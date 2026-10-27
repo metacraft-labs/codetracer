@@ -1,4 +1,3 @@
-use std::cmp::min;
 use std::collections::HashMap;
 use std::error::Error;
 
@@ -171,6 +170,17 @@ pub struct EventDb {
     /// reads this map to derive its view without re-walking
     /// `single_tables`.
     pub firings_by_source_location: HashMap<TracepointSourceLocation, Vec<SourceLocationFiring>>,
+    /// The results table of each tracepoint that has one, by tracepoint id.
+    ///
+    /// A tracepoint id is a label its client chose, not a position: the
+    /// clients count their ids up and never reuse one (the Python bridge
+    /// from 1, the TUI by a sweep counter that grows on every run), so the
+    /// ids in use are sparse and can be large. The tables themselves stay
+    /// dense in `single_tables` (slot 0 is the recording's own events) and
+    /// are made one per id, the first time a request names that id
+    /// ([`Self::ensure_tracepoint_table`]). The table used to be slot
+    /// `id + 1`, which made a table for every smaller id as well.
+    tracepoint_tables: HashMap<usize, SingleTableId>,
 }
 
 impl EventDb {
@@ -185,7 +195,32 @@ impl EventDb {
             selected_kinds: [true; EVENT_KINDS_COUNT],
             trace_list: vec![SingleTableId(0)],
             firings_by_source_location: HashMap::new(),
+            tracepoint_tables: HashMap::new(),
         }
+    }
+
+    /// The results table of tracepoint `tracepoint_id`, if one has been made.
+    pub fn tracepoint_table(&self, tracepoint_id: usize) -> Option<SingleTableId> {
+        self.tracepoint_tables.get(&tracepoint_id).copied()
+    }
+
+    /// The results table of tracepoint `tracepoint_id`, made (empty) if it
+    /// has none yet. Makes at most one table, whatever the id: see
+    /// `tracepoint_tables`.
+    pub fn ensure_tracepoint_table(&mut self, tracepoint_id: usize) -> SingleTableId {
+        if let Some(table_id) = self.tracepoint_table(tracepoint_id) {
+            return table_id;
+        }
+        // Slot 0 belongs to the recording's own events
+        // (`replace_record_events`); a tracepoint table never takes it,
+        // even when the tracepoints come before the event log is loaded.
+        if self.single_tables.is_empty() {
+            self.single_tables.push(SingleTable::new(DbEventKind::Record));
+        }
+        let table_id = SingleTableId(self.single_tables.len());
+        self.single_tables.push(SingleTable::new(DbEventKind::Trace));
+        self.tracepoint_tables.insert(tracepoint_id, table_id);
+        table_id
     }
 
     /// M25 (spec §3.2.1.1) — O(1) lookup of every tracepoint firing
@@ -235,8 +270,11 @@ impl EventDb {
         })
     }
 
+    /// How many results tracepoint `tracepoint_id` has: none when it has no
+    /// table.
     pub fn get_trace_length(&mut self, tracepoint_id: usize) -> usize {
-        self.single_tables[tracepoint_id + 1].events.len()
+        self.tracepoint_table(tracepoint_id)
+            .map_or(0, |table_id| self.single_tables[table_id.0].events.len())
     }
 
     pub fn get_events_count(&mut self) -> usize {
@@ -291,17 +329,6 @@ impl EventDb {
                 event_slot
             );
         }
-    }
-
-    /// Append an event to an event-table slot, growing `single_tables` as
-    /// needed.  See [`Self::update_single_table`] for the `event_slot` /
-    /// `trace_id` rename context (M-REC-4).
-    fn insert_in_single_table(&mut self, event: ProgramEvent, event_slot: usize) {
-        if self.single_tables.len() <= event_slot {
-            self.single_tables
-                .resize(event_slot + 1, SingleTable::new(DbEventKind::Trace));
-        }
-        self.single_tables[event_slot].events.push(event);
     }
 
     pub fn refresh_global(&mut self) {
@@ -359,7 +386,7 @@ impl EventDb {
 
     pub fn register_tracepoint_results(&mut self, results: &[Stop]) {
         for result in results {
-            let table_id = self.make_single_table_id(result.tracepoint_id);
+            let table_id = self.ensure_tracepoint_table(result.tracepoint_id);
             if !self.trace_list.contains(&table_id) {
                 self.trace_list.push(table_id);
             }
@@ -371,7 +398,7 @@ impl EventDb {
             // the post-push length as the firing's index.
             let location = TracepointSourceLocation::new(event.high_level_path.clone(), event.high_level_line);
             let next_index = self.single_tables.get(table_id.0).map(|t| t.events.len()).unwrap_or(0);
-            self.insert_in_single_table(event, table_id.0);
+            self.single_tables[table_id.0].events.push(event);
             self.firings_by_source_location
                 .entry(location)
                 .or_default()
@@ -398,7 +425,14 @@ impl EventDb {
     pub fn register_events(&mut self, kind: DbEventKind, events: &[ProgramEvent], tracepoint_ids: Vec<i64>) {
         if kind == DbEventKind::Trace {
             for id in tracepoint_ids {
-                let table_id = (id + 1) as usize;
+                // Only a tracepoint whose table has been made has results to
+                // replace; rows registered in the global table for one with
+                // none would point at no table.
+                let Some(SingleTableId(table_id)) = usize::try_from(id).ok().and_then(|id| self.tracepoint_table(id))
+                else {
+                    error!("no results table for tracepoint {id}");
+                    continue;
+                };
                 if events.is_empty() {
                     self.update_single_table(kind, events, table_id);
                     return;
@@ -419,10 +453,6 @@ impl EventDb {
 
     pub fn get_program_event(&self, table_id: &SingleTableId, event_index: &IndexInSingleTable) -> &ProgramEvent {
         &self.single_tables[table_id.0].events[event_index.0]
-    }
-
-    pub fn make_single_table_id(&self, id: usize) -> SingleTableId {
-        SingleTableId(id + 1)
     }
 
     pub fn disable_table(&mut self, table_id: SingleTableId) {
@@ -547,8 +577,10 @@ impl EventDb {
                 event_count = searched_table.len();
             }
         // Tracepoint log datatable ajax update
-        } else if args.table_args.search.value.is_empty() && args.event_slot < self.single_tables.len() - 1 {
-            let table: &SingleTable = &self.single_tables[min(self.single_tables.len() - 1, args.event_slot + 1)];
+        } else if args.table_args.search.value.is_empty()
+            && let Some(table_id) = self.tracepoint_table(args.event_slot)
+        {
+            let table: &SingleTable = &self.single_tables[table_id.0];
             let mut trace_locals: Vec<Vec<StringAndValueTuple>> = vec![vec![]];
             if args.table_args.start < table.events.len() {
                 for (i, event) in table.events[args.table_args.start..].iter().enumerate() {
@@ -577,8 +609,8 @@ impl EventDb {
             let mut trace_locals: Vec<Vec<StringAndValueTuple>> = vec![vec![]];
             let mut searched_table: Vec<TableRow> = vec![];
             // Search through all values
-            if self.single_tables.len() > args.event_slot + 1 {
-                let table: &SingleTable = &self.single_tables[args.event_slot + 1];
+            if let Some(table_id) = self.tracepoint_table(args.event_slot) {
+                let table: &SingleTable = &self.single_tables[table_id.0];
                 for event in table.events.iter() {
                     match args.table_args.search.value.parse::<i64>() {
                         Ok(search_num) => {
@@ -636,7 +668,7 @@ impl EventDb {
     }
 
     pub fn register_tracepoint_values(&mut self, tracepoint_id: usize, locals: Vec<Vec<StringAndValueTuple>>) {
-        let table_id = self.make_single_table_id(tracepoint_id);
+        let table_id = self.ensure_tracepoint_table(tracepoint_id);
         if !self.trace_list.contains(&table_id) {
             self.trace_list.push(table_id);
         }
@@ -653,16 +685,18 @@ impl EventDb {
         // M25 §3.2.1.1 — the source-location index must drop firings
         // for any tracepoint being reset, otherwise stale entries
         // would surface on the next correlation lookup.
-        let cleared_table_ids: std::collections::HashSet<SingleTableId> =
-            tracepoint_id_list.iter().map(|id| SingleTableId(id + 1)).collect();
+        let cleared_table_ids: std::collections::HashSet<SingleTableId> = tracepoint_id_list
+            .iter()
+            .filter_map(|id| self.tracepoint_table(*id))
+            .collect();
         self.firings_by_source_location.retain(|_, firings| {
             firings.retain(|f| !cleared_table_ids.contains(&f.single_table_id));
             !firings.is_empty()
         });
-        for tracepoint_id in tracepoint_id_list {
-            self.clear_single_table(SingleTableId(tracepoint_id + 1));
-            self.refresh_global();
+        for table_id in cleared_table_ids {
+            self.clear_single_table(table_id);
         }
+        self.refresh_global();
     }
 }
 

@@ -16,7 +16,7 @@ use crate::ctfs_trace_reader::ctfs_container::CtfsReader;
 use crate::ctfs_trace_reader::span_stream::{SpanRecord, SpanStreamReader};
 use crate::dap::{self, DapClient, DapMessage};
 use crate::db::{Db, DbCall, MaterializedReplaySession, program_event_of_record};
-use crate::event_db::{EventDb, SingleTableId};
+use crate::event_db::EventDb;
 use crate::expr_loader::ExprLoader;
 use crate::flow_preloader::FlowPreloader;
 use crate::in_memory_trace_reader::InMemoryTraceReader;
@@ -6173,15 +6173,6 @@ impl Handler {
         Ok(())
     }
 
-    /// The event table of tracepoint `id` (`SingleTableId(id + 1)`: table 0
-    /// holds the recording's own events), refused by name when the id is
-    /// too large to have one.
-    fn tracepoint_table_id(command: &str, id: usize) -> Result<SingleTableId, Box<dyn Error>> {
-        id.checked_add(1)
-            .map(SingleTableId)
-            .ok_or_else(|| format!("{command}: tracepoint id {id} is out of range").into())
-    }
-
     /// `ct/tracepoint-delete`: drop a tracepoint's results.
     ///
     /// Only a tracepoint that has been run has a table to clear, so an id
@@ -6194,10 +6185,9 @@ impl Handler {
         tracepoint_id: TracepointId,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        let table_id = Self::tracepoint_table_id("ct/tracepoint-delete", tracepoint_id.id)?;
-        if table_id.0 >= self.event_db.single_tables.len() {
+        let Some(table_id) = self.event_db.tracepoint_table(tracepoint_id.id) else {
             return Err(format!("ct/tracepoint-delete: no tracepoint has id {}", tracepoint_id.id).into());
-        }
+        };
         self.event_db.clear_single_table(table_id);
         self.event_db.refresh_global();
         let mut t_update = TraceUpdate::new(0, false, tracepoint_id.id, self.event_db.tracepoint_errors.clone());
@@ -6211,16 +6201,15 @@ impl Handler {
     ///
     /// The disabled state is kept by table id whether or not the tracepoint
     /// has been run yet, so a tracepoint switched off before its first run
-    /// stays off when its table is made; only an id too large to have a
-    /// table is refused. Answered with an empty body after the
-    /// `ct/updated-trace` event.
+    /// gets its (empty) table here, and stays off when it is run. Answered
+    /// with an empty body after the `ct/updated-trace` event.
     pub fn tracepoint_toggle(
         &mut self,
         req: dap::Request,
         tracepoint_id: TracepointId,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        let table_id = Self::tracepoint_table_id("ct/tracepoint-toggle", tracepoint_id.id)?;
+        let table_id = self.event_db.ensure_tracepoint_table(tracepoint_id.id);
         if self.event_db.disabled_tables.contains(&table_id) {
             self.event_db.enable_table(table_id);
         } else {
@@ -6433,12 +6422,14 @@ impl Handler {
     ///
     /// The shared half of `ct/setup-trace-session` and `ct/run-tracepoints`,
     /// kept apart from both so that each answers its own request once.
+    ///
+    /// One table per tracepoint id the request names, and none for any id it
+    /// does not: an id is a label the client chose, so its size says nothing
+    /// about how many tracepoints there are (see
+    /// `EventDb::ensure_tracepoint_table`).
     fn prepare_trace_tables(&mut self, arg: &RunTracepointsArg) {
         for trace in &arg.session.tracepoints {
-            while trace.tracepoint_id + 1 >= self.event_db.single_tables.len() {
-                self.event_db.add_new_table(DbEventKind::Trace, &[]);
-            }
-            assert!(self.event_db.single_tables.len() > trace.tracepoint_id + 1);
+            self.event_db.ensure_tracepoint_table(trace.tracepoint_id);
         }
     }
 
@@ -9213,6 +9204,116 @@ mod tests {
         handler.run_tracepoints(dap::Request::default(), make_tracepoints_with_count(count), sender)?;
 
         assert_eq!(handler.event_db.single_tables.len(), count + 1);
+        Ok(())
+    }
+
+    /// A tracepoint id is a label its client chose (each client counts its
+    /// ids up and never reuses one), not a position: `ct/setup-trace-session`
+    /// makes a table for each id it names and for nothing else, however
+    /// large the id. It used to make one for every id up to the one named,
+    /// so one request naming a large id allocated a table per smaller id.
+    #[test]
+    fn setup_trace_session_makes_a_table_only_for_the_ids_it_names() -> Result<(), Box<dyn Error>> {
+        const LARGE_ID: usize = 1_000_000;
+        let db = setup_db();
+        let (sender, _r) = mpsc::channel();
+        let mut handler: Handler = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(db));
+        handler.event_load(dap::Request::default(), sender.clone())?;
+        let before = handler.event_db.single_tables.len();
+
+        handler.setup_trace_session(
+            dap::Request::default(),
+            make_tracepoints_args(1, LARGE_ID),
+            sender.clone(),
+        )?;
+        assert_eq!(
+            handler.event_db.single_tables.len(),
+            before + 1,
+            "one tracepoint named, so one table made"
+        );
+
+        // Naming it again makes nothing more.
+        handler.setup_trace_session(dap::Request::default(), make_tracepoints_args(1, LARGE_ID), sender)?;
+        assert_eq!(handler.event_db.single_tables.len(), before + 1);
+        Ok(())
+    }
+
+    /// Each tracepoint's results land in its own table, and are read back by
+    /// its id (`ct/update-table`'s `eventSlot`), whatever the ids and in
+    /// whatever order they are first named. The control for the test
+    /// above: making fewer tables must not mix up whose results are whose.
+    #[test]
+    fn sparse_tracepoint_ids_keep_their_own_results() -> Result<(), Box<dyn Error>> {
+        let db = setup_db_loop(3);
+        let (sender, _r) = mpsc::channel();
+        let mut handler: Handler = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(db));
+        handler.event_load(dap::Request::default(), sender.clone())?;
+
+        // The Python bridge's first id is 1; a later one is far above it.
+        const LATER_ID: usize = 40_000_000;
+        let mut args = make_tracepoints_args(2, LATER_ID);
+        let mut first = make_tracepoints_args(1, 1).session.tracepoints;
+        args.session.tracepoints.append(&mut first);
+        handler.run_tracepoints(dap::Request::default(), args, sender)?;
+
+        let later = handler
+            .event_db
+            .tracepoint_table(LATER_ID)
+            .expect("a table for the later id");
+        let early = handler.event_db.tracepoint_table(1).expect("a table for id 1");
+        assert_ne!(later, early);
+        assert!(handler.event_db.tracepoint_table(0).is_none(), "id 0 was never named");
+        assert!(handler.event_db.single_tables.len() <= 3);
+
+        let rows = |handler: &mut Handler, id: usize| -> Result<Vec<i64>, Box<dyn Error>> {
+            let (update, _) = handler.event_db.update_table(crate::task::UpdateTableArgs {
+                table_args: crate::task::TableArgs {
+                    length: 100,
+                    ..crate::task::TableArgs::default()
+                },
+                selected_kinds: [true; crate::task::EVENT_KINDS_COUNT],
+                is_trace: true,
+                event_slot: id,
+            })?;
+            Ok(update
+                .data
+                .data
+                .iter()
+                .map(|row| row.direct_location_rr_ticks)
+                .collect())
+        };
+        let later_rows = rows(&mut handler, LATER_ID)?;
+        assert_eq!(later_rows.len(), 3, "the loop line is hit once per iteration");
+        assert_eq!(handler.event_db.get_trace_length(LATER_ID), 3);
+        assert_eq!(rows(&mut handler, 1)?.len(), handler.event_db.get_trace_length(1));
+        assert!(rows(&mut handler, 7)?.is_empty(), "an id with no table has no rows");
+        Ok(())
+    }
+
+    /// `ct/tracepoint-delete` of an id no request named is refused by name
+    /// and makes no table; `ct/tracepoint-toggle` of one makes its table
+    /// (one), so that it stays off when it is first run.
+    #[test]
+    fn delete_refuses_an_unnamed_id_and_toggle_keeps_one_switched_off() -> Result<(), Box<dyn Error>> {
+        let db = setup_db();
+        let (sender, _r) = mpsc::channel();
+        let mut handler: Handler = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(db));
+        handler.event_load(dap::Request::default(), sender.clone())?;
+        let before = handler.event_db.single_tables.len();
+
+        let refused =
+            handler.tracepoint_delete(dap::Request::default(), TracepointId { id: usize::MAX }, sender.clone());
+        let message = refused.expect_err("an unnamed id is refused").to_string();
+        assert!(message.contains("no tracepoint has id"), "{message}");
+        assert_eq!(handler.event_db.single_tables.len(), before);
+
+        handler.tracepoint_toggle(dap::Request::default(), TracepointId { id: usize::MAX }, sender)?;
+        assert_eq!(handler.event_db.single_tables.len(), before + 1);
+        let table = handler
+            .event_db
+            .tracepoint_table(usize::MAX)
+            .expect("toggle made its table");
+        assert!(handler.event_db.disabled_tables.contains(&table));
         Ok(())
     }
 

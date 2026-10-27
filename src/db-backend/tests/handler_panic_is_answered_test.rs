@@ -531,6 +531,34 @@ fn calltrace_expand_and_collapse_are_answered_exactly_once() {
     let _ = client.disconnect();
 }
 
+/// The arguments of `ct/setup-trace-session` / `ct/run-tracepoints` for one
+/// tracepoint, `tracepoint_id`, logging at `path:line`.
+fn session_with_tracepoint(path: &str, line: i64, tracepoint_id: u64) -> serde_json::Value {
+    json!({
+        "session": {
+            "id": 1,
+            "tracepoints": [{
+                "tracepointId": tracepoint_id,
+                "mode": 0,
+                "line": line.max(1),
+                "offset": 0,
+                "name": path,
+                "expression": "log(1)",
+                "lastRender": 0,
+                "isDisabled": false,
+                "isChanged": true,
+                "results": [],
+                "tracepointError": "",
+            }],
+            "found": [],
+            "lastCount": 0,
+            "results": {},
+        },
+        "stopAfter": -1,
+        "withLocals": false,
+    })
+}
+
 /// The commands that move the session or change its tracepoints are each
 /// answered exactly once, after the events that report what they did.
 ///
@@ -575,29 +603,7 @@ fn moves_and_tracepoint_commands_are_answered_exactly_once() {
         None,
     );
 
-    let session = json!({
-        "session": {
-            "id": 1,
-            "tracepoints": [{
-                "tracepointId": 0,
-                "mode": 0,
-                "line": line.max(1),
-                "offset": 0,
-                "name": path,
-                "expression": "log(1)",
-                "lastRender": 0,
-                "isDisabled": false,
-                "isChanged": true,
-                "results": [],
-                "tracepointError": "",
-            }],
-            "found": [],
-            "lastCount": 0,
-            "results": {},
-        },
-        "stopAfter": -1,
-        "withLocals": false,
-    });
+    let session = session_with_tracepoint(&path, line, 0);
     transcript.send(&mut client, "ct/setup-trace-session", session.clone(), None);
     transcript.send(&mut client, "ct/run-tracepoints", session, None);
     transcript.send(&mut client, "ct/tracepoint-toggle", json!({ "id": 0 }), None);
@@ -611,12 +617,17 @@ fn moves_and_tracepoint_commands_are_answered_exactly_once() {
         json!({ "id": UNKNOWN_ID }),
         Some("no tracepoint has id 987654321"),
     );
+    // A tracepoint id is a label, not a position: the largest one is as
+    // good as any, and costs one table, made for it alone. It used to be
+    // refused as out of range by `ct/tracepoint-toggle`, and to overflow
+    // `ct/setup-trace-session`, which made a table for every smaller id.
     transcript.send(
         &mut client,
-        "ct/tracepoint-toggle",
-        json!({ "id": u64::MAX }),
-        Some("out of range"),
+        "ct/setup-trace-session",
+        session_with_tracepoint(&path, line, u64::MAX),
+        None,
     );
+    transcript.send(&mut client, "ct/tracepoint-toggle", json!({ "id": u64::MAX }), None);
     transcript.send(&mut client, "ct/history-jump", json!({ "rrTicks": -5 }), Some("-5"));
     // `ct/run-tracepoints` reported its results before it answered.
     transcript.last_event("ct/tracepoint-results");
