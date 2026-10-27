@@ -15,7 +15,9 @@
 ## on the 5-byte CTFS magic header to identify MCR traces.
 
 import
-  std/[os, osproc, strutils, strformat],
+  std/[os, osproc, strutils, strformat, memfiles, sets],
+  results,
+  codetracer_ctfs/zstd_bindings,
   ../trace/trace_container
 
 # CTFS magic detection and container lookup used to be duplicated here.
@@ -24,6 +26,8 @@ import
 # module re-exports it so existing callers (and
 # ``test_mcr_enrichment.nim``) keep their import surface.
 export CtfsMagic, hasCtfsMagic, findCtFileInFolder
+
+from codetracer_ctfs/container import MemberRun, memberRuns
 
 # ---------------------------------------------------------------------------
 # The root directory of a CTFS container
@@ -208,9 +212,9 @@ proc exportCouldHoldItsOwnDirectory(path: string, dir: CtfsRootDir):
   ## A necessary condition for the export to actually contain what its root
   ## directory advertises, computed from block arithmetic alone.
   ##
-  ## The member comparison below deliberately does not walk §4 — a reader that
-  ## resolved data blocks could be fooled by the very defects it exists to
-  ## catch.  But that leaves the comparison satisfied by an export whose
+  ## This check deliberately does not walk §4: it stays independent of the
+  ## mapping reader used to validate CAS payloads below. A member comparison
+  ## alone would be satisfied by an export whose
   ## directory is intact and whose *content* is not: zero every entry's mapping
   ## root, or cut a block off the tail, and every name and size still matches
   ## while not one byte is reachable.  Both were reproduced.  So the export is
@@ -274,16 +278,187 @@ proc exportCouldHoldItsOwnDirectory(path: string, dir: CtfsRootDir):
                    $needed & " to hold the members it lists")
   (true, "")
 
+# A cursor over shared CTFS mapping runs. The container is mapped read-only;
+# neither the trace nor a complete member is copied onto the heap.
+type
+  MemberCursor = object
+    image: ptr UncheckedArray[byte]
+    runs: seq[MemberRun]
+    run, into: int
+
+  ZstdInput {.importc: "ZSTD_inBuffer", header: "<zstd.h>", bycopy.} = object
+    src: pointer
+    size, pos: csize_t
+  ZstdOutput {.importc: "ZSTD_outBuffer", header: "<zstd.h>", bycopy.} = object
+    dst: pointer
+    size, pos: csize_t
+
+# The shared zstd module supplies linking and the frame API. This scanner
+# needs the streaming API to validate arbitrary chunk sizes with fixed buffers.
+proc ZSTD_initDStream(ctx: pointer): csize_t {.importc, header: "<zstd.h>".}
+proc ZSTD_decompressStream(ctx: pointer, output: var ZstdOutput,
+    input: var ZstdInput): csize_t {.importc, header: "<zstd.h>".}
+proc ZSTD_DCtx_setParameter(ctx: pointer, param, value: cint): csize_t
+    {.importc, header: "<zstd.h>".}
+var zstdWindowLogMax {.importc: "ZSTD_d_windowLogMax", header: "<zstd.h>".}: cint
+
+proc cursor(image: MemFile, dir: CtfsRootDir,
+    member: CtfsMember): Result[MemberCursor, string] =
+  if dir.blockSize < 16:
+    return err("CTFS block cannot hold a data pointer and a chain pointer")
+  if member.size > uint64(high(int)):
+    return err("member is too large to address")
+  let p = cast[ptr UncheckedArray[byte]](image.mem)
+  let runs = ? memberRuns(p.toOpenArray(0, image.size - 1), member.name,
+    member.size, member.mapBlock, uint32(dir.blockSize))
+  ok(MemberCursor(image: p, runs: runs))
+
+proc available(c: MemberCursor): int =
+  if c.run < c.runs.len: c.runs[c.run].len - c.into else: 0
+
+proc consume(c: var MemberCursor, n: int) =
+  c.into += n
+  if c.run < c.runs.len and c.into == c.runs[c.run].len:
+    inc c.run
+    c.into = 0
+
+proc readLE(c: var MemberCursor, n: int): uint64 =
+  # Callers have checked index sizes before reading these 4/8-byte words.
+  for i in 0 ..< n:
+    result = result or (uint64(c.image[c.runs[c.run].at + c.into]) shl (8 * i))
+    c.consume(1)
+
+proc decodedFrame(c: var MemberCursor, ctx: pointer, stored: uint64,
+    chunkSize: uint64): Result[uint64, string] =
+  # CCT readers size their cache slots from Frame_Content_Size. A valid zstd
+  # stream without that header field is therefore not a readable CCT frame.
+  var headerCursor = c
+  var header: array[18, byte] # ZSTD_FRAMEHEADERSIZE_MAX
+  let headerSize = int(min(uint64(header.len), stored))
+  for i in 0 ..< headerSize:
+    header[i] = byte(headerCursor.readLE(1))
+  let declared = ZSTD_getFrameContentSize(addr header[0], csize_t(headerSize))
+  if declared == ZSTD_CONTENTSIZE_UNKNOWN or declared == ZSTD_CONTENTSIZE_ERROR:
+    return err("zstd frame does not declare a readable content size")
+  if declared == 0 or uint64(declared) > chunkSize:
+    return err("zstd frame content size is outside the index chunk size")
+  if ZSTD_isError(ZSTD_initDStream(ctx)) != 0:
+    return err("cannot initialise zstd decoder")
+  var remaining = stored
+  var decoded = 0'u64
+  var buffer: array[65536, byte]
+  while true:
+    let n = int(min(uint64(c.available()), remaining))
+    var input = ZstdInput(size: csize_t(n))
+    if n > 0:
+      input.src = addr c.image[c.runs[c.run].at + c.into]
+    var output = ZstdOutput(dst: addr buffer[0], size: csize_t(buffer.len))
+    let status = ZSTD_decompressStream(ctx, output, input)
+    if ZSTD_isError(status) != 0:
+      return err("invalid zstd frame")
+    c.consume(int(input.pos))
+    remaining -= uint64(input.pos)
+    decoded += uint64(output.pos)
+    if decoded > chunkSize:
+      return err("zstd frame exceeds the index chunk size")
+    if status == 0:
+      if remaining != 0:
+        return err("extra bytes after the indexed zstd frame")
+      if decoded != uint64(declared):
+        return err("zstd frame disagrees with its declared content size")
+      return ok(decoded)
+    # Input exhaustion is not frame completion: a full output buffer may
+    # leave decoded bytes buffered. Drain those with an empty input span.
+    if input.pos == 0 and output.pos == 0:
+      return err("incomplete zstd frame")
+
+proc casLogicalName(name: string): string =
+  ## Only the page store and defined checkpoint CAS streams may be rewritten.
+  if name in ["cppages.ns", "cppages.nzd", "cppages.nzi"]:
+    return "cppages.ns"
+  if not (name.endsWith(".cas") or name.endsWith(".czd") or name.endsWith(".czi")):
+    return ""
+  let stem = name[0 ..< name.len - 4]
+  if stem in ["cp.prein", "cp.entry", "cp.postl"]:
+    return stem & ".cas"
+  if stem.len < 3 or stem.len > 7 or not stem.startsWith("cp"):
+    return ""
+  # Periodic ids are canonical base-36, one to five digits, with no leading 0.
+  if stem.len > 3 and stem[2] == '0':
+    return ""
+  for c in stem[2 .. ^1]:
+    if c notin {'0'..'9', 'a'..'z'}:
+      return ""
+  stem & ".cas"
+
+proc decodedCasSize(image: MemFile, dir: CtfsRootDir,
+    logical: string): Result[uint64, string] =
+  let dot = logical.rfind('.')
+  let stem = logical[0 .. dot] & logical[dot + 1] & "z"
+  let names = [logical, stem & "d", stem & "i"]
+  var counts: array[3, int]
+  var members: array[3, CtfsMember]
+  for member in dir.members:
+    for i, name in names:
+      if member.name == name:
+        inc counts[i]
+        members[i] = member
+  for n in counts:
+    if n > 1:
+      return err("duplicate members for '" & logical & "'")
+  if counts[0] != 0:
+    if counts[1] != 0 or counts[2] != 0:
+      return err("ambiguous raw and compressed forms of '" & logical & "'")
+    discard ? cursor(image, dir, members[0])
+    return ok(members[0].size)
+  if counts[1] != 1 or counts[2] != 1:
+    return err("missing or incomplete compressed pair for '" & logical & "'")
+  var data = ? cursor(image, dir, members[1])
+  var index = ? cursor(image, dir, members[2])
+  let indexSize = members[2].size
+  if indexSize < 4 or (indexSize - 4) mod 8 != 0:
+    return err("invalid compressed index size")
+  let chunkSize = index.readLE(4)
+  if chunkSize == 0:
+    return err("zero compressed chunk size")
+  let chunks = (indexSize - 4) div 8
+  if chunks == 0:
+    if members[1].size != 0:
+      return err("compressed data without indexed frames")
+    return ok(0'u64)
+  var start = index.readLE(8)
+  if start != 0:
+    return err("first compressed offset is not zero")
+  let ctx = ZSTD_createDCtx()
+  if ctx.isNil:
+    return err("cannot allocate zstd decoder")
+  defer: discard ZSTD_freeDCtx(ctx)
+  # The streaming decoder's normal 128 MiB window ceiling is explicit here:
+  # an untrusted frame header must not turn a length check into an unbounded
+  # allocation. Snapshot writers normally use 1 MiB chunks.
+  if ZSTD_isError(ZSTD_DCtx_setParameter(ctx, zstdWindowLogMax, 27)) != 0:
+    return err("cannot bound zstd decoder window")
+  var total = 0'u64
+  for i in 0'u64 ..< chunks:
+    let stop = if i + 1 < chunks: index.readLE(8) else: members[1].size
+    if stop <= start or stop > members[1].size:
+      return err("invalid compressed frame offset")
+    let size = ? data.decodedFrame(ctx, stop - start, chunkSize)
+    if i + 1 < chunks and size != chunkSize:
+      return err("non-final zstd frame does not fill the index chunk size")
+    if size > high(uint64) - total:
+      return err("decoded length overflows")
+    total += size
+    start = stop
+  ok(total)
+
 proc exportKeptEveryMember*(original, enriched: string):
     tuple[ok: bool, reason: string] =
-  ## Does `enriched` carry every member of `original`, at the same size?
-  ##
-  ## A `--portable` export is only ever allowed to ADD to a recording: it
-  ## bundles binaries as `b/NNNN` and debug symbols as `d/NNNN`, and it rebuilds
-  ## the single `filemap.bin` provenance carrier by merging the record-side
-  ## entries with the bundled images.  `filemap.bin` is therefore the one member
-  ## whose size legitimately changes; nothing else may shrink, change or
-  ## disappear.
+  ## A portable export must preserve every logical member. Most members keep
+  ## their stored sizes; the rebuilt provenance carrier may change. Resolving
+  ## host-cache pages may grow the decoded page store and rewrite checkpoint
+  ## CAS headers in place, including changing raw/compressed representation.
+  ## Compare those payloads by decoded length, validating every indexed frame.
   const RebuiltMember = "filemap.bin"
 
   let (origOk, origDir, origWhy) = readCtfsRootDir(original)
@@ -293,19 +468,22 @@ proc exportKeptEveryMember*(original, enriched: string):
   if not newOk:
     return (false, "cannot list the exported trace's members: " & newWhy)
 
-  # Only the EXPORT is held to this. The original is whatever the user has —
-  # possibly already damaged, which is exactly when an export must not be
-  # allowed to overwrite it — and refusing to look at a damaged original would
-  # turn "your recording is damaged" into "enrichment is broken".
+  # Keep this independent root-directory check: a readable mapping walk is
+  # insufficient evidence that an export can hold all the content it claims.
   let holds = exportCouldHoldItsOwnDirectory(enriched, newDir)
   if not holds.ok:
     return (false, holds.reason)
 
-  let origMembers = origDir.members
-  let newMembers = newDir.members
-  for m in origMembers:
+  var originalCas = initHashSet[string]()
+  var allCas = initHashSet[string]()
+  for m in origDir.members:
+    let logical = casLogicalName(m.name)
+    if logical.len > 0:
+      originalCas.incl(logical)
+      allCas.incl(logical)
+      continue
     var found = false
-    for n in newMembers:
+    for n in newDir.members:
       if n.name != m.name:
         continue
       found = true
@@ -317,6 +495,36 @@ proc exportKeptEveryMember*(original, enriched: string):
     if not found:
       return (false, "'" & m.name & "' (" & $m.size &
                      " bytes) is missing from the export")
+  for m in newDir.members:
+    let logical = casLogicalName(m.name)
+    if logical.len > 0:
+      allCas.incl(logical)
+  if allCas.len == 0:
+    return (true, "")
+
+  # Map only when a CAS payload needs inspection. Closing both mappings here
+  # also releases Windows file handles before the caller replaces the trace.
+  try:
+    var origImage = memfiles.open(original, mode = fmRead)
+    defer: origImage.close()
+    var newImage = memfiles.open(enriched, mode = fmRead)
+    defer: newImage.close()
+    for logical in allCas:
+      let newSize = decodedCasSize(newImage, newDir, logical)
+      if newSize.isErr:
+        return (false, "cannot read '" & logical & "' in the export: " & newSize.error)
+      if logical notin originalCas:
+        continue
+      let oldSize = decodedCasSize(origImage, origDir, logical)
+      if oldSize.isErr:
+        return (false, "cannot read '" & logical & "' in the original: " & oldSize.error)
+      if (logical == "cppages.ns" and newSize.get() < oldSize.get()) or
+          (logical != "cppages.ns" and newSize.get() != oldSize.get()):
+        return (false, "'" & logical & "' is " & $newSize.get() &
+          " decoded bytes in the export but " & $oldSize.get() &
+          " decoded bytes in the original")
+  except OSError as e:
+    return (false, "cannot inspect snapshot payloads: " & e.msg)
   (true, "")
 
 proc findCtMcrBinary*(): string =
@@ -440,7 +648,7 @@ proc enrichMcrTraceIfNeeded*(outputFolder: string, noPortable: bool = false): bo
   # user's only copy.  The temp-file dance above does not protect against it,
   # because it is not a failure by exit code.  So before the original is
   # destroyed, check the thing that actually matters: that the export carries
-  # every member of the input, at the same size.  See
+  # every logical member of the input, at its permitted size. See
   # `codetracer-specs/Trace-Files/CTFS-Binary-Format.md` §5d.
   let kept = exportKeptEveryMember(ctFilePath, enrichedPath)
   if not kept.ok:
