@@ -784,7 +784,7 @@ elif [ "${#flake_pin_mismatches[@]}" -eq 0 ]; then
 else
 	fail "every SHA-pinned flake-input sibling equals its flake.lock locked.rev" \
 		"the sibling checkout and the Nix lane would compile different revisions;" \
-		"'bash scripts/sibling-pins.sh' prints the lines these blocks should carry" \
+		"'bash scripts/sibling-pins.sh --all' prints the lines for every sibling it declares" \
 		"${flake_pin_mismatches[@]}"
 fi
 

@@ -160,7 +160,11 @@ suite "book nav matches the book's four-section organization":
     # `usage_guide/deep_review` article split into an Introduction that argues
     # why the feature exists plus four articles: collecting, reading, the agent
     # workflow, and the deferrals.
-    check entries.len == 65
+    #
+    # +2 = `reference/watchpoints` (the watchpoints reference) and
+    # `usage_guide/terminal-setup` (PLAT-71: setting up your terminal for the
+    # terminal front-end; its own contract is `test_terminal_setup_page`).
+    check entries.len == 67
 
   test "content collapses to exactly the four sections":
     var sections: seq[string] = @[]

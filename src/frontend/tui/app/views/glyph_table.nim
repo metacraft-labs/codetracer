@@ -87,7 +87,8 @@ type
     grCallExpanded = "call trace expanded"
     grCallCollapsed = "call trace collapsed"
     grCallLeaf = "call trace leaf"
-    grRunAction = "run action"
+    grRunControl = "run control"
+      ## Test Results' ▶ (the desktop's `RunButtonLabel`): run the tests.
 
   GlyphColumn* = enum
     gcolExtended = "extended"
@@ -161,9 +162,7 @@ const
     grCallExpanded:        ["▾",      "▼",    "v",   "▾"],
     grCallCollapsed:       ["▸",      "►",    ">",   "▸"],
     grCallLeaf:            ["·",      "·",    ".",   "."],
-    grRunAction:           ["▶",      "►",    ">",   "▸"]]
-      # The Test Results pane's run button (the ViewModel's
-      # `RunButtonLabel` is the extended spelling).
+    grRunControl:          ["▶",      "►",    ">",   "▸"]]
 
   DefaultGlyphs* = GlyphProfile()
     ## Extended, narrow, classic: the screen before profiles.

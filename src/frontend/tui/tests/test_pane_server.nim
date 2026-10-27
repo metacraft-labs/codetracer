@@ -15,7 +15,7 @@
 ## No mocks: the recording, the engine, the session and the painters are the
 ## product's. The stdio transport itself is `test_pane_server_stdio.nim`'s.
 
-import std/[json, options, os, sequtils, strutils, tables, unittest]
+import std/[importutils, json, options, os, sequtils, strutils, tables, unittest]
 
 import headless_app/layout_model
 
@@ -26,6 +26,18 @@ import ../app/layout/cells
 import ../app/layout/project
 import ../host/pane_server
 import ./fixtures/fixture_provider
+
+proc activeRuntime(srv: PaneServer): TuiRuntime =
+  ## The active session's runtime, to compare a hosted pane with the
+  ## interactive terminal's painting of the same pane. The server keeps its
+  ## sessions private (an editor reaches them only through the protocol), so
+  ## the suite reads them through std/importutils.
+  privateAccess(PaneServer)
+  if srv.active < 0:
+    return nil
+  let session = srv.sessions[srv.active]
+  privateAccess(typeof(session))
+  session.rt
 
 const
   FixtureName = "calc"

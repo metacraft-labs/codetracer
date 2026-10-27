@@ -29,6 +29,14 @@ import viewmodels/[calltrace_vm, event_log_vm, state_vm, step_list_vm,
 import session_vm
 import sdk/stop_loader
 
+proc testClockScheduler(clock: TestClock): ViewportScheduler =
+  ## Debounces on a `TestClock`: a report is applied when the test advances
+  ## the clock past `ViewportDebounceMs`.
+  ViewportScheduler(
+    schedule: proc(delayMs: float64; callback: proc()): int =
+      clock.schedule(callback, delayMs),
+    cancel: proc(id: int) = clock.cancel(id))
+
 proc drain() = drainPlatformCallbacks()
 
 proc storeWithMock(): tuple[store: ReplayDataStore; mock: MockBackendService] =
@@ -36,10 +44,9 @@ proc storeWithMock(): tuple[store: ReplayDataStore; mock: MockBackendService] =
   (createReplayDataStore(mock.toBackendService()), mock)
 
 proc recordingStore(sent: ref seq[(string, JsonNode)]): ReplayDataStore =
-  ## A store whose backend records every command and answers `{}`. For a
-  ## command `MockBackendService` refuses as unknown to the engine
-  ## (`ct/load-step-lines` has no engine handler yet): the property under
-  ## test is what the ViewModel SENDS, not what an engine would answer.
+  ## A store whose backend records every command and answers `{}`: the
+  ## property under test is what the ViewModel SENDS, not what an engine
+  ## would answer.
   let backend = BackendService(
     sendProc: proc(command: string; args: JsonNode): BackendFuture[JsonNode] =
       sent[].add((command, args))
@@ -454,18 +461,6 @@ suite "the call-trace search asks for the pane's window of results":
       check asked.len == 1
       check not asked[0].hasKey("limit")
       dispose()
-
-suite "the current position's event index is asked once per tick":
-
-  test "the same tick is not asked again; a new tick is":
-    let mock = newMockBackendService(autoRespond = true)
-    let store = createReplayDataStore(mock.toBackendService())
-    store.requestEventIndexAt(10'u64)
-    store.requestEventIndexAt(10'u64)
-    drain()
-    store.requestEventIndexAt(10'u64)
-    store.requestEventIndexAt(11'u64)
-    check mock.sent("ct/event-load").len == 2
 
 suite "the request-span tail":
 

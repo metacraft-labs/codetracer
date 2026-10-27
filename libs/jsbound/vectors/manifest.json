@@ -142,6 +142,13 @@
       "name": "mark"
     },
     {
+      "bytes": "declassify.bin",
+      "class": "valid",
+      "description": "one Declassify record at seq 1",
+      "expected": "declassify.json",
+      "name": "declassify"
+    },
+    {
       "bytes": "xhr_event.bin",
       "class": "valid",
       "description": "one XhrEvent record at seq 1",
@@ -233,6 +240,20 @@
       "name": "platform_state"
     },
     {
+      "bytes": "net_request_holed.bin",
+      "class": "valid",
+      "description": "a NetRequest whose URL and body digest are in holed form: the password the page sent replaced by the hole token U+FDD0 ct:hole U+FDD1 in the query, and the digest taken over the holed JSON body",
+      "expected": "net_request_holed.json",
+      "name": "net_request_holed"
+    },
+    {
+      "bytes": "sensitive_session.bin",
+      "class": "valid",
+      "description": "a login form with sensitive fields: masked keystrokes, a Scrubbed record in place of the password's value, two Declassify records of one declassifier (false, then true) and the login request holed",
+      "expected": "sensitive_session.json",
+      "name": "sensitive_session"
+    },
+    {
       "bytes": "storage_shape_reads.bin",
       "class": "valid",
       "description": "StorageRead present 2: the key list, length and key(n) of an area",
@@ -302,9 +323,17 @@
       "base": "clock",
       "bytes": "unknown_tag.bin",
       "class": "refusal",
-      "description": "the third frame's tag is 0x54, unassigned in the jsbound range",
+      "description": "the third frame's tag is 0x5a, unassigned in the jsbound range",
       "expected": "unknown_tag.json",
       "name": "unknown_tag"
+    },
+    {
+      "base": "declassify",
+      "bytes": "reserved_tag_0x55.bin",
+      "class": "refusal",
+      "description": "the Declassify frame's tag is 0x55, reserved for the escrow record vocabulary 1 does not define (§11.3.7)",
+      "expected": "reserved_tag_0x55.json",
+      "name": "reserved_tag_0x55"
     },
     {
       "base": "clock",

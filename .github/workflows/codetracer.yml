@@ -1366,8 +1366,8 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=327d41aaa69520ce5a1ccc5daea6e73397757dfa
-            codetracer-trace-format-nim=a3f76fad6613be080d156d5135ea2adaad245aa9
-            codetracer-native-recorder=8fffbbc643bb1cb5acf015c6707c7312375fe911
+            codetracer-trace-format-nim=ccc4ba4e05d740659bc1663fb4f39a2f32de9937
+            codetracer-native-recorder=36d280180cdab174082af2ac1649dfeeb45e2560
             codetracer-native-backend
 
       - name: Upload env.ps1 component decomposition
@@ -1650,7 +1650,7 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
           env-ps1-path: ./env.ps1
           siblings: |
-            codetracer-native-recorder=8fffbbc643bb1cb5acf015c6707c7312375fe911
+            codetracer-native-recorder=36d280180cdab174082af2ac1649dfeeb45e2560
             # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
             # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
             # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
@@ -1658,7 +1658,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=327d41aaa69520ce5a1ccc5daea6e73397757dfa
-            codetracer-trace-format-nim=a3f76fad6613be080d156d5135ea2adaad245aa9
+            codetracer-trace-format-nim=ccc4ba4e05d740659bc1663fb4f39a2f32de9937
 
       - name: Install Nim dependencies
         shell: bash
@@ -2016,9 +2016,14 @@ jobs:
 
   lint-nix:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
-    # 200-run window: 42 green, median 5.4m, max 7.2m. 25m is ~3.5x the slowest
-    # green -- wider than the lint floor because this lane evaluates the flake.
-    timeout-minutes: 25
+    # 200-run window: 42 green, median 5.4m, max 7.2m -- measured when this lane
+    # only evaluated the flake. Since 7ab073a22 it also BUILDS the backend-manager
+    # package's sandbox inputs (db-backend, the ct-mcr test recorder, the license
+    # check), none of which a fresh slot has in its store: on nixos-ci-bare-003
+    # (2026-10-25/26) that step took 26-35m and the flake check 10-18m, and on
+    # #882 every attempt on a cold garm slot was cancelled at 25m inside the
+    # build. 90m is ~2x the slowest local measurement of the two steps together.
+    timeout-minutes: 90
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -2125,8 +2130,8 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=327d41aaa69520ce5a1ccc5daea6e73397757dfa
-            codetracer-trace-format-nim=a3f76fad6613be080d156d5135ea2adaad245aa9
-            codetracer-native-recorder=8fffbbc643bb1cb5acf015c6707c7312375fe911
+            codetracer-trace-format-nim=ccc4ba4e05d740659bc1663fb4f39a2f32de9937
+            codetracer-native-recorder=36d280180cdab174082af2ac1649dfeeb45e2560
 
       # MEASURE THE FETCH ENVIRONMENT BEFORE NIX TOUCHES THE NETWORK, and
       # before the FIRST `nix develop` in this job rather than before the
@@ -3770,15 +3775,39 @@ jobs:
         # product: the arm that carries write, compile, run, record and export
         # reaches NO network primitive, so there is no request for a token to
         # ride on. The renderer arm's egress is budgeted per surface — lsp,
-        # visual-replay, agentic, collab — and fails in both directions, which
-        # is what catches ID3's named erosion ("one personalisation, one
-        # counter"; a counter is a fetch).
+        # visual-replay, agentic, collab, session-allocation — and fails in both
+        # directions, which is what catches ID3's named erosion ("one
+        # personalisation, one counter"; a counter is a fetch).
         #
-        # This step runs the gate AND its mutation proof: eleven mutations,
+        # This step runs the gate AND its mutation proof: sixteen mutations,
         # each verified to redden the assertion written for it. It lives in
         # `viewmodel-tests`, which ci/verdict/required-jobs.txt already
         # requires, rather than in a new job that file does not know about.
         run: nix develop .#devShells.x86_64-linux.default --command just test-noir-studio-signed-out
+
+      - name: WD7 — the Noir Studio arm carries no allocation call
+        # `Hosted-Session-Allocation.md` §3.2's first prohibition, as a
+        # property of the built bundle: *"it does not own the container"*, and
+        # the narrower statement that the Noir Studio arm cannot even ASK. Two
+        # arms, so the zero is a measurement: the tree as committed must have
+        # 0 egress sites, and a planted import of the allocation client must
+        # give the SAME scanner a non-zero. A run in which both arms report 0
+        # is a broken observer and the gate says so.
+        #
+        # A separate step from the one above because it builds the loop arm
+        # twice and the second build IS the control; folding it in would make
+        # that step's single build serve two purposes and lose the arm.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-wd7-loop-arm-allocates-nothing
+
+      - name: WD7 — the allocation call's mutation proof
+        # Eight arms over `viewmodel/platform/session_allocation.nim`, each
+        # planting the defect that would satisfy a weaker version of one of
+        # §3.2's prohibitions — a flavour allow-list, a lease counter, a
+        # refusal-reason allow-list, a caller-supplied `product_id` — and each
+        # naming in advance the `test_session_allocation.nim` case that must
+        # redden. Two behaviour-preserving controls, so a red arm is not merely
+        # a touched file.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-wd7-session-allocation-mutations
 
       - name: Run ViewModel headless tests (native + JS backends)
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm
@@ -4111,6 +4140,16 @@ jobs:
         # from the REAL Electron app. Here for the reasons the steps above
         # give; the recipe starts its own Xvfb.
         run: nix develop .#devShells.x86_64-linux.default --command just plat54-capture-electron
+
+      - name: The desktop's Problems panel is the reference
+        if: ${{ !cancelled() }}
+        # The desktop column of the Problems pane: its rows after a real
+        # `nargo compile` of a crate with one warning and two errors in two
+        # files, the icons' colours, the Errors filter and Group by File, and
+        # what a right-click and a press on a row open — read from the REAL
+        # Electron app. Here for the reasons the steps above give; the recipe
+        # starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat55-capture-electron
 
       - name: The desktop's Timeline removal, list scrubbers and changed values are the reference
         if: ${{ !cancelled() }}
@@ -5074,8 +5113,8 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=327d41aaa69520ce5a1ccc5daea6e73397757dfa
-            codetracer-trace-format-nim=a3f76fad6613be080d156d5135ea2adaad245aa9
-            codetracer-native-recorder=8fffbbc643bb1cb5acf015c6707c7312375fe911
+            codetracer-trace-format-nim=ccc4ba4e05d740659bc1663fb4f39a2f32de9937
+            codetracer-native-recorder=36d280180cdab174082af2ac1649dfeeb45e2560
 
       - name: Remove WSL bash stub from System32
         # As in the other eph-win-x64 jobs: let CreateProcessW fall through to
@@ -6666,15 +6705,15 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=327d41aaa69520ce5a1ccc5daea6e73397757dfa
-            codetracer-trace-format-nim=a3f76fad6613be080d156d5135ea2adaad245aa9
-            codetracer-native-recorder=8fffbbc643bb1cb5acf015c6707c7312375fe911
+            codetracer-trace-format-nim=ccc4ba4e05d740659bc1663fb4f39a2f32de9937
+            codetracer-native-recorder=36d280180cdab174082af2ac1649dfeeb45e2560
             nim-stackable-hooks=dev
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
             codetracer-visual-replay=71f6b70ee6c3de47973645dae45e661de076eb7b
-            codetracer-native-backend=a1d58c85865d236d6ed914e321f851036745166e
+            codetracer-native-backend=b1e07aabb86536d2c4248cb8fc162381d86350fe
             runquota=dev
 
       - name: Stage codetracer-trace-format into libs/
@@ -7244,7 +7283,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=327d41aaa69520ce5a1ccc5daea6e73397757dfa
-            codetracer-trace-format-nim=a3f76fad6613be080d156d5135ea2adaad245aa9
+            codetracer-trace-format-nim=ccc4ba4e05d740659bc1663fb4f39a2f32de9937
 
       - name: Stage codetracer-trace-format into libs/
         # The flake override below points at ./libs/codetracer-trace-format;
@@ -7307,7 +7346,7 @@ jobs:
         # what the script's stale-checkout check can hold a checkout to.
         env:
           GH_TOKEN: ${{ steps.ci_token.outputs.token }}
-          RR_BACKEND_REF: a1d58c85865d236d6ed914e321f851036745166e
+          RR_BACKEND_REF: b1e07aabb86536d2c4248cb8fc162381d86350fe
         run: ./ci/setup-rr-backend.sh
 
       - name: Assert the ct-native-replay build-siblings builds can start
@@ -7603,7 +7642,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=327d41aaa69520ce5a1ccc5daea6e73397757dfa
-            codetracer-trace-format-nim=a3f76fad6613be080d156d5135ea2adaad245aa9
+            codetracer-trace-format-nim=ccc4ba4e05d740659bc1663fb4f39a2f32de9937
             io-mon=6fccd929cb09da0bfc0844b93ced9ffb1ac0f74f
             nim-shm-queue=5a8e43b52fa202859658692c9f8432967f3971ea
             nim-shm-gset=360bfc15cadab1ff583e6d1cbc20b389d5d6825f
@@ -7613,8 +7652,8 @@ jobs:
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
             codetracer-visual-replay=71f6b70ee6c3de47973645dae45e661de076eb7b
-            codetracer-native-backend=a1d58c85865d236d6ed914e321f851036745166e
-            codetracer-native-recorder=8fffbbc643bb1cb5acf015c6707c7312375fe911
+            codetracer-native-backend=b1e07aabb86536d2c4248cb8fc162381d86350fe
+            codetracer-native-recorder=36d280180cdab174082af2ac1649dfeeb45e2560
             codetracer-native-test-programs=dev
             codetracer-visual-replay-fixtures=dev
             runquota=dev
@@ -7912,19 +7951,19 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=327d41aaa69520ce5a1ccc5daea6e73397757dfa
-            codetracer-trace-format-nim=a3f76fad6613be080d156d5135ea2adaad245aa9
+            codetracer-trace-format-nim=ccc4ba4e05d740659bc1663fb4f39a2f32de9937
             io-mon=6fccd929cb09da0bfc0844b93ced9ffb1ac0f74f
             nim-shm-queue=5a8e43b52fa202859658692c9f8432967f3971ea
             nim-shm-gset=360bfc15cadab1ff583e6d1cbc20b389d5d6825f
             nim-stackable-hooks=dev
-            codetracer-native-recorder=8fffbbc643bb1cb5acf015c6707c7312375fe911
+            codetracer-native-recorder=36d280180cdab174082af2ac1649dfeeb45e2560
             codetracer-js-recorder=dev
             codetracer-ruby-recorder=dev
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
-            codetracer-native-backend=a1d58c85865d236d6ed914e321f851036745166e
+            codetracer-native-backend=b1e07aabb86536d2c4248cb8fc162381d86350fe
             codetracer-visual-replay=71f6b70ee6c3de47973645dae45e661de076eb7b
 
       - name: Allow direnv in the cloned recorder siblings

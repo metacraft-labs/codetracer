@@ -54,9 +54,7 @@ import codetracer_embed
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 523
-  ## 520 -> 523: the glyph table's `grRunAction` role (the Test Results
-  ## pane's run button) — its ASCII glyph and its two one-cell columns.
+const ExpectedAssertions = 520
 
 var countedAssertions = 0
 

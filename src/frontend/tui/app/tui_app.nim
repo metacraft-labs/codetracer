@@ -65,6 +65,7 @@ import ./views/vcs_pane
 import ./views/search_results_pane
 import ./views/test_results_pane
 import ./views/agent_activity_pane
+import ./views/problems_pane
 import ./views/point_list
 
 export headless_app
@@ -297,6 +298,10 @@ type
       ## host (`host/tui_session.agentModelOf`) from the session's
       ## `AgentActivityVM` through the shared feed; its `scroll` is the
       ## pane's own reading position.
+    problems*: ProblemsPaneModel
+      ## PLAT-55. The PROBLEMS pane's model, as a value, filled by the host
+      ## (`host/problems_source.nim`) from the window's `ErrorsVM`, which the
+      ## window's builds feed; its `scrollTop` is the pane's own.
     build*: BuildSession
       ## PLAT-16. The build or run in flight, or the last one's verdict, or
       ## `nil` for a session that has never built. `nil` is a state the pane
@@ -338,6 +343,12 @@ type
       ## PLAT-57: the HOST's Find in Files toggle, by its operation
       ## (`search.toggle-case` / `-whole-word` / `-regex`): flipped, and a
       ## search that ran run again. The words the status line shows.
+    problemsCommand*: proc(kind: ProblemsCommandKind;
+                           index: int): string {.closure.}
+      ## PLAT-55: the HOST's Problems pane — select diagnostic `index`, open
+      ## it (its file at its line, K35), step to the next / previous error
+      ## (EMT-D22), set a filter, toggle the grouping. The words the status
+      ## line shows, "" for none. Nil when no host fills the pane.
     stepSearchResult*: proc(delta: int): string {.closure.}
       ## PLAT-57: the HOST's next (`1`) / previous (`-1`) result: selected and
       ## opened in the editor at its line. "" when one opened, else why not.
@@ -656,6 +667,7 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     search: app.search,
     tests: app.tests,
     agent: app.agent,
+    problems: app.problems,
     build: build,
     product: app.modes.product,
     edit: (if app.editSession.isNil: initEditPaneModel()

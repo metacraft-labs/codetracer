@@ -122,6 +122,11 @@ const
   ShowDetailLabel* = "Show Detail"
   WidenColumnLabel* = "Widen Column"
   NarrowColumnLabel* = "Narrow Column"
+  ScrollLeftLabel* = "View: Scroll Left"
+  ScrollRightLabel* = "View: Scroll Right"
+    ## PLAT-70 Part I: `view.scroll-left` / `-right` from the palette — the
+    ## focused output pane's view, or a table pane's while its columns
+    ## scroll (Horizontal-Overflow.md §4.4, §5.5).
   ColumnWidthVerb* = "column-width"
     ## Horizontal-Overflow.md §5.2: `:column-width <title> <cells>`, beside
     ## the `:column-*` verbs.
@@ -140,6 +145,15 @@ proc tableCommands*(): seq[OmnibarEntry] =
                           target: OperationCommandPrefix &
                                   "table.resize-column(-" & $ColumnStepCells &
                                   ")")
+
+proc viewScrollCommands*(): seq[OmnibarEntry] =
+  ## PLAT-70 Part I: **View: Scroll Left** / **View: Scroll Right**
+  ## (`view.scroll-left` / `-right`) — what `z h` / `z l` (and the output
+  ## panes' arrows) do, reachable where no chord is bound.
+  result.add OmnibarEntry(kind: omCommand, label: ScrollLeftLabel,
+                          target: OperationCommandPrefix & "view.scroll-left")
+  result.add OmnibarEntry(kind: omCommand, label: ScrollRightLabel,
+                          target: OperationCommandPrefix & "view.scroll-right")
 
 proc parseOperationCommand*(target: string): tuple[ok: bool; operation: string] =
   ## `operation:<name>[(<arg>)]` -> the operation text; `ok` false otherwise.
@@ -177,6 +191,7 @@ proc omnibarIndexOf*(fs: FilesystemVM; store: ReplayDataStore;
   result.add commandsOf(menu)
   result.add eventLogColumnCommands()
   result.add tableCommands()
+  result.add viewScrollCommands()
   result.add layoutSettingCommands(terminalSettings)
   result.add baseKeymapCommands()
 

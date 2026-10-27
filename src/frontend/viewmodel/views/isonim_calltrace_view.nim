@@ -16,7 +16,8 @@
 ##     `.calltrace-call-line.calltrace-row[.event-selected]`
 ##     `.call-child-box#local-call-{index}`
 ##     `.toggle-call > .{dot|collapse}-call-img`
-##     `.call-text#local-call-text-{index}` (click = select / double-click = jump)
+##     `.call-text#local-call-text-{index}` (click = select / double-click = jump;
+##       an `a.call-text[href]` when the host passes a link builder, D10)
 ##     `.calltrace-search > form > input.calltrace-search-input`
 ##     `.call-search-summary` (when the window held fewer matches than the trace)
 ##     `.call-search-results > .search-result`
@@ -43,6 +44,7 @@ when defined(js):
   import isonim/web/dom_api as isonim_dom
   import ../store/replay_data_store
   import ./isonim_activation
+  from ./row_link_dom import attachRowLinkClicks
   from ./context_menu_bridge import showContextMenu
   from ../../context_menu_item import ContextMenuItem
   import kdom except Location
@@ -55,6 +57,7 @@ when defined(js):
   from ../viewmodels/table_overflow import CallTraceTablePane
 
 import ../store/types
+import ./row_links
 import ../backend/backend_service
 import ../viewmodels/calltrace_vm
 import ../viewport   # `withRows` / `withCols`
@@ -636,16 +639,55 @@ proc toggleExpanded(item: proc(): CallLine): string =
   elif line.isExpanded: "true"
   else: "false"
 
+proc callTextLink(vm: CalltraceVM; links: RowLinks; row: int): string =
+  ## The call text's `href`: what the host's builder makes of the address of
+  ## the held row at `row` (Shared-DOM-Front-Ends D10); empty when it makes
+  ## nothing.
+  links.linkOf(vm.rowAddress(row))
+
+proc renderCallText[R, N](r: R; vm: CalltraceVM; item: proc(): CallLine;
+                          h: RowHandlers; links: RowLinks; row: int;
+                          callTextEl: var N): N =
+  ## The call's text: the row's main control. Without a link builder it is a
+  ## `role="button"` with a tab stop. With one (a host that can address a row,
+  ## D10) it is an `<a href>` to the builder's URL, so focus, Enter,
+  ## middle-click, "open in new tab" and "copy link" are the platform's; a
+  ## plain click still selects and goes (`row_link_dom`).
+  ##
+  ## Chosen once per row, outside `ui`: whether a host passed a builder does
+  ## not change while the view lives.
+  if links.isNil:
+    result = ui(r):
+      tdiv(ref = callTextEl,
+           id = "local-call-text-" & $item().index, class = "call-text",
+           role = "button", tabindex = "0",
+           onclick = h.onSelect, ondblclick = h.onDblClick):
+        text callDisplayName(item()) & " #" & $item().index
+  else:
+    result = ui(r):
+      a(ref = callTextEl,
+        id = "local-call-text-" & $item().index, class = "call-text",
+        onclick = h.onSelect, ondblclick = h.onDblClick):
+        text callDisplayName(item()) & " #" & $item().index
+    # A row the builder made no URL for has no `href` at all (an empty one
+    # would link to the page itself) and stays a button with a tab stop.
+    let el = result
+    bindLinkAttributes[R, N](r, el, proc(): string =
+      callTextLink(vm, links, row), asButtonWhenUnlinked = true)
+
 proc renderCallLineRow*[R, N](r: R; vm: CalltraceVM;
-                              item: proc(): CallLine): N =
+                              item: proc(): CallLine;
+                              links: RowLinks = nil; slot = -1): N =
   ## One call-trace row (see the markup above).
   ##
   ## The call's text and its toggle are the row's two controls, and each is a
   ## `role="button"` with a tab stop, and Enter or Space on it is its click
   ## (`isonim_activation`): the call text selects the call and goes to it, the
-  ## toggle expands or collapses its children. A leaf's dot is neither.
+  ## toggle expands or collapses its children. A leaf's dot is neither. With a
+  ## host's link builder the call text is a link instead (`renderCallText`) to
+  ## the address of the held row at `slot`, the position this row is drawn at.
   let h = rowHandlers(vm, item)
-  var argsHost, callTextEl: N
+  var argsHost, callTextEl, childBoxEl, callArgsEl: N
   let row = ui(r):
     tdiv(class = rowClass(vm, item),
          `data-function` = item().name,
@@ -659,7 +701,7 @@ proc renderCallLineRow*[R, N](r: R; vm: CalltraceVM;
       span(min_width = $(item().depth * int(CallDepthIndentPx)) & "px"):
         discard
       tdiv(class = "calltrace-child call-depth"):
-        tdiv(id = "local-call-" & $item().index,
+        tdiv(ref = childBoxEl, id = "local-call-" & $item().index,
              class = childBoxClass(vm, item),
              `data-ct-cell` = callCellKey(item),
              `data-ct-full` = callFullText(vm, item),
@@ -671,12 +713,10 @@ proc renderCallLineRow*[R, N](r: R; vm: CalltraceVM;
                onclick = h.onToggle):
             tdiv(class = toggleClass(vm, item)):
               discard
-          tdiv(ref = callTextEl,
-               id = "local-call-text-" & $item().index, class = "call-text",
-               role = "button", tabindex = "0",
-               onclick = h.onSelect, ondblclick = h.onDblClick):
-            text callDisplayName(item()) & " #" & $item().index
-          tdiv(class = "call-args", id = "call-args-false-" & $item().index):
+          # The call text goes here, between the toggle and the arguments
+          # (`renderCallText`, inserted below).
+          tdiv(ref = callArgsEl, class = "call-args",
+               id = "call-args-false-" & $item().index):
             span:
               text "("
             span(ref = argsHost, class = "call-args-list"):
@@ -688,6 +728,10 @@ proc renderCallLineRow*[R, N](r: R; vm: CalltraceVM;
               text returnArrowForRow(vm, item)
             span(class = "return-text"):
               text returnValueForRow(vm, item)
+  r.insertBefore(childBoxEl,
+                 renderCallText[R, N](r, vm, item, h, links, slot,
+                                      callTextEl),
+                 callArgsEl)
   indexEach[CallArg, R, N](r, argsHost,
     proc(): seq[CallArg] = argsForRow(vm, item),
     proc(arg: proc(): CallArg, index: int): N =
@@ -705,6 +749,8 @@ proc renderCallLineRow*[R, N](r: R; vm: CalltraceVM;
         cstring"contextmenu",
         proc(ev: isonim_dom.Event) =
           showMenu(ev, calltraceRowContextItems(vm, item)))
+      if not links.isNil:
+        attachRowLinkClicks(row)
   row
 
 proc searchResultsClass(vm: CalltraceVM): string =
@@ -735,9 +781,14 @@ proc searchResultLabel(res: CalltraceSearchResult): string =
 # The panel
 # ---------------------------------------------------------------------------
 
-proc renderCalltracePanel*[R, N](r: R; vm: CalltraceVM): N =
+proc renderCalltracePanel*[R, N](r: R; vm: CalltraceVM;
+                                 links: RowLinks = nil): N =
   ## The Call Trace panel — the markup of the legacy Karax calltrace, which
   ## the Playwright page objects find unchanged.
+  ##
+  ## `links` is a host's link builder (Shared-DOM-Front-Ends D10): with one,
+  ## each row's call text is a link to what it builds from the row's address.
+  ## CodeTracer's own front-ends pass none.
   ##
   ## The rows are the section the store holds, positioned by `translateY`
   ## inside a scroll area as tall as the whole trace (`totalCallsCount` rows),
@@ -787,7 +838,7 @@ proc renderCalltracePanel*[R, N](r: R; vm: CalltraceVM): N =
   indexEach[CallLine, R, N](r, linesContainer,
     proc(): seq[CallLine] = vm.store.calltrace.lines.val,
     proc(item: proc(): CallLine, index: int): N =
-      renderCallLineRow[R, N](r, vm, item))
+      renderCallLineRow[R, N](r, vm, item, links, index))
 
   indexEach[CalltraceSearchResult, R, N](r, resultsHost,
     proc(): seq[CalltraceSearchResult] = vm.backendSearchResults.val,

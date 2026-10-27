@@ -158,13 +158,25 @@ flake_input_path() {
 	case "$REPO_ROOT" in
 	*'"'* | *"\\"* | *'$'*) fail "repo root '$REPO_ROOT' contains a character this script will not splice into a Nix expression." ;;
 	esac
+	# stdout carries only the path; stderr is kept apart and shown on failure.
+	# Merging them made the path unreadable whenever nix had anything else to
+	# say -- a fresh runner's "unpacking ... into the Git cache", an unknown
+	# setting warning, an auto-GC's progress -- with nix still exiting 0.
+	local err
+	err="$(mktemp)"
 	out="$(nix eval --raw --impure --expr \
-		"(builtins.getFlake \"$REPO_ROOT\").inputs.\"$input\".outPath" 2>&1)"
+		"(builtins.getFlake \"$REPO_ROOT\").inputs.\"$input\".outPath" 2>"$err")"
 	rc=$?
 	if [ "$rc" -ne 0 ] || [ ! -d "$out" ]; then
-		fail "could not locate the flake's '$input' input (nix eval exited $rc). This is a failure to READ the pin, NOT a statement that the catalog lacks anything. nix output:
-$out"
+		local diag
+		diag="$(cat "$err")"
+		rm -f "$err"
+		fail "could not locate the flake's '$input' input (nix eval exited $rc). This is a failure to READ the pin, NOT a statement that the catalog lacks anything. nix stdout:
+$out
+nix stderr:
+$diag"
 	fi
+	rm -f "$err"
 	printf '%s\n' "$out"
 }
 

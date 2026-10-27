@@ -182,7 +182,7 @@ _tlf_js_only_suites() {
 	while read -r f; do
 		[ -n "${f}" ] || continue
 		[ -f "${f}" ] || continue
-		if _tlf_top_level_imports "${f}" | grep -qE -- "${_TLF_JS_ONLY_IMPORT_RE}"; then
+		if grep -qE -- "${_TLF_JS_ONLY_IMPORT_RE}" <<<"$(_tlf_top_level_imports "${f}")"; then
 			[ "${mode}" = keep ] && printf '%s\n' "${f}"
 		else
 			[ "${mode}" = reject ] && printf '%s\n' "${f}"
@@ -1078,6 +1078,18 @@ test_lane_files() {
 		# `shared_rows_keyboard_dom_test.nim`: Enter and Space on a shared
 		# view's `role="button"` row are its click, in a real DOM.
 		echo src/frontend/tests/shared_rows_keyboard_dom_test.nim
+		# `row_links_dom_test.nim`: with a host's link builder (Shared-DOM-
+		# Front-Ends D10), a plain click on a shared row's link is the row's
+		# click and does not navigate; a modified click is the browser's.
+		echo src/frontend/tests/row_links_dom_test.nim
+		# `event_log_scroll_area_dom_test.nim`: the Event Log's scroll area is as
+		# tall as the whole log, in a real DOM, whatever the table's fit does.
+		echo src/frontend/tests/event_log_scroll_area_dom_test.nim
+		# `vscode_request_panel_role_dom_test.nim`: the Request Panel is a VS
+		# Code panel role (Shared-DOM-Front-Ends Q8): the webview entry mounts the
+		# shared view over a mirror, its rows are the window the host's primary
+		# loaded, and a row click and a filter run on the primary.
+		echo src/frontend/tests/vscode_request_panel_role_dom_test.nim
 		# `git_cli_index_lock_test.nim`: `ui/git_cli.gitExec`'s `status` and
 		# `diff`, through the Electron process facade, over real repositories
 		# with a stale stat cache, never rewrite the index or leave

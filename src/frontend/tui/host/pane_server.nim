@@ -1166,7 +1166,3 @@ proc runPaneServer*(): int =
     s.close()
   if srv.shutdownRequested: 0 else: 1
 
-proc activeRuntime*(srv: PaneServer): TuiRuntime =
-  ## The active session's runtime — for a suite that compares a hosted pane
-  ## with the interactive terminal's painting of the same pane.
-  if srv.active < 0: nil else: srv.sessions[srv.active].rt

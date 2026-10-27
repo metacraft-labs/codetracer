@@ -903,6 +903,30 @@ proc showSearchResult*(s: TuiSession; rt: TuiRuntime; index: int): string =
   rt.app.notification = "opened " & row.path & ":" & $row.line
   ""
 
+proc showFileAt*(s: TuiSession; rt: TuiRuntime; path: string;
+                 line, col: int): string =
+  ## PLAT-55 (K35) in a replay's Debug mode: a Problems row's file shown in
+  ## the editor at its line, the caret there — read from the recording, as a
+  ## Find in Files result is (`showSearchResult`); the recording position
+  ## does not move. "" when it opened, else why not.
+  if s.ended:
+    return EndedSessionNote
+  rt.app.viewedFile = path
+  s.showViewedFile(rt, force = true)
+  if rt.app.viewedFile.len == 0:
+    return if rt.app.notification.len > 0: rt.app.notification
+           else: path & " is not in this recording"
+  let paneRows = max(1, rt.sourcePaneRows())
+  rt.app.source.viewportTop = max(1, line - paneRows div 3)
+  let column = max(1, col) - 1
+  let buf = rt.debugBuffer()
+  if not buf.isNil and buf.path == path:
+    buf.moveCaretTo(line - 1, column)
+    rt.app.caret = (buf.path, buf.caretLine, buf.caretColumn + 1)
+  else:
+    rt.app.caret = (path, line, column + 1)
+  ""
+
 proc toggleSearchOption*(s: TuiSession; rt: TuiRuntime;
                          operation: string): string =
   ## One of Find in Files' toggles flipped by its operation

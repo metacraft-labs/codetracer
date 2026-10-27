@@ -42,6 +42,10 @@ when defined(js):
       ## drawn at its row's budget): what is measured against the cell.
     TableCutAttribute* = "data-ct-cut"
       ## On a cell drawn cut: its column (HO-8).
+    MidCutTextAttribute = "data-ct-mid-text"
+      ## PLAT-71: the text this pass drew in a cell cut in its middle.
+    MidCutOfAttribute = "data-ct-mid-of"
+      ## PLAT-71: the text the view drew there, which the cut stands for.
     TableDetailClass* = "ct-table-detail"
       ## A row's full text, open under it.
     TableTooltipClass* = "ct-table-tooltip"
@@ -178,9 +182,50 @@ when defined(js):
   proc chord(): string =
     if copyChordOf.isNil: "" else: copyChordOf()
 
+  proc setDrawnText(el: JsObject; text: cstring) {.importjs: """
+    (function(el, t){
+      const n = el.firstChild;
+      if (n && n.nodeType === 3 && !n.nextSibling) n.nodeValue = t;
+      else el.textContent = t;
+    })(#, #)""".}
+    ## The cell's text node's text — the node the view's renderer holds, so
+    ## its next update still reaches it.
+
+  proc middleCutPass(cell: JsObject; kind: CutKind): bool =
+    ## PLAT-71 (Terminal-Adaptation §9.2): a column whose cut is not at its
+    ## end — a path's middle, a number never cut silently — is drawn with the
+    ## shared presenter's text, since `text-overflow` cuts only the end. The
+    ## text the view drew is kept (`MidCutOfAttribute`) while the cell shows
+    ## the cut; a new text from the view replaces both.
+    let shown = $cell.textOf
+    var whole = shown
+    if $cell.attr(MidCutTextAttribute) == shown and shown.len > 0:
+      whole = $cell.attr(MidCutOfAttribute)
+    let fitted = fitCellAs(whole, cell.cellsOf, kind)
+    if fitted.truncated:
+      if shown != fitted.text:
+        cell.setDrawnText(cstring(fitted.text))
+      cell.setAttr(MidCutTextAttribute, cstring(fitted.text))
+      cell.setAttr(MidCutOfAttribute, cstring(whole))
+      cell.setAttr(TableFullAttribute, cstring(whole))
+      cell.setAttr(TableCutAttribute, cstring(cell.parts.column))
+    else:
+      if shown != whole:
+        cell.setDrawnText(cstring(whole))
+      cell.removeAttr(MidCutTextAttribute)
+      cell.removeAttr(MidCutOfAttribute)
+      if cell.attr(TableCutAttribute).len > 0:
+        cell.removeAttr(TableCutAttribute)
+    true
+
   proc fitPass(t: TablePaneDom) =
     ## §5.1: every cell's `truncated`, from the shared fit, marked.
     for cell in t.root.queryAll(cstring("[" & TableCellAttribute & "]")):
+      let parts = cell.parts
+      let kind = cutKindOf(parts.pane, parts.column)
+      if kind != ckEnd and cell.attr(TableTextAttribute).len == 0 and
+         cell.middleCutPass(kind):
+        continue
       let drawn = cell.drawnOf
       let fitted = fitCell(drawn, cell.cellsOf)
       if fitted.truncated:

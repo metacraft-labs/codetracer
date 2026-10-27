@@ -16,6 +16,15 @@ import isonim/testing/mock_dom
 
 import views/isonim_flow_value_view
 
+proc renderFlowValueChip[R, N](r: R; name, boxId, boxClass, valueText: string;
+                               iteration: int; style: FlowStyle = @[];
+                               boxStyle: FlowStyle = @[]; maxWidth = ""): N =
+  ## A whole chip: the container with its name and its value box.
+  result = renderFlowValueContainer[R, N](r, style)
+  r.appendChild(result, renderFlowValueName[R, N](r, name))
+  r.appendChild(result, renderFlowValueBox[R, N](r, boxId, boxClass, valueText,
+                                                 iteration, boxStyle, maxWidth))
+
 proc classes(node: MockNode): seq[string] =
   node.attributes.getOrDefault("class", "").splitWhitespace()
 

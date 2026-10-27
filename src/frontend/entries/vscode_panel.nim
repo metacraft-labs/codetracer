@@ -14,10 +14,14 @@
 ## bundle.
 ##
 ## The panels: `state`, `calltrace`, `eventLog`, `terminalOutput`,
-## `scratchpad`, `traceLog`, `flow`, `pointList` and `fileTree`.
+## `scratchpad`, `traceLog`, `flow`, `pointList`, `fileTree` and
+## `requestPanel` (Shared-DOM-Front-Ends Q8: the Request Panel role, its
+## window loaded by the host's primary from the size this webview reports).
 
 when not defined(js):
   {.error: "entries/vscode_panel runs in a VS Code webview (JS).".}
+
+import std/options
 
 import isonim/core/owner
 import isonim/web/web_renderer
@@ -32,11 +36,12 @@ import ../viewmodel/views/[isonim_state_view, isonim_calltrace_view,
                            isonim_event_log_view, isonim_terminal_output_view,
                            isonim_scratchpad_view, isonim_trace_log_view,
                            isonim_flow_view, isonim_point_list_view,
-                           isonim_filesystem_view]
+                           isonim_filesystem_view, isonim_request_panel_view]
+import ../viewmodel/views/pane_measure_dom
 
 const PanelKinds* = ["state", "calltrace", "eventLog", "terminalOutput",
                      "scratchpad", "traceLog", "flow", "pointList",
-                     "fileTree"]
+                     "fileTree", "requestPanel"]
   ## The panels a webview can show, as its HTML names them.
 
 proc panelKindOfPage(): cstring {.importjs:
@@ -71,10 +76,24 @@ proc renderPanel(kind: string; s: SessionViewModel): dom_api.Element =
     renderPointListPanel[WebRenderer, dom_api.Element](r, s.pointListVM)
   of "fileTree":
     renderFilesystemPanel[WebRenderer, dom_api.Element](r, s.fileTreeVM)
+  of "requestPanel":
+    renderRequestPanel[WebRenderer, dom_api.Element](r, s.requestPanelVM)
   else: nil
 
 var activeMirror: MirrorSession
   ## This webview's mirror; one per page.
+
+proc measuredPaneOf(kind: string): Option[MeasuredPane] =
+  ## The measurement of panel `kind` (`views/pane_measure_dom`); none for a
+  ## panel that loads no window by its viewport.
+  case kind
+  of "calltrace": some(mpCalltrace)
+  of "state": some(mpState)
+  of "traceLog": some(mpTraceLog)
+  of "terminalOutput": some(mpTerminalOutput)
+  of "eventLog": some(mpEventLog)
+  of "requestPanel": some(mpRequestPanel)
+  else: none(MeasuredPane)
 
 proc mountVsCodePanel*(kind: string; root: dom_api.Element): MirrorSession =
   ## Mirror the host's session over this webview's channel and mount panel
@@ -95,6 +114,15 @@ proc mountVsCodePanel*(kind: string; root: dom_api.Element): MirrorSession =
     let panel = renderPanel(kind, mirror.session)
     if not dom_api.isNodeNil(dom_api.Node(panel)):
       discard dom_api.appendChild(dom_api.Node(root), dom_api.Node(panel))
+      # The panel reports what it shows — its rows, the first row, the depth
+      # levels that fit — as the desktop's panel host does (HSF-V2). The
+      # mirror relays each report to the host's primary, which asks the
+      # replay for that window: the Call Trace's rows as it scrolls, the
+      # Event Log's page (codetracer-vscode-extension#37, #40). The webview
+      # lives as long as the panel, so the observer is never stopped.
+      let pane = measuredPaneOf(kind)
+      if pane.isSome:
+        discard startMeasuringPane(root, pane.get, mirror.session)
   mirror
 
 when isMainModule:

@@ -97,7 +97,7 @@ if [ -z "${row}" ]; then
 	echo "FAIL: the transcript carries no M1 arm row (harness rc ${rc})"
 	printf '%s\n' "${out}" | tail -15 | sed 's/^/      /'
 	failed=$((failed + 1))
-elif ! printf '%s\n' "${row}" | grep -qE '^M1 +plat18_marshalling_probe@native +killed {2,}'; then
+elif ! grep -qE '^M1 +plat18_marshalling_probe@native +killed {2,}' <<<"${row}"; then
 	echo "FAIL: M1 was not killed with ISONIM_SRC pointed at another isonim copy:"
 	echo "      ${row}"
 	failed=$((failed + 1))
@@ -105,7 +105,7 @@ else
 	echo "ok: M1 killed with ISONIM_SRC pointed at another isonim copy"
 fi
 
-if printf '%s\n' "${out}" | grep -q '^note: ISONIM_SRC overridden'; then
+if grep -q '^note: ISONIM_SRC overridden' <<<"${out}"; then
 	echo "ok: the harness said it overrode the ambient ISONIM_SRC"
 else
 	echo "FAIL: the harness did not say it overrode the ambient ISONIM_SRC"

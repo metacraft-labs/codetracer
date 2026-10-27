@@ -15,7 +15,14 @@
  *     user): its rows are table cells, the wide call is cut, and its cut is
  *     the browser's (HO-8: marked iff its box overflows);
  *   * the Call Trace of `test-programs/deep_calls` — a call nested 40 deep:
- *     once the deep calls are on screen the list SCROLLS sideways (HO-15).
+ *     once the deep calls are on screen the list SCROLLS sideways (HO-15);
+ *   * the palette's **View: Scroll Right** / **View: Scroll Left** move the
+ *     Event Log's body while its columns scroll — the table pane last pressed,
+ *     since the palette holds the keyboard while its entry runs;
+ *   * PLAT-71 (Terminal-Adaptation §9.2): the location column, shown and
+ *     narrower than its text, loses its MIDDLE — the line number stays — as
+ *     the shared presenter cuts it on every front-end, while `text-overflow`
+ *     could only cut the end.
  *
  * No mocks: real `.ct` recordings, the real `ct`, a real `replay-server`, the
  * real Electron app, real wheel events.
@@ -177,6 +184,76 @@ test.describe("PLAT-70 Part I: wide_lines — a remembered wide column scrolls",
     expect(followed.after.cell).toBeLessThan(followed.before.cell);
     expect(Math.abs(followed.after.head - followed.after.cell)).toBeLessThanOrEqual(
       Math.abs(followed.before.head - followed.before.cell) + 1);
+
+    // ---- The palette's View: Scroll Right / Left -----------------------------
+    await page.evaluate(() => {
+      const body = document.querySelector(".eventLog-scroll-body") as HTMLElement;
+      body.scrollLeft = 0;
+      body.dispatchEvent(new Event("scroll"));
+      // A press in the pane: the table pane the palette's entry acts on.
+      document.querySelector(".eventLog-column-header")!.dispatchEvent(
+        new MouseEvent("mousedown", { bubbles: true }));
+    });
+    const scrollLeft = () => page.evaluate(() =>
+      (document.querySelector(".eventLog-scroll-body") as HTMLElement).scrollLeft);
+    expect(await scrollLeft()).toBe(0);
+    const run = async (label: string) => {
+      await page.keyboard.press("Control+KeyP");
+      const input = page.locator("#command-query-text");
+      // The palette's command search is one word (a space starts arguments).
+      await input.fill(":" + label.replace("View: ", "").replace(/ /g, ""));
+      await expect(page.locator(".command-results .command-result.command-command")
+        .filter({ hasText: label }).first()).toBeVisible({ timeout: 10_000 });
+      await input.press("Enter");
+    };
+    await run("View: Scroll Right");
+    await expect.poll(scrollLeft, { timeout: 10_000 }).toBeGreaterThan(0);
+    const right = await scrollLeft();
+    await run("View: Scroll Left");
+    await expect.poll(scrollLeft, { timeout: 10_000 }).toBeLessThan(right);
+  });
+});
+
+test.describe("PLAT-71: a cut location loses its middle (§9.2)", () => {
+  test.use({
+    sourcePath: recording("wide_lines"),
+    launchMode: "trace-folder",
+    ...(prefix ? { codetracerPrefixOverride: prefix } : {}),
+  });
+
+  test.beforeAll(() => {
+    // The location column 6 cells wide: narrower than `main.py:<line>`.
+    fs.writeFileSync(columnsFile, "event-log.location=6\n");
+  });
+
+  test.afterAll(() => {
+    if (fs.existsSync(columnsFile)) fs.unlinkSync(columnsFile);
+  });
+
+  test("the location column, shown narrow, keeps its line number", async ({ ctPage }) => {
+    const page = ctPage;
+    await page.waitForSelector("[data-ct-cell^='event-log|']", { timeout: 180_000 });
+    await page.click(".eventLog-columns-button");
+    await page.click(".eventLog-column-option[data-column='location'] span:first-child");
+    const cells = () => page.evaluate(() =>
+      (Array.from(document.querySelectorAll("[data-ct-cell$='|location']")) as HTMLElement[])
+        .filter((c) => c.offsetParent !== null)
+        .map((c) => ({ text: c.textContent ?? "", cut: c.hasAttribute("data-ct-cut"),
+                       full: c.getAttribute("data-ct-full") ?? "" })));
+    await expect.poll(async () => (await cells()).filter((c) => c.cut).length,
+                      { timeout: 30_000 }).toBeGreaterThan(0);
+    for (const c of (await cells()).filter((c) => c.cut)) {
+      // The middle went: the `…` is inside, the line number is the end.
+      // The middle went: the `…` is inside, between the text's start and
+      // its end — the line number's digits are kept.
+      expect(c.full).toMatch(/^main\.py:\d+$/);
+      const [head, tail] = c.text.split("…");
+      expect(head.length).toBeGreaterThan(0);
+      expect(tail.length).toBeGreaterThan(0);
+      expect(c.full.startsWith(head)).toBe(true);
+      expect(c.full.endsWith(tail)).toBe(true);
+      expect(tail).toMatch(/\d$/);
+    }
   });
 });
 

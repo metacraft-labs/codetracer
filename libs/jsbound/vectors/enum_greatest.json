@@ -199,12 +199,18 @@
       "seq": "22"
     },
     {
+      "fn_id": "isValidEmail",
+      "output": "false",
+      "record": "Declassify",
+      "seq": "23"
+    },
+    {
       "event": 7,
       "length_computable": 1,
       "loaded": "65536",
       "record": "XhrEvent",
       "req_id": "3",
-      "seq": "23",
+      "seq": "24",
       "target": 2,
       "total": "2097152"
     },
@@ -213,27 +219,27 @@
       "phase": 3,
       "record": "Loading",
       "scripts": 2,
-      "seq": "24",
+      "seq": "25",
       "text": 318
     },
     {
       "event": "",
       "kind": 5,
       "record": "DocTask",
-      "seq": "25",
+      "seq": "26",
       "src": "https://shop.example/assets/app.js",
       "target": ""
     },
     {
       "query": "callback",
       "record": "PlatformValue",
-      "seq": "26",
+      "seq": "27",
       "src": 9,
       "task_id": "11",
       "value": "[{\"target\":\"path:#hero\",\"isIntersecting\":true,\"intersectionRatio\":0.5}]"
     },
     {
-      "last_seq": "26",
+      "last_seq": "27",
       "reason": 4,
       "record": "End"
     }

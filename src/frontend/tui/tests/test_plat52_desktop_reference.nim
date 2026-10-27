@@ -28,6 +28,7 @@ import headless_session
 import store/types
 import viewmodels/terminal_output_vm
 import ../../viewmodel/host/terminal_output_source
+import ../testing/terminal_output_load
 import ./fixtures/fixture_provider
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling

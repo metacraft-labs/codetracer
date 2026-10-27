@@ -74,6 +74,10 @@ type
     truncated*: bool
       ## The cell was cut (§5.1). Only a cut cell carries `…`, the hover and
       ## the `…` click.
+    midMarker*: int
+      ## PLAT-71 (§9.2): where in `text` (a byte offset) the cut's `…` is when
+      ## it is not at the end — a path cut in its middle; 0 when it is at the
+      ## end (or there is none).
 
   DetailView* = object
     ## The full text laid out under its row, or in a tooltip.
@@ -142,6 +146,170 @@ func fitCell*(full: string; cells: int;
   let (text, clipped) = ctx.clipToCells(line, cells)
   result.text = text
   result.truncated = clipped
+
+type
+  CutKind* = enum
+    ## Where a cut cell loses its text (Terminal-Adaptation §9.2): decided
+    ## here, with the cut, so the terminal, GPUI and the desktop cut in the
+    ## same place.
+    ckEnd = "end"
+      ## Identifiers, call names, types, values: the start is what is typed,
+      ## searched for and read first.
+    ckPath = "path"
+      ## Paths, module paths, URLs: the MIDDLE goes, the last component —
+      ## what identifies the file — kept whole when it fits.
+    ckNumber = "number"
+      ## Numbers are never cut silently: a cut number reads as a different
+      ## number. Scientific form when that fits, else `…` alone.
+
+const
+  PathSeparators = {'/', '\\'}
+  SeparatorSlackCells = 3
+    ## §9.2: the middle cut moves to a path separator within this many cells
+    ## of where it would fall.
+
+func cutKindOf*(pane, column: string): CutKind =
+  ## The cut a table column takes (§9.2), by the pane's and the column's
+  ## shared names — one table every front-end reads.
+  if pane == EventLogTablePane:
+    case column
+    of "location": ckPath
+    of "tick", "#": ckNumber
+    else: ckEnd
+  else: ckEnd
+
+func isNumberText*(text: string): bool =
+  ## A value drawn as a number: an integer or a decimal, signed, with an
+  ## exponent or not (`-12`, `3.5`, `1e21`).
+  let t = text.strip()
+  if t.len == 0 or t.len > 64:
+    return false
+  try:
+    discard parseFloat(t)
+    t[^1] in Digits or t[^1] == '.'
+  except ValueError:
+    false
+
+func widthOfText(ctx: PresentationContext; s: string): int =
+  for r in runes(s):
+    result += max(1, measureOf(ctx, $r))
+
+func headCells(ctx: PresentationContext; s: string; cells: int): string =
+  ## The longest prefix of `s` at most `cells` wide.
+  var used = 0
+  for r in runes(s):
+    let w = max(1, measureOf(ctx, $r))
+    if used + w > cells: break
+    used += w
+    result.add $r
+
+func tailCells(ctx: PresentationContext; s: string; cells: int): string =
+  ## The longest suffix of `s` at most `cells` wide.
+  var rs: seq[string] = @[]
+  for r in runes(s): rs.add $r
+  var used = 0
+  var i = rs.len
+  while i > 0:
+    let w = max(1, measureOf(ctx, rs[i - 1]))
+    if used + w > cells: break
+    used += w
+    dec i
+  for k in i ..< rs.len: result.add rs[k]
+
+func middleCut(ctx: PresentationContext; line: string; cells: int): string =
+  ## §9.2's path cut: one `…` in place of the removed middle. Whole
+  ## components where they fit — the first one before the `…`, as many of
+  ## the last ones after it as the column holds, the file name always among
+  ## them when it fits — else the column split at its middle, the split moved
+  ## to a separator within `SeparatorSlackCells` of it.
+  let mark = max(1, measureOf(ctx, Ellipsis))
+  let budget = cells - mark
+  if budget <= 0:
+    return ctx.clipToCells(line, cells).text
+  # Whole components: the head through the first separator (past a leading
+  # one), the tail from the separator that leaves the most that fits.
+  var firstSep = -1
+  for i in 1 .. line.high:
+    if line[i] in PathSeparators:
+      firstSep = i
+      break
+  if firstSep > 0:
+    let head = line[0 .. firstSep]
+    let headW = ctx.widthOfText(head)
+    if headW <= budget div 2:
+      var tail = ""
+      for i in countdown(line.high, firstSep + 1):
+        if line[i] in PathSeparators:
+          let t = line[i .. ^1]
+          if ctx.widthOfText(t) <= budget - headW: tail = t
+          else: break
+      if tail.len > 0:
+        return head & Ellipsis & tail
+  # The column split at its middle, moved to a separator near it.
+  var head = ctx.headCells(line, budget div 2)
+  block:
+    var k = head.high
+    var dropped = 0
+    while k > 0 and dropped <= SeparatorSlackCells:
+      if head[k] in PathSeparators:
+        head = head[0 .. k]
+        break
+      if (head[k].ord and 0xC0) != 0x80: inc dropped
+      dec k
+  var tail = ctx.tailCells(line, budget - ctx.widthOfText(head))
+  block:
+    var k = 0
+    var dropped = 0
+    while k < tail.high and dropped <= SeparatorSlackCells:
+      if tail[k] in PathSeparators:
+        tail = tail[k .. ^1]
+        break
+      if (tail[k].ord and 0xC0) != 0x80: inc dropped
+      inc k
+  head & Ellipsis & tail
+
+func numberCut(ctx: PresentationContext; line: string; cells: int): string =
+  ## §9.2's number: scientific form when it fits, else `…` alone.
+  var x = 0.0
+  try:
+    x = parseFloat(line.strip())
+  except ValueError:
+    return (if max(1, measureOf(ctx, Ellipsis)) <= cells: Ellipsis else: "")
+  for digits in countdown(6, 0):
+    var sci = formatFloat(x, ffScientific, digits)
+    let e = sci.find('e')
+    if e > 0 and '.' in sci[0 ..< e]:
+      var m = sci[0 ..< e]
+      m = m.strip(leading = false, chars = {'0'})
+      m = m.strip(leading = false, chars = {'.'})
+      sci = m & sci[e .. ^1]
+    if ctx.widthOfText(sci) <= cells:
+      return sci
+  if max(1, measureOf(ctx, Ellipsis)) <= cells: Ellipsis else: ""
+
+func fitCellAs*(full: string; cells: int; kind: CutKind;
+                measure: PresentationMeasure = runeMeasure): FittedCell =
+  ## `fitCell`, cut where `kind` says (§9.2): the end, the middle of a path,
+  ## or a number never cut silently. The cell is `truncated` whenever it does
+  ## not draw the whole text, so its full value stays reachable.
+  if kind == ckEnd:
+    return fitCell(full, cells, measure)
+  let line = oneLine(full)
+  result.full = full
+  let ctx = PresentationContext(measure: measure)
+  if cells <= 0:
+    result.truncated = line.len > 0
+    return
+  if ctx.widthOfText(line) <= cells:
+    result.text = line
+    return
+  result.truncated = true
+  result.text = case kind
+                of ckPath: ctx.middleCut(line, cells)
+                of ckNumber: ctx.numberCut(line, cells)
+                of ckEnd: ""
+  if kind == ckPath and not result.text.endsWith(Ellipsis):
+    result.midMarker = max(0, result.text.rfind(Ellipsis))
 
 func presentedCell*(text, full: string; truncated: bool): FittedCell =
   ## A value cell: the presenter's answer at the cell's budget (already

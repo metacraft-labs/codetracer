@@ -39,8 +39,10 @@ when defined(js):
   from ./table_fit_dom import attachEventLogFit
   # Enter and Space on a `role="button"` row or header cell are its click.
   import ./isonim_activation
+  from ./row_link_dom import attachRowLinkClicks
 
 import ../store/types
+import ./row_links
 import ../viewmodels/event_log_vm
 from ../viewmodels/table_overflow import pxOfCells, EventLogTablePane, oneLine
 from std/unicode import runeLen
@@ -269,6 +271,28 @@ proc windowOffset*(vm: EventLogVM): string =
     $int(float(vm.store.eventLog.loadedStart.val) * vm.rowHeightPx.val) &
     "px)"
 
+proc joinStyle(parts: varargs[string]): string =
+  ## Inline style declarations joined into one `style` attribute.
+  for part in parts:
+    if part.len > 0:
+      if result.len > 0: result.add "; "
+      result.add part
+
+proc scrollSpaceStyle*(vm: EventLogVM): string =
+  ## The scroll area's whole style: its height (`listHeight`) and, in SCROLL,
+  ## its width. ONE `style` binding, because a `style = …` binding replaces
+  ## the element's whole inline style each time it re-runs: a separate
+  ## `height = …` binding beside it was wiped whenever the table's fit
+  ## changed, the scroll area shrank to the held window, and the scrollbar
+  ## reached only the rows already loaded (codetracer-vscode-extension#40).
+  joinStyle("height: " & listHeight(vm), tableMinWidthStyle(vm))
+
+proc rowsTableStyle*(vm: EventLogVM): string =
+  ## The held window's table's whole style: its place in the scroll area
+  ## (`windowOffset`) and, in SCROLL, its width — one binding, for the reason
+  ## `scrollSpaceStyle` gives.
+  joinStyle("transform: " & windowOffset(vm), tableMinWidthStyle(vm))
+
 proc footerStart*(vm: EventLogVM): int =
   ## The footer's first row shown, counted from 1 (0 for an empty list).
   if vm.listTotal <= 0: 0
@@ -356,9 +380,31 @@ proc onMoveColumn(vm: EventLogVM; col: EventLogColumn; delta: int): proc() =
 # Rows
 # ---------------------------------------------------------------------------
 
+proc eventLink(vm: EventLogVM; links: RowLinks; position: int): string =
+  ## The index cell's `href`: what the host's builder makes of the row's
+  ## address (Shared-DOM-Front-Ends D10); empty, which removes the attribute,
+  ## when it makes nothing.
+  links.linkOf(vm.rowAddress(position))
+
 proc renderEventCell*[R, N](r: R; vm: EventLogVM; position: int;
-                            col: EventLogColumn): N =
+                            col: EventLogColumn; links: RowLinks = nil): N =
   ## One cell of the row at `position`, for column `col`.
+  ##
+  ## With a host's link builder (D10) the index cell's number is a link to
+  ## what it builds — `a.eventLog-row-link`, out of the tab order because the
+  ## row is the keyboard's control, so the link only adds the pointer's
+  ## new-tab and copy-link affordances (`row_link_dom` keeps a plain click the
+  ## row's).
+  if col == elcIndex and not links.isNil:
+    var link: N
+    result = ui(r):
+      td(class = columnClass(col), style = columnWidthStyle(vm, col),
+         `data-ct-cell` = cellKey(vm, position, col)):
+        a(ref = link, class = "eventLog-row-link", tabindex = "-1"):
+          text $vm.rowAt(position).eventId
+    bindLinkAttributes[R, N](r, link, proc(): string =
+      eventLink(vm, links, position))
+    return
   case col
   of elcTick:
     ui(r):
@@ -394,7 +440,8 @@ proc renderEventCell*[R, N](r: R; vm: EventLogVM; position: int;
          `data-ct-cell` = cellKey(vm, position, col)):
         text eventLogText(vm.rowAt(position))
 
-proc renderEventRow*[R, N](r: R; vm: EventLogVM; position: int): N =
+proc renderEventRow*[R, N](r: R; vm: EventLogVM; position: int;
+                           links: RowLinks = nil): N =
   ## The row at `position` of the list: its identity as `data-*` attributes
   ## (what the page objects find rows by), a cell per shown column.
   var rowEl: N
@@ -414,7 +461,11 @@ proc renderEventRow*[R, N](r: R; vm: EventLogVM; position: int): N =
   forEachKeyed[EventLogColumn, R, N](r, rowEl,
     proc(): seq[EventLogColumn] = vm.columns.val.visibleColumns,
     proc(col: proc(): EventLogColumn; index: proc(): int): N =
-      renderEventCell[R, N](r, vm, position, col()))
+      renderEventCell[R, N](r, vm, position, col(), links))
+  when defined(js):
+    when N is isonim_dom.Element:
+      if not links.isNil:
+        attachRowLinkClicks(rowEl)
   row
 
 proc renderMarkerRow*[R, N](r: R; vm: EventLogVM;
@@ -536,8 +587,12 @@ when defined(js):
 # The panel
 # ---------------------------------------------------------------------------
 
-proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM): N =
-  ## The Event Log panel.
+proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM;
+                                links: RowLinks = nil): N =
+  ## The Event Log panel. `links` is a host's link builder
+  ## (Shared-DOM-Front-Ends D10): with one, each row's index cell links to
+  ## what it builds from the row's address. CodeTracer's own front-ends pass
+  ## none.
   ##
   ##   div.component-container.eventLog.event-log-component
   ##     div.ct-flex                      filter button, search, columns menu
@@ -595,10 +650,9 @@ proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM): N =
           discard
         tdiv(ref = scrollBody, class = EventLogScrollBodyClass,
              style = scrollBodyStyle(vm)):
-          tdiv(class = "eventLog-scroll-space", height = listHeight(vm),
-               style = tableMinWidthStyle(vm)):
-            table(class = "eventLog-rows", transform = windowOffset(vm),
-                  style = tableMinWidthStyle(vm)):
+          tdiv(class = "eventLog-scroll-space",
+               style = scrollSpaceStyle(vm)):
+            table(class = "eventLog-rows", style = rowsTableStyle(vm)):
               tbody(ref = tbodyEl):
                 discard
         tdiv(class = "dt-empty", display = emptyDisplay(vm)):
@@ -643,7 +697,7 @@ proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM): N =
   forEachKeyed[int, R, N](r, tbodyEl,
     proc(): seq[int] = listPositions(vm),
     proc(position: proc(): int; index: proc(): int): N =
-      renderEventRow[R, N](r, vm, position()))
+      renderEventRow[R, N](r, vm, position(), links))
 
   indexEach[MarkerEventRow, R, N](r, markerContainer,
     proc(): seq[MarkerEventRow] = vm.visibleMarkerRows.val,

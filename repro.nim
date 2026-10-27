@@ -2055,7 +2055,7 @@ package codeTracer:
     # the evidence was silenced. That distinction is the whole rule:
     # uncacheable is safe, falsely-cacheable is not.
     #
-    # ON ALL TEN, NOT ONLY THE FIVE THAT RUN PYTHON TODAY. The property
+    # ON EVERY GATE, NOT ONLY THE ONES THAT RUN PYTHON TODAY. The property
     # being asserted is about the family -- "no gate's verdict depends on
     # CPython's hash seed" -- not about today's call sites. A gate that
     # grows a `python3` line later would otherwise silently stop caching,
@@ -2198,6 +2198,66 @@ package codeTracer:
       extraEnvValue = GateEnv)
     target("gate-test-lane-coverage", gateTestLaneCoverage)
 
+    # THE TWO REAL-TREE SIBLING-PIN GUARDS. `gate-sibling-pins` above drives
+    # `scripts/sibling-pins.sh` over fixtures; these two read the COMMITTED
+    # workflows and locks and fail when a sibling pin spelled in a workflow
+    # disagrees with the revision `flake.lock` locks. `agents` has no CI, so
+    # before these edges the only place either ran was CI on `dev`, and a
+    # `flake.lock` move whose workflows did not follow landed on `agents`
+    # twice in two days (codetracer 40a5ea82b/f8b94ae92, then eba07b914/
+    # e2bc8336c) and was caught only at promotion.
+    #
+    # They compare declarations across the tree and exercise no behaviour, so
+    # they are `lint` by the criterion above. And UNLIKE the contract suites,
+    # the lock and workflow files ARE their inputs, so they are declared:
+    # editing `flake.lock` must re-run exactly these, which is the point.
+    #
+    # The workflow/action list is every file `sibling-provisioning-test.sh`
+    # globs (`.github/workflows/*.yml`, `.github/actions/*/action.yml`) as of
+    # writing. A file added later is still read and recorded by the monitor;
+    # the declaration only orders the edge before its first monitored run.
+    const SiblingProvisioningWorkflowInputs = [
+      ".github/workflows/beam-flow.yml",
+      ".github/workflows/cla.yml",
+      ".github/workflows/codetracer.yml",
+      ".github/workflows/cross-repo-tests.yml",
+      ".github/workflows/deploy-get.yml",
+      ".github/workflows/deploy-web-codetracer.yml",
+      ".github/workflows/dev-coverage-schedule.yml",
+      ".github/workflows/docs-preview-cleanup.yml",
+      ".github/workflows/elixir-flow-dap.yml",
+      ".github/workflows/launcher-recorder-e2e-desktop-edge.yml",
+      ".github/workflows/launcher-recorder-e2e.yml",
+      ".github/workflows/mcr-dap-flow.yml",
+      ".github/workflows/release.yml",
+      ".github/workflows/request-panel-sidecar-retirement.yml",
+      ".github/workflows/windows-msys2-provision-check.yml",
+      ".github/actions/dump-git-fetch-env/action.yml",
+      ".github/actions/provision-repro-lock-siblings/action.yml",
+      ".github/actions/refresh-github-token/action.yml",
+      ".github/actions/setup-db-backend-siblings/action.yml",
+      ".github/actions/setup-nix/action.yml"]
+    let gateSiblingProvisioning = ctShell(
+      actionIdValue = "codetracer.gate.sibling-provisioning",
+      commandValue = "bash ci/test/sibling-provisioning-test.sh",
+      extraInputsValue = @[
+        "ci/test/sibling-provisioning-test.sh",
+        "ci/repro-lock-build-input-siblings.sh",
+        "flake.lock", "repro.lock"] & @SiblingProvisioningWorkflowInputs,
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
+    target("gate-sibling-provisioning", gateSiblingProvisioning)
+
+    let gateSiblingInputBranch = ctShell(
+      actionIdValue = "codetracer.gate.sibling-input-branch",
+      commandValue = "bash ci/test/sibling-input-branch-test.sh",
+      extraInputsValue = @[
+        "ci/test/sibling-input-branch-test.sh",
+        "flake.nix", "flake.lock", ".github/workflows/codetracer.yml"],
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
+    target("gate-sibling-input-branch", gateSiblingInputBranch)
+
     let ctGateTestActions = @[
       gateFlakePinAlignment,
       gatePythonVersionAlignment,
@@ -2209,7 +2269,9 @@ package codeTracer:
     let ctGateLintActions = @[
       gateBuildAlignment,
       gateRustTestCrateCoverage,
-      gateTestLaneCoverage]
+      gateTestLaneCoverage,
+      gateSiblingProvisioning,
+      gateSiblingInputBranch]
 
     for gateAction in ctGateTestActions:
       auxiliaryActionIds.add(gateAction.id)

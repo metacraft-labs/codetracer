@@ -495,7 +495,7 @@ tables too, so they have no engine implementation at all:
 | command | send site |
 | --- | --- |
 | `ct/jump-location` | `viewmodels/errors_vm.nim:129`, `viewmodels/search_results_vm.nim:179` |
-| `ct/load-step-lines` | `viewmodels/step_list_vm.nim:170` |
+| ~~`ct/load-step-lines`~~ (engine arm landed 2026-10-26; see the dispositions below) | `viewmodels/step_list_vm.nim` |
 | `ct/line-step-jump` | `viewmodels/step_list_vm.nim:186` |
 | `ct/asm-instruction-jump` | `viewmodels/low_level_code_vm.nim:202` |
 | `ct/build-cancel` | `viewmodels/build_vm.nim:177` |
@@ -568,7 +568,7 @@ allow-lists were touched, and no command string was added anywhere.
 | `ct/new-record` | same — `CODETRACER::new-record` | **FIXED.** `onSubmitNewRecord`, carrying a `NewRecordRequest`. |
 | `ct/launch-config` | same family; the main process already answers `CODETRACER::launch-configs-loaded` (`index/traces.nim`), so the request half was the missing piece. | **FIXED.** `onLaunchConfig`, carrying a `LaunchConfigRequest`. The one real mismatch: the VM is keyed by `slug`, the IPC by `configIndex`, so the request carries the entry's position in the list the host installed. |
 | `ct/line-step-jump` | **genuinely dead, and NOT a rename of `ct/local-step-jump`.** That arm deserialises `LocalStepJump` (`task.rs:2578`), which needs `step_count`, `target_iteration`, `first_loop_line`, `active_iteration` and `reverse`. `StepListVM` sends `delta`/`path`/`line`/`rrTicks` and has none of the loop-iteration context. Redirecting it would fail `load_args` at runtime. | **Known failure.** The engine needs a command for this, or the VM needs the iteration model. This is exactly why the nearest-name substitution is the wrong instinct. |
-| `ct/load-step-lines` | **genuinely dead as a command** — absent from `VALID_DAP_COMMANDS`, no arm in either `dap_server.rs` dispatch table, no analogue to redirect to. But **the loader is not missing**: `step_lines_loader.rs` implements `load_lines` in full and `DapHandler` already constructs one (`dap_handler.rs:532`); `load_step_lines` (:5076) has no caller, its loader call and its `send_event` are commented out, and the commented call passes `&self.db` where the signature now takes `Arc<dyn TraceReader>`. A dispatch arm and an event, not new construction. | **Known failure**, and note *what* is registered: the two cases used to assert `{path, line, rrTicks, count}`, which **no declaration on either side of the wire contains** — both peers' `LoadStepLinesArg` is `{location, forwardCount, backwardCount}`. Corrected 2026-09-05 so the rows pin the declared shape; they stay red on the command name. **No spec requires this panel** — absent from `GUI-Overview.md`'s Core Panes, from `Layout-System.md`'s `PaneKind`, and from `CodeTracer-DAP-Extensions.md`. |
+| `ct/load-step-lines` | **was dead as a command, with the loader already written** — absent from `VALID_DAP_COMMANDS`, no arm in either `dap_server.rs` dispatch table, while `step_lines_loader.rs` implemented `load_lines` in full and `DapHandler` already constructed one; `load_step_lines` had no caller and its loader call was commented out. | **FIXED 2026-10-26.** `dap_server.rs` dispatches it to `DapHandler::load_step_lines`, which answers the window as a `LoadStepLinesUpdate` in the response body (materialized traces; any other kind is refused by name), pinned by `db-backend/tests/load_step_lines_test.rs`; `StepListVM.loadStepLinesFor` applies the answer. It is in `VALID_DAP_COMMANDS` and has its `CtLoadStepLines` kind, so §7 holds eight. The registered case (`loadStepLinesFor emits ct/load-step-lines with location + count`, already re-grounded on 2026-09-05 to the declared `{location, forwardCount, backwardCount}`) passes and its rows are gone from the ledger. The step list is a windowed pane in `Viewport-Driven-Loading.md` V1; it is still in no Core Panes inventory and unreachable on the desktop. |
 | `ct/asm-instruction-jump` | **genuinely dead.** No engine arm. `low_level_code_vm.nim`'s comment hopes it will "either jump to the corresponding source line or step to the matching asm offset" — two different commands, neither chosen. | **Known failure.** |
 
 > **The "four new seams" estimate in this table was wrong, and worth recording
@@ -589,11 +589,16 @@ allow-lists were touched, and no command string was added anywhere.
 > estimate says a seam must be built, look for the seam first.
 
 **Note the four are still absent from `VALID_DAP_COMMANDS`, deliberately.** The
-fix was to stop sending them, not to bless them; §7's nine are still nine and
-`test_mock_backend_validates_dap_commands.nim` still rejects all nine with its
-count asserted.
+fix was to stop sending them, not to bless them; §7's nine stayed nine until
+`ct/load-step-lines` gained its engine arm (2026-10-26), and
+`test_mock_backend_validates_dap_commands.nim` rejects the remaining eight with
+its count asserted.
 
-**Tests deliberately left red.** They are *not* weakened to green, because a
+**Tests deliberately left red — none left, 2026-10-26.** The last registered
+case (`loadStepLinesFor emits ct/load-step-lines with location + count`, one
+case × two lanes after 2026-10-19) passes now that the engine dispatches the
+command, and its rows are deleted. The history below is kept as written.
+They were *not* weakened to green, because a
 test that asserts wrong behaviour misleads the next reader more than a red one
 does. The executable list is `ci/lib/known-test-failures.tsv`; as of 2026-09-02
 it holds **4 rows — 2 cases × 2 lanes**, both in `views/isonim_views_test.nim`

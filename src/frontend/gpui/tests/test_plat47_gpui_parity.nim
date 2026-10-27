@@ -239,31 +239,32 @@ suite "PLAT-47: the GPUI window at desktop parity":
     ck ("border-color", chromeOf(crWindowBackground)) in
        paneOutlineStyle(false)
 
-  test "the WINDOW outlines its focused region, closed, in the desktop's colour":
+  test "the WINDOW's first screen outlines no region, as the desktop's":
     # Read off the window's own PIXELS (PLAT-39's reader, via PLAT-45's
     # committed record `src/tests/visual/plat45-gpui-arrangement.json`, which
     # `just plat45-arrangement-window && just plat45-window-record`
-    # regenerates): the focused region — the editor, where the window's keys
-    # go — carries the desktop's outline gray on all four edges, and no other
-    # region carries it on any edge.
+    # regenerates). Since 2026-10-17 (`849d152bba`, the desktop's chrome) the
+    # window draws the focus outline only once a pane has been pressed
+    # (`gFocusShown`), as the desktop outlines its selected panel only once
+    # one has been clicked: the editor holds the keys before that, unmarked.
+    # So on the first screen NO region carries the outline gray on any edge.
+    # The outline a press draws, and where it sits, is
+    # `test_plat48_gpui_plan`'s (`data-ct-focus-outline`). (Until the record
+    # was re-made on 2026-10-26 it was a frame from before that change, and
+    # this test asserted the editor's outline off it.)
     let record = parseJson(readFile(repo / WindowRecord))
     let regions = record["frames"]["shared"]["regions"]
-    var outlined = 0
     for r in regions:
       let o = r{"outline"}
       ck not o.isNil
       if o.isNil: continue
-      let all4 = o["top"].getBool and o["bottom"].getBool and
-                 o["left"].getBool and o["right"].getBool
       let any = o["top"].getBool or o["bottom"].getBool or
                 o["left"].getBool or o["right"].getBool
       checkpoint(r["active"].getStr & ": " & $o)
-      if r["active"].getStr == "Editor":
-        ck all4
-        inc outlined
-      else:
-        ck not any
-    ck outlined == 1
+      ck not any
+    # Every region of the shared default was read (so "no outline" is a
+    # reading of five panes, not of none).
+    ck regions.len == 5
     # The record's outline gray is the focus colour the recorder searches
     # for (`plat45_window_record.FocusOutlineHex`, PLAT-51's subtler token).
     ck chromeOf(crFocusOutline) == DesignTokenHex[dtColorsUiBorderSecondary][dmDark]

@@ -4549,13 +4549,12 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   four are tests that a deliberate product change left behind, none of which
   touched this file in the same commit:
     * `loadStepLinesFor emits ct/load-step-lines with location + count` and
-      `… falls back to default panel height when unset` —
-      `InvalidDapCommandDefect`. `ct/load-step-lines` is genuinely dead as a
-      command: absent from `VALID_DAP_COMMANDS_SEQ`, no arm in `dap_server.rs`.
-      `backend/dap_dialect.md` §7 records the disposition and says no spec
-      requires the panel. REGISTERED KNOWN FAILURES — do not allow-list the
-      string to go green; `test_mock_backend_validates_dap_commands.nim` pins
-      the §7 set on purpose.
+      `… falls back to default panel height when unset` — RESOLVED. The second
+      was retired on 2026-10-19 (an unmeasured list asks for nothing); the
+      first passes since 2026-10-26, when the engine gained its
+      `ct/load-step-lines` arm (`db-backend/tests/load_step_lines_test.rs`)
+      and the command entered `VALID_DAP_COMMANDS_SEQ`. The known-failure
+      ledger has no rows left.
     * `diff previews and terminals preserve legacy ids` —
       `MockNodeNotFoundError` for class `agent-editor`. `ecd864ed` ("feat: Diff
       view redesign for agent activity") deleted the Monaco diff host AND the
@@ -7454,7 +7453,7 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   its VCS and Agent Activity panes). A launch with no replay engine passes
   `withDebugger = false`, which skips the DAP `initialize` (it would time out
   into a status-bar error) and the stepping toolbar.
-- Desktop window tabs each own their ViewModels: `ReplaySession.viewModels` (`ui/session_viewmodels.nim`) holds the tab's `SessionViewModel`, its `DebuggerSession` (or the `ct host` mirror, first tab only), and its Test Results / Constraints VMs. `ui_js.configureSessionMiddleware` builds them once per tab; `bindWindowToSession` (called by `session_switch.switchSession`) points the window-level pane bridges (toolbar, footer panes, module-level `init*VMFromSession` slots) at the shown tab. The panel host renders each mount over the session of the tab whose `#session-container-<n>` holds it. Legacy component handlers that write a VM should resolve their own tab's (`sessionVMOfComponent`), not the module slot, or a hidden tab's answer lands in the shown tab.
+- Desktop window tabs each own their ViewModels: `ReplaySession.viewModels` (`ui/session_viewmodels.nim`) holds the tab's `SessionViewModel`, its `DebuggerSession` (or the `ct host` mirror, first tab only), and its Test Results / Constraints VMs. `ui_js.configureSessionMiddleware` builds them once per tab; `bindWindowToSession` (called by `session_switch.switchSession`) points the window-level pane bridges (toolbar, footer panes, module-level `init*VMFromSession` slots) at the shown tab. The panel host renders each mount over the session of the tab whose `#session-container-<n>` holds it. Legacy component handlers that write a VM should resolve their own tab's (`sessionVMOf(data.sessionOfComponent(c))`), not the module slot, or a hidden tab's answer lands in the shown tab.
 - The Playwright fixtures and the `ct host` suites make their scratch `CODETRACER_HOME` under `/tmp` and refuse one too deep for the session manager's sockets (`src/tests/gui/lib/socket-path-bound.ts`, `src/tests/ct_host/ct_host_scratch.nim`); a home under macOS's `/var/folders/.../T/` does not fit the 104-byte `sun_path`. Node does not refuse a too-long Unix socket path: `net.createConnection`/`listen` truncate it silently (a connect then fails with ENOTSOCK/ENOENT on the truncated name), so it is no probe of the bound.
 - `#stable-status` no longer exists in the status bar; wait for a step through `data.sessions[i].status.stableBusy` instead (`multi-replay/second_tab_panes_render.spec.ts`).
 
@@ -7873,3 +7872,38 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   checkout (src/db-backend + src/libs + libs file bytes); a binary built from
   an older tree is refused by the GPUI suites even when db-backend is
   unchanged (libs/jsbound moves often).
+
+## Grapheme continuation, width fences, cut kinds, stops (PLAT-70 I / PLAT-71 residuals)
+
+- A zero-width rune (combining mark, ZWJ, VS16) is carried WITH the cell before
+  it twice: `styled_row.paint` appends it to the previous StyledCell's rune
+  string, and isonim-tui's `rawCellsForEntry` puts it in `Cell.extra`. Every
+  emitter must write `cellText(cell)`, not `cell.rune` — `ssh_tuning.emitRuns`,
+  `terminal_driver`'s plain frame, `hyperlinks.frameBytesWithHyperlinks` and
+  isonim-tui's drivers/snapshots all do. Controls (TAB) are never attached.
+- Width fences (`CSI <col> G` after a cell) are decided by
+  `ssh_tuning.widthFencesOf(caps)` from the width probe's UNKNOWNS; a terminal
+  that answered nothing (the silent persona, most unit tests' caps) fences
+  every EAW-A / Unicode-13 / text-pictograph content cell. Box drawing and
+  block elements (U+2500–U+259F) never fence, so borders cost no bytes.
+- §9.2's cut position is `table_overflow.fitCellAs(full, cells, kind)` with
+  `cutKindOf(pane, column)`; a middle cut records `FittedCell.midMarker` so
+  `markCut` puts the ASCII tier's `~` where the `…` is. The desktop draws the
+  middle cut by rewriting the cell's TEXT NODE (`table_overflow_dom.
+  middleCutPass`, `data-ct-mid-text` / `data-ct-mid-of`), because CSS
+  `text-overflow` cuts only the end.
+- SIGTSTP: `nim-termctl.onSuspend` restores, raises the stop with SIGTSTP
+  unblocked inside the handler, and on SIGCONT re-takes raw mode / alt screen /
+  modes, writes `setExtraResume` bytes and pokes the SIGWINCH pipe;
+  `terminal_driver.nextEvent` sees `takeResumed()` and returns a resize event
+  after resetting the emitter (a whole frame). Under TermAssert the child is a
+  session leader in an ORPHANED process group, so the kernel discards the stop
+  and the continue happens at once — the pty test sees restore then resume;
+  nim-termctl's own suite uses `setpgid(0,0)` to get a real stop.
+- The desktop command palette's search splits on spaces (the first token is a
+  command name, the rest its argument), so a spec searches `:ScrollRight`, not
+  `:View: Scroll Right`. GPUI's palette commands are reached with Ctrl+P then
+  `:` (`type::view: scroll right`), not Ctrl+Shift+P.
+- docs/book-isonim tests need a hand-written `nim.cfg` (paths to isonim-docs,
+  codetracer-design-system/nim, isonim, vendor chronicles …; see its README);
+  its nav test counts every content page (`entries.len`), so a new page bumps it.

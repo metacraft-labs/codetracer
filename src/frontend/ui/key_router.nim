@@ -420,11 +420,31 @@ proc focusedOutputScroller(): JsObject {.importjs: """
       el = pane.querySelector('.isonim-terminal-output > pre');
     else if (id === 'buildOutput')
       el = pane.querySelector('.build-output-container');
+    else if (id === 'eventLog' || id === 'calltrace' || id === 'state') {
+      const fit = pane.querySelector('[data-ct-fit="scroll"]');
+      if (fit)
+        el = fit.querySelector(':scope > .eventLog-scroll-body') || fit;
+    }
     return el && el.clientHeight > 1 ? el : null;
   })()""".}
   ## PLAT-70: the scroll container of the focused output pane — the
   ## Terminal Output's LINE view (its screen view has no bar and keeps its
-  ## step-by-write arrows) or Build Output's lines — or nil.
+  ## step-by-write arrows) or Build Output's lines — or, PLAT-70 Part I, a
+  ## focused table pane's while its columns SCROLL (the Event Log's body,
+  ## the Call Trace's and the State pane's scroll boxes) — or nil.
+
+proc tableScrollerOf(paneKind: cstring): JsObject {.importjs: """
+  (function(id){
+    const pane = document.querySelector(
+      '[data-scope-kind="pane"][data-scope-id="' + id + '"]');
+    if (!pane) return null;
+    const fit = pane.querySelector('[data-ct-fit="scroll"]');
+    if (!fit) return null;
+    const el = fit.querySelector(':scope > .eventLog-scroll-body') || fit;
+    return el && el.clientHeight > 1 ? el : null;
+  })(#)""".}
+  ## PLAT-70 Part I: a table pane's sideways scroll container while its
+  ## columns SCROLL (`data-ct-fit="scroll"`), or nil.
 
 proc showInertNote(note: string) =
   ## The inert key's reason on the status bar, and on `window.__ctInertNotes`
@@ -484,6 +504,23 @@ proc runTableOperation(res: EditingResolution): bool =
   of "table.resize-column":
     if not resizeEventLogColumnHook.isNil:
       resizeEventLogColumnHook(res.argument)
+    true
+  of "view.scroll-left", "view.scroll-right":
+    # PLAT-70 Part I (Horizontal-Overflow.md §5.5): from the palette — which
+    # holds the focus while its entry runs — the table pane last focused or
+    # pressed, while its columns scroll; else the focused output pane.
+    let id = if pane == EventLogDetailPane: "eventLog"
+             elif pane == CallTraceTablePane: "calltrace"
+             elif pane == StateDetailPane: "state"
+             else: ""
+    var scroller = if id.len > 0: tableScrollerOf(cstring(id)) else: nil
+    if scroller.isNil:
+      scroller = focusedOutputScroller()
+    if scroller.isNil:
+      cwarn "keys: `" & res.operation & "` scrolls an output pane, or a " &
+            "table pane whose columns do not fit"
+    else:
+      discard viewOperation(scroller, res.operation)
     true
   else: false
 

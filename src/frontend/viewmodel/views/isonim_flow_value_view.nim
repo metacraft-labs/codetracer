@@ -24,8 +24,7 @@
 ##
 ## The procs build one element each; a host composes them (the band's columns
 ## and chips are appended by whoever knows which passes and values exist), as
-## the hand-built versions were composed. `renderFlowValueChip` is the whole
-## chip in one call.
+## the hand-built versions were composed.
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
@@ -144,12 +143,3 @@ proc renderFlowValueBand*[R, N](r: R; leftPx: float; isLoop: bool;
     r.setStyle(result, "position", "relative")
   if maxWidthPx > 0.0:
     r.setStyle(result, "maxWidth", $int(maxWidthPx) & "px")
-
-proc renderFlowValueChip*[R, N](r: R; name, boxId, boxClass, valueText: string;
-                               iteration: int; style: FlowStyle = @[];
-                               boxStyle: FlowStyle = @[]; maxWidth = ""): N =
-  ## A whole chip: the container with its name and its value box.
-  result = renderFlowValueContainer[R, N](r, style)
-  r.appendChild(result, renderFlowValueName[R, N](r, name))
-  r.appendChild(result, renderFlowValueBox[R, N](r, boxId, boxClass, valueText,
-                                                 iteration, boxStyle, maxWidth))

@@ -123,7 +123,7 @@ BUILD_SIBLINGS="${SUITE_ROOT}/scripts/build-siblings.sh"
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=117
+EXPECTED_ASSERTIONS=122
 
 ASSERTIONS=0
 FAILURES=0
@@ -1196,6 +1196,69 @@ assert_contains "$(run_cross_locked)" \
 assert_contains "$(run_cross_unpinned)" \
 	"cannot check whether '${NB}' is at the workspace-locked revision" \
 	"an unresolvable pin is spoken out loud rather than passed over"
+
+# THE RUN REMOVES THE SCRATCH HOME IT MADE, and only that. The runner exports a
+# scratch `CODETRACER_HOME` (`ci/lib/codetracer-home.sh`) and never removed it:
+# 42 `ct-home-cross-repo.*` directories had piled up in /tmp on one
+# workstation (codetracer-pm issue
+# `2026-10-26-run-cross-repo-tests-never-removes-the-scratch-codetracer-home-it-creates.md`).
+# Each run here gets its own TMPDIR and no inherited home, so the home it makes
+# is the only `ct-home-cross-repo.*` there. A `cargo` stub records the home the
+# run's tests were given, which proves a home was made and used (without it,
+# "none is left" would hold for a run that never made one).
+XTMP="${TEST_ROOT}/xtmp"
+HOME_BIN="${TEST_ROOT}/home-bin"
+HOMES_SEEN="${TEST_ROOT}/homes-seen.txt"
+mkdir -p "${XTMP}" "${HOME_BIN}"
+# shellcheck disable=SC2016 # expanded by the stub, not here
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "${CODETRACER_HOME:-}" >>"%s"\nexit 0\n' \
+	"${HOMES_SEEN}" >"${HOME_BIN}/cargo"
+chmod +x "${HOME_BIN}/cargo"
+# run_cross_in_xtmp <ref> [VAR=value...] — the runner with TMPDIR=${XTMP}.
+run_cross_in_xtmp() {
+	local ref="$1"
+	shift
+	: >"${HOMES_SEEN}"
+	env -u CODETRACER_HOME "$@" \
+		PATH="${HOME_BIN}:${BIN}:${PATH}" \
+		TMPDIR="${XTMP}" \
+		METACRAFT_WORKSPACE_ROOT="${XWS}" \
+		RR_BACKEND_REF="${ref}" \
+		CT_NATIVE_REPLAY_LD_LIBRARY_PATH="${TEST_ROOT}/nolibs" \
+		bash "${XREPO}/scripts/run-cross-repo-tests.sh" nim-flow >/dev/null 2>&1
+}
+scratch_homes_left() {
+	find "${XTMP}" -maxdepth 1 -name 'ct-home-cross-repo.*' -print 2>/dev/null
+}
+
+run_cross_in_xtmp "${REV_NB_OLD}"
+assert_contains "$(head -n 1 "${HOMES_SEEN}")" "${XTMP}/ct-home-cross-repo." \
+	"a run with no inherited home makes a scratch one and runs its tests under it"
+LEFT="$(scratch_homes_left)"
+if [[ -z ${LEFT} ]]; then
+	ok "...and removes it when it ends"
+else
+	bad "...and removes it when it ends" "left behind: ${LEFT}"
+fi
+
+run_cross_in_xtmp "${REV_NB_NEW}"
+LEFT="$(scratch_homes_left)"
+if [[ -z ${LEFT} ]]; then
+	ok "a run that is refused removes the scratch home it made too"
+else
+	bad "a run that is refused removes the scratch home it made too" "left behind: ${LEFT}"
+fi
+
+INHERITED="${XTMP}/inherited-home"
+mkdir -p "${INHERITED}"
+run_cross_in_xtmp "${REV_NB_OLD}" CODETRACER_HOME="${INHERITED}"
+assert_contains "$(head -n 1 "${HOMES_SEEN}")" "${INHERITED}" \
+	"an inherited scratch home is the one the run uses"
+if [[ -d ${INHERITED} ]]; then
+	ok "...and it is kept: a run removes only the home it made"
+else
+	bad "...and it is kept: a run removes only the home it made" "removed: ${INHERITED}"
+fi
 
 # ---------------------------------------------------------------------------
 section "the nimcache root names the checkout, not just the consumer"

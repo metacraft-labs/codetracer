@@ -93,6 +93,7 @@ import ./app/theme/colour_math
 import ./host/tui_session
 import ./host/vcs_source
 import ./host/test_results_source   # PLAT-53
+import ./host/problems_source       # PLAT-55
 # PLAT-49 part B: the session strip's sessions — opened, adopted, closed here.
 import headless_app/headless_app
 import headless_app/session_tabs
@@ -1146,6 +1147,16 @@ proc interactive(command: TuiCommand): int =
   if command.reviewSession.len > 0:
     discard session.agent.loadReviewSession(command.reviewSession)
   session.refreshAgent(rt)
+  # PLAT-55: the Problems pane — the window's builds (`:build`), read by the
+  # shared rule into the window's `ErrorsVM`. A row opens in Edit mode's
+  # editor, or, in Debug mode, from the recording.
+  let problems = newProblemsSource(rt,
+    proc(path: string; line, col: int): string =
+      if rt.app.modes.product == pmEdit:
+        rt.openWorkingFileAt(path, line, col)
+      else:
+        session.showFileAt(rt, path, line, col))
+  defer: problems.close()
   app.notification = describe(session)
 
   # PLAT-51 deliverable 8: A NEW TAB'S WELCOME SCREEN, performed. The "+"
@@ -1345,6 +1356,8 @@ proc interactive(command: TuiCommand): int =
       let vcsChanged = vcs.tick(rt)
       # PLAT-53: a test run that ended, and a re-rooted project.
       let testsChanged = tests.tick(rt)
+      # PLAT-55: the build's diagnostics, as they arrive.
+      let problemsChanged = problems.tick(rt)
       # PLAT-57: the search in flight, a bounded step per tick.
       let searched = session.pumpFindInFiles(rt)
       # PLAT-54: what a live agent sent since the last tick.
@@ -1365,7 +1378,7 @@ proc interactive(command: TuiCommand): int =
       let keysChanged = rt.pollKeybindings(keybindings)
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
          hoverChanged or frameOwed or recorded or keysChanged or searched or
-         barsChanged or testsChanged or agentChanged:
+         barsChanged or testsChanged or agentChanged or problemsChanged:
         paint(driver, rt)
         frameOwed = false
     of dekResize:
@@ -1694,6 +1707,12 @@ proc editInteractive(command: TuiCommand): int =
       NoSessionTabsText & folder)
   defer: tests.close()
   tests.refresh(rt)
+  # PLAT-55: the Problems pane over this window's builds; a row opens in the
+  # editor.
+  let problems = newProblemsSource(rt,
+    proc(path: string; line, col: int): string =
+      rt.openWorkingFileAt(path, line, col))
+  defer: problems.close()
 
   paint(driver, rt)
 
@@ -1714,13 +1733,15 @@ proc editInteractive(command: TuiCommand): int =
       let built = advanceBuild(rt, edit, report = true)
       let vcsChanged = vcs.tick(rt)
       let testsChanged = tests.tick(rt)
+      let problemsChanged = problems.tick(rt)
       let hoverChanged = rt.tickAutoHide(nowMs()) or
                          rt.tickCellHover(nowMs()) or
                          rt.tickPendingPrefix(nowMs())
       let barsChanged = rt.tickScrollbars(nowMs()).repaint
       let keysChanged = rt.pollKeybindings(keybindings)
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
-         hoverChanged or keysChanged or barsChanged or testsChanged:
+         hoverChanged or keysChanged or barsChanged or testsChanged or
+         problemsChanged:
         paint(driver, rt)
     of dekResize:
       size = ev.size

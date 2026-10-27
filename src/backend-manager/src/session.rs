@@ -215,6 +215,13 @@ pub struct SessionManager {
     /// When a session's idle timer fires, its key is sent through this
     /// channel so the daemon loop can call `stop_replay` and clean up.
     ttl_expiry_tx: mpsc::UnboundedSender<SessionKey>,
+
+    /// When the last session was removed, while none has been added since:
+    /// how long the daemon has had no trace loaded, after it had one. `None`
+    /// before the first session and while any is loaded. Set on every way a
+    /// session ends (TTL expiry, `ct/close-trace`, `ct/stop-replay`, a
+    /// crashed backend), all of which remove it here.
+    emptied_at: Option<std::time::Instant>,
 }
 
 impl std::fmt::Debug for SessionManager {
@@ -255,6 +262,7 @@ impl SessionManager {
             default_ttl,
             max_sessions,
             ttl_expiry_tx: tx,
+            emptied_at: None,
         };
         (mgr, rx)
     }
@@ -262,6 +270,12 @@ impl SessionManager {
     /// Returns the number of currently active sessions.
     pub fn session_count(&self) -> usize {
         self.sessions.len()
+    }
+
+    /// Since when no session has been loaded, after at least one was: see
+    /// the `emptied_at` field.
+    pub fn emptied_at(&self) -> Option<std::time::Instant> {
+        self.emptied_at
     }
 
     /// Returns the default TTL duration for new sessions.
@@ -308,6 +322,7 @@ impl SessionManager {
         };
 
         self.sessions.insert(path, session);
+        self.emptied_at = None;
         Ok(())
     }
 
@@ -346,6 +361,7 @@ impl SessionManager {
         };
 
         self.sessions.insert(path, session);
+        self.emptied_at = None;
         Ok(())
     }
 
@@ -359,6 +375,9 @@ impl SessionManager {
         if let Some(session) = self.sessions.remove(path) {
             if let Some(handle) = session.ttl_handle {
                 handle.abort();
+            }
+            if self.sessions.is_empty() {
+                self.emptied_at = Some(std::time::Instant::now());
             }
             Some(session.backend_id)
         } else {
@@ -598,6 +617,33 @@ mod tests {
         assert_eq!(args["hostSourceReads"], json!(false));
         HostSourceReads::Allowed.mark_request(&mut args);
         assert_eq!(args["hostSourceReads"], json!(true));
+    }
+
+    #[test]
+    fn emptied_at_marks_when_the_last_loaded_session_went_away() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let (mut mgr, _rx) = make_session_manager(300, 4);
+            assert_eq!(mgr.emptied_at(), None, "nothing was ever loaded");
+
+            mgr.add_session(key("/a"), 0).unwrap();
+            mgr.add_session(key("/b"), 1).unwrap();
+            assert_eq!(mgr.emptied_at(), None, "sessions are loaded");
+            mgr.remove_session(&key("/a"));
+            assert_eq!(mgr.emptied_at(), None, "one session is still loaded");
+
+            let before = std::time::Instant::now();
+            mgr.remove_session(&key("/b"));
+            let emptied = mgr.emptied_at().expect("the last session went away");
+            assert!(emptied >= before, "it records when the last one went away");
+
+            // Removing what is not there changes nothing.
+            mgr.remove_session(&key("/b"));
+            assert_eq!(mgr.emptied_at(), Some(emptied));
+
+            mgr.add_session(key("/c"), 2).unwrap();
+            assert_eq!(mgr.emptied_at(), None, "a session is loaded again");
+        });
     }
 
     #[test]

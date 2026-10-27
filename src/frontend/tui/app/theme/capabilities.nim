@@ -346,6 +346,11 @@ type
     clipboardReadFrom*: CapabilitySource
 
 const
+  ClipboardInAppOnly* = "in-app only"
+    ## The clipboard axis when no OSC 52 writer was found (§8).
+  InAppOnlyCopyNote* = "inside CodeTracer only — your terminal does not " &
+                       "accept OSC 52 (see :terminal-info)"
+    ## What a copy says then (§8), after "copied <what>".
   TrueColorPrograms* = ["iTerm.app", "WezTerm", "ghostty", "Hyper"]
     ## `$TERM_PROGRAM` values whose terminals emit 24-bit colour whatever
     ## `TERM` claims. Apple_Terminal is deliberately absent: it is a
@@ -1165,7 +1170,7 @@ proc resolveCapabilities*(env: TerminalEnv; flags: CapabilityFlags;
   let graphemeSet = graphemeKnown and probe.grapheme2027 == 2
 
   # The clipboard (§8): no query exists.
-  var (clipboard, clipboardFrom) = ("in-app only", csDefault)
+  var (clipboard, clipboardFrom) = (ClipboardInAppOnly, csDefault)
   if env.tmux.len > 0 and probe.tmuxSetClipboard in ["on", "external"]:
     (clipboard, clipboardFrom) = ("osc52 via tmux", csProbe)
   elif env.tmux.len == 0 and identity.name in Osc52Writers:

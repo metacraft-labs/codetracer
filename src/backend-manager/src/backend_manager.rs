@@ -511,8 +511,9 @@ impl BackendManager {
     /// - Broadcast DAP events to *all* connected clients.
     /// - Track per-trace sessions with TTL timers; expired sessions are
     ///   automatically stopped.
-    /// - Auto-shutdown when the last session expires (if any sessions were
-    ///   ever loaded).
+    /// - Auto-shutdown when no session has been loaded for the TTL, after
+    ///   one was (the last session expired, or it was closed, stopped or
+    ///   crashed and no other was opened since).
     /// - Shut down cleanly when `ct/daemon-shutdown` is received or a signal
     ///   is caught (see `shutdown_rx`).
     ///
@@ -673,6 +674,9 @@ impl BackendManager {
         let mgr_crash = mgr.clone();
         tokio::spawn(Self::crash_detection_loop(mgr_crash));
 
+        // --- Idle shutdown: no trace loaded for the TTL, after one was. ---
+        tokio::spawn(Self::idle_shutdown_loop(mgr.clone()));
+
         Ok((mgr, shutdown_rx))
     }
 
@@ -830,6 +834,9 @@ impl BackendManager {
         // --- Crash detection loop ---
         let mgr_crash = mgr.clone();
         tokio::spawn(Self::crash_detection_loop(mgr_crash));
+
+        // --- Idle shutdown: no trace loaded for the TTL, after one was. ---
+        tokio::spawn(Self::idle_shutdown_loop(mgr.clone()));
 
         Ok((mgr, shutdown_rx))
     }
@@ -1945,6 +1952,45 @@ impl BackendManager {
                         let _ = tx.send(());
                     }
                 }
+            }
+        }
+    }
+
+    /// Background loop that shuts the daemon down once it has had no trace
+    /// loaded for its TTL, after it had one.
+    ///
+    /// codetracer-pm `spec/Planned-Features/CodeTracer-MCP-Server.md`, "Daemon
+    /// Lifecycle": the daemon "auto-starts on first CLI/MCP use and
+    /// self-terminates on idle". [`Self::ttl_expiry_loop`] covers the trace
+    /// whose own TTL ran out. A trace that ends any other way (its client
+    /// closes it, `ct/close-trace`, as `trace query` does when its script is
+    /// done; `ct/stop-replay`; a crashed backend) used to leave the daemon with
+    /// nothing loaded and nothing to end it, so a daemon `trace query` had
+    /// auto-started ran until it was killed. The TTL counts from the moment
+    /// the last trace went away ([`SessionManager::emptied_at`]); opening a
+    /// trace in the meantime starts the count again. A daemon that never had
+    /// a trace is left running, as before.
+    async fn idle_shutdown_loop(mgr: Arc<Mutex<Self>>) {
+        // Fine enough against a TTL of seconds (tests) or minutes (default).
+        let interval = Duration::from_secs(1);
+        loop {
+            sleep(interval).await;
+            let mut locked = mgr.lock().await;
+            let Some(ds) = locked.daemon_state.as_mut() else {
+                continue;
+            };
+            let ttl = ds.session_manager.default_ttl();
+            let idle_for_the_ttl = ds.session_manager.session_count() == 0
+                && ds
+                    .session_manager
+                    .emptied_at()
+                    .is_some_and(|emptied| emptied.elapsed() >= ttl);
+            if idle_for_the_ttl {
+                info!("No trace has been loaded for {ttl:?} — initiating auto-shutdown");
+                if let Some(tx) = ds.shutdown_tx.take() {
+                    let _ = tx.send(());
+                }
+                return;
             }
         }
     }

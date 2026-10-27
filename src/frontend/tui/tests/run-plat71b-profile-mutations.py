@@ -41,6 +41,7 @@ P_PROFILE = "*::the profile per persona, every axis with its source"
 P_WIDE = "*::TA-5, TA-8: a terminal measured ambiguous-WIDE gets the safe glyphs"
 P_RESTORE = "*::TA-3, TA-10: an interactive session, its screen and its restore"
 P_TYPED = "*::TA-4 and the F3 rule: typed-ahead keys survive, a late CSI 1;5R is a key"
+P_SIGNALS = "*::TA-10: SIGHUP and a crash reset every mode; a stop resets them, then takes the terminal again"
 
 # (id, [(subject, find, replace), ...], [(suite, filter), ...], what it breaks)
 ARMS = [
@@ -100,6 +101,15 @@ ARMS = [
               "  if false:")],
      [(PROFILE, OQT8)],
      "OQ-T8: a C locale on a terminal that decodes UTF-8 stays ASCII"),
+    # ---- TA-10 on a stop (SIGTSTP, then SIGCONT) -------------------------------
+    ("B15", [(DRIVER, "  discard setExtraResume(d.resumeUnion())",
+              "  discard d")],
+     [(PTY, P_SIGNALS)],
+     "TA-10: after a stop the driver's own modes (2027, 1003) are not taken again"),
+    ("B16", [(DRIVER, "    if takeResumed():",
+              "    if false:")],
+     [(PTY, P_SIGNALS)],
+     "TA-10: after a stop no whole frame is painted (the screen the user returns to is stale)"),
 ]
 
 

@@ -64,6 +64,33 @@ use crate::types::*;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
+/// The event db-backend sends when a `launch` it has already acknowledged
+/// cannot succeed. Its body is `{ "message": <why> }`.
+///
+/// Mirrors `LAUNCH_FAILED_EVENT` in `src/db-backend/src/dap_server.rs`, which
+/// documents the contract: the event exists so that a client waiting for the
+/// handshake's `stopped` can stop waiting when the launch has failed. This
+/// crate cannot import that constant (db-backend depends on this crate, not
+/// the other way round), so the name is spelled here once and
+/// `tests/wait_for_stopped_launch_failed_test.rs` pins the behaviour.
+///
+/// `ct/notification` of kind `Error` is deliberately NOT treated as terminal:
+/// db-backend also emits one for a trace that opened fine whose first step
+/// carries a recorded error event.
+pub const LAUNCH_FAILED_EVENT: &str = "ct/launch-failed";
+
+/// The human-readable reason carried by a [`LAUNCH_FAILED_EVENT`] body.
+///
+/// Falls back to the raw body, so an engine that changes the body's shape
+/// still gets its words into the test failure instead of losing them.
+fn launch_failed_reason(body: &Value) -> String {
+    match body.get("message").and_then(Value::as_str) {
+        Some(message) => message.to_string(),
+        None if body.is_null() => "(the event carried no body)".to_string(),
+        None => format!("(no `message` string in the event body) {body}"),
+    }
+}
+
 fn validate_set_breakpoints_body(body: &Value, expected_count: usize) -> Result<(), BoxError> {
     let breakpoints = body
         .get("breakpoints")
@@ -325,6 +352,11 @@ impl DapStdioClient {
     }
 
     /// Wait for a `stopped` event (emitted after configurationDone + runToEntry).
+    ///
+    /// Returns an error at once, carrying the engine's reason, when the
+    /// engine sends [`LAUNCH_FAILED_EVENT`]: no `stopped` can follow it, so
+    /// waiting out `timeout` would only replace the reason with a timeout.
+    /// The timeout path remains for an engine that really goes quiet.
     pub fn wait_for_stopped(&mut self, timeout: Duration) -> Result<(), BoxError> {
         let start = std::time::Instant::now();
         let deadline = start + timeout;
@@ -363,6 +395,29 @@ impl DapStdioClient {
                 Ok(Ok(DapMessage::Event(e))) => {
                     if e.event == "stopped" {
                         return Ok(());
+                    }
+                    if e.event == LAUNCH_FAILED_EVENT {
+                        let stderr = self.recent_stderr(20);
+                        let mut msg = format!(
+                            "Launch failed: db-backend sent '{}' after {:.1}s while waiting for 'stopped': {}",
+                            LAUNCH_FAILED_EVENT,
+                            start.elapsed().as_secs_f64(),
+                            launch_failed_reason(&e.body)
+                        );
+                        if !received_events.is_empty() {
+                            msg.push_str(&format!(
+                                "\n  Events received before it: {:?}",
+                                received_events
+                            ));
+                        }
+                        if !stderr.is_empty() {
+                            msg.push_str(&format!(
+                                "\n  db-backend stderr (last {} lines):\n    {}",
+                                stderr.len(),
+                                stderr.join("\n    ")
+                            ));
+                        }
+                        return Err(msg.into());
                     }
                     eprintln!(
                         "[wait_for_stopped] received event '{}' at {:.1}s",
@@ -777,7 +832,18 @@ impl Drop for DapStdioClient {
 mod tests {
     use serde_json::json;
 
-    use super::validate_set_breakpoints_body;
+    use super::{launch_failed_reason, validate_set_breakpoints_body};
+
+    #[test]
+    fn launch_failed_reason_reads_the_message_and_keeps_an_unexpected_body() {
+        assert_eq!(launch_failed_reason(&json!({ "message": "why" })), "why");
+        let odd = launch_failed_reason(&json!({ "reason": "why" }));
+        assert!(
+            odd.contains("\"reason\":\"why\""),
+            "body was dropped: {odd}"
+        );
+        assert!(launch_failed_reason(&serde_json::Value::Null).contains("no body"));
+    }
 
     #[test]
     fn validates_verified_set_breakpoints_response() {

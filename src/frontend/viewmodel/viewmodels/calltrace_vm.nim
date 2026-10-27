@@ -42,7 +42,8 @@ import isonim/viewmodel
 
 import ../backend/backend_service
 import ../collab/[runtime_role, session_core, types]
-import ../store/[replay_data_store, request_tracker, types]
+import ../store/[replay_data_store, request_tracker, types, row_address]
+export row_address
 from ../store/stop_timeline import stopIdentityOf
 import ../viewport
 export viewport
@@ -921,6 +922,20 @@ proc callRows*(vm: CalltraceVM): seq[CallRow] =
               args[line.callKey]
             else: @[]
     result.add callRowOf(line, a, selected)
+
+proc rowAddress*(vm: CalltraceVM; row: int): RowAddress =
+  ## The logical address of the call-trace row at position `row` of the
+  ## section the store holds (the row the view draws in that slot): which call
+  ## of the recording it is, in the recording's coordinates, with no URL
+  ## (Shared-DOM-Front-Ends D10, `store/row_address`). A host with a URL
+  ## scheme builds the row's link from it. `rakNone` past the held rows.
+  ##
+  ## By position and not by `CallLine.index`, because the position is what
+  ## identifies a drawn row; `callPath` is counted over the held rows up to it.
+  let held = vm.store.calltrace.lines.val
+  if row < 0 or row >= held.len:
+    return RowAddress()
+  frameAddress(held[row], callPathsOf(held.toOpenArray(0, row))[row])
 
 # ---------------------------------------------------------------------------
 # Factory

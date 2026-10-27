@@ -13,7 +13,14 @@
 ##     chrome is ASCII; under the ambiguous-wide rule no cell is an East Asian
 ##     Width `A` glyph (TA-8, on a painted screen rather than on the table);
 ##     on `basic` no glyph outside the WGL4 drawing set; with `modern-unicode`
-##     resolved on, a thin scrollbar is drawn with `🮇`.
+##     resolved on, a thin scrollbar is drawn with `🮇`;
+##   * §9.2 — the Event Log's location column loses its MIDDLE and keeps the
+##     file name, its `…` recorded where it is drawn, and drawn as the
+##     table's marker on the ASCII tier; a number value is never cut
+##     silently;
+##   * §8 — a copy on a terminal the profile found no OSC 52 writer for says
+##     the text stayed inside CodeTracer and where to look; on one that takes
+##     OSC 52 it says only what was copied.
 ##
 ## No mocks. The recording is real (`fixture_provider`), the runtime is the
 ## shipped one, and the screens are its own `shellScreenOf`.
@@ -34,13 +41,16 @@ import ../app/views/scrollbar_styles
 import ../app/views/source_pane
 import ../app/views/styled_row
 import ../app/views/gutter
+import ../app/views/event_log
+import ../app/formatters/type_formatters
+import ../app/views/tree_node
 import ../app/layout/cells
 import ../host/tui_session
 import ./fixtures/fixture_provider
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 31
+const ExpectedAssertions = 41
 
 var countedAssertions = 0
 
@@ -271,6 +281,84 @@ suite "PLAT-71 Tier 1: the glyph table, drawn":
     var n = newStyledGrid(10, 1)
     n.paint(0, 0, "e\u0301x")
     ck n.runeAt(0, 1) == "x"
+
+  test "§9.2: a path loses its middle, a number is never cut silently":
+    const File = "src/frontend/a_rather_long_module_name_for_the_log.py"
+    var rows: seq[EventRow] = @[]
+    for i in 0 ..< 3:
+      rows.add EventRow(index: i, tick: uint64(1000 + i), file: File,
+                        line: 120 + i, content: "out " & $i,
+                        category: ecOutput)
+    let pages: EventPages = proc(offset, limit: int): EventPage =
+      var page = EventPage(total: rows.len)
+      for k in offset ..< min(rows.len, offset + limit):
+        page.rows.add rows[k]
+      page.atEnd = offset + limit >= rows.len
+      page
+    var model = initEventLogModel(pages = pages, pageSize = 32)
+    model.ensureWindow(0, rows.len)
+    discard model.columns.showColumn(elcLocation)
+    discard model.columns.setColumnWidth(elcLocation, 18)
+    let screen = eventLogScreen(model, 90, 8)
+    var locCut: seq[CutCell] = @[]
+    for c in screen.cuts:
+      if c.column == $elcLocation: locCut.add c
+    ck locCut.len == 3
+    proc textOf(row: StyledRow): string =
+      for span in row: result.add span.text
+    var drawn = ""
+    for (col, at, w) in screen.columnCells:
+      if col == elcLocation:
+        let row = screen.rows[screen.headerRow + 1].textOf
+        drawn = row.runeSubStr(at, w).strip
+    checkpoint("the location drawn: " & drawn)
+    # The line number — the end — and the name's start both stay; the `…`
+    # is in between (the end cut would have lost the line number).
+    ck drawn.startsWith("a_r") and drawn.endsWith(":120") and
+       drawn.contains("…") and not drawn.endsWith("…")
+    if locCut.len > 0:
+      # The `…` is recorded where it is drawn, in the middle.
+      let row = screen.rows[locCut[0].row].textOf
+      ck row.runeSubStr(locCut[0].ellipsisCol, 1) == "…"
+    # On the ASCII tier the middle `…` is the table's marker, in the middle.
+    let ascii = markCut(fitCellAs("a_rather_long_name.py:120", 12, ckPath),
+                        glyphProfileOf(capsWith(tierAscii)))
+    checkpoint("ASCII: " & ascii)
+    ck ascii.contains("~") and not ascii.contains("…") and
+       ascii.endsWith(":120")
+    # A raw number value narrower than its digits: never a prefix of them.
+    let num = valueCell(TreeRowSpec(name: "n", value: "123456789012"), 6)
+    checkpoint("the number drawn: " & num.text)
+    ck num.truncated and num.text == "1e+11"
+    let num7 = valueCell(TreeRowSpec(name: "n", value: "123456789012"), 7)
+    ck num7.truncated and num7.text == "1.2e+11"
+
+  test "§8: a copy without OSC 52 says it stayed inside CodeTracer":
+    let calc = resolveFixture(pythonSpec("calc"))
+    ck calc.outcome == foRecorded
+    if calc.outcome == foRecorded:
+      proc copied(clipboard: string): string =
+        var caps = capsWith(tierExtended)
+        caps.clipboard = clipboard
+        let rt = newTuiRuntime(newTuiApp(), caps, Cols, Rows)
+        discard rt.enableLayoutBinding()
+        let s = openTuiSession(calc.tracePath, viewportHeight = Rows - 8)
+        s.header(rt)
+        s.learnExtent()
+        s.refresh(rt)
+        discard rt.focusHostedPane(paneCalltrace)
+        discard rt.runNamedOperation("list.copy", "", 0)
+        result = rt.app.notification
+        s.close()
+      # No identity that takes OSC 52, no tmux passing it on (xterm here).
+      let resolved = capsWith(tierExtended)
+      ck resolved.clipboard == ClipboardInAppOnly
+      let inApp = copied(resolved.clipboard)
+      checkpoint("in-app only: " & inApp)
+      ck inApp.startsWith("copied ") and inApp.endsWith(InAppOnlyCopyNote)
+      let osc = copied("osc52")
+      checkpoint("osc52: " & osc)
+      ck osc.startsWith("copied ") and not osc.contains("inside CodeTracer")
 
   test "assertion count":
     echo "CHECKS: " & $countedAssertions

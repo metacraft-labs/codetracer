@@ -467,10 +467,7 @@ proc plainScreen*(buf: ScreenBuffer): string =
     for cell in buf.rows[r].cells:
       if cell.width == 0:
         continue
-      if cell.rune.int32 == 0:
-        line.add ' '
-      else:
-        line.add unicode.toUTF8(cell.rune)
+      line.add cellText(cell)
     # `strutils.strip` EXPLICITLY. `std/unicode` is imported here for `toUTF8`
     # and exports a `strip` of its own that leaves an all-whitespace string
     # UNCHANGED (nim 2.2.8) — recorded in `docs/tui-testing.md` as a trap this
@@ -649,8 +646,25 @@ proc restoreUnion*(d: TerminalDriver): string =
   if d.mouseOwned:
     result.add "\x1b[?1003l"
 
+proc resumeUnion*(d: TerminalDriver): string =
+  ## The bytes that put this driver's own modes back when the process is
+  ## continued after a stop (SIGTSTP, then SIGCONT): `nim-termctl` gives the
+  ## terminal back before the stop and takes raw mode, the alternate screen,
+  ## mouse capture, focus and extended keys again on the continue
+  ## (`setExtraResume`); these follow — the hidden cursor, grapheme
+  ## clustering, pixel and any-motion mouse. A whole frame is painted after
+  ## them (`takeResumed`, in `nextEvent`).
+  result = HideCursorBytes
+  if d.graphemeOwned:
+    result.add "\x1b[?2027h"
+  if d.pixelMouseOwned:
+    result.add "\x1b[?1016h"
+  if d.mouseOwned:
+    result.add MotionTrackingOnBytes
+
 proc registerRestore(d: TerminalDriver) =
   discard setExtraRestore(d.restoreUnion())
+  discard setExtraResume(d.resumeUnion())
 
 proc adoptCapabilities*(d: TerminalDriver; caps: TerminalCapabilities) =
   ## PLAT-46. Replace the negotiated capabilities after the start-up query
@@ -772,6 +786,7 @@ proc stop*(d: TerminalDriver) =
   if d.started:
     writeAll(d.outFd, d.restoreUnion())
     discard setExtraRestore("")
+    discard setExtraResume("")
   d.graphemeOwned = false
   d.pixelMouseOwned = false
   if d.mouseOwned:
@@ -936,6 +951,15 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
   if b == ReadEof:
     return DriverEvent(kind: dekEof)
   if b < 0:
+    # A STOP WAS CONTINUED (SIGTSTP, then SIGCONT): the terminal was given
+    # back and taken again, so it no longer shows the last frame — the
+    # emitter forgets it and the loop paints a whole one, at whatever size
+    # the terminal has now.
+    if takeResumed():
+      d.emitter.reset()
+      if not d.watcher.isNil:
+        discard d.watcher.pump()
+      return DriverEvent(kind: dekResize, size: d.size())
     if not d.watcher.isNil and d.watcher.pump():
       return DriverEvent(kind: dekResize, size: d.watcher.currentSize())
     if d.framer.escDue((getMonoTime() - MonoTime()).inMilliseconds):

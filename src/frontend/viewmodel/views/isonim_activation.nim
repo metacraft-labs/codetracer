@@ -38,8 +38,11 @@ when defined(js):
         if (!el || ev.repeat || ev.defaultPrevented || !el.getAttribute) return;
         if (el.getAttribute('role') !== 'button') return;
         // A native control already answers its own keys; text input is typing.
+        // An `<a>` is one only with an `href` (a linked row whose host built
+        // no URL for it is an `<a role="button">`, Shared-DOM-Front-Ends D10).
         var tag = el.tagName;
-        if (tag === 'BUTTON' || tag === 'A' || tag === 'INPUT' ||
+        if (tag === 'BUTTON' || (tag === 'A' && el.hasAttribute('href')) ||
+            tag === 'INPUT' ||
             tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable) return;
         if (el.getAttribute('aria-disabled') === 'true') return;
         if (!isKey(ev.key || '')) return;

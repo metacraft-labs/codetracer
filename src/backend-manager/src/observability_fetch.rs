@@ -602,6 +602,97 @@ pub async fn fetch_recording_from_dive_in_url_via(
     })
 }
 
+/// The answer of a call of the codetracer-ci API: its status and its
+/// (decoded) body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GatewayAnswer {
+    pub status: u16,
+    pub body: Vec<u8>,
+}
+
+/// Largest answer accepted from a codetracer-ci API call (64 MiB): the
+/// largest document the boundary tools read (a session's full narrative) is
+/// bounded well below it by the server.
+pub const MAX_API_ANSWER_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Call the codetracer-ci API at the configured gateway origin
+/// ([`GATEWAY_BASE_URL_ENV`]) with the bearer token of
+/// [`GATEWAY_TOKEN_ENV`], under the same rules as the dive-in fetch: that
+/// origin only, plain HTTP only, no redirect followed, a token that is not an
+/// RFC 6750 b64token refused before any connection, and the body framed and
+/// bounded as a dive-in fetch's ([`MAX_API_ANSWER_BYTES`]).
+///
+/// `method` is `GET` or `POST` (a `POST` carries no body);
+/// `path_and_query` starts with `/` and its query values are the caller's to
+/// percent-encode ([`url_encode_component`]). Any HTTP status is returned to
+/// the caller, which reads the API's problem documents itself.
+pub async fn gateway_api_request(
+    method: &str,
+    path_and_query: &str,
+) -> Result<GatewayAnswer, String> {
+    let gateway = configured_gateway()?;
+    let bearer = std::env::var(GATEWAY_TOKEN_ENV).unwrap_or_default();
+    let credentials = GatewayCredentials::new(&bearer, None)?;
+    gateway_api_request_via(
+        &gateway,
+        &credentials,
+        method,
+        path_and_query,
+        MAX_API_ANSWER_BYTES,
+    )
+    .await
+}
+
+/// [`gateway_api_request`] with the gateway, the credentials and the size
+/// limit given explicitly.
+pub async fn gateway_api_request_via(
+    gateway: &Origin,
+    credentials: &GatewayCredentials,
+    method: &str,
+    path_and_query: &str,
+    limit: u64,
+) -> Result<GatewayAnswer, String> {
+    if method != "GET" && method != "POST" {
+        return Err(format!("unsupported gateway method {method:?}"));
+    }
+    // The path is the caller's, but it must stay a path of the configured
+    // origin: no scheme, no authority, nothing that could end the request
+    // line or add a header.
+    if !path_and_query.starts_with('/')
+        || path_and_query.starts_with("//")
+        || path_and_query
+            .bytes()
+            .any(|b| b <= b' ' || b == 0x7f || b == b'#')
+    {
+        return Err(format!(
+            "refusing gateway path {:?}: not a plain absolute path",
+            redact_url(path_and_query)
+        ));
+    }
+    let mut stream = open_http_connection(gateway).await?;
+    let request = build_request(method, gateway, path_and_query, credentials, None);
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .map_err(|e| format!("write request: {e}"))?;
+    let (status, headers, leftover) = read_response_headers(&mut stream).await?;
+    let framing = body_framing(&headers)?;
+    let mut body = Vec::new();
+    read_body(
+        &mut stream,
+        leftover,
+        framing,
+        limit,
+        path_and_query,
+        &mut |bytes: &[u8]| {
+            body.extend_from_slice(bytes);
+            Ok(())
+        },
+    )
+    .await?;
+    Ok(GatewayAnswer { status, body })
+}
+
 /// Low-level entry point used by tests: fetch the recording into an
 /// explicit directory rather than the user's cache.  Bypasses the
 /// `.complete` sentinel — the caller is responsible for atomicity.
@@ -1248,9 +1339,20 @@ fn build_get_request(
     credentials: &GatewayCredentials,
     range: Option<&str>,
 ) -> String {
+    build_request("GET", gateway, path, credentials, range)
+}
+
+/// An HTTP/1.1 request without a body (a `POST` declares an empty one).
+fn build_request(
+    method: &str,
+    gateway: &Origin,
+    path: &str,
+    credentials: &GatewayCredentials,
+    range: Option<&str>,
+) -> String {
     let host = gateway.authority();
     let mut req = format!(
-        "GET {path} HTTP/1.1\r\n\
+        "{method} {path} HTTP/1.1\r\n\
          Host: {host}\r\n\
          User-Agent: codetracer-backend-manager/0.1\r\n\
          Accept: */*\r\n\
@@ -1266,6 +1368,9 @@ fn build_get_request(
     }
     if let Some(r) = range {
         req.push_str(&format!("Range: {r}\r\n"));
+    }
+    if method == "POST" {
+        req.push_str("Content-Length: 0\r\n");
     }
     req.push_str("\r\n");
     req
@@ -1463,7 +1568,9 @@ fn hex_val(b: u8) -> Option<u8> {
     }
 }
 
-fn url_encode_component(s: &str) -> String {
+/// Percent-encode `s` as a URL query or path component: every byte but
+/// RFC 3986's unreserved characters (§2.3).
+pub fn url_encode_component(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {

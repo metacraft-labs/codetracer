@@ -75,6 +75,10 @@ trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 
 SIBLING_NAMES=(codetracer-native-recorder codetracer-trace-format codetracer-trace-format-nim)
 EXPECTED_COUNT=${#SIBLING_NAMES[@]}
+# Mirrors WORKFLOW_PINNED_SIBLINGS in the guard: the flake inputs workflows
+# name by commit, resolved only under `--all`. A drift between the two lists
+# reddens the `--all` count assertion below.
+WORKFLOW_PINNED_NAMES=(codetracer-native-backend codetracer-visual-replay io-mon)
 
 # ---------------------------------------------------------------------------
 # Fixture: a throwaway "repo root" holding a copy of the guard plus a flake.lock
@@ -101,7 +105,22 @@ mkfixture() { # <dir>
 		FIX_SHAS+=("$sha")
 	done
 
-	python3 - "$root/flake.lock" "${FIX_SHAS[@]}" <<'PY'
+	# The workflow-pinned inputs are resolved only under `--all` (flake inputs
+	# that workflows name by commit, not build siblings the deploy lane clones).
+	# Each revision is a real commit so `--all` output is checkable, and none is
+	# put in siblings/: the default `--verify` must neither require nor look at
+	# them.
+	declare -gA FIX_WP_SHA=()
+	local wp_args=()
+	for name in "${WORKFLOW_PINNED_NAMES[@]}"; do
+		git init -q "$root/wp-src/$name"
+		git -C "$root/wp-src/$name" -c user.email=t@t -c user.name=t \
+			commit -q --allow-empty -m "$name"
+		FIX_WP_SHA[$name]="$(git -C "$root/wp-src/$name" rev-parse HEAD)"
+		wp_args+=("$name=${FIX_WP_SHA[$name]}")
+	done
+
+	python3 - "$root/flake.lock" "${FIX_SHAS[@]}" "${wp_args[@]}" <<'PY'
 import json, sys
 out, (rec, tf, tfn) = sys.argv[1], sys.argv[2:5]
 decoy = "0" * 39 + "1"
@@ -117,6 +136,13 @@ nodes = {
     "codetracer-trace-format_4": {"locked": {"rev": tf}},
     "codetracer-trace-format-nim": {"locked": {"rev": tfn}},
 }
+# Same trap for every workflow-pinned input: the bare-name node is a decoy and
+# the root input points at the suffixed key `<name>_2`.
+for pair in sys.argv[5:]:
+    name, rev = pair.split("=", 1)
+    nodes["root"]["inputs"][name] = name + "_2"
+    nodes[name] = {"locked": {"rev": decoy}}
+    nodes[name + "_2"] = {"locked": {"rev": rev}}
 with open(out, "w") as h:
     json.dump({"nodes": nodes, "root": "root", "version": 7}, h)
 PY
@@ -173,6 +199,115 @@ elif [ "$got_tf" = "$DECOY_REV" ]; then
 else
 	fail "it follows root.inputs to the suffixed node" "got '$got_tf', expected '${FIX_SHAS[1]}'"
 fi
+
+# The default set must NOT include the workflow-pinned inputs: it is what the
+# deploy lane clones (`--github-output`) and verifies (`--verify`), and none of
+# them is a build input of that bundle.
+for name in "${WORKFLOW_PINNED_NAMES[@]}"; do
+	if ! grep -q "^${name}=" <<<"$OUT"; then
+		pass "the default set (the deploy lane's clone set) does not include $name"
+	else
+		fail "the default set does not include $name" \
+			"$name leaked into the build-sibling set the deploy lane clones and verifies: $OUT"
+	fi
+done
+
+# ===========================================================================
+# Group 1b — --all: the build siblings plus the workflow-pinned flake inputs
+# ===========================================================================
+EXPECTED_ALL_COUNT=$((EXPECTED_COUNT + ${#WORKFLOW_PINNED_NAMES[@]}))
+run "$FIX" --all
+n_all="$(printf '%s\n' "$OUT" | grep -c '^[a-z-]*=[0-9a-f]\{40\}$')"
+if [ "$RC" -eq 0 ] && [ "$n_all" -eq "$EXPECTED_ALL_COUNT" ]; then
+	pass "--all emits exactly $EXPECTED_ALL_COUNT pins (the $EXPECTED_COUNT build siblings and ${WORKFLOW_PINNED_NAMES[*]})"
+else
+	fail "--all emits exactly $EXPECTED_ALL_COUNT pins" "exit $RC, $n_all pin(s):
+$OUT"
+fi
+
+for name in "${WORKFLOW_PINNED_NAMES[@]}"; do
+	got="$(printf '%s\n' "$OUT" | awk -F= -v n="$name" '$1==n{print $2}')"
+	if [ "$got" = "${FIX_WP_SHA[$name]}" ]; then
+		pass "--all resolves $name through root.inputs to its suffixed node (${name}_2)"
+	elif [ "$got" = "$DECOY_REV" ]; then
+		fail "--all resolves $name through root.inputs" \
+			"it returned the decoy parked at the bare node key '$name' ($DECOY_REV)"
+	else
+		fail "--all resolves $name through root.inputs" "got '$got', expected '${FIX_WP_SHA[$name]}'"
+	fi
+done
+
+run "$FIX" --list --all
+listed_wp=0
+for name in "${WORKFLOW_PINNED_NAMES[@]}"; do
+	grep -qx -- "$name" <<<"$OUT" && listed_wp=$((listed_wp + 1))
+done
+if [ "$RC" -eq 0 ] && [ "$(printf '%s\n' "$OUT" | grep -c .)" -eq "$EXPECTED_ALL_COUNT" ] &&
+	[ "$listed_wp" -eq "${#WORKFLOW_PINNED_NAMES[@]}" ]; then
+	pass "--list --all names the $EXPECTED_ALL_COUNT siblings, every workflow-pinned one among them"
+else
+	fail "--list --all names the $EXPECTED_ALL_COUNT siblings, every workflow-pinned one among them" \
+		"exit $RC, $listed_wp of ${#WORKFLOW_PINNED_NAMES[@]} workflow-pinned listed: $OUT"
+fi
+
+# --all must not widen the deploy lane's clone set or its verification. Both
+# refusals are asserted by their own diagnostic, not by a bare non-zero exit.
+GITHUB_OUTPUT="$TMP/gh-output" run "$FIX" --all --github-output
+if [ "$RC" -ne 0 ] && grep -q -- "--all widens the set" <<<"$OUT" && [ ! -s "$TMP/gh-output" ]; then
+	pass "--all --github-output is refused and writes no step output"
+else
+	fail "--all --github-output is refused and writes no step output" "exit $RC: $OUT"
+fi
+run "$FIX" --all --verify "$FIX/siblings"
+if [ "$RC" -ne 0 ] && grep -q -- "--all widens the set" <<<"$OUT"; then
+	pass "--all --verify is refused, so the deploy lane never has to hold a workflow-pinned checkout"
+else
+	fail "--all --verify is refused" "exit $RC: $OUT"
+fi
+
+# --- mutations, one pair per workflow-pinned input ---------------------------
+# Dropped from flake.nix: reddens --all by name, and ONLY --all (the default
+# set does not depend on it). Locked at a branch name: reddens the 40-hex check.
+for name in "${WORKFLOW_PINNED_NAMES[@]}"; do
+	MUT="$TMP/no-$name"
+	cp -R "$FIX" "$MUT"
+	python3 - "$MUT/flake.lock" "$name" <<'PY'
+import json, sys
+p, name = sys.argv[1], sys.argv[2]
+d = json.load(open(p))
+del d["nodes"]["root"]["inputs"][name]
+json.dump(d, open(p, "w"))
+PY
+	run "$MUT" --all
+	if [ "$RC" -ne 0 ] && grep -q -- "$name not-a-root-input" <<<"$OUT"; then
+		pass "MUTATION $name dropped from flake.nix -> --all names it, not silently one pin fewer"
+	else
+		fail "MUTATION $name dropped from flake.nix -> --all names it" "exit $RC: $OUT"
+	fi
+	run "$MUT"
+	if [ "$RC" -eq 0 ]; then
+		pass "MUTATION $name dropped from flake.nix -> the default (deploy) set is unaffected"
+	else
+		fail "MUTATION $name dropped from flake.nix -> the default set is unaffected" "exit $RC: $OUT"
+	fi
+
+	MUT="$TMP/norev-$name"
+	cp -R "$FIX" "$MUT"
+	python3 - "$MUT/flake.lock" "$name" <<'PY'
+import json, sys
+p, name = sys.argv[1], sys.argv[2]
+d = json.load(open(p))
+d["nodes"][name + "_2"]["locked"]["rev"] = "dev"
+json.dump(d, open(p, "w"))
+PY
+	run "$MUT" --all
+	if [ "$RC" -ne 0 ] && grep -q -- "$name no-40-hex-rev" <<<"$OUT"; then
+		pass "MUTATION $name locked.rev is a branch name -> --all reddens the 40-hex assertion"
+	else
+		fail "MUTATION $name locked.rev is a branch name -> --all reddens the 40-hex assertion" \
+			"exit $RC: $OUT"
+	fi
+done
 
 # ===========================================================================
 # Group 2 — --verify against checkouts (the non-circular arm)
@@ -243,7 +378,10 @@ if ! python3 - "$MUT/scripts/sibling-pins.sh" <<'PY'; then
 import re, sys
 p = sys.argv[1]
 s = open(p).read()
-s2 = re.sub(r"SIBLINGS=\(\n(\t[a-z-]+\n)+\)", "SIBLINGS=()", s, count=1)
+# Anchored to the line start: `WORKFLOW_PINNED_SIBLINGS=(` also contains
+# `SIBLINGS=(`, and this arm is about the build set.
+s2 = re.sub(r"^SIBLINGS=\(\n(\t[a-z-]+\n)+\)", "SIBLINGS=()", s, count=1,
+            flags=re.MULTILINE)
 assert s2 != s, "the SIBLINGS array literal was not found; this arm's premise has moved"
 open(p, "w").write(s2)
 PY
@@ -358,6 +496,32 @@ print(d["nodes"][key if isinstance(key, str) else key[0]]["locked"]["rev"])
 		fail "all pins agree with flake.lock read independently" \
 			"cross-checked $checked (expected $EXPECTED_COUNT), $mismatch mismatch(es)"
 	fi
+
+	# The workflow-pinned inputs resolve against the real lock too: these are
+	# the inputs the workflows hand-copy by SHA, so if one ever stops being a
+	# root input, `--all` must say so here rather than in the middle of a pin
+	# refresh. Each pin is cross-checked against flake.lock read independently.
+	real_all="$(bash "$GUARD" --all 2>&1)"
+	real_all_rc=$?
+	if [ "$real_all_rc" -ne 0 ]; then
+		fail "--all resolves against this repo's flake.lock" "exit $real_all_rc:
+$real_all"
+	fi
+	for name in "${WORKFLOW_PINNED_NAMES[@]}"; do
+		real_pin="$(printf '%s\n' "$real_all" | awk -F= -v n="$name" '$1==n{print $2}')"
+		indep_pin="$(python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+key = d["nodes"][d["root"]]["inputs"][sys.argv[2]]
+print(d["nodes"][key if isinstance(key, str) else key[0]]["locked"]["rev"])
+' "$REPO_ROOT/flake.lock" "$name" 2>/dev/null)"
+		if [ "$real_all_rc" -eq 0 ] && [ "${#real_pin}" -eq 40 ] && [ "$real_pin" = "$indep_pin" ]; then
+			pass "--all resolves this repo's $name pin ($real_pin), agreeing with flake.lock read independently"
+		else
+			fail "--all resolves this repo's $name pin, agreeing with flake.lock read independently" \
+				"guard says '${real_pin}', flake.lock says '${indep_pin}'"
+		fi
+	done
 
 	# The workflow must RESOLVE the pins and then CONSUME them. Both halves are
 	# asserted separately, because either one alone is silently useless: a

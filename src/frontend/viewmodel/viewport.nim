@@ -14,14 +14,12 @@
 ##
 ## THE DEBOUNCE (UI-Data-Loading-Guidelines Pattern 6): consecutive reports
 ## within `ViewportDebounceMs` produce one request. The timer is INJECTED
-## (`ViewportScheduler`), so it is testable with a `TestClock`. The default
+## (`ViewportScheduler`), so a suite can drive it from a `TestClock`. The default
 ## applies a report at once: native hosts report a viewport only when a layout
 ## is committed, and a host that reports continuously (the DOM's
 ## `ResizeObserver` and scroll listener) installs `timeoutScheduler`.
 ##
 ## Works on both the C and JS backends.
-
-import isonim/core/clock
 
 type
   Viewport* = object
@@ -116,14 +114,6 @@ proc immediateScheduler*(): ViewportScheduler =
       callback()
       0,
     cancel: proc(id: int) = discard)
-
-proc testClockScheduler*(clock: TestClock): ViewportScheduler =
-  ## Debounces on a `TestClock`: a report is applied when the test advances
-  ## the clock past `ViewportDebounceMs`.
-  ViewportScheduler(
-    schedule: proc(delayMs: float64; callback: proc()): int =
-      clock.schedule(callback, delayMs),
-    cancel: proc(id: int) = clock.cancel(id))
 
 when defined(js):
   proc jsSetTimeout(cb: proc(); ms: float64): int {.importjs: "setTimeout(#, #)".}

@@ -61,3 +61,6 @@ onFileTreeOperationDone  # renderer IPC handler: `uiIpcHandlers` in ui_js.nim's 
 onTableColumnsRequest  # IPC handler resolved by string: ipc_utils registers "table-columns-request" and dispatches to on<CamelCase>
 onTableColumnsSave  # IPC handler resolved by string: ipc_utils registers "table-columns-save" and dispatches to on<CamelCase>
 testResultsFit  # reached by the Test Results panes of the terminal (tui/app/views/test_results_pane.nim columnsFor) and GPUI (gpui/test_results_leaf.nim testsLayout): product modules whose test_* basename the name scan classifies as tests
+classifyStartFailure  # Embed SDK surface (sdk/debugger_session.nim, re-exported by codetracer_embed): BlockTracer's live build calls it from client/hydrate/hydrate.nim when its launch deadline expires (Shared-DOM-Front-Ends D8); that consumer is in another repository, so no scan of this one sees it
+failStart             # Embed SDK surface (sdk/debugger_session.nim): BlockTracer's client/hydrate/hydrate.nim settles a launch it gave up on with it, together with classifyStartFailure (Shared-DOM-Front-Ends D8); the reader is in another repository
+renderTestResultsPanel  # reached by ui/test_results.nim (the desktop Test Results host mounts it), a product module whose test_* basename the name scan classifies as a test, the same misreading as testResultsFit above

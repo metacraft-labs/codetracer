@@ -793,14 +793,6 @@ proc loadRecordingPanes*(s: HeadlessDebugSession;
     # Files click), which the terminal's rows and GPUI's view follow.
     expandAllFolders(files)
 
-proc refreshCallStackFallback*(s: HeadlessDebugSession) =
-  ## PLAT-47: hand the calltrace pane the call STACK when — and only when —
-  ## the recording provides no call trace (`CalltraceVM.fallbackStack`),
-  ## re-asked now even at an unchanged stop. The load itself is the SDK stop
-  ## loader's (`StopPane.spCallStackFallback`).
-  s.sdk.stops.reload(spCallStackFallback)
-  drainPlatformCallbacks()
-
 proc selectCurrentCall*(s: HeadlessDebugSession) =
   ## PLAT-49 part B: select the call the debugger is in, as the desktop does
   ## on every move (`CalltraceComponent.onCompleteMove` -> `selectEntry`) —

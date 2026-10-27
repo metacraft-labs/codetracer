@@ -738,3 +738,10 @@ src/common/**/test_*
 # A test-helper DIRECTORY matches `test_*` too, and git cannot re-include a file
 # below an excluded directory, so the directory itself is re-included.
 !src/frontend/test_support/
+
+# The same, for WD7's session-allocation harness. A third lock rather than a
+# shared one, for the reason the PLAT-8 note gives: its subject set is one file
+# (`viewmodel/platform/session_allocation.nim`), it shares no file with either
+# of the harnesses above, and one lock would serialise runs that do not collide
+# while telling a reader they do.
+src/frontend/viewmodel/tests/unit/.wd7-session-allocation-mutation.lock

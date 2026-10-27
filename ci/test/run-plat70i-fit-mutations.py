@@ -5,7 +5,10 @@ bar only when the minimums do not fit; Horizontal-Overflow.md §5.5).
 
 Each arm plants ONE defect in the shared solver (`table_fit.nim`, the Event
 Log's declaration in `event_log_vm.nim`), the terminal's painters or runtime,
-the GPUI window, or the desktop's DOM pass and view; REBUILDS the shipped
+the GPUI window, or the desktop's DOM pass, view or key router (the residuals
+closed after Part I: the bar that appears is woken, GPUI's bars answer a
+press and a grab, the palette's `view.*` reaches the table panes on every
+front-end); REBUILDS the shipped
 `codetracer-tui` / `codetracer-gpui` / desktop when the defect is compiled
 into a binary an arm is graded through; runs the suites that must catch it;
 and requires RED — with the failure the first run recorded
@@ -61,6 +64,7 @@ GPUI_MAIN = "src/frontend/gpui/main.nim"
 GPUI_LEAVES = "src/frontend/gpui/app/leaves.nim"
 DOM = "src/frontend/viewmodel/views/table_fit_dom.nim"
 DESKTOP_EVENTS = "src/frontend/viewmodel/views/isonim_event_log_view.nim"
+KEY_ROUTER = "src/frontend/ui/key_router.nim"
 
 # Suites.
 VMU = "src/frontend/viewmodel/tests/unit/test_plat70i_table_fit.nim"
@@ -68,13 +72,19 @@ TBL = "src/frontend/tui/tests/test_plat70i_fit_layout.nim"
 PTY = "src/frontend/tui/tests/real_terminal/test_plat70i_fit_pty.nim"
 PLAN = "src/frontend/gpui/tests/test_plat70i_gpui_plan.nim"
 SPEC = "src/tests/gui/tests/layout/plat70i-fit-or-scroll.spec.ts"
+HSB = "src/frontend/tui/tests/test_plat70h_scrollbars.nim"
 
 SUBJECTS = [FIT, EVENT_VM, TUI_EVENTS, TUI_CALLS, TUI_VARS, RUNTIME,
-            GPUI_MAIN, GPUI_LEAVES, DOM, DESKTOP_EVENTS]
-SUITES = [VMU, TBL, PTY, PLAN, SPEC]
+            GPUI_MAIN, GPUI_LEAVES, DOM, DESKTOP_EVENTS, KEY_ROUTER]
+SUITES = [VMU, TBL, PTY, PLAN, SPEC, HSB]
 
 PTY_EVENTS = "*::the Event Log: no bar while the columns fit; a wide column scrolls"
 PTY_CALLS = "*::HO-15: a deep call scrolls the Call Trace to its whole name"
+HSB_APPEARS = "*::a table pane's sideways bar that APPEARS fades in (§7.5, HO-11)"
+HSB_PALETTE = "*::the palette's View: Scroll Right / Left reach a table pane (§4.4, §5.5)"
+PLAN_BAR = "*::the Event Log's bar answers a press on its track and a thumb grab, offset kept"
+PLAN_CALL_BAR = "*::the Call Trace's bar answers a press on its track"
+PLAN_PALETTE = "*::the palette's View: Scroll Right reaches the focused table pane"
 
 # (id, [(subject, find, replace), ...], [(suite, filter), ...], what it breaks)
 ARMS = [
@@ -174,6 +184,31 @@ ARMS = [
              "        if false:")],
      [(SPEC, None)],
      "the desktop Event Log's header does not follow the body's sideways scroll"),
+    # ---- the residuals closed after Part H / Part I --------------------------------
+    ("W1", [(RUNTIME, "       b.pane in TableViewPanes and not rt.scrollbars.present[b.pane][b.axis]:",
+             "       false:")],
+     [(HSB, HSB_APPEARS)],
+     "§7.5: a table pane's sideways bar that appears (its columns grew past the pane) is not woken"),
+    ("T7", [(RUNTIME, "      discard rt.runViewOperation(name, outcome)",
+             "      discard name")],
+     [(HSB, HSB_PALETTE)],
+     "§4.4: the palette's View: Scroll Right does not reach a table pane in the terminal"),
+    ("G5", [(GPUI_MAIN, "    if pressTableHBar(r, x, y):",
+             "    if false and pressTableHBar(r, x, y):")],
+     [(PLAN, PLAN_BAR), (PLAN, PLAN_CALL_BAR)],
+     "§5.5.4: the GPUI table panes' bars answer no press (wheel only)"),
+    ("G6", [(GPUI_MAIN, "              else: v.dragThumb(v.barModel.heldThumbStart(f))",
+             "              else: v.dragThumb(f - v.barModel.thumbLength / 2.0)")],
+     [(PLAN, PLAN_BAR)],
+     "Scrollbar-Scrubbers §3.3: a GPUI table bar's grabbed thumb jumps to centre on the pointer (the grab offset dropped)"),
+    ("G7", [(GPUI_MAIN, "      runGpuiViewOperation(r, name)",
+             "      discard name")],
+     [(PLAN, PLAN_PALETTE)],
+     "§4.4: the palette's View: Scroll Right does not reach a GPUI table pane"),
+    ("D4", [(KEY_ROUTER, "    var scroller = if id.len > 0: tableScrollerOf(cstring(id)) else: nil",
+             "    var scroller: JsObject = nil")],
+     [(SPEC, None)],
+     "§4.4: the palette's View: Scroll Right does not reach a desktop table pane"),
     # ---- the declared survivor ---------------------------------------------------
     ("N1", [(FIT, "  v.setContent(if f.overflows: f.contentUnits else: 0)",
              "  v.setContent(f.contentUnits)")],
@@ -187,7 +222,7 @@ IN_BINARY = {FIT, EVENT_VM, TUI_EVENTS, TUI_CALLS, TUI_VARS, RUNTIME}
   # Subjects compiled into `codetracer-tui`.
 IN_GPUI = {FIT, EVENT_VM, GPUI_MAIN, GPUI_LEAVES}
   # Subjects compiled into `codetracer-gpui`.
-IN_DESKTOP = {FIT, EVENT_VM, DOM, DESKTOP_EVENTS}
+IN_DESKTOP = {FIT, EVENT_VM, DOM, DESKTOP_EVENTS, KEY_ROUTER}
   # Subjects compiled into the desktop's bundle.
 PTY_SUITES = {PTY}
 GPUI_SUITES = {PLAN}
@@ -421,7 +456,8 @@ def main():
     if needs_desktop and not build_desktop():
         print("ABORT: the unmutated desktop does not build.")
         return 1
-    graded = sorted({(s, flt) for arm in selected for s, flt in arm[2]})
+    graded = sorted({(s, flt) for arm in selected for s, flt in arm[2]},
+                    key=lambda p: (p[0], p[1] or ""))
     for s, flt in graded:
         v, f = run_suite(s, flt)
         if v != "GREEN":

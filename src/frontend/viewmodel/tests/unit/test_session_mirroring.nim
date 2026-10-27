@@ -25,9 +25,9 @@
 ##
 ## Runs on the C and JS backends (`vm-unit`, `vm-unit-js`).
 
-import std/[json, options, sets, tables, unittest]
+import std/[json, jsonutils, options, sets, tables, unittest]
 
-import isonim/core/[async_compat, owner, signals]
+import isonim/core/[async_compat, computation, owner, signals]
 
 import ../../backend/mock_backend
 import ../../session_vm
@@ -37,10 +37,12 @@ import ../../sync/[action_relay, mirror_session, sync_host, sync_publisher,
                    sync_subscriber, synced_signals, transport]
 import ../../viewmodels/[calltrace_vm, debug_controls_vm, event_log_vm,
                          flow_layout, flow_vm,
-                         filesystem_vm, pixel_history_vm, terminal_output_model,
+                         filesystem_vm, pixel_history_vm, request_panel_vm,
+                         terminal_output_model,
                          terminal_output_vm, visual_replay_client,
                          state_vm]
 import ../../viewport
+import ./in_memory_transport
 
 var checks = 0
 template ck(cond: untyped) =
@@ -50,6 +52,13 @@ template ck(cond: untyped) =
 # ---------------------------------------------------------------------------
 # Harness
 # ---------------------------------------------------------------------------
+
+proc actionArg[T](value: T): JsonNode =
+  ## Encode one typed action argument the way `action_relay`'s primary side
+  ## decodes it (enums by name). Product relays build their arguments as JSON
+  ## directly; the suites below encode typed values with this and check that
+  ## the primary decodes them, so a drift between the two fails here.
+  toJson(value, ToJsonOptions(enumMode: joptEnumString))
 
 var queued: seq[proc()]
 let manual: Scheduler = proc(callback: proc()) = queued.add callback
@@ -110,7 +119,7 @@ suite "the mirrored signals":
       for owner in ["store.", "state.", "calltrace.", "eventLog.", "flow.",
                     "editor.", "timeline.", "debugControls.", "searchResults.",
                     "pointList.", "scratchpad.", "fileTree.",
-                    "terminalOutput."]:
+                    "terminalOutput.", "requestPanel."]:
         var n = 0
         for k in reg.keys:
           if k.len > owner.len and k[0 ..< owner.len] == owner:
@@ -962,6 +971,50 @@ suite "a ct host page's mirror (Shared-DOM-Front-Ends D2)":
       ck chosen == 1
       ck host.actionsApplied == before
       ck "/src" notin primary.fileTreeVM.expandedPaths.val
+      mirror.dispose()
+      host.dispose()
+      done()
+
+  test "the request panel's filters and selection are the server's; its row activation is the page's":
+    # The request panel's window is loaded by the server's session from the
+    # viewport the page relays (Shared-DOM-Front-Ends Q8), so a filter set on
+    # the page alone would filter rows the page does not load: the filters
+    # and the selection are relayed. Activating a row stays on the page,
+    # which installs `openExternalTrace` for a request recorded elsewhere.
+    createRoot proc(done: proc()) =
+      let (primary, _) = newPrimary()
+      let host = newSyncHost(manual)
+      host.addPrimary("ct-host/replay-0", primary)
+      let link = newInMemoryLink()
+      host.attach(link.a, follow = "ct-host/replay-0")
+      # A live session's tail, so the rows are the store's and not a window
+      # the mock would answer empty; they reach the page as the server's.
+      var live = primary.store.session.val
+      live.debugSessionMode = liveMcr
+      primary.store.session.val = live
+      let mirror = createHostedPageMirror(link.b)
+      link.settle()
+      mirror.session.requestPanelVM.setViewport(Viewport(rows: 9))
+      mirror.session.requestPanelVM.setFilterMethod("POST")
+      mirror.session.requestPanelVM.setSearchText("api")
+      link.settle()
+      ck primary.requestPanelVM.viewport.val.rows == 9
+      ck primary.requestPanelVM.filterMethod.val == "POST"
+      ck primary.requestPanelVM.searchText.val == "api"
+      ck mirror.session.requestPanelVM.filterMethod.val == "POST"
+      let before = host.actionsApplied
+      var opened: seq[string]
+      mirror.session.requestPanelVM.openExternalTrace =
+        proc(path: string; startGeid: int64) = opened.add path
+      primary.store.requestSpans.requests.val = @[RequestRecord(
+        id: 1, httpMethod: "POST", url: "/api", startGeid: 10,
+        externalTracePath: "/other/trace")]
+      link.settle()
+      ck mirror.session.requestPanelVM.filteredRequests.val.len == 1
+      mirror.session.requestPanelVM.jumpToHandler(0)
+      link.settle()
+      ck host.actionsApplied == before
+      ck opened == @["/other/trace"]
       mirror.dispose()
       host.dispose()
       done()

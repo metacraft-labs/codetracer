@@ -57,7 +57,8 @@ import ../formatters/type_formatters
 import ./diff_highlighter
 import ./styled_row
 # PLAT-70 Part B: the cut cells (Horizontal-Overflow.md §5.1).
-from codetracer_embed import FittedCell, fitCell, presentedCell, CutCell,
+from codetracer_embed import FittedCell, fitCell, fitCellAs, CutKind,
+  isNumberText, presentedCell, CutCell,
   fullValueText
 
 export type_formatters, diff_highlighter
@@ -278,7 +279,10 @@ proc valueCell*(spec: TreeRowSpec; cells: int;
   ## (`fullValue`, what the tooltip, the detail and `list.copy` show) beside
   ## it when it was cut. Never a cut of a presentation (PLAT-2's rule).
   if spec.presented.isNil:
-    return fitCell(spec.value, cells, measureFor(ambiguous))
+    # PLAT-71 (§9.2): a number is never cut silently.
+    return fitCellAs(spec.value, cells,
+                     (if isNumberText(spec.value): ckNumber else: ckEnd),
+                     measureFor(ambiguous))
   let p = spec.presentation(cells, ambiguous)
   # The whole value only where it is needed — a cut cell's hover and detail
   # — so a row that fits costs one presentation, as before.
