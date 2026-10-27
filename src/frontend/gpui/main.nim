@@ -2300,7 +2300,7 @@ proc redrawCalltrace(r: GpuiRenderer) =
 
 func callTraceRowsIn(body: PxRect): int =
   ## The call rows a call-trace body shows: under its search field, at the
-  ## desktop's fractional pitch.
+  ## desktop's row pitch (`leaves.CallRowPitch`).
   max(1, callRowAtPx(body.h - paneInsetOf($paneCalltrace).top -
                      CallRowsTopPx))
 

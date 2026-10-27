@@ -38,7 +38,13 @@ const
   FirstRow = 40
   Levels = 40
   DomRowAdvancePx = 25.28
-    ## The desktop's measured row advance (not a whole number of pixels).
+    ## A row advance that is not a whole number of pixels and not exact in
+    ## binary floating point, so `rows * advance / advance` lands a hair off
+    ## the count — the case `pixelPaneViewport`'s tolerance exists for. (It
+    ## is the mean the desktop once measured while rows with a return value
+    ## were taller than the rest, codetracer-pm issue 2026-10-18; the rows
+    ## are now all 1.5625em, which is fractional too at other zooms —
+    ## 20.3125 px at a 13 px root.)
 
 type Front = enum
   terminal, gpui, dom

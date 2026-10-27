@@ -146,7 +146,7 @@ proc pressOn(row: JsonNode; body: seq[int]): string =
   ## A press and release on `row`'s name (right of its 14 px toggle and the
   ## 8 px gap after it, at its depth's indent), as the pointer delivers it.
   ## The rows start below the pane's inset and the search field, at the
-  ## desktop's fractional pitch (`leaves.callRowTopPx`).
+  ## desktop's row pitch (`leaves.callRowTopPx`).
   let at = parseInt(row.attr("data-call-index"))
   let indent = row{"styles"}{"padding_left"}.getStr("0px")
   let x = body[0] + parseInt(indent[0 ..< indent.len - 2]) + 14 + 8 + 6

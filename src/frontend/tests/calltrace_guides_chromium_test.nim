@@ -20,8 +20,9 @@
 ## The defect this pins: the SVG was laid out at a hard-coded 25 px per row
 ## with x offsets in fixed pixels, and its render effect depended only on the
 ## lines, so a row advance other than 25 px drifted by a little more every row
-## (about 28 px by row 100 on the desktop's measured 25.28 px advance) and a
-## zoom never moved it.
+## (about 28 px by row 100 at the 25.28 px advance the desktop measured
+## while rows with a return value were taller than the rest) and a zoom never
+## moved it.
 ##
 ## ## WHY A BROWSER
 ##
@@ -37,11 +38,17 @@
 ## `.call-child-box`, `.toggle-call`, `.calltrace-svg-line`), in the same em
 ## units, so the rows scale with the root font size exactly as the app's do.
 ## One declaration is added on purpose: `margin-bottom: 0.0175em` on each row.
-## The desktop's row ADVANCE measures ~25.28 px against a 25 px row box
-## (codetracer-pm issue 2026-10-18, "row advance exceeds its own row box"),
-## and the cause is not yet known; the margin reproduces an advance that is
-## not the row box and not a whole number of pixels (25.28 px at 16 px), so a
-## drawer that assumes either one is caught.
+## It is ADVERSARIAL, not a model of the shipped stylesheet: it makes the row
+## advance (25.28 px at 16 px) differ from the row box (25 px) and not be a
+## whole number of pixels, so a drawer that assumes the advance is either one
+## is caught. The shipped rows have advance == box (every row is 1.5625em,
+## `ci/test/calltrace-row-box-in-browser.sh`), but a box that is not a whole
+## number of pixels is ordinary — 20.3125 px at a 13 px root — and the
+## guides must take the advance from the layout whatever it turns out to be.
+## The desktop really did have an advance above its box once — rows showing a
+## return value were ~0.8 px taller (codetracer-pm issue
+## 2026-10-18-electron-calltrace-row-advance-exceeds-its-own-row-box) — which
+## is the value this margin reproduces.
 ##
 ## ## NO MOCKS OF THE SUBJECT
 ##
@@ -136,7 +143,7 @@ const ExpectedChecks = 22
 const
   RowCount = 120
     ## Long enough that a per-row error of 0.28 px has grown past a whole
-    ## row (25 px) by the last row, which is the reporter's symptom.
+    ## row (25 px) by the last row, which is the reporter's symptom (#849).
   TolerancePx = 1.0
     ## Sub-pixel layout snaps row edges to 1/64 px; one CSS pixel is far
     ## above that and far below the 28 px the defect reaches.
