@@ -1409,55 +1409,75 @@ impl Handler {
     //     Ok(())
     // }
 
+    /// The call key a `ct/collapse-calls` / `ct/expand-calls` request names,
+    /// checked against the call trace before anything changes.
+    ///
+    /// The key is the client's and every expansion indexes by it, so a key
+    /// that is not an integer, or that no call has, is refused by name
+    /// (`command` prefixes the message) rather than logged or indexed with.
+    fn expansion_call_key(&self, command: &str, args: &CollapseCallsArgs) -> Result<CallKey, Box<dyn Error>> {
+        let num_key = args
+            .call_key
+            .parse::<i64>()
+            .map_err(|_| format!("{command}: call key {:?} is not an integer", args.call_key))?;
+        if !self.calltrace.has_call(CallKey(num_key)) {
+            return Err(format!("{command}: no call has key {num_key}").into());
+        }
+        Ok(CallKey(num_key))
+    }
+
+    /// `ct/collapse-calls`: hide the children of a call.
+    ///
+    /// Answered with an empty body once the state has changed: the request
+    /// carries no data back (the caller reads the changed tree through its
+    /// next `ct/load-calltrace-section`), but the DAP answers every request
+    /// (<https://microsoft.github.io/debug-adapter-protocol/overview#requests>).
+    /// A refused key is answered `success: false` by the caller's error path.
     pub fn collapse_calls(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         collapse_calls_args: CollapseCallsArgs,
+        sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         // Shape the tree for this stop BEFORE applying the collapse, so the
         // read that follows it does not re-shape and drop it
         // (`Calltrace::reshape_if_stop_changed`).
         self.calltrace.reshape_if_stop_changed(self.step_id, &*self.reader);
-        if let Ok(num_key) = collapse_calls_args.call_key.clone().parse::<i64>() {
-            // The key is the client's; `change_expand_state` indexes by it.
-            if !self.calltrace.has_call(CallKey(num_key)) {
-                return Err(format!("ct/collapse-calls: no call has key {num_key}").into());
-            }
-            self.calltrace.change_expand_state(CallKey(num_key), false);
-        } else {
-            error!("invalid i64 number for call key: {}", collapse_calls_args.call_key);
-        }
-
-        // self.return_task((task, VOID_RESULT.to_string()))?;
-        Ok(())
+        let call_key = self.expansion_call_key("ct/collapse-calls", &collapse_calls_args)?;
+        self.calltrace.change_expand_state(call_key, false);
+        self.respond_dap(req, serde_json::json!({}), sender)
     }
 
+    /// `ct/expand-calls`: show a call's children, or unfold a collapsed
+    /// stretch of the call stack, as `non_expanded_kind` says. Answered as
+    /// `collapse_calls` is; a kind that names no expansion (`Siblings`,
+    /// `Calls`, `CallstackInternalChild`) is refused by name.
     pub fn expand_calls(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         collapse_calls_args: CollapseCallsArgs,
+        sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         // As in `collapse_calls`: shape for this stop first, then expand.
         self.calltrace.reshape_if_stop_changed(self.step_id, &*self.reader);
-        let kind = collapse_calls_args.non_expanded_kind;
-        if let Ok(num_key) = collapse_calls_args.call_key.clone().parse::<i64>() {
-            // The key is the client's; every expansion below indexes by it.
-            if !self.calltrace.has_call(CallKey(num_key)) {
-                return Err(format!("ct/expand-calls: no call has key {num_key}").into());
+        let call_key = self.expansion_call_key("ct/expand-calls", &collapse_calls_args)?;
+        match collapse_calls_args.non_expanded_kind {
+            CalltraceNonExpandedKind::CallstackInternal => self
+                .calltrace
+                .expand_callstack_internal(call_key, collapse_calls_args.count),
+            CalltraceNonExpandedKind::Callstack => self.calltrace.expand_callstack(call_key),
+            CalltraceNonExpandedKind::Children => self.calltrace.change_expand_state(call_key, true),
+            // These kinds name no expansion this command makes. Answering
+            // them `success: true` would tell the client something changed
+            // when nothing did, so they are refused by name, before (and
+            // instead of) any change.
+            other @ (CalltraceNonExpandedKind::Siblings
+            | CalltraceNonExpandedKind::Calls
+            | CalltraceNonExpandedKind::CallstackInternalChild) => {
+                return Err(format!("ct/expand-calls: nonExpandedKind {other:?} names no expansion to make").into());
             }
-            if kind == CalltraceNonExpandedKind::CallstackInternal {
-                self.calltrace
-                    .expand_callstack_internal(CallKey(num_key), collapse_calls_args.count)
-            } else if kind == CalltraceNonExpandedKind::Callstack {
-                self.calltrace.expand_callstack(CallKey(num_key));
-            } else if kind == CalltraceNonExpandedKind::Children {
-                self.calltrace.change_expand_state(CallKey(num_key), true);
-            }
-        } else {
-            error!("invalid i64 number for call key: {}", collapse_calls_args.call_key);
         }
-        // self.return_task((task, VOID_RESULT.to_string()))?;
-        Ok(())
+        self.respond_dap(req, serde_json::json!({}), sender)
     }
 
     fn load_local_calltrace(&mut self, args: CalltraceLoadArgs) -> Result<Vec<CallLine>, Box<dyn Error>> {
@@ -9499,6 +9519,7 @@ mod tests {
 
         handler.step_id = StepId(handler.reader.step_count() as i64 + 10);
         collapse(&mut handler, CallKey(0))?;
+        let (sender, _receiver) = mpsc::channel();
         handler.expand_calls(
             dap::Request::default(),
             CollapseCallsArgs {
@@ -9506,6 +9527,7 @@ mod tests {
                 non_expanded_kind: CalltraceNonExpandedKind::Children,
                 count: 0,
             },
+            sender,
         )?;
         Ok(())
     }
@@ -9558,6 +9580,9 @@ mod tests {
 
     /// `ct/collapse-calls` for `key`, as the front ends send it.
     fn collapse(handler: &mut Handler, key: CallKey) -> Result<(), Box<dyn Error>> {
+        // The answer is not read here; the receiver is kept alive so the
+        // handler's `respond_dap` has somewhere to send it.
+        let (sender, _receiver) = mpsc::channel();
         handler.collapse_calls(
             dap::Request::default(),
             CollapseCallsArgs {
@@ -9565,6 +9590,7 @@ mod tests {
                 non_expanded_kind: CalltraceNonExpandedKind::Children,
                 count: 0,
             },
+            sender,
         )
     }
 

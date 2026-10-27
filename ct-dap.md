@@ -79,8 +79,8 @@ response behavior per command.
 | `ct/update-table` | `UpdateTableArgs` | Emits `ct/updated-table` with `CtUpdatedTableResponseBody`. |
 | `ct/event-load` | none | Emits `ct/updated-events` and `ct/updated-events-content`. |
 | `ct/load-terminal` | none | Emits `ct/loaded-terminal`. |
-| `ct/collapse-calls` | `CollapseCallsArgs` | Updates internal calltrace state. |
-| `ct/expand-calls` | `CollapseCallsArgs` | Updates internal calltrace state. |
+| `ct/collapse-calls` | `CollapseCallsArgs` | Updates internal calltrace state; responds with an empty body (`success: false` for a call key no call has, or one that is not an integer). |
+| `ct/expand-calls` | `CollapseCallsArgs` | Updates internal calltrace state; responds as `ct/collapse-calls` does, and refuses a `nonExpandedKind` that names no expansion (`Siblings`, `Calls`, `CallstackInternalChild`). |
 | `ct/load-calltrace-section` | `CalltraceLoadArgs` | Emits `ct/updated-calltrace`. |
 | `ct/calltrace-jump` | `Location` (must carry `rrTicks`) | Emits `stopped`, `ct/complete-move`, `output`. |
 | `ct/event-jump` | `ProgramEvent` | Emits `stopped`, `ct/complete-move`, `output`. |

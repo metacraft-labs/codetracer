@@ -251,10 +251,12 @@ proc toggleCallChildren*(s: HeadlessDebugSession; index: int64): string =
   let collapse = line.isExpanded
   let command = if collapse: "ct/collapse-calls" else: "ct/expand-calls"
   try:
-    # FIRE AND FORGET, as the desktop's `backend.send` is: the engine sends
-    # no response to `ct/expand-calls` / `ct/collapse-calls` (measured — a
-    # blocking `sendDapRequest` never returned), only the changed section
-    # the next load reads.
+    # FIRE AND FORGET, as the desktop's `backend.send` is: what this toggle
+    # is for is the changed section the next load reads. The engine does
+    # answer the request (an empty body, or a refusal naming the key), and
+    # that answer is left unread here; every later read matches a response
+    # by its `request_seq` (`sendDapRequest`) or skips responses
+    # (`waitForEvent`), so it is discarded, never taken for another's.
     s.backend.sendDapRequestNoResponse(command, %*{
       "callKey": line.callKey, "nonExpandedKind": 1, "count": 0})
     discard s.backend.drainEvents()

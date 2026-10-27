@@ -224,6 +224,19 @@ func commandToCtResponseEventKind*(command: string): CtEventKind =
   # `reset` replaces and a non-reset delta merges on `id`, last wins.
   of "ct/load-request-spans-since": CtLoadRequestSpansSince
   of "ct/load-request-spans": CtLoadRequestSpans
+  # The engine answers both with an empty body once the call trace's
+  # expansion state has changed (every request is answered, as the DAP
+  # requires). The answer fans out as the request's own kind, as the
+  # request-span arms above do. Nothing acts on it there: the desktop's
+  # subscriptions to these kinds are on the views mediator, where they SEND
+  # the request, and the one `DapApi` handler that receives every mapped kind
+  # (`dap_backend.newDapBackendService`) hands it to `BackendService.onEvent`
+  # handlers, each of which matches the event kinds it applies and ignores
+  # the rest. So the fan-out is a no-op instead of the `ignoring response for
+  # unmapped command` log line, and the caller reads the change through its
+  # next `ct/load-calltrace-section`.
+  of "ct/collapse-calls": CtCollapseCalls
+  of "ct/expand-calls": CtExpandCalls
   of "ct/load-symbols": CtLoadSymbols
   of "ct/load-value-elements": CtLoadValueElements
   of "ct/load-terminal-lines": CtLoadTerminalLines

@@ -6700,11 +6700,11 @@ Two traps in the same area, both live:
   it is red; stage the gitlink at 3d0703d with `git update-index --cacheinfo`
   to grade, and restore it after.
 - PLAT-49 part B (2026-10-02) facts:
-  * The engine sends NO DAP response to `ct/expand-calls` / `ct/collapse-calls`
-    (the desktop fires them with `backend.send`). A blocking
-    `DapStdioBackend.sendDapRequest` for either never returns and wedges the
-    front-end's loop; use `sendDapRequestNoResponse`, then reload the section.
-    After a collapse the section's `#N` indices RENUMBER (`callLineOf` numbers a
+  * `ct/expand-calls` / `ct/collapse-calls` are answered (an empty body, or a
+    refusal naming the key) since the 2026-10-27 fix; until then the engine
+    sent nothing on success. The TUI still fires them with
+    `sendDapRequestNoResponse` and reloads the section, leaving the answer
+    unread (every later read matches by `request_seq`). After a collapse the section's `#N` indices RENUMBER (`callLineOf` numbers a
     row by its place in the section), on the desktop too.
   * Call rows: `ct/load-calltrace-section` carries every call's `args` (with
     `value`s) and `returnValue`; the response's top-level `args` /

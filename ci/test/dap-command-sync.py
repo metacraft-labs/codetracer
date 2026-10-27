@@ -178,14 +178,6 @@ EXPECTED_RESIDUE = {
 #     here would be dead code. Each reason names the handler and what it does
 #     with its `sender` instead; all of them were read, not assumed.
 RESPONSE_RESIDUE_NO_RESPONSE = {
-    "ct/collapse-calls": (
-        "dap_handler.rs::collapse_calls mutates `self.calltrace` and returns; "
-        "the arm passes no `sender` at all."
-    ),
-    "ct/expand-calls": (
-        "dap_handler.rs::expand_calls — same shape as collapse_calls, no "
-        "`sender` in the arm."
-    ),
     "ct/history-jump": (
         "dap_handler.rs::history_jump jumps and calls `complete_move`, which "
         "emits the `ct/complete-move` EVENT. No respond_dap."

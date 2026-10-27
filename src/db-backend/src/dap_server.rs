@@ -2194,8 +2194,12 @@ pub fn handle_request(
         "ct/event-load" => handler.event_load(req.clone(), sender.clone())?,
         "ct/load-terminal" => handler.load_terminal(req.clone(), sender.clone())?,
         "ct/load-terminal-lines" => handler.load_terminal_lines(req.clone(), sender.clone())?,
-        "ct/collapse-calls" => handler.collapse_calls(req.clone(), req.load_args::<CollapseCallsArgs>()?)?,
-        "ct/expand-calls" => handler.expand_calls(req.clone(), req.load_args::<CollapseCallsArgs>()?)?,
+        "ct/collapse-calls" => {
+            handler.collapse_calls(req.clone(), req.load_args::<CollapseCallsArgs>()?, sender.clone())?
+        }
+        "ct/expand-calls" => {
+            handler.expand_calls(req.clone(), req.load_args::<CollapseCallsArgs>()?, sender.clone())?
+        }
         // NOT `req.load_args::<Location>()`. `Location` is `#[serde(default)]`
         // at container level, so that call succeeds on ANY JSON object and
         // hands the handler a zeroed location — `rr_ticks == 0`, which

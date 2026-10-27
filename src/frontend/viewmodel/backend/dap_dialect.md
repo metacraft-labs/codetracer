@@ -687,8 +687,8 @@ as `_req` — deliberately unused — and ends at `complete_move(...)` without t
 | `ct/calltrace-jump` | `dap_handler.rs::calltrace_jump` | **fixed** — now responds |
 | `ct/event-jump` | `dap_handler.rs::event_jump` | **fixed** — now responds |
 | `restart` | `run_to_entry` | silent |
-| `ct/collapse-calls` | `collapse_calls` | silent — dispatched without a `sender` at all, so it *cannot* respond |
-| `ct/expand-calls` | `expand_calls` | silent — same |
+| `ct/collapse-calls` | `collapse_calls` | **fixed** — now responds: an empty body on success, `success: false` for a call key no call has or one that is not an integer. The arm now hands it the `sender` |
+| `ct/expand-calls` | `expand_calls` | **fixed** — same, and also refuses a `nonExpandedKind` that names no expansion (`Siblings`, `Calls`, `CallstackInternalChild`) |
 | `ct/history-jump` | `history_jump` | silent |
 | `ct/trace-jump` | `trace_jump` | **fixed** — now responds (`dap_handler.rs:5274`). This row read "silent" until 2026-09-21; the fix and the comment explaining it were already in the file, and only the table had not been updated |
 | `ct/tracepoint-delete` | `tracepoint_delete` | silent |
@@ -697,10 +697,15 @@ as `_req` — deliberately unused — and ends at `complete_move(...)` without t
 | `ct/setup-trace-session` | `setup_trace_session` | silent |
 
 The two `*-jump` commands are fixed because they are the row-click commands a
-pane awaits directly. The remaining nine are recorded rather than changed: two of
-them are not even handed a `sender`, so fixing them is a dispatch-signature
-change rather than a one-line addition, and the rest want a caller that actually
-awaits them before their response shape is decided.
+pane awaits directly. `ct/collapse-calls` and `ct/expand-calls` are fixed
+because the engine answers every request exactly once, as the DAP requires
+(<https://microsoft.github.io/debug-adapter-protocol/overview#requests>). Their
+callers send them fire-and-forget and may leave the answer unread, which is
+safe: every reader matches a response by its `request_seq` (or, in
+`headless_session.awaitJump`, its `command`), so an unread answer is skipped,
+never taken for another request's. The remaining seven are recorded rather
+than changed: they want a caller that actually awaits them before their
+response shape is decided.
 
 **For consumers:** do not `await` any command in the "silent" rows above without
 your own deadline. `hydrate.nim` is unaffected today only because it uses
