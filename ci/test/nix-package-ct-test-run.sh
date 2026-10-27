@@ -51,7 +51,11 @@ cp -r "$REPO_ROOT/src/ct_test/fixtures/go_test_project" "$workspace"
 chmod -R u+w "$workspace"
 git -C "$workspace" init -q
 git -C "$workspace" add -A
-git -C "$workspace" -c user.email=ct@example.invalid -c user.name=ct commit -qm fixture
+# A fixture commit, unsigned whatever the runner's own git config says: a
+# persistent runner with `commit.gpgsign` set and no key failed this lane at
+# "gpg failed to sign the data", a property of the host and not of `ct test`.
+git -C "$workspace" -c user.email=ct@example.invalid -c user.name=ct \
+	-c commit.gpgsign=false commit -qm fixture
 
 export CODETRACER_HOME="$WORK/home"
 export TEST_CERTIFICATES_DIR="$WORK/certificates"
