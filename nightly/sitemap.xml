@@ -43,6 +43,7 @@
   <url><loc>https://docs.codetracer.com/nightly/reference/mcp-tools</loc></url>
   <url><loc>https://docs.codetracer.com/nightly/reference/origin-kinds</loc></url>
   <url><loc>https://docs.codetracer.com/nightly/reference/recorders</loc></url>
+  <url><loc>https://docs.codetracer.com/nightly/reference/watchpoints</loc></url>
   <url><loc>https://docs.codetracer.com/nightly/usage_guide</loc></url>
   <url><loc>https://docs.codetracer.com/nightly/usage_guide/cli</loc></url>
   <url><loc>https://docs.codetracer.com/nightly/usage_guide/gui</loc></url>
@@ -55,6 +56,7 @@
   <url><loc>https://docs.codetracer.com/nightly/usage_guide/live-requests-elixir</loc></url>
   <url><loc>https://docs.codetracer.com/nightly/usage_guide/live-requests-javascript</loc></url>
   <url><loc>https://docs.codetracer.com/nightly/usage_guide/live-requests-native</loc></url>
+  <url><loc>https://docs.codetracer.com/nightly/usage_guide/terminal-setup</loc></url>
   <url><loc>https://docs.codetracer.com/nightly/usage_guide/visual_recordings</loc></url>
   <url><loc>https://docs.codetracer.com/nightly/usage_guide/incremental-testing</loc></url>
   <url><loc>https://docs.codetracer.com/nightly/usage_guide/value-origin-tracking</loc></url>
