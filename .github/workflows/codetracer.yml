@@ -2016,9 +2016,14 @@ jobs:
 
   lint-nix:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
-    # 200-run window: 42 green, median 5.4m, max 7.2m. 25m is ~3.5x the slowest
-    # green -- wider than the lint floor because this lane evaluates the flake.
-    timeout-minutes: 25
+    # 200-run window: 42 green, median 5.4m, max 7.2m -- measured when this lane
+    # only evaluated the flake. Since 7ab073a22 it also BUILDS the backend-manager
+    # package's sandbox inputs (db-backend, the ct-mcr test recorder, the license
+    # check), none of which a fresh slot has in its store: on nixos-ci-bare-003
+    # (2026-10-25/26) that step took 26-35m and the flake check 10-18m, and on
+    # #882 every attempt on a cold garm slot was cancelled at 25m inside the
+    # build. 90m is ~2x the slowest local measurement of the two steps together.
+    timeout-minutes: 90
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility

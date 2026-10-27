@@ -883,9 +883,9 @@
             "${inputs.codetracer-trace-format-nim}/src"
             "${inputs.codetracer-visual-replay}/src"
             "${inputs.nim-stackable-hooks}/src"
-            ../../libs/nim-confutils
-            ../../libs/nim-serialization
-            ../../libs/nim-faststreams
+            inputs.nim-confutils
+            inputs.nim-serialization
+            inputs.nim-faststreams
           ];
           buildPhase = ''
             runHook preBuild

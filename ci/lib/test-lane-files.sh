@@ -182,7 +182,7 @@ _tlf_js_only_suites() {
 	while read -r f; do
 		[ -n "${f}" ] || continue
 		[ -f "${f}" ] || continue
-		if _tlf_top_level_imports "${f}" | grep -qE -- "${_TLF_JS_ONLY_IMPORT_RE}"; then
+		if grep -qE -- "${_TLF_JS_ONLY_IMPORT_RE}" <<<"$(_tlf_top_level_imports "${f}")"; then
 			[ "${mode}" = keep ] && printf '%s\n' "${f}"
 		else
 			[ "${mode}" = reject ] && printf '%s\n' "${f}"

@@ -4389,6 +4389,23 @@
         "type": "github"
       }
     },
+    "nim-confutils": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1792503140,
+        "narHash": "sha256-sYOq5Q8KioS25qxKvZdAeX6gFGVYEA6zd3WAnXBWOq4=",
+        "owner": "metacraft-labs",
+        "repo": "nim-confutils",
+        "rev": "331c5fa2f741a6657c16404bfc9401b18d295f92",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "repo": "nim-confutils",
+        "rev": "331c5fa2f741a6657c16404bfc9401b18d295f92",
+        "type": "github"
+      }
+    },
     "nim-csources-src": {
       "flake": false,
       "locked": {
@@ -4420,6 +4437,23 @@
         "owner": "metacraft-labs",
         "ref": "dev",
         "repo": "nim-everywhere",
+        "type": "github"
+      }
+    },
+    "nim-faststreams": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1642874480,
+        "narHash": "sha256-Q2lq5j3wXB5/pHAZHdCfIRRGfWDCLfhMs/2nYHLPNu4=",
+        "owner": "status-im",
+        "repo": "nim-faststreams",
+        "rev": "37a183153c071539ab870f427c09a1376ba311b9",
+        "type": "github"
+      },
+      "original": {
+        "owner": "status-im",
+        "repo": "nim-faststreams",
+        "rev": "37a183153c071539ab870f427c09a1376ba311b9",
         "type": "github"
       }
     },
@@ -4602,6 +4636,23 @@
       "original": {
         "owner": "arnetheduck",
         "repo": "nim-results",
+        "type": "github"
+      }
+    },
+    "nim-serialization": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1657650924,
+        "narHash": "sha256-lCTEJDRW02xtS1ukqwQ1Q4bj5h9AYpy6hb63bYoIifs=",
+        "owner": "status-im",
+        "repo": "nim-serialization",
+        "rev": "9eb88077063bf7e16357e1ed6aaa7c1391b4d7c4",
+        "type": "github"
+      },
+      "original": {
+        "owner": "status-im",
+        "repo": "nim-serialization",
+        "rev": "9eb88077063bf7e16357e1ed6aaa7c1391b4d7c4",
         "type": "github"
       }
     },
@@ -7720,10 +7771,13 @@
         "nim-acp": "nim-acp",
         "nim-agent-harbor": "nim-agent-harbor",
         "nim-agents": "nim-agents",
+        "nim-confutils": "nim-confutils",
         "nim-everywhere": "nim-everywhere",
+        "nim-faststreams": "nim-faststreams",
         "nim-langserver": "nim-langserver",
         "nim-pty": "nim-pty",
         "nim-results": "nim-results_4",
+        "nim-serialization": "nim-serialization",
         "nim-stackable-hooks": "nim-stackable-hooks",
         "nim-stew": "nim-stew_4",
         "nim-termctl": "nim-termctl",
