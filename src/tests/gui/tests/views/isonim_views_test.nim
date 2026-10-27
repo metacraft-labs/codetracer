@@ -2527,8 +2527,10 @@ suite "IsoNim Calltrace Panel — guide-line geometry":
     ]
 
   test "connector k sits at (k+1) * pitch for a sub-pixel pitch, at any row":
-    # The desktop's measured advance. A 25 px drawer is 0.28 px off per row,
-    # more than a whole row by row 100.
+    # A sub-pixel advance that is not exact in binary — the mean the desktop
+    # measured while rows with a return value were taller than the rest
+    # (codetracer-pm issue 2026-10-18). A 25 px drawer is 0.28 px off per
+    # row, more than a whole row by row 100.
     const pitch = 25.28
     var depths: seq[int]
     for i in 0 ..< 120: depths.add(i mod 3)

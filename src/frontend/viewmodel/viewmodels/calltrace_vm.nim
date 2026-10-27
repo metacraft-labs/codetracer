@@ -196,9 +196,9 @@ type
 
     # -- Measured layout --
     # The rows' measured ADVANCE (top to top) in CSS pixels, measured from
-    # the DOM after rows render and on every zoom/resize. Not the row box:
-    # the two differ on the desktop (~25.28 vs 25 px), and only the advance
-    # places the n-th row.
+    # the DOM after rows render and on every zoom/resize. On the shipped
+    # stylesheet it equals the row box (1.5625em), but only the advance
+    # places the n-th row, so it is the advance that is measured.
     # Defaults to 24.0 (the legacy CALL_HEIGHT_PX constant) until measured.
     # Used by the view to compute the virtual-scroll container height
     # (totalCallsCount * rowHeightPx) and the translateY offset

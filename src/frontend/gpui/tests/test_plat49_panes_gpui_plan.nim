@@ -292,7 +292,7 @@ suite "PLAT-49 part B: the GPUI window's call trace":
     let entryTick = geom.tickOf
     ck entryTick >= 0
     # The rows start below the pane's inset and the search field, at the
-    # desktop's fractional pitch (`leaves.callRowTopPx`).
+    # desktop's row pitch (`leaves.callRowTopPx`).
     proc rowY(i: int): int =
       b[1] + paneInsetOf("calltrace").top + CallRowsTopPx + callRowTopPx(i) +
         (callRowTopPx(i + 1) - callRowTopPx(i)) div 2

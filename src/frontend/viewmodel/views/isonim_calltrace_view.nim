@@ -167,8 +167,8 @@ proc returnArrowForRow(vm: CalltraceVM; item: proc(): CallLine): string =
 # The guides are an SVG layer laid over the rows (`renderTraceSvg` below). A
 # guide connects two rows only if it is drawn where the browser put them, and
 # the browser lays the rows out from em-based CSS: their advance follows the
-# root font size (zoom) and is not a whole number of pixels (about 25.28 px
-# against a 25 px row box at 16 px on the desktop). So nothing here is a pixel
+# root font size (zoom) and need not be a whole number of pixels (the row box
+# is 1.5625em, so 20.3125 px at a 13 px root). So nothing here is a pixel
 # constant except the depth indent, which the row renderer itself writes in
 # pixels. The rest is measured from the rendered rows and passed in.
 
@@ -279,12 +279,16 @@ when defined(js):
 
   proc measureCallRowPitch(linesContainer: isonim_dom.Element): float =
     ## The rows' ADVANCE in CSS px — the distance from one row's top to the
-    ## next — which is what positions every row, and not the row box: on the
-    ## desktop the advance is ~25.28 px against a 25 px box (codetracer-pm
-    ## issue 2026-10-18), and a layout built on the box drifts by the
-    ## difference every row. Averaged over all rendered rows, so a sub-pixel
-    ## advance is recovered exactly rather than rounded per row. With one row
-    ## the box is all there is; with none, 0.0.
+    ## next — which is what positions every row. The shipped stylesheet makes
+    ## it equal to the row box (`calltrace.styl` keeps every part of a row
+    ## within the toggle's 1.5625em; codetracer-pm issue 2026-10-18 records
+    ## the return value that once grew rows past it), but the advance is
+    ## still MEASURED rather than assumed: it is the quantity the guides and
+    ## the virtual scroll depend on, and a theme or a later rule that let a
+    ## row grow would otherwise drift them by the difference every row.
+    ## Averaged over all rendered rows, so a sub-pixel advance is recovered
+    ## exactly rather than rounded per row. With one row the box is all there
+    ## is; with none, 0.0.
     ##
     ## Read from the live layout, so it follows the root font size (zoom) and
     ## the theme.

@@ -43,8 +43,10 @@ func pixelPaneViewport*(heightPx, widthPx, rowPx, scrollTopPx: float;
   ## (no height, or no row pitch yet) asks for nothing.
   if heightPx <= 0.0 or rowPx <= 0.0:
     return Viewport()
-  # A whole row, measured at a fractional pitch (the desktop's ~25.28 px),
-  # divides to a hair under its count; the tolerance keeps it whole.
+  # A whole row, measured at a fractional pitch (the desktop's 1.5625em row
+  # is 20.3125 px at a 13 px root, and a measured mean need not be exact in
+  # binary at all), divides to a hair under its count; the tolerance keeps it
+  # whole.
   const Tolerance = 1e-6
   let exact = heightPx / rowPx
   let rows = max(1, if countPartialRow: int(ceil(exact - Tolerance))

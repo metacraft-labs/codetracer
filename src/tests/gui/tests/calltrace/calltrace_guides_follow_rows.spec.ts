@@ -36,7 +36,8 @@
  *
  * The same property is held, without Electron, by
  * `src/frontend/tests/calltrace_guides_chromium_test.nim` (renderer-chromium
- * lane), which reproduces the 25.28 px advance and runs in seconds.
+ * lane), which drives the drawer at an advance that is neither the row box
+ * nor a whole number of pixels, and runs in seconds.
  */
 import { test, expect } from "../../lib/fixtures";
 import { LayoutPage } from "../../page-objects/layout-page";
