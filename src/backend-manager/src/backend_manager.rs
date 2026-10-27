@@ -1821,10 +1821,13 @@ impl BackendManager {
                         python_bridge::format_select_process_response(msg)
                     }
                     PendingPyRequestKind::RunTracepoints => {
-                        // RunTracepoints is resolved via event interception
-                        // (ct/tracepoint-results), not via a DAP response.
-                        // If we reach here, silently consume.
-                        return;
+                        // A sweep that succeeds is answered from its
+                        // ct/tracepoint-results event, which comes before
+                        // this answer and retires this entry. Reaching it
+                        // here means there was no event: a refusal (or a
+                        // success without results), which the Python client
+                        // must still be answered with, or it waits for ever.
+                        python_bridge::format_run_tracepoints_answer(msg)
                     }
                     PendingPyRequestKind::OriginChain => {
                         // Forward the OriginChain wire shape verbatim (spec §4.1).
@@ -4606,7 +4609,9 @@ impl BackendManager {
     /// Builds a `ct/run-tracepoints` DAP command from all stored tracepoints
     /// and sends it to the backend's tracepoint thread.  Registers a pending
     /// request that is resolved when the backend emits a
-    /// `ct/tracepoint-results` event.
+    /// `ct/tracepoint-results` event, or, when the backend refuses the sweep
+    /// (it then answers `success: false` and sends no event), by that
+    /// refusal, which the client gets as `success: false` with the reason.
     ///
     /// # Wire protocol
     ///
@@ -7183,5 +7188,176 @@ mod replay_id_tag_tests {
     #[test]
     fn a_message_that_is_not_an_object_passes_through() {
         assert_eq!(tag_with_replay_id(json!("raw"), 1), json!("raw"));
+    }
+}
+
+/// `ct/py-run-tracepoints` is answered whichever way the backend's
+/// `ct/run-tracepoints` ends.
+///
+/// Spec: codetracer-specs `spec/Architecture/CodeTracer-DAP-Extensions.md`,
+/// "Every request is answered": a request the replay server cannot carry out
+/// gets `success: false` and a `message`, never only logged. The session
+/// manager's Python bridge is the client of that request, so the refusal has
+/// to reach the Python client it was made for; it used to be consumed here,
+/// and the client waited for ever.
+///
+/// These drive the daemon's real message router (`route_daemon_message`)
+/// with the messages a replay server sends. No backend process is started:
+/// what is under test is what the router does with each message, and the
+/// client is the receiving end of the channel the daemon writes to.
+#[cfg(test)]
+mod py_run_tracepoints_answer_tests {
+    use super::{BackendManager, ClientHandle, DaemonState};
+    use crate::config::DaemonConfig;
+    use crate::python_bridge::{PendingPyRequest, PendingPyRequestKind, PyBridgeState};
+    use crate::session::SessionManager;
+    use serde_json::{Value, json};
+    use std::collections::HashMap;
+    use std::time::Duration;
+    use tokio::sync::mpsc::{self, UnboundedReceiver};
+
+    const CLIENT: u64 = 7;
+    const CLIENT_SEQ: i64 = 3;
+    const BACKEND_SEQ: i64 = 1_000_005;
+
+    /// A daemon with one Python client and its `ct/py-run-tracepoints`
+    /// already forwarded to the backend as `ct/run-tracepoints`.
+    fn daemon_awaiting_a_sweep() -> (BackendManager, UnboundedReceiver<Value>) {
+        let (session_manager, _expiries) = SessionManager::new(Duration::from_secs(60), 4);
+        let (tx, rx) = mpsc::unbounded_channel();
+        let mut py_bridge = PyBridgeState::new();
+        py_bridge.pending_requests.push(PendingPyRequest {
+            kind: PendingPyRequestKind::RunTracepoints,
+            client_id: CLIENT,
+            original_seq: CLIENT_SEQ,
+            backend_seq: BACKEND_SEQ,
+            response_command: "ct/py-run-tracepoints".to_string(),
+            expression: String::new(),
+        });
+        let manager = BackendManager {
+            children: vec![],
+            children_receivers: vec![],
+            parent_senders: vec![],
+            selected: 0,
+            manager_receiver: None,
+            manager_sender: None,
+            daemon_state: Some(DaemonState {
+                clients: HashMap::from([(CLIENT, ClientHandle { tx })]),
+                request_client_map: HashMap::new(),
+                shutdown_tx: None,
+                session_manager,
+                config: DaemonConfig::default(),
+                py_bridge,
+            }),
+        };
+        (manager, rx)
+    }
+
+    fn answer(success: bool, message: Option<&str>) -> Value {
+        let mut answer = json!({
+            "type": "response",
+            "request_seq": BACKEND_SEQ,
+            "success": success,
+            "command": "ct/run-tracepoints",
+            "body": {},
+        });
+        if let Some(message) = message {
+            answer["message"] = json!(message);
+        }
+        answer
+    }
+
+    fn sent(rx: &mut UnboundedReceiver<Value>) -> Vec<Value> {
+        std::iter::from_fn(|| rx.try_recv().ok()).collect()
+    }
+
+    fn nothing_pending(manager: &BackendManager) -> bool {
+        manager
+            .daemon_state
+            .as_ref()
+            .is_some_and(|ds| ds.py_bridge.pending_requests.is_empty())
+    }
+
+    #[test]
+    fn a_refused_sweep_is_answered_to_the_python_client_as_an_error() {
+        let (mut manager, mut rx) = daemon_awaiting_a_sweep();
+        let refusal = "ct/run-tracepoints: the tracepoint thread has no trace loaded";
+        manager.route_daemon_message(Some(0), &answer(false, Some(refusal)));
+
+        let sent = sent(&mut rx);
+        assert_eq!(
+            sent.len(),
+            1,
+            "the refused sweep must be answered exactly once, got {sent:?}"
+        );
+        assert_eq!(sent[0]["type"], json!("response"));
+        assert_eq!(sent[0]["command"], json!("ct/py-run-tracepoints"));
+        assert_eq!(sent[0]["request_seq"], json!(CLIENT_SEQ));
+        assert_eq!(sent[0]["success"], json!(false));
+        let message = sent[0]["message"].as_str().unwrap_or_default();
+        assert!(
+            message.contains(refusal),
+            "the answer must carry the backend's reason, got {message:?}"
+        );
+        assert!(
+            nothing_pending(&manager),
+            "the request must not stay pending"
+        );
+    }
+
+    #[test]
+    fn a_refusal_without_a_message_is_still_an_error_answer() {
+        let (mut manager, mut rx) = daemon_awaiting_a_sweep();
+        manager.route_daemon_message(Some(0), &answer(false, None));
+
+        let sent = sent(&mut rx);
+        assert_eq!(sent.len(), 1, "got {sent:?}");
+        assert_eq!(sent[0]["success"], json!(false));
+        assert!(
+            sent[0]["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("ct/run-tracepoints")),
+            "the answer must name what failed, got {:?}",
+            sent[0]
+        );
+    }
+
+    #[test]
+    fn a_success_without_its_results_event_is_not_left_unanswered() {
+        let (mut manager, mut rx) = daemon_awaiting_a_sweep();
+        manager.route_daemon_message(Some(0), &answer(true, None));
+
+        let sent = sent(&mut rx);
+        assert_eq!(sent.len(), 1, "got {sent:?}");
+        assert_eq!(sent[0]["request_seq"], json!(CLIENT_SEQ));
+        assert_eq!(sent[0]["success"], json!(false));
+        assert!(
+            sent[0]["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("ct/tracepoint-results")),
+            "the answer must say the results never came, got {:?}",
+            sent[0]
+        );
+    }
+
+    /// The order a sweep that succeeds keeps: its results event, then its
+    /// answer. The client gets the results once, and the answer after them
+    /// reaches no client.
+    #[test]
+    fn a_sweep_that_succeeds_is_answered_once_with_its_results() {
+        let (mut manager, mut rx) = daemon_awaiting_a_sweep();
+        let results = json!({
+            "type": "event",
+            "event": "ct/tracepoint-results",
+            "body": {"sessionId": 1, "results": [], "errors": {}},
+        });
+        manager.route_daemon_message(Some(0), &results);
+        manager.route_daemon_message(Some(0), &answer(true, None));
+
+        let sent = sent(&mut rx);
+        assert_eq!(sent.len(), 1, "got {sent:?}");
+        assert_eq!(sent[0]["success"], json!(true));
+        assert_eq!(sent[0]["body"]["results"], json!([]));
+        assert!(nothing_pending(&manager), "the answer must be consumed");
     }
 }
