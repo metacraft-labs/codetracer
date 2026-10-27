@@ -1246,6 +1246,24 @@ impl Handler {
         Ok(())
     }
 
+    /// `restart` and `ct/run-to-entry`: go back to the entry and answer.
+    ///
+    /// [`Handler::run_to_entry`] itself does not answer, because the launch
+    /// paths position a session with it too and they have no request of
+    /// their own to answer. A request does: the DAP answers every request,
+    /// and for `restart` it defines the answer, a `RestartResponse` with no
+    /// body (<https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Restart>).
+    /// The answer follows the move's `stopped` / `ct/complete-move`, as the
+    /// other moves' answers do.
+    pub fn run_to_entry_request(
+        &mut self,
+        req: dap::Request,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        self.run_to_entry(req.clone(), None, sender.clone())?;
+        self.respond_dap(req, serde_json::json!({}), sender)
+    }
+
     /// Position a freshly launched session: where a launch opens.
     ///
     /// * A launch carrying a `restoreLocation` (a subsystem restart) goes back
@@ -3708,17 +3726,21 @@ impl Handler {
         Ok(())
     }
 
+    /// `ct/history-jump`: move to a recorded location. Answered with an empty
+    /// body after the move's `stopped` / `ct/complete-move` (the DAP answers
+    /// every request); a location the replay cannot reach is refused by the
+    /// caller's error path before anything moves.
     pub fn history_jump(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         loc: Location,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         info!("history_jump: doing location jump to {loc:?}");
         self.replay.location_jump(&loc)?;
         self.step_id = self.replay.current_step_id();
-        self.complete_move(false, sender)?;
-        Ok(())
+        self.complete_move(false, sender.clone())?;
+        self.respond_dap(req, serde_json::json!({}), sender)
     }
 
     // -----------------------------------------------------------------
@@ -6049,6 +6071,11 @@ impl Handler {
         }
     }
 
+    /// `ct/run-tracepoints`: sweep the recording for the session's tracepoints.
+    ///
+    /// The results travel as events (`ct/updated-trace` per tracepoint, then
+    /// `ct/tracepoint-results`), and the request is answered with an empty
+    /// body after the last of them.
     pub fn run_tracepoints(
         &mut self,
         req: dap::Request,
@@ -6063,8 +6090,9 @@ impl Handler {
         };
         info!("run_tracepoints trace_kind {:?}", self.trace_kind);
 
-        // Sort steps in StepId Ord
-        self.setup_trace_session(req, args.clone(), sender.clone())?;
+        // The tables only: `setup_trace_session` would answer the request,
+        // and this one is answered once the sweep is over (below).
+        self.prepare_trace_tables(&args);
 
         let tracepoints = &args.session.tracepoints;
         let is_empty = false; // TODO: check if there is at least one enabled non-empty log?
@@ -6112,7 +6140,12 @@ impl Handler {
         let results_event = self.dap_client.tracepoint_results_event(aggregate)?;
         sender.send(results_event)?;
 
-        Ok(())
+        // The answer comes last, once every event of the sweep is out: a
+        // client that reads the results event and then its response (or
+        // only the response) never sees one without the other. The DAP
+        // answers every request; the results travel in the events, so the
+        // body is empty.
+        self.respond_dap(req, serde_json::json!({}), sender)
     }
 
     pub fn trace_jump(
@@ -6140,28 +6173,54 @@ impl Handler {
         Ok(())
     }
 
+    /// The event table of tracepoint `id` (`SingleTableId(id + 1)`: table 0
+    /// holds the recording's own events), refused by name when the id is
+    /// too large to have one.
+    fn tracepoint_table_id(command: &str, id: usize) -> Result<SingleTableId, Box<dyn Error>> {
+        id.checked_add(1)
+            .map(SingleTableId)
+            .ok_or_else(|| format!("{command}: tracepoint id {id} is out of range").into())
+    }
+
+    /// `ct/tracepoint-delete`: drop a tracepoint's results.
+    ///
+    /// Only a tracepoint that has been run has a table to clear, so an id
+    /// with none is refused by name before anything changes (it used to
+    /// index past the tables and panic). Answered with an empty body after
+    /// the `ct/updated-trace` event.
     pub fn tracepoint_delete(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         tracepoint_id: TracepointId,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        self.event_db.clear_single_table(SingleTableId(tracepoint_id.id + 1));
+        let table_id = Self::tracepoint_table_id("ct/tracepoint-delete", tracepoint_id.id)?;
+        if table_id.0 >= self.event_db.single_tables.len() {
+            return Err(format!("ct/tracepoint-delete: no tracepoint has id {}", tracepoint_id.id).into());
+        }
+        self.event_db.clear_single_table(table_id);
         self.event_db.refresh_global();
         let mut t_update = TraceUpdate::new(0, false, tracepoint_id.id, self.event_db.tracepoint_errors.clone());
         t_update.refresh_event_log = true;
         let raw_event = self.dap_client.updated_trace_event(t_update)?;
         sender.send(raw_event)?;
-        Ok(())
+        self.respond_dap(req, serde_json::json!({}), sender)
     }
 
+    /// `ct/tracepoint-toggle`: enable or disable a tracepoint's results.
+    ///
+    /// The disabled state is kept by table id whether or not the tracepoint
+    /// has been run yet, so a tracepoint switched off before its first run
+    /// stays off when its table is made; only an id too large to have a
+    /// table is refused. Answered with an empty body after the
+    /// `ct/updated-trace` event.
     pub fn tracepoint_toggle(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         tracepoint_id: TracepointId,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        let table_id = self.event_db.make_single_table_id(tracepoint_id.id);
+        let table_id = Self::tracepoint_table_id("ct/tracepoint-toggle", tracepoint_id.id)?;
         if self.event_db.disabled_tables.contains(&table_id) {
             self.event_db.enable_table(table_id);
         } else {
@@ -6172,7 +6231,7 @@ impl Handler {
         t_update.refresh_event_log = true;
         let raw_event = self.dap_client.updated_trace_event(t_update)?;
         sender.send(raw_event)?;
-        Ok(())
+        self.respond_dap(req, serde_json::json!({}), sender)
     }
 
     pub fn search_program(&mut self, query: String, _task: Task) -> Result<(), Box<dyn Error>> {
@@ -6253,9 +6312,11 @@ impl Handler {
         Ok(())
     }
 
+    /// `ct/local-step-jump`: move to another iteration of a loop. Answered
+    /// with an empty body after the move's `stopped` / `ct/complete-move`.
     pub fn local_step_jump(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         arg: LocalStepJump,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
@@ -6263,7 +6324,7 @@ impl Handler {
             self.replay.jump_to(StepId(arg.rr_ticks))?;
             self.step_id = self.replay.current_step_id();
 
-            self.complete_move(false, sender)?;
+            self.complete_move(false, sender.clone())?;
         } else {
             self.replay.disable_breakpoints()?;
             let bp = self
@@ -6296,10 +6357,10 @@ impl Handler {
 
             self.step_id = self.replay.current_step_id();
 
-            self.complete_move(false, sender)?;
+            self.complete_move(false, sender.clone())?;
             // warn!("local_step_jump not implemented for RR traces");
         }
-        Ok(())
+        self.respond_dap(req, serde_json::json!({}), sender)
     }
 
     pub fn register_events(&mut self, arg: RegisterEventsArg, _task: Task) -> Result<(), Box<dyn Error>> {
@@ -6309,19 +6370,29 @@ impl Handler {
         Ok(())
     }
 
-    pub fn setup_trace_session(
-        &mut self,
-        _req: dap::Request,
-        arg: RunTracepointsArg,
-        _sender: Sender<DapMessage>,
-    ) -> Result<(), Box<dyn Error>> {
-        for trace in arg.session.tracepoints {
+    /// Make sure every tracepoint of the session has its event table.
+    ///
+    /// The shared half of `ct/setup-trace-session` and `ct/run-tracepoints`,
+    /// kept apart from both so that each answers its own request once.
+    fn prepare_trace_tables(&mut self, arg: &RunTracepointsArg) {
+        for trace in &arg.session.tracepoints {
             while trace.tracepoint_id + 1 >= self.event_db.single_tables.len() {
                 self.event_db.add_new_table(DbEventKind::Trace, &[]);
             }
             assert!(self.event_db.single_tables.len() > trace.tracepoint_id + 1);
         }
-        Ok(())
+    }
+
+    /// `ct/setup-trace-session`: make the session's tracepoint tables.
+    /// Answered with an empty body (the DAP answers every request).
+    pub fn setup_trace_session(
+        &mut self,
+        req: dap::Request,
+        arg: RunTracepointsArg,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        self.prepare_trace_tables(&arg);
+        self.respond_dap(req, serde_json::json!({}), sender)
     }
 
     pub fn register_tracepoint_logs(&mut self, arg: TracepointResults, _task: Task) -> Result<(), Box<dyn Error>> {

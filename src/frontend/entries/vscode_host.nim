@@ -283,10 +283,12 @@ proc runTracepoint*(host: VsCodeHost; path: string; line: int;
   hosted.tracepoints.add TracepointSweepSpec(
     tracepointId: hosted.tracepoints.len, path: path, line: line,
     expression: expression)
-  # A sweep answers with an event and no response (`Handler::run_tracepoints`,
-  # src/db-backend/src/dap_handler.rs), so the request settles only when the
-  # replay REFUSES it, which `callRequest` reports as `null`. A refused run
-  # is said on the tracepoint's row, as an errored sweep is.
+  # A sweep's hits arrive as the `ct/tracepoint-results` event, which the
+  # handler installed with the session applies; the response follows that
+  # event with an empty body (`Handler::run_tracepoints`,
+  # src/db-backend/src/dap_handler.rs) and carries nothing to apply. Only a
+  # refusal, which `callRequest` reports as `null`, needs saying here: it is
+  # said on the tracepoint's row, as an errored sweep is.
   let debugger = hosted.debugger
   let specs = hosted.tracepoints
   let spec = specs[^1]

@@ -175,36 +175,17 @@ EXPECTED_RESIDUE = {
 
 # (1) The engine sends NO DAP Response for these, so no response frame ever
 #     bears the command and `receiveResponse` is never called with it. An arm
-#     here would be dead code. Each reason names the handler and what it does
-#     with its `sender` instead; all of them were read, not assumed.
-RESPONSE_RESIDUE_NO_RESPONSE = {
-    "ct/history-jump": (
-        "dap_handler.rs::history_jump jumps and calls `complete_move`, which "
-        "emits the `ct/complete-move` EVENT. No respond_dap."
-    ),
-    "ct/local-step-jump": (
-        "dap_handler.rs::local_step_jump — same: the outcome is the "
-        "`ct/complete-move` event, not a response body."
-    ),
-    "ct/run-to-entry": (
-        "dap_handler.rs::run_to_entry — same: `complete_move` event only."
-    ),
-    "ct/run-tracepoints": (
-        "dap_handler.rs::run_tracepoints answers with the `ct/updated-trace` "
-        "EVENT via `sender`; it never calls respond_dap."
-    ),
-    "ct/setup-trace-session": (
-        "dap_handler.rs::setup_trace_session takes `_sender` — underscored, "
-        "i.e. deliberately unused. It allocates event tables and returns."
-    ),
-    "ct/tracepoint-delete": (
-        "dap_handler.rs::tracepoint_delete sends `updated_trace_event` — an "
-        "EVENT — and returns."
-    ),
-    "ct/tracepoint-toggle": (
-        "dap_handler.rs::tracepoint_toggle — same as tracepoint_delete."
-    ),
-}
+#     here would be dead code.
+#
+#     EMPTY, and it should stay so: the engine answers every request exactly
+#     once, as the DAP requires (the commands that used to be listed here --
+#     the moves, the tracepoint commands and the call-trace expansions --
+#     answer with an empty body after their events since 2026-10-27, and
+#     `handler_panic_is_answered_test.rs` holds them to it). A command named
+#     here is a defect in the engine to fix, not a residue to keep; if one
+#     must be named meanwhile, give the handler that proves it sends no
+#     response.
+RESPONSE_RESIDUE_NO_RESPONSE: dict[str, str] = {}
 
 # (2) KNOWN GAPS. The engine DOES respond to these — every handler named here
 #     calls `respond_dap` — so each one logs

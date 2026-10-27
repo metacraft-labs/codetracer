@@ -2162,7 +2162,7 @@ pub fn handle_request(
             req.load_args::<dap_types::VariablesArguments>()?,
             sender.clone(),
         )?,
-        "restart" => handler.run_to_entry(req.clone(), None, sender.clone())?,
+        "restart" => handler.run_to_entry_request(req.clone(), sender.clone())?,
         "setBreakpoints" => handler.set_breakpoints(
             req.clone(),
             req.load_args::<dap_types::SetBreakpointsArguments>()?,
@@ -2294,7 +2294,7 @@ pub fn handle_request(
             handler.goto_ticks(req.clone(), GoToTicksArguments { thread_id: 0, ticks }, sender.clone())?
         }
         "ct/load-flow" => handler.load_flow(req.clone(), req.load_args::<CtLoadFlowArguments>()?, sender.clone())?,
-        "ct/run-to-entry" => handler.run_to_entry(req.clone(), None, sender.clone())?,
+        "ct/run-to-entry" => handler.run_to_entry_request(req.clone(), sender.clone())?,
         "ct/mcr-live-step" => handler.mcr_live_step(
             req.clone(),
             req.load_args::<crate::dap_handler::McrLiveStepArguments>()?,

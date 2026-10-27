@@ -21,15 +21,13 @@
 ##      a `◆` on `app/views/timeline_bar.nim`'s track, so this is the surface the
 ##      marks come from.
 ##
-##      **It answers with NO DAP RESPONSE.** `Handler::run_tracepoints`
+##      **Its hits are an EVENT, not the response.** `Handler::run_tracepoints`
 ##      (`src/db-backend/src/dap_handler.rs`) sends `ct/updated-trace` and
-##      `ct/tracepoint-results` and never calls `respond_dap`, so a client that
-##      waits for the reply waits for ever — measured, as a hang, before it was
-##      read in the source. `headless_session.runTracepoints` therefore sends
-##      without expecting a response and synchronises on the EVENT. Recorded
-##      here because it is exactly the shape
-##      `codetracer-specs/Testing/Verification-Harness-Traps.md` §3 is about: the
-##      symptom is a timeout and the cause is not a slow backend.
+##      `ct/tracepoint-results`, then answers the request with an empty body.
+##      `headless_session.runTracepoints` synchronises on the EVENT and leaves
+##      the answer unread. Until 2026-10-27 there was no answer at all, and a
+##      client that waited for one waited for ever — the shape
+##      `codetracer-specs/Testing/Verification-Harness-Traps.md` §3 is about.
 ##
 ##   2. **The DAP LOGPOINT is the live one**, and it is not a substitute.
 ##      `setBreakpoints` with a `logMessage` verifies the line and emits one

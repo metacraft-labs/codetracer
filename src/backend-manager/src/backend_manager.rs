@@ -1413,6 +1413,18 @@ impl BackendManager {
                     .position(|p| p.kind == PendingPyRequestKind::RunTracepoints)
             {
                 let pending = ds.py_bridge.pending_requests.remove(idx);
+                // The backend answers the request right after this event;
+                // consume that answer here rather than broadcast it.
+                ds.py_bridge.pending_requests.push(PendingPyRequest {
+                    kind: PendingPyRequestKind::Unobserved(
+                        python_bridge::UnobservedReason::RunTracepointsAnswer,
+                    ),
+                    client_id: 0,
+                    original_seq: 0,
+                    backend_seq: pending.backend_seq,
+                    response_command: String::new(),
+                    expression: String::new(),
+                });
                 let body = msg.get("body").unwrap_or(&Value::Null);
 
                 // Extract Stop objects from the results array and convert

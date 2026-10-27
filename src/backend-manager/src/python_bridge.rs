@@ -614,6 +614,18 @@ pub enum UnobservedReason {
     /// so a backend that refused them would leave the caller stepping
     /// from wherever the previous script stopped.
     OpenTraceCachedSessionReset,
+    /// The answer to a `ct/run-tracepoints` whose `ct/tracepoint-results`
+    /// event has already been turned into the `ct/py-run-tracepoints`
+    /// response.
+    ///
+    /// The replay server sends that event and then answers the request, so
+    /// by the time the answer arrives the client has its results, and the
+    /// answer (an empty success) carries nothing it was not already told.
+    /// Waiting for it here keeps it from matching no pending request and
+    /// being broadcast to every client. A run that is refused answers
+    /// `success: false` with no event, and that answer still reaches the
+    /// `RunTracepoints` entry itself.
+    RunTracepointsAnswer,
 }
 
 /// A pending synchronous Python bridge request waiting for a backend

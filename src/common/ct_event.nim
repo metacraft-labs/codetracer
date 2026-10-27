@@ -237,6 +237,18 @@ func commandToCtResponseEventKind*(command: string): CtEventKind =
   # next `ct/load-calltrace-section`.
   of "ct/collapse-calls": CtCollapseCalls
   of "ct/expand-calls": CtExpandCalls
+  # Likewise for the commands whose outcome travels in events: the moves
+  # (`stopped` / `ct/complete-move`) and the tracepoint commands
+  # (`ct/updated-trace`, and `ct/tracepoint-results` for a run). The engine
+  # answers each with an empty body after those events; the answer fans out
+  # as the request's own kind, which no handler acts on.
+  of "ct/history-jump": CtHistoryJump
+  of "ct/local-step-jump": CtLocalStepJump
+  of "ct/run-to-entry": CtRunToEntry
+  of "ct/tracepoint-toggle": CtTracepointToggle
+  of "ct/tracepoint-delete": CtTracepointDelete
+  of "ct/setup-trace-session": CtSetupTraceSession
+  of "ct/run-tracepoints": CtRunTracepoints
   of "ct/load-symbols": CtLoadSymbols
   of "ct/load-value-elements": CtLoadValueElements
   of "ct/load-terminal-lines": CtLoadTerminalLines
