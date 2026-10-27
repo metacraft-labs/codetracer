@@ -478,13 +478,47 @@ grep_filter=()
 RUN_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "run stamp: frames older than ${RUN_STARTED_AT} will be refused, not graded"
 
+# ---------------------------------------------------------------------------
+# WHAT HAPPENED TO EACH SCENARIO, RECORDED BY THE RUN — not read off the log.
+# ---------------------------------------------------------------------------
+#
+# On 2026-10-17 four of six scenarios failed, and the readings written from
+# `playwright.log` said "all four failures are the same assertion at :862 ...
+# AFTER the window has been captured". Two had died in the LAUNCH fixture, one
+# inside `drive`, and only `entry-shell` at that assertion, after capturing
+# (codetracer-pm issues/2026-10-17-plat37-readings-of-2026-10-17-misreport-
+# all-four-playwright-failures-as-one-assertion.md). A list log invites that
+# summary: the phase of each failure had to be inferred from line numbers.
+#
+# So the run writes Playwright's JSON report beside the list log, the spec
+# names its phases as `test.step`s, and `ci/test/plat37_electron_outcomes.py`
+# turns the report into `scenarioOutcomes` in manifest.json: per scenario its
+# status, phase (the failing step, or `launch` when it failed before entering
+# any), first error line, error location and whether the capture phase was
+# reached. `--reporter=list,json` keeps the list output on stdout, teed to
+# playwright.log as before; `PLAYWRIGHT_JSON_OUTPUT_NAME` sends the JSON to a
+# file (playwright/lib/reporters/base.js `resolveOutputFile`, 1.56.1) instead
+# of stdout. The path is made absolute because the driver runs from
+# `${GUI}` and `--out` may be relative. A previous run's report is removed
+# first, for the reason `RUN_STARTED_AT` gives: a file that merely exists is
+# not this run's evidence, and a run that writes none must read as "no
+# outcomes known", never as the last run's outcomes.
+PW_JSON="$(cd "${OUT}" && pwd -P)/playwright.json"
+rm -f "${PW_JSON}"
+if [ -n "${ONLY}" ]; then
+	expected_views="${ONLY}"
+else
+	expected_views="$(cut -f2 "${TSV}" | paste -sd, -)"
+fi
+
 echo
 echo "=== driving ${expected} scenario(s) through the product's own toolbar ==="
 drive_rc=0
 (
 	cd "${GUI}" &&
-		timeout "${DRIVE_TIMEOUT_S}" npx playwright test --workers=1 \
-			--reporter=list "${SPEC}" "${grep_filter[@]}"
+		PLAYWRIGHT_JSON_OUTPUT_NAME="${PW_JSON}" \
+			timeout "${DRIVE_TIMEOUT_S}" npx playwright test --workers=1 \
+			--reporter=list,json "${SPEC}" "${grep_filter[@]}"
 ) 2>&1 | tee "${OUT}/playwright.log" || drive_rc=$?
 
 # ---------------------------------------------------------------------------
@@ -797,10 +831,14 @@ done <"${TSV}"
 # ---------------------------------------------------------------------------
 python3 - "${SCENARIOS}" "${OUT}" "${ONLY}" "${BUILD_DIR}" "${drive_rc}" \
 	"${ELECTRON_INPUT_DIGEST}" "${ELECTRON_STAMP}" \
+	"${root}/ci/test" "${PW_JSON}" "${expected_views}" \
 	<<'PY' || fail "the manifest did not assemble"
 import datetime, json, os, subprocess, sys
 (scenarios_path, out, only, build_dir, drive_rc,
- input_digest, stamp_path) = sys.argv[1:8]
+ input_digest, stamp_path, outcomes_dir, pw_json,
+ expected_views) = sys.argv[1:11]
+sys.path.insert(0, outcomes_dir)
+import plat37_electron_outcomes
 
 
 def stamp_field(name):
@@ -845,6 +883,14 @@ manifest = {
     "renderer": "electron",
     "only": only,
     "playwrightExitCode": int(drive_rc),
+    # PER SCENARIO, FROM THE RUN'S OWN JSON REPORT: status, the phase it
+    # failed in, the first error line, its location and whether the capture
+    # phase was reached. A readings file summarising this run enumerates from
+    # HERE, and never states a common cause or an "after the capture" that
+    # `captureReached` does not back. `reportStatus` other than "parsed" means
+    # the outcomes are UNKNOWN, not that nothing failed.
+    "scenarioOutcomes": plat37_electron_outcomes.summarise(
+        pw_json, [v for v in expected_views.split(",") if v]),
     "expectedScenarios": doc["expectedScenarios"],
     "gpuiProbesDriven": 0,
     "whyNoProbes": "scenarios.json: 'A probe is NOT part of the "
@@ -975,9 +1021,35 @@ PY
 # ---------------------------------------------------------------------------
 echo
 echo "=== ${captured} captured, ${refused} refused ==="
+
+# ONE LINE PER FAILED SCENARIO, from `scenarioOutcomes` — each with its own
+# phase and cause, so a reader never has to infer either from the list log.
+# Exit 2 means the report is missing, unparseable or empty; the line says so,
+# and that is "outcomes unknown", never "no scenario failed".
+echo
+echo "=== per-scenario outcomes (manifest.json scenarioOutcomes) ==="
+python3 "${root}/ci/test/plat37_electron_outcomes.py" --report "${PW_JSON}" \
+	--expect-views "${expected_views}" --format lines | sed 's/^/  /' || true
+# The same record, condensed for the fail messages below: `<scenario> (<phase>)`
+# per failure, or the reason there is no record.
+failed_scenarios="$(
+	python3 - "${OUT}/manifest.json" <<'PY'
+import json, sys
+o = json.load(open(sys.argv[1]))["scenarioOutcomes"]
+if o["reportStatus"] != "parsed":
+    print(f"per-scenario outcomes UNKNOWN ({o['reportStatus']}): {o['problem']}")
+else:
+    bad = [f"{s['scenario']} ({s['phase']})" for s in o["scenarios"]
+           if s["status"] not in ("passed", "skipped")]
+    bad += [f"{v} (not in report)" for v in o["missingScenarios"]]
+    print("failed: " + ", ".join(bad) if bad else "no scenario failed")
+PY
+)" || failed_scenarios="per-scenario outcomes UNKNOWN: manifest.json unreadable"
+
 total=$((captured + refused))
 [ "${total}" -eq "${expected}" ] ||
-	fail "${total} scenarios ran where ${expected} were declared"
+	fail "${total} scenarios ran where ${expected} were declared;
+      ${failed_scenarios}"
 
 python3 - "${OUT}/manifest.json" <<'PY'
 import json, sys
@@ -1001,9 +1073,13 @@ for r in m["records"]:
 PY
 
 [ "${refused}" -eq 0 ] ||
-	fail "${refused} of ${total} scenarios did not produce a graded frame"
+	fail "${refused} of ${total} scenarios did not produce a graded frame;
+      ${failed_scenarios}. Each failure's phase and cause are in
+      ${OUT}/manifest.json under scenarioOutcomes."
 [ "${drive_rc}" -eq 0 ] ||
-	fail "the Playwright driver exited ${drive_rc}; see ${OUT}/playwright.log"
+	fail "the Playwright driver exited ${drive_rc}; ${failed_scenarios}.
+      Each failure's phase and cause are in ${OUT}/manifest.json under
+      scenarioOutcomes; the list log is ${OUT}/playwright.log."
 echo
 echo "OK: ${captured} of ${expected} attested Electron window frames in ${OUT}"
 echo "    Every record carries satisfiesG1: true and"

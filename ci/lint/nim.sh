@@ -905,6 +905,20 @@ lint_step "DAP command sync: contract suite" \
 lint_step "DAP command sync: the allow-list names everything the engine dispatches" \
 	python3 ci/test/dap-command-sync.py
 
+# The PLAT-37 Electron capture lane records, per scenario, the phase each
+# failure occurred in (launch fixture, viewport, drive, capture,
+# verify-capture), its cause and whether the capture was reached — in
+# manifest.json `scenarioOutcomes`, parsed from Playwright's JSON report by
+# `ci/test/plat37_electron_outcomes.py`. The lane itself needs a macOS GUI
+# session and cannot run here; its parser, its wiring and the spec's step names
+# can, against a synthetic report of the 2026-10-17 run whose four failures
+# were summarised as one assertion "after the capture" when three never
+# reached it (codetracer-pm issue 2026-10-17-plat37-readings-of-2026-10-17-
+# misreport-all-four-playwright-failures-as-one-assertion). Pure bash +
+# python3, about a second.
+lint_step "PLAT-37 Electron lane: per-scenario outcomes name each failure's phase and cause" \
+	bash ci/test/plat37-electron-outcomes-test.sh
+
 # The mutation harnesses edit the product's sources in place. One that DROPS a
 # flag it does not know turns `--only=…` into a full, file-mutating grading run;
 # every harness must refuse the flag instead, before touching anything — and an

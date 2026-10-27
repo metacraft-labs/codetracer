@@ -1014,222 +1014,263 @@ for (const scenario of definition.scenarios) {
     test.setTimeout(600_000);
 
     test(`capture ${scenario.view}`, async ({ ctPage, electronApp }) => {
-      expect(
-        electronApp,
-        "the Electron application fixture is null, so the window cannot be " +
-          "resized and this lane would capture whatever size the product " +
-          "happened to open at",
-      ).not.toBeNull();
-      const app = electronApp as import("playwright").ElectronApplication;
+      // THE PHASES, NAMED. Each `test.step` title below is a phase the lane
+      // records per scenario (`ci/test/plat37_electron_outcomes.py`
+      // `LANE_PHASES`; manifest.json `scenarioOutcomes`). A failure is
+      // attributed to the step it threw in, and one thrown before the first
+      // step — the launch fixture behind `ctPage` / `electronApp` — is the
+      // `launch` phase. On 2026-10-17 four failures from three different
+      // phases were read off the list log as "the same assertion, after the
+      // capture" (codetracer-pm issue 2026-10-17-plat37-readings-of-2026-10-17-
+      // misreport-all-four-playwright-failures-as-one-assertion). Keep the
+      // titles stable: renaming one is a change to the lane's record, and
+      // ci/test/plat37-electron-outcomes-test.sh fails until the parser agrees.
       const layout = new LayoutPage(ctPage);
-
       const vp = definition.viewports[scenario.viewport];
-      const viewportRecord = await applyViewport(ctPage, app, vp);
 
-      // The editor must finish re-laying-out BEFORE the first operation:
-      // measured on the Linux lane, two of four probed runs drove the
-      // debugger with a 1298px-tall editor inside a 900px-tall window.
-      await waitForEditorFrameSettled(ctPage);
+      const viewportRecord = await test.step("viewport", async () => {
+        expect(
+          electronApp,
+          "the Electron application fixture is null, so the window cannot be " +
+            "resized and this lane would capture whatever size the product " +
+            "happened to open at",
+        ).not.toBeNull();
+        const app = electronApp as import("playwright").ElectronApplication;
 
-      const driven = await drive(layout, scenario.operations);
+        const applied = await applyViewport(ctPage, app, vp);
 
-      const pagePng = path.join(outDir, `${scenario.view}.page.png`);
-      const settle = await captureSettled(ctPage, pagePng);
-      const pagePngSize = pngSize(pagePng);
-
-      // ----------------------------------------------------------------
-      // THE WINDOW CAPTURE — the same binary, the same probe and the same
-      // attestation the GPUI arm goes through, aimed at this owner.
-      // ----------------------------------------------------------------
-      const windowPng = path.join(outDir, `${scenario.view}.png`);
-      const windowRec = path.join(outDir, `${scenario.view}.capture.json`);
-      const args = [
-        "capture",
-        `--owner=${owner}`,
-        `--out=${windowPng}`,
-        `--record=${windowRec}`,
-        `--view=${scenario.view}`,
-        `--scenario=${scenario.id}`,
-        `--requested-width=${vp.width}`,
-        `--requested-height=${vp.height}`,
-        // **ZERO, AND THE DRIVER EARNS IT BELOW.**
-        //
-        // The capture binary subtracts `--title-bar-points` from the attested
-        // FRAME height before deciding `viewportHonoured`, because a standard
-        // macOS titled window's frame is 29 points taller than the content
-        // area the request was about. CodeTracer's Electron window is NOT a
-        // standard titled window: measured 2026-10-12 at `wide`, the frame
-        // `CGWindowListCopyWindowInfo` reports is 1920x1080 and the page's
-        // own `window.innerHeight` is 1080 — frame and content are the same
-        // rectangle. Subtracting 29 reported `viewportHonoured: false` with a
-        // `-29` deviation for a viewport that was honoured EXACTLY.
-        //
-        // So 0 is passed, and `frameEqualsContent` below asserts the premise
-        // against the window the system actually made. A product that grows a
-        // real title bar fails there rather than silently reporting its
-        // viewport 29 points short.
-        "--title-bar-points=0",
-        "--timeout-ms=30000",
-        "--wait-ms=15000",
-      ];
-      const cap = childProcess.spawnSync(captureBin, args, {
-        encoding: "utf-8",
-        timeout: 240_000,
+        // The editor must finish re-laying-out BEFORE the first operation:
+        // measured on the Linux lane, two of four probed runs drove the
+        // debugger with a 1298px-tall editor inside a 900px-tall window.
+        await waitForEditorFrameSettled(ctPage);
+        return applied;
       });
 
-      // THE RECORD IS THE VERDICT, not the exit code. The driver writes one
-      // on every path it reaches, including a refusal.
-      const captureRecord = fs.existsSync(windowRec)
-        ? JSON.parse(fs.readFileSync(windowRec, "utf8"))
-        : null;
+      const driven = await test.step("drive", async () =>
+        drive(layout, scenario.operations));
 
-      const route = {
-        schemaVersion: 1,
-        lane: "plat37-macos-electron-capture",
-        milestone: "PLAT-37",
-        scenario: scenario.id,
-        view: scenario.view,
-        viewportName: scenario.viewport,
-        renderer: "electron",
-        recording: recordingPath,
-        drivenOperations: scenario.operations,
-        trajectory: driven.trajectory,
-        movesPerformed: driven.moves,
-        // `null`, not `true`, over zero operations: "settled between
-        // operations" is vacuously true when there are none, and that vacuous
-        // green is what sat beside entry-shell's wrong line.
-        editorSettledBetweenOperations: settledBetweenOperations(
-          driven.moves,
-          driven.settled,
-        ),
-        finalState: driven.final,
-        // The entry settle's evidence: `firstSample` is what the lane would
-        // have recorded before it waited, so an artefact shows whether the
-        // early-sample race was live on this run.
-        entrySettle: driven.entrySettle,
-        // PARITY-S5's reference value, from Monaco rather than from ink.
-        editorFontMetrics: await readEditorFontMetrics(ctPage),
-        // PARITY-P1's: the face the renderer RESOLVED, not the one asked for.
-        resolvedEditorFace: await readResolvedEditorFace(ctPage),
-        viewport: viewportRecord,
-        pageRoute: {
-          how: "page.screenshot() over CDP — Chromium's own raster of the web contents, no window chrome, no compositor",
-          path: pagePng,
-          ihdr: pagePngSize,
-          settleAttempts: settle.attempts,
-          byteStable: settle.stable,
-          expectedIhdr: {
-            width: Math.round(
-              viewportRecord.cssViewport.width * viewportRecord.devicePixelRatio,
+      // `capture` is entered only by a scenario that was driven
+      // (`scenarioOutcomes.captureReached`), and returns once this run has
+      // taken the page PNG, run the window-capture driver and written the
+      // route record (`captureCompleted`). Whether the driver's record says
+      // the window WAS captured is not decided here: that is
+      // `verify-capture`'s first assertions, so a refused capture fails in
+      // `verify-capture` with `captureCompleted: true`.
+      const { pagePngSize, windowPng, windowRec, cap, captureRecord, route } =
+        await test.step("capture", async () => {
+          const pagePng = path.join(outDir, `${scenario.view}.page.png`);
+          const settle = await captureSettled(ctPage, pagePng);
+          const pagePngSize = pngSize(pagePng);
+
+          // ----------------------------------------------------------------
+          // THE WINDOW CAPTURE — the same binary, the same probe and the same
+          // attestation the GPUI arm goes through, aimed at this owner.
+          // ----------------------------------------------------------------
+          const windowPng = path.join(outDir, `${scenario.view}.png`);
+          const windowRec = path.join(outDir, `${scenario.view}.capture.json`);
+          const args = [
+            "capture",
+            `--owner=${owner}`,
+            `--out=${windowPng}`,
+            `--record=${windowRec}`,
+            `--view=${scenario.view}`,
+            `--scenario=${scenario.id}`,
+            `--requested-width=${vp.width}`,
+            `--requested-height=${vp.height}`,
+            // **ZERO, AND THE DRIVER EARNS IT BELOW.**
+            //
+            // The capture binary subtracts `--title-bar-points` from the attested
+            // FRAME height before deciding `viewportHonoured`, because a standard
+            // macOS titled window's frame is 29 points taller than the content
+            // area the request was about. CodeTracer's Electron window is NOT a
+            // standard titled window: measured 2026-10-12 at `wide`, the frame
+            // `CGWindowListCopyWindowInfo` reports is 1920x1080 and the page's
+            // own `window.innerHeight` is 1080 — frame and content are the same
+            // rectangle. Subtracting 29 reported `viewportHonoured: false` with a
+            // `-29` deviation for a viewport that was honoured EXACTLY.
+            //
+            // So 0 is passed, and `frameEqualsContent` below asserts the premise
+            // against the window the system actually made. A product that grows a
+            // real title bar fails there rather than silently reporting its
+            // viewport 29 points short.
+            "--title-bar-points=0",
+            "--timeout-ms=30000",
+            "--wait-ms=15000",
+          ];
+          const cap = childProcess.spawnSync(captureBin, args, {
+            encoding: "utf-8",
+            timeout: 240_000,
+          });
+
+          // THE RECORD IS THE VERDICT, not the exit code. The driver writes one
+          // on every path it reaches, including a refusal.
+          const captureRecord = fs.existsSync(windowRec)
+            ? JSON.parse(fs.readFileSync(windowRec, "utf8"))
+            : null;
+
+          const route = {
+            schemaVersion: 1,
+            lane: "plat37-macos-electron-capture",
+            milestone: "PLAT-37",
+            scenario: scenario.id,
+            view: scenario.view,
+            viewportName: scenario.viewport,
+            renderer: "electron",
+            recording: recordingPath,
+            drivenOperations: scenario.operations,
+            trajectory: driven.trajectory,
+            movesPerformed: driven.moves,
+            // `null`, not `true`, over zero operations: "settled between
+            // operations" is vacuously true when there are none, and that vacuous
+            // green is what sat beside entry-shell's wrong line.
+            editorSettledBetweenOperations: settledBetweenOperations(
+              driven.moves,
+              driven.settled,
             ),
-            height: Math.round(
-              viewportRecord.cssViewport.height *
-                viewportRecord.devicePixelRatio,
-            ),
-          },
-        },
-        windowRoute: {
-          how: "CGWindowListCopyWindowInfo attestation then SCScreenshotManager over SCContentFilter(desktopIndependentWindow:) — the same binary and the same probe the GPUI arm uses",
-          owner,
-          path: windowPng,
-          exitCode: cap.status,
-          stderr: (cap.stderr ?? "").trim().split("\n").slice(-6).join("\n"),
-          record: captureRecord,
-        },
-      };
-      fs.writeFileSync(
-        path.join(outDir, `${scenario.view}.route.json`),
-        `${JSON.stringify(route, null, 2)}\n`,
-      );
+            finalState: driven.final,
+            // The entry settle's evidence: `firstSample` is what the lane would
+            // have recorded before it waited, so an artefact shows whether the
+            // early-sample race was live on this run.
+            entrySettle: driven.entrySettle,
+            // PARITY-S5's reference value, from Monaco rather than from ink.
+            editorFontMetrics: await readEditorFontMetrics(ctPage),
+            // PARITY-P1's: the face the renderer RESOLVED, not the one asked for.
+            resolvedEditorFace: await readResolvedEditorFace(ctPage),
+            viewport: viewportRecord,
+            pageRoute: {
+              how: "page.screenshot() over CDP — Chromium's own raster of the web contents, no window chrome, no compositor",
+              path: pagePng,
+              ihdr: pagePngSize,
+              settleAttempts: settle.attempts,
+              byteStable: settle.stable,
+              expectedIhdr: {
+                width: Math.round(
+                  viewportRecord.cssViewport.width *
+                    viewportRecord.devicePixelRatio,
+                ),
+                height: Math.round(
+                  viewportRecord.cssViewport.height *
+                    viewportRecord.devicePixelRatio,
+                ),
+              },
+            },
+            windowRoute: {
+              how: "CGWindowListCopyWindowInfo attestation then SCScreenshotManager over SCContentFilter(desktopIndependentWindow:) — the same binary and the same probe the GPUI arm uses",
+              owner,
+              path: windowPng,
+              exitCode: cap.status,
+              stderr: (cap.stderr ?? "")
+                .trim()
+                .split("\n")
+                .slice(-6)
+                .join("\n"),
+              record: captureRecord,
+            },
+          };
+          fs.writeFileSync(
+            path.join(outDir, `${scenario.view}.route.json`),
+            `${JSON.stringify(route, null, 2)}\n`,
+          );
+          return {
+            pagePngSize,
+            windowPng,
+            windowRec,
+            cap,
+            captureRecord,
+            route,
+          };
+        });
 
-      // ----------------------------------------------------------------
-      // THE ASSERTIONS. Each one has a state a broken run reaches.
-      // ----------------------------------------------------------------
+      await test.step("verify-capture", async () => {
+        // ----------------------------------------------------------------
+        // THE ASSERTIONS. Each one has a state a broken run reaches.
+        // ----------------------------------------------------------------
 
-      // 1. The page PNG is the CSS viewport times the measured dpr. This is
-      //    the `dpr === 1` assertion's actual content, kept. A PNG 1.046875x
-      //    its viewport fails here.
-      expect(
-        `${pagePngSize.width}x${pagePngSize.height}`,
-        `the page screenshot's own IHDR disagrees with the CSS viewport ` +
-          `(${viewportRecord.cssViewport.width}x` +
-          `${viewportRecord.cssViewport.height}) times the measured device ` +
-          `pixel ratio (${viewportRecord.devicePixelRatio})`,
-      ).toBe(
-        `${route.pageRoute.expectedIhdr.width}x${route.pageRoute.expectedIhdr.height}`,
-      );
+        // 1. The page PNG is the CSS viewport times the measured dpr. This is
+        //    the `dpr === 1` assertion's actual content, kept. A PNG 1.046875x
+        //    its viewport fails here.
+        expect(
+          `${pagePngSize.width}x${pagePngSize.height}`,
+          `the page screenshot's own IHDR disagrees with the CSS viewport ` +
+            `(${viewportRecord.cssViewport.width}x` +
+            `${viewportRecord.cssViewport.height}) times the measured device ` +
+            `pixel ratio (${viewportRecord.devicePixelRatio})`,
+        ).toBe(
+          `${route.pageRoute.expectedIhdr.width}x${route.pageRoute.expectedIhdr.height}`,
+        );
 
-      // 2. The window capture produced a record and that record claims G1
-      //    over a window that was attested FIRST and captured by id.
-      expect(
-        captureRecord,
-        `the capture driver wrote no record at ${windowRec} (rc ${cap.status}). ` +
-          `"the capture ran and the window was not there" must stay ` +
-          `distinguishable from "the capture did not run".`,
-      ).not.toBeNull();
-      expect(captureRecord.outcome, captureRecord.refusal ?? "").toBe(
-        "captured",
-      );
-      expect(captureRecord.satisfiesG1).toBe(true);
-      expect(
-        captureRecord.attestation.matched,
-        "G1 is claimed and no window was attested",
-      ).toBeGreaterThanOrEqual(1);
-      expect(
-        captureRecord.capture.sameWindowAsAttested,
-        "ScreenCaptureKit captured a different window than the one " +
-          "CGWindowListCopyWindowInfo attested",
-      ).toBe(true);
+        // 2. The window capture produced a record and that record claims G1
+        //    over a window that was attested FIRST and captured by id.
+        expect(
+          captureRecord,
+          `the capture driver wrote no record at ${windowRec} (rc ${cap.status}). ` +
+            `"the capture ran and the window was not there" must stay ` +
+            `distinguishable from "the capture did not run".`,
+        ).not.toBeNull();
+        expect(captureRecord.outcome, captureRecord.refusal ?? "").toBe(
+          "captured",
+        );
+        expect(captureRecord.satisfiesG1).toBe(true);
+        expect(
+          captureRecord.attestation.matched,
+          "G1 is claimed and no window was attested",
+        ).toBeGreaterThanOrEqual(1);
+        expect(
+          captureRecord.capture.sameWindowAsAttested,
+          "ScreenCaptureKit captured a different window than the one " +
+            "CGWindowListCopyWindowInfo attested",
+        ).toBe(true);
 
-      // 3. The window PNG's own IHDR equals the captured POINT extent times
-      //    the captured scale — the artefact's word against the driver's.
-      const windowIhdr = pngSize(windowPng);
-      expect(`${windowIhdr.width}x${windowIhdr.height}`).toBe(
-        `${captureRecord.capturedPixels.width}x${captureRecord.capturedPixels.height}`,
-      );
+        // 3. The window PNG's own IHDR equals the captured POINT extent times
+        //    the captured scale — the artefact's word against the driver's.
+        const windowIhdr = pngSize(windowPng);
+        expect(`${windowIhdr.width}x${windowIhdr.height}`).toBe(
+          `${captureRecord.capturedPixels.width}x${captureRecord.capturedPixels.height}`,
+        );
 
-      // 3a. **THE PREMISE BEHIND `--title-bar-points=0`.** The attested frame
-      //     and the page's own content area are the same rectangle, so
-      //     nothing is subtracted. A product that grows a real title bar
-      //     fails here, by name, instead of reporting every viewport short by
-      //     whatever that bar turns out to be. Width is included because a
-      //     frame that gained a border would move it and not the height.
-      const frameEqualsContent =
-        `${captureRecord.windowFramePoints.width}x` +
-        `${captureRecord.windowFramePoints.height}`;
-      expect(
-        frameEqualsContent,
-        "the Electron window's attested FRAME is no longer its content " +
-          "area, so `--title-bar-points=0` is now subtracting the wrong " +
-          "number and every viewport below it is mis-graded. Measure the " +
-          "new frame and pass it.",
-      ).toBe(
-        `${viewportRecord.contentSize.width}x${viewportRecord.contentSize.height}`,
-      );
+        // 3a. **THE PREMISE BEHIND `--title-bar-points=0`.** The attested frame
+        //     and the page's own content area are the same rectangle, so
+        //     nothing is subtracted. A product that grows a real title bar
+        //     fails here, by name, instead of reporting every viewport short by
+        //     whatever that bar turns out to be. Width is included because a
+        //     frame that gained a border would move it and not the height.
+        const frameEqualsContent =
+          `${captureRecord.windowFramePoints.width}x` +
+          `${captureRecord.windowFramePoints.height}`;
+        expect(
+          frameEqualsContent,
+          "the Electron window's attested FRAME is no longer its content " +
+            "area, so `--title-bar-points=0` is now subtracting the wrong " +
+            "number and every viewport below it is mis-graded. Measure the " +
+            "new frame and pass it.",
+        ).toBe(
+          `${viewportRecord.contentSize.width}x${viewportRecord.contentSize.height}`,
+        );
 
-      // 4. **THE ASSERTION A BLANK WINDOW FAILS.** Everything above is true
-      //    of a window that drew nothing: it is attested, it is captured, its
-      //    IHDR matches. What distinguishes a rendering CodeTracer is that
-      //    the product's own debugger reported a position and the editor drew
-      //    rows — both read from the live DOM, both zero on a dead renderer.
-      //    The frame's own glyph count is graded separately by the lane's
-      //    `plat37_macos_window_grade`, which fails a flat frame; this is the
-      //    renderer-side half of the same question.
-      expect(
-        driven.final.rrTicks,
-        "the product reported no position at capture time, so the window " +
-          "above is of a session that never opened",
-      ).toBeGreaterThanOrEqual(0);
-      const drawnRows = await ctPage
-        .locator(
-          "div[id^='editorComponent'] .monaco-editor .view-lines .view-line",
-        )
-        .count();
-      expect(
-        drawnRows,
-        "the editor drew no rows, so the captured window holds no source " +
-          "text whatever its pane grounds look like",
-      ).toBeGreaterThan(0);
+        // 4. **THE ASSERTION A BLANK WINDOW FAILS.** Everything above is true
+        //    of a window that drew nothing: it is attested, it is captured, its
+        //    IHDR matches. What distinguishes a rendering CodeTracer is that
+        //    the product's own debugger reported a position and the editor drew
+        //    rows — both read from the live DOM, both zero on a dead renderer.
+        //    The frame's own glyph count is graded separately by the lane's
+        //    `plat37_macos_window_grade`, which fails a flat frame; this is the
+        //    renderer-side half of the same question.
+        expect(
+          driven.final.rrTicks,
+          "the product reported no position at capture time, so the window " +
+            "above is of a session that never opened",
+        ).toBeGreaterThanOrEqual(0);
+        const drawnRows = await ctPage
+          .locator(
+            "div[id^='editorComponent'] .monaco-editor .view-lines .view-line",
+          )
+          .count();
+        expect(
+          drawnRows,
+          "the editor drew no rows, so the captured window holds no source " +
+            "text whatever its pane grounds look like",
+        ).toBeGreaterThan(0);
+      });
     });
   });
 }
