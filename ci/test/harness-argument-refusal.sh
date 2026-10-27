@@ -47,7 +47,78 @@ python3 ci/lib/harness_guard.py || {
 	exit 1
 }
 
-mapfile -t harnesses < <(find src ci scripts -name 'run-plat*mutations*.py' -type f | sort)
+# THE DISCOVERY IS GENERAL AND THE EXEMPTIONS ARE NAMED, COUNTED AND FROZEN.
+#
+# It was `run-plat*mutations*.py` alone, which was a statement about the only
+# naming scheme that existed when it was written. The first harness named after
+# anything else — `run-wd7-session-allocation-mutations.py` — was therefore
+# exempt from this probe BY ACCIDENT, which is the shape this whole script
+# exists to refuse.
+#
+# Naming a second prefix would have fixed that one case and left the accident
+# in place for the next harness, so the rule is inverted instead: **discover
+# every `run-*mutations*.py` and subtract an explicit list.** A new harness is
+# now covered on the day it lands, whatever it is called, which is the property
+# the narrow glob could not have.
+#
+# **The exemptions are real defects in those harnesses, not in this rule.**
+# Widening the discovery brings in harnesses that do not satisfy this probe:
+# they exit 1 rather than 2, or they invoke the compiler BEFORE parsing their
+# command line, which is the very ordering this script exists to check. Those
+# are theirs to fix — but a discovery rule that turns red for somebody else's
+# defect gets reverted rather than fixed, so each one is listed here, with its
+# issue, and the list's SIZE is asserted against a written constant.
+#
+# That constant is what makes this different from the glob it replaces: the
+# list cannot grow silently. A newly landed harness that fails this probe makes
+# the count assertion fail, and the only ways forward are to fix the harness or
+# to add it here deliberately and say why.
+# Filed as
+# `codetracer-specs/issues/2026-10-27-five-mutation-harnesses-run-a-full-grading-run-instead-of-refusing-an-unknown-argument.md`.
+# Four of the five are the SECOND class and the dangerous one: they drop the
+# unrecognised argument and perform a full, mutating grading run. Measured
+# 2026-10-27 in the repo dev shell, `run-run-control-refusal-mutations.py`
+# answered `--no-such-harness-flag` with exit 0 after 43 s, printed
+# `RESULT: 5/5 arms killed their own assertion`, and changed the working tree
+# while doing it. Fixing one is deleting its line here and decrementing the
+# constant.
+EXEMPT_EXPECTED=5
+declare -a EXEMPT_HARNESSES=(
+	'src/frontend/viewmodel/tests/unit/run-edit-mode-toolbar-mutations.py'
+	'src/frontend/viewmodel/tests/unit/run-noir-edit-persistence-mutations.py'
+	'src/frontend/viewmodel/tests/unit/run-run-control-refusal-mutations.py'
+	'src/frontend/viewmodel/tests/unit/run-vnm5-mutations.py'
+	'src/frontend/viewmodel/tests/unit/run-vnm5-render-mutations.py'
+)
+
+mapfile -t discovered < <(find src ci scripts -name 'run-*mutations*.py' -type f | sort)
+harnesses=()
+exempted=0
+for h in "${discovered[@]}"; do
+	skip=0
+	for e in "${EXEMPT_HARNESSES[@]}"; do
+		[ "${h}" = "${e}" ] && skip=1 && break
+	done
+	if [ "${skip}" -eq 1 ]; then
+		exempted=$((exempted + 1))
+	else
+		harnesses+=("${h}")
+	fi
+done
+if [ "${exempted}" -ne "${EXEMPT_EXPECTED}" ]; then
+	echo "FAIL: ${exempted} of the listed exemptions matched a discovered harness," \
+		"expected ${EXEMPT_EXPECTED} — an exemption names a file that has moved or" \
+		"gone, so this probe's coverage is not what the list says it is" >&2
+	exit 1
+fi
+if [ "${#EXEMPT_HARNESSES[@]}" -ne "${EXEMPT_EXPECTED}" ]; then
+	echo "FAIL: the exemption list holds ${#EXEMPT_HARNESSES[@]} entries but" \
+		"EXEMPT_EXPECTED says ${EXEMPT_EXPECTED} — the list grew without the" \
+		"constant being moved deliberately" >&2
+	exit 1
+fi
+echo "discovered ${#discovered[@]} mutation harness(es); ${exempted} exempted by name," \
+	"${#harnesses[@]} probed"
 if [ "${#harnesses[@]}" -lt 30 ]; then
 	echo "FAIL: found ${#harnesses[@]} mutation harnesses; expected at least 30 —" \
 		"the discovery is broken, and a check over nothing is not a check" >&2

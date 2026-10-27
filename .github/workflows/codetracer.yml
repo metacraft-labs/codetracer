@@ -3775,15 +3775,39 @@ jobs:
         # product: the arm that carries write, compile, run, record and export
         # reaches NO network primitive, so there is no request for a token to
         # ride on. The renderer arm's egress is budgeted per surface — lsp,
-        # visual-replay, agentic, collab — and fails in both directions, which
-        # is what catches ID3's named erosion ("one personalisation, one
-        # counter"; a counter is a fetch).
+        # visual-replay, agentic, collab, session-allocation — and fails in both
+        # directions, which is what catches ID3's named erosion ("one
+        # personalisation, one counter"; a counter is a fetch).
         #
-        # This step runs the gate AND its mutation proof: eleven mutations,
+        # This step runs the gate AND its mutation proof: sixteen mutations,
         # each verified to redden the assertion written for it. It lives in
         # `viewmodel-tests`, which ci/verdict/required-jobs.txt already
         # requires, rather than in a new job that file does not know about.
         run: nix develop .#devShells.x86_64-linux.default --command just test-noir-studio-signed-out
+
+      - name: WD7 — the Noir Studio arm carries no allocation call
+        # `Hosted-Session-Allocation.md` §3.2's first prohibition, as a
+        # property of the built bundle: *"it does not own the container"*, and
+        # the narrower statement that the Noir Studio arm cannot even ASK. Two
+        # arms, so the zero is a measurement: the tree as committed must have
+        # 0 egress sites, and a planted import of the allocation client must
+        # give the SAME scanner a non-zero. A run in which both arms report 0
+        # is a broken observer and the gate says so.
+        #
+        # A separate step from the one above because it builds the loop arm
+        # twice and the second build IS the control; folding it in would make
+        # that step's single build serve two purposes and lose the arm.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-wd7-loop-arm-allocates-nothing
+
+      - name: WD7 — the allocation call's mutation proof
+        # Eight arms over `viewmodel/platform/session_allocation.nim`, each
+        # planting the defect that would satisfy a weaker version of one of
+        # §3.2's prohibitions — a flavour allow-list, a lease counter, a
+        # refusal-reason allow-list, a caller-supplied `product_id` — and each
+        # naming in advance the `test_session_allocation.nim` case that must
+        # redden. Two behaviour-preserving controls, so a red arm is not merely
+        # a touched file.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-wd7-session-allocation-mutations
 
       - name: Run ViewModel headless tests (native + JS backends)
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm

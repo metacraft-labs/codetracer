@@ -4965,6 +4965,37 @@ test-noir-studio-signed-out:
   CT_RENDERER_WEB_BUNDLE="${cache}/nsso-renderer/ui.js" \
     bash ci/test/noir-studio-signed-out-test.sh
 
+# WD7's construction half of Hosted-Session-Allocation.md §5's
+# `test_noir_studio_allocates_nothing`: the Noir Studio bundle carries no
+# allocation call, measured in the built bundle against a PLANTED arm that the
+# same scanner sees.
+#
+# ITS OWN RECIPE rather than a line in the one above, because it builds the loop
+# arm TWICE — once as committed and once with the allocation client imported —
+# and the second build is the positive control rather than a repetition. Folding
+# it in would make the recipe above's single build serve two purposes and lose
+# the arm.
+#
+# It is NOT `test_noir_studio_allocates_nothing` itself: that assertion is the
+# substrate seeing no request, which needs a running substrate to observe.
+test-wd7-loop-arm-allocates-nothing:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-wd7-loop-arm-allocates-nothing.log) 2>&1
+  bash ci/test/wd7-loop-arm-allocates-nothing.sh
+
+# WD7's mutation proof for the allocation call: eight arms, each planting the
+# defect that would satisfy a weaker version of one of
+# `Hosted-Session-Allocation.md` §3.2's prohibitions, each naming in advance the
+# `test_session_allocation.nim` case that must redden.
+test-wd7-session-allocation-mutations:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-wd7-session-allocation-mutations.log) 2>&1
+  python3 -u src/frontend/viewmodel/tests/unit/run-wd7-session-allocation-mutations.py
+
 # The docs/book-isonim SSG suites.
 #
 # THE EXPLICIT ANSWER to "are these CI or hand-run?": CI, via this recipe, when

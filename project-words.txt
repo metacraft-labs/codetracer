@@ -39,6 +39,7 @@ MSVC
 MSYS
 Metacraft
 Miden
+Nondet
 Normalisation
 Offchain
 PKGBUILD

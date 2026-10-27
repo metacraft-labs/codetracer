@@ -6200,10 +6200,23 @@ when defined(ctWeb):
   import ui/web_project_persistence
   from viewmodel/platform/web_entry import
     EntryResolution, EntryVerdict, evTemplate, entryPath, entryPathOnHost,
+    # WD7: the one form that may carry a substrate-allocated session.
+    # `/p/{locator}` is `classifyPath`'s project form, and taking the value
+    # from there rather than re-reading `window.location` is the same rule
+    # every other arm in this proc follows — a second `classifyPath` in this
+    # file is the drift `web_entry.nim`'s header warns about.
+    efProject,
     # WHICH PRODUCT THIS ADDRESS IS. Web-only, because only a served page has
     # an address to be a product of; the desktop keeps `displayed_product`'s
     # default, which is the same constant this resolves to for the neutral root.
     productNameFor
+  # WD7's request path: the two HTTP calls that ask the substrate for this
+  # project's session. Web-only, and deliberately in `ui/` rather than in
+  # `viewmodel/platform/` — `src/frontend/ui/` is not reachable from
+  # `web_main.nim`, which `ci/test/noir-studio-signed-out.sh` requires to have
+  # ZERO egress sites. That unreachability is the construction half of
+  # `Hosted-Session-Allocation.md` §5's `test_noir_studio_allocates_nothing`.
+  import ui/session_allocation_client
   # The revision this page was served as, for the surfaces that show it.
   # Web-only alongside `web_entry_surface`, for the same reason: only a served
   # deployment has a descriptor to read.
@@ -6553,6 +6566,46 @@ when defined(ctWeb):
         # "not a mere redirect — the user stays on this domain" rules out.
         web_entry_surface.jsReplaceHistoryEntry(
           cstring(entryPathOnHost(entry.languageEntry, hostLanguage)))
+
+      # WD7 — ASK THE SUBSTRATE FOR THIS PROJECT'S SESSION.
+      #
+      # `Hosted-Session-Allocation.md` §1.1's allocation layer is *"a runtime
+      # API call on a user gesture"*, and arriving at `/p/{locator}` is that
+      # gesture. Everything else about a session is the substrate's:
+      # `session_allocation_client` reads the project's descriptor, asks if and
+      # only if the descriptor declares a session runtime, and reports the
+      # substrate's own reason when it will not.
+      #
+      # **ASYNCHRONOUS, AND NOTHING WAITS ON IT.** §3.1a's whole argument
+      # against reading the per-project record at the edge is that it would put
+      # an API call on the path before first paint; putting a blocking one
+      # there from inside the bundle instead would be the same cost in a
+      # different file. The call is ISSUED here, before the mount below, and
+      # the mount does not wait — `startSessionForProject` returns as soon as
+      # the request is away and reports through its callback, so first paint is
+      # unchanged whether the substrate answers in 20 ms or never. That is also
+      # why a refusal arrives as a notification over a mounted page rather than
+      # as an error page: there is no state in which the page is waiting to be
+      # told.
+      #
+      # `entry.form` AND a non-empty locator, which are the two conditions
+      # `classifyPath` already decided. No other form allocates — in
+      # particular the bare and language roots do not, which is what keeps Noir
+      # Studio on `interactive-session-substrate.md` §8's
+      # "live, no substrate dependency" row.
+      #
+      # THE ONLY THING THIS ARM ADDS TO A REFUSAL IS A PLACE TO READ IT.
+      # §3.2: *"CodeTracer surfaces the reason; it does not re-derive the
+      # decision."* There is no `case` over reasons here and none below — the
+      # text is the substrate's.
+      if entry.form == efProject and entry.locator.len > 0:
+        session_allocation_client.startSessionForProject(entry.locator,
+          proc(start: session_allocation_client.SessionStart) =
+            let refusal = session_allocation_client.sessionStartFailureText(start)
+            if refusal.len > 0:
+              console.error cstring"CODETRACER::session: ", refusal.cstring
+              data.viewsApi.showNotification(newNotification(
+                NotificationKind.NotificationError, refusal)))
 
       # §1b.3 step 6 — "Never a blank editor, never an error page". Every arm
       # below mounts something; the choice is WHICH, and it follows from the
