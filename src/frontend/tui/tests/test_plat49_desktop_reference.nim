@@ -14,8 +14,9 @@
 ##     (`window_top_bar.gpuiTopBarLayout` / `gpuiMenuPopovers`) lay the same
 ##     open Menu ViewModel out in the same relations;
 ##   * finding 5, THE TOOLTIPS — every transport button's tooltip on the
-##     desktop is the ViewModel's `transportTooltip` over the desktop's own
-##     binding — the very text the GPUI window's hover popover draws;
+##     desktop is the ViewModel's `transportTooltip` over the chord the
+##     desktop's router runs it with (PLAT-68) — the very text the GPUI
+##     window's hover popover draws;
 ##   * finding 6, THE PLACEHOLDER — the desktop's palette input shows the
 ##     Omnibar ViewModel's `OmnibarPlaceholder`, the words the terminal's
 ##     field and GPUI's draw.
@@ -30,35 +31,31 @@ import codetracer_embed
 import ../app/views/top_bar
 import ../../gpui/window_top_bar
 
+import ../../viewmodel/keymap/[keymap_router, client_actions, context_keys,
+                               editing_keymap, operation_catalogue,
+                               scope_path]
+
+const DesktopDelivery = KeyDelivery(frontEnd: feDesktop, platform: pkLinux,
+                                    keyProtocol: kpNative)
+
+proc desktopChord(clientAction: string): string =
+  ## THE ORACLE: the chord the desktop's router runs `clientAction` with at
+  ## the window -- what its toolbar tooltip shows (`ui/shortcut_labels`,
+  ## `ui/chord_display`, `keymap_router.chordFor`; PLAT-68). The CUA base is
+  ## the desktop's default, and the capture runs with no `keybindings.json`.
+  ## It used to read the YAML `bindings:` table, which is legacy data since
+  ## PLAT-68: the desktop stopped showing it, so a fresh capture disagreed
+  ## with an oracle nothing draws any more.
+  let op = operationOfClientAction(clientAction)
+  if op.len == 0:
+    return ""
+  let (name, arg) = splitOperation(op)
+  initKeymapRouter(bkCua, DesktopDelivery).chordFor(
+    name, SessionFacts(product: pmDebug, editor: sourceViewFacts()),
+    @[element(ekWindow, "window")], nmNormal, arg)
+
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-proc desktopBindings(): Table[string, string] =
-  ## THE ORACLE: the desktop YAML's `bindings:` table (legacy data since
-  ## PLAT-68 — the one-time import and macOS's native accelerators read it).
-  ## `ClientAction` name → the chord text, spelled as the desktop's menu
-  ## spells it (`renderChord`: upper case, alternatives joined by a space).
-  var inBindings = false
-  for raw in DesktopDefaultConfig.splitLines():
-    if raw.len == 0:
-      continue
-    if not raw[0].isSpaceAscii and raw[0] != '#':
-      inBindings = raw.startsWith("bindings:")
-      continue
-    if not inBindings:
-      continue
-    let line = raw.strip()
-    if line.startsWith("#"):
-      continue
-    let colon = line.find(':')
-    if colon <= 0:
-      continue
-    let action = line[0 ..< colon].strip()
-    var value = line[colon + 1 .. ^1].strip()
-    if value.len >= 2 and value[0] == '"' and value[^1] == '"':
-      value = value[1 .. ^2]
-    if value.len > 0 and action notin result:
-      result[action] = value.toUpperAscii
-
 const ExpectedAssertions = 49
 
 var countedAssertions = 0
@@ -161,15 +158,14 @@ suite "PLAT-49: the desktop is the reference":
       ck abs(pops[1].rect.y - debugY) <= 4
 
     test "every transport tooltip is the ViewModel's, over the desktop's binding":
-      let bindings = desktopBindings()
       var compared = 0
       for c in TransportControls:
         let desk = a["tooltips"]{c.id}.getStr
-        checkpoint(c.id & ": desktop '" & desk & "'")
-        ck desk == transportTooltip(c.id, bindings.getOrDefault(c.clientAction))
+        let chord = desktopChord(c.clientAction)
+        checkpoint(c.id & ": desktop '" & desk & "', router '" & chord & "'")
+        ck desk == transportTooltip(c.id, chord)
         # …which is exactly what GPUI's hover popover draws for it.
-        ck desk == controlTooltip(controlIndex(c.id),
-                                  bindings.getOrDefault(c.clientAction))
+        ck desk == controlTooltip(controlIndex(c.id), chord)
         inc compared
       ck compared == TransportControls.len
 
