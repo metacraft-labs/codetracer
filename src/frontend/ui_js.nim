@@ -7064,6 +7064,12 @@ when defined(ctWeb):
         #   3. `requestInitialPanelData` — what the desktop calls right after
         #      `switchToDebug` so the Event Log and Terminal Output ask for
         #      their data instead of sitting blank.
+        # The trace the replay host launched is the shown tab's: its debugger
+        # session adopts it, as `onTraceLoaded` does on the desktop, so the
+        # session's stop loader (the locals, the flow window) follows its
+        # stops. The host launched it into the folder it names `trace`.
+        web_replay_host.installTraceLaunchedEntry(proc() =
+          attachLoadedTrace(data.activeSession, "trace"))
         web_replay_host.installDebugSurfaceEntry(proc() =
           let debugLayout = web_entry_surface.noirStudioDebugLayout()
           if debugLayout.isNil:
