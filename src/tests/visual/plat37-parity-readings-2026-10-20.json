@@ -425,5 +425,10 @@
   "reprobuild": "MOVED DURING THE PASS: local/checked-out f974c2e74a, remote agents was f974c2e74a at the start and is b1bf8d2e19 at the end.",
   "reprobuildWhyItDoesNotAffectANYreadingHere": "Nothing in this pass builds reprobuild or reads its source. The repro used throughout is the ALREADY-BUILT binary at reprobuild/build/bin/repro (repro 0.2.6), which sits in the working tree and was not rebuilt, re-linked or replaced at any point - and the one build that actually consumed a repro, the Electron bundle, was built by repro 0.1.3 anyway (REPROBUILD-ISSUE-D). The checkout was NOT synced to b1bf8d2e19, deliberately: syncing mid-pass would have changed the tool under the measurements.",
   "codetracerPm": "local ee8b69f6ff, remote latest c6ce2ff72e - MOVED before the pass began and still unsynced at the end"
- }
+ },
+  "captureStabilityQualification": {
+    "independentCaptureCount": null,
+    "status": "unvalidated-historical-reading",
+    "reason": "Independent capture count and pairwise within-renderer FLIP stability were not recorded. Regrading preserved frames is not another capture. eventLog figures and aggregates containing them cannot establish a validated parity baseline or delta."
+  }
 }

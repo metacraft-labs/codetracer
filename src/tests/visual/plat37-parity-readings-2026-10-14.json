@@ -121,5 +121,10 @@
    "that PLAT35-VG5 ('four panes against eight') is the same artefact. Its spec entry now carries a RE-MEASUREMENT REQUIRED note marked [status:proposed]. Read from the launch path of visual-alignment-capture.spec.ts, which also sets no noUserLayout; NOT measured, and it is read by a different instrument in a lane that was not run.",
    "that the FLIP figure will improve. Not claimed; see flip.whatToExpectAndWhyItIsNotAPrediction."
   ]
- }
+ },
+  "captureStabilityQualification": {
+    "independentCaptureCount": null,
+    "status": "unvalidated-historical-reading",
+    "reason": "Independent capture count and pairwise within-renderer FLIP stability were not recorded. Regrading preserved frames is not another capture. eventLog figures and aggregates containing them cannot establish a validated parity baseline or delta."
+  }
 }

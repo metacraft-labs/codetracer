@@ -442,5 +442,10 @@
   "reprobuild": "local f974c2e74, remote agents has MOVED to 18c9229ad. Same.",
   "ruling": "Both repositories that were MEASURED AGAINST -- codetracer and isonim-gpui -- are exactly at their published tips, so every figure in this file is anchored to a revision a reader can fetch. The three that moved were not measured against and were not modified."
  },
- "theFlakeLockHookTrap": "NOT TRIGGERED. The brief warned that codetracer/flake.lock's nix-blockchain-development node can be reverted by the managed pre-commit hook. No commit was attempted in any repo this pass, and codetracer's working tree is clean apart from this readings file."
+ "theFlakeLockHookTrap": "NOT TRIGGERED. The brief warned that codetracer/flake.lock's nix-blockchain-development node can be reverted by the managed pre-commit hook. No commit was attempted in any repo this pass, and codetracer's working tree is clean apart from this readings file.",
+  "captureStabilityQualification": {
+    "independentCaptureCount": null,
+    "status": "unvalidated-historical-reading",
+    "reason": "Independent capture count and pairwise within-renderer FLIP stability were not recorded. Regrading preserved frames is not another capture. eventLog figures and aggregates containing them cannot establish a validated parity baseline or delta."
+  }
 }

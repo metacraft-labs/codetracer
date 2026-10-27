@@ -523,6 +523,9 @@ package codeTracer:
     "nim-agent-harbor >=0"
     "nim-agents >=0"
     "nim-acp >=0"
+    # The parity gate compiles the FLIP producer's C ABI; declare its source
+    # package so the sibling revision participates in dependency locking.
+    "image_diff >=0"
 
     # Windows-only build tools. ``nsis`` (the Nullsoft Scriptable
     # Install System compiler) is what the ``windows-installer``

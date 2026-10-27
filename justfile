@@ -6901,3 +6901,13 @@ plat51-capture-electron *args:
 # Ctrl+Shift+B, the user's keybindings.json and its reload).
 plat68-desktop-keys *args:
   bash scripts/plat68-desktop-keys.sh {{args}}
+
+# Published parity figures require two independent captures of each renderer.
+# Raw capture recipes above produce diagnostics, not stable parity scalars.
+[positional-arguments]
+plat37-parity *args:
+  bash ci/test/plat37-parity.sh "$@"
+
+# Real-FLIP stability/refusal controls, independent of GUI permissions.
+test-plat37-parity:
+  bash ci/test/plat37-parity.sh --test

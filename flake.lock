@@ -591,6 +591,23 @@
         "type": "github"
       }
     },
+    "codetracer-image-diff": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1793050497,
+        "narHash": "sha256-w4Ahbo3XgnFptT8YGMo8THl9uKdPpUfL8oyMk5o+wK0=",
+        "owner": "metacraft-labs",
+        "repo": "codetracer-image-diff",
+        "rev": "e002498eac522ccc90c1dab4800e0b934bdc72fd",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "agents",
+        "repo": "codetracer-image-diff",
+        "type": "github"
+      }
+    },
     "codetracer-js-recorder": {
       "inputs": {
         "codetracer-trace-format": [
@@ -641,11 +658,11 @@
     "codetracer-native-recorder": {
       "flake": false,
       "locked": {
-        "lastModified": 1793135799,
-        "narHash": "sha256-cc6Gg4wnBzcqXB38qeeuziQe1fYlWJ4vUacKS9+sOCQ=",
+        "lastModified": 1793140730,
+        "narHash": "sha256-56964O4Zdvy9quGfEEYxI2ISALWwV2atLgJfSqNJ2sQ=",
         "owner": "metacraft-labs",
         "repo": "codetracer-native-recorder",
-        "rev": "05548fe320e2203bc6b7c2591a1fe7b530a86ade",
+        "rev": "f8e9134f057486146a247758300a8203c85511b0",
         "type": "github"
       },
       "original": {
@@ -4102,11 +4119,11 @@
     "isonim": {
       "flake": false,
       "locked": {
-        "lastModified": 1793133780,
-        "narHash": "sha256-/u4hSTiEBo5jmo2m0/h04izSrQy4Ip7g1RhAOazpTYE=",
+        "lastModified": 1793139381,
+        "narHash": "sha256-Qd/cif7ELyTZ8iPCPJ0FY83PioYrZzCMRzBIsP2Q8aA=",
         "owner": "metacraft-labs",
         "repo": "isonim",
-        "rev": "c760ca323a62005014c4478be645b56bcb125d7e",
+        "rev": "b8f117170a8b86a0f77a287b30d0ce02b94f6215",
         "type": "github"
       },
       "original": {
@@ -7652,11 +7669,11 @@
         "stackable-hooks-macos-tools": "stackable-hooks-macos-tools"
       },
       "locked": {
-        "lastModified": 1793133683,
-        "narHash": "sha256-/HQKxaJ7/ETMJIryv/mJRA8cmDcOLDbJzGcK1Z5j24c=",
+        "lastModified": 1793140369,
+        "narHash": "sha256-+H0A/n52UHpSeEjNMbVXL018hFOUB37s/0duqsY8GkU=",
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "c61928595827c2e9d5f899ec25b6b820e0c9dcdb",
+        "rev": "3f44681b74f7efa7ba1b265d4d63f41249a6c1ee",
         "type": "github"
       },
       "original": {
@@ -7748,6 +7765,7 @@
     "root": {
       "inputs": {
         "appimage-channel": "appimage-channel",
+        "codetracer-image-diff": "codetracer-image-diff",
         "codetracer-js-recorder": "codetracer-js-recorder",
         "codetracer-native-backend": "codetracer-native-backend",
         "codetracer-native-recorder": "codetracer-native-recorder",

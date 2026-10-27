@@ -432,5 +432,10 @@
   "isonimGpui": "ab520c05fccbc08adec17606b201d7db19960eea (agents) -- UNCHANGED; this pass's shim work is uncommitted on top of it",
   "codetracerPm": "MOVED TWICE during the pass and was never synced: local ee8b69f6ff throughout, remote cdc111a7a at the start and c6ce2ff72e at the end. Nothing this pass measured depends on it.",
   "ruling": "the three repos every measurement depends on did not move. Every figure in this file is against codetracer 025bd9981, isonim-gpui ab520c05f plus the uncommitted shim changes listed in `subject`, and reprobuild f974c2e74a."
- }
+ },
+  "captureStabilityQualification": {
+    "independentCaptureCount": null,
+    "status": "unvalidated-historical-reading",
+    "reason": "Independent capture count and pairwise within-renderer FLIP stability were not recorded. Regrading preserved frames is not another capture. eventLog figures and aggregates containing them cannot establish a validated parity baseline or delta."
+  }
 }

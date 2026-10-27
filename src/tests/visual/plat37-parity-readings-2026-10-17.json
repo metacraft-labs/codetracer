@@ -1634,5 +1634,10 @@
   "PARITY-S6, S7, S8, S10, S11 and S12 were not re-measured and are labelled carried-forward. S9 is partly contradicted by the title strips this pass read, and is labelled so rather than re-graded.",
   "Both capture lanes ran while no other heavy job was on the machine, but the GPUI lane ran before the Electron one in the same session; no cross-check was made for capture-time contention.",
   "No issue was filed, by instruction. The six drafts above are unfiled."
- ]
+ ],
+  "captureStabilityQualification": {
+    "independentCaptureCount": null,
+    "status": "unvalidated-historical-reading",
+    "reason": "Independent capture count and pairwise within-renderer FLIP stability were not recorded. Regrading preserved frames is not another capture. eventLog figures and aggregates containing them cannot establish a validated parity baseline or delta."
+  }
 }

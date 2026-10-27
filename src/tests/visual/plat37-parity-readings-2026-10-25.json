@@ -239,5 +239,10 @@
     "platform": "aarch64-darwin, Darwin 25.5.0, macOS 26.5.2 build 25F84",
     "workspace": "/Users/zahary/m/fix-pxor-issues",
     "diskAvailable": "86 G"
+  },
+  "captureStabilityQualification": {
+    "independentCaptureCount": null,
+    "status": "unvalidated-historical-reading",
+    "reason": "Independent capture count and pairwise within-renderer FLIP stability were not recorded. Regrading preserved frames is not another capture. eventLog figures and aggregates containing them cannot establish a validated parity baseline or delta."
   }
 }
