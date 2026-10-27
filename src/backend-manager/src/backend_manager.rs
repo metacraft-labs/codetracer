@@ -6551,15 +6551,27 @@ impl BackendManager {
             .or_else(|_| std::env::var("CODETRACER_DB_BACKEND_CMD"))
             .unwrap_or_else(|_| "replay-server".to_string());
 
-        // Build the arguments: the backend command + "dap-server" subcommand.
-        let backend_args_owned: Vec<String> =
-            if backend_cmd.contains("backend-manager") || backend_cmd.contains("session-manager") {
-                // For mock-dap-backend, the subcommand is `mock-dap-backend`.
-                vec!["mock-dap-backend".to_string()]
-            } else {
-                vec!["dap-server".to_string()]
-            };
-        let backend_args: Vec<&str> = backend_args_owned.iter().map(|s| s.as_str()).collect();
+        // The subcommand: `dap-server`, or the mock's when the explicit test
+        // flag asks for it.  Never inferred from `backend_cmd`: that path is
+        // wherever the user, the workspace or the CI runner put the build,
+        // so a word in it says nothing about which program it is.
+        let subcommand = match replay_backend_subcommand(
+            std::env::var_os(REPLAY_SERVER_MOCK_DAP_ENV).as_deref(),
+        ) {
+            Ok(subcommand) => subcommand,
+            Err(e) => {
+                let response = json!({
+                    "type": "response",
+                    "request_seq": seq,
+                    "success": false,
+                    "command": "ct/open-trace",
+                    "message": format!("cannot choose the replay backend: {e}")
+                });
+                self.send_response_for_seq(seq, response);
+                return Ok(());
+            }
+        };
+        let backend_args = [subcommand];
 
         // Spawn the backend process (raw, without installing channels).
         let (backend_id, sender, mut receiver) =
@@ -7166,6 +7178,71 @@ impl BackendManager {
 
     pub async fn message_selected(&self, message: Value) -> Result<(), Box<dyn Error>> {
         self.message(self.selected, message).await
+    }
+}
+
+/// The test flag that makes `ct/open-trace` start its replay backend as
+/// `<CODETRACER_REPLAY_SERVER_CMD> mock-dap-backend <socket>` (the session
+/// manager's own DAP test double) instead of `<…> dap-server <socket>`.
+/// `1` turns it on; unset, empty or `0` leaves the real `dap-server`.
+pub const REPLAY_SERVER_MOCK_DAP_ENV: &str = "CODETRACER_REPLAY_SERVER_MOCK_DAP";
+
+/// The subcommand `ct/open-trace` starts the replay backend with, given the
+/// value of [`REPLAY_SERVER_MOCK_DAP_ENV`].
+///
+/// The mock is chosen only when that flag asks for it.  It used to be
+/// inferred from the backend command containing `backend-manager` or
+/// `session-manager`, so a real `replay-server` built under a directory
+/// with either word in its name was started as `replay-server
+/// mock-dap-backend`, which it does not have, and every trace open timed
+/// out.  A value other than `1`, `0` or empty is refused rather than read
+/// as either: a misspelt flag that quietly selected one backend would make
+/// a test pass or fail for the wrong reason.
+pub fn replay_backend_subcommand(
+    mock_dap: Option<&std::ffi::OsStr>,
+) -> Result<&'static str, String> {
+    match mock_dap {
+        None => Ok("dap-server"),
+        Some(value) => match value.to_str() {
+            Some("" | "0") => Ok("dap-server"),
+            Some("1") => Ok("mock-dap-backend"),
+            _ => Err(format!(
+                "{REPLAY_SERVER_MOCK_DAP_ENV}={} is neither 1 nor 0",
+                value.to_string_lossy()
+            )),
+        },
+    }
+}
+
+#[cfg(test)]
+mod replay_backend_subcommand_tests {
+    use super::replay_backend_subcommand;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn the_real_dap_server_unless_the_flag_asks_for_the_mock() {
+        assert_eq!(replay_backend_subcommand(None), Ok("dap-server"));
+        assert_eq!(
+            replay_backend_subcommand(Some(OsStr::new(""))),
+            Ok("dap-server")
+        );
+        assert_eq!(
+            replay_backend_subcommand(Some(OsStr::new("0"))),
+            Ok("dap-server")
+        );
+        assert_eq!(
+            replay_backend_subcommand(Some(OsStr::new("1"))),
+            Ok("mock-dap-backend")
+        );
+    }
+
+    #[test]
+    fn a_value_that_is_neither_1_nor_0_is_refused_by_name() {
+        let err = replay_backend_subcommand(Some(OsStr::new("yes"))).unwrap_err();
+        assert!(
+            err.contains("CODETRACER_REPLAY_SERVER_MOCK_DAP=yes"),
+            "{err}"
+        );
     }
 }
 

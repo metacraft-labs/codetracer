@@ -132,6 +132,11 @@ and communicating via stdin/stdout with newline-delimited JSON-RPC 2.0.
   socket and never auto-start one (used in tests). The daemon also sets it
   for `exec_script`'s Python process, and the Python API connects to it
   ahead of any other resolution.
+- `CODETRACER_REPLAY_SERVER_CMD` - The replay backend the daemon starts for
+  a trace, as `<cmd> dap-server <socket>` (default `replay-server`).
+  `CODETRACER_REPLAY_SERVER_MOCK_DAP=1` (a test flag) starts
+  `<cmd> mock-dap-backend <socket>` instead; any value but `1`, `0` or empty
+  is refused. The choice never depends on the command's path.
 - `CODETRACER_TMP_PATH`, else `$CODETRACER_HOME/tmp`, else the per-OS default
   (`TMPDIR`-based on Linux) - where the daemon socket and PID file go without
   an override.
