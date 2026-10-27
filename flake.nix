@@ -273,29 +273,10 @@
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
       inputs.git-hooks.follows = "git-hooks-nix";
-      # runquota's REVISION is reprobuild's to state — that is the whole point
-      # of the `runquota.follows = "reprobuild/runquota-src"` edge above. Its
-      # PARAMETERISATION is still ours, and these three restore exactly the
-      # overrides the old standalone `runquota` input carried, without
-      # reintroducing a second revision for them to disagree about.
-      #
-      # Without them runquota is evaluated against
-      # `runquota-src/nixos-modules/nixpkgs-unstable` (measured 2026-10-14:
-      # nixpkgs 3497aa5c) rather than this repo's nixpkgs (687f05a9,
-      # nixos-25.11), which would build `inputs'.runquota.packages.runquota`
-      # — used by nix/shells/ci-base.nix — from a second nixpkgs.
-      # `nixos-modules` needs no line here: runquota-src's already follows
-      # reprobuild's, which follows `nix-blockchain-development/nixos-modules`
-      # above.
-      # Nix 2.28 treats an override-only nested input as the indirect
-      # registry reference `flake:runquota-src`. State the same source URL
-      # as reprobuild so the Nix shipped in our dev-env can re-enter it.
-      # This declares no revision: the lock and the derived root follows
-      # edge above still select reprobuild's single RunQuota source.
-      inputs.runquota-src.url = "github:metacraft-labs/runquota/dev";
-      inputs.runquota-src.inputs.nixpkgs.follows = "nixpkgs";
-      inputs.runquota-src.inputs.flake-parts.follows = "flake-parts";
-      inputs.runquota-src.inputs.git-hooks.follows = "git-hooks-nix";
+      # Reprobuild owns RunQuota's source and its input parameterisation.
+      # Restating a nested URL overrides the producer's locked child when
+      # this parent is updated, even if both happen to match today. Keep
+      # the root `runquota` follows edge above and inherit the complete input.
       flake = true;
     };
 

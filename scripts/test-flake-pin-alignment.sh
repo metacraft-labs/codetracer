@@ -25,15 +25,19 @@
 #
 #     runquota.follows = "reprobuild/runquota-src";
 #
-# so the closure holds exactly ONE runquota node and it is reprobuild's own.
+# with no nested `inputs.runquota-src` override. The producer owns both
+# the source and its parameterisation, so a parent update carries its child.
+# The closure holds exactly ONE runquota node and it is reprobuild's own.
 # Two revisions that could disagree have become one that cannot. This script
-# therefore now checks TWO things, and the first is the important one:
+# therefore checks both the declaration and its locked result:
 #
 #   1. STRUCTURE — that root input `runquota` is still a `follows` path onto
 #      `reprobuild`'s `runquota-src`. If someone reintroduces an independent
 #      `runquota` input, the guarantee is gone even on the day the two
 #      revisions happen to match, so that is a failure in its own right.
-#   2. VALUE — that the revision this repo's flake.lock resolves `runquota` to
+#   2. SOURCE — that the locked original source agrees with the producer.
+#      The Nix metadata regression also rejects nested source overrides.
+#   3. VALUE — that the revision this repo's flake.lock resolves `runquota` to
 #      equals the `runquota-src` revision reprobuild's OWN committed flake.lock
 #      states. This is NOT vacuous under (1): the two numbers come from two
 #      different files, and a hand-edited or half-relocked codetracer
@@ -204,8 +208,11 @@ if name not in nodes.get("root", {}).get("inputs", {}):
     print("")
 else:
     node = nodes.get(resolve("root", [name]))
-    print(node.get("locked", {}).get("rev", "") if node else "")
-' "$1" "$2" 2>&1)"
+    if len(sys.argv) > 3 and sys.argv[3] == "source":
+        print(json.dumps(node.get("original", {}), sort_keys=True) if node else "")
+    else:
+        print(node.get("locked", {}).get("rev", "") if node else "")
+' "$1" "$2" "${3:-rev}" 2>&1)"
 	rc=$?
 	[ "$rc" -eq 0 ] || fail \
 		"could not read '$1' as a flake.lock (python3 exited $rc). This is a parse failure, NOT a statement about any pin — do not read it as 'the input is missing'. Parser output:
@@ -321,10 +328,18 @@ trap 'rm -f "$RB_LOCK_TMP"' EXIT HUP INT TERM
 git -C "$REPROBUILD_DIR" show "${REPROBUILD_REV}:flake.lock" >"$RB_LOCK_TMP" 2>/dev/null ||
 	fail "reprobuild@${REPROBUILD_REV} has no flake.lock. The pin cannot be validated; re-examine this check."
 
-# reprobuild calls its own input `runquota-src`; this repo calls the override
-# `runquota` and wires them with `inputs.runquota-src.follows = "runquota"`.
+# reprobuild owns `runquota-src`; this repo derives its root `runquota`
+# through `runquota.follows = "reprobuild/runquota-src"`.
 RB_RUNQUOTA="$(lock_rev "$RB_LOCK_TMP" runquota-src)" || exit 1
 [ -n "$RB_RUNQUOTA" ] || fail "reprobuild@${REPROBUILD_REV} flake.lock has no locked rev for 'runquota-src'; the input reprobuild expects has been renamed. Update this check to match."
+
+# Equal revisions can still name different source branches. A parent update
+# must inherit its child source; the exact declaration-level check lives in
+# the Nix metadata regression so this offline guard needs no Nix parser.
+CT_RUNQUOTA_SOURCE="$(lock_rev "$CT_LOCK" runquota source)" || exit 1
+RB_RUNQUOTA_SOURCE="$(lock_rev "$RB_LOCK_TMP" runquota-src source)" || exit 1
+[ "$CT_RUNQUOTA_SOURCE" = "$RB_RUNQUOTA_SOURCE" ] || fail \
+	"RunQuota source differs from reprobuild; remove the nested source override and re-lock the parent with 'nix flake update reprobuild'."
 
 echo "reprobuild pinned here:       ${REPROBUILD_REV}"
 echo "  its runquota-src:           ${RB_RUNQUOTA}"
