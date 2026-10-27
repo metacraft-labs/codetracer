@@ -77,7 +77,7 @@
   "nested": {
    "x": 179,
    "y": 221,
-   "w": 197,
+   "w": 191,
    "h": 902
   },
   "nestedFirstLabels": [
@@ -90,15 +90,15 @@
   "nestedLevelWithFolder": true
  },
  "tooltips": {
-  "reverse-next": "Reverse next (SHIFT+F10)",
+  "reverse-next": "Reverse next (Shift+F10)",
   "next": "Next (F10)",
-  "reverse-step-in": "Reverse step in (SHIFT+F11)",
+  "reverse-step-in": "Reverse step in (Shift+F11)",
   "step-in": "Step in (F11)",
-  "reverse-step-out": "Reverse step out (SHIFT+F12)",
+  "reverse-step-out": "Reverse step out (Shift+F12)",
   "step-out": "Step out (F12)",
-  "reverse-continue": "Reverse continue (SHIFT+F8)",
-  "continue": "Continue (F8 F2)",
-  "run-to-entry": "Run to entry (CTRL+ALT+E)"
+  "reverse-continue": "Reverse continue (Shift+F8)",
+  "continue": "Continue (F8)",
+  "run-to-entry": "Run to entry (Ctrl+Alt+E)"
  },
  "omnibarPlaceholder": "Navigate to file or run a :command"
 }
