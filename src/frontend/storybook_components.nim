@@ -483,39 +483,34 @@ proc storyFilesystem(): FilesystemEntryNode =
     ],
   )
 
+proc storyLine(raw: string; isStdout: bool; severity = blsNone;
+               path = ""; line = 0): BuildOutputLine =
+  ## A line as a compiler wrote it, ANSI included, decoded by the pane's own
+  ## reader (PLAT-56: text and styled runs).
+  var reader: BuildLineReader
+  let (text, runs) = reader.decode(raw)
+  BuildOutputLine(text: text, runs: runs, isStdout: isStdout,
+                  severity: severity, locationPath: path, locationLine: line)
+
 proc applyBuild(vm: BuildVM; fixture: string) =
   vm.setCommand("nargo test")
   vm.setRunning(fixture == "loading")
-  vm.appendLine(BuildOutputLine(htmlText: "$ nargo test --workspace noir_space_ship",
-                                isStdout: true, severity: blsInfo))
-  vm.appendLine(BuildOutputLine(htmlText: "Compiling noir_space_ship v0.2.0",
-                                isStdout: true, severity: blsInfo))
-  vm.appendLine(BuildOutputLine(htmlText: "Checking src/main.nr",
-                                isStdout: true, severity: blsInfo))
-  vm.appendLine(BuildOutputLine(
-    htmlText: "<span class=\"ansi-bright-red-fg\">src/main.nr:13:10 error:</span> expected u32",
-    isStdout: false,
-    severity: blsError,
-    locationPath: "src/main.nr",
-    locationLine: 13,
-  ))
-  vm.appendLine(BuildOutputLine(
-    htmlText: "  let did_survive_positive = shield.iterate_asteroids(...)",
-    isStdout: false,
-    severity: blsError,
-  ))
-  vm.appendLine(BuildOutputLine(
-    htmlText: "         ^^^^^^^^^^^^^ expected field `shield` to be u32",
-    isStdout: false,
-    severity: blsError,
-  ))
-  vm.appendLine(BuildOutputLine(
-    htmlText: "<span class=\"ansi-bright-yellow-fg\">src/shield.nr:61:3 warning:</span> unused variable `debug_mode`",
-    isStdout: false,
-    severity: blsWarning,
-    locationPath: "src/shield.nr",
-    locationLine: 61,
-  ))
+  vm.appendLine(storyLine("$ nargo test --workspace noir_space_ship", true,
+                          blsInfo))
+  vm.appendLine(storyLine("Compiling noir_space_ship v0.2.0", true, blsInfo))
+  vm.appendLine(storyLine("Checking src/main.nr", true, blsInfo))
+  vm.appendLine(storyLine(
+    "\e[91msrc/main.nr:13:10 error:\e[0m expected u32", false, blsError,
+    "src/main.nr", 13))
+  vm.appendLine(storyLine(
+    "  let did_survive_positive = shield.iterate_asteroids(...)", false,
+    blsError))
+  vm.appendLine(storyLine(
+    "         ^^^^^^^^^^^^^ expected field `shield` to be u32", false,
+    blsError))
+  vm.appendLine(storyLine(
+    "\e[93msrc/shield.nr:61:3 warning:\e[0m unused variable `debug_mode`",
+    false, blsWarning, "src/shield.nr", 61))
   for problem in storyProblems():
     vm.appendProblem(problem)
   vm.setCode(if fixture == "success": 0 else: 1)
