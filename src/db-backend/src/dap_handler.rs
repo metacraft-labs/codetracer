@@ -5025,12 +5025,11 @@ impl Handler {
                 // historical `Err`, because for it a miss really does mean the
                 // location is unknown.
                 //
-                // Returning `Err` here would be the worse of two bugs, not the
-                // safer one: `dap_server.rs`'s dispatcher does not respond on
-                // the error path, so the request never settles and a strict
-                // DAP client waits forever. That is the same failure the
-                // `respond_dap` above exists to prevent, and the failure
-                // `local_step_jump` still has.
+                // So it is answered as a success, with a warning saying why
+                // nothing moved. Returning `Err` would answer the request
+                // `success: false` (`dap_server.rs`'s task thread answers
+                // every handler error that way), reporting an ordinary
+                // outcome as a failed request.
                 let direction = if behaviour == JumpBehaviour::Forward {
                     "forward"
                 } else {
