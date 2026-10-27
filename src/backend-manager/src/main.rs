@@ -3,6 +3,7 @@ extern crate log;
 
 mod backend_manager;
 pub mod boundary_log;
+pub mod boundary_tools;
 pub mod browser_stream_host;
 pub mod browser_stream_receiver;
 mod config;

@@ -15,6 +15,8 @@
 //!   assemble`, whose command line is [`cli`].
 //! * [`container`]: writing and verifying the four members, and the
 //!   checkpoint index rebuilt from the log ([`rebuild_checkpoint_index`]).
+//! * [`narrate`]: the session's narrative and the decoded records the
+//!   boundary tools serve, the work of `ct-jsbound narrate` and `events`.
 //! * [`vectors`]: the byte vectors shared with the TypeScript implementation
 //!   in codetracer-js-recorder `packages/boundary-format`.
 //!
@@ -33,6 +35,7 @@ pub mod cli;
 pub mod container;
 pub mod decode;
 pub mod encode;
+pub mod narrate;
 pub mod record;
 pub mod vectors;
 
@@ -46,4 +49,5 @@ pub use container::{
 };
 pub use decode::{decode_log, DecodeError, DecodeErrorKind, DecodedLog, Termination};
 pub use encode::{encode_frame, encode_frames, encode_log};
+pub use narrate::{events, narrate, narrate_log, EventQuery};
 pub use record::{BlobRef, Record, HOLE_TOKEN, RECORD_KINDS};

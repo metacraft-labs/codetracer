@@ -7,6 +7,9 @@
 //!                     [--summary <file.json>]
 //!                     <batch file or directory>...
 //! ct-jsbound summarize <file.ct>
+//! ct-jsbound narrate <file.ct> [--out <file.json>]
+//! ct-jsbound events <file.ct> [--seq-from <seq>] [--seq-to <seq>]
+//!                   [--kinds <Kind,Kind,...>] [--limit <n>] [--out <file.json>]
 //! ```
 //!
 //! `--summary` also writes the assembled session's [`Summary`] as JSON (its
@@ -18,6 +21,12 @@
 //! assembled `.ct` back, verifies it and prints the same summary with its
 //! `recording_id` and member names (for tests and tools that check a stored
 //! recording).
+//!
+//! `narrate` writes the session's narrative document and `events` the
+//! decoded records of a `seq` range ([`crate::narrate`]), each as one JSON
+//! document, to `--out` (through a temporary file and a rename) or stdout. A
+//! caller that must not decode recorder bytes itself runs them sandboxed over
+//! a stored recording, as it runs `assemble`.
 //!
 //! A directory argument contributes every regular file in it (the staging
 //! prefix `staging/js-boundary/{tenant}/{recording_id}/{batch_seq}`,
@@ -31,11 +40,15 @@ use std::path::{Path, PathBuf};
 
 use crate::assemble::{assemble, summarise, AssembleError, AssembleOptions, Finalisation, Summary};
 use crate::container::{BoundaryRecording, MEMBERS};
+use crate::narrate::{events, narrate, EventQuery, MAX_EVENTS};
 
 /// The usage text.
 pub const USAGE: &str = "usage: ct-jsbound assemble --recording-id <uuidv7> --out <file.ct> \
 [--idle | --session-cap] [--refused-batch <batch_seq>]... [--summary <file.json>] \
-<batch file or directory>...\n       ct-jsbound summarize <file.ct>";
+<batch file or directory>...\n       ct-jsbound summarize <file.ct>\n       \
+ct-jsbound narrate <file.ct> [--out <file.json>]\n       \
+ct-jsbound events <file.ct> [--seq-from <seq>] [--seq-to <seq>] [--kinds <Kind,...>] \
+[--limit <n>] [--out <file.json>]";
 
 /// Why the command failed.
 #[derive(Debug)]
@@ -211,11 +224,125 @@ fn summarize(args: &[String]) -> Result<String, CliError> {
     Ok(value.to_string())
 }
 
+/// Read and verify the boundary recording at `path` (exit 1 when it is not one).
+fn read_recording(path: &str) -> Result<BoundaryRecording, CliError> {
+    let bytes = fs::read(path).map_err(|e| io_err("read", Path::new(path), e))?;
+    BoundaryRecording::read(bytes)
+        .map_err(|e| CliError::Io(format!("{path} is not a valid boundary recording: {e}")))
+}
+
+/// The `.ct` path and the options of `narrate` and `events`: `--out` and
+/// whatever `value_option` accepts (an option it does not know is a usage
+/// error).
+fn recording_command<'a>(
+    command: &str,
+    args: &'a [String],
+    mut value_option: impl FnMut(&str, &str) -> Result<bool, CliError>,
+) -> Result<(&'a str, Option<PathBuf>), CliError> {
+    let mut input = None;
+    let mut out = None;
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        if arg.starts_with("--") {
+            let value = it
+                .next()
+                .ok_or_else(|| CliError::Usage(format!("{arg} needs a value")))?;
+            if arg == "--out" {
+                out = Some(PathBuf::from(value));
+            } else if !value_option(arg, value)? {
+                return Err(CliError::Usage(format!(
+                    "unknown option {arg} for {command}"
+                )));
+            }
+        } else if input.replace(arg.as_str()).is_some() {
+            return Err(CliError::Usage(format!(
+                "{command} takes exactly one .ct file"
+            )));
+        }
+    }
+    let input = input.ok_or_else(|| CliError::Usage(format!("{command} needs a .ct file")))?;
+    Ok((input, out))
+}
+
+/// Write `document` to `out`, or return it for stdout.
+fn emit(document: &serde_json::Value, out: Option<PathBuf>) -> Result<String, CliError> {
+    let mut bytes = serde_json::to_vec(document).expect("a JSON value always serialises");
+    match out {
+        Some(path) => {
+            bytes.push(b'\n');
+            write_atomically(&path, &bytes)?;
+            Ok(format!("wrote {} ({} bytes)", path.display(), bytes.len()))
+        }
+        None => Ok(String::from_utf8(bytes).expect("serde_json writes UTF-8")),
+    }
+}
+
+fn parse_seq(option: &str, value: &str) -> Result<u64, CliError> {
+    value
+        .parse::<u64>()
+        .map_err(|_| CliError::Usage(format!("{option} {value:?} is not a seq")))
+}
+
+/// `ct-jsbound narrate <file.ct> [--out <file.json>]`.
+fn narrate_command(args: &[String]) -> Result<String, CliError> {
+    let (input, out) = recording_command("narrate", args, |_, _| Ok(false))?;
+    let recording = read_recording(input)?;
+    emit(&narrate(&recording), out)
+}
+
+/// `ct-jsbound events <file.ct> [--seq-from] [--seq-to] [--kinds] [--limit] [--out]`.
+fn events_command(args: &[String]) -> Result<String, CliError> {
+    let mut query = EventQuery::default();
+    let (input, out) = recording_command("events", args, |option, value| {
+        match option {
+            "--seq-from" => query.seq_from = parse_seq(option, value)?,
+            "--seq-to" => query.seq_to = parse_seq(option, value)?,
+            "--kinds" => {
+                query.kinds = value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|k| !k.is_empty())
+                    .map(str::to_string)
+                    .collect();
+                if let Some(unknown) = query
+                    .kinds
+                    .iter()
+                    .find(|k| !crate::record::RECORD_KINDS.iter().any(|(_, n)| n == k))
+                {
+                    return Err(CliError::Usage(format!(
+                        "--kinds: {unknown:?} is no record kind"
+                    )));
+                }
+            }
+            "--limit" => {
+                query.limit = value
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|n| (1..=MAX_EVENTS).contains(n))
+                    .ok_or_else(|| {
+                        CliError::Usage(format!("--limit {value:?} is not from 1 to {MAX_EVENTS}"))
+                    })?;
+            }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    })?;
+    if query.seq_to < query.seq_from {
+        return Err(CliError::Usage("--seq-to is before --seq-from".into()));
+    }
+    let recording = read_recording(input)?;
+    emit(&events(&recording, &query), out)
+}
+
 /// Run `ct-jsbound` with `args` (without the program name). On success,
-/// returns a one-line summary for stdout.
+/// returns a one-line summary (or the document, for `narrate` and `events`
+/// without `--out`) for stdout.
 pub fn run(args: &[String]) -> Result<String, CliError> {
-    if args.first().map(String::as_str) == Some("summarize") {
-        return summarize(&args[1..]);
+    match args.first().map(String::as_str) {
+        Some("summarize") => return summarize(&args[1..]),
+        Some("narrate") => return narrate_command(&args[1..]),
+        Some("events") => return events_command(&args[1..]),
+        _ => {}
     }
     let args = parse_args(args)?;
     let bodies = read_batches(&args.inputs)?;
