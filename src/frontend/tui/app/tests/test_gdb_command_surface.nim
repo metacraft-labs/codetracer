@@ -299,7 +299,10 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 323
+  ExpectedStyleLiterals = 333
+    ## 2026-10-28: 323 → 333, measured — the native Build Output pane's ten
+    ## more (`views/build_output.nim`: its compiler colours, verdicts and
+    ## history).
     ## 2026-10-27 (PLAT-55): 312 → 323, measured — the Problems pane's eleven
     ## (`views/problems_pane.nim`).
     ## 2026-10-24 (PLAT-53): 285 → 293, measured — the Test Results pane's

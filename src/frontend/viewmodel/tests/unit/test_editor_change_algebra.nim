@@ -117,7 +117,10 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1977
+const ExpectedAssertions = 1983
+  ## *1977 -> 1983 on 2026-10-28: `viewmodels/agent_prompt_context.nim` and
+  ## `viewmodels/build_output_model.nim` x three assertions. Neither calls
+  ## `rebase(` or spells `mapOver`.*
   ## *1974 -> 1977 on 2026-10-28: `viewmodels/replay_open_setting.nim` x
   ## three assertions. It calls no `rebase(` and spells no `mapOver`.*
   ## *1966 -> 1974 on 2026-10-28: the in-document find's two modules.
