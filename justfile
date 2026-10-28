@@ -3788,6 +3788,15 @@ test-plat18-fake-timer:
   exec > >(tee test-logs/test-plat18-fake-timer.log) 2>&1
   bash ci/test/plat18-fake-timer-builds.sh
 
+# The marshalling mutation harness must compile the isonim tree it mutates,
+# even when the dev shell exports ISONIM_SRC for another copy.
+test-plat18-harness-grades-mutated-tree:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-plat18-harness-grades-mutated-tree.log) 2>&1
+  bash ci/test/plat18-harness-grades-the-tree-it-mutates.sh
+
 # PLAT-18 deliverable 2: the vertical slice — the variables pane with the
 # 600-member fixture, driven by PLAT-17's core, in a REAL Electron renderer
 # against a REAL document.

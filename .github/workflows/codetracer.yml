@@ -4011,6 +4011,13 @@ jobs:
         # ship is not evaluated (Verification-Harness-Traps.md §12b).
         run: nix develop .#devShells.x86_64-linux.default --command just test-plat18-fake-timer
 
+      - name: PLAT-18 — the marshalling harness grades the tree it mutates
+        if: ${{ !cancelled() }}
+        # Uses the writable isonim sibling provisioned from repro.lock above.
+        # The gate redirects ISONIM_SRC to an unmutated copy and requires M1
+        # to be killed against the sibling the harness actually mutates.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-plat18-harness-grades-mutated-tree
+
       - name: PLAT-18 — the vertical slice in a real Electron renderer
         if: ${{ !cancelled() }}
         # The variables pane with the 600-member fixture, three arms in one
