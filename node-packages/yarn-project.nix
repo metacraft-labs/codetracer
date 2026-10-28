@@ -90,12 +90,9 @@ let
     # yarn-cache.drv, no substitute possible) and measured on nixos-ci-bare-002
     # 2026-10-24; the node-modules derivation was then built with it.
     "x86_64-linux" = "sha512-qTQAjem/DRvtgA0upZLmE6W6xWjLzhqWim47SJz6gHttUMzvOQoXxD7xNWhnkxah/sMqmIzKk8DTX6JrksNi4Q==";
-    # aarch64-darwin: NOT YET MEASURED. The previous value named the cache of
-    # the old lockfile, which Nix would substitute from the binary cache and
-    # never rebuild (``YN0056: Cache entry required but missing`` further
-    # down). The sentinel makes the first aarch64-darwin build fail loudly
-    # with the true ``got:`` value instead; paste it here.
-    "aarch64-darwin" = sentinelHash;
+    # aarch64-darwin: forced with sentinelHash and measured on m1 at
+    # 9c68a34b5, 2026-10-28, to make the developer shell usable there.
+    "aarch64-darwin" = "sha512-CDtX/JgvEUe9n5dGjaJEXGWuO9y/VlfEGkXZgXbdfbysfvRIXMWnCzFkZ5WSVMO9hrAHPn+0yfbJA2Br3nix0w==";
   };
 
   cacheOutputHash =

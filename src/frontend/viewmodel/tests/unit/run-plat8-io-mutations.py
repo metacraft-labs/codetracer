@@ -215,7 +215,7 @@ I_F3_SECOND = "'127.1' passes the first pass and is refused by the second"
 I_F4_CONNECT = ("0.0.0.0 no longer reaches the loopback daemon with "
                 "socket:remote")
 I_F5_GRANDCHILD = ("a child that forks is killed with its process group, "
-                   "asserted at /proc")
+                   "asserted against the OS")
 I_F6_NAMES = "F6: the fourth way to block, and WHICH HALF refuses each name"
 I_PARTITION = "the `system` surface is PARTITIONED by the two tables, not trimmed"
 

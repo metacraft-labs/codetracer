@@ -118,7 +118,7 @@ import isonim/core/[signals, computation]
 import ../../tui/app/syntax/lexical
 import ../../tui/app/theme/editor_theme
 import ../../styles/generated/design_tokens
-import ../../viewmodel/viewmodels/editor_gutter_lanes
+import codetracer_ui_components
 import ../devicon_marks
 from std/hashes import hash
 

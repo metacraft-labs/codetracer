@@ -64,3 +64,8 @@ export row_address
 # arithmetic; exported here because measuring is the host's half of mounting.
 import pane_viewport
 export pane_viewport
+
+# The shared gutter band map is presentation geometry. Renderers consume it
+# through the UI surface so the replay core remains free of pixel policy.
+import viewmodels/editor_gutter_lanes
+export editor_gutter_lanes
