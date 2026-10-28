@@ -381,6 +381,13 @@ export product_mode
 import viewmodels/build_vm
 export build_vm
 
+# The build tasks, the task picker and the `:build` grammar; when a build
+# reveals and dismisses its pane; a build's diagnostics in the editor
+# (Build-Output-Pane.md §3.6, §3.8, §3.9, §3.11, §3.12). Pure Nim over `std/*`
+# and the ViewModels above: one decision every front-end applies.
+import viewmodels/[build_tasks, build_auto_reveal, editor_diagnostics]
+export build_tasks, build_auto_reveal, editor_diagnostics
+
 # ---------------------------------------------------------------------------
 # Session lifecycle (§3.1, row 4; §6)
 # ---------------------------------------------------------------------------

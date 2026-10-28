@@ -77,6 +77,11 @@ type
       ## PLAT-54: a recording to attach to the agent's next prompt (the
       ## desktop's *Recording / trace*): the recordings the host can see, and
       ## a typed path.
+    omBuildTask = "build-task"
+      ## Build-Output-Pane.md §3.11, §3.12: the BUILD TASK PICKER — `:build:`
+      ## (what `Ctrl+Shift+B` opens). The entries are the project's tasks and
+      ## the pane's commands (`build_tasks.buildTaskEntries`), which a host
+      ## hands the omnibar with `setBuildTasks`.
 
   OmnibarEntry* = object
     ## One thing the omnibar can find.
@@ -115,6 +120,10 @@ type
       ## PLAT-70 Part D: the other end of the selected text, a byte offset
       ## into `query`, or -1 when no text is selected (see the header).
     limit*: int
+    buildTasks*: seq[OmnibarEntry]
+      ## The build task picker's entries (`omBuildTask`), kept apart from
+      ## `index` because they are the project's, not the recording's, and
+      ## are read again whenever the picker opens.
     revision*: int
     onChange*: proc() {.closure.}
 
@@ -129,6 +138,9 @@ const
     ## *Files & folders* open the omnibar on.
   AttachRecordingQuery* = ":attach-recording "
     ## PLAT-54: what its *Recording / trace* opens the omnibar on.
+  BuildTaskPrefix* = ":build:"
+    ## Build-Output-Pane.md §3.12: `:build: <task>` — the colon after the verb
+    ## is what tells a task from `:build <command>`.
   TickPrefix* = "#"
   OmnibarPlaceholder* = "Navigate to file or run a :command"
     ## PLAT-49: what every front-end's empty omnibar field shows — the
@@ -165,6 +177,8 @@ func classifyOmnibarQuery*(query: string): tuple[mode: OmnibarMode,
     if lower.startsWith(prefix) and
        (query.len == prefix.len or query[prefix.len] == ' '):
       return (mode, query[prefix.len .. ^1].strip)
+  if lower.startsWith(BuildTaskPrefix):
+    return (omBuildTask, query[BuildTaskPrefix.len .. ^1].strip)
   if lower.startsWith(OpenRecordingQuery.strip) and
      (query.len == OpenRecordingQuery.strip.len or
       query[OpenRecordingQuery.strip.len] == ' '):
@@ -197,6 +211,8 @@ func desktopKindOf*(mode: OmnibarMode): OmnibarMode =
   ## on its welcome screen, so `:open …` stays a command there.
   if mode == omTick: omFile
   elif mode in {omRecording, omAttach, omAttachRecording}: omCommand
+  # `:build: …` stays the picker: the desktop's palette lists the same
+  # entries (`ui/command_interpreter`).
   else: mode
 
 # ---------------------------------------------------------------------------
@@ -275,6 +291,20 @@ func rankOmnibar*(index: openArray[OmnibarEntry]; mode: OmnibarMode;
     return
   of omProgram, omAgent:
     return
+  of omBuildTask:
+    # THE PICKER'S OWN ORDER with nothing typed (the default task first, so
+    # `Ctrl+Shift+B` `Enter` runs it); ranked once something is.
+    for e in index:
+      if e.kind != omBuildTask:
+        continue
+      let s = fuzzyScore(needle, e.label)
+      if s.ok:
+        result.add OmnibarResult(entry: e, score: s.score, matched: s.matched)
+    if needle.len > 0:
+      result.sort(cmpResult)
+    if limit > 0 and result.len > limit:
+      result.setLen(limit)
+    return
   of omRecording:
     # A TYPED PATH IS A RECORDING TOO, offered first: the host checks it is
     # one when it is opened (`native_host.openLocalTrace`).
@@ -338,13 +368,21 @@ proc rerank(vm: OmnibarVM) =
   let (mode, needle) = classifyOmnibarQuery(vm.query)
   vm.mode = mode
   vm.needle = needle
-  vm.results = rankOmnibar(vm.index, mode, needle, vm.limit)
+  vm.results =
+    if mode == omBuildTask: rankOmnibar(vm.buildTasks, mode, needle, vm.limit)
+    else: rankOmnibar(vm.index, mode, needle, vm.limit)
   vm.selected = if vm.results.len > 0: 0 else: -1
 
 proc setIndex*(vm: OmnibarVM; index: seq[OmnibarEntry]) =
   ## Replace what can be found (the recording's files and functions, the
   ## menu's commands). Re-ranks the open query.
   vm.index = index
+  vm.rerank()
+  vm.changed()
+
+proc setBuildTasks*(vm: OmnibarVM; entries: seq[OmnibarEntry]) =
+  ## The build task picker's entries (`build_tasks.buildTaskEntries`).
+  vm.buildTasks = entries
   vm.rerank()
   vm.changed()
 

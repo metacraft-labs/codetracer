@@ -110,6 +110,12 @@ type
       ## what every new build returns to), else an index into `history`.
     reader*: BuildLineReader
       ## The current build's line reader (`build_output_model`).
+    taskName*: Signal[string]
+      ## The build task the current build runs (Build-Output-Pane.md §3.6),
+      ## "" for a free command.
+    diagnosticsOff*: bool
+      ## The current build's task says `problemMatcher: none`: its lines are
+      ## read and drawn, and none becomes a Problems row.
 
     # -- Derived state --
     status*: Memo[BuildStatus]
@@ -235,7 +241,7 @@ proc archiveCurrent(vm: BuildVM) =
   vm.history.val = h
 
 proc beginBuild*(vm: BuildVM; command: string; startMs: float;
-                 noun = "build") =
+                 noun = "build"; taskName = ""; problemMatcher = "") =
   ## A new build starts: the last one (if it ended) goes to the history, the
   ## output, the diagnostics and the reader start afresh, and the pane shows
   ## the new build (§3.7: "the most recent build is always shown by
@@ -249,6 +255,8 @@ proc beginBuild*(vm: BuildVM; command: string; startMs: float;
   vm.code.val = 0
   vm.command.val = command
   vm.noun.val = noun
+  vm.taskName.val = taskName
+  vm.diagnosticsOff = problemMatcher == "none"
   vm.buildStartTime.val = startMs
   vm.buildEndTime.val = 0.0
   vm.clockMs.val = startMs
@@ -262,6 +270,8 @@ proc feedOutput*(vm: BuildVM; raw: string; isStdout: bool): ReadBuildLine =
   ## diagnostic — appended to the build's problems too. The caller feeds the
   ## same row to the Problems pane's `ErrorsVM` (`result.fed`).
   result = vm.reader.read(raw, isStdout)
+  if vm.diagnosticsOff:
+    result.fed.problem = false
   var lines = vm.output.val
   lines.add result.line
   vm.output.val = lines
@@ -410,6 +420,7 @@ proc createBuildVM*(store: ReplayDataStore): BuildVM =
     let noun = createSignal("build")
     let history = createSignal(newSeq[BuildHistoryEntry]())
     let shownIndex = createSignal(-1)
+    let taskName = createSignal("")
 
     # Derived: coarse status, recomputed from running/code/output.
     # PLAT-56: idle means NO BUILD — no command and no output — rather than
@@ -450,6 +461,7 @@ proc createBuildVM*(store: ReplayDataStore): BuildVM =
       noun: noun,
       history: history,
       shownIndex: shownIndex,
+      taskName: taskName,
       status: status,
       isRunning: isRunning,
       hasOutput: hasOutput,
