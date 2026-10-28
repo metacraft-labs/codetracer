@@ -43,7 +43,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 159
+const ExpectedAssertions = 160
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
@@ -87,7 +87,7 @@ proc problemsWith(vm: BuildVM; severity: BuildLineSeverity): int =
 
 proc linesMentioning(vm: BuildVM; needle: string): int =
   for line in vm.output.val:
-    if needle in line.htmlText: inc result
+    if needle in line.text: inc result
 
 # ---------------------------------------------------------------------------
 # Fixtures: verbatim `noir_wasm.wasm` output. See
@@ -400,13 +400,13 @@ suite "the trace phase reports what a trace IS":
     counted linesMentioning(producer.vm, "Prover.toml") == 1
     counted producer.vm.problems.val.len == 0
 
-suite "what reaches innerHTML is escaped":
+suite "what a diagnostic quotes reaches the pane as text":
 
   test "a diagnostic quoting the user's source cannot inject markup":
-    # `isonim_build_view` assigns `htmlText` to `innerHTML`, deliberately —
-    # the desktop's producer passes ANSI runs through `ansi_up`. Nothing here
-    # is ANSI: it is compiler output quoting the user's own source, and §1b.3
-    # links can carry a project.
+    # PLAT-56: a line is its text and its styled runs, which
+    # `isonim_build_view` draws as TEXT NODES (no `innerHTML`); the text is
+    # kept as the compiler wrote it. `escapeHtmlText` stays the shared helper
+    # (`common/html_text`) the desktop Event Log escapes with.
     counted escapeHtmlText("<script>alert(1)</script>") ==
       "&lt;script&gt;alert(1)&lt;/script&gt;"
     counted escapeHtmlText("a & b") == "a &amp; b"
@@ -422,11 +422,16 @@ suite "what reaches innerHTML is escaped":
     counted producer.vm.problems.val.len == 1
     var rawTagRows = 0
     var escapedRows = 0
+    var runsAreText = true
     for line in producer.vm.output.val:
-      if "<img" in line.htmlText: inc rawTagRows
-      if "&lt;img" in line.htmlText: inc escapedRows
-    counted rawTagRows == 0
-    counted escapedRows == 1
+      if "<img" in line.text: inc rawTagRows
+      if "&lt;img" in line.text: inc escapedRows
+      var joined = ""
+      for run in line.runs: joined.add run.text
+      runsAreText = runsAreText and joined == line.text
+    counted rawTagRows == 1
+    counted escapedRows == 0
+    counted runsAreText
     # The PROBLEM row keeps the text unescaped — it is rendered as
     # `textContent` by the Problems panel, and double-escaping there would
     # show a user `&lt;img` where they wrote `<img`.
@@ -440,9 +445,9 @@ suite "what reaches innerHTML is escaped":
     discard producer.onRefusal("first line\nsecond line\nthird line")
     var matched = 0
     for line in producer.vm.output.val:
-      if "second line" in line.htmlText or "third line" in line.htmlText:
+      if "second line" in line.text or "third line" in line.text:
         inc matched
-        counted "\n" notin line.htmlText
+        counted "\n" notin line.text
     counted matched == 2
 
 suite "the severity mapping is total":

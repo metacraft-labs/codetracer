@@ -12,14 +12,13 @@
  * - **Materialized (DB-based)**: Python programs recorded via the Python
  *   recorder (py_console_logs, py_checklist).  Always available.
  * - **MCR (native recorder)**: C/Rust programs recorded via codetracer-native-
- *   recorder.  Requires `CODETRACER_RR_BACKEND_PATH` or
- *   `CODETRACER_RR_BACKEND_PRESENT` environment variable.
+ *   recorder. Requires a runnable `ct-native-replay` on PATH.
  * - **RR**: Uses the rr time-travel debugger as the recording backend.
  *   Same prerequisite as MCR.
  *
  * The base test uses two materialized Python traces (always works).  An
- * extended test conditionally adds an RR/MCR trace when the backend is
- * available.
+ * extended test requires the RR backend and reports a missing or unusable
+ * `ct-native-replay` explicitly, except in an explicitly selected DB-only lane.
  *
  * ## How loading into a new session works
  *
@@ -32,19 +31,16 @@
  *    stores the trace in the active session.
  * 5. Verify session metadata and editor content.
  *
- * ## Known limitation
- *
- * Loading a trace into session 1 stops the replay for session 0
- * (`prepareForLoadingTrace` calls `ct/stop-replay`).  This means
- * session 0's DAP connection is broken after session 1 loads its trace.
- * Stepping in session 0 will not work until the replay is restarted.
- * This test verifies trace metadata and source file correctness, not
- * DAP stepping across sessions.
+ * This suite checks trace identity, source files and event navigation across
+ * session switches. Replay selection and stepping have additional coverage in
+ * the other multi-replay specs.
  */
 
 import * as path from "node:path";
+import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 
-import { test, expect, recordTestProgram, testProgramsPath } from "../../lib/fixtures";
+import { test, expect, recordTestProgram, testProgramsPath, traceFolderForId } from "../../lib/fixtures";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { retry } from "../../lib/retry-helpers";
 
@@ -299,22 +295,9 @@ test.describe("Multi-trace loading into sessions", () => {
     expect(trace0!.id).not.toBe(trace1!.id);
     expect(trace0!.program).not.toBe(trace1!.program);
 
-    // Wait for editor to show basics.py in session 1 (different file).
-    // Note: loading a trace into session 1 stops the replay for session 0
-    // (known limitation), so the editor may take longer to update or may
-    // not show the expected file if the backend hasn't sent CtCompleteMove.
-    let editor1File = "";
-    try {
-      editor1File = await waitForEditorFile(ctPage, "basics.py");
-      expect(editor1File).toContain("basics.py");
-      expect(editor1File).not.toContain("main.py");
-      console.log(`# session 1: editor shows ${editor1File} (different from main.py)`);
-    } catch {
-      // The editor may not have updated yet — verify via the data model
-      // instead. The trace program name is the authoritative check.
-      console.log("# session 1: editor did not show basics.py yet (known limitation); " +
-        "trace metadata already verified above");
-    }
+    const editor1File = await waitForEditorFile(ctPage, "basics.py");
+    expect(editor1File).toContain("basics.py");
+    expect(editor1File).not.toContain("main.py");
 
     // ==================================================================
     // Phase 5: Switch back to session 0 — verify editor + line preserved
@@ -379,16 +362,8 @@ test.describe("Multi-trace loading into sessions", () => {
     const activeSession1 = await getActiveIndex(ctPage);
     expect(activeSession1).toBe(1);
 
-    // Verify editor shows basics.py again in session 1.
-    // This may fail if the replay for session 1 was not fully initialized
-    // (known limitation: loading a new trace stops the previous replay).
-    try {
-      const editor1FileAfterSwitch = await waitForEditorFile(ctPage, "basics.py");
-      expect(editor1FileAfterSwitch).toContain("basics.py");
-      console.log("# session 1: editor shows basics.py after switch-back");
-    } catch {
-      console.log("# session 1: editor did not show basics.py after switch (known limitation)");
-    }
+    const editor1FileAfterSwitch = await waitForEditorFile(ctPage, "basics.py");
+    expect(editor1FileAfterSwitch).toContain("basics.py");
 
     // ==================================================================
     // Phase 7: Click event log entry in session 1 — verify navigation
@@ -409,52 +384,14 @@ test.describe("Multi-trace loading into sessions", () => {
     // never arrived. The line below records which side a run is on.
     const session1EventRows =
       "#session-container-1 div[id^='eventLogComponent'] .eventLog-dense-table tbody tr:not(:has(td.dataTables_empty))";
-    const hasEventLogRows = await retry(
-      async () => {
-        const rowCount = await ctPage.evaluate((selector) => {
-          return document.querySelectorAll(selector).length;
-        }, session1EventRows);
-        return rowCount > 0;
-      },
-      { maxAttempts: 30, delayMs: 1000 },
-    ).then(() => true).catch(() => false);
-    console.log(`# session 1: own event log rows present: ${hasEventLogRows}`);
-
-    if (hasEventLogRows) {
-      // Click the first visible event log row.  The rows may exist in the
-      // DOM but be hidden (e.g. if the event log pane is behind another
-      // pane after session switch), so we use a short timeout and catch.
-      try {
-        const firstRow = ctPage.locator(session1EventRows).first();
-        await firstRow.click({ timeout: 10_000 });
-        await ctPage.waitForTimeout(1000);
-
-        // After clicking, verify the editor navigated (the active line should
-        // be set and the editor should still show a file from session 1's
-        // trace, not session 0's main.py).
-        const editorLabelsAfterClick: string[] = await ctPage.evaluate(() => {
-          const editors = document.querySelectorAll("div[id^='editorComponent']");
-          return Array.from(editors).map((el) => el.getAttribute("data-label") ?? "");
-        });
-
-        // At least one editor label should reference a file from the
-        // py_checklist program (basics.py or another file in the package).
-        const showsSession1File = editorLabelsAfterClick.some(
-          (l) => l.includes("basics.py") || l.includes("py_checklist"),
-        );
-        if (showsSession1File) {
-          console.log("# session 1: event log click navigated editor correctly");
-        } else {
-          console.log("# session 1: event log click did not navigate to expected file " +
-            `(labels: ${editorLabelsAfterClick.join(", ")})`);
-        }
-      } catch {
-        console.log("# session 1: event log rows exist but are not visible/clickable " +
-          "(pane may be behind another panel after session switch)");
-      }
-    } else {
-      console.log("# session 1: no event log rows available (skipping click test)");
-    }
+    await expect(ctPage.locator(session1EventRows).first()).toBeVisible();
+    await ctPage.locator(session1EventRows).first().click();
+    await expect.poll(() => ctPage.evaluate(() => {
+      const editors = document.querySelectorAll(
+        "#session-container-1 div[id^='editorComponent']");
+      return Array.from(editors).some((el) =>
+        (el.getAttribute("data-label") ?? "").includes("basics.py"));
+    })).toBe(true);
 
     console.log("# multi-trace load test passed: both sessions hold distinct traces with full isolation");
   });
@@ -463,135 +400,62 @@ test.describe("Multi-trace loading into sessions", () => {
   // Test 2: Open in New Tab from file menu
   //
   // Simulates the "Open in New Tab" menu action by sending the
-  // `CODETRACER::open-trace-in-new-tab` IPC message.  Verifies that
+  // `CODETRACER::open-trace-in-tab` IPC message.  Verifies that
   // a new session is created and becomes the active session.
   // -------------------------------------------------------------------------
 
-  test("open-trace-in-new-tab IPC creates new session and switches to it", async ({ ctPage }) => {
+  test("open-trace-in-tab IPC creates new session and switches to it", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
-
-    // ==================================================================
-    // Phase 1: Wait for the initial trace to fully load
-    // ==================================================================
-
     await layout.waitForTraceLoaded();
     await layout.waitForAllComponentsLoaded();
-
-    await retry(
-      async () => (await getSessionCount(ctPage)) >= 1,
-      { maxAttempts: 30, delayMs: 1000 },
-    );
-    expect(await getActiveIndex(ctPage)).toBe(0);
-    expect(await sessionHasTrace(ctPage, 0)).toBe(true);
-
     const trace0 = await getSessionTrace(ctPage, 0);
     expect(trace0).not.toBeNull();
-    console.log(`# initial session trace: id=${trace0!.id} program=${trace0!.program}`);
-
     const initialSessionCount = await getSessionCount(ctPage);
 
-    // ==================================================================
-    // Phase 2: Trigger "Open in New Tab" IPC
-    // ==================================================================
-
-    // Send the IPC message that the menu item would trigger.
-    // This should create a new session (tab) with the same trace
-    // loaded, or an empty session ready for a new trace.
-    const ipcSent = await ctPage.evaluate(() => {
-      try {
-        const d = (window as any).data;
-        // Try the IPC channel that the menu item uses.
-        d.ipc.send("CODETRACER::open-trace-in-new-tab", {});
-        return true;
-      } catch {
-        return false;
-      }
-    });
-
-    if (!ipcSent) {
-      // If the IPC channel does not exist on the data object, try
-      // via ipcRenderer directly.
-      await ctPage.evaluate(() => {
-        const { ipcRenderer } = require("electron");
-        ipcRenderer.send("CODETRACER::open-trace-in-new-tab", {});
-      });
-    }
-
-    // ==================================================================
-    // Phase 3: Verify a new session was created
-    // ==================================================================
-
-    // Wait for the session count to increase.
-    let newSessionCreated = false;
-    await retry(
-      async () => {
-        const count = await getSessionCount(ctPage);
-        newSessionCreated = count > initialSessionCount;
-        return newSessionCreated;
-      },
-      { maxAttempts: 20, delayMs: 1000 },
-    ).catch(() => {
-      // The IPC handler may not be implemented yet.
-    });
-
-    if (newSessionCreated) {
-      const newCount = await getSessionCount(ctPage);
-      expect(newCount).toBeGreaterThan(initialSessionCount);
-      console.log(`# session count increased: ${initialSessionCount} -> ${newCount}`);
-
-      // ==================================================================
-      // Phase 4: Verify the active session switched to the new one
-      // ==================================================================
-
-      const activeIdx = await getActiveIndex(ctPage);
-      // The new session should be active (it should be the last one).
-      expect(activeIdx).toBe(newCount - 1);
-      console.log(`# active session switched to index ${activeIdx}`);
-
-      // The original session 0 should still have its trace.
-      const trace0After = await getSessionTrace(ctPage, 0);
-      expect(trace0After).not.toBeNull();
-      expect(trace0After!.id).toBe(trace0!.id);
-      expect(trace0After!.program).toContain("main.py");
-
-      console.log("# open-trace-in-new-tab test passed: new session created and activated");
-    } else {
-      // If the IPC handler is not implemented, verify the send did not
-      // corrupt existing session state.
-      const countAfter = await getSessionCount(ctPage);
-      expect(countAfter).toBeGreaterThanOrEqual(initialSessionCount);
-
-      const trace0After = await getSessionTrace(ctPage, 0);
-      expect(trace0After).not.toBeNull();
-      expect(trace0After!.id).toBe(trace0!.id);
-
-      console.log(
-        "# open-trace-in-new-tab IPC accepted but no new session created " +
-        "(handler may not be implemented yet); existing state preserved",
-      );
-    }
+    // A successful send alone proves nothing: Electron accepts unknown IPC
+    // channels too. Require the addressed recording in a new, active session.
+    await ctPage.evaluate((traceId) => {
+      (window as any).data.ipc.send("CODETRACER::open-trace-in-tab", { traceId });
+    }, trace0!.id);
+    await expect.poll(() => getSessionCount(ctPage)).toBe(initialSessionCount + 1);
+    await expect.poll(() => getActiveIndex(ctPage)).toBe(initialSessionCount);
+    await expect.poll(async () =>
+      (await getSessionTrace(ctPage, initialSessionCount))?.id,
+    ).toBe(trace0!.id);
+    expect((await getSessionTrace(ctPage, 0))?.id).toBe(trace0!.id);
   });
 
   // -------------------------------------------------------------------------
-  // Test 3: three trace types (materialized + MCR + RR) in separate sessions
+  // Test 3: materialized Python and Noir plus RR in separate sessions
   //
   // This test loads three different trace types:
   //   - Session 0: Materialized (py_console_logs) — always available
   //   - Session 1: Materialized (noir_example) — DB-based Noir trace
-  //   - Session 2: RR/MCR (c_sudoku_solver) — requires RR backend
+  //   - Session 2: RR (c_sudoku_solver) — requires the Linux RR backend
   //
-  // The test is skipped when the RR backend is not available.
+  // The test requires a runnable RR backend; a DB-only lane excludes it.
   // -------------------------------------------------------------------------
 
   test("three trace types: materialized Python + Noir + RR C program", async ({ ctPage }, testInfo) => {
-    // Skip if RR backend is not available.
-    const hasRR = !!(process.env.CODETRACER_RR_BACKEND_PATH || process.env.CODETRACER_RR_BACKEND_PRESENT);
-    if (!hasRR) {
-      testInfo.skip(true, "RR backend not available — skipping multi-type trace test");
-    }
+    testInfo.skip(process.platform !== "linux", "The RR recording backend is supported on Linux only");
     // Also skip if only running DB tests.
     if (process.env.CODETRACER_DB_TESTS_ONLY === "1") {
       testInfo.skip(true, "RR test skipped — running DB-based tests only");
+    }
+    // A sibling directory or a presence flag is not a runnable backend.
+    // Diagnose the actual prerequisite before recording the native trace, with the
+    // same provisioning recipe the GUI lane uses, rather than surfacing it
+    // later as an unexplained `ct record` failure or silently skipping it.
+    const nativeReplay = spawnSync("ct-native-replay", ["--help"], {
+      encoding: "utf-8",
+    });
+    if (nativeReplay.error || nativeReplay.status !== 0) {
+      throw new Error(
+        "Missing or unusable GUI test prerequisite: ct-native-replay. " +
+        "Run `bash scripts/build-siblings.sh --only codetracer-native-backend` " +
+        "inside the CodeTracer development environment, then re-enter it.\n" +
+        String(nativeReplay.error ?? nativeReplay.stderr),
+      );
     }
 
     const layout = new LayoutPage(ctPage);
@@ -622,8 +486,13 @@ test.describe("Multi-trace loading into sessions", () => {
     console.log(`# pre-recorded Noir trace: id=${noirTraceId}`);
 
     const cProgramPath = path.join(testProgramsPath, "c_sudoku_solver", "main.c");
-    const cTraceId = recordTestProgram(cProgramPath);
+    // This case is specifically about RR beside materialized recordings.
+    // Native recording defaults to MCR, so select the intended backend.
+    const cTraceId = recordTestProgram(cProgramPath, "rr");
     console.log(`# pre-recorded C/RR trace: id=${cTraceId}`);
+    // Check the produced artifact too: a cached/default MCR recording must
+    // not satisfy a case whose third recording is specifically RR.
+    expect(existsSync(path.join(traceFolderForId(cTraceId), "rr", "version"))).toBe(true);
 
     // ==================================================================
     // Phase 3: Session 1 — Noir trace (materialized, DB-based)

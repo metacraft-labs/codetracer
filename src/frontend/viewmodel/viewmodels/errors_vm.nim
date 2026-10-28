@@ -119,6 +119,12 @@ type
     totalCount*: Memo[int]
     visibleRefs*: Memo[seq[ProblemRef]]
 
+    landOnHighlight*: bool
+      ## Whether the selection is a failed build's HIGHLIGHT that the next
+      ## `next error` lands on (`highlightFirstError`), rather than an origin
+      ## it steps from. Set only by the highlight; cleared by any navigation,
+      ## any selection and any change of the list.
+
     # -- Callbacks wired by the host (ui/errors.nim) after VM creation --
     onJumpToProblem*: proc(path: string; line: int; col: int)
       ## Move the editor caret to a diagnostic and focus the editor.
@@ -148,6 +154,7 @@ proc setProblems*(vm: ErrorsVM; problems: seq[BuildProblemLine]) =
   ## the cursor holds are positions in the list being replaced.
   vm.problems.val = problems
   vm.selectedIndex.val = NO_SELECTED_PROBLEM
+  vm.landOnHighlight = false
 
 proc appendProblem*(vm: ErrorsVM; problem: BuildProblemLine) =
   ## Append a single problem row.  Called by the legacy build pipeline
@@ -169,6 +176,7 @@ proc clearProblems*(vm: ErrorsVM) =
   vm.problems.val = @[]
   vm.selectedIndex.val = NO_SELECTED_PROBLEM
   vm.statusMessage.val = ""
+  vm.landOnHighlight = false
 
 proc setFilter*(vm: ErrorsVM; filter: ProblemFilterTag) =
   ## Set the active severity filter.  Memoed signals (``visibleProblems``)
@@ -240,6 +248,7 @@ proc selectProblemIndex*(vm: ErrorsVM; masterIndex: int) =
   ## Select the row at ``masterIndex`` in the master list, or clear the
   ## selection when the index is out of range.  Selecting a row does **not**
   ## move the caret and does **not** focus anything (EMT-D21).
+  vm.landOnHighlight = false
   if masterIndex < 0 or masterIndex >= vm.problems.val.len:
     vm.selectedIndex.val = NO_SELECTED_PROBLEM
   else:
@@ -288,9 +297,18 @@ proc gotoError*(vm: ErrorsVM; step: ErrorNavStep): ErrorNavOutcome =
 
   var wrapped = false
   var target = 0
+  # THE HIGHLIGHT IS WHERE THE FIRST `next error` LANDS (EMT-D21, "so the
+  # user can see where they will land"): after a failed build the first error
+  # is selected without a jump, and the next `next error` opens THAT error
+  # rather than stepping past it to the second. `previous error` steps from
+  # it, as from any selection.
+  let landing = vm.landOnHighlight and step == ensNext and current >= 0
+  vm.landOnHighlight = false
   case step
   of ensNext:
-    if current < 0:
+    if landing:
+      target = current
+    elif current < 0:
       target = 0
     elif current + 1 >= nav.len:
       target = 0
@@ -342,6 +360,7 @@ proc highlightFirstError*(vm: ErrorsVM): bool =
   if nav.len == 0:
     return false
   vm.selectedIndex.val = nav[0].index
+  vm.landOnHighlight = true
   true
 
 # ---------------------------------------------------------------------------

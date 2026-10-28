@@ -31,6 +31,7 @@ from ../viewmodel/viewmodels/errors_vm import
   setFilter, setGroupByFile, toggleGroupByFile, jumpToProblem,
   ErrorNavOutcome, enoEmpty, enoMoved, enoWrapped,
   gotoNextError, gotoPreviousError, highlightFirstError
+from ../viewmodel/viewmodels/build_diagnostics import resolvedPath
 from isonim/web/dom_api import nil
 
 # The session's ViewModel and the registered component, so the legacy
@@ -80,6 +81,23 @@ proc revealProblemsPanel*() =
       # panel host (`onPanelShown` -> `mountPaneForState`).
       revealOverlay(panel)
 
+proc desktopResolvedPath*(path: string): string =
+  ## Where a diagnostic's file is on the desktop: an absolute path as written;
+  ## a relative one against the folder Edit mode opened
+  ## (`data.startOptions.folder`) — the desktop has no action working
+  ## directory for an IPC-fed build, and the folder is the one a build of the
+  ## project runs in (Edit-Mode-Toolbar.md EMT-A36; the native front-ends
+  ## resolve against the build's own directory,
+  ## `viewmodels/build_diagnostics.resolvedPath`, the same rule).
+  ##
+  ## Until PLAT-56 the path went to `openLocation` as the compiler wrote it,
+  ## and a relative one opened nothing (codetracer-pm issue
+  ## `2026-10-26-desktop-problems-row-ignores-relative-paths`).
+  if data.isNil or data.startOptions.folder.isNil or
+     data.startOptions.folder.len == 0:
+    return path
+  resolvedPath(path, $data.startOptions.folder)
+
 proc installErrorsVMCallbacks*(vm: ErrorsVM) =
   ## Wire the Problems pane to the editor.
   ##
@@ -93,7 +111,7 @@ proc installErrorsVMCallbacks*(vm: ErrorsVM) =
   if vm.isNil:
     return
   vm.onJumpToProblem = proc(path: string, line: int, col: int) =
-    discard data.openLocation(cstring(path), line, col)
+    discard data.openLocation(cstring(desktopResolvedPath(path)), line, col)
   vm.onRevealPanel = proc() =
     revealProblemsPanel()
 
@@ -116,6 +134,13 @@ proc highlightFirstBuildError*() =
   if errorsVMInstance.isNil:
     return
   discard errorsVMInstance.highlightFirstError()
+
+proc highlightFirstBuildErrorIn*(vm: ErrorsVM) =
+  ## Select the first error of `vm` — the Problems pane of the tab whose build
+  ## failed — without moving focus (EMT-D21).
+  if vm.isNil:
+    return
+  discard vm.highlightFirstError()
 
 proc safeStr(s: cstring): string =
   ## Convert a possibly-null cstring to an empty string.  E2E tests

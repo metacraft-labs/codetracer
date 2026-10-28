@@ -1313,6 +1313,14 @@ proc shellScreen*(model: ShellModel; width, height: int;
                 fitCells(productText, min(textCells(productText),
                                           width - productCol)),
                 productStyle(status.product))
+      # PLAT-56: the build indicator in its verdict's colour, where
+      # `statusBarText` put it.
+      let buildCol = status.buildColumn
+      if buildCol >= 0 and sc + buildCol < width:
+        g.paint(height - 1, sc + buildCol,
+                fitCells(status.build, min(textCells(status.build),
+                                           width - sc - buildCol)),
+                statusStyle(status.buildState))
     # The labels over the row's left, after the status line's ground.
     for strip in geometry.strips:
       if strip.edge == leBottom:

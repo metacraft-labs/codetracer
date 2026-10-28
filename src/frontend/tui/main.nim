@@ -97,6 +97,7 @@ import ./host/problems_source       # PLAT-55
 from ../viewmodel/viewmodels/test_results_vm import TraceOpenPolicy,
   TestTabPlacement, TestTabPlacementKind, placeTestRecording, testTabOf,
   noteTestTab, forgetTestTab   # Test-Results-Pane.md §9
+import ./host/build_output_source   # PLAT-56
 # PLAT-49 part B: the session strip's sessions — opened, adopted, closed here.
 import headless_app/headless_app
 import headless_app/session_tabs
@@ -1114,6 +1115,9 @@ proc interactive(command: TuiCommand): int =
     session.agentPrompt(rt, text)
   app.agentStop = proc(): string =
     session.agentStop(rt)
+  # The prompt's "add context" menu (DeepReview-GUI.md §2.2.7).
+  app.agentAttach = proc(context: string; mustExist: bool): string =
+    session.agentAttach(rt, context, mustExist)
 
   # PLAT-47 deliverable 4: the VCS pane reads the directory the desktop's VCS
   # panel reads for a replay — the process's own working directory.
@@ -1216,6 +1220,21 @@ proc interactive(command: TuiCommand): int =
       else:
         session.showFileAt(rt, path, line, col))
   defer: problems.close()
+  # PLAT-56: the Build Output pane over the same reader — the window's
+  # `BuildVM`, the desktop BUILD panel's ViewModel; a located line opens as a
+  # Problems row does, and Run builds the shown command again.
+  let buildOut = newBuildOutputSource(rt, problems,
+    proc(path: string; line, col: int): string =
+      if rt.app.modes.product == pmEdit:
+        rt.openWorkingFileAt(path, line, col)
+      else:
+        session.showFileAt(rt, path, line, col),
+    proc(command, noun: string): string =
+      if rt.editServices.startBuild.isNil:
+        return "this window has no build runner"
+      let started = rt.editServices.startBuild(
+        (if noun == "run": bkRun else: bkBuild), command)
+      if started.ok: "" else: started.message)
   app.notification = describe(session)
 
   # PLAT-51 deliverable 8: A NEW TAB'S WELCOME SCREEN, performed. The "+"
@@ -1420,7 +1439,8 @@ proc interactive(command: TuiCommand): int =
         tests.publish(rt)
       let testsChanged = tests.tick(rt) or tabsMoved
       # PLAT-55: the build's diagnostics, as they arrive.
-      let problemsChanged = problems.tick(rt)
+      let problemsTicked = problems.tick(rt, nowMonoMs())
+      let problemsChanged = buildOut.tick(rt) or problemsTicked
       # PLAT-57: the search in flight, a bounded step per tick.
       let searched = session.pumpFindInFiles(rt)
       # PLAT-54: what a live agent sent since the last tick.
@@ -1782,6 +1802,19 @@ proc editInteractive(command: TuiCommand): int =
       rt.openWorkingFileAt(path, line, col))
   defer: problems.close()
 
+  # PLAT-56: the Build Output pane over the same reader — the window's
+  # `BuildVM`, the desktop BUILD panel's ViewModel; a located line opens as a
+  # Problems row does, and Run builds the shown command again.
+  let buildOut = newBuildOutputSource(rt, problems,
+    proc(path: string; line, col: int): string =
+      rt.openWorkingFileAt(path, line, col),
+    proc(command, noun: string): string =
+      if rt.editServices.startBuild.isNil:
+        return "this window has no build runner"
+      let started = rt.editServices.startBuild(
+        (if noun == "run": bkRun else: bkBuild), command)
+      if started.ok: "" else: started.message)
+
   paint(driver, rt)
 
   var loop = true
@@ -1801,7 +1834,8 @@ proc editInteractive(command: TuiCommand): int =
       let built = advanceBuild(rt, edit, report = true)
       let vcsChanged = vcs.tick(rt)
       let testsChanged = tests.tick(rt)
-      let problemsChanged = problems.tick(rt)
+      let problemsTicked = problems.tick(rt, nowMonoMs())
+      let problemsChanged = buildOut.tick(rt) or problemsTicked
       let hoverChanged = rt.tickAutoHide(nowMs()) or
                          rt.tickCellHover(nowMs()) or
                          rt.tickPendingPrefix(nowMs())

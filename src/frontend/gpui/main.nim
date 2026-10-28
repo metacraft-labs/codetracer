@@ -154,6 +154,7 @@ import ./terminal_output_leaf
 import ./search_results_leaf   # PLAT-57: Find in Files, drawn natively
 import ./test_results_leaf     # PLAT-53: Test Results, drawn natively
 import ./problems_leaf         # PLAT-55: Problems, drawn natively
+import ./build_output_leaf     # PLAT-56: Build Output, drawn natively
 # PLAT-55: the window's builds (`:build`, the terminal's runner) and the
 # shared reader that fills its Problems pane — PLAT-56's Build Output reads
 # the same `BuildSession`.
@@ -268,6 +269,11 @@ OPTIONS:
                       problems:filter:<all|errors|warnings>
                       problems:group  problems:next  problems:previous
                       problems:key:<operation>  problems:wheel:<rows>
+                    and (PLAT-56) Build Output:
+                      build:show  build:line:<index>
+                      build:control:<history|run|stop|clear|follow>
+                      build:history:<entry>  build:wheel:<rows>
+                      build:status (press the footer's build indicator)
                     and (PLAT-69) what an open window's renderer reports:
                       resize:<width>:<height> (the content area resized)
                       chrome:<spec> (its frame changed; `--window-chrome`'s
@@ -646,6 +652,8 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
                        "agent",
                        # PLAT-55: Problems' rows, buttons and builds.
                        "problems",
+                       # PLAT-56: Build Output's lines and controls.
+                       "build",
                        # PLAT-69: the window resized, its frame changed.
                        "resize", "chrome"]:
           return GpuiCommand(kind: gckUsageError,
@@ -862,8 +870,6 @@ const
   CallsCommand = ":calls "
     ## The call trace's search field's omnibox prefix (`runWatchCommand`).
 
-const StatusNoteSeconds = 6.0
-  ## How long a status-bar note (`gStatusNote`) stays when no key replaces it.
 
 type
   GContent = object
@@ -1111,6 +1117,8 @@ proc drawAgentPane(r: GpuiRenderer)
   ## PLAT-54: forward-declared; defined beside Find in Files' drawing.
 proc drawProblemsPane(r: GpuiRenderer)
   ## PLAT-55: forward-declared; defined beside Test Results' drawing.
+proc drawBuildPane(r: GpuiRenderer)
+  ## PLAT-56: forward-declared; defined beside Problems' drawing.
   ## PLAT-57: forward-declared; defined beside the Terminal Output pane's.
   ## PLAT-52: the Terminal Output pane, drawn natively (defined with its
   ## clicks, before `windowPointer`).
@@ -1269,6 +1277,11 @@ var
     ## tab: a build is of the working tree.
   gProblemsPane = initGProblemsPane()
     ## PLAT-55: the Problems pane's reading position and a held scrubber.
+  gBuildPane = initGBuildPane()
+    ## PLAT-56: the Build Output pane's reading position, horizontal view,
+    ## held scrubber and open history picker.
+  gFooterBuildRect = PxRect()
+    ## PLAT-56: where the footer's build indicator is drawn (empty when none).
   gBuild: RunningBuild = nil
     ## PLAT-55: the window's `:build` in flight, or the last one (the
     ## terminal's runner, `tui/host/build_runner`).
@@ -1285,13 +1298,17 @@ var
   gOpenCmd: GpuiCommand
   gCtxMenu: ContextMenuState
     ## PLAT-50: the open right-click menu (`headless_app/pane_clicks`).
+  gStatusNote = ""
+    ## PLAT-54: what the window's status line (its footer) says last — a
+    ## recording opened from Agent Activity in a new session tab, a context
+    ## attached to the agent's next prompt, a refusal — as the terminal's
+    ## status line says it (`sayStatus`).
   gContent: GContent
     ## PLAT-50: a text over the window (`GContent`).
-  gStatusNote: tuple[text: string, untilS: float]
-    ## PLAT-68 (Mode-Transitions §8.1): a short note on the status bar — a
-    ## key inert in this product mode says so there, as the terminal says it
-    ## on its status line — shown until `untilS` (`epochTime`) or until the
-    ## next key the router answers.
+  gInertNoteShown = false
+    ## PLAT-68 (Mode-Transitions §8.1): the status line's note
+    ## (`gStatusNote`) is a key's inert-in-this-mode note, which the next key
+    ## the router answers takes away.
   gMaximised = none(PaneKind)
     ## PLAT-50 (K7): the pane whose container "Maximise container" shows
     ## alone, until "Minimise container".
@@ -1469,6 +1486,15 @@ proc topBarGeometry(): JsonNode
 proc traceGesture(line: string) =
   if gestureTrace and line.len > 0:
     stderr.writeLine("gesture " & line)
+
+
+proc sayStatus(line: string) =
+  ## PLAT-54: `line` on the window's status line (the footer's note,
+  ## `data-ct-footer-note`) and in the gesture trace. The footer is drawn
+  ## with the top bar (`drawTopBar`).
+  gStatusNote = line
+  gInertNoteShown = false
+  traceGesture("status: " & line)
 
 proc committedLayout(): Layout =
   let idx = gShell.windows.indexOf(gWindow)
@@ -2199,6 +2225,8 @@ proc drawArrangement(r: GpuiRenderer): bool =
   drawAgentPane(r)
   # PLAT-55: and Problems from its own.
   drawProblemsPane(r)
+  # PLAT-56: and Build Output from its own.
+  drawBuildPane(r)
   # PLAT-51: and the list panes' scrubbers from theirs.
   drawListScrubbers(r)
   # V6: the VCS history follows the body it was laid out with — once the
@@ -3012,6 +3040,34 @@ proc problemsBody(): PxRect =
     return PxRect()
   n.body
 
+proc buildBody(): PxRect =
+  ## PLAT-56: Build Output's body in window pixels — revealed, docked open,
+  ## or the visible tab of a box — or a zero rectangle.
+  if gGestures.revealing and gGestures.reveal.pane == paneBuildOutput:
+    return dockedBodyOf(gGeom.revealRectOf(gGestures.reveal.edge))
+  if not gGeom.openDock.isEmpty and gGeom.openDockPane == $paneBuildOutput:
+    return dockedBodyOf(gGeom.openDock)
+  let i = gGeom.tabsNodeOfPane($paneBuildOutput)
+  if i < 0:
+    return PxRect()
+  let n = gGeom.nodes[i]
+  if n.panes.len > 0 and n.active >= 0 and n.active < n.panes.len and
+     n.panes[n.active] != $paneBuildOutput:
+    return PxRect()
+  n.body
+
+proc drawBuildPane(r: GpuiRenderer) =
+  ## PLAT-56: draw Build Output from the window's ViewModel, natively,
+  ## replacing whatever the leaf held.
+  let pane = gPanes.getOrDefault($paneBuildOutput)
+  if pane.isNil or gProblems.isNil:
+    return
+  let vm = gProblems.build
+  gBuildPane.measureContent(vm)
+  gBuildPane.follow(vm)
+  if drawBuildOutput(r, pane, vm, gBuildPane, buildBody()):
+    applyTextFaces(r, pane)
+
 proc drawProblemsPane(r: GpuiRenderer) =
   ## PLAT-55: draw Problems from the window's ViewModel, natively, replacing
   ## whatever the leaf held.
@@ -3109,6 +3165,15 @@ proc pressAgent(r: GpuiRenderer; x, y: int): bool
 proc runAgentPrompt(r: GpuiRenderer; text: string)
 proc pressProblems(r: GpuiRenderer; x, y: int): bool
   ## PLAT-55: forward-declared; defined beside the Problems host.
+proc pressBuild(r: GpuiRenderer; x, y: int): bool
+  ## PLAT-56: forward-declared; defined beside the Problems host.
+proc drawFooterBuildStatus(r: GpuiRenderer)
+  ## PLAT-56: forward-declared; defined beside the Problems host.
+proc revealGpuiBuildPane(r: GpuiRenderer)
+  ## PLAT-56: forward-declared; defined beside the Problems host.
+proc attachAgentContext(r: GpuiRenderer; context: string;
+                        mustExist = true)
+  ## PLAT-54: forward-declared; defined beside `runAgentPrompt`.
 proc runGpuiFindInFiles(r: GpuiRenderer; pattern: string)
 proc openFindInFiles(r: GpuiRenderer)
 proc stepSearchResult(r: GpuiRenderer; delta: int)
@@ -3571,6 +3636,14 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     # (EMT-D21), so the pane takes the focus only for the others.
     if pressProblems(r, x, y):
       return
+    # PLAT-56: Build Output's presses (a located line opens its file, the
+    # header's controls, the history picker, the scrubbers).
+    if pressBuild(r, x, y):
+      return
+    # PLAT-56 (§3.10): the footer's build indicator reveals Build Output.
+    if not gFooterBuildRect.isEmpty and gFooterBuildRect.contains(x, y):
+      revealGpuiBuildPane(r)
+      return
     # PLAT-53: Test Results' presses (its ▶, a row's `⟳` / `⏵`, a row).
     if pressTests(r, x, y):
       gFocusShown = true
@@ -3652,6 +3725,11 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       if not vm.isNil:
         gSearch.scrubSearch(vm, searchBody(), y, dragging = true)
         drawSearchPane(r)
+      return
+    if gBuildPane.dragging:
+      if not gProblems.isNil:
+        gBuildPane.scrubBuild(gProblems.build, buildBody(), y, dragging = true)
+        drawBuildPane(r)
       return
     if gProblemsPane.dragging:
       if not gProblems.isNil:
@@ -3741,6 +3819,15 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
         gSearch.scrollBy(vm, search, (if rows == 0: (if dy < 0: 1 else: -1)
                                       else: rows))
         drawSearchPane(r)
+      return
+    # PLAT-56: and Build Output's lines.
+    let buildRect = buildBody()
+    if buildRect.w > 0 and buildRect.contains(x, y) and dy != 0.0 and
+       not gProblems.isNil:
+      let rows = int(round(-dy / float(BuildRowPx)))
+      gBuildPane.scrollBy(gProblems.build, buildRect,
+                          (if rows == 0: (if dy < 0: 1 else: -1) else: rows))
+      drawBuildPane(r)
       return
     # PLAT-55: and Problems' list.
     let problemsRect = problemsBody()
@@ -4370,6 +4457,30 @@ proc drawFooter(r: GpuiRenderer) =
         r.appendChild(fi, bar)
       text(r, fi, part)
     gTopEls.add fi
+  # PLAT-56 (Build-Output-Pane.md §3.10): the build indicator — the current
+  # build in the shared words, its icon first, in its verdict's colour —
+  # after the labels; pressed, Build Output is revealed.
+  gFooterBuildRect = PxRect()
+  if not gProblems.isNil and gProblems.build.statusText.len > 0:
+    let vm = gProblems.build
+    let words = vm.statusIcon & " " & vm.statusText
+    var bx = FooterFileInfoX + (if info.len > 0: FooterFileInfoPx + 16 else: 0)
+    for st in gGeom.strips:
+      if st.edge == leBottom and not st.rect.isEmpty:
+        bx = max(bx, st.rect.x + st.rect.w + 16)
+    let bw = groteskTextPx(words, 14.0) + 8
+    gFooterBuildRect = PxRect(x: bx, y: rowY, w: bw, h: TabHeightPx)
+    let b = absBox(r, gFooterBuildRect)
+    r.setAttribute(b, "data-ct-footer-build", words)
+    r.setAttribute(b, "data-ct-footer-build-state", $vm.status.val)
+    let colour = case vm.status.val
+                 of bsFailed: BuildErrorColour
+                 of bsSucceeded: BuildSuccessColour
+                 else: ink
+    r.setAttribute(b, "data-ct-colour", colour)
+    r.setStyle(b, "color", colour)
+    text(r, b, words)
+    gTopEls.add b
   for st in gGeom.strips:
     if st.edge != leBottom or st.rect.isEmpty:
       continue
@@ -4393,7 +4504,29 @@ proc drawFooter(r: GpuiRenderer) =
       text(r, b, sl.label)
       r.appendChild(strip, b)
     gTopEls.add strip
-  var noteRight = gGeom.footer.x + gGeom.footer.w - 16
+  # PLAT-54: the status line's note — after the file info and the bottom
+  # strip, before the right-hand items — in the same face.
+  if gStatusNote.len > 0:
+    var noteX = gGeom.footer.x + FooterFileInfoX
+    if info.len > 0:
+      noteX = max(noteX, FooterFileInfoX + FooterFileInfoPx + 16)
+    for st in gGeom.strips:
+      if st.edge == leBottom and not st.rect.isEmpty:
+        noteX = max(noteX, st.rect.x + st.rect.w + 16)
+    var noteEnd = gGeom.footer.x + gGeom.footer.w - 8
+    if not gSession.isNil:
+      let lw = groteskTextPx(footerLocation(), 14.0)
+      noteEnd = copyPathRect().x - 8 - lw - 16
+      let cert = certificateLabel()
+      if cert.len > 0:
+        noteEnd -= groteskTextPx(cert, 14.0) + 8
+    let note = absBox(r, PxRect(x: noteX, y: rowY, w: max(0, noteEnd - noteX),
+                                h: TabHeightPx))
+    r.setAttribute(note, "data-ct-footer-note", gStatusNote)
+    r.setStyle(note, "color", ink)
+    r.setStyle(note, "overflow", "hidden")
+    text(r, note, gStatusNote)
+    gTopEls.add note
   if not gSession.isNil:
     # From the right: the copy button, the location before it, the
     # certificate label before that.
@@ -4419,7 +4552,6 @@ proc drawFooter(r: GpuiRenderer) =
     text(r, p, location)
     gTopEls.add p
     let cert = certificateLabel()
-    var leftEdge = lx
     if cert.len > 0:
       let cw = groteskTextPx(cert, 14.0)
       let c = absBox(r, PxRect(x: lx - 8 - cw, y: rowY, w: cw, h: TabHeightPx))
@@ -4427,23 +4559,6 @@ proc drawFooter(r: GpuiRenderer) =
       r.setStyle(c, "color", ink)
       text(r, c, cert)
       gTopEls.add c
-      leftEdge = lx - 8 - cw
-    noteRight = leftEdge - 16
-  # PLAT-68 (Mode-Transitions §8.1): the status bar's note — a key inert in
-  # this product mode says what it does and in which mode — right-aligned
-  # before the location, in the status bar's ink, for a few seconds.
-  if gStatusNote.text.len > 0 and epochTime() > gStatusNote.untilS:
-    gStatusNote = ("", 0.0)
-  if gStatusNote.text.len > 0:
-    let nw = groteskTextPx(gStatusNote.text, 14.0)
-    let nx = max(gGeom.footer.x, noteRight - nw)
-    let n = absBox(r, PxRect(x: nx, y: rowY, w: max(1, noteRight - nx),
-                             h: TabHeightPx))
-    r.setAttribute(n, "data-ct-footer-note", gStatusNote.text)
-    r.setStyle(n, "color", ink)
-    r.setStyle(n, "overflow", "hidden")
-    text(r, n, gStatusNote.text)
-    gTopEls.add n
 
 proc wrapWords(text: string; maxChars: int): seq[string] =
   ## `text` broken at spaces into lines of at most `maxChars` characters, the
@@ -4601,7 +4716,9 @@ proc drawTopBar(r: GpuiRenderer) =
   if gMenu.isNil:
     # K19: an Edit window draws no top bar, and its right-click menu — the
     # Files pane's — is still drawn over the window, and the Files rows a
-    # redraw made take their presses.
+    # redraw made take their presses. PLAT-56: its footer (where the build
+    # indicator is) when the window has one.
+    drawFooter(r)
     drawPopovers(r)
     for e in gTopEls:
       if gChrome.clientDecorated and
@@ -5311,6 +5428,7 @@ proc refreshReplayWindow(r: GpuiRenderer) =
   drawSearchPane(r)
   drawTestsPane(r)
   drawProblemsPane(r)
+  drawBuildPane(r)
   drawListScrubbers(r)
   gOmnibar.setIndex(omnibarIndexOf(gSession.session.fileTreeVM,
                                    gSession.session.store, gMenu,
@@ -6388,6 +6506,19 @@ proc acceptOmnibar(r: GpuiRenderer) =
     else:
       runAgentPrompt(r, needle)
     return
+  # PLAT-54 (§2.2.7): `:attach …` / `:attach-recording …` — the prompt's
+  # "add context" items: the chosen file, folder or recording is attached to
+  # the agent's next prompt.
+  if mode in {omAttach, omAttachRecording}:
+    let (ok, entry) = gOmnibar.accept()
+    if not ok:
+      sayStatus("nothing matches: type the path to attach")
+      drawTopBar(r)
+      return
+    gOmnibar.close()
+    drawTopBar(r)
+    attachAgentContext(r, entry.target)
+    return
   if mode == omProgram:
     if needle.len == 0:
       openFindInFiles(r)
@@ -7399,6 +7530,9 @@ proc attachProblems(leafSet: var GpuiLeafSet) =
   for leaf in leafSet.leaves.mitems:
     if leaf.kind == glkBuiltin and leaf.builtin == paneProblems:
       leaf.vm = ViewModel(gProblems.vm)
+    # PLAT-56: and Build Output the window's `BuildVM`.
+    if leaf.kind == glkBuiltin and leaf.builtin == paneBuildOutput:
+      leaf.vm = ViewModel(gProblems.build)
 
 proc pollGpuiBuild(r: GpuiRenderer): bool =
   ## PLAT-55: the `:build` in flight advanced — its output read into the
@@ -7407,7 +7541,7 @@ proc pollGpuiBuild(r: GpuiRenderer): bool =
     return false
   let wasRunning = gBuild.session.verdict == bvRunning
   discard pollBuild(gBuild, nowMonoMs())
-  let changed = gProblems.follow(gBuild.session)
+  let changed = gProblems.follow(gBuild.session, nowMonoMs())
   if wasRunning and gBuild.session.verdict != bvRunning:
     traceGesture(describeVerdict(gBuild.session))
     traceGesture("problems: " & gProblems.vm.errorBadgeText & " " &
@@ -7415,6 +7549,8 @@ proc pollGpuiBuild(r: GpuiRenderer): bool =
                  gProblems.vm.totalBadgeText)
   if changed:
     drawProblemsPane(r)
+    drawBuildPane(r)
+    drawFooterBuildStatus(r)
   changed
 
 proc startGpuiBuild(r: GpuiRenderer; command: string): string =
@@ -7429,8 +7565,10 @@ proc startGpuiBuild(r: GpuiRenderer; command: string): string =
     return "a " & $gBuild.session.kind & " is already running; :cancel it first"
   let root = if gBuildRoot.len > 0: gBuildRoot else: getCurrentDir()
   gBuild = startBuild(bkBuild, command, root, nowMonoMs())
-  discard gProblems.follow(gBuild.session)
+  discard gProblems.follow(gBuild.session, nowMonoMs())
   drawProblemsPane(r)
+  drawBuildPane(r)
+  drawFooterBuildStatus(r)
   armRecordTick()
   if gBuild.session.verdict == bvRunning: "build started: " & command
   else: describeVerdict(gBuild.session)
@@ -7586,6 +7724,102 @@ proc pressProblems(r: GpuiRenderer; x, y: int): bool =
       focusWindowPane(r, $paneProblems)
       discard drawArrangement(r)
   true
+
+proc openBuildLine(r: GpuiRenderer; index: int) =
+  ## K35: output line `index`'s location opened at its line and column, as a
+  ## Problems row's is (a relative path against the build's directory).
+  let vm = gProblems.build
+  let shown = vm.shownSnapshot()
+  if index < 0 or index >= shown.output.len:
+    problemsSay("that line is no longer shown")
+    return
+  let line = shown.output[index]
+  let t = gProblems.targetOf(line.locationPath, line.locationLine,
+                             line.locationCol)
+  if not t.ok:
+    traceGesture("build: " & t.why)
+    return
+  let why = openProblemFile(r, t.path, t.line, t.col)
+  traceGesture("build: " & (if why.len > 0: why
+                            else: "opened " & line.locationPath & ":" &
+                                  $line.locationLine &
+                                  (if line.locationCol > 0:
+                                     ":" & $line.locationCol else: "")))
+
+proc buildControl(r: GpuiRenderer; c: GBuildControl) =
+  ## The header's controls, as the desktop's: the history picker, Run (the
+  ## shown command again), Stop, Clear, auto-scroll.
+  let vm = gProblems.build
+  case c
+  of gbHistory:
+    gBuildPane.historyOpen = not gBuildPane.historyOpen and
+                             vm.history.val.len > 0
+  of gbRun:
+    let shown = vm.shownSnapshot()
+    if vm.isRunning.val:
+      traceGesture("build: a build is already running; Stop it first")
+    elif shown.command.len == 0:
+      traceGesture("build: nothing to run again; :build <command> first")
+    else:
+      traceGesture(startGpuiBuild(r, shown.command))
+  of gbStop:
+    traceGesture(cancelGpuiBuild())
+  of gbClear:
+    vm.clearOutput()
+  of gbFollow:
+    vm.toggleAutoScroll()
+  traceGesture("build control " & $c)
+
+proc pressBuild(r: GpuiRenderer; x, y: int): bool =
+  ## A left press on Build Output: a located line opens its file at its line;
+  ## a control acts; a history entry is shown; the scrubbers move the view.
+  ## The desktop opens no menu on a line.
+  let body = buildBody()
+  if gProblems.isNil or body.w <= 0 or not body.contains(x, y):
+    return false
+  let vm = gProblems.build
+  let hit = buildHitAt(vm, gBuildPane, body, x, y)
+  case hit.kind
+  of gbhNone, gbhText: discard
+  of gbhControl:
+    buildControl(r, hit.control)
+  of gbhHistoryItem:
+    vm.showBuild(hit.index - 1)
+    gBuildPane.historyOpen = false
+    traceGesture("build shown " & $vm.shownIndex.val)
+  of gbhLine:
+    openBuildLine(r, hit.index)
+  of gbhTrack, gbhThumb:
+    gBuildPane.dragging = hit.kind == gbhThumb
+    gBuildPane.scrubBuild(vm, body, y, dragging = gBuildPane.dragging)
+  of gbhHBar:
+    gBuildPane.scrollColumns(vm, body, hit.fraction)
+  drawBuildPane(r)
+  drawFooterBuildStatus(r)
+  true
+
+proc drawFooterBuildStatus(r: GpuiRenderer) =
+  ## PLAT-56: the footer's build indicator follows the build (the footer is
+  ## drawn with the band).
+  drawTopBar(r)
+
+proc revealGpuiBuildPane(r: GpuiRenderer) =
+  ## PLAT-56 (§3.10): the build indicator pressed — Build Output revealed
+  ## from the footer when docked, its tab activated where it is placed.
+  var rr = r
+  let layout = committedLayout()
+  if layout.dockedIndex(paneBuildOutput) >= 0:
+    if not (gGestures.revealing and gGestures.reveal.pane == paneBuildOutput) and
+       not (not gGeom.openDock.isEmpty and
+            gGeom.openDockPane == $paneBuildOutput):
+      let shown = beginReveal(layout, paneBuildOutput)
+      if shown.isSome:
+        gGestures.reveal = shown.get
+        discard drawArrangement(rr)
+  elif layout.tree.contains(paneBuildOutput):
+    applyGestureCommand(rr, cmdActivateTab(paneBuildOutput))
+    discard drawArrangement(rr)
+  traceGesture("build pane revealed")
 
 proc problemsKey(r: GpuiRenderer; operation: string): bool =
   ## PLAT-55 from the keyboard, the pane focused (Build-Output-Pane.md §3.3:
@@ -8328,7 +8562,9 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
   traceGesture("context action " & $action)
   # K19: an Edit window has no session; its Files menu acts on the disk.
   if gSession.isNil and
-     action notin {caFileCreate, caFileRename, caFileDelete, caFileEdit}:
+     action notin {caFileCreate, caFileRename, caFileDelete, caFileEdit,
+                   caAgentAttachUpload, caAgentAttachFilesFolders,
+                   caAgentAttachEditorSelection, caAgentAttachRecording}:
     return
   case action
   of caNone: discard
@@ -8440,6 +8676,14 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
       traceGesture("files: " & $action)
       redrawPaneOf(r, paneFileTree)
       focusEditKeys()
+  of caAgentAttachUpload, caAgentAttachFilesFolders:
+    # PLAT-54 (§2.2.7): no system file dialog in this window — the omnibox,
+    # on a file or folder to attach.
+    openOmnibar(r, AttachQuery)
+  of caAgentAttachRecording:
+    openOmnibar(r, AttachRecordingQuery)
+  of caAgentAttachEditorSelection:
+    attachAgentContext(r, target.path, mustExist = false)
 
 # ---------------------------------------------------------------------------
 # PLAT-68 — the window's keys through the ONE router
@@ -8581,9 +8825,42 @@ proc runAgentPrompt(r: GpuiRenderer; text: string) =
     return
   let why = h.sendPrompt(text)
   traceGesture(if why.len > 0: "agent: " & why else: "agent: sent " & text)
+  if why.len > 0:
+    sayStatus(why)
   drawAgentPane(r)
   drawTopBar(r)
   armHoverTick()
+
+proc gpuiEditorSelection(): string =
+  ## What the "add context" menu's *Editor selection* attaches: the editor's
+  ## file and the lines its selection covers (the caret's line when nothing
+  ## is selected); "" when the editor shows no file.
+  let path = gEditorSurface.path
+  if path.len == 0:
+    return ""
+  if gDebugDocs.hasKey(path):
+    let (first, last) = gDebugDocs[path].selectedLines
+    return editorSelectionContext(path, first, last)
+  editorSelectionContext(path, max(1, gEditorSurface.executionLine),
+                         max(1, gEditorSurface.executionLine))
+
+proc attachAgentContext(r: GpuiRenderer; context: string;
+                        mustExist = true) =
+  ## PLAT-54 (§2.2.7): `context` attached to the agent's next prompt, Agent
+  ## Activity shown (the attachment is listed above its prompt), and the
+  ## status line saying what happened. An editor selection is attached as
+  ## the editor names it (`mustExist` false).
+  showPaneFromMenu(r, paneAgentActivity)
+  let h = agentHost()
+  if h.isNil:
+    sayStatus("this window has no agent to attach context for")
+    drawTopBar(r)
+    return
+  discard h.attachContext(context, mustExist)
+  sayStatus(h.message)
+  h.message = ""
+  drawAgentPane(r)
+  drawTopBar(r)
 
 proc pressAgent(r: GpuiRenderer; x, y: int): bool =
   ## A left press on Agent Activity: a row runs its action, a button its
@@ -8606,12 +8883,21 @@ proc pressAgent(r: GpuiRenderer; x, y: int): bool =
       discard h.runFeed(row, action)
       traceGesture("agent " & $action.kind & " " & row.key &
                    (if h.message.len > 0: ": " & h.message else: ""))
+      # The host's words go on the status line, as the terminal's do: a
+      # recording opened in a new session tab says so (§2.2.4).
+      if h.message.len > 0:
+        sayStatus(h.message)
+        drawTopBar(r)
       h.message = ""
       # An evidence card's review lands in the VCS pane at once.
       redrawPaneOf(r, paneVcs)
     drawAgentPane(r)
   of gaPrompt:
     openOmnibar(r, AgentOmnibarQuery)
+  of gaAddContext:
+    # The desktop's `+`: the "add context" menu, at the press
+    # (DeepReview-GUI.md §2.2.7).
+    openContextMenuAt(r, agentAddContextMenu(gpuiEditorSelection()), x, y)
   of gaControl:
     if h.vm.isLoading.val:
       h.stopAgent()
@@ -9297,10 +9583,12 @@ proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string]) =
   traceGesture("key " & name & " at " & $path)
   let mode = if gFindBrowsing and not gFind.open: nmSearch else: nmNormal
   let res = gRouter.route(windowSessionFacts(), path, mode, name, nowMs)
-  # A note says what the LAST key did; the next one the router answers
-  # takes it away.
-  let hadNote = gStatusNote.text.len > 0
-  gStatusNote = ("", 0.0)
+  # An inert note says what the LAST key did; the next one the router
+  # answers takes it away (a note `sayStatus` wrote for anything else stays).
+  let hadNote = gInertNoteShown
+  if gInertNoteShown:
+    gStatusNote = ""
+    gInertNoteShown = false
   case res.kind
   of erPending:
     traceGesture("pending " & gRouter.pendingLabel)
@@ -9312,7 +9600,8 @@ proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string]) =
       # status bar, as the terminal says it on its status line.
       let note = gRouter.inertNote(res, windowSessionFacts(), path, mode)
       traceGesture("inert " & note)
-      gStatusNote = (note, epochTime() + StatusNoteSeconds)
+      gStatusNote = note
+      gInertNoteShown = true
       drawTopBar(r)
       return
     if hadNote: drawTopBar(r)
@@ -10210,6 +10499,50 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
           windowPointer(r, gekWheel, cx, cy, -float(at(2) * ProblemsRowPx))
         else:
           return "unknown problems event '" & parts[1] & "'"
+    of "build":
+      # PLAT-56: Build Output, aimed from the geometry it was drawn with
+      # (`build_output_leaf.buildLayout`); a build is started with
+      # `problems:build:<command>` and settled with `problems:wait`.
+      case parts[1]
+      of "show":
+        showPaneFromMenu(r, paneBuildOutput)
+      of "status":
+        revealGpuiBuildPane(r)
+      else:
+        let body = buildBody()
+        if gProblems.isNil or body.w <= 0:
+          return "the Build Output pane is not drawn"
+        let vm = gProblems.build
+        let lay = buildLayout(vm, gBuildPane, body)
+        case parts[1]
+        of "line":
+          let index = at(2)
+          gBuildPane.scrollTop = max(0, index - 1)
+          drawBuildPane(r)
+          let c = lineCentre(vm, gBuildPane, body, index)
+          if not c.ok:
+            return "line " & $index & " is not shown"
+          pressAt(c.x, c.y)
+        of "control":
+          var found = false
+          for (c, rect) in lay.controls:
+            if ($c).toLowerAscii == "gb" & parts[2].toLowerAscii:
+              let (x, y) = centreOf(rect)
+              pressAt(x, y)
+              found = true
+          if not found:
+            return "no Build Output control '" & parts[2] & "'"
+        of "history":
+          if lay.menuRows <= 0:
+            return "the history picker is not open"
+          let k = at(2)
+          pressAt(lay.menu.x + 8, lay.menu.y + k * BuildRowPx +
+                                  BuildRowPx div 2)
+        of "wheel":
+          let (cx, cy) = centreOf(body)
+          windowPointer(r, gekWheel, cx, cy, -float(at(2) * BuildRowPx))
+        else:
+          return "unknown build event '" & parts[1] & "'"
     of "tests":
       # PLAT-53: Test Results, aimed from the geometry it was drawn with
       # (`test_results_leaf.testsLayout`):
@@ -10308,6 +10641,8 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       #                                    (scrolled into view)
       #   agent:row:<kind>[:<nth>]         press the nth row of that kind
       #   agent:prompt                     press the prompt
+      #   agent:add                        press the prompt's `+` (the "add
+      #                                    context" menu)
       #   agent:wheel:<lines>              the wheel over the pane
       #   agent:show / agent:vcs           show Agent Activity / the VCS pane
       if parts[1] == "show":
@@ -10343,6 +10678,12 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
             inc n
       of "prompt":
         let (x, y) = centreOf(lay.prompt)
+        pressAt(x, y)
+        return ""
+      of "add":
+        if lay.add.w <= 0:
+          return "the Agent Activity pane is too narrow for its +"
+        let (x, y) = centreOf(lay.add)
         pressAt(x, y)
         return ""
       of "wheel":

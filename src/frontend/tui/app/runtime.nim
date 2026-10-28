@@ -2393,7 +2393,7 @@ proc syncOutputViews(rt: TuiRuntime) =
   ## The output panes' widths, before a frame: Build Output's content (the
   ## widest line measured so far of this build) and both panes' text widths
   ## where they are painted. A pane not on the screen keeps its last width.
-  rt.app.buildView.measureContent(rt.app.build)
+  rt.app.buildView.measureContent(rt.app.currentBuildPane())
   let b = rt.paintedAreaOf(paneBuildOutput)
   if b.width > 0:
     rt.app.buildView.hview.setViewport(b.width)
@@ -2580,6 +2580,29 @@ proc runAgentPrompt*(rt: TuiRuntime; text: string;
   let why = rt.app.agentPrompt(text)
   rt.note(if why.len > 0: why else: "sent to the agent: " & text)
 
+proc agentEditorSelection(rt: TuiRuntime): string =
+  ## What the "add context" menu's *Editor selection* attaches: the editor's
+  ## file and the lines its selection covers (the caret's line when nothing
+  ## is selected); "" when no file is shown.
+  let buf = rt.editorBuffer()
+  if buf.isNil or buf.path.len == 0:
+    return ""
+  let (first, last) = buf.doc.selectedLines
+  editorSelectionContext(buf.path, first, last)
+
+proc attachAgentContext(rt: TuiRuntime; context: string;
+                        outcome: var RuntimeOutcome; mustExist = true) =
+  ## PLAT-54 (§2.2.7): attach `context` to the agent's next prompt and show
+  ## Agent Activity, where it is listed above the prompt.
+  outcome.repaint = true
+  if rt.app.agentAttach.isNil:
+    rt.note("this session has no agent to attach context for")
+    return
+  rt.showPane(paneAgentActivity, outcome)
+  let words = rt.app.agentAttach(context, mustExist)
+  if words.len > 0:
+    rt.note(words)
+
 proc scrollSearch(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
   ## PLAT-57: the wheel over Find in Files scrolls its rows.
   let (_, screen) = rt.searchPaneScreen()
@@ -2653,6 +2676,58 @@ proc pressTestsControl(rt: TuiRuntime; control: TestsPaneControl;
     outcome.requestClick(request)
   else:
     rt.note(control.title)
+
+proc buildPaneScreen*(rt: TuiRuntime): tuple[area: CellArea,
+                                            model: BuildPaneModel,
+                                            screen: BuildPaneScreen] =
+  ## PLAT-56: Build Output below its strip, its value as painted, and where
+  ## the painter put its parts — the arithmetic a press is read back with.
+  let under = rt.paneAreaOf(paneBuildOutput)
+  result.area = CellArea(col: under.col, row: under.row + 1,
+                         width: under.width, height: max(0, under.height - 1))
+  result.model = rt.app.currentBuildPane()
+  result.model.hview = rt.app.buildView.hview
+  if result.area.width <= 0:
+    return
+  var g = newStyledGrid(result.area.col + result.area.width,
+                        result.area.row + result.area.height)
+  result.screen = paintBuildOutput(g, result.area, result.model)
+
+proc scrollBuild(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
+  ## PLAT-56: the wheel over Build Output scrolls its lines.
+  let (_, model, screen) = rt.buildPaneScreen()
+  rt.app.buildPane.scrollTop = clampBuildTop(model.output.len,
+    screen.first + delta, screen.listRows)
+  outcome.repaint = true
+
+proc buildCommand(rt: TuiRuntime; kind: BuildPaneCommandKind; index: int;
+                  outcome: var RuntimeOutcome) =
+  ## PLAT-56: ask the host (`build_output_source`) — run again, stop, clear,
+  ## auto-scroll, the history picker, a located line opened — and say what it
+  ## said. An open focuses the editor, as a Problems row's does.
+  outcome.repaint = true
+  if rt.app.buildCommand.isNil:
+    rt.note("this window has no Build Output pane host")
+    return
+  let said = rt.app.buildCommand(kind, index)
+  if said.len > 0:
+    rt.note(said)
+
+proc revealBuildPane*(rt: TuiRuntime) =
+  ## PLAT-56 (§3.10): the status line's build indicator pressed — the Build
+  ## Output pane brought on screen: its tab activated where the arrangement
+  ## places it, revealed from its edge where it is docked.
+  if not rt.layoutBindingEnabled():
+    return
+  let b = rt.app.layoutBinding
+  let at = b.layout.dockedIndex(paneBuildOutput)
+  if at >= 0:
+    if not b.layout.docked[at].open and b.interaction.kind != ikRevealingDock:
+      discard b.beginRevealDock(paneBuildOutput)
+  elif b.layout.tree.contains(paneBuildOutput):
+    let acted = b.dispatch(cmdActivateTab(paneBuildOutput))
+    if acted.status == lasApplied:
+      rt.afterLayoutCommit()
 
 proc problemsPaneScreen*(rt: TuiRuntime): tuple[area: CellArea,
                                                screen: ProblemsPaneScreen] =
@@ -3255,6 +3330,8 @@ proc applyBarTop(rt: TuiRuntime; bar: BarSpot; top: int;
       rt.scrollAgentTo(top)
     of paneProblems:
       rt.app.problems.scrollTop = top
+    of paneBuildOutput:
+      rt.app.buildPane.scrollTop = top
     of paneEditor:
       rt.requestSourceScroll(SourceScroll(kind: sskTo, top: top + 1), outcome)
     of InHandPanes:
@@ -3702,6 +3779,19 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
   # desktop's copy control does (measured: the path, without the line). The
   # bottom dock labels in that row are the layout's, handled before this.
   if event.row == rt.height - 1 and event.button == mbLeft:
+    # PLAT-56 (§3.10): a press on the build indicator reveals Build Output.
+    if rt.app.buildStatus.len > 0:
+      let frame = rt.shellScreenOf()
+      if frame.rows.len > 0:
+        let statusRow = frame.rows[^1]
+        let at = statusRow.find(rt.app.buildStatus)
+        if at >= 0:
+          let startCol = textCells(statusRow[0 ..< at])
+          if event.col >= startCol and
+             event.col < startCol + textCells(rt.app.buildStatus):
+            rt.revealBuildPane()
+            outcome.repaint = true
+            return true
     let colon = rt.app.location.rfind(':')
     if colon <= 0:
       return false
@@ -3871,10 +3961,12 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
   of paneAgentActivity:
     # PLAT-54: a row runs its action (a turn, a run, a test, a tool group
     # opened or closed), a `[button]` its button's (a recording opened, in
-    # this tab or a new one; a review entered); the prompt row opens the
-    # omnibox on `/ai `; Send / Stop as the desktop's; the scrollbar column
-    # is the scrollbar's (`routeScrollbars`). The desktop's panel has no
-    # context menu of its own, so a right press opens nothing.
+    # this tab or a new one; a review entered; an attachment removed); the
+    # prompt row opens the omnibox on `/ai `; its `[+]` opens the desktop's
+    # "add context" menu (DeepReview-GUI.md §2.2.7); Send / Stop as the
+    # desktop's; the scrollbar column is the scrollbar's (`routeScrollbars`).
+    # The desktop's panel has no context menu of its own, so a right press
+    # opens nothing.
     if event.button != mbLeft or not rt.app.agent.loaded:
       return false
     let (area, screen) = rt.agentPaneScreen()
@@ -3892,6 +3984,10 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
     of atPrompt, atSend:
       rt.openOmnibar(AgentOmnibarPrefix)
       outcome.repaint = true
+      return true
+    of atAddContext:
+      rt.openContextMenu(agentAddContextMenu(rt.agentEditorSelection()),
+                         event.row, event.col, outcome)
       return true
     of atStop:
       if not rt.app.agentStop.isNil:
@@ -3928,6 +4024,34 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
       # PLAT-70 Part H: the scrollbar's (`routeScrollbars`).
       return true
     of stFile, stNone:
+      return false
+  of paneBuildOutput:
+    # PLAT-56 (K35): a line that names a location opens its file at its line
+    # and column; the header's controls act; a history entry is shown; the
+    # scrollbar is the scrollbars' (`routeScrollbars`). The desktop opens no
+    # menu on a line, so a right press does nothing here.
+    if event.button != mbLeft or not rt.app.buildPane.loaded:
+      return false
+    let (area, model, screen) = rt.buildPaneScreen()
+    let t = model.buildTargetAt(screen, area, event.row, event.col)
+    case t.kind
+    of btControl:
+      rt.buildCommand((case t.control
+                       of bcHistory: bpcHistory
+                       of bcRun: bpcRun
+                       of bcStop: bpcStop
+                       of bcClear: bpcClear
+                       of bcFollow: bpcFollow), -1, outcome)
+      return true
+    of btHistoryItem:
+      rt.buildCommand(bpcShow, t.index, outcome)
+      return true
+    of btLine:
+      rt.buildCommand(bpcOpen, t.index, outcome)
+      return true
+    of btTrack:
+      return true
+    of btText, btNone:
       return false
   of paneProblems:
     # PLAT-55 (K35): a diagnostic opens its file at its line and is selected
@@ -4107,6 +4231,14 @@ proc runContextAction(rt: TuiRuntime; action: ContextAction;
   of caFileCreate, caFileRename, caFileDelete, caFileEdit:
     # K19: the Files pane's entries, as the shared Files model decides them.
     rt.runFilesMenuAction(action, target, outcome)
+  of caAgentAttachUpload, caAgentAttachFilesFolders:
+    # PLAT-54 (§2.2.7): no system file dialog here — the omnibox, on a file
+    # or folder to attach.
+    rt.openOmnibar(AttachQuery)
+  of caAgentAttachRecording:
+    rt.openOmnibar(AttachRecordingQuery)
+  of caAgentAttachEditorSelection:
+    rt.attachAgentContext(target.path, outcome, mustExist = false)
 
 proc routeOverlayMouse(rt: TuiRuntime; event: MouseEvent;
                        outcome: var RuntimeOutcome): bool =
@@ -4325,6 +4457,13 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
     let at = geometry.paneAt(event.row, event.col)
     if at.found and at.region.pane == paneSearch and rt.app.search.loaded:
       rt.scrollSearch(
+        (if event.button == mbWheelDown: CallTraceWheelRows
+         else: -CallTraceWheelRows), outcome)
+      return
+    # PLAT-56: the wheel scrolls Build Output's lines.
+    if at.found and at.region.pane == paneBuildOutput and
+       rt.app.buildPane.loaded:
+      rt.scrollBuild(
         (if event.button == mbWheelDown: CallTraceWheelRows
          else: -CallTraceWheelRows), outcome)
       return
@@ -5261,6 +5400,12 @@ proc openOmnibar*(rt: TuiRuntime; query = "") =
   rt.app.omnibar.open(query)
   if query == OpenRecordingQuery:
     rt.note("new tab: choose a recording, or type its folder")
+  elif query == AttachQuery:
+    rt.note("attach to the agent's next prompt: choose a file or folder, " &
+            "or type its path")
+  elif query == AttachRecordingQuery:
+    rt.note("attach to the agent's next prompt: choose a recording, or " &
+            "type its folder")
   else:
     rt.note("omnibar: type a file, :sym <function>, :<command> or #<tick>")
 
@@ -5540,6 +5685,17 @@ proc acceptOmnibar(rt: TuiRuntime; outcome: var RuntimeOutcome) =
       rt.note("type a prompt for the agent after /ai")
     else:
       rt.runAgentPrompt(needle, outcome)
+    return
+  # PLAT-54 (§2.2.7): `:attach …` / `:attach-recording …` — the prompt's
+  # "add context" items: the chosen file, folder or recording is attached to
+  # the agent's next prompt.
+  if mode in {omAttach, omAttachRecording}:
+    let (ok, entry) = rt.app.omnibar.accept()
+    outcome.repaint = true
+    if not ok:
+      rt.note("nothing matches: type the path to attach")
+      return
+    rt.attachAgentContext(entry.target, outcome)
     return
   # PLAT-57: `:grep <text>` is Find in Files (§5.1): the omnibar closes and
   # the search runs into the pane; `:grep` alone keeps the field open.

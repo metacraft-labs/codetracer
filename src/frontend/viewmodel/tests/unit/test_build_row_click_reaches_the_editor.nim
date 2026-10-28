@@ -108,13 +108,12 @@ proc newVM(): BuildVM =
   createBuildVM(createReplayDataStore(backend))
 
 proc located(text, path: string; line: int;
-             severity: BuildLineSeverity = blsError): BuildOutputLine =
-  BuildOutputLine(htmlText: text, isStdout: false, severity: severity,
-                  locationPath: path, locationLine: line)
+             severity: BuildLineSeverity = blsError; col = 0): BuildOutputLine =
+  plainBuildLine(text, isStdout = false, severity = severity, path = path,
+                 line = line, col = col)
 
 proc plain(text: string): BuildOutputLine =
-  BuildOutputLine(htmlText: text, isStdout: false, severity: blsNone,
-                  locationPath: "", locationLine: 0)
+  plainBuildLine(text, isStdout = false)
 
 # ---------------------------------------------------------------------------
 
@@ -130,12 +129,12 @@ suite "a BUILD diagnostic row is a place the caret can go":
       # ordinary consequence of a render effect that re-attaches without
       # clearing — opens the tab, scrolls it, and opens it again; that is a
       # different defect with the same green "it jumped".
-      var calls: seq[(string, int)] = @[]
-      vm.onJumpToLine = proc(path: string; line: int) =
-        calls.add((path, line))
+      var calls: seq[(string, int, int)] = @[]
+      vm.onJumpToLine = proc(path: string; line, col: int) =
+        calls.add((path, line, col))
 
       vm.appendLine(located("src/main.nr:1:9: warning: unused variable x",
-                            "src/main.nr", 9, blsWarning))
+                            "src/main.nr", 9, blsWarning, col = 4))
 
       let r = MockRenderer()
       let panel = renderBuildPanel[MockRenderer, MockNode](r, vm)
@@ -161,14 +160,17 @@ suite "a BUILD diagnostic row is a place the caret can go":
       if calls.len == 1:
         ck calls[0][0] == "src/main.nr"
         ck calls[0][1] == 9
+        # PLAT-56: the column travels with the line.
+        ck calls[0][2] == 4
       else:
         checkpoint("the row carries `build-clickable` and no click handler — " &
                    "the affordance is dead, which is the state `dev` is in")
         ck false
         ck false
+        ck false
 
       dispose()
-    expectCount(5)
+    expectCount(6)
 
   test "a row with no location is not clickable and clicking it jumps nowhere":
     ## The twin. Build output is mostly NOT diagnostics — `   |`, the quoted
@@ -179,7 +181,7 @@ suite "a BUILD diagnostic row is a place the caret can go":
     createRoot proc(dispose: proc()) =
       let vm = newVM()
       var calls = 0
-      vm.onJumpToLine = proc(path: string; line: int) = inc calls
+      vm.onJumpToLine = proc(path: string; line, col: int) = inc calls
 
       vm.appendLine(plain("   |"))
       vm.appendLine(plain(" 3 |     let b: bool = a;"))

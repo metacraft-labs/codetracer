@@ -139,6 +139,16 @@ proc feedLine*(f: BuildProblemsFeed; raw: string): bool =
     f.vm.appendProblem(fed.row)
   fed.problem
 
+proc addRow*(f: BuildProblemsFeed; fed: FedBuildLine): bool =
+  ## A line another reader already read by this rule (PLAT-56: the Build
+  ## Output pane's reader, `BuildVM.feedOutput`, reads each line once for
+  ## both panes). Whether it became a row.
+  if f.isNil or not fed.problem:
+    return false
+  if not f.vm.isNil:
+    f.vm.appendProblem(fed.row)
+  true
+
 proc endBuild*(f: BuildProblemsFeed; failed: bool) =
   ## The build ended. A failed one highlights its first error WITHOUT moving
   ## the caret or the focus (EMT-D21: a build never steals focus; the row is

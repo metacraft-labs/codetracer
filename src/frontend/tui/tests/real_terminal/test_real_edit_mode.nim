@@ -250,8 +250,9 @@ suite "PLAT-16 Tier 2: editing in a real terminal":
       ck not screen.contains("CALL STACK")
       ck not screen.contains(" Call Trace ")
       ck not screen.contains("CALL TRACE")
-      # The build pane is a statement rather than a blank.
-      ck screen.contains("[idle]")
+      # The build pane is a statement rather than a blank (PLAT-56: the
+      # desktop's words, `BuildIdleText`).
+      ck screen.contains("No build has run.")
     finally:
       sess.send(QuitByte)
       discard sess.waitExit(initDuration(seconds = 10))

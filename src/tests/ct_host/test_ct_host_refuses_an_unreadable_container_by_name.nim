@@ -163,8 +163,12 @@ proc runHostWith(scratch, argument: string): tuple[output: string, exitCode: int
   let logPath = scratch / "ct-host.log"
   env["CT_TEST_LOG"] = logPath
   let wrapper = "exec >\"$CT_TEST_LOG\" 2>&1; exec \"$@\""
-  let p = startProcess("/bin/bash", workingDir = root, env = env,
-    args = @["-c", wrapper, "bash", ctBinary, "host", argument],
+  # The shell from PATH, not a fixed path: NixOS has no `/bin/bash`, and the
+  # wrapper is plain POSIX `sh`.
+  let shell = findExe("sh")
+  doAssert shell.len > 0, "no `sh` on PATH to start `ct host` through"
+  let p = startProcess(shell, workingDir = root, env = env,
+    args = @["-c", wrapper, "sh", ctBinary, "host", argument],
     options = {})
   let started = epochTime()
   var exitCode = -1

@@ -33,6 +33,10 @@
 import std/[strutils, unicode]
 
 import ./layout_model
+# The Agent Activity prompt's "add context" items, through the SDK facade
+# (`viewmodels/agent_prompt_context`, re-exported by `codetracer_embed`).
+from codetracer_embed import AgentAddContextItem, label,
+  AgentNoEditorSelectionReason
 
 type
   ClickGesture* = enum
@@ -112,6 +116,12 @@ type
     caFileRename = "file-rename"
     caFileDelete = "file-delete"
     caFileEdit = "file-edit"
+    caAgentAttachUpload = "agent-attach-upload"
+      ## PLAT-54: the Agent Activity prompt's `+` menu
+      ## (`agentAddContextMenu`), its four items in the desktop's order.
+    caAgentAttachFilesFolders = "agent-attach-files-folders"
+    caAgentAttachEditorSelection = "agent-attach-editor-selection"
+    caAgentAttachRecording = "agent-attach-recording"
 
   ContextMenuKind* = enum
     cmkTab = "tab"
@@ -126,6 +136,9 @@ type
     cmkDockLabel = "dock-label"
     cmkFileTreeNode = "file-tree-node"
       ## A row of the Files pane's tree (K19).
+    cmkAgentAddContext = "agent-add-context"
+      ## The Agent Activity prompt's `+` (the desktop's
+      ## `.agent-add-context-dropdown`): opened by a press, not a right-click.
 
   ContextMenuEntry* = object
     label*: string
@@ -439,6 +452,28 @@ func valueHistoryEntryContextMenu*(expression, value: string;
     entries: @[
       entry(AddToScratchpadLabel, caAddValueToScratchpad),
       entry("Show value origin", caShowValueOrigin)])
+
+func agentAddContextMenu*(editorSelection: string): ContextMenuModel =
+  ## The Agent Activity prompt's `+` menu — the desktop's four items, in its
+  ## order and words (`agent_prompt_context.AgentAddContextItem`). A native
+  ## front-end has no system file dialog, so the two file items and the
+  ## recording item open the omnibox on a path (DeepReview-GUI.md §2.2.7);
+  ## *Editor selection* attaches `editorSelection` (the editor's file and the
+  ## lines its selection covers, `editorSelectionContext`), disabled with the
+  ## reason when no file is shown.
+  ContextMenuModel(
+    kind: cmkAgentAddContext,
+    target: ContextTarget(pane: paneAgentActivity, path: editorSelection),
+    entries: @[
+      entry(aciUpload.label, caAgentAttachUpload),
+      entry(aciFilesFolders.label, caAgentAttachFilesFolders),
+      entry(aciEditorSelection.label, caAgentAttachEditorSelection,
+            hint = (if editorSelection.len > 0: ""
+                    else: AgentNoEditorSelectionReason),
+            enabled = editorSelection.len > 0,
+            reason = (if editorSelection.len > 0: ""
+                      else: AgentNoEditorSelectionReason)),
+      entry(aciRecording.label, caAgentAttachRecording)])
 
 func labels*(m: ContextMenuModel): seq[string] =
   for e in m.entries:

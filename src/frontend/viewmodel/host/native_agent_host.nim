@@ -11,6 +11,7 @@
 ## | a dataset's shape (AA-3 inspect)         | `index/review_dataset` read    | `agent_session_files.readDatasetShape`      |
 ## | enter a review over a dataset (AA-3 open)| `vcs.openReviewDataset` → `enterReview` | `readReviewDataset` → `resetReviewEntry` + `enterReview` over the host's VCS ViewModel |
 ## | open a test's recording (AA-2)           | `createNewSession` / `load-trace-file` | the front-end's own opener (`openRecording`) |
+## | the prompt's attachments (the `+` menu)   | a system file dialog → `contextPaths` → `acp-prompt` | the omnibox or the editor → `attachContext` → `contextPaths` → `sendPrompt` |
 ##
 ## The live session's events land in the SESSION'S STORE
 ## (`ReplayDataStore.agentSessions`), which is also what the session tab's
@@ -43,6 +44,13 @@ const
   DefaultAgentCommand* = "codex-acp"
     ## The desktop's (`acp_ipc.defaultCmd`).
   NativeAgentTabPrefix* = "native-acp:"
+  NewSessionTabNote* = "in a new session tab"
+    ## What the status line says a recording opened in (§2.2.4): both of a
+    ## test row's buttons open one natively.
+  NoCurrentTabReplacementNote* =
+    "this window cannot replace its current session yet"
+    ## Why `[Open recording]` (the desktop's current-tab open) opened a new
+    ## tab natively (DeepReview-GUI.md §2.2.4, the recorded deviation).
 
 type
   OpenRecordingProc* = proc(request: TraceOpenRequest): string {.closure.}
@@ -81,6 +89,17 @@ type
       ## Something the pane shows changed since the front-end last painted.
     dispose: proc()
 
+proc recordingOpenedNote*(request: TraceOpenRequest): string =
+  ## The status line after a test's recording opened natively: which
+  ## recording, that it is in a NEW session tab, and — for `[Open
+  ## recording]`, which the desktop opens in the current tab — why.
+  let name = extractFilename(request.tracePath.strip(leading = false,
+                                                     chars = {'/'}))
+  result = "Opened " & (if name.len > 0: name else: request.tracePath) &
+           " " & NewSessionTabNote
+  if request.policy == topCurrentTab:
+    result.add ": " & NoCurrentTabReplacementNote
+
 proc splitArgs(value: string): seq[string] =
   for a in value.splitWhitespace():
     if a.len > 0: result.add a
@@ -93,7 +112,7 @@ proc wire(h: NativeAgentHost) =
                      "agent's session"
     else:
       let why = host.openRecording(request)
-      host.message = why
+      host.message = if why.len > 0: why else: recordingOpenedNote(request)
     host.changed = true)
   h.vm.reviewOpen = ReviewOpenService(requestProc:
     proc(request: ReviewDatasetRequest) =
@@ -216,9 +235,53 @@ proc sendNext(h: NativeAgentHost) =
   h.worker.command(%*{"t": "prompt", "text": text})
   h.project()
 
+# ---------------------------------------------------------------------------
+# The prompt's attachments (the `+` menu, DeepReview-GUI.md §2.2.7)
+# ---------------------------------------------------------------------------
+
+proc attachedPathOf(context: string): string =
+  ## The file an attachment names: `path`, or the path of an editor
+  ## selection's `path:first[-last]`.
+  result = context
+  let colon = context.rfind(':')
+  if colon > 0:
+    let tail = context[colon + 1 .. ^1]
+    if tail.len > 0 and tail.allCharsInSet({'0' .. '9', '-'}) and
+       tail[0] != '-':
+      result = context[0 ..< colon]
+
+proc attachContext*(h: NativeAgentHost; context: string;
+                    mustExist = true): string =
+  ## Attach `context` — a file or folder, a recording, or an editor
+  ## selection (`path:first-last`) — to the next prompt, as the desktop's `+`
+  ## items add to `contextPaths`. A path typed or chosen in the omnibox must
+  ## exist on disk (a relative one is read from the agent's working
+  ## directory); an editor selection names the file the editor shows, and is
+  ## attached as it is (`mustExist = false`). "" when attached, else why not;
+  ## either way the status line has the words (`message`).
+  let c = context.strip()
+  if c.len == 0:
+    result = "type the path of a file or folder to attach"
+  else:
+    let path = c.attachedPathOf()
+    let onDisk = if path.isAbsolute: path else: h.cwd / path
+    if mustExist and not fileExists(onDisk) and not dirExists(onDisk):
+      result = "cannot attach " & c & ": no such file or folder"
+    elif c in h.vm.contextPaths.val:
+      result = c & " is attached already"
+    else:
+      h.vm.contextPaths.val = withContextPath(h.vm.contextPaths.val, c)
+      h.message = "Attached " & c & ": it goes with the next prompt"
+      h.changed = true
+      return ""
+  h.message = result
+  h.changed = true
+
 proc sendPrompt*(h: NativeAgentHost; text: string): string =
   ## Send `text` to the agent, starting the session first when there is
   ## none — the desktop's `/ai <prompt>` and its prompt field's Enter.
+  ## The prompt's attachments go with it, in the desktop's header
+  ## (`contextPromptText`), and are cleared, as the desktop clears them.
   ## Returns "" or why nothing was sent.
   let prompt = text.strip()
   if prompt.len == 0:
@@ -240,7 +303,8 @@ proc sendPrompt*(h: NativeAgentHost; text: string): string =
     h.store.agentSessions.val = state
     h.worker.command(%*{"t": "start", "command": h.agentCommand,
                         "args": h.agentArgs, "cwd": h.cwd})
-  h.pendingPrompts.add prompt
+  h.pendingPrompts.add contextPromptText(prompt, h.vm.contextPaths.val)
+  h.vm.clearContextPaths()
   # The user's turn shows at once, where it was sent — the desktop's
   # `updateAgentUi` adds it before the prompt goes out.
   h.userTurns.add UserTurn(

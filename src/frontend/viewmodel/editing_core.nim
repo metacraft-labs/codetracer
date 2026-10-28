@@ -875,6 +875,19 @@ proc selectionCells*(d: EditingDocument): SelectionCells =
     if r.isEmpty: continue
     spanCellsIn(text, ls, r.rangeFrom, r.rangeTo, result)
 
+proc selectedLines*(d: EditingDocument): tuple[first, last: int] =
+  ## The 1-based lines the selection covers (every range's), or the caret's
+  ## line when nothing is selected — what the Agent Activity prompt's
+  ## *Editor selection* attaches (`agent_prompt_context.editorSelectionContext`).
+  let cells = d.selectionCells
+  if cells.len == 0:
+    let line = d.caretLine
+    return (line, line)
+  result = (cells[0].line, cells[0].line)
+  for c in cells:
+    result.first = min(result.first, c.line)
+    result.last = max(result.last, c.line)
+
 func hasSelection*(d: EditingDocument): bool =
   ## Whether any range spans text. A caret is a range of zero length, so
   ## `rangeCount > 0` is not the question — every state has at least one.

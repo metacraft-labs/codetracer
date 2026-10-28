@@ -307,7 +307,23 @@ type
     build*: BuildSession
       ## PLAT-16. The build or run in flight, or the last one's verdict, or
       ## `nil` for a session that has never built. `nil` is a state the pane
-      ## renders (`build: not started`) rather than one it hides.
+      ## renders (`No build has run.`) rather than one it hides.
+    buildPane*: BuildPaneModel
+      ## PLAT-56. The BUILD OUTPUT pane's model, as a value, filled by the
+      ## host (`host/build_output_source.nim`) from the window's `BuildVM` —
+      ## the desktop's BUILD panel's ViewModel — which the window's builds
+      ## feed; its `scrollTop` is the pane's own. Not loaded without a host:
+      ## the pane then draws `build` itself (`buildPaneModelFor`).
+    buildStatus*: string
+      ## PLAT-56 (Build-Output-Pane.md §3.10): the status line's build
+      ## indicator — the current build in the shared words, "" for none.
+    buildStatusState*: BuildStatus
+      ## Its verdict, for its colour.
+    buildCommand*: proc(kind: BuildPaneCommandKind;
+                        index: int): string {.closure.}
+      ## PLAT-56: the HOST's Build Output pane — run again, stop, clear,
+      ## auto-scroll, the history picker, a located line opened. The words the
+      ## status line shows, "" for none. Nil when no host fills the pane.
     editSession*: EditSession
       ## PLAT-16. The open buffers, their carets, their scroll positions and
       ## the project's points.
@@ -364,6 +380,12 @@ type
       ## starting a session when there is none. "" when sent, else why not.
     agentStop*: proc(): string {.closure.}
       ## PLAT-54: the prompt's Stop control.
+    agentAttach*: proc(context: string; mustExist: bool): string {.closure.}
+      ## PLAT-54: the prompt's "add context" menu (DeepReview-GUI.md §2.2.7)
+      ## — the HOST attaches a file, folder, recording or editor selection to
+      ## the next prompt (`native_agent_host.attachContext`; an editor
+      ## selection is attached as the editor names it, `mustExist` false).
+      ## The words the status line shows.
     recordingOpener*: proc(path: string): string {.closure.}
       ## PLAT-49 part B: the HOST's "open this recording in a new session
       ## tab" — "" when it opened, else why not. Nil when the host cannot
@@ -534,6 +556,12 @@ proc welcomeViewOf*(app: TuiApp): WelcomeView =
               input: w.input, placeholder: w.placeholder,
               message: w.message)
 
+proc currentBuildPane*(app: TuiApp): BuildPaneModel =
+  ## PLAT-56: the Build Output pane's value — the host's, from the window's
+  ## `BuildVM`, or (no host) the runner's session drawn directly.
+  if app.buildPane.loaded: app.buildPane
+  else: buildPaneModelFor(app.build)
+
 proc shellModel*(app: TuiApp; width, height: int): ShellModel =
   ## The CTUI-3 screen model for this application at this terminal size.
   ##
@@ -604,7 +632,7 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
   # PLAT-70: the output panes' horizontal views and the markers setting.
   var terminalOutput = app.terminalOutput
   terminalOutput.overflowMarkers = not app.overflowMarkersOff
-  var build = buildPaneModelFor(app.build)
+  var build = app.currentBuildPane()
   build.hview = app.buildView.hview
   build.overflowMarkers = not app.overflowMarkersOff
   result = ShellModel(
@@ -632,6 +660,8 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
                         caretDrawn: app.caretDrawn),
     status: initStatusBarModel(mode = umNormal, profile = selected,
                                notification = app.notification,
+                               build = app.buildStatus,
+                               buildState = app.buildStatusState,
                                product = app.modes.product,
                                # PLAT-45: say so when the screen is the shared
                                # default FOLDED — and only then. An arrangement
@@ -699,6 +729,8 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
                                        else: terminalPaneName(d.pane)))
   let modeW = textCells("COMMAND " & productIndicator(result.product) &
                         (if result.status.fold.len > 0: " " & result.status.fold
+                         else: "") &
+                        (if app.buildStatus.len > 0: "  " & app.buildStatus
                          else: ""))
   let noteW = noteRowCells(app.notification)
   let fileInfo =

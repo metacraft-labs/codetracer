@@ -7928,3 +7928,44 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - Letters typed into a find field resolve as characters even where the
   global table binds them (`n`, `l`): the router gives the focused input's
   text priority.
+- Build Output (PLAT-56): a `BuildOutputLine` is `text` + styled `runs`
+  (`TermAttrs`), no HTML; the reader is `build_output_model.BuildLineReader`,
+  owned by each `BuildVM` (`beginBuild` / `feedOutput` / `finishBuild`), and
+  its `fed` result is the Problems row — the native `build_problems.follow`
+  and the desktop's `appendBuild` read each line ONCE through it. The native
+  runner reads stdout and stderr on two pipes (`BuildSession.stderrFlags`)
+  and keeps trailing spaces (gcc's caret rule pads with them).
+- `parseBuildLocation` reads `alert(1)` as a Nim `path(line)` location: a test
+  string with parentheses and digits becomes a located error line.
+- The desktop `#build` panel's generic DOM view needs `mixin createElement,
+  setStyle, …` in generic procs: under JS the module imports `web_renderer`,
+  and the Mock renderer's overloads are not found without the mixin.
+- The GPUI Edit window (`--edit`, no menu) drew no footer until PLAT-56; it
+  now draws `drawFooter` in `drawTopBar`'s K19 branch (the build indicator).
+- On the desktop, after a failed build the bottom OVERLAY (BUILD/PROBLEMS)
+  covers the dock: Playwright presses must Escape it first; clicking a docked
+  footer tab again CLOSES it (`openBottomPanel` toggles).
+- Agent Activity's "add context" menu natively (DeepReview-GUI §2.2.7): the
+  menu is a `pane_clicks.ContextMenuModel` (`agentAddContextMenu`,
+  `cmkAgentAddContext`) opened by a LEFT press on the prompt's `[+]` / `+`, so
+  it rides the right-click menu machinery of both front-ends (TUI
+  `runContextAction`, GPUI `runContextAction`; the GPUI scripted op `ctx:<label>`
+  chooses an entry). The file items open the omnibox on `:attach ` /
+  `:attach-recording ` (`omnibar_vm.omAttach*`, mapped to `omCommand` on the
+  desktop by `desktopKindOf`, so `ui/command_interpreter`'s case must list
+  them). Attachments are `contextPaths`, shown as `frContextPath` rows at the
+  END of the feed; the prompt header is `agent_prompt_context.contextPromptText`,
+  which the desktop's main process (`acp_ipc`) uses too.
+- The GPUI window's status line is its footer note (`gStatusNote`,
+  `sayStatus`, `data-ct-footer-note`); before it, GPUI only had the gesture
+  trace for host messages.
+- A native recording press reports through `native_agent_host.message`
+  (`recordingOpenedNote`): both buttons open a NEW session tab natively.
+- `acp-replay-agent.js --prompt-log=<path>` appends each `session/prompt`'s
+  content blocks as a JSON line: assert what the agent RECEIVED.
+- Building in a fresh worktree: the submodules are not checked out (`git
+  submodule update --init -- libs`, then `git submodule foreach 'git checkout
+  -f HEAD'` for any left empty); a `reprobuild.paths` file (gitignored) lists
+  extra `--path`s that win over the workspace siblings (nim-everywhere,
+  nim-agents, nim-acp at their pins). The tup build's nimcache is hard-wired to
+  /tmp/ct-nim-cache, shared by every checkout on the host.

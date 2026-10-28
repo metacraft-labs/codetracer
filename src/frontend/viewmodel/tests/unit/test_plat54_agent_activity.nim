@@ -41,11 +41,13 @@ import store/types
 import viewmodels/agent_activity_vm
 import viewmodels/agent_activity_feed
 import viewmodels/review_session
+import viewmodels/omnibar_vm
+import ../../editing_core
 import views/isonim_agent_activity_view
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 142
+const ExpectedAssertions = 176
 
 var countedAssertions = 0
 
@@ -428,6 +430,106 @@ suite "PLAT-54 lines and the reader's place":
       scroll.scrollTo(lines.len, rows, lines, 10)
       ck scroll.follow
       dispose()
+
+suite "PLAT-54 the prompt's add-context menu (DeepReview-GUI §2.2.7)":
+
+  test "the four items, in the desktop's order and words":
+    var labels: seq[string] = @[]
+    for item in AgentAddContextItem:
+      labels.add item.label
+    ck labels == @["Upload attachment", "Files & folders", "Editor selection",
+                   "Recording / trace"]
+    # The desktop's dropdown draws exactly these, from the same enum.
+    createRoot proc(dispose: proc()) =
+      let vm = createAgentActivityVM(nil)
+      vm.addContextDropdownOpen.val = true
+      let r = MockRenderer()
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, 1)
+      var drawn: seq[string] = @[]
+      for item in findAll(panel, "agent-add-context-menu-item"):
+        drawn.add textOf(item).strip()
+      ck drawn == labels
+      dispose()
+
+  test "the header a prompt with attachments carries":
+    ck contextPromptText("fix it", []) == "fix it"
+    ck contextPromptText("fix it", ["src/a.nim", "src/a.nim:3-5"]) ==
+       "Context paths:\n- src/a.nim\n- src/a.nim:3-5\n\nfix it"
+    ck editorSelectionContext("src/a.nim", 5, 3) == "src/a.nim:3-5"
+    ck editorSelectionContext("src/a.nim", 7, 7) == "src/a.nim:7"
+    ck editorSelectionContext("", 1, 2) == ""
+    ck withContextPath(["a"], "a") == @["a"]
+    ck withContextPath(["a"], " b ") == @["a", "b"]
+    # The lines *Editor selection* attaches: the caret's, or the selection's.
+    var d = initEditingDocument("src/a.nim", "one\ntwo\nthree\nfour\nfive\n")
+    d.moveCaretTo(2, 0)
+    ck d.selectedLines == (first: 3, last: 3)
+    d.extendSelectionTo(3, 2)
+    ck d.selectedLines == (first: 3, last: 4)
+    d.moveCaretTo(4, 1)
+    d.extendSelectionTo(1, 0)
+    ck d.selectedLines == (first: 2, last: 5)
+
+  test "attachments are rows above the prompt, each removable by its path":
+    createRoot proc(dispose: proc()) =
+      let vm = createAgentActivityVM(nil)
+      vm.addContextPath("src/a.nim")
+      vm.addContextPath("src/b.nim:2-4")
+      # Idle, the attachments still follow the idle rows.
+      var rows = vm.agentFeed()
+      ck rows.kinds == @[frIdleHeading, frIdleSubtitle, frIdleChip,
+                         frIdleChip, frIdleChip, frContextPath, frContextPath]
+      ck rows[5].spansText == AgentContextChipLead & "src/a.nim"
+      ck rows[6].buttons.len == 1 and
+         rows[6].buttons[0].kind == faRemoveContext and
+         rows[6].buttons[0].label == AgentContextRemoveLabel
+      # After a conversation too, last.
+      applyReviewSession(vm, replayedSession())
+      rows = vm.agentFeed()
+      ck rows[^1].kind == frContextPath and rows[^2].kind == frContextPath
+      ck rows[^3].kind != frContextPath
+      # `[×]` removes the row's own path…
+      let first = rows[^2]
+      let effect = vm.runFeedAction(first, first.buttons[0])
+      ck effect.handled
+      ck vm.contextPaths.val == @["src/b.nim:2-4"]
+      # …and a press read off a stale line removes nothing else.
+      let stale = vm.runFeedAction(first, first.buttons[0])
+      ck not stale.handled
+      ck vm.contextPaths.val == @["src/b.nim:2-4"]
+      dispose()
+
+  test "the omnibox's attach modes":
+    ck classifyOmnibarQuery(":attach src/a").mode == omAttach
+    ck classifyOmnibarQuery(":attach src/a").needle == "src/a"
+    ck classifyOmnibarQuery(":attach-recording /tmp/r").mode ==
+       omAttachRecording
+    ck classifyOmnibarQuery(":attach-recording /tmp/r").needle == "/tmp/r"
+    ck classifyOmnibarQuery(":attachx").mode == omCommand
+    ck desktopKindOf(omAttach) == omCommand and
+       desktopKindOf(omAttachRecording) == omCommand
+    let index = @[
+      OmnibarEntry(kind: omFile, label: "parser.nim", detail: "src",
+                   target: "src/parser.nim"),
+      OmnibarEntry(kind: omFile, label: "lexer.nim", detail: "src",
+                   target: "src/lexer.nim"),
+      OmnibarEntry(kind: omRecording, label: "trace-1", detail: "",
+                   target: "/tmp/traces/trace-1"),
+      OmnibarEntry(kind: omCommand, label: "Step over", target: "step")]
+    # Files and their folders, each once; no command, no recording.
+    var labels: seq[string] = @[]
+    for r in rankOmnibar(index, omAttach, ""):
+      ck r.entry.kind == omAttach
+      labels.add r.entry.label
+    ck labels.len == 3
+    ck "src/" in labels and "parser.nim" in labels and "lexer.nim" in labels
+    # A typed path is offered first, as typed.
+    let typed = rankOmnibar(index, omAttach, "docs/notes.md")
+    ck typed[0].entry.target == "docs/notes.md"
+    # The recording mode finds the recordings only.
+    let recs = rankOmnibar(index, omAttachRecording, "")
+    ck recs.len == 1 and recs[0].entry.target == "/tmp/traces/trace-1" and
+       recs[0].entry.kind == omAttachRecording
 
 suite "PLAT-54 a live session's entry as the feed":
 

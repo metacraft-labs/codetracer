@@ -34,7 +34,7 @@
 ##
 ##   let vm = createBuildVM(store)
 ##   vm.setCommand("cargo build")
-##   vm.appendLine(BuildOutputLine(htmlText: "Compiling foo", isStdout: true))
+##   vm.appendLine(plainBuildLine("Compiling foo"))
 ##   vm.setCode(0)
 ##   echo vm.output.val.len           # 1
 ##   echo vm.status.val               # bsSucceeded
@@ -52,18 +52,11 @@ import isonim/viewmodel
 
 import ../backend/backend_service
 import ../store/[replay_data_store, types]
+import ./build_output_model
+
+export build_output_model
 
 type
-  BuildStatus* = enum
-    ## Coarse build-status enum derived from running/code/output state.
-    ## Drives the Karax-equivalent header text ("running ...", "build
-    ## succeeded", "build failed (exit code N)") and the header CSS
-    ## modifier classes (``build-failed`` / ``build-succeeded``).
-    bsIdle       ## No build has run, or the panel was cleared.
-    bsRunning    ## A build is currently in progress.
-    bsSucceeded  ## Last build returned exit code 0 with output present.
-    bsFailed     ## Last build returned a non-zero exit code with output.
-
   BuildVM* = ref object of ViewModel
     ## Reactive state for the Build panel.
     ##
@@ -95,6 +88,28 @@ type
     code*: Signal[int]
     autoScroll*: Signal[bool]
     buildStartTime*: Signal[float]
+    # -- PLAT-56 (Build-Output-Pane.md §3.13) --
+    cancelled*: Signal[bool]
+      ## The current build was stopped by the user (`bsCancelled`).
+    buildEndTime*: Signal[float]
+      ## When the current build ended (ms since the epoch); 0 while running
+      ## or before any build.
+    clockMs*: Signal[float]
+      ## The host's clock, ticked while a build runs (`tickClock`), which the
+      ## elapsed time is measured against.
+    number*: Signal[int]
+      ## The current build's number in this window, from 1; 0 before any.
+    noun*: Signal[string]
+      ## What the current build is called in the words: "build", or "run"
+      ## (the terminal's `:run`).
+    history*: Signal[seq[BuildHistoryEntry]]
+      ## The finished builds before the current one, NEWEST FIRST, at most
+      ## `BuildHistoryMax` (§3.7).
+    shownIndex*: Signal[int]
+      ## Which build the pane shows: -1 the current one (the default, and
+      ## what every new build returns to), else an index into `history`.
+    reader*: BuildLineReader
+      ## The current build's line reader (`build_output_model`).
 
     # -- Derived state --
     status*: Memo[BuildStatus]
@@ -102,7 +117,7 @@ type
     hasOutput*: Memo[bool]
 
     # -- Callbacks wired by the host (ui_js.nim) after VM creation --
-    onJumpToLine*: proc(path: string; line: int)
+    onJumpToLine*: proc(path: string; line, col: int)
       ## Open a diagnostic row's file at its line.
       ##
       ## The pane's own header has documented `click→jumpToLocation` on these
@@ -114,10 +129,10 @@ type
       ## and done nothing since — and `real-compiler-errors.spec.ts` asserts
       ## the CLASS, by name, which passes over exactly that.
       ##
-      ## No column: `BuildOutputLine` carries `locationPath` and
-      ## `locationLine` only. The PROBLEMS pane's rows carry a column and
-      ## navigate with it; this is the coarser of the two surfaces and says so
-      ## rather than passing a zero that looks like a real answer.
+      ## PLAT-56: with the column (`locationCol`, 0 when the compiler wrote
+      ## none), as the PROBLEMS pane's rows navigate. The path is the
+      ## compiler's, as written; resolving a relative one is the host's
+      ## (`build_diagnostics.resolvedPath`).
     runBuild*: proc() ## Trigger a build-only (no re-record) action.
     cancelBuildProc*: proc()
       ## Stop the in-flight build, when the host has a way to.
@@ -161,6 +176,123 @@ proc setCode*(vm: BuildVM; code: int) =
   vm.running.val = false
   vm.code.val = code
 
+proc currentSnapshot*(vm: BuildVM): BuildSnapshot =
+  ## The current build as a value (reactive: reads its signals).
+  BuildSnapshot(number: vm.number.val, noun: vm.noun.val,
+                command: vm.command.val,
+                output: vm.output.val, problems: vm.problems.val,
+                status: vm.status.val, code: vm.code.val,
+                startMs: vm.buildStartTime.val, endMs: vm.buildEndTime.val,
+                latest: true)
+
+proc shownSnapshot*(vm: BuildVM): BuildSnapshot =
+  ## The build the pane shows: the current one, or the history entry the
+  ## user picked.
+  let i = vm.shownIndex.val
+  let h = vm.history.val
+  if i >= 0 and i < h.len: snapshotOf(h[i])
+  else: vm.currentSnapshot()
+
+proc showingLatest*(vm: BuildVM): bool =
+  let i = vm.shownIndex.val
+  i < 0 or i >= vm.history.val.len
+
+proc showBuild*(vm: BuildVM; index: int) =
+  ## Show history entry `index` (newest first), or the current build for -1
+  ## or an index the history does not hold.
+  vm.shownIndex.val = (if index >= 0 and index < vm.history.val.len: index
+                       else: -1)
+
+proc tickClock*(vm: BuildVM; nowMs: float) =
+  ## The host's clock, for the elapsed time of a running build.
+  vm.clockMs.val = nowMs
+
+proc headerText*(vm: BuildVM): string = vm.shownSnapshot.headerText
+proc durationText*(vm: BuildVM): string =
+  vm.shownSnapshot.durationText(vm.clockMs.val)
+proc statusText*(vm: BuildVM): string =
+  ## The status bar's indicator — always the CURRENT build (§3.10).
+  vm.currentSnapshot.statusText(vm.clockMs.val)
+proc statusIcon*(vm: BuildVM): string = BuildStatusIcons[vm.status.val]
+
+proc historyLabels*(vm: BuildVM): seq[string] =
+  ## The picker's entries: the current build first, then the history, newest
+  ## first.
+  result.add BuildLatestLabel
+  for e in vm.history.val:
+    result.add historyLabel(e)
+
+proc archiveCurrent(vm: BuildVM) =
+  ## The current build, if one ran and ended, into the history (newest
+  ## first, bounded).
+  let cur = vm.currentSnapshot()
+  if cur.status in {bsIdle, bsRunning} or cur.number <= 0:
+    return
+  var h = vm.history.val
+  h.insert(entryOf(cur), 0)
+  if h.len > BuildHistoryMax:
+    h.setLen(BuildHistoryMax)
+  vm.history.val = h
+
+proc beginBuild*(vm: BuildVM; command: string; startMs: float;
+                 noun = "build") =
+  ## A new build starts: the last one (if it ended) goes to the history, the
+  ## output, the diagnostics and the reader start afresh, and the pane shows
+  ## the new build (§3.7: "the most recent build is always shown by
+  ## default").
+  vm.archiveCurrent()
+  vm.reader.reset()
+  vm.output.val = @[]
+  vm.errors.val = @[]
+  vm.problems.val = @[]
+  vm.cancelled.val = false
+  vm.code.val = 0
+  vm.command.val = command
+  vm.noun.val = noun
+  vm.buildStartTime.val = startMs
+  vm.buildEndTime.val = 0.0
+  vm.clockMs.val = startMs
+  vm.number.val = vm.number.val + 1
+  vm.shownIndex.val = -1
+  vm.running.val = true
+
+proc feedOutput*(vm: BuildVM; raw: string; isStdout: bool): ReadBuildLine =
+  ## One raw line of the current build's output (no newline): read by the
+  ## build's reader, appended, and — when the shared rule makes it a
+  ## diagnostic — appended to the build's problems too. The caller feeds the
+  ## same row to the Problems pane's `ErrorsVM` (`result.fed`).
+  result = vm.reader.read(raw, isStdout)
+  var lines = vm.output.val
+  lines.add result.line
+  vm.output.val = lines
+  if result.fed.problem:
+    var rows = vm.problems.val
+    rows.add result.fed.row
+    vm.problems.val = rows
+  if result.line.located:
+    var entries = vm.errors.val
+    entries.add BuildErrorLine(locationPath: result.line.locationPath,
+                               locationLine: result.line.locationLine,
+                               rawLocation: result.line.text,
+                               other: result.fed.scanned.message)
+    vm.errors.val = entries
+
+proc feedChunk*(vm: BuildVM; data: string; isStdout: bool): seq[ReadBuildLine] =
+  ## A stream's write (`chunkLines`), line by line.
+  for raw in chunkLines(data):
+    result.add vm.feedOutput(raw, isStdout)
+
+proc finishBuild*(vm: BuildVM; code: int; endMs: float; cancelled = false) =
+  ## The current build ended: its exit code, when, and whether the user
+  ## stopped it.
+  vm.code.val = code
+  vm.cancelled.val = cancelled
+  vm.buildEndTime.val = endMs
+  vm.clockMs.val = max(vm.clockMs.val, endMs)
+  if vm.number.val <= 0:
+    vm.number.val = 1
+  vm.running.val = false
+
 proc appendLine*(vm: BuildVM; line: BuildOutputLine) =
   ## Append a single rendered line to the output stream.
   ## Used by the legacy ``processBuildOutput`` after it has split the
@@ -192,7 +324,7 @@ proc jumpToLine*(vm: BuildVM; line: BuildOutputLine) =
     return
   if vm.onJumpToLine.isNil:
     return
-  vm.onJumpToLine(line.locationPath, line.locationLine)
+  vm.onJumpToLine(line.locationPath, line.locationLine, line.locationCol)
 
 proc clearOutput*(vm: BuildVM) =
   ## Clear all output / errors / problems and reset the exit code so
@@ -202,6 +334,14 @@ proc clearOutput*(vm: BuildVM) =
   vm.errors.val = @[]
   vm.problems.val = @[]
   vm.code.val = 0
+  # PLAT-56: the current build is cleared as a whole — its verdict too
+  # (`status` is idle with no command and no output); the history is kept.
+  if not vm.running.val:
+    vm.command.val = ""
+    vm.cancelled.val = false
+    vm.buildStartTime.val = 0.0
+    vm.buildEndTime.val = 0.0
+  vm.shownIndex.val = -1
 
 proc setAutoScroll*(vm: BuildVM; on: bool) =
   ## Set the auto-scroll preference.  The view re-scrolls to the
@@ -263,13 +403,25 @@ proc createBuildVM*(store: ReplayDataStore): BuildVM =
     let code = createSignal(0)
     let autoScroll = createSignal(true)
     let buildStartTime = createSignal(0.0)
+    let cancelled = createSignal(false)
+    let buildEndTime = createSignal(0.0)
+    let clockMs = createSignal(0.0)
+    let number = createSignal(0)
+    let noun = createSignal("build")
+    let history = createSignal(newSeq[BuildHistoryEntry]())
+    let shownIndex = createSignal(-1)
 
     # Derived: coarse status, recomputed from running/code/output.
+    # PLAT-56: idle means NO BUILD — no command and no output — rather than
+    # "no output": a build that failed without a word is a failed build, and
+    # one that was stopped is a cancelled one.
     let status = createMemo[BuildStatus] proc(): BuildStatus =
       if running.val:
         bsRunning
-      elif output.val.len == 0:
+      elif output.val.len == 0 and command.val.len == 0:
         bsIdle
+      elif cancelled.val:
+        bsCancelled
       elif code.val != 0:
         bsFailed
       else:
@@ -291,6 +443,13 @@ proc createBuildVM*(store: ReplayDataStore): BuildVM =
       code: code,
       autoScroll: autoScroll,
       buildStartTime: buildStartTime,
+      cancelled: cancelled,
+      buildEndTime: buildEndTime,
+      clockMs: clockMs,
+      number: number,
+      noun: noun,
+      history: history,
+      shownIndex: shownIndex,
       status: status,
       isRunning: isRunning,
       hasOutput: hasOutput,

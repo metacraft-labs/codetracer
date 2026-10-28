@@ -198,7 +198,7 @@ proc rowNamed(vm: TestResultsVM; selector: string): TestResultsRow =
 proc paneText(producer: NoirBuildProducer): string =
   var parts: seq[string] = @[]
   for line in producer.vm.output.val:
-    parts.add line.htmlText
+    parts.add line.text
   parts.join("\n")
 
 # ---------------------------------------------------------------------------

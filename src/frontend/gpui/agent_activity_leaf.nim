@@ -8,7 +8,9 @@
 ## header, text, tool-call groups and the promoted final text), each `ct test`
 ## run as a summary card that opens to its tests and their recordings, each
 ## evidence handoff as a card that opens its review — then the prompt, its
-## Send (or, while the agent works, Stop). Rows wrap to the pane and have a
+## Send (or, while the agent works, Stop), and beside it the desktop's `+`,
+## the "add context" menu (DeepReview-GUI.md §2.2.7), whose attachments are
+## rows at the end of the feed. Rows wrap to the pane and have a
 ## fixed pitch, so a press and the drawing go through the same layout
 ## (`agentLayout`); the list scrolls (the wheel), its scrollbar is the shared
 ## scrubber over the WHOLE session (`list_scrubber`), and rows that arrive
@@ -43,6 +45,9 @@ type
     prompt*: PxRect
     control*: PxRect
       ## Send / Stop, at the prompt's right edge.
+    add*: PxRect
+      ## The `+` ("add context"), just left of Send / Stop; empty when the
+      ## pane is too narrow for it.
     rows*: int
       ## How many lines fit.
     overflow*: bool
@@ -50,7 +55,8 @@ type
     top*: int
 
   GAgentHitKind* = enum
-    gaNone, gaRow, gaButton, gaPrompt, gaControl, gaTrack, gaThumb
+    gaNone, gaRow, gaButton, gaPrompt, gaControl, gaTrack, gaThumb,
+    gaAddContext
 
   GAgentHit* = object
     kind*: GAgentHitKind
@@ -63,6 +69,9 @@ const
   AgentPromptPx* = 28
   AgentTextPx* = 13.0
   AgentControlPx* = 56
+  AgentAddPx* = 28
+    ## The `+` button's width (the desktop's 28 px `.agent-add-context-button`).
+  AgentAddLabel* = "+"
   AgentAttribute* = "data-ct-agent"
   AgentLineAttribute* = "data-ct-agent-line"
     ## A painted line: its row's kind.
@@ -98,6 +107,10 @@ proc agentLayout*(body: PxRect; rows: openArray[AgentFeedRow];
                           y: result.prompt.y + 2, w: min(result.prompt.w,
                                                          AgentControlPx - 4),
                           h: max(0, result.prompt.h - 4))
+  if result.prompt.w > AgentControlPx + AgentAddPx + 40:
+    result.add = PxRect(x: result.control.x - AgentAddPx + 4,
+                        y: result.control.y,
+                        w: AgentAddPx - 4, h: result.control.h)
   let listH = max(0, inner.h - AgentPromptPx - 2)
   result.rows = max(0, listH div AgentRowPx)
   let marked = markedRows(rows)
@@ -218,7 +231,9 @@ proc drawAgentActivity*(r: GpuiRenderer; pane: GpuiElement;
   r.setStyle(bar, "margin-top", "2px")
   let field = r.createElement("div")
   r.setAttribute(field, "data-ct-agent-prompt", prompt)
-  r.setStyle(field, "width", $max(0, lay.prompt.w - AgentControlPx) & "px")
+  let fieldW = lay.prompt.w - AgentControlPx -
+               (if lay.add.w > 0: AgentAddPx else: 0)
+  r.setStyle(field, "width", $max(0, fieldW) & "px")
   r.setStyle(field, "height", $max(0, lay.prompt.h - 4) & "px")
   r.setStyle(field, "background", AgentFieldGround)
   r.setStyle(field, "rounded", "3px")
@@ -233,6 +248,19 @@ proc drawAgentActivity*(r: GpuiRenderer; pane: GpuiElement;
   r.appendChild(caption, r.createTextNode(AgentPromptMark & prompt))
   r.appendChild(field, caption)
   r.appendChild(bar, field)
+  if lay.add.w > 0:
+    let add = r.createElement("div")
+    r.setAttribute(add, "data-ct-agent-add", AgentAddLabel)
+    r.setStyle(add, "width", $lay.add.w & "px")
+    r.setStyle(add, "height", $lay.add.h & "px")
+    r.setStyle(add, "display", "flex")
+    r.setStyle(add, "items", "center")
+    r.setStyle(add, "justify", "center")
+    r.setStyle(add, "rounded", "3px")
+    r.setStyle(add, "background", AgentFieldGround)
+    r.setStyle(add, "color", AgentHeadingColour)
+    r.appendChild(add, r.createTextNode(AgentAddLabel))
+    r.appendChild(bar, add)
   let control = r.createElement("div")
   let label = if working: AgentStopLabel else: AgentSendLabel
   r.setAttribute(control, "data-ct-agent-control", label)
@@ -260,6 +288,8 @@ proc agentHitAt*(rows: openArray[AgentFeedRow]; st: GAgentPane; body: PxRect;
   let lay = agentLayout(body, rows, st.scroll)
   if lay.control.contains(x, y):
     return GAgentHit(kind: gaControl, row: -1, button: -1)
+  if lay.add.w > 0 and lay.add.contains(x, y):
+    return GAgentHit(kind: gaAddContext, row: -1, button: -1)
   if lay.prompt.contains(x, y):
     return GAgentHit(kind: gaPrompt, row: -1, button: -1)
   if lay.overflow:

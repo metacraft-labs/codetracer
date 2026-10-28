@@ -538,7 +538,7 @@ suite "PLAT-70 Part A: the output panes scroll sideways on a real terminal":
       proc(s: Snapshot): bool = s.text(Rows - 1).contains("[EDIT]"))
     sess.omnibox(":build printf '%s\\n' '" & Wide & "'")
     discard sess.waitUntil("the build succeeded",
-      proc(s: Snapshot): bool = s.findRow("[succeeded]")[0] >= 0)
+      proc(s: Snapshot): bool = s.findRow("build succeeded")[0] >= 0)
     # Back to Debug mode, where the bottom dock's BUILD label docks the
     # pane open over the debugger's arrangement.
     sess.send("\x1b[15;5~")

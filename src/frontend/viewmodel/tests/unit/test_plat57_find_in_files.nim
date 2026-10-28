@@ -1,5 +1,6 @@
 ## test_plat57_find_in_files.nim — PLAT-57: THE Find in Files runner
-## (`viewmodel/host/find_in_files`), on both backends (vm-unit, vm-unit-js).
+## (`viewmodel/host/find_in_files`), on all three backends
+## (vm-unit, vm-unit-js, vm-unit-wasm).
 ##
 ## Find-And-Incremental-Search.md §5.4 and FS-8. What is graded:
 ##
@@ -33,6 +34,10 @@
 ## own `parseRgJsonLine` — the differential is the same, the transport is the
 ## one stand-in, and it is not a mock: it is `rg` itself.
 ##
+## On WASM the production runner uses its in-process walker, and the Node
+## host executes the same real rg oracle through Emscripten's script bridge.
+## Every differential and refusal assertion still runs, on the same corpus.
+##
 ## No mocks: a real corpus on disk, the real `rg`, the real walker, the real
 ## `SearchResultsVM`.
 
@@ -52,11 +57,15 @@ import isonim/viewmodel   # ViewModel.dispose
 when defined(js):
   import std/jsffi
 else:
-  import std/[os, osproc, streams, tempfiles]
+  import std/[os, tempfiles]
+  when defined(wasm32):
+    import std/json
+  else:
+    import std/[osproc, streams]
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 220
+const ExpectedAssertions = 226
 
 var countedAssertions = 0
 
@@ -67,6 +76,13 @@ template ck(condition: untyped) =
 # ---------------------------------------------------------------------------
 # The corpus, on the real filesystem of either backend
 # ---------------------------------------------------------------------------
+
+when not defined(js):
+  proc makeTempDir(prefix: string): string = createTempDir(prefix, "")
+  proc ensureDir(path: string) = createDir(path)
+  proc writeTo(path, content: string) = writeFile(path, content)
+  proc linkTo(target, path: string) = createSymlink(target, path)
+  proc removeTree(path: string) = removeDir(path)
 
 when defined(js):
   proc nodeRequire(name: cstring): JsObject {.importjs: "require(#)".}
@@ -115,6 +131,41 @@ when defined(js):
       let parsed = parseRgJsonLine(line, scope)
       if parsed.ok:
         result.add parsed.row
+elif defined(wasm32):
+  proc evaluateScript(script: cstring): cstring {.importc: "emscripten_run_script_string",
+    header: "<emscripten.h>".}
+
+  proc rgHost(pattern: string; options: TextMatchOptions;
+              roots: seq[string]): tuple[code: int, errors, output: string] =
+    ## The WASM module cannot spawn a process. Its Node test host runs the
+    ## real rg oracle, just as the JS suite uses spawnSync above; the corpus
+    ## is the same host filesystem exposed by the lane's NODERAWFS flag.
+    ## JSON carries the argument vector and result across the boundary, with
+    ## no shell and no substitution of the runner's matcher for the oracle.
+    let args = $(%rgArguments(pattern, options, roots))
+    let script = "JSON.stringify((function() {" &
+      "const r = require('child_process').spawnSync('rg', " & args &
+      ", {encoding:'utf8', maxBuffer:64*1024*1024});" &
+      "if (r.error) throw r.error;" &
+      "if (r.status === null) throw new Error('rg terminated: ' + r.signal);" &
+      "return {code:r.status, errors:r.stderr, output:r.stdout};})())"
+    let response = parseJson($evaluateScript(cstring(script)))
+    (response["code"].getInt, response["errors"].getStr,
+     response["output"].getStr)
+
+  proc rgDirect(pattern: string; options: TextMatchOptions;
+                roots: seq[string]): tuple[code: int, errors: string] =
+    let response = rgHost(pattern, options, roots)
+    (response.code, response.errors)
+
+  proc rgRows(pattern: string; options: TextMatchOptions;
+              scope: FindInFilesScope): seq[SearchResultLine] =
+    let response = rgHost(pattern, options, scope.roots)
+    doAssert response.code in {0, 1}, response.errors
+    for line in response.output.splitLines():
+      let parsed = parseRgJsonLine(line, scope)
+      if parsed.ok:
+        result.add parsed.row
 else:
   proc rgDirect(pattern: string; options: TextMatchOptions;
                 roots: seq[string]): tuple[code: int, errors: string] =
@@ -127,12 +178,6 @@ else:
     result.errors = p.errorStream.readAll()
     result.code = p.waitForExit()
     p.close()
-
-  proc makeTempDir(prefix: string): string = createTempDir(prefix, "")
-  proc ensureDir(path: string) = createDir(path)
-  proc writeTo(path, content: string) = writeFile(path, content)
-  proc linkTo(target, path: string) = createSymlink(target, path)
-  proc removeTree(path: string) = removeDir(path)
 
   proc rgRows(pattern: string; options: TextMatchOptions;
               scope: FindInFilesScope): seq[SearchResultLine] =
@@ -315,6 +360,31 @@ suite "the runner's pure parts":
     ck s2.roots == @[store & "/proj", store & "/C:"] and s2.stripPrefix == ""
     let s3 = findInFilesScope("/nonexistent", true, ["/also-not"])
     ck s3.roots.len == 0 and s3.reason.len > 0
+    removeTree(root)
+
+suite "platform engine availability":
+
+  test "the default engine is available; WASM falls back from an explicit rg request":
+    when defined(wasm32):
+      ck ripgrepOnPath() == ""
+      ck preferredEngine() == fieWalker
+    else:
+      ck ripgrepOnPath().len > 0
+      ck preferredEngine() == fieRipgrep
+    let root = corpus()
+    let scope = findInFilesScope(root & "/files", true, [])
+    var rows: seq[SearchResultLine] = @[]
+    let sink = proc(batch: FindInFilesBatch) = rows.add batch.rows
+    # Node's asynchronous rg transport cannot be driven synchronously on JS.
+    # On WASM, explicitly asking for rg must still use the working walker.
+    let requested = when defined(wasm32): fieRipgrep else: fieWalker
+    let run = newFindInFilesService().search(1, "foo", opts(), scope, sink,
+                                             engine = requested)
+    run.runToCompletion()
+    ck run.engine == fieWalker
+    ck run.finished
+    ck rows.len > 0
+    ck keys(rows) == keys(walkerRows("foo", opts(), scope))
     removeTree(root)
 
 suite "FS-8: rg and the walker agree":

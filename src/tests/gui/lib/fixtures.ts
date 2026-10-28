@@ -631,8 +631,11 @@ function cleanupCodetracerEnvVars(): void {
 // string — not a numeric DB row id.
 const recordingCache = new Map<string, string>();
 
-function recordTestProgram(recordArg: string): string {
-  const cached = recordingCache.get(recordArg);
+function recordTestProgram(recordArg: string, backend?: "rr" | "mcr" | "ttd"): string {
+  // A test selecting a backend must not reuse a recording made by another
+  // backend, or by the product's current default.
+  const cacheKey = JSON.stringify([recordArg, backend ?? null]);
+  const cached = recordingCache.get(cacheKey);
   if (cached !== undefined) {
     console.log(`# reusing cached trace for ${recordArg} with id ${cached}`);
     return cached;
@@ -642,7 +645,7 @@ function recordTestProgram(recordArg: string): string {
 
   const ctProcess = childProcess.spawnSync(
     codetracerPath,
-    ["record", recordArg],
+    ["record", ...(backend ? ["--backend", backend] : []), recordArg],
     {
       cwd: codetracerInstallDir,
       stdio: "pipe",
@@ -687,7 +690,7 @@ function recordTestProgram(recordArg: string): string {
     throw new Error(`Empty recording id from ct record output: ${markerLine}`);
   }
   console.log(`# recorded trace for ${recordArg} with id ${recordingId}`);
-  recordingCache.set(recordArg, recordingId);
+  recordingCache.set(cacheKey, recordingId);
   return recordingId;
 }
 

@@ -21,8 +21,10 @@
  *     shows;
  *   * what a right-click on a row opens (measured, not assumed);
  *   * what a press on a row OPENS — the active editor's path and its caret
- *     line before and after the press (K35), measured: the desktop does not
- *     resolve a compiler's relative path (see the press below).
+ *     line before and after the press (K35): the compiler's relative path
+ *     resolved against the folder Edit mode opened (EMT-A36; until PLAT-56
+ *     it opened nothing — codetracer-pm issue
+ *     `2026-10-26-desktop-problems-row-ignores-relative-paths`).
  *
  * Written to `src/tests/visual/answers/plat55-problems.electron.json`, which
  * `src/frontend/tui/tests/test_plat55_problems.nim`,
@@ -217,12 +219,9 @@ test.describe("PLAT-55: the desktop's Problems panel, captured", () => {
     await pane.rows().nth(1).locator(".problems-message").click({ button: "right" });
     const rowContextMenu = await contextMenuEntries(ctPage);
 
-    // A PRESS ON THE SECOND ROW (src/util.nr:3:22): what it opens, MEASURED.
-    // The desktop hands the compiler's path to `openLocation` as written, and
-    // a relative one is not resolved against the project (codetracer-pm issue
-    // `2026-10-26-desktop-problems-row-ignores-relative-paths`), so this
-    // records what the active editor is after the press rather than
-    // requiring the jump.
+    // A PRESS ON THE SECOND ROW (src/util.nr:3:22): what it opens, measured.
+    // The compiler's relative path is resolved against the folder Edit mode
+    // opened (`errors.desktopResolvedPath`, PLAT-56).
     const before = await activeEditor(ctPage);
     await pane.rows().nth(1).click();
     await ctPage.waitForTimeout(3_000);
@@ -255,6 +254,13 @@ test.describe("PLAT-55: the desktop's Problems panel, captured", () => {
       "error src/util.nr:3:22",
       "error src/main.nr:5:19",
     ]);
+    // EMT-D21: the failed build highlights its first error (PLAT-56 fixed
+    // the desktop's highlight, which went to the shown tab's slot —
+    // `2026-10-26-desktop-failed-build-highlights-no-problems-row`).
+    expect(after.rows.map((r: any) => r.selected)).toEqual([false, true, false]);
+    // K35 / EMT-A36: the press opened the row's file at its line.
+    expect(inProject(opened.path)).toBe("src/util.nr");
+    expect(opened.line).toBe(3);
     fs.mkdirSync(answersDir, { recursive: true });
     fs.writeFileSync(answersFile, JSON.stringify(out, null, 1) + "\n");
   });

@@ -71,6 +71,9 @@ GPUI_LEAF = "src/frontend/gpui/agent_activity_leaf.nim"
 GPUI_MAIN = "src/frontend/gpui/main.nim"
 VOCAB = "src/frontend/view_vocabulary/pane_views.nim"
 DESKTOP = "src/frontend/viewmodel/views/isonim_agent_activity_view.nim"
+PROMPT_CTX = "src/frontend/viewmodel/viewmodels/agent_prompt_context.nim"
+OMNI = "src/frontend/viewmodel/viewmodels/omnibar_vm.nim"
+PANE_CLICKS = "src/frontend/headless_app/pane_clicks.nim"
 
 # Suites.
 VMU = "src/frontend/viewmodel/tests/unit/test_plat54_agent_activity.nim"
@@ -80,7 +83,7 @@ PLAN = "src/frontend/gpui/tests/test_plat54_gpui_agent_activity.nim"
 
 SUBJECTS = [TEXT, FEED, VM, FILES, HOST, WORKER, TUI_PANE, RUNTIME, SHELL,
             PROFILE, TUI_SESSION, VCS_PANE, VCS_SOURCE, GPUI_LEAF, GPUI_MAIN,
-            VOCAB, DESKTOP]
+            VOCAB, DESKTOP, PROMPT_CTX, OMNI, PANE_CLICKS]
 SUITES = [VMU, TBL, PTY, PLAN]
 
 TBL_REVIEW = "*::a recorded session: evidence cards, a click loads each dataset"
@@ -89,6 +92,8 @@ TBL_LIVE = "*::a live session: rows arrive, the tab agrees, the reader stays put
 PLAN_REVIEW = "*::a recorded session: the cards, and a click loads each dataset"
 PLAN_RUN = "*::a ct test run: the card opens, a recording opens as a tab"
 PLAN_LIVE = "*::a live session: rows arrive over ACP, the tab and the pane agree"
+TBL_ADD = "*::the prompt's add-context menu: attachments reach the agent"
+PLAN_ADD = "*::the prompt's add-context menu: attachments reach the agent"
 
 # (id, [(subject, find, replace), ...], [(suite, filter), ...], what it breaks)
 ARMS = [
@@ -184,7 +189,7 @@ ARMS = [
              "    if s.button > 0 and col >= at + w:")],
      [(TBL, TBL_REVIEW)],
      "a press on a button is read as a press on its row"),
-    ("T2", [(PROFILE, "     paneAgentActivity},", "     },"),
+    ("T2", [(PROFILE, "     paneAgentActivity,", "    "),
             (SHELL, "  elif region.pane == paneAgentActivity and model.agent.loaded:",
              "  elif false:")],
      [(PTY, None)],
@@ -243,12 +248,88 @@ ARMS = [
      "AA-2: the desktop's run card names itself differently"),
 ]
 
+# ---- the prompt's "add context" menu and the status line (§2.2.4, §2.2.7) ----
+ARMS += [
+    ("C1", [(FEED, "  result.add vm.contextRows()", "  discard vm.contextRows()")],
+     [(VMU, None), (TBL, TBL_ADD), (PLAN, PLAN_ADD)],
+     "an attachment is not shown above the prompt"),
+    ("C2", [(FEED, "      vm.removeContextPath(at)", "      discard at")],
+     [(VMU, None), (TBL, TBL_ADD), (PLAN, PLAN_ADD)],
+     "an attachment's [×] removes nothing"),
+    ("C3", [(PROMPT_CTX, "  result = AgentContextPathsHeading & \"\\n\"",
+             "  return text")],
+     [(VMU, None), (TBL, TBL_ADD), (PLAN, PLAN_ADD)],
+     "a prompt's attachments never reach the agent (no header)"),
+    ("C4", [(HOST, "  h.pendingPrompts.add contextPromptText(prompt, h.vm.contextPaths.val)",
+             "  h.pendingPrompts.add prompt")],
+     [(TBL, TBL_ADD), (PLAN, PLAN_ADD)],
+     "the native host sends the prompt without its attachments"),
+    ("C5", [(HOST, "    if mustExist and not fileExists(onDisk) and not dirExists(onDisk):",
+             "    if false:")],
+     [(TBL, TBL_ADD)],
+     "a path that does not exist is attached"),
+    ("C6", [(HOST, "      host.message = if why.len > 0: why else: recordingOpenedNote(request)",
+             "      host.message = why")],
+     [(TBL, TBL_RUN), (PTY, None), (PLAN, PLAN_RUN)],
+     "the status line does not say a recording opened in a new session tab"),
+    ("C7", [(HOST, "  if request.policy == topCurrentTab:", "  if false:")],
+     [(TBL, TBL_RUN), (PLAN, PLAN_RUN)],
+     "[Open recording]'s note does not say why it is a new tab"),
+    ("C8", [(OMNI, "      return (mode, query[prefix.len .. ^1].strip)",
+             "      discard mode")],
+     [(VMU, None), (TBL, TBL_ADD)],
+     "`:attach <path>` is read as a command, not an attachment"),
+    ("C9", [(OMNI, "          let fs = fuzzyScore(needle, dir & \"/\")",
+             "          let fs = fuzzyScore(\"\\x01\", dir)")],
+     [(VMU, None)],
+     "*Files & folders* lists no folders"),
+    ("C10", [(PANE_CLICKS, "      entry(aciRecording.label, caAgentAttachRecording)])",
+              "      entry(aciRecording.label, caAgentAttachUpload)])")],
+     [(TBL, TBL_ADD)],
+     "*Recording / trace* asks for a file, not a recording"),
+    ("C11", [(PANE_CLICKS, "            enabled = editorSelection.len > 0,",
+              "            enabled = false,")],
+     [(TBL, TBL_ADD), (PLAN, PLAN_ADD)],
+     "*Editor selection* is disabled while the editor shows a file"),
+    ("T10", [(TUI_PANE, "      return AgentPaneTarget(kind: atAddContext)",
+              "      return AgentPaneTarget(kind: atPrompt)")],
+     [(TBL, TBL_ADD)],
+     "the terminal's [+] opens the omnibox, not the menu"),
+    ("T11", [(RUNTIME, "  if mode in {omAttach, omAttachRecording}:", "  if false:")],
+     [(TBL, TBL_ADD)],
+     "the terminal's `:attach` choice attaches nothing"),
+    ("T12", [(RUNTIME, "    rt.attachAgentContext(target.path, outcome, mustExist = false)",
+              "    discard target")],
+     [(TBL, TBL_ADD)],
+     "the terminal's *Editor selection* attaches nothing"),
+    ("G6", [(GPUI_LEAF, "    return GAgentHit(kind: gaAddContext, row: -1, button: -1)",
+             "    return GAgentHit(kind: gaPrompt, row: -1, button: -1)")],
+     [(PLAN, PLAN_ADD)],
+     "the GPUI window's + opens the omnibox, not the menu"),
+    ("G7", [(GPUI_MAIN, "  if mode in {omAttach, omAttachRecording}:", "  if false:")],
+     [(PLAN, PLAN_ADD)],
+     "the GPUI window's `:attach` choice attaches nothing"),
+    ("G8", [(GPUI_MAIN, "    r.setAttribute(note, \"data-ct-footer-note\", gStatusNote)",
+             "    discard note")],
+     [(PLAN, PLAN_RUN), (PLAN, PLAN_ADD)],
+     "the GPUI window's status line shows no note"),
+    ("G9", [(GPUI_MAIN, "        sayStatus(h.message)", "        discard")],
+     [(PLAN, PLAN_RUN)],
+     "a press on Agent Activity leaves the GPUI status line silent"),
+    ("D3", [(DESKTOP, "      renderAddContextMenuItem(r, AgentAddContextUploadIcon, aciUpload.label,",
+             "      renderAddContextMenuItem(r, AgentAddContextUploadIcon, \"Upload\",")],
+     [(VMU, None)],
+     "the desktop's + menu words its first item differently"),
+]
+
 DECLARED_SURVIVORS = set()
 
 IN_BINARY = {TEXT, FEED, VM, FILES, HOST, WORKER, TUI_PANE, RUNTIME, SHELL,
-             PROFILE, TUI_SESSION, VCS_PANE, VCS_SOURCE}
+             PROFILE, TUI_SESSION, VCS_PANE, VCS_SOURCE, PROMPT_CTX, OMNI,
+             PANE_CLICKS}
   # Subjects compiled into `codetracer-tui`.
-IN_GPUI = {TEXT, FEED, VM, FILES, HOST, WORKER, GPUI_LEAF, GPUI_MAIN, VOCAB}
+IN_GPUI = {TEXT, FEED, VM, FILES, HOST, WORKER, GPUI_LEAF, GPUI_MAIN, VOCAB,
+           PROMPT_CTX, OMNI, PANE_CLICKS}
   # Subjects compiled into `codetracer-gpui`.
 IN_DESKTOP = set()
 PTY_SUITES = {PTY}
