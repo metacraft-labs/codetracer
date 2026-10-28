@@ -76,5 +76,12 @@
       }
     ]
   },
-  "contextMenu": []
+  "contextMenu": [],
+  "editorSelection": {
+    "item": "Editor selection",
+    "enabled": true,
+    "range": "main.py:3-5",
+    "caret": "main.py:7",
+    "received": "Context paths:\n- main.py:3-5\n- main.py:7\n\nexplain these lines"
+  }
 }

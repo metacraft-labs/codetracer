@@ -15,6 +15,7 @@ import isonim/viewmodel
 
 import ../store/[replay_data_store, types]
 import evidence_call_vm, review_open, test_run_summary_vm, trace_open
+from agent_prompt_context import withContextPath
 
 export evidence_call_vm, review_open, test_run_summary_vm, trace_open
 
@@ -539,9 +540,10 @@ proc getPastedImages*(vm: AgentActivityVM): seq[string] =
   vm.pastedImages.val
 
 proc addContextPath*(vm: AgentActivityVM; path: string) =
-  var paths = vm.contextPaths.val
-  paths.add(path)
-  vm.contextPaths.val = paths
+  ## Attach `path` to the next prompt. A path already attached is not
+  ## attached twice (`agent_prompt_context.withContextPath`, the native
+  ## hosts' rule too).
+  vm.contextPaths.val = withContextPath(vm.contextPaths.val, path)
 
 proc removeContextPath*(vm: AgentActivityVM; idx: int) =
   var paths = vm.contextPaths.val

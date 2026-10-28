@@ -26,7 +26,8 @@ from ../viewmodel/viewmodels/evidence_call_vm import EvidenceDataset
 from ../viewmodel/viewmodels/review_session import
   ReviewSession, ReviewSessionState, rssAbsent, applyReviewSession
 from ../viewmodel/viewmodels/agent_prompt_context import
-  editorSelectionContext, AgentNoEditorSelectionReason
+  editorSelectionContext, AgentNoEditorSelectionReason, EditorRange,
+  selectedLinesOf
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
   import ../viewmodel/views/isonim_agent_activity_view
@@ -545,7 +546,13 @@ proc sendAcpPrompt(self: AgentActivityComponent, prompt: cstring) =
   console.log cstring(fmt"[agent-activity] sending prompt sessionKey={self.currentSessionKey()} sessionId={self.sessionId} pending={self.pendingSessionId} prompt={prompt}")
   let vm = ensureAgentActivityVM(self)
   let images = if not vm.isNil: vm.getPastedImages() else: newSeq[string]()
-  let ctxPaths = if not vm.isNil: vm.getContextPaths() else: newSeq[string]()
+  # The attachments as JavaScript strings: a Nim `string` crosses the IPC as
+  # an array of byte values, which the main process cannot read as a path
+  # (`acp_ipc.onAcpPrompt` turned it into a `TypeError` and sent no prompt).
+  var ctxPaths: seq[cstring] = @[]
+  if not vm.isNil:
+    for p in vm.getContextPaths():
+      ctxPaths.add cstring(p)
   data.ipc.send ("CODETRACER::acp-prompt"), js{
     "sessionId": self.sessionId,
     "clientSessionId": self.pendingSessionId,
@@ -677,11 +684,22 @@ when defined(js):
        editor.monacoEditor.isNil or
        (not editor.tabInfo.isNil and editor.tabInfo.untitled):
       return ""
-    let selection = editor.monacoEditor.toJs.getSelection()
-    if selection.isNil:
+    # Every one of Monaco's selections, its lines counted by the rule the
+    # native selection follows (`selectedLinesOf`): a range that ends at
+    # column 1 of a later line stops at the line break before it.
+    let monacoEditor = editor.monacoEditor.toJs
+    let selections = monacoEditor.getSelections()
+    if selections.isNil:
       return ""
-    editorSelectionContext($editor.path,
-      selection.startLineNumber.to(int), selection.endLineNumber.to(int))
+    var ranges: seq[EditorRange] = @[]
+    for i in 0 ..< selections.length.to(int):
+      let sel = selections[i]
+      ranges.add((sel.startLineNumber.to(int), sel.startColumn.to(int),
+                  sel.endLineNumber.to(int), sel.endColumn.to(int)))
+    let position = monacoEditor.getPosition()
+    let caretLine = if position.isNil: 1 else: position.lineNumber.to(int)
+    let (first, last) = selectedLinesOf(ranges, caretLine)
+    editorSelectionContext($editor.path, first, last)
 
   proc buildAgentActivityCallbacks(self: AgentActivityComponent):
       AgentActivityCallbacks =
