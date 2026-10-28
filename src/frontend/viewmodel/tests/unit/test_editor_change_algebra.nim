@@ -117,7 +117,9 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1974
+const ExpectedAssertions = 1977
+  ## *1974 -> 1977 on 2026-10-28: `viewmodels/replay_open_setting.nim` x
+  ## three assertions. It calls no `rebase(` and spells no `mapOver`.*
   ## *1966 -> 1974 on 2026-10-28: the in-document find's two modules.
   ## `editor/find_match.nim` x five (it is in `editor/`, the directory that
   ## calls the primitive, so the two FLAG needles apply to it too) and
