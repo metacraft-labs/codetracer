@@ -65,6 +65,16 @@ window:
 vcs:
   fileClickOpensFullFile: false
 
+# the Build Output pane (Build-Output-Pane.md §3.8, §5.1), on every
+# front-end:
+#   autoReveal: a build brings the pane on screen from its edge (a failed
+#     one Problems too)
+#   autoDismissOnSuccess: a revealed pane is put away two seconds after a
+#     build that succeeded with no warning
+build:
+  autoReveal: true
+  autoDismissOnSuccess: true
+
 # project open
 default: ""
 

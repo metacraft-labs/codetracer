@@ -39,6 +39,12 @@ type
     downloadApi* {.defaultVal: "".}:      string
     deleteApi* {.defaultVal: "".}:        string
 
+  BuildPaneConfigObj* = object
+    ## The `build:` block (codetracer-pm Build-Output-Pane.md §5.1, §3.8):
+    ## when a build shows and puts away the Build Output pane.
+    autoReveal* {.defaultVal: true.}: bool
+    autoDismissOnSuccess* {.defaultVal: true.}: bool
+
   VcsConfigObj* = object
     ## The `vcs:` block (codetracer-specs GUI/Core-Panes/VCS-Panel.md,
     ## "Configuration").
@@ -86,6 +92,10 @@ type
     vcs* {.defaultVal: VcsConfigObj(
       fileClickOpensFullFile: false
     ).}:                                                  VcsConfigObj
+
+    build* {.defaultVal: BuildPaneConfigObj(
+      autoReveal: true, autoDismissOnSuccess: true
+    ).}:                                                  BuildPaneConfigObj
 
     ## PLAT-69: how the window opens (`window_policy`).
     window* {.defaultVal: WindowConfigObj(
