@@ -89,7 +89,7 @@ PROMPT_CTX = "src/frontend/viewmodel/viewmodels/agent_prompt_context.nim"
 OMNI = "src/frontend/viewmodel/viewmodels/omnibar_vm.nim"
 PANE_CLICKS = "src/frontend/headless_app/pane_clicks.nim"
 UI_AGENT = "src/frontend/ui/agent_activity.nim"
-AGENT_VM = "src/frontend/viewmodel/viewmodels/agent_activity_vm.nim"
+AGENT_VM = VM   # the ViewModel the desktop's host attaches through
 TUI_MAIN = "src/frontend/tui/main.nim"
 LEAVES = "src/frontend/gpui/app/leaves.nim"
 WORKFLOW = ".github/workflows/sibling-cargo-locks.yml"
@@ -113,8 +113,8 @@ WINDOW = "window:" + WIN47
 
 SUBJECTS = [TEXT, FEED, VM, FILES, HOST, WORKER, TUI_PANE, RUNTIME, SHELL,
             PROFILE, TUI_SESSION, VCS_PANE, VCS_SOURCE, GPUI_LEAF, GPUI_MAIN,
-            VOCAB, DESKTOP, PROMPT_CTX, OMNI, PANE_CLICKS, UI_AGENT, AGENT_VM,
-            TUI_MAIN, LEAVES, WORKFLOW, RECORD47]
+            VOCAB, DESKTOP, PROMPT_CTX, OMNI, PANE_CLICKS, UI_AGENT, TUI_MAIN,
+            LEAVES, WORKFLOW, RECORD47]
 SUITES = [VMU, TBL, PTY, PLAN, BOUNDARY, WF_SUITE, CAPTURE, WIN47]
 
 TBL_REVIEW = "*::a recorded session: evidence cards, a click loads each dataset"
@@ -360,8 +360,8 @@ ARMS += [
 # ---- the residuals of 2026-10-28 -------------------------------------------
 ARMS += [
     # The desktop's *Editor selection* (§2.2.7): the active editor's lines.
-    ("E1", [(UI_AGENT, "      let context = activeEditorSelectionContext()",
-             "      let context = \"\"")],
+    ("E1", [(UI_AGENT, "      let path = activeEditorSelectionContext()",
+             "      let path = \"\"")],
      [(CAPTURE, CAPTURE_SEL)],
      "the desktop's Editor selection attaches nothing"),
     ("E2", [(UI_AGENT, "      ranges.add((sel.startLineNumber.to(int), sel.startColumn.to(int),",
@@ -372,8 +372,8 @@ ARMS += [
              "      if false: r.endLine - 1")],
      [(VMU, None)],
      "a Monaco range ending at a line's start attaches that line too"),
-    ("E4", [(DESKTOP, "        disabledReason = (if editorSelection.len > 0: \"\"",
-             "        disabledReason = (if true: \"\"")],
+    ("E4", [(DESKTOP, "      else: callbacks.editorSelectionUnavailableReason()",
+             "      else: \"\"")],
      [(VMU, None)],
      "the desktop's Editor selection is enabled with no file shown"),
     ("E5", [(AGENT_VM, "  vm.contextPaths.val = withContextPath(vm.contextPaths.val, path)",
@@ -752,7 +752,8 @@ def main():
     if needs_window and not build_window():
         print("ABORT: the unmutated windowed binary does not build.")
         return 1
-    graded = sorted({(s, flt) for arm in selected for s, flt in arm[2]})
+    graded = sorted({(s, flt) for arm in selected for s, flt in arm[2]},
+                    key=lambda t: (t[0], t[1] or ""))
     for s, flt in graded:
         v, f = run_suite(s, flt)
         if v != "GREEN":
