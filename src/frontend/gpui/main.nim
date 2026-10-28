@@ -1740,6 +1740,20 @@ proc drawNode(r: GpuiRenderer; i: int): GpuiElement =
         r.setStyle(row, "items", "center")
         r.setStyle(row, "height", $TabHeightPx & "px")
         r.setStyle(row, "flex-shrink", "0")
+        if active:
+          # THE SELECTED TAB ON A GROUND OF ITS OWN (`chrome.tabStyle`, the
+          # user's PLAT-49 direction over the desktop's single panel colour,
+          # as the terminal's `srTabActive` draws it): its label row on
+          # ui/surface/primary/tertiary — on a focused strip, the window's
+          # ground (PLAT-68) — while the bridge below it stays the pane's own
+          # ground, so tab and panel still join into one shape.
+          for (key, value) in tabStyle(true, focusedHere):
+            if key == "background-color":
+              r.setAttribute(row, "data-ct-tab-ground", value)
+              r.setStyle(row, key, value)
+          r.setStyle(row, "rounded", $TabRadiusPx & "px")
+          r.setStyle(row, "border-bottom-left-radius", "0px")
+          r.setStyle(row, "border-bottom-right-radius", "0px")
         r.setStyle(row, "padding-left", $TabTitleInsetPx & "px")
         r.setStyle(row, "padding-right", $TabTitleInsetPx & "px")
         r.appendChild(tab, row)
