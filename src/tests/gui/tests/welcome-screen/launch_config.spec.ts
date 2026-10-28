@@ -150,8 +150,20 @@ test.describe("Launch Configuration Menu", () => {
       const rubyFibonacci = ctPage.locator(".menu-element-ruby-fibonacci");
       await expect(rubyFibonacci).toBeVisible();
 
-      const classes = await rubyFibonacci.locator("..").getAttribute("class");
-      expect(classes).toContain("menu-enabled");
+      // Enabled state belongs to the menu row, not its layout container.
+      await expect(rubyFibonacci).toHaveClass(/\bmenu-enabled\b/);
+      await rubyFibonacci.click();
+      // Ruby recordings name the interpreter (`ruby`) as their program.
+      // Require a real recording identity and the selected configuration's
+      // source file in the editor instead of mistaking it for an executable.
+      await expect.poll(() => ctPage.evaluate(() => {
+        const data = (window as any).data;
+        return data?.sessions?.map((session: any) =>
+          String(session.trace?.recordingId ?? "")).find(Boolean) ?? "";
+      }), { timeout: 60_000 }).toMatch(/^[0-9a-f-]{36}$/);
+      await expect(ctPage.locator(
+        "div[id^='editorComponent'][data-label$='fibonacci.rb']",
+      )).toBeVisible();
     });
   }
 });

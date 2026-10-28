@@ -720,14 +720,13 @@ test.describe("DeepReview GUI - main features", () => {
 
     // `main`'s first invocation runs on lines 1-4 and 10; the hunk shows 2-11,
     // so four of those five lines are on screen and get `line-flow-hit`.  The
-    // rest of the function's visible lines get `line-flow-skip`, because a
-    // dataset is a finished window.
-    await expect
-      .poll(async () => await lines.locator(".line-flow-hit").count(), {
-        timeout: 20_000,
-      })
-      .toBeGreaterThan(0);
-    expect(await lines.locator(".line-flow-skip").count()).toBeGreaterThan(0);
+    // remaining lines carry no branch evidence in this dataset. The standard
+    // flow rule leaves them undimmed: a missing step does not prove an untaken
+    // branch. The headless adapter test pins these same four hits.
+    await expect(lines.locator(".view-line:has(.line-flow-hit)")).toHaveCount(4, {
+      timeout: 20_000,
+    });
+    await expect(lines.locator(".line-flow-skip")).toHaveCount(0);
 
     // §4.4: "Inline variable values MUST NOT be rendered as text comments."
     // The deleted panel drew `  // x = 10, y = 20` as an after-content
@@ -2109,9 +2108,13 @@ test.describe("DeepReview GUI - main features", () => {
     // Two lines remain, so a second press takes those two rather than
     // re-revealing the first ten.
     await DeepReviewPage.expandAboveHandle(tab).click();
-    const afterSecond = await DeepReviewPage.diffNewLineNumbers(tab);
-    expect(afterSecond).toContain("24");
-    expect(afterSecond).toContain("25");
+    // Revealing the final lines changes the document's visible regions, not
+    // the viewport. Scroll to read them: Monaco virtualizes the gutter, and
+    // line 25 is just below the initial viewport at this window size.
+    await DeepReviewPage.scrollDiff(ctPage, tab, 2000);
+    await expect
+      .poll(async () => await DeepReviewPage.diffNewLineNumbers(tab))
+      .toEqual(expect.arrayContaining(["24", "25"]));
 
     // The region is exhausted, so the boundary goes: a reader cannot press
     // something that can no longer act.
@@ -2197,6 +2200,9 @@ test.describe("DeepReview GUI - main features", () => {
     // so the file's last line reaches the gutter and the boundary retires.
     await dr.expansionMenuItems().last().click();
     await expect(dr.expansionMenu()).toHaveCount(0);
+    // The menu reveals the region without scrolling the editor. Bring its
+    // far end into the viewport before asking the virtualized gutter for it.
+    await DeepReviewPage.scrollDiff(ctPage, tab, 2000);
     await expect
       .poll(async () => await DeepReviewPage.diffNewLineNumbers(tab), {
         timeout: 15_000,
