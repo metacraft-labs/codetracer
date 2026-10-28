@@ -252,7 +252,11 @@ done
 #   - `dev-shell-hygiene` (`2fc6c5764`): ./.github/actions/setup-nix;
 #   - `ct-test-certificates` (`3aed1d7cd`): ./.github/actions/setup-nix;
 #   - `wasm-recordings` (`76a99d802`): setup-dev-env.
-readonly EXPECTED_NIX_JOBS=39
+#
+# 39 -> 40: sibling-cargo-locks.yml's `sibling-cargo-locks` job (the sibling
+# Cargo.lock guard on every branch changes land on, `agents` included). It
+# provisions Nix through setup-dev-env, env-flavor nix, before its first `nix`.
+readonly EXPECTED_NIX_JOBS=40
 
 if [ "${#nix_jobs[@]}" -eq "$EXPECTED_NIX_JOBS" ]; then
 	ok "the scanner still classifies the nix-using jobs (${#nix_jobs[@]})"
