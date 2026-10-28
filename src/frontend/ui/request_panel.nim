@@ -6,27 +6,27 @@
 ## The legacy Karax ``method render`` was dropped in favour of an IsoNim
 ## view (``viewmodel/views/isonim_request_panel_view.nim``) that mounts
 ## directly into the GoldenLayout container.  The legacy
-## ``RequestPanelComponent`` retains its event-bus-carrier methods: its
-## ``register`` subscribes to ``CtUpdatedHttpRequests`` (RS-M3) and feeds
-## the delta into the shared ``ReplayDataStore``; every state mutation
-## also mirrors into the parallel ``RequestPanelVM`` so the IsoNim view is
-## the single source of truth for the panel's DOM.
+## ``RequestPanelComponent`` keeps its lifecycle methods; the deltas reach
+## the shared ``ReplayDataStore`` through the session's own backend event
+## handlers, and the IsoNim view over the session's ``RequestPanelVM`` is the
+## single source of truth for the panel's DOM.
 ##
 ## Live tail (RS-M3):
 ## - ``startRequestSpanPolling`` ticks ``ct/load-request-spans-since`` with
 ##   the store's opaque cursor.
 ## - The backend answers with a delta AND emits ``ct/updated-http-requests``
-##   carrying the same body; ``middleware.nim`` forwards that onto the views
-##   mediator, where ``register``'s subscription picks it up.
+##   carrying the same body; the store's ``installBackendEventHandlers``
+##   subscription consumes it.
 ## - ``ReplayDataStore.applyRequestSpanDelta`` merges the delta keyed on span
 ##   id; the VM mirrors the merged list and the view repaints.
 ##
 ## Visibility (RS-M4):
 ## - The panel is registered as a bottom-edge auto-hide panel, so by default
-##   it is a collapsed strip tab.  ``noteRequestSpanDelta`` /
-##   ``autoRevealRequestPanel`` dock it the first time a delta carries request
-##   rows, so ``ct replay`` on a recorded server opens with the panel showing
-##   instead of leaving the user to find it.  Once per renderer only — after
+##   it is a collapsed strip tab.  An effect on the store's request rows
+##   (``initRequestPanelVMFromSession``) and ``autoRevealRequestPanel`` dock
+##   it the first time the recording's requests arrive, so ``ct replay`` on
+##   a recorded server opens with the panel showing instead of leaving the
+##   user to find it.  Once per renderer only — after
 ##   that, visibility belongs to the user.
 ##
 ## Lifecycle:
@@ -225,30 +225,6 @@ proc syncLegacyRequestPanelIntoVM*(self: RequestPanelComponent) =
 # RS-M3 — live span tail
 # ---------------------------------------------------------------------------
 
-when defined(js):
-  proc stringifyDeltaJs(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
-
-  proc requestSpanDeltaToJson(raw: JsObject): JsonNode =
-    ## Convert the raw DAP event body to a stdlib ``JsonNode``.
-    ##
-    ## Nim's JS backend models ``JsonNode`` as a tagged object, so a plain
-    ## JavaScript value cannot be cast to one — it has to go through a
-    ## stringify/parse round trip (the same conversion
-    ## ``viewmodel/backend/real_backend.nim`` performs).  A body that fails to
-    ## round-trip yields ``null``, which ``applyRequestSpanDelta`` ignores
-    ## rather than treating as an empty delta.
-    if raw.isNil:
-      return newJNull()
-    try:
-      parseJson($stringifyDeltaJs(raw))
-    except CatchableError:
-      cerror "requestSpanDeltaToJson: unparsable ct/updated-http-requests body"
-      newJNull()
-else:
-  proc requestSpanDeltaToJson(raw: JsObject): JsonNode =
-    ## Native builds have no DAP event source; the store is driven directly.
-    newJNull()
-
 proc openExternalRequestTrace*(tracePath: string; startGeid: int64) =
   ## RS-M3 — activate a row whose span carries an external binding.
   ##
@@ -354,42 +330,6 @@ proc tryRevealRequestPanel() {.gcsafe.} =
     discard setTimeout(proc() = tryRevealRequestPanel(), 250)
   else:
     requestPanelRevealPending = false
-
-proc noteRequestSpanDelta(body: JsonNode) =
-  ## Decide from one delta body whether the panel is worth surfacing.
-  ##
-  ## The signal is "this delta carried at least one request row", not
-  ## ``meta.dat`` bit 13 on its own.  Bit 13 only says a span STREAM exists:
-  ## an RS-M1b container carries ``span_type: "process"`` descriptors and sets
-  ## the same bit, and the backend filters those out of the delta (see
-  ## ``request_spans.rs`` — a delta holds only ``web-request`` records).  So a
-  ## non-empty delta is exactly "the recording served HTTP requests", which is
-  ## the condition the panel should appear for; bit 13 alone would pop an empty
-  ## table open on every multi-process native recording.
-  if requestPanelRevealSettled or body.isNil or body.kind != JObject:
-    return
-  let spans = body{"spans"}
-  if spans.isNil or spans.kind != JArray or spans.len == 0:
-    return
-  scheduleRequestPanelReveal()
-
-proc applyRequestSpanDeltaEvent*(raw: JsObject) =
-  ## Feed one ``ct/updated-http-requests`` body into the store that backs the
-  ## panel.
-  ##
-  ## The shared ``ReplayDataStore`` also consumes this event through its own
-  ## ``installBackendEventHandlers`` subscription (the RealBackendService
-  ## forwards every DAP-mapped kind).  Both paths land in
-  ## ``applyRequestSpanDelta``, which is idempotent — merging a delta keyed on
-  ## span id twice yields the same rows and the same cursor — so the overlap
-  ## costs a redundant merge and nothing else.
-  if requestPanelVMStore.isNil:
-    return
-  let body = requestSpanDeltaToJson(raw)
-  requestPanelVMStore.applyRequestSpanDelta(body)
-  # RS-M4 — the panel is hidden behind an edge strip by default; a recording
-  # that actually serves requests brings it on screen once.
-  noteRequestSpanDelta(body)
 
 proc pollRequestSpans*() =
   ## Ask the backend for spans committed since the stored cursor.

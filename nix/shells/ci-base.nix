@@ -64,6 +64,7 @@ let
   });
   pythonWithRecorder = pythonEnv.package.withPackages (ps: [
     ps.black
+    ps.pytest
     pythonRecorderPkg
   ]);
 
@@ -168,6 +169,14 @@ with pkgs;
     # test-non-gui and every build job used to declare `needs: lint-rust`,
     # that single missing binary silently skipped the entire test suite.
     direnv
+
+    # ssh-keygen makes the signing keys the ct-test certificate suites sign
+    # with (`certificate_issuance_test.generateSigningKey`). Undeclared, it
+    # came from the runner: a NixOS host's own binary passed, and a stock
+    # Ubuntu GARM slot's /usr/bin/ssh-keygen loaded this shell's OpenSSL
+    # through LD_LIBRARY_PATH and died on `GLIBC_2.38' not found`, so the
+    # lane's verdict was a property of which runner picked it up.
+    openssh
 
     # jq parses the `needs` payload in ci/verdict/required-jobs.sh. That
     # gate runs on a stock GitHub-hosted runner (where jq is preinstalled)
@@ -559,8 +568,13 @@ with pkgs;
     # process this shell starts — `cargo`, `node`, Electron, the recorders'
     # own loaders — and putting a GL / Vulkan / Wayland stack in front of all
     # of them to serve one lane is how an unrelated test starts resolving a
-    # different `libGL`. `ci/test/plat37-window-frame.sh` prepends this for
-    # the processes that need it, and nothing else does.
+    # different `libGL`. The processes that need it prepend it themselves: the
+    # window captures and probes under `ci/test/` (`plat37-window-frame.sh`,
+    # `plat38-keystroke.sh`, the `*-window.sh` scripts, through
+    # `ci/lib/gpui-window-capture.sh` too), the GPUI test suites for the
+    # `codetracer-gpui` they start (`src/frontend/gpui/tests/gpui_child_env.nim`),
+    # and the Nim test lanes whose suites load the shim in-process
+    # (`test_lane_run_library_path` in `ci/lib/test-lane-files.sh`).
     # LINUX ONLY, and the guard is not cosmetic: every package in this list
     # is a Linux graphics library. `pkgs.wayland`, `pkgs.mesa`,
     # `pkgs.libglvnd`, `pkgs.vulkan-loader` and the `xorg.*` set all declare
@@ -573,11 +587,9 @@ with pkgs;
     #
     # — which takes out every lane a macOS developer can run, not just the
     # GPUI ones: `just test-vm-native`, `just test-vm-js` and `just
-    # build-once` all start with `nix develop`. The variable itself is
-    # consumed only by `ci/test/plat37-window-frame.sh` and
-    # `ci/test/plat38-keystroke.sh`, both of which drive a real Wayland
-    # compositor and so cannot run on Darwin at all; leaving it unset there
-    # loses nothing.
+    # build-once` all start with `nix develop`. Every consumer
+    # named above treats it as optional, and the shim needs none of these
+    # libraries on Darwin, so leaving it unset there loses nothing.
     ${pkgs.lib.optionalString (!stdenv.isDarwin) ''
       export CODETRACER_GPUI_RUNTIME_LIB_PATH="${
         pkgs.lib.makeLibraryPath [

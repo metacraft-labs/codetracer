@@ -138,7 +138,7 @@ fn every_advertised_tool_is_dispatched() {
     // Population count: a silently empty list would make every assertion
     // below vacuous.
     assert!(
-        tools.len() >= 8,
+        tools.len() >= 13,
         "tools/list advertised only {} tools — the surface shrank unexpectedly: {listed}",
         tools.len()
     );

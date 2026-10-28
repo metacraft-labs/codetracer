@@ -34,6 +34,8 @@ when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
   from ./context_menu_bridge import showContextMenu
+  # Enter and Space on a `role="button"` line or caret are its click.
+  import ./isonim_activation
   from ../../context_menu_item import ContextMenuItem
   import kdom except Location
 
@@ -650,11 +652,16 @@ proc renderHistoryRow[R, N](r: R; row: proc(): VariableHistoryRowView;
   ## One value-history line: "<rrTicks>  <value>". PLAT-51: A NAVIGATION ROW
   ## (Variable-State-Pane.md: "a click moves the recording position to it on
   ## every front-end") — a click goes to the tick its value was recorded at.
+  ##
+  ## A control, so it announces itself and takes a tab stop; Enter or Space
+  ## on it is its click (`isonim_activation`).
   let jumpVM = vm
   let jumpRow = row
+  let jump = proc() = jumpVM.jumpToHistoryEntry(jumpRow().locationTicks)
   ui(r):
     tdiv(class = "ct-history-inline-row ct-flex",
-         onclick = proc() = jumpVM.jumpToHistoryEntry(jumpRow().locationTicks)):
+         role = "button", tabindex = "0",
+         onclick = jump):
       tdiv(class = "history-location ct-mr-4"):
         text $row().locationTicks
       tdiv(class = "history-value"):
@@ -824,8 +831,14 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
   show(r, expandSlot,
     proc(): bool = item().hasChildren,
     proc(): N =
+      # The caret expands or collapses the value's children: a toggle
+      # button with a tab stop (`isonim_activation`).
       ui(r):
-        span(class = "value-expand-button", onclick = onToggle):
+        span(class = "value-expand-button",
+             role = "button", tabindex = "0",
+             `aria-expanded` = (if item().isExpanded: "true" else: "false"),
+             `aria-label` = "Show or hide the value's parts",
+             onclick = onToggle):
           tdiv(class = caretClass(item)):
             discard)
   show(r, nameTypeSlot,

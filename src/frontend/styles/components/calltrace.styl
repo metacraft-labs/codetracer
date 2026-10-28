@@ -191,7 +191,9 @@
 
   .calltrace-row
   .call-name
-    cursor: pointer
+    // No hand on the whole call: only its text and its toggle answer a click
+    // (each a `role="button"`, `isonim_calltrace_view.renderCallLineRow`),
+    // and a pointer cursor is a promise that the element under it does.
     display: inline-flex
     //padding: 0.125em
     // font-size: 1em
@@ -207,6 +209,11 @@
     padding-left: 0.125em
     display: inline
     z-index: 2
+    cursor: pointer
+
+  .call-text:focus-visible, .toggle-call:focus-visible
+    outline: 1px solid colors-ui-border-focus
+    outline-offset: 1px
 
   .end-of-program-text
     color: CALLTRACE_END_OF_PROGRAM_TEXT

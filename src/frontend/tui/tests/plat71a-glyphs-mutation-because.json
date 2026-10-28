@@ -1,10 +1,17 @@
 {
   "A1": "offenders.len == 0",
+  "A10": "xb.fencedAfter(Woman & \"\u200d\")",
+  "A11": "xb.contains(\"cafe\u0301\")",
+  "A12": "drawn.startsWith(\"a_r\") and drawn.endsWith(\":120\") and drawn.contains(\"\u2026\") and",
+  "A13": "num.truncated and num.text == \"1e+11\"",
+  "A14": "ascii.contains(\"~\") and not ascii.contains(\"\u2026\") and ascii.endsWith(\":120\")",
+  "A15": "c.text.startsWith(\"src/\") and c.text.endsWith(\"/views/shell.nim\")",
   "A2": "screen.contains(\"\u2014\")",
   "A3": "text.contains(\"*\")",
   "A4": "leaks.len == 0",
   "A5": "leaks.len == 0",
   "A6": "cellWidthOf(\"e\u0301\") == 1",
   "A7": "g.runeAt(0, 0) == \"\u2026\" and g.runeAt(0, 1) == \"\" and g.runeAt(0, 2) == \"x\"",
-  "A8": "o.glyphTierOf(GlyphProfile(ambiguousWide: true)) == gtAmbiguousModern"
+  "A8": "o.glyphTierOf(GlyphProfile(ambiguousWide: true)) == gtAmbiguousModern",
+  "A9": "xb.fencedAfter(Woman & \"\u200d\")"
 }

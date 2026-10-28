@@ -206,8 +206,10 @@ suite "PLAT-45: the GPUI window and the shared default":
     let reports = reportLeaves(sharedDefaultLayout().tree, cap)
     # Four until PLAT-47 part B drew the VCS pane (from the desktop's VCSVM);
     # three until PLAT-52 drew the Terminal Output pane; two until PLAT-53
-    # drew Test Results (from the window's TestResultsVM).
-    ck reports.len == 1
+    # drew Test Results (from the window's TestResultsVM); one until PLAT-54
+    # drew Agent Activity (from its host's AgentActivityVM). Every pane of the
+    # shared default is now drawn.
+    ck reports.len == 0
     let text = planText(run.plan)
     for r in reports:
       var state = ""

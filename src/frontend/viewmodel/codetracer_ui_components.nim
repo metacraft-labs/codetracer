@@ -54,6 +54,11 @@ export isonim_state_view
 import views/isonim_event_log_view
 export isonim_event_log_view
 
+# A row's logical address and the link builder a host passes the Call Trace
+# and Event Log views (Shared-DOM-Front-Ends D10). Rendering-free.
+import store/row_address
+export row_address
+
 # The conversion a host makes from the pixels it measures on a mounted pane to
 # the `Viewport` its ViewModel is told (`pixelPaneViewport`). Rendering-free
 # arithmetic; exported here because measuring is the host's half of mounting.

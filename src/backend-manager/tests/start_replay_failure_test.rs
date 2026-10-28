@@ -234,10 +234,8 @@ async fn the_daemon_answers_a_start_whose_replay_exits_before_it_connects() {
     let (mut daemon, socket) = start_daemon(&root, &tmp).await;
     let mut stream = UnixStream::connect(&socket).await.unwrap();
     // `false(1)`: POSIX, on every host, and it exits 1 without connecting.
-    let exits_at_once = ["/usr/bin/false", "/bin/false"]
-        .into_iter()
-        .find(|candidate| Path::new(candidate).is_file())
-        .expect("false(1) at /usr/bin/false or /bin/false");
+    let false_utility = false_utility();
+    let exits_at_once = false_utility.to_str().expect("a UTF-8 path to false(1)");
 
     stream
         .write_all(&frame(&start_replay_request(5, exits_at_once)))
@@ -304,4 +302,28 @@ async fn the_single_client_session_manager_answers_a_start_whose_replay_command_
 
     let _ = manager.start_kill();
     let _ = manager.wait().await;
+}
+
+/// The `false(1)` utility, found as a shell finds it: the first executable
+/// `false` in the absolute directories of `PATH`, then `/usr/bin/false` and
+/// `/bin/false`. POSIX specifies the utility, not where it is installed:
+/// NixOS has neither of those two paths and puts `false` on `PATH` from the
+/// Nix store, so a fixed list of paths made this test unrunnable there.
+fn false_utility() -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let on_path = std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
+        .unwrap_or_default();
+    on_path
+        .into_iter()
+        // A relative entry would be resolved against the working directory.
+        .filter(|dir| dir.is_absolute())
+        .map(|dir| dir.join("false"))
+        .chain([PathBuf::from("/usr/bin/false"), PathBuf::from("/bin/false")])
+        .find(|candidate| {
+            fs::metadata(candidate)
+                .map(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+                .unwrap_or(false)
+        })
+        .expect("false(1): no executable `false` on PATH, at /usr/bin/false or at /bin/false")
 }

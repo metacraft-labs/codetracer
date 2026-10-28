@@ -1,5 +1,9 @@
 {
   "_comment": [
+    "PLATFORM PINS: gpuiEditorRows is the non-Darwin default (Monaco 22 px at 16 px font).",
+    "gpuiEditorRowsDarwin overrides it on Darwin only (Monaco 24 px); absent, the default applies.",
+    "The same content-height arithmetic gives 41 rows wide and 34 laptop on Darwin.",
+    "Each platform pins one exact answer; platform differences are not tolerance sets.",
     "PLAT-35 — THE PINNED CORPUS. WHAT MAKES A SHIFTED CORPUS REDDEN.",
     "",
     "WHY THIS FILE EXISTS, MEASURED RATHER THAN ASSUMED.",
@@ -88,6 +92,9 @@
       "gpuiEditorRows": [
         "rows=45;first=1;last=45"
       ],
+      "gpuiEditorRowsDarwin": [
+        "rows=41;first=1;last=41"
+      ],
       "electronEditorRows": [
         "rows=45;first=1;last=45"
       ]
@@ -103,6 +110,9 @@
       "_whyGpuiEditorRows": "PLAT-47 part B review (2026-09-30): the GPUI editor's fetch window holds the rows its PANE shows at the window's row pitch (26 px; `window_geometry.editorRowsOf`), not the window's height over a nominal 20 px — which held more rows than the pane showed and squeezed every row, clipping descenders. Fewer rows, so a stop past them is centred (source_vm.topCentringIfOutside). 2026-10-17 (the GPUI redesign): the editor's row pitch is the desktop's Monaco `lineHeight`, 22 px (`window_geometry.GpuiEditorRowPx`, 26 px until then), the editor draws nothing above its rows and counts a partly visible last row as Monaco does, so the same pane shows more rows (33 -> 43 at 1920x1080, 26 -> 35 at 1440x900) and the centred window moves accordingly. The stop is unchanged. RE-PINNED AGAIN 2026-10-17, the same day: the arm now opens the shared default (the editor is the full-height 25% column, not 60% x 90% under a debug-controls row) and derives its geometry as `runOpen` does — with the top bar's band (`GpuiTopBandPx`) and the source service's `visibleRows` / `fullRows` — so the rows are the shipped window's: 45 at 1920x1080 and 37 at 1440x900, within a row of Monaco's.",
       "gpuiEditorRows": [
         "rows=45;first=22;last=66"
+      ],
+      "gpuiEditorRowsDarwin": [
+        "rows=41;first=24;last=64"
       ],
       "electronEditorRows": [
         "rows=46;first=21;last=66"
@@ -120,6 +130,9 @@
       "gpuiEditorRows": [
         "rows=37;first=38;last=74"
       ],
+      "gpuiEditorRowsDarwin": [
+        "rows=34;first=40;last=73"
+      ],
       "electronEditorRows": [
         "rows=38;first=37;last=74"
       ]
@@ -135,6 +148,9 @@
       "_whyGpuiEditorRows": "PLAT-47 part B review (2026-09-30): the GPUI editor's fetch window holds the rows its PANE shows at the window's row pitch (26 px; `window_geometry.editorRowsOf`), not the window's height over a nominal 20 px — which held more rows than the pane showed and squeezed every row, clipping descenders. Fewer rows, so a stop past them is centred (source_vm.topCentringIfOutside). PLAT-49 part A (2026-10-01): the window draws no heading inside a pane any more and every pane box has a tab strip (30 px) outside its body, so the editor body is 4 px shorter than it was with the 26 px heading row inside it; at the 26 px row pitch the editor at this viewport shows one row fewer (27 -> 26), and the centred window moves by one line. The stop is unchanged. 2026-10-17 (the GPUI redesign): the editor's row pitch is the desktop's Monaco `lineHeight`, 22 px (`window_geometry.GpuiEditorRowPx`, 26 px until then), the editor draws nothing above its rows and counts a partly visible last row as Monaco does, so the same pane shows more rows (33 -> 43 at 1920x1080, 26 -> 35 at 1440x900) and the centred window moves accordingly. The stop is unchanged. RE-PINNED AGAIN 2026-10-17, the same day: the arm now opens the shared default (the editor is the full-height 25% column, not 60% x 90% under a debug-controls row) and derives its geometry as `runOpen` does — with the top bar's band (`GpuiTopBandPx`) and the source service's `visibleRows` / `fullRows` — so the rows are the shipped window's: 45 at 1920x1080 and 37 at 1440x900, within a row of Monaco's.",
       "gpuiEditorRows": [
         "rows=37;first=80;last=116"
+      ],
+      "gpuiEditorRowsDarwin": [
+        "rows=34;first=83;last=116"
       ],
       "electronEditorRows": [
         "rows=36;first=82;last=117",
@@ -155,6 +171,9 @@
       "gpuiEditorRows": [
         "rows=45;first=72;last=116"
       ],
+      "gpuiEditorRowsDarwin": [
+        "rows=41;first=76;last=116"
+      ],
       "electronEditorRows": [
         "rows=45;first=73;last=117",
         "rows=44;first=74;last=117",
@@ -174,6 +193,9 @@
       "_whyGpuiEditorRows": "PLAT-47 part B review (2026-09-30): the GPUI editor's fetch window holds the rows its PANE shows at the window's row pitch (26 px; `window_geometry.editorRowsOf`), not the window's height over a nominal 20 px — which held more rows than the pane showed and squeezed every row, clipping descenders. Fewer rows, so a stop past them is centred (source_vm.topCentringIfOutside). PLAT-49 part A (2026-10-01): the window draws no heading inside a pane any more and every pane box has a tab strip (30 px) outside its body, so the editor body is 4 px shorter than it was with the 26 px heading row inside it; at the 26 px row pitch the editor at this viewport shows one row fewer (27 -> 26), and the centred window moves by one line. The stop is unchanged. 2026-10-17 (the GPUI redesign): the editor's row pitch is the desktop's Monaco `lineHeight`, 22 px (`window_geometry.GpuiEditorRowPx`, 26 px until then), the editor draws nothing above its rows and counts a partly visible last row as Monaco does, so the same pane shows more rows (33 -> 43 at 1920x1080, 26 -> 35 at 1440x900) and the centred window moves accordingly. The stop is unchanged. RE-PINNED AGAIN 2026-10-17, the same day: the arm now opens the shared default (the editor is the full-height 25% column, not 60% x 90% under a debug-controls row) and derives its geometry as `runOpen` does — with the top bar's band (`GpuiTopBandPx`) and the source service's `visibleRows` / `fullRows` — so the rows are the shipped window's: 45 at 1920x1080 and 37 at 1440x900, within a row of Monaco's.",
       "gpuiEditorRows": [
         "rows=37;first=26;last=62"
+      ],
+      "gpuiEditorRowsDarwin": [
+        "rows=34;first=28;last=61"
       ],
       "electronEditorRows": [
         "rows=38;first=25;last=62"

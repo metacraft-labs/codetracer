@@ -116,6 +116,16 @@
 #   sibling-pins.sh                      -> `name=rev` lines, one per sibling
 #   sibling-pins.sh --github-output      -> the same, as a `pins` step output
 #   sibling-pins.sh --verify <dir>       -> assert <dir>/<name> is AT its pin
+#   sibling-pins.sh --all                -> `name=rev` lines for the build
+#                                           siblings AND for every other flake
+#                                           input the workflows name by commit
+#                                           (WORKFLOW_PINNED_SIBLINGS below)
+#
+# `--all` is the refresh source for hand-written `<name>=<sha>` entries in the
+# workflows' `siblings:` blocks. It is deliberately NOT accepted by
+# `--github-output` or `--verify`: those two feed and check the deploy lane's
+# clone set, which is the build siblings only, and widening them would make
+# that lane clone (and require) repositories its bundle does not read.
 #
 # `--verify` is the half that is not circular. Resolving a pin out of
 # `flake.lock` and then comparing it to `flake.lock` proves nothing; comparing
@@ -143,6 +153,28 @@ SIBLINGS=(
 	codetracer-trace-format
 	codetracer-trace-format-nim
 )
+
+# Flake inputs that workflow `siblings:` blocks ALSO name by commit, but that
+# are not build inputs of the browser-replay bundle, so the deploy lane neither
+# clones nor verifies them. They are resolved only under `--all`.
+#
+# Together with SIBLINGS this is exactly the set
+# ci/test/sibling-provisioning-test.sh checks (its FLAKE_PINNED_SIBLINGS): the
+# workflows carry hand-copied `<name>=<sha>` entries for each of these
+# (codetracer.yml, launcher-recorder-e2e.yml, mcr-dap-flow.yml, ...), and every
+# one must equal flake.lock's locked.rev for that input. Before they were
+# listed, nothing in this repo printed the lines those entries should carry, so
+# refreshing them meant reading flake.lock by hand. Keep the two lists equal.
+WORKFLOW_PINNED_SIBLINGS=(
+	codetracer-native-backend
+	codetracer-visual-replay
+	io-mon
+)
+
+# The set the current mode resolves. Every check below quantifies over this,
+# never over SIBLINGS directly, so `--all` gets the same vacuity, 40-hex and
+# count guards as the default set.
+WANTED=("${SIBLINGS[@]}")
 
 die() {
 	printf 'sibling-pins: %s\n' "$1" >&2
@@ -205,7 +237,7 @@ for name in wanted:
         print("MISSING %s no-40-hex-rev(%r)" % (name, rev))
         continue
     print("PIN %s %s" % (name, rev))
-' "$LOCK" "${SIBLINGS[@]}" 2>&1)"
+' "$LOCK" "${WANTED[@]}" 2>&1)"
 	rc=$?
 	[ "$rc" -eq 0 ] || die "could not run python3 over '$LOCK' (exit $rc). This is a
   parse/tooling failure, NOT a statement about any pin — do not read it as
@@ -251,8 +283,9 @@ collect() {
 		die "flake.lock does not pin every declared build sibling to a commit:$problems
 
   Each of these must be a root input of flake.nix carrying a 40-hex locked.rev.
-  If a sibling was renamed or dropped from flake.nix, update SIBLINGS in this
-  script to match — do not leave the two disagreeing, because the clone step
+  If a sibling was renamed or dropped from flake.nix, update SIBLINGS (or
+  WORKFLOW_PINNED_SIBLINGS) in this script to match — do not leave the two
+  disagreeing, because the clone step
   would then silently fall back to a branch tip for the one that vanished."
 	fi
 
@@ -264,8 +297,8 @@ collect() {
 		die "resolved 0 sibling pins. Refusing to report success over an empty set:
   a build with no pins is not a pinned build, it is an unchecked one."
 	fi
-	if [ "${#PIN_NAMES[@]}" -ne "${#SIBLINGS[@]}" ]; then
-		die "resolved ${#PIN_NAMES[@]} pin(s) but ${#SIBLINGS[@]} sibling(s) are declared."
+	if [ "${#PIN_NAMES[@]}" -ne "${#WANTED[@]}" ]; then
+		die "resolved ${#PIN_NAMES[@]} pin(s) but ${#WANTED[@]} sibling(s) are declared."
 	fi
 }
 
@@ -336,9 +369,9 @@ verify() {
 		printf 'RESULT: FAILED — verified 0 siblings; the check asserted nothing at all.\n' >&2
 		exit 1
 	fi
-	if [ "$checked" -ne "${#SIBLINGS[@]}" ]; then
+	if [ "$checked" -ne "${#WANTED[@]}" ]; then
 		printf 'RESULT: FAILED — verified %d sibling(s), but %d are declared.\n' \
-			"$checked" "${#SIBLINGS[@]}" >&2
+			"$checked" "${#WANTED[@]}" >&2
 		exit 1
 	fi
 	if [ "$failed" -ne 0 ]; then
@@ -361,6 +394,7 @@ verify() {
 
 MODE=lines
 VERIFY_DIR=""
+ALL=0
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--github-output)
@@ -376,19 +410,35 @@ while [ $# -gt 0 ]; do
 		MODE=list
 		shift
 		;;
+	--all)
+		ALL=1
+		shift
+		;;
 	-h | --help)
 		sed -n '2,90p' "${BASH_SOURCE[0]}"
 		exit 0
 		;;
 	*)
-		die "unknown argument '$1'. Usage: sibling-pins.sh [--github-output | --verify <dir> | --list]"
+		die "unknown argument '$1'. Usage: sibling-pins.sh [--github-output | --verify <dir> | --list] [--all]"
 		;;
 	esac
 done
 
+if [ "$ALL" -eq 1 ]; then
+	case "$MODE" in
+	github | verify)
+		die "--all widens the set to flake inputs the deploy lane does not clone, so it
+  is refused with --github-output and --verify: those feed and check that lane's
+  clone set, which is the ${#SIBLINGS[@]} build siblings only. Use --all on its own (or
+  with --list) to print the lines the workflows' hand-written sibling pins carry."
+		;;
+	esac
+	WANTED+=("${WORKFLOW_PINNED_SIBLINGS[@]}")
+fi
+
 case "$MODE" in
 list)
-	printf '%s\n' "${SIBLINGS[@]}"
+	printf '%s\n' "${WANTED[@]}"
 	;;
 verify)
 	verify "$VERIFY_DIR"

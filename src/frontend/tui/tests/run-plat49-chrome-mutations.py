@@ -705,9 +705,12 @@ ARMS = [
         "  of csIndent, csCallee, csIndex: CellStyle(role: srChromeText, bold: false)\n",
         S2_ROLES,
         "the call the debugger is in is not marked"),
+    # CT7 RE-AIMED 2026-10-24: PLAT-70 Part I (`44f8cfba8`) draws the rows
+    # from the view's `leftCol`, so the toggle's cell is counted from
+    # `origin`, not `area.col`.
     Arm("CT7", CALLVIEW,
-        "  let toggleCol = area.col + call.depth * CallRowIndentCells\n",
-        "  let toggleCol = area.col + call.depth * CallRowIndentCells + 1\n",
+        "  let toggleCol = origin + call.depth * CallRowIndentCells\n",
+        "  let toggleCol = origin + call.depth * CallRowIndentCells + 1\n",
         S2_HIT,
         "a press on the toggle is read one cell to the left of it"),
     Arm("CT8", RUNTIME,
@@ -769,16 +772,20 @@ ARMS = [
         "  if col in c.hidden:\n",
         V2_COLHIDE,
         "the last visible column can be hidden"),
+    # EL4 RE-AIMED 2026-10-24: `44f8cfba8` moved the layout decisions into
+    # one geometry record; the header is its `header` field.
     Arm("EL4", EVLOGVIEW,
-        "  let header = area.height > 2\n",
-        "  let header = false\n",
+        "  result.header = area.height > 2\n",
+        "  result.header = false\n",
         S2_LOGHEAD,
         "the terminal's event log draws no column header"),
     # EL5 RE-AIMED 2026-10-21 (PLAT-70 Part B): the rows and the header are
     # laid out by ONE table, `columnCellsOf`; hidden columns enter there.
+    # RE-AIMED AGAIN 2026-10-24: `44f8cfba8` lays the cells out from one
+    # `TableFit`, so the loop under `shown` walks the fit, not `at`.
     Arm("EL5", EVLOGVIEW,
-        "  let shown = model.columns.visibleColumns\n  var at = startCol\n",
-        "  let shown = model.columns.order\n  var at = startCol\n",
+        "  let shown = model.columns.visibleColumns\n  for k, col in shown:\n",
+        "  let shown = model.columns.order\n  for k, col in shown:\n",
         S2_LOGHEAD,
         "the terminal's rows draw every column, hidden ones included"),
     Arm("EL6", RUNTIME,
@@ -1084,9 +1091,11 @@ ARMS = [
         "the wrapped root keeps three shares to the newcomer's one"),
 
     # --- review: the current call on its ground ------------------------------
+    # CG1 RE-AIMED 2026-10-24: `44f8cfba8` paints each row into its own
+    # one-row table grid before it is placed, so the ground is painted there.
     Arm("CG1", CALLVIEW,
-        "    if isCurrent:\n      g.paint(y, area.col, spaces(rowWidth), CurrentRowFill)\n",
-        "    if false:\n      g.paint(y, area.col, spaces(rowWidth), CurrentRowFill)\n",
+        "    if isCurrent:\n      table.paint(0, 0, spaces(tableW), CurrentRowFill)\n",
+        "    if false:\n      table.paint(0, 0, spaces(tableW), CurrentRowFill)\n",
         S2_ROLES,
         "the call the debugger is in is on the pane's own ground"),
     Arm("CG2", ROLES,

@@ -166,20 +166,26 @@ proc paint*(g: var StyledGrid; row, col: int; text: string;
   if row < 0 or row >= g.height:
     return
   var c = col
+  var last = -1
+    ## The grid index of the cell this call wrote last.
   for r in runes(text):
-    if c >= g.width:
-      break
     let w = cellsOfRune(r, g.ambiguous)
     if w == 0:
-      # A combining mark, a joiner, a control: no cell of its own — the
-      # compositor draws none for it either (`isonim_tui.compositor`), so
-      # counting it would shift every cell after it.
+      # A combining mark, a joiner, a variation selector: no cell of its own
+      # — it goes WITH THE CELL BEFORE IT, as the compositor carries it
+      # (`isonim_tui` `Cell.extra`), so the glyph the text holds is drawn.
+      # Counting it would shift every cell after it.
+      if last >= 0 and isClusterContinuation(r):
+        g.cells[last].rune.add $r
       continue
+    if c >= g.width:
+      break
     if c >= 0:
       let i = row * g.width + c
       var s = style
       if s.surface == srNone: s.surface = g.cells[i].style.surface
       g.cells[i] = StyledCell(rune: $r, style: s)
+      last = i
       if w == 2 and c + 1 < g.width:
         var s2 = style
         if s2.surface == srNone: s2.surface = g.cells[i + 1].style.surface

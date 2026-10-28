@@ -52,19 +52,16 @@ import gpui/app/pane_names   # `desktopTabTitle`
 import styles/generated/design_tokens
 
 var CHECKS = 0
+var expectedNoHeadingChecks = 0
 template ck(cond: untyped) =
   inc CHECKS
   check(cond)
 
 const
-  ExpectedAssertions = 212
-    ## PLAT-51: 186 -> 183, measured — the View menu lost its Timeline entry
-    ## (the per-entry sweep), and the omnibox's ground became the editor's.
-    ## 184 -> 212 (2026-10-17, the desktop-parity redesign), measured: the
-    ## no-heading sweep visits every `data-ct-text-role` node, and the editor
-    ## now shows 45 rows of 22 px (a number and a code cell each) plus its
-    ## inline value chips — 95 nodes at 1920x1080; the Edit window's label
-    ## case asserts the root file's label once more.
+  FixedAssertions = 120
+    ## The old 212 included 95 per-text-node assertions at Linux's 22 px
+    ## pitch. Keep the 117 fixed checks, plus three population checks below;
+    ## the no-heading sweep is counted separately from the plan it inspects.
   CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1920
@@ -215,8 +212,45 @@ suite "PLAT-49: the GPUI window's chrome, as drawn":
     ck clicked.item("Continue").rectOf.x == cont.rectOf.x
 
   test "no heading in any pane; every pane box has a strip naming it":
-    let plan = windowPlan("")
-    for n in plan.nodesWith("data-ct-text-role"):
+    var geometry: JsonNode
+    let plan = windowPlan("", geometry)
+    let rows = plan.nodesWith("data-ct-row")
+    var editorBodyHeight = 0
+    for n in geometry["nodes"]:
+      if n{"kind"}.getStr == "tabs" and "editor" in n["panes"].to(seq[string]):
+        editorBodyHeight = n["body"][3].getInt
+    # Population checks are independent of the text-role sweep: an empty
+    # editor or a fetch window with the wrong row count must still fail.
+    ck editorBodyHeight > 0
+    ck rows.len == max(1, (editorBodyHeight - EditorPadTopPx -
+                          EditorLinesAbovePx + GpuiEditorRowPx - 1) div
+                          GpuiEditorRowPx)
+    let textRoles = plan.nodesWith("data-ct-text-role")
+    var rowRolesValid = true
+    for row in rows:
+      # Structured values belong to the source row, independently of the
+      # role metadata inspected below. Each nonempty annotation adds one
+      # value-text container, whether it holds one chip or several.
+      let hasValues = row.attr("data-ct-values").len > 0
+      var numbers, codes, values = 0
+      let roles = row.nodesWith("data-ct-text-role")
+      for n in roles:
+        case n.attr("data-ct-text-role")
+        of "gutter-line-number": inc numbers
+        of "editor-code": inc codes
+        of "value-text": inc values
+        else: discard
+      let annotations = row.nodesWith("data-ct-inline-values")
+      let expectedValues = if hasValues: 1 else: 0
+      if numbers != 1 or codes != 1 or values != expectedValues or
+          annotations.len != expectedValues or roles.len != 2 + expectedValues:
+        checkpoint("row " & row.attr("data-ct-row") &
+                   ": expected one number, one code and " & $expectedValues &
+                   " value container; found " & $roles)
+        rowRolesValid = false
+      expectedNoHeadingChecks += 2 + expectedValues
+    ck rowRolesValid and textRoles.len == expectedNoHeadingChecks
+    for n in textRoles:
       ck n.attr("data-ct-text-role") != "pane-title"
     let strips = plan.nodesWith("data-ct-tabs")
     ck strips.len >= 5
@@ -405,4 +439,5 @@ suite "PLAT-49: the GPUI window's chrome, as drawn":
 suite "PLAT-49 GPUI plan: assertion count":
   test "every assertion ran":
     echo "CHECKS: " & $CHECKS
-    check CHECKS == ExpectedAssertions
+    check expectedNoHeadingChecks > 0
+    check CHECKS == FixedAssertions + expectedNoHeadingChecks

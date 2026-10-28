@@ -946,10 +946,11 @@ test-rust:
   # tests in those two crates are anchored to. A dark anchor is not an
   # anchor. (ci/test/rust-test-crate-coverage.sh is the gate that says so.)
   ( cd libs/ct-data-breakpoints && cargo nextest run --release )
-  # `libs/ct-open-beneath` is the symlink-refusing open both read sides
-  # (src/db-backend, src/backend-manager) apply to a recording's own files.
-  # It is a plain path dependency of both, so the same reasoning holds: run
-  # its tests here or nothing does.
+  # `libs/ct-open-beneath` is the one rule both read sides (backend-manager's
+  # MCP `read_source_file`, db-backend's reads of a recording's source copies)
+  # open recorded paths through, without following a symlink below the base.
+  # It is a path dependency of both, so for the reason above its tests --
+  # the checks on that confinement -- run only here.
   ( cd libs/ct-open-beneath && cargo test )
   pushd src/db-backend
   # Unit tests (inside the binary)
@@ -1075,6 +1076,19 @@ test-ct-print:
   set -e
   ./tests/test_ct_print.sh
 
+# Run the complete API directory, so newly added pytest files join the gate.
+test-python-api:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  source ci/lib/codetracer-home.sh
+  ct_export_scratch_codetracer_home python-api
+  trap 'rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
+  cd python-api
+  python3 -m pytest -q tests
+
+test-python-api-gate:
+  bash ci/test/python-api-gate-test.sh
+
 # Run all non-GUI tests.
 # test-frontend-js needs npm-installed jsdom (available after tup build, not in bare nix shell).
 # test-python-recorder needs a built ct binary.
@@ -1131,6 +1145,8 @@ test:
     test-flake-lock-node-dates \
     test-npm-install-yarn-lock \
     test-python-version-alignment \
+    test-python-api-gate \
+    test-python-api \
     test-sibling-backend-path \
     test-agent-api-contract \
     test-rust \
@@ -4949,6 +4965,37 @@ test-noir-studio-signed-out:
   CT_RENDERER_WEB_BUNDLE="${cache}/nsso-renderer/ui.js" \
     bash ci/test/noir-studio-signed-out-test.sh
 
+# WD7's construction half of Hosted-Session-Allocation.md §5's
+# `test_noir_studio_allocates_nothing`: the Noir Studio bundle carries no
+# allocation call, measured in the built bundle against a PLANTED arm that the
+# same scanner sees.
+#
+# ITS OWN RECIPE rather than a line in the one above, because it builds the loop
+# arm TWICE — once as committed and once with the allocation client imported —
+# and the second build is the positive control rather than a repetition. Folding
+# it in would make the recipe above's single build serve two purposes and lose
+# the arm.
+#
+# It is NOT `test_noir_studio_allocates_nothing` itself: that assertion is the
+# substrate seeing no request, which needs a running substrate to observe.
+test-wd7-loop-arm-allocates-nothing:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-wd7-loop-arm-allocates-nothing.log) 2>&1
+  bash ci/test/wd7-loop-arm-allocates-nothing.sh
+
+# WD7's mutation proof for the allocation call: eight arms, each planting the
+# defect that would satisfy a weaker version of one of
+# `Hosted-Session-Allocation.md` §3.2's prohibitions, each naming in advance the
+# `test_session_allocation.nim` case that must redden.
+test-wd7-session-allocation-mutations:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-wd7-session-allocation-mutations.log) 2>&1
+  python3 -u src/frontend/viewmodel/tests/unit/run-wd7-session-allocation-mutations.py
+
 # The docs/book-isonim SSG suites.
 #
 # THE EXPLICIT ANSWER to "are these CI or hand-run?": CI, via this recipe, when
@@ -5495,6 +5542,14 @@ plat48-capture-electron *args:
 plat49-capture-electron *args:
   bash scripts/plat49-capture-electron.sh "$@"
 
+# PLAT-54: the desktop's Agent Activity pane over the AA suites' replayed agent
+# sessions — every evidence card and the `ct test` run card, word for word —
+# written to `src/tests/visual/answers/plat54-agent-activity.electron.json`,
+# which the terminal's Agent Activity suite asserts its feed against.
+[positional-arguments]
+plat54-capture-electron *args:
+  bash scripts/plat54-capture-electron.sh "$@"
+
 # The desktop's caption bar, strips, menu surface, right-click menus and click
 # behaviours, as the terminal's and GPUI's are measured against them —
 # written to `src/tests/visual/answers/plat50-desktop.electron.json`.
@@ -5518,6 +5573,15 @@ plat52-capture-electron *args:
 [positional-arguments]
 plat53-capture-electron *args:
   bash scripts/plat53-capture-electron.sh "$@"
+
+# PLAT-55: the desktop's Problems panel is the reference the terminal's and the
+# GPUI window's are measured against: its rows after a real `nargo compile` of
+# a crate with one warning and two errors in two files, its filters, and what
+# a right-click and a press on a row open — written to
+# `src/tests/visual/answers/plat55-problems.electron.json`.
+[positional-arguments]
+plat55-capture-electron *args:
+  bash scripts/plat55-capture-electron.sh "$@"
 
 # The §30a arm: the two answer producers are independent readers.
 plat35-answer-independence:

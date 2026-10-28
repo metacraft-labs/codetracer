@@ -141,7 +141,7 @@ proc writeAll*(fd: cint; s: string) =
     if n == 0: return
     off += n
 
-proc frameBytes*(buf: ScreenBuffer): string =
+proc frameBytes*(buf: ScreenBuffer; fences = WidthFences()): string =
   ## The exact byte stream one composited frame writes, in full.
   ##
   ## MOVED HERE FROM `testing/test_app_runtime.nim` by CTUI-11 and from
@@ -161,7 +161,7 @@ proc frameBytes*(buf: ScreenBuffer): string =
   ## tree waits on (`dual_snap.waitForCompleteFrame`), and `encodeAnsi`'s
   ## trailing reset is what leaves the terminal's SGR state at `default`.
   result = ClearScreenBytes
-  let raw = encodeAnsi(buf)
+  let raw = encodeAnsi(buf, fences)
   var row = 1
   var line = ""
   for ch in raw:
@@ -250,7 +250,8 @@ proc dirtyRuns*(prev, curr: ScreenBuffer;
     else:
       result.add DirtyRun(row: region.row, startCol: startCol, endCol: endCol)
 
-proc emitRuns*(buf: ScreenBuffer; runs: seq[DirtyRun]): string =
+proc emitRuns*(buf: ScreenBuffer; runs: seq[DirtyRun];
+               fences = WidthFences()): string =
   ## The bytes that turn a terminal already showing the previous frame into one
   ## showing `buf`.
   ##
@@ -278,10 +279,11 @@ proc emitRuns*(buf: ScreenBuffer; runs: seq[DirtyRun]): string =
       if trans.len > 0:
         result.add trans
         prevStyle = curr
-      if cell.rune.int32 == 0:
-        result.add ' '
-      else:
-        result.add unicode.toUTF8(cell.rune)
+      result.add cellText(cell)
+      # PLAT-71 (Terminal-Adaptation §6.5): a cell this terminal may draw at
+      # another width than counted — the next one is placed absolutely.
+      if cell.needsFence(fences) and c + int(cell.width) < run.endCol:
+        result.add fenceAfter(c, cell)
   result.add SgrResetBytes
 
 # ---------------------------------------------------------------------------
@@ -352,6 +354,18 @@ type
       ## waiting whether or not the application had anything to say.
     bytesEmitted*: int
 
+func widthFencesOf*(caps: TerminalCapabilities): WidthFences =
+  ## PLAT-71 (Terminal-Adaptation §6.5): the width questions this terminal
+  ## left unanswered — what the width probe did not measure (§4.3), unless
+  ## the user said (a flag or a setting, for the ambiguous policy).
+  let w = caps.widths
+  WidthFences(
+    ambiguousUnknown: w.ambiguous == apUnknown and
+                      caps.ambiguousFrom notin {csFlag, csSetting},
+    unicode13Unknown: w.unicode13 != knYes,
+    pictographsUnknown: w.pictoWide == knUnknown,
+    noClusters: w.clusters != knYes)
+
 proc newFrameEmitter*(caps: TerminalCapabilities; diffing = true;
                       joinGap = DefaultJoinGap): FrameEmitter =
   FrameEmitter(caps: caps, diffing: diffing, joinGap: joinGap,
@@ -376,13 +390,14 @@ proc emit*(e: FrameEmitter; buf: ScreenBuffer;
   ## than sending the rows.
   var body = ""
   var full = false
+  let fences = widthFencesOf(e.caps)
   if not e.diffing or not e.hasPrevious or
      e.previous.cols != buf.cols or e.previous.rowsCount != buf.rowsCount:
     full = true
   else:
     let runs = dirtyRuns(e.previous, buf, e.joinGap)
-    let diffBody = emitRuns(buf, runs)
-    let fullBody = frameBytes(buf)
+    let diffBody = emitRuns(buf, runs, fences)
+    let fullBody = frameBytes(buf, fences)
     if runs.len == 0:
       body = ""
       inc e.emptyFrames
@@ -393,7 +408,7 @@ proc emit*(e: FrameEmitter; buf: ScreenBuffer;
       body = fullBody
       full = true
   if full:
-    body = frameBytes(buf)
+    body = frameBytes(buf, fences)
     inc e.fullFrames
   # THE CURSOR PARK. A full frame reaches the bottom-right cell by writing it;
   # a diffed frame may not have touched the last row at all, and the frame

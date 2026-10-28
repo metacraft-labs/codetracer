@@ -57,6 +57,9 @@
 ##   handle the dynamic content).
 
 import std/[strutils, tables]
+when defined(js):
+  # Enter and Space on a `role="button"` row are its click.
+  import ./isonim_activation
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
@@ -585,7 +588,7 @@ proc renderFilesystemPanel*[R, N](r: R; vm: FilesystemVM): N =
         let rowLabelLocal = diffEntryLabel(diff)
         let pathLocal = diff.path
         let row = ui(r):
-          tdiv(class = rowClsLocal,
+          tdiv(role = "button", tabindex = "0", class = rowClsLocal,
                onclick = diffOpenHandler(vm, pathLocal)):
             text rowLabelLocal
         r.appendChild(diffContainer, row)

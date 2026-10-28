@@ -69,6 +69,12 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # shellcheck disable=SC1091 # resolved at runtime from $REPO_ROOT
 source "$REPO_ROOT/ci/lib/codetracer-home.sh"
 ct_export_scratch_codetracer_home cross-repo
+# Remove the home this run made, and only that (`ct_scratch_home_created` is
+# empty when an inherited scratch home was kept), however the run ends: the
+# helper's prescribed trap. Without it every run left its
+# `ct-home-cross-repo.*` behind in the temp directory.
+# shellcheck disable=SC2154 # set by ct_export_scratch_codetracer_home
+trap 'rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
 LOG_DIR="$REPO_ROOT/target/cross-test-logs"
 CLONE_DIR="$REPO_ROOT/target/rr-backend-clone"
 

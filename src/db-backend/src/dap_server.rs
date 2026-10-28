@@ -31,8 +31,8 @@ use crate::source_access::{HostSourceReads, SourceAccess};
 use crate::task;
 use crate::task::{
     Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadFlowArguments, CtLoadLocalsArguments,
-    FunctionLocation, GoToTicksArguments, LoadHistoryArg, LocalStepJump, Location, ProgramEvent, RunTracepointsArg,
-    SourceCallJumpTarget, SourceLocation, StepArg, TraceKind, TracepointId, UpdateTableArgs,
+    FunctionLocation, GoToTicksArguments, LoadHistoryArg, LoadStepLinesArg, LocalStepJump, Location, ProgramEvent,
+    RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg, TraceKind, TracepointId, UpdateTableArgs,
 };
 use crate::transport_endpoint::DapEndpoint;
 #[cfg(not(windows))]
@@ -376,7 +376,7 @@ where
 }
 
 /// A recording this build structurally cannot open, refused on the container
-/// version the reader found in it.
+/// version, or the `meta.dat` schema version, the reader found in it.
 ///
 /// **Why this is a type and not a formatted string.** `launch_failure_text`
 /// renders anything it cannot downcast with `{err:?}`, so a refusal boxed as a
@@ -519,6 +519,12 @@ fn setup(
 
     if let Some(ctfs_path) = ctfs_candidate {
         info!("detected CTFS container: {}", ctfs_path.display());
+        // A container this build reads whose `meta.dat` schema version it
+        // refuses is refused here, by name, for the same reason as the
+        // container-version probe above: the open below would fail, and its
+        // failure would be swallowed by the fall-through to the replay-worker
+        // path, which then tries a DB trace as an rr recording.
+        refuse_unreadable_meta_dat_version(&ctfs_path)?;
         match CTFSTraceReader::open(&ctfs_path) {
             Ok(ctfs_reader) => {
                 info!(
@@ -586,7 +592,10 @@ fn setup(
                 // here: `refuse_unreadable_ctfs_version` above has already
                 // returned it, structurally, off the header's six bytes. That
                 // is the right place for it — a header probe needs no reader,
-                // so it answers even for a container no reader will open.
+                // so it answers even for a container no reader will open. A
+                // `meta.dat` whose schema version this build refuses never
+                // reaches here either: `refuse_unreadable_meta_dat_version`
+                // returned it before the open.
                 info!(
                     "CTFS open as materialised trace failed for {}: {e} — trying replay-worker path",
                     ctfs_path.display()
@@ -1882,6 +1891,57 @@ fn refuse_unreadable_ctfs_version(path: &Path) -> Result<(), ContainerVersionRef
     }
 }
 
+/// Refuse, with the reader's own sentence, a DB-trace container whose
+/// `meta.dat` carries a schema version this backend does not read
+/// (`codetracer-trace-format-spec/internal-files.md` § "Version History":
+/// "Readers refuse every other version, naming it").
+///
+/// `refuse_unreadable_ctfs_version` answers off the CONTAINER header, so a
+/// container at a readable version passes it whatever its `meta.dat` says. A
+/// recorder linked against the previous trace writer produces exactly that:
+/// a version-5 container holding a version-6 `meta.dat`. `CTFSTraceReader::open`
+/// refuses it, but `setup` treats an open failure as "not a materialised
+/// trace" and falls through to the replay-worker path, which tried the DB
+/// trace as an rr recording and reported `worker start FAILED: … NotFound`
+/// — naming neither the version nor the remedy.
+///
+/// Only the version is refused here, and as the typed
+/// [`ContainerVersionRefusal`] so `launch_failure_text` delivers the sentence
+/// rather than its debug rendering: it is the one open failure whose remedy
+/// is known (re-record) and that is not corruption. Every other `meta.dat`
+/// problem (missing, short, bad magic, unknown flags) is left to the reader,
+/// which reports it from the open itself. The version is read by the same
+/// parser the reader uses, so the two cannot disagree about which versions
+/// are readable.
+///
+/// A `meta.dat` that declares MCR fields belongs to the replay-worker path
+/// and is not refused here: a native recording's version is that path's to
+/// judge. The flag word sits at bytes 6..8 in every schema version, so it
+/// can be read from a header the parser refuses.
+fn refuse_unreadable_meta_dat_version(path: &Path) -> Result<(), ContainerVersionRefusal> {
+    use crate::ctfs_trace_reader::meta_dat::{FLAG_HAS_MCR_FIELDS, MetaDatError, parse_meta_dat};
+    let Ok(mut ctfs) = CtfsReader::open(path) else {
+        return Ok(());
+    };
+    let Ok(bytes) = ctfs.read_file("meta.dat") else {
+        return Ok(());
+    };
+    match parse_meta_dat(&bytes) {
+        Err(e @ MetaDatError::UnsupportedVersion(_)) => {
+            let flags = bytes.get(6..8).map_or(0, |f| u16::from_le_bytes([f[0], f[1]]));
+            if flags & FLAG_HAS_MCR_FIELDS != 0 {
+                return Ok(());
+            }
+            warn!("refusing {}: {e}", path.display());
+            Err(ContainerVersionRefusal {
+                container: path.to_path_buf(),
+                reader_refusal: e.to_string(),
+            })
+        }
+        _ => Ok(()),
+    }
+}
+
 /// Classify a CTFS container as a DB (materialized) trace this backend can
 /// serve: one that carries `steps.dat`, the split-stream format every recorder
 /// writes, and is not a native MCR recording.
@@ -2149,6 +2209,9 @@ pub fn handle_request(
         )?,
         "ct/event-jump" => handler.event_jump(req.clone(), req.load_args::<ProgramEvent>()?, sender.clone())?,
         "ct/load-history" => handler.load_history(req.clone(), req.load_args::<LoadHistoryArg>()?, sender.clone())?,
+        "ct/load-step-lines" => {
+            handler.load_step_lines(req.clone(), req.load_args::<LoadStepLinesArg>()?, sender.clone())?
+        }
         // Value Origin Tracking — `ct/originChain` (spec §5.3) and
         // `ct/originSummary` (spec §5.3.2 batch placeholder fill).
         "ct/originChain" => handler.origin_chain(
@@ -2805,8 +2868,13 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 && let Err(send_err) = to_stable_sender.send(req.clone())
             {
                 // The stable task-thread's ``from_stable_receiver``
-                // has been dropped — almost always because the
-                // thread panicked.  Surface an error DAP response
+                // has been dropped: the thread has ended.  A handler
+                // panic no longer does that (`run_answering_panics`
+                // answers it and the thread refuses later requests by
+                // name until a relaunch), so this arm now covers the
+                // thread failing outside a request (its cached-launch
+                // setup, a panic in the loop itself).
+                // Surface an error DAP response
                 // to the client so its ``customRequest`` promise
                 // resolves immediately instead of waiting the full
                 // 30 s for nothing (see the Leo deep-test
@@ -3269,6 +3337,152 @@ fn announce_session_load(announces_session: bool, session: &mut SessionHandler, 
     }
 }
 
+/// Run one request's handler, catching a panic inside it.
+///
+/// The Debug Adapter Protocol requires a response to every request
+/// (<https://microsoft.github.io/debug-adapter-protocol/overview#requests>);
+/// one that cannot be carried out is answered `success: false` with a
+/// `message`. [`task_thread`] answers a handler's `Err` that way, but a handler
+/// that *panicked* used to unwind out of `task_thread` and end the thread: the
+/// request that panicked was never answered, so its client waited out its own
+/// timeout. This returns the handler's own result as `Ok`, and a panic as
+/// `Err` carrying the text the request is answered with: the command, its
+/// `seq` and the panic message.
+///
+/// # Why a panic poisons the session
+///
+/// `AssertUnwindSafe` asserts that whatever `handle` borrows mutably (the
+/// task thread's session) may be touched after an unwind. It may be touched,
+/// but it cannot be trusted: a handler can panic halfway through a change.
+/// `run_tracepoints`, for one, disables the user's breakpoints and moves the
+/// replay before it evaluates anything, and restores both only on the way
+/// out. The panics a client can provoke with a bad argument are refused by
+/// name before anything changes, so a panic that still reaches this function
+/// is a defect whose effect on the session is unknown. [`task_thread`]
+/// therefore stops serving from that session ([`ThreadPoison`]): every later
+/// request is refused by name until a `launch` loads the trace again. That is
+/// the same contract `std::sync::Mutex` keeps after a panic, and it is what
+/// keeps a defect from turning into wrong answers that look right.
+///
+/// Where a panic aborts instead of unwinding (`panic = "abort"`, or
+/// `wasm32-unknown-unknown`, where the browser build dispatches inline) this
+/// function never sees the panic; the browser build answers from its panic
+/// hook instead (`browser_panic_net` in `dap.rs`).
+fn run_answering_panics<F>(
+    thread_name: &str,
+    request: &dap::Request,
+    handle: F,
+) -> Result<Result<(), Box<dyn Error>>, String>
+where
+    F: FnOnce() -> Result<(), Box<dyn Error>>,
+{
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        panic_if_test_hook_names(&request.command);
+        handle()
+    }))
+    .map_err(|payload| {
+        let reason = panic_payload_text(&*payload);
+        error!(
+            "the '{thread_name}' thread's handler for {} (seq {}) panicked: {reason}",
+            request.command, request.base.seq
+        );
+        format!(
+            "the replay server's handler for {} (seq {}) panicked: {reason}",
+            request.command, request.base.seq
+        )
+    })
+}
+
+/// The environment variable that makes the native replay server panic, on
+/// purpose, in the handler of the command it names.
+///
+/// It exists for one reason: the panic net above must be tested through the
+/// shipping binary, and a deliberate panic is the only panic a test can rely
+/// on. Every panic a client could provoke with a bad argument is refused by
+/// name before it happens, so no real request is left that is guaranteed to
+/// panic, and a test that depended on one would stop testing anything the day
+/// that request was fixed. Unset (always, outside tests) it changes nothing.
+pub const TEST_PANIC_ON_COMMAND_ENV: &str = "CODETRACER_REPLAY_SERVER_TEST_PANIC_ON_COMMAND";
+
+/// The command whose handler panics on purpose, decided once per process: by
+/// [`arm_test_panic_on_command`] when it is called before the first request,
+/// otherwise by [`TEST_PANIC_ON_COMMAND_ENV`].
+static TEST_PANIC_COMMAND: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
+/// Make the handler of `command` panic on purpose, for a test. This is how a
+/// test arms the panic in the browser build, which has no environment; it has
+/// to be called before the engine serves its first request, and refuses once
+/// the choice has been made.
+pub fn arm_test_panic_on_command(command: &str) -> Result<(), String> {
+    TEST_PANIC_COMMAND
+        .set(Some(command.to_string()))
+        .map_err(|_| "the test panic is decided once, before the first request, and it already was".to_string())
+}
+
+/// Panic if a test armed a panic for `command` (see [`TEST_PANIC_COMMAND`]).
+/// Called inside the panic net, just before the handler runs.
+// A panic is this function's whole purpose, and it happens only when a test
+// armed it.
+#[allow(clippy::panic)]
+pub(crate) fn panic_if_test_hook_names(command: &str) {
+    let named = TEST_PANIC_COMMAND.get_or_init(|| std::env::var(TEST_PANIC_ON_COMMAND_ENV).ok());
+    if named.as_deref() == Some(command) {
+        panic!("a test armed a panic for {command}: deliberate panic");
+    }
+}
+
+/// The message a panic was raised with: `panic!` and `expect` carry a `&str`
+/// or a `String`; anything else (`std::panic::panic_any`) has no text to show.
+pub(crate) fn panic_payload_text(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(text) = payload.downcast_ref::<&str>() {
+        (*text).to_string()
+    } else if let Some(text) = payload.downcast_ref::<String>() {
+        text.clone()
+    } else {
+        "a panic payload that is not a string".to_string()
+    }
+}
+
+/// Answer `request` with `success: false` and `message`. The response's own
+/// `seq` is filled in by the sending thread (see `patch_message_seq`).
+fn send_failed_response(sender: &Sender<DapMessage>, request: &dap::Request, message: String) {
+    let response = DapMessage::Response(Response {
+        base: ProtocolMessage {
+            seq: 0,
+            type_: "response".to_string(),
+        },
+        request_seq: request.base.seq,
+        success: false,
+        command: request.command.clone(),
+        message: Some(message),
+        body: json!({}),
+    });
+    if let Err(send_err) = sender.send(response) {
+        error!(
+            "failed to send the failure response for {}: {send_err:?}",
+            request.command
+        );
+    }
+}
+
+/// Why a task thread no longer serves from its session: the panic that
+/// poisoned it (see [`run_answering_panics`]). Cleared by a `launch` that
+/// loads the trace again.
+struct ThreadPoison {
+    panic: String,
+}
+
+impl ThreadPoison {
+    /// The refusal every request gets while the thread is poisoned.
+    fn refusal(&self, thread_name: &str, command: &str) -> String {
+        format!(
+            "the replay server's '{thread_name}' session cannot serve {command}: it stopped serving after {}; \
+             launch the trace again to reload it",
+            self.panic
+        )
+    }
+}
+
 /// Serve the requests routed to one task thread (`name`) against the session
 /// it loads on `launch`. `announces_session` is true for the one thread whose
 /// session answers the client — see [`announce_session_load`].
@@ -3406,6 +3620,10 @@ fn task_thread(
             .map_err(|e| -> String { format!("placeholder session wrap error: {e:?}") })?
     };
 
+    // Set when a handler panics; while set, this thread refuses every request
+    // but `launch` (see [`run_answering_panics`]).
+    let mut poison: Option<ThreadPoison> = None;
+
     loop {
         info!("waiting for new message from DAP server");
         let request = from_thread_receiver.recv().map_err(|e| {
@@ -3421,7 +3639,14 @@ fn task_thread(
             // reported failure *and* the thread survives to serve the next
             // request — which is how the non-launch branch below has always
             // treated a failed request.
-            let launch_result: Result<(), Box<dyn Error>> = (|| {
+            //
+            // The closure also runs under `catch_unwind` (see
+            // [`run_answering_panics`]): a panic during setup would otherwise
+            // end this thread just as the `?`s used to, and report nothing.
+            // `session_loaded` says whether it replaced the session, which is
+            // what clears a poisoned thread.
+            let mut session_loaded = false;
+            let launch_result = run_answering_panics(name, &request, || {
                 let args = request.load_args::<dap::LaunchRequestArguments>()?;
                 if let Some(folder) = &args.trace_folder {
                     let launch_trace_folder = folder.clone();
@@ -3500,6 +3725,7 @@ fn task_thread(
                         // session.toml re-load. Idempotent: each launch
                         // produces a fresh full snapshot.
                         announce_session_load(announces_session, &mut session, &sender);
+                        session_loaded = true;
                         loaded_trace_folder = Some(launch_trace_folder);
                         loaded_trace_file = Some(launch_trace_file);
                         loaded_raw_diff_index = launch_raw_diff_index;
@@ -3533,6 +3759,7 @@ fn task_thread(
                         // session yields a one-entry process list with the
                         // recorded `.ct` file as `displayName`.
                         announce_session_load(announces_session, &mut session, &sender);
+                        session_loaded = true;
                         loaded_trace_folder = Some(launch_trace_folder);
                         loaded_trace_file = Some(launch_trace_file);
                         loaded_raw_diff_index = launch_raw_diff_index;
@@ -3573,16 +3800,44 @@ fn task_thread(
                     // is empty for live recordings until the recorder
                     // finishes).
                     announce_session_load(announces_session, &mut session, &sender);
+                    session_loaded = true;
                     loaded_trace_folder = None;
                     loaded_trace_file = None;
                     loaded_raw_diff_index = None;
                 }
                 Ok(())
-            })();
-            if let Err(e) = launch_result {
-                error!("launch error: {e:?}");
-                send_launch_failure_notification(&sender, &launch_failure_text(&*e));
+            });
+            match launch_result {
+                Ok(Ok(())) => {
+                    if session_loaded {
+                        poison = None;
+                    }
+                }
+                Ok(Err(e)) => {
+                    error!("launch error: {e:?}");
+                    send_launch_failure_notification(&sender, &launch_failure_text(&*e));
+                }
+                Err(panic_text) => {
+                    // The launch reports its failure with an event, not a
+                    // response (the protocol-level `launch` response has
+                    // already been sent), so the panic is reported the same
+                    // way. A panic part-way through setup can leave the
+                    // session half-replaced: poison it, and forget which trace
+                    // was loaded so that the next `launch` reloads instead of
+                    // taking the duplicate-launch shortcut.
+                    send_launch_failure_notification(&sender, &panic_text);
+                    poison = Some(ThreadPoison { panic: panic_text });
+                    loaded_trace_folder = None;
+                    loaded_trace_file = None;
+                    loaded_raw_diff_index = None;
+                }
             }
+        } else if let Some(poison) = &poison {
+            // A handler panicked on this thread earlier; its session is not
+            // trusted until a `launch` loads the trace again (see
+            // [`run_answering_panics`]).
+            warn!("  '{name}' thread is poisoned, refusing {:?}", request.command);
+            send_failed_response(&sender, &request, poison.refusal(name, &request.command));
         } else {
             // Any session whose primary trace is initialized is
             // dispatched through the session router. The router
@@ -3590,30 +3845,32 @@ fn task_thread(
             // single-trace Handler (unchanged code path) per M24.
             let primary_initialized = session.trace(0).map(|t| t.handler.initialized).unwrap_or(false);
             if primary_initialized {
-                let res = handle_request_via_session(&mut session, request.clone(), sender.clone());
-                if let Err(e) = res {
-                    warn!("  handle_request error in thread: {e:?}");
-                    // Send an error response back to the daemon so it does not
-                    // wait indefinitely for events that will never arrive
-                    // (e.g., a `stopped` event after an unrecognized
-                    // navigation command like `ct/goto-ticks`).
-                    let error_response = DapMessage::Response(Response {
-                        base: ProtocolMessage {
-                            seq: 0, // Will be patched by write_dap_messages
-                            type_: "response".to_string(),
-                        },
-                        request_seq: request.base.seq,
-                        success: false,
-                        command: request.command.clone(),
-                        message: Some(format!("{e}")),
-                        body: json!({}),
-                    });
-                    if let Err(send_err) = sender.send(error_response) {
-                        error!("failed to send error response for {}: {send_err:?}", request.command);
+                let res = run_answering_panics(name, &request, || {
+                    handle_request_via_session(&mut session, request.clone(), sender.clone())
+                });
+                match res {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => {
+                        warn!("  handle_request error in thread: {e:?}");
+                        // Send an error response back to the daemon so it does not
+                        // wait indefinitely for events that will never arrive
+                        // (e.g., a `stopped` event after an unrecognized
+                        // navigation command like `ct/goto-ticks`). The thread
+                        // goes on serving: a handler that returns `Err` is
+                        // expected to leave its session consistent.
+                        send_failed_response(&sender, &request, format!("{e}"));
                     }
-                    // continue with other requests; trying to be more robust
-                    // assuming it's for individual requests to fail
-                    //   TODO: is it possible for some to leave bad state ?
+                    Err(panic_text) => {
+                        // Answer the request that panicked, then stop serving
+                        // from a session the panic may have left half-changed.
+                        // The trace is forgotten so that a `launch` of the same
+                        // trace reloads it.
+                        send_failed_response(&sender, &request, panic_text.clone());
+                        poison = Some(ThreadPoison { panic: panic_text });
+                        loaded_trace_folder = None;
+                        loaded_trace_file = None;
+                        loaded_raw_diff_index = None;
+                    }
                 }
             } else {
                 // #689: this branch used to drop the request silently, and
@@ -3626,26 +3883,14 @@ fn task_thread(
                 // exists to remove. Answer it instead, the same way the
                 // initialized-but-failing arm above does.
                 warn!("  handler NOT initialized, refusing {:?}", request.command);
-                let error_response = DapMessage::Response(Response {
-                    base: ProtocolMessage {
-                        seq: 0, // Will be patched by the sending thread
-                        type_: "response".to_string(),
-                    },
-                    request_seq: request.base.seq,
-                    success: false,
-                    command: request.command.clone(),
-                    message: Some(format!(
+                send_failed_response(
+                    &sender,
+                    &request,
+                    format!(
                         "no trace is loaded in the '{name}' thread; cannot service {}",
                         request.command
-                    )),
-                    body: json!({}),
-                });
-                if let Err(send_err) = sender.send(error_response) {
-                    error!(
-                        "failed to send not-initialized response for {}: {send_err:?}",
-                        request.command
-                    );
-                }
+                    ),
+                );
             }
         }
     }
@@ -3971,6 +4216,72 @@ mod tests {
         bytes[5] = 0;
         std::fs::write(&ct_path, &bytes).unwrap();
         assert!(refuse_unreadable_ctfs_version(&ct_path).is_ok());
+    }
+
+    /// Stamp a superseded schema version over serialized `meta.dat` bytes
+    /// (u16 LE at bytes 4..6, after the `CTMD` magic). The serializer cannot
+    /// write a superseded version, that being what the bump means; v6 and v7
+    /// differ only in this field (`internal-files.md`, "v7").
+    fn with_meta_dat_version(mut bytes: Vec<u8>, version: u16) -> Vec<u8> {
+        assert_eq!(&bytes[0..4], b"CTMD");
+        bytes[4..6].copy_from_slice(&version.to_le_bytes());
+        bytes
+    }
+
+    /// A readable container whose `meta.dat` schema version this build
+    /// refuses is refused by name, with the reader's own sentence — not left
+    /// to fail the open and fall through to the replay-worker path.
+    #[test]
+    fn a_meta_dat_of_another_version_is_refused_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // CONTROL: the current version passes, so the arm below discriminates
+        // on the version rather than refusing every container.
+        let current = dir.path().join("current.ct");
+        write_minimal_ctfs(&current, &[("meta.dat", &non_mcr_meta_dat_bytes()), ("steps.dat", b"")]).unwrap();
+        assert!(refuse_unreadable_meta_dat_version(&current).is_ok());
+
+        let old = dir.path().join("v6.ct");
+        let v6 = with_meta_dat_version(non_mcr_meta_dat_bytes(), 6);
+        write_minimal_ctfs(&old, &[("meta.dat", &v6), ("steps.dat", b"")]).unwrap();
+        assert!(
+            refuse_unreadable_ctfs_version(&old).is_ok(),
+            "the container header is at a readable version; only meta.dat is superseded"
+        );
+        let refusal = refuse_unreadable_meta_dat_version(&old).unwrap_err();
+        assert_eq!(refusal.container, old);
+        let err = refusal.to_string();
+        assert!(
+            err.contains("meta.dat: version 6 is not readable")
+                && err.contains(&format!("reads version {META_DAT_VERSION} only")),
+            "{err}"
+        );
+        assert!(err.contains("Re-record"), "{err}");
+    }
+
+    /// A `meta.dat` problem that is not its version is the reader's to
+    /// report from the open, and a native (MCR) recording is the replay
+    /// worker's to judge: neither is refused by the version probe.
+    #[test]
+    fn the_meta_dat_version_probe_refuses_only_a_non_mcr_version() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let mcr_v6 = dir.path().join("mcr-v6.ct");
+        let bytes = with_meta_dat_version(mcr_meta_dat_bytes(), 6);
+        write_minimal_ctfs(&mcr_v6, &[("meta.dat", &bytes), ("steps.dat", b"")]).unwrap();
+        assert!(refuse_unreadable_meta_dat_version(&mcr_v6).is_ok());
+
+        let corrupt = dir.path().join("corrupt.ct");
+        write_minimal_ctfs(&corrupt, &[("meta.dat", &[0u8; 4]), ("steps.dat", b"")]).unwrap();
+        assert!(refuse_unreadable_meta_dat_version(&corrupt).is_ok());
+
+        let no_meta = dir.path().join("no-meta.ct");
+        write_minimal_ctfs(&no_meta, &[("steps.dat", b"")]).unwrap();
+        assert!(refuse_unreadable_meta_dat_version(&no_meta).is_ok());
+
+        let not_a_container = dir.path().join("plain.ct");
+        std::fs::write(&not_a_container, b"not a container").unwrap();
+        assert!(refuse_unreadable_meta_dat_version(&not_a_container).is_ok());
     }
 
     /// MCR native recordings may carry stream names that overlap with
@@ -5082,6 +5393,97 @@ mod tests {
                 "the jump must reach line 5, and the user's line-3 breakpoint must still \
                  stop the Continue that follows it",
             );
+        }
+    }
+
+    /// `run_answering_panics` is what keeps a task thread alive through a
+    /// handler panic (`tests/handler_panic_is_answered_test.rs` drives it
+    /// through the shipping binary). These pin its contract directly, with
+    /// closures that panic on purpose: no handler path is mocked, the
+    /// closure *is* the unit under test's input.
+    mod run_answering_panics_contract {
+        use super::*;
+
+        fn request(command: &str, seq: i64) -> dap::Request {
+            dap::Request {
+                base: ProtocolMessage {
+                    seq,
+                    type_: "request".to_string(),
+                },
+                command: command.to_string(),
+                arguments: json!({}),
+            }
+        }
+
+        fn panic_text(result: Result<Result<(), Box<dyn Error>>, String>) -> String {
+            match result {
+                Err(text) => text,
+                Ok(handled) => panic!(
+                    "a panic must come back as the outer Err, got the handler's own result {:?}",
+                    handled.map_err(|e| e.to_string())
+                ),
+            }
+        }
+
+        #[test]
+        fn a_panic_becomes_a_message_naming_the_command_seq_and_reason() {
+            let req = request("scopes", 41);
+            let message = panic_text(run_answering_panics("stable", &req, || {
+                panic!("load_dap_scopes: invalid call_key")
+            }));
+            assert!(message.contains("scopes"), "{message}");
+            assert!(message.contains("seq 41"), "{message}");
+            assert!(message.contains("panicked"), "{message}");
+            assert!(message.contains("load_dap_scopes: invalid call_key"), "{message}");
+        }
+
+        #[test]
+        fn a_formatted_panic_message_is_kept() {
+            let req = request("stackTrace", 2);
+            let id = 7;
+            let message = panic_text(run_answering_panics("flow", &req, || panic!("no step {id}")));
+            assert!(message.contains("no step 7"), "{message}");
+        }
+
+        #[test]
+        fn a_non_string_payload_still_answers() {
+            let req = request("ct/load-flow", 3);
+            let message = panic_text(run_answering_panics("flow", &req, || std::panic::panic_any(17_u32)));
+            assert!(
+                message.contains("ct/load-flow") && message.contains("panicked"),
+                "{message}"
+            );
+        }
+
+        /// A handler's own result is not a panic: success and a refusal both
+        /// come back unchanged as the inner result, so `task_thread` answers a
+        /// refusal and keeps serving instead of poisoning the session.
+        #[test]
+        fn success_and_errors_pass_through_unchanged() {
+            let req = request("threads", 4);
+            assert!(matches!(run_answering_panics("stable", &req, || Ok(())), Ok(Ok(()))));
+            match run_answering_panics("stable", &req, || Err("plain refusal".into())) {
+                Ok(Err(e)) => assert_eq!(e.to_string(), "plain refusal"),
+                other => panic!(
+                    "an Err must pass through as the handler's result, got {:?}",
+                    other.map(|r| r.map_err(|e| e.to_string()))
+                ),
+            }
+        }
+
+        /// The refusal a poisoned thread gives every later request names the
+        /// thread, the refused command, the panic that poisoned it, and the
+        /// way out.
+        #[test]
+        fn a_poisoned_thread_refuses_by_name() {
+            let poison = ThreadPoison {
+                panic: "the replay server's handler for scopes (seq 6) panicked: boom".to_string(),
+            };
+            let refusal = poison.refusal("stable", "stackTrace");
+            assert!(refusal.contains("'stable'"), "{refusal}");
+            assert!(refusal.contains("stackTrace"), "{refusal}");
+            assert!(refusal.contains("scopes (seq 6) panicked: boom"), "{refusal}");
+            assert!(refusal.contains("launch"), "{refusal}");
         }
     }
 }

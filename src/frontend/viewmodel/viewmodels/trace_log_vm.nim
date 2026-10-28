@@ -136,6 +136,24 @@ proc setEntries*(vm: TraceLogVM; entries: seq[TraceLogEntry]) =
   vm.entries.val = sorted
   vm.selectedIndex.val = NO_SELECTED_INDEX
 
+proc setSweepHits*(vm: TraceLogVM; hits: seq[TracepointSweepHit];
+                   maxRRTicks: int) =
+  ## The rows of one sweep's answer (`ct/tracepoint-results`) for a front-end
+  ## that holds the answer as the store's hits rather than as the desktop's
+  ## legacy stops (`ui/trace_log.nim`): the VS Code extension host. One row
+  ## per hit; the locals are read by window, as on the desktop
+  ## (Viewport-Driven-Loading, Decided Q4), except a hit that failed, whose
+  ## row says why.
+  var rows: seq[TraceLogEntry] = @[]
+  for hit in hits:
+    rows.add TraceLogEntry(
+      rrTicks: int(hit.rrTicks), minRRTicks: 0, maxRRTicks: maxRRTicks,
+      path: hit.path, line: hit.line,
+      localsText: hit.errorMessage,
+      localsLoaded: hit.errorMessage.len > 0,
+      tracepointId: hit.tracepointId)
+  vm.setEntries(rows)
+
 proc addEntry*(vm: TraceLogVM; entry: TraceLogEntry) =
   ## Append a captured tracepoint stop and re-sort by ``rrTicks``.
   ## Mirrors the legacy ``rows.add`` call inside

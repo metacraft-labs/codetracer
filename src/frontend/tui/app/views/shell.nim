@@ -67,6 +67,8 @@ import ./tracepoint_manager
 import ./vcs_pane
 import ./search_results_pane
 import ./test_results_pane
+import ./agent_activity_pane
+import ./problems_pane
 import ./frame_overlay
 import ./variables
 import ./context_menu
@@ -182,6 +184,10 @@ type
       ## CTUI-8's event log, as a value: the Event Log pane's own rectangle
       ## (the Timeline that shared it is removed, 2026-10-05), its scrollbar a
       ## scrubber over the whole log (PLAT-51).
+    agent*: AgentPaneModel
+      ## PLAT-54. THE AGENT ACTIVITY pane, as a value: the session's
+      ## `AgentActivityVM` the desktop's panel draws too, as the shared feed's
+      ## rows (`tui_session.agentModelOf`). Not loaded by default.
     search*: SearchResultsPaneModel
       ## PLAT-57. FIND IN FILES, as a value: the session's `SearchResultsVM`
       ## the desktop's panel draws too, read by `tui_session.searchModelOf`.
@@ -189,6 +195,9 @@ type
     tests*: TestResultsPaneModel
       ## PLAT-53. TEST RESULTS, as a value: the window's `TestResultsVM`,
       ## read by `test_results_source.paneModelOf`. Not loaded by default.
+    problems*: ProblemsPaneModel
+      ## PLAT-55. PROBLEMS, as a value: the window's `ErrorsVM`, read by
+      ## `problems_source.paneModelOf`. Not loaded by default.
     vcs*: VcsPaneModel
       ## PLAT-47 deliverable 4. The VCS pane, as a value: the shared `VCSVM`
       ## the desktop's VCS panel draws, read by `host/vcs_source.nim`. Not
@@ -892,6 +901,14 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   elif region.pane == paneTestResults and model.tests.loaded:
     belowStrip:
       discard paintTestResults(g, content, model.tests)
+  # PLAT-54. AGENT ACTIVITY — its prompt is content, so below the strip.
+  elif region.pane == paneAgentActivity and model.agent.loaded:
+    belowStrip:
+      discard paintAgentActivity(g, content, model.agent)
+  # PLAT-55. PROBLEMS — its counts and buttons are content, so below the strip.
+  elif region.pane == paneProblems and model.problems.loaded:
+    belowStrip:
+      discard paintProblems(g, content, model.problems)
   elif region.pane == paneBuildOutput:
     # NO EMPTINESS GUARD: an idle BUILD pane is a statement — `[idle] build:
     # not started` — and a user who has just pressed `:build` needs to see the

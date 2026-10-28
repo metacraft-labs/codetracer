@@ -91,7 +91,9 @@ template ck(condition: untyped) =
   check condition
 
 const
-  Cols = 140
+  Cols = 170
+    ## Wide enough that the status line holds a whole inert-key message beside
+    ## Edit mode's footer labels (PROBLEMS, FIND IN FILES, REQUESTS — PLAT-55).
   Rows = 40
     ## The Standard profile's band (>= 120 wide, >= 35 tall), so the Edit
     ## layout is the file tree beside the editor above the build pane rather

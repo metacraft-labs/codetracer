@@ -6,6 +6,11 @@
   "(ci/test/plat47_gpui_window.py). Asserted by",
   "src/frontend/gpui/tests/test_plat47_gpui_window.nim."
  ],
+ "captureContext": {
+  "platform": "linux",
+  "editorFontPx": 16,
+  "editorRowPx": 22
+ },
  "frame": [
   1920,
   1080

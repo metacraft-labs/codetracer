@@ -928,7 +928,7 @@ proc paintOmnibarDropdown*(g: var StyledGrid; m: TopBarModel;
     let what =
       case m.omnibar.mode
       of omProgram: "program search runs in the search pane"
-      of omAgent: "the agent is not available in the terminal"
+      of omAgent: "Enter sends the prompt to the agent"
       else: "no match"
     g.paint(a.row, a.col, fitCells(" " & what, a.width), OmnibarMutedStyle)
     return

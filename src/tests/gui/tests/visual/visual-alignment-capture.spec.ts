@@ -78,6 +78,12 @@ import {
   type DebugToolbarButton,
 } from "../../page-objects/debug-toolbar-ids";
 import { extractLayoutAnswers } from "../../tools/layout-answers";
+import {
+  type ProgramState,
+  type SettledEntry,
+  assertSampledSettled,
+  awaitSettledEntry,
+} from "../../lib/session-settle";
 
 // `__dirname` is `<repo>/src/tests/gui/tests/visual`, so the repository root is
 // five levels up. It was four for one run, which produced
@@ -96,7 +102,7 @@ interface ScenarioOp {
   line?: number;
 }
 
-/**
+/*
  * Where the program IS, read from the renderer's own debugger service.
  *
  * `rrTicks` is the only field that moves on EVERY operation. Measured
@@ -106,13 +112,10 @@ interface ScenarioOp {
  * genuinely happened. `real-tab-switching.spec.ts` reads the same field for
  * the same reason, and `stepping-through-views.spec.ts` records the rule:
  * *"the line may wrap back on loops, but ticks always advance forward"*.
+ *
+ * `ProgramState` itself, and the entry settle, live in `lib/session-settle.ts`,
+ * shared with `plat37-electron-window-capture.spec.ts`.
  */
-interface ProgramState {
-  line: number;
-  path: string;
-  rrTicks: number;
-  busy: boolean | null;
-}
 
 interface Scenario {
   id: string;
@@ -494,18 +497,29 @@ async function waitForEditorFrameSettled(
 async function drive(
   layout: LayoutPage,
   ops: ScenarioOp[],
-): Promise<{ moves: number; trajectory: string[]; final: ProgramState }> {
+): Promise<{
+  moves: number;
+  trajectory: string[];
+  final: ProgramState;
+  entrySettle: SettledEntry;
+}> {
   let moves = 0;
   const trajectory: string[] = [];
-  // THE STARTING POINT IS ASSERTED, not assumed. A session that has not
-  // finished opening reports `rrTicks: -1`, and driving from there would make
-  // the first operation's postcondition true by arithmetic on a sentinel.
-  let state = await readProgramState(layout.page);
-  expect(
-    state.rrTicks,
-    "the session had no position before the first operation; the capture " +
-      "would then be driving a window that has not opened",
-  ).toBeGreaterThanOrEqual(0);
+  // THE STARTING POINT IS SETTLED, not sampled. The only other settle is per
+  // operation, inside `waitForMove`, and the population-control scenario
+  // `entry-shell` has no operation to force one — the PLAT-37 Electron twin
+  // of this loop recorded it as `{line: 0, path: "", rrTicks: 0, busy: true}`
+  // beside a frame that drew line 1 (codetracer-pm issue 2026-10-12-the-
+  // electron-capture-lanes-entry-shell-samples-...). `awaitSettledEntry`
+  // waits on the product's own busy flag until two consecutive reads agree on
+  // a resolved position, and THROWS rather than return one that never got
+  // there; a session with no position (`rrTicks: -1`) is refused with it.
+  const entrySettle = await awaitSettledEntry(
+    async () => readProgramState(layout.page),
+    async (ms) => layout.page.waitForTimeout(ms),
+    { what: "PLAT-35 entry" },
+  );
+  let { state } = entrySettle;
   trajectory.push(`entry=${state.line}@${state.rrTicks}`);
 
   for (const op of ops) {
@@ -601,7 +615,10 @@ async function drive(
       await waitForEditorFrameSettled(layout.page);
     }
   }
-  return { moves, trajectory, final: state };
+  // A busy final state is a lane failure, never a recorded `stoppedLine`:
+  // the `setBreakpoint` branch reads without waiting, so this covers it.
+  assertSampledSettled(state, "PLAT-35 final state");
+  return { moves, trajectory, final: state, entrySettle };
 }
 
 /**
@@ -1132,6 +1149,9 @@ for (const scenario of definition.scenarios) {
             stoppedPath: path.basename(driven.final.path),
             rrTicks: driven.final.rrTicks,
             trajectory: driven.trajectory,
+            // The entry settle's evidence; `firstSample` is what an
+            // unsettled first read would have recorded.
+            entrySettle: driven.entrySettle,
             // The measured viewport and the captured image, so the two can be
             // checked against the declaration without re-running the lane.
             viewportCss: `${size.width}x${size.height}`,

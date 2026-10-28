@@ -843,7 +843,15 @@ const
         # needle stay forbidden — this module must not be able to delete a
         # component tree or reach a network any more than the other two.
         "createDir", "writeFile", "readFile", "moveFile"],
-      imports: @["import ../../common/plugin_model/diagnostics",
+      # `ct_home` is where the store's default root comes from
+      # (`launcherUserRoot` falls back to `ct_home.ctLauncherUserRootDefault`,
+      # `$CODETRACER_HOME/launcher`). Reviewed when it was added here: on the
+      # C backend this module is built for, it imports only
+      # `std/[os, strutils]` and `common/env`, whose one proc there is a
+      # `getEnv` — it resolves local paths from environment variables and
+      # opens no socket, spawns nothing and fetches nothing.
+      imports: @["import ../../common/ct_home",
+                 "import ../../common/plugin_model/diagnostics",
                  "import ../../common/plugin_model/grant_ledger",
                  "import std/[os, strutils]", "import std/posix"],
       anchor: "proc saveGrantLedgerTo*",

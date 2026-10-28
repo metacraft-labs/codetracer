@@ -24,6 +24,8 @@ from ../viewmodel/viewmodels/build_vm import
   BuildVM, BuildStatus,
   setCommand, setRunning, setBuildStartTime, setCode, appendLine,
   appendError, appendProblem, clearOutput, jumpToLine
+from ../viewmodel/viewmodels/build_diagnostics import feedBuildLine,
+  severityOf
 from isonim/web/dom_api import nil
 # `Signal.val` is a template, so reading a `BuildVM` signal here needs the
 # module in scope even though the type arrives through `build_vm`. Used by the
@@ -391,10 +393,7 @@ proc parserSeverityToVM(sev: BuildSeverity): BuildLineSeverity =
   ## view.  Kept separate from ``buildSeverityToProblem`` so the
   ## Problems-panel and the build-line tagging stay independently
   ## evolvable.
-  case sev
-  of SevError:   blsError
-  of SevWarning: blsWarning
-  of SevInfo:    blsInfo
+  severityOf(sev)
 
 proc syncBuildOutputAppend(self: BuildComponent, htmlText: cstring,
                            isStdout: bool, severity: BuildLineSeverity = blsNone,
@@ -423,7 +422,13 @@ template appendBuild(self: BuildComponent, buildLine: string, stdout: bool): unt
   #
   # This call is what makes `buildDiagnosticScanner` reachable; see its
   # declaration for the defect that existed while it was not.
-  let scanned = buildDiagnosticScanner.scan(buildLine)
+  #
+  # The rule — which lines are rows, with which severity and sentence — is
+  # `viewmodels/build_diagnostics.feedBuildLine`, shared with the terminal's and
+  # the GPUI window's Problems panes so all three list the same rows for the
+  # same output. `fed.located` is `matchLocation`'s verdict on the line.
+  let fed = buildDiagnosticScanner.feedBuildLine(buildLine)
+  let scanned = fed.scanned
   let (match, location, rawLocation, other) = self.matchLocation(buildLine)
   if match:
     if rawLocation.len > 0:
@@ -450,19 +455,14 @@ template appendBuild(self: BuildComponent, buildLine: string, stdout: bool): unt
     # `SevError` and an empty message, so a `warning:` became a red row with
     # nothing written on it. `scanned` carries both down from the header.
     let parsed = scanned
-    if parsed.found:
+    if fed.problem:
       self.build.problems.add(BuildProblem(
         severity: buildSeverityToProblem(parsed.severity),
         path: cstring(parsed.path),
         line: parsed.line,
         col: parsed.col,
         message: cstring(parsed.message)))
-      let problemRow = BuildProblemLine(
-        severity: parserSeverityToVM(parsed.severity),
-        path: parsed.path,
-        line: parsed.line,
-        col: parsed.col,
-        message: parsed.message)
+      let problemRow = fed.row
       let ownProblemsBuildVM = self.paneVM()
       if not ownProblemsBuildVM.isNil:
         ownProblemsBuildVM.appendProblem(problemRow)

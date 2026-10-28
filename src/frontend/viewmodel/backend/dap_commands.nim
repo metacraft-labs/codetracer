@@ -75,6 +75,7 @@ const VALID_DAP_COMMANDS_SEQ*: seq[string] = @[
   "ct/calltrace-jump",
   "ct/event-jump",
   "ct/load-history",
+  "ct/load-step-lines",
   "ct/updated-history",
   "ct/history-jump",
   "ct/search-calltrace",

@@ -13,7 +13,7 @@
 ## from a stub `SourceProvider`, the injected seam the VM fetches through, so
 ## the markup case controls exactly what the "recorded source" says.
 
-import std/[json, options, strutils, tables, unittest]
+import std/[importutils, json, options, strutils, tables, unittest]
 
 import isonim/core/[signals, owner, async_compat]
 import isonim/testing/mock_dom
@@ -24,6 +24,13 @@ import store/[replay_data_store, types]
 import viewmodels/[low_level_code_vm, source_vm]
 import sdk/[stop_loader, source_provider]
 import views/isonim_low_level_code_view
+
+proc setSourceProvider(vm: LowLevelCodeVM; provider: SourceProvider) =
+  ## Use `provider` for the groups' source text instead of the DAP default:
+  ## the suite's stub, written into the ViewModel's private field because no
+  ## product host swaps the provider.
+  privateAccess(LowLevelCodeVM)
+  vm.sources = provider
 
 proc sent(mock: MockBackendService; command: string): int =
   for c in mock.receivedCommands:

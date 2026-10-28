@@ -284,6 +284,11 @@ export table_overflow
 import viewmodels/table_fit
 export table_fit
 
+# PLAT-55: the Problems pane's row — its four parts as the desktop's flex row
+# lays them out (`errors_vm.problemsFit`), which the terminal's pane fits.
+from viewmodels/errors_vm import problemsFit, ProblemColumnNames
+export problemsFit, ProblemColumnNames
+
 # ---------------------------------------------------------------------------
 # Visual replay (PLAT-15)
 #
@@ -494,6 +499,17 @@ export menu_vm, product_menu, omnibar_vm, omnibar_sources, transport_icons,
 # `omnibar_sources`). Plain Nim over the ViewModels above: no renderer, no I/O.
 import viewmodels/[native_welcome, layout_settings]
 export native_welcome, layout_settings
+
+# PLAT-54: the Agent Activity pane's words and rows (`agent_activity_feed`,
+# re-exporting `agent_activity_text`) — the one projection of the desktop's
+# `AgentActivityVM` both native panes draw, so a view under
+# `src/frontend/tui/app/` paints the same rows through this door. The
+# ViewModel itself stays withheld: the feed exports its own row and action
+# types only. Plain Nim over `std/*`, `isonim/core/*` and `store/*` (the
+# ViewModel and the evidence / test-run projections it reads): no renderer,
+# no I/O, no process — the agent connection is the native host's.
+import viewmodels/agent_activity_feed
+export agent_activity_feed
 
 const
   CodeTracerEmbedFacadeModule* = "codetracer_embed"

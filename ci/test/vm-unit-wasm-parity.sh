@@ -51,7 +51,7 @@
 #
 # THE SECOND CONTRACT: THE EXCLUSION LIST IS EXACTLY RIGHT
 # --------------------------------------------------------
-# `vm-unit-wasm` is `vm-unit` minus nine named files. This script re-derives
+# `vm-unit-wasm` is `vm-unit` minus ten named files. This script re-derives
 # that difference from the two lanes and requires it to equal
 # `EXPECTED_WASM_EXCLUSIONS` below, in both directions:
 #
@@ -92,7 +92,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${REPO_ROOT}" || exit 2
 
-# The nine files `vm-unit` runs and `vm-unit-wasm` does not, each explained in
+# The ten files `vm-unit` runs and `vm-unit-wasm` does not, each explained in
 # full at its rejection in ci/lib/test-lane-files.sh. Kept here as a flat list
 # so this script can compare against it without parsing that file's prose --
 # and duplicated DELIBERATELY rather than derived, because a check that reads
@@ -101,6 +101,7 @@ cd "${REPO_ROOT}" || exit 2
 # to come from somewhere else or it is a self-comparison).
 EXPECTED_WASM_EXCLUSIONS=(
 	src/frontend/viewmodel/tests/unit/test_editor_async_closure.nim
+	src/frontend/viewmodel/tests/unit/test_native_file_tree_operations.nim
 	src/frontend/viewmodel/tests/unit/test_platform_desktop_native.nim
 	src/frontend/viewmodel/tests/unit/test_plugin_grant_lifecycle.nim
 	src/frontend/viewmodel/tests/unit/test_plugin_io_sdk.nim
@@ -240,14 +241,14 @@ echo
 # ---------------------------------------------------------------------------
 # Contract 1 — the exclusion list is exactly the difference
 # ---------------------------------------------------------------------------
-echo "--- contract 1: the wasm lane's exclusions are exactly the nine that are documented"
+echo "--- contract 1: the wasm lane's exclusions are exactly the ten that are documented"
 actual_excluded="$(comm -23 \
 	<(printf '%s\n' "${native_files}" | sort) \
 	<(printf '%s\n' "${wasm_files}" | sort))"
 expected_excluded="$(printf '%s\n' "${EXPECTED_WASM_EXCLUSIONS[@]}" | sort)"
 
 if [ "${actual_excluded}" = "${expected_excluded}" ]; then
-	ok "the difference is the documented nine"
+	ok "the difference is the documented ten"
 else
 	fail 'vm-unit \ vm-unit-wasm is not the documented set'
 	echo "      undocumented (in the difference, not in the list):" >&2

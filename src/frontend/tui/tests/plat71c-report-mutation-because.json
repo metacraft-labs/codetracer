@@ -2,5 +2,6 @@
   "C1": "value.kind == JObject and value.hasKey(\"from\") and value.hasKey(\"value\")",
   "C2": "text.contains(\"[\ud83e\udf87]\")",
   "C3": "prefs.contains(\"[terminal \\\"kitty\\\"]\")",
-  "C4": "sess.screenText().contains(\"key: x\")"
+  "C4": "sess.screenText().contains(\"key: x\")",
+  "C5": "inApp.startsWith(\"copied \") and inApp.endsWith(InAppOnlyCopyNote)"
 }

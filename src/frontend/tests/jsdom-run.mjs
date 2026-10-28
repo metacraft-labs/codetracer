@@ -44,7 +44,9 @@ if (!fs.existsSync(jsdomPath)) {
 }
 const { JSDOM } = require(jsdomPath);
 const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>',
-  { url: 'http://localhost' });
+  // `pretendToBeVisual` gives the window `requestAnimationFrame`, which a
+  // mounted pane schedules its measurement with (jsdom's own, at 60 Hz).
+  { url: 'http://localhost', pretendToBeVisual: true });
 globalThis.window = dom.window;
 globalThis.document = dom.window.document;
 try { delete globalThis.navigator; } catch { /* not configurable: ignore */ }
@@ -78,6 +80,25 @@ if (typeof dom.window.matchMedia !== 'function') {
   });
 }
 if (!('matchMedia' in globalThis)) globalThis.matchMedia = dom.window.matchMedia;
+
+// The observers, the style query and the frame clock a mounted pane reaches
+// as bare names; all but `ResizeObserver` are jsdom's own. jsdom has no
+// layout engine and so no `ResizeObserver`
+// (https://github.com/jsdom/jsdom/issues/3368); the stand-in observes nothing,
+// which is what a pane that is never resized sees. No suite here reads a size.
+for (const name of ['MutationObserver', 'getComputedStyle', 'KeyboardEvent',
+  'requestAnimationFrame', 'cancelAnimationFrame']) {
+  if (!(name in globalThis) && dom.window[name]) {
+    globalThis[name] = name === 'getComputedStyle'
+      ? dom.window.getComputedStyle.bind(dom.window)
+    : (name.endsWith('AnimationFrame') ? dom.window[name].bind(dom.window) : dom.window[name]);
+  }
+}
+if (!('ResizeObserver' in globalThis)) {
+  globalThis.ResizeObserver = class {
+    observe() {} unobserve() {} disconnect() {}
+  };
+}
 
 globalThis.ctRepoRoot = REPO;
 require(suite);

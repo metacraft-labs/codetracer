@@ -28,18 +28,21 @@ when not defined(js):
 
 import std/[asyncjs, json, jsffi, strutils, tables]
 
-import isonim/core/[signals, computation, owner]
+import isonim/core/[signals, computation, owner, async_compat]
 
 import ../viewmodel/backend/backend_service
-import ../viewmodel/sdk/[debugger_session, trace_source]
+import ../viewmodel/sdk/[debugger_session, trace_source, expression_eval]
 import ../viewmodel/store/[replay_data_store, types]
 import ../viewmodel/session_vm
 import ../viewmodel/viewport
 import ../viewmodel/sync/[sync_host, transport, webview_transport]
 import ../viewmodel/viewmodels/[calltrace_vm, debug_controls_vm,
                                 filesystem_vm, flow_vm, flow_line_values,
-                                scratchpad_vm, state_vm]
+                                scratchpad_vm, state_vm, trace_log_vm]
 import ../../common/lang as common_lang
+
+const TracepointRunRefused* = "the replay refused to run the tracepoint"
+  ## A tracepoint row's detail when `ct/run-tracepoints` was refused.
 
 type
   HostedDebugSession = ref object
@@ -174,6 +177,12 @@ proc openSession*(host: VsCodeHost; id, traceFolder: string;
       # The panels mark the call the debugger is in after every move, as on
       # the desktop.
       debugger.session.calltraceVM.followDebuggerCall()
+      # The Request Panel role (Shared-DOM-Front-Ends Q8): the first poll
+      # says how many requests the recording served (`recordedTotal`, the
+      # panel's count); a completed recording asks nothing more, and its
+      # rows are the window the panel's webview reports
+      # (`RequestPanelVM.setViewport`, relayed to this primary).
+      debugger.store.requestRequestSpansSince()
       let files = debugger.session.fileTreeVM
       if not files.isNil:
         if hosted.sourceFiles.len > 0:
@@ -200,6 +209,10 @@ proc openSession*(host: VsCodeHost; id, traceFolder: string;
         line: stop{"line"}.getBiggestInt(0).int,
         errorMessage: stop{"errorMessage"}.getStr(""))
     debugger.store.applyTracepointResults(hosted.tracepoints, hits)
+    # The Trace Log lists the sweep's hits: the panel `addTracepoint` opens.
+    if not debugger.session.traceLogVM.isNil:
+      debugger.session.traceLogVM.setSweepHits(hits,
+        int(debugger.store.eventLog.maxRRTicks.val))
   debugger.followBackendMoves()
 
 proc deliverEvent*(host: VsCodeHost; id: string; message: JsonNode) =
@@ -247,11 +260,6 @@ proc revealFile*(host: VsCodeHost; path: string) =
   if not s.isNil and not s.fileTreeVM.isNil:
     s.fileTreeVM.expandToFile(path)
 
-proc sessionView*(host: VsCodeHost; id: string): SessionViewModel =
-  ## Debug session `id`'s ViewModels once it is hosted (its first stop);
-  ## nil before, and after it ended.
-  host.sync.primary(id)
-
 proc activeSession(host: VsCodeHost): SessionViewModel =
   host.sync.primary(host.active.val)
 
@@ -275,8 +283,25 @@ proc runTracepoint*(host: VsCodeHost; path: string; line: int;
   hosted.tracepoints.add TracepointSweepSpec(
     tracepointId: hosted.tracepoints.len, path: path, line: line,
     expression: expression)
-  discard hosted.debugger.backend.send("ct/run-tracepoints",
-    tracepointSweepRequest(hosted.tracepoints))
+  # A sweep answers with an event and no response (`Handler::run_tracepoints`,
+  # src/db-backend/src/dap_handler.rs), so the request settles only when the
+  # replay REFUSES it, which `callRequest` reports as `null`. A refused run
+  # is said on the tracepoint's row, as an errored sweep is.
+  let debugger = hosted.debugger
+  let specs = hosted.tracepoints
+  let spec = specs[^1]
+  onComplete(debugger.backend.send("ct/run-tracepoints",
+      tracepointSweepRequest(specs)),
+    proc(response: JsonNode) =
+      if not responseSucceeded(response):
+        debugger.store.applyTracepointResults(@[spec], @[TracepointSweepHit(
+          tracepointId: spec.tracepointId, path: path, line: line,
+          errorMessage: TracepointRunRefused)], replaceHits = false),
+    proc(message: string) =
+      debugger.store.applyTracepointResults(@[spec], @[TracepointSweepHit(
+        tracepointId: spec.tracepointId, path: path, line: line,
+        errorMessage: TracepointRunRefused & ": " & message)],
+        replaceHits = false))
 
 proc onFlowLines*(host: VsCodeHost;
                   listener: proc(path: string; lines: seq[FlowLineValue];
@@ -300,22 +325,47 @@ proc onFlowLines*(host: VsCodeHost;
       listener(path, flowLineValues(window, debugger.rrTicks.int),
                flowLoopLines(window, debugger.location.line))
 
-proc addToScratchpad*(host: VsCodeHost; expression: string): bool
-    {.discardable.} =
+type
+  ScratchpadAddOutcome* = enum
+    ## What the editor's "Add to Scratchpad" did (Scratchpad-Pane.md § Adding
+    ## Values, "An editor selection (VS Code)").
+    saNoSession   ## no session is hosted: nothing can be evaluated, nothing added
+    saAdded       ## a local or a watch of the stop, added as the State pane shows it
+    saEvaluated   ## evaluated through the watch path, and its value added
+    saError       ## evaluated, and the scratchpad shows why it has no value
+
+proc addToScratchpad*(host: VsCodeHost; expression: string;
+                      done: proc(outcome: ScratchpadAddOutcome;
+                                 detail: string) = nil) =
   ## Add `expression`'s value at the current stop to the active session's
-  ## scratchpad: the editor's "Add to scratchpad". The value is the stop's
-  ## local or watch of that name, as the State pane shows it. False when the
-  ## stop has none, so the editor can say so instead of adding nothing.
+  ## scratchpad: the editor's "Add to scratchpad".
+  ##
+  ## A local or a watch of that name is added as the State pane shows it, with
+  ## no request. Anything else is EVALUATED at the stop through the watch path
+  ## (`sdk/expression_eval.evaluateAtStop`, one `ct/load-locals` carrying it as
+  ## a watch expression), without changing the State pane's watch list. A
+  ## failed evaluation still adds an entry: an error value saying why. `done`
+  ## is called once with the outcome and, for `saError` / `saNoSession`, why.
+  let report = proc(outcome: ScratchpadAddOutcome; detail: string) =
+    if not done.isNil: done(outcome, detail)
   let s = host.activeSession
   if s.isNil or s.scratchpadVM.isNil:
+    report(saNoSession, "no CodeTracer session is being debugged")
     return
+  let expr = expression.strip
   for rows in [s.store.locals.locals.val, s.store.locals.watches.val]:
     for v in rows:
-      if v.name == expression:
+      if v.name == expr:
         s.scratchpadVM.addValue(ScratchpadValueEntry(
           expression: v.name, valueText: v.value, typeName: v.typeName,
           hasChildren: v.hasChildren, children: v.children))
-        return true
+        report(saAdded, "")
+        return
+  let scratchpad = s.scratchpadVM
+  s.store.evaluateAtStop(expr, proc(answer: ExpressionAnswer) =
+    scratchpad.addValue(scratchpadEntryOf(answer))
+    if answer.kind == eaValue: report(saEvaluated, "")
+    else: report(saError, answer.reason))
 
 proc moveInHistory*(host: VsCodeHost; back: bool) =
   ## The debug toolbar's history back / forward: move the active session's
@@ -399,9 +449,19 @@ proc ctHostOnFlowLines(host: VsCodeHost;
       loopArr.add %*{"line": l.line, "locationInside": l.locationInside}
     listener(cstring(path), jsOf(lineArr), jsOf(loopArr)))
 
-proc ctHostAddToScratchpad(host: VsCodeHost; expression: cstring): bool
-    {.exportc.} =
-  host.addToScratchpad($expression)
+proc ctHostAddToScratchpad(host: VsCodeHost; expression: cstring;
+                           done: proc(outcome, detail: cstring)) {.exportc.} =
+  ## `done(outcome, detail)`: `outcome` is the `ScratchpadAddOutcome` name
+  ## without its prefix (`noSession`, `added`, `evaluated`, `error`).
+  host.addToScratchpad($expression,
+    proc(outcome: ScratchpadAddOutcome; detail: string) =
+      if not done.isNil:
+        let name = case outcome
+          of saNoSession: "noSession"
+          of saAdded: "added"
+          of saEvaluated: "evaluated"
+          of saError: "error"
+        done(cstring(name), cstring(detail)))
 
 proc ctHostSetSourceFiles(host: VsCodeHost; id: cstring;
                           paths: seq[cstring]) {.exportc.} =

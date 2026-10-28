@@ -125,6 +125,7 @@ type
     CtLoadSymbols,
     CtLoadValueElements,
     CtLoadTerminalLines,
+    CtLoadStepLines,
     # Multi-process sessions (M29 §5.2 / M42 §14.8). `ct/listProcesses`
     # is unusual in that the backend speaks it in BOTH directions: as a
     # request the frontend may issue, and as an unsolicited event
@@ -226,6 +227,7 @@ func commandToCtResponseEventKind*(command: string): CtEventKind =
   of "ct/load-symbols": CtLoadSymbols
   of "ct/load-value-elements": CtLoadValueElements
   of "ct/load-terminal-lines": CtLoadTerminalLines
+  of "ct/load-step-lines": CtLoadStepLines
   # Multi-process sessions (M42 §14.8)
   of "ct/listProcesses": CtListProcessesResponse
   of "ct/pairIndexLookup": CtPairIndexLookupResponse

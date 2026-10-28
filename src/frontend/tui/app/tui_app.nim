@@ -64,6 +64,8 @@ import ./layout/cells       # `terminalPaneName`
 import ./views/vcs_pane
 import ./views/search_results_pane
 import ./views/test_results_pane
+import ./views/agent_activity_pane
+import ./views/problems_pane
 import ./views/point_list
 
 export headless_app
@@ -291,6 +293,15 @@ type
       ## `TestResultsVM`; its `selected` and `scrollTop` are the pane's own.
       ## The window's, not a session's: every tab shares the project
       ## (`Test-Results-Pane.md` §8.2).
+    agent*: AgentPaneModel
+      ## PLAT-54. THE AGENT ACTIVITY pane's model, as a value, filled by the
+      ## host (`host/tui_session.agentModelOf`) from the session's
+      ## `AgentActivityVM` through the shared feed; its `scroll` is the
+      ## pane's own reading position.
+    problems*: ProblemsPaneModel
+      ## PLAT-55. The PROBLEMS pane's model, as a value, filled by the host
+      ## (`host/problems_source.nim`) from the window's `ErrorsVM`, which the
+      ## window's builds feed; its `scrollTop` is the pane's own.
     build*: BuildSession
       ## PLAT-16. The build or run in flight, or the last one's verdict, or
       ## `nil` for a session that has never built. `nil` is a state the pane
@@ -332,9 +343,25 @@ type
       ## PLAT-57: the HOST's Find in Files toggle, by its operation
       ## (`search.toggle-case` / `-whole-word` / `-regex`): flipped, and a
       ## search that ran run again. The words the status line shows.
+    problemsCommand*: proc(kind: ProblemsCommandKind;
+                           index: int): string {.closure.}
+      ## PLAT-55: the HOST's Problems pane — select diagnostic `index`, open
+      ## it (its file at its line, K35), step to the next / previous error
+      ## (EMT-D22), set a filter, toggle the grouping. The words the status
+      ## line shows, "" for none. Nil when no host fills the pane.
     stepSearchResult*: proc(delta: int): string {.closure.}
       ## PLAT-57: the HOST's next (`1`) / previous (`-1`) result: selected and
       ## opened in the editor at its line. "" when one opened, else why not.
+    agentPress*: proc(row, button: int): string {.closure.}
+      ## PLAT-54: the HOST's answer to a press on Agent Activity row `row`
+      ## (`button` -1: the row itself, else that button) — the feed's action
+      ## run through the ViewModel (`native_agent_host.runFeed`). The words
+      ## the status line shows, "" for none. Nil when no host owns the pane.
+    agentPrompt*: proc(text: string): string {.closure.}
+      ## PLAT-54: `/ai <text>` — the HOST sends the prompt to the agent,
+      ## starting a session when there is none. "" when sent, else why not.
+    agentStop*: proc(): string {.closure.}
+      ## PLAT-54: the prompt's Stop control.
     recordingOpener*: proc(path: string): string {.closure.}
       ## PLAT-49 part B: the HOST's "open this recording in a new session
       ## tab" — "" when it opened, else why not. Nil when the host cannot
@@ -639,6 +666,8 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     vcs: app.vcs,
     search: app.search,
     tests: app.tests,
+    agent: app.agent,
+    problems: app.problems,
     build: build,
     product: app.modes.product,
     edit: (if app.editSession.isNil: initEditPaneModel()

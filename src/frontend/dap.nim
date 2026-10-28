@@ -236,6 +236,7 @@ const EVENT_KIND_TO_DAP_MAPPING*: array[CtEventKind, cstring] = [
   CtLoadSymbols: "ct/load-symbols",
   CtLoadValueElements: "ct/load-value-elements",
   CtLoadTerminalLines: "ct/load-terminal-lines",
+  CtLoadStepLines: "ct/load-step-lines",
   # Multi-process sessions (M29 §5.2 / M42 §14.8). The same command
   # string names both the request the frontend may issue and the
   # session-load event the backend dispatches unsolicited, so a single

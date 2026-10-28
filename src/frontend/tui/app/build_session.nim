@@ -86,6 +86,14 @@ type
     deadlineMs*: int64
       ## Wall-clock budget. `0` means no deadline.
     startedMs*: int64
+    received*: int
+      ## PLAT-55: how many lines the build has written in all — `lines` is a
+      ## ring, so a reader that follows the output (the Problems pane's feed,
+      ## `host/problems_source`) counts from here and never re-reads a line
+      ## the ring has kept or misses one it dropped silently.
+    workingDir*: string
+      ## PLAT-55: the directory the command runs in, which a relative
+      ## diagnostic's path is resolved against (Edit-Mode-Toolbar.md EMT-A36).
 
 const
   MaxBuildLines* = 2000
@@ -119,6 +127,7 @@ proc appendLine*(s: BuildSession; line: string) =
     s.lines.delete(0)
     s.truncated = true
   s.lines.add line
+  inc s.received
 
 proc requestCancel*(s: BuildSession) =
   ## Ask for the build to stop. IDEMPOTENT and valid at any time: a user

@@ -101,6 +101,7 @@ set -g mouse on                                # the mouse reaches CodeTracer
 set -as terminal-features ',<your-term>*:RGB'  # 24-bit colour
 set -g extended-keys on                        # Ctrl+Shift chords
 set -g set-clipboard on                        # copy reaches your clipboard
+set -g allow-passthrough on                    # pointer shapes reach the terminal
 set -g focus-events on                         # the VCS pane refreshes on return
 ```
 

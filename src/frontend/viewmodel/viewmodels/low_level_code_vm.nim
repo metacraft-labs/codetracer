@@ -83,7 +83,7 @@ type
       ## code again.
     sources: SourceProvider
       ## Where source text comes from; a DAP provider over the store's
-      ## backend unless a host installed one (`setSourceProvider`).
+      ## backend unless something installed another (the suites do).
 
     # -- Anchoring (NS4, Generated-Code-Listing.md §3.1/§4) --
     anchors*: Signal[seq[MappingAnchor]]
@@ -195,10 +195,6 @@ proc setActiveLine*(vm: LowLevelCodeVM; path: string; line: int) =
   ## Where the debugger is in the listing's source.
   vm.activePath.val = path
   vm.activeLine.val = line
-
-proc setSourceProvider*(vm: LowLevelCodeVM; provider: SourceProvider) =
-  ## Use `provider` for the groups' source text instead of the DAP default.
-  vm.sources = provider
 
 proc clearInstructions*(vm: LowLevelCodeVM) =
   ## Reset the row list and the active-offset / error signals.  Called

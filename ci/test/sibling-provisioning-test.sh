@@ -719,12 +719,18 @@ fi
 # with nothing noticing: on 2026-10-24 six workflow lines named
 # codetracer-native-backend at a859cfb9 while flake.lock locked 742cc6d0,
 # and io-mon's entries trailed its flake.lock rev the same way.
+# The isonim family joined on 2026-10-27: deploy-web-codetracer.yml names its
+# nine members by SHA so the web renderer compiles against them, and they
+# trailed flake.lock twice in a week -- the first time the cloud deploy of
+# dev 05f2247b46 stopped at "renderer: did not build" (`firstElementChild`
+# missing from isonim 45673bba), and three days later four of the nine had
+# moved again with nothing here noticing.
 # `reprobuild-packages` stays out: deploy-web-codetracer.yml pins a catalog
 # revision its flake input does not track yet, deliberately and documented.
 # nim-stackable-hooks stays out until its two flake.lock nodes agree (see the
 # ceiling note above); its entries are `=dev` anyway.
 # ---------------------------------------------------------------------------
-readonly FLAKE_PINNED_SIBLINGS='codetracer-trace-format codetracer-trace-format-nim codetracer-native-recorder codetracer-native-backend codetracer-visual-replay io-mon'
+readonly FLAKE_PINNED_SIBLINGS='codetracer-trace-format codetracer-trace-format-nim codetracer-native-recorder codetracer-native-backend codetracer-visual-replay io-mon isonim isonim-tui isonim-gpui nim-everywhere nim-termctl nim-pty nim-acp nim-agent-harbor nim-agents'
 
 # jq, not python3: jq is on every runner this suite is meant to run on -- the
 # stock ubuntu-latest of `ci-contract-suites` and the self-hosted NixOS and
@@ -784,7 +790,7 @@ elif [ "${#flake_pin_mismatches[@]}" -eq 0 ]; then
 else
 	fail "every SHA-pinned flake-input sibling equals its flake.lock locked.rev" \
 		"the sibling checkout and the Nix lane would compile different revisions;" \
-		"'bash scripts/sibling-pins.sh' prints the lines these blocks should carry" \
+		"'bash scripts/sibling-pins.sh --all' prints the lines for every sibling it declares" \
 		"${flake_pin_mismatches[@]}"
 fi
 

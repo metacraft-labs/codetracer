@@ -1,0 +1,80 @@
+{
+  "evidence": [
+    {
+      "state": "ready",
+      "kind": "Collected review evidence",
+      "shape": "2 files · a1b2c3d4e5f6...",
+      "dataset": "<evidence>/iteration-1.json",
+      "command": "ct review collect --repo . --diff main..HEAD --recordings .ct/runs -o <evidence>/iteration-1.json",
+      "note": null,
+      "open": true,
+      "output": null
+    },
+    {
+      "state": "ready",
+      "kind": "Handed over review evidence",
+      "shape": "1 file · a1b2c3d4e5f6...",
+      "dataset": "<evidence>/iteration-2.json",
+      "command": "ct agent evidence <evidence>/iteration-2.json",
+      "note": null,
+      "open": true,
+      "output": null
+    },
+    {
+      "state": "unavailable",
+      "kind": "Collected review evidence",
+      "shape": null,
+      "dataset": "<evidence>/gone.json",
+      "command": "ct review collect --repo . --diff main..HEAD --recordings .ct/runs -o <evidence>/gone.json",
+      "note": "The review dataset at <evidence>/gone.json could not be read. no review dataset at <evidence>/gone.json",
+      "open": false,
+      "output": null
+    },
+    {
+      "state": "failed",
+      "kind": "Collected review evidence",
+      "shape": null,
+      "dataset": "<evidence>/failed.json",
+      "command": "ct review collect --repo . --diff main..HEAD --recordings .ct/runs -o <evidence>/failed.json",
+      "note": "This command failed, so there is no review dataset to open.",
+      "open": false,
+      "output": "error: `ct review collect` found no recordings under .ct/runs"
+    },
+    {
+      "state": "unreported",
+      "kind": "Collected review evidence",
+      "shape": null,
+      "dataset": "<evidence>/pending.json",
+      "command": "ct review collect --repo . --diff main..HEAD --recordings .ct/runs -o <evidence>/pending.json",
+      "note": "No outcome has been reported for this command yet.",
+      "open": false,
+      "output": null
+    }
+  ],
+  "testRun": {
+    "state": "failed",
+    "title": "ct-mcr record --source tests/calc.c",
+    "status": "1 passed, 1 failed, 1 errored · 135ms",
+    "tests": [
+      {
+        "outcome": "passed",
+        "name": "test_add",
+        "duration": "135ms",
+        "recording": true
+      },
+      {
+        "outcome": "failed",
+        "name": "test_sub",
+        "duration": "12ms",
+        "recording": false
+      },
+      {
+        "outcome": "errored",
+        "name": "test_mul",
+        "duration": "40ms",
+        "recording": false
+      }
+    ]
+  },
+  "contextMenu": []
+}

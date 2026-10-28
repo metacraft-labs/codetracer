@@ -66,6 +66,16 @@ type
       ## opened to fifty rows would bury the conversation it sits in.
     expandedTests*: Signal[seq[string]]
       ## `expansionKey(anchorId, testId)` for each expanded test row.
+    toggledThoughts*: Signal[seq[string]]
+      ## Ids of the agent turns the reader flipped from their default
+      ## (`agent_activity_text.startsCollapsed`): a finished turn opened, or
+      ## an open one closed.  Recorded as a flip rather than as "open" so a
+      ## turn that finishes while the reader watches collapses the way the
+      ## desktop's does.  The desktop view flips DOM classes for the same
+      ## gesture; the native front-ends, which repaint from values, read this.
+    expandedToolHistories*: Signal[seq[string]]
+      ## `toolHistoryKey(messageId, group)` for each tool-call group whose
+      ## earlier calls the reader opened ("N tools used").
     evidenceCalls*: Signal[seq[EvidenceCall]]
       ## AA-3 — the session's evidence handoffs, re-derived from `messages` on
       ## every `setMessages` for the same reason `testRuns` is: one projection,
@@ -173,6 +183,31 @@ proc expansionKey*(anchorId, testId: string): string {.noSideEffect.} =
   ## (`normalizeIdComponent` collapses whitespace and never emits control
   ## characters), so the pair cannot alias.
   anchorId & "\x1f" & testId
+
+proc toggleIn(list: var seq[string]; key: string) =
+  let index = list.find(key)
+  if index >= 0: list.delete(index) else: list.add key
+
+proc isThoughtToggled*(vm: AgentActivityVM; messageId: string): bool =
+  messageId in vm.toggledThoughts.val
+
+proc toggleThought*(vm: AgentActivityVM; messageId: string) =
+  ## Flip one agent turn between collapsed and open.
+  var toggled = vm.toggledThoughts.val
+  toggled.toggleIn messageId
+  vm.toggledThoughts.val = toggled
+
+proc toolHistoryKey*(messageId: string; group: int): string {.noSideEffect.} =
+  messageId & "\x1f" & $group
+
+proc isToolHistoryExpanded*(vm: AgentActivityVM; messageId: string;
+                            group: int): bool =
+  toolHistoryKey(messageId, group) in vm.expandedToolHistories.val
+
+proc toggleToolHistory*(vm: AgentActivityVM; messageId: string; group: int) =
+  var expanded = vm.expandedToolHistories.val
+  expanded.toggleIn toolHistoryKey(messageId, group)
+  vm.expandedToolHistories.val = expanded
 
 proc datasetIndex(vm: AgentActivityVM; datasetPath: string): int =
   for i, entry in vm.evidenceDatasets.val:
@@ -399,6 +434,56 @@ proc openEvidence*(vm: AgentActivityVM; anchorId: string): bool =
     kind: rdrOpen)
   true
 
+# ---------------------------------------------------------------------------
+# A live agent session (the store's `AgentServiceSessionEntry`) as the feed
+# ---------------------------------------------------------------------------
+
+proc eventToActivityMessage*(event: AgentServiceEventEntry):
+    AgentActivityMessageEntry =
+  ## One event of a live session as a feed row.
+  ##
+  ## Lives here, beside the panel's model, rather than in
+  ## `agentic_session_vm`: the desktop's agentic coordinator and the native
+  ## front-ends' agent host both project the same store entry, and two
+  ## projections would be two answers to "what does this event read as".
+  var content = event.text
+  if content.len == 0:
+    content = event.toolName
+  if content.len == 0:
+    content = event.filePath
+  if content.len == 0:
+    content = $event.kind
+  AgentActivityMessageEntry(
+    id: event.id,
+    content: content,
+    role: aamrAgent,
+    canceled: event.kind == aseCancelled,
+    isLoading: event.kind notin {aseCompleted, aseCancelled, aseError},
+    # AA-3: the tool identity survives the projection instead of being
+    # collapsed into `content` above.  `content` still falls back to the tool
+    # name so nothing renders blank; these fields say *why* it reads that way.
+    toolName: event.toolName,
+    toolCallId: event.toolCallId,
+    status: event.status)
+
+proc activityMessagesOf*(session: AgentServiceSessionEntry):
+    seq[AgentActivityMessageEntry] =
+  for event in session.events:
+    result.add event.eventToActivityMessage()
+
+proc agentSessionRunning*(session: AgentServiceSessionEntry): bool =
+  ## Whether the agent is still at work — what puts the panel's prompt into
+  ## its "stop" state and what the session tab's indicator animates on
+  ## (`headless_app/session_tabs.agentOf`, the same two lifecycles).
+  session.lifecycle in {aslConnecting, aslRunning}
+
+proc applyAgentSession*(vm: AgentActivityVM;
+                        session: AgentServiceSessionEntry) =
+  ## Put a live session into the panel.
+  vm.setMessages(session.activityMessagesOf())
+  vm.isLoading.val = session.agentSessionRunning()
+  vm.sessionKey.val = session.tabId
+
 proc setTerminals*(vm: AgentActivityVM;
                    terminals: openArray[AgentActivityTerminalEntry]) =
   vm.terminals.val = @terminals
@@ -500,6 +585,8 @@ proc clearConversation*(vm: AgentActivityVM) =
   vm.testRuns.val = @[]
   vm.expandedTestRuns.val = @[]
   vm.expandedTests.val = @[]
+  vm.toggledThoughts.val = @[]
+  vm.expandedToolHistories.val = @[]
   vm.evidenceCalls.val = @[]
   # The dataset answers go too: they belong to the conversation that named
   # them, and a file read for the previous session may since have changed.
@@ -521,6 +608,8 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
     let testRuns = createSignal(newSeq[AgentTestRunEntry]())
     let expandedTestRuns = createSignal(newSeq[string]())
     let expandedTests = createSignal(newSeq[string]())
+    let toggledThoughts = createSignal(newSeq[string]())
+    let expandedToolHistories = createSignal(newSeq[string]())
     let evidenceCalls = createSignal(newSeq[EvidenceCall]())
     let evidenceDatasets = createSignal(newSeq[EvidenceDatasetEntry]())
     let terminals = createSignal(newSeq[AgentActivityTerminalEntry]())
@@ -569,6 +658,8 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
       testRuns: testRuns,
       expandedTestRuns: expandedTestRuns,
       expandedTests: expandedTests,
+      toggledThoughts: toggledThoughts,
+      expandedToolHistories: expandedToolHistories,
       evidenceCalls: evidenceCalls,
       evidenceDatasets: evidenceDatasets,
       terminals: terminals,

@@ -24,9 +24,10 @@ RUNTIME = "src/frontend/tui/app/runtime.nim"
 
 PROFILE = "src/frontend/tui/app/tests/test_plat71_terminal_profile.nim"
 PTY = "src/frontend/tui/tests/real_terminal/test_plat71_terminal_pty.nim"
+GLYPHS = "src/frontend/tui/tests/test_plat71_glyph_table.nim"
 
 SUBJECTS = [REPORT, RUNTIME]
-SUITES = [PROFILE, PTY]
+SUITES = [PROFILE, PTY, GLYPHS]
 IN_BINARY = {REPORT, RUNTIME}
 
 TA13 = "*::TA-13: the report's JSON names a source for every axis"
@@ -50,6 +51,10 @@ ARMS = [
              "  discard name")],
      [(PTY, P_INFO)],
      "§10.1: :terminal-info does not show the key it was given"),
+    ("C5", [(RUNTIME, "  if rt.caps.clipboard == ClipboardInAppOnly:",
+             "  if false:")],
+     [(GLYPHS, "*::§8: a copy without OSC 52 says it stayed inside CodeTracer")],
+     "§8: a copy on a terminal without OSC 52 claims the system clipboard"),
 ]
 
 

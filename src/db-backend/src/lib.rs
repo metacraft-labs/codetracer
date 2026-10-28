@@ -255,6 +255,18 @@ pub fn _start() {
     wasm_logger::init(wasm_logger::Config::default());
 }
 
+/// Make the engine's handler for `command` panic on purpose, for a test of
+/// the browser panic net (`dap.rs`, `browser_panic_net`): no real request is
+/// guaranteed to panic, so a test needs a deliberate one. Call it after the
+/// module is initialised and before `wasm_start`; nothing calls it in
+/// production. The native server is armed by an environment variable
+/// instead (`dap_server::TEST_PANIC_ON_COMMAND_ENV`).
+#[cfg(feature = "browser-transport")]
+#[wasm_bindgen]
+pub fn wasm_test_panic_on_command(command: &str) -> Result<(), JsValue> {
+    dap_server::arm_test_panic_on_command(command).map_err(|e| JsValue::from_str(&e))
+}
+
 /// Write a file into the in-memory VFS so that trace data is accessible to the
 /// DAP server before any requests arrive.  Called from JavaScript after the WASM
 /// module is initialised but before `wasm_start`.

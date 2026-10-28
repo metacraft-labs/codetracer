@@ -1,0 +1,3 @@
+# The recorded sessions the narrative test reads are fixtures, not logs: the
+# repository's `*.log` rule must not keep them out.
+!*.jsbound.log

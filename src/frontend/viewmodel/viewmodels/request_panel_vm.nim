@@ -97,6 +97,8 @@ import std/[json, strutils]
 import isonim/core/[signals, computation, owner, batch, async_compat]
 import isonim/viewmodel
 
+import ./action_sink
+
 import ../backend/backend_service
 import ../store/[replay_data_store, types]
 import ../viewport
@@ -110,6 +112,10 @@ const NO_SELECTED_INDEX* = -1
 type
   RequestPanelVM* = ref object of ViewModel
     ## Reactive state for the HTTP Request panel.
+    actionSink*: ActionSink
+      ## Set in a mirror session (a VS Code webview, a `ct host` page): the
+      ## view's actions run on the primary (`action_sink`,
+      ## `sync/action_relay`); nil on a primary.
     store*: ReplayDataStore
 
     # -- Mutable state --
@@ -294,6 +300,9 @@ proc selectRequest*(vm: RequestPanelVM; index: int) =
   ## relative to the *filtered* list so the view's iteration index
   ## maps directly onto this signal.  ``NO_SELECTED_INDEX`` clears
   ## the selection.
+  if vm.actionSink.forwards("requestPanel", "selectRequest",
+      %*{"index": index}):
+    return
   vm.selectedIndex.val = index
   let rows = vm.filteredRequests.val
   vm.selectedId = if index >= 0 and index < rows.len: rows[index].id else: 0
@@ -318,12 +327,19 @@ proc setViewport*(vm: RequestPanelVM; v: Viewport) =
   ## The rows the view shows — the ONE way a view tells this ViewModel what
   ## it shows (Viewport-Driven-Loading V1). For a completed recording the
   ## window of matching requests is then asked for, filtered by the engine.
+  # A mirror reports its measured size to the primary and keeps it too.
+  discard vm.actionSink.forwards("viewport", "set", %*{
+    "pane": "requestPanel", "rows": v.rows, "depth": v.cols,
+    "firstRow": v.firstRow})
   vm.viewportGate.submit(v)
 
 proc setFilterMethod*(vm: RequestPanelVM; methodFilter: string) =
   ## Update the method filter and reset the selected-row reference —
   ## any prior selection refers to a row in the previously-filtered
   ## list whose index may no longer be valid.
+  if vm.actionSink.forwards("requestPanel", "setFilterMethod",
+      %*{"filter": methodFilter}):
+    return
   vm.filterMethod.val = methodFilter
   vm.selectedIndex.val = NO_SELECTED_INDEX
   vm.selectedId = 0
@@ -331,17 +347,25 @@ proc setFilterMethod*(vm: RequestPanelVM; methodFilter: string) =
 proc setFilterStatus*(vm: RequestPanelVM; statusFilter: string) =
   ## Update the status-bucket filter; same selection-reset reasoning
   ## as ``setFilterMethod``.
+  if vm.actionSink.forwards("requestPanel", "setFilterStatus",
+      %*{"filter": statusFilter}):
+    return
   vm.filterStatus.val = statusFilter
   vm.selectedIndex.val = NO_SELECTED_INDEX
   vm.selectedId = 0
 
 proc setDetailTab*(vm: RequestPanelVM; tab: string) =
   ## Switch the active tab in the request detail panel.
+  if vm.actionSink.forwards("requestPanel", "setDetailTab", %*{"tab": tab}):
+    return
   vm.detailTab.val = tab
 
 proc setSearchText*(vm: RequestPanelVM; searchText: string) =
   ## Update the URL search text; same selection-reset reasoning as
   ## ``setFilterMethod``.
+  if vm.actionSink.forwards("requestPanel", "setSearchText",
+      %*{"text": searchText}):
+    return
   vm.searchText.val = searchText
   vm.selectedIndex.val = NO_SELECTED_INDEX
   vm.selectedId = 0
@@ -360,6 +384,9 @@ proc jumpToHandler*(vm: RequestPanelVM; index: int) =
   ##   opened instead through the injected ``openExternalTrace`` hook.
   ##
   ## An out-of-range index is a silent no-op.
+  if vm.actionSink.forwards("requestPanel", "jumpToHandler",
+      %*{"index": index}):
+    return
   let filtered = vm.filteredRequests.val
   if index < 0 or index >= filtered.len:
     return

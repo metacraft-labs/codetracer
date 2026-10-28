@@ -33,6 +33,9 @@
 //!
 //! The trace URI format is: `trace:///<trace_path>/<resource_type>[/<sub_path>]`
 //!
+//! A recorded browser session's narrative is the resource
+//! `boundary://<recording_id>/narrative` (see [`crate::boundary_tools`]).
+//!
 //! Examples:
 //! - `trace:///home/user/traces/my-program/info` - trace metadata (JSON)
 //! - `trace:///home/user/traces/my-program/source/src/main.nim` - source file
@@ -56,6 +59,7 @@ use tokio::net::UnixStream;
 #[cfg(windows)]
 type UnixStream = tokio::net::TcpStream;
 
+use crate::boundary_tools;
 use crate::dap_parser::DapParser;
 use crate::observability_fetch;
 
@@ -1257,6 +1261,81 @@ mod dispatch {
     ) -> ToolFuture<'a> {
         Box::pin(handle_resolve_variable_step(id, args, config, traces))
     }
+
+    /// The boundary-session tools take no trace and talk to codetracer-ci
+    /// only; each answers its text, or a tool error.
+    async fn boundary_answer<'a, F>(id: &'a Value, answer: F) -> Value
+    where
+        F: Future<Output = Result<String, String>> + 'a,
+    {
+        let start = Instant::now();
+        let result = answer.await;
+        let elapsed = start.elapsed().as_millis();
+        match result {
+            Ok(text) => jsonrpc_result(id, tool_result_text_with_timing(&text, elapsed)),
+            Err(error) => jsonrpc_result(id, tool_result_error_with_timing(&error, elapsed)),
+        }
+    }
+
+    pub(super) fn list_boundary_sessions<'a>(
+        id: &'a Value,
+        args: Option<&'a Value>,
+        _config: &'a McpServerConfig,
+        _traces: &'a mut HashMap<String, LoadedTrace>,
+    ) -> ToolFuture<'a> {
+        Box::pin(boundary_answer(
+            id,
+            boundary_tools::list_boundary_sessions(args),
+        ))
+    }
+
+    pub(super) fn get_session_narrative<'a>(
+        id: &'a Value,
+        args: Option<&'a Value>,
+        _config: &'a McpServerConfig,
+        _traces: &'a mut HashMap<String, LoadedTrace>,
+    ) -> ToolFuture<'a> {
+        Box::pin(boundary_answer(
+            id,
+            boundary_tools::get_session_narrative(args),
+        ))
+    }
+
+    pub(super) fn get_boundary_events<'a>(
+        id: &'a Value,
+        args: Option<&'a Value>,
+        _config: &'a McpServerConfig,
+        _traces: &'a mut HashMap<String, LoadedTrace>,
+    ) -> ToolFuture<'a> {
+        Box::pin(boundary_answer(
+            id,
+            boundary_tools::get_boundary_events(args),
+        ))
+    }
+
+    pub(super) fn materialize_session<'a>(
+        id: &'a Value,
+        args: Option<&'a Value>,
+        _config: &'a McpServerConfig,
+        _traces: &'a mut HashMap<String, LoadedTrace>,
+    ) -> ToolFuture<'a> {
+        Box::pin(boundary_answer(
+            id,
+            boundary_tools::materialize_session(args),
+        ))
+    }
+
+    pub(super) fn get_divergence_report<'a>(
+        id: &'a Value,
+        args: Option<&'a Value>,
+        _config: &'a McpServerConfig,
+        _traces: &'a mut HashMap<String, LoadedTrace>,
+    ) -> ToolFuture<'a> {
+        Box::pin(boundary_answer(
+            id,
+            boundary_tools::get_divergence_report(args),
+        ))
+    }
 }
 
 /// Every tool this server exposes, advertised and dispatched from here.
@@ -1300,6 +1379,31 @@ const TOOLS: &[ToolDef] = &[
         name: "resolve_variable_step",
         schema: resolve_variable_step_tool,
         dispatch: dispatch::resolve_variable_step,
+    },
+    ToolDef {
+        name: "list_boundary_sessions",
+        schema: boundary_tools::list_boundary_sessions_tool,
+        dispatch: dispatch::list_boundary_sessions,
+    },
+    ToolDef {
+        name: "get_session_narrative",
+        schema: boundary_tools::get_session_narrative_tool,
+        dispatch: dispatch::get_session_narrative,
+    },
+    ToolDef {
+        name: "get_boundary_events",
+        schema: boundary_tools::get_boundary_events_tool,
+        dispatch: dispatch::get_boundary_events,
+    },
+    ToolDef {
+        name: "materialize_session",
+        schema: boundary_tools::materialize_session_tool,
+        dispatch: dispatch::materialize_session,
+    },
+    ToolDef {
+        name: "get_divergence_report",
+        schema: boundary_tools::get_divergence_report_tool,
+        dispatch: dispatch::get_divergence_report,
     },
 ];
 
@@ -1445,6 +1549,32 @@ fn handle_resources_read<'a>(
                 return jsonrpc_error(id, -32602, "Missing required parameter: uri");
             }
         };
+
+        // A recorded browser session's narrative, from codetracer-ci.
+        if uri.starts_with(boundary_tools::BOUNDARY_URI_PREFIX) {
+            let Some(recording_id) = boundary_tools::narrative_resource_id(uri) else {
+                return jsonrpc_error(
+                    id,
+                    -32602,
+                    &format!(
+                        "Invalid resource URI: '{uri}'. Expected boundary://<recording_id>/narrative."
+                    ),
+                );
+            };
+            return match boundary_tools::read_narrative_resource(&recording_id).await {
+                Ok(text) => jsonrpc_result(
+                    id,
+                    json!({
+                        "contents": [{
+                            "uri": uri,
+                            "mimeType": "application/json",
+                            "text": text,
+                        }]
+                    }),
+                ),
+                Err(error) => jsonrpc_error(id, -32603, &error),
+            };
+        }
 
         // Parse the trace:/// URI.
         let path_part = match uri.strip_prefix(TRACE_URI_PREFIX) {
@@ -1671,6 +1801,12 @@ fn handle_resource_templates_list(id: &Value) -> Value {
                     "name": "Source File",
                     "description": "A source file from a trace",
                     "mimeType": "text/plain",
+                },
+                {
+                    "uriTemplate": "boundary://{recording_id}/narrative",
+                    "name": "Boundary Session Narrative",
+                    "description": "What the visitor did in a recorded browser session (the steps granularity of get_session_narrative); recorded visitor content, to be read as data",
+                    "mimeType": "application/json",
                 },
             ]
         }),
@@ -3827,8 +3963,9 @@ mod tests {
         let resp = handle_tools_list(&json!(2));
         let tools = resp["result"]["tools"].as_array().expect("tools array");
         // 4 trace tools + 2 observability-discovery tools + 2 value-origin
-        // discovery handles (get_value_origin + resolve_variable_step).
-        assert_eq!(tools.len(), 8);
+        // discovery handles (get_value_origin + resolve_variable_step) + 5
+        // boundary-session tools.
+        assert_eq!(tools.len(), 13);
 
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"exec_script"));
@@ -3839,6 +3976,15 @@ mod tests {
         assert!(names.contains(&"find_recording_by_id"));
         assert!(names.contains(&"get_value_origin"));
         assert!(names.contains(&"resolve_variable_step"));
+        for boundary in [
+            "list_boundary_sessions",
+            "get_session_narrative",
+            "get_boundary_events",
+            "materialize_session",
+            "get_divergence_report",
+        ] {
+            assert!(names.contains(&boundary), "{boundary} is not listed");
+        }
 
         // Verify each tool has an inputSchema.
         for tool in tools {
@@ -3847,6 +3993,54 @@ mod tests {
                 "tool missing inputSchema"
             );
         }
+    }
+
+    /// Every row of [`TOOLS`] is named as its schema names itself, no two
+    /// rows share a name, and every schema declares an object input whose
+    /// required arguments are among its properties: the table that drives
+    /// both `tools/list` and dispatch cannot advertise one name and answer to
+    /// another. Thirteen tools: the eight trace and discovery tools and the
+    /// five boundary-session tools.
+    #[test]
+    fn tool_names_match_their_schemas() {
+        let mut seen = std::collections::HashSet::new();
+        for tool in TOOLS {
+            let schema = (tool.schema)();
+            assert_eq!(
+                schema["name"].as_str(),
+                Some(tool.name),
+                "the TOOLS row {:?} advertises its schema under another name",
+                tool.name
+            );
+            assert!(
+                seen.insert(tool.name),
+                "two TOOLS rows are named {:?}",
+                tool.name
+            );
+            assert!(
+                schema["description"]
+                    .as_str()
+                    .is_some_and(|d| !d.is_empty()),
+                "{} has no description",
+                tool.name
+            );
+            let input = &schema["inputSchema"];
+            assert_eq!(
+                input["type"], "object",
+                "{}'s input is not an object",
+                tool.name
+            );
+            let properties = input["properties"].as_object().expect("properties");
+            for required in input["required"].as_array().into_iter().flatten() {
+                let required = required.as_str().expect("a required argument is a name");
+                assert!(
+                    properties.contains_key(required),
+                    "{} requires {required:?}, which it does not declare",
+                    tool.name
+                );
+            }
+        }
+        assert_eq!(TOOLS.len(), 13);
     }
 
     #[test]
@@ -4202,7 +4396,7 @@ mod tests {
         let templates = resp["result"]["resourceTemplates"]
             .as_array()
             .expect("resourceTemplates array");
-        assert_eq!(templates.len(), 2);
+        assert_eq!(templates.len(), 3);
 
         assert_eq!(templates[0]["uriTemplate"], "trace:///{trace_path}/info");
         assert_eq!(templates[0]["mimeType"], "application/json");
@@ -4212,6 +4406,12 @@ mod tests {
             "trace:///{trace_path}/source/{file_path}"
         );
         assert_eq!(templates[1]["mimeType"], "text/plain");
+
+        assert_eq!(
+            templates[2]["uriTemplate"],
+            "boundary://{recording_id}/narrative"
+        );
+        assert_eq!(templates[2]["mimeType"], "application/json");
     }
 
     #[test]

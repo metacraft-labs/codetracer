@@ -598,6 +598,13 @@ pub async fn execute_script(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        // A script that outlives its timeout is killed when its handle is
+        // dropped (the timeout below drops it). `tokio::process::Child` does
+        // not kill on drop by default
+        // (<https://docs.rs/tokio/latest/tokio/process/struct.Command.html#method.kill_on_drop>):
+        // without this the timed-out script ran on, to the end of whatever it
+        // was doing, and past the daemon's own exit.
+        .kill_on_drop(true)
         .spawn()
         .map_err(|e| format!("Failed to spawn {}: {e}", python.display()))?;
 
@@ -644,10 +651,9 @@ pub async fn execute_script(
         Err(_) => {
             // Timeout reached — kill the subprocess and return a timeout result.
             //
-            // Note: `child` was moved into the async block above, but the
-            // timeout means that block's future was dropped.  The drop
-            // implementation of `tokio::process::Child` kills the child
-            // process automatically when the handle is dropped.
+            // `child` was moved into the async block above, and the timeout
+            // dropped that block's future with it: `kill_on_drop(true)` (set
+            // where it is spawned) makes that drop kill the script.
             Ok(ScriptResult {
                 stdout: String::new(),
                 stderr: format!("Script execution timed out after {timeout_seconds} seconds"),

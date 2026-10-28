@@ -629,8 +629,10 @@ suite "PLAT-21: the product's panes, in the vocabulary, on a real recording":
 
   liveTest "the entries each pane uses are the ones the module declares":
     publishTracepoints()
+    # The State pane is one list of variables and watches: no Locals /
+    # Globals / Watches tab strip, so no `pkTabs` (9ae2786b72).
     ck paneView(paneState, vmFor(paneState), GpuiPanelBudget, "gpui").entries ==
-       {pkTree, pkTabs, pkCollapsible}
+       {pkTree, pkCollapsible}
     ck paneView(paneCalltrace, vmFor(paneCalltrace), GpuiPanelBudget,
                 "gpui").entries == {pkList}
     ck paneView(paneEventLog, vmFor(paneEventLog), GpuiPanelBudget,
@@ -644,7 +646,8 @@ suite "PLAT-21: three renderers, one pane view, the same state":
   liveTest "the state pane renders the same state on all three media":
     var t = buildThreeWay(paneState, GpuiPanelBudget)
     allThreeAgree(t, "the state pane as opened")
-    allThreeSay(t, "state.tabs.selected", "0")
+    # One list, no tab strip: no medium reports a selected tab at all.
+    allThreeSay(t, "state.tabs.selected", "<absent>")
     allThreeSay(t, "state.root.cursor", "0")
     allThreeSay(t, "state.expanded", "true")
     # Every variable plus the tree root, and the number comes from the

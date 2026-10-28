@@ -138,6 +138,13 @@ type
       recordKeys*: string
       replayKeys*: string
         ## `--record-keys=<file>` and `--replay-keys=<file>`, or "".
+      reviewSession*: string
+        ## PLAT-54: `--review-session=<file>` — the agent session `ct review`
+        ## resolved for the review this window opens (the desktop's
+        ## `--review-session`), loaded into Agent Activity; "" when absent.
+      reviewDataset*: string
+        ## PLAT-54: `--deepreview=<dataset>` — the review the window opens on
+        ## (the desktop's `--deepreview`), entered into the VCS pane; "".
       dividers*: DividerChoice
         ## PLAT-50: `--dividers=strip|subtle` — the colour a pane divider is
         ## drawn in (`roles.DividerChoice`); `strip` when absent.
@@ -355,6 +362,10 @@ options:
   --goto=TICK        seek to TICK before the first debugger frame
   --record-keys=FILE write every input token to FILE, one per line
   --replay-keys=FILE read input from FILE instead of the keyboard, then exit
+  --deepreview=FILE  open the review dataset FILE in the VCS pane
+  --review-session=FILE
+                     show the agent session FILE (as `ct review` resolves
+                     it) in Agent Activity
   --layout-binding   (default) : and the mouse rearrange panes; remembered
   --no-flow-overlay  do not dim the lines the run did not reach
   --dividers=NAME    strip (default: pane dividers in the tab strips' ground,
@@ -501,6 +512,8 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
   var gotoTick = NoGotoTick
   var recordKeys = ""
   var replayKeys = ""
+  var reviewSession = ""
+  var reviewDataset = ""
   var layoutBinding = false
   var noFlowOverlay = false
   var dividers = dcStrip
@@ -692,6 +705,24 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
                 kind: tckUsageError,
                 message: "'--replay-keys' needs a file to read from")
             replayKeys = replayPath
+            break options
+          # PLAT-54: the review a window opens on, and its agent session —
+          # the two arguments `ct review` hands the desktop.
+          let (isSession, sessionPath) = optionValue(arg, "--review-session")
+          if isSession:
+            if sessionPath.len == 0:
+              return TuiCommand(
+                kind: tckUsageError,
+                message: "'--review-session' needs the resolved session file")
+            reviewSession = sessionPath
+            break options
+          let (isDataset, datasetPath) = optionValue(arg, "--deepreview")
+          if isDataset:
+            if datasetPath.len == 0:
+              return TuiCommand(
+                kind: tckUsageError,
+                message: "'--deepreview' needs a review dataset")
+            reviewDataset = datasetPath
             break options
           let (planned, owner) = plannedOption(arg)
           if planned:
@@ -926,7 +957,8 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
                focusHighlight: settingOverrides[lsFocusHighlight],
                liveResize: settingOverrides[lsLiveResize],
                overflowMarkers: settingOverrides[lsOverflowMarkers],
-               layoutFlags: layoutFlags, keymap: keymap)
+               layoutFlags: layoutFlags, keymap: keymap,
+               reviewSession: reviewSession, reviewDataset: reviewDataset)
   else:
     TuiCommand(kind: tckOpenTrace, tracePath: tracePath, flags: flags,
                gotoTick: gotoTick, recordKeys: recordKeys,
@@ -935,4 +967,5 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
                focusHighlight: settingOverrides[lsFocusHighlight],
                liveResize: settingOverrides[lsLiveResize],
                overflowMarkers: settingOverrides[lsOverflowMarkers],
-               layoutFlags: layoutFlags, keymap: keymap)
+               layoutFlags: layoutFlags, keymap: keymap,
+               reviewSession: reviewSession, reviewDataset: reviewDataset)

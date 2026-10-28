@@ -2514,6 +2514,9 @@ var callTraceHView*, eventLogHView*: HorizontalView
   ## frame's fit by the pane's render; the window's wheel and bar move them.
 var callTracePaneHeightPx* = 0
   ## The call trace pane body's height, set by the window (its bar's row).
+var eventLogTableHeightPx* = 0
+  ## The Event Log's header and drawn rows, in pixels — where its sideways
+  ## bar starts below the toolbar (the window's hit test reads it).
 var eventLogWidestPx*: array[EventLogColumn, int]
   ## Each Event Log column's widest cell over the rows last drawn, in pixels
   ## — what the window's separator hit-test lays the columns out from too.
@@ -2524,7 +2527,7 @@ const
     ## `::-webkit-scrollbar`, the State pane's (`StateScrollbarPx`).
   TableHBarAttribute* = "data-ct-hscroll"
     ## On a table pane's horizontal bar: `<leftPx>,<contentPx>,<viewportPx>`.
-  TableHBarMinThumbPx = 20
+  TableHBarMinThumbPx* = 20
 
 func gpuiCellUnits*(): int =
   ## One cell of the code face in whole pixels (the solver's `unit`).
@@ -3590,7 +3593,10 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
     # (No pane size yet — a plan drawn before the window laid out — fits all.)
     let cells = if paneW <= 0: high(int) div 2 else: cellsInPx(roomPx)
     let fitted =
-      if row.presented.isNil: fitCell(row.whole, cells)
+      if row.presented.isNil:
+        # PLAT-71 (§9.2): a number is never cut silently.
+        fitCellAs(row.whole, cells,
+                  (if isNumberText(row.whole): ckNumber else: ckEnd))
       else:
         var b = budget
         if paneW > 0: b.cells = max(1, cells)
@@ -4520,11 +4526,16 @@ proc renderEventLog*(r: GpuiRenderer; parent: GpuiElement; vm: EventLogVM;
         let full = eventCellTextOf(ev, col)
         let cellX = widthOfX(col)
         let room = widthOf(col) - eventCellPad(col)
+        # PLAT-71 (§9.2): the location loses its middle, a number is never
+        # cut silently, the output loses its end.
+        let kind = cutKindOf(EventLogTablePane, $col)
         let fitted = if eventLogPaneWidthPx <= 0: fitCell(full, high(int) div 2)
-                     else: fitCell(full, cellsInPx(room))
+                     else: fitCellAs(full, cellsInPx(room), kind)
         if fitted.truncated:
           r.setAttribute(c, TableCutAttribute, $col)
-          let drawn = fitted.text.runeLen
+          let drawn = if fitted.midMarker > 0:
+                        fitted.text[0 ..< fitted.midMarker].runeLen + 1
+                      else: fitted.text.runeLen
           let textX = cellX + eventCellPad(col)
           eventCuts.add CutCell(row: rowTop,
                                 height: eventRowTopPx(line + 1) -
@@ -4560,6 +4571,7 @@ proc renderEventLog*(r: GpuiRenderer; parent: GpuiElement; vm: EventLogVM;
         r.appendChild(table, d)
         inc line
   r.appendChild(pane, table)
+  eventLogTableHeightPx = EventHeaderPx + eventRowTopPx(line)
   if scrolls:
     # §5.5.4: the table's horizontal bar, under its rows.
     let hb = r.createElement("div")

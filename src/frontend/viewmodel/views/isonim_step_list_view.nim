@@ -54,6 +54,9 @@
 ## advances to the corresponding step.
 
 import std/os
+when defined(js):
+  # Enter and Space on a `role="button"` row are its click.
+  import ./isonim_activation
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
@@ -111,7 +114,7 @@ proc onLineClick(vm: StepListVM; line: StepLine): proc() =
 proc renderLineRow[R, N](r: R; vm: StepListVM; line: StepLine;
                          isCurrent: bool): N =
   ui(r):
-    tdiv(class = rowClass(isCurrent),
+    tdiv(role = "button", tabindex = "0", class = rowClass(isCurrent),
          onclick = onLineClick(vm, line)):
       span(class = "step-line-column step-line-delta"):
         text deltaText(line)

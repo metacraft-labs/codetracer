@@ -1089,3 +1089,38 @@ proc createVCSVM*(): VCSVM =
       selectedHunkCount: selectedHunkCount,
       disposeProc: dispose,
     )
+
+# ---------------------------------------------------------------------------
+# PLAT-54: a review's Changed Files, in the words every front-end shows
+# ---------------------------------------------------------------------------
+
+const VCSNoChangedFilesText* = "No changed files"
+  ## What an empty Changed Files section says.
+
+proc vcsStatusLabel*(status: string): string =
+  ## A changed file's status letter, from the word a dataset may spell it in.
+  case status
+  of "added": "A"
+  of "deleted": "D"
+  of "modified": "M"
+  else: status
+
+proc changedFilesHeaderText*(vm: VCSVM): string =
+  ## DeepReview-GUI.md §3: "The section header shows the review's file count
+  ## and, when the changeset came from local git history, the commit it
+  ## belongs to."  A standalone patch names no commit, and then only the file
+  ## count is shown. (Moved from the desktop's view, PLAT-54, so the native
+  ## VCS panes head a review's files with the same words.)
+  if vm.deepReviewMode.val:
+    let commit = vm.reviewCommit.val
+    if commit.len > 0:
+      " (" & $vm.fileCount.val & " files, " & commit & ")"
+    else:
+      " (" & $vm.fileCount.val & " files)"
+  elif vm.selectedCommitIndices.val.len == 1:
+    let idx = vm.selectedCommitIndices.val[0]
+    if idx >= 0 and idx < vm.commits.val.len:
+      " (" & vm.commits.val[idx].hash & ")"
+    else: ""
+  else:
+    ""

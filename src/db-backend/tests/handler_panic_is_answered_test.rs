@@ -1,0 +1,325 @@
+//! Every request is answered: a client-supplied id that names nothing is
+//! refused by name, and a handler that panics is answered too.
+//!
+//! The Debug Adapter Protocol requires a response to every request
+//! (<https://microsoft.github.io/debug-adapter-protocol/overview#requests>):
+//! a request that cannot be carried out is answered with `success: false`
+//! and a `message`. The replay server dispatches each request on a task
+//! thread. A panic inside a handler used to end that thread: the request that
+//! panicked got no response at all, so its client waited out its own timeout,
+//! and only *later* requests were refused (by `handle_message`'s dead-channel
+//! arm). `scopes` with a `frameId` no call has was one way to get there: the
+//! handler `expect()`ed the frame to exist.
+//!
+//! The contract these tests hold the shipping `replay-server` to:
+//!
+//! * a request carrying an id that names nothing (a frame, a call key) is
+//!   refused with a message that names the id, and the session goes on
+//!   serving as before;
+//! * a request whose handler panics is answered `success: false` with a
+//!   message naming the command, its `seq` and the panic. The panic may have
+//!   left the thread's session half-changed, so the thread refuses every later
+//!   request by name until a `launch` loads the trace again, after which it
+//!   serves exactly as it did before the panic;
+//! * a `launch` whose setup panics reports the failure with the
+//!   `ct/launch-failed` event, as a failed launch does, and the requests after
+//!   it are answered rather than left waiting.
+//!
+//! # The panic path
+//!
+//! Every panic a client could provoke with a bad argument is now refused
+//! before it happens, so no real request is guaranteed to panic. The panic
+//! tests therefore set `CODETRACER_REPLAY_SERVER_TEST_PANIC_ON_COMMAND`, which
+//! makes the shipping binary panic inside the handler run of the command it
+//! names (`dap_server::TEST_PANIC_ON_COMMAND_ENV`). The panic is raised under
+//! the same `catch_unwind` the real handlers run under, so it exercises the
+//! code path a defect in any handler would take. Without that variable the
+//! binary never panics on purpose, which `named_refusals_*` relies on.
+//!
+//! # No mocks
+//!
+//! The server is the `replay-server` binary this crate builds, spoken to over
+//! stdio by the shipping `ct-dap-client`, and the trace is the committed
+//! materialized fixture
+//! `tests/fixtures/stylus-fund-trace/stylus_fund_tracking_demo.ct`, so this
+//! runs on any host. Its entry stop has a non-empty call stack, which is what
+//! makes "answers exactly as before" a comparison of something.
+
+#![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+use ct_dap_client::client::DapStdioClient;
+use ct_dap_client::protocol::{DapMessage, Response};
+use ct_dap_client::types::launch::LaunchRequestArguments;
+use serde_json::json;
+
+/// The variable that makes the binary panic on purpose in one command's
+/// handler. Spelled out rather than imported so a rename on the server side
+/// fails here by name instead of silently disarming the panic tests.
+const TEST_PANIC_ON_COMMAND_ENV: &str = "CODETRACER_REPLAY_SERVER_TEST_PANIC_ON_COMMAND";
+
+/// A frame id / call key no call in the fixture has: the fixture records a
+/// few hundred calls at most.
+const UNKNOWN_ID: i64 = 987_654_321;
+
+/// How long an answer may take. A refusal or a panic answers at once; the
+/// bound only has to be far below the 20-120 s client timeouts a missing
+/// answer used to run into, and far above scheduling noise.
+const ANSWER_BUDGET: Duration = Duration::from_secs(15);
+
+fn fixture() -> PathBuf {
+    let trace =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/stylus-fund-trace/stylus_fund_tracking_demo.ct");
+    assert!(trace.is_file(), "the committed fixture {} is missing", trace.display());
+    trace
+}
+
+fn launch_args() -> LaunchRequestArguments {
+    LaunchRequestArguments {
+        trace_folder: Some(fixture()),
+        ..Default::default()
+    }
+}
+
+/// A `replay-server` over stdio, with a scratch `CODETRACER_HOME` (kept alive
+/// by the returned guard) and, when `panic_on` names a command, the test
+/// panic armed for it.
+fn spawn(panic_on: Option<&str>) -> (DapStdioClient, tempfile::TempDir) {
+    let home = tempfile::tempdir().expect("scratch CODETRACER_HOME");
+    let home_str = home.path().to_string_lossy().to_string();
+    let mut envs: Vec<(&str, &str)> = vec![("CODETRACER_HOME", home_str.as_str())];
+    if let Some(command) = panic_on {
+        envs.push((TEST_PANIC_ON_COMMAND_ENV, command));
+    }
+    let mut client = DapStdioClient::spawn_with_envs(&PathBuf::from(env!("CARGO_BIN_EXE_replay-server")), &envs)
+        .expect("spawn replay-server");
+    client.initialize().expect("initialize");
+    (client, home)
+}
+
+/// `spawn`, then launch the fixture and wait for the entry stop.
+fn launched(panic_on: Option<&str>) -> (DapStdioClient, tempfile::TempDir) {
+    let (mut client, home) = spawn(panic_on);
+    client.launch(launch_args()).expect("launch");
+    client.configuration_done().expect("configurationDone");
+    client
+        .wait_for_stopped(Duration::from_secs(120))
+        .expect("the launch stops at the entry");
+    (client, home)
+}
+
+/// Read until the response to `seq` arrives, or fail after `ANSWER_BUDGET`.
+fn response_to(client: &mut DapStdioClient, seq: i64, what: &str) -> Response {
+    let deadline = Instant::now() + ANSWER_BUDGET;
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            panic!(
+                "no response to {what} (seq {seq}) within {ANSWER_BUDGET:?}; server stderr:\n{}",
+                client.recent_stderr(40).join("\n")
+            );
+        }
+        match client.recv_message(deadline - now) {
+            Ok(DapMessage::Response(r)) if r.request_seq == seq => return r,
+            Ok(_) => {}
+            Err(e) => panic!(
+                "no response to {what} (seq {seq}): {e}; server stderr:\n{}",
+                client.recent_stderr(40).join("\n")
+            ),
+        }
+    }
+}
+
+/// Send `command` and wait for its response.
+fn ask(client: &mut DapStdioClient, command: &str, arguments: serde_json::Value, what: &str) -> Response {
+    let seq = client
+        .send_request(command, arguments)
+        .unwrap_or_else(|e| panic!("send {command}: {e}"));
+    response_to(client, seq, what)
+}
+
+/// `stackTrace` and `threads`, which the stable task thread serves: what the
+/// session answers, to compare before and after.
+fn control_answers(client: &mut DapStdioClient, when: &str) -> Vec<Response> {
+    let answers = vec![
+        ask(
+            client,
+            "stackTrace",
+            json!({ "threadId": 1 }),
+            &format!("`stackTrace` {when}"),
+        ),
+        ask(client, "threads", json!({}), &format!("`threads` {when}")),
+    ];
+    for answer in &answers {
+        assert!(answer.success, "{} {when} failed: {:?}", answer.command, answer.message);
+    }
+    assert!(
+        answers[0].body["stackFrames"].as_array().is_some_and(|f| !f.is_empty()),
+        "the fixture's session reports no stack frames: {}",
+        answers[0].body
+    );
+    assert!(
+        answers[1].body["threads"].as_array().is_some_and(|t| !t.is_empty()),
+        "the fixture's session reports no threads: {}",
+        answers[1].body
+    );
+    answers
+}
+
+fn assert_same_answers(before: &[Response], after: &[Response], when: &str) {
+    for (b, a) in before.iter().zip(after) {
+        assert_eq!(
+            a.body, b.body,
+            "{} must answer {when} exactly as it did before",
+            a.command
+        );
+    }
+}
+
+/// A failed answer, with its message.
+fn refusal(answer: &Response, what: &str) -> String {
+    assert!(
+        !answer.success,
+        "{what} must be refused, but succeeded: {}",
+        answer.body
+    );
+    answer.message.clone().unwrap_or_default()
+}
+
+#[test]
+fn named_refusals_for_ids_that_name_nothing_leave_the_session_serving() {
+    let (mut client, _home) = launched(None);
+    let before = control_answers(&mut client, "before the refusals");
+
+    let key = UNKNOWN_ID.to_string();
+    let cases = [
+        (
+            "scopes",
+            json!({ "frameId": UNKNOWN_ID }),
+            format!("no frame has frameId {UNKNOWN_ID}"),
+        ),
+        (
+            "ct/load-asm-function",
+            json!({ "path": "", "name": "", "key": key, "forceReload": false }),
+            format!("no call has key {UNKNOWN_ID}"),
+        ),
+        (
+            "ct/expand-calls",
+            json!({ "callKey": key, "nonExpandedKind": 1, "count": 1 }),
+            format!("no call has key {UNKNOWN_ID}"),
+        ),
+        (
+            "ct/expand-calls",
+            json!({ "callKey": "-5", "nonExpandedKind": 4, "count": 1 }),
+            "no call has key -5".to_string(),
+        ),
+        (
+            "ct/collapse-calls",
+            json!({ "callKey": key, "nonExpandedKind": 1, "count": 0 }),
+            format!("no call has key {UNKNOWN_ID}"),
+        ),
+    ];
+    // Each case runs against a server of its own, and every failing case is
+    // reported, so one case that panics (and poisons its thread) cannot hide
+    // what the others do.
+    let _ = client.disconnect();
+    let mut failures: Vec<String> = Vec::new();
+    for (command, arguments, expected) in cases {
+        let what = format!("`{command}` {arguments}");
+        let (mut client, _home) = launched(None);
+        let answer = ask(&mut client, command, arguments, &what);
+        let message = answer.message.clone().unwrap_or_default();
+        if answer.success || !message.contains(&expected) || message.contains("panicked") {
+            failures.push(format!(
+                "{what} must be refused naming the id ({expected:?}), before anything panics. \
+                 Got success={} {message:?}",
+                answer.success
+            ));
+            let _ = client.disconnect();
+            continue;
+        }
+        let after = control_answers(&mut client, &format!("after {what}"));
+        for (b, a) in before.iter().zip(&after) {
+            if a.body != b.body {
+                failures.push(format!(
+                    "{} after {what} answered differently: {} (before: {})",
+                    a.command, a.body, b.body
+                ));
+            }
+        }
+        let _ = client.disconnect();
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn a_handler_panic_is_answered_and_the_thread_refuses_until_relaunched() {
+    let (mut client, _home) = launched(Some("scopes"));
+    let before = control_answers(&mut client, "before the panic");
+
+    // The request whose handler panics is answered, naming what panicked.
+    let seq = client
+        .send_request("scopes", json!({ "frameId": 0 }))
+        .expect("send scopes");
+    let answer = response_to(&mut client, seq, "the panicking `scopes`");
+    assert_eq!(answer.command, "scopes", "the answer names the request's command");
+    let message = refusal(&answer, "the panicking `scopes`");
+    assert!(
+        message.contains("panicked") && message.contains("scopes") && message.contains(&format!("seq {seq}")),
+        "the answer must say that the handler for this command and seq panicked. Got: {message:?}"
+    );
+
+    // The session may be half-changed: every later request is refused by
+    // name, and told how to recover, instead of being served from it.
+    for (command, arguments) in [("stackTrace", json!({ "threadId": 1 })), ("threads", json!({}))] {
+        let what = format!("`{command}` after the panic");
+        let answer = ask(&mut client, command, arguments, &what);
+        let message = refusal(&answer, &what);
+        assert!(
+            message.contains("panicked") && message.contains(&format!("seq {seq}")) && message.contains("launch"),
+            "{what} must be refused naming the panic and the relaunch. Got: {message:?}"
+        );
+    }
+
+    // A launch of the same trace reloads it, and the thread serves again,
+    // exactly as before the panic.
+    client.launch(launch_args()).expect("relaunch");
+    client
+        .wait_for_stopped(Duration::from_secs(120))
+        .expect("the relaunch stops at the entry");
+    let after = control_answers(&mut client, "after the relaunch");
+    assert_same_answers(&before, &after, "after the relaunch");
+    let _ = client.disconnect();
+}
+
+#[test]
+fn a_launch_whose_setup_panics_is_reported_and_later_requests_are_answered() {
+    let (mut client, _home) = spawn(Some("launch"));
+    client
+        .launch(launch_args())
+        .expect("the protocol-level launch response");
+    client.configuration_done().expect("configurationDone");
+    let failed = client
+        .recv_event("ct/launch-failed", ANSWER_BUDGET)
+        .unwrap_or_else(|e| {
+            panic!(
+                "a launch whose setup panicked must be reported with ct/launch-failed: {e}; stderr:\n{}",
+                client.recent_stderr(40).join("\n")
+            )
+        });
+    let text = failed.body["message"].as_str().unwrap_or_default().to_string();
+    assert!(
+        text.contains("panicked") && text.contains("launch"),
+        "the launch failure must say that the launch handler panicked. Got: {text:?}"
+    );
+
+    let answer = ask(&mut client, "threads", json!({}), "`threads` after the failed launch");
+    let message = refusal(&answer, "`threads` after the failed launch");
+    assert!(
+        message.contains("panicked"),
+        "a request after a panicked launch must be refused naming the panic. Got: {message:?}"
+    );
+    let _ = client.disconnect();
+}

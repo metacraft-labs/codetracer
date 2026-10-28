@@ -94,6 +94,7 @@
 ## return values and call `check` nowhere.
 
 import replay_prerequisite
+import corpus_row_pins
 import std/[algorithm, json, options, os, sequtils, sets, strutils, tables,
             times, unittest]
 
@@ -659,17 +660,6 @@ let pinDoc = parseJson(readFile(requireFile(PinRel,
   "see a moved corpus.")))
 let pinnedScenarios = pinDoc["scenarios"]
 
-proc admissibleRows(pin: JsonNode; key: string): seq[string] =
-  ## The set of `editor-row-count` answers this arm is pinned to, as a `seq`.
-  ##
-  ## ALWAYS AN ARRAY IN THE FILE, even for the four scenarios whose answer is a
-  ## single value. A schema where one entry is a string and another is a list is
-  ## a schema in which the reader decides, and the reader would then be the
-  ## second place the rule lives. Trap 13: a `proc`, returning a value, calling
-  ## `check` nowhere.
-  result = @[]
-  if not pin.hasKey(key): return
-  for v in pin[key]: result.add v.getStr
 
 proc executionLineOf(s: LayoutAnswerSet): int =
   ## ONE reading, both arms — `executionLineIn` over the front-end's own
@@ -740,8 +730,13 @@ suite "PLAT-35: THE CORPUS IS PINNED — a shifted corpus reddens":
     var defended = true
     for sc in scenarios:
       let p = pinnedScenarios[sc.id]
-      for arm in ["gpuiEditorRows", "electronEditorRows"]:
-        let admissible = admissibleRows(p, arm)
+      var variants = @["gpuiEditorRows", "electronEditorRows"]
+      if p.hasKey("gpuiEditorRowsDarwin"): variants.add "gpuiEditorRowsDarwin"
+      for arm in variants:
+        # Validate every stored platform independently, including the default
+        # on Darwin. Host selection here would leave another platform's empty
+        # or widened pin unexamined.
+        let admissible = admissibleRows(p, arm, darwin = false)
         let defectKey = arm & "Defect"
         let defect = p{defectKey}.getStr("")
         if admissible.len == 0:

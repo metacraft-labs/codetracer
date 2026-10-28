@@ -23,7 +23,7 @@
 ## Node only (`vm-unit-js`): it opens sockets. Needs `socket.io` and
 ## `socket.io-client` on Node's module path.
 
-import std/[asyncjs, json, jsffi, options]
+import std/[asyncjs, importutils, json, jsffi, options]
 
 import isonim/core/[owner, signals]
 
@@ -34,6 +34,12 @@ import ../../store/types
 import ../../sync/[hosted_primary, mirror_session, socket_transport, sync_host,
                    synced_signals]
 import ../../viewmodels/state_vm
+
+proc pageCount(h: HostedPrimary): int =
+  ## How many pages `h` serves. Read through the private field: no product
+  ## code asks, and the suite is the only reader.
+  privateAccess(HostedPrimary)
+  h.pages.len
 
 var checks = 0
 var failures = 0

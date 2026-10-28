@@ -10,8 +10,8 @@
 ##
 ##   {"type": "action", "session": id, "vm": "<vm>", "action": "<action>", "args": {…}}
 ##
-## `args` are encoded with `std/jsonutils` (`actionArgs`), the same encoder
-## the signal registry uses, so an enum, an `Option` or an object crosses as
+## `args` are decoded with `std/jsonutils`, the same codec the signal
+## registry uses, so an enum, an `Option` or an object crosses as
 ## it does in a mirrored signal.
 ##
 ## THE VIEWPORT is one action, `viewport` / `set`, with the pane and its
@@ -41,6 +41,7 @@ import ../viewmodels/[
   filesystem_vm,
   flow_vm,
   point_list_vm,
+  request_panel_vm,
   scratchpad_vm,
   search_results_vm,
   search_vm,
@@ -52,16 +53,11 @@ import ../viewmodels/[
 ]
 
 const
-  EncodeOptions = ToJsonOptions(enumMode: joptEnumString)
   DecodeOptions = Joptions(allowMissingKeys: true, allowExtraKeys: true)
 
 # ---------------------------------------------------------------------------
 # Mirror side
 # ---------------------------------------------------------------------------
-
-proc actionArg*[T](value: T): JsonNode =
-  ## Encode one action argument as the primary decodes it.
-  toJson(value, EncodeOptions)
 
 proc serializeAction*(vm: string; action: string;
                       args: JsonNode = newJObject();
@@ -129,6 +125,11 @@ proc applyViewport(session: SessionViewModel; args: JsonNode): bool =
     true
   of "traceLog":
     let vm = session.traceLogVM
+    if vm.isNil: return false
+    vm.setViewport(merged(vm.viewport.val))
+    true
+  of "requestPanel":
+    let vm = session.requestPanelVM
     if vm.isNil: return false
     vm.setViewport(merged(vm.viewport.val))
     true
@@ -343,6 +344,18 @@ proc applyAction*(session: SessionViewModel; msg: JsonNode): bool =
     of "setQuery": v.setQuery(a.arg("query", ""))
     of "selectResult": v.selectResult(a.arg("index", none(int)))
     of "toggleResults": v.toggleResults()
+    else: return false
+
+  of "requestPanel":
+    let v = session.requestPanelVM
+    if v.isNil: return false
+    case action
+    of "selectRequest": v.selectRequest(a.arg("index", request_panel_vm.NO_SELECTED_INDEX))
+    of "jumpToHandler": v.jumpToHandler(a.arg("index", request_panel_vm.NO_SELECTED_INDEX))
+    of "setFilterMethod": v.setFilterMethod(a.arg("filter", ""))
+    of "setFilterStatus": v.setFilterStatus(a.arg("filter", ""))
+    of "setSearchText": v.setSearchText(a.arg("text", ""))
+    of "setDetailTab": v.setDetailTab(a.arg("tab", "headers"))
     else: return false
 
   of "pointList":

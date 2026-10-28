@@ -63,9 +63,10 @@ import isonim/core/async_compat
 import isonim/viewmodel
 
 import ../backend/backend_service
-import ../store/[replay_data_store, types]
+import ../store/[replay_data_store, types, row_address]
 import ../viewport
 export viewport
+export row_address
 import ./table_overflow
 import ./table_fit
 from ../keymap/operation_catalogue import parseColumnResize
@@ -568,6 +569,19 @@ type
       ## rather than the `SessionViewModel` itself so that a single-
       ## recording session — where there is nothing to switch to —
       ## leaves it nil and the jump degrades to a plain seek.
+
+# ---------------------------------------------------------------------------
+# Row addresses (Shared-DOM-Front-Ends D10)
+# ---------------------------------------------------------------------------
+
+proc rowAddress*(vm: EventLogVM; position: int): RowAddress =
+  ## The logical address of the row at `position` of the list the pane pages
+  ## through: which recorded event it shows, in the recording's coordinates,
+  ## with no URL (`store/row_address`). A host with a URL scheme builds the
+  ## row's link from it. `rakNone` once the held window moved past the row.
+  let at = position - vm.store.eventLog.loadedStart.val
+  let rows = vm.eventRows.val
+  if at < 0 or at >= rows.len: RowAddress() else: eventAddress(rows[at])
 
 # ---------------------------------------------------------------------------
 # Actions

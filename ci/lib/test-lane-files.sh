@@ -45,6 +45,8 @@
 #   test_lane_description <id>       # one-line human description
 #   test_lane_recipe <id>            # `just` recipe(s) that own the lane's
 #                                    # execution; empty = the runner owns it
+#   test_lane_run_library_path <id>  # extra LD_LIBRARY_PATH directories for
+#                                    # the run (may be empty)
 #
 # All paths are repo-relative. Callers must run from the repo root.
 
@@ -548,6 +550,45 @@ test_lane_parity_partner() {
 	esac
 }
 
+# test_lane_run_library_path ID — directories the lane's suites need on
+# `LD_LIBRARY_PATH` when they RUN (never when they compile), ahead of the
+# inherited value; empty for most lanes.
+#
+# The three lanes below hold suites that load isonim-gpui's shim INSIDE the
+# test process: they import `isonim_gpui/bindings`, whose procs are
+# `{.dynlib.}`, so the program loads `libgpui_nim_shim.so` when it starts. A
+# shim built with `--features gpui-backend` (the one README.md and
+# AGENTS.md build) links `libxcb`, `libxkbcommon` and the rest of the window
+# stack. The dev shell exports those directories as
+# CODETRACER_GPUI_RUNTIME_LIB_PATH and keeps them off LD_LIBRARY_PATH on
+# purpose, so that only the processes that need them see them
+# (`nix/shells/ci-base.nix`, "PLAT-37 — THE GPUI RUNTIME LIBRARY PATH").
+# Without them each such suite exits 1 before its first case, on NixOS, with
+# `could not load: …/libgpui_nim_shim.so`. Measured 2026-10-26 inside
+# `repro exec .`:
+#
+#   gpui-shell             11 suites (`test_gpui_shell_split`,
+#                          `test_gpui_editing_surface`, …), and
+#                          `test_gpui_handshake_bound`, which starts
+#                          `codetracer-gpui` with the inherited environment
+#   tui                    `test_cross_renderer_panes`, `test_plat42_laws`,
+#                          `test_editor_front_end_observed`,
+#                          `test_plat44_both_arms_write`
+#   vm-collab-integration  `test_collab_m8_cross_frontend`
+#
+# The suites that start `codetracer-gpui` with an environment of their own
+# add the same directories for the child themselves
+# (`src/frontend/gpui/tests/gpui_child_env.nim`). The variable is not set on
+# macOS, so there the answer is empty and the run is unchanged.
+test_lane_run_library_path() {
+	case "$1" in
+	gpui-shell | tui | vm-collab-integration)
+		echo "${CODETRACER_GPUI_RUNTIME_LIB_PATH:-}"
+		;;
+	*) echo "" ;;
+	esac
+}
+
 # test_lane_extra_flags ID — extra `nim` flags the lane's files need. Each
 # non-empty answer must say what breaks without it.
 test_lane_extra_flags() {
@@ -1034,6 +1075,21 @@ test_lane_files() {
 		# `low_level_code_markup_dom_test.nim`: a source line in the Low Level
 		# Code pane is text in a real DOM, whatever markup it contains (HSF-D3).
 		echo src/frontend/tests/low_level_code_markup_dom_test.nim
+		# `shared_rows_keyboard_dom_test.nim`: Enter and Space on a shared
+		# view's `role="button"` row are its click, in a real DOM.
+		echo src/frontend/tests/shared_rows_keyboard_dom_test.nim
+		# `row_links_dom_test.nim`: with a host's link builder (Shared-DOM-
+		# Front-Ends D10), a plain click on a shared row's link is the row's
+		# click and does not navigate; a modified click is the browser's.
+		echo src/frontend/tests/row_links_dom_test.nim
+		# `event_log_scroll_area_dom_test.nim`: the Event Log's scroll area is as
+		# tall as the whole log, in a real DOM, whatever the table's fit does.
+		echo src/frontend/tests/event_log_scroll_area_dom_test.nim
+		# `vscode_request_panel_role_dom_test.nim`: the Request Panel is a VS
+		# Code panel role (Shared-DOM-Front-Ends Q8): the webview entry mounts the
+		# shared view over a mirror, its rows are the window the host's primary
+		# loaded, and a row click and a filter run on the primary.
+		echo src/frontend/tests/vscode_request_panel_role_dom_test.nim
 		# `git_cli_index_lock_test.nim`: `ui/git_cli.gitExec`'s `status` and
 		# `diff`, through the Electron process facade, over real repositories
 		# with a stale stat cache, never rewrite the index or leave

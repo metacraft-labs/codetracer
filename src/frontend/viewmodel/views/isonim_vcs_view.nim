@@ -29,6 +29,9 @@
 ## `N` is the browser's element.
 
 import std/[strformat, strutils]
+when defined(js):
+  # Enter and Space on a `role="button"` row are its click.
+  import ./isonim_activation
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
@@ -44,7 +47,7 @@ export signals, computation, components
 
 const VCSContainerClass* = "component-container vcs-container"
 const VCSNoRepoClass* = "vcs-no-repo"
-const VCSNoFilesText* = "No changed files"
+const VCSNoFilesText* = VCSNoChangedFilesText
 
 
 ## Branch lane colour palette — cycled by ``VCSGraphCell.colorIdx``.
@@ -108,12 +111,7 @@ proc statusClass*(status: string): string =
   of "M", "modified": "vcs-status-modified"
   else: "vcs-status-other"
 
-proc statusLabel*(status: string): string =
-  case status
-  of "added": "A"
-  of "deleted": "D"
-  of "modified": "M"
-  else: status
+proc statusLabel*(status: string): string = vcsStatusLabel(status)
 
 proc accordionFileStatusClass*(status: string): string =
   ## CSS class for the coloured status letter inside an expanded accordion row.
@@ -162,24 +160,8 @@ proc abbreviateRelTime*(t: string): string =
     else: unit
   numStr & abbr
 
-proc changedFilesHeaderText(vm: VCSVM): string =
-  ## DeepReview-GUI.md §3: "The section header shows the review's file count
-  ## and, when the changeset came from local git history, the commit it
-  ## belongs to."  A standalone patch names no commit, and then only the file
-  ## count is shown.
-  if vm.deepReviewMode.val:
-    let commit = vm.reviewCommit.val
-    if commit.len > 0:
-      " (" & $vm.fileCount.val & " files, " & commit & ")"
-    else:
-      " (" & $vm.fileCount.val & " files)"
-  elif vm.selectedCommitIndices.val.len == 1:
-    let idx = vm.selectedCommitIndices.val[0]
-    if idx >= 0 and idx < vm.commits.val.len:
-      " (" & vm.commits.val[idx].hash & ")"
-    else: ""
-  else:
-    ""
+# `changedFilesHeaderText` is the ViewModel's (`vcs_vm`), so the native
+# front-ends' review header reads the same words (PLAT-54).
 
 # ---------------------------------------------------------------------------
 # Callback dispatch helpers
@@ -806,7 +788,7 @@ proc renderAccordionFileRow[R](r: R; callbacks: VCSCallbacks;
 
   var rowNode: typeof(r.createElement("div"))
   let row = ui(r):
-    tdiv(ref = rowNode, class = "vcs-accordion-file",
+    tdiv(role = "button", tabindex = "0", ref = rowNode, class = "vcs-accordion-file",
          onclick = proc() =
            callbacks.invokeSelectFile(rowIndex, rowPath, documentTarget,
                                       rowStatus))
@@ -851,7 +833,7 @@ proc renderCommitRow[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
   ## ``renderCommitGraph``, ``renderVCSPanelImpl``, etc.
   var entryNode: typeof(r.createElement("div"))
   let entry = ui(r):
-    tdiv(ref = entryNode, class = "vcs-commit-entry")
+    tdiv(role = "button", tabindex = "0", ref = entryNode, class = "vcs-commit-entry")
 
   # Header: a flex row whose children are appended manually so that proc calls
   # returning nodes (renderGraphLanes, the body block) are properly added.
@@ -1004,7 +986,7 @@ proc renderChangedFileRow[R](r: R; callbacks: VCSCallbacks;
   let rowTarget = "file:" & rowPath
   var diffBtn: typeof(r.createElement("span"))
   let row = ui(r):
-    tdiv(class = fileRowClass(file.selected),
+    tdiv(role = "button", tabindex = "0", class = fileRowClass(file.selected),
          onclick = proc() =
            callbacks.invokeSelectFile(rowIndex, rowPath, rowTarget, rowStatus)):
       span(class = "vcs-file-status " & statusClass(file.status)):

@@ -44,6 +44,9 @@
 ## for the same line set `textContent` for the same reason.
 
 import std/[strutils, tables]
+when defined(js):
+  # Enter and Space on a `role="button"` row are its click.
+  import ./isonim_activation
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
@@ -231,7 +234,7 @@ proc renderLowLevelRow*[R, N](r: R; vm: LowLevelCodeVM;
   of lrkInstruction:
     var item: N
     result = ui(r):
-      tdiv(ref = item, class = rowClass(row.active),
+      tdiv(role = "button", tabindex = "0", ref = item, class = rowClass(row.active),
            onclick = onRowClick(vm, row.index)):
         span(class = "low-level-code-instruction-offset"):
           text row.offsetText

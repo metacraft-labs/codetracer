@@ -57,6 +57,15 @@ var debugSurfaceEntry: proc()
   ## cycle — the module that HAS the machinery hands over one proc, which is
   ## the same shape `replay_session_service` uses in the other direction.
 
+var traceLaunchedEntry: proc()
+  ## Installed by `ui_js.configure`: adopts the trace this host just launched
+  ## into the shown tab's debugger session (`DebuggerSession.attach`), which
+  ## starts that session's stop loader. The desktop does the same from
+  ## `onTraceLoaded`; this host launches the trace itself, so without it the
+  ## loader never ran on the web, and every per-stop load it owns -- the
+  ## locals, and since the flow window moved there, the editor's inline
+  ## flow -- was never asked for.
+
 var activeReplayTerminate: proc()
   ## The worker holding the current session, so a second Run replaces it
   ## rather than leaving two 18 MB wasm instances answering one store.
@@ -274,13 +283,28 @@ proc openSession(request: ReplaySessionRequest) =
       # counter makes the second one a distinct request.
       data.dapApi.sendCtRequest(DapInitialize, js{clientName: cstring"codetracer"})
       data.dapApi.sendCtRequest(DapLaunch, js{traceFolder: cstring"trace"})
-      data.dapApi.sendCtRequest(DapConfigurationDone, js{}))
+      data.dapApi.sendCtRequest(DapConfigurationDone, js{})
+      if traceLaunchedEntry.isNil:
+        report("this build installs no session to adopt the trace; " &
+          "no per-stop data will be loaded")
+      else:
+        try:
+          traceLaunchedEntry()
+        except CatchableError as e:
+          report("could not adopt the trace into the session: " & e.msg)
+        except:
+          report("could not adopt the trace into the session"))
 
 proc installDebugSurfaceEntry*(entry: proc()) =
   ## Called from `ui_js.configure`. Separate from `installReplayHost` because
   ## the two have different owners: `web_entry_surface` installs the host when
   ## a template edit session starts, and only `ui_js` can supply this.
   debugSurfaceEntry = entry
+
+proc installTraceLaunchedEntry*(entry: proc()) =
+  ## Called from `ui_js.configure`, for the reason `installDebugSurfaceEntry`
+  ## gives: only `ui_js` holds the tab's debugger session.
+  traceLaunchedEntry = entry
 
 proc installReplayHost*() =
   ## Make this tab able to answer a request for a replay session.

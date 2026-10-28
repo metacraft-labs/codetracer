@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en" data-ct-arms='{"checkout":"B"}'>
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture checkout</title>
+  </head>
+  <body>
+    <main>
+      <h1>Checkout</h1>
+      <button id="add" type="button" data-ct-label="Add to cart">Add to cart</button>
+      <button id="details" type="button" data-ct-label="Show details">Details</button>
+      <p id="detail-text" hidden>Ships in two days.</p>
+      <form id="form">
+        <input id="name" type="text" data-ct-public data-ct-label="Name" />
+        <input id="email" type="email" data-ct-label="E-mail" />
+        <button id="continue" type="button" data-ct-label="Continue">Continue</button>
+        <p id="email-error"></p>
+        <button id="pay" type="button" data-ct-label="Pay now">Pay</button>
+      </form>
+      <p id="status"></p>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

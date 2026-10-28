@@ -60,6 +60,18 @@ proc paneModelOf*(vm: VCSVM): VcsPaneModel =
     branch: vm.currentBranch.val,
     workingTreeTitle: VCSWorkingTreeTitle,
     cleanText: VCSCleanTreeText)
+  # PLAT-54: a review shows its changeset, as the desktop's panel does.
+  if vm.deepReviewMode.val:
+    result.review = true
+    result.reviewTitle = vm.headerTitle.val
+    result.reviewStats = vm.statsText.val
+    result.changedHeader = vm.changedFilesHeaderText()
+    result.cleanText = VCSNoChangedFilesText
+    for f in vm.changedFiles.val:
+      result.reviewFiles.add VcsReviewLine(
+        status: vcsStatusLabel(f.status), name: f.baseName, path: f.path,
+        additions: f.additions, deletions: f.deletions,
+        coverage: f.coverageText, selected: f.selected)
   for f in vm.workingTreeFiles.val:
     result.files.add VcsFileLine(status: f.status, path: f.path)
   for c in vm.commits.val:
@@ -86,7 +98,7 @@ proc newVcsSource*(directory: string;
     src.vm = createVCSVM()
     src.dispose = dispose
 
-proc publish(s: VcsSource; rt: TuiRuntime) =
+proc publish*(s: VcsSource; rt: TuiRuntime) =
   ## Hand the app layer the pane's value. M71 (#838): the reading position
   ## (`scrollTop`) is the reader's, not the repository's, so a re-read —
   ## every `VcsRefreshMs`, or a commit opened — keeps it (the painter clamps

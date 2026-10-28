@@ -19,6 +19,7 @@ tests/test_dev
 tests/test_chrome
 tests/test_home_landing
 tests/test_support_pages
+tests/test_terminal_setup_page
 tests/test_site_builds
 tests/test_completeness
 tests/test_content_loader

@@ -74,7 +74,8 @@ from codetracer_embed import EventLogColumn, EventLogColumns,
 from codetracer_embed import ScrubberModel, scrubberModel
 # PLAT-70 Part B: the cut cells, the open detail and the column widths
 # (Horizontal-Overflow.md §5).
-from codetracer_embed import FittedCell, fitCell, CutCell, DetailToggle,
+from codetracer_embed import FittedCell, fitCell, fitCellAs, cutKindOf,
+  EventLogTablePane, CutCell, DetailToggle,
   detailView, isOpen, isOpenIn, columnWidthOr, EventLogTableName, oneLine
 # PLAT-70 Part I: the columns' widths and the horizontal view
 # (Horizontal-Overflow.md §5.5).
@@ -720,8 +721,11 @@ proc eventRowLayout*(model: EventLogModel; row: EventLogRow;
     if w <= 0 or used >= width:
       continue
     let room = min(w, width - used)
-    let fittedCell = fitCell(eventCellText(event, col), room,
-                             measureFor(ambiguous))
+    # PLAT-71 (§9.2): the location loses its middle, a number is never cut
+    # silently, the output loses its end.
+    let fittedCell = fitCellAs(eventCellText(event, col), room,
+                               cutKindOf(EventLogTablePane, $col),
+                               measureFor(ambiguous))
     var cell = fittedCell
     cell.text = markCut(fittedCell, glyphs)
     let drawn = cellWidthOf(cell.text, ambiguous)
@@ -740,7 +744,11 @@ proc eventRowLayout*(model: EventLogModel; row: EventLogRow;
                   (if col in {elcTick, elcIndex}: room - drawn else: 0)
       result.cuts.add CutCell(row: screenRow, col: startCol + used,
                               width: room,
-                              ellipsisCol: first + drawn - glyphs.markerCells,
+                              ellipsisCol:
+                                (if cell.midMarker > 0:
+                                   first + cellWidthOf(cell.text[0 ..< cell.midMarker],
+                                                       ambiguous)
+                                 else: first + drawn - glyphs.markerCells),
                               key: $event.index, column: $col,
                               full: eventCellText(event, col))
     used += room

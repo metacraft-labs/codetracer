@@ -71,6 +71,8 @@ import ../app/call_stack_binding
 import ../app/frame_viewer_binding
 import ../app/runtime
 import ../app/views/search_results_pane   # PLAT-57
+import ../app/views/agent_activity_pane   # PLAT-54
+import ../../viewmodel/host/native_agent_host   # PLAT-54: Agent Activity's host
 from ../app/edit_binding import EditBuffer, moveCaretTo, caretLine, caretColumn   # the read-only document a result opens in
 import ../app/source_binding
 import ../app/timeline_binding
@@ -162,6 +164,11 @@ type
       ## set; the tab it was shown in survives as an edit tab.
     closed: bool
       ## `close` has run; a second call is a no-op.
+    agent*: NativeAgentHost
+      ## PLAT-54: Agent Activity's host — the desktop's `AgentActivityVM`
+      ## over this session's store (so a live agent's session is the one
+      ## this session's tab reports), a recorded session it was handed, and
+      ## the files and recordings its cards open.
 
 proc ended*(s: TuiSession): bool =
   ## M76: whether the session's replay has ended — by this host's *Stop*
@@ -233,7 +240,8 @@ proc openTuiSession*(traceFolder: string; viewportHeight: int;
       mutations: @[],
       maxRRTicks: 0'u64,
       originNav: nav,
-      valueGate: InlineValueGate())
+      valueGate: InlineValueGate(),
+      agent: newNativeAgentHost(store))
   except DapStalledError as e:
     sess.close()
     raise newException(EngineStalledAfterOpenError, e.msg, e)
@@ -247,6 +255,7 @@ proc close*(s: TuiSession) =
   if s.isNil or s.closed:
     return
   s.closed = true
+  s.agent.close()
   s.source.dispose()
   s.session.close()
 
@@ -768,6 +777,76 @@ proc findInFiles*(s: TuiSession; rt: TuiRuntime; query: string): string =
   s.refreshSearch(rt)
   ""
 
+# ---------------------------------------------------------------------------
+# PLAT-54: Agent Activity
+# ---------------------------------------------------------------------------
+
+proc agentModelOf*(host: NativeAgentHost;
+                   prior: AgentPaneModel): AgentPaneModel =
+  ## The session's `AgentActivityVM` as the pane's value: the shared feed's
+  ## rows, the prompt (typed, or the desktop's placeholder), Send or Stop.
+  ## The reading position (`scroll`) is the pane's own, kept.
+  result = AgentPaneModel(loaded: not host.isNil, scroll: prior.scroll)
+  if host.isNil:
+    return
+  result.rows = host.feedRows()
+  let typed = host.vm.inputValue.val
+  result.promptIsPlaceholder = typed.len == 0
+  result.prompt = if typed.len > 0: typed else: promptPlaceholder(host.vm)
+  result.working = host.vm.isLoading.val
+  if not prior.loaded:
+    result.scroll = initFeedScroll()
+
+proc refreshAgent*(s: TuiSession; rt: TuiRuntime) =
+  rt.app.agent = agentModelOf(s.agent, rt.app.agent)
+
+proc pumpAgent*(s: TuiSession; rt: TuiRuntime): bool =
+  ## Apply what a live agent sent since the last tick (the loop calls this
+  ## on its idle tick); whether the pane's value changed.
+  if s.isNil or s.agent.isNil:
+    return false
+  let polled = s.agent.poll()
+  if not polled and not s.agent.changed:
+    return false
+  s.agent.changed = false
+  let before = rt.app.agent
+  s.refreshAgent(rt)
+  if s.agent.message.len > 0:
+    rt.app.notification = s.agent.message
+    s.agent.message = ""
+  rt.app.agent != before
+
+proc agentPress*(s: TuiSession; rt: TuiRuntime; row, button: int): string =
+  ## A press on Agent Activity row `row` (`button` -1 for the row itself).
+  if s.isNil or s.agent.isNil:
+    return "this session has no Agent Activity"
+  let rows = rt.app.agent.rows
+  if row < 0 or row >= rows.len:
+    return ""
+  let r = rows[row]
+  let action = if button < 0: r.press
+               elif button < r.buttons.len: r.buttons[button]
+               else: AgentFeedAction()
+  if action.kind == faNone:
+    return ""
+  discard s.agent.runFeed(r, action)
+  s.agent.changed = false
+  s.refreshAgent(rt)
+  result = s.agent.message
+  s.agent.message = ""
+
+proc agentPrompt*(s: TuiSession; rt: TuiRuntime; text: string): string =
+  if s.isNil or s.agent.isNil:
+    return "this session has no Agent Activity"
+  result = s.agent.sendPrompt(text)
+  s.refreshAgent(rt)
+
+proc agentStop*(s: TuiSession; rt: TuiRuntime): string =
+  if s.isNil or s.agent.isNil:
+    return ""
+  s.agent.stopAgent()
+  "the agent stops after its current turn"
+
 proc pumpFindInFiles*(s: TuiSession; rt: TuiRuntime): bool =
   ## Advance the search in flight (the loop calls this on its idle tick);
   ## whether the pane's value changed.
@@ -822,6 +901,30 @@ proc showSearchResult*(s: TuiSession; rt: TuiRuntime; index: int): string =
     let under = rt.paneBodyRows(paneSearch)
     rt.app.search.scrollTop = rt.app.search.revealRow(at, max(1, under - 3))
   rt.app.notification = "opened " & row.path & ":" & $row.line
+  ""
+
+proc showFileAt*(s: TuiSession; rt: TuiRuntime; path: string;
+                 line, col: int): string =
+  ## PLAT-55 (K35) in a replay's Debug mode: a Problems row's file shown in
+  ## the editor at its line, the caret there — read from the recording, as a
+  ## Find in Files result is (`showSearchResult`); the recording position
+  ## does not move. "" when it opened, else why not.
+  if s.ended:
+    return EndedSessionNote
+  rt.app.viewedFile = path
+  s.showViewedFile(rt, force = true)
+  if rt.app.viewedFile.len == 0:
+    return if rt.app.notification.len > 0: rt.app.notification
+           else: path & " is not in this recording"
+  let paneRows = max(1, rt.sourcePaneRows())
+  rt.app.source.viewportTop = max(1, line - paneRows div 3)
+  let column = max(1, col) - 1
+  let buf = rt.debugBuffer()
+  if not buf.isNil and buf.path == path:
+    buf.moveCaretTo(line - 1, column)
+    rt.app.caret = (buf.path, buf.caretLine, buf.caretColumn + 1)
+  else:
+    rt.app.caret = (path, line, column + 1)
   ""
 
 proc toggleSearchOption*(s: TuiSession; rt: TuiRuntime;

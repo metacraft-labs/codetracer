@@ -340,12 +340,6 @@ proc breakpointOf*(self: DebuggerService, path: cstring,
 proc hasBreakpoint*(self: DebuggerService, path: cstring, line: int): bool =
   self.breakpointOf(path, line).isSome
 
-proc breakpointsIn*(self: DebuggerService, path: cstring): seq[BreakpointSpec] =
-  ## `path`'s breakpoints, armed and disabled.
-  let st = self.store
-  if not st.isNil:
-    result = heldBreakpoints(st, $path)
-
 proc dapSetBreakpoints*(self: DebuggerService) =
   ## Send every file's breakpoints again — the engine restarted and holds none
   ## of them (`middleware`'s subsystem restart).

@@ -419,9 +419,6 @@ type
     symbols*: Signal[seq[RecordedSymbol]]
       ## Every function the recording called, once (`ct/load-symbols`) — the
       ## omnibar's symbol index, independent of the call-trace window held.
-    eventIndexAskedFor*: string
-      ## The tick `requestEventIndexAt` last asked about; the same tick is not
-      ## asked again. Cleared with the event log.
       ## The timer every windowed ViewModel over this store debounces its
       ## viewport reports with (Viewport-Driven-Loading V2). Immediate by
       ## default; a host that reports on every resize and scroll event (the
@@ -904,40 +901,6 @@ proc requestRequestSpansSince*(store: ReplayDataStore) =
       s.requestTracker.markComplete(key, $cursor)
       s.requestSpans.loadingState.val = lsError,
   )
-
-proc requestEventIndexAt*(store: ReplayDataStore; rrTicks: uint64) =
-  ## PLAT-51: ask the engine which row of the WHOLE event log is "now" — the
-  ## last event at or before `rrTicks` — and how long the log is
-  ## (`ct/event-load` with `indexOnly`: no window, no `ct/updated-events`, so a
-  ## host whose table reloads on that event is not made to redraw by a move).
-  ## The answer lands in `eventLog.currentIndex` (the list scrubber's mark).
-  # ONE QUESTION PER TICK (Pattern 5): a move re-asks only when the tick
-  # changed, and not while the same question is still in flight.
-  let key = "event-index-at"
-  let argsStr = $rrTicks
-  if store.requestTracker.isDuplicate(key, argsStr) or
-      store.eventIndexAskedFor == argsStr:
-    return
-  store.requestTracker.markPending(key, argsStr)
-  store.eventIndexAskedFor = argsStr
-  let fut = store.backend.send("ct/event-load", %*{
-    "indexOnly": true, "atRRTicks": int64(rrTicks)})
-  let s = store
-  async_compat.onComplete(fut,
-    onSuccess = proc(response: JsonNode) =
-      s.requestTracker.markComplete(key, argsStr)
-      var body = response
-      if not body.isNil and body.kind == JObject and body.hasKey("body") and
-          body["body"].kind == JObject:
-        body = body["body"]
-      if body.isNil or body.kind != JObject:
-        return
-      if body.hasKey("indexAtTick") and body["indexAtTick"].kind == JInt:
-        s.eventLog.currentIndex.val = body["indexAtTick"].getInt,
-    onError = proc(msg: string) =
-      s.requestTracker.markComplete(key, argsStr)
-      # A failed question may be asked again.
-      s.eventIndexAskedFor = "")
 
 proc installBackendEventHandlers(store: ReplayDataStore) =
   ## Consume backend responses/events that are not mirrored through the
@@ -2121,7 +2084,6 @@ proc clearEventLog*(store: ReplayDataStore) =
   store.eventLog.recordsTotal.val = 0
   store.eventLog.totalReported.val = false
   store.eventLog.currentIndex.val = -1
-  store.eventIndexAskedFor = ""
   store.eventLog.recordsFiltered.val = 0
   store.eventLog.windowSearched.val = false
   store.eventLog.maxRRTicks.val = 0'u64
@@ -2286,7 +2248,8 @@ proc tracepointSweepRequest*(specs: openArray[TracepointSweepSpec];
 
 proc applyTracepointResults*(store: ReplayDataStore;
                              specs: seq[TracepointSweepSpec];
-                             hits: seq[TracepointSweepHit]) =
+                             hits: seq[TracepointSweepHit];
+                             replaceHits = true) =
   ## Write ONE `ct/tracepoint-results` answer into the store.
   ##
   ## THE ONE PLACE A SWEEP BECOMES DATA, and it produces two things because the
@@ -2307,7 +2270,12 @@ proc applyTracepointResults*(store: ReplayDataStore;
   ## so replacing would delete them. A spec that matches an existing row
   ## annotates it in place, which is what lets a pane show a declared
   ## collection and the engine's verdict on it as one list.
-  store.pointList.tracepointHits.val = hits
+  ##
+  ## `replaceHits = false` annotates the rows only and keeps the hits the
+  ## last sweep answered: the caller's `hits` are not a sweep's answer but a
+  ## verdict on the run itself (a refused request, `entries/vscode_host`).
+  if replaceHits:
+    store.pointList.tracepointHits.val = hits
 
   var hitCounts: seq[int] = @[]
   var hitLines: seq[int] = @[]
