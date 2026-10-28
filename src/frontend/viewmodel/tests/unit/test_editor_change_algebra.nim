@@ -117,7 +117,12 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1966
+const ExpectedAssertions = 1974
+  ## *1966 -> 1974 on 2026-10-28: the in-document find's two modules.
+  ## `editor/find_match.nim` x five (it is in `editor/`, the directory that
+  ## calls the primitive, so the two FLAG needles apply to it too) and
+  ## `viewmodels/find_vm.nim` x three. Neither calls `rebase(`, spells
+  ## `mapOver` or declares `before: bool`.*
   ## *1945 -> 1966 on 2026-10-27: seven production modules x three
   ## assertions — `platform/session_allocation.nim`, `sdk/expression_eval.nim`,
   ## `store/row_address.nim`, `viewmodels/build_diagnostics.nim`,

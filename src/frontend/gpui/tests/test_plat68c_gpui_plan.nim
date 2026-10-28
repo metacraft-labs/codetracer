@@ -221,10 +221,12 @@ suite "PLAT-68 GPUI: the letters under CUA (OQ-1)":
     ck again.executionLine == OverLine
 
   test "the find field: n is typed into the query":
+    # Ctrl+F opens the in-document find (`find_vm`); the `n` is its field's
+    # text, and steps nothing.
     var t: string
     let plan = windowPlan("key:f:control,key:n", trace = t)
     ck t.lines("operation debugger.").len == 0
-    ck "query=:grep n" in t
+    ck "find open=true field=n " in t
     ck plan.executionLine == lineAfter("wait:1")
 
 suite "PLAT-68 GPUI: VS Code's precedence through input (KL-11)":
