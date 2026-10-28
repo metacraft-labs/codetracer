@@ -1959,6 +1959,18 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           rootEl.appendChild(el)
       el
 
+  # The session tab is a scope element (Base-Keymaps §5.2: window, session
+  # tab, pane, …), as on the terminal and GPUI, so the scope path the desktop
+  # reads off the DOM focus chain (`key_router.desktopScopePath`) has it too.
+  # Stamped here because the first tab's container comes from `index.html`;
+  # `session_switch.createSessionContainer` stamps the ones it makes.
+  let rootElement = cast[kdom.Element](root)
+  if not rootElement.isNil and
+     rootElement.getAttribute(cstring"data-scope-kind").isNil:
+    rootElement.setAttribute(cstring"data-scope-kind", cstring"tab")
+    rootElement.setAttribute(cstring"data-scope-id",
+                             cstring("tab:" & $(data.activeSessionIndex + 1)))
+
   var layout = newGoldenLayout(
     cast[JsObject](root),
     proc() = (cdebug "layout: component binded"),

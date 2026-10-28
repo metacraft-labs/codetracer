@@ -816,6 +816,18 @@ lint_step "Editor import closure: no async, no I/O, no clock in the editor model
 lint_step "CUA keymap: every cited VS Code binding re-extracts, every default accounted for" \
 	bash ci/test/cua-keymap-extractor.sh
 
+# PLAT-68's clean-code gate (Base-Keymaps-And-Layer-Stack.md §8, KL-10): one
+# resolver, one key decoder per device, one modifier order, bases as data, no
+# behaviour in a binding, one owner per keymap module. Same order as the
+# boundary guards above and for the same reason: the contract suite — which
+# plants a second resolver, a second decoder and an out-of-order modifier
+# spelling and requires each to redden — runs before the gate it covers.
+lint_step "Keymap clean code: contract suite" \
+	bash ci/test/keymap-clean-code-test.sh
+
+lint_step "Keymap clean code: one resolver, one decoder per device, one modifier order, bases as data" \
+	bash ci/test/keymap-clean-code.sh
+
 # PLAT-2's verification gate: no surface formats a value by a path that
 # bypasses the one presenter, and the presenter is pure.
 # CodeTracer-Platform.milestones.org asks for it "in the shape

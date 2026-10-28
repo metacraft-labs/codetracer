@@ -1149,15 +1149,28 @@ proc focusEditorView*(data: Data) =
   if not editor.monacoEditor.isNil:
     cast[JsObject](editor.monacoEditor).focus()
 
+proc focusFirstOfClass(classes: cstring) =
+  ## Put the DOM focus on the first element carrying `classes` (a pane's
+  ## focusable body, `tabindex` set by its view) — the element the key
+  ## router's scope path is read from. Nothing when the pane is not mounted.
+  let found = kdom.document.getElementsByClassName(classes)
+  if found.len > 0 and not found[0].isNil:
+    found[0].focus()
+
 proc focusEventLog*(data: Data) =
   let map = data.ui.componentMapping
   focusComponent(data, map[Content.EventLog][0])
-  kdom.document.getElementsByClassName("component-container eventLog")[0].focus()
+  focusFirstOfClass("component-container eventLog")
 
 proc focusCalltrace*(data: Data) =
+  ## `layout.focus-pane(call-trace)` (`Alt+C`). The view's focusable body is
+  ## `.calltrace-view` (the IsoNim call trace); the `component-container
+  ## calltrace-view` pair this looked for is no longer drawn, so the lookup
+  ## threw and the focus stayed where it was — every key after `Alt+C` still
+  ## reached the editor.
   let map = data.ui.componentMapping
   focusComponent(data, map[Content.Calltrace][0])
-  kdom.document.getElementsByClassName("component-container calltrace-view")[0].focus()
+  focusFirstOfClass("calltrace-view")
 
 proc switchTab*(change: int) {.exportc.} =
   var panel = data.ui.activeEditorPanel

@@ -107,6 +107,11 @@ proc createSessionContainer(index: int): kdom.Element =
   let container = document.createElement("div")
   container.id = sessionContainerId(index)
   container.class = cstring"session-container hidden"
+  # The session tab is a scope element (Base-Keymaps §5.2: window, session
+  # tab, pane, …), as on the terminal and GPUI: the desktop's scope path is
+  # read off the DOM focus chain (`key_router.desktopScopePath`).
+  container.setAttribute(cstring"data-scope-kind", cstring"tab")
+  container.setAttribute(cstring"data-scope-id", cstring("tab:" & $(index + 1)))
 
   let root = document.getElementById(cstring"ROOT")
   if not root.isNil:

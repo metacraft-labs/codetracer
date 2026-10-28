@@ -2165,6 +2165,7 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
                    surface.sourceStatement)
   if surface.notice.len > 0:
     let note = r.createElement("div")
+    r.setAttribute(note, "data-ct-editor-notice", surface.notice)
     r.appendChild(note, r.createTextNode(surface.notice))
     r.appendChild(parent, note)
   if surface.degradedMessage.len > 0:

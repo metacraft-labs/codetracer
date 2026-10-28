@@ -22,7 +22,7 @@
 # `dist/css/goldenlayout-base.css`, etc. — fails parsing with
 # `Failed to find directory ID for dir '...'`.  This is exactly how
 # the sibling rules for `third_party/monaco-editor/min`,
-# `third_party/@exuanbo`, `third_party/mousetrap`, etc. work: they
+# `third_party/@exuanbo`, `third_party/vex-js`, etc. work: they
 # name the symlinked subdirectory itself as the input and let Tup
 # treat it as a single leaf, never enumerating inside it.
 #
@@ -32,7 +32,6 @@
 # in `frontend/index.html` and `frontend/server_index.ejs` resolve to
 # the real GoldenLayout stylesheets on every platform.
 : third_party/golden-layout/dist |> !tup_preserve |> %f
-: third_party/mousetrap |> !tup_preserve |> %f
 : third_party/vex-js |> !tup_preserve |> %f
 : third_party/xterm |> !tup_preserve |> %f
 : foreach dist/* |> !tup_preserve |> %f

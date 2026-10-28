@@ -95,7 +95,22 @@ import ../replay_ops
 # RE-COUNTED 2026-09-23: 535 → 555, by the second route above — PLAT-44 added
 # two non-test files under `src/frontend/gpui/app/` (`edit_arm.nim`,
 # `gpui_keys.nim`), 2 x 10 assertions in the registry scan.
-const ExpectedAssertions = 732
+const ExpectedAssertions = 777
+  ## 2026-10-28 (the native Build Output pane): 768 -> 777, measured —
+  ## `CHECKS: 777`. One more scanned source file, `build_output_leaf.nim`,
+  ## at 1 + 8 = 9 per file.
+  ## 2026-10-28: 759 -> 768, measured — `CHECKS: 768`. One more scanned
+  ## source file, `host/certificate_indicator.nim`, at 1 + 8 = 9 per file.
+  ## 2026-10-27 (the native Problems pane): 750 -> 759, measured —
+  ## `CHECKS: 759`, `scanned 29 source files`. One more scanned source file,
+  ## `problems_leaf.nim`, at 1 + 8 = 9 per file.
+  ## 2026-10-26 (the native Agent Activity pane): 741 -> 750, measured —
+  ## `CHECKS: 750`, `scanned 28 source files`. One more scanned source file,
+  ## `agent_activity_leaf.nim`, at 1 + 8 = 9 per file.
+  ## 2026-10-26 (the native Test Results pane): 732 -> 741, measured —
+  ## `CHECKS: 741`, `scanned 27 source files`. One more scanned source file,
+  ## `test_results_leaf.nim`; the registry subjects stay 8, so the scan's
+  ## per-file body is 1 + 8 = 9.
   ## 2026-10-21 (window activation): 731 -> 732, measured — `CHECKS: 732`
   ## against isonim-gpui `d4325e9` plus its uncommitted `onWindowActivated`.
   ## The third route: `window.nim` exports one more proc, and it joined

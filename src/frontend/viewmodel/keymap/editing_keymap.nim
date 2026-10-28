@@ -7,6 +7,11 @@
 ## detection over it, the configuration format that layers over it, and the one
 ## function that EXECUTES a resolution against an `EditorState`.
 ##
+## Refuses to own: any base's rows (each base's own module), the context keys
+## and `when` (`context_keys`, `when_expr`), the order of the layers and the
+## user layer (`keymap_router`, `layer_stack`, `user_keymap`), and what an
+## operation does (the editing core).
+##
 ## =========================================================================
 ## NOTHING IN THE EDITING CORE KNOWS ABOUT KEYS, AND THIS IS THE OTHER SIDE
 ## =========================================================================

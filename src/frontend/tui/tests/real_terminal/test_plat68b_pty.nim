@@ -26,6 +26,9 @@
 ## INPUT — what a terminal that allows clipboard reads sends back. libvterm
 ## answers none, so the silent case is the harness's own behaviour. That is
 ## the terminal's side of the conversation, not a stand-in for the product.
+## Likewise the late-answer case answers the start-up round as a Kitty-protocol
+## terminal does (`CSI ? 0 u`, then DA1) — the bytes kitty, Ghostty and foot
+## were measured to send — because libvterm implements no Kitty protocol.
 ##
 ## No mocks: the real binary, a real recording, a real engine, a real pty.
 
@@ -41,7 +44,7 @@ import ../../app/theme/roles
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 40
+const ExpectedAssertions = 46
 
 var countedAssertions = 0
 
@@ -77,7 +80,8 @@ proc freshDir(): string =
   removeDir(result)
   createDir(result)
 
-proc open(extra: seq[string] = @[]; keybindings = ""): TuiTestSession =
+proc open(extra: seq[string] = @[]; keybindings = "";
+          kittyTerminal = false; term = "xterm-256color"): TuiTestSession =
   let resolved = resolveFixture("calc")
   doAssert resolved.outcome == foRecorded, resolved.detail
   let state = freshDir()
@@ -88,7 +92,7 @@ proc open(extra: seq[string] = @[]; keybindings = ""): TuiTestSession =
     .width(Cols).height(Rows).transcript()
     .envRemove("TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE", "TMUX", "STY",
                "NERD_FONT", "NERDFONT", "COLORFGBG")
-    .envSet("TERM", "xterm-256color").envSet("LANG", "en_US.UTF-8")
+    .envSet("TERM", term).envSet("LANG", "en_US.UTF-8")
     .envSet("COLORTERM", "truecolor")
     .envSet("XDG_STATE_HOME", state)
     .envSet("XDG_CONFIG_HOME", state / "config")
@@ -96,6 +100,15 @@ proc open(extra: seq[string] = @[]; keybindings = ""): TuiTestSession =
     .envSet("CODETRACER_TUI_LAYOUT_DIR", state / "layout")
     .envSet("CODETRACER_KEYBINDINGS", state / "keybindings.json")
     .spawn()
+  if kittyTerminal:
+    # Answer the start-up round as a Kitty-protocol terminal does (kitty,
+    # Ghostty, foot, WezTerm with `enable_kitty_keyboard` — measured): the
+    # flags, then the DA1 fence. The binary then pushes flag 1.
+    let deadline = getMonoTime() + initDuration(seconds = 20)
+    while getMonoTime() < deadline and
+          not result.transcriptBytes().contains("\e[?u"):
+      discard result.drainOutput(20)
+    result.send("\e[?0u\e[?62;22c")
   settleOnDebugger(result, Cols, Rows)
 
 proc snap(sess: var TuiTestSession): Snapshot =
@@ -341,6 +354,78 @@ suite "PLAT-68 Phase B on a real terminal: selection and the clipboard":
     sess.waitUntil("the internal copy pasted", twice)
     ck twice(sess.snap())
     ck sess.transcriptBytes().contains("\e]52;c;?\a")
+    sess.quit()
+
+  test "a LATE clipboard answer is not typed into the document (Kitty protocol)":
+    # kitty and Ghostty ask the user before a program may read the
+    # clipboard (their defaults: `read-clipboard-ask`, `clipboard-read =
+    # ask`), so their answer arrives after the paste's 300 ms wait has run
+    # out. Measured 2026-10-24 under Xvfb: no answer within 5 s while the
+    # prompt is up. The answer must then be taken as the terminal's reply —
+    # the clipboard's new contents — and never typed as text.
+    var sess = open(kittyTerminal = true)
+    let deadline0 = getMonoTime() + initDuration(seconds = 10)
+    while getMonoTime() < deadline0 and
+          not sess.transcriptBytes().contains("\e[>1u"):
+      discard sess.drainOutput(40)
+    ck sess.transcriptBytes().contains("\e[>1u")
+    let at = sess.snap().line11()
+    sess.press(at.row - 8, at.code + 4)
+    sess.send(CtrlE)
+    sess.waitUntil("writable", proc(s: Snapshot): bool =
+      "writable" in s.text(StatusRow))
+    sess.send(CtrlV)
+    let deadline = getMonoTime() + initDuration(seconds = 10)
+    while getMonoTime() < deadline and
+          not sess.transcriptBytes().contains("\e]52;c;?\a"):
+      discard sess.drainOutput(40)
+    ck sess.transcriptBytes().contains("\e]52;c;?\a")
+    # Past the wait (and past the reply window's close on the next idle).
+    sleep(900)
+    discard sess.drainOutput(80)
+    let late = base64.encode("ZQXJ-late-answer")
+    sess.send("\e]52;c;" & late & "\e\\")
+    sleep(600)
+    let s = sess.snap()
+    var typed = false
+    for r in 0 ..< Rows:
+      if "52;c;" in s.text(r) or late in s.text(r) or
+         "ZQXJ-late-answer" in s.text(r):
+        checkpoint("row " & $r & ": " & s.text(r))
+        typed = true
+    ck not typed
+    # The late answer is the clipboard now: the next paste asks again and,
+    # the harness being silent, pastes it.
+    sess.send(CtrlV)
+    sess.waitUntil("the late answer pasted", proc(s: Snapshot): bool =
+      s.findRow("ZQXJ-late-answer")[0] >= 0)
+    ck sess.snap().findRow("ZQXJ-late-answer")[0] >= 0
+    sess.quit()
+
+  test "kitty's TERM: a paste does not ask (its default answer is a prompt)":
+    # Under `TERM=xterm-kitty` the read would raise kitty's permission
+    # prompt, which takes the keys typed after `Ctrl+V` (measured in kitty
+    # 0.49.1; `capabilities.resolveClipboardRead`). So nothing is asked and
+    # the session's own copy is pasted at once.
+    var sess = open(term = "xterm-kitty")
+    let at = sess.clickLine11(3)
+    sess.send(ShiftEnd)
+    sess.send(CtrlC)
+    sess.waitUntil("copied", proc(s: Snapshot): bool =
+      "copied" in s.text(StatusRow))
+    sess.press(at.row - 8, at.code + 4)
+    sess.send(CtrlE)
+    sess.waitUntil("writable", proc(s: Snapshot): bool =
+      "writable" in s.text(StatusRow))
+    sess.send(CtrlV)
+    proc twice(s: Snapshot): bool =
+      var n = 0
+      for r in 0 ..< Rows:
+        if "fixture_provider.nim``" in s.text(r): inc n
+      n == 2
+    sess.waitUntil("the internal copy pasted", twice)
+    ck twice(sess.snap())
+    ck not sess.transcriptBytes().contains("\e]52;c;?\a")
     sess.quit()
 
 suite "PLAT-68 Phase B on a real terminal: the focused strip's tabs":

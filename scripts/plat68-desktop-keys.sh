@@ -53,9 +53,16 @@ done
 export PLAT68_DESKTOP_PREFIX="$work/prefix"
 export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
 
+# The specs: Phase B's keys (`plat68b`) and the real-stack boxes of the
+# desktop's column (`plat68c`: the stepping F-keys once each in and out of the
+# editor, a rebound step-over on every surface that shows it, the letters,
+# VS Code's precedence and the shortcut reference, the layer stack, the
+# inert-key note). `PLAT68_SPEC` names other spec files, space-separated.
+read -r -a specs <<<"${PLAT68_SPEC:-tests/keymaps/plat68b-desktop-keys.spec.ts tests/keymaps/plat68c-desktop-keys.spec.ts}"
+
 run_spec() {
 	(cd src/tests/gui && env CODETRACER_DEV_TOOLS=0 npx playwright test --workers=1 \
-		"${PLAT68_SPEC:-tests/keymaps/plat68b-desktop-keys.spec.ts}" "$@")
+		"${specs[@]}" "$@")
 }
 
 case "$(uname -s)" in

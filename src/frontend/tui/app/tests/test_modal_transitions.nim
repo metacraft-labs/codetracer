@@ -392,7 +392,7 @@ suite "CTUI-9: the modal state machine decides every event":
     # `Ctrl+w` `l`, whose indicator names the modifier so a user can see what
     # the terminal delivered.
     ck km.resolve(state, "\x17", 600).kind == "pending"
-    ck km.router.pendingLabel == "Ctrl+w…"
+    ck km.router.pendingLabel == "Ctrl+W…"
     ck km.resolve(state, "l", 601).action == kaFocusRight
     ck km.router.pendingLabel == ""
 
@@ -435,7 +435,7 @@ suite "CTUI-9: the modal state machine decides every event":
     checkpoint("mouse during a prefix -> " & $mouse.kind & " pending '" &
                mouse.pending & "'")
     ck mouse.kind == "none"
-    ck mouse.pending == "Ctrl+w…"
+    ck mouse.pending == "Ctrl+W…"
     ck km.resolve(state, "h", 4002).action == kaFocusLeft
 
     # `Esc` clears a pending prefix through the state machine, which is the

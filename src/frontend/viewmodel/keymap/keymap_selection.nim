@@ -1,5 +1,13 @@
 ## keymap_selection.nim — PLAT-43: CHOOSING A BASE KEYMAP BY NAME.
 ##
+## Owns: the mapping from a base keymap's NAME to its `BaseKeymap`, the
+## refusal of a name that is none, and the one-time reading of the retired
+## stored `default` as `cua`.
+##
+## Refuses to own: where the choice is stored (`viewmodel/host/
+## keymap_preference`), the commands that change it (each front-end's
+## `:keymap` and palette entry), and the bases themselves (`base_keymaps`).
+##
 ## PLAT-31 built three keymap models (now PLAT-68's four base keymaps,
 ## `editing_keymap.BaseKeymap`) and PLAT-34
 ## made `EditingDocument` take one as a parameter, but no key the shipped

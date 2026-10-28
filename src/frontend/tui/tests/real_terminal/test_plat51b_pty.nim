@@ -76,6 +76,18 @@ proc freshDir(tag: string): string =
   removeDir(result)
   createDir(result)
 
+
+proc ctUnderTest(): string =
+  ## The ONE `ct` the "Record new trace" case may run: `CT_BIN` when the
+  ## environment names one, else this checkout's debug build. It is resolved
+  ## once and pinned into the child's `CT_BIN`, so the binary the case checks
+  ## is the binary the terminal front-end runs — never another `ct` that
+  ## `native_host.findCtBinary` would fall through to (`PATH`, or one beside
+  ## the engine) when this one is missing.
+  let named = getEnv("CT_BIN", "")
+  if named.len > 0: named
+  else: lifecycle_support.repoRoot() / "src" / "build-debug" / "bin" / "ct"
+
 proc builder(args: seq[string]; layoutDir: string;
              subject = ""): TuiTestBuilder =
   let target =
@@ -93,9 +105,11 @@ proc builder(args: seq[string]; layoutDir: string;
     .envSet("XDG_STATE_HOME", layoutDir / "xdg")
     .envSet("CODETRACER_HOME", layoutDir / "ct-home")
     .envSet("CODETRACER_TUI_LAYOUT_DIR", layoutDir)
-  let ct = lifecycle_support.repoRoot() / "src" / "build-debug" / "bin" / "ct"
+  let ct = ctUnderTest()
   if fileExists(ct):
     result = result.envSet("CT_BIN", ct)
+  else:
+    result = result.envRemove("CT_BIN")
 
 proc open(args: seq[string]; layoutDir: string): TuiTestSession =
   result = builder(args, layoutDir).spawn()
@@ -534,40 +548,44 @@ suite "PLAT-51 part B on a real terminal: GoldenLayout's decisions, cells and pi
 suite "PLAT-51 part B on a real terminal: a new tab's Welcome Screen":
 
   test "Record new trace runs a real ct record and opens the recording in the tab":
-    let ct = lifecycle_support.repoRoot() / "src" / "build-debug" / "bin" / "ct"
+    let ct = ctUnderTest()
+    checkpoint("ct under test: " & ct)
     if not fileExists(ct):
-      checkpoint("prerequisite missing: " & ct & " (just build-once)")
+      checkpoint("prerequisite missing: " & ct &
+                 " (just build-once, or CT_BIN); the terminal is not run " &
+                 "against any other ct")
     ck fileExists(ct)
-    let dir = freshDir("record")
-    let work = dir / "program"
-    createDir(work)
-    let program = work / "greeter.py"
-    writeFile(program, "def greet(name):\n    return 'hello ' + name\n\n" &
-                       "print(greet('plat51'))\n")
-    var sess = open(@[], dir)
-    let plus = sess.snap().text(0).cellFind(" + ")
-    ck plus > 0
-    sess.click(0, plus + 1)
-    discard sess.waitFor("Welcome to CodeTracer")
-    let (rr, rc) = sess.waitFor(" Record new trace ")
-    sess.click(rr, rc + 2)
-    discard sess.waitFor("Program to record")
-    sess.send(program)
-    sess.send("\r")
-    # The recording runs in the background; when it is done it opens HERE.
-    discard sess.waitFor("greet #", timeoutMs = 240000)
-    let top = sess.snap().text(0)
-    checkpoint("top bar: " & top)
-    ck top.contains("greeter")
-    ck not sess.snap().text(2).contains("Welcome to CodeTracer")
-    # Recorded under the product's state root.
-    var recorded = 0
-    if dirExists(dir / "recordings"):
-      for kind, path in walkDir(dir / "recordings"):
-        if kind == pcDir and path.extractFilename.startsWith("greeter-"):
-          inc recorded
-    ck recorded == 1
-    sess.quit()
+    if fileExists(ct):
+      let dir = freshDir("record")
+      let work = dir / "program"
+      createDir(work)
+      let program = work / "greeter.py"
+      writeFile(program, "def greet(name):\n    return 'hello ' + name\n\n" &
+                         "print(greet('plat51'))\n")
+      var sess = open(@[], dir)
+      let plus = sess.snap().text(0).cellFind(" + ")
+      ck plus > 0
+      sess.click(0, plus + 1)
+      discard sess.waitFor("Welcome to CodeTracer")
+      let (rr, rc) = sess.waitFor(" Record new trace ")
+      sess.click(rr, rc + 2)
+      discard sess.waitFor("Program to record")
+      sess.send(program)
+      sess.send("\r")
+      # The recording runs in the background; when it is done it opens HERE.
+      discard sess.waitFor("greet #", timeoutMs = 240000)
+      let top = sess.snap().text(0)
+      checkpoint("top bar: " & top)
+      ck top.contains("greeter")
+      ck not sess.snap().text(2).contains("Welcome to CodeTracer")
+      # Recorded under the product's state root.
+      var recorded = 0
+      if dirExists(dir / "recordings"):
+        for kind, path in walkDir(dir / "recordings"):
+          if kind == pcDir and path.extractFilename.startsWith("greeter-"):
+            inc recorded
+      ck recorded == 1
+      sess.quit()
 
   test "Open folder turns the tab into an editing session on that folder":
     let dir = freshDir("folder")

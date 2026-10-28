@@ -4,6 +4,10 @@
 ## Owns: one `KeymapDefinition` — the noun-then-verb bindings, and the
 ## explicit, reasoned list of published operations this model does NOT claim.
 ##
+## Refuses to own: resolution (`editing_keymap.resolveLayers`, the one
+## resolver), what an operation does (the editing core), and the navigation
+## layer the modal bases share outside the editor (`navigation_keymap`).
+##
 ## =========================================================================
 ## NOUN THEN VERB, AND WHY THERE IS NO OPERATOR-PENDING ROW ANYWHERE BELOW
 ## =========================================================================

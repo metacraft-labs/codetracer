@@ -60,6 +60,10 @@ type
       ## The TARGET is not drawn by this front-end (the reason in `note`): a
       ## click needs something to land on. Never used for a target that is
       ## drawn.
+    nsRetired = "retired"
+      ## The desktop no longer has the target either: a later decision removed
+      ## it from every front-end (the decision in `note`). The row keeps its id
+      ## so the ids stay the milestone table's; nothing implements it.
 
   ClickBehaviour* = object
     id*: string
@@ -639,7 +643,9 @@ const ClickInventory*: array[57, ClickBehaviour] = [
     "StateVM.setHideOtherProcessWatches", nsDone, nsDone,
     "the pane is one list of variables and watches; the terminal's toggle is `:watches hide|show`"),
   k("K30", "Timeline: track", {cgClick}, "seek to the tick",
-    "gotoTick", nsDone, nsDone),
+    "-", nsRetired, nsRetired,
+    "the Timeline panel was removed from every front-end (Layout-System.md, " &
+      "\"The Timeline panel is removed\")"),
   k("K31", "Point list: row", {cgClick}, "select the point",
     "PointListVM.selectPoint", nsDone, nsDone),
   k("K32", "Terminal output: line", {cgClick}, "go to that output",
@@ -685,10 +691,13 @@ const ClickInventory*: array[57, ClickBehaviour] = [
     "the terminal strip draws no pin glyph (its tab menu pins, K7); " &
       "GPUI's button is PLAT-49 part B's"),
   k("K44", "Timeline: zoom buttons", {cgClick}, "zoom the track",
-    "-", nsNotApplicable, nsNotApplicable,
-    "the native timelines draw no zoom control"),
+    "-", nsRetired, nsRetired,
+    "the Timeline panel was removed from every front-end (Layout-System.md, " &
+      "\"The Timeline panel is removed\")"),
   k("K45", "Timeline: track", {cgDrag},
-    "seek where the drag is released", "gotoTick", nsDone, nsDone),
+    "seek where the drag is released", "-", nsRetired, nsRetired,
+    "the Timeline panel was removed from every front-end (Layout-System.md, " &
+      "\"The Timeline panel is removed\")"),
   k("K46", "Flow: loop iteration controls", {cgClick, cgDoubleClick},
     "previous / next iteration; open a folded iteration", "-",
     nsNotApplicable, nsNotApplicable,

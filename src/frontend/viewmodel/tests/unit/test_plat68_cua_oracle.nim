@@ -44,7 +44,7 @@ proc canonicalWhen(text: string): string =
   let p = parseWhen(text)
   if p.ok: $p.expr else: text
 
-const ExpectedAssertions = 39
+const ExpectedAssertions = 48
 
 var countedAssertions = 0
 
@@ -323,6 +323,24 @@ suite "PLAT-68 KL-3: the CUA data is CUA-Keymap.md §3 – §4, both directions"
     ck extra.len == 0
     ck data.len == spec.len
 
+suite "PLAT-68 KL-2 / KL-3: a deleted row is named (the planted control)":
+  # Base-Keymaps §9 KL-2: "a planted deleted row reddens". For a data base
+  # the filed list is derived from the bound one (`base_rows.filedFor`), so
+  # `covered + filed == operations` holds by construction and cannot be the
+  # check that notices a lost row; this comparison is. One row taken out of
+  # the shipped data, the comparison names exactly it.
+  test "a CUA row deleted from the data is a documented, unshipped binding":
+    let spec = specTuples(CuaDoc, CuaSections).sortedStrings
+    var planted = CuaRows.filterIt(it.whenText != "keyProtocol == legacy")
+    let victim = planted[0]
+    planted.delete(0)
+    let missing = difference(spec, mergePlatforms(dataTuples(planted)).sortedStrings)
+    checkpoint("deleted " & victim.chords & " -> " & victim.operation &
+               "; missing " & $missing)
+    ck missing.len >= 1
+    ck missing.allIt(it.startsWith(normalizeChordSequence(victim.chords) & " -> " &
+                                   victim.operation))
+
 suite "PLAT-68 KL-3: §3.10's legacy fallbacks, read the way §3.10 says":
   proc legacyResolves(chords, op: string): bool =
     ## Whether `chords` resolves to `op` in the shipped CUA data under
@@ -377,6 +395,90 @@ suite "PLAT-68 KL-3: §3.10's legacy fallbacks, read the way §3.10 says":
       if r.whenText == "keyProtocol == legacy":
         checkpoint("legacy row " & r.chords)
         ck normalizeChordSequence(r.chords) in documented
+
+# ---------------------------------------------------------------------------
+# KL-4: no base contains a row whose source is another base
+# ---------------------------------------------------------------------------
+#
+# Base-Keymaps-And-Layer-Stack.md §3.3 ("No hybrids") and §9 KL-4. Every row
+# of a base's document names its source in the last column (`Src`); the
+# sources a base may draw on are its own upstream and CodeTracer's own
+# defaults, which every base shares:
+#
+#   * CUA (CUA-Keymap.md §1): `M` (Monaco), `W` (the VS Code workbench), `CT`
+#     (the desktop's defaults), `TUI` (CodeTracer-TUI.md §4.2 — OQ-1's
+#     letters, decided by the user);
+#   * Emacs (Emacs-Keymap.md §1): `GNU` (GNU Emacs), `CT`.
+#
+# A CUA row sourced `GNU` (an Emacs binding mixed into CUA — the hybrid the
+# user declined on 2026-10-09) or an Emacs row sourced `M` / `W` is named. A
+# row with no source at all is named too: its source was never checked.
+# The Vim and Kakoune tables (Editing-Operations-And-Keymaps.md) carry no
+# source column; their rows are each base's own by construction (PLAT-31's
+# tables), so there is no other base for them to draw from in a document.
+
+proc sourcesOf(cell: string): seq[string] =
+  ## `W, CT` -> @["W", "CT"]; `CT (prevEvent)` -> @["CT"]: the source tokens
+  ## of a `Src` cell, its parenthesised commands dropped.
+  var text = cell
+  let paren = text.find('(')
+  if paren >= 0: text = text[0 ..< paren]
+  result = @[]
+  for t in text.split(','):
+    let w = t.strip().strip(chars = {'*', '`'})
+    if w.len > 0: result.add w
+
+proc foreignSourceRows(doc: string; sections: openArray[string];
+                       allowed: openArray[string]): (int, seq[string]) =
+  ## (rows read, the rows whose source is not one of `allowed`).
+  var rows = 0
+  var bad: seq[string] = @[]
+  for cells in tableRows(doc, sections):
+    inc rows
+    let srcs = sourcesOf(cells[^1])
+    if srcs.len == 0:
+      bad.add cells[0] & " (no source)"
+    for src in srcs:
+      if src notin allowed:
+        bad.add cells[0] & " (source " & src & ")"
+  (rows, bad)
+
+const
+  CuaSources = ["M", "W", "CT", "TUI"]
+  EmacsSources = ["GNU", "CT"]
+
+suite "PLAT-68 KL-4: no base row is sourced from another base":
+
+  test "every CUA row's source is VS Code's or CodeTracer's":
+    let (rows, bad) = foreignSourceRows(CuaDoc, CuaSections, CuaSources)
+    for b in bad: checkpoint("CUA row from another source: " & b)
+    checkpoint("CUA rows read: " & $rows)
+    ck rows > 0
+    ck bad.len == 0
+
+  test "every Emacs row's source is GNU Emacs's or CodeTracer's":
+    let (rows, bad) = foreignSourceRows(EmacsDoc, EmacsSections, EmacsSources)
+    for b in bad: checkpoint("Emacs row from another source: " & b)
+    checkpoint("Emacs rows read: " & $rows)
+    ck rows > 0
+    ck bad.len == 0
+
+  test "planted control: an Emacs row in CUA, a VS Code row in Emacs, a row with no source":
+    # The same reader over a document that has each defect once, so the two
+    # checks above cannot pass by reading nothing.
+    const Planted = "### 3.1 Planted\n" &
+      "| Chord | tty | Operation | when | VS Code command | Src |\n" &
+      "|---|---|---|---|---|---|\n" &
+      "| `Ctrl+A` | L | `editor.select-all` | — | `selectAll` | M |\n" &
+      "| `Ctrl+K` | L | `editor.kill-line` | `writable` | — | GNU |\n" &
+      "| `Ctrl+E` | L | `editor.move-line-end` | — | — | |\n" &
+      "| `Ctrl+B` | L | `layout.toggle-side-panels` | — | — | W, CT |\n"
+    let (cuaRows, cuaBad) = foreignSourceRows(Planted, ["3.1"], CuaSources)
+    ck cuaRows == 4
+    ck cuaBad == @["`Ctrl+K` (source GNU)", "`Ctrl+E` (no source)"]
+    let (_, emacsBad) = foreignSourceRows(Planted, ["3.1"], EmacsSources)
+    ck emacsBad == @["`Ctrl+A` (source M)", "`Ctrl+E` (no source)",
+                     "`Ctrl+B` (source W)"]
 
 suite "PLAT-68 KL-3: the Emacs data is Emacs-Keymap.md §3, both directions":
   let spec = specTuples(EmacsDoc, EmacsSections).sortedStrings

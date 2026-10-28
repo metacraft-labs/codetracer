@@ -67,7 +67,7 @@ proc catalogueCoverage(def: KeymapDefinition): TableCoverage =
     if bound: result.covered.add o.name
     else: result.filed.add (o.name, filedReasonOf(def.model))
 
-const ExpectedAssertions = 152
+const ExpectedAssertions = 159
 
 var countedAssertions = 0
 
@@ -349,6 +349,23 @@ suite "the find widget's layer (§5.3)":
     ck r.press(f, FindPath, "c").op == "char:c"
     ck r.press(f, FindPath, "Enter").op == "find.next"
 
+  test "a focused field's own row with a true `when` takes its character":
+    # §5.6, THE TEXT-ENTRY SHADOW: in a text field a character is text —
+    # unless a row of the focused element's own layer (here the pushed find
+    # layer) binds it under a `when` that holds. An unconditional row there
+    # is no reason to stop typing, and a row further out (the global
+    # table's) is never asked before the character.
+    let uk = parseUserKeymap("""[
+      {"key": "c", "command": "find.toggle-case", "when": "findWidgetVisible"},
+      {"key": "w", "command": "find.toggle-whole-word"}]""")
+    var r = initKeymapRouter(bkCua, Linux, user = uk)
+    var f = debugFacts()
+    f.findWidgetVisible = true
+    discard r.pushLayer(FindTable, "editor:main.nr", "FIND")
+    ck r.press(f, FindPath, "c").op == "find.toggle-case"
+    ck r.press(f, FindPath, "w").op == "char:w"
+    ck r.press(f, FindPath, "n").op == "char:n"
+
   test "closing the owner pops its layer":
     var r = initKeymapRouter(bkCua, Linux)
     discard r.pushLayer(FindTable, "editor:main.nr", "FIND")
@@ -360,7 +377,7 @@ suite "the pending prefix and the status line":
   test "CUA waits on Ctrl+K forever; Vim times out at 1000 ms":
     var r = initKeymapRouter(bkCua, Linux)
     ck r.pressAt(editFacts(), CallTracePath, nmNormal, 0, "Ctrl+k").kind == erPending
-    ck r.statusLabel(CallTracePath, nmNormal) == "Ctrl+k…"
+    ck r.statusLabel(CallTracePath, nmNormal) == "Ctrl+K…"
     ck r.pressAt(editFacts(), CallTracePath, nmNormal, 60_000, "Ctrl+s").op ==
       "help.keyboard-shortcuts"
     var v = initKeymapRouter(bkVim, Linux)
@@ -414,9 +431,25 @@ suite "KL-7: the user layer's closed error set":
 
 suite "KL-11: VS Code's precedence, through input":
   test "a user row with no `when` takes Enter from the call trace's base row":
+    # FIRST, IN ONE TABLE: a user row of the list table over the list
+    # table's own base row (`Ctrl+F`, `list.filter`). Every precedence rule
+    # ever drafted agrees here — source first, or scope first — except one
+    # that puts the BASE before the user; so this line names that defect,
+    # and the cross-scope line after it names the other one (§5.1: the
+    # first draft compared the scope before the source, which a same-table
+    # pair cannot tell apart).
+    let same = parseUserKeymap("""[{"key": "ctrl+f", "command": "list.focus-first"}]""")
+    var s = initKeymapRouter(bkCua, Linux, user = same)
+    ck s.press(debugFacts(), CallTracePath, "Ctrl+f").op == "list.focus-first"
     let uk = parseUserKeymap("""[{"key": "enter", "command": "debugger.step-over"}]""")
     var r = initKeymapRouter(bkCua, Linux, user = uk)
+    # ACROSS SCOPES: a user GLOBAL row over the call trace's base LIST row.
+    # Source before scope (VS Code's rule) gives the user's; scope before
+    # source (the withdrawn draft) would give `list.activate`.
     ck r.press(debugFacts(), CallTracePath, "Enter").op == "debugger.step-over"
+    # The load report counts the shadow (§5.6: "listed in the load report").
+    ck r.shadows.len > 0 and
+      r.loadSummary.endsWith(", " & $r.shadows.len & " shadow(s)")
     ck r.shadows.anyIt(it.shadowedOperation == "list.activate" and
                        it.shadowedTable == ListTable)
     let shown = r.shortcutReference(debugFacts(), CallTracePath, nmNormal)
@@ -443,6 +476,19 @@ suite "KL-11: VS Code's precedence, through input":
     var r = initKeymapRouter(bkCua, Linux, user = uk)
     ck r.press(debugFacts(), CallTracePath, "Ctrl+Alt+u").op == "list.focus-first"
     ck r.press(debugFacts(), EditorPath, "Ctrl+Alt+u").op == "debugger.step-over"
+
+  test "inside a base the inner scope goes first":
+    # `Shift+Alt+I` is the editor's (`add-cursor-at-each-line-of-selection`,
+    # the editor table, `editorTextFocus`) and, in Debug mode, the window's
+    # (`flow.set-inline`, the global table): in the Debug editor both rows
+    # hold, and the inner one answers.
+    var r = initKeymapRouter(bkCua, Linux)
+    ck r.press(debugFacts(), EditorPath, "Shift+Alt+i").op ==
+      "add-cursor-at-each-line-of-selection"
+    # The control: where no editor is on the path the global row is live, so
+    # the line above is a choice between two rows that both hold.
+    ck r.press(debugFacts(), CallTracePath, "Shift+Alt+i").op ==
+      "flow.set-inline"
 
   test "a removal takes the base row out; the chord is then the next layer's":
     let uk = parseUserKeymap("""[{"key": "ctrl+b", "command": "-layout.toggle-side-panels"}]""")

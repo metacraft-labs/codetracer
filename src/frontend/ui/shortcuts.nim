@@ -74,11 +74,21 @@ proc openShortcutsDialog*() =
   closeShortcutsDialog()
   let mac = isMacPlatform()
   let active = activePreset()
+  let (reference, scopeText) = shortcutReferenceHere()
   let tree = buildShortcutDialog(proc(action: ClientAction): string =
                                    $chordForAction(action),
-                                 active, mac, keybindingsNotes)
+                                 active, mac, keybindingsNotes,
+                                 reference, scopeText)
   let host = mountShortcutDialog(tree)
   host.setAttribute("id", ShortcutDialogHostId)
+  # Over the window, as a dialog: no stylesheet styles it, so appended as it
+  # was it landed below the layout, out of sight and out of reach.
+  host.setAttribute("style", "position: fixed; top: 8vh; left: 50%; " &
+    "transform: translateX(-50%); z-index: 10000; max-height: 84vh; " &
+    "overflow: auto; min-width: 440px; padding: 16px 20px; " &
+    "background: var(--bg-primary, #1e1e1e); color: var(--text-primary, #ddd); " &
+    "border: 1px solid var(--border-color, #555); border-radius: 6px; " &
+    "box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5)")
 
   # The preset buttons and the close button, wired by the attribute the builder
   # stamped rather than by position — so reordering the picker cannot silently

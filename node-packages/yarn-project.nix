@@ -82,26 +82,20 @@ let
     "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
 
   cacheOutputHashes = {
-    # Refreshed for the ``electron-rebuild@3.2.9`` -> ``@electron/rebuild@4.2.0``
-    # swap that drops ``tar@6.2.1`` (GHSA-23hp-3jrh-7fpw). That lockfile change
-    # invalidated both hashes below, exactly as the NOTE above warns.
+    # Refreshed for dropping ``mousetrap`` (nothing imports it since every key
+    # reaches the one router, ``ui/key_router.nim``). That lockfile change
+    # invalidated both hashes, as the NOTE above warns.
     #
-    # Forced with ``sentinelHash`` rather than by waiting for a mismatch, per the
-    # procedure above -- the previous values were real, so Nix would have
-    # substituted the stale caches from the binary cache and never run the
-    # builder, surfacing as ``YN0056: Cache entry required but missing``.
-    # Measured on CI (run 34337422212) after the sentinel forced a real build of
-    # yarn-cache.drv on x86_64-linux -- no Linux builder is configured on the
-    # machine this branch was prepared on, so this value could not be obtained
-    # locally. Three independent jobs -- test-non-gui (nixos, eph-linux-x64-g1),
-    # reprobuild-linux-smoke, and ct-test release gate (M16 provider matrix) --
-    # each built /nix/store/jkmf1s93nsmg5n2hyxc9hggwyj044yqv-yarn-cache.drv and
-    # reported this identical ``got:`` value.
-    "x86_64-linux" = "sha512-YOh4Lqjn3A2V2gYD+sspl5ZVOZJ+SCRPLHwp+DD03wq9t4eHQv2kXEv6aqhYW4ybT5itznWOe6E1SxfFDC57sg==";
-    # Measured locally on aarch64-darwin: the sentinel above forced a real build
-    # of yarn-cache.drv (no substitute can exist for it), and the mismatch
-    # reported this ``got:``. Re-pinned and rebuilt to confirm it is stable.
-    "aarch64-darwin" = "sha512-rJ3Oka4DrMUZPVorCFF5usgDOBwQaXM/6AfzvVohcMiR7qB1EkYkr+hCNn3AVu+9Hl4TAZ472TBFhfSwxE8XJw==";
+    # x86_64-linux: forced with ``sentinelHash`` (a real build of
+    # yarn-cache.drv, no substitute possible) and measured on nixos-ci-bare-002
+    # 2026-10-24; the node-modules derivation was then built with it.
+    "x86_64-linux" = "sha512-qTQAjem/DRvtgA0upZLmE6W6xWjLzhqWim47SJz6gHttUMzvOQoXxD7xNWhnkxah/sMqmIzKk8DTX6JrksNi4Q==";
+    # aarch64-darwin: NOT YET MEASURED. The previous value named the cache of
+    # the old lockfile, which Nix would substitute from the binary cache and
+    # never rebuild (``YN0056: Cache entry required but missing`` further
+    # down). The sentinel makes the first aarch64-darwin build fail loudly
+    # with the true ``got:`` value instead; paste it here.
+    "aarch64-darwin" = sentinelHash;
   };
 
   cacheOutputHash =

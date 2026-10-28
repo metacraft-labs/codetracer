@@ -7707,6 +7707,76 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   reports consumer-declared / plugin-io-edge-is-real / tui-layers violations.
   `git init` the copy, exclude the submodule paths in `.git/info/exclude`, and
   `git add -f` the few tracked-but-ignored .nim files so the listing matches.
+- `ci/test/keymap-clean-code.sh` (Base-Keymaps §8 / KL-10) holds the keymap's
+  clean-code rules mechanically: exactly one routine walks a binding trie
+  (`editing_keymap.resolveLayers`; `nodeAfter` is its walk primitive), only
+  `key_names` turns terminal key BYTES into names (a view matching `"\x1b[A"`
+  is a second decoder — pass names through `keyName`), `chordName`'s callers
+  are the declared decoders (gpui_keys, key_event_names, vim_import), and every
+  `viewmodel/keymap/*.nim` header needs `Owns:` and `Refuses to own:` lines.
+  Written chords in the base data (`"Alt+Shift+M"`) are exempt from the
+  modifier-order rule because `normalizeChord` orders them on load.
+- In the PLAT-68 harness, `B1` (base before user) and `G2` (scope before
+  source) are told apart by the first lines of test_plat68_layers' KL-11 case:
+  a SAME-table user/base pair (only B1 fails it) precedes the cross-scope pair.
+- DIFF-13 (KL-6) is `src/frontend/tui/tests/test_plat68_diff13.nim` over a population DERIVED from the four bases'
+  tables (`tui/tests/support/diff13_population.nim`, ~4.6k row tuples, ~4.5k probes); the key synthesiser for all three
+  devices is `tui/tests/support/key_devices.nim`. The desktop half is `src/tests/gui/tests/keymaps/plat68-diff13-desktop.spec.ts`
+  reading the committed `diff13/answers-<base>.json` (split per base: the repo refuses added files > 500 KB); regenerate
+  them with `CT_DIFF13_WRITE=1` and the suite filtered to "PLAT-68 DIFF-13: the population*::*". The desktop answers through
+  `window.__ctKeymapProbe(json)` (ui/key_router.probeKeys), GPUI through `--window-ops=probe:<key>[:mods]` (the key field is
+  percent-decoded: `%2C` `,`, `%3A` `:`, `%25` `%`), the terminal through `runtime.probeKey`.
+- A situation that opens something (palette, writable editor) must be reached with THAT base's own chord
+  (`openingChords` via `chordFor`): Ctrl+P / Ctrl+E are other operations under Emacs. GPUI cannot switch its base after
+  start and Vim/Kakoune bind no key to `editor.toggle-read-only`, so the writable editor under a modal base is unreachable
+  on GPUI (counted). The desktop's `desktopFacts` reports a writable editor as insert mode under every base (no modal
+  editing in Monaco) — counted as inexpressible on the desktop.
+- The desktop's session-container-<n> carries `data-scope-kind=tab` / `data-scope-id=tab:<n+1>` so its scope path has the
+  session tab like the terminal's and GPUI's (window / tab:tab:1 / pane:… ).
+- The macOS native menu (`index/menu.nim`, `when defined(ctmacos)`) is
+  compiled by NO Linux lane; `nim check -b:js <Tuprules NIM_COMMON_FLAGS>
+  -d:ctIndex -d:nodejs -d:ctmacos src/frontend/index.nim` type-checks it on
+  Linux. Its accelerators come from `viewmodel/keymap/menu_accelerators`
+  (a main-process router over the same keybindings.json), and
+  `test_plat68_menu_accelerators` source-checks the arm.
+- `index/keybindings.onKeybindingsText` is called with the file's text every
+  time it is sent to the renderer — the hook the macOS menu re-keys on.
+- The desktop shortcuts dialog has NO stylesheet (no `kb-*` rules anywhere);
+  its shortcut-reference section carries an inline max-height/overflow.
+- `shortcut_dialog_test`'s no-markup walk counts 3 checks per node per dialog
+  (text, tag, each attribute): a new dialog section moves ExpectedAssertions
+  by (nodes × checks × 4 presets), not only by the new case's checks.
+- Changing node-packages/yarn.lock: set the platform's hash in
+  `yarn-project.nix` to `sentinelHash`, `nix build .#packages.x86_64-linux.
+  node-modules-derivation`, paste the `got:` (it is the yarn-cache FOD), build
+  again. The yarn-cache build takes ~15 s here (680 MiB of packages).
+- Re-syncing a /tmp mirror (`sync.sh`) while `build-once.sh` runs in it
+  reverts the patched `src/Tuprules.tup`, and cargo then builds into the
+  SHARED `/tmp/codetracer/db_backend_target`. Never sync a mirror mid-build.
+- Keymap router pending prefixes expire LAZILY in `resolveLayers` (at the next
+  key). The terminal now also expires them on the idle clock
+  (`keymap_router.expirePending` / `runtime.tickPendingPrefix`, woken by
+  `idleWaitMs`), so Vim's `g…` leaves the status line at 1000 ms.
+  `pendingLabel` spells the prefix with `key_names.displaySequence`
+  (`Ctrl+K…`), not the router's canonical `Ctrl+k`.
+- Under CUA a writable editor already has `textInputFocus` true
+  (`context_keys`), and the resolver's text-entry shadow types a printable key
+  before any non-focused layer is asked: the letter rows' `editorReadOnly` and
+  `!textInputFocus` are defence in depth, not the only guard.
+- The terminal's find field (`rt.prompt`, kind != pkCommand) is on the scope
+  path only while the focus is on its owner (`rt.app.findOwner`: the editor's
+  element id or the pane `/` was typed in); elsewhere `Escape` is that pane's.
+- GPUI's EDIT window (`--edit`, `openArm`) delivers keys to the document's
+  own resolution (`edit_arm.applyGpuiKey` -> `doc.applyKey`), NOT through
+  `gRouter.route`; only `editKeyInert` asks the router (for the inert-key
+  status-bar note). A replay window's keys go through `routeWindowKey`.
+- GPUI's status bar is `drawFooter` (`data-ct-footer="status-bar"`); its
+  transient note is `gStatusNote` (`data-ct-footer-note`).
+- The shortcut reference's text is `keymap_router.referenceLines` of
+  `shortcutReference`: `[user:<table>]` / `[base:<table>]` headings in
+  resolution order, rows `  <key>  <operation> — <label>  (shadowed by your
+  row N)`. Terminal: `:keys reference` and `help.keyboard-shortcuts`
+  (`Ctrl+K Ctrl+S`) open it in the content overlay; GPUI the same op.
 - Test Results natively (PLAT-53): the native hosts install the DESKTOP's
   `desktop_test_host` unchanged over `viewmodel/host/native_test_host.nim`'s
   producers (`ct test run --events`, `ct record-test`, run via `/bin/sh -c

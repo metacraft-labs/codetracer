@@ -55,7 +55,7 @@ import ../views/borders
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 451
+const ExpectedAssertions = 457
 
 const
   LandedThroughMilestone = 14
@@ -520,6 +520,23 @@ suite "CTUI-11 Tier 1: capability resolution":
       initTerminalEnv(term = "dumb", lang = "en_US.UTF-8"),
       initCapabilityFlags())
     ck not dumb.kittyKeyboard
+
+  test "a paste asks the terminal for its clipboard except where it would prompt":
+    # kitty and Ghostty answer an OSC 52 read with a permission prompt by
+    # default (measured 2026-10-24), which takes the keys typed after the
+    # paste — so they are not asked; every other terminal is.
+    let env = proc(term: string; program = ""): TerminalEnv =
+      initTerminalEnv(term = term, termProgram = program, lang = "en_US.UTF-8")
+    ck resolveCapabilities(env("xterm-256color"),
+                           initCapabilityFlags()).clipboardRead
+    ck resolveCapabilities(env("foot"), initCapabilityFlags()).clipboardRead
+    let kitty = resolveCapabilities(env("xterm-kitty"), initCapabilityFlags())
+    ck not kitty.clipboardRead and kitty.clipboardReadFrom == csEnvironment
+    ck not resolveCapabilities(env("xterm-ghostty", "ghostty"),
+                               initCapabilityFlags()).clipboardRead
+    ck not resolveCapabilities(env("xterm-256color", "ghostty"),
+                               initCapabilityFlags()).clipboardRead
+    ck describe(kitty).contains("clipboard-read=off(environment)")
 
   test "the resolved set is ONE value, and it names why each axis resolved":
     # CTUI-11's first contract. `describe` is what a user and a failure message

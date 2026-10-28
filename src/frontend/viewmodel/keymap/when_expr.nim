@@ -12,6 +12,9 @@
 ## — its evaluation, and `canBothHold`, the exact overlap test §5.6 decides
 ## base conflicts with.
 ##
+## Refuses to own: the catalogue of keys and their values (`context_keys`),
+## and which rows a condition guards (each base, and the user layer).
+##
 ## **AN UNKNOWN KEY IS A PARSE ERROR, NOT `false`.** A misspelt key that
 ## evaluated false would disable its binding with no report (§4.1). So is a
 ## comparison against a value outside the key's closed domain, and a bare key

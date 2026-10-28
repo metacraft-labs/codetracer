@@ -4523,7 +4523,6 @@ __metadata:
     monaco-editor-node: "npm:^0.3.0"
     monaco-editor-webpack-plugin: "npm:7.1.1"
     monaco-languageclient: "npm:10.2.0"
-    mousetrap: "npm:^1.6.5"
     napi-build-utils: "npm:^2.0.0"
     node-abi: "npm:^4.24.0"
     node-gyp: "npm:^12.1.0"
@@ -8909,13 +8908,6 @@ __metadata:
   version: 2.11.1
   resolution: "monaco-languages@npm:2.11.1"
   checksum: 10c0/9fe4f0a18257ddafa4036d9ed9bdec51a6960ac0a98cb8295b111d51a3e50f6e965c3c18fae46a5a8f24ffabe999cd68fd24f0ea0438397ea898189aee8ea237
-  languageName: node
-  linkType: hard
-
-"mousetrap@npm:^1.6.5":
-  version: 1.6.5
-  resolution: "mousetrap@npm:1.6.5"
-  checksum: 10c0/5c361bdbbff3966fd58d70f39b9fe1f8e32c78f3ce65989d83af7aad32a3a95313ce835a8dd8a55cb5de9eeb7c1f0c2b9048631a3073b5606241589e8fc0ba53
   languageName: node
   linkType: hard
 

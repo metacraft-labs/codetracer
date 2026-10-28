@@ -3,6 +3,11 @@
 ## Owns: one `KeymapDefinition` — the bindings a Vim user expects, and the
 ## explicit, reasoned list of published operations this model does NOT claim.
 ##
+## Refuses to own: resolution (`editing_keymap.resolveLayers`, the one
+## resolver), what an operation does (the editing core), the navigation layer
+## the modal bases share outside the editor (`navigation_keymap`), and a
+## user's own `.vimrc` (`vim_import`).
+##
 ## =========================================================================
 ## OPERATOR-PENDING COMPOSITION, AND WHY ONE CHORD IS THREE ROWS
 ## =========================================================================
