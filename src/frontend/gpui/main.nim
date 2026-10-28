@@ -668,7 +668,11 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
                        # PLAT-58: the Requests pane's rows, menus, field.
                        "requests",
                        # PLAT-69: the window resized, its frame changed.
-                       "resize", "chrome"]:
+                       "resize", "chrome",
+                       # Build-Output-Pane.md §3.8, §3.9: a pane docked to
+                       # the footer; the pointer resting on an editor
+                       # character.
+                       "dock", "hover-code"]:
           return GpuiCommand(kind: gckUsageError,
             message: "codetracer-gpui: --window-ops: unknown event '" & op &
                      "'")
@@ -1175,6 +1179,8 @@ proc editOverlayKey(key: string; mods: seq[string]): bool
 proc leaveFilesField(r: GpuiRenderer)
   ## K19: likewise.
 
+proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string])
+  ## PLAT-68: forward-declared; defined with the router below.
 proc editKeyInert(name: string): bool
   ## PLAT-68 (Mode-Transitions §8.1): FORWARD-DECLARED; defined with the
   ## router's section beside `routeWindowKey`.
@@ -1319,6 +1325,10 @@ var
     ## PLAT-55: where a `:build` runs — the window's project, as for the
     ## terminal's `:build` (the Edit window's folder, a folder tab's, a
     ## replay's working directory).
+  gBuildReveal = initBuildAutoReveal()
+    ## Build-Output-Pane.md §3.8: when this window's builds show and put away
+    ## the Build Output pane (`build_auto_reveal`), its settings read when the
+    ## window opens (`installProblems`).
     ## PLAT-57: Find in Files' reading position and a held scrubber thumb.
   gSessionsOpened = initTable[int, HeadlessDebugSession]()
     ## PLAT-49 part B: every session this window holds, by its tab's id —
@@ -2545,6 +2555,23 @@ proc drawEditorBody(r: GpuiRenderer; pane: GpuiElement;
   ## The editor's rows and bar from `gEditorSurface`, at the window's width
   ## and the followed horizontal view — every draw of the editor's body.
   followEditorView()
+  # §3.9: the build's diagnostics in the file drawn — the Problems pane's
+  # rows, the path of each resolved against the build's directory, the
+  # editor's against the project.
+  gEditorSurface.diagnostics = @[]
+  if not gProblems.isNil and gEditorSurface.path.len > 0:
+    let rows = gEditorSurface.rows
+    let project = if not openArm.isNil and gEditorSurface.productMode == pmEdit:
+                    openArm.root
+                  elif gBuildRoot.len > 0: gBuildRoot
+                  else: getCurrentDir()
+    gEditorSurface.diagnostics = diagnosticsForFile(
+      gProblems.vm.problems.val, gProblems.feed.workingDirectory,
+      gEditorSurface.path, project,
+      proc(line: int): string =
+        for row in rows:
+          if row.line == line: return row.text
+        "")
   discard renderEditor(r, pane, sourcePaneView(GpuiMedium).root,
                        gEditorSurface, gEditorViewportPx, gEditorView.leftCol,
                        gEditorView.contentCols, editorCaretMark(),
@@ -4012,6 +4039,7 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     if buildRect.w > 0 and buildRect.contains(x, y) and dy != 0.0 and
        not gProblems.isNil:
       let rows = int(round(-dy / float(BuildRowPx)))
+      gBuildReveal.interact()   # §3.8: pin on interaction
       gBuildPane.scrollBy(gProblems.build, buildRect,
                           (if rows == 0: (if dy < 0: 1 else: -1) else: rows))
       drawBuildPane(r)
@@ -4159,8 +4187,6 @@ proc pointerHandler(r0: GpuiRenderer): GpuiEventHandler =
                    (defined(macosx) and gmPlatform in ev.modifiers)
     windowPointer(r0, ev.kind, int(p.x), int(p.y), dy, dx)
 
-proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string])
-  ## PLAT-68: forward-declared; defined with the router below.
 
 proc windowKey(key: string; mods: seq[string]) =
   ## One key of a replay window, from a pane's `keydown` listener or from
@@ -4902,6 +4928,69 @@ proc drawPopovers(r: GpuiRenderer) =
       r.appendChild(box, row)
     gTopEls.add box
 
+proc drawCellTooltip(r: GpuiRenderer) =
+  ## A truncated cell's — or a build diagnostic's — tooltip (`drawTopBar`).
+  if gCellTooltip.len > 0:
+    var widest = 0
+    for l in gCellTooltip:
+      widest = max(widest, l.runeLen)
+    let a = gCellHoverAnchor
+    let w = min(pendingViewportWidth, pxOfText(widest) + 2 * TabPadPx)
+    let h = gCellTooltip.len * HoverLabelPx
+    let below = a.y + a.h
+    let y = if below + h <= pendingViewportHeight: below else: max(0, a.y - h)
+    let x = max(0, min(a.x, pendingViewportWidth - w))
+    let tb = absBox(r, PxRect(x: x, y: y, w: w, h: h),
+                    chromeOf(crWindowBackground))
+    r.setAttribute(tb, CellTooltipAttribute, gCellHover.key & "|" &
+                                             gCellHover.column)
+    r.setStyle(tb, "display", "flex")
+    r.setStyle(tb, "flex-direction", "column")
+    r.setStyle(tb, "items", "start")   # the lines left-aligned, as wrapped
+    r.setStyle(tb, "padding-left", $TabPadPx & "px")
+    r.setStyle(tb, "font-family", MonoFontFamily)
+    for (k, v) in paneOutlineStyle(true): r.setStyle(tb, k, v)
+    for l in gCellTooltip:
+      let line = r.createElement("div")
+      r.setStyle(line, "height", $HoverLabelPx & "px")
+      r.setStyle(line, "white-space", "nowrap")
+      r.appendChild(line, r.createTextNode(l))
+      r.appendChild(tb, line)
+    gTopEls.add tb
+
+proc drawOmnibarResults(r: GpuiRenderer) =
+  ## The omnibox's results under its field (`drawTopBar`, `drawEditOmnibar`).
+  # THE OMNIBAR'S RESULTS.
+  let op = gpuiOmnibarPopover(gOmnibar, gTopLayout, pendingViewportHeight)
+  if op.rows.len > 0:
+    # PLAT-51: the results list on the EDITOR'S ground too (its border the
+    # menu's), the selected row on the editor's selection colour under the
+    # editor's foreground.
+    let box = absBox(r, op.rect, EditorGround)
+    r.setAttribute(box, "data-ct-omnibar-results", $gOmnibar.results.len)
+    r.setStyle(box, "border-width", "1px")
+    r.setStyle(box, "border-color", chromeOf(crMenuBorder))
+    gTopEls.add box
+    for row in op.rows:
+      let selected = row.item >= 0 and row.item == gOmnibar.selected
+      let rb = absBox(r, row.rect,
+                      if selected: EditorSelectionColour else: "")
+      r.setStyle(rb, "padding-left", $TabPadPx & "px")
+      r.setStyle(rb, "white-space", "nowrap")
+      r.setStyle(rb, "overflow", "hidden")
+      let text =
+        if row.item < 0: "no match"
+        else:
+          let e = gOmnibar.results[row.item].entry
+          e.label & (if e.detail.len > 0: "   " & e.detail else: "")
+      if row.item >= 0:
+        r.setAttribute(rb, "data-ct-omnibar-result",
+                       gOmnibar.results[row.item].entry.label)
+      r.setStyle(rb, "color",
+                 if row.item < 0: EditorLineNumberColour else: EditorTextColour)
+      r.appendChild(rb, r.createTextNode(text))
+      gTopEls.add rb
+
 proc drawTopBar(r: GpuiRenderer) =
   ## The band and everything over it, from the shared ViewModels.
   if gRoot.isNil:
@@ -5216,36 +5305,7 @@ proc drawTopBar(r: GpuiRenderer) =
       else:
         r.appendChild(rb, r.createTextNode(it.label & tail))
       gTopEls.add rb
-  # THE OMNIBAR'S RESULTS.
-  let op = gpuiOmnibarPopover(gOmnibar, gTopLayout, pendingViewportHeight)
-  if op.rows.len > 0:
-    # PLAT-51: the results list on the EDITOR'S ground too (its border the
-    # menu's), the selected row on the editor's selection colour under the
-    # editor's foreground.
-    let box = absBox(r, op.rect, EditorGround)
-    r.setAttribute(box, "data-ct-omnibar-results", $gOmnibar.results.len)
-    r.setStyle(box, "border-width", "1px")
-    r.setStyle(box, "border-color", chromeOf(crMenuBorder))
-    gTopEls.add box
-    for row in op.rows:
-      let selected = row.item >= 0 and row.item == gOmnibar.selected
-      let rb = absBox(r, row.rect,
-                      if selected: EditorSelectionColour else: "")
-      r.setStyle(rb, "padding-left", $TabPadPx & "px")
-      r.setStyle(rb, "white-space", "nowrap")
-      r.setStyle(rb, "overflow", "hidden")
-      let text =
-        if row.item < 0: "no match"
-        else:
-          let e = gOmnibar.results[row.item].entry
-          e.label & (if e.detail.len > 0: "   " & e.detail else: "")
-      if row.item >= 0:
-        r.setAttribute(rb, "data-ct-omnibar-result",
-                       gOmnibar.results[row.item].entry.label)
-      r.setStyle(rb, "color",
-                 if row.item < 0: EditorLineNumberColour else: EditorTextColour)
-      r.appendChild(rb, r.createTextNode(text))
-      gTopEls.add rb
+  drawOmnibarResults(r)
   drawPopovers(r)
   # UNPIN on a revealed pane (the PIN buttons are drawn before the
   # popovers, below).
@@ -5335,33 +5395,7 @@ proc drawTopBar(r: GpuiRenderer) =
   # TEXT, after the pointer rested on it 500 ms — under the cell (above it
   # when the window has no room below), wrapped at min(80 columns, the
   # window), at most `DetailMaxLines` lines.
-  if gCellTooltip.len > 0:
-    var widest = 0
-    for l in gCellTooltip:
-      widest = max(widest, l.runeLen)
-    let a = gCellHoverAnchor
-    let w = min(pendingViewportWidth, pxOfText(widest) + 2 * TabPadPx)
-    let h = gCellTooltip.len * HoverLabelPx
-    let below = a.y + a.h
-    let y = if below + h <= pendingViewportHeight: below else: max(0, a.y - h)
-    let x = max(0, min(a.x, pendingViewportWidth - w))
-    let tb = absBox(r, PxRect(x: x, y: y, w: w, h: h),
-                    chromeOf(crWindowBackground))
-    r.setAttribute(tb, CellTooltipAttribute, gCellHover.key & "|" &
-                                             gCellHover.column)
-    r.setStyle(tb, "display", "flex")
-    r.setStyle(tb, "flex-direction", "column")
-    r.setStyle(tb, "items", "start")   # the lines left-aligned, as wrapped
-    r.setStyle(tb, "padding-left", $TabPadPx & "px")
-    r.setStyle(tb, "font-family", MonoFontFamily)
-    for (k, v) in paneOutlineStyle(true): r.setStyle(tb, k, v)
-    for l in gCellTooltip:
-      let line = r.createElement("div")
-      r.setStyle(line, "height", $HoverLabelPx & "px")
-      r.setStyle(line, "white-space", "nowrap")
-      r.appendChild(line, r.createTextNode(l))
-      r.appendChild(tb, line)
-    gTopEls.add tb
+  drawCellTooltip(r)
   for e in gTopEls:
     # PLAT-69 (C2): EVERY PART AND POPOVER IS `no-drag`, so a press on one
     # stays a press. They are absolutely placed SIBLINGS of the strip, not
@@ -6460,9 +6494,14 @@ proc showPaneFromMenu(r: GpuiRenderer; pane: PaneKind) =
   discard drawArrangement(r)
 
 proc openOmnibar(r: GpuiRenderer; query = "") =
-  if gMenu.isOpen: gMenu.close()
-  # The omnibar lists the menu's ENABLED commands: read them for now.
-  refreshGpuiMenuAvailability()
+  if gOmnibar.isNil:
+    # An Edit window's omnibox (Build-Output-Pane.md §3.12), made when first
+    # opened: it finds no recording's files, and runs `:` commands.
+    gOmnibar = newOmnibarVM()
+  if not gMenu.isNil:
+    if gMenu.isOpen: gMenu.close()
+    # The omnibar lists the menu's ENABLED commands: read them for now.
+    refreshGpuiMenuAvailability()
   if not gSession.isNil:
     gOmnibar.setIndex(omnibarIndexOf(gSession.session.fileTreeVM,
                                      gSession.session.store, gMenu,
@@ -6752,6 +6791,14 @@ proc startGpuiBuild(r: GpuiRenderer; command: string): string
   ## PLAT-55: forward-declared; defined with the Problems pane's host.
 proc cancelGpuiBuild(): string
   ## PLAT-55: forward-declared; defined with the Problems pane's host.
+proc gpuiBuildTasks(): BuildTaskConfig
+  ## §3.6: forward-declared; defined with the Problems pane's host.
+proc gpuiBuildTaskHost(r: GpuiRenderer): BuildTaskHost
+  ## Likewise.
+proc runGpuiBuildLine(r: GpuiRenderer; line: string): string
+  ## Likewise.
+proc openGpuiBuildTaskPicker(r: GpuiRenderer): string
+  ## Likewise.
 
 proc acceptOmnibar(r: GpuiRenderer) =
   # PLAT-51: a watch verb.
@@ -6829,6 +6876,22 @@ proc acceptOmnibar(r: GpuiRenderer) =
       traceGesture("event log column " & $parsed.column & " " &
                    $vm.columns.val.widths[parsed.column] & " cells")
       redrawListPane(r, paneEventLog)
+    return
+  # Build-Output-Pane.md §3.11, §3.12: the task picker (`:build: …`) — the
+  # chosen task or command, or (nothing chosen) the line as typed; and
+  # `:build` alone, the default task.
+  if mode == omBuildTask:
+    let (ok, entry) = gOmnibar.accept()
+    gOmnibar.close()
+    drawTopBar(r)
+    traceGesture(if ok: runBuildChoice(gpuiBuildTaskHost(r), gpuiBuildTasks(),
+                                       entry)
+                 else: runGpuiBuildLine(r, ":build: " & needle))
+    return
+  if mode == omCommand and needle == "build":
+    gOmnibar.close()
+    drawTopBar(r)
+    traceGesture(runGpuiBuildLine(r, ":build"))
     return
   # PLAT-55: `:build <command>` and `:cancel` — the terminal's verbs, its
   # runner; the build's diagnostics fill the Problems pane.
@@ -7195,7 +7258,9 @@ proc armHoverTick() =
                   # PLAT-53: a Test Results run, polled on the same tick.
                   gTestsHost.running or
                   # PLAT-55: a `:build`, polled on the same tick.
-                  (not gBuild.isNil and gBuild.session.verdict == bvRunning)):
+                  (not gBuild.isNil and gBuild.session.verdict == bvRunning) or
+                  # §3.8: a clean success's pane waiting to be put away.
+                  gBuildReveal.pending):
     let want = (due: -3'i64, vcs: false)
     if gArmedTick != want:
       gArmedTick = want
@@ -7272,10 +7337,36 @@ proc showCellTooltip() =
   gCellTooltip = tooltipView(gCellHover.full, cols, a.bodyRows, chord).lines
   traceGesture("cell tooltip " & $gCellTooltip.len & " line(s)")
 
+proc editorColumnAt(x: int): int
+  ## Forward-declared; defined with the editor's columns.
+proc editorLineAt(y: int): int
+  ## Forward-declared; defined with the editor's rows.
+
+proc editorDiagnosticHover(x, y: int): tuple[line: int; text: string] =
+  ## Build-Output-Pane.md §3.9: the messages of the build diagnostics whose
+  ## squiggle is under window `(x, y)` in the editor, "" elsewhere.
+  if gEditorSurface.diagnostics.len == 0:
+    return (0, "")
+  let i = gGeom.tabsNodeOfPane($paneEditor)
+  if i < 0 or not gGeom.nodes[i].body.contains(x, y):
+    return (0, "")
+  let col = editorColumnAt(x)
+  if col <= 0:
+    return (0, "")
+  let line = editorLineAt(y)
+  var hit: seq[EditorDiagnostic]
+  for d in gEditorSurface.diagnostics:
+    if d.line == line and col - 1 >= d.fromColumn and col - 1 < d.toColumn:
+      hit.add d
+  (line, hoverText(hit, line))
+
 proc cellHoverAt(r: GpuiRenderer; x, y: int) =
   ## §5.3: the pointer moving with no button — a truncated cell under it
-  ## starts the 500 ms clock; anywhere else hides a shown tooltip.
+  ## starts the 500 ms clock; anywhere else hides a shown tooltip. A build
+  ## diagnostic's squiggle in the editor shows its messages the same way
+  ## (Build-Output-Pane.md §3.9).
   let hit = tableCellAtWindow(x, y)
+  let diag = if hit.found: (line: 0, text: "") else: editorDiagnosticHover(x, y)
   let entered = hit.found and
     not gCellHover.sameCell(tableDetailPaneOf(hit.pane), hit.cut.key,
                             hit.cut.column)
@@ -7285,6 +7376,12 @@ proc cellHoverAt(r: GpuiRenderer; x, y: int) =
                           hit.bodyRows)
       gCellHover.pointerOver(tableDetailPaneOf(hit.pane), hit.cut.key,
                              hit.cut.column, hit.cut.full, true, hoverNowMs())
+    elif diag.text.len > 0:
+      if not gCellHover.sameCell("editor", $diag.line, "diagnostics"):
+        traceGesture("diagnostic hover " & $diag.line)
+      gCellHoverAnchor = (x, y, GpuiEditorRowPx, 20)
+      gCellHover.pointerOver("editor", $diag.line, "diagnostics", diag.text,
+                             true, hoverNowMs())
     else:
       gCellHover.pointerOver("", "", "", "", false, hoverNowMs())
   if entered:
@@ -7836,6 +7933,15 @@ proc installProblems(root: string) =
     return
   gBuildRoot = root
   gProblems = newBuildProblems()
+  # §5.1: `build.autoReveal` / `build.autoDismissOnSuccess`, from the
+  # configuration file the desktop reads.
+  let config = findUserConfigFile(getCurrentDir(), ctConfigDir())
+  if config.len > 0:
+    try:
+      gBuildReveal = initBuildAutoReveal(
+        buildRevealSettingOfConfigText(readFile(config)).setting)
+    except IOError:
+      discard
   var rr: GpuiRenderer
   wireProblemsJump(rr)
 
@@ -7851,6 +7957,9 @@ proc attachProblems(leafSet: var GpuiLeafSet) =
     # PLAT-56: and Build Output the window's `BuildVM`.
     if leaf.kind == glkBuiltin and leaf.builtin == paneBuildOutput:
       leaf.vm = ViewModel(gProblems.build)
+
+proc tickGpuiBuildReveal(r: GpuiRenderer): bool
+  ## §3.8: forward-declared; defined with the task picker below.
 
 proc pollGpuiBuild(r: GpuiRenderer): bool =
   ## PLAT-55: the `:build` in flight advanced — its output read into the
@@ -7869,7 +7978,11 @@ proc pollGpuiBuild(r: GpuiRenderer): bool =
     drawProblemsPane(r)
     drawBuildPane(r)
     drawFooterBuildStatus(r)
-  changed
+    # §3.9: the editor's marks follow the Problems pane's rows (a new build
+    # clears them).
+    if not openArm.isNil and not editPane.isNil:
+      redrawEditor()
+  tickGpuiBuildReveal(r) or changed
 
 proc startGpuiBuild(r: GpuiRenderer; command: string): string =
   ## `:build <command>` — the terminal's verb (CodeTracer-TUI-Edit-Mode.md
@@ -7908,6 +8021,126 @@ proc stopGpuiBuild() =
   while gBuild.session.verdict == bvRunning and epochTime() < deadline:
     discard pollBuild(gBuild, nowMonoMs())
     sleep(20)
+
+# ---------------------------------------------------------------------------
+# Build-Output-Pane.md §3.6, §3.8, §3.11, §3.12: build tasks, the task picker,
+# the `:build` commands, and when a build shows and puts away its pane
+# ---------------------------------------------------------------------------
+
+proc startGpuiTask(r: GpuiRenderer; command, dir, task,
+                   matcher: string): string =
+  ## A build TASK (§3.6): its command in its working directory, named, read
+  ## by its problem matcher — the runner `:build` uses. "" when it started.
+  if gProblems.isNil:
+    installProblems(getCurrentDir())
+  if not gBuild.isNil and gBuild.session.verdict == bvRunning:
+    return BuildAlreadyRunningText
+  let root = if dir.len > 0: dir
+             elif gBuildRoot.len > 0: gBuildRoot
+             else: getCurrentDir()
+  gBuild = startBuild(bkBuild, command, root, nowMonoMs())
+  gBuild.session.taskName = task
+  gBuild.session.problemMatcher = matcher
+  discard gProblems.follow(gBuild.session, nowMonoMs())
+  drawProblemsPane(r)
+  drawBuildPane(r)
+  drawFooterBuildStatus(r)
+  armRecordTick()
+  if gBuild.session.verdict == bvRunning: "" else: describeVerdict(gBuild.session)
+
+proc gpuiBuildTasks(): BuildTaskConfig =
+  ## The project's tasks, read from its `.codetracer/build.yaml` NOW.
+  let root = if gBuildRoot.len > 0: gBuildRoot else: getCurrentDir()
+  let file = root / BuildTasksFile
+  var text = ""
+  let found = fileExists(file)
+  if found:
+    try: text = readFile(file)
+    except IOError: discard
+  loadBuildTasks(text, found)
+
+proc openGpuiBuildTaskPicker(r: GpuiRenderer): string =
+  ## §3.11: `Ctrl+Shift+B` — the omnibox on `:build: `, the default task
+  ## first, the pane's commands after. What to say.
+  let c = gpuiBuildTasks()
+  if gOmnibar.isNil:
+    gOmnibar = newOmnibarVM()
+  gOmnibar.setBuildTasks(buildTaskEntries(c))
+  openOmnibar(r, BuildTaskQuery)
+  let note = pickerNote(c)
+  if note.len > 0: note
+  else: "build tasks: Enter runs " &
+        (if c.defaultTask.found: c.defaultTask.task.name else: "the chosen one")
+
+proc gpuiBuildTaskHost(r: GpuiRenderer): BuildTaskHost =
+  ## What this window does for `build_tasks` (its runner, its pane).
+  var rr = r
+  result.running = not gBuild.isNil and gBuild.session.verdict == bvRunning
+  result.projectDir = if gBuildRoot.len > 0: gBuildRoot else: getCurrentDir()
+  result.start = proc(command, dir, task, matcher: string): string =
+    startGpuiTask(rr, command, dir, task, matcher)
+  result.stop = proc(): string = cancelGpuiBuild()
+  result.clear = proc(): string =
+    if not gProblems.isNil:
+      gProblems.build.clearOutput()
+      drawBuildPane(rr)
+      drawFooterBuildStatus(rr)
+    ""
+  result.showHistory = proc(): string =
+    if gProblems.isNil or gProblems.build.history.val.len == 0:
+      return "no earlier build in this window"
+    revealGpuiBuildPane(rr)
+    gBuildPane.historyOpen = true
+    drawBuildPane(rr)
+    "build history: choose a build"
+  result.openPicker = proc(): string = openGpuiBuildTaskPicker(rr)
+
+proc runGpuiBuildLine(r: GpuiRenderer; line: string): string =
+  ## A `:build` line (§3.12) through the shared grammar. What to say.
+  runBuildVerb(gpuiBuildTaskHost(r), gpuiBuildTasks(), parseBuildVerb(line))
+
+proc tickGpuiBuildReveal(r: GpuiRenderer): bool =
+  ## §3.8: the shared rule's step for the window's build, applied to the
+  ## window's docking — Build Output revealed when a build starts; when one
+  ## fails, Problems revealed in its place where Build Output is itself docked
+  ## (where it is placed, the failure is on screen and stays visible); a
+  ## clean success puts a revealed Build Output away two seconds later.
+  if gProblems.isNil:
+    return false
+  var rr = r
+  let vm = gProblems.build
+  # The hover machine's clock: the window's, which a scripted run's `wait:`
+  # advances as it advances the hover's.
+  let now = float(hoverNowMs())
+  let step = gBuildReveal.observe(vm.number.val, vm.status.val,
+                                  gProblems.vm.errorCount.val,
+                                  gProblems.vm.warningCount.val, now)
+  case step
+  of brsReveal:
+    revealGpuiBuildPane(rr)
+    result = true
+  of brsRevealProblems:
+    revealGpuiBuildPane(rr)
+    let layout = committedLayout()
+    if layout.dockedIndex(paneBuildOutput) >= 0 and
+       not (not gGeom.openDock.isEmpty and
+            gGeom.openDockPane == $paneBuildOutput) and
+       layout.dockedIndex(paneProblems) >= 0:
+      let shown = beginReveal(layout, paneProblems)
+      if shown.isSome:
+        gGestures.reveal = shown.get
+        discard drawArrangement(rr)
+        traceGesture("problems pane revealed")
+    result = true
+  else:
+    discard
+  if gBuildReveal.due(now) == brsDismiss and
+     gGestures.dismissReveal(paneBuildOutput):
+    discard drawArrangement(rr)
+    traceGesture("build pane dismissed")
+    result = true
+  if gBuildReveal.pending:
+    armRecordTick()
 
 proc showViewedFile(r: GpuiRenderer; atLine = 1; topLine = 0)
   ## PLAT-55: forward-declared; defined with the replay editor.
@@ -8095,6 +8328,7 @@ proc pressBuild(r: GpuiRenderer; x, y: int): bool =
   let body = buildBody()
   if gProblems.isNil or body.w <= 0 or not body.contains(x, y):
     return false
+  gBuildReveal.interact()   # §3.8: a press in the pane pins it
   let vm = gProblems.build
   let hit = buildHitAt(vm, gBuildPane, body, x, y)
   case hit.kind
@@ -10006,6 +10240,10 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
     if res.argument.len > 0: runGpuiFindInFiles(r, res.argument)
     else: openFindInFiles(r)
     return
+  of "build.run":
+    # Build-Output-Pane.md §3.11: `Ctrl+Shift+B` — the build task picker.
+    traceGesture(openGpuiBuildTaskPicker(r))
+    return
   of "problems.next", "problems.previous":
     # PLAT-55 (EMT-D22): the desktop's `aGotoNextError` /
     # `aGotoPreviousError` — `F8` / `Shift+F8` in Edit mode, `Ctrl+Alt+N` /
@@ -10044,10 +10282,14 @@ func decodePercent(text: string): string =
       inc i
 
 const EditWindowRoutedOperations = ["search.find-in-files",
-  "search.next-result", "search.previous-result"]
+  "search.next-result", "search.previous-result",
+  "build.run", "problems.next", "problems.previous",
+  "palette.quick-open-file", "palette.open-commands"]
   ## The window operations an Edit window's keys run through the router
   ## rather than typing into the document: Find in Files' (it searches the
-  ## project in Edit mode, Find-And-Incremental-Search.md §5.1).
+  ## project in Edit mode, Find-And-Incremental-Search.md §5.1); the build
+  ## task picker, `F8` / `Shift+F8` and the omnibox's own keys
+  ## (Build-Output-Pane.md §3.9, §3.11, §3.12).
 
 proc editWindowRoutesKey(key: string; mods: seq[string]): bool =
   ## An Edit window's key that the window router takes instead of the
@@ -11755,12 +11997,44 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
             windowPointer(r, gekPointerMove, x, y)
             return ""
       return "no strip label for '" & parts[1] & "'"
+    of "dock":
+      # `dock:<pane>` — the pane docked to the footer, the command a box's
+      # pin applies (`cmdDock(…, leBottom)`); an Edit window's boxes draw no
+      # pin of their own to press.
+      for k in PaneKind:
+        if $k == parts[1]:
+          applyGestureCommand(r, cmdDock(k, leBottom))
+          discard drawArrangement(r)
+          drawTopBar(r)
+          return ""
+      return "no pane '" & parts[1] & "'"
+    of "hover-code":
+      # Build-Output-Pane.md §3.9: `hover-code:<line>:<column>` — the pointer
+      # brought to rest over that character of the editor (as `move:` would,
+      # aimed from the geometry the editor was drawn with); `wait:` then
+      # lets the hover's clock run.
+      let i = gGeom.tabsNodeOfPane($paneEditor)
+      if i < 0:
+        return "the editor is not drawn"
+      let body = gGeom.nodes[i].body
+      let x = editorXOfColumn(at(2))
+      var y = -1
+      for py in body.y ..< body.y + body.h:
+        if editorLineAt(py) == at(1):
+          y = py + GpuiEditorRowPx div 2
+          break
+      if y < 0:
+        return "line " & parts[1] & " is not drawn"
+      windowPointer(r, gekPointerMove, x, y)
+      return ""
     of "wait":
       # PLAT-49 part B: let `ms` pass for the hover machine (a scripted run
       # has no loop to wait in) and run what fell due.
       gHoverClockOffsetMs += int64(at(1))
       applyHoverReply(r, gAutoHide.tick(hoverNowMs()))
       discard tickCellHover(r)
+      # Build-Output-Pane.md §3.8: and a clean success's pane put away.
+      discard tickGpuiBuildReveal(r)
       # PLAT-51: and a welcome tab's running `ct record` — REALLY waited
       # for, up to `ms`, polled as the window's tick polls it.
       if not gRecordJob.isNil and not gRecordJob.done:

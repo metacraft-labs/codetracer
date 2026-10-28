@@ -1466,6 +1466,14 @@ func indentGuides*(rows: openArray[EditorRow]): seq[int] =
         if own[j] >= 0: below = own[j]; break
       result[i] = min(above, below)
 
+const
+  EditorDiagnosticAttribute* = "data-ct-diagnostic"
+    ## Build-Output-Pane.md §3.9: on a squiggle (`<severity> <line>:<from>-<to>`,
+    ## 1-based columns, `to` exclusive) and on a gutter's diagnostic icon
+    ## (`<severity>@<line>`).
+  DiagnosticSquigglePx* = 2
+    ## The squiggle's thickness at the row's foot.
+
 proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
                      numberWidth = 1; skipCols = 0;
                      caretColumn = 0;
@@ -1474,7 +1482,8 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
                                                 current: bool]] = [];
                      foldable = false; bracketDepth = 0;
                      guides = 0; stickyHeader = false;
-                     markersView = HorizontalView()):
+                     markersView = HorizontalView();
+                     diagnostics: openArray[EditorDiagnostic] = []):
                      GpuiElement =
   ## One row of the source editor. `stickyHeader`: drawn as Monaco's sticky
   ## widget draws a scope's first line — no number, a dim chevron after the
@@ -1558,6 +1567,16 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
         r.setStyle(mark, "height", $ExecutionMarkPx.h & "px")
         r.setStyle(mark, "flex-shrink", "0")
         r.appendChild(lane, mark)
+      elif gutterSeverity(diagnostics, row.line) != blsNone:
+        # §3.9: THE BUILD'S MOST SEVERE DIAGNOSTIC on the line, its icon in
+        # the pointer band, in its severity's colour — over the caret's
+        # inspection mark (an editor being built has no execution, and the
+        # caret is drawn in the text); the execution pointer still wins.
+        let sev = gutterSeverity(diagnostics, row.line)
+        r.setAttribute(lane, EditorDiagnosticAttribute,
+                       severityWord(sev) & "@" & $row.line)
+        r.setStyle(lane, "color", colourOf(sev))
+        r.appendChild(lane, r.createTextNode(gutterIcon(diagnostics, row.line)))
       elif row.pointer != eptNone:
         r.appendChild(lane, r.createTextNode(runs3[0].text))
     of gbLineNumber:
@@ -1680,6 +1699,28 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
     r.setStyle(band, "background", (if m.current: FindMatchCurrentColour
                                     else: FindMatchColour))
     r.appendChild(column, band)
+  for want in [blsInfo, blsWarning, blsError]:
+    for d in diagnostics:
+      # §3.9: A SQUIGGLE under each diagnostic's span — a line in its
+      # severity's colour along the row's foot (the most severe drawn last,
+      # over the others on the same characters).
+      if d.line != row.line or d.severity != want: continue
+      let fromCol = max(d.fromColumn + 1, skipCols + 1)
+      if d.toColumn + 1 <= fromCol: continue
+      r.setStyle(column, "position", "relative")
+      let band = r.createElement("div")
+      r.setAttribute(band, EditorDiagnosticAttribute,
+                     severityWord(d.severity) & " " & $row.line & ":" &
+                     $(d.fromColumn + 1) & "-" & $(d.toColumn + 1))
+      r.setStyle(band, "position", "absolute")
+      r.setStyle(band, "left", formatFloat(float(fromCol - 1 - skipCols) *
+                                           EditorColumnPx, ffDecimal, 1) & "px")
+      r.setStyle(band, "top", $(EditorLinePx - DiagnosticSquigglePx) & "px")
+      r.setStyle(band, "width", formatFloat(float(d.toColumn + 1 - fromCol) *
+                                            EditorColumnPx, ffDecimal, 1) & "px")
+      r.setStyle(band, "height", $DiagnosticSquigglePx & "px")
+      r.setStyle(band, "background", colourOf(d.severity))
+      r.appendChild(column, band)
   if caretColumn > 0 and caretColumn > skipCols:
     # PLAT-51: THE CARET of the read-only debugging editor — a thin bar
     # before its column, in the editor's foreground (Monaco's cursor),
@@ -2228,7 +2269,8 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
                                           markersView =
                                             (if overflowMarkers and
                                                 scroll.present: scroll.view
-                                             else: HorizontalView())))
+                                             else: HorizontalView()),
+                                          diagnostics = surface.diagnostics))
   if scroll.present:
     r.appendChild(parent, renderEditorScrollbar(r, scroll, caretMark))
   if editorPaneHeightPx > 0 and viewportPx > 0:
