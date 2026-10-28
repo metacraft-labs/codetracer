@@ -7969,3 +7969,65 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   extra `--path`s that win over the workspace siblings (nim-everywhere,
   nim-agents, nim-acp at their pins). The tup build's nimcache is hard-wired to
   /tmp/ct-nim-cache, shared by every checkout on the host.
+
+## The Requests pane natively (PLAT-58, 2026-10-26)
+- The session's `RequestPanelVM` (built by `initializePanelViewModels`, the
+  desktop's own) is the native panes' model: `headless_app.paneViewModel`
+  answers it for `paneRequests`. Everything a painter decides is in
+  `request_panel_vm`: `displayRows` (cells + `RequestTone` / `MethodTone`),
+  `pressRow` (the VM counts the double press — neither the terminal nor the
+  GPUI shim reports a click count; `RequestDoubleClickMs`), `activate`
+  (`RequestActivation`: raSeek / raRefused / raExternal), `rowMenu` /
+  `runRowMenu`, `moveSelection`, `pollTail` (the 500 ms cadence, moved from
+  `ui/request_panel.nim`), `takeReveal` (once), `requestsCommandOf`
+  (`:requests`). The native host is `viewmodel/host/native_requests_host`;
+  the menus as `ContextMenuModel` are `headless_app/request_menu`.
+- A completed recording's rows are WINDOWED: `filteredRequests` is the held
+  window (`windowRows`), `windowStart` its first position, `matchingCount`
+  the scroll range. A filter change sends `ct/load-request-spans` from an
+  effect at once, but the stdio transport's callbacks are DEFERRED: read the
+  pane only after `drainPlatformCallbacks()` (both native hosts do it before
+  they read), or the rows are the previous filter's.
+- `ct/seek-to-geid` used to REFUSE every materialized trace ("restore-at is
+  only available for live replay sessions"), so the desktop's double click
+  on a request moved nothing on a completed recording. A request's
+  `startGeid` is its span's `start_step`; for a materialized trace the
+  handler now `jump_to`s that step (`dap_handler.seek_to_geid`). A DB
+  trace's position is its step (`getCurrentRRTicks`); `getCurrentGeid` is
+  none there.
+- `ReplayDataStore.requestRequestSpansSince` applied the transport's whole
+  answer; the stdio transport resolves with the DAP response ENVELOPE, which
+  `applyRequestSpanDelta` ignores — a native live tail never showed a row.
+  It now applies `responseBody(response)`.
+- The demo container (`src/tools/demo_request_session.writeDemoRequestSession`,
+  RS-M4) is replayable and is the fixture: request `i` (0-based) has span id
+  `i + 2` and handler entry step `6 + 7 i` (line 13 of demo_server.py); its
+  `--through=` stages grow a container under a running engine (the tail).
+- TUI focus: the ring (`motions.newPaneFocus`) now takes the DOCKED-OPEN pane
+  after the tree's regions; a press on the Requests pane sets
+  `layoutBinding.focus`. `showPane` on an already-open docked pane focuses it
+  instead of starting a reveal (a reveal left `ikRevealingDock` live and the
+  next Esc cancelled it instead of reaching the pane). GPUI's
+  `showPaneFromMenu` has the same rule.
+- GPUI: an `applyGestureCommand` does not redraw — call `drawArrangement`
+  after it. The first session's reveal runs in the root builder after the
+  arrangement is drawn (`paintWindowChrome`), so `--report-window-plan` sees
+  the pane. `--window-ops` requests:* (show, row/double/menu by request id,
+  method, status, field, handler, key, wheel, track).
+- Omniboxes trim their line, so `:requests ` cannot carry "clear": the bare
+  `:requests` clears an active search and opens the field otherwise.
+- A column-alignment table is only enforced where it is READ: the terminal
+  Requests painter used `RightAligned[i]` for the header and literal `true`
+  for the rows, so mutating the table moved only a header that fills its
+  column anyway (arm T1 survived). Every cell now reads the table.
+- A docked list pane whose rows sit below the fold needs a wheel before a
+  colour check can see every bucket: the GPUI suite's 5xx row was never
+  drawn, so G1 survived until the suite checked every row after a wheel.
+- Real-stack suites now refuse a `replay-server` whose `--build-revision`
+  does not match the checkout's source fingerprint
+  (`common/replay_server_path`). A binary copied out of the SHARED
+  `/tmp/codetracer/db_backend_target` can carry `unknown` or another tree's
+  revision; build it in a private `CARGO_TARGET_DIR` from the tree under test.
+- Docked panes take keys two ways now: a press records `dockKeys`
+  (Problems, PLAT-55) and the focus ring includes the open dock (Requests,
+  PLAT-58, which also lets `:requests` focus an already-open dock).

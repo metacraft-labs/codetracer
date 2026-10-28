@@ -1,0 +1,26 @@
+# Control digests for run-plat58-requests-mutations.py — the
+# subjects AND the suites the arms are graded by (§16c).
+# Refreshed with --record-control-hashes, gated by the
+# needle scan (§39a).
+47bb504810fa25ca976ea421fd82fbebbd0d1dfdcaeef2cd0b2e4c4fb93e270a  src/frontend/viewmodel/viewmodels/request_panel_vm.nim
+dd976404f069ad8fc618da45eb1b31b68cb3f503dc01528468f4d75cc01cb91f  src/frontend/viewmodel/viewmodels/table_fit.nim
+1e9c2406a9b49ab957282e27c96d939b48fcadb4abcf0e946fbf0ded5e3d2439  src/frontend/viewmodel/store/replay_data_store.nim
+5a7b31a0bb701aabffe0e70cc937b835ccc7090ca2efe4a24aa2c9e88ed959e3  src/db-backend/src/dap_handler.rs
+aafac7092400b350f406a4389c879bcb3428d65b260f19b101e02919d6a854f4  src/frontend/tui/app/views/requests_pane.nim
+8950074c5b69168fb443be55c9d23a6144804ba46a8aadd9ceda4fb26d906a6d  src/frontend/tui/app/runtime.nim
+50b66980bfd02b011a2807444d52bc13cfe3a3c78bc4c8466b2153b36b3fcb32  src/frontend/tui/app/input/motions.nim
+1c7e33f927b215031819e967e88aec8d090e6e316a0da73a0ee147e1eaee6fa1  src/frontend/tui/app/views/shell.nim
+bb6f7789eaa74937d57c387bc7cc1d40d042a9f95361e00eeb47a98b1e3a020f  src/frontend/tui/app/layout/profile.nim
+839e98cd9ac2ba548209f96ce2d615ac56f5d7a3e8748c2994d5ea06206682fd  src/frontend/tui/host/tui_session.nim
+ec0c55184f420b2a585d8d1249995148f55d2caef9398d807874579bd70f5b65  src/frontend/tui/main.nim
+d66e5fc8e3985736fa438b789cb72753ec8837b130dc57529232e225f0fbf623  src/frontend/gpui/requests_leaf.nim
+9e9f5c4febc689f667252f39e0d470484d2a421e0e221d72df241c8f41087235  src/frontend/gpui/main.nim
+362da55c9dc7a5d23990b3c0ecaed063d2a67e85f020d529f31b50c4a2caabf9  src/frontend/view_vocabulary/pane_views.nim
+3093b8a9659fbf3e5bac69da2e1503a1bf9d60576a369495061998b8a2d618d4  src/frontend/viewmodel/views/isonim_request_panel_view.nim
+1e110fcf3a48c9a883dbaf9ade7d59dcefa8279904fa710fb762a56e8f6cb683  src/frontend/viewmodel/tests/unit/test_plat58_requests.nim
+15118f52eed344ff4849aa07000971d805a34b2039e4d7800331b785ce430938  src/frontend/tui/tests/test_plat58_requests.nim
+b8cfe88c3f6123feff40d051c1edbd44ad85df894d9c1c62886dbe674d5696ff  src/frontend/tui/tests/real_terminal/test_plat58_requests_pty.nim
+9e9d4ea2ce0ffed7a1481b5d84c0bb5ce29d3f9b593b4317f2702cee90549502  src/frontend/gpui/tests/test_plat58_gpui_requests.nim
+cde4f91d6f777b2aa42090eaa95a44ddccf4d35f48c7e6e178916ed1dcc9fa13  src/db-backend/tests/seek_to_geid_materialized_test.rs
+2a7d6aaeb634be606fe74b5990836e6123f4bb61b673885b336b697025099886  src/tests/gui/tests/request-panel/plat58-requests-capture.spec.ts
+fa6fb9325123c8c7d7619c984ef77c63d7a0864546d95ce69cb44599f772f0bc  src/tests/visual/answers/plat58-requests.electron.json
