@@ -2501,7 +2501,8 @@ proc bindWindowToSession(session: ReplaySession) =
 # Every tab switch binds the window to the tab it shows.
 session_switch.setSessionBindProc(bindWindowToSession)
 
-proc configureSessionMiddleware(session: ReplaySession; withDebugger = true) =
+proc configureSessionMiddleware(session: ReplaySession; withDebugger = true;
+    initializeDebugger = true) =
   ## Set up `session` — one window tab — once: its middleware, its
   ## ViewModels and the subscriptions that keep them current. Every handler
   ## installed here acts on THIS session's ViewModels, never on the tab on
@@ -2525,6 +2526,11 @@ proc configureSessionMiddleware(session: ReplaySession; withDebugger = true) =
   ## Everything else — the session, its panel ViewModels and the panel
   ## host's session — is what the review's panes render, and is built either
   ## way.
+  ##
+  ## `initializeDebugger` is independently false for edit sessions: they
+  ## have no replay engine either, but still need the toolbar bound so its
+  ## edit-mode project commands render. Selecting a replay later initializes
+  ## that replay through `handleDapReplaySelected`.
   if session.isNil or session.dapApi.isNil or session.viewsApi.isNil:
     return
   let vms = ensureViewModels(session)
@@ -2567,9 +2573,10 @@ proc configureSessionMiddleware(session: ReplaySession; withDebugger = true) =
   # (`handleDapReplaySelected`), as it did before each tab had a session of
   # its own; sending a second `initialize` here would only be answered by a
   # backend the host has not yet routed the tab to. A session with no replay
-  # engine (`withDebugger = false`, a dataset review) sends none: it would go
-  # unanswered and time out into a status-bar error.
-  if firstSession and withDebugger:
+  # engine (a dataset review or an edit session) sends none: it would go
+  # unanswered and time out into a status-bar error. Toolbar binding is
+  # independent: edit sessions still need their project-command surface.
+  if firstSession and withDebugger and initializeDebugger:
     dapRef.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
       clientName: "codetracer"
     )))
@@ -3842,7 +3849,7 @@ proc onNoTrace(
 
   # This tab's session — an edit session has one too: its panes' ViewModels
   # (Files, the editor, the toolbar) are the session's.
-  configureSessionMiddleware(data.activeSession)
+  configureSessionMiddleware(data.activeSession, initializeDebugger = false)
 
   # Check if coming from welcome screen (where layout was already initialized)
   let wasFromWelcomeScreen = not data.ui.layout.isNil
