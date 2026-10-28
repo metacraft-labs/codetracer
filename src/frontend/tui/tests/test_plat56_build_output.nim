@@ -56,7 +56,7 @@ from ../../view_vocabulary/pane_views import buildOutputPaneView,
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 64
+const ExpectedAssertions = 70
 
 var countedAssertions = 0
 
@@ -183,6 +183,33 @@ suite "PLAT-56: the terminal's Build Output painter":
       ck g.rowText(s.menuTop + 1).contains("#1 " & Plat56FailCommand)
       let t = m.buildTargetAt(s, area, s.menuTop + 1, 4)
       ck t.kind == btHistoryItem and t.index == 1
+      dispose()
+
+  test "the History control and the shown build's mark come from the glyph table":
+    # CodeTracer-TUI-Terminal-Adaptation.md §6.3: `grDropdown` and
+    # `grCurrentEntry`, so a basic or ASCII terminal never gets a `▾` or a
+    # `●` it may not have. The control keeps its width on every tier, so the
+    # hit-test still finds it where it was drawn.
+    createRoot proc(dispose: proc()) =
+      let vm = failedVM()
+      vm.beginBuild(Plat56PassCommand, 2000.0)
+      for raw in Plat56PassTranscript:
+        discard vm.feedOutput(raw, false)
+      vm.finishBuild(0, 2200.0)
+      let m = paneModelOf(vm, historyOpen = true)
+      let area = CellArea(col: 0, row: 0, width: 120, height: 12)
+      for (profile, arrow, mark) in [
+          (GlyphProfile(tier: tierExtended), "▾", "●"),
+          (GlyphProfile(tier: tierBasic), "▼", "●"),
+          (GlyphProfile(tier: tierAscii), "v", "*")]:
+        var g = newStyledGrid(120, 12)
+        g.glyphs = profile
+        let s = paintBuildOutput(g, area, m)
+        checkpoint($profile.tier)
+        let h = s.controls[0]
+        ck h.control == bcHistory and
+           g.rowText(area.row).contains("History " & arrow)
+        ck g.rowText(s.menuTop).startsWith(mark & " ")
       dispose()
 
 # ---------------------------------------------------------------------------
