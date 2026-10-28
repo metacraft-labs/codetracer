@@ -28,7 +28,14 @@
  *     width the desktop opens with, and a drag on a header separator writes
  *     it back (the 3-cell minimum holding);
  *   * Variable-State-Pane Decision 3 — the state pane does not scroll
- *     sideways.
+ *     sideways;
+ *   * a pane that is not rendered (`display: none`, as a hidden session
+ *     tab's panes are) is not fitted: the Event Log's `#` cells — a
+ *     middle-cut number column (PLAT-71) — keep their indices while it is
+ *     hidden and after it is shown again. A fit at the hidden pane's zero
+ *     width once cut every index to "" for good (issue #835's spec,
+ *     `welcome-screen/new_file_with_open_replay.spec.ts`, shows it through
+ *     the session tabs).
  *
  * No mocks: a real `.ct` recording, the real `ct`, a real `replay-server`,
  * the real Electron app, real pointer and key events.
@@ -61,10 +68,15 @@ const prefix = process.env.PLAT70_DESKTOP_PREFIX ?? "";
 
 test.setTimeout(500_000);
 
-/** The state directory the main process reads `table-columns` from. */
+/** The state directory the main process reads `table-columns` from. It is
+ * given to the app only while this file's tests run (`beforeAll` /
+ * `afterAll`): set at module load and never restored, it stayed in the
+ * worker's environment, so a later spec in the same worker launched with
+ * this file's remembered widths — the Event Log's `#` column at the 3-cell
+ * minimum its last step drags it to. */
 const stateDir = fs.mkdtempSync(path.join(require("os").tmpdir(), "plat70b-state-"));
-process.env.CODETRACER_TUI_LAYOUT_DIR = stateDir;
 const columnsFile = path.join(stateDir, "table-columns");
+const layoutDirBefore = process.env.CODETRACER_TUI_LAYOUT_DIR;
 
 function where(page: any) {
   return page.evaluate(() => {
@@ -110,9 +122,15 @@ test.describe("PLAT-70 Part B: the desktop's table panes truncate, resize and re
   });
 
   test.beforeAll(() => {
+    process.env.CODETRACER_TUI_LAYOUT_DIR = stateDir;
     // THE TERMINAL'S OWN FORM of a remembered width (`encodeColumnWidths`):
     // the index column 6 cells, as `:column-width # 6` writes it there.
     fs.writeFileSync(columnsFile, "event-log.#=6\n");
+  });
+
+  test.afterAll(() => {
+    if (layoutDirBefore === undefined) delete process.env.CODETRACER_TUI_LAYOUT_DIR;
+    else process.env.CODETRACER_TUI_LAYOUT_DIR = layoutDirBefore;
   });
 
   test("HO-8, hover, detail, copy and the remembered widths", async ({ ctPage }) => {
@@ -135,6 +153,29 @@ test.describe("PLAT-70 Part B: the desktop's table panes truncate, resize and re
       }
       expect(mine.some((c: any) => c.cut), `a cut cell in ${p}`).toBe(true);
     }
+
+    // ---- A hidden pane is not fitted: its number cells survive -------------
+    // The Event Log host is hidden the way a background session tab hides
+    // its panes (an ancestor `display: none`), which fires the pane's
+    // ResizeObserver and so runs a fit pass at zero width; then shown again.
+    const indexCells = () =>
+      page.evaluate(() =>
+        (Array.from(document.querySelectorAll("td.eventLog-index[data-ct-cell]")) as HTMLElement[])
+          .map((c) => `${c.getAttribute("data-ct-cell")}=${(c.textContent ?? "").trim()}`));
+    const setEventLogDisplay = (display: string) =>
+      page.evaluate(async (d: string) => {
+        (document.querySelector('[id^="eventLogComponent"]') as HTMLElement).style.display = d;
+        // Two frames: the resize is observed, then the pass it schedules
+        // (`requestAnimationFrame`) has run.
+        for (let i = 0; i < 2; i++) await new Promise((r) => requestAnimationFrame(() => r(null)));
+      }, display);
+    const indicesShown = await indexCells();
+    expect(indicesShown.length, "Event Log # cells").toBeGreaterThan(0);
+    expect(indicesShown.every((c) => !c.endsWith("=")), "every # cell holds an index").toBe(true);
+    await setEventLogDisplay("none");
+    expect(await indexCells(), "a hidden pane's # cells are left as they are").toEqual(indicesShown);
+    await setEventLogDisplay("");
+    expect(await indexCells(), "the # cells keep their indices once shown again").toEqual(indicesShown);
 
     // ---- PLAT-70 Part I: the desktop's Call Trace fits — its rows cut ------
     const callCells = all.filter((c: any) => c.cell.startsWith("call-trace|"));

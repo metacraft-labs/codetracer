@@ -97,6 +97,10 @@ when defined(js):
     })(#)""".}
   proc attr(el: JsObject; name: cstring): cstring
     {.importjs: "(#.getAttribute(#) || '')".}
+  proc hasAttr(el: JsObject; name: cstring): bool
+    {.importjs: "(!!#.hasAttribute(#))".}
+    ## Whether the attribute is present at all: `attr` answers "" both for a
+    ## missing attribute and for one set to "".
   proc setAttr(el: JsObject; name, value: cstring)
     {.importjs: "#.setAttribute(#, #)".}
   proc removeAttr(el: JsObject; name: cstring)
@@ -121,6 +125,13 @@ when defined(js):
       return el.getBoundingClientRect().left - row.getBoundingClientRect().left;
     })(#,#)""".}
   proc isConnectedJs(el: JsObject): bool {.importjs: "(!!#.isConnected)".}
+  proc isRendered(el: JsObject): bool
+    {.importjs: "(#.getClientRects().length > 0)".}
+    ## Whether the element has a layout box. An element that is not rendered
+    ## — itself or an ancestor `display: none`, as a hidden session tab's
+    ## panes are — has no CSS boxes, so `getClientRects()` is empty
+    ## (https://developer.mozilla.org/en-US/docs/Web/API/Element/getClientRects),
+    ## while a rendered element of zero width still has one box.
   proc rectOf(el: JsObject): JsObject {.importjs: "#.getBoundingClientRect()".}
   proc innerWidth(): float {.importjs: "(window.innerWidth)@".}
   proc innerHeight(): float {.importjs: "(window.innerHeight)@".}
@@ -197,9 +208,16 @@ when defined(js):
     ## shared presenter's text, since `text-overflow` cuts only the end. The
     ## text the view drew is kept (`MidCutOfAttribute`) while the cell shows
     ## the cut; a new text from the view replaces both.
+    ##
+    ## The cell still shows this pass's cut when it carries the kept text and
+    ## draws exactly the cut text, and then the kept text is the whole value
+    ## — including when the cut is EMPTY (a number in a cell too narrow even
+    ## for `…`): read back as the whole value, "" would lose the number for
+    ## good once the cell is wide again.
     let shown = $cell.textOf
     var whole = shown
-    if $cell.attr(MidCutTextAttribute) == shown and shown.len > 0:
+    if cell.hasAttr(MidCutOfAttribute) and
+       $cell.attr(MidCutTextAttribute) == shown:
       whole = $cell.attr(MidCutOfAttribute)
     let fitted = fitCellAs(whole, cell.cellsOf, kind)
     if fitted.truncated:
@@ -221,6 +239,13 @@ when defined(js):
   proc fitPass(t: TablePaneDom) =
     ## §5.1: every cell's `truncated`, from the shared fit, marked.
     for cell in t.root.queryAll(cstring("[" & TableCellAttribute & "]")):
+      # A cell with no layout box (its pane is in a hidden session tab or a
+      # background GoldenLayout tab) has no width to fit: measured, it holds
+      # 0 characters and every cell would be cut — a number column redrawn
+      # as nothing. It is left exactly as it is, text and marks, until it is
+      # shown again; the resize that showing it causes fits it then.
+      if not cell.isRendered:
+        continue
       let parts = cell.parts
       let kind = cutKindOf(parts.pane, parts.column)
       if kind != ckEnd and cell.attr(TableTextAttribute).len == 0 and

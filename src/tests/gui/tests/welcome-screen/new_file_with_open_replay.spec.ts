@@ -24,7 +24,14 @@
  *       editor's model (writable, not read-only);
  *   (c) switching back to the replay tab shows its own Monaco editor still
  *       attached to the document, inside the replay's session container, and
- *       still showing the traced source.
+ *       still showing the traced source; and the replay's Event Log `#`
+ *       column still shows the same, non-empty event indices it showed
+ *       before "+". That last check names one cause on its own, ahead of the
+ *       whole-tab comparison: while the replay tab is hidden its panes have
+ *       no width, and the table-overflow fit pass
+ *       (`views/table_overflow_dom.nim`) once redrew every middle-cut
+ *       number cell at zero width — the `#` column cut to "" — and could not
+ *       recover the number once the tab was shown again.
  *
  * No mocks: this drives the real Electron app against a real recorded
  * Python trace (`py_console_logs/main.py`). The defect is in how two
@@ -195,6 +202,45 @@ async function settledReplaySnapshot(page: Page): Promise<Record<string, unknown
   throw new Error(`the replay tab never settled; last snapshot: ${previous}`);
 }
 
+/**
+ * The replay's Event Log `#` column: the text of every index cell
+ * (`td.eventLog-index`, a middle-cut number column of the table-overflow
+ * pass) inside `#session-container-0`, keyed by the cell's `data-ct-cell`
+ * (`event-log|<row>|#`). Read with `textContent`, so a hidden tab still
+ * yields its cells: this reports what the cells HOLD, whichever tab is shown.
+ * Keyed rather than listed because the table is virtualised: its render
+ * window follows its last viewport measurement (see `snapshotReplayTab`), so
+ * the rows present before "+" and after switching back need not be the same
+ * set, but a row present in both must show the same index.
+ */
+async function replayEventLogIndices(page: Page): Promise<Record<string, string>> {
+  return page.evaluate(() => {
+    const cells: Record<string, string> = {};
+    const found = document.querySelectorAll(
+      '#session-container-0 [id="eventLogComponent-0"] tbody tr td.eventLog-index',
+    );
+    found.forEach((cell, i) => {
+      cells[cell.getAttribute("data-ct-cell") ?? `<unkeyed ${i}>`] = (cell.textContent ?? "").trim();
+    });
+    return cells;
+  });
+}
+
+/** How the `#` cells after switching back differ from those before "+": the
+ *  cells that hold no index, and the rows present in both whose index
+ *  changed. Both empty is the expected outcome. */
+function indexCellDefects(
+  before: Record<string, string>,
+  after: Record<string, string>,
+): { empty: string[]; changed: string[] } {
+  return {
+    empty: Object.keys(after).filter((key) => after[key].length === 0),
+    changed: Object.keys(after)
+      .filter((key) => key in before && after[key] !== before[key])
+      .map((key) => `${key}: ${JSON.stringify(before[key])} -> ${JSON.stringify(after[key])}`),
+  };
+}
+
 async function activeSessionIndex(page: Page): Promise<number> {
   return page.evaluate(() => (window as any).data?.activeSessionIndex ?? -1);
 }
@@ -239,9 +285,31 @@ test.describe("New File from a + tab with a replay open (#835)", () => {
     const replaySource = replayEditorsBefore[0].value;
     const replayUri = replayEditorsBefore[0].uri;
 
-    // Rule 6 baseline: everything the replay tab shows, before "+".
+    // Rule 6 baseline: everything the replay tab shows, before "+". It must
+    // be a baseline of the LOADED tab: `waitForAllComponentsLoaded` waits for
+    // the pane hosts, not for the trace's calls and events, which were
+    // measured arriving up to ~3 s later. `settledReplaySnapshot` alone can
+    // settle on two equal snapshots of the still-empty Call Trace and Event
+    // Log, and then the comparison after switching back fails on content
+    // that only finished loading. So the baseline waits for both.
     await layout.waitForAllComponentsLoaded();
+    await retry(
+      async () =>
+        (await ctPage.locator('#session-container-0 [id="calltraceComponent-0"] .call-text').count()) > 0 &&
+        Object.keys(await replayEventLogIndices(ctPage)).length > 0,
+      { maxAttempts: 60, delayMs: 500 },
+    ).catch(() => undefined);
     const replayBefore = await settledReplaySnapshot(ctPage);
+    const indicesBefore = await replayEventLogIndices(ctPage);
+    expect(
+      await ctPage.locator('#session-container-0 [id="calltraceComponent-0"] .call-text').count(),
+      "the replay's Call Trace shows calls before \"+\"",
+    ).toBeGreaterThan(0);
+    expect(Object.keys(indicesBefore).length, "the replay's Event Log shows rows before \"+\"").toBeGreaterThan(0);
+    expect(
+      indexCellDefects(indicesBefore, indicesBefore).empty,
+      "every Event Log # cell holds an index before \"+\"",
+    ).toEqual([]);
 
     // 2. "+" opens a new tab on the welcome screen.
     await ctPage.locator(".session-tab-add").click();
@@ -327,6 +395,28 @@ test.describe("New File from a + tab with a replay open (#835)", () => {
     expect(replayEditorAfter, "the replay tab's Monaco editor is attached and visible after switching back").toBeDefined();
     expect(replayEditorAfter!.value).toBe(replaySource);
     await expect(ctPage.locator("#session-container-0 .monaco-editor .view-lines").first()).toBeVisible();
+
+    // The Event Log's `#` cells survived the hidden tab's zero-width fit pass:
+    // no cell cut to nothing, and every row shown both before "+" and now
+    // shows the same index. Polled, so a pass still pending after the switch
+    // gets its chance to redraw them.
+    let indicesAfter: Record<string, string> = {};
+    const noDefects = { empty: [] as string[], changed: [] as string[] };
+    await retry(
+      async () => {
+        indicesAfter = await replayEventLogIndices(ctPage);
+        return JSON.stringify(indexCellDefects(indicesBefore, indicesAfter)) === JSON.stringify(noDefects);
+      },
+      { maxAttempts: 20, delayMs: 500 },
+    ).catch(() => undefined);
+    expect(
+      Object.keys(indicesAfter).filter((key) => key in indicesBefore).length,
+      "the replay's Event Log shows rows it showed before \"+\"",
+    ).toBeGreaterThan(0);
+    expect(
+      indexCellDefects(indicesBefore, indicesAfter),
+      "the replay's Event Log # cells keep their indices across the hidden tab (no zero-width cut)",
+    ).toEqual(noDefects);
 
     // Rule 6: every replay pane, the status bar, the mode, read-only state and
     // debugger position are as they were before "+". Polled first so a pane
