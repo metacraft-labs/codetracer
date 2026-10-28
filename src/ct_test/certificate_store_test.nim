@@ -263,6 +263,22 @@ status = "active"
 
 suite "the local certificate store reader (Transport.md §2.4)":
 
+  test "store directory names reject non-portable algorithm identifiers":
+    for name in ["../x", "a/b", "a\\b", ".x", "x.", "CON", "con", "prn", "aux",
+                 "nul", "com1", "com9", "lpt1", "lpt9", "nul.x", "a_b", "Upper",
+                 "é", repeat('x', 65)]:
+      let content = name & ":aa"
+      checkpoint content
+      let path = localStoreContentDir(content)
+      check not path.ok
+      check path.relative == ""
+      check path.problem.len > 0
+    for name in ["future-v2", "-", "0", "com0", "lpt0", "con-v2", repeat('x', 64)]:
+      let path = localStoreContentDir(name & ":a")
+      check path.ok
+      check path.relative == "v1/" & name & "/a"
+
+
   test "the reader finds records by content id":
     ## Through the same read-only seam the indicator uses, on real
     ## directories: both roots are listed for the one content directory asked

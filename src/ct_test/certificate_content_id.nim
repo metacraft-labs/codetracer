@@ -113,8 +113,8 @@ const
     ## scope holding no entries (Content-Id §4.2).
 
 proc lookupAlgorithm*(name: string): tuple[known: bool; algorithm: ContentAlgorithm] =
-  ## The §4 algorithm ``name`` identifies, by exact string equality — so
-  ## ``Git-Tree-SHA1`` is an unknown algorithm, not ``git-tree-sha1``.
+  ## The §4 algorithm ``name`` identifies, by exact string equality.
+  ## The parser first checks the portable Content-Id §1 identifier grammar.
   for algorithm in ContentAlgorithm:
     if $algorithm == name:
       return (true, algorithm)
@@ -124,6 +124,20 @@ proc isLowerHex(text: string): bool =
   for ch in text:
     if ch notin {'0'..'9', 'a'..'f'}:
       return false
+  true
+
+proc isPortableAlgorithm(name: string): bool =
+  ## Content-Id §1: portable across store implementations and filesystems,
+  ## including Windows reserved devices, even when parsed on another host.
+  if name.len == 0 or name.len > 64:
+    return false
+  for ch in name:
+    if ch notin {'a'..'z', '0'..'9', '-'}:
+      return false
+  if name in ["con", "prn", "aux", "nul"]:
+    return false
+  if name.len == 4 and name[0..2] in ["com", "lpt"] and name[3] in {'1'..'9'}:
+    return false
   true
 
 proc parseContentId*(text: string): ParsedContentId =
@@ -145,6 +159,10 @@ proc parseContentId*(text: string): ParsedContentId =
   if result.algorithmName.len == 0:
     result.form = cifMalformed
     result.problem = "nothing precedes the `:`, so it names no algorithm"
+    return
+  if not isPortableAlgorithm(result.algorithmName):
+    result.form = cifMalformed
+    result.problem = "the algorithm identifier is not portable (Content-Id §1)"
     return
   if result.digest.len == 0:
     result.form = cifMalformed

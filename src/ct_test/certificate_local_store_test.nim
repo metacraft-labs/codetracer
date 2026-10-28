@@ -374,6 +374,34 @@ proc spawnSelf(env: openArray[(string, string)]): Process =
 
 suite "CTC-3e: the local certificate store":
 
+  test "portable unknown identifiers relay verbatim; invalid prefixes never write":
+    let workspace = scratchDir("algorithm-names-workspace")
+    for name in ["../x", "a/b", "a\\b", ".x", "x.", "CON", "con", "prn", "aux",
+                 "nul", "com1", "com9", "lpt1", "lpt9", "nul.x", "a_b", "Upper",
+                 "é", repeat('x', 65)]:
+      let root = useStoreRoot("invalid-algorithm-name")
+      let sentinel = root.parentDir / "sentinel"
+      writeFile(sentinel, "untouched")
+      let doc = sampleDocument(name & ":aa")
+      ck localStoreRelativePathOf(doc).path == ""
+      let published = publishToLocalStore(nativeRoots(), workspace, doc)
+      ck not published.written
+      ck not dirExists(root)
+      ck readFile(sentinel) == "untouched"
+    for name in ["future-v2", "-", "0", "com0", "lpt0", "con-v2", repeat('x', 64)]:
+      let root = useStoreRoot("unknown-algorithm-name")
+      let content = name & ":a"
+      let doc = sampleDocument(content)
+      let relative = localStoreRelativePathOf(doc)
+      ck relative.path.startsWith("v1/" & name & "/a/")
+      let published = publishToLocalStore(nativeRoots(), workspace, doc)
+      ck published.written
+      ck readFile(root / relative.path) == doc
+      let found = lookupLocalStore(nativeStoreAccess(), nativeRoots(), content)
+      ck found.found.len == 1
+      if found.found.len == 1:
+        ck found.found[0].text == doc
+
   test "the temporary directory is outside any git repository":
     let probe = scratchDir("environment-check")
     let toplevel = run("git", ["rev-parse", "--show-toplevel"], probe)
