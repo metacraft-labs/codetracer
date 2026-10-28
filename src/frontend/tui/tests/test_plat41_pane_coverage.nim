@@ -98,18 +98,20 @@ suite "PLAT-41 LAW-P1 — the three sets COVER PaneKind":
     # host's `AgentActivityVM`.
     # PLAT-55 moved `paneProblems` into the vocabulary: it draws the window's
     # `ErrorsVM`.
+    # PLAT-56 moved `paneBuildOutput` into the vocabulary: it draws the
+    # window's `BuildVM`.
     ck card(allPanes()) == 19
-    ck card(PaneVocabularyPanes) == 15
+    ck card(PaneVocabularyPanes) == 16
     ck card(PaneNativePanes) == 1
-    ck card(PaneAcceptedExceptions) == 3
+    ck card(PaneAcceptedExceptions) == 2
     ck paneFileTree in PaneVocabularyPanes
     ck paneVcs in PaneVocabularyPanes
     ck paneTerminalOutput in PaneVocabularyPanes
     ck paneTestResults in PaneVocabularyPanes
     ck paneAgentActivity in PaneVocabularyPanes
     ck paneProblems in PaneVocabularyPanes
-    ck PaneAcceptedExceptions == {paneBuildOutput, paneConstraints,
-                                  paneRequests}
+    ck paneBuildOutput in PaneVocabularyPanes
+    ck PaneAcceptedExceptions == {paneConstraints, paneRequests}
     ck card(PaneVocabularyPanes) + card(PaneNativePanes) +
        card(PaneAcceptedExceptions) == card(allPanes())
 

@@ -449,7 +449,10 @@ suite "PLAT-48 on a real terminal: auto-hide panels":
     for r in changed:
       if s1.text(r).startsWith(" BUILD "): band = r
     ck band > 0
-    ck s1.text(band + 1).contains("[idle]")
+    # PLAT-56: the idle pane's header row carries the controls, the row
+    # beneath it the desktop's empty state.
+    ck s1.text(band + 1).contains("Run Stop Clear Follow") or
+       s1.text(band + 2).contains("No build has run.")
     # One check over the band, so the assertion count does not depend on
     # how many rows the band happens to take.
     var filled: seq[int] = @[]
