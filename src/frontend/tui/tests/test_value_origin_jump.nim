@@ -147,7 +147,7 @@ import ./fixtures/fixture_provider
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 174
+const ExpectedAssertions = 230
 
 var countedAssertions = 0
 
@@ -726,6 +726,54 @@ suite "CTUI-10: `o` lands on the origin OriginChainVM reports":
       ck h.session.getCurrentRRTicks() == originStep.tick
       ck h.session.getCurrentLine() == originStep.line
       ck h.session.getCurrentFile() == originStep.path
+
+      # ---- `o` ON A PARAMETER PASS: THE CALL BOUNDARY IS A DESTINATION TOO -
+      # The ranking above keeps parameter passes out of the CHOICE of target,
+      # not out of `o`'s reach. A user who selects `initial_shield` and presses
+      # `o` must land where its hop says it was bound — the callee's entry,
+      # `shield.nr:1` — with source, stack and variables consistent there, and
+      # `O` must bring them back. Without this the parameter-pass hop's
+      # `location` would be asserted as data and never navigated.
+      if parameterHead.isSome:
+        let p = parameterHead.get()
+        h.session.gotoTick(queryTick)
+        discard h.session.drainEvents()
+        ck h.session.getCurrentRRTicks() == queryTick
+        h.nav[] = initOriginNavigator()
+        h.origin.onCancelLoad()
+        h.origin.activeChain.val = none(OriginChain)
+        ctx = h.contextFor(targets, selected = ParameterVariable)
+        let askParam = dispatchAction(d, ctx, kaValueOrigin)
+        ck askParam.status == drDone
+        ck askParam.detail.startsWith(OriginPendingText)
+        ck applyOriginEvents(h.origin, h.session.drainEvents()) == 1
+        ck h.origin.activeChain.val.isSome
+        let paramSteps = stepsOf(h.origin.activeChain.val.get())
+        ck paramSteps.len > 0
+        ck paramSteps[0].kind == okParameterPass
+        ck paramSteps[0].tick == p.tick
+        discard h.session.drainEvents()
+        let jumpParam = dispatchAction(d, ctx, kaValueOrigin)
+        h.session.settleAfterSeek()
+        checkpoint("`o` on " & ParameterVariable & ": " & $jumpParam.status &
+                   " " & jumpParam.detail)
+        ck jumpParam.status == drDone
+        ck jumpParam.detail.contains($p.tick)
+        ck bufferedStops(h) == 0
+        ck h.nav[].depth == 1
+        checkDestinationState(h, p.tick, p.path, p.line, "parameter pass")
+        # The pane's line IS the hop's `sourceText`: the header that bound it.
+        ck recordedProgramLine(p.path, p.line).strip() == p.sourceText.strip()
+
+        discard h.session.drainEvents()
+        ctx = h.contextFor(targets, selected = ParameterVariable)
+        let backParam = dispatchAction(d, ctx, kaReverseOrigin)
+        h.session.settleAfterSeek()
+        ck backParam.status == drDone
+        ck bufferedStops(h) == 0
+        ck h.nav[].depth == 0
+        checkDestinationState(h, queryTick, queryFile, queryLine,
+                              "returned from parameter pass")
 
   test "the interpreter's dispatch moves a real debugger":
     inc examinedFixtures
