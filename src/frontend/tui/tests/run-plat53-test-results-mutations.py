@@ -129,8 +129,8 @@ ARMS = [
              "    FitColumn(name: TestColumnNames[1], flex: TestWhereFlex),")],
      [(VMU, None)],
      "§8.4: the name does not outrank the location (the desktop's 1.8fr : 1fr)"),
-    ("V6", [(FIT, "              neverCut: true),",
-             "              neverCut: false),")],
+    ("V6", [(FIT, "    FitColumn(name: TestColumnNames[3], preferredUnits: durationUnits,\n              neverCut: true),",
+             "    FitColumn(name: TestColumnNames[3], preferredUnits: durationUnits,\n              neverCut: false),")],
      [(VMU, None)],
      "§8.4: the duration is cut when the pane is narrow"),
     # ---- the catalog rule ---------------------------------------------------
