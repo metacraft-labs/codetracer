@@ -7960,7 +7960,41 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   `sayStatus`, `data-ct-footer-note`); before it, GPUI only had the gesture
   trace for host messages.
 - A native recording press reports through `native_agent_host.message`
-  (`recordingOpenedNote`): both buttons open a NEW session tab natively.
+  (`recordingOpenedNote`). `[Open in new tab]` opens a new session tab;
+  `[Open recording]` replaces the current tab's session (the host decides,
+  `agentRecordingPlacement`, from the front-end's `currentTabReplaceable`).
+  A replacement MOVES the Agent Activity host onto the new session
+  (`rehome`, which moves the live store entry too): in the terminal
+  `recordingOpener`'s replace path, in GPUI `replaceSessionTab` (Test
+  Results' replacement goes through both as well). Because of that,
+  `tui_session.agentPress` holds the host in a local: after a press that
+  replaced the session, `s.agent` is nil.
+- Desktop renderer -> main IPC: a Nim `string` (or a `seq[string]` passed
+  through `.toJs`) crosses as an ARRAY OF BYTE VALUES, not a JS string; the
+  main process's `$cstring` then throws `charCodeAt is not a function` inside
+  an async handler and the request silently does nothing. Convert to
+  `cstring` before `toJs` (the Agent Activity prompt's `contextPaths` never
+  reached the agent until 2026-10-28 because of this).
+- The desktop's Agent Activity `+` menu asks its host what *Editor
+  selection* would attach as it draws (`AgentActivityCallbacks.
+  editorSelectionContext`); "" draws it disabled with the reason. Monaco
+  ranges -> lines: `agent_prompt_context.selectedLinesOf` (a range ending at
+  column 1 of a later line does not cover that line, as the native cells).
+- The GPUI pane tab strips are painted by `main.drawNode`, NOT from
+  `chrome.tabStyle` (the session tabs, dock slots and ghost use tabStyle).
+  The selected tab's own ground is on its label ROW (`data-ct-tab-ground`);
+  the tab element itself stays the pane's ground so the bridge joins the
+  body. The real-window check is `test_plat47_gpui_window` B2 over the plat47
+  record (`labelGround`).
+- A replay-server built from a plain COPY of the tree reports provenance
+  `unknown` and real-engine plan suites refuse it (`replay_prerequisite`).
+  Make the copy a git repo holding exactly the checkout's regular tracked
+  files under src/db-backend and libs: the fingerprint is content-based
+  (path + blob hash), so it then matches the checkout's.
+- `ci/lib/test-lane-files.sh` `test_lane_run_library_path`: the GPUI runtime
+  libraries (libxcb, libxkbcommon...) the shim needs are NOT on the dev
+  shell's LD_LIBRARY_PATH; a hand-run GPUI suite must prepend
+  `$CODETRACER_GPUI_RUNTIME_LIB_PATH` to its RUN (the lane runner does).
 - `acp-replay-agent.js --prompt-log=<path>` appends each `session/prompt`'s
   content blocks as a JSON line: assert what the agent RECEIVED.
 - Building in a fresh worktree: the submodules are not checked out (`git
