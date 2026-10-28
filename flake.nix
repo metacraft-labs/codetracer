@@ -136,6 +136,13 @@
       flake = true;
     };
 
+    # The parity gate compiles this producer's FLIP C ABI. Pin its source
+    # alongside the other sibling inputs; no additional dev shell is needed.
+    codetracer-image-diff = {
+      url = "github:metacraft-labs/codetracer-image-diff/agents";
+      flake = false;
+    };
+
     codetracer-shell-recorders = {
       url = "github:metacraft-labs/codetracer-shell-recorders";
       inputs.nixpkgs.follows = "nixpkgs";

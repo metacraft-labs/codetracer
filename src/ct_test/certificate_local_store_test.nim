@@ -237,11 +237,13 @@ proc runCli(repo, name: string; extra: seq[string] = @[]):
   (code, summary)
 
 proc storeFiles(root: string): seq[string] =
-  ## Every file under ``root``, store-relative, sorted — temporaries included.
+  ## Every file under ``root``, store-relative, sorted — temporaries included,
+  ## excluding the persistent root coordination file required by §2.3.
   result = @[]
   if dirExists(root):
     for path in walkDirRec(root):
-      result.add path.relativePath(root).replace(DirSep, '/')
+      let relative = path.relativePath(root).replace(DirSep, '/')
+      if relative != ".write-lock": result.add relative
   result.sort()
 
 proc workingTreeId(repo: string): string =
@@ -337,6 +339,16 @@ proc removeScratchRoot() =
 # does — no sleeps, no timing.
 # ---------------------------------------------------------------------------
 
+when defined(linux):
+  var sharedLockRoot: string
+  var sharedLockObserved: bool
+  proc sharedLockStep(attempt: int) {.nimcall, gcsafe.} =
+    {.cast(gcsafe).}:
+      sharedLockObserved = true
+      let contender = execCmdEx(quoteShellCommand(
+        ["flock", "--exclusive", "--nonblock", sharedLockRoot / ".write-lock", "true"]))
+      doAssert contender.exitCode == 1, contender.output
+
 var toPruner, toWriter: Channel[string]
 var lockstepLog: seq[string]            # main thread only
 
@@ -373,6 +385,34 @@ proc spawnSelf(env: openArray[(string, string)]): Process =
 # ---------------------------------------------------------------------------
 
 suite "CTC-3e: the local certificate store":
+
+  test "portable unknown identifiers relay verbatim; invalid prefixes never write":
+    let workspace = scratchDir("algorithm-names-workspace")
+    for name in ["../x", "a/b", "a\\b", ".x", "x.", "CON", "con", "prn", "aux",
+                 "nul", "com1", "com9", "lpt1", "lpt9", "nul.x", "a_b", "Upper",
+                 "é", repeat('x', 65)]:
+      let root = useStoreRoot("invalid-algorithm-name")
+      let sentinel = root.parentDir / "sentinel"
+      writeFile(sentinel, "untouched")
+      let doc = sampleDocument(name & ":aa")
+      ck localStoreRelativePathOf(doc).path == ""
+      let published = publishToLocalStore(nativeRoots(), workspace, doc)
+      ck not published.written
+      ck not dirExists(root)
+      ck readFile(sentinel) == "untouched"
+    for name in ["future-v2", "-", "0", "com0", "lpt0", "con-v2", repeat('x', 64)]:
+      let root = useStoreRoot("unknown-algorithm-name")
+      let content = name & ":a"
+      let doc = sampleDocument(content)
+      let relative = localStoreRelativePathOf(doc)
+      ck relative.path.startsWith("v1/" & name & "/a/")
+      let published = publishToLocalStore(nativeRoots(), workspace, doc)
+      ck published.written
+      ck readFile(root / relative.path) == doc
+      let found = lookupLocalStore(nativeStoreAccess(), nativeRoots(), content)
+      ck found.found.len == 1
+      if found.found.len == 1:
+        ck found.found[0].text == doc
 
   test "the temporary directory is outside any git repository":
     let probe = scratchDir("environment-check")
@@ -586,7 +626,7 @@ suite "CTC-3e: the local certificate store":
       if dirExists(dir):
         try: setLastModificationTime(dir, getTime() - initDuration(days = 1))
         except OSError: discard
-      let written = publishRecord(root, relative, doc, signed = true)
+      let written = publishRecord(root, relative, doc, signed = true, signatureMade = true)
       inc writes
       if written.retried: inc retries
       if written.error.len > 0:
@@ -614,7 +654,7 @@ suite "CTC-3e: the local certificate store":
     let relative = localStoreRelativePathOf(doc).path
     let contentDir = relative.parentDir
     let dir = root / contentDir
-    ck publishRecord(root, relative, doc, signed = true).error == ""
+    ck publishRecord(root, relative, doc, signed = true, signatureMade = true).error == ""
     setLastModificationTime(dir, getTime() - initDuration(days = 1))
     toPruner.open()
     toWriter.open()
@@ -623,7 +663,7 @@ suite "CTC-3e: the local certificate store":
     createThread(pruner, lockstepPruner, root)
     # The prune has chosen the directory, and waits.
     ck toWriter.recv() == $psChosen & " " & contentDir
-    let written = publishRecord(root, relative, doc, signed = true,
+    let written = publishRecord(root, relative, doc, signed = true, signatureMade = true,
                                 beforeRename = publishStep)
     joinThread(pruner)
     toPruner.close()
@@ -659,6 +699,20 @@ suite "CTC-3e: the local certificate store":
     ck not dirExists(leftover)
     ck storeFiles(root) == @[localStoreRelativePathOf(doc).path]
 
+  when defined(linux):
+    test "a native publisher holds the shared kernel lock until rename":
+      let root = useStoreRoot("shared-lock")
+      let doc = sampleDocument(contentFor(10))
+      let relative = localStoreRelativePathOf(doc).path
+      sharedLockRoot = root
+      sharedLockObserved = false
+      let written = publishRecord(root, relative, doc, signed = false,
+        beforeRename = sharedLockStep)
+      ck sharedLockObserved and written.error.len == 0
+      let released = execCmdEx(quoteShellCommand(
+        ["flock", "--exclusive", "--nonblock", root / ".write-lock", "true"]))
+      ck released.exitCode == 0
+
   test "a signed record replaces its unsigned twin, and an unsigned one keeps the signed":
     ## §2.3: the two share a name (the signature block is outside the
     ## payload). A signing producer always replaces; an unsigned one may keep
@@ -693,9 +747,33 @@ suite "CTC-3e: the local certificate store":
                                           unsignedWithKey)
     ck viaUnsigned.written and viaUnsigned.kept
     ck readFile(path) == signed
-    # A signing producer replaces even a signed copy: it just made its own.
-    discard publishToLocalStore(nativeRoots(), workspace, signedAgain)
+    # An unverified relay must preserve the existing signed document.
+    let relayed = publishToLocalStore(nativeRoots(), workspace, signedAgain)
+    ck relayed.kept
+    ck readFile(path) == signed
+    # Only the process that made this signature can assert signer provenance.
+    let reissued = publishToLocalStore(nativeRoots(), workspace, signedAgain,
+                                       signatureMade = true)
+    ck reissued.written and not reissued.kept
     ck readFile(path) == signedAgain
+    for bad in ["not a certificate\n", sampleDocument(contentFor(12))]:
+      writeFile(path, bad)
+      for incoming in [signed, unsignedWithKey]:
+        let refused = publishToLocalStore(nativeRoots(), workspace, incoming)
+        ck refused.error.len > 0
+        ck readFile(path) == bad
+    when not defined(windows):
+      writeFile(path, signed)
+      let permissions = getFilePermissions(path)
+      setFilePermissions(path, {})
+      try:
+        for incoming in [signed, unsignedWithKey]:
+          let refused = publishToLocalStore(nativeRoots(), workspace, incoming)
+          ck refused.error.len > 0
+          ck getFilePermissions(path) == {}
+      finally:
+        setFilePermissions(path, permissions)
+      ck readFile(path) == signed
     ck storeFiles(root).len == 1
 
   test "retention keeps the newest N content directories and HEAD's content":

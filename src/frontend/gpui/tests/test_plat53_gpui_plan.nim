@@ -43,7 +43,7 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 32
+  ExpectedAssertions = 42
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1600
   H = 1000
@@ -168,6 +168,15 @@ proc failureLines(plan: JsonNode): seq[string] =
 proc rowsOf(plan: JsonNode): seq[JsonNode] =
   plan.nodesWith("data-ct-test-id")
 
+proc actionOf(title: string): string =
+  ## A `⏵` title without its last sentence — WHERE the press opens the
+  ## recording (Test-Results-Pane.md §9.4), which is the front-end's own
+  ## context: the desktop's pane is in an editing session ("Opens in a new
+  ## tab."), this window's in a replay ("…; Ctrl+click opens it in this
+  ## tab."). What the press DOES is the desktop's word for word.
+  let at = title.find(" Opens in ")
+  if at >= 0: title[0 ..< at] else: title
+
 proc compareRows(plan: JsonNode; want: JsonNode; ran: bool): int =
   ## How many fields of the plan's rows differ from the desktop's.
   let rows = plan.rowsOf()
@@ -197,7 +206,9 @@ proc compareRows(plan: JsonNode; want: JsonNode; ran: bool): int =
       diffs.add "refresh '" & refresh.attr("data-ct-title") & "'"
     let open = r.control("open")
     if open.textOf != w["open"]["label"].getStr or
-       open.attr("data-ct-title") != w["open"]["title"].getStr or
+       open.attr("data-ct-title").actionOf != w["open"]["title"].getStr.actionOf or
+       not open.attr("data-ct-title").endsWith(
+         "Opens in a new tab; Ctrl+click opens it in this tab.") or
        open.attr("data-ct-open-mode") != w["open"]["mode"].getStr or
        open.attr("data-ct-disabled") != $w["open"]["disabled"].getBool:
       diffs.add "open '" & open.attr("data-ct-title") & "'"
@@ -255,9 +266,14 @@ suite "PLAT-53: the Test Results pane in the GPUI window":
         opened.add line
     checkpoint(tr)
     # Three opens: a record-and-open, an open of THAT recording (nothing
-    # recorded), and a Shift-armed re-record opened.
+    # recorded), and a Shift-armed re-record opened. Test-Results-Pane.md §9
+    # (rule 4): the second SHOWS the test's tab and the third REPLACES that
+    # tab's session in place — two session tabs were opened, not three.
     ck recordings.len == 3
-    ck opened.len == 3
+    ck opened.len == 2
+    ck tr.contains("tests: showed tab")
+    ck tr.contains("tests: replaced tab")
+    ck tr.contains(" in its own tab")
     ck recordings.len == 3 and recordings[0] == recordings[1]
     ck recordings.len == 3 and recordings[2] != recordings[0]
     ck tr.contains("tests: open test_fails (record-and-open)")
@@ -269,6 +285,34 @@ suite "PLAT-53: the Test Results pane in the GPUI window":
     # The window shows the last tab opened: that recording's session.
     ck recordings.len == 3 and
        tr.contains("session shown") and tr.contains(recordings[2])
+    removeDir(project)
+
+  test "§9: Ctrl opens in this tab; the hover label is the control's title":
+    let project = writePlat53Project("ct-plat53-gpui-")
+    let (plan, tr) = windowPlan(project,
+      "tests:show,tests:open:test_fails,tests:wait," &
+      "tests:open:test_passes:ctrl,tests:wait," &
+      "tests:hover:open:test_fails")
+    checkpoint(tr)
+    # The failing test's recording in a new tab; the passing test's, with
+    # Ctrl, IN THAT TAB (a replay, replaced in place): one tab opened.
+    ck tr.contains("tests: open test_passes (record-and-open)")
+    ck tr.contains("tests: replaced tab")
+    ck tr.contains(" in this tab")
+    var opens = 0
+    for line in tr.splitLines():
+      if line.contains(" as tab ") and line.contains("opened "): inc opens
+    ck opens == 2
+    # THE HOVER LABEL: the `⏵`'s own title (`data-ct-title`), word for word.
+    let hover = plan.nodesWith("data-ct-tests-hover")
+    ck hover.len == 1
+    let fails = plan.rowsOf()[1]
+    let title = fails.control("open").attr("data-ct-title")
+    ck title.len > 0 and hover.len == 1 and
+       hover[0].attr("data-ct-hover-label") == title
+    # The title says where it opens: test_fails has no tab of its own any
+    # more (its tab now holds test_passes), and the current tab is a replay.
+    ck title.endsWith("Opens in a new tab; Ctrl+click opens it in this tab.")
     removeDir(project)
 
   test "a press selects a row; the window's keys move the selection":

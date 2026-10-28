@@ -4067,6 +4067,9 @@ test-renderer-browser:
 # `later_session_launch_failure_test.nim` delivers a refusal tagged for a tab
 # that is not on screen and asserts it reaches that tab's status bar only, and
 # is painted into `#status` when that tab is shown.
+# `tab_session_ids_test.nim` opens and closes tabs and asserts a new tab's
+# session id is never one the window has used, and that a tab's requests name
+# its replay.
 #
 # NEEDS the checkout's `node_modules/jsdom`, which the dev shell links from the
 # Nix-built node modules on entry; the runner fails (rather than skipping) when
@@ -4103,6 +4106,8 @@ test-renderer-chromium:
 # `dap_session_routing_test.nim` drives the main process's DAP router with two
 # sessions whose requests share a `seq` and asserts each answer reaches the
 # session that asked.
+# `dap_replay_selection_test.nim` asserts the router selects a tab's request
+# onto the replay the Backend Manager answered for that tab, not by its tab id.
 test-main-process:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -6907,3 +6912,13 @@ plat68-desktop-keys *args:
 # operation and a `-command` removal behave identically on all three.
 plat68-one-keymap:
   bash ci/test/plat68-one-keymap-three-front-ends.sh
+
+# Published parity figures require two independent captures of each renderer.
+# Raw capture recipes above produce diagnostics, not stable parity scalars.
+[positional-arguments]
+plat37-parity *args:
+  bash ci/test/plat37-parity.sh "$@"
+
+# Real-FLIP stability/refusal controls, independent of GUI permissions.
+test-plat37-parity:
+  bash ci/test/plat37-parity.sh --test

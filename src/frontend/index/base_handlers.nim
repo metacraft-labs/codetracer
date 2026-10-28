@@ -3,6 +3,7 @@ import
   ../lib/[ jslib ],
   ../[ types ],
   ./ipc_registry,
+  ./load_admission,
   ../../common/[ ct_logging ]
 
 
@@ -46,7 +47,7 @@ macro indexIpcHandlers*(namespace: static[string], messages: untyped): untyped =
       fullMessage = (namespace & $message).newLit
       handler = (("on-" & $message).toCamelCase).ident
       messageCode = quote:
-        `ipc`.on(`fullMessage`, `handler`.toJs)
+        `ipc`.on(`fullMessage`, guardLoadHandler(`fullMessage`, `handler`.toJs))
       result.add(messageCode)
     else:
       error "unexpected message ", message

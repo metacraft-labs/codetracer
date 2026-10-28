@@ -591,6 +591,23 @@
         "type": "github"
       }
     },
+    "codetracer-image-diff": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1793050497,
+        "narHash": "sha256-w4Ahbo3XgnFptT8YGMo8THl9uKdPpUfL8oyMk5o+wK0=",
+        "owner": "metacraft-labs",
+        "repo": "codetracer-image-diff",
+        "rev": "e002498eac522ccc90c1dab4800e0b934bdc72fd",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "agents",
+        "repo": "codetracer-image-diff",
+        "type": "github"
+      }
+    },
     "codetracer-js-recorder": {
       "inputs": {
         "codetracer-trace-format": [
@@ -608,11 +625,11 @@
         "pre-commit-hooks": "pre-commit-hooks"
       },
       "locked": {
-        "lastModified": 1793103361,
-        "narHash": "sha256-q2Ki6vO/6k8Au7JOtl+dggq/aG2nnP3MHrTRSBpBGAc=",
+        "lastModified": 1793167392,
+        "narHash": "sha256-jjYdJK7Yu+DDGgGJweQ09ojBTI6i1bRvhKXeKvx3H1g=",
         "owner": "metacraft-labs",
         "repo": "codetracer-js-recorder",
-        "rev": "d7bcb827e2a51b50b8ed7bb5a76861af69c6783f",
+        "rev": "18647fa86c7f8922eadd66ca1c48416f6c386b00",
         "type": "github"
       },
       "original": {
@@ -641,11 +658,11 @@
     "codetracer-native-recorder": {
       "flake": false,
       "locked": {
-        "lastModified": 1793135799,
-        "narHash": "sha256-cc6Gg4wnBzcqXB38qeeuziQe1fYlWJ4vUacKS9+sOCQ=",
+        "lastModified": 1793186652,
+        "narHash": "sha256-AceKJr1GOX2hJ8lBfzOKu/M6Cx0ggWwnF18qowYdUh4=",
         "owner": "metacraft-labs",
         "repo": "codetracer-native-recorder",
-        "rev": "05548fe320e2203bc6b7c2591a1fe7b530a86ade",
+        "rev": "bea753520d876f49f6c5f0bedc620e2209d81958",
         "type": "github"
       },
       "original": {
@@ -832,11 +849,11 @@
     "codetracer-trace-format-nim": {
       "flake": false,
       "locked": {
-        "lastModified": 1792957907,
-        "narHash": "sha256-WmJkDz+lUDb5xtH9fJIuKw35dX0S20FhbksFQQXfHp8=",
+        "lastModified": 1793168673,
+        "narHash": "sha256-9JOs2gR4Iq73PiIdx0p8a2Dr7ZnZOglCWZSVbzsyu30=",
         "owner": "metacraft-labs",
         "repo": "codetracer-trace-format-nim",
-        "rev": "ccc4ba4e05d740659bc1663fb4f39a2f32de9937",
+        "rev": "6029d4844a89fd669ebd55de5b315eb78a10dc5e",
         "type": "github"
       },
       "original": {
@@ -4102,11 +4119,11 @@
     "isonim": {
       "flake": false,
       "locked": {
-        "lastModified": 1793133780,
-        "narHash": "sha256-/u4hSTiEBo5jmo2m0/h04izSrQy4Ip7g1RhAOazpTYE=",
+        "lastModified": 1793180599,
+        "narHash": "sha256-8VRHnVxE0J+Sl2ks6PwIF0UrZ2wZkJUDfJm+8eZVrCs=",
         "owner": "metacraft-labs",
         "repo": "isonim",
-        "rev": "c760ca323a62005014c4478be645b56bcb125d7e",
+        "rev": "fa73eddf64dbda8b6689dca948720730f6f186b6",
         "type": "github"
       },
       "original": {
@@ -4426,11 +4443,11 @@
     "nim-everywhere": {
       "flake": false,
       "locked": {
-        "lastModified": 1793107428,
-        "narHash": "sha256-wT8nAFGlJFsZup/dCTSTo9V5UdGYK+bFfvfTWJxkPEk=",
+        "lastModified": 1793178288,
+        "narHash": "sha256-8n6SaRXGiUD4hKDMGEuxVn7cK8Sy+ARDQ+Lni5uaYRg=",
         "owner": "metacraft-labs",
         "repo": "nim-everywhere",
-        "rev": "80d4b7d9c683967ddbc8ee29c902881e358fbaa1",
+        "rev": "2a41b67a6c0d41cbb55359c702f300eb2696682f",
         "type": "github"
       },
       "original": {
@@ -7652,11 +7669,11 @@
         "stackable-hooks-macos-tools": "stackable-hooks-macos-tools"
       },
       "locked": {
-        "lastModified": 1793133683,
-        "narHash": "sha256-/HQKxaJ7/ETMJIryv/mJRA8cmDcOLDbJzGcK1Z5j24c=",
+        "lastModified": 1793179964,
+        "narHash": "sha256-UZtkIVpULGvm+fEji0BqGPwmToMwvygbgR1EV8UzwwU=",
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "c61928595827c2e9d5f899ec25b6b820e0c9dcdb",
+        "rev": "d2e2ce73370abd35bcdcbef3f4260ebb9900a183",
         "type": "github"
       },
       "original": {
@@ -7748,6 +7765,7 @@
     "root": {
       "inputs": {
         "appimage-channel": "appimage-channel",
+        "codetracer-image-diff": "codetracer-image-diff",
         "codetracer-js-recorder": "codetracer-js-recorder",
         "codetracer-native-backend": "codetracer-native-backend",
         "codetracer-native-recorder": "codetracer-native-recorder",

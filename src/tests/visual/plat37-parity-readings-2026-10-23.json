@@ -644,5 +644,10 @@
   "platform": "aarch64-darwin, Darwin 25.5.0, 2880x1800 device px at pointPixelScale 2.0",
   "diskAtEnd": "86G available on /, above the 20G abort threshold",
   "electronStamp": "built_by = repro 0.1.3 as expected (the dev-shell PATH caveat, not a defect). No build was run this pass."
- }
+ },
+  "captureStabilityQualification": {
+    "independentCaptureCount": null,
+    "status": "unvalidated-historical-reading",
+    "reason": "Independent capture count and pairwise within-renderer FLIP stability were not recorded. Regrading preserved frames is not another capture. eventLog figures and aggregates containing them cannot establish a validated parity baseline or delta."
+  }
 }

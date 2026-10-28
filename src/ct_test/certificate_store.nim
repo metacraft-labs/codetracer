@@ -67,6 +67,7 @@
 import std/[algorithm, strutils]
 
 import certificate
+import certificate_content_id
 import certificate_store_roots
 
 export certificate_store_roots
@@ -391,42 +392,14 @@ proc readWorkspaceCarriers(access: CertificateStoreAccess;
             "the certificate at '" & join(dir, name) & "' could not be read: " &
             read.detail
 
-proc isSafeComponent(text: string): bool =
-  ## One path component that cannot leave the directory it is joined to.
-  if text.len == 0 or text == "." or text == "..":
-    return false
-  for c in text:
-    if c in {'/', '\\', ':', '\0'}:
-      return false
-  true
-
 proc localStoreContentDir*(contentId: string):
     tuple[ok: bool; relative: string; problem: string] =
-  ## ``v1/<algorithm>/<digest>`` for a content id (Transport.md §2.2): the id
-  ## split at its FIRST ``:``, because ``:`` is not a legal file-name
-  ## character on Windows. ``/``-separated.
-  ##
-  ## Refused, rather than mapped somewhere, when either half could not be a
-  ## single directory name: a digest that is not lowercase hex
-  ## (Content-Id.md §1), or an algorithm that is empty or carries a
-  ## separator. A content id decides where a write lands and which directory
-  ## a read lists, so it must not be able to name ``..``.
-  let colon = contentId.find(':')
-  if colon <= 0:
-    return (false, "", "the content id `" & contentId &
-            "` has no algorithm before a `:`")
-  let algorithm = contentId[0 ..< colon]
-  let digest = contentId[colon + 1 .. ^1]
-  if not isSafeComponent(algorithm):
-    return (false, "", "the content id's algorithm `" & algorithm &
-            "` cannot be a directory name")
-  if digest.len == 0:
-    return (false, "", "the content id `" & contentId & "` has no digest")
-  for c in digest:
-    if c notin {'0'..'9', 'a'..'f'}:
-      return (false, "", "the content id's digest `" & digest &
-              "` is not lowercase hexadecimal")
-  (true, LocalStoreLayout & "/" & algorithm & "/" & digest, "")
+  ## Transport §2.2 uses the two components validated by Content-Id §1.
+  ## Unknown portable algorithms are relayed verbatim, never computed here.
+  let parsed = parseContentId(contentId)
+  if parsed.form == cifMalformed:
+    return (false, "", "the content id is malformed: " & parsed.problem)
+  (true, LocalStoreLayout & "/" & parsed.algorithmName & "/" & parsed.digest, "")
 
 proc isLocalStoreRecordName*(name: string): bool =
   ## Which names in a content directory are certificates (Transport.md §2.4):

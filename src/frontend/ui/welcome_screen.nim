@@ -17,7 +17,7 @@ from ../viewmodel/store/types import
 from ../viewmodel/viewmodels/welcome_screen_vm import
   WelcomeScreenVM, NewRecordFormState, createWelcomeScreenVM, setRecentTraces,
   setRecentFolders, setStartOptions, setStartOptionsNote, setMode,
-  updateNewRecord,
+  updateNewRecord, setLoadError,
   syncLoadingState, setRecordBackendAvailability, recordBackendWireName,
   recordBackendChoiceFromWireName,
   # Issue #734: both arms' start-option strips come from these two builders
@@ -256,6 +256,9 @@ proc syncLegacyWelcomeScreenIntoVM*(self: WelcomeScreenComponent) =
   welcomeScreenVMInstance.syncLoadingState(
     self.loading,
     (if self.loadingTrace.isNil: NO_LOADING_RECORDING else: safeStr(self.loadingTrace.recordingId)))
+  # The mount's VM is shared, but its source component belongs to one tab.
+  # Always overwrite feedback, including the empty value on another tab.
+  welcomeScreenVMInstance.setLoadError(safeStr(self.loadError))
   welcomeScreenVMInstance.updateNewRecord(proc(form: var NewRecordFormState) =
     if self.newRecord.isNil:
       form.executable = ""
@@ -314,6 +317,7 @@ proc loadRecentTraceFromWelcome*(self: WelcomeScreenComponent; recordingId: cstr
   ## M-REC-3: ``recordingId`` is a UUIDv7 recording-id string.  The IPC
   ## payload field name ``traceId`` is preserved here as the wire format
   ## is owned by M-REC-5.
+  self.loadError = cstring""
   self.loading = true
   self.loadingTrace = nil
   for trace in self.data.recentTraces:
@@ -324,6 +328,7 @@ proc loadRecentTraceFromWelcome*(self: WelcomeScreenComponent; recordingId: cstr
   self.data.ipc.send "CODETRACER::load-recent-trace", js{ traceId: recordingId }
 
 proc loadRecentFolderFromWelcome*(self: WelcomeScreenComponent; folderPath: string) =
+  self.loadError = cstring""
   self.loading = true
   self.syncLegacyWelcomeScreenIntoVM()
   self.data.ipc.send "CODETRACER::load-recent-folder",
@@ -334,6 +339,8 @@ proc triggerWelcomeStartOption*(self: WelcomeScreenComponent; key: string) =
   ## `DesktopHandledStartOptions` mirrors. An arm added here must be added
   ## there in the same edit, and an arm deleted here must be deleted there —
   ## nothing relates the two (see `welcomeStartOptions` above).
+  self.loadError = cstring""
+  self.syncLegacyWelcomeScreenIntoVM()
   case key
   of "new-file":
     # ISSUE #735. Through the main process rather than straight into
@@ -434,6 +441,8 @@ when defined(js):
       self.loadRecentFolderFromWelcome(folderPath)
 
     welcomeScreenVMInstance.onLaunchConfig = proc(request: LaunchConfigRequest) =
+      self.loadError = cstring""
+      self.syncLegacyWelcomeScreenIntoVM()
       # The one genuine impedance mismatch in this change. Everything on the
       # VM side is keyed by `slug`; `CODETRACER::record-with-launch-config` is
       # keyed by an index into `getLaunchConfigsForWorkspace`
@@ -446,6 +455,7 @@ when defined(js):
         js{ configIndex: request.configIndex })
 
     welcomeScreenVMInstance.onSubmitNewRecord = proc(request: NewRecordRequest) =
+      self.loadError = cstring""
       # `request` carries the VM's decision (target kind, record backend,
       # session mode); the payload itself is still built from the legacy form
       # state, which is what `prepareArgs` reads and what the main process has
@@ -534,6 +544,7 @@ when defined(js):
       onSubmitNewRecord: proc() =
         if self.newRecord.isNil:
           return
+        self.loadError = cstring""
         self.newRecord.status.kind = InProgress
         let workDir = if self.newRecord.workDir.isNil or self.newRecord.workDir.len == 0:
             jsUndefined
@@ -557,6 +568,7 @@ when defined(js):
         self.newDownload.args = value.split(" ").filterIt(it.len > 0).mapIt(cstring(it))
         self.syncLegacyWelcomeScreenIntoVM(),
       onSubmitOnlineTrace: proc(value: string) =
+        self.loadError = cstring""
         if self.newDownload.isNil:
           self.newDownload = newDefaultDownloadRecord()
         self.newDownload.args = value.split(" ").filterIt(it.len > 0).mapIt(cstring(it))

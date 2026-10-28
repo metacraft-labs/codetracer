@@ -84,7 +84,7 @@
 when defined(js):
   {.error: "plat37_macos_window_capture is native-only.".}
 
-import std/[json, os, osproc, streams, strutils, times]
+import std/[json, os, osproc, streams, strutils, times, sysrand, sha1, sequtils]
 
 import gui_assert/screen_capture
 import gui_assert/window_layout
@@ -467,6 +467,9 @@ proc fail(cfg: Config, node: JsonNode, why: string, code: int) =
 proc runHost(cfg: Config) =
   var node = %*{
     "probe": "plat37-macos-window-capture/host",
+    # Minted by the capture process, never by the grader. Copies retain it.
+    "captureId": urandom(16).mapIt(it.toHex(2)).join(""),
+    "build": getEnv("CODETRACER_PARITY_BUILD"),
     "takenAt": now().utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'"),
     "host": hostRecord(),
   }
@@ -557,6 +560,9 @@ proc runCapture(cfg: Config) =
     "subject": cfg.owner,
     "view": cfg.view,
     "scenario": cfg.scenario,
+    # Minted by the capture process, never by the grader. Copies retain it.
+    "captureId": urandom(16).mapIt(it.toHex(2)).join(""),
+    "build": getEnv("CODETRACER_PARITY_BUILD"),
     "takenAt": now().utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'"),
     # EVERY EXTENT ON THE COMMAND LINE IS IN POINTS, and is labelled so.
     "requestedPoints": {"width": cfg.requestedWidth,
@@ -845,6 +851,8 @@ proc runCapture(cfg: Config) =
       "warns about, and PLAT-23's G5 — `a gate cannot be passed by a " &
       "measurement that could not have failed` — cuts the other way too: a " &
       "gate that cannot RUN is not a gate. It is evidence where it runs.")
+  # Bind the identity to the original encoded surface before any regrading.
+  node["imageSha1"] = %($secureHashFile(cfg.outPath))
   node["outcome"] = %"captured"
   writeRecord(cfg.recordPath, node)
 

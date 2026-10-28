@@ -7,7 +7,7 @@
  * text, a `<textarea>`, a contenteditable element) is an `input` element of
  * that path whether or not its view stamped it
  * (`scope_path.withNativeTextField`). Its table is `input`, whose
- * rows the element performs itself (`key_router.NativeTables`), so the
+ * rows the element performs itself (`native_key_operations`), so the
  * router lets `Enter` through to the field's own `keydown` listener. Before
  * the fix the Call Trace search box was not on the path at all: `Enter`
  * resolved to the pane's `list.activate`, and the router's

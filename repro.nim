@@ -523,6 +523,9 @@ package codeTracer:
     "nim-agent-harbor >=0"
     "nim-agents >=0"
     "nim-acp >=0"
+    # The parity gate compiles the FLIP producer's C ABI; declare its source
+    # package so the sibling revision participates in dependency locking.
+    "image_diff >=0"
 
     # Windows-only build tools. ``nsis`` (the Nullsoft Scriptable
     # Install System compiler) is what the ``windows-installer``
@@ -1513,6 +1516,26 @@ package codeTracer:
         else:
           @[],
         source = "src/ct_test/ct_test.nim")
+      # THE C BACKEND AND THE DEBUG-INFO PASS ARE SUB-TOOLS HERE TOO.
+      #
+      # Same rule as `ctNative` above (see its "NAMING ANY REF MAKES THIS
+      # EDGE'S `PATH` HERMETIC" note): `nim c` shells out to a bare
+      # `clang`/`gcc`, and on macOS runs `dsymutil` after the link. Without
+      # these refs the edge inherited the developer's `PATH`, found
+      # `/usr/bin/clang` (the xcode-select shim, a SIP binary), and the
+      # monitor substituted the real Command Line Tools clang with `SDKROOT`
+      # scrubbed. Measured 2026-10-28 on aarch64-darwin (CLT selected):
+      # `repro build ct-test` died on `'string.h' file not found`. Naming the
+      # Nix clang gives the edge the wrapped compiler that carries its own
+      # libc/SDK include paths, exactly as `ct-binary` already gets.
+      block:
+        const CtTestBackendCompiler =
+          when defined(macosx): "clang"
+          else: "gcc"
+        appendRegisteredActionToolIdentityRefs(ctTest.id,
+          [CtTestBackendCompiler])
+        when defined(macosx):
+          appendRegisteredActionToolIdentityRefs(ctTest.id, ["dsymutil"])
       target("ct-test", ctTest)
       codetracerActions.add(ctTest)
       auxiliaryActionIds.add(ctTest.id)

@@ -2,7 +2,7 @@ import
   std/[ async, jsffi, jsconsole, json, os, strformat ],
   results,
   window, traces, files, config, install, electron_vars, debugger, launch_config,
-  recent_items, keybindings,
+  recent_items, keybindings, load_admission, tab_answers,
   ipc_subsystems/socket,
   ../[ config, types, trace_metadata ],
   ../lib/[ jslib, electron_lib ],
@@ -49,6 +49,13 @@ proc onStarted*(sender: js, response: js) {.async.} =
     mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
       "test": cstring("hello from index"),
     })
+
+const StartupAnnouncesAtStart = defined(server)
+  ## Whether the startup replay is announced as soon as it starts. In the
+  ## server (`ct host`) a page that connects is sent the cached announcement
+  ## (`bootstrap_cache`) and `host_clients` binds the replay to a client from
+  ## it, so it goes out at once, as it always has. On the desktop the one
+  ## window must be listening, so it waits for `started()` (`init`).
 
 proc started*: Future[void] =
   var future = newPromise() do (resolve: (proc: void)):
@@ -129,6 +136,10 @@ proc init*(config: Config, layout: js, helpers: Helpers) {.async.} =
   ## state. A replay's trace did, but only because `prepareForLoadingTrace`
   ## assigns the global itself.
   debugPrint "index: init"
+  # createData starts the renderer with session id 0. Keep its asynchronous
+  # load addressed to that session even if the user opens/switches a tab.
+  doAssert beginLoad(js{tab: 0}), "startup must own load admission"
+  defer: finishLoad()
   let bypass = true
 
   data.config = config
@@ -170,11 +181,11 @@ proc init*(config: Config, layout: js, helpers: Helpers) {.async.} =
     # with a recording loaded, and keep the debugging layout.
     let reviewLayout = await mainWindow.loadReviewLayoutConfig(
       string(userLayoutDir / "default_edit_layout.json"))
-    mainWindow.webContents.send "CODETRACER::start-deepreview", js{
+    mainWindow.webContents.send "CODETRACER::start-deepreview", forLoadTab(js{
       config: data.config,
       layout: reviewLayout,
       startOptions: data.startOptions
-    }
+    })
     # DeepReview is a normal window with a session tab bar, so its "+" opens a
     # welcome tab too (issue #568).
     await pushRecentItems(data.startOptions)
@@ -195,9 +206,26 @@ proc init*(config: Config, layout: js, helpers: Helpers) {.async.} =
       data.pluginClient.trace = trace
       if data.trace.compileCommand.len == 0:
         data.trace.compileCommand = data.config.defaultBuild
-      replayFailure = await startReplayForTrace(trace.recordingId, nodeProcess.pid.to(int))
+      # Started now, announced below: the renderer is not listening yet.
+      replayFailure = await startReplayForTrace(trace.recordingId,
+        nodeProcess.pid.to(int), announce = StartupAnnouncesAtStart)
 
   await started()
+  # THE FIRST TAB LEARNS ITS REPLAY HERE, once the renderer listens. The
+  # replay's `dap-replay-selected` used to go out from `startReplayForTrace`
+  # above, before `started()` — the handshake that waits for the renderer to
+  # answer — and was lost: the window's first tab never learned its replay
+  # id. Harmless only while the main process selected replays by the TAB's id
+  # (tab 0 and replay 0 coincided); its Stop found no replay to stop, closing
+  # it stopped none, and once requests are selected by the replay the tab
+  # names (`GUI/Multi-Window-Tab-Management.md` §Tab Behavior rule 8) its
+  # requests named none. Sent before `init`, as it was before it: the
+  # renderer holds it until its first trace load is ready for it
+  # (`ui_js.onDapReplaySelected`) and gives the tab its replay at once.
+  when not StartupAnnouncesAtStart:
+    if replayFailure.len == 0 and startedReplayId() >= 0 and
+        not data.startOptions.edit and not data.startOptions.welcomeScreen:
+      announceReplaySelected(startedReplayId())
   let configSnapshot = data.config
   let startOptionsSnapshot = data.startOptions
 
@@ -207,14 +235,14 @@ proc init*(config: Config, layout: js, helpers: Helpers) {.async.} =
 
     mainWindow.webContents.send(
       "CODETRACER::init",
-      js{
+      forLoadTab(js{
         home: paths.home.cstring,
         config: configSnapshot,
         layout: layout,
         helpers: helpers,
         startOptions: startOptionsSnapshot,
         bypass: bypass
-    })
+    }))
 
     # echo "Trying to send acp msg"
     #
@@ -265,7 +293,7 @@ proc init*(config: Config, layout: js, helpers: Helpers) {.async.} =
     let editLayout = await mainWindow.loadEditLayoutConfig(
       string(userLayoutDir / "default_edit_layout.json"))
 
-    mainWindow.webContents.send "CODETRACER::no-trace", js{
+    mainWindow.webContents.send "CODETRACER::no-trace", forLoadTab(js{
       path: startOptionsSnapshot.name,
       lang: save.project.lang,
       home: paths.home.cstring,
@@ -277,7 +305,7 @@ proc init*(config: Config, layout: js, helpers: Helpers) {.async.} =
       filesystem: filesystem,
       functions: functions,
       save: save
-    }
+    })
 
     # Load and send launch configs for the workspace
     let launchConfigs = getLaunchConfigsForWorkspace(folder)
@@ -297,7 +325,7 @@ proc init*(config: Config, layout: js, helpers: Helpers) {.async.} =
           configType: config.configType,
           env: envJs
         })
-      mainWindow.webContents.send "CODETRACER::launch-configs-loaded", js{configs: configsJs}
+      mainWindow.webContents.send "CODETRACER::launch-configs-loaded", forLoadTab(js{configs: configsJs})
 
   else:
     let recentTraces = await electron_vars.app.findRecentTracesWithCodetracer(limit=RECENT_ITEMS_LIMIT)

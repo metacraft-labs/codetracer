@@ -183,7 +183,15 @@ suite "GPUI Edit mode: the opened folder's tree":
     let data = createTempDir("files-edit-gpui-data-", "")
     var t = ""
     let leaf = run(@["--edit", "--report-plan", project], data, t)
-    ck not leaf.textOf.contains("a DEBUG-mode pane")
+    # The Files pane itself is live in Edit mode, not the DEBUG-mode
+    # placeholder. Asked of the Files pane alone: since ecc2b02de7 Edit mode
+    # docks the desktop's footer panels too, and GPUI's Find in Files is
+    # still that placeholder there (codetracer-pm issue 2026-10-27).
+    var filesStates: seq[string] = @[]
+    for n in leaf.nodesWith("data-ct-pane"):
+      if n.attr("data-ct-pane") == "fileTree":
+        filesStates.add n.attr("data-ct-state")
+    ck filesStates == @["live"]
     let names = block:
       var s: seq[string] = @[]
       for (_, text) in leaf.treeRows: s.add text

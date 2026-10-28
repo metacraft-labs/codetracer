@@ -111,9 +111,7 @@ import ./window_preflight               # refuse by kind when no window can open
 import ./list_scrubber
 import ../viewmodel/views/debug_control_marks
 import ../viewmodel/viewmodels/history_cursor   # history back / forward: the desktop's cursor rule
-import ../viewmodel/viewmodels/[certificate_indicator_vm,
-                                certificate_indicator_source]
-import ../viewmodel/host/desktop_native   # the certificate indicator's host
+import ./host/certificate_indicator
 import ./design_font_metrics
 import ../tui/host/native_host   # `loadStopPanes`, the terminal's own producer
 import ../tui/host/session_driver   # HSF-S1: what follows a control or a click, shared with the terminal
@@ -1104,6 +1102,9 @@ proc applyTextFaces*(r: GpuiRenderer; node: GpuiElement): int {.discardable.}
 
 proc drawTerminalPane(r: GpuiRenderer)
 proc drawSearchPane(r: GpuiRenderer)
+proc syncTestsTabs()
+  ## Test-Results-Pane.md §9: forward-declared; defined with the tests host.
+
 proc drawTestsPane(r: GpuiRenderer)
   ## PLAT-53: forward-declared; defined beside Find in Files' drawing.
 proc drawAgentPane(r: GpuiRenderer)
@@ -1256,6 +1257,9 @@ var
   gPointerShift = false
     ## PLAT-53: whether Shift was held with the pointer event being handled
     ## (`pointerHandler`), so a press on `⏵` arms it as the desktop's does.
+  gPointerCtrl = false
+    ## Test-Results-Pane.md §9.3: whether the redirect modifier (Ctrl, Cmd on
+    ## macOS) was held with it — a `⏵` press then inverts the destination.
   gTestsRoot = ""
     ## PLAT-53: the window's project (§8.2) — its working directory for a
     ## replay, the project of the Edit window, a folder tab's folder.
@@ -3023,6 +3027,8 @@ proc drawTestsPane(r: GpuiRenderer) =
   let pane = gPanes.getOrDefault($paneTestResults)
   if pane.isNil or gTestsVM.isNil:
     return
+  # §9.4: the `⏵` titles read the current tab's facts, as they are now.
+  syncTestsTabs()
   if drawTestResults(r, pane, gTestsVM, gTests, testsBody()):
     applyTextFaces(r, pane)
 
@@ -3866,6 +3872,8 @@ proc pointerHandler(r0: GpuiRenderer): GpuiEventHandler =
       return
     let (dy, dx) = wheelDeltas(p.dy, p.dx, gmShift in ev.modifiers)
     gPointerShift = gmShift in ev.modifiers
+    gPointerCtrl = gmControl in ev.modifiers or
+                   (defined(macosx) and gmPlatform in ev.modifiers)
     windowPointer(r0, ev.kind, int(p.x), int(p.y), dy, dx)
 
 proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string])
@@ -3978,11 +3986,13 @@ var
   gHoverControl = -1
   gHoverTool = -1
     ## The tool button under the pointer (`GToolButton` ordinal).
-  gCertVm: CertificateIndicatorVm = nil
-    ## The status bar's certificate indicator, over `gCertDir`.
-  gCertDir = ""
+  gCertVm: NativeCertificateIndicator = nil
+    ## The status bar's worker; its displayed answer changes only on poll.
   gHoverTab = -1
   gHoverTabAdd = false
+  gHoverTests: tuple[title: string, at: PxRect]
+    ## Test-Results-Pane.md §9.6: the Test Results control under the pointer
+    ## — its title, the desktop's tooltip words — and where it is drawn.
     ## PLAT-49 part B: the pointer is on the strip's "+".
   gHoverSlot = ""
     ## The auto-hide label under the pointer (its pane id), for the hover
@@ -4269,23 +4279,24 @@ proc footerLocation(): string =
   else: gSession.getCurrentFile() & ":" & $gSession.getCurrentLine() & "#" &
         $gSession.getCurrentRRTicks()
 
+proc armHoverTick()
+
 proc certificateLabel(): string =
   ## The status bar's test-certificate indicator (`certificate_indicator_vm`,
   ## the desktop's `.test-certificate-label`), over the recording's source
-  ## folder, read once per folder through the shipped native reader.
+  ## folder. The native host reads and evaluates on its own worker; drawing
+  ## requests a refresh and keeps the previous complete answer until poll.
   if gSession.isNil:
     return ""
   let dir = gSession.getCurrentFile().parentDir
   if dir.len == 0:
     return ""
-  if gCertVm.isNil or gCertDir != dir:
-    gCertDir = dir
-    gCertVm = newCertificateIndicatorVm(platformCertificateFactsReader(
-      newDesktopNativePlatform(), dir, standardPlatformTriple(hostOS, hostCPU)))
-    try:
-      discard gCertVm.refresh(citStartup)
-    except CatchableError:
-      discard
+  if gCertVm.isNil:
+    gCertVm = newNativeCertificateIndicator()
+  gCertVm.request(dir)
+  discard gCertVm.poll()
+  if gCertVm.pending:
+    armHoverTick()
   gCertVm.model.label
 
 proc copyPathRect(): PxRect =
@@ -4946,11 +4957,31 @@ proc drawTopBar(r: GpuiRenderer) =
     hoverText = NewSessionTabTitle
     hoverAt = PxRect(x: sg.rect.x, y: sg.rect.y + sg.rect.h + 6,
                      w: textPx(hoverText) + 2 * TabPadPx, h: HoverLabelPx)
+  elif gHoverTests.title.len > 0:
+    # Test-Results-Pane.md §9.6: a Test Results control's title — the
+    # desktop's tooltip — beneath the control, wrapped at a tooltip's width
+    # and kept inside the window.
+    hoverText = gHoverTests.title
+    const TooltipChars = 60
+    hoverLines = wrapWords(hoverText, TooltipChars)
+    var widest = 0
+    for l in hoverLines:
+      widest = max(widest, textPx(l))
+    let w = min(pendingViewportWidth, widest + 2 * TabPadPx)
+    let h = max(1, hoverLines.len) * HoverLabelPx
+    let a = gHoverTests.at
+    let below = a.y + a.h + 2
+    hoverAt = PxRect(x: max(0, min(a.x, pendingViewportWidth - w)),
+                     y: (if below + h <= pendingViewportHeight: below
+                         else: max(0, a.y - h - 2)),
+                     w: w, h: h)
   # (An auto-hide label's hover shows its PANE — the preview, PLAT-49 part B
   # — not a hint label: the desktop's strip tab has none.)
   if hoverText.len > 0:
     let hb = absBox(r, hoverAt, chromeOf(crWindowBackground))
     r.setAttribute(hb, "data-ct-hover-label", hoverText)
+    if gHoverTests.title.len > 0 and hoverText == gHoverTests.title:
+      r.setAttribute(hb, "data-ct-tests-hover", "true")
     r.setStyle(hb, "padding-left", $TabPadPx & "px")
     r.setStyle(hb, "white-space", "nowrap")
     for (k, v) in paneOutlineStyle(true): r.setStyle(hb, k, v)
@@ -5377,6 +5408,9 @@ proc closeSessionTab(r: GpuiRenderer; index: int) =
       gAgentHosts.del(key)
     gSessionsOpened[int(id)].close()
     gSessionsOpened.del(int(id))
+  if not gTestsVM.isNil:
+    # Test-Results-Pane.md §9.2: no test has a closed tab.
+    gTestsVM.forgetTestTab(int(id))
   traceGesture("closed tab " & $id)
   showSession(r, gShell.app.activeSessionId())
 
@@ -6680,6 +6714,9 @@ proc vcsTick() {.cdecl.}
 proc recordTick() {.cdecl.}
 proc searchTick() {.cdecl.}
 proc agentTick() {.cdecl.}
+proc certificateTick() {.cdecl.}
+const CertificatePollMs = 25
+  ## A completed certificate read earns a footer redraw on the UI thread.
 const AgentPollMs = 100
   ## PLAT-54: how often a live agent's updates are applied.
 const SearchPollMs = 15
@@ -6705,17 +6742,24 @@ proc armHoverTick() =
   let cellDue = gCellHover.dueMs
   if cellDue >= 0 and (due < 0 or cellDue < due):
     due = cellDue
+  # Pending certificate draws also arm this scheduler. Preserve an activity's
+  # existing interval so frequent paints cannot postpone its next callback
+  # (which now delivers certificate answers alongside that activity's work).
   # PLAT-57: a Find in Files search streaming is pumped on the same tick,
   # every `SearchPollMs`, while it runs.
   if due < 0 and nativeFindInFiles.running:
-    gArmedTick = (due: -4'i64, vcs: false)
-    gpui_set_tick(uint32(SearchPollMs), searchTick)
+    let want = (due: -4'i64, vcs: false)
+    if gArmedTick != want:
+      gArmedTick = want
+      gpui_set_tick(uint32(SearchPollMs), searchTick)
     return
   # PLAT-54: a live agent's updates are applied on the same tick, every
   # `AgentPollMs`, while it works.
   if due < 0 and agentLive():
-    gArmedTick = (due: -5'i64, vcs: false)
-    gpui_set_tick(uint32(AgentPollMs), agentTick)
+    let want = (due: -5'i64, vcs: false)
+    if gArmedTick != want:
+      gArmedTick = want
+      gpui_set_tick(uint32(AgentPollMs), agentTick)
     return
   # PLAT-51: a welcome tab's `ct record` is polled on the same tick, every
   # `RecordPollMs`, while it runs.
@@ -6725,8 +6769,20 @@ proc armHoverTick() =
                   gTestsHost.running or
                   # PLAT-55: a `:build`, polled on the same tick.
                   (not gBuild.isNil and gBuild.session.verdict == bvRunning)):
-    gArmedTick = (due: -3'i64, vcs: false)
-    gpui_set_tick(uint32(RecordPollMs), recordTick)
+    let want = (due: -3'i64, vcs: false)
+    if gArmedTick != want:
+      gArmedTick = want
+      gpui_set_tick(uint32(RecordPollMs), recordTick)
+    return
+  # Certificate reads share the existing activity ticks above. Otherwise
+  # wake for their completion without postponing an imminent hover deadline.
+  # Keep a stable arming while pointer events arrive: repeatedly restarting
+  # this interval could keep a completed result off screen indefinitely.
+  if gCertVm.pending and (due < 0 or due - hoverNowMs() > CertificatePollMs):
+    let want = (due: -6'i64, vcs: false)
+    if gArmedTick != want:
+      gArmedTick = want
+      gpui_set_tick(uint32(CertificatePollMs), certificateTick)
     return
   let want = (due: due, vcs: due < 0 and gVcsDirectory.len > 0)
   if want == gArmedTick:
@@ -6996,6 +7052,18 @@ proc handleTopHover(r: GpuiRenderer; x, y: int) =
   gHoverAt = (x, y)
   # PLAT-70 Part B (§5.3): a truncated table cell's tooltip clock.
   cellHoverAt(r, x, y)
+  # Test-Results-Pane.md §9.6: a Test Results control's title, at once, as
+  # the top bar's controls show theirs.
+  block:
+    let body = testsBody()
+    let over = if gTestsVM.isNil or body.w <= 0:
+                 (title: "", at: PxRect())
+               else: testsControlAt(gTestsVM, gTests, body, x, y)
+    if over.title != gHoverTests.title or over.at != gHoverTests.at:
+      gHoverTests = over
+      if over.title.len > 0:
+        traceGesture("tests hover: " & over.title)
+      drawTopBar(r)
   # The editor's scrollbar shows while the pointer is over the editor
   # (Monaco's fading scrollbars).
   block:
@@ -7103,6 +7171,9 @@ proc installTestsHost(root: string; openFolder: NativeOpenFolder) =
     return
   gTestsRoot = root
   gTestsVM = createTestResultsVM()
+  when defined(macosx):
+    # Test-Results-Pane.md §9.3: the redirect modifier is Cmd there.
+    gTestsVM.redirectKeyName = "Cmd"
   gTestsHost = newNativeTestHost(gTestsVM,
     projectRoot = proc(): string = gTestsRoot,
     ctBinary = proc(): string = nativeCtBinary(),
@@ -7110,12 +7181,74 @@ proc installTestsHost(root: string; openFolder: NativeOpenFolder) =
     openFolder = openFolder)
   discard gTestsHost.refreshCatalog(force = true)
 
+proc syncTestsTabs() =
+  ## Test-Results-Pane.md §9: the window's current session tab, and whether
+  ## a replay may replace it — not while the window is in Edit mode (rule 3).
+  if gTestsVM.isNil or gShell.isNil or not gTestsVM.sessionTabsShown.val:
+    return
+  gTestsVM.setCurrentTab(int(gShell.app.activeSessionId()),
+                         gEditorSurface.productMode != pmEdit)
+
+proc placeGpuiTestRecording(testId, recordingId, folder: string;
+                            policy: TraceOpenPolicy): string =
+  ## §9.5: test `testId`'s recording placed by the shared rule — its own tab
+  ## shown or replaced in place, the current tab replaced, or a new tab.
+  let problem = traceFolderProblem(folder)
+  if problem.len > 0:
+    return "could not open " & folder & ": " & problem
+  syncTestsTabs()
+  var place = gTestsVM.placeTestRecording(testId, recordingId, policy)
+  if place.kind != ttpNewTab and not gSessionsOpened.hasKey(place.tab):
+    gTestsVM.forgetTestTab(place.tab)
+    place = TestTabPlacement(kind: ttpNewTab, tab: -1)
+  let own = gTestsVM.testTabOf(testId) >= 0
+  var rr: GpuiRenderer
+  case place.kind
+  of ttpShowTab:
+    discard gShell.app.activate(HeadlessSessionId(place.tab))
+    showSession(rr, HeadlessSessionId(place.tab))
+    gTestsHost.placedWords = " in its own tab"
+    traceGesture("tests: showed tab " & $place.tab)
+    return ""
+  of ttpReplaceTab, ttpNewTab:
+    let before = gSessionsOpened.len
+    openRecordingInTab(rr, folder)
+    if gSessionsOpened.len <= before:
+      return "could not open " & folder & " in a new tab"
+    if place.kind == ttpReplaceTab:
+      # THE NEW SESSION TAKES THE OLD ONE'S PLACE: the replaced session's
+      # engine stopped (rule 2), the strip position kept (rule 4).
+      let old = HeadlessSessionId(place.tab)
+      let fresh = gShell.app.activeSessionId()
+      var at = -1
+      for i, t in gShell.app.tabsOf():
+        if t.id == old:
+          at = i
+      if gShell.app.closeSession(old, disconnectBackend = false):
+        gSessionsOpened[place.tab].close()
+        gSessionsOpened.del(place.tab)
+        if at >= 0:
+          discard gShell.app.moveSlot(fresh, at)
+      discard gShell.app.activate(fresh)
+      showSession(rr, fresh)
+      gTestsVM.forgetTestTab(place.tab)
+      gTestsHost.placedWords = if own: " in its own tab" else: " in this tab"
+      traceGesture("tests: replaced tab " & $place.tab & " with tab " &
+                   $int(fresh))
+    else:
+      gTestsHost.placedWords = " in a new tab"
+  gTestsVM.noteTestTab(testId, int(gShell.app.activeSessionId()),
+                       recordingId)
+  syncTestsTabs()
+  ""
+
 proc attachTests(leafSet: var GpuiLeafSet) =
   ## Hand the Test Results leaf, when the arrangement places one, the
   ## window's ViewModel — the headless replay session owns none
   ## (`headless_app.paneViewModel`), as it owns no VCS ViewModel.
   if gTestsVM.isNil:
     return
+  syncTestsTabs()
   discard gTestsHost.refreshCatalog()   # a re-rooted window's project
   for leaf in leafSet.leaves.mitems:
     if leaf.kind == glkBuiltin and leaf.builtin == paneTestResults:
@@ -7174,7 +7307,12 @@ proc pressTests(r: GpuiRenderer; x, y: int): bool =
     gTests.selected = hit.row
   of gtRefresh, gtOpen:
     gTests.selected = hit.row
+    # The hover label goes with the press (§9.6).
+    if gHoverTests.title.len > 0:
+      gHoverTests = (title: "", at: PxRect())
+      drawTopBar(r)
     vm.setShiftHeld(gPointerShift)
+    vm.setRedirectHeld(gPointerCtrl)
     let row = vm.rows.val[hit.row]
     if hit.kind == gtRefresh:
       if vm.refreshAbsence().len > 0:
@@ -7189,6 +7327,7 @@ proc pressTests(r: GpuiRenderer; x, y: int): bool =
                      $vm.openButtonMode(row) & ")")
         vm.triggerOpen(row)
     vm.setShiftHeld(false)
+    vm.setRedirectHeld(false)
   of gtTrack, gtThumb:
     gTests.dragging = hit.kind == gtThumb
     if gTests.dragging:
@@ -7484,6 +7623,18 @@ proc problemsKey(r: GpuiRenderer; operation: string): bool =
   drawProblemsPane(r)
   true
 
+proc pollCertificateIndicator(r: GpuiRenderer) =
+  ## Only whole current answers cross the worker's channel. drawTopBar
+  ## replaces the footer's old elements as well as drawing its new label.
+  if not gCertVm.isNil and gCertVm.poll():
+    drawTopBar(r)
+
+proc certificateTick() {.cdecl.} =
+  var r: GpuiRenderer
+  gArmedTick = (due: -2'i64, vcs: false)
+  pollCertificateIndicator(r)
+  armHoverTick()
+
 proc recordTick() {.cdecl.} =
   ## PLAT-51: the welcome tab's recording, polled; when it finishes its
   ## recording opens in the tab that asked (`pollWelcomeRecording`).
@@ -7493,6 +7644,7 @@ proc recordTick() {.cdecl.} =
   discard pollTestRun(r)
   discard pollTestsHost(r)
   discard pollGpuiBuild(r)
+  pollCertificateIndicator(r)
   armHoverTick()
 
 proc agentTick() {.cdecl.} =
@@ -7508,6 +7660,7 @@ proc agentTick() {.cdecl.} =
   if changed:
     drawAgentPane(r)
     drawTopBar(r)
+  pollCertificateIndicator(r)
   armHoverTick()
 
 proc searchTick() {.cdecl.} =
@@ -7521,6 +7674,7 @@ proc searchTick() {.cdecl.} =
   discard nativeFindInFiles.pump()
   if not vm.isNil and (vm.results.val.len, vm.searching.val) != before:
     drawSearchPane(r)
+  pollCertificateIndicator(r)
   armHoverTick()
 
 proc hoverTick() {.cdecl.} =
@@ -7532,6 +7686,7 @@ proc hoverTick() {.cdecl.} =
   gArmedTick = (due: -2'i64, vcs: false)
   applyHoverReply(r, gAutoHide.tick(hoverNowMs()))
   discard tickCellHover(r)
+  pollCertificateIndicator(r)
   armHoverTick()
 
 proc refreshVcsPane() =
@@ -7608,6 +7763,8 @@ proc vcsTick() {.cdecl.} =
   ## The first trigger: every `VCSRefreshIntervalMs` the loop calls this
   ## (`gpui_set_tick`, on the loop's own thread).
   refreshVcsPane()
+  var r: GpuiRenderer
+  pollCertificateIndicator(r)
 
 proc vcsWindowActivated() =
   ## The second trigger: the user came back to the window from another
@@ -10062,7 +10219,10 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       #                               as the window's tick polls it)
       #   tests:row:<name>            press a test's row (selects it)
       #   tests:refresh:<name>        press its `⟳`
-      #   tests:open:<name>[:shift]   press its `⏵` (Shift held)
+      #   tests:open:<name>[:shift][:ctrl]
+      #                               press its `⏵` (Shift, Ctrl held)
+      #   tests:hover:<run|refresh|open>[:<name>]
+      #                               the pointer moved over a control
       #   tests:key:<operation>       a list operation, the pane focused
       #   tests:kill                  SIGKILL the run in flight's group
       #   tests:wheel:<rows>          the wheel over the pane
@@ -10110,9 +10270,32 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
                   of "row": lay.list.x + TestsActionPx
                   of "refresh": a + TestsActionPx div 2
                   else: a + TestsActionPx + TestsActionPx div 2
-          gPointerShift = parts.len > 3 and parts[3] == "shift"
+          gPointerShift = "shift" in parts[3 .. ^1]
+          gPointerCtrl = "ctrl" in parts[3 .. ^1]
           pressAt(x, y)
           gPointerShift = false
+          gPointerCtrl = false
+        of "hover":
+          # §9.6: the pointer moving over a control, through the window's
+          # own motion handler.
+          let lay = testsLayout(gTestsVM, body)
+          var (x, y) = centreOf(lay.run)
+          if parts[2] != "run":
+            if parts.len < 4:
+              return "tests:hover:" & parts[2] & " needs a test"
+            let i = testsRowNamed(parts[3])
+            if i < 0:
+              return "no test " & parts[3]
+            gTests.revealRow(gTestsVM, body, i)
+            drawTestsPane(r)
+            let lay2 = testsLayout(gTestsVM, body)
+            let top = gTests.visibleTop(lay2.lines.len, lay2.rows)
+            y = lay2.list.y + (lay2.lineOfRow(i) - top) * TestsRowPx +
+                TestsRowPx div 2
+            let a = lay2.list.x + lay2.fit.starts[4]
+            x = if parts[2] == "refresh": a + TestsActionPx div 2
+                else: a + TestsActionPx + TestsActionPx div 2
+          handleTopHover(r, x, y)
         of "wheel":
           let (cx, cy) = centreOf(body)
           windowPointer(r, gekWheel, cx, cy, -float(at(2) * TestsRowPx))
@@ -11069,8 +11252,12 @@ proc runEdit(cmd: GpuiCommand): int =
     attachEditFiles(leafSet, cmd.traceFolder)
   # PLAT-53: Test Results over the project. This window has no session tabs,
   # so a test's recording is not opened here: the pane says where it is.
-  installTestsHost(cmd.traceFolder, proc(folder: string): string =
+  installTestsHost(cmd.traceFolder, proc(testId, recordingId, folder: string;
+                                         policy: TraceOpenPolicy): string =
     NoSessionTabsInEditText & folder)
+  # §9: no session tabs in this window.
+  gTestsVM.setSessionTabsShown(false)
+  gTestsVM.setCurrentTab(-1, false)
   attachTests(leafSet)
   # PLAT-55: Problems over this window's builds (`:build` runs in the
   # project).
@@ -11148,6 +11335,10 @@ proc runOpen(cmd: GpuiCommand): int =
   ## Open the recording, build the shell, draw the leaves.
   if cmd.product == pmEdit:
     return runEdit(cmd)
+  defer:
+    if not gCertVm.isNil:
+      gCertVm.close()
+      gCertVm = nil
   let session = openGpuiTrace(cmd.traceFolder)
   # THE ENGINE ENDS WITH THIS RUN, on every path out of it: the plan, the
   # window, each `return 1`, and a stall raised after the open. Without this
@@ -11446,16 +11637,10 @@ proc runOpen(cmd: GpuiCommand): int =
   # working directory.
   attachVcs(leafSet, getCurrentDir())
   # PLAT-53: Test Results over the same directory, the window's project; a
-  # test's recording opens in a NEW SESSION TAB (Test-Results-Pane.md §8.3).
-  installTestsHost(getCurrentDir(), proc(folder: string): string =
-    let problem = traceFolderProblem(folder)
-    if problem.len > 0:
-      return "could not open " & folder & ": " & problem
-    let before = gSessionsOpened.len
-    var rr: GpuiRenderer
-    openRecordingInTab(rr, folder)
-    if gSessionsOpened.len > before: ""
-    else: "could not open " & folder & " in a new tab")
+  # test's recording opens where Test-Results-Pane.md §9 places it.
+  installTestsHost(getCurrentDir(), proc(testId, recordingId, folder: string;
+                                         policy: TraceOpenPolicy): string =
+    placeGpuiTestRecording(testId, recordingId, folder, policy))
   attachTests(leafSet)
   # PLAT-54: the review this window opens on (`--deepreview`) and the agent
   # session `ct review` resolved for it (`--review-session`), before the
@@ -11481,6 +11666,8 @@ proc runOpen(cmd: GpuiCommand): int =
   gSession = session
   applyRememberedColumnWidths()
   gEditorSurface = surface
+  # §9: the tab facts once the surface says which mode the window is in.
+  syncTestsTabs()
   gEditorViewportPx = editorBodyWidthFor(
     shell.windows.windows[shell.windows.indexOf(windowId)].layout,
     shell.viewport, cmd)

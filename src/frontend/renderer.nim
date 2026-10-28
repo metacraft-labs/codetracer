@@ -758,6 +758,8 @@ proc expand*(path: cstring, line: int) {.exportc, used.} =
     }
     bumpSeq(dap)
     packet["sessionId"] = dap.sessionId
+    # The tab's replay, which the main process selects (`dap.stampReplay`).
+    packet.stampReplay(dap)
     ipc.send("CODETRACER::dap-raw-message", packet)
 
 var debugResponse* = DebugOutput(kind: DebugResult, output: cstring"") # per-replay

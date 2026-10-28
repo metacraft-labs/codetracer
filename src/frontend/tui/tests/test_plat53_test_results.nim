@@ -55,7 +55,7 @@ from ../../view_vocabulary/pane_views import testResultsPaneView,
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 103
+const ExpectedAssertions = 138
 
 var countedAssertions = 0
 
@@ -268,7 +268,8 @@ suite "PLAT-53: the terminal's Test Results pane over the real host":
       projectRoot = proc(): string = app.projectRoot,
       ctBinary = proc(): string = ctBin,
       resolveFolder = proc(id: string): string = recordingFolderOf(id),
-      openFolder = proc(folder: string): string =
+      openFolder = proc(testId, recordingId, folder: string;
+                        policy: TraceOpenPolicy): string =
         opened.add folder
         "")
     src.refresh(rt)
@@ -365,7 +366,8 @@ suite "PLAT-53: the terminal's Test Results pane over the real host":
     ck opened.len == 1 and opened[0].contains(recording)
     ck rt.app.tests.rows[1].open.label == "⏵"
     ck rt.app.tests.rows[1].open.mode == "open-existing"
-    ck rt.app.tests.rows[1].open.title.endsWith("Press ⟳ to record it again first.")
+    ck rt.app.tests.rows[1].open.title.endsWith(
+      "Press ⟳ to record it again first. " & OpensInNewTabText)
     # §4.2: a recording is not a verdict — the record run began a run (the
     # last verdicts cleared, as on the desktop) and reported none.
     ck rt.app.tests.headline == "2 tests, not run yet"
@@ -430,7 +432,8 @@ suite "PLAT-53: the terminal's Test Results pane over the real host":
       projectRoot = proc(): string = project,
       ctBinary = proc(): string = "",
       resolveFolder = proc(id: string): string = "",
-      openFolder = proc(folder: string): string = "")
+      openFolder = proc(testId, recordingId, folder: string;
+                        policy: TraceOpenPolicy): string = "")
     bare.refresh(rt)
     ck bare.applyClick(rt, PaneClickRequest(kind: pcTestsRun))
     ck not bare.host.running
@@ -453,7 +456,8 @@ suite "PLAT-53: the terminal's Test Results pane over the real host":
       projectRoot = proc(): string = app.projectRoot,
       ctBinary = proc(): string = ctBin,
       resolveFolder = proc(id: string): string = "",
-      openFolder = proc(folder: string): string = "")
+      openFolder = proc(testId, recordingId, folder: string;
+                        policy: TraceOpenPolicy): string = "")
     src.refresh(rt)
     ck rt.app.tests.headline == "no tests found"
     ck not rt.app.tests.run.enabled
@@ -469,6 +473,165 @@ suite "PLAT-53: the terminal's Test Results pane over the real host":
     ck rt.app.tests.run.enabled
     src.close()
     removeDir(plain)
+    removeDir(project)
+
+suite "Test-Results-Pane.md §9: the destination, the hover, a maximized pane":
+
+  test "Ctrl inverts the destination; Enter and the palette use the setting":
+    # No `ct` is run: a recording is remembered on a row, so `⏵` opens it
+    # (open-existing) and the opener — the capturing seam — records the
+    # destination each press asked for.
+    let state = createTempDir("ct-plat53-state-", "")
+    let lanesState = getEnv("CODETRACER_TUI_LAYOUT_DIR")
+    putEnv("CODETRACER_TUI_LAYOUT_DIR", state)
+    let project = writePlat53Project()
+    let app = newTuiApp()
+    app.projectRoot = project
+    let rt = newTuiRuntime(app, caps(), Cols, Rows)
+    discard rt.enableLayoutBinding()
+    var asked: seq[TraceOpenPolicy] = @[]
+    let src = newTestsSource(
+      projectRoot = proc(): string = app.projectRoot,
+      ctBinary = proc(): string = ctBin,
+      resolveFolder = proc(id: string): string = "/recordings/" & id,
+      openFolder = proc(testId, recordingId, folder: string;
+                        policy: TraceOpenPolicy): string =
+        asked.add policy
+        "")
+    src.refresh(rt)
+    # A replay tab is current, so "this tab" is a destination at all.
+    ck src.setTabs(1, replaceable = true, shown = true)
+    rt.showTestsTab()
+    src.vm.rememberRecording(rt.app.tests.rows[1].testId, "rec-1", "t")
+    src.publish(rt)
+    ck rt.app.tests.rows[1].open.title.endsWith(
+      "Opens in a new tab; Ctrl+click opens it in this tab.")
+    let (area, s) = rt.testsPaneScreen()
+    let row = s.listTop + s.listRowOf(1)
+    let col = area.col + s.fit.starts[4] + 2
+    # Plain: the setting (a new tab). Ctrl (SGR bit 16): inverted.
+    let plain = rt.press(row, col)
+    ck plain.paneClick.kind == pcTestsOpen and plain.paneClick.behaviour == ""
+    ck src.applyClick(rt, plain.paneClick)
+    let ctrl = rt.press(row, col, button = 16)
+    ck ctrl.paneClick.kind == pcTestsOpen and
+       ctrl.paneClick.behaviour == TestsRedirectBehaviour
+    ck src.applyClick(rt, ctrl.paneClick)
+    ck asked == @[topNewTab, topCurrentTab]
+    ck not src.vm.redirectHeld.val   # held for that one press only
+    # THE PALETTE'S COMMAND writes the workspace's setting …
+    var outcome = RuntimeOutcome()
+    rt.runMenuAction(replayOpenCommandTarget(topCurrentTab), outcome)
+    ck outcome.paneClick.kind == pcTestsOpenIn
+    ck src.applyClick(rt, outcome.paneClick)
+    ck rt.app.notification == replayOpenSetNote(project, topCurrentTab)
+    ck replayOpenFor(readFile(state / ReplayOpenFileName), project) ==
+       topCurrentTab
+    ck rt.app.tests.rows[1].open.title.endsWith(
+      "Opens in this tab, ending its session; Ctrl+click opens a new tab.")
+    # … which Enter on the selected row then uses, and Ctrl inverts back.
+    discard rt.press(row, area.col + 4)
+    let enter = rt.handleToken("\r", 0)
+    ck src.applyClick(rt, enter.paneClick)
+    let back = rt.press(row, col, button = 16)
+    ck src.applyClick(rt, back.paneClick)
+    ck asked == @[topNewTab, topCurrentTab, topCurrentTab, topNewTab]
+    # A NEW HOST over the same workspace reads it back (the document).
+    let again = newTestsSource(
+      projectRoot = proc(): string = project,
+      ctBinary = proc(): string = ctBin,
+      resolveFolder = proc(id: string): string = "",
+      openFolder = proc(testId, recordingId, folder: string;
+                        policy: TraceOpenPolicy): string = "")
+    again.refresh(rt)
+    ck again.vm.openSetting.val == topCurrentTab
+    again.close()
+    src.close()
+    if lanesState.len > 0: putEnv("CODETRACER_TUI_LAYOUT_DIR", lanesState)
+    else: delEnv("CODETRACER_TUI_LAYOUT_DIR")
+    removeDir(state)
+    removeDir(project)
+
+  test "hovering a control puts its title on the status line; leaving restores":
+    let project = writePlat53Project()
+    let app = newTuiApp()
+    app.projectRoot = project
+    let rt = newTuiRuntime(app, caps(), Cols, Rows)
+    discard rt.enableLayoutBinding()
+    let src = newTestsSource(
+      projectRoot = proc(): string = app.projectRoot,
+      ctBinary = proc(): string = ctBin,
+      resolveFolder = proc(id: string): string = "",
+      openFolder = proc(testId, recordingId, folder: string;
+                        policy: TraceOpenPolicy): string = "")
+    src.refresh(rt)
+    rt.showTestsTab()
+    rt.app.notification = "what the line said"
+    let (area, s) = rt.testsPaneScreen()
+    let row = s.listTop + s.listRowOf(1)
+    let openCol = area.col + s.fit.starts[4] + 2
+    proc statusLine(): string = rt.shellScreenOf().rows[^1]
+    # `?1003` motion with no button (SGR 35) over the failing test's `⏵`.
+    let moved = rt.handleToken(sgr(35, row, openCol, true), 0)
+    ck moved.repaint
+    let title = rt.app.tests.rows[1].open.title
+    ck rt.app.testsHover == title
+    ck statusLine().contains(title[0 ..< 30])
+    # Over `⟳`, then the ▶: their titles.
+    discard rt.handleToken(sgr(35, row, openCol - 2, true), 0)
+    ck rt.app.testsHover == rt.app.tests.rows[1].refresh.title
+    discard rt.handleToken(sgr(35, area.row, s.runCol, true), 0)
+    ck rt.app.testsHover == rt.app.tests.run.title
+    ck statusLine().contains(rt.app.tests.run.title[0 ..< 20])
+    # Off every control: the line says what it said before.
+    discard rt.handleToken(sgr(35, row, area.col + 4, true), 0)
+    ck rt.app.testsHover == ""
+    ck statusLine().contains("what the line said")
+    ck rt.app.notification == "what the line said"
+    src.close()
+    removeDir(project)
+
+  test "a maximized Test Results answers its presses where it is drawn":
+    let project = writePlat53Project()
+    let app = newTuiApp()
+    app.projectRoot = project
+    let rt = newTuiRuntime(app, caps(), Cols, 50)
+    discard rt.enableLayoutBinding()
+    rt.refreshMenuForKeymap()
+    let src = newTestsSource(
+      projectRoot = proc(): string = app.projectRoot,
+      ctBinary = proc(): string = ctBin,
+      resolveFolder = proc(id: string): string = "",
+      openFolder = proc(testId, recordingId, folder: string;
+                        policy: TraceOpenPolicy): string = "")
+    src.refresh(rt)
+    rt.showTestsTab()
+    # The tab's menu → "Maximise container", as a user chooses it.
+    let (tr, tc) = rt.findOnScreen("Tests")
+    discard rt.press(tr, tc + 1, button = 2)
+    ck rt.app.contextMenu.open
+    let labels = rt.app.contextMenu.menu.labels
+    let at = labels.find("Maximise container")
+    ck at >= 0
+    let menuArea = rt.shellScreenOf().contextMenuArea
+    discard rt.press(menuArea.row + 1 + at, menuArea.col + 3)
+    ck rt.maximize.active and rt.maximize.pane == paneTestResults
+    # The pane is drawn over the whole body now; its ▶ is at the right edge.
+    let (area, s) = rt.testsPaneScreen()
+    ck area.width > Cols div 2
+    ck s.runCol > Cols div 2
+    ck cellSlice(rt.screenRows()[area.row], s.runCol, s.runCol + 1) == RunLabel
+    let run = rt.press(area.row, s.runCol)
+    ck run.paneClick.kind == pcTestsRun
+    # A row press selects that row — in the maximized pane.
+    discard rt.press(s.listTop + s.listRowOf(1), area.col + 4)
+    ck rt.app.tests.selected == 1
+    # And its `⏵` is a press on that test.
+    let open = rt.press(s.listTop + s.listRowOf(1),
+                        area.col + s.fit.starts[4] + 2)
+    ck open.paneClick.kind == pcTestsOpen and
+       open.paneClick.text == rt.app.tests.rows[1].testId
+    src.close()
     removeDir(project)
 
   test "the assertion count":

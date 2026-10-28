@@ -402,6 +402,10 @@ type
     hoveredTooltip*: string
       ## PLAT-49: the hovered control's tooltip, from
       ## `debug_controls_vm.transportTooltip`.
+    testsHover*: string
+      ## Test-Results-Pane.md §9.6: the title of the Test Results control the
+      ## pointer is over (the desktop's tooltip words), shown on the status
+      ## line while it is there; "" otherwise.
     caretDrawn*: bool
       ## PLAT-49: the terminal is not known to honour caret shapes
       ## (DECSCUSR), so the omnibar's caret is drawn into its cell.

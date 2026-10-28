@@ -51,6 +51,7 @@ import ./chord_display
 from ./shortcut_dialog import ReferenceLine
 from ./status import onNotification
 import ./monaco_operations
+import ./native_key_operations
 import ./editor_scope
 import ./video_player   # `videoPlayerHasFocus`, `currentVideoPlayerVM`
 import ./menu_keys
@@ -73,10 +74,6 @@ type
 
 const
   KeybindingsMessage = cstring"CODETRACER::keybindings"
-  NativeTables = [InputTable, PaletteTable, ContextMenuTable, FindTable]
-    ## Tables whose base rows the DOM element under the focus performs itself
-    ## (a field's caret keys, the palette's list, Monaco's find widget): the
-    ## router decides the key is theirs, and the key goes on to them.
 
 
 
@@ -543,16 +540,13 @@ proc runDesktopOperation(res: EditingResolution): NativeKind =
   if hostOperations.hasKey(res.operation):
     hostOperations[res.operation]()
     return nkHandled
-  let table = if res.layer.find(':') >= 0: res.layer[res.layer.find(':') + 1 .. ^1]
-              else: ""
-  let fromUser = res.layer.startsWith("user")
   # The right-click menu's operations are performed here rather than left
   # to the menu: it is a plain `<div>` that never takes the focus, so no
   # element under the focus would move its highlight, choose or close it.
   if contextMenuIsOpen() and contextMenuOperation(res.operation):
     return nkHandled
   # The DOM element's own operations stay its own.
-  if not fromUser and table in NativeTables:
+  if res.isNativeBaseOperation:
     return nkLeaveToElement
   if res.operation in HostIntents:
     if not data.functions.update.isNil: data.functions.update(data, false)
@@ -805,6 +799,14 @@ proc shortcutReferenceHere*(): tuple[lines: seq[ReferenceLine], scope: string] =
                                    shadowedBy: e.shadowedBy)
   result.scope = $path
 
+proc testChordForAction(actionName: cstring): cstring =
+  ## Read-only browser-test seam: ask the live router, including the user's
+  ## rows and current scope, independently of any menu or tooltip's text.
+  try:
+    chordForAction(parseEnum[ClientAction]($actionName))
+  except ValueError:
+    cstring""
+
 # PLAT-70 Part B: the copy hint under a table row names the chord that
 # copies it where the focus is (KL-8).
 copyChordOf = proc(): string =
@@ -867,6 +869,8 @@ proc installKeyRouter*() =
     return
   installed = true
   {.emit: ["window.__ctKeymapProbe = ", probeKeys, ";"].}
+  {.emit: ["window.__CODETRACER_TEST__ = window.__CODETRACER_TEST__ || {};",
+           "window.__CODETRACER_TEST__.chordForAction = ", testChordForAction, ";"].}
   {.emit: ["window.addEventListener('keydown', ", onKeyDown, ", true);",
            "window.addEventListener('keyup', ", onKeyUp, ", true);",
            "window.addEventListener('mousedown', ", onPointerDown, ", true);",

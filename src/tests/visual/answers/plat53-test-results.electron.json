@@ -28,7 +28,7 @@
     },
     "open": {
      "label": "⏺⏵",
-     "title": "Record test_passes and open the recording (this test has no recording yet).",
+     "title": "Record test_passes and open the recording (this test has no recording yet). Opens in a new tab.",
      "mode": "record-and-open",
      "disabled": false
     },
@@ -50,7 +50,7 @@
     },
     "open": {
      "label": "⏺⏵",
-     "title": "Record test_fails and open the recording (this test has no recording yet).",
+     "title": "Record test_fails and open the recording (this test has no recording yet). Opens in a new tab.",
      "mode": "record-and-open",
      "disabled": false
     },
@@ -64,7 +64,7 @@
  },
  "rowContextMenu": [],
  "after": {
-  "headline": "1 passed, 1 failed · 2.2s",
+  "headline": "1 passed, 1 failed · 728ms",
   "run": {
    "label": "▶",
    "title": "Run the tests (nargo test)",
@@ -78,7 +78,7 @@
     "markColor": "rgb(187, 247, 208)",
     "name": "test_passes",
     "where": "src/main.nr:5",
-    "duration": "357ms",
+    "duration": "284ms",
     "refresh": {
      "label": "⟳",
      "title": "Record test_passes (this test ran, but no recording was kept). Stays in this pane.",
@@ -86,7 +86,7 @@
     },
     "open": {
      "label": "⏺⏵",
-     "title": "Record test_passes and open the recording (this test ran, but no recording was kept).",
+     "title": "Record test_passes and open the recording (this test ran, but no recording was kept). Opens in a new tab.",
      "mode": "record-and-open",
      "disabled": false
     },
@@ -100,7 +100,7 @@
     "markColor": "rgb(252, 165, 165)",
     "name": "test_fails",
     "where": "src/main.nr:10",
-    "duration": "1.5s",
+    "duration": "338ms",
     "refresh": {
      "label": "⟳",
      "title": "Record test_fails (this test ran, but no recording was kept). Stays in this pane.",
@@ -108,7 +108,7 @@
     },
     "open": {
      "label": "⏺⏵",
-     "title": "Record test_fails and open the recording (this test ran, but no recording was kept).",
+     "title": "Record test_fails and open the recording (this test ran, but no recording was kept). Opens in a new tab.",
      "mode": "record-and-open",
      "disabled": false
     },

@@ -1913,6 +1913,33 @@ method clear*(self: FlowComponent) =
   if not self.flow.isNil:
     self.resetFlow()
 
+var lastFlowWidgetScope = 0
+  ## The last `FlowComponent.widgetScope` handed out (`widgetIdScope`).
+
+proc widgetIdScope*(self: FlowComponent): string =
+  ## The prefix of every Monaco content-widget id this component registers:
+  ## the editor's id AND a number no other component has had.
+  ##
+  ## The editor's id alone is not enough. Monaco keys its content widgets by
+  ## `getId()` (`ContentWidgets.addWidget` / `removeWidget`,
+  ## https://github.com/microsoft/vscode/blob/main/src/vs/editor/browser/viewParts/contentWidgets/contentWidgets.ts),
+  ## and an editor's flow window is replaced by a NEW component
+  ## (`EditorViewComponent.loadFlow`) while the old one's widgets are still
+  ## up — they are taken down only once the new window has rendered
+  ## (`handoffFlow`). With ids built from the editor's id and the line, both
+  ## windows registered `ct-flow-<editor>-99` for `def main():`: the new
+  ## registration replaced the old entry with the old DOM node still
+  ## attached, and the hand-off's `removeContentWidget(old)` then removed the
+  ## NEW entry by that id. The old window's chips were left in the editor,
+  ## no longer positioned by it — the module's globals painted beside
+  ## `main`'s values, on whichever row they had last been placed
+  ## (codetracer-pm issue
+  ## `2026-10-23-gpui-omits-an-inline-value-chip-the-desktop-renders-in-the-editor.md`).
+  if self.widgetScope == 0:
+    inc lastFlowWidgetScope
+    self.widgetScope = lastFlowWidgetScope
+  &"{self.id}-{self.widgetScope}"
+
 proc addContentWidget*(
   self: FlowComponent,
   dom: Node,
@@ -1921,6 +1948,8 @@ proc addContentWidget*(
   id: cstring,
   isStatusWidget: bool = false
 ): JsObject =
+  ## Register `dom` as a Monaco content widget at `line`. `id` must be unique
+  ## among the editor's live widgets: build it on `widgetIdScope`.
   dom.class = "flow-content-widget"
   var editor = self.editorUI.monacoEditor
 
@@ -1976,7 +2005,7 @@ proc makeLegend(self: FlowComponent, step: FlowLayoutStep): Node =
 proc makeFlowLineContainer*(self: FlowComponent, step: FlowLayoutStep) =
   # create content widget for
   var dom = web(renderFlowLineHost[WR, WE](flowRenderer))
-  let id = cstring(&"ct-flow-{self.id}-{step.line}")
+  let id = cstring(&"ct-flow-{self.widgetIdScope}-{step.line}")
 
   self.flowDom[step.line] = dom
 

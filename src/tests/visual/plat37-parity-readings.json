@@ -1225,5 +1225,10 @@
    "The two durable fixes (`nix/shells/main.nix`, `fixture_provider.nim`) — each exercised with live positive AND negative arms; see instrumentControls."
   ],
   "handlingOfConflicts": "The one genuine reader conflict this pass recorded under `uncertain` was handled correctly — recorded, not resolved by preference — and review settled it by measurement into PARITY-S13. No other conflict was found silently collapsed."
- }
+ },
+  "captureStabilityQualification": {
+    "independentCaptureCount": null,
+    "status": "unvalidated-historical-reading",
+    "reason": "Independent capture count and pairwise within-renderer FLIP stability were not recorded. Regrading preserved frames is not another capture. eventLog figures and aggregates containing them cannot establish a validated parity baseline or delta."
+  }
 }

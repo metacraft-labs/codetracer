@@ -42,14 +42,17 @@
 import std/[asyncjs, jsffi, strutils]
 
 import lib/src_relative_require
+import ../lib/jslib
 import ../[types, lang]
 import ../index/config
 import ../index/electron_vars
 import ../index/startup
 import ../index/traces
+import ../index/[ipc_utils, server_config, load_admission, tab_answers]
 
 var checks = 0
 var failedChecks = 0
+var startupPaused: proc()
 
 proc ck(cond: bool; name: string) =
   inc checks
@@ -89,6 +92,8 @@ proc rendererWindow(sent: Sent): JsObject =
   webContents["send"] = proc(channel: cstring; payload: JsObject) =
     sent.messages.add(($channel, payload))
     if $channel == "CODETRACER::started":
+      if not startupPaused.isNil:
+        startupPaused()
       setTimeoutZero(proc() = discard onStarted(nil, nil))
   result = newJsObject()
   result["webContents"] = webContents
@@ -106,7 +111,7 @@ proc childNames(node: JsObject): seq[string] =
   for i in 0 ..< children[cstring"length"].to(int):
     result.add $children[i][cstring"text"].to(cstring)
 
-const ExpectedChecks = 8
+const ExpectedChecks = 15
 
 proc editLaunch(dir: cstring) {.async.} =
   # 1. `ct edit <folder>`.
@@ -124,10 +129,35 @@ proc editLaunch(dir: cstring) {.async.} =
   data.startOptions.folder = folder
   data.startOptions.name = cstring""
   data.startOptions.isInstalled = false
+  startupPaused = proc() =
+    # The REAL registered load-recent-trace callback, while REAL init is
+    # suspended at its renderer handshake. Admission must refuse before the
+    # actual handler can touch metadata, trace or replay state.
+    var registered: JsObject = nil
+    for entry in ipc.registry.handlers:
+      if entry.event == cstring"CODETRACER::load-recent-trace":
+        registered = entry.handler
+    doAssert not registered.isNil, "configureIpcMain must register the production load handler"
+    let call = jsAsFunction[proc(request: JsObject)](registered)
+    call(js{tab: 22, traceId: cstring"not-a-recording"})
+    let refusal = sent.payloadOf("CODETRACER::trace-load-error")
+    ck not refusal.isNil, "startup refuses the production second load"
+    ck not refusal.isNil and refusal["tab"].to(int) == 22,
+      "startup refusal answers the second load's asking tab"
+    ck not refusal.isNil and not refusal["preserveLoading"].to(bool),
+      "startup refusal lets the other tab leave its loading overlay"
+    ck forLoadTab(js{})["tab"].to(int) == 0,
+      "the refused request leaves startup addressed to its first tab"
   await init(Config(), js{}, JsAssoc[cstring, Helper]{})
+  startupPaused = nil
+  let released = beginLoad(js{tab: 23})
+  ck released, "real startup releases admission after initialization"
+  if released: finishLoad()
 
   let noTrace = sent.payloadOf("CODETRACER::no-trace")
   ck not noTrace.isNil, "init took the edit branch and sent no-trace"
+  ck not noTrace.isNil and noTrace["tab"].to(int) == 0,
+    "startup's delayed no-trace message still names its first tab"
   ck not data.workspaceFolder.isNil and $data.workspaceFolder == $folder,
     "the process state holds the opened folder (got '" &
       (if data.workspaceFolder.isNil: "nil" else: $data.workspaceFolder) & "')"
@@ -161,6 +191,8 @@ proc importedTraceLoad(dir: cstring) {.async.} =
 
   let traceLoaded = sent.payloadOf("CODETRACER::trace-loaded")
   ck not traceLoaded.isNil, "loadTrace sent trace-loaded"
+  ck not traceLoaded.isNil and traceLoaded["tab"].to(int) == 0,
+    "loadTrace's delayed message retains its admitted startup tab"
   let sentSaveId =
     if traceLoaded.isNil: -2 else: traceLoaded[cstring"save"][cstring"id"].to(int)
   ck sentSaveId == -1 and data.save.id == sentSaveId,
@@ -189,6 +221,10 @@ proc importedTraceLoad(dir: cstring) {.async.} =
 proc main() {.async.} =
   let dir = makeTempDir()
   try:
+    configureIpcMain()
+    # The same initial owner startup establishes, before the direct loadTrace
+    # arm below (which deliberately calls the pipeline without an IPC handler).
+    startLoadFor(js{tab: 0})
     await importedTraceLoad(dir)
     await editLaunch(dir)
   except:

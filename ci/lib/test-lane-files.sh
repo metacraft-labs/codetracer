@@ -1072,6 +1072,12 @@ test_lane_files() {
 		# session, a hidden tab's move updates its own store only, each tab has
 		# its own Test Results ViewModel, and closing a tab disposes its own.
 		echo src/frontend/tests/session_viewmodels_test.nim
+		# `tab_session_ids_test.nim` holds a window tab's session id to never being
+		# one another tab of the window has held: open 0 and 1, close 1, "+" (and
+		# 0, 1, 2, close 1, "+") give the new tab a fresh id, an event in flight
+		# for the closed tab reaches no tab, and every request a tab sends names
+		# the replay the Backend Manager answered for it beside the tab's id.
+		echo src/frontend/tests/tab_session_ids_test.nim
 		# `low_level_code_markup_dom_test.nim`: a source line in the Low Level
 		# Code pane is text in a real DOM, whatever markup it contains (HSF-D3).
 		echo src/frontend/tests/low_level_code_markup_dom_test.nim
@@ -1178,6 +1184,12 @@ test_lane_files() {
 		# `git` and `sh` on PATH; writes only under one `mkdtemp` directory,
 		# which it points `XDG_CONFIG_HOME` at and then removes.
 		echo src/frontend/tests/dap_session_routing_test.nim
+		# `dap_replay_selection_test.nim` drives the same router with tabs whose
+		# id is not their replay's (Stop and a new run, a refused start, crossed
+		# ids) and asserts each request runs on its tab's own replay, each event
+		# reaches the tab owning the replay that sent it, and a tab with no
+		# replay is not run on another tab's.
+		echo src/frontend/tests/dap_replay_selection_test.nim
 		echo src/frontend/tests/index_server_binds_loopback_test.nim
 		echo src/frontend/tests/facade_endpoint_verbs_test.nim
 		#
@@ -1217,6 +1229,7 @@ test_lane_files() {
 		# with real async handlers that reject, throw, or settle and then fail,
 		# on the JS backend where a rejection arrives as a foreign exception.
 		echo src/frontend/tests/settle_once_test.nim
+		echo src/frontend/tests/concurrent_trace_loads_test.nim
 		#
 		# `index_serves_deployment_cache_classes_test.nim` asks the running
 		# server for two files and compares the `Cache-Control` it sends with

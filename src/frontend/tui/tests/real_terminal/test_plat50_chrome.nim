@@ -37,9 +37,7 @@ import ../../../styles/generated/design_tokens
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 61
-  ## +1 — the open menu's first item is read from the dropdown's second, and
-  ## checked to be "File".
+const ExpectedAssertions = 60
   ## PLAT-51: +1 — the light omnibox is the editor's ground, and not white.
 
 var countedAssertions = 0
@@ -188,12 +186,11 @@ suite "PLAT-50 on a real terminal: the top bar":
     var sess = open()
     discard sess.waitFor("Navigate to file")
     sess.press(0, 1)
-    # Row 1 already spells "Files" (the Files stack's strip): wait for the
-    # dropdown's second item, which nothing else spells, and read the first
-    # item's cell from it (the items are left-aligned, one per row).
-    let (re, ce) = sess.waitFor(" Edit ")
-    let (rf, cf) = (re - 1, ce + 1)
-    ck sess.snap().text(rf).runeSubStr(cf).startsWith("File")
+    # The item is found WITH the frame's left edge before it: a bare "File"
+    # also matches the Files pane's tab, which is on screen before the menu
+    # opens, and then the frame's cells are read off the tab's row.
+    let (rb, cb) = sess.waitFor("│ File")
+    let (rf, cf) = (rb, cb + 2)
     let s = sess.snap()
     # The frame: `┌` one row above the first item, in ui/border/primary.
     ck s[rf - 1][cf - 2].glyph == "┌"

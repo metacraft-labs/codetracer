@@ -10851,6 +10851,23 @@ suite "IsoNim Welcome Screen — structure":
 
       dispose()
 
+  test "welcome load refusal renders an alert during loading and clears on retry":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      let r = MockRenderer()
+      let panel = renderWelcomeScreenPanel[MockRenderer, MockNode](r, vm)
+      vm.beginLoadingTrace("first")
+      vm.setLoadError("Another trace or session is loading. Wait and retry.")
+      let alert = findByClass(panel, WelcomeLoadErrorClass)
+      check alert.attributes["role"] == "alert"
+      check alert.textContent == "Another trace or session is loading. Wait and retry."
+      check findByClassOrNil(panel, WelcomeLoadingOverlayClass) != nil
+      vm.beginLoadingTrace("retry")
+      check findByClassOrNil(panel, WelcomeLoadErrorClass) == nil
+      check findByClassOrNil(panel, WelcomeLoadingOverlayClass) != nil
+      dispose()
+
   test "loading flag appends the loading modifier and overlay":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()

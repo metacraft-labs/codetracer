@@ -575,6 +575,7 @@ suite "content ids (Content-Id.md)":
     check parseContentId("manifest-v1-sha256:" & EmptyManifestDigest).form ==
       cifWellFormed
     for malformed in [
+        "Git-Tree-SHA1:" & full,                  # uppercase algorithm
         "git-tree-sha1:" & full.toUpperAscii(),     # uppercase hex
         "git-tree-sha1:4B825dc642cb6eb9a060e54bf8d69288fbee4904",
         "git-tree-sha1:4b825dc",                    # abbreviated
@@ -593,7 +594,7 @@ suite "content ids (Content-Id.md)":
       check parsed.text == malformed
     check parseContentId("git-tree-sha1:abc:" & full).algorithmName == "git-tree-sha1"
     # Unknown algorithms are well-formed: their digest length is unknowable.
-    for unknown in ["git-tree-blake3:" & full, "Git-Tree-SHA1:" & full,
+    for unknown in ["git-tree-blake3:" & full,
                     "future:ab"]:
       let parsed = parseContentId(unknown)
       check parsed.form == cifUnknownAlgorithm
@@ -601,6 +602,24 @@ suite "content ids (Content-Id.md)":
     # ...but an unknown algorithm with a bad digest is still malformed.
     check parseContentId("future:AB").form == cifMalformed
     check parseContentId("future:").form == cifMalformed
+
+  test "algorithm identifiers are portable before lookup":
+    for name in ["../x", "a/b", "a\\b", ".x", "x.", "CON", "con", "prn", "aux",
+                 "nul", "com1", "com9", "lpt1", "lpt9", "nul.x", "a_b", "Upper",
+                 "é", repeat('x', 65)]:
+      let text = name & ":aa"
+      checkpoint text
+      let parsed = parseContentId(text)
+      check parsed.form == cifMalformed
+      check parsed.text == text
+      check parsed.problem.len > 0
+    for name in ["future-v2", "-", "0", "com0", "lpt0", "con-v2", repeat('x', 64)]:
+      let text = name & ":a"
+      let parsed = parseContentId(text)
+      check parsed.form == cifUnknownAlgorithm
+      check parsed.text == text
+      check parsed.algorithmName == name
+      check parsed.digest == "a"
 
   test "a state that cannot be computed is a failure, never an id":
     let notARepo = createTempDir("ct-content-id-plain-", "", suiteDir)

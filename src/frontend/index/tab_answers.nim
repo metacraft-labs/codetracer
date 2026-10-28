@@ -19,9 +19,11 @@
 ##   `prepareForLoadingTrace` / `loadExistingRecord` / `loadTrace`. The main
 ##   process runs one load at a time over ONE `data.trace` (and one
 ##   `prefetchedTrace`, one `selectedReplayId`), so the tab of the load in
-##   progress is one value too: each entrypoint that starts a load records
-##   its request's `tab` here, and every message of that load carries it
-##   (`forLoadTab`).
+##   progress is one value too. `load_admission` enforces that invariant for
+##   the ENTIRE asynchronous IPC operation (and startup): a second load is
+##   refused in its asking tab before changing shared state. Each entrypoint
+##   records its request's `tab` here, and every message of that load carries
+##   it (`forLoadTab`). Nested steps retain their admitted operation's tab.
 ##
 ## Messages that are about the window rather than a reply to one tab's
 ## request carry no `tab` and stay window-scoped; `ui_js.configureIPC` lists
@@ -49,8 +51,9 @@ proc answerFor*(request: JsObject; payload: JsObject): JsObject =
 
 var loadTab*: JsObject = jsUndefined
   ## The tab of the trace load in progress (see the module doc). `undefined`
-  ## for a load no tab asked for — the startup load, a load a new tab is
-  ## being created for — whose messages then go to the tab on screen.
+  ## for a legacy sender that names none, whose messages then go to the tab
+  ## on screen. Startup names the renderer's first session (0); a new tab
+  ## requests its own load after the renderer has created its identity.
 
 proc startLoadFor*(request: JsObject) =
   ## A load-starting entrypoint records the tab its `request` came from.

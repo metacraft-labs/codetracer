@@ -44,7 +44,11 @@ import ../../../viewmodel/viewmodels/transport_icons
 # case checks every row the docked-open pane changed, and a docked band is
 # taller than the overlay the click used to open. PLAT-50: -1 — with no
 # divider row between stacked panes the docked band changes one row fewer.)
-const ExpectedAssertions = 117
+const ExpectedAssertions = 87
+  ## 2026-10-27: 117 -> 87, measured. The footer case checks the docked band
+  ## for fill glyphs in ONE assertion now, so the count no longer moves with
+  ## the band's height (it had moved with it four times, below), and it
+  ## compares screens once they have settled, which changes fewer rows.
   ## PLAT-70 Part A: 116 -> 117, measured. `calc`'s widest line overflows the
   ## editor, so its horizontal bar is drawn in the editor's last row; the
   ## docked band moves that row up, one more changed row for the sweep.
@@ -143,6 +147,24 @@ proc snap(sess: var TuiTestSession; cols, rows: int): Snapshot =
     for c in 0 ..< cols:
       row.add sess.cellAt(r, c)
     result.add row
+
+proc settled(sess: var TuiTestSession; cols, rows: int;
+             timeoutMs = 15000): Snapshot =
+  ## The screen once it has stopped changing for longer than a scrollbar's
+  ## hold (`scrollbar_interaction.FadeAfterMs`, 1200 ms) plus its fade: a
+  ## bar shown by a change fades out on its own, so a snapshot taken before
+  ## that is a transient frame, not the arrangement.
+  const QuietMs = 2500
+  let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
+  result = sess.snap(cols, rows)
+  var since = getMonoTime()
+  while getMonoTime() < deadline and
+        getMonoTime() - since < initDuration(milliseconds = QuietMs):
+    sleep(250)
+    let next = sess.snap(cols, rows)
+    if next != result:
+      result = next
+      since = getMonoTime()
 
 proc text(s: Snapshot; r: int): string =
   for c in s[r]:
@@ -403,7 +425,10 @@ suite "PLAT-48 on a real terminal: auto-hide panels":
     const Cols = 200
     const Rows = 50
     var sess = open(Cols, Rows, stateDir("reveal"))
-    let s0 = sess.snap(Cols, Rows)
+    # Compared cell for cell with the screen after the second click, so both
+    # are taken once the screen has settled: the first frames still show the
+    # panes' scrollbars, which fade out a moment later.
+    let s0 = sess.settled(Cols, Rows)
     let strip = s0.text(Rows - 1)
     for t in ["BUILD", "PROBLEMS", "FIND IN FILES", "REQUESTS"]:
       ck strip.contains(" " & t & " ")
@@ -413,16 +438,6 @@ suite "PLAT-48 on a real terminal: auto-hide panels":
     while getMonoTime() < deadline and s1.text(Rows - 2) == s0.text(Rows - 2):
       sleep(100)
       s1 = sess.snap(Cols, Rows)
-    # The docked band is repainted over several writes: read on until two
-    # snapshots in a row agree, so every row it changes is counted.
-    var settled = false
-    while getMonoTime() < deadline and not settled:
-      sleep(250)
-      let again = sess.snap(Cols, Rows)
-      settled = true
-      for r in 0 ..< Rows:
-        if again.text(r) != s1.text(r): settled = false
-      s1 = again
     # The docked band: the rows that changed at the bottom of the body.
     var changed: seq[int] = @[]
     for r in 1 ..< Rows - 1:
@@ -435,29 +450,30 @@ suite "PLAT-48 on a real terminal: auto-hide panels":
       if s1.text(r).startsWith(" BUILD "): band = r
     ck band > 0
     ck s1.text(band + 1).contains("[idle]")
+    # One check over the band, so the assertion count does not depend on
+    # how many rows the band happens to take.
+    var filled: seq[int] = @[]
     for r in changed:
-      ck not s1.text(r).contains("▒")
+      if s1.text(r).contains("▒"): filled.add r
+    ck filled.len == 0
     # Contiguous to the status row: docked against the bottom edge.
     ck changed[^1] == Rows - 2
     ck not sess.rowOf(Cols, Rows - 1).contains("revealing")
     sess.click(Rows - 1, strip.cellFind(" BUILD ") + 1)
-    # Every cell of the body back as it was. The terminal repaints the rows
-    # over several writes, so wait for the WHOLE body (not only the row
-    # above the status row) before reading it as final.
-    proc restored(a, b: Snapshot): bool =
-      for r in 0 ..< Rows - 1:
-        for c in 0 ..< Cols:
-          if a[r][c].rune != b[r][c].rune or
-             colorKey(a[r][c].fg) != colorKey(b[r][c].fg) or
-             colorKey(a[r][c].bg) != colorKey(b[r][c].bg):
-            return false
-      true
-    let deadline2 = getMonoTime() + initDuration(seconds = 20)
+    let deadline2 = getMonoTime() + initDuration(seconds = 10)
     var s2 = sess.snap(Cols, Rows)
-    while getMonoTime() < deadline2 and not restored(s2, s0):
+    while getMonoTime() < deadline2 and s2.text(Rows - 2) != s0.text(Rows - 2):
       sleep(100)
       s2 = sess.snap(Cols, Rows)
-    ck restored(s2, s0)
+    s2 = sess.settled(Cols, Rows)
+    var same = true
+    for r in 0 ..< Rows - 1:
+      for c in 0 ..< Cols:
+        if s2[r][c].rune != s0[r][c].rune or
+           colorKey(s2[r][c].fg) != colorKey(s0[r][c].fg) or
+           colorKey(s2[r][c].bg) != colorKey(s0[r][c].bg):
+          same = false
+    ck same
     sess.quit()
 
   test "a left-docked pane's label reads down, one character per row":
@@ -467,17 +483,10 @@ suite "PLAT-48 on a real terminal: auto-hide panels":
     sess.typeLine("focus left")
     sess.typeLine("dock left")
     discard sess.waitRow(Cols, Rows - 1, "applied")
-    # The status note can arrive before the docked label is repainted: read
-    # the left column until it settles on the label (bounded).
-    proc leftColumn(sess: var TuiTestSession): string =
-      let s = sess.snap(Cols, Rows)
-      for r in 1 ..< Rows - 2:
-        result.add s[r][0].rune
-    let deadline = getMonoTime() + initDuration(seconds = 20)
-    var column = sess.leftColumn()
-    while getMonoTime() < deadline and not column.startsWith("Files"):
-      sleep(100)
-      column = sess.leftColumn()
+    let s = sess.snap(Cols, Rows)
+    var column = ""
+    for r in 1 ..< Rows - 2:
+      column.add s[r][0].rune
     # `:focus left` from the editor is the Files stack.
     ck column.startsWith("Files")
     sess.quit()

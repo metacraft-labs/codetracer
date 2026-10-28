@@ -292,28 +292,15 @@ suite "PLAT-68 GPUI: the focused strip's selected tab is told apart":
     ck focusedStrips == 1
 
 suite "PLAT-68 GPUI: the program menu from the keyboard (CUA-Keymap.md §3.8)":
-
-  # CUA-Keymap.md §3.8 binds `Alt` alone and `Alt+<mnemonic>` on Linux and
-  # Windows only: "On macOS, as in VS Code, there is neither — Option+<letter>
-  # types a character — and the menu is the system's." So on macOS the two
-  # gestures are asserted to reach NO `menu.*` operation, which keeps the
-  # platform rule a checked statement rather than a skipped case.
-  when defined(macosx):
-    test "on macOS Alt pressed and released alone reaches no menu operation":
-      var t: string
-      let plan = windowPlan("modifiers:alt,modifiers:", trace = t)
-      ck t.lines("operation ") == newSeq[string]()
-      ck plan.values("data-ct-menu-item").len == 0
-
-    test "on macOS Alt+D opens no folder (Option+D is a character)":
-      var t: string
-      let plan = windowPlan("modifiers:alt,key:d:alt,modifiers:", trace = t)
-      var menuOps = 0
-      for line in t.lines("operation "):
-        if line.startsWith("operation menu."): inc menuOps
-      ck menuOps == 0
-      ck plan.values("data-ct-menu-item").len == 0
-  else:
+  # §3.8 binds the Alt tap (`menu.toggle`) and the `Alt+<mnemonic>` rows
+  # (`menu.open-folder(...)`) on Linux and Windows only: "On macOS, as in VS
+  # Code, there is neither — Option+<letter> types a character — and the
+  # menu is the system's" (`cua_keymap.nim` declares both with
+  # `platforms: {pkLinux, pkWindows}`). So each platform asserts its own
+  # rule — macOS the ABSENCE of a menu operation, not a skip — and the two
+  # arms make the same number of checks, so `ExpectedAssertions` holds on
+  # both. `Alt+`` (`menu.open`, every platform) is asserted below for all.
+  when not defined(macosx):
     test "Alt pressed and released alone opens the menu, its mnemonics underlined":
       var t: string
       let plan = windowPlan("modifiers:alt,modifiers:", trace = t)
@@ -329,14 +316,29 @@ suite "PLAT-68 GPUI: the program menu from the keyboard (CUA-Keymap.md §3.8)":
         if span{"styles"}{"text_decoration"}.getStr == "underline":
           inc underlined
       ck underlined == 7
-
-    test "a second Alt tap closes it":
+  else:
+    test "on macOS an Alt tap reaches no menu operation; Alt+` still opens it":
       var t: string
-      let plan = windowPlan("modifiers:alt,modifiers:,modifiers:alt,modifiers:",
-                            trace = t)
-      ck t.lines("alt tapped").len == 2
+      let plan = windowPlan("modifiers:alt,modifiers:", trace = t)
+      # The window saw the tap, and no row turned it into an operation.
+      ck t.lines("alt tapped").len == 1
+      ck t.lines("operation menu.").len == 0
       ck plan.values("data-ct-menu-item").len == 0
+      # The tap toggled nothing behind the scenes: `Alt+`` after it OPENS
+      # the menu (were the tap a hidden `menu.toggle`, it would close it).
+      var t2: string
+      let opened = windowPlan("modifiers:alt,modifiers:,key:`:alt", trace = t2)
+      ck t2.lines("operation ") == @["operation menu.open"]
+      ck opened.values("data-ct-menu-item").len > 0
 
+  test "after a second Alt tap the menu is closed (on macOS neither tap opens it)":
+    var t: string
+    let plan = windowPlan("modifiers:alt,modifiers:,modifiers:alt,modifiers:",
+                          trace = t)
+    ck t.lines("alt tapped").len == 2
+    ck plan.values("data-ct-menu-item").len == 0
+
+  when not defined(macosx):
     test "Alt+D opens Debug; the release that follows is not a tap":
       var t: string
       let plan = windowPlan("modifiers:alt,key:d:alt,modifiers:", trace = t)
@@ -347,6 +349,17 @@ suite "PLAT-68 GPUI: the program menu from the keyboard (CUA-Keymap.md §3.8)":
         if n.attr("data-ct-menu-active") == "true":
           active.add n.attr("data-ct-menu-item")
       ck "Debug" in active
+  else:
+    test "on macOS Option+D is no mnemonic: no menu folder opens":
+      var t: string
+      let plan = windowPlan("modifiers:alt,key:d:alt,modifiers:", trace = t)
+      ck t.lines("alt tapped").len == 0
+      ck t.lines("operation menu.").len == 0
+      var active: seq[string] = @[]
+      for n in plan.nodesWith("data-ct-menu-active"):
+        if n.attr("data-ct-menu-active") == "true":
+          active.add n.attr("data-ct-menu-item")
+      ck active.len == 0
 
   test "Alt+` opens it too — the chord a terminal can send":
     var t: string
@@ -356,8 +369,4 @@ suite "PLAT-68 GPUI: the program menu from the keyboard (CUA-Keymap.md §3.8)":
 
 suite "PLAT-68 GPUI: assertion count":
   test "the declared count was reached":
-    # macOS runs the two §3.8 macOS cases (4 checks) in place of the Linux /
-    # Windows Alt-tap, second-tap and Alt+D cases (5 + 2 + 3 checks).
-    const Expected = when defined(macosx): ExpectedAssertions - 10 + 4
-                     else: ExpectedAssertions
-    check countedAssertions == Expected
+    check countedAssertions == ExpectedAssertions

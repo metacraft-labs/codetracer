@@ -939,6 +939,12 @@ lint_step "PLAT-37 Electron lane: per-scenario outcomes name each failure's phas
 lint_step "Mutation harnesses refuse an unknown flag or arm id before touching a file" \
 	bash ci/test/harness-argument-refusal.sh
 
+# This job already provisions codetracer-pm for its spec-reading gates. The
+# assertion baseline requires that checkout too: an absent canonical lint must
+# fail the drift comparison, so this cannot run in the sibling-free bash job.
+lint_step "contract suite: no Rust test lacks an assertion (enumerated baseline)" \
+	bash ci/test/test-assertion-baseline.sh
+
 # Each harness refuses to grade while a recorded control digest disagrees with
 # the tree, and nothing told the change that MOVED the digest: 6 harnesses had
 # stale entries on 2026-09-20, 30 of the 49 control files on 2026-10-21, and

@@ -33,6 +33,9 @@
 ##     box, codetracer-pm issue 2026-10-21, "Pressing Enter in the desktop
 ##     Call Trace search box sends no search") and in a field inside the
 ##     read-only editor (the find widget).
+##   * Vim and Kakoune leave Ctrl+C and Escape to fields too: the input
+##     table shields them from the global quit and navigation-mode rows,
+##     using the desktop's own native-operation dispatch predicate.
 ##
 ## The DOM half (reading those facts off `document.activeElement`) is
 ## `ui/key_router.desktopScopePath`, graded end to end by
@@ -50,6 +53,7 @@ import ../../keymap/keymap_router
 import ../../keymap/scope_path
 import ../../keymap/context_keys
 import ../../keymap/editing_keymap
+import ../../../ui/native_key_operations
 
 const
   Desktop = KeyDelivery(frontEnd: feDesktop, platform: pkLinux,
@@ -88,12 +92,9 @@ proc op(res: EditingResolution): string =
   of erNothing: "nothing"
 
 proc leftToElement(res: EditingResolution): bool =
-  ## Whether the desktop leaves this resolution to the focused DOM element:
-  ## unresolved, a character, or a base row of the input table (the first
-  ## rule of `key_router.runDesktopOperation`, whose `NativeTables` holds
-  ## `InputTable`).
+  ## The production desktop dispatch decision, not a second table in a test.
   res.kind in {erNothing, erCharacter} or
-    (res.kind == erOperation and res.layer == "base:" & InputTable)
+    res.isNativeBaseOperation
 
 suite "which focused element is a native text field":
   test "a textarea and the text-entry input types are; other controls are not":
@@ -234,6 +235,59 @@ suite "a field's keys under every base":
     CallTraceField = withNativeTextField(@[Window, pane("calltrace")],
                                          field("INPUT", "text"))
     FindWidgetField = withNativeTextField(EditorChain, field("TEXTAREA"))
+
+  test "modal fields copy and cancel instead of quitting or changing navigation mode":
+    # Exercise the shipped router with the desktop producer's paths, including
+    # the stamped Agent Activity prompt. No fabricated keymap rows.
+    for base in [bkVim, bkKakoune]:
+      for path in [CallTraceField, FindWidgetField, PromptPath]:
+        var r = initKeymapRouter(base, Desktop)
+        for (key, operation) in [("Ctrl+c", "input.copy"),
+                                  ("Esc", "input.cancel")]:
+          let res = r.route(debugFacts(), path, nmNormal, key, 1_000)
+          checkpoint($base & " / " & path.focused.id & " / " & key &
+                     " -> " & res.op & " @ " & res.layer)
+          check res.op == operation
+          check res.layer == "base:input"
+          check res.leftToElement
+
+  test "modal navigation outside fields still quits and returns to normal":
+    for base in [bkVim, bkKakoune]:
+      var r = initKeymapRouter(base, Desktop)
+      let path = @[Window, pane("calltrace")]
+      check r.route(debugFacts(), path, nmNormal, "Ctrl+c", 1_000).op == "app.quit"
+      check r.route(debugFacts(), path, nmNormal, "Esc", 1_000).op ==
+        "modal.return-to-normal"
+
+  test "terminal command and search prompts cancel through the input table":
+    let terminal = KeyDelivery(frontEnd: feTerminal, platform: pkLinux,
+                                keyProtocol: kpKitty)
+    for base in [bkVim, bkKakoune]:
+      for mode in [nmCommand, nmSearch]:
+        let prompt = if mode == nmCommand:
+          @[Window, element(ekOverlay, "command-line"), element(ekInput, "prompt")]
+        else:
+          EditorChain & @[element(ekOverlay, "find"), element(ekInput, "find-query")]
+        var r = initKeymapRouter(base, terminal)
+        check r.route(debugFacts(), prompt, mode, "Esc", 1_000).op ==
+          "input.cancel"
+        check r.route(debugFacts(), prompt, mode, "Enter", 1_000).op ==
+          "input.commit"
+
+  test "a user's field bindings still take precedence over the modal base":
+    let user = parseUserKeymap("""[
+      {"key":"ctrl+c","command":"palette.open-commands","when":"textInputFocus"},
+      {"key":"escape","command":"palette.open-commands","when":"textInputFocus"}
+    ]""")
+    check user.errors.len == 0
+    for base in [bkVim, bkKakoune]:
+      var r = initKeymapRouter(base, Desktop, user = user)
+      check r.errors.len == 0
+      for key in ["Ctrl+c", "Esc"]:
+        let res = r.route(debugFacts(), CallTraceField, nmNormal, key, 1_000)
+        check res.op == "palette.open-commands"
+        check res.layer == "user:global"
+        check not res.leftToElement
 
   test "Enter commits, Backspace deletes and a letter types, in every base":
     # The modal bases' `Enter` / `Backspace` in a field are
