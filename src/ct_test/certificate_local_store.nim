@@ -25,17 +25,11 @@
 ##   document, so the signature block is never hashed. The standard's
 ##   ``store/`` vectors pin this derivation; ``certificate_vectors_test.nim``
 ##   walks them through ``localStoreRelativePathOf`` below.
-## * **Write (§2.3).** Directories are created owner-only. The record is
-##   written under a temporary name in the SAME directory — beginning with
-##   ``.`` and not ending in ``.toml``, so no reader ever lists it — flushed to
-##   disk, and renamed onto its final name, so a reader sees the whole file or
-##   none of it, and two writers either write different names or the same
-##   bytes under one name. When the final name exists: a SIGNED record always
-##   replaces it (its signature was just made, while the existing copy may be
-##   unsigned or carry a signature that fails); an UNSIGNED record keeps it,
-##   because the existing file is either the same claim or the same claim
-##   signed, and replacing a signed copy with an unsigned one would discard the
-##   signature.
+## * **Writing (§2.3).** Owner-only directories hold atomic, flushed record
+##   renames. Every writer holds the root's persistent `.write-lock` through
+##   inspecting and publishing. Unsigned copies keep an existing record;
+##   relayed signed copies replace only a well-formed unsigned twin. Only a
+##   caller that made the new signature can replace an existing signed copy.
 ## * **Prune (§2.5).** On publish only: whole content directories, keeping the
 ##   ``keep`` most recently written (by the directory's modification time,
 ##   which a rename into it updates) plus the directory of the current
@@ -146,8 +140,8 @@ type
       ## The record is at ``path`` — written now, or kept because an
       ## identical claim was already there.
     kept*: bool
-      ## An unsigned record found its final name taken and left the existing
-      ## file in place (§2.3). ``written`` is ``true`` too.
+      ## An unsigned copy or signed relay kept the existing record (§2.3).
+      ## ``written`` is ``true`` too.
     retried*: bool
       ## The first attempt failed because a concurrent prune removed the
       ## content directory, and the write was retried once (§2.5).
@@ -285,14 +279,59 @@ proc directoryIdentity(dir: string): string =
   except OSError:
     ""
 
+# Writers in every implementation share this persistent root lock (Transport
+# §2.3). Never unlink it: another process may already hold its inode open.
+when defined(windows):
+  proc storeCreateFile(path: WideCString; access, share: uint32; security: pointer;
+                       disposition, flags: uint32; templateFile: pointer): pointer
+    {.stdcall, dynlib: "kernel32", importc: "CreateFileW".}
+  proc storeCloseHandle(handle: pointer): int32
+    {.stdcall, dynlib: "kernel32", importc: "CloseHandle".}
+  proc storeLastError(): uint32
+    {.stdcall, dynlib: "kernel32", importc: "GetLastError".}
+  type StoreWriteLock = pointer
+else:
+  import std/posix except Time
+  var storeNoFollow {.importc: "O_NOFOLLOW", header: "<fcntl.h>".}: cint
+  proc storeFlock(fd, operation: cint): cint
+    {.importc: "flock", header: "<sys/file.h>".}
+  type StoreWriteLock = cint
+
+proc acquireStoreWriteLock(root: string): StoreWriteLock =
+  let path = root / ".write-lock"
+  when defined(windows):
+    while true:
+      result = storeCreateFile(newWideCString(path), 0xC0000000'u32, 0,
+        nil, 4, 0x80, nil)
+      if result != cast[pointer](-1): return
+      let error = storeLastError()
+      if error != 32: raiseOSError(OSErrorCode(error), path)
+      sleep(10)
+  else:
+    result = posix.open(path.cstring, O_RDWR or O_CREAT or storeNoFollow or
+      O_CLOEXEC, Mode(0o600))
+    if result < 0: raiseOSError(osLastError(), path)
+    while storeFlock(result, 2) != 0: # LOCK_EX
+      if errno == EINTR: continue
+      let error = osLastError()
+      discard posix.close(result)
+      raiseOSError(error, path)
+
+proc releaseStoreWriteLock(lock: StoreWriteLock) =
+  when defined(windows):
+    discard storeCloseHandle(lock)
+  else:
+    discard posix.close(lock)
+
 proc publishRecord*(root, relative, document: string; signed: bool;
-                    beforeRename: PublishStepHook = nil):
+                    beforeRename: PublishStepHook = nil; signatureMade = false):
     tuple[kept, retried: bool; error: string] =
   ## Steps 1-3 of §2.3, with the one retry §2.5 allows when a concurrent
   ## prune removed the directory between creating it and renaming into it.
   ## The bare write: no root resolution, no working-tree guard, no prune —
   ## ``publishToLocalStore`` is the entry point; this is exported so the
   ## retry can be raced in a tight loop by the suite.
+  ## ``signatureMade`` is true only for the immediate signing producer.
   ##
   ## One retry is enough because a prune removes a directory by renaming it
   ## aside first (``pruneLocalStore``): a failure here means that rename has
@@ -303,6 +342,13 @@ proc publishRecord*(root, relative, document: string; signed: bool;
   let final = root / toNative(relative)
   let dir = final.parentDir
   let contentDir = relative[0 ..< relative.rfind('/')]
+  var writeLock: StoreWriteLock
+  try:
+    createOwnerOnlyDirs(root, "")
+    writeLock = acquireStoreWriteLock(root)
+  except CatchableError as err:
+    return (false, false, err.msg)
+  defer: releaseStoreWriteLock(writeLock)
   for attempt in 0 .. 1:
     # A prune that chose this directory a moment before the temporary file
     # appeared can still remove it: it renames the directory aside, taking
@@ -315,7 +361,22 @@ proc publishRecord*(root, relative, document: string; signed: bool;
     try:
       createOwnerOnlyDirs(root, contentDir)
       identity = directoryIdentity(dir)
-      if not signed and fileExists(final):
+      if symlinkExists(final) or dirExists(final):
+        raise newException(IOError, "existing certificate is not a regular file")
+      var keepExisting = false
+      if fileExists(final):
+        if not signatureMade:
+          let existing = readCertificate(readFile(final))
+          if existing.status != crsOk:
+            raise newException(IOError, "existing certificate is malformed: " &
+              existing.detail)
+          let existingPath = localStoreRelativePath(existing.cert)
+          if existingPath.error.len > 0 or existingPath.path != relative:
+            raise newException(IOError, "existing certificate does not match its store name")
+          keepExisting = not signed or existing.cert.isSigned
+        elif not signed:
+          keepExisting = true
+      if keepExisting:
         touchDirectory(dir)
         return (true, attempt > 0, "")
       let temporary = dir / temporaryName(final.extractFilename)
@@ -529,15 +590,15 @@ proc headContentDir(workspaceRoot, algorithm: string): string =
 
 proc publishToLocalStore*(roots: CertificateStoreRoots; workspaceRoot: string;
                           document: string;
-                          keep = DefaultRetention): PublishOutcome =
+                          keep = DefaultRetention; signatureMade = false): PublishOutcome =
   ## Publish one issued certificate to the user root of ``roots`` and prune
   ## that root (Transport.md §2.3, §2.5).
   ##
   ## ``workspaceRoot`` is the repository the tests ran in: the root must not
   ## lie inside it, and its ``HEAD^{tree}`` directory survives the prune.
-  ## Whether the record is signed — which decides between replacing and
-  ## keeping an existing file of the same name — is read from the document
-  ## itself, not taken from the caller.
+  ## Signedness is read from the document. This defaults to a relay, which
+  ## upgrades only an unsigned twin. ``signatureMade`` may be true only when
+  ## this caller made the incoming signature.
   if not roots.available or roots.user.len == 0:
     result.error = "the local certificate store's user root could not be " &
       "resolved" &
@@ -559,7 +620,8 @@ proc publishToLocalStore*(roots: CertificateStoreRoots; workspaceRoot: string;
         "point TEST_CERTIFICATES_DIR outside the repository"
       return
 
-  let published = publishRecord(roots.user, relative.path, document, signed)
+  let published = publishRecord(roots.user, relative.path, document, signed,
+    signatureMade = signatureMade)
   if published.error.len > 0:
     result.retried = published.retried
     result.error = published.error
