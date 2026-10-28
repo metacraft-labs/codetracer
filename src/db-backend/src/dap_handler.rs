@@ -8783,6 +8783,126 @@ mod tests {
         Ok(())
     }
 
+    /// With host reads on, a client may name a host file by ANY spelling that
+    /// resolves to it (CodeTracer-MCP-Server.md §2.5): reverse
+    /// canonicalization (stage 5) compares the canonical spellings of BOTH
+    /// the recorded path and the requested one. Here the recorded path is a
+    /// file symlink `link.py -> realdir/module.py` and the client asks for
+    /// `aliasdir/module.py` through a directory symlink `aliasdir -> realdir`,
+    /// so neither side is canonical and only resolving both makes them meet.
+    ///
+    /// The fixture root is canonicalized first, so the only non-canonical
+    /// components are the ones this test plants: the property fails on every
+    /// host, not only where the temp dir itself sits behind a symlink (macOS
+    /// `/var -> /private/var`). The filenames differ (`link.py` vs
+    /// `module.py`), so the filename-only stage cannot match trivially. With
+    /// host reads off nothing is resolved, so the same request yields nothing.
+    #[test]
+    #[cfg(unix)]
+    fn path_matching_canonicalizes_a_non_canonical_requested_path_under_host_reads() -> Result<(), Box<dyn Error>> {
+        let root = std::fs::canonicalize(env::temp_dir())?.join(format!(
+            "hsr-noncanonical-request-{}-path_matching_canonicalizes",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("realdir"))?;
+        let real = root.join("realdir").join("module.py");
+        std::fs::write(&real, "x = 1\n")?;
+        std::os::unix::fs::symlink(root.join("realdir"), root.join("aliasdir"))?;
+        let link = root.join("link.py");
+        std::os::unix::fs::symlink(&real, &link)?;
+
+        let trace = vec![
+            TraceLowLevelEvent::Path(link.clone()),
+            TraceLowLevelEvent::Function(FunctionRecord {
+                path_id: PathId(0),
+                line: Line(1),
+                name: "<top-level>".to_string(),
+            }),
+            TraceLowLevelEvent::Call(CallRecord {
+                function_id: FunctionId(0),
+                args: vec![],
+            }),
+            TraceLowLevelEvent::Step(StepRecord {
+                path_id: PathId(0),
+                line: Line(1),
+            }),
+        ];
+        let mut db = Db::new(&root.join("workdir"));
+        TraceProcessor::new(&mut db).postprocess(&trace)?;
+        let reader = InMemoryTraceReader::new(db);
+        let requested = root.join("aliasdir").join("module.py").to_string_lossy().to_string();
+        let allowed = reader.fuzzy_path_ids_for_under(&requested, crate::source_access::HostSourceReads::Allowed);
+        let refused = reader.fuzzy_path_ids_for_under(&requested, crate::source_access::HostSourceReads::Refused);
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(
+            allowed,
+            vec![PathId(0)],
+            "with host reads a non-canonical spelling of the recorded symlink's target is matched"
+        );
+        assert!(
+            refused.is_empty(),
+            "without host reads a host symlink was resolved to match a path"
+        );
+        Ok(())
+    }
+
+    /// The requested side of the same rule: with host reads off, the path a
+    /// client asks for is never resolved on this host either (stage 4,
+    /// canonicalizing the request, is a host stat — Threat-Model C-MCP-12).
+    /// The recorded path is canonical and the client asks through a file
+    /// symlink `alias.py -> realdir/module.py`, so only resolving the request
+    /// matches it; the filenames differ, so the filename-only stage cannot.
+    /// The control is the host-reads-on half.
+    #[test]
+    #[cfg(unix)]
+    fn path_matching_does_not_resolve_the_requested_path_without_host_reads() -> Result<(), Box<dyn Error>> {
+        let root = std::fs::canonicalize(env::temp_dir())?.join(format!(
+            "hsr-request-not-resolved-{}-path_matching_does_not_resolve_the_requested",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("realdir"))?;
+        let real = root.join("realdir").join("module.py");
+        std::fs::write(&real, "x = 1\n")?;
+        let alias = root.join("alias.py");
+        std::os::unix::fs::symlink(&real, &alias)?;
+
+        let trace = vec![
+            TraceLowLevelEvent::Path(real.clone()),
+            TraceLowLevelEvent::Function(FunctionRecord {
+                path_id: PathId(0),
+                line: Line(1),
+                name: "<top-level>".to_string(),
+            }),
+            TraceLowLevelEvent::Call(CallRecord {
+                function_id: FunctionId(0),
+                args: vec![],
+            }),
+            TraceLowLevelEvent::Step(StepRecord {
+                path_id: PathId(0),
+                line: Line(1),
+            }),
+        ];
+        let mut db = Db::new(&root.join("workdir"));
+        TraceProcessor::new(&mut db).postprocess(&trace)?;
+        let reader = InMemoryTraceReader::new(db);
+        let requested = alias.to_string_lossy().to_string();
+        let allowed = reader.fuzzy_path_ids_for_under(&requested, crate::source_access::HostSourceReads::Allowed);
+        let refused = reader.fuzzy_path_ids_for_under(&requested, crate::source_access::HostSourceReads::Refused);
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(
+            allowed,
+            vec![PathId(0)],
+            "the control: with host reads a symlinked request resolves to the recorded path"
+        );
+        assert!(
+            refused.is_empty(),
+            "without host reads the requested path was resolved on the host to match"
+        );
+        Ok(())
+    }
+
     /// A continuation token is client data: its `filesystem` digests name
     /// paths the client chose. In a session with host reads off, checking
     /// one never reads the named host file, so the answer reveals neither
