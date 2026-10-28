@@ -18,39 +18,50 @@
 #
 # ## What runs where
 #
-# OUTSIDE (the default): build the three inputs with the host's nix —
-# `packages.codetracer-host-image`, isonim-platform's `sessionctl` at the
-# revision pinned below, and the VM driver — then boot the VM with this
-# checkout shared at `/repo` and re-enter this script there with `--inside-vm`.
-# The host's store is the VM's store, so the store paths built here are valid
-# arguments inside.
+# OUTSIDE (the default): build the two inputs this repository owns with the
+# host's nix — `packages.codetracer-host-image` and the VM driver — take the
+# session substrate's CLI from the caller (see "the resolver" below), then boot
+# the VM with this checkout shared at `/repo` and re-enter this script there
+# with `--inside-vm`. The host's store is the VM's store, so the store paths
+# built here are valid arguments inside.
 #
 # INSIDE (`--inside-vm`, root on the VM's Incus host): the substrate is
 # provisioned by its own `sessionctl image build`, then the operator's two
 # steps, unchanged — the publication into the substrate's project, which
 # finishes only when `sessionctl image-resolve` names the image, and the gate.
 #
+# ## THE RESOLVER IS SUPPLIED, NEVER FETCHED
+#
+# `ci/publish-host-image.sh` confirms its import with `sessionctl
+# image-resolve`, so this gate needs that CLI. It does **not** build it: this
+# repository is public, and a public tree must not name, pin or fetch a
+# non-public sibling — nor can it, for the audience a public tree has, since
+# the fetch would need credentials an outside contributor or a fork does not
+# have. So the binary is an INPUT. Give it as a path, or as a flake reference
+# through the environment, which is where a deployment that has one keeps it
+# (in CI, a masked secret rather than a tracked file). With neither, the gate
+# refuses and says so; it never guesses a source.
+#
 # Usage:  bash ci/test/host-image-serves-in-incus-vm.sh
 #           [--oci-archive PATH]   use this codetracer-host-image, do not build
 #           [--sessionctl PATH]    use this sessionctl binary, do not build
 #           [--keep-work]          keep the work directory (VM state, out-links)
-# Needs:  Linux, `nix`, and a readable/writable `/dev/kvm` (CI: a runner
-#         labelled `kvm`). isonim-platform is private: the nix fetcher needs a
-#         GitHub token for it unless `--sessionctl` is given.
+# Env:    CT_SESSIONCTL           same as `--sessionctl`
+#         CT_SESSIONCTL_FLAKE     a flake reference whose `#sessionctl` output
+#                                 is built when no path was given. Pin a
+#                                 revision in the value, not a branch, so this
+#                                 gate's verdict changes only when codetracer
+#                                 changes.
+# Needs:  Linux, `nix`, a readable/writable `/dev/kvm` (CI: a runner labelled
+#         `kvm`), and a `sessionctl` from one of the two inputs above.
 set -euo pipefail
-
-# THE SUBSTRATE'S RESOLVER, pinned. `ci/publish-host-image.sh` confirms its
-# import with `sessionctl image-resolve`, which isonim-platform added in
-# 19a954d (SS-M5) and ships as `packages.sessionctl`. A revision rather than a
-# branch so that this gate's verdict changes only when codetracer changes; move
-# it deliberately, to a revision that carries `image-resolve`.
-isonim_platform_rev="8b323534459d3ad67eb84a2bfebb9a2b36705f5a"
 
 # `-` and no `:` — see the alias rules in `ci/publish-host-image.sh`.
 alias_name="codetracer-host-ci"
 
 oci_archive=""
-sessionctl_bin=""
+sessionctl_bin="${CT_SESSIONCTL:-}"
+sessionctl_flake="${CT_SESSIONCTL_FLAKE:-}"
 keep_work=0
 inside_vm=0
 while [ $# -gt 0 ]; do
@@ -126,6 +137,18 @@ if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
 	echo "  remedy: run on a KVM-capable host (CI: [self-hosted, linux, x64, kvm])" >&2
 	exit 1
 fi
+# BEFORE THE IMAGE BUILD, which is the expensive step (median ~9 minutes warm,
+# tens of minutes on a cold store). A missing resolver is a configuration fact
+# knowable in no time at all, and discovering it after the build wastes the
+# whole job.
+if [ -z "${sessionctl_bin}" ] && [ -z "${sessionctl_flake}" ]; then
+	echo "host-image-serves-in-incus-vm: no sessionctl was supplied" >&2
+	echo "  remedy: pass --sessionctl PATH, or set CT_SESSIONCTL to a built" >&2
+	echo "          binary, or set CT_SESSIONCTL_FLAKE to a flake reference" >&2
+	echo "          whose '#sessionctl' output this may build. In CI that" >&2
+	echo "          value is a masked secret, not a tracked file." >&2
+	exit 2
+fi
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/ct-incus-vm-XXXXXX")"
 cleanup() {
@@ -147,9 +170,12 @@ if [ -z "${oci_archive}" ]; then
 		'.?submodules=1#codetracer-host-image')"
 fi
 if [ -z "${sessionctl_bin}" ]; then
-	echo "==> building sessionctl (isonim-platform ${isonim_platform_rev})"
+	# A path was not given, so the reference is the source. That it is
+	# non-empty was settled before the image build above; this cannot be
+	# reached with both unset.
+	echo "==> building sessionctl from the configured reference"
 	sessionctl_bin="$(nix build --out-link "${work}/sessionctl" --print-out-paths \
-		"github:metacraft-labs/isonim-platform/${isonim_platform_rev}#sessionctl")/bin/sessionctl"
+		"${sessionctl_flake}#sessionctl")/bin/sessionctl"
 fi
 echo "==> building the Incus VM"
 vm_driver="$(nix build --out-link "${work}/incus-vm" --print-out-paths \

@@ -2319,9 +2319,9 @@
             # An OCI runtime starts `Entrypoint` and hands the container a
             # configured network. An Incus container boots `/sbin/init` and
             # gets an interface with NO address — a managed bridge hands those
-            # out over DHCP to a client INSIDE the container (D-S12, and
-            # `isonim-platform/session/src/image.nim` carries the same pair for
-            # the same reason). `ci/publish-host-image.sh` writes the init; it
+            # out over DHCP to a client INSIDE the container (the session
+            # substrate's own image builder carries the same pair for the same
+            # reason). `ci/publish-host-image.sh` writes the init; it
             # cannot conjure the binaries, so they travel with the image and
             # both forms stay startable in their own runtime.
             pkgs.iproute2

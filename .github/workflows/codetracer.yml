@@ -2995,19 +2995,29 @@ jobs:
 
   ct-host-container-gate:
     # `ct host` SERVING FROM INSIDE A CONTAINER, REACHED FROM OUTSIDE IT — the
-    # WD2 seam (`ci/SEAM-REGISTER.md`), graded here rather than only by hand.
+    # WD2 seam, graded here rather than only by hand. The campaign's seam
+    # register lives with the campaign plan that owns it, outside this
+    # repository.
     #
     # The gate (`ci/test/host-image-serves-in-a-container.sh`) needs an Incus
     # daemon with a managed bridge, and no runner class gives a job one: the
     # ephemeral Linux runners are Incus containers themselves and offer Docker
     # and /dev/kvm. `kvm` is the capability label every one of them carries
-    # (infra central-garm.nix: the generic pool grants /dev/kvm since the
-    # 2026-10-11 fold-back), and it is all this needs:
+    # (the runner fleet's generic pool has granted /dev/kvm since the
+    # 2026-10-11 fold-back; the declaration lives with the fleet, not here),
+    # and it is all this needs:
     # `ci/test/host-image-serves-in-incus-vm.sh` boots a NixOS VM that IS an
     # Incus host (`nix/packages/incus-vm.nix`), publishes the image into it
-    # through `ci/publish-host-image.sh` — confirmed by isonim-platform's
-    # `sessionctl image-resolve`, which is why the token below must reach
-    # that private flake — and runs the gate as root on that host.
+    # through `ci/publish-host-image.sh` — confirmed by the session
+    # substrate's own `sessionctl image-resolve` — and runs the gate as root on
+    # that host.
+    #
+    # THE RESOLVER IS CONFIGURATION, NOT CODE. This repository is public, so it
+    # carries no reference to the non-public sibling that builds `sessionctl`.
+    # The step below takes a flake reference from a masked secret
+    # (`CT_SESSIONCTL_FLAKE`), and the gate refuses by name when it is absent
+    # rather than guessing a source. Masked rather than a variable because
+    # nix echoes what it fetches and this job's logs are public.
     runs-on: [self-hosted, linux, x64, kvm]
     # NO GREEN SAMPLE YET: this job is new. The image is the `codetracer`
     # package's closure, which `nix-build` (median 8.7m, max 10.9m, warm) and a
@@ -3020,8 +3030,7 @@ jobs:
     steps:
       - name: Mint installation token for cross-repo sibling access
         # The same per-run installation token as `nix-build`. Here it also
-        # lets nix fetch the private `github:metacraft-labs/isonim-platform`
-        # flake that provides `sessionctl`.
+        # authenticates the fetch of whatever `CT_SESSIONCTL_FLAKE` names.
         id: ci_token
         uses: actions/create-github-app-token@v2
         with:
@@ -3046,6 +3055,8 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Publish ct host's image into an Incus VM and serve it from a container
+        env:
+          CT_SESSIONCTL_FLAKE: ${{ secrets.CT_SESSIONCTL_FLAKE }}
         run: bash ci/test/host-image-serves-in-incus-vm.sh
 
   viewmodel-tests:

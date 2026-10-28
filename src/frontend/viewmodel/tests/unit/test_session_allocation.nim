@@ -10,7 +10,8 @@
 ## side, and this comment named one as though there were. What is here is
 ## the half that says the request leaving this bundle is the right request
 ## and the answer coming back is not re-decided; the observational half is
-## unbuilt and `ci/SEAM-REGISTER.md` carries it as open.
+## unbuilt, and the campaign's seam register -- kept with the campaign plan
+## that owns it, outside this repository -- carries it as open.
 ##
 ## ## MOCK JUSTIFICATION — required by the workspace policy, and short
 ##
@@ -20,9 +21,9 @@
 ## real module with real values and asserts over the real bytes it produces —
 ## there is no transport to stand in for, no HTTP server to fake and no
 ## substrate to stub. The response strings below are not a mock substrate;
-## they are the substrate's own `toJson(AllocationView)` shape, copied from
-## `isonim-platform` `api-server/src/substrate.nim` `04c078c`, used as INPUT
-## to a parser. A test for a parser that did not hand it bytes would be
+## they are the substrate's own `toJson(AllocationView)` shape, copied from the
+## substrate's own serialiser at the revision recorded with the workspace, used
+## as INPUT to a parser. A test for a parser that did not hand it bytes would be
 ## testing nothing.
 ##
 ## That is also why the I/O lives at one call site in the caller rather than

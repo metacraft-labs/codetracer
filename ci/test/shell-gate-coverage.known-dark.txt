@@ -716,7 +716,7 @@ ci/test/plat35-gpui-capture.sh
 # `host-image-serves-in-a-container.sh` inside a NixOS VM
 # (`ci/test/host-image-serves-in-incus-vm.sh`) and its line is gone.
 
-# Need a running local Zitadel issuer (isonim-platform's local stack, its dev
+# Need a running local Zitadel issuer (a sibling product's local stack, its dev
 # CA trusted) that no CI job provisions; the gate exits 2 with the remedy when
 # the stack is absent, so wiring it as-is would be a lane that never grades.
 # `just test-identity-live-device-grant` is the recipe. The `.mjs` is its

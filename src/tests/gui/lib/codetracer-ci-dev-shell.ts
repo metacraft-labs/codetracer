@@ -15,10 +15,9 @@
  *
  * Why `nix develop <codetracer-ci>/nix --command …` and not
  * `repro exec <codetracer-ci> -- …`, which the other siblings use: entering
- * codetracer-ci through repro fails in a CodeTracer workspace because its
- * `repro.nim` uses `isonim-platform`, which that workspace does not check out
- * (codetracer-pm issues/2026-10-26-codetracer-ci-dev-env-does-not-compile-
- * in-a-codetracer-workspace-without-isonim-platform.md). codetracer-ci's
+ * codetracer-ci through repro fails in a CodeTracer workspace, because its
+ * `repro.nim` reaches for a sibling that workspace does not check out. The
+ * defect is filed with the workspace's specifications. codetracer-ci's
  * `.envrc` is exactly `use flake ./nix`, so `nix develop ./nix` is the very
  * environment direnv activated, and it needs no per-checkout approval. When
  * that issue is fixed this can move to `repro exec` like the other siblings.

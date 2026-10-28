@@ -102,9 +102,9 @@ export deployment_descriptor
 
 type
   AllocationRequest* = object
-    ## One allocation, as the substrate's HTTP surface takes it
-    ## (`isonim-platform` `api-server/src/routes.nim` `handleAllocateSession`,
-    ## routed at `POST /api/v1/projects/{app}/sessions`).
+    ## One allocation, as the substrate's HTTP surface takes it: the
+    ## substrate's own `handleAllocateSession`, routed at
+    ## `POST /api/v1/projects/{app}/sessions`.
     verb*: string
       ## `POST`, and a POST because it ALLOCATES: a container is started and a
       ## `session.concurrent` lease is taken. The substrate's own route comment

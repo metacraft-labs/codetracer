@@ -133,7 +133,7 @@ let
           python3
           zip
           # `sessionctl image build` packs the substrate's own base image from
-          # these, resolved off PATH (isonim-platform `defaultImageSpec`).
+          # these, resolved off PATH.
           iproute2
           dhcpcd
         ];
@@ -141,7 +141,7 @@ let
 
     # `</dev/null` IS LOAD-BEARING. A command run through the test driver's
     # backdoor inherits the backdoor's stdin, and `incus exec` forwards its
-    # stdin into the container: infra's `checks/ephemeral-linux-runners-docker.nix`
+    # stdin into the container: the runner fleet's own Docker check
     # measured incusd buffering it until the VM's OOM killer fired (7.4 GiB
     # resident) and the exec never returning. The gate's `incus exec` calls
     # take no input, so closing stdin here costs nothing.

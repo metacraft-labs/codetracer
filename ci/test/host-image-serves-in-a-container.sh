@@ -3,8 +3,9 @@
 # shellcheck disable=SC2016
 #
 # `ct host` SERVES FROM INSIDE A CONTAINER, REACHED FROM OUTSIDE IT — the join
-# WD1a, WD1c and WD2 were each half of, and the seam
-# `ci/SEAM-REGISTER.md` was written to name.
+# WD1a, WD1c and WD2 were each half of, and the seam the campaign's register
+# was written to name. That register lives with the campaign plan that owns it,
+# outside this repository.
 #
 # ## Why this is the test and not six smaller ones
 #

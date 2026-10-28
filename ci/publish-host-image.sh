@@ -25,12 +25,15 @@
 # product this campaign is about.
 #
 # So the layers are applied, in manifest order, into a `rootfs/` beside a
-# `metadata.yaml`, and the result is packed the way
-# `isonim-platform/session/src/image.nim` packs its own: one archive format,
-# sorted names, zeroed owners, a constant mtime and `gzip -n`. Same recipe
-# rather than a similar one, because the substrate's `sha256File` is what
-# checks the fingerprint and a differently-packed tarball would content-address
-# differently for a reason that has nothing to do with its contents.
+# `metadata.yaml`, and the result is packed the way the session substrate's own
+# image builder packs its own: one archive format, sorted names, zeroed owners,
+# a constant mtime and `gzip -n`. Same recipe rather than a similar one,
+# because the substrate's `sha256File` is what checks the fingerprint and a
+# differently-packed tarball would content-address differently for a reason
+# that has nothing to do with its contents. (The substrate is not part of this
+# repository and is deliberately not named here; the pinned cross-references
+# for each "same as the substrate's" claim below are recorded with the
+# workspace, not in a public tree.)
 #
 # ## The confirmation is the point of the script
 #
@@ -58,9 +61,9 @@
 # ## The image goes into the SUBSTRATE'S project, not the client's
 #
 # The substrate keeps its sessions in an Incus project of its own --
-# `$ISONIM_SESSION_INCUS_PROJECT`, default `isonim-dev`
-# (isonim-platform `session/src/incus.nim`, `DefaultProject`) -- and every
-# `incus` call it makes carries `--project`. That project is created with
+# `$ISONIM_SESSION_INCUS_PROJECT`, whose default this script mirrors from the
+# substrate's own CLI rather than inventing -- and every `incus` call it makes
+# carries `--project`. That project is created with
 # `features.images=true`, so it has an image store of its own, and
 # `sessionctl image-resolve` looks there and nowhere else. An import that
 # names no project lands in whichever project the `incus` CLI has selected,
@@ -255,11 +258,11 @@ echo "==> writing the Incus init"
 # substrate can RESOLVE and cannot RUN; converted with an init but no DHCP
 # client, it produces one that boots with an interface that is up and unusable
 # — which from outside is indistinguishable from one that was never attached,
-# and is what made isonim-platform's seam S81 take four months to find.
+# and is a failure the substrate's own implementers took four months to find.
 #
-# So this is the same init `isonim-platform/session/src/image.nim` writes, for
-# the same reasons, and the comments there are the long form of every line
-# here. The three that are easy to get wrong:
+# So this is the same init the substrate's image builder writes, for the same
+# reasons, and the comments there are the long form of every line here. The
+# three that are easy to get wrong:
 #
 #   * `/run/isonim-net.status` is written `pending` FIRST, before anything that
 #     can block, so a reader arriving during boot sees "not yet" rather than
@@ -327,9 +330,9 @@ mkdir -p "${rootfs}/run/dhcpcd" "${rootfs}/var/lib/dhcpcd" "${rootfs}/var/log"
 rm -f "${rootfs}/etc/dhcpcd.conf" "${rootfs}/sbin/init"
 : >"${rootfs}/etc/dhcpcd.conf"
 
-# A PASSWD AND GROUP WITH ROOT ONLY, for the reason
-# `isonim-platform/session/src/image.nim` gives: `id` inside the session has to
-# resolve, and nothing else is named — there is no second account to become.
+# A PASSWD AND GROUP WITH ROOT ONLY, for the reason the substrate's own image
+# builder gives: `id` inside the session has to resolve, and nothing else is
+# named — there is no second account to become.
 #
 # `dockerTools` ships neither, because an OCI runtime does not need them: a
 # container started by `Entrypoint` never asks who it is. `ct host` does, three
@@ -369,8 +372,8 @@ INIT
 chmod 0755 "${rootfs}/sbin/init"
 
 echo "==> writing metadata.yaml"
-# The same four keys `isonim-platform/session/src/image.nim` writes, and the
-# same constant epoch: the tarball is content-addressed, so a build timestamp
+# The same four keys the substrate's own image builder writes, and the same
+# constant epoch: the tarball is content-addressed, so a build timestamp
 # in it would give two identical images two fingerprints.
 cat >"${work}/unified/metadata.yaml" <<YAML
 architecture: x86_64

@@ -14,12 +14,14 @@
 // actually type into, and presses the button they actually press. Every hop is
 // a real navigation over TLS the browser genuinely verified.
 //
-// This is modelled directly on isonim-platform's
-// `local-dev/tests/login_browser.mjs` — same Chromium, same
+// This is modelled directly on the login-browser probe of the sibling product
+// that first stood this issuer up — same Chromium, same
 // `ignoreHTTPSErrors: false`, same `input[name="loginName"]` → password →
 // second-factor-"Skip" sequence, same navigation trail printed on the way out.
-// What it adds is the leg that file has no reason to have: the device
-// authorization's own consent page.
+// What it adds is the leg that probe has no reason to have: the device
+// authorization's own consent page. (That probe is not in this repository and
+// is deliberately not located here; the pinned pointer is recorded with the
+// workspace.)
 //
 // WHAT ZITADEL'S LOGIN-V1 DEVICE PAGES ACTUALLY LOOK LIKE (measured against
 // the local stack on 2026-09-30; none of this is in Zitadel's docs):
