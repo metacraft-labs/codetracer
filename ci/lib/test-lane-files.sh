@@ -440,7 +440,7 @@ test_lane_recipe() {
 #
 # `js-dom` is `js-browser`'s compile RUN under node over jsdom
 # (`src/frontend/tests/jsdom-run.mjs`): for suites whose subject is a renderer
-# module that only compiles for the browser target, and whose property can be
+# module that needs the browser's DOM bindings, and whose property can be
 # observed without a real browser. It needs the checkout's `node_modules/jsdom`.
 #
 # `js-browser` EXISTS BECAUSE `-d:nodejs` IS NOT A NEUTRAL FLAG. The `js`
@@ -449,12 +449,13 @@ test_lane_recipe() {
 # a no-op, and node exits 0 even when a case fails (`vm-js-lane-test.sh` proves
 # that against the real toolchain rather than asserting it).
 #
-# But the renderer is a BROWSER module, and under `-d:nodejs` it does not
-# compile at all — `kdom`'s `createElementNS` is absent, because node is not a
-# browser. That is why the earlier attempt to put `renderer.nim` in
-# `host-instantiations` failed, and the note there correctly refused to force
-# it: compiling the renderer under `-d:nodejs` would gate it in a configuration
-# nothing ships.
+# The renderer needs the BROWSER bindings: `std/dom` imports the page's
+# document there, but allocates a dummy document under `-d:nodejs`. Earlier
+# renderer code also failed to compile under the define, through a qualified
+# `dom.createElementNS` call. Removing the obsolete SVG helper in 58172d6af
+# removed that incidental compile error, not the runtime binding difference.
+# `renderer-browser-build.sh` checks document identity with the lane flags and
+# a node-targeted negative control, rather than requiring that error to persist.
 #
 # The resolution is a third backend rather than an exception inside the second.
 # `js-browser` is `nim js` with no `-d:nodejs`, and it is ALWAYS compile-only —
@@ -944,18 +945,13 @@ test_lane_files() {
 		# CANNOT go in this lane: `run-nim-test-lane.sh` passes `-d:nodejs` to
 		# every JS lane, which is load-bearing there (without it
 		# `std/exitprocs.setProgramResult` is undeclared and node exits 0 even
-		# when a case fails), and under `-d:nodejs` the renderer does not
-		# compile at all — `kdom`'s `createElementNS` is absent, because the
-		# renderer is a BROWSER module and node is not a browser. Forcing it in
-		# would compile it in a configuration nothing ships, which is exactly
-		# what the note below warns against.
+		# when a case fails). That define also substitutes std/dom's dummy
+		# document for the page's document. The renderer now compiles under it
+		# after removal of an obsolete SVG helper, but that configuration still
+		# does not ship. The renderer-electron/web lanes use js-browser and
+		# `renderer-browser-build.sh` checks the DOM binding they select.
 		#
-		# What DOES compile it is the tup product build, transitively through
-		# `ui_js.nim`. So it is better covered than `web_browser.nim` ever was
-		# — but not by this CI job, and a change to its facade call sites is
-		# therefore checked at package time rather than on push. That gap is
-		# real and is recorded in the milestone file rather than papered over
-		# with a lane that would lie.
+		# The tup product build also compiles it transitively through ui_js.nim.
 		# `browser_tab.nim` is here for the same reason `web_browser.nim` is:
 		# it is `importjs` and `{.emit.}` throughout, so `vm-unit` cannot see
 		# it, and the two modules that DO import it — `web_browser.nim` here
@@ -1048,7 +1044,7 @@ test_lane_files() {
 
 	renderer-dom)
 		# Suites that RUN renderer modules — `ui/state.nim` and the DAP
-		# transport under it — which only compile for the browser target.
+		# transport under it — with the browser's DOM bindings.
 		# `locals_answer_identity_test.nim` drives the web renderer's
 		# `ct/load-locals` senders through the real response fan-out: one
 		# request per stop, in the stopped-in file's language.

@@ -2,9 +2,9 @@
 // WITHOUT `-d:nodejs`) under node, over a real DOM.
 //
 // The `renderer-dom` lane's runner (ci/lib/run-nim-test-lane.sh, backend
-// `js-dom`). A renderer module cannot be compiled with `-d:nodejs` (`kdom`
-// has no `createElementNS` there — see ci/lib/test-lane-files.sh on
-// `js-browser`), and its module graph touches `window` and `document` at
+// `js-dom`). `-d:nodejs` substitutes std/dom's dummy document (see
+// ci/lib/test-lane-files.sh on `js-browser`), while the renderer needs the
+// host's actual DOM. Its module graph touches `window` and `document` at
 // import time, so it is compiled as the browser module it is and given
 // jsdom's `window`, `document` and `navigator` as its globals.
 //

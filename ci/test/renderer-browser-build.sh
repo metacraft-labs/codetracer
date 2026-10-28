@@ -10,9 +10,9 @@
 # `ci/lib/test-lane-files.sh` recorded that gap honestly in the
 # `host-instantiations` lane ("What DOES compile it is the tup product build...
 # at package time rather than on push") after an attempt to close it failed:
-# the JS lane family passes `-d:nodejs` to everything, and under `-d:nodejs`
-# the renderer does not compile, because it is a BROWSER module and node is not
-# a browser.
+# the JS lane family passes `-d:nodejs` to everything. That selects std/dom's
+# dummy document instead of the browser's document, even when compilation
+# succeeds. Step 2 checks the binding rather than an incidental compile error.
 #
 # THE GAP WAS NOT THEORETICAL. Commit 333ec709 dropped `ui/ui_imports.nim`'s
 # blanket re-export of `electron_lib` after auditing its 14 exported symbols
@@ -101,11 +101,13 @@ echo
 # a gate that did not run, and conflating the two is how a suite comes to
 # "pass" on a machine that compiled nothing.
 # ---------------------------------------------------------------------------
-command -v nim >/dev/null 2>&1 || {
-	echo "nim is not on PATH" >&2
-	echo "  remedy: run inside the dev shell (direnv exec ${repo_root} ...)" >&2
-	exit 2
-}
+for tool in nim node; do
+	command -v "${tool}" >/dev/null 2>&1 || {
+		echo "${tool} is not on PATH" >&2
+		echo "  remedy: run inside the dev shell (direnv exec ${repo_root} ...)" >&2
+		exit 2
+	}
+done
 
 isonim_root=""
 if [ -n "${ISONIM_SRC:-}" ]; then
@@ -135,9 +137,8 @@ echo
 
 # ---------------------------------------------------------------------------
 echo "Step 1: the lanes are wired to a browser backend, not the node one"
-echo "    This is the property that makes the renderer compilable at all, and"
-echo "    it is the one an editor is most likely to undo by 'tidying' the"
-echo "    backend list. Step 2 proves it is load-bearing against the compiler."
+echo "    The browser target uses the page's DOM instead of std/dom's node dummy."
+echo "    Step 2 proves that distinction with the actual lane flags."
 # ---------------------------------------------------------------------------
 for lane in renderer-electron renderer-web; do
 	if grep -qx "${lane}" <<<"$(test_lane_ids)"; then
@@ -157,7 +158,7 @@ for lane in renderer-electron renderer-web; do
 	if [[ ${flags} != *"-d:nodejs"* ]]; then
 		ok "${lane} does not pass -d:nodejs"
 	else
-		bad "${lane} passes -d:nodejs, under which the renderer cannot compile"
+		bad "${lane} passes -d:nodejs, which substitutes a dummy document"
 	fi
 
 	if [[ ${flags} == *"-d:ctRenderer"* ]]; then
@@ -196,30 +197,74 @@ fi
 echo
 
 # ---------------------------------------------------------------------------
-echo "Step 2: -d:nodejs really is fatal here, measured against the toolchain"
-echo "    The js-browser backend exists ONLY because of this. Asserting it in a"
-echo "    comment would let the reason rot; vm-js-lane-test.sh makes the"
-echo "    mirror-image claim for the node lanes the same way."
+echo "Step 2: the lane flags bind kdom to the host document"
+echo "    A successful node-targeted compile is not a browser build: std/dom"
+echo "    substitutes a dummy document. The node control must fail this check."
 # ---------------------------------------------------------------------------
-nodejs_probe_cache="${cache_root}/renderer-nodejs-probe"
-mkdir -p "${nodejs_probe_cache}"
-nodejs_out="$(nim js -d:nodejs -d:chronicles_enabled=off -d:ctRenderer \
-	--hints:off --warnings:off --nimcache:"${nodejs_probe_cache}" \
-	-o:"${nodejs_probe_cache}/ui.js" src/frontend/ui_js.nim 2>&1)"
-nodejs_rc=$?
-if [ "${nodejs_rc}" -ne 0 ]; then
-	ok "the renderer does NOT compile with -d:nodejs (exit ${nodejs_rc}), so the backend split is load-bearing"
-	if grep -q "createElementNS" <<<"${nodejs_out}"; then
-		ok "and it fails for the recorded reason: kdom's createElementNS is absent under -d:nodejs"
-	else
-		# Not a failure. The claim under test is "this configuration does not
-		# build"; the specific missing symbol is Nim's business and may move.
-		note "NOTE: it failed for a different reason than the recorded createElementNS:"
-		printf '%s\n' "${nodejs_out}" | grep -E 'Error:' | head -2 | sed 's/^/        /'
+# The fake host document is deliberately only an identity sentinel. This
+# measures which object the real compiler and kdom select, not DOM behavior;
+# a simulated DOM would add unrelated functionality to the oracle. Both arms
+# run the SAME probe and evaluator, so a missing call or weakened comparison
+# makes the node control fail rather than silently passing the browser arm.
+# The obsolete utils.renderLineElement helper used to fail compilation under
+# nodejs because it called dom.createElementNS. Its removal in 58172d6af did
+# not change std/dom's runtime binding, so compile failure is no longer a gate.
+mkdir -p "${cache_root}" || exit 2
+document_probe="$(mktemp -d "${cache_root}/renderer-document.XXXXXX")" || exit 2
+trap 'rm -rf "${document_probe}"' EXIT
+cat >"${document_probe}/probe.nim" <<'NIM'
+import kdom
+
+proc checkHostDocument(value: Document) {.importjs: """(function(value) {
+  if (value !== globalThis.document) {
+    throw new Error("renderer-host-document mismatch");
+  }
+})(#)""".}
+
+checkHostDocument(document)
+NIM
+cat >"${document_probe}/run.cjs" <<'JS'
+const fs = require('node:fs');
+const vm = require('node:vm');
+const code = fs.readFileSync(process.argv[2], 'utf8');
+vm.runInNewContext(code, { document: Object.freeze({}), console, process });
+console.log('renderer-host-document: OK');
+JS
+probe_document_binding() {
+	local label="$1"
+	shift
+	local output="${document_probe}/${label}.js" log rc
+	log="$(nim js --hints:off --warnings:off "$@" \
+		--path:"${repo_root}/src/frontend" \
+		--nimcache:"${document_probe}/${label}" -o:"${output}" \
+		"${document_probe}/probe.nim" 2>&1)"
+	rc=$?
+	if [ "${rc}" -ne 0 ] || [ ! -s "${output}" ]; then
+		bad "${label}: document probe did not compile; no binding was tested"
+		printf '%s\n' "${log}" | head -5 | sed 's/^/      /'
+		return
 	fi
-else
-	bad "the renderer COMPILED with -d:nodejs — if kdom gained a node arm, fold these lanes back into the js backend and delete js-browser"
-fi
+	log="$(node "${document_probe}/run.cjs" "${output}" 2>&1)"
+	rc=$?
+	if [ "${label}" = node-control ]; then
+		if [ "${rc}" -ne 0 ] && grep -q 'Error: renderer-host-document mismatch' <<<"${log}"; then
+			ok "control: -d:nodejs fails the host-document identity check"
+		else
+			bad "control: -d:nodejs did not fail the host-document identity check"
+			printf '%s\n' "${log}" | head -5 | sed 's/^/      /'
+		fi
+	elif [ "${rc}" -eq 0 ] && grep -qx 'renderer-host-document: OK' <<<"${log}"; then
+		ok "${label}: kdom uses the host document"
+	else
+		bad "${label}: kdom does not use the host document"
+		printf '%s\n' "${log}" | head -5 | sed 's/^/      /'
+	fi
+}
+for lane in renderer-electron renderer-web; do
+	read -r -a flags <<<"$(test_lane_extra_flags "${lane}")"
+	probe_document_binding "${lane}" "${flags[@]}"
+done
+probe_document_binding node-control -d:nodejs
 echo
 
 # ---------------------------------------------------------------------------

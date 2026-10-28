@@ -4033,11 +4033,11 @@ test-host-instantiations:
 # THE RENDERER, COMPILED BY CI AT LAST — both arms.
 #
 # The lane note in `host-instantiations` above recorded, honestly, that nothing
-# in CI compiled `renderer.nim`: the JS lane family passes `-d:nodejs`, under
-# which the renderer does not build at all (`kdom`'s `createElementNS` is a
-# browser binding and node is not a browser), so forcing it in would have gated
-# it in a configuration nothing ships. The only thing compiling the renderer
-# was the tup product build, at package time.
+# in CI compiled `renderer.nim`: the JS lane family passes `-d:nodejs`, which
+# selects std/dom's dummy document instead of the page's DOM. It used to also
+# fail compilation through an obsolete SVG helper; that helper's removal did
+# not make the node configuration a shipped renderer. The only thing compiling
+# the renderer was the tup product build, at package time.
 #
 # THAT GAP COST A WORKING RENDERER ON `dev`. Commit 333ec709 removed
 # `ui/ui_imports.nim`'s blanket re-export of `electron_lib` after auditing its
@@ -4067,7 +4067,7 @@ test-renderer-browser:
   bash ci/test/renderer-browser-build.sh
 
 # Renderer modules RUN, not only compiled: the `renderer-dom` lane builds its
-# suites for the browser target (the only target `ui/state.nim` compiles for)
+# suites for the browser target (using the page's actual DOM bindings)
 # and runs them under node over jsdom (`src/frontend/tests/jsdom-run.mjs`).
 # `locals_answer_identity_test.nim` drives the web renderer's `ct/load-locals`
 # senders through the real response fan-out and asserts one request per stop,

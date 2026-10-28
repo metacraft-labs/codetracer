@@ -352,9 +352,10 @@ while read -r f; do
 	elif [ "${backend}" = "js-browser" ] || [ "${backend}" = "js-dom" ] ||
 		[ "${backend}" = "js-chromium" ]; then
 		# `nim js` WITHOUT `-d:nodejs`. See test_lane_backend's header: the
-		# define is required by every lane that RUNS its output under node, and
-		# is fatal for a browser module — `kdom`'s `createElementNS` is absent
-		# under it, so the renderer does not compile at all.
+		# define enables unittest exit status in the ordinary node lanes, but
+		# also makes std/dom replace the page's document with a dummy object.
+		# Browser lanes must keep the actual page bindings even when a node-
+		# targeted compile happens to succeed.
 		compile_cmd=(nim js --hints:off --warnings:off
 			${extra_flags[@]+"${extra_flags[@]}"} --nimcache:"${cache}" -o:"${cache}/${name}.js" "${f}")
 		artifact="${cache}/${name}.js"

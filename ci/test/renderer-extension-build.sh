@@ -54,8 +54,8 @@
 #                             -d:ctRenderer -d:ctInExtension         NO ARTEFACT
 #
 # NOT A NEW BACKEND, and that is the difference from the note at the top of
-# `renderer-browser-build.sh`. `js-browser` had to exist because the JS lane
-# family passes `-d:nodejs`, under which the renderer cannot compile at all.
+# `renderer-browser-build.sh`. `js-browser` exists because the JS lane family
+# passes `-d:nodejs`, which replaces the browser's document with a dummy DOM.
 # This build is `nim js` with no `-d:nodejs` — the same backend — differing
 # only in defines. A third backend would have been ceremony; a second gate on
 # the same backend is the honest shape.
