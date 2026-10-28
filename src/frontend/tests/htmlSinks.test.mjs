@@ -59,9 +59,10 @@
  * today" is exactly the reasoning that missed 4.
  *
  * Arms S3-S5 are the bounded negative.  S3 pins the WHOLE `innerHTML`
- * population — 47 writes, 13 of them non-clearing, every one triaged — so a
- * forty-eighth is a red run.  It pins them as a TABLE of files and a TRANSCRIPT
- * of the thirteen live writes, not as the number 47, so the red run names the
+ * population — every direct write triaged — so an additional write is a red
+ * run. S2 separately closes the renderer API calls that also write markup.
+ * S3 pins direct writes as a TABLE of files and a TRANSCRIPT
+ * of the live writes, not as a count, so the red run names the
  * file that grew and quotes the line that did it: a budget whose failure
  * cannot say what it found is a budget the next reader bumps.  S4 sweeps the
  * other ways in (`outerHTML`,
@@ -717,36 +718,69 @@ assert(/rowsCount\*: int\n\s+startRow\*: int\n\s+endRow\*: int/.test(
     "the Run-test button's label is restored as text, not as markup");
 }
 
-// --- the chevron helpers: a constant chevron, and a CLOSED call set ---------
+// --- renderer HTML APIs: constant SVGs, and CLOSED call sets ----------------
 //
-// "The payload is a constant SVG" is only true while nothing else calls the
-// helper, so the assertion is the whole call set, not the constant.  The
-// Request panel's copy has been named `setPickerChevron` since 167227860; the
-// VCS view's is still `setInnerHtml`.  Both names are scanned, so a third
-// helper under either name, or a call with another argument, is a red run.
-// Since 09239daa3 the VCS view's helper is ONE generic proc,
-// `setInnerHtml[R, N](r: R; …)`, whose write is the `importjs`
-// `setInnerHtmlJS` — so the declaration is matched in either shape.
-assertEqual(filesMatching(/proc (setInnerHtml|setPickerChevron)(\[R, N\])?\(r: (WebRenderer|R);/),
-  'src/frontend/viewmodel/views/isonim_request_panel_view.nim,'
-  + 'src/frontend/viewmodel/views/isonim_vcs_view.nim',
-  'the scan finds both chevron helpers');
-assertEqual(matchesAcross(/r\.(setInnerHtml|setPickerChevron)\([^)]*\)/g),
-  'src/frontend/viewmodel/views/isonim_request_panel_view.nim:r.setPickerChevron(chevronHost, chevronSvg) | '
+// The Request panel and Agent Activity now call the renderer's setInnerHtml
+// instead of owning raw assignments. Removing their old S3 entries alone
+// would lose those sinks. Close ALL API calls here, including bare calls and
+// receivers other than r, and trace the variable icon argument to its callers.
+assertEqual(shippedMatching(/proc (setInnerHtml|setPickerChevron)(\[R, N\])?\(r: (WebRenderer|R);/),
+  'src/frontend/viewmodel/views/isonim_vcs_view.nim',
+  'the VCS view owns the only local HTML helper');
+const htmlApiCall = /\b(?:\w+\.)?(?:setInnerHtml|setPickerChevron)\s*\([^)]*\)/g;
+for (const sample of ['other.setInnerHtml(host, untrusted)',
+                      'setInnerHtml(r, host, untrusted)',
+                      'r.setPickerChevron(host, untrusted)']) {
+  assertEqual(sample.match(htmlApiCall)?.[0], sample,
+    `the HTML API scan sees ${sample}`);
+}
+assertEqual(shippedMatchesAcross(htmlApiCall),
+  'src/frontend/viewmodel/views/isonim_agent_activity_view.nim:r.setInnerHtml(createIconRef, BranchCreateIcon) | '
+  + 'src/frontend/viewmodel/views/isonim_agent_activity_view.nim:r.setInnerHtml(iconRef, icon) | '
+  + 'src/frontend/viewmodel/views/isonim_agent_activity_view.nim:r.setInnerHtml(searchIconRef, BranchSearchIcon) | '
+  + 'src/frontend/viewmodel/views/isonim_request_panel_view.nim:r.setInnerHtml(chevronHost, chevronSvg) | '
   + 'src/frontend/viewmodel/views/isonim_vcs_view.nim:r.setInnerHtml(chevronHost, chevronSvg)',
-  'and every call passes chevronSvg — the call set is closed');
+  'every renderer HTML API call is a triaged chevron or agent icon');
+assertEqual(shippedMatchesAcross(/\brenderAddContextMenuItem\(\s*[^,\n]+,\s*[^,\n]+,/g),
+  'src/frontend/viewmodel/views/isonim_agent_activity_view.nim:renderAddContextMenuItem(r, AgentAddContextEditorIcon, | '
+  + 'src/frontend/viewmodel/views/isonim_agent_activity_view.nim:renderAddContextMenuItem(r, AgentAddContextFolderIcon, | '
+  + 'src/frontend/viewmodel/views/isonim_agent_activity_view.nim:renderAddContextMenuItem(r, AgentAddContextTraceIcon, | '
+  + 'src/frontend/viewmodel/views/isonim_agent_activity_view.nim:renderAddContextMenuItem(r, AgentAddContextUploadIcon,',
+  'the add-context icon argument comes only from four named constants');
+assertEqual(shippedMatchesAcross(/^const (AgentAddContext\w+Icon|Branch\w+Icon)(?= = """<svg (?:(?!""")[^\n])*<\/svg>"""$)/gm),
+  'src/frontend/viewmodel/views/isonim_agent_activity_view.nim:const AgentAddContextEditorIcon | '
+  + 'src/frontend/viewmodel/views/isonim_agent_activity_view.nim:const AgentAddContextFolderIcon | '
+  + 'src/frontend/viewmodel/views/isonim_agent_activity_view.nim:const AgentAddContextTraceIcon | '
+  + 'src/frontend/viewmodel/views/isonim_agent_activity_view.nim:const AgentAddContextUploadIcon | '
+  + 'src/frontend/viewmodel/views/isonim_agent_activity_view.nim:const BranchCreateIcon | '
+  + 'src/frontend/viewmodel/views/isonim_agent_activity_view.nim:const BranchSearchIcon',
+  'all six agent icons are literal SVG constants without interpolation');
+assertEqual(shippedMatchesAcross(/let chevronSvg = if isOpen: chevronUpSvg else: chevronDownSvg(?=\n|$)/g),
+  'src/frontend/viewmodel/views/isonim_request_panel_view.nim:let chevronSvg = if isOpen: chevronUpSvg else: chevronDownSvg | '
+  + 'src/frontend/viewmodel/views/isonim_vcs_view.nim:let chevronSvg = if isOpen: chevronUpSvg else: chevronDownSvg',
+  'both chevron arguments select only their two constants');
 // The generic helper's raw `importjs` write takes any string, so the closed
 // call set above only holds while the helper is its one caller.
 assertEqual(matchesAcross(/\bsetInnerHtmlJS\(/g),
   'src/frontend/viewmodel/views/isonim_vcs_view.nim:setInnerHtmlJS( | '
   + 'src/frontend/viewmodel/views/isonim_vcs_view.nim:setInnerHtmlJS(',
   'and it is named only by its declaration and that one call');
-assertEqual(matchesAcross(/^const chevron(Up|Down)Svg/gm),
+assertEqual(shippedMatchesAcross(/^const chevron(Up|Down)Svg(?=\*?\s*=\s*"""<svg (?:(?!""")[^\n])*<\/svg>"""$)/gm),
   'src/frontend/viewmodel/views/isonim_request_panel_view.nim:const chevronDownSvg | '
   + 'src/frontend/viewmodel/views/isonim_request_panel_view.nim:const chevronUpSvg | '
   + 'src/frontend/viewmodel/views/isonim_vcs_view.nim:const chevronDownSvg | '
   + 'src/frontend/viewmodel/views/isonim_vcs_view.nim:const chevronUpSvg',
   'and chevronSvg is one of four compile-time `const`s, so it cannot vary');
+
+// The Build view's old ansi_up HTML sink disappeared too: styled runs are
+// now drawn with text nodes. Keep that safer boundary explicit rather than
+// merely dropping its obsolete row from S3.
+{
+  const buildView = shipped.get('src/frontend/viewmodel/views/isonim_build_view.nim') ?? '';
+  assert(buildView.length > 0 && !/innerHTML|setInnerHtml|insertAdjacentHTML|verbatim/.test(buildView)
+      && /r\.createTextNode\(run\.text\)/.test(buildView),
+    'the Build view renders styled output runs as text nodes');
+}
 
 describe('S3. The whole innerHTML population, pinned');
 
@@ -769,8 +803,7 @@ describe('S3. The whole innerHTML population, pinned');
 // failure prints the file that grew and the line of source that did it, and
 // triage starts from a diff instead of a hunt.
 //
-// The 47 in this file's header is DERIVED from the table rather than written
-// twice, so the prose and the pin cannot drift apart.
+// The totals printed below are derived from this table.
 
 /** Every shipped front-end file that writes innerHTML: `[file, clears, live]`. */
 const INNER_HTML_BY_FILE = [
@@ -797,13 +830,9 @@ const INNER_HTML_BY_FILE = [
   // them, so neither had ever been looked at — which is the single thing the
   // table exists to prevent.
   //
-  //   * `setIconHtml(el, html)` has six call sites and every one passes a
-  //     compile-time `const` SVG literal: `AgentAddContextUploadIcon`,
-  //     `…FolderIcon`, `…EditorIcon`, `…TraceIcon`, `BranchSearchIcon`,
-  //     `BranchCreateIcon`. Nothing is interpolated and nothing is
-  //     caller-supplied — the same shape as `file_conflict_dialog.nim` and
-  //     `hcr_live_edit_panel.nim` below, which this table already accepts.
-  //   * the `setupInputHighlightJs` `importjs` writes `hl.innerHTML = b(…)`,
+  // The static icon writes moved to the renderer API in 667305775;
+  // S2 now pins those calls and all six literal SVG inputs separately.
+  // The remaining `setupInputHighlightJs` `importjs` writes `hl.innerHTML = b(…)`,
   //     and `b` escapes `&`, `<` and `>` before emitting anything. The only
   //     markup it produces is `<span class="agent-inline-code">`, and its
   //     input is the user's own textarea.
@@ -818,9 +847,7 @@ const INNER_HTML_BY_FILE = [
   // two — because those writes no longer exist. A table that is stale in both
   // directions is worse than one that is merely behind: it fails for a reason
   // that has nothing to do with the write someone just added.
-  ['src/frontend/viewmodel/views/isonim_agent_activity_view.nim', 0, 2],
-  ['src/frontend/viewmodel/views/isonim_build_view.nim', 0, 1],
-  ['src/frontend/viewmodel/views/isonim_request_panel_view.nim', 0, 1],
+  ['src/frontend/viewmodel/views/isonim_agent_activity_view.nim', 0, 1],
   ['src/frontend/viewmodel/views/isonim_vcs_view.nim', 0, 1],
 ];
 
@@ -843,10 +870,7 @@ const INNER_HTML_LIVE_WRITES = [
   'src/frontend/ui/trace.nim: self.kindSwitchButton.innerHTML =',
   'src/frontend/ui/trace.nim: self.resultsOverlayDom.children[0].innerHTML = "Loading..."',
   'src/frontend/ui/trace.nim: self.resultsOverlayDom.children[0].innerHTML = NO_RESULTS_MESSAGE',
-  "src/frontend/viewmodel/views/isonim_agent_activity_view.nim: el.innerHTML = cstring(html)",
   "src/frontend/viewmodel/views/isonim_agent_activity_view.nim: {.importjs: \"\"\"(function(ta,hl){function e(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}function b(v){var h='',i=0;while(i<v.length){if(v[i]==='`'){if(i+2<v.length&&v[i+1]==='`'&&v[i+2]==='`'){h+=e('```');i+=3;}else{var j=v.indexOf('`',i+1);if(j===i+1){h+=e('``');i+=2;}else if(j>0){h+='<span class=\"agent-inline-code\">`'+e(v.slice(i+1,j))+'`</span>';i=j+1;}else{h+=e(v[i]);i++;}}}else{var n=v.indexOf('`',i);if(n<0)n=v.length;h+=e(v.slice(i,n));i=n;}}return h+'\\n';}function s(){hl.innerHTML=b(ta.value);hl.scrollTop=ta.scrollTop;}ta.addEventListener('input',s);ta.addEventListener('scroll',function(){hl.scrollTop=ta.scrollTop;});s();return s;})(#,#)\"\"\".}",
-  'src/frontend/viewmodel/views/isonim_build_view.nim: lineNode.innerHTML = cstring(lineCopy.htmlText)',
-  'src/frontend/viewmodel/views/isonim_request_panel_view.nim: node.innerHTML = cstring(html)',
   'src/frontend/viewmodel/views/isonim_vcs_view.nim: {.importjs: "#.innerHTML = #".}',
 ];
 
@@ -889,7 +913,7 @@ assertEqual(
   [...INNER_HTML_LIVE_WRITES].sort().join('\n'),
   `and the ${INNER_HTML_LIVE_WRITES.length} non-clearing ones are written exactly this way`);
 
-// The three that arm S/S2 do not already name, so all thirteen are accounted
+// The remaining writes that arm S/S2 do not already name are accounted
 // for rather than merely counted.
 {
   const traceNim = sources.get('src/frontend/ui/trace.nim');
@@ -1046,7 +1070,9 @@ assertEqual(shippedMatchesAcross(/"nodeIntegration": true/g),
 // 209 -> 165 on 2026-10-22: the desktop Event Log is no longer a DataTables
 // table, so arm D and its probe entry points (41) and the column-wiring scan
 // (3) went with it; the scan that its view writes no markup came in (+1).
-const EXPECTED_ASSERTIONS = 165;
+// 165 -> 172 on 2026-10-28: three API-scan controls, the icon caller and
+// literal pins, the chevron selection pin, and the Build text-node boundary.
+const EXPECTED_ASSERTIONS = 172;
 const total = passed + failed;
 console.log(`\n\x1b[1m${total} assertions, ${failed} failed\x1b[0m`);
 // Trap 4b again, at the top level: a silent skip anywhere above moves this.
