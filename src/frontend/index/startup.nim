@@ -2,7 +2,7 @@ import
   std/[ async, jsffi, jsconsole, json, os, strformat ],
   results,
   window, traces, files, config, install, electron_vars, debugger, launch_config,
-  recent_items, keybindings,
+  recent_items, keybindings, load_admission, tab_answers,
   ipc_subsystems/socket,
   ../[ config, types, trace_metadata ],
   ../lib/[ jslib, electron_lib ],
@@ -129,6 +129,10 @@ proc init*(config: Config, layout: js, helpers: Helpers) {.async.} =
   ## state. A replay's trace did, but only because `prepareForLoadingTrace`
   ## assigns the global itself.
   debugPrint "index: init"
+  # createData starts the renderer with session id 0. Keep its asynchronous
+  # load addressed to that session even if the user opens/switches a tab.
+  doAssert beginLoad(js{tab: 0}), "startup must own load admission"
+  defer: finishLoad()
   let bypass = true
 
   data.config = config
@@ -170,11 +174,11 @@ proc init*(config: Config, layout: js, helpers: Helpers) {.async.} =
     # with a recording loaded, and keep the debugging layout.
     let reviewLayout = await mainWindow.loadReviewLayoutConfig(
       string(userLayoutDir / "default_edit_layout.json"))
-    mainWindow.webContents.send "CODETRACER::start-deepreview", js{
+    mainWindow.webContents.send "CODETRACER::start-deepreview", forLoadTab(js{
       config: data.config,
       layout: reviewLayout,
       startOptions: data.startOptions
-    }
+    })
     # DeepReview is a normal window with a session tab bar, so its "+" opens a
     # welcome tab too (issue #568).
     await pushRecentItems(data.startOptions)
@@ -207,14 +211,14 @@ proc init*(config: Config, layout: js, helpers: Helpers) {.async.} =
 
     mainWindow.webContents.send(
       "CODETRACER::init",
-      js{
+      forLoadTab(js{
         home: paths.home.cstring,
         config: configSnapshot,
         layout: layout,
         helpers: helpers,
         startOptions: startOptionsSnapshot,
         bypass: bypass
-    })
+    }))
 
     # echo "Trying to send acp msg"
     #
@@ -265,7 +269,7 @@ proc init*(config: Config, layout: js, helpers: Helpers) {.async.} =
     let editLayout = await mainWindow.loadEditLayoutConfig(
       string(userLayoutDir / "default_edit_layout.json"))
 
-    mainWindow.webContents.send "CODETRACER::no-trace", js{
+    mainWindow.webContents.send "CODETRACER::no-trace", forLoadTab(js{
       path: startOptionsSnapshot.name,
       lang: save.project.lang,
       home: paths.home.cstring,
@@ -277,7 +281,7 @@ proc init*(config: Config, layout: js, helpers: Helpers) {.async.} =
       filesystem: filesystem,
       functions: functions,
       save: save
-    }
+    })
 
     # Load and send launch configs for the workspace
     let launchConfigs = getLaunchConfigsForWorkspace(folder)
@@ -297,7 +301,7 @@ proc init*(config: Config, layout: js, helpers: Helpers) {.async.} =
           configType: config.configType,
           env: envJs
         })
-      mainWindow.webContents.send "CODETRACER::launch-configs-loaded", js{configs: configsJs}
+      mainWindow.webContents.send "CODETRACER::launch-configs-loaded", forLoadTab(js{configs: configsJs})
 
   else:
     let recentTraces = await electron_vars.app.findRecentTracesWithCodetracer(limit=RECENT_ITEMS_LIMIT)

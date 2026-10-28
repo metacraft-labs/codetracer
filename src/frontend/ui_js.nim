@@ -4346,10 +4346,26 @@ proc onOpenEditFolderInTabReady*(
   data.ipc.send cstring"CODETRACER::init-edit-mode",
     js{folder: response.folderPath}
 
-proc onTraceLoadError*(sender: js, response: jsobject(error=cstring)) =
+proc onTraceLoadError*(sender: js, response: jsobject(error=cstring, preserveLoading=bool)) =
   ## Handler for trace loading errors (e.g. from the Trace Macro action).
   ## Displays the error message to the user via the views API.
   let errorMsg = response.error
+  # Welcome actions optimistically show a loading overlay before IPC. A
+  # refused request in another tab must become retryable, while a second
+  # click in the active load's own tab must leave its overlay intact.
+  if not data.ui.welcomeScreen.isNil:
+    let welcome = data.ui.welcomeScreen
+    # Replay tabs retain this component after hiding it. Only refresh an
+    # actual welcome/form/loading surface; remounting a hidden component
+    # would cover the original replay with a welcome screen on refusal.
+    let welcomeVisible = welcome.welcomeScreen or welcome.newRecordScreen or
+      welcome.openOnlineTrace or welcome.loading
+    if welcomeVisible:
+      welcome.loadError = errorMsg
+      if not response.preserveLoading:
+        welcome.loading = false
+        welcome.loadingTrace = nil
+      welcome.requestWelcomeScreenRender()
   cwarn "trace-load-error: " & errorMsg
   data.viewsApi.errorMessage(errorMsg)
 
@@ -4867,10 +4883,10 @@ proc stampAskingTab(data: Data) =
   ## WHICH ANSWERS STAY WINDOW-SCOPED, and why — they carry no `tab`, so
   ## `deliverTabAnswer` gives them to the tab on screen:
   ##
-  ## * `started`, `init` and `no-trace` at startup, `start-shell-ui`,
-  ##   `start-deepreview`, `welcome-screen`: the window's first content,
-  ##   before any tab has asked for anything (the same messages sent by a
-  ##   load DO name its tab);
+  ## * `started`, `start-shell-ui`, `welcome-screen`: the window's handshake
+  ##   and initial surface. Startup's session payloads (`init`, `no-trace`,
+  ##   `start-deepreview`) name the first tab, id 0, so a switch during an
+  ##   asynchronous startup cannot redirect them;
   ## * `recent-items`, `ct-install-status`, `keybindings`, `new-notification`,
   ##   `menu-action`, `close`, `reset-layout-done`: the window's own lists,
   ##   install state, key map, toasts, menu and lifecycle — one for every tab;

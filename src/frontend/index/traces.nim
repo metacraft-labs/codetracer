@@ -1118,10 +1118,6 @@ proc onOpenTraceInTab*(sender: js, response: jsobject(traceId=cstring)) {.async.
   ## metadata so it can create a new session tab and load the trace.
   ## The IPC field name ``traceId`` is preserved here as it is part of
   ## the renderer ↔ main-process wire format owned by M-REC-5.
-  # The load is for the tab the renderer creates on
-  # `open-trace-in-tab-ready`, which is then the tab on screen; no tab
-  # has its id yet, so its messages name none (`tab_answers`).
-  loadTab = jsUndefined
   let recordingId = response.traceId
   infoPrint "index: open-trace-in-tab for recording ", $recordingId
 
@@ -1130,9 +1126,9 @@ proc onOpenTraceInTab*(sender: js, response: jsobject(traceId=cstring)) {.async.
     "CODETRACER::open-trace-in-tab-ready",
     js{traceId: recordingId})
 
-  # Prepare the replay backend for this trace (starts a DAP session).
-  if await prepareForLoadingTrace(recordingId, nodeProcess.pid.to(int)):
-    await loadExistingRecord(recordingId)
+  # The renderer creates the tab and sends load-recent-trace with its id.
+  # Loading here too would start an unaddressed duplicate and race that
+  # request before the new tab even has an identity.
 
 proc onLoadRecentTransaction*(sender: js, response: jsobject(txHash=cstring)) {.async.} =
   # Every message of the load this starts answers the tab that asked.
@@ -1156,8 +1152,8 @@ proc onLoadRecentTransaction*(sender: js, response: jsobject(txHash=cstring)) {.
     quit(1)
 
 proc onLoadTraceByRecordProcessId*(sender: js, pid: int) {.async.} =
-  # A recorder process asked, not a tab: the tab on screen (`tab_answers`).
-  loadTab = jsUndefined
+  # A direct recorder IPC has no asking tab (the admission wrapper set that
+  # already). Called inside a recording operation, retain its asking tab.
   let trace = await electron_vars.app.findTraceByRecordProcessId(pid)
   infoPrint "index: trace by record process id has recording id ", trace.recordingId
   prefetchedTrace = trace
@@ -1302,7 +1298,7 @@ proc onOpenTraceDialog*(sender: js, response: js) {.async.} =
     debugPrint "selected trace folder: ", selection
     # Check if it's a valid trace folder (contains trace.db or similar)
     # For now, just try to load it
-    var traceResponse = js{tracePath: selection}
+    var traceResponse = answerFor(response, js{tracePath: selection})
     await onOpenLocalTrace(sender, traceResponse)
 
 proc onRecordFromLaunch*(sender: js, response: js) {.async.} =

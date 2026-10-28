@@ -1217,6 +1217,7 @@ test_lane_files() {
 		# with real async handlers that reject, throw, or settle and then fail,
 		# on the JS backend where a rejection arrives as a foreign exception.
 		echo src/frontend/tests/settle_once_test.nim
+		echo src/frontend/tests/concurrent_trace_loads_test.nim
 		#
 		# `index_serves_deployment_cache_classes_test.nim` asks the running
 		# server for two files and compares the `Cache-Control` it sends with

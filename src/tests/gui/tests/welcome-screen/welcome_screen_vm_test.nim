@@ -362,6 +362,22 @@ suite "WelcomeScreenVM — welcome_screen":
       check store.session.val.debugSessionMode == completedReplay
       dispose()
 
+  test "load refusal feedback belongs to its welcome session and clears on retry":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let first = createWelcomeScreenVM(store)
+      let second = createWelcomeScreenVM(store)
+      first.beginLoadingTrace("first")
+      first.setLoadError("Wait for the active load and retry")
+      check first.loading.val
+      check first.loadingRecordingId.val == "first"
+      check first.loadError.val == "Wait for the active load and retry"
+      check second.loadError.val == ""
+      first.beginLoadingTrace("retry")
+      check first.loadError.val == ""
+      check first.loading.val
+      dispose()
+
   test "endLoading clears the overlay":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()

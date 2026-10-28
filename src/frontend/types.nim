@@ -1709,6 +1709,7 @@ type
     newDownload*: NewDownloadRecord
     loading*: bool
     loadingTrace*: Trace
+    loadError*: cstring
     recentTracesScroll*: int
     recentFoldersScroll*: int
     copyMessageActive*: JsAssoc[int, bool]

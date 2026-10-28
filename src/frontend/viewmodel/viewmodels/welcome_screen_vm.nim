@@ -191,6 +191,7 @@ type
     mode*: Signal[WelcomeScreenMode]
     loading*: Signal[bool]
     loadingRecordingId*: Signal[string]
+    loadError*: Signal[string]
     onlineTraceInput*: Signal[string]
     launchConfig*: Signal[LaunchConfigState]
     newRecord*: Signal[NewRecordFormState]
@@ -795,6 +796,7 @@ proc beginLoadingTrace*(vm: WelcomeScreenVM; recordingId: string) =
   ## loaded.  Mirrors the Karax ``handleClick`` proc that flips
   ## ``self.loading = true`` and ``self.loadingTrace = trace``.
   vm.loading.val = true
+  vm.loadError.val = ""
   vm.loadingRecordingId.val = recordingId
 
 proc endLoading*(vm: WelcomeScreenVM) =
@@ -804,6 +806,11 @@ proc endLoading*(vm: WelcomeScreenVM) =
   ## interactive again.
   vm.loading.val = false
   vm.loadingRecordingId.val = NO_LOADING_RECORDING
+
+proc setLoadError*(vm: WelcomeScreenVM; message: string) =
+  ## Feedback is independent of loading: a refused second request from the
+  ## same tab must explain itself without ending the original operation.
+  vm.loadError.val = message
 
 proc syncLoadingState*(vm: WelcomeScreenVM; loading: bool; recordingId: string) =
   ## Bridge helper for the legacy renderer path: mirror the current
@@ -950,6 +957,7 @@ proc loadRecentFolder*(vm: WelcomeScreenVM; folderPath: string) =
   ## Folder loads transition the welcome surface into edit mode on the
   ## main-process side, so we mirror that locally rather than let the GUI
   ## race the IPC roundtrip.
+  vm.loadError.val = ""
   vm.enterEditMode(folderPath)
   if vm.onLoadRecentFolder != nil:
     vm.onLoadRecentFolder(folderPath)
@@ -971,6 +979,7 @@ proc launchSelectedConfig*(vm: WelcomeScreenVM): bool =
     if entry.slug == lc.selectedSlug:
       if not entry.enabled:
         return false
+      vm.loadError.val = ""
       let target = classifyLanguageOrPath(entry.language, entry.program)
       let backend =
         if target == recordTargetNative: recordBackendMcr
@@ -1004,6 +1013,7 @@ proc submitNewRecord*(vm: WelcomeScreenVM): bool =
   ## an invalid form.
   if not vm.isNewRecordValid:
     return false
+  vm.loadError.val = ""
   let form = vm.newRecord.val
   let availability = vm.recordBackendAvailability.val
   let target = form.inferredRecordTargetKind
@@ -1046,6 +1056,7 @@ proc createWelcomeScreenVM*(store: ReplayDataStore): WelcomeScreenVM =
     let mode = createSignal(wsmWelcome)
     let loading = createSignal(false)
     let loadingRecordingId = createSignal(NO_LOADING_RECORDING)
+    let loadError = createSignal("")
     let onlineTraceInput = createSignal("")
     let launchConfig = createSignal(emptyLaunchConfig())
     let newRecord = createSignal(emptyNewRecord())
@@ -1107,6 +1118,7 @@ proc createWelcomeScreenVM*(store: ReplayDataStore): WelcomeScreenVM =
       mode: mode,
       loading: loading,
       loadingRecordingId: loadingRecordingId,
+      loadError: loadError,
       onlineTraceInput: onlineTraceInput,
       launchConfig: launchConfig,
       newRecord: newRecord,
