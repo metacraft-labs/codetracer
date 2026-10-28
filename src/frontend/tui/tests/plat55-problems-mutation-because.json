@@ -18,7 +18,7 @@
   "R1": "s.activeEditor() == (\"src/util.nr\", 2, 9)",
   "R2": "area.width > 0 and screen.listRows > 0",
   "R3": "s.rt.app.problems.selected == 2",
-  "R4": "s.activeEditor() == (\"src/main.nr\", 5, 19)",
+  "R4": "s.activeEditor() == (\"src/util.nr\", 3, 22)",
   "S1": "s.activeEditor() == (\"src/util.nr\", 2, 9)",
   "S2": "s.paneRows() == want",
   "T1": "bad == 0",

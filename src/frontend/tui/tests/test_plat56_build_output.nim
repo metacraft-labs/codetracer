@@ -35,6 +35,7 @@
 ## file read by the shipped `edit_host.readProjectFile`.
 
 import std/[json, os, strutils, monotimes, times, unittest]
+from std/unicode import runeSubstr
 
 import codetracer_embed
 
@@ -45,6 +46,7 @@ import ../app/edit_binding
 import ../app/theme/capabilities
 import ../app/views/shell
 import ../app/views/build_output
+import ../app/views/status_bar
 import ../host/problems_source
 import ../host/build_output_source
 import ../host/build_runner
@@ -56,7 +58,7 @@ from ../../view_vocabulary/pane_views import buildOutputPaneView,
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 70
+const ExpectedAssertions = 74
 
 var countedAssertions = 0
 
@@ -211,6 +213,20 @@ suite "PLAT-56: the terminal's Build Output painter":
            g.rowText(area.row).contains("History " & arrow)
         ck g.rowText(s.menuTop).startsWith(mark & " ")
       dispose()
+
+
+suite "PLAT-56: the status line's build indicator":
+
+  test "the indicator has its place after the mode indicators":
+    let m = initStatusBarModel(notification = "a note",
+                               build = "✗ Build failed: 2 errors, 1 warning",
+                               buildState = bsFailed)
+    let row = statusBarText(m, 160)
+    ck row.contains("✗ Build failed: 2 errors, 1 warning")
+    ck row.contains("a note")
+    ck m.buildColumn > 0 and
+       row.runeSubstr(m.buildColumn).startsWith("✗ Build failed")
+    ck initStatusBarModel().buildColumn == -1
 
 # ---------------------------------------------------------------------------
 # The runtime over real builds

@@ -223,7 +223,12 @@ proc syncLegacyErrorsIntoVM*(self: ErrorsComponent) =
       line: prob.line,
       col: prob.col,
       message: safeStr(prob.message)))
-  ownVM.setProblems(rows)
+  # ALREADY THESE ROWS: the build fed them one by one, and replacing them
+  # would reset the selection — the failed build's highlight (EMT-D21) was
+  # wiped whenever the panel was revealed after the build ended (measured by
+  # the PLAT-55 capture, intermittently, by when the reveal landed).
+  if ownVM.problems.val != rows:
+    ownVM.setProblems(rows)
   ownVM.setFilter(problemFilterToVM(self.filter))
   ownVM.setGroupByFile(self.groupByFile)
 
