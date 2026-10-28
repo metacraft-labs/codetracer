@@ -111,9 +111,7 @@ import ./window_preflight               # refuse by kind when no window can open
 import ./list_scrubber
 import ../viewmodel/views/debug_control_marks
 import ../viewmodel/viewmodels/history_cursor   # history back / forward: the desktop's cursor rule
-import ../viewmodel/viewmodels/[certificate_indicator_vm,
-                                certificate_indicator_source]
-import ../viewmodel/host/desktop_native   # the certificate indicator's host
+import ./host/certificate_indicator
 import ./design_font_metrics
 import ../tui/host/native_host   # `loadStopPanes`, the terminal's own producer
 import ../tui/host/session_driver   # HSF-S1: what follows a control or a click, shared with the terminal
@@ -3958,9 +3956,8 @@ var
   gHoverControl = -1
   gHoverTool = -1
     ## The tool button under the pointer (`GToolButton` ordinal).
-  gCertVm: CertificateIndicatorVm = nil
-    ## The status bar's certificate indicator, over `gCertDir`.
-  gCertDir = ""
+  gCertVm: NativeCertificateIndicator = nil
+    ## The status bar's worker; its displayed answer changes only on poll.
   gHoverTab = -1
   gHoverTabAdd = false
     ## PLAT-49 part B: the pointer is on the strip's "+".
@@ -4249,23 +4246,24 @@ proc footerLocation(): string =
   else: gSession.getCurrentFile() & ":" & $gSession.getCurrentLine() & "#" &
         $gSession.getCurrentRRTicks()
 
+proc armHoverTick()
+
 proc certificateLabel(): string =
   ## The status bar's test-certificate indicator (`certificate_indicator_vm`,
   ## the desktop's `.test-certificate-label`), over the recording's source
-  ## folder, read once per folder through the shipped native reader.
+  ## folder. The native host reads and evaluates on its own worker; drawing
+  ## requests a refresh and keeps the previous complete answer until poll.
   if gSession.isNil:
     return ""
   let dir = gSession.getCurrentFile().parentDir
   if dir.len == 0:
     return ""
-  if gCertVm.isNil or gCertDir != dir:
-    gCertDir = dir
-    gCertVm = newCertificateIndicatorVm(platformCertificateFactsReader(
-      newDesktopNativePlatform(), dir, standardPlatformTriple(hostOS, hostCPU)))
-    try:
-      discard gCertVm.refresh(citStartup)
-    except CatchableError:
-      discard
+  if gCertVm.isNil:
+    gCertVm = newNativeCertificateIndicator()
+  gCertVm.request(dir)
+  discard gCertVm.poll()
+  if gCertVm.pending:
+    armHoverTick()
   gCertVm.model.label
 
 proc copyPathRect(): PxRect =
@@ -6621,6 +6619,9 @@ proc vcsTick() {.cdecl.}
 proc recordTick() {.cdecl.}
 proc searchTick() {.cdecl.}
 proc agentTick() {.cdecl.}
+proc certificateTick() {.cdecl.}
+const CertificatePollMs = 25
+  ## A completed certificate read earns a footer redraw on the UI thread.
 const AgentPollMs = 100
   ## PLAT-54: how often a live agent's updates are applied.
 const SearchPollMs = 15
@@ -6646,17 +6647,24 @@ proc armHoverTick() =
   let cellDue = gCellHover.dueMs
   if cellDue >= 0 and (due < 0 or cellDue < due):
     due = cellDue
+  # Pending certificate draws also arm this scheduler. Preserve an activity's
+  # existing interval so frequent paints cannot postpone its next callback
+  # (which now delivers certificate answers alongside that activity's work).
   # PLAT-57: a Find in Files search streaming is pumped on the same tick,
   # every `SearchPollMs`, while it runs.
   if due < 0 and nativeFindInFiles.running:
-    gArmedTick = (due: -4'i64, vcs: false)
-    gpui_set_tick(uint32(SearchPollMs), searchTick)
+    let want = (due: -4'i64, vcs: false)
+    if gArmedTick != want:
+      gArmedTick = want
+      gpui_set_tick(uint32(SearchPollMs), searchTick)
     return
   # PLAT-54: a live agent's updates are applied on the same tick, every
   # `AgentPollMs`, while it works.
   if due < 0 and agentLive():
-    gArmedTick = (due: -5'i64, vcs: false)
-    gpui_set_tick(uint32(AgentPollMs), agentTick)
+    let want = (due: -5'i64, vcs: false)
+    if gArmedTick != want:
+      gArmedTick = want
+      gpui_set_tick(uint32(AgentPollMs), agentTick)
     return
   # PLAT-51: a welcome tab's `ct record` is polled on the same tick, every
   # `RecordPollMs`, while it runs.
@@ -6666,8 +6674,20 @@ proc armHoverTick() =
                   gTestsHost.running or
                   # PLAT-55: a `:build`, polled on the same tick.
                   (not gBuild.isNil and gBuild.session.verdict == bvRunning)):
-    gArmedTick = (due: -3'i64, vcs: false)
-    gpui_set_tick(uint32(RecordPollMs), recordTick)
+    let want = (due: -3'i64, vcs: false)
+    if gArmedTick != want:
+      gArmedTick = want
+      gpui_set_tick(uint32(RecordPollMs), recordTick)
+    return
+  # Certificate reads share the existing activity ticks above. Otherwise
+  # wake for their completion without postponing an imminent hover deadline.
+  # Keep a stable arming while pointer events arrive: repeatedly restarting
+  # this interval could keep a completed result off screen indefinitely.
+  if gCertVm.pending and (due < 0 or due - hoverNowMs() > CertificatePollMs):
+    let want = (due: -6'i64, vcs: false)
+    if gArmedTick != want:
+      gArmedTick = want
+      gpui_set_tick(uint32(CertificatePollMs), certificateTick)
     return
   let want = (due: due, vcs: due < 0 and gVcsDirectory.len > 0)
   if want == gArmedTick:
@@ -7425,6 +7445,18 @@ proc problemsKey(r: GpuiRenderer; operation: string): bool =
   drawProblemsPane(r)
   true
 
+proc pollCertificateIndicator(r: GpuiRenderer) =
+  ## Only whole current answers cross the worker's channel. drawTopBar
+  ## replaces the footer's old elements as well as drawing its new label.
+  if not gCertVm.isNil and gCertVm.poll():
+    drawTopBar(r)
+
+proc certificateTick() {.cdecl.} =
+  var r: GpuiRenderer
+  gArmedTick = (due: -2'i64, vcs: false)
+  pollCertificateIndicator(r)
+  armHoverTick()
+
 proc recordTick() {.cdecl.} =
   ## PLAT-51: the welcome tab's recording, polled; when it finishes its
   ## recording opens in the tab that asked (`pollWelcomeRecording`).
@@ -7434,6 +7466,7 @@ proc recordTick() {.cdecl.} =
   discard pollTestRun(r)
   discard pollTestsHost(r)
   discard pollGpuiBuild(r)
+  pollCertificateIndicator(r)
   armHoverTick()
 
 proc agentTick() {.cdecl.} =
@@ -7449,6 +7482,7 @@ proc agentTick() {.cdecl.} =
   if changed:
     drawAgentPane(r)
     drawTopBar(r)
+  pollCertificateIndicator(r)
   armHoverTick()
 
 proc searchTick() {.cdecl.} =
@@ -7462,6 +7496,7 @@ proc searchTick() {.cdecl.} =
   discard nativeFindInFiles.pump()
   if not vm.isNil and (vm.results.val.len, vm.searching.val) != before:
     drawSearchPane(r)
+  pollCertificateIndicator(r)
   armHoverTick()
 
 proc hoverTick() {.cdecl.} =
@@ -7473,6 +7508,7 @@ proc hoverTick() {.cdecl.} =
   gArmedTick = (due: -2'i64, vcs: false)
   applyHoverReply(r, gAutoHide.tick(hoverNowMs()))
   discard tickCellHover(r)
+  pollCertificateIndicator(r)
   armHoverTick()
 
 proc refreshVcsPane() =
@@ -7549,6 +7585,8 @@ proc vcsTick() {.cdecl.} =
   ## The first trigger: every `VCSRefreshIntervalMs` the loop calls this
   ## (`gpui_set_tick`, on the loop's own thread).
   refreshVcsPane()
+  var r: GpuiRenderer
+  pollCertificateIndicator(r)
 
 proc vcsWindowActivated() =
   ## The second trigger: the user came back to the window from another
@@ -11023,6 +11061,10 @@ proc runOpen(cmd: GpuiCommand): int =
   ## Open the recording, build the shell, draw the leaves.
   if cmd.product == pmEdit:
     return runEdit(cmd)
+  defer:
+    if not gCertVm.isNil:
+      gCertVm.close()
+      gCertVm = nil
   let session = openGpuiTrace(cmd.traceFolder)
   # THE ENGINE ENDS WITH THIS RUN, on every path out of it: the plan, the
   # window, each `return 1`, and a stall raised after the open. Without this
