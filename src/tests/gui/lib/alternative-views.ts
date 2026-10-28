@@ -125,6 +125,7 @@ export async function readAlternativeViewState(
 
     const dbg = data?.services?.debugger;
     const editors = data?.ui?.editors;
+    const flags = data?.ui?.openViewOnCompleteMove;
     const openViews: number[] = [];
     if (editors) {
       for (const key of Object.keys(editors)) {
@@ -135,7 +136,9 @@ export async function readAlternativeViewState(
 
     return {
       hasData: !!data,
-      hasFlags: Array.isArray(data?.ui?.openViewOnCompleteMove),
+      // EditorView has ten ordinals. Nim emits this fixed boolean array as
+      // Uint8Array; other array-like storage is valid at this JS boundary too.
+      hasFlags: flags !== null && typeof flags === "object" && flags.length === 10,
       sourcemapLoaded: data?.sourcemap?.loaded === true,
       cPath: str(dbg?.cLocation?.path),
       cFunctionName: str(dbg?.cLocation?.functionName),
@@ -168,9 +171,15 @@ export async function armAlternativeView(
   return await page.evaluate((v: number) => {
     const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
     const flags = w.data?.ui?.openViewOnCompleteMove;
-    if (!flags) return false;
-    flags[v] = true;
-    return flags[v] === true;
+    // Keep the shape check inside each serialized callback: page.evaluate
+    // cannot access functions from this module's Node context.
+    if (flags === null || typeof flags !== "object" || flags.length !== 10) {
+      return false;
+    }
+    flags[v] = typeof flags[v] === "bigint" ? 1n : true;
+    // Typed arrays coerce boolean writes to numeric storage. Read the original
+    // slot back rather than replacing the array the renderer holds.
+    return flags[v] === true || flags[v] === 1 || flags[v] === 1n;
   }, view);
 }
 
