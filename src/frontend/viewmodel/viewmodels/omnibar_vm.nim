@@ -39,7 +39,7 @@
 ## Plain Nim, C and JavaScript backends, no signals (a host installs
 ## `onChange` to repaint).
 
-import std/[algorithm, strutils]
+import std/[algorithm, sets, strutils]
 
 import ../keymap/scope_path
 
@@ -57,6 +57,16 @@ type
       ## session strip's "+" (the desktop's `.session-tab-add`, "New tab")
       ## opens the omnibar on `:open `; the entries are the recordings the
       ## host can see, and a typed path is one too.
+    omAttach = "attach"
+      ## PLAT-54 (DeepReview-GUI.md §2.2.7): a file or folder to ATTACH to the
+      ## agent's next prompt — the native front-ends' answer to the desktop
+      ## prompt's *Upload attachment* / *Files & folders*, whose system file
+      ## dialog a terminal does not have. The entries are the files the
+      ## omnibox finds and their folders; a typed path is one too.
+    omAttachRecording = "attach-recording"
+      ## PLAT-54: a recording to attach to the agent's next prompt (the
+      ## desktop's *Recording / trace*): the recordings the host can see, and
+      ## a typed path.
 
   OmnibarEntry* = object
     ## One thing the omnibar can find.
@@ -101,6 +111,11 @@ const
   CommandPrefix* = ":"
   OpenRecordingQuery* = ":open "
     ## PLAT-49 part B: what the session strip's "+" opens the omnibar on.
+  AttachQuery* = ":attach "
+    ## PLAT-54: what the Agent Activity prompt's *Upload attachment* and
+    ## *Files & folders* open the omnibar on.
+  AttachRecordingQuery* = ":attach-recording "
+    ## PLAT-54: what its *Recording / trace* opens the omnibar on.
   TickPrefix* = "#"
   OmnibarPlaceholder* = "Navigate to file or run a :command"
     ## PLAT-49: what every front-end's empty omnibar field shows — the
@@ -132,6 +147,11 @@ func classifyOmnibarQuery*(query: string): tuple[mode: OmnibarMode,
     return (omSymbol, query[4 .. ^1].strip)
   if query.startsWith("/ai"):
     return (omAgent, query[3 .. ^1].strip)
+  for (prefix, mode) in [(AttachRecordingQuery.strip, omAttachRecording),
+                         (AttachQuery.strip, omAttach)]:
+    if lower.startsWith(prefix) and
+       (query.len == prefix.len or query[prefix.len] == ' '):
+      return (mode, query[prefix.len .. ^1].strip)
   if lower.startsWith(OpenRecordingQuery.strip) and
      (query.len == OpenRecordingQuery.strip.len or
       query[OpenRecordingQuery.strip.len] == ' '):
@@ -163,7 +183,7 @@ func desktopKindOf*(mode: OmnibarMode): OmnibarMode =
   ## tick search, so `#…` stays a file query there; its "+" opens a new tab
   ## on its welcome screen, so `:open …` stays a command there.
   if mode == omTick: omFile
-  elif mode == omRecording: omCommand
+  elif mode in {omRecording, omAttach, omAttachRecording}: omCommand
   else: mode
 
 # ---------------------------------------------------------------------------
@@ -249,14 +269,42 @@ func rankOmnibar*(index: openArray[OmnibarEntry]; mode: OmnibarMode;
       result.add OmnibarResult(entry: OmnibarEntry(
         kind: omRecording, label: "Open " & needle & " in a new tab",
         detail: "path", target: needle), score: high(int))
+  of omAttach, omAttachRecording:
+    # A TYPED PATH IS ATTACHED AS TYPED, offered first: the host checks it
+    # exists when it is attached (`native_agent_host.attachContext`).
+    if needle.contains('/'):
+      result.add OmnibarResult(entry: OmnibarEntry(
+        kind: mode, label: "Attach " & needle, detail: "path",
+        target: needle), score: high(int))
   else:
     discard
+  # What each mode finds: its own entries — except the attach modes, which
+  # find the files (and their folders) or the recordings the index holds.
+  let source = case mode
+               of omAttach: omFile
+               of omAttachRecording: omRecording
+               else: mode
+  var folders = initHashSet[string]()
   for e in index:
-    if e.kind != mode:
+    if e.kind != source:
       continue
+    if mode == omAttach:
+      # Each indexed file's folder is a candidate too (*Files & folders*).
+      let slash = e.target.rfind('/')
+      if slash > 0:
+        let dir = e.target[0 ..< slash]
+        if not folders.containsOrIncl(dir):
+          let fs = fuzzyScore(needle, dir & "/")
+          if fs.ok:
+            result.add OmnibarResult(entry: OmnibarEntry(
+              kind: omAttach, label: dir & "/", detail: "folder",
+              target: dir), score: fs.score, matched: fs.matched)
     let s = fuzzyScore(needle, e.label)
     if s.ok:
-      result.add OmnibarResult(entry: e, score: s.score, matched: s.matched)
+      var found = e
+      found.kind = mode   # an attach mode's entry says what choosing it does
+      result.add OmnibarResult(entry: found, score: s.score,
+                               matched: s.matched)
   result.sort(cmpResult)
   if limit > 0 and result.len > limit:
     result.setLen(limit)

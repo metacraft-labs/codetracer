@@ -15,7 +15,9 @@
 ##     replay agent started over its real stdio, answering `session/prompt`
 ##     with streamed updates — and the agent's rows arrive on the screen; the
 ##     session tab carries the agent's indicator, ✓ once the turn is over, and
-##     the prompt row's control is `[Send]` again.
+##     the prompt row's control is `[Send]` again;
+##   * a run card's `[Open in new tab]` opens the recording in a new session
+##     tab through the real `recordingOpener`, and the status line says so.
 ##
 ## No mocks: the real binary, a real recording, a real `replay-server`, a
 ## real pty (TermAssert + libvterm), a real agent process speaking ACP. The
@@ -34,7 +36,7 @@ import ../../../../ct/review_session
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 10
+const ExpectedAssertions = 11
 
 var countedAssertions = 0
 
@@ -180,6 +182,14 @@ suite "PLAT-54 on a real terminal: Agent Activity":
     sess.press(nr, nc + 2)
     s = sess.waitScreen(" × ", 120000)      # a second tab: closable tabs
     ck s[0].contains("calc")
+    # The status line says where the recording went (DeepReview-GUI §2.2.4):
+    # the real `recordingOpener` switched tabs, and the note is still the
+    # press's, not the new tab's description.
+    let opened = "Opened " & extractFilename(
+      calc.tracePath.strip(leading = false, chars = {'/'})) &
+      " in a new session tab"
+    s = sess.waitScreen(opened)
+    ck s.join("\n").contains(opened)
     sess.showAgent()
     discard sess.waitScreen("Start an agent task")
     sess.send(CtrlP)

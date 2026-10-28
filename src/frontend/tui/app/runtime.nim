@@ -2574,6 +2574,29 @@ proc runAgentPrompt*(rt: TuiRuntime; text: string;
   let why = rt.app.agentPrompt(text)
   rt.note(if why.len > 0: why else: "sent to the agent: " & text)
 
+proc agentEditorSelection(rt: TuiRuntime): string =
+  ## What the "add context" menu's *Editor selection* attaches: the editor's
+  ## file and the lines its selection covers (the caret's line when nothing
+  ## is selected); "" when no file is shown.
+  let buf = rt.editorBuffer()
+  if buf.isNil or buf.path.len == 0:
+    return ""
+  let (first, last) = buf.doc.selectedLines
+  editorSelectionContext(buf.path, first, last)
+
+proc attachAgentContext(rt: TuiRuntime; context: string;
+                        outcome: var RuntimeOutcome; mustExist = true) =
+  ## PLAT-54 (§2.2.7): attach `context` to the agent's next prompt and show
+  ## Agent Activity, where it is listed above the prompt.
+  outcome.repaint = true
+  if rt.app.agentAttach.isNil:
+    rt.note("this session has no agent to attach context for")
+    return
+  rt.showPane(paneAgentActivity, outcome)
+  let words = rt.app.agentAttach(context, mustExist)
+  if words.len > 0:
+    rt.note(words)
+
 proc scrollSearch(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
   ## PLAT-57: the wheel over Find in Files scrolls its rows.
   let (_, screen) = rt.searchPaneScreen()
@@ -3932,10 +3955,12 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
   of paneAgentActivity:
     # PLAT-54: a row runs its action (a turn, a run, a test, a tool group
     # opened or closed), a `[button]` its button's (a recording opened, in
-    # this tab or a new one; a review entered); the prompt row opens the
-    # omnibox on `/ai `; Send / Stop as the desktop's; the scrollbar column
-    # is the scrollbar's (`routeScrollbars`). The desktop's panel has no
-    # context menu of its own, so a right press opens nothing.
+    # this tab or a new one; a review entered; an attachment removed); the
+    # prompt row opens the omnibox on `/ai `; its `[+]` opens the desktop's
+    # "add context" menu (DeepReview-GUI.md §2.2.7); Send / Stop as the
+    # desktop's; the scrollbar column is the scrollbar's (`routeScrollbars`).
+    # The desktop's panel has no context menu of its own, so a right press
+    # opens nothing.
     if event.button != mbLeft or not rt.app.agent.loaded:
       return false
     let (area, screen) = rt.agentPaneScreen()
@@ -3953,6 +3978,10 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
     of atPrompt, atSend:
       rt.openOmnibar(AgentOmnibarPrefix)
       outcome.repaint = true
+      return true
+    of atAddContext:
+      rt.openContextMenu(agentAddContextMenu(rt.agentEditorSelection()),
+                         event.row, event.col, outcome)
       return true
     of atStop:
       if not rt.app.agentStop.isNil:
@@ -4196,6 +4225,14 @@ proc runContextAction(rt: TuiRuntime; action: ContextAction;
   of caFileCreate, caFileRename, caFileDelete, caFileEdit:
     # K19: the Files pane's entries, as the shared Files model decides them.
     rt.runFilesMenuAction(action, target, outcome)
+  of caAgentAttachUpload, caAgentAttachFilesFolders:
+    # PLAT-54 (§2.2.7): no system file dialog here — the omnibox, on a file
+    # or folder to attach.
+    rt.openOmnibar(AttachQuery)
+  of caAgentAttachRecording:
+    rt.openOmnibar(AttachRecordingQuery)
+  of caAgentAttachEditorSelection:
+    rt.attachAgentContext(target.path, outcome, mustExist = false)
 
 proc routeOverlayMouse(rt: TuiRuntime; event: MouseEvent;
                        outcome: var RuntimeOutcome): bool =
@@ -5357,6 +5394,12 @@ proc openOmnibar*(rt: TuiRuntime; query = "") =
   rt.app.omnibar.open(query)
   if query == OpenRecordingQuery:
     rt.note("new tab: choose a recording, or type its folder")
+  elif query == AttachQuery:
+    rt.note("attach to the agent's next prompt: choose a file or folder, " &
+            "or type its path")
+  elif query == AttachRecordingQuery:
+    rt.note("attach to the agent's next prompt: choose a recording, or " &
+            "type its folder")
   else:
     rt.note("omnibar: type a file, :sym <function>, :<command> or #<tick>")
 
@@ -5636,6 +5679,17 @@ proc acceptOmnibar(rt: TuiRuntime; outcome: var RuntimeOutcome) =
       rt.note("type a prompt for the agent after /ai")
     else:
       rt.runAgentPrompt(needle, outcome)
+    return
+  # PLAT-54 (§2.2.7): `:attach …` / `:attach-recording …` — the prompt's
+  # "add context" items: the chosen file, folder or recording is attached to
+  # the agent's next prompt.
+  if mode in {omAttach, omAttachRecording}:
+    let (ok, entry) = rt.app.omnibar.accept()
+    outcome.repaint = true
+    if not ok:
+      rt.note("nothing matches: type the path to attach")
+      return
+    rt.attachAgentContext(entry.target, outcome)
     return
   # PLAT-57: `:grep <text>` is Find in Files (§5.1): the omnibar closes and
   # the search runs into the pane; `:grep` alone keeps the field open.

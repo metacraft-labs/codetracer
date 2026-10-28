@@ -380,6 +380,12 @@ type
       ## starting a session when there is none. "" when sent, else why not.
     agentStop*: proc(): string {.closure.}
       ## PLAT-54: the prompt's Stop control.
+    agentAttach*: proc(context: string; mustExist: bool): string {.closure.}
+      ## PLAT-54: the prompt's "add context" menu (DeepReview-GUI.md §2.2.7)
+      ## — the HOST attaches a file, folder, recording or editor selection to
+      ## the next prompt (`native_agent_host.attachContext`; an editor
+      ## selection is attached as the editor names it, `mustExist` false).
+      ## The words the status line shows.
     recordingOpener*: proc(path: string): string {.closure.}
       ## PLAT-49 part B: the HOST's "open this recording in a new session
       ## tab" — "" when it opened, else why not. Nil when the host cannot

@@ -22,6 +22,9 @@ import std/[strutils, tables]
 
 import ../store/types
 import evidence_call_vm, test_run_summary_vm
+import agent_prompt_context
+
+export agent_prompt_context
 
 when defined(js):
   proc dateNowMs(): float {.importjs: "Date.now()".}

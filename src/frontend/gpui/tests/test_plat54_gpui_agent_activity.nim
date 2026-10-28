@@ -23,7 +23,17 @@
 ##     `session/prompt` updates) on the worker thread; after the turn the
 ##     pane holds the agent's rows, the user's turn first, and the session
 ##     tab's agent indicator (`data-ct-tab-agent`) says the agent completed
-##     while the pane's control says Send — the two read one store entry.
+##     while the pane's control says Send — the two read one store entry;
+##   * THE STATUS LINE (the footer's note, `data-ct-footer-note`) after either
+##     recording button: the recording opened in a new session tab, and for
+##     `[Open recording]` why (§2.2.4);
+##   * THE PROMPT'S "ADD CONTEXT" MENU (§2.2.7): the `+` beside Send, pressed
+##     where it was drawn, opens the desktop's four items as a popover;
+##     *Editor selection* attaches the shown file at its line, *Files &
+##     folders* opens the omnibox on `:attach ` and attaches the folder typed
+##     there, each attachment a feed row whose `[×]` removes it; the next
+##     `/ai` prompt reaches the REAL agent process with the `Context paths:`
+##     header (the agent's own `--prompt-log`).
 ##
 ## No mocks. The agent is the AA suites' documented ACP test double
 ## (`agent-activity-deepreview/fixtures/acp-replay-agent.js`, justified in
@@ -42,7 +52,7 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 28
+  ExpectedAssertions = 44
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1600
   H = 1000
@@ -143,6 +153,23 @@ proc lines(plan: JsonNode): seq[(string, string, string)] =
 
 proc allText(plan: JsonNode): string = textOf(plan)
 
+proc paneText(plan: JsonNode; pane: string): string =
+  ## The text drawn in pane `pane` (`data-ct-pane`) alone — not the footer,
+  ## whose status note can name the same review.
+  for n in plan.nodesWith("data-ct-pane"):
+    if n.attr("data-ct-pane") == pane:
+      result.add textOf(n)
+
+proc attachments(plan: JsonNode): seq[string] =
+  ## The attachments the pane drew above its prompt, by their rows' keys
+  ## (`context/<i>/<path>`): a long path wraps, so its text spans lines.
+  for n in plan.nodesWith("data-ct-agent-line"):
+    if n.attr("data-ct-agent-line") == "context-path" and
+       n.attr("data-ct-agent-part") == "0":
+      let key = n.attr("data-ct-agent-key")
+      let slash = key.find('/', "context/".len)
+      result.add (if slash >= 0: key[slash + 1 .. ^1] else: key)
+
 writeDataset(evidenceDir / "iteration-1.json", "Iteration one", 0, 2)
 writeDataset(evidenceDir / "iteration-2.json", "Iteration two", 2, 3)
 
@@ -167,16 +194,20 @@ suite "PLAT-54: Agent Activity in the GPUI window":
     let (first, tr1) = windowPlan("agent:show,agent:button:Open review:0," &
                                   "agent:vcs", @[flag])
     ck tr1.contains("Review: Iteration one")
-    ck first.allText.contains("Iteration one")
-    ck first.allText.contains("main.rs")
-    ck first.allText.contains("utils.rs")
+    ck first.paneText("vcs").contains("Iteration one")
+    ck first.paneText("vcs").contains("main.rs")
+    ck first.paneText("vcs").contains("utils.rs")
+    # …and the status line says which review was entered.
+    let entered = first.nodesWith("data-ct-footer-note")
+    ck entered.len == 1 and
+       entered[0].attr("data-ct-footer-note") == "Review: Iteration one"
     let (second, tr2) = windowPlan("agent:show,agent:button:Open review:0," &
                                    "agent:button:Open review:1,agent:vcs",
                                    @[flag])
     ck tr2.contains("Review: Iteration two")
-    ck second.allText.contains("Iteration two")
-    ck second.allText.contains("config.rs")
-    ck not second.allText.contains("utils.rs")
+    ck second.paneText("vcs").contains("Iteration two")
+    ck second.paneText("vcs").contains("config.rs")
+    ck not second.paneText("vcs").contains("utils.rs")
 
   test "a ct test run: the card opens, a recording opens as a tab":
     let session = resolveSession(@["--test-run", "--trace-dir=" & trace])
@@ -203,6 +234,20 @@ suite "PLAT-54: Agent Activity in the GPUI window":
                                   "agent:button:Open in new tab:0", @[flag])
     ck tr.contains("opened " & trace)
     ck tabbed.nodesWith("data-ct-session-tab").len == 2
+    # THE STATUS LINE says where it went: a new session tab (§2.2.4)…
+    let name = extractFilename(trace.strip(leading = false, chars = {'/'}))
+    let note = tabbed.nodesWith("data-ct-footer-note")
+    ck note.len == 1 and note[0].attr("data-ct-footer-note") ==
+       "Opened " & name & " in a new session tab"
+    # …and `[Open recording]` (the desktop's current-tab open) says why it
+    # is a new tab here too.
+    let (current, _) = windowPlan("agent:show,agent:row:test-run," &
+                                  "agent:button:Open recording:0", @[flag])
+    ck current.nodesWith("data-ct-session-tab").len == 2
+    let why = current.nodesWith("data-ct-footer-note")
+    ck why.len == 1 and why[0].attr("data-ct-footer-note") ==
+       "Opened " & name & " in a new session tab: this window cannot " &
+       "replace its current session yet"
 
   test "a live session: rows arrive over ACP, the tab and the pane agree":
     let env2 = @[("CODETRACER_AGENT_ACP_COMMAND", findExe("node")),
@@ -240,6 +285,60 @@ suite "PLAT-54: Agent Activity in the GPUI window":
     ck control.len == 1 and control[0].attr("data-ct-agent-control") == "Send"
     let pane = plan.nodesWith("data-ct-agent")
     ck pane.len == 1 and pane[0].attr("data-ct-agent-working") == "false"
+
+  test "the prompt's add-context menu: attachments reach the agent":
+    let promptLog = scratch / "prompts.jsonl"
+    let env2 = @[("CODETRACER_AGENT_ACP_COMMAND", findExe("node")),
+                 ("CODETRACER_AGENT_ACP_ARGS",
+                  replayAgent & " --evidence --evidence-dir=" & evidenceDir &
+                  " --prompt-log=" & promptLog)]
+    # The `+`, drawn beside Send, opens the desktop's four items.
+    let (menu, mtr) = windowPlan("agent:show,agent:add", env2 = env2)
+    ck menu.nodesWith("data-ct-agent-add").len == 1
+    let box = menu.nodesWith("data-ct-context-menu")
+    ck box.len == 1 and box[0].attr("data-ct-context-menu") ==
+       "agent-add-context"
+    var labels: seq[string] = @[]
+    for e in menu.nodesWith("data-ct-context-entry"):
+      labels.add e.attr("data-ct-context-entry")
+    ck labels == @["Upload attachment", "Files & folders", "Editor selection",
+                   "Recording / trace"]
+    ck mtr.contains("context menu agent-add-context")
+    # *Editor selection*: the file the editor shows, at its line; *Files &
+    # folders*: a folder typed into the omnibox on `:attach `.
+    let ops = "agent:show,agent:add,ctx:Editor selection," &
+              "agent:add,ctx:Files & folders,type:" & evidenceDir &
+              ",key:enter"
+    let (attached, atr) = windowPlan(ops, env2 = env2)
+    let chips = attached.attachments
+    checkpoint("attachments: " & $chips & "\n" & atr)
+    ck chips.len == 2
+    ck chips.len == 2 and chips[0].endsWith("main.py:1") and
+       chips[1] == evidenceDir
+    let note = attached.nodesWith("data-ct-footer-note")
+    ck note.len == 1 and note[0].attr("data-ct-footer-note") ==
+       "Attached " & evidenceDir & ": it goes with the next prompt"
+    # `[×]` removes the attachment it is drawn on.
+    let (removed, _) = windowPlan(ops & ",agent:button:×:1", env2 = env2)
+    let left = removed.attachments
+    ck left.len == 1 and left[0].endsWith("main.py:1")
+    # THE PROMPT: what the REAL agent process received carries the header,
+    # and the attachments are gone from the pane.
+    removeFile(promptLog)
+    let (sent, str) = windowPlan(ops & ",key:p:control," &
+                                 "type:/ai summarize the change,key:enter," &
+                                 "wait:20000", env2 = env2)
+    ck str.contains("agent: sent summarize the change")
+    ck fileExists(promptLog)
+    var received = ""
+    if fileExists(promptLog):
+      for b in parseJson(readFile(promptLog).splitLines()[0]):
+        received.add b{"text"}.getStr("")
+    checkpoint("the agent received: " & received)
+    ck received.startsWith("Context paths:\n- ") and
+       received.contains("main.py:1\n") and
+       received.endsWith("\n- " & evidenceDir & "\n\nsummarize the change")
+    ck sent.attachments.len == 0
 
   test "assertion count":
     echo "CHECKS: " & $CHECKS

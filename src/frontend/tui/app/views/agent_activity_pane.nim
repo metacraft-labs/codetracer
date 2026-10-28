@@ -19,12 +19,15 @@
 ##       /tmp/evidence/iteration-1.json
 ##       ct review collect … -o /tmp/evidence/iteration-1.json
 ##     ▌ ▸ ct test record --json-events  1 passed, 1 failed · 95ms
-##     › Ask for a change, or type a follow-up…                    [Send]
+##       context src/parser.nim:12-18  [×]
+##     › Ask for a change, or type a follow-up…                [+] [Send]
 ##
 ## A press on a row runs the row's action (expand a turn, a run, a test, a
 ## tool group), on a `[button]` the button's (open a recording, in this tab or
-## a new one; open a review); the prompt row opens the omnibox on `/ai `
-## (the terminal's field is the omnibox, as Find in Files' is); the rightmost
+## a new one; open a review; remove an attachment); the prompt row opens the
+## omnibox on `/ai ` (the terminal's field is the omnibox, as Find in Files'
+## is); its `[+]` opens the desktop's "add context" menu (DeepReview-GUI.md
+## §2.2.7), whose attachments are rows at the end of the feed; the rightmost
 ## column is the scrollbar scrubber over the WHOLE session when it overflows
 ## (Scrollbar-Scrubbers.md: a list scrubber moves the VIEW). Rows that arrive
 ## while the agent works keep the reader where they were
@@ -54,7 +57,7 @@ type
       ## The reader's position, kept across re-derived rows.
 
   AgentPaneTargetKind* = enum
-    atNone, atRow, atButton, atPrompt, atSend, atStop, atTrack
+    atNone, atRow, atButton, atPrompt, atSend, atStop, atTrack, atAddContext
 
   AgentPaneTarget* = object
     kind*: AgentPaneTargetKind
@@ -75,12 +78,17 @@ type
     promptRow*: int
     controlCol*: int
       ## Where `[Send]` / `[Stop]` starts on the prompt row.
+    addCol*: int
+      ## Where `[+]` (the "add context" menu) starts on the prompt row, -1
+      ## when the pane is too narrow for it.
     painted*: seq[string]
       ## Every painted line's text, in order (for the suites).
 
 const
   AgentSendLabel* = "[Send]"
   AgentStopLabel* = "[Stop]"
+  AgentAddContextLabel* = "[+]"
+    ## The desktop's `+` beside its prompt (`.agent-add-context-button`).
   AgentPromptMark* = canonical(grOverflowRight) & " "
     ## The prompt row's mark as the extended tier draws it; the painter draws
     ## the terminal's own (`grOverflowRight`, `>` on ASCII).
@@ -128,7 +136,8 @@ proc layoutAgent*(model: AgentPaneModel; area: CellArea): AgentPaneScreen =
   ## Where everything goes in `area` (the rows below the pane's tab strip):
   ## the lines, the scrubber column when they overflow, the prompt row — and
   ## the view's top, settled from the model's scroll over these lines.
-  result = AgentPaneScreen(trackCol: -1, promptRow: -1, controlCol: -1)
+  result = AgentPaneScreen(trackCol: -1, promptRow: -1, controlCol: -1,
+                          addCol: -1)
   if area.width <= 0 or area.height <= 0:
     return
   result.promptRow = area.row + area.height - 1
@@ -148,6 +157,9 @@ proc layoutAgent*(model: AgentPaneModel; area: CellArea): AgentPaneScreen =
   let label = if model.working: AgentStopLabel else: AgentSendLabel
   if area.width > textCells(label) + 4:
     result.controlCol = area.col + area.width - textCells(label)
+    let add = textCells(AgentAddContextLabel)
+    if area.width > textCells(label) + add + 8:
+      result.addCol = result.controlCol - 1 - add
 
 proc scrubberOf*(screen: AgentPaneScreen): ScrubberModel =
   scrubberModel(screen.lines.len, screen.top, screen.listRows)
@@ -188,13 +200,18 @@ proc paintAgentActivity*(g: var StyledGrid; area: CellArea;
   # The prompt row: the field, and its control at the right edge.
   g.fillSurface(result.promptRow, area.col, area.width, 1, srSurfaceInput)
   let mark = g.glyphText(grOverflowRight) & " "
-  let field = max(0, (if result.controlCol >= 0: result.controlCol - area.col - 1
-                      else: area.width) - textCells(mark))
+  let fieldEnd = if result.addCol >= 0: result.addCol
+                 elif result.controlCol >= 0: result.controlCol
+                 else: area.col + area.width + 1
+  let field = max(0, fieldEnd - area.col - 1 - textCells(mark))
   g.paint(result.promptRow, area.col, mark, AgentPromptStyle)
   g.paint(result.promptRow, area.col + textCells(mark),
           fitCells(model.prompt, field),
           if model.promptIsPlaceholder: AgentPlaceholderStyle
           else: AgentPromptStyle)
+  if result.addCol >= 0:
+    g.paint(result.promptRow, result.addCol, AgentAddContextLabel,
+            AgentControlStyle)
   if result.controlCol >= 0:
     g.paint(result.promptRow, result.controlCol,
             (if model.working: AgentStopLabel else: AgentSendLabel),
@@ -208,6 +225,9 @@ proc agentTargetAt*(model: AgentPaneModel; screen: AgentPaneScreen;
   if row == screen.promptRow:
     if screen.controlCol >= 0 and col >= screen.controlCol:
       return AgentPaneTarget(kind: (if model.working: atStop else: atSend))
+    if screen.addCol >= 0 and col >= screen.addCol and
+       col < screen.addCol + textCells(AgentAddContextLabel):
+      return AgentPaneTarget(kind: atAddContext)
     return AgentPaneTarget(kind: atPrompt)
   if screen.trackCol >= 0 and col == screen.trackCol and
      row >= screen.listTop and row < screen.listTop + screen.listRows:

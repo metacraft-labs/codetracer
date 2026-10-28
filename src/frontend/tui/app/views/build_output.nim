@@ -137,9 +137,10 @@ type
 
 const
   BuildControlLabels*: array[BuildControl, string] =
-    ["History ▾", "Run", "Stop", "Clear", "Follow"]
-    ## The controls as words; their titles are the desktop's
-    ## (`BuildControlTitles`).
+    ["History " & canonical(grDropdown), "Run", "Stop", "Clear", "Follow"]
+    ## The controls as words, as the extended tier draws them; their titles
+    ## are the desktop's (`BuildControlTitles`). The painter draws History's
+    ## `▾` from the terminal's glyph table (`controlLabel`).
   BuildControlGap = 1
   BuildOutputStyle* = CellStyle(role: srChromeText)
   BuildStderrStyle* = CellStyle(role: srChromeError, italic: true)
@@ -239,6 +240,12 @@ proc measureContent*(v: var BuildView; model: BuildPaneModel) =
   v.hview.setContent(v.widths.measureLines(model.generation, lines,
                                            cellWidthOf))
 
+proc controlLabel(g: StyledGrid; c: BuildControl): string =
+  ## A control's label as this terminal draws it: History's `▾` is the glyph
+  ## table's `grDropdown` (`v` on ASCII), the same width on every tier.
+  if c == bcHistory: "History " & g.glyphText(grDropdown)
+  else: BuildControlLabels[c]
+
 proc controlsWidth(model: BuildPaneModel; withDuration = true): int =
   for c in BuildControl:
     if c == bcHistory and model.history.len == 0:
@@ -335,7 +342,7 @@ proc paintBuildOutput*(g: var StyledGrid; area: CellArea;
     for c in BuildControl:
       if c == bcHistory and model.history.len == 0:
         continue
-      let label = BuildControlLabels[c]
+      let label = g.controlLabel(c)
       let w = cellWidthOf(label)
       let style =
         case c
@@ -366,7 +373,8 @@ proc paintBuildOutput*(g: var StyledGrid; area: CellArea;
   result.menuRows = geo.menuRows
   for k in 0 ..< geo.menuRows:
     let shown = k == model.historyShown
-    let text = (if shown: "● " else: "  ") & model.history[k]
+    let text = (if shown: g.glyphText(grCurrentEntry) & " " else: "  ") &
+               model.history[k]
     let t = truncateToCells(text, area.width)
     g.paint(geo.menuTop + k, area.col, t,
             if shown: BuildMenuActiveStyle else: BuildMenuStyle)

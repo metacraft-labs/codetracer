@@ -841,6 +841,18 @@ proc agentPrompt*(s: TuiSession; rt: TuiRuntime; text: string): string =
   result = s.agent.sendPrompt(text)
   s.refreshAgent(rt)
 
+proc agentAttach*(s: TuiSession; rt: TuiRuntime; context: string;
+                  mustExist = true): string =
+  ## The prompt's "add context" menu: `context` attached to the next prompt
+  ## (`native_agent_host.attachContext`). The status line's words.
+  if s.isNil or s.agent.isNil:
+    return "this session has no Agent Activity"
+  discard s.agent.attachContext(context, mustExist)
+  s.agent.changed = false
+  s.refreshAgent(rt)
+  result = s.agent.message
+  s.agent.message = ""
+
 proc agentStop*(s: TuiSession; rt: TuiRuntime): string =
   if s.isNil or s.agent.isNil:
     return ""
