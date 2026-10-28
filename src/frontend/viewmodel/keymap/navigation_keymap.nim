@@ -188,6 +188,9 @@ const
     ##     NORMAL too — a desktop text field (Base-Keymaps-And-Layer-Stack.md
     ##     §6.2), which has no prompt mode, would otherwise answer `Enter` with
     ##     §4.2's `list.expand` and `Backspace` with `list.collapse`;
+    ##     likewise a field owns copying and cancellation: `Ctrl+C` must not
+    ##     reach NORMAL's quit row, and `<Esc>` cancels the field (`:help
+    ##     c_<Esc>`) rather than changing the surrounding navigation mode;
     ##   * the palette and a context menu are lists of choices, walked as
     ##     Vim's own popup menu is (`:help popupmenu-keys`: the arrows,
     ##     `<PageUp>` / `<PageDown>`, `<CR>`, `<Esc>`);
@@ -212,6 +215,8 @@ const
     BaseRow(chords: "Ctrl+W", operation: "input.delete-word-backward", table: InputTable),
     BaseRow(chords: "Enter", operation: "input.commit", table: InputTable),
     BaseRow(chords: "Backspace", operation: "input.delete-backward", table: InputTable),
+    BaseRow(chords: "Ctrl+C", operation: "input.copy", table: InputTable),
+    BaseRow(chords: "Escape", operation: "input.cancel", table: InputTable),
     BaseRow(chords: "Up", operation: "palette.focus-previous", table: PaletteTable),
     BaseRow(chords: "Down", operation: "palette.focus-next", table: PaletteTable),
     BaseRow(chords: "PageUp", operation: "palette.focus-page-up", table: PaletteTable),

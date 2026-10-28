@@ -49,6 +49,7 @@ import ../dap
 import ./shortcut_preference
 import ./chord_display
 import ./monaco_operations
+import ./native_key_operations
 import ./editor_scope
 import ./video_player   # `videoPlayerHasFocus`, `currentVideoPlayerVM`
 import ./menu_keys
@@ -70,10 +71,6 @@ type
 
 const
   KeybindingsMessage = cstring"CODETRACER::keybindings"
-  NativeTables = [InputTable, PaletteTable, ContextMenuTable, FindTable]
-    ## Tables whose base rows the DOM element under the focus performs itself
-    ## (a field's caret keys, the palette's list, Monaco's find widget): the
-    ## router decides the key is theirs, and the key goes on to them.
 
 
 
@@ -528,16 +525,13 @@ proc runDesktopOperation(res: EditingResolution): NativeKind =
   if hostOperations.hasKey(res.operation):
     hostOperations[res.operation]()
     return nkHandled
-  let table = if res.layer.find(':') >= 0: res.layer[res.layer.find(':') + 1 .. ^1]
-              else: ""
-  let fromUser = res.layer.startsWith("user")
   # The right-click menu's operations are performed here rather than left
   # to the menu: it is a plain `<div>` that never takes the focus, so no
   # element under the focus would move its highlight, choose or close it.
   if contextMenuIsOpen() and contextMenuOperation(res.operation):
     return nkHandled
   # The DOM element's own operations stay its own.
-  if not fromUser and table in NativeTables:
+  if res.isNativeBaseOperation:
     return nkLeaveToElement
   if res.operation in HostIntents:
     if not data.functions.update.isNil: data.functions.update(data, false)

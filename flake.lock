@@ -625,11 +625,11 @@
         "pre-commit-hooks": "pre-commit-hooks"
       },
       "locked": {
-        "lastModified": 1793162302,
-        "narHash": "sha256-ewTILaldn/CukEUkKG+4vWyJ2PfTUo1zoBTd3ysULMs=",
+        "lastModified": 1793167392,
+        "narHash": "sha256-jjYdJK7Yu+DDGgGJweQ09ojBTI6i1bRvhKXeKvx3H1g=",
         "owner": "metacraft-labs",
         "repo": "codetracer-js-recorder",
-        "rev": "943eff752e5b8c9e47e7926e519d4b55e5a81910",
+        "rev": "18647fa86c7f8922eadd66ca1c48416f6c386b00",
         "type": "github"
       },
       "original": {
@@ -4119,11 +4119,11 @@
     "isonim": {
       "flake": false,
       "locked": {
-        "lastModified": 1793154982,
-        "narHash": "sha256-lt3kusBMgYXDbQYChFE7ggKDN2QFgqoPbqcKl6917YE=",
+        "lastModified": 1793170830,
+        "narHash": "sha256-WSwBCUwamWFtEe9JdjAJFJ1pcmPvNleKZMdqsBiiEtc=",
         "owner": "metacraft-labs",
         "repo": "isonim",
-        "rev": "39c3c47720db7fd5ea9f01efdadbd63699503dac",
+        "rev": "c8dd0264bdfab3d5b257073918ec3a3b111123d9",
         "type": "github"
       },
       "original": {
@@ -7669,11 +7669,11 @@
         "stackable-hooks-macos-tools": "stackable-hooks-macos-tools"
       },
       "locked": {
-        "lastModified": 1793168533,
-        "narHash": "sha256-MIsxBmBV8iE30xX3W+2Bi7IzrIHzP3Z1wSufe7DNDyo=",
+        "lastModified": 1793169992,
+        "narHash": "sha256-BeU6tEnjF3WYb9zstty6VHJkoFGq32+rS2a+4KIgBb4=",
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "a0d0688b53b933664221dac0e09d6df7355fae27",
+        "rev": "f98198bdf58146ba081b8c083461f88f47a30985",
         "type": "github"
       },
       "original": {
