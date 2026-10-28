@@ -3,7 +3,7 @@
 ## (`headless_app/pane_clicks`).
 ##
 ##   * the INVENTORY — every desktop click behaviour the milestone's table
-##     lists, one row each (`K1` … `K57`), every row with a target, gestures,
+##     lists, one row each (`K1` … `K60`), every row with a target, gestures,
 ##     the desktop's behaviour and a state for each native front-end (done,
 ##     existing, or n/a with the reason the front-end draws no such target);
 ##   * the WORD UNDER THE POINTER (`callTokenAt`), Monaco's rule, with Rust's
@@ -37,7 +37,8 @@ import viewmodels/event_log_vm
 # as the suite's RUNTIME assertion count.
 # 248 -> 246: K30 and K45 left the done sweep (-4 checks) for the two
 # retired-rows checks (+2) when the Timeline rows were retired.
-const ExpectedAssertions = 247
+# 247 -> 254 (PLAT-58): K58-K60, the Requests rows (+7).
+const ExpectedAssertions = 254
 
 var countedAssertions = 0
 
@@ -53,13 +54,13 @@ func rowsWith(state: NativeState; gpui = false): seq[string] =
 
 suite "PLAT-50: the click inventory":
 
-  test "every row K1..K57, once, complete":
+  test "every row K1..K60, once, complete":
     var ids = initHashSet[string]()
     for i, b in ClickInventory:
       ck b.id == "K" & $(i + 1)
       ids.incl b.id
     ck ids.len == ClickInventory.len
-    ck ClickInventory.len == 57
+    ck ClickInventory.len == 60
     for b in ClickInventory:
       if b.target.len == 0 or b.gestures.card == 0 or b.desktop.len == 0:
         checkpoint("incomplete row " & b.id)
@@ -99,6 +100,10 @@ suite "PLAT-50: the click inventory":
     ck behaviour("K32").gpui == nsDone
     # PLAT-57 drew Find in Files on both: its row opens the result.
     ck behaviour("K35").terminal == nsDone and behaviour("K35").gpui == nsDone
+    # PLAT-58 drew the Requests pane on both: a row, its menu, the pickers.
+    for id in ["K58", "K59", "K60"]:
+      ck behaviour(id).terminal == nsDone and behaviour(id).gpui == nsDone
+    ck cgDoubleClick in behaviour("K58").gestures
     ck behaviour("K99").id.len == 0
     ck describe(behaviour("K24")).startsWith("K24 Event log: row [click]")
 

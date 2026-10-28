@@ -162,7 +162,9 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 121
+  ExpectedAppModules = 122
+    ## 2026-10-28 (PLAT-58): 121 → 122, `views/requests_pane.nim`, the
+    ## Requests pane's painter.
     ## 2026-10-27 (PLAT-55): 120 → 121, `views/problems_pane.nim`, the
     ## Problems pane's painter.
     ## 2026-10-24 (PLAT-53): 118 → 119, `views/test_results_pane.nim`.
@@ -299,7 +301,11 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 333
+  ExpectedStyleLiterals = 349
+    ## 2026-10-28 (PLAT-58): 333 → 349, measured — the Requests pane's
+    ## sixteen (`views/requests_pane.nim`: the field and its placeholder, the
+    ## pickers, the header, the muted and text cells, the refusal, `Handler ›`,
+    ## and the status and method tones).
     ## 2026-10-28: 323 → 333, measured — the native Build Output pane's ten
     ## more (`views/build_output.nim`: its compiler colours, verdicts and
     ## history).
@@ -432,7 +438,8 @@ const
     ## reachability guard's bucket B). They were deleted to bring that ratchet
     ## back under its ceiling, and `views/search.nim` had no other literal, so
     ## it leaves the styled-file count. No painted colour changed.
-  ExpectedStyledFiles = 42
+  ExpectedStyledFiles = 43
+    ## 2026-10-28 (PLAT-58): +1, `views/requests_pane.nim`.
     ## 2026-10-27 (PLAT-55): +1, `views/problems_pane.nim`.
     ## 2026-10-24 (PLAT-53): +1, `views/test_results_pane.nim`.
     ## 2026-10-25 (PLAT-54): +1, `views/agent_activity_pane.nim`.

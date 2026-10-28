@@ -93,6 +93,7 @@ import viewmodels/terminal_output_vm
 import viewmodels/test_results_vm
 # PLAT-54 — the Agent Activity pane's ViewModel and its shared feed.
 import viewmodels/agent_activity_vm
+import viewmodels/request_panel_vm   # PLAT-58: the Requests pane
 import viewmodels/agent_activity_feed
 # PLAT-55 — the Problems pane's ViewModel.
 import viewmodels/errors_vm
@@ -155,7 +156,11 @@ const
                                          # PLAT-56: a build's output, verdict
                                          # and history, from the window's
                                          # `BuildVM`.
-                                         paneBuildOutput}
+                                         paneBuildOutput,
+                                         # PLAT-58: the recording's request
+                                         # spans, from the session's
+                                         # `RequestPanelVM`.
+                                         paneRequests}
     ## The panes expressed in the vocabulary. A CLOSED SET a test asserts, not
     ## a list a reader infers from which procs exist.
 
@@ -175,11 +180,12 @@ const
                                             # PLAT-53 `paneTestResults`,
                                             # PLAT-54 `paneAgentActivity`;
                                             # PLAT-56 `paneBuildOutput`).
-                                            paneConstraints,
+                                            paneConstraints}
                                             # PLAT-48 — the desktop's footer
                                             # panels the shared default docks
-                                            # (PLAT-55 drew `paneProblems`).
-                                            paneRequests}
+                                            # were here until PLAT-55 drew
+                                            # `paneProblems` and PLAT-58
+                                            # `paneRequests`.
     ## **Panes this front-end deliberately does not draw, with the reason
     ## recorded at the dispatch arm.**
     ##
@@ -194,8 +200,9 @@ const
     ## `BuildVM`, attached by the front-end as Problems' is.) The one PLAT-45
     ## added that remains, `paneConstraints` (it added five; PLAT-47, -52,
     ## -53 and -54 drew the VCS, Terminal Output, Test Results and Agent
-    ## Activity panes), and PLAT-48's two footer panels are the desktop's own
-    ## panes — placed by the shared
+    ## Activity panes), and PLAT-48's footer panel that remains (PLAT-58 drew
+    ## the REQUESTS one; PROBLEMS is left) is the desktop's own pane — placed
+    ## by the shared
     ## default in every front-end so every product opens with the same panes —
     ## whose ViewModels the headless replay session does not own. See the two
     ## dispatch arms.
@@ -850,6 +857,35 @@ proc buildOutputPaneView*(vm: BuildVM): PaneView =
                              expanded = true)
   result.entries = entriesOf(result.root)
 
+proc requestsPaneView*(vm: RequestPanelVM): PaneView =
+  ## PLAT-58. THE REQUESTS PANE (`Request-Panel.md` § N.3): the filter bar's
+  ## three words (the URL field, the Method and Status pickers' labels), the
+  ## refusal of the last activation when there is one, then a `Table` of the
+  ## requests held — `#`, method, URL, status, duration, size, every cell the
+  ## ViewModel's words. The session owns the ViewModel (the desktop's own).
+  result.pane = paneRequests
+  if vm.isNil:
+    result.report = "requests have no ViewModel; the session has not launched"
+    result.root = viewText("requests.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  let search = vm.searchText.val
+  var children = @[
+    viewText("requests.search",
+             if search.len > 0: search else: RequestSearchPlaceholder),
+    viewText("requests.method", vm.methodPickerLabel),
+    viewText("requests.status", vm.statusPickerLabel)]
+  if vm.navigationMessage.val.len > 0:
+    children.add viewText("requests.message", vm.navigationMessage.val)
+  var cells: seq[seq[string]] = @[]
+  for r in vm.displayRows():
+    cells.add @[r.idText, r.httpMethod, r.url, r.status, r.duration, r.size]
+  children.add viewTable("requests.rows", @RequestsColumnTitles, cells)
+  if cells.len == 0:
+    result.report = "no requests"
+  result.root = viewTreeNode("requests", "Requests", children, expanded = true)
+  result.entries = entriesOf(result.root)
+
 proc shellPaneView*(vm: ShellVM): PaneView =
   ## The shell: a `Tree` of the input `Input` and a `List` of history.
   ##
@@ -1051,11 +1087,13 @@ proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
   of paneAgentActivity: agentActivityPaneView(AgentActivityVM(vm))
   # PLAT-55.
   of paneProblems: problemsPaneView(ErrorsVM(vm))
-  of paneConstraints, paneRequests:
+  # PLAT-58.
+  of paneRequests: requestsPaneView(RequestPanelVM(vm))
+  of paneConstraints:
     # **PLAT-45: THE DESKTOP'S PANES, PLACED AND REPORTED — NOT OMITTED.**
     # (PLAT-48 adds the desktop's PROBLEMS and REQUESTS footer panels, which
     # the shared default DOCKS: revealed, each says what it is and why it is
-    # not drawn here, on this rule.)
+    # not drawn here, on this rule. PLAT-58 drew REQUESTS, above.)
     #
     # The shared default (`layout_model.sharedDefaultLayout`) places these four (five until PLAT-47 drew the VCS pane)
     # because the desktop's default did, and "every product opens with the

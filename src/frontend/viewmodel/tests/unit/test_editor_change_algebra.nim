@@ -117,7 +117,10 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1983
+const ExpectedAssertions = 1986
+  ## *1983 -> 1986 on 2026-10-28: `host/native_requests_host.nim` (the
+  ## Requests pane's native host) x three assertions. It calls no `rebase(`
+  ## and spells no `mapOver`.*
   ## *1977 -> 1983 on 2026-10-28: `viewmodels/agent_prompt_context.nim` and
   ## `viewmodels/build_output_model.nim` x three assertions. Neither calls
   ## `rebase(` or spells `mapOver`.*

@@ -130,7 +130,7 @@ const
     ## painted screen cannot satisfy "at least one".
 
   MeasurementDate = "2026-10-24"
-  MeasuredBinaryBytes = 20_359_600
+  MeasuredBinaryBytes = 22_026_040
     ## `build/bin/codetracer-tui` as `just build-tui` produces it — `--mm:orc
     ## -d:release`, NOT stripped, ten tree-sitter grammars statically archived
     ## in, the runtime dynamic. `wc -c` on a Linux x86-64 host on
@@ -281,8 +281,22 @@ const
     ## `shell` and `runtime`, less the per-pane bar paths it replaced
     ## (`scrubber_track`, -2 KB). No data table is linked in. The ceiling
     ## keeps 8.02% over the anchor.
+    ##
+    ##   22_026_040  2026-10-27: the Requests pane (PLAT-58), over `agents`
+    ##               3a7cb34368, which built the same way (the repro.lock
+    ##               pins) is 21_910_824 — already 7.6% over the 20_359_600
+    ##               anchor from the panes landed since it was set.
+    ##
+    ## RE-ANCHORED WITH ATTRIBUTION. The Requests pane costs +115_216 bytes
+    ## (+0.53%) over `agents` built the same way: its painter
+    ## (`views/requests_pane`), the native host (`viewmodel/host/
+    ## native_requests_host`) and the menus' conversion (`headless_app/
+    ## request_menu`), `RequestPanelVM` and its table fit linked into the
+    ## terminal for the first time, and growth in `runtime` and
+    ## `tui_session`. No data table is linked in. The ceiling keeps 8.02% over
+    ## the anchor.
 
-  BinaryCeilingBytes = 21_992_400
+  BinaryCeilingBytes = 23_792_600
     ## MeasuredBinaryBytes + 8.02%. Wide enough that ordinary work — a pane, a
     ## formatter, a grammar's parser table growing — does not redden the lane on
     ## the day it lands, narrow enough that a link-line accident (a second

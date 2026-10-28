@@ -123,13 +123,14 @@ proc terminalCapability*(): PaneCapability =
      # PLAT-54: Agent Activity (`views/agent_activity_pane.nim`).
      paneAgentActivity,
      # PLAT-55: Problems (`views/problems_pane.nim`).
-     paneProblems},
+     paneProblems,
+     # PLAT-58: Requests (`views/requests_pane.nim`).
+     paneRequests},
     [(paneDebugControls, "the terminal draws the debugger controls in its " &
                          "top bar, not as a pane"),
      (paneFlow, "the terminal draws flow inside the source pane"),
      (paneShell, "the terminal has no embedded shell view yet"),
-     (paneConstraints, "the terminal has no constraints view yet"),
-     (paneRequests, "the terminal has no requests view yet")])
+     (paneConstraints, "the terminal has no constraints view yet")])
 
 # ---------------------------------------------------------------------------
 # PLAT-45 deliverable 5 — the fold depth this terminal needs

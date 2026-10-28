@@ -65,6 +65,7 @@ import ./theme/terminal_report
 import ./views/test_results_pane
 import ./views/agent_activity_pane
 import ./views/problems_pane
+import ./views/requests_pane   # PLAT-58
 
 export interpreter, keymap, motions, command_line, tui_app, degradation
 export persistence
@@ -596,6 +597,11 @@ proc runFindInFiles(rt: TuiRuntime; pattern: string;
 proc stepFindInFiles(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome)
   ## PLAT-57: FORWARD-DECLARED for the command line's `:grep`, `:cnext` and
   ## `:cprev`; defined beside `showPane`, whose rule they use.
+proc openRequestsField(rt: TuiRuntime; outcome: var RuntimeOutcome)
+proc actOnRequests*(rt: TuiRuntime; act: RequestsAct;
+                    outcome: var RuntimeOutcome): RequestsActResult
+  ## PLAT-58: FORWARD-DECLARED for the command line's `:requests`; defined
+  ## beside the Requests pane's other helpers.
 
 proc runFileJob(rt: TuiRuntime; job: FileJob)
 proc writeBuffers(rt: TuiRuntime; verb: string; all = false)
@@ -730,6 +736,8 @@ proc layoutBindingEnabled*(rt: TuiRuntime): bool =
   ## what would have to change before the default could flip.
   not rt.isNil and not rt.app.isNil and not rt.app.layoutBinding.isNil
 
+proc layoutGeometry*(rt: TuiRuntime): LayoutGeometry
+
 proc rebuildFocus(rt: TuiRuntime) =
   ## Re-derive the focus ring from the layout that will be painted next,
   ## carrying the focused pane if it is still on screen.
@@ -741,8 +749,15 @@ proc rebuildFocus(rt: TuiRuntime) =
   let (had, focused) = rt.focus.focusedPane()
   let model = rt.app.shellModel(rt.width, rt.height)
   let projection = projectLayout(model.layout, bodyArea(rt.width, rt.height))
+  var docked: seq[PaneRegion] = @[]
+  if rt.layoutBindingEnabled():
+    let geometry = rt.layoutGeometry()
+    if not geometry.openDock.isEmptyArea:
+      docked.add PaneRegion(pane: geometry.openDockPane,
+                            area: geometry.openDock, activeTab: -1)
   rt.focus = newPaneFocus(projection,
-                         tabId = "tab:" & $(rt.app.shell.activeTabIndex() + 1))
+                         tabId = "tab:" & $(rt.app.shell.activeTabIndex() + 1),
+                         docked = docked)
   if had:
     discard rt.focus.focusPaneKind(focused)
   # PLAT-68: a pane gone from the screen takes its pushed layers with it.
@@ -1534,6 +1549,22 @@ proc runCommandLine(rt: TuiRuntime; line: string; outcome: var RuntimeOutcome;
     if words.len > 0 and words[0] == "grep":
       if words.len == 1: rt.openFindInFiles(outcome)
       else: rt.runFindInFiles(text[4 .. ^1].strip(), outcome)
+      outcome.detail = rt.app.notification
+      return
+    # PLAT-58 (Request-Panel.md § N.4): `:requests <text>` sets the Requests
+    # pane's URL search; `:requests` alone opens its field, and submitted
+    # with nothing after the verb (`:requests `) clears the search.
+    let requests = requestsCommandOf(line)
+    if requests.isRequests:
+      # `:requests` alone with a search on CLEARS it (the field opens
+      # holding the search; emptied and submitted, it arrives as the bare
+      # verb); with none it opens the field.
+      if requests.openField and rt.app.requests.search.len == 0:
+        rt.openRequestsField(outcome)
+      else:
+        rt.showPane(paneRequests, outcome)
+        discard rt.actOnRequests(RequestsAct(kind: rakSearch,
+                                             text: requests.search), outcome)
       outcome.detail = rt.app.notification
       return
     if words.len == 1 and words[0] in ["cnext", "cn", "cprev", "cp"]:
@@ -2819,6 +2850,92 @@ proc openWorkingFileAt*(rt: TuiRuntime; path: string; line, col: int): string =
   discard rt.focus.focusPaneKind(paneEditor)
   ""
 
+proc requestsPaneScreen*(rt: TuiRuntime): tuple[area: CellArea,
+                                               screen: RequestsPaneScreen] =
+  ## PLAT-58: the Requests pane's rows below its strip, and where the painter
+  ## put its parts — the arithmetic a press is read back with.
+  let under = rt.paneAreaOf(paneRequests)
+  result.area = CellArea(col: under.col, row: under.row + 1,
+                         width: under.width, height: max(0, under.height - 1))
+  if result.area.width <= 0:
+    return
+  var g = newStyledGrid(result.area.col + result.area.width,
+                        result.area.row + result.area.height)
+  result.screen = paintRequests(g, result.area, rt.app.requests)
+
+proc actOnRequests*(rt: TuiRuntime; act: RequestsAct;
+                    outcome: var RuntimeOutcome): RequestsActResult =
+  ## PLAT-58: hand `act` to the host (`TuiApp.requestsAct`), which does it
+  ## through the session's `RequestPanelVM` and refreshes the pane (every pane,
+  ## when the debugger moved); its words go to the status line and a copied
+  ## URL to the clipboard.
+  outcome.repaint = true
+  if rt.app.requestsAct.isNil:
+    rt.note("this session has no Requests pane")
+    return
+  result = rt.app.requestsAct(act)
+  if result.copied.len > 0:
+    rt.copyToClipboard(result.copied, "the URL")
+  if result.note.len > 0:
+    rt.note(result.note)
+
+proc showRequestsWindow(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  ## PLAT-58: the list's rows moved (the wheel, the scrollbar, a kept
+  ## selection): the host reports them to the ViewModel, which asks the
+  ## engine for that window of a completed recording.
+  let (_, screen) = rt.requestsPaneScreen()
+  rt.app.requests.scrollTop = clampRequestsTop(rt.app.requests.total,
+    rt.app.requests.scrollTop, screen.listRows)
+  if not rt.app.requestsAct.isNil and screen.listRows > 0:
+    discard rt.app.requestsAct(RequestsAct(kind: rakShow,
+      position: rt.app.requests.scrollTop, rows: screen.listRows))
+  outcome.repaint = true
+
+proc scrollRequests(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
+  ## PLAT-58: the wheel over the Requests pane scrolls its list.
+  rt.app.requests.scrollTop = rt.app.requests.scrollTop + delta
+  rt.showRequestsWindow(outcome)
+
+proc keepRequestSelected(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  ## PLAT-58: the selected request kept in view.
+  let (_, screen) = rt.requestsPaneScreen()
+  let m = rt.app.requests
+  let top = m.revealPosition(screen.listRows, m.selected)
+  if top != clampRequestsTop(m.total, m.scrollTop, screen.listRows):
+    rt.app.requests.scrollTop = top
+    rt.showRequestsWindow(outcome)
+
+proc revealRequestsPane*(rt: TuiRuntime): bool =
+  ## PLAT-58 (Request-Panel.md § N.2, RS-M4): a recording that serves
+  ## requests brings the pane on screen once — the docked REQUESTS pane opened
+  ## at its edge (`cmdOpenDocked`, as the desktop docks it), its tab brought
+  ## forward when the arrangement places it. Whether the layout changed.
+  if not rt.layoutBindingEnabled():
+    return false
+  let b = rt.app.layoutBinding
+  let at = b.layout.dockedIndex(paneRequests)
+  let acted =
+    if at >= 0:
+      if b.layout.docked[at].open: return false
+      b.dispatch(cmdOpenDocked(paneRequests))
+    elif b.layout.tree.contains(paneRequests):
+      b.dispatch(cmdActivateTab(paneRequests))
+    else:
+      return false
+  if acted.status == lasApplied:
+    rt.afterLayoutCommit()
+    rt.rebuildFocus()
+    return true
+  false
+
+proc openRequestsField(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  ## PLAT-58: the URL field — `:requests` alone, a press on the field,
+  ## `list.filter` with the pane focused: the pane shown and the omnibox
+  ## opened on `:requests <the current search>` (Request-Panel.md § N.4).
+  rt.showPane(paneRequests, outcome)
+  rt.openOmnibar(":requests " & rt.app.requests.search)
+  outcome.repaint = true
+
 # ---------------------------------------------------------------------------
 # M71 (#838): the panes whose whole content is in hand — State, Files, VCS —
 # keep an ORDINARY scrollbar (Scrollbar-Scrubbers.md §2), drawn by their
@@ -3326,6 +3443,10 @@ proc applyBarTop(rt: TuiRuntime; bar: BarSpot; top: int;
       rt.app.search.scrollTop = top
     of paneTestResults:
       rt.app.tests.scrollTop = top
+    of paneRequests:
+      # PLAT-58: the view moves; the host reports the rows it now shows.
+      rt.app.requests.scrollTop = top
+      rt.showRequestsWindow(outcome)
     of paneAgentActivity:
       rt.scrollAgentTo(top)
     of paneProblems:
@@ -4113,6 +4234,51 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
       return true
     of tpText, tpNone:
       return false
+  of paneRequests:
+    # PLAT-58 (K58 – K60): a press selects a request and a double press goes
+    # to its handler (the ViewModel counts it); a right press opens the row's
+    # menu; a picker opens its options; the field opens the omnibox on
+    # `:requests`; `Handler ›` goes to the selected request's handler; the
+    # scrollbar is the scrollbars' (`routeScrollbars`).
+    if event.button notin {mbLeft, mbRight} or not rt.app.requests.loaded:
+      return false
+    # A press on the pane focuses it — docked open at its edge included, which
+    # the layout binding's own press does not focus — so its keys follow.
+    rt.app.layoutBinding.focus = paneRequests
+    let (area, screen) = rt.requestsPaneScreen()
+    let t = rt.app.requests.requestsTargetAt(screen, area, event.row,
+                                             event.col)
+    if event.button == mbRight:
+      if t.kind != rqRow or not t.held:
+        return t.kind != rqNone
+      let r = rt.actOnRequests(RequestsAct(kind: rakRowMenu,
+                                           position: t.position), outcome)
+      if r.menu.entries.len > 0:
+        rt.openContextMenu(r.menu, event.row, event.col, outcome)
+      return true
+    case t.kind
+    of rqRow:
+      if t.held:
+        discard rt.actOnRequests(RequestsAct(kind: rakPress,
+          position: t.position, nowMs: rt.scrollbars.clockMs), outcome)
+        rt.keepRequestSelected(outcome)
+      return true
+    of rqMethod, rqStatus:
+      let r = rt.actOnRequests(RequestsAct(kind: rakPickerMenu,
+        text: (if t.kind == rqStatus: "status" else: "method")), outcome)
+      if r.menu.entries.len > 0:
+        rt.openContextMenu(r.menu, event.row + 1, event.col, outcome)
+      return true
+    of rqField:
+      rt.openRequestsField(outcome)
+      return true
+    of rqHandler:
+      discard rt.actOnRequests(RequestsAct(kind: rakGoToHandler), outcome)
+      return true
+    of rqTrack, rqHeader, rqDetail, rqMessage:
+      return true
+    of rqNone:
+      return false
   of paneVcs:
     # K34 / K53: a changed file opens its diff; a commit opens (lists the
     # files it changed) or closes; a commit's file opens that change.
@@ -4240,6 +4406,12 @@ proc runContextAction(rt: TuiRuntime; action: ContextAction;
     rt.openOmnibar(AttachRecordingQuery)
   of caAgentAttachEditorSelection:
     rt.attachAgentContext(target.path, outcome, mustExist = false)
+  of caRequestGoToHandler, caRequestCopyUrl, caRequestFilterMethod,
+     caRequestFilterStatus, caRequestClearFilters:
+    # PLAT-58 (K59, K60): a Requests row's entry or a picker's option, as the
+    # shared Requests model decides it now.
+    discard rt.actOnRequests(RequestsAct(kind: rakMenuChoice, action: action,
+                                         target: target), outcome)
 
 proc routeOverlayMouse(rt: TuiRuntime; event: MouseEvent;
                        outcome: var RuntimeOutcome): bool =
@@ -4471,6 +4643,13 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
     # PLAT-55: the wheel scrolls Problems' list.
     if at.found and at.region.pane == paneProblems and rt.app.problems.loaded:
       rt.scrollProblems(
+        (if event.button == mbWheelDown: CallTraceWheelRows
+         else: -CallTraceWheelRows), outcome)
+      return
+    # PLAT-58: the wheel scrolls the Requests pane's list.
+    if at.found and at.region.pane == paneRequests and
+       rt.app.requests.loaded:
+      rt.scrollRequests(
         (if event.button == mbWheelDown: CallTraceWheelRows
          else: -CallTraceWheelRows), outcome)
       return
@@ -5492,7 +5671,16 @@ proc showPane(rt: TuiRuntime; pane: PaneKind; outcome: var RuntimeOutcome) =
     rt.note($pane & ": the layout is not rearrangeable in this session")
     return
   let b = rt.app.layoutBinding
-  if b.layout.dockedIndex(pane) >= 0:
+  let at = b.layout.dockedIndex(pane)
+  if at >= 0 and b.layout.docked[at].open:
+    # PLAT-58: DOCKED AND ALREADY OPEN at its edge — it is on screen, so it
+    # is focused, not revealed again as a hover overlay over itself (a reveal
+    # left a dock gesture live that took the next Esc).
+    b.focus = pane
+    rt.rebuildFocus()
+    discard rt.focus.focusPaneKind(pane)
+    rt.note("focus " & $pane)
+  elif at >= 0:
     let acted = b.beginRevealDock(pane)
     rt.note(acted.message)
   elif b.layout.tree.contains(pane):
@@ -6771,6 +6959,39 @@ proc runFilesKeyOperation(rt: TuiRuntime; operation: string;
     true
   else: false
 
+proc runRequestsKeyOperation(rt: TuiRuntime; operation: string;
+                             outcome: var RuntimeOutcome): bool =
+  ## PLAT-58 FROM THE KEYBOARD, while the Requests pane has the focus
+  ## (Request-Panel.md § N.4): the `list.*` moves select a request (kept in
+  ## view), `list.activate` goes to its handler, `list.filter` opens the URL
+  ## field, `list.copy` copies its URL, `list.clear-selection` clears it.
+  ## Answers whether `operation` was the pane's.
+  case operation
+  of "list.focus-next", "list.focus-previous", "list.focus-first",
+     "list.focus-last", "list.focus-page-down", "list.focus-page-up",
+     "editor.scroll-line-down", "editor.scroll-line-up":
+    let op = case operation
+             of "editor.scroll-line-down": "list.focus-next"
+             of "editor.scroll-line-up": "list.focus-previous"
+             else: operation
+    discard rt.actOnRequests(RequestsAct(kind: rakKey, operation: op,
+      page: max(1, rt.paneBodyRows(paneRequests) - 4)), outcome)
+    rt.keepRequestSelected(outcome)
+    true
+  of "list.activate":
+    discard rt.actOnRequests(RequestsAct(kind: rakGoToHandler), outcome)
+    true
+  of "list.filter":
+    rt.openRequestsField(outcome)
+    true
+  of "list.copy":
+    discard rt.actOnRequests(RequestsAct(kind: rakCopy), outcome)
+    true
+  of "list.clear-selection":
+    discard rt.actOnRequests(RequestsAct(kind: rakClearSelection), outcome)
+    true
+  else: false
+
 proc runTestsKeyOperation(rt: TuiRuntime; operation: string;
                           outcome: var RuntimeOutcome): bool =
   ## PLAT-53 FROM THE KEYBOARD, while Test Results has the focus (§8.4): Up /
@@ -6924,6 +7145,9 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
       return
     if had and focused == paneProblems and rt.app.problems.loaded and
        rt.runProblemsKeyOperation(res.operation, outcome):
+      return
+    if had and focused == paneRequests and rt.app.requests.loaded and
+       rt.runRequestsKeyOperation(res.operation, outcome):
       return
   # PLAT-55: the docked Problems pane, pressed while shown, takes the list
   # keys too (`dockKeys`).

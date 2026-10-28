@@ -72,6 +72,9 @@ import ../app/frame_viewer_binding
 import ../app/runtime
 import ../app/views/search_results_pane   # PLAT-57
 import ../app/views/agent_activity_pane   # PLAT-54
+import ../app/views/requests_pane   # PLAT-58
+import ../../viewmodel/host/native_requests_host   # PLAT-58: the Requests pane's host
+from isonim/core/async_compat import drainPlatformCallbacks
 import ../../viewmodel/host/native_agent_host   # PLAT-54: Agent Activity's host
 from ../app/edit_binding import EditBuffer, moveCaretTo, caretLine, caretColumn   # the read-only document a result opens in
 import ../app/source_binding
@@ -778,6 +781,135 @@ proc findInFiles*(s: TuiSession; rt: TuiRuntime; query: string): string =
   ""
 
 # ---------------------------------------------------------------------------
+# PLAT-58: the Requests pane
+# ---------------------------------------------------------------------------
+
+proc moved(s: TuiSession; rt: TuiRuntime)
+  ## FORWARD-DECLARED: a press that went to a request's handler moved the
+  ## debugger, and every pane follows (defined beside `applyPaneClick`).
+
+proc requestsModelOf*(vm: RequestPanelVM;
+                      prior: RequestsPaneModel): RequestsPaneModel =
+  ## The session's `RequestPanelVM` as the pane's value: the filter bar's
+  ## words, the refusal, the rows held (every cell the ViewModel's,
+  ## `displayRows`), the selection and its detail. The reading position
+  ## (`scrollTop`) is the pane's own, kept.
+  result = RequestsPaneModel(loaded: not vm.isNil, selected: -1,
+                             scrollTop: prior.scrollTop)
+  if vm.isNil:
+    return
+  result.search = vm.searchText.val
+  result.methodLabel = vm.methodPickerLabel
+  result.statusLabel = vm.statusPickerLabel
+  result.message = vm.navigationMessage.val
+  result.total = vm.matchingCount
+  for d in vm.displayRows():
+    result.rows.add RequestsPaneRow(position: d.position, id: d.id,
+      idText: d.idText, httpMethod: d.httpMethod, url: d.url,
+      status: d.status, duration: d.duration, size: d.size,
+      statusTone: d.statusTone, methodTone: d.methodTone, isOpen: d.isOpen)
+    if d.selected:
+      result.selected = d.position
+  let (ok, req) = vm.selectedRequest()
+  if ok:
+    result.detail = RequestsPaneDetail(shown: true,
+      httpMethod: req.httpMethod, url: req.url,
+      status: (if req.isOpen: InFlightPlaceholder
+               else: detailStatusText(req.statusCode)),
+      methodTone: methodTone(req.httpMethod), statusTone: statusTone(req),
+      refused: req.seekUnavailableReason)
+
+proc refreshRequests*(s: TuiSession; rt: TuiRuntime) =
+  ## The pane's value at this moment — and, when the pane is on screen, the
+  ## rows it shows reported first (Viewport-Driven-Loading V1), so a completed
+  ## recording's window is the one drawn.
+  if s.ended:
+    return
+  # A filter changed since the last read asked the engine for its window at
+  # once (the ViewModel's effect); its answer is applied when the platform's
+  # callbacks run.
+  drainPlatformCallbacks()
+  let vm = s.session.requestsVM
+  if not vm.isNil:
+    let (_, screen) = rt.requestsPaneScreen()
+    if screen.listRows > 0:
+      let top = clampRequestsTop(vm.matchingCount, rt.app.requests.scrollTop,
+                                 screen.listRows)
+      let shown = vm.viewport.val
+      if shown.rows != screen.listRows or shown.firstRow != top:
+        s.session.showRequestWindow(screen.listRows, top)
+  rt.app.requests = requestsModelOf(vm, rt.app.requests)
+
+proc pumpRequests*(s: TuiSession; rt: TuiRuntime; nowMs: int64): bool =
+  ## The idle tick (Request-Panel.md § N.2): the tail polled when due, and —
+  ## once, the first time the recording's requests are known — the pane
+  ## brought on screen. Whether the pane's value (or the layout) changed.
+  if s.ended:
+    return false
+  let vm = s.session.requestsVM
+  if vm.isNil:
+    return false
+  discard s.session.pollRequests(nowMs)
+  var revealed = false
+  if vm.takeReveal():
+    revealed = rt.revealRequestsPane()
+  let before = rt.app.requests
+  s.refreshRequests(rt)
+  revealed or rt.app.requests != before
+
+proc requestsAct*(s: TuiSession; rt: TuiRuntime;
+                  act: RequestsAct): RequestsActResult =
+  ## The pane's act done through the session's `RequestPanelVM` (and, for a
+  ## move, the engine), the panes refreshed.
+  if s.ended:
+    return RequestsActResult(note: EndedSessionNote)
+  let vm = s.session.requestsVM
+  if vm.isNil:
+    return RequestsActResult(note: "this session has no requests")
+  var host: RequestsHostResult
+  case act.kind
+  of rakPress:
+    host = s.session.pressRequest(vm.heldIndexOf(act.position), act.nowMs)
+  of rakGoToHandler:
+    let i = vm.selectedIndex.val
+    host = if i < 0: RequestsHostResult(note: "no request is selected")
+           else: s.session.goToHandler(i)
+  of rakRowMenu:
+    let i = vm.heldIndexOf(act.position)
+    if i >= 0:
+      vm.selectRequest(i)
+      result.menu = vm.requestRowContextMenuOf(i)
+  of rakPickerMenu:
+    result.menu = vm.requestPickerMenuOf(statusPicker = act.text == "status")
+  of rakMenuChoice:
+    host = s.session.runRequestMenu(act.action, act.target)
+  of rakSearch:
+    vm.setSearchText(act.text)
+    host.note = if act.text.len == 0: "the URL search is cleared"
+                else: "requests whose URL contains \"" & act.text & "\""
+  of rakKey:
+    if vm.moveSelection(act.operation, act.page) < 0 and
+       vm.filteredRequests.val.len == 0:
+      host.note = "the Requests pane lists no request"
+  of rakCopy:
+    let (ok, req) = vm.selectedRequest()
+    host = if ok: RequestsHostResult(copied: req.url,
+                                     note: "copied " & req.url)
+           else: RequestsHostResult(note: "no request is selected")
+  of rakClearSelection:
+    vm.selectRequest(NO_SELECTED_INDEX)
+  of rakShow:
+    s.session.showRequestWindow(act.rows, act.position)
+  if host.moved:
+    s.moved(rt)
+  s.refreshRequests(rt)
+  result.note = host.note
+  result.copied = host.copied
+  result.moved = host.moved
+  if host.moved and host.note.len > 0:
+    rt.app.notification = host.note & " — " & rt.app.notification
+
+# ---------------------------------------------------------------------------
 # PLAT-54: Agent Activity
 # ---------------------------------------------------------------------------
 
@@ -1090,6 +1222,8 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   rt.app.points = pointListPaneModelFor(s.points)
   # PLAT-57: Find in Files, this session's.
   s.refreshSearch(rt)
+  # PLAT-58: the Requests pane, this session's.
+  s.refreshRequests(rt)
 
   let locals = s.session.getLocals()
   s.valueTimeline.observeStop(tick, locals)

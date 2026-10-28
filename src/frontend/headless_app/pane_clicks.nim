@@ -124,6 +124,17 @@ type
     caAgentAttachFilesFolders = "agent-attach-files-folders"
     caAgentAttachEditorSelection = "agent-attach-editor-selection"
     caAgentAttachRecording = "agent-attach-recording"
+    caRequestGoToHandler = "request-go-to-handler"
+      ## PLAT-58: the Requests row's menu (Request-Panel.md § N.5), the
+      ## entries `RequestPanelVM.rowMenu` decides, in its order; the request
+      ## is `ContextTarget.index` (its id).
+    caRequestCopyUrl = "request-copy-url"
+    caRequestFilterMethod = "request-filter-method"
+      ## …and a Method picker's choice: the filter becomes
+      ## `ContextTarget.text` ("" for every method).
+    caRequestFilterStatus = "request-filter-status"
+      ## …and a Status picker's choice (`text`: "2xx" … "5xx", or "").
+    caRequestClearFilters = "request-clear-filters"
 
   ContextMenuKind* = enum
     cmkTab = "tab"
@@ -141,6 +152,11 @@ type
     cmkAgentAddContext = "agent-add-context"
       ## The Agent Activity prompt's `+` (the desktop's
       ## `.agent-add-context-dropdown`): opened by a press, not a right-click.
+    cmkRequestRow = "request-row"
+      ## PLAT-58: a row of the Requests pane (K59).
+    cmkRequestPicker = "request-picker"
+      ## PLAT-58: the Requests pane's Method or Status picker, opened as a
+      ## dropdown (K60): one entry per option, the current one hinted.
 
   ContextMenuEntry* = object
     label*: string
@@ -150,6 +166,10 @@ type
     enabled*: bool
     reason*: string
       ## Why a disabled entry is disabled.
+    carriesValue*: bool
+      ## PLAT-58: the entry names its own value (a picker's option), which
+      ## the chosen target carries in `text` (`choose`) — "" included.
+    value*: string
 
   NamedValue* = tuple[name, value: string]
 
@@ -422,6 +442,50 @@ func fileTreeNodeContextMenu*(path: string;
                              hint = (if d.enabled: "" else: d.reason),
                              enabled = d.enabled, reason = d.reason)
 
+const RequestPickerCurrentHint* = "current"
+  ## The hint column of a picker's current option (the desktop's
+  ## `ct-menu-item--active`).
+
+func requestRowContextMenu*(id: int64;
+                            decided: openArray[tuple[label: string;
+                                                     action: ContextAction;
+                                                     enabled: bool;
+                                                     reason: string]]):
+    ContextMenuModel =
+  ## PLAT-58 (K59): a Requests row's menu, from the entries the shared model
+  ## decided (`headless_app/request_menu.requestRowContextMenuOf` reads them
+  ## off `RequestPanelVM.rowMenu`). A disabled entry's reason is its hint too,
+  ## as the Files menu's is.
+  result = ContextMenuModel(kind: cmkRequestRow,
+                            target: ContextTarget(pane: paneRequests,
+                                                  index: id))
+  for d in decided:
+    result.entries.add entry(d.label, d.action,
+                             hint = (if d.enabled: "" else: d.reason),
+                             enabled = d.enabled, reason = d.reason)
+
+func requestPickerContextMenu*(statusPicker: bool;
+                               options: openArray[(string, string)];
+                               current: string): ContextMenuModel =
+  ## PLAT-58 (K60): the Method (or Status) picker as a dropdown — the
+  ## desktop's options in its order, each choosing its value
+  ## (`ContextTarget.text`, "" for All); the current one hinted.
+  result = ContextMenuModel(kind: cmkRequestPicker,
+                            target: ContextTarget(pane: paneRequests,
+                                                  text: current,
+                                                  expression:
+                                                    (if statusPicker: "status"
+                                                     else: "method")))
+  let action = if statusPicker: caRequestFilterStatus
+               else: caRequestFilterMethod
+  for (value, label) in options:
+    var e = entry(label, action,
+                  hint = (if value == current: RequestPickerCurrentHint
+                          else: ""))
+    e.carriesValue = true
+    e.value = value
+    result.entries.add e
+
 func variablesContextMenu*(path: string): ContextMenuModel =
   ## A Variables row's right-click menu — the State pane's
   ## `buildVariableRowContextMenu`: value history and value origin.
@@ -548,7 +612,9 @@ proc choose*(s: var ContextMenuState; index: int):
   let e = s.menu.entries[i]
   if not e.enabled:
     return (false, caNone, s.menu.target)
-  let target = s.menu.target
+  var target = s.menu.target
+  if e.carriesValue:
+    target.text = e.value
   s.close()
   (true, e.action, target)
 
@@ -572,7 +638,7 @@ func k(id, target: string; gestures: set[ClickGesture];
                  desktop: desktop, sharedOp: sharedOp, terminal: terminal,
                  gpui: gpui, note: note)
 
-const ClickInventory*: array[57, ClickBehaviour] = [
+const ClickInventory*: array[60, ClickBehaviour] = [
   k("K1", "Top bar: menu button / item", {cgClick},
     "open the menu; run the item / enter the folder", "MenuVM",
     nsExisting, nsExisting, "PLAT-48/49"),
@@ -744,7 +810,22 @@ const ClickInventory*: array[57, ClickBehaviour] = [
   k("K57", "Problems / Build line", {cgClick},
     "jump to file:line", "source jump", nsNotApplicable, nsNotApplicable,
     "the panes are report leaves natively in a replay (K35 was this row " &
-      "with Find in Files' until PLAT-57 drew that pane)")]
+      "with Find in Files' until PLAT-57 drew that pane)"),
+  k("K58", "Requests: row", {cgClick, cgDoubleClick},
+    "select it / go to the request handler's entry (the Call Trace " &
+      "follows the move)", "RequestPanelVM.pressRow / activate", nsDone,
+    nsDone, "PLAT-58: the ViewModel counts the double press, which neither " &
+      "native platform reports"),
+  k("K59", "Requests: row", {cgRightClick},
+    "menu: Go to Handler, Copy URL, Filter by Method, Filter by Status, " &
+      "Clear Filters", "RequestPanelVM.rowMenu", nsDone, nsDone,
+    "PLAT-58 added the menu on all three front-ends"),
+  k("K60", "Requests: Method / Status picker, URL field", {cgClick},
+    "open the picker's options / focus the URL search",
+    "RequestPanelVM.setFilterMethod / setFilterStatus / setSearchText",
+    nsDone, nsDone,
+    "PLAT-58: the pickers open as dropdowns; the field is the omnibox's " &
+      "(the terminal's command line's) `:requests <text>`")]
 
 func behaviour*(id: string): ClickBehaviour =
   ## The inventory row named `id` (`K1` …); an empty value for an unknown id.

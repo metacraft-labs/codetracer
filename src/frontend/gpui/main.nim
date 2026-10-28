@@ -161,6 +161,9 @@ import ./build_output_leaf     # PLAT-56: Build Output, drawn natively
 import ../tui/app/build_session
 import ../tui/host/build_runner
 import ../tui/host/build_problems
+import ./requests_leaf         # PLAT-58: the Requests pane, drawn natively
+import ../viewmodel/host/native_requests_host   # PLAT-58: its host
+from isonim/core/async_compat import drainPlatformCallbacks
 import ../viewmodel/host/native_test_host   # PLAT-53: the desktop's host, native producers
 import ./agent_activity_leaf   # PLAT-54: Agent Activity, drawn natively
 import ../viewmodel/host/native_agent_host   # PLAT-54: its host
@@ -274,6 +277,13 @@ OPTIONS:
                       build:control:<history|run|stop|clear|follow>
                       build:history:<entry>  build:wheel:<rows>
                       build:status (press the footer's build indicator)
+                    and (PLAT-58) the Requests pane (`<id>` a request's
+                    id, its `#`):
+                      requests:show  requests:row:<id>
+                      requests:double:<id>  requests:menu:<id>
+                      requests:method  requests:status  requests:field
+                      requests:handler  requests:key:<operation>
+                      requests:wheel:<rows>  requests:track:<permille>
                     and (PLAT-69) what an open window's renderer reports:
                       resize:<width>:<height> (the content area resized)
                       chrome:<spec> (its frame changed; `--window-chrome`'s
@@ -654,6 +664,8 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
                        "problems",
                        # PLAT-56: Build Output's lines and controls.
                        "build",
+                       # PLAT-58: the Requests pane's rows, menus, field.
+                       "requests",
                        # PLAT-69: the window resized, its frame changed.
                        "resize", "chrome"]:
           return GpuiCommand(kind: gckUsageError,
@@ -1112,6 +1124,8 @@ proc syncTestsTabs()
   ## Test-Results-Pane.md §9: forward-declared; defined with the tests host.
 
 proc drawTestsPane(r: GpuiRenderer)
+proc drawRequestsPane(r: GpuiRenderer)
+  ## PLAT-58: forward-declared; defined beside Test Results' drawing.
   ## PLAT-53: forward-declared; defined beside Find in Files' drawing.
 proc drawAgentPane(r: GpuiRenderer)
   ## PLAT-54: forward-declared; defined beside Find in Files' drawing.
@@ -1255,6 +1269,8 @@ var
     ## store, so a live agent's session is the one its tab reports.
   gSearch = initGSearchPane()
   gTests = initGTestsPane()
+  gRequests = initGRequestsPane()
+    ## PLAT-58: the Requests pane's reading position and a held thumb.
     ## PLAT-53: the Test Results pane's reading position and selection.
   gTestsVM: TestResultsVM = nil
     ## PLAT-53: the WINDOW's Test Results ViewModel — its project's tests
@@ -2231,6 +2247,8 @@ proc drawArrangement(r: GpuiRenderer): bool =
   drawSearchPane(r)
   # PLAT-53: and Test Results from its own.
   drawTestsPane(r)
+  # PLAT-58: and the Requests pane from the session's.
+  drawRequestsPane(r)
   # PLAT-54: and Agent Activity from its own.
   drawAgentPane(r)
   # PLAT-55: and Problems from its own.
@@ -3100,6 +3118,48 @@ proc drawProblemsPane(r: GpuiRenderer) =
   if drawProblems(r, pane, gProblems.vm, gProblemsPane, problemsBody()):
     applyTextFaces(r, pane)
 
+proc requestsVM(): RequestPanelVM =
+  ## PLAT-58: the shown session's `RequestPanelVM`.
+  if gSession.isNil: nil else: gSession.requestsVM
+
+proc requestsBody(): PxRect =
+  ## PLAT-58: the Requests pane's body in window pixels — revealed, docked
+  ## open, or the visible tab of a box — or a zero rectangle.
+  if gGestures.revealing and gGestures.reveal.pane == paneRequests:
+    return dockedBodyOf(gGeom.revealRectOf(gGestures.reveal.edge))
+  if not gGeom.openDock.isEmpty and gGeom.openDockPane == $paneRequests:
+    return dockedBodyOf(gGeom.openDock)
+  let i = gGeom.tabsNodeOfPane($paneRequests)
+  if i < 0:
+    return PxRect()
+  let n = gGeom.nodes[i]
+  if n.panes.len > 0 and n.active >= 0 and n.active < n.panes.len and
+     n.panes[n.active] != $paneRequests:
+    return PxRect()
+  n.body
+
+proc drawRequestsPane(r: GpuiRenderer) =
+  ## PLAT-58: draw the Requests pane from the session's ViewModel, natively,
+  ## replacing whatever the leaf held — after reporting the rows it shows, so
+  ## a completed recording's window is the one drawn (Viewport-Driven-Loading
+  ## V1).
+  let pane = gPanes.getOrDefault($paneRequests)
+  let vm = requestsVM()
+  if pane.isNil or vm.isNil:
+    return
+  # A filter changed since the last draw asked the engine for its window at
+  # once (the ViewModel's effect); its answer is applied when the platform's
+  # callbacks run.
+  drainPlatformCallbacks()
+  let body = requestsBody()
+  if body.w > 0:
+    let (rows, top) = gRequests.shownRows(vm, body)
+    let shown = vm.viewport.val
+    if rows > 0 and (shown.rows != rows or shown.firstRow != top):
+      gSession.showRequestWindow(rows, top)
+  if drawRequests(r, pane, vm, gRequests, body):
+    applyTextFaces(r, pane)
+
 proc drawTestsPane(r: GpuiRenderer) =
   ## PLAT-53: draw Test Results from the window's ViewModel, natively,
   ## replacing whatever the leaf held.
@@ -3183,6 +3243,8 @@ proc agentLive(): bool =
 
 proc pressSearch(r: GpuiRenderer; x, y: int): bool
 proc pressTests(r: GpuiRenderer; x, y: int): bool
+proc pressRequests(r: GpuiRenderer; x, y: int; right = false): bool
+  ## PLAT-58: forward-declared; defined beside the Requests pane's host.
   ## PLAT-53: forward-declared; defined beside the Test Results host.
 proc pressAgent(r: GpuiRenderer; x, y: int): bool
 proc runAgentPrompt(r: GpuiRenderer; text: string)
@@ -3201,6 +3263,8 @@ proc runGpuiFindInFiles(r: GpuiRenderer; pattern: string)
 proc openFindInFiles(r: GpuiRenderer)
 proc stepSearchResult(r: GpuiRenderer; delta: int)
 proc wireSearch(s: HeadlessDebugSession)
+proc wireRequestsOf(s: HeadlessDebugSession)
+proc pumpRequestsWindow(r: GpuiRenderer): bool
   ## PLAT-57: forward-declared; defined beside the editor's caret, which
   ## opening a result places.
 
@@ -3636,6 +3700,9 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     leaveFilesField(r)
   case kind
   of gekContextMenu:
+    # PLAT-58 (K59): a right press on a Requests row opens its menu.
+    if pressRequests(r, x, y, right = true):
+      return
     # PLAT-50 (K42): a right-click on a docked pane's label opens the
     # desktop's strip menu (`ui/auto_hide`'s `onContextMenu`).
     let (si, sl) = gGeom.slotAt(x, y)
@@ -3672,6 +3739,14 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       gFocusShown = true
       if gFocusPane != $paneTestResults:
         focusWindowPane(r, $paneTestResults)
+        discard drawArrangement(r)
+      return
+    # PLAT-58: the Requests pane's presses (a row, the pickers, the field,
+    # `Handler ›`, the scrubber), on the same rule.
+    if pressRequests(r, x, y):
+      gFocusShown = true
+      if gFocusPane != $paneRequests:
+        focusWindowPane(r, $paneRequests)
         discard drawArrangement(r)
       return
     # PLAT-54: Agent Activity's presses, on the same rule.
@@ -3765,6 +3840,12 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
         gTests.scrubTests(gTestsVM, testsBody(), y, dragging = true)
         drawTestsPane(r)
       return
+    if gRequests.dragging:
+      let vm = requestsVM()
+      if not vm.isNil:
+        gRequests.scrubRequests(vm, requestsBody(), y, dragging = true)
+        drawRequestsPane(r)
+      return
     if gAgent.dragging:
       let h = agentHost()
       if not h.isNil:
@@ -3806,6 +3887,9 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       return
     if gSearch.dragging:
       gSearch.dragging = false
+      return
+    if gRequests.dragging:
+      gRequests.dragging = false
       return
     if gAgent.dragging:
       gAgent.dragging = false
@@ -3869,6 +3953,15 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       gTests.scrollBy(gTestsVM, tests, (if rows == 0: (if dy < 0: 1 else: -1)
                                         else: rows))
       drawTestsPane(r)
+      return
+    # PLAT-58: and the Requests pane's list.
+    let requests = requestsBody()
+    if requests.w > 0 and requests.contains(x, y) and dy != 0.0 and
+       not requestsVM().isNil:
+      let rows = int(round(-dy / float(RequestsRowPx)))
+      gRequests.scrollBy(requestsVM(), requests,
+                         (if rows == 0: (if dy < 0: 1 else: -1) else: rows))
+      drawRequestsPane(r)
       return
     # PLAT-54: and Agent Activity's lines.
     let agent = agentBody()
@@ -5452,6 +5545,7 @@ proc refreshReplayWindow(r: GpuiRenderer) =
   drawTestsPane(r)
   drawProblemsPane(r)
   drawBuildPane(r)
+  drawRequestsPane(r)
   drawListScrubbers(r)
   gOmnibar.setIndex(omnibarIndexOf(gSession.session.fileTreeVM,
                                    gSession.session.store, gMenu,
@@ -5488,6 +5582,9 @@ proc showSession(r: GpuiRenderer; id: HeadlessSessionId) =
   # PLAT-69: the window is called after the recording it shows.
   noteWindowTitle(windowTitleFor(gSession))
   refreshReplayWindow(r)
+  # PLAT-58: the session's requests counted, and the pane revealed once
+  # when it serves any.
+  discard pumpRequestsWindow(r)
   discard drawArrangement(r)
 
 proc openRecordingInTab(r: GpuiRenderer; path: string) =
@@ -5526,6 +5623,7 @@ proc openRecordingInTab(r: GpuiRenderer; path: string) =
     title = extractFilename(opened.tracePath.strip(chars = {'/'})),
     layout = layout, adopt = opened.sdk)
   wireSearch(opened)
+  wireRequestsOf(opened)
   gSessionsOpened[int(slot.id)] = opened
   traceGesture("opened " & path & " as tab " & $slot.id)
   showSession(r, slot.id)
@@ -6204,7 +6302,12 @@ proc performControl(r: GpuiRenderer; id: string) =
 
 proc showPaneFromMenu(r: GpuiRenderer; pane: PaneKind) =
   let layout = committedLayout()
-  if layout.dockedIndex(pane) >= 0:
+  let docked = layout.dockedIndex(pane)
+  if docked >= 0 and layout.docked[docked].open:
+    # PLAT-58: DOCKED AND ALREADY OPEN at its edge — on screen, so focused,
+    # not revealed again as a hover overlay over itself.
+    focusWindowPane(r, $pane)
+  elif docked >= 0:
     let shown = beginReveal(layout, pane)
     if shown.isSome:
       gGestures.reveal = shown.get
@@ -6485,6 +6588,9 @@ proc runGpuiPointMenuOp(r: GpuiRenderer; op: PointMenuOp) =
 
 proc runWatchCommand(r: GpuiRenderer; query: string): bool
   ## PLAT-51: forward-declared; defined beside the value history.
+proc openRequestsField(r: GpuiRenderer)
+proc applyRequestsSearch(r: GpuiRenderer; text: string)
+  ## PLAT-58: forward-declared; defined beside the Requests pane's host.
 
 proc showShortcutReference(r: GpuiRenderer) =
   ## PLAT-68 (Base-Keymaps §5.4, §5.6): THE SHORTCUT REFERENCE for where the
@@ -6519,6 +6625,22 @@ proc acceptOmnibar(r: GpuiRenderer) =
   # the search runs into the pane; `:grep` alone keeps the field open.
   # `:cnext` / `:cprev` (`:cn` / `:cp`) open the next / previous result.
   let (mode, needle) = classifyOmnibarQuery(gOmnibar.query)
+  # PLAT-58 (Request-Panel.md § N.4): `:requests <text>` is the Requests
+  # pane's URL search; `:requests` alone keeps the field open; `:requests `
+  # with nothing after the verb clears it.
+  let requests = requestsCommandOf(gOmnibar.query)
+  if requests.isRequests:
+    # `:requests` alone with a search on clears it (the field opens holding
+    # the search; emptied and submitted, it arrives as the bare verb); with
+    # none it opens the field.
+    let current = if requestsVM().isNil: "" else: requestsVM().searchText.val
+    if requests.openField and current.len == 0:
+      openRequestsField(r)
+    else:
+      gOmnibar.close()
+      drawTopBar(r)
+      applyRequestsSearch(r, requests.search)
+    return
   # PLAT-54: `/ai <text>` is the agent query (the desktop's): the omnibox
   # closes, Agent Activity is shown and the prompt goes to the agent.
   if mode == omAgent:
@@ -6867,6 +6989,8 @@ proc hoverTick() {.cdecl.}
 proc vcsTick() {.cdecl.}
 proc recordTick() {.cdecl.}
 proc searchTick() {.cdecl.}
+proc requestsTick() {.cdecl.}
+proc requestsLive(): bool
 proc agentTick() {.cdecl.}
 proc certificateTick() {.cdecl.}
 const CertificatePollMs = 25
@@ -6914,6 +7038,12 @@ proc armHoverTick() =
     if gArmedTick != want:
       gArmedTick = want
       gpui_set_tick(uint32(AgentPollMs), agentTick)
+    return
+  # PLAT-58: a live session's request tail, every
+  # `RequestSpanPollIntervalMs`.
+  if due < 0 and requestsLive():
+    gArmedTick = (due: -6'i64, vcs: false)
+    gpui_set_tick(uint32(RequestSpanPollIntervalMs), requestsTick)
     return
   # PLAT-51: a welcome tab's `ct record` is polled on the same tick, every
   # `RecordPollMs`, while it runs.
@@ -7892,6 +8022,164 @@ proc certificateTick() {.cdecl.} =
   pollCertificateIndicator(r)
   armHoverTick()
 
+# ---------------------------------------------------------------------------
+# PLAT-58: the Requests pane's host (`Request-Panel.md` § N.2, N.4)
+# ---------------------------------------------------------------------------
+
+proc requestsSay(r: GpuiRenderer; host: RequestsHostResult) =
+  ## What an act on the pane did: a move followed by every pane, a URL put
+  ## on the clipboard, the words traced.
+  if host.copied.len > 0:
+    copyToClipboard(host.copied, "the URL")
+  if host.moved:
+    gViewedFile = ""
+    refreshReplayWindow(r)
+  if host.note.len > 0:
+    traceGesture("requests: " & host.note)
+  drawRequestsPane(r)
+
+proc keepRequestShown(vm: RequestPanelVM) =
+  ## The selected request kept in view.
+  gRequests.revealPosition(vm, requestsBody(),
+                           vm.positionOf(vm.selectedIndex.val))
+
+proc openRequestsField(r: GpuiRenderer) =
+  ## `:requests` alone, a press on the field, `list.filter` with the pane
+  ## focused: the pane shown and the omnibox on `:requests <the search>`.
+  showPaneFromMenu(r, paneRequests)
+  let vm = requestsVM()
+  openOmnibar(r, CommandPrefix & RequestsCommandVerb & " " &
+                 (if vm.isNil: "" else: vm.searchText.val))
+
+proc applyRequestsSearch(r: GpuiRenderer; text: string) =
+  ## `:requests <text>`: the URL search, the pane shown.
+  showPaneFromMenu(r, paneRequests)
+  let vm = requestsVM()
+  if vm.isNil:
+    traceGesture("requests: this window has no session")
+    return
+  vm.setSearchText(text)
+  gRequests.scrollTop = 0
+  traceGesture("requests: search '" & text & "'")
+  drawRequestsPane(r)
+
+proc pressRequests(r: GpuiRenderer; x, y: int; right = false): bool =
+  ## A press on the Requests pane: a row is selected (a double press goes to
+  ## its handler), a right press opens its menu, a picker opens its options,
+  ## the field opens the omnibox on `:requests`, `Handler ›` goes to the
+  ## selected request's handler, the scrubber moves the view. Every press on
+  ## the pane is the pane's.
+  let vm = requestsVM()
+  let body = requestsBody()
+  if vm.isNil or body.w <= 0 or not body.contains(x, y):
+    return false
+  let hit = requestsHitAt(vm, gRequests, body, x, y)
+  if right:
+    if hit.kind == grqRow and hit.index >= 0:
+      vm.selectRequest(hit.index)
+      drawRequestsPane(r)
+      openContextMenuAt(r, vm.requestRowContextMenuOf(hit.index), x, y)
+    return true
+  let nowMs = int64(epochTime() * 1000)
+  case hit.kind
+  of grqNone, grqOther: discard
+  of grqRow:
+    if hit.index >= 0:
+      let host = gSession.pressRequest(hit.index, nowMs)
+      traceGesture("requests: press #" & $hit.position & " -> " &
+                   $vm.selectedIndex.val)
+      requestsSay(r, host)
+  of grqMethod, grqStatus:
+    let lay = requestsLayout(vm, body)
+    let at = if hit.kind == grqStatus: lay.statusPicker else: lay.methodPicker
+    openContextMenuAt(r, vm.requestPickerMenuOf(hit.kind == grqStatus),
+                      at.x, at.y + at.h)
+  of grqField:
+    openRequestsField(r)
+  of grqHandler:
+    let i = vm.selectedIndex.val
+    if i >= 0:
+      requestsSay(r, gSession.goToHandler(i))
+  of grqTrack, grqThumb:
+    gRequests.dragging = hit.kind == grqThumb
+    if gRequests.dragging:
+      let lay = requestsLayout(vm, body)
+      gRequests.scrubberOf(vm.matchingCount, lay.rows).beginBarGrab(
+        hit.fraction)
+    gRequests.scrubRequests(vm, body, y, dragging = gRequests.dragging)
+    drawRequestsPane(r)
+  true
+
+proc requestsKey(r: GpuiRenderer; operation: string): bool =
+  ## PLAT-58 from the keyboard, the pane focused (§ N.4): the `list.*` moves
+  ## select a request, `list.activate` goes to its handler, `list.filter`
+  ## opens the URL field, `list.copy` copies its URL, `list.clear-selection`
+  ## clears it. Whether it was the pane's.
+  let vm = requestsVM()
+  if vm.isNil or gFocusPane != $paneRequests:
+    return false
+  case operation
+  of "list.focus-next", "list.focus-previous", "list.focus-first",
+     "list.focus-last", "list.focus-page-down", "list.focus-page-up":
+    let lay = requestsLayout(vm, requestsBody())
+    if vm.moveSelection(operation, max(1, lay.rows - 1)) < 0:
+      traceGesture("requests: the Requests pane lists no request")
+    keepRequestShown(vm)
+    drawRequestsPane(r)
+  of "list.activate":
+    let i = vm.selectedIndex.val
+    if i < 0:
+      traceGesture("requests: no request is selected")
+    else:
+      requestsSay(r, gSession.goToHandler(i))
+  of "list.filter":
+    openRequestsField(r)
+  of "list.copy":
+    let (ok, req) = vm.selectedRequest()
+    if ok: copyToClipboard(req.url, "the URL")
+    else: traceGesture("requests: no request is selected")
+  of "list.clear-selection":
+    vm.selectRequest(NO_SELECTED_INDEX)
+    drawRequestsPane(r)
+  else:
+    return false
+  true
+
+proc requestsLive(): bool =
+  ## A live session's tail is polled on the window's tick (§ N.2).
+  let vm = requestsVM()
+  not vm.isNil and not vm.store.isNil and
+    vm.store.session.val.debugSessionMode.historicalModeTarget()
+
+proc pumpRequestsWindow(r: GpuiRenderer): bool =
+  ## The tail polled when due and — once, the first time the recording's
+  ## requests are known — the docked REQUESTS pane opened (RS-M4: the
+  ## desktop docks it). Whether anything changed.
+  let vm = requestsVM()
+  if vm.isNil or gSession.isNil:
+    return false
+  result = gSession.pollRequests(int64(epochTime() * 1000))
+  if vm.takeReveal():
+    let layout = committedLayout()
+    let at = layout.dockedIndex(paneRequests)
+    if at >= 0 and not layout.docked[at].open:
+      applyGestureCommand(r, cmdOpenDocked(paneRequests))
+      traceGesture("requests: revealed")
+      discard drawArrangement(r)
+    elif at < 0 and layout.tree.contains(paneRequests):
+      applyGestureCommand(r, cmdActivateTab(paneRequests))
+      discard drawArrangement(r)
+    result = true
+  if result:
+    drawRequestsPane(r)
+
+proc requestsTick() {.cdecl.} =
+  ## A live session's tail, every `RequestSpanPollIntervalMs`.
+  var r: GpuiRenderer
+  gArmedTick = (due: -2'i64, vcs: false)
+  discard pumpRequestsWindow(r)
+  armHoverTick()
+
 proc recordTick() {.cdecl.} =
   ## PLAT-51: the welcome tab's recording, polled; when it finishes its
   ## recording opens in the tab that asked (`pollWelcomeRecording`).
@@ -8677,6 +8965,15 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
   of caJumpToValue:
     traceGesture(target.expression & " = " & target.text &
                  " is the value at this step")
+  of caRequestGoToHandler, caRequestCopyUrl, caRequestFilterMethod,
+     caRequestFilterStatus, caRequestClearFilters:
+    # PLAT-58 (K59, K60): a Requests row's entry or a picker's option, as
+    # the shared Requests model decides it now.
+    gRequests.scrollTop =
+      if action in {caRequestFilterMethod, caRequestFilterStatus,
+                    caRequestClearFilters}: 0
+      else: gRequests.scrollTop
+    requestsSay(r, gSession.runRequestMenu(action, target))
   of caFileCreate, caFileRename, caFileDelete, caFileEdit:
     # K19: the Files pane's entries, as the shared Files model decides them
     # now — the replay's tree, or Edit mode's opened folder. Opening a file
@@ -8729,6 +9026,14 @@ proc placeCaret(r: GpuiRenderer; path: string; line, column: int) =
     drawDebugDocument(r)
   traceGesture("caret " & $gDebugDocs[path].caretLine & ":" &
                $(gDebugDocs[path].caretColumn + 1))
+
+proc wireRequestsOf(s: HeadlessDebugSession) =
+  ## PLAT-58: a request whose execution is in another recording opens it in a
+  ## new session tab (`openRecordingInTab`).
+  wireRequests(s, proc(path: string): string =
+    var r: GpuiRenderer
+    openRecordingInTab(r, path)
+    "")
 
 proc wireSearch(s: HeadlessDebugSession) =
   ## PLAT-57: the session's Find in Files searches go to the shared runner,
@@ -9398,6 +9703,9 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
   let palette = paletteQueryOf(res.operation)
   if palette.ok:
     openOmnibar(r, palette.query)
+    return
+  # PLAT-58: the focused Requests pane takes its list operations first.
+  if res.operation.startsWith("list.") and requestsKey(r, res.operation):
     return
   case res.operation
   of "editor.toggle-read-only":
@@ -10184,6 +10492,10 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
     if not laidOut:
       for pane in leaves:
         r.appendChild(container, pane)
+    else:
+      # PLAT-58: the first session's requests counted, and the docked
+      # REQUESTS pane opened when the recording serves any (RS-M4: once).
+      discard pumpRequestsWindow(r)
   if not laidOut:
     # No document to follow (a refused projection draws its refusal as its
     # one leaf): the leaves tile one row, as they always have.
@@ -10739,6 +11051,70 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
           at += w
       pressAt(x, y)
       return ""
+    of "requests":
+      # PLAT-58: the Requests pane, aimed from the geometry it was drawn
+      # with (`requests_leaf.requestsLayout`); a row by its request's id,
+      # scrolled into view first.
+      if parts[1] == "show":
+        showPaneFromMenu(r, paneRequests)
+        discard pumpRequestsWindow(r)
+        return ""
+      if parts[1] == "key":
+        gFocusPane = $paneRequests
+        if not requestsKey(r, parts[2]):
+          return "the Requests pane does not take '" & parts[2] & "'"
+        return ""
+      let vm = requestsVM()
+      let body = requestsBody()
+      if vm.isNil or body.w <= 0:
+        return "the Requests pane is not drawn"
+      let lay = requestsLayout(vm, body)
+      case parts[1]
+      of "row", "double", "menu":
+        var position = -1
+        for i, q in vm.filteredRequests.val:
+          if $q.id == parts[2]:
+            position = vm.positionOf(i)
+        if position < 0:
+          return "no request " & parts[2] & " is listed"
+        gRequests.revealPosition(vm, body, position)
+        drawRequestsPane(r)
+        let (x, y) = rowCentre(vm, gRequests, body, position)
+        if x < 0:
+          return "request " & parts[2] & " is not in view"
+        if parts[1] == "menu":
+          windowPointer(r, gekContextMenu, x, y)
+        else:
+          pressAt(x, y)
+          if parts[1] == "double":
+            pressAt(x, y)
+      of "method":
+        let (x, y) = centreOf(lay.methodPicker)
+        pressAt(x, y)
+      of "status":
+        let (x, y) = centreOf(lay.statusPicker)
+        pressAt(x, y)
+      of "field":
+        let (x, y) = centreOf(lay.field)
+        pressAt(x, y)
+      of "handler":
+        if lay.handler.w <= 0:
+          return "no request's handler can be gone to"
+        let (x, y) = centreOf(lay.handler)
+        pressAt(x, y)
+      of "wheel":
+        let (cx, cy) = centreOf(lay.list)
+        windowPointer(r, gekWheel, cx, cy, -float(at(2) * RequestsRowPx))
+      of "track":
+        if not lay.overflow:
+          return "the list does not overflow"
+        let track = listTrackRect(PxRect(x: body.x,
+          y: lay.list.y - ChromePaddingPx, w: body.w,
+          h: lay.list.h + 2 * ChromePaddingPx))
+        pressAt(track.x + ListTrackPx div 2,
+                track.y + min(track.h - 1, track.h * at(2) div 1000))
+      else:
+        return "unknown requests event '" & parts[1] & "'"
     of "search":
       # PLAT-57: Find in Files, aimed from the geometry it was drawn with
       # (`search_results_leaf.searchLayout`):
@@ -12095,6 +12471,7 @@ proc runOpen(cmd: GpuiCommand): int =
   gSession = session
   applyRememberedColumnWidths()
   wireSearch(session)
+  wireRequestsOf(session)
   # PLAT-48: the top bar's shared ViewModels. The menu is the product's tree
   # with what this window performs enabled, its chords none (the window has
   # no keymap of its own for the debugger yet); the omnibar searches the

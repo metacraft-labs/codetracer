@@ -98,6 +98,8 @@ from ../viewmodel/viewmodels/test_results_vm import TraceOpenPolicy,
   TestTabPlacement, TestTabPlacementKind, placeTestRecording, testTabOf,
   noteTestTab, forgetTestTab   # Test-Results-Pane.md §9
 import ./host/build_output_source   # PLAT-56
+from ../viewmodel/host/native_requests_host import wireRequests   # PLAT-58
+import ./app/views/requests_pane   # PLAT-58: `RequestsAct`
 # PLAT-49 part B: the session strip's sessions — opened, adopted, closed here.
 import headless_app/headless_app
 import headless_app/session_tabs
@@ -945,6 +947,11 @@ proc interactive(command: TuiCommand): int =
     session.setViewportHeight(rt.sourcePaneRows())
     session.learnExtent()
     session.wireFindInFiles()
+    # PLAT-58: a request whose execution is in another recording opens it in
+    # a new session tab (`recordingOpener`, set below).
+    wireRequests(session.session, proc(path: string): string =
+      if app.recordingOpener.isNil: "this terminal cannot open " & path
+      else: app.recordingOpener(path))
     session.refresh(rt)
   except DapStalledError as e:
     driver.stop()
@@ -1045,6 +1052,9 @@ proc interactive(command: TuiCommand): int =
       title = extractFilename(opened.session.tracePath.strip(chars = {'/'})),
       layout = rt.debugArrangementOf(), adopt = opened.session.sdk)
     opened.wireFindInFiles()
+    wireRequests(opened.session, proc(path: string): string =
+      if app.recordingOpener.isNil: "this terminal cannot open " & path
+      else: app.recordingOpener(path))
     sessions[int(slot.id)] = opened
     # M76: OPENED FROM A TAB WHOSE SESSION *STOP* ENDED — *File › Open
     # Trace…* (or *Record New Trace…*) chosen there, whose welcome tab
@@ -1118,6 +1128,11 @@ proc interactive(command: TuiCommand): int =
   # The prompt's "add context" menu (DeepReview-GUI.md §2.2.7).
   app.agentAttach = proc(context: string; mustExist: bool): string =
     session.agentAttach(rt, context, mustExist)
+  # PLAT-58: the Requests pane — a press, a menu, the URL search, a key —
+  # done through the shown session's `RequestPanelVM`; its tail is polled on
+  # the idle tick below.
+  app.requestsAct = proc(act: RequestsAct): RequestsActResult =
+    session.requestsAct(rt, act)
 
   # PLAT-47 deliverable 4: the VCS pane reads the directory the desktop's VCS
   # panel reads for a replay — the process's own working directory.
@@ -1445,6 +1460,9 @@ proc interactive(command: TuiCommand): int =
       let searched = session.pumpFindInFiles(rt)
       # PLAT-54: what a live agent sent since the last tick.
       let agentChanged = session.pumpAgent(rt)
+      # PLAT-58: the Requests pane's tail (a live session's), and its reveal
+      # once the recording's requests are known.
+      let requestsChanged = session.pumpRequests(rt, nowMs())
       # PLAT-51: a welcome tab's recording, when it finishes.
       let recorded = pollRecording()
       # PLAT-49 part B: the auto-hide hover's clock — a preview due after
@@ -1461,7 +1479,8 @@ proc interactive(command: TuiCommand): int =
       let keysChanged = rt.pollKeybindings(keybindings)
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
          hoverChanged or frameOwed or recorded or keysChanged or searched or
-         barsChanged or testsChanged or agentChanged or problemsChanged:
+         barsChanged or testsChanged or agentChanged or problemsChanged or
+         requestsChanged:
         paint(driver, rt)
         frameOwed = false
     of dekResize:

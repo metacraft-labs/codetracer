@@ -66,6 +66,7 @@ import ./views/search_results_pane
 import ./views/test_results_pane
 import ./views/agent_activity_pane
 import ./views/problems_pane
+import ./views/requests_pane
 import ./views/point_list
 
 export headless_app
@@ -304,6 +305,10 @@ type
       ## PLAT-55. The PROBLEMS pane's model, as a value, filled by the host
       ## (`host/problems_source.nim`) from the window's `ErrorsVM`, which the
       ## window's builds feed; its `scrollTop` is the pane's own.
+    requests*: RequestsPaneModel
+      ## PLAT-58. THE REQUESTS pane's model, as a value, filled by the host
+      ## (`host/tui_session.requestsModelOf`) from the session's
+      ## `RequestPanelVM`; its `scrollTop` is the pane's own reading position.
     build*: BuildSession
       ## PLAT-16. The build or run in flight, or the last one's verdict, or
       ## `nil` for a session that has never built. `nil` is a state the pane
@@ -386,6 +391,11 @@ type
       ## the next prompt (`native_agent_host.attachContext`; an editor
       ## selection is attached as the editor names it, `mustExist` false).
       ## The words the status line shows.
+    requestsAct*: proc(act: RequestsAct): RequestsActResult {.closure.}
+      ## PLAT-58: the HOST's answer to an act on the Requests pane — a press,
+      ## a menu built or chosen, the URL search, a key — done through the
+      ## session's `RequestPanelVM` (`tui_session.requestsAct`), the pane's
+      ## model refreshed. Nil when no host owns the pane.
     recordingOpener*: proc(path: string): string {.closure.}
       ## PLAT-49 part B: the HOST's "open this recording in a new session
       ## tab" — "" when it opened, else why not. Nil when the host cannot
@@ -704,6 +714,7 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     tests: app.tests,
     agent: app.agent,
     problems: app.problems,
+    requests: app.requests,
     build: build,
     product: app.modes.product,
     edit: (if app.editSession.isNil: initEditPaneModel()
