@@ -1081,6 +1081,18 @@ proc interactive(command: TuiCommand): int =
         if t.id == stoppedId:
           at = i
       if app.shell.closeSession(stoppedId, disconnectBackend = false):
+        # THE AGENT STAYS WITH THE TAB (DeepReview-GUI.md §2.2.4): the replay
+        # is what is replaced; the Agent Activity host — its conversation, a
+        # live agent, the prompt's attachments — moves onto the new session,
+        # as the desktop's panel keeps them when it loads a recording in
+        # place.
+        let old = sessions[int(stoppedId)]
+        if not old.agent.isNil:
+          let store = opened.agent.store   # the new session's own
+          opened.agent.close()
+          opened.agent = old.agent
+          old.agent = nil
+          opened.agent.rehome(store)
         sessions[int(stoppedId)].close()
         sessions.del(int(stoppedId))
         if at >= 0:
@@ -1207,9 +1219,26 @@ proc interactive(command: TuiCommand): int =
     if s.isNil or s.agent.isNil:
       return
     s.agent.vcs = vcs.vm
+    # §2.2.4: `[Open recording]` replaces the current tab's session when it
+    # is a live replay in Debug mode (the Test Results pane's rule 3 test),
+    # and the host opens a new tab otherwise.
+    s.agent.currentTabReplaceable = proc(): bool =
+      sessions.hasKey(int(shownId)) and not session.isNil and
+        not session.ended and app.modes.product == pmDebug
     s.agent.openRecording = proc(request: TraceOpenRequest): string =
-      if app.recordingOpener.isNil: "this terminal cannot open a recording"
-      else: app.recordingOpener(request.tracePath)
+      if app.recordingOpener.isNil:
+        return "this terminal cannot open a recording"
+      if request.policy != topCurrentTab:
+        return app.recordingOpener(request.tracePath)
+      let replaced = int(shownId)
+      replaceTab = replaced
+      result =
+        try: app.recordingOpener(request.tracePath)
+        finally: replaceTab = -1
+      if result.len == 0 and not testsTabs.isNil:
+        # Test-Results-Pane §9.2: a tab whose session was replaced is no
+        # test's tab any more.
+        testsTabs(replaced)
   agentWiring = wireAgent
   # An evidence card's review lands in the VCS pane at once, not at its next
   # refresh.

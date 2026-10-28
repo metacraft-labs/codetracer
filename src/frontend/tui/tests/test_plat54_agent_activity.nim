@@ -29,9 +29,10 @@
 ##     indicator (`session_tabs.agentOf`, what the strip draws) says running
 ##     exactly while the pane's prompt says Stop, and both say done at the end;
 ##     a reader who scrolled up stays on their line while rows arrive;
-##   * THE STATUS LINE after a recording button: both open a NEW session tab
-##     natively, and the status line says so — and, for `[Open recording]`,
-##     why (§2.2.4);
+##   * THE STATUS LINE after a recording button (§2.2.4): `[Open in new tab]`
+##     opens a NEW session tab, `[Open recording]` replaces this tab's
+##     session when it is a replay and otherwise opens a new tab and says
+##     why — and the status line says where each went;
 ##   * THE PROMPT'S "ADD CONTEXT" MENU (§2.2.7): `[+]` pressed with SGR bytes
 ##     opens the desktop's four items; *Editor selection* attaches the shown
 ##     file at the caret's line, *Files & folders* and *Recording / trace*
@@ -47,10 +48,13 @@
 ## justifies it: a production agent cannot hold a known session on demand);
 ## everything on CodeTracer's side is production code. THE ONE STAND-IN is
 ## the window's `openRecording` seam — in the shipped terminal
-## `app.recordingOpener`, which starts a replay in a new tab (the PTY suite,
-## `real_terminal/test_plat54_agent_activity_pty.nim`, drives that half).
-## Here it records the request, and the suite checks the folder it names is
-## a real recording: it captures, it does not pretend.
+## `app.recordingOpener`, which starts a replay in a new tab or in place of
+## the current one (the PTY suite, `real_terminal/test_plat54_agent_activity_pty.nim`,
+## drives that half) — with its companion `currentTabReplaceable`, the
+## window's answer to "is this tab a replay". Here the first records the
+## request and the second is set by the suite to each answer in turn; the
+## suite checks the folder named is a real recording: it captures, it does
+## not pretend.
 
 import std/[json, os, osproc, strutils, monotimes, times, unittest]
 
@@ -72,7 +76,7 @@ import ./fixtures/fixture_provider
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 93
+const ExpectedAssertions = 97
 
 var countedAssertions = 0
 
@@ -378,14 +382,26 @@ suite "PLAT-54: the terminal's Agent Activity pane":
                                                     chars = {'/'}))
     checkpoint("status: " & rt.app.notification)
     ck rt.app.notification == "Opened " & name & " in a new session tab"
-    # …and `[Open recording]`, the desktop's current-tab open, says why it
-    # is a new tab here too.
+    # …and `[Open recording]`, the desktop's current-tab open, replaces
+    # this tab's session when it is a replay (the window answers through
+    # `currentTabReplaceable`; the shipped terminal's replacement itself is
+    # the PTY suite's)…
+    var replaceable = true
+    s.agent.currentTabReplaceable = proc(): bool = replaceable
     ck s.pressButton(rt, "[Open recording]", 0)
     ck opened.len == 2
     ck opened[1].policy == topCurrentTab
     checkpoint("status: " & rt.app.notification)
+    ck rt.app.notification == "Opened " & name & " " & ThisTabNote
+    # …and opens a new tab, saying why, when this tab is an editing session
+    # (rule 3: an editing session is never replaced by a replay).
+    replaceable = false
+    ck s.pressButton(rt, "[Open recording]", 0)
+    ck opened.len == 3
+    ck opened[2].policy == topNewTab
+    checkpoint("status: " & rt.app.notification)
     ck rt.app.notification == "Opened " & name & " in a new session tab: " &
-                              NoCurrentTabReplacementNote
+                              EditingSessionKeptNote
     # THE DESKTOP'S RUN CARD, captured from Electron: title, status, state,
     # and every test's outcome, name, duration and recording affordance.
     let desk = parseJson(readFile(answersPath))["testRun"]

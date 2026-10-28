@@ -970,11 +970,15 @@ proc agentPress*(s: TuiSession; rt: TuiRuntime; row, button: int): string =
                else: AgentFeedAction()
   if action.kind == faNone:
     return ""
-  discard s.agent.runFeed(r, action)
-  s.agent.changed = false
-  s.refreshAgent(rt)
-  result = s.agent.message
-  s.agent.message = ""
+  # The host, held: `[Open recording]` can replace this session, and the
+  # host then moves onto the session that replaced it (`rehome`), leaving
+  # `s.agent` nil.
+  let host = s.agent
+  discard host.runFeed(r, action)
+  host.changed = false
+  rt.app.agent = agentModelOf(host, rt.app.agent)
+  result = host.message
+  host.message = ""
 
 proc agentPrompt*(s: TuiSession; rt: TuiRuntime; text: string): string =
   if s.isNil or s.agent.isNil:

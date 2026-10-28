@@ -25,8 +25,10 @@
 ##     tab's agent indicator (`data-ct-tab-agent`) says the agent completed
 ##     while the pane's control says Send — the two read one store entry;
 ##   * THE STATUS LINE (the footer's note, `data-ct-footer-note`) after either
-##     recording button: the recording opened in a new session tab, and for
-##     `[Open recording]` why (§2.2.4);
+##     recording button: `[Open in new tab]`'s recording in a new session tab,
+##     `[Open recording]`'s in this tab — its session replaced (the window's
+##     gesture trace names the replacement), one session left, and the
+##     agent's run card still in the pane (§2.2.4);
 ##   * THE PROMPT'S "ADD CONTEXT" MENU (§2.2.7): the `+` beside Send, pressed
 ##     where it was drawn, opens the desktop's four items as a popover;
 ##     *Editor selection* attaches the shown file at its line, *Files &
@@ -52,7 +54,7 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 44
+  ExpectedAssertions = 47
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1600
   H = 1000
@@ -239,15 +241,22 @@ suite "PLAT-54: Agent Activity in the GPUI window":
     let note = tabbed.nodesWith("data-ct-footer-note")
     ck note.len == 1 and note[0].attr("data-ct-footer-note") ==
        "Opened " & name & " in a new session tab"
-    # …and `[Open recording]` (the desktop's current-tab open) says why it
-    # is a new tab here too.
-    let (current, _) = windowPlan("agent:show,agent:row:test-run," &
-                                  "agent:button:Open recording:0", @[flag])
-    ck current.nodesWith("data-ct-session-tab").len == 2
-    let why = current.nodesWith("data-ct-footer-note")
-    ck why.len == 1 and why[0].attr("data-ct-footer-note") ==
-       "Opened " & name & " in a new session tab: this window cannot " &
-       "replace its current session yet"
+    # …and `[Open recording]` (the desktop's current-tab open) replaces this
+    # tab's session: the recording opened, the first tab's session closed and
+    # the new one in its place — one session, no strip — and the agent's
+    # pane, which moved with the tab, still shows the run card.
+    let (current, ctr) = windowPlan("agent:show,agent:row:test-run," &
+                                    "agent:button:Open recording:0", @[flag])
+    ck ctr.contains("opened " & trace)
+    ck ctr.contains("replaced tab 0 with tab 1")
+    ck current.nodesWith("data-ct-session-tab").len == 0
+    let here = current.nodesWith("data-ct-footer-note")
+    ck here.len == 1 and here[0].attr("data-ct-footer-note") ==
+       "Opened " & name & " in this tab"
+    var kept = 0
+    for (kind, _, _) in current.lines:
+      if kind == "test-run": inc kept
+    ck kept == 1
 
   test "a live session: rows arrive over ACP, the tab and the pane agree":
     let env2 = @[("CODETRACER_AGENT_ACP_COMMAND", findExe("node")),
