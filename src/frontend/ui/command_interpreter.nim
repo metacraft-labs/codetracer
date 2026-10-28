@@ -4,7 +4,7 @@ import
 
 from ../viewmodel/viewmodels/omnibar_vm import classifyOmnibarQuery,
   desktopKindOf, OmnibarMode, omCommand, omProgram, omSymbol, omAgent, omFile,
-  omRecording,
+  omRecording, omBuildTask,
   omTick
 
 let
@@ -81,7 +81,7 @@ proc parseQuery*(self: CommandInterpreter, query: cstring): SearchQuery =
   ## `desktopKindOf` keeps `#…` a file query here.
   let classified = classifyOmnibarQuery($query)
   case desktopKindOf(classified.mode)
-  of omCommand, omRecording, omAttach, omAttachRecording:
+  of omCommand, omRecording, omAttach, omAttachRecording, omBuildTask:
     # (`desktopKindOf` keeps `:open …` a command here: the desktop's "+"
     # opens a tab on its welcome screen; and `:attach …`, the native
     # front-ends' stand-in for the agent prompt's file dialog.)

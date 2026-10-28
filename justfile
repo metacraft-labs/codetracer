@@ -5650,6 +5650,12 @@ plat55-capture-electron *args:
 plat56-capture-electron *args:
   bash scripts/plat56-capture-electron.sh "$@"
 
+# Build-Output-Pane.md §3.2, §3.6, §3.8, §3.9, §3.11, §3.12: the desktop's
+# build tasks, task picker, Stop, BUILD panel reveal and editor diagnostics,
+# real `gcc` builds run by its main process (Xvfb 2560x1440 when no DISPLAY).
+build-tasks-electron *args:
+  bash scripts/build-tasks-electron.sh "$@"
+
 # The §30a arm: the two answer producers are independent readers.
 plat35-answer-independence:
   bash ci/test/plat35-answer-independence.sh

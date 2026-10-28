@@ -2231,6 +2231,11 @@ type
 
   BuildCode* = object
     code*: int
+    cancelled*: bool
+      ## The user stopped it (`index/build_runner`).
+    runner*: bool
+      ## It came from the desktop's build runner (a task or a typed
+      ## command), not the record-and-debug flow: the mode stays.
 
   OpenedTab* = object
     path*: cstring

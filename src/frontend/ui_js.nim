@@ -107,6 +107,8 @@ from viewmodel/viewmodels/omnibar_sources import ShowDetailLabel,
   WidenColumnLabel, NarrowColumnLabel, ScrollLeftLabel, ScrollRightLabel,
   FindCancelLabel
 from viewmodel/viewmodels/table_overflow import ColumnStepCells
+from viewmodel/viewmodels/build_vm as build_vm import shownSnapshot
+from viewmodel/viewmodels/build_output_model import BuildSnapshot
 
 
 # Desktop-test machinery: it drives an agentic worktree by running arbitrary
@@ -873,6 +875,13 @@ var buildRequestSession: ReplaySession
   ## window runs one build at a time, and its output (`CODETRACER::build-*`)
   ## belongs in that tab's Build pane whichever tab is on screen when it
   ## arrives (`ipcUiTarget`).
+
+editor.onMonacoEditorReady = proc() = build.refreshBuildEditorMarks()
+
+build.onDesktopBuildRequested = proc() =
+  ## A build the renderer asked the main process for (`ui/build`): its output
+  ## belongs to the tab on screen now.
+  buildRequestSession = data.activeSession
 
 proc ipcUiTarget(data: Data; message: cstring): ReplaySession =
   ## The tab whose components a `=> [ui]` IPC message is dispatched to
@@ -2765,7 +2774,22 @@ proc configureSessionMiddleware(session: ReplaySession; withDebugger = true;
 
   initPanelVM("installBuildRunner"):
     if not sessionVM.buildVM.isNil:
-      sessionVM.buildVM.runBuild = proc() = data.update(build=true)
+      when defined(ctWeb):
+        sessionVM.buildVM.runBuild = proc() = data.update(build=true)
+      else:
+        # THE DESKTOP'S BUILD RUNNER (`index/build_runner`, Build-Output-
+        # Pane.md §4.2): Run builds the SHOWN build's command again (§3.13),
+        # in the project folder; ■ Stop stops what the runner runs.
+        let vm = sessionVM.buildVM
+        vm.runBuild = proc() =
+          let shown = build_vm.shownSnapshot(vm)
+          let why =
+            if shown.command.len == 0: build.runDesktopBuildLine(":build")
+            else: build.startDesktopBuild(shown.command,
+                    (if data.startOptions.folder.isNil: ""
+                     else: $data.startOptions.folder), "", "")
+          if why.len > 0: cwarn "build: " & why
+        vm.cancelBuildProc = proc() = discard build.stopDesktopBuild()
 
   # -----------------------------------------------------------------
   # Direct viewsApi subscriptions on THIS session's mediator: bypass the
@@ -5810,7 +5834,8 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     if not invokeDebugStepAction(cstring"reverse-step-out"):
       reverseStepOut(fromShortcut=true),
   stop: proc(actionData: JsObject) = stopAction(),
-  build: proc(actionData: JsObject) = data.update(build=true),
+  build: proc(actionData: JsObject) =
+    discard build.runDesktopBuildLine(":build:"),
   switchTabLeft: proc(actionData: JsObject) = switchTab(change = -1),
   switchTabRight: proc(actionData: JsObject) = switchTab(change = 1),
   switchTabHistory: proc(actionData: JsObject) = data.switchTabHistory(),

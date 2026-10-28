@@ -2328,6 +2328,10 @@ proc loadFlow*(self: EditorViewComponent, location: types.Location) =
   if windows.len > 0 and windows[0].rrTicks == location.rrTicks:
     self.adoptFlowWindows(windows)
 
+var onMonacoEditorReady*: proc()
+  ## Installed by `ui_js`: an editor got its Monaco instance (the BUILD
+  ## panel's marks are put on it, `ui/build.refreshBuildEditorMarks`).
+
 proc createMonacoEditor*(selector: cstring, options: MonacoEditorOptions): MonacoEditor =
   result = monaco.editor.create(jq(selector), options)
 
@@ -3457,6 +3461,9 @@ proc initMonacoForEditor(self: EditorViewComponent, host: JsObject) =
         self.data.ui.monacoEditors.add(self.monacoEditor)
       registerLspEditor(self)
       self.markEditorScope(self.monacoEditor)
+      # Build-Output-Pane.md §3.9: the last build's diagnostics in it.
+      if not onMonacoEditorReady.isNil:
+        onMonacoEditorReady()
     if not editorReady:
       return
 

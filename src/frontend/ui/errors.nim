@@ -81,6 +81,10 @@ proc revealProblemsPanel*() =
       # panel host (`onPanelShown` -> `mountPaneForState`).
       revealOverlay(panel)
 
+var desktopBuildDirectory*: string
+  ## The directory the current build runs in when it is a task with its own
+  ## `cwd` (`ui/build.startDesktopBuild`), "" for the project folder.
+
 proc desktopResolvedPath*(path: string): string =
   ## Where a diagnostic's file is on the desktop: an absolute path as written;
   ## a relative one against the folder Edit mode opened
@@ -93,6 +97,9 @@ proc desktopResolvedPath*(path: string): string =
   ## Until PLAT-56 the path went to `openLocation` as the compiler wrote it,
   ## and a relative one opened nothing (codetracer-pm issue
   ## `2026-10-26-desktop-problems-row-ignores-relative-paths`).
+  if desktopBuildDirectory.len > 0:
+    # A task's own directory (Build-Output-Pane.md §3.6, EMT-A36).
+    return resolvedPath(path, desktopBuildDirectory)
   if data.isNil or data.startOptions.folder.isNil or
      data.startOptions.folder.len == 0:
     return path

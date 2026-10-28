@@ -209,3 +209,37 @@
 
 .problems-severity-info
   border-left: 3px solid by-mode(#58a6ff, colors-ui-icon-information-primary)
+
+// Build-Output-Pane.md §3.9: a build diagnostic's icon in the editor's
+// gutter — the most severe one on the line, in the Problems pane's colours,
+// in the gutter's pointer lane (the lane the current-line arrow and the
+// run-test control use: an editor being built has no execution, and the
+// Problems pane's icons are the ones a reader already knows). Put there by
+// `ui/build.refreshBuildEditorMarks` as a Monaco margin decoration; the
+// squiggles and the hover are Monaco's own markers.
+.build-diagnostic-margin
+  position: relative
+  &:before
+    position: absolute
+    top: 0
+    left: 0
+    width: var(--ct-gutter-pointer-lane, 0.75em)
+    height: 100%
+    display: flex
+    align-items: center
+    justify-content: center
+    font-size: 0.7em
+    z-index: 3
+    pointer-events: none
+
+.build-diagnostic-margin-error:before
+  content: "\25cf"
+  color: #f85149
+
+.build-diagnostic-margin-warning:before
+  content: "\26a0"
+  color: #d29922
+
+.build-diagnostic-margin-info:before
+  content: "\24d8"
+  color: #58a6ff

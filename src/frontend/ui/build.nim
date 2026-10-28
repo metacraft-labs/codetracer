@@ -33,6 +33,19 @@ from isonim/web/dom_api import nil
 # module in scope even though the type arrives through `build_vm`. Used by the
 # empty-record guard in `syncLegacyBuildIntoVM`.
 from isonim/core/signals import Signal, val, `val=`
+from isonim/core/computation import Memo, val
+from ../viewmodel/viewmodels/build_auto_reveal import BuildAutoReveal,
+  BuildRevealSetting, BuildRevealStep, brsNone, brsReveal, brsRevealProblems,
+  brsDismiss, initBuildAutoReveal, observe, interact, pending,
+  DefaultBuildRevealSetting
+from ../viewmodel/viewmodels/build_tasks import BuildTaskConfig,
+  BuildTaskHost, BuildTasksFile, loadBuildTasks, parseBuildVerb,
+  runBuildVerb, runBuildChoice, buildTaskEntries, pickerNote, defaultTask,
+  BuildAlreadyRunningText
+from ../viewmodel/viewmodels/omnibar_vm import OmnibarEntry
+from ../viewmodel/viewmodels/editor_diagnostics import EditorDiagnostic,
+  diagnosticsForFile, gutterSeverity, severityWord, BuildDiagnosticsOwner
+from ../viewmodel/viewmodels/build_diagnostics import resolvedPath
 
 export build_location_parser
 
@@ -50,6 +63,17 @@ var orphanReader: BuildLineReader
   ## build starts — which carries `nargo`'s severity keyword down onto the
   ## location line (`BuildLocationScanner`, `viewmodels/build_diagnostics`)
   ## and decodes the line's colours into styled runs.
+
+var pendingBuildTask*: tuple[name, matcher, dir: string]
+  ## The task (or typed command's) name, problem matcher and directory of the
+  ## build the renderer asked the main process for (`startDesktopBuild`),
+  ## taken by its `build-command` (Build-Output-Pane.md §3.6).
+
+var buildReveal = initBuildAutoReveal()
+  ## §3.8: when this window's builds show and put away the BUILD panel — the
+  ## shared rule (`build_auto_reveal`), applied through the auto-hide strips.
+
+var buildRevealConfigured = false
 
 var buildClockTimer: int = 0
   ## The running build's clock tick (`BuildVM.tickClock`), 0 when none.
@@ -406,6 +430,190 @@ proc tickBuildClock(self: BuildComponent) =
   buildStatusChanged()
   buildClockTimer = windowSetTimeout(proc() = self.tickBuildClock(), 200)
 
+var onDesktopBuildRequested*: proc()
+  ## Installed by `ui_js`: the tab on screen is the one the build's output
+  ## goes to (`buildRequestSession`).
+
+proc projectFolder(): string
+
+var buildMarkDecorations = JsAssoc[cstring, JsObject]{}
+  ## Each editor's diagnostic gutter decorations, by editor name, so the next
+  ## refresh replaces exactly them.
+
+proc setBuildModelMarkers(editor: MonacoEditor; owner: cstring;
+                          markers: JsObject) {.importjs:
+  "(function(e,o,m){var md=e.getModel(); if (md) monaco.editor.setModelMarkers(md,o,m);})(#,#,#)".}
+proc buildModelLine(editor: MonacoEditor; line: int): cstring {.importjs:
+  "(function(e,l){var m=e.getModel(); if(!m||l<1||l>m.getLineCount()) return ''; return m.getLineContent(l);})(#,#)".}
+proc buildDeltaDecorations(editor: MonacoEditor; old, fresh: JsObject): JsObject
+  {.importjs: "#.deltaDecorations(#, #)".}
+proc newMonacoRange(a, b, c, d: int): JsObject {.importjs: "new monaco.Range(#,#,#,#)".}
+proc emptyJsArray(): JsObject {.importjs: "(function(){return [];})()".}
+proc pushJs(a, v: JsObject) {.importjs: "#.push(#)".}
+
+proc markerSeverity(s: BuildLineSeverity): int =
+  ## Monaco's `MarkerSeverity`: Error 8, Warning 4, Info 2.
+  case s
+  of blsError: 8
+  of blsWarning: 4
+  else: 2
+
+proc refreshBuildEditorMarks*() =
+  ## Build-Output-Pane.md §3.9: the build's diagnostics in every open editor —
+  ## the shared rule's spans (`editor_diagnostics`) as Monaco markers (its
+  ## squiggles, in the severity's colour, and the message on hover) and the
+  ## most severe one's icon in the gutter's pointer lane. From the Problems
+  ## pane's rows (`errorsVMInstance`), so a new build — which clears them —
+  ## clears the marks.
+  if data.isNil or data.ui.isNil or data.ui.editors.isNil:
+    return
+  let errs = errors.errorsVMInstance
+  let rows = if errs.isNil: newSeq[BuildProblemLine]() else: errs.problems.val
+  let folder = projectFolder()
+  let dir = if errors.desktopBuildDirectory.len > 0: errors.desktopBuildDirectory
+            else: folder
+  for name, editor in data.ui.editors:
+    if editor.isNil or editor.monacoEditor.isNil or editor.path.isNil:
+      continue
+    let monacoEditor = editor.monacoEditor
+    let diags = diagnosticsForFile(rows, dir, $editor.path, folder,
+      proc(line: int): string = $buildModelLine(monacoEditor, line))
+    let markers = emptyJsArray()
+    let glyphs = emptyJsArray()
+    var marked: seq[int]
+    for d in diags:
+      markers.pushJs js{severity: markerSeverity(d.severity),
+                        message: cstring(d.message),
+                        source: cstring"build",
+                        startLineNumber: d.line,
+                        startColumn: d.fromColumn + 1,
+                        endLineNumber: d.line,
+                        endColumn: d.toColumn + 1}
+      if d.line notin marked:
+        marked.add d.line
+        let sev = severityWord(gutterSeverity(diags, d.line))
+        glyphs.pushJs js{range: newMonacoRange(d.line, 1, d.line, 1),
+                         options: js{
+                           marginClassName: cstring(
+                             "build-diagnostic-margin build-diagnostic-margin-" &
+                             sev)}}
+    setBuildModelMarkers(monacoEditor, cstring(BuildDiagnosticsOwner), markers)
+    let old = if buildMarkDecorations.hasKey(name): buildMarkDecorations[name]
+              else: emptyJsArray()
+    buildMarkDecorations[name] = buildDeltaDecorations(monacoEditor, old, glyphs)
+
+proc configuredRevealSetting(): BuildRevealSetting =
+  ## §5.1's `build.autoReveal` / `build.autoDismissOnSuccess` from the loaded
+  ## configuration (a configuration written before them has neither: the
+  ## defaults).
+  result = DefaultBuildRevealSetting
+  if data.isNil or data.config.isNil:
+    return
+  let b = data.config.toJs["build"]
+  if b.isNil or b.isUndefined:
+    return
+  for (key, field) in [("autoReveal", 0), ("autoDismissOnSuccess", 1)]:
+    let v = b[cstring(key)]
+    if not v.isNil and not v.isUndefined and jsTypeOf(v) == cstring"boolean":
+      if field == 0: result.autoReveal = v.to(bool)
+      else: result.autoDismissOnSuccess = v.to(bool)
+
+proc revealStep(self: BuildComponent): BuildRevealStep =
+  ## §3.8: the shared rule's step for this tab's build now.
+  let vm = self.paneVM()
+  if vm.isNil:
+    return brsNone
+  if not buildRevealConfigured:
+    buildRevealConfigured = true
+    buildReveal = initBuildAutoReveal(configuredRevealSetting())
+  let errs = self.errorsVMOf()
+  buildReveal.observe(vm.number.val, vm.status.val,
+                      (if errs.isNil: 0 else: errs.errorCount.val),
+                      (if errs.isNil: 0 else: errs.warningCount.val),
+                      dateNowMs())
+
+proc readProjectText(path: cstring): JsObject {.importjs: """(function(p) {
+  try { return {ok: true, text: require('fs').readFileSync(p, 'utf8')}; }
+  catch (e) { return {ok: false, text: ''}; } })(#)""".}
+
+proc projectFolder(): string =
+  if data.isNil or data.startOptions.folder.isNil: ""
+  else: $data.startOptions.folder
+
+proc desktopBuildTasks*(): BuildTaskConfig =
+  ## Build-Output-Pane.md §3.6, §5.2: the project's tasks, read from its
+  ## `.codetracer/build.yaml` NOW; with no file, the session's own build
+  ## command (`trace.compileCommand`, the configuration's `defaultBuild`).
+  let folder = projectFolder()
+  var inferred = ""
+  if not data.isNil and not data.trace.isNil and
+     not data.trace.compileCommand.isNil:
+    inferred = $data.trace.compileCommand
+  if folder.len == 0:
+    return loadBuildTasks("", false, inferred)
+  let read = readProjectText(cstring(folder & "/" & BuildTasksFile))
+  loadBuildTasks($read["text"].to(cstring), read["ok"].to(bool), inferred)
+
+proc desktopBuildRunning(): bool =
+  not buildVMInstance.isNil and buildVMInstance.running.val
+
+proc startDesktopBuild*(command, dir, task, matcher: string): string =
+  ## A build run by the main process (`index/build_runner`): its command in
+  ## `dir`, its output into the BUILD panel of the tab on screen. "" when it
+  ## was asked for, else why not.
+  if desktopBuildRunning():
+    return BuildAlreadyRunningText
+  if data.isNil:
+    return "this window cannot run builds"
+  if not onDesktopBuildRequested.isNil:
+    onDesktopBuildRequested()
+  pendingBuildTask = (task, matcher, dir)
+  data.ipc.send cstring"CODETRACER::build-start",
+    js{command: cstring(command), cwd: cstring(dir)}
+  ""
+
+proc stopDesktopBuild*(): string =
+  ## ■ Stop / `:build: stop`: the main process stops the build it runs.
+  if not desktopBuildRunning():
+    return "nothing is running"
+  data.ipc.send cstring"CODETRACER::build-cancel", js{}
+  "cancelling build …"
+
+var openBuildTaskPickerProc*: proc(): string
+  ## Installed by the command palette (`ui/command`): open it on `:build: `.
+var showBuildHistoryProc*: proc(): string
+  ## Installed by the BUILD panel's view host: open its history picker.
+
+proc desktopBuildTaskHost*(): BuildTaskHost =
+  ## What the desktop does for `build_tasks`.
+  result.running = desktopBuildRunning()
+  result.projectDir = projectFolder()
+  result.start = proc(command, dir, task, matcher: string): string =
+    startDesktopBuild(command, dir, task, matcher)
+  result.stop = proc(): string = stopDesktopBuild()
+  result.clear = proc(): string =
+    if not buildVMInstance.isNil:
+      buildVMInstance.clearOutput()
+      buildStatusChanged()
+    ""
+  result.showHistory = proc(): string =
+    if buildVMInstance.isNil or buildVMInstance.history.val.len == 0:
+      return "no earlier build in this window"
+    revealBuildPane()
+    if showBuildHistoryProc.isNil: "" else: showBuildHistoryProc()
+  result.openPicker = proc(): string =
+    if openBuildTaskPickerProc.isNil: "this window has no task picker"
+    else: openBuildTaskPickerProc()
+
+proc runDesktopBuildLine*(line: string): string =
+  ## A `:build` line (§3.12) through the shared grammar. What to say.
+  runBuildVerb(desktopBuildTaskHost(), desktopBuildTasks(),
+               parseBuildVerb(line))
+
+proc runDesktopBuildChoice*(entry: OmnibarEntry): string =
+  ## A picker entry chosen.
+  runBuildChoice(desktopBuildTaskHost(), desktopBuildTasks(), entry)
+
 method onBuildCommand*(self: BuildComponent, response: BuildCommand) {.async.} =
   self.build.command = response.command
   # A NEW BUILD STARTS AFRESH: the legacy record's lines, errors and
@@ -422,8 +630,10 @@ method onBuildCommand*(self: BuildComponent, response: BuildCommand) {.async.} =
   self.build.buildStartTime = dateNowMs()
   self.build.running = true
 
-  # BP-M6: Auto-reveal the build pane if it is pinned to an auto-hide strip.
-  autoRevealBuildPanel()
+  # The task this build runs, and the directory its relative paths are in.
+  let task = pendingBuildTask
+  pendingBuildTask = ("", "", "")
+  errors.desktopBuildDirectory = task.dir
 
   # Mirror the start-of-build state into the IsoNim VM. The legacy
   # ``self.build`` record stays the source of truth for the Karax-driven
@@ -432,7 +642,8 @@ method onBuildCommand*(self: BuildComponent, response: BuildCommand) {.async.} =
   if not buildVM.isNil:
     # New builds clear the previous output so failures from one run don't
     # bleed into the next; the previous build goes to the history (§3.7).
-    buildVM.beginBuild($response.command, self.build.buildStartTime)
+    buildVM.beginBuild($response.command, self.build.buildStartTime,
+                       taskName = task.name, problemMatcher = task.matcher)
     if buildClockTimer == 0:
       buildClockTimer = windowSetTimeout(proc() = self.tickBuildClock(), 200)
   buildStatusChanged()
@@ -440,6 +651,12 @@ method onBuildCommand*(self: BuildComponent, response: BuildCommand) {.async.} =
   # Mirror the per-build clear into the IsoNim ErrorsVM so the
   # Problems panel resets at the same instant the Build panel does.
   errors.syncErrorsClearInto(self.errorsVMOf())
+  # §3.9: the editors' marks of the last build go with its rows.
+  refreshBuildEditorMarks()
+  # §3.8, BP-M6: the shared rule — a build starting reveals the panel where
+  # it is pinned to an auto-hide strip.
+  if self.revealStep() == brsReveal:
+    autoRevealBuildPanel()
 
   self.data.redraw()
 
@@ -470,8 +687,29 @@ method onBuildCode*(self: BuildComponent, response: BuildCode) {.async.} =
   self.build.running = false
   let buildVM = self.paneVM()
   if not buildVM.isNil:
-    buildVM.finishBuild(response.code, dateNowMs())
+    buildVM.finishBuild(response.code, dateNowMs(),
+                        cancelled = response.cancelled)
   buildStatusChanged()
+  # §3.9: the build's diagnostics in the open editors.
+  refreshBuildEditorMarks()
+  let step = self.revealStep()
+  if response.runner:
+    # A TASK OR A TYPED COMMAND (`index/build_runner`): the mode stays as it
+    # is — this is a build of the working tree, not the record-and-debug
+    # flow below. §3.8: a failure reveals the panel and Problems and
+    # highlights the first error (EMT-D21); a clean success puts the
+    # revealed panel away.
+    if step == brsRevealProblems:
+      autoRevealBuildPanel()
+      if not autoHideState.isNil:
+        let errorsPanel = autoHideState.findPanelByContent(Content.BuildErrors)
+        if not errorsPanel.isNil:
+          revealOverlay(errorsPanel)
+      errors.highlightFirstBuildErrorIn(self.errorsVMOf())
+    elif buildReveal.pending:
+      autoDismissBuildPanel()
+    self.data.redraw()
+    return
   if self.build.code != 0:
     self.focusBuild()
     # Also focus the build errors tab via the component mapping,
