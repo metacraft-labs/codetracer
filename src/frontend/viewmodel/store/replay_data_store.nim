@@ -893,7 +893,12 @@ proc requestRequestSpansSince*(store: ReplayDataStore) =
   async_compat.onComplete(fut,
     onSuccess = proc(response: JsonNode) =
       s.requestTracker.markComplete(key, $cursor)
-      s.applyRequestSpanDelta(response)
+      # THE BODY, whatever the transport resolved with: the mock resolves
+      # with the delta itself, the stdio transport (the terminal and GPUI)
+      # with the whole DAP response — whose delta is its `body`, and which
+      # `applyRequestSpanDelta` would otherwise ignore as "not a delta
+      # envelope", so a native host's live tail never showed a row.
+      s.applyRequestSpanDelta(responseBody(response))
       s.requestSpans.snapshotAnswered = true
       if s.requestSpans.loadingState.val == lsLoading:
         s.requestSpans.loadingState.val = lsIdle,

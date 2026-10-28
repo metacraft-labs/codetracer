@@ -4191,6 +4191,16 @@ jobs:
         # starts its own Xvfb.
         run: nix develop .#devShells.x86_64-linux.default --command just plat56-capture-electron
 
+      - name: The desktop's Requests pane is the reference
+        if: ${{ !cancelled() }}
+        # The desktop column of the Requests pane: the rows of a recording
+        # carrying request spans, the Method and Status filters and the URL
+        # search, a double-click going to a request's handler, and the
+        # right-click menu on a row — read from the REAL Electron app with
+        # this checkout's desktop JavaScript. Here for the reasons the steps
+        # above give; the recipe starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat58-capture-electron
+
       - name: The desktop's Timeline removal, list scrubbers and changed values are the reference
         if: ${{ !cancelled() }}
         # The desktop column of the 2026-10-05 decisions: no Timeline (and a

@@ -5584,6 +5584,13 @@ plat49-capture-electron *args:
 plat54-capture-electron *args:
   bash scripts/plat54-capture-electron.sh "$@"
 
+# PLAT-58: the desktop's REQUESTS panel on the RS-M4 demo session, as the
+# terminal's and GPUI's Requests panes are measured against it — written to
+# `src/tests/visual/answers/plat58-requests.electron.json`.
+[positional-arguments]
+plat58-capture-electron *args:
+  bash scripts/plat58-capture-electron.sh "$@"
+
 # The desktop's caption bar, strips, menu surface, right-click menus and click
 # behaviours, as the terminal's and GPUI's are measured against them —
 # written to `src/tests/visual/answers/plat50-desktop.electron.json`.

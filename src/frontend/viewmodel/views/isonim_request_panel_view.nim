@@ -49,7 +49,7 @@
 ##   ``addEventListener`` after the DSL expansion) so we can read
 ##   each control's value when its event fires.
 
-import std/[strutils, tables]
+import std/[strutils, tables, times]
 when defined(js):
   # Enter and Space on a `role="button"` row are its click.
   import ./isonim_activation
@@ -62,9 +62,22 @@ when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
   import std/[jsffi, math]
+  import kdom
+  from ./context_menu_bridge import showContextMenu
+  from ../../context_menu_item import ContextMenuItem
 
 import ../store/types
 import ../viewmodels/request_panel_vm
+
+# PLAT-58: the row's words, the option lists and the in-flight placeholder are
+# the ViewModel's now (the native panes draw the same ones); re-exported so
+# every reader of this view keeps finding them here.
+export request_panel_vm.HttpMethods, request_panel_vm.StatusBucketOptions,
+  request_panel_vm.InFlightPlaceholder, request_panel_vm.statusText,
+  request_panel_vm.statusCellClass, request_panel_vm.durationText,
+  request_panel_vm.formatReqId, request_panel_vm.statusCodeText,
+  request_panel_vm.detailStatusText, request_panel_vm.MethodPickerOptions,
+  request_panel_vm.StatusPickerOptions
 
 # The generic procs expand the DSL at their instantiation site.
 export signals, computation, components
@@ -76,32 +89,9 @@ const RequestPanelContainerClass* = "component-container request-panel"
   ## ``"component-container " & class``).  Exposed for headless
   ## tests so they assert against the exact class string.
 
-const HttpMethods* = ["GET", "POST", "PUT", "DELETE", "PATCH",
-                      "HEAD", "OPTIONS"]
-  ## Method-filter dropdown options.  Exposed so the view, the
-  ## headless tests, and any future fixture builder share a single
-  ## source of truth.  Order mirrors the legacy
-  ## ``request_panel.nim::renderFilterBar`` array.
-
-const StatusBucketOptions*: array[4, tuple[value: string; label: string]] = [
-  (value: "2xx", label: "2xx Success"),
-  (value: "3xx", label: "3xx Redirect"),
-  (value: "4xx", label: "4xx Client Error"),
-  (value: "5xx", label: "5xx Server Error"),
-]
-  ## Status-filter dropdown options.  Same ordering and label copy as
-  ## the legacy view so visual regressions keep working.
-
 # ---------------------------------------------------------------------------
 # Reactive helpers used inside DSL expressions
 # ---------------------------------------------------------------------------
-
-const InFlightPlaceholder* = "—"
-  ## Text rendered in the Status and Duration columns of an in-flight row.
-  ## The pane spec (GUI/Core-Panes/Request-Panel.md § Live Sessions) says an
-  ## in-flight row is "rendered distinctly, with no status or duration" — a
-  ## placeholder keeps the column grid aligned while saying "not yet known",
-  ## which a literal empty cell would not.
 
 proc rowClass*(selected: bool; isOpen: bool = false): string =
   ## Outer ``.request-row`` modifier string.  ``selected`` mirrors the legacy
@@ -135,33 +125,6 @@ proc countText*(vm: RequestPanelVM): string =
   ## engine's (`matchingCount`, `recordedCount`), not the rows held.
   countText(vm.matchingCount, vm.recordedCount)
 
-proc statusText*(req: RequestRecord): string =
-  ## Status-column text.  An in-flight row has no status code yet (the open
-  ## record carries ``statusCode == 0``), so it renders the placeholder
-  ## rather than a misleading ``0``.
-  if req.isOpen:
-    InFlightPlaceholder
-  else:
-    $req.statusCode
-
-proc statusCellClass*(req: RequestRecord): string =
-  ## Status-column span class.  In flight the span's own status byte is
-  ## ``"unknown"``, which is exactly the ``request-status-unknown`` bucket
-  ## ``statusClass(0)`` already yields — spelled out here so the intent
-  ## survives any future change to the bucket ranges.
-  if req.isOpen:
-    "request-status-unknown"
-  else:
-    statusClass(req.statusCode)
-
-proc durationText*(req: RequestRecord): string =
-  ## Duration-column text; the placeholder while in flight, since the
-  ## wall-clock duration is only known at completion.
-  if req.isOpen:
-    InFlightPlaceholder
-  else:
-    formatDuration(req.durationMs)
-
 proc methodBadgeClass*(httpMethod: string): string =
   ## Returns the full CSS class string for the per-method badge:
   ## ``"request-method-badge request-method-<lowercase-method>"``.
@@ -181,60 +144,23 @@ proc onRowClick(vm: RequestPanelVM; index: int): proc() =
   ## per-row capture every row's closure would observe the loop
   ## variable's final value (same closure-capture concern as the
   ## low_level_code / step_list views).
+  ##
+  ## PLAT-58: a press is counted (`RequestPanelVM.pressRow`, the rule the
+  ## terminal's and GPUI's panes use): the second press on the same row in
+  ## time goes to its handler. The selection rebuilds the table body, so the
+  ## browser's own `dblclick` never reaches the row it replaced — measured by
+  ## the Electron capture, where a double click moved nothing.
   let captured = index
-  result = proc() = vm.selectRequest(captured)
+  result = proc() =
+    if vm.pressRow(captured, int64(epochTime() * 1000)) == rpActivate:
+      vm.jumpToHandler(captured)
 
 proc onRowDoubleClick(vm: RequestPanelVM; index: int): proc() =
-  ## Closure factory for the per-row ``ondblclick`` handler.  Mirrors
-  ## ``onRowClick`` but dispatches ``vm.jumpToHandler`` instead.
+  ## Closure factory for the per-row ``ondblclick`` handler: go to the
+  ## handler, unless the two presses that made the double click already did
+  ## (`RequestPanelVM.doubleClickRow`).
   let captured = index
-  result = proc() = vm.jumpToHandler(captured)
-
-proc formatReqId*(id: int): string =
-  ## Zero-pads single-digit IDs so the ``#`` column aligns nicely
-  ## (matches the reference design: 01, 02 … 09, 10, 11 …).
-  if id < 10: "0" & $id else: $id
-
-proc statusCodeText*(code: int): string =
-  ## Standard HTTP reason phrase for common status codes.
-  ## Returns an empty string for unrecognised codes.
-  case code
-  of 100: "Continue"
-  of 101: "Switching Protocols"
-  of 200: "OK"
-  of 201: "Created"
-  of 202: "Accepted"
-  of 204: "No Content"
-  of 206: "Partial Content"
-  of 301: "Moved Permanently"
-  of 302: "Found"
-  of 303: "See Other"
-  of 304: "Not Modified"
-  of 307: "Temporary Redirect"
-  of 308: "Permanent Redirect"
-  of 400: "Bad Request"
-  of 401: "Unauthorized"
-  of 403: "Forbidden"
-  of 404: "Not Found"
-  of 405: "Method Not Allowed"
-  of 408: "Request Timeout"
-  of 409: "Conflict"
-  of 410: "Gone"
-  of 413: "Content Too Large"
-  of 422: "Unprocessable Content"
-  of 429: "Too Many Requests"
-  of 500: "Internal Server Error"
-  of 501: "Not Implemented"
-  of 502: "Bad Gateway"
-  of 503: "Service Unavailable"
-  of 504: "Gateway Timeout"
-  else: ""
-
-proc detailStatusText*(code: int): string =
-  ## Full status display string for the detail panel header:
-  ## "NNN Reason Phrase" for known codes, just "NNN" otherwise.
-  let reason = statusCodeText(code)
-  if reason.len > 0: $code & " " & reason else: $code
+  result = proc() = discard vm.doubleClickRow(captured, int64(epochTime() * 1000))
 
 const DetailTabs* = [
   ("headers",   "Headers"),
@@ -256,28 +182,6 @@ const chevronDownSvg* = """<svg width="9" height="5" viewBox="0 0 9 5" fill="non
   ## Matches the VCS branch-picker chevron shape and colour.
 const chevronUpSvg* = """<svg width="9" height="5" viewBox="0 0 9 5" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8.35352 4.35358L4.35352 0.353577L0.353516 4.35358" stroke="#DDDDDD" stroke-linejoin="round"/></svg>"""
   ## Up-pointing chevron — shown when a picker dropdown is open.
-
-const MethodPickerOptions*: array[8, (string, string)] = [
-  ("", "Method: All"),
-  ("GET", "GET"),
-  ("POST", "POST"),
-  ("PUT", "PUT"),
-  ("DELETE", "DELETE"),
-  ("PATCH", "PATCH"),
-  ("HEAD", "HEAD"),
-  ("OPTIONS", "OPTIONS"),
-]
-  ## (filterValue, displayLabel) pairs for the Method filter picker.
-  ## An empty ``filterValue`` means "all methods".
-
-const StatusPickerOptions*: array[5, (string, string)] = [
-  ("", "Status: All"),
-  ("2xx", "2xx Success"),
-  ("3xx", "3xx Redirect"),
-  ("4xx", "4xx Client Error"),
-  ("5xx", "5xx Server Error"),
-]
-  ## (filterValue, displayLabel) pairs for the Status filter picker.
 
 when defined(js):
   # ---------------------------------------------------------------------------
@@ -439,6 +343,45 @@ proc renderDetail[R, N](r: R; vm: RequestPanelVM; req: RequestRecord;
   handle = handleEl
   panel
 
+when defined(js):
+  proc eventClientX(ev: isonim_dom.Event): int {.importjs: "(#.clientX || 0)".}
+  proc eventClientY(ev: isonim_dom.Event): int {.importjs: "(#.clientY || 0)".}
+  proc preventMenuDefault(ev: isonim_dom.Event) {.importjs: "#.preventDefault()".}
+  proc stopMenuPropagation(ev: isonim_dom.Event) {.importjs: "#.stopPropagation()".}
+  proc writeRequestUrl(text: cstring) {.importjs:
+    "(navigator.clipboard ? navigator.clipboard.writeText(#).catch(function(){}) : null)".}
+
+  proc rowMenuHandler(vm: RequestPanelVM; index: int;
+                      action: RequestMenuAction): proc(ev: kdom.Event) =
+    ## One entry's handler. A FACTORY, as `pickerSelectHandler` is: an inline
+    ## closure over the loop's `let` made every entry run the LAST one under
+    ## the JS backend (codetracer#860; measured here by the Electron capture:
+    ## "Filter by Method" ran "Clear Filters").
+    result = proc(ev: kdom.Event) =
+      let outcome = vm.runRowMenu(index, action)
+      if outcome.copied.len > 0:
+        writeRequestUrl(cstring(outcome.copied))
+
+  proc rowMenuItems(vm: RequestPanelVM; index: int): seq[ContextMenuItem] =
+    ## PLAT-58: the row's context menu, the ViewModel's entries
+    ## (`RequestPanelVM.rowMenu`) — the same the terminal's and GPUI's panes
+    ## show. A disabled entry carries its reason on the row.
+    for e in vm.rowMenu(index):
+      result.add ContextMenuItem(
+        name: cstring(e.label), hint: cstring"",
+        disabled: not e.enabled, disabledReason: cstring(e.reason),
+        handler: rowMenuHandler(vm, index, e.action))
+
+  proc wireRowMenu(row: isonim_dom.Element; vm: RequestPanelVM; index: int) =
+    ## A right press selects the row and opens its menu.
+    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"contextmenu",
+      proc(ev: isonim_dom.Event) =
+        ev.preventMenuDefault()
+        ev.stopMenuPropagation()
+        vm.selectRequest(index)
+        showContextMenu(rowMenuItems(vm, index), ev.eventClientX(),
+                        ev.eventClientY()))
+
 proc renderRow[R, N](r: R; vm: RequestPanelVM; req: RequestRecord;
                      index: int; selected: bool): N =
   ## One filtered request row; a click selects it, a double click goes to it.
@@ -447,7 +390,7 @@ proc renderRow[R, N](r: R; vm: RequestPanelVM; req: RequestRecord;
   ## colours both independently.
   let statusCls = statusCellClass(req)
   let badgeCls = methodBadgeClass(req.httpMethod)
-  ui(r):
+  result = ui(r):
     tdiv(role = "button", tabindex = "0", class = rowClass(selected, req.isOpen),
          onclick = onRowClick(vm, index),
          ondblclick = onRowDoubleClick(vm, index)):
@@ -465,6 +408,9 @@ proc renderRow[R, N](r: R; vm: RequestPanelVM; req: RequestRecord;
         text durationText(req)
       tdiv(class = "request-col-size"):
         text formatSize(req.responseSize)
+  when defined(js):
+    when N is isonim_dom.Element:
+      wireRowMenu(result, vm, index)
 
 when defined(js):
   proc inputValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
@@ -518,25 +464,27 @@ proc renderRequestPanel*[R, N](r: R; vm: RequestPanelVM): N =
         input(ref = searchInputEl,
               class = "request-filter-search ct-input-panel ct-input-search-image",
               `type` = "text",
-              placeholder = "Find by URL...")
+              placeholder = RequestSearchPlaceholder)
         tdiv(ref = methodPickerHost)
         tdiv(ref = statusPickerHost)
       tdiv(class = "request-navigation-status", role = "status"):
         text vm.navigationMessage.val
       # Column headers
+      # The header's words are the ViewModel's (`RequestsColumnTitles`), the
+      # ones the terminal's and GPUI's panes draw too.
       tdiv(class = "request-table-header"):
         tdiv(class = "request-col-id"):
-          text "#"
+          text RequestsColumnTitles[0]
         tdiv(class = "request-col-method"):
-          text "method"
+          text RequestsColumnTitles[1]
         tdiv(class = "request-col-url"):
-          text "URL"
+          text RequestsColumnTitles[2]
         tdiv(class = "request-col-status"):
-          text "Status"
+          text RequestsColumnTitles[3]
         tdiv(class = "request-col-duration"):
-          text "Duration"
+          text RequestsColumnTitles[4]
         tdiv(class = "request-col-size"):
-          text "Size"
+          text RequestsColumnTitles[5]
       tdiv(ref = bodyContainer, class = "request-table-body"):
         discard
       # Detail panel host — empty when no row is selected, populated reactively
