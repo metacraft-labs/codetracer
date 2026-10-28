@@ -501,7 +501,7 @@ proc runRun(args: seq[string]; registry: var ProviderRegistry;
       # (CTC-3e). A user who wants a file copies it out of the store.
       let published = publishToLocalStore(
         nativeCertificateStoreRoots(), response.workspaceRoot,
-        issuance.document)
+        issuance.document, signatureMade = true)
       if published.written:
         writtenTo = published.path
       writeError = published.error

@@ -103,6 +103,9 @@ import ../app/views/styled_row
 import ../host/tui_session
 from codetracer_embed import BaseKeymap, BaseSource
 import ./fixtures/fixture_provider
+import ../../gpui/tests/process_meter
+  # `residentKb`: the CURRENT resident set on Linux (statm x the real page
+  # size) and macOS (task_info), and a named failure on any other host.
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
@@ -174,24 +177,6 @@ proc writeBigPayload(root: string): string =
   createDir(payload.parentDir)
   writeFile(payload, text)
   traceDir
-
-proc residentKb(): int =
-  ## This process's resident set size, in KB, from `/proc/self/statm`.
-  ##
-  ## A DIAGNOSTIC FAILURE rather than a skip when the file is absent: the two
-  ## TUI lanes run on Linux, and a run that silently stopped measuring memory
-  ## would be a run whose memory assertion passed for free.
-  const statm = "/proc/self/statm"
-  if not fileExists(statm):
-    raise newException(IOError,
-      "RSS cannot be measured: " & statm & " does not exist. This suite's " &
-      "memory bound is CTUI-5's only guard on the CTUI-14 target, so a host " &
-      "without procfs must not run it silently — port `residentKb` or run " &
-      "the `tui` lane on Linux.")
-  let fields = readFile(statm).splitWhitespace()
-  if fields.len < 2:
-    raise newException(IOError, statm & " has fewer than two fields")
-  parseInt(fields[1]) * 4   # pages -> KB, 4 KiB pages
 
 type VHarness = object
   session: HeadlessDebugSession

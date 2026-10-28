@@ -605,7 +605,9 @@ const GutterGap* = "\u00A0\u00A0\u00A0\u00A0"
   ##   * `plat42-surface` — ABORTS: baseline
   ##     `test_gpui_editing_surface.nim` is RED on
   ##     `countedAssertions == ExpectedAssertions` (it needs `/proc/self/statm`,
-  ##     which macOS has not).
+  ##     which macOS has not). 2026-10-28: no longer true — the suite reads RSS
+  ##     through `tests/process_meter.nim` on macOS too and is 13/13 green
+  ##     there, so this harness's re-grade is now runnable; it is still owed.
   ##   * `plat47-parity`, `plat49-chrome` — *"REFUSING TO RUN:
   ##     `REPLAY_SERVER_BIN` is not exported"*. Their needle scans pass
   ##     (`0 problems`); only the environment is missing.

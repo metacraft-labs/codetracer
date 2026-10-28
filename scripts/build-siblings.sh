@@ -913,10 +913,17 @@ if [ -z "$_ruby_dlext" ]; then
 	*) _ruby_dlext="so" ;;
 	esac
 fi
+# CARGO_TARGET_DIR is pinned to the extension's own target/, for the reason
+# the wasm-instrumenter entry below gives: a persistent runner exports a
+# runner-wide CARGO_TARGET_DIR, the build then "succeeded but missing" the
+# artifact path named here, and the launcher-recorder ruby edge failed on
+# those runners only. `$PWD` is expanded by the build wrapper inside the
+# sibling, not here.
+# shellcheck disable=SC2016
 build_sibling \
 	codetracer-ruby-recorder \
 	"gems/codetracer-ruby-recorder/ext/native_tracer/target/release/codetracer_ruby_recorder.$_ruby_dlext" \
-	"just build-extension"
+	'CARGO_TARGET_DIR="$PWD/gems/codetracer-ruby-recorder/ext/native_tracer/target" just build-extension'
 
 # BEAM recorder (Erlang + Elixir) — one Rust CLI (`codetracer-beam-recorder`)
 # that wraps the command which starts the BEAM program.  Added for the LRC-4
@@ -931,10 +938,15 @@ build_sibling \
 # rebar3 provider compile), and `repro exec` has already supplied the
 # toolchain.  The binary lands in target/debug — the profile
 # scripts/detect-siblings.sh probes first.
+#
+# CARGO_TARGET_DIR is pinned to the repository's own target/, as for the Ruby
+# entry above: under a runner-wide CARGO_TARGET_DIR the binary is built and
+# then reported missing.
+# shellcheck disable=SC2016
 build_sibling \
 	codetracer-beam-recorder \
 	target/debug/codetracer-beam-recorder \
-	"just build-native"
+	'CARGO_TARGET_DIR="$PWD/target" just build-native'
 
 # wazero (Go binary; lives at the repo root, not target/release).
 build_sibling \
