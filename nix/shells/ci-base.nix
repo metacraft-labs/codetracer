@@ -170,6 +170,14 @@ with pkgs;
     # that single missing binary silently skipped the entire test suite.
     direnv
 
+    # ssh-keygen makes the signing keys the ct-test certificate suites sign
+    # with (`certificate_issuance_test.generateSigningKey`). Undeclared, it
+    # came from the runner: a NixOS host's own binary passed, and a stock
+    # Ubuntu GARM slot's /usr/bin/ssh-keygen loaded this shell's OpenSSL
+    # through LD_LIBRARY_PATH and died on `GLIBC_2.38' not found`, so the
+    # lane's verdict was a property of which runner picked it up.
+    openssh
+
     # jq parses the `needs` payload in ci/verdict/required-jobs.sh. That
     # gate runs on a stock GitHub-hosted runner (where jq is preinstalled)
     # precisely so it does not depend on this shell — but `ci/lint/bash.sh`
