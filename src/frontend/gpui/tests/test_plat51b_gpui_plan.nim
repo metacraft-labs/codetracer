@@ -342,11 +342,20 @@ suite "PLAT-51 part B GPUI: a new tab's Welcome Screen":
         inc found
     ck found == 1
 
+const OpenFileMenu = "key:`:alt,key:right"
+  ## File opened from the keyboard on EVERY platform: `` Alt+` `` (`menu.open`,
+  ## CUA-Keymap.md §3.8, bound everywhere) shows the menu bar with File, the
+  ## first folder, highlighted, and `Right` enters it, its first item
+  ## highlighted — the state `Alt+F` opens straight into. `Alt+F` itself is a
+  ## Linux/Windows row only (§3.8: "On macOS ... Option+<letter> types a
+  ## character"), so a case about File's ITEMS must not depend on it; the
+  ## mnemonic is PLAT-68's subject, asserted in `test_plat68_gpui_keys_plan`.
+
 suite "M74 (#841) GPUI: the File menu reaches the welcome flow":
   # codetracer#841: the window's menu enabled a static list without a single
-  # File item. Here File is opened with `Alt+F` (CUA-Keymap.md §3.8, the
-  # window's default CUA base) and an item chosen with `Down` / `Enter`,
-  # through the window's own key handlers (`--window-ops`).
+  # File item. Here File is opened with `OpenFileMenu` and an item chosen
+  # with `Down` / `Enter`, through the window's own key handlers
+  # (`--window-ops`).
 
   proc welcomeForm(plan: JsonNode): string =
     for n in plan.nodesWith("data-ct-welcome-form"):
@@ -356,13 +365,13 @@ suite "M74 (#841) GPUI: the File menu reaches the welcome flow":
   test "New Trace Tab opens the Welcome Screen; Open Trace… and Record New Trace… open its forms":
     # File's items in order: Open Trace…, Open Trace in New Tab…, Record New
     # Trace…, New Trace Tab. The folder opens on the first.
-    let tab = windowPlan("key:f:alt,key:down,key:down,key:down,key:enter")
+    let tab = windowPlan(OpenFileMenu & ",key:down,key:down,key:down,key:enter")
     ck tab.nodesWith("data-ct-welcome").len == 1
     ck tab.welcomeForm == ""
-    let open = windowPlan("key:f:alt,key:enter")
+    let open = windowPlan(OpenFileMenu & ",key:enter")
     ck open.nodesWith("data-ct-welcome").len == 1
     ck open.welcomeForm == "open-local-trace"
-    let record = windowPlan("key:f:alt,key:down,key:down,key:enter")
+    let record = windowPlan(OpenFileMenu & ",key:down,key:down,key:enter")
     ck record.nodesWith("data-ct-welcome").len == 1
     ck record.welcomeForm == "record-new-trace"
 
@@ -379,7 +388,7 @@ suite "M74 (#841) GPUI: a disabled File item says why, beside it":
     CloseFileReason =
       "the window's editor holds one file per tab; there is no list of " &
       "open files to step through"
-    ToCloseFile = "key:f:alt,key:down,key:down,key:down,key:down"
+    ToCloseFile = OpenFileMenu & ",key:down,key:down,key:down,key:down"
       ## File opens on Open Trace…; Close Current File is the fifth item.
 
   proc pxRect(a: JsonNode): PxRect =
@@ -420,7 +429,7 @@ suite "M74 (#841) GPUI: a disabled File item says why, beside it":
 
   test "highlighted by keyboard or pointer, the reason is drawn beside the row; an enabled item has none":
     var g: JsonNode
-    let opened = windowPlan("key:f:alt", g)
+    let opened = windowPlan(OpenFileMenu, g)
     # Open Trace…, highlighted on opening, is performed here: no label.
     ck opened.hoverLabels.len == 0
     let (pop, close) = g.fileRow("Close Current File")
@@ -442,18 +451,18 @@ suite "M74 (#841) GPUI: a disabled File item says why, beside it":
     # Up again, onto New Trace Tab (enabled): the label goes.
     ck windowPlan(ToCloseFile & ",key:up").hoverLabels.len == 0
     # THE POINTER: the same row hovered, then an enabled one.
-    let hovered = windowPlan("key:f:alt,move:" & close.mid)
+    let hovered = windowPlan(OpenFileMenu & ",move:" & close.mid)
     let hl = hovered.hoverLabels
     ck hl.len == 1
     if hl.len == 1:
       ck hl[0].textOf == CloseFileReason
       ck hl[0].besideRow(pop, close)
-    ck windowPlan("key:f:alt,move:" & close.mid & ",move:" &
+    ck windowPlan(OpenFileMenu & ",move:" & close.mid & ",move:" &
                   newTab.mid).hoverLabels.len == 0
 
   test "choosing it, by Enter or by a click, keeps the menu open and shows the reason":
     var g0: JsonNode
-    discard windowPlan("key:f:alt", g0)
+    discard windowPlan(OpenFileMenu, g0)
     let (pop, close) = g0.fileRow("Close Current File")
     var ge: JsonNode
     let entered = windowPlan(ToCloseFile & ",key:enter", ge)
@@ -463,8 +472,8 @@ suite "M74 (#841) GPUI: a disabled File item says why, beside it":
     # A press with no motion before it (a touch, a tablet): the press alone
     # must bring the refused row's reason up.
     var gc: JsonNode
-    let clicked = windowPlan("key:f:alt,press:" & close.mid & ",release:" &
-                             close.mid, gc)
+    let clicked = windowPlan(OpenFileMenu & ",press:" & close.mid &
+                             ",release:" & close.mid, gc)
     ck gc["topBar"]["menuOpen"].getBool
     let cl = clicked.hoverLabels
     ck cl.len == 1 and cl[0].textOf == CloseFileReason
@@ -480,7 +489,7 @@ suite "M74 (#841) GPUI: a disabled File item says why, beside it":
     for (width, beside) in [(1280, true), (640, false)]:
       checkpoint("window width " & $width)
       var g: JsonNode
-      discard windowPlan("key:f:alt", g, width = width)
+      discard windowPlan(OpenFileMenu, g, width = width)
       let (pop, close) = g.fileRow("Close Current File")
       let ls = windowPlan(ToCloseFile, width = width).hoverLabels
       ck ls.len == 1
