@@ -4162,6 +4162,7 @@ proc runContextAction(rt: TuiRuntime; action: ContextAction;
   of caPinLeft: rt.layout(cmdDock(target.pane, leLeft))
   of caPinBottom: rt.layout(cmdDock(target.pane, leBottom))
   of caPinRight: rt.layout(cmdDock(target.pane, leRight))
+  of caPinTop: rt.layout(cmdDock(target.pane, leTop))
   of caUnpin: rt.layout(cmdRestoreDocked(target.pane))
   of caClosePane: rt.layout(cmdRemovePane(target.pane))
   of caMaximise:

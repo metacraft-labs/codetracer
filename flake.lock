@@ -4119,11 +4119,11 @@
     "isonim": {
       "flake": false,
       "locked": {
-        "lastModified": 1793191969,
-        "narHash": "sha256-uC9YFxDiefA49NrORtvetSE/WQbzJF/RAOl0NkJv3PU=",
+        "lastModified": 1793201543,
+        "narHash": "sha256-c9CuXsh1cLfwemvfGT6Xot261Vw58xGvqvmnhOI0r30=",
         "owner": "metacraft-labs",
         "repo": "isonim",
-        "rev": "4215efad564c57648638e19c15cc3af41346dca8",
+        "rev": "4d9cce23b511d36c07fbd473d3e061f77d2df3e1",
         "type": "github"
       },
       "original": {
@@ -4136,11 +4136,11 @@
     "isonim-gpui": {
       "flake": false,
       "locked": {
-        "lastModified": 1792892300,
-        "narHash": "sha256-cg0jim6RP8C8btScS4qQWFTa3ukJeY1cGanMeLiUUbU=",
+        "lastModified": 1793210565,
+        "narHash": "sha256-1nLBaODjeLLg4iYRoXJ58SkUsqc8GIGRkTtAqgUtvt8=",
         "owner": "metacraft-labs",
         "repo": "isonim-gpui",
-        "rev": "a46be3761c4e0276646eed048b80e8472fa39460",
+        "rev": "a07b0bdf1dfe0e87ead2a1f4189b8ab430e09778",
         "type": "github"
       },
       "original": {
@@ -7669,11 +7669,11 @@
         "stackable-hooks-macos-tools": "stackable-hooks-macos-tools"
       },
       "locked": {
-        "lastModified": 1793190581,
-        "narHash": "sha256-UwY/KnOFZjsD6GZfgBcT1QYFi5TyTiTI3OIEK7a2x2A=",
+        "lastModified": 1793198072,
+        "narHash": "sha256-fdCM43el866bqvg/HCmZH8EurVSeIDDArAg0ROZR2jo=",
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "3e8928930f8aaa0b668d7aec06c87c996ccd942e",
+        "rev": "9a700d3c8c9c71a4026121cd89ab2a8c087680ad",
         "type": "github"
       },
       "original": {

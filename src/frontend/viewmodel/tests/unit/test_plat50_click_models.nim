@@ -37,7 +37,7 @@ import viewmodels/event_log_vm
 # as the suite's RUNTIME assertion count.
 # 248 -> 246: K30 and K45 left the done sweep (-4 checks) for the two
 # retired-rows checks (+2) when the Timeline rows were retired.
-const ExpectedAssertions = 246
+const ExpectedAssertions = 247
 
 var countedAssertions = 0
 
@@ -127,20 +127,20 @@ suite "PLAT-50: the context menus are the desktop's":
 
   test "a tab's menu, and a docked pane's label's":
     let m = tabContextMenu(paneVcs, maximised = false)
-    ck m.labels == @["Pin to Left", "Pin to Bottom", "Pin to Right", "Close",
+    ck m.labels == @["Pin to Left", "Pin to Bottom", "Pin to Right", "Pin to Top", "Close",
                      MaximiseLabel]
     ck m.target.pane == paneVcs
     ck tabContextMenu(paneVcs, maximised = true).labels[^1] == MinimiseLabel
     for e in m.entries:
       ck e.enabled
-    ck m.entries[0].action == caPinLeft and m.entries[3].action == caClosePane
+    ck m.entries[0].action == caPinLeft and m.entries[4].action == caClosePane
     # `ui/auto_hide`'s strip menu: every OTHER edge, Unpin, Close.
     let bottom = dockLabelContextMenu(paneBuildOutput, leBottom)
-    ck bottom.labels == @["Pin to Left", "Pin to Right", UnpinLabel, "Close"]
+    ck bottom.labels == @["Pin to Left", "Pin to Right", "Pin to Top", UnpinLabel, "Close"]
     ck bottom.target.edge == leBottom and bottom.target.pane == paneBuildOutput
-    ck bottom.entries[2].action == caUnpin
+    ck bottom.entries[3].action == caUnpin
     ck dockLabelContextMenu(paneVcs, leLeft).labels ==
-      @["Pin to Bottom", "Pin to Right", UnpinLabel, "Close"]
+      @["Pin to Bottom", "Pin to Right", "Pin to Top", UnpinLabel, "Close"]
 
   test "the editor's menu on a plain line: every entry enabled":
     let m = editorTextContextMenu("/a/main.py", 31,

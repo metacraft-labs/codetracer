@@ -18,8 +18,8 @@
 ## geometry sidecar's rectangles say where to look.
 ##
 ## The top-docked document of the last case is WRITTEN BY THE TERMINAL
-## (`codetracer-tui` on `calc` in a pty, `1`, `:dock top`), not by the
-## capture script.
+## (`codetracer-tui` on `calc` in a pty, focus a pane with `1`, `:dock top`),
+## not by the capture script.
 ##
 ## No mocks: a real window, a real compositor, a real pointer, real OCR, the
 ## real `calc` recording stepped by a real replay-server.
@@ -37,7 +37,9 @@ template ck(cond: untyped) =
 
 const
   Record = "src/tests/visual/plat48-gpui-window.json"
-  ExpectedAssertions = 131
+  ExpectedAssertions = 134
+    ## The real Top context-menu frame adds one settled-frame assertion;
+    ## pin and unpin each assert that they did not navigate the debugger.
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 
@@ -71,7 +73,7 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, read from its pi
     ck rootPop[0] == button[0]
     ck rootPop[1] >= button[1] + button[3]
 
-  test "the button, then Debug: its popover drawn, Step Over's chord the desktop's":
+  test "the button, then Debug: its popover drawn, Step Over's active Vim chord":
     let pop = arr(rec["menuOpen"]["popover"])
     let box = arr(rec["menuOpen"]["changedBox"])
     let rootPop = arr(rec["menuOpen"]["rootPopover"])
@@ -83,8 +85,8 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, read from its pi
     ck box[0] + box[2] >= pop[0] + pop[2]
     ck box[1] + box[3] <= pop[1] + pop[3] + 40
     ck rec["menuStepOverOcr"].getStr.contains("Step Over")
-    ck rec["menuStepOverOcr"].getStr.contains("F10")
-    ck rec["menuStepOverShortcut"].getStr == "F10"
+    ck rec["menuStepOverOcr"].getStr.endsWith(" n")
+    ck rec["menuStepOverShortcut"].getStr == "n"
 
   test "the pointer highlights, the keyboard moves on, a click chooses":
     let rep = rec["reportedByWindow"]
@@ -133,7 +135,7 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, read from its pi
   test "a hovered control names itself and its chord":
     let ocr = rec["controlHoverOcr"].getStr
     ck ocr.contains("Next")
-    ck ocr.contains("F10")
+    ck ocr.contains("Next (n)")
 
   test "the omnibar: a tick query goes there, :sym lists the program's functions":
     ck rec["ticksReportedByWindow"]["omni-tick"].getInt == 42
@@ -151,7 +153,7 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, read from its pi
       checkpoint(d.title)
       ck ocr.contains(d.title)
 
-  test "a click reveals the pane itself as an overlay; Esc restores every pixel":
+  test "hover reveals the pane itself as an overlay; Esc restores every pixel":
     let rect = arr(rec["revealBottom"]["rect"])
     ck rect[2] > 0 and rect[3] > 0
     # An overlay: nothing outside it (and the strip that marks it) moved —
@@ -162,35 +164,40 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, read from its pi
     ck ocr.contains("Build Output")
     ck ocr.contains("Unpin")
     ck rec["revealEscChanged"].getInt == 0
-    # Ctrl+O reveals the first docked pane from the keyboard: its own
-    # content over the tree.
+    # The capture explicitly selects Vim: Ctrl+O is its docked-pane reveal
+    # binding. Under CUA the same chord opens a file.
     ck rec["keyRevealOcr"].getStr.contains("Build Output")
     ck rec["reportedByWindow"]["keyReveal"].getStr == "buildOutput"
 
   test "pin docks the pane, unpin puts it back where it was":
+    ck rec["ticksReportedByWindow"]["pinned"].getInt ==
+       rec["ticksReportedByWindow"]["omni-tick"].getInt
+    ck rec["ticksReportedByWindow"]["unpinned"].getInt ==
+       rec["ticksReportedByWindow"]["pinned"].getInt
     # Pinned: its label is drawn in the footer strip.
-    ck rec["pinnedFooterOcr"].getStr.contains("State")
+    ck rec["pinnedFooterOcr"].getStr.contains(gpuiPaneName(paneState))
     # Unpinned: gone from the footer, drawn as a tab again — into the stack
     # it was pinned from, beside Scratchpad as in the shared default, not
     # appended to the root.
-    ck not rec["unpinnedFooterOcr"].getStr.contains("State")
+    ck not rec["unpinnedFooterOcr"].getStr.contains(gpuiPaneName(paneState))
     # State goes back IN FRONT of Scratchpad, where it was.
     let tabs = rec["unpinnedTabsOcr"].getStr
-    ck tabs.contains("State") and tabs.contains("Scratchpad")
-    ck tabs.find("State") < tabs.find("Scratchpad")
+    ck tabs.contains(desktopTabTitle(paneState)) and
+       tabs.contains(desktopTabTitle(paneScratchpad))
+    ck tabs.find(desktopTabTitle(paneState)) < tabs.find(desktopTabTitle(paneScratchpad))
     let rep = rec["reportedByWindow"]
     ck rep["pinnedDocked"].getBool and rep["unpinnedPlaced"].getBool
     var stack: seq[string] = @[]
     for p in rep["unpinnedStack"]: stack.add p.getStr
     ck stack == @["state", "scratchpad"]
 
-  test "the TOP edge: a drag docks there, the strip reveals, Esc restores, a drag back":
+  test "the TOP edge: Pin to Top docks, the strip reveals, Esc restores, a drag back":
     let rep = rec["reportedByWindow"]
-    ck rec["topStrip"]["ocr"].getStr.contains("State")
+    ck rec["topStrip"]["ocr"].getStr.contains(gpuiPaneName(paneState))
     ck rep["topDocked"].getBool
     # The reveal from the top is the pane's own content, and nothing outside
     # it moved; Esc restores every pixel.
-    ck rec["topReveal"]["ocr"].getStr.contains("State")
+    ck rec["topReveal"]["ocr"].getStr.contains(gpuiPaneName(paneState))
     ck rep["topRevealPane"].getStr == "state"
     ck rec["topReveal"]["changedOutside"].getInt == 0
     ck rec["topEscChanged"].getInt == 0

@@ -2045,6 +2045,8 @@ proc editorVScrollbarGeometry(rect: proc (p: PxRect): JsonNode): JsonNode =
                                 h: EditorScrollbarMarkPx))),
      "shown": editorScrollbarShown}
 
+proc unpinButtonRect(): PxRect
+
 proc writeGeometry() =
   if geometryOut.len == 0:
     return
@@ -2066,6 +2068,11 @@ proc writeGeometry() =
       var tabs = newJArray()
       for t in n.tabs: tabs.add rect(t)
       j["tabs"] = tabs
+      # Capture drivers aim at the same controls as the window's hit test.
+      # A pane can share its strip, so its pin is not the strip's right edge.
+      var pins = newJArray()
+      for p in n.pins: pins.add rect(p)
+      j["pins"] = pins
     nodes.add j
   var dividers = newJArray()
   for d in gGeom.dividers:
@@ -2080,7 +2087,8 @@ proc writeGeometry() =
   let revealed =
     if gGestures.revealing:
       %*{"pane": $gGestures.reveal.pane,
-         "rect": rect(gGeom.revealRectOf(gGestures.reveal.edge))}
+         "rect": rect(gGeom.revealRectOf(gGestures.reveal.edge)),
+         "unpin": rect(unpinButtonRect())}
     else: newJNull()
   let top = topBarGeometry()
   # PLAT-70 Part B: the Event Log's columns as drawn (window px), so a lane
@@ -2174,6 +2182,8 @@ proc followVcsViewport(r: GpuiRenderer)
 proc followListViewports(r: GpuiRenderer)
   ## Forward-declared for `drawArrangement`; defined beside the panes'
   ## redraws it calls.
+proc syncEditorViewport(r: GpuiRenderer)
+proc refitEditorRows(r: GpuiRenderer)
 
 proc drawArrangement(r: GpuiRenderer): bool =
   ## Lay the window out from the layout it should show NOW — the committed
@@ -2235,6 +2245,10 @@ proc drawArrangement(r: GpuiRenderer): bool =
   if not gGestures.active:
     followVcsViewport(r)
     followListViewports(r)
+    # Docking changes the editor's body too (a Top strip takes height).
+    # Realise that viewport before this arrangement's frame, rather than
+    # leaving its rows at the old inset until a later hover repaints them.
+    syncEditorViewport(r)
   if not gRoot.isNil:
     drawOverlay(r)
     drawTopBar(r)
@@ -2571,21 +2585,30 @@ proc withDebugDocument(surface: EditorSurface): EditorSurface =
       result.findMarks.add (m.line, m.fromColumn, m.toColumn, m.current)
 
 proc syncEditorViewport(r: GpuiRenderer) =
-  ## `PLAT35-F3`. Take the editor pane's inner width from the geometry the
-  ## window was just drawn at, and redraw the pane if it moved.
+  ## Take the editor pane's width and height from the geometry the window
+  ## was just drawn at, and redraw its rows if either changed.
   ##
   ## **IT IS READ FROM `gGeom` AND NOT FROM THE COMMAND LINE**, which is the
   ## difference between a scrollbar that is right once and one that stays
   ## right: a divider drag changes the pane's width without changing the
   ## window's, and a pane that got wider may no longer have anything off its
   ## edge.
-  if gGeom.tabsNodeOfPane($paneEditor) < 0:
+  let i = gGeom.tabsNodeOfPane($paneEditor)
+  if i < 0:
     return
   let w = editorBodyWidthOf(gGeom)
-  if w == gEditorViewportPx:
+  let h = gGeom.nodes[i].body.h
+  if w == gEditorViewportPx and h == editorPaneHeightPx:
     return
   gEditorViewportPx = w
-  redrawEditorRows(r)
+  editorPaneHeightPx = h
+  refitEditorRows(r)
+  if openArm.isNil and not gSourceService.isNil and gViewedFile.len == 0:
+    # A height can change the sub-row inset even if its whole-row budget
+    # did not change. Redraw that inset as well as refitting the fetch.
+    redrawReplayEditor(r)
+  else:
+    redrawEditorRows(r)
 
 proc scrollEditorColumns(r: GpuiRenderer; cols: int) =
   ## `PLAT35-F3` / PLAT-70. Scroll the editor's code `cols` columns right
@@ -8568,11 +8591,12 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
     return
   case action
   of caNone: discard
-  of caPinLeft, caPinBottom, caPinRight:
+  of caPinLeft, caPinBottom, caPinRight, caPinTop:
     applyGestureCommand(r, cmdDock(target.pane,
       (case action
        of caPinLeft: leLeft
        of caPinRight: leRight
+       of caPinTop: leTop
        else: leBottom)))
     discard drawArrangement(r)
   of caUnpin:
@@ -9649,6 +9673,12 @@ proc onPaneClick(c: GPaneClick) =
   if gCtxMenu.open or gContent.open or
      (not gMenu.isNil and gMenu.isOpen) or
      (not gOmnibar.isNil and gOmnibar.isOpen):
+    return
+  # The shim bubbles the underlay's row listener before the root listener.
+  # Unpin belongs to the reveal overlay: only handleTopPress may act on it,
+  # otherwise an Event Log row beneath it navigates before the pane restores.
+  if c.button == gbLeft and gGestures.revealing and
+     unpinButtonRect().contains(c.x, c.y):
     return
   # K19: an Edit window has no session, and its Files tree is its own.
   if gSession.isNil and c.part != gcpFileNode:

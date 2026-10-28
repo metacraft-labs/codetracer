@@ -67,7 +67,9 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 115
+  ExpectedAssertions = 121
+    ## The native Top action adds two checks of the actual window plan.
+    ## Four checks keep a file opened from Files through docking and resize.
     ## K19: 108 -> 115 — a Files node opens the Files pane's menu (its
     ## entries, kind, the reason drawn on each, a disabled entry, Edit) where
     ## the case asserted no menu (2).
@@ -332,9 +334,9 @@ suite "PLAT-50 GPUI: the call trace, a tab and the variables":
     let plan = windowPlan("click:tab:vcs:right")
     var labels: seq[string] = @[]
     for (l, _) in plan.menuEntries: labels.add l
-    ck labels == @["Pin to Left", "Pin to Bottom", "Pin to Right", "Close",
+    ck labels == @["Pin to Left", "Pin to Bottom", "Pin to Right", "Pin to Top", "Close",
                    "Maximise container"]
-    ck plan.menuEntries[4][1] == "true"
+    ck plan.menuEntries[5][1] == "true"
     # Maximise: the container alone in the window, then back.
     let full = windowPlan("click:tab:vcs:right,ctx:Maximise container")
     var boxes = 0
@@ -350,6 +352,19 @@ suite "PLAT-50 GPUI: the call trace, a tab and the variables":
     for n in closed.nodesWith("data-ct-tab-pane"):
       if n.attr("data-ct-tab-pane") == "vcs": vcs = true
     ck not vcs
+
+  test "Pin to Top routes the tab menu to the fourth auto-hide edge":
+    let plan = windowPlan("click:tab:vcs:right,ctx:Pin to Top")
+    var topPanes: seq[string] = @[]
+    for strip in plan.nodesWith("data-ct-dock-strip"):
+      if strip.attr("data-ct-dock-strip") == "top":
+        for slot in strip.nodesWith("data-ct-dock-slot"):
+          topPanes.add slot.attr("data-ct-dock-slot")
+    ck topPanes == @["vcs"]
+    var placed = false
+    for n in plan.nodesWith("data-ct-tab-pane"):
+      if n.attr("data-ct-tab-pane") == "vcs": placed = true
+    ck not placed
 
   test "a value expands; a variable's menu":
     let open = windowPlan("click:event:3:left,click:var:EXPRESSIONS:left")
@@ -397,6 +412,16 @@ suite "PLAT-50 GPUI: Files":
       for n in opened.nodesWith("data-ct-tabs"):
         if n.attr("data-ct-tabs").contains("helpers.py"): tabNamesIt = true
       ck tabNamesIt
+      # Realising a different editor viewport must preserve the file the
+      # reader opened. Neither a dock command nor a resize moves execution.
+      for change in [",click:tab:state:right,ctx:Pin to Top", ",resize:1200:900"]:
+        checkpoint(change)
+        let refitted = windowPlan("click:file:" & helpers & ":left" & change, mr)
+        ck refitted.textOf.contains("def add(left, right):")
+        var tabStillNamesIt = false
+        for n in refitted.nodesWith("data-ct-tabs"):
+          if n.attr("data-ct-tabs").contains("helpers.py"): tabStillNamesIt = true
+        ck tabStillNamesIt
       # One press, one row: the folder the file is in heard the press too (a
       # press bubbles) and did NOT collapse — its file is still drawn.
       var stillListed = false
@@ -521,7 +546,7 @@ suite "PLAT-50 GPUI: the sweep's other rows":
     let labelMenu = windowPlan("label-menu:buildOutput")
     var labels: seq[string] = @[]
     for (l, _) in labelMenu.menuEntries: labels.add l
-    ck labels == @["Pin to Left", "Pin to Right", "Unpin", "Close"]
+    ck labels == @["Pin to Left", "Pin to Right", "Pin to Top", "Unpin", "Close"]
 
   test "the VCS pane: a file's diff, a commit's files":
     let repo = createTempDir("plat50-vcs-gpui-", "") / "repo"

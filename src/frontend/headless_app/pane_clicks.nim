@@ -80,12 +80,14 @@ type
 
   ContextAction* = enum
     ## What choosing a context-menu entry does. One value per DISTINCT
-    ## operation the desktop's menus run, so a host's `case` over it is the
-    ## exhaustive list of what it must route.
+    ## operation the context menus run, so a host's `case` over it is the
+    ## exhaustive list of what it must route. Top is the native hosts'
+    ## additional auto-hide edge; the remaining operations mirror desktop.
     caNone = "none"
     caPinLeft = "pin-left"
     caPinBottom = "pin-bottom"
     caPinRight = "pin-right"
+    caPinTop = "pin-top"
     caUnpin = "unpin"
     caClosePane = "close-pane"
     caMaximise = "maximise"
@@ -197,6 +199,9 @@ const
                            "Close"]
     ## `ui/layout.addPanelTransferContextMenu`'s first four entries; the fifth
     ## names the stack's state (`MaximiseLabel` / `MinimiseLabel`).
+  TopPinLabel* = "Pin to Top"
+    ## Native front-ends support the fourth auto-hide edge too. Keep the
+    ## measured desktop labels above intact: the desktop has no Top entry.
   MaximiseLabel* = "Maximise container"
   MinimiseLabel* = "Minimise container"
   ExpandCallChildrenLabel* = "Expand Call Children"
@@ -276,13 +281,15 @@ func entry(label: string; action: ContextAction; hint = "";
 
 func tabContextMenu*(pane: PaneKind; maximised: bool): ContextMenuModel =
   ## A pane tab's right-click menu — `ui/layout.addPanelTransferContextMenu`:
-  ## pin to an edge, close, and maximise / minimise its container.
+  ## pin to an edge, close, and maximise / minimise its container, with Top
+  ## added for the native hosts' fourth auto-hide edge.
   ContextMenuModel(
     kind: cmkTab, target: ContextTarget(pane: pane),
     entries: @[
       entry(DesktopTabMenuLabels[0], caPinLeft),
       entry(DesktopTabMenuLabels[1], caPinBottom),
       entry(DesktopTabMenuLabels[2], caPinRight),
+      entry(TopPinLabel, caPinTop),
       entry(DesktopTabMenuLabels[3], caClosePane),
       entry((if maximised: MinimiseLabel else: MaximiseLabel), caMaximise)])
 
@@ -298,6 +305,8 @@ func dockLabelContextMenu*(pane: PaneKind; edge: LayoutEdge): ContextMenuModel =
     result.entries.add entry(DesktopTabMenuLabels[1], caPinBottom)
   if edge != leRight:
     result.entries.add entry(DesktopTabMenuLabels[2], caPinRight)
+  if edge != leTop:
+    result.entries.add entry(TopPinLabel, caPinTop)
   result.entries.add entry(UnpinLabel, caUnpin)
   result.entries.add entry(DesktopTabMenuLabels[3], caClosePane)
 
