@@ -3555,9 +3555,17 @@ impl Handler {
         arg: CallSearchArg,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
+        // Native recordings have no materialized calls in `reader`: ask the
+        // replay to enumerate them, keeping the browsing session untouched.
+        if self.trace_kind == TraceKind::Recreator {
+            let (calls, total) = self.replay.search_calls(&arg.value, arg.limit)?;
+            sender.send(self.dap_client.calltrace_search_event(calls.clone())?)?;
+            self.respond_dap(req, CallSearchResponseBody { calls, total }, sender)?;
+            return Ok(());
+        }
         let mut calls: Vec<Call> = vec![];
         let mut list: Vec<usize> = vec![];
-        let re = Regex::new(&arg.value.clone())?;
+        let re = Regex::new(&arg.value)?;
 
         for (id, function) in self.reader.functions_iter() {
             if re.is_match(&function.name) {

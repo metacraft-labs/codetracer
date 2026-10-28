@@ -1000,6 +1000,43 @@ fn connect_tcp_endpoint_with_timeout(address: &str, timeout: Duration) -> Result
         .into())
 }
 
+/// LLDB's POSIX regular expressions differ from the Rust expressions the
+/// DAP endpoint accepts. A finite set of literal match prefixes safely narrows
+/// the pending resolver; the full Rust expression still decides each result.
+/// When no such set exists, all entries are candidates rather than omitting
+/// valid calls. Prefix extraction's contract is documented by regex-syntax.
+fn call_search_name_filter(pattern: &str) -> Result<String, Box<dyn Error>> {
+    let hir = regex_syntax::Parser::new().parse(pattern)?;
+    let extracted = regex_syntax::hir::literal::Extractor::new().extract(&hir);
+    let Some(literals) = extracted.literals() else {
+        return Ok(".*".to_string());
+    };
+    if literals.is_empty() {
+        return Ok(".*".to_string());
+    }
+    let mut alternatives = Vec::new();
+    for literal in literals {
+        let Ok(text) = std::str::from_utf8(literal.as_bytes()) else {
+            return Ok(".*".to_string());
+        };
+        if text.is_empty() || text.contains('\0') {
+            return Ok(".*".to_string());
+        }
+        let mut escaped = String::new();
+        for character in text.chars() {
+            if matches!(
+                character,
+                '.' | '^' | '$' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|' | '\\'
+            ) {
+                escaped.push('\\');
+            }
+            escaped.push(character);
+        }
+        alternatives.push(escaped);
+    }
+    Ok(format!("({})", alternatives.join("|")))
+}
+
 impl RecreatorReplaySession {
     pub fn new(name: &str, index: usize, ct_rr_args: RecreatorArgs) -> RecreatorReplaySession {
         let mut stable = ReplayWorker::new_with_recording_id(
@@ -1249,6 +1286,24 @@ impl ReplaySession for RecreatorReplaySession {
         let res =
             serde_json::from_str::<Vec<CallLine>>(&self.stable.dispatch_replay_query(ReplayQuery::LoadCallstack)?)?;
         Ok(res)
+    }
+
+    fn search_calls(&mut self, pattern: &str, limit: usize) -> Result<(Vec<crate::task::Call>, usize), Box<dyn Error>> {
+        if self.stable.live_program.is_some() {
+            return Err("call search requires a completed recording".into());
+        }
+        // Search belongs to the existing replay operation. The native worker
+        // owns the isolated scan context, so queries preserve the browsing
+        // cursor and do not start another licensed replay session.
+        let filter = call_search_name_filter(pattern)?;
+        self.ensure_active_stable()?;
+        Ok(serde_json::from_str(&self.stable.dispatch_replay_query(
+            ReplayQuery::SearchCalls {
+                pattern: pattern.to_owned(),
+                filter,
+                limit,
+            },
+        )?)?)
     }
 
     fn load_history(&mut self, arg: &LoadHistoryArg) -> Result<(Vec<HistoryResultWithRecord>, i64), Box<dyn Error>> {
@@ -1702,6 +1757,45 @@ fn tracepoint_return_value_from_class(response: &TtdTracepointEvalResponseEnvelo
 mod tests {
     use super::*;
     use codetracer_trace_types::{TypeKind, TypeRecord, TypeSpecificInfo};
+
+    #[test]
+    fn call_search_filter_never_excludes_a_rust_regex_match() {
+        let names = [
+            "scale",
+            "SCALE",
+            "calculate_sum",
+            "namespace::scale",
+            "foo+bar",
+            "17_scale",
+            "λ_scale",
+            "fooscale",
+            "unrelated",
+            "",
+            "\0",
+        ];
+        for pattern in [
+            "^scale$",
+            "(?i:^scale$)",
+            "^(?:scale|calculate_sum)$",
+            r"foo\+bar",
+            r"^\d+_scale$",
+            ".*scale",
+            "^λ.*",
+            "(foo)?scale",
+            r"\x00",
+        ] {
+            let original = regex::Regex::new(pattern).unwrap();
+            let filter = call_search_name_filter(pattern).unwrap();
+            let candidates = regex::Regex::new(&filter).unwrap();
+            for name in names {
+                assert!(
+                    !original.is_match(name) || candidates.is_match(name),
+                    "{pattern:?} matches {name:?}, but its candidate filter {filter:?} excludes it"
+                );
+            }
+        }
+        assert!(call_search_name_filter("[").is_err());
+    }
 
     #[test]
     fn tracepoint_return_value_prefers_complex_payload() {
