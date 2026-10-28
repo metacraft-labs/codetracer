@@ -118,6 +118,7 @@ import isonim/core/[signals, computation]
 import ../../tui/app/syntax/lexical
 import ../../tui/app/theme/editor_theme
 import ../../styles/generated/design_tokens
+import ../../viewmodel/viewmodels/editor_gutter_lanes
 import ../devicon_marks
 from std/hashes import hash
 
@@ -1104,22 +1105,9 @@ func editorNumberWidth*(rows: openArray[EditorRow]): int =
 
 const
   EditorGutterPx* = 110
-    ## The editor's left margin, the desktop's Monaco `line-numbers` box
-    ## (measured 2026-10-17): the execution mark's lane (13 px), the line
-    ## number right-aligned in 40, a 2 px gap, the diff lane (5), 2, the
-    ## breakpoint lane (9), 2, the trace lane (10), and the fold chevron's
-    ## lane to the end. The code starts here.
-  GutterPointerPx* = 13
-  GutterNumberPx* = 38
-    ## Monaco's 40 less the 2 px its digits end short of the box: the last
-    ## digit's ink ends 49 px into the margin (measured 2026-10-17), where
-    ## this lane's right-aligned text ends with no bearing.
-  GutterBreakpointX* = 62
-    ## The breakpoint lane's left, from the margin's.
+    ## The code column starts after this margin. Lane order, ownership and
+    ## widths inside it come from editor_gutter_lanes at CodeFontPx.
   GutterBreakpointPx* = 9
-  GutterFoldX* = 84
-    ## The fold chevron's box's left (`codicon-folding-expanded`, its ink
-    ## 2.6 px into the 14 px box).
   StickyFoldX* = 56
     ## A sticky header's chevron's left: Monaco's sticky widget draws the
     ## fold icon right after its line-number box, its ink 60–67 px into the
@@ -1535,26 +1523,9 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
   r.setAttribute(gutter, TextRoleAttribute, $trGutterLineNumber)
   r.setAttribute(gutter, TextMetricAttribute, gpuiMetricFor(trGutterLineNumber))
   r.setAttribute(gutter, TokenAttribute, gpuiTokenFor(trGutterLineNumber, row))
-  # THE MARKER LANES ARE LEFT OF THE NUMBER, each one reserved cell at a fixed
-  # index, and the geometry — with the measurements it was changed from — is
-  # `gutterRuns`'. The pointer sat AFTER the number until 2026-09-23, where it
-  # OCR'd as a letter glued to the digits (`44p`) and PLAT-39's gutter grammar
-  # — marker glyphs, then digits — rejected every execution row it had located
-  # by its band.
-  #
-  # THREE RUNS AND NOT ONE TEXT NODE, which is `PLAT35-F13`: the MARK has to be
-  # painted its own colour and a character inside the gutter span can only take
-  # the gutter's. Same pattern as the code column's classified `piece` spans
-  # below — a child span per run, its own `color`, `flex-shrink: 0`, inside a
-  # flex parent — so the face still comes from the ONE metric-bearing node
-  # (children inherit it, which is how the code runs are monospaced) and every
-  # role / metric / token census is unmoved.
-  # 2026-10-17: THE DESKTOP'S MARGIN, lane by lane at its measured offsets
-  # (`EditorGutterPx`): the execution mark at the left edge, the number
-  # right-aligned in its 40 px in the gutter face (14 px, light), the
-  # breakpoint lane right of the number, the trace lane beside it, and the
-  # fold chevron before the code. The three runs keep their attributes
-  # (`GutterLaneAttribute`), so a reader of the plan reads the same lanes.
+  # Reserve the shared map's bands on every row, even when no concern paints
+  # in them. The three textual runs retain their reader-facing format, but
+  # pixel geometry belongs to editor_gutter_lanes, as it does on the desktop.
   r.setStyle(gutter, "display", "flex")
   r.setStyle(gutter, "flex-shrink", "0")
   r.setStyle(gutter, "width", $EditorGutterPx & "px")
@@ -1567,21 +1538,19 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
              if row.pointer == eptExecution: EditorActiveLineNumberColour
              else: EditorLineNumberColour)
   let runs3 = gutterRuns(row, numberWidth)
-  # The desktop's order: the mark's lane is right of the number.
-  for run in [runs3[0], runs3[2], runs3[1]]:
+  for band in resolveBands(CodeFontPx, EditorGutterPx):
     let lane = r.createElement("div")
-    r.setAttribute(lane, GutterLaneAttribute, $run.kind)
-    r.setStyle(lane, "color", run.colour)
+    r.setAttribute(lane, "data-ct-gutter-band", $band.band)
     r.setStyle(lane, "flex-shrink", "0")
     r.setStyle(lane, "display", "flex")
     r.setStyle(lane, "items", "center")
+    r.setStyle(lane, "width", $(band.rightPx - band.leftPx) & "px")
     r.setStyle(lane, "height", $EditorLinePx & "px")
-    case run.kind
-    of grkPointer:
-      r.setStyle(lane, "width", $GutterPointerPx & "px")
+    case band.band
+    of gbPointer:
+      r.setAttribute(lane, GutterLaneAttribute, $grkPointer)
+      r.setStyle(lane, "color", runs3[0].colour)
       if row.pointer == eptExecution:
-        # PLAT-51: THE DESKTOP'S MARK, drawn — not a glyph that approximates
-        # it (`.gutter-highlight-active:before`, at the margin's left edge).
         r.setAttribute(lane, PointerMarkAttribute, "highlight_line_arrow.svg")
         let mark = r.createElement("img")
         r.setAttribute(mark, "src", executionMarkPath())
@@ -1590,33 +1559,57 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
         r.setStyle(mark, "flex-shrink", "0")
         r.appendChild(lane, mark)
       elif row.pointer != eptNone:
-        r.appendChild(lane, r.createTextNode(run.text))
-    of grkNumber:
-      r.setStyle(lane, "width", $GutterNumberPx & "px")
+        r.appendChild(lane, r.createTextNode(runs3[0].text))
+    of gbLineNumber:
+      r.setAttribute(lane, GutterLaneAttribute, $grkNumber)
+      r.setStyle(lane, "color", runs3[2].colour)
       r.setStyle(lane, "justify", "end")
       if not stickyHeader:
         r.appendChild(lane, r.createTextNode($row.line))
-    of grkMark:
-      # Right of the number: the breakpoint lane, or the trace lane beside
-      # it — a disc in the mark's colour (`.gutter-breakpoint-enabled`,
-      # 1.1ch; `.gutter-trace`, 1.2ch).
-      let lead = GutterBreakpointX - GutterPointerPx - GutterNumberPx +
-                 (if row.mark == emTracepoint: 11 else: 0)
-      # Held to the fold lane's left, so the chevron after it is at
-      # `GutterFoldX` whatever the lane holds.
-      r.setStyle(lane, "width",
-                 $(GutterFoldX - GutterPointerPx - GutterNumberPx - lead) & "px")
-      r.setStyle(lane, "padding-left", $lead & "px")
+    of gbMarker:
+      r.setAttribute(lane, GutterLaneAttribute, $grkMark)
+      r.setStyle(lane, "color", runs3[1].colour)
+      r.setStyle(lane, "position", "relative")
       if row.mark != emNone:
+        # The breakpoint and tracepoint share the map's marker band. Their
+        # glyph sizes and separation stay local to that band; neither changes
+        # the flow width or the following folding control's position.
         let side = if row.mark == emTracepoint: 10 else: GutterBreakpointPx
         let disc = r.createElement("div")
-        r.setAttribute(disc, "data-ct-mark-glyph", run.text)
+        r.setAttribute(disc, "data-ct-mark-glyph", runs3[1].text)
+        r.setStyle(disc, "position", "absolute")
+        r.setStyle(disc, "left", (if row.mark == emTracepoint: "11px" else: "0px"))
+        r.setStyle(disc, "top", formatFloat(float(EditorLinePx - side) / 2,
+                                            ffDecimal, 1) & "px")
         r.setStyle(disc, "width", $side & "px")
         r.setStyle(disc, "height", $side & "px")
         r.setStyle(disc, "rounded", $(side div 2 + 1) & "px")
-        r.setStyle(disc, "background-color", run.colour)
+        r.setStyle(disc, "background-color", runs3[1].colour)
         r.setStyle(disc, "flex-shrink", "0")
         r.appendChild(lane, disc)
+    of gbFolding:
+      if foldable and not stickyHeader:
+        # Anchor the ordinary chevron to its owner band, never a parallel
+        # gutter-relative x. Keep the icon within the band's reserved width.
+        r.setStyle(lane, "position", "relative")
+        let side = min(14, band.rightPx - band.leftPx)
+        let holder = r.createElement("div")
+        r.setStyle(holder, "position", "absolute")
+        r.setStyle(holder, "left", "0px")
+        # Preserve the previous 14 px icon's vertical center as it is fitted.
+        r.setStyle(holder, "top", formatFloat(3.0 + float(14 - side) / 2,
+                                              ffDecimal, 1) & "px")
+        r.setStyle(holder, "width", $side & "px")
+        r.setStyle(holder, "height", $side & "px")
+        let chevron = r.createElement("img")
+        r.setAttribute(chevron, "data-ct-fold", "expanded")
+        r.setAttribute(chevron, "src", foldChevronPath())
+        r.setStyle(chevron, "width", $side & "px")
+        r.setStyle(chevron, "height", $side & "px")
+        r.appendChild(holder, chevron)
+        r.appendChild(lane, holder)
+    of gbVcs, gbVcsSplit, gbMarkerGap:
+      discard # Reserved even when this row has no indicator to paint.
     r.appendChild(gutter, lane)
   if stickyHeader:
     r.setStyle(gutter, "position", "relative")
@@ -1630,26 +1623,6 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
     let chevron = r.createElement("img")
     r.setAttribute(chevron, "data-ct-fold", "sticky")
     r.setAttribute(chevron, "src", stickyChevronPath())
-    r.setStyle(chevron, "width", "14px")
-    r.setStyle(chevron, "height", "14px")
-    r.appendChild(holder, chevron)
-    r.appendChild(gutter, holder)
-  elif foldable:
-    # Monaco's fold chevron (`.codicon-folding-expanded`), always shown on a
-    # line that opens an indented block (`alwaysShowFoldIcons`): 14 px,
-    # placed so its ink is 86–94 px into the margin and 8–12 px down the row
-    # as the desktop's glyph is (measured 2026-10-17) — absolutely, as the
-    # lanes' flow does not put it there.
-    r.setStyle(gutter, "position", "relative")
-    let holder = r.createElement("div")
-    r.setStyle(holder, "position", "absolute")
-    r.setStyle(holder, "left", $GutterFoldX & "px")
-    r.setStyle(holder, "top", "3px")
-    r.setStyle(holder, "width", "14px")
-    r.setStyle(holder, "height", "14px")
-    let chevron = r.createElement("img")
-    r.setAttribute(chevron, "data-ct-fold", "expanded")
-    r.setAttribute(chevron, "src", foldChevronPath())
     r.setStyle(chevron, "width", "14px")
     r.setStyle(chevron, "height", "14px")
     r.appendChild(holder, chevron)

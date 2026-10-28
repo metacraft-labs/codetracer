@@ -39,6 +39,7 @@ import ../app/tui_app
 import ../app/edit_binding
 import ../app/views/shell
 import ../app/layout/binding
+import ../app/layout/profile
 import ../app/theme/capabilities
 import ../app/theme/roles
 import ../host/control_icons
@@ -54,7 +55,9 @@ import ./fixtures/fixture_provider
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 514
+const ExpectedAssertions = 515
+  ## 514 -> 515 (2026-10-28): the footer case also checks that
+  ## `profileLayoutValue`'s docked panes are the ones the runtime shows.
   ## 379 (M74, codetracer#841) -> 514 (M76, codetracer#843): +135 — the
   ## Debug menu's point items and Stop over a real session (+91, of them
   ## +14 for which open starts its session in a stopped tab), and the
@@ -329,6 +332,14 @@ suite "PLAT-48: the auto-hide strips":
     let strip = rows[^1]
     for t in ["BUILD", "PROBLEMS", "FIND IN FILES", "REQUESTS"]:
       ck strip.contains(" " & t & " ")
+    # The default arrangement the shell suites seed their bindings from
+    # (`profileLayoutValue`) carries the same footer the runtime shows. The
+    # runtime seeds from `layoutValueForMode`, so the strip above cannot see
+    # a `profileLayoutValue` that lost its docked panes.
+    var seeded, shown: seq[string]
+    for d in profileLayoutValue(selectProfile(200, 50)).docked: seeded.add d.title
+    for d in rt.app.layoutBinding.layout.docked: shown.add d.title
+    ck seeded.len > 0 and seeded == shown
 
   test "a left-docked pane's label reads top to bottom, one character per row":
     let rt = newRuntime(200, 50)
