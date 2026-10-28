@@ -54,9 +54,11 @@ export text_match
 when defined(js):
   import std/jsffi
 else:
-  import std/[os, osproc, streams]
-  when defined(posix):
-    import std/posix
+  import std/os
+  when not defined(wasm32):
+    import std/[osproc, streams]
+    when defined(posix):
+      import std/posix
 
 const
   FindInFilesBatchSize* = 50
@@ -112,7 +114,7 @@ type
       ## What `rg` wrote to its error stream: its reason when it refuses.
     when defined(js):
       child: JsObject
-    else:
+    elif not defined(wasm32):
       process: Process
       fd: cint
       sawEof: bool
@@ -366,7 +368,12 @@ else:
 
   proc ripgrepOnPath*(): string =
     ## The `rg` the search would run, or "" when there is none.
-    findExe(RipgrepProgram)
+    when defined(wasm32):
+      # A WASM module cannot spawn host processes, even when its filesystem
+      # is backed by Node. The walker remains available on that filesystem.
+      ""
+    else:
+      findExe(RipgrepProgram)
 
   proc directoryExists*(path: string): bool =
     dirExists(path)
@@ -551,7 +558,7 @@ when defined(js):
         discard run.child.kill()
       except:
         discard
-else:
+elif not defined(wasm32):
   proc startRipgrep(run: FindInFilesRun; rg: string): bool =
     try:
       run.process = startProcess(rg, args = rgArguments(run.pattern,
@@ -635,7 +642,8 @@ proc cancel*(run: FindInFilesRun) =
   run.cancelled = true
   run.todo = @[]
   run.pending = @[]
-  run.stopProcess()
+  when not defined(wasm32):
+    run.stopProcess()
 
 proc start(run: FindInFilesRun; engine: FindInFilesEngine) =
   run.engine = engine
@@ -653,10 +661,11 @@ proc start(run: FindInFilesRun; engine: FindInFilesEngine) =
     run.finish(note = compiled.error)
     return
   run.matcher = compiled.matcher
-  if engine == fieRipgrep:
-    let rg = ripgrepOnPath()
-    if rg.len > 0 and run.startRipgrep(rg):
-      return
+  when not defined(wasm32):
+    if engine == fieRipgrep:
+      let rg = ripgrepOnPath()
+      if rg.len > 0 and run.startRipgrep(rg):
+        return
   run.startWalker()
 
 proc preferredEngine*(): FindInFilesEngine =
@@ -671,7 +680,7 @@ proc pump*(run: FindInFilesRun): bool =
     return false
   case run.engine
   of fieRipgrep:
-    when not defined(js):
+    when not defined(js) and not defined(wasm32):
       run.pumpRipgrep()
   of fieWalker:
     run.walkStep(WalkerFilesPerPump)
@@ -685,7 +694,7 @@ proc runToCompletion*(run: FindInFilesRun) =
     when defined(js):
       if run.engine == fieRipgrep:
         break
-    elif defined(posix):
+    elif defined(posix) and not defined(wasm32):
       if run.engine == fieRipgrep:
         var fds = [TPollfd(fd: run.fd, events: POLLIN)]
         discard posix.poll(addr fds[0], 1, 50)
@@ -704,7 +713,7 @@ proc search*(service: FindInFilesService; runId: int; pattern: string;
     service.current.cancel()
   result = FindInFilesRun(id: runId, pattern: pattern, options: options,
                           scope: scope, sink: sink)
-  when not defined(js):
+  when not defined(js) and not defined(wasm32):
     result.fd = -1
   service.current = result
   result.start(engine)
