@@ -658,11 +658,11 @@
     "codetracer-native-recorder": {
       "flake": false,
       "locked": {
-        "lastModified": 1793147002,
-        "narHash": "sha256-KPQdG2FRW47spguT/0wSDR85IZn3p+79Fbj9FlZ1rpE=",
+        "lastModified": 1793153009,
+        "narHash": "sha256-1fxh8Kx5lczqZsrBnJkyhqeX4u5lT01JHZv4+tSGNx8=",
         "owner": "metacraft-labs",
         "repo": "codetracer-native-recorder",
-        "rev": "f11753a8b2b1761b41beacf2f165f76c9df354ca",
+        "rev": "dc4328e036efaecfea067920f7a7f11fc393a704",
         "type": "github"
       },
       "original": {
@@ -7669,11 +7669,11 @@
         "stackable-hooks-macos-tools": "stackable-hooks-macos-tools"
       },
       "locked": {
-        "lastModified": 1793150828,
-        "narHash": "sha256-BHcIkj5wSw8BvTByQNhX2KXR5LnJh5/T/eMNiEaMebs=",
+        "lastModified": 1793153921,
+        "narHash": "sha256-3Qy+qs1WrmlRA4lw7YKvFByFAgzuMxVwQ2X6FNrtJ/s=",
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "42c95f4140b4933ff27b27fb5a92426c0af245fb",
+        "rev": "76e341ff216df79daacb1f8d41cbfb0fb85da8b9",
         "type": "github"
       },
       "original": {

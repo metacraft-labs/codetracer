@@ -760,6 +760,14 @@ proc chordForAction*(action: ClientAction): cstring =
 
 chord_display.chordOfAction = chordForAction
 
+proc testChordForAction(actionName: cstring): cstring =
+  ## Read-only browser-test seam: ask the live router, including the user's
+  ## rows and current scope, independently of any menu or tooltip's text.
+  try:
+    chordForAction(parseEnum[ClientAction]($actionName))
+  except ValueError:
+    cstring""
+
 # PLAT-70 Part B: the copy hint under a table row names the chord that
 # copies it where the focus is (KL-8).
 copyChordOf = proc(): string =
@@ -784,6 +792,8 @@ proc installKeyRouter*() =
   if installed:
     return
   installed = true
+  {.emit: ["window.__CODETRACER_TEST__ = window.__CODETRACER_TEST__ || {};",
+           "window.__CODETRACER_TEST__.chordForAction = ", testChordForAction, ";"].}
   {.emit: ["window.addEventListener('keydown', ", onKeyDown, ", true);",
            "window.addEventListener('keyup', ", onKeyUp, ", true);",
            "window.addEventListener('mousedown', ", onPointerDown, ", true);",

@@ -25,7 +25,7 @@
  *
  * They assert different halves and neither can reach this one.
  * `src/frontend/tests/debug_toolbar_tooltips_test.nim` asserts the SHIPPED
- * config table drives all 13 controls and that rebinding changes the answer;
+ * router drives all 13 controls and that rebinding changes the answer;
  * `src/tests/gui/tests/views/isonim_views_test.nim` asserts the view PAINTS
  * that string and repaints it on a rebind. Neither runs CSS, so neither can
  * see the thing this file is for: the tooltip is hidden until the pointer
@@ -47,10 +47,17 @@
  *    hardcoded label passes. So the chord is read out of the tooltip and
  *    related to what the page itself reports the binding to be; no chord is
  *    named by the assertion that judges a control.
+ *
+ * The synthetic readings in the oracle controls deliberately corrupt text to
+ * calibrate the SAME validators used on the DOM below. They test the instrument;
+ * the toolbar tests use the real app and its live router, without mocks.
  */
 
 import { test, expect } from "../../lib/fixtures";
 import type { Page } from "@playwright/test";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { ctUserConfigDir } from "../../lib/ct-home";
 
 /**
  * The toolbar's controls, by the ids the view emits (`page-objects/
@@ -58,25 +65,26 @@ import type { Page } from "@playwright/test";
  * some point from `{action}-debug`).  Kept in the order the toolbar paints
  * them so "crossing" below is a real traversal of the strip.
  *
- * This list is the SUBJECT SELECTOR, not the expectation: no assertion below
- * says what chord any of these has.  It exists so the tests can be counted
- * over every control rather than over whichever one happened to be found.
+ * The ClientAction identifies what each control does, independently of its
+ * tooltip. No chord is stored here: every expected chord comes from the live
+ * router for THAT action, so another control's valid chord cannot pass.
  */
-const TOOLBAR_BUTTON_IDS = [
-  "history-back-image",
-  "history-forward-image",
-  "reverse-next-image",
-  "next-image",
-  "reverse-step-in-image",
-  "step-in-image",
-  "reverse-step-out-image",
-  "step-out-image",
-  "reverse-continue-image",
-  "continue-image",
-  "run-to-entry-image",
-  "reset-operation-image",
-  "run-tests-image",
+const TOOLBAR_CONTROLS = [
+  { id: "history-back-image", action: "aHistoryBack" },
+  { id: "history-forward-image", action: "aHistoryForward" },
+  { id: "reverse-next-image", action: "reverseNext" },
+  { id: "next-image", action: "forwardNext" },
+  { id: "reverse-step-in-image", action: "reverseStep" },
+  { id: "step-in-image", action: "forwardStep" },
+  { id: "reverse-step-out-image", action: "reverseStepOut" },
+  { id: "step-out-image", action: "forwardStepOut" },
+  { id: "reverse-continue-image", action: "reverseContinue" },
+  { id: "continue-image", action: "forwardContinue" },
+  { id: "run-to-entry-image", action: "aRunToEntry" },
+  { id: "reset-operation-image", action: "aResetOperation" },
+  { id: "run-tests-image", action: "aRunTests" },
 ] as const;
+const TOOLBAR_BUTTON_IDS = TOOLBAR_CONTROLS.map(({ id }) => id);
 
 /**
  * Longer than `TOOLTIP_DELAY_TIMER` (0.20s, `styles/defaults.styl`) plus the
@@ -203,40 +211,78 @@ async function tooltipShownBeforeItsDelay(page: Page, id: string): Promise<boole
 }
 
 /**
- * Turn a chord as the TOOLTIP SPELLS IT into the key string Playwright presses.
- *
- * Deliberately a dumb transliteration with no table of known chords in it: the
- * whole point of §10.5's strongest reading is that the test does not know what
- * any control is bound to, it reads the claim off the page and tries it. A
- * lookup table here would re-introduce exactly the second source of truth this
- * work removed.
- *
- * `forwardContinue` is bound to two chords ("F8 F2") and the tooltip shows
- * both; pressing the first is enough to test the claim.
+ * The router's canonical syntax (`common/key_names.nim`): modifiers, then a
+ * printable character or named key. Case does not decide whether this is a
+ * chord: `Ctrl+Alt+-` is one, and uppercase prose is not. Spaces separate
+ * successive strokes of ONE binding, not alternative bindings.
  */
-function chordToPlaywrightKey(chord: string): string {
-  const first = chord.trim().split(/\s+/)[0];
-  const parts = first.split("+");
-  const key = parts[parts.length - 1];
-  const modifiers = parts.slice(0, -1).map((m) => {
-    switch (m.toUpperCase()) {
-      case "CTRL":
-        return "Control";
-      case "SHIFT":
-        return "Shift";
-      case "ALT":
-        return "Alt";
-      case "COMMAND":
-      case "META":
-        return "Meta";
-      default:
-        throw new Error(`unrecognised modifier in chord "${chord}": ${m}`);
-    }
+function chordStrokes(chord: string): string[] {
+  const strokePattern = /^(?:(?:Ctrl|Shift|Alt|Meta)\+)*(?:[!-~]|F(?:[1-9]|1[0-2])|Esc|Enter|Tab|Backspace|Delete|Insert|Space|Home|End|PageUp|PageDown|Up|Down|Left|Right|Alt)$/i;
+  const strokes = chord.trim().split(/\s+/);
+  if (!strokes.every((stroke) => strokePattern.test(stroke))) {
+    throw new Error(`not a chord: "${chord}"`);
+  }
+  return strokes;
+}
+
+/** Transliterate every stroke the tooltip claims, without a binding table. */
+function chordToPlaywrightKeys(chord: string): string[] {
+  return chordStrokes(chord).map((stroke) => {
+    // Keep a literal '+' key intact (Ctrl++), instead of splitting it into
+    // an empty key and an unrecognised modifier.
+    const [, prefix, key] = /^((?:(?:Ctrl|Shift|Alt|Meta)\+)*)(.+)$/i.exec(stroke)!;
+    const modifiers = prefix.split("+").filter(Boolean).map((m) => {
+      switch (m.toUpperCase()) {
+        case "CTRL":
+          return "Control";
+        case "SHIFT":
+          return "Shift";
+        case "ALT":
+          return "Alt";
+        case "META":
+          return "Meta";
+        default:
+          throw new Error(`unrecognised modifier in chord "${chord}": ${m}`);
+      }
+    });
+    const mainKey = key.length === 1 && prefix.length > 0 ? key.toLowerCase() : key;
+    return [...modifiers, mainKey].join("+");
   });
-  // A single character is a letter key and Playwright wants it lower case;
-  // anything longer is a named key (F10, PageUp, Home) and is passed through.
-  const mainKey = key.length === 1 ? key.toLowerCase() : key;
-  return [...modifiers, mainKey].join("+");
+}
+
+/** Read and validate the actual text, shared by DOM assertions and controls. */
+function tooltipChord(text: string, id: string): string {
+  const match = /^(.+?) \((.+)\)$/.exec(text);
+  if (!match) throw new Error(`#${id} tooltip names no chord: "${text}"`);
+  const chord = match[2];
+  chordStrokes(chord);
+  return chord;
+}
+
+function assertRouterChord(text: string, id: string, routerChord: string): void {
+  const chord = tooltipChord(text, id);
+  expect(routerChord, `#${id}: the router has no chord for this control's action`).not.toBe("");
+  // This is the canonical string the router returns, including sequence order
+  // and letter case: bare `g` and `G` really are different keys.
+  expect(chord, `#${id} claims "${chord}", but its action's router chord is "${routerChord}"`)
+    .toBe(routerChord);
+}
+
+async function toolbarBindings(page: Page) {
+  return page.evaluate((controls) => {
+    const probe = (window as unknown as {
+      __CODETRACER_TEST__?: { chordForAction?: (action: string) => string };
+    }).__CODETRACER_TEST__;
+    if (typeof probe?.chordForAction !== "function") {
+      throw new Error("the live key router's chordForAction test seam is missing");
+    }
+    return controls.map(({ id, action }) => ({
+      id,
+      action,
+      text: (document.querySelector(`#${id} .custom-tooltip`)?.textContent ?? "").trim(),
+      routerChord: probe.chordForAction!(action),
+    }));
+  }, TOOLBAR_CONTROLS);
 }
 
 /** Read the chord a control's own tooltip claims, without hovering. */
@@ -245,9 +291,7 @@ async function chordFromTooltip(page: Page, id: string): Promise<string> {
     const tip = document.querySelector(`#${elementId} .custom-tooltip`);
     return (tip?.textContent ?? "").trim();
   }, id);
-  const match = /^(.+?) \(([^()]+)\)$/.exec(text);
-  if (!match) throw new Error(`#${id} tooltip names no chord: "${text}"`);
-  return match[2];
+  return tooltipChord(text, id);
 }
 
 async function resetStepLog(page: Page): Promise<void> {
@@ -291,6 +335,25 @@ async function waitStableBusyFalse(page: Page): Promise<void> {
     )
     .toBe(true);
 }
+
+test("CHORD ORACLE accepts router spelling and rejects malformed, stale and wrong-action readings", () => {
+  for (const chord of ["Ctrl+Alt+-", "Shift+F10", "ctrl+alt+-", "Ctrl+K Ctrl+C", "Ctrl++", "g", "G"]) {
+    expect(() => assertRouterChord(`Control (${chord})`, "control", chord)).not.toThrow();
+  }
+  for (const text of ["Control", "Control ()", "Control (PRESS THE KEY)", "Control (press the key)",
+                      "Control (Ctrl+Alt+)", "Control (Moon+F10)", "Control (F10) trailing"]) {
+    expect(() => tooltipChord(text, "control"), text).toThrow();
+  }
+  // A valid chord is insufficient: it must be this action's current chord.
+  // These deliberately corrupt readings calibrate the same assertion as the DOM.
+  for (const [claimed, bound] of [["Ctrl+Alt+B", "Ctrl+Alt+-"], ["F10", "Ctrl+Alt+-"],
+                                 ["Ctrl+K", "Ctrl+K Ctrl+C"], ["g", "G"]]) {
+    expect(() => assertRouterChord(`Control (${claimed})`, "control", bound)).toThrow(/router chord/);
+  }
+  expect(() => assertRouterChord("Control (F10)", "control", "")).toThrow(/router has no chord/);
+  expect(chordToPlaywrightKeys("Ctrl+K Ctrl+Shift+C")).toEqual(["Control+k", "Control+Shift+c"]);
+  expect(chordToPlaywrightKeys("g G")).toEqual(["g", "G"]);
+});
 
 test.describe("Debug toolbar tooltips name the bound chord, and wait for a rest", () => {
   test.describe.configure({ mode: "serial" });
@@ -461,24 +524,14 @@ test.describe("Debug toolbar tooltips name the bound chord, and wait for a rest"
     expect(readings.length).toBe(13);
     expect(readings.length).toBeGreaterThan(0);
 
-    const chordPattern = /^(.+?) \(([^()]+)\)$/;
     let controlsWithChord = 0;
     const chords = new Set<string>();
 
     for (const reading of readings) {
-      const match = chordPattern.exec(reading.text);
       // A control whose tooltip is a bare label is exactly the state this work
       // removed: five of the thirteen had no binding at all and so could only
       // ever have shown a label.
-      expect(match, `#${reading.id} tooltip has no chord: "${reading.text}"`).not.toBeNull();
-      if (!match) continue;
-
-      const [, label, chord] = match;
-      expect(label.length).toBeGreaterThan(0);
-      expect(chord.length).toBeGreaterThan(0);
-      // A chord is spelled in upper case by `renderChord`; a label is not. This
-      // catches a tooltip whose parentheses hold prose rather than a binding.
-      expect(chord).toBe(chord.toUpperCase());
+      const chord = tooltipChord(reading.text, reading.id);
       chords.add(chord);
       controlsWithChord += 1;
     }
@@ -495,47 +548,57 @@ test.describe("Debug toolbar tooltips name the bound chord, and wait for a rest"
     // §10.5, counted over every control on screen (rule 3): "one control with a
     // stale tooltip is the defect". This is the half of the strongest reading
     // that can be taken for ALL THIRTEEN without pressing anything — a chord
-    // the shortcut map does not contain is one that cannot possibly work, and
-    // that is decidable from the page alone.
+    // the router does not return for this action is a stale or wrong-action claim.
     //
     // It relates two things the page reports — the chord the tooltip claims and
-    // the chords the running config has bound — and names neither.
-    const results = await page.evaluate((ids: string[]) => {
-      const shortcutActions =
-        (window as unknown as {
-          data?: { config?: { shortcutMap?: { shortcutActions?: Record<string, unknown> } } };
-        }).data?.config?.shortcutMap?.shortcutActions ?? {};
-      const bound = new Set(Object.keys(shortcutActions).map((k) => k.toUpperCase()));
-      return ids.map((id) => {
-        const tip = document.querySelector(`#${id} .custom-tooltip`);
-        const text = (tip?.textContent ?? "").trim();
-        const match = /^(.+?) \(([^()]+)\)$/.exec(text);
-        const chord = match ? match[2] : "";
-        // "F8 F2" is two chords; every one of them must be bound.
-        const chords = chord ? chord.split(/\s+/) : [];
-        return {
-          id,
-          chord,
-          chordCount: chords.length,
-          allBound: chords.length > 0 && chords.every((c) => bound.has(c.toUpperCase())),
-          boundTableSize: bound.size,
-        };
-      });
-    }, TOOLBAR_BUTTON_IDS as unknown as string[]);
+    // the chord the live router runs for its action — and names neither.
+    const results = await toolbarBindings(page);
 
-    // NON-VACUITY: an empty shortcut table would make `allBound` false for
-    // everything, but an assertion shaped as "no unbound chords found" would
-    // pass over an empty LIST of controls. Both populations are sized.
+    // Size both populations and require a binding for EVERY selected action.
     expect(results.length).toBe(13);
-    expect(results[0].boundTableSize).toBeGreaterThan(40);
+    expect(new Set(results.map(({ action }) => action)).size).toBe(13);
 
     let controlsBound = 0;
     for (const r of results) {
-      expect(r.chordCount).toBeGreaterThan(0);
-      expect(r.allBound, `#${r.id} claims "${r.chord}", which nothing has bound`).toBe(true);
+      assertRouterChord(r.text, r.id, r.routerChord);
       controlsBound += 1;
     }
     expect(controlsBound).toBe(13);
+  });
+
+  test("the tooltip oracle follows a user's live keybindings.json rebind", async ({ ctPage }) => {
+    const page = ctPage as unknown as Page;
+    const file = path.join(ctUserConfigDir(), "keybindings.json");
+    const previous = fs.existsSync(file) ? fs.readFileSync(file) : null;
+    const original = await toolbarBindings(page);
+    const back = original.find(({ id }) => id === "history-back-image")!;
+    const next = original.find(({ id }) => id === "next-image")!;
+    assertRouterChord(back.text, back.id, back.routerChord);
+    expect(back.routerChord).not.toBe("Ctrl+Alt+9");
+
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify([
+        { key: "ctrl+alt+9", command: "navigation.back" },
+      ]));
+      // The real main-process file watcher reloads the router; no binding is
+      // injected into the renderer by this test. Wait for the painted claim too.
+      await expect.poll(async () => (await toolbarBindings(page))
+        .find(({ id }) => id === back.id)?.routerChord, { timeout: 30_000 }).toBe("Ctrl+Alt+9");
+      await expect.poll(() => chordFromTooltip(page, back.id), { timeout: 30_000 }).toBe("Ctrl+Alt+9");
+      const rebound = await toolbarBindings(page);
+      expect(rebound.length).toBe(13);
+      for (const reading of rebound) assertRouterChord(reading.text, reading.id, reading.routerChord);
+      expect(rebound.find(({ id }) => id === next.id)?.routerChord).toBe(next.routerChord);
+      // A stale pre-rebind claim is rejected by the very same live oracle.
+      expect(() => assertRouterChord(back.text, back.id, "Ctrl+Alt+9")).toThrow(/router chord/);
+    } finally {
+      if (previous === null) fs.unlinkSync(file);
+      else fs.writeFileSync(file, previous);
+      await expect.poll(async () => (await toolbarBindings(page))
+        .find(({ id }) => id === back.id)?.routerChord, { timeout: 30_000 }).toBe(back.routerChord);
+      await expect.poll(() => chordFromTooltip(page, back.id), { timeout: 30_000 }).toBe(back.routerChord);
+    }
   });
 
   test("PRESSING the key a tooltip names does what that control does", async ({ ctPage }) => {
@@ -596,11 +659,10 @@ test.describe("Debug toolbar tooltips name the bound chord, and wait for a rest"
 
     for (const id of STEPPING_CONTROLS) {
       const chord = await chordFromTooltip(page, id);
-      const key = chordToPlaywrightKey(chord);
 
       // 1. Press the key the tooltip claims.
       await resetStepLog(page);
-      await page.keyboard.press(key);
+      for (const key of chordToPlaywrightKeys(chord)) await page.keyboard.press(key);
       await expect
         .poll(() => firstRecordedStep(page), { timeout: 30_000 })
         .not.toBe("");
