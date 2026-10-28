@@ -1086,7 +1086,9 @@ proc statusWidgetDom(self: FlowComponent, line: int): Node =
   var dom = cast[Node](document.createElement(cstring"div"))
   var target = cast[Node](document.createElement(cstring"div"))
   dom.appendChild(target)
-  let id = cstring(&"flow-status-widget-{line}")
+  # Scoped to this component (`flow.widgetIdScope`): the component that
+  # replaces it registers its own status widget before this one is removed.
+  let id = cstring(&"flow-status-widget-{self.widgetIdScope}-{line}")
   target.id = id
   cast[Element](target).classList.add(cstring"flow-status-widget")
   self.statusDom = dom
@@ -1106,7 +1108,7 @@ proc ensureStatusWidget(self: FlowComponent, line: int) =
 
   if add:
     let dom = self.statusWidgetDom(line)
-    self.statusWidget = self.addContentWidget(dom, line, self.maxFlowLineWidth, &"flow-status-widget-{line}", isStatusWidget = true)
+    self.statusWidget = self.addContentWidget(dom, line, self.maxFlowLineWidth, &"flow-status-widget-{self.widgetIdScope}-{line}", isStatusWidget = true)
 
 const flowStatusTexts: array[FlowUpdateStateKind, string] = [
   "not loading",

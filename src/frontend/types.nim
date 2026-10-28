@@ -1523,6 +1523,11 @@ type
       ## `loadFlow` stores the outgoing component here so `onUpdatedFlow` can
       ## call `resetFlow` on it only after the new DOM is fully constructed —
       ## giving zero blank time compared with clearing eagerly before the load.
+    widgetScope*: int
+      ## This component's own namespace in the Monaco content-widget ids it
+      ## registers (`ui/flow.nim::widgetIdScope`), so it never shares an id
+      ## with the component it replaces — or the one replacing it — while
+      ## both are alive. `0` until the first widget is registered.
     flowLines*: JsAssoc[int, FlowLine]
     flowViewWidth*: int
     flowLoops*: JsAssoc[int, FlowLoop]
