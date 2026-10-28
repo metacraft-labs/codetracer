@@ -32,7 +32,11 @@
  * SESSION TAB and leave the edit session in its own tab (rule 3); the same
  * test's `⏵` again shows the tab it already has (rule 4) rather than a second
  * one; the palette's **Tests: Open Recordings in the Current Tab** writes the
- * workspace's `replay-open-in` document. Until 2026-10-25 the desktop loaded
+ * workspace's `replay-open-in` document; a click on a row selects it, and the
+ * palette's **Tests: Run** records the selected test and opens it in a new
+ * tab (§9.3); the editor's context-menu "Re-record and replay this test"
+ * goes through the pane's host too — a run in the pane, a new tab, the edit
+ * session left where it is (§9.7). Until 2026-10-25 the desktop loaded
  * the recording INTO the edit session's window (codetracer-pm
  * `issues/2026-10-24-desktop-test-results-opens-a-recording-in-place-not-in-a-new-tab.md`).
  */
@@ -351,6 +355,86 @@ test.describe("the desktop Test Results pane runs the suite through ct test run"
     expect(tabs.count).toBe(2);
     expect(tabs.active).toBe(1);
     expect(tabs.first).toBe("");
+  });
+
+  test("a clicked row is selected, and the palette's Tests: Run records it into a new tab", async ({ ctPage }) => {
+    // §9.3: the palette pair acts on the selected row; Run executes — it
+    // records — and opens at the command's destination, a new tab.
+    await showTestsPane(ctPage);
+    await expect(ctPage.locator(".test-results-row")).toHaveCount(2, { timeout: 60_000 });
+    const row = rowFor(ctPage, "test_passes");
+    await expect(row).not.toHaveClass(/\bselected\b/);
+    await row.locator(".test-results-name").click();
+    await expect(row).toHaveClass(/\bselected\b/);
+    await expect(row).toHaveAttribute("data-ct-selected", "true");
+    await expect(rowFor(ctPage, "test_fails")).toHaveAttribute("data-ct-selected", "");
+    const containersBefore = recordedContainers();
+    expect(await loadedRecordingId(ctPage)).toBe("");
+
+    await ctPage.keyboard.press("Control+KeyP");
+    const box = ctPage.locator("#command-query-text");
+    await expect(box).toBeVisible({ timeout: 30_000 });
+    await box.fill(":Tests: Run");
+    const hit = ctPage
+      .locator(".command-results .command-result.command-command")
+      .filter({ hasText: "Tests: Run" })
+      .filter({ hasNotText: "Current" })
+      .first();
+    await expect(hit).toBeVisible({ timeout: 30_000 });
+    await hit.click();
+
+    const ended = await waitForRunOutcome(ctPage);
+    test.info().annotations.push({ type: "Tests: Run outcome", description: ended });
+    expect(ended).toMatch(/^recording:/);
+    // RECORDED — the row had no recording, and the run made one, on that row.
+    expect(recordedContainers()).toBe(containersBefore + 1);
+    await expect(row).not.toHaveAttribute("data-ct-recording-id", "", { timeout: 30_000 });
+    expect(ended).toBe(`recording:${await row.getAttribute("data-ct-recording-id")}`);
+    // In a NEW SESSION TAB; the edit session stays the first tab.
+    const tabs = await sessionTabs(ctPage);
+    expect(tabs.count).toBe(2);
+    expect(tabs.active).toBe(1);
+    expect(tabs.first).toBe("");
+  });
+
+  test("the editor's context-menu Re-record and replay this test opens a new tab through the pane", async ({ ctPage }) => {
+    // §9.7: the menu item used to dispatch around the host and load the
+    // recording INTO the edit session; now it is the editor's Run-test.
+    await showTestsPane(ctPage);
+    await expect(ctPage.locator(".test-results-row")).toHaveCount(2, { timeout: 60_000 });
+    const row = rowFor(ctPage, "test_passes");
+    await expect(row).toHaveAttribute("data-ct-recording-id", "");
+    const editorTab = ctPage.locator(".lm_tab", { hasText: "main.nr" }).first();
+    await expect(editorTab).toBeVisible({ timeout: 60_000 });
+    await editorTab.click();
+    // The first `#[test]` line — test_passes's attribute.
+    const attribute = ctPage.locator(".monaco-editor .view-line", { hasText: "#[test]" }).first();
+    await expect(attribute).toBeVisible({ timeout: 60_000 });
+    await attribute.click({ button: "right" });
+    const item = ctPage
+      .locator("#context-menu-container .context-menu-item", { hasText: "Re-record and replay this test" })
+      .first();
+    await expect(item).toBeVisible({ timeout: 30_000 });
+    const containersBefore = recordedContainers();
+    await item.click();
+
+    const ended = await waitForRunOutcome(ctPage);
+    test.info().annotations.push({ type: "context-menu outcome", description: ended });
+    expect(ended).toMatch(/^recording:/);
+    expect(recordedContainers()).toBe(containersBefore + 1);
+    // THROUGH THE PANE'S HOST: the run was the pane's, so the recording is
+    // on test_passes's row…
+    await expect(row).not.toHaveAttribute("data-ct-recording-id", "", { timeout: 30_000 });
+    expect(ended).toBe(`recording:${await row.getAttribute("data-ct-recording-id")}`);
+    // …and it opened in a NEW SESSION TAB, the edit session left in the first.
+    const tabs = await sessionTabs(ctPage);
+    expect(tabs.count).toBe(2);
+    expect(tabs.active).toBe(1);
+    expect(tabs.first).toBe("");
+    // Nothing is left spinning in the editor.
+    expect(
+      await ctPage.evaluate(() => document.querySelectorAll(".editor-test-action.active-test-button").length),
+    ).toBe(0);
   });
 
   test("the palette's Tests: Open Recordings in the Current Tab writes the workspace's setting", async ({ ctPage }) => {

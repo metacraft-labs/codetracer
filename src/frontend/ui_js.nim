@@ -1853,7 +1853,10 @@ proc refreshCommandPaletteMenuIndex*(data: Data) =
                           # `omnibar_sources.replayOpenCommands`).
                           (OpenRecordingsInNewTabLabel, aTestsOpenInNewTab),
                           (OpenRecordingsInCurrentTabLabel,
-                           aTestsOpenInCurrentTab)]:
+                           aTestsOpenInCurrentTab),
+                          # …and the palette pair.
+                          (RunTestLabel, aTestsRun),
+                          (RunTestInCurrentTabLabel, aTestsRunInCurrentTab)]:
     data.ui.commandPalette.interpreter.commands[cstring(label)] = Command(
       name: cstring(label), kind: ActionCommand, action: action,
       shortcut: displayedChord(action))
@@ -4419,6 +4422,21 @@ proc saveReplayOpenIn(data: Data; policy: TraceOpenPolicy) =
   data.ipc.send cstring"CODETRACER::replay-open-in-save",
     js{workspace: cstring(workspace), policy: cstring($policy)}
 
+proc runTestFromPalette(data: Data; policy: TraceOpenPolicy) =
+  ## The palette's **Tests: Run** / **Tests: Run in Current Tab** (§9.3):
+  ## the pane's selected test, recorded and opened where the command says
+  ## (`TestResultsVM.runTestIn`, through this window's host).
+  if desktopTestRunHost.isNil or desktopTestRunHost.vm.isNil:
+    data.viewsApi.warnMessage(cstring(NoRecorderHostText))
+    return
+  let vm = desktopTestRunHost.vm
+  let why = vm.runSelectedTestIn(policy)
+  if why.len > 0:
+    data.viewsApi.warnMessage(cstring(why))
+  else:
+    data.viewsApi.infoMessage(cstring(
+      vm.runTestStartedText(vm.selectedTestId.val, policy)))
+
 proc onReplayOpenIn(sender: js,
                     response: jsobject(workspace=cstring, policy=cstring,
                                        error=cstring)) =
@@ -6129,6 +6147,11 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     saveReplayOpenIn(data, topNewTab),
   aTestsOpenInCurrentTab: proc(actionData: JsObject) = # aTestsOpenInCurrentTab
     saveReplayOpenIn(data, topCurrentTab),
+  aTestsRun: proc(actionData: JsObject) = # aTestsRun
+    ## Test-Results-Pane.md §9.3 — see `runTestFromPalette`.
+    runTestFromPalette(data, topNewTab),
+  aTestsRunInCurrentTab: proc(actionData: JsObject) = # aTestsRunInCurrentTab
+    runTestFromPalette(data, topCurrentTab),
 ]
 
 data.actions = actions

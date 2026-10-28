@@ -182,6 +182,14 @@ proc applyClick*(s: TestsSource; rt: TuiRuntime; c: PaneClickRequest): bool =
     let (ok, policy) = parsePolicyWord(c.text)
     if ok:
       rt.app.notification = s.host.setReplayOpen(policy)
+  of pcTestsRunIn:
+    # §9.3's palette pair, on the row the terminal has selected.
+    let (ok, policy) = parsePolicyWord(c.text)
+    if ok:
+      s.vm.selectTest(c.path)
+      let why = s.vm.runSelectedTestIn(policy)
+      rt.app.notification =
+        if why.len > 0: why else: s.vm.runTestStartedText(c.path, policy)
   else:
     return false
   let note = s.host.takeNote()
