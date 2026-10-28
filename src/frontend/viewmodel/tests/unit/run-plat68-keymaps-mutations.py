@@ -18,7 +18,7 @@ touched.
 THREE THINGS PARTICULAR TO THIS MILESTONE:
 
   * **SUBJECTS OUTSIDE THIS REPOSITORY.** The CUA specification lives in the
-    specification checkout (`$CT_SPECS_DIR`, else `../codetracer-specs`), and
+    specification checkout (`$CT_SPECS_DIR`, else `../codetracer-pm`), and
     the restore the terminal relies on lives in `nim-termctl`
     (`$NIM_TERMCTL_SRC`, else `../nim-termctl/src`). Both are named by a
     prefix (`specs:`, `nim-termctl:`) in the control file, mutated and
@@ -76,7 +76,7 @@ ROOTS = {
     "isonim-tui:": Path(os.environ.get("ISONIM_TUI_SRC") or
                         REPO.parent / "isonim-tui/src"),
     "specs:": Path(os.environ.get("CT_SPECS_DIR") or
-                   REPO.parent / "codetracer-specs"),
+                   REPO.parent / "codetracer-pm"),
     "nim-termctl:": Path(os.environ.get("NIM_TERMCTL_SRC") or
                          REPO.parent / "nim-termctl/src"),
 }

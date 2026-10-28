@@ -144,7 +144,7 @@ READ_ONLY_INPUTS = [
     ".github/workflows/codetracer.yml",
     "justfile",
     "ci/lib/test-lane-files.sh",
-    "../codetracer-specs/spec/Architecture/Editor-ViewModel.md",
+    "../codetracer-pm/spec/Architecture/Editor-ViewModel.md",
     # Executed by this harness (it is in `SUITES`) but not mutated by it — see
     # `AUTHORITY` above for why it is digested here rather than in `TOUCHED`.
     AUTHORITY,
@@ -522,7 +522,7 @@ def write_source(rel, text):
     (ROOT / rel).write_text(text)
 
 
-SPECS_PREFIX = "../codetracer-specs/"
+SPECS_PREFIX = "../codetracer-pm/"
 
 
 def resolve_input(rel):
@@ -530,7 +530,7 @@ def resolve_input(rel):
     specification checkout is read from `CT_SPECS_DIR` when that names one —
     the override `src/frontend/test_support/spec_documents.nim` honours for
     the suites this harness runs, so the harness digests the document they
-    read. The control file keeps the canonical `../codetracer-specs/...`
+    read. The control file keeps the canonical `../codetracer-pm/...`
     spelling either way, so one recording compares in both environments."""
     specs = os.environ.get("CT_SPECS_DIR", "")
     if specs and rel.startswith(SPECS_PREFIX):

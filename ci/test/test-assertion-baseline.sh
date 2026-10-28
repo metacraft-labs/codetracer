@@ -5,30 +5,27 @@
 #
 # # The defect this closes
 #
-# `codetracer-specs/tools/check-test-assertions.sh` flags `#[test]` functions
+# `codetracer-pm/tools/check-test-assertions.sh` flags `#[test]` functions
 # whose bodies assert nothing. It is described in its own header as "part of the
 # M0 CI lint deliverable", and the specs repo runs `just
 # test-check-test-assertions` against it specifically so it "could not rot into
 # a no-op".
 #
-# This repository invoked it NOWHERE -- no reference in `justfile`, `ci/`,
+# Originally this repository invoked it NOWHERE -- no reference in `justfile`, `ci/`,
 # `.github/` or `scripts/`. And it could not have: the lint lives in a repo that
-# is never checked out here. `lint-bash` checks out `codetracer` alone,
+# was never checked out here. `lint-bash` checked out `codetracer` alone,
 # `.github/sibling-repos` does not list `codetracer-specs`, and no workflow
-# clones it. A guard was written, shipped, and connected to nothing, which is
+# cloned it. A guard was written, shipped, and connected to nothing, which is
 # the mechanism by which assertion-less Rust tests lived inside a required gate.
 #
-# # Why the lint is VENDORED and not reached for in the sibling
+# # Why the lint is vendored and its canonical copy is required here
 #
-# `ci/lint/bash.sh` is deliberately the lane that needs "nothing beyond the
-# linter itself" -- no siblings, no network, no dev-shell closure. Making it
-# clone a private repo to obtain a self-contained shell script would trade that
-# property away for nothing. So `tools/check-test-assertions.sh` here is a
-# BYTE-IDENTICAL copy of the specs original, and assertion 1 below compares the
-# two by sha256 whenever both repos are on disk, so the copy cannot drift
-# silently. When the sibling is absent that one assertion says so by name; it is
-# the only part of this suite that depends on anything outside this checkout,
-# and it is not the part that does the guarding.
+# `tools/check-test-assertions.sh` remains a BYTE-IDENTICAL copy of the specs
+# original so the lint itself can run without a sibling. This suite also proves
+# that copy has not drifted: assertion 1 requires the canonical source from
+# `$CT_SPECS_DIR`, else `../codetracer-pm`. CI provisions that checkout before
+# running this suite. A missing source is a failure, since no comparison was
+# made; it cannot certify the copy as current.
 #
 # # Why a recorded baseline and not "zero violations"
 #
@@ -76,7 +73,7 @@
 # The committed `src/` and `tests/` trees are the input.
 #
 # Run: bash ci/test/test-assertion-baseline.sh
-# Lane: a step of `lint-bash` (pure bash + awk, no nix, no network). Roughly
+# Lane: a step of `lint-nim` (bash + awk, with codetracer-pm on disk). Roughly
 #       10-30s: it reads every .rs file in the repository twice.
 # =============================================================================
 set -uo pipefail
@@ -84,7 +81,7 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 readonly REPO_ROOT
 readonly LINT="$REPO_ROOT/tools/check-test-assertions.sh"
-readonly SPECS_ORIGIN="$REPO_ROOT/../codetracer-pm/tools/check-test-assertions.sh"
+readonly SPECS_ORIGIN="${CT_SPECS_DIR:-$REPO_ROOT/../codetracer-pm}/tools/check-test-assertions.sh"
 
 assertions=0
 failures=0
@@ -146,9 +143,9 @@ if [ -f "$SPECS_ORIGIN" ]; then
 			"a change to it still works; this copy has no self-test of its own."
 	fi
 else
-	# Not a skip of the guarding: everything below still runs. This one
-	# assertion cannot be evaluated without the sibling, and says so.
-	ok "codetracer-pm not on disk — drift comparison not evaluated here (lint still runs below)"
+	fail "canonical test-assertion lint is missing" \
+		"expected at: $SPECS_ORIGIN" \
+		"Provide the codetracer-pm sibling, or set CT_SPECS_DIR to its checkout."
 fi
 
 # ---------------------------------------------------------------------------
