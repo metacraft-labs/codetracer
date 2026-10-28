@@ -34,6 +34,7 @@
   "pinned": true,
   "unpinned": true,
   "top-base": true,
+  "top-menu": true,
   "top-docked": true,
   "top-revealed": true,
   "top-esc": true,
@@ -43,7 +44,9 @@
  "ticksReportedByWindow": {
   "base": 1,
   "menu-choose": 2,
-  "omni-tick": 42
+  "omni-tick": 42,
+  "pinned": 42,
+  "unpinned": 42
  },
  "controlClicks": [
   {
@@ -98,67 +101,67 @@
   }
  ],
  "controlMarkInk": {
-  "reverse-next": 56,
-  "next": 56,
-  "reverse-step-in": 84,
-  "step-in": 100,
-  "reverse-step-out": 122,
-  "step-out": 124,
-  "reverse-continue": 44,
-  "continue": 44,
-  "run-to-entry": 111
+  "reverse-next": 38,
+  "next": 38,
+  "reverse-step-in": 88,
+  "step-in": 90,
+  "reverse-step-out": 85,
+  "step-out": 85,
+  "reverse-continue": 36,
+  "continue": 34,
+  "run-to-entry": 120
  },
- "menuBandOcr": "N A I",
- "menuTitlesOcr": "File \u00bb\nEdit \u00bb\nView \u00bb\nBuild \u00bb\nReset \u00bb\nDebug \u00bb\nHelp \u00bb",
+ "menuBandOcr": "o = Y& 5=",
+ "menuTitlesOcr": "File >\nEdit >\nView >\nBuild =\nReset \u00bb\nDebug >\nHelp =",
  "menuRoot": {
   "popover": [
-   12,
-   46,
+   4,
+   34,
    240,
    190
   ],
   "button": [
-   12,
-   12,
+   4,
+   6,
    34,
-   34
+   26
   ]
  },
- "footerOcr": "BUILD PROBLEMS FIND IN FILES REQUESTS main.py:1 tick 1",
+ "footerOcr": "BUILD\nPROBLEMS\nFIND IN FILES\nREQUESTS",
  "menuOpen": {
   "popover": [
-   252,
-   176,
-   508,
+   244,
+   164,
+   438,
    690
   ],
   "changedBox": [
-   12,
-   50,
-   748,
+   4,
+   38,
+   678,
    816
   ],
-  "changed": 358024,
+  "changed": 312210,
   "rootPopover": [
-   12,
-   46,
+   4,
+   34,
    240,
    190
   ]
  },
- "menuStepOverOcr": "Step Over F10",
- "menuStepOverShortcut": "F10",
+ "menuStepOverOcr": "Step Over n",
+ "menuStepOverShortcut": "n",
  "menuHover": {
-  "stepInRowChanged": 13197
+  "stepInRowChanged": 11373
  },
  "menuKey": {
-  "stepOutRowChanged": 13198
+  "stepOutRowChanged": 11367
  },
  "menuChoose": {
-  "popoverPixelsChanged": 345568
+  "popoverPixelsChanged": 299779
  },
- "controlHoverOcr": "Next (F10)",
- "omnibarQueryOcr": "o :sym add|",
+ "controlHoverOcr": "Next (n) resTs P \u00a5 calc/main.py",
+ "omnibarQueryOcr": "Q) :sym add]|",
  "omnibarAttempts": {
   "#42": 1,
   ":sym add": 1
@@ -166,56 +169,56 @@
  "omnibarSymOcr": "add main.py:29",
  "revealBottom": {
   "rect": [
-   12,
-   714,
-   1896,
-   330
+   4,
+   710,
+   1912,
+   338
   ],
   "changedBox": [
-   12,
-   714,
-   1896,
+   4,
+   710,
+   1912,
    366
   ],
   "changedOutside": 0,
-  "ocr": "Build Output Unpin\nthe buildOutput pane is an edit-mode view; a replay session does not build the working tree and will not claim to"
+  "ocr": "| Build Output\nUnpin"
  },
  "revealEscChanged": 0,
- "keyRevealOcr": "Build Output Unpin\nthe buildOutput pane is an edit-mode view; a replay session does not build the working tree and will not claim to",
- "pinnedFooterOcr": "BUILD PROBLEMS FIND IN FILES REQUESTS State main.py:79 tick 42",
- "unpinnedFooterOcr": "BUILD PROBLEMS FIND IN FILES REQUESTS main.py:111 tick 168",
- "unpinnedTabsOcr": "State Scratchpad h'|",
+ "keyRevealOcr": "| Build Output\nUnpin",
+ "pinnedFooterOcr": "BUILD\nPROBLEMS\nFIND IN FILES\nREQUESTS\nVariables",
+ "unpinnedFooterOcr": "BUILD\nPROBLEMS\nFIND IN FILES\nREQUESTS",
+ "unpinnedTabsOcr": "VARIABLES\nSCRATCHPAD",
  "topStrip": {
   "rect": [
-   12,
-   54,
-   1896,
+   4,
+   34,
+   1912,
    24
   ],
-  "ocr": "State"
+  "ocr": "Variables"
  },
  "topReveal": {
   "rect": [
-   12,
-   86,
-   1896,
-   319
+   4,
+   62,
+   1912,
+   328
   ],
   "changedOutside": 0,
-  "ocr": "State Unpin\nLocals"
+  "ocr": "| Variables\nUnpin"
  },
  "topEscChanged": 0,
  "docTop": {
   "strip": [
-   12,
-   54,
-   1896,
+   4,
+   34,
+   1912,
    24
   ],
   "terminalTopDocked": [
-   "calltrace"
+   "fileTree"
   ],
-  "ocr": "Call Trace"
+  "ocr": "Files"
  },
  "reportedByWindow": {
   "menuHoverHighlight": 2,
@@ -236,7 +239,7 @@
   "topRevealPane": "state",
   "topBackPlaced": true,
   "docTopSlots": [
-   "calltrace"
+   "fileTree"
   ]
  }
 }
