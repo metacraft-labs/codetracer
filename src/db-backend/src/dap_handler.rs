@@ -2616,7 +2616,19 @@ impl Handler {
         args: SeekToGeidArguments,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        let restored = self.replay.seek_to_geid(args.geid)?;
+        // A replay that serves geid positions (a native recording's live
+        // replay) seeks to the geid. A MATERIALIZED trace has none, but the
+        // coordinates sent here for it are its own STEP ids: a request span's
+        // `startGeid` is the span's `start_step` (`request_spans.rs`), and
+        // for a materialized trace a step is exactly the position
+        // `ct/goto-ticks` moves to. Refusing it ("restore-at is only available
+        // for live replay sessions") made the Requests pane's "go to the
+        // handler" a no-op on every completed recording.
+        let restored = if self.trace_kind == TraceKind::Materialized && !self.replay.serves_geid_positions() {
+            self.replay.jump_to(StepId(args.geid as i64))?
+        } else {
+            self.replay.seek_to_geid(args.geid)?
+        };
         self.step_id = self.replay.current_step_id();
         self.complete_move(false, sender.clone())?;
         self.respond_dap(request, restored, sender)
