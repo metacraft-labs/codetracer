@@ -324,6 +324,16 @@ type
       ## indicator — the current build in the shared words, "" for none.
     buildStatusState*: BuildStatus
       ## Its verdict, for its colour.
+    buildDiagnostics*: seq[BuildProblemLine]
+      ## Build-Output-Pane.md §3.9: the Problems pane's rows (the window's
+      ## `ErrorsVM`), which the Edit pane marks in the file it shows; filled
+      ## by the host with the pane (`host/build_output_source`).
+    buildDiagnosticsDir*: string
+      ## The working directory of the build those rows came from, which a
+      ## relative path resolves against (EMT-A36).
+    buildPaneTouched*: bool
+      ## §3.8 "pin on interaction": the user pressed or scrolled in the Build
+      ## Output pane since the host last looked (the host clears it).
     buildCommand*: proc(kind: BuildPaneCommandKind;
                         index: int): string {.closure.}
       ## PLAT-56: the HOST's Build Output pane — run again, stop, clear,
@@ -571,6 +581,18 @@ proc welcomeViewOf*(app: TuiApp): WelcomeView =
               input: w.input, placeholder: w.placeholder,
               message: w.message)
 
+proc editPaneModel*(app: TuiApp): EditPaneModel =
+  ## The Edit pane's value: the active buffer's, with the build's
+  ## diagnostics in it (§3.9).
+  if app.editSession.isNil:
+    return initEditPaneModel()
+  result = editPaneModelFor(app.editSession, app.editSession.activeBuffer())
+  # The project folder (a session started on one names none: its builds run
+  # in it, so the build's directory stands in).
+  result.attachDiagnostics(app.buildDiagnostics, app.buildDiagnosticsDir,
+                           (if app.projectRoot.len > 0: app.projectRoot
+                            else: app.buildDiagnosticsDir))
+
 proc currentBuildPane*(app: TuiApp): BuildPaneModel =
   ## PLAT-56: the Build Output pane's value — the host's, from the window's
   ## `BuildVM`, or (no host) the runner's session drawn directly.
@@ -722,9 +744,7 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     requests: app.requests,
     build: build,
     product: app.modes.product,
-    edit: (if app.editSession.isNil: initEditPaneModel()
-           else: editPaneModelFor(app.editSession,
-                                  app.editSession.activeBuffer())))
+    edit: app.editPaneModel())
   # THE FILE INFO YIELDS TO A NOTE. The status row carries the file info, the
   # bottom labels, the mode indicators and the notification; where they do
   # not all fit, the file info is the one left out — a message the user

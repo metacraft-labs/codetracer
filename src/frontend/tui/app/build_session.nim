@@ -100,6 +100,11 @@ type
       ## so do the terminal and GPUI (Build-Output-Pane.md §3.13).
     endedMs*: int64
       ## PLAT-56: when the process ended (or 0), for the build's duration.
+    taskName*: string
+      ## The build task this runs (Build-Output-Pane.md §3.6), "" for a
+      ## command typed as it is.
+    problemMatcher*: string
+      ## The task's problem matcher; "none" reads no diagnostics.
 
 const
   MaxBuildLines* = 2000

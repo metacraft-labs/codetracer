@@ -87,7 +87,8 @@ proc follow*(p: BuildProblems; session: BuildSession; nowMs = 0'i64): bool =
     p.consumed = 0
     p.feed.beginBuild(session.workingDir)
     p.build.beginBuild(session.command, float(session.startedMs),
-                       noun = $session.kind)
+                       noun = $session.kind, taskName = session.taskName,
+                       problemMatcher = session.problemMatcher)
     result = true
   let pending = session.received - p.consumed
   if pending > 0:

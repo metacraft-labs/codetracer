@@ -257,6 +257,20 @@ proc wireEditServices(rt: TuiRuntime; root: string; keymapFlag: string;
       BuildStartResult(ok: true, message: $kind & " started: " & cmd)
     else:
       BuildStartResult(ok: false, message: describeVerdict(state.running.session))
+  # Build-Output-Pane.md §3.6: a build TASK — its command in its own working
+  # directory, named, read by its problem matcher.
+  rt.editServices.projectDir = proc(): string = rootOf()
+  rt.editServices.startTask = proc(cmd, dir, task,
+                                   matcher: string): BuildStartResult =
+    state.running = startBuild(bkBuild, cmd, (if dir.len > 0: dir
+                                              else: rootOf()), nowMonoMs())
+    state.running.session.taskName = task
+    state.running.session.problemMatcher = matcher
+    rt.app.build = state.running.session
+    if state.running.session.verdict == bvRunning:
+      BuildStartResult(ok: true, message: "")
+    else:
+      BuildStartResult(ok: false, message: describeVerdict(state.running.session))
   state
 
 proc wireKeybindings(rt: TuiRuntime): ref KeybindingsLoad =

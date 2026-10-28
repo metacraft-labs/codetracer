@@ -205,11 +205,14 @@ suite "PLAT-55: the Problems pane on a real terminal":
     let (lr, _) = s.findRow("let unused = 1;")
     ck lr >= 0
     if lr >= 0:
-      # The gutter's number just left of the line's text.
+      # The gutter's number just left of the line's text — past the build
+      # diagnostic's icon in the pointer field (Build-Output-Pane.md §3.9).
       let line = s.text(lr)
       let at = line.find("let unused = 1;")
-      ck line[0 ..< at].strip().endsWith(" 2") or
-         line[0 ..< at].splitWhitespace()[^1] == "2"
+      var words: seq[string]
+      for w in line[0 ..< at].splitWhitespace():
+        if w notin ["●", "⚠", "ⓘ"]: words.add w
+      ck words.len > 0 and words[^1] == "2"
 
     sess.send("\x11")  # Ctrl+Q
     discard sess.waitExit(initDuration(seconds = 10))

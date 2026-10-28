@@ -320,12 +320,13 @@ suite "PLAT-16 §5: `:build`, `:run` and `:cancel` on the prompt":
     checkpoint(statusRow(rt))
     ck statusRow(rt).contains("no runner")
     ck rt.app.build.isNil
-    # …and so is a verb with no argument.
+    # …and `:build` alone, which runs the project's default build TASK
+    # (Build-Output-Pane.md §3.12), says there is none to run.
     discard rt.prompt.open(pkCommand)
     for ch in ":build":
       discard rt.prompt.applyKey($ch, @[])
     discard rt.handleToken("\r", 0)
-    ck statusRow(rt).contains("needs a command")
+    ck statusRow(rt).contains("No build tasks")
 
   test "`:w` writes through the host seam and clears the dirty marker":
     let rt = editingRuntime()

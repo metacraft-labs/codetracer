@@ -17,14 +17,22 @@
 ##   column (K35): a relative path against the build's working directory
 ##   (EMT-A36); a file that is not there is said, and nothing opens (EMT-D20).
 ##
-## It also fills the status line's build indicator (§3.10).
+## It also fills the status line's build indicator (§3.10), hands the Edit
+## pane the Problems pane's rows for its marks (§3.9), and applies the shared
+## reveal rule (`build_auto_reveal`, §3.8): a build brings the pane on screen,
+## a failed one Problems too, and a clean success puts a REVEALED pane back on
+## its edge two seconds later unless the user pressed or scrolled in it.
+
+import std/[os, times]
 
 import isonim/core/[signals, computation]
+import ../../../common/[ct_home, window_policy]
 
 import ../app/runtime
 import ../app/tui_app
 import ../app/views/build_output
 import ../../viewmodel/store/types
+import ../../viewmodel/viewmodels/build_auto_reveal
 import ./build_problems
 import ./problems_source
 
@@ -46,6 +54,8 @@ type
     lastShown: (int, int, int)
       ## (number, shown index, line count) of the last published output, for
       ## auto-scroll.
+    reveal*: BuildAutoReveal
+      ## §3.8: when this window's builds show and put away the pane.
 
 proc vmOf(s: BuildOutputSource): BuildVM =
   if s.isNil or s.problems.isNil or s.problems.problems.isNil: nil
@@ -99,15 +109,44 @@ proc publish*(s: BuildOutputSource; rt: TuiRuntime) =
   rt.app.buildPane = model
   rt.app.buildStatus = statusOf(vm)
   rt.app.buildStatusState = vm.status.val
+  # §3.9: the Problems pane's rows, for the Edit pane's marks.
+  if not s.problems.problems.vm.isNil:
+    rt.app.buildDiagnostics = s.problems.problems.vm.problems.val
+    rt.app.buildDiagnosticsDir = s.problems.problems.feed.workingDirectory
   s.lastKey = keyOf(vm, s.historyOpen)
+
+proc applyReveal(s: BuildOutputSource; rt: TuiRuntime; vm: BuildVM): bool =
+  ## §3.8: the shared rule's step for this window's build, applied to its
+  ## docking. Whether the screen changed.
+  let now = epochTime() * 1000.0
+  if rt.app.buildPaneTouched:
+    rt.app.buildPaneTouched = false
+    s.reveal.interact()
+  let errs = s.problems.problems.vm
+  let step = s.reveal.observe(vm.number.val, vm.status.val,
+                              (if errs.isNil: 0 else: errs.errorCount.val),
+                              (if errs.isNil: 0 else: errs.warningCount.val),
+                              now)
+  case step
+  of brsReveal:
+    rt.autoRevealBuildPane()
+    result = true
+  of brsRevealProblems:
+    rt.revealFailedBuild()
+    result = true
+  else:
+    discard
+  if s.reveal.due(now) == brsDismiss:
+    result = rt.dismissBuildReveal() or result
 
 proc tick*(s: BuildOutputSource; rt: TuiRuntime): bool =
   ## Publish when the build (or its clock) moved. Whether the pane changed.
   let vm = s.vmOf
   if vm.isNil:
     return false
+  let revealed = s.applyReveal(rt, vm)
   if keyOf(vm, s.historyOpen) == s.lastKey:
-    return false
+    return revealed
   s.publish(rt)
   true
 
@@ -165,13 +204,26 @@ proc command(s: BuildOutputSource; rt: TuiRuntime; kind: BuildPaneCommandKind;
                         else: "")
   s.publish(rt)
 
+proc revealSetting(): BuildRevealSetting =
+  ## §5.1's `build.autoReveal` / `build.autoDismissOnSuccess`, from the
+  ## configuration file the desktop reads (found as it finds it). A value that
+  ## is not true or false leaves the default, and is not fatal.
+  result = DefaultBuildRevealSetting
+  let file = findUserConfigFile(getCurrentDir(), ctConfigDir())
+  if file.len > 0:
+    try:
+      result = buildRevealSettingOfConfigText(readFile(file)).setting
+    except IOError:
+      discard
+
 proc newBuildOutputSource*(rt: TuiRuntime; problems: ProblemsSource;
                            open: ProblemsOpener;
                            rerun: BuildRerun): BuildOutputSource =
   ## The window's Build Output source over `problems`' reader, its commands
   ## installed on `rt`'s app.
   result = BuildOutputSource(problems: problems, open: open, rerun: rerun,
-                             lastShown: (-1, -1, 0))
+                             lastShown: (-1, -1, 0),
+                             reveal: initBuildAutoReveal(revealSetting()))
   let s = result
   rt.app.buildCommand = proc(kind: BuildPaneCommandKind; index: int): string =
     s.command(rt, kind, index)

@@ -126,6 +126,13 @@ type
       ## (`ensureEditWorkspace`), two suppliers, no branch in the consumer.
     startBuild*: proc(kind: BuildKind; command: string): BuildStartResult
       {.closure.}
+    startTask*: proc(command, workingDir, taskName,
+                     problemMatcher: string): BuildStartResult {.closure.}
+      ## Build-Output-Pane.md §3.6: start a build TASK — its command in its
+      ## working directory, named, read by its problem matcher.
+    projectDir*: proc(): string {.closure.}
+      ## The folder Edit mode opened: where `.codetracer/build.yaml` is read
+      ## from and where a task runs.
     submitFileJob*: proc(job: FileJob) {.closure.}
       ## PLAT-29. Hand a read (`:e!`) or a write (`:w`) to the host's file
       ## worker (`host/file_worker`), which answers through `deliverFileJob`.
@@ -1478,6 +1485,60 @@ proc runFilesMenuAction(rt: TuiRuntime; action: ContextAction;
     return
   rt.promptForFilesField()
 
+proc revealBuildPane*(rt: TuiRuntime)
+  ## FORWARD-DECLARED for `:build: history`; defined with the pane's readers.
+
+proc buildTaskConfig*(rt: TuiRuntime): BuildTaskConfig =
+  ## Build-Output-Pane.md §3.6, §5.2: the project's tasks, read from
+  ## `.codetracer/build.yaml` NOW (an edit to the file is seen at once).
+  if rt.editServices.readFile.isNil:
+    return BuildTaskConfig()
+  let read = rt.editServices.readFile(BuildTasksFile)
+  loadBuildTasks(read.text, read.ok)
+
+proc buildRunning(rt: TuiRuntime): bool =
+  not rt.app.build.isNil and rt.app.build.verdict == bvRunning
+
+proc openBuildTaskPicker*(rt: TuiRuntime): string =
+  ## §3.11: `Ctrl+Shift+B` — the omnibox on `:build: `, the default task
+  ## first (`Enter` runs it), the pane's commands after. What to say.
+  let c = rt.buildTaskConfig()
+  rt.app.omnibar.setBuildTasks(buildTaskEntries(c))
+  rt.openOmnibar(BuildTaskQuery)
+  let note = pickerNote(c)
+  if note.len > 0: note
+  else: "build tasks: Enter runs " &
+        (if c.defaultTask.found: c.defaultTask.task.name else: "the chosen one")
+
+proc buildTaskHost*(rt: TuiRuntime): BuildTaskHost =
+  ## What this window does for `build_tasks` (its runner, its pane).
+  result.running = rt.buildRunning
+  result.projectDir = (if rt.editServices.projectDir.isNil: rt.app.projectRoot
+                       else: rt.editServices.projectDir())
+  result.start = proc(command, dir, task, matcher: string): string =
+    if rt.editServices.startTask.isNil:
+      return "this session has no build runner"
+    let started = rt.editServices.startTask(command, dir, task, matcher)
+    if started.ok: "" else: started.message
+  result.stop = proc(): string =
+    rt.app.build.requestCancel()
+    "cancelling " & $rt.app.build.kind & " …"
+  result.clear = proc(): string =
+    if rt.app.buildCommand.isNil: "this window has no Build Output pane host"
+    else: rt.app.buildCommand(bpcClear, -1)
+  result.showHistory = proc(): string =
+    if rt.app.buildPane.history.len == 0:
+      return "no earlier build in this window"
+    rt.revealBuildPane()
+    if not rt.app.buildPane.historyOpen and not rt.app.buildCommand.isNil:
+      discard rt.app.buildCommand(bpcHistory, -1)
+    "build history: choose a build"
+  result.openPicker = proc(): string = rt.openBuildTaskPicker()
+
+proc runBuildLine*(rt: TuiRuntime; line: string): string =
+  ## A `:build` line (§3.12) through the shared grammar. What to say.
+  runBuildVerb(rt.buildTaskHost, rt.buildTaskConfig, parseBuildVerb(line))
+
 proc runCommandLine(rt: TuiRuntime; line: string; outcome: var RuntimeOutcome;
                     unknownFallsThrough = false): bool =
   ## One command line, through CTUI-10's interpreter and the verbs beside it —
@@ -1739,6 +1800,13 @@ proc runCommandLine(rt: TuiRuntime; line: string; outcome: var RuntimeOutcome;
     let words = text.splitWhitespace()
     let verb = if words.len > 0: words[0] else: ""
     let rest = if words.len > 1: text[text.find(words[1]) .. ^1] else: ""
+    # Build-Output-Pane.md §3.12: `:build: <task>` and the pane's words
+    # (`:build: stop|clear|history|tasks`) — the colon after the verb.
+    if parseBuildVerb(text).kind in {bvkRunTask, bvkPick, bvkStop, bvkClear,
+                                     bvkHistory}:
+      rt.note(rt.runBuildLine(text))
+      outcome.detail = rt.app.notification
+      return
     case verb
     of "keymap":
       rt.chooseKeymap(rest)
@@ -1836,7 +1904,10 @@ proc runCommandLine(rt: TuiRuntime; line: string; outcome: var RuntimeOutcome;
       outcome.detail = rt.app.notification
       return
     of "build", "run":
-      if rest.len == 0:
+      if verb == "build" and parseBuildVerb(text).kind != bvkRunCommand:
+        # Build-Output-Pane.md §3.12: `:build` runs the default task.
+        rt.note(rt.runBuildLine(text))
+      elif rest.len == 0:
         rt.note(":" & verb & " needs a command, e.g. ':" & verb &
                 " just build'")
       elif rt.editServices.startBuild.isNil:
@@ -2350,7 +2421,7 @@ proc paneAreaOf(rt: TuiRuntime; kind: PaneKind): CellArea =
 # painted, feeds it its width, and routes the wheel, the bar and the keys.
 # ---------------------------------------------------------------------------
 
-proc paintedAreaOf(rt: TuiRuntime; kind: PaneKind): CellArea =
+proc paintedAreaOf*(rt: TuiRuntime; kind: PaneKind): CellArea =
   ## The rectangle pane `kind`'s painter is handed this frame (its strip row
   ## first): the maximized pane's under `z`, else `paneAreaOf`'s (a tiled
   ## pane, or a docked one shown open or revealed).
@@ -2730,6 +2801,7 @@ proc buildPaneScreen*(rt: TuiRuntime): tuple[area: CellArea,
 
 proc scrollBuild(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
   ## PLAT-56: the wheel over Build Output scrolls its lines.
+  rt.app.buildPaneTouched = true
   let (_, model, screen) = rt.buildPaneScreen()
   rt.app.buildPane.scrollTop = clampBuildTop(model.output.len,
     screen.first + delta, screen.listRows)
@@ -2741,6 +2813,7 @@ proc buildCommand(rt: TuiRuntime; kind: BuildPaneCommandKind; index: int;
   ## auto-scroll, the history picker, a located line opened — and say what it
   ## said. An open focuses the editor, as a Problems row's does.
   outcome.repaint = true
+  rt.app.buildPaneTouched = true
   if rt.app.buildCommand.isNil:
     rt.note("this window has no Build Output pane host")
     return
@@ -2763,6 +2836,65 @@ proc revealBuildPane*(rt: TuiRuntime) =
     let acted = b.dispatch(cmdActivateTab(paneBuildOutput))
     if acted.status == lasApplied:
       rt.afterLayoutCommit()
+
+proc revealProblemsPane*(rt: TuiRuntime) =
+  ## Build-Output-Pane.md §3.8: a failed build brings the Problems pane on
+  ## screen, as `revealBuildPane` brings Build Output — revealed from its
+  ## edge where it is docked, its tab activated where it is placed. The
+  ## keyboard stays where it was (EMT-D21).
+  if not rt.layoutBindingEnabled():
+    return
+  let b = rt.app.layoutBinding
+  let at = b.layout.dockedIndex(paneProblems)
+  if at >= 0:
+    if not b.layout.docked[at].open:
+      if b.interaction.kind == ikRevealingDock:
+        b.interaction = b.interaction.cancel()
+      discard b.beginRevealDock(paneProblems)
+  elif b.layout.tree.contains(paneProblems):
+    let acted = b.dispatch(cmdActivateTab(paneProblems))
+    if acted.status == lasApplied:
+      rt.afterLayoutCommit()
+
+proc autoRevealBuildPane*(rt: TuiRuntime) =
+  ## §3.8: a build started — Build Output brought on screen, in place of
+  ## another pane revealed now (a failed build's Problems) — the desktop's
+  ## overlay, which shows one pane at a time.
+  if rt.layoutBindingEnabled():
+    let b = rt.app.layoutBinding
+    if b.interaction.kind == ikRevealingDock and
+       b.interaction.pane != paneBuildOutput and
+       b.layout.dockedIndex(paneBuildOutput) >= 0:
+      b.interaction = b.interaction.cancel()
+  rt.revealBuildPane()
+
+proc revealFailedBuild*(rt: TuiRuntime) =
+  ## §3.8: a failed build — Build Output brought on screen, and Problems
+  ## revealed in its place WHEN BUILD OUTPUT IS ITSELF DOCKED (the desktop's
+  ## footer, where both are: the overlay shows one pane, and the list is the
+  ## one to read). Where Build Output is placed in the arrangement (the shared
+  ## Edit-mode default) the failure is on screen already, and an overlay over
+  ## it would hide the very lines that failed: Problems stays on its edge with
+  ## its first error highlighted (EMT-D21), one `F8` away.
+  rt.autoRevealBuildPane()
+  if rt.layoutBindingEnabled():
+    let b = rt.app.layoutBinding
+    let at = b.layout.dockedIndex(paneBuildOutput)
+    if at >= 0 and not b.layout.docked[at].open:
+      rt.revealProblemsPane()
+
+proc dismissBuildReveal*(rt: TuiRuntime): bool =
+  ## §3.8: a clean success's delay ran out — the Build Output pane put back on
+  ## its edge, if it is the pane revealed now (one docked open or placed in
+  ## the arrangement stays). Whether it was.
+  if not rt.layoutBindingEnabled():
+    return false
+  let b = rt.app.layoutBinding
+  if b.interaction.kind == ikRevealingDock and
+     b.interaction.pane == paneBuildOutput:
+    b.interaction = b.interaction.cancel()
+    return true
+  false
 
 proc problemsPaneScreen*(rt: TuiRuntime): tuple[area: CellArea,
                                                screen: ProblemsPaneScreen] =
@@ -3119,7 +3251,22 @@ proc cellHoverPointer(rt: TuiRuntime; event: MouseEvent; nowMs: int64;
       rt.app.cellHover.pointerOver(tablePaneName(hit.pane), hit.cut.key,
                                    hit.cut.column, hit.cut.full, true, nowMs)
     else:
-      rt.app.cellHover.pointerOver("", "", "", "", false, nowMs)
+      # Build-Output-Pane.md §3.9: over a build diagnostic's underlined span
+      # in the Edit pane, its messages — the pointer's hover, on the same
+      # clock as a truncated cell's.
+      let area = rt.paintedAreaOf(paneEditor)
+      let over = if rt.app.modes.product == pmEdit and
+                    area.contains(event.row, event.col):
+                   rt.app.editPaneModel().diagnosticHoverAt(area, event.row,
+                                                            event.col)
+                 else: (line: 0, text: "")
+      if over.text.len > 0:
+        rt.app.cellHoverAnchor = (event.row, event.col,
+                                  max(1, area.row + area.height - event.row))
+        rt.app.cellHover.pointerOver("edit", $over.line, "diagnostics",
+                                     over.text, true, nowMs)
+      else:
+        rt.app.cellHover.pointerOver("", "", "", "", false, nowMs)
   if changed:
     rt.app.cellTooltip = CellTooltip()
     outcome.repaint = true
@@ -5590,6 +5737,8 @@ proc openOmnibar*(rt: TuiRuntime; query = "") =
   elif query == AttachRecordingQuery:
     rt.note("attach to the agent's next prompt: choose a recording, or " &
             "type its folder")
+  elif query == BuildTaskQuery:
+    discard   # the picker's own note (`openBuildTaskPicker`)
   else:
     rt.note("omnibar: type a file, :sym <function>, :<command> or #<tick>")
 
@@ -5918,6 +6067,18 @@ proc acceptOmnibar(rt: TuiRuntime; outcome: var RuntimeOutcome) =
     else:
       rt.app.omnibar.close()
       rt.runFindInFiles(needle, outcome)
+    return
+  # Build-Output-Pane.md §3.11, §3.12: the task picker (`:build: …`) — the
+  # chosen task or command, or (nothing chosen) the line as typed, so an
+  # unknown task is named rather than silently ignored.
+  if mode == omBuildTask:
+    let c = rt.buildTaskConfig()
+    let (ok, entry) = rt.app.omnibar.accept()
+    rt.app.omnibar.close()
+    outcome.repaint = true
+    rt.note(if ok: runBuildChoice(rt.buildTaskHost, c, entry)
+            else: runBuildVerb(rt.buildTaskHost, c,
+                               parseBuildVerb(":build: " & needle)))
     return
   if mode == omCommand and
      rt.runCommandLine(":" & needle, outcome,
@@ -7303,6 +7464,11 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
     # without, the pane and its field (`Ctrl+Shift+F`).
     if res.argument.len > 0: rt.runFindInFiles(res.argument, outcome)
     else: rt.openFindInFiles(outcome)
+    return
+  of "build.run":
+    # Build-Output-Pane.md §3.11: `Ctrl+Shift+B` — the build task picker.
+    rt.note(rt.openBuildTaskPicker())
+    outcome.repaint = true
     return
   of "problems.next", "problems.previous":
     # PLAT-55 (EMT-D22): `F8` / `Shift+F8` in Edit mode, `Ctrl+Alt+N` /
