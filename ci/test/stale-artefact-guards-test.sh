@@ -123,7 +123,7 @@ BUILD_SIBLINGS="${SUITE_ROOT}/scripts/build-siblings.sh"
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=122
+EXPECTED_ASSERTIONS=123
 
 ASSERTIONS=0
 FAILURES=0
@@ -254,6 +254,10 @@ printf '#!/usr/bin/env bash\nprintf "npx\\t%%s\\n" "$*" >>"${TRACE}"\nexit 0\n' 
 chmod +x "${BIN}/npx"
 
 SHOTS="${TEST_ROOT}/book-shots"
+# Deliberately inherit unrelated command selectors in the healthy capture,
+# recording and vendored cases below. The helpers must select their throwaway
+# sibling even inside a dev environment that exports the real workspace's MCR.
+AMBIENT_MCR="${TEST_ROOT}/unrelated-workspace/ct_cli"
 
 # `run_visual_capture` photographs a SUPPLIED trace; `run_visual_recording` has
 # the script record one first, which is the only path that reaches the GL scene
@@ -261,13 +265,15 @@ SHOTS="${TEST_ROOT}/book-shots"
 # to `run_expect_failure` by name.
 run_visual_capture() {
 	: >"${TRACE}"
+	# The capture script must discover the fixture sibling, not an inherited
+	# command from the developer's environment.
 	PATH="${BIN}:${PATH}" \
 		NATIVE_RECORDER_REPO="${WS}/codetracer-native-recorder" \
 		VISUAL_REPLAY_REPO="${WS}/codetracer-visual-replay" \
 		NATIVE_TEST_PROGRAMS_REPO="${WS}/codetracer-native-test-programs" \
 		CODETRACER_BOOK_SCREENSHOT_DIR="${SHOTS}" \
 		CODETRACER_REAL_VISUAL_TRACE="${TEST_ROOT}/provided.ct" \
-		bash "${VISUAL_CAPTURE}" 2>&1
+		env -u CODETRACER_CT_MCR_CMD -u CT_MCR bash "${VISUAL_CAPTURE}" 2>&1
 }
 
 run_visual_recording() {
@@ -277,11 +283,11 @@ run_visual_recording() {
 		VISUAL_REPLAY_REPO="${WS}/codetracer-visual-replay" \
 		NATIVE_TEST_PROGRAMS_REPO="${WS}/codetracer-native-test-programs" \
 		CODETRACER_BOOK_SCREENSHOT_DIR="${SHOTS}" \
-		bash "${VISUAL_CAPTURE}" 2>&1
+		env -u CODETRACER_CT_MCR_CMD -u CT_MCR bash "${VISUAL_CAPTURE}" 2>&1
 }
 
 # -- healthy: every binary is newer than its own sources ---------------------
-HEALTHY="$(run_visual_capture)"
+HEALTHY="$(CODETRACER_CT_MCR_CMD="${AMBIENT_MCR}" CT_MCR="${AMBIENT_MCR}" run_visual_capture)"
 assert_contains "${HEALTHY}" "Capturing book screenshots into ${SHOTS}" \
 	"a recorder and player newer than their sources are photographed"
 assert_not_contains "${HEALTHY}" "stale sibling build" \
@@ -310,9 +316,11 @@ touch "${WS}/codetracer-visual-replay/ct_gfx_player"
 # Reached only on the recording path (no CODETRACER_REAL_VISUAL_TRACE), which is
 # the path the book actually uses. This binary is the SUBJECT of the recording,
 # not a tool used to make it.
-RECORDED="$(run_visual_recording)"
+RECORDED="$(CODETRACER_CT_MCR_CMD="${AMBIENT_MCR}" CT_MCR="${AMBIENT_MCR}" run_visual_recording)"
 assert_contains "${RECORDED}" "Recording visual trace for book screenshots" \
 	"with no supplied trace the capture records one with the fresh fixture"
+assert_contains "$(cat "${TRACE}")" $'codetracer-native-recorder\trecord --interpose' \
+	"recording uses the throwaway recorder despite inherited MCR selectors"
 
 touch "${WS}/codetracer-native-test-programs/source.c"
 run_expect_failure "a GL scene fixture older than its own sources is refused" \
@@ -341,13 +349,14 @@ NOT_GIT="${TEST_ROOT}/vendored"
 mkdir -p "${NOT_GIT}/ct_cli"
 printf '#!/usr/bin/env bash\nexit 0\n' >"${NOT_GIT}/ct_cli/ct_cli"
 chmod +x "${NOT_GIT}/ct_cli/ct_cli"
-NOT_GIT_OUT="$(PATH="${BIN}:${PATH}" \
+NOT_GIT_OUT="$(CODETRACER_CT_MCR_CMD="${AMBIENT_MCR}" CT_MCR="${AMBIENT_MCR}" \
+	PATH="${BIN}:${PATH}" \
 	NATIVE_RECORDER_REPO="${NOT_GIT}" \
 	VISUAL_REPLAY_REPO="${WS}/codetracer-visual-replay" \
 	NATIVE_TEST_PROGRAMS_REPO="${WS}/codetracer-native-test-programs" \
 	CODETRACER_BOOK_SCREENSHOT_DIR="${SHOTS}" \
 	CODETRACER_REAL_VISUAL_TRACE="${TEST_ROOT}/provided.ct" \
-	bash "${VISUAL_CAPTURE}" 2>&1)"
+	env -u CODETRACER_CT_MCR_CMD -u CT_MCR bash "${VISUAL_CAPTURE}" 2>&1)"
 assert_contains "${NOT_GIT_OUT}" "is not a git checkout" \
 	"a vendored sibling tree says its sources are unknown instead of passing quietly"
 
