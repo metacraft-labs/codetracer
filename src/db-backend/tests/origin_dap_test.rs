@@ -1116,6 +1116,81 @@ fn test_origin_chain_parameter_pass_transition() {
 }
 
 #[test]
+fn test_origin_chain_parameter_pass_hop_source_text_names_its_location_line() {
+    // REGRESSION — a ParameterPass hop synthesised when the backward scan
+    // reaches the frame's entry (`BackwardScanOutcome::FrameEntryReached`)
+    // must carry the source text of the line its `location` names.
+    //
+    // Spec Value-Origin-Tracking.md `OriginHop`: `source_text` is the
+    // source text of the line the hop's `location` names, and an empty
+    // `source_text` is reserved for "source unavailable". Until this test
+    // the engine built that hop with `location` pointing at the callee's
+    // entry step but `source_text: String::new()`, so the hop's two
+    // accounts of itself disagreed. Measured on the `noir_space_ship`
+    // fixture through a real `replay-server`: `initial_shield`'s head hop
+    // was a parameter pass at `shield.nr:1`
+    // (`pub fn iterate_asteroids(initial_shield: Field, …) -> bool {`)
+    // with an empty `source_text`, which the TUI's value-origin suite
+    // rejects (it renders and verifies hops by `sourceText`).
+    //
+    // The callee's entry step sits on its `def` header, exactly as the
+    // Noir recorder places it, so the expected text is not empty and is
+    // not the call site.
+    let source = "arg = 7\nfoo(arg)\ndef foo(param):\n    print(param)\n";
+    let recipe = Recipe {
+        source_path: "fixture.py",
+        source,
+        function_name: "main",
+        steps: vec![
+            // step 0 (line 1): `arg = 7` in caller `main`.
+            (1, vec![("arg", int_value(7))]),
+            // step 1 (line 2): the call site in `main`.
+            (2, vec![("arg", int_value(7))]),
+            // step 2 (line 3): callee entry, on `foo`'s header. `param`
+            // is already bound — it never changes inside `foo`.
+            (3, vec![("param", int_value(7))]),
+            // step 3 (line 4): the query step inside `foo`.
+            (4, vec![("param", int_value(7))]),
+        ],
+        extra_calls: vec![CallShape {
+            function_name: "foo",
+            step_range: 2..4,
+            args: vec![("param", int_value(7))],
+        }],
+    };
+    let (db, tmpdir) = build_trace(recipe);
+    let chain = run_chain(db, "param", 3, tmpdir.path());
+
+    let hop = chain
+        .hops
+        .iter()
+        .find(|h| h.kind == OriginKind::ParameterPass)
+        .unwrap_or_else(|| panic!("expected a ParameterPass hop, got chain: {:#?}", chain.hops));
+    // The hop names the callee entry (step 2, line 3) — pinned so the
+    // source-text assertion below is checked against the line this
+    // fixture means, not whatever line the hop happens to name.
+    assert_eq!(hop.location.line, 3, "the parameter pass names the callee entry");
+    let line_at_location = source
+        .lines()
+        .nth((hop.location.line - 1) as usize)
+        .expect("hop.location.line is inside the fixture source");
+    // THE ASSERTION THIS TEST EXISTS FOR. Before the fix `source_text`
+    // was empty although the line is available.
+    assert!(
+        !hop.source_text.trim().is_empty(),
+        "a ParameterPass hop whose source is available must carry it; \
+         location names line {} ({:?})",
+        hop.location.line,
+        line_at_location
+    );
+    assert_eq!(
+        hop.source_text.trim(),
+        line_at_location.trim(),
+        "the hop's source_text and its location must name the same line"
+    );
+}
+
+#[test]
 fn test_origin_chain_return_capture_transition() {
     // result = foo()  — the chain continues inside foo at the
     // return-value step.

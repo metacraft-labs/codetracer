@@ -65,6 +65,29 @@
 ## that goes back to naming the successor step reddens here instead of quietly
 ## moving every front-end's origin jump.
 ##
+## Since 2026-10-28 the same contract is asserted on EVERY classified head hop
+## the sweep relies on, not only on the one `o` follows. That is what exposed
+## the next defect of the same class: `db.rs` synthesised the parameter-pass
+## hop for a parameter the frame never writes (`FrameEntryReached`) with a
+## `location` on the callee's entry and an EMPTY `sourceText` —
+## `initial_shield` at `shield.nr:1`, whose line is
+## `pub fn iterate_asteroids(…)`. The engine now reads that line
+## (`origin_dap_test.rs`'s
+## `test_origin_chain_parameter_pass_hop_source_text_names_its_location_line`),
+## and this suite pins the parameter pass on the real trace by name.
+##
+## ## WHICH VARIABLE `o` IS PRESSED ON
+##
+## CTUI-10 asks for "a variable with a known non-trivial provenance", and the
+## TUI spec records the one this recording has: `remaining_shield`, written by
+## a previous iteration of the loop. The suite picks it from the data — the
+## classified head furthest back — but ranks only heads that stay in the query's
+## frame. A parameter pass names the callee's entry, the call boundary the
+## value came through, which is always the deepest tick a parameter can reach
+## in its frame; ranked with the rest, every untouched parameter would outrank
+## the loop-carried value (`initial_shield` did, once the engine classified
+## it).
+##
 ## ## THE PENDING STATE IS ASSERTED, WHICH IS CTUI-10's NAMED RISK MITIGATION
 ##
 ## *"the query is asynchronous with a visible pending state, and the test
@@ -124,7 +147,7 @@ import ./fixtures/fixture_provider
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 162
+const ExpectedAssertions = 174
 
 var countedAssertions = 0
 
@@ -143,6 +166,17 @@ const
     ## `remaining_shield` has been written by a PREVIOUS iteration, which is
     ## what makes the provenance non-trivial rather than the parameter it
     ## started as.
+
+  ParameterVariable = "initial_shield"
+    ## A parameter of `iterate_asteroids` the loop never writes. Its origin
+    ## in the query's frame is the parameter pass at the callee's entry,
+    ## which pins the engine's synthesised parameter-pass hop on a real
+    ## trace.
+  ParameterFunctionHeader = "pub fn iterate_asteroids("
+    ## The start of the line that parameter pass names: the callee's header
+    ## in `shield.nr`. A prefix, so a re-recording that reflowed the
+    ## parameter list does not read as an engine defect; the exact line is
+    ## checked against the file by the sweep's two-accounts assertion.
 
   SourceViewport = 16
   StackWidth = 46
@@ -442,6 +476,7 @@ suite "CTUI-10: `o` lands on the origin OriginChainVM reports":
       # mandatory. The answer is echoed in full so a reader of a green run can
       # see the chains rather than take the assertion's word.
       var classified: seq[string] = @[]
+      var parameterHead = none(OriginStep)
       var bestVariable = ""
       var bestDistance = 0'u64
       var queriesIssued = 0
@@ -467,15 +502,46 @@ suite "CTUI-10: `o` lands on the origin OriginChainVM reports":
         let head = steps[0]
         if head.kind != okUnknown and head.tick < queryTick:
           classified.add name
-          let distance = queryTick - head.tick
-          if distance > bestDistance or
-             (distance == bestDistance and name < bestVariable):
-            bestDistance = distance
-            bestVariable = name
+          # EVERY CLASSIFIED HEAD'S TWO ACCOUNTS AGREE, not only the one `o`
+          # follows below. The sweep relies on each of these hops (it ranks
+          # them, and it is the evidence that the chains have an interior),
+          # so the contract is checked on each: the hop's `sourceText` is the
+          # line its `location` names, read back off disk. Spec
+          # Value-Origin-Tracking.md `OriginHop` reserves an EMPTY
+          # `sourceText` for "source unavailable", and the source is
+          # available here — the file is read below. This is the check that
+          # caught the engine synthesising `initial_shield`'s parameter-pass
+          # hop with a `location` on the callee entry and no `sourceText`
+          # (codetracer-pm issue 2026-10-24, `db.rs`'s `FrameEntryReached`
+          # arm).
+          let headLine = recordedProgramLine(head.path, head.line)
+          checkpoint("classified head of `" & name & "`: '" &
+                     head.sourceText.strip() & "' vs " & head.path & ":" &
+                     $head.line & " '" & headLine.strip() & "'")
+          ck head.sourceText.len > 0
+          ck head.sourceText.strip() == headLine.strip()
+          if name == ParameterVariable:
+            parameterHead = some(head)
+          # THE `o` TARGET IS RANKED ONLY AMONG HEADS THAT STAY IN THIS
+          # FRAME. A parameter pass names the callee's entry — the call
+          # boundary through which the value arrived — not a write inside
+          # the loop, and it is always the deepest tick a parameter can
+          # reach in this frame. Ranking it with the rest would let every
+          # untouched parameter outrank the loop-carried value CTUI-10 asks
+          # for (measured: `initial_shield`, 274 ticks back, against
+          # `remaining_shield`'s 64). The parameter-pass head is still
+          # classified, counted and contract-checked above, and pinned
+          # separately below.
+          if head.kind != okParameterPass:
+            let distance = queryTick - head.tick
+            if distance > bestDistance or
+               (distance == bestDistance and name < bestVariable):
+              bestDistance = distance
+              bestVariable = name
       ck queriesIssued == locals.len
       ck eventsApplied == locals.len
       echo "CTUI-10 CLASSIFIED PROVENANCE: ", classified,
-           " — deepest is `", bestVariable, "` at ", bestDistance,
+           " — deepest in-frame is `", bestVariable, "` at ", bestDistance,
            " tick(s) back"
       # THE ORIGIN CHAINS ARE POPULATED. Asserted as a count against the
       # locals, so an engine that stopped classifying reddens rather than
@@ -484,11 +550,33 @@ suite "CTUI-10: `o` lands on the origin OriginChainVM reports":
       ck classified.len < locals.len       # not everything is classified
       ck bestVariable.len > 0
       ck bestDistance > 0
-      # …and on THIS recording the deepest is `remaining_shield`, whose value
-      # at this stop was written by the PREVIOUS iteration of the loop. An
+      # …and on THIS recording the deepest head that stays in this frame is
+      # `remaining_shield`, whose value at this stop was written by the
+      # PREVIOUS iteration of the loop — CTUI-10's "variable with a known
+      # non-trivial provenance" (the TUI spec records it: tick 283's value
+      # originates at tick 219). Parameter passes are excluded from the
+      # ranking (see the sweep); without that exclusion `initial_shield`'s
+      # parameter pass, 274 ticks back at the callee entry, wins. An
       # equality rather than a property, so a re-recording that changed the
       # answer is visible rather than absorbed.
       ck bestVariable == "remaining_shield"
+
+      # THE PARAMETER-PASS PATH, PINNED ON THE REAL TRACE. `initial_shield`
+      # is a parameter of `iterate_asteroids` that the loop never writes, so
+      # its provenance in this frame is the call that bound it: the engine
+      # classifies it as a parameter pass whose `location` is the callee's
+      # entry, and whose `sourceText` is therefore the function header. Both
+      # are asserted, so a regression to an empty `sourceText` — or to a hop
+      # that names some other line — reddens here by name.
+      ck ParameterVariable in classified
+      ck parameterHead.isSome
+      if parameterHead.isSome:
+        let p = parameterHead.get()
+        echo "CTUI-10 PARAMETER PASS OF `", ParameterVariable, "`: ", $p.kind,
+             " <- ", p.sourceExpr.strip(), " @ ", p.path.extractFilename, ":",
+             p.line, " tick ", p.tick, " — '", p.sourceText.strip(), "'"
+        ck p.kind == okParameterPass
+        ck p.sourceText.strip().startsWith(ParameterFunctionHeader)
 
       # ---- PRESS `o` — THROUGH THE PRODUCT'S DISPATCH ---------------------
       # The navigator is reset first: the sweep above left the ViewModel
