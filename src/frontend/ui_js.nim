@@ -3079,7 +3079,9 @@ proc loadFrontendSourcemap(sourcemapPath: cstring): Future[FrontendSourcemap] {.
 
 proc handleDapReplaySelected(response: JsObject; sendInitialize: bool) =
   let trace = response["trace"].to(Trace)
-  data.activeSession.replayId = response["replayId"].to(int)
+  # The replay the Backend Manager answered for this tab: its requests are
+  # selected onto it from now on (`types.assignReplay`).
+  data.activeSession.assignReplay(response["replayId"].to(int))
   data.activeSession.liveDebugSession = false
   # AND TELL THE VIEWMODEL, which is a separate statement from the line above
   # and was the missing half of the pair. `handleDapLiveSessionSelected` below
@@ -3111,7 +3113,7 @@ proc handleDapReplaySelected(response: JsObject; sendInitialize: bool) =
 
 proc handleDapLiveSessionSelected(response: JsObject; sendInitialize: bool) =
   let trace = response["trace"].to(Trace)
-  data.activeSession.replayId = response["replayId"].to(int)
+  data.activeSession.assignReplay(response["replayId"].to(int))
   data.activeSession.liveDebugSession = true
   if not shownSessionVM().isNil:
     shownSessionVM().store.setSessionMode(liveMcr)
@@ -3156,6 +3158,11 @@ proc onDapReplaySelected(sender: js; response: JsObject) =
   if dapSessionSelectionReady:
     handleDapReplaySelected(response, shouldInitializeForDapSelection())
   else:
+    # The tab takes its replay NOW, though the launch waits for its first
+    # trace load: the requests it sends meanwhile (its `initialize` and its
+    # panes' first loads, `configureSessionMiddleware`) name the replay, and
+    # the main process selects that replay for them (`types.assignReplay`).
+    data.activeSession.assignReplay(response["replayId"].to(int))
     pendingDapReplaySelection = response
 
 proc onDapLiveSessionSelected(sender: js; response: JsObject) =
@@ -3163,6 +3170,8 @@ proc onDapLiveSessionSelected(sender: js; response: JsObject) =
   if dapSessionSelectionReady:
     handleDapLiveSessionSelected(response, shouldInitializeForDapSelection())
   else:
+    # As in `onDapReplaySelected`: the replay is the tab's at once.
+    data.activeSession.assignReplay(response["replayId"].to(int))
     pendingDapLiveSelection = response
 
 proc attachLoadedTrace(session: ReplaySession; folder: string) =

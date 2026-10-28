@@ -2184,6 +2184,9 @@ type
     # exclusively into ReplaySession.
     sessions*:              seq[ReplaySession]
     activeSessionIndex*:    int
+    nextSessionId*:         int
+      ## The id the window's next tab gets (`allocateSessionId`). Only grows:
+      ## a tab's id is never one another tab of the window has held.
 
 
   # workaround for calling data ui_js functions: their impls are be defined there to be able to eventually use
@@ -2429,6 +2432,52 @@ proc newReplaySession*(id: ReplaySessionId): ReplaySession =
   ## (dapApi, services, etc.) after construction.
   ReplaySession(id: id, replayId: -1)
 
+proc allocateSessionId*(data: Data): int =
+  ## The id of a new tab of this window: its `ReplaySession.id` and its
+  ## `DapApi.sessionId`, one number.
+  ##
+  ## FROM A COUNTER THAT ONLY GROWS, never from the tabs open now. The id
+  ## names the tab to the main process and in the renderer's per-tab tables
+  ## (`event_helpers.sessionDapApi`, `tab_answer_routing.deliverTabAnswer`,
+  ## `session_viewmodels.tabScopedKey`), all of which take it to be unique per
+  ## window; an event or an answer still in flight for a closed tab must then
+  ## reach no tab. Derived from the open tabs it was not: `data.sessions.len`
+  ## gave the next tab the id of the third of three tabs once the middle one
+  ## closed, and "one past the largest id in use" gave it the CLOSED tab's id
+  ## once the last one closed (open 0 and 1, close 1, "+": 1 again) — codetracer-pm
+  ## `issues/2026-10-23-a-tab-opened-after-closing-a-middle-tab-reuses-a-live-tabs-session-id.md`,
+  ## `GUI/Multi-Window-Tab-Management.md` §Tab Behavior rule 8.
+  ##
+  ## The counter starts past the window's first tab (id 0, built with
+  ## `data`). It is also kept past every id open, so a tab added without it
+  ## (a test's hand-built tab) cannot be named twice either.
+  result = max(data.nextSessionId, 1)
+  for open in data.sessions:
+    if not open.isNil:
+      result = max(result, int(open.id) + 1)
+      if not open.dapApi.isNil:
+        result = max(result, open.dapApi.sessionId + 1)
+  data.nextSessionId = result + 1
+
+proc assignReplay*(session: ReplaySession; replayId: int) =
+  ## `replayId` is the replay `session`'s tab talks to from now on — the id
+  ## the Backend Manager answered `ct/start-replay` with for it
+  ## (`dap-replay-selected` / `dap-live-session-selected`) — or, when
+  ## negative, it has none (Stop, `ui/stop_command`).
+  ##
+  ## Kept on the session (what closing the tab stops) AND on its `DapApi`,
+  ## which names it on every request it sends (`dap.dispatchCtRequest`) so the
+  ## main process selects THIS replay for it. The tab's own id is not that
+  ## replay: the Backend Manager numbers replays in the order it starts them
+  ## and never reuses a number, so the two part after Stop and a new run, a
+  ## refused start, or a "+" tab left on the Welcome Screen while a later tab
+  ## loads (`GUI/Multi-Window-Tab-Management.md` §Tab Behavior rule 8).
+  if session.isNil:
+    return
+  session.replayId = if replayId < 0: -1 else: replayId
+  if not session.dapApi.isNil:
+    session.dapApi.setReplay(replayId)
+
 # --- end M0 helpers ---
 
 when defined(ctRenderer):
@@ -2508,7 +2557,9 @@ when defined(ctRenderer):
     lastAgentPrompt: "",
     breakpointMenu: JsAssoc[cstring, JsAssoc[int, BreakpointMenu]]{},
     sessions: @[],
-    activeSessionIndex: 0)
+    activeSessionIndex: 0,
+    # The session built just below is tab 0; the next tab is 1.
+    nextSessionId: 1)
 
   # Multi-replay-window (M0 + M1 + M2): create the initial (and currently only)
   # replay session.  Per-replay fields (trace, status, startOptions,

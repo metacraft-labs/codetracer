@@ -46,10 +46,13 @@
  * realm, which the Playwright `page.evaluate` context cannot reach.
  * The Nim source under test (`ipc_subsystems/dap.nim`) is shipped as
  * compiled JS to `src/build-debug/src/index.js`.  The routing
- * predicate is `sessionId != currentDapSessionId`, with no special
- * case for sessionId == 0; this test pins the renderer half (DapApi
- * field population) AND documents the symmetric routing contract
- * via a local mirror.
+ * predicate is `replayId != selectedReplay` — keyed on the REPLAY a
+ * request names (`replayId`, stamped by the renderer), not on the tab's
+ * `sessionId` — with no special case for 0; the router itself is driven
+ * by `src/frontend/tests/dap_replay_selection_test.nim` and
+ * `dap_session_routing_test.nim` (`main-process` lane). This test pins the
+ * renderer half (DapApi field population) AND documents the symmetric
+ * routing contract via a local mirror.
  */
 
 import { test, expect } from "../../lib/fixtures";
@@ -183,21 +186,22 @@ test.describe("DAP session routing (issue #327)", () => {
     // 6. Verify the routing-decision contract via a renderer-side mirror.
     //
     //    The main-process router (ipc_subsystems/dap.nim) chooses to
-    //    emit ct/select-replay iff `sessionId != currentDapSessionId`.
-    //    The pre-fix code additionally checked `sessionId != 0` and
-    //    skipped the switch for session 0, which is the #327 bug.
+    //    emit ct/select-replay iff `replayId != selectedReplay`, where
+    //    `replayId` is the replay the request names. The #327 code keyed
+    //    on the session id and additionally checked `sessionId != 0`,
+    //    skipping the switch for session 0, which is the #327 bug.
     //
     //    We re-implement the *fixed* predicate here and prove its key
     //    properties — symmetric for any pair (a, b) with a != b, and
-    //    importantly true for (a, 0) where currentDapSessionId is any
+    //    importantly true for (a, 0) where selectedReplay is any
     //    non-zero value.  If anyone later resurrects the special case,
     //    these assertions still pass for the buggy code — they cannot
     //    catch the regression by themselves.  Their value is documenting
     //    the routing contract so a future test (or human reviewer) can
     //    point at it as the canonical reference.
     // ------------------------------------------------------------------
-    const shouldSelectReplay = (currentDapSessionId: number, target: number): boolean =>
-      target !== currentDapSessionId;
+    const shouldSelectReplay = (selectedReplay: number, target: number): boolean =>
+      target !== selectedReplay;
 
     // The bug pattern: BM is currently serving session 1, session 0
     // wants to send.  The fix must emit ct/select-replay; the bug

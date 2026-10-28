@@ -130,6 +130,22 @@ when defined(ctRenderer):
     # on a `DapApi` with no handler for it and stayed empty with no reason.
     wireSessionNotifications(session.dapApi, session.viewsApi)
 
+  proc newTabSession*(data: Data; ipc: JsObject): ReplaySession =
+    ## A new tab's session, named and given its DAP API and views mediator:
+    ## the part of `session_switch.createNewSession` (the "+" button) that
+    ## decides who the tab is to the main process. Here, rather than inline in
+    ## `createNewSession`, so a suite can drive it: `session_switch` reaches
+    ## the editor, which needs Monaco as its module loads
+    ## (`tests/tab_session_ids_test.nim`).
+    ##
+    ## The id comes from the window's counter (`types.allocateSessionId`) and
+    ## is never one another tab of the window has held. It is the tab's id
+    ## only; the replay the tab talks to is set when the Backend Manager
+    ## answers one for it (`types.assignReplay`).
+    let sessionId = data.allocateSessionId()
+    result = newReplaySession(ReplaySessionId(sessionId))
+    attachSessionApis(result, sessionId, ipc)
+
 func jsHasOwnKey(obj: JsObject; key: cstring): bool {.
   importjs: "Object.prototype.hasOwnProperty.call(# || {}, #)", noSideEffect.}
   ## Presence probe that tolerates a `null`/`undefined` frame.

@@ -50,6 +50,13 @@ proc onStarted*(sender: js, response: js) {.async.} =
       "test": cstring("hello from index"),
     })
 
+const StartupAnnouncesAtStart = defined(server)
+  ## Whether the startup replay is announced as soon as it starts. In the
+  ## server (`ct host`) a page that connects is sent the cached announcement
+  ## (`bootstrap_cache`) and `host_clients` binds the replay to a client from
+  ## it, so it goes out at once, as it always has. On the desktop the one
+  ## window must be listening, so it waits for `started()` (`init`).
+
 proc started*: Future[void] =
   var future = newPromise() do (resolve: (proc: void)):
     if startedFuture.isNil:
@@ -199,9 +206,26 @@ proc init*(config: Config, layout: js, helpers: Helpers) {.async.} =
       data.pluginClient.trace = trace
       if data.trace.compileCommand.len == 0:
         data.trace.compileCommand = data.config.defaultBuild
-      replayFailure = await startReplayForTrace(trace.recordingId, nodeProcess.pid.to(int))
+      # Started now, announced below: the renderer is not listening yet.
+      replayFailure = await startReplayForTrace(trace.recordingId,
+        nodeProcess.pid.to(int), announce = StartupAnnouncesAtStart)
 
   await started()
+  # THE FIRST TAB LEARNS ITS REPLAY HERE, once the renderer listens. The
+  # replay's `dap-replay-selected` used to go out from `startReplayForTrace`
+  # above, before `started()` — the handshake that waits for the renderer to
+  # answer — and was lost: the window's first tab never learned its replay
+  # id. Harmless only while the main process selected replays by the TAB's id
+  # (tab 0 and replay 0 coincided); its Stop found no replay to stop, closing
+  # it stopped none, and once requests are selected by the replay the tab
+  # names (`GUI/Multi-Window-Tab-Management.md` §Tab Behavior rule 8) its
+  # requests named none. Sent before `init`, as it was before it: the
+  # renderer holds it until its first trace load is ready for it
+  # (`ui_js.onDapReplaySelected`) and gives the tab its replay at once.
+  when not StartupAnnouncesAtStart:
+    if replayFailure.len == 0 and startedReplayId() >= 0 and
+        not data.startOptions.edit and not data.startOptions.welcomeScreen:
+      announceReplaySelected(startedReplayId())
   let configSnapshot = data.config
   let startOptionsSnapshot = data.startOptions
 

@@ -15,14 +15,43 @@ var replayStartHandler*: proc(body: JsObject) = nil
 # --- M9: DAP multiplexing state ---
 #
 # The Backend Manager serves one "selected" replay at a time.  When the
-# main process forwards a DAP request from a particular session, it must
-# first tell the BM to select the corresponding replay via
-# `ct/select-replay`.  Responses are then tagged with the originating
-# sessionId so the renderer can route them to the correct ReplaySession.
+# main process forwards a DAP request, it must first tell the BM to select
+# the request's replay via `ct/select-replay`.  Responses are then tagged
+# with the originating sessionId so the renderer can route them to the
+# correct ReplaySession.
+#
+# TWO NUMBERS, KEPT APART. A request names the renderer TAB it comes from
+# (`sessionId`, the tab's `ReplaySession.id`) and, on the desktop, the REPLAY
+# that tab talks to (`replayId`, stamped by the renderer's
+# `dap.stampReplay`). The replay is what `ct/select-replay` takes; the tab is
+# who the answer and the events are for. They are different counters: the
+# Backend Manager numbers replays in the order it starts them and never
+# reuses one (`backend_manager.rs` `start_replay_raw`; a refused start
+# consumes one too), and the window numbers its tabs. Selecting by the tab's
+# id — which this router did — ran a tab's requests on another tab's replay
+# as soon as the two parted: after Stop and a new run in one tab, a refused
+# start, or a "+" tab left on the Welcome Screen while a later one loaded
+# (codetracer-pm
+# `issues/2026-10-23-a-tab-opened-after-closing-a-middle-tab-reuses-a-live-tabs-session-id.md`,
+# `GUI/Multi-Window-Tab-Management.md` §Tab Behavior rule 8). In `ct host`'s
+# server a session IS its replay (`ServerSessionRouting` below), so there the
+# two are one number by construction.
 
-var currentDapSessionId = 0
-  ## Which session the Backend Manager is currently serving.  Updated
-  ## every time we send a `ct/select-replay` command.
+var selectedReplay = 0
+  ## The replay the Backend Manager is serving, as exactly as this process
+  ## can know it: set by every `ct/select-replay` written — by `selectReplay`
+  ## and by the trace loader (`noteReplaySelected`) — and `-1` after a
+  ## `ct/stop-replay` (`noteReplayStopped`), which leaves it serving none.
+  ## 0 at start: the Backend Manager's own initial selection.
+
+var servedSession = 0
+  ## The session of the last request forwarded: who an event that names no
+  ## replay of a known owner is attributed to (`resolveSessionId`).
+
+var replayOwners: Table[int, int] = initTable[int, int]()
+  ## Desktop: replay id -> the tab that owns it, learned from the requests
+  ## that name it (a tab names only its own replay) and forgotten when the
+  ## replay is stopped. Says which tab an event of a replay is for.
 
 type
   PendingDapRequest = object
@@ -142,60 +171,64 @@ proc getSessionId*(body: JsObject): int =
     return body["sessionId"].to(int)
   return 0
 
-proc selectSession(sessionId: int) =
-  ## Point the Backend Manager at `sessionId`'s replay, when it is serving
-  ## another one.
+proc getReplayId*(body: JsObject): int =
+  ## The replay a request from the renderer names (`replayId`, stamped by
+  ## `dap.stampReplay`), or -1 when it names none: its tab has no replay yet,
+  ## or no longer has one.
+  if jsHasKey(body, cstring"replayId"):
+    let replayId = body["replayId"].to(int)
+    return if replayId >= 0: replayId else: -1
+  return -1
+
+proc selectReplay(replayId: int) =
+  ## Point the Backend Manager at replay `replayId`, when it is serving
+  ## another one (or none).
   ##
-  ## The routing decision is keyed solely on the target sessionId vs the
-  ## one the BM is currently serving. Earlier code special-cased
-  ## `sessionId == 0` and skipped the switch, which mis-targeted the
-  ## default session whenever a non-zero session had previously been
-  ## selected on the BM (issue #327). The routing must be symmetric:
-  ## session 0 needs the same switch logic as any other session.
-  if sessionId != currentDapSessionId:
+  ## The decision is keyed solely on the target replay vs the one the BM is
+  ## serving. Earlier code special-cased session 0 and skipped the switch,
+  ## which mis-targeted the default session whenever another had been
+  ## selected (issue #327): the routing is symmetric. And it is keyed on the
+  ## REPLAY, never on the tab a request came from (see the state above).
+  if replayId != selectedReplay:
     backendManagerSocket.write(wrapJsonForSending(js{
       "type": cstring"request",
       "command": cstring"ct/select-replay",
-      "arguments": sessionId,
+      "arguments": replayId,
       "seq": nextWireSeq()
     }))
-    currentDapSessionId = sessionId
+    selectedReplay = replayId
 
 proc noteReplaySelected*(replayId: int) =
   ## A `ct/select-replay` for `replayId` was written to the Backend Manager
-  ## OUTSIDE `selectSession` (`traces.prepareForLoadingTrace`).
+  ## OUTSIDE `selectReplay` (`traces.startReplayForTrace`,
+  ## `prepareForLiveTrace`).
   ##
-  ## In the server, where a session is its replay, the router must know the
-  ## Backend Manager now serves `replayId`: left stale, the next request of
-  ## the session it believed selected skips its switch and runs on this
-  ## replay — another client's. The desktop names sessions differently
-  ## (its page's session 0 talks to whichever replay was selected last), so
-  ## there this records nothing.
-  if not serverRouting.isNil:
-    currentDapSessionId = replayId
+  ## The router must know the Backend Manager now serves `replayId`: left
+  ## stale, the next request of the replay it believed selected skips its
+  ## switch and runs on this one — another tab's, or in the server another
+  ## client's. Recorded on the desktop too: it once was not, on the grounds
+  ## that the window's tab 0 "talks to whichever replay was selected last",
+  ## and then tab 0's next request after a later tab's replay started ran on
+  ## that later tab's replay.
+  selectedReplay = replayId
 
 proc noteReplayStopped*(replayId: int) =
   ## `replayId` was stopped (`ct/stop-replay`); the Backend Manager then
   ## serves no replay, WHICHEVER replay it was serving: its `stop_replay`
-  ## clears the selection unconditionally (`backend_manager.rs`). So in the
-  ## server the next request of any session must select its replay again —
-  ## left at the replay it believed selected, the router would skip that
-  ## switch when another client's replay is stopped (a client released) and
-  ## the request would reach no replay. The desktop is left as it was (see
-  ## above).
-  if not serverRouting.isNil:
-    currentDapSessionId = -1
+  ## clears the selection unconditionally (`backend_manager.rs`). So the next
+  ## request of any replay must select it again — left at the replay it
+  ## believed selected, the router would skip that switch when another
+  ## replay is stopped (a tab closed, a client released) and the request
+  ## would reach no replay. Its id is never served again (the Backend Manager
+  ## does not reuse one), so it has no owner any more.
+  selectedReplay = -1
+  replayOwners.del(replayId)
 
-proc sendDapForSession*(sessionId: int, message: JsObject) =
-  ## Forward a DAP request to the Backend Manager on behalf of
-  ## `sessionId`.  If the BM is currently serving a different session,
-  ## a `ct/select-replay` command is sent first to switch contexts.
-  if backendManagerSocket.isNil:
-    errorPrint "backend socket is nil, couldn't send DAP for session ",
-      sessionId, ": ", message.toJs
-    return
-
-  selectSession(sessionId)
+proc forwardRequest(sessionId: int; replayId: int; message: JsObject) =
+  ## Forward `message`, a request of `sessionId`, to the Backend Manager,
+  ## having selected `replayId` first (`selectReplay`).
+  selectReplay(replayId)
+  servedSession = sessionId
 
   # Track which session owns this request so the response can be tagged:
   # the frame goes out under a wire `seq` unique across sessions, recorded
@@ -210,15 +243,26 @@ proc sendDapForSession*(sessionId: int, message: JsObject) =
 
   backendManagerSocket.write(wrapJsonForSending(frame))
 
+proc sendDapForSession*(sessionId: int; replayId: int; message: JsObject) =
+  ## Forward a DAP request of `sessionId` to the Backend Manager, on replay
+  ## `replayId`.  If the BM is currently serving a different replay, a
+  ## `ct/select-replay` command is sent first to switch contexts.
+  if backendManagerSocket.isNil:
+    errorPrint "backend socket is nil, couldn't send DAP for session ",
+      sessionId, ": ", message.toJs
+    return
+  forwardRequest(sessionId, replayId, message)
+
 proc sendLocalDapRequest*(sessionId: int; command: cstring;
                           arguments: JsObject;
                           onResponse: LocalDapResponseHandler): bool =
   ## Send a DAP request for `sessionId` on behalf of a server-side client;
   ## `onResponse` receives the whole DAP response. `false` when there is no
-  ## Backend Manager connection to send on.
+  ## Backend Manager connection to send on. Server-side only, where a
+  ## session is its replay: `sessionId` is the replay selected.
   if backendManagerSocket.isNil:
     return false
-  selectSession(sessionId)
+  selectReplay(sessionId)
   let wireSeq = nextWireSeq()
   localResponseHandlers[wireSeq] = onResponse
   backendManagerSocket.write(wrapJsonForSending(js{
@@ -243,17 +287,42 @@ proc addLocalDapEventListener*(sessionId: int;
 
 proc onDapRawMessage*(sender: js, response: JsObject) {.async.} =
   ## IPC handler for "dap-raw-message" from the renderer.
-  ## Extracts the sessionId attached by the renderer and delegates to
-  ## `sendDapForSession` which handles BM session switching.
+  ## Decides the replay the request is for and delegates to
+  ## `sendDapForSession`, which handles BM replay switching.
   var sessionId = getSessionId(response)
   if not serverRouting.isNil:
-    # The page's session number is its own; the replay is its client's.
+    # The page's session number is its own; the replay is its client's —
+    # decided here, never taken from the page (a `replayId` it stamps is not
+    # trusted: one client must not drive another's replay).
     sessionId = serverRouting.requestSession(sessionId)
     if sessionId < 0:
       warnPrint "dap: dropped a request from a client with no replay: ",
         response.toJs
       return
-  sendDapForSession(sessionId, response)
+    sendDapForSession(sessionId, sessionId, response)
+    return
+
+  # The desktop: the tab names its replay (`dap.stampReplay`).
+  let replayId = getReplayId(response)
+  if replayId >= 0:
+    # A tab names only its own replay, so this is who owns it — what an
+    # event of the replay is attributed to (`resolveSessionId`).
+    replayOwners[replayId] = sessionId
+    sendDapForSession(sessionId, replayId, response)
+    return
+
+  # A TAB THAT NAMES NO REPLAY HAS NONE: a "+" tab on the Welcome Screen, a
+  # tab after Stop, a window that opened on the Welcome Screen or in Edit
+  # mode. Every tab with a replay is told it (`dap-replay-selected`, the
+  # window's first tab included: `startup.init` announces the startup replay
+  # once the renderer listens) and names it from then on. The request is
+  # dropped, as the server drops a request from a client with no replay: run
+  # on whatever replay is served, it would answer with another tab's data,
+  # which is the defect this router's replay selection removes. Dropped, it is
+  # what the renderer already takes such a request to be — sent into a
+  # channel with no peer (`resetForNewSession`).
+  warnPrint "dap: dropped a request from tab ", $sessionId,
+    ", which has no replay: ", response.toJs
 
 proc resolveSessionId(body: JsObject): int =
   ## Determine which session a DAP message from the Backend Manager
@@ -262,8 +331,12 @@ proc resolveSessionId(body: JsObject): int =
   ## * **Responses** carry a `request_seq` that maps back to the
   ##   originating request via `pendingRequests`; its `request_seq` is
   ##   rewritten to the `seq` that session sent.
-  ## * **Events** have no such link; they belong to whichever session
-  ##   the BM is currently serving (`currentDapSessionId`).
+  ## * **Events** have no such link. On the desktop an event belongs to the
+  ##   tab that owns the replay the Backend Manager names on it
+  ##   (`ctReplayId`, `replayOwners`); an event of a replay no tab has named
+  ##   yet (the window's first replay, before the renderer is told it), or
+  ##   one without the tag, to the session of the last request forwarded
+  ##   (`servedSession`).
   ## * If the message already has a `sessionId` (future-proofing), we
   ##   honour it as-is.
   ## * In the server (`installServerSessionRouting`), the replay the Backend
@@ -289,8 +362,18 @@ proc resolveSessionId(body: JsObject): int =
       body["request_seq"] = request.seq
       return request.sessionId
 
-  # Fallback: attribute to the currently selected session.
-  return currentDapSessionId
+  # The desktop: the Backend Manager names the replay of every message it
+  # relays, and a tab names only its own replay on its requests, so an event
+  # of a replay a tab owns is that tab's — exactly, where "the session that
+  # sent the last request" is wrong whenever another tab's replay is still
+  # sending (a hidden tab's replay finishing a move).
+  if jsHasKey(body, ReplayIdTag):
+    let owner = replayOwners.getOrDefault(body[ReplayIdTag].to(int), -1)
+    if owner >= 0:
+      return owner
+
+  # Fallback: attribute to the session the last request was forwarded for.
+  return servedSession
 
 proc deliverToSession(sessionId: int; channel: cstring; body: JsObject) =
   ## Hand a replay's answer or event to whoever displays its session: in the

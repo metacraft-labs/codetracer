@@ -168,23 +168,25 @@ proc createNewSession*(data: Data) =
   # THE TAB'S POSITION AND ITS ID ARE TWO NUMBERS. The position (`index`) is
   # where it sits in `data.sessions` and which `session-container-<n>` holds
   # it, and shifts when a tab before it closes. The id names it to the main
-  # process: its DAP requests carry it and its events come back tagged with it
-  # (`event_helpers.deliverDapEvent`), so it must never be an id another open
-  # tab holds — which `data.sessions.len` was, once a tab had closed: close
-  # the middle of three tabs and the next new tab took the third's id, and
-  # their events reached whichever matched first. One past the largest id in
-  # use: equal to the position until a tab closes.
+  # process: its DAP requests carry it and its events and answers come back
+  # tagged with it (`event_helpers.deliverDapEvent`,
+  # `tab_answer_routing.deliverTabAnswer`), and per-tab tables are keyed by it
+  # (`session_viewmodels.tabScopedKey`). So it is never an id another tab of
+  # the window has held, open OR closed: it comes from the window's counter
+  # (`types.allocateSessionId`, through `newTabSession`). Neither number that
+  # was used before is: `data.sessions.len` gave the next tab the third tab's
+  # id once the middle of three closed, and "one past the largest id in use"
+  # gave it the closed tab's id once the last tab closed, so an event in
+  # flight for the closed tab reached the new one.
+  #
+  # And neither is the tab's REPLAY: the Backend Manager numbers those itself
+  # and the tab learns its replay when one is selected for it
+  # (`types.assignReplay`); the main process selects requests by that
+  # (`GUI/Multi-Window-Tab-Management.md` §Tab Behavior rule 8).
   let index = data.sessions.len
-  var sessionId = index
-  for open in data.sessions:
-    if not open.isNil:
-      sessionId = max(sessionId, int(open.id) + 1)
-      if not open.dapApi.isNil:
-        sessionId = max(sessionId, open.dapApi.sessionId + 1)
-  var session = newReplaySession(ReplaySessionId(sessionId))
   # The tab's own DAP API and views mediator, wired so its backend notices
   # reach its own status bar: see `event_helpers.attachSessionApis`.
-  attachSessionApis(session, sessionId, data.ipc)
+  var session = newTabSession(data, data.ipc)
   session.services = Services(
     eventLog: EventLogService(),
     debugger: DebuggerService(
@@ -339,7 +341,7 @@ proc createNewSession*(data: Data) =
   discard data.makeWelcomeScreenComponent()
   data.activeSessionIndex = previousActiveSessionIndex
 
-  clog "session_switch: created new session " & $sessionId &
+  clog "session_switch: created new session " & $int(session.id) &
     " at position " & $index & " (total: " & $data.sessions.len & ")"
 
   # Switch to the newly created session.

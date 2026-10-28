@@ -964,12 +964,34 @@ proc loadExistingRecord*(recordingId: cstring) {.async.} =
   #   debugPrint "warning: exception when starting instance client:"
   #   debugPrint "  that's ok, if this was not started from shell-ui!"
 
-proc startReplayForTrace*(recordingId: cstring, pid: int): Future[cstring] {.async.} =
+proc announceReplaySelected*(replayId: int) =
+  ## Tell the renderer the replay of the load in progress is `replayId`
+  ## (`CODETRACER::dap-replay-selected`): the tab it goes to takes it as its
+  ## replay (`ReplaySession.assignReplay`), names it on every request, and
+  ## stops it when it is stopped or closed.
+  ##
+  ## It must reach a renderer that is LISTENING. A message sent before the
+  ## renderer has answered `CODETRACER::started` is lost, and a tab that
+  ## misses it never learns its replay: requests it cannot route, a Stop that
+  ## finds nothing to stop, a close that stops nothing. See
+  ## `startReplayForTrace`'s `announce`.
+  mainWindow.webContents.send(
+    "CODETRACER::dap-replay-selected",
+    forLoadTab(js{trace: data.trace, replayId: replayId}))
+
+proc startReplayForTrace*(recordingId: cstring, pid: int;
+                          announce = true): Future[cstring] {.async.} =
   ## Resolve the trace `recordingId` and start (and select) a replay for it.
   ## Resolves with "" when the replay runs, else with why it does not, for
   ## the user. Nothing is reported here: `prepareForLoadingTrace` reports it
   ## at once, and the startup reports it once the renderer is initialised
   ## (`startup.init`), since before that nothing would show it.
+  ##
+  ## `announce` false: the replay is started and selected but the renderer is
+  ## not told (`announceReplaySelected`) — for the startup, which runs this
+  ## before the renderer listens and announces the replay once it does
+  ## (`startup.init`). Every other caller is answering a renderer's request,
+  ## so the renderer is listening.
   ## M-REC-3: UUIDv7 recording-id (cstring in JS/Electron context).
   callerProcessPid = pid
   if prefetchedTrace.isNil or prefetchedTrace.recordingId != recordingId:
@@ -1018,10 +1040,14 @@ proc startReplayForTrace*(recordingId: cstring, pid: int): Future[cstring] {.asy
   }
   backendManagerSocket.write(selectPacket)
   noteReplaySelected(replayId)
-  mainWindow.webContents.send(
-    "CODETRACER::dap-replay-selected",
-    forLoadTab(js{trace: data.trace, replayId: replayId}))
+  if announce:
+    announceReplaySelected(replayId)
   return cstring""
+
+proc startedReplayId*(): int =
+  ## The replay the last start selected (`-1` when it is stopped or none
+  ## started): what `startup.init` announces once the renderer listens.
+  selectedReplayId
 
 proc prepareForLoadingTrace*(recordingId: cstring, pid: int): Future[bool] {.async.} =
   ## `startReplayForTrace`, reporting a failure to the renderer at once.
