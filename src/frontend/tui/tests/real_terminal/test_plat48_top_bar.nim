@@ -44,7 +44,7 @@ import ../../../viewmodel/viewmodels/transport_icons
 # case checks every row the docked-open pane changed, and a docked band is
 # taller than the overlay the click used to open. PLAT-50: -1 — with no
 # divider row between stacked panes the docked band changes one row fewer.)
-const ExpectedAssertions = 87
+const ExpectedAssertions = 88
   ## 2026-10-27: 117 -> 87, measured. The footer case checks the docked band
   ## for fill glyphs in ONE assertion now, so the count no longer moves with
   ## the band's height (it had moved with it four times, below), and it
@@ -424,11 +424,29 @@ suite "PLAT-48 on a real terminal: auto-hide panels":
     # message — where a second click on its label closes it again.
     const Cols = 200
     const Rows = 50
-    var sess = open(Cols, Rows, stateDir("reveal"))
+    # THE SCROLLBARS DO NOT FADE in this case (`--scrollbar-fade=off`), so
+    # every pane's bar is drawn in every frame and the comparison below holds
+    # the tracks to the same rule as every other cell. With the default fade
+    # a bar's look is a function of TIME as well as of the arrangement: it is
+    # shown when a pane's view moves (docking and closing move the editor's)
+    # and fades 1.2 s later, and `settled` cannot tell a bar at rest from a
+    # loop that has not ticked for a while. On a loaded host (50–140) that
+    # made this case red 3 runs in 5 — a track at rest in one snapshot and
+    # still shown, or half-faded, in the other (codetracer-pm issue
+    # 2026-10-26, "tui scrollbar tracks not restored after a docked footer
+    # pane closes"). The fade itself is covered by the scrollbar suites.
+    var sess = open(Cols, Rows, stateDir("reveal"),
+                    args = @["--scrollbar-fade=off"])
     # Compared cell for cell with the screen after the second click, so both
-    # are taken once the screen has settled: the first frames still show the
-    # panes' scrollbars, which fade out a moment later.
+    # are taken once the screen has settled.
     let s0 = sess.settled(Cols, Rows)
+    # The bars are there to compare: the editor's at its right edge.
+    var tracks = 0
+    for r in 2 ..< Rows - 2:
+      if $s0[r][111].rune in ["▕", "▐", "┃", "█", "|", "#"] or
+         $s0[r][199].rune in ["▕", "▐", "┃", "█", "|", "#"]:
+        inc tracks
+    ck tracks > 0
     let strip = s0.text(Rows - 1)
     for t in ["BUILD", "PROBLEMS", "FIND IN FILES", "REQUESTS"]:
       ck strip.contains(" " & t & " ")
@@ -438,6 +456,9 @@ suite "PLAT-48 on a real terminal: auto-hide panels":
     while getMonoTime() < deadline and s1.text(Rows - 2) == s0.text(Rows - 2):
       sleep(100)
       s1 = sess.snap(Cols, Rows)
+    # The docked frame once it has stopped changing — the first change to
+    # the row above the status row can be a frame still being drawn.
+    s1 = sess.settled(Cols, Rows)
     # The docked band: the rows that changed at the bottom of the body.
     var changed: seq[int] = @[]
     for r in 1 ..< Rows - 1:
