@@ -5682,7 +5682,7 @@ proc drawWelcome(r: GpuiRenderer): GpuiElement =
   if w.isNil:
     return
   let rows = w.rowsOf()
-  gWelcomeLayout = welcomeLayoutPx(rows, area)
+  gWelcomeLayout = welcomeLayoutPx(rows, area, w.focus)
   let lay = gWelcomeLayout
   proc place(rect: PxRect; text, colour: string; bg = ""): GpuiElement =
     let e = r.createElement("div")
@@ -5744,6 +5744,9 @@ proc drawWelcome(r: GpuiRenderer): GpuiElement =
     else:
       r.setStyle(e, "padding-left", "6px")
     r.setAttribute(e, "data-ct-welcome-row", $row.kind & ":" & row.key)
+    # Its index in the model's reading order — the order the keys walk —
+    # since a scrolled panel draws only some of its rows.
+    r.setAttribute(e, "data-ct-welcome-index", $i)
     r.setAttribute(e, "data-ct-welcome-enabled", $row.enabled)
     r.setAttribute(e, "data-ct-welcome-focus", $focused)
   if w.form != nwfNone:
