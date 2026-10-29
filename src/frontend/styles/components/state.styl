@@ -339,13 +339,50 @@
   font-size: 0
   overflow: hidden
 
+// Source excerpts preserve their real line breaks and indentation. Long lines
+// scroll inside the expansion instead of wrapping or widening the State pane.
+.ct-origin-inline-chain,
+.ct-history-inline-container
+  min-width: 0
+  max-width: 100%
+  overflow: auto
+
+.ct-origin-inline-chain-hop,
+.ct-origin-inline-chain-terminator,
+.ct-history-inline-row
+  width: max-content
+  min-width: 100%
+  white-space: pre
+
+// -- Inline origin chain rows --
+.ct-origin-inline-chain
+  background-color: colors-ui-surface-primary-default
+  font-family: "SpaceMono"
+  padding: 0.25em 0
+  max-height: 8em
+
+.ct-origin-inline-chain-hop,
+.ct-origin-inline-chain-terminator
+  display: flex
+  align-items: baseline
+  line-height: 1.5em
+  justify-content: flex-start
+  gap: 0.5em
+
+  .ct-origin-inline-chain-hop-text
+    color: colors-ui-text-warning-primary
+    text-align: left
+
+  .ct-origin-inline-chain-terminator-text
+    color: colors-ui-text-primary-body
+    text-align: left
+
 // -- Inline value history rows --
 .ct-history-inline-container
   background-color: colors-ui-surface-primary-default
   font-family: "SpaceMono"
   padding: 0.25em 0
   max-height: 5em
-  overflow-y: auto
 
 .ct-history-inline-row
   display: flex

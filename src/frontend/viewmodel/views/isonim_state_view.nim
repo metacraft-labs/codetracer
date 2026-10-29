@@ -350,10 +350,11 @@ template onToggleOriginBadge*(vm: StateVM; item: proc(): VariableViewState; evTy
 # JS-only wrapper additionally converts each entry into the real
 # ``ContextMenuItem`` type from ``frontend/types.nim`` and forwards the
 # list to ``showContextMenu`` (the same primitive ``ui/value.nim`` uses).
-# The "Show value origin" action calls ``StateVM.onShowOrigin``, which puts
-# one ``ct/originChain`` on the wire: through the host bridge, whose
-# ``OriginChainVM`` sends it and opens the side panel (spec §3.2.2), or,
-# with no bridge installed, from the StateVM itself.
+# The "Show value origin" action replicates the badge-button behaviour
+# (``onToggleOriginBadge``): it calls ``toggleOriginExpansion`` to toggle
+# the in-row chain block, then loads the chain if needed (placeholder →
+# ``onShowOriginProc``; missing eager chain → ``onLoadOriginChainProc``).
+# It does NOT open the dedicated side panel — that is intentional.
 # ---------------------------------------------------------------------------
 
 proc rowLocation(vm: StateVM): store_types.Location =
@@ -381,9 +382,9 @@ proc buildVariableRowContextMenu*(vm: StateVM;
                                   item: VariableViewState):
     seq[OriginContextMenuEntry] =
   ## Build the right-click context menu for ``item`` (M4 deliverable
-  ## §3.1).  Mirrors the structure of
-  ## ``ValueComponent.createContextMenuItems`` in ``ui/value.nim`` so
-  ## the "Show value origin" entry behaves identically across surfaces.
+  ## §3.1).  The "Show value origin" entry replicates the badge-button
+  ## (``onToggleOriginBadge``): it toggles in-row expansion and loads
+  ## the chain when needed, rather than opening the side panel.
   ##
   ## The action closes over a snapshot of the row's name + the current
   ## debugger location so the menu can outlive a subsequent ``indexEach``
@@ -402,7 +403,17 @@ proc buildVariableRowContextMenu*(vm: StateVM;
     label: "Show value origin",
     hint: "Ctrl+Shift+O",
     action: proc() =
-      stateVM.onShowOrigin(name, loc),
+      let id = badgeRowId(item)
+      stateVM.toggleOriginExpansion(id)
+      let summary = summaryFor(stateVM, item)
+      if summary.isSome and summary.get.isPlaceholder:
+        if not stateVM.onShowOriginProc.isNil and not stateVM.store.isNil:
+          stateVM.onShowOriginProc(name, loc)
+      elif summary.isSome and stateVM.isOriginExpanded(id) and
+          not stateVM.onLoadOriginChainProc.isNil and not stateVM.store.isNil and
+          (stateVM.originChainLookup.isNil or
+           stateVM.originChainLookup(name).isNone):
+        stateVM.onLoadOriginChainProc(name, loc),
   )
   # Spec §14.8 — "The State Pane's right-click menu gains a 'Switch
   # process' entry that pivots to the same step coordinate in a sibling
@@ -710,9 +721,9 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
   ##           button.ct-origin-badge[.{terminator-icon}|.ct-origin-badge-placeholder]
   ##             span.ct-origin-badge-icon
   ##             span.ct-origin-badge-text
-  ##         div.ct-origin-inline-chain[display: block when expanded]
-  ##           div.ct-origin-inline-chain-hop (one per hop) — text "lhs = rhs"
-  ##           div.ct-origin-inline-chain-terminator
+  ##       div.ct-origin-inline-chain[display: block when expanded]  ← sibling of atom/compound-parent
+  ##         div.ct-origin-inline-chain-hop (one per hop) — text "lhs = rhs"
+  ##         div.ct-origin-inline-chain-terminator
   ##       div.ct-history-inline-container[display: block when expanded]  ← sibling of atom/compound-parent
   ##         div.ct-history-inline-row (one per history entry)
   ##           div.history-location : "{rrTicks}"
@@ -800,19 +811,14 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
                 discard
               span(class = "ct-origin-badge-text"):
                 text badgeTextForRow(vm, item())
-          # per M4 deliverable #4: in-row expanded chain block. Hidden
-          # via ``display: none`` while collapsed so the placeholder
-          # stays present in the DOM (matches the empty-overlay /
-          # loading-indicator pattern the same view already uses).
-          #
-          # Both containers below are populated AFTER the ``ui()`` block
-          # by `indexEach` (see the GOTCHA above); their bodies here are
-          # deliberately empty so the only thing the DSL emits is the
-          # container element plus its reactive ``display`` attribute.
-          tdiv(class = "ct-origin-inline-chain",
-               display = (if rowExpanded(vm, item()): "block" else: "none"),
-               ref = chainContainer):
-            discard
+      # Origin chain container is a sibling of atomOrCompoundClass — placed
+      # outside it so that expanding origin does not push the name/value
+      # layout out of line, matching the history container placement.
+      # Populated after the ui() block via renderOriginChainLines (indexEach).
+      tdiv(class = "ct-origin-inline-chain ct-mt-2",
+           display = (if rowExpanded(vm, item()): "block" else: "none"),
+           ref = chainContainer):
+        discard
       # History container is a sibling of atomOrCompoundClass — placed
       # outside it so that expanding history does not push the name/value
       # layout out of line. Populated after the ui() block via
