@@ -8129,3 +8129,25 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   poll for good and the panel never revealed (fixed: latch only on an answer
   that carries `total`). Clicking a docked auto-hide panel's strip label TOGGLES
   it closed, so Electron specs must not click REQUESTS after the reveal.
+
+- Low Level Code (PLAT-60): the listing is `ct/load-asm-function`, loaded per
+  stop by the stop loader ONLY while `LowLevelCodeVM.shown` (the native hosts
+  set it from the pane's on-screen area before `loadStopPanes`). An
+  instruction's `offset` is the STEP it was reached at, and a materialized
+  recording's `rrTicks` IS the step id, so the execution pointer is the row
+  whose offset equals the tick (else the first row of the debugger's line).
+  The engine writes `highLevelPath` as the trace's path table holds it
+  (`src/main.nr` for Noir) while moves and the editor use the full path:
+  compare with `low_level_code_vm.sameSourcePath`, never `==`. Jumps must send
+  that path verbatim. The engine's function range for a language without a
+  tree-sitter grammar comes from `reader.load_location`'s trace fallback; the
+  range is inclusive. rr / MCR sessions have an EMPTY reader, so they answer
+  no listing (codetracer-pm issue 2026-10-29-native-recordings-…).
+- A pane added to `PaneKind` must also be added to
+  `viewmodel/keymap/scope_path.nim`'s `PaneKinds` (and `ListPaneKinds` for a
+  list pane) or a focused pane gets no `list.*` keys; and to the TUI
+  `cells.terminalPaneName`, GPUI `pane_names`, `desktop_panes.PaneContent`,
+  `headless_app.paneViewModel`, `pane_views.paneView`, and the schema version
+  (with a migration).
+- `cmdSplit(paneEditor, p, saRow, ssAfter)` is "beside the source"; `saColumn`
+  stacks it below.

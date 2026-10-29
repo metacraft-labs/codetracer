@@ -528,12 +528,12 @@ suite "the web studio's Run and Export (CUA-Keymap.md §3.7)":
     ck d.press(editFacts(), EditorPath, "Ctrl+Enter").op == "open-line-below"
     ck d.press(editFacts(), EditorPath, "Ctrl+Shift+e").op ==
        "layout.focus-pane(file-tree)"
-    # `Alt+1`, the desktop's low-level code view (§5), on both — and not on
-    # the terminal, which has no such view.
+    # `Alt+1`, the desktop's low-level code view (§5), on both — and (PLAT-60)
+    # on the terminal, which draws the view now too.
     ck d.press(debugFacts(), EditorPath, "Alt+1").op == "view.low-level-code"
     ck w.press(debugFacts(), EditorPath, "Alt+1").op == "view.low-level-code"
     var t = initKeymapRouter(bkCua, Linux)
-    ck t.press(debugFacts(), EditorPath, "Alt+1").op != "view.low-level-code"
+    ck t.press(debugFacts(), EditorPath, "Alt+1").op == "view.low-level-code"
 
 suite "the modal bases: derived layers (§5.5)":
   test "§4.2 under Vim: the navigation table follows the modal state":

@@ -80,6 +80,7 @@ import ./host/file_worker
 import ./host/key_journal
 import ./host/layout_store
 import ./host/native_host
+import ./app/views/low_level_code_pane   # PLAT-60: `LowLevelAct`
 import ./host/pane_server
 from ../viewmodel/host/find_in_files import running   # PLAT-57
 from ../viewmodel/host/native_file_tree import wireNativeFileOperations,
@@ -1163,6 +1164,11 @@ proc interactive(command: TuiCommand): int =
   # the idle tick below.
   app.requestsAct = proc(act: RequestsAct): RequestsActResult =
     session.requestsAct(rt, act)
+  # PLAT-60: the Low Level Code pane — a press, a menu, a key, the sync
+  # toggle, the editor's caret, a step — done through the shown session's
+  # `LowLevelCodeVM`.
+  app.lowLevelAct = proc(act: LowLevelAct): LowLevelActResult =
+    session.lowLevelAct(rt, act)
 
   # PLAT-47 deliverable 4: the VCS pane reads the directory the desktop's VCS
   # panel reads for a replay — the process's own working directory.

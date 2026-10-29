@@ -289,6 +289,14 @@ export table_fit
 from viewmodels/errors_vm import problemsFit, ProblemColumnNames
 export problemsFit, ProblemColumnNames
 
+# PLAT-60: the Low Level Code pane — the listing's rows, its cross-reference
+# with the source, its header's words and its row menu, which the terminal's
+# and GPUI's panes draw as the desktop's view does. Imports `std/*`,
+# `isonim/*`, `backend_service`, `store/*`, `generated_code_anchors` (pure),
+# `source_vm` (here already) and `sdk/source_provider` (here already).
+import viewmodels/low_level_code_vm
+export low_level_code_vm
+
 # PLAT-70 Part C: the editor's find session — highlight as you type, the
 # walk, accept and cancel, the seeds and the word-under-the-caret launchers
 # (Find-And-Incremental-Search.md §3, §4). Imports only `editing_core` (here

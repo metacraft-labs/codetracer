@@ -127,6 +127,11 @@ type
       ## inspection cursor — or 0 for none.
     caretColumn*: int
       ## Its 1-based column.
+    crossRefLine*: int
+      ## PLAT-60: the line the Low Level Code listing's selected instruction
+      ## came from (`LowLevelCodeVM.crossRefSource`), which the editor
+      ## highlights — the cross-reference from an instruction to its source.
+      ## 0 for none.
     selection*: SelectionCells
       ## PLAT-68: the editor document's selection as display cells
       ## (`editing_core.selectionCells`) — in Debug mode the read-only

@@ -67,6 +67,7 @@ import ./views/test_results_pane
 import ./views/agent_activity_pane
 import ./views/problems_pane
 import ./views/requests_pane
+import ./views/low_level_code_pane
 import ./views/point_list
 
 export headless_app
@@ -301,6 +302,10 @@ type
       ## host (`host/tui_session.agentModelOf`) from the session's
       ## `AgentActivityVM` through the shared feed; its `scroll` is the
       ## pane's own reading position.
+    lowLevel*: LowLevelPaneModel
+      ## PLAT-60. THE LOW LEVEL CODE pane's model, as a value, filled by the
+      ## host (`host/tui_session.lowLevelModelOf`) from the session's
+      ## `LowLevelCodeVM`; its `scrollTop` is the pane's own reading position.
     problems*: ProblemsPaneModel
       ## PLAT-55. The PROBLEMS pane's model, as a value, filled by the host
       ## (`host/problems_source.nim`) from the window's `ErrorsVM`, which the
@@ -381,6 +386,11 @@ type
       ## PLAT-57: the HOST's Find in Files toggle, by its operation
       ## (`search.toggle-case` / `-whole-word` / `-regex`): flipped, and a
       ## search that ran run again. The words the status line shows.
+    lowLevelAct*: proc(act: LowLevelAct): LowLevelActResult {.closure.}
+      ## PLAT-60: the HOST's answer to an act on the Low Level Code pane — a
+      ## press, a menu built or chosen, a key, the sync toggle, a step —
+      ## done through the session's `LowLevelCodeVM`, the pane's model
+      ## refreshed. Nil when no host owns the pane.
     problemsCommand*: proc(kind: ProblemsCommandKind;
                            index: int): string {.closure.}
       ## PLAT-55: the HOST's Problems pane — select diagnostic `index`, open
@@ -742,6 +752,7 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     agent: app.agent,
     problems: app.problems,
     requests: app.requests,
+    lowLevel: app.lowLevel,
     build: build,
     product: app.modes.product,
     edit: app.editPaneModel())

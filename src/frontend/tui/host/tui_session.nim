@@ -75,6 +75,8 @@ import ../app/views/agent_activity_pane   # PLAT-54
 import ../app/views/requests_pane   # PLAT-58
 import ../../viewmodel/host/native_requests_host   # PLAT-58: the Requests pane's host
 from isonim/core/async_compat import drainPlatformCallbacks
+import ../app/views/low_level_code_pane   # PLAT-60
+import headless_app/low_level_menu   # PLAT-60: the row menu (K62)
 import ../../viewmodel/host/native_agent_host   # PLAT-54: Agent Activity's host
 from ../app/edit_binding import EditBuffer, moveCaretTo, caretLine, caretColumn   # the read-only document a result opens in
 import ../app/source_binding
@@ -919,6 +921,145 @@ proc requestsAct*(s: TuiSession; rt: TuiRuntime;
     rt.app.notification = host.note & " — " & rt.app.notification
 
 # ---------------------------------------------------------------------------
+# PLAT-60: the Low Level Code pane
+# ---------------------------------------------------------------------------
+
+proc lowLevelModelOf*(vm: LowLevelCodeVM;
+                      prior: LowLevelPaneModel): LowLevelPaneModel =
+  ## The session's `LowLevelCodeVM` as the pane's value: the header's words
+  ## and the listing's rows, every cell and mark the ViewModel's
+  ## (`displayRows`). The reading position (`scrollTop`) is the pane's own,
+  ## kept.
+  result = LowLevelPaneModel(loaded: not vm.isNil, scrollTop: prior.scrollTop,
+                             executionRow: -1, selectedRow: -1, linkedRow: -1)
+  if vm.isNil:
+    return
+  result.error = vm.errorMessage.val
+  if vm.address.val > 0:
+    result.address = addressText(vm.address.val)
+  result.syncOn = vm.syncSettings.val.enabled
+  result.syncLabel = syncToggleLabel(result.syncOn)
+  result.stepping = vm.steppingText
+  result.notice = vm.mappingNotice
+  result.empty = vm.emptyText
+  result.showsFidelity = vm.hasAnchors.val or vm.anchorsRejected.val
+  let source = vm.crossRefSource
+  result.crossRefPath = source.path
+  result.crossRefLine = source.line
+  for d in vm.displayRows():
+    let at = result.rows.len
+    case d.kind
+    of lrkSource:
+      result.rows.add LowLevelPaneRow(kind: lpSource, index: -1,
+        path: d.path, line: d.line, text: d.text, active: d.active,
+        linked: d.linked)
+    of lrkInstruction:
+      var instruction = d.name
+      if d.args.len > 0: instruction.add " " & d.args
+      if d.other.len > 0: instruction.add " " & d.other
+      result.rows.add LowLevelPaneRow(kind: lpInstruction, index: d.index,
+        offset: d.offsetText, instruction: instruction, crossRef: d.crossRef,
+        fidelity: d.fidelityText, count: d.countText, active: d.active,
+        linked: d.linked, executing: d.executing, selected: d.selected)
+      if d.executing: result.executionRow = at
+      if d.selected: result.selectedRow = at
+      if d.linked and result.linkedRow < 0: result.linkedRow = at
+
+proc refreshLowLevel*(s: TuiSession; rt: TuiRuntime) =
+  ## The pane's value at this moment. Whether the pane is on screen is told
+  ## to the ViewModel first (`setShown`): the session's stop loader asks the
+  ## engine for the listing only while it is, and asks at once when it
+  ## becomes shown.
+  if s.ended:
+    return
+  let vm = s.session.session.lowLevelCodeVM
+  if vm.isNil:
+    rt.app.lowLevel = LowLevelPaneModel()
+    return
+  let shown = rt.lowLevelPaneShown()
+  if shown != vm.shown.val:
+    vm.setShown(shown)
+    if shown:
+      discard s.session.loadStopPanes()
+  rt.app.lowLevel = lowLevelModelOf(vm, rt.app.lowLevel)
+
+proc lowLevelAct*(s: TuiSession; rt: TuiRuntime;
+                  act: LowLevelAct): LowLevelActResult =
+  ## The pane's act done through the session's `LowLevelCodeVM` (and, for a
+  ## move, the engine — `sourceLineJump`, the move the desktop's click asks
+  ## for), the panes refreshed.
+  if s.ended:
+    return LowLevelActResult(note: EndedSessionNote)
+  let vm = s.session.session.lowLevelCodeVM
+  if vm.isNil:
+    return LowLevelActResult(note: "this session has no low-level code")
+  var jump = SourceLineRef()
+  case act.kind
+  of llaPress:
+    vm.selectInstruction(act.index)
+    jump = vm.jumpTargetOf(act.index)
+    if jump.line <= 0:
+      result.note = NoSourceLineReason
+  of llaActivate:
+    jump = vm.jumpTargetOf(vm.selected.val)
+    if vm.selected.val < 0:
+      result.note = "no instruction is selected"
+    elif jump.line <= 0:
+      result.note = NoSourceLineReason
+  of llaRowMenu:
+    vm.selectInstruction(act.index)
+    result.menu = vm.lowLevelRowContextMenuOf(act.index)
+  of llaMenuChoice:
+    let (isLowLevel, wanted) = lowLevelMenuActionOf(act.action)
+    if isLowLevel:
+      let index = int(act.target.index)
+      let rows = vm.instructions.val
+      if index < 0 or index >= rows.len or
+         rows[index].offset != act.target.line:
+        result.note = "that instruction is no longer listed"
+      else:
+        let outcome = vm.runRowMenu(index, wanted, send = false)
+        result.note = outcome.note
+        result.copied = outcome.copied
+        jump = outcome.jumpTo
+  of llaKey:
+    if vm.moveSelection(act.operation, act.page) < 0:
+      result.note = "the listing has no instruction"
+  of llaToggleSync:
+    vm.setSyncEnabled(not vm.syncSettings.val.enabled)
+    result.note = "source syncing is " &
+      (if vm.syncSettings.val.enabled: "on" else: "off")
+  of llaClearSelection:
+    vm.selectInstruction(NoSelectedInstruction)
+  of llaSourceCursor:
+    vm.setSourceCursor(act.path, act.line)
+  of llaStep:
+    let request = vm.instructionStepRequest(act.operation)
+    if request.offered:
+      try:
+        discard s.session.sendRawDapRequest(request.command, request.args)
+        discard s.session.drainEvents()
+        result.handled = true
+        result.moved = true
+      except CatchableError as e:
+        result.note = "the step by instruction failed: " & e.msg
+    else:
+      result.note = request.note
+  if jump.line > 0:
+    try:
+      s.session.sourceLineJump(jump.path, jump.line)
+      result.moved = true
+    except CatchableError as e:
+      result.note = "could not go to " & jump.path & ":" & $jump.line &
+                    ": " & e.msg
+  if result.moved:
+    s.moved(rt)
+  else:
+    s.refreshLowLevel(rt)
+  if result.moved and result.note.len > 0:
+    rt.app.notification = result.note & " — " & rt.app.notification
+
+# ---------------------------------------------------------------------------
 # PLAT-54: Agent Activity
 # ---------------------------------------------------------------------------
 
@@ -1194,6 +1335,11 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   # pane's inline values are read from them. Until 2026-09-23 the model was
   # built first and passed no values at all, so the shipped terminal drew no
   # inline value on any line (PLAT22-PG3's re-measurement found it).
+  # PLAT-60: the Low Level Code listing is asked for at this stop only while
+  # the pane is on screen.
+  let lowLevel = s.session.session.lowLevelCodeVM
+  if not lowLevel.isNil:
+    lowLevel.setShown(rt.lowLevelPaneShown())
   discard s.session.loadStopPanes()
 
   # The flow overlay reads the SAME facts GPUI's `editorSurfaceFor` reads —
@@ -1237,6 +1383,8 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   s.refreshSearch(rt)
   # PLAT-58: the Requests pane, this session's.
   s.refreshRequests(rt)
+  # PLAT-60: the Low Level Code pane, this session's.
+  s.refreshLowLevel(rt)
 
   let locals = s.session.getLocals()
   s.valueTimeline.observeStop(tick, locals)

@@ -66,6 +66,7 @@ import ./views/test_results_pane
 import ./views/agent_activity_pane
 import ./views/problems_pane
 import ./views/requests_pane   # PLAT-58
+import ./views/low_level_code_pane   # PLAT-60
 
 export interpreter, keymap, motions, command_line, tui_app, degradation
 export persistence
@@ -434,6 +435,9 @@ type
   TuiRuntime* = ref object
     ## The running front-end's state, minus the terminal and minus the process.
     app*: TuiApp
+    lowLevelCursor*: (string, int)
+      ## PLAT-60: the editor caret's line last told to the Low Level Code
+      ## listing (`syncLowLevelCursor`), so it is told once per move.
     dockKeys*: PaneKind
     hasDockKeys*: bool
       ## PLAT-55: the docked pane a left press last landed in while it was
@@ -2437,12 +2441,24 @@ proc paintedAreaOf*(rt: TuiRuntime; kind: PaneKind): CellArea =
     return CellArea()
   rt.paneAreaOf(kind)
 
+func sameRecordedPath*(a, b: string): bool =
+  ## PLAT-60: one recorded file, however the engine and the editor spell it
+  ## (the listing's rule, `low_level_code_vm.sameSourcePath`).
+  sameSourcePath(a, b)
+
 proc editorPaneModel(rt: TuiRuntime; model: var ShellModel; follow: bool) =
   ## The editor's part of a frame's model: PLAT-68's Debug-mode document (its
   ## selection over the recording's source while read-only; the Edit pane
   ## once writable) and PLAT-70's horizontal view — the content width and the
   ## pane's code width brought up to date and, when `follow`, the caret
   ## followed (§4.5) — before the frame is painted from it.
+  # PLAT-60: the Low Level Code listing's cross-reference back to the source —
+  # the line its selected instruction came from — while the pane is shown.
+  let ll = rt.app.lowLevel
+  if ll.loaded and ll.crossRefLine > 0 and
+     rt.paneAreaOf(paneLowLevelCode).width > 0 and
+     sameRecordedPath(ll.crossRefPath, model.source.path):
+    model.source.crossRefLine = ll.crossRefLine
   if rt.app.modes.product == pmDebug and not rt.app.editSession.isNil:
     let at = rt.app.editSession.indexOfPath(rt.app.source.path)
     if at >= 0:
@@ -2954,6 +2970,182 @@ proc problemsCommand(rt: TuiRuntime; kind: ProblemsCommandKind; index: int;
         rt.afterLayoutCommit()
   if rt.app.problems.selected >= 0:
     rt.revealProblem(rt.app.problems.selected)
+
+# ---------------------------------------------------------------------------
+# PLAT-60: the Low Level Code pane
+# ---------------------------------------------------------------------------
+
+proc requestSourceScroll(rt: TuiRuntime; scroll: SourceScroll;
+                         outcome: var RuntimeOutcome)
+  ## FORWARD-DECLARED for the listing's cross-reference; defined with the
+  ## scrollbars.
+
+proc lowLevelPaneShown*(rt: TuiRuntime): bool =
+  ## Whether the Low Level Code pane is on screen — what the host tells the
+  ## session's `LowLevelCodeVM` (`setShown`), so the listing is asked for
+  ## only then.
+  rt.paneAreaOf(paneLowLevelCode).width > 0
+
+proc lowLevelPaneScreen*(rt: TuiRuntime): tuple[area: CellArea,
+                                               screen: LowLevelPaneScreen] =
+  ## The pane below its strip, and where the painter put its parts — the
+  ## arithmetic a press is read back with.
+  let under = rt.paneAreaOf(paneLowLevelCode)
+  result.area = CellArea(col: under.col, row: under.row + 1,
+                         width: under.width, height: max(0, under.height - 1))
+  if result.area.width <= 0:
+    return
+  var g = newStyledGrid(result.area.col + result.area.width,
+                        result.area.row + result.area.height)
+  result.screen = paintLowLevelCode(g, result.area, rt.app.lowLevel)
+
+proc revealLowLevelRow(rt: TuiRuntime; row: int) =
+  ## Keep display row `row` of the listing in view.
+  if row < 0:
+    return
+  let (_, screen) = rt.lowLevelPaneScreen()
+  rt.app.lowLevel.scrollTop = rt.app.lowLevel.revealRow(screen.listRows, row)
+
+proc scrollLowLevel(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
+  ## The wheel over the listing scrolls it.
+  let (_, screen) = rt.lowLevelPaneScreen()
+  rt.app.lowLevel.scrollTop = clampLowLevelTop(rt.app.lowLevel.rows.len,
+    rt.app.lowLevel.scrollTop + delta, screen.listRows)
+  outcome.repaint = true
+
+proc revealSourceLine(rt: TuiRuntime; line: int;
+                      outcome: var RuntimeOutcome) =
+  ## INSTRUCTION → SOURCE: the editor brought to `line` when it is outside
+  ## the editor's window (the window only: the caret and the debugger stay).
+  if line <= 0 or rt.app.source.path.len == 0:
+    return
+  let rows = max(1, rt.paintedAreaOf(paneEditor).height - 2)
+  let top = rt.app.source.viewportTop
+  if line < top or line >= top + rows:
+    rt.requestSourceScroll(SourceScroll(kind: sskTo,
+                                        top: max(1, line - rows div 2)),
+                           outcome)
+
+proc actOnLowLevel*(rt: TuiRuntime; act: LowLevelAct;
+                    outcome: var RuntimeOutcome): LowLevelActResult =
+  ## Hand `act` to the host (`TuiApp.lowLevelAct`), which does it through the
+  ## session's `LowLevelCodeVM` and refreshes the pane (every pane, when the
+  ## debugger moved); its words go to the status line and copied text to the
+  ## clipboard. The listing then keeps its cursor in view, and the editor the
+  ## cursor's source line.
+  outcome.repaint = true
+  if rt.app.lowLevelAct.isNil:
+    rt.note("this session has no Low Level Code pane")
+    return
+  let before = rt.app.lowLevel.selectedRow
+  result = rt.app.lowLevelAct(act)
+  if result.copied.len > 0:
+    rt.copyToClipboard(result.copied, "the instruction")
+  if result.note.len > 0 and not result.moved:
+    rt.note(result.note)
+  let m = rt.app.lowLevel
+  if m.selectedRow >= 0 and m.selectedRow != before:
+    rt.revealLowLevelRow(m.selectedRow)
+    if not result.moved and m.crossRefLine > 0 and
+       sameRecordedPath(m.crossRefPath, rt.app.source.path):
+      rt.revealSourceLine(m.crossRefLine, outcome)
+  elif result.moved and m.executionRow >= 0:
+    rt.revealLowLevelRow(m.executionRow)
+
+proc syncLowLevelCursor(rt: TuiRuntime) =
+  ## SOURCE → INSTRUCTIONS: the editor's caret, told to the listing whenever
+  ## it moved, so the instructions generated from its line are the
+  ## cross-referenced ones — and brought into the listing's view.
+  if not rt.app.lowLevel.loaded or rt.app.lowLevelAct.isNil or
+     not rt.lowLevelPaneShown():
+    return
+  let at = if rt.app.caret.line > 0 and rt.app.caret.path == rt.app.source.path:
+             (rt.app.source.path, rt.app.caret.line)
+           else: ("", 0)
+  if at == rt.lowLevelCursor:
+    return
+  rt.lowLevelCursor = at
+  discard rt.app.lowLevelAct(LowLevelAct(kind: llaSourceCursor, path: at[0],
+                                         line: at[1]))
+  if rt.app.lowLevel.linkedRow >= 0:
+    rt.revealLowLevelRow(rt.app.lowLevel.linkedRow)
+
+proc openLowLevelCode(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  ## `view.low-level-code` (Alt+1, the desktop's `aLowLevel1`): the Low Level
+  ## Code pane opened BESIDE THE SOURCE — the editor's region split, the
+  ## listing after it — as the desktop opens its view in a new container
+  ## next to the editor; focused when it is already placed. No default
+  ## layout places it (Generated-Code-Listing.md §10).
+  outcome.repaint = true
+  if not rt.layoutBindingEnabled():
+    rt.note("Low Level Code: the layout is not rearrangeable in this session")
+    return
+  let b = rt.app.layoutBinding
+  if not b.layout.tree.contains(paneLowLevelCode):
+    let acted = b.dispatch(cmdSplit(paneEditor, paneLowLevelCode, saRow,
+                                    ssAfter))
+    if acted.status != lasApplied:
+      rt.note("Low Level Code could not be opened: " & acted.message)
+      return
+    rt.afterLayoutCommit()
+  else:
+    let acted = b.dispatch(cmdActivateTab(paneLowLevelCode))
+    if acted.status == lasApplied:
+      rt.afterLayoutCommit()
+  rt.rebuildFocus()
+  discard rt.focus.focusPaneKind(paneLowLevelCode)
+  b.focus = paneLowLevelCode
+  # The host loads the listing now that the pane is on screen.
+  if not rt.app.lowLevelAct.isNil:
+    discard rt.app.lowLevelAct(LowLevelAct(kind: llaClearSelection))
+    if rt.app.lowLevel.executionRow >= 0:
+      rt.revealLowLevelRow(rt.app.lowLevel.executionRow)
+  rt.note(LowLevelCodeTitle & " beside the source")
+
+proc runLowLevelKeyOperation(rt: TuiRuntime; operation: string;
+                             outcome: var RuntimeOutcome): bool =
+  ## PLAT-60 FROM THE KEYBOARD, while the Low Level Code pane has the focus:
+  ## the `list.*` moves put the listing's cursor on an instruction (the
+  ## editor cross-references its source line), `list.activate` goes to that
+  ## line, `list.copy` copies the instruction, `list.clear-selection`
+  ## clears the cursor; a step steps by instruction when the engine offers
+  ## it (else the ordinary step runs, by line, as the header says). Answers
+  ## whether `operation` was the pane's.
+  case operation
+  of "list.focus-next", "list.focus-previous", "list.focus-first",
+     "list.focus-last", "list.focus-page-down", "list.focus-page-up",
+     "editor.scroll-line-down", "editor.scroll-line-up":
+    let op = case operation
+             of "editor.scroll-line-down": "list.focus-next"
+             of "editor.scroll-line-up": "list.focus-previous"
+             else: operation
+    let (_, screen) = rt.lowLevelPaneScreen()
+    discard rt.actOnLowLevel(LowLevelAct(kind: llaKey, operation: op,
+      page: max(1, screen.listRows - 1)), outcome)
+    true
+  of "list.activate":
+    discard rt.actOnLowLevel(LowLevelAct(kind: llaActivate), outcome)
+    true
+  of "list.copy":
+    let i = rt.app.lowLevel.selectedRow
+    if i >= 0:
+      let r = rt.app.lowLevel.rows[i]
+      rt.copyToClipboard(r.offset & "  " & r.instruction, "the instruction")
+    else:
+      rt.note("no instruction is selected")
+    outcome.repaint = true
+    true
+  of "list.clear-selection":
+    discard rt.actOnLowLevel(LowLevelAct(kind: llaClearSelection), outcome)
+    true
+  of "debugger.step-over", "debugger.step-into", "debugger.reverse-step-over",
+     "debugger.reverse-step-into":
+    if rt.app.lowLevel.stepping != SteppingByInstructionText:
+      return false
+    let r = rt.actOnLowLevel(LowLevelAct(kind: llaStep, operation: operation),
+                             outcome)
+    r.handled
+  else: false
 
 proc openWorkingFileAt*(rt: TuiRuntime; path: string; line, col: int): string =
   ## PLAT-55 (K35): a working-tree file opened in Edit mode's editor — the
@@ -3602,6 +3794,9 @@ proc applyBarTop(rt: TuiRuntime; bar: BarSpot; top: int;
       rt.scrollAgentTo(top)
     of paneProblems:
       rt.app.problems.scrollTop = top
+    of paneLowLevelCode:
+      # PLAT-60: the listing's view moves; nothing is fetched.
+      rt.app.lowLevel.scrollTop = top
     of paneBuildOutput:
       rt.app.buildPane.scrollTop = top
     of paneEditor:
@@ -4350,6 +4545,37 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
       return true
     of pbHeader, pbText, pbNone:
       return false
+  of paneLowLevelCode:
+    # PLAT-60 (K61 – K63): a press on an instruction goes to the source line
+    # it came from (the desktop's click; the listing's cursor goes on it); a
+    # right press opens its menu; the header's `sync on` toggles source
+    # syncing; the scrollbar is the scrollbars' (`routeScrollbars`).
+    if event.button notin {mbLeft, mbRight} or not rt.app.lowLevel.loaded:
+      return false
+    rt.app.layoutBinding.focus = paneLowLevelCode
+    let (area, screen) = rt.lowLevelPaneScreen()
+    let t = rt.app.lowLevel.lowLevelTargetAt(screen, area, event.row,
+                                             event.col)
+    if event.button == mbRight:
+      if t.kind != ltInstruction:
+        return t.kind != ltNone
+      let r = rt.actOnLowLevel(LowLevelAct(kind: llaRowMenu, index: t.index),
+                               outcome)
+      if r.menu.entries.len > 0:
+        rt.openContextMenu(r.menu, event.row, event.col, outcome)
+      return true
+    case t.kind
+    of ltInstruction:
+      discard rt.actOnLowLevel(LowLevelAct(kind: llaPress, index: t.index),
+                               outcome)
+      return true
+    of ltSync:
+      discard rt.actOnLowLevel(LowLevelAct(kind: llaToggleSync), outcome)
+      return true
+    of ltSource, ltHeader, ltTrack:
+      return true
+    of ltNone:
+      return false
   of paneTestResults:
     # PLAT-53: the ▶ runs the suite; a row's `⟳` records it again and `⏵`
     # opens its recording in a new tab; a press elsewhere on a row (or its
@@ -4562,6 +4788,12 @@ proc runContextAction(rt: TuiRuntime; action: ContextAction;
     # PLAT-58 (K59, K60): a Requests row's entry or a picker's option, as the
     # shared Requests model decides it now.
     discard rt.actOnRequests(RequestsAct(kind: rakMenuChoice, action: action,
+                                         target: target), outcome)
+  of caLowLevelGoToSourceLine, caLowLevelShowSourceLine,
+     caLowLevelCopyInstruction, caLowLevelCopySourceLocation:
+    # PLAT-60 (K62): an instruction's entry, as the shared listing model
+    # decides it now.
+    discard rt.actOnLowLevel(LowLevelAct(kind: llaMenuChoice, action: action,
                                          target: target), outcome)
 
 proc routeOverlayMouse(rt: TuiRuntime; event: MouseEvent;
@@ -4788,6 +5020,13 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
     if at.found and at.region.pane == paneBuildOutput and
        rt.app.buildPane.loaded:
       rt.scrollBuild(
+        (if event.button == mbWheelDown: CallTraceWheelRows
+         else: -CallTraceWheelRows), outcome)
+      return
+    # PLAT-60: the wheel scrolls the Low Level Code listing.
+    if at.found and at.region.pane == paneLowLevelCode and
+       rt.app.lowLevel.loaded:
+      rt.scrollLowLevel(
         (if event.button == mbWheelDown: CallTraceWheelRows
          else: -CallTraceWheelRows), outcome)
       return
@@ -7339,6 +7578,9 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
     if had and focused == paneRequests and rt.app.requests.loaded and
        rt.runRequestsKeyOperation(res.operation, outcome):
       return
+    if had and focused == paneLowLevelCode and rt.app.lowLevel.loaded and
+       rt.runLowLevelKeyOperation(res.operation, outcome):
+      return
   # PLAT-55: the docked Problems pane, pressed while shown, takes the list
   # keys too (`dockKeys`).
   if not rt.prompt.open and rt.hasDockKeys and rt.dockKeys == paneProblems and
@@ -7469,6 +7711,11 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
     # Build-Output-Pane.md §3.11: `Ctrl+Shift+B` — the build task picker.
     rt.note(rt.openBuildTaskPicker())
     outcome.repaint = true
+    return
+  of "view.low-level-code":
+    # PLAT-60: Alt+1, the desktop's `aLowLevel1` — the Low Level Code pane
+    # beside the source.
+    rt.openLowLevelCode(outcome)
     return
   of "problems.next", "problems.previous":
     # PLAT-55 (EMT-D22): `F8` / `Shift+F8` in Edit mode, `Ctrl+Alt+N` /
@@ -7923,6 +8170,8 @@ proc shellScreenOf*(rt: TuiRuntime): ShellScreen =
   ## LAYOUT through `motions.layoutFor` — so `z` really replaces the tree with a
   ## single-pane one rather than merely noting that it was pressed.
   rt.scheduleHighlights()
+  # PLAT-60: the editor's caret, told to the Low Level Code listing.
+  rt.syncLowLevelCursor()
   # PLAT-70: the output panes' widths before the model is taken from them.
   rt.syncOutputViews()
   # PLAT-70 Part I: the table panes' views over this frame's fit.

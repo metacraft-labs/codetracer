@@ -154,6 +154,8 @@ import ./terminal_output_leaf
 import ./search_results_leaf   # PLAT-57: Find in Files, drawn natively
 import ./test_results_leaf     # PLAT-53: Test Results, drawn natively
 import ./problems_leaf         # PLAT-55: Problems, drawn natively
+import ./low_level_code_leaf   # PLAT-60: Low Level Code, drawn natively
+import headless_app/low_level_menu   # PLAT-60: its row menu (K59)
 import ./build_output_leaf     # PLAT-56: Build Output, drawn natively
 # PLAT-55: the window's builds (`:build`, the terminal's runner) and the
 # shared reader that fills its Problems pane — PLAT-56's Build Output reads
@@ -285,6 +287,13 @@ OPTIONS:
                       requests:method  requests:status  requests:field
                       requests:handler  requests:key:<operation>
                       requests:wheel:<rows>  requests:track:<permille>
+                    and (PLAT-60) the Low Level Code pane (`<index>` an
+                    instruction's index in the listing):
+                      lowlevel:show (Alt+1's `view.low-level-code`)
+                      lowlevel:row:<index>  lowlevel:menu:<index>
+                      lowlevel:choose:<label>  lowlevel:sync
+                      lowlevel:key:<operation>  lowlevel:caret:<line>
+                      lowlevel:wheel:<rows>
                     and (PLAT-69) what an open window's renderer reports:
                       resize:<width>:<height> (the content area resized)
                       chrome:<spec> (its frame changed; `--window-chrome`'s
@@ -667,6 +676,8 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
                        "build",
                        # PLAT-58: the Requests pane's rows, menus, field.
                        "requests",
+                       # PLAT-60: the Low Level Code listing.
+                       "lowlevel",
                        # PLAT-69: the window resized, its frame changed.
                        "resize", "chrome",
                        # Build-Output-Pane.md §3.8, §3.9: a pane docked to
@@ -1139,6 +1150,8 @@ proc drawRequestsPane(r: GpuiRenderer)
 proc drawAgentPane(r: GpuiRenderer)
   ## PLAT-54: forward-declared; defined beside Find in Files' drawing.
 proc drawProblemsPane(r: GpuiRenderer)
+proc drawLowLevelPane(r: GpuiRenderer)
+  ## PLAT-60: forward-declared; defined beside Problems' drawing.
   ## PLAT-55: forward-declared; defined beside Test Results' drawing.
 proc drawBuildPane(r: GpuiRenderer)
   ## PLAT-56: forward-declared; defined beside Problems' drawing.
@@ -1312,6 +1325,8 @@ var
     ## from the window's builds (`tui/host/build_problems`), shared by every
     ## tab: a build is of the working tree.
   gProblemsPane = initGProblemsPane()
+  gLowLevel = initGLowLevelPane()
+    ## PLAT-60: the Low Level Code listing's reading position and a held thumb.
     ## PLAT-55: the Problems pane's reading position and a held scrubber.
   gBuildPane = initGBuildPane()
     ## PLAT-56: the Build Output pane's reading position, horizontal view,
@@ -2300,6 +2315,8 @@ proc drawArrangement(r: GpuiRenderer): bool =
   drawAgentPane(r)
   # PLAT-55: and Problems from its own.
   drawProblemsPane(r)
+  # PLAT-60: and Low Level Code from the session's.
+  drawLowLevelPane(r)
   # PLAT-56: and Build Output from its own.
   drawBuildPane(r)
   # PLAT-51: and the list panes' scrubbers from theirs.
@@ -2659,6 +2676,13 @@ proc withDebugDocument(surface: EditorSurface): EditorSurface =
     result.caretLine = d.caretLine
     result.caretColumn = d.caretColumn + 1
   result.selection = d.selectionCells
+  # PLAT-60: the Low Level Code listing's cross-reference — the line its
+  # selected instruction came from — while the listing is shown.
+  if not gSession.isNil and not gSession.session.lowLevelCodeVM.isNil and
+     gSession.session.lowLevelCodeVM.shown.val:
+    let x = gSession.session.lowLevelCodeVM.crossRefSource
+    if x.line > 0 and sameSourcePath(x.path, surface.path):
+      result.crossRefLine = x.line
   # PLAT-70 Part C: the find session's highlights on the drawn rows.
   result.findMarks = @[]
   if result.rows.len > 0:
@@ -3200,6 +3224,49 @@ proc drawBuildPane(r: GpuiRenderer) =
   if drawBuildOutput(r, pane, vm, gBuildPane, buildBody()):
     applyTextFaces(r, pane)
 
+proc lowLevelVM(): LowLevelCodeVM =
+  ## PLAT-60: the shown session's `LowLevelCodeVM`.
+  if gSession.isNil: nil else: gSession.session.lowLevelCodeVM
+
+proc lowLevelBody(): PxRect =
+  ## PLAT-60: the Low Level Code pane's body in window pixels — the visible
+  ## tab of a box — or a zero rectangle.
+  let i = gGeom.tabsNodeOfPane($paneLowLevelCode)
+  if i < 0:
+    return PxRect()
+  let n = gGeom.nodes[i]
+  if n.panes.len > 0 and n.active >= 0 and n.active < n.panes.len and
+     n.panes[n.active] != $paneLowLevelCode:
+    return PxRect()
+  n.body
+
+proc syncLowLevelShown(): bool =
+  ## PLAT-60: tell the session's listing whether it is on screen (the stop
+  ## loader asks the engine only then), and the editor's caret line (the
+  ## SOURCE → INSTRUCTIONS cross-reference). Whether it became shown.
+  let vm = lowLevelVM()
+  if vm.isNil:
+    return false
+  let shown = lowLevelBody().w > 0
+  result = shown and not vm.shown.val
+  vm.setShown(shown)
+  if shown and gDebugDocs.hasKey(gEditorSurface.path):
+    vm.setSourceCursor(gEditorSurface.path,
+                       gDebugDocs[gEditorSurface.path].caretLine)
+
+proc drawLowLevelPane(r: GpuiRenderer) =
+  ## PLAT-60: draw the Low Level Code pane from the session's ViewModel,
+  ## natively, replacing whatever the leaf held. A pane just shown asks the
+  ## engine for this stop's listing first.
+  let pane = gPanes.getOrDefault($paneLowLevelCode)
+  let vm = lowLevelVM()
+  if pane.isNil or vm.isNil:
+    return
+  if syncLowLevelShown():
+    discard gSession.loadStopPanes()
+  if drawLowLevelCode(r, pane, vm, gLowLevel, lowLevelBody()):
+    applyTextFaces(r, pane)
+
 proc drawProblemsPane(r: GpuiRenderer) =
   ## PLAT-55: draw Problems from the window's ViewModel, natively, replacing
   ## whatever the leaf held.
@@ -3356,6 +3423,10 @@ proc pressRequests(r: GpuiRenderer; x, y: int; right = false): bool
 proc pressAgent(r: GpuiRenderer; x, y: int): bool
 proc runAgentPrompt(r: GpuiRenderer; text: string)
 proc pressProblems(r: GpuiRenderer; x, y: int): bool
+proc pressLowLevel(r: GpuiRenderer; x, y: int; right = false): bool
+  ## PLAT-60: forward-declared; defined beside the Low Level Code host.
+proc lowLevelKey(r: GpuiRenderer; operation: string): bool
+proc lowLevelStep(r: GpuiRenderer; operation: string): bool
   ## PLAT-55: forward-declared; defined beside the Problems host.
 proc pressBuild(r: GpuiRenderer; x, y: int): bool
   ## PLAT-56: forward-declared; defined beside the Problems host.
@@ -3810,6 +3881,9 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     # PLAT-58 (K59): a right press on a Requests row opens its menu.
     if pressRequests(r, x, y, right = true):
       return
+    # PLAT-60 (K62): a right press on an instruction opens its menu.
+    if pressLowLevel(r, x, y, right = true):
+      return
     # PLAT-50 (K42): a right-click on a docked pane's label opens the
     # desktop's strip menu (`ui/auto_hide`'s `onContextMenu`).
     let (si, sl) = gGeom.slotAt(x, y)
@@ -3832,6 +3906,14 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     # filter, Group by File, the scrubber). A row's open focuses the editor
     # (EMT-D21), so the pane takes the focus only for the others.
     if pressProblems(r, x, y):
+      return
+    # PLAT-60: the Low Level Code pane's presses (an instruction goes to its
+    # source line, the sync toggle, the scrubber); the pane takes the focus.
+    if pressLowLevel(r, x, y):
+      gFocusShown = true
+      if gFocusPane != $paneLowLevelCode:
+        focusWindowPane(r, $paneLowLevelCode)
+        discard drawArrangement(r)
       return
     # PLAT-56: Build Output's presses (a located line opens its file, the
     # header's controls, the history picker, the scrubbers).
@@ -3942,6 +4024,12 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
                                     dragging = true)
         drawProblemsPane(r)
       return
+    if gLowLevel.dragging:
+      if not lowLevelVM().isNil:
+        gLowLevel.scrubLowLevel(lowLevelVM(), lowLevelBody(), y,
+                                dragging = true)
+        drawLowLevelPane(r)
+      return
     if gTests.dragging:
       if not gTestsVM.isNil:
         gTests.scrubTests(gTestsVM, testsBody(), y, dragging = true)
@@ -3998,6 +4086,9 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     if gRequests.dragging:
       gRequests.dragging = false
       return
+    if gLowLevel.dragging:
+      gLowLevel.dragging = false
+      return
     if gAgent.dragging:
       gAgent.dragging = false
       return
@@ -4043,6 +4134,15 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       gBuildPane.scrollBy(gProblems.build, buildRect,
                           (if rows == 0: (if dy < 0: 1 else: -1) else: rows))
       drawBuildPane(r)
+      return
+    # PLAT-60: and the Low Level Code listing.
+    let lowLevelRect = lowLevelBody()
+    if lowLevelRect.w > 0 and lowLevelRect.contains(x, y) and dy != 0.0 and
+       not lowLevelVM().isNil:
+      let rows = int(round(-dy / float(LowLevelRowPx)))
+      gLowLevel.scrollBy(lowLevelVM(), lowLevelRect,
+                         (if rows == 0: (if dy < 0: 1 else: -1) else: rows))
+      drawLowLevelPane(r)
       return
     # PLAT-55: and Problems' list.
     let problemsRect = problemsBody()
@@ -4389,6 +4489,12 @@ proc gpuiMenuRouteOf(action: string): GpuiMenuRoute =
   of "aScratchpad": GpuiMenuRoute(kind: gmrPane, pane: paneScratchpad)
   of "aPointList": GpuiMenuRoute(kind: gmrPane, pane: panePointList)
   of "aAgentActivity": GpuiMenuRoute(kind: gmrPane, pane: paneAgentActivity)
+  # PLAT-60: Alt+1, the desktop's `aLowLevel1` — the Low Level Code pane
+  # beside the source.
+  of "aLowLevel1":
+    GpuiMenuRoute(kind: gmrPane, pane: paneLowLevelCode,
+                  reason: (if gSession.isNil: "the low-level code is a " &
+                             "recording's: open one to see it" else: ""))
   of "aExit": GpuiMenuRoute(kind: gmrExit)
   # File: the Welcome Screen's own flows (Multi-Window-Tab-Management.md rule
   # 3, Welcome-Screen.md § The native front-ends), as in the terminal.
@@ -5656,6 +5762,8 @@ proc refreshReplayWindow(r: GpuiRenderer) =
   gViewedFile = ""
   if not gSourceService.isNil:
     gSourceService.serveWindow()
+  # PLAT-60: the listing is asked for at this stop only while it is shown.
+  discard syncLowLevelShown()
   discard gSession.loadStopPanes()
   # PLAT-49 part B: the call the debugger is in, selected, as on the desktop.
   gSession.selectCurrentCall()
@@ -5676,6 +5784,7 @@ proc refreshReplayWindow(r: GpuiRenderer) =
   drawSearchPane(r)
   drawTestsPane(r)
   drawProblemsPane(r)
+  drawLowLevelPane(r)
   drawBuildPane(r)
   drawRequestsPane(r)
   drawListScrubbers(r)
@@ -6484,6 +6593,13 @@ proc showPaneFromMenu(r: GpuiRenderer; pane: PaneKind) =
       gGestures.reveal = shown.get
   elif layout.tree.contains(pane):
     applyGestureCommand(r, cmdActivateTab(pane))
+  elif pane == paneLowLevelCode and layout.tree.contains(paneEditor):
+    # PLAT-60: Low Level Code opens BESIDE THE SOURCE — the editor's region
+    # split, the listing after it — as the desktop opens its view in a new
+    # container next to the editor (the terminal's rule too).
+    applyGestureCommand(r, cmdSplit(paneEditor, paneLowLevelCode, saRow,
+                                    ssAfter))
+    focusWindowPane(r, $paneLowLevelCode)
   else:
     # PLAT-50: a pane the arrangement does not place is OPENED, as the
     # desktop's View menu opens its panel — a tab beside the event log, else
@@ -8409,6 +8525,125 @@ proc problemsKey(r: GpuiRenderer; operation: string): bool =
   drawProblemsPane(r)
   true
 
+# ---------------------------------------------------------------------------
+# PLAT-60: the Low Level Code pane's host (Generated-Code-Listing.md §0.2)
+# ---------------------------------------------------------------------------
+
+proc afterMove(r: GpuiRenderer)
+  ## Forward-declared for the Low Level Code host's moves.
+
+proc lowLevelGoTo(r: GpuiRenderer; target: SourceLineRef) =
+  ## Move the debugger to an instruction's source line — the engine's move
+  ## the desktop's click asks for (`ct/source-line-jump`) — and follow it.
+  if target.line <= 0:
+    traceGesture("low-level: " & NoSourceLineReason)
+    return
+  try:
+    gSession.sourceLineJump(target.path, target.line, "smart")
+  except CatchableError as e:
+    traceGesture("low-level: could not go to " & target.path & ":" &
+                 $target.line & ": " & e.msg)
+    return
+  traceGesture("low-level: went to " & target.path & ":" & $target.line)
+  afterMove(r)
+  let vm = lowLevelVM()
+  if not vm.isNil:
+    gLowLevel.revealIndex(vm, lowLevelBody(), vm.executionIndex)
+    drawLowLevelPane(r)
+
+proc lowLevelSelected(r: GpuiRenderer) =
+  ## The listing's cursor moved: kept in view, and the editor redrawn with
+  ## the cross-reference on the cursor's source line (and brought to it).
+  let vm = lowLevelVM()
+  if vm.isNil:
+    return
+  gLowLevel.revealIndex(vm, lowLevelBody(), vm.selected.val)
+  drawLowLevelPane(r)
+  let x = vm.crossRefSource
+  if x.line > 0 and sameSourcePath(x.path, gEditorSurface.path):
+    let rows = max(1, editorRowsOf(gGeom))
+    let top = gEditorSurface.viewportTop
+    if x.line < top or x.line >= top + rows:
+      scrollEditorLines(r, x.line - top - rows div 2)
+  redrawReplayEditor(r)
+
+proc pressLowLevel(r: GpuiRenderer; x, y: int; right = false): bool =
+  ## A press on the Low Level Code pane: an instruction goes to its source
+  ## line (the desktop's click; the cursor goes on it), a right press opens
+  ## its menu, `sync on` toggles source syncing, the scrubber moves the view.
+  ## Every press on the pane is the pane's.
+  let vm = lowLevelVM()
+  let body = lowLevelBody()
+  if vm.isNil or body.w <= 0 or not body.contains(x, y):
+    return false
+  let hit = lowLevelHitAt(vm, gLowLevel, body, x, y)
+  if right:
+    if hit.kind == glInstruction:
+      vm.selectInstruction(hit.index)
+      lowLevelSelected(r)
+      openContextMenuAt(r, vm.lowLevelRowContextMenuOf(hit.index), x, y)
+    return true
+  case hit.kind
+  of glInstruction:
+    vm.selectInstruction(hit.index)
+    traceGesture("low-level: press instruction " & $hit.index)
+    lowLevelGoTo(r, vm.jumpTargetOf(hit.index))
+  of glSync:
+    vm.setSyncEnabled(not vm.syncSettings.val.enabled)
+    traceGesture("low-level: " & syncToggleLabel(vm.syncSettings.val.enabled))
+    drawLowLevelPane(r)
+    redrawReplayEditor(r)
+  of glTrack, glThumb:
+    gLowLevel.dragging = hit.kind == glThumb
+    if gLowLevel.dragging:
+      gLowLevel.scrubberOf(lowLevelLayout(vm, body)).beginBarGrab(
+        hit.fraction)
+    gLowLevel.scrubLowLevel(vm, body, y, dragging = gLowLevel.dragging)
+    drawLowLevelPane(r)
+  of glSource, glHeader, glNone: discard
+  true
+
+proc lowLevelKey(r: GpuiRenderer; operation: string): bool =
+  ## PLAT-60 from the keyboard, the pane focused: the `list.*` moves put the
+  ## listing's cursor on an instruction, `list.activate` goes to its source
+  ## line. Whether it was the pane's.
+  let vm = lowLevelVM()
+  if vm.isNil or gFocusPane != $paneLowLevelCode:
+    return false
+  if operation == "list.activate":
+    if vm.selected.val < 0:
+      traceGesture("low-level: no instruction is selected")
+    else:
+      lowLevelGoTo(r, vm.jumpTargetOf(vm.selected.val))
+    return true
+  let lay = lowLevelLayout(vm, lowLevelBody())
+  if vm.moveSelection(operation, max(1, lay.rows - 1)) < 0:
+    if vm.instructions.val.len == 0:
+      traceGesture("low-level: the listing has no instruction")
+      return true
+    return false
+  lowLevelSelected(r)
+  true
+
+proc lowLevelStep(r: GpuiRenderer; operation: string): bool =
+  ## PLAT-60: a step pressed while the listing has the focus goes by
+  ## instruction when the engine offers it (DAP `granularity`); otherwise
+  ## the ordinary step runs, by line, as the pane's header says.
+  let vm = lowLevelVM()
+  if vm.isNil or gFocusPane != $paneLowLevelCode:
+    return false
+  let request = vm.instructionStepRequest(operation)
+  if not request.offered:
+    return false
+  try:
+    discard gSession.sendRawDapRequest(request.command, request.args)
+    discard gSession.drainEvents()
+  except CatchableError as e:
+    traceGesture("low-level: the step by instruction failed: " & e.msg)
+    return true
+  afterMove(r)
+  true
+
 proc pollCertificateIndicator(r: GpuiRenderer) =
   ## Only whole current answers cross the worker's channel. drawTopBar
   ## replaces the footer's old elements as well as drawing its new label.
@@ -9300,6 +9535,26 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
     copyToClipboard(target.text & "\n", "line " & $target.line)
   of caFind:
     openOmnibar(r)
+  of caLowLevelGoToSourceLine, caLowLevelShowSourceLine,
+     caLowLevelCopyInstruction, caLowLevelCopySourceLocation:
+    # PLAT-60 (K62): an instruction's entry, as the shared listing model
+    # decides it now; the move is this window's own (`lowLevelGoTo`).
+    let vm = lowLevelVM()
+    let index = int(target.index)
+    if vm.isNil or index < 0 or index >= vm.instructions.val.len or
+       vm.instructions.val[index].offset != target.line:
+      traceGesture("low-level: that instruction is no longer listed")
+      return
+    let (_, wanted) = lowLevelMenuActionOf(action)
+    let outcome = vm.runRowMenu(index, wanted, send = false)
+    if outcome.copied.len > 0:
+      copyToClipboard(outcome.copied, "the instruction")
+    if outcome.note.len > 0:
+      traceGesture("low-level: " & outcome.note)
+    if outcome.jumpTo.line > 0:
+      lowLevelGoTo(r, outcome.jumpTo)
+    else:
+      lowLevelSelected(r)
   of caJumpToLine, caRunToCursor, caJumpBackwardToLine:
     try:
       gSession.sourceLineJump(target.path, target.line,
@@ -9901,6 +10156,12 @@ proc focusedRowText(): tuple[text, what: string] =
   if gSession.isNil:
     return ("", "")
   case gFocusPane
+  of $paneLowLevelCode:
+    # PLAT-60: the selected instruction, as Copy Instruction copies it.
+    let vm = gSession.session.lowLevelCodeVM
+    if not vm.isNil and vm.selected.val >= 0:
+      return (vm.runRowMenu(vm.selected.val, llmCopyInstruction).copied,
+              "the instruction")
   of $paneCalltrace:
     let vm = gSession.session.calltraceVM
     if not vm.isNil:
@@ -10182,6 +10443,9 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
     # PLAT-55: and the focused Problems pane's.
     if problemsKey(r, res.operation):
       return
+    # PLAT-60: and the focused Low Level Code listing's.
+    if lowLevelKey(r, res.operation):
+      return
   of "list.copy":
     let (text, what) = focusedRowText()
     if text.len == 0: traceGesture("nothing is selected here to copy")
@@ -10260,6 +10524,11 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
     toggleSearchOption(r, searchOptionOf(res.operation).option)
     drawTopBar(r)
     return
+  of "debugger.step-over", "debugger.step-into", "debugger.reverse-step-over",
+     "debugger.reverse-step-into":
+    # PLAT-60: by instruction from the focused listing, where offered.
+    if lowLevelStep(r, res.operation):
+      return
   else: discard
   let action = clientActionOf(op)
   if action.len > 0 and gpuiMenuAvailability(action).enabled:
@@ -11234,6 +11503,62 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
         windowPointer(r, gekWheel, cx, cy, -float(at(2) * TerminalRowPx))
       else:
         return "unknown terminal event '" & parts[1] & "'"
+    of "lowlevel":
+      # PLAT-60: Low Level Code, aimed from the geometry it was drawn with
+      # (`low_level_code_leaf.lowLevelLayout`).
+      case parts[1]
+      of "show":
+        runWindowOperation(r, EditingResolution(
+          operation: "view.low-level-code"), 0)
+      of "key":
+        gFocusPane = $paneLowLevelCode
+        if not lowLevelKey(r, parts[2]):
+          return "the Low Level Code pane does not take '" & parts[2] & "'"
+      of "caret":
+        # The editor's caret put on a line, as a press on its text puts it.
+        let path = gEditorSurface.path
+        if not debugDocumentFor(path, gEditorSurface.executionLine):
+          return "there is no document in the editor"
+        gDebugDocs[path].moveCaretTo(at(2) - 1, 0)
+        redrawReplayEditor(r)
+        drawLowLevelPane(r)
+      of "choose":
+        let label = parts[2 .. ^1].join(":")
+        if not gCtxMenu.open:
+          return "no menu is open"
+        let i = gCtxMenu.menu.labels.find(label)
+        if i < 0:
+          return "the menu has no '" & label & "'"
+        let chosen = gCtxMenu.choose(i)
+        drawTopBar(r)
+        if chosen.chosen:
+          runContextAction(r, chosen.action, chosen.target)
+      else:
+        let vm = lowLevelVM()
+        let body = lowLevelBody()
+        if vm.isNil or body.w <= 0:
+          return "the Low Level Code pane is not drawn"
+        case parts[1]
+        of "row", "menu":
+          let index = at(2)
+          gLowLevel.revealIndex(vm, body, index)
+          drawLowLevelPane(r)
+          let c = vm.instructionCentre(gLowLevel, body, index)
+          if not c.ok:
+            return "instruction " & $index & " is not listed"
+          if parts[1] == "menu":
+            windowPointer(r, gekContextMenu, c.x, c.y)
+          else:
+            pressAt(c.x, c.y)
+        of "sync":
+          let lay = lowLevelLayout(vm, body)
+          let (x, y) = centreOf(lay.sync)
+          pressAt(x, y)
+        of "wheel":
+          let (cx, cy) = centreOf(body)
+          windowPointer(r, gekWheel, cx, cy, -float(at(2) * LowLevelRowPx))
+        else:
+          return "unknown lowlevel event '" & parts[1] & "'"
     of "problems":
       # PLAT-55: Problems, aimed from the geometry it was drawn with
       # (`problems_leaf.problemsLayout`):

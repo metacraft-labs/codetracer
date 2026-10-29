@@ -100,10 +100,12 @@ suite "PLAT-41 LAW-P1 — the three sets COVER PaneKind":
     # `ErrorsVM`.
     # PLAT-56 moved `paneBuildOutput` into the vocabulary: it draws the
     # window's `BuildVM`.
-    ck card(allPanes()) == 19
+    # PLAT-60 added `paneLowLevelCode`, drawn in the vocabulary from the
+    # session's `LowLevelCodeVM`.
+    ck card(allPanes()) == 20
     # PLAT-58 moved `paneRequests` into the vocabulary: it draws the
     # session's `RequestPanelVM`.
-    ck card(PaneVocabularyPanes) == 17
+    ck card(PaneVocabularyPanes) == 18
     ck card(PaneNativePanes) == 1
     ck card(PaneAcceptedExceptions) == 1
     ck paneFileTree in PaneVocabularyPanes

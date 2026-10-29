@@ -162,7 +162,9 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 122
+  ExpectedAppModules = 123
+    ## 2026-10-29 (PLAT-60): 122 → 123, `views/low_level_code_pane.nim`, the
+    ## Low Level Code pane's painter.
     ## 2026-10-28 (PLAT-58): 121 → 122, `views/requests_pane.nim`, the
     ## Requests pane's painter.
     ## 2026-10-27 (PLAT-55): 120 → 121, `views/problems_pane.nim`, the
@@ -301,7 +303,11 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 349
+  ExpectedStyleLiterals = 359
+    ## 2026-10-29 (PLAT-60): 349 → 359, measured — the Low Level Code pane's
+    ## ten (`views/low_level_code_pane.nim`: the sync toggle on and off, the
+    ## muted, text, error and notice cells, the source line, the line number
+    ## and the debugger's, and the execution pointer).
     ## 2026-10-28 (PLAT-58): 333 → 349, measured — the Requests pane's
     ## sixteen (`views/requests_pane.nim`: the field and its placeholder, the
     ## pickers, the header, the muted and text cells, the refusal, `Handler ›`,
@@ -438,7 +444,8 @@ const
     ## reachability guard's bucket B). They were deleted to bring that ratchet
     ## back under its ceiling, and `views/search.nim` had no other literal, so
     ## it leaves the styled-file count. No painted colour changed.
-  ExpectedStyledFiles = 43
+  ExpectedStyledFiles = 44
+    ## 2026-10-29 (PLAT-60): +1, `views/low_level_code_pane.nim`.
     ## 2026-10-28 (PLAT-58): +1, `views/requests_pane.nim`.
     ## 2026-10-27 (PLAT-55): +1, `views/problems_pane.nim`.
     ## 2026-10-24 (PLAT-53): +1, `views/test_results_pane.nim`.
