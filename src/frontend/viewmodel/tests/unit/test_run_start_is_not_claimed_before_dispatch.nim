@@ -76,6 +76,13 @@ proc readSubject(relative: string): string =
     require fileExists(path)
     result = readFile(path)
 
+const EditorRunTestDef =
+  "isPythonTest = false) =\n  ## THE EDITOR'S RUN-TEST"
+  ## The inline widget's click handler, which is `editor.startEditorTestAt`
+  ## since the context menu's "Re-record and replay this test" shares it
+  ## (Test-Results-Pane.md §9.7) — its DEFINITION, not its forward
+  ## declaration.
+
 suite "a run control does not claim a start it has not been given":
 
   test "`dispatch` hands back its refusal instead of leaving it to be inferred":
@@ -138,7 +145,7 @@ suite "a run control does not claim a start it has not been given":
     ## later settle.
     let source = readSubject("src/frontend/ui/editor.nim")
 
-    let widgetAt = source.find("proc makeTestAction(")
+    let widgetAt = source.find(EditorRunTestDef)
     check widgetAt >= 0
     let nextProc = source.find("\nproc ", widgetAt + 10)
     check nextProc > widgetAt
@@ -157,7 +164,7 @@ suite "a run control does not claim a start it has not been given":
     ## two-minute spinner under a false claim.
     let source = readSubject("src/frontend/ui/editor.nim")
 
-    let widgetAt = source.find("proc makeTestAction(")
+    let widgetAt = source.find(EditorRunTestDef)
     check widgetAt >= 0
     let nextProc = source.find("\nproc ", widgetAt + 10)
     check nextProc > widgetAt
@@ -176,13 +183,13 @@ suite "a run control does not claim a start it has not been given":
     # being asserted is a guard that LEAVES, not a condition that reads
     # the same list.
     let guardAt = body.find(
-      "if spinningTestEditors.find(self) < 0:\n        return", hookAt)
+      "if spinningTestEditors.find(self) < 0:\n      return", hookAt)
     check guardAt >= 0
     check guardAt < claimAt
 
   test "a refused inline click unwinds only its own editor":
     let source = readSubject("src/frontend/ui/editor.nim")
-    let armAt = source.find("proc makeTestAction(")
+    let armAt = source.find(EditorRunTestDef)
     require armAt >= 0
     let refusalAt = source.find("if refusal.len > 0:", armAt)
     require refusalAt >= 0
@@ -194,7 +201,7 @@ suite "a run control does not claim a start it has not been given":
 
   test "refusal clears the new button without restarting the accepted animation":
     let source = readSubject("src/frontend/ui/editor.nim")
-    let armAt = source.find("proc makeTestAction(")
+    let armAt = source.find(EditorRunTestDef)
     require armAt >= 0
     let refusalAt = source.find("if refusal.len > 0:", armAt)
     require refusalAt >= 0

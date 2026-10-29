@@ -24,7 +24,11 @@
 ##   * §5: `ct test run` KILLED MID-WAY (SIGKILL to its process group) settles
 ##     — the pane says the run was ended by a signal and nothing is left
 ##     "running…";
-##   * the terminal QUIT DURING A RUN leaves no `ct test run` behind.
+##   * the terminal QUIT DURING A RUN leaves no `ct test run` behind;
+##   * §9 — a test's tab reused and replaced in place, Ctrl+click in this tab,
+##     hover, a maximized pane; §9.3 from the keyboard: `Ctrl+Enter` on a
+##     selected row opens in this tab, and the palette's **Tests: Run**
+##     records the selected test and opens it in a new tab.
 ##
 ## No mocks: the real binary, a real recording made by the Python recorder, a
 ## real `replay-server`, the real `ct`, `ct-test` and `nargo` on a real crate,
@@ -43,7 +47,7 @@ import ../../app/theme/colour_math
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 38
+const ExpectedAssertions = 42
 
 var countedAssertions = 0
 
@@ -523,6 +527,39 @@ suite "PLAT-53: the Test Results pane on a real terminal":
     ck third != second
     discard sess.waitFor("test_passes #1", 60_000)
     ck sessionTabs(2) == 2
+    # §9.3 FROM THE KEYBOARD. The failing test selected (a press on its
+    # name), then `Ctrl+Enter` (`CSI 13;5u`): its existing recording opens
+    # IN THIS TAB — the setting, a new tab, inverted — the count stays.
+    proc select(sess: var TuiTestSession; test: string) =
+      var s = sess.snap()
+      var (r, _) = s.findRow(test)
+      if r < 0:
+        let (t1, t2) = s.testsTabAt()
+        sess.press(t1, t2)
+        discard sess.waitFor(test)
+        s = sess.snap()
+        r = s.findRow(test)[0]
+      sess.press(r, s.text(r).cellFind(test) + 2)
+      sleep(300)
+    sess.send("\x1b")
+    sess.select("· test_fai")
+    sess.send("\x1b[13;5u")
+    ck sess.opened("in this tab", notFolder = third) == second
+    discard sess.waitFor("test_fails #1", 60_000)
+    ck sessionTabs(2) == 2
+    # The palette's **Tests: Run** on the passing test (its tab was just
+    # taken): recorded afresh and opened in a NEW tab — three tabs.
+    sess.send("\x1b")
+    sess.select("· test_pas")
+    sess.send("\x10")                # Ctrl+P, the palette
+    sleep(400)
+    sess.send(":Tests: Run")
+    sleep(300)
+    sess.send("\r")
+    let fourth = sess.opened("in a new tab", notFolder = second)
+    ck fourth != third
+    discard sess.waitFor("test_passes #1", 60_000)
+    ck sessionTabs(3) == 3
     sess.send("\x11")
     discard sess.waitExit(initDuration(seconds = 20))
     sess.terminate()

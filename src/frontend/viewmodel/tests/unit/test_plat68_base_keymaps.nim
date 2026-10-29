@@ -38,7 +38,9 @@ import std/[strutils, tables, unittest]
 
 import ../../editing_core
 
-const ExpectedAssertions = 1186
+const ExpectedAssertions = 1187
+  ## +1 on 2026-10-28: CUA's `Ctrl+Enter`, `list.activate-redirected`
+  ## (Test-Results-Pane.md §9.3; one `when` assertion per shipped row).
   ## +6 on 2026-10-24 (PLAT-70 Part C): one more vocabulary operation
   ## (`search-selection-whole-word`) in the per-base coverage sweep.
   ## 1178 → 1180 with PLAT-70 Part B's `list.show-detail` rows (CUA

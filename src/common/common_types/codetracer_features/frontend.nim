@@ -343,7 +343,12 @@ type
     # native omniboxes' `replayOpenCommands`. Appended at the end, for the
     # reason every note above gives.
     aTestsOpenInNewTab,           # palette: Tests: Open Recordings in a New Tab
-    aTestsOpenInCurrentTab        # palette: Tests: Open Recordings in the Current Tab
+    aTestsOpenInCurrentTab,       # palette: Tests: Open Recordings in the Current Tab
+    # Test-Results-Pane.md §9.3: the palette pair — the selected test,
+    # recorded and opened at the command's destination. Appended at the end,
+    # for the reason every note above gives.
+    aTestsRun,                    # palette: Tests: Run
+    aTestsRunInCurrentTab         # palette: Tests: Run in Current Tab
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

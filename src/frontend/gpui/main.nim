@@ -6456,8 +6456,14 @@ proc runGpuiViewOperation(r: GpuiRenderer; operation: string) =
                $v.maxLeftCol)
   drawTerminalPane(r)
 
+proc gpuiTestsCommand(r: GpuiRenderer; action: string): bool
+  ## Test-Results-Pane.md §9.3's omnibox commands; defined with the pane's
+  ## host below.
+
 proc runGpuiMenuAction(r: GpuiRenderer; action: string) =
   traceGesture("menu action " & action)
+  if gpuiTestsCommand(r, action):
+    return
   # PLAT-68: the palette's **Preferences: Select Base Keymap** — every open
   # editor re-keyed (text and history kept), and the choice remembered in
   # the preference both native hosts read.
@@ -7592,6 +7598,34 @@ proc attachTests(leafSet: var GpuiLeafSet) =
     if leaf.kind == glkBuiltin and leaf.builtin == paneTestResults:
       leaf.vm = ViewModel(gTestsVM)
 
+proc gpuiTestsCommand(r: GpuiRenderer; action: string): bool =
+  ## Test-Results-Pane.md §9.3 in this window's omnibox: **Tests: Open
+  ## Recordings in …** (the project's `replay-open-in`) and the palette pair
+  ## **Tests: Run** / **Tests: Run in Current Tab** on the selected row.
+  ## Whether `action` was one of them.
+  let openIn = parseReplayOpenCommandTarget(action)
+  let runIn = parseRunTestCommandTarget(action)
+  if not openIn.ok and not runIn.ok:
+    return false
+  if gTestsVM.isNil or gTestsHost.isNil:
+    traceGesture("tests: " & NoRecorderHostText)
+  elif openIn.ok:
+    traceGesture("tests: " & gTestsHost.setReplayOpen(openIn.policy))
+  else:
+    syncTestsTabs()
+    let rows = gTestsVM.rows.val
+    let sel = gTests.selected
+    gTestsVM.selectTest(if sel >= 0 and sel < rows.len: rows[sel].testId
+                        else: "")
+    let why = gTestsVM.runSelectedTestIn(runIn.policy)
+    traceGesture("tests: " & (if why.len > 0: why
+      else: gTestsVM.runTestStartedText(gTestsVM.selectedTestId.val,
+                                        runIn.policy)))
+    armRecordTick()
+  drawTestsPane(r)
+  drawTopBar(r)
+  true
+
 proc pollTestsHost(r: GpuiRenderer): bool =
   ## PLAT-53: a run that ended, settled into the pane (and, for
   ## record-and-open, its recording opened in a new tab).
@@ -7693,7 +7727,7 @@ proc testsKey(r: GpuiRenderer; operation: string): bool =
   of "list.focus-last": gTests.selected = n - 1
   of "list.focus-page-down": gTests.selected = clamp(sel + 10, 0, max(0, n - 1))
   of "list.focus-page-up": gTests.selected = clamp(sel - 10, 0, max(0, n - 1))
-  of "list.activate":
+  of "list.activate", "list.activate-redirected":
     if sel < 0 or sel >= n:
       traceGesture("tests: no test is selected")
       return true
@@ -7701,7 +7735,12 @@ proc testsKey(r: GpuiRenderer; operation: string): bool =
     if gTestsVM.openAbsence(row).len > 0:
       traceGesture("tests: " & gTestsVM.openButtonTitle(row))
     else:
-      gTestsVM.triggerOpen(row)
+      # §9.3: `Ctrl+Enter` is Ctrl on the press — held for this one open.
+      gTestsVM.setRedirectHeld(operation == "list.activate-redirected")
+      try:
+        gTestsVM.triggerOpen(row)
+      finally:
+        gTestsVM.setRedirectHeld(false)
       armRecordTick()
   else:
     return false
@@ -9820,7 +9859,7 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
     return
   of "list.focus-next", "list.focus-previous", "list.focus-first",
      "list.focus-last", "list.focus-page-down", "list.focus-page-up",
-     "list.activate":
+     "list.activate", "list.activate-redirected":
     # PLAT-53: the focused Test Results pane's list (other panes say below
     # that the operation is not theirs here, as before).
     if testsKey(r, res.operation):

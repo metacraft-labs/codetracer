@@ -252,6 +252,11 @@ const
     BaseRow(chords: "Space", operation: "list.toggle-expand", whenText: "treeFocus",
             table: ListTable),
     BaseRow(chords: "Enter", operation: "list.activate", whenText: "listFocus", table: ListTable),
+    # Test-Results-Pane.md §9.3: the open with its destination redirected —
+    # Ctrl on a press, as a key (VS Code's Explorer: Open to the Side). The
+    # web studio's Ctrl+Enter is Run (§3.7).
+    BaseRow(chords: "Ctrl+Enter", operation: "list.activate-redirected",
+            whenText: "listFocus && frontEnd != web", table: ListTable),
     # `!dragActive`: while a layout gesture is live (a drag, a revealed pane)
     # Esc is the gesture's (`layout.cancel-drag` below), whatever pane holds
     # the focus — the focused list must not take it first.
