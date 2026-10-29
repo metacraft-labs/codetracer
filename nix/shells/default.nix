@@ -23,7 +23,10 @@
               # Preserve the configured hook tools before backend compiler inputs.
               inputsFrom = [
                 config.pre-commit.devShell
-                self'.packages.db-backend
+                # A complete backend derivation also contributes its test-only
+                # inputs (including Noir). Hooks need the shared compiler inputs,
+                # not a build of every recorder used by backend runtime tests.
+                (pkgs.mkShell { inherit (nativeBackendEnv) nativeBuildInputs; })
               ];
               shellHook = nativeBackendEnv.shellHook;
             }

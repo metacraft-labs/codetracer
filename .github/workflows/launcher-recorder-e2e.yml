@@ -705,7 +705,7 @@ jobs:
             # isonim-tui is in codetracer's repro.lock since 6850efc5e, but the
             # recorder repos' lock records these edges also resolve do not
             # carry it, so it keeps the SHA shape.
-            isonim=cdeb4aae2cc9f342453873eb696285211c0d6be2
+            isonim=6927da97dfd0ff92b24662d54f6d261528811632
             isonim-tui=1d123c35bd241a4af853b2df6b21c973fba9e6b7
             runquota=f9f1118cd33a27051c6fea683348f343df91e96f
 

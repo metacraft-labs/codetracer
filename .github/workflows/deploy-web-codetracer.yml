@@ -422,9 +422,9 @@ jobs:
             # again 2026-10-27: deploy run 40431335005 failed at "renderer: did
             # not build" -- `isonim_menu_shell_view.nim` calls
             # `firstElementChild`, which isonim 45673bba does not define.
-            isonim=cdeb4aae2cc9f342453873eb696285211c0d6be2
+            isonim=6927da97dfd0ff92b24662d54f6d261528811632
             isonim-tui=1d123c35bd241a4af853b2df6b21c973fba9e6b7
-            isonim-gpui=a07b0bdf1dfe0e87ead2a1f4189b8ab430e09778
+            isonim-gpui=ef99a8a8a342d0dbc32a8ad1cdb11cc4ba63b2f7
             nim-everywhere=2a41b67a6c0d41cbb55359c702f300eb2696682f
             nim-termctl=322fbd406837d3b3b6da7c3b07928079c2a24ce4
             nim-pty=2845abd58dd2073475177301590c8b51aa5c9094
