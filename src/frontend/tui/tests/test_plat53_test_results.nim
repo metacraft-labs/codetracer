@@ -412,6 +412,17 @@ suite "PLAT-53: the terminal's Test Results pane over the real host":
     src.host.stop()
     let stopMs = (getMonoTime() - t0).inMilliseconds
     checkpoint("stop took " & $stopMs & " ms")
+    src.publish(rt)
+    var ended = false
+    for line in rt.app.tests.lines:
+      if line.kind == tlFailure and line.text.contains("ended by signal 15"):
+        ended = true
+    # Attribute missing termination to the signal, before checking its speed
+    # or the group's reaping. Without either stop signal (mutation N7), the
+    # suite can finish naturally or waitForExit can kill the direct child;
+    # neither is the SIGTERM the window should have sent. Which timing or
+    # group check also fails depends on how quickly the real suite finishes.
+    ck ended
     ck stopMs < 1000
     # No process of the group is left (allowing an orphan's reaping).
     var left = true
@@ -421,12 +432,6 @@ suite "PLAT-53: the terminal's Test Results pane over the real host":
         break
       sleep(20)
     ck not left
-    src.publish(rt)
-    var ended = false
-    for line in rt.app.tests.lines:
-      if line.kind == tlFailure and line.text.contains("ended by signal 15"):
-        ended = true
-    ck ended
     # A HOST WITH NO `ct` refuses with a sentence and settles at once.
     let bare = newTestsSource(
       projectRoot = proc(): string = project,
