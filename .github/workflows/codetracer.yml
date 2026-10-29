@@ -5348,7 +5348,7 @@ jobs:
     # images and runs the AppImage inside each), so it needs an in-guest Docker
     # daemon. Every `eph-linux-x64` container now provides one: the runner-image
     # consolidation folded the retired nested golden's capability into the single
-    # `vmh-linux-runner` image (security.nesting + nested KVM + docker/fuse3
+    # `gosti-linux-runner` image (security.nesting + nested KVM + docker/fuse3
     # baked), so nested Docker is no longer a separate class. aws-cli comes from
     # nixpkgs.
     runs-on: [self-hosted, linux, x64]

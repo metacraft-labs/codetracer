@@ -894,7 +894,7 @@ package codeTracer:
       # say "this edge uses that tool", and it is what `nim.c` itself uses for
       # the two sub-tools it knows about: `openssl` on a `-d:ssl` edge, and the
       # backend C compiler (`repro_dsl_stdlib/packages/nim.nim:716,757`).
-      # `vm-harness/repro.nim:112` spells it the same way for `pcre-config`.
+      # gosti's `repro.nim` spells it the same way for `pcre-config`.
       # An unmatched ref is inert — the resolver returns `none` for a name no
       # `uses:` entry declares — so this is a no-op on a tree whose package
       # block does not declare `zstd-dev`.
