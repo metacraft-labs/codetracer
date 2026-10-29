@@ -174,7 +174,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=1029da4a8fb5dbca07ea0ec717c09ca35e6bec02
-            codetracer-trace-format-nim=b69ffcf0ed291f26eabd775e153c70eeba8b0627
+            codetracer-trace-format-nim=62325a3adf0cacd6f0f17ac55775a554f9d17e84
             codetracer-visual-replay
 
       - name: Run MCR DAP flow tests

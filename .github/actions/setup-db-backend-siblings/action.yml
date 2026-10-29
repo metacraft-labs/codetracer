@@ -161,6 +161,6 @@ runs:
         # the `uses:` line.
         siblings: |
           codetracer-trace-format=1029da4a8fb5dbca07ea0ec717c09ca35e6bec02
-          codetracer-trace-format-nim=b69ffcf0ed291f26eabd775e153c70eeba8b0627
+          codetracer-trace-format-nim=62325a3adf0cacd6f0f17ac55775a554f9d17e84
           codetracer-native-recorder=f1b9bf029039b3f21a15f399e000496139127076
           ${{ inputs.extra-siblings }}
