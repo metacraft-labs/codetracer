@@ -2649,6 +2649,7 @@ proc buildSessionViewModels(session: ReplaySession; vms: SessionViewModels;
   # existed (its DAP `initialize` response can beat this assignment), so the
   # reverse-step toolbar buttons reflect the backend's real capability.
   store.setSupportsStepBack(vms.supportsStepBack)
+  store.setSupportsSteppingGranularity(vms.supportsSteppingGranularity)
   vms.collabAdapter = initWebUiCollabAdapter(
     sessionVM.collabCore.localPrincipalId,
     sessionVM.collabCore.localActorId
@@ -2731,8 +2732,17 @@ proc configureSessionMiddleware(session: ReplaySession; withDebugger = true;
     # wrongly disabled on completed DB replays even though the backend
     # supports backward stepping.
     vms.supportsStepBack = supportsStepBack
+    # PLAT-60: whether a step can go by instruction, which the Low Level Code
+    # listing says (`LowLevelCodeVM.steppingText`).
+    var supportsSteppingGranularity = false
+    if not response.isNil and
+       not jsMissing(response["supportsSteppingGranularity"]):
+      supportsSteppingGranularity =
+        response["supportsSteppingGranularity"].to(bool)
+    vms.supportsSteppingGranularity = supportsSteppingGranularity
     if not vms.vm.isNil:
       vms.vm.store.setSupportsStepBack(supportsStepBack)
+      vms.vm.store.setSupportsSteppingGranularity(supportsSteppingGranularity)
   )
 
   # The window's first session says hello to its backend as the window

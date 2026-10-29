@@ -180,6 +180,9 @@ proc ownPaneStore(self: EditorViewComponent): ReplayDataStore =
   let vm = ownPaneVM(self, editorVMInstance, editorVM)
   if vm.isNil: nil else: vm.store
 
+proc stringifyMove(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
+  ## A `ct/complete-move` body as JSON text, for `applyStopLocation`.
+
 proc syncEditorDebuggerPosition(store: ReplayDataStore;
                                 rrTicks: int, path: cstring, line: int;
                                 sourceGeneration: int = 0;
@@ -4411,6 +4414,15 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
     response.location.line,
     response.location.sourceGeneration,
     response.location.sourceDigest)
+  # …and the stop's WHOLE location (`ReplayDataStore.stop`: the function, its
+  # call key, the C-level location), which the Low Level Code view's per-stop
+  # load asks for (`store.asmFunction`). The session middleware's own
+  # `CtCompleteMove` subscription (`ui_js.configureSessionMiddleware`) was its
+  # only writer and is not delivered the move on the desktop, so the view
+  # asked for nothing at any stop (measured by PLAT-60's Electron capture).
+  let stopStore = self.ownPaneStore()
+  if not stopStore.isNil:
+    stopStore.applyStopLocation(parseJson($stringifyMove(response.toJs)))
 
   duration("complete move")
   self.location = response.location

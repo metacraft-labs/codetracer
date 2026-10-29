@@ -77,6 +77,8 @@ type
     supportsStepBack*: bool
       ## The backend's DAP `initialize` capability, kept for a response that
       ## arrives before `vm` exists and applied when it is built.
+    supportsSteppingGranularity*: bool
+      ## PLAT-60: the same, for `supportsSteppingGranularity`.
     testResultsVM*: TestResultsVM
     constraintsVM*: ConstraintsVM
       ## The Test Results and Constraints panes' ViewModels for this tab,

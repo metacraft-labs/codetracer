@@ -138,6 +138,10 @@ type
     recordingHeadRRTicks*: uint64
     recordingHeadLoadingState*: LoadingState
     supportsStepBack*: bool
+    supportsSteppingGranularity*: bool
+      ## PLAT-60. The engine's DAP `supportsSteppingGranularity`: a step can
+      ## be asked for by instruction (`granularity: "instruction"`). What the
+      ## Low Level Code listing's steps do (`LowLevelCodeVM.steppingText`).
 
   ReplayDeploymentMode* = enum
     ## Where a replay session is hosted.

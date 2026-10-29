@@ -5687,6 +5687,12 @@ plat56-capture-electron *args:
 build-tasks-electron *args:
   bash scripts/build-tasks-electron.sh "$@"
 
+# PLAT-60: the desktop's Low Level Code view on the `noir_space_ship`
+# recording — the reference the terminal's and GPUI's panes are measured
+# against (`src/tests/visual/answers/plat60-low-level-code.electron.json`).
+plat60-capture-electron *args:
+  bash scripts/plat60-capture-electron.sh "$@"
+
 # The §30a arm: the two answer producers are independent readers.
 plat35-answer-independence:
   bash ci/test/plat35-answer-independence.sh

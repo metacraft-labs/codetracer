@@ -601,6 +601,24 @@ proc setSupportsStepBack*(store: ReplayDataStore; supports: bool) =
   session.supportsStepBack = supports
   store.session.val = session
 
+proc setSupportsSteppingGranularity*(store: ReplayDataStore; supports: bool) =
+  ## PLAT-60. Record the engine's `supportsSteppingGranularity` capability.
+  var session = store.session.val
+  if session.supportsSteppingGranularity == supports:
+    return
+  session.supportsSteppingGranularity = supports
+  store.session.val = session
+
+proc applyDapCapabilities*(store: ReplayDataStore; capabilities: JsonNode) =
+  ## The capabilities an `initialize` response's body carries that the
+  ## session's panes read: `supportsStepBack` and (PLAT-60)
+  ## `supportsSteppingGranularity`. A field the engine leaves out is false.
+  if capabilities.isNil or capabilities.kind != JObject:
+    return
+  store.setSupportsStepBack(capabilities{"supportsStepBack"}.getBool(false))
+  store.setSupportsSteppingGranularity(
+    capabilities{"supportsSteppingGranularity"}.getBool(false))
+
 proc isLiveSessionMode*(mode: DebugSessionMode): bool =
   mode in {liveMcr, liveMaterialized}
 

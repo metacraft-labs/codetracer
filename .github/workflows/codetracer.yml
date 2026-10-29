@@ -3872,6 +3872,16 @@ jobs:
         # above give; the recipe starts its own Xvfb.
         run: nix develop .#devShells.x86_64-linux.default --command just plat58-capture-electron
 
+      - name: The desktop's Low Level Code view is the reference
+        if: ${{ !cancelled() }}
+        # The desktop column of the Low Level Code pane: the listing of a Noir
+        # recording opened with Alt+1, its execution pointer, its header, an
+        # instruction's right-click menu and a click going to its source line —
+        # read from the REAL Electron app with this checkout's desktop
+        # JavaScript. Here for the reasons the steps above give; the recipe
+        # starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat60-capture-electron
+
       - name: The desktop's Timeline removal, list scrubbers and changed values are the reference
         if: ${{ !cancelled() }}
         # The desktop column of the 2026-10-05 decisions: no Timeline (and a

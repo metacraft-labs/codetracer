@@ -282,6 +282,9 @@ proc newHeadlessDebugSession*(
     let store = sdkSession.session.store
     store.sourceLanguageOf = proc(file: string): string =
       langWireName(toLangFromFilename(file))
+    # The engine's capabilities the panes read (the reverse steps; PLAT-60,
+    # whether a step can go by instruction), from the `initialize` answer.
+    store.applyDapCapabilities(initResp{"body"})
     sdkSession.attach(localFolderTrace(tracePath))
 
     result = HeadlessDebugSession(
