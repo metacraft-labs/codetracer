@@ -468,6 +468,8 @@ suite "the request-span tail":
     # Its rows are the panel's window (`RequestPanelVM.setViewport`); the
     # poll only learns how many requests there are, once.
     let mock = newMockBackendService(autoRespond = true)
+    mock.expect("ct/load-request-spans", %*{"requests": [], "total": 0,
+                                           "open": false})
     let store = createReplayDataStore(mock.toBackendService())
     store.requestRequestSpansSince()
     drain()
@@ -476,6 +478,7 @@ suite "the request-span tail":
     check mock.sent("ct/load-request-spans-since").len == 0
     check mock.sent("ct/load-request-spans").len == 1
     check mock.sent("ct/load-request-spans")[0]["limit"].getInt == 1
+    check store.requestSpans.recordedTotal.val == 0
 
   test "a live session keeps polling":
     let mock = newMockBackendService(autoRespond = true)

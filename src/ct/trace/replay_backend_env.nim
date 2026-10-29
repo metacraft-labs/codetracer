@@ -1,5 +1,5 @@
 ## replay_backend_env — how `ct replay` hands replay options to the native
-## (MCR) replay backend.
+## replay backend, including request following in db-backend.
 ##
 ## NORMATIVE SOURCE: `codetracer-specs/CLI/ct/replay.md`, "Options", and
 ## `codetracer-specs/CLI/ct-mcr/replay-worker.md` ("Replay Mode —
@@ -63,8 +63,12 @@ const
   ThreadSyncOrderEnv* = "CT_THREAD_SYNC_ORDER"
   OsSimulationFlag* = "--os-simulation"
   OsSimulationEnv* = "CT_OS_SIMULATION"
+  FollowRequestSpansFlag* = "--follow-request-spans"
+  FollowRequestSpansEnv* = "CT_FOLLOW_REQUEST_SPANS"
 
   ReplayBackendOptions* = [
+    # Request following is consumed by db-backend; it uses the same inherited
+    # environment chain without enabling live debugger controls.
     ## The value sets are the replay engine's own
     ## (`ct_cli/thread_sync_order.nim` `parseThreadSyncOrder`, and
     ## `parseReplayOsSimMode`).  They are repeated here so that a mistake is
@@ -74,6 +78,8 @@ const
     ReplayBackendOption(flag: OsSimulationFlag, envVar: OsSimulationEnv,
                         values: @["weak-userspace", "strong-userspace",
                                   "strong-kernel"]),
+    ReplayBackendOption(flag: FollowRequestSpansFlag, envVar: FollowRequestSpansEnv,
+                        values: @["1", "0"]),
   ]
 
 proc acceptedValues(opt: ReplayBackendOption): string =

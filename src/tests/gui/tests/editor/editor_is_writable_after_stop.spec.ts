@@ -174,16 +174,9 @@ test.describe("The editor after a debug session is stopped", () => {
     // still the user's own property — a typed character reaching the buffer —
     // and Stop is still the only thing between the two readings.
     //
-    // TWO THINGS REPAIR IT ON THIS ROUTE, and this test pins only that one of
-    // them does. The Debug layout an edit session toggles into does not carry
-    // the editor tab, so the Monaco instance is detached in Debug, and Stop
-    // re-attaches it through `reattachMonacoIfDetached` (`ui/editor.nim`),
-    // which applies `data.ui.readOnly` itself. Measured against `839457a1d`:
-    // with the change guard put back (`readOnlyTransitionAppliesEditability`
-    // returning `flagChanged`), this test stayed GREEN; with the guard put
-    // back AND the re-attach's `monacoEditorSetReadOnly` removed, it went RED
-    // here. The guard on its own is the subject of the headless
-    // `read_only_transition_test.nim`.
+    // The visible source tab survives in both modes. Stop must repair the
+    // staged disagreement without needing a separate editability command;
+    // read_only_transition_test.nim covers the unconditional policy directly.
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 60_000 });
     await ctPage.waitForSelector(".view-line", { timeout: 90_000 });
 

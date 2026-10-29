@@ -32,6 +32,7 @@
  * `PLAT47_DESKTOP_PREFIX`; without it the build's own prefix runs.
  */
 
+import { expect } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -219,7 +220,50 @@ async function captureParity(ctPage: import("playwright").Page, theme: "dark" | 
     const lr = lines ? lines.getBoundingClientRect() : null;
     return r && lr ? { right: r.x + r.width, linesX: lr.x } : null;
   });
+  // The execution mark must be visible in the pixels as well as coloured
+  // correctly in computed style. Its lane excludes the line-number ink.
+  const pointer = await ctPage.evaluate(() => {
+    const mark = document.querySelector(".gutter-highlight-active");
+    const gutter = mark?.closest(".gutter");
+    if (!mark || !gutter) throw new Error("execution pointer gutter is absent");
+    const style = getComputedStyle(mark, "::before");
+    const channels = style.backgroundColor.match(/\d+/g);
+    const rect = gutter.getBoundingClientRect();
+    return {
+      colour: channels ? "#" + channels.slice(0, 3).map((v) => Number(v).toString(16).padStart(2, "0")).join("") : "",
+      mask: style.maskImage,
+      opacity: Number(style.opacity),
+      rect: { x: rect.x, y: rect.y, w: Math.min(12, rect.width), h: rect.height },
+    };
+  });
+  expect(pointer.mask, "the execution pointer uses its SVG mask").not.toBe("none");
+  expect(pointer.opacity, "the execution pointer is visible away from hover").toBeGreaterThan(0);
   const shot = await ctPage.screenshot();
+  const pointerInkPixels = await ctPage.evaluate(async ({ png, rect, ground }) => {
+    const img = new Image();
+    img.src = "data:image/png;base64," + png;
+    await img.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext("2d")!;
+    ctx.drawImage(img, 0, 0);
+    const luminance = (channels: number[]): number => channels
+      .map((v) => v / 255)
+      .map((v) => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
+      .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+    const bg = luminance([1, 3, 5].map((i) => parseInt(ground.slice(i, i + 2), 16)));
+    let count = 0;
+    for (let y = Math.ceil(rect.y); y < Math.floor(rect.y + rect.h); y++) {
+      for (let x = Math.ceil(rect.x); x < Math.floor(rect.x + rect.w); x++) {
+        const pixel = ctx.getImageData(x, y, 1, 1).data;
+        const fg = luminance([pixel[0], pixel[1], pixel[2]]);
+        if ((Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05) >= 3) count++;
+      }
+    }
+    return count;
+  }, { png: shot.toString("base64"), rect: pointer.rect, ground: dom.editor.background });
+  expect(pointerInkPixels, "the execution mark paints contrasting pixels in its own lane").toBeGreaterThan(2);
   let executionLine = "";
   if (dom.onRect && box) {
     executionLine = await pixelAt(ctPage, shot, box.right - 30,
@@ -308,9 +352,33 @@ async function captureParity(ctPage: import("playwright").Page, theme: "dark" | 
     monacoTokens,
     recording: path.basename(recording()),
     ...dom,
-    editor: { ...dom.editor, executionLine, selection },
+    editor: { ...dom.editor, executionLine, executionPointer: pointer.colour, pointerInkPixels, selection },
     focus,
   };
+}
+
+function contrast(foreground: string, background: string): number {
+  const luminance = (hex: string): number => {
+    expect(hex).toMatch(/^#[0-9a-f]{6}$/i);
+    return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+      .map((v) => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
+      .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+  };
+  const a = luminance(foreground), b = luminance(background);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function assertReadable(answers: any): void {
+  for (const background of [answers.editor.background, answers.editor.executionLine]) {
+    for (const key of ["keyword", "string", "comment", "identifier", "delimiter", "lineNumber", "activeLineNumber"]) {
+      expect(contrast(answers.editor[key], background), `${answers.theme} ${key} on ${background}`).toBeGreaterThanOrEqual(4.5);
+    }
+    expect(contrast(answers.editor.executionPointer, background), `${answers.theme} execution pointer on ${background}`).toBeGreaterThanOrEqual(3);
+  }
+  for (const key of ["panel", "unfocusedEdge"]) {
+    expect(contrast(answers.focus.outline, answers.focus[key]), `${answers.theme} focus on ${key}`).toBeGreaterThanOrEqual(3);
+  }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -321,7 +389,9 @@ function writeAnswers(file: string, answers: any): void {
 }
 
 test("PLAT-47: the desktop's editor, focus, files, calltrace and first-run layout", async ({ ctPage }) => {
-  writeAnswers(answersFile, await captureParity(ctPage, "dark"));
+  const answers = await captureParity(ctPage, "dark");
+  assertReadable(answers);
+  writeAnswers(answersFile, answers);
   await ctPage.screenshot({ path: path.join(repoRoot, "test-logs", "plat47-desktop-parity.png") });
 });
 
@@ -343,6 +413,7 @@ test.describe("the light theme", () => {
       const el = document.querySelector(".monaco-editor");
       return el ? Array.from(el.classList).join(" ") : "";
     });
+    assertReadable(answers);
     answers.monacoClasses = monacoTheme;
     if (!/\bvs\b/.test(monacoTheme) || /\bvs-dark\b/.test(monacoTheme)) {
       throw new Error(`PLAT-47: the light launch's Monaco editor is not light: '${monacoTheme}'`);

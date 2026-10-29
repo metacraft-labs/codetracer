@@ -225,6 +225,9 @@ class DaemonConnection:
         socket_path: Path to the daemon's Unix socket.  When *None*, the
             path returned by :func:`default_daemon_socket_path`
             (the one the daemon itself resolves) is used.
+        socket_fd: A connected socket this process inherited from the daemon,
+            used instead of connecting to ``socket_path``.  A script the
+            daemon runs confined is handed its connection this way.
         host_source_reads: Whether the trace sessions this connection opens
             may read a recording's listed sources from the replay host.  The
             daemon keeps one session per trace AND setting, so every request
@@ -237,7 +240,13 @@ class DaemonConnection:
         self,
         socket_path: Optional[Union[str, Path]] = None,
         host_source_reads: bool = False,
+        socket_fd: Optional[int] = None,
     ) -> None:
+        if socket_fd is not None and socket_path is not None:
+            raise ValueError("pass socket_path or socket_fd, not both")
+        # A connection the process inherited (a confined script's, which may
+        # open no socket of its own): it is adopted, not connected.
+        self._socket_fd = socket_fd
         if socket_path is None:
             self._socket_path = default_daemon_socket_path()
         else:
@@ -271,6 +280,18 @@ class DaemonConnection:
             TraceError: If the daemon is not reachable.
         """
         if self._sock is not None:
+            return
+        if self._socket_fd is not None:
+            # Adopt the inherited, already connected socket; ``fileno`` makes
+            # Python read its family and type from the descriptor.
+            try:
+                self._sock = socket.socket(fileno=self._socket_fd)
+            except OSError as e:
+                raise TraceError(
+                    f"Cannot use the daemon connection on descriptor "
+                    f"{self._socket_fd}: {e}"
+                ) from e
+            self._sock.setblocking(True)
             return
         self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:

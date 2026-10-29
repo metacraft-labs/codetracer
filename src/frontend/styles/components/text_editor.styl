@@ -973,7 +973,8 @@
     padding-right: 0.15em
     text-align: right
     white-space: nowrap
-    opacity: 0.5
+    // Keep the measured resting line-number colour at full strength.
+    opacity: 1
     // overflow: hidden
     cursor: default
 //font-weight: bold
@@ -1045,8 +1046,11 @@ line-number-type()
   padding-right: 0 !important
   // color: LINE_NUMBERS_TEXT_COLOR !important
 
+.line-numbers:not(.active-line-number):not(.unified-diff-editor *)
+  color: editor-theme-line-number !important
+
 .on
-  background-color: ON_BG_COLOR
+  background-color: editor-theme-execution-line
   position: relative
   z-index: -2
 
@@ -1112,6 +1116,19 @@ line-number-type()
   50%
     opacity: 1
 
+// The desktop and native execution marks share the theme block's colour.
+// Mask the existing SVG so Light can use legible ink without a second asset.
+editor-execution-pointer()
+  background-color: editor-theme-execution-pointer
+  -webkit-mask-image: HIGHLIGHT_LINE_ARROW
+  mask-image: HIGHLIGHT_LINE_ARROW
+  -webkit-mask-repeat: no-repeat
+  mask-repeat: no-repeat
+  -webkit-mask-position: center
+  mask-position: center
+  -webkit-mask-size: contain
+  mask-size: contain
+
 .gutter-highlight-active:before
   content: ""
   display: block
@@ -1120,10 +1137,9 @@ line-number-type()
   left: var(--ct-gutter-highlight-left)
   width: var(--ct-gutter-highlight-size)
   height: var(--ct-gutter-highlight-size)
-  background-image: HIGHLIGHT_LINE_ARROW
-  background-repeat: no-repeat
-  background-position: center
-  background-size: 0.47em
+  editor-execution-pointer()
+  -webkit-mask-size: 0.47em
+  mask-size: 0.47em
   transform: translate(-40%, -40%)
   z-index: 0
 

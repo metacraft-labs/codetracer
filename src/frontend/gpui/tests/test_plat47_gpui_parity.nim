@@ -223,11 +223,11 @@ suite "PLAT-47: the GPUI window at desktop parity":
       ck k in ["color", "font-weight", "background-color"]
     # B2: a 1px BORDER of the focus colour around the focused pane, the same
     # width — invisible — around every other. PLAT-51 (the user: SUBTLER):
-    # the focus colour is one step down the border ramp from the desktop's
-    # measured outline (ui/border/secondary under ui/border/primary), and the
+    # the focus colour is the subtler ui/border/secondary, compared with the
+    # desktop's ui/border/action outline, and the
     # focused strip's ground; a declared deviation.
     ck desk{"focus"}{"outline"}.getStr ==
-       DesignTokenHex[dtColorsUiBorderPrimary][dmDark]
+       DesignTokenHex[dtColorsUiBorderAction][dmDark]
     ck ("border-color", DesignTokenHex[dtColorsUiBorderSecondary][dmDark]) in
        paneOutlineStyle(true)
     ck ("border-width", desk{"focus"}{"outlineWidth"}.getStr) in

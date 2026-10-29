@@ -332,7 +332,11 @@ suite "PLAT-30: the oracle is PARSED, and the parser is asserted first":
     # never read, and the note column is never read in any category.
     var groupLabels = 0
     var noteTokens = 0
-    for raw in SpecSource.splitLines():
+    # Walked through a `let`, never the `const`: an inline iterator over a
+    # `const` rebuilds the whole literal at every character access on the JS
+    # backend (`ci/test/js-const-iteration-test.sh` says why and refuses it).
+    let specText = SpecSource
+    for raw in specText.splitLines():
       let line = raw.strip()
       if not line.startsWith("| Insertion") and not line.startsWith("| Deletion by unit"):
         continue

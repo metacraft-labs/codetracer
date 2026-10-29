@@ -212,10 +212,6 @@ test.describe("The editor context menu follows the mode", () => {
     await ctPage.keyboard.press("Escape");
 
     // ---- DEBUG -------------------------------------------------------------
-    // Red here until the Debug layout an edit session toggles into carries the
-    // open source tab (Mode-Transitions.md §5). Today it carries none, so
-    // `openEditorMenu` finds no rendered code to right-click. That is a
-    // product defect, recorded on its own, and not a reason to soften this leg.
     await enterDebugMode(ctPage);
 
     await openEditorMenu(ctPage);

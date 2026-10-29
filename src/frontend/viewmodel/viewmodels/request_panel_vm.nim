@@ -917,8 +917,8 @@ proc pollTail*(vm: RequestPanelVM; nowMs: int64): bool =
   ## since the store's cursor, at most once every `RequestSpanPollIntervalMs`
   ## — the desktop's poll timer (`ui/request_panel.startRequestSpanPolling`).
   ## The store applies the desktop's rule: a live session is tailed; a
-  ## completed recording is asked once how many requests it served and is
-  ## then read by window. Whether a poll was due.
+  ## completed recording is read by window. Explicit replay-follow keeps
+  ## that window current through bounded count polls. Whether a poll was due.
   if vm.store.isNil or vm.store.backend.isNil:
     return false
   if vm.lastPollMs >= 0 and nowMs >= vm.lastPollMs and
@@ -1026,8 +1026,8 @@ proc createRequestPanelVM*(store: ReplayDataStore): RequestPanelVM =
       # issue 2026-10-20 "the request panel loads a whole snapshot and
       # filters it on the client"): the rows the view shows plus the 20/10
       # buffers, filtered by the engine (`ct/load-request-spans`), once per
-      # distinct window and filter. A live session keeps its tail
-      # (`requestRequestSpansSince`), which the panel filters itself; an
+      # distinct window, filter and successful follow poll. A live session
+      # keeps its tail (`requestRequestSpansSince`), filtered here; an
       # unmeasured view asks nothing.
       var lastKey = ""
       createEffect proc() =
@@ -1041,7 +1041,7 @@ proc createRequestPanelVM*(store: ReplayDataStore): RequestPanelVM =
         let args = %*{"start": w.start, "limit": w.count,
                       "filters": {"method": m, "statusClass": st,
                                   "urlContains": q}}
-        let key = $args
+        let key = $args & "|" & $store.requestSpans.windowRevision.val
         if key == lastKey:
           return
         lastKey = key

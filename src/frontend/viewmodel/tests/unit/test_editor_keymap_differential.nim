@@ -195,7 +195,11 @@ suite "PLAT-31: the DIFF-4 population, before a single task is compared":
     # counted, which is the same rule `ci/lib/nim-imports.sh` keeps for the
     # closure gates and is kept here for the same reason.
     var code = ""
-    for line in Raw.splitLines():
+    # Walked through a `let`, never the `const`: an inline iterator over a
+    # `const` rebuilds the whole literal at every character access on the JS
+    # backend (`ci/test/js-const-iteration-test.sh` says why and refuses it).
+    let raw = Raw
+    for line in raw.splitLines():
       let text = line.strip()
       if text.startsWith("#"): continue
       code.add line

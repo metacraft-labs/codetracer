@@ -10,6 +10,7 @@ use std::{
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+use futures_util::FutureExt;
 use serde_json::{Value, json};
 #[cfg(unix)]
 use tokio::fs::remove_file;
@@ -88,9 +89,162 @@ fn tag_with_replay_id(mut message: Value, replay_id: usize) -> Value {
 
 /// Write handle for a single connected daemon client, together with its
 /// unique identifier.  Used by the daemon-mode response router.
-struct ClientHandle {
-    /// Channel for sending DAP messages back to this client.
+/// What sends DAP messages to one daemon client: its channel, and the table
+/// that maps the daemon's numbering of the client's requests back to the
+/// client's own.
+///
+/// Every client numbers its requests itself, from 1, so two clients' `seq`
+/// values collide.  The daemon gives each request a `seq` of its own, unique
+/// across clients, before dispatching it (`dispatch_client_message`), routes
+/// the answer by that number, and [`ClientSender::send`] writes the client's
+/// own number back into the answer.  A client cannot reach another client's
+/// answer by reusing its `seq`.
+#[derive(Clone)]
+struct ClientSender {
     tx: UnboundedSender<Value>,
+    seqs: Arc<std::sync::Mutex<HashMap<i64, i64>>>,
+}
+
+impl ClientSender {
+    fn new(tx: UnboundedSender<Value>) -> Self {
+        Self {
+            tx,
+            seqs: Arc::new(std::sync::Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Record that the daemon's request `daemon_seq` is this client's `own_seq`.
+    fn number(&self, daemon_seq: i64, own_seq: i64) {
+        self.seqs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(daemon_seq, own_seq);
+    }
+
+    /// Send `message`; an answer to one of this client's requests carries
+    /// the client's own `seq` again.
+    fn send(&self, mut message: Value) -> Result<(), mpsc::error::SendError<Value>> {
+        if message.get("type").and_then(Value::as_str) == Some("response")
+            && let Some(daemon_seq) = message.get("request_seq").and_then(Value::as_i64)
+            && let Some(own_seq) = self
+                .seqs
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&daemon_seq)
+        {
+            message["request_seq"] = json!(own_seq);
+        }
+        self.tx.send(message)
+    }
+}
+
+/// The first `seq` the daemon gives a client's request: above the Python
+/// bridge's own numbers (`PyBridgeState::next_seq`, from 1,000,000), and
+/// within a 32-bit integer for backends that read `seq` as one.
+const DAEMON_SEQ_BASE: i64 = 2_000_000_000;
+
+struct ClientHandle {
+    /// Sends DAP messages back to this client.
+    sender: ClientSender,
+    /// For the connection a confined script inherits, what it may ask for
+    /// ([`ScriptGrant`]); `None` for a client that connected to the socket.
+    script: Option<ScriptGrant>,
+}
+
+/// What the connection handed to one confined `exec_script` run may ask the
+/// daemon for: the queries of that run's trace, in the session its client
+/// asked for, and nothing else.
+///
+/// The script runs arbitrary Python and may open no socket
+/// (`crate::script_confinement`), so this connection is its only way to the
+/// daemon, and the daemon is not confined: a request that starts a process
+/// (`ct/start-replay` names the program it runs), runs another script, opens
+/// another trace or stops the daemon would let the script act with the
+/// daemon's privileges.  [`ScriptGrant::admit`] refuses every such request.
+#[derive(Debug, Clone)]
+struct ScriptGrant {
+    /// The run's trace, canonicalized.
+    trace_path: PathBuf,
+    /// The host-read setting of the client that asked for the run; every
+    /// admitted request is sent with it, whatever the script wrote.
+    host_source_reads: HostSourceReads,
+}
+
+impl ScriptGrant {
+    /// The commands a script's queries are made of: the Python API's
+    /// (`python-api/codetracer`), each naming the run's trace.
+    fn admits_command(command: &str) -> bool {
+        command == "ct/open-trace" || command == "ct/close-trace" || command.starts_with("ct/py-")
+    }
+
+    /// `message` as it is dispatched (its `hostSourceReads` set to the
+    /// grant's), or why it is refused.
+    fn admit(&self, mut message: Value) -> Result<Value, String> {
+        let is_request = message.get("type").and_then(Value::as_str) == Some("request");
+        let command = message
+            .get("command")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        if !is_request || !Self::admits_command(&command) {
+            return Err(format!(
+                "a script may ask only for queries of its own trace; `{command}` is refused"
+            ));
+        }
+        let Some(arguments) = message.get_mut("arguments").and_then(Value::as_object_mut) else {
+            return Err(format!("`{command}` names no trace"));
+        };
+        let mut named = 0;
+        for key in ["tracePath", "recordTrace"] {
+            if let Some(value) = arguments.get(key).cloned() {
+                let Some(path) = value.as_str() else {
+                    return Err(format!("`{command}`: {key} is not a path"));
+                };
+                if canonical_trace_path(path) != self.trace_path {
+                    return Err(format!(
+                        "a script may query only its own trace; `{command}` names another"
+                    ));
+                }
+                // Dispatched under the granted path itself, not the name the
+                // script wrote: a name is resolved again by everything that
+                // opens it, so a symlink the script swaps after this check
+                // would otherwise open another recording.
+                let granted = self
+                    .trace_path
+                    .to_str()
+                    .ok_or_else(|| format!("`{command}`: the granted trace path is not UTF-8"))?;
+                arguments.insert(key.to_string(), Value::String(granted.to_string()));
+                named += 1;
+            }
+        }
+        if named == 0 {
+            return Err(format!("`{command}` names no trace"));
+        }
+        if arguments.contains_key("tracePath") {
+            arguments.insert(
+                "hostSourceReads".to_string(),
+                Value::Bool(self.host_source_reads.is_allowed()),
+            );
+        }
+        Ok(message)
+    }
+}
+
+/// A trace path as the script grant compares it: canonical when it exists,
+/// as given otherwise.
+fn canonical_trace_path(path: &str) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path))
+}
+
+/// The text of a panic payload, for the log and the client's answer.
+fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(text) = payload.downcast_ref::<&str>() {
+        (*text).to_string()
+    } else if let Some(text) = payload.downcast_ref::<String>() {
+        text.clone()
+    } else {
+        "a panic with no message".to_string()
+    }
 }
 
 /// Shared mutable state that the daemon accept loop and response router need.
@@ -112,6 +266,15 @@ pub struct DaemonState {
     config: DaemonConfig,
     /// State for Python bridge navigation operations (ct/py-navigate).
     py_bridge: PyBridgeState,
+    /// The dispatch loop's inbound channel and the next client id, shared
+    /// with the accept loop, so a connection the daemon makes itself (a
+    /// confined script's, [`ScriptGrant`]) is read like an accepted one.
+    inbound_tx: Option<UnboundedSender<(u64, Value)>>,
+    next_client_id: Arc<std::sync::atomic::AtomicU64>,
+    /// The next `seq` the daemon gives a client's request ([`ClientSender`]).
+    next_daemon_seq: i64,
+    /// The manager itself, for tasks spawned from a handler.
+    self_ref: std::sync::Weak<Mutex<BackendManager>>,
 }
 
 impl Debug for DaemonState {
@@ -183,6 +346,40 @@ pub(crate) fn check_unix_socket_path(path: &std::path::Path) -> Result<(), Socke
 fn bind_unix_listener(path: &std::path::Path) -> Result<UnixListener, Box<dyn Error>> {
     check_unix_socket_path(path)?;
     Ok(UnixListener::bind(path)?)
+}
+
+/// Make the daemon socket at `path` readable and writable by its owner only.
+#[cfg(unix)]
+fn restrict_socket_to_owner(path: &std::path::Path) -> Result<(), Box<dyn Error>> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|e| {
+        format!(
+            "cannot restrict the daemon socket {} to its owner: {e}",
+            path.display()
+        )
+    })?;
+    Ok(())
+}
+
+/// Accept a connection only from a process of the user this process runs
+/// as (its effective user id), by the peer credentials the kernel records
+/// for the socket (`SO_PEERCRED`, `getpeereid`).  The socket's mode is the
+/// first check; this one holds when the mode does not (a socket path in a
+/// shared directory, a mode changed after the bind).
+#[cfg(unix)]
+pub(crate) fn check_peer_is_this_user(socket: &UnixStream) -> Result<(), String> {
+    let cred = socket
+        .peer_cred()
+        .map_err(|e| format!("its peer credentials cannot be read: {e}"))?;
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    let me = unsafe { libc::geteuid() };
+    if cred.uid() != me {
+        return Err(format!(
+            "its peer runs as uid {} and this process as uid {me}",
+            cred.uid()
+        ));
+    }
+    Ok(())
 }
 
 /// `accept`, the replay's connection to the endpoint it was told to connect
@@ -545,12 +742,26 @@ impl BackendManager {
                 session_manager,
                 config,
                 py_bridge: PyBridgeState::new(),
+                inbound_tx: None,
+                next_client_id: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                next_daemon_seq: DAEMON_SEQ_BASE,
+                self_ref: std::sync::Weak::new(),
             }),
         }));
 
         // Channel for the per-client read tasks to forward (client_id, message)
         // tuples into the central dispatch loop.
         let (inbound_tx, mut inbound_rx) = mpsc::unbounded_channel::<(u64, Value)>();
+        let next_client_id = {
+            let mut locked = mgr.lock().await;
+            let ds = locked
+                .daemon_state
+                .as_mut()
+                .expect("a daemon manager has daemon state");
+            ds.inbound_tx = Some(inbound_tx.clone());
+            ds.self_ref = Arc::downgrade(&mgr);
+            ds.next_client_id.clone()
+        };
 
         // Ensure socket directory exists and remove any stale socket file.
         if let Some(parent) = socket_path.parent() {
@@ -559,17 +770,24 @@ impl BackendManager {
         _ = remove_file(&socket_path).await;
 
         let listener = bind_unix_listener(&socket_path)?;
+        // Only this user may connect: the socket is the owner's alone, and
+        // every connection is checked again by its peer's credentials below,
+        // which holds whatever the directory's or the file's mode allows.
+        restrict_socket_to_owner(&socket_path)?;
         info!("Daemon listening on: {}", socket_path.display());
 
         // --- Accept loop: spawns per-client read and write tasks. ---
         let mgr_accept = mgr.clone();
         tokio::spawn(async move {
-            let mut next_client_id: u64 = 0;
             loop {
                 match listener.accept().await {
                     Ok((socket, _addr)) => {
-                        let client_id = next_client_id;
-                        next_client_id += 1;
+                        if let Err(refusal) = check_peer_is_this_user(&socket) {
+                            warn!("Daemon: refused a connection: {refusal}");
+                            continue;
+                        }
+                        let client_id =
+                            next_client_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                         let (read_half, write_half) = tokio::io::split(socket);
 
@@ -580,7 +798,13 @@ impl BackendManager {
                         {
                             let mut locked = mgr_accept.lock().await;
                             if let Some(ds) = locked.daemon_state.as_mut() {
-                                ds.clients.insert(client_id, ClientHandle { tx: client_tx });
+                                ds.clients.insert(
+                                    client_id,
+                                    ClientHandle {
+                                        sender: ClientSender::new(client_tx),
+                                        script: None,
+                                    },
+                                );
                             }
                         }
 
@@ -611,16 +835,7 @@ impl BackendManager {
             while let Some((client_id, message)) = inbound_rx.recv().await {
                 let mut locked = mgr_dispatch.lock().await;
 
-                // Track which client sent this request (if it has a seq number).
-                if let Some(seq) = message.get("seq").and_then(Value::as_i64)
-                    && let Some(ds) = locked.daemon_state.as_mut()
-                {
-                    ds.request_client_map.insert(seq, client_id);
-                }
-
-                if let Err(err) = locked.dispatch_message(message).await {
-                    error!("Daemon: dispatch error for client {client_id}: {err}");
-                }
+                locked.dispatch_client_message(client_id, message).await;
             }
         });
 
@@ -709,6 +924,10 @@ impl BackendManager {
                 session_manager,
                 config,
                 py_bridge: PyBridgeState::new(),
+                inbound_tx: None,
+                next_client_id: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                next_daemon_seq: DAEMON_SEQ_BASE,
+                self_ref: std::sync::Weak::new(),
             }),
         }));
 
@@ -752,7 +971,13 @@ impl BackendManager {
                         {
                             let mut locked = mgr_accept.lock().await;
                             if let Some(ds) = locked.daemon_state.as_mut() {
-                                ds.clients.insert(client_id, ClientHandle { tx: client_tx });
+                                ds.clients.insert(
+                                    client_id,
+                                    ClientHandle {
+                                        sender: ClientSender::new(client_tx),
+                                        script: None,
+                                    },
+                                );
                             }
                         }
 
@@ -1892,7 +2117,7 @@ impl BackendManager {
                     && let Some(client_id) = ds.request_client_map.remove(&request_seq)
                     && let Some(handle) = ds.clients.get(&client_id)
                 {
-                    if let Err(err) = handle.tx.send(msg.clone()) {
+                    if let Err(err) = handle.sender.send(msg.clone()) {
                         error!("Daemon: can't send response to client {client_id}: {err}");
                     }
                     return;
@@ -1911,9 +2136,12 @@ impl BackendManager {
     }
 
     /// Sends `msg` to every connected daemon client.
+    ///
+    /// A confined script's connection is left out: it is answered its own
+    /// requests only, and never sees another session's events or answers.
     fn broadcast_to_clients(ds: &DaemonState, msg: &Value) {
-        for (cid, handle) in &ds.clients {
-            if let Err(err) = handle.tx.send(msg.clone()) {
+        for (cid, handle) in ds.clients.iter().filter(|(_, h)| h.script.is_none()) {
+            if let Err(err) = handle.sender.send(msg.clone()) {
                 error!("Daemon: can't broadcast to client {cid}: {err}");
             }
         }
@@ -2100,12 +2328,164 @@ impl BackendManager {
         }
     }
 
+    /// Dispatch one message from daemon client `client_id`: admitted
+    /// ([`Self::admit_client_message`]), recorded for routing its answer,
+    /// and handled with a panic contained to it.  A handler that panics
+    /// fails its own request (the client is told) and nothing else: without
+    /// the containment the panic ended the dispatch loop, and with it the
+    /// daemon's answers to every client and every trace.
+    async fn dispatch_client_message(&mut self, client_id: u64, message: Value) {
+        // A confined script's connection is admitted only its own
+        // trace's queries; a client no longer registered (a script
+        // run that ended) is not answered at all.
+        let message = match self.admit_client_message(client_id, message) {
+            Ok(message) => message,
+            Err(None) => return,
+            Err(Some(refusal)) => {
+                self.send_to_client(client_id, refusal);
+                return;
+            }
+        };
+        let mut message = message;
+        let command = message
+            .get("command")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+
+        // A request is dispatched under a `seq` of the daemon's, unique
+        // across clients, and its answer routed by it ([`ClientSender`]).
+        let mut seq = message.get("seq").and_then(Value::as_i64);
+        if message.get("type").and_then(Value::as_str) == Some("request")
+            && let Some(own_seq) = seq
+            && let Some(ds) = self.daemon_state.as_mut()
+        {
+            let daemon_seq = ds.next_daemon_seq;
+            ds.next_daemon_seq += 1;
+            if let Some(handle) = ds.clients.get(&client_id) {
+                handle.sender.number(daemon_seq, own_seq);
+            }
+            message["seq"] = json!(daemon_seq);
+            seq = Some(daemon_seq);
+        }
+
+        // Track which client sent this request (if it has a seq number).
+        if let Some(seq) = seq
+            && let Some(ds) = self.daemon_state.as_mut()
+        {
+            ds.request_client_map.insert(seq, client_id);
+        }
+
+        let outcome = std::panic::AssertUnwindSafe(self.dispatch_message(message))
+            .catch_unwind()
+            .await;
+        match outcome {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                error!("Daemon: dispatch error for client {client_id}: {err}");
+            }
+            Err(payload) => {
+                let text = panic_text(payload.as_ref());
+                error!("Daemon: handling `{command}` for client {client_id} panicked: {text}");
+                if let Some(seq) = seq {
+                    self.send_to_client(
+                        client_id,
+                        json!({
+                            "type": "response",
+                            "request_seq": seq,
+                            "success": false,
+                            "command": command,
+                            "message": format!(
+                                "the session manager failed handling `{command}`: {text}"
+                            ),
+                        }),
+                    );
+                }
+            }
+        }
+    }
+
+    /// What the dispatch loop does with `message` from `client_id`:
+    /// `Ok` to dispatch it (as [`ScriptGrant::admit`] rewrote it, for a
+    /// confined script's connection), `Err(Some(answer))` to answer it with
+    /// a refusal, `Err(None)` to drop it (its client is no longer registered:
+    /// a script whose run ended, or a client that disconnected).
+    fn admit_client_message(&self, client_id: u64, message: Value) -> Result<Value, Option<Value>> {
+        let Some(ds) = self.daemon_state.as_ref() else {
+            return Ok(message);
+        };
+        let Some(handle) = ds.clients.get(&client_id) else {
+            return Err(None);
+        };
+        let Some(grant) = &handle.script else {
+            return Ok(message);
+        };
+        let seq = message.get("seq").cloned().unwrap_or(Value::Null);
+        let command = message.get("command").cloned().unwrap_or(Value::Null);
+        grant.admit(message).map_err(|refusal| {
+            warn!("Daemon: refused a script's request: {refusal}");
+            Some(json!({
+                "type": "response",
+                "request_seq": seq,
+                "success": false,
+                "command": command,
+                "message": refusal,
+            }))
+        })
+    }
+
+    /// Register the connection a confined script inherits: a socket pair
+    /// whose daemon end is read and answered like an accepted client, under
+    /// `grant`.  Returns the client id (to revoke it when the run ends) and
+    /// the script's end.
+    #[cfg(unix)]
+    fn register_script_client(
+        &mut self,
+        grant: ScriptGrant,
+    ) -> Result<(u64, std::os::fd::OwnedFd), String> {
+        let ds = self
+            .daemon_state
+            .as_mut()
+            .ok_or("a confined script needs the session manager's daemon mode")?;
+        let mgr = ds
+            .self_ref
+            .upgrade()
+            .ok_or("the session manager is shutting down")?;
+        let inbound_tx = ds
+            .inbound_tx
+            .clone()
+            .ok_or("the session manager is shutting down")?;
+        let (daemon_end, script_end) = std::os::unix::net::UnixStream::pair()
+            .map_err(|e| format!("cannot create the script's connection: {e}"))?;
+        daemon_end
+            .set_nonblocking(true)
+            .map_err(|e| format!("cannot set up the script's connection: {e}"))?;
+        let daemon_end = UnixStream::from_std(daemon_end)
+            .map_err(|e| format!("cannot set up the script's connection: {e}"))?;
+        let client_id = ds
+            .next_client_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let (client_tx, client_rx) = mpsc::unbounded_channel::<Value>();
+        ds.clients.insert(
+            client_id,
+            ClientHandle {
+                sender: ClientSender::new(client_tx),
+                script: Some(grant),
+            },
+        );
+        let (read_half, write_half) = tokio::io::split(daemon_end);
+        Self::spawn_client_writer(client_id, write_half, client_rx);
+        Self::spawn_client_reader(client_id, read_half, inbound_tx, mgr);
+        info!("Daemon: client {client_id} is a confined script's connection");
+        Ok((client_id, std::os::fd::OwnedFd::from(script_end)))
+    }
+
     /// In daemon mode, sends a message directly to a specific client
     /// (bypassing the manager_sender channel).
     fn send_to_client(&self, client_id: u64, message: Value) {
         if let Some(ds) = &self.daemon_state {
             if let Some(handle) = ds.clients.get(&client_id) {
-                if let Err(err) = handle.tx.send(message) {
+                if let Err(err) = handle.sender.send(message) {
                     error!("Daemon: can't send to client {client_id}: {err}");
                 }
             } else {
@@ -2515,6 +2895,11 @@ impl BackendManager {
                 let seq = msg.get("seq").and_then(Value::as_i64).unwrap_or(0);
 
                 match req_type {
+                    // A handler that panics, for the test of the dispatch
+                    // loop's containment (`a_panicking_handler_fails_its_own_request_only`);
+                    // compiled into test builds only.
+                    #[cfg(test)]
+                    "ct/test-panic" => panic!("a test handler panicked"),
                     "ct/start-replay" => {
                         if let Some(Value::Array(arr)) = args
                             && let Some(Value::String(command)) = arr.first()
@@ -6882,7 +7267,7 @@ impl BackendManager {
     ///
     /// The response body contains `stdout`, `stderr`, `exitCode`, and
     /// `timedOut` fields.
-    fn handle_exec_script(&self, seq: i64, args: Option<&Value>) -> Result<(), Box<dyn Error>> {
+    fn handle_exec_script(&mut self, seq: i64, args: Option<&Value>) -> Result<(), Box<dyn Error>> {
         // --- Extract trace path ---
         let trace_path_str = match args
             .and_then(|a| a.get("tracePath"))
@@ -6918,11 +7303,30 @@ impl BackendManager {
             }
         };
 
-        // --- Extract optional timeout ---
-        let timeout_secs = args
-            .and_then(|a| a.get("timeout"))
-            .and_then(Value::as_u64)
-            .unwrap_or(script_executor::DEFAULT_TIMEOUT_SECS);
+        // --- Extract optional timeout: 1 s to the ceiling, else refused ---
+        let timeout_secs = match args.and_then(|a| a.get("timeout")) {
+            None | Some(Value::Null) => script_executor::DEFAULT_TIMEOUT_SECS,
+            Some(value) => match value
+                .as_u64()
+                .ok_or_else(|| format!("timeout {value} is not a whole number of seconds"))
+                .and_then(script_executor::check_timeout)
+            {
+                Ok(secs) => secs,
+                Err(message) => {
+                    self.send_response_for_seq(
+                        seq,
+                        json!({
+                            "type": "response",
+                            "request_seq": seq,
+                            "success": false,
+                            "command": "ct/exec-script",
+                            "message": message,
+                        }),
+                    );
+                    return Ok(());
+                }
+            },
+        };
 
         // --- The host-read setting the script's trace session uses ---
         //
@@ -6998,9 +7402,119 @@ impl BackendManager {
             }
         };
 
+        // --- Confined unless its client opted out ---
+        //
+        // `unconfinedScripts: true` is sent only by a client started with the
+        // explicit opt-in (`trace mcp --allow-unconfined-scripts`, or the `ct
+        // trace` command line, which runs the user's own script).  Without
+        // it the script runs confined, and where confinement is not
+        // available it does not run at all.
+        let unconfined = args
+            .and_then(|a| a.get("unconfinedScripts"))
+            .and_then(Value::as_bool)
+            == Some(true);
+        let refuse = |this: &Self, message: String| {
+            this.send_response_for_seq(
+                seq,
+                json!({
+                    "type": "response",
+                    "request_seq": seq,
+                    "success": false,
+                    "command": "ct/exec-script",
+                    "message": message,
+                }),
+            );
+        };
+        #[cfg_attr(not(unix), allow(unused_mut))]
+        let mut confined_run: Option<(u64, PathBuf)> = None;
+        let isolation = if unconfined {
+            script_executor::ScriptIsolation::Unconfined {
+                socket_path: socket_path.clone(),
+            }
+        } else {
+            #[cfg(unix)]
+            {
+                let prepared = crate::script_confinement::probe()
+                    .and_then(|()| {
+                        let parent = CODETRACER_PATHS
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .tmp_path
+                            .join("script-scratch");
+                        crate::script_confinement::make_scratch(&parent)
+                    })
+                    .and_then(|scratch| {
+                        // The rule is bound to the directory's descriptor;
+                        // the path is kept to run in and to remove it.
+                        match crate::script_confinement::Confinement::prepare(&scratch) {
+                            Ok(confinement) => Ok((scratch.path, confinement)),
+                            Err(e) => {
+                                crate::script_confinement::remove_scratch(&scratch.path);
+                                Err(e)
+                            }
+                        }
+                    });
+                let (scratch, confinement) = match prepared {
+                    Ok(prepared) => prepared,
+                    Err(reason) => {
+                        refuse(
+                            self,
+                            format!(
+                                "exec_script runs scripts confined, and confinement is not \
+                                 available here: {reason}. A server started with \
+                                 --allow-unconfined-scripts runs scripts with its own \
+                                 privileges instead"
+                            ),
+                        );
+                        return Ok(());
+                    }
+                };
+                let grant = ScriptGrant {
+                    trace_path: canonical_trace_path(&trace_path_str),
+                    host_source_reads,
+                };
+                let (client_id, daemon) = match self.register_script_client(grant) {
+                    Ok(registered) => registered,
+                    Err(reason) => {
+                        crate::script_confinement::remove_scratch(&scratch);
+                        refuse(
+                            self,
+                            format!("exec_script cannot run a confined script: {reason}"),
+                        );
+                        return Ok(());
+                    }
+                };
+                confined_run = Some((client_id, scratch.clone()));
+                script_executor::ScriptIsolation::Confined {
+                    confinement,
+                    scratch,
+                    daemon,
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                refuse(
+                    self,
+                    format!(
+                        "exec_script runs scripts confined, and confinement is not available \
+                         here: {}. A server started with --allow-unconfined-scripts runs \
+                         scripts with its own privileges instead",
+                        crate::script_confinement::probe().unwrap_err()
+                    ),
+                );
+                return Ok(());
+            }
+        };
+        let manager = self
+            .daemon_state
+            .as_ref()
+            .map(|ds| ds.self_ref.clone())
+            .unwrap_or_default();
+
         info!(
             "Executing script for trace={trace_path_str}, timeout={timeout_secs}s, \
-             socket={socket_path}, python_api={python_api:?}"
+             socket={socket_path}, confined={}, python_api={python_api:?}",
+            !unconfined
         );
 
         // --- Clone the response sender so the spawned task can send the
@@ -7009,15 +7523,15 @@ impl BackendManager {
         // In daemon mode we clone the client's `UnboundedSender<Value>`.
         // In legacy (single-client) mode we clone the `manager_sender`.
         let client_id = self.lookup_client_for_seq(seq);
-        let response_tx: Option<UnboundedSender<Value>> = if self.daemon_state.is_some() {
+        let response_tx: Option<ClientSender> = if self.daemon_state.is_some() {
             client_id.and_then(|cid| {
                 self.daemon_state
                     .as_ref()
                     .and_then(|ds| ds.clients.get(&cid))
-                    .map(|handle| handle.tx.clone())
+                    .map(|handle| handle.sender.clone())
             })
         } else {
-            self.manager_sender.clone()
+            self.manager_sender.clone().map(ClientSender::new)
         };
 
         // --- Spawn a detached task that runs the script and sends the
@@ -7036,17 +7550,26 @@ impl BackendManager {
                 }
             };
 
-            match script_executor::execute_script(
+            let outcome = script_executor::execute_script(
                 &script,
                 &trace_path_str,
-                &socket_path,
+                isolation,
                 &python_api,
                 timeout_secs,
                 session_id.as_deref(),
                 host_source_reads,
             )
-            .await
-            {
+            .await;
+            // The run is over: its connection's grant is revoked (a process
+            // it left behind holding the connection is answered nothing more)
+            // and its scratch directory removed.
+            if let Some((client_id, scratch)) = confined_run {
+                if let Some(manager) = manager.upgrade() {
+                    Self::remove_client(&manager, client_id).await;
+                }
+                crate::script_confinement::remove_scratch(&scratch);
+            }
+            match outcome {
                 Ok(result) => {
                     let response = json!({
                         "type": "response",
@@ -7058,6 +7581,7 @@ impl BackendManager {
                             "stderr": result.stderr,
                             "exitCode": result.exit_code,
                             "timedOut": result.timed_out,
+                            "outputLimitExceeded": result.output_limit_exceeded,
                         }
                     });
                     send_response(response);
@@ -7319,12 +7843,22 @@ mod py_run_tracepoints_answer_tests {
             manager_receiver: None,
             manager_sender: None,
             daemon_state: Some(DaemonState {
-                clients: HashMap::from([(CLIENT, ClientHandle { tx })]),
+                clients: HashMap::from([(
+                    CLIENT,
+                    ClientHandle {
+                        sender: crate::backend_manager::ClientSender::new(tx),
+                        script: None,
+                    },
+                )]),
                 request_client_map: HashMap::new(),
                 shutdown_tx: None,
                 session_manager,
                 config: DaemonConfig::default(),
                 py_bridge,
+                inbound_tx: None,
+                next_client_id: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                next_daemon_seq: crate::backend_manager::DAEMON_SEQ_BASE,
+                self_ref: std::sync::Weak::new(),
             }),
         };
         (manager, rx)
@@ -7436,5 +7970,248 @@ mod py_run_tracepoints_answer_tests {
         assert_eq!(sent[0]["success"], json!(true));
         assert_eq!(sent[0]["body"]["results"], json!([]));
         assert!(nothing_pending(&manager), "the answer must be consumed");
+    }
+}
+
+/// The daemon's dispatch step: a panic is contained to its own request, and
+/// a confined script's connection is admitted only its own trace's queries.
+/// Driven through [`BackendManager::dispatch_client_message`], the step the
+/// dispatch loop runs for every message, on a daemon-mode manager with no
+/// backend (none of these requests reaches one).
+#[cfg(test)]
+mod dispatch_step_tests {
+    use super::*;
+
+    fn daemon(
+        clients: Vec<(u64, Option<ScriptGrant>)>,
+    ) -> (BackendManager, Vec<UnboundedReceiver<Value>>) {
+        let (session_manager, _expiries) = SessionManager::new(Duration::from_secs(60), 4);
+        let (shutdown_tx, _shutdown_rx) = mpsc::unbounded_channel();
+        let mut map = HashMap::new();
+        let mut receivers = Vec::new();
+        for (id, script) in clients {
+            let (tx, rx) = mpsc::unbounded_channel();
+            map.insert(
+                id,
+                ClientHandle {
+                    sender: ClientSender::new(tx),
+                    script,
+                },
+            );
+            receivers.push(rx);
+        }
+        let manager = BackendManager {
+            children: vec![],
+            children_receivers: vec![],
+            parent_senders: vec![],
+            selected: 0,
+            manager_receiver: None,
+            manager_sender: None,
+            daemon_state: Some(DaemonState {
+                clients: map,
+                request_client_map: HashMap::new(),
+                shutdown_tx: Some(shutdown_tx),
+                session_manager,
+                config: DaemonConfig::default(),
+                py_bridge: PyBridgeState::new(),
+                inbound_tx: None,
+                next_client_id: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                next_daemon_seq: DAEMON_SEQ_BASE,
+                self_ref: std::sync::Weak::new(),
+            }),
+        };
+        (manager, receivers)
+    }
+
+    fn request(command: &str, seq: i64, arguments: Value) -> Value {
+        json!({"type": "request", "command": command, "seq": seq, "arguments": arguments})
+    }
+
+    fn drain(rx: &mut UnboundedReceiver<Value>) -> Vec<Value> {
+        let mut out = Vec::new();
+        while let Ok(message) = rx.try_recv() {
+            out.push(message);
+        }
+        out
+    }
+
+    #[tokio::test]
+    async fn a_panicking_handler_fails_its_own_request_only() {
+        let (mut manager, mut rx) = daemon(vec![(7, None), (8, None)]);
+        manager
+            .dispatch_client_message(7, request("ct/test-panic", 11, json!({})))
+            .await;
+        let answers = drain(&mut rx[0]);
+        assert_eq!(answers.len(), 1, "{answers:?}");
+        assert_eq!(answers[0]["request_seq"], json!(11));
+        assert_eq!(answers[0]["success"], json!(false));
+        assert!(
+            answers[0]["message"]
+                .as_str()
+                .unwrap()
+                .contains("failed handling `ct/test-panic`: a test handler panicked"),
+            "{answers:?}"
+        );
+        // The same manager answers the next request, from either client.
+        for (client, seq) in [(7u64, 12i64), (8, 13)] {
+            manager
+                .dispatch_client_message(client, request("ct/ping", seq, json!({})))
+                .await;
+            let answers = drain(&mut rx[client as usize - 7]);
+            assert_eq!(answers.len(), 1, "{answers:?}");
+            assert_eq!(answers[0]["success"], json!(true), "{answers:?}");
+            assert_eq!(answers[0]["body"]["pong"], json!(true));
+        }
+    }
+
+    /// Two clients number their requests alike; each answer reaches the
+    /// client that sent the request, with that client's own number, and no
+    /// other client.  Before the daemon numbered requests itself, the second
+    /// client's `seq` took the first one's route.
+    #[tokio::test]
+    async fn two_clients_with_the_same_seq_each_get_their_own_answer() {
+        let (mut manager, mut rx) = daemon(vec![(1, None), (2, None)]);
+        // A request with no backend to answer it: it stays pending, as one
+        // a backend answers later does.
+        for client in [1u64, 2] {
+            manager
+                .dispatch_client_message(client, request("next", 5, json!({"threadId": 1})))
+                .await;
+        }
+        let map = &manager.daemon_state.as_ref().unwrap().request_client_map;
+        assert_eq!(map.get(&DAEMON_SEQ_BASE), Some(&1));
+        assert_eq!(map.get(&(DAEMON_SEQ_BASE + 1)), Some(&2));
+        // The backend's answers, in the daemon's numbering, reversed.
+        for (daemon_seq, marker) in [(DAEMON_SEQ_BASE + 1, "two"), (DAEMON_SEQ_BASE, "one")] {
+            manager.route_daemon_message(
+                Some(0),
+                &json!({"type": "response", "request_seq": daemon_seq, "success": true,
+                        "command": "next", "body": {"for": marker}}),
+            );
+        }
+        for (index, marker) in [(0usize, "one"), (1, "two")] {
+            let answers = drain(&mut rx[index]);
+            assert_eq!(answers.len(), 1, "client {}: {answers:?}", index + 1);
+            assert_eq!(answers[0]["request_seq"], json!(5));
+            assert_eq!(answers[0]["body"]["for"], json!(marker));
+        }
+    }
+
+    #[tokio::test]
+    async fn a_script_connection_is_admitted_only_its_own_traces_queries() {
+        let dir = tempfile::tempdir().unwrap();
+        let own = dir.path().join("own");
+        let other = dir.path().join("other");
+        std::fs::create_dir_all(&own).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        let grant = ScriptGrant {
+            trace_path: canonical_trace_path(own.to_str().unwrap()),
+            host_source_reads: HostSourceReads::Refused,
+        };
+        let (mut manager, mut rx) = daemon(vec![(1, Some(grant.clone())), (2, None)]);
+        let own_path = own.to_str().unwrap();
+        let refused = [
+            request("ct/start-replay", 1, json!(["/bin/sh", "-c", "true"])),
+            request(
+                "ct/exec-script",
+                2,
+                json!({"tracePath": own_path, "script": "pass"}),
+            ),
+            request("ct/daemon-shutdown", 3, json!({})),
+            request(
+                "ct/py-locals",
+                4,
+                json!({"tracePath": other.to_str().unwrap()}),
+            ),
+            request("ct/py-locals", 5, json!({})),
+            request(
+                "ct/py-memory-diff-record-vs-replay",
+                6,
+                json!({"recordTrace": other.to_str().unwrap()}),
+            ),
+            request("next", 7, json!({"threadId": 1})),
+            json!({"type": "event", "event": "stopped"}),
+        ];
+        for message in refused {
+            let answer = manager.admit_client_message(1, message.clone());
+            assert!(
+                matches!(answer, Err(Some(_))),
+                "admitted {message}: {answer:?}"
+            );
+            manager.dispatch_client_message(1, message).await;
+        }
+        let answers = drain(&mut rx[0]);
+        assert_eq!(answers.len(), 8, "{answers:?}");
+        assert!(
+            answers.iter().all(|a| a["success"] == json!(false)),
+            "{answers:?}"
+        );
+        assert!(
+            manager.daemon_state.as_ref().unwrap().shutdown_tx.is_some(),
+            "the refused shutdown must not reach the handler"
+        );
+        // Its own trace's query is admitted, with the grant's host-read
+        // setting whatever the script wrote; the same path through a
+        // symlink-free spelling with `..` names the same trace.
+        let spelled = format!("{}/../own", own_path);
+        let admitted = manager
+            .admit_client_message(
+                1,
+                request(
+                    "ct/py-locals",
+                    9,
+                    json!({"tracePath": spelled, "hostSourceReads": true}),
+                ),
+            )
+            .expect("its own trace");
+        assert_eq!(admitted["arguments"]["hostSourceReads"], json!(false));
+        // It is dispatched under the granted path, not the name the script
+        // wrote: a symlink to its trace, which the script could repoint
+        // after the check, is replaced by what it resolved to.
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&own, &link).unwrap();
+        let admitted = manager
+            .admit_client_message(
+                1,
+                request(
+                    "ct/open-trace",
+                    11,
+                    json!({"tracePath": link.to_str().unwrap()}),
+                ),
+            )
+            .expect("a symlink to its own trace");
+        assert_eq!(
+            admitted["arguments"]["tracePath"],
+            json!(std::fs::canonicalize(&own).unwrap().to_str().unwrap())
+        );
+        let admitted = manager
+            .admit_client_message(
+                1,
+                request(
+                    "ct/py-memory-diff-record-vs-replay",
+                    12,
+                    json!({"recordTrace": link.to_str().unwrap()}),
+                ),
+            )
+            .expect("recordTrace through a symlink");
+        assert_eq!(
+            admitted["arguments"]["recordTrace"],
+            json!(std::fs::canonicalize(&own).unwrap().to_str().unwrap())
+        );
+        // A client that connected to the socket is not restricted.
+        let plain = request("ct/daemon-status", 10, json!({}));
+        assert_eq!(
+            manager.admit_client_message(2, plain.clone()).unwrap(),
+            plain
+        );
+        // A client no longer registered (a run that ended) is dropped.
+        assert!(matches!(manager.admit_client_message(3, plain), Err(None)));
+        // Broadcasts skip the script's connection.
+        BackendManager::broadcast_to_clients(
+            manager.daemon_state.as_ref().unwrap(),
+            &json!({"type": "event", "event": "output"}),
+        );
+        assert!(drain(&mut rx[0]).is_empty());
+        assert_eq!(drain(&mut rx[1]).len(), 1);
     }
 }

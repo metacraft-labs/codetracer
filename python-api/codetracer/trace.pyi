@@ -20,6 +20,8 @@ def open_trace(
     path: Union[str, Path],
     *,
     daemon_socket: Optional[Union[str, Path]] = ...,
+    host_source_reads: bool = ...,
+    daemon_fd: Optional[int] = ...,
 ) -> Trace:
     """Open a recorded trace for inspection."""
     ...

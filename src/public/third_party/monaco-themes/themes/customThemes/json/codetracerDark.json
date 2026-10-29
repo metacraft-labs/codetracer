@@ -7,15 +7,15 @@
       "token": ""
     },
     {
-      "foreground": "78A96C",
+      "foreground": "94bb8a",
       "token": "comment"
     },
     {
-      "foreground": "86B77A",
+      "foreground": "8fbd84",
       "token": "comment.doc"
     },
     {
-      "foreground": "6FB6D9",
+      "foreground": "76b9db",
       "token": "comment.tag"
     },
     {
@@ -27,7 +27,7 @@
       "token": "variable.name"
     },
     {
-      "foreground": "B38BC8",
+      "foreground": "c5a6d5",
       "token": "variable.readOnly"
     },
     {
@@ -47,7 +47,7 @@
       "token": "variable.language"
     },
     {
-      "foreground": "5A9DD4",
+      "foreground": "84b6df",
       "token": "keyword"
     },
     {
@@ -71,7 +71,7 @@
       "token": "type.identifier"
     },
     {
-      "foreground": "D6A38D",
+      "foreground": "d7a690",
       "token": "string"
     },
     {
@@ -127,19 +127,19 @@
       "token": "support.function"
     },
     {
-      "foreground": "7AA2D6",
+      "foreground": "93b3de",
       "token": "constant"
     },
     {
-      "foreground": "C586C0",
+      "foreground": "d2a1ce",
       "token": "namespace"
     },
     {
-      "foreground": "D47E7E",
+      "foreground": "e0a1a1",
       "token": "regexp"
     },
     {
-      "foreground": "FF7B72",
+      "foreground": "ff928a",
       "token": "namespace.std"
     },
     {
@@ -151,7 +151,7 @@
       "token": "namespace.library"
     },
     {
-      "foreground": "8B949E",
+      "foreground": "abb2b9",
       "token": "namespace.except"
     },
     {
@@ -159,7 +159,7 @@
       "token": "metatag"
     },
     {
-      "foreground": "66A7DD",
+      "foreground": "81b7e3",
       "token": "tag"
     },
     {
@@ -167,14 +167,14 @@
       "token": "attribute.name"
     },
     {
-      "foreground": "D6A38D",
+      "foreground": "d7a690",
       "token": "attribute.value"
     }
   ],
   "semanticHighlighting": true,
   "semanticTokenColors": {
-    "macro": "#E78A4E",
-    "macro.declaration": "#E78A4E",
+    "macro": "#eba06f",
+    "macro.declaration": "#eba06f",
     "function": "#D7C98A",
     "function.declaration": "#D7C98A",
     "method": "#D7C98A",
@@ -187,11 +187,11 @@
     "typeParameter": "#9CDCFE",
     "parameter": "#D9E2D4",
     "variable": "#CDD3DE",
-    "variable.readonly": "#B38BC8",
+    "variable.readonly": "#c5a6d5",
     "property": "#9CDCFE",
-    "enumMember": "#7AA2D6",
-    "namespace": "#C586C0",
-    "decorator": "#E78A4E",
+    "enumMember": "#93b3de",
+    "namespace": "#d2a1ce",
+    "decorator": "#eba06f",
     "label": "#CDD3DE",
     "operator": "#C7D0DA"
   },
@@ -202,21 +202,20 @@
     "editorBracketHighlight.foreground4": "#EAB308",
     "editorBracketHighlight.foreground5": "#8B5CF6",
     "editorBracketHighlight.foreground6": "#3B82F6",
-    "editor.foreground": "#CDD6DF",
+    "editor.foreground": "#f3f3f3",
     "editor.background": "#2c2c2c",
     "editor.selectionBackground": "#3a3a3ab3",
-    "editor.lineHighlightBackground": "#3A3A3AB3",
+    "editor.lineHighlightBackground": "#404040",
     "editorWhitespace.foreground": "#65737e",
     "editorIndentGuide.background": "#65737F",
     "editorIndentGuide.activeBackground": "#FBC95A",
     "editorSuggestWidget.foreground": "#8e8f92",
     "editorSuggestWidget.background": "#2c2c2c",
-    "editorLineNumber": "#646464",
     "activeLineNumber": "#CDD6DF",
     "selection": "#2A4B73",
     "inactiveSelection": "#253F60",
     "selectionHighlight": "#2A4B73",
-    "lineHighlight": "#3A3A3A",
+    "lineHighlight": "#404040",
     "bracketMatch.background": "#2A2D31",
     "bracketMatch.border": "#4DA6D8",
     "editorWhitespace": "#3B3F45",
@@ -241,14 +240,16 @@
     "diffEditor.unchangedCodeBackground": "#28282800",
     "minimapSlider.background": "#A6AEFF40",
     "minimapSlider.hoverBackground": "#A6AEFF59",
-    "minimapSlider.activeBackground": "#A6AEFF73"
+    "minimapSlider.activeBackground": "#A6AEFF73",
+    "editorLineNumber.foreground": "#b0b0b0"
   },
   "codetracer": {
-    "$comment": "PLAT-47. The colours the desktop paints AROUND Monaco, as the eye sees them, so the terminal's editor (generated from this file by scripts/tokens-to-styl.sh --editor-theme) equals the desktop's. The desktop renders Monaco's own surface transparent over its pane (components/text_editor.styl), so the ground is the pane surface token; a resting line number is Monaco's line-number colour at the stylesheet's 50% opacity over that ground; the execution line is the stop decoration (`.on`) under Monaco's line highlight; the selection is editor.selectionBackground over the ground. A hex here was MEASURED from the real Electron app (src/tests/visual/answers/plat47-desktop-parity.electron.json, `just plat47-capture-electron`), and the terminal's parity suite fails when the desktop stops rendering it. Monaco ignores this key.",
+    "$comment": "The editor palette shared by the desktop and native front-ends. scripts/tokens-to-styl.sh generates editor-theme.styl for the desktop gutter, execution band and pointer, and design_tokens.nim for the native editor, from this block. Monaco supplies syntax and selection colours. The editor ground is the mode's panel because Monaco is transparent; resting line numbers paint at full opacity. The execution band and Monaco cursor-line highlight use the same opaque colour so composition cannot lower text contrast. Fresh real Electron captures (src/tests/visual/answers/plat47-desktop-parity.electron.json, just plat47-capture-electron) verify the effective colours. Monaco ignores this key.",
     "ground": "{colors.ui.surface.base.panel}",
-    "lineNumber": "#575757",
+    "lineNumber": "#b0b0b0",
     "activeLineNumber": "{colors.ui.text.primary.label}",
     "executionLine": "#404040",
-    "selection": "#353535"
+    "selection": "#353535",
+    "executionPointer": "{colors.editor.action.secondary}"
   }
 }

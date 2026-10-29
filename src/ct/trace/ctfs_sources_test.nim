@@ -283,7 +283,7 @@ const
                "/workspace/project/src/util.c"]
 
 proc buildMetaDat(version: uint16, extFlags: uint32 = 0,
-                  withPathList = false): string =
+                  withPathList = false, argsCount = 0'u64): string =
   ## A complete ``meta.dat`` body stamped with an explicit version, laid out
   ## as version 7 (``internal-files.md`` §"Metadata (meta.dat)"):
   ## ``flags_ext`` always present, nothing after ``recorder_id``.
@@ -297,7 +297,7 @@ proc buildMetaDat(version: uint16, extFlags: uint32 = 0,
   result.putU32Le(extFlags)
   result.putVarString(RecordingId)
   result.putVarString(Program)
-  result.putLeb128(0)  # args
+  result.putLeb128(argsCount)  # args (none follow: a count past 0 is a lie)
   result.putVarString(Workdir)
   result.putVarString(RecorderId)
   if withPathList:
@@ -325,6 +325,16 @@ proc refusal(ctPath: string): string =
   ""
 
 suite "CTFS meta.dat version gate":
+  test "an argument count past the bytes left is refused before allocating":
+    ## A declared 2^60 arguments: `newSeqOfCap` of that would ask for
+    ## 2^64 bytes.
+    let root = getTempDir() / "ctfs-args-count-" & $getCurrentProcessId()
+    createDir(root)
+    defer: removeDir(root)
+    let ct = root / "trace.ct"
+    writeMinimalCtfs(ct, @[("meta.dat", buildMetaDat(7, argsCount = 1'u64 shl 60))])
+    check refusal(ct).contains("args_count is 1152921504606846976")
+
   test "version 7 is the one accepted":
     ## Literals, not the constants under test: an assertion written as
     ## `SupportedMetaDatVersion == SupportedMetaDatVersion` is an

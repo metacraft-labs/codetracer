@@ -2772,14 +2772,13 @@ demo-request-panel LANG="synthetic":
 # appending to a live file.  Every stage nonetheless re-seals its earlier chunks
 # to the SAME bytes — seal points and record contents are both derived from the
 # request index, never from the stage count — so each stage's span stream is a
-# strict CHUNK PREFIX of the next, which is exactly what the backend's
-# chunk-count cursor requires.  The whole reader half is therefore genuinely
-# exercised: held reader, per-poll delta, `reset` only on the first poll,
-# client-side last-record-wins across deltas.  True in-place append needs the
-# writer built on `createCtfsStreaming(path)`; that is a writer change, not a
-# panel change.
+# strict CHUNK PREFIX of the next. Replay explicitly follows requests with
+# --follow-request-spans=1: each poll asks for the count and refreshes the
+# bounded visible window, including the in-flight row's later completion.
+# Following continues until the window closes; a finalized stage does not
+# advertise whether another stage will replace it.
 #
-# Both properties are asserted headlessly by
+# The staged containers are asserted headlessly by
 # src/tests/gui/tests/request-panel/demo_recipe_vm_test.nim, over the same stage
 # sequence the loop below walks.
 demo-request-panel-live LANG="synthetic" INTERVAL="2":
@@ -2811,7 +2810,7 @@ demo-request-panel-live LANG="synthetic" INTERVAL="2":
   "$work/demo_request_session" "$demo_dir" --through=1 >/dev/null
 
   # Grow the session in the background while the GUI tails it.  The GUI polls
-  # `ct/load-request-spans-since` every 500 ms, so a 2 s stage interval makes
+  # the count and visible request window every 500 ms, so a 2 s stage interval makes
   # each new row visibly arrive on its own.
   #
   # The `--open-only` element is the in-flight step: it adds request 6's open
@@ -2841,7 +2840,7 @@ demo-request-panel-live LANG="synthetic" INTERVAL="2":
   # never reaches a `wait`.  The grower is already a detached child and keeps
   # feeding the container; it exits on its own after the eighth stage.
   echo "[demo] launching the GUI — watch rows appear in the REQUESTS panel"
-  exec ct replay -t "$demo_dir"
+  exec ct replay --follow-request-spans=1 -t "$demo_dir"
 
 # Elixir materialized trace DAP flow integration test (DB-based, no rr required).
 # Uses CODETRACER_BEAM_RECORDER_PATH for explicit sibling discovery
@@ -4315,12 +4314,9 @@ test-low-level-code-row-click: build-storybook-components
 # strip the panes are actually in, because a pane exiled at zero width
 # satisfies a presence check exactly as a working one does.
 #
-# ONE ARM SKIPS HERE, LOUDLY AND COUNTED SEPARATELY. Without a replay engine
-# and a Noir toolchain — both OPTIONAL bundle assets this recipe does not build
-# — debug mode reaches no session and opens no source file, so the debug-mode
-# editor has nothing to measure. The gate reads that from the product (the edit
-# legs carry a source tab, the debug legs carry none) and skips rather than
-# reddening; a permanently red lane stops being read.
+# The already-open source must survive every transition, even without replay
+# tools. Supplied-report tests first check that missing tabs or unpainted
+# editors fail the gate; the browser then measures the real workspace.
 #
 # Reuses an assembled bundle when CT_WEB_BUNDLE_DIR is set; assembles one
 # otherwise (~80s), then ~20s in the browser.
@@ -4329,6 +4325,7 @@ test-mode-layout-in-browser:
   set -euo pipefail
   mkdir -p test-logs
   exec > >(tee test-logs/test-mode-layout-in-browser.log) 2>&1
+  python3 ci/test/mode-layout-in-browser-test.py
   bash ci/test/mode-layout-in-browser.sh
 
 # A TEST ROW OFFERS TWO ACTIONS AND ONLY ONE OF THEM RE-RUNS.

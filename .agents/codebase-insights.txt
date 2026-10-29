@@ -8031,3 +8031,23 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - Docked panes take keys two ways now: a press records `dockKeys`
   (Problems, PLAT-55) and the focus ring includes the open dock (Requests,
   PLAT-58, which also lets `:requests` focus an already-open dock).
+
+- Lane user-state guard (2026-10-28): ci/lib/run-nim-test-lane.sh snapshots the
+  user's ~/.local/state/codetracer, ~/.config/codetracer and trace_index.db
+  around EVERY file's run (not only the lane), fails that file with "TOUCHED THE
+  USER'S STATE", and gives each file XDG_DATA_HOME/XDG_CONFIG_HOME of its own
+  beside CODETRACER_HOME. The snapshot is host-global: a CodeTracer process
+  outside the lane (the user's TUI in tmux, another agent's manual run) trips
+  it too — strace -f on the lane's RUN steps showed no lane process writing
+  there (2026-10-28). ci/test/lane-user-state-guard-test.sh drives the runner
+  with a `nim` stub in a scratch HOME.
+- GPUI Edit window: keys go to the document (editKey); only the operations in
+  EditWindowRoutedOperations (Find in Files') and keys while the omnibox is open
+  go through the window router. gMenu/gOmnibar are created for the Edit window
+  too since 2026-10-28; before that both were nil there (openOmnibar segfaulted).
+- Welcome Screen recent panels scroll to the focused row
+  (native_welcome.shownFrom, used by GPUI welcome_leaf and TUI welcome_view);
+  GPUI rows carry data-ct-welcome-index (the model's order, the keys' order).
+- test_plat29_highlight_worker measures render-thread CPU (CLOCK_THREAD_CPUTIME_ID)
+  and voluntary context switches (RUSAGE_THREAD), not a wall-clock band: wall
+  time under host load is preemption, not waiting.

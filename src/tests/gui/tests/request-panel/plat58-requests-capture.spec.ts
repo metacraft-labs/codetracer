@@ -128,15 +128,10 @@ test.describe("PLAT-58: the desktop's REQUESTS panel, captured", () => {
     await chooseMenu(ctPage, "Clear Filters");
     await expect(rows).toHaveCount(8, { timeout: 30_000 });
 
-    // A DOUBLE CLICK: request 04's handler — two presses on the row (the
-    // shared `pressRow` count). Each press is aimed at the row afresh: the
-    // first one's selection opens the detail panel, which in a short docked
-    // panel is drawn OVER the lower rows, so a second press at the same
-    // point lands on the detail (codetracer-pm issue
-    // 2026-10-27-desktop-request-detail-covers-the-row-a-double-click-is-on).
+    // A DOUBLE CLICK: request 04's handler, without re-aiming between the
+    // first selection (which opens the detail) and the second press.
     const before = await location(ctPage);
-    await rows.nth(2).click();
-    await rows.nth(2).click();
+    await rows.nth(2).dblclick();
     await expect.poll(async () => (await location(ctPage))?.rrTicks, { timeout: 60_000 }).not.toBe(
       before?.rrTicks,
     );

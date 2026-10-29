@@ -1,5 +1,5 @@
 {
-  "takenAt": "2026-10-20T14:04:23.903Z",
+  "takenAt": "2026-10-29T07:16:16.286Z",
   "theme": "light",
   "monacoTokens": {
     "path": "calc/main.py",
@@ -1829,7 +1829,7 @@
       ],
       "active": 0,
       "titles": [
-        "STATE",
+        "VARIABLES",
         "SCRATCHPAD"
       ]
     },
@@ -1866,15 +1866,17 @@
   ],
   "editor": {
     "background": "#e6e2db",
-    "keyword": "#56a3e8",
-    "string": "#0b6ae6",
-    "comment": "#eb4f64",
+    "keyword": "#33618a",
+    "string": "#0959c2",
+    "comment": "#a53746",
     "number": "",
     "identifier": "#464646",
     "delimiter": "#464646",
-    "lineNumber": "#85adb7",
+    "lineNumber": "#666055",
     "activeLineNumber": "#353430",
-    "executionLine": "#c5ca88",
+    "executionLine": "#e2e0bc",
+    "executionPointer": "#353430",
+    "pointerInkPixels": 24,
     "selection": "#4f5b66"
   },
   "files": [
@@ -1917,13 +1919,13 @@
   "onRect": {
     "x": 494,
     "y": 70,
-    "w": 5244,
+    "w": 5755,
     "h": 22
   },
   "linesRect": {
     "x": 494,
     "y": 70,
-    "w": 5244,
+    "w": 5755,
     "h": 2586
   },
   "viewport": {
@@ -1933,7 +1935,7 @@
   "ticks": 1,
   "focus": {
     "outlineCount": 1,
-    "outline": "#aca494",
+    "outline": "#6366f1",
     "outlineWidth": "1px",
     "unfocusedEdge": "#f8f6f2",
     "panel": "#e6e2db"

@@ -354,6 +354,10 @@ pub struct Handler {
     /// `ct/load-request-spans` reports the absence rather than guessing.
     pub trace_folder: Option<std::path::PathBuf>,
 
+    /// Explicit replay request-follow policy. Kept separate from debugger
+    /// live mode: following a container grants no live process controls.
+    pub follow_request_spans: bool,
+
     /// RS-M3 — the live Request-panel tail, held across `ct/load-request-spans-since`
     /// calls so a poll decodes only the span chunks sealed since the last one.
     ///
@@ -711,6 +715,7 @@ impl Handler {
             cached_marker_rows: None,
             active_source_view_path: None,
             trace_folder: None,
+            follow_request_spans: std::env::var("CT_FOLLOW_REQUEST_SPANS").as_deref() == Ok("1"),
             request_span_tail: None,
             bundled_sources_root: None,
             source_access,
@@ -2738,9 +2743,10 @@ impl Handler {
         let Some(trace_folder) = self.trace_folder.clone() else {
             return Err("ct/load-request-spans: the session has no trace folder".into());
         };
-        let response = match crate::request_spans::load_request_spans(&trace_folder)? {
+        let mut response = match crate::request_spans::load_request_spans(&trace_folder)? {
             Some(spans) => spans.page(&args),
             None => crate::request_spans::LoadRequestSpansResponse {
+                open: false,
                 requests: Vec::new(),
                 total: 0,
                 next_span_id: None,
@@ -2748,6 +2754,7 @@ impl Handler {
                 skipped_lines: 0,
             },
         };
+        response.open = self.follow_request_spans;
         self.respond_dap(request, response, sender)
     }
 

@@ -146,6 +146,9 @@ impl McpClient {
         let mut command = Command::new(binary);
         command
             .args(["trace", "mcp"])
+            // Not a test of script confinement: opt out only where the host
+            // cannot confine a script (`with_script_opt_in`).
+            .args(mcp_harness::with_script_opt_in(binary, &[]))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());

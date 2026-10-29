@@ -589,7 +589,7 @@ const
                                        mono = {raItalic}),
     srGutterTracepoint: fgOnly(dgGutter, dtColorsEditorSyntaxType,
                                attrs = {raBold}, mono = {raBold}),
-    srGutterExecutionPointer: fgOnly(dgGutter, dtColorsEditorActionSecondary,
+    srGutterExecutionPointer: fgOnly(dgGutter, dtEditorThemeExecutionPointer,
                                      attrs = {raBold},
                                      mono = {raBold, raUnderline}),
     srGutterInspectionPointer: fgOnly(dgGutter,

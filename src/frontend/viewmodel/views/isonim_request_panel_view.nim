@@ -51,8 +51,11 @@
 
 import std/[strutils, tables, times]
 when defined(js):
+  type RequestDetailDisposer = proc()
+
   # Enter and Space on a `role="button"` row are its click.
   import ./isonim_activation
+  from isonim/core/owner import onCleanup
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
@@ -138,6 +141,13 @@ proc makeTabClickHandler*(vm: RequestPanelVM; tab: string): proc() =
   let captured = tab
   result = proc() = vm.setDetailTab(captured)
 
+proc pressAndActivateRow(vm: RequestPanelVM; index: int): bool =
+  ## Both a row click and the continuation of a click displaced by the
+  ## detail resize use the ViewModel's one double-press rule.
+  if vm.pressRow(index, int64(epochTime() * 1000)) == rpActivate:
+    vm.jumpToHandler(index)
+    return true
+
 proc onRowClick(vm: RequestPanelVM; index: int): proc() =
   ## Closure factory that captures the row's filtered-list index so
   ## each row's click handler refers to its own value.  Without the
@@ -151,9 +161,7 @@ proc onRowClick(vm: RequestPanelVM; index: int): proc() =
   ## browser's own `dblclick` never reaches the row it replaced — measured by
   ## the Electron capture, where a double click moved nothing.
   let captured = index
-  result = proc() =
-    if vm.pressRow(captured, int64(epochTime() * 1000)) == rpActivate:
-      vm.jumpToHandler(captured)
+  result = proc() = discard pressAndActivateRow(vm, captured)
 
 proc onRowDoubleClick(vm: RequestPanelVM; index: int): proc() =
   ## Closure factory for the per-row ``ondblclick`` handler: go to the
@@ -392,6 +400,7 @@ proc renderRow[R, N](r: R; vm: RequestPanelVM; req: RequestRecord;
   let badgeCls = methodBadgeClass(req.httpMethod)
   result = ui(r):
     tdiv(role = "button", tabindex = "0", class = rowClass(selected, req.isOpen),
+         `data-request-id` = $req.id,
          onclick = onRowClick(vm, index),
          ondblclick = onRowDoubleClick(vm, index)):
       tdiv(class = "request-col-id"):
@@ -413,6 +422,72 @@ proc renderRow[R, N](r: R; vm: RequestPanelVM; req: RequestRecord;
       wireRowMenu(result, vm, index)
 
 when defined(js):
+  proc keepSelectedRequestVisible(body: isonim_dom.Element) {.importjs: """
+    (function(body) {
+      const row = body.querySelector('.request-row.selected');
+      if (!row || !body.isConnected || body.clientHeight <= 0) return;
+      const viewport = body.getBoundingClientRect(), bounds = row.getBoundingClientRect();
+      // Scroll only this list, not its enclosing dock or the document.
+      if (bounds.bottom > viewport.bottom) body.scrollTop += bounds.bottom - viewport.bottom;
+      else if (bounds.top < viewport.top) body.scrollTop += bounds.top - viewport.top;
+    })(#)""".}
+
+  proc installRequestDetailGesture(panel, body, detail: isonim_dom.Element;
+      activate: proc(id: int): bool; interval: int;
+      keepVisible: proc()): RequestDetailDisposer {.importjs: """
+    (function(panel, body, detail, activate, interval, keepVisible) {
+      let first = null;
+      const reset = () => { first = null; };
+      const near = e => first && Math.abs(e.clientX - first.x) <= 4 &&
+        Math.abs(e.clientY - first.y) <= 4;
+      const move = e => { if (first && !near(e)) reset(); };
+      const leave = e => { if (e.target === panel) reset(); };
+      const down = e => {
+        if (e.button !== 0 || e.target.closest('.request-detail-resize-handle')) reset();
+      };
+      const click = e => {
+        const row = e.target.closest('.request-row');
+        if (row && panel.contains(row)) {
+          // Only the first selection opens the split. Once open, a press
+          // on a detail control is its own gesture, not a row continuation.
+          first = e.button === 0 && e.detail > 0 && !detail.firstElementChild ?
+            { id: Number(row.dataset.requestId), x: e.clientX, y: e.clientY,
+              time: e.timeStamp } : null;
+          return;
+        }
+        const previous = first;
+        const continues = near(e);
+        reset();
+        if (!previous || !continues || e.button !== 0 || e.detail === 0 ||
+            e.timeStamp < previous.time || e.timeStamp - previous.time > interval ||
+            !detail.contains(e.target) || e.target.closest('.request-detail-resize-handle')) return;
+        // The split moved the clicked row out from under the pointer.
+        // Route the continuation by request identity, before the detail's
+        // controls see it; the callback rechecks the current selection.
+        if (activate(previous.id)) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+        }
+      };
+      panel.addEventListener('click', click, true);
+      panel.addEventListener('mousedown', down, true);
+      panel.addEventListener('pointermove', move, true);
+      panel.addEventListener('pointerleave', leave, true);
+      for (const event of ['contextmenu', 'wheel', 'keydown', 'pointercancel'])
+        panel.addEventListener(event, reset, true);
+      const observer = new ResizeObserver(keepVisible);
+      observer.observe(body);
+      return () => {
+        observer.disconnect();
+        panel.removeEventListener('click', click, true);
+        panel.removeEventListener('mousedown', down, true);
+        panel.removeEventListener('pointermove', move, true);
+        panel.removeEventListener('pointerleave', leave, true);
+        for (const event of ['contextmenu', 'wheel', 'keydown', 'pointercancel'])
+          panel.removeEventListener(event, reset, true);
+      };
+    })(#, #, #, #, #, #)""".}
+
   proc inputValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
   proc requestRowHeight(body: JsObject): float {.importjs:
     "(function(b){const r=b.querySelector('.request-row');return r?r.getBoundingClientRect().height:0;})(#)".}
@@ -543,6 +618,7 @@ proc renderRequestPanel*[R, N](r: R; vm: RequestPanelVM): N =
         if idx >= 0:
           isonim_dom.setAttribute(detailContainer, cstring"style",
             cstring("flex: 0 0 " & $int(pct) & "%; min-height: 0"))
+          keepSelectedRequestVisible(bodyContainer)
         else:
           isonim_dom.setAttribute(detailContainer, cstring"style", cstring"")
 
@@ -575,4 +651,12 @@ proc renderRequestPanel*[R, N](r: R; vm: RequestPanelVM): N =
   when defined(js):
     when N is isonim_dom.Element:
       decorateRequestPanel(searchInputEl, bodyContainer, vm)
+      let activateDisplacedRow = proc(id: int): bool =
+        let idx = vm.selectedIndex.val
+        let rows = vm.filteredRequests.val
+        if idx >= 0 and idx < rows.len and rows[idx].id == id:
+          return pressAndActivateRow(vm, idx)
+      onCleanup(installRequestDetailGesture(panelRef, bodyContainer, detailContainer,
+        activateDisplacedRow, RequestDoubleClickMs,
+        proc() = keepSelectedRequestVisible(bodyContainer)))
   panel

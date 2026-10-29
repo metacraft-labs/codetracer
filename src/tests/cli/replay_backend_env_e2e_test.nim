@@ -114,7 +114,7 @@ proc runReplay(f: Fixture, options: seq[string],
   removeFile(f.capture)
   let env = newStringTable(modeCaseSensitive)
   for k, v in envPairs():
-    if k notin ["CT_THREAD_SYNC_ORDER", "CT_OS_SIMULATION", "CODETRACER_UI",
+    if k notin ["CT_THREAD_SYNC_ORDER", "CT_OS_SIMULATION", "CT_FOLLOW_REQUEST_SPANS", "CODETRACER_UI",
                 "CODETRACER_NEW_TRACE_POLICY", "CODETRACER_TUI_BIN"]:
       env[k] = v
   env["PATH"] = f.bin & $PathSep & getEnv("PATH")
@@ -136,7 +136,8 @@ proc runReplay(f: Fixture, options: seq[string],
   if result.launched:
     for line in readFile(f.capture).splitLines:
       if line.startsWith("ENV CT_THREAD_SYNC_ORDER=") or
-          line.startsWith("ENV CT_OS_SIMULATION="):
+          line.startsWith("ENV CT_OS_SIMULATION=") or
+          line.startsWith("ENV CT_FOLLOW_REQUEST_SPANS="):
         result.env.add line[4 .. ^1]
       elif line.startsWith("ENV CODETRACER_NEW_TRACE_POLICY="):
         result.policy = line["ENV CODETRACER_NEW_TRACE_POLICY=".len .. ^1]
@@ -254,5 +255,35 @@ suite "ct replay: a bad value is refused before anything is launched":
       check r.exitCode != 0
       check not r.launched
       check "CT_OS_SIMULATION='weak'" in r.output
+
+suite "ct replay: follow requests reaches the launched front-end":
+  test "follow requests opens its own window and forwards its choice":
+    check fixture.prerequisite == ""
+    if fixture.prerequisite == "":
+      let r = runReplay(fixture, @["--follow-request-spans=1", "--new-tab"])
+      checkpoint describe(r)
+      check r.exitCode == 0
+      check r.launched
+      check r.policy == "window"
+      check "CT_FOLLOW_REQUEST_SPANS=1" in r.env
+
+  test "native handoff consumes the follow flag and inherits its twin":
+    check fixture.prerequisite == ""
+    if fixture.prerequisite == "":
+      let r = runReplay(fixture, @["--ui=tui", "--follow-request-spans=1"])
+      checkpoint describe(r)
+      check r.exitCode == 0
+      check r.launched
+      check "CT_FOLLOW_REQUEST_SPANS=1" in r.env
+      check r.args == @[fixture.trace]
+
+  test "invalid follow values cannot launch a replay":
+    check fixture.prerequisite == ""
+    if fixture.prerequisite == "":
+      let r = runReplay(fixture, @["--follow-request-spans=yes"])
+      checkpoint describe(r)
+      check r.exitCode != 0
+      check not r.launched
+      check "--follow-request-spans='yes'" in r.output
 
 removeDir(fixture.work)
