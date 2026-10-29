@@ -10,6 +10,8 @@
     }:
     {
       devShells = {
+        # Run the existing configured hooks without the full development SDK.
+        pre-commit = config.pre-commit.devShell;
         default = import ./main.nix {
           inherit
             pkgs

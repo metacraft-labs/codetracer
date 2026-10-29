@@ -3,6 +3,9 @@ import std/[os, strutils]
 
 import repro_dsl_stdlib
 
+when defined(windows):
+  import "../reprobuild-packages/packages/contributions/tree-sitter/repro"
+
 
 
 
@@ -401,6 +404,11 @@ package codeTracer:
     "rustc >=1"
     "rustup >=1"
     "sh >=1"
+    # The Windows generator uses the catalog's pinned upstream archive.
+    when defined(windows):
+      "tree-sitter ==0.27.0"
+    else:
+      "tree-sitter >=0"
     "wasm-opt >=0"
     # Zstandard's DEVELOPMENT channel -- `zstd.h` on the include path and
     # `libzstd` on the library path. NOT the same thing as `zstd` (declared
@@ -580,7 +588,6 @@ package codeTracer:
       "shellcheck >=0"
       "sqlite3 >=0"
       "tmux >=0"
-      "tree-sitter >=0"
       "vim >=0"
       "wasm-pack >=0"
       "webpack-cli >=0"
