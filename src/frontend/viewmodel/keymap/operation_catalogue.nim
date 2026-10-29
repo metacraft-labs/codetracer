@@ -157,6 +157,7 @@ const
     op("list.expand", ListTable, "Expand"),
     op("list.toggle-expand", ListTable, "Toggle Expand"),
     op("list.activate", ListTable, "Open"),
+    op("list.activate-redirected", ListTable, "Open in the Other Tab"),
     op("list.clear-selection", ListTable, "Clear Selection"),
     op("list.filter", ListTable, "Filter"),
     op("list.copy", ListTable, "Copy"),

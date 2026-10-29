@@ -15,6 +15,10 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
+#[path = "../../path_tools.rs"]
+mod path_tools;
+pub use path_tools::bash_command;
+
 use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments};
 use db_backend::task::{CtLoadFlowArguments, FlowMode, Location};
 use db_backend::transport::DapTransport;
@@ -1820,7 +1824,7 @@ pub fn provision_sibling(key: &str, repo: &str, artifact: &str) -> PathBuf {
         // Both streams inherited: a first build takes minutes, and the
         // script's progress and summary are the only sign the test has not
         // hung, and the only place a failure's cause is printed.
-        let status = Command::new("bash")
+        let status = bash_command()
             .arg(&script)
             .arg("--only")
             .arg(key)
@@ -2551,7 +2555,7 @@ fn run_detect_siblings_for_var(var_name: &str) -> Option<PathBuf> {
         "DETECT_SIBLINGS_QUIET=1; source {:?} {:?} >/dev/null; printf '%s' \"${{{}:-}}\"",
         detect_script, repo_root, var_name
     );
-    let output = Command::new("bash").arg("-lc").arg(script).output().ok()?;
+    let output = bash_command().arg("-lc").arg(script).output().ok()?;
     if !output.status.success() {
         return None;
     }
@@ -4297,7 +4301,7 @@ fn record_bash_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String>
 
     fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
 
-    let output = Command::new("bash")
+    let output = bash_command()
         .args([
             recorder.to_str().unwrap(),
             "--out-dir",
@@ -6147,7 +6151,7 @@ fn provision_cross_process_recording_tools() -> PathBuf {
         );
         // stdout is the one-line result; stderr, the progress of builds that
         // can take minutes and the diagnostic when one fails, is inherited.
-        let output = Command::new("bash")
+        let output = bash_command()
             .arg(&script)
             .current_dir(codetracer_root())
             .stdin(Stdio::null())

@@ -65,7 +65,7 @@ fn test_bash_flow_integration() {
 
     let config = create_bash_flow_config();
 
-    let version_label = std::process::Command::new("bash")
+    let version_label = test_harness::bash_command()
         .arg("--version")
         .output()
         .ok()

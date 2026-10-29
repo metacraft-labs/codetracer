@@ -215,12 +215,20 @@ proc omnibarIndexOf*(fs: FilesystemVM; store: ReplayDataStore;
 proc replayOpenCommands*(): seq[OmnibarEntry] =
   ## Test-Results-Pane.md §9.3: **Tests: Open Recordings in a New Tab** and
   ## **… in the Current Tab**, the workspace's `replay-open-in` — the same two
-  ## words the desktop's palette offers.
+  ## words the desktop's palette offers — then the palette pair **Tests: Run**
+  ## and **Tests: Run in Current Tab**.
   for policy in [topNewTab, topCurrentTab]:
     result.add OmnibarEntry(kind: OmnibarMode.omCommand,
                             label: replayOpenCommandLabel(policy),
                             detail: ReplayOpenSettingName & " " & $policy,
                             target: replayOpenCommandTarget(policy))
+  # §9.3's palette pair: one run of the selected test, at the command's
+  # destination.
+  for policy in [topNewTab, topCurrentTab]:
+    result.add OmnibarEntry(kind: OmnibarMode.omCommand,
+                            label: runTestCommandLabel(policy),
+                            detail: runTestCommandDetail(policy),
+                            target: runTestCommandTarget(policy))
 
 proc baseKeymapCommands*(): seq[OmnibarEntry] =
   ## PLAT-68: **Preferences: Select Base Keymap**, one entry per base, on every

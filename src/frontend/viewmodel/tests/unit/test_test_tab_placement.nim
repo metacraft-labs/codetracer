@@ -28,7 +28,16 @@
 ##     `openRecording` on the settle, with the destination captured AT THE
 ##     PRESS (the modifier released before the recorder answers); `⟳` opens
 ##     nothing; a failed record opens nothing; an open the front-end refuses
-##     is said on the pane; with no opener installed the pane says so.
+##     is said on the pane; with no opener installed the pane says so;
+##   * §9.3's PALETTE PAIR: **Tests: Run** / **Tests: Run in Current Tab** —
+##     their labels and omnibox targets, one per destination; `runTestIn`
+##     RECORDS the test (also when a recording exists) and the host captures
+##     THE COMMAND's destination, neither the setting's nor a held
+##     modifier's, the hold released after the dispatch; §9.1 still places
+##     it (an editing session is not replaced); the started note says where;
+##     no selection, a test the catalog dropped, a run in flight and a host
+##     that refuses at once each answer their own sentence and record
+##     nothing.
 ##
 ## THE ONE STAND-IN, and why it is not a mock: the host's two effects — the
 ## dispatch (an IPC send, in the product) and `openRecording` (a new session
@@ -55,7 +64,7 @@ template ck(condition: untyped) =
   inc asserted
   check condition
 
-const ExpectedAssertions = 81
+const ExpectedAssertions = 112
 
 proc item(id, selector: string; line: int): TestItem =
   TestItem(id: id, providerId: "noir-nargo", language: "noir",
@@ -279,6 +288,96 @@ suite "the replay-open-in document":
     ck not parseReplayOpenCommandTarget(ReplayOpenCommandPrefix & "nope").ok
     ck replayOpenSetNote("/p/", topCurrentTab) ==
       "test recordings open in the current tab in /p"
+
+suite "§9.3: the palette pair, Tests: Run and Tests: Run in Current Tab":
+
+  test "their labels and targets, one per destination":
+    ck runTestCommandLabel(topNewTab) == "Tests: Run"
+    ck runTestCommandLabel(topCurrentTab) == "Tests: Run in Current Tab"
+    for policy in [topNewTab, topCurrentTab]:
+      let (ok, back) = parseRunTestCommandTarget(runTestCommandTarget(policy))
+      ck ok and back == policy
+      # Not the setting's command: the two pairs never read as each other.
+      ck not parseReplayOpenCommandTarget(runTestCommandTarget(policy)).ok
+      ck not parseRunTestCommandTarget(replayOpenCommandTarget(policy)).ok
+    ck runTestCommandDetail(topCurrentTab).endsWith("in the current tab")
+    ck not parseRunTestCommandTarget(RunTestCommandPrefix & "nope").ok
+
+  test "the command's destination is captured, the setting and Ctrl ignored":
+    createRoot proc(dispose: proc()) =
+      let vm = createTestResultsVM()
+      vm.setCatalog(TestCatalog(items: @[item("a", "test_a", 5), item("b", "test_b", 9)]))
+      let spies = Spies()
+      let host = hostOver(vm, spies)
+      # A replay tab is current; the setting is the current tab and Ctrl is
+      # held — **Tests: Run** still opens a NEW tab.
+      vm.setCurrentTab(4, replaceable = true)
+      vm.setOpenSetting(topCurrentTab)
+      vm.setRedirectHeld(true)
+      vm.selectTest("a")
+      ck vm.runTestStartedText("a", topNewTab) ==
+        "recording test_a; it opens in a new tab"
+      ck vm.runSelectedTestIn(topNewTab) == ""
+      ck spies.recordOpening == 1
+      ck not vm.hasCommandPolicy   # held for that one dispatch only
+      ck vm.effectiveOpenPolicy() == topNewTab   # Ctrl inverting the setting
+      vm.setRedirectHeld(false)
+      host.settleDesktopTestRun(recordingId = "rec-a", recordedAtText = "t")
+      ck spies.opened.len == 1 and spies.opened[0].policy == topNewTab
+      # **Run in Current Tab** RECORDS AGAIN although a recording exists, and
+      # opens at the current tab whatever the setting says.
+      vm.setOpenSetting(topNewTab)
+      ck vm.rowFor("a").hasRecording()
+      ck vm.runTestStartedText("b", topCurrentTab) ==
+        "recording test_b; it opens in this tab"
+      ck vm.runTestIn("b", topCurrentTab) == ""
+      ck spies.recordOpening == 2
+      host.settleDesktopTestRun(recordingId = "rec-b", recordedAtText = "t")
+      ck spies.opened.len == 2 and spies.opened[1].policy == topCurrentTab
+      ck spies.opened.len == 2 and spies.opened[1].testId == "b"
+      # §9.1 still places it: from an EDITING session the current tab is no
+      # destination (rule 3), and the note says so.
+      vm.setCurrentTab(0, replaceable = false)
+      ck vm.runTestStartedText("a", topCurrentTab) ==
+        "recording test_a; it opens in a new tab"
+      dispose()
+
+  test "no selection, a dropped test, a run in flight, a refusal: said":
+    createRoot proc(dispose: proc()) =
+      let vm = createTestResultsVM()
+      vm.setCatalog(TestCatalog(items: @[item("a", "test_a", 5)]))
+      let spies = Spies()
+      discard hostOver(vm, spies)
+      ck vm.runSelectedTestIn(topNewTab) == NoTestSelectedText
+      vm.selectTest("gone")
+      ck vm.runSelectedTestIn(topNewTab) == TestNotListedText
+      vm.selectTest("a")
+      ck vm.runSelectedTestIn(topNewTab) == ""
+      ck vm.runSelectedTestIn(topCurrentTab) == RunInProgressText
+      ck spies.recordOpening == 1
+      dispose()
+    createRoot proc(dispose: proc()) =
+      # A host that refuses AT ONCE: its sentence, not "recording …".
+      let vm = createTestResultsVM()
+      vm.setCatalog(TestCatalog(items: @[item("a", "test_a", 5)]))
+      let host = newDesktopTestHost(vm,
+        dispatch = proc(selector, file: string; line: int): string =
+          "the recorder is busy",
+        settleEditor = nil)
+      host.installDesktopRowActions(
+        keepWindowDispatch = proc(selector, file: string; line: int): string =
+          "",
+        openRecording = proc(testId, recordingId: string;
+                             policy: TraceOpenPolicy): string = "")
+      ck vm.runTestIn("a", topNewTab) == "the recorder is busy"
+      ck not vm.inFlight.val
+      dispose()
+    createRoot proc(dispose: proc()) =
+      # No host: nothing can record.
+      let vm = createTestResultsVM()
+      vm.setCatalog(TestCatalog(items: @[item("a", "test_a", 5)]))
+      ck vm.runTestIn("a", topNewTab) == NoRecorderHostText
+      dispose()
 
 suite "§9.5: the desktop host opens after it records":
 

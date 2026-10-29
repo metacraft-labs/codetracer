@@ -356,6 +356,16 @@ type
       ## edit` and the GPUI Edit window do not, §8.3).
     testTabs*: Signal[seq[TestTab]]
       ## Which tests have a tab (§9.2), one entry per test, one test per tab.
+    selectedTestId*: Signal[string]
+      ## The selected row's test (§9.3): what the palette's **Tests: Run** /
+      ## **Tests: Run in Current Tab** act on. Natively the keyboard reach's
+      ## selection, on the desktop a click on the row. "" for none.
+    hasCommandPolicy*: bool
+    commandPolicy*: TraceOpenPolicy
+      ## The palette pair's destination, HELD FOR ONE DISPATCH
+      ## (`runTestIn`): `effectiveOpenPolicy` answers it while it is held,
+      ## so the host captures the command's destination exactly as it
+      ## captures a press's. Plain fields, not Signals — nothing draws them.
 
     refreshRecording*: Signal[TestRowActionProc]
       ## Record this test again and KEEP THE RESULT WITHOUT NAVIGATING.
@@ -692,7 +702,10 @@ proc effectiveOpenPolicy*(vm: TestResultsVM; redirect: bool): TraceOpenPolicy =
   if redirect: vm.openSetting.val.invert() else: vm.openSetting.val
 
 proc effectiveOpenPolicy*(vm: TestResultsVM): TraceOpenPolicy =
-  ## The destination a press made NOW would have (the held modifier read).
+  ## The destination a press made NOW would have (the held modifier read) —
+  ## or, while a palette command dispatches (`runTestIn`), the command's.
+  if vm.hasCommandPolicy:
+    return vm.commandPolicy
   vm.effectiveOpenPolicy(vm.redirectHeld.val)
 
 proc testTabIndex(vm: TestResultsVM; testId: string): int =
@@ -1141,6 +1154,78 @@ proc rowOfTest*(vm: TestResultsVM; testId: string): int =
       return i
   -1
 
+# ---------------------------------------------------------------------------
+# The palette pair: **Tests: Run** / **Tests: Run in Current Tab** (§9.3)
+# ---------------------------------------------------------------------------
+
+const
+  NoTestSelectedText* =
+    "no test of the Test Results pane is selected — select one first"
+    ## The palette pair with no row selected.
+  TestNotListedText* = "the selected test is no longer listed"
+    ## The selected test left the catalog.
+
+proc selectTest*(vm: TestResultsVM; testId: string) =
+  ## The row the palette pair acts on ("" for none).
+  if vm.selectedTestId.val != testId:
+    vm.selectedTestId.val = testId
+
+proc runTestIn*(vm: TestResultsVM; testId: string;
+                policy: TraceOpenPolicy): string =
+  ## **Tests: Run** (`topNewTab`) / **Tests: Run in Current Tab**
+  ## (`topCurrentTab`): RECORD test `testId` afresh and open the new
+  ## recording — `⇧⏵`'s refresh-and-open whether or not a recording exists —
+  ## at the COMMAND's destination, neither the setting's nor a held
+  ## modifier's; §9.1 still places it. "" when the run was dispatched, else
+  ## why it was not.
+  if testId.len == 0:
+    return NoTestSelectedText
+  let i = vm.rowOfTest(testId)
+  if i < 0:
+    return TestNotListedText
+  let absence = vm.refreshAbsence()
+  if absence.len > 0:
+    return absence
+  let action = vm.recordAndOpenRecording.val
+  if action.isNil:
+    return NoReplayHostText
+  let row = vm.rows.val[i]
+  vm.hasCommandPolicy = true
+  vm.commandPolicy = policy
+  try:
+    action(row.testId, row.selector)
+  finally:
+    vm.hasCommandPolicy = false
+  # A host that refused AT ONCE settled the run inside the call and filed
+  # its sentence on the pane; the command's caller is owed it too, rather
+  # than "recording …" over a run that never began.
+  if not vm.inFlight.val:
+    let said = vm.summary.val.diagnostics
+    if said.len > 0:
+      return said[^1].message
+  ""
+
+proc runSelectedTestIn*(vm: TestResultsVM; policy: TraceOpenPolicy): string =
+  ## The palette pair on the selected row (`selectedTestId`).
+  vm.runTestIn(vm.selectedTestId.val, policy)
+
+proc runTestStartedText*(vm: TestResultsVM; testId: string;
+                         policy: TraceOpenPolicy): string =
+  ## What a front-end says once the palette pair dispatched: which test is
+  ## recording, and where §9.1 will put it for `policy` — so **Run in
+  ## Current Tab** from an editing session says it opens a new tab (rule 3)
+  ## rather than leaving the user to find that out.
+  let i = vm.rowOfTest(testId)
+  let name = if i >= 0: vm.rows.val[i].name else: testId
+  let where =
+    if not vm.sessionTabsShown.val: "its folder is named on the pane"
+    else:
+      let place = vm.placeTestRecording(testId, "", policy)
+      if place.kind == ttpNewTab: "it opens in a new tab"
+      elif place.tab == vm.testTabOf(testId): "it opens in the tab it already has"
+      else: "it opens in this tab"
+  "recording " & name & "; " & where
+
 # The five columns' widths are `table_fit.testResultsFit` (beside the other
 # panes' declarations, so the terminal's painter reaches it through the SDK
 # facade).
@@ -1200,6 +1285,7 @@ proc createTestResultsVM*(): TestResultsVM =
     let currentTabReplaceable = createSignal(false)
     let sessionTabsShown = createSignal(true)
     let testTabs = createSignal(newSeq[TestTab]())
+    let selectedTestId = createSignal("")
     # THREE TYPED VARS, for `noRunner`'s reason and not for tidiness.
     # `createSignal(TestRowActionProc(nil))` compiles on both backends and runs
     # on one: `nim js` emits the conversion as `null.bind(null)`, which throws
@@ -1249,6 +1335,7 @@ proc createTestResultsVM*(): TestResultsVM =
       currentTabReplaceable: currentTabReplaceable,
       sessionTabsShown: sessionTabsShown,
       testTabs: testTabs,
+      selectedTestId: selectedTestId,
       refreshRecording: refreshRecording,
       openExistingRecording: openExistingRecording,
       recordAndOpenRecording: recordAndOpenRecording,

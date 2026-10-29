@@ -17,7 +17,9 @@
 ## trailing separator.
 ##
 ## The commands that set it are here too, by their palette labels, so the
-## three front-ends offer the same two words.
+## three front-ends offer the same two words — and the palette pair that
+## names a destination for one run (**Tests: Run** / **Tests: Run in Current
+## Tab**, §9.3).
 ##
 ## Pure: C and JavaScript backends.
 
@@ -35,6 +37,12 @@ const
   OpenRecordingsInCurrentTabLabel* = "Tests: Open Recordings in the Current Tab"
   ReplayOpenCommandPrefix* = "replayOpenIn:"
     ## The native omnibox entries' target: `replayOpenIn:<new-tab|current-tab>`.
+  RunTestLabel* = "Tests: Run"
+  RunTestInCurrentTabLabel* = "Tests: Run in Current Tab"
+    ## §9.3's palette pair: record the selected test and open it in a new
+    ## tab / the current tab (`TestResultsVM.runTestIn`).
+  RunTestCommandPrefix* = "runTestIn:"
+    ## Their native omnibox target: `runTestIn:<new-tab|current-tab>`.
 
 type
   ReplayOpenEntry* = object
@@ -111,6 +119,23 @@ proc parseReplayOpenCommandTarget*(target: string):
 proc replayOpenCommandLabel*(policy: TraceOpenPolicy): string =
   if policy == topNewTab: OpenRecordingsInNewTabLabel
   else: OpenRecordingsInCurrentTabLabel
+
+proc runTestCommandTarget*(policy: TraceOpenPolicy): string =
+  RunTestCommandPrefix & $policy
+
+proc parseRunTestCommandTarget*(target: string):
+    tuple[ok: bool; policy: TraceOpenPolicy] =
+  if not target.startsWith(RunTestCommandPrefix):
+    return (false, topNewTab)
+  parsePolicyWord(target[RunTestCommandPrefix.len .. ^1])
+
+proc runTestCommandLabel*(policy: TraceOpenPolicy): string =
+  if policy == topNewTab: RunTestLabel else: RunTestInCurrentTabLabel
+
+proc runTestCommandDetail*(policy: TraceOpenPolicy): string =
+  ## The omnibox entry's second column.
+  "record the selected test and open it " &
+    (if policy == topNewTab: "in a new tab" else: "in the current tab")
 
 proc replayOpenSetNote*(workspace: string; policy: TraceOpenPolicy): string =
   ## What a front-end says once the setting is written.

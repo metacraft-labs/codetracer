@@ -24,7 +24,11 @@
 ##     runs nothing; Shift held arms the re-record — a new recording, opened;
 ##   * §5: a run SIGKILLed mid-way (its process group) settles, saying so;
 ##   * THE EDIT WINDOW, which has no session tabs, states where the recording
-##     is instead of opening it.
+##     is instead of opening it;
+##   * §9.3: `Ctrl+Enter` on the selected row opens in this tab; the
+##     omnibox's **Tests: Run** records the selected test again and opens it
+##     in a new tab; its **Tests: Open Recordings in the Current Tab** writes
+##     the workspace's `replay-open-in`.
 ##
 ## No mocks: the real binary, a real recording made by the Python recorder, a
 ## real `replay-server`, the real `ct`, `ct-test` and `nargo` on a real crate,
@@ -43,7 +47,7 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 42
+  ExpectedAssertions = 49
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1600
   H = 1000
@@ -60,6 +64,11 @@ let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                    repo.parentDir / "isonim-gpui/rust/target/debug")
 let answers = parseJson(readFile(repo / AnswersFile))
 let ct = fixture_provider.findCtBinary()
+
+proc typed(text: string): string =
+  ## `--window-ops` keys typing `text`.
+  for ch in text:
+    result.add(if ch == ' ': ",key:space" else: ",key:" & $ch)
 
 proc calc(): string =
   let resolved = resolveFixture(FixtureSpec(
@@ -313,6 +322,46 @@ suite "PLAT-53: the Test Results pane in the GPUI window":
     # The title says where it opens: test_fails has no tab of its own any
     # more (its tab now holds test_passes), and the current tab is a replay.
     ck title.endsWith("Opens in a new tab; Ctrl+click opens it in this tab.")
+    removeDir(project)
+
+  test "§9.3: Ctrl+Enter on the selected row; the palette's Tests: Run":
+    # `Ctrl+Enter` on a selected row is Ctrl on the press
+    # (`list.activate-redirected`): the passing test, never recorded, is
+    # recorded and opened IN THIS TAB (a replay, replaced in place). The
+    # palette's **Tests: Run** on the failing test — whose tab that was —
+    # records it AGAIN and opens it in a NEW tab, whatever the setting.
+    let project = writePlat53Project("ct-plat53-gpui-")
+    let (plan, tr) = windowPlan(project,
+      "tests:show,tests:open:test_fails,tests:wait," &
+      "tests:row:test_passes,key:enter:control,tests:wait," &
+      "tests:row:test_fails,key:p:control,key:colon" & typed("Tests") &
+      ",key:colon" & typed(" Run") & ",key:enter,tests:wait")
+    checkpoint(tr)
+    ck tr.contains("operation list.activate-redirected")
+    ck tr.contains("tests: replaced tab")
+    ck tr.contains("tests: recording test_fails; it opens in a new tab")
+    var opens = 0
+    for line in tr.splitLines():
+      if line.contains(" as tab ") and line.contains("opened "): inc opens
+    ck opens == 3
+    # Recorded twice for test_fails (the ⏵, then Run): its row carries the
+    # second recording, and both tests have one.
+    let rows = plan.rowsOf()
+    ck rows.len == 2 and rows[0].attr("data-ct-recording-id").len > 0
+    ck rows.len == 2 and rows[1].attr("data-ct-recording-id").len > 0
+    removeDir(project)
+
+  test "§9.3: the omnibox's Tests: Open Recordings in the Current Tab":
+    # The window's omnibox offers the setting's commands — and choosing one
+    # writes the workspace's `replay-open-in` (it used to fall through to
+    # the menu table and do nothing).
+    let project = writePlat53Project("ct-plat53-gpui-")
+    let (_, tr) = windowPlan(project,
+      "tests:show,key:p:control,key:colon" & typed("Tests") & ",key:colon" &
+      typed(" Open Recordings in the Current") & ",key:enter")
+    checkpoint(tr)
+    ck tr.contains("tests: test recordings open in the current tab in " &
+                   project.strip(leading = false, chars = {'/'}))
     removeDir(project)
 
   test "a press selects a row; the window's keys move the selection":

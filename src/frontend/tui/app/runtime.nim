@@ -246,6 +246,10 @@ type
     pcTestsOpenIn
       ## §9.3: the palette's **Tests: Open Recordings in …** — the project's
       ## `replay-open-in` set to the policy `text` names.
+    pcTestsRunIn
+      ## §9.3: the palette's **Tests: Run** / **Tests: Run in Current Tab** —
+      ## record the selected test (`path`: its id, "" for none) and open it
+      ## at the destination `text` names (`TestResultsVM.runTestIn`).
     pcFrameSeek
       ## PLAT-51: the frame viewer's own scrubber — show frame `index`
       ## (`behaviour` "drag" while held, "release" where it is let go:
@@ -5807,6 +5811,18 @@ proc runMenuAction*(rt: TuiRuntime; action: string;
                                           text: $openIn.policy))
     outcome.repaint = true
     return
+  # §9.3's palette pair: **Tests: Run** / **Tests: Run in Current Tab** on
+  # the pane's selected test, recorded and opened by the host.
+  let runIn = parseRunTestCommandTarget(action)
+  if runIn.ok:
+    let sel = rt.app.tests.selected
+    let testId = if sel >= 0 and sel < rt.app.tests.rows.len:
+                   rt.app.tests.rows[sel].testId
+                 else: ""
+    outcome.requestClick(PaneClickRequest(kind: pcTestsRunIn, path: testId,
+                                          text: $runIn.policy))
+    outcome.repaint = true
+    return
   # PLAT-68: the palette's base-keymap commands
   # (`keymap_selection.baseKeymapCommandTargets`).
   let base = parseBaseKeymapCommand(action)
@@ -7020,14 +7036,19 @@ proc runTestsKeyOperation(rt: TuiRuntime; operation: string;
       else: (if sel < 0: n - 1 else: sel - 1)
     rt.selectTestRow(clamp(next, 0, n - 1))
     true
-  of "list.activate":
+  of "list.activate", "list.activate-redirected":
     if sel < 0 or sel >= n:
       rt.note("no test of the Test Results pane is selected")
       outcome.repaint = true
       return true
     let r = rt.app.tests.rows[sel]
+    # §9.3: `Ctrl+Enter` is Ctrl on the press — the destination inverted for
+    # this one open.
+    let redirected = operation == "list.activate-redirected"
     rt.pressTestsControl(r.open, PaneClickRequest(kind: pcTestsOpen,
-                         text: r.testId), outcome)
+                         text: r.testId,
+                         behaviour: (if redirected: TestsRedirectBehaviour
+                                     else: "")), outcome)
     true
   else: false
 
