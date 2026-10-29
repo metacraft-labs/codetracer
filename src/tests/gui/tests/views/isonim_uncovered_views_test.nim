@@ -827,6 +827,32 @@ suite "IsoNim Shader Debug — structure":
 
 suite "IsoNim Shader Debug — events":
 
+  test "a mounted inspector follows the current step without remounting":
+    var vm: ShaderDebugVM
+    var panel: MockNode
+    var disposePanel: proc()
+    createRoot proc(dispose: proc()) =
+      disposePanel = dispose
+      vm = createShaderDebugVM(makeClient())
+      # The real pane mounts before the selected pixel's response arrives.
+      panel = renderShaderDebugPanel[MockRenderer, MockNode](MockRenderer(), vm)
+    defer: disposePanel()
+    vm.debugInfo.val = some(debugInfo())
+    check panel.findByClass("shader-debug-instruction-value").allText == "OpLoad"
+    check panel.findByClass("shader-debug-variables-table").allText.contains("a")
+
+    panel.findByClass("shader-debug-step-forward").fireEvent("click")
+    check vm.currentStepIndex.val == 1
+    check panel.findByClass("shader-debug-step-label").allText == "Step 2 / 2"
+    check panel.findByClass("shader-debug-instruction-value").allText == "OpIMul"
+    check panel.findByClassOrNil("shader-debug-variables-table").isNil
+    check panel.findByClass("shader-debug-registers-table").allText.contains("r0")
+
+    panel.findByClass("shader-debug-step-first").fireEvent("click")
+    check panel.findByClass("shader-debug-instruction-value").allText == "OpLoad"
+    check panel.findByClass("shader-debug-variables-table").allText.contains("a")
+    check panel.findByClassOrNil("shader-debug-registers-table").isNil
+
   test "the four step buttons drive the step index and clamp at the ends":
     createRoot proc(dispose: proc()) =
       let vm = createShaderDebugVM(makeClient())
