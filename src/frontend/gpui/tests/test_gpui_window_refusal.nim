@@ -1,11 +1,14 @@
-## test_gpui_window_refusal.nim — **the shipped `codetracer-gpui`, linked to a
+## test_gpui_window_refusal.nim — **the production `codetracer-gpui`, linked to a
 ## shim with no window backend, refuses a window launch by name instead of
 ## exiting 0 having shown nothing.**
 ##
-## Run (needs `just build-gpui` over isonim-gpui's DEFAULT, featureless shim —
-## what this lane links — the `calc` recording under `test-logs/tui-fixtures/`,
-## and `REPLAY_SERVER_BIN`):
+## Run (needs the `calc` recording under `test-logs/tui-fixtures/` and a
+## built `replay-server`, through this repository's development environment):
 ##   nim c -r --path:src/frontend/viewmodel src/frontend/gpui/tests/test_gpui_window_refusal.nim
+##
+## The suite provisions its own featureless shim and a release build of the
+## production entry point under `build/gpui-refusal/`. This works even when
+## the rest of `gpui-shell` uses the shared windowed shim and executable.
 ##
 ## `codetracer-pm/issues/2026-10-01-gpui-launch-is-silent-when-no-window-can-open.md`
 ## measured `ct replay --ui=gpui <trace>` against the featureless shim: rc 0 in
@@ -24,27 +27,22 @@
 ##     the window path and the introspection tier works on any host.
 ##
 ## The windowed shim's no-display refusal needs a binary linked to the WINDOWED
-## shim, which this lane does not build; it is asserted by
+## shim; it is asserted by
 ## `ci/test/gpui-window-captures.sh`, which does.
 ##
-## THE SHIM IS CHECKED, NOT ASSUMED. `isonim_gpui/bindings` resolves the shim
-## at compile time to an absolute path, the same one for this test program and
-## for `build/bin/codetracer-gpui` (both compile against the same isonim-gpui
-## sources, and `just build-gpui` passes no `-d:gpuiShimPath`). So this
-## program's own `gpui_has_window_backend()` reports the build the binary under
-## test will load, and the first case requires it to be the featureless one: a
-## lane that had swapped the windowed shim in at that path (the PLAT-37 capture
-## does, temporarily) would otherwise fail every case below for a reason that
-## is not this suite's.
+## THE SHIM IS CHECKED, NOT ASSUMED. The prerequisite builder pins the
+## production executable to an absolute `gpuiShimPath`, and this suite loads
+## that exact library to check its capability. Importing the ordinary Nim
+## bindings here would instead load whichever shim the surrounding lane uses.
+## Shared shim and executable bytes are checked before and after provisioning:
+## making this suite green must not break a neighbouring windowed suite.
 ##
-## No mocks: the shipped binary, the real shim, the real `replay-server`, a real
+## No mocks: the production entry point, the real shim, the real `replay-server`, a real
 ## recording.
 
 import replay_prerequisite
-import std/[os, osproc, strtabs, strutils, tempfiles, times,
+import std/[dynlib, os, osproc, sha1, strtabs, strutils, tempfiles, times,
             unittest]
-
-import isonim_gpui/bindings
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -63,13 +61,56 @@ const
     ## failure mode was "never returns", and a lane must not inherit it.
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
-let bin = repo / "build/bin/codetracer-gpui"
+when defined(windows):
+  const ProgramName = "codetracer-gpui.exe"
+  const ShimName = "gpui_nim_shim.dll"
+elif defined(macosx):
+  const ProgramName = "codetracer-gpui"
+  const ShimName = "libgpui_nim_shim.dylib"
+else:
+  const ProgramName = "codetracer-gpui"
+  const ShimName = "libgpui_nim_shim.so"
+let bin = repo / "build/gpui-refusal" / ProgramName
+let shim = repo / "build/gpui-refusal/shim/debug" / ShimName
 let calc = repo / CalcFixture
+let gpuiSource = block:
+  let override = getEnv("ISONIM_GPUI_SRC")
+  # Match the prerequisite builder's shell `${ISONIM_GPUI_SRC:-...}`:
+  # an explicitly empty override selects the ordinary sibling too.
+  if override.len > 0: override else: repo.parentDir / "isonim-gpui/src"
+let sharedArtifacts = [repo / "build/bin" / ProgramName,
+                       gpuiSource.normalizedPath.parentDir /
+                         "rust/target/debug" / ShimName]
+var
+  buildAttempted, buildSucceeded: bool
+  sharedBefore, sharedAfter: array[2, string]
 
 proc requirePrereq(ok: bool; what: string) =
   ## **A MISSING PREREQUISITE FAILS BY NAME. It does not skip.**
   if not ok:
     raise newException(IOError, "prerequisite missing: " & what)
+
+proc artifactDigest(path: string): string =
+  ## Absence must also be preserved: running this suite alone does not need
+  ## to create the ordinary executable or shared shim as a side effect.
+  if fileExists(path): $secureHashFile(path) else: "<absent>"
+
+proc ensureRefusalBuild() =
+  ## Lazy so test discovery does not build anything. Memoise a failed attempt
+  ## too: every case fails loudly on that failure, without retrying the build.
+  if not buildAttempted:
+    buildAttempted = true
+    for i, path in sharedArtifacts:
+      sharedBefore[i] = artifactDigest(path)
+    let r = execCmdEx(quoteShellCommand(@["bash",
+      repo / "ci/lib/gpui-refusal-prereqs.sh"]))
+    echo r.output
+    if r.exitCode == 0:
+      for i, path in sharedArtifacts:
+        sharedAfter[i] = artifactDigest(path)
+      buildSucceeded = true
+  requirePrereq(buildSucceeded,
+    "isolated GPUI refusal build (ci/lib/gpui-refusal-prereqs.sh; see output above)")
 
 type Run = object
   rc: int
@@ -82,6 +123,7 @@ proc runBinary(args: seq[string]; withDisplay: bool): Run =
   ## removes every variable GPUI reads to find a display; true supplies an X
   ## display NAME — nothing listens there, and nothing needs to: the
   ## featureless shim never connects, and the preflight only reads the name.
+  ensureRefusalBuild()
   var env = newStringTable()
   for k, v in envPairs():
     if k notin ["DISPLAY", "WAYLAND_DISPLAY", "ZED_HEADLESS"]:
@@ -119,16 +161,26 @@ proc windowArgs(): seq[string] =
 
 suite "codetracer-gpui refuses a window launch the featureless shim cannot serve":
 
-  test "the prerequisites are here, and the shim is the featureless one":
-    requirePrereq(fileExists(bin), bin & " (just build-gpui)")
+  test "the prerequisites are here, and the isolated shim is featureless":
     requirePrereq(dirExists(calc), calc & " (run 'just test-tui' once)")
     requirePrereq(existsEnv("REPLAY_SERVER_BIN") and
                   fileExists(getEnv("REPLAY_SERVER_BIN")),
                   "REPLAY_SERVER_BIN naming a built replay-server")
-    requirePrereq(gpui_has_window_backend() == 0'u8,
-                  "the FEATURELESS shim at isonim-gpui's rust/target/debug " &
-                  "(`just rust-build` there); a windowed build is in its place")
-    ck true
+    ensureRefusalBuild()
+    requirePrereq(fileExists(bin), bin & " (isolated production build)")
+    let library = loadLib(shim)
+    requirePrereq(library != nil, "loadable featureless shim: " & shim)
+    defer: unloadLib(library)
+    let capability = library.symAddr("gpui_has_window_backend")
+    requirePrereq(capability != nil, "gpui_has_window_backend in " & shim)
+    type BackendProbe = proc(): uint8 {.cdecl.}
+    ck cast[BackendProbe](capability)() == 0'u8
+
+  test "provisioning preserves the shared shim and production executable":
+    ensureRefusalBuild()
+    for i, path in sharedArtifacts:
+      checkpoint(path)
+      ck sharedBefore[i] == sharedAfter[i]
 
   test "with a display: exit 3, promptly, naming the missing backend":
     let r = runBinary(windowArgs(), withDisplay = true)

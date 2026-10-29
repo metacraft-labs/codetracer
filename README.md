@@ -270,9 +270,12 @@ The GPUI front-end also needs `isonim-gpui`'s Rust shim. Build it in the same
 ```
 
 Plain `cargo build` (the `just rust-build` default) builds a shim without a window
-backend, which is what the GPUI test lanes use. With it, `codetracer-gpui` cannot
-open a window: it says so and exits 3 (see "When no window can open" below).
-`--report-plan` still works with either shim.
+backend. With it, `codetracer-gpui` cannot open a window: it says so and exits 3
+(see "When no window can open" below). `--report-plan` works with either shim.
+The `gpui-shell` lane can use the windowed build above: its window-refusal suite
+builds its own featureless shim and production executable under
+`build/gpui-refusal/`, leaving the shared shim and `build/bin/codetracer-gpui`
+unchanged. Running that suite directly provisions the same isolated build.
 
 ### Get a recording
 

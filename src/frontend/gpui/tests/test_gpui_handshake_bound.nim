@@ -49,9 +49,9 @@
 ##     `openGpuiTrace` returns carries the override's budget, and
 ##     `liftOpenBound` — what the window calls before it takes input — leaves
 ##     it unbounded, so an operation that is silent by design (a tracepoint
-##     sweep over a large recording) is not reported as a stall. This one case
-##     runs in-process, because the featureless shim this lane links refuses
-##     the window before the binary would reach that line.
+##     sweep over a large recording) is not reported as a stall. This case
+##     runs in-process so it needs no window; it also covers featureless builds,
+##     which refuse the window before the binary would reach that line.
 ##
 ## ## The one stand-in, and why it is justified
 ##
