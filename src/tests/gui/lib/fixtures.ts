@@ -18,7 +18,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as childProcess from "node:child_process";
-import * as process from "node:process";
+import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -80,6 +80,31 @@ const codetracerPrefix =
   process.env.CODETRACER_BUILD_DIR && process.env.CODETRACER_BUILD_DIR.length > 0
     ? process.env.CODETRACER_BUILD_DIR
     : path.join(codetracerInstallDir, "src", "build-debug");
+// Imports also run in the collector, in --list, and in base-Playwright tests
+// that never use _workerCleanup. Keep their import-time isolation, but give
+// every allocating process its own synchronous exit cleanup. Register before
+// the first allocation so a later setup failure cannot leak a partial pair.
+const ownedGuiTestHomes = new Map<string, string>();
+function removeOwnedGuiTestHomes(): void {
+  for (const [home, variable] of ownedGuiTestHomes) {
+    try {
+      fs.rmSync(home, { recursive: true, force: true });
+      // Relinquish ownership once removed: a later exit must not remove a
+      // directory somebody else recreates at this path after worker teardown.
+      ownedGuiTestHomes.delete(home);
+    } catch (ex) {
+      console.warn(`fixtures: removing test ${variable} failed: ${(ex as Error).message}`);
+    }
+  }
+}
+process.once("exit", removeOwnedGuiTestHomes);
+
+function makeGuiTestHome(prefix: string, variable: string): string {
+  const home = fs.mkdtempSync(path.join(scratchBase(), prefix));
+  ownedGuiTestHomes.set(home, variable);
+  return home;
+}
+
 // Both scratch homes are made under `scratchBase()` — `/tmp` on POSIX, not
 // `os.tmpdir()`. The product binds Unix sockets under `CODETRACER_HOME`
 // (`$CODETRACER_HOME/tmp/session-manager/<pid>/<id>.sock`), a socket address
@@ -90,9 +115,7 @@ const codetracerPrefix =
 const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
 const guiTestXdgConfigHome =
   process.env.CODETRACER_GUI_TEST_XDG_CONFIG_HOME ??
-  fs.mkdtempSync(path.join(scratchBase(), "codetracer-gui-xdg-config-"));
-const ownsGuiTestXdgConfigHome =
-  process.env.CODETRACER_GUI_TEST_XDG_CONFIG_HOME === undefined;
+  makeGuiTestHome("codetracer-gui-xdg-config-", "XDG_CONFIG_HOME");
 process.env.XDG_CONFIG_HOME = guiTestXdgConfigHome;
 // EVERY per-user location of every CodeTracer this worker launches — config
 // and layouts, the trace index, recordings, caches, the tmp/socket dir —
@@ -103,7 +126,7 @@ process.env.XDG_CONFIG_HOME = guiTestXdgConfigHome;
 const originalCodetracerHome = process.env.CODETRACER_HOME;
 const guiTestCodetracerHome =
   process.env.CODETRACER_GUI_TEST_CODETRACER_HOME ??
-  fs.mkdtempSync(path.join(scratchBase(), "codetracer-gui-home-"));
+  makeGuiTestHome("codetracer-gui-home-", "CODETRACER_HOME");
 const ownsGuiTestCodetracerHome =
   process.env.CODETRACER_GUI_TEST_CODETRACER_HOME === undefined;
 // Before anything is launched: a home too deep for the sockets under it
@@ -2045,24 +2068,13 @@ export const test = base.extend<
       } catch (ex) {
         console.warn(`fixtures: restoreUserLayout failed: ${(ex as Error).message}`);
       }
-      if (ownsGuiTestXdgConfigHome) {
-        try {
-          fs.rmSync(guiTestXdgConfigHome, { recursive: true, force: true });
-        } catch (ex) {
-          console.warn(`fixtures: removing test XDG_CONFIG_HOME failed: ${(ex as Error).message}`);
-        }
-      }
+      // Also registered on process exit for importers without this fixture.
+      // Successful removals relinquish ownership; exit retries only failures.
+      removeOwnedGuiTestHomes();
       if (originalXdgConfigHome === undefined) {
         delete process.env.XDG_CONFIG_HOME;
       } else {
         process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
-      }
-      if (ownsGuiTestCodetracerHome) {
-        try {
-          fs.rmSync(guiTestCodetracerHome, { recursive: true, force: true });
-        } catch (ex) {
-          console.warn(`fixtures: removing test CODETRACER_HOME failed: ${(ex as Error).message}`);
-        }
       }
       if (originalCodetracerHome === undefined) {
         delete process.env.CODETRACER_HOME;
