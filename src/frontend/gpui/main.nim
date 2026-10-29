@@ -169,7 +169,8 @@ import ./agent_activity_leaf   # PLAT-54: Agent Activity, drawn natively
 import ../viewmodel/host/native_agent_host   # PLAT-54: its host
 import ../viewmodel/viewmodels/trace_open   # PLAT-54: a test's recording opened
 import ../viewmodel/viewmodels/search_results_vm
-from ../viewmodel/host/find_in_files import FindInFilesScope, running, pump
+from ../viewmodel/host/find_in_files import FindInFilesScope, running, pump,
+  findInFilesScope
 import ../viewmodel/host/terminal_output_source
 
 const DefaultPixelsView* = "window"
@@ -926,6 +927,10 @@ var
     ## path, so switching back to one finds its buffer as it was left (an
     ## Edit buffer is never dropped by opening another file).
   gEditFiles = initTable[string, FilesystemVM]()
+  gEditSearch = initTable[string, SearchResultsVM]()
+    ## Edit mode's Find in Files, one model per opened folder: it searches
+    ## the folder itself (Find-And-Incremental-Search.md §5.1, "In Edit mode
+    ## it is the project's root"), where a replay's searches its recording.
     ## K19 in Edit mode: each opened folder's Files model (`projectTreeOf`
     ## over the project walk, acting on the disk through
     ## `native_file_tree`), by the folder's absolute path — what the Files
@@ -1174,6 +1179,10 @@ proc editKeyInert(name: string): bool
   ## PLAT-68 (Mode-Transitions §8.1): FORWARD-DECLARED; defined with the
   ## router's section beside `routeWindowKey`.
 
+proc editWindowRoutesKey(key: string; mods: seq[string]): bool
+  ## PLAT-68 (Mode-Transitions §8.1): FORWARD-DECLARED; defined with the
+  ## router's section beside `routeWindowKey`.
+
 proc editKey(key: string; mods: seq[string]) =
   ## One key of an EDIT window's editor pane: its `keydown` listener's body,
   ## and what `--window-ops`' `key:` dispatches in an edit window (the editor
@@ -1182,6 +1191,11 @@ proc editKey(key: string; mods: seq[string]) =
   # K19: the Files pane's name field or Delete question takes the keys
   # while it is open; an open right-click menu closes on `Esc`.
   if editOverlayKey(key, mods):
+    return
+  # Find in Files, which Edit mode docks and which searches the project: its
+  # keys (`Ctrl+Shift+F`, the next / previous result) and the omnibox's
+  # `:grep` line they open are the window router's, as in a replay window.
+  if editWindowRoutesKey(key, mods):
     return
   # A key that runs an operation only in a replay (`F12`, step out) is inert
   # here AND SAYS SO on the status bar — the router's answer for this window's
@@ -2157,6 +2171,9 @@ proc markPaneScope(r: GpuiRenderer; pane: GpuiElement; id: string) =
 proc armPaneKeys(r: GpuiRenderer; pane: GpuiElement)
   ## PLAT-68: forward-declared; defined beside the pointer.
 
+proc searchVM(): SearchResultsVM
+  ## PLAT-57: forward-declared; defined with Find in Files below.
+
 proc adoptNewLeaves(r: GpuiRenderer) =
   ## PLAT-50: a pane a layout command ADDED (the View menu opening a pane the
   ## arrangement did not place) has no leaf yet — the leaves were rendered
@@ -2178,6 +2195,12 @@ proc adoptNewLeaves(r: GpuiRenderer) =
         if known.paneId == leaf.paneId and not known.vm.isNil:
           leaf.vm = known.vm
           break
+    # Find in Files opened where the arrangement did not place it: the
+    # model the window searches with (an Edit window's, over its project).
+    if leaf.vm.isNil and leaf.kind == glkBuiltin and leaf.builtin == paneSearch:
+      let vm = searchVM()
+      if not vm.isNil:
+        leaf.vm = ViewModel(vm)
     let (node, _) = renderLeaf(r, leaf, gEditorSurface, gEditorViewportPx)
     stripHeading(r, node)
     applyTextFaces(r, node)
@@ -3023,8 +3046,35 @@ proc terminalKey(r: GpuiRenderer; key: string): bool =
 # PLAT-57: Find in Files, drawn natively (`search_results_leaf`)
 # ---------------------------------------------------------------------------
 
+proc editSearchVMOf(folder: string): SearchResultsVM =
+  ## The opened folder's Find in Files model, made once per folder and wired
+  ## to the shared runner over the folder itself — Edit mode has no
+  ## recording, and the pane it docks searches the working tree.
+  var root = absolutePath(folder).normalizedPath
+  while root.len > 1 and root[^1] in {'/', '\\'}:
+    root.setLen(root.len - 1)
+  result = gEditSearch.getOrDefault(root)
+  if not result.isNil:
+    return
+  result = createSearchResultsVM(nil)
+  wireFindInFiles(result,
+    proc(): FindInFilesScope = findInFilesScope("", false, [root]))
+  gEditSearch[root] = result
+
 proc searchVM(): SearchResultsVM =
-  if gSession.isNil: nil else: gSession.session.searchResultsVM
+  ## The model Find in Files shows: the opened folder's in Edit mode (an
+  ## Edit window, a folder tab), else the shown replay's.
+  if not openArm.isNil: editSearchVMOf(openArm.root)
+  elif not gSession.isNil: gSession.session.searchResultsVM
+  else: nil
+
+proc attachEditSearch(leafSet: var GpuiLeafSet; folder: string) =
+  ## Hand the Find in Files leaf, when the arrangement places one (Edit
+  ## mode docks it in the footer), the opened folder's model — so the pane
+  ## is live in Edit mode rather than a Debug-mode placeholder.
+  for leaf in leafSet.leaves.mitems:
+    if leaf.kind == glkBuiltin and leaf.builtin == paneSearch:
+      leaf.vm = ViewModel(editSearchVMOf(folder))
 
 proc dockedBodyOf(rect: PxRect): PxRect =
   ## The body of a docked pane's box (`dockedPaneBox`): inside the outline,
@@ -5961,6 +6011,7 @@ proc showFolderTab(r: GpuiRenderer; index: int): string =
   var leafSet = gShell.leavesFor(gWindow)
   attachVcs(leafSet, tab.folder)
   attachEditFiles(leafSet, tab.folder)   # K19: the folder's Files tree
+  attachEditSearch(leafSet, tab.folder)
   # PLAT-53: the window's project is the folder now (§8.2).
   gTestsRoot = tab.folder
   attachTests(leafSet)
@@ -9082,6 +9133,20 @@ proc openSearchResult(r: GpuiRenderer; index: int): bool =
     return false
   vm.selectResult(index)
   let row = rows[index]
+  if not openArm.isNil:
+    # Edit mode: the working-tree file in the Edit window's editor, as a
+    # Problems row opens it, the caret on the match.
+    let column = if row.matchStart > 0 and row.matchStart <= row.text.len:
+                   row.text[0 ..< row.matchStart].runeLen
+                 else: 0
+    let why = openProblemFile(r, row.path, row.line, column + 1)
+    if why.len > 0:
+      traceGesture(why)
+    else:
+      traceGesture("opened " & row.path & ":" & $row.line)
+    gSearch.revealResult(vm, searchBody(), index)
+    drawSearchPane(r)
+    return why.len == 0
   gViewedFile = row.path
   showViewedFile(r, atLine = row.line)
   if gViewedFile.len > 0:
@@ -9857,6 +9922,33 @@ func decodePercent(text: string): string =
     else:
       result.add text[i]
       inc i
+
+const EditWindowRoutedOperations = ["search.find-in-files",
+  "search.next-result", "search.previous-result"]
+  ## The window operations an Edit window's keys run through the router
+  ## rather than typing into the document: Find in Files' (it searches the
+  ## project in Edit mode, Find-And-Incremental-Search.md §5.1).
+
+proc editWindowRoutesKey(key: string; mods: seq[string]): bool =
+  ## An Edit window's key that the window router takes instead of the
+  ## document: any key while the omnibox is open (its `:grep` line), and the
+  ## keys of `EditWindowRoutedOperations`.
+  if openArm.isNil:
+    return false
+  var r: GpuiRenderer
+  if not gOmnibar.isNil and gOmnibar.isOpen:
+    routeWindowKey(r, key, mods)
+    return true
+  let name = canonicalKeyOfGpui(key, mods)
+  if name.len == 0:
+    return false
+  var probe = gRouter
+  let res = probe.route(windowSessionFacts(), windowScopePath(), nmNormal,
+                        name, int64(epochTime() * 1000))
+  if res.kind == erOperation and res.operation in EditWindowRoutedOperations:
+    routeWindowKey(r, key, mods)
+    return true
+  false
 
 proc editKeyInert(name: string): bool =
   ## An EDIT window's key, asked of the shared router without effect (its
@@ -12000,6 +12092,8 @@ proc runEdit(cmd: GpuiCommand): int =
     # K19: and the Files pane lists the opened folder, its menu acting on
     # the disk.
     attachEditFiles(leafSet, cmd.traceFolder)
+    # And Find in Files searches it.
+    attachEditSearch(leafSet, cmd.traceFolder)
   # PLAT-53: Test Results over the project. This window has no session tabs,
   # so a test's recording is not opened here: the pane says where it is.
   installTestsHost(cmd.traceFolder, proc(testId, recordingId, folder: string;
@@ -12013,6 +12107,13 @@ proc runEdit(cmd: GpuiCommand): int =
   # project).
   installProblems(cmd.traceFolder)
   attachProblems(leafSet)
+  # The omnibox, for Find in Files' `:grep` line (`Ctrl+Shift+F` opens it;
+  # Find-And-Incremental-Search.md §5.2): its command index is the menu's.
+  if gMenu.isNil:
+    gMenu = newMenuVM(nativeFrontEndMenu("CodeTracer"))
+    refreshGpuiMenuAvailability()
+  if gOmnibar.isNil:
+    gOmnibar = newOmnibarVM()
   # `PLAT35-F3`: the editor pane's inner width, from the geometry this
   # window is about to be laid out at.
   gEditorSurface = surface

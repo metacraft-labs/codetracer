@@ -94,6 +94,7 @@ import ./host/tui_session
 import ./host/vcs_source
 import ./host/test_results_source   # PLAT-53
 import ./host/problems_source       # PLAT-55
+import ./host/edit_search           # Find in Files over the project in Edit mode
 from ../viewmodel/viewmodels/test_results_vm import TraceOpenPolicy,
   TestTabPlacement, TestTabPlacementKind, placeTestRecording, testTabOf,
   noteTestTab, forgetTestTab   # Test-Results-Pane.md §9
@@ -1834,6 +1835,10 @@ proc editInteractive(command: TuiCommand): int =
         (if noun == "run": bkRun else: bkBuild), command)
       if started.ok: "" else: started.message)
 
+  # Find in Files, which Edit mode docks, searches the project
+  # (Find-And-Incremental-Search.md §5.1); a result opens in the editor.
+  let editSearch = newEditSearchSource(rt, root)
+
   paint(driver, rt)
 
   var loop = true
@@ -1846,6 +1851,7 @@ proc editInteractive(command: TuiCommand): int =
       discard rt.clipboardReadDue(driver)
       if not rt.clipboardRead.open:
         negotiation.closeReplyWindow(driver)
+      let searched = editSearch.tick(rt)
       # THE BUILD IS ADVANCED FROM THE SAME LOOP THAT READS THE KEYBOARD, which
       # is the whole of §5's cancellability requirement: the key that cancels is
       # read while the compiler runs, and the clock that bounds an unattended
@@ -1862,7 +1868,7 @@ proc editInteractive(command: TuiCommand): int =
       let keysChanged = rt.pollKeybindings(keybindings)
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
          hoverChanged or keysChanged or barsChanged or testsChanged or
-         problemsChanged:
+         problemsChanged or searched:
         paint(driver, rt)
     of dekResize:
       size = ev.size
