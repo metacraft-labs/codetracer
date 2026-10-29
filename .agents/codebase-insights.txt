@@ -8104,3 +8104,8 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   dropped silently after `EscDelayMs` if nothing continues it. Before this,
   an Esc the loop had not consumed when F1 arrived made `O`,`P` typed text
   (the keymap selector's DIFF-12 flake under load).
+- GPUI `--window-ops`: every event verb must also be listed in the command-line parser's whitelist (gpui/main.nim, near "unknown event"), or the run exits with a usage error before any op runs — a new `of "<verb>":` arm alone is not enough.
+- GPUI Edit window: `EditWindowRoutedOperations` also carries build.run, problems.next/previous and the palette-opening operations (Build-Output-Pane.md §3.11); its omnibox is drawn by the full top bar now that the window has a gMenu.
+- Edit-mode surfaces mark the caret line `eptInspection` (GPUI): a gutter mark in the pointer band must test `!= eptExecution`, not `== eptNone`, to show on the caret's line.
+- Desktop builds: the Electron main process runs them (`index/build_runner`, `CODETRACER::build-start` / `build-cancel`); `build-code` carries `runner: true` for these, and `onBuildCode` then leaves the mode alone (the legacy record-and-debug `build-code` without it still switches modes). Tests that feed `build-*` by hand (PLAT-55/56 captures) take the legacy path.
+- TUI auto-reveal: `layoutBinding.interaction.pane` is a variant field — read it only after checking `interaction.kind == ikRevealingDock` or the binary dies with FieldDefect.

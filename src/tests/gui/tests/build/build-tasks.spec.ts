@@ -217,3 +217,47 @@ test.describe("Build tasks on the desktop", () => {
     await expect(revealed).toHaveCount(1);
   });
 });
+
+// THE EDIT-MODE TOOLBAR'S BUILD (Edit-Mode-Toolbar.md EMT-D17, EMT-D30): the
+// project's own command — a Noir crate's `nargo compile`, which the toolbar
+// derives from `Nargo.toml` — run by the same main-process runner, its
+// output in the BUILD panel. The crate is the PLAT-55 one
+// (`src/frontend/tui/tests/fixtures/plat55_noir_build.nim`), which fails.
+// `nargo` is found where `$NARGO` says (the pinned build), as the PLAT-55
+// capture finds it.
+const noirFixture = path.join(repoRoot, "src", "frontend", "tui", "tests", "fixtures",
+                              "plat55_noir_build.nim");
+function noirText(name: string): string {
+  const text = fs.readFileSync(noirFixture, "utf8");
+  const m = text.match(new RegExp(`${name}\\* = """([\\s\\S]*?)"""`));
+  if (!m) throw new Error(`${name} not in ${noirFixture}`);
+  return m[1];
+}
+if (process.env.NARGO) {
+  process.env.PATH = `${path.dirname(process.env.NARGO)}${path.delimiter}${process.env.PATH}`;
+}
+const noirProject = fs.mkdtempSync(path.join(os.tmpdir(), "ct-build-toolbar-"));
+fs.mkdirSync(path.join(noirProject, "src"), { recursive: true });
+fs.writeFileSync(path.join(noirProject, "Nargo.toml"),
+  '[package]\nname = "plat55_build"\ntype = "bin"\nauthors = [""]\n\n[dependencies]\n');
+fs.writeFileSync(path.join(noirProject, "src", "main.nr"), noirText("Plat55MainNr"));
+fs.writeFileSync(path.join(noirProject, "src", "util.nr"), noirText("Plat55UtilNr"));
+
+test.describe("The desktop toolbar's Build", () => {
+  test.use({ launchMode: "edit", editFolderPath: noirProject });
+  test.setTimeout(300_000);
+
+  test("runs the project's build command through the main process", async ({ ctPage }) => {
+    await expect(ctPage.locator(".lm_goldenlayout")).toBeVisible({ timeout: 60_000 });
+    const button = ctPage.locator("#build-image");
+    await expect(button).toBeVisible({ timeout: 60_000 });
+    await expect(button).toBeEnabled({ timeout: 30_000 });
+    // Run stays refused, and says why (EMT-D30).
+    await expect(ctPage.locator("#run-image")).toBeDisabled();
+    await expect(ctPage.locator("#run-image")).toHaveAttribute("title", /record, then debug/);
+    await button.click();
+    await expectVerdict(ctPage, "build failed (exit code 1)");
+    await expect(ctPage.locator("#status .build-status-text")).toHaveText(
+      /^Build failed: 2 errors?, 1 warning/, { timeout: 15_000 });
+  });
+});
