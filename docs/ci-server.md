@@ -142,6 +142,24 @@ I use `fish`, so I install it with `sudo apt install fish`. Keep in mind some of
 
 ## GitHub Actions scheduling
 
+### Windows subprocess tool selection
+
+Windows build and test subprocesses must use the tools selected by the activated
+development environment. Rust callers resolve Bash from that environment's PATH
+in order and pass its absolute executable path to `Command`; relative and empty
+PATH entries are resolved against the current directory. A missing Bash is a
+missing prerequisite, not permission to fall back to Windows system search.
+
+CI must not take ownership of, change permissions on, delete or hide operating
+system executables to influence tool selection. It must not substitute a
+hardcoded Git installation for the declared Bash provider. Script argument path
+conversion is separate from executable selection.
+
+The normal pre-commit shell runs the unchanged Rust hooks using the backend
+package's same declared compiler and tools, Nix-native mode flags and immutable
+Nim dependency paths. It does not require the unrelated full development SDK.
+
+
 The executable triggers and concurrency expressions remain in
 [the CodeTracer workflow](../.github/workflows/codetracer.yml). The rationale
 below was moved from that file at `b2603929` to keep it below GitHub Actions'

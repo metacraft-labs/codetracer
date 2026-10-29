@@ -834,44 +834,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "the locked Python recorder is not importable" }
           "CODETRACER_PYTHON_CMD=$python" >> $env:GITHUB_ENV
 
-      - name: Prefer Git Bash over WSL bash stub
-        # The twin of the step of the same purpose in
-        # ``windows-rust-components``; keep the two bodies in step. Both
-        # remove the WSL launcher stub so ``CreateProcessW``'s System32-first
-        # lookup falls through to Git for Windows' ``bash.exe``.
-        #
-        # The ``C:\Program Files\Git\bin`` append is conditional on the
-        # directory existing. That is the GitHub-hosted ``windows-latest``
-        # layout; on ``eph-win-x64`` the directory is absent and the
-        # "Ensure Git and Git Bash are on PATH" step above provisions
-        # PortableGit under RUNNER_TEMP instead. Appending a non-existent
-        # directory succeeds silently, which is why the original mismatch
-        # surfaced several steps later as ``bash: command not found`` rather
-        # than here.
-        #
-        # And then bash must actually resolve: this job's payload step is
-        # ``shell: bash``, so a missing bash there is reported as a test
-        # failure rather than as a missing tool.
-        shell: pwsh
-        run: |
-          $wslStub = "$env:SystemRoot\System32\bash.exe"
-          if (Test-Path $wslStub) {
-            takeown /f $wslStub | Out-Null
-            icacls $wslStub /grant "Administrators:(F)" | Out-Null
-            Remove-Item -Force $wslStub
-          }
-          $gitForWindowsBin = "C:\Program Files\Git\bin"
-          if (Test-Path -LiteralPath $gitForWindowsBin -PathType Container) {
-            Add-Content -Path $env:GITHUB_PATH -Value $gitForWindowsBin
-          }
-          $bash = Get-Command bash -CommandType Application -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-          if (-not $bash) {
-            throw "No bash on PATH. The 'Ensure Git and Git Bash are on PATH' step " +
-                  "should have provisioned Git Bash; the routed matrix below needs it."
-          }
-          Write-Host "Using bash from $($bash.Source)"
-
       - name: Generate tree-sitter-nim parser
         shell: pwsh
         run: |
@@ -1113,7 +1075,7 @@ jobs:
           token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup dev env
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@248a4dbbeb852bfced9eba14913ea1d4614ba2af
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@26448a158691e2ce4858c10312618a306a333b8e
         with:
           env-flavor: reprobuild
           sibling-strategy: repro-lock
@@ -1148,57 +1110,6 @@ jobs:
             .repro/build/**/*tool-identities.inspect.json
           if-no-files-found: ignore
           retention-days: 30
-
-      - name: Remove WSL bash stub from System32
-        # db-backend's build.rs runs ``Command::new("bash") ...
-        # build_native_api.sh`` on Windows.  Rust's
-        # ``Command::new`` uses ``CreateProcessW``, whose documented
-        # lookup order checks ``C:\Windows\System32`` BEFORE PATH.
-        # On windows-latest that directory contains a WSL launcher
-        # stub (``bash.exe``) which aborts with ``Windows Subsystem
-        # for Linux has no installed distributions``.  Even after
-        # prepending Git Bash to PATH the WSL stub still wins.
-        #
-        # We don't need WSL on this runner -- removing the stub
-        # lets CreateProcessW fall through to Git for Windows'
-        # ``bash.exe``, which the "Ensure Git and Git Bash are on
-        # PATH" step above has already placed on GITHUB_PATH. That is
-        # what the build.rs comment ("Ensure Git for Windows bash is
-        # on PATH") actually wants.
-        #
-        # This step used to append the literal
-        # ``C:\Program Files\Git\bin`` unconditionally. That is the
-        # GitHub-hosted ``windows-latest`` layout; on ``eph-win-x64``
-        # the directory does not exist, and the bootstrap step instead
-        # provisions PortableGit under RUNNER_TEMP. Appending a
-        # non-existent directory is silent, so the mismatch would not
-        # have shown up here -- it showed up as ``bash: command not
-        # found`` in whichever step needed bash first. The path is now
-        # added only when it is really there, so a runner that does
-        # ship Git for Windows keeps the old behaviour and one that
-        # does not relies on the bootstrap rather than on a lie.
-        shell: pwsh
-        run: |
-          $wslStub = "$env:SystemRoot\System32\bash.exe"
-          if (Test-Path $wslStub) {
-            takeown /f $wslStub | Out-Null
-            icacls $wslStub /grant "Administrators:(F)" | Out-Null
-            Remove-Item -Force $wslStub
-          }
-          $gitForWindowsBin = "C:\Program Files\Git\bin"
-          if (Test-Path -LiteralPath $gitForWindowsBin -PathType Container) {
-            Add-Content -Path $env:GITHUB_PATH -Value $gitForWindowsBin
-          }
-          # Whatever supplied it, `bash` must resolve now: every step below
-          # this one is `shell: bash`, and a missing bash there reads as a
-          # build failure rather than as a missing tool.
-          $bash = Get-Command bash -CommandType Application -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-          if (-not $bash) {
-            throw "No bash on PATH. The 'Ensure Git and Git Bash are on PATH' step " +
-                  "should have provisioned Git Bash; every step below this one needs it."
-          }
-          Write-Host "Using bash from $($bash.Source)"
 
       - name: Generate tree-sitter-nim parser
         shell: pwsh
@@ -4918,32 +4829,6 @@ jobs:
             codetracer-trace-format=2624f1e80609307548d9199caed0fd511ca31575
             codetracer-trace-format-nim=df7751a1dabac8bc99c27dd715d1b82723c06c50
             codetracer-native-recorder=bef426439b44ae7d877e6e98e2da3e34d3feccb9
-
-      - name: Remove WSL bash stub from System32
-        # As in the other eph-win-x64 jobs: let CreateProcessW fall through to
-        # Git Bash instead of the WSL launcher stub.
-        shell: pwsh
-        run: |
-          $wslStub = "$env:SystemRoot\System32\bash.exe"
-          if (Test-Path $wslStub) {
-            takeown /f $wslStub | Out-Null
-            icacls $wslStub /grant "Administrators:(F)" | Out-Null
-            Remove-Item -Force $wslStub
-          }
-          $gitForWindowsBin = "C:\Program Files\Git\bin"
-          if (Test-Path -LiteralPath $gitForWindowsBin -PathType Container) {
-            Add-Content -Path $env:GITHUB_PATH -Value $gitForWindowsBin
-          }
-          # Whatever supplied it, `bash` must resolve now: the build step below
-          # is `shell: bash`, and a missing bash there reads as a build failure
-          # rather than as a missing tool.
-          $bash = Get-Command bash -CommandType Application -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-          if (-not $bash) {
-            throw "No bash on PATH. The 'Ensure Git and Git Bash are on PATH' step " +
-                  "should have provisioned Git Bash; every step below this one needs it."
-          }
-          Write-Host "Using bash from $($bash.Source)"
 
       - name: Build CodeTracer-Setup.exe
         shell: bash
