@@ -42,6 +42,7 @@
     "remove": "^0.1.5",
     "selenium-webdriver": "^4.38.0",
     "socket.io": "^4.8.1",
+    "source-map-js": "^1.2.1",
     "tar": "^7.5.2",
     "tippy.js": "^6.3.7",
     "vex-dialog": "^1.1.0",

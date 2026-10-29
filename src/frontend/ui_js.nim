@@ -24,6 +24,8 @@
 when defined(ctWeb):
   from web_boot import startWebSession, describeRunningPlatform
 
+import nim_sourcemap
+
 import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm, jsconsole, macros,
   options, json, tables,
@@ -2986,103 +2988,6 @@ proc configureSessionMiddleware(session: ReplaySession; withDebugger = true;
 
 cast[js](dom.document).onreadystatechange = onReady
 
-proc jsObjectKeys(obj: js): seq[cstring] {.importjs: "Object.keys(#)".}
-
-proc loadFrontendSourcemap(sourcemapPath: cstring): Future[FrontendSourcemap] {.async.} =
-  ## Load and parse a ct_sourcemap_* file into a FrontendSourcemap.
-  ## The sourcemap JSON has the structure:
-  ##   { "nimSources": {path: id, ...}, "cSources": {path: id, ...},
-  ##     "mappings": [ { "lineStr": [[pathID, cLine], ...], ... }, ... ] }
-  ## We build bidirectional lookup tables: nim(path,line)->C and C(path,line)->nim.
-  ##
-  ## Note: In Nim's JS async, `result` is a Future[T], so we must use a local
-  ## variable for the FrontendSourcemap and return it explicitly.
-  var sm = FrontendSourcemap(
-    nimToC: JsAssoc[cstring, JsAssoc[int, seq[seq[SourcemapPathIDLine]]]]{},
-    cToNim: JsAssoc[cstring, JsAssoc[int, SourcemapPathIDLine]]{},
-    cSources: JsAssoc[int, cstring]{},
-    nimSources: JsAssoc[int, cstring]{},
-    loaded: false)
-
-  if sourcemapPath.isNil or sourcemapPath.len == 0:
-    return sm
-
-  try:
-    let rawText = await readFileUtf8(sourcemapPath)
-    if rawText.isNil or rawText.len == 0:
-      console.log cstring"sourcemap: empty file at ", sourcemapPath
-      return sm
-
-    let raw = JSON.parse(rawText)
-    if raw.isNil:
-      console.log cstring"sourcemap: failed to parse JSON"
-      return sm
-
-    # Build ID -> path maps (inverting the path -> ID maps from the JSON)
-    let rawCSources = raw.cSources
-    let rawNimSources = raw.nimSources
-
-    # cSources: { "path.c": 0, ... } -> sm.cSources[0] = "path.c"
-    let cSourceKeys = jsObjectKeys(rawCSources)
-    for cPath in cSourceKeys:
-      let cID = cast[int](rawCSources[cPath])
-      sm.cSources[cID] = cPath
-      # Initialize the cToNim table for this C source
-      if not sm.cToNim.hasKey(cPath):
-        sm.cToNim[cPath] = JsAssoc[int, SourcemapPathIDLine]{}
-
-    # nimSources: { "path.nim": 0, ... } -> sm.nimSources[0] = "path.nim"
-    let nimSourceKeys = jsObjectKeys(rawNimSources)
-    for nimPath in nimSourceKeys:
-      let nimID = cast[int](rawNimSources[nimPath])
-      sm.nimSources[nimID] = nimPath
-      # Initialize the nimToC table for this Nim source
-      if not sm.nimToC.hasKey(nimPath):
-        sm.nimToC[nimPath] = JsAssoc[int, seq[seq[SourcemapPathIDLine]]]{}
-
-    # Build mappings: mappings is an array indexed by nimPathID
-    # Each element is an object with line numbers as keys -> array of groups
-    let rawMappings = raw.mappings
-    let mappingsLen = cast[int](rawMappings.length)
-    for nimPathID in 0 ..< mappingsLen:
-      let pathMapping = rawMappings[nimPathID]
-      if pathMapping.isNil:
-        continue
-      if not sm.nimSources.hasKey(nimPathID):
-        continue
-      let nimPath = sm.nimSources[nimPathID]
-      let lineKeys = jsObjectKeys(pathMapping)
-      for lineStr in lineKeys:
-        let nimLine = parseInt($lineStr)
-        let groups = pathMapping[lineStr]
-        let groupsLen = cast[int](groups.length)
-        var parsedGroups: seq[seq[SourcemapPathIDLine]] = @[]
-        for gi in 0 ..< groupsLen:
-          let group = groups[gi]
-          let groupLen = cast[int](group.length)
-          var parsedGroup: seq[SourcemapPathIDLine] = @[]
-          for pi in 0 ..< groupLen:
-            let pair = group[pi]
-            let pathIDLine: SourcemapPathIDLine = [cast[int](pair[0]), cast[int](pair[1])]
-            parsedGroup.add(pathIDLine)
-            # Also build the reverse mapping: C -> Nim
-            let cPathID = pathIDLine[0]
-            let cLine = pathIDLine[1]
-            if sm.cSources.hasKey(cPathID):
-              let cPath = sm.cSources[cPathID]
-              if sm.cToNim.hasKey(cPath):
-                sm.cToNim[cPath][cLine] = [nimPathID, nimLine]
-          parsedGroups.add(parsedGroup)
-        if sm.nimToC.hasKey(nimPath):
-          sm.nimToC[nimPath][nimLine] = parsedGroups
-
-    sm.loaded = true
-    console.log cstring"sourcemap: loaded successfully from ", sourcemapPath
-  except:
-    console.log cstring"sourcemap: failed to load: ", cstring(getCurrentExceptionMsg())
-
-  return sm
-
 proc handleDapReplaySelected(response: JsObject; sendInitialize: bool) =
   let trace = response["trace"].to(Trace)
   # The replay the Backend Manager answered for this tab: its requests are
@@ -3209,7 +3114,7 @@ proc onTraceLoaded(
     rawDiffIndex=cstring,
     # traceKind=cstring,
     dontAskAgain=bool,
-    sourcemapPath=cstring,
+    sourcemapPaths=seq[cstring],
     macroSourcemapPath=cstring,
     visualReplayAvailable=bool,
     visualReplayPlayerUrl=cstring,
@@ -3251,10 +3156,9 @@ proc onTraceLoaded(
   duration("traceLoaded")
 
   # Load the Nim-to-C sourcemap for ViewTargetSource line synchronization.
-  # The index process sends the path; the renderer reads and parses it asynchronously.
-  if data.trace.lang == LangNim and not response.sourcemapPath.isNil and
-     response.sourcemapPath.len > 0:
-    data.activeSession.sourcemap = await loadFrontendSourcemap(response.sourcemapPath)
+  # The index sends all module paths; the renderer reads them through its platform.
+  if data.trace.lang == LangNim and response.sourcemapPaths.len > 0:
+    data.activeSession.sourcemap = await loadFrontendSourcemap(response.sourcemapPaths, readFileUtf8)
   else:
     data.activeSession.sourcemap = FrontendSourcemap(loaded: false)
 

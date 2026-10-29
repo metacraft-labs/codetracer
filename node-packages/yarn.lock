@@ -4535,6 +4535,7 @@ __metadata:
     remove: "npm:^0.1.5"
     selenium-webdriver: "npm:^4.38.0"
     socket.io: "npm:^4.8.1"
+    source-map-js: "npm:^1.2.1"
     style-loader: "npm:4.0.0"
     stylus: "npm:^0.64.0"
     tar: "npm:^7.5.2"

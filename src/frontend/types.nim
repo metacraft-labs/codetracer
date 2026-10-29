@@ -1,3 +1,6 @@
+import nim_sourcemap_types
+export nim_sourcemap_types
+
 import
   std/[ jsffi, dom, asyncjs, typetraits, tables ],
   kdom,
@@ -149,23 +152,6 @@ type
   SourceLine* = object
     path*:                  cstring
     line*:                  int
-
-  # Nim-to-C sourcemap for ViewTargetSource line synchronization.
-  # PathIDLine is [pathID, line] — an index into the cSources/nimSources tables.
-  SourcemapPathIDLine* = array[2, int]
-
-  # Frontend-friendly sourcemap representation.
-  # Loaded from ct_sourcemap_* files in the trace nimcache directory.
-  FrontendSourcemap* = ref object
-    # Maps: nim file path -> nim line -> seq of C line groups
-    # Each group is a seq of [cSourceID, cLine] pairs
-    nimToC*:   JsAssoc[cstring, JsAssoc[int, seq[seq[SourcemapPathIDLine]]]]
-    # Maps: c file path -> c line -> [nimSourceID, nimLine]
-    cToNim*:   JsAssoc[cstring, JsAssoc[int, SourcemapPathIDLine]]
-    # ID -> path lookups
-    cSources*:   JsAssoc[int, cstring]
-    nimSources*: JsAssoc[int, cstring]
-    loaded*: bool
 
   Overlay* {.pure.} = enum None, LowLevel, Hit
 

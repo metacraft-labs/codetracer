@@ -1407,6 +1407,7 @@ test_lane_files() {
 			src/frontend/tests/frontend_lang_test.nim \
 			src/frontend/tests/ipc_registry_test.nim \
 			src/frontend/tests/monaco_operations_test.nim \
+			src/frontend/tests/nim_sourcemap_test.nim \
 			src/frontend/tests/run_to_cursor_test.nim \
 			src/frontend/tests/scratchpad_add_dispatch_test.nim \
 			src/frontend/tests/shortcut_dialog_test.nim \

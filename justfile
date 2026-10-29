@@ -1840,6 +1840,7 @@ test-frontend-js:
   # module, so this recipe is where the variable comes from.
   source ci/lib/codetracer-home.sh
   ct_export_scratch_codetracer_home frontend-js
+  nim_sourcemap_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-nim-sourcemap-test.XXXXXX.js")"
   frontend_lang_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-frontend-lang-test.XXXXXX.js")"
   scratchpad_dispatch_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-scratchpad-add-dispatch-test.XXXXXX.js")"
   target_axes_js_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-target-axes-js-test.XXXXXX.js")"
@@ -1854,7 +1855,11 @@ test-frontend-js:
   run_to_cursor_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-run-to-cursor-test.XXXXXX.js")"
   html_sinks_probe="$(mktemp "${TMPDIR:-/tmp}/codetracer-html-sinks-probe.XXXXXX.js")"
   dap_refusal_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-dap-refusal-test.XXXXXX.js")"
-  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$monaco_operations_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$component_ids_across_sessions_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe" "$dap_refusal_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
+  trap 'rm -f "$nim_sourcemap_test" "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$monaco_operations_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$component_ids_across_sessions_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe" "$dap_refusal_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
+  echo "Running Nim Source Map V3 frontend tests..."
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctIndex -d:server \
+    --out:"$nim_sourcemap_test" js src/frontend/tests/nim_sourcemap_test.nim
+  node "$nim_sourcemap_test"
   echo "Running frontend language mapping tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$frontend_lang_test" js src/frontend/tests/frontend_lang_test.nim
