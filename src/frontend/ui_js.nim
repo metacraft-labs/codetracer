@@ -40,7 +40,7 @@ import
   # `layout_config_repair` is dependency-free by design (its own header says
   # so) precisely so a non-Electron caller can use it; `onNoTrace` reads the
   # editor's declared width out of the layout config with it.
-  index/layout_config_repair,
+  index/[layout_config_repair, editor_working_set],
   ui/[test_results, constraints, generated_code, point_list, editor_points],
   # ONE LAYOUT PER MODE. `applyModeLayout` below is this module's only caller;
   # everything about where a mode's arrangement lives is in there.
@@ -1390,78 +1390,40 @@ proc applyModeLayout(data: Data; leaving, entering: LayoutMode) =
       "; the workspace was left as it was"
     return
 
-  # THE EDITOR'S SHARE BELONGS TO A LAYOUT, NOT TO THE SESSION.
-  #
-  # `editorAreaPercent` is read once at boot (see its assignment further down
-  # this file) from the layout the session STARTS in — on noirstudio.dev that
-  # is the edit layout, whose top-level row declares `20%` Filesystem and
-  # `25%` NS9 and leaves `55` unclaimed for the editor. Storing that 55 in
-  # `data.ui` made a per-layout quantity look like a per-session one, and
-  # nothing recomputed it when a different layout was installed.
-  #
-  # `openNewLayoutContainer` (utils.nim) then forces the editor to `wanted`
-  # and rescales its siblings by `(100 - wanted) / others`, so the edit
-  # layout's 55 was being applied to the debug row. Measured on the deployed
-  # page, entering debug mode from `/`:
-  #
-  #     declared   FILES 20   replay 55            (the debug row sums to 75:
-  #     forced     editor 55                        edit mode's number)
-  #     others     75  ->  scale = 45/75 = 0.6
-  #     rendered   FILES 12.4%   editor 54.4%   right 32.6%
-  #
-  # That 12.4% is 179px at 1440, and three tabs of pin+close do not fit in it:
-  # VCS and TESTS rendered with their labels at LITERALLY zero width, as two
-  # anonymous pin/close pairs. It is the reported "the edit panels stay and the
-  # whole UI gets crammed", and the "pane at zero width" is those labels.
-  #
-  # Asking the ENTERING layout the same question the boot line asks makes the
-  # debug row answer `25` — the share its pruned NS9 column left — so the
-  # siblings scale by 75/75 and Filesystem keeps the 20% it declares.
-  #
-  # The degenerate answers are the safe ones, and both mean "do not interfere":
-  # `0` for a row already accounting for 100% — which is every `mlsSession`
-  # restore, because `saveLayout()` returns a config GoldenLayout has already
-  # renormalised, and re-forcing a width there would overwrite the arrangement
-  # the user left — and `-1` for a config the question is not well-defined
-  # over, which `max(0, ...)` folds into the same `0`.
-  data.ui.editorAreaPercent = max(0, unclaimedTopLevelPercent(resolution.config))
+  # The mode owns the pane arrangement; the session owns the live documents.
+  # A saved mode layout may predate an open or close in the other mode.
+  let activeEditor = data.services.editor.active
+  let liveEditors = cast[js](data.ui.layoutConfig.fromResolved(
+    data.ui.layout.saveLayout()))
+  var editorStates: seq[tuple[editor, state: JsObject]] = @[]
+  for _, component in data.ui.editors:
+    if not component.isNil and not component.monacoEditor.isNil:
+      let monaco = component.monacoEditor.toJs
+      editorStates.add (monaco, monaco.saveViewState())
 
-  # CONSTRUCT WHAT THE LAYOUT NAMES BEFORE HANDING IT OVER. GoldenLayout builds
-  # containers, not components: a layout installed after startup names panes
-  # `renderer.createUIComponents` never made, and they come up empty. Only the
-  # ones that do not exist yet — constructing a component that already exists
-  # makes a SECOND one, and for the menu that is a second render-gate owner.
-  data.constructDeclaredComponents(resolution.config)
-
-  # A REGISTER OR STORE ENTRY IS A *RESOLVED* CONFIG; A DEFAULT IS NOT.
-  #
-  # `saveLayout()` returns resolved, `loadLayout` wants unresolved, and the Nim
-  # type cannot tell them apart (`restoreSavedLayout`'s header). Handing a
-  # resolved config straight to `loadLayout` is the `e.trimStart is not a
-  # function` defect; handing the bundled default through `fromResolved` is the
-  # same mistake with the arguments swapped. The SOURCE says which it is, which
-  # is one of the reasons `resolveLayoutForMode` reports it.
-  var applied = false
-  case resolution.source
-  of mlsSession:
-    # The REGISTER holds `saveLayout()` output, which is resolved.
-    applied = data.restoreSavedLayout(
-      cast[GoldenLayoutResolvedConfig](resolution.config),
-      "the " & $entering & " layout")
-  of mlsStored, mlsBundled, mlsBundledAfterFailure:
-    # The STORE and the bundled default are both UNRESOLVED — the store
-    # because `rememberModeLayout` converts on the way in (see its comment),
-    # the default because it is plain JSON. `loadLayout` takes exactly this
-    # shape, and putting either through `fromResolved` is the same mistake
-    # with the arguments swapped.
+  proc install(config: js; resolved: bool): bool =
     try:
-      let resolved = cast[GoldenLayoutResolvedConfig](resolution.config)
-      data.swapLayout(resolved)
-      data.ui.resolvedConfig = resolved
-      applied = true
+      let unresolved = if resolved:
+          cast[js](data.ui.layoutConfig.fromResolved(
+            cast[GoldenLayoutResolvedConfig](config)))
+        else: config
+      data.ui.editorAreaPercent = max(0, unclaimedTopLevelPercent(unresolved))
+      let merged = carryEditorWorkingSet(unresolved, liveEditors,
+                                        ord(Content.EditorView), activeEditor)
+      data.constructDeclaredComponents(merged)
+      data.swapLayout(cast[GoldenLayoutResolvedConfig](merged))
+      data.ui.resolvedConfig = data.ui.layout.saveLayout()
+      return true
     except:
-      cerror "mode-layout: GoldenLayout rejected the default " & $entering &
+      cerror "mode-layout: could not install the " & $entering &
         " layout: " & getCurrentExceptionMsg()
+      return false
+
+  # Only the in-session register is resolved; the store and bundled default
+  # already have loadLayout's unresolved shape. The installer also computes
+  # the entering layout's editor share, so Edit's width cannot squeeze Debug's
+  # auxiliary panes, and constructs any components that mode has not mounted.
+  var applied = install(resolution.config, resolution.source == mlsSession)
 
   if not applied and resolution.source in {mlsSession, mlsStored}:
     # WHAT THE USER LEFT COULD NOT BE PUT BACK — degrade to the mode's default
@@ -1473,14 +1435,7 @@ proc applyModeLayout(data: Data; leaving, entering: LayoutMode) =
     mode_layouts.forgetStoredLayoutForMode(entering)
     let fallback = mode_layouts.bundledLayoutForMode(entering)
     if not fallback.isNil:
-      try:
-        let resolved = cast[GoldenLayoutResolvedConfig](fallback)
-        data.swapLayout(resolved)
-        data.ui.resolvedConfig = resolved
-        applied = true
-      except:
-        cerror "mode-layout: the default " & $entering &
-          " layout was also rejected: " & getCurrentExceptionMsg()
+      applied = install(fallback, false)
     data.reportLayoutDegraded(
       "The " & (if mode_layouts.isEditingMode(entering): "edit" else: "debug") &
       " layout could not be restored and was reset to the default. " &
@@ -1502,6 +1457,18 @@ proc applyModeLayout(data: Data; leaving, entering: LayoutMode) =
   # Cleared on any applied swap, and only then: a transition that could not
   # apply a layout has not invalidated anything.
   if applied:
+    # Mount callbacks visit every tab and can leave the global active pointer
+    # on the last one constructed, even when another stack/tab was selected.
+    if activeEditor.len > 0 and data.ui.editors.hasKey(activeEditor):
+      let item = data.ui.editors[activeEditor].layoutItem
+      if not item.isNil:
+        if not item.parent.isNil and item.parent.isStack:
+          item.parent.setActiveContentItem(item)
+        data.ui.activeEditorPanel = item.parent
+      data.services.editor.active = activeEditor
+    for saved in editorStates:
+      if not saved.state.isNil and not saved.state.isUndefined:
+        saved.editor.restoreViewState(saved.state)
     data.ui.editModeHiddenPanels.setLen(0)
     data.ui.layoutBeforeAuxiliaryClose = nil
 

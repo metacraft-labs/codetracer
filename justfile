@@ -4315,12 +4315,9 @@ test-low-level-code-row-click: build-storybook-components
 # strip the panes are actually in, because a pane exiled at zero width
 # satisfies a presence check exactly as a working one does.
 #
-# ONE ARM SKIPS HERE, LOUDLY AND COUNTED SEPARATELY. Without a replay engine
-# and a Noir toolchain — both OPTIONAL bundle assets this recipe does not build
-# — debug mode reaches no session and opens no source file, so the debug-mode
-# editor has nothing to measure. The gate reads that from the product (the edit
-# legs carry a source tab, the debug legs carry none) and skips rather than
-# reddening; a permanently red lane stops being read.
+# The already-open source must survive every transition, even without replay
+# tools. Supplied-report tests first check that missing tabs or unpainted
+# editors fail the gate; the browser then measures the real workspace.
 #
 # Reuses an assembled bundle when CT_WEB_BUNDLE_DIR is set; assembles one
 # otherwise (~80s), then ~20s in the browser.
@@ -4329,6 +4326,7 @@ test-mode-layout-in-browser:
   set -euo pipefail
   mkdir -p test-logs
   exec > >(tee test-logs/test-mode-layout-in-browser.log) 2>&1
+  python3 ci/test/mode-layout-in-browser-test.py
   bash ci/test/mode-layout-in-browser.sh
 
 # A TEST ROW OFFERS TWO ACTIONS AND ONLY ONE OF THEM RE-RUNS.
