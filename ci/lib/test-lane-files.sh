@@ -1062,6 +1062,7 @@ test_lane_files() {
 		# Entry and history jump reach the active tab's views mediator, not
 		# the one that was active when the toolbar's routes were built.
 		echo src/frontend/tests/debug_toolbar_follows_active_tab_test.nim
+		echo src/frontend/tests/agent_editor_selection_dom_test.nim
 		echo src/frontend/tests/origin_chain_wiring_test.nim
 		# `session_viewmodels_test.nim` holds each window tab to owning its
 		# ViewModels: the panel host renders a tab's panes over that tab's
@@ -1148,6 +1149,7 @@ test_lane_files() {
 		# leaves the keyboard in a text field being typed in. Where the
 		# keyboard goes is decided only by a browser.
 		echo src/frontend/tests/editor_focus_chromium_test.nim
+		echo src/frontend/tests/agent_editor_selection_hover_chromium_test.nim
 		;;
 
 	main-process)
