@@ -7734,17 +7734,17 @@
     "reprobuild-packages": {
       "flake": false,
       "locked": {
-        "lastModified": 1793293765,
-        "narHash": "sha256-4aoFDdxDLLaWxtBakmq7HOtniQ9FtSJ/HaLzDvE+o0g=",
+        "lastModified": 1793295574,
+        "narHash": "sha256-2ARF7hQQvieMwyuFecVRyj9D+kcINNxmMvvN42m+s4s=",
         "owner": "metacraft-labs",
         "repo": "reprobuild-packages",
-        "rev": "344e268e12de75c38bd1c6ad4620e60bf6548ab8",
+        "rev": "7cbfee303fa2ae433b46c2a6151abd6f50ca7c29",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "reprobuild-packages",
-        "rev": "344e268e12de75c38bd1c6ad4620e60bf6548ab8",
+        "rev": "7cbfee303fa2ae433b46c2a6151abd6f50ca7c29",
         "type": "github"
       }
     },
