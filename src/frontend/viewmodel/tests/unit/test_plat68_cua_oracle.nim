@@ -364,7 +364,11 @@ suite "PLAT-68 KL-3: §3.10's legacy fallbacks, read the way §3.10 says":
     var otherRows = 0
     var documented: seq[string] = @[]
     var inTable = false
-    for line in CuaDoc.splitLines():
+    # Walked through a `let`, never the `const`: an inline iterator over a
+    # `const` rebuilds the whole literal at every character access on the JS
+    # backend (`ci/test/js-const-iteration-test.sh` says why and refuses it).
+    let cuaText = CuaDoc
+    for line in cuaText.splitLines():
       if line.startsWith("| Operation | CUA chord | Legacy fallback"):
         inTable = true
         continue

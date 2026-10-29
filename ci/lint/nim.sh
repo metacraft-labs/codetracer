@@ -58,6 +58,14 @@ lint_step "test-lane runner: recipe-owned lanes are refused, by name" \
 lint_step "test-lane backends: JS-only ViewModel suites run in vm-unit-js, never in vm-unit" \
 	bash ci/test/vm-unit-js-only-suites-test.sh
 
+# The JS lanes' WALL TIME, checked on the source rather than the clock: a `for`
+# loop over a `staticRead` const re-materialises the whole string at every
+# character access under `nim js` (an inline iterator gets the constant's
+# literal substituted for its parameter), which made one `vm-unit-js` case take
+# eighteen minutes. Pure bash + awk over the JS lanes' files, seconds.
+lint_step "JS lanes: no for-loop iterates a staticRead const (quadratic on the JS backend)" \
+	bash ci/test/js-const-iteration-test.sh
+
 # THE SAME QUESTION, ONE FILE EXTENSION OVER. `test-lane-coverage.sh` is scoped
 # in its own first line to "any test-shaped **Nim** file", and `ci/test/` holds
 # sixty-three SHELL gates that nothing measured. Twelve of them were reachable

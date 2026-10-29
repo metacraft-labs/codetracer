@@ -1541,7 +1541,11 @@ suite "IsoNim State Panel — watches in the list":
       check iconContent.len > 0
 
     var originIconRules: seq[string] = @[]
-    for line in resourceTupfile.splitLines:
+    # Walked through a `let`, never the `const`: an inline iterator over a
+    # `const` rebuilds the whole literal at every character access on the JS
+    # backend (`ci/test/js-const-iteration-test.sh` says why and refuses it).
+    let resourceTupfileText = resourceTupfile
+    for line in resourceTupfileText.splitLines:
       if "origin-icons" in line:
         originIconRules.add(line)
     check originIconRules == @[expectedTupRule]

@@ -350,7 +350,11 @@ suite "a browser-produced MemoryTrace becomes the files the engine reads":
     ## bundle, and `std/os` is a module whose browser behaviour is
     ## `raiseAssert`. Reasoning about which of its procs happen to be safe is
     ## how this comes back.
-    const source = staticRead("../../platform/replay_engine_vfs.nim")
+    const Source = staticRead("../../platform/replay_engine_vfs.nim")
+    # Walked through a `let`, never the `const`: an inline iterator over a
+    # `const` rebuilds the whole literal at every character access on the JS
+    # backend (`ci/test/js-const-iteration-test.sh` says why and refuses it).
+    let source = Source
     var importsOs = false
     for line in source.splitLines:
       let trimmed = line.strip
