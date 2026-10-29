@@ -187,6 +187,8 @@ when defined(js):
   proc setInputNodeValue(node: isonim_dom.Node; value: cstring) {.importjs: "#.value = #".}
   proc setNodeDisplay(node: isonim_dom.Node; display: cstring)
       {.importjs: "#.style.display = #".}
+  proc focusAndSelectSoon(node: isonim_dom.Node)
+      {.importjs: "((n) => setTimeout(() => { n.focus(); n.select(); }, 0))(#)".}
 
   proc decorateSearchField(vm: SearchResultsVM;
                            inputEl, clearBtnEl: isonim_dom.Element) =
@@ -200,6 +202,18 @@ when defined(js):
       if $inputNode.inputNodeValue() != q:
         inputNode.setInputNodeValue(cstring(q))
       clearNode.setNodeDisplay(if q.len > 0: cstring"flex" else: cstring"none")
+    # PLAT-70 Part D (§5.2): `Ctrl+Shift+F`, `:grep` alone — the field
+    # focused on the request's seed, its text SELECTED so typing replaces it.
+    # Each request once (`fieldHandled`), a panel mounted by the request
+    # included.
+    createRenderEffect proc() =
+      let req = vm.fieldRequest.val
+      if req.revision > vm.fieldHandled:
+        vm.fieldHandled = req.revision
+        inputNode.setInputNodeValue(cstring(req.seed))
+        clearNode.setNodeDisplay(if req.seed.len > 0: cstring"flex"
+                                 else: cstring"none")
+        inputNode.focusAndSelectSoon()
     isonim_dom.addEventListener(inputNode, cstring"keydown",
       proc(ev: isonim_dom.Event) =
         if ev.eventKeyCode() == 13:

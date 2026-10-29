@@ -1118,6 +1118,9 @@ proc interactive(command: TuiCommand): int =
     session.stepSearchResult(rt, delta)
   app.toggleSearchOption = proc(operation: string): string =
     session.toggleSearchOption(rt, operation)
+  # PLAT-70 Part D: the field's seed (`Ctrl+Shift+F`, `:grep` alone).
+  app.openFindInFilesField = proc(selection: string): string =
+    session.openFindInFilesField(rt, selection)
   # PLAT-54: Agent Activity — a press runs the row's action through the
   # session's `AgentActivityVM`; `/ai <prompt>` sends a prompt to the agent.
   app.agentPress = proc(row, button: int): string =
