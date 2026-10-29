@@ -1106,6 +1106,8 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addMany("RequestPanelVM", ["windowStart", "windowTotal"],
     vscRendererLocal,
     "The window of requests this viewer's pane holds and the engine's count.")
+  entries.addEntry("RequestSpansStore", "windowRevision", vscRendererLocal,
+    "Successful follow-poll invalidation of this viewer's request window: request bookkeeping.")
   entries.addEntry("RequestSpansStore", "recordedTotal", vscBackendAuthoritative,
     "How many requests the recording served.")
   entries.addEntry("ReplayDataStore", "symbols", vscBackendAuthoritative,

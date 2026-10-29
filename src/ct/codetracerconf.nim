@@ -890,6 +890,11 @@ type
           "(env CT_OS_SIMULATION; the flag wins). " &
           "Unset: the replay backend's default"
       .}: Option[string]
+      replayFollowRequestSpans* {.
+        name: "follow-request-spans",
+        desc: "Follow requests in a growing container: '1' or '0' " &
+          "(env CT_FOLLOW_REQUEST_SPANS; the flag wins). Default off"
+      .}: Option[string]
     of StartupCommand.run:
       runTracePathOrId* {.
         argument

@@ -36,7 +36,11 @@ fn fixture_ct() -> PathBuf {
 }
 
 fn build_handler(ct: &Path) -> Handler {
-    assert!(ct.is_file(), "fixture trace missing at {} — no silent skip", ct.display());
+    assert!(
+        ct.is_file(),
+        "fixture trace missing at {} — no silent skip",
+        ct.display()
+    );
     let reader: Arc<dyn TraceReader> =
         Arc::new(CTFSTraceReader::open(ct).unwrap_or_else(|e| panic!("CTFS open failed for {}: {e}", ct.display())));
     let mut handler = Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), reader, false);
@@ -79,8 +83,15 @@ fn seek_to_geid_goes_to_the_named_step_of_a_materialized_trace() {
     let mut handler = build_handler(&ct);
     for step in [5_u64, 2, 7] {
         let (moved, response) = seek(&mut handler, step);
-        assert_eq!(handler.step_id, StepId(step as i64), "seek-to-geid {step} must land on step {step}");
-        assert!(moved.is_some(), "the move is announced (ct/complete-move) for step {step}");
+        assert_eq!(
+            handler.step_id,
+            StepId(step as i64),
+            "seek-to-geid {step} must land on step {step}"
+        );
+        assert!(
+            moved.is_some(),
+            "the move is announced (ct/complete-move) for step {step}"
+        );
         let response = response.expect("the request is answered");
         assert_eq!(
             response.get("success").and_then(JsonValue::as_bool),
