@@ -11,7 +11,8 @@
 ##   <N bytes of JSON>
 ##
 ## The implementation uses **synchronous blocking I/O** — there are no
-## background threads or async loops.  This is intentional: the primary
+## async loops. An owned worker independently drains stderr; it never reads
+## or writes DAP. This is intentional: the primary
 ## use-case is sequential integration tests where simplicity trumps
 ## concurrency.  Each ``sendDapRequest`` call blocks until the matching
 ## response arrives, buffering any interleaved events for later retrieval.
@@ -117,6 +118,7 @@ import std/[json, monotimes, osproc, streams, strutils, os, times,
 when defined(posix):
   import std/posix
 import backend_service
+import stderr_capture
 
 type
   DapReadBound* = object
@@ -207,6 +209,9 @@ type
     ## DAP request/response communication over pipes.
     process*: Process
       ## The replay-server child process.
+    stderrCapture: StderrCapture
+    closedDiagnostics: string
+      ## A bounded stderr tail retained even after close releases the pipe.
     seqCounter: int
       ## Monotonically increasing sequence number for outgoing requests.
     closed: bool
@@ -490,9 +495,8 @@ proc readOneMessage(backend: DapStdioBackend; deadline: ReadDeadline;
   var contentLength = -1
   # Read headers — DAP allows multiple headers but in practice only
   # Content-Length is sent.  We loop until we hit the empty \r\n line.
-  # `replay-server` runs with `poStdErrToStdOut`, so its diagnostics arrive on
-  # this stream as lines that are neither `Content-Length:` nor empty; they are
-  # skipped here exactly as they always were.
+  # Unknown DAP headers are permitted. Engine diagnostics are read from a
+  # separate pipe; skipping lines cannot repair bytes interleaved into a body.
   while true:
     let headerLine = backend.readHeaderLine(deadline, consumed)
     if headerLine.len == 0:
@@ -508,6 +512,12 @@ proc readOneMessage(backend: DapStdioBackend; deadline: ReadDeadline;
       "DapStdioBackend: missing Content-Length header in DAP message")
 
   parseJson(backend.readBody(contentLength, deadline, consumed))
+
+proc diagnosticTail*(backend: DapStdioBackend): string =
+  ## The engine's recent stderr, separate from protocol bytes. A truncated
+  ## tail explicitly says so. Reading it does not consume or reorder DAP.
+  if backend.closed: backend.closedDiagnostics
+  else: backend.stderrCapture.diagnosticTail()
 
 proc readDapMessage*(backend: DapStdioBackend;
                      operation = false): JsonNode =
@@ -540,19 +550,27 @@ proc readDapMessage*(backend: DapStdioBackend;
   try:
     result = readOneMessage(backend, deadline, consumed)
   except DapStalledError, DapInterruptedError:
+    let error = getCurrentException()
     # AN ABANDONED OPERATION LEAVES ITS ANSWER BEHIND, whether the clock or
     # the user gave up on it. See `abandonedOperation`.
     if operation:
       backend.abandonedOperation = true
     if consumed:
       backend.broken = true
+    if error of DapStalledError:
+      let diagnostic = backend.diagnosticTail()
+      if diagnostic.len > 0:
+        error.msg.add("\nreplay-server stderr:\n" & diagnostic)
     raise
-  except CatchableError:
+  except CatchableError as error:
     # ABANDONED PART WAY THROUGH: the stream is no longer at a message
     # boundary, so nothing after this can be parsed. Say so once, here, rather
     # than letting every later read report a different piece of nonsense.
     if consumed:
       backend.broken = true
+    let diagnostic = backend.diagnosticTail()
+    if diagnostic.len > 0:
+      error.msg.add("\nreplay-server stderr:\n" & diagnostic)
     raise
 
 proc writeDapMessage*(backend: DapStdioBackend; msg: JsonNode) =
@@ -829,7 +847,8 @@ proc startReplayServer*(replayServerBin: string;
   ## ``launch`` request.
   ##
   ## The child's stdin/stdout are captured for DAP communication.
-  ## stderr is inherited so server diagnostics appear in the test output.
+  ## stderr is drained independently, retaining a bounded diagnostic tail.
+  ## DAP framing cannot tolerate diagnostic writes inside a header or body.
   if not fileExists(replayServerBin):
     raise newException(IOError,
       "DapStdioBackend: replay-server binary not found at: " & replayServerBin)
@@ -839,15 +858,23 @@ proc startReplayServer*(replayServerBin: string;
   let process = startProcess(
     replayServerBin,
     args = args,
-    options = {poUsePath, poStdErrToStdOut},
+    options = {poUsePath},
   )
 
-  DapStdioBackend(
-    process: process,
-    seqCounter: 0,
-    eventQueue: @[],
-    bound: bound,
-  )
+  try:
+    result = DapStdioBackend(
+      process: process,
+      seqCounter: 0,
+      eventQueue: @[],
+      bound: bound,
+      stderrCapture: startStderrCapture(process.errorHandle),
+    )
+  except:
+    if process.running:
+      process.kill()
+      discard process.waitForExit()
+    process.close()
+    raise
 
 proc isClosed*(backend: DapStdioBackend): bool =
   ## Whether `close` has run: the child was ended and its handles released.
@@ -861,18 +888,20 @@ proc close*(backend: DapStdioBackend) =
   if backend.closed:
     return
   backend.closed = true
-  if backend.process.running:
-    try:
-      backend.process.inputStream.close()
-    except:
-      discard
-    # Give the process a moment to exit, then force-kill.
-    try:
-      let code = backend.process.waitForExit(timeout = 3000)
-      discard code
-    except:
-      backend.process.terminate()
-  backend.process.close()
+  try:
+    if backend.process.running:
+      try:
+        backend.process.inputStream.close()
+      except CatchableError:
+        discard
+      # waitForExit returns -1 on timeout; it does not raise. Reap a child
+      # that ignored stdin EOF before releasing its handles.
+      if backend.process.waitForExit(timeout = 3000) == -1:
+        backend.process.kill()
+        discard backend.process.waitForExit()
+  finally:
+    backend.closedDiagnostics = backend.stderrCapture.stop()
+    backend.process.close()
 
 # ---------------------------------------------------------------------------
 # BackendService adapter
