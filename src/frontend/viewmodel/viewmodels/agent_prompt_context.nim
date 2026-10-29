@@ -31,7 +31,7 @@ const
   AgentContextPathsHeading* = "Context paths:"
     ## The first line of the header a prompt with attachments carries.
   AgentNoEditorSelectionReason* = "no file is open in the editor"
-    ## Why *Editor selection* is disabled on a native front-end with no file
+    ## Why *Editor selection* is disabled on a front-end with no file
     ## shown in its editor.
 
 func label*(item: AgentAddContextItem): string = $item
@@ -54,7 +54,7 @@ func contextPromptText*(text: string; paths: openArray[string]): string =
   result.add text
 
 func editorSelectionContext*(path: string; first, last: int): string =
-  ## What *Editor selection* attaches natively: the editor's file and the
+  ## What *Editor selection* attaches: the editor's file and the
   ## lines its selection covers (1-based, inclusive), `path:first-last` — or
   ## `path:line` for a selection on one line (the caret's line when nothing is
   ## selected). "" when no file is shown.
