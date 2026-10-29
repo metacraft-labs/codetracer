@@ -235,6 +235,9 @@ impl RequestSpanSource {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoadRequestSpansResponse {
+    /// Explicit replay-follow policy, independent of live-debugger mode.
+    /// Sealing a chunk does not establish that a producer has finished.
+    pub open: bool,
     /// The requested page, ascending by `id`.
     pub requests: Vec<RequestRecord>,
     /// How many records match the filters in total, *before* paging. Lets the
@@ -315,6 +318,7 @@ impl RequestSpans {
         }
 
         LoadRequestSpansResponse {
+            open: false,
             requests: page,
             total,
             next_span_id,

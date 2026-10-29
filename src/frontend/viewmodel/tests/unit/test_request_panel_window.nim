@@ -27,20 +27,26 @@ proc drain() = drainPlatformCallbacks()
 type
   Engine = ref object
     sent: seq[(string, JsonNode)]
+    count: int
+    following: bool
+    status: int
+    failNext: bool
 
 proc record(id: int; httpMethod: string): JsonNode =
   %*{"id": id, "httpMethod": httpMethod, "url": "/r/" & $id,
      "statusCode": 200, "durationMs": 1, "startGeid": id * 10,
      "status": "ok"}
 
-proc answer(command: string; args: JsonNode): JsonNode =
+proc answer(e: Engine; command: string; args: JsonNode): JsonNode =
   ## 200 requests, ids 1..200, every third a POST.
   var matching: seq[JsonNode]
   let wantMethod = args{"filters", "method"}.getStr("")
-  for id in 1 .. 200:
+  for id in 1 .. e.count:
     let m = if id mod 3 == 0: "POST" else: "GET"
     if wantMethod.len == 0 or wantMethod == m:
-      matching.add record(id, m)
+      var row = record(id, m)
+      row["statusCode"] = %e.status
+      matching.add row
   case command
   of "ct/load-request-spans":
     let start = args{"start"}.getInt(0)
@@ -48,17 +54,21 @@ proc answer(command: string; args: JsonNode): JsonNode =
     var page = newJArray()
     for i in start ..< min(matching.len, start + limit):
       page.add matching[i]
-    %*{"requests": page, "total": matching.len, "source": "span-stream"}
+    %*{"requests": page, "total": matching.len, "source": "span-stream",
+       "open": e.following}
   else:
     newJObject()
 
 proc setup(live = false): (Engine, ReplayDataStore, RequestPanelVM) =
-  let e = Engine()
+  let e = Engine(count: 200, status: 200)
   let backend = BackendService(
     sendProc: proc(command: string; args: JsonNode): BackendFuture[JsonNode] =
       e.sent.add((command, args))
+      if e.failNext:
+        e.failNext = false
+        return newCompletedFuture[JsonNode](%*{"success": false})
       newCompletedFuture[JsonNode](%*{"type": "response", "success": true,
-                                      "body": answer(command, args)}),
+                                      "body": e.answer(command, args)}),
     onEventProc: proc(handler: EventHandler) = discard)
   let store = createReplayDataStore(backend)
   if live:
@@ -83,6 +93,73 @@ suite "the request panel reads the window it shows":
     check asked[0]["limit"].getInt == 1
     check store.requestSpans.recordedTotal.val == 200
     check vm.requests.val.len == 0
+
+  test "an explicitly followed replay refreshes its bounded window as it grows":
+    let (e, store, vm) = setup()
+    e.following = true
+    e.count = 1
+    store.requestRequestSpansSince()
+    drain()
+    vm.setViewport(Viewport(rows: 20, firstRow: 0))
+    drain()
+    check vm.matchingCount == 1
+    check vm.filteredRequests.val.len == 1
+    e.count = 2
+    store.requestRequestSpansSince()
+    drain()
+    check vm.recordedCount == 2
+    check vm.matchingCount == 2
+    check vm.filteredRequests.val.len == 2
+    # Completion changes a row without changing the count.
+    e.status = 201
+    store.requestRequestSpansSince()
+    drain()
+    check vm.filteredRequests.val[0].statusCode == 201
+    check store.session.val.debugSessionMode == completedReplay
+    check e.sentOf("ct/load-request-spans-since").len == 0
+    for args in e.sentOf("ct/load-request-spans"):
+      check args{"limit"}.getInt > 0
+      check args{"limit"}.getInt <= 20 + LeadRows + TrailRows
+    # A final closed answer refreshes the last changes, then stops polling.
+    e.following = false
+    e.status = 202
+    store.requestRequestSpansSince()
+    drain()
+    check vm.filteredRequests.val[0].statusCode == 202
+    let before = e.sent.len
+    store.requestRequestSpansSince()
+    drain()
+    check e.sent.len == before
+
+  test "following preserves the active filter and selected request":
+    let (e, store, vm) = setup()
+    e.following = true
+    e.count = 6
+    store.requestRequestSpansSince()
+    vm.setViewport(Viewport(rows: 20, firstRow: 0))
+    vm.setFilterMethod("POST")
+    drain()
+    check vm.matchingCount == 2
+    vm.selectRequest(1)
+    check vm.filteredRequests.val[vm.selectedIndex.val].id == 6
+    e.count = 9
+    store.requestRequestSpansSince()
+    drain()
+    check vm.matchingCount == 3
+    check vm.recordedCount == 9
+    check vm.filteredRequests.val[vm.selectedIndex.val].id == 6
+    for row in vm.filteredRequests.val:
+      check row.httpMethod == "POST"
+
+  test "a failed count request remains retryable":
+    let (e, store, _) = setup()
+    e.failNext = true
+    store.requestRequestSpansSince()
+    drain()
+    store.requestRequestSpansSince()
+    drain()
+    check e.sentOf("ct/load-request-spans").len == 2
+    check store.requestSpans.recordedTotal.val == 200
 
   test "an unmeasured view asks nothing":
     let (e, _, _) = setup()
