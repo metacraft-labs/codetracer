@@ -99,7 +99,7 @@ const TRACE_URI_PREFIX: &str = "trace://";
 fn exec_script_tool() -> Value {
     json!({
         "name": "exec_script",
-        "description": "Execute a Python script against a CodeTracer trace file. The `trace` variable is pre-bound to the opened trace.\n\nAvailable trace methods:\n- Navigation: trace.step_over(), step_in(), step_out(), step_back(), continue_forward(), continue_reverse(), goto_ticks(n), goto_geid(geid) (native recordings: go to right after the event with that global event id, such as a span marker or a dive-in link geid)\n- Breakpoints: trace.add_breakpoint(path, line) -> id, remove_breakpoint(id)\n- Watchpoints: trace.add_watchpoint(var) -> id, remove_watchpoint(id). Value-change watchpoints on materialized recordings only: plain variable names, writes only, no conditions. Unsupported requests raise TraceError naming the reason.\n- Tracepoints: trace.add_tracepoint(path, line, expr) -> id, remove_tracepoint(id), run_tracepoints(limit) -> results (limit=None for every hit)\n- Inspection: trace.locals(), evaluate(expr), stack_trace(), location, ticks\n- Value Trace: trace.value_trace(path, line, mode='call') -> ValueTrace with .steps and .loops\n- Data: trace.source_files, calltrace(), events(), terminal_output()\n- Source: trace.read_source(path)\n- MCR diagnostic (MW47): trace.memory_diff(event_a, event_b, max_diffs=16) -> MemoryDiffResult with first_divergence_event_geid for cascade-peeling binary search; works on .ct traces recorded with CT_MEMORY_SNAPSHOT_AT_EVENT=1\n- MCR record-vs-replay diff (MW47 Phase 3): trace.memory_diff_record_vs_replay(replay_snapshot_path, geid, max_diffs=16) -> MemoryDiffResult; compares the recorded snapshot at GEID N against the replayer's single-shot file at the same GEID; agent binary-searches over N to localise where replay diverges from record. Requires re-recording with CT_MEMORY_SNAPSHOT_AT_GEID=N and re-replaying with CT_REPLAY_SNAPSHOT_AT_GEID=N + CT_REPLAY_SNAPSHOT_OUT_PATH.\n\nAll navigation methods raise StopIteration at trace boundaries. Print results to stdout.\n\nUse the optional 'session_id' parameter to preserve execution state (breakpoints, position) across multiple calls — this enables incremental step-by-step debugging.\n\nUse the 'trace_query_api' prompt for the full API reference with data types and examples.",
+        "description": "Execute a Python script against a CodeTracer trace file. The `trace` variable is pre-bound to the opened trace.\n\nAvailable trace methods:\n- Navigation: trace.step_over(), step_in(), step_out(), step_back(), continue_forward(), continue_reverse(), goto_ticks(n), goto_geid(geid) (native recordings: go to right after the event with that global event id, such as a span marker or a dive-in link geid)\n- Breakpoints: trace.add_breakpoint(path, line) -> id, remove_breakpoint(id)\n- Watchpoints: trace.add_watchpoint(var) -> id, remove_watchpoint(id). Value-change watchpoints on materialized recordings only: plain variable names, writes only, no conditions. Unsupported requests raise TraceError naming the reason.\n- Tracepoints: trace.add_tracepoint(path, line, expr) -> id, remove_tracepoint(id), run_tracepoints(limit) -> results (limit=None for every hit)\n- Inspection: trace.locals(), evaluate(expr), stack_trace(), location, ticks\n- Value Trace: trace.value_trace(path, line, mode='call') -> ValueTrace with .steps and .loops\n- Data: trace.source_files, calltrace(), events(), terminal_output()\n- Source: trace.read_source(path)\n- MCR diagnostic (MW47): trace.memory_diff(event_a, event_b, max_diffs=16) -> MemoryDiffResult with first_divergence_event_geid for cascade-peeling binary search; works on .ct traces recorded with CT_MEMORY_SNAPSHOT_AT_EVENT=1\n- MCR record-vs-replay diff (MW47 Phase 3): trace.memory_diff_record_vs_replay(replay_snapshot_path, geid, max_diffs=16) -> MemoryDiffResult; compares the recorded snapshot at GEID N against the replayer's single-shot file at the same GEID; agent binary-searches over N to localise where replay diverges from record. Requires re-recording with CT_MEMORY_SNAPSHOT_AT_GEID=N and re-replaying with CT_REPLAY_SNAPSHOT_AT_GEID=N + CT_REPLAY_SNAPSHOT_OUT_PATH.\n\nAll navigation methods raise StopIteration at trace boundaries. Print results to stdout.\n\nUnless the server was started with --allow-unconfined-scripts, the script runs confined: it may write only its working directory (a scratch directory removed after the call), opens no network or socket connection, and queries only this trace; where the host cannot confine it, the call is refused. Standard output and standard error are each kept up to 1 MiB; a script that writes more is stopped.\n\nUse the optional 'session_id' parameter to preserve execution state (breakpoints, position) across multiple calls — this enables incremental step-by-step debugging.\n\nUse the 'trace_query_api' prompt for the full API reference with data types and examples.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -113,8 +113,10 @@ fn exec_script_tool() -> Value {
                 },
                 "timeout_seconds": {
                     "type": "number",
-                    "description": "Maximum execution time in seconds (default: 120)",
-                    "default": 120
+                    "description": "Maximum execution time in seconds (default: 120, at most 600; a larger value is refused)",
+                    "default": 120,
+                    "exclusiveMinimum": 0,
+                    "maximum": 600
                 },
                 "session_id": {
                     "type": "string",
@@ -963,6 +965,11 @@ pub struct McpServerConfig {
     /// backends behind every other tool (see [`HostSourceReads`]).  Set
     /// only by `trace mcp --allow-host-source-reads`.
     pub host_source_reads: HostSourceReads,
+    /// Whether `exec_script` runs a script with the daemon's own privileges
+    /// rather than confined (`crate::script_confinement`).  Set only by
+    /// `trace mcp --allow-unconfined-scripts`, a command-line option, so no
+    /// parent process's environment and no tool argument can set it.
+    pub unconfined_scripts: bool,
 }
 
 /// Whether a recording's listed sources may be read from this host: by
@@ -1823,6 +1830,18 @@ fn handle_resource_templates_list(id: &Value) -> Value {
 /// is self-contained for the MCP server module.
 #[cfg(unix)]
 async fn connect_to_daemon(config: &McpServerConfig) -> Result<UnixStream, String> {
+    let stream = connect_to_daemon_unverified(config).await?;
+    // The daemon runs this server's scripts and opens its traces: it must be
+    // a process of this user, not one that took the socket's place.
+    crate::backend_manager::check_peer_is_this_user(&stream)
+        .map_err(|refusal| format!("refusing the daemon's socket: {refusal}"))?;
+    Ok(stream)
+}
+
+/// Connects to the daemon's socket (starting the daemon when none answers),
+/// without checking who answered; [`connect_to_daemon`] checks.
+#[cfg(unix)]
+async fn connect_to_daemon_unverified(config: &McpServerConfig) -> Result<UnixStream, String> {
     // Check for CODETRACER_DAEMON_SOCK override (used in tests).
     if let Ok(sock_path) = std::env::var("CODETRACER_DAEMON_SOCK") {
         let path = PathBuf::from(&sock_path);
@@ -2112,6 +2131,21 @@ async fn fetch_trace_metadata(
     })
 }
 
+/// The `timeout_seconds` an `exec_script` caller set, in whole seconds: a
+/// positive number of at most `MAX_TIMEOUT_SECS`, rounded up.
+fn parse_script_timeout(value: &Value) -> Result<u64, String> {
+    let max = crate::script_executor::MAX_TIMEOUT_SECS;
+    match value.as_f64() {
+        Some(seconds) if seconds.is_finite() && seconds > 0.0 && seconds <= max as f64 => {
+            Ok(seconds.ceil() as u64)
+        }
+        _ => Err(format!(
+            "timeout_seconds must be a number of seconds greater than 0 and at most {max}; \
+             got {value}"
+        )),
+    }
+}
+
 /// Handles the `exec_script` tool.
 ///
 /// Sends a `ct/exec-script` request to the daemon and returns the
@@ -2168,10 +2202,17 @@ async fn handle_exec_script(
         }
     };
 
-    let timeout_seconds = arguments
-        .and_then(|a| a.get("timeout_seconds"))
-        .and_then(Value::as_u64)
-        .unwrap_or(DEFAULT_SCRIPT_TIMEOUT);
+    // The timeout is the caller's (model output, for an agent): at most the
+    // ceiling, else refused rather than shortened, so the caller knows.
+    let timeout_seconds = match arguments.and_then(|a| a.get("timeout_seconds")) {
+        None | Some(Value::Null) => DEFAULT_SCRIPT_TIMEOUT,
+        Some(value) => match parse_script_timeout(value) {
+            Ok(seconds) => seconds,
+            Err(message) => {
+                return jsonrpc_result(id, tool_result_error(&message));
+            }
+        },
+    };
 
     // Optional session ID for persistent debugging sessions.  When provided,
     // execution state (breakpoints, position) is preserved across calls.
@@ -2202,6 +2243,9 @@ async fn handle_exec_script(
     }));
     if let Some(sid) = session_id {
         exec_args["sessionId"] = json!(sid);
+    }
+    if config.unconfined_scripts {
+        exec_args["unconfinedScripts"] = json!(true);
     }
     let resp = match dap_request(
         &mut stream,
@@ -2261,6 +2305,24 @@ async fn handle_exec_script(
         .get("timedOut")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+
+    if body
+        .get("outputLimitExceeded")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return jsonrpc_result(
+            id,
+            tool_result_error_with_timing(
+                &format!(
+                    "Script stopped: it wrote more than {} bytes to one output stream. \
+                     Print less, or summarise in the script. Output kept: {stdout}",
+                    crate::script_executor::MAX_SCRIPT_OUTPUT_BYTES
+                ),
+                duration_ms,
+            ),
+        );
+    }
 
     if timed_out {
         return jsonrpc_result(
@@ -3582,7 +3644,7 @@ impl ResolvedSource {
 fn read_resolved_source(resolved: &ResolvedSource) -> Result<String, String> {
     use std::io::Read;
     let location = resolved.location();
-    let mut file = match resolved {
+    let file = match resolved {
         ResolvedSource::Embedded {
             files_root,
             relative,
@@ -3590,11 +3652,23 @@ fn read_resolved_source(resolved: &ResolvedSource) -> Result<String, String> {
         ResolvedSource::Host(path) => std::fs::File::open(path),
     }
     .map_err(|e| format!("failed to read {}: {e}", location.display()))?;
+    // A source file the recording carries is recording content of any size:
+    // read at most one byte past the limit, and refuse a longer file.
     let mut content = String::new();
-    file.read_to_string(&mut content)
+    file.take(MAX_SOURCE_FILE_BYTES + 1)
+        .read_to_string(&mut content)
         .map_err(|e| format!("failed to read {}: {e}", location.display()))?;
+    if content.len() as u64 > MAX_SOURCE_FILE_BYTES {
+        return Err(format!(
+            "{} is longer than the {MAX_SOURCE_FILE_BYTES} bytes read_source_file serves",
+            location.display()
+        ));
+    }
     Ok(content)
 }
+
+/// The longest source file `read_source_file` serves from the file system.
+const MAX_SOURCE_FILE_BYTES: u64 = 16 * 1024 * 1024;
 
 /// [`resolve_recorded_source`] then [`read_resolved_source`]: the unit
 /// tests' view of what the tool serves.

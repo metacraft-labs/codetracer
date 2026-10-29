@@ -10306,6 +10306,31 @@ fn extract_python_code_blocks(text: &str) -> Vec<String> {
     blocks
 }
 
+/// `--allow-unconfined-scripts` where this host cannot confine an
+/// `exec_script` script (`trace check-confinement` fails: macOS, a Linux
+/// kernel without Landlock ABI 3), nothing elsewhere.  These suites test
+/// queries, not confinement, so they opt out explicitly only where the
+/// server would otherwise refuse every script; wherever confinement exists
+/// they run the confined path an agent gets.
+fn script_opt_in() -> &'static [&'static str] {
+    static ANSWER: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let confinable = *ANSWER.get_or_init(|| {
+        std::process::Command::new(binary_path())
+            .args(["trace", "check-confinement"])
+            .envs(replay_test_env())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    });
+    if confinable {
+        &[]
+    } else {
+        &["--allow-unconfined-scripts"]
+    }
+}
+
 /// Sends `ct/exec-script` to the daemon and returns the response.
 ///
 /// This helper skips any interleaved events (e.g., backend output events)
@@ -10329,6 +10354,9 @@ async fn exec_script(
             "tracePath": trace_path.to_string_lossy().to_string(),
             "script": script,
             "timeout": timeout_secs,
+            // Not a test of script confinement: unconfined only where the
+            // host cannot confine a script (`script_opt_in`).
+            "unconfinedScripts": !script_opt_in().is_empty(),
         }
     });
     client
@@ -11014,6 +11042,7 @@ async fn start_mcp_server_with_real_backend_in(
         // their source lists name from this host, as a developer's server
         // does (the rule itself: mcp_read_source_file_confinement_test.rs).
         .arg("--allow-host-source-reads")
+        .args(script_opt_in())
         .env("TMPDIR", test_dir)
         .env(
             "CODETRACER_DAEMON_SOCK",
@@ -12359,6 +12388,7 @@ async fn start_hermetic_mcp_server(
         .arg("mcp")
         // The test's own recordings: see `start_mcp_server_with_real_backend`.
         .arg("--allow-host-source-reads")
+        .args(script_opt_in())
         .current_dir(mcp_cwd)
         .env("TMPDIR", test_dir)
         .env("CODETRACER_DAEMON_SOCK", &socket_path)

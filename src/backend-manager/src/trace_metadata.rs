@@ -147,7 +147,11 @@ const RETIRED_MEMBERS: [&str; 2] = ["events.log", "events.fmt"];
 /// is not part of the trace format (`events.log`, `events.fmt`).
 pub fn read_trace_metadata(trace_dir: &Path) -> Result<TraceMetadata, TraceMetadataError> {
     let ct_path = locate_ct_file(trace_dir)?;
-    let bytes = std::fs::read(&ct_path).map_err(|source| TraceMetadataError::Io {
+    // Read by position, never whole: the container is recording content of
+    // any size, and this runs in the session manager every client shares.
+    // Only the header, the directory and the members read below are touched
+    // (`meta_dat::CtfsFile`, `meta_dat::MAX_MEMBER_BYTES`).
+    let bytes = meta_dat::CtfsFile::open(&ct_path).map_err(|source| TraceMetadataError::Io {
         file: ct_path.clone(),
         source,
     })?;

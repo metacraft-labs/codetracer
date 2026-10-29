@@ -810,3 +810,32 @@ pub fn dap_messages(bytes: &[u8]) -> Vec<Value> {
     }
     messages
 }
+
+/// Whether `server` can run `exec_script` scripts confined on this host
+/// (`trace check-confinement`), asked once per test binary.
+pub fn scripts_can_be_confined(server: &Path) -> bool {
+    static ANSWER: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ANSWER.get_or_init(|| {
+        std::process::Command::new(server)
+            .args(["trace", "check-confinement"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("run trace check-confinement")
+            .success()
+    })
+}
+
+/// `args` for a `trace mcp` server whose test is not about script
+/// confinement but runs `exec_script`: where the host cannot confine a
+/// script (macOS, a Linux kernel without Landlock ABI 3), the server refuses
+/// `exec_script` unless it opts out, so these tests opt out explicitly
+/// there.  Wherever confinement exists they run the confined path an agent
+/// gets.  The tests about confinement itself never call this.
+pub fn with_script_opt_in<'a>(server: &Path, args: &[&'a str]) -> Vec<&'a str> {
+    let mut out = args.to_vec();
+    if !scripts_can_be_confined(server) {
+        out.push("--allow-unconfined-scripts");
+    }
+    out
+}

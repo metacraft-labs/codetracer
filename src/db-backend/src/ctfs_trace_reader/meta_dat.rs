@@ -591,6 +591,20 @@ pub enum MetaDatError {
         /// The full flags field as parsed from the header.
         flags: u16,
     },
+    /// A record count declares more records than the bytes left could hold,
+    /// at `min_record_bytes` each. Refused before anything is allocated for
+    /// it: the count is recording content, and taken on trust it sizes an
+    /// allocation the process cannot make.
+    CountExceedsInput {
+        /// The count's field name.
+        field: &'static str,
+        /// The count the payload declares.
+        declared: u64,
+        /// The bytes left after the count.
+        remaining: usize,
+        /// The fewest bytes one record takes.
+        min_record_bytes: usize,
+    },
 }
 
 impl fmt::Display for MetaDatError {
@@ -669,6 +683,17 @@ impl fmt::Display for MetaDatError {
             MetaDatError::TrailingBytes { extra } => {
                 write!(f, "meta.dat: {extra} trailing byte(s) after structured payload")
             }
+            MetaDatError::CountExceedsInput {
+                field,
+                declared,
+                remaining,
+                min_record_bytes,
+            } => write!(
+                f,
+                "meta.dat: {field} is {declared}, but the {remaining} byte(s) left hold at most {} \
+                 record(s) of at least {min_record_bytes} byte(s)",
+                remaining / min_record_bytes,
+            ),
             MetaDatError::InvalidRecordingId { value } => write!(
                 f,
                 "meta.dat: invalid recording_id {value:?} (expected canonical lowercase hyphenated UUIDv7)",
@@ -731,6 +756,29 @@ fn decode_varint(data: &[u8], pos: &mut usize) -> Result<u64, MetaDatError> {
             return Err(MetaDatError::VarintTooLong);
         }
     }
+}
+
+/// Read a record count (`field`) and check it against the input left after
+/// it: every record takes at least `min_record_bytes`, so a count larger than
+/// the remaining bytes allow cannot be honest and is refused before it sizes
+/// an allocation.
+fn read_count(
+    data: &[u8],
+    pos: &mut usize,
+    field: &'static str,
+    min_record_bytes: usize,
+) -> Result<usize, MetaDatError> {
+    let declared = decode_varint(data, pos)?;
+    let remaining = data.len() - *pos;
+    usize::try_from(declared)
+        .ok()
+        .filter(|&count| count <= remaining / min_record_bytes)
+        .ok_or(MetaDatError::CountExceedsInput {
+            field,
+            declared,
+            remaining,
+            min_record_bytes,
+        })
 }
 
 // ── String codec ────────────────────────────────────────────────────────
@@ -873,8 +921,8 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
 
     let program = read_string(input, &mut pos)?;
 
-    let args_count_u64 = decode_varint(input, &mut pos)?;
-    let args_count = usize::try_from(args_count_u64).map_err(|_| MetaDatError::StringTooLong(args_count_u64))?;
+    // A string is at least its one-byte length.
+    let args_count = read_count(input, &mut pos, "args_count", 1)?;
     let mut args = Vec::with_capacity(args_count);
     for _ in 0..args_count {
         args.push(read_string(input, &mut pos)?);
@@ -896,9 +944,7 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
         let atomic_mode_str = read_string(input, &mut pos)?;
         let start_time_str = read_string(input, &mut pos)?;
         let hook_profile = read_string(input, &mut pos)?;
-        let hook_strategies_count_u64 = decode_varint(input, &mut pos)?;
-        let hook_strategies_count = usize::try_from(hook_strategies_count_u64)
-            .map_err(|_| MetaDatError::StringTooLong(hook_strategies_count_u64))?;
+        let hook_strategies_count = read_count(input, &mut pos, "hook_strategies_count", 1)?;
         let mut hook_strategies = Vec::with_capacity(hook_strategies_count);
         for _ in 0..hook_strategies_count {
             hook_strategies.push(read_string(input, &mut pos)?);
@@ -980,8 +1026,8 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
     let mut filter_provenance: Vec<FilterProvenanceEntry> = Vec::new();
     let has_filter_provenance = flags & FLAG_HAS_TRACE_FILTER_PROVENANCE != 0;
     if has_filter_provenance {
-        let count_u64 = decode_varint(input, &mut pos)?;
-        let count = usize::try_from(count_u64).map_err(|_| MetaDatError::StringTooLong(count_u64))?;
+        // An entry is a path (at least its one-byte length) and a SHA-256.
+        let count = read_count(input, &mut pos, "filter_provenance_count", 1 + 32)?;
         filter_provenance.reserve(count);
         for _ in 0..count {
             let path = read_string(input, &mut pos)?;
@@ -1147,6 +1193,30 @@ mod tests {
     /// so every v3 fixture carries a syntactically valid `recording_id`.
     /// Picked by hand — embedded timestamp is fictional, but byte-stable.
     const TEST_UUID_V7: &str = "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb";
+
+    /// A count the bytes left cannot hold is refused by name before it sizes
+    /// an allocation: a declared 2^60 arguments used to reach
+    /// `Vec::with_capacity` and panic.
+    #[test]
+    fn an_argument_count_past_the_input_is_refused_before_allocating() {
+        let bytes = serialize_meta_dat(&fixture_minimal());
+        // The empty argument list's count: after the header, the recording
+        // id and the empty program.
+        let at = 12 + 1 + TEST_UUID_V7.len() + 1;
+        assert_eq!(bytes[at], 0, "the fixture's argument count");
+        let mut patched = bytes[..at].to_vec();
+        encode_varint(1 << 60, &mut patched);
+        patched.extend_from_slice(&bytes[at + 1..]);
+        let err = parse_meta_dat(&patched).expect_err("2^60 arguments");
+        assert!(
+            matches!(
+                err,
+                MetaDatError::CountExceedsInput { field: "args_count", declared, .. } if declared == 1 << 60
+            ),
+            "{err:?}"
+        );
+        assert!(err.to_string().contains("args_count is 1152921504606846976"), "{err}");
+    }
 
     /// Build a [`MetaDat`] with no optional MCR block and empty arg/path lists.
     /// Used as one of the round-trip fixtures (a) in the suite.

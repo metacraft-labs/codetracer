@@ -251,6 +251,16 @@ pub enum MetaDatError {
     TrailingBytes {
         extra: usize,
     },
+    /// A count (`field`) declares more records than the bytes left could
+    /// hold, at `min_record_bytes` each.  Refused before anything is
+    /// allocated for it: the count is recording content, so taken on trust
+    /// it sizes an allocation the reading process cannot make.
+    CountExceedsInput {
+        field: &'static str,
+        declared: u64,
+        remaining: usize,
+        min_record_bytes: usize,
+    },
 }
 
 impl fmt::Display for MetaDatError {
@@ -296,6 +306,17 @@ impl fmt::Display for MetaDatError {
             MetaDatError::InvalidRecordingId { value } => write!(
                 f,
                 "meta.dat: invalid recording_id {value:?} (expected canonical UUIDv7)",
+            ),
+            MetaDatError::CountExceedsInput {
+                field,
+                declared,
+                remaining,
+                min_record_bytes,
+            } => write!(
+                f,
+                "meta.dat: {field} is {declared}, but the {remaining} byte(s) left hold at most \
+                 {} record(s) of at least {min_record_bytes} byte(s)",
+                remaining / min_record_bytes,
             ),
             MetaDatError::TrailingBytes { extra } => {
                 write!(
@@ -346,6 +367,29 @@ fn read_string(data: &[u8], pos: &mut usize) -> Result<String, MetaDatError> {
     let owned = s.to_owned();
     *pos += len;
     Ok(owned)
+}
+
+/// Read a record count (`field`) and check it against the input left after
+/// it: every record takes at least `min_record_bytes`, so a count larger than
+/// the remaining bytes allow cannot be honest and is refused before it sizes
+/// an allocation.
+fn read_count(
+    data: &[u8],
+    pos: &mut usize,
+    field: &'static str,
+    min_record_bytes: usize,
+) -> Result<usize, MetaDatError> {
+    let declared = decode_varint(data, pos)?;
+    let remaining = data.len() - *pos;
+    let fits = usize::try_from(declared)
+        .ok()
+        .filter(|&count| count <= remaining / min_record_bytes);
+    fits.ok_or(MetaDatError::CountExceedsInput {
+        field,
+        declared,
+        remaining,
+        min_record_bytes,
+    })
 }
 
 // ── Recording-id validation ─────────────────────────────────────────────
@@ -429,9 +473,8 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
     }
 
     let program = read_string(input, &mut pos)?;
-    let args_count_u64 = decode_varint(input, &mut pos)?;
-    let args_count =
-        usize::try_from(args_count_u64).map_err(|_| MetaDatError::TooShort { got: input.len() })?;
+    // A string is at least its one-byte length.
+    let args_count = read_count(input, &mut pos, "args_count", 1)?;
     let mut args = Vec::with_capacity(args_count);
     for _ in 0..args_count {
         args.push(read_string(input, &mut pos)?);
@@ -452,9 +495,7 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
         let atomic_mode_str = read_string(input, &mut pos)?;
         let start_time_str = read_string(input, &mut pos)?;
         let hook_profile = read_string(input, &mut pos)?;
-        let hook_strategies_count_u64 = decode_varint(input, &mut pos)?;
-        let hook_strategies_count = usize::try_from(hook_strategies_count_u64)
-            .map_err(|_| MetaDatError::TooShort { got: input.len() })?;
+        let hook_strategies_count = read_count(input, &mut pos, "hook_strategies_count", 1)?;
         let mut hook_strategies = Vec::with_capacity(hook_strategies_count);
         for _ in 0..hook_strategies_count {
             hook_strategies.push(read_string(input, &mut pos)?);
@@ -532,9 +573,8 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
     let mut filter_provenance: Vec<FilterProvenanceEntry> = Vec::new();
     let has_filter_provenance = flags & FLAG_HAS_TRACE_FILTER_PROVENANCE != 0;
     if has_filter_provenance {
-        let count_u64 = decode_varint(input, &mut pos)?;
-        let count =
-            usize::try_from(count_u64).map_err(|_| MetaDatError::TooShort { got: input.len() })?;
+        // An entry is a path (at least its one-byte length) and a SHA-256.
+        let count = read_count(input, &mut pos, "filter_provenance_count", 1 + 32)?;
         filter_provenance.reserve(count);
         for _ in 0..count {
             let path = read_string(input, &mut pos)?;
@@ -705,16 +745,127 @@ fn base40_encode(name: &str) -> u64 {
     value
 }
 
-fn read_u32_le(data: &[u8], offset: usize) -> Option<u32> {
-    let bytes = data.get(offset..offset + 4)?;
-    Some(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+/// The bytes of a CTFS container, read by position.
+///
+/// A container is read without holding it whole: [`CtfsFile`] answers each
+/// read with `pread(2)` from the file, so reading `meta.dat` and the source
+/// list out of a recording of any size touches its header, its directory,
+/// the block maps of the members read and their data blocks only.  A slice of
+/// bytes is a source too (tests, and callers that already hold the bytes).
+pub trait CtfsSource {
+    /// The container's length in bytes.
+    fn len(&self) -> u64;
+    /// Fill `buf` from `offset`: `Ok(false)` when the container ends before
+    /// `buf` is full (the read is past what the container holds).
+    fn read_exact_at(&self, offset: u64, buf: &mut [u8]) -> Result<bool, String>;
 }
 
-fn read_u64_le(data: &[u8], offset: usize) -> Option<u64> {
-    let bytes = data.get(offset..offset + 8)?;
-    Some(u64::from_le_bytes([
-        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-    ]))
+impl CtfsSource for [u8] {
+    fn len(&self) -> u64 {
+        <[u8]>::len(self) as u64
+    }
+
+    fn read_exact_at(&self, offset: u64, buf: &mut [u8]) -> Result<bool, String> {
+        let Some(bytes) = usize::try_from(offset)
+            .ok()
+            .and_then(|start| self.get(start..start.checked_add(buf.len())?))
+        else {
+            return Ok(false);
+        };
+        buf.copy_from_slice(bytes);
+        Ok(true)
+    }
+}
+
+impl CtfsSource for Vec<u8> {
+    fn len(&self) -> u64 {
+        self.as_slice().len() as u64
+    }
+
+    fn read_exact_at(&self, offset: u64, buf: &mut [u8]) -> Result<bool, String> {
+        self.as_slice().read_exact_at(offset, buf)
+    }
+}
+
+/// A container file read by position, never whole.  Its length is taken when
+/// it is opened; a read past it is "not present", whatever the file has grown
+/// to since, so one reading sees one container.
+pub struct CtfsFile {
+    file: std::fs::File,
+    len: u64,
+    path: std::path::PathBuf,
+}
+
+impl CtfsFile {
+    pub fn open(path: &std::path::Path) -> std::io::Result<Self> {
+        let file = std::fs::File::open(path)?;
+        let len = file.metadata()?.len();
+        Ok(Self {
+            file,
+            len,
+            path: path.to_path_buf(),
+        })
+    }
+}
+
+impl CtfsSource for CtfsFile {
+    fn len(&self) -> u64 {
+        self.len
+    }
+
+    fn read_exact_at(&self, offset: u64, buf: &mut [u8]) -> Result<bool, String> {
+        match offset.checked_add(buf.len() as u64) {
+            Some(end) if end <= self.len => {}
+            _ => return Ok(false),
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::FileExt;
+            match self.file.read_exact_at(buf, offset) {
+                Ok(()) => Ok(true),
+                // Shorter than when it was opened: what is gone is not present.
+                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => Ok(false),
+                Err(e) => Err(format!("{}: read failed: {e}", self.path.display())),
+            }
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::FileExt;
+            let mut done = 0usize;
+            while done < buf.len() {
+                match self.file.seek_read(&mut buf[done..], offset + done as u64) {
+                    Ok(0) => return Ok(false),
+                    Ok(n) => done += n,
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(e) => return Err(format!("{}: read failed: {e}", self.path.display())),
+                }
+            }
+            Ok(true)
+        }
+    }
+}
+
+/// The most bytes one member is read into memory as.  The members this
+/// reader takes out of a container (`meta.dat`, `paths.dat`, `paths.off`)
+/// are kilobytes in a real recording; a member declared larger is refused
+/// before anything is allocated for it, so a container cannot have the
+/// shared session manager allocate whatever size it names.
+pub const MAX_MEMBER_BYTES: u64 = 64 * 1024 * 1024;
+
+/// How many bytes of the root directory are read at once while it is
+/// searched for a member.
+const DIRECTORY_CHUNK_ENTRIES: usize = 2048;
+
+fn read_array<const N: usize, S: CtfsSource + ?Sized>(
+    src: &S,
+    offset: u64,
+) -> Result<Option<[u8; N]>, String> {
+    let mut buf = [0u8; N];
+    Ok(src.read_exact_at(offset, &mut buf)?.then_some(buf))
+}
+
+fn read_u64_at<S: CtfsSource + ?Sized>(src: &S, offset: u64) -> Result<Option<u64>, String> {
+    Ok(read_array::<8, S>(src, offset)?.map(u64::from_le_bytes))
 }
 
 /// The container version written here (`ctfs-container.md` §1): a
@@ -738,79 +889,107 @@ struct CtfsEntry {
 
 /// Validate a container header and return `(block_size, entry_start, root
 /// entry count)`.
-fn ctfs_header(data: &[u8]) -> Result<(u64, usize, usize), String> {
-    if data.len() < 16 {
-        return Err(format!("CTFS file too short ({} bytes)", data.len()));
+fn ctfs_header<S: CtfsSource + ?Sized>(src: &S) -> Result<(u64, u64, u64), String> {
+    let len = src.len();
+    if len < 16 {
+        return Err(format!("CTFS file too short ({len} bytes)"));
     }
-    if data[0..5] != CTFS_MAGIC {
+    let header: [u8; 16] =
+        read_array(src, 0)?.ok_or_else(|| format!("CTFS file too short ({len} bytes)"))?;
+    if header[0..5] != CTFS_MAGIC {
         return Err("not a valid CTFS file (bad magic)".to_string());
     }
-    let version = data[5];
+    let version = header[5];
     if version != CTFS_VERSION && version != CTFS_VERSION_V6 {
         return Err(format!(
             "CTFS container version {version} is not readable: this reader reads versions \
              {CTFS_VERSION} and {CTFS_VERSION_V6}. Re-record the trace"
         ));
     }
-    let block_size = read_u32_le(data, 8).ok_or("CTFS header truncated at block_size")?;
+    let block_size = u32::from_le_bytes([header[8], header[9], header[10], header[11]]);
     if !matches!(block_size, 1024 | 2048 | 4096) {
         return Err(format!("invalid CTFS block size {block_size}"));
     }
-    let entry_start = if version == CTFS_VERSION_V6 {
-        if data.len() < 24 {
+    let entry_start: u64 = if version == CTFS_VERSION_V6 {
+        let Some(v6) = read_array::<24, S>(src, 0)? else {
             return Err(format!(
-                "a version 6 CTFS header is 24 bytes, but only {} are present",
-                data.len()
+                "a version 6 CTFS header is 24 bytes, but only {len} are present"
             ));
-        }
-        if data[16] != 0 {
+        };
+        if v6[16] != 0 {
             return Err(format!(
                 "CTFS version 6 container with profile {}: this reader reads profile 0 (full) only",
-                data[16]
+                v6[16]
             ));
         }
-        if data[17] != 0 {
+        if v6[17] != 0 {
             return Err(format!(
                 "CTFS version 6 container with whole-file compression {}: this reader reads \
                  compression 0 (none) only",
-                data[17]
+                v6[17]
             ));
         }
-        if let Some(i) = (18..24).find(|&i| data[i] != 0) {
+        if let Some(i) = (18..24).find(|&i| v6[i] != 0) {
             return Err(format!(
                 "CTFS version 6 container with reserved byte {i} = {}; reserved bytes must be zero",
-                data[i]
+                v6[i]
             ));
         }
         24
     } else {
         16
     };
-    let max_entries = read_u32_le(data, 12).ok_or("CTFS header truncated at max_entries")? as usize;
+    let max_entries = u32::from_le_bytes([header[12], header[13], header[14], header[15]]);
     // `0` fills the rest of block 0 with entries (§1, "Auto-fill").
     let count = if max_entries == 0 {
-        (block_size as usize - entry_start) / 24
+        (u64::from(block_size) - entry_start) / 24
     } else {
-        max_entries
+        u64::from(max_entries)
     };
     Ok((u64::from(block_size), entry_start, count))
 }
 
 /// The root directory entry named `file_name`, if the container has one.
-fn ctfs_entry(data: &[u8], file_name: &str) -> Result<Option<CtfsEntry>, String> {
-    let (_, entry_start, count) = ctfs_header(data)?;
+///
+/// The directory is searched a chunk at a time, and only as far as the
+/// container holds whole entries, however many the header declares.
+fn ctfs_entry<S: CtfsSource + ?Sized>(
+    src: &S,
+    file_name: &str,
+) -> Result<Option<CtfsEntry>, String> {
+    let (_, entry_start, count) = ctfs_header(src)?;
     let encoded_name = base40_encode(file_name);
-    for i in 0..count {
-        let entry_off = entry_start + i * 24;
-        let Some(entry_name) = read_u64_le(data, entry_off + 16) else {
+    let present = src.len().saturating_sub(entry_start) / 24;
+    let count = count.min(present);
+    let mut chunk = vec![0u8; DIRECTORY_CHUNK_ENTRIES * 24];
+    let mut first = 0u64;
+    while first < count {
+        let n = (count - first).min(DIRECTORY_CHUNK_ENTRIES as u64) as usize;
+        let region = &mut chunk[..n * 24];
+        if !src.read_exact_at(entry_start + first * 24, region)? {
             break;
-        };
-        if entry_name == encoded_name {
-            let size = read_u64_le(data, entry_off).ok_or("truncated CTFS entry size")?;
-            let map_block =
-                read_u64_le(data, entry_off + 8).ok_or("truncated CTFS entry mapBlock")?;
-            return Ok(Some(CtfsEntry { size, map_block }));
         }
+        for entry in region.chunks_exact(24) {
+            let word = |i: usize| {
+                u64::from_le_bytes([
+                    entry[i],
+                    entry[i + 1],
+                    entry[i + 2],
+                    entry[i + 3],
+                    entry[i + 4],
+                    entry[i + 5],
+                    entry[i + 6],
+                    entry[i + 7],
+                ])
+            };
+            if word(16) == encoded_name {
+                return Ok(Some(CtfsEntry {
+                    size: word(0),
+                    map_block: word(8),
+                }));
+            }
+        }
+        first += n as u64;
     }
     Ok(None)
 }
@@ -826,33 +1005,40 @@ fn ctfs_entry(data: &[u8], file_name: &str) -> Result<Option<CtfsEntry>, String>
 /// stream when `meta.dat::mcr::total_events` is unavailable
 /// (currently the case for the Nim multi-stream writer, which only
 /// fills the MCR block for native MCR recordings).
-/// Whether the container in `data` has a member named `file_name`, empty or not.
-pub fn ctfs_has_member(data: &[u8], file_name: &str) -> Result<bool, String> {
-    Ok(ctfs_entry(data, file_name)?.is_some())
-}
-
-pub fn ctfs_internal_file_size(data: &[u8], file_name: &str) -> Result<Option<u64>, String> {
-    Ok(ctfs_entry(data, file_name)?
+pub fn ctfs_internal_file_size<S: CtfsSource + ?Sized>(
+    src: &S,
+    file_name: &str,
+) -> Result<Option<u64>, String> {
+    Ok(ctfs_entry(src, file_name)?
         .map(|e| e.size)
         .filter(|&size| size > 0))
 }
 
-/// Read the internal file `file_name` out of a version 5 CTFS container:
-/// `Ok(None)` when the container has no such member.
-pub fn read_ctfs_internal_file(data: &[u8], file_name: &str) -> Result<Option<Vec<u8>>, String> {
-    let (block_size, _, _) = ctfs_header(data)?;
-    let Some(entry) = ctfs_entry(data, file_name)? else {
+/// Whether the container in `src` has a member named `file_name`, empty or not.
+pub fn ctfs_has_member<S: CtfsSource + ?Sized>(src: &S, file_name: &str) -> Result<bool, String> {
+    Ok(ctfs_entry(src, file_name)?.is_some())
+}
+
+/// Read the internal file `file_name` out of a CTFS container:
+/// `Ok(None)` when the container has no such member.  A member declared
+/// larger than [`MAX_MEMBER_BYTES`] is refused before it is read.
+pub fn read_ctfs_internal_file<S: CtfsSource + ?Sized>(
+    src: &S,
+    file_name: &str,
+) -> Result<Option<Vec<u8>>, String> {
+    let (block_size, _, _) = ctfs_header(src)?;
+    let Some(entry) = ctfs_entry(src, file_name)? else {
         return Ok(None);
     };
-    resolve_ctfs_file(data, file_name, entry.size, entry.map_block, block_size).map(Some)
+    resolve_ctfs_file(src, file_name, entry.size, entry.map_block, block_size).map(Some)
 }
 
 /// Locate the bytes of `meta.dat` inside a CTFS container.
 ///
 /// Returns the file content on success.  Errors carry a string with
 /// enough context for the caller to surface to users.
-pub fn read_meta_dat_from_ctfs(data: &[u8]) -> Result<Vec<u8>, String> {
-    read_ctfs_internal_file(data, "meta.dat")?
+pub fn read_meta_dat_from_ctfs<S: CtfsSource + ?Sized>(src: &S) -> Result<Vec<u8>, String> {
+    read_ctfs_internal_file(src, "meta.dat")?
         .ok_or_else(|| "internal file not found in CTFS container: meta.dat".to_string())
 }
 
@@ -864,12 +1050,15 @@ pub fn read_meta_dat_from_ctfs(data: &[u8]) -> Result<Vec<u8>, String> {
 /// `meta_flags` selects the record layout: with bit 4 (column-aware) or
 /// bit 14 (line-count table) set, a record is `path_len: varint` + path
 /// bytes + a tail this reader does not need; otherwise it is the path bytes.
-pub fn read_source_paths_from_ctfs(data: &[u8], meta_flags: u16) -> Result<Vec<String>, String> {
+pub fn read_source_paths_from_ctfs<S: CtfsSource + ?Sized>(
+    src: &S,
+    meta_flags: u16,
+) -> Result<Vec<String>, String> {
     // `paths.dat` is one of four interning tables a container carries all
     // four or none (`internal-files.md` §"Interning Tables").
     let mut present = Vec::new();
     for name in codetracer_ctfs::interning_set::INTERNING_TABLE_MEMBERS {
-        if ctfs_entry(data, name)?.is_some() {
+        if ctfs_entry(src, name)?.is_some() {
             present.push(name);
         }
     }
@@ -878,10 +1067,10 @@ pub fn read_source_paths_from_ctfs(data: &[u8], meta_flags: u16) -> Result<Vec<S
     {
         return Err(refusal);
     }
-    let Some(dat) = read_ctfs_internal_file(data, "paths.dat")? else {
+    let Some(dat) = read_ctfs_internal_file(src, "paths.dat")? else {
         return Ok(Vec::new());
     };
-    let off = read_ctfs_internal_file(data, "paths.off")?
+    let off = read_ctfs_internal_file(src, "paths.off")?
         .ok_or("paths.off missing from a container that carries paths.dat")?;
     if off.is_empty() || off.len() % 8 != 0 {
         return Err(format!(
@@ -907,7 +1096,7 @@ pub fn read_source_paths_from_ctfs(data: &[u8], meta_flags: u16) -> Result<Vec<S
                 .map_err(|e| format!("paths.dat: record {id}: {e}"))?
                 as usize;
             record
-                .get(pos..pos + len)
+                .get(pos..pos.saturating_add(len))
                 .ok_or_else(|| format!("paths.dat: record {id} path extends past the record"))?
         } else {
             record
@@ -917,13 +1106,15 @@ pub fn read_source_paths_from_ctfs(data: &[u8], meta_flags: u16) -> Result<Vec<S
     Ok(paths)
 }
 
-fn ctfs_block(
-    data: &[u8],
+/// The byte offset of block `block`, which must be a block the container
+/// holds: not the header's block 0, and starting before the container ends.
+fn ctfs_block<S: CtfsSource + ?Sized>(
+    src: &S,
     name: &str,
     block: u64,
     block_size: u64,
     what: &str,
-) -> Result<usize, String> {
+) -> Result<u64, String> {
     if block == 0 {
         return Err(format!(
             "{name}: its {what} is a null block pointer (block 0 is the container header); the \
@@ -932,15 +1123,14 @@ fn ctfs_block(
     }
     block
         .checked_mul(block_size)
-        .and_then(|o| usize::try_from(o).ok())
-        .filter(|&o| o < data.len())
+        .filter(|&o| o < src.len())
         .ok_or_else(|| {
             format!("{name}: its {what} is block {block}, past the end of the container")
         })
 }
 
-fn resolve_ctfs_file(
-    data: &[u8],
+fn resolve_ctfs_file<S: CtfsSource + ?Sized>(
+    src: &S,
     name: &str,
     size: u64,
     map_block: u64,
@@ -949,12 +1139,26 @@ fn resolve_ctfs_file(
     if size == 0 {
         return Ok(Vec::new());
     }
+    // The declared size is recording content: it is checked against what one
+    // member may be, and against the container (a member cannot hold more
+    // bytes than the container has), before anything is allocated for it.
+    if size > MAX_MEMBER_BYTES {
+        return Err(format!(
+            "{name}: its declared size {size} is more than the {MAX_MEMBER_BYTES} bytes this \
+             reader reads of one member"
+        ));
+    }
+    if size > src.len() {
+        return Err(format!(
+            "{name}: its declared size {size} is more than the whole container ({} bytes)",
+            src.len()
+        ));
+    }
     if map_block == 0 {
         return Err(format!(
             "{name} (size {size}): its MapBlock is a null block pointer; the container is damaged"
         ));
     }
-    let block_size_usize = block_size as usize;
     if map_block & CTFS_DIRECT != 0 {
         if size > block_size {
             return Err(format!(
@@ -963,16 +1167,17 @@ fn resolve_ctfs_file(
             ));
         }
         let off = ctfs_block(
-            data,
+            src,
             name,
             map_block & !CTFS_DIRECT,
             block_size,
             "direct data block",
         )?;
-        return data
-            .get(off..off + size as usize)
-            .map(<[u8]>::to_vec)
-            .ok_or_else(|| format!("{name}: its data block is out of bounds"));
+        let mut out = vec![0u8; size as usize];
+        if !src.read_exact_at(off, &mut out)? {
+            return Err(format!("{name}: its data block is out of bounds"));
+        }
+        return Ok(out);
     }
 
     let usable = block_size / 8 - 1;
@@ -980,10 +1185,10 @@ fn resolve_ctfs_file(
     let mut out: Vec<u8> = Vec::with_capacity(remaining);
     let mut block_idx: u64 = 0;
     let read_ptr = |block: u64, slot: u64, what: &str| -> Result<u64, String> {
-        let off = ctfs_block(data, name, block, block_size, what)?;
-        read_u64_le(data, off + (slot as usize) * 8)
-            .ok_or_else(|| format!("{name}: truncated {what}"))
+        let off = ctfs_block(src, name, block, block_size, what)?;
+        read_u64_at(src, off + slot * 8)?.ok_or_else(|| format!("{name}: truncated {what}"))
     };
+    let mut block_buf = vec![0u8; block_size as usize];
 
     while remaining > 0 {
         let mut idx = block_idx;
@@ -1016,16 +1221,17 @@ fn resolve_ctfs_file(
 
         let data_block = read_ptr(nav_block, nav_idx, "mapping block")?;
         let block_off = ctfs_block(
-            data,
+            src,
             name,
             data_block,
             block_size,
             &format!("data block {block_idx}"),
         )?;
-        let copy_len = remaining.min(block_size_usize);
-        let slice = data
-            .get(block_off..block_off + copy_len)
-            .ok_or_else(|| format!("{name}: data block {block_idx} is out of bounds"))?;
+        let copy_len = remaining.min(block_size as usize);
+        let slice = &mut block_buf[..copy_len];
+        if !src.read_exact_at(block_off, slice)? {
+            return Err(format!("{name}: data block {block_idx} is out of bounds"));
+        }
         out.extend_from_slice(slice);
         remaining -= copy_len;
         block_idx += 1;
@@ -1326,6 +1532,148 @@ mod tests {
         assert_eq!(m.recorder_id, "r");
     }
 
+    /// `v7_bytes` with its argument count (the `0` after the program)
+    /// replaced by `count` and `args` appended after it.
+    fn v7_with_args(count: u64, args: &[&str]) -> Vec<u8> {
+        let base = v7_bytes();
+        // The argument count's offset: header, recording id, program.
+        let at = 12 + 1 + TEST_RECORDING_ID.len() + 3;
+        assert_eq!(base[at], 0, "the fixture's argument count");
+        let mut buf = base[..at].to_vec();
+        encode_varint(count, &mut buf);
+        for arg in args {
+            write_string(arg, &mut buf);
+        }
+        buf.extend_from_slice(&base[at + 1..]);
+        buf
+    }
+
+    /// A count larger than the bytes left could hold is refused by name
+    /// before anything is allocated for it: a container declaring 2^60
+    /// arguments made `Vec::with_capacity` panic ("capacity overflow") in the
+    /// session manager every client shares.
+    #[test]
+    fn an_argument_count_past_the_input_is_refused_before_allocating() {
+        let err = parse_meta_dat(&v7_with_args(1 << 60, &[])).expect_err("2^60 arguments");
+        assert!(
+            matches!(
+                err,
+                MetaDatError::CountExceedsInput {
+                    field: "args_count",
+                    declared,
+                    min_record_bytes: 1,
+                    ..
+                } if declared == 1 << 60
+            ),
+            "{err:?}"
+        );
+        assert!(
+            err.to_string()
+                .contains("args_count is 1152921504606846976"),
+            "{err}"
+        );
+        // One more than the bytes left (workdir and recorder id: 5 bytes).
+        assert!(matches!(
+            parse_meta_dat(&v7_with_args(6, &[])),
+            Err(MetaDatError::CountExceedsInput { remaining: 5, .. })
+        ));
+        // Honest counts parse.
+        let m = parse_meta_dat(&v7_with_args(2, &["-v", "x"])).expect("two arguments");
+        assert_eq!(m.args, ["-v", "x"]);
+    }
+
+    /// Through the parser: a filter-provenance count is held to 33 bytes an
+    /// entry.  Two entries declared with one entry's bytes present (an empty
+    /// path and a SHA-256) are refused for the count, before the first entry
+    /// is read; at one byte an entry the count would pass and the second
+    /// entry fail later, as a short string.
+    #[test]
+    fn a_provenance_count_past_its_entries_is_refused_by_the_parser() {
+        let mut buf = v7_bytes();
+        buf[6..8].copy_from_slice(&FLAG_HAS_TRACE_FILTER_PROVENANCE.to_le_bytes());
+        encode_varint(2, &mut buf);
+        write_string("", &mut buf);
+        buf.extend_from_slice(&[7u8; 32]);
+        let err = parse_meta_dat(&buf).expect_err("two entries, one present");
+        assert!(
+            matches!(
+                err,
+                MetaDatError::CountExceedsInput {
+                    field: "filter_provenance_count",
+                    declared: 2,
+                    remaining: 33,
+                    min_record_bytes: 33,
+                }
+            ),
+            "{err:?}"
+        );
+        // Control: the same bytes declaring one entry parse.
+        let mut one = v7_bytes();
+        one[6..8].copy_from_slice(&FLAG_HAS_TRACE_FILTER_PROVENANCE.to_le_bytes());
+        encode_varint(1, &mut one);
+        write_string("", &mut one);
+        one.extend_from_slice(&[7u8; 32]);
+        let m = parse_meta_dat(&one).expect("one entry");
+        assert_eq!(m.filter_provenance.len(), 1);
+    }
+
+    /// The bound is per record size: a provenance entry is at least 33
+    /// bytes (a path's length and a SHA-256).
+    #[test]
+    fn a_count_is_bounded_by_its_records_smallest_size() {
+        let mut pos = 0;
+        let mut one = Vec::new();
+        encode_varint(1, &mut one);
+        let mut just = one.clone();
+        just.extend_from_slice(&[0u8; 33]);
+        assert_eq!(
+            read_count(&just, &mut pos, "filter_provenance_count", 33),
+            Ok(1)
+        );
+        let mut short = one;
+        short.extend_from_slice(&[0u8; 32]);
+        pos = 0;
+        assert!(matches!(
+            read_count(&short, &mut pos, "filter_provenance_count", 33),
+            Err(MetaDatError::CountExceedsInput { remaining: 32, .. })
+        ));
+    }
+
+    /// A member's declared size is refused past the per-member cap or past
+    /// the container, before the reader allocates for it.
+    #[test]
+    fn a_member_declared_past_the_cap_or_the_container_is_refused() {
+        for (size, expected) in [
+            (1u64 << 40, "more than the 67108864 bytes"),
+            (MAX_MEMBER_BYTES + 1, "more than the 67108864 bytes"),
+            (5000, "more than the whole container"),
+        ] {
+            let raw = raw_v5(3, &[(0, "meta.dat", size, 1)]);
+            let err = read_meta_dat_from_ctfs(&raw).expect_err("an oversized member");
+            assert!(err.contains(expected), "{size}: {err}");
+        }
+    }
+
+    /// Reading by position from the file gives what reading the bytes does.
+    #[test]
+    fn a_container_file_is_read_by_position() {
+        let dir = tempfile::tempdir().unwrap();
+        let ct = dir.path().join("trace.ct");
+        let big: Vec<u8> = (0..3000u32).map(|i| (i % 251) as u8).collect();
+        write_minimal_ctfs(&ct, &[("meta.dat", b"abc"), ("big", &big)]).unwrap();
+        let file = CtfsFile::open(&ct).unwrap();
+        let raw = std::fs::read(&ct).unwrap();
+        assert_eq!(file.len(), raw.len() as u64);
+        for name in ["meta.dat", "big", "absent"] {
+            assert_eq!(
+                read_ctfs_internal_file(&file, name).unwrap(),
+                read_ctfs_internal_file(&raw, name).unwrap(),
+                "{name}"
+            );
+        }
+        assert_eq!(read_ctfs_internal_file(&file, "big").unwrap(), Some(big));
+    }
+
     #[test]
     fn a_path_list_after_recorder_id_is_not_read() {
         let mut buf = v7_bytes();
@@ -1531,7 +1879,7 @@ mod tests {
         write_minimal_ctfs(&ct, &[("empty", &[]), ("small", b"abc"), ("big", &big)]).unwrap();
         let raw = std::fs::read(&ct).unwrap();
         assert_eq!(raw[5], 5);
-        let entry = |slot: usize| read_u64_le(&raw, 16 + slot * 24 + 8).unwrap();
+        let entry = |slot: u64| read_u64_at(&raw, 16 + slot * 24 + 8).unwrap().unwrap();
         assert_eq!(entry(0), 0, "an empty member owns no block");
         assert_ne!(entry(1) & BIT63, 0, "a one-block member is direct");
         assert_eq!(entry(2) & BIT63, 0, "a larger member is mapped");
