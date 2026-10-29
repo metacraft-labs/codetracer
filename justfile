@@ -423,14 +423,14 @@ test-reprobuild-macos-daemon-build:
 test-reprobuild-linux-smoke:
   ./ci/reprobuild/linux-smoke.sh
 
-# Drives the vm-harness Hyper-V backend through a fresh
+# Drives the gosti Hyper-V backend through a fresh
 # install -> verify -> uninstall cycle against the produced
 # CodeTracer-Setup.exe. Requires a Windows host with Hyper-V enabled
 # and a `repro-m69-hyperv` VM carrying a `base-clean` snapshot;
-# vm-harness's HyperVBackend skips with a clear message when those
+# gosti's HyperVBackend skips with a clear message when those
 # preconditions are not met. The recipe (re)builds the installer
 # first via reprobuild's `windows-installer` target, then exports
-# the path through VMH_INSTALLER_HOST_PATH so the test picks it up.
+# the path through GOSTI_INSTALLER_HOST_PATH so the test picks it up.
 test-windows-installer:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -439,13 +439,13 @@ test-windows-installer:
     *) echo "Error: test-windows-installer requires a Windows host." >&2; exit 2 ;;
   esac
 
-  vm_harness_root="${VM_HARNESS_ROOT:-../vm-harness}"
-  if [ ! -d "$vm_harness_root/src/vm_harness" ]; then
-    echo "Error: vm-harness sibling not found at $vm_harness_root." >&2
-    echo "Set VM_HARNESS_ROOT or clone metacraft-labs/vm-harness alongside codetracer." >&2
+  gosti_root="${GOSTI_ROOT:-../gosti}"
+  if [ ! -d "$gosti_root/src/gosti" ]; then
+    echo "Error: gosti sibling not found at $gosti_root." >&2
+    echo "Set GOSTI_ROOT or clone metacraft-labs/gosti alongside codetracer." >&2
     exit 2
   fi
-  vm_harness_root="$(cd "$vm_harness_root" && pwd)"
+  gosti_root="$(cd "$gosti_root" && pwd)"
 
   bash scripts/build-once.sh
   : "${REPROBUILD_BIN:=../reprobuild/build/bin/repro.exe}"
@@ -459,10 +459,10 @@ test-windows-installer:
     exit 1
   fi
 
-  cd "$vm_harness_root"
-  VMH_INSTALLER_HOST_PATH="$installer" \
+  cd "$gosti_root"
+  GOSTI_INSTALLER_HOST_PATH="$installer" \
     nim r --hints:off --warnings:off --verbosity:0 \
-      tests/e2e/t_vm_harness_hyperv_windows_installer_smoke.nim
+      tests/e2e/t_gosti_hyperv_windows_installer_smoke.nim
 
 test-reprobuild-hcr-mcr-dap:
   #!/usr/bin/env bash
