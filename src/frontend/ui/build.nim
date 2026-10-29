@@ -705,7 +705,7 @@ method onBuildCode*(self: BuildComponent, response: BuildCode) {.async.} =
         let errorsPanel = autoHideState.findPanelByContent(Content.BuildErrors)
         if not errorsPanel.isNil:
           revealOverlay(errorsPanel)
-      errors.highlightFirstBuildErrorIn(self.errorsVMOf())
+      errors.highlightFirstBuildErrorIn(errorsVMOf(self))
     elif buildReveal.pending:
       autoDismissBuildPanel()
     self.data.redraw()

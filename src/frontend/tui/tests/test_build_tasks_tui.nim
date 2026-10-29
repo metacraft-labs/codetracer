@@ -50,7 +50,7 @@ import ../../headless_app/layout_interaction
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 70
+const ExpectedAssertions = 73
 
 var countedAssertions = 0
 
@@ -221,6 +221,15 @@ suite "build tasks on the terminal":
     # A free command is still `:build <command>`.
     ck s.run(":build " & CleanCommand) == bvSucceeded
     ck s.taskName == ""
+    # THE COMMAND LINE (`:`), the same grammar as the omnibox.
+    s.held.b = nil
+    discard s.rt.prompt.open(pkCommand)
+    for ch in ":build: fail":
+      discard s.rt.prompt.applyKey($ch, @[])
+    discard s.rt.handleToken("\r", 0)
+    ck not s.held.b.isNil
+    ck s.settle() == bvFailed
+    ck s.taskName == "fail"
     # STOP: a running task cancelled.
     s.held.b = nil
     s.omnibox(":build: slow")

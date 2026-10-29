@@ -64,7 +64,7 @@ template ck(condition: untyped) =
   inc asserted
   check condition
 
-const ExpectedAssertions = when defined(js): 138 else: 140
+const ExpectedAssertions = when defined(js): 140 else: 142
 
 const SpecExample = """# In project config or .codetracer/build.yaml
 tasks:
@@ -413,6 +413,13 @@ suite "the reveal rule":
       discard a.see(5000.0)
       a.interact()
       ck a.due(9000.0) == brsNone
+      # Touched WHILE IT RAN: the success that follows schedules nothing.
+      vm.beginBuild(CleanCommand, 6000.0)
+      ck a.see(6000.0) == brsReveal
+      a.interact()
+      vm.finishBuild(0, 6100.0)
+      discard a.see(6100.0)
+      ck not a.pending
       # A new build cancels the last one's dismissal.
       discard runBuildVerb(host, BuildTaskConfig(), parseBuildVerb(
         ":build " & CleanCommand))

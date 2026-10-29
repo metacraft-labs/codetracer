@@ -145,12 +145,12 @@ test.describe("Build tasks on the desktop", () => {
 
     // ENTER: the main process runs the real failing build.
     await ctPage.keyboard.press("Enter");
-    await expectVerdict(ctPage, "build failed (exit code 1)", 120_000);
     await expect(ctPage.locator("#status .build-status-text")).toHaveText(
-      "Build failed: 2 errors, 1 warning", { timeout: 15_000 });
+      "Build failed: 2 errors, 1 warning", { timeout: 120_000 });
     // §3.8: the failure revealed the panels from their strip (Problems last).
     await expect(ctPage.locator("#auto-hide-overlay.visible")).toHaveCount(1, { timeout: 15_000 });
     await ensureBuildShown(ctPage);
+    await expectVerdict(ctPage, "build failed (exit code 1)", 15_000);
     await expect(ctPage.locator("#build > div")).toHaveCount(15, { timeout: 15_000 });
 
     // THE EDITOR'S MARKS in src/main.c, opened from the first error's line.
@@ -256,8 +256,11 @@ test.describe("The desktop toolbar's Build", () => {
     await expect(ctPage.locator("#run-image")).toBeDisabled();
     await expect(ctPage.locator("#run-image")).toHaveAttribute("title", /record, then debug/);
     await button.click();
-    await expectVerdict(ctPage, "build failed (exit code 1)");
+    // The status bar first: it is always on screen, while the failure moves the
+    // strip's overlay from the BUILD panel to Problems (§3.8).
     await expect(ctPage.locator("#status .build-status-text")).toHaveText(
-      /^Build failed: 2 errors?, 1 warning/, { timeout: 15_000 });
+      /^Build failed: 2 errors?, 1 warning/, { timeout: 120_000 });
+    await ensureBuildShown(ctPage);
+    await expectVerdict(ctPage, "build failed (exit code 1)", 15_000);
   });
 });
