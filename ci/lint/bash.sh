@@ -84,7 +84,7 @@ export GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false
 # while `command -v python3` said yes throughout. Requirements are declared here
 # in the form `require-tools.sh` can actually check.
 lint_step "tools this stage invokes are present" \
-	bash ci/lib/require-tools.sh shellcheck bash just git python3 python3:yaml node awk diff sort comm timeout openssl sha256sum curl
+	bash ci/lib/require-tools.sh shellcheck bash just git python3 python3:yaml node awk diff sort comm timeout openssl sha256sum curl pre-commit prek
 
 lint_step "shellcheck: CI scripts" \
 	shellcheck ci/**/*.sh
@@ -610,6 +610,14 @@ lint_step "contract suite: core.hooksPath is never left relative" \
 # in mktemp repositories; pure bash + git.
 lint_step "contract suite: the dev shell keeps Reprobuild's hook dispatchers" \
 	bash ci/test/reclaim-hook-dispatchers-test.sh
+
+# Its end-to-end companion, with the REAL python pre-commit and prek: a
+# dispatcher prek displaced to `.legacy` is overwritten by pre-commit's own
+# install unless the dev shell snapshots it first. A negative control proves the
+# real tools still clobber it. Refuses (exit 3), never skips, without the tools;
+# devShells.lint carries both.
+lint_step "contract suite: a dispatcher another hook manager displaced survives the installer" \
+	bash ci/test/hook-dispatcher-snapshot-test.sh
 
 # The non-Nix leg of the same hooks (ci/dev/portable-pre-commit.py): what native
 # Windows runs at commit time instead of the /nix/store pre-commit shim it cannot

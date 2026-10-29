@@ -164,6 +164,15 @@ pkgs.mkShell {
     # file exists. The suite refuses to run without it (exit 3) rather than
     # skipping that section, so the shell has to carry it.
     openssl
+
+    # `ci/test/hook-dispatcher-snapshot-test.sh` drives the REAL python
+    # pre-commit (git-hooks.nix's installer here) and the REAL prek (the other
+    # hook manager that displaces Reprobuild's dispatcher), because what it pins
+    # is how those two tools move each other's files. It refuses to run without
+    # them (exit 3). This shell runs no hook installer, so carrying them installs
+    # nothing.
+    pre-commit
+    prek
   ];
 
   shellHook = ''
