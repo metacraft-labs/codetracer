@@ -464,7 +464,7 @@
     # `io-mon-src` (f79853ec2); the fix is the same single-node graft onto the
     # revision reprobuild itself declares.
     reprobuild-packages = {
-      url = "github:metacraft-labs/reprobuild-packages/4e2fd1dcabf8ae8eac28a2d27c3160233589c1e6";
+      url = "github:metacraft-labs/reprobuild-packages/9384d8e492d15c423c2ba039a7cb48cf1ccb9b0f";
       flake = false;
     };
 
