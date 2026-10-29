@@ -6585,12 +6585,29 @@ impl Handler {
             )
             .into());
         };
+        // The function's line range. The reader's location loads the file into
+        // the expression loader when a grammar can read it (so the answer
+        // does not depend on whether a flow was loaded for the file first)
+        // and otherwise takes the range from the trace's own steps of this
+        // call — the only range a language without a grammar here (Noir,
+        // Cairo, Circom …) has. Before, such a function listed no lines at
+        // all.
+        let enriched =
+            self.reader
+                .load_location(db_call.step_id, call_key, &mut self.flow_preloader.expr_loader);
         let location = self.load_location(db_call.step_id);
         let function_location = self
             .flow_preloader
             .expr_loader
             .find_function_location(&location, &function_step.line);
-        for line in function_location.function_first..function_location.function_last {
+        let (first_line, last_line) = if function_location.function_last > 0 {
+            (function_location.function_first, function_location.function_last)
+        } else {
+            (enriched.function_first, enriched.function_last)
+        };
+        // Both ends belong to the function: the last line is its last line,
+        // and for a trace-derived range the last line a step reached.
+        for line in first_line..=last_line {
             let Some(step_map) = self.reader.step_map_for_path(function_path_id) else {
                 return Err(format!(
                     "call {}'s function is in path {}, for which the trace has no step map",
@@ -9823,6 +9840,37 @@ mod tests {
             }
         }
         assert!(found_complete_move, "expected a ct/complete-move event");
+        Ok(())
+    }
+
+    /// The low-level listing of a function whose source no grammar here can
+    /// read (`example.small`, which is not even on disk) still lists its
+    /// lines: the range is the trace's own — from the function's line (7) to
+    /// the last line a step of the call reached (8) — and its LAST line is in
+    /// it. Before, such a function — every Noir one among them — listed
+    /// nothing. Line 7 is the call site's step, which belongs to the caller,
+    /// so the call lists line 8 alone.
+    #[test]
+    fn test_asm_listing_lines_come_from_the_trace_without_a_grammar() -> Result<(), Box<dyn Error>> {
+        let db = setup_db_with_calls();
+        let mut handler: Handler = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(db));
+        let mut a_key = None;
+        for key in 0..8 {
+            if let Some(call) = handler.reader.call(CallKey(key)) {
+                if handler.reader.function(call.function_id).map(|f| f.name.as_str()) == Some("a") {
+                    a_key = Some(CallKey(key));
+                }
+            }
+        }
+        let a_key = a_key.ok_or("the trace has a call of `a`")?;
+        let lines = handler.load_steps_for_call(a_key)?;
+        let listed: Vec<i64> = lines.keys().copied().collect();
+        assert_eq!(listed, vec![8]);
+        for (line, step_id) in lines.iter() {
+            let step = handler.reader.step(*step_id).ok_or("a listed step is recorded")?;
+            assert_eq!(step.line.0, *line);
+            assert_eq!(step.call_key, a_key);
+        }
         Ok(())
     }
 
