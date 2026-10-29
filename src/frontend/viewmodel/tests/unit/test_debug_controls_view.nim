@@ -10,7 +10,9 @@
 ## `topbarSurface`.
 ##
 ## The backend is a `MockBackendService`: what is asserted is the request a
-## click makes (`ct/history-jump`, a step) and the DOM it leaves.
+## click makes (`ct/history-jump`, a step) and the DOM it leaves. MockRenderer
+## isolates reactive structure and event dispatch; the real browser integration
+## test covers native contextmenu events, focus, positioning and dismissal.
 
 import std/[json, strutils, tables, unittest]
 
@@ -55,14 +57,15 @@ suite "the debugger controls panel":
   test "every control is there under its page-object id":
     let (_, vm, _) = setup()
     let panel = renderDebugControlsPanel[MockRenderer, MockNode](MockRenderer(), vm)
-    for id in ["history-back-image", "history-list-before-image",
-               "history-forward-image", "history-list-after-image",
+    for id in ["history-back-image", "history-forward-image",
                "reverse-next-image", "next-image", "reverse-step-in-image",
                "step-in-image", "reverse-step-out-image", "step-out-image",
                "reverse-continue-image", "continue-image",
                "run-to-entry-image", "reset-operation-image",
                "run-tests-image", "stop-image"]:
       check not panel.byId(id).isNil
+    check panel.byId("history-list-before-image").isNil
+    check panel.byId("history-list-after-image").isNil
     check panel.attributes["data-topbar-surface"] == DebugToolbarSurfaceValue
 
   test "a click is the toolbar action its id names":
@@ -93,7 +96,9 @@ suite "the debugger controls panel":
     for t in 1 .. 3: store.moveTo(uint64(t * 10), t)
     let panel = renderDebugControlsPanel[MockRenderer, MockNode](MockRenderer(), vm)
     check panel.byId(HistoryListId).isNil
-    fireEvent(panel.byId("history-list-before-image"), "click")
+    let context = MockEvent()
+    fireEventWith(panel.byId("history-back-image"), "contextmenu", context)
+    check context.defaultPrevented and context.propagationStopped
     let list = panel.byId(HistoryListId)
     check not list.isNil
     var entries: seq[MockNode] = @[]
@@ -104,6 +109,45 @@ suite "the debugger controls panel":
     let jumps = mock.sent("ct/history-jump")
     check jumps.len == 1 and jumps[0]["rrTicks"].getInt == 10
     check panel.byId(HistoryListId).isNil
+
+  test "right-click forward lists every newer position, nearest first":
+    let (store, vm, mock) = setup()
+    for t in 1 .. 4: store.moveTo(uint64(t * 10), t)
+    let panel = renderDebugControlsPanel[MockRenderer, MockNode](MockRenderer(), vm)
+    vm.goBack()
+    store.moveTo(30, 3)
+    vm.goBack()
+    store.moveTo(20, 2)
+    mock.receivedCommands.setLen(0)
+    let context = MockEvent()
+    fireEventWith(panel.byId("history-forward-image"), "contextmenu", context)
+    check context.defaultPrevented and context.propagationStopped
+    check vm.historyList.val == hlAfter
+    var entries: seq[MockNode] = @[]
+    byClass(panel, "history-list-entry", entries)
+    check entries.len == 2
+    check entries[0].textContent.contains("tick 30")
+    check entries[1].textContent.contains("tick 40")
+    fireEvent(entries[1], "click")
+    let jumps = mock.sent("ct/history-jump")
+    check jumps.len == 1 and jumps[0]["rrTicks"].getInt == 40
+    check panel.byId(HistoryListId).isNil
+
+  test "empty directions do not open a popup and Close dismisses without jumping":
+    let (store, vm, mock) = setup()
+    let panel = renderDebugControlsPanel[MockRenderer, MockNode](MockRenderer(), vm)
+    fireEvent(panel.byId("history-back-image"), "contextmenu")
+    fireEvent(panel.byId("history-forward-image"), "contextmenu")
+    check vm.historyList.val == hlNone
+    store.moveTo(10, 1)
+    store.moveTo(20, 2)
+    fireEvent(panel.byId("history-back-image"), "contextmenu")
+    var close: seq[MockNode] = @[]
+    byClass(panel, "history-list-close", close)
+    check close.len == 1
+    fireEvent(close[0], "click")
+    check vm.historyList.val == hlNone
+    check mock.sent("ct/history-jump").len == 0
 
   test "run-tests is disabled while its run is pending":
     let mock = newMockBackendService(autoRespond = true)

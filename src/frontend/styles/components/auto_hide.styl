@@ -935,37 +935,6 @@ body:has(#auto-hide-strip-right .auto-hide-strip-tab.active:first-child)
     opacity: 1
     background-color: transparent  // override .auto-hide-strip-tab-btn:hover
 
-// The × on the active side tab (Nikolay, 2026-10-16): the same `close_sm`
-// icon, 16px size and resting/hover colours as the × on the selected row of
-// the status bar's tab-list menu (`.auto-hide-tablist-close` below), and the
-// same job — hide the panel that is showing, keep the tab.  It sits where the
-// label's text ends: below it on the left strip (read top-to-bottom), above it
-// on the right (read bottom-to-top), 4px from the label.
-.auto-hide-strip-tab-hide
-  display: block
-  flex: 0 0 1rem
-  width: 1rem
-  height: 1rem
-  margin-top: 0.25rem
-  cursor: pointer
-  tab-icon(url('../../public/resources/shared/close_sm.svg'), 1rem 1rem)
-
-#auto-hide-strip-right .auto-hide-strip-tab-hide
-  order: -1
-  margin-top: 0
-  margin-bottom: 0.25rem
-
-// Status-bar tabs (Nikolay, 2026-10-17): the same ×, after the label on the
-// row, 4px from it.
-#auto-hide-bottom-strip .auto-hide-strip-tab-hide
-  margin-top: 0
-  margin-left: 0.25rem
-
-// ...and 4px from the tab's right end, not the tab's usual 8px (Nikolay,
-// 2026-10-17).  Only the tab carrying the ×; the label side keeps its 8px.
-#auto-hide-bottom-strip .auto-hide-strip-tab:has(.auto-hide-strip-tab-hide)
-  padding-right: 0.25rem
-
 // (The `.auto-hide-bottom-tabs .ct-button-sm-secondary` overrides that used
 // to live here were removed with the renderer that emitted them.  The status
 // bar's bottom tabs are `#auto-hide-bottom-strip .auto-hide-strip-tab`
@@ -1431,14 +1400,8 @@ body:has(#auto-hide-strip-right .auto-hide-strip-tab.active:first-child)
 .collapsed-icon-zone.has-icons
   flex-shrink: 0
 
-// The per-panel icons of a minimal sidebar are SHOWN: `Auto-Hide-Panes.md`
-// §10.3 makes the icon zone the collapsed sidebar's panel directory, "one
-// small icon per auto-hidden panel", each opening the overlay on its own
-// panel.  They were hidden "for now" on 2026-10-15 (d83de2484) with no change
-// to that section, which left every minimal sidebar without its directory and
-// its icons without an accessible name.  The zone's `gap` is 0 for the
-// toggle/tab-list pair (below), so the icons keep their former 2px spacing
-// from their neighbours here.
+// Fallback panel icons keep their spacing when no pinned-tabs dropdown is
+// available. The toggle/dropdown pair uses the zone's zero gap.
 .collapsed-icon-zone .collapsed-icon + .collapsed-icon:not(.auto-hide-restore-button):not(.auto-hide-tablist-button),
 .collapsed-icon-zone .collapsed-icon:not(.auto-hide-restore-button):not(.auto-hide-tablist-button) + .collapsed-icon
   margin-left: 2px
