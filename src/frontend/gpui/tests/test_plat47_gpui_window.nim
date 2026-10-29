@@ -90,10 +90,10 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
     ck n == 22
 
   test "B2: the focused pane is closed in a 1px border of the focus colour":
-    # The desktop's outline is #565656; PLAT-51 made the native focus colour
+    # The desktop's outline is #6366f1; PLAT-51 made the native focus colour
     # subtler (ui/border/secondary, `crFocusOutline`), which the recorder
     # searches the frame for.
-    ck desk["focus"]["outline"].getStr == "#565656"
+    ck desk["focus"]["outline"].getStr == "#6366f1"
     ck chromeOf(crFocusOutline) == "#3a3a3a"
     let ring = rec["focusRing"]
     # Since 2026-10-17 the outline is an OVERLAY shown after the first press,

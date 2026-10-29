@@ -7,8 +7,8 @@
 # Design tokens in, TWO outputs out, from ONE resolution of the token layers:
 #
 #   * stylus, into src/frontend/styles/generated/ — the desktop's stylesheets
-#     import it. The stylus keeps its references symbolic (`a = b`) and lets
-#     stylus resolve them; its bytes are unchanged by the second emitter.
+#     import it. The design-system layers keep their references symbolic
+#     (`a = b`) and let stylus resolve them.
 #     Each layer whose tokens publish a `Light` mode also gets
 #     `<layer>-light.styl`, which `index.styl` imports when the stylesheet sets
 #     `COLOR_MODE = "Light"` (the desktop's light theme does).
@@ -19,7 +19,8 @@
 #     one design-system revision through one resolver.
 #
 #   * (with `--nim-out` and `--editor-theme DIR`, PLAT-47) the EDITOR THEME in
-#     the same Nim module: the desktop's Monaco theme documents
+#     the same Nim module, plus `editor-theme.styl` imported by `index.styl`:
+#     the desktop's Monaco theme documents
 #     (`DIR/codetracerDark.json` for Dark, `DIR/codetracerWhite.json` for
 #     Light — the files `renderer.nim` feeds to `monaco.editor.defineTheme`)
 #     resolved to `#rrggbb` per mode, as more `DesignToken` members: every
@@ -27,9 +28,10 @@
 #     resolves a scope — the rule itself, else its longest dotted prefix, else
 #     the default rule), and the colours the desktop paints around Monaco
 #     (the file's `codetracer` block: the editor ground, line numbers, the
-#     execution line, the selection; a value is a hex or a `{token.path}`
+#     execution line, execution pointer and selection; a value is a hex or a `{token.path}`
 #     reference into the design system, resolved by the same resolver). The
-#     terminal's editor is painted from these, so it equals the desktop's.
+#     terminal's editor and the desktop's surrounding styles paint from these
+#     same values. Monaco continues to own syntax and selection rendering.
 #
 # Usage: tokens-to-styl.sh <design-system-root> <stylus-out-dir> [<mode>]
 #                          [--nim-out <file.nim>] [--editor-theme <dir>]
@@ -512,6 +514,23 @@ def emit_nim(out_file):
         sep = "," if i + 1 < len(rows) else "]"
         lines.append(f"    {ident}: [" + ", ".join(f'"{h}"' for h in hexes) + "]" + sep)
     if editor:
+        # The surrounding desktop colours and native colours have ONE input.
+        # Emit only the block's non-syntax roles here; Monaco owns its rules.
+        block_rows = [(path, hexes) for _ident, path, hexes in editor
+                      if not path.startswith("editor-theme/rule/")]
+        styl = ["// Generated from the Monaco themes' codetracer blocks. Do not edit."]
+        default_mode = NIM_MODES.index(SELECT_MODE) if SELECT_MODE in NIM_MODES else 0
+        for path, hexes in block_rows:
+            variable = re.sub(r"([a-z])([A-Z])", r"\1-\2", path).replace("/", "-").lower()
+            styl.append(f"{variable} = {hexes[default_mode]}")
+        styl.append('if COLOR_MODE is defined and COLOR_MODE == "Light"')
+        for path, hexes in block_rows:
+            variable = re.sub(r"([a-z])([A-Z])", r"\1-\2", path).replace("/", "-").lower()
+            styl.append(f"  {variable} = {hexes[1]}")
+        (OUT_DIR / "editor-theme.styl").write_text("\n".join(styl) + "\n", encoding="utf-8")
+        index = OUT_DIR / "index.styl"
+        index.write_text(index.read_text(encoding="utf-8") + '@import "editor-theme.styl"\n', encoding="utf-8")
+    if editor:
         rule_rows = [(path[len("editor-theme/rule/"):], ident)
                      for ident, path, _h in editor if path.startswith("editor-theme/rule/")]
         lines += ["",
@@ -538,6 +557,7 @@ EDITOR_GROUND_ROLES = [
     ("lineNumber", "LineNumber"),
     ("activeLineNumber", "ActiveLineNumber"),
     ("executionLine", "ExecutionLine"),
+    ("executionPointer", "ExecutionPointer"),
     ("selection", "Selection"),
 ]
 

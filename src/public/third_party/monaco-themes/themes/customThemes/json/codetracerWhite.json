@@ -7,11 +7,11 @@
       "token": ""
     },
     {
-      "foreground": "eb4f64",
+      "foreground": "a53746",
       "token": "comment"
     },
     {
-      "foreground": "eb4f64",
+      "foreground": "a53746",
       "fontStyle": "underline",
       "token": "comment.doc"
     },
@@ -32,7 +32,7 @@
       "token": "variable.member"
     },
     {
-      "foreground": "795E26",
+      "foreground": "745a25",
       "token": "variable.member.function"
     },
     {
@@ -41,48 +41,48 @@
       "token": "variable.language"
     },
     {
-      "foreground": "56a3e8",
+      "foreground": "33618a",
       "token": "keyword"
     },
     {
-      "foreground": "56a3e8",
+      "foreground": "33618a",
       "token": "keyword.operator"
     },
     {
-      "foreground": "56a3e8",
+      "foreground": "33618a",
       "fontStyle": "bold",
       "token": "keyword.type"
     },
     {
-      "foreground": "2dc079",
+      "foreground": "196b43",
       "token": "type"
     },
     {
-      "foreground": "2dc079",
+      "foreground": "196b43",
       "token": "type.identifier"
     },
     {
-      "foreground": "0b6ae6",
+      "foreground": "0959c2",
       "token": "string"
     },
     {
-      "foreground": "599f89",
+      "foreground": "396658",
       "token": "number"
     },
     {
-      "foreground": "599f89",
+      "foreground": "396658",
       "token": "number.hex"
     },
     {
-      "foreground": "599f89",
+      "foreground": "396658",
       "token": "number.octal"
     },
     {
-      "foreground": "599f89",
+      "foreground": "396658",
       "token": "number.binary"
     },
     {
-      "foreground": "599f89",
+      "foreground": "396658",
       "token": "number.float"
     },
     {
@@ -98,38 +98,38 @@
       "token": "operator"
     },
     {
-      "foreground": "CF222E",
+      "foreground": "b71e29",
       "fontStyle": "bold",
       "token": "modifier.export"
     },
     {
-      "foreground": "267f99",
+      "foreground": "1f667b",
       "fontStyle": "bold",
       "token": "entity.name.type"
     },
     {
-      "foreground": "795E26",
+      "foreground": "745a25",
       "fontStyle": "bold",
       "token": "entity.name.function"
     },
     {
-      "foreground": "795E26",
+      "foreground": "745a25",
       "token": "identifier.function"
     },
     {
-      "foreground": "795E26",
+      "foreground": "745a25",
       "token": "support.function"
     },
     {
-      "foreground": "0070C1",
+      "foreground": "0060a6",
       "token": "constant"
     },
     {
-      "foreground": "AF00DB",
+      "foreground": "9d00c5",
       "token": "namespace"
     },
     {
-      "foreground": "CF222E",
+      "foreground": "b71e29",
       "fontStyle": "bold",
       "token": "namespace.std"
     },
@@ -143,60 +143,62 @@
       "token": "namespace.library"
     },
     {
-      "foreground": "57606A",
+      "foreground": "565f69",
       "token": "namespace.except"
     },
     {
-      "foreground": "E50000",
+      "foreground": "c00000",
       "token": "metatag"
     },
     {
-      "foreground": "0070C1",
+      "foreground": "0060a6",
       "token": "attribute.name"
     }
   ],
   "semanticHighlighting": true,
   "semanticTokenColors": {
-    "macro": "#AF3DB4",
-    "macro.declaration": "#AF3DB4",
-    "function": "#795E26",
-    "function.declaration": "#795E26",
-    "method": "#795E26",
-    "type": "#267F99",
-    "type.declaration": "#267F99",
-    "class": "#267F99",
-    "enum": "#267F99",
-    "interface": "#267F99",
-    "struct": "#267F99",
-    "typeParameter": "#0070C1",
+    "macro": "#953499",
+    "macro.declaration": "#953499",
+    "function": "#745a25",
+    "function.declaration": "#745a25",
+    "method": "#745a25",
+    "type": "#1f667b",
+    "type.declaration": "#1f667b",
+    "class": "#1f667b",
+    "enum": "#1f667b",
+    "interface": "#1f667b",
+    "struct": "#1f667b",
+    "typeParameter": "#0060a6",
     "parameter": "#1F377F",
     "variable": "#001080",
-    "variable.readonly": "#0070C1",
+    "variable.readonly": "#0060a6",
     "property": "#001080",
-    "enumMember": "#0070C1",
-    "namespace": "#267F99",
-    "decorator": "#AF3DB4",
+    "enumMember": "#0060a6",
+    "namespace": "#1f667b",
+    "decorator": "#953499",
     "label": "#001080",
     "operator": "#000000"
   },
   "colors": {
-    "editor.foreground": "#f4f4f4",
+    "editor.foreground": "#464646",
     "editor.background": "#f4f4f4",
     "editor.selectionBackground": "#4f5b66",
-    "editor.lineHighlightBackground": "#65737e55",
+    "editor.lineHighlightBackground": "#e2e0bc",
     "editorCursor.foreground": "#c0c5ce",
     "editorWhitespace.foreground": "#65737e",
     "editorIndentGuide.background": "#65737F",
     "editorIndentGuide.activeBackground": "#FBC95A",
     "editorSuggestWidget.foreground": "#464646",
-    "editorSuggestWidget.background": "#F5F5F5"
+    "editorSuggestWidget.background": "#F5F5F5",
+    "editorLineNumber.foreground": "#666055"
   },
   "codetracer": {
-    "$comment": "PLAT-47. The colours the desktop paints AROUND Monaco in its light theme (config `theme: default_white`), as the eye sees them, so the terminal's light editor (generated from this file by scripts/tokens-to-styl.sh --editor-theme) equals the desktop's. Every value here was MEASURED from the real Electron app launched in its light theme (src/tests/visual/answers/plat47-desktop-parity-light.electron.json, `just plat47-capture-electron`), and tests/test_plat47_editor_theme.nim fails when the file and the capture part. The light stylesheet paints from the design system's Light palette (default_white_theme.styl sets COLOR_MODE), and the desktop renders Monaco's own surface transparent over its pane (components/text_editor.styl), so the ground is the pane surface token in its Light mode; the active line number is the label tier, likewise in Light. A resting line number is Monaco's light line-number colour at the stylesheet's 50% opacity over that ground; the execution line is the light stop decoration under this theme's line highlight; the selection is this theme's opaque selection. Monaco ignores this key.",
+    "$comment": "The editor palette shared by the desktop and native front-ends. scripts/tokens-to-styl.sh generates editor-theme.styl for the desktop gutter, execution band and pointer, and design_tokens.nim for the native editor, from this block. Monaco supplies syntax and selection colours. The editor ground is the mode's panel because Monaco is transparent; resting line numbers paint at full opacity. The execution band and Monaco cursor-line highlight use the same opaque colour so composition cannot lower text contrast. Fresh real Electron captures (src/tests/visual/answers/plat47-desktop-parity-light.electron.json, just plat47-capture-electron) verify the effective colours. Monaco ignores this key.",
     "ground": "{colors.ui.surface.base.panel}",
-    "lineNumber": "#85adb7",
+    "lineNumber": "#666055",
     "activeLineNumber": "{colors.ui.text.primary.label}",
-    "executionLine": "#c5ca88",
-    "selection": "#4f5b66"
+    "executionLine": "#e2e0bc",
+    "selection": "#4f5b66",
+    "executionPointer": "{colors.ui.text.primary.label}"
   }
 }

@@ -435,8 +435,8 @@ ARMS = [
         "the generated shared default edited by hand"),
     # --- one editor theme ----------------------------------------------------
     Arm("T1", TOKENS,
-        '    dtEditorThemeRuleKeyword: ["#5a9dd4", "#56a3e8"],',
-        '    dtEditorThemeRuleKeyword: ["#ff79c6", "#56a3e8"],',
+        '    dtEditorThemeRuleKeyword: ["#84b6df", "#33618a"],',
+        '    dtEditorThemeRuleKeyword: ["#ff79c6", "#33618a"],',
         C_TOKENS,
         "a generated editor token no longer the theme file's rule (Dracula's "
         "keyword back)"),
@@ -815,14 +815,14 @@ ARMS += [
         "GPUI's call-trace title does not count the trace"),
     # --- the light theme, measured ----------------------------------------------
     Arm("W1", WHITE,
-        '    "executionLine": "#c5ca88",\n',
-        '    "executionLine": "#c5ca87",\n',
+        '    "executionLine": "#e2e0bc",\n',
+        '    "executionLine": "#e2e0bb",\n',
         C_MEASURED,
         "the light execution line back to the value COMPOSED from the theme's "
         "rules, not the one the desktop renders",
         also=((TOKENS,
-               '    dtEditorThemeExecutionLine: ["#404040", "#c5ca88"],\n',
-               '    dtEditorThemeExecutionLine: ["#404040", "#c5ca87"],\n'),)),
+               '    dtEditorThemeExecutionLine: ["#404040", "#e2e0bc"],\n',
+               '    dtEditorThemeExecutionLine: ["#404040", "#e2e0bb"],\n'),)),
     # --- the VCS pane refreshes --------------------------------------------------
     Arm("U1", VCSVM,
         '  for f in vm.workingTreeFiles.val:\n    result.add "\\x1e" & f.status & " " & f.path\n',
