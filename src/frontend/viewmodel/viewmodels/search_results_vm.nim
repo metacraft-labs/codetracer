@@ -21,6 +21,14 @@
 ## ``TODO find`` and narrowed nothing; it was retired with its machinery. What
 ## narrows a search is a new search.
 ##
+## ``search.find-in-files`` with no pattern — ``Ctrl+Shift+F``, ``:grep``
+## alone, the Edit menu's Find in Files — opens the pane's FIELD
+## (``openField``, PLAT-70 Part D, Find-And-Incremental-Search.md §5.2): the
+## seed is ``findInFilesSeed`` of the editor's selection, the one rule every
+## front-end applies, and the request (``fieldRequest``) is what the desktop's
+## panel focuses and selects; the terminal and GPUI open their field — the
+## omnibar's ``:grep`` line — on the same seed, selected.
+##
 ## ``active`` is kept as the assertable stand-in for the retired
 ## ``search-results-active`` root modifier; no CSS reads it.
 
@@ -47,6 +55,12 @@ type
     path*: string
     rows*: seq[tuple[index: int, row: SearchResultLine]]
 
+  FieldRequest* = object
+    ## PLAT-70 Part D: the latest request to open the pane's field — the
+    ## seed it opens on, selected — numbered so a view acts on each once.
+    seed*: string
+    revision*: int
+
   SearchResultsVM* = ref object of ViewModel
     ## Reactive state for the Find in Files panel — the ONE model the
     ## desktop's panel, the terminal's pane and GPUI's leaf draw.
@@ -62,6 +76,7 @@ type
     ##   note            — why the latest search found nothing to read.
     ##   selected        — the selected row's index in ``results``, or -1.
     ##   recentSearches  — past searches shown in the empty state.
+    ##   fieldRequest    — the latest ``openField`` (PLAT-70 Part D).
     ##
     ## Derived memos:
     ##   resultCount    — convenience: ``results.val.len``.
@@ -96,6 +111,10 @@ type
       ## memory — so the viewport decides only which rows a windowed view
       ## renders (`visibleResults`).
     runId*: int
+    fieldRequest*: Signal[FieldRequest]
+    fieldHandled*: int
+      ## The ``fieldRequest`` revision a view last acted on: a panel mounted
+      ## after the request still opens it once, and never twice.
 
     # -- Derived state --
     resultCount*: Memo[int]
@@ -193,6 +212,25 @@ proc search*(vm: SearchResultsVM; query: string) =
   let id = vm.beginSearch(query)
   if query.len > 0 and not vm.onSearch.isNil:
     vm.onSearch(id, query, vm.options.val)
+
+func findInFilesSeed*(selection, query: string): string =
+  ## PLAT-70 Part D (§5.2): what Find in Files' field opens on — the editor's
+  ## selection when it is non-empty and on one line (VS Code's Find in Files
+  ## seeds from the selection only; ``search.seedWithNearestWord`` is off by
+  ## default), else the pane's query, as it stands.
+  if selection.len > 0 and '\n' notin selection and '\r' notin selection:
+    selection
+  else:
+    query
+
+proc openField*(vm: SearchResultsVM; selection: string): string =
+  ## ``search.find-in-files`` with no pattern (§5.2): the field's seed
+  ## (``findInFilesSeed``), requested for the view that draws the field, and
+  ## returned for the front-ends whose field is the omnibar's ``:grep`` line.
+  ## Nothing is searched until ``Enter``.
+  result = findInFilesSeed(selection, vm.query.val)
+  vm.fieldRequest.val = FieldRequest(seed: result,
+                                     revision: vm.fieldRequest.val.revision + 1)
 
 type
   SearchOption* = enum
@@ -441,6 +479,7 @@ proc createSearchResultsVM*(store: ReplayDataStore): SearchResultsVM =
     let selected = createSignal(-1)
     let recentSearches = createSignal(newSeq[RecentSearch]())
     let viewport = createSignal(Viewport())
+    let fieldRequest = createSignal(FieldRequest())
 
     let resultCount = createMemo[int] proc(): int =
       results.val.len
@@ -468,6 +507,7 @@ proc createSearchResultsVM*(store: ReplayDataStore): SearchResultsVM =
       active: active,
       loading: loading,
       searching: searching,
+      fieldRequest: fieldRequest,
       note: note,
       selected: selected,
       recentSearches: recentSearches,

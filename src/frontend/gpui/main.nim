@@ -5033,7 +5033,25 @@ proc drawTopBar(r: GpuiRenderer) =
         r.setStyle(text, "white-space", "nowrap")
         r.setStyle(text, "overflow", "hidden")
         let caret = if gOmnibar.overwrite: "█" else: "▏"
-        if showsQuery:
+        let (selA, selB) = gOmnibar.selectedSpan
+        if showsQuery and selA >= 0:
+          # PLAT-70 Part D: the SELECTED SEED (Find in Files' field), on the
+          # editor's selection ground, the caret at its end: what typing
+          # replaces.
+          r.setStyle(text, "color", "#c8c8c8")
+          r.setStyle(text, "display", "flex")
+          let c = min(gOmnibar.cursor, gOmnibar.query.len)
+          let sel = r.createElement("div")
+          r.setAttribute(sel, "data-ct-omnibar-selection",
+                         gOmnibar.query[selA ..< selB])
+          r.setStyle(sel, "background", EditorSelectionColour)
+          r.appendChild(sel, r.createTextNode(gOmnibar.query[selA ..< selB]))
+          r.appendChild(text, r.createTextNode(gOmnibar.query[0 ..< selA] &
+            (if c == selA: caret else: "")))
+          r.appendChild(text, sel)
+          r.appendChild(text, r.createTextNode(
+            (if c == selB: caret else: "") & gOmnibar.query[selB .. ^1]))
+        elif showsQuery:
           let c = min(gOmnibar.cursor, gOmnibar.query.len)
           r.setStyle(text, "color", "#c8c8c8")
           r.appendChild(text, r.createTextNode(gOmnibar.query[0 ..< c] &
@@ -9152,12 +9170,21 @@ proc runGpuiFindInFiles(r: GpuiRenderer; pattern: string) =
   armHoverTick()
 
 proc openFindInFiles(r: GpuiRenderer) =
-  ## `search.find-in-files` with no pattern (`Ctrl+Shift+F`, the Edit menu,
-  ## a press on the pane's field): the pane shown and its field — the
-  ## omnibox's `:grep` line, holding the pane's query (§5.2).
+  ## `search.find-in-files` with no pattern (`Ctrl+Shift+F`, `:grep` alone,
+  ## the Edit menu, a press on the pane's field): the pane shown and its
+  ## field — the omnibox's `:grep` line. PLAT-70 Part D (§5.2): it opens on
+  ## the editor's selection when that is one line, else on the pane's query
+  ## (`SearchResultsVM.openField`), the seed SELECTED so typing replaces it.
+  let path = editorPath()
+  let selection = if gDebugDocs.hasKey(path): selectionText(gDebugDocs[path])
+                  else: ""
   showPaneFromMenu(r, paneSearch)
   let vm = searchVM()
-  openOmnibar(r, CommandPrefix & "grep " & (if vm.isNil: "" else: vm.query.val))
+  let seed = if vm.isNil: "" else: vm.openField(selection)
+  openOmnibar(r)
+  gOmnibar.openSelected(CommandPrefix & "grep ", seed)
+  traceGesture("find in files field '" & seed & "'")
+  drawTopBar(r)
 
 proc openSearchResult(r: GpuiRenderer; index: int): bool =
   ## K35: result `index` selected and opened in the editor at its line — the

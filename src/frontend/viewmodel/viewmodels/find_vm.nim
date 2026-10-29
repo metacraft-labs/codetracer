@@ -237,14 +237,19 @@ proc wordAtCaret*(d: EditingDocument): tuple[a, b: int] =
   let b = min(m.rangeTo, d.state.doc.len)
   if b > a and isWholeWordText(d.state.doc[a ..< b]): (a, b) else: (-1, -1)
 
+func selectionText*(d: EditingDocument): string =
+  ## The main selection's text ("" for a caret) — what §4.1's seed and Find
+  ## in Files' seed (§5.2, `search_results_vm.findInFilesSeed`) start from.
+  let m = d.state.selection.mainRange
+  if m.isEmpty: "" else: d.state.doc[m.rangeFrom ..< min(m.rangeTo, d.state.doc.len)]
+
 proc seedOf(d: EditingDocument; seed: FindSeed): string =
   ## §4.1, in its order.
   case seed
   of fsNone: ""
   of fsSelectionOrWord:
-    let m = d.state.selection.mainRange
-    if not m.isEmpty:
-      let t = d.state.doc[m.rangeFrom ..< min(m.rangeTo, d.state.doc.len)]
+    let t = selectionText(d)
+    if t.len > 0:
       if '\n' notin t: return t
       return d.state.search.pattern
     let w = wordAtCaret(d)

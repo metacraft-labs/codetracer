@@ -8057,3 +8057,16 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - The GPUI window's omnibox listed the `replayOpenIn:` commands but `runGpuiMenuAction` had no branch for them (they fell through to `gpuiMenuRouteOf` and were refused). `gpuiTestsCommand` (forward-declared before `runGpuiMenuAction`, defined after `placeGpuiTestRecording` so it can call `syncTestsTabs`) now handles both `replayOpenIn:` and `runTestIn:`.
 - The desktop editor's context-menu "Re-record and replay this test" now calls `editor.startEditorTestAt(line)` — the inline Run-test widget's own handler, through `editorTestRunHook` into the desktop host — instead of `renderer.runTests` directly (which loaded the recording into the edit session and began no pane run).
 - Local desktop build hazard: tup's style rules need `stylus` on PATH (`node_modules/.bin`); the f53 env did not put it there, so a stylus edit made tup fail with "stylus: command not found" and leave the old CSS.
+- Find in Files' field (PLAT-70 Part D): on the terminal and GPUI it is the
+  omnibar's `:grep` line, opened with `OmnibarVM.openSelected(":grep ", seed)`
+  so the seed is selected (`anchor`..`cursor`); the seed rule is
+  `search_results_vm.findInFilesSeed` (one-line selection, else the pane's
+  query). The TUI app layer reaches the VM only through the host closure
+  `app.openFindInFilesField` (search_results_vm is not in the SDK facade).
+  The desktop's panel acts on `SearchResultsVM.fieldRequest` (numbered,
+  consumed once via `fieldHandled`).
+- Input framer: `ESC ESC` delivers one Esc and HOLDS the second ESC as
+  `paired`; it begins a following CSI/SS3 (`ESC ESC O P` = Esc, F1) and is
+  dropped silently after `EscDelayMs` if nothing continues it. Before this,
+  an Esc the loop had not consumed when F1 arrived made `O`,`P` typed text
+  (the keymap selector's DIFF-12 flake under load).

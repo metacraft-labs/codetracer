@@ -20,7 +20,7 @@ import std/json
 from ../viewmodel/store/types as vmtypes import SearchResultLine
 from ../viewmodel/viewmodels/search_results_vm import
   SearchResultsVM, search, acceptBatch, stepResult,
-  openResult, toggleOption, searchOptionOf,
+  openResult, toggleOption, searchOptionOf, openField,
   TextMatchOptions
 import ./panel_host
 from ../viewmodel/session_vm import SessionViewModel
@@ -213,6 +213,28 @@ proc toggleSearchOption*(operation: string) =
   if known:
     vm.toggleOption(which)
 
+proc editorSelectionText(): string =
+  ## The active editor's selection as Monaco holds it ("" with no editor).
+  let active = data.services.editor.active
+  if active.len == 0 or not data.ui.editors.hasKey(active) or
+     data.ui.editors[active].monacoEditor.isNil:
+    return ""
+  $data.getMonacoSelectionText()
+
+proc openFindInFilesField*() =
+  ## PLAT-70 Part D: ``search.find-in-files`` with no pattern —
+  ## ``Ctrl+Shift+F``, ``:grep`` alone, Edit › Find in Files (Find-And-
+  ## Incremental-Search.md §5.2): the pane revealed, opened or focused
+  ## (``openLayoutTab``) and its field focused, seeded with the editor's
+  ## selection when that is one line, else holding the pane's query
+  ## (``SearchResultsVM.openField``), its text selected so typing replaces
+  ## it. The panel's view acts on the request. Nothing is searched until
+  ## ``Enter``.
+  data.openLayoutTab(Content.SearchResults)
+  let vm = paneVM()
+  if not vm.isNil:
+    discard vm.openField(editorSelectionText())
+
 proc startFindInFiles(query: string) =
   ## The omnibar's ``:grep``: the pane's own search.
   let vm = paneVM()
@@ -231,4 +253,5 @@ method register*(self: SearchResultsComponent, api: MediatorWithSubscribers) =
 # ---------------------------------------------------------------------------
 
 startFindInFilesHook = startFindInFiles
+openFindInFilesFieldHook = openFindInFilesField
 acceptFindInFilesBatchHook = acceptFindInFilesBatch

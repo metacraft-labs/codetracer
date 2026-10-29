@@ -5716,10 +5716,18 @@ proc openFindInFiles(rt: TuiRuntime; outcome: var RuntimeOutcome) =
   ## `search.find-in-files` with no pattern — `Ctrl+Shift+F` under CUA, the
   ## Edit menu's Find in Files, `:grep` alone, a press on the pane's field:
   ## Find in Files shown (`showPane`'s rule) and its field opened. The
-  ## terminal's field is the omnibox's `:grep` line, holding the pane's
-  ## current query (Find-And-Incremental-Search.md §5.2).
+  ## terminal's field is the omnibox's `:grep` line. PLAT-70 Part D
+  ## (Find-And-Incremental-Search.md §5.2): it opens on the editor's
+  ## selection when that is one line, else on the pane's query
+  ## (`SearchResultsVM.openField`), and the seed is SELECTED, so typing
+  ## replaces it; `Enter` runs the search.
+  let buf = rt.editorBuffer()
+  let selection = if buf.isNil: "" else: selectionText(buf.doc)
+  let seed = if rt.app.openFindInFilesField.isNil: rt.app.search.query
+             else: rt.app.openFindInFilesField(selection)
   rt.showPane(paneSearch, outcome)
-  rt.openOmnibar(":grep " & rt.app.search.query)
+  rt.openOmnibar()
+  rt.app.omnibar.openSelected(":grep ", seed)
   outcome.repaint = true
 
 proc runFindInFiles(rt: TuiRuntime; pattern: string;

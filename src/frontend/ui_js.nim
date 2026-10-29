@@ -5881,7 +5881,10 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     if not data.ui.activeFocus.isNil:
       discard data.ui.activeFocus.onFindOrFilter(),
   aReplace: nil,
-  findInFiles: proc(actionData: JsObject) = data.findInFiles(),
+  findInFiles: proc(actionData: JsObject) =
+    # PLAT-70 Part D (§5.2): the pane's own field, seeded and selected —
+    # it opened the palette on `:grep ` before.
+    search_results.openFindInFilesField(),
   replaceInFiles: nil,
   aToggleComment: nil,
   aIncreaseIndentation: nil,

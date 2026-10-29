@@ -16,7 +16,7 @@
 ##     Pane.md);
 ##   * `:cnext` opens the next result, `F4` the next, `Shift+F4` the previous;
 ##   * the pane's `Aa` toggle runs the search again case-sensitively;
-##   * the Edit menu's Find in Files opens the omnibox on `:grep <query>`, the
+##   * the Edit menu's Find in Files opens the omnibox on `:grep <seed>`, the
 ##     pane's field; there `Alt+C` flips Match Case and `Alt+R` Use Regular
 ##     Expression (each running the search again), and a regular expression
 ##     lists exactly the lines the oracle's own reading of it finds.
@@ -326,7 +326,10 @@ suite "PLAT-57 on a real terminal: Find in Files":
     sess.press(toggleRow, toggleCol)
     discard sess.waitScreen("No results for \"Scale\"")
 
-    # The Edit menu's Find in Files: the omnibox on `:grep <query>`.
+    # The Edit menu's Find in Files: the omnibox on `:grep <seed>` — the
+    # editor's selection, which is the `scale` the result press selected
+    # (PLAT-70 Part D, Find-And-Incremental-Search.md §5.2), not the pane's
+    # query `Scale`.
     sess.press(0, 1)
     s = sess.waitScreen(" Edit ")
     var editRow = -1
@@ -342,8 +345,8 @@ suite "PLAT-57 on a real terminal: Find in Files":
         itemRow = r
         itemCol = s[r][0 ..< at].runeLen + 1
     sess.press(itemRow, itemCol)
-    let top = sess.waitScreen(":grep Scale")[0]
-    ck top.contains(":grep Scale")
+    let top = sess.waitScreen(":grep scale")[0]
+    ck top.contains(":grep scale")
 
     # The omnibox on `:grep` is the pane's field: `Alt+C` flips Match Case
     # back off, and the search runs again — `Scale` finds the rows again.

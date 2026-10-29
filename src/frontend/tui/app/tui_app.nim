@@ -362,6 +362,11 @@ type
       ## the session's `SearchResultsVM` through the shared runner
       ## (`viewmodel/host/find_in_files`); "" when it started, else why not.
       ## Nil when no host searches (an in-process caller).
+    openFindInFilesField*: proc(selection: string): string {.closure.}
+      ## PLAT-70 Part D: the HOST's `SearchResultsVM.openField` — the seed
+      ## Find in Files' field opens on for the editor's selection
+      ## `selection` (`findInFilesSeed`: a one-line selection, else the
+      ## pane's query). Nil when no host searches.
     toggleSearchOption*: proc(operation: string): string {.closure.}
       ## PLAT-57: the HOST's Find in Files toggle, by its operation
       ## (`search.toggle-case` / `-whole-word` / `-regex`): flipped, and a

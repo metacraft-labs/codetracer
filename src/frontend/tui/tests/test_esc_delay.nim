@@ -18,7 +18,15 @@
 ##   * an `ESC` followed by an ordinary key AFTER the delay is two tokens —
 ##     the key-press sequence of a Vim user leaving insert mode;
 ##   * a sequence already waiting behind its `ESC` is one token even when the
-##     reader comes back after the delay (PLAT-48).
+##     reader comes back after the delay (PLAT-48);
+##   * an `Esc` the reader had not finished with when the next key's escape
+##     sequence arrived — `ESC` and then, within the delay, `ESC O P` — is
+##     `Esc` and then `F1`, never `Esc`, `O`, `P` (the keymap selector's
+##     DIFF-12 pty case typed that `P` into its document on a loaded machine,
+##     codetracer-pm issue 2026-10-26);
+##   * a held `ESC` whose sequence's tail arrived within the delay but was
+##     read late is that sequence, not `Esc` and its tail as keys (the same
+##     case's second cause, issue 2026-10-29).
 ##
 ## NO MOCKS: a real pipe, the shipped driver, the shipped framer.
 
@@ -136,6 +144,88 @@ suite "the lone ESC delay, over a real pipe":
     checkpoint("got " & tok.escape)
     ck tok == "\x1b[<0;51;1m"
     let (none, _) = d.nextToken(150)
+    ck none == ""
+
+suite "an Esc, then another key's escape sequence":
+
+  test "ESC ESC O P in one burst is Esc, then F1":
+    let (d, w) = pipeDriver()
+    w.put("\x1b\x1bOP")
+    let (first, _) = d.nextToken(1000)
+    let (second, _) = d.nextToken(1000)
+    checkpoint("got " & first.escape & " " & second.escape)
+    ck first == "\x1b"
+    ck second == "\x1bOP"
+    ck keyName(second) == "F1"
+    let (none, _) = d.nextToken(150)
+    ck none == ""
+
+  test "an ESC held, then F1 within the delay: Esc, then F1":
+    # The race itself: the reader holds the `Esc` (the delay has not run
+    # out) when `F1`'s three bytes arrive. Before 2026-10-27 the second
+    # `ESC` was consumed as the pair's `Esc` and `O`, `P` were typed.
+    let (d, w) = pipeDriver()
+    w.put("\x1b")
+    let held = d.nextEvent(5)
+    ck held.kind == dekIdle
+    os.sleep(5)
+    w.put("\x1bOP")
+    let (first, _) = d.nextToken(1000)
+    let (second, _) = d.nextToken(1000)
+    checkpoint("got " & first.escape & " " & second.escape)
+    ck first == "\x1b"
+    ck second == "\x1bOP"
+    let (none, _) = d.nextToken(150)
+    ck none == ""
+
+  test "an ESC held, F1's tail arriving within the delay, the reader back late: F1":
+    # The reader holds the `ESC`; `O P` arrive 5 ms later (a split write);
+    # the reader is busy past the delay before it asks again. The tail is
+    # waiting, so it is read: `F1`, not `Esc`, `O`, `P`.
+    let (d, w) = pipeDriver()
+    w.put("\x1b")
+    let held = d.nextEvent(5)
+    ck held.kind == dekIdle
+    os.sleep(5)
+    w.put("OP")
+    os.sleep(int(EscDelayMs) * 3)
+    let (first, _) = d.nextToken(1000)
+    checkpoint("got " & first.escape)
+    ck first == "\x1bOP"
+    let (none, _) = d.nextToken(150)
+    ck none == ""
+
+  test "an ESC held, a key arriving within the delay, the reader back late: Esc, then the key":
+    # The same late reader, but the waiting byte begins no sequence: it is a
+    # key of its own after the `Esc` (Vim's `Esc` `j`), not `Alt+j`.
+    let (d, w) = pipeDriver()
+    w.put("\x1b")
+    discard d.nextEvent(5)
+    os.sleep(5)
+    w.put("j")
+    os.sleep(int(EscDelayMs) * 3)
+    ck d.nextToken(1000)[0] == "\x1b"
+    ck d.nextToken(1000)[0] == "j"
+    let (none, _) = d.nextToken(150)
+    ck none == ""
+
+  test "ESC ESC [ A is Esc, then Up; ESC ESC j is Esc, then j":
+    let (d, w) = pipeDriver()
+    w.put("\x1b\x1b[A")
+    ck d.nextToken(1000)[0] == "\x1b"
+    ck d.nextToken(1000)[0] == "\x1b[A"
+    w.put("\x1b\x1bj")
+    ck d.nextToken(1000)[0] == "\x1b"
+    ck d.nextToken(1000)[0] == "j"
+    let (none, _) = d.nextToken(150)
+    ck none == ""
+
+  test "ESC ESC ESC is two Escs, as it always was":
+    let (d, w) = pipeDriver()
+    w.put("\x1b\x1b\x1b")
+    ck d.nextToken(1000)[0] == "\x1b"
+    ck d.nextToken(1000)[0] == "\x1b"
+    let (none, _) = d.nextToken(200)
     ck none == ""
 
 suite "ESC delay — assertion tally":

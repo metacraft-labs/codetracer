@@ -768,6 +768,15 @@ proc wireFindInFiles*(s: TuiSession) =
   wireFindInFiles(s.session.session.searchResultsVM,
                   proc(): FindInFilesScope = recordingSearchScope(folder))
 
+proc openFindInFilesField*(s: TuiSession; rt: TuiRuntime;
+                           selection: string): string =
+  ## PLAT-70 Part D: `SearchResultsVM.openField` — the seed Find in Files'
+  ## field opens on for the editor's `selection` (§5.2).
+  if s.ended:
+    return rt.app.search.query
+  let vm = s.session.session.searchResultsVM
+  if vm.isNil: rt.app.search.query else: vm.openField(selection)
+
 proc findInFiles*(s: TuiSession; rt: TuiRuntime; query: string): string =
   ## `:grep <query>`: the session's search (`SearchResultsVM.search`, which
   ## hands it to the runner). "" when it started, else why not.
