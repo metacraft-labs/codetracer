@@ -141,7 +141,7 @@ const
   SelectedBackground* = srSurfaceSelection
   EmptyStyle* = CellStyle(role: srChromeMuted, italic: true)
 
-  KindLabels*: array[PaletteEntryKind, string] = [
+  KindLabels: array[PaletteEntryKind, string] = [
     ":", canonical(grPaletteFunction), canonical(grPaletteFile)]
     ## One glyph per kind, so a row says what it will do before it is run.
 

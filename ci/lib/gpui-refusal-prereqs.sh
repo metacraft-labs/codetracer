@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+# NOT-A-CI-GATE: a prerequisite BUILDER, not a check — it builds the
+# featureless shim and entry point that `src/frontend/gpui/tests/
+# test_gpui_window_refusal.nim` (lane `gpui-shell`) then asserts against, and
+# that suite runs it and fails by name when it cannot. It asserts nothing
+# itself.
+#
 # The refusal suite needs a featureless shim even when the rest of gpui-shell
 # uses a windowed one. Build both the shim and the production entry point in
 # this checkout's own directory, without changing either shared build output.

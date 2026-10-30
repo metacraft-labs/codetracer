@@ -163,7 +163,7 @@ const
   # ambiguous in every suite that imports the shell — caught by
   # `tests/test_call_stack_navigation.nim` refusing to compile.
   TracepointDialogTitle* = "TRACEPOINTS"
-  DialogBorder* = canonical(grDividerH)
+  DialogBorder = canonical(grDividerH)
 
   MaxExpressionCells* = 40
 

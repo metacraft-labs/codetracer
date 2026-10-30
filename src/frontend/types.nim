@@ -3053,7 +3053,7 @@ method onBuildCode*(self: Component, response: BuildCode) {.base, async.} =
 method onUpdatedTable*(self: Component, response: CtUpdatedTableResponseBody) {.base, async.} =
   discard
 
-method onUpdatedCalltrace*(self: Component, response: CtUpdatedCalltraceResponseBody) {.base, async.} =
+method onUpdatedCalltrace(self: Component, response: CtUpdatedCalltraceResponseBody) {.base, async.} =
   discard
 
 method onUpdatedShell*(self: Component, response: ShellUpdate) {.base, async.} =

@@ -1279,7 +1279,7 @@ proc tmuxRgbRemedy*(caps: TerminalCapabilities): string =
   "tmux withholds 24-bit colour: set -as terminal-features ',"  & pattern &
     ":RGB'"
 
-proc tmuxExtendedKeysRemedy*(caps: TerminalCapabilities): string =
+proc tmuxExtendedKeysRemedy(caps: TerminalCapabilities): string =
   ## The one-line remedy when tmux keeps extended keys from this pane; ""
   ## otherwise (Base-Keymaps §7.2 step 6).
   if not caps.tmuxExtendedKeysOff:

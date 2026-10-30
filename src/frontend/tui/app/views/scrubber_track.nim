@@ -230,7 +230,7 @@ proc horizontalBarHit*(sm: ScrubberModel; left, cols, col: int;
   else:
     ScrubberHit(kind: shTrack, fraction: fraction)
 
-proc barScrollTo*(v: var HorizontalView; hit: ScrubberHit;
+proc barScrollTo(v: var HorizontalView; hit: ScrubberHit;
                   dragging: bool): bool =
   ## What a press (`dragging = false`: the column at the fraction centred) or
   ## a held thumb (`dragging = true`: the thumb follows, centred on the

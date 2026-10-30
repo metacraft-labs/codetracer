@@ -41,7 +41,13 @@ trap 'rm -rf "$scratch"' EXIT
 # Compile the owning library's unchanged C ABI shim. Only one compiler process;
 # no additional workspace or heavyweight frontend build is needed for grading.
 cxx="${CXX:-c++}"
-"$cxx" -std=c++17 -O2 -dynamiclib \
+# `-dynamiclib` is Apple's spelling; GNU ld wants `-shared` and position-
+# independent code. The library is loaded by path through ctypes either way.
+case "$(uname -s)" in
+Darwin) shared=(-dynamiclib) ;;
+*) shared=(-shared -fPIC) ;;
+esac
+"$cxx" -std=c++17 -O2 "${shared[@]}" \
 	-I "${root}/../codetracer-image-diff/vendor/flip" \
 	"${root}/../codetracer-image-diff/src/flip_wrapper.cpp" \
 	-o "${scratch}/flip.dylib"

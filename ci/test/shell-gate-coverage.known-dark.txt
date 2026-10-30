@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 47
+# RECORDED-DARK-CEILING: 48
 #
 # TWO KINDS OF DARK, AND ONLY ONE OF THEM MAY BE ADDED HERE.
 #
@@ -759,3 +759,24 @@ ci/test/identity-device-approve.mjs
 # Issue: codetracer-pm issues/2026-10-17-plat37-macos-capture-gates-are-reachable-from-no-ci-lane.md
 ci/test/plat37-macos-window-capture.sh
 ci/test/plat37-macos-electron-capture.sh
+
+# --- added 2026-10-30, with the clean-`agents` lint sweep --------------------
+#
+# Ceiling raised 47 -> 48 for this entry, in the open, per the rule above.
+#
+# BLOCKED, not UNWIRED: the recipe exists (`just test-build-siblings-noir`), and
+# what is missing is the input. The gate builds `nargo` FROM A NOIR CHECKOUT at
+# `../noir` through `scripts/build-siblings.sh --force --only noir`, and no CI
+# job has one: `noir` is not a repro.lock dependency, so
+# `provision-repro-lock-siblings` does not clone it, and every CI consumer of
+# the Noir toolchain takes the Nix-built `nargo` instead. Wiring the recipe into
+# an existing job would make that job fail on "noir is not checked out", every
+# run — the gate fails rather than skips without the sibling, deliberately.
+#
+# WHAT WOULD MAKE IT GREEN: a job that checks out `metacraft-labs/noir` at
+# `../noir` (with the network noir's own `just trace-format-nim` fetch needs)
+# and runs `just test-build-siblings-noir`. Then this line goes and the ceiling
+# drops by one.
+#
+# Issue: codetracer-pm issues/2026-10-30-lint-and-vm-unit-reds-on-clean-agents-grep-q-site-image-diff-use-ledger-and-a-tally.md
+ci/test/build-siblings-noir-fresh-checkout-test.sh

@@ -535,7 +535,10 @@ package codeTracer:
     "nim-acp >=0"
     # The parity gate compiles the FLIP producer's C ABI; declare its source
     # package so the sibling revision participates in dependency locking.
-    "image_diff >=0"
+    # Named by its repository, as every workspace producer above is
+    # (`isonim-tui`, whose package is `isonim_tui`): the repro.lock dep is
+    # `codetracer-image-diff`, and its package `image_diff` resolves from it.
+    "codetracer-image-diff >=0"
 
     # Windows-only build tools. ``nsis`` (the Nullsoft Scriptable
     # Install System compiler) is what the ``windows-installer``

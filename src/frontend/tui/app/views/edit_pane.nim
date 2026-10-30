@@ -196,7 +196,7 @@ const
   EditDirtyStyle* = CellStyle(role: srChromeNotification, bold: true)
   EditStatementStyle* = CellStyle(role: srChromeMuted, italic: true)
   EditRuleStyle* = CellStyle(role: srBorderPane)
-  EditPaneRule* = canonical(grDividerH)
+  EditPaneRule = canonical(grDividerH)
 
 proc initEditPaneModel*(path = ""; sourceStatement = "";
                         lines: seq[string] = @[]; viewportTop = 1;

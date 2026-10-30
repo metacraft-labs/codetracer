@@ -277,7 +277,7 @@ proc feedOutput*(vm: BuildVM; raw: string; isStdout: bool): ReadBuildLine =
                                other: result.fed.scanned.message)
     vm.errors.val = entries
 
-proc feedChunk*(vm: BuildVM; data: string; isStdout: bool): seq[ReadBuildLine] =
+proc feedChunk(vm: BuildVM; data: string; isStdout: bool): seq[ReadBuildLine] =
   ## A stream's write (`chunkLines`), line by line.
   for raw in chunkLines(data):
     result.add vm.feedOutput(raw, isStdout)

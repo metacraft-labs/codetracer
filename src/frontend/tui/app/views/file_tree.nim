@@ -77,14 +77,14 @@ type
 
 const
   FileTreeTitle* = "FILES"
-  FileTreeRule* = canonical(grDividerH)
+  FileTreeRule = canonical(grDividerH)
   FileTreeTitleStyle* = CellStyle(role: srModeEdit, bold: true)
   FileTreeRuleStyle* = CellStyle(role: srBorderPane)
   FileTreeOpenStyle* = CellStyle(role: srChromeText, bold: true)
   FileTreePlainStyle* = CellStyle(role: srChromeMuted)
   FileTreeSelectedBackground* = srSurfaceSelection
   FileTreeTruncatedStyle* = CellStyle(role: srChromeNotification)
-  OpenMarker* = canonical(grOpenMarker)
+  OpenMarker = canonical(grOpenMarker)
     ## Beside the file the editor holds. One cell, so the paths stay aligned.
 
 proc initFileTreeModel*(files: seq[string] = @[]; selected = -1;
@@ -96,10 +96,10 @@ proc initFileTreeModel*(files: seq[string] = @[]; selected = -1;
 proc isEmpty*(model: FileTreeModel): bool =
   model.files.len == 0 and model.entries.len == 0
 
-const FolderGlyph* = canonical(grTreeExpanded)
+const FolderGlyph = canonical(grTreeExpanded)
   ## Beside an expanded folder, as the desktop's twisty. One cell;
   ## `borders.asciiFor` degrades it to `v`.
-const CollapsedFolderGlyph* = canonical(grTreeCollapsed)
+const CollapsedFolderGlyph = canonical(grTreeCollapsed)
   ## PLAT-50: beside a COLLAPSED folder (a click opens it). `asciiFor`: `>`.
 
 proc entryText*(e: FileTreeEntry; glyphs = DefaultGlyphs): string =

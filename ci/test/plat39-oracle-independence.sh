@@ -97,6 +97,18 @@ nimkey() { printf '%s' "$1" | tr -d '_' | tr '[:upper:]' '[:lower:]'; }
 # one set the global failure flag, the control that proves the scan CAN go red
 # would itself turn the run red, which is trap §5's shape: the instrument
 # scoring its own calibration run as a result.
+# THE NEEDLE IS A SET OF WHOLE NAMES, NOT SUBSTRINGS. Matched as substrings,
+# the normalised line `import ./plat42_code_column` ("…codecolumn") "imported"
+# `viewmodel/collab/codec.nim`, and lint-nim went red on an oracle that shares
+# nothing with the application (measured on `agents` `5192276c07c`). Each
+# identifier on an import line — path segments and bracketed module lists
+# alike — is normalised and looked up whole, which is what an import edge is.
+declare -A FORBIDDEN=()
+for m in "${VM_MODULES[@]}" "${PO_MODULES[@]}"; do
+	mk="$(nimkey "$m")"
+	[ -n "$mk" ] && FORBIDDEN["$mk"]="$m"
+done
+
 scan_one() {
 	local file="$1" hits=0
 	# Import lines only: a module NAME appearing inside a comment or a string is
@@ -107,19 +119,15 @@ scan_one() {
 		import* | from* | include*) ;;
 		*) continue ;;
 		esac
-		local key
-		key="$(nimkey "$line")"
-		for m in "${VM_MODULES[@]}" "${PO_MODULES[@]}"; do
-			local mk
-			mk="$(nimkey "$m")"
-			[ -z "$mk" ] && continue
-			case "$key" in
-			*"$mk"*)
-				printf '%s imports %s\n' "$file" "$m"
+		local word key
+		while IFS= read -r word; do
+			case "$word" in import | from | include | as | except) continue ;; esac
+			key="$(nimkey "$word")"
+			if [ -n "${FORBIDDEN[$key]+x}" ]; then
+				printf '%s imports %s\n' "$file" "${FORBIDDEN[$key]}"
 				hits=$((hits + 1))
-				;;
-			esac
-		done
+			fi
+		done < <(grep -oE '[A-Za-z_][A-Za-z0-9_]*' <<<"${line%%#*}")
 	done <"$file"
 	return "$hits"
 }
@@ -164,7 +172,9 @@ rm -f "$PLANT"
 
 # --- 5. The negative control: a clean module must NOT fire -------------------
 CLEAN="$ORACLE_DIR/.plat39_independence_clean.nim"
-printf 'import std/[strutils, os]\nimport gui_assert/ocr\n' >"$CLEAN"
+# The second line is the measured false positive: `plat42_code_column`
+# contains `codec` (a viewmodel module) as a substring and is not an import of it.
+printf 'import std/[strutils, os]\nimport gui_assert/ocr\nimport ./plat42_code_column\n' >"$CLEAN"
 if scan_one "$CLEAN" >/dev/null 2>&1; then
 	note "negative control silent: a clean module is not flagged"
 else

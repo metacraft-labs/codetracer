@@ -349,7 +349,7 @@ proc readByteWithTimeout*(timeoutMs: int; fd: cint = STDIN_FILENO;
 
 const
   MotionTrackingOnBytes* = "\x1b[?1003h"
-  MotionTrackingOffBytes* = "\x1b[?1003l"
+  MotionTrackingOffBytes = "\x1b[?1003l"
     ## ANY-EVENT tracking (`?1003`) since PLAT-48; button-event tracking
     ## (`?1002`) before it. A motion report with a button held drives a
     ## drag (PLAT-47); one with no button lets the top bar's controls show
@@ -780,7 +780,7 @@ proc start*(d: TerminalDriver) =
 
 const
   PixelMouseOnBytes* = "\x1b[?1016h"
-  PixelMouseOffBytes* = "\x1b[?1016l"
+  PixelMouseOffBytes = "\x1b[?1016l"
     ## PLAT-51: SGR-pixel mouse reporting (DECSET 1016) — the same reports as
     ## SGR-1006, in pixels.
 

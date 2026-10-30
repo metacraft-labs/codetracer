@@ -532,7 +532,7 @@ const
     ## light box corners and tees, which are `A` too). `░` is `A` in
     ## EastAsianWidth.txt despite §6.2 listing it as not; the file wins.
 
-proc isEawAmbiguous*(glyph: string): bool =
+proc isEawAmbiguous(glyph: string): bool =
   glyph in EawAmbiguousChrome
 
 # ---------------------------------------------------------------------------

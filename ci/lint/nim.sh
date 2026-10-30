@@ -738,8 +738,41 @@ lint_step "frontend reachability: the ratchet's prose agrees with its threshold"
 #       (`viewmodel/platform`'s session helpers, `viewmodel/sync`, `gpui/app`
 #       and others), left for their features, inside the ceiling.
 #   1209 - 3 - 10 = 1196, measured, 7 under the corrected base.
-lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1196 + allow-list hygiene)" \
-	env CT_REACHABILITY_MAX=1196 bash ci/test/frontend-reachability.sh
+# THE CEILING MOVED 1196 -> 1207 ON 2026-10-30, after `agents` had drifted to
+#   1242 (red on the branch from the PLAT-51/53/54/56/58/68/70 landings on).
+#   THE ACCOUNT is a DIFF OF TWO RUNS of this script, by path, kind and name:
+#   `cc640d0882b` (where 1196 was set, measured 1196) against `5192276c07c`.
+#   99 in, 51 out (the 51 are symbols those landings gave a product reader).
+#   -35, UN-EXPORTED, reached by nothing outside their own module — no product,
+#       no suite, no script, no string (an identifier scan of the repository,
+#       style-insensitive as Nim is): `build_output.{buildBarOf,
+#       initBuildPaneModel,TruncatedNote}`, `source_pane.{sourceBarOf,
+#       sourceTrackOf}`, `scrubber_track.barScrollTo`, `scrollbar_styles.
+#       isScrollbarTrackRole`, `scrollbar_interaction.isHeld`, `build_vm.
+#       feedChunk`, `stdio_backend.isBounded`, `terminal_profile.isEawAmbiguous`,
+#       `capabilities.tmuxExtendedKeysRemedy`, `terminal_driver.{
+#       MotionTrackingOffBytes,PixelMouseOffBytes}`, `command_palette.
+#       KindLabels`, `edit_pane.EditPaneRule`, `event_log.{CategoryFieldCells,
+#       IndexFieldCells,TickFieldCells}`, `file_tree.{CollapsedFolderGlyph,
+#       FileTreeRule,FolderGlyph,OpenMarker}`, `top_bar.{FolderMarker,
+#       OmnibarGlyph}`, `tracepoint_manager.DialogBorder`, `tree_node.{
+#       AddWatchText,MoreRowPrefix,RemoveWatchGlyph}`, `types.
+#       onUpdatedCalltrace`, `value.{renderValueDomWithLeft,replaceAllValues}`,
+#       `utils.{getSessionIdFromMessage,makeFlowComponent}` and `jslib.
+#       findElement`. Their own module keeps them where it uses them.
+#   LEFT, AND WHY (64): 43 tested-only exports (bucket A) — suites and no
+#       product caller yet, the shape every earlier move carried — and 21 that
+#       the scan files under "nothing" although a reader exists where it does
+#       not look or cannot tell apart: suites under `src/tests/gui` (`twistyText`,
+#       `isActiveRow`, `refreshInFlight`, `workspaceVcsState`, `rowTimestamp`),
+#       a sibling view (`HttpMethods`, `StatusBucketOptions`), a name declared
+#       in several modules at once (`PaneRule` x4, `onLoadedTerminal` x2,
+#       `CallTraceBuffer`/`CALLTRACE_BUFFER`), the SDK facade guard
+#       (`CodeTracerUiComponentsModule`), and one `==` (`find_match`) a name
+#       scan cannot judge, for the reason given above for `$`.
+#   1242 - 35 = 1207, measured.
+lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1207 + allow-list hygiene)" \
+	env CT_REACHABILITY_MAX=1207 bash ci/test/frontend-reachability.sh
 
 # ONE CHAIN, ENFORCED, BECAUSE THE RATCHET ABOVE CANNOT ENFORCE IT.
 #
@@ -938,6 +971,15 @@ lint_step "DAP command sync: the allow-list names everything the engine dispatch
 # python3, about a second.
 lint_step "PLAT-37 Electron lane: per-scenario outcomes name each failure's phase and cause" \
 	bash ci/test/plat37-electron-outcomes-test.sh
+
+# PLAT-37's published parity figures (`just plat37-parity`) are graded by REAL
+# FLIP and refused when two independent captures of one renderer disagree.
+# `--test` runs the tool's controls over synthetic PNGs — stability, refusal,
+# capture provenance — with no window or GPU: one c++ compile of the
+# `codetracer-image-diff` sibling's C ABI shim (this job provisions the
+# repro.lock siblings) and about six seconds of Python.
+lint_step "PLAT-37 parity: unstable captures are refused, stable ones graded by real FLIP" \
+	bash ci/test/plat37-parity.sh --test
 
 # The mutation harnesses edit the product's sources in place. One that DROPS a
 # flag it does not know turns `--only=…` into a full, file-mutating grading run;

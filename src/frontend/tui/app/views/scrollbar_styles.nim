@@ -316,7 +316,7 @@ func isScrollbarThumbRole*(role: SemanticRole): bool =
   role in {srScrollbarThumb, srScrollbarThumbSolid, srScrollbarThumbHover,
            srScrollbarThumbHeld}
 
-func isScrollbarTrackRole*(role: SemanticRole): bool =
+func isScrollbarTrackRole(role: SemanticRole): bool =
   role in {srScrollbarTrack, srScrollbarTrackRevealed}
 
 # ---------------------------------------------------------------------------

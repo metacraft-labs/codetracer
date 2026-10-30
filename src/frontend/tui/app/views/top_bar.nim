@@ -158,8 +158,8 @@ type
 
 const
   MenuButtonGlyph* = canonical(grMenuButton)
-  OmnibarGlyph* = canonical(grOmnibar)
-  FolderMarker* = canonical(grOverflowRight)
+  OmnibarGlyph = canonical(grOmnibar)
+  FolderMarker = canonical(grOverflowRight)
   OmnibarOpenMinCells* = 16
   OmnibarFieldMinCells* = 14
   OmnibarResultRows* = 10

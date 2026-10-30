@@ -78,7 +78,7 @@ proc sendWithSession*(data: Data, channel: cstring) =
   msg["sessionId"] = data.activeSessionIndex
   data.ipc.send(channel, msg)
 
-proc getSessionIdFromMessage*(raw: JsObject): int =
+proc getSessionIdFromMessage(raw: JsObject): int =
   ## Extract the sessionId from an incoming IPC message.
   ## Returns ``DEFAULT_SESSION_ID`` when the field is absent, which keeps
   ## backward compatibility during M8 (single session).
@@ -767,7 +767,7 @@ proc makeChartComponent*(data:Data): ChartComponent =
     pieLabels: @[],
     pieValues: @[])
 
-proc makeFlowComponent*(data: Data, position: int): FlowComponent =
+proc makeFlowComponent(data: Data, position: int): FlowComponent =
   FlowComponent(
     # api: self.api,
     # id: self.id,

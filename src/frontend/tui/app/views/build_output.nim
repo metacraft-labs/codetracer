@@ -153,7 +153,7 @@ const
   BuildEmptyStyle = CellStyle(role: srChromeMuted)
   BuildMenuStyle = CellStyle(role: srChromeText)
   BuildMenuActiveStyle = CellStyle(role: srChromeText, bold: true)
-  TruncatedNote* = canonical(grTruncation) & " earlier output dropped"
+  TruncatedNote = canonical(grTruncation) & " earlier output dropped"
 
 proc verdictStyle*(verdict: BuildVerdict): CellStyle =
   ## ONE COLOUR PER VERDICT, NO TWO THE SAME, on exactly the rule
@@ -219,7 +219,7 @@ proc snapshotOfSession*(s: BuildSession): BuildSnapshot =
     if read.fed.problem:
       result.problems.add read.fed.row
 
-proc initBuildPaneModel*(): BuildPaneModel =
+proc initBuildPaneModel(): BuildPaneModel =
   BuildPaneModel(status: bsIdle, follow: true)
 
 proc buildPaneModelFor*(s: BuildSession; nowMs = 0.0): BuildPaneModel =
@@ -312,7 +312,7 @@ proc outputGeometry*(model: BuildPaneModel; area: CellArea):
 proc clampBuildTop*(total, top, rows: int): int =
   clamp(top, 0, max(0, total - max(1, rows)))
 
-proc buildBarOf*(model: BuildPaneModel; area: CellArea):
+proc buildBarOf(model: BuildPaneModel; area: CellArea):
     tuple[shown: bool; row, left, cols: int; view: HorizontalView] =
   ## PLAT-70: where `paintBuildOutput` draws the horizontal bar in `area`
   ## (the rows below the strip), and the view it is drawn over.

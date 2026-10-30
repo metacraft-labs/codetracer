@@ -514,7 +514,7 @@ proc sourcePaneLayout*(model: SourcePaneModel; area: CellArea): SourcePaneLayout
                            (if model.executionLine > 0: model.executionLine - 1
                             else: -1)))
 
-proc sourceBarOf*(model: SourcePaneModel; area: CellArea):
+proc sourceBarOf(model: SourcePaneModel; area: CellArea):
     tuple[shown: bool; row, left, cols: int; view: HorizontalView] =
   ## PLAT-70: where `paintSourcePane` draws the horizontal bar in `area`, and
   ## the view it is drawn over — what a press on it is hit-tested against.
@@ -522,7 +522,7 @@ proc sourceBarOf*(model: SourcePaneModel; area: CellArea):
   ## (`sourcePaneLayout`).
   model.sourcePaneLayout(area).bar
 
-proc sourceTrackOf*(model: SourcePaneModel; area: CellArea): SourceTrack =
+proc sourceTrackOf(model: SourcePaneModel; area: CellArea): SourceTrack =
   ## M73 (#840): where `paintSourcePane` draws the vertical bar in `area`.
   model.sourcePaneLayout(area).track
 

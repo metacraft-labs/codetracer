@@ -270,11 +270,11 @@ const
     ## the last one is short, so both "it pages" and "it finds the end" are
     ## observable on real data.
 
-  TickFieldCells* = EventLogTickCells
+  TickFieldCells = EventLogTickCells
   GapCells* = 1
-  IndexFieldCells* = EventLogIndexCells
+  IndexFieldCells = EventLogIndexCells
     ## The `#` column: the event's number in the log.
-  CategoryFieldCells* = EventLogKindCells
+  CategoryFieldCells = EventLogKindCells
     ## PLAT-70 Part I: the default widths are the shared declaration's
     ## (`event_log_vm.eventLogFitColumns`); the location and output columns
     ## take their widths from what they show (Horizontal-Overflow.md §5.5).

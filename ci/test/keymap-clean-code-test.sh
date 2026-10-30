@@ -69,7 +69,7 @@ expect_red() {
 	rc=$?
 	if [ "${rc}" -eq 0 ]; then
 		bad "${name}: the gate passed a planted violation" "${out##*$'\n'}"
-	elif grep -F -- "FAIL  [${check}]" <<<"${out}" | grep -qF -- "${text}"; then
+	elif grep -qF -- "${text}" <<<"$(grep -F -- "FAIL  [${check}]" <<<"${out}")"; then
 		ok "${name}: reddens on check ${check}"
 	else
 		bad "${name}: red, but not on check ${check} with '${text}'" \
