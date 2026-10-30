@@ -2700,17 +2700,10 @@ impl ExprLoader {
 
     pub fn register_loop(&mut self, start: Position, end: Position, path: &PathBuf) {
         let lang = self.get_current_language(path);
-        // The `+1` for Rust is unchanged in effect: `get_current_language`
-        // answers `Lang::RustWasm` for every `.rs` before LRS-5's second
-        // deletion round and `Lang::Rust` for every `.rs` after it, so the
-        // same paths take the same offset.  What changed is that the condition
-        // no longer reads as "materialized Rust" when it never distinguished
-        // one.
-        let offset = if lang == Lang::RubyDb || lang == Lang::Rust {
-            1
-        } else {
-            0
-        };
+        // Ruby blocks begin at their first body line. Rust's parsed start is
+        // already the loop header: the first body statement may have no
+        // executable stop, so shifting there can hide the loop entirely.
+        let offset = if lang == Lang::RubyDb { 1 } else { 0 };
         info!("current lang: {lang:?}");
         let start_with_offset = Position(start.0 + offset);
         if self.is_new_loop_shape(&start_with_offset, &self.processed_files[path]) {
@@ -3418,6 +3411,39 @@ mod tests {
         assert!(checked >= 25, "only {checked} vectors read");
 
         let _ = fs::remove_dir_all(&base);
+        Ok(())
+    }
+
+    #[test]
+    fn rust_loop_shapes_start_on_their_source_headers() -> Result<(), Box<dyn std::error::Error>> {
+        let file = tempfile::Builder::new().suffix(".rs").tempfile()?;
+        fs::write(
+            file.path(),
+            r#"fn main() {
+    for k in 0..5 {
+        let local = k;
+        println!("{k}");
+    }
+    while false {
+        break;
+    }
+    loop {
+        break;
+    }
+}
+"#,
+        )?;
+        let path = file.path().to_path_buf();
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&path)?;
+        assert_eq!(loader.processed_files[&path].loop_shapes.len(), 4);
+        for (first, last) in [(2, 5), (6, 8), (9, 11)] {
+            let shape = loader
+                .get_loop_shape(Position(first), &path)
+                .unwrap_or_else(|| panic!("Rust loop at source header {first} was not registered"));
+            assert_eq!(shape.first, Position(first));
+            assert_eq!(shape.last, Position(last));
+        }
         Ok(())
     }
 
