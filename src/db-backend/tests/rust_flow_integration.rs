@@ -89,6 +89,72 @@ fn test_rust_flow_integration() {
     }
 }
 
+/// A stop in the middle of a native call must still show assignments before
+/// that stop. Drive the real Rust recorder, rr worker and DAP flow loader:
+/// a variable appearing again in a later println is insufficient evidence,
+/// so check the values on their original assignment lines.
+#[cfg(unix)]
+#[test]
+fn test_rust_flow_from_middle_includes_earlier_assignments() {
+    const TEST_NAME: &str = "test_rust_flow_from_middle_includes_earlier_assignments";
+    let Some(ct_native_replay) = rust_rr_flow_prerequisites(TEST_NAME) else {
+        return;
+    };
+    let source = get_rust_source_path();
+    let pause_line =
+        i64::try_from(find_line_containing(&source, "let final_result = doubled + 10;")).expect("source line fits i64");
+    let recording = TestRecording::create(&source, Language::Rust, &rustc_version_label(), &ct_native_replay)
+        .expect("Rust recording failed");
+    let mut client = DapTestClient::start(&recording.temp_dir, &ct_native_replay).expect("DAP start failed");
+    client
+        .initialize_and_launch(&recording, &ct_native_replay)
+        .expect("DAP launch failed");
+    client
+        .set_breakpoint(&source, u32::try_from(pause_line).expect("source line fits u32"))
+        .expect("setting breakpoint failed");
+    let location = client.continue_to_breakpoint().expect("breakpoint was not reached");
+    assert_eq!(
+        location.line, pause_line,
+        "the flow request must originate after the earlier assignments"
+    );
+    let flow = client.request_flow(location).expect("native call flow failed");
+
+    for (statement, name, expected) in [
+        ("let sum = a + b;", "sum", 42),
+        ("let doubled = sum * 2;", "doubled", 84),
+    ] {
+        let line = i64::try_from(find_line_containing(&source, statement)).expect("source line fits i64");
+        assert!(line < pause_line);
+        let step = flow
+            .steps
+            .iter()
+            .find(|step| step.line == line)
+            .unwrap_or_else(|| panic!("call flow omitted the earlier {name} assignment at line {line}"));
+        let value = step
+            .after_values
+            .get(name)
+            .unwrap_or_else(|| panic!("the assignment at line {line} has no resulting value for {name}"));
+        assert_eq!(
+            test_harness::FlowData::extract_int_value(value),
+            Some(expected),
+            "wrong {name} at its assignment"
+        );
+    }
+    let later = flow
+        .steps
+        .iter()
+        .find(|step| step.line == pause_line)
+        .expect("call flow omitted the assignment at the paused line");
+    assert_eq!(
+        later
+            .after_values
+            .get("final_result")
+            .and_then(test_harness::FlowData::extract_int_value),
+        Some(94),
+        "the flow must also retain values after the paused position"
+    );
+}
+
 /// A call flow requested where the replay stops at the END of the trace must
 /// be refused by name, and the refusal must not cost a worker.
 ///
