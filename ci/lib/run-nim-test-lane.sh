@@ -116,6 +116,44 @@ if [ -n "${_ct_lane_recipes}" ]; then
 	exit 2
 fi
 
+# THE SPECIFICATION CHECKOUT, FOR THE SUITES THAT READ THEIR ORACLE FROM IT.
+#
+# `test_support/spec_documents.nim` reads `$CT_SPECS_DIR`, else the sibling
+# `../codetracer-pm`, and never searches; in a workspace the repository is
+# checked out under its manifest path (`codetracer-specs`), so without this
+# every suite that imports it failed to COMPILE, on every tree, in a way that
+# read as a product defect. The lane resolves the checkout once
+# (ci/lib/spec-checkout.sh: the override, the workspace manifest, the sibling
+# names) and exports it. When the lane holds such a suite and nothing
+# resolves, the lane stops HERE, before compiling anything, naming the suites
+# and every place it looked — a missing oracle is a hard red, never a skip.
+# shellcheck source=ci/lib/spec-checkout.sh
+# shellcheck disable=SC1091 # resolved at runtime from $repo_root
+source "${repo_root}/ci/lib/spec-checkout.sh"
+_ct_spec_readers="$(test_lane_files "${lane}" | while read -r _ct_f; do
+	[ -n "${_ct_f}" ] && grep -l 'spec_documents' "${_ct_f}" 2>/dev/null
+done)"
+if _ct_specs_found="$(ct_resolve_specs_dir "${repo_root}" 2>"${TMPDIR:-/tmp}/ct-specs-tried.$$")"; then
+	export CT_SPECS_DIR="${_ct_specs_found}"
+	if [ -n "${_ct_spec_readers}" ]; then
+		echo "    (specifications read from ${CT_SPECS_DIR})"
+		sed 's/^/    /' "${TMPDIR:-/tmp}/ct-specs-tried.$$"
+	fi
+elif [ -n "${_ct_spec_readers}" ]; then
+	{
+		echo "ERROR: lane '${lane}' has suites that read the CodeTracer specification"
+		echo "       checkout (codetracer-pm, checked out as codetracer-specs in a workspace),"
+		echo "       and no checkout was found:"
+		printf '%s\n' "${_ct_spec_readers}" | sed 's/^/         suite: /'
+		sed 's/^/         tried: /' "${TMPDIR:-/tmp}/ct-specs-tried.$$"
+		echo "       Check the repository out beside this one (repro ws enable codetracer)"
+		echo "       or set CT_SPECS_DIR to a checkout holding spec/."
+	} >&2
+	rm -f "${TMPDIR:-/tmp}/ct-specs-tried.$$"
+	exit 2
+fi
+rm -f "${TMPDIR:-/tmp}/ct-specs-tried.$$"
+
 # THE CACHE ROOT IS PER-CHECKOUT, AND THAT IS THE WHOLE POINT.
 #
 # The default used to be a bare `/tmp/ct-nim-cache`, and the per-suite directory
