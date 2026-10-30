@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# NOT-A-CI-GATE: a local runner (an Xvfb when there is no DISPLAY, the CI
+# Electron flags) for `src/tests/gui/tests/build/build-tasks.spec.ts`, which CI
+# already runs with every other spec: the `test-ui-tests` job's
+# `ci/test/ui-tests-db.sh` calls `just test-e2e` with no filter.
+#
 # build-tasks-electron.sh — the REAL Electron front-end's build tasks, task
 # picker, Stop, BUILD panel reveal and editor diagnostics
 # (`src/tests/gui/tests/build/build-tasks.spec.ts`; Build-Output-Pane.md
