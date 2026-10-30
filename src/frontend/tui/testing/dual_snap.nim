@@ -257,6 +257,26 @@ const
         "same cell with the foreground colour from the same SGR intact " &
         "(both fg=5)."),
     NamedExclusion(
+      name: "zero-width-runes-have-no-tier-2-representation",
+      scope: esNormalisation,
+      subject: "plaintext.txt (a cell's zero-width runes after its base)",
+      justification:
+        "Since isonim-tui draws a grapheme's zero-width runes (combining " &
+        "marks, ZWJ, variation selectors) with the cell before them, Tier 1's " &
+        "plaintext carries them; Tier 2 reads one rune per cell and cannot. " &
+        "Both texts are compared with those runes removed — the rule the " &
+        "compositor uses to attach them, so nothing else is touched — and " &
+        "the suite asserts the marks ARE in Tier 1's text, so this is " &
+        "exercised rather than hypothetical. Retire it when Tier 2's cell " &
+        "reading exposes libvterm's further `chars`.",
+      evidence:
+        "isonim-tui `7012421` (compositor: \"draw a grapheme's zero-width " &
+        "runes\") adds them to `Cell.extra` and to every emitter; " &
+        "nim-libvterm/src/nim_libvterm/screen.nim `cellAt` sets `rune` from " &
+        "`chars[0]` only, and TermAssert's renderPlain writes `cell.rune`. " &
+        "Measured on app_wide_glyphs at 80x24: Tier 1 row 0 " &
+        "`┌世\u0301界\u0301─┐`, Tier 2 `┌世界─┐`, all else equal."),
+    NamedExclusion(
       name: "cellmap-tier-private-fields",
       scope: esField,
       subject: "nodeId (Tier 1); hyperlinkId, imageRef (Tier 2)",
@@ -272,7 +292,7 @@ const
         "lands in M3+; TermAssert's renderCellmap writes hyperlinkId and " &
         "imageRef and no nodeId.")]
 
-  CrossTierExclusionCount* = 6
+  CrossTierExclusionCount* = 7
     ## Asserted by the suite. Adding an exclusion without updating this — and
     ## therefore without a reviewer seeing the number move — fails the run.
 
@@ -569,10 +589,23 @@ proc compareCanon*(tier1, tier2: CanonScreen): seq[Divergence] =
             else: "the colours differ"))
         return
 
+proc withoutZeroWidthRunes*(s: string): string =
+  ## The `zero-width-runes-have-no-tier-2-representation` exclusion: every rune
+  ## the compositor would attach to the cell before it (zero cells wide and a
+  ## cluster continuation — `compositor.rawCellsForEntry`'s own test) removed,
+  ## everything else kept byte for byte.
+  result = newStringOfCap(s.len)
+  for r in s.runes:
+    if displayWidth(r, awNarrow) == 0 and isClusterContinuation(r):
+      continue
+    result.add $r
+
 proc normalisePlaintext(s: string): string =
-  ## The `plaintext-trailing-newline` exclusion, applied in exactly one place.
+  ## The `plaintext-trailing-newline` exclusion, applied in exactly one place,
+  ## and the `zero-width-runes-…` one beside it.
   ## Only a SINGLE trailing newline is removed: a second one would be a blank
   ## row the two tiers disagree about, and that must still fail.
+  let s = withoutZeroWidthRunes(s)
   if s.endsWith("\n"): s[0 ..< s.len - 1] else: s
 
 proc comparePlaintext*(tier1, tier2: string): seq[Divergence] =

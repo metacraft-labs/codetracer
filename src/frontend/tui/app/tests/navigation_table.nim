@@ -107,6 +107,10 @@ type
     pending*: string
       ## The status line's pending indicator after the key (`g…`).
     timedOut*: bool
+    operation*: string
+      ## The routed operation, argument included, when `kind` is `action` —
+      ## what the runtime dispatches. Some operations have no `KeyAction`
+      ## (`find.cancel`, run by name), so `action` alone reads them as none.
     reason*: string
       ## `inert-in-mode`'s sentence (Mode-Transitions §8.1) — the runtime's
       ## `performAction` answer for an action the product mode has no use
@@ -151,6 +155,9 @@ proc resolve*(r: var NavResolver; state: ModalState; token: string;
   case res.kind
   of erOperation:
     result.kind = "action"
+    result.operation =
+      if res.argument.len > 0: res.operation & "(" & res.argument & ")"
+      else: res.operation
     result.action = actionOfOperation(
       if res.argument.len > 0: res.operation & "(" & res.argument & ")"
       else: res.operation)

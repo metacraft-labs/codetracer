@@ -51,7 +51,7 @@ import ../views/status_bar
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 135
+const ExpectedAssertions = 136
 
 var countedAssertions = 0
 
@@ -339,8 +339,16 @@ suite "CTUI-9: the modal state machine decides every event":
     ck km.resolve(typing, "N", 0).kind == "text"
     ck km.resolve(browsing, "N", 0).action == kaPrevMatch
     # And the NON-printable bindings are NOT shadowed by the prompt, which is
-    # what keeps an open prompt escapable.
-    ck km.resolve(typing, "\x1b", 0).action == kaReturnToNormal
+    # what keeps an open prompt escapable. ESCAPE IS THE FIELD'S OWN CANCEL
+    # since the find session (Find-And-Incremental-Search.md §3.5): the open
+    # find field routes it as `input.cancel`, which the runtime
+    # (`runPromptKey`, `claCancelled`) turns into the modal cancel back to
+    # NORMAL plus each base's native exit — CUA keeps the match, the others
+    # restore. Before the find layer this resolved straight to
+    # `modal.return-to-normal`; the operation has no `KeyAction` of its own.
+    let escTyping = km.resolve(typing, "\x1b", 0)
+    ck escTyping.kind == "action"
+    ck escTyping.operation == "input.cancel"
     ck km.resolve(typing, "\r", 0).action == kaCommitPrompt
     ck km.resolve(typing, "\x7f", 0).action == kaPromptBackspace
     # …and the same three keys in NORMAL mean their §4.2 actions instead.
@@ -455,6 +463,7 @@ suite "CTUI-9: the modal state machine decides every event":
     ## the one chord a user holds down. Every binding in every mode is driven
     ## through `resolve` once, from its own byte token, and the slowest is
     ## reported.
+    const DispatchReps = 5
     let table = navigationKeymap()
     var worstNs = 0'i64
     var totalNs = 0'i64
@@ -467,10 +476,18 @@ suite "CTUI-9: the modal state machine decides every event":
       for bnd in table.bindingsFor(mode):
         for token in [".", "n", "\x1b[21~", "\x1b[21;2~", "\x17", "\x1b[Z",
                       "\x1b[B", "\x7f", "\x1b", "\r", "g", "r", "\x1b[15;3~"]:
-          var km = newNavResolver()
-          let started = getMonoTime()
-          discard km.resolve(state, token, 0)
-          let elapsed = (getMonoTime() - started).inNanoseconds
+          # THE DISPATCH'S COST, NOT THE SCHEDULER'S: the fastest of
+          # `DispatchReps` identical dispatches, each from a fresh resolver.
+          # A dispatch that is slow is slow every time; one the kernel
+          # descheduled is slow once. Measured 2026-10-30 on `agents` at load
+          # 150: a single wall-clock reading put the worst at 10.3 ms (RED) on
+          # a table whose every dispatch costs microseconds alone.
+          var elapsed = int64.high
+          for rep in 0 ..< DispatchReps:
+            var km = newNavResolver()
+            let started = getMonoTime()
+            discard km.resolve(state, token, 0)
+            elapsed = min(elapsed, (getMonoTime() - started).inNanoseconds)
           inc dispatches
           totalNs += elapsed
           if elapsed > worstNs:
@@ -483,6 +500,11 @@ suite "CTUI-9: the modal state machine decides every event":
     checkpoint("worst dispatch " & $worstUs & " us over " & $dispatches &
                " dispatches; slowest " & slowest)
     # 2 ms, spelled in nanoseconds so the comparison is integer.
+    #
+    # ## REPAIRED 2026-10-30: each binding's reading is now the MINIMUM of
+    # ## `DispatchReps` dispatches, i.e. its cost rather than the scheduler's
+    # ## worst moment — the "distribution rather than a maximum" remedy the
+    # ## record below names. The history is kept because it is why.
     #
     # ## KNOWN WEAKNESS, RECORDED 2026-09-12 — THIS IS A §12 COIN FLIP AND IT
     # ## WILL BITE CI
@@ -517,8 +539,7 @@ suite "CTUI-9: the modal state machine decides every event":
     # a gate that is already 100x too loose for its stated subject.
     #
     # PRE-EXISTING: this gate is CTUI-9's and predates PLAT-12, which touched
-    # neither this file nor `resolve`. Until it is repaired, RUN THE `tui` LANE
-    # ALONE — the number above is what it says otherwise.
+    # neither this file nor `resolve`.
     ck worstNs < 2_000_000
     # THE NON-VACUITY FLOOR: 102 bindings x 13 tokens = 1326. A sweep that
     # measured nothing would satisfy the gate above trivially.
