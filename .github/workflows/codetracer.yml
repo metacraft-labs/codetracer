@@ -7819,6 +7819,12 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Provision dependency siblings from repro.lock
+        # Among them test-certificates-tools, the test-certificate reference
+        # library `ct test` links (the local store's prune, HEAD protection and
+        # owner check, the native root resolver) and the conformance walker
+        # uses for note framing, at the revision repro.lock pins (the same one
+        # flake.nix's `test-certificates-tools` input names: `repro lock
+        # update test-certificates-tools` moves both).
         uses: ./.github/actions/provision-repro-lock-siblings
 
       - name: Run the ct-test-certificates lane
@@ -7852,6 +7858,17 @@ jobs:
             exit 1
           fi
           nix develop .#devShells.x86_64-linux.default --command "${walker}"
+
+      - name: A wrong pin turns the walk red (negative control)
+        # CTC-3a. A green walk shows the walker agrees with the vectors at the
+        # pin; this shows the walk is BOUND to the pin, on every run: with the
+        # walker the lane built, an earlier revision of the standard and a
+        # revision the sibling lacks must each fail, by name, and the
+        # committed pin must pass (the control). The pin file is restored on
+        # every exit path. Reproduce locally with
+        # `just test-certificate-vectors-wrong-pin <walker>`.
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-certificate-vectors-wrong-pin
 
   push-to-attic:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
@@ -8122,6 +8139,18 @@ jobs:
               "https://x-access-token:${SIBLING_TOKEN}@github.com/metacraft-labs/${repo}.git" \
               "$dest"
           done
+
+      - name: Run the book's suites (just test-book-isonim)
+        # The book's own tests -- navigation, the CLI reference's pinned facts
+        # (the `ct test` section among them), links -- against the siblings
+        # checked out above. Before the publish, so a book whose tests are red
+        # is not published, and on every pull request that changes `docs/`
+        # (the `docs-scope` gate above), the promotion pull request included.
+        # CT_BOOK_ISONIM_REQUIRED makes a missing isonim-docs sibling a
+        # failure here rather than the recipe's local "skip".
+        env:
+          CT_BOOK_ISONIM_REQUIRED: "1"
+        run: nix develop .#devShells.x86_64-linux.default --command just test-book-isonim
 
       - env:
           # docs.sh reads AND pushes gh-pages with this (the job's GITHUB_TOKEN +

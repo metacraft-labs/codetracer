@@ -3986,6 +3986,13 @@ test-ct-test-certificates:
 test-nix-package-ct-test-run:
   bash ci/test/nix-package-ct-test-run.sh
 
+# CTC-3a's negative control: the conformance-vector walker the
+# `ct-test-certificates` lane built (or `walker`) passes at the committed pin
+# and fails at an earlier revision of the standard and at one the sibling
+# lacks. Run `just test-ct-test-certificates` first, or name a walker binary.
+test-certificate-vectors-wrong-pin walker="":
+  bash ci/test/certificate-vectors-wrong-pin.sh {{quote(walker)}}
+
 # GUI ViewModel suites that spawn a real backend process (`headless_session` /
 # `stdio_backend`).  `test-vm-native` and `test-vm-js` both exclude them; until
 # this recipe existed those exclusions pointed at nothing, so three of the four
