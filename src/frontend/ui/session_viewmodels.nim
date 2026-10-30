@@ -21,8 +21,11 @@
 ##
 ## * the session's `SessionViewModel` and what built it — a page-owned
 ##   `DebuggerSession` over that tab's own `DapApi`, or, under `ct host`, the
-##   mirror of the server's session (only ever the window's first session: the
-##   server owns one session and the page mirrors it over its one socket);
+##   mirror of the server's session for THIS tab: the server owns one session
+##   per replay tab of the page, and each tab mirrors its own over the page's
+##   one socket, on an event named by its tab id
+##   (`Refactoring-Plans/Shared-DOM-Front-Ends.md` D2,
+##   `sync/socket_transport.sessionSyncEventFor`);
 ## * the collaboration adapter projecting that session's collaboration core;
 ## * the ViewModels of the per-tab panes the session layer does not hold —
 ##   Test Results and Constraints, whose inputs come from the host rather than
@@ -64,8 +67,11 @@ type
     debuggerSession*: DebuggerSession
       ## The page-owned session that built `vm`; nil for a mirror.
     mirror*: MirrorSession
-      ## The `ct host` server's session this page mirrors; nil when the page
-      ## owns `vm`.
+      ## The `ct host` server's session for this tab, which the tab mirrors;
+      ## nil when the page owns `vm`.
+    releaseMirrorChannel*: proc()
+      ## Stops the mirror's transport listening for this tab (the socket
+      ## outlives the tab); nil when there is nothing to stop.
     collabAdapter*: FrontEndAdapter
       ## The web UI's collaboration adapter over `vm.collabCore`.
     supportsStepBack*: bool
@@ -286,6 +292,35 @@ proc constraintsVMOf*(session: ReplaySession): ConstraintsVM =
     vms.constraintsVM = createConstraintsVM()
   vms.constraintsVM
 
+proc needsServerSession*(vms: SessionViewModels;
+                         serverOwnsSession: bool): bool =
+  ## Whether a tab that now holds a recording must turn its page-owned
+  ## ViewModels into a mirror of the server's session for it. Under a
+  ## server-managed deployment (`serverOwnsSession`) every replay tab is a
+  ## server session (Shared-DOM-Front-Ends D2), but a tab that began with no
+  ## replay engine — an edit session, a dataset review — was given page-owned
+  ## ViewModels, because the server has no session for it. Once it opens a
+  ## recording through the server, the server opens one, and the tab
+  ## follows. Already a mirror, not set up yet, or not served: no.
+  serverOwnsSession and not vms.isNil and vms.wired and vms.mirror.isNil and
+    not vms.debuggerSession.isNil
+
+proc detachPageOwnedSession*(vms: SessionViewModels): DebuggerSession =
+  ## Take `vms`'s page-owned session out of the record, so a mirror can be
+  ## built into it (`needsServerSession`), and hand it back, still alive:
+  ## its panes are rendered over it until they are rendered over the mirror,
+  ## and the caller disposes it after that
+  ## (`dispose(disconnectBackend = false)`: the transport is the tab's
+  ## `DapApi`, which the tab keeps). The per-tab pane ViewModels (Test
+  ## Results, Constraints) and the record's flags are kept. Nil when the
+  ## record holds no page-owned session.
+  if vms.isNil or vms.debuggerSession.isNil:
+    return nil
+  result = vms.debuggerSession
+  vms.debuggerSession = nil
+  vms.vm = nil
+  vms.collabAdapter = nil
+
 proc disposeViewModels*(session: ReplaySession) =
   ## Release everything `session` owns of the ViewModel layer, as its tab is
   ## closed: the debugger session (and with it the `SessionViewModel`, its
@@ -305,6 +340,8 @@ proc disposeViewModels*(session: ReplaySession) =
     # The mirror built its session inside its own reactive root, which this
     # disposes together with the channel.
     vms.mirror.dispose()
+    if not vms.releaseMirrorChannel.isNil:
+      vms.releaseMirrorChannel()
   elif not vms.vm.isNil:
     vms.vm.dispose(disconnectBackend = false)
   if not vms.testResultsVM.isNil:
@@ -314,6 +351,7 @@ proc disposeViewModels*(session: ReplaySession) =
   vms.vm = nil
   vms.debuggerSession = nil
   vms.mirror = nil
+  vms.releaseMirrorChannel = nil
   vms.collabAdapter = nil
   vms.testResultsVM = nil
   vms.constraintsVM = nil

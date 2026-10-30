@@ -107,6 +107,12 @@ when defined(server):
     ## The client id the page presented in its handshake (`ct_client`), or ""
     ## when it presented none (`host_clients.connect` then makes a new one).
     $handshakeQueryValue(socket, ClientIdParameter.cstring)
+
+  proc handshakePageId(socket: JsObject): string =
+    ## The page document the socket's page presented (`ct_page`), or "": a
+    ## different one from the client's last tells a reload from a reconnect
+    ## (`host_clients.connect`).
+    $handshakeQueryValue(socket, PageIdParameter.cstring)
   proc setInterval*(cb: proc(): void, delay: int): JsObject {.importjs: "setInterval(#, #)".}
 
   proc setupServer* =
@@ -421,7 +427,8 @@ when defined(server):
         resetActivity()
 
       # The client this socket serves: the id its page holds, or a new one.
-      discard serverClients.connect(client, handshakeClientId(client.toJs))
+      discard serverClients.connect(client, handshakeClientId(client.toJs),
+                                    handshakePageId(client.toJs))
 
       # THE FACADE ENDPOINT, on the SAME socket — §6.1.
       #

@@ -6,11 +6,15 @@
 ## page's socket (`socket_transport`). Each page renders a mirror
 ## (`mirror_session`).
 ##
-## ONE SESSION PER CLIENT. `ct host` gives every client its own replay and its
-## own session (`CLI/ct/host.md`, "Sessions are isolated"; `index/host_clients`),
-## all on one `SyncHost` (`HostedSessions`). A page is attached PINNED to its
-## client's session (`sync_host.attach(…, follow)`): it is told to follow that
-## session only and cannot subscribe to or act on another client's.
+## ONE SESSION PER REPLAY TAB OF EACH CLIENT. `ct host` gives every client its
+## own replay and its own session for each of its page's replay tabs
+## (`CLI/ct/host.md`, "Sessions are isolated"; Shared-DOM-Front-Ends D2;
+## `index/host_clients`), all on one `SyncHost` (`HostedSessions`). A page's
+## tab is attached PINNED to its own session (`sync_host.attach(…, follow)`),
+## over that tab's event on the page's socket
+## (`socket_transport.sessionSyncEventFor`): it is told to follow that
+## session only and cannot subscribe to or act on another tab's or another
+## client's.
 ##
 ## THE SERVER NEVER LAUNCHES THE REPLAY. The page still performs its replay's
 ## DAP handshake and still drives the components that are not ViewModels yet
@@ -59,7 +63,7 @@ type
     ownsHost: bool
       ## Made for this session alone, so closing it disposes the host too.
     closed: bool
-    pages: seq[tuple[socket: JsObject; channel: SyncChannel]]
+    pages: seq[tuple[socket: JsObject; channel: SyncChannel; event: string]]
 
 proc newHostedSessions*(): HostedSessions =
   HostedSessions(host: newSyncHost())
@@ -109,11 +113,13 @@ proc openHostedPrimary*(backend: BackendService; traceFolder: string;
                 sourceLanguageOf)
   result.ownsHost = true
 
-proc connectPage*(h: HostedPrimary; socket: JsObject) =
-  ## Serve the page at the other end of `socket`: it is told to follow THIS
-  ## session, and only this one, and receives its state as a snapshot.
-  let channel = newSocketSyncChannel(socket)
-  h.pages.add (socket, channel)
+proc connectPage*(h: HostedPrimary; socket: JsObject; tab = 0) =
+  ## Serve the page at the other end of `socket`, whose tab `tab` (its tab id)
+  ## mirrors this session: that tab is told to follow THIS session, and only
+  ## this one, and receives its state as a snapshot.
+  let event = sessionSyncEventFor(tab)
+  let channel = newSocketSyncChannel(socket, event)
+  h.pages.add (socket, channel, event)
   h.host.attach(channel, follow = h.id)
 
 proc disconnectPage*(h: HostedPrimary; socket: JsObject) =
@@ -122,17 +128,18 @@ proc disconnectPage*(h: HostedPrimary; socket: JsObject) =
   for i in countdown(h.pages.high, 0):
     if h.pages[i].socket == socket:
       h.host.detach(h.pages[i].channel)
-      closeSocketSyncChannel(h.pages[i].channel, socket)
+      closeSocketSyncChannel(h.pages[i].channel, socket, h.pages[i].event)
       h.pages.delete(i)
 
 proc close*(h: HostedPrimary) =
-  ## End the session: its client is gone, or the server is shutting down.
+  ## End the session: its tab was closed, its client is gone, or the server
+  ## is shutting down.
   if h.closed:
     return
   h.closed = true
   for page in h.pages:
     h.host.detach(page.channel)
-    closeSocketSyncChannel(page.channel, page.socket)
+    closeSocketSyncChannel(page.channel, page.socket, page.event)
   h.pages = @[]
   h.host.removePrimary(h.id)
   if h.ownsHost:

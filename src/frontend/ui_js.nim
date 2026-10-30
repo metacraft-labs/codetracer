@@ -319,14 +319,9 @@ template shownSessionVM(): SessionViewModel =
   ## instead (`sessionVMOf(data.sessionOwning(dapApi))`, or the session it
   ## was wired for).
   data.activeSessionVM()
-var serverSessionMirrored = false
-  ## Whether a tab already mirrors the `ct host` server's session. The server
-  ## owns ONE session and the page mirrors it over its one socket, so only the
-  ## first tab configured is that mirror; a tab opened after it holds a
-  ## recording of its own and owns its session in the page.
 var pageSocket: JsObject
-  ## The socket to the page's server, when it has one; the mirror's channel
-  ## rides on it.
+  ## The socket to the page's server, when it has one; every replay tab's
+  ## mirror channel rides on it (`socket_transport.sessionSyncEventFor`).
 var sessionPlacementName {.importc: "CODETRACER_SESSION_PLACEMENT".}: cstring
   ## The deployment descriptor's `session.placement`, recorded by the page's
   ## `/deployment.json` fetch; undefined where nothing recorded it.
@@ -2488,6 +2483,192 @@ proc bindWindowToSession(session: ReplaySession) =
 # Every tab switch binds the window to the tab it shows.
 session_switch.setSessionBindProc(bindWindowToSession)
 
+proc pageBackendFor(dapRef: DapApi): BackendService =
+  ## The `BackendService` over a tab's own `DapApi`: what a page-owned
+  ## session drives, and what a mirror's page-side panes navigate through.
+  newDapBackendService(dapRef,
+    onSend = proc(command: cstring; argsJs: JsObject) =
+      when defined(js):
+        if data.startOptions.inTest:
+          recordVmBackendRequest(command, argsJs))
+
+proc wireSessionViewModelHooks(vms: SessionViewModels; dapRef: DapApi) =
+  ## Install the page's hooks on the session's current ViewModels
+  ## (`vms.vm`): the process switch bridges and the build runner. Run once
+  ## per ViewModel set, so again when a tab's set is replaced
+  ## (`adoptServerSession`).
+  let sessionVM = vms.vm
+  if sessionVM.isNil:
+    return
+  # The process tree's click handler rotates the ViewModel's active
+  # recording; this bridge is what makes that rotation visible in
+  # the backend. Requests are routed to a recording purely by the
+  # composed `threadId` they carry
+  # (`dap_server.rs::handle_request_via_session`), so switching
+  # process means re-pointing that id and then moving the cursor
+  # into the new recording so the editor and State Pane follow.
+  initPanelVM("installSwitchProcessBridge"):
+    sessionVM.onSwitchProcessProc = proc(recordingId: string) =
+      let entryOpt = sessionVM.entryForRecording(recordingId)
+      if entryOpt.isNone:
+        cerror "switch process: unknown recording " & recordingId
+        return
+      let threadId = entryOpt.get.routingThreadId()
+      if threadId == 0:
+        cerror "switch process: recording " & recordingId &
+          " advertises no thread id; leaving routing unchanged"
+        return
+      # This session's requests only: each tab routes to its own recording.
+      dapRef.setRoutingThreadId(threadId)
+      dapRef.sendCtRequest(CtRunToEntry, JsObject{})
+
+  # Spec §14.8 — the State Pane's "Switch process" right-click
+  # entry. Offered only while a cross-process correlation is
+  # active: the targets are the sibling recordings the open origin
+  # chain reaches, minus the one already being viewed.
+  initPanelVM("installSwitchProcessMenuBridges"):
+    let svm = sessionVM.stateVM
+    if not svm.isNil:
+      svm.crossProcessSwitchTargets = proc(): seq[ProcessSwitchTarget] =
+        result = @[]
+        let activeId = sessionVM.activeProcessRecordingId.val
+        var seen: seq[string] = @[]
+        for span in sessionVM.crossProcessSpans.val:
+          if span.recordingId.len == 0 or span.recordingId == activeId:
+            continue
+          if span.recordingId in seen:
+            continue
+          seen.add(span.recordingId)
+          result.add(ProcessSwitchTarget(
+            recordingId: span.recordingId, role: span.role))
+      svm.onSwitchProcessProc = proc(recordingId: string) =
+        sessionVM.onSwitchProcess(recordingId)
+
+  initPanelVM("installEventLogSwitchProcessBridge"):
+    # §5.3 — an Event Log boundary chip whose counterpart lives in
+    # a sibling recording rotates the session, exactly as clicking
+    # that recording in the process tree would.
+    if not sessionVM.eventLogVM.isNil:
+      sessionVM.eventLogVM.onSwitchProcessProc = proc(recordingId: string) =
+        sessionVM.onSwitchProcess(recordingId)
+
+  initPanelVM("installBuildRunner"):
+    if not sessionVM.buildVM.isNil:
+      when defined(ctWeb):
+        sessionVM.buildVM.runBuild = proc() = data.update(build=true)
+      else:
+        # THE DESKTOP'S BUILD RUNNER (`index/build_runner`, Build-Output-
+        # Pane.md §4.2): Run builds the SHOWN build's command again (§3.13),
+        # in the project folder; ■ Stop stops what the runner runs.
+        let vm = sessionVM.buildVM
+        vm.runBuild = proc() =
+          let shown = build_vm.shownSnapshot(vm)
+          let why =
+            if shown.command.len == 0: build.runDesktopBuildLine(":build")
+            else: build.startDesktopBuild(shown.command,
+                    (if data.startOptions.folder.isNil: ""
+                     else: $data.startOptions.folder), "", "")
+          if why.len > 0: cwarn "build: " & why
+        vm.cancelBuildProc = proc() = discard build.stopDesktopBuild()
+
+proc buildSessionViewModels(session: ReplaySession; vms: SessionViewModels;
+                            realBackend: BackendService; asMirror: bool) =
+  ## Build `session`'s `SessionViewModel` into `vms.vm`: a mirror of the
+  ## `ct host` server's session for this tab (`asMirror`), or a page-owned
+  ## `DebuggerSession` over `realBackend`. Shared by the first wiring
+  ## (`configureSessionMiddleware`) and by a tab that turns into a replay
+  ## under `ct host` after it began as an edit session or a dataset review
+  ## (`adoptServerSession`).
+  let dapRef = session.dapApi
+  # THE TOOLBAR'S ACTIONS ON THIS HOST, handed to the session before it
+  # builds `DebugControlsVM` with them: steps through the DAP mediator of
+  # the tab on screen (`debug_toolbar.toolbarApiFor`) with the status bar's
+  # operation status, the replay server's restart, Stop, and test runs in a
+  # new window. The toolbar only ever shows the tab on screen's
+  # `DebugControlsVM` (`bindWindowToSession`), so that tab is this session
+  # whenever these routes run. A mirror takes them too: under `ct host` the
+  # page still drives the replay, and the server's session follows the
+  # moves it makes.
+  var sessionVM: SessionViewModel
+  if asMirror:
+    # SERVER-MANAGED (`ct host`): the server owns this tab's session and
+    # the page mirrors it over its socket — EVERY replay tab, the first and
+    # each "+" tab alike: the server holds one session per replay tab of the
+    # page (Shared-DOM-Front-Ends D2), and this tab's travels on its own
+    # event, named by its tab id (`sessionSyncEventFor`), pinned by the
+    # server to this tab's session. The mirror's ViewModels are the ones the
+    # panels read; the panes' measured viewports and the call trace's
+    # actions run on the server's session, the other panels' actions on the
+    # page (`createHostedPageMirror`). Its locals are the server's, so the
+    # page's own decoders stand down (`claimLocalsLoading`). A tab with no
+    # replay engine (a dataset review, an edit session) has no server
+    # session to mirror and keeps its session in the page until it opens a
+    # recording (`adoptServerSession`).
+    let syncEvent = sessionSyncEventFor(dapRef.sessionId)
+    let channel = newSocketSyncChannel(pageSocket, syncEvent)
+    let socket = pageSocket
+    vms.mirror = createHostedPageMirror(channel,
+      debugCommandsFor = proc(s: SessionViewModel): DebugCommands =
+        desktopDebugCommands(data, s.store))
+    # Closing the tab stops listening on its event, so a message still in
+    # flight for it reaches nothing (`disposeViewModels`).
+    vms.releaseMirrorChannel = proc() =
+      closeSocketSyncChannel(channel, socket, syncEvent)
+    sessionVM = vms.mirror.session
+    sessionVM.store.claimLocalsLoading()
+    # The panes that run on the page jump through the page's connection,
+    # as its toolbar does (`ReplayDataStore.navigationBackend`).
+    sessionVM.store.navigationBackend = realBackend
+  else:
+    vms.debuggerSession = newDebuggerSession(realBackend)
+    sessionVM = vms.debuggerSession.session
+  vms.vm = sessionVM
+  let store = sessionVM.store
+  # The DOM reports a pane's size on every resize and scroll event, so the
+  # windowed ViewModels debounce those reports on the browser's timer
+  # (Viewport-Driven-Loading V2, Pattern 6) — a mirror's as well, whose
+  # viewports travel to the server's session.
+  store.viewportScheduler = timeoutScheduler()
+  if vms.mirror.isNil:
+    # The panel ViewModels are the session's, built once by
+    # `initializePanelViewModels` — in edit mode too, where no trace is
+    # open and the session is not yet attached. The stop loader is the one
+    # `ct/load-locals` sender, so the locals are claimed BEFORE the StateVM
+    # exists (its effect would otherwise send on its first run), and the
+    # request's language hook is installed before anything can ask.
+    state.installSourceLanguage(store)
+    store.claimLocalsLoading()
+    sessionVM.debugCommands = desktopDebugCommands(data, store)
+    sessionVM.initializePanelViewModels()
+  # The session store holds the breakpoints (Shared-DOM-Front-Ends D7.4):
+  # the debugger service plans each change over its rows and the engine's
+  # answer replaces them, as on the native front-ends (PLAT-40). The
+  # debugger service is the tab's own (`ReplaySession.services`).
+  session.services.debugger.pointStore = cast[JsObject](store)
+  # Apply any `supportsStepBack` capability that arrived before this VM
+  # existed (its DAP `initialize` response can beat this assignment), so the
+  # reverse-step toolbar buttons reflect the backend's real capability.
+  store.setSupportsStepBack(vms.supportsStepBack)
+  vms.collabAdapter = initWebUiCollabAdapter(
+    sessionVM.collabCore.localPrincipalId,
+    sessionVM.collabCore.localActorId
+  )
+  sessionVM.collabCore.installFrontEndAdapterProjection(vms.collabAdapter)
+  cdebug "[PIPELINE] configureSessionMiddleware: SessionVM + RealBackendService created for session " &
+    $dapRef.sessionId
+  clog "SessionViewModel: created with real DapApi backend for session " &
+    $dapRef.sessionId
+
+  # The session's OriginChainVM (M29 §14.8), attached so the chain panel's
+  # breadcrumb chips route process switches through
+  # `SessionViewModel.onSwitchProcess` (and so the derived
+  # `crossProcessSpans` memo sees a live chain).
+  initPanelVM("createSessionOriginChainVM"):
+    if sessionVM.originChainVM.isNil and not sessionVM.stateVM.isNil:
+      sessionVM.attachOriginChainVM(
+        state.createSessionOriginChainVM(sessionVM.stateVM,
+          sessionVM.scratchpadVM))
+
 proc configureSessionMiddleware(session: ReplaySession; withDebugger = true;
     initializeDebugger = true) =
   ## Set up `session` — one window tab — once: its middleware, its
@@ -2574,88 +2755,12 @@ proc configureSessionMiddleware(session: ReplaySession; withDebugger = true;
   # lazily creates panel VMs — if the session's store is already in place
   # the panels use it instead of falling back to stub backends.
   # -----------------------------------------------------------------------
-  let realBackend = newDapBackendService(dapRef,
-    onSend = proc(command: cstring; argsJs: JsObject) =
-      when defined(js):
-        if data.startOptions.inTest:
-          recordVmBackendRequest(command, argsJs))
-  # THE TOOLBAR'S ACTIONS ON THIS HOST, handed to the session before it
-  # builds `DebugControlsVM` with them: steps through the DAP mediator of
-  # the tab on screen (`debug_toolbar.toolbarApiFor`) with the status bar's
-  # operation status, the replay server's restart, Stop, and test runs in a
-  # new window. The toolbar only ever shows the tab on screen's
-  # `DebugControlsVM` (`bindWindowToSession`), so that tab is this session
-  # whenever these routes run. A mirror takes them too: under `ct host` the
-  # page still drives the replay, and the server's session follows the
-  # moves it makes.
-  var sessionVM: SessionViewModel
-  if serverOwnsSession() and not serverSessionMirrored:
-    # SERVER-MANAGED (`ct host`): the server owns the session and this
-    # page mirrors it over its socket. The mirror's ViewModels are the
-    # ones the panels read; the panes' measured viewports and the call
-    # trace's actions run on the server's session, the other panels'
-    # actions on the page (`createHostedPageMirror`). Its locals are the
-    # server's, so the page's own decoders stand down
-    # (`claimLocalsLoading`). Only the window's first such tab: the server
-    # owns one session per client (`serverSessionMirrored`).
-    serverSessionMirrored = true
-    vms.mirror = createHostedPageMirror(newSocketSyncChannel(pageSocket),
-      debugCommandsFor = proc(s: SessionViewModel): DebugCommands =
-        desktopDebugCommands(data, s.store))
-    sessionVM = vms.mirror.session
-    sessionVM.store.claimLocalsLoading()
-    # The panes that run on the page jump through the page's connection,
-    # as its toolbar does (`ReplayDataStore.navigationBackend`).
-    sessionVM.store.navigationBackend = realBackend
-  else:
-    vms.debuggerSession = newDebuggerSession(realBackend)
-    sessionVM = vms.debuggerSession.session
-  vms.vm = sessionVM
-  let store = sessionVM.store
-  # The DOM reports a pane's size on every resize and scroll event, so the
-  # windowed ViewModels debounce those reports on the browser's timer
-  # (Viewport-Driven-Loading V2, Pattern 6) — a mirror's as well, whose
-  # viewports travel to the server's session.
-  store.viewportScheduler = timeoutScheduler()
-  if vms.mirror.isNil:
-    # The panel ViewModels are the session's, built once by
-    # `initializePanelViewModels` — in edit mode too, where no trace is
-    # open and the session is not yet attached. The stop loader is the one
-    # `ct/load-locals` sender, so the locals are claimed BEFORE the StateVM
-    # exists (its effect would otherwise send on its first run), and the
-    # request's language hook is installed before anything can ask.
-    state.installSourceLanguage(store)
-    store.claimLocalsLoading()
-    sessionVM.debugCommands = desktopDebugCommands(data, store)
-    sessionVM.initializePanelViewModels()
-  # The session store holds the breakpoints (Shared-DOM-Front-Ends D7.4):
-  # the debugger service plans each change over its rows and the engine's
-  # answer replaces them, as on the native front-ends (PLAT-40). The
-  # debugger service is the tab's own (`ReplaySession.services`).
-  session.services.debugger.pointStore = cast[JsObject](store)
-  # Apply any `supportsStepBack` capability that arrived before this VM
-  # existed (its DAP `initialize` response can beat this assignment), so the
-  # reverse-step toolbar buttons reflect the backend's real capability.
-  store.setSupportsStepBack(vms.supportsStepBack)
-  vms.collabAdapter = initWebUiCollabAdapter(
-    sessionVM.collabCore.localPrincipalId,
-    sessionVM.collabCore.localActorId
-  )
-  sessionVM.collabCore.installFrontEndAdapterProjection(vms.collabAdapter)
-  cdebug "[PIPELINE] configureSessionMiddleware: SessionVM + RealBackendService created for session " &
-    $dapRef.sessionId
-  clog "SessionViewModel: created with real DapApi backend for session " &
-    $dapRef.sessionId
-
-  # The session's OriginChainVM (M29 §14.8), attached so the chain panel's
-  # breadcrumb chips route process switches through
-  # `SessionViewModel.onSwitchProcess` (and so the derived
-  # `crossProcessSpans` memo sees a live chain).
-  initPanelVM("createSessionOriginChainVM"):
-    if sessionVM.originChainVM.isNil and not sessionVM.stateVM.isNil:
-      sessionVM.attachOriginChainVM(
-        state.createSessionOriginChainVM(sessionVM.stateVM,
-          sessionVM.scratchpadVM))
+  let realBackend = pageBackendFor(dapRef)
+  buildSessionViewModels(session, vms, realBackend,
+    asMirror = serverOwnsSession() and withDebugger and initializeDebugger)
+  # Read by the locals wiring below. The move subscription reads the tab's
+  # store at each move instead, because `adoptServerSession` can replace it.
+  let store = vms.vm.store
 
   # M42 §14.8 — multi-process session surface.
   #
@@ -2671,7 +2776,10 @@ proc configureSessionMiddleware(session: ReplaySession; withDebugger = true;
         if raw.isNil:
           return
         try:
-          sessionVM.consumeListProcessesEvent(parseJsonFromJsObject(raw))
+          # The tab's CURRENT ViewModels: a tab that turned into a replay
+          # under `ct host` replaced them (`adoptServerSession`).
+          if not vms.vm.isNil:
+            vms.vm.consumeListProcessesEvent(parseJsonFromJsObject(raw))
         except CatchableError as e:
           cerror "ct/listProcesses: failed to decode payload: " & e.msg)
 
@@ -2695,7 +2803,9 @@ proc configureSessionMiddleware(session: ReplaySession; withDebugger = true;
   initPanelVM("subscribeUpdatedOriginChain"):
     dap.on[JsObject](dapRef, CtOriginChainResponse,
       proc(kind: CtEventKind, raw: JsObject) =
-        let ocvm = sessionVM.originChainVM
+        if vms.vm.isNil:
+          return
+        let ocvm = vms.vm.originChainVM
         if ocvm.isNil or raw.isNil:
           return
         try:
@@ -2720,76 +2830,7 @@ proc configureSessionMiddleware(session: ReplaySession; withDebugger = true;
         except CatchableError as e:
           cerror "ct/originChain: failed to decode response: " & e.msg)
 
-  # The process tree's click handler rotates the ViewModel's active
-  # recording; this bridge is what makes that rotation visible in
-  # the backend. Requests are routed to a recording purely by the
-  # composed `threadId` they carry
-  # (`dap_server.rs::handle_request_via_session`), so switching
-  # process means re-pointing that id and then moving the cursor
-  # into the new recording so the editor and State Pane follow.
-  initPanelVM("installSwitchProcessBridge"):
-    sessionVM.onSwitchProcessProc = proc(recordingId: string) =
-      let entryOpt = sessionVM.entryForRecording(recordingId)
-      if entryOpt.isNone:
-        cerror "switch process: unknown recording " & recordingId
-        return
-      let threadId = entryOpt.get.routingThreadId()
-      if threadId == 0:
-        cerror "switch process: recording " & recordingId &
-          " advertises no thread id; leaving routing unchanged"
-        return
-      # This session's requests only: each tab routes to its own recording.
-      dapRef.setRoutingThreadId(threadId)
-      dapRef.sendCtRequest(CtRunToEntry, JsObject{})
-
-  # Spec §14.8 — the State Pane's "Switch process" right-click
-  # entry. Offered only while a cross-process correlation is
-  # active: the targets are the sibling recordings the open origin
-  # chain reaches, minus the one already being viewed.
-  initPanelVM("installSwitchProcessMenuBridges"):
-    let svm = sessionVM.stateVM
-    if not svm.isNil:
-      svm.crossProcessSwitchTargets = proc(): seq[ProcessSwitchTarget] =
-        result = @[]
-        let activeId = sessionVM.activeProcessRecordingId.val
-        var seen: seq[string] = @[]
-        for span in sessionVM.crossProcessSpans.val:
-          if span.recordingId.len == 0 or span.recordingId == activeId:
-            continue
-          if span.recordingId in seen:
-            continue
-          seen.add(span.recordingId)
-          result.add(ProcessSwitchTarget(
-            recordingId: span.recordingId, role: span.role))
-      svm.onSwitchProcessProc = proc(recordingId: string) =
-        sessionVM.onSwitchProcess(recordingId)
-
-  initPanelVM("installEventLogSwitchProcessBridge"):
-    # §5.3 — an Event Log boundary chip whose counterpart lives in
-    # a sibling recording rotates the session, exactly as clicking
-    # that recording in the process tree would.
-    if not sessionVM.eventLogVM.isNil:
-      sessionVM.eventLogVM.onSwitchProcessProc = proc(recordingId: string) =
-        sessionVM.onSwitchProcess(recordingId)
-
-  initPanelVM("installBuildRunner"):
-    if not sessionVM.buildVM.isNil:
-      when defined(ctWeb):
-        sessionVM.buildVM.runBuild = proc() = data.update(build=true)
-      else:
-        # THE DESKTOP'S BUILD RUNNER (`index/build_runner`, Build-Output-
-        # Pane.md §4.2): Run builds the SHOWN build's command again (§3.13),
-        # in the project folder; ■ Stop stops what the runner runs.
-        let vm = sessionVM.buildVM
-        vm.runBuild = proc() =
-          let shown = build_vm.shownSnapshot(vm)
-          let why =
-            if shown.command.len == 0: build.runDesktopBuildLine(":build")
-            else: build.startDesktopBuild(shown.command,
-                    (if data.startOptions.folder.isNil: ""
-                     else: $data.startOptions.folder), "", "")
-          if why.len > 0: cwarn "build: " & why
-        vm.cancelBuildProc = proc() = discard build.stopDesktopBuild()
+  wireSessionViewModelHooks(vms, dapRef)
 
   # -----------------------------------------------------------------
   # Direct viewsApi subscriptions on THIS session's mediator: bypass the
@@ -2837,14 +2878,17 @@ proc configureSessionMiddleware(session: ReplaySession; withDebugger = true;
       # This session's tab's editors hold its source lines, shown or not.
       let editors =
         if session.ui.isNil: nil else: session.ui.editors
-      isoBatch.batch proc() =
-        state.syncStoreDebuggerPositionInto(store, editors,
-          rrTicks, path, line, sourceGeneration, sourceDigest)
-        if geid.isSome:
-          store.updateCurrentGeid(geid)
-        # The stop's whole location, which the editor places its
-        # execution line from (`ReplayDataStore.stop`).
-        store.applyStopLocation(parseJsonFromJsObject(rawResponse))
+      # The tab's CURRENT store (`adoptServerSession` may have replaced it).
+      let store = if vms.vm.isNil: nil else: vms.vm.store
+      if not store.isNil:
+        isoBatch.batch proc() =
+          state.syncStoreDebuggerPositionInto(store, editors,
+            rrTicks, path, line, sourceGeneration, sourceDigest)
+          if geid.isSome:
+            store.updateCurrentGeid(geid)
+          # The stop's whole location, which the editor places its
+          # execution line from (`ReplayDataStore.stop`).
+          store.applyStopLocation(parseJsonFromJsObject(rawResponse))
 
       # The status bar of THIS session's tab; it draws only while its tab
       # is shown (`ui/status.nim`).
@@ -2981,6 +3025,36 @@ proc configureSessionMiddleware(session: ReplaySession; withDebugger = true;
   #   data.dapApi.exampleDap.receiveOnMove(), 1_000)
 
 cast[js](dom.document).onreadystatechange = onReady
+
+proc adoptServerSession(session: ReplaySession) =
+  ## Under `ct host`, turn a tab that began as an edit session or a dataset
+  ## review — set up with page-owned ViewModels, because the server holds no
+  ## session for a tab without a replay — into a mirror of the session the
+  ## server opened for it when it opened a recording
+  ## (Shared-DOM-Front-Ends D2: every replay tab of a hosted page is a server
+  ## session; `session_viewmodels.needsServerSession`). Nothing for any other
+  ## tab or deployment.
+  ##
+  ## The mirror is built into the tab's record, the window's bridges and the
+  ## tab's panes are moved onto it, and only then is the page-owned session
+  ## disposed, so no pane is left rendering a disposed session. The
+  ## subscriptions `configureSessionMiddleware` installed read the record's
+  ## CURRENT ViewModels, so they follow.
+  let vms = viewModelsOf(session)
+  if not needsServerSession(vms, serverOwnsSession()):
+    return
+  let dapRef = session.dapApi
+  let pageOwned = vms.detachPageOwnedSession()
+  buildSessionViewModels(session, vms, pageBackendFor(dapRef), asMirror = true)
+  wireSessionViewModelHooks(vms, dapRef)
+  clog "SessionViewModel: tab " & $dapRef.sessionId &
+    " opened a recording under ct host; it now mirrors the server's session"
+  if session == data.activeSession:
+    bindWindowToSession(session)
+  else:
+    panel_host.refreshPanelSessions()
+  if not pageOwned.isNil:
+    pageOwned.dispose(disconnectBackend = false)
 
 proc handleDapReplaySelected(response: JsObject; sendInitialize: bool) =
   let trace = response["trace"].to(Trace)
@@ -3232,6 +3306,10 @@ proc onTraceLoaded(
   # This tab's session, set up the first time it gets a trace; a trace
   # loaded into a tab that already has one re-attaches its session below.
   configureSessionMiddleware(data.activeSession)
+  # A tab that began as an edit session or a dataset review has page-owned
+  # ViewModels; under `ct host` the recording it opened is a server session,
+  # which it now mirrors (before its toolbar is bound below).
+  adoptServerSession(data.activeSession)
   # A dataset review configured its session without the debugger toolbar
   # (`configureSessionMiddleware(withDebugger = false)`); a recording opened
   # into it now has a replay to step, so the session gains its toolbar here,
@@ -7740,6 +7818,26 @@ when not defined(ctWeb):
 
     proc hostClientId(): cstring = resolvedHostClientId
 
+    # THIS PAGE DOCUMENT'S ID, new on every page load and kept across the
+    # socket's reconnects (`ct_page` in the handshake). The server keeps one
+    # session per replay tab of a client, and a reloaded page rebuilds only
+    # its first tab: a known client presenting another document has
+    # reloaded, and the server releases its other tabs' sessions; the same
+    # document is this page reconnecting after a network blip, with every
+    # tab still open, and keeps them all (Shared-DOM-Front-Ends D2,
+    # `index/host_clients.connect`).
+    proc newPageDocumentId(): cstring {.importjs: """(function () {
+  if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+    return window.crypto.randomUUID();
+  }
+  var bytes = new Uint8Array(16);
+  window.crypto.getRandomValues(bytes);
+  return Array.prototype.map.call(bytes, function (b) {
+    return ('0' + b.toString(16)).slice(-2);
+  }).join('');
+})()""".}
+    let pageDocumentId = newPageDocumentId()
+
     proc startIPC =
       let host = domwindow.location.hostname.to(cstring)
       let parameters = if frontendSocketParameters.len > 0:
@@ -7771,7 +7869,8 @@ when not defined(ctWeb):
       var socket = io(
         address,
         js{withCredentials: false, query: cstring(fmt"socketParam={parameters}&pathname={domwindow.location.pathname.to(cstring)}") & sessionQuery &
-          cstring"&ct_client=" & encodeQueryValue(hostClientId())})
+          cstring"&ct_client=" & encodeQueryValue(hostClientId()) &
+          cstring"&ct_page=" & encodeQueryValue(pageDocumentId)})
       socketdebug = socket
       pageSocket = socket.toJs
       socket.on(cstring"disconnect") do (reason: cstring):

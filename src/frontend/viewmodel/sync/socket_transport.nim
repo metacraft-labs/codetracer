@@ -5,9 +5,17 @@
 ##
 ## The connection is the one the page already has: socket.io, whose server
 ## and client sockets both expose `on(name, handler)` and `emit(name, data)`
-## (https://socket.io/docs/v4/emitting-events/). The channel takes ONE event
-## name on it, `SessionSyncEvent`, so the mirroring traffic shares the socket
-## with the index IPC surface without either reading the other's messages.
+## (https://socket.io/docs/v4/emitting-events/). A channel takes ONE event
+## name on it (`SessionSyncEvent`, or a tab's, below), so the mirroring traffic
+## shares the socket with the index IPC surface without either reading the
+## other's messages.
+##
+## ONE EVENT PER REPLAY TAB. A page holds one server session per replay tab
+## (Shared-DOM-Front-Ends D2), all on its one socket, so each tab's mirror
+## has an event of its own (`sessionSyncEventFor`): the page's first tab
+## (tab id 0) keeps `SessionSyncEvent`, and tab `N` uses
+## `SessionSyncEvent & "/" & N`. A channel listens on its own event only, so
+## one tab's session never reaches another tab's mirror.
 ##
 ## Each message crosses as JSON text: `$msg` on the way out, `parseJson` on the
 ## way in. A frame that does not parse is dropped rather than raised — it
@@ -25,7 +33,14 @@ import transport
 
 const
   SessionSyncEvent* = "CODETRACER::session-sync"
-    ## The socket.io event every mirroring message travels on.
+    ## The socket.io event the mirroring messages of a page's first tab
+    ## travel on (`sessionSyncEventFor(0)`).
+
+proc sessionSyncEventFor*(tab: int): string =
+  ## The socket.io event of the mirror of the page's tab `tab` (its tab id,
+  ## `DapApi.sessionId`).
+  if tab == 0: SessionSyncEvent
+  else: SessionSyncEvent & "/" & $tab
 
 proc socketOn(socket: JsObject; name: cstring;
               handler: proc(frame: cstring)) {.importjs: "#.on(#, #)".}
@@ -35,12 +50,13 @@ proc socketOff(socket: JsObject; name: cstring) {.
   importjs: "#.removeAllListeners(#)".}
   ## Both socket.io sockets are event emitters with `removeAllListeners`.
 
-proc newSocketSyncChannel*(socket: JsObject): SyncChannel =
+proc newSocketSyncChannel*(socket: JsObject;
+                           event = SessionSyncEvent): SyncChannel =
   ## A channel end over `socket`, a socket.io socket on either side of the
-  ## connection.
+  ## connection, carried by the socket.io event `event`.
   let channel = newSyncChannel(proc(msg: JsonNode) =
-    socketEmit(socket, SessionSyncEvent.cstring, cstring($msg)))
-  socketOn(socket, SessionSyncEvent.cstring, proc(frame: cstring) =
+    socketEmit(socket, event.cstring, cstring($msg)))
+  socketOn(socket, event.cstring, proc(frame: cstring) =
     var msg: JsonNode
     try:
       msg = parseJson($frame)
@@ -51,7 +67,8 @@ proc newSocketSyncChannel*(socket: JsObject): SyncChannel =
     channel.deliver(msg))
   channel
 
-proc closeSocketSyncChannel*(channel: SyncChannel; socket: JsObject) =
-  ## Stop the channel and stop listening on `socket`.
+proc closeSocketSyncChannel*(channel: SyncChannel; socket: JsObject;
+                             event = SessionSyncEvent) =
+  ## Stop the channel and stop listening for `event` on `socket`.
   channel.close()
-  socketOff(socket, SessionSyncEvent.cstring)
+  socketOff(socket, event.cstring)

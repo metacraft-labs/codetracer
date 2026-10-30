@@ -127,19 +127,21 @@ proc registerStartReplayHandler*(handler: proc(body: JsObject)) =
 # `ct host` gives every connected client a replay of its own
 # (`CLI/ct/host.md`, "Sessions are isolated"; `index/host_clients`). There a
 # DAP session IS a replay — its id is the id `ct/start-replay` answered with —
-# while each page numbers its own session 0, as a single-replay page does. So
-# the server decides two things the desktop's window table decides here:
-# which replay a page's request is for, and which client an answer or event
-# of a replay goes to. The desktop installs nothing and keeps its routing.
+# while a page numbers its sessions by its own tab ids (its first tab 0, each
+# replay tab its own: Shared-DOM-Front-Ends D2). So the server decides two
+# things the desktop's window table decides here: which replay a page tab's
+# request is for, and which client and tab an answer or event of a replay
+# goes to. The desktop installs nothing and keeps its routing.
 
 type
   ServerSessionRouting* = ref object
     requestSession*: proc(pageSessionId: int): int
-      ## The replay a page's request for `pageSessionId` is for, decided for
-      ## the client the request came from; negative drops the request (the
-      ## client has no replay yet).
+      ## The replay a page's request for its tab `pageSessionId` is for,
+      ## decided for the client the request came from; negative drops the
+      ## request (that tab has no replay).
     deliver*: proc(sessionId: int; channel: cstring; body: JsObject)
-      ## Hand a replay's answer or event to the client that owns the replay.
+      ## Hand a replay's answer or event to the client and tab that own the
+      ## replay.
 
 var serverRouting: ServerSessionRouting = nil
 
@@ -291,12 +293,12 @@ proc onDapRawMessage*(sender: js, response: JsObject) {.async.} =
   ## `sendDapForSession`, which handles BM replay switching.
   var sessionId = getSessionId(response)
   if not serverRouting.isNil:
-    # The page's session number is its own; the replay is its client's —
-    # decided here, never taken from the page (a `replayId` it stamps is not
-    # trusted: one client must not drive another's replay).
+    # The page's session number is its tab's; the replay is that tab's in
+    # its client — decided here, never taken from the page (a `replayId` it
+    # stamps is not trusted: one client must not drive another's replay).
     sessionId = serverRouting.requestSession(sessionId)
     if sessionId < 0:
-      warnPrint "dap: dropped a request from a client with no replay: ",
+      warnPrint "dap: dropped a request from a client tab with no replay: ",
         response.toJs
       return
     sendDapForSession(sessionId, sessionId, response)

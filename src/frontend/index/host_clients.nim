@@ -11,12 +11,38 @@
 ##   started on its first client, or one started for it (`startReplay`);
 ## * its own primary `DebuggerSession` on the server's `SyncHost`
 ##   (`hosted_primary`), which its page mirrors, pinned to it;
+## * a replay and a session of their own for each further replay tab of its
+##   page (below);
 ## * its own share of what the index says: an answer to a request goes to the
 ##   client that asked, a replay's answers and events go to the client that
 ##   owns the replay, and what the index says to no one in particular (the
 ##   startup's `init`, the trace it loaded) goes to every client;
 ## * its own reconnect bootstrap, so a reload of that tab resumes ITS replay
 ##   at ITS position (`bootstrap_cache`, ADR 0006).
+##
+## ONE SESSION PER REPLAY TAB (Shared-DOM-Front-Ends D2, owner decision
+## 2026-10-30). A page's session tabs are independent sessions, so each of a
+## client's replay tabs (`HostTab`) has its own replay and its own server
+## session, all over the client's one socket. They are told apart by the tab
+## id the page already puts on its messages: a DAP request's `sessionId` names
+## the tab whose replay it runs on (`requestSession`), a replay's answers and
+## events go back stamped with the tab that owns the replay (`deliverDap`), a
+## replay selection names the tab that asked for it (`tab`, `onSelection`),
+## and each tab's mirror has its own channel on the socket
+## (`socket_transport.sessionSyncEventFor`). The page's first tab, id 0
+## (`FirstTab`), holds the client's startup replay; a later tab gets a replay
+## when a trace is opened in it. Closing a tab stops its replay
+## (`CODETRACER::close-replay-session`), which closes its session
+## (`forgetStoppedReplay`).
+##
+## Only the first tab's messages are kept for the client's next socket: a
+## reloaded page rebuilds its first tab alone, so another tab's selection or
+## position would be replayed into a tab that no longer exists. For the same
+## reason a reload releases the client's other tabs. The page names its
+## document in the handshake (`ct_page`, one random id per page load): a known
+## client presenting another document has reloaded, and its tabs other than
+## the first are released; the same document is a reconnect of the same page
+## (a network blip), which keeps them all.
 ##
 ## A second socket with the SAME id (a reload whose old socket has not closed
 ## yet, or a duplicated tab, which copies `sessionStorage`) takes the client
@@ -64,10 +90,13 @@ import ../../common/ct_logging
 const
   ClientIdParameter* = "ct_client"
     ## The socket handshake query parameter that names the page's client.
+  PageIdParameter* = "ct_page"
+    ## The socket handshake query parameter that names the page document
+    ## (one per page load), which tells a reload from a reconnect.
   MaxClientIdLength = 64
-  PageSessionId = 0
-    ## The DAP session number a page gives its replay: a page of `ct host`
-    ## drives one replay and numbers it 0, as a single-replay page does.
+  FirstTab = 0
+    ## The tab id of a page's first tab (`types.allocateSessionId`): the tab
+    ## that holds the client's startup replay and that a reload rebuilds.
   SelectionChannels = [cstring"CODETRACER::dap-replay-selected",
                        cstring"CODETRACER::dap-live-session-selected"]
     ## The messages that hand a page its replay: always one client's.
@@ -77,16 +106,28 @@ const
   TraceLoadedChannel = cstring"CODETRACER::trace-loaded"
 
 type
+  HostTab = ref object
+    ## One replay tab of a client's page and the server session behind it.
+    tab: int
+      ## The page's id for the tab (`DapApi.sessionId`, the `tab` of its
+      ## loads).
+    replayId: int
+      ## Its current replay; -1 while it has none.
+    primary: HostedPrimary
+      ## The server's session over `replayId`, which the tab mirrors.
+
   HostClient* = ref object
     id: string
     socket: WebSocket
       ## The socket serving it now; nil while it has none.
-    replayId: int
-      ## Its replay; -1 until it has one.
+    pageId: string
+      ## The page document its last socket named (`ct_page`); "" when none
+      ## did.
+    tabs: seq[HostTab]
+      ## Its page's replay tabs, each added when it first gets a replay.
     replays: seq[int]
       ## Every replay started for it, stopped when it is released.
     allocating: bool
-    primary: HostedPrimary
     bootstrap: seq[BootstrapPayload]
       ## What the index said to this client alone, for its next socket.
     goneSinceMs: float
@@ -116,6 +157,7 @@ type
 
 proc jsonStringify(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
 proc jsonParse(s: cstring): JsObject {.importjs: "JSON.parse(#)".}
+proc jsTypeOf(o: JsObject): cstring {.importjs: "(typeof #)".}
 proc jsAssign(target, source: JsObject): JsObject {.importjs: "Object.assign(#, #)".}
 proc randomUuid(): cstring {.importjs: "require('crypto').randomUUID()".}
 proc nowMs(): float {.importjs: "Date.now()".}
@@ -126,6 +168,59 @@ proc newHostClients*(ipc: FrontendIPC; releaseAfterMs: int): HostClients =
               owners: initTable[int, HostClient](),
               spareReplay: -1, sessions: newHostedSessions(),
               releaseAfterMs: releaseAfterMs)
+
+proc tabOf(c: HostClient; tab: int): HostTab =
+  ## `c`'s tab `tab`, or nil when it has none.
+  for t in c.tabs:
+    if t.tab == tab:
+      return t
+  nil
+
+proc ensureTab(c: HostClient; tab: int): HostTab =
+  ## `c`'s tab `tab`, created without a replay when it has none.
+  result = c.tabOf(tab)
+  if result.isNil:
+    result = HostTab(tab: tab, replayId: -1)
+    c.tabs.add result
+
+proc tabOfReplay(c: HostClient; replayId: int): HostTab =
+  ## The tab of `c` whose CURRENT replay is `replayId`, or nil.
+  if replayId < 0:
+    return nil
+  for t in c.tabs:
+    if t.replayId == replayId:
+      return t
+  nil
+
+proc firstReplay(c: HostClient): int =
+  ## The replay of `c`'s first tab; -1 while it has none.
+  let t = c.tabOf(FirstTab)
+  if t.isNil: -1 else: t.replayId
+
+proc tabIdOf(payload: JsObject): int =
+  ## The tab a message names (`tab`, or a DAP message's `sessionId`), or
+  ## `FirstTab` when it names none: a message no tab claims is the
+  ## single-tab page's.
+  if payload.isNil or payload.isUndefined or payload.isNull:
+    return FirstTab
+  for field in [cstring"tab", cstring"sessionId"]:
+    let value = payload[field]
+    if not value.isNil and not value.isUndefined and not value.isNull and
+       jsTypeOf(value) == cstring"number":
+      return value.to(int)
+  FirstTab
+
+proc forFirstTab(payload: cstring): bool =
+  ## Whether the serialized message `payload` is for the page's first tab
+  ## (or names none). One that does not parse is taken to be: it is kept as
+  ## it always was.
+  var parsed: JsObject
+  try:
+    parsed = jsonParse(payload)
+  except:
+    # Bare `except:`: `JSON.parse` throws V8's own `SyntaxError`.
+    return true
+  tabIdOf(parsed) == FirstTab
 
 proc normalizeClientId(raw: string): string =
   ## The client id a page presented, or "" when it is not one: 1 to 64 of
@@ -189,54 +284,58 @@ proc primaryIdFor(replayId: int): string =
   ## other clients from the ids it is told.
   "ct-host/replay-" & $replayId
 
-proc closePrimary(c: HostClient) =
-  if not c.primary.isNil:
-    c.primary.close()
-    c.primary = nil
+proc closePrimary(t: HostTab) =
+  if not t.primary.isNil:
+    t.primary.close()
+    t.primary = nil
 
-proc bindReplay(hc: HostClients; c: HostClient; replayId: int;
+proc bindReplay(hc: HostClients; c: HostClient; tab: int; replayId: int;
                 channel: cstring; selection: JsObject) =
-  ## `replayId` is `c`'s replay from now on: its page is told so, its
-  ## requests go there, and the server's session for it follows that replay.
-  let previous = c.replayId
-  c.replayId = replayId
+  ## `replayId` is the replay of `c`'s tab `tab` from now on: its page is told
+  ## so, the tab's requests go there, and the server's session for the tab
+  ## follows that replay.
+  let t = c.ensureTab(tab)
+  let previous = t.replayId
+  t.replayId = replayId
   if replayId notin c.replays:
     c.replays.add replayId
   hc.owners[replayId] = c
   selection["replayId"] = replayId
   let serialized = jsonStringify(selection)
-  if previous != replayId:
-    # A cached move of the replay it held is not a position of this one.
-    c.bootstrap.forget(DapEventChannel)
-  for other in SelectionChannels:
-    c.bootstrap.forget(other)
-  c.bootstrap.remember(channel, cstring"", serialized)
+  if tab == FirstTab:
+    # Kept for the client's next socket: a reload rebuilds this tab.
+    if previous != replayId:
+      # A cached move of the replay it held is not a position of this one.
+      c.bootstrap.forget(DapEventChannel)
+    for other in SelectionChannels:
+      c.bootstrap.forget(other)
+    c.bootstrap.remember(channel, cstring"", serialized)
   if not c.socket.isNil:
     c.socket.emit(channel, serialized)
-  # The server's own session over the replay, which the page mirrors.
-  if previous != replayId or c.primary.isNil:
-    c.closePrimary()
+  # The server's own session over the replay, which the tab mirrors.
+  if previous != replayId or t.primary.isNil:
+    t.closePrimary()
     let trace = selection["trace"]
     let folder =
       if trace.isNil or trace.isUndefined or trace["outputFolder"].isUndefined or
          trace["outputFolder"].isNil: ""
       else: $trace["outputFolder"].to(cstring)
     if folder.len > 0:
-      c.primary = openHostedSession(hc.sessions, primaryIdFor(replayId),
+      t.primary = openHostedSession(hc.sessions, primaryIdFor(replayId),
                                     replayId, folder)
       if not c.socket.isNil:
-        c.primary.connectPage(c.socket.toJs)
-  infoPrint "ct host: client ", c.id, " replays ", $replayId
+        t.primary.connectPage(c.socket.toJs, tab)
+  infoPrint "ct host: client ", c.id, " tab ", $tab, " replays ", $replayId
 
 proc allocate(hc: HostClients; c: HostClient) =
-  ## Give `c` a replay of its own, once the trace is known.
-  if c.replayId >= 0 or c.allocating or hc.selection.isNil:
+  ## Give `c`'s first tab a replay of its own, once the trace is known.
+  if c.firstReplay >= 0 or c.allocating or hc.selection.isNil:
     return
   let selectionCopy = jsonParse(jsonStringify(hc.selection))
   if hc.spareReplay >= 0:
     let replayId = hc.spareReplay
     hc.spareReplay = -1
-    hc.bindReplay(c, replayId, hc.selectionChannel, selectionCopy)
+    hc.bindReplay(c, FirstTab, replayId, hc.selectionChannel, selectionCopy)
     return
   if hc.startReplay.isNil:
     warnPrint "ct host: no way to start a replay for client ", c.id
@@ -265,7 +364,7 @@ proc allocate(hc: HostClients; c: HostClient) =
       if not hc.stopReplay.isNil:
         hc.stopReplay(replayId)
       return
-    hc.bindReplay(c, replayId, hc.selectionChannel, selectionCopy)
+    hc.bindReplay(c, FirstTab, replayId, hc.selectionChannel, selectionCopy)
   discard run()
 
 proc onSelection(hc: HostClients; c: HostClient; channel: cstring;
@@ -277,8 +376,10 @@ proc onSelection(hc: HostClients; c: HostClient; channel: cstring;
     return
   let replayId = replayIdNode.to(int)
   if not c.isNil:
-    # A client's own request opened a replay (a trace it loaded, a restart).
-    hc.bindReplay(c, replayId, channel, selection)
+    # A client's own request opened a replay (a trace it loaded, a restart),
+    # for the tab that asked: a "+" tab's load gives THAT tab a replay and a
+    # session of its own, beside the others.
+    hc.bindReplay(c, tabIdOf(selection), replayId, channel, selection)
     return
   # The server's startup opened the trace it serves: the first client waiting
   # takes that replay, and every other one waiting gets its own.
@@ -286,14 +387,14 @@ proc onSelection(hc: HostClients; c: HostClient; channel: cstring;
   hc.selectionChannel = channel
   var taker: HostClient = nil
   for waiting in hc.clients.values:
-    if waiting.replayId < 0 and not waiting.allocating and
+    if waiting.firstReplay < 0 and not waiting.allocating and
        not waiting.socket.isNil:
       taker = waiting
       break
   if taker.isNil:
     hc.spareReplay = replayId
   else:
-    hc.bindReplay(taker, replayId, channel, selection)
+    hc.bindReplay(taker, FirstTab, replayId, channel, selection)
   for waiting in hc.clients.values:
     if not waiting.socket.isNil:
       hc.allocate(waiting)
@@ -311,38 +412,44 @@ proc deliver(hc: HostClients; id: cstring; key: cstring; payload: cstring) =
       if not each.socket.isNil:
         each.socket.emit(id, payload)
   else:
-    c.bootstrap.remember(id, key, payload)
+    # Only the first tab's are kept for the next socket: a reloaded page has
+    # no other tab to give them to (module doc).
+    if cacheable(id, key) and forFirstTab(payload):
+      c.bootstrap.remember(id, key, payload)
     if not c.socket.isNil:
       c.socket.emit(id, payload)
 
 proc deliverDap(hc: HostClients; replayId: int; channel: cstring;
                 body: JsObject) =
   ## A replay's answer or event, to the client that owns the replay, under
-  ## the session number its page uses.
+  ## the tab id of the page's tab whose replay it is.
   let owner = hc.owners.getOrDefault(replayId)
   if owner.isNil:
     debugPrint "ct host: dropped a message of replay ", $replayId,
       ", which is no client's"
     return
-  if owner.replayId != replayId:
-    # A replay the client held before (it loaded another trace since): its
-    # page numbers only its CURRENT replay, 0, so this would be shown as that
+  let t = owner.tabOfReplay(replayId)
+  if t.isNil:
+    # A replay a tab held before (it loaded another trace since): the page
+    # knows a tab only by its CURRENT replay, so this would be shown as that
     # one's. The replay itself is kept until the client is released.
     debugPrint "ct host: dropped a message of replay ", $replayId,
-      ", no longer client ", owner.id, "'s current one"
+      ", no tab of client ", owner.id, " holds it now"
     return
   let forPage = jsAssign(newJsObject(), body)
-  forPage["sessionId"] = PageSessionId
+  forPage["sessionId"] = t.tab
   runAsClient(owner.toJs, proc() =
     mainWindow.webContents.send(channel, forPage))
 
 proc requestSession(hc: HostClients; pageSessionId: int): int =
+  ## The replay a request of the page's tab `pageSessionId` runs on: that
+  ## tab's own, or -1 (dropped) while it has none.
   let c = hc.current()
   if c.isNil:
     # Not a page's request: the server's own code names the replay itself.
-    pageSessionId
-  else:
-    c.replayId
+    return pageSessionId
+  let t = c.tabOf(pageSessionId)
+  if t.isNil: -1 else: t.replayId
 
 proc mayStopReplay*(hc: HostClients; replayId: int): bool =
   ## A client may stop its own replays only; the server itself, any.
@@ -350,7 +457,9 @@ proc mayStopReplay*(hc: HostClients; replayId: int): bool =
   c.isNil or replayId in c.replays
 
 proc forgetStoppedReplay*(hc: HostClients; replayId: int) =
-  ## `replayId` was stopped at a client's request (the toolbar's Stop).
+  ## `replayId` was stopped at a client's request: the toolbar's Stop, or its
+  ## tab was closed. The tab's session is closed with it; a tab other than
+  ## the first is forgotten, and gets a new entry if it runs again.
   let owner = hc.owners.getOrDefault(replayId)
   if owner.isNil:
     return
@@ -358,12 +467,19 @@ proc forgetStoppedReplay*(hc: HostClients; replayId: int) =
   let i = owner.replays.find(replayId)
   if i >= 0:
     owner.replays.delete(i)
-  if owner.replayId == replayId:
-    owner.replayId = -1
-    owner.closePrimary()
+  let t = owner.tabOfReplay(replayId)
+  if t.isNil:
+    return
+  t.replayId = -1
+  t.closePrimary()
+  infoPrint "ct host: client ", owner.id, " closed the session of tab ",
+    $t.tab, " (replay ", $replayId, ")"
+  if t.tab == FirstTab:
     for channel in SelectionChannels:
       owner.bootstrap.forget(channel)
     owner.bootstrap.forget(DapEventChannel)
+  else:
+    owner.tabs.delete(owner.tabs.find(t))
 
 proc installRouting*(hc: HostClients) =
   ## Route the index's sends and the replays' messages per client.
@@ -378,20 +494,45 @@ proc installRouting*(hc: HostClients) =
 
 proc dropSocket(hc: HostClients; c: HostClient; socket: WebSocket) =
   hc.ipc.removeClientSocket(socket)
-  if not c.primary.isNil:
-    c.primary.disconnectPage(socket.toJs)
+  for t in c.tabs:
+    if not t.primary.isNil:
+      t.primary.disconnectPage(socket.toJs)
 
-proc connect*(hc: HostClients; socket: WebSocket; rawClientId: string): HostClient =
+proc releaseLaterTabs(hc: HostClients; c: HostClient) =
+  ## Close the sessions of `c`'s tabs other than the first, and stop their
+  ## replays: its page reloaded, and a reloaded page has its first tab only.
+  var kept: seq[HostTab] = @[]
+  for t in c.tabs:
+    if t.tab == FirstTab:
+      kept.add t
+      continue
+    t.closePrimary()
+    if t.replayId >= 0:
+      hc.owners.del(t.replayId)
+      let i = c.replays.find(t.replayId)
+      if i >= 0:
+        c.replays.delete(i)
+      if not hc.stopReplay.isNil:
+        hc.stopReplay(t.replayId)
+    infoPrint "ct host: client ", c.id, " reloaded; released the session of tab ",
+      $t.tab, " (replay ", $t.replayId, ")"
+  c.tabs = kept
+
+proc connect*(hc: HostClients; socket: WebSocket; rawClientId: string;
+              rawPageId = ""): HostClient =
   ## Serve `socket` as the client its page names (`rawClientId`), or as a new
   ## client when it names none. Its page is sent what it missed: what the
-  ## index said to every client and what it said to this one.
+  ## index said to every client and what it said to this one. `rawPageId` is
+  ## the page document the socket names (`ct_page`): another document than
+  ## the client's last one is a reload, which keeps only the first tab.
   var id = normalizeClientId(rawClientId)
+  let pageId = normalizeClientId(rawPageId)
   if id.len == 0:
     # Not resumable: the page did not name itself.
     id = "anonymous-" & $randomUuid()
   var c = hc.clients.getOrDefault(id)
   if c.isNil:
-    c = HostClient(id: id, replayId: -1)
+    c = HostClient(id: id)
     hc.clients[id] = c
     infoPrint "ct host: client ", id, " connected (", $hc.clients.len, " clients)"
   elif not c.socket.isNil and c.socket != socket:
@@ -401,6 +542,10 @@ proc connect*(hc: HostClients; socket: WebSocket; rawClientId: string): HostClie
     infoPrint "ct host: client ", id, " reconnected; its previous socket is superseded"
   else:
     infoPrint "ct host: client ", id, " reconnected"
+  if pageId.len > 0:
+    if c.pageId.len > 0 and c.pageId != pageId:
+      hc.releaseLaterTabs(c)
+    c.pageId = pageId
   c.socket = socket
   c.goneSinceMs = 0
   let store = c.toJs
@@ -413,8 +558,9 @@ proc connect*(hc: HostClients; socket: WebSocket; rawClientId: string): HostClie
     upsertBootstrap(missed, own)
   replayBootstrap(missed, proc(event: cstring; payload: cstring) =
     socket.emit(event, payload))
-  if not c.primary.isNil:
-    c.primary.connectPage(socket.toJs)
+  for t in c.tabs:
+    if not t.primary.isNil:
+      t.primary.connectPage(socket.toJs, t.tab)
   hc.allocate(c)
   c
 
@@ -429,13 +575,14 @@ proc disconnect*(hc: HostClients; socket: WebSocket) =
       infoPrint "ct host: client ", c.id, " disconnected"
 
 proc release(hc: HostClients; c: HostClient) =
-  c.closePrimary()
+  for t in c.tabs:
+    t.closePrimary()
+  c.tabs = @[]
   for replayId in c.replays:
     hc.owners.del(replayId)
     if not hc.stopReplay.isNil:
       hc.stopReplay(replayId)
   c.replays = @[]
-  c.replayId = -1
   hc.clients.del(c.id)
   infoPrint "ct host: released client ", c.id, " (", $hc.clients.len, " clients)"
 
