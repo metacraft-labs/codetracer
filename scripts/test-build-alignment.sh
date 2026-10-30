@@ -956,7 +956,7 @@ run_nim_flag_alignment_check() {
 # (J) The io-mon sibling probe must name a module this repo actually imports.
 # ---------------------------------------------------------------------------
 #
-# `scripts/require-siblings.sh`'s advisory tier exists to name, BEFORE any
+# `scripts/require-siblings.sh`'s io-mon row exists to name, BEFORE any
 # compile, the module that would otherwise fail to resolve. That only works if
 # the probe tracks the import. It did not.
 #

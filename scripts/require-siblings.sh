@@ -205,13 +205,43 @@ sibling_remote_org="${CODETRACER_SIBLING_REMOTE_ORG:-https://github.com/metacraf
 # test-ui-tests, viewmodel-tests, cross-process-linux) provision it in
 # .github/workflows/codetracer.yml.
 #
+# `io-mon` and `nim-stackable-hooks` joined that tier on 2026-10-31
+# (codetracer-pm issue 2026-10-30-require-siblings-calls-io-mon-advisory-but-
+# build-once-cannot-compile-ct-without-it). They used to be advisory, on the
+# belief that builds succeed without them, and that was false:
+# `src/ct_test/incremental/io_mon_capture.nim` imports `io_mon/depfile` and
+# `stackable_hooks/propagation` unconditionally, and it is reached from EVERY
+# `ct` build (src/ct/codetracer.nim -> ../ct_test/incremental_cli ->
+# incremental/io_mon_capture). That is by design, not an accident to be
+# compiled out: the Incremental-Test-Runner campaign (codetracer-pm
+# milestones/Incremental-Test-Runner.milestones.org, M6b and M8) puts io-mon's
+# read-file capture in the runner that `ct test` IS, and gates only the LIVE
+# capture -- at run time, on the interpose shim being locatable -- never the
+# compile. A tree without io-mon passed this preflight as "5 optional sibling
+# repo(s) are missing ... The build continues" and then died in tup on
+# `cannot open file: io_mon/depfile`.
+#
+# Their override columns are EMPTY for the same reason as runquota's: the dev
+# shell seeds IO_MON_SRC / NIM_STACKABLE_HOOKS_SRC from flake inputs
+# (nix/shells/main.nix), but `src/Tuprules.tup` exports neither, so under tup
+# the repo-root `config.nims` sees only the `../io-mon` / `../nim-stackable-hooks`
+# sibling checkouts. Honouring the variables here is exactly how the issue's
+# failing tree got its green preflight.
+#
 # Everything else the source references across a relative path goes in the
 # advisory tier: a warning naming the module that will fail to resolve, and a
 # zero exit. `isonim-gpui` / `nim-termctl` / `nim-pty` are on
-# `src/Tuprules.tup`'s `--path` list but builds succeed without them, and the
-# io-mon family (io-mon, nim-stackable-hooks, nim-shm-queue, nim-shm-gset) is
-# reached from `src/ct_test/incremental/*` yet is NOT provisioned by any CI
-# job -- promoting either group would break lanes that are green today.
+# `src/Tuprules.tup`'s `--path` list but builds succeed without them.
+# `nim-shm-queue` / `nim-shm-gset` are on `config.nims`'s search path for
+# io-mon's CAPTURE half (`io_mon/writer`, `io_mon/fs_snoop`, and so the
+# `io_mon` umbrella), which nothing in this repo imports: the closure of
+# `io_mon/depfile` (types, capabilities, codec, encode, reader, render,
+# shim_discovery, paths) reaches neither library. Measured 2026-10-31: `nim
+# check` of io_mon_capture.nim with --skipParentCfg and ONLY io-mon (6fccd929)
+# and nim-stackable-hooks (059c549) on the path exits 0; drop either one and it
+# fails on that repo's module. They stay advisory so a workspace that carries
+# them keeps its `--path`, and so a future import of the umbrella is warned
+# about by name.
 #
 # CODETRACER_STRICT_SIBLING_CHECK=1 promotes the advisory tier to required,
 # for a lane that means to assert a complete workspace.
@@ -234,9 +264,6 @@ required_siblings=(
 	# TEST_CERTIFICATES_TOOLS_SRC, so the tup driver sees it too, and the dev
 	# shell seeds it from the pinned flake input (nix/shells/main.nix).
 	'test-certificates-tools|src/test_certificates.nim|TEST_CERTIFICATES_TOOLS_SRC|`ct` links the test-certificate reference library (`test_certificates/*`) in src/ct_test/certificate_local_store.nim and certificate_store_roots_native.nim, reached from EVERY `ct` build via src/ct/codetracer.nim -> ../ct_test/ct_test'
-)
-
-advisory_siblings=(
 	# Probe the FORMAT module, not the `io_mon` umbrella -- the umbrella is a
 	# false green. Nothing in this repo imports `io_mon`: the only io-mon
 	# imports are `io_mon/depfile` (io_mon_capture.nim:83 and the two
@@ -246,17 +273,27 @@ advisory_siblings=(
 	#
 	# The distinction is not cosmetic. `src/io_mon.nim` has existed in io-mon
 	# forever; `src/io_mon/depfile.nim` only since io-mon cfd2514 (2026-08-27).
-	# A pin older than that satisfies the umbrella probe, so this tier stayed
+	# A pin older than that satisfies the umbrella probe, so the check stayed
 	# SILENT and the missing module surfaced instead as
 	# `cannot open file: io_mon/depfile` from the Nim compiler, ~2000 lines
 	# into the build -- which is exactly how the published workspace lock for
 	# codetracer 0039436d (io-mon pinned at 8b6d0b9b, 2026-07-31) shipped a
 	# tree that could not build `ct`. Probing the module the source actually
-	# imports turns that into this warning, by name, before any compile.
-	'io-mon|src/io_mon/depfile.nim|IO_MON_SRC|`import io_mon/depfile` in src/ct_test/incremental/{io_mon_capture,test_io_mon_launched_binaries,test_io_mon_readfiles_materialized}.nim, reached from `ct` via src/ct_test/incremental_cli:78'
-	'nim-stackable-hooks|src/stackable_hooks.nim|NIM_STACKABLE_HOOKS_SRC|`import stackable_hooks/propagation` in src/ct_test/incremental/io_mon_capture.nim'
-	"nim-shm-queue|src/shm_queue.nim|SHM_QUEUE_SRC|io-mon's dependency queue imports \`shm_queue\`"
-	"nim-shm-gset|src/shm_gset.nim|SHM_GSET_SRC|io-mon's writer imports \`shm_gset/transport\` (the symptom config.nims:74-77 documents)"
+	# imports turns that into a refusal, by name, before any compile.
+	#
+	# Override columns deliberately empty -- see the io-mon paragraph in the
+	# tier notes above: tup strips IO_MON_SRC / NIM_STACKABLE_HOOKS_SRC.
+	'io-mon|src/io_mon/depfile.nim||`import io_mon/depfile` in src/ct_test/incremental/io_mon_capture.nim:83, reached from EVERY `ct` build via src/ct/codetracer.nim -> ../ct_test/incremental_cli -> incremental/io_mon_capture; config.nims puts ../io-mon/src on the Nim search path'
+	# Probe the module imported, for the same reason as io-mon's row.
+	'nim-stackable-hooks|src/stackable_hooks/propagation.nim||`import stackable_hooks/propagation` in src/ct_test/incremental/io_mon_capture.nim:91, reached from EVERY `ct` build by the same chain as io-mon; config.nims puts ../nim-stackable-hooks/src on the Nim search path'
+)
+
+advisory_siblings=(
+	# Not in `ct`'s import closure (see the tier notes above): only io-mon's
+	# capture half -- `io_mon/writer`, `io_mon/fs_snoop`, the `io_mon` umbrella
+	# -- imports them, and nothing in this repo imports that half.
+	"nim-shm-queue|src/shm_queue.nim|SHM_QUEUE_SRC|io-mon's capture half (\`io_mon/writer\`, the \`io_mon\` umbrella) imports \`shm_queue\`; \`ct\`'s \`io_mon/depfile\` closure does not, so this matters only to code that imports that half"
+	"nim-shm-gset|src/shm_gset.nim|SHM_GSET_SRC|io-mon's capture half (\`io_mon/writer\`, \`io_mon/fs_snoop\`) imports \`shm_gset/transport\` (the symptom config.nims documents); \`ct\`'s \`io_mon/depfile\` closure does not"
 	"isonim-gpui|src||src/Tuprules.tup:74 puts it on the Nim search path"
 	"nim-termctl|src||src/Tuprules.tup:75 puts it on the Nim search path"
 	"nim-pty|src||src/Tuprules.tup:76 puts it on the Nim search path"

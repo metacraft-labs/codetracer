@@ -33,7 +33,13 @@ REQUIRED_BUILD_SIBLING_FILES=(
 	#
 	#     cannot open file: shm_gset/transport
 	#
-	# out of the `ct` compile. Checking it here names the real cause instead.
+	# out of whichever compile in this lane imports io-mon's capture half (the
+	# `io_mon` umbrella, `io_mon/writer`, `io_mon/fs_snoop` -- e.g. the `io-mon`
+	# CLI, cmd/io_mon_snoop.nim, which a test lane builds from this checkout).
+	# `ct` itself imports only `io_mon/depfile`, whose closure reaches neither
+	# shm library; that is why scripts/require-siblings.sh
+	# requires io-mon and nim-stackable-hooks for every build but leaves the
+	# two shm libraries advisory. Checking it here names the real cause instead.
 	"nim-shm-gset/src/shm_gset/transport.nim"
 	"nim-stackable-hooks/src/stackable_hooks/propagation.nim"
 )

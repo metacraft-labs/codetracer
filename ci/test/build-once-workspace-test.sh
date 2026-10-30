@@ -66,6 +66,11 @@
 #      than the late compiler error the whole file exists to pre-empt: the
 #      launcher-recorder-e2e logs for d05e45f9 contain the recipe failure and
 #      not one word of the report above.
+#   5. Every sibling the `ct` compile imports (io-mon, nim-stackable-hooks, via
+#      src/ct_test/incremental/io_mon_capture.nim) is in the REQUIRED tier:
+#      the preflight accepts a workspace of exactly the required siblings and
+#      refuses one missing either repo, by name, even when only the repo's
+#      `*_SRC` variable (which tup strips) points at a copy.
 #
 # # No mocks
 #
@@ -157,6 +162,36 @@ KNOWN_GAPS=(
 	"codetracer.yml|windows-installer-build|nim-acp"
 	"codetracer.yml|windows-installer-build|nim-everywhere"
 	"codetracer.yml|windows-installer-build|runquota"
+
+	# io-mon and nim-stackable-hooks became REQUIRED on 2026-10-31 (codetracer-pm
+	# issue 2026-10-30-require-siblings-calls-io-mon-advisory-but-build-once-
+	# cannot-compile-ct-without-it). FOUND, not accepted: these jobs never
+	# provisioned either repo, so on the tup driver they could not have compiled
+	# `ct` past `cannot open file: io_mon/depfile` before this change either --
+	# the preflight now says so up front. No CI run has corroborated it, because
+	# none of them reached `build-once` in the runs checked (codetracer.yml runs
+	# up to 41895ebdf, 2026-10-30: token-mint failures and cancellations).
+	#
+	# REMEDY: most of these jobs take their Nim siblings from
+	# provision-repro-lock-siblings, which clones the members of repro.lock's
+	# develop set that the lock also solves as PACKAGES
+	# (ci/repro-lock-build-input-siblings.sh). io-mon and nim-stackable-hooks are
+	# in the develop set but not solved as packages, so the action skips them.
+	# Declaring both as from-source inputs in repro.nim and relocking closes
+	# every line below except windows-installer-build's, which needs them in its
+	# windows-diy siblings: block (bare; repro.lock pins both). Recorded, with
+	# this remedy, as codetracer-pm issue 2026-10-31-codetracer-ci-build-once-
+	# jobs-do-not-provision-io-mon-nim-stackable-hooks-or-test-certificates-tools.
+	"codetracer.yml|cross-process-linux|io-mon"
+	"codetracer.yml|cross-process-linux|nim-stackable-hooks"
+	"codetracer.yml|viewmodel-tests|io-mon"
+	"codetracer.yml|viewmodel-tests|nim-stackable-hooks"
+	"codetracer.yml|gpui-window-captures|io-mon"
+	"codetracer.yml|gpui-window-captures|nim-stackable-hooks"
+	"codetracer.yml|windows-installer-build|io-mon"
+	"codetracer.yml|windows-installer-build|nim-stackable-hooks"
+	# test-ui-tests already clones nim-stackable-hooks=dev in its siblings: block.
+	"codetracer.yml|test-ui-tests|io-mon"
 )
 
 assertions=0
@@ -523,6 +558,135 @@ else
 			"'required sibling repo(s) are missing'. First line: $(printf '%s' "$out" | head -1)"
 	fi
 fi
+
+# -----------------------------------------------------------------------------
+# 6. Every sibling the `ct` compile imports is in the REQUIRED tier.
+#
+# The defect being pinned (codetracer-pm issue 2026-10-30-require-siblings-
+# calls-io-mon-advisory-but-build-once-cannot-compile-ct-without-it): io-mon
+# and nim-stackable-hooks sat in the ADVISORY tier, so a workspace without them
+# passed the preflight ("optional sibling repo(s) are missing ... The build
+# continues") and then failed in tup on `cannot open file: io_mon/depfile`.
+# `src/ct_test/incremental/io_mon_capture.nim` imports both unconditionally and
+# is reached from every `ct` build (src/ct/codetracer.nim ->
+# ../ct_test/incremental_cli -> incremental/io_mon_capture).
+#
+# Executed, not grepped: the real preflight runs against a throwaway workspace
+# holding the probe file of every REQUIRED row and nothing else. It must
+#   a. accept that workspace (the control -- otherwise b proves nothing, and it
+#      also pins that nim-shm-queue / nim-shm-gset, which `ct`'s
+#      `io_mon/depfile` closure does not reach, are NOT required);
+#   b. refuse it, naming the repo, once one of CT_IMPORT_SIBLINGS is removed;
+#   c. still refuse when only the repo's *_SRC variable points at a copy,
+#      because tup strips those variables before `config.nims` reads them.
+# The module list is checked against io_mon_capture.nim's imports first, so
+# the list below cannot outlive the imports it stands for.
+# -----------------------------------------------------------------------------
+echo "every sibling the ct compile imports is a REQUIRED sibling"
+
+readonly CT_IMPORT_MODULE="$REPO_ROOT/src/ct_test/incremental/io_mon_capture.nim"
+# repo | module imported by CT_IMPORT_MODULE | env var tup does not export
+CT_IMPORT_SIBLINGS=(
+	"io-mon|io_mon/depfile|IO_MON_SRC"
+	"nim-stackable-hooks|stackable_hooks/propagation|NIM_STACKABLE_HOOKS_SRC"
+)
+
+# Build a workspace with every REQUIRED row's probe present, minus $2 (a repo
+# name, or empty). Echoes the workspace root.
+required_rows="$(awk '
+	/^required_siblings=\(/ { inblock = 1; next }
+	inblock && /^\)/        { inblock = 0 }
+	inblock {
+		line = $0
+		sub(/^[ \t]*/, "", line)
+		if (line ~ /^#/ || line == "") next
+		sub(/^["'\'']/, "", line)
+		split(line, parts, "|")
+		if (parts[1] != "") print parts[1] "|" parts[2]
+	}
+' "$PREFLIGHT")"
+
+tier_fixture_root="$(mktemp -d)"
+trap 'rm -rf "${fixture:-}" "$tier_fixture_root"' EXIT
+make_tier_workspace() { # <label> <omit-name> ; echoes the workspace root
+	local ws_dir="$tier_fixture_root/$1" row name probe
+	mkdir -p "$ws_dir/codetracer/scripts"
+	cp "$PREFLIGHT" "$ws_dir/codetracer/scripts/require-siblings.sh"
+	while IFS= read -r row; do
+		[ -n "$row" ] || continue
+		IFS='|' read -r name probe <<<"$row"
+		[ "$name" = "$2" ] && continue
+		case "$probe" in
+		*.*) mkdir -p "$ws_dir/$name/$(dirname "$probe")" && : >"$ws_dir/$name/$probe" ;;
+		*) mkdir -p "$ws_dir/$name/$probe" ;;
+		esac
+	done <<<"$required_rows"
+	printf '%s' "$ws_dir"
+}
+
+# Run the preflight with no inherited override or bypass, so the developer's
+# own dev shell (which seeds IO_MON_SRC and friends) cannot green the check.
+run_tier_preflight() { # <workspace root> [VAR=value...]
+	local ws_dir="$1"
+	shift
+	(cd "$ws_dir/codetracer" && env -u CODETRACER_SKIP_SIBLING_CHECK \
+		-u CODETRACER_STRICT_SIBLING_CHECK -u IO_MON_SRC \
+		-u NIM_STACKABLE_HOOKS_SRC "$@" bash scripts/require-siblings.sh 2>&1)
+}
+
+for entry in "${CT_IMPORT_SIBLINGS[@]}"; do
+	IFS='|' read -r name module _ <<<"$entry"
+	if grep -qE "^import[[:space:]]+${module}([[:space:]]|$)" "$CT_IMPORT_MODULE"; then
+		ok "io_mon_capture.nim still imports $module (from $name)"
+	else
+		fail "io_mon_capture.nim still imports $module (from $name)" \
+			"the import is gone, so this entry of CT_IMPORT_SIBLINGS no longer stands" \
+			"for anything -- drop it here, and reconsider $name's tier in the preflight."
+	fi
+done
+
+control_ws="$(make_tier_workspace control "")"
+control_out="$(run_tier_preflight "$control_ws")"
+control_rc=$?
+if [ "$control_rc" -eq 0 ]; then
+	ok "the preflight accepts a workspace holding exactly the required siblings (no nim-shm-queue / nim-shm-gset)"
+else
+	fail "the preflight accepts a workspace holding exactly the required siblings" \
+		"it exited $control_rc, so the refusals below would prove nothing. First line:" \
+		"$(printf '%s' "$control_out" | head -1)"
+fi
+
+for entry in "${CT_IMPORT_SIBLINGS[@]}"; do
+	IFS='|' read -r name module var <<<"$entry"
+	omit_ws="$(make_tier_workspace "without-$name" "$name")"
+	omit_out="$(run_tier_preflight "$omit_ws")"
+	omit_rc=$?
+	if [ "$omit_rc" -ne 0 ] && grep -q "required sibling repo(s) are missing" <<<"$omit_out" &&
+		grep -qE "^[[:space:]]*\*[[:space:]]+$name([[:space:]]|$)" <<<"$omit_out" &&
+		grep -qF "git clone" <<<"$omit_out"; then
+		ok "the preflight refuses a workspace without $name and names it"
+	else
+		fail "the preflight refuses a workspace without $name and names it" \
+			"exit $omit_rc. \`ct\` cannot compile without \`$module\`, so a zero exit here is" \
+			"the defect: the build proceeds and dies in tup on \`cannot open file: $module\`." \
+			"First line: $(printf '%s' "$omit_out" | head -1)"
+	fi
+
+	# A copy of the repo reachable ONLY through the variable tup strips.
+	alias_dir="$tier_fixture_root/alias-$name/src"
+	mkdir -p "$alias_dir/$(dirname "$module")"
+	: >"$alias_dir/$module.nim"
+	alias_out="$(run_tier_preflight "$omit_ws" "$var=$alias_dir")"
+	alias_rc=$?
+	if [ "$alias_rc" -ne 0 ] && grep -qE "^[[:space:]]*\*[[:space:]]+$name([[:space:]]|$)" <<<"$alias_out"; then
+		ok "$var alone does not satisfy the $name requirement (tup strips it)"
+	else
+		fail "$var alone does not satisfy the $name requirement" \
+			"exit $alias_rc with $var=$alias_dir and no ../$name checkout. src/Tuprules.tup" \
+			"does not export $var, so under tup config.nims never sees it and the" \
+			"compile still fails on \`$module\`."
+	fi
+done
 
 echo
 if [ "$failures" -eq 0 ]; then

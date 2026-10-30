@@ -28,9 +28,10 @@ relative path `../<sibling>`:
 | Repro/Nix | `repro.nim` and native workspace input overrides (`../io-mon`, `../reprobuild`, …) | sibling overrides cannot be resolved |
 
 None of the four can be pointed elsewhere per-worktree, so relocating the
-checkout is the only fix. In particular **`runquota` has no override at all** by
-design — see the tier notes in `scripts/require-siblings.sh` — so no environment
-variable can paper over a badly-placed worktree.
+checkout is the only fix. In particular **`runquota`, `io-mon` and
+`nim-stackable-hooks` have no override at all** by design — see the tier notes
+in `scripts/require-siblings.sh` — so no environment variable can paper over a
+badly-placed worktree.
 
 Create one like this, from the main checkout:
 

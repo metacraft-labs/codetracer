@@ -3322,6 +3322,11 @@ commands.
     but it adds that path BEFORE the `../io-mon/src` sibling and Nim resolves
     later `--path` entries first, so the env var cannot override a colliding
     module in the sibling checkout.
+    UPDATE 2026-10-31: io-mon and nim-stackable-hooks are now REQUIRED
+    siblings (probing `io_mon/depfile.nim` / `stackable_hooks/propagation.nim`,
+    no env override because tup strips IO_MON_SRC / NIM_STACKABLE_HOOKS_SRC),
+    so the preflight refuses such a tree by name. nim-shm-queue / nim-shm-gset
+    stay optional: `ct`'s `io_mon/depfile` closure does not import them.
 - 2026-09-05: **a `HeadlessDebugSession` that steps in a loop and never calls
   `drainEvents()` grows without bound.** Every `continue`/step makes
   replay-server push events the session buffers until somebody asks for them,

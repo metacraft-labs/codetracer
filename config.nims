@@ -80,10 +80,14 @@ addPathIfDir(workspaceRoot / "io-mon" / "src")
 addPathIfDir(getEnv("IO_MON_SRC"))
 addPathIfDir(workspaceRoot / "nim-shm-queue" / "src")
 addPathIfDir(getEnv("SHM_QUEUE_SRC"))
-# io-mon's writer now imports `shm_gset/transport` (the grow-only shared-memory
+# io-mon's writer imports `shm_gset/transport` (the grow-only shared-memory
 # set that backs io-mon's Linux dependency-capture channel), in addition to
-# `shm_queue`. Thread nim-shm-gset onto the path the same way, or the `ct`
-# compile fails with `cannot open file: shm_gset/transport`.
+# `shm_queue`. Thread nim-shm-gset onto the path the same way, or any module
+# that imports io-mon's capture half (`io_mon/writer`, `io_mon/fs_snoop`, the
+# `io_mon` umbrella) fails with `cannot open file: shm_gset/transport`. `ct`
+# itself imports only `io_mon/depfile`, whose closure reaches neither shm
+# library, which is why scripts/require-siblings.sh requires io-mon and
+# nim-stackable-hooks but leaves these two advisory.
 addPathIfDir(workspaceRoot / "nim-shm-gset" / "src")
 addPathIfDir(getEnv("SHM_GSET_SRC"))
 addPathIfDir(workspaceRoot / "nim-stackable-hooks" / "src")
