@@ -19,7 +19,11 @@
 ##   * a recorded string is drawn with its text in the values-on-lines
 ##     overlay;
 ##   * a loader that starts following at a stop asks about THAT stop, so the
-##     position a session lands on has its locals.
+##     position a session lands on has its locals;
+##   * a move keeps the values on screen until its own answer arrives, so the
+##     pane is never painted empty at a position that has values;
+##   * a click on a call-trace row jumps to that row's own tick, and a click on
+##     an event-log row jumps to that event.
 ##
 ## WHY A MOCK. As in `test_stop_loader.nim`: `MockBackendService` is the SDK's
 ## declared test transport (CodeTracer-Embed-SDK.md §3.1), and what is under
@@ -31,12 +35,12 @@
 ##   nim js -d:nodejs -r --path:src/frontend/viewmodel \
 ##     src/frontend/viewmodel/tests/unit/test_hsf_sdk_jobs.nim
 
-import std/[json, tables, unittest]
+import std/[json, options, tables, unittest]
 import isonim/core/[signals, async_compat]
 import backend/[backend_service, mock_backend]
 import session_vm
-import store/[replay_data_store, locals_answer]
-import viewmodels/[state_vm, flow_vm, value_changes]
+import store/[replay_data_store, locals_answer, types]
+import viewmodels/[state_vm, flow_vm, value_changes, calltrace_vm, event_log_vm]
 import sdk/stop_loader
 import ../../../../common/value_presentation/json_adapter
 
@@ -153,3 +157,57 @@ suite "HSF SDK jobs: the stop a session lands on":
     check mock.sent("ct/load-locals") == 1
     check loader.status[spLocals].val == plsApplied
     check session.store.locals.locals.val.len == 1
+
+suite "HSF SDK jobs: a move and its answer":
+
+  test "a move keeps the values on screen until its answer arrives":
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    session.store.moveTo(10, 1)
+    mock.expect("ct/load-locals", %*{"success": true, "body": {"locals": [
+      {"expression": "x", "value": wireInt("1")}]}})
+    let loader = createStopLoader(session, {spLocals})
+    loader.loadStop()
+    drainPlatformCallbacks()
+    check session.store.locals.locals.val.len == 1
+    mock.deferResponses = true
+    session.store.moveTo(11, 2)
+    loader.loadStop()
+    check mock.pendingDeferredCount == 1
+    check session.store.locals.locals.val.len == 1
+
+suite "HSF SDK jobs: a click on a row goes where the row says":
+
+  test "a call-trace row's click jumps to that row's own tick":
+    let mock = newMockBackendService(autoRespond = true)
+    let store = createReplayDataStore(mock.toBackendService())
+    let vm = createCalltraceVM(store)
+    let body = %*{
+      "startCallLineIndex": 0,
+      "totalCallsCount": 1,
+      "callLines": [{
+        "depth": 0,
+        "content": {"count": 0, "hiddenChildren": false, "call": {
+          "rawName": "transfer", "key": "4", "children": [],
+          "location": {"path": "/src/token.cairo", "line": 23,
+                       "rrTicks": 3426, "callstackDepth": 1}}}}]}
+    check store.applyCalltraceResponse(body) == 1
+    mock.clearReceivedCommands()
+    vm.doubleClickEntry(0)
+    let jump = mock.findCommand("ct/calltrace-jump")
+    check jump.isSome
+    check jump.isSome and jump.get.args["rrTicks"].getInt == 3426
+
+  test "an event-log row's click jumps to that event":
+    let mock = newMockBackendService(autoRespond = true)
+    let store = createReplayDataStore(mock.toBackendService())
+    let vm = createEventLogVM(store)
+    vm.appendLiveDebuggerStop(EventLogRow(
+      eventId: 512'u64, eventIndex: 0, kindId: 1, kind: "Write",
+      file: "token.cairo", line: 91, value: "storage write",
+      rrTicks: 512'u64, maxRRTicks: 4096'u64))
+    mock.clearReceivedCommands()
+    vm.doubleClickRow(0)
+    let jump = mock.findCommand("ct/event-jump")
+    check jump.isSome
+    check jump.isSome and jump.get.args["directLocationRRTicks"].getBiggestInt == 512

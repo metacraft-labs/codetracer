@@ -33,6 +33,9 @@ ONE ARM PER CLAIM, each naming the case that must die:
   | VD1 | "changed" is taken from the selection, not from the values | "the changed mark follows the value, not the selection" |
   | VD2 | every value present at the anchor is marked changed | "an unchanged value is not marked changed" |
   | VD3 | a name new in scope is recorded as modified, not added | "a name new in scope is recorded as added, not modified" |
+  | FL2 | a move empties the values before its answer arrives | "a move keeps the values on screen until its answer arrives" |
+  | G   | a call-trace row's click seeks one tick past the row | "a call-trace row's click jumps to that row's own tick" |
+  | H   | an event-log row's click seeks nowhere | "an event-log row's click jumps to that event" |
 
 VD3 GUARDS THE MODEL, NOT THE DRAWING. Every front-end draws an added binding
 and a modified one alike, in the changed-value style
@@ -83,6 +86,8 @@ FLOWVM = "src/frontend/viewmodel/viewmodels/flow_vm.nim"
 ADAPTER = "src/common/value_presentation/json_adapter.nim"
 CHANGES = "src/frontend/viewmodel/viewmodels/value_changes.nim"
 STATEVM = "src/frontend/viewmodel/viewmodels/state_vm.nim"
+CALLTRACEVM = "src/frontend/viewmodel/viewmodels/calltrace_vm.nim"
+EVENTLOGVM = "src/frontend/viewmodel/viewmodels/event_log_vm.nim"
 
 # The suites that grade them.
 T_LOADER = "src/frontend/viewmodel/tests/unit/test_stop_loader.nim"
@@ -90,7 +95,8 @@ T_JOBS = "src/frontend/viewmodel/tests/unit/test_hsf_sdk_jobs.nim"
 SUITES = [T_LOADER, T_JOBS]
 BACKENDS = ["c", "js"]
 
-TOUCHED = [STOPLOADER, FLOWVM, ADAPTER, CHANGES, STATEVM, T_LOADER, T_JOBS]
+TOUCHED = [STOPLOADER, FLOWVM, ADAPTER, CHANGES, STATEVM, CALLTRACEVM,
+           EVENTLOGVM, T_LOADER, T_JOBS]
 CONTROL_HASHES = HERE / "hsf-sdk-mutation-control.sha256"
 
 SUITE_TIMEOUT = 2400
@@ -108,11 +114,15 @@ K_STRING = "a recorded string is drawn with its text"
 K_SELECTION = "the changed mark follows the value, not the selection"
 K_UNCHANGED = "an unchanged value is not marked changed"
 K_ADDED = "a name new in scope is recorded as added, not modified"
+K_KEPT = "a move keeps the values on screen until its answer arrives"
+K_CALLJUMP = "a call-trace row's click jumps to that row's own tick"
+K_EVENTJUMP = "an event-log row's click jumps to that event"
 
 NAMED_CASES = {
     K_LOCALS: T_LOADER, K_FLOW: T_LOADER,
     K_LANDING: T_JOBS, K_INT: T_JOBS, K_STRING: T_JOBS,
     K_SELECTION: T_JOBS, K_UNCHANGED: T_JOBS, K_ADDED: T_JOBS,
+    K_KEPT: T_JOBS, K_CALLJUMP: T_JOBS, K_EVENTJUMP: T_JOBS,
 }
 
 BT_SELFTEST = "BlockTracer tools/journeys/selftest.mjs"
@@ -205,6 +215,39 @@ ARMS = [
         "**AN ARRIVAL IS RECORDED AS A CHANGE.** Drawn alike by design; the "
         "model's distinction is what a caller that draws them apart reads",
         "VD3/an-arrival-reads-as-a-change",
+    ),
+]
+
+ARMS += [
+    Arm(
+        "FL2", STOPLOADER,
+        "  store.locals.loadingState.val = lsLoading\n",
+        "  store.locals.loadingState.val = lsLoading\n"
+        "  store.locals.locals.val = @[]\n",
+        K_KEPT,
+        "**A MOVE EMPTIES THE VALUES BEFORE ITS ANSWER.** Between the move and "
+        "the engine's reply the pane shows nothing, at a position that has "
+        "values — the frame the host's journey samples for",
+        "FL2/the-panes-move-before-the-values-arrive",
+    ),
+    Arm(
+        "G", CALLTRACEVM,
+        "      calltraceJumpArgs(line.location, line.rrTicks, line.codeGeneration))",
+        "      calltraceJumpArgs(line.location, line.rrTicks + 1, line.codeGeneration))",
+        K_CALLJUMP,
+        "**THE CALL-TRACE SEEK LANDS ONE TICK PAST THE ROW.** The click still "
+        "moves the session, so the move looks like it worked; it is at the "
+        "wrong step",
+        "G/the-seek-lands-somewhere-else",
+    ),
+    Arm(
+        "H", EVENTLOGVM,
+        "    if event.noPosition:\n      return\n",
+        "    if true:\n      return\n",
+        K_EVENTJUMP,
+        "**AN EVENT-LOG ROW'S CLICK SEEKS NOWHERE.** The row is selected and "
+        "the session stays where it was",
+        "H/the-event-log-rows-are-not-bound",
     ),
 ]
 
