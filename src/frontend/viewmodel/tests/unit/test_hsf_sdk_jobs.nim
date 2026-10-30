@@ -23,7 +23,9 @@
 ##   * a move keeps the values on screen until its own answer arrives, so the
 ##     pane is never painted empty at a position that has values;
 ##   * a click on a call-trace row jumps to that row's own tick, and a click on
-##     an event-log row jumps to that event.
+##     an event-log row jumps to that event;
+##   * every call-trace row carries the call identity the engine gave it, so no
+##     two frames answer to one identity (a link to a frame names one row).
 ##
 ## WHY A MOCK. As in `test_stop_loader.nim`: `MockBackendService` is the SDK's
 ## declared test transport (CodeTracer-Embed-SDK.md §3.1), and what is under
@@ -211,3 +213,20 @@ suite "HSF SDK jobs: a click on a row goes where the row says":
     let jump = mock.findCommand("ct/event-jump")
     check jump.isSome
     check jump.isSome and jump.get.args["directLocationRRTicks"].getBiggestInt == 512
+
+suite "HSF SDK jobs: a call-trace row's identity":
+
+  test "every call-trace row carries its own call key":
+    let mock = newMockBackendService(autoRespond = true)
+    let store = createReplayDataStore(mock.toBackendService())
+    proc call(name, key: string; ticks: int): JsonNode =
+      %*{"depth": 0, "content": {"count": 0, "hiddenChildren": false, "call": {
+        "rawName": name, "key": key, "children": [],
+        "location": {"path": "/src/token.cairo", "line": 23, "rrTicks": ticks,
+                     "callstackDepth": 1}}}}
+    let body = %*{"startCallLineIndex": 0, "totalCallsCount": 2,
+                  "callLines": [call("transfer", "4", 100), call("transfer", "9", 200)]}
+    check store.applyCalltraceResponse(body) == 2
+    let lines = store.calltrace.lines.val
+    check lines.len == 2
+    check lines.len == 2 and lines[0].callKey == "4" and lines[1].callKey == "9"
