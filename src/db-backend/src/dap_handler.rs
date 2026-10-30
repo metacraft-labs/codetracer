@@ -1211,11 +1211,22 @@ impl Handler {
             .unwrap_or(false))
     }
 
-    fn skip_internal_jit_registration_stops(&mut self) -> Result<(), Box<dyn Error>> {
+    /// On a live session, continue past the internal JIT debug-symbol
+    /// registration stops a step can land on (at most eight).
+    ///
+    /// The step before this has already moved the replay, and so has every
+    /// `Continue` here that succeeded. When one of these calls fails, the
+    /// stop the replay was left at is reported before the failure is
+    /// returned (see [`Self::report_stop_after_failed_move`]).
+    fn skip_internal_jit_registration_stops(&mut self, sender: &Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         if !self.is_live_recreator_session() {
             return Ok(());
         }
+        self.continue_past_internal_jit_registration_stops()
+            .map_err(|failure| self.report_stop_after_failed_move(failure, sender.clone()))
+    }
 
+    fn continue_past_internal_jit_registration_stops(&mut self) -> Result<(), Box<dyn Error>> {
         for _ in 0..8 {
             if !self.is_internal_jit_registration_stop()? {
                 return Ok(());
@@ -1980,7 +1991,7 @@ impl Handler {
                 self.next(forward)?;
             }
         }
-        self.skip_internal_jit_registration_stops()?;
+        self.skip_internal_jit_registration_stops(&sender)?;
         // Surface the post-step location (mirrors `step()`'s
         // `complete_move(false, ...)` call so DAP clients receive the
         // ct/complete-move event the GUI listens on).
@@ -2482,7 +2493,7 @@ impl Handler {
                 self.step_out(true)?;
             }
         }
-        self.skip_internal_jit_registration_stops()?;
+        self.skip_internal_jit_registration_stops(&sender)?;
         // Surface the post-step location (mirrors M3 / M7's contract).
         self.complete_move(false, sender.clone())?;
 
@@ -2545,7 +2556,7 @@ impl Handler {
             Action::Continue => self.step_continue(!arg.reverse, sender.clone())?,
             _ => error!("action {:?} not implemented", arg.action),
         }
-        self.skip_internal_jit_registration_stops()?;
+        self.skip_internal_jit_registration_stops(&sender)?;
         if arg.complete {
             // && arg.action != Action::Continue {
             self.complete_move(false, sender.clone())?;
@@ -3448,22 +3459,8 @@ impl Handler {
                     // that it cannot serve the row (it returns to where it
                     // was when it can, and says so). Report where the
                     // session is, then the refusal, so the client never shows
-                    // a position the session has left. A failure to report
-                    // it is added to the refusal, never put in its place.
-                    let reported = self
-                        .replay
-                        .load_location(&mut self.expr_loader)
-                        .map(|_| ())
-                        .and_then(|()| {
-                            self.step_id = self.replay.current_step_id();
-                            self.complete_move(false, sender.clone())
-                        });
-                    return Err(match reported {
-                        Ok(()) => refusal,
-                        Err(report) => {
-                            format!("{refusal}; and where the session is now could not be reported: {report}").into()
-                        }
-                    });
+                    // a position the session has left.
+                    return Err(self.report_stop_after_failed_move(refusal, sender));
                 }
                 let _ = self.replay.load_location(&mut self.expr_loader)?;
                 self.step_id = self.replay.current_step_id();
@@ -5079,14 +5076,19 @@ impl Handler {
             // A failed move is reported below rather than returned, so the
             // bracket's `moves` hand it back as a value; only opening or
             // closing the bracket fails the request, and the bracket is
-            // closed again on every one of those paths.
-            let moves = self.with_run_to_line_bracket(
+            // closed again on every one of those paths. Closing can fail
+            // after the moves have run, so that failure reports where they
+            // left the replay too.
+            let moves = match self.with_run_to_line_bracket(
                 &source_location.path,
                 source_location.line as i64,
                 source_location.column,
                 source_location.condition.clone(),
                 |handler| Ok(handler.source_line_jump_moves_for_rr(&source_location)),
-            )?;
+            ) {
+                Ok(moves) => moves,
+                Err(failure) => return Err(self.report_stop_after_failed_move(failure, sender)),
+            };
 
             let mut move_error = false;
             if let Err(e) = moves {
@@ -6343,15 +6345,20 @@ impl Handler {
         } else {
             // The moves run inside a run-to-line bracket, which is closed
             // again however they end: a `Continue` that fails part-way must
-            // not leave the user's breakpoints disabled.
-            self.with_run_to_line_bracket(&arg.path, arg.first_loop_line + 1, None, None, |handler| {
-                handler.local_step_jump_moves_for_rr(&arg)
-            })?;
+            // not leave the user's breakpoints disabled. The `Continue`s
+            // before it have moved the replay all the same, so a failure
+            // reports where they left it before the request fails.
+            if let Err(failure) =
+                self.with_run_to_line_bracket(&arg.path, arg.first_loop_line + 1, None, None, |handler| {
+                    handler.local_step_jump_moves_for_rr(&arg)
+                })
+            {
+                return Err(self.report_stop_after_failed_move(failure, sender));
+            }
 
             self.step_id = self.replay.current_step_id();
 
             self.complete_move(false, sender.clone())?;
-            // warn!("local_step_jump not implemented for RR traces");
         }
         self.respond_dap(req, serde_json::json!({}), sender)
     }
@@ -6385,6 +6392,28 @@ impl Handler {
             self.replay.step(Action::Continue, false)?;
         }
         Ok(())
+    }
+
+    /// Report where a request that failed part-way left the replay, and hand
+    /// back its failure for the `success: false` answer.
+    ///
+    /// A request that moves the replay several times in a row (the
+    /// `Continue`s of a run-to-line bracket, the `Continue`s a live session
+    /// makes past the JIT registration stop after a step) does not move it
+    /// back when one of them fails: the moves before it have run. The
+    /// handler's step is brought up to the replay's real position and that
+    /// stop is sent as `stopped` / `ct/complete-move`, so the client shows
+    /// the position the next move starts from (DAP-extensions spec, "Every
+    /// request is answered", "The handler returns an error"). A failure to
+    /// report it is appended to `failure`, never put in its place.
+    fn report_stop_after_failed_move(&mut self, failure: Box<dyn Error>, sender: Sender<DapMessage>) -> Box<dyn Error> {
+        // `complete_move` sets the step again once it has the location; this
+        // one keeps the step current when loading the location fails.
+        self.step_id = self.replay.current_step_id();
+        match self.complete_move(false, sender) {
+            Ok(()) => failure,
+            Err(report) => format!("{failure}; and where the session is now could not be reported: {report}").into(),
+        }
     }
 
     /// Run `moves` inside a *run-to-line bracket*: the user's breakpoints
