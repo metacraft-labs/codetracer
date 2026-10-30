@@ -24,7 +24,8 @@ The builds run `$PLAT58_BUILD_TUI` / `$PLAT58_BUILD_GPUI` /
 `$PLAT58_BUILD_DESKTOP` when set, else `just build-tui` / `just build-gpui` /
 `just build-once`. The desktop's arms are graded by the Electron capture
 (`scripts/plat58-capture-electron.sh`, or `$PLAT58_DESKTOP_TEST`; a DISPLAY or
-Xvfb is needed), whose answers file is restored after every run. The engine's arm is graded by its Rust
+Xvfb is needed), whose answers file is restored after every run, and D2 also
+by the double-click regression spec (`just test-e2e`). The engine's arm is graded by its Rust
 suite, run by `$PLAT58_CARGO_TEST` when set, else `cargo test --test
 seek_to_geid_materialized_test` in `src/db-backend`. The Nim suites run a real
 `replay-server` (`REPLAY_SERVER_BIN`) on the RS-M4 demo container.
@@ -79,12 +80,13 @@ PTY = "src/frontend/tui/tests/real_terminal/test_plat58_requests_pty.nim"
 PLAN = "src/frontend/gpui/tests/test_plat58_gpui_requests.nim"
 RUST = "src/db-backend/tests/seek_to_geid_materialized_test.rs"
 SPEC = "src/tests/gui/tests/request-panel/plat58-requests-capture.spec.ts"
+DBL = "src/tests/gui/tests/request-panel/request-detail-double-click.spec.ts"
 ANSWERS = "src/tests/visual/answers/plat58-requests.electron.json"
 
 SUBJECTS = [VM, FIT, STORE, ENGINE, TUI_PANE, RUNTIME, MOTIONS, SHELL,
             PROFILE, SESSION, TUI_MAIN, GPUI_LEAF, GPUI_MAIN, VOCAB,
             DESKTOP_VIEW]
-SUITES = [VMU, TBL, PTY, PLAN, RUST, SPEC, ANSWERS]
+SUITES = [VMU, TBL, PTY, PLAN, RUST, SPEC, DBL, ANSWERS]
 
 # (id, [(subject, find, replace), ...], [(suite, filter), ...], what it breaks)
 ARMS = [
@@ -256,9 +258,13 @@ ARMS = [
              "        handler: rowMenuHandler(vm, index, rmClearFilters))")],
      [(SPEC, None)],
      "N.5: every entry of the desktop's row menu runs Clear Filters"),
-    ("D2", [(DESKTOP_VIEW, "    if vm.pressRow(captured, int64(epochTime() * 1000)) == rpActivate:",
-             "    if false:")],
-     [(SPEC, None)],
+    ("D2", [(DESKTOP_VIEW, "  if vm.pressRow(index, int64(epochTime() * 1000)) == rpActivate:",
+             "  if false:")],
+     # The capture's double click is a real `dblclick`, which the row's own
+     # handler also answers, so it no longer sees the press rule alone. The
+     # regression spec's second press lands after the detail has moved the
+     # row: only the press rule can carry it to the handler.
+     [(SPEC, None), (DBL, None)],
      "N.4: two presses on a desktop row do not go to its handler"),
     # ---- the declared survivor ----------------------------------------------------
     ("S9", [(TUI_PANE, "  IdFloorCells = 2", "  IdFloorCells = 1")],
@@ -277,7 +283,7 @@ IN_GPUI = {VM, FIT, STORE, GPUI_LEAF, GPUI_MAIN, VOCAB}
 PTY_SUITES = {PTY}
 GPUI_SUITES = {PLAN}
 RUST_SUITES = {RUST}
-DESKTOP_SUITES = {SPEC}
+DESKTOP_SUITES = {SPEC, DBL}
 IN_DESKTOP = {VM, STORE, DESKTOP_VIEW}
   # Subjects compiled into the desktop's bundle.
 
@@ -414,12 +420,17 @@ def run_rust(suite):
 
 
 def run_spec(suite):
-    """The Electron capture: GREEN on rc 0, else RED on its first expectation.
-    It rewrites the answers file the native suites read, so the file is put
-    back whatever the run did."""
-    cmd = os.environ.get("PLAT58_DESKTOP_TEST")
-    argv = ["bash", "-c", cmd] if cmd else \
-        ["bash", "scripts/plat58-capture-electron.sh"]
+    """A desktop suite in the real Electron app: GREEN on rc 0, else RED on
+    its first expectation. The capture (SPEC) rewrites the answers file the
+    native suites read, so the file is put back whatever the run did; the
+    double-click regression (DBL) writes its own container."""
+    cmd = os.environ.get("PLAT58_DESKTOP_TEST") if suite == SPEC else None
+    if cmd:
+        argv = ["bash", "-c", cmd]
+    elif suite == SPEC:
+        argv = ["bash", "scripts/plat58-capture-electron.sh"]
+    else:
+        argv = ["just", "test-e2e", suite.split("src/tests/gui/", 1)[1]]
     saved = path_of(ANSWERS).read_bytes()
     try:
         p = subprocess.run(argv, cwd=REPO, capture_output=True, text=True,

@@ -1,6 +1,6 @@
 {
   "D1": "Error: expect(locator).toHaveCount(expected) failed / Expected: 1",
-  "D2": "Error: expect(received).not.toBe(expected) // Object.is equality / Expected: not 6",
+  "D2": "Error: locator.evaluate: TypeError: Cannot read properties of null (reading 'getBoundingClientRect') / Error: expect(locator).toBeVisible() failed",
   "E1": "thread 'seek_to_geid_goes_to_the_named_step_of_a_materialized_trace' (2231290) panicked at tests/seek_to_geid_materialized_test.rs",
   "F1": "f.widths[2] == 80 - (2 + 6 + 6 + 8 + 6) - 5",
   "F2": "shrink.widths[2] == 50 - 28 - 5",
