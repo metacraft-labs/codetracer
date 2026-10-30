@@ -381,7 +381,9 @@ suite "CTUI-9: the modal state machine decides every event":
     # anything.
     ck table.prefixChords(mmCommand).len == 0
     ck table.prefixChords(mmSearch).len == 0
-    ck table.prefixChords(mmInspect).len == 0
+    # INSPECT's one: `g`, since PLAT-70 Part E's `g o` (Show Value Origin, in
+    # the Variables pane).
+    ck table.prefixChords(mmInspect) == @["g"]
 
     var state = initModalState(mmNormal)
     # `g` alone is PENDING and says so on screen.
@@ -555,7 +557,7 @@ suite "CTUI-9: the modal state machine decides every event":
     # PRE-EXISTING: this gate is CTUI-9's and predates PLAT-12, which touched
     # neither this file nor `resolve`.
     ck worstNs < 2_000_000
-    # THE NON-VACUITY FLOOR: 102 bindings x 13 tokens = 1326. A sweep that
+    # THE NON-VACUITY FLOOR: 106 bindings x 13 tokens = 1378. A sweep that
     # measured nothing would satisfy the gate above trivially.
     #
     # 1105 UNTIL PLAT-16 ADDED ONE BINDING (`Ctrl+F5`, the product-mode
@@ -565,14 +567,15 @@ suite "CTUI-9: the modal state machine decides every event":
     # shared jump history added TWO (`Alt+Left`, `Alt+Right`), 1235 until
     # PLAT-70 added FIVE (the output panes' `z h`, `z l`, `z H`, `z L`, `0`),
     # 1300 until the table panes' Show Detail added TWO (`Shift+K` under the
-    # Vim and Kakoune modes, Horizontal-Overflow.md §5.3).
+    # Vim and Kakoune modes, Horizontal-Overflow.md §5.3), 1326 until PLAT-70
+    # Part E added FOUR (`g o` and `Menu` in NORMAL and INSPECT).
     # The literal
     # moves with `ExpectedBindingCount` in `test_keymap_no_conflicts.nim`,
     # and it is still written as a literal BESIDE the computed form rather
     # than replacing it: the line above is satisfied by any binding count,
     # and this one is what notices that the count changed.
     ck dispatches == table.bindings.len * 13
-    ck dispatches == 1326
+    ck dispatches == 1378
 
   test "assertion count":
     echo "CHECKS: " & $countedAssertions

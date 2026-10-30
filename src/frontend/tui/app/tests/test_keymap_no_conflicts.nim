@@ -63,7 +63,9 @@ import ./navigation_table
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 329
+const ExpectedAssertions = 335
+  ## PLAT-70 Part E: +6 — `g o` and `Menu` in NORMAL and INSPECT (their four
+  ## reachability checks), and `CSI 29 ~` / `CSI 57363 u` decoded to `Menu`.
   ## PLAT-70 Part B: +3 — `Shift+K` (`list.show-detail`) in NORMAL and
   ## INSPECT (their two reachability checks), and `K` decoded.
   ## PLAT-70 Part A: +8 — five output-pane view bindings (`z h`, `z l`, `z H`,
@@ -104,7 +106,7 @@ const
     ## that a parser which silently stopped at the first odd row — or a table
     ## that lost a row — is red here rather than quietly checking less.
 
-  ExpectedBindingCount = 102
+  ExpectedBindingCount = 106
     ## Every binding in `defaultKeymap()`, across all four modes. The
     ## NON-VACUITY FLOOR: every "for every binding …" sweep below is satisfied
     ## for free by an empty table, and this is the one assertion that is not.
@@ -131,6 +133,10 @@ const
     ## 102 SINCE PLAT-70 Part B: `Shift+K` (`list.show-detail`) in NORMAL and
     ## INSPECT — an operation of the shared Vim base with no terminal
     ## `KeyAction`, like Part A's output-pane view rows (100), so not a §4.2 row.
+    ##
+    ## 106 SINCE PLAT-70 Part E: `g o` (`variables.show-value-origin`) and
+    ## `Menu` (`context-menu.open`) in NORMAL and INSPECT — shared-base
+    ## operations with no terminal `KeyAction`, like `Shift+K`.
 
   # Real xterm byte sequences, and the canonical name each must decode to.
   # This list is the "reachability" oracle of check 4, and it is written from
@@ -177,6 +183,9 @@ const
     # (ctlseqs, "PC-Style Function Keys"), Alt is `1 + 2 = 3`.
     ("\x1b[1;3D", "Alt+Left"), ("\x1b[1;3C", "Alt+Right"),
     ("\x1b[17~", "F6"), ("\x1b[17;2~", "Shift+F6"),
+    # PLAT-70 Part E: the application (context-menu) key — xterm's
+    # `CSI 29 ~` and the Kitty protocol's `CSI 57363 u`.
+    ("\x1b[29~", "Menu"), ("\x1b[57363u", "Menu"),
     ("\x1b[112;6u", "Ctrl+Shift+p"),
   ]
 
@@ -490,7 +499,7 @@ suite "CTUI-9: the keymap is §4.2, and it has no conflicts":
       if got notin names:
         names.add got
     ck decoded == KeyBytes.len
-    ck decoded == 77
+    ck decoded == 79
 
     var unreachable: seq[string] = @[]
     var chordsChecked = 0
@@ -509,12 +518,13 @@ suite "CTUI-9: the keymap is §4.2, and it has no conflicts":
     # two-chord bindings §4.2 has: `Ctrl+w` h/j/k/l, `rf`, `rc` and `g` `g` —
     # and the TWO §3.3.1 adds, `g t` and `g T`: nine — and the FOUR the output
     # panes' view adds (Horizontal-Overflow.md §4.4), `z h` / `z l` / `z H` /
-    # `z L`: thirteen.
+    # `z L`: thirteen; PLAT-70 Part E's `g o` (Show Value Origin, in the
+    # Variables pane) in NORMAL and INSPECT: fifteen.
     var twoChord = 0
     for bnd in km.bindings:
       if bnd.chords.len == 2:
         inc twoChord
-    ck twoChord == 13
+    ck twoChord == 15
     ck chordsChecked == ExpectedBindingCount + twoChord
 
     # …and the decoder REFUSES what is not a key, so "every chord decodes" is

@@ -81,7 +81,7 @@ const
     "Esc", "Enter", "Tab", "Backspace", "Delete", "Insert", "Space",
     "Home", "End", "PageUp", "PageDown", "Up", "Down", "Left", "Right",
     "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11",
-    "F12", "Alt"]
+    "F12", "Alt", "Menu"]
     ## Every canonical non-character key name. Closed: `normalizeChord`
     ## refuses anything that is neither one of these nor one printable
     ## character.
@@ -90,6 +90,11 @@ const
     ## "Alt focuses the menu bar" gesture (CUA-Keymap.md §3.8). A front-end
     ## that can see a modifier on its own (the desktop's keydown / keyup, GPUI's
     ## modifier changes) delivers it; a terminal cannot, and never does.
+    ##
+    ## `Menu` is the application (context-menu) key — VS Code's and
+    ## Windows's context-menu key, `KeyboardEvent.key` `ContextMenu`; xterm
+    ## sends `CSI 29 ~` and the Kitty protocol `CSI 57363 u` (PLAT-70 Part E,
+    ## Variable-State-Pane.md § Value origin from the keyboard).
 
   KeyAliases = {
     "escape": "Esc", "esc": "Esc", "return": "Enter", "enter": "Enter",
@@ -100,7 +105,8 @@ const
     "pgdn": "PageDown", "up": "Up", "uparrow": "Up", "down": "Down",
     "downarrow": "Down", "left": "Left", "leftarrow": "Left",
     "right": "Right", "rightarrow": "Right", "backquote": "`",
-    "alt": "Alt"}.toTable
+    "alt": "Alt", "menu": "Menu", "contextmenu": "Menu", "apps": "Menu",
+    "application": "Menu"}.toTable
     ## Spellings `normalizeChord` accepts for a key, lower-cased: this
     ## product's own, VS Code's (`escape`, `pageup`), and GPUI's.
 
@@ -297,6 +303,7 @@ func codepointKey(code: int): string =
   of 27: "Esc"
   of 8, 127: "Backspace"
   of 32: "Space"
+  of 57363: "Menu"          # the Kitty protocol's application key
   of 33 .. 126: $chr(code)
   else: ""
 
@@ -403,6 +410,7 @@ func csiKey(params: string; final: char): DecodedKey =
               of 21: "F10"
               of 23: "F11"
               of 24: "F12"
+              of 29: "Menu"     # xterm's application (context-menu) key
               else: ""
     if key.len == 0: return NoKey
     if parts.len == 1: return decoded({}, key)
@@ -481,7 +489,7 @@ func legacyTokens(): seq[string] =
   for f in "ABCDHFPQRSZ":
     for m in mods: result.add "\x1b[" & m & $f
   for code in [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 17, 18, 19, 20,
-               21, 23, 24]:
+               21, 23, 24, 29]:
     result.add "\x1b[" & $code & "~"
     for m in 2 .. 16: result.add "\x1b[" & $code & ";" & $m & "~"
 

@@ -31,11 +31,14 @@ const
     "f7": "F7", "f8": "F8", "f9": "F9", "f10": "F10", "f11": "F11",
     "f12": "F12",
     "alt": "Alt",
+    "menu": "Menu", "contextmenu": "Menu", "apps": "Menu",
   }.toTable
     ## GPUI's names for the non-printable keys, as `keystroke.key` spells
     ## them. `alt` is never a keystroke — GPUI reports a modifier alone as a
     ## modifier change — and is the name the window gives `Alt` pressed and
-    ## released alone (`alt_tap`, CUA-Keymap.md §3.8).
+    ## released alone (`alt_tap`, CUA-Keymap.md §3.8). `menu` is the
+    ## application (context-menu) key (PLAT-70 Part E); the other two are
+    ## the spellings other platform layers give it.
 
 func keyModifiersOfGpui*(modifiers: openArray[string]): KeyModifiers =
   ## GPUI's modifier names as this product's set (`platform` is Meta).

@@ -1585,20 +1585,6 @@ proc loadValueOrigin*(s: HeadlessDebugSession; expression: string;
                                           expression))
   parseOriginChain(resp.getOrDefault("body"))
 
-func originHopLines*(chain: OriginChain): seq[string] =
-  ## The chain's hops, one line each — `tick N  kind  target <- source
-  ## file:line`, the desktop's origin panel's row — skipping a hop that names
-  ## no recorded step.
-  for hop in chain.hops:
-    if hop.location.path.len == 0 and hop.location.rrTicks == 0'u64:
-      continue
-    var file = hop.location.path
-    let slash = file.rfind('/')
-    if slash >= 0: file = file[slash + 1 .. ^1]
-    result.add "tick " & $hop.location.rrTicks & "  " & $hop.kind & "  " &
-               hop.targetExpr & " <- " & hop.sourceExpr.strip() & "  " &
-               file & ":" & $hop.location.line
-
 proc addToScratchpad*(s: HeadlessDebugSession; expression, value: string) =
   ## PLAT-50: pin `expression = value` to the scratchpad — the desktop's
   ## "Add value to scratchpad" on a call-trace argument

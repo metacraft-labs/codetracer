@@ -67,7 +67,7 @@ const
                  "3.9", "4"]
   EmacsSections = ["3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "3.8",
                    "3.9", "3.10", "3.11", "3.12"]
-  ExpectedCuaTuples = 315
+  ExpectedCuaTuples = 318
     ## The binding tuples CUA-Keymap.md §3.1 – §3.9 and §4 publish (their
     ## legacy fallbacks are §3.10's), counted from the document on 2026-10-12
     ## (293, then +10 for §3.8's program-menu rows: `Alt`, `` Alt+` ``, `F10`
@@ -80,8 +80,10 @@ const
     ## `Right` on the output panes, `view.scroll-left` / `-right`, PLAT-70;
     ## +1 for §3.6's `Ctrl+K Ctrl+I`, `list.show-detail`, PLAT-70 Part B;
     ## +1 for §3.6's `Ctrl+Enter`, `list.activate-redirected`,
-    ## Test-Results-Pane.md §9.3).
-  ExpectedEmacsTuples = 190
+    ## Test-Results-Pane.md §9.3; +3 for PLAT-70 Part E: §3.8's `Menu` and
+    ## `Ctrl+K Shift+F10` → `context-menu.open`, §4's `Ctrl+Shift+O` →
+    ## `variables.show-value-origin`).
+  ExpectedEmacsTuples = 192
     ## 188 until PLAT-70 Part C moved isearch's `Ctrl+W` (§3.9) and `Alt+S .`
     ## (§3.6) into the oracle (`Ctrl+G` and `Enter` changed operation only).
     ## Emacs-Keymap.md §3.1 – §3.12's (+1: `` Alt+` ``, `tmm-menubar`; +1:
@@ -89,7 +91,9 @@ const
     ## +2: §3.6's `Alt+G N` / `Alt+G P`, `next-error` / `previous-error`;
     ## +3: §3.6's `Alt+C` / `Alt+W` / `Alt+R` in Find in Files' field; +2:
     ## §3.7's `Ctrl+X <` / `Ctrl+X >` on the output panes, PLAT-70; +1:
-    ## §3.12's `Ctrl+H .`, `list.show-detail`, PLAT-70 Part B).
+    ## §3.12's `Ctrl+H .`, `list.show-detail`, PLAT-70 Part B; +2: PLAT-70
+    ## Part E's §3.6 `Menu` → `palette.open-commands` and §3.8 `Ctrl+Shift+O`
+    ## → `variables.show-value-origin`).
 
 type
   Tuple = object

@@ -435,6 +435,14 @@ const
     BaseRow(chords: "Escape", operation: "context-menu.close", table: ContextMenuTable),
     BaseRow(chords: "Shift+F10", operation: "context-menu.open", whenText: "productMode == edit",
             table: G),
+    # PLAT-70 Part E (Variable-State-Pane.md § Value origin from the
+    # keyboard): the application key opens the focused element's menu in
+    # every mode, and `Ctrl+K Shift+F10` is the Debug-mode chord for a
+    # terminal that does not deliver it (`Shift+F10` is reverse step over
+    # there, §4).
+    BaseRow(chords: "Menu", operation: "context-menu.open", table: G),
+    BaseRow(chords: "Ctrl+K Shift+F10", operation: "context-menu.open", whenText: Debug,
+            table: G),
     # The program menu (CUA-Keymap.md §3.8): VS Code's Alt alone, its Alt +
     # mnemonic, and F10 where stepping does not hold it. A terminal never
     # sees Alt alone, so `` Alt+` `` (Emacs's own menu-bar chord) is the
@@ -464,6 +472,10 @@ const
             whenText: "editorFocus && editorReadOnly && " & Debug),
     BaseRow(chords: "Ctrl+Shift+O", operation: "editor.jump-to-value-origin",
             whenText: "editorFocus && " & Debug),
+    # PLAT-70 Part E: the desktop's chord, widened from the editor to the
+    # variable focused in the Variables pane — its chain opens under the row.
+    BaseRow(chords: "Ctrl+Shift+O", operation: "variables.show-value-origin",
+            whenText: Dl & " && paneKind == state", table: G),
     BaseRow(chords: "Ctrl+F8", operation: "debugger.smart-jump", whenText: "editorFocus && " & Debug),
     BaseRow(chords: "Ctrl+F10", operation: "debugger.run-to-cursor",
             whenText: "editorFocus && " & Debug),

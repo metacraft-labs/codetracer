@@ -41,6 +41,9 @@ from ../store/locals_answer import variableFromValue, presentedValueText
 import ../viewport
 export viewport
 import origin_chain_types
+import state_pane_keys
+
+export state_pane_keys
 import value_changes
 # NOTE: deliberately does NOT import `common/types`. That module *includes*
 # `common_types`, which is also included by `frontend/types.nim` under
@@ -166,12 +169,21 @@ type
       ## Variable-State-Pane.md, "Changed-value styling"; no `[MOD]` badge).
     changeTimeline*: ValueTimeline
       ## The locals observed at each stop this session saw, the diff's input.
-    originLines*: Signal[Table[string, seq[string]]]
+    originHops*: Signal[Table[string, seq[OriginHopRow]]]
       ## PLAT-51: the value-origin chains OPEN IN THE PANE, by the row's path,
-      ## one line per hop — listed under the row as the desktop's in-row
+      ## one row per hop — listed under the row as the desktop's in-row
       ## chain (`div.ct-origin-inline-chain`) is. A native host fills it
-      ## (`loadValueOrigin`) when a row's origin badge or "Show value origin"
-      ## opens it, and re-reads it at each stop.
+      ## (`loadValueOrigin` → `state_pane_keys.originHopRows`) when a row's
+      ## origin badge or "Show value origin" opens it, and re-reads it at each
+      ## stop. PLAT-70 Part E: each hop carries the tick `Enter` seeks to and
+      ## its operands.
+    selectedHop*: Signal[int]
+      ## PLAT-70 Part E: the hop of `selectedPath`'s open chain that has the
+      ## keyboard cursor, or -1 when the cursor is on the variable itself
+      ## (`state_pane_keys.StateCursor`).
+    openOperands*: Signal[HashSet[string]]
+      ## PLAT-70 Part E: the hops whose operand snapshots are shown under
+      ## them, keyed `operandKey(path, hop)`.
 
     # -- Derived state --
     currentVariables*: Memo[seq[store_types.Variable]]
@@ -887,7 +899,9 @@ proc createStateVM*(store: ReplayDataStore;
     let originMetadataMode = createSignal("unavailable")
     let lastContextMenu = createSignal(newSeq[OriginContextMenuEntry]())
     let valueChanges = createSignal(VariableDiff())
-    let originLines = createSignal(initTable[string, seq[string]]())
+    let originHops = createSignal(initTable[string, seq[OriginHopRow]]())
+    let selectedHop = createSignal(-1)
+    let openOperands = createSignal(initHashSet[string]())
 
     # Derived: THE PANE'S ONE LIST (Variable-State-Pane.md § Decisions,
     # 2026-10-24): the locals, the globals when the backend reports any, then
@@ -975,7 +989,9 @@ proc createStateVM*(store: ReplayDataStore;
       originMetadataMode: originMetadataMode,
       lastContextMenu: lastContextMenu,
       valueChanges: valueChanges,
-      originLines: originLines,
+      originHops: originHops,
+      selectedHop: selectedHop,
+      openOperands: openOperands,
       changeTimeline: initValueTimeline(),
       disposeProc: dispose,
     )

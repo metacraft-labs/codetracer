@@ -147,6 +147,10 @@ const
             whenText: "searchInputFocus", table: G),
     BaseRow(chords: "Ctrl+L", operation: "editor.center-on-pointer", whenText: "editorTextFocus"),
     BaseRow(chords: "Alt+X", operation: "palette.open-commands", table: G),
+    # GNU binds `<menu>` to `execute-extended-command` (PLAT-70 Part E): under
+    # this base the application key is `M-x`, and the context menu is the
+    # palette's Show Context Menu.
+    BaseRow(chords: "Menu", operation: "palette.open-commands", table: G),
 
     # --- §3.7 Windows, buffers and the session ---------------------------------
     BaseRow(chords: "Alt+`", operation: "menu.open", table: G),
@@ -200,6 +204,11 @@ const
     BaseRow(chords: "F5", operation: "debugger.continue", whenText: Debug, table: G),
     BaseRow(chords: "Ctrl+Shift+F5", operation: "debugger.restart", whenText: Debug, table: G),
     BaseRow(chords: "Ctrl+F5", operation: "session.toggle-product-mode", table: G),
+    # PLAT-70 Part E: the desktop's chord for the focused variable's value
+    # origin (no GNU equivalent), as this section takes the desktop's F-keys.
+    BaseRow(chords: "Ctrl+Shift+O", operation: "variables.show-value-origin",
+            whenText: "productMode == debug && listFocus && !textInputFocus && paneKind == state",
+            table: G),
 
     # --- §3.9 isearch: the find widget's layer ----------------------------------
     BaseRow(chords: "Ctrl+S", operation: "find.next", whenText: "findWidgetVisible",

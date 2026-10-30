@@ -80,6 +80,8 @@ from codetracer_embed import VariableCategory, vcLocal, vcArgument,
   vcGlobal, vcReturnValue, vcRegister, vcWatch, categoryTag
 # M71 (#838): the pane's ordinary scrollbar is the shared scrubber model.
 from codetracer_embed import ScrubberModel, scrubberModel
+from codetracer_embed import OriginHopRow, StateKeyRow, StateRowKind,
+  srkVariable, srkHop, srkOther, StateCursor, operandKey
 import ../layout/profile
 import ./styled_row
 import ./tree_node
@@ -158,6 +160,9 @@ type
       ## row: a click goes to its tick).
     vrkOrigin
       ## PLAT-51: a hop of the row above's value origin chain.
+    vrkOperand
+      ## PLAT-70 Part E: one operand snapshot (`name = value`) of the hop
+      ## above, shown by `→` on the hop (Value-Origin-Tracking.md §13.0).
     vrkAddWatch
       ## PLAT-51: the Watches group's "Add watch expression…" row.
     vrkDetail
@@ -186,7 +191,11 @@ type
     entry*: int
       ## For `vrkHistory` / `vrkOrigin`: which entry / hop, 0-based.
     ticks*: uint64
-      ## For `vrkHistory`: the tick the entry's value was recorded at.
+      ## For `vrkHistory`: the tick the entry's value was recorded at; for
+      ## `vrkOrigin`: the tick the hop's value was written at (where `Enter`
+      ## on it seeks).
+    operands*: int
+      ## For `vrkOrigin`: how many operand snapshots the hop carries.
 
   VariablesModel* = object
     ## Everything the pane shows.
@@ -226,8 +235,17 @@ type
       ## PLAT-51: the value histories OPEN in the pane, by the variable's
       ## path — each listed under its row (Variable-State-Pane.md: "The history
       ## and the origin open IN the pane, under the row").
-    origins*: Table[string, seq[string]]
-      ## PLAT-51: the origin chains open in the pane, one line per hop.
+    origins*: Table[string, seq[OriginHopRow]]
+      ## PLAT-51: the origin chains open in the pane, one row per hop
+      ## (PLAT-70 Part E: with its tick and operands, `originHopRows`).
+    selectedHop*: int
+      ## PLAT-70 Part E: the hop of `selected`'s open chain under the keyboard
+      ## cursor, or -1 when the cursor is on the variable itself
+      ## (`state_pane_keys.StateCursor`). `selected` stays the variable's
+      ## path, so `o`, the row menu and the copy keep naming the variable.
+    openOperands*: seq[string]
+      ## PLAT-70 Part E: the hops whose operands are shown
+      ## (`operandKey(path, hop)`).
     watches*: seq[string]
       ## PLAT-51: the watch expressions (`StateVM.watchExpressions`), so the
       ## watch rows carry their remove control and the group its "Add watch
@@ -380,7 +398,7 @@ proc initVariablesModel*(scopes: seq[Scope] = @[];
   VariablesModel(
     scopes: scopes, expanded: expanded, selected: selected,
     focused: (if focused.len > 0: focused else: selected),
-    scrollTop: scrollTop, pageSize: max(1, pageSize), diff: diff,
+    selectedHop: -1, scrollTop: scrollTop, pageSize: max(1, pageSize), diff: diff,
     tickLabel: tickLabel, children: children,
     held: initTable[string, seq[VarNode]](),
     totals: initTable[string, int](), populations: 0)
@@ -523,7 +541,12 @@ proc appendNodeRows(model: VariablesModel; scope: ScopeKind; path: string;
                               note: "no recorded origin", node: node)
       for i, h in hops:
         rows.add VariablesRow(kind: vrkOrigin, scope: scope, node: node,
-                              depth: depth + 1, entry: i, note: h)
+                              depth: depth + 1, entry: i, note: h.text,
+                              ticks: h.tick, operands: h.operands.len)
+        if operandKey(node.path, i) in model.openOperands:
+          for o in h.operands:
+            rows.add VariablesRow(kind: vrkOperand, scope: scope, node: node,
+                                  depth: depth + 2, entry: i, note: o)
     if open:
       model.appendNodeRows(scope, node.path, depth + 1, rows)
   let total = model.memberTotal(path)
@@ -563,6 +586,29 @@ proc paneRows*(model: VariablesModel): seq[VariablesRow] =
     # PLAT-51: the Watches group ends with its "Add watch expression…" row.
     if scope.kind == skWatches:
       result.add VariablesRow(kind: vrkAddWatch, scope: scope.kind, depth: 1)
+
+func stateKeyRows*(model: VariablesModel;
+                   rows: openArray[VariablesRow]): seq[StateKeyRow] =
+  ## PLAT-70 Part E: the pane's rows as the shared keyboard rule
+  ## (`state_pane_keys.stateKey`) reads them — the variables and the hops of
+  ## their open chains are the cursor's stops, everything else is passed over.
+  for r in rows:
+    case r.kind
+    of vrkVariable:
+      result.add StateKeyRow(kind: srkVariable, path: r.node.path, hop: -1,
+                             expandable: r.expandable, expanded: r.expanded,
+                             chainOpen: model.origins.hasKey(r.node.path))
+    of vrkOrigin:
+      result.add StateKeyRow(kind: srkHop, path: r.node.path, hop: r.entry,
+                             tick: r.ticks, hasOperands: r.operands > 0,
+                             operandsOpen: operandKey(r.node.path, r.entry) in
+                                           model.openOperands)
+    else:
+      result.add StateKeyRow(kind: srkOther, path: r.node.path, hop: -1)
+
+func cursorOf*(model: VariablesModel): StateCursor =
+  ## Where the keyboard cursor is, in the shared rule's terms.
+  StateCursor(path: model.selected, hop: model.selectedHop)
 
 proc fullValueOf*(model: VariablesModel; node: VarNode): string =
   ## PLAT-70 Part B: a variable's WHOLE value — its detail's, its tooltip's
@@ -605,6 +651,11 @@ proc rowSpecFor*(model: VariablesModel; row: VariablesRow;
                 width: width, tag: tag, tagRole: tagRole)
   of vrkOrigin:
     TreeRowSpec(kind: trkOrigin, name: row.note, depth: row.depth,
+                memberCount: -1, width: width, tag: tag, tagRole: tagRole,
+                selected: model.selected == row.node.path and
+                          model.selectedHop == row.entry)
+  of vrkOperand:
+    TreeRowSpec(kind: trkNote, name: row.note, depth: row.depth,
                 memberCount: -1, width: width, tag: tag, tagRole: tagRole)
   of vrkAddWatch:
     TreeRowSpec(kind: trkAddWatch, depth: row.depth, memberCount: -1,
@@ -614,7 +665,7 @@ proc rowSpecFor*(model: VariablesModel; row: VariablesRow;
       kind: trkVariable, name: row.node.name, typeName: row.node.typeName,
       value: row.node.value, depth: row.depth,
       expandable: row.expandable, expanded: row.expanded,
-      selected: model.selected == row.node.path,
+      selected: model.selected == row.node.path and model.selectedHop < 0,
       modified: model.diff.isModified(variablePathOf(row.node.path)),
       focused: model.focused == row.node.path,
       memberCount: row.node.memberCount, presented: row.node.presented,
@@ -1003,7 +1054,7 @@ proc paintVariables*(g: var StyledGrid; area: CellArea;
     of vrkScope: inc result.scopeRows
     of vrkVariable: inc result.variableRows
     of vrkMore: inc result.moreRows
-    of vrkNote, vrkHistory, vrkOrigin, vrkAddWatch, vrkDetail:
+    of vrkNote, vrkHistory, vrkOrigin, vrkOperand, vrkAddWatch, vrkDetail:
       inc result.noteRows
     if spec.modified:
       inc result.modifiedRows

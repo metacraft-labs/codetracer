@@ -8194,3 +8194,32 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - In an IsoNim view instantiated with BOTH MockRenderer and the web renderer,
   JS-only DOM wiring must be `when defined(js): when N is dom.Element:` —
   `vm-unit-js` instantiates the view with MockNode under `defined(js)`.
+- Variables pane from the keyboard (PLAT-70 Part E): the cursor is a
+  variable path plus a hop index (`state_pane_keys.StateCursor`); the rule
+  for every `list.*` / `variables.show-value-origin` operation is the pure
+  `stateKey(rows, cursor, op)`, which the terminal (`runtime.
+  runVariablesKeyOperation`) and GPUI (`main.runStateKey`) apply. Before
+  Part E neither native front-end moved the Variables cursor by keyboard at
+  all — `list.focus-next` in the pane fell through to `kaScrollLineDown`,
+  which only the call trace, the editor and Terminal Output took.
+- The TUI rebuilds `rt.app.variables` from `StateVM` at every stop
+  (`variablesModelFor` reads `selectedPath`), so the pane's cursor is
+  published to the StateVM (`publishSelection` + `selectedHop` +
+  `openOperands`) right before the rebuild in `tui_session.refresh`; before
+  Part E a clicked selection was silently dropped at the next stop.
+- Origin chains are stored as `OriginHopRow`s (text + seek tick + operands,
+  `originHopRows`) in `StateVM.originHops` (GPUI) and
+  `VariablesModel.origins` (terminal). `originHopLines` is gone.
+- `o` / `O`'s navigator (`OriginNavigator`, `advance` / `retreat`) moved to
+  the shared `viewmodels/origin_walk.nim`; `tui/app/origin_binding.nim`
+  re-exports it and keeps only the terminal's async query plumbing. GPUI
+  walks synchronously (`loadValueOrigin` + `adopt`).
+- `Menu` is a canonical key name (`key_names.NamedKeys`): xterm `CSI 29 ~`
+  (legacy-encodable), Kitty `CSI 57363 u`, DOM `ContextMenu`, GPUI `menu`.
+- Spec-reading suites (`test_support/spec_documents`) default to the sibling
+  `codetracer-pm`; a workspace checks the repo out as `codetracer-specs`
+  (often on an old-layout branch). `ci/lib/run-nim-test-lane.sh` now resolves
+  it (`ci/lib/spec-checkout.sh`: CT_SPECS_DIR, sibling codetracer-pm, the
+  workspace manifest's path — or a snapshot of its `origin/<branch>` when the
+  checkout lacks `spec/` — then codetracer-specs) and exports CT_SPECS_DIR,
+  failing before any compile when a spec-reading lane finds nothing.
