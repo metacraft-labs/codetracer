@@ -307,6 +307,16 @@ impl EventDb {
         if !self.trace_list.contains(&SingleTableId(0)) {
             self.trace_list.push(SingleTableId(0));
         }
+        // A sweep can run before the recorded log is loaded (the event log is
+        // loaded on demand), so its rows were stamped with an extent of 0
+        // then. They state the recording's extent like every recorded row,
+        // so they take it now.
+        let extent = self.recording_extent();
+        for table in self.single_tables.iter_mut().filter(|t| t.kind != DbEventKind::Record) {
+            for event in table.events.iter_mut() {
+                event.max_rr_ticks = extent;
+            }
+        }
         self.refresh_global();
     }
 
@@ -378,10 +388,30 @@ impl EventDb {
             bytes: 0,
             stdout: false,
             base64_encoded: false,
-            max_rr_ticks: 0,
+            // The recording's extent, as every recorded row states it (0 if
+            // the recorded log is not loaded yet; `replace_record_events`
+            // stamps it then). A row that said 0 told a reader of the log
+            // that the recording ends before the tick this very row stands on
+            // (a calc sweep's hit at tick 133 under `max_rr_ticks: 0`), and a
+            // client that takes the extent from the log's first row read 0
+            // once a sweep put its hit first.
+            max_rr_ticks: self.recording_extent(),
             source_generation: 0,
             source_digest: String::new(),
         }
+    }
+
+    /// The recording's extent as the RECORDED rows report it (`db.rs` stamps
+    /// each with the reader's last step), or 0 when none has been loaded —
+    /// the same "unknown" a client already reads from an empty log.
+    fn recording_extent(&self) -> i64 {
+        self.single_tables
+            .iter()
+            .filter(|table| table.kind == DbEventKind::Record)
+            .flat_map(|table| table.events.iter())
+            .map(|event| event.max_rr_ticks)
+            .max()
+            .unwrap_or(0)
     }
 
     pub fn register_tracepoint_results(&mut self, results: &[Stop]) {
@@ -732,6 +762,60 @@ mod tests {
             is_trace: false,
             event_slot: 0,
         }
+    }
+
+    #[test]
+    fn a_tracepoint_row_states_the_recordings_extent_as_recorded_rows_do() -> Result<(), Box<dyn std::error::Error>> {
+        let mut db = EventDb::new();
+        let mut recorded = event(EventLogKind::Write, "recorded write", 20, 10);
+        recorded.max_rr_ticks = 1314;
+        db.replace_record_events(&[recorded]);
+        db.register_tracepoint_results(&[Stop::new(
+            "src/main.nr".to_string(),
+            42,
+            vec![],
+            7,
+            0,
+            0,
+            StopType::Trace,
+        )]);
+
+        let traced: Vec<&ProgramEvent> = db
+            .single_tables
+            .iter()
+            .filter(|table| table.kind != DbEventKind::Record)
+            .flat_map(|table| table.events.iter())
+            .collect();
+        assert_eq!(traced.len(), 1);
+        assert_eq!(traced[0].kind, EventLogKind::TraceLogEvent);
+        assert_eq!(traced[0].direct_location_rr_ticks, 7);
+        assert_eq!(traced[0].max_rr_ticks, 1314);
+        Ok(())
+    }
+
+    #[test]
+    fn a_sweep_registered_before_the_log_loads_takes_the_extent_when_it_does() {
+        let mut db = EventDb::new();
+        db.register_tracepoint_results(&[Stop::new(
+            "src/main.nr".to_string(),
+            42,
+            vec![],
+            7,
+            0,
+            0,
+            StopType::Trace,
+        )]);
+        let mut recorded = event(EventLogKind::Write, "recorded write", 20, 10);
+        recorded.max_rr_ticks = 171;
+        db.replace_record_events(&[recorded]);
+        let traced: Vec<&ProgramEvent> = db
+            .single_tables
+            .iter()
+            .filter(|table| table.kind != DbEventKind::Record)
+            .flat_map(|table| table.events.iter())
+            .collect();
+        assert_eq!(traced.len(), 1);
+        assert_eq!(traced[0].max_rr_ticks, 171);
     }
 
     #[test]
