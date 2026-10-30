@@ -392,6 +392,7 @@ package codeTracer:
     "bash >=4"
     "capnp >=0"
     "cargo >=1"
+    "cargo-nextest >=0"
     "emcc >=0"
     "gcc >=10"
     "git >=2"
@@ -569,7 +570,6 @@ package codeTracer:
     # POSIX-only / Nix-only tools — guarded off the Windows branch.
     when not defined(windows):
       "attic-client >=0"
-      "cargo-nextest >=0"
       "clang >=1"
       "ctags >=0"
       "curl >=0"
