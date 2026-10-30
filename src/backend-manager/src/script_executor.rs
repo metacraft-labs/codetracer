@@ -500,12 +500,15 @@ pub enum ScriptIsolation {
     /// `ct trace` command line, which runs the user's own script).
     Unconfined { socket_path: String },
     /// Confined (`crate::script_confinement`): the script writes only
-    /// `scratch` (also its working directory, `HOME` and `TMPDIR`), gets a
-    /// cleared environment, and reaches the daemon only through `daemon`,
-    /// which it inherits as [`SCRIPT_DAEMON_FD`].
+    /// `scratch` (its `HOME` and `TMPDIR`; its working directory is set on
+    /// `scratch_dir`, the directory's descriptor, so no path is resolved
+    /// for it), gets a cleared environment, and reaches the daemon only
+    /// through `daemon`, which it inherits as [`SCRIPT_DAEMON_FD`].
     Confined {
         confinement: crate::script_confinement::Confinement,
         scratch: PathBuf,
+        #[cfg(unix)]
+        scratch_dir: std::os::fd::OwnedFd,
         #[cfg(unix)]
         daemon: std::os::fd::OwnedFd,
     },
@@ -746,6 +749,8 @@ pub async fn execute_script(
         confinement,
         scratch,
         #[cfg(unix)]
+        scratch_dir,
+        #[cfg(unix)]
         daemon,
     } = &isolation
     {
@@ -761,21 +766,27 @@ pub async fn execute_script(
                 command.env(name, value);
             }
         }
-        command
-            .env("HOME", scratch)
-            .env("TMPDIR", scratch)
-            .current_dir(scratch);
+        command.env("HOME", scratch).env("TMPDIR", scratch);
+        #[cfg(not(unix))]
+        command.current_dir(scratch);
         #[cfg(unix)]
         {
             use std::os::fd::AsRawFd;
             let daemon_fd = daemon.as_raw_fd();
+            let scratch_fd = scratch_dir.as_raw_fd();
             // The ruleset descriptor stays open: `isolation` outlives the
             // spawn below.
             let child_confinement = confinement.for_child();
             // SAFETY: runs in the child between fork and exec; it calls only
-            // dup2/fcntl and `ChildConfinement::apply`, all async-signal-safe.
+            // fchdir/dup2/fcntl and `ChildConfinement::apply`, all
+            // async-signal-safe.
             unsafe {
                 command.pre_exec(move || {
+                    // The working directory is the scratch directory's
+                    // descriptor (still open here; it closes at exec).
+                    if libc::fchdir(scratch_fd) != 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
                     if daemon_fd == SCRIPT_DAEMON_FD {
                         // dup2 onto itself keeps close-on-exec: clear it.
                         if libc::fcntl(daemon_fd, libc::F_SETFD, 0) != 0 {

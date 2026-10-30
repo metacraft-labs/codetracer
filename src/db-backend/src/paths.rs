@@ -216,13 +216,51 @@ fn socket_runtime_base_dir(fallback_tmp: &Path) -> PathBuf {
     }
     if !cfg!(target_os = "macos")
         && let Ok(xdg) = env::var("XDG_RUNTIME_DIR")
+        && let Some(base) = xdg_runtime_base(Path::new(&xdg), &|dir| accepts_writes(dir))
     {
-        let candidate = PathBuf::from(&xdg);
-        if !xdg.is_empty() && candidate.is_dir() {
-            return candidate.join("codetracer");
-        }
+        return base;
     }
     fallback_tmp.to_path_buf()
+}
+
+/// `<xdg>/codetracer` when `$XDG_RUNTIME_DIR` (`xdg`) can hold it, else
+/// `None` so the caller falls back to the per-user tmp directory.
+///
+/// The directory has to exist (as before) and also accept writes: the
+/// directory that would receive the run directories is `<xdg>/codetracer`
+/// when it already exists, else `<xdg>` itself, where it would be created.
+/// A confined process can inherit `$XDG_RUNTIME_DIR` naming a directory it
+/// sees read-only (a sandbox that bind-mounts the host's runtime directory
+/// read-only while giving the process a private writable `/tmp`). Choosing
+/// it there made every replay fail at startup with `EROFS` while a writable
+/// fallback was available. `writable` is the probe, injectable for tests.
+fn xdg_runtime_base(xdg: &Path, writable: &dyn Fn(&Path) -> bool) -> Option<PathBuf> {
+    if xdg.as_os_str().is_empty() || !xdg.is_dir() {
+        return None;
+    }
+    let base = xdg.join("codetracer");
+    let receiving = if base.is_dir() { base.as_path() } else { xdg };
+    if writable(receiving) { Some(base) } else { None }
+}
+
+/// Whether this process may create entries in `dir`: POSIX `access(2)`
+/// with `W_OK`, which also reports `EROFS` for a read-only mount
+/// (<https://pubs.opengroup.org/onlinepubs/9699919799/functions/access.html>).
+#[cfg(unix)]
+fn accepts_writes(dir: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c_path) = std::ffi::CString::new(dir.as_os_str().as_bytes()) else {
+        return false;
+    };
+    // SAFETY: `c_path` is a valid NUL-terminated string that outlives the call.
+    unsafe { libc::access(c_path.as_ptr(), libc::W_OK) == 0 }
+}
+
+/// Non-Unix hosts never reach the `$XDG_RUNTIME_DIR` branch's callers in
+/// practice; treat the directory as writable to keep the old behaviour.
+#[cfg(not(unix))]
+fn accepts_writes(_dir: &Path) -> bool {
+    true
 }
 
 /// The file name of a replay worker's socket inside its run directory.
@@ -562,6 +600,71 @@ mod tests {
         assert_eq!(
             run_dir.file_name().and_then(|n| n.to_str()),
             Some("run-01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb")
+        );
+    }
+
+    /// A runtime directory that does not accept writes is passed over, so
+    /// the caller falls back to its writable tmp directory instead of
+    /// failing every replay at startup. The probe is the real `access(2)`
+    /// against a directory made read-only on the real filesystem, so it
+    /// must run as a user other than root (root ignores the mode; the test
+    /// fails there instead of passing unchecked).
+    #[cfg(unix)]
+    #[test]
+    fn a_runtime_directory_that_refuses_writes_is_passed_over() {
+        use std::os::unix::fs::PermissionsExt;
+        // Root bypasses mode bits, so on a root run the probe below would be
+        // measured against nothing. Fail rather than pass without checking.
+        assert_ne!(
+            unsafe { libc::geteuid() },
+            0,
+            "this test needs a non-root user: root ignores the 0500 mode it relies on"
+        );
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let xdg = temp.path().join("runtime");
+        fs::create_dir(&xdg).expect("create runtime dir");
+        assert_eq!(
+            super::xdg_runtime_base(&xdg, &|dir| super::accepts_writes(dir)),
+            Some(xdg.join("codetracer")),
+            "a writable runtime directory is used"
+        );
+        fs::set_permissions(&xdg, fs::Permissions::from_mode(0o500)).expect("make it read-only");
+        let refused = super::accepts_writes(&xdg);
+        let chosen = super::xdg_runtime_base(&xdg, &|dir| super::accepts_writes(dir));
+        fs::set_permissions(&xdg, fs::Permissions::from_mode(0o700)).expect("restore");
+        assert!(!refused, "access(W_OK) must refuse a 0500 directory");
+        assert_eq!(chosen, None, "a read-only runtime directory must not be chosen");
+    }
+
+    /// The probe is asked about the directory that would receive the run
+    /// directories: `<xdg>/codetracer` once it exists, `<xdg>` before.
+    #[test]
+    fn the_runtime_directory_probe_asks_about_the_receiving_directory() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let xdg = temp.path().join("runtime");
+        fs::create_dir(&xdg).expect("create runtime dir");
+        let only_codetracer = xdg.join("codetracer");
+        let probe = |dir: &Path| dir == only_codetracer.as_path();
+        assert_eq!(
+            super::xdg_runtime_base(&xdg, &probe),
+            None,
+            "before it exists, <xdg> is asked"
+        );
+        fs::create_dir(&only_codetracer).expect("create codetracer dir");
+        assert_eq!(
+            super::xdg_runtime_base(&xdg, &probe),
+            Some(only_codetracer.clone()),
+            "once it exists, <xdg>/codetracer is asked"
+        );
+        assert_eq!(
+            super::xdg_runtime_base(Path::new(""), &|_| true),
+            None,
+            "an empty value is unset"
+        );
+        assert_eq!(
+            super::xdg_runtime_base(&temp.path().join("missing"), &|_| true),
+            None,
+            "a missing directory is not used"
         );
     }
 

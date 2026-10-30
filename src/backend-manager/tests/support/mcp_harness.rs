@@ -673,6 +673,64 @@ pub async fn start_daemon_with_env(
     replay_server: &Path,
     env: &[(&str, &OsStr)],
 ) -> (Child, PathBuf) {
+    start_daemon_configured(server, root, replay_server, env, |_| {}).await
+}
+
+/// [`start_daemon`] in a user namespace of its own that maps only this
+/// user's uid and gid, as a sandbox built on an unprivileged user namespace
+/// does: inside it every file of another user, `/` included, reads as owned
+/// by the overflow uid (`/proc/sys/kernel/overflowuid`).  The namespace is
+/// entered between fork and exec (`unshare(2)`, then the process writes its
+/// own one-line `uid_map` and `gid_map`, as an unprivileged process may).
+#[cfg(target_os = "linux")]
+#[allow(dead_code)]
+pub async fn start_daemon_in_own_user_namespace(
+    server: &Path,
+    root: &Path,
+    replay_server: &Path,
+) -> (Child, PathBuf) {
+    // SAFETY: getuid/getgid have no preconditions and cannot fail.
+    let (uid, gid) = unsafe { (libc::getuid(), libc::getgid()) };
+    // Prepared before the fork: the hook below only opens and writes.
+    let uid_map = format!("{uid} {uid} 1\n");
+    let gid_map = format!("{gid} {gid} 1\n");
+    start_daemon_configured(server, root, replay_server, &[], move |command| {
+        // SAFETY: the hook runs between fork and exec and calls only
+        // unshare/open/write/close, which are async-signal-safe.
+        unsafe {
+            command.pre_exec(move || {
+                if libc::unshare(libc::CLONE_NEWUSER) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                for (file, contents) in [
+                    (c"/proc/self/setgroups", "deny".as_bytes()),
+                    (c"/proc/self/uid_map", uid_map.as_bytes()),
+                    (c"/proc/self/gid_map", gid_map.as_bytes()),
+                ] {
+                    let fd = libc::open(file.as_ptr(), libc::O_WRONLY | libc::O_CLOEXEC);
+                    if fd < 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    let written = libc::write(fd, contents.as_ptr().cast(), contents.len());
+                    libc::close(fd);
+                    if written != contents.len() as isize {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                }
+                Ok(())
+            });
+        }
+    })
+    .await
+}
+
+async fn start_daemon_configured(
+    server: &Path,
+    root: &Path,
+    replay_server: &Path,
+    env: &[(&str, &OsStr)],
+    configure: impl FnOnce(&mut Command),
+) -> (Child, PathBuf) {
     let daemon_dir = root.join("codetracer");
     std::fs::create_dir_all(&daemon_dir).unwrap();
     let socket = daemon_dir.join(if cfg!(windows) {
@@ -681,7 +739,8 @@ pub async fn start_daemon_with_env(
         "daemon.sock"
     });
     let stderr_log = root.join("daemon.stderr");
-    let mut daemon = Command::new(server)
+    let mut command = Command::new(server);
+    command
         .args(["daemon", "start"])
         .env("TMPDIR", root)
         .env("CODETRACER_HOME", daemon_home(root))
@@ -692,9 +751,9 @@ pub async fn start_daemon_with_env(
         .envs(env.iter().map(|(k, v)| (*k, *v)))
         .stdout(Stdio::null())
         .stderr(std::fs::File::create(&stderr_log).expect("the daemon's stderr log"))
-        .kill_on_drop(true)
-        .spawn()
-        .expect("start the daemon");
+        .kill_on_drop(true);
+    configure(&mut command);
+    let mut daemon = command.spawn().expect("start the daemon");
     wait_for_daemon_socket(&mut daemon, &socket, &stderr_log).await;
     (daemon, socket)
 }

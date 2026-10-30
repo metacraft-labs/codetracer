@@ -558,3 +558,52 @@ async fn t_mcp_exec_script_refuses_a_scratch_parent_others_can_reach() {
     }
     assert_eq!(ran.as_deref().map(str::trim), Ok("ran"));
 }
+
+/// A daemon in an unprivileged user namespace that maps only this user,
+/// where `/` and every other directory not this user's read as owned by the
+/// overflow uid, as inside an agent sandbox built on such a namespace.  The
+/// scratch root is made and used through its own descriptor, so the
+/// directories above it need not be root's or this user's: the confined
+/// script runs, sees `/` owned by the overflow uid, writes its scratch
+/// directory and queries its trace.  Before the scratch root was anchored,
+/// every call there was refused ("/ ... is owned by uid 65534").
+#[tokio::test(flavor = "multi_thread")]
+async fn t_mcp_exec_script_runs_confined_where_root_reads_as_the_overflow_uid() {
+    let (_guard, root) = short_root("ct-userns-");
+    let server = server_binary();
+    let replay = replay_server_for(&server);
+    let trace_dir = simple_recording(&root);
+    let (mut daemon, socket) = start_daemon_in_own_user_namespace(&server, &root, &replay).await;
+    let mut mcp = start_mcp(&server, &root, &socket, &[]).await;
+    let overflow: u32 = std::fs::read_to_string("/proc/sys/kernel/overflowuid")
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    let script = "import os\n\
+                  with open(os.path.join(os.environ['TMPDIR'], 'w.txt'), 'w') as f:\n    f.write('x')\n\
+                  print('root-uid', os.stat('/').st_uid)\n\
+                  print('scratch', open(os.path.join(os.getcwd(), 'w.txt')).read())\n\
+                  print('files', len(trace.source_files) >= 1)\n";
+    let answer = mcp
+        .call_tool(
+            "exec_script",
+            json!({"trace_path": trace_dir, "script": script}),
+        )
+        .await;
+    mcp.stop().await;
+    shutdown_daemon(&socket, &mut daemon).await;
+    let out = answer.unwrap_or_else(|e| panic!("exec_script was refused in the namespace: {e}"));
+    assert!(
+        out.contains(&format!("root-uid {overflow}")),
+        "vacuity guard: `/` did not read as the overflow uid ({overflow}) in the namespace: {out}"
+    );
+    assert!(
+        out.contains("scratch x"),
+        "the script could not write its scratch directory: {out}"
+    );
+    assert!(
+        out.contains("files True"),
+        "the script could not query its trace: {out}"
+    );
+}

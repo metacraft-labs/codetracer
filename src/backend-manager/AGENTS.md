@@ -71,8 +71,13 @@ it inherits as descriptor 3, for its own trace's queries. Nothing it starts
 can leave its process group (`setsid` and `setpgid` are refused), which is
 killed when the call ends; it has a 4 GiB address space, 64 MiB files and no
 core file. Confinement needs Linux with Landlock ABI 3 or later and seccomp,
-and a scratch parent (`<tmp>/script-scratch`) that is the daemon user's alone;
-elsewhere the call is refused. `backend-manager trace check-confinement` says
+and a scratch root (`<tmp>/script-scratch`) that the daemon makes itself and
+accepts only as its own directory, mode 0700, not a mount point (its mount
+id, from `statx` `STATX_MNT_ID`, must equal its parent's, which refuses a bind
+mount as well as a file system mounted over it) and not FUSE; every
+scratch directory is then made, opened and removed relative to the root's
+open descriptor, so the directories above the root may belong to anyone (as
+`/` does inside an unprivileged user namespace). Elsewhere the call is refused. `backend-manager trace check-confinement` says
 which applies on this host.
 To run scripts with the server's own privileges (scripts that write files, or
 a host that cannot confine them), add `"--allow-unconfined-scripts"` to

@@ -7426,7 +7426,7 @@ impl BackendManager {
             );
         };
         #[cfg_attr(not(unix), allow(unused_mut))]
-        let mut confined_run: Option<(u64, PathBuf)> = None;
+        let mut confined_run: Option<(u64, crate::script_confinement::Scratch)> = None;
         let isolation = if unconfined {
             script_executor::ScriptIsolation::Unconfined {
                 socket_path: socket_path.clone(),
@@ -7444,17 +7444,24 @@ impl BackendManager {
                         crate::script_confinement::make_scratch(&parent)
                     })
                     .and_then(|scratch| {
-                        // The rule is bound to the directory's descriptor;
-                        // the path is kept to run in and to remove it.
+                        // The rule is bound to the directory's descriptor,
+                        // and so is the script's working directory; the
+                        // removal is relative to the scratch root's.
                         match crate::script_confinement::Confinement::prepare(&scratch) {
-                            Ok(confinement) => Ok((scratch.path, confinement)),
+                            Ok(confinement) => match scratch.dir.try_clone() {
+                                Ok(dir) => Ok((scratch, dir, confinement)),
+                                Err(e) => {
+                                    crate::script_confinement::remove_scratch(scratch);
+                                    Err(format!("cannot keep the scratch directory open: {e}"))
+                                }
+                            },
                             Err(e) => {
-                                crate::script_confinement::remove_scratch(&scratch.path);
+                                crate::script_confinement::remove_scratch(scratch);
                                 Err(e)
                             }
                         }
                     });
-                let (scratch, confinement) = match prepared {
+                let (scratch, scratch_dir, confinement) = match prepared {
                     Ok(prepared) => prepared,
                     Err(reason) => {
                         refuse(
@@ -7476,7 +7483,7 @@ impl BackendManager {
                 let (client_id, daemon) = match self.register_script_client(grant) {
                     Ok(registered) => registered,
                     Err(reason) => {
-                        crate::script_confinement::remove_scratch(&scratch);
+                        crate::script_confinement::remove_scratch(scratch);
                         refuse(
                             self,
                             format!("exec_script cannot run a confined script: {reason}"),
@@ -7484,10 +7491,12 @@ impl BackendManager {
                         return Ok(());
                     }
                 };
-                confined_run = Some((client_id, scratch.clone()));
+                let scratch_path = scratch.path.clone();
+                confined_run = Some((client_id, scratch));
                 script_executor::ScriptIsolation::Confined {
                     confinement,
-                    scratch,
+                    scratch: scratch_path,
+                    scratch_dir,
                     daemon,
                 }
             }
@@ -7567,7 +7576,7 @@ impl BackendManager {
                 if let Some(manager) = manager.upgrade() {
                     Self::remove_client(&manager, client_id).await;
                 }
-                crate::script_confinement::remove_scratch(&scratch);
+                crate::script_confinement::remove_scratch(scratch);
             }
             match outcome {
                 Ok(result) => {
