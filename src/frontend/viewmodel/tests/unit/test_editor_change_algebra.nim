@@ -117,7 +117,11 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1989
+const ExpectedAssertions = 1998
+  ## *1989 -> 1998 on 2026-10-30: `viewmodels/build_auto_reveal.nim`,
+  ## `viewmodels/build_tasks.nim` and `viewmodels/editor_diagnostics.nim` (the
+  ## build residuals) x three assertions. None calls `rebase(` or spells
+  ## `mapOver`.*
   ## *1986 -> 1989 on 2026-10-30: `backend/stderr_capture.nim` (the replay
   ## engine's diagnostics, kept off the protocol stream) x three assertions.
   ## It calls no `rebase(` and spells no `mapOver`.*
