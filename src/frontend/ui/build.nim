@@ -481,7 +481,10 @@ proc refreshBuildEditorMarks*() =
     let markers = emptyJsArray()
     let glyphs = emptyJsArray()
     var marked: seq[int]
-    for d in diags:
+    for i in 0 ..< diags.len:
+      # A copy, not `for d in diags`: the iterator yields a `lent` the `js{}`
+      # literal below cannot capture on the JS backend.
+      let d = diags[i]
       markers.pushJs js{severity: markerSeverity(d.severity),
                         message: cstring(d.message),
                         source: cstring"build",
