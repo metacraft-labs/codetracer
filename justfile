@@ -1051,7 +1051,21 @@ test-rust:
   # codetracer-observability-e2e checkout, which brings one up.
   echo "NOT RUN in this lane: mcp_dive_in_fetch_gateway_test (needs a running codetracer-ci;"
   echo "  codetracer-observability-e2e: just t_mcp_dive_in_fetch_sends_token_only_to_gateway)"
-  cargo nextest run --release --run-ignored ignored-only -E "not binary(mcp_dive_in_fetch_gateway_test) and ($bm_filter)" || \
+  # daemon_socket_peer_test's t_mcp_daemon_answers_no_peer_of_another_user
+  # needs a second user, which it reaches through `sudo -n -u nobody`; it
+  # fails, never skips, where that does not work. A lane whose host provides
+  # it declares CODETRACER_TEST_SECOND_USER=1 (ci/test/non-gui.sh, Linux leg:
+  # the self-hosted Linux runners give the job user passwordless sudo) and
+  # runs it here. Anywhere else, such as a developer host without
+  # passwordless sudo, it is excluded by name and printed as NOT RUN.
+  peer_filter='all()'
+  if [ "${CODETRACER_TEST_SECOND_USER:-}" != "1" ]; then
+    peer_filter='not (binary(daemon_socket_peer_test) and test(=t_mcp_daemon_answers_no_peer_of_another_user))'
+    echo "NOT RUN in this lane (CODETRACER_TEST_SECOND_USER is not 1): daemon_socket_peer_test"
+    echo "  t_mcp_daemon_answers_no_peer_of_another_user (needs \`sudo -n -u nobody\`; runs in"
+    echo "  codetracer.yml test-non-gui, Linux leg, where ci/test/non-gui.sh declares it)"
+  fi
+  cargo nextest run --release --run-ignored ignored-only -E "not binary(mcp_dive_in_fetch_gateway_test) and ($peer_filter) and ($bm_filter)" || \
     if [ "$?" = "4" ]; then \
       echo "  (no ignored tests in backend-manager; treating as no-op)"; \
     else \

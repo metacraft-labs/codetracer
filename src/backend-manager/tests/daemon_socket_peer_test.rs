@@ -12,8 +12,11 @@
 //! connects as `nobody` through `sudo -n -u nobody`, so it is `#[ignore]`d in
 //! the default run (which cannot switch users) and is run explicitly with
 //! `--ignored` on a host that can; it fails, never skips, when `sudo` is not
-//! available there.  Its vacuity guard is the same client run as the
-//! daemon's own user, which is answered.
+//! available there.  `just test-rust` runs it only where the lane declares
+//! `CODETRACER_TEST_SECOND_USER=1` (`ci/test/non-gui.sh` does on the Linux
+//! leg of `test-non-gui`, whose runners give the job user passwordless sudo);
+//! elsewhere it excludes it by name and prints it as NOT RUN.  Its vacuity
+//! guard is the same client run as the daemon's own user, which is answered.
 //!
 //! What is real: the daemon and the kernel's credential passing.  The
 //! client is a few lines of Python speaking the daemon's DAP framing.  No
