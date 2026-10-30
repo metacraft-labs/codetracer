@@ -1024,6 +1024,9 @@ jobs:
     # for the bootstrap, plus 25 for the cold ct-native-replay cargo build the
     # TTD tests need.
     timeout-minutes: 100
+    defaults:
+      run:
+        working-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer
     env:
       REPRO_TOOL_PROVISIONING: tarball
     steps:
@@ -1032,6 +1035,7 @@ jobs:
       # through a real git; without one it falls back to the REST API and
       # fails outright with "Input 'submodules' not supported".
       - name: Ensure Git and Git Bash are on PATH
+        working-directory: ${{ github.workspace }}
         shell: powershell
         env:
           CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
@@ -1071,6 +1075,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
+          path: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
 
@@ -1078,6 +1083,8 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@ae97e0e42475bdcad85d94871d4a7ec543d5aa16
         with:
           env-flavor: reprobuild
+          consumer-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer
+          workspace-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}
           sibling-strategy: repro-lock
           repro-version: v0.2.17
           gh-token: ${{ steps.ci_token.outputs.token }}
@@ -1105,9 +1112,9 @@ jobs:
           name: windows-env-decomposition
           include-hidden-files: true
           path: |
-            .tmp/windows-diy/windows-env-decomposition.json
-            .repro/dev-env/**/*tool-identities.inspect.json
-            .repro/build/**/*tool-identities.inspect.json
+            wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/.tmp/windows-diy/windows-env-decomposition.json
+            wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/.repro/dev-env/**/*tool-identities.inspect.json
+            wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/.repro/build/**/*tool-identities.inspect.json
           if-no-files-found: ignore
           retention-days: 30
 
@@ -1118,7 +1125,7 @@ jobs:
         run: dev-exec tree-sitter generate --abi 15 --output libs/tree-sitter-nim/src libs/tree-sitter-nim/grammar.js
 
       - name: Build db-backend
-        working-directory: src/db-backend
+        working-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/src/db-backend
         shell: bash
         # The emulator's ``syscall_replay.nim`` imports
         # ``stew/endians2`` but ``ct_emulator.nimble`` doesn't list
@@ -1128,7 +1135,7 @@ jobs:
         # vendored ``libs/nim-stew``; mirror that here so
         # build_native_api.sh's ``--path:`` flags pick it up.
         env:
-          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/libs/nim-stew/stew:${{ github.workspace }}/wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/libs/nim-stew:${{ github.workspace }}/wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/libs/nim-result
         run: dev-exec cargo build
 
       # ct-native-replay, for the Windows recorder tests: TTD (which env.ps1
@@ -1141,7 +1148,7 @@ jobs:
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: |
           set -euo pipefail
-          backend="${{ github.workspace }}/../codetracer-native-backend"
+          backend="${{ github.workspace }}/wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer-native-backend"
           cd "$backend"
           # The tests look for it under the sibling's own target/, not under a
           # runner-wide CARGO_TARGET_DIR.
@@ -1152,7 +1159,7 @@ jobs:
           fi
 
       - name: Test db-backend
-        working-directory: src/db-backend
+        working-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/src/db-backend
         shell: bash
         # build_native_api.sh has already produced the C files in
         # the Build step above; this env var only matters when
@@ -1160,7 +1167,7 @@ jobs:
         # cache doesn't trigger a re-run that then fails for the
         # same path-resolution reason.
         env:
-          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/libs/nim-stew/stew:${{ github.workspace }}/wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/libs/nim-stew:${{ github.workspace }}/wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/libs/nim-result
           # ``ctfs_trace_reader::tests::bench_new_format_startup_time``
           # asserts new-format trace startup is under 200ms.  That
           # number is calibrated for a developer workstation; GitHub-
@@ -1194,37 +1201,37 @@ jobs:
             echo "No db-backend test skipped."
           fi
       - name: Build backend-manager
-        working-directory: src/backend-manager
+        working-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/src/backend-manager
         shell: bash
         run: dev-exec cargo build
 
       - name: Build tui
-        working-directory: src/tui
+        working-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/src/tui
         shell: bash
         run: dev-exec cargo build
 
       - name: Clippy db-backend
-        working-directory: src/db-backend
+        working-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/src/db-backend
         shell: bash
         # Same rationale as Build db-backend above: keep the path
         # variable set so any cached-state-invalidation triggers
         # a regeneration with stew on the import path.
         env:
-          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/libs/nim-stew/stew:${{ github.workspace }}/wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/libs/nim-stew:${{ github.workspace }}/wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/libs/nim-result
         run: dev-exec cargo clippy --all-targets -- -D warnings
 
       - name: Clippy backend-manager
-        working-directory: src/backend-manager
+        working-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/src/backend-manager
         shell: bash
         run: dev-exec cargo clippy --all-targets -- -D warnings
 
       - name: Clippy tui
-        working-directory: src/tui
+        working-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/src/tui
         shell: bash
         run: dev-exec cargo clippy --all-targets -- -D warnings
 
       - name: Test tui named pipe
-        working-directory: src/tui
+        working-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/src/tui
         shell: bash
         run: dev-exec cargo test --bin simple-tui windows_named_pipe
 
@@ -6401,7 +6408,7 @@ jobs:
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
             codetracer-visual-replay=71f6b70ee6c3de47973645dae45e661de076eb7b
-            codetracer-native-backend=9facaaa341b54de2fb52f04d432bf851b89b304c
+            codetracer-native-backend=465bd6846769e484ade98f9e6159fc08a52eb81e
             runquota=dev
 
       - name: Stage codetracer-trace-format into libs/
@@ -7340,7 +7347,7 @@ jobs:
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
             codetracer-visual-replay=71f6b70ee6c3de47973645dae45e661de076eb7b
-            codetracer-native-backend=9facaaa341b54de2fb52f04d432bf851b89b304c
+            codetracer-native-backend=465bd6846769e484ade98f9e6159fc08a52eb81e
             codetracer-native-recorder=f1b9bf029039b3f21a15f399e000496139127076
             codetracer-native-test-programs=dev
             codetracer-visual-replay-fixtures=dev
@@ -7651,7 +7658,7 @@ jobs:
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
-            codetracer-native-backend=9facaaa341b54de2fb52f04d432bf851b89b304c
+            codetracer-native-backend=465bd6846769e484ade98f9e6159fc08a52eb81e
             codetracer-visual-replay=71f6b70ee6c3de47973645dae45e661de076eb7b
 
       - name: Allow direnv in the cloned recorder siblings
