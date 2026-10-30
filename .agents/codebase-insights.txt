@@ -8109,3 +8109,14 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - Edit-mode surfaces mark the caret line `eptInspection` (GPUI): a gutter mark in the pointer band must test `!= eptExecution`, not `== eptNone`, to show on the caret's line.
 - Desktop builds: the Electron main process runs them (`index/build_runner`, `CODETRACER::build-start` / `build-cancel`); `build-code` carries `runner: true` for these, and `onBuildCode` then leaves the mode alone (the legacy record-and-debug `build-code` without it still switches modes). Tests that feed `build-*` by hand (PLAT-55/56 captures) take the legacy path.
 - TUI auto-reveal: `layoutBinding.interaction.pane` is a variant field — read it only after checking `interaction.kind == ikRevealingDock` or the binary dies with FieldDefect.
+- A bare createAppViewModel has NO StopLoader: the per-stop loads (ct/load-locals
+  as the loader issues them, ct/load-flow, low-level code) come from the SDK's
+  StopLoader that DebuggerSession.markReady attaches. A ViewModel scenario that
+  expects ct/load-flow on a move must build the app as markReady does
+  (src/tests/gui/tests/scenarios/stop_loading_app.nim, createStopLoadingApp).
+- The desktop REQUESTS panel's self-reveal hangs on the store's recordedTotal,
+  set by the first {limit: 1} ct/load-request-spans answer. That poll runs before
+  the trace is ready; latching snapshotAnswered on a refused answer stopped the
+  poll for good and the panel never revealed (fixed: latch only on an answer
+  that carries `total`). Clicking a docked auto-hide panel's strip label TOGGLES
+  it closed, so Electron specs must not click REQUESTS after the reveal.

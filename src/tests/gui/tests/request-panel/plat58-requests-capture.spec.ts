@@ -12,7 +12,7 @@
  * demo-request-panel` runs; `just plat58-capture-electron` writes it and
  * names it in `PLAT58_DEMO_TRACE`) — its REQUESTS panel read from the DOM:
  *
- *   * the panel, opened from its strip label, lists every request: `#`,
+ *   * the panel, docked by itself (RS-M4), lists every request: `#`,
  *     method, URL, status, duration, size, each status's class and colour;
  *   * the filter bar's words; the header's;
  *   * a row's right-click menu (PLAT-58 added it): its entries and which are
@@ -99,12 +99,12 @@ test.describe("PLAT-58: the desktop's REQUESTS panel, captured", () => {
 
   test("rows, filter bar, a row's menu, a filter from it, a double click", async ({ ctPage }) => {
     const rows = ctPage.locator(".request-panel .request-row");
-    // The panel is opened from its bottom strip label, as a user opens it.
-    // (RS-M4's self-reveal does not happen for a COMPLETED recording on the
-    // desktop: codetracer-pm issue
-    // 2026-10-27-desktop-requests-panel-does-not-reveal-for-a-completed-recording.)
+    // The panel docks ITSELF: the demo session serves requests, so RS-M4's
+    // reveal brings the REQUESTS panel on screen with no click. Clicking its
+    // strip label here would be wrong twice over — it would hide a revealed
+    // panel (the label toggles a docked panel) and it would mask a reveal
+    // that never happened.
     await expect(ctPage.locator(".lm_goldenlayout")).toBeVisible({ timeout: 120_000 });
-    await ctPage.locator("text=REQUESTS").last().click();
     await expect(rows).toHaveCount(8, { timeout: 120_000 });
     const listed = await readRows(ctPage);
     const filterBar = await ctPage.evaluate(() => ({

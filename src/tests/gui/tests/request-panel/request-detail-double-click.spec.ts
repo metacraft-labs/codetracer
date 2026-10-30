@@ -40,7 +40,8 @@ async function position(page: Page) {
 
 async function openRequests(page: Page) {
   await expect(page.locator(".lm_goldenlayout")).toBeVisible();
-  await page.locator("text=REQUESTS").last().click();
+  // The panel docks itself for a recording that serves requests (RS-M4); a
+  // click on its strip label would hide it again.
   const panel = page.locator(".request-panel");
   await expect(panel.locator(".request-row")).toHaveCount(8);
   return panel;
