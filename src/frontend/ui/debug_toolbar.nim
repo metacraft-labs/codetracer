@@ -260,6 +260,20 @@ proc bindDebugToolbar*(vm: DebugControlsVM) =
   syncToolbarMode()
   ensureDebugToolbar()
 
+var projectRunRoute*: proc()
+  ## The edit-mode toolbar's Run, when this window has a route for it
+  ## (Edit-Mode-Toolbar.md §9.4): on the desktop, the project's program
+  ## recorded and opened by the Test Results host (installed by `ui_js` with
+  ## the host). Nil on a platform with no such route — the web studio runs a
+  ## program its own way — and the palette's **Project: Run** pair is listed
+  ## only where it is set.
+
+proc lastEditToolbarRun*(): ToolbarButton =
+  ## The Run of the edit-mode model last installed: whether this project has
+  ## a Run, and why not when it does not. A default, disabled button before
+  ## any model was installed.
+  pendingEditToolbar.model.run
+
 proc setEditModeToolbar*(model: EditToolbarModel; invoke: proc(id: string)) =
   ## Install (or replace) the edit-mode toolbar a platform composed. The
   ## model is a value, so every change that could alter it arrives as a new

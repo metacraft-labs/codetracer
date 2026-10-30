@@ -111,6 +111,8 @@ import isonim/core/signals
 
 import ../../../ct_test/contracts
 import ./test_results_vm
+import ./edit_mode_toolbar   # the toolbar's Run: whether the project's Run runs
+import ./replay_open_setting   # `normalWorkspace`, the program's tab key
 
 export contracts
 
@@ -130,6 +132,19 @@ type
     ## product, `CODETRACER::run-test-suite`, answered by `index/traces
     ## .onRunTestSuite` with `CODETRACER::test-suite-settled`. Returns "" when
     ## it was taken, or why it was not: `DesktopTestDispatch`'s contract.
+
+  DesktopProgramDispatch* = proc(workspaceRoot: string): string
+    ## Record the PROGRAM of the project at `workspaceRoot` — the project's
+    ## Run (Edit-Mode-Toolbar.md §9.4): on the desktop
+    ## `CODETRACER::run-program`, answered by `index/traces.onRunProgram`
+    ## with `CODETRACER::program-run-settled`; natively `ct record <folder>`
+    ## in the background (`native_test_host`). Loads nothing: the host opens
+    ## the recording on the settle, where §9 places it. `DesktopTestDispatch`'s
+    ## contract: "" when it was taken, else why not.
+
+  DesktopProgramNote* = proc(text: string)
+    ## Say how the project's Run ended when it did not open a recording (the
+    ## desktop's notification, the native status line).
 
   DesktopWorkspaceRoot* = proc(): string
     ## The project folder a suite run covers, read AT CLICK TIME, or "" when
@@ -158,6 +173,10 @@ type
     ## default-constructed run is the kind this host always had.
     drkRecordTest = "ct-record-test"
     drkSuite = "ct-test-run"
+    drkProgram = "ct-record"
+      ## The project's Run: its program recorded and opened
+      ## (Edit-Mode-Toolbar.md §9.4). Settled by `settleDesktopProgramRun`
+      ## only, and it never touches the pane's run: a program is not a test.
 
   DesktopTestRun* = object
     ## The run this window is waiting on.
@@ -199,6 +218,10 @@ type
       ## project-relative file for the row controls.
     openRecording*: DesktopOpenRecording
       ## Nil until `installDesktopRowActions`.
+    programDispatch*: DesktopProgramDispatch
+      ## Nil until `installDesktopProgramRun`.
+    programNote*: DesktopProgramNote
+      ## Nil until `installDesktopProgramRun`.
 
   DesktopSuiteEvents* = object
     ## What `parseDesktopSuiteEvents` read out of `ct-test --events`'s file.
@@ -294,7 +317,7 @@ proc newDesktopTestHost*(vm: TestResultsVM;
 
 proc providerIdFor(kind: DesktopRunKind): string =
   case kind
-  of drkRecordTest: DesktopTestProviderId
+  of drkRecordTest, drkProgram: DesktopTestProviderId
   of drkSuite: DesktopSuiteProviderId
 
 proc desktopRunStartedEvents*(run: DesktopTestRun): seq[TestEvent] =
@@ -610,6 +633,7 @@ proc settleRefused(host: DesktopTestHost; run: DesktopTestRun;
   case run.kind
   of drkRecordTest: host.settleDesktopTestRun(errorMessage = refusal)
   of drkSuite: host.settleDesktopSuiteRun("", -1, errorMessage = refusal)
+  of drkProgram: host.pending = none(DesktopTestRun)
 
 proc runDispatch(host: DesktopTestHost; run: DesktopTestRun;
                  send: proc(): string): DesktopDispatchAnswer =
@@ -845,3 +869,141 @@ proc installDesktopRowActions*(host: DesktopTestHost;
     recordAndOpen = proc(testId, selector: string) =
       host.recordRow(testId, selector, keepWindow = false)
   host.vm.setRowActions(refresh, openExisting, recordAndOpen)
+
+# ---------------------------------------------------------------------------
+# The project's Run (Edit-Mode-Toolbar.md §9.4, EMT-D32 / EMT-D33)
+#
+# The toolbar's Run and the palette pair **Project: Run** / **Project: Run in
+# Current Tab**: the project's program recorded, then its recording opened
+# where Test-Results-Pane.md §9.1 places it — the SAME placement, keyed by the
+# project instead of a test (`programRunKey`), so a re-run reuses the run's
+# own tab (rule 4), the current tab is replaced only when it is the
+# destination and a replay, and an editing session never is (rule 3).
+#
+# It shares this host's ONE pending run, because a window that records a test
+# and the program at once would race their settles for the same slot; it does
+# not share the pane's run (`beginRun`), because the pane reports tests and a
+# program is not one.
+# ---------------------------------------------------------------------------
+
+const
+  ProgramRunKeyPrefix* = "project-run:"
+    ## The prefix of the project's tab key in `TestResultsVM.testTabs` (a
+    ## catalog test id never starts with it: those are `<file>::<name>`).
+  NoProgramRouteText* = "No host in this build can run the project"
+  NoProgramProjectText* =
+    "No project folder is open, so there is no program to run. Open the " &
+    "project's folder and run it again."
+  ProgramRunAlreadyGoingText* =
+    "a run is already going in this window; wait for it to finish and run " &
+    "the project again"
+  ProgramNoRecordingText* =
+    "the run finished without reporting a recording, so there is nothing " &
+    "to replay"
+    ## EMT-D16: exit 0 with no recording is its own verdict, not a success.
+
+proc programRunKey*(workspaceRoot: string): string =
+  ## The project's own tab key (§9.2's test id, for the program).
+  ProgramRunKeyPrefix & normalWorkspace(workspaceRoot)
+
+proc programCommandLine*(workspaceRoot: string): string =
+  "ct record " & normalWorkspace(workspaceRoot)
+
+proc installDesktopProgramRun*(host: DesktopTestHost;
+                               dispatch: DesktopProgramDispatch;
+                               note: DesktopProgramNote) =
+  ## Install the route that records the project's program. The project is
+  ## `workspaceRoot` (`installDesktopSuiteRun`) and the open is
+  ## `openRecording` (`installDesktopRowActions`): the program's recording is
+  ## opened exactly as a test's.
+  if host.isNil:
+    return
+  host.programDispatch = dispatch
+  host.programNote = note
+
+proc runProgramIn*(host: DesktopTestHost; policy: TraceOpenPolicy;
+                   run: ToolbarButton): string =
+  ## **Project: Run** (`topNewTab`) / **Project: Run in Current Tab**
+  ## (`topCurrentTab`), and the toolbar's Run (the setting, inverted by the
+  ## held modifier): RECORD the project's program and open the recording at
+  ## `policy`. `run` is the toolbar's Run for this project, which decides
+  ## whether there is anything to run and, when not, says why (EMT-D14). ""
+  ## when it was dispatched, else why not.
+  if host.isNil or host.vm.isNil or host.programDispatch.isNil:
+    return NoProgramRouteText
+  let root = host.currentWorkspaceRoot().strip()
+  if root.len == 0:
+    return NoProgramProjectText
+  if not run.enabled:
+    return (if run.reason.len > 0: run.reason else: NoProgramRouteText)
+  if host.pending.isSome:
+    return ProgramRunAlreadyGoingText
+  inc host.runCounter
+  let pending = DesktopTestRun(
+    kind: drkProgram,
+    workspaceRoot: root,
+    testId: programRunKey(root),
+    runId: "ct-record-" & $host.runCounter,
+    commandLine: programCommandLine(root),
+    openAfter: true,
+    openPolicy: policy)
+  host.pending = some(pending)
+  var refusal = ""
+  try:
+    refusal = host.programDispatch(root)
+  except:
+    let detail = getCurrentExceptionMsg()
+    refusal = DesktopDispatchRaisedText &
+      (if detail.len > 0: ": " & detail else: ".")
+  if refusal.len > 0:
+    host.pending = none(DesktopTestRun)
+  refusal
+
+proc programRunning*(host: DesktopTestHost): bool =
+  ## Whether the project's Run is the run in flight.
+  not host.isNil and host.pending.isSome and host.pending.get.kind == drkProgram
+
+proc programRunStartedText*(host: DesktopTestHost;
+                            policy: TraceOpenPolicy): string =
+  ## What a front-end says once the project's Run dispatched: where §9.1 will
+  ## put the recording for `policy` — so **Project: Run in Current Tab** from
+  ## an editing session says it opens a new tab (rule 3).
+  if host.isNil or host.vm.isNil:
+    return ""
+  let root = host.currentWorkspaceRoot()
+  let key = programRunKey(root)
+  let vm = host.vm
+  let where =
+    if not vm.sessionTabsShown.val:
+      "its folder is named when it is made"
+    else:
+      let place = vm.placeTestRecording(key, "", policy)
+      if place.kind == ttpNewTab: "it opens in a new tab"
+      elif place.tab == vm.testTabOf(key): "it opens in the tab it already has"
+      else: "it opens in this tab"
+  "recording " & normalWorkspace(root) & "; " & where
+
+proc settleDesktopProgramRun*(host: DesktopTestHost;
+                              recordingId = ""; errorMessage = "") =
+  ## The project's Run answered, however it ended: its recording opened where
+  ## §9 places it, or why there is none said (`programNote`). A settle with
+  ## no program run pending changes nothing.
+  if host.isNil or host.pending.isNone or host.pending.get.kind != drkProgram:
+    return
+  let run = host.pending.get
+  host.pending = none(DesktopTestRun)
+  var said = ""
+  if recordingId.len == 0:
+    said = if errorMessage.len > 0: errorMessage else: ProgramNoRecordingText
+  elif host.openRecording.isNil:
+    said = NoReplayHostText
+  else:
+    try:
+      said = host.openRecording(run.testId, recordingId, run.openPolicy)
+    except:
+      let detail = getCurrentExceptionMsg()
+      said = DesktopOpenRaisedText &
+        (if detail.len > 0: ": " & detail else: ".")
+  if said.len > 0 and not host.programNote.isNil:
+    host.programNote(said)
+

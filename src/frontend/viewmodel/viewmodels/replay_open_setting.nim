@@ -19,7 +19,8 @@
 ## The commands that set it are here too, by their palette labels, so the
 ## three front-ends offer the same two words — and the palette pair that
 ## names a destination for one run (**Tests: Run** / **Tests: Run in Current
-## Tab**, §9.3).
+## Tab**, §9.3) and its sibling for the project's own Run (**Project: Run** /
+## **Project: Run in Current Tab**, Edit-Mode-Toolbar.md §9.4).
 ##
 ## Pure: C and JavaScript backends.
 
@@ -43,6 +44,13 @@ const
     ## tab / the current tab (`TestResultsVM.runTestIn`).
   RunTestCommandPrefix* = "runTestIn:"
     ## Their native omnibox target: `runTestIn:<new-tab|current-tab>`.
+  RunProgramLabel* = "Project: Run"
+  RunProgramInCurrentTabLabel* = "Project: Run in Current Tab"
+    ## Edit-Mode-Toolbar.md §9.4 (EMT-D32): the project's Run — record the
+    ## project's program and open the recording — in a new tab / the current
+    ## tab (`DesktopTestHost.runProgramIn`).
+  RunProgramCommandPrefix* = "runProgramIn:"
+    ## Their native omnibox target: `runProgramIn:<new-tab|current-tab>`.
 
 type
   ReplayOpenEntry* = object
@@ -135,6 +143,23 @@ proc runTestCommandLabel*(policy: TraceOpenPolicy): string =
 proc runTestCommandDetail*(policy: TraceOpenPolicy): string =
   ## The omnibox entry's second column.
   "record the selected test and open it " &
+    (if policy == topNewTab: "in a new tab" else: "in the current tab")
+
+proc runProgramCommandTarget*(policy: TraceOpenPolicy): string =
+  RunProgramCommandPrefix & $policy
+
+proc parseRunProgramCommandTarget*(target: string):
+    tuple[ok: bool; policy: TraceOpenPolicy] =
+  if not target.startsWith(RunProgramCommandPrefix):
+    return (false, topNewTab)
+  parsePolicyWord(target[RunProgramCommandPrefix.len .. ^1])
+
+proc runProgramCommandLabel*(policy: TraceOpenPolicy): string =
+  if policy == topNewTab: RunProgramLabel else: RunProgramInCurrentTabLabel
+
+proc runProgramCommandDetail*(policy: TraceOpenPolicy): string =
+  ## The omnibox entry's second column.
+  "record the project's program and open it " &
     (if policy == topNewTab: "in a new tab" else: "in the current tab")
 
 proc replayOpenSetNote*(workspace: string; policy: TraceOpenPolicy): string =

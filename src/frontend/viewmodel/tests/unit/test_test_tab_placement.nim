@@ -37,7 +37,19 @@
 ##     it (an editing session is not replaced); the started note says where;
 ##     no selection, a test the catalog dropped, a run in flight and a host
 ##     that refuses at once each answer their own sentence and record
-##     nothing.
+##     nothing;
+##   * THE PROJECT'S RUN (Edit-Mode-Toolbar.md §9.4, EMT-D32/D33): the
+##     palette pair **Project: Run** / **Project: Run in Current Tab** — labels
+##     and targets, distinct from both test pairs, listed in the omnibox;
+##     `runProgramIn` dispatches the project's folder with THE COMMAND's
+##     destination (the setting and a held Ctrl ignored), begins no run in the
+##     pane, holds the host's one pending run (a second run of either kind is
+##     refused, a test's settle does not end it); its settle opens the
+##     recording under the project's key, where §9.1 places it — a re-run
+##     reuses the run's own tab (rule 4), an editing session is never the
+##     destination (rule 3); no project, a project with no Run (the toolbar
+##     model's own reason), no route, a refused dispatch, a recorder failure
+##     and an exit with no recording each say their sentence and open nothing.
 ##
 ## THE ONE STAND-IN, and why it is not a mock: the host's two effects — the
 ## dispatch (an IPC send, in the product) and `openRecording` (a new session
@@ -57,6 +69,9 @@ import ../../../../ct_test/contracts
 import ../../viewmodels/test_results_vm
 import ../../viewmodels/desktop_test_host
 import ../../viewmodels/replay_open_setting
+import ../../viewmodels/omnibar_sources
+import ../../viewmodels/edit_mode_toolbar
+import ../../platform/capabilities
 
 var asserted = 0
 
@@ -64,7 +79,7 @@ template ck(condition: untyped) =
   inc asserted
   check condition
 
-const ExpectedAssertions = 112
+const ExpectedAssertions = 159
 
 proc item(id, selector: string; line: int): TestItem =
   TestItem(id: id, providerId: "noir-nargo", language: "noir",
@@ -92,6 +107,11 @@ type
     recordOpening, recordKeeping: int
     opened: seq[Opened]
     openRefuseWith: string
+    programRuns: seq[string]
+      ## The project folders the project's Run was dispatched for.
+    programRefuseWith: string
+    notes: seq[string]
+      ## What the host said about a Run that opened nothing.
 
 proc hostOver(vm: TestResultsVM; spies: Spies; withOpener = true):
     DesktopTestHost =
@@ -118,6 +138,16 @@ proc hostOver(vm: TestResultsVM; spies: Spies; withOpener = true):
       inc spies.recordKeeping
       "",
     openRecording = opener)
+  result.installDesktopProgramRun(
+    dispatch = proc(workspaceRoot: string): string =
+      spies.programRuns.add workspaceRoot
+      spies.programRefuseWith,
+    note = proc(text: string) = spies.notes.add text)
+
+proc noirRun(): ToolbarButton =
+  ## The toolbar's Run for a Noir package, as the desktop composes it.
+  editModeToolbar(desktopProfile, EditMode,
+                  listing = @["Nargo.toml", "src/main.nr"]).run
 
 suite "§9.1: one placement rule":
 
@@ -377,6 +407,134 @@ suite "§9.3: the palette pair, Tests: Run and Tests: Run in Current Tab":
       let vm = createTestResultsVM()
       vm.setCatalog(TestCatalog(items: @[item("a", "test_a", 5)]))
       ck vm.runTestIn("a", topNewTab) == NoRecorderHostText
+      dispose()
+
+suite "Edit-Mode-Toolbar §9.4: the project's Run":
+
+  test "the palette pair's labels and targets, in the omnibox":
+    ck runProgramCommandLabel(topNewTab) == "Project: Run"
+    ck runProgramCommandLabel(topCurrentTab) == "Project: Run in Current Tab"
+    for policy in [topNewTab, topCurrentTab]:
+      let (ok, back) = parseRunProgramCommandTarget(
+        runProgramCommandTarget(policy))
+      ck ok and back == policy
+      # Neither test pair's command reads as the project's, nor the other way.
+      ck not parseRunTestCommandTarget(runProgramCommandTarget(policy)).ok
+      ck not parseReplayOpenCommandTarget(runProgramCommandTarget(policy)).ok
+      ck not parseRunProgramCommandTarget(runTestCommandTarget(policy)).ok
+    var targets: seq[string] = @[]
+    for entry in replayOpenCommands():
+      targets.add entry.target
+    ck runProgramCommandTarget(topNewTab) in targets
+    ck runProgramCommandTarget(topCurrentTab) in targets
+    ck noirRun().enabled
+
+  test "the command's destination, the pane untouched, one pending run":
+    createRoot proc(dispose: proc()) =
+      let vm = createTestResultsVM()
+      vm.setCatalog(TestCatalog(items: @[item("a", "test_a", 5)]))
+      let spies = Spies()
+      let host = hostOver(vm, spies)
+      # A replay is current; the setting says the current tab and Ctrl is
+      # held — **Project: Run** still opens a NEW tab.
+      vm.setCurrentTab(4, replaceable = true)
+      vm.setOpenSetting(topCurrentTab)
+      vm.setRedirectHeld(true)
+      ck host.programRunStartedText(topNewTab) ==
+        "recording /proj; it opens in a new tab"
+      ck host.runProgramIn(topNewTab, noirRun()) == ""
+      ck spies.programRuns == @["/proj"]
+      ck host.programRunning
+      # A program is not a test: the pane begins no run.
+      ck not vm.inFlight.val
+      # One run per window, of either kind.
+      ck host.runProgramIn(topCurrentTab, noirRun()) ==
+        ProgramRunAlreadyGoingText
+      ck host.startDesktopTestRun("test_a", "/proj/src/main.nr", 5) ==
+        DesktopRunAlreadyGoingText
+      # A test's settle does not end it.
+      host.settleDesktopTestRun(recordingId = "rec-t", recordedAtText = "t")
+      ck host.programRunning and spies.opened.len == 0
+      host.settleDesktopProgramRun(recordingId = "rec-1")
+      ck not host.programRunning
+      ck spies.opened.len == 1 and
+        spies.opened[0].testId == programRunKey("/proj/")
+      ck spies.opened.len == 1 and spies.opened[0].recordingId == "rec-1"
+      ck spies.opened.len == 1 and spies.opened[0].policy == topNewTab
+      ck spies.notes.len == 0
+      dispose()
+
+  test "rule 4: a re-run reuses the run's tab; rule 3: an editing session":
+    createRoot proc(dispose: proc()) =
+      let vm = createTestResultsVM()
+      let spies = Spies()
+      let host = hostOver(vm, spies)
+      let key = programRunKey("/proj")
+      vm.setCurrentTab(4, replaceable = true)
+      # **Run in Current Tab** from a replay replaces it …
+      ck host.programRunStartedText(topCurrentTab) ==
+        "recording /proj; it opens in this tab"
+      ck vm.placeTestRecording(key, "rec-1", topCurrentTab) ==
+        TestTabPlacement(kind: ttpReplaceTab, tab: 4)
+      # … and once the run has a tab, a re-run goes there, whatever the
+      # destination: the same program again compares nothing.
+      vm.noteTestTab(key, 7, "rec-1")
+      ck host.programRunStartedText(topNewTab) ==
+        "recording /proj; it opens in the tab it already has"
+      ck vm.placeTestRecording(key, "rec-2", topNewTab) ==
+        TestTabPlacement(kind: ttpReplaceTab, tab: 7)
+      ck vm.placeTestRecording(key, "rec-1", topNewTab) ==
+        TestTabPlacement(kind: ttpShowTab, tab: 7)
+      # A tab holds one thing: a test placed in the run's tab takes it.
+      vm.noteTestTab("a", 7, "rec-a")
+      ck vm.testTabOf(key) == -1
+      # An editing session is never the destination.
+      vm.setCurrentTab(0, replaceable = false)
+      ck host.programRunStartedText(topCurrentTab) ==
+        "recording /proj; it opens in a new tab"
+      dispose()
+
+  test "no project, no Run, no route, a refusal, a failure: said":
+    createRoot proc(dispose: proc()) =
+      let vm = createTestResultsVM()
+      let spies = Spies()
+      let host = hostOver(vm, spies)
+      # A folder CodeTracer does not recognise: the toolbar's own reason.
+      let notes = editModeToolbar(desktopProfile, EditMode,
+                                  listing = @["notes.txt"]).run
+      ck not notes.enabled
+      ck host.runProgramIn(topNewTab, notes) == notes.reason
+      ck notes.reason.len > 0
+      ck spies.programRuns.len == 0
+      # The dispatch refuses at once: its sentence, and nothing pending.
+      spies.programRefuseWith = "the recorder is busy"
+      ck host.runProgramIn(topNewTab, noirRun()) == "the recorder is busy"
+      ck not host.programRunning
+      spies.programRefuseWith = ""
+      # The recorder failed: its words, nothing opened.
+      ck host.runProgramIn(topNewTab, noirRun()) == ""
+      host.settleDesktopProgramRun(errorMessage = "ct record error: no main")
+      ck spies.notes == @["ct record error: no main"]
+      # Exit 0 with no recording is its own verdict (EMT-D16).
+      ck host.runProgramIn(topNewTab, noirRun()) == ""
+      host.settleDesktopProgramRun()
+      ck spies.notes.len == 2 and spies.notes[1] == ProgramNoRecordingText
+      ck spies.opened.len == 0
+      # A settle with no program run pending changes nothing.
+      host.settleDesktopProgramRun(recordingId = "stray")
+      ck spies.opened.len == 0
+      dispose()
+    createRoot proc(dispose: proc()) =
+      # No project folder open.
+      let vm = createTestResultsVM()
+      let host = newDesktopTestHost(vm, dispatch = nil, settleEditor = nil)
+      host.installDesktopProgramRun(
+        dispatch = proc(workspaceRoot: string): string = "",
+        note = nil)
+      ck host.runProgramIn(topNewTab, noirRun()) == NoProgramProjectText
+      # No route at all.
+      let bare = newDesktopTestHost(vm, dispatch = nil, settleEditor = nil)
+      ck bare.runProgramIn(topNewTab, noirRun()) == NoProgramRouteText
       dispose()
 
 suite "§9.5: the desktop host opens after it records":

@@ -24,9 +24,16 @@
 ## modified editor first (EMT-D17) and runs the button's command line in the
 ## project folder, its output in the BUILD panel.
 ##
-## RUN IS STILL REFUSED, by name (EMT-D30): Run records the program and opens
-## the recording (§9.3), and the runner only runs a command — a Run that built
-## and recorded nothing would be a button that does less than it says.
+## RUN HAS ITS ROUTE (Edit-Mode-Toolbar.md §9.4, EMT-D33): Run records the
+## project's program (`ct record <folder>`, `index/traces.onRunProgram`) — the
+## build runner only runs a command, which is less than Run says — and the
+## Test Results pane's host opens the recording where Test-Results-Pane.md
+## §9.1 places it: in a new tab by default, never over the edit session. A
+## press saves every modified editor first, as Build's does (EMT-D17). `ui_js`
+## installs the route (`debug_toolbar.projectRunRoute`), because the host
+## lives there; the palette's **Project: Run** pair reads the same composed
+## Run (`debug_toolbar.lastEditToolbarRun`). A window with no such host
+## refuses Run (`DesktopRunRefusal`).
 ##
 ## Desktop-only: the web studio composes its own model in `web_noir_build`.
 ## `ui_js` imports this module only on the
@@ -36,15 +43,18 @@ import ui_imports
 from ../platform_host import ctPlatform
 import ../viewmodel/viewmodels/edit_mode_toolbar
 import ../viewmodel/platform/wasm_registry
-from debug_toolbar import setEditModeToolbar
+from debug_toolbar import setEditModeToolbar, projectRunRoute
 from ./build import startDesktopBuild
 
 
+
 const DesktopRunRefusal* =
-  "Running from the toolbar (record, then debug) is not available in the " &
-  "desktop app yet; Build runs the project's build command."
-  ## Why the desktop's Run is off. Never empty (EMT-A28): it is the button's
-  ## tooltip, and a disabled button that cannot say why is a defect.
+  "Running from the toolbar (record, then debug) is not available in this " &
+  "window; Build runs the project's build command."
+  ## Why Run is off in a window with no Test Results host to place a
+  ## recording with (`ui_js` installs `projectRunRoute` with that host). Never
+  ## empty (EMT-A28): it is the button's tooltip.
+
 
 proc originalPath(node: CodetracerFile): cstring =
   ## The node's `original.path`, or nil when it has none.
@@ -115,8 +125,13 @@ var shownToolbar: EditToolbarModel
 proc desktopEditToolbarInvoke(id: string) =
   ## The buttons' action: Build (`build-image`) saves every modified editor
   ## (EMT-D17) and runs its command line in the project folder through the
-  ## desktop's build runner. Run is refused (never reaches here); an id this
-  ## host does not know is ignored, the web arm's `else: discard`.
+  ## desktop's build runner; Run (`run-image`) is the project's Run
+  ## (`projectRunRoute`, Edit-Mode-Toolbar.md §9.4), which saves the same way.
+  ## An id this host does not know is ignored, the web arm's `else: discard`.
+  if id == "run-image":
+    if not projectRunRoute.isNil:
+      projectRunRoute()
+    return
   if id != "build-image":
     return
   let button = shownToolbar.build
@@ -143,11 +158,13 @@ proc installDesktopEditModeToolbar*() =
   let listing =
     if data.services.editor.isNil: newSeq[string]()
     else: workspaceListing(data.services.editor.filesystem)
+  let refused: set[TopbarAction] =
+    if projectRunRoute.isNil: {tbaRun} else: {}
   let model = editModeToolbar(
     ctPlatform().profile,
     ToolbarMode(data.ui.mode.ord),
     listing = listing,
     wasm = WasmRegistry()).refuseCommands(DesktopRunRefusal,
-                                          refused = {tbaRun})
+                                          refused = refused)
   shownToolbar = model
   setEditModeToolbar(model, desktopEditToolbarInvoke)

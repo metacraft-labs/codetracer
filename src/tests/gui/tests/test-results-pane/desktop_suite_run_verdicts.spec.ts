@@ -39,6 +39,14 @@
  * session left where it is (§9.7). Until 2026-10-25 the desktop loaded
  * the recording INTO the edit session's window (codetracer-pm
  * `issues/2026-10-24-desktop-test-results-opens-a-recording-in-place-not-in-a-new-tab.md`).
+ *
+ * THE PROJECT'S RUN (Edit-Mode-Toolbar.md §9.4): the edit-mode toolbar's Run
+ * is enabled for the crate, writes the modified editor to disk first
+ * (EMT-D17), records the project's program with the real `ct record` and
+ * opens the recording in a NEW SESSION TAB, the edit session left in the
+ * first; Run again reuses that tab (rule 4) with a new recording; the
+ * palette's **Project: Run in Current Tab** from the edit session opens a new
+ * tab, because an editing session is never replaced (rule 3).
  */
 import { test, expect } from "../../lib/fixtures";
 import * as fs from "node:fs";
@@ -70,6 +78,10 @@ fs.writeFileSync(
     "",
   ].join("\n"),
 );
+// The inputs `main` needs to RUN: the project's Run (Edit-Mode-Toolbar.md
+// §9.4) records the program, `nargo trace` in the crate. The tests' catalog
+// is unchanged by it.
+fs.writeFileSync(path.join(project, "Prover.toml"), 'x = "1"\ny = "2"\n');
 const certificates = fs.mkdtempSync(path.join(os.tmpdir(), "ct-desktop-suite-certs-"));
 
 async function showTestsPane(ctPage: any) {
@@ -435,6 +447,85 @@ test.describe("the desktop Test Results pane runs the suite through ct test run"
     expect(
       await ctPage.evaluate(() => document.querySelectorAll(".editor-test-action.active-test-button").length),
     ).toBe(0);
+  });
+
+  test("the toolbar's Run writes the editor, records the project and opens it in a new tab; again reuses it", async ({ ctPage }) => {
+    await showTestsPane(ctPage);
+    const run = ctPage.locator("#run-image");
+    await expect(run).toBeVisible({ timeout: 60_000 });
+    await expect(run).not.toHaveAttribute("disabled", /.*/, { timeout: 60_000 });
+    // An unsaved change in the editor: Run writes it before it records.
+    const editorTab = ctPage.locator(".lm_tab", { hasText: "main.nr" }).first();
+    await expect(editorTab).toBeVisible({ timeout: 60_000 });
+    await editorTab.click();
+    const firstLine = ctPage.locator(".monaco-editor .view-line").first();
+    await expect(firstLine).toBeVisible({ timeout: 60_000 });
+    await firstLine.click();
+    await ctPage.keyboard.press("Control+Home");
+    await ctPage.keyboard.type("// the project's run\n");
+    const source = path.join(project, "src", "main.nr");
+    const original = fs.readFileSync(source, "utf8");
+    test.info().attach("main.nr before", { body: original });
+    const containersBefore = recordedContainers();
+    expect(await loadedRecordingId(ctPage)).toBe("");
+
+    await run.click();
+
+    await expect
+      .poll(() => fs.readFileSync(source, "utf8"), { timeout: 30_000 })
+      .toContain("// the project's run");
+    await expect.poll(async () => (await sessionTabs(ctPage)).count, { timeout: 300_000 }).toBe(2);
+    const first = await waitForRunOutcome(ctPage);
+    test.info().annotations.push({ type: "toolbar Run outcome", description: first });
+    expect(first).toMatch(/^recording:/);
+    expect(recordedContainers()).toBe(containersBefore + 1);
+    let tabs = await sessionTabs(ctPage);
+    expect(tabs.active).toBe(1);
+    expect(tabs.first).toBe("");
+    // No test ran: the pane's rows carry no recording.
+    await expect(rowFor(ctPage, "test_passes")).toHaveAttribute("data-ct-recording-id", "");
+
+    // Run again, from the edit session: the run's own tab, a new recording.
+    await showEditTab(ctPage);
+    await expect(run).not.toHaveAttribute("disabled", /.*/, { timeout: 60_000 });
+    await run.click();
+    await expect
+      .poll(async () => await loadedRecordingId(ctPage), { timeout: 300_000, intervals: [1_000] })
+      .not.toBe(first.slice("recording:".length));
+    // The recording is opened from its id as soon as `ct record` reports it;
+    // its container lands in the store as the recorder finishes writing.
+    await expect.poll(() => recordedContainers(), { timeout: 60_000 }).toBe(containersBefore + 2);
+    tabs = await sessionTabs(ctPage);
+    expect(tabs.count).toBe(2);
+    expect(tabs.active).toBe(1);
+    expect(tabs.first).toBe("");
+    // The crate as the other cases expect it.
+    fs.writeFileSync(source, original);
+  });
+
+  test("the palette's Project: Run in Current Tab from the edit session opens a new tab", async ({ ctPage }) => {
+    await showTestsPane(ctPage);
+    await expect(ctPage.locator("#run-image")).not.toHaveAttribute("disabled", /.*/, { timeout: 60_000 });
+    const containersBefore = recordedContainers();
+    await ctPage.keyboard.press("Control+KeyP");
+    const box = ctPage.locator("#command-query-text");
+    await expect(box).toBeVisible({ timeout: 30_000 });
+    await box.fill(":Project: Run in Current Tab");
+    const hit = ctPage
+      .locator(".command-results .command-result.command-command")
+      .filter({ hasText: "Project: Run in Current Tab" })
+      .first();
+    await expect(hit).toBeVisible({ timeout: 30_000 });
+    await hit.click();
+    const ended = await waitForRunOutcome(ctPage);
+    test.info().annotations.push({ type: "Project: Run in Current Tab outcome", description: ended });
+    expect(ended).toMatch(/^recording:/);
+    expect(recordedContainers()).toBe(containersBefore + 1);
+    // An editing session is never replaced: a new tab, the edit session first.
+    const tabs = await sessionTabs(ctPage);
+    expect(tabs.count).toBe(2);
+    expect(tabs.active).toBe(1);
+    expect(tabs.first).toBe("");
   });
 
   test("the palette's Tests: Open Recordings in the Current Tab writes the workspace's setting", async ({ ctPage }) => {

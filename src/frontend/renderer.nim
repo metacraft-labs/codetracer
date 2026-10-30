@@ -2153,6 +2153,15 @@ proc runTestSuite*(data: Data, workspaceRoot: string) =
   data.ipc.send(cstring"CODETRACER::run-test-suite",
                 js{workspaceRoot: cstring(workspaceRoot)})
 
+proc runProgram*(data: Data, workspaceRoot: string) =
+  ## The project's Run (Edit-Mode-Toolbar.md §9.4): ask the main process to
+  ## record the program of the project at `workspaceRoot` (`ct record
+  ## <folder>`). Answered, on every exit, with `CODETRACER::program-run-
+  ## settled` (`index/traces.onRunProgram`). Loads nothing into this window:
+  ## the host opens the recording where it is placed.
+  data.ipc.send(cstring"CODETRACER::run-program",
+                js{workspaceRoot: cstring(workspaceRoot)})
+
 proc openRecordingById*(data: Data, recordingId: string) =
   ## Enter an EXISTING recording in this window, running nothing — the Test
   ## Results row's `⏵`. The same IPC the welcome screen's recent-traces list

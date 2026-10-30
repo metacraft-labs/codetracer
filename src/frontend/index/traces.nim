@@ -1959,6 +1959,73 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
   await settleGuarded(once, handle, settleFailure, loadFailedAfterSettle)
 
 # ---------------------------------------------------------------------------
+# THE PROJECT'S RUN — the edit-mode toolbar's Run and the palette's **Project:
+# Run** / **Project: Run in Current Tab** (Edit-Mode-Toolbar.md §9.4).
+#
+# `ct record <project folder>`: the project's program recorded into the trace
+# store, which names it by the `recordingId:` line it prints. Loads NOTHING
+# into the asking window — the renderer's host opens the recording where
+# Test-Results-Pane.md §9.1 places it (a new tab by default; never over the
+# edit session). Answered with `CODETRACER::program-run-settled` on EVERY
+# exit, `onRunTest`'s rule.
+# ---------------------------------------------------------------------------
+
+proc sendProgramRunSettled(recordingId: cstring; errorMessage: cstring;
+                           tab: JsObject) =
+  mainWindow.webContents.send "CODETRACER::program-run-settled", withTab(js{
+    recordingId: recordingId,
+    errorMessage: errorMessage
+  }, tab)
+
+proc onRunProgram*(sender: JsObject,
+                   response: jsobject(workspaceRoot=cstring)) {.async.} =
+  let once = newSettleOnce()
+  let tab = askingTab(response.toJs)
+  proc settle(recordingId: cstring; errorMessage: cstring) =
+    if once.claim():
+      sendProgramRunSettled(recordingId, errorMessage, tab)
+
+  proc handle(once: SettleOnce): Future[void] {.async.} =
+    let root = if response.workspaceRoot.isNil: "" else: $response.workspaceRoot
+    if root.len == 0:
+      settle(cstring"", cstring"ct record was asked to run with no project folder.")
+      return
+    # EMT-D17: the renderer wrote the modified editors before it asked; the
+    # writes are asynchronous here, and the recording must see them.
+    var waited = 0
+    while files.savesInFlight > 0 and waited < 10_000:
+      await asyncSleep(20)
+      waited += 20
+    infoPrint "index: run-program: ct record ", root
+    let outcome = await readProcessOutcome(
+      codetracerExe, @[cstring"record", cstring(root)],
+      js{cwd: cstring(root)})
+    if outcome.spawnError.len == 0 and outcome.signal.len == 0 and
+       outcome.exitCode == 0:
+      let recordingId = cstring(recordingIdFromOutput($outcome.stdout))
+      if recordingId.len == 0:
+        # EMT-D16: exit 0 and no recording is its own verdict.
+        settle(cstring"", cstring(
+          "ct record finished without reporting a recording, so there is " &
+          "nothing to replay. Its output is in the CodeTracer log."))
+        echo outcome.stdout
+        return
+      infoPrint "index: run-program: recorded ", recordingId
+      settle(recordingId, cstring"")
+    else:
+      let errorText = cstring(recordProgramFailureSentence(
+        outcome.exitCode, $outcome.signal, $outcome.stdout, $outcome.stderr,
+        $outcome.spawnError))
+      errorPrint "index: ", errorText
+      settle(cstring"", errorText)
+
+  let settleFailure = proc(detail: string) =
+    errorPrint "index: run-program: ", detail
+    sendProgramRunSettled(cstring"", cstring(
+      "CodeTracer could not run ct record: " & detail), tab)
+  await settleGuarded(once, handle, settleFailure)
+
+# ---------------------------------------------------------------------------
 # THE WHOLE-SUITE RUN — the desktop Test Results pane's header ▶
 #
 # `GUI/Core-Panes/Test-Results-Pane.md` §4.3. The renderer's desktop host

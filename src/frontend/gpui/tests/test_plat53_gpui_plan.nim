@@ -28,7 +28,10 @@
 ##   * §9.3: `Ctrl+Enter` on the selected row opens in this tab; the
 ##     omnibox's **Tests: Run** records the selected test again and opens it
 ##     in a new tab; its **Tests: Open Recordings in the Current Tab** writes
-##     the workspace's `replay-open-in`.
+##     the workspace's `replay-open-in`;
+##   * Edit-Mode-Toolbar §9.4: the omnibox's **Project: Run in Current Tab**
+##     records the project's program (the real `ct record`) into this tab, and
+##     **Project: Run** again reuses the run's own tab; no test is recorded.
 ##
 ## No mocks: the real binary, a real recording made by the Python recorder, a
 ## real `replay-server`, the real `ct`, `ct-test` and `nargo` on a real crate,
@@ -47,7 +50,7 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 49
+  ExpectedAssertions = 56
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1600
   H = 1000
@@ -369,6 +372,40 @@ suite "PLAT-53: the Test Results pane in the GPUI window":
     # temporary directory is under a symbolic link (`/var` -> `/private/var`).
     ck tr.contains("tests: test recordings open in the current tab in " &
                    project.expandFilename.strip(leading = false, chars = {'/'}))
+    removeDir(project)
+
+  test "Edit-Mode-Toolbar §9.4: the omnibox's Project: Run pair":
+    # The project's Run from the window's omnibox: **Project: Run in Current
+    # Tab** records the project's program with the real `ct record` and
+    # opens it IN THIS TAB (the replay the window opened with, replaced in
+    # place); **Project: Run** then reuses the run's own tab (rule 4) —
+    # two sessions opened, both replacements, and no test recorded.
+    let project = writePlat53RunProject("ct-plat53-gpui-")
+    let (plan, tr) = windowPlan(project,
+      "tests:show,key:p:control,key:colon" & typed("Project") &
+      ",key:colon" & typed(" Run in Current Tab") & ",key:enter,tests:wait," &
+      "key:p:control,key:colon" & typed("Project") & ",key:colon" &
+      typed(" Run") & ",key:enter,tests:wait")
+    checkpoint(tr)
+    ck tr.contains("status: recording " & project & "; it opens in this tab")
+    ck tr.contains("status: recording " & project &
+                   "; it opens in the tab it already has")
+    var recordings: seq[string] = @[]
+    for line in tr.splitLines():
+      let at = line.find("status: opened the recording ")
+      if at >= 0:
+        recordings.add line[at + "status: opened the recording ".len .. ^1]
+    ck recordings.len == 2 and recordings[0].endsWith(" in this tab")
+    ck recordings.len == 2 and recordings[1].endsWith(" in its own tab")
+    ck recordings.len == 2 and
+       recordings[0].split(' ')[0] != recordings[1].split(' ')[0]
+    var opens = 0
+    for line in tr.splitLines():
+      if line.contains(" as tab ") and line.contains("opened "): inc opens
+    ck opens == 2
+    let rows = plan.rowsOf()
+    ck rows.len == 2 and rows[0].attr("data-ct-recording-id") == "" and
+       rows[1].attr("data-ct-recording-id") == ""
     removeDir(project)
 
   test "a press selects a row; the window's keys move the selection":

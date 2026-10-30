@@ -216,7 +216,8 @@ proc replayOpenCommands*(): seq[OmnibarEntry] =
   ## Test-Results-Pane.md §9.3: **Tests: Open Recordings in a New Tab** and
   ## **… in the Current Tab**, the workspace's `replay-open-in` — the same two
   ## words the desktop's palette offers — then the palette pair **Tests: Run**
-  ## and **Tests: Run in Current Tab**.
+  ## and **Tests: Run in Current Tab**, and the project's **Project: Run** and
+  ## **Project: Run in Current Tab** (Edit-Mode-Toolbar.md §9.4).
   for policy in [topNewTab, topCurrentTab]:
     result.add OmnibarEntry(kind: OmnibarMode.omCommand,
                             label: replayOpenCommandLabel(policy),
@@ -229,6 +230,13 @@ proc replayOpenCommands*(): seq[OmnibarEntry] =
                             label: runTestCommandLabel(policy),
                             detail: runTestCommandDetail(policy),
                             target: runTestCommandTarget(policy))
+  # Edit-Mode-Toolbar.md §9.4: the project's Run, at the command's
+  # destination.
+  for policy in [topNewTab, topCurrentTab]:
+    result.add OmnibarEntry(kind: OmnibarMode.omCommand,
+                            label: runProgramCommandLabel(policy),
+                            detail: runProgramCommandDetail(policy),
+                            target: runProgramCommandTarget(policy))
 
 proc baseKeymapCommands*(): seq[OmnibarEntry] =
   ## PLAT-68: **Preferences: Select Base Keymap**, one entry per base, on every
