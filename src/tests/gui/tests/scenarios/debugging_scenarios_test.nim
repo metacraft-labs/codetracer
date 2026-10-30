@@ -41,6 +41,7 @@ import isonim/viewmodel
 import backend/backend_service
 import backend/mock_backend
 import app/app_vm
+import ./stop_loading_app
 import store/types
 import store/replay_data_store
 import store/request_tracker
@@ -870,10 +871,11 @@ suite "Scenario 8: Cross-VM consistency after move":
     ## - TimelineVM.currentPosition updates
     ## - DebugControlsVM.statusText updates
     ## - EventLogVM sends event log request
-    ## - FlowVM sends flow data request
+    ## - FlowVM sends flow data request (through the session's stop loader,
+    ##   which every product session attaches — `createStopLoadingApp`)
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let app = createAppViewModel(mock.toBackendService())
+      let app = createStopLoadingApp(mock.toBackendService())
       let session = app.session
       drain()
 
@@ -886,7 +888,7 @@ suite "Scenario 8: Cross-VM consistency after move":
       session.store.updateDebuggerPosition(500'u64, "calculator.py", 42)
       drain()
 
-      # StateVM: locals request was sent.
+      # The locals request was sent (by the session's stop loader).
       let localsCmd = mock.findCommand("ct/load-locals")
       check localsCmd.isSome
       check localsCmd.get.args["rrTicks"].getBiggestInt == 500
