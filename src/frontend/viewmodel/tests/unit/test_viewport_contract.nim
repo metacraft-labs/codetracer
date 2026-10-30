@@ -342,6 +342,66 @@ suite "EventLogVM on the viewport contract":
       check mock.sent("ct/event-load").len == 0
       dispose()
 
+suite "EventLogVM's measured reports":
+  # Measured at `c12d777ef` on a 355 px pane: 15 rows at the fallback 24 px
+  # before any row exists, 14 at the rows' own 26.79 px. The footer reads
+  # `viewport`, so it is what these cases watch.
+  const
+    FallbackPx = 24.0
+    MeasuredPx = 26.79
+
+  test "a report with a new pitch applies at once, and an unchanged one debounces":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = storeWithMock()
+      let clock = newTestClock()
+      store.viewportScheduler = testClockScheduler(clock)
+      let vm = createEventLogVM(store)
+
+      # The chicken and egg: no row exists yet, so the fallback pitch is what
+      # the ViewModel already holds, and the report is an ordinary debounced
+      # one that still has to arrive in order to ask for the first rows.
+      vm.reportMeasure(Viewport(rows: 15), FallbackPx)
+      check vm.viewport.val.rows == 0
+      clock.advance(ViewportDebounceMs)
+      check vm.viewport.val.rows == 15
+
+      # The first real measurement: no timer has to run.
+      vm.reportMeasure(Viewport(rows: 14), MeasuredPx)
+      check vm.rowHeightPx.val == MeasuredPx
+      check vm.viewport.val.rows == 14
+
+      # Scrolling at that pitch, and a wobble inside `setRowHeightPx`'s
+      # tolerance, stay debounced.
+      vm.reportMeasure(Viewport(rows: 14, firstRow: 3), MeasuredPx)
+      vm.reportMeasure(Viewport(rows: 14, firstRow: 4), MeasuredPx + 0.005)
+      check vm.viewport.val.firstRow == 0
+      check vm.rowHeightPx.val == MeasuredPx
+      clock.advance(ViewportDebounceMs)
+      check vm.viewport.val.firstRow == 4
+      dispose()
+
+  test "a hidden pane's report is no measurement, and showing it again applies at once":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = storeWithMock()
+      let clock = newTestClock()
+      store.viewportScheduler = testClockScheduler(clock)
+      let vm = createEventLogVM(store)
+      vm.reportMeasure(Viewport(rows: 14), MeasuredPx)
+      check vm.viewport.val.rows == 14
+
+      # A hidden pane's rows have no boxes, so it reports the fallback pitch
+      # and no rows. That pitch differs from the held one and measures nothing:
+      # it waits its turn as it always did.
+      vm.reportMeasure(Viewport(), FallbackPx)
+      check vm.viewport.val.rows == 14
+      clock.advance(ViewportDebounceMs)
+      check vm.viewport.val.rows == 0
+
+      # Shown again, the rows' pitch is measured anew.
+      vm.reportMeasure(Viewport(rows: 14), MeasuredPx)
+      check vm.viewport.val.rows == 14
+      dispose()
+
 suite "StepListVM on the viewport contract":
 
   test "R rows: the R rows either side of the line":

@@ -701,6 +701,32 @@ proc setViewport*(vm: EventLogVM; v: Viewport) =
     "firstRow": v.firstRow})
   vm.viewportGate.submit(v)
 
+proc reportMeasure*(vm: EventLogVM; v: Viewport; rowPx: float) =
+  ## What the pane's host measured: `v`, at rows `rowPx` apart. Reports at the
+  ## pitch the ViewModel already holds are debounced like any other (scrolling
+  ## must be); one that carries a NEW pitch is applied at once.
+  ##
+  ## With no row rendered there is no pitch to measure, so the pane has to ask
+  ## for its first rows at a fallback pitch, and the size that gives is
+  ## provisional. When the rows arrive the true size is known, and debouncing
+  ## it leaves the footer on the provisional range until the timer can fire:
+  ## measured at `c12d777ef`, a 355 px pane said "to 15" at the fallback 24 px
+  ## for about 0.8 s after its 26.79 px rows had made it 14, because long
+  ## main-thread work delayed the timer (codetracer-pm issue 2026-10-25). The
+  ## debounce coalesces bursts, and a pitch change is not one: a pitch settles
+  ## once, while a scroll keeps it, so nothing here defeats it.
+  ##
+  ## A hidden pane's report (no rows; its rows have no boxes, so it names the
+  ## fallback pitch) also differs from a measured pitch, but it measures
+  ## nothing, and it stays debounced as it always was: a hide must not cut a
+  ## pending report's wait short. Its fallback pitch does replace the held one,
+  ## so the pane's first report when shown again applies at once too.
+  let wasPitch = vm.rowHeightPx.val
+  vm.setRowHeightPx(rowPx)
+  vm.setViewport(v)
+  if v.measured and vm.rowHeightPx.val != wasPitch:
+    vm.viewportGate.flush()
+
 proc followStop*(vm: EventLogVM; follow = true) =
   ## Name the current stop in each window request, and ask again on a move
   ## (`followsStop`).
