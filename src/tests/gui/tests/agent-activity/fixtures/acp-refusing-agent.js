@@ -51,6 +51,10 @@
 //                     appended to this file, one per line.  The spec reads it
 //                     as its positive control: the refusal it asserts on must
 //                     come from a `session/prompt` that really reached here.
+//
+//   CT_FAKE_ACP_PROMPT_LOG  when set, the text of every `session/prompt` is
+//                     appended to this file as one JSON string per line, so
+//                     a spec can read what the agent received.
 
 "use strict";
 
@@ -76,6 +80,19 @@ function logMethod(method) {
   if (logPath.length === 0) return;
   try {
     fs.appendFileSync(logPath, `${method}\n`);
+  } catch {
+    // The log is a test aid; never let it break the protocol.
+  }
+}
+
+// `CT_FAKE_ACP_PROMPT_LOG`: append each `session/prompt`'s text as one JSON
+// string per line, so a spec reads what the agent RECEIVED (the context
+// header the main process builds included), not the pane's echo of it.
+const promptLogPath = process.env.CT_FAKE_ACP_PROMPT_LOG || "";
+function logPrompt(text) {
+  if (promptLogPath.length === 0) return;
+  try {
+    fs.appendFileSync(promptLogPath, `${JSON.stringify(text)}\n`);
   } catch {
     // The log is a test aid; never let it break the protocol.
   }
@@ -118,6 +135,7 @@ function handleRequest(msg) {
       send({ jsonrpc: "2.0", id: msg.id, result: { sessionId: SESSION_ID } });
       return;
     case "session/prompt": {
+      logPrompt(promptText(msg));
       if (promptText(msg).includes(HOLD_MARKER)) {
         heldPromptIds.push(msg.id);
         return;

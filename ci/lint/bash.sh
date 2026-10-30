@@ -307,6 +307,14 @@ lint_step "shellcheck: flake lock node dates guard" \
 lint_step "shellcheck: sibling cargo locks guard" \
 	shellcheck scripts/test-sibling-cargo-locks.sh
 
+# The guard above only protects a branch whose CI runs it. It ran inside `just
+# test` alone, which no push to `agents` triggers, and a stale lock landed
+# there. `.github/workflows/sibling-cargo-locks.yml` runs it on `agents` too;
+# this suite holds that workflow to the branch, the files that can make a lock
+# stale, and STRICT. Pure bash + python3 over the live workflow files.
+lint_step "contract suite: the sibling Cargo.lock guard runs on agents" \
+	bash ci/test/sibling-cargo-locks-workflow-test.sh
+
 # Not covered by the `ci/**/*.sh` glob above, and it runs in the deploy lane on
 # every push to `cloud`, where a shell defect would surface as a deploy failure
 # rather than as a lint one.

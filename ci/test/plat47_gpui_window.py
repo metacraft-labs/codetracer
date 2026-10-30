@@ -831,9 +831,20 @@ def record():
         # pixels are exactly its colour).
         bright = max((px(frame, i, j) for j in range(title[1], title[1] + title[3])
                       for i in range(title[0], title[0] + title[2])), key=lum)
+        # The ground the tab's label row is painted on: the commonest colour
+        # of the row inside its rounded corners (the title and its icons are
+        # a minority of it). The selected tab has a ground of its own there
+        # (the user's PLAT-49 direction, `chrome.tabStyle`); the others are
+        # the desktop's panel-coloured chips.
+        hist = {}
+        for j in range(r[1] + 2, r[1] + r[3] - 2):
+            for i in range(r[0] + 6, r[0] + r[2] - 6):
+                c = px(frame, i, j)
+                hist[c] = hist.get(c, 0) + 1
         return {"titleInk": "#%02x%02x%02x" % bright,
                 "activeTitlePixels": colour_count(frame, title, act_t, tol=0),
                 "inactiveTitlePixels": colour_count(frame, title, inact_t, tol=0),
+                "labelGround": "#%02x%02x%02x" % max(hist, key=hist.get),
                 "bridge": "#%02x%02x%02x" % px(frame, r[0] + r[2] // 2,
                                                 strip[1] + strip[3] - 2)}
 

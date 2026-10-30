@@ -206,6 +206,15 @@ type UnixStream = tokio::net::TcpStream;
 use tokio::process::Command;
 use tokio::time::{sleep, timeout};
 
+// Building a missing or stale workspace sibling (ct-native-replay, the Ruby
+// recorder's native extension) for the tests that need it: the same code,
+// script and cross-process lock db-backend's harness provisions with.
+// `rustfmt::skip`: the file is db-backend's and formatted by db-backend's
+// rustfmt.toml (max_width = 120); this crate's defaults would fight it.
+#[rustfmt::skip]
+#[path = "../../db-backend/tests/test_harness/sibling_provisioning.rs"]
+mod sibling_provisioning;
+
 // ---------------------------------------------------------------------------
 // Shared helpers (previously in daemon_integration.rs; now consolidated here since integration
 // test files cannot share code without a helper crate or `mod` file)
@@ -449,71 +458,67 @@ fn find_db_backend() -> Option<PathBuf> {
     None
 }
 
-/// Finds the `ct-native-replay` binary (same logic as the replay-server test harness).
+/// Finds the `ct-native-replay` binary, the same way db-backend's harness
+/// does (`find_ct_native_replay` in `src/db-backend/tests/test_harness/mod.rs`).
+///
+/// Search order:
+/// 1. `CT_NATIVE_REPLAY_PATH` (explicit override), falling back to
+///    `CT_RR_SUPPORT_PATH`, the spelling `codetracer-native-backend`'s
+///    `scripts/run-cross-repo-tests.sh` still exports.  Used as given.
+/// 2. `ct-native-replay` on `PATH`, unless the hit is the workspace
+///    sibling's own build output (the dev shell puts it there), which says
+///    only that it was built once, not that the build is current.
+/// 3. The workspace's `codetracer-native-backend` sibling, PROVISIONED: built
+///    or refreshed by `scripts/build-siblings.sh --only
+///    codetracer-native-backend` (see `sibling_provisioning`), which panics
+///    naming the failing build.  This used to return whatever
+///    `target/debug/ct-native-replay` held, however stale, and fail when the
+///    sibling had never been built: every rr test failed on a fresh
+///    workspace for want of a build step.
+/// 4. No sibling checkout: a MISSING PREREQUISITE naming it (through
+///    [`prereq_missing`]).
 fn find_ct_native_replay() -> Option<PathBuf> {
-    // Explicit environment variable (used by cross-repo test scripts).
-    // `CT_RR_SUPPORT_PATH` is the spelling `codetracer-native-backend`'s
-    // `scripts/run-cross-repo-tests.sh` still exports; it stays until that
-    // repo switches over.
     for var_name in ["CT_NATIVE_REPLAY_PATH", "CT_RR_SUPPORT_PATH"] {
         if let Ok(path) = std::env::var(var_name) {
             let p = PathBuf::from(&path);
-            if p.exists() && p.is_file() {
+            if p.is_file() {
                 return Some(p);
             }
+            eprintln!("WARNING: {var_name}='{path}' but file does not exist; falling back");
         }
     }
 
-    // Check PATH.
-    if let Ok(output) = std::process::Command::new("which")
-        .arg("ct-native-replay")
-        .output()
+    const SIBLING: &str = "codetracer-native-backend";
+    let exe_name = format!("ct-native-replay{}", std::env::consts::EXE_SUFFIX);
+    if let Ok(output) = std::process::Command::new("which").arg(&exe_name).output()
         && output.status.success()
     {
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !path.is_empty() {
-            return Some(PathBuf::from(path));
+        let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+        if !path.as_os_str().is_empty()
+            && !sibling_provisioning::is_in_workspace_sibling(&path, SIBLING)
+        {
+            return Some(path);
         }
     }
 
-    // Check common development locations relative to the session-manager crate.
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let dev_locations = [
-        "../../../codetracer-native-backend/target/debug/ct-native-replay",
-        "../../../codetracer-native-backend/target/release/ct-native-replay",
-        "../../codetracer-native-backend/target/debug/ct-native-replay",
-    ];
-
-    for loc in dev_locations {
-        let path = manifest_dir.join(loc);
-        if path.exists() {
-            return Some(path.canonicalize().unwrap_or(path));
-        }
+    let sibling = sibling_provisioning::workspace_root().join(SIBLING);
+    if !sibling.is_dir() {
+        prereq_missing(&format!(
+            "ct-native-replay: CT_NATIVE_REPLAY_PATH is unset, it is not on PATH, \
+             and the `{SIBLING}` sibling it is built from is not checked out at {}. \
+             Check it out (`repro ws enable codetracer` checks out every repository \
+             the codetracer project includes), or point CT_NATIVE_REPLAY_PATH at a build.",
+            sibling.display()
+        ));
+        return None;
     }
-
-    // Check from home directory.
-    if let Some(home) = std::env::var_os("HOME") {
-        let home_path = PathBuf::from(home);
-        let home_locations = [
-            "metacraft/codetracer-native-backend/target/debug/ct-native-replay",
-            "metacraft/codetracer-main/codetracer-native-backend/target/debug/ct-native-replay",
-            "codetracer-native-backend/target/debug/ct-native-replay",
-        ];
-        for loc in home_locations {
-            let path = home_path.join(loc);
-            if path.exists() {
-                return Some(path);
-            }
-        }
-    }
-
-    prereq_missing(
-        "ct-native-replay was not found via CT_NATIVE_REPLAY_PATH, PATH, or \
-         any sibling codetracer-native-backend checkout.  Build it \
-         (`cargo build` in codetracer-native-backend) or point \
-         CT_NATIVE_REPLAY_PATH at it.",
-    );
-    None
+    // The artifact build-siblings.sh's entry names (`just
+    // ensure-ct-native-replay` builds the debug profile).
+    Some(sibling_provisioning::provision_sibling(
+        SIBLING,
+        SIBLING,
+        &format!("target/debug/{exe_name}"),
+    ))
 }
 
 /// Check if `rr` is available on the system.
@@ -1379,26 +1384,6 @@ fn find_nargo() -> Option<PathBuf> {
     None
 }
 
-/// Finds a Ruby recorder launcher capable of producing a CTFS `.ct`
-/// container.
-///
-/// Search order:
-/// 1. `CODETRACER_RUBY_RECORDER_PATH` environment variable.
-/// 2. The native gem launcher (`codetracer-ruby-recorder`) via PATH —
-///    it is the only Ruby recorder that emits a `.ct` bundle the
-///    backend-manager's `read_trace_metadata` can read (M-REC-1.5
-///    retired the JSON sidecar fallback).
-/// 3. The native gem launcher at its in-repo location, provided the
-///    Rust extension has been built (see `ruby_native_extension_built`).
-///    We probe for it explicitly because the launcher script otherwise silently
-///    falls back to an event-less mode that produces no `.ct` and
-///    breaks downstream session tests.
-/// 4. As a last resort, the pure-Ruby recorder — kept around so dev
-///    environments that haven't run `just build-extension` still get
-///    a usable diagnostic when the daemon refuses the bundle.
-///
-/// When `REQUIRE_REAL_RECORDINGS=1` is set and no recorder is found,
-/// this function panics instead of returning `None`.
 /// True when `path` points at the pure-Ruby recorder launcher.  The
 /// pure-Ruby gem only emits the retired `trace.json` JSON-sidecar layout;
 /// db-backend is CTFS-only since M-REC-1.5, so a pure-Ruby launcher can
@@ -1528,15 +1513,31 @@ fn ruby_extension_probe_rejects_missing_extension() {
     assert!(!ruby_native_extension_built(unrelated.path(), "so"));
 }
 
+/// Finds a Ruby recorder launcher that writes a CTFS `.ct` container, the
+/// same way db-backend's harness does (`find_ruby_recorder` in
+/// `src/db-backend/tests/test_harness/mod.rs`).
+///
+/// Search order:
+/// 1. `CODETRACER_RUBY_RECORDER_PATH` (explicit override), used as given
+///    unless it names the pure-Ruby launcher, which emits only the retired
+///    `trace.json` layout the daemon cannot open.
+/// 2. `codetracer-ruby-recorder` on `PATH` (a gem-installed recorder),
+///    unless the hit is the workspace sibling's own wrapper: that wrapper is
+///    checked in, so its presence says nothing about whether the native
+///    extension it loads was ever built.
+/// 3. The workspace's `codetracer-ruby-recorder` sibling, PROVISIONED: its
+///    native extension is built or refreshed by `scripts/build-siblings.sh
+///    --only codetracer-ruby-recorder` (see `sibling_provisioning`), which
+///    panics naming the failing build; the wrapper is returned.  This used
+///    to fail every Ruby-recording test on a workspace where nobody had run
+///    `just build-extension` in the sibling, and to use a stale extension
+///    where someone had.
+/// 4. No sibling checkout: the legacy submodule
+///    `libs/codetracer-ruby-recorder`, if its extension is built; otherwise a
+///    MISSING PREREQUISITE naming the sibling (through [`prereq_missing`]).
 fn find_ruby_recorder() -> Option<PathBuf> {
-    // 1. Explicit environment variable override.  Honour it only when it
-    //    is a CTFS-capable (native) launcher — a pure-Ruby launcher here
-    //    would silently produce a `trace.json` the daemon cannot open.
     if let Ok(path) = std::env::var("CODETRACER_RUBY_RECORDER_PATH") {
         let p = PathBuf::from(&path);
-        if p.exists() && p.is_file() && !is_pure_ruby_launcher(&p) {
-            return Some(p);
-        }
         if is_pure_ruby_launcher(&p) {
             eprintln!(
                 "NOTE: CODETRACER_RUBY_RECORDER_PATH points at the pure-Ruby \
@@ -1544,79 +1545,72 @@ fn find_ruby_recorder() -> Option<PathBuf> {
                  emits legacy JSON sidecars that db-backend (CTFS-only) \
                  cannot load.  Falling back to the native gem launcher."
             );
+        } else if p.is_file() {
+            return Some(p);
+        } else {
+            eprintln!(
+                "WARNING: CODETRACER_RUBY_RECORDER_PATH='{path}' but file does not exist; falling back"
+            );
         }
     }
 
-    // 2. Native gem launcher on PATH.  This is the production path —
-    //    the launcher loads the gem's native extension
-    //    (`codetracer_ruby_recorder.<DLEXT>`) and emits a CTFS container
-    //    the daemon can read.
+    const SIBLING: &str = "codetracer-ruby-recorder";
+    const GEM: &str = "gems/codetracer-ruby-recorder";
+    const WRAPPER: &str = "gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder";
+
     if let Ok(output) = std::process::Command::new("which")
         .arg("codetracer-ruby-recorder")
         .output()
         && output.status.success()
     {
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !path.is_empty() {
-            return Some(PathBuf::from(path));
+        let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+        if !path.as_os_str().is_empty()
+            && !is_pure_ruby_launcher(&path)
+            && !sibling_provisioning::is_in_workspace_sibling(&path, SIBLING)
+        {
+            return Some(path);
         }
     }
 
-    // 3. In-repo native gem launcher.  The native gem is the only Ruby
-    //    recorder that emits a CTFS `.ct` container — the format the
-    //    db-backend (CTFS-only since M-REC-1.5) can load.  We canonicalize
-    //    the candidate paths first: `CARGO_MANIFEST_DIR` is an absolute
-    //    path with native separators, but joining a `../../..`-style
-    //    relative literal leaves an un-normalized mixed-separator path
-    //    whose `.parent()` / `.join()` arithmetic for the extension probe is
-    //    fragile on Windows.  Canonicalizing the launcher up-front gives a
-    //    clean absolute path so the extension existence probe is reliable.
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let native_launcher_paths = [
-        "../../../codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder",
-        "../../libs/codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder",
-    ];
-    for loc in native_launcher_paths {
-        let raw = manifest_dir.join(loc);
-        let launcher = match raw.canonicalize() {
-            Ok(p) => p,
-            Err(_) => continue,
-        };
-        if !launcher.is_file() {
-            continue;
+    let sibling = sibling_provisioning::workspace_root().join(SIBLING);
+    if !sibling.is_dir() {
+        let legacy_gem = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../libs/codetracer-ruby-recorder")
+            .join(GEM);
+        if ruby_native_extension_built(
+            &legacy_gem.join("ext/native_tracer/target/release"),
+            &ruby_dlext(),
+        ) {
+            return Some(sibling_provisioning::safe_canonicalize(
+                &legacy_gem.join("bin/codetracer-ruby-recorder"),
+            ));
         }
-        // The launcher lives in `bin/` of the gem; the compiled native
-        // extension lives in `<gem>/ext/native_tracer/target/release/`.
-        // Its file name depends on the platform (`.so` on Linux,
-        // `.bundle`/`.dylib` on macOS, `.so`/`.dll` on Windows), so accept
-        // exactly the names the gem's loader accepts — see
-        // `ruby_native_extension_built`.
-        let gem_root = launcher
-            .parent()
-            .and_then(|p| p.parent())
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| launcher.clone());
-        let ext_release = gem_root.join("ext/native_tracer/target/release");
-        if ruby_native_extension_built(&ext_release, &ruby_dlext()) {
-            return Some(launcher);
-        }
+        prereq_missing(&format!(
+            "the native Ruby recorder: CODETRACER_RUBY_RECORDER_PATH is unset, \
+             `codetracer-ruby-recorder` is not on PATH, and the `{SIBLING}` sibling \
+             whose native extension these tests build is not checked out at {}. \
+             Check it out (`repro ws enable codetracer` checks out every repository \
+             the codetracer project includes), or point CODETRACER_RUBY_RECORDER_PATH \
+             at a native launcher.",
+            sibling.display()
+        ));
+        return None;
     }
 
-    // The native extension is mandatory: db-backend is CTFS-only and the
-    // pure-Ruby recorder emits only the retired `trace.json` JSON-sidecar
-    // layout, which the daemon refuses to open.  Falling back to it would
-    // guarantee a "no .ct found" failure, so we surface the missing
-    // extension directly instead of recording an unusable trace.
-    panic!(
-        "no CTFS-capable Ruby recorder found.  The native gem launcher \
-         (codetracer-ruby-recorder/gems/codetracer-ruby-recorder) and its \
-         compiled extension in `ext/native_tracer/target/release/` \
-         (`codetracer_ruby_recorder.<DLEXT>` or \
-         `libcodetracer_ruby_recorder.{{so,bundle,dylib,dll}}`, the names \
-         lib/codetracer/native.rb loads) are required — run \
-         `just build-extension` in codetracer-ruby-recorder, or set CODETRACER_RUBY_RECORDER_PATH to a \
-         native launcher."
+    // The artifact build-siblings.sh's entry names: `just build-extension`
+    // writes `codetracer_ruby_recorder.<RbConfig DLEXT>`, and both the script
+    // and `ruby_dlext` ask the same `ruby` for DLEXT.
+    sibling_provisioning::provision_sibling(
+        SIBLING,
+        SIBLING,
+        &format!(
+            "{GEM}/ext/native_tracer/target/release/codetracer_ruby_recorder.{}",
+            ruby_dlext()
+        ),
     );
+    Some(sibling_provisioning::safe_canonicalize(
+        &sibling.join(WRAPPER),
+    ))
 }
 
 /// Creates a Noir project, runs `nargo trace` to produce a trace directory,

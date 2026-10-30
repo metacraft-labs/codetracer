@@ -1,4 +1,5 @@
-//! A move that fails part-way leaves the user's breakpoints as they were.
+//! A move that fails part-way leaves the user's breakpoints as they were,
+//! and reports where it left the replay.
 //!
 //! Spec reference: codetracer-specs
 //! `spec/Architecture/CodeTracer-DAP-Extensions.md`, "Every request is
@@ -20,19 +21,31 @@
 //! breakpoints still suppressed: the session went on, and never stopped at
 //! them again.
 //!
+//! The same requests, and a step that goes on past an internal JIT
+//! registration stop, make several moves in a row. When one of them fails
+//! after others have run, the replay is wherever the last successful move
+//! stopped. The request is still answered `success: false` with the error,
+//! but first the handler's step is brought up to date and that stop is
+//! reported (`stopped` and `ct/complete-move`), as `ct/source-line-jump`
+//! already did when its moves failed. Before that fix these requests
+//! returned with the handler's step and the client's view still at the stop
+//! before the request, so the next move started from a position the client
+//! had never been shown.
+//!
 //! ## Why a test double stands in for the replay session
 //!
-//! [`BracketReplay`] replaces the trace's `ReplaySession` and keeps the two
-//! facts this pins — whether the user's breakpoints are suppressed, and
-//! which temporary breakpoints are set — failing the one call each case
-//! names. The production session for these traces is an rr replay driven
-//! through the `ct-native-replay` worker from the sibling
-//! `codetracer-native-backend` repository. A real worker cannot be made to
-//! fail a chosen `Continue` (or a chosen breakpoint operation) on demand, and
-//! the defect is entirely in the handler's bookkeeping around those calls,
-//! not in the worker. So the double supplies the calls' outcomes and nothing
-//! else; every trait method the bracket does not use is unreachable and
-//! panics if called.
+//! [`BracketReplay`] replaces the trace's `ReplaySession` and keeps the
+//! facts this pins — whether the user's breakpoints are suppressed, which
+//! temporary breakpoints are set, and how many moves have succeeded (its
+//! position, reported as both the step id and the location's `rr_ticks`) —
+//! failing the one call each case names. The production session for these
+//! traces is an rr replay driven through the `ct-native-replay` worker from
+//! the sibling `codetracer-native-backend` repository. A real worker cannot
+//! be made to fail a chosen `Continue` (or a chosen breakpoint operation) on
+//! demand, and the defect is entirely in the handler's bookkeeping around
+//! those calls, not in the worker. So the double supplies the calls'
+//! outcomes and nothing else; every trait method these requests do not use
+//! is unreachable and panics if called.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
@@ -52,7 +65,7 @@ use db_backend::recreator_session::RecreatorArgs;
 use db_backend::replay::ReplaySession;
 use db_backend::task::{
     Action, Breakpoint, CallLine, CtLoadLocalsArguments, Events, HistoryResultWithRecord, LoadHistoryArg,
-    LocalStepJump, Location, ProgramEvent, SourceLocation, TraceKind, VariableWithRecord,
+    LocalStepJump, Location, MoveState, ProgramEvent, RRTicks, SourceLocation, StepArg, TraceKind, VariableWithRecord,
 };
 use db_backend::value::ValueRecordWithType;
 use serde_json::json;
@@ -79,6 +92,9 @@ struct BracketState {
     temporaries: Vec<i64>,
     next_id: i64,
     continues: usize,
+    /// How many moves (`Continue`s and steps) have succeeded: where the
+    /// replay is. A failed move leaves it where it was.
+    position: i64,
 }
 
 /// A `ReplaySession` that answers the run-to-line bracket only. See the
@@ -87,9 +103,12 @@ struct BracketState {
 struct BracketReplay {
     state: Arc<Mutex<BracketState>>,
     fail: Failure,
+    /// The double reports every stop as one inside the JIT debug-symbol
+    /// registration hook, which a live session continues past.
+    at_jit_registration: bool,
 }
 
-const ONLY_THE_BRACKET: &str = "BracketReplay answers the run-to-line bracket only";
+const ONLY_THE_BRACKET: &str = "BracketReplay answers the moves of a run-to-line bracket or a step only";
 
 impl ReplaySession for BracketReplay {
     fn disable_breakpoints(&mut self) -> Result<(), Box<dyn Error>> {
@@ -133,22 +152,38 @@ impl ReplaySession for BracketReplay {
         Ok(true)
     }
     fn step(&mut self, action: Action, _forward: bool) -> Result<bool, Box<dyn Error>> {
-        assert!(matches!(action, Action::Continue), "the bracket only continues");
+        assert!(
+            matches!(action, Action::Continue | Action::StepIn),
+            "these requests only continue and step in"
+        );
         let mut state = self.state.lock().expect("state");
-        state.continues += 1;
-        if let Failure::Continue(n) = self.fail
-            && state.continues == n
-        {
-            return Err(format!("injected: continue #{n} failed").into());
+        if matches!(action, Action::Continue) {
+            state.continues += 1;
+            if let Failure::Continue(n) = self.fail
+                && state.continues == n
+            {
+                return Err(format!("injected: continue #{n} failed").into());
+            }
         }
+        state.position += 1;
         Ok(true)
     }
     fn load_location(&mut self, _expr_loader: &mut ExprLoader) -> Result<Location, Box<dyn Error>> {
+        let position = self.state.lock().expect("state").position;
         Ok(Location {
             path: SOURCE_PATH.to_string(),
             line: 1,
+            rr_ticks: RRTicks(position),
+            function_name: if self.at_jit_registration {
+                "__jit_debug_register_code".to_string()
+            } else {
+                String::new()
+            },
             ..Location::default()
         })
+    }
+    fn current_step_id(&mut self) -> StepId {
+        StepId(self.state.lock().expect("state").position)
     }
 
     fn run_to_entry(&mut self) -> Result<(), Box<dyn Error>> {
@@ -215,9 +250,6 @@ impl ReplaySession for BracketReplay {
     ) -> Result<ValueRecordWithType, Box<dyn Error>> {
         unreachable!("{ONLY_THE_BRACKET}")
     }
-    fn current_step_id(&mut self) -> StepId {
-        unreachable!("{ONLY_THE_BRACKET}")
-    }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
@@ -225,14 +257,21 @@ impl ReplaySession for BracketReplay {
 
 /// An rr-kind handler over the double, and the state the double keeps.
 fn handler_failing(fail: Failure) -> (Handler, Arc<Mutex<BracketState>>) {
+    handler_over(fail, RecreatorArgs::default(), false)
+}
+
+/// [`handler_failing`] with the session's arguments and the double's JIT
+/// registration stops chosen by the caller.
+fn handler_over(fail: Failure, args: RecreatorArgs, at_jit_registration: bool) -> (Handler, Arc<Mutex<BracketState>>) {
     let state = Arc::new(Mutex::new(BracketState::default()));
     let handler = Handler::construct_with_replay(
         TraceKind::Recreator,
-        RecreatorArgs::default(),
+        args,
         Arc::new(InMemoryTraceReader::new(Db::new(&PathBuf::from("/test/workdir")))),
         Box::new(BracketReplay {
             state: Arc::clone(&state),
             fail,
+            at_jit_registration,
         }),
         false,
     );
@@ -326,4 +365,128 @@ fn source_line_jump_restores_breakpoints_when_the_temporary_breakpoint_cannot_be
     };
     let outcome = handler.source_line_jump(request("ct/source-line-jump"), target, sender);
     assert_bracket_closed(outcome, &state, "ct/source-line-jump, add_breakpoint fails");
+}
+
+/// The request failed with the injected error, and before it did it brought
+/// the handler's step up to date and reported the stop the replay was left
+/// at: one `stopped` and one `ct/complete-move` at `position`, and no
+/// response of its own (the task thread answers the error `success: false`).
+fn assert_stop_reported(
+    outcome: &Result<(), Box<dyn Error>>,
+    handler: &Handler,
+    messages: &mpsc::Receiver<DapMessage>,
+    position: i64,
+    case: &str,
+) {
+    let err = outcome
+        .as_ref()
+        .expect_err(&format!("{case}: the injected failure must fail the request"));
+    assert!(
+        err.to_string().contains("injected"),
+        "{case}: the request must fail with the injected error, got {err}"
+    );
+    assert_eq!(
+        handler.step_id,
+        StepId(position),
+        "{case}: the handler's step must be where the replay was left"
+    );
+    let mut stopped = 0;
+    let mut complete_moves = vec![];
+    for message in messages.try_iter() {
+        match message {
+            DapMessage::Event(event) if event.event == "stopped" => stopped += 1,
+            DapMessage::Event(event) if event.event == "ct/complete-move" => {
+                let state: MoveState = serde_json::from_value(event.body).expect("a MoveState body");
+                complete_moves.push(state.location.rr_ticks.0);
+            }
+            DapMessage::Response(response) => {
+                panic!("{case}: a failed request must not answer itself, got {response:?}")
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(stopped, 1, "{case}: the stop the replay was left at must be reported");
+    assert_eq!(
+        complete_moves,
+        vec![position],
+        "{case}: ct/complete-move must report the position the replay was left at"
+    );
+}
+
+#[test]
+fn local_step_jump_that_fails_midway_reports_where_it_left_the_replay() {
+    for nth in 1..=5 {
+        let (mut handler, state) = handler_failing(Failure::Continue(nth));
+        let (sender, receiver) = mpsc::channel::<DapMessage>();
+        let outcome = handler.local_step_jump(request("ct/local-step-jump"), loop_jump(), sender);
+        let case = format!("ct/local-step-jump, continue #{nth} fails");
+        // The `Continue`s before the failing one have moved the replay.
+        assert_stop_reported(&outcome, &handler, &receiver, nth as i64 - 1, &case);
+        assert_bracket_closed(outcome, &state, &case);
+    }
+}
+
+#[test]
+fn local_step_jump_whose_bracket_cannot_be_closed_reports_where_it_left_the_replay() {
+    let (mut handler, state) = handler_failing(Failure::DeleteBreakpoint);
+    let (sender, receiver) = mpsc::channel::<DapMessage>();
+    let outcome = handler.local_step_jump(request("ct/local-step-jump"), loop_jump(), sender);
+    // All five `Continue`s ran; closing the bracket is what failed.
+    assert_stop_reported(
+        &outcome,
+        &handler,
+        &receiver,
+        5,
+        "ct/local-step-jump, delete_breakpoint fails",
+    );
+    assert!(
+        !state.lock().expect("state").suppressed,
+        "a failed delete of the temporary breakpoint must not keep the user's breakpoints disabled"
+    );
+}
+
+#[test]
+fn source_line_jump_whose_bracket_cannot_be_closed_reports_where_it_left_the_replay() {
+    let (mut handler, state) = handler_failing(Failure::DeleteBreakpoint);
+    let (sender, receiver) = mpsc::channel::<DapMessage>();
+    let target = SourceLocation {
+        path: SOURCE_PATH.to_string(),
+        line: 6,
+        ..SourceLocation::default()
+    };
+    let outcome = handler.source_line_jump(request("ct/source-line-jump"), target, sender);
+    // `Smart`: forward, which misses line 6 (the double stops on line 1),
+    // then backward: two `Continue`s ran before closing the bracket failed.
+    assert_stop_reported(
+        &outcome,
+        &handler,
+        &receiver,
+        2,
+        "ct/source-line-jump, delete_breakpoint fails",
+    );
+    assert!(
+        !state.lock().expect("state").suppressed,
+        "a failed delete of the temporary breakpoint must not keep the user's breakpoints disabled"
+    );
+}
+
+#[test]
+fn step_whose_jit_registration_continue_fails_reports_where_it_left_the_replay() {
+    // A live session continues past the internal JIT debug-symbol
+    // registration stop a step can land on. Here the step in succeeds and
+    // the first of those `Continue`s fails.
+    let args = RecreatorArgs {
+        live_program: Some(PathBuf::from("/test/workdir/main")),
+        ..RecreatorArgs::default()
+    };
+    let (mut handler, _state) = handler_over(Failure::Continue(1), args, true);
+    let (sender, receiver) = mpsc::channel::<DapMessage>();
+    let outcome = handler.step(request("stepIn"), StepArg::new(Action::StepIn, false), sender);
+    assert_stop_reported(
+        &outcome,
+        &handler,
+        &receiver,
+        1,
+        "stepIn, the JIT registration continue fails",
+    );
 }

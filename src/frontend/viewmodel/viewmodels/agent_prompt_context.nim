@@ -65,6 +65,35 @@ func editorSelectionContext*(path: string; first, last: int): string =
   if a == b: path & ":" & $a
   else: path & ":" & $a & "-" & $b
 
+type
+  EditorRange* = tuple[startLine, startColumn, endLine, endColumn: int]
+    ## One selection range as the desktop's Monaco reports it: 1-based lines
+    ## and columns, start before end.
+
+func selectedLinesOf*(ranges: openArray[EditorRange];
+                      caretLine: int): tuple[first, last: int] =
+  ## The desktop's half of `EditingDocument.selectedLines`: the lines the
+  ## non-empty `ranges` cover, or `caretLine` when none spans text. A range
+  ## that ends at column 1 of a later line does not cover that line — it
+  ## stops at the line break before it, as the native selection's cells do
+  ## (`editing_core.selectionCells`). So selecting lines 3 to 5 by their line
+  ## numbers (which ends at 6:1) attaches `path:3-5` on every front-end.
+  var any = false
+  for r in ranges:
+    if r.startLine == r.endLine and r.startColumn == r.endColumn:
+      continue
+    let last =
+      if r.endColumn <= 1 and r.endLine > r.startLine: r.endLine - 1
+      else: r.endLine
+    if not any:
+      result = (r.startLine, last)
+      any = true
+    else:
+      result.first = min(result.first, r.startLine)
+      result.last = max(result.last, last)
+  if not any:
+    result = (caretLine, caretLine)
+
 func withContextPath*(paths: openArray[string]; path: string): seq[string] =
   ## `paths` with `path` attached: appended once (a path already attached is
   ## not attached twice), blanks ignored.

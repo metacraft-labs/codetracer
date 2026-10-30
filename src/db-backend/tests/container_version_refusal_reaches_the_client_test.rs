@@ -183,8 +183,9 @@ fn terminate_child(child: &mut Child) {
 }
 
 /// Run `initialize` → `configurationDone` → `launch` against a real
-/// `replay-server --stdio` and drain until `stopped` or an error notification
-/// arrives, or `budget` expires.
+/// `replay-server --stdio` and drain until both `stopped` and the `launch`
+/// response have arrived (in either order), until a refusal has arrived and
+/// its settle window has passed, or until `budget` expires.
 ///
 /// The request order is the front-ends' own: `headless_session.nim` and the
 /// SDK's `debugger_session.nim` both send `configurationDone` before `launch`.
@@ -310,8 +311,18 @@ fn drive_launch(trace_folder: &Path, budget: Duration) -> Exchange {
             }
             DapMessage::Request(request) => exchange.seen.push(format!("request {}", request.command)),
         }
-        if exchange.stopped {
-            // The trace opened; nothing more is coming that this case reads.
+        // The trace opened AND the launch was answered: nothing more is
+        // coming that this case reads. Both, not `stopped` alone. The Debug
+        // Adapter Protocol does not order the `launch` response against the
+        // events the launch causes
+        // (https://microsoft.github.io/debug-adapter-protocol/overview#launch-sequencing),
+        // and this server sends `stopped` from the thread that opens the
+        // trace while the thread that handed the launch over to it is still
+        // writing the `launch` response. Under load `stopped` wins, and a
+        // loop that broke on it reported "launch not acknowledged" for a
+        // response it had stopped listening for. The deadline stays the
+        // bound: if the response never comes, the control fails by name.
+        if exchange.stopped && exchange.launch_success.is_some() {
             break;
         }
         if !exchange.refusal_texts.is_empty() && settle_by.is_none() {

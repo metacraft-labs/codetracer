@@ -47,7 +47,7 @@ import views/isonim_agent_activity_view
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 176
+const ExpectedAssertions = 193
 
 var countedAssertions = 0
 
@@ -447,7 +447,8 @@ suite "PLAT-54 the prompt's add-context menu (DeepReview-GUI §2.2.7)":
       let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, 1)
       var drawn: seq[string] = @[]
       for item in findAll(panel, "agent-add-context-menu-item"):
-        drawn.add textOf(item).strip()
+        # The label alone, whatever else a row carries.
+        drawn.add textOf(findAll(item, "ct-menu-item-label")[0]).strip()
       ck drawn == labels
       dispose()
 
@@ -469,6 +470,58 @@ suite "PLAT-54 the prompt's add-context menu (DeepReview-GUI §2.2.7)":
     d.moveCaretTo(4, 1)
     d.extendSelectionTo(1, 0)
     ck d.selectedLines == (first: 2, last: 5)
+    # A selection that ends at the START of a line does not cover it — on
+    # the native document, and in the desktop's reading of Monaco's ranges
+    # (`selectedLinesOf`), so the two attach the same lines.
+    d.moveCaretTo(2, 0)
+    d.extendSelectionTo(4, 0)
+    ck d.selectedLines == (first: 3, last: 4)
+    ck selectedLinesOf([(startLine: 3, startColumn: 1, endLine: 5,
+                         endColumn: 1)], 9) == (first: 3, last: 4)
+    ck selectedLinesOf([(startLine: 3, startColumn: 2, endLine: 5,
+                         endColumn: 3)], 9) == (first: 3, last: 5)
+    # Nothing selected: the caret's line. Several ranges: all of them.
+    ck selectedLinesOf([(startLine: 4, startColumn: 2, endLine: 4,
+                         endColumn: 2)], 4) == (first: 4, last: 4)
+    ck selectedLinesOf([(startLine: 7, startColumn: 1, endLine: 7,
+                         endColumn: 4),
+                        (startLine: 2, startColumn: 1, endLine: 3,
+                         endColumn: 2)], 1) == (first: 2, last: 7)
+    ck selectedLinesOf([], 6) == (first: 6, last: 6)
+    # A path is attached once, however often it is chosen.
+    createRoot proc(dispose: proc()) =
+      let vm = createAgentActivityVM(nil)
+      vm.addContextPath("src/a.nim:3")
+      vm.addContextPath("src/a.nim:3")
+      ck vm.contextPaths.val == @["src/a.nim:3"]
+      dispose()
+
+  test "the desktop's Editor selection: the editor's lines, or disabled and why":
+    # The desktop's dropdown asks its host, as it draws, why *Editor
+    # selection* is unavailable (`editorSelectionUnavailableReason`): a
+    # reason draws the item disabled with the reason as its hover text; none
+    # draws it enabled, and a press hands the host the item.
+    for (reason, enabled) in [(AgentNoEditorSelectionReason, false), ("", true)]:
+      createRoot proc(dispose: proc()) =
+        let vm = createAgentActivityVM(nil)
+        vm.addContextDropdownOpen.val = true
+        var picked = 0
+        let callbacks = AgentActivityCallbacks(
+          editorSelectionUnavailableReason: proc(): string = reason,
+          onAddEditorSelection: proc() = inc picked)
+        let r = MockRenderer()
+        let panel = renderAgentActivityPanel[MockRenderer, MockNode](
+          r, vm, 1, callbacks = callbacks)
+        let items = findAll(panel, "agent-add-context-menu-item")
+        ck items.len == 4
+        let item = items[ord(aciEditorSelection)]
+        ck textOf(item).contains(aciEditorSelection.label)
+        let disabled = findAll(item, "ct-menu-item--disabled").len > 0
+        ck disabled == not enabled
+        ck item.attributes.getOrDefault("title", "") == reason
+        item.fireEvent("click")
+        ck picked == (if enabled: 1 else: 0)
+        dispose()
 
   test "attachments are rows above the prompt, each removable by its path":
     createRoot proc(dispose: proc()) =

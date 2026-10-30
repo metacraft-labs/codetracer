@@ -32,7 +32,7 @@ import ../store/[replay_data_store, types]
 import nim_agents
 import ../agent_service
 import ../viewmodels/[agent_activity_vm, agent_activity_feed, review_entry,
-                      review_session, vcs_vm]
+                      review_session, trace_open, vcs_vm]
 import ./agent_session_files
 import ./agent_live_worker
 
@@ -45,16 +45,28 @@ const
     ## The desktop's (`acp_ipc.defaultCmd`).
   NativeAgentTabPrefix* = "native-acp:"
   NewSessionTabNote* = "in a new session tab"
-    ## What the status line says a recording opened in (§2.2.4): both of a
-    ## test row's buttons open one natively.
-  NoCurrentTabReplacementNote* =
-    "this window cannot replace its current session yet"
-    ## Why `[Open recording]` (the desktop's current-tab open) opened a new
-    ## tab natively (DeepReview-GUI.md §2.2.4, the recorded deviation).
+    ## Where `[Open in new tab]` opens a test's recording (§2.2.4).
+  ThisTabNote* = "in this tab"
+    ## Where `[Open recording]` opens it: the current tab's session replaced,
+    ## as the desktop loads it in place (§2.2.4).
+  EditingSessionKeptNote* = "an editing session is not replaced by a replay"
+    ## Why `[Open recording]` opened a new tab after all: the current tab is
+    ## an editing session (Multi-Window-Tab-Management.md, "Replacing the
+    ## session in the current tab", rule 3).
 
 type
   OpenRecordingProc* = proc(request: TraceOpenRequest): string {.closure.}
-    ## Open a recording the front-end's way; "" or the reason it could not.
+    ## Open a recording the front-end's way, where `request.policy` says —
+    ## `topCurrentTab` replaces the current tab's session, `topNewTab` opens
+    ## a new session tab; "" or the reason it could not. The host has already
+    ## decided the policy (`agentRecordingPolicy`).
+
+  AgentRecordingPlacement* = enum
+    ## Where a test's recording went, for the status line.
+    arpNewTab        ## a new session tab, as asked (`[Open in new tab]`)
+    arpThisTab       ## the current tab's session replaced (`[Open recording]`)
+    arpNewTabEditing ## a new tab although the current one was asked for: the
+                     ## current tab is an editing session (rule 3)
 
   UserTurn = object
     beforeEvent: int
@@ -71,6 +83,10 @@ type
       ## The front-end's VCS pane's ViewModel, into which an evidence click
       ## enters a review; nil when the front-end has none.
     openRecording*: OpenRecordingProc
+    currentTabReplaceable*: proc(): bool {.closure.}
+      ## Whether the current tab's session may be replaced by a recording: a
+      ## live replay (not an editing session, not a tab *Stop* ended). nil
+      ## answers no, so a front-end that cannot replace opens a new tab.
     openFile*: proc(path: string) {.closure.}
       ## Opens a review's first file (§7 step 2); nil to open nothing.
     agentCommand*: string
@@ -89,16 +105,32 @@ type
       ## Something the pane shows changed since the front-end last painted.
     dispose: proc()
 
-proc recordingOpenedNote*(request: TraceOpenRequest): string =
+func agentRecordingPlacement*(asked: TraceOpenPolicy;
+                              currentReplaceable: bool): AgentRecordingPlacement =
+  ## Where a test's recording opens from Agent Activity
+  ## (DeepReview-GUI.md §2.2.4): `[Open in new tab]` in a new session tab;
+  ## `[Open recording]` in the current tab, replacing its session, as the
+  ## desktop loads it in place — unless that session may not be replaced (an
+  ## editing session, rule 3), when it opens in a new tab and says why.
+  if asked == topNewTab: arpNewTab
+  elif currentReplaceable: arpThisTab
+  else: arpNewTabEditing
+
+func placementPolicy*(p: AgentRecordingPlacement): TraceOpenPolicy =
+  ## The policy the front-end's opener performs for a placement.
+  if p == arpThisTab: topCurrentTab else: topNewTab
+
+proc recordingOpenedNote*(request: TraceOpenRequest;
+                          placement: AgentRecordingPlacement): string =
   ## The status line after a test's recording opened natively: which
-  ## recording, that it is in a NEW session tab, and — for `[Open
-  ## recording]`, which the desktop opens in the current tab — why.
+  ## recording, and where — a new session tab, or this tab — and, when
+  ## `[Open recording]` could not replace this tab, why.
   let name = extractFilename(request.tracePath.strip(leading = false,
                                                      chars = {'/'}))
-  result = "Opened " & (if name.len > 0: name else: request.tracePath) &
-           " " & NewSessionTabNote
-  if request.policy == topCurrentTab:
-    result.add ": " & NoCurrentTabReplacementNote
+  result = "Opened " & (if name.len > 0: name else: request.tracePath) & " " &
+           (if placement == arpThisTab: ThisTabNote else: NewSessionTabNote)
+  if placement == arpNewTabEditing:
+    result.add ": " & EditingSessionKeptNote
 
 proc splitArgs(value: string): seq[string] =
   for a in value.splitWhitespace():
@@ -111,8 +143,14 @@ proc wire(h: NativeAgentHost) =
       host.message = "this front-end cannot open a recording from the " &
                      "agent's session"
     else:
-      let why = host.openRecording(request)
-      host.message = if why.len > 0: why else: recordingOpenedNote(request)
+      let replaceable = not host.currentTabReplaceable.isNil and
+                        host.currentTabReplaceable()
+      let placement = agentRecordingPlacement(request.policy, replaceable)
+      var placed = request
+      placed.policy = placement.placementPolicy
+      let why = host.openRecording(placed)
+      host.message = if why.len > 0: why
+                     else: recordingOpenedNote(request, placement)
     host.changed = true)
   h.vm.reviewOpen = ReviewOpenService(requestProc:
     proc(request: ReviewDatasetRequest) =
@@ -381,6 +419,36 @@ proc runFeed*(h: NativeAgentHost; row: AgentFeedRow;
     h.message = "the agent's file diffs open on the desktop"
   else:
     discard
+  h.changed = true
+
+proc rehome*(h: NativeAgentHost; store: ReplayDataStore) =
+  ## Move the host onto another session's store — the session that REPLACED
+  ## the one it served (a recording opened in this tab). The agent is not the
+  ## replay: its conversation, its live worker and its attachments go with
+  ## the tab, as the desktop's panel keeps them when it loads a recording in
+  ## place. The live session's store entry moves with it, so the session
+  ## tab's indicator, which reads the shown session's store, still agrees
+  ## with the pane.
+  if h.isNil or store.isNil or h.store == store:
+    return
+  if h.tabId.len > 0:
+    var moved = store.agentSessions.val
+    var kept = h.store.agentSessions.val
+    var i = 0
+    while i < kept.sessions.len:
+      if kept.sessions[i].tabId == h.tabId:
+        moved.sessions.add kept.sessions[i]
+        kept.sessions.delete(i)
+      else:
+        inc i
+    if kept.activeTabId == h.tabId:
+      moved.activeTabId = h.tabId
+      kept.activeTabId = ""
+    h.store.agentSessions.val = kept
+    store.agentSessions.val = moved
+  h.store = store
+  h.vm.store = store
+  h.service.store = store
   h.changed = true
 
 proc close*(h: NativeAgentHost) =

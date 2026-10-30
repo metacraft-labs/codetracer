@@ -25,8 +25,14 @@ nixos)
 	# backend-manager nextest runs, each given its own crate's entries -- and
 	# prints each as NOT RUN with the lane that runs it. Those lanes select the
 	# same entries from the same file (ci/lib/not-provided-filter.sh --lane).
+	#
+	# CODETRACER_TEST_SECOND_USER=1: this leg's runners give the job user
+	# passwordless sudo, so `just test-rust` runs the daemon peer test that
+	# connects as `nobody` through `sudo -n -u nobody` (and it fails, naming
+	# sudo, if a runner stops providing it).
 	exec nix develop .#devShells.x86_64-linux.default --command \
 		env CODETRACER_RR_BACKEND_PATH= CODETRACER_RR_BACKEND_PRESENT=0 \
+		CODETRACER_TEST_SECOND_USER=1 \
 		CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false \
 		CODETRACER_TEST_LANE_NOT_PROVIDED=ci/test/non-gui-not-provided.linux.txt \
 		just test

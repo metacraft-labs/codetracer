@@ -176,13 +176,15 @@
    "base": {
     "titleInk": "#c8c8c8",
     "activeTitlePixels": 10,
-    "inactiveTitlePixels": 1,
+    "inactiveTitlePixels": 3,
+    "labelGround": "#333333",
     "bridge": "#282828"
    },
    "vcs": {
     "titleInk": "#727272",
     "activeTitlePixels": 0,
     "inactiveTitlePixels": 10,
+    "labelGround": "#282828",
     "bridge": "#1b1b1b"
    },
    "bodyGround": "#282828"
@@ -198,12 +200,14 @@
     "titleInk": "#717171",
     "activeTitlePixels": 0,
     "inactiveTitlePixels": 0,
+    "labelGround": "#282828",
     "bridge": "#1b1b1b"
    },
    "vcs": {
-    "titleInk": "#c6c6c6",
+    "titleInk": "#c7c7c7",
     "activeTitlePixels": 0,
-    "inactiveTitlePixels": 1,
+    "inactiveTitlePixels": 2,
+    "labelGround": "#333333",
     "bridge": "#282828"
    },
    "bodyGround": "#282828"
@@ -365,7 +369,7 @@
    "vcs"
   ],
   "liftedRing": null,
-  "liftedChangedPixels": 42002,
+  "liftedChangedPixels": 47673,
   "liftedInner": [
    4,
    34,
@@ -470,7 +474,7 @@
     982
    ],
    "changedPixels": 194436,
-   "ghostChangedPixels": 3519,
+   "ghostChangedPixels": 3411,
    "ghostCentre": [
     68,
     68,
@@ -522,7 +526,7 @@
     68
    ]
   },
-  "pressFocusChangedPixels": 39444,
+  "pressFocusChangedPixels": 39472,
   "cancelChangedPixels": 0,
   "releasedChangedPixels": 0,
   "commitRing": [

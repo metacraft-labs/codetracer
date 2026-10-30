@@ -12,8 +12,11 @@
 //! connects as `nobody` through `sudo -n -u nobody`, so it is `#[ignore]`d in
 //! the default run (which cannot switch users) and is run explicitly with
 //! `--ignored` on a host that can; it fails, never skips, when `sudo` is not
-//! available there.  Its vacuity guard is the same client run as the
-//! daemon's own user, which is answered.
+//! available there.  `just test-rust` runs it only where the lane declares
+//! `CODETRACER_TEST_SECOND_USER=1` (`ci/test/non-gui.sh` does on the Linux
+//! leg of `test-non-gui`, whose runners give the job user passwordless sudo);
+//! elsewhere it excludes it by name and prints it as NOT RUN.  Its vacuity
+//! guard is the same client run as the daemon's own user, which is answered.
 //!
 //! What is real: the daemon and the kernel's credential passing.  The
 //! client is a few lines of Python speaking the daemon's DAP framing.  No
@@ -122,15 +125,10 @@ async fn t_mcp_daemon_socket_is_its_owners_alone() {
 async fn t_mcp_daemon_answers_no_peer_of_another_user() {
     let (_guard, root) = short_root("ct-peer-");
     let server = server_binary();
-    // The daemon logs under CODETRACER_HOME's state area.
-    let home = root.join("home");
-    let (mut daemon, socket) = start_daemon_with_env(
-        &server,
-        &root,
-        &replay_server_for(&server),
-        &[("CODETRACER_HOME", home.as_os_str())],
-    )
-    .await;
+    // The daemon logs under CODETRACER_HOME's state area: the home the
+    // harness gives it.
+    let home = daemon_home(&root);
+    let (mut daemon, socket) = start_daemon(&server, &root, &replay_server_for(&server)).await;
     // Open the path to everyone, so only the peer check stands between
     // another user and the daemon.
     for dir in [root.as_path(), socket.parent().unwrap()] {

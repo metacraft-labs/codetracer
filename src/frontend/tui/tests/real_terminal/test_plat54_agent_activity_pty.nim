@@ -17,7 +17,11 @@
 ##     session tab carries the agent's indicator, ✓ once the turn is over, and
 ##     the prompt row's control is `[Send]` again;
 ##   * a run card's `[Open in new tab]` opens the recording in a new session
-##     tab through the real `recordingOpener`, and the status line says so.
+##     tab through the real `recordingOpener`, and the status line says so;
+##   * its `[Open recording]` replaces the tab's session instead (DeepReview-
+##     GUI §2.2.4): one tab still, this run's old `replay-server` gone and a
+##     new one serving it, the status line saying "in this tab", and the
+##     agent's run card still in its pane.
 ##
 ## No mocks: the real binary, a real recording, a real `replay-server`, a
 ## real pty (TermAssert + libvterm), a real agent process speaking ACP. The
@@ -36,7 +40,7 @@ import ../../../../ct/review_session
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 11
+const ExpectedAssertions = 16
 
 var countedAssertions = 0
 
@@ -214,6 +218,50 @@ suite "PLAT-54 on a real terminal: Agent Activity":
       checkpoint(s.join("\n"))
     ck done
     ck not s.join("\n").contains("[Stop]")
+
+  test "Open recording replaces this tab's session, and the agent stays":
+    # DeepReview-GUI §2.2.4: `[Open recording]` is the desktop's in-place
+    # open. On the terminal it replaces the current tab's session — through
+    # the real `recordingOpener`, as Test Results' rule 4 replaces one — so
+    # no second tab appears, the old engine is stopped (rule 2) and a new
+    # one serves the tab, and the agent's pane keeps its conversation.
+    let spec = ReviewSessionRefSpec(sessionId: "session-fixture",
+      backend: "acp", workspacePath: scratch, agentCommand: findExe("node"),
+      agentArgs: @[replayAgent, "--test-run", "--trace-dir=" & calc.tracePath])
+    let sessionFile = writeResolvedReviewSession(resolveReviewSession(spec),
+                                                 scratch)
+    var sess = spawnTui(@["--review-session=" & sessionFile, calc.tracePath])
+    defer: sess.close()
+    sess.showAgent()
+    var s = sess.waitScreen("▌ ▸")
+    # This run's one engine, before the press.
+    let before = markedReplayServerPids()
+    checkpoint("engines before: " & $before)
+    ck before.len == 1
+    let (rr, rc) = s.find("▌ ▸")
+    sess.press(rr, rc + 2)
+    s = sess.waitScreen("[Open recording]")
+    let (orow, ocol) = s.find("[Open recording]")
+    sess.press(orow, ocol + 2)
+    let placed = "Opened " & extractFilename(
+      calc.tracePath.strip(leading = false, chars = {'/'})) & " in this tab"
+    s = sess.waitScreen(placed, 120000)
+    ck s.join("\n").contains(placed)
+    # One tab still: the strip (drawn from two sessions on) is not there.
+    ck not s[0].contains(" × ")
+    # The old engine stopped, a new one serves the tab.
+    let deadline = getMonoTime() + initDuration(milliseconds = 30000)
+    var after = markedReplayServerPids()
+    while getMonoTime() < deadline and
+          (after.len != 1 or after[0] in before):
+      sleep(100)
+      after = markedReplayServerPids()
+    checkpoint("engines after: " & $after)
+    ck after.len == 1 and after[0] notin before
+    # The agent's pane, shown again, still holds the run card.
+    sess.showAgent()
+    s = sess.waitScreen("ct test record")
+    ck s.join("\n").contains("[Open recording]")
 
   test "assertion count":
     echo "CHECKS: " & $countedAssertions

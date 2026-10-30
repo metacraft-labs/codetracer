@@ -1740,6 +1740,20 @@ proc drawNode(r: GpuiRenderer; i: int): GpuiElement =
         r.setStyle(row, "items", "center")
         r.setStyle(row, "height", $TabHeightPx & "px")
         r.setStyle(row, "flex-shrink", "0")
+        if active:
+          # THE SELECTED TAB ON A GROUND OF ITS OWN (`chrome.tabStyle`, the
+          # user's PLAT-49 direction over the desktop's single panel colour,
+          # as the terminal's `srTabActive` draws it): its label row on
+          # ui/surface/primary/tertiary — on a focused strip, the window's
+          # ground (PLAT-68) — while the bridge below it stays the pane's own
+          # ground, so tab and panel still join into one shape.
+          for (key, value) in tabStyle(true, focusedHere):
+            if key == "background-color":
+              r.setAttribute(row, "data-ct-tab-ground", value)
+              r.setStyle(row, key, value)
+          r.setStyle(row, "rounded", $TabRadiusPx & "px")
+          r.setStyle(row, "border-bottom-left-radius", "0px")
+          r.setStyle(row, "border-bottom-right-radius", "0px")
         r.setStyle(row, "padding-left", $TabTitleInsetPx & "px")
         r.setStyle(row, "padding-right", $TabTitleInsetPx & "px")
         r.appendChild(tab, row)
@@ -3236,6 +3250,7 @@ proc drawSearchPane(r: GpuiRenderer) =
 # ---------------------------------------------------------------------------
 
 proc openRecordingInTab(r: GpuiRenderer; path: string)
+proc replaceSessionTab(r: GpuiRenderer; old: HeadlessSessionId)
 proc vcsVM(): VCSVM
 
 proc agentHost(): NativeAgentHost =
@@ -3247,9 +3262,24 @@ proc agentHost(): NativeAgentHost =
   let key = cast[int](gSession)
   if not gAgentHosts.hasKey(key):
     let h = newNativeAgentHost(gSession.session.store)
+    # §2.2.4: `[Open recording]` replaces the current tab's session when it
+    # is a replay (the Test Results pane's rule 3 test, `syncTestsTabs`);
+    # the host opens a new tab otherwise.
+    h.currentTabReplaceable = proc(): bool =
+      not gShell.isNil and gEditorSurface.productMode != pmEdit and
+        gSessionsOpened.hasKey(int(gShell.app.activeSessionId()))
     h.openRecording = proc(request: TraceOpenRequest): string =
       var rr: GpuiRenderer
+      let current = gShell.app.activeSessionId()
+      let before = gSessionsOpened.len
       openRecordingInTab(rr, request.tracePath)
+      if gSessionsOpened.len <= before:
+        return "could not open " & request.tracePath
+      if request.policy == topCurrentTab:
+        replaceSessionTab(rr, current)
+        if not gTestsVM.isNil:
+          # Test-Results-Pane §9.2: a replaced tab is no test's tab.
+          gTestsVM.forgetTestTab(int(current))
       ""
     gAgentHosts[key] = h
   result = gAgentHosts[key]
@@ -5721,6 +5751,41 @@ proc closeSessionTab(r: GpuiRenderer; index: int) =
   traceGesture("closed tab " & $id)
   showSession(r, gShell.app.activeSessionId())
 
+proc replaceSessionTab(r: GpuiRenderer; old: HeadlessSessionId) =
+  ## Multi-Window-Tab-Management.md, "Replacing the session in the current
+  ## tab": the session just opened (the active one, `openRecordingInTab`'s)
+  ## takes tab `old`'s place in the strip (rule 4), `old`'s engine is
+  ## stopped (rule 2), and its Agent Activity host moves onto the new
+  ## session — the agent is not the replay, and the desktop's panel keeps its
+  ## conversation when it loads a recording in place (DeepReview-GUI.md
+  ## §2.2.4).
+  let fresh = gShell.app.activeSessionId()
+  if fresh == old or not gSessionsOpened.hasKey(int(old)):
+    return
+  var at = -1
+  for i, t in gShell.app.tabsOf():
+    if t.id == old:
+      at = i
+  if gShell.app.closeSession(old, disconnectBackend = false):
+    let gone = gSessionsOpened[int(old)]
+    let oldKey = cast[int](gone)
+    if gAgentHosts.hasKey(oldKey):
+      let host = gAgentHosts[oldKey]
+      gAgentHosts.del(oldKey)
+      let opened = gSessionsOpened[int(fresh)]
+      let newKey = cast[int](opened)
+      if gAgentHosts.hasKey(newKey):
+        gAgentHosts[newKey].close()
+      host.rehome(opened.session.store)
+      gAgentHosts[newKey] = host
+    gone.close()
+    gSessionsOpened.del(int(old))
+    if at >= 0:
+      discard gShell.app.moveSlot(fresh, at)
+    traceGesture("replaced tab " & $int(old) & " with tab " & $int(fresh))
+  discard gShell.app.activate(fresh)
+  showSession(r, fresh)
+
 # ---------------------------------------------------------------------------
 # PLAT-51 deliverable 8: a new tab's Welcome Screen
 # ---------------------------------------------------------------------------
@@ -7580,19 +7645,8 @@ proc placeGpuiTestRecording(testId, recordingId, folder: string;
     if place.kind == ttpReplaceTab:
       # THE NEW SESSION TAKES THE OLD ONE'S PLACE: the replaced session's
       # engine stopped (rule 2), the strip position kept (rule 4).
-      let old = HeadlessSessionId(place.tab)
       let fresh = gShell.app.activeSessionId()
-      var at = -1
-      for i, t in gShell.app.tabsOf():
-        if t.id == old:
-          at = i
-      if gShell.app.closeSession(old, disconnectBackend = false):
-        gSessionsOpened[place.tab].close()
-        gSessionsOpened.del(place.tab)
-        if at >= 0:
-          discard gShell.app.moveSlot(fresh, at)
-      discard gShell.app.activate(fresh)
-      showSession(rr, fresh)
+      replaceSessionTab(rr, HeadlessSessionId(place.tab))
       gTestsVM.forgetTestTab(place.tab)
       gTestsHost.placedWords = if own: " in its own tab" else: " in this tab"
       traceGesture("tests: replaced tab " & $place.tab & " with tab " &
