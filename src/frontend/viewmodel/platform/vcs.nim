@@ -42,7 +42,7 @@
 ## its future when the last git call has answered (Status-Bar.md, "A refresh
 ## never stalls the window").
 
-import std/strutils
+import std/[algorithm, strutils]
 
 import ./outcome
 import ./capabilities
@@ -134,6 +134,22 @@ type
       ## Empty when computed; otherwise what prevented an id, in words an
       ## operator can act on.
 
+  VcsDeclaredScopes* = object
+    ## The answer of `declaredScopes`: the scopes a repository declares its
+    ## certificates are issued for (test-certificates-spec Tooling §3.1).
+    scopes*: seq[seq[string]]
+      ## One entry per declared scope: its `path` values, in byte order, each
+      ## once. In the order the scope's first section appears; two sections
+      ## with the same set of paths are one scope. Empty when nothing is
+      ## declared, which is a valid, empty declaration — and empty when
+      ## `problems` is not.
+    problems*: seq[string]
+      ## Non-empty when the declaration is INVALID (a `path` that is not a
+      ## scope path, a `path` with no value, any other key under the
+      ## section): every problem, and no scope at all. Tooling §3.1 makes an
+      ## invalid declaration void as a whole, so a caller never acts on part
+      ## of one.
+
   VcsFacade* {.requiresInit.} = ref object
     ## `{.requiresInit.}` for the reason spelled out on `FileSystemFacade` in
     ## `fs.nim`: without it, an unassigned field is `nil` rather than a compile
@@ -181,6 +197,22 @@ type
       ## directory outside the repository and only the copy is written) and no
       ## working-tree file. It is classed a READ because what it writes is
       ## unobservable through any ref and is exactly what `git gc` prunes.
+    declaredScopes*: proc(repository: string
+                         ): PlatformFuture[PlatformOutcome[VcsDeclaredScopes]]
+      ## The scopes the repository containing `repository` declares its
+      ## certificates are issued for: its effective git configuration's
+      ## `[testCertificatesScope "<name>"] path = …` sections
+      ## (test-certificates-spec Tooling §3.1). A scoped certificate is filed
+      ## in the local store under its SCOPED content id, which nobody can
+      ## compute without knowing the scope; this is how a consumer knows which
+      ## scoped ids to look up (`contentId` with that scope).
+      ##
+      ## Nothing declared is a valid, empty answer. An invalid declaration is
+      ## a value too (`problems`), not an error: the call worked and the
+      ## repository's configuration is wrong. An error means the
+      ## configuration could not be read at all.
+      ##
+      ## **Requires `capVcsRead`** (`DeclaredScopesRequires`). Writes nothing.
 
     # -- write (capVcsWrite) ------------------------------------------------
     stage*: proc(repository: string;
@@ -416,6 +448,169 @@ proc contentIdOverAsync*(host: AsyncContentIdHost; profile: PlatformProfile;
                                getCurrentExceptionMsg()),
       settle))
 
+# ---------------------------------------------------------------------------
+# Declared certificate scopes (test-certificates-spec Tooling §3.1)
+# ---------------------------------------------------------------------------
+
+const
+  DeclaredScopesRequires*: CapabilitySet = {capVcsRead}
+    ## What `declaredScopes` requires, on every instantiation and at the
+    ## endpoint verb `vcs.declaredScopes`: it reads the repository's
+    ## configuration and writes nothing.
+
+  DeclaredScopeSection* = "testCertificatesScope"
+    ## Tooling §3.1's section name.
+  DeclaredScopeKeyPrefix = "testcertificatesscope."
+    ## As `git config --get-regexp` prints it: git lowercases the section and
+    ## the variable name and keeps the subsection (`<name>`) as written
+    ## (https://git-scm.com/docs/git-config#Documentation/git-config.txt---get-regexp).
+  DeclaredScopePathVariable = ".path"
+
+  DeclaredScopesGitArgs* = ["config", "-z", "--get-regexp",
+                            "^testcertificatesscope\\."]
+    ## The one read of the declaration: every configuration file git reads for
+    ## the repository, includes too (Tooling §3.1). `-z` makes each entry
+    ## `<key> LF <value> NUL`, or `<key> NUL` for a key with no `=`.
+
+func declaredScopePathProblem*(path: string): string =
+  ## Why `path` is not a scope path a declaration may name, or "" when it is.
+  ## Tooling §3.1: "one literal path … repo-relative and `/`-separated, not
+  ## beginning or ending with `/`, with no empty, `.` or `..` component" —
+  ## the reference library's `scopePathProblem`, which rejects `\` too.
+  if path.len == 0:
+    return "an empty scope path"
+  if '\0' in path:
+    return "scope path contains NUL"
+  if path.startsWith("/") or path.endsWith("/") or '\\' in path:
+    return "scope path `" & path & "` is not repo-relative and `/`-separated"
+  for part in path.split('/'):
+    if part.len == 0 or part == "." or part == "..":
+      return "scope path `" & path & "` has an empty, `.` or `..` component"
+  ""
+
+func byteOrderCmp(a, b: string): int =
+  ## Unsigned byte order — the order Content-Id and Canonical-Payload use —
+  ## rather than a locale or a library `cmp`.
+  for i in 0 ..< min(a.len, b.len):
+    let x = uint8(a[i])
+    let y = uint8(b[i])
+    if x != y:
+      return (if x < y: -1 else: 1)
+  cmp(a.len, b.len)
+
+func parseDeclaredScopes*(output: string): VcsDeclaredScopes =
+  ## `git config -z --get-regexp '^testcertificatesscope\.'`'s output, read
+  ## as Tooling §3.1 declares: one scope per section, its `path` values
+  ## interpreted together; a path repeated within a section counts once; two
+  ## sections with the same set of paths are one scope; a `path` that is not
+  ## a scope path, a value-less `path` or any other key makes the whole
+  ## declaration invalid, with every problem reported and no scope returned.
+  ##
+  ## Pure, and backend-neutral, so every instantiation — native, node,
+  ## the container endpoint — reads the declaration through this one reader.
+  ## Held to the reference library's `declaredScopes` by
+  ## `test_vcs_content_id.nim`.
+  var records = output.split('\0')
+  if records.len > 0 and records[^1].len == 0:
+    records.setLen(records.len - 1)
+  var names: seq[string] = @[]
+  var pathsOf: seq[seq[string]] = @[]
+  for entry in records:
+    let lf = entry.find('\n')
+    let key = if lf < 0: entry else: entry[0 ..< lf]
+    let isPath =
+      key.len > DeclaredScopeKeyPrefix.len + DeclaredScopePathVariable.len and
+      key.startsWith(DeclaredScopeKeyPrefix) and
+      key.endsWith(DeclaredScopePathVariable)
+    if not isPath:
+      result.problems.add "`" & key & "` is not a scope declaration: only " &
+        DeclaredScopeSection & ".<name>.path is"
+      continue
+    let name = key[DeclaredScopeKeyPrefix.len ..< key.len -
+                   DeclaredScopePathVariable.len]
+    if lf < 0:
+      result.problems.add DeclaredScopeSection & "." & name &
+        ".path has no value"
+      continue
+    let path = entry[lf + 1 .. ^1]
+    let problem = declaredScopePathProblem(path)
+    if problem.len > 0:
+      result.problems.add DeclaredScopeSection & "." & name & ".path: " &
+        problem
+      continue
+    var at = names.find(name)
+    if at < 0:
+      names.add name
+      pathsOf.add @[]
+      at = names.len - 1
+    if path notin pathsOf[at]:
+      pathsOf[at].add path
+  if result.problems.len > 0:
+    return                      # an invalid declaration declares no scope
+  for paths in pathsOf.mitems:
+    var sorted = paths
+    sorted.sort(byteOrderCmp)
+    if sorted notin result.scopes:
+      result.scopes.add sorted
+
+proc declaredScopesRefusal*(profile: PlatformProfile):
+    PlatformOutcome[VcsDeclaredScopes] =
+  var missing: seq[string]
+  for capability in DeclaredScopesRequires - profile.capabilities:
+    missing.add $capability
+  failed[VcsDeclaredScopes](pkNotSupported,
+    "vcs.declaredScopes requires " & missing.join(", ") & ", which " &
+    profile.displayName & " does not grant")
+
+proc declaredScopesOver*(host: ContentIdHost; profile: PlatformProfile;
+                         repository: string): PlatformOutcome[VcsDeclaredScopes] =
+  ## `declaredScopes`, implemented ONCE over the content-id host's git, so
+  ## every instantiation that can run git (`certificate_content_id_native`,
+  ## `host/node_certificate_host`) reads the declaration the same way.
+  ## `git config` exits 1 when no key matches: nothing is declared.
+  if not profile.hasAll(DeclaredScopesRequires):
+    return declaredScopesRefusal(profile)
+  var argv = @["git"]
+  argv.add DeclaredScopesGitArgs
+  let reply = host.git(GitCall(argv: argv, cwd: repository))
+  if reply.exitCode < 0:
+    return failed[VcsDeclaredScopes](pkFailed,
+      "git could not be run to read the declared certificate scopes",
+      reply.stderr.strip())
+  if not reply.complete:
+    return failed[VcsDeclaredScopes](pkFailed,
+      "reading the declared certificate scopes was cut short",
+      reply.stderr.strip())
+  case reply.exitCode
+  of 0:
+    succeeded(parseDeclaredScopes(reply.stdout))
+  of 1:
+    succeeded(VcsDeclaredScopes())
+  else:
+    failed[VcsDeclaredScopes](pkFailed,
+      "the declared certificate scopes could not be read (git config " &
+      "exited " & $reply.exitCode & ")", reply.stderr.strip())
+
+proc declaredScopesOverAsync*(host: AsyncContentIdHost;
+                              profile: PlatformProfile; repository: string
+                             ): PlatformFuture[PlatformOutcome[VcsDeclaredScopes]] =
+  ## `declaredScopesOver` over a host whose git answers later — the
+  ## Electron renderer's — through the same `runResumable` driver
+  ## `contentIdOverAsync` uses, so the renderer never waits for git.
+  settledLater(proc(settle: proc(value: PlatformOutcome[VcsDeclaredScopes])) =
+    runResumable(host,
+      proc(sync: ContentIdHost): PlatformOutcome[VcsDeclaredScopes] =
+        try:
+          declaredScopesOver(sync, profile, repository)
+        except CatchableError as err:
+          failed[VcsDeclaredScopes](pkFailed,
+            "reading the declared certificate scopes raised", err.msg)
+        except:
+          failed[VcsDeclaredScopes](pkFailed,
+            "reading the declared certificate scopes raised",
+            getCurrentExceptionMsg()),
+      settle))
+
 proc unavailableVcs*(profile: PlatformProfile): VcsFacade =
   VcsFacade(
     profile: profile,
@@ -438,6 +633,10 @@ proc unavailableVcs*(profile: PlatformProfile): VcsFacade =
       resolvedOk(cannotComputeContentId(algorithm,
         profile.displayName & " has no version control, so no content id " &
         "can be computed here")),
+    declaredScopes: proc(repository: string): auto =
+      # With no version control there is no repository configuration to read
+      # and no content id to scope, so nothing is declared here.
+      resolvedOk(VcsDeclaredScopes()),
     stage: proc(repository: string; paths: seq[string]): auto =
       resolvedUnsupported[Nothing]("staging changes"),
     unstage: proc(repository: string; paths: seq[string]): auto =

@@ -1212,6 +1212,14 @@ test_lane_files() {
 		# on PATH; writes only under one `mkdtemp` directory, which it
 		# removes.
 		echo src/frontend/tests/electron_vcs_refresh_async_test.nim
+		# `node_certificate_store_account_test.nim` holds the node hosts'
+		# store-root account to Transport §2.1: the uid on POSIX, the token
+		# user's SID (`whoami /user /fo csv /nh`) on Windows, and an
+		# unresolved system root, with the reason, when it cannot be read.
+		# The Windows branch is driven through a stubbed command runner (its
+		# header says why); the real runner answers for this host. Runs
+		# nothing but that and writes nothing.
+		echo src/frontend/tests/node_certificate_store_account_test.nim
 		#
 		# `electron_vcs_index_lock_test.nim` drives the same facade's `status`
 		# and `diff` over real repositories whose index has a stale stat cache,

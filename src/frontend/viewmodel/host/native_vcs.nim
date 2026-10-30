@@ -136,6 +136,9 @@ proc nativeVcs*(profile: PlatformProfile): VcsFacade =
                          ): PlatformFuture[PlatformOutcome[VcsContentId]] =
     resolved(contentIdOver(contentHost, profile, repository, state, algorithm,
                            scope))
+  result.declaredScopes = proc(repository: string
+                              ): PlatformFuture[PlatformOutcome[VcsDeclaredScopes]] =
+    resolved(declaredScopesOver(contentHost, profile, repository))
 
   result.stage = proc(repository: string;
                       paths: seq[string]): PlatformFuture[PlatformOutcome[Nothing]] =

@@ -343,6 +343,15 @@ proc newContainerPlatform*(transport: RemoteTransport;
                                 "algorithm": algorithm,
                                 "scope": encodeTextSeq(scope)},
                              decodeVcsContentId)
+  result.vcs.declaredScopes = proc(repository: string
+                                  ): PlatformFuture[PlatformOutcome[VcsDeclaredScopes]] =
+    # Refused here for the reason `contentId` is: the profile is the
+    # server's own declaration of what it serves.
+    if not profile.hasAll(DeclaredScopesRequires):
+      return resolved(declaredScopesRefusal(profile))
+    callRemote[VcsDeclaredScopes](transport, "vcs.declaredScopes",
+                                  %*{"repository": repository},
+                                  decodeVcsDeclaredScopes)
   result.vcs.stage = proc(repository: string; paths: seq[string]): auto =
     callRemote[Nothing](transport, "vcs.stage",
                         %*{"repository": repository,

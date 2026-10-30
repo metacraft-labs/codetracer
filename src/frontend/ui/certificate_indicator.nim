@@ -23,11 +23,10 @@
 ## | trigger | moves | wired by |
 ## |---|---|---|
 ## | first render | — | `ensureCertificateIndicator` |
-## | a commit, checkout, rebase, merge | H (and W, S on a checkout) | a watch on `<repo>/.git`: `citCommitChanged` |
+## | a commit, checkout, rebase, merge | H (and W, S on a checkout) | a watch on `<repository root>/.git`: `citCommitChanged` |
 ## | staging or unstaging (`git add`, `git reset`) | S | the same watch, on `index`: `citIndexChanged` (`gitDirTrigger`) |
-## | an edit to a tracked file at the top level | W | a watch on the workspace root: `citWorktreeChanged` |
+## | an edit to a tracked file at the top level of the repository | W | a watch on the repository root: `citWorktreeChanged` |
 ## | a certificate arriving, being replaced or removed | the store | watches on the local store's root, layout and algorithm directories and on every content directory looked up (`citStoreChanged`), re-armed after each refresh |
-## | reprobuild's workspace store appearing or changing | the store | watches on that directory and the workspace root |
 ## | the user selecting the indicator | — | `selectCertificateIndicator` |
 ## | anything else, every `RevalidateIntervalMs` | W | a `setInterval` |
 ##
@@ -179,13 +178,30 @@ when defined(js):
     ## layout directory and both algorithm directories (a content directory
     ## being created), and every directory the last refresh SEARCHED — W's,
     ## H's and S's content directories in both roots, which change as the
-    ## facts do. Workspace-relative entries of `searched` (reprobuild's
-    ## carrier) are watched once at start-up instead.
+    ## facts do — and the REPOSITORY the facts were gathered for: its `.git`
+    ## (commit, checkout, staging) and its root (a top-level edit).
+    ##
+    ## The repository root comes from the facts (`model.repositoryRoot`, the
+    ## facade's `repositoryRoot`, resolved upwards from the opened folder), so
+    ## a project opened at a SUBDIRECTORY of its repository gets the same
+    ## commit and staging triggers as one opened at the root. Nothing here is
+    ## relative to the opened folder any more: the store is looked up by
+    ## content id, and no working-tree directory is read for certificates.
     if indicator.isNil:
       return
     let host = ctPlatform()
     if not host.can(capFilesystemWatch):
       return
+    let repoRoot = indicator.model.repositoryRoot
+    if repoRoot.len > 0:
+      # `<root>/.git` is a FILE in a linked worktree (`gitdir: …`); the watch
+      # is then refused and ignored, and the timer carries commits there.
+      watchDirectory(host, repoRoot & "/.git",
+        proc(event: FsWatchEvent): CertificateIndicatorTrigger =
+          gitDirTrigger(event.path))
+      # NOT RECURSIVE: one slot, catching a top-level edit (W). A recursive
+      # watch would also catch every build artefact in the tree.
+      watchDirectory(host, repoRoot, always(citWorktreeChanged))
     var roots: CertificateStoreRoots
     try:
       let outcome = ctAwaitSync(host.fs.certificateStoreRoots())
@@ -282,39 +298,10 @@ when defined(js):
       setRepeating(proc() = revalidateCertificateIndicator(),
                    RevalidateIntervalMs)
 
-    if not host.can(capFilesystemWatch):
-      return
-    # EVERYTHING HERE IS RELATIVE TO THE OPENED WORKSPACE DIRECTORY, not to
-    # the repository root, and that is a stated limit rather than an
-    # oversight. `readCertificateStore` searches `<workspaceDir>/.repro`
-    # (beside the local certificate store, which is per user), so the
-    # workspace carrier this indicator speaks for is the one beside the
-    # folder the user opened; using a different root for the watch than for
-    # the store would make the two disagree.
-    #
-    # The consequence, for a project opened at a SUBDIRECTORY of its
-    # repository: `<workspaceDir>/.git` does not exist, `watchDirectory`'s
-    # refusal is ignored (see its header), and the commit and staging
-    # triggers degrade to the periodic backstop. The content facts are still
-    # right — the facade resolves the repository upwards — so the indicator is
-    # correct and merely slower to notice a commit.
-    watchDirectory(host, workspaceDir & "/.git",
-      proc(event: FsWatchEvent): CertificateIndicatorTrigger =
-        gitDirTrigger(event.path))
-    for dir in CertificateStoreDirs:
-      # A store directory that does not exist yet cannot be watched; the
-      # workspace-root watch below is what notices it being created.
-      watchDirectory(host, workspaceDir & "/" & dir, always(citStoreChanged))
-    # NOT RECURSIVE. One watch on the workspace root costs one inotify slot and
-    # catches the two things a root watch can catch that nothing else does: an
-    # edit to a tracked file at the top level (W), and reprobuild's store
-    # directory appearing for the first time. A recursive watch would also
-    # catch every build artefact in the tree, which is the cost this indicator
-    # does not earn.
-    watchDirectory(host, workspaceDir,
-      proc(event: FsWatchEvent): CertificateIndicatorTrigger =
-        if "/.repro" in event.path: citStoreChanged else: citWorktreeChanged)
-    armStoreWatches()
+    # The repository and store watches are armed once the first gather
+    # completes (`refreshedHandler` -> `armStoreWatches`), because the
+    # repository root they are armed on is one of the facts that gather
+    # establishes.
 
   proc selectCertificateIndicator*() =
     ## The user selected the indicator: re-read, then toggle the disclosure.

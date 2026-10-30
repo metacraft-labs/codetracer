@@ -607,6 +607,13 @@ proc electronVcs*(profile: PlatformProfile): VcsFacade =
     do:
       resolvedErr[VcsContentId](pkFailed, "computing a content id failed",
                                 errorText())
+  result.declaredScopes = proc(repository: string
+                              ): PlatformFuture[PlatformOutcome[VcsDeclaredScopes]] =
+    jsGuard:
+      declaredScopesOverAsync(contentHost, profile, repository)
+    do:
+      resolvedErr[VcsDeclaredScopes](pkFailed,
+        "reading the declared certificate scopes failed", errorText())
 
   result.stage = proc(repository: string;
                       paths: seq[string]): PlatformFuture[PlatformOutcome[Nothing]] =
