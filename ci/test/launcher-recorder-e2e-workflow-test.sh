@@ -1407,6 +1407,106 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 9b'''. A PERSISTENT RUNNER'S LEFTOVERS ARE CLEARED BEFORE THE CHECKOUT.
+#
+# Two leftovers have failed `actions/checkout` on these hosts: a dead job's tup
+# FUSE mount (`EBUSY ... rmdir '.../src/.tup/mnt'`) and a 0555 directory
+# (`EACCES` on a file inside it). Pinned here:
+#   a. ORDER: both sweeps run before every checkout and every nix call;
+#   b. the FUSE sweep, EXECUTED against a planted mount table with a stub
+#      fusermount3 and a bash-only PATH, unmounts exactly the FUSE mounts
+#      strictly below $RUNNER_WORKSPACE (not one outside it, not a non-FUSE
+#      one inside it, not one in a directory that merely shares its prefix);
+#   c. a mount it cannot drop is a warning and exit 0, and an absent work
+#      directory is a clean no-op.
+# The read-only sweep's body is ci/runner/sweep-readonly-leftovers.sh's, and
+# ci/test/readonly-leftovers-sweep-test.sh holds this copy byte-identical.
+# ---------------------------------------------------------------------------
+echo
+echo "a persistent runner's leftovers are cleared before the checkout"
+
+readonly FUSE_STEP="Unmount stale FUSE mounts left in the persistent work directory"
+readonly RO_STEP="Sweep read-only leftovers from the persistent work directory"
+hy_names="$(step_names "$REUSABLE")"
+hy_bad=""
+for want in "$FUSE_STEP" "$RO_STEP"; do
+	grep -qxF "$want" <<<"$hy_names" || hy_bad="${hy_bad} missing:'${want}'"
+done
+hy_seen=0
+while IFS= read -r name; do
+	case "$name" in
+	"$FUSE_STEP" | "$RO_STEP")
+		hy_seen=$((hy_seen + 1))
+		continue
+		;;
+	esac
+	[ "$hy_seen" -eq 2 ] && break
+	if step_block "$name" "$REUSABLE" | grep -v '^[[:space:]]*#' |
+		grep -qE 'actions/checkout@|(^|[^A-Za-z0-9_-])nix( |$)'; then
+		hy_bad="${hy_bad} '${name}' checks out or runs nix before the sweeps"
+	fi
+done <<<"$hy_names"
+if [ -z "$hy_bad" ]; then
+	ok "both leftover sweeps run before any checkout or nix call"
+else
+	fail "both leftover sweeps run before any checkout or nix call" "$hy_bad"
+fi
+
+FS="$TMP/fuse-sweep"
+mkdir -p "$FS/bin" "$FS/work/codetracer/src/.tup/mnt" "$FS/workx/x" "$FS/home"
+FS_ROOT="$(cd "$FS/work" && pwd -P)"
+printf '%s\n' \
+	'proc /proc proc rw,nosuid 0 0' \
+	"tup $FS_ROOT/codetracer/src/.tup/mnt fuse.tup rw,nosuid,nodev 0 0" \
+	'sshfs /elsewhere/mnt fuse.sshfs rw 0 0' \
+	"tmpfs $FS_ROOT/codetracer/tmp tmpfs rw 0 0" \
+	"tup ${FS_ROOT}x/x fuse rw 0 0" >"$FS/mounts"
+# shellcheck disable=SC2016  # the stub's own text, expanded when it runs
+printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$*" >>"$FUSE_LOG"' >"$FS/fusermount3.stub"
+cp "$FS/fusermount3.stub" "$FS/bin/fusermount3"
+chmod +x "$FS/bin/fusermount3"
+FS_STEP="$FS/step.sh"
+extract_step_script "$FUSE_STEP" "$REUSABLE" >"$FS_STEP"
+FS_BASH="$(command -v bash)"
+
+# run_fuse_step ROOT PATH -> the step's combined output; exit status preserved.
+run_fuse_step() {
+	: >"$FS/fuse.log"
+	env -i PATH="$2" HOME="$FS/home" RUNNER_WORKSPACE="$1" RUNNER_NAME=fixture \
+		LRC_MOUNTS_FILE="$FS/mounts" FUSE_LOG="$FS/fuse.log" "$FS_BASH" -e "$FS_STEP" 2>&1
+}
+
+fs_out="$(run_fuse_step "$FS_ROOT" "$FS/bin:$(dirname "$FS_BASH")")"
+fs_rc=$?
+if [ "$fs_rc" = 0 ] && [ "$(cat "$FS/fuse.log")" = "-u -z $FS_ROOT/codetracer/src/.tup/mnt" ] &&
+	grep -qF "found 1 stale FUSE mount(s) under $FS_ROOT; 0 could not be unmounted" <<<"$fs_out"; then
+	ok "the FUSE sweep unmounts exactly the stale FUSE mount below the work directory"
+else
+	fail "the FUSE sweep unmounts exactly the stale FUSE mount below the work directory" \
+		"exit $fs_rc; fusermount calls: $(tr '\n' ';' <"$FS/fuse.log")" "output: ${fs_out}"
+fi
+
+rm -f "$FS/bin/fusermount3"
+fs_out="$(run_fuse_step "$FS_ROOT" "$FS/bin:$(dirname "$FS_BASH")")"
+fs_rc=$?
+if [ "$fs_rc" = 0 ] &&
+	grep -qF "::warning::fuse-sweep: could not unmount $FS_ROOT/codetracer/src/.tup/mnt" <<<"$fs_out" &&
+	grep -qF "1 could not be unmounted" <<<"$fs_out"; then
+	ok "a mount the sweep cannot drop is a warning naming it, and the step still exits 0"
+else
+	fail "a mount the sweep cannot drop is a warning naming it, and the step still exits 0" \
+		"exit $fs_rc; output: ${fs_out}"
+fi
+
+fs_out="$(run_fuse_step "$FS/absent" "$(dirname "$FS_BASH")")"
+fs_rc=$?
+if [ "$fs_rc" = 0 ] && grep -q "work dir absent" <<<"$fs_out"; then
+	ok "an absent work directory is a clean no-op"
+else
+	fail "an absent work directory is a clean no-op" "exit $fs_rc; output: ${fs_out}"
+fi
+
+# ---------------------------------------------------------------------------
 # 9c. THE CORE BUILD'S WORKSPACE: complete, pinned, and on flake.lock's revs.
 #
 # `Build the codetracer-desktop core` runs `just build-once`, whose tup build
@@ -1997,7 +2097,7 @@ fi
 # reporting success on fewer checks than it claims.
 # ---------------------------------------------------------------------------
 echo
-readonly EXPECTED_ASSERTIONS=40
+readonly EXPECTED_ASSERTIONS=44
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))

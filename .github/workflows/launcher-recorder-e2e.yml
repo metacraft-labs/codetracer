@@ -343,6 +343,158 @@ jobs:
     timeout-minutes: 180
 
     steps:
+      - name: Unmount stale FUSE mounts left in the persistent work directory
+        # PERSISTENT RUNNERS KEEP A DEAD JOB'S tup MOUNT.  `just build-once`
+        # runs tup, and tup tracks dependencies through a FUSE filesystem it
+        # mounts on `<checkout>/src/.tup/mnt`.  A job that is cancelled or
+        # times out while tup is running leaves that mount behind in this
+        # PERSISTENT work directory, and the next job's `actions/checkout`
+        # dies cleaning it: `EBUSY: resource busy or locked, rmdir
+        # '.../src/.tup/mnt'`.  Nothing a later step does can recover from
+        # that, so the mount is dropped here, before the checkout.
+        #
+        # Only FUSE mounts strictly BELOW this job's work directory
+        # ($RUNNER_WORKSPACE, which holds the triggering checkout and every
+        # sibling `clone-siblings` places beside it) are touched, and only
+        # with the unprivileged `fusermount -u -z` the runner user may run on
+        # a mount it made; nothing here needs or takes root.  A mount that
+        # cannot be dropped is a WARNING, not a failure: the checkout below
+        # then fails with the EBUSY that names it, which is no worse than
+        # without this step.  Bash builtins only (no grep/sed/awk), like the
+        # read-only sweep below.  ci/test/launcher-recorder-e2e-workflow-test.sh
+        # executes this block against a planted mount table.
+        shell: bash
+        run: |
+          set -uo pipefail
+          root="${RUNNER_WORKSPACE:-}"
+          mounts="${LRC_MOUNTS_FILE:-/proc/self/mounts}"
+          echo "fuse-sweep: runner=${RUNNER_NAME:-?} root=${root:-<unset>}"
+          if [ -z "${root}" ] || [ ! -d "${root}" ]; then
+            echo "fuse-sweep: found 0 stale FUSE mount(s) (work dir absent - fresh runner)"
+            exit 0
+          fi
+          if [ ! -r "${mounts}" ]; then
+            echo "::warning::fuse-sweep: ${mounts} is not readable, so stale FUSE mounts under ${root} cannot be listed; nothing was unmounted"
+            exit 0
+          fi
+          found=0
+          stuck=0
+          while read -r _dev mnt fstype _rest; do
+            case "${fstype}" in
+              fuse | fuse.* | fuseblk) ;;
+              *) continue ;;
+            esac
+            case "${mnt}" in
+              "${root}"/*) ;;
+              *) continue ;;
+            esac
+            found=$((found + 1))
+            echo "fuse-sweep: stale ${fstype} mount ${mnt}"
+            dropped=0
+            for tool in fusermount3 fusermount /run/wrappers/bin/fusermount3 /run/wrappers/bin/fusermount; do
+              if command -v "${tool}" >/dev/null 2>&1 && "${tool}" -u -z "${mnt}"; then
+                echo "fuse-sweep:   unmounted with ${tool}"
+                dropped=1
+                break
+              fi
+            done
+            if [ "${dropped}" -eq 0 ]; then
+              stuck=$((stuck + 1))
+              echo "::warning::fuse-sweep: could not unmount ${mnt} (no fusermount on PATH, or it refused); actions/checkout will fail with EBUSY on it"
+            fi
+          done <"${mounts}"
+          echo "fuse-sweep: found ${found} stale FUSE mount(s) under ${root}; ${stuck} could not be unmounted"
+
+      - name: Sweep read-only leftovers from the persistent work directory
+        # The second leftover a persistent runner hands the next job: a 0555
+        # directory (the desktop build stages trees out of the Nix store, e.g.
+        # `studio-bundle/.../goldenlayout-base.css`'s parent) that
+        # `actions/checkout`'s clean cannot unlink inside -- `EACCES` on the
+        # file it tried to remove.  This is codetracer.yml's pre-checkout
+        # sweep, byte-identical to ci/runner/sweep-readonly-leftovers.sh
+        # (ci/test/readonly-leftovers-sweep-test.sh enforces that for this
+        # copy too); see that script for the rationale and the measured runs.
+        shell: bash
+        run: |
+          set -uo pipefail
+          shopt -s dotglob nullglob
+          root="${RUNNER_WORKSPACE:-}"
+          echo "ro-sweep: runner=${RUNNER_NAME:-?} root=${root:-<unset>}"
+          if [ -z "$root" ] || [ ! -d "$root" ]; then
+            echo "ro-sweep: found 0 unwritable directory(ies) (work dir absent - fresh runner)"
+            echo "ro-sweep: NOTHING FOUND - this host was already clean, mode 3 did not apply here"
+            exit 0
+          fi
+          ro_count=0
+          ro_shown=0
+          ro_blind=0
+          # Directory-only recursion via a trailing-slash glob, so bash never has to test
+          # the tens of thousands of regular files one at a time. `"$d"/*/` also matches
+          # symlinks TO directories; those are skipped, because following them leaves the
+          # work directory (these checkouts link into /nix/store) and a store path is not
+          # ours to chmod.
+          scan() {
+            local d="$1" e p
+            for e in "$d"/*/; do
+              p="${e%/}"
+              # `[ -L "$p" ] && continue` would be shorter and WRONG: GitHub runs `run:`
+              # blocks under `bash -e`, where a bare `A && B` list that evaluates false is
+              # a fatal command. Every branch here is a condition, never a bare list.
+              if [ -L "$p" ]; then
+                continue
+              fi
+              if [ ! -r "$p" ] || [ ! -x "$p" ]; then
+                ro_blind=$((ro_blind + 1))
+                continue
+              fi
+              if [ ! -w "$p" ]; then
+                ro_count=$((ro_count + 1))
+                if [ "$ro_shown" -lt 10 ]; then
+                  ro_shown=$((ro_shown + 1))
+                  echo "ro-sweep:   unwritable $p"
+                fi
+              fi
+              scan "$p"
+            done
+            return 0
+          }
+          scan "$root"
+          before="$ro_count"
+          echo "ro-sweep: found $before unwritable directory(ies) under $root ($ro_blind unreadable)"
+          if [ "$before" -eq 0 ]; then
+            echo "ro-sweep: NOTHING FOUND - this host was already clean, mode 3 did not apply here"
+            exit 0
+          fi
+          # Prove the tool exists before claiming it worked: a `chmod` that is not on
+          # PATH exits 127, and a `|| true` would turn that into a silent pass.
+          chmod_bin="$(command -v chmod 2>/dev/null || true)"
+          if [ -z "$chmod_bin" ]; then
+            for candidate in /bin/chmod /usr/bin/chmod /run/current-system/sw/bin/chmod; do
+              if [ -x "$candidate" ]; then
+                chmod_bin="$candidate"
+                break
+              fi
+            done
+          fi
+          if [ -z "$chmod_bin" ]; then
+            echo "ro-sweep: FATAL no chmod on PATH and none at /bin/chmod;" \
+              "$before directory(ies) CANNOT be fixed" >&2
+            exit 1
+          fi
+          echo "ro-sweep: using $chmod_bin"
+          "$chmod_bin" -R u+w "$root" 2>/dev/null || true
+          ro_count=0
+          ro_shown=0
+          ro_blind=0
+          scan "$root"
+          after="$ro_count"
+          echo "ro-sweep: after chmod -R u+w: $after unwritable directory(ies) remain"
+          echo "ro-sweep: RESTORED owner-write on $((before - after)) directory(ies)"
+          if [ "$after" -ne 0 ]; then
+            echo "ro-sweep: WARNING $after directory(ies) are not owned by the runner user;" \
+              "checkout will still fail to clean them"
+          fi
+
       - name: Plan the workspace layout
         # See "WORKSPACE LAYOUT" in this file's header.  The triggering repo is
         # the primary checkout, because `clone-siblings` cannot clone a repo
