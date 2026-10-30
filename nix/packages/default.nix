@@ -1837,6 +1837,60 @@
         #     '';
         #   };
 
+        # The io-mon file monitor that `ct test run` captures its read set
+        # with (CTC-3g, `src/ct_test/run_read_capture.nim`): the standalone
+        # `io-mon` CLI and the interpose shim `librepro_monitor_shim`. Built
+        # from the `io-mon` input by io-mon's OWN recipe (`just build`, as its
+        # flake's `packages.default` does), against the stackable-hooks and
+        # shared-memory sources this flake pins, the ones repro.lock names, so the
+        # shipped monitor is the one io-mon tests. Without it a packaged
+        # `ct test run` cannot know which files its tests read, and in the
+        # default `reads` mode issues every certificate with
+        # `untracked = true` and `read_set = not-captured` (conforming, but
+        # it cannot withhold for an untracked input it never saw).
+        ct-io-mon = pkgs.stdenv.mkDerivation {
+          pname = "ct-io-mon";
+          version = "0";
+          src = inputs.io-mon;
+
+          nativeBuildInputs = [
+            pkgs.just
+            pkgs.nim2
+          ];
+
+          STACKABLE_HOOKS_SRC = "${inputs.nim-stackable-hooks}/src";
+          SHM_QUEUE_SRC = "${inputs.nim-shm-queue}/src";
+          SHM_GSET_SRC = "${inputs.nim-shm-gset}/src";
+
+          postPatch = ''
+            patchShebangs scripts/build_shim.sh
+          '';
+
+          buildPhase = ''
+            runHook preBuild
+            export HOME="$TMPDIR"
+            just build
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+            mkdir -p "$out/bin" "$out/lib"
+            install -m755 build/bin/io-mon "$out/bin/io-mon"
+            found=0
+            for lib in build/lib/librepro_monitor_shim.*; do
+              [ -e "$lib" ] || continue
+              install -m755 "$lib" "$out/lib/$(basename "$lib")"
+              found=1
+            done
+            if [ "$found" -ne 1 ]; then
+              echo "io-mon's build produced no librepro_monitor_shim" >&2
+              exit 1
+            fi
+            runHook postInstall
+          '';
+        };
+
         # native build inputs: e.g. gcc upstream-nim
         # build : runtime inputs: e.g. gcc, rustc others
         # move from shell.nix some deps
@@ -1886,6 +1940,7 @@
             export CODETRACER_RESULTS_SRC="${inputs.nim-results}"
             export IO_MON_SRC="${inputs.io-mon}/src"
             export NIM_STACKABLE_HOOKS_SRC="${inputs.nim-stackable-hooks}/src"
+            export TEST_CERTIFICATES_TOOLS_SRC="${inputs.test-certificates-tools}/src"
 
             ${nim-codetracer.out}/bin/nim2 \
               ${isonimNimPaths} \
@@ -1995,6 +2050,12 @@
             cp ./db-backend-record $out/bin
             # Beside `ct`, which is where `ct test run` looks for it first.
             cp ./ct-test $out/bin
+            # The io-mon monitor `ct-test` captures its read set with (CTC-3g):
+            # the CLI beside `ct-test` (`findSnoopCli` looks beside the running
+            # executable) and the shim in `lib/`, where io-mon's discovery
+            # looks (`<bin>/../lib`).
+            cp ${ct-io-mon}/bin/io-mon $out/bin/
+            cp ${ct-io-mon}/lib/librepro_monitor_shim.* $out/lib/
             cp -L ${ctRemote}/bin/ct-remote $out/bin/
 
             cp -r src/frontend/index.html $out/
@@ -2003,6 +2064,10 @@
           '';
 
           meta.mainProgram = "ct";
+
+          # For `ci/test/nix-package-bin-slice.nix`, which lays out the same
+          # `bin/` and `lib/` without the heavy runtime closure.
+          passthru.ctIoMon = ct-io-mon;
 
           postFixup = ''
             wrapProgram $out/bin/ct \
