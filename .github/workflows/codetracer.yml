@@ -1075,7 +1075,7 @@ jobs:
           token: ${{ steps.ci_token.outputs.token }}
 
       - name: Setup dev env
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@4b00fe2102d60b810b260e3fbbc806857677fff0
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@ae97e0e42475bdcad85d94871d4a7ec543d5aa16
         with:
           env-flavor: reprobuild
           sibling-strategy: repro-lock
