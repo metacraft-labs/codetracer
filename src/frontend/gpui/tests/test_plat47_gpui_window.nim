@@ -52,7 +52,10 @@ const
   Desktop = "src/tests/visual/answers/plat47-desktop-parity.electron.json"
   Desktop50 = "src/tests/visual/answers/plat50-desktop.electron.json"
     ## The desktop's tab strip colours (PLAT-50's capture).
-  ExpectedAssertions = 139
+  ExpectedAssertions = 140
+    ## 139 -> 140 (2026-10-30): deliverable 5's press is judged region by
+    ## region — the regions account for every changed pixel, and none is
+    ## other than the caret or a scrollbar band — two readings for one.
     ## 104 -> 125 (the Electron-parity redesign, 2026-10-17, re-captured and
     ## measured): three more frames settled (counted per frame); the outline
     ## absent before the first press and drawn on the editor's own box; the
@@ -273,20 +276,39 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
     # A press that is not on a divider resizes nothing.
     ck r["pressBodyRingLeft"].getInt == r["doneRingLeft"].getInt
     # (PLAT-51: the press places the read-only editor's CARET — a bar one
-    # cell wide at most — and, the pointer now over the editor, Monaco shows
-    # its horizontal scrollbar in the band along the editor's bottom
-    # (`EditorHScrollBandPx`); nothing else changes.)
-    let box = if r["pressBodyChanged"].getInt == 0: @[0, 0, 0, 0]
-              else: arr(r["pressBodyChangedBox"])
-    let editorBottom = arr(rec["focusRing"]["bbox"])[1] +
-                       arr(rec["focusRing"]["bbox"])[3]
-    let caretOnly =
-      r["pressBodyChanged"].getInt == 0 or
-      (box[2] <= 12 and box[3] <= rec["captureContext"]["editorRowPx"].getInt + 2) or
-      (box[0] >= r["doneRingLeft"].getInt and
-       box[1] >= editorBottom - 1 - EditorHScrollBandPx and
-       box[1] + box[3] <= editorBottom and box[3] <= EditorHScrollBandPx)
-    ck caretOnly
+    # cell wide at most — and, the pointer now over the editor, its
+    # scrollbars are revealed as Monaco reveals them on hover: the horizontal
+    # one in the band along the editor's bottom (`EditorHScrollBandPx`) and,
+    # since the scrollbars fade with pointer activity (2026-10-29), the
+    # vertical thumb in the band along its right edge (`EditorVScrollbarPx`).
+    # Nothing else changes. EACH CHANGED REGION IS JUDGED ON ITS OWN: one
+    # bounding box over the thumb and the band was the editor's whole body,
+    # which reads as "everything changed" and says nothing about either.)
+    let ring = arr(rec["focusRing"]["bbox"])
+    let editorBottom = ring[1] + ring[3]
+    let editorRight = ring[0] + ring[2]
+    let rowPx = rec["captureContext"]["editorRowPx"].getInt
+    var unexplained: seq[string] = @[]
+    var regionPixels = 0
+    for region in r["pressBodyChangedRegions"]:
+      let box = arr(region["box"])
+      regionPixels += region["pixels"].getInt
+      let caret = box[2] <= 12 and box[3] <= rowPx + 2
+      let hBand = box[0] >= r["doneRingLeft"].getInt and
+                  box[1] >= editorBottom - 1 - EditorHScrollBandPx and
+                  box[1] + box[3] <= editorBottom and
+                  box[3] <= EditorHScrollBandPx
+      let vBand = box[0] >= editorRight - 1 - EditorVScrollbarPx and
+                  box[0] + box[2] <= editorRight and
+                  box[2] <= EditorVScrollbarPx and
+                  box[1] >= ring[1] and box[1] + box[3] <= editorBottom
+      if not (caret or hBand or vBand):
+        unexplained.add $box
+    checkpoint("press-body regions not a caret or a scrollbar band: " &
+               $unexplained)
+    # Every changed pixel is in some region — the regions are the change.
+    ck regionPixels == r["pressBodyChanged"].getInt
+    ck unexplained.len == 0
     # The layout document the window wrote carries the new weight: the Files
     # column's share grew by 80 px of the row's extent (the shared default
     # gives it 20).

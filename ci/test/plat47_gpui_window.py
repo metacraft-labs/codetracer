@@ -566,6 +566,46 @@ def changed_bbox(a, b, exclude=None):
     return [x0, y0, x1 - x0 + 1, y1 - y0 + 1], count
 
 
+def changed_regions(a, b, gap=2):
+    """The changed pixels of `a` -> `b` as separate regions: one box per
+    connected group (pixels within `gap` of each other join), largest first.
+    A single bounding box merges two unrelated changes — the vertical thumb at
+    the editor's right edge and the horizontal band at its bottom — into one
+    box the size of the editor, which says nothing about either."""
+    w, h, ra = a
+    _, _, rb = b
+    pts = set()
+    for y in range(h):
+        row = y * w * 3
+        if ra[row:row + w * 3] == rb[row:row + w * 3]:
+            continue
+        for x in range(w):
+            i = row + x * 3
+            if ra[i:i + 3] != rb[i:i + 3]:
+                pts.add((x, y))
+    regions = []
+    while pts:
+        seed = pts.pop()
+        stack = [seed]
+        x0 = x1 = seed[0]
+        y0 = y1 = seed[1]
+        n = 1
+        while stack:
+            cx, cy = stack.pop()
+            for dx in range(-gap, gap + 1):
+                for dy in range(-gap, gap + 1):
+                    q = (cx + dx, cy + dy)
+                    if q in pts:
+                        pts.discard(q)
+                        stack.append(q)
+                        n += 1
+                        x0, x1 = min(x0, q[0]), max(x1, q[0])
+                        y0, y1 = min(y0, q[1]), max(y1, q[1])
+        regions.append({"box": [x0, y0, x1 - x0 + 1, y1 - y0 + 1], "pixels": n})
+    regions.sort(key=lambda r: -r["pixels"])
+    return regions
+
+
 def colour_count(frame, rect, colour, tol=6):
     x, y, w, h = rect
     n = 0
@@ -870,6 +910,10 @@ def record():
         # PLAT-51: a press on the read-only editor's text places its CARET —
         # what changed, as a box (a caret is a bar one cell wide).
         "pressBodyChangedBox": changed_bbox(frames["resize-done"], frames["press-body"])[0],
+        # ...and each separate change, so the caret, and the scrollbars the
+        # pointer's arrival over the editor reveals, are judged one by one.
+        "pressBodyChangedRegions": changed_regions(frames["resize-done"],
+                                                   frames["press-body"]),
     }
     saved = os.path.join(OUT, "a-state", "gpui-layout.json")
     out["resize"]["savedLayout"] = json.load(open(saved)) if os.path.exists(saved) else None

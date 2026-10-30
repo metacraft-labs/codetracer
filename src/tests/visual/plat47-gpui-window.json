@@ -225,6 +225,26 @@
    394,
    978
   ],
+  "pressBodyChangedRegions": [
+   {
+    "box": [
+     851,
+     70,
+     13,
+     375
+    ],
+    "pixels": 4873
+   },
+   {
+    "box": [
+     470,
+     1036,
+     135,
+     12
+    ],
+    "pixels": 1482
+   }
+  ],
   "savedLayout": {
    "version": 6,
    "layout": {
