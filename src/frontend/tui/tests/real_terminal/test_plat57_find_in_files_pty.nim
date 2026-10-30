@@ -364,8 +364,15 @@ suite "PLAT-57 on a real terminal: Find in Files":
         regexOn = $sess.cellAt(r, c).bg != $sess.cellAt(r, c - 6).bg
     ck regexOn
     # A regular expression: the oracle's reading of it, row for row.
+    # `Esc` closes the field; WAIT FOR THAT, not for a time. While the search
+    # the `Alt+R` above re-ran is still being drawn, the loop may not read the
+    # `Esc` before the next byte arrives, and a held `Esc` read together with
+    # `Ctrl+P` frames as ONE chord (`Alt+Ctrl+P`): the field stayed open and
+    # `:grep sc[a]le\b` was typed over its selected seed (measured: the query
+    # became `:grep sc[a]le\b`, red at load 22 and 90, green after a longer
+    # pause). The input indicator leaves `PALETTE` when the field is gone.
     sess.send("\x1b")
-    sleep(200)
+    discard sess.waitScreen("CUA [DEBUG]")
     let defs = wordEndLines(trace, Pattern)
     var defFiles: seq[string] = @[]
     for (f, _) in defs:

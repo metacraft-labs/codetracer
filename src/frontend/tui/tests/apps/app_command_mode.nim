@@ -274,9 +274,17 @@ proc applyToken*(st: var AppState; token: string; cols, rows: int;
     st.modal.buffer = st.prompt.buffer
     true
   of "action":
-    st.lastAction = res.action
-    let (raises, ev) = modalEventFor(res.action)
-    case res.action
+    # THE OPEN FIELD'S OWN CANCEL. Since the find session, `Escape` in an open
+    # prompt routes as `input.cancel`, which has no `KeyAction`; the runtime
+    # (`runPromptKey`, `claCancelled`) treats it as the modal cancel back to
+    # NORMAL, the palette closing with it. The child does the same.
+    let action =
+      if res.action == kaNone and res.operation == "input.cancel" and
+         st.modal.isTextEntry: kaReturnToNormal
+      else: res.action
+    st.lastAction = action
+    let (raises, ev) = modalEventFor(action)
+    case action
     of kaOpenCommandPrompt:
       if raises and applyModalEvent(st.modal, ev).accepted:
         discard st.prompt.open(pkCommand)
@@ -288,7 +296,7 @@ proc applyToken*(st: var AppState; token: string; cols, rows: int;
         st.hasOutcome = false
     of kaSearchForward, kaSearchBackward:
       if raises and applyModalEvent(st.modal, ev).accepted:
-        let dir = if res.action == kaSearchForward: sdirForward
+        let dir = if action == kaSearchForward: sdirForward
                   else: sdirBackward
         st.searchModel = initSearchModel(sscSource, dir)
         discard st.prompt.open(

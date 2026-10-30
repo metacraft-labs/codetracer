@@ -38,8 +38,12 @@
 ## byte for byte what `sendKey("f10")` writes — and cannot exercise
 ## `Shift+F10`'s binding at all.
 ##
-## This file drives it anyway, because CTUI-9 names it, and ASSERTS THE
-## CONSEQUENCE: the second F10 resolves to `step-over` again, exactly like the
+## (SINCE FIXED: the pinned TermAssert sends `ESC [ 2 1 ; 2 ~` for
+## `shift+f10`, and the case below asserts the modified key. The rest of this
+## paragraph is the history.)
+##
+## This file drove it anyway, because CTUI-9 names it, and ASSERTED THE
+## CONSEQUENCE: the second F10 resolved to `step-over` again, exactly like the
 ## first. Then it sends xterm's real modified-function-key sequence
 ## `ESC [ 2 1 ; 2 ~` itself and asserts THAT resolves to `reverse-step-over`.
 ## The two together are what make "Shift+F10 is bound and reachable" a measured
@@ -232,14 +236,16 @@ suite "CTUI-9 Tier 2: the keymap on a real terminal":
       checkField(sess, keysApp.KindRow, keysApp.KindLabel, "action")
       checkMode(sess, mmNormal, ansiIndexOf(srModeNormal))
 
-      # ---- `sendKey("shift+f10")`: THE HARNESS DROPS THE MODIFIER ---------
+      # ---- `sendKey("shift+f10")`: THE HARNESS NOW KEEPS THE MODIFIER -----
       # Driven because CTUI-9 names it, and asserted for what it ACTUALLY
-      # does. See this file's header: `sendKey` strips `shift+`, so these are
-      # the same bytes as above and must resolve the same way.
+      # does. This file's header records TermAssert dropping `shift+`; it no
+      # longer does (measured 2026-10-30 at the pinned TermAssert: the key
+      # field reads `Shift+F10`), so this is the modified key, as CTUI-9 meant.
       sess.sendKey("shift+f10")
       discard settledFrame(sess, 2)
-      checkField(sess, keysApp.KeyRow, keysApp.KeyLabel, "F10")
-      checkField(sess, keysApp.ActionRow, keysApp.ActionLabel, $kaStepOver)
+      checkField(sess, keysApp.KeyRow, keysApp.KeyLabel, "Shift+F10")
+      checkField(sess, keysApp.ActionRow, keysApp.ActionLabel,
+                 $kaReverseStepOver)
 
       # ---- THE REAL Shift+F10 SEQUENCE ------------------------------------
       sess.send(ShiftF10Bytes)

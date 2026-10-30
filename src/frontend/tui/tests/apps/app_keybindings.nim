@@ -214,6 +214,16 @@ proc applyToken*(st: var AppState; token: string; cols, rows: int;
   of "action":
     st.lastAction = res.action
     st.lastSpelling = res.spelling
+    # THE OPEN PROMPT'S OWN CANCEL. Since the find session, `Escape` in an
+    # open field routes as `input.cancel`, which has no `KeyAction`; the
+    # runtime (`runPromptKey`, `claCancelled`) turns it into the modal cancel
+    # back to NORMAL. The child does the same, through the same event, and
+    # reports it as the action that event belongs to.
+    if res.action == kaNone and res.operation == "input.cancel" and
+       st.modal.isTextEntry:
+      st.lastAction = kaReturnToNormal
+      discard applyModalEvent(st.modal, meCancel)
+      return true
     let (raises, ev) = modalEventFor(res.action)
     if raises:
       discard applyModalEvent(st.modal, ev)
