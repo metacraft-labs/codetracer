@@ -3,13 +3,13 @@
 
 .isonim-state
   // The panel inset (PANEL_INSET, 8px — button.styl) on both sides of every
-  // row: the toolbar, the source line, the watch field and the values start
+  // row: the sub-tabs, the source line, the watch field and the values start
   // on the same line as the tab title above them and end 8px from the right.
   // The .value-components-container drops its right padding so its scrollbar
   // remains flush with the right edge of the panel.
   .code-state-line,
   #gdb-evaluate,
-  .variables-toolbar,
+  .state-tabs,
   .loading-indicator,
   .value-components-container
     padding-left: PANEL_INSET
@@ -27,31 +27,28 @@
   .value-view
     flex-wrap: nowrap
 
-  // One column (Variable-State-Pane.md, "Decisions (2026-10-24)": the pane
-  // is one list of variables and watches, with no tab strip): the watch
-  // field, the toolbar under it, the source line, then the list.  The
-  // toolbar holds only the "Hide watches from other processes" toggle, which
-  // is `display: none` unless some watch came from another process; the
-  // toolbar then has no height, so its row is empty.  A `display: none` child
-  // (the loading line, or a hidden code line) likewise leaves its row empty.
+  // The watch field sits on the tabs' row, to their right, 6px from them —
+  // one control bar instead of two stacked rows.
   //
   // `&`: `isonim-state` and `state-component` are classes of the SAME element.
   &.state-component
     display: grid
-    grid-template-columns: minmax(0, 1fr)
-    grid-template-rows: auto auto auto auto minmax(0, 1fr)
-    grid-template-areas: "field" "toolbar" "code" "loading" "values"
+    grid-template-columns: max-content minmax(0, 1fr)
+    grid-template-rows: auto auto auto minmax(0, 1fr)
+    grid-template-areas: "tabs field" "code code" "loading loading" "values values"
+    column-gap: 0.375rem
     align-items: center
 
+    > .state-tabs
+      grid-area: tabs
+
+    // No left inset of its own here: the 6px gap is the only space between
+    // it and the tabs. Its right inset matches the rows below.
     > #gdb-evaluate
       grid-area: field
+      padding-left: 0
 
-    > .variables-toolbar
-      grid-area: toolbar
-      display: flex
-      justify-content: flex-end
-
-    // The source line of the stopped position, 8px below the field.
+    // The source line of the stopped position, 8px below the tabs/field bar.
     > .code-state-line
       grid-area: code
       margin-top: PANEL_INSET
@@ -71,8 +68,8 @@
       // Anchors the empty message below.
       position: relative
 
-      // The empty message ("No variables at this point of execution…")
-      // centred in the values area, the way every other panel centres
+      // The empty message ("No local variables…", "No watch expressions
+      // yet…") centred in the values area, the way every other panel centres
       // its message (components/empty_states.styl) — the same fill Scratchpad
       // uses (scratchpad.styl).
       //
@@ -89,6 +86,15 @@
         left: 0
         right: 0
         bottom: 0
+
+  // Locals / Globals / Watches — the design system's mode-switcher
+  // (CodeTracer Design System, "I2 · Mode switcher"): one outlined track
+  // with the selected view raised inside it.
+  .state-tabs
+    segmented-tabs()
+    // Keeps the 8px inset from the rule at the top of this block, as a margin:
+    // the track's own padding is the 2px around the tabs.
+    margin-left: PANEL_INSET
 
   // "Hide watches from other processes": a small toggle, raised while on.
   .hide-other-process-watches
@@ -110,11 +116,10 @@
       color: #f3f3f3
 
   // A watch the stop cannot answer stays in the list, its value cell
-  // carrying the reason, muted and italic so it does not read as a value; a
-  // watch still waiting for its answer is muted only.
+  // carrying the reason in a muted colour; a watch still waiting for its
+  // answer uses the same muted treatment.
   .value-watch.watch-invalid .value-expanded-text
     color: #b4b4b4
-    font-style: italic
 
   .value-watch.watch-pending .value-expanded-text
     color: #b4b4b4
@@ -234,7 +239,7 @@
   background: colors-ui-surface-base-panel
 
 .value-watch
-  font-style: italic
+  font-style: normal
 
 .value-selected
   opacity: 0.5
@@ -339,13 +344,50 @@
   font-size: 0
   overflow: hidden
 
+// Source excerpts preserve their real line breaks and indentation. Long lines
+// scroll inside the expansion instead of wrapping or widening the State pane.
+.ct-origin-inline-chain,
+.ct-history-inline-container
+  min-width: 0
+  max-width: 100%
+  overflow: auto
+
+.ct-origin-inline-chain-hop,
+.ct-origin-inline-chain-terminator,
+.ct-history-inline-row
+  width: max-content
+  min-width: 100%
+  white-space: pre
+
+// -- Inline origin chain rows --
+.ct-origin-inline-chain
+  background-color: colors-ui-surface-primary-default
+  font-family: "SpaceMono"
+  padding: 0.25em 0
+  max-height: 8em
+
+.ct-origin-inline-chain-hop,
+.ct-origin-inline-chain-terminator
+  display: flex
+  align-items: baseline
+  line-height: 1.5em
+  justify-content: flex-start
+  gap: 0.5em
+
+  .ct-origin-inline-chain-hop-text
+    color: colors-ui-text-warning-primary
+    text-align: left
+
+  .ct-origin-inline-chain-terminator-text
+    color: colors-ui-text-primary-body
+    text-align: left
+
 // -- Inline value history rows --
 .ct-history-inline-container
   background-color: colors-ui-surface-primary-default
   font-family: "SpaceMono"
   padding: 0.25em 0
   max-height: 5em
-  overflow-y: auto
 
 .ct-history-inline-row
   display: flex

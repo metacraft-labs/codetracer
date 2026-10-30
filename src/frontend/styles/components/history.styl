@@ -241,3 +241,52 @@
 
 .history
   width: 100%
+
+// The debugger's history popup is anchored to back/forward by its view. Scope
+// these rules so older history surfaces retain their own positioning.
+.isonim-debug-controls .history-list-host
+  position: fixed
+  z-index: 1500
+  width: max-content
+  max-width: calc(100vw - 16px)
+  -webkit-app-region: no-drag
+
+  .history-list
+    position: relative
+    margin: 0
+    transform: none
+    min-width: 12rem
+    max-width: calc(100vw - 16px)
+    color: colors-ui-text-primary-body
+    border: 1px solid colors-ui-border-primary-hover
+
+  .history-list-rows
+    display: flex
+    flex-direction: column
+    max-height: min(45vh, 24rem)
+    overflow: auto
+
+  .history-list-entry,
+  .history-list-close
+    border: 0
+    background: transparent
+    color: inherit
+    font-family: "SpaceGrotesk"
+    font-size: 0.875rem
+    line-height: 1.5rem
+    padding: 0.125rem 0.5rem
+    text-align: left
+    white-space: nowrap
+    cursor: pointer
+    flex-shrink: 0
+
+    &:hover,
+    &:focus-visible
+      background: colors-ui-surface-primary-secondary-hover
+
+  .history-list-entry
+    width: max-content
+    min-width: 100%
+
+  .history-list-close
+    border-top: 1px solid colors-ui-border-primary-hover

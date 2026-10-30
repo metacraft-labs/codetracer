@@ -1146,6 +1146,8 @@ test_lane_files() {
 		# leaves the keyboard in a text field being typed in. Where the
 		# keyboard goes is decided only by a browser.
 		echo src/frontend/tests/editor_focus_chromium_test.nim
+		# Native history context menus, exact destinations and dismissal.
+		echo src/frontend/tests/debug_history_context_menu_chromium_test.nim
 		;;
 
 	main-process)

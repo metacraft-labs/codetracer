@@ -523,6 +523,26 @@ button
 // `pointer-events: none` made unreachable now shows.
 .isonim-debug-controls button:disabled
   pointer-events: auto
+  // Dim only the mark: parent opacity also fades the tooltip's entire layer.
+  // The disabled colour and native disabled behaviour still apply.
+  opacity: 1
+
+  > .ct-control-mark
+    opacity: 0.5
+
+// Viewport coordinates are clamped by the toolbar view on hover and resize.
+// Long labels can wrap when even the full window is narrower than the text.
+.isonim-debug-controls [class*="ct-button-image-"] > .custom-tooltip
+  position: fixed
+  box-sizing: border-box
+  max-width: calc(100vw - 16px)
+  max-height: calc(100vh - 16px)
+  overflow-wrap: anywhere
+  white-space: normal
+  transition: opacity 0.3s ease, visibility 0.3s ease
+
+  &:after
+    left: calc(var(--tooltip-arrow-left, 50%) - 0.5em)
 
 // The value-origin badge on each State row sits beside the value-history toggle
 // (above), so it is built as the same extra-small icon button: 20px tall, the

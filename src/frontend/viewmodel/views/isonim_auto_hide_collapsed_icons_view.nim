@@ -1,8 +1,8 @@
 ## IsoNim view for the collapsed auto-hide status-bar icon zone.
 ##
 ## The status bar owns stable hosts at both ends, refreshed directly through
-## this view after status redraws. Each icon opens
-## the corresponding side-pinned auto-hide panel.
+## this view after status redraws. The pinned-tabs dropdown replaces individual
+## panel icons when available.
 
 import isonim/dsl/ui
 import isonim/core/[signals, computation]
@@ -171,8 +171,10 @@ proc renderAutoHideCollapsedIconsPanel*[R, N](
     r.appendChild(result, renderRestoreButton[R, N](r, callbacks))
   if callbacks.restoreFirst and callbacks.hasTabList:
     r.appendChild(result, renderTabListButton[R, N](r, callbacks))
-  for i, icon in icons:
-    r.appendChild(result, renderCollapsedIcon[R, N](r, icon, i, callbacks))
+  # The dropdown already lists every pinned panel; avoid a duplicate icon row.
+  if not callbacks.hasTabList:
+    for i, icon in icons:
+      r.appendChild(result, renderCollapsedIcon[R, N](r, icon, i, callbacks))
   if not callbacks.restoreFirst and callbacks.hasTabList:
     r.appendChild(result, renderTabListButton[R, N](r, callbacks))
   if not callbacks.restoreFirst and callbacks.hasRestore:
