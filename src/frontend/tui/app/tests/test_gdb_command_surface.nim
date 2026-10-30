@@ -303,7 +303,10 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 359
+  ExpectedStyleLiterals = 363
+    ## 2026-10-30: 359 → 363, measured — the Edit pane's diagnostics, four
+    ## (`views/edit_pane.nim`: the error, warning and info underlines and the
+    ## margin's severity cell), added with the build tasks.
     ## 2026-10-29 (PLAT-60): 349 → 359, measured — the Low Level Code pane's
     ## ten (`views/low_level_code_pane.nim`: the sync toggle on and off, the
     ## muted, text, error and notice cells, the source line, the line number
