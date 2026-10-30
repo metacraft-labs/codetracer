@@ -1,0 +1,24 @@
+# Control digests for run-plat70e-origin-mutations.py — the
+# subjects AND the suites the arms are graded by (§16c).
+# Refreshed with --record-control-hashes, gated by the
+# needle scan (§39a).
+ce0b9cc6db25ed06241adf6b9963e87e05c082f84544967f305c29cc91013ba5  src/frontend/viewmodel/viewmodels/state_pane_keys.nim
+65d5f9926d582c9c7e6932ae72910760117fb6c55b0208ee9e531bdae6d793a4  src/frontend/viewmodel/keymap/cua_keymap.nim
+21ed354faca33d11b765c4b960ca930d8d92d842b8efdea3b0c4f3ce98e68bff  src/frontend/viewmodel/keymap/emacs_keymap.nim
+defecdb45013589d11cb71fc132c5fea6becf55ead0de4b5b35dab9851ca4f91  src/frontend/viewmodel/keymap/navigation_keymap.nim
+3d9357060b47e3c85543bceb63df335c6fe235b6638b4a69e17a89c958f774a1  src/common/key_names.nim
+dedecfaeb3fb4f388c01f89eb9500e5ac04be99e77b3ac0687d0b183ff705dea  src/common/key_event_names.nim
+10d0991b5fc8a82cb47b832dab77039f71c02335ba2e0067c26307f36e9442dd  src/frontend/tui/app/runtime.nim
+f95646b8a165bd7e42bfc45135f7bedd647c1b4b795ee4ddbfd14ed338c7eb10  src/frontend/tui/app/views/variables.nim
+efe3ee1560ee74cacbcba811b4ce7d42b07fc838569da68e6d719aa54c7f414c  src/frontend/tui/host/tui_session.nim
+07c82bc5daff5c927f78cf71ac0250727f75c1a0472a7fe331777fa9260843e2  src/frontend/gpui/main.nim
+1093dfbab72adc1fef61132db310f7bd6d2ad9818c7303344ea6d697222e05d2  src/frontend/gpui/app/leaves.nim
+e7bbdd98f457fc0f5ee0c1e06f5c7bc30031a63569fb7b3afc51e64ce7f273f4  src/frontend/ui/key_router.nim
+e1ffc5f0d70dea4028b10673c94c7ef721562e7aa8b25d8560f1672c690ab3c0  ci/lib/spec-checkout.sh
+2b09af682d583319b959775bf7a30c554912b48edf079a99d88bcd566753f4cc  ci/lib/run-nim-test-lane.sh
+1e3622438e2a6b383dfa08d9d5e9e58515a5a46d6d2fe16c0ea5b10ba150c736  src/frontend/viewmodel/tests/unit/test_plat70e_origin_keys_vm.nim
+83ee21a82e4b36fafb8a8d24b7b685a1a10f396f90766081d2f3bb691db1fe57  src/frontend/viewmodel/tests/unit/test_plat68_cua_oracle.nim
+562b38ae218ab1463a455d624bed229f3db5ce1d25883beb609c17a717c4a5ec  src/frontend/tui/tests/real_terminal/test_plat70e_origin_keys_pty.nim
+308047e42cbc2c2ab161c32aecca052f80841823b851efd79a61de029ee28dea  src/frontend/gpui/tests/test_plat70e_gpui_plan.nim
+c8ca5ef00c9169bf2aa5a4515118d2fb24c9c592d576ea3d50921272360a117c  src/tests/gui/tests/value-origin/plat70e-origin-keys.spec.ts
+f697e37156544b2ed9b0d70912306607156676a695e61ac024e6b8dff6e50fcd  ci/test/spec-checkout-paths-test.py
