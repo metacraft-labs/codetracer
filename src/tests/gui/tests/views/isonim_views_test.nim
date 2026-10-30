@@ -25,6 +25,7 @@ import backend/mock_backend
 import backend/dap_commands
 import store/types
 import store/replay_data_store
+import viewmodels/build_output_model
 import viewmodels/state_vm
 import viewmodels/calltrace_vm
 import viewmodels/debug_controls_vm
@@ -4999,13 +5000,11 @@ proc makeBuildLine(text: string;
                    severity: BuildLineSeverity = blsNone;
                    path: string = "";
                    line: int = 0): BuildOutputLine =
-  BuildOutputLine(
-    htmlText: text,
-    isStdout: isStdout,
-    severity: severity,
-    locationPath: path,
-    locationLine: line,
-  )
+  ## The line a producer that writes plain text makes — the product's own
+  ## constructor, one default run (build output is styled runs since PLAT-56;
+  ## the HTML field this used to fill is gone).
+  plainBuildLine(text, isStdout = isStdout, severity = severity,
+                 path = path, line = line)
 
 # ---------------------------------------------------------------------------
 # Build structure tests
@@ -12116,7 +12115,7 @@ suite "Handlers built in a loop act on their own item (codetracer#860 sweep)":
       let vm = createBuildVM(store)
       let r = MockRenderer()
       var jumps: seq[(string, int)] = @[]
-      vm.onJumpToLine = proc(path: string; line: int) = jumps.add((path, line))
+      vm.onJumpToLine = proc(path: string; line, col: int) = jumps.add((path, line))
 
       let panel = renderBuildPanel[MockRenderer, MockNode](r, vm)
       vm.appendLine(makeBuildLine("a.nim(3, 1) Error: x", severity = blsError,
