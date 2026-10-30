@@ -235,6 +235,18 @@ type
       ## overlay had nothing to draw.
     bound*: DapReadBound
       ## CTUI-14.  Unbounded by default; see this module's header.
+    stalled: bool
+      ## Set when a read ran out ``bound.timeoutMs`` with nothing arriving: the
+      ## engine has already been given its whole budget to answer and did not.
+      ##
+      ## `close` reads it. An engine that stopped answering is not asked to
+      ## shut down gracefully as well — the same three-second wait for it to
+      ## notice its stdin closing would follow a budget it has just spent,
+      ## and an engine wedged INSIDE an operation (blocked opening a container
+      ## that never yields a byte, measured 2026-10-30) never notices: the
+      ## terminal's stalled open then ended at budget + 3 s instead of on its
+      ## clock. A user interrupt does not set this — that engine may be
+      ## perfectly healthy, and keeps its graceful exit.
     broken: bool
       ## Set when a read was abandoned PART WAY THROUGH A MESSAGE.
       ##
@@ -304,7 +316,7 @@ proc watchesInterrupt*(b: DapReadBound): bool =
   ## watched only when there is something to consume it.
   b.interruptFd >= 0 and b.onInterrupt != nil
 
-proc isBounded*(b: DapReadBound): bool =
+proc isBounded(b: DapReadBound): bool =
   ## Whether this bound does anything at all. ``DapReadBound()`` does not.
   b.timeoutMs > 0 or b.watchesInterrupt
 
@@ -558,6 +570,7 @@ proc readDapMessage*(backend: DapStdioBackend;
     if consumed:
       backend.broken = true
     if error of DapStalledError:
+      backend.stalled = true
       let diagnostic = backend.diagnosticTail()
       if diagnostic.len > 0:
         error.msg.add("\nreplay-server stderr:\n" & diagnostic)
@@ -883,7 +896,9 @@ proc isClosed*(backend: DapStdioBackend): bool =
 
 proc close*(backend: DapStdioBackend) =
   ## Terminate the replay-server child process.
-  ## Attempts a graceful shutdown first (close stdin), then kills.
+  ## Attempts a graceful shutdown first (close stdin), then kills — except for
+  ## an engine that already ran out its read budget (``stalled``), which is
+  ## killed at once.
   ## Idempotent: the process's handles are released once.
   if backend.closed:
     return
@@ -896,7 +911,10 @@ proc close*(backend: DapStdioBackend) =
         discard
       # waitForExit returns -1 on timeout; it does not raise. Reap a child
       # that ignored stdin EOF before releasing its handles.
-      if backend.process.waitForExit(timeout = 3000) == -1:
+      if backend.stalled:
+        backend.process.kill()
+        discard backend.process.waitForExit()
+      elif backend.process.waitForExit(timeout = 3000) == -1:
         backend.process.kill()
         discard backend.process.waitForExit()
   finally:

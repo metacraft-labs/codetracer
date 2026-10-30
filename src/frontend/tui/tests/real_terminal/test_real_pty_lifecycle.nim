@@ -49,7 +49,9 @@
 ## handshake waits for, and never exits. The old blocking read never
 ## returned, behind an alternate screen the driver had already claimed, with
 ## `ISIG` cleared by `cfmakeraw` and no input loop running — so `Ctrl+c` reached
-## nothing.
+## nothing. (The engine has since learnt to refuse that garbage outright, so
+## the folder these cases use now stalls it with a container that is a pipe
+## nobody writes — `lifecycle_support.WedgeContainer`.)
 ##
 ## Both halves of the fix are asserted below, and each is PINNED BY A CHECK THAT
 ## REDDENS:
@@ -80,7 +82,7 @@ import ./lifecycle_support
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 64
+const ExpectedAssertions = 63
 
 var countedAssertions = 0
 
@@ -137,14 +139,14 @@ suite "CTUI-14 Tier 2: the pty lifecycle, and the wedge that used to end it":
     tracePath = resolved.tracePath
     checkpoint("trace: " & tracePath)
     ck dirExists(tracePath)
-    # THE GARBAGE FOLDER IS BUILT HERE, once, and it is built rather than
-    # checked in: a 4 KB file of urandom in a repository would be a fixture
-    # nobody could read, and the property that matters — "shape-valid, and not
-    # a recording" — is what the construction says out loud.
+    # THE WEDGE FOLDER IS BUILT HERE, once, and it is built rather than
+    # checked in: its one entry is a pipe nothing writes, under a container's
+    # name (`lifecycle_support.WedgeContainer` says why), and the property that
+    # matters — "shape-valid, and never a recording" — is what the
+    # construction says out loud.
     let wedge = wedgeFolder()
     checkpoint("shape-valid non-recording: " & wedge)
-    ck fileExists(wedge / "trace.bin")
-    ck getFileSize(wedge / "trace.bin") == WedgeBytes
+    ck isPipe(wedge / WedgeContainer)
 
   test "a session quit with `:quit` exits 0 with a paired alternate screen":
     # §4.3's `quit` command, typed at the `:` prompt, which is the exit path
@@ -211,7 +213,8 @@ suite "CTUI-14 Tier 2: the pty lifecycle, and the wedge that used to end it":
 
   test "THE WEDGE: a stalled handshake ends on the clock, not on the user":
     # The folder passes every `stat` `traceFolderProblem` makes — it holds a
-    # `trace.bin` — and `replay-server` accepts it and then stops answering.
+    # `.ct` container — and `replay-server` opens it and then waits for bytes
+    # that never come.
     # Before CTUI-14 this hung for ever with the alternate screen claimed.
     let wedge = wedgeFolder()
     let started = getMonoTime()
