@@ -859,7 +859,7 @@ jobs:
             # carry it, so it keeps the SHA shape.
             isonim=6927da97dfd0ff92b24662d54f6d261528811632
             isonim-tui=1d123c35bd241a4af853b2df6b21c973fba9e6b7
-            runquota=f9f1118cd33a27051c6fea683348f343df91e96f
+            runquota=35b9dfe4af6e18f3f2a2242ece7cff330eb581e2
 
       - name: Check the workspace has the shape the driver expects
         # Cheap, and it turns the one class of failure a local rehearsal cannot
