@@ -530,7 +530,10 @@ async fn t_mcp_exec_script_refuses_a_scratch_parent_others_can_reach() {
     let trace_dir = simple_recording(&root);
     let (mut daemon, socket) = start_daemon(&server, &root, &replay).await;
     let mut mcp = start_mcp(&server, &root, &socket, &[]).await;
-    let parent = root.join("codetracer").join("script-scratch");
+    // Where the daemon makes its scratch directories:
+    // `<tmp_path>/script-scratch`, its tmp dir being the one the harness
+    // gives it (`daemon_tmp_dir`), whatever CODETRACER_HOME this run inherits.
+    let parent = daemon_tmp_dir(&root).join("script-scratch");
     std::fs::create_dir_all(&parent).unwrap();
     std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
     let refused = mcp

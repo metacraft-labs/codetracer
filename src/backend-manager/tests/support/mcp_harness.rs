@@ -638,6 +638,27 @@ pub fn short_root(prefix: &str) -> (tempfile::TempDir, PathBuf) {
     (root, path)
 }
 
+/// The private `CODETRACER_HOME` the harness gives the daemon and `trace mcp`
+/// it starts under `root`.
+///
+/// Every per-user location the daemon resolves (its tmp dir, which holds the
+/// script scratch parent and the replay sockets; the trace index; logs)
+/// follows `CODETRACER_HOME`, and `CODETRACER_HOME` outranks `TMPDIR`
+/// (`libs/ct-home`).  Setting only `TMPDIR`, as the harness used to, left the
+/// daemon in whatever `CODETRACER_HOME` the test run inherited: `just
+/// test-rust` exports a scratch one for the whole run, so the daemon's tmp
+/// dir was not under `root` at all, and a test that arranged a directory there
+/// (the script scratch parent) arranged one the daemon never looked at.
+pub fn daemon_home(root: &Path) -> PathBuf {
+    root.join("home")
+}
+
+/// The daemon's tmp dir (`$CODETRACER_HOME/tmp`, `ct_home::tmp_dir`) under
+/// the home [`daemon_home`] gives it.
+pub fn daemon_tmp_dir(root: &Path) -> PathBuf {
+    daemon_home(root).join("tmp")
+}
+
 /// The real daemon, with its own socket under `root`, starting the real
 /// `replay-server`.  Returns it and its socket once the socket exists.
 pub async fn start_daemon(server: &Path, root: &Path, replay_server: &Path) -> (Child, PathBuf) {
@@ -663,6 +684,9 @@ pub async fn start_daemon_with_env(
     let mut daemon = Command::new(server)
         .args(["daemon", "start"])
         .env("TMPDIR", root)
+        .env("CODETRACER_HOME", daemon_home(root))
+        // It outranks CODETRACER_HOME; an inherited one would move the tmp dir.
+        .env_remove("CODETRACER_TMP_PATH")
         .env("CODETRACER_DAEMON_SOCKET", &socket)
         .env("CODETRACER_REPLAY_SERVER_CMD", replay_server)
         .envs(env.iter().map(|(k, v)| (*k, *v)))
@@ -741,6 +765,9 @@ pub async fn start_mcp(server: &Path, root: &Path, socket: &Path, extra_args: &[
         .args(["trace", "mcp"])
         .args(extra_args)
         .env("TMPDIR", root)
+        .env("CODETRACER_HOME", daemon_home(root))
+        // It outranks CODETRACER_HOME; an inherited one would move the tmp dir.
+        .env_remove("CODETRACER_TMP_PATH")
         .env("CODETRACER_DAEMON_SOCK", socket)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

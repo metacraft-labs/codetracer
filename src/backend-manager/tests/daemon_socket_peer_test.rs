@@ -122,15 +122,10 @@ async fn t_mcp_daemon_socket_is_its_owners_alone() {
 async fn t_mcp_daemon_answers_no_peer_of_another_user() {
     let (_guard, root) = short_root("ct-peer-");
     let server = server_binary();
-    // The daemon logs under CODETRACER_HOME's state area.
-    let home = root.join("home");
-    let (mut daemon, socket) = start_daemon_with_env(
-        &server,
-        &root,
-        &replay_server_for(&server),
-        &[("CODETRACER_HOME", home.as_os_str())],
-    )
-    .await;
+    // The daemon logs under CODETRACER_HOME's state area: the home the
+    // harness gives it.
+    let home = daemon_home(&root);
+    let (mut daemon, socket) = start_daemon(&server, &root, &replay_server_for(&server)).await;
     // Open the path to everyone, so only the peer check stands between
     // another user and the daemon.
     for dir in [root.as_path(), socket.parent().unwrap()] {
