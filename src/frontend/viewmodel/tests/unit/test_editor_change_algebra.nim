@@ -117,7 +117,10 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1986
+const ExpectedAssertions = 1989
+  ## *1986 -> 1989 on 2026-10-30: `backend/stderr_capture.nim` (the replay
+  ## engine's diagnostics, kept off the protocol stream) x three assertions.
+  ## It calls no `rebase(` and spells no `mapOver`.*
   ## *1983 -> 1986 on 2026-10-28: `host/native_requests_host.nim` (the
   ## Requests pane's native host) x three assertions. It calls no `rebase(`
   ## and spells no `mapOver`.*

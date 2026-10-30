@@ -221,6 +221,21 @@ const
   ScenarioRel = "src/tests/visual/scenarios.json"
   GpuiSourceDir = "src/frontend/gpui"
   WindowModuleRel = "../isonim-gpui/src/isonim_gpui/window.nim"
+    ## The sibling checkout's window module. `windowModulePath` prefers the
+    ## copy `ISONIM_GPUI_SRC` names, because that is the one `config.nims`
+    ## compiles the front-end against when it is set.
+
+proc windowModulePath(): string =
+  ## The window module THIS BUILD compiles against: `$ISONIM_GPUI_SRC`'s when
+  ## it is set (a build pinned to another isonim-gpui revision — the override
+  ## `config.nims` honours), else the sibling's. Reading the sibling while
+  ## the compiler reads the override compared the front-end with a different
+  ## revision's registry: measured on a workspace whose sibling was behind the
+  ## pin, `setMinWindowSize` and `setInitialWindowState` were "not exported"
+  ## by a module the binary was not built from.
+  let override = getEnv("ISONIM_GPUI_SRC")
+  if override.len > 0: override / "isonim_gpui" / "window.nim"
+  else: WindowModuleRel
 
 proc requireFile(path, why: string): string =
   ## **A MISSING PREREQUISITE FAILS BY NAME. It does not skip.** The
@@ -1345,7 +1360,7 @@ const LaunchedWindowNames = [
 proc exportedWindowProcs(): seq[string] =
   ## Parse `proc <name>*(` out of the sibling's window module.
   result = @[]
-  for raw in readFile(requireFile(WindowModuleRel,
+  for raw in readFile(requireFile(windowModulePath(),
       "The scan's subject set is DERIVED from isonim-gpui's own window " &
       "module. A hand-typed list would be blind to a registry function added " &
       "upstream on the day it was added (§35a).")).splitLines():

@@ -14,7 +14,9 @@
 ##      (since PLAT-47 the keyword role is painted from them, generated beside
 ##      the pinned `codetracer-design-system`);
 ##   2. rewrites their `keyword` rule to two colours nothing else in the
-##      system uses (one per mode);
+##      system uses (one per mode), each chosen to differ from the committed
+##      keyword on every rung (`chooseNew`) — a change that cannot move a rung
+##      would test nothing about that rung;
 ##   3. runs the REAL generator (`scripts/tokens-to-styl.sh --nim-out
 ##      --editor-theme`) over the pinned design system and the scratch themes;
 ##   4. compiles a probe against the REAL `app/theme/` modules, copied into a
@@ -43,7 +45,7 @@ import ../app/theme/colour_math
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 17
+const ExpectedAssertions = 19
 
 var countedAssertions = 0
 
@@ -52,10 +54,24 @@ template ck(condition: untyped) =
   check condition
 
 const
-  NewDark = "#11aa33"
-  NewLight = "#2255cc"
-    ## Colours no token of the system resolves to, so a rung that still shows
-    ## the old keyword pink could not have come from the new hex by accident.
+  Candidates = ["#11aa33", "#2255cc", "#cc3322", "#aa22cc", "#22aaaa",
+                "#ccaa11"]
+    ## The keyword colours the experiment may write, one per mode, chosen in
+    ## this order (`chooseNew`). Spread over six hue families so that, for any
+    ## committed keyword colour, some candidate lands on a different entry at
+    ## EVERY rung.
+    ##
+    ## WHY THE COLOUR IS CHOSEN AND NOT FIXED. The claim is "change the token
+    ## and every rung moves". A change whose new colour happens to fall on the
+    ## SAME 16-colour family as the committed one cannot move that rung, so a
+    ## fixed pair turned this suite red the day the committed keyword moved
+    ## next to it — measured after `4424bd111ac` raised the Light keyword to
+    ## `#33618a`: the fixed `#2255cc` shares its 16-colour answer, and two of
+    ## the eight rungs "did not move" on a correct generator. That reading
+    ## says nothing about derivation. So the experiment picks a colour that is
+    ## DISTINGUISHABLE from the committed one on every rung (and that no token
+    ## of the system already resolves to), and the assertions below are
+    ## unchanged: each moved rung must still be the nearest entry to THAT hex.
   ThemeModules = ["roles.nim", "cell_style.nim", "colour_math.nim",
                   "palette.nim", "capabilities.nim", "editor_theme.nim",
                   "terminal_profile.nim"]
@@ -153,6 +169,25 @@ proc lineOf(table, prefix: string): string =
       return line[prefix.len + 1 .. ^1]
   ""
 
+proc chooseNew(committed, committedTokens, mode: string): string =
+  ## The first candidate that differs from the COMMITTED keyword's answer on
+  ## every rung (24-bit, 256, 16, terminal palette) and that no committed
+  ## token resolves to. "" when none does — which the caller asserts against,
+  ## so an exhausted list fails by name rather than shrinking the claim.
+  let prefix = mode & " syntax-keyword "
+  for hex in Candidates:
+    if committedTokens.toLowerAscii.contains(hex.toLowerAscii):
+      continue
+    let c = parseHexColour(hex)
+    let ansi = AnsiNames[nearestAnsi16Family(c)]
+    if hex == lineOf(committed, prefix & "truecolor") or
+       "indexed:" & $nearestXterm256(c) == lineOf(committed, prefix & "ansi256") or
+       ansi == lineOf(committed, prefix & "ansi16") or
+       ansi == lineOf(committed, prefix & "terminal"):
+      continue
+    return hex
+  ""
+
 suite "PLAT-46 deliverable 6: every rung is derived from the token":
 
   test "a changed keyword token moves every rung; an untouched one does not":
@@ -168,6 +203,16 @@ suite "PLAT-46 deliverable 6: every rung is derived from the token":
     # scratch copy of those two files — the keyword rule — and the design
     # system is the pinned one, untouched.
     let ds = designSystemSource(root, scratch)
+    let committedTokens = root / "src" / "frontend" / "styles" /
+                          "generated" / "design_tokens.nim"
+    let before = buildProbe(scratch / "tree-before", committedTokens, root)
+    checkpoint("committed tokens:\n" & before)
+    let NewDark = chooseNew(before, readFile(committedTokens), "dark")
+    let NewLight = chooseNew(before, readFile(committedTokens), "light")
+    checkpoint("new keyword colours: dark " & NewDark & ", light " & NewLight)
+    ck NewDark.len == 7
+    ck NewLight.len == 7
+
     let themes = scratch / "monaco-themes"
     createDir(themes)
     let themeSrc = root / "src" / "public" / "third_party" / "monaco-themes" /
@@ -190,11 +235,7 @@ suite "PLAT-46 deliverable 6: every rung is derived from the token":
     ck genCode == 0
     ck readFile(tokensNim).contains(NewDark)
 
-    let before = buildProbe(scratch / "tree-before",
-      root / "src" / "frontend" / "styles" / "generated" / "design_tokens.nim",
-      root)
     let after = buildProbe(scratch / "tree-after", tokensNim, root)
-    checkpoint("committed tokens:\n" & before)
     checkpoint("mutated tokens:\n" & after)
 
     var moved = 0
