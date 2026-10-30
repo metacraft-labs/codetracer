@@ -1,12 +1,12 @@
-## The workspace certificate store — **discovery only, and strictly read-only.**
+## The local certificate store — **discovery only, and strictly read-only.**
 ##
-## Implements ``test-certificates-spec/Transport.md`` §3 (a file carrier) and
-## §4 (discovery) for the directory carrier a workspace keeps beside its build
-## state. It answers one question — *which certificate records exist here, and
-## which one landed last* — and it answers it without deciding anything about
-## them. Reading a record, checking a signature and evaluating coverage all
-## belong to ``certificate.nim`` and ``certificate_verification.nim``, which
-## this module deliberately does not duplicate.
+## Implements ``test-certificates-spec/Transport.md`` §2.4 (reading the local
+## certificate store) and §5 (discovery). It answers one question — *which
+## certificate records exist for these content ids, and in what order did they
+## land* — and it answers it without deciding anything about them. Reading a
+## record, checking a signature and evaluating coverage all belong to
+## ``certificate.nim`` and ``certificate_verification.nim``, which this module
+## deliberately does not duplicate.
 ##
 ## Read-only, and that is a conformance property rather than a convention.
 ## Nothing here creates, writes, renames or removes a file, and nothing here
@@ -17,52 +17,51 @@
 ##
 ## What "the store" is
 ## -------------------
-## Two carriers are searched, because the standard's whole point is that a
-## certificate is producer-agnostic and carriers are interchangeable
-## (Transport.md §1):
+## The **local certificate store** (Transport.md §2), per user and addressed by
+## content id: ``<root>/v1/<algorithm>/<digest>/*.toml`` in BOTH of the user's
+## roots (§2.1, resolved by ``certificate_store_roots``). A lookup lists only
+## the directories of the content ids the caller asks about (§2.4) — it never
+## enumerates the store, which is shared by every repository the user works
+## in. Every conforming producer writes it: `ct test`
+## (``certificate_local_store``) and reprobuild alike, so a record reads
+## identically whichever produced it.
 ##
-## * the **local certificate store** (Transport.md §2), per user and
-##   addressed by content id: ``<root>/v1/<algorithm>/<digest>/*.toml`` in
-##   BOTH of the user's roots (§2.1, resolved by ``certificate_store_roots``).
-##   A lookup lists only the directories of the content ids the caller asks
-##   about (§2.4) — it never enumerates the store, which is shared by every
-##   repository the user works in. `ct test` writes it
-##   (``certificate_local_store``);
-## * ``.repro/workspace/certificates`` — reprobuild's workspace directory,
-##   matching where it keeps ``registered-keys.toml``
-##   (``reprobuild-specs/Test-Certificates.md``). Still pooled until
-##   reprobuild publishes to the local store.
+## Nothing under the working tree is read any more:
 ##
-## ``.ct/certificates`` is **not** read. `ct test` wrote one record per
-## platform there before the local store existed (CTC-2); since CTC-3e it
-## writes nothing under ``.ct/`` and nothing reads that directory, so records
-## left there are simply not seen (``AbandonedCtTestStoreDir``).
+## * ``.ct/certificates`` — `ct test` wrote one record per platform there
+##   before the local store existed (CTC-2); since CTC-3e it writes nothing
+##   under ``.ct/`` and nothing reads that directory, so records left there are
+##   simply not seen (``AbandonedCtTestStoreDir``).
+## * ``.repro/workspace/certificates`` — reprobuild's former workspace store,
+##   pooled here until reprobuild published to the local store. It does now
+##   (reprobuild-pm Test-Certificates TC-8c; reprobuild ``agents``
+##   1e70a388c), so the directory is no longer read either
+##   (``AbandonedReprobuildStoreDir``). Its ``registered-keys.toml`` went with
+##   it: that file is reprobuild's own trust policy, in reprobuild's own schema
+##   (``reprobuild.registered-keys.v1``), which this reader never parsed.
 ##
-## A record found in any carrier reads identically; there is no field anywhere
-## below recording which carrier it came from beyond its display name,
-## precisely so a hook-written certificate cannot render differently from an
-## agent-written one.
+## **The git-notes carrier is not read here.** Notes are push transport,
+## populated from the local store by the test-certificates helper tooling
+## (Transport.md §3, Tooling.md); a consumer on the machine that ran the tests
+## finds everything in the local store.
 ##
-## **The git-notes carrier is not read here.** Transport.md §2 recommends
-## ``refs/notes/<vendor>/certificates``, and reprobuild uses it for records that
-## travel with a push. Reading it needs a git plumbing call this module has no
-## seam for, so it is a stated gap rather than a silent one: a workspace whose
-## certificates live *only* in notes reads as "no certificates", which is the
-## outcome Transport.md §2 itself predicts for a notes ref that was never
-## fetched.
+## Absence is not an error; an incomplete search is not absence
+## --------------------------------------------------------------
+## A store with nothing for this content — no `ct test`, no reprobuild, a
+## project that does not use certificates — is an ordinary state and MUST NOT
+## be reported as a failure (Transport.md §5). It is ``present = false`` here,
+## and the indicator renders "no certificates".
 ##
-## Absence is not an error
-## -----------------------
-## A workspace with no store at all — no reprobuild, no `ct test`, a project
-## that does not use certificates — is an ordinary state and MUST NOT be
-## reported as a failure (Transport.md §4). It is ``present = false`` here, and
-## the indicator renders "no certificates".
-##
-## A store that *exists* and cannot be listed or read is a different answer,
-## and the two are kept apart for the same reason Verification.md §3.1 keeps an
-## empty key store apart from an unreadable one: one says "there is nothing
-## here", the other says "I could not look", and only the second means
-## something is misconfigured.
+## A root this host could not search is a different answer, kept apart for the
+## same reason Verification.md §3.1 keeps an empty key store apart from an
+## unreadable one: one says "there is nothing here", the other says "I could
+## not look". Transport.md §2.1: a reader finds no certificates in an
+## UNRESOLVED root and continues searching the other root, and it reports that
+## the search could not cover that root rather than claiming it was searched
+## and empty. A root that exists and could not be read is the same situation
+## (§2.4). Both make the search ``incomplete``; the other root is always still
+## searched, so a certificate found there still counts. Only a host with no
+## local store at all (a browser tab) is ``unreadable``.
 
 import std/[algorithm, strutils]
 
@@ -73,9 +72,6 @@ import certificate_store_roots
 export certificate_store_roots
 
 const
-  ReprobuildStoreDir* = ".repro/workspace/certificates"
-    ## reprobuild's workspace store (``reprobuild-specs/Test-Certificates.md``).
-
   AbandonedCtTestStoreDir* = ".ct/certificates"
     ## Where `ct test` published before CTC-3e (one ``<platform>.toml`` per
     ## platform). **Neither read nor written any more**: certificates are
@@ -83,33 +79,14 @@ const
     ## only so a test can prove nothing here reaches a reader, and so the
     ## records left behind in existing workspaces have a name in the docs.
 
-  CertificateStoreDirs* = [ReprobuildStoreDir]
-    ## The workspace-relative carriers searched, in this order. The order
-    ## decides only which *key store* is consulted when several carry one
-    ## (see ``readCertificateStore``).
+  AbandonedReprobuildStoreDir* = ".repro/workspace/certificates"
+    ## reprobuild's former workspace store. Pooled by this reader until
+    ## reprobuild published every certificate to the local store; **no longer
+    ## read**. Named only so a test can prove nothing here reaches a reader.
 
   LocalStoreLayout* = "v1"
     ## The layout version directory under each local-store root
     ## (Transport.md §2.2).
-
-  RegisteredKeysFile* = "registered-keys.toml"
-    ## The registered-key store's name inside a store directory
-    ## (Verification.md §3.1).
-
-  SigningKeyFile* = "signing-key"
-    ## reprobuild's current implementation keeps a workspace-local **private
-    ## signing key** at this path, inside the same directory as the
-    ## certificates (``reprobuild-specs/Test-Certificates.md``). A discovery
-    ## pass that slurped every file in the directory would read it, which is
-    ## the last thing a read-only display should do.
-    ##
-    ## Named here so the hazard is visible, but **the ``.toml`` allow-list in
-    ## ``isCertificateFile`` is what actually excludes it** — an explicit
-    ## `name == SigningKeyFile` branch was there too and was dead code, since a
-    ## file with no extension never reaches it. Mutation testing found that:
-    ## removing the branch changed nothing, which meant the guard the branch
-    ## appeared to be was somewhere else. Removing the allow-list DOES fail
-    ## ``certificate_store_test.nim``, which is the guard that exists.
 
 type
   StoreReadStatus* = enum
@@ -152,9 +129,7 @@ type
     ## Not ``{.gcsafe.}``, and that is not an oversight: the front end fills
     ## these in from ``FileSystemFacade``, whose operations are ordinary
     ## closures, so a ``gcsafe`` seam would exclude the one host this exists to
-    ## serve. Nothing here is called from a second thread — the indicator is
-    ## read on the renderer's own turn — so the annotation would buy a promise
-    ## nobody needs at the cost of the instantiation that matters.
+    ## serve.
     listFiles*: proc(dir: string): StoreListing {.closure.}
       ## Regular files directly inside ``dir``. ``srAbsent`` when the directory
       ## does not exist — which is the ordinary "no store" case and not a
@@ -171,9 +146,7 @@ type
     ## is carried verbatim; nothing here interprets it beyond the local
     ## store's directory check (``lookupLocalStore``).
     name*: string
-      ## Workspace-relative for a workspace carrier, e.g.
-      ## ``.repro/workspace/certificates/hook.toml``; the full path for a
-      ## local-store record, e.g.
+      ## The record's full path, e.g.
       ## ``/home/u/.local/state/test-certificates/v1/git-tree-sha1/<digest>/<hash>.toml``.
       ## Shown to a human and used as the deterministic final tiebreak in the
       ## ordering.
@@ -182,23 +155,37 @@ type
       ## When this file last changed on the host that is displaying it.
 
   CertificateStore* = object
-    ## What discovery found. Every field exists because Transport.md §4 asks
+    ## What discovery found. Every field exists because Transport.md §5 asks
     ## discovery to be **explicit about what it searched** and **non-fatal when
     ## empty**.
     searched*: seq[string]
-      ## Every directory this pass looked in, whether or not it existed.
+      ## Every content directory this pass looked in, whether or not it
+      ## existed.
     present*: bool
-      ## At least one store directory exists. ``false`` is the ordinary
-      ## "this project does not use certificates" state.
+      ## At least one record was found (or found and rejected, or a root could
+      ## not be searched). ``false`` is the ordinary "nothing here for this
+      ## content" state.
     unreadable*: bool
-      ## A store directory exists and could not be listed, or a file inside it
-      ## could not be read. Distinct from ``present = false``, and the
-      ## distinction is the whole of Transport.md §4's first bullet.
+      ## This host has no local store at all (``roots.available = false``,
+      ## a browser tab): it could not look anywhere. Distinct from
+      ## ``present = false`` and from ``incomplete``.
     unreadableReason*: string
+    incomplete*: bool
+      ## At least one root could not be searched — unresolved (Transport.md
+      ## §2.1) or existing and unreadable (§2.4) — while the other was. What
+      ## was found in the searched root still counts; what was NOT found is
+      ## not evidence that nothing exists, so "no certificates" must not be
+      ## claimed (§5).
+    incompleteReasons*: seq[string]
+      ## Why, one sentence per root or directory that could not be covered.
     certificates*: seq[StoredCertificate]
       ## **Newest first** — see ``orderByArrival``.
     keyStorePath*: string
-      ## Empty when no store directory carries one.
+      ## The registered-key store (Verification.md §3.1) a host supplies as the
+      ## deployment's trust policy. Empty when none was supplied, which is the
+      ## case for every shipped host today: no reader here populates it (the
+      ## workspace directory that used to carry one is no longer read, see the
+      ## module header). A host or test that does supply one sets both fields.
     keyStore*: KeyStore
       ## Parsed. ``readable = false`` when a store file exists and could not be
       ## read, which is what makes the outcome unverifiable rather than
@@ -207,16 +194,14 @@ type
       ## test ``keyStorePath.len > 0`` before treating it as an answer, which
       ## is what ``hasKeyStore`` below is for.
     rejected*: seq[string]
-      ## Local-store records that were found and NOT made candidates, each
-      ## with the reason: a record whose own ``content`` does not match the
-      ## directory it was found in (Transport.md §2.4: "reported and
-      ## ignored"). Empty when there were none.
+      ## Records that were found and NOT made candidates, each with the
+      ## reason: a record whose own ``content`` does not match the directory it
+      ## was found in (Transport.md §2.4: "reported and ignored").
     problems*: seq[string]
       ## Faults that did not stop the search, in words an operator can act
-      ## on: a system root that exists and cannot be read (Transport.md §2.4:
-      ## reported, and the user root is still searched), and every variable
-      ## the root resolver ignored. A fault that DID stop the search sets
-      ## ``unreadable`` instead.
+      ## on: every variable the root resolver ignored, and a content id that
+      ## could not name a directory. A root that could not be searched is in
+      ## ``incompleteReasons`` instead.
 
   LocalStoreQuery* = object
     ## What to look up in the local certificate store (Transport.md §2.4).
@@ -243,19 +228,24 @@ type
     rejected*: seq[string]
     problems*: seq[string]
     unreadable*: bool
-      ## The USER root, or a content directory in it, could not be read.
+      ## The host has no local store at all (``roots.available = false``).
     unreadableReason*: string
+    incomplete*: bool
+      ## A root was unresolved, or it (or this content directory in it, or a
+      ## record in that directory) could not be read. The other root was still
+      ## searched.
+    incompleteReasons*: seq[string]
 
 proc hasKeyStore*(store: CertificateStore): bool =
-  ## Whether the workspace declared a trust policy at all.
+  ## Whether a trust policy was supplied at all.
   ##
-  ## The distinction this exists to keep: a workspace with **no** registered-key
-  ## store has not said which keys it trusts, and a consumer that answered
-  ## "fail-closed, nobody is trusted" would be inventing a deployment decision
-  ## nobody made. Verification.md §3.1's fail-closed rule is about a consumer
-  ## *that requires signatures*; whether to require them is the deployment's
-  ## call, and the absence of a store file is the absence of that call rather
-  ## than a negative answer to it.
+  ## The distinction this exists to keep: a deployment with **no**
+  ## registered-key store has not said which keys it trusts, and a consumer
+  ## that answered "fail-closed, nobody is trusted" would be inventing a
+  ## deployment decision nobody made. Verification.md §3.1's fail-closed rule
+  ## is about a consumer *that requires signatures*; whether to require them
+  ## is the deployment's call, and the absence of a store file is the absence
+  ## of that call rather than a negative answer to it.
   store.keyStorePath.len > 0
 
 proc compareArrival(a, b: StoredCertificate): int =
@@ -274,6 +264,12 @@ proc compareArrival(a, b: StoredCertificate): int =
   ## guess here cannot turn an invalid certificate into a valid one — it can
   ## only show the user the wrong one of several, which is why the tiebreaks
   ## below are total rather than left to the filesystem's enumeration order.
+  ##
+  ## The name tiebreak is not decoration: ``modifiedMs`` answers ``0`` for
+  ## "unknown", so on a host whose ``stat`` is unavailable EVERY pair ties on
+  ## the primary key and the whole order falls through to it (pinned by
+  ## ``certificate_store_test.nim``, "records that arrived together are
+  ## ordered by name, the greater first").
   if a.receivedAtMs != b.receivedAtMs:
     return if a.receivedAtMs > b.receivedAtMs: -1 else: 1
   # `compareBytes` rather than `cmp`, so the ordering is the same unsigned
@@ -289,28 +285,13 @@ proc orderByArrival*(certificates: var seq[StoredCertificate]) =
   certificates.sort(compareArrival)
 
 proc lastProduced*(store: CertificateStore): StoredCertificate =
-  ## The record the indicator speaks for. Callers MUST check
+  ## The record the indicator speaks for when none binds. Callers MUST check
   ## ``store.certificates.len > 0`` first; this returns the zero value for an
   ## empty store rather than raising, because "the store is empty" is a state
   ## every caller already has to render and not an exceptional condition.
   if store.certificates.len == 0:
     return StoredCertificate()
   store.certificates[0]
-
-proc isCertificateFile(name: string): bool =
-  ## Which entries in a store directory are candidate records.
-  ##
-  ## AN ALLOW-LIST RATHER THAN A DENY-LIST, and that is the whole guard: the
-  ## directory also holds a registered-key store and, in reprobuild's current
-  ## implementation, a **private signing key** (``SigningKeyFile``). A pass
-  ## that read everything and sorted it out afterwards would have read the key
-  ## before deciding it did not want it. Anything not ending in ``.toml`` is
-  ## never opened.
-  if not name.endsWith(".toml"):
-    return false
-  if name == RegisteredKeysFile:
-    return false
-  true
 
 proc join(dir, name: string): string =
   ## Store paths are always ``/``-separated, on every host. They are shown to a
@@ -319,78 +300,6 @@ proc join(dir, name: string): string =
   if dir.len == 0: name
   elif dir.endsWith("/"): dir & name
   else: dir & "/" & name
-
-proc readWorkspaceCarriers(access: CertificateStoreAccess;
-                           workspaceRoot: string; store: var CertificateStore) =
-  ## Every record in the workspace-relative carriers (``CertificateStoreDirs``).
-  for dir in CertificateStoreDirs:
-    let full = join(workspaceRoot, dir)
-    store.searched.add dir
-
-    let listing = access.listFiles(full)
-    case listing.status
-    of srAbsent:
-      continue
-    of srUnreadable:
-      # The directory is there and could not be listed. That is a fault to
-      # report, not an emptiness to render.
-      store.present = true
-      if not store.unreadable:
-        store.unreadable = true
-        store.unreadableReason =
-          "the certificate store at '" & dir & "' could not be listed: " &
-          listing.detail
-      continue
-    of srOk:
-      store.present = true
-
-    var names = listing.names
-    # Sorted before reading so the *reads* happen in a stable order too; the
-    # final ordering is `orderByArrival`, but a deterministic read order keeps
-    # the first-unreadable-file report from depending on the filesystem.
-    names.sort(compareBytes)
-
-    for name in names:
-      if name == RegisteredKeysFile:
-        # First store directory that carries one wins, so a workspace using
-        # both carriers has exactly one trust policy rather than a union
-        # nobody wrote down.
-        if store.keyStorePath.len == 0:
-          let read = access.readText(join(full, name))
-          store.keyStorePath = join(dir, name)
-          case read.status
-          of srOk:
-            store.keyStore = readKeyStore(read.text)
-          of srAbsent:
-            # Listed and then gone: a race, not an answer.
-            store.keyStore = KeyStore(readable: false,
-              unreadableReason: "the registered-key store at '" &
-                join(dir, name) & "' disappeared between listing and reading")
-          of srUnreadable:
-            store.keyStore = KeyStore(readable: false,
-              unreadableReason: "the registered-key store at '" &
-                join(dir, name) & "' could not be read: " & read.detail)
-        continue
-
-      if not isCertificateFile(name):
-        continue
-
-      let path = join(full, name)
-      let read = access.readText(path)
-      case read.status
-      of srOk:
-        store.certificates.add StoredCertificate(
-          name: join(dir, name),
-          text: read.text,
-          receivedAtMs: access.modifiedMs(path))
-      of srAbsent:
-        continue
-      of srUnreadable:
-        if not store.unreadable:
-          store.unreadable = true
-          store.unreadableReason =
-            "the certificate at '" & join(dir, name) & "' could not be read: " &
-            read.detail
 
 proc localStoreContentDir*(contentId: string):
     tuple[ok: bool; relative: string; problem: string] =
@@ -415,10 +324,12 @@ proc lookupLocalStore*(access: CertificateStoreAccess;
   ##
   ## * A missing root, a missing directory or an empty one is **none found**,
   ##   never an error (§5).
-  ## * A USER root that cannot be read makes the lookup ``unreadable``: the
-  ##   reader could not look, which is different from finding nothing.
-  ## * A SYSTEM root that exists and cannot be read is a ``problem`` — usually
-  ##   a misconfigured install — and the user root is still searched.
+  ## * A root that is UNRESOLVED (§2.1), or that exists and cannot be read —
+  ##   or whose content directory, or a record in it, cannot be read — makes
+  ##   the lookup ``incomplete``, with the reason, and the OTHER root is still
+  ##   searched. The two roots are symmetric here: §2.1 resolves them
+  ##   independently, and a certificate the other root holds still counts.
+  ## * A host with no local store at all is ``unreadable``: it looked nowhere.
   ## * A record whose own ``content`` is not ``contentId`` is ``rejected``,
   ##   with the reason, and is not a candidate: the directory is a hint for
   ##   discovery, not evidence. A record that does not parse IS a candidate —
@@ -438,14 +349,23 @@ proc lookupLocalStore*(access: CertificateStoreAccess;
       (if roots.problems.len > 0: ": " & roots.problems.join("; ") else: "")
     return
 
+  proc couldNotSearch(lookup: var LocalStoreLookup; message: string) =
+    lookup.incomplete = true
+    if message notin lookup.incompleteReasons:
+      lookup.incompleteReasons.add message
+
   for (label, root) in [("user", roots.user), ("system", roots.system)]:
     if root.len == 0:
-      if label == "user":
-        result.unreadable = true
-        result.unreadableReason = "the local certificate store's user root " &
-          "could not be resolved" &
-          (if roots.problems.len > 0: ": " & roots.problems.join("; ") else: "")
-        return
+      # §2.1: an unresolved root is reported as not covered, never as
+      # "searched and empty", and never guessed. The resolver's own reasons
+      # say which variable to set.
+      var reasons: seq[string] = @[]
+      for problem in roots.problems:
+        if label & " root" in problem:
+          reasons.add problem
+      result.couldNotSearch("the local certificate store's " & label &
+        " root could not be resolved, so it was not searched" &
+        (if reasons.len > 0: ": " & reasons.join("; ") else: ""))
       continue
     let full = join(root, dir.relative)
     result.searched.add full
@@ -457,13 +377,9 @@ proc lookupLocalStore*(access: CertificateStoreAccess;
     of srAbsent:
       continue
     of srUnreadable:
-      let message = "the local certificate store's " & label & " root '" &
-        root & "' exists and could not be read: " & rootListing.detail
-      if label == "user":
-        result.unreadable = true
-        result.unreadableReason = message
-        return
-      result.problems.add message
+      result.couldNotSearch("the local certificate store's " & label &
+        " root '" & root & "' exists and could not be read: " &
+        rootListing.detail)
       continue
     of srOk:
       discard
@@ -473,13 +389,8 @@ proc lookupLocalStore*(access: CertificateStoreAccess;
     of srAbsent:
       continue
     of srUnreadable:
-      let message = "the local certificate store directory '" & full &
-        "' could not be listed: " & listing.detail
-      if label == "user":
-        result.unreadable = true
-        result.unreadableReason = message
-        return
-      result.problems.add message
+      result.couldNotSearch("the local certificate store directory '" & full &
+        "' could not be listed: " & listing.detail)
       continue
     of srOk:
       discard
@@ -497,14 +408,8 @@ proc lookupLocalStore*(access: CertificateStoreAccess;
         # rename. The store is a cache (§2.5); a vanished file is not a fault.
         continue
       of srUnreadable:
-        let message = "the certificate at '" & path & "' could not be read: " &
-          read.detail
-        if label == "user":
-          if not result.unreadable:
-            result.unreadable = true
-            result.unreadableReason = message
-        else:
-          result.problems.add message
+        result.couldNotSearch("the certificate at '" & path &
+          "' could not be read: " & read.detail)
         continue
       of srOk:
         discard
@@ -525,16 +430,15 @@ proc lookupLocalStore*(access: CertificateStoreAccess;
         name: path, text: read.text, receivedAtMs: access.modifiedMs(path))
 
 proc readCertificateStore*(access: CertificateStoreAccess;
-                           workspaceRoot: string;
                            local: LocalStoreQuery): CertificateStore =
-  ## Discover every candidate record for a workspace: the local certificate
-  ## store's directories for ``local.contentIds``, in both roots, pooled with
-  ## the workspace carriers in ``CertificateStoreDirs``.
+  ## Discover every candidate record for ``local.contentIds`` in both roots of
+  ## the local certificate store.
   ##
   ## Never raises, never writes, and never reports absence as a failure. The
-  ## three outcomes it distinguishes — no store, a store, a store it could not
-  ## read — are exactly Transport.md §5's requirement that "no certificates
-  ## found" and a discovery that broke down be reported differently.
+  ## outcomes it distinguishes — nothing here, records, a search that could
+  ## not cover a root, a host with no store at all — are exactly Transport.md
+  ## §5's requirement that "no certificates found" be reported only when the
+  ## search actually covered the store.
   result.searched = @[]
   result.problems.add local.roots.problems
 
@@ -544,7 +448,9 @@ proc readCertificateStore*(access: CertificateStoreAccess;
       continue
     seenIds.add contentId
     let lookup = lookupLocalStore(access, local.roots, contentId)
-    result.searched.add lookup.searched
+    for dir in lookup.searched:
+      if dir notin result.searched:
+        result.searched.add dir
     result.rejected.add lookup.rejected
     for problem in lookup.problems:
       if problem notin result.problems:
@@ -554,12 +460,23 @@ proc readCertificateStore*(access: CertificateStoreAccess;
       if not result.unreadable:
         result.unreadable = true
         result.unreadableReason = lookup.unreadableReason
+    if lookup.incomplete:
+      result.present = true
+      result.incomplete = true
+      for reason in lookup.incompleteReasons:
+        if reason notin result.incompleteReasons:
+          result.incompleteReasons.add reason
     if lookup.found.len > 0 or lookup.rejected.len > 0:
       result.present = true
     result.certificates.add lookup.found
 
-  readWorkspaceCarriers(access, workspaceRoot, result)
   orderByArrival(result.certificates)
+
+proc incompleteSummary*(store: CertificateStore): string =
+  ## One sentence saying the search did not cover the whole store, and why —
+  ## for the reports that must not read "no certificates" when it did not.
+  "The certificate search was incomplete: " &
+    store.incompleteReasons.join("; ") & "."
 
 # ---------------------------------------------------------------------------
 # The native host's access

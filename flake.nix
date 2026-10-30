@@ -416,6 +416,38 @@
       flake = false;
     };
 
+    # Non-flake inputs: the two shared-memory libraries io-mon's interpose shim
+    # and CLI are built on (io-mon `config.nims`, `scripts/build_shim.sh`).
+    # Pinned at the revisions repro.lock pins (the push gate requires the two
+    # locks to agree), which are what this project's siblings build against,
+    # for the monitor the Nix package ships (`ct-io-mon` in
+    # nix/packages/default.nix: `ct test run`'s read-set capture). Move them
+    # with `repro lock update`.
+    nim-shm-queue = {
+      url = "github:metacraft-labs/nim-shm-queue/91451f2250beb89d1d221f0a77be0841c19b182e";
+      flake = false;
+    };
+    nim-shm-gset = {
+      url = "github:metacraft-labs/nim-shm-gset/fb981c7f186a9507c974b7de8871fc74d6308eae";
+      flake = false;
+    };
+
+    # Non-flake input: the test-certificate standard's reference library
+    # (test-certificates-tools, Nim package `test_certificates`, stdlib only).
+    # `ct` and `ct-test` link it for the local certificate store's prune, HEAD
+    # protection and root-owner check and the native store-root resolver
+    # (src/ct_test/certificate_local_store.nim,
+    # certificate_store_roots_native.nim); the conformance walker for note
+    # framing. config.nims reads TEST_CERTIFICATES_TOOLS_SRC after the
+    # `../test-certificates-tools` sibling; the sandboxed package build and
+    # the dev shell have no sibling, so they seed it from here. Pinned at the
+    # same revision reprobuild links (reprobuild `agents` 1e70a388c) until the
+    # v0.1.0 tag carries it.
+    test-certificates-tools = {
+      url = "github:metacraft-labs/test-certificates-tools/9864082065c8acb1db315e65a6a4157a3ab77117";
+      flake = false;
+    };
+
     # Non-flake input: the reprobuild-packages catalog. Every `uses:` name in
     # `repro.nim` that reprobuild's stdlib no longer bundles — `sqlite3`,
     # `shellcheck`, `shfmt` and `prek` so far (reprobuild

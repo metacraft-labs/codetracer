@@ -88,6 +88,16 @@ addPathIfDir(workspaceRoot / "nim-shm-gset" / "src")
 addPathIfDir(getEnv("SHM_GSET_SRC"))
 addPathIfDir(workspaceRoot / "nim-stackable-hooks" / "src")
 addPathIfDir(getEnv("NIM_STACKABLE_HOOKS_SRC"))
+# The test-certificate standard's reference library (test-certificates-tools,
+# Nim package `test_certificates`, stdlib only): `ct test`'s store writer
+# links its prune, HEAD protection and root-owner check
+# (src/ct_test/certificate_local_store.nim), the native store-root resolver its
+# account lookup (the Windows SID), and the conformance walker its note
+# framing and merge. Same order rule as above: the sibling, then
+# TEST_CERTIFICATES_TOOLS_SRC (seeded from the pinned flake input by the dev
+# shell and the Nix package build), which overrides it.
+addPathIfDir(workspaceRoot / "test-certificates-tools" / "src")
+addPathIfDir(getEnv("TEST_CERTIFICATES_TOOLS_SRC"))
 
 const runquotaLibs = [
   "runquota_process",

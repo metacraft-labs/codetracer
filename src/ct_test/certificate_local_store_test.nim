@@ -43,6 +43,8 @@
 
 import std/[algorithm, json, options, os, osproc, sequtils, streams, strtabs,
             strutils, times, unittest]
+when not defined(windows):
+  import std/posix except Time
 
 import contracts
 import certificate
@@ -280,7 +282,7 @@ proc indicatorFor(repo: string): CertificateIndicatorModel =
     if answer.computed and answer.id notin ids:
       ids.add answer.id
   evaluateCertificateIndicator(CertificateIndicatorFacts(
-    store: readCertificateStore(nativeStoreAccess(), repo, LocalStoreQuery(
+    store: readCertificateStore(nativeStoreAccess(), LocalStoreQuery(
       roots: nativeRoots(), contentIds: ids)),
     vcs: WorkspaceVcsState(known: true, repo: repo.lastPathPart,
                            workingTree: states[0], head: states[1],
@@ -368,8 +370,10 @@ proc publishStep(attempt: int) {.nimcall, gcsafe.} =
     lockstepLog.add toWriter.recv()
 
 proc lockstepPruner(root: string) {.thread.} =
-  let outcome = pruneLocalStore(root, 0, [], pruneStep)
+  # The library's `pruneRoot` is not annotated gcsafe; it touches no global
+  # GC'd state, and this thread owns everything it allocates.
   {.cast(gcsafe).}:
+    let outcome = pruneLocalStore(root, 0, [], pruneStep)
     toWriter.send("prune finished: removed " & $outcome.removed.len &
                   ", errors " & $outcome.errors.len)
 
@@ -840,6 +844,119 @@ suite "CTC-3e: the local certificate store":
     ck not dirExists(dirs[1])
     ck dirExists(dirs[2])
 
+  test "a user root owned by another account is refused before the write lock":
+    ## Transport.md §2.3: an existing user root MUST be owned by the writer's
+    ## effective account, checked before ANY mutation — `.write-lock`
+    ## included — and refused even when the caller can write it. A
+    ## sticky, world-writable, root-owned directory is exactly that root.
+    ## When this suite runs as root it makes one for another uid instead.
+    let workspace = committedRepo("foreign-root")
+    var foreign = "/tmp"
+    when not defined(windows):
+      if geteuid() == 0:
+        foreign = scratchDir("foreign-owned")
+        doAssert posix.chown(foreign.cstring, Uid(65534), Gid(65534)) == 0
+        setFilePermissions(foreign, {fpUserRead, fpUserWrite, fpUserExec,
+          fpGroupRead, fpGroupWrite, fpGroupExec, fpOthersRead, fpOthersWrite,
+          fpOthersExec})
+    let lockExisted = fileExists(foreign / ".write-lock")
+    let layoutExisted = dirExists(foreign / "v1")
+    let content = contentFor(501)
+    let doc = sampleDocument(content)
+    let outcome = publishToLocalStore(
+      CertificateStoreRoots(available: true, user: foreign), workspace, doc)
+    checkpoint $outcome
+    ck not outcome.written
+    ck "refusing to write the certificate store" in outcome.error
+    ck "owned by uid" in outcome.error
+    ck fileExists(foreign / ".write-lock") == lockExisted
+    ck dirExists(foreign / "v1") == layoutExisted
+    ck not fileExists(foreign / localStoreRelativePathOf(doc).path)
+    # Control: a root of this account's own is written.
+    let own = useStoreRoot("own-root")
+    ck publishToLocalStore(nativeRoots(), workspace, doc).written
+    ck fileExists(own / ".write-lock")
+
+  test "record files are written 0600 whatever the umask":
+    ## Transport.md §2.3 step 1: on POSIX, new record files are `0600`. A
+    ## permissive umask must not leave them group/world readable, and a
+    ## restrictive one must not leave the owner unable to write.
+    when not defined(windows):
+      let workspace = committedRepo("record-mode")
+      for (label, mask) in [("umask 000", 0o000), ("umask 022", 0o022),
+                            ("umask 277", 0o277)]:
+        let root = useStoreRoot("record-mode-" & $mask)
+        let previous = posix.umask(Mode(mask))
+        let doc = sampleDocument(contentFor(510 + mask))
+        let outcome = publishToLocalStore(nativeRoots(), workspace, doc)
+        discard posix.umask(previous)
+        checkpoint label & ": " & $outcome
+        ck outcome.written
+        var st: Stat
+        ck stat(outcome.path.cstring, st) == 0
+        ck (int(st.st_mode) and 0o777) == 0o600
+        ck dirExists(root)
+
+  test "a prune does not run when HEAD's content ids cannot be computed":
+    ## Transport.md §2.5: a failure computing a required id for an existing
+    ## HEAD aborts pruning before anything is removed. An invalid scope
+    ## declaration (Tooling.md §3.1) is such a failure: the declared scopes'
+    ## ids are required, and cannot be computed from a declaration that does
+    ## not parse. The certificate is still delivered.
+    let root = useStoreRoot("prune-abort")
+    let repo = committedRepo("prune-abort")
+    let stale = root / "v1" / "git-tree-sha1" / contentFor(520)[14 .. ^1]
+    createDir(stale)
+    setLastModificationTime(stale, getTime() - initDuration(days = 30))
+    discard run("git", ["config", "testCertificatesScope.bad.path", "../escape"],
+                repo)
+    let outcome = publishToLocalStore(nativeRoots(), repo,
+                                      sampleDocument(contentFor(521)), keep = 0)
+    checkpoint $outcome
+    ck outcome.written
+    ck dirExists(stale)
+    ck outcome.pruned.removed.len == 0
+    ck outcome.pruned.errors.len == 1
+    ck "was not pruned" in outcome.pruned.errors.join(" ")
+    # Control: with the declaration fixed, the same publish prunes it.
+    discard run("git", ["config", "--unset", "testCertificatesScope.bad.path"],
+                repo)
+    let again = publishToLocalStore(nativeRoots(), repo,
+                                    sampleDocument(contentFor(522)), keep = 0)
+    checkpoint $again
+    ck not dirExists(stale)
+
+  test "a prune keeps HEAD's content in every declared scope":
+    ## Tooling.md §3.1 / Transport.md §2.5: protection covers the unscoped
+    ## state AND each scope the repository declares, in the native git-tree
+    ## algorithm. A scoped certificate for HEAD's `tests/` content survives a
+    ## prune that keeps nothing else — and only because the scope is declared.
+    let root = useStoreRoot("declared-scope")
+    let repo = committedRepo("declared-scope")
+    writeFile(repo / "README", "not in the scope\n")
+    discard run("git", ["add", "README"], repo)
+    discard run("git", ["commit", "-m", "readme"], repo)
+    let scoped = computeContentId(nativeContentIdHost(), repo,
+      commitState("HEAD"), caGitTreeSha1, @["tests"])
+    require scoped.outcome == cioComputed
+    ck scoped.id != "git-tree-sha1:" & headTree(repo)
+    let scopedDir = root / "v1" / "git-tree-sha1" / scoped.id[14 .. ^1]
+    proc plantAndPublish(n: int): PublishOutcome =
+      createDir(scopedDir)
+      setLastModificationTime(scopedDir, getTime() - initDuration(days = 30))
+      publishToLocalStore(nativeRoots(), repo, sampleDocument(contentFor(n)),
+                          keep = 0)
+    # Control first: undeclared, the scoped directory is an ordinary old one.
+    discard plantAndPublish(530)
+    ck not dirExists(scopedDir)
+    # Declared: kept.
+    discard run("git", ["config", "testCertificatesScope.tests.path", "tests"],
+                repo)
+    let outcome = plantAndPublish(531)
+    checkpoint $outcome
+    ck dirExists(scopedDir)
+    ck outcome.pruned.errors.len == 0
+
   test "a certificate issued in one clone is found from another with identical content":
     let root = useStoreRoot("clones")
     discard root
@@ -898,7 +1015,7 @@ suite "CTC-3e: the local certificate store":
                       currentPlatform().replace('/', '-') & ".toml"
     writeFile(plantedPath, planted)
     # The reader does not see it: nothing in the local store, nothing found.
-    let before = readCertificateStore(nativeStoreAccess(), old, LocalStoreQuery(
+    let before = readCertificateStore(nativeStoreAccess(), LocalStoreQuery(
       roots: nativeRoots(), contentIds: @[workingTreeId(old)]))
     ck before.certificates.len == 0
     ck AbandonedCtTestStoreDir notin before.searched

@@ -230,6 +230,10 @@ required_siblings=(
 	# the tier notes above. Accepting the env var here would green this check on
 	# the tup driver, which strips it.
 	'runquota|libs/runquota_process/src/runquota_process.nim||`import runquota_process` in src/ct_test/process_exec.nim, reached from EVERY `ct` build via src/ct/codetracer.nim -> ../ct_test/ct_test; src/Tuprules.tup puts libs/runquota_*/src on the Nim search path'
+	# The override IS honoured here, unlike runquota's: src/Tuprules.tup exports
+	# TEST_CERTIFICATES_TOOLS_SRC, so the tup driver sees it too, and the dev
+	# shell seeds it from the pinned flake input (nix/shells/main.nix).
+	'test-certificates-tools|src/test_certificates.nim|TEST_CERTIFICATES_TOOLS_SRC|`ct` links the test-certificate reference library (`test_certificates/*`) in src/ct_test/certificate_local_store.nim and certificate_store_roots_native.nim, reached from EVERY `ct` build via src/ct/codetracer.nim -> ../ct_test/ct_test'
 )
 
 advisory_siblings=(

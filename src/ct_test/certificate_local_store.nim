@@ -25,15 +25,22 @@
 ##   document, so the signature block is never hashed. The standard's
 ##   ``store/`` vectors pin this derivation; ``certificate_vectors_test.nim``
 ##   walks them through ``localStoreRelativePathOf`` below.
-## * **Writing (§2.3).** Owner-only directories hold atomic, flushed record
-##   renames. Every writer holds the root's persistent `.write-lock` through
+## * **Writing (§2.3).** An existing user root must be owned by this
+##   process's effective account, checked (by the reference library) before
+##   ANY mutation, the `.write-lock` included; a foreign root is refused and
+##   never adopted or repaired. Owner-only (`0700`) directories hold atomic,
+##   flushed renames of `0600` record files, whatever the umask. Every writer holds the root's persistent `.write-lock` through
 ##   inspecting and publishing. Unsigned copies keep an existing record;
 ##   relayed signed copies replace only a well-formed unsigned twin. Only a
 ##   caller that made the new signature can replace an existing signed copy.
-## * **Prune (§2.5).** On publish only: whole content directories, keeping the
-##   ``keep`` most recently written (by the directory's modification time,
-##   which a rename into it updates) plus the directory of the current
-##   repository's ``HEAD^{tree}`` and the one just written into. A directory a
+## * **Prune (§2.5).** On publish only, by the reference library's
+##   ``pruneRoot``: whole content directories, keeping the ``keep`` most
+##   recently written (by the directory's modification time, which a rename
+##   into it updates) plus the one just written into and every HEAD content
+##   id the library's ``pruneProtection`` computes — unscoped and in each
+##   scope the repository declares (Tooling.md §3.1), in the native
+##   ``git-tree-*`` algorithm and ``manifest-v1-sha256``. When those ids
+##   cannot be computed for an existing HEAD, nothing is pruned at all. A directory a
 ##   producer is writing into — one holding a fresh temporary file, or
 ##   modified in the last few seconds — is never removed. A directory is
 ##   removed by first renaming it aside, within its parent, to a dot-named
@@ -53,14 +60,27 @@
 ## It writes nothing but the store, reads nothing under ``.ct/``, and never
 ## touches the working tree or the user's index.
 
-import std/[algorithm, atomics, os, strutils, times]
+import std/[os, strutils, times]
+
+# The reference library (test-certificates-tools, Nim package
+# `test_certificates`), linked for the rules it implements byte for byte:
+# pruning (Transport.md §2.5), the HEAD protection a prune computes over
+# declared scopes (Tooling.md §3.1) and the user-root ownership check (§2.3).
+# Imported QUALIFIED ONLY: its names (`PruneStage`, `parseContentId`, …)
+# overlap this module's and `certificate_content_id`'s, and an unqualified
+# import would let an overload silently pick the other one.
+from test_certificates/prune as tcprune import nil
+from test_certificates/scopes as tcscopes import nil
+from test_certificates/layout as tclayout import nil
 
 when defined(windows):
   import std/winlean
+  from test_certificates/windows_owner as tcowner import nil
 else:
-  from std/posix import fsync
-  proc c_rename(oldname, newname: cstring): cint {.
-    importc: "rename", header: "<stdio.h>".}
+  import std/posix except Time
+  from test_certificates/permissions as tcperm import nil
+  var storeNoFollow {.importc: "O_NOFOLLOW", header: "<fcntl.h>".}: cint
+  var storeOpenDirectory {.importc: "O_DIRECTORY", header: "<fcntl.h>".}: cint
 
 import certificate
 import certificate_content_id
@@ -71,31 +91,34 @@ import certificate_store_roots_native
 export certificate_store_roots_native
 
 const
-  DefaultRetention* = 20
+  DefaultRetention* = tcprune.DefaultKeep
     ## The reference policy's number of content directories kept
     ## (Transport.md §2.5).
 
-  StaleTemporaryAge* = initDuration(hours = 1)
+  StaleTemporaryAge* = tcprune.StaleTemporaryAge
     ## A temporary file older than this belongs to a writer that died, not to
     ## one that is writing. Without an age a crashed run would pin its content
     ## directory against pruning forever.
 
-  FreshDirectoryAge* = initDuration(seconds = 10)
+  FreshDirectoryAge* = tcprune.FreshDirectoryAge
     ## A content directory modified more recently than this is treated as
     ## being written into, whether or not its temporary file exists yet: a
     ## writer creates the directory a moment BEFORE it opens the temporary
-    ## file, and a prune landing in that moment would cost the writer its
-    ## retry for nothing. Only ever protects a directory for seconds, and
-    ## the newest directories are kept by the count anyway.
+    ## file.
 
-  TemporaryMarker* = ".tmp-"
+  TemporaryMarker* = tclayout.TemporaryMarker
     ## Part of every temporary name, after the leading ``.``.
 
-  RemovalMarker* = ".removing-"
+  RemovalMarker* = tclayout.RemovalMarker
     ## Part of the name a content directory is renamed to while a prune
-    ## deletes it: ``.<digest>.removing-<pid>-<counter>``, beside the
-    ## directories of its algorithm. Begins with ``.``, so it is never a
-    ## content directory (a digest is hex) and no reader lists it.
+    ## deletes it: ``.<digest>.removing-<pid>-<counter>``.
+
+  UserRecordFileMode = 0o600
+    ## A record file in the user root (Transport.md §2.3 step 1): readable and
+    ## writable by its owner only, WHATEVER THE UMASK. Set with ``fchmod``
+    ## after creation rather than left to ``open``'s mode argument, which the
+    ## umask can only narrow and which ``std/syncio``'s ``0666`` default would
+    ## otherwise leave as ``0644`` under an ordinary umask.
 
 type
   LocalStorePath* = tuple[path: string; error: string]
@@ -105,11 +128,13 @@ type
     removed*: seq[string]
       ## Content directories removed, store-relative (``v1/<alg>/<digest>``).
     errors*: seq[string]
-      ## Directories that could not be removed, with the reason. Never fatal:
-      ## pruning is a matter of disk space, not of correctness (§2.5).
+      ## Directories that could not be removed, with the reason — or, when a
+      ## prune did not run at all, why. Never fatal: pruning is a matter of
+      ## disk space, not of correctness (§2.5).
 
   PruneStage* = enum
-    ## The points of one directory's removal a ``PruneStepHook`` observes.
+    ## The points of one directory's removal a ``PruneStepHook`` observes —
+    ## the library's ``tcprune.PruneStage``, renamed for this module's callers.
     psChosen
       ## Chosen for removal — not kept, not protected, not being written —
       ## and nothing changed yet.
@@ -240,20 +265,63 @@ proc temporaryName*(finalName: string): string =
     $temporaryCounter & "-" & $getTime().toUnix() & $getTime().nanosecond
 
 proc writeFlushed(path, content: string) =
-  ## Write and flush to stable storage before the rename that publishes it.
-  var f: File
-  if not open(f, path, fmWrite):
-    raise newException(IOError, "cannot open '" & path & "' for writing: " &
-                       osErrorMsg(osLastError()))
-  try:
-    f.write(content)
-    f.flushFile()
-    when not defined(windows):
-      if fsync(getFileHandle(f)) != 0:
+  ## Create ``path`` (a fresh temporary name: it must not exist), write
+  ## ``content`` and flush it to stable storage before the rename that
+  ## publishes it. On POSIX the file is ``0600`` (``UserRecordFileMode``)
+  ## before a byte of the record is written, whatever the umask (§2.3).
+  when defined(windows):
+    var f: File
+    if not open(f, path, fmWrite):
+      raise newException(IOError, "cannot open '" & path & "' for writing: " &
+                         osErrorMsg(osLastError()))
+    try:
+      f.write(content)
+      f.flushFile()
+    finally:
+      f.close()
+  else:
+    let fd = posix.open(path.cstring, O_WRONLY or O_CREAT or O_EXCL or
+      O_CLOEXEC or storeNoFollow, Mode(UserRecordFileMode))
+    if fd < 0:
+      raise newException(IOError, "cannot create '" & path & "': " &
+                         osErrorMsg(osLastError()))
+    var f: File
+    if not open(f, fd, fmWrite):
+      discard posix.close(fd)
+      raise newException(IOError, "cannot open '" & path & "' for writing: " &
+                         osErrorMsg(osLastError()))
+    try:
+      if fchmod(fd, Mode(UserRecordFileMode)) != 0:
+        raise newException(IOError, "cannot make '" & path & "' owner-only: " &
+                           osErrorMsg(osLastError()))
+      f.write(content)
+      f.flushFile()
+      if fsync(fd) != 0:
         raise newException(IOError, "fsync of '" & path & "' failed: " &
                            osErrorMsg(osLastError()))
-  finally:
-    f.close()
+    finally:
+      f.close()
+
+proc userRootOwnerProblem*(root: string): string =
+  ## "" when ``root`` does not exist yet or is owned by this process's
+  ## EFFECTIVE account; otherwise why it must not be touched. Transport.md
+  ## §2.3: "An existing user root MUST be owned by the writer's effective
+  ## account … refuse and report a root owned by another account, even when
+  ## that root is writable by the caller." The check is the reference
+  ## library's — ``fstat`` of the OPENED directory against ``geteuid`` on
+  ## POSIX, the directory's owner SID against the effective token's user on
+  ## Windows — so an owner that cannot be read is a refusal, never permission.
+  if not dirExists(root) and not symlinkExists(root) and not fileExists(root):
+    return ""
+  when defined(windows):
+    tcowner.checkUserRootOwner(root)
+  else:
+    let fd = posix.open(root.cstring, O_RDONLY or storeOpenDirectory or O_CLOEXEC)
+    if fd < 0:
+      return "could not open the store root '" & root & "' to check its " &
+        "owner: " & osErrorMsg(osLastError())
+    defer: discard posix.close(fd)
+    tcperm.checkOwner(fd, root)
 
 proc renameInto(temporary, final: string) =
   ## The atomic step. ``moveFile`` is ``rename(2)`` on POSIX (replacing an
@@ -291,8 +359,6 @@ when defined(windows):
     {.stdcall, dynlib: "kernel32", importc: "GetLastError".}
   type StoreWriteLock = pointer
 else:
-  import std/posix except Time
-  var storeNoFollow {.importc: "O_NOFOLLOW", header: "<fcntl.h>".}: cint
   proc storeFlock(fd, operation: cint): cint
     {.importc: "flock", header: "<sys/file.h>".}
   type StoreWriteLock = cint
@@ -342,6 +408,13 @@ proc publishRecord*(root, relative, document: string; signed: bool;
   let final = root / toNative(relative)
   let dir = final.parentDir
   let contentDir = relative[0 ..< relative.rfind('/')]
+  # Before ANY mutation — creating the root's `.write-lock` included — an
+  # existing root must be this account's (Transport.md §2.3). A foreign root
+  # is reported and left exactly as it was: never adopted, never repaired.
+  let ownerProblem = userRootOwnerProblem(root)
+  if ownerProblem.len > 0:
+    return (false, false, "refusing to write the certificate store: " &
+                          ownerProblem)
   var writeLock: StoreWriteLock
   try:
     createOwnerOnlyDirs(root, "")
@@ -405,132 +478,43 @@ proc publishRecord*(root, relative, document: string; signed: bool;
 # Pruning (Transport.md §2.5)
 # ---------------------------------------------------------------------------
 
-proc beingWritten(dir: string; now: Time): bool =
-  ## Whether a producer is writing into ``dir``: it was modified within
-  ## ``FreshDirectoryAge``, or it holds a temporary file younger than
-  ## ``StaleTemporaryAge``.
-  try:
-    if now - getLastModificationTime(dir) < FreshDirectoryAge:
-      return true
-  except OSError:
-    return true
-  try:
-    for kind, path in walkDir(dir):
-      let name = path.extractFilename
-      if name.startsWith(".") and TemporaryMarker in name:
-        try:
-          if now - getLastModificationTime(path) < StaleTemporaryAge:
-            return true
-        except OSError:
-          # Vanished between the listing and the stat: renamed into place a
-          # moment ago, which is a write in progress too.
-          return true
-  except OSError:
-    return true
-  false
-
-var removalCounter: Atomic[int]
-  ## Process-wide, not per thread: two prunes on two threads of one process
-  ## must never pick the same aside name for the same digest.
-
-proc removalName(digest: string): string =
-  "." & digest & RemovalMarker & $getCurrentProcessId() & "-" &
-    $(removalCounter.fetchAdd(1) + 1)
-
-proc renameAside(path, aside: string) =
-  ## One ``rename(2)`` / ``MoveFileExW`` of a directory within its parent,
-  ## and nothing else. ``moveDir`` would fall back to copying and deleting
-  ## when the rename is refused, which is neither atomic nor wanted: Windows
-  ## refuses exactly when a file inside is open — when a writer is in it.
-  when defined(windows):
-    if moveFileExW(newWideCString(path), newWideCString(aside), 0'i32) == 0:
-      raiseOSError(osLastError(), path)
-  else:
-    if c_rename(path.cstring, aside.cstring) != 0:
-      raiseOSError(osLastError(), path)
 
 proc pruneLocalStore*(root: string; keep: int;
                       protected: openArray[string];
                       onStep: PruneStepHook = nil): PruneOutcome =
   ## Remove whole content directories from one root, keeping the ``keep``
-  ## most recently written (directory modification time; ties broken by
-  ## name, newest-looking first) plus every directory in ``protected``
+  ## most recently written plus every directory in ``protected``
   ## (store-relative ``v1/<algorithm>/<digest>`` paths).
   ##
-  ## Never removes a directory a producer is writing into. Never fails the
-  ## publish: a directory that cannot be removed is reported in ``errors``.
+  ## The removal is the reference library's ``pruneRoot``
+  ## (test-certificates-tools), linked rather than re-implemented so it
+  ## cannot drift from the helper every other producer uses: a directory a
+  ## producer is writing into (modified within ``FreshDirectoryAge``, or
+  ## holding a temporary file younger than ``StaleTemporaryAge``) is never
+  ## removed; a directory leaves the store in ONE atomic step — renamed aside
+  ## within its parent — and is deleted only after; the leftovers of a prune
+  ## that died are deleted; and an existing root owned by another account is
+  ## refused before anything is renamed or deleted (Transport.md §2.5). This
+  ## wrapper only translates this module's directory-shaped protection and
+  ## step hook into the library's content-id-shaped ones.
   ##
-  ## A directory leaves the store in ONE atomic step — renamed aside within
-  ## its parent (``RemovalMarker``) — and is deleted only after that. A
-  ## writer that entered it between the check and the rename loses its
-  ## rename and retries into a fresh directory, which this removal cannot
-  ## reach. Directories left aside by a prune that died mid-delete are
-  ## deleted by the next prune.
-  let layout = root / LocalStoreLayout
-  if not dirExists(layout):
+  ## Never fails the publish: what could not be removed is in ``errors``.
+  if root.len == 0:
     return
-  var dirs: seq[tuple[relative: string; mtime: Time]] = @[]
-  try:
-    for algorithmKind, algorithmPath in walkDir(layout):
-      if algorithmKind != pcDir:
-        continue
-      for digestKind, digestPath in walkDir(algorithmPath):
-        if digestKind != pcDir:
-          continue
-        let digestName = digestPath.extractFilename
-        if digestName.startsWith("."):
-          if RemovalMarker in digestName:
-            # Renamed aside by a prune that has not finished deleting it, or
-            # never will. Another prune deleting it at the same time is
-            # harmless: each tolerates entries the other already removed.
-            try:
-              removeDir(digestPath)
-            except OSError as err:
-              if dirExists(digestPath):
-                result.errors.add "'" & digestPath &
-                  "' could not be removed: " & err.msg
-          continue
-        let relative = LocalStoreLayout & "/" &
-          algorithmPath.extractFilename & "/" & digestPath.extractFilename
-        var mtime: Time
-        try:
-          mtime = getLastModificationTime(digestPath)
-        except OSError:
-          continue                      # gone already
-        dirs.add (relative, mtime)
-  except OSError as err:
-    result.errors.add "the store at '" & layout & "' could not be listed: " &
-      err.msg
-    return
-  dirs.sort(proc(a, b: tuple[relative: string; mtime: Time]): int =
-    if a.mtime != b.mtime:
-      return (if a.mtime > b.mtime: -1 else: 1)
-    -cmp(a.relative, b.relative))
-  let now = getTime()
-  for i, entry in dirs:
-    if i < keep or entry.relative in protected:
-      continue
-    let path = root / toNative(entry.relative)
-    if beingWritten(path, now):
-      continue
-    if onStep != nil:
-      onStep(psChosen, entry.relative)
-    let aside = path.parentDir / removalName(path.extractFilename)
-    try:
-      renameAside(path, aside)
-    except OSError as err:
-      if dirExists(path):
-        # Windows refuses to rename a directory with a file open inside:
-        # a writer is in it, and it stays.
-        result.errors.add "'" & path & "' could not be removed: " & err.msg
-      continue                          # else another prune took it first
-    result.removed.add entry.relative
-    if onStep != nil:
-      onStep(psDetached, entry.relative)
-    try:
-      removeDir(aside)
-    except OSError as err:
-      result.errors.add "'" & aside & "' could not be removed: " & err.msg
+  var ids: seq[string] = @[]
+  for dir in protected:
+    let parts = dir.split('/')
+    if parts.len == 3 and parts[0] == LocalStoreLayout:
+      ids.add parts[1] & ":" & parts[2]
+  let hook: tcprune.PruneStepHook =
+    if onStep == nil: nil
+    else:
+      proc(stage: tcprune.PruneStage; relative: string) =
+        onStep(if stage == tcprune.psChosen: psChosen else: psDetached,
+               relative)
+  let pruned = tcprune.pruneRoot(root, keep, ids, onStep = hook)
+  result.removed = pruned.removed
+  result.errors = pruned.errors
 
 # ---------------------------------------------------------------------------
 # Publishing
@@ -574,19 +558,33 @@ proc repositoryToplevel(workspaceRoot: string): string =
     return ""
   reply.stdout.strip()
 
-proc headContentDir(workspaceRoot, algorithm: string): string =
-  ## The store-relative directory of the current repository's ``HEAD^{tree}``
-  ## in ``algorithm``, or ``""`` when there is none (an unborn branch, an
-  ## algorithm git cannot compute here).
-  let (known, parsed) = lookupAlgorithm(algorithm)
-  if not known:
-    return ""
-  let computed = computeContentId(nativeContentIdHost(), workspaceRoot,
-                                  commitState("HEAD"), parsed)
-  if computed.outcome != cioComputed:
-    return ""
-  let dir = localStoreContentDir(computed.id)
-  if dir.ok: dir.relative else: ""
+proc headPruneProtection*(repository: string):
+    tuple[ok: bool; dirs: seq[string]; problem: string] =
+  ## The content directories a prune of the user root must keep for
+  ## ``repository`` (Transport.md §2.5): ``HEAD``'s content in the
+  ## repository's native ``git-tree-*`` algorithm AND ``manifest-v1-sha256``,
+  ## unscoped and in every scope the repository DECLARES (Tooling.md §3.1,
+  ## ``[testCertificatesScope "<name>"] path = …``), all computed from one
+  ## frozen ``HEAD`` tree by the reference library's ``pruneProtection``.
+  ##
+  ## ``ok`` with no ``dirs``: nothing to protect — no repository, or an
+  ## unborn branch. ``ok = false``: ``HEAD`` exists and one of its ids could
+  ## not be computed, or the scope declaration is invalid; the caller MUST
+  ## then not prune at all, since pruning without that protection could
+  ## delete the certificates of the very content checked out (§2.5).
+  if repository.len == 0:
+    return (true, @[], "")
+  let protection = tcscopes.pruneProtection(repository)
+  if not protection.ok:
+    return (false, @[], protection.problem)
+  result.ok = true
+  for id in protection.ids:
+    let dir = localStoreContentDir(id)
+    if not dir.ok:
+      return (false, @[], "HEAD content id '" & id & "' names no store " &
+        "directory: " & dir.problem)
+    if dir.relative notin result.dirs:
+      result.dirs.add dir.relative
 
 proc publishToLocalStore*(roots: CertificateStoreRoots; workspaceRoot: string;
                           document: string;
@@ -595,7 +593,9 @@ proc publishToLocalStore*(roots: CertificateStoreRoots; workspaceRoot: string;
   ## that root (Transport.md §2.3, §2.5).
   ##
   ## ``workspaceRoot`` is the repository the tests ran in: the root must not
-  ## lie inside it, and its ``HEAD^{tree}`` directory survives the prune.
+  ## lie inside it, and its HEAD content directories (``headPruneProtection``:
+  ## unscoped and every declared scope, in each computed algorithm) survive
+  ## the prune — which does not run at all when they cannot be computed.
   ## Signedness is read from the document. This defaults to a relay, which
   ## upgrades only an unsigned twin. ``signatureMade`` may be true only when
   ## this caller made the incoming signature.
@@ -630,10 +630,17 @@ proc publishToLocalStore*(roots: CertificateStoreRoots; workspaceRoot: string;
   result.written = true
   result.kept = published.kept
 
-  let contentDir = relative.path[0 ..< relative.path.rfind('/')]
-  var protected = @[contentDir]
-  let algorithm = contentDir.split('/')[1]
-  let head = headContentDir(workspaceRoot, algorithm)
-  if head.len > 0:
-    protected.add head
+  let protection = headPruneProtection(workspaceRoot)
+  if not protection.ok:
+    # Transport.md §2.5: a failure computing a required id for an existing
+    # HEAD aborts pruning before anything is removed — leftovers of an
+    # interrupted prune included. The certificate was still delivered; only
+    # the bounding of the store waits for a run that can compute what to keep.
+    result.pruned.errors.add "the local certificate store was not pruned: " &
+      "the content ids of HEAD could not be computed: " & protection.problem
+    return
+  var protected = @[relative.path[0 ..< relative.path.rfind('/')]]
+  for dir in protection.dirs:
+    if dir notin protected:
+      protected.add dir
   result.pruned = pruneLocalStore(roots.user, keep, protected)

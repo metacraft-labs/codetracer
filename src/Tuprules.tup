@@ -563,6 +563,14 @@ export CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL
 export CT_EMULATOR_EXTRA_NIM_PATHS
 export CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS
 
+# The test-certificate reference library (test-certificates-tools) that `ct`
+# links (src/ct_test/certificate_local_store.nim). config.nims takes it from
+# the `../test-certificates-tools` sibling, else from this variable, which
+# the dev shell seeds from the pinned flake input (nix/shells/main.nix). Kept
+# through tup's environment sanitization so a CI job with no sibling checkout
+# still resolves `test_certificates/*` from the dev shell.
+export TEST_CERTIFICATES_TOOLS_SRC
+
 # Keep linker selection in Cargo config/env instead of inline --config args.
 # This avoids shell-quoting differences between Windows environments.
 RUST_WINDOWS_LINKER_CONFIG =

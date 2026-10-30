@@ -533,6 +533,17 @@ package codeTracer:
     "nim-agent-harbor >=0"
     "nim-agents >=0"
     "nim-acp >=0"
+    # The test-certificate standard's reference library (test-certificates-tools,
+    # `library test_certificates`, stdlib only). `ct` links it in
+    # src/ct_test/certificate_local_store.nim and
+    # certificate_store_roots_native.nim, reached from every `ct` build. Like
+    # the siblings above it is consumed as SOURCE through the SC-11 Nim
+    # library-source channel, and this line and its `repro.lock` entry are ONE
+    # change: a `uses:` with neither a develop override nor a committed
+    # `LockedDep` falls through to PATH and fails. The pin is the revision
+    # flake.nix's `test-certificates-tools` input names; move both together
+    # (`repro lock update test-certificates-tools --to <rev>`).
+    "test-certificates-tools >=0"
     # The parity gate compiles the FLIP producer's C ABI; declare its source
     # package so the sibling revision participates in dependency locking.
     # Named by its repository, as every workspace producer above is

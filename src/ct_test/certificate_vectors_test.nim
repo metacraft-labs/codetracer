@@ -5,12 +5,13 @@
 ## invoked, imported, ported or trusted in order to claim conformance
 ## (``vectors/README.md``). This file is CodeTracer's own thin walker over it.
 ##
-## It walks all five groups:
+## It walks all six groups:
 ##
 ## * ``payload/`` — serialize ``fields.json`` and compare byte for byte with
-##   ``canonical.txt``. Plus the one optional ``received.toml``, a deliberately
-##   non-canonical rendering of the same values that MUST parse to the same
-##   payload (Canonical-Payload.md §5).
+##   ``canonical.txt``. Plus every optional ``received.toml``, a deliberately
+##   non-canonical rendering of the same values (CRLF, multi-line strings
+##   with physical CRLF newlines, …) that MUST parse to the same payload
+##   (Canonical-Payload.md §5).
 ## * ``signature/`` — **verify**, never reproduce. Conformance.md §2 sets that
 ##   direction: SSH signature framing is an implementation's own business,
 ##   while verification is what interoperability actually needs. Three of the
@@ -37,6 +38,13 @@
 ##   payload rebuilt from the parsed fields, hashed, under
 ##   ``v1/<algorithm>/<digest>/`` (Transport.md §2.2); compared with
 ##   ``expected-path.txt``.
+## * ``notes/`` — note framing (Transport.md §3.1): split each ``note.txt``
+##   into the pieces ``expected.json`` lists, add ``add.txt`` and compare
+##   with ``expected-note.txt``, and merge each ``merge-*`` pair, byte for
+##   byte, idempotently and with the required report categories. The
+##   framing and merge are the reference library's (test-certificates-tools,
+##   linked); every record piece is ALSO read by CodeTracer's own
+##   ``readCertificate``, its payload rebuilt and its signature verified.
 ##
 ## ``index.json`` is cross-checked against what was walked, in both directions:
 ## every case a walked group lists must be on disk and vice versa, and every
@@ -84,12 +92,17 @@ import certificate_local_store
 import certificate_signature
 import certificate_verification
 
+# The reference library's note framing and two-note merge (test-certificates-
+# tools), walked against the `notes/` group; see "notes/" below.
+import test_certificates/note_framing
+
 const
   SpecRepositoryName = "test-certificates-spec"
   PinFileName = "certificate_vectors.pin"
   VectorsOverrideVariable = "CT_TEST_CERTIFICATE_VECTORS"
 
-  WalkedGroups* = ["payload", "signature", "content", "verify", "store"]
+  WalkedGroups* = ["payload", "signature", "content", "verify", "store",
+                  "notes"]
     ## The ``index.json`` groups this walker understands. A group the
     ## standard declares and this list lacks fails the suite by name.
 
@@ -386,25 +399,32 @@ proc walkPayload*(root: string): GroupWalk =
         "see " & (dir / "pins.md") & " for the rule this case pins"
 
 proc walkReceived*(root: string): GroupWalk =
-  ## ``payload/escapes/received.toml`` uses CRLF, aligned ``=``, tables and
-  ## keys in a different order, a TOML literal string, ``\uXXXX`` escapes and
-  ## an empty signature block. Parsing it MUST produce exactly
-  ## ``canonical.txt``: a verifier reconstructs the payload from the parsed
-  ## **fields**, never by slicing the received file, or a cosmetically
-  ## reformatted certificate would fail against its own valid signature
-  ## (Canonical-Payload.md §5).
-  let dir = root / "payload" / "escapes"
-  result.cases = @["escapes/received.toml"]
-  if not fileExists(dir / "received.toml"):
-    result.failures.add "payload/escapes/received.toml is missing"
-    return
-  let read = readCertificate(readFile(dir / "received.toml"))
-  if read.status != crsOk:
-    result.failures.add "payload/escapes/received.toml did not read: " &
-                        $read.status & " " & read.detail
-  elif canonicalPayload(read.cert) != readFile(dir / "canonical.txt"):
-    result.failures.add "payload/escapes/received.toml parsed to a different payload:\n" &
-                        describeBytes(canonicalPayload(read.cert))
+  ## Every ``payload/<case>/received.toml``: a deliberately non-canonical
+  ## rendering of the case's field values. ``escapes`` uses CRLF, aligned
+  ## ``=``, tables and keys in another order, a TOML literal string,
+  ## ``\uXXXX`` escapes and an empty signature block; ``crlf-multiline`` uses
+  ## multi-line basic and literal strings containing physical CRLF newlines,
+  ## which MUST read as LF while escaped CRs stay (Canonical-Payload.md §5).
+  ## Parsing each MUST produce exactly its ``canonical.txt``: a verifier
+  ## reconstructs the payload from the parsed **fields**, never by slicing the
+  ## received file. Discovered from the tree, not listed, so a new
+  ## ``received.toml`` is checked the day it appears.
+  let group = root / "payload"
+  for name in sortedCaseDirs(group):
+    let dir = group / name
+    if not fileExists(dir / "received.toml"):
+      continue
+    result.cases.add name & "/received.toml"
+    let read = readCertificate(readFile(dir / "received.toml"))
+    if read.status != crsOk:
+      result.failures.add "payload/" & name & "/received.toml did not read: " &
+                          $read.status & " " & read.detail
+    elif canonicalPayload(read.cert) != readFile(dir / "canonical.txt"):
+      result.failures.add "payload/" & name & "/received.toml parsed to a " &
+        "different payload:\n" & describeBytes(canonicalPayload(read.cert)) &
+        "expected:\n" & describeBytes(readFile(dir / "canonical.txt"))
+  if result.cases.len == 0:
+    result.failures.add "payload/: no received.toml found under " & group
 
 proc walkSignature*(root: string): GroupWalk =
   ## ``signature/``: verify each detached signature, expecting ``verify`` or
@@ -729,6 +749,142 @@ proc walkVerify*(root: string): GroupWalk =
     except CatchableError as err:
       result.failures.add "verify/" & name & ": raised " & err.msg
 
+# ---------------------------------------------------------------------------
+# notes/: note framing, the writer rule and the two-note merge
+# ---------------------------------------------------------------------------
+#
+# `ct test` writes no notes (CTC-3 operator decision 6: push transport is the
+# test-certificates helper tooling's), but a consumer that ever reads a note
+# must split it exactly as every other tool does, so the group is walked. The
+# FRAMING, the writer rule and the merge are the reference library's
+# (test-certificates-tools `test_certificates/note_framing`, linked, not
+# re-implemented); what this walk adds is CodeTracer's own reader on every
+# record piece: `readCertificate` must agree with the library on which pieces
+# are records, rebuild exactly the expected payload, and the signed ones must
+# verify with `ct test`'s own ssh-keygen primitive.
+
+type NoteReportKind = enum
+  ## The report categories Transport.md §3.1 requires of a merge (the
+  ## `expected.json` categories of the `notes/merge-*` vectors).
+  nrSignedConflict = "signed-conflict"
+  nrLeadingJoined = "leading-joined"
+  nrLfRepair = "lf-repair"
+  nrOther = "other"
+
+proc noteReportKind(remark: string): NoteReportKind =
+  ## The §3.1 category of one of the library's merge remarks. Matched on the
+  ## wording the PINNED library fixes; a library bump that rewords a remark
+  ## fails the `merge-*` cases below instead of silently dropping a report.
+  if "published copy was kept" in remark: nrSignedConflict
+  elif "text before the first delimiter" in remark: nrLeadingJoined
+  elif "LF" in remark: nrLfRepair
+  else: nrOther
+
+proc publishedSigningKey(root: string): string =
+  ## The (published, worthless) key every signed note record is signed by.
+  let path = root / "signature" / "keys" / "insecure-test-key.pub"
+  if fileExists(path): readFile(path).strip() else: ""
+
+proc walkNoteMerge(dir, name: string): seq[string] =
+  let context = " (see " & (dir / "pins.md") & " for the rule this case pins)"
+  let base = readFile(dir / "base.txt")
+  let other = readFile(dir / "other.txt")
+  let expected = readFile(dir / "expected-note.txt")
+  let merged = mergeNotes(base, other)
+  if merged.blob != expected:
+    result.add "notes/" & name & ": the merge diverged\nexpected:\n" &
+      describeBytes(expected) & "produced:\n" & describeBytes(merged.blob) &
+      context
+  # Merging `other` into the result again MUST change nothing (§3.1).
+  let again = mergeNotes(merged.blob, other)
+  if again.blob != merged.blob:
+    result.add "notes/" & name & ": merging other.txt again changed the " &
+      "note" & context
+  var produced: seq[string] = @[]
+  for remark in merged.remarks:
+    produced.add $noteReportKind(remark)
+  let wanted = readJson(dir / "expected.json").strSeq("reports")
+  if produced != wanted:
+    result.add "notes/" & name & ": reports were " & $produced &
+      " (from " & $merged.remarks & "), expected " & $wanted & context
+
+proc walkNoteReader(dir, name, signingKey: string): seq[string] =
+  let context = " (see " & (dir / "pins.md") & " for the rule this case pins)"
+  let note = readFile(dir / "note.txt")
+  let pieces = splitNote(note)
+  let expected = readJson(dir / "expected.json")
+  let wanted = if expected.hasKey("pieces"): expected["pieces"] else: newJArray()
+  if wanted.len != pieces.len:
+    result.add "notes/" & name & ": " & $pieces.len & " piece(s), expected " &
+      $wanted.len & context
+    return
+  for i, piece in pieces:
+    let want = wanted[i]
+    let label = "notes/" & name & " piece " & $i
+    if want.boolean("skipped"):
+      if piece.kind == pkRecord:
+        result.add label & ": read as a record, expected skipped" & context
+      continue
+    if piece.kind != pkRecord:
+      result.add label & ": skipped (" & piece.problem & "), expected a record" &
+        context
+      continue
+    # CodeTracer's own reader on the same bytes: it must read the piece, and
+    # rebuild exactly the expected payload from the parsed fields.
+    let read = readCertificate(piece.body)
+    if read.status != crsOk:
+      result.add label & ": readCertificate refused a record piece: " &
+        $read.status & " " & read.detail & context
+      continue
+    let payload = canonicalPayload(read.cert)
+    if payload != want.str("payload"):
+      result.add label & ": payload diverged\nexpected:\n" &
+        describeBytes(want.str("payload")) & "produced:\n" &
+        describeBytes(payload) & context
+    if read.cert.isSigned != want.boolean("signed") or
+        piece.signed != want.boolean("signed"):
+      result.add label & ": signed is " & $read.cert.isSigned & " (library " &
+        $piece.signed & "), expected " & $want.boolean("signed") & context
+    if read.cert.isSigned:
+      let outcome = verifyDetachedSignature(payload, signingKey,
+                                            read.cert.signature.value)
+      if outcome.check != scValid:
+        result.add label & ": its signature does not verify against the " &
+          "published key: " & $outcome.check & " (" & outcome.detail & ")" &
+          context
+  if fileExists(dir / "add.txt"):
+    var written = pieces
+    discard addRecord(written, recordPiece(readFile(dir / "add.txt")))
+    let produced = renderNote(written)
+    let expectedNote = readFile(dir / "expected-note.txt")
+    if produced != expectedNote:
+      result.add "notes/" & name & ": adding add.txt diverged\nexpected:\n" &
+        describeBytes(expectedNote) & "produced:\n" & describeBytes(produced) &
+        context
+
+proc walkNotes*(root: string): GroupWalk =
+  ## ``notes/``: the reader cases (``note.txt`` -> ``expected.json``), the
+  ## writer cases (``add.txt`` -> ``expected-note.txt``) and the two-blob
+  ## ``merge-*`` cases (``base.txt`` + ``other.txt`` -> ``expected-note.txt``,
+  ## idempotent, with the required report categories).
+  let group = root / "notes"
+  result.cases = sortedCaseDirs(group)
+  if result.cases.len == 0:
+    result.failures.add "notes/: no cases found under " & group
+  let signingKey = publishedSigningKey(root)
+  if signingKey.len == 0:
+    result.failures.add "notes/: the published signing key " &
+      "signature/keys/insecure-test-key.pub is missing"
+  for name in result.cases:
+    let dir = group / name
+    try:
+      if fileExists(dir / "base.txt"):
+        result.failures.add walkNoteMerge(dir, name)
+      else:
+        result.failures.add walkNoteReader(dir, name, signingKey)
+    except CatchableError as err:
+      result.failures.add "notes/" & name & ": raised " & err.msg
+
 proc crossCheckIndex*(root: string; walked: openArray[string]): seq[string] =
   ## Compare ``index.json`` with the tree and with the walker. Returns one
   ## failure per disagreement:
@@ -777,23 +933,25 @@ type
   VectorsWalk* = object
     ## Everything one walk of a ``vectors`` tree found.
     index*: seq[string]  ## the index cross-check's failures
-    payload*, received*, signature*, content*, verify*, store*: GroupWalk
+    payload*, received*, signature*, content*, verify*, store*,
+      notes*: GroupWalk
 
 proc walkVectors*(root: string): VectorsWalk =
   VectorsWalk(index: crossCheckIndex(root, WalkedGroups),
               payload: walkPayload(root), received: walkReceived(root),
               signature: walkSignature(root), content: walkContent(root),
-              verify: walkVerify(root), store: walkStore(root))
+              verify: walkVerify(root), store: walkStore(root),
+              notes: walkNotes(root))
 
 proc caseCount*(walk: VectorsWalk): int =
   walk.payload.cases.len + walk.received.cases.len +
     walk.signature.cases.len + walk.content.cases.len +
-    walk.verify.cases.len + walk.store.cases.len
+    walk.verify.cases.len + walk.store.cases.len + walk.notes.cases.len
 
 proc failures*(walk: VectorsWalk): seq[string] =
   walk.index & walk.payload.failures & walk.received.failures &
     walk.signature.failures & walk.content.failures & walk.verify.failures &
-    walk.store.failures
+    walk.store.failures & walk.notes.failures
 
 # ---------------------------------------------------------------------------
 # Locating the tree this run walks
@@ -930,6 +1088,15 @@ suite "test-certificate conformance vectors":
     reportGroup("store", walk.store)
     check walk.store.cases.len > 0
     check walk.store.failures.len == 0
+
+  test "note-framing vectors: split, add and merge exactly as Transport §3.1 says":
+    ## The library's framing, writer rule and two-note union merge, and
+    ## CodeTracer's own reader on every record piece (payload rebuilt from
+    ## the parsed fields, signatures verified by `ct test`'s primitive).
+    require source.root.len > 0
+    reportGroup("notes", walk.notes)
+    check walk.notes.cases.len > 0
+    check walk.notes.failures.len == 0
 
   test "the extracted vectors are removed once walked, leaving no cleanup for exit":
     ## The temporary directory is gone before the first case reads the walk,

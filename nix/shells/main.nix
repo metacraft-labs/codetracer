@@ -301,6 +301,9 @@ mkShell {
     if [ -z "''${NIM_STACKABLE_HOOKS_SRC:-}" ]; then
       export NIM_STACKABLE_HOOKS_SRC="${inputs.nim-stackable-hooks}/src"
     fi
+    if [ -z "''${TEST_CERTIFICATES_TOOLS_SRC:-}" ]; then
+      export TEST_CERTIFICATES_TOOLS_SRC="${inputs.test-certificates-tools}/src"
+    fi
 
     RECORDER_SRC="''${CODETRACER_PYTHON_RECORDER_SRC:-}"
 
