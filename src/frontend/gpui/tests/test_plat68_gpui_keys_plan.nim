@@ -31,7 +31,7 @@ import styles/contrast_floors     # `TabGroundContrastFloor`
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 56
+const ExpectedAssertions = 80
 
 var countedAssertions = 0
 
@@ -152,6 +152,84 @@ suite "PLAT-68 GPUI: Debug-mode stepping through the router":
     ck at[0].endsWith("pane:calltrace")
     ck at[0] == "key s at window:window / tab:tab:1 / pane:calltrace"
     ck t.lines("operation ") == @["operation debugger.step-into"]
+
+suite "GPUI call trace: routed list keys and keyboard focus":
+
+  const ListRows = """[
+    {"key":"f6","command":"list.focus-first","when":"listFocus"},
+    {"key":"f7","command":"list.focus-next","when":"listFocus"},
+    {"key":"f8","command":"list.activate","when":"listFocus"}
+  ]"""
+
+  proc selectedCall(plan: JsonNode): string =
+    for n in plan.nodesWith("data-call-selected"):
+      if n.attr("data-call-selected") == "true":
+        return n.attr("data-call-index")
+
+  test "rebound list keys select the first and next calls, then activate":
+    var t0, t1, t2: string
+    # The second call begins at the initial source line. Step away first,
+    # so activating it must visibly navigate back rather than be a no-op.
+    let first = windowPlan("key:f10,click:tab:calltrace,key:f6", ListRows, t0)
+    let next = windowPlan("key:f10,click:tab:calltrace,key:f6,key:f7", ListRows, t1)
+    let activated = windowPlan("key:f10,click:tab:calltrace,key:f6,key:f7,key:f8",
+                               ListRows, t2)
+    let calls = first.values("data-call-index")
+    ck calls.len >= 2
+    ck t0.lines("operation ") == @["operation debugger.step-over",
+                                   "operation list.focus-first"]
+    ck first.selectedCall == calls[0]
+    ck t1.lines("operation ") == @["operation debugger.step-over",
+                                   "operation list.focus-first",
+                                   "operation list.focus-next"]
+    ck next.selectedCall == calls[1]
+    ck t2.lines("operation ") == @["operation debugger.step-over",
+      "operation list.focus-first",
+      "operation list.focus-next", "operation list.activate"]
+    ck "not available in this window" notin t2
+    ck activated.executionLine != first.executionLine
+
+  test "Alt+C transfers the element focus to the call trace":
+    var t: string
+    discard windowPlan("key:c:alt,key:f6", ListRows, t)
+    ck t.lines("operation ")[0].startsWith("operation layout.focus-pane")
+    ck t.lines("key F6 at ") ==
+      @["key F6 at window:window / tab:tab:1 / pane:calltrace"]
+    ck t.lines("operation ")[^1] == "operation list.focus-first"
+    ck "not available in this window" notin t
+
+  test "revealing a docked call trace leaves the keyboard with the editor":
+    # The hover overlay is dismissed by Esc and the pane goes off screen, so
+    # a key must not keep resolving in a pane nobody can see.
+    var t: string
+    discard windowPlan("dock:calltrace,key:c:alt,key:escape,key:f6", ListRows, t)
+    let at = t.lines("key F6 at ")
+    ck at.len == 1 and at[0].startsWith("key F6 at window:window / tab:tab:1 / pane:editor")
+    ck "operation list.focus-first" notin t
+
+  test "pressing an inactive tab transfers focus to its newly active pane":
+    var t: string
+    let plan = windowPlan("click:tab:agentActivity,click:tab:calltrace,key:f6", ListRows, t)
+    ck t.lines("key F6 at ") ==
+      @["key F6 at window:window / tab:tab:1 / pane:calltrace"]
+    ck t.lines("operation ") == @["operation list.focus-first"]
+    ck "not available in this window" notin t
+    ck plan.selectedCall == plan.values("data-call-index")[0]
+
+  test "list boundaries clamp and pages keep the selected call visible":
+    var t0, t1, t2, t3, t4: string
+    let first = windowPlan("click:tab:calltrace,key:home", trace = t0)
+    let down = windowPlan("click:tab:calltrace,key:home,key:pagedown", trace = t1)
+    let last = windowPlan("click:tab:calltrace,key:end,key:down", trace = t2)
+    let up = windowPlan("click:tab:calltrace,key:end,key:pageup", trace = t3)
+    let clamped = windowPlan("click:tab:calltrace,key:home,key:up", trace = t4)
+    let firstRows = first.values("data-call-index")
+    ck firstRows.len > 1
+    ck down.selectedCall == $(firstRows.len - 1)
+    ck last.selectedCall == last.values("data-call-index")[^1]
+    ck parseInt(up.selectedCall) < parseInt(last.selectedCall)
+    ck up.selectedCall in up.values("data-call-index")
+    ck clamped.selectedCall == "0"
 
 suite "PLAT-68 GPUI: the read-only editor's document":
 

@@ -460,11 +460,14 @@ ARMS = [
         "the frame held for a click's release half is never drawn: the step "
         "happened and the screen keeps the old tick"),
     Arm("DR1", DRIVER,
-        "  while not complete and d.framer.pending.len > 0:\n",
-        "  while false:\n",
+        "  # measures bytes that had NOT arrived.\n  while not complete and d.framer.pending.len > 0:\n",
+        "  # measures bytes that had NOT arrived.\n  while false:\n",
         E_LATE,
-        "a sequence's bytes are read one per call again: a mouse report queued "
-        "behind a debugger step is split into Esc and keys"),
+        "the ordinary drain and late continuation recognition are both disabled: "
+        "a queued mouse report is split into Esc and keys",
+        also=((DRIVER,
+               "    if next >= 0 and char(next) in {'[', 'O'}:\n",
+               "    if false:\n"),)),
     # --- GPUI ------------------------------------------------------------------------
     Arm("GT1", DOCKPROJ,
         "  let topDocked = dockGroupsOf(layout, leTop).len > 0\n",

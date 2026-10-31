@@ -36,7 +36,7 @@ import headless_app/layout_model
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 40
+const ExpectedAssertions = 42
   ## Five assertions drive the native Top menu through the real runtime.
 
 var countedAssertions = 0
@@ -171,9 +171,12 @@ suite "PLAT-50: the strip is the divider above it":
     # (PLAT-51: the Terminal Output tab — the Timeline is removed.)
     let tl = rt.shellScreenOf().rows[moved].cellOf("Terminal Output")
     rt.press(moved, tl + 1)
+    ck rt.focus.focusedPane() == (true, paneTerminalOutput)
+    ck rt.app.layoutBinding.focus == paneTerminalOutput
     var outputActive = false
     for span in rt.shellScreenOf().styledRows[moved]:
-      if span.text.contains("Terminal Output") and span.style.role == srTabActive:
+      if span.text.contains("Terminal Output") and
+         span.style.role == srTabActiveFocused:
         outputActive = true
     ck outputActive
 

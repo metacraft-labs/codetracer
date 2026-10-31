@@ -49,7 +49,7 @@ const EditorTabText = " calc/main.py "
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 41
+const ExpectedAssertions = 43
 
 var countedAssertions = 0
 
@@ -369,7 +369,21 @@ suite "PLAT-51 part B on a real terminal: live reflow while a divider is dragged
   test "with --live-resize=off a guide is drawn and nothing moves; Esc cancels":
     var sess = open(@["--live-resize=off"], freshDir("guide"))
     let row = 10
-    let s0 = sess.snap()
+    let initial = sess.snap()
+    let (filesRow, filesCol) = initial.findRow(" Files ")
+    let (vcsRow, vcsCol) = initial.findRow(" VCS ")
+    ck filesRow >= 0 and vcsRow >= 0
+    # Isolate guide cancellation from initial keyboard-focus chrome by
+    # selecting the visible Files tab before taking the comparison frame.
+    sess.click(filesRow, filesCol + 2)
+    var s0 = sess.snap()
+    let focusDeadline = getMonoTime() + initDuration(seconds = 20)
+    while getMonoTime() < focusDeadline:
+      if vcsRow >= 0 and s0[vcsRow][vcsCol + 1].bgHex == focusHex:
+        break
+      sleep(30)
+      s0 = sess.snap()
+    ck vcsRow >= 0 and s0[vcsRow][vcsCol + 1].bgHex == focusHex
     let divs = s0.dividerCols(row)
     let d = divs[0]
     sess.cellReport(0, row, d)

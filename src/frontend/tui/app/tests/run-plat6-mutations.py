@@ -697,8 +697,8 @@ MUTATIONS = [
         "M22", BIND,
         "  if b.userModified:\n"
         "    return false\n"
-        "  if depthFor(pmDebug, selected) == before:",
-        "  if depthFor(pmDebug, selected) == before:",
+        "  if depthFor(b.product, selected) == before:",
+        "  if depthFor(b.product, selected) == before:",
         C_PROFILE,
         "a resize re-flows a layout the user has modified",
     ),

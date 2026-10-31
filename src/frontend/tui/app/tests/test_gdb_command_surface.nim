@@ -162,7 +162,9 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 123
+  ExpectedAppModules = 124
+    ## 2026-10-31: 123 → 124, `tests/test_layout_keyboard_focus.nim`, keyboard
+    ## focus through layout input on the real runtime.
     ## 2026-10-29 (PLAT-60): 122 → 123, `views/low_level_code_pane.nim`, the
     ## Low Level Code pane's painter.
     ## 2026-10-28 (PLAT-58): 121 → 122, `views/requests_pane.nim`, the

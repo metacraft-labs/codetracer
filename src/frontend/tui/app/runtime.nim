@@ -754,8 +754,8 @@ proc layoutBindingEnabled*(rt: TuiRuntime): bool =
 proc layoutGeometry*(rt: TuiRuntime): LayoutGeometry
 
 proc rebuildFocus(rt: TuiRuntime) =
-  ## Re-derive the focus ring from the layout that will be painted next,
-  ## carrying the focused pane if it is still on screen.
+  ## Re-derive focus from the visible layout, or the committed tree during
+  ## a tab lift, carrying its owner while that tree still owns it.
   ##
   ## Called after a resize AND after a layout command, because both can change
   ## which panes have a rectangle: `:dock left` takes one off the screen
@@ -763,7 +763,15 @@ proc rebuildFocus(rt: TuiRuntime) =
   ## no longer projected.
   let (had, focused) = rt.focus.focusedPane()
   let model = rt.app.shellModel(rt.width, rt.height)
-  let projection = projectLayout(model.layout, bodyArea(rt.width, rt.height))
+  # Lifting a tab changes the pointer's preview, not pane ownership. Derive
+  # keyboard focus from the committed tree during that preview, so a resize
+  # still updates geometry without retiring the dragged pane's scope.
+  let focusTree =
+    if rt.layoutBindingEnabled() and
+       rt.app.layoutBinding.interaction.kind == ikDraggingTab:
+      rt.app.layoutBinding.layout.tree
+    else: model.layout
+  let projection = projectLayout(focusTree, bodyArea(rt.width, rt.height))
   var docked: seq[PaneRegion] = @[]
   if rt.layoutBindingEnabled():
     let geometry = rt.layoutGeometry()
@@ -1775,6 +1783,7 @@ proc runCommandLine(rt: TuiRuntime; line: string; outcome: var RuntimeOutcome;
         rt.app.layoutBinding.focus = focused
       let acted = rt.app.layoutBinding.runLayoutCommand(rt.layoutGeometry(),
                                                         line)
+      let intendedFocus = rt.app.layoutBinding.focus
       outcome.detail = acted.message
       rt.note(acted.message)
       if acted.status == lasApplied:
@@ -1783,6 +1792,10 @@ proc runCommandLine(rt: TuiRuntime; line: string; outcome: var RuntimeOutcome;
       # back (`:undock`), so the focus ring is re-derived from the arrangement
       # the next frame will paint rather than from the one before the command.
       rt.rebuildFocus()
+      # `:focus` changes the binding's owner without changing the layout.
+      # Carry that explicit request into the rebuilt ring; if a command hid
+      # its pane, the ring's normal visible-pane fallback remains in place.
+      discard rt.focus.focusPaneKind(intendedFocus)
       return
 
   # PLAT-16's FIVE EDIT VERBS, ROUTED HERE AND ONLY IN EDIT MODE.
@@ -7995,6 +8008,7 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
                                                   ikResizingSplit,
                                                   ikRevealingDock}:
       let cancelled = rt.app.layoutBinding.cancelGesture()
+      rt.rebuildFocus()
       rt.note(cancelled.message)
       result.detail = cancelled.message
       result.repaint = true

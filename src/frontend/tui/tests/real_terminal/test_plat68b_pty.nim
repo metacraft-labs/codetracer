@@ -44,7 +44,7 @@ import ../../app/theme/roles
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 46
+const ExpectedAssertions = 50
 
 var countedAssertions = 0
 
@@ -264,6 +264,38 @@ suite "PLAT-68 Phase B on a real terminal: Debug mode's keys":
       seen.add sess.snap().caretColumn(at.row, at.code)
     ck seen == @[3, 1, 3]
     sess.quit()
+
+suite "native replay focus on a real terminal":
+
+  test "the initial editor owns Enter before any pointer input":
+    var sess = open()
+    try:
+      sess.send("\r")
+      sess.waitUntil("the initially focused editor's tracepoint prompt",
+        proc(s: Snapshot): bool = ":tracepoint " in s.text(StatusRow))
+      ck sess.status() == ":tracepoint"
+    finally:
+      sess.quit()
+
+  test "a call trace tab press transfers the next key's scope":
+    var sess = open(keybindings = """[
+      {"key":"f6","command":"debugger.step-over","when":"listFocus && paneKind == calltrace"},
+      {"key":"f6","command":"editor.toggle-tracepoint","when":"editorFocus"}
+    ]""")
+    try:
+      discard sess.clickLine11(5)
+      let (row, col) = sess.snap().findRow("Call Trace")
+      ck row >= 0
+      let before = sess.snap().tick
+      sess.press(row, col + 2)
+      discard sess.drainOutput(100)
+      sess.send("\e[17~")
+      sess.waitUntil("the tab's list-scope key steps", proc(s: Snapshot): bool =
+        s.tick > before or ":tracepoint " in s.text(StatusRow))
+      ck sess.snap().tick > before
+      ck not sess.status().startsWith(":tracepoint")
+    finally:
+      sess.quit()
 
 suite "PLAT-68 Phase B on a real terminal: selection and the clipboard":
 

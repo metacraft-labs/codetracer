@@ -147,7 +147,7 @@ import ../viewmodel/viewmodels/vcs_vm   # `VCSVM`, `VCSRefreshIntervalMs`: the V
 import ../viewmodel/host/native_vcs_details   # PLAT-50: commit files, diffs
 from std/unicode import runeLen
 import ../viewmodel/viewmodels/[point_list_vm, scratchpad_vm, state_vm,
-                                calltrace_vm, event_log_vm,
+                                calltrace_vm, calltrace_navigation, event_log_vm,
                                 origin_chain_types]
 # PLAT-52: the Terminal Output pane, drawn natively, and its producer.
 import ./terminal_output_leaf
@@ -4105,6 +4105,11 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       if c.kind == lcSetAutoHide and c.autoHideDirection in {ahOpen, ahClose}:
         gAutoHide.clicked()
       applyGestureCommand(r, c)
+      # A tab's press initially hits the pane that was active before it.
+      # Once activated, its own element must own the next key's scope.
+      if c.kind == lcActivateTab:
+        gFocusShown = true
+        focusWindowPane(r, $c.activateTarget)
     if not gGestures.revealing:
       gAutoHide.overlayClosed()
   of gekWheel:
@@ -6583,14 +6588,17 @@ proc performControl(r: GpuiRenderer; id: string) =
 proc showPaneFromMenu(r: GpuiRenderer; pane: PaneKind) =
   let layout = committedLayout()
   let docked = layout.dockedIndex(pane)
-  if docked >= 0 and layout.docked[docked].open:
-    # PLAT-58: DOCKED AND ALREADY OPEN at its edge — on screen, so focused,
-    # not revealed again as a hover overlay over itself.
-    focusWindowPane(r, $pane)
-  elif docked >= 0:
+  # A hover reveal is transient: once dismissed the pane is off screen, so
+  # the keyboard stays with its owner (the terminal's `showPane` rule).
+  let revealOnly = docked >= 0 and not layout.docked[docked].open
+  if revealOnly:
     let shown = beginReveal(layout, pane)
     if shown.isSome:
       gGestures.reveal = shown.get
+  elif docked >= 0:
+    # PLAT-58: DOCKED AND ALREADY OPEN at its edge — on screen, so focused,
+    # not revealed again as a hover overlay over itself.
+    discard
   elif layout.tree.contains(pane):
     applyGestureCommand(r, cmdActivateTab(pane))
   elif pane == paneLowLevelCode and layout.tree.contains(paneEditor):
@@ -6607,6 +6615,11 @@ proc showPaneFromMenu(r: GpuiRenderer; pane: PaneKind) =
     applyGestureCommand(r, cmdAddPane(pane,
       after = (if layout.tree.contains(paneEventLog): some(paneEventLog)
                else: none(PaneKind))))
+  # A focus command gives the pane the input as well as bringing its tab
+  # forward. The next key's scope comes from GPUI's element focus chain.
+  if not revealOnly:
+    gFocusShown = true
+    focusWindowPane(r, $pane)
   discard drawArrangement(r)
 
 proc openOmnibar(r: GpuiRenderer; query = "") =
@@ -10319,6 +10332,49 @@ proc runFindOperation(r: GpuiRenderer; operation: string; nowMs: int64) =
     focusWindowPane(r, $paneEditor)
   findRevealed(r, path, reveal)
 
+proc calltraceKey(r: GpuiRenderer; operation: string): bool =
+  ## The call trace's routed list operations, using the ViewModel's row
+  ## selection and the same host paging and activation as its pointer input.
+  ## A selected row stays in view even when the move crosses a loaded section.
+  if gSession.isNil or gFocusPane != $paneCalltrace:
+    return false
+  let vm = gSession.session.calltraceVM
+  if vm.isNil:
+    return false
+  if operation notin ["list.focus-next", "list.focus-previous",
+      "list.focus-first", "list.focus-last", "list.focus-page-down",
+      "list.focus-page-up", "list.activate"]:
+    return false
+  let selected = vm.selectedEntry.val
+  if operation == "list.activate":
+    if selected.isNone:
+      traceGesture("no call trace row is selected")
+      return true
+    let why = gSession.jumpToCall(selected.get)
+    if why.len > 0:
+      traceGesture("calltrace jump failed: " & why)
+    else:
+      refreshReplayWindow(r)
+    return true
+  let i = gGeom.tabsNodeOfPane($paneCalltrace)
+  if i < 0:
+    return false
+  let body = gGeom.nodes[i].body
+  # Report the window's measured viewport before the shared navigation asks
+  # it to keep a row visible; the VM then owns clamping and page distance.
+  discard gSession.pageCalltrace(callTraceRowsIn(body), 0, body.w, CallIndentPx)
+  case operation
+  of "list.focus-first": vm.selectFirst()
+  of "list.focus-last": vm.selectLast()
+  of "list.focus-next": vm.moveSelection(1)
+  of "list.focus-previous": vm.moveSelection(-1)
+  of "list.focus-page-down": vm.pageSelection(1)
+  of "list.focus-page-up": vm.pageSelection(-1)
+  else: discard
+  gSession.settle()
+  redrawCalltrace(r)
+  true
+
 proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
                         nowMs: int64) =
   ## **GPUI'S DISPATCH** of a resolved operation onto its ViewModels — the
@@ -10445,6 +10501,8 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
       return
     # PLAT-60: and the focused Low Level Code listing's.
     if lowLevelKey(r, res.operation):
+      return
+    if calltraceKey(r, res.operation):
       return
   of "list.copy":
     let (text, what) = focusedRowText()

@@ -1660,6 +1660,13 @@ proc dragThresholdPassed*(b: LayoutBinding; row, col: int): bool =
     (abs(col - b.pressCol) >= DragThresholdCols or
      abs(row - b.pressRow) >= DragThresholdRows)
 
+proc activateClickedTab(b: LayoutBinding; pane: PaneKind): LayoutAction =
+  ## A completed pointer click focuses its tab even when already active.
+  ## Programmatic activation and wheel navigation keep their own focus rules.
+  result = b.dispatch(cmdActivateTab(pane))
+  if result.status in {lasApplied, lasNoOp}:
+    b.focus = pane
+
 proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
               event: MouseEvent): LayoutAction =
   ## One decoded SGR-1006 report, as a layout gesture.
@@ -1853,7 +1860,7 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
         let source = pending.get
         if b.layout.dockedIndex(source) >= 0:
           return b.toggleDockOpen(source)
-        return b.dispatch(cmdActivateTab(source))
+        return b.activateClickedTab(source)
     if b.interaction.kind != ikDraggingTab:
       # A plain click, or the release of a press that marked nothing: not a
       # drag, and nothing to say about one.
@@ -1866,7 +1873,7 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
       discard b.cancelGesture()
       if b.layout.dockedIndex(source) >= 0:
         return b.toggleDockOpen(source)
-      return b.dispatch(cmdActivateTab(source))
+      return b.activateClickedTab(source)
     let (px, py) = pixelOf(event)
     discard b.hoverAtPx(geom, px, py)
     b.dropDrag()
