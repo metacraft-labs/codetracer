@@ -25,7 +25,7 @@ import replay_server_path
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 23
+const ExpectedAssertions = 32
 
 var countedAssertions = 0
 
@@ -198,19 +198,59 @@ suite "replay-server discovery order":
     putEnv(BuildDirEnv, outside)
     ck replayServerCandidates("") == @[outside / "bin" / ReplayServerExe]
 
+proc buildsReplayServerCandidate(text: string,
+                                  fixtureJoinExempt = false): bool =
+  ## Whether the Nim source `text` spells a `replay-server` candidate path.
+  ## Every way a private copy of the list could spell one: a path joined onto
+  ## the quoted file name (`dir /` the name, also with `.exe` or `.addFileExt`,
+  ## which is how every one of the thirty copies ended), a string literal that
+  ## ends in the file name after a slash, and a join onto the module's own
+  ## `ReplayServerExe`.
+  ##
+  ## Each quoted tail ends at the closing quote, which `.addFileExt` follows,
+  ## because a longer name that merely starts with `replay-server`, such as the
+  ## engine's stderr log, is not a candidate. Built by concatenation so this
+  ## file does not match itself.
+  ##
+  ## `fixtureJoinExempt` waives the `ReplayServerExe` join alone, for a suite
+  ## that builds stub engines at the paths the order names.
+  let q = "\""
+  let tails = ["/ " & q & "replay-" & "server" & q,
+               "/ " & q & "replay-" & "server.exe" & q,
+               "/replay-" & "server" & q,
+               "/replay-" & "server.exe" & q,
+               "/ " & "ReplayServerExe"]
+  for i, tail in tails:
+    if i == tails.high and fixtureJoinExempt:
+      continue
+    if tail in text:
+      return true
+
 suite "the search order is spelled once":
-  test "no Nim source outside this module builds a replay-server candidate":
-    # Every way a private copy of the list could spell a candidate: a path
-    # joined onto the file name (`dir /` the quoted name, also with `.exe` or
-    # `.addFileExt`, which is how every one of the thirty copies ended), a
-    # string literal that ends in the file name (`"src/build-debug/bin/
-    # replay-server"`), and a join onto this module's own `ReplayServerExe`.
-    # Built by concatenation so this file does not match itself.
+  test "the sweep flags every candidate spelling and nothing else":
     let q = "\""
-    let tails = ["/ " & q & "replay-server",
-                 "/replay-" & "server" & q,
-                 "/replay-" & "server.exe" & q,
-                 "/ " & "ReplayServerExe"]
+    # The engine's stderr log in a scratch directory names a log file, not an
+    # engine to run, so the sweep must leave it alone.
+    ck not buildsReplayServerCandidate(
+      "let engineLog = scratch / " & q & "replay-" & "server.stderr.log" & q)
+    # One positive control per form, so that tightening a tail cannot silently
+    # stop catching the spelling it was written for.
+    ck buildsReplayServerCandidate("dir / " & q & "replay-" & "server" & q)
+    ck buildsReplayServerCandidate("dir / " & q & "replay-" & "server.exe" & q)
+    ck buildsReplayServerCandidate(
+      "dir / " & q & "replay-" & "server" & q & ".addFileExt(ExeExt)")
+    ck buildsReplayServerCandidate(
+      q & "src/build-debug/bin/replay-" & "server" & q)
+    ck buildsReplayServerCandidate(
+      q & "src/build-debug/bin/replay-" & "server.exe" & q)
+    ck buildsReplayServerCandidate("dir / " & "ReplayServerExe")
+    # The fixture exemption covers the `ReplayServerExe` join and no other form.
+    ck not buildsReplayServerCandidate("dir / " & "ReplayServerExe",
+                                       fixtureJoinExempt = true)
+    ck buildsReplayServerCandidate("dir / " & q & "replay-" & "server" & q,
+                                   fixtureJoinExempt = true)
+
+  test "no Nim source outside this module builds a replay-server candidate":
     # `paths.nim`'s `dbBackendExe` is the INSTALLED layout under the product
     # prefix, not a checkout candidate, so it is the one other legitimate
     # spelling.
@@ -245,13 +285,9 @@ suite "the search order is spelled once":
           if rel in exempt:
             continue
           inc scanned
-          let text = readFile(path)
-          for i, tail in tails:
-            if i == tails.high and rel in fixtureJoinExempt:
-              continue
-            if tail in text:
-              offenders.add(rel)
-              break
+          if buildsReplayServerCandidate(readFile(path),
+                                         rel in fixtureJoinExempt):
+            offenders.add(rel)
         else:
           discard
     checkpoint("re-spelled replay-server search: " & offenders.join(", "))
