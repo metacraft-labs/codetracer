@@ -229,7 +229,7 @@ const
   GoToSourceLabel* = "Go to Source"
   CopyNameLabel* = "Copy Name"
   CopySourceLocationLabel* = "Copy Source Location"
-  ConstraintsCommandVerb = "constraints"
+  ConstraintsCommandVerb* = "constraints"
     ## `:constraints` — shows the pane (the terminal's command line, the GPUI
     ## window's omnibox).
   NumberedCircuitReason* =

@@ -68,6 +68,7 @@ import ./views/problems_pane
 import ./views/requests_pane   # PLAT-58
 import ./views/low_level_code_pane   # PLAT-60
 import ./views/verification_pane     # PLAT-63
+import ./views/constraints_pane   # PLAT-62
 
 export interpreter, keymap, motions, command_line, tui_app, degradation
 export persistence
@@ -1669,6 +1670,14 @@ proc runCommandLine(rt: TuiRuntime; line: string; outcome: var RuntimeOutcome;
         rt.note(":verify takes `run` or `stop`, not '" & words[1] & "'")
       outcome.detail = rt.app.notification
       return
+    # PLAT-62: `:constraints` shows the Constraints pane — revealed when it is
+    # docked, its tab brought forward when the arrangement places it, opened
+    # beside the event log when it does not (Debug mode's default places it
+    # nowhere; a user who opens it keeps it).
+    if words.len == 1 and words[0] == "constraints":
+      rt.showPane(paneConstraints, outcome)
+      outcome.detail = rt.app.notification
+      return
     if words.len == 1 and words[0] in ["cnext", "cn", "cprev", "cp"]:
       rt.stepFindInFiles((if words[0] in ["cnext", "cn"]: 1 else: -1),
                          outcome)
@@ -2465,7 +2474,7 @@ proc paneAt(geometry: LayoutGeometry; row, col: int):
                              area: geometry.openDock, activeTab: -1),
             geometry.openDock)
 
-proc paneAreaOf(rt: TuiRuntime; kind: PaneKind): CellArea =
+proc paneAreaOf*(rt: TuiRuntime; kind: PaneKind): CellArea =
   ## The rectangle pane `kind` is painted into (its strip row first), or an
   ## empty one when it is not on the screen — PLAT-57: a docked pane shown
   ## open or revealed included; a maximized pane's (`paintedGeometry`).
@@ -3312,6 +3321,57 @@ proc openWorkingFileAt*(rt: TuiRuntime; path: string; line, col: int): string =
   discard rt.focus.focusPaneKind(paneEditor)
   ""
 
+proc constraintsPaneScreen*(rt: TuiRuntime): tuple[area: CellArea,
+                                                  screen: ConstraintsPaneScreen] =
+  ## PLAT-62: the Constraints pane below its strip, and where the painter put
+  ## its parts — the arithmetic a press is read back with.
+  let under = rt.paneAreaOf(paneConstraints)
+  result.area = CellArea(col: under.col, row: under.row + 1,
+                         width: under.width, height: max(0, under.height - 1))
+  if result.area.width <= 0:
+    return
+  var g = newStyledGrid(result.area.col + result.area.width,
+                        result.area.row + result.area.height)
+  result.screen = paintConstraints(g, result.area, rt.app.constraints)
+
+proc actOnConstraints*(rt: TuiRuntime; act: ConstraintsAct;
+                       outcome: var RuntimeOutcome): ConstraintsActResult =
+  ## PLAT-62: hand `act` to the host (`TuiApp.constraintsAct`), which does it
+  ## through the window's `ConstraintsVM` and refreshes the pane; its words go
+  ## to the status line and a copied name or location to the clipboard. An
+  ## opened source gives the editor the keys.
+  outcome.repaint = true
+  if rt.app.constraintsAct.isNil:
+    rt.note("this window has no Constraints pane host")
+    return
+  result = rt.app.constraintsAct(act)
+  if result.copied.len > 0:
+    rt.copyToClipboard(result.copied, "the row")
+  if result.note.len > 0:
+    rt.note(result.note)
+  if result.opened:
+    # The editor has the keys now (the line it opened is where the reader
+    # goes next), as a Problems row's open gives them to it.
+    rt.hasDockKeys = false
+    if rt.layoutBindingEnabled():
+      rt.app.layoutBinding.focus = paneEditor
+    discard rt.focus.focusPaneKind(paneEditor)
+
+proc keepConstraintSelected(rt: TuiRuntime) =
+  ## PLAT-62: the selected row kept in view.
+  let (_, screen) = rt.constraintsPaneScreen()
+  let m = rt.app.constraints
+  rt.app.constraints.scrollTop = m.revealIndex(screen.listRows, m.selected)
+
+proc scrollConstraints(rt: TuiRuntime; delta: int;
+                       outcome: var RuntimeOutcome) =
+  ## PLAT-62: the wheel over the Constraints pane scrolls its list.
+  let (_, screen) = rt.constraintsPaneScreen()
+  rt.app.constraints.scrollTop = clampConstraintsTop(
+    rt.app.constraints.rows.len, rt.app.constraints.scrollTop + delta,
+    screen.listRows)
+  outcome.repaint = true
+
 proc requestsPaneScreen*(rt: TuiRuntime): tuple[area: CellArea,
                                                screen: RequestsPaneScreen] =
   ## PLAT-58: the Requests pane's rows below its strip, and where the painter
@@ -3934,6 +3994,8 @@ proc applyBarTop(rt: TuiRuntime; bar: BarSpot; top: int;
     of paneVerification:
       # PLAT-63: the list's view moves.
       rt.app.verification.scrollTop = top
+    of paneConstraints:
+      rt.app.constraints.scrollTop = top
     of paneBuildOutput:
       rt.app.buildPane.scrollTop = top
     of paneEditor:
@@ -4829,6 +4891,31 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
       return true
     of rqNone:
       return false
+  of paneConstraints:
+    # PLAT-62 (K67, K68): a press selects a row and opens the line that
+    # declares its function (a row no source declares says why); a right
+    # press opens the row's menu; the scrollbar is the scrollbars'
+    # (`routeScrollbars`).
+    if event.button notin {mbLeft, mbRight} or not rt.app.constraints.loaded:
+      return false
+    let (area, screen) = rt.constraintsPaneScreen()
+    let t = rt.app.constraints.constraintsTargetAt(screen, area, event.row,
+                                                   event.col)
+    case t.kind
+    of cgRow:
+      if event.button == mbRight:
+        let r = rt.actOnConstraints(ConstraintsAct(kind: cakRowMenu,
+                                                   index: t.index), outcome)
+        if r.menu.entries.len > 0:
+          rt.openContextMenu(r.menu, event.row, event.col, outcome)
+      else:
+        discard rt.actOnConstraints(ConstraintsAct(kind: cakOpen,
+                                                   index: t.index), outcome)
+      return true
+    of cgTrack, cgText:
+      return true
+    of cgNone:
+      return false
   of paneVcs:
     # K34 / K53: a changed file opens its diff; a commit opens (lists the
     # files it changed) or closes; a commit's file opens that change.
@@ -4975,6 +5062,13 @@ proc runContextAction(rt: TuiRuntime; action: ContextAction;
     # decides it now.
     discard rt.actOnVerification(VerificationAct(kind: vrMenuChoice,
       action: action, target: target), outcome)
+  of caConstraintGoToSource, caConstraintCopyName,
+     caConstraintCopySourceLocation:
+    # PLAT-62 (K68): a Constraints row's entry, as the shared model decides
+    # it now.
+    discard rt.actOnConstraints(ConstraintsAct(kind: cakMenuChoice,
+                                               action: action,
+                                               target: target), outcome)
 
 proc routeOverlayMouse(rt: TuiRuntime; event: MouseEvent;
                        outcome: var RuntimeOutcome): bool =
@@ -5220,6 +5314,13 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
     # PLAT-55: the wheel scrolls Problems' list.
     if at.found and at.region.pane == paneProblems and rt.app.problems.loaded:
       rt.scrollProblems(
+        (if event.button == mbWheelDown: CallTraceWheelRows
+         else: -CallTraceWheelRows), outcome)
+      return
+    # PLAT-62: the wheel scrolls the Constraints pane's list.
+    if at.found and at.region.pane == paneConstraints and
+       rt.app.constraints.loaded:
+      rt.scrollConstraints(
         (if event.button == mbWheelDown: CallTraceWheelRows
          else: -CallTraceWheelRows), outcome)
       return
@@ -7728,6 +7829,38 @@ proc runRequestsKeyOperation(rt: TuiRuntime; operation: string;
     true
   else: false
 
+proc runConstraintsKeyOperation(rt: TuiRuntime; operation: string;
+                                outcome: var RuntimeOutcome): bool =
+  ## PLAT-62 FROM THE KEYBOARD, while the Constraints pane has the focus: the
+  ## `list.*` moves select a row (kept in view), `list.activate` opens its
+  ## source, `list.copy` copies its name. Answers whether `operation` was the
+  ## pane's.
+  case operation
+  of "list.focus-next", "list.focus-previous", "list.focus-first",
+     "list.focus-last", "list.focus-page-down", "list.focus-page-up",
+     "editor.scroll-line-down", "editor.scroll-line-up":
+    let op = case operation
+             of "editor.scroll-line-down": "list.focus-next"
+             of "editor.scroll-line-up": "list.focus-previous"
+             else: operation
+    discard rt.actOnConstraints(ConstraintsAct(kind: cakKey, operation: op,
+      page: max(1, rt.paneBodyRows(paneConstraints) - 3)), outcome)
+    rt.keepConstraintSelected()
+    true
+  of "list.activate":
+    let at = rt.app.constraints.selected
+    if at < 0:
+      rt.note("no row of the Constraints pane is selected")
+      outcome.repaint = true
+    else:
+      discard rt.actOnConstraints(ConstraintsAct(kind: cakOpen, index: at),
+                                  outcome)
+    true
+  of "list.copy":
+    discard rt.actOnConstraints(ConstraintsAct(kind: cakCopy), outcome)
+    true
+  else: false
+
 proc runTestsKeyOperation(rt: TuiRuntime; operation: string;
                           outcome: var RuntimeOutcome): bool =
   ## PLAT-53 FROM THE KEYBOARD, while Test Results has the focus (§8.4): Up /
@@ -7900,6 +8033,9 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
     if had and focused == paneVerification and
        rt.app.verification.loaded and
        rt.runVerificationKeyOperation(res.operation, outcome):
+      return
+    if had and focused == paneConstraints and rt.app.constraints.loaded and
+       rt.runConstraintsKeyOperation(res.operation, outcome):
       return
   # PLAT-55: the docked Problems pane, pressed while shown, takes the list
   # keys too (`dockKeys`).

@@ -267,12 +267,12 @@ suite "PLAT-45: the terminal's fold at every size":
     shuffled.folds = @[bundled.folds[2], bundled.folds[3], bundled.folds[0],
                        bundled.folds[4], bundled.folds[1], bundled.folds[5]]
     checkOrder(shuffled)
-    # The shuffled order's first terminal step is the report-only one
-    # (Constraints). Test Results is drawn since PLAT-53, so it keeps its
-    # declared place and the next step is the shuffle's own first.
+    # No region is report-only any more: Test Results is drawn since PLAT-53
+    # and Constraints since PLAT-62, so every step keeps its declared place
+    # and the shuffle's own first two lead.
     let t = terminalFolds(shuffled, cap)
-    ck t.folds[0].region == paneConstraints
-    ck t.folds[1].region == paneFileTree
+    ck t.folds[0].region == paneFileTree
+    ck t.folds[1].region == paneCalltrace
     # And at every size the shipped default keeps TESTS where the desktop
     # keeps it — a tab of the FILES panel — whatever the terminal folds.
     for w in countup(80, 300, 20):

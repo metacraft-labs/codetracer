@@ -108,9 +108,11 @@ suite "PLAT-41 LAW-P1 — the three sets COVER PaneKind":
     # PLAT-58 moved `paneRequests` into the vocabulary: it draws the
     # session's `RequestPanelVM`.
     # PLAT-63's Verification is in the vocabulary from its first day.
-    ck card(PaneVocabularyPanes) == 19
+    # PLAT-62 moved `paneConstraints`, the last accepted exception, into the
+    # vocabulary: it draws the window's `ConstraintsVM`.
+    ck card(PaneVocabularyPanes) == 20
     ck card(PaneNativePanes) == 1
-    ck card(PaneAcceptedExceptions) == 1
+    ck card(PaneAcceptedExceptions) == 0
     ck paneFileTree in PaneVocabularyPanes
     ck paneVcs in PaneVocabularyPanes
     ck paneTerminalOutput in PaneVocabularyPanes
@@ -119,7 +121,8 @@ suite "PLAT-41 LAW-P1 — the three sets COVER PaneKind":
     ck paneProblems in PaneVocabularyPanes
     ck paneBuildOutput in PaneVocabularyPanes
     ck paneRequests in PaneVocabularyPanes
-    ck PaneAcceptedExceptions == {paneConstraints}
+    ck paneConstraints in PaneVocabularyPanes
+    ck PaneAcceptedExceptions == {}
     ck card(PaneVocabularyPanes) + card(PaneNativePanes) +
        card(PaneAcceptedExceptions) == card(allPanes())
 

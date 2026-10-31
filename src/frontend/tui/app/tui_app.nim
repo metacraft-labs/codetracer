@@ -69,6 +69,7 @@ import ./views/problems_pane
 import ./views/requests_pane
 import ./views/low_level_code_pane
 import ./views/verification_pane   # PLAT-63
+import ./views/constraints_pane
 import ./views/point_list
 
 export headless_app
@@ -319,6 +320,10 @@ type
       ## PLAT-58. THE REQUESTS pane's model, as a value, filled by the host
       ## (`host/tui_session.requestsModelOf`) from the session's
       ## `RequestPanelVM`; its `scrollTop` is the pane's own reading position.
+    constraints*: ConstraintsPaneModel
+      ## PLAT-62. THE CONSTRAINTS pane's model, as a value, filled by the host
+      ## (`host/constraints_source.paneModelOf`) from the window's
+      ## `ConstraintsVM`; its `scrollTop` is the pane's own reading position.
     build*: BuildSession
       ## PLAT-16. The build or run in flight, or the last one's verdict, or
       ## `nil` for a session that has never built. `nil` is a state the pane
@@ -427,6 +432,11 @@ type
       ## the next prompt (`native_agent_host.attachContext`; an editor
       ## selection is attached as the editor names it, `mustExist` false).
       ## The words the status line shows.
+    constraintsAct*: proc(act: ConstraintsAct): ConstraintsActResult {.closure.}
+      ## PLAT-62: the HOST's answer to an act on the Constraints pane — a
+      ## press, a menu built or chosen, a key — done through the window's
+      ## `ConstraintsVM` (`constraints_source.act`), the pane's model
+      ## refreshed. Nil when no host owns the pane.
     requestsAct*: proc(act: RequestsAct): RequestsActResult {.closure.}
       ## PLAT-58: the HOST's answer to an act on the Requests pane — a press,
       ## a menu built or chosen, the URL search, a key — done through the
@@ -765,6 +775,7 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     requests: app.requests,
     lowLevel: app.lowLevel,
     verification: app.verification,
+    constraints: app.constraints,
     build: build,
     product: app.modes.product,
     edit: app.editPaneModel())

@@ -40,7 +40,8 @@ import viewmodels/event_log_vm
 # 247 -> 254 (PLAT-58): K58-K60, the Requests rows (+7).
 # 254 -> 257 (PLAT-60): K61-K63, the Low Level Code rows (+3).
 # 257 -> 260 (PLAT-63): K64-K66, the Verification rows (+3).
-const ExpectedAssertions = 260
+# 260 -> 262 (PLAT-62): K67-K68, the Constraints rows (+2).
+const ExpectedAssertions = 262
 
 var countedAssertions = 0
 
@@ -56,13 +57,13 @@ func rowsWith(state: NativeState; gpui = false): seq[string] =
 
 suite "PLAT-50: the click inventory":
 
-  test "every row K1..K66, once, complete":
+  test "every row K1..K68, once, complete":
     var ids = initHashSet[string]()
     for i, b in ClickInventory:
       ck b.id == "K" & $(i + 1)
       ids.incl b.id
     ck ids.len == ClickInventory.len
-    ck ClickInventory.len == 66
+    ck ClickInventory.len == 68
     for b in ClickInventory:
       if b.target.len == 0 or b.gestures.card == 0 or b.desktop.len == 0:
         checkpoint("incomplete row " & b.id)
