@@ -901,9 +901,10 @@ suite "M4 — State Pane renders inline origin badge per row":
     ## M4 deliverable §3.1 — right-click on a State Pane variable row
     ## opens a context menu whose "Show value origin" entry routes
     ## through ``StateVM.onShowOrigin``, which (a) dispatches
-    ## ``ct/originChain`` via the backend and (b) opens the dedicated
-    ## side panel by setting ``OriginChainVM.sidePanelOpen.val = true``
-    ## and populating ``activeChain`` once the DAP response lands.
+    ## ``ct/originChain`` via the backend and (b) expands the row's chain
+    ## in place, as the badge does — the side panel stays closed (#893's
+    ## intended behaviour) — with ``activeChain`` populated once the DAP
+    ## response lands.
     ##
     ## The test exercises Option-A from the brief: it fires
     ## ``contextmenu`` on the rendered row's MockNode so the
@@ -983,9 +984,15 @@ suite "M4 — State Pane renders inline origin badge per row":
       let req = mock.findCommand("ct/originChain")
       check req.isSome
       check req.get.args["variableName"].getStr == "total"
-      # 2. The host bridge forwarded the call to ``OriginChainVM`` which
-      #    opens the dedicated side panel per spec §3.2.2.
-      check originVM.sidePanelOpen.val == true
+      # 2. The entry does what the row's origin badge does (#893,
+      #    `9dc6e5c2345`: "It does NOT open the dedicated side panel — that
+      #    is intentional"): the row's chain expands IN PLACE and the side
+      #    panel stays closed (it is one press away, the chain's own "Show
+      #    in side panel").
+      var expandedNames: seq[string] = @[]
+      for id in stateVM.expandedOrigins.val: expandedNames.add id.name
+      check "total" in expandedNames
+      check not originVM.sidePanelOpen.val
       # 3. ``activeChain`` becomes Some after the DAP response lands.
       #    The mock returns ``%*{}`` so we synthesise the response the
       #    real db-backend would dispatch through ``applyChainResponse``
@@ -1514,10 +1521,15 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
       let requests = originChainRequests(w.mock)
       check requests.len == 1
       check requests.len == 1 and requests[0]["variableName"].getStr == "c"
-      check w.origin.sidePanelOpen.val
-      check w.origin.activeChain.val.isSome and
-        w.origin.activeChain.val.get.queryVariable == "c"
-      check w.origin.breadcrumbStack.val.len == 1
+      # In place, as the badge (#893): the row is expanded, the side panel
+      # stays closed, and the chain the row draws is the one that answered.
+      var expandedNames: seq[string] = @[]
+      for id in w.state.expandedOrigins.val: expandedNames.add id.name
+      check "c" in expandedNames
+      check not w.origin.sidePanelOpen.val
+      check not w.state.originChainLookup.isNil and
+        w.state.originChainLookup("c").isSome and
+        w.state.originChainLookup("c").get.queryVariable == "c"
       dispose()
 
   test "without the OriginChainVM bridge, StateVM.onShowOrigin still sends one ct/originChain":

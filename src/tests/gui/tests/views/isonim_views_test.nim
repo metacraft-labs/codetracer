@@ -2996,9 +2996,12 @@ proc tooltipTextOf(panel: MockNode; buttonId: string): string =
   let button = findById(panel, buttonId)
   findByClass(button, "custom-tooltip").textContent
 
-const ToolbarControlCount = 16
-  ## Every control of the shipped toolbar: history back / forward and their
-  ## two lists, the eight steps, run to entry, reset, run tests, stop.
+const ToolbarControlCount = 14
+  ## Every control of the shipped toolbar: history back / forward, the eight
+  ## steps, run to entry, reset, run tests, stop. The two history lists open
+  ## from back / forward's context menu, as a browser's do, and have no
+  ## buttons of their own (`test_debug_controls_view.nim` asserts they are
+  ## gone).
 
 const mockToolbarButtons: array[6, tuple[cls: string; id: string; label: string]] = [
   (cls: "reverse-next-image",     id: "reverse-next",     label: "Reverse next"),
