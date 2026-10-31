@@ -174,6 +174,15 @@ fail() {
 	exit 1
 }
 
+# Teardown awaits this deadline, so disarming it would leave no normal quit.
+case "${WINDOW_MS}" in
+"" | *[!0-9]*) fail "CODETRACER_PLAT37_WINDOW_MS must be a positive integer" ;;
+esac
+# The app passes this value to a uint32 FFI; 2^32 would silently disarm it.
+[ "${#WINDOW_MS}" -le 10 ] && [ "${WINDOW_MS}" -gt 0 ] &&
+	[ "${WINDOW_MS}" -le 4294967295 ] ||
+	fail "CODETRACER_PLAT37_WINDOW_MS must be in 1..4294967295 (at most 10 digits)"
+
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--only)
@@ -324,17 +333,44 @@ SHIM_DIR="${ISONIM_GPUI}/rust/target/plat37"
 LIVE_SHIM="${ISONIM_GPUI}/rust/target/debug/libgpui_nim_shim.dylib"
 WINDOWED_SHIM="${SHIM_DIR}/libgpui_nim_shim.windowed.dylib"
 SHIM_BACKUP=""
+# Only this lane's outstanding child belongs to its cleanup. Never sweep by
+# executable name: another capture or an operator may be running the same app.
+gpid=""
+
+wait_capture_app() {
+	local app_rc=0
+	[ -n "${gpid}" ] || return 0
+	# --quit-after-ms requests the shim's normal stop_event_loop route. Waiting
+	# lets gpui_launch return and the process run its registered exit cleanup.
+	# Sending SIGTERM here bypasses that cleanup, even after a good capture.
+	wait "${gpid}" || app_rc=$?
+	gpid=""
+	if [ "${app_rc}" -ne 0 ]; then
+		echo "GPUI app exited unsuccessfully (status ${app_rc})" >&2
+	fi
+	return "${app_rc}"
+}
 
 restore_shim() {
+	local lane_rc=$? app_rc=0
+	# A failed capture still owns a live app. Let its armed quit finish before
+	# replacing the library it loaded; preserve the lane's original exit code.
+	wait_capture_app || app_rc=$?
 	if [ -n "${SHIM_BACKUP}" ] && [ -f "${SHIM_BACKUP}" ]; then
-		mv -f "${SHIM_BACKUP}" "${LIVE_SHIM}"
-		SHIM_BACKUP=""
-		echo "restored ${LIVE_SHIM}"
+		if mv -f "${SHIM_BACKUP}" "${LIVE_SHIM}"; then
+			SHIM_BACKUP=""
+			echo "restored ${LIVE_SHIM}"
+		else
+			echo "failed to restore ${LIVE_SHIM}; backup remains at ${SHIM_BACKUP}" >&2
+			[ "${lane_rc}" -ne 0 ] || lane_rc=1
+		fi
 	fi
-	pkill -f "${BIN}" 2>/dev/null
-	return 0
+	# Preserve a prior capture failure, while refusing a failed app even if
+	# the lane otherwise reached a successful exit.
+	[ "${lane_rc}" -ne 0 ] || lane_rc=${app_rc}
+	return "${lane_rc}"
 }
-trap restore_shim EXIT
+trap 'restore_shim; exit $?' EXIT
 
 [ -f "${WINDOWED_SHIM}" ] || fail "the windowed shim is not at
       ${WINDOWED_SHIM}. Build all three in the sibling's own dev shell,
@@ -569,8 +605,7 @@ while IFS=$'\t' read -r id view width height vpname ops; do
 		--requested-width="${width}" --requested-height="${height}" \
 		--timeout-ms=30000 --wait-ms="${WAIT_MS}" || cap_rc=$?
 
-	kill "${gpid}" 2>/dev/null
-	wait "${gpid}" 2>/dev/null
+	wait_capture_app || fail "${view}: the captured app did not shut down cleanly"
 
 	# THE RECORD IS THE VERDICT, not the exit code and not the file's size.
 	# The driver writes one on every path it reaches, INCLUDING a refusal, so
@@ -671,7 +706,7 @@ print(json.loads(open(sys.argv[1]).read().strip().splitlines()[-1])['laneVerdict
 	fi
 done <"${SPEC}"
 
-restore_shim
+restore_shim || fail "restoring the capture shim failed"
 
 # ---------------------------------------------------------------------------
 # The manifest

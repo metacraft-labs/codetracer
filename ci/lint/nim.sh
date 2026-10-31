@@ -972,6 +972,11 @@ lint_step "DAP command sync: the allow-list names everything the engine dispatch
 lint_step "PLAT-37 Electron lane: per-scenario outcomes name each failure's phase and cause" \
 	bash ci/test/plat37-electron-outcomes-test.sh
 
+# The macOS capture lane must let the app's exit cleanup run and must never
+# sweep up other sessions by executable name. Real child processes, no GUI.
+lint_step "PLAT-37 GPUI capture: normal shutdown and owned-child cleanup" \
+	bash ci/test/plat37-gpui-shutdown-test.sh
+
 # PLAT-37's published parity figures (`just plat37-parity`) are graded by REAL
 # FLIP and refused when two independent captures of one renderer disagree.
 # `--test` runs the tool's controls over synthetic PNGs — stability, refusal,
