@@ -36,6 +36,7 @@
 ## temporary directory so a run never touches the user's.
 
 import replay_prerequisite
+import ../../tui/tests/fixtures/fixture_provider
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles,
             unittest]
 import ./gpui_child_env
@@ -53,7 +54,6 @@ template ck(condition: untyped) =
 const
   W = 1440
   H = 1000
-  CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   OpenedFolderRowReason = "The opened folder cannot be renamed or deleted " &
                           "from the tree"
 
@@ -423,10 +423,7 @@ suite "GPUI Edit mode: the Files menu acts on the disk":
 suite "GPUI Edit mode: a folder tab":
 
   test "a folder tab lists the folder, and its menu acts on the disk":
-    let calc = repo / CalcFixture
-    if not dirExists(calc):
-      raise newException(IOError, "prerequisite missing: " & calc &
-        " (the tui lane records it on its first run)")
+    let calc = requireFixture(fixtureSpec("calc"))
     let project = newProject()
     let data = createTempDir("files-edit-gpui-data-", "")
     # A new tab's Welcome screen; its focus starts on "Open folder".

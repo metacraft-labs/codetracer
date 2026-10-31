@@ -62,6 +62,7 @@
 ## written at the end of it. Every number was written LAST, from a run.
 
 import replay_prerequisite
+import ../../tui/tests/fixtures/fixture_provider
 import process_meter   # residentKb, loadAverage1: Linux AND macOS
 import std/[algorithm, monotimes, os, osproc, strutils, times, unittest]
 
@@ -121,8 +122,6 @@ const
   MaxHeldLines = BigViewportLines + 2 * BigOverscan
   ScrollStops = 60
   ScrollStride = BigFileLines div ScrollStops
-
-  CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   GpuiEntrypoint = "src/frontend/gpui/main.nim"
     ## The Tier-2 case compiles THIS, into a temporary path, and runs what it
     ## compiled. It deliberately does NOT read `build/bin/codetracer-gpui`: see
@@ -145,22 +144,14 @@ proc writeBigPayload(root: string): string =
   writeFile(payload, text)
   traceDir
 
-proc fixtureAvailable(): bool =
-  dirExists(CalcFixture)
-
-proc requireFixture(): string =
-  ## The recording, or a FAILURE naming what to run.
+proc calcFixture(): string =
+  ## The `calc` recording, recorded on first use by the fixture provider, or a
+  ## FAILURE naming the missing recorder and how to get it.
   ##
   ## Loud rather than skipped. A suite whose subject is "the editor draws the
   ## recording's source" and which quietly passes with no recording has stopped
   ## being about anything.
-  if not fixtureAvailable():
-    raise newException(IOError,
-      "the `calc` fixture is absent at " & CalcFixture & ". It is recorded on " &
-      "demand by the tui lane's fixture provider; run `just test-tui` once, " &
-      "or point this suite at another recording. It is NOT skipped, because a " &
-      "green run over no recording is worth less than a red one.")
-  CalcFixture
+  requireFixture(fixtureSpec("calc"))
 
 # ---------------------------------------------------------------------------
 # Reading the RENDERED tree back
@@ -274,7 +265,7 @@ type LiveEditor = object
   bigTrace: string
 
 proc openLive(viewportHeight: int; big: bool): LiveEditor =
-  let trace = requireFixture()
+  let trace = calcFixture()
   let session = openLocalTrace(trace)
   var root = ""
   var bigTrace = ""
@@ -943,7 +934,7 @@ suite "PLAT-22: the GPUI editing surface":
     defer:
       removeFile(built)
       removeDir(built & ".cache")
-    let trace = requireFixture()
+    let trace = calcFixture()
     let (output, code) = execCmdEx(built & " --report-plan " & trace)
     ck code == 0
     ck output.len > 0

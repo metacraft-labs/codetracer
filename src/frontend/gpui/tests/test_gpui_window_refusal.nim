@@ -2,8 +2,9 @@
 ## shim with no window backend, refuses a window launch by name instead of
 ## exiting 0 having shown nothing.**
 ##
-## Run (needs the `calc` recording under `test-logs/tui-fixtures/` and a
-## built `replay-server`, through this repository's development environment):
+## Run (needs the Python recorder, which records the `calc` fixture on first
+## use, and a built `replay-server`, through this repository's development
+## environment):
 ##   nim c -r --path:src/frontend/viewmodel src/frontend/gpui/tests/test_gpui_window_refusal.nim
 ##
 ## The suite provisions its own featureless shim and a release build of the
@@ -41,6 +42,7 @@
 ## recording.
 
 import replay_prerequisite
+import ../../tui/tests/fixtures/fixture_provider
 import std/[dynlib, os, osproc, sha1, strtabs, strutils, tempfiles, times,
             unittest]
 
@@ -50,7 +52,6 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   ExitNoWindow = 3
     ## `window_preflight.ExitNoWindow`, restated: this suite asserts the
     ## number the CONTRACT publishes, so importing the constant under test
@@ -72,7 +73,7 @@ else:
   const ShimName = "libgpui_nim_shim.so"
 let bin = repo / "build/gpui-refusal" / ProgramName
 let shim = repo / "build/gpui-refusal/shim/debug" / ShimName
-let calc = repo / CalcFixture
+let calc = requireFixture(fixtureSpec("calc"))
 let gpuiSource = block:
   let override = getEnv("ISONIM_GPUI_SRC")
   # Match the prerequisite builder's shell `${ISONIM_GPUI_SRC:-...}`:
@@ -162,7 +163,6 @@ proc windowArgs(): seq[string] =
 suite "codetracer-gpui refuses a window launch the featureless shim cannot serve":
 
   test "the prerequisites are here, and the isolated shim is featureless":
-    requirePrereq(dirExists(calc), calc & " (run 'just test-tui' once)")
     requirePrereq(existsEnv("REPLAY_SERVER_BIN") and
                   fileExists(getEnv("REPLAY_SERVER_BIN")),
                   "REPLAY_SERVER_BIN naming a built replay-server")

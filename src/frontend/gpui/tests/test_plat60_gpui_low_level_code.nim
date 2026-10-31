@@ -25,6 +25,7 @@
 ## No mocks: the binary, the engine and the recording are the product's.
 
 import replay_prerequisite
+import ../../tui/tests/fixtures/fixture_provider
 import ../../../common/replay_server_path
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
 import ./gpui_child_env
@@ -55,19 +56,10 @@ let bin = repo / "build/bin/codetracer-gpui"
 let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                    repo.parentDir / "isonim-gpui/rust/target/debug")
 
-proc fixture(prefix: string): string =
-  for kind, path in walkDir(repo / "test-logs/tui-fixtures"):
-    if kind == pcDir and path.extractFilename.startsWith(prefix & "-"):
-      return path
-  ""
-
 proc windowPlan(ops: string; subject: string; trace: var string): JsonNode =
   if not fileExists(bin):
     raise newException(IOError, "prerequisite missing: " & bin &
                        " (just build-gpui)")
-  if subject.len == 0:
-    raise newException(IOError, "prerequisite missing: a tui-fixtures " &
-      "recording (the tui lane records them on its first run)")
   let state = createTempDir("plat60-gpui-plan-", "")
   var env = newStringTable()
   for k, v in envPairs():
@@ -160,7 +152,7 @@ proc lineOf(row: JsonNode): int =
 
 suite "PLAT-60: the Low Level Code pane in the GPUI window":
 
-  let subject = fixture("noir_space_ship")
+  let subject = requireFixture(fixtureSpec("noir_space_ship"))
 
   test "view.low-level-code opens it beside the source with the engine's listing":
     let before = windowPlan("", subject)

@@ -31,6 +31,7 @@
 ## or satisfy the real-recording case.
 
 import replay_prerequisite
+import ../../tui/tests/fixtures/fixture_provider
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles,
             times, unittest]
 import ./gpui_child_env
@@ -56,7 +57,6 @@ const
     ## (EMT-D14) — highlighted by keyboard and by pointer, an enabled item
     ## with none, chosen by Enter and by a click, and wrapped in two windows
     ## too narrow for it on one line — twenty-four checks.
-  CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   DesktopAnswers = "src/tests/visual/answers/plat51-desktop.electron.json"
   W = 1920
@@ -66,7 +66,7 @@ let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 let bin = repo / "build/bin/codetracer-gpui"
 let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                    repo.parentDir / "isonim-gpui/rust/target/debug")
-let calc = repo / CalcFixture
+let calc = requireFixture(fixtureSpec("calc"))
 
 proc checkedRecorder(path: string): string =
   ## A failed prerequisite stops the case before the native host can choose
@@ -87,8 +87,6 @@ proc windowPlan(ops: string; geometry: var JsonNode; state = "";
   if not fileExists(bin):
     raise newException(IOError, "prerequisite missing: " & bin &
                        " (just build-gpui)")
-  if not dirExists(calc):
-    raise newException(IOError, "prerequisite missing: " & calc)
   let own = state.len == 0
   let root = if own: createTempDir("plat51b-gpui-plan-", "") else: state
   var env = newStringTable()

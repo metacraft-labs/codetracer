@@ -13,13 +13,13 @@
 ## The wheel itself, from a real pointer device, is
 ## `test_plat47_gpui_window.nim`'s.
 ##
-## Needs `REPLAY_SERVER_BIN` and the `call_pages` recording under
-## `test-logs/tui-fixtures/` (`just test-tui` records it). A missing
-## prerequisite fails by name.
+## Needs `REPLAY_SERVER_BIN` and the Python recorder, which records the
+## `call_pages` fixture on first use. A missing prerequisite fails by name.
 ##
 ## No mocks: a real recording, a real replay-server, the real ViewModel.
 
 import replay_prerequisite
+import ../../tui/tests/fixtures/fixture_provider
 import std/[os, strutils, unittest]
 
 import gpui/host/gpui_host
@@ -34,7 +34,6 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  PagesFixture = "test-logs/tui-fixtures/call_pages-d6745afd1e2e"
   Rows = 15
   ExpectedAssertions = 10
   PaneWidthPx = 600
@@ -61,10 +60,7 @@ proc labels(session: HeadlessDebugSession): seq[string] =
 suite "PLAT-47 B3: GPUI's call trace scrolls and pages":
 
   test "scrolled to the end the last call is listed; back at the top, the first":
-    let trace = repo / PagesFixture
-    if not dirExists(trace):
-      raise newException(IOError, "prerequisite missing: " & trace &
-                         " (run 'just test-tui' once)")
+    let trace = requireFixture(pythonScriptSpec("call_pages"))
     let session = openGpuiTrace(trace)
     let loaded = session.loadRecordingPanes()
     ck loaded.calltrace

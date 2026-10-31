@@ -2,8 +2,8 @@
 ## default, draws every pane of it (data or a report), and remembers its OWN
 ## last layout in its own file.**
 ##
-## Run (needs `just build-gpui`, the `calc` recording under
-## `test-logs/tui-fixtures/`, and `REPLAY_SERVER_BIN`):
+## Run (needs `just build-gpui`, the Python recorder, which records the `calc`
+## fixture on first use, and `REPLAY_SERVER_BIN`):
 ##   nim c -r --path:src/frontend/viewmodel \
 ##     src/frontend/gpui/tests/test_plat45_gpui_layout.nim
 ##
@@ -31,6 +31,7 @@
 ## recording and real files.
 
 import replay_prerequisite
+import ../../tui/tests/fixtures/fixture_provider
 import std/[json, os, osproc, sets, streams, strtabs, strutils, tempfiles,
             unittest]
 import ./gpui_child_env
@@ -45,7 +46,6 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   GpuiDocument = "gpui-layout.json"
   TuiDocument = "tui-layout.json"
@@ -54,7 +54,7 @@ let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 let bin = repo / "build/bin/codetracer-gpui"
 let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                    repo.parentDir / "isonim-gpui/rust/target/debug")
-let calc = repo / CalcFixture
+let calc = requireFixture(fixtureSpec("calc"))
 
 proc requirePrereq(ok: bool; what: string) =
   ## **A MISSING PREREQUISITE FAILS BY NAME. It does not skip.**
@@ -174,7 +174,6 @@ suite "PLAT-45: the GPUI window and the shared default":
 
   test "the prerequisites are here":
     requirePrereq(fileExists(bin), bin & " (just build-gpui)")
-    requirePrereq(dirExists(calc), calc & " (run 'just test-tui' once)")
 
   test "with nothing remembered the window opens the shared default, every pane placed":
     let state = createTempDir("plat45-gpui-state-", "")
