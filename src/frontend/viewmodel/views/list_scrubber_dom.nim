@@ -26,8 +26,10 @@
 ## the vertical track is, along the container's bottom, only while its
 ## content is wider than it; a press centres, a held thumb follows, and the
 ## square where it meets a vertical track belongs to neither. The browser's
-## own wheel, Shift + wheel and touchpad swipe scroll the container, and the
-## bar follows them.
+## own horizontal wheel / touchpad scroll stays authoritative; when Electron
+## leaves `scrollLeft` unchanged, this module supplies the same movement on
+## the next frame. Shift + the vertical wheel is routed explicitly so it can
+## never move the pane's rows, and the bar follows either route.
 
 import std/math
 from isonim/core/owner import onCleanup
@@ -96,12 +98,15 @@ when defined(js):
     "(function(e){e.preventDefault();e.stopPropagation();})(#)".}
   proc listen(el: JsObject; name: cstring; handler: proc(ev: JsObject))
     {.importjs: "#.addEventListener(#, #)".}
+  proc listenWheel(el: JsObject; handler: proc(ev: JsObject))
+    {.importjs: "#.addEventListener('wheel', #, {passive:false})".}
   proc listenDoc(name: cstring; handler: proc(ev: JsObject))
     {.importjs: "document.addEventListener(#, #)".}
   proc unlistenDoc(name: cstring; handler: proc(ev: JsObject))
     {.importjs: "document.removeEventListener(#, #)".}
   proc setIntervalJs(handler: proc(); ms: int): int {.importjs: "setInterval(#, #)".}
   proc clearIntervalJs(id: int) {.importjs: "clearInterval(#)".}
+  proc rafJs(handler: proc()) {.importjs: "requestAnimationFrame(#)".}
 
   proc everyMs(handler: proc(); ms: int) =
     ## Run `handler` every `ms` for as long as the reactive root the scrubber
@@ -295,6 +300,10 @@ when defined(js):
       track, thumb: JsObject
       grab: float
       dragging: bool
+      wheelPending: bool
+      wheelStart, pendingWheelPixels: float
+        ## Horizontal device deltas collected until the browser has had one
+        ## frame to apply its native scroll. See `queueWheelFallback`.
       verticalTrack*: bool
         ## A vertical scrubber shares the container's right edge: the bar
         ## stops short of it, leaving the corner square to neither.
@@ -307,6 +316,10 @@ when defined(js):
     "(function(e,h){const a=e.getBoundingClientRect(),b=h.getBoundingClientRect();return a.left-b.left;})(#,#)".}
   proc trackLeftOf(el: JsObject): float {.importjs: "#.getBoundingClientRect().left".}
   proc clientXOf(ev: JsObject): float {.importjs: "(#.clientX || 0)".}
+  proc wheelDeltaXOf(ev: JsObject): float {.importjs: "(#.deltaX || 0)".}
+  proc wheelDeltaYOf(ev: JsObject): float {.importjs: "(#.deltaY || 0)".}
+  proc wheelDeltaModeOf(ev: JsObject): int {.importjs: "(#.deltaMode || 0)".}
+  proc shiftKeyOf(ev: JsObject): bool {.importjs: "(#.shiftKey === true)".}
   proc removeAttrJs(el: JsObject; name: cstring) {.importjs: "#.removeAttribute(#)".}
 
   proc horizontalViewOf(container: JsObject): HorizontalView =
@@ -354,6 +367,58 @@ when defined(js):
     ## (HO-4).
     s.container.setScrollLeft(float(v.leftCol))
     s.refresh()
+
+  proc columnPxOf(el: JsObject): float {.importjs: """
+    (function(e){
+      const s = document.createElement('span');
+      s.textContent = 'MMMMMMMMMM';
+      s.style.visibility = 'hidden'; s.style.position = 'absolute';
+      s.style.whiteSpace = 'pre';
+      e.appendChild(s);
+      const w = s.getBoundingClientRect().width / 10;
+      e.removeChild(s);
+      return w > 0 ? w : 8;
+    })(#)""".}
+
+  proc wheelPixels(container, ev: JsObject; delta: float): float =
+    ## WheelEvent deltas are pixels, lines or pages. Keep pixel-mode native
+    ## semantics; a line-mode notch is §4.3's six columns, and a page-mode
+    ## report is one viewport.
+    case ev.wheelDeltaModeOf()
+    of 1: delta * float(WheelColumns) * container.columnPxOf()
+    of 2: delta * container.clientWidthOf()
+    else: delta
+
+  proc scrollByWheel(s: HorizontalScrubberDom; pixels: float): bool =
+    ## The DOM view is measured in pixels. Keep a fine touchpad report from
+    ## rounding to no movement while still using the shared view's clamp.
+    if pixels == 0.0:
+      return false
+    let rounded = int(round(pixels))
+    let step = if rounded != 0: rounded elif pixels > 0.0: 1 else: -1
+    var v = s.view
+    result = v.scrollBy(step)
+    if result:
+      s.moveTo(v)
+
+  proc queueWheelFallback(s: HorizontalScrubberDom; pixels: float) =
+    ## Give Chromium one frame to perform its native horizontal scroll. Real
+    ## devices keep the browser's acceleration and diagonal-axis behaviour;
+    ## Electron's synthetic/macOS path, which can leave `scrollLeft` at the
+    ## old value, receives the accumulated device delta exactly once.
+    if not s.wheelPending:
+      s.wheelPending = true
+      s.wheelStart = s.container.scrollLeftOf()
+      rafJs(proc() =
+        let pending = s.pendingWheelPixels
+        let start = s.wheelStart
+        s.wheelPending = false
+        s.pendingWheelPixels = 0.0
+        if s.container.scrollLeftOf() == start:
+          discard s.scrollByWheel(pending)
+        else:
+          s.refresh())
+    s.pendingWheelPixels += pixels
 
   proc attachHorizontalScrubber*(container, host: JsObject; paneId = "";
                                  verticalTrack = false): HorizontalScrubberDom =
@@ -404,22 +469,24 @@ when defined(js):
         # §4.2: a press on the track centres the column under it.
         discard v.clickTrack(trackFractionAt(clamp(int(x), 0, w - 1), w))
         s.moveTo(v))
+    container.listenWheel(proc(ev: JsObject) =
+      let dx = ev.wheelDeltaXOf()
+      let shiftedVertical = dx == 0.0 and ev.shiftKeyOf() and
+                            ev.wheelDeltaYOf() != 0.0
+      if shiftedVertical:
+        # §4.3: Shift + vertical wheel is horizontal, never vertical. Consume
+        # it even when horizontal movement clamps at either boundary.
+        ev.stopEv()
+        discard s.scrollByWheel(
+          s.container.wheelPixels(ev, ev.wheelDeltaYOf()))
+      elif dx != 0.0 and s.view.overflows:
+        # Prefer the browser's real horizontal-wheel path. The next-frame
+        # fallback covers Electron when that path consumes no delta.
+        s.queueWheelFallback(s.container.wheelPixels(ev, dx)))
     container.listen("scroll", proc(ev: JsObject) = s.refresh())
     everyMs(proc() = s.refresh(), 250)
     s.refresh()
     s
-
-  proc columnPxOf(el: JsObject): float {.importjs: """
-    (function(e){
-      const s = document.createElement('span');
-      s.textContent = 'MMMMMMMMMM';
-      s.style.visibility = 'hidden'; s.style.position = 'absolute';
-      s.style.whiteSpace = 'pre';
-      e.appendChild(s);
-      const w = s.getBoundingClientRect().width / 10;
-      e.removeChild(s);
-      return w > 0 ? w : 8;
-    })(#)""".}
 
   proc viewOperation*(container: JsObject; operation: string): bool =
     ## §4.4's `view.*` operations on a desktop output pane's scroll container
