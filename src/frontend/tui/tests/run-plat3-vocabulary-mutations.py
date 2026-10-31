@@ -435,12 +435,26 @@ def load_because() -> dict:
     return {}
 
 
+def normalize_assertion(text: str) -> str:
+    """Ignore Nim's generated counter, preserving identifiers and literals.
+
+    Template-local names acquire compiler-order-dependent `gensymNNN suffixes.
+    Only the decimal counter is incidental: the variable, operator and expected
+    value still attribute the failure. Quoted source text is assertion data and
+    must remain exact, including escapes and text that resembles a gensym.
+    """
+    tokens = r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`gensym[0-9]+\b'
+    text = re.sub(tokens, lambda match: (
+        "`gensym" if match[0].startswith("`gensym") else match[0]), text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def first_check(lines: list[str]) -> str:
     checks = [ln[ln.index("Check failed:"):] for ln in lines
               if "Check failed:" in ln]
     if not checks:
         checks = [ln for ln in lines if ln.strip()]
-    return re.sub(r"\s+", " ", checks[0]).strip() if checks else ""
+    return normalize_assertion(checks[0]) if checks else ""
 
 
 def derive(selected: list[Arm]) -> int:
@@ -504,7 +518,7 @@ def grade(selected: list[Arm]) -> int:
         lines = " ".join(ln[ln.index("Check failed:"):]
                          if "Check failed:" in ln else ln
                          for ln in failure_lines_for(out, arm.kills))
-        if because[arm.name] not in re.sub(r"\s+", " ", lines):
+        if normalize_assertion(because[arm.name]) not in normalize_assertion(lines):
             results.append((arm, "MIS-ATTRIBUTED",
                             f"expected: {because[arm.name]}"))
             continue
