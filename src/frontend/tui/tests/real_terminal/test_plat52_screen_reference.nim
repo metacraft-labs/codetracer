@@ -88,13 +88,7 @@ proc differences(m: TermScreen; v: Screen; limit = 6): seq[string] =
         result.add "(" & $r & "," & $c & ") " & why
         if result.len >= limit: return
 
-let screenRec = resolveFixture(FixtureSpec(
-  name: "terminal_screen", program: "test-programs/terminal_screen/main.py",
-  recorder: "codetracer-python-recorder",
-  probe: FixtureProbe(kind: pkPythonRecorder),
-  buildHint: "Install codetracer_python_recorder into the interpreter `ct` " &
-             "will use.",
-  blockedOn: ""))
+let screenRec = resolveFixture(pythonScriptSpec("terminal_screen"))
 
 suite "PLAT-52: the screen is libvterm's screen, at every write checked":
 

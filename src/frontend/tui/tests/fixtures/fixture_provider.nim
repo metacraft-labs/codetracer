@@ -227,6 +227,29 @@ proc fixtureSpec*(name: string): FixtureSpec =
   raise newException(KeyError,
     "no fixture named '" & name & "'. Declared: " & known.join(", "))
 
+proc pythonScriptSpec*(name: string): FixtureSpec =
+  ## A suite-local fixture recorded from `test-programs/<name>/main.py` by the
+  ## Python recorder: the spec a suite passes to `resolveFixture` for a
+  ## program that is not in `DeclaredFixtures` (the corpus suites verify every
+  ## declared fixture, so a program one feature's suites read is not added
+  ## there).
+  ##
+  ## ONE constructor for every suite that reads the same program, because the
+  ## cache key is the spec's `name` plus its program's content (`fixtureKey`):
+  ## suites in different lanes that build their own specs can drift apart on
+  ## either and stop sharing a recording. Every PLAT-52 suite (terminal, PTY
+  ## and GPUI) reads `terminal_colours` and `terminal_screen` through this,
+  ## and each records them on first use, so no lane depends on another having
+  ## run.
+  FixtureSpec(
+    name: name, program: "test-programs/" & name & "/main.py",
+    recorder: "codetracer-python-recorder",
+    probe: FixtureProbe(kind: pkPythonRecorder),
+    buildHint: "Install codetracer_python_recorder into the interpreter `ct` " &
+               "will use (the repo's .python-recorder-venv, or " &
+               "$CODETRACER_PYTHON_INTERPRETER).",
+    blockedOn: "")
+
 # ---------------------------------------------------------------------------
 # Locating the repository and the binaries
 # ---------------------------------------------------------------------------

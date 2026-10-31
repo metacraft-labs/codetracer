@@ -50,15 +50,6 @@ const
     ## `.future { color: white; opacity: 0.5 }` (`styles/components/
     ## terminal.styl`).
 
-proc spec(name: string): FixtureSpec =
-  FixtureSpec(
-    name: name, program: "test-programs/" & name & "/main.py",
-    recorder: "codetracer-python-recorder",
-    probe: FixtureProbe(kind: pkPythonRecorder),
-    buildHint: "Install codetracer_python_recorder into the interpreter " &
-               "`ct` will use.",
-    blockedOn: "")
-
 proc effective(a: TermAttrs): tuple[fg, bg: string] =
   ## The colours a run is DRAWN in (`drawnColours`), as hex.
   let (fg, bg) = drawnColours(a)
@@ -72,7 +63,7 @@ suite "PLAT-52: the desktop's Terminal Output pane, measured":
 
   test "the desktop's lines and fragments are the shared model's":
     require answers.hasKey("lines")
-    let rec = resolveFixture(spec("terminal_colours"))
+    let rec = resolveFixture(pythonScriptSpec("terminal_colours"))
     require rec.outcome == foRecorded
     let s = newHeadlessDebugSession(rec.tracePath, findReplayServer())
     defer: s.close()
@@ -116,7 +107,7 @@ suite "PLAT-52: the desktop's Terminal Output pane, measured":
 
   test "the future is the desktop's .future; the click lands at its write":
     require answers.hasKey("lines")
-    let rec = resolveFixture(spec("terminal_colours"))
+    let rec = resolveFixture(pythonScriptSpec("terminal_colours"))
     require rec.outcome == foRecorded
     let s = newHeadlessDebugSession(rec.tracePath, findReplayServer())
     defer: s.close()
@@ -145,7 +136,7 @@ suite "PLAT-52: the desktop's Terminal Output pane, measured":
 
   test "the desktop's screen, at each tick its scrubber reached, is the model's":
     require answers.hasKey("screen")
-    let rec = resolveFixture(spec("terminal_screen"))
+    let rec = resolveFixture(pythonScriptSpec("terminal_screen"))
     require rec.outcome == foRecorded
     let s = newHeadlessDebugSession(rec.tracePath, findReplayServer())
     defer: s.close()

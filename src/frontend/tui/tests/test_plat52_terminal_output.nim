@@ -63,16 +63,6 @@ const
   Cols = 160
   Rows = 48
 
-proc pythonSpec(name: string): FixtureSpec =
-  FixtureSpec(
-    name: name, program: "test-programs/" & name & "/main.py",
-    recorder: "codetracer-python-recorder",
-    probe: FixtureProbe(kind: pkPythonRecorder),
-    buildHint: "Install codetracer_python_recorder into the interpreter " &
-               "`ct` will use (the repo's .python-recorder-venv, or " &
-               "$CODETRACER_PYTHON_INTERPRETER).",
-    blockedOn: "")
-
 proc newRuntime(): TuiRuntime =
   let caps = resolveCapabilities(
     initTerminalEnv(term = "xterm-256color", colorterm = "truecolor",
@@ -147,8 +137,11 @@ proc styleAtText(rt: TuiRuntime; row: int; needle: string): CellStyle =
     c += w
   CellStyle()
 
-let colours = resolveFixture(pythonSpec("terminal_colours"))
-let screenRec = resolveFixture(pythonSpec("terminal_screen"))
+# The same specs `../../gpui/tests/test_plat52_gpui_plan.nim` resolves, from
+# the one constructor, so both lanes share (and either lane makes) the
+# recordings.
+let colours = resolveFixture(pythonScriptSpec("terminal_colours"))
+let screenRec = resolveFixture(pythonScriptSpec("terminal_screen"))
 
 suite "PLAT-52: the terminal draws the Terminal Output pane":
 

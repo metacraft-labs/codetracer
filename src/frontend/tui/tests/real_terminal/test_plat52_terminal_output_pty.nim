@@ -48,17 +48,8 @@ type Snapshot = seq[seq[Cell]]
 
 var spawned = 0
 
-proc spec(name: string): FixtureSpec =
-  FixtureSpec(
-    name: name, program: "test-programs/" & name & "/main.py",
-    recorder: "codetracer-python-recorder",
-    probe: FixtureProbe(kind: pkPythonRecorder),
-    buildHint: "Install codetracer_python_recorder into the interpreter " &
-               "`ct` will use.",
-    blockedOn: "")
-
 proc open(name: string): TuiTestSession =
-  let resolved = resolveFixture(spec(name))
+  let resolved = resolveFixture(pythonScriptSpec(name))
   doAssert resolved.outcome == foRecorded, resolved.detail
   inc spawned
   let state = getTempDir() / ("plat52-pty-" & $getCurrentProcessId() & "-" &
