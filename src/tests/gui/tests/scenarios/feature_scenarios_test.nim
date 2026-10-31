@@ -43,6 +43,7 @@ import backend/mock_backend
 import store/types
 import store/replay_data_store
 import app/app_vm
+import ./stop_loading_app
 import viewmodels/[
   state_vm,
   calltrace_vm,
@@ -82,8 +83,11 @@ proc countCommands(mock: MockBackendService; command: string): int =
 proc makeAppWithMock(autoRespond: bool = true):
     tuple[app: AppViewModel, store: ReplayDataStore, mock: MockBackendService] =
   ## Create an app-level ViewModel backed by a MockBackendService.
+  ## Built the way a product session is (`createStopLoadingApp`): the
+  ## per-stop loads — the flow window among them — come from the session's
+  ## stop loader, not from a panel's own effect.
   let mock = newMockBackendService(autoRespond = autoRespond)
-  let app = createAppViewModel(mock.toBackendService())
+  let app = createStopLoadingApp(mock.toBackendService())
   drain()
   mock.clearReceivedCommands()
   (app, app.session.store, mock)
@@ -1457,9 +1461,11 @@ suite "Full workflow: record -> replay -> debug":
     ## 10. Check flow data loaded
     ## 11. Verify timeline position matches throughout
     ## 12. Cleanup
+    ## The session loads per stop through its stop loader, as every product
+    ## session does (`createStopLoadingApp`).
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let app = createAppViewModel(mock.toBackendService())
+      let app = createStopLoadingApp(mock.toBackendService())
       let session = app.session
       drain()
 
@@ -1633,10 +1639,11 @@ suite "Full workflow: record -> replay -> debug":
 
   test "multi-panel consistency during rapid navigation":
     ## Simulates rapid navigation through a program, verifying that
-    ## all panels stay consistent at each position.
+    ## all panels stay consistent at each position. The flow window is
+    ## asked for by the session's stop loader, as in every product session.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let app = createAppViewModel(mock.toBackendService())
+      let app = createStopLoadingApp(mock.toBackendService())
       let session = app.session
       session.calltraceVM.setViewport(session.calltraceVM.viewport.val.withRows(20))
       drain()

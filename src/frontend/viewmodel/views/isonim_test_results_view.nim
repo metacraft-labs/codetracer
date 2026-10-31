@@ -167,6 +167,8 @@ type
     ## title needs the row and not just the id.
     row: TestResultsRow
     openButton: N
+    rowNode: N
+      ## The row itself, for the selection's class (§9.3).
 
 proc applyOpenButton[R, N](r: R; vm: TestResultsVM;
                           handle: RowActionHandles[N]) =
@@ -184,6 +186,17 @@ proc applyOpenButton[R, N](r: R; vm: TestResultsVM;
   r.appendChild(handle.openButton,
                 r.createTextNode(openButtonMark(vm, handle.row)))
 
+proc applySelection[R, N](r: R; vm: TestResultsVM;
+                          handle: RowActionHandles[N]) =
+  ## Test-Results-Pane.md §9.3: the selected row — what the palette's
+  ## **Tests: Run** / **Tests: Run in Current Tab** act on — marked.
+  mixin setAttribute
+  let selected = vm.selectedTestId.val == handle.row.testId
+  r.setAttribute(handle.rowNode, "class", stateClass(handle.row.state) &
+    (if selected: " selected" else: ""))
+  r.setAttribute(handle.rowNode, "data-ct-selected",
+                 if selected: "true" else: "")
+
 proc renderRow[R, N](r: R; vm: TestResultsVM; row: TestResultsRow;
                      handle: var RowActionHandles[N]): N =
   # Bound where instantiated: on JS this module also sees WebRenderer's.
@@ -194,7 +207,10 @@ proc renderRow[R, N](r: R; vm: TestResultsVM; row: TestResultsRow;
   let message = row.message
   var refreshButton, openButton, nameNode, whereNode: N
   let node = ui(r):
-    tdiv(class = stateClass(row.state)):
+    # A click on the row — or on its ⟳ / ⏵, which bubble here — selects it
+    # (§9.3: the row the palette pair acts on).
+    tdiv(class = stateClass(row.state),
+         onclick = proc() = vm.selectTest(row.testId)):
       span(class = "test-results-mark"):
         text mark
       span(ref = nameNode, class = "test-results-name"):
@@ -238,12 +254,14 @@ proc renderRow[R, N](r: R; vm: TestResultsVM; row: TestResultsRow;
   r.setAttribute(refreshButton, "class", refreshButtonClass(vm))
   r.setAttribute(refreshButton, "title", refreshButtonTitle(vm, row))
   r.setAttribute(refreshButton, "aria-label", refreshButtonTitle(vm, row))
-  handle = RowActionHandles[N](row: row, openButton: openButton)
+  handle = RowActionHandles[N](row: row, openButton: openButton,
+                               rowNode: node)
   # UNTRACKED. This runs inside the structural effect, and the paint reads
   # `vm.shiftHeld`; a tracked read here makes the structural effect a
   # subscriber and every keypress rebuilds the row. See the header.
   let handleCopy = handle
   untrack proc() = applyOpenButton[R, N](r, vm, handleCopy)
+  untrack proc() = applySelection[R, N](r, vm, handleCopy)
   if message.len > 0:
     let detail = ui(r):
       tdiv(class = "test-results-message"):
@@ -267,25 +285,44 @@ when defined(js):
     ## rather than a coercion so an event that has no such property answers
     ## `false` instead of `undefined`.
 
+  proc eventRedirectKey(ev: isonim_dom.Event): bool
+    {.importjs: "(function(e){return e.ctrlKey === true || (typeof navigator !== 'undefined' && /Mac/.test(navigator.platform) && e.metaKey === true);})(#)".}
+    ## Test-Results-Pane.md §9.3: the redirect modifier — Ctrl, or Cmd on
+    ## macOS (VS Code's `CtrlCmd`).
+
+  proc platformIsMac(): bool
+    {.importjs: "(typeof navigator !== 'undefined' && /Mac/.test(navigator.platform))".}
+
   proc installShiftTracking(vm: TestResultsVM) =
-    ## Keydown, keyup and blur, on the DOCUMENT.
+    ## Keydown, keyup and blur, on the DOCUMENT — for Shift and, since
+    ## Test-Results-Pane.md §9.3, for the redirect modifier the same way.
     ##
     ## See the header: a listener on the button would never fire, because the
     ## user this exists for is hovering it rather than focused in it. `blur`
     ## is here because alt-tab eats the `keyup` — without it the pane stays
     ## armed and every later click silently re-records.
     let docNode = isonim_dom.Node(isonim_dom.document)
+    if platformIsMac():
+      vm.redirectKeyName = "Cmd"
     isonim_dom.addEventListener(docNode, cstring"keydown",
-      proc(ev: isonim_dom.Event) = vm.setShiftHeld(eventShiftKey(ev)))
+      proc(ev: isonim_dom.Event) =
+        vm.setShiftHeld(eventShiftKey(ev))
+        vm.setRedirectHeld(eventRedirectKey(ev)))
     isonim_dom.addEventListener(docNode, cstring"keyup",
-      proc(ev: isonim_dom.Event) = vm.setShiftHeld(eventShiftKey(ev)))
+      proc(ev: isonim_dom.Event) =
+        vm.setShiftHeld(eventShiftKey(ev))
+        vm.setRedirectHeld(eventRedirectKey(ev)))
     isonim_dom.addEventListener(docNode, cstring"blur",
-      proc(ev: isonim_dom.Event) = vm.setShiftHeld(false))
+      proc(ev: isonim_dom.Event) =
+        vm.setShiftHeld(false)
+        vm.setRedirectHeld(false))
     # `mouseover` carries the modifier state too, and it is what corrects the
     # flag when the pointer ARRIVES on the pane with Shift already down — a
     # keydown that happened before the pane existed reached nobody.
     isonim_dom.addEventListener(docNode, cstring"mouseover",
-      proc(ev: isonim_dom.Event) = vm.setShiftHeld(eventShiftKey(ev)))
+      proc(ev: isonim_dom.Event) =
+        vm.setShiftHeld(eventShiftKey(ev))
+        vm.setRedirectHeld(eventRedirectKey(ev)))
 
 
 proc renderTestResultsPanel*[R, N](r: R; vm: TestResultsVM): N =
@@ -357,10 +394,27 @@ proc renderTestResultsPanel*[R, N](r: R; vm: TestResultsVM): N =
   # is a plain `var`, so reading it creates no dependency and this effect does
   # not re-run when the rows do (the structural effect above has already
   # painted the current mode onto the buttons it just built).
+  #
+  # Test-Results-Pane.md §9.4: the title's last sentence — where the press
+  # opens the recording — reads the redirect modifier, the setting, the
+  # current tab and which tests have tabs, so those are its inputs too.
   createRenderEffect proc() =
     discard vm.shiftHeld.val
+    discard vm.redirectHeld.val
+    discard vm.openSetting.val
+    discard vm.currentTab.val
+    discard vm.currentTabReplaceable.val
+    discard vm.sessionTabsShown.val
+    discard vm.testTabs.val
     for handle in openHandles:
       applyOpenButton[R, N](r, vm, handle)
+
+  # THE SELECTION EFFECT (§9.3): the selected row's class, rewritten in
+  # place when the selection moves — the rows are not rebuilt.
+  createRenderEffect proc() =
+    discard vm.selectedTestId.val
+    for handle in openHandles:
+      applySelection[R, N](r, vm, handle)
 
   # Shift arms re-recording on the open buttons; in a browser the key state
   # is tracked on the document (see `installShiftTracking`).

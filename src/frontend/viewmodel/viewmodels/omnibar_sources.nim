@@ -21,9 +21,10 @@ import isonim/core/signals
 
 import ../store/[replay_data_store, types]
 import ./[filesystem_vm, layout_settings, menu_vm, omnibar_vm]
+import ./replay_open_setting
 import ../keymap/keymap_selection
 
-export layout_settings
+export layout_settings, replay_open_setting
 from ./event_log_vm import EventLogColumn, eventLogColumnTitle,
   parseEventLogColumn
 from ./table_overflow import ColumnStepCells
@@ -155,6 +156,19 @@ proc viewScrollCommands*(): seq[OmnibarEntry] =
   result.add OmnibarEntry(kind: omCommand, label: ScrollRightLabel,
                           target: OperationCommandPrefix & "view.scroll-right")
 
+const
+  FindCancelLabel* = "Find: Cancel and Return"
+    ## PLAT-70 Part C (Find-And-Incremental-Search.md §3.5): CUA has no
+    ## restoring exit — `Escape` keeps the match (the user's OQ-F1) — so
+    ## `find.cancel` is reached under CUA from the palette (IR-2).
+
+proc findCommands*(): seq[OmnibarEntry] =
+  ## THE FIND SESSION'S PALETTE ENTRY: **Find: Cancel and Return**
+  ## (`find.cancel`) — the selection and both scroll offsets as they were
+  ## when the find opened.
+  result.add OmnibarEntry(kind: omCommand, label: FindCancelLabel,
+                          target: OperationCommandPrefix & "find.cancel")
+
 proc parseOperationCommand*(target: string): tuple[ok: bool; operation: string] =
   ## `operation:<name>[(<arg>)]` -> the operation text; `ok` false otherwise.
   if not target.startsWith(OperationCommandPrefix):
@@ -179,6 +193,7 @@ proc parseColumnWidthLine*(words: openArray[string]):
 
 proc layoutSettingCommands*(terminalSettings = true): seq[OmnibarEntry]
 proc baseKeymapCommands*(): seq[OmnibarEntry]
+proc replayOpenCommands*(): seq[OmnibarEntry]
   ## Forward-declared; defined at the end of this module.
 
 proc omnibarIndexOf*(fs: FilesystemVM; store: ReplayDataStore;
@@ -192,8 +207,28 @@ proc omnibarIndexOf*(fs: FilesystemVM; store: ReplayDataStore;
   result.add eventLogColumnCommands()
   result.add tableCommands()
   result.add viewScrollCommands()
+  result.add findCommands()
   result.add layoutSettingCommands(terminalSettings)
   result.add baseKeymapCommands()
+  result.add replayOpenCommands()
+
+proc replayOpenCommands*(): seq[OmnibarEntry] =
+  ## Test-Results-Pane.md §9.3: **Tests: Open Recordings in a New Tab** and
+  ## **… in the Current Tab**, the workspace's `replay-open-in` — the same two
+  ## words the desktop's palette offers — then the palette pair **Tests: Run**
+  ## and **Tests: Run in Current Tab**.
+  for policy in [topNewTab, topCurrentTab]:
+    result.add OmnibarEntry(kind: OmnibarMode.omCommand,
+                            label: replayOpenCommandLabel(policy),
+                            detail: ReplayOpenSettingName & " " & $policy,
+                            target: replayOpenCommandTarget(policy))
+  # §9.3's palette pair: one run of the selected test, at the command's
+  # destination.
+  for policy in [topNewTab, topCurrentTab]:
+    result.add OmnibarEntry(kind: OmnibarMode.omCommand,
+                            label: runTestCommandLabel(policy),
+                            detail: runTestCommandDetail(policy),
+                            target: runTestCommandTarget(policy))
 
 proc baseKeymapCommands*(): seq[OmnibarEntry] =
   ## PLAT-68: **Preferences: Select Base Keymap**, one entry per base, on every

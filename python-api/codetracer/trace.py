@@ -49,6 +49,7 @@ def open_trace(
     *,
     daemon_socket: Optional[Union[str, Path]] = None,
     host_source_reads: bool = False,
+    daemon_fd: Optional[int] = None,
 ) -> "Trace":
     """Open a recorded trace for inspection.
 
@@ -69,6 +70,9 @@ def open_trace(
             source list is recording content and can name any file on the
             machine that replays it, so turn this on only for recordings of
             your own programs.
+        daemon_fd: A connected socket to the daemon this process inherited,
+            used instead of ``daemon_socket``.  The daemon hands one to a
+            script it runs confined, which may not open a socket itself.
 
     Returns:
         A :class:`Trace` instance connected to the backend daemon.
@@ -78,7 +82,9 @@ def open_trace(
         TraceError: If the daemon is not reachable or returns an error.
     """
     conn = DaemonConnection(
-        socket_path=daemon_socket, host_source_reads=host_source_reads
+        socket_path=daemon_socket,
+        host_source_reads=host_source_reads,
+        socket_fd=daemon_fd,
     )
     conn.connect()
 

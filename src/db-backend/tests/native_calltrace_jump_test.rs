@@ -54,9 +54,8 @@
 //! A call-trace search result (`CalltraceVM.jumpToSearchResult`) sends the
 //! same request: it builds its payload with the same `calltraceJumpArgs` from
 //! the same `callLineOf` decoding of the call, so these requests cover both
-//! activations at the backend. (On a native recording `ct/search-calltrace`
-//! answers from the trace's database, which holds no calls, so it returns no
-//! results to activate today.)
+//! activations at the backend. The search regressions below also discover
+//! calls whose stack rows have never been loaded, and activate their results.
 //!
 //! Why rows come from an earlier stop: on a native recording the call trace
 //! the backend serves is the call stack of the current position
@@ -100,6 +99,7 @@ const CALCULATE_SUM_LINE: usize = 31;
 const CALCULATE_SUM_LINES: std::ops::RangeInclusive<i64> = 24..=32;
 /// `sum += i;` in `with_loops`' `for` loop.
 const WITH_LOOPS_LINE: usize = 37;
+const AFTER_WITH_LOOPS_LINE: usize = 73;
 const WITH_LOOPS_LINES: std::ops::RangeInclusive<i64> = 34..=56;
 const MAIN_LINES: std::ops::RangeInclusive<i64> = 58..=74;
 /// The lines of `c_flow_test.c` the scenarios rely on.
@@ -109,6 +109,7 @@ const FLOW_TEST_LINES: &[(usize, &str)] = &[
     (24, "int calculate_sum(int a, int b) {"),
     (34, "void with_loops(int n) {"),
     (58, "int main(void) {"),
+    (AFTER_WITH_LOOPS_LINE, "return 0;"),
 ];
 
 /// `sink = scaled;` in `scale` (`c_sibling_calls_test.c`), and the function.
@@ -444,6 +445,201 @@ fn stop_in_with_loops(client: &mut DapStdioClient, file: &str) {
     assert!(
         !names.iter().any(|frame| frame.contains("calculate_sum")),
         "`calculate_sum` must not be on the stack inside `with_loops`: {names:?}"
+    );
+}
+
+/// Search must discover a returned call without having loaded its stack first.
+/// The result goes through the frontend's actual jump payload conversion.
+fn search_finds_an_off_stack_call(name: &str, recorder: Recorder) {
+    let mut session = open_session(name, recorder, "c_flow_test.c", FLOW_TEST_LINES)
+        .expect("native search requires its real recording and replay prerequisites");
+    let file = session.file.clone();
+    let client = session.runner.client();
+    stop_in_with_loops(client, &file);
+    client
+        .set_breakpoints(&file, &[AFTER_WITH_LOOPS_LINE])
+        .expect("retain user breakpoint during search");
+    let before = stack(client);
+    let seq = client
+        .send_request("ct/search-calltrace", json!({"value": "^calculate_sum$"}))
+        .expect("send search");
+    let ((success, message, body), moved) = response_to(client, seq, "ct/search-calltrace");
+    assert!(success, "search failed: {message:?}");
+    assert!(moved.is_none(), "search must not move the session");
+    assert_eq!(stack(client), before, "search changed the current stack");
+    let calls = body["calls"].as_array().expect("search calls");
+    assert_eq!(calls.len(), 1, "search must find the calculate_sum invocation: {body}");
+    assert_eq!(body["total"], 1);
+    assert!(
+        !calls[0]["location"]["replayPosition"].as_str().unwrap_or("").is_empty(),
+        "native search result must name its exact stop: {}",
+        calls[0]
+    );
+    let continued = client
+        .dap_continue_with_timeout(scaled(Duration::from_secs(120)))
+        .expect("continue to the retained user breakpoint");
+    assert_eq!(
+        continued.location.line, AFTER_WITH_LOOPS_LINE as i64,
+        "search must preserve the user's breakpoint"
+    );
+    client.set_breakpoints(&file, &[]).expect("clear retained breakpoint");
+    let moved = activate_row(client, &json!({"content": {"call": calls[0]}}));
+    assert_in_function(
+        "activating search result",
+        client,
+        &moved,
+        "calculate_sum",
+        &CALCULATE_SUM_LINES,
+    );
+    session.runner.finish().expect("disconnect failed");
+}
+
+#[test]
+fn c_mcr_calltrace_search_finds_an_off_stack_call() {
+    search_finds_an_off_stack_call("c_mcr_calltrace_search_finds_an_off_stack_call", Recorder::Mcr);
+}
+
+#[test]
+fn c_rr_calltrace_search_finds_an_off_stack_call() {
+    search_finds_an_off_stack_call("c_rr_calltrace_search_finds_an_off_stack_call", Recorder::Rr);
+}
+
+fn search_preserves_repeated_calls(name: &str, recorder: Recorder) {
+    let mut session = open_session(name, recorder, "c_sibling_calls_test.c", SIBLING_CALLS_LINES)
+        .expect("native search requires its real recording and replay prerequisites");
+    let file = session.file.clone();
+    let client = session.runner.client();
+    continue_to_line(client, &file, AFTER_CALLS_LINE);
+    let before = stack(client);
+    let mut results = Vec::new();
+    for limit in [1, 0] {
+        let seq = client
+            .send_request("ct/search-calltrace", json!({"value": "^scale$", "limit": limit}))
+            .expect("send search");
+        let ((success, message, body), moved) = response_to(client, seq, "ct/search-calltrace");
+        assert!(success, "search failed: {message:?}");
+        assert!(moved.is_none(), "search moved the session");
+        assert_eq!(stack(client), before, "search changed the current stack");
+        assert_eq!(body["total"], 2, "limit must not truncate total: {body}");
+        results = body["calls"].as_array().expect("search calls").clone();
+        assert_eq!(results.len(), if limit == 0 { 2 } else { 1 });
+    }
+    assert_ne!(
+        results[0]["location"]["replayPosition"],
+        results[1]["location"]["replayPosition"]
+    );
+    let moved = activate_row(client, &json!({"content": {"call": results[1]}}));
+    assert_in_function(
+        "activating the second scale search result",
+        client,
+        &moved,
+        "scale",
+        &SCALE_LINES,
+    );
+    assert_eq!(
+        local_int(client, "value"),
+        20,
+        "search must preserve the second invocation"
+    );
+
+    let seq = client
+        .send_request("ct/search-calltrace", json!({"value": "^never_called_function$"}))
+        .expect("send no-match search");
+    let ((success, message, body), _) = response_to(client, seq, "ct/search-calltrace");
+    assert!(success, "no-match search failed: {message:?}");
+    assert_eq!(body["total"], 0);
+    assert_eq!(body["calls"], json!([]));
+    let seq = client
+        .send_request("ct/search-calltrace", json!({"value": "["}))
+        .expect("send invalid regex search");
+    let ((success, _, _), _) = response_to(client, seq, "ct/search-calltrace");
+    assert!(!success, "invalid regex must fail the request");
+    assert_eq!(local_int(client, "value"), 20, "failed search changed the session");
+    session.runner.finish().expect("disconnect failed");
+}
+
+#[test]
+fn c_mcr_calltrace_search_preserves_repeated_calls() {
+    search_preserves_repeated_calls("c_mcr_calltrace_search_preserves_repeated_calls", Recorder::Mcr);
+}
+
+#[test]
+fn c_rr_calltrace_search_preserves_repeated_calls() {
+    search_preserves_repeated_calls("c_rr_calltrace_search_preserves_repeated_calls", Recorder::Rr);
+}
+
+/// A constructor has already returned when RunToEntry stops at main. The
+/// other function belongs to a library that has not even loaded at that stop.
+/// These cases require both rewinding the search and pending module resolution.
+fn search_includes_constructors_and_later_modules(name: &str, recorder: Recorder) {
+    let scratch = tempfile::tempdir().expect("search fixture directory");
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-programs/c/c_search_calls_test.c");
+    let library = scratch.path().join("libsearch_calls.so");
+    let compiled = std::process::Command::new("cc")
+        .args(["-shared", "-fPIC", "-g", "-O0", "-DCALLTRACE_SEARCH_LIBRARY"])
+        .arg(&fixture)
+        .arg("-o")
+        .arg(&library)
+        .output()
+        .expect("compile search library");
+    assert!(
+        compiled.status.success(),
+        "compile search library: {}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    let source = format!(
+        "#define CALLTRACE_LIBRARY_PATH {}\n{}",
+        serde_json::to_string(&library.to_str().unwrap()).unwrap(),
+        std::fs::read_to_string(&fixture).expect("read search fixture")
+    );
+    let stop_line = source
+        .lines()
+        .position(|line| line.contains("search after both calls returned"))
+        .expect("search stop marker")
+        + 1;
+    let source_path = scratch.path().join("search_calls.c");
+    std::fs::write(&source_path, source).expect("write search fixture");
+    let mut session = open_session_for(name, recorder, Language::C, source_path.to_str().unwrap(), &[])
+        .expect("native search requires its recording and replay prerequisites");
+    let file = session.file.clone();
+    let client = session.runner.client();
+    continue_to_line(client, &file, stop_line);
+    for (function, expected) in [("before_main", 123), ("later_loaded", 18)] {
+        let seq = client
+            .send_request("ct/search-calltrace", json!({"value": format!("^{function}$")}))
+            .expect("send search");
+        let ((success, message, body), moved) = response_to(client, seq, "ct/search-calltrace");
+        assert!(success, "search for {function} failed: {message:?}");
+        assert!(moved.is_none());
+        assert_eq!(body["total"], 1, "search must find {function}: {body}");
+        let calls = body["calls"].as_array().expect("search calls");
+        assert_eq!(calls.len(), 1);
+        let moved = activate_row(client, &json!({"content": {"call": calls[0]}}));
+        let (names, _) = stack(client);
+        assert!(names[0].contains(function), "search result landed in {names:?}");
+        assert!(moved.location.function_name.contains(function));
+        // Read a real local after advancing within the activated invocation.
+        client.dap_step("next").expect("step within search result");
+        if function == "later_loaded" {
+            assert_eq!(local_int(client, "result"), expected);
+        }
+    }
+    session.runner.finish().expect("disconnect failed");
+}
+
+#[test]
+fn c_mcr_calltrace_search_includes_constructors_and_later_modules() {
+    search_includes_constructors_and_later_modules(
+        "c_mcr_calltrace_search_includes_constructors_and_later_modules",
+        Recorder::Mcr,
+    );
+}
+
+#[test]
+fn c_rr_calltrace_search_includes_constructors_and_later_modules() {
+    search_includes_constructors_and_later_modules(
+        "c_rr_calltrace_search_includes_constructors_and_later_modules",
+        Recorder::Rr,
     );
 }
 
@@ -843,4 +1039,117 @@ fn go_rr_calltrace_jump_to_a_row_of_an_earlier_stop_is_refused_in_place() {
         "the refusal must leave the session where it was: {names:?} line {line}"
     );
     session.runner.finish().expect("disconnect failed");
+}
+
+/// Delve and GDB discover historical calls even though their documented
+/// historical-stop navigation limitation requires activation to refuse in place.
+fn language_rr_search_discovers_historical_call(
+    name: &str,
+    language: Language,
+    program: &str,
+    after_call_line: usize,
+    pattern: &str,
+) {
+    let mut session = open_session_for(name, Recorder::Rr, language, program, &[])
+        .expect("native search requires real recorder and debugger prerequisites");
+    let file = session.file.clone();
+    let client = session.runner.client();
+    continue_to_line(client, &file, after_call_line);
+    let before = stack(client);
+    let seq = client
+        .send_request("ct/search-calltrace", json!({"value": pattern}))
+        .expect("send search");
+    let ((success, message, body), moved) = response_to(client, seq, "ct/search-calltrace");
+    assert!(success, "search failed: {message:?}");
+    assert!(moved.is_none(), "search moved the browsing session");
+    assert_eq!(stack(client), before, "search changed the browsing stack");
+    let calls = body["calls"].as_array().expect("search calls");
+    assert_eq!(calls.len(), 1, "expected the off-stack invocation: {body}");
+    assert_eq!(body["total"], 1);
+    assert!(!calls[0]["location"]["replayPosition"].as_str().unwrap_or("").is_empty());
+    let (success, message, _) = send_row_jump(client, &json!({"content": {"call": calls[0]}}));
+    assert!(
+        !success
+            && message
+                .unwrap_or_default()
+                .contains("cannot return to that stop exactly")
+    );
+    assert_eq!(
+        stack(client),
+        before,
+        "refused historical activation changed the browsing stack"
+    );
+    let seq = client
+        .send_request("ct/search-calltrace", json!({"value": "^never_called_function$"}))
+        .expect("send no-match search");
+    let ((success, message, body), moved) = response_to(client, seq, "ct/search-calltrace");
+    assert!(success, "no-match search failed: {message:?}");
+    assert_eq!(body["calls"], json!([]));
+    assert_eq!(body["total"], 0);
+    assert!(moved.is_none());
+    assert_eq!(stack(client), before);
+    let seq = client
+        .send_request("ct/search-calltrace", json!({"value": "["}))
+        .expect("send invalid regex");
+    let ((success, _, _), moved) = response_to(client, seq, "ct/search-calltrace");
+    assert!(!success, "invalid regex must be refused");
+    assert!(moved.is_none());
+    assert_eq!(stack(client), before);
+    session.runner.finish().expect("disconnect failed");
+}
+
+#[test]
+fn go_rr_calltrace_search_discovers_an_off_stack_call() {
+    language_rr_search_discovers_historical_call(
+        "go_rr_calltrace_search_discovers_an_off_stack_call",
+        Language::Go,
+        "go/go_flow_program.go",
+        GO_AFTER_CALL_LINE,
+        "^main\\.calculateSum$",
+    );
+}
+
+#[test]
+fn ada_rr_calltrace_search_discovers_an_off_stack_call() {
+    language_rr_search_discovers_historical_call(
+        "ada_rr_calltrace_search_discovers_an_off_stack_call",
+        Language::Ada,
+        "ada/ada_flow_test.adb",
+        37,
+        "(?i)calculate_sum",
+    );
+}
+
+/// Exercise real Free admission in a child environment: the normal DAP harness
+/// sets an existing UI-test exemption, which would hide extra replay startups.
+/// The driver clears it and any license, then reads the shipping encrypted
+/// usage counter before and after six searches on one browsing session.
+#[test]
+fn c_rr_calltrace_search_uses_the_browsing_replay_admission() {
+    search_uses_the_browsing_replay_admission("rr");
+}
+
+#[test]
+fn c_mcr_calltrace_search_uses_the_browsing_replay_admission() {
+    search_uses_the_browsing_replay_admission("mcr");
+}
+
+fn search_uses_the_browsing_replay_admission(recorder: &str) {
+    let native = test_harness::find_ct_native_replay()
+        .expect("ct-native-replay is required for the unlicensed search regression");
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let output = std::process::Command::new("python3")
+        .arg(manifest.join("tests/support/native_search_license.py"))
+        .arg(native)
+        .arg(env!("CARGO_BIN_EXE_replay-server"))
+        .arg(manifest.join("test-programs/c/c_flow_test.c"))
+        .arg(recorder)
+        .output()
+        .expect("run the unlicensed DAP search driver");
+    assert!(
+        output.status.success(),
+        "unlicensed search regression failed: {}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

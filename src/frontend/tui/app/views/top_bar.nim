@@ -158,8 +158,8 @@ type
 
 const
   MenuButtonGlyph* = canonical(grMenuButton)
-  OmnibarGlyph* = canonical(grOmnibar)
-  FolderMarker* = canonical(grOverflowRight)
+  OmnibarGlyph = canonical(grOmnibar)
+  FolderMarker = canonical(grOverflowRight)
   OmnibarOpenMinCells* = 16
   OmnibarFieldMinCells* = 14
   OmnibarResultRows* = 10
@@ -554,6 +554,31 @@ proc omnibarCaret*(m: TopBarModel; lay: TopBarLayout):
   (true, 0, min(s.col + s.width - 1, s.col + OmnibarPad + cell),
    m.omnibar.overwrite)
 
+proc omnibarSelectedCells*(m: TopBarModel; lay: TopBarLayout):
+    tuple[col, width: int] =
+  ## PLAT-70 Part D: the cells the open omnibar's SELECTED text occupies on
+  ## row 0 (`OmnibarVM.selectedChars`: Find in Files' seed, which typing
+  ## replaces), clipped to the field; width 0 when nothing is selected.
+  if m.omnibar.isNil or not m.omnibar.isOpen or not lay.omnibarField:
+    return (-1, 0)
+  let (a, b) = m.omnibar.selectedChars
+  if a < 0:
+    return (-1, 0)
+  let s = lay.segmentOf(tpOmnibar)
+  if s.col < 0:
+    return (-1, 0)
+  let (_, caretCell) = omnibarFieldText(m, s.width)
+  # The text is scrolled so the caret is in view: the caret's character is
+  # at `caretCell`, and every character is one cell (as the caret's own
+  # placement counts them).
+  let caret = m.omnibar.cursorChars
+  let lo = max(textCells(DefaultGlyphs.glyph(grOmnibar) & " "),
+               caretCell + (a - caret))
+  let hi = min(s.width - 2 * OmnibarPad, caretCell + (b - caret))
+  if hi <= lo:
+    return (-1, 0)
+  (s.col + OmnibarPad + lo, hi - lo)
+
 # ---------------------------------------------------------------------------
 # Painting the row
 # ---------------------------------------------------------------------------
@@ -644,6 +669,14 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
           g.fillSurface(0, s.col + s.width - 1, 1, 1, srSurfaceTopBar)
           g.paint(0, s.col + s.width - 1, g.glyphText(grFieldEdgeRight),
                   CellStyle(role: srBorderPane, surface: srSurfaceTopBar))
+        # PLAT-70 Part D: THE SELECTED SEED on the selection ground the
+        # editor draws its selection on, so it reads as text the next key
+        # replaces.
+        let picked = omnibarSelectedCells(m, lay)
+        if picked.width > 0:
+          g.restyle(0, picked.col, picked.width,
+                    proc(c: CellStyle): CellStyle =
+                      c.withBackground(srSurfaceSelection))
         let caret = omnibarCaret(m, lay)
         if caret.shown and m.caretDrawn:
           g.restyle(0, caret.col, 1,

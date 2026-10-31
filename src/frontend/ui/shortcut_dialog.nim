@@ -75,6 +75,21 @@ proc labelFor*(action: ClientAction): string =
       return entry.label
   $action
 
+type
+  ReferenceLine* = object
+    ## One line of the shortcut reference (Base-Keymaps-And-Layer-Stack.md
+    ## §5.4, §5.6): a binding live where the focus is, in resolution order —
+    ## `keymap_router.shortcutReference`'s `ReferenceEntry`, as the dialog
+    ## states it.
+    layer*: string
+      ## `user:<table>` or `base:<table>` — the layer it resolves in.
+    keyText*: string
+    operation*: string
+    label*: string
+      ## The operation's reading name (`operationLabelOf`).
+    shadowedBy*: string
+      ## "" or the user row that takes this chord (`your row 3`).
+
 type ChordOf = proc(action: ClientAction): string
   ## The chord that runs an action where the focus is — on the desktop,
   ## `ui/key_router.chordForAction` (PLAT-68: the router's, not the YAML's).
@@ -96,8 +111,45 @@ proc shortcutDialogRows*(chordOf: ChordOf; mac: bool): seq[ShortcutDialogRow] =
       chord: describeChord(chord, mac),
       hazard: hazardOf(chord, mac))
 
+proc referenceNode*(reference: seq[ReferenceLine];
+                    scopeText: string): DialogNode =
+  ## **THE SHORTCUT REFERENCE** (§5.4: *"the shortcut reference lists the
+  ## active layers in order"*; §5.6: each user shadow *"is listed in the load
+  ## report and in the shortcut reference"*): every binding live for the
+  ## focused scope path, layer by layer in the order a key is resolved, a
+  ## shadowed base row marked with the user row that takes its chord.
+  result = DialogNode(tag: "div", attrs: @[
+    ("class", "kb-reference"), ("data-kb-reference", $reference.len),
+    ("data-kb-scope", scopeText),
+    ("style", "max-height: 40vh; overflow: auto")])
+  result.children.add DialogNode(tag: "h3", attrs: @[("class", "kb-ref-title")],
+                                 text: "Bindings here, in the order a key " &
+                                       "is resolved (" & scopeText & ")")
+  var layer = ""
+  for line in reference:
+    if line.layer != layer:
+      layer = line.layer
+      result.children.add DialogNode(tag: "div",
+        attrs: @[("class", "kb-ref-layer"), ("data-kb-ref-layer-title", layer)],
+        text: layer)
+    var attrs = @[("class", "kb-ref-row"), ("data-kb-ref-layer", line.layer),
+                  ("data-kb-ref-key", line.keyText),
+                  ("data-kb-ref-operation", line.operation)]
+    var cells = @[
+      DialogNode(tag: "kbd", attrs: @[("class", "kb-ref-key")],
+                 text: line.keyText),
+      DialogNode(tag: "span", attrs: @[("class", "kb-ref-label")],
+                 text: (if line.label.len > 0: line.label else: line.operation))]
+    if line.shadowedBy.len > 0:
+      attrs.add ("data-kb-ref-shadowed-by", line.shadowedBy)
+      cells.add DialogNode(tag: "span", attrs: @[("class", "kb-ref-shadow")],
+                           text: "shadowed by " & line.shadowedBy)
+    result.children.add DialogNode(tag: "div", attrs: attrs, children: cells)
+
 proc buildShortcutDialog*(chordOf: ChordOf; active: ShortcutPresetId;
-                          mac: bool; notes: seq[string] = @[]): DialogNode =
+                          mac: bool; notes: seq[string] = @[];
+                          reference: seq[ReferenceLine] = @[];
+                          scopeText = ""): DialogNode =
   ## The whole dialog, as a value.
   ##
   ## `data-kb-rows` DECLARES THE COUNT IT DREW, and it is `$rows.len` rather
@@ -163,6 +215,7 @@ proc buildShortcutDialog*(chordOf: ChordOf; active: ShortcutPresetId;
                                           attrs: @[("class", "kb-note")],
                                           text: n)
                    lines)),
+      referenceNode(reference, scopeText),
       DialogNode(tag: "button",
                  attrs: @[("class", "kb-close"), ("data-kb-close", "true")],
                  text: "Close"),

@@ -36,7 +36,7 @@ when not defined(js):
   {.error: "node_certificate_host.nim is the node host; native builds use " &
            "ct_test/certificate_content_id_native.nim".}
 
-import std/jsffi
+import std/[jsffi, strutils]
 
 import ../../../ct_test/certificate_content_id
 import ../../../ct_test/certificate_store_roots
@@ -45,7 +45,9 @@ export certificate_content_id.ContentIdHost,
        certificate_content_id.AsyncContentIdHost,
        certificate_content_id.AsyncContentGitRunner,
        certificate_content_id.GitCall, certificate_content_id.GitReply
-export certificate_store_roots.CertificateStoreRoots
+export certificate_store_roots.CertificateStoreRoots,
+       certificate_store_roots.StoreRootPlatform,
+       certificate_store_roots.StoreEnvironment
 
 {.emit: """
 // One spawn, every outcome as a plain record: node's `spawnSync` reports a
@@ -339,18 +341,133 @@ proc nodeAsyncContentIdHost*(tempRoot = "";
   ## the Electron renderer's, whose main thread must not wait for git.
   asyncContentIdHost(nodeFileOperations(tempRoot), nodeAsyncGitRunner(captureLimit))
 
+# ---------------------------------------------------------------------------
+# The account the system root is partitioned by (Transport §2.1)
+# ---------------------------------------------------------------------------
+#
+# POSIX: `process.getuid()`. Windows: node has no binding to the process
+# token, and `process.getuid` does not exist there, so the SID is asked of
+# `whoami /user /fo csv /nh` — the token user's SID, the same account the
+# native host reads with `GetTokenInformation(TokenUser)` through the
+# reference library (`certificate_store_roots_native`). Without it the
+# system root, `%ProgramData%\test-certificates\<SID>`, stays unresolved,
+# which makes every lookup incomplete and the indicator *Unverifiable*
+# whenever nothing in the user root covers the working tree.
+# https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/whoami
+
+type
+  AccountCommandRunner* = proc(argv: seq[string]): GitReply {.closure.}
+    ## Runs one command to completion and answers with its exit status and
+    ## output, in the recipe's `GitReply` shape (negative exit status: it could
+    ## not be launched). The seam the suite replaces to answer for a Windows
+    ## host on any host (`node_certificate_store_account_test.nim`).
+
+const WhoamiOutputLimit = 64 * 1024
+  ## `whoami /user` prints one short line; a bound keeps a misbehaving
+  ## program from filling the renderer's memory.
+
+proc windowsSidFromWhoami*(output: string): tuple[sid, problem: string] =
+  ## The SID in `whoami /user /fo csv /nh`'s answer: one CSV line,
+  ## `"<domain>\<user>","<SID>"`. The SID is the LAST field (a user name may
+  ## itself contain a comma, inside its quotes; a SID never does). Anything
+  ## that is not exactly one such line holding a valid string SID is a
+  ## problem, never a guess: a wrong account would name another user's
+  ## partition of the system root.
+  var lines: seq[string] = @[]
+  for raw in output.splitLines():
+    let line = raw.strip()
+    if line.len > 0:
+      lines.add line
+  if lines.len != 1:
+    return ("", "`whoami /user` printed " & $lines.len &
+      " non-empty lines, not the one CSV line expected")
+  let line = lines[0]
+  let separator = line.rfind("\",\"")
+  if not line.endsWith("\"") or separator < 0:
+    return ("", "`whoami /user` printed `" & line &
+      "`, not a CSV line of a user and a SID")
+  let sid = line[separator + 3 ..< line.len - 1]
+  if not isValidAccount(srpWindows, sid):
+    return ("", "`whoami /user` printed `" & sid & "`, which is not a SID")
+  (sid, "")
+
+proc storeAccountFor*(platform: StoreRootPlatform; uid: string;
+                      env: StoreEnvironment;
+                      run: AccountCommandRunner): tuple[account, problem: string] =
+  ## The account to partition the system root by on `platform`: `uid` on
+  ## POSIX systems, the token user's SID on Windows (via `run`). Pure in its
+  ## inputs, so the suite can drive the Windows branch on any host.
+  case platform
+  of srpUnix, srpMacos:
+    if uid.len == 0:
+      return ("", "the process's uid could not be read")
+    (uid, "")
+  of srpWindows:
+    # `%SystemRoot%\System32\whoami.exe` rather than a `PATH` lookup, so a
+    # `whoami` earlier on `PATH` cannot answer for the account.
+    var systemRoot = env("SystemRoot")
+    if systemRoot.len == 0:
+      systemRoot = env("windir")
+    if systemRoot.len == 0:
+      return ("", "neither %SystemRoot% nor %windir% is set, so " &
+        "`whoami.exe` could not be found to read the account's SID")
+    let whoami = systemRoot.strip(leading = false, chars = {'\\', '/'}) &
+      "\\System32\\whoami.exe"
+    let reply = run(@[whoami, "/user", "/fo", "csv", "/nh"])
+    if reply.exitCode < 0:
+      return ("", "`" & whoami & "` could not be run: " & reply.stderr.strip())
+    if not reply.complete:
+      return ("", "`" & whoami & " /user`'s output was cut short")
+    if reply.exitCode != 0:
+      return ("", "`" & whoami & " /user` failed (exit status " &
+        $reply.exitCode & "): " & reply.stderr.strip())
+    let parsed = windowsSidFromWhoami(reply.stdout)
+    if parsed.problem.len > 0:
+      return ("", parsed.problem)
+    (parsed.sid, "")
+
+proc nodeAccountRunner(): AccountCommandRunner =
+  result = proc(argv: seq[string]): GitReply {.closure.} =
+    var args: seq[cstring] = @[]
+    for a in argv:
+      args.add cstring(a)
+    replyOf(ctContentIdSpawn(args, cstring(""), @[], WhoamiOutputLimit))
+
+var nodeWindowsSid = ""
+  ## The token user's SID, once read: an account does not change for the
+  ## life of a process, and `whoami` is a process launch the renderer should
+  ## not repeat on every refresh. A failure is NOT remembered, so a transient
+  ## one is retried on the next refresh.
+
+proc rootsForAccount*(platform: StoreRootPlatform; env: StoreEnvironment;
+                     account: tuple[account, problem: string]):
+    CertificateStoreRoots =
+  ## Both roots for `platform`, `env` and the account `storeAccountFor` read,
+  ## with the reason when it could not be read.
+  result = resolveCertificateStoreRoots(platform, env, account.account)
+  if account.problem.len > 0:
+    result.problems.add "the account's " &
+      (if platform == srpWindows: "SID" else: "uid") &
+      " could not be read: " & account.problem
+
 proc nodeCertificateStoreRoots*(): CertificateStoreRoots =
   ## Both store roots as this node process resolves them now (Transport
-  ## §2.1): its `process.env`, `process.platform` and `process.getuid()`.
-  ## Read on every call, so a changed variable is seen by the next one.
+  ## §2.1): its `process.env`, `process.platform`, and its account —
+  ## `process.getuid()` on POSIX, the token user's SID on Windows (read once,
+  ## see `nodeWindowsSid`). Everything else is read on every call, so a
+  ## changed variable is seen by the next one.
   var uid = ""
   try:
     uid = $(nodeUidRaw().to(cstring))
   except:
     uid = ""
-  resolveCertificateStoreRoots(
-    storeRootPlatformFor($nodeOsName()),
-    proc(name: string): string =
-      let raw = nodeEnvRaw(cstring(name))
-      if isNullish(raw): "" else: $(raw.to(cstring)),
-    uid)
+  let platform = storeRootPlatformFor($nodeOsName())
+  let env = proc(name: string): string =
+    let raw = nodeEnvRaw(cstring(name))
+    if isNullish(raw): "" else: $(raw.to(cstring))
+  if platform == srpWindows and nodeWindowsSid.len > 0:
+    return resolveCertificateStoreRoots(platform, env, nodeWindowsSid)
+  let account = storeAccountFor(platform, uid, env, nodeAccountRunner())
+  if platform == srpWindows and account.problem.len == 0:
+    nodeWindowsSid = account.account
+  rootsForAccount(platform, env, account)

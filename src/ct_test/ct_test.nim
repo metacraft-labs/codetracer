@@ -113,8 +113,10 @@ proc ctTestUsageMessage*(): string =
   "untracked mode says — `--untracked`, else `[certificate] untracked` in " &
   "the workspace's `.codetracer/test.toml`, else `reads`: `reads` withholds " &
   "only when a read set the run captured shows a test read an untracked " &
-  "file (`test run` captures none today, so it issues with " &
-  "`untracked = true` and the summary says no read set was captured), " &
+  "file (when untracked files exist, `test run` runs its test processes " &
+  "under the io-mon monitor to capture one; where it cannot, it issues with " &
+  "`untracked = true` and the summary says no read set was captured, and " &
+  "why), " &
   "`strict` withholds whenever an untracked, non-ignored file exists; an " &
   "unknown `--untracked` value is an error before any test runs; an " &
   "unusable `.codetracer/test.toml` is reported before the tests run, " &
@@ -501,7 +503,7 @@ proc runRun(args: seq[string]; registry: var ProviderRegistry;
       # (CTC-3e). A user who wants a file copies it out of the store.
       let published = publishToLocalStore(
         nativeCertificateStoreRoots(), response.workspaceRoot,
-        issuance.document)
+        issuance.document, signatureMade = true)
       if published.written:
         writtenTo = published.path
       writeError = published.error

@@ -207,7 +207,7 @@ proc jsAsFunction*[T](handler: js): T {.importcpp: "#".}
 template byId*(id: typed): untyped =
   document.getElementById(`id`)
 
-template findElement*(selector: cstring): kdom.Element =
+template findElement(selector: cstring): kdom.Element =
   kdom.document.querySelector(`selector`)
 
 template jq*(selector: typed): untyped =

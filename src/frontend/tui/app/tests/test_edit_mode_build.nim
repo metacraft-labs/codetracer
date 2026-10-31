@@ -117,23 +117,23 @@ suite "PLAT-16 §5: the verdict states, and the one this milestone added":
     ok.requestCancel()
     ck ok.verdict == bvSucceeded
 
-  test "the core's four states are reachable and the fifth maps onto idle":
-    # `statusOf` is the lossy direction and the only one that exists, so the
-    # distinction cannot be lost by a round trip.
+  test "every verdict is the core's, the cancellation included":
+    # PLAT-56: the core gained `bsCancelled`, so the mapping is one to one —
+    # a cancellation is neither idle nor failed on any front-end.
     ck statusOf(bvIdle) == bsIdle
     ck statusOf(bvRunning) == bsRunning
     ck statusOf(bvSucceeded) == bsSucceeded
     ck statusOf(bvFailed) == bsFailed
-    # `bvCancelled` is `bsIdle` and NOT `bsFailed`: `build_vm` documents
-    # `bsFailed` as a claim about the code, and a cancelled build makes none.
-    ck statusOf(bvCancelled) == bsIdle
+    # `bvCancelled` is `bsCancelled` and NOT `bsFailed`: `bsFailed` is a claim
+    # about the code, and a cancelled build makes none.
+    ck statusOf(bvCancelled) == bsCancelled
     ck statusOf(bvCancelled) != bsFailed
-    # Every core state is the image of something, so the mapping is onto.
+    # Every core state is the image of exactly one verdict.
     var images: seq[BuildStatus] = @[]
     for v in BuildVerdict:
       if statusOf(v) notin images:
         images.add statusOf(v)
-    ck images.len == 4
+    ck images.len == 5
 
   test "the deadline is a bound and is NOT reported as a cancellation":
     let s = newBuildSession(bkBuild, "sleep 1d", 1000, deadlineMs = 5000)
@@ -204,10 +204,12 @@ suite "PLAT-16 §5: the verdict is in a PANE, in words and in colour":
       text.add g.rowText(row) & "\n"
     checkpoint(text)
     ck screen.renderedLines == 1
-    # PLAT-49: the first row is the verdict itself, not a `BUILD ───` title.
-    ck text.startsWith("[failed]")
-    ck text.contains("just build")
-    ck text.contains("exit 1")
+    # PLAT-49: the first row is the verdict itself, not a `BUILD ───` title;
+    # PLAT-56: in the desktop's words (`build_output_model.headerText`), with
+    # the desktop's controls on the right.
+    ck text.startsWith("build failed (exit code 1)")
+    ck text.contains("Run Stop Clear Follow")
+    ck text.contains("exit code 1")
     ck text.contains("undeclared identifier")
     # AND THE COLOUR IS ON THE TITLE CELL, so a Tier-2 `cellAt` read can say
     # which verdict it is looking at without reading a glyph.
@@ -223,10 +225,13 @@ suite "PLAT-16 §5: the verdict is in a PANE, in words and in colour":
     var g = newStyledGrid(Cols, Rows)
     discard paintBuildOutput(g, CellArea(col: 0, row: 0, width: 60, height: 3),
                              model)
+    # PLAT-56: the header is empty with no build (as the desktop's), and the
+    # pane says so on the row beneath it (`BuildIdleText`).
     let row0 = g.rowText(0)
-    checkpoint(row0)
-    ck row0.startsWith("[idle]")
-    ck row0.contains("no build has been run")
+    let row1 = g.rowText(1)
+    checkpoint(row0 & "\n" & row1)
+    ck row0.strip.startsWith("Run")
+    ck row1.startsWith("No build has run.")
 
   test "the error heuristic offers lines and hides none":
     let s = newBuildSession(bkBuild, "x", 0)
@@ -315,12 +320,13 @@ suite "PLAT-16 §5: `:build`, `:run` and `:cancel` on the prompt":
     checkpoint(statusRow(rt))
     ck statusRow(rt).contains("no runner")
     ck rt.app.build.isNil
-    # …and so is a verb with no argument.
+    # …and `:build` alone, which runs the project's default build TASK
+    # (Build-Output-Pane.md §3.12), says there is none to run.
     discard rt.prompt.open(pkCommand)
     for ch in ":build":
       discard rt.prompt.applyKey($ch, @[])
     discard rt.handleToken("\r", 0)
-    ck statusRow(rt).contains("needs a command")
+    ck statusRow(rt).contains("No build tasks")
 
   test "`:w` writes through the host seam and clears the dirty marker":
     let rt = editingRuntime()

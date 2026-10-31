@@ -89,6 +89,10 @@ type
     grCallLeaf = "call trace leaf"
     grRunControl = "run control"
       ## Test Results' ▶ (the desktop's `RunButtonLabel`): run the tests.
+    grDropdown = "dropdown indicator"
+      ## A control that opens a list (Build Output's "History ▾").
+    grCurrentEntry = "current entry mark"
+      ## The entry a list shows now (Build Output's history picker).
 
   GlyphColumn* = enum
     gcolExtended = "extended"
@@ -162,7 +166,9 @@ const
     grCallExpanded:        ["▾",      "▼",    "v",   "▾"],
     grCallCollapsed:       ["▸",      "►",    ">",   "▸"],
     grCallLeaf:            ["·",      "·",    ".",   "."],
-    grRunControl:          ["▶",      "►",    ">",   "▸"]]
+    grRunControl:          ["▶",      "►",    ">",   "▸"],
+    grDropdown:            ["▾",      "▼",    "v",   "▾"],
+    grCurrentEntry:        ["●",      "●",    "*",   "*"]]
 
   DefaultGlyphs* = GlyphProfile()
     ## Extended, narrow, classic: the screen before profiles.

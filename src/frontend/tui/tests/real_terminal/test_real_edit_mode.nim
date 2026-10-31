@@ -28,12 +28,11 @@
 ##     `b and 0x1F`. So `sendKey("ctrl+z")` really does send `0x1a`, and
 ##     `sendKey("ctrl+f5")` sends a plain `F5`.
 ##
-##     Both halves are asserted below rather than trusted: the case named for
-##     it drives `sendKey("ctrl+f5")` and requires the product mode NOT to
-##     change — because plain `F5` is Continue, which is `asDebugOnly` and
-##     therefore inert in Edit mode — and then drives the same chord as
-##     `CSI 15 ; 5 ~` and requires it to. That is the note's hazard reproduced
-##     on the key it still applies to.
+##     SINCE FIXED in TermAssert: the pinned revision keeps both modifiers on
+##     named keys (measured 2026-10-30 — `sendKey("ctrl+f5")` switched the
+##     product mode). The case that reproduced the hazard now asserts the
+##     plain `F5` inert in Edit mode (Continue is `asDebugOnly`) and the
+##     toggle through both the harness spelling and `CSI 15 ; 5 ~`.
 ##   * **The alternate screen.** The editor is inside it, and the terminal is
 ##     given back.
 ##
@@ -82,7 +81,7 @@ import term_assert
 import ../fixtures/fixture_provider
 import ./lifecycle_support
 
-const ExpectedAssertions = 63
+const ExpectedAssertions = 65
 
 var countedAssertions = 0
 
@@ -250,8 +249,9 @@ suite "PLAT-16 Tier 2: editing in a real terminal":
       ck not screen.contains("CALL STACK")
       ck not screen.contains(" Call Trace ")
       ck not screen.contains("CALL TRACE")
-      # The build pane is a statement rather than a blank.
-      ck screen.contains("[idle]")
+      # The build pane is a statement rather than a blank (PLAT-56: the
+      # desktop's words, `BuildIdleText`).
+      ck screen.contains("No build has run.")
     finally:
       sess.send(QuitByte)
       discard sess.waitExit(initDuration(seconds = 10))
@@ -315,16 +315,20 @@ suite "PLAT-16 Tier 2: editing in a real terminal":
       discard sess.waitExit(initDuration(seconds = 10))
       sess.close()
 
-  test "`sendKey(\"ctrl+f5\")` loses the modifier; the raw bytes do not":
-    # PLAT-16's note, reproduced on the key it still applies to in this
-    # checkout. See the module header for the measurement.
+  test "a plain F5 is inert in Edit mode; Ctrl+F5 toggles, spelled or as bytes":
+    # PLAT-16's note recorded TermAssert's `sendKey` dropping `ctrl+` on a
+    # function key, so `sendKey("ctrl+f5")` arrived as a plain F5. The pinned
+    # TermAssert no longer drops it (measured 2026-10-30: the spelling switched
+    # the mode). Both halves of the old case are kept, each on the key that now
+    # carries it: the plain key's inert answer, and the toggle through both
+    # the harness spelling and the raw bytes.
     let dir = projectDir()
     var sess = spawnEditor(dir)
     try:
       discard waitForScreenText(sess, "CUA [EDIT]")
 
-      # ---- THE STRIPPED SPELLING: a plain F5 arrives -----------------------
-      sess.sendKey("ctrl+f5")
+      # ---- A PLAIN F5 ------------------------------------------------------
+      sess.sendKey("f5")
       # `F5` is Continue, which `keymap.scopeOf` makes `asDebugOnly`, so in
       # Edit mode it resolves `krInertInMode` and the user is TOLD
       # (Mode-Transitions.md §8.1). That message is the evidence the plain key
@@ -338,11 +342,17 @@ suite "PLAT-16 Tier 2: editing in a real terminal":
       ck inert.contains("CUA [EDIT]")
       ck not inert.contains("[DEBUG]")
 
-      # ---- THE BYTES: the modifier survives --------------------------------
-      sess.send(CtrlF5)
+      # ---- THE SPELLING: the modifier survives the harness now -------------
+      sess.sendKey("ctrl+f5")
       let switched = waitForScreenText(sess, "CUA [DEBUG]")
       ck switched.contains("CUA [DEBUG]")
       ck not switched.contains("CUA [EDIT]")
+
+      # ---- THE BYTES: and back --------------------------------------------
+      sess.send(CtrlF5)
+      let back = waitForScreenText(sess, "CUA [EDIT]")
+      ck back.contains("CUA [EDIT]")
+      ck not back.contains("CUA [DEBUG]")
     finally:
       sess.send(QuitByte)
       discard sess.waitExit(initDuration(seconds = 10))

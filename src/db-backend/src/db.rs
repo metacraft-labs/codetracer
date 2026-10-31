@@ -3675,13 +3675,56 @@ impl MaterializedReplaySession {
                             let step = self.reader.step(call_step).copied();
                             if let Some(step_record) = step {
                                 let location = self.reader.load_location(call_step, current_frame, expr_loader);
+                                // `source_text` is the line `location` names
+                                // — the callee's entry step, i.e. its
+                                // header (`def foo(param):`, `pub fn
+                                // iterate_asteroids(initial_shield: …)`).
+                                // Spec Value-Origin-Tracking.md `OriginHop`
+                                // makes the two one statement and reserves
+                                // an EMPTY `source_text` for "source
+                                // unavailable"; this hop used to ship
+                                // `String::new()` beside a resolvable
+                                // `location`, so its two accounts of itself
+                                // disagreed and every front-end that
+                                // renders or verifies a hop by its text
+                                // (the TUI's value-origin suite, on
+                                // `noir_space_ship`'s `initial_shield`)
+                                // got nothing. The line is read exactly as
+                                // step "(2) Resolve the source line" reads
+                                // it, from the step's OWN source version
+                                // (GDH-M7), and its digest is tracked the
+                                // same way so a continuation token covers
+                                // every file a hop's text came from. When
+                                // the source is unavailable the text stays
+                                // empty — the specified degradation.
+                                let path_str = self.reader.path(step_record.path_id).unwrap_or("").to_string();
+                                let mut source_text = String::new();
+                                if !path_str.is_empty() {
+                                    let probe_path = expr_loader.source_probe_path(self.reader.workdir(), &path_str);
+                                    let (line_text, source_origin) = expr_loader.get_source_line_v2(
+                                        &probe_path,
+                                        step_record.line.0.max(0) as usize,
+                                        meta_dat_sources_root,
+                                        self.reader.path_version_ordinal(step_record.path_id),
+                                    );
+                                    if source_origin != SourceOrigin::Unavailable {
+                                        track_source_digest(
+                                            &mut source_digests,
+                                            &probe_path,
+                                            source_origin,
+                                            meta_dat_sources_root,
+                                            expr_loader,
+                                        );
+                                        source_text = line_text;
+                                    }
+                                }
                                 hops.push(OriginHop {
                                     kind: WireOriginKind::ParameterPass,
                                     target_expr: current_var_name.clone(),
                                     source_expr: arg_name.clone(),
                                     source_variable: Some(arg_name.clone()),
                                     location,
-                                    source_text: String::new(),
+                                    source_text,
                                     step_id: step_record.step_id.0,
                                     frame_transition: Some(WireFrameTransition {
                                         kind: FrameTransitionKind::ParameterPass,

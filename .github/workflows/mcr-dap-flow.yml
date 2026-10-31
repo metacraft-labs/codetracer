@@ -173,8 +173,8 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=327d41aaa69520ce5a1ccc5daea6e73397757dfa
-            codetracer-trace-format-nim=ccc4ba4e05d740659bc1663fb4f39a2f32de9937
+            codetracer-trace-format=4f95fba0206476117df962204835cc9a65ad2e87
+            codetracer-trace-format-nim=62325a3adf0cacd6f0f17ac55775a554f9d17e84
             codetracer-visual-replay
 
       - name: Run MCR DAP flow tests

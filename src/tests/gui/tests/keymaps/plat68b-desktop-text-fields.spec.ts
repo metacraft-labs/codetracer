@@ -7,7 +7,7 @@
  * text, a `<textarea>`, a contenteditable element) is an `input` element of
  * that path whether or not its view stamped it
  * (`scope_path.withNativeTextField`). Its table is `input`, whose
- * rows the element performs itself (`key_router.NativeTables`), so the
+ * rows the element performs itself (`native_key_operations`), so the
  * router lets `Enter` through to the field's own `keydown` listener. Before
  * the fix the Call Trace search box was not on the path at all: `Enter`
  * resolved to the pane's `list.activate`, and the router's
@@ -208,19 +208,71 @@ test.describe("PLAT-68: a field inside the editor element is a field", () => {
     await ctPage.keyboard.type("fn", { delay: 20 });
     expect(await keyTrace(ctPage)).toEqual([]);
     await expect.poll(value).toBe("fn");
+    const heights = () => ctPage.evaluate(() => {
+      const ed = (globalThis as any).__plat68TracepointEditor;
+      const node = ed.getDomNode() as HTMLElement;
+      return {
+        zone: node.closest(".trace")!.getBoundingClientRect().height,
+        editor: node.getBoundingClientRect().height,
+      };
+    });
+    const oneLineHeights = await heights();
+    expect(oneLineHeights.zone).toBeGreaterThan(0);
+    expect(oneLineHeights.editor).toBeGreaterThan(0);
+    await ctPage.evaluate(() => {
+      const ed = (globalThis as any).__plat68TracepointEditor;
+      const input = document.activeElement;
+      (globalThis as any).__plat68TracepointEdits = [];
+      // Observe after the product's content-change listener has resized the
+      // zone, before any delayed focus repair. Sampling after a Playwright
+      // round trip misses the blur when its restore timer happens to win.
+      (globalThis as any).__plat68TracepointEditProbe = ed.onDidChangeModelContent(() => {
+        (globalThis as any).__plat68TracepointEdits.push({
+          value: String(ed.getValue()),
+          inputConnected: !!input?.isConnected,
+          inputFocused: document.activeElement === input,
+        });
+      });
+    });
     await ctPage.keyboard.press("Enter");
     expect(await keyTrace(ctPage)).toEqual(["input.commit"]);
     // Monaco performed it: a new line in the tracepoint's expression, the
     // tracepoint editor still open and focused.
     await expect.poll(value).toBe("fn\n");
+    expect(await ctPage.evaluate(() =>
+      (globalThis as any).__plat68TracepointEdits)).toEqual([
+        { value: "fn\n", inputConnected: true, inputFocused: true },
+      ]);
     expect(await activeIsInside(ctPage, ".trace")).toBe(true);
+    // Keeping focus by omitting the resize is not sufficient: both the
+    // reserved view zone and its nested editor must grow with the newline.
+    const twoLineHeights = await heights();
+    expect(twoLineHeights.zone).toBeGreaterThan(oneLineHeights.zone);
+    expect(twoLineHeights.editor).toBeGreaterThan(oneLineHeights.editor);
     // The caret stays in the input across an edit and the relayout it
-    // triggers (the zone grows by a line, and the editor restores its focus
-    // afterwards): a further letter goes on writing the expression.
-    await ctPage.waitForTimeout(500);
+    // triggers (the zone grows by a line with its input still attached and
+    // focused): a further letter goes on writing the expression.
     expect(await hasTextFocus()).toBe(true);
     await ctPage.keyboard.type("x", { delay: 20 });
     await expect.poll(value).toBe("fn\nx");
+    expect(await hasTextFocus()).toBe(true);
+    // Shrinking the zone must keep the same input too, so the very next key
+    // continues the expression without clicking or waiting for focus repair.
+    await ctPage.keyboard.press("Backspace");
+    await ctPage.keyboard.press("Backspace");
+    await ctPage.keyboard.type("y");
+    await expect.poll(value).toBe("fny");
+    expect(await heights()).toEqual(oneLineHeights);
+    expect(await ctPage.evaluate(() => {
+      (globalThis as any).__plat68TracepointEditProbe.dispose();
+      return (globalThis as any).__plat68TracepointEdits;
+    })).toEqual([
+      { value: "fn\n", inputConnected: true, inputFocused: true },
+      { value: "fn\nx", inputConnected: true, inputFocused: true },
+      { value: "fn\n", inputConnected: true, inputFocused: true },
+      { value: "fn", inputConnected: true, inputFocused: true },
+      { value: "fny", inputConnected: true, inputFocused: true },
+    ]);
     expect(await hasTextFocus()).toBe(true);
   });
 });

@@ -84,7 +84,7 @@ export GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false
 # while `command -v python3` said yes throughout. Requirements are declared here
 # in the form `require-tools.sh` can actually check.
 lint_step "tools this stage invokes are present" \
-	bash ci/lib/require-tools.sh shellcheck bash just git python3 python3:yaml node awk diff sort comm timeout openssl sha256sum curl
+	bash ci/lib/require-tools.sh shellcheck bash just git python3 python3:yaml node awk diff sort comm timeout openssl sha256sum curl pre-commit prek
 
 lint_step "shellcheck: CI scripts" \
 	shellcheck ci/**/*.sh
@@ -307,6 +307,14 @@ lint_step "shellcheck: flake lock node dates guard" \
 lint_step "shellcheck: sibling cargo locks guard" \
 	shellcheck scripts/test-sibling-cargo-locks.sh
 
+# The guard above only protects a branch whose CI runs it. It ran inside `just
+# test` alone, which no push to `agents` triggers, and a stale lock landed
+# there. `.github/workflows/sibling-cargo-locks.yml` runs it on `agents` too;
+# this suite holds that workflow to the branch, the files that can make a lock
+# stale, and STRICT. Pure bash + python3 over the live workflow files.
+lint_step "contract suite: the sibling Cargo.lock guard runs on agents" \
+	bash ci/test/sibling-cargo-locks-workflow-test.sh
+
 # Not covered by the `ci/**/*.sh` glob above, and it runs in the deploy lane on
 # every push to `cloud`, where a shell defect would surface as a deploy failure
 # rather than as a lint one.
@@ -328,6 +336,12 @@ lint_step "shellcheck: toolchain resolver" \
 # that defect is invisible to shellcheck and to every happy-path run.
 lint_step "contract suite: flake pin alignment guard" \
 	bash ci/test/flake-pin-alignment-test.sh
+
+# The real tree's two locks: every sibling both pin, pinned at one revision.
+# `repro.lock` once lagged `flake.lock` by an `isonim-tui` the code needed
+# (2026-10-26); this is the gate that would have said so before a push.
+lint_step "sibling pins: repro.lock agrees with flake.lock" \
+	bash ci/test/repro-lock-flake-lock-agreement.sh
 
 # The catalog coverage guard has the same exposure, and more ways to earn it:
 # it PARSES four inputs (repro.nim, two reprobuild source files, repro.lock),
@@ -597,6 +611,14 @@ lint_step "contract suite: core.hooksPath is never left relative" \
 lint_step "contract suite: the dev shell keeps Reprobuild's hook dispatchers" \
 	bash ci/test/reclaim-hook-dispatchers-test.sh
 
+# Its end-to-end companion, with the REAL python pre-commit and prek: a
+# dispatcher prek displaced to `.legacy` is overwritten by pre-commit's own
+# install unless the dev shell snapshots it first. A negative control proves the
+# real tools still clobber it. Refuses (exit 3), never skips, without the tools;
+# devShells.lint carries both.
+lint_step "contract suite: a dispatcher another hook manager displaced survives the installer" \
+	bash ci/test/hook-dispatcher-snapshot-test.sh
+
 # The non-Nix leg of the same hooks (ci/dev/portable-pre-commit.py): what native
 # Windows runs at commit time instead of the /nix/store pre-commit shim it cannot
 # execute. Registered here because nothing else runs it -- the hosts it serves
@@ -650,6 +672,13 @@ lint_step "contract suite: the dev shell's nim is not shadowed by a sibling buil
 lint_step "contract suite: lane not-provided lists name real tests and the lane that runs each" \
 	bash ci/test/lane-not-provided-test.sh
 
+# A Nim test lane gives every file its own CODETRACER_HOME and XDG roots and
+# fails, naming the file, when one touched the user's own CodeTracer state.
+# The suite runs the real runner over fixture files that leak the way a child
+# ignoring the overrides would, in a scratch HOME. Pure bash, a `nim` stub.
+lint_step "contract suite: a test lane's user-state guard names the file that touched real state" \
+	bash ci/test/lane-user-state-guard-test.sh
+
 # The same lists name two crates' tests, and nextest refuses a filterset that
 # names a binary its crate does not have; the lane that runs an entry selects
 # it from the same line. not-provided-filter.sh is the one place a list becomes
@@ -685,21 +714,13 @@ lint_step "contract suite: the runner defect register still cites real things" \
 lint_step "shellcheck: Rust test-assertion lint (vendored from codetracer-pm)" \
 	shellcheck tools/check-test-assertions.sh
 
-# Registered here rather than left to be discovered, for the reason the lint
-# itself was worth wiring: an unrun check is the defect it exists to catch. It
-# is pure bash + awk over the committed tree -- no nix, no network, no siblings,
-# seconds -- so it belongs in the cheapest lane that will run it.
-#
-# It holds the flagged set to an ENUMERATED baseline rather than to zero, and
-# fails in both directions: a new assertion-less test is a line the baseline
-# lacks, and a baseline entry that gets fixed is a line the actual set lacks.
-# Because that baseline is non-empty it is also the lint's own canary -- a lint
-# that rotted into a no-op finds zero and reddens this step.
-lint_step "contract suite: no Rust test lacks an assertion (enumerated baseline)" \
-	bash ci/test/test-assertion-baseline.sh
+# The baseline itself runs in lint-nim, whose CI job provisions codetracer-pm
+# for the mandatory drift comparison. Its filesystem contracts need no sibling.
+lint_step "Spec-reading scripts use codetracer-pm and require their inputs" \
+	python3 ci/test/spec-checkout-paths-test.py
 
-# THE RUST TEST-CRATE COVERAGE GATE. The step above asks whether a Rust test
-# ASSERTS anything; this one asks the question underneath it -- whether the test
+# THE RUST TEST-CRATE COVERAGE GATE. The assertion baseline in lint-nim asks
+# whether a Rust test ASSERTS anything; this one asks whether the test
 # RUNS at all. `ci/test/test-lane-coverage.sh` answers that for Nim and
 # `ci/test/shell-gate-coverage.sh` for shell gates, and neither can answer it for
 # Rust: lanes enumerate FILES, and Rust tests are selected wholesale by

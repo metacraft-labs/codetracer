@@ -71,7 +71,9 @@
 
     tbody
       display: block
-      cursor: pointer
+      // The body is not a control: only its rows take a click. The hand
+      // is on the rows that are (`tr[role="button"]`, below), so the body
+      // around and between them no longer offers one.
 
   tr
     // height: 24px
@@ -87,6 +89,11 @@
 
     td
       cursor: normal
+
+    // The shared views' clickable rows (`role="button"`, `tabindex="0"` —
+    // test_shared_rows_are_controls.nim): the hand belongs to the control.
+    &[role="button"]
+      cursor: pointer
 
     .dataTables_empty
       cursor: normal

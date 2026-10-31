@@ -260,8 +260,7 @@ suite "SB-1: the indicator against a real repository":
     # repository's content is the one above's, whose record is in that store.
     discard freshStoreRoot()
     writeCertificateFor(other,
-      "git-tree-sha1:" & repeat('d', 40), base = headCommit(other),
-      dir = ReprobuildStoreDir)
+      "git-tree-sha1:" & repeat('d', 40), base = headCommit(other))
     let otherVm = indicatorFor(other)
     discard otherVm.refresh(citStartup)
     checkpoint $otherVm.model.state & " — " & otherVm.model.summary
@@ -274,14 +273,28 @@ suite "SB-1: the indicator against a real repository":
   test "a content id the host cannot compute reads unverifiable":
     ## `git-tree-sha256` against this SHA-1 repository: the real host answers
     ## "cannot compute", which is not a mismatch (Verification.md §4.1.1).
+    ## A keyed lookup never surfaces such a record (Transport.md §5.1), so it
+    ## is handed over the way a carrier read in full (a CI artifact) would
+    ## hand it, beside the real host's facts.
     let repo = newRepository("sha256-on-sha1")
-    writeCertificateFor(repo, "git-tree-sha256:" & repeat('a', 64),
-                        dir = ReprobuildStoreDir)
-    let vm = indicatorFor(repo)
-    discard vm.refresh(citStartup)
-    checkpoint $vm.model.state & " — " & vm.model.summary
-    check vm.model.state == cisUnverifiable
-    check vm.model.remedy == FixConfigurationRemedy
+    var facts = platformCertificateFacts(platform(), repo, Platform)
+    check evaluateCertificateIndicator(facts).state == cisNoCertificates
+    let cert = TestCertificate(
+      schema: CertificateSchema, framework: "ct-test",
+      project: repo.lastPathPart, platform: Platform,
+      targets: @["calc_test.nim"], result: "passed",
+      issuedAt: "2026-08-18T09:00:00Z", issuer: "ct-test",
+      vcs: VcsState(repo: repo.lastPathPart, paths: @[],
+                    content: "git-tree-sha256:" & repeat('a', 64),
+                    untracked: false, base: UnrelatedBase),
+      commands: @[@["ct", "test", "run"]])
+    facts.store.certificates.add StoredCertificate(name: "artifact/run.toml",
+      text: renderCertificate(cert), receivedAtMs: 1)
+    facts.store.present = true
+    let model = evaluateCertificateIndicator(facts)
+    checkpoint $model.state & " — " & model.summary
+    check model.state == cisUnverifiable
+    check model.remedy == FixConfigurationRemedy
 
   test "a working tree with no content id reads unverifiable, even with HEAD certified":
     ## An assume-unchanged entry hides an edit from `git status`; Content-Id.md
@@ -371,19 +384,25 @@ suite "SB-1: the indicator against a real repository":
     check vm.model.state == cisCertified
 
   test "a certificate written by a hook reads the same as one written by an agent":
-    ## Producer-agnosticism against the real carriers: one record in
-    ## reprobuild's store directory, one in `ct test`'s, differing in issuer and
-    ## in which directory holds them. Only the record's own name may differ.
+    ## Producer-agnosticism against the real roots: one record in the SYSTEM
+    ## root (a privileged hook service's), one in the user root (`ct test`'s),
+    ## differing in issuer and in which root holds them. Only the record's own
+    ## name may differ.
     let repo = newRepository("producers")
     let content = headContent(repo)
-    writeCertificateFor(repo, content, name = "hook.toml",
-                        dir = ReprobuildStoreDir, issuer = "repro-hook")
+    writeCertificateFor(repo, content, name = "hook.toml", issuer = "repro-hook")
+    let relative = localStoreContentDir(content).relative.replace('/', DirSep)
+    let systemDir = getEnv("TEST_CERTIFICATES_SYSTEM_DIR") /
+                    nativeStoreAccount() / relative
+    createDir(systemDir)
+    moveFile(getEnv("TEST_CERTIFICATES_DIR") / relative / "hook.toml",
+             systemDir / "hook.toml")
     let hookVm = indicatorFor(repo)
     discard hookVm.refresh(citStartup)
     let hook = hookVm.model
-    check hook.certificateName == ReprobuildStoreDir & "/hook.toml"
+    check hook.certificateName.startsWith(systemDir)
 
-    removeDir(repo / ReprobuildStoreDir)
+    removeDir(systemDir)
     writeCertificateFor(repo, content, name = "agent.toml",
                         dir = LocalStore, issuer = "ct-test-agent")
     let agentVm = indicatorFor(repo)
@@ -441,10 +460,19 @@ suite "SB-1: the indicator against a real repository":
     ## The consumer could not establish the repository, so it must not behave
     ## as though it had. Reporting "not certified" would send an operator to run
     ## tests over a VCS problem.
+    ## Nothing can be looked up there (the store is keyed by content id), so
+    ## with no record in hand it reads "No certificates" and says why; a
+    ## record handed over (a carrier read in full) cannot be judged against
+    ## a repository nobody established: unverifiable.
     let dir = scratchDir("not-a-repo")
-    createDir(dir / ReprobuildStoreDir)
-    writeFile(dir / ReprobuildStoreDir / "run.toml",
-      renderCertificate(TestCertificate(
+    let plain = indicatorFor(dir)
+    discard plain.refresh(citStartup)
+    check plain.model.state == cisNoCertificates
+    check NoRepositorySentence in plain.model.summary
+    var facts = platformCertificateFacts(platform(), dir, Platform)
+    facts.store.present = true
+    facts.store.certificates.add StoredCertificate(name: "artifact/run.toml",
+      receivedAtMs: 1, text: renderCertificate(TestCertificate(
         schema: CertificateSchema, framework: "ct-test", project: "x",
         platform: Platform, targets: @["t"], result: "passed",
         issuedAt: "2026-08-18T09:00:00Z", issuer: "ct-test",
@@ -452,11 +480,26 @@ suite "SB-1: the indicator against a real repository":
                       content: "git-tree-sha1:" & "a".repeat(40),
                       untracked: false),
         commands: @[@["ct", "test", "run"]])))
-    let vm = indicatorFor(dir)
+    let model = evaluateCertificateIndicator(facts)
+    checkpoint $model.state & " — " & model.summary
+    check model.state == cisUnverifiable
+    check model.remedy == FixConfigurationRemedy
+
+  test "a project opened at a subdirectory answers for, and is watched at, its repository root":
+    ## SB-1's "the workspace is the OPENED FOLDER, not the repository root".
+    ## Lookup is by content id, so the opened folder no longer decides which
+    ## store is read; the facade resolves the repository upwards, and the
+    ## model carries that root, where the host arms its `.git` and
+    ## working-tree watches (`ui/certificate_indicator.armStoreWatches`).
+    let repo = newRepository("opened-at-subdir")
+    createDir(repo / "sub" / "dir")
+    writeCertificateFor(repo, headContent(repo))
+    let vm = indicatorFor(repo / "sub" / "dir")
     discard vm.refresh(citStartup)
-    checkpoint $vm.model.state & " — " & vm.model.summary
-    check vm.model.state == cisUnverifiable
-    check vm.model.remedy == FixConfigurationRemedy
+    checkpoint $vm.model.state & " — " & vm.model.repositoryRoot
+    check vm.model.state == cisCertified
+    check vm.model.repositoryRoot.len > 0
+    check expandFilename(vm.model.repositoryRoot) == expandFilename(repo)
 
   test "reading the store writes nothing into the workspace":
     ## SB-1: read-only. Asserted as an observation of the real tree rather than
@@ -679,8 +722,8 @@ suite "SB-2b: the indicator decides on W, H and S in a real repository":
 #
 # On the desktop, `vcs.contentId` and `vcs.repositoryRoot` answer on a later
 # turn of the event loop. This suite drives the SHIPPED source
-# (`gatherCertificateFacts`) over the shipped native platform with those two
-# operations deferred: each call is recorded, its future is returned pending,
+# (`gatherCertificateFacts`) over the shipped native platform with its three
+# reads (`contentId`, `repositoryRoot`, `declaredScopes`) deferred: each call is recorded, its future is returned pending,
 # and the test completes it later with the real platform's own answer — real
 # git, real repository. Only the moment of delivery is the test's, which is
 # what is under test: the facts handed over are complete (no answer still
@@ -715,6 +758,14 @@ proc deferringPlatform(deferred: DeferredVcs): Platform =
     let future = newFuture[PlatformOutcome[string]]("deferred repositoryRoot")
     deferred.pending.add proc() =
       future.complete(awaitSync(realRoot(path)))
+    future
+  let realScopes = result.vcs.declaredScopes
+  result.vcs.declaredScopes = proc(repository: string):
+      PlatformFuture[PlatformOutcome[VcsDeclaredScopes]] =
+    let future = newFuture[PlatformOutcome[VcsDeclaredScopes]](
+      "deferred declaredScopes")
+    deferred.pending.add proc() =
+      future.complete(awaitSync(realScopes(repository)))
     future
 
 proc sameDecision(a, b: CertificateIndicatorModel): bool =
@@ -779,12 +830,19 @@ suite "SB-2b: the facts gathered asynchronously":
     check model.state == cisCertified
     check sameDecision(model, expected)
 
-  test "a scoped record is decided on its scope, whose id arrives late":
-    ## The scoped id is asked only once the root is known and the store has
-    ## been read — reprobuild's pooled carrier is read in the same pass that
-    ## first asks W, H and S, so it is asked alongside them — and the facts
-    ## must not be handed over before it is in: a record decided on a scoped
-    ## id still being computed would read *unverifiable*, not certified.
+  test "a scoped record in a declared scope is found, and decided on its scope":
+    ## A scoped record sits in its SCOPED content directory (Transport.md
+    ## §2.2), which a lookup by the whole-repository ids of W, H and S does
+    ## not list. The repository declares the scope (Tooling.md §3.1,
+    ## `testCertificatesScope.<name>.path`), the facade's `declaredScopes`
+    ## reads it, and the gather asks W, H and S in that scope — in a LATER
+    ## wave than the whole-repository ids, since the scopes are read after the
+    ## root — and so finds the record. The gathered decision equals the
+    ## synchronous reader's, and both read *Certified (scoped)*.
+    ##
+    ## Control: the same repository and store with the declaration removed
+    ## asks no scoped id and reads *No certificates* — the record is there,
+    ## and only the declaration makes it findable.
     let repo = newRepository("gathered-scoped")
     createDir(repo / "src")
     writeFile(repo / "src" / "lib.nim", "proc lib(): int = 1\n")
@@ -803,31 +861,82 @@ suite "SB-2b: the facts gathered asynchronously":
                     content: scoped.value.id, untracked: false,
                     base: UnrelatedBase),
       commands: @[@["ct", "test", "run"]])
-    createDir(repo / ReprobuildStoreDir)
-    writeFile(repo / ReprobuildStoreDir / "scoped.toml", renderCertificate(cert))
+    let scopedDir = getEnv("TEST_CERTIFICATES_DIR") /
+      localStoreContentDir(scoped.value.id).relative.replace('/', DirSep)
+    createDir(scopedDir)
+    writeFile(scopedDir / "scoped.toml", renderCertificate(cert))
 
+    proc scopedWaveOf(deferred: DeferredVcs): tuple[scoped, whole: int] =
+      result = (-1, -1)
+      for entry in deferred.asked:
+        let fields = entry.split(' ')
+        if fields.len == 4 and fields[1] == $vbsWorkingTree:
+          if fields[3] == "src" and result.scoped < 0:
+            result.scoped = parseInt(fields[0])
+          if fields[3] == "" and result.whole < 0:
+            result.whole = parseInt(fields[0])
+
+    # Control first: nothing declared, nothing scoped asked, nothing found.
+    block:
+      let deferred = DeferredVcs()
+      let late = gatheredLate(repo, deferred)
+      let waves = scopedWaveOf(deferred)
+      checkpoint deferred.asked.join("; ")
+      check waves.whole >= 1
+      check waves.scoped == -1
+      let model = evaluateCertificateIndicator(late.facts)
+      checkpoint $model.state & " — " & model.summary
+      check model.state == cisNoCertificates
+
+    discard git(repo, ["config", "--add", "testCertificatesScope.lib.path",
+                       "src"])
     let deferred = DeferredVcs()
     let late = gatheredLate(repo, deferred)
     check not late.finishedInline
-    var scopedWave = -1
-    var wholeWave = -1
-    for entry in deferred.asked:
-      let fields = entry.split(' ')
-      if fields.len == 4 and fields[1] == $vbsWorkingTree and fields[3] == "src":
-        scopedWave = parseInt(fields[0])
-      if fields.len == 4 and fields[1] == $vbsWorkingTree and fields[3] == "" and
-         wholeWave < 0:
-        wholeWave = parseInt(fields[0])
+    let waves = scopedWaveOf(deferred)
     checkpoint deferred.asked.join("; ")
-    check wholeWave >= 1          # after the root
-    check scopedWave >= 1         # after the root, once the store was read
-    check late.waves >= 2
+    check waves.whole >= 1          # after the root
+    check waves.scoped > waves.whole  # after the declaration was read
+    check late.waves >= 3
     let model = evaluateCertificateIndicator(late.facts)
-    let expected = evaluateCertificateIndicator(
-      platformCertificateFacts(newDesktopNativePlatform(), repo, Platform))
+    let syncFacts = platformCertificateFacts(newDesktopNativePlatform(), repo,
+                                             Platform)
+    let expected = evaluateCertificateIndicator(syncFacts)
     checkpoint $model.state & " — " & model.summary
     check model.state == cisCertified
     check sameDecision(model, expected)
+    # SB-1's open gap: the short surfaces say it is scoped, not only the
+    # disclosure.
+    check model.label.endsWith(ScopedLabelSuffix)
+    check scopedSentence(@["src"]) in model.summary
+    var scopeRow = ""
+    for row in model.detail:
+      if row.label == "Scope": scopeRow = row.value
+    check scopeRow == "src"
+
+  test "an invalid scope declaration makes the search incomplete, never \"no certificates\"":
+    ## Tooling.md §3.1: an invalid declaration is void, so the scoped
+    ## certificates cannot be looked up; nothing found is then not evidence
+    ## that nothing exists, and the indicator reads *Unverifiable* with the
+    ## declaration as the remedy. Control: the same repository with the
+    ## declaration fixed reads *No certificates*.
+    let repo = newRepository("invalid-scope-declaration")
+    discard git(repo, ["config", "--add", "testCertificatesScope.bad.path",
+                       "../outside"])
+    let invalid = newCertificateIndicatorVm(platformCertificateFactsReader(
+      newDesktopNativePlatform(), repo, Platform))
+    discard invalid.refresh(citStartup)
+    checkpoint $invalid.model.state & " — " & invalid.model.summary
+    check invalid.model.state == cisUnverifiable
+    check "testCertificatesScope" in invalid.model.summary
+    check invalid.model.remedy == DeclaredScopesRemedy
+    discard git(repo, ["config", "--unset-all", "testCertificatesScope.bad.path"])
+    discard git(repo, ["config", "--add", "testCertificatesScope.ok.path", "src"])
+    let fixed = newCertificateIndicatorVm(platformCertificateFactsReader(
+      newDesktopNativePlatform(), repo, Platform))
+    discard fixed.refresh(citStartup)
+    checkpoint $fixed.model.state & " — " & fixed.model.summary
+    check fixed.model.state == cisNoCertificates
 
   test "the gathered facts never answer \"still being computed\"":
     ## Re-asking the handed-over facts asks nothing new: every content id the

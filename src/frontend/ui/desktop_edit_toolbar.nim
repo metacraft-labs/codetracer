@@ -17,12 +17,16 @@
 ##   (`data.services.editor.filesystem`), as paths relative to the folder it
 ##   was loaded from, which is the form `projectKinds` ranks by depth.
 ##
-## BUILD AND RUN ARE REFUSED HERE, by name. The desktop profile can run
-## arbitrary programs, so the model enables `nargo compile` — but nothing on
-## this host carries a toolbar build out: `data.update(build = true)` sends
-## `CODETRACER::update`, which the main process does not handle. A button that
-## is enabled and does nothing is what §8 / EMT-D14 forbid, so the buttons are
-## shown disabled with that sentence until the desktop has a build route.
+## BUILD GOES TO THE DESKTOP'S BUILD RUNNER. The desktop profile can run
+## arbitrary programs, so the model enables the project's command (`nargo
+## compile`, …), and the main process now runs builds
+## (`index/build_runner`, Build-Output-Pane.md §4.2): a press saves every
+## modified editor first (EMT-D17) and runs the button's command line in the
+## project folder, its output in the BUILD panel.
+##
+## RUN IS STILL REFUSED, by name (EMT-D30): Run records the program and opens
+## the recording (§9.3), and the runner only runs a command — a Run that built
+## and recorded nothing would be a button that does less than it says.
 ##
 ## Desktop-only: the web studio composes its own model in `web_noir_build`.
 ## `ui_js` imports this module only on the
@@ -33,12 +37,14 @@ from ../platform_host import ctPlatform
 import ../viewmodel/viewmodels/edit_mode_toolbar
 import ../viewmodel/platform/wasm_registry
 from debug_toolbar import setEditModeToolbar
+from ./build import startDesktopBuild
 
-const DesktopCommandRefusal* =
-  "Building and running from the toolbar is not available in the desktop " &
-  "app yet."
-  ## Why the desktop's Build and Run are off. Never empty (EMT-A28): it is the
-  ## button's tooltip, and a disabled button that cannot say why is a defect.
+
+const DesktopRunRefusal* =
+  "Running from the toolbar (record, then debug) is not available in the " &
+  "desktop app yet; Build runs the project's build command."
+  ## Why the desktop's Run is off. Never empty (EMT-A28): it is the button's
+  ## tooltip, and a disabled button that cannot say why is a defect.
 
 proc originalPath(node: CodetracerFile): cstring =
   ## The node's `original.path`, or nil when it has none.
@@ -103,14 +109,25 @@ proc workspaceListing(tree: CodetracerFile): seq[string] =
       if not folder.isNil:
         addLeaves(folder, normalizedPath(originalPath(folder)), result)
 
+var shownToolbar: EditToolbarModel
+  ## The model the bar was last drawn from: a press runs ITS command line.
+
 proc desktopEditToolbarInvoke(id: string) =
-  ## The buttons' action. Nothing to dispatch: the only buttons the bar
-  ## carries are Build and Run, and both are refused on this host, so a
-  ## disabled button never reaches here. An id this host does not know is
-  ## ignored, the same answer the web arm's `else: discard` gives — when the
-  ## desktop gains a build route, this is where `build-image` / `run-image`
-  ## are routed and the refusal in `installDesktopEditModeToolbar` goes.
-  discard id
+  ## The buttons' action: Build (`build-image`) saves every modified editor
+  ## (EMT-D17) and runs its command line in the project folder through the
+  ## desktop's build runner. Run is refused (never reaches here); an id this
+  ## host does not know is ignored, the web arm's `else: discard`.
+  if id != "build-image":
+    return
+  let button = shownToolbar.build
+  if not button.enabled or button.commandLine.len == 0:
+    return
+  data.saveFiles()
+  let folder = if data.startOptions.folder.isNil: ""
+               else: $data.startOptions.folder
+  let why = startDesktopBuild(button.commandLine, folder, "", "")
+  if why.len > 0:
+    cwarn "toolbar: " & why
 
 proc installDesktopEditModeToolbar*() =
   ## Compose the edit-mode topbar from what this session is NOW — its mode
@@ -130,5 +147,7 @@ proc installDesktopEditModeToolbar*() =
     ctPlatform().profile,
     ToolbarMode(data.ui.mode.ord),
     listing = listing,
-    wasm = WasmRegistry()).refuseCommands(DesktopCommandRefusal)
+    wasm = WasmRegistry()).refuseCommands(DesktopRunRefusal,
+                                          refused = {tbaRun})
+  shownToolbar = model
   setEditModeToolbar(model, desktopEditToolbarInvoke)

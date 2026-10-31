@@ -11,6 +11,7 @@
 ## | a dataset's shape (AA-3 inspect)         | `index/review_dataset` read    | `agent_session_files.readDatasetShape`      |
 ## | enter a review over a dataset (AA-3 open)| `vcs.openReviewDataset` → `enterReview` | `readReviewDataset` → `resetReviewEntry` + `enterReview` over the host's VCS ViewModel |
 ## | open a test's recording (AA-2)           | `createNewSession` / `load-trace-file` | the front-end's own opener (`openRecording`) |
+## | the prompt's attachments (the `+` menu)   | a system file dialog → `contextPaths` → `acp-prompt` | the omnibox or the editor → `attachContext` → `contextPaths` → `sendPrompt` |
 ##
 ## The live session's events land in the SESSION'S STORE
 ## (`ReplayDataStore.agentSessions`), which is also what the session tab's
@@ -31,7 +32,7 @@ import ../store/[replay_data_store, types]
 import nim_agents
 import ../agent_service
 import ../viewmodels/[agent_activity_vm, agent_activity_feed, review_entry,
-                      review_session, vcs_vm]
+                      review_session, trace_open, vcs_vm]
 import ./agent_session_files
 import ./agent_live_worker
 
@@ -43,10 +44,29 @@ const
   DefaultAgentCommand* = "codex-acp"
     ## The desktop's (`acp_ipc.defaultCmd`).
   NativeAgentTabPrefix* = "native-acp:"
+  NewSessionTabNote* = "in a new session tab"
+    ## Where `[Open in new tab]` opens a test's recording (§2.2.4).
+  ThisTabNote* = "in this tab"
+    ## Where `[Open recording]` opens it: the current tab's session replaced,
+    ## as the desktop loads it in place (§2.2.4).
+  EditingSessionKeptNote* = "an editing session is not replaced by a replay"
+    ## Why `[Open recording]` opened a new tab after all: the current tab is
+    ## an editing session (Multi-Window-Tab-Management.md, "Replacing the
+    ## session in the current tab", rule 3).
 
 type
   OpenRecordingProc* = proc(request: TraceOpenRequest): string {.closure.}
-    ## Open a recording the front-end's way; "" or the reason it could not.
+    ## Open a recording the front-end's way, where `request.policy` says —
+    ## `topCurrentTab` replaces the current tab's session, `topNewTab` opens
+    ## a new session tab; "" or the reason it could not. The host has already
+    ## decided the policy (`agentRecordingPolicy`).
+
+  AgentRecordingPlacement* = enum
+    ## Where a test's recording went, for the status line.
+    arpNewTab        ## a new session tab, as asked (`[Open in new tab]`)
+    arpThisTab       ## the current tab's session replaced (`[Open recording]`)
+    arpNewTabEditing ## a new tab although the current one was asked for: the
+                     ## current tab is an editing session (rule 3)
 
   UserTurn = object
     beforeEvent: int
@@ -63,6 +83,10 @@ type
       ## The front-end's VCS pane's ViewModel, into which an evidence click
       ## enters a review; nil when the front-end has none.
     openRecording*: OpenRecordingProc
+    currentTabReplaceable*: proc(): bool {.closure.}
+      ## Whether the current tab's session may be replaced by a recording: a
+      ## live replay (not an editing session, not a tab *Stop* ended). nil
+      ## answers no, so a front-end that cannot replace opens a new tab.
     openFile*: proc(path: string) {.closure.}
       ## Opens a review's first file (§7 step 2); nil to open nothing.
     agentCommand*: string
@@ -81,6 +105,33 @@ type
       ## Something the pane shows changed since the front-end last painted.
     dispose: proc()
 
+func agentRecordingPlacement*(asked: TraceOpenPolicy;
+                              currentReplaceable: bool): AgentRecordingPlacement =
+  ## Where a test's recording opens from Agent Activity
+  ## (DeepReview-GUI.md §2.2.4): `[Open in new tab]` in a new session tab;
+  ## `[Open recording]` in the current tab, replacing its session, as the
+  ## desktop loads it in place — unless that session may not be replaced (an
+  ## editing session, rule 3), when it opens in a new tab and says why.
+  if asked == topNewTab: arpNewTab
+  elif currentReplaceable: arpThisTab
+  else: arpNewTabEditing
+
+func placementPolicy*(p: AgentRecordingPlacement): TraceOpenPolicy =
+  ## The policy the front-end's opener performs for a placement.
+  if p == arpThisTab: topCurrentTab else: topNewTab
+
+proc recordingOpenedNote*(request: TraceOpenRequest;
+                          placement: AgentRecordingPlacement): string =
+  ## The status line after a test's recording opened natively: which
+  ## recording, and where — a new session tab, or this tab — and, when
+  ## `[Open recording]` could not replace this tab, why.
+  let name = extractFilename(request.tracePath.strip(leading = false,
+                                                     chars = {'/'}))
+  result = "Opened " & (if name.len > 0: name else: request.tracePath) & " " &
+           (if placement == arpThisTab: ThisTabNote else: NewSessionTabNote)
+  if placement == arpNewTabEditing:
+    result.add ": " & EditingSessionKeptNote
+
 proc splitArgs(value: string): seq[string] =
   for a in value.splitWhitespace():
     if a.len > 0: result.add a
@@ -92,8 +143,14 @@ proc wire(h: NativeAgentHost) =
       host.message = "this front-end cannot open a recording from the " &
                      "agent's session"
     else:
-      let why = host.openRecording(request)
-      host.message = why
+      let replaceable = not host.currentTabReplaceable.isNil and
+                        host.currentTabReplaceable()
+      let placement = agentRecordingPlacement(request.policy, replaceable)
+      var placed = request
+      placed.policy = placement.placementPolicy
+      let why = host.openRecording(placed)
+      host.message = if why.len > 0: why
+                     else: recordingOpenedNote(request, placement)
     host.changed = true)
   h.vm.reviewOpen = ReviewOpenService(requestProc:
     proc(request: ReviewDatasetRequest) =
@@ -216,9 +273,53 @@ proc sendNext(h: NativeAgentHost) =
   h.worker.command(%*{"t": "prompt", "text": text})
   h.project()
 
+# ---------------------------------------------------------------------------
+# The prompt's attachments (the `+` menu, DeepReview-GUI.md §2.2.7)
+# ---------------------------------------------------------------------------
+
+proc attachedPathOf(context: string): string =
+  ## The file an attachment names: `path`, or the path of an editor
+  ## selection's `path:first[-last]`.
+  result = context
+  let colon = context.rfind(':')
+  if colon > 0:
+    let tail = context[colon + 1 .. ^1]
+    if tail.len > 0 and tail.allCharsInSet({'0' .. '9', '-'}) and
+       tail[0] != '-':
+      result = context[0 ..< colon]
+
+proc attachContext*(h: NativeAgentHost; context: string;
+                    mustExist = true): string =
+  ## Attach `context` — a file or folder, a recording, or an editor
+  ## selection (`path:first-last`) — to the next prompt, as the desktop's `+`
+  ## items add to `contextPaths`. A path typed or chosen in the omnibox must
+  ## exist on disk (a relative one is read from the agent's working
+  ## directory); an editor selection names the file the editor shows, and is
+  ## attached as it is (`mustExist = false`). "" when attached, else why not;
+  ## either way the status line has the words (`message`).
+  let c = context.strip()
+  if c.len == 0:
+    result = "type the path of a file or folder to attach"
+  else:
+    let path = c.attachedPathOf()
+    let onDisk = if path.isAbsolute: path else: h.cwd / path
+    if mustExist and not fileExists(onDisk) and not dirExists(onDisk):
+      result = "cannot attach " & c & ": no such file or folder"
+    elif c in h.vm.contextPaths.val:
+      result = c & " is attached already"
+    else:
+      h.vm.contextPaths.val = withContextPath(h.vm.contextPaths.val, c)
+      h.message = "Attached " & c & ": it goes with the next prompt"
+      h.changed = true
+      return ""
+  h.message = result
+  h.changed = true
+
 proc sendPrompt*(h: NativeAgentHost; text: string): string =
   ## Send `text` to the agent, starting the session first when there is
   ## none — the desktop's `/ai <prompt>` and its prompt field's Enter.
+  ## The prompt's attachments go with it, in the desktop's header
+  ## (`contextPromptText`), and are cleared, as the desktop clears them.
   ## Returns "" or why nothing was sent.
   let prompt = text.strip()
   if prompt.len == 0:
@@ -240,7 +341,8 @@ proc sendPrompt*(h: NativeAgentHost; text: string): string =
     h.store.agentSessions.val = state
     h.worker.command(%*{"t": "start", "command": h.agentCommand,
                         "args": h.agentArgs, "cwd": h.cwd})
-  h.pendingPrompts.add prompt
+  h.pendingPrompts.add contextPromptText(prompt, h.vm.contextPaths.val)
+  h.vm.clearContextPaths()
   # The user's turn shows at once, where it was sent — the desktop's
   # `updateAgentUi` adds it before the prompt goes out.
   h.userTurns.add UserTurn(
@@ -317,6 +419,36 @@ proc runFeed*(h: NativeAgentHost; row: AgentFeedRow;
     h.message = "the agent's file diffs open on the desktop"
   else:
     discard
+  h.changed = true
+
+proc rehome*(h: NativeAgentHost; store: ReplayDataStore) =
+  ## Move the host onto another session's store — the session that REPLACED
+  ## the one it served (a recording opened in this tab). The agent is not the
+  ## replay: its conversation, its live worker and its attachments go with
+  ## the tab, as the desktop's panel keeps them when it loads a recording in
+  ## place. The live session's store entry moves with it, so the session
+  ## tab's indicator, which reads the shown session's store, still agrees
+  ## with the pane.
+  if h.isNil or store.isNil or h.store == store:
+    return
+  if h.tabId.len > 0:
+    var moved = store.agentSessions.val
+    var kept = h.store.agentSessions.val
+    var i = 0
+    while i < kept.sessions.len:
+      if kept.sessions[i].tabId == h.tabId:
+        moved.sessions.add kept.sessions[i]
+        kept.sessions.delete(i)
+      else:
+        inc i
+    if kept.activeTabId == h.tabId:
+      moved.activeTabId = h.tabId
+      kept.activeTabId = ""
+    h.store.agentSessions.val = kept
+    store.agentSessions.val = moved
+  h.store = store
+  h.vm.store = store
+  h.service.store = store
   h.changed = true
 
 proc close*(h: NativeAgentHost) =

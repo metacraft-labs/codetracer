@@ -143,9 +143,14 @@ putEnv("TEST_CERTIFICATES_DIR", storeScratch / "user-root")
 putEnv("TEST_CERTIFICATES_SYSTEM_DIR", storeScratch / "system")
 
 proc storeFileCount(): int =
+  ## Certificate RECORDS in the user root: `.toml` names not beginning with
+  ## `.` (Transport.md §2.4). The root's persistent `.write-lock` (§2.3) is
+  ## synchronization metadata, not a certificate, and is not counted.
   if dirExists(storeScratch / "user-root"):
     for path in walkDirRec(storeScratch / "user-root"):
-      inc result
+      let name = path.extractFilename
+      if name.endsWith(".toml") and not name.startsWith("."):
+        inc result
 
 suite "ct test run certificate CLI":
 

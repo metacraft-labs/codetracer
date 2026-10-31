@@ -7,6 +7,7 @@ import
   ../served_client
 
 from ../../viewmodel/platform/vcs import noIndexLockGitArgs
+from ../../viewmodel/viewmodels/agent_prompt_context import contextPromptText
 
 proc getEnv(name: cstring): cstring {.importjs: "(process.env[#] || '')".}
 proc parseArgs(env: cstring): seq[cstring] {.importjs: "((val) => val ? val.split(' ').filter(Boolean) : [])(#)".}
@@ -742,18 +743,16 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
         stringify(rawText)
 
   # Prepend any file/folder context paths as a readable header so Claude has
-  # the path information in-band without requiring read-file tool calls.
+  # the path information in-band without requiring read-file tool calls. The
+  # header is the one the native front-ends send too
+  # (`viewmodels/agent_prompt_context.contextPromptText`).
   let text: cstring =
     if jsHasKey(response, cstring"contextPaths"):
       let rawPaths = cast[seq[cstring]](response[cstring"contextPaths"])
-      if rawPaths.len > 0:
-        var header = "Context paths:\n"
-        for p in rawPaths:
-          header.add("- " & $p & "\n")
-        header.add("\n")
-        cstring(header & $userText)
-      else:
-        userText
+      var paths: seq[string] = @[]
+      for p in rawPaths:
+        paths.add $p
+      cstring(contextPromptText($userText, paths))
     else:
       userText
 

@@ -343,6 +343,158 @@ jobs:
     timeout-minutes: 180
 
     steps:
+      - name: Unmount stale FUSE mounts left in the persistent work directory
+        # PERSISTENT RUNNERS KEEP A DEAD JOB'S tup MOUNT.  `just build-once`
+        # runs tup, and tup tracks dependencies through a FUSE filesystem it
+        # mounts on `<checkout>/src/.tup/mnt`.  A job that is cancelled or
+        # times out while tup is running leaves that mount behind in this
+        # PERSISTENT work directory, and the next job's `actions/checkout`
+        # dies cleaning it: `EBUSY: resource busy or locked, rmdir
+        # '.../src/.tup/mnt'`.  Nothing a later step does can recover from
+        # that, so the mount is dropped here, before the checkout.
+        #
+        # Only FUSE mounts strictly BELOW this job's work directory
+        # ($RUNNER_WORKSPACE, which holds the triggering checkout and every
+        # sibling `clone-siblings` places beside it) are touched, and only
+        # with the unprivileged `fusermount -u -z` the runner user may run on
+        # a mount it made; nothing here needs or takes root.  A mount that
+        # cannot be dropped is a WARNING, not a failure: the checkout below
+        # then fails with the EBUSY that names it, which is no worse than
+        # without this step.  Bash builtins only (no grep/sed/awk), like the
+        # read-only sweep below.  ci/test/launcher-recorder-e2e-workflow-test.sh
+        # executes this block against a planted mount table.
+        shell: bash
+        run: |
+          set -uo pipefail
+          root="${RUNNER_WORKSPACE:-}"
+          mounts="${LRC_MOUNTS_FILE:-/proc/self/mounts}"
+          echo "fuse-sweep: runner=${RUNNER_NAME:-?} root=${root:-<unset>}"
+          if [ -z "${root}" ] || [ ! -d "${root}" ]; then
+            echo "fuse-sweep: found 0 stale FUSE mount(s) (work dir absent - fresh runner)"
+            exit 0
+          fi
+          if [ ! -r "${mounts}" ]; then
+            echo "::warning::fuse-sweep: ${mounts} is not readable, so stale FUSE mounts under ${root} cannot be listed; nothing was unmounted"
+            exit 0
+          fi
+          found=0
+          stuck=0
+          while read -r _dev mnt fstype _rest; do
+            case "${fstype}" in
+              fuse | fuse.* | fuseblk) ;;
+              *) continue ;;
+            esac
+            case "${mnt}" in
+              "${root}"/*) ;;
+              *) continue ;;
+            esac
+            found=$((found + 1))
+            echo "fuse-sweep: stale ${fstype} mount ${mnt}"
+            dropped=0
+            for tool in fusermount3 fusermount /run/wrappers/bin/fusermount3 /run/wrappers/bin/fusermount; do
+              if command -v "${tool}" >/dev/null 2>&1 && "${tool}" -u -z "${mnt}"; then
+                echo "fuse-sweep:   unmounted with ${tool}"
+                dropped=1
+                break
+              fi
+            done
+            if [ "${dropped}" -eq 0 ]; then
+              stuck=$((stuck + 1))
+              echo "::warning::fuse-sweep: could not unmount ${mnt} (no fusermount on PATH, or it refused); actions/checkout will fail with EBUSY on it"
+            fi
+          done <"${mounts}"
+          echo "fuse-sweep: found ${found} stale FUSE mount(s) under ${root}; ${stuck} could not be unmounted"
+
+      - name: Sweep read-only leftovers from the persistent work directory
+        # The second leftover a persistent runner hands the next job: a 0555
+        # directory (the desktop build stages trees out of the Nix store, e.g.
+        # `studio-bundle/.../goldenlayout-base.css`'s parent) that
+        # `actions/checkout`'s clean cannot unlink inside -- `EACCES` on the
+        # file it tried to remove.  This is codetracer.yml's pre-checkout
+        # sweep, byte-identical to ci/runner/sweep-readonly-leftovers.sh
+        # (ci/test/readonly-leftovers-sweep-test.sh enforces that for this
+        # copy too); see that script for the rationale and the measured runs.
+        shell: bash
+        run: |
+          set -uo pipefail
+          shopt -s dotglob nullglob
+          root="${RUNNER_WORKSPACE:-}"
+          echo "ro-sweep: runner=${RUNNER_NAME:-?} root=${root:-<unset>}"
+          if [ -z "$root" ] || [ ! -d "$root" ]; then
+            echo "ro-sweep: found 0 unwritable directory(ies) (work dir absent - fresh runner)"
+            echo "ro-sweep: NOTHING FOUND - this host was already clean, mode 3 did not apply here"
+            exit 0
+          fi
+          ro_count=0
+          ro_shown=0
+          ro_blind=0
+          # Directory-only recursion via a trailing-slash glob, so bash never has to test
+          # the tens of thousands of regular files one at a time. `"$d"/*/` also matches
+          # symlinks TO directories; those are skipped, because following them leaves the
+          # work directory (these checkouts link into /nix/store) and a store path is not
+          # ours to chmod.
+          scan() {
+            local d="$1" e p
+            for e in "$d"/*/; do
+              p="${e%/}"
+              # `[ -L "$p" ] && continue` would be shorter and WRONG: GitHub runs `run:`
+              # blocks under `bash -e`, where a bare `A && B` list that evaluates false is
+              # a fatal command. Every branch here is a condition, never a bare list.
+              if [ -L "$p" ]; then
+                continue
+              fi
+              if [ ! -r "$p" ] || [ ! -x "$p" ]; then
+                ro_blind=$((ro_blind + 1))
+                continue
+              fi
+              if [ ! -w "$p" ]; then
+                ro_count=$((ro_count + 1))
+                if [ "$ro_shown" -lt 10 ]; then
+                  ro_shown=$((ro_shown + 1))
+                  echo "ro-sweep:   unwritable $p"
+                fi
+              fi
+              scan "$p"
+            done
+            return 0
+          }
+          scan "$root"
+          before="$ro_count"
+          echo "ro-sweep: found $before unwritable directory(ies) under $root ($ro_blind unreadable)"
+          if [ "$before" -eq 0 ]; then
+            echo "ro-sweep: NOTHING FOUND - this host was already clean, mode 3 did not apply here"
+            exit 0
+          fi
+          # Prove the tool exists before claiming it worked: a `chmod` that is not on
+          # PATH exits 127, and a `|| true` would turn that into a silent pass.
+          chmod_bin="$(command -v chmod 2>/dev/null || true)"
+          if [ -z "$chmod_bin" ]; then
+            for candidate in /bin/chmod /usr/bin/chmod /run/current-system/sw/bin/chmod; do
+              if [ -x "$candidate" ]; then
+                chmod_bin="$candidate"
+                break
+              fi
+            done
+          fi
+          if [ -z "$chmod_bin" ]; then
+            echo "ro-sweep: FATAL no chmod on PATH and none at /bin/chmod;" \
+              "$before directory(ies) CANNOT be fixed" >&2
+            exit 1
+          fi
+          echo "ro-sweep: using $chmod_bin"
+          "$chmod_bin" -R u+w "$root" 2>/dev/null || true
+          ro_count=0
+          ro_shown=0
+          ro_blind=0
+          scan "$root"
+          after="$ro_count"
+          echo "ro-sweep: after chmod -R u+w: $after unwritable directory(ies) remain"
+          echo "ro-sweep: RESTORED owner-write on $((before - after)) directory(ies)"
+          if [ "$after" -ne 0 ]; then
+            echo "ro-sweep: WARNING $after directory(ies) are not owned by the runner user;" \
+              "checkout will still fail to clean them"
+          fi
+
       - name: Plan the workspace layout
         # See "WORKSPACE LAYOUT" in this file's header.  The triggering repo is
         # the primary checkout, because `clone-siblings` cannot clone a repo
@@ -705,9 +857,14 @@ jobs:
             # isonim-tui is in codetracer's repro.lock since 6850efc5e, but the
             # recorder repos' lock records these edges also resolve do not
             # carry it, so it keeps the SHA shape.
-            isonim=bc0a4edd91937d3b731ec9e3b04799b2cf2b9197
-            isonim-tui=70124210a3e72a2687bcbc646de296ddd71f2efd
-            runquota=f9f1118cd33a27051c6fea683348f343df91e96f
+            isonim=6927da97dfd0ff92b24662d54f6d261528811632
+            isonim-tui=1d123c35bd241a4af853b2df6b21c973fba9e6b7
+            runquota=35b9dfe4af6e18f3f2a2242ece7cff330eb581e2
+            # Required by scripts/require-siblings.sh (`ct` links its reference
+            # library). SHA, not bare: this workflow is also called from recorder
+            # repos, whose repro.lock need not pin it. It is a flake input, so the
+            # SHA is the one flake.lock pins.
+            test-certificates-tools=9864082065c8acb1db315e65a6a4157a3ab77117
 
       - name: Check the workspace has the shape the driver expects
         # Cheap, and it turns the one class of failure a local rehearsal cannot
@@ -840,6 +997,32 @@ jobs:
         # duplicated.  A sibling with no flake.nix has nothing for a later step
         # to evaluate and is skipped.
         #
+        # REPRO'S OWN TOOL PROVISIONING IS A FETCH NO DEV SHELL EVALUATES, so
+        # it is fetched here FIRST, explicitly.  `repro exec` (build-siblings'
+        # toolchain lookup, and every sibling build after it) realizes the
+        # tools a repo's `repro.nim` declares from reprobuild's package
+        # catalog, and every `nixpkgs#` entry there resolves against ONE
+        # nixpkgs revision, `CanonicalNixpkgsRev` in reprobuild's
+        # libs/repro_dsl_stdlib/src/repro_dsl_stdlib/nixpkgs_pin.nim.  repro
+        # fetches it itself, as `github:NixOS/nixpkgs/<rev>?narHash=<hash>`,
+        # and no flake evaluated below reaches that ref.  Launcher run
+        # 40412127662's beam arm died on exactly it, ~2 h after the mint, in
+        # `Build ct-print`'s toolchain lookup:
+        #
+        #   unable to download 'https://api.github.com/repos/NixOS/nixpkgs/
+        #   tarball/addf7cf5f383...': HTTP error 401 "Bad credentials"
+        #
+        # The revision is READ, never restated: the reprobuild that provides
+        # `repro` to this job is codetracer's `reprobuild` flake input
+        # (nix/shells/ci-base.nix: `inputs'.reprobuild.packages`, and
+        # REPROBUILD_SOURCE_ROOT for the stdlib the provider compiles
+        # against), so the pin file is read out of THAT input at the revision
+        # this checkout's flake.lock locks, and the exact ref repro will ask
+        # for is fetched.  A codetracer whose flake has no direct `reprobuild`
+        # input gets repro from elsewhere and is skipped; a pin file that no
+        # longer reads is an error naming it, because skipping it silently
+        # would reopen the 401 above.
+        #
         # NO CREDENTIAL IS HANDLED HERE.  nix reads the token from the
         # user-level nix.conf `setup-nix` wrote (mode 600); this step never
         # names it, and nix's diagnostics carry the URL, never the header.
@@ -849,6 +1032,47 @@ jobs:
           RECORDER_REPO: ${{ inputs.recorder-repo }}
         run: |
           set -euo pipefail
+          PIN_FILE="libs/repro_dsl_stdlib/src/repro_dsl_stdlib/nixpkgs_pin.nim"
+          rb_node=""
+          if [ -f "${CT_DIR}/flake.lock" ]; then
+            rb_node="$(jq -r '.nodes.root.inputs.reprobuild // "" | if type == "string" then . else "" end' "${CT_DIR}/flake.lock")"
+          fi
+          if [ -z "${rb_node}" ]; then
+            echo "no direct reprobuild input in ${CT_DIR}/flake.lock (repro's tool-provisioning nixpkgs is not this flake's to name)"
+          else
+            rb_ref="$(jq -r --arg n "${rb_node}" '.nodes[$n].locked | if .type == "github" then "github:\(.owner)/\(.repo)/\(.rev)?narHash=\(.narHash | @uri)" else "" end' "${CT_DIR}/flake.lock")"
+            if [ -z "${rb_ref}" ]; then
+              echo "::error::codetracer's reprobuild flake input is not a locked github input, so this step cannot read the nixpkgs revision repro provisions tools from. Teach this step the input's type; skipping it would leave that fetch to after the token expires."
+              exit 1
+            fi
+            if ! rb_json="$(nix flake prefetch --json "${rb_ref}")"; then
+              echo "::error::could not fetch ${rb_ref} (codetracer's reprobuild input, which names the nixpkgs repro provisions tools from) while this job's GitHub token is still valid; nix's own diagnostic is above this line."
+              exit 1
+            fi
+            rb_src="$(jq -r '.storePath // ""' <<<"${rb_json}" 2>/dev/null || true)"
+            pin="${rb_src}/${PIN_FILE}"
+            np_rev=""
+            np_nar=""
+            if [ -n "${rb_src}" ] && [ -f "${pin}" ]; then
+              np_rev="$(sed -n -E 's|^[[:space:]]*CanonicalNixpkgsRev\*?[[:space:]]*=[[:space:]]*"([0-9a-f]{40})".*|\1|p' "${pin}")"
+              np_nar="$(sed -n -E 's|^[[:space:]]*CanonicalNixpkgsNarHash\*?[[:space:]]*=[[:space:]]*"(sha256-[A-Za-z0-9+/=]+)".*|\1|p' "${pin}")"
+            fi
+            if [ -z "${np_rev}" ] || [ -z "${np_nar}" ]; then
+              echo "::error::could not read CanonicalNixpkgsRev / CanonicalNixpkgsNarHash from ${PIN_FILE} in ${rb_ref}. That pair names the nixpkgs repro realizes every catalog tool from; this step must fetch it while the token is valid. If reprobuild moved or renamed it, update this step."
+              exit 1
+            fi
+            np_nar_q="${np_nar//+/%2B}"
+            np_nar_q="${np_nar_q//\//%2F}"
+            np_nar_q="${np_nar_q//=/%3D}"
+            np_ref="github:NixOS/nixpkgs/${np_rev}?narHash=${np_nar_q}"
+            started="${SECONDS}"
+            if ! nix flake prefetch "${np_ref}" >/dev/null; then
+              echo "::error::could not fetch ${np_ref} (the nixpkgs repro provisions tools from) while this job's GitHub token is still valid; nix's own diagnostic is above this line."
+              exit 1
+            fi
+            echo "fetched: ${np_ref} (repro tool provisioning; ${rb_ref}) ($((SECONDS - started))s)"
+          fi
+
           SYSTEM="$(nix eval --impure --raw --expr builtins.currentSystem)"
           PARENT="$(cd "${CT_DIR}/.." && pwd)"
           dirs=("${CT_DIR}" "${CT_DIR}" "${PARENT}/codetracer-trace-format-nim" "${PARENT}/${RECORDER_REPO}")

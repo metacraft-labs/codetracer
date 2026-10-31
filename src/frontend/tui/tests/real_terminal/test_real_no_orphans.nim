@@ -113,7 +113,7 @@ suite "CTUI-14 Tier 2: a hundred sessions leave no unreaped children":
     ck resolved.outcome == foRecorded
     tracePath = resolved.tracePath
     ck dirExists(tracePath)
-    ck fileExists(wedgeFolder() / "trace.bin")
+    ck isPipe(wedgeFolder() / WedgeContainer)
 
   test "THE DETECTOR WORKS: a live replay-server is found, and then is not":
     # THE POSITIVE ARM. Without it, `survivingReplayServers().len == 0` is the

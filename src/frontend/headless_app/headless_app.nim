@@ -395,11 +395,16 @@ proc paneViewModel*(slot: HeadlessSessionSlot; kind: PaneKind): ViewModel =
     # (`layout_model.PaneCapability`), and this answers what is true: no
     # ViewModel here, `paneIsLive` false.
     nil
-  of paneProblems, paneRequests:
-    # PLAT-48. The desktop's PROBLEMS and REQUESTS footer panels, which the
-    # shared default now docks. Their ViewModels are the desktop's (a build's
-    # diagnostics, a service's request log); the replay session owns neither,
-    # so nil, for the reason above.
+  of paneRequests:
+    # PLAT-58. The recording's request spans: the session's own
+    # `RequestPanelVM`, the one the desktop's REQUESTS panel draws (built by
+    # `initializePanelViewModels` on the session's store). Until PLAT-58 this
+    # answered nil beside the Problems pane, as a desktop-only footer panel.
+    ViewModel(s.requestPanelVM)
+  of paneProblems:
+    # PLAT-48. The desktop's PROBLEMS footer panel, which the shared default
+    # docks. Its ViewModel is the desktop's (a build's diagnostics); the
+    # replay session owns none, so nil, for the reason above.
     nil
 
 proc paneIsLive*(slot: HeadlessSessionSlot; kind: PaneKind): bool =

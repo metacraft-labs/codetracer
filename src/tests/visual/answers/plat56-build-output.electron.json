@@ -1,0 +1,938 @@
+{
+ "_comment": [
+  "PLAT-56 — the desktop's BUILD panel and status bar, read from the real Electron app after real `gcc` builds.",
+  "Produced by src/tests/gui/tests/build/plat56-build-output-capture.spec.ts",
+  "(`just plat56-capture-electron`)."
+ ],
+ "idle": {
+  "header": "",
+  "headerClass": "build-header",
+  "duration": "",
+  "empty": true,
+  "historyShown": false,
+  "lines": [],
+  "status": "",
+  "statusIcon": "",
+  "statusClass": ""
+ },
+ "failing": {
+  "command": "gcc -Wall -fdiagnostics-color=always -c src/main.c -o /dev/null",
+  "build": {
+   "stdout": [],
+   "stderr": [
+    "\u001b[01m\u001b[Ksrc/main.c:\u001b[m\u001b[K In function ‘\u001b[01m\u001b[Ktwice\u001b[m\u001b[K’:",
+    "\u001b[01m\u001b[Ksrc/main.c:5:17:\u001b[m\u001b[K \u001b[01;31m\u001b[Kerror: \u001b[m\u001b[Kexpected ‘\u001b[01m\u001b[K;\u001b[m\u001b[K’ before ‘\u001b[01m\u001b[K}\u001b[m\u001b[K’ token",
+    "    5 |     return v * 2",
+    "      |                 \u001b[01;31m\u001b[K^\u001b[m\u001b[K",
+    "      |                 \u001b[32m\u001b[K;\u001b[m\u001b[K",
+    "    6 | \u001b[32m\u001b[K}\u001b[m\u001b[K",
+    "      | \u001b[32m\u001b[K~\u001b[m\u001b[K                ",
+    "\u001b[01m\u001b[Ksrc/main.c:4:9:\u001b[m\u001b[K \u001b[01;35m\u001b[Kwarning: \u001b[m\u001b[Kunused variable ‘\u001b[01m\u001b[Kunused\u001b[m\u001b[K’ [\u001b[01;35m\u001b[K-Wunused-variable\u001b[m\u001b[K]",
+    "    4 |     int \u001b[01;35m\u001b[Kunused\u001b[m\u001b[K = 1;",
+    "      |         \u001b[01;35m\u001b[K^~~~~~\u001b[m\u001b[K",
+    "\u001b[01m\u001b[Ksrc/main.c:\u001b[m\u001b[K In function ‘\u001b[01m\u001b[Kmain\u001b[m\u001b[K’:",
+    "\u001b[01m\u001b[Ksrc/main.c:10:12:\u001b[m\u001b[K \u001b[01;31m\u001b[Kerror: \u001b[m\u001b[K‘\u001b[01m\u001b[Kundefined_name\u001b[m\u001b[K’ undeclared (first use in this function)",
+    "   10 |     return \u001b[01;31m\u001b[Kundefined_name\u001b[m\u001b[K;",
+    "      |            \u001b[01;31m\u001b[K^~~~~~~~~~~~~~\u001b[m\u001b[K",
+    "\u001b[01m\u001b[Ksrc/main.c:10:12:\u001b[m\u001b[K \u001b[01;36m\u001b[Knote: \u001b[m\u001b[Keach undeclared identifier is reported only once for each function it appears in"
+   ],
+   "code": 1
+  },
+  "header": "build failed (exit code 1)",
+  "headerClass": "build-header build-failed",
+  "duration": "in 1.5s",
+  "empty": false,
+  "historyShown": false,
+  "lines": [
+   {
+    "class": "build-stderr",
+    "text": "src/main.c: In function ‘twice’:",
+    "runs": [
+     {
+      "text": "src/main.c:",
+      "style": "font-weight:bold",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": " In function ‘",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": "twice",
+      "style": "font-weight:bold",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": "’:",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     }
+    ]
+   },
+   {
+    "class": "build-line-error",
+    "text": "src/main.c:5:17: error: expected ‘;’ before ‘}’ token",
+    "runs": [
+     {
+      "text": "src/main.c:5:17:",
+      "style": "font-weight:bold",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": " ",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": "error: ",
+      "style": "color:rgb(187,0,0);font-weight:bold",
+      "color": "rgb(187, 0, 0)"
+     },
+     {
+      "text": "expected ‘",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": ";",
+      "style": "font-weight:bold",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": "’ before ‘",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": "}",
+      "style": "font-weight:bold",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": "’ token",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     }
+    ]
+   },
+   {
+    "class": "build-stderr",
+    "text": "    5 |     return v * 2",
+    "runs": [
+     {
+      "text": "    5 |     return v * 2",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     }
+    ]
+   },
+   {
+    "class": "build-stderr",
+    "text": "      |                 ^",
+    "runs": [
+     {
+      "text": "      |                 ",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": "^",
+      "style": "color:rgb(187,0,0);font-weight:bold",
+      "color": "rgb(187, 0, 0)"
+     }
+    ]
+   },
+   {
+    "class": "build-stderr",
+    "text": "      |                 ;",
+    "runs": [
+     {
+      "text": "      |                 ",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": ";",
+      "style": "color:rgb(0,187,0)",
+      "color": "rgb(0, 187, 0)"
+     }
+    ]
+   },
+   {
+    "class": "build-stderr",
+    "text": "    6 | }",
+    "runs": [
+     {
+      "text": "    6 | ",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": "}",
+      "style": "color:rgb(0,187,0)",
+      "color": "rgb(0, 187, 0)"
+     }
+    ]
+   },
+   {
+    "class": "build-stderr",
+    "text": "      | ~                ",
+    "runs": [
+     {
+      "text": "      | ",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": "~",
+      "style": "color:rgb(0,187,0)",
+      "color": "rgb(0, 187, 0)"
+     },
+     {
+      "text": "                ",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     }
+    ]
+   },
+   {
+    "class": "build-line-warning",
+    "text": "src/main.c:4:9: warning: unused variable ‘unused’ [-Wunused-variable]",
+    "runs": [
+     {
+      "text": "src/main.c:4:9:",
+      "style": "font-weight:bold",
+      "color": "rgb(253, 186, 116)"
+     },
+     {
+      "text": " ",
+      "style": "",
+      "color": "rgb(253, 186, 116)"
+     },
+     {
+      "text": "warning: ",
+      "style": "color:rgb(187,0,187);font-weight:bold",
+      "color": "rgb(187, 0, 187)"
+     },
+     {
+      "text": "unused variable ‘",
+      "style": "",
+      "color": "rgb(253, 186, 116)"
+     },
+     {
+      "text": "unused",
+      "style": "font-weight:bold",
+      "color": "rgb(253, 186, 116)"
+     },
+     {
+      "text": "’ [",
+      "style": "",
+      "color": "rgb(253, 186, 116)"
+     },
+     {
+      "text": "-Wunused-variable",
+      "style": "color:rgb(187,0,187);font-weight:bold",
+      "color": "rgb(187, 0, 187)"
+     },
+     {
+      "text": "]",
+      "style": "",
+      "color": "rgb(253, 186, 116)"
+     }
+    ]
+   },
+   {
+    "class": "build-stderr",
+    "text": "    4 |     int unused = 1;",
+    "runs": [
+     {
+      "text": "    4 |     int ",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": "unused",
+      "style": "color:rgb(187,0,187);font-weight:bold",
+      "color": "rgb(187, 0, 187)"
+     },
+     {
+      "text": " = 1;",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     }
+    ]
+   },
+   {
+    "class": "build-stderr",
+    "text": "      |         ^~~~~~",
+    "runs": [
+     {
+      "text": "      |         ",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": "^~~~~~",
+      "style": "color:rgb(187,0,187);font-weight:bold",
+      "color": "rgb(187, 0, 187)"
+     }
+    ]
+   },
+   {
+    "class": "build-stderr",
+    "text": "src/main.c: In function ‘main’:",
+    "runs": [
+     {
+      "text": "src/main.c:",
+      "style": "font-weight:bold",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": " In function ‘",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": "main",
+      "style": "font-weight:bold",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": "’:",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     }
+    ]
+   },
+   {
+    "class": "build-line-error",
+    "text": "src/main.c:10:12: error: ‘undefined_name’ undeclared (first use in this function)",
+    "runs": [
+     {
+      "text": "src/main.c:10:12:",
+      "style": "font-weight:bold",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": " ",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": "error: ",
+      "style": "color:rgb(187,0,0);font-weight:bold",
+      "color": "rgb(187, 0, 0)"
+     },
+     {
+      "text": "‘",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": "undefined_name",
+      "style": "font-weight:bold",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": "’ undeclared (first use in this function)",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     }
+    ]
+   },
+   {
+    "class": "build-stderr",
+    "text": "   10 |     return undefined_name;",
+    "runs": [
+     {
+      "text": "   10 |     return ",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": "undefined_name",
+      "style": "color:rgb(187,0,0);font-weight:bold",
+      "color": "rgb(187, 0, 0)"
+     },
+     {
+      "text": ";",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     }
+    ]
+   },
+   {
+    "class": "build-stderr",
+    "text": "      |            ^~~~~~~~~~~~~~",
+    "runs": [
+     {
+      "text": "      |            ",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": "^~~~~~~~~~~~~~",
+      "style": "color:rgb(187,0,0);font-weight:bold",
+      "color": "rgb(187, 0, 0)"
+     }
+    ]
+   },
+   {
+    "class": "build-line-info",
+    "text": "src/main.c:10:12: note: each undeclared identifier is reported only once for each function it appears in",
+    "runs": [
+     {
+      "text": "src/main.c:10:12:",
+      "style": "font-weight:bold",
+      "color": "rgb(243, 243, 243)"
+     },
+     {
+      "text": " ",
+      "style": "",
+      "color": "rgb(243, 243, 243)"
+     },
+     {
+      "text": "note: ",
+      "style": "color:rgb(0,187,187);font-weight:bold",
+      "color": "rgb(0, 187, 187)"
+     },
+     {
+      "text": "each undeclared identifier is reported only once for each function it appears in",
+      "style": "",
+      "color": "rgb(243, 243, 243)"
+     }
+    ]
+   }
+  ],
+  "status": "Build failed: 2 errors, 1 warning",
+  "statusIcon": "✗",
+  "statusClass": "build-status status-inline build-status-failed",
+  "lineContextMenu": [],
+  "press": {
+   "line": 1,
+   "before": {
+    "path": "src/main.c",
+    "line": 1
+   },
+   "opened": {
+    "path": "src/main.c",
+    "line": 5
+   }
+  }
+ },
+ "passing": {
+  "command": "gcc -Wall -fdiagnostics-color=always -c src/ok.c -o /dev/null",
+  "build": {
+   "stdout": [],
+   "stderr": [
+    "\u001b[01m\u001b[Ksrc/ok.c:\u001b[m\u001b[K In function ‘\u001b[01m\u001b[Kmain\u001b[m\u001b[K’:",
+    "\u001b[01m\u001b[Ksrc/ok.c:4:9:\u001b[m\u001b[K \u001b[01;35m\u001b[Kwarning: \u001b[m\u001b[Kunused variable ‘\u001b[01m\u001b[Kspare\u001b[m\u001b[K’ [\u001b[01;35m\u001b[K-Wunused-variable\u001b[m\u001b[K]",
+    "    4 |     int \u001b[01;35m\u001b[Kspare\u001b[m\u001b[K = 0;",
+    "      |         \u001b[01;35m\u001b[K^~~~~\u001b[m\u001b[K"
+   ],
+   "code": 0
+  },
+  "header": "build succeeded",
+  "headerClass": "build-header build-succeeded",
+  "duration": "in 0.3s",
+  "empty": false,
+  "historyShown": true,
+  "lines": [
+   {
+    "class": "build-stderr",
+    "text": "src/ok.c: In function ‘main’:",
+    "runs": [
+     {
+      "text": "src/ok.c:",
+      "style": "font-weight:bold",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": " In function ‘",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": "main",
+      "style": "font-weight:bold",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": "’:",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     }
+    ]
+   },
+   {
+    "class": "build-line-warning",
+    "text": "src/ok.c:4:9: warning: unused variable ‘spare’ [-Wunused-variable]",
+    "runs": [
+     {
+      "text": "src/ok.c:4:9:",
+      "style": "font-weight:bold",
+      "color": "rgb(253, 186, 116)"
+     },
+     {
+      "text": " ",
+      "style": "",
+      "color": "rgb(253, 186, 116)"
+     },
+     {
+      "text": "warning: ",
+      "style": "color:rgb(187,0,187);font-weight:bold",
+      "color": "rgb(187, 0, 187)"
+     },
+     {
+      "text": "unused variable ‘",
+      "style": "",
+      "color": "rgb(253, 186, 116)"
+     },
+     {
+      "text": "spare",
+      "style": "font-weight:bold",
+      "color": "rgb(253, 186, 116)"
+     },
+     {
+      "text": "’ [",
+      "style": "",
+      "color": "rgb(253, 186, 116)"
+     },
+     {
+      "text": "-Wunused-variable",
+      "style": "color:rgb(187,0,187);font-weight:bold",
+      "color": "rgb(187, 0, 187)"
+     },
+     {
+      "text": "]",
+      "style": "",
+      "color": "rgb(253, 186, 116)"
+     }
+    ]
+   },
+   {
+    "class": "build-stderr",
+    "text": "    4 |     int spare = 0;",
+    "runs": [
+     {
+      "text": "    4 |     int ",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": "spare",
+      "style": "color:rgb(187,0,187);font-weight:bold",
+      "color": "rgb(187, 0, 187)"
+     },
+     {
+      "text": " = 0;",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     }
+    ]
+   },
+   {
+    "class": "build-stderr",
+    "text": "      |         ^~~~~",
+    "runs": [
+     {
+      "text": "      |         ",
+      "style": "",
+      "color": "rgb(252, 165, 165)"
+     },
+     {
+      "text": "^~~~~",
+      "style": "color:rgb(187,0,187);font-weight:bold",
+      "color": "rgb(187, 0, 187)"
+     }
+    ]
+   }
+  ],
+  "status": "Build succeeded in 0.3s",
+  "statusIcon": "✓",
+  "statusClass": "build-status status-inline build-status-succeeded"
+ },
+ "history": {
+  "labels": [
+   "Latest build",
+   "#1 gcc -Wall -fdiagnostics-color=always -c src/main.c -o /dev/null — failed (exit code 1), 1.5s"
+  ],
+  "shown": {
+   "header": "build failed (exit code 1)",
+   "headerClass": "build-header build-failed",
+   "duration": "in 1.5s",
+   "empty": false,
+   "historyShown": true,
+   "lines": [
+    {
+     "class": "build-stderr",
+     "text": "src/main.c: In function ‘twice’:",
+     "runs": [
+      {
+       "text": "src/main.c:",
+       "style": "font-weight:bold",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": " In function ‘",
+       "style": "",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": "twice",
+       "style": "font-weight:bold",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": "’:",
+       "style": "",
+       "color": "rgb(252, 165, 165)"
+      }
+     ]
+    },
+    {
+     "class": "build-line-error",
+     "text": "src/main.c:5:17: error: expected ‘;’ before ‘}’ token",
+     "runs": [
+      {
+       "text": "src/main.c:5:17:",
+       "style": "font-weight:bold",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": " ",
+       "style": "",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": "error: ",
+       "style": "color:rgb(187,0,0);font-weight:bold",
+       "color": "rgb(187, 0, 0)"
+      },
+      {
+       "text": "expected ‘",
+       "style": "",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": ";",
+       "style": "font-weight:bold",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": "’ before ‘",
+       "style": "",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": "}",
+       "style": "font-weight:bold",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": "’ token",
+       "style": "",
+       "color": "rgb(252, 165, 165)"
+      }
+     ]
+    },
+    {
+     "class": "build-stderr",
+     "text": "    5 |     return v * 2",
+     "runs": [
+      {
+       "text": "    5 |     return v * 2",
+       "style": "",
+       "color": "rgb(252, 165, 165)"
+      }
+     ]
+    },
+    {
+     "class": "build-stderr",
+     "text": "      |                 ^",
+     "runs": [
+      {
+       "text": "      |                 ",
+       "style": "",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": "^",
+       "style": "color:rgb(187,0,0);font-weight:bold",
+       "color": "rgb(187, 0, 0)"
+      }
+     ]
+    },
+    {
+     "class": "build-stderr",
+     "text": "      |                 ;",
+     "runs": [
+      {
+       "text": "      |                 ",
+       "style": "",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": ";",
+       "style": "color:rgb(0,187,0)",
+       "color": "rgb(0, 187, 0)"
+      }
+     ]
+    },
+    {
+     "class": "build-stderr",
+     "text": "    6 | }",
+     "runs": [
+      {
+       "text": "    6 | ",
+       "style": "",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": "}",
+       "style": "color:rgb(0,187,0)",
+       "color": "rgb(0, 187, 0)"
+      }
+     ]
+    },
+    {
+     "class": "build-stderr",
+     "text": "      | ~                ",
+     "runs": [
+      {
+       "text": "      | ",
+       "style": "",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": "~",
+       "style": "color:rgb(0,187,0)",
+       "color": "rgb(0, 187, 0)"
+      },
+      {
+       "text": "                ",
+       "style": "",
+       "color": "rgb(252, 165, 165)"
+      }
+     ]
+    },
+    {
+     "class": "build-line-warning",
+     "text": "src/main.c:4:9: warning: unused variable ‘unused’ [-Wunused-variable]",
+     "runs": [
+      {
+       "text": "src/main.c:4:9:",
+       "style": "font-weight:bold",
+       "color": "rgb(253, 186, 116)"
+      },
+      {
+       "text": " ",
+       "style": "",
+       "color": "rgb(253, 186, 116)"
+      },
+      {
+       "text": "warning: ",
+       "style": "color:rgb(187,0,187);font-weight:bold",
+       "color": "rgb(187, 0, 187)"
+      },
+      {
+       "text": "unused variable ‘",
+       "style": "",
+       "color": "rgb(253, 186, 116)"
+      },
+      {
+       "text": "unused",
+       "style": "font-weight:bold",
+       "color": "rgb(253, 186, 116)"
+      },
+      {
+       "text": "’ [",
+       "style": "",
+       "color": "rgb(253, 186, 116)"
+      },
+      {
+       "text": "-Wunused-variable",
+       "style": "color:rgb(187,0,187);font-weight:bold",
+       "color": "rgb(187, 0, 187)"
+      },
+      {
+       "text": "]",
+       "style": "",
+       "color": "rgb(253, 186, 116)"
+      }
+     ]
+    },
+    {
+     "class": "build-stderr",
+     "text": "    4 |     int unused = 1;",
+     "runs": [
+      {
+       "text": "    4 |     int ",
+       "style": "",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": "unused",
+       "style": "color:rgb(187,0,187);font-weight:bold",
+       "color": "rgb(187, 0, 187)"
+      },
+      {
+       "text": " = 1;",
+       "style": "",
+       "color": "rgb(252, 165, 165)"
+      }
+     ]
+    },
+    {
+     "class": "build-stderr",
+     "text": "      |         ^~~~~~",
+     "runs": [
+      {
+       "text": "      |         ",
+       "style": "",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": "^~~~~~",
+       "style": "color:rgb(187,0,187);font-weight:bold",
+       "color": "rgb(187, 0, 187)"
+      }
+     ]
+    },
+    {
+     "class": "build-stderr",
+     "text": "src/main.c: In function ‘main’:",
+     "runs": [
+      {
+       "text": "src/main.c:",
+       "style": "font-weight:bold",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": " In function ‘",
+       "style": "",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": "main",
+       "style": "font-weight:bold",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": "’:",
+       "style": "",
+       "color": "rgb(252, 165, 165)"
+      }
+     ]
+    },
+    {
+     "class": "build-line-error",
+     "text": "src/main.c:10:12: error: ‘undefined_name’ undeclared (first use in this function)",
+     "runs": [
+      {
+       "text": "src/main.c:10:12:",
+       "style": "font-weight:bold",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": " ",
+       "style": "",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": "error: ",
+       "style": "color:rgb(187,0,0);font-weight:bold",
+       "color": "rgb(187, 0, 0)"
+      },
+      {
+       "text": "‘",
+       "style": "",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": "undefined_name",
+       "style": "font-weight:bold",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": "’ undeclared (first use in this function)",
+       "style": "",
+       "color": "rgb(252, 165, 165)"
+      }
+     ]
+    },
+    {
+     "class": "build-stderr",
+     "text": "   10 |     return undefined_name;",
+     "runs": [
+      {
+       "text": "   10 |     return ",
+       "style": "",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": "undefined_name",
+       "style": "color:rgb(187,0,0);font-weight:bold",
+       "color": "rgb(187, 0, 0)"
+      },
+      {
+       "text": ";",
+       "style": "",
+       "color": "rgb(252, 165, 165)"
+      }
+     ]
+    },
+    {
+     "class": "build-stderr",
+     "text": "      |            ^~~~~~~~~~~~~~",
+     "runs": [
+      {
+       "text": "      |            ",
+       "style": "",
+       "color": "rgb(252, 165, 165)"
+      },
+      {
+       "text": "^~~~~~~~~~~~~~",
+       "style": "color:rgb(187,0,0);font-weight:bold",
+       "color": "rgb(187, 0, 0)"
+      }
+     ]
+    },
+    {
+     "class": "build-line-info",
+     "text": "src/main.c:10:12: note: each undeclared identifier is reported only once for each function it appears in",
+     "runs": [
+      {
+       "text": "src/main.c:10:12:",
+       "style": "font-weight:bold",
+       "color": "rgb(243, 243, 243)"
+      },
+      {
+       "text": " ",
+       "style": "",
+       "color": "rgb(243, 243, 243)"
+      },
+      {
+       "text": "note: ",
+       "style": "color:rgb(0,187,187);font-weight:bold",
+       "color": "rgb(0, 187, 187)"
+      },
+      {
+       "text": "each undeclared identifier is reported only once for each function it appears in",
+       "style": "",
+       "color": "rgb(243, 243, 243)"
+      }
+     ]
+    }
+   ],
+   "status": "Build succeeded in 0.3s",
+   "statusIcon": "✓",
+   "statusClass": "build-status status-inline build-status-succeeded"
+  }
+ },
+ "statusPress": {
+  "panelsBefore": 0,
+  "panelsAfter": 1
+ }
+}

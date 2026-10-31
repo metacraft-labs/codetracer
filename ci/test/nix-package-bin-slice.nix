@@ -36,18 +36,26 @@ assert lib.assertMsg (lib.hasInfix "--mm:orc" pkg.buildPhase)
   "the codetracer package does not compile anything with --mm:orc";
 assert lib.assertMsg (lib.hasInfix "cp ./ct-test $out/bin" pkg.installPhase)
   "the codetracer package does not install ct-test into $out/bin";
+assert lib.assertMsg (lib.hasInfix "/bin/io-mon $out/bin/" pkg.installPhase)
+  "the codetracer package does not install the io-mon CLI into $out/bin";
+assert lib.assertMsg (lib.hasInfix "/lib/librepro_monitor_shim.* $out/lib/" pkg.installPhase)
+  "the codetracer package does not install the io-mon shim into $out/lib";
 pkg.overrideAttrs (old: {
   name = "codetracer-bin-slice";
   nativeBuildInputs = builtins.filter (d: !(heavy (d.name or ""))) old.nativeBuildInputs;
   buildPhase = dropHeavy (
     lib.concatStringsSep "\n" (builtins.filter keepLine (lib.splitString "\n" pkg.buildPhase))
   );
-  # The package's `bin/` as its installPhase lays it out: `ct` and `ct-test`
-  # side by side (`db-backend-record` and `ct-remote` play no part here).
+  # The package's `bin/` and `lib/` as its installPhase lays them out: `ct`
+  # and `ct-test` side by side, and the io-mon monitor `ct-test` captures its
+  # read set with -- the CLI in `bin/`, the shim in `lib/` (`db-backend-record`
+  # and `ct-remote` play no part here).
   installPhase = ''
-    mkdir -p $out/bin
+    mkdir -p $out/bin $out/lib
     cp ./ct $out/bin
     cp ./ct-test $out/bin
+    cp ${pkg.ctIoMon}/bin/io-mon $out/bin/
+    cp ${pkg.ctIoMon}/lib/librepro_monitor_shim.* $out/lib/
   '';
   postFixup = dropHeavy old.postFixup;
 })

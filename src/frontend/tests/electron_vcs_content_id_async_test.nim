@@ -278,6 +278,20 @@ proc runCases() {.async.} =
   ck $indexBytes(cstring(repo & "/.git/index")) == indexBefore,
      "the user's index is byte-identical afterwards"
 
+  # The declared certificate scopes (Tooling §3.1), read by the same reader
+  # as the synchronous host, off the main thread too.
+  discard git(repo, "config", "--add", "testCertificatesScope.lib.path", "src")
+  discard git(repo, "config", "--add", "testCertificatesScope.lib.path", "a.txt")
+  let scopesObs = await observe(facade.declaredScopes(repo))
+  ck not scopesObs.settledInline,
+     "declaredScopes: the future is still pending after the drain"
+  let scopesExpected = declaredScopesOver(nodeContentIdHost(), profile, repo)
+  ck scopesObs.outcome.ok and scopesExpected.ok and
+     scopesObs.outcome.value.scopes == scopesExpected.value.scopes and
+     scopesObs.outcome.value.scopes == @[@["a.txt", "src"]],
+     "declaredScopes: the synchronous reader's answer, the declared scope"
+  discard git(repo, "config", "--remove-section", "testCertificatesScope.lib")
+
   # An assume-unchanged entry: no content id, and the path named.
   let assumed = workspace & "/assumed"
   makeDir(assumed)
@@ -399,7 +413,7 @@ proc runCases() {.async.} =
   ck leftovers().len == 0,
      "no ct-content-id-* directory is left under the host's temporary root"
 
-const ExpectedChecks = 71
+const ExpectedChecks = 73
 
 proc main() {.async.} =
   try:

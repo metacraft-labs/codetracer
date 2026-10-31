@@ -36,6 +36,7 @@ import std/[algorithm, cpuinfo, json, locks, options, os, sets, strutils,
 
 import contracts
 import discovery
+import run_read_capture
 
 type
   PartitionMode* = enum
@@ -370,6 +371,8 @@ type
     resultsLock: ptr Lock
     outcomes: ptr seq[RunUnitOutcome]
     handoff: ptr ResultHandoff
+    capture: ptr ReadCaptureSession
+      ## The read-set capture of the run, or nil (`run_read_capture`).
 
 proc resolveThreadCount*(requested: int): int =
   ## Resolve the effective worker-thread count. An explicit positive
@@ -432,7 +435,8 @@ proc isRunnableUnit*(registry: ProviderRegistry; unit: RunUnit): bool =
   false
 
 proc runUnitOutcome(
-    registry: ptr ProviderRegistry; unit: RunUnit): RunUnitOutcome {.gcsafe.} =
+    registry: ptr ProviderRegistry; unit: RunUnit;
+    capture: ptr ReadCaptureSession = nil): RunUnitOutcome {.gcsafe.} =
   ## Execute one run unit by invoking the owning provider's ``run`` proc with
   ## the unit's scope, and tag the returned events. A missing provider, a
   ## provider with no ``run`` proc, or a provider that declares it cannot run
@@ -485,7 +489,14 @@ proc runUnitOutcome(
       unit.item.file)
     return
 
-  let providerResult = provider.run(unit.scope)
+  # Only a unit whose provider is actually invoked takes part in a read-set
+  # capture: a refused unit above ran nothing and read nothing.
+  beginUnitCapture(capture)
+  var providerResult: ProviderResult[seq[TestEvent]]
+  try:
+    providerResult = provider.run(unit.scope)
+  finally:
+    endUnitCapture()
   result.events = providerResult.value
   result.diagnostics = providerResult.diagnostics
 
@@ -496,7 +507,7 @@ proc workerLoop(args: WorkerArgs) =
     var unit: RunUnit
     if not nextUnit(args.queue, unit):
       break
-    let outcome = runUnitOutcome(args.registry, unit)
+    let outcome = runUnitOutcome(args.registry, unit, args.capture)
     acquire(args.resultsLock[])
     args.outcomes[].add outcome
     release(args.resultsLock[])
@@ -545,9 +556,14 @@ proc runUnits*(
     registry: var ProviderRegistry;
     units: seq[RunUnit];
     partition: PartitionSpec = emptyPartition();
-    threads = 0): TestRunResult =
+    threads = 0;
+    capture: ptr ReadCaptureSession = nil): TestRunResult =
   ## Run ``units`` in parallel, honouring the partition allow-list and the
   ## requested thread count, and aggregate the per-unit event streams.
+  ##
+  ## ``capture``, when not nil, runs every process a provider launches under
+  ## io-mon for the run's read set (``run_read_capture``); it must outlive
+  ## the call. Only ``certificate_issuance.runAndAttest`` passes one.
   ##
   ## ``registry`` is taken ``var`` because the worker threads need a stable
   ## ``ptr`` into the live provider closures; the registry itself is not
@@ -588,7 +604,8 @@ proc runUnits*(
     registry: addr registry,
     resultsLock: addr resultsLock,
     outcomes: addr outcomes,
-    handoff: addr handoff)
+    handoff: addr handoff,
+    capture: capture)
 
   var workers = newSeq[Thread[WorkerArgs]](workerCount)
   let wallStart = epochTime()

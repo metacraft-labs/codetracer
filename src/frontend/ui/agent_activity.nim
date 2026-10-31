@@ -25,6 +25,9 @@ from ../viewmodel/viewmodels/review_open import ReviewOpenService
 from ../viewmodel/viewmodels/evidence_call_vm import EvidenceDataset
 from ../viewmodel/viewmodels/review_session import
   ReviewSession, ReviewSessionState, rssAbsent, applyReviewSession
+from ../viewmodel/viewmodels/agent_prompt_context import
+  editorSelectionContext, AgentNoEditorSelectionReason, EditorRange,
+  selectedLinesOf
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
   import ../viewmodel/views/isonim_agent_activity_view
@@ -543,7 +546,13 @@ proc sendAcpPrompt(self: AgentActivityComponent, prompt: cstring) =
   console.log cstring(fmt"[agent-activity] sending prompt sessionKey={self.currentSessionKey()} sessionId={self.sessionId} pending={self.pendingSessionId} prompt={prompt}")
   let vm = ensureAgentActivityVM(self)
   let images = if not vm.isNil: vm.getPastedImages() else: newSeq[string]()
-  let ctxPaths = if not vm.isNil: vm.getContextPaths() else: newSeq[string]()
+  # The attachments as JavaScript strings: a Nim `string` crosses the IPC as
+  # an array of byte values, which the main process cannot read as a path
+  # (`acp_ipc.onAcpPrompt` turned it into a `TypeError` and sent no prompt).
+  var ctxPaths: seq[cstring] = @[]
+  if not vm.isNil:
+    for p in vm.getContextPaths():
+      ctxPaths.add cstring(p)
   data.ipc.send ("CODETRACER::acp-prompt"), js{
     "sessionId": self.sessionId,
     "clientSessionId": self.pendingSessionId,
@@ -660,6 +669,38 @@ proc afterAgentActivityDynamicRender(self: AgentActivityComponent) =
     data.lastAgentPrompt = ""
 
 when defined(js):
+  proc activeEditorSelectionContext(): string =
+    ## Read at activation, rather than capturing the editor when the panel or
+    ## menu was built: the active file can change while either stays mounted.
+    if data.isNil or data.sessions.len == 0 or data.activeSessionIndex < 0 or
+       data.activeSessionIndex >= data.sessions.len or data.services.isNil or
+       data.services.editor.isNil or data.ui.isNil:
+      return ""
+    let active = data.services.editor.active
+    if active.isNil or active.len == 0 or not data.ui.editors.hasKey(active):
+      return ""
+    let editor = data.ui.editors[active]
+    if editor.isNil or editor.path.isNil or editor.path.len == 0 or
+       editor.monacoEditor.isNil or
+       (not editor.tabInfo.isNil and editor.tabInfo.untitled):
+      return ""
+    # Every one of Monaco's selections, its lines counted by the rule the
+    # native selection follows (`selectedLinesOf`): a range that ends at
+    # column 1 of a later line stops at the line break before it.
+    let monacoEditor = editor.monacoEditor.toJs
+    let selections = monacoEditor.getSelections()
+    if selections.isNil:
+      return ""
+    var ranges: seq[EditorRange] = @[]
+    for i in 0 ..< selections.length.to(int):
+      let sel = selections[i]
+      ranges.add((sel.startLineNumber.to(int), sel.startColumn.to(int),
+                  sel.endLineNumber.to(int), sel.endColumn.to(int)))
+    let position = monacoEditor.getPosition()
+    let caretLine = if position.isNil: 1 else: position.lineNumber.to(int)
+    let (first, last) = selectedLinesOf(ranges, caretLine)
+    editorSelectionContext($editor.path, first, last)
+
   proc buildAgentActivityCallbacks(self: AgentActivityComponent):
       AgentActivityCallbacks =
     result.onFocusInput = proc() =
@@ -721,7 +762,15 @@ when defined(js):
     result.onAddFolders = proc() =
       data.ipc.send("CODETRACER::acp-pick-files", js{"kind": cstring"folders"})
     result.onAddEditorSelection = proc() =
-      data.ipc.send("CODETRACER::acp-pick-files", js{"kind": cstring"files"})
+      let path = activeEditorSelectionContext()
+      let vm = ensureAgentActivityVM(self)
+      if path.len > 0 and not vm.isNil:
+        vm.addContextPath(path)
+    result.editorSelectionUnavailableReason = proc(): string =
+      if activeEditorSelectionContext().len == 0:
+        AgentNoEditorSelectionReason
+      else:
+        ""
     result.onAddTrace = proc() =
       data.ipc.send("CODETRACER::acp-pick-files", js{"kind": cstring"trace"})
     result.onModelSelect = proc() =

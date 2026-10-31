@@ -24,13 +24,8 @@
  * for that mode's topbar surface to be mounted, so an assertion that follows
  * cannot run against the mode the session is leaving.
  *
- * NO SOURCE TAB IS AWAITED IN DEBUG MODE. The Debug layout an edit session
- * toggles into carries no editor tab today, which Mode-Transitions.md §5 ("the
- * set of open editor tabs") does not allow; that is recorded as its own
- * defect. The Monaco instance is not destroyed: it is detached, still answers
- * `getOption`, and is the instance the Edit layout shows again after Stop. So
- * a caller samples it through Monaco rather than waiting for `.view-line`, and
- * `stopToEditMode` waits for the visible editor on the way back.
+ * Both modes retain the same source tabs. Callers that inspect the source
+ * assert its visible pane as well as these helpers' mode and toolbar checks.
  */
 
 import { expect } from "@playwright/test";
@@ -77,5 +72,13 @@ export async function stopToEditMode(page: any): Promise<void> {
     })
     .toBe(EDIT_MODE);
   await page.waitForSelector(".edit-mode-toolbar", { timeout: 60_000 });
-  await page.waitForSelector(".view-line", { timeout: 60_000 });
+  await page.waitForFunction(() => {
+    const data = (globalThis as any).data;
+    const node = data?.ui?.editors?.[data?.services?.editor?.active]?.monacoEditor?.getDomNode();
+    return !!node?.isConnected && Array.from(node.querySelectorAll(".view-line"))
+      .some((line: any) => {
+        const box = line.getBoundingClientRect();
+        return box.width > 0 && box.height > 0;
+      });
+  }, null, { timeout: 60_000 });
 }

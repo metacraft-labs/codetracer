@@ -665,12 +665,13 @@ now — a real command, genuinely unexpected — so it measures what its name sa
 `handle_request`'s fallthrough refuses them by name with `command <x> not
 supported here`. A caller gets an error it can render.
 
-There is a second, worse category, and it is not visible from any mapping table
-because the commands *are* in one. These commands **are** dispatched, **do**
-their work, **do** emit their events — and never send a **response**. DAP
-correlates a reply to a request by `request_seq`; a handler that emits only
-events never settles the caller's future. There is no error, no refusal, and no
-timeout from the engine's side. The caller waits forever.
+There was a second, worse category, and it is not visible from any mapping table
+because the commands *are* in one. It is empty since 2026-10-27 (the table
+below is kept as the record of what it held). These commands **were**
+dispatched, **did** their work, **did** emit their events — and never sent a
+**response**. DAP correlates a reply to a request by `request_seq`; a handler
+that emits only events never settles the caller's future. There is no error, no
+refusal, and no timeout from the engine's side. The caller waits forever.
 
 Measured against the published wasm engine over `zk_shields.ct`:
 `ct/calltrace-jump` was dispatched, moved the session, emitted its `stopped`
@@ -686,25 +687,35 @@ as `_req` — deliberately unused — and ends at `complete_move(...)` without t
 | --- | --- | --- |
 | `ct/calltrace-jump` | `dap_handler.rs::calltrace_jump` | **fixed** — now responds |
 | `ct/event-jump` | `dap_handler.rs::event_jump` | **fixed** — now responds |
-| `restart` | `run_to_entry` | silent |
-| `ct/collapse-calls` | `collapse_calls` | silent — dispatched without a `sender` at all, so it *cannot* respond |
-| `ct/expand-calls` | `expand_calls` | silent — same |
-| `ct/history-jump` | `history_jump` | silent |
+| `restart` | `run_to_entry_request` | **fixed** — now responds (an empty body, the DAP `RestartResponse`) after the move's events |
+| `ct/run-to-entry` | `run_to_entry_request` | **fixed** — same |
+| `ct/collapse-calls` | `collapse_calls` | **fixed** — now responds: an empty body on success, `success: false` for a call key no call has or one that is not an integer. The arm now hands it the `sender` |
+| `ct/expand-calls` | `expand_calls` | **fixed** — same, and also refuses a `nonExpandedKind` that names no expansion (`Siblings`, `Calls`, `CallstackInternalChild`) |
+| `ct/history-jump` | `history_jump` | **fixed** — now responds, after the move's events |
 | `ct/trace-jump` | `trace_jump` | **fixed** — now responds (`dap_handler.rs:5274`). This row read "silent" until 2026-09-21; the fix and the comment explaining it were already in the file, and only the table had not been updated |
-| `ct/tracepoint-delete` | `tracepoint_delete` | silent |
-| `ct/tracepoint-toggle` | `tracepoint_toggle` | silent |
-| `ct/local-step-jump` | `local_step_jump` | silent |
-| `ct/setup-trace-session` | `setup_trace_session` | silent |
+| `ct/tracepoint-delete` | `tracepoint_delete` | **fixed** — now responds, after `ct/updated-trace`; an id with no table is refused by name (it used to panic) |
+| `ct/tracepoint-toggle` | `tracepoint_toggle` | **fixed** — now responds, after `ct/updated-trace` |
+| `ct/local-step-jump` | `local_step_jump` | **fixed** — now responds, after the move's events |
+| `ct/setup-trace-session` | `setup_trace_session` | **fixed** — now responds |
+| `ct/run-tracepoints` | `run_tracepoints` | **fixed** — now responds, after `ct/tracepoint-results`; its table setup no longer goes through `setup_trace_session`, which would answer it a second time |
 
-The two `*-jump` commands are fixed because they are the row-click commands a
-pane awaits directly. The remaining nine are recorded rather than changed: two of
-them are not even handed a `sender`, so fixing them is a dispatch-signature
-change rather than a one-line addition, and the rest want a caller that actually
-awaits them before their response shape is decided.
+The two `*-jump` commands were fixed first because they are the row-click
+commands a pane awaits directly. The rest are fixed because the engine answers
+every request exactly once, as the DAP requires
+(<https://microsoft.github.io/debug-adapter-protocol/overview#requests>). Most of
+their callers send them fire-and-forget and may leave the answer unread, which is
+safe: every reader matches a response by its `request_seq` (or, in
+`headless_session.awaitJump`, its `command`), so an unread answer is skipped,
+never taken for another request's. Each answer is an empty body sent after the
+events that carry the outcome, so a caller that reads both sees the events first.
+No command is silent any more.
 
-**For consumers:** do not `await` any command in the "silent" rows above without
-your own deadline. `hydrate.nim` is unaffected today only because it uses
-`ct/goto-ticks` — which does respond — for call-trace row clicks.
+**For consumers:** every command above is answered, so awaiting one is safe; an
+engine error still answers `success: false`. A Rust client must read a
+`ct/run-tracepoints` answer as well as its results event
+(`ct-dap-client`'s `run_tracepoints` does): `recv_response` takes the first
+response it finds, so an answer left unread would be taken for the next
+request's.
 
 ---
 

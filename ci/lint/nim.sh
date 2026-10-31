@@ -58,6 +58,14 @@ lint_step "test-lane runner: recipe-owned lanes are refused, by name" \
 lint_step "test-lane backends: JS-only ViewModel suites run in vm-unit-js, never in vm-unit" \
 	bash ci/test/vm-unit-js-only-suites-test.sh
 
+# The JS lanes' WALL TIME, checked on the source rather than the clock: a `for`
+# loop over a `staticRead` const re-materialises the whole string at every
+# character access under `nim js` (an inline iterator gets the constant's
+# literal substituted for its parameter), which made one `vm-unit-js` case take
+# eighteen minutes. Pure bash + awk over the JS lanes' files, seconds.
+lint_step "JS lanes: no for-loop iterates a staticRead const (quadratic on the JS backend)" \
+	bash ci/test/js-const-iteration-test.sh
+
 # THE SAME QUESTION, ONE FILE EXTENSION OVER. `test-lane-coverage.sh` is scoped
 # in its own first line to "any test-shaped **Nim** file", and `ci/test/` holds
 # sixty-three SHELL gates that nothing measured. Twelve of them were reachable
@@ -730,8 +738,41 @@ lint_step "frontend reachability: the ratchet's prose agrees with its threshold"
 #       (`viewmodel/platform`'s session helpers, `viewmodel/sync`, `gpui/app`
 #       and others), left for their features, inside the ceiling.
 #   1209 - 3 - 10 = 1196, measured, 7 under the corrected base.
-lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1196 + allow-list hygiene)" \
-	env CT_REACHABILITY_MAX=1196 bash ci/test/frontend-reachability.sh
+# THE CEILING MOVED 1196 -> 1207 ON 2026-10-30, after `agents` had drifted to
+#   1242 (red on the branch from the PLAT-51/53/54/56/58/68/70 landings on).
+#   THE ACCOUNT is a DIFF OF TWO RUNS of this script, by path, kind and name:
+#   `cc640d0882b` (where 1196 was set, measured 1196) against `5192276c07c`.
+#   99 in, 51 out (the 51 are symbols those landings gave a product reader).
+#   -35, UN-EXPORTED, reached by nothing outside their own module — no product,
+#       no suite, no script, no string (an identifier scan of the repository,
+#       style-insensitive as Nim is): `build_output.{buildBarOf,
+#       initBuildPaneModel,TruncatedNote}`, `source_pane.{sourceBarOf,
+#       sourceTrackOf}`, `scrubber_track.barScrollTo`, `scrollbar_styles.
+#       isScrollbarTrackRole`, `scrollbar_interaction.isHeld`, `build_vm.
+#       feedChunk`, `stdio_backend.isBounded`, `terminal_profile.isEawAmbiguous`,
+#       `capabilities.tmuxExtendedKeysRemedy`, `terminal_driver.{
+#       MotionTrackingOffBytes,PixelMouseOffBytes}`, `command_palette.
+#       KindLabels`, `edit_pane.EditPaneRule`, `event_log.{CategoryFieldCells,
+#       IndexFieldCells,TickFieldCells}`, `file_tree.{CollapsedFolderGlyph,
+#       FileTreeRule,FolderGlyph,OpenMarker}`, `top_bar.{FolderMarker,
+#       OmnibarGlyph}`, `tracepoint_manager.DialogBorder`, `tree_node.{
+#       AddWatchText,MoreRowPrefix,RemoveWatchGlyph}`, `types.
+#       onUpdatedCalltrace`, `value.{renderValueDomWithLeft,replaceAllValues}`,
+#       `utils.{getSessionIdFromMessage,makeFlowComponent}` and `jslib.
+#       findElement`. Their own module keeps them where it uses them.
+#   LEFT, AND WHY (64): 43 tested-only exports (bucket A) — suites and no
+#       product caller yet, the shape every earlier move carried — and 21 that
+#       the scan files under "nothing" although a reader exists where it does
+#       not look or cannot tell apart: suites under `src/tests/gui` (`twistyText`,
+#       `isActiveRow`, `refreshInFlight`, `workspaceVcsState`, `rowTimestamp`),
+#       a sibling view (`HttpMethods`, `StatusBucketOptions`), a name declared
+#       in several modules at once (`PaneRule` x4, `onLoadedTerminal` x2,
+#       `CallTraceBuffer`/`CALLTRACE_BUFFER`), the SDK facade guard
+#       (`CodeTracerUiComponentsModule`), and one `==` (`find_match`) a name
+#       scan cannot judge, for the reason given above for `$`.
+#   1242 - 35 = 1207, measured.
+lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1207 + allow-list hygiene)" \
+	env CT_REACHABILITY_MAX=1207 bash ci/test/frontend-reachability.sh
 
 # ONE CHAIN, ENFORCED, BECAUSE THE RATCHET ABOVE CANNOT ENFORCE IT.
 #
@@ -815,6 +856,18 @@ lint_step "Editor import closure: no async, no I/O, no clock in the editor model
 # document's agreement with VS Code — the two halves of KL-3.
 lint_step "CUA keymap: every cited VS Code binding re-extracts, every default accounted for" \
 	bash ci/test/cua-keymap-extractor.sh
+
+# PLAT-68's clean-code gate (Base-Keymaps-And-Layer-Stack.md §8, KL-10): one
+# resolver, one key decoder per device, one modifier order, bases as data, no
+# behaviour in a binding, one owner per keymap module. Same order as the
+# boundary guards above and for the same reason: the contract suite — which
+# plants a second resolver, a second decoder and an out-of-order modifier
+# spelling and requires each to redden — runs before the gate it covers.
+lint_step "Keymap clean code: contract suite" \
+	bash ci/test/keymap-clean-code-test.sh
+
+lint_step "Keymap clean code: one resolver, one decoder per device, one modifier order, bases as data" \
+	bash ci/test/keymap-clean-code.sh
 
 # PLAT-2's verification gate: no surface formats a value by a path that
 # bypasses the one presenter, and the presenter is pure.
@@ -905,6 +958,29 @@ lint_step "DAP command sync: contract suite" \
 lint_step "DAP command sync: the allow-list names everything the engine dispatches" \
 	python3 ci/test/dap-command-sync.py
 
+# The PLAT-37 Electron capture lane records, per scenario, the phase each
+# failure occurred in (launch fixture, viewport, drive, capture,
+# verify-capture), its cause and whether the capture was reached — in
+# manifest.json `scenarioOutcomes`, parsed from Playwright's JSON report by
+# `ci/test/plat37_electron_outcomes.py`. The lane itself needs a macOS GUI
+# session and cannot run here; its parser, its wiring and the spec's step names
+# can, against a synthetic report of the 2026-10-17 run whose four failures
+# were summarised as one assertion "after the capture" when three never
+# reached it (codetracer-pm issue 2026-10-17-plat37-readings-of-2026-10-17-
+# misreport-all-four-playwright-failures-as-one-assertion). Pure bash +
+# python3, about a second.
+lint_step "PLAT-37 Electron lane: per-scenario outcomes name each failure's phase and cause" \
+	bash ci/test/plat37-electron-outcomes-test.sh
+
+# PLAT-37's published parity figures (`just plat37-parity`) are graded by REAL
+# FLIP and refused when two independent captures of one renderer disagree.
+# `--test` runs the tool's controls over synthetic PNGs — stability, refusal,
+# capture provenance — with no window or GPU: one c++ compile of the
+# `codetracer-image-diff` sibling's C ABI shim (this job provisions the
+# repro.lock siblings) and about six seconds of Python.
+lint_step "PLAT-37 parity: unstable captures are refused, stable ones graded by real FLIP" \
+	bash ci/test/plat37-parity.sh --test
+
 # The mutation harnesses edit the product's sources in place. One that DROPS a
 # flag it does not know turns `--only=…` into a full, file-mutating grading run;
 # every harness must refuse the flag instead, before touching anything — and an
@@ -912,6 +988,12 @@ lint_step "DAP command sync: the allow-list names everything the engine dispatch
 # (`ci/lib/harness_guard.py`). Pure Python start-up per harness, no build.
 lint_step "Mutation harnesses refuse an unknown flag or arm id before touching a file" \
 	bash ci/test/harness-argument-refusal.sh
+
+# This job already provisions codetracer-pm for its spec-reading gates. The
+# assertion baseline requires that checkout too: an absent canonical lint must
+# fail the drift comparison, so this cannot run in the sibling-free bash job.
+lint_step "contract suite: no Rust test lacks an assertion (enumerated baseline)" \
+	bash ci/test/test-assertion-baseline.sh
 
 # Each harness refuses to grade while a recorded control digest disagrees with
 # the tree, and nothing told the change that MOVED the digest: 6 harnesses had

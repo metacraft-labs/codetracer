@@ -699,6 +699,10 @@
         db-backend =
           let
             fullSrc = ../../.;
+            nativeBackendEnv = import ../backend-native-env.nix {
+              inherit pkgs inputs;
+              nimCompiler = nim-codetracer;
+            };
           in
           pkgs.stdenv.mkDerivation {
             name = "db-backend";
@@ -706,21 +710,7 @@
 
             src = fullSrc;
 
-            nativeBuildInputs = [
-              pkgs.capnproto
-              pkgs.nodejs_20
-              pkgs.tree-sitter
-              pkgs.rustc
-              pkgs.cargo
-              pkgs.rustPlatform.cargoSetupHook
-              # nim is needed because db-backend's build.rs shells out to
-              # codetracer-native-recorder/ct_emulator/build_native_api.sh,
-              # which runs ``nim c`` to generate native C files.  Outside
-              # the sandbox direnv loads the recorder's flake env; here we
-              # provide nim directly.
-              nim-codetracer
-              pkgs.gcc
-            ];
+            inherit (nativeBackendEnv) nativeBuildInputs;
 
             buildInputs = [ ];
 
@@ -743,8 +733,10 @@
             # sibling-libs paths into the ``nim c`` invocations so
             # ``requires "results" / "stew"`` resolve without a nimble
             # pkg store.
-            CODETRACER_DB_BACKEND_SKIP_DIRENV = "1";
-            CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL = "1";
+            inherit (nativeBackendEnv.environment)
+              CODETRACER_DB_BACKEND_SKIP_DIRENV
+              CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL
+              ;
 
             postUnpack = ''
               # Generate tree-sitter-nim parser
@@ -775,30 +767,7 @@
               cp $sourceRoot/src/db-backend/Cargo.lock $sourceRoot/Cargo.lock
             '';
 
-            preBuild = ''
-              # Inject the codetracer/libs Nim package directories so
-              # ``results`` and ``stew`` resolve when
-              # build_native_api.sh (ct_emulator) runs ``nim c``;
-              # ``$PWD`` is the unpacked codetracer source at this point.
-              if [ -d "$PWD/libs/nim-stew/stew" ]; then
-                # Use ``libs/nim-stew/stew`` only -- it ships a
-                # newer ``results.nim`` with proper ``Result[void,
-                # E]`` support that ct_emulator relies on (the older
-                # standalone libs/nim-result
-                # mishandles ``?`` on void results so we
-                # deliberately leave it off the path).  The stew
-                # path also provides ``stew/byteutils``, ``stew/io2``
-                # and the other modules the trace-format-nim sources
-                # transitively pull in.
-                NIM_PATHS_LIB="$PWD/libs/nim-stew/stew:$PWD/libs/nim-stew"
-                export CT_EMULATOR_EXTRA_NIM_PATHS="$NIM_PATHS_LIB"
-              fi
-              # trace-format-nim itself needs the standalone `results`
-              # package: stew's copy above does not compile its
-              # `unsafeError` calls on `Result[void, E]` under upstream
-              # Nim 2.2, so its writer build takes the same flake inputs as the
-              # Python recorder in `nix/shells/ci-base.nix`.
-              export CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS="${inputs.nim-results}:${inputs.nim-stew}"
+            preBuild = nativeBackendEnv.shellHook + ''
               cd src/db-backend
             '';
 
@@ -1868,6 +1837,60 @@
         #     '';
         #   };
 
+        # The io-mon file monitor that `ct test run` captures its read set
+        # with (CTC-3g, `src/ct_test/run_read_capture.nim`): the standalone
+        # `io-mon` CLI and the interpose shim `librepro_monitor_shim`. Built
+        # from the `io-mon` input by io-mon's OWN recipe (`just build`, as its
+        # flake's `packages.default` does), against the stackable-hooks and
+        # shared-memory sources this flake pins, the ones repro.lock names, so the
+        # shipped monitor is the one io-mon tests. Without it a packaged
+        # `ct test run` cannot know which files its tests read, and in the
+        # default `reads` mode issues every certificate with
+        # `untracked = true` and `read_set = not-captured` (conforming, but
+        # it cannot withhold for an untracked input it never saw).
+        ct-io-mon = pkgs.stdenv.mkDerivation {
+          pname = "ct-io-mon";
+          version = "0";
+          src = inputs.io-mon;
+
+          nativeBuildInputs = [
+            pkgs.just
+            pkgs.nim2
+          ];
+
+          STACKABLE_HOOKS_SRC = "${inputs.nim-stackable-hooks}/src";
+          SHM_QUEUE_SRC = "${inputs.nim-shm-queue}/src";
+          SHM_GSET_SRC = "${inputs.nim-shm-gset}/src";
+
+          postPatch = ''
+            patchShebangs scripts/build_shim.sh
+          '';
+
+          buildPhase = ''
+            runHook preBuild
+            export HOME="$TMPDIR"
+            just build
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+            mkdir -p "$out/bin" "$out/lib"
+            install -m755 build/bin/io-mon "$out/bin/io-mon"
+            found=0
+            for lib in build/lib/librepro_monitor_shim.*; do
+              [ -e "$lib" ] || continue
+              install -m755 "$lib" "$out/lib/$(basename "$lib")"
+              found=1
+            done
+            if [ "$found" -ne 1 ]; then
+              echo "io-mon's build produced no librepro_monitor_shim" >&2
+              exit 1
+            fi
+            runHook postInstall
+          '';
+        };
+
         # native build inputs: e.g. gcc upstream-nim
         # build : runtime inputs: e.g. gcc, rustc others
         # move from shell.nix some deps
@@ -1917,6 +1940,7 @@
             export CODETRACER_RESULTS_SRC="${inputs.nim-results}"
             export IO_MON_SRC="${inputs.io-mon}/src"
             export NIM_STACKABLE_HOOKS_SRC="${inputs.nim-stackable-hooks}/src"
+            export TEST_CERTIFICATES_TOOLS_SRC="${inputs.test-certificates-tools}/src"
 
             ${nim-codetracer.out}/bin/nim2 \
               ${isonimNimPaths} \
@@ -2026,6 +2050,12 @@
             cp ./db-backend-record $out/bin
             # Beside `ct`, which is where `ct test run` looks for it first.
             cp ./ct-test $out/bin
+            # The io-mon monitor `ct-test` captures its read set with (CTC-3g):
+            # the CLI beside `ct-test` (`findSnoopCli` looks beside the running
+            # executable) and the shim in `lib/`, where io-mon's discovery
+            # looks (`<bin>/../lib`).
+            cp ${ct-io-mon}/bin/io-mon $out/bin/
+            cp ${ct-io-mon}/lib/librepro_monitor_shim.* $out/lib/
             cp -L ${ctRemote}/bin/ct-remote $out/bin/
 
             cp -r src/frontend/index.html $out/
@@ -2034,6 +2064,10 @@
           '';
 
           meta.mainProgram = "ct";
+
+          # For `ci/test/nix-package-bin-slice.nix`, which lays out the same
+          # `bin/` and `lib/` without the heavy runtime closure.
+          passthru.ctIoMon = ct-io-mon;
 
           postFixup = ''
             wrapProgram $out/bin/ct \

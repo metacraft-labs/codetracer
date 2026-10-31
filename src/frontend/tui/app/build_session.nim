@@ -94,6 +94,17 @@ type
     workingDir*: string
       ## PLAT-55: the directory the command runs in, which a relative
       ## diagnostic's path is resolved against (Edit-Mode-Toolbar.md EMT-A36).
+    stderrFlags*: seq[bool]
+      ## PLAT-56: beside `lines`, entry for entry: whether the line came from
+      ## the child's stderr. The desktop draws stderr as `.build-stderr`, and
+      ## so do the terminal and GPUI (Build-Output-Pane.md §3.13).
+    endedMs*: int64
+      ## PLAT-56: when the process ended (or 0), for the build's duration.
+    taskName*: string
+      ## The build task this runs (Build-Output-Pane.md §3.6), "" for a
+      ## command typed as it is.
+    problemMatcher*: string
+      ## The task's problem matcher; "none" reads no diagnostics.
 
 const
   MaxBuildLines* = 2000
@@ -120,14 +131,23 @@ proc start*(s: BuildSession; nowMs: int64) =
   s.startedMs = nowMs
   s.cancelRequested = false
 
-proc appendLine*(s: BuildSession; line: string) =
+proc appendLine*(s: BuildSession; line: string; stderr = false) =
   if s.isNil:
     return
   if s.lines.len >= MaxBuildLines:
     s.lines.delete(0)
+    if s.stderrFlags.len > 0:
+      s.stderrFlags.delete(0)
     s.truncated = true
   s.lines.add line
+  while s.stderrFlags.len < s.lines.len - 1:
+    s.stderrFlags.add false
+  s.stderrFlags.add stderr
   inc s.received
+
+proc isStderr*(s: BuildSession; i: int): bool =
+  ## Whether line `i` of the ring came from stderr.
+  not s.isNil and i >= 0 and i < s.stderrFlags.len and s.stderrFlags[i]
 
 proc requestCancel*(s: BuildSession) =
   ## Ask for the build to stop. IDEMPOTENT and valid at any time: a user
@@ -159,16 +179,14 @@ proc finish*(s: BuildSession; exitCode: int) =
     else: bvFailed
 
 proc statusOf*(verdict: BuildVerdict): BuildStatus =
-  ## The CORE's four-state view, for a consumer that shares it with the desktop.
+  ## The CORE's view, for a consumer that shares it with the desktop.
   ##
-  ## `bvCancelled` maps onto `bsIdle` and NOT onto `bsFailed`: `build_vm`'s own
-  ## documentation says `bsFailed` is "last build returned a non-zero exit code
-  ## with output present", which is a claim about the code, and a cancelled
-  ## build makes no claim about the code at all. The lossy direction is the
-  ## only one that exists — nothing converts back — so the distinction cannot
-  ## be lost by a round trip.
+  ## `bvCancelled` maps onto `bsCancelled` (PLAT-56 brought the state into the
+  ## core) and NOT onto `bsFailed`: `bsFailed` is a claim about the code, and
+  ## a cancelled build makes no claim about the code at all.
   case verdict
-  of bvIdle, bvCancelled: bsIdle
+  of bvIdle: bsIdle
+  of bvCancelled: bsCancelled
   of bvRunning: bsRunning
   of bvSucceeded: bsSucceeded
   of bvFailed: bsFailed

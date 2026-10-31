@@ -143,7 +143,7 @@
     // stretch the row to 25px (only empty line-box space falls outside).
     height: 1.5rem
     line-height: 1.5rem
-    background-color: CURRENT_LINE_BG
+    background-color: editor-theme-execution-line
     // The ellipsis moves to the code (below): on a flex row it applies to
     // the children, not to the row.
     text-overflow: clip
@@ -158,10 +158,7 @@
     width: 0.4375rem
     height: 0.625rem
     margin-right: 0.375rem
-    background-image: HIGHLIGHT_LINE_ARROW
-    background-repeat: no-repeat
-    background-position: center
-    background-size: contain
+    editor-execution-pointer()
 
   // The active line number in the editor's gutter: Space Mono Light at 14px
   // (`line-number-type()`, text_editor.styl), in the bright label colour

@@ -28,17 +28,33 @@
 ##     its worker thread; rows arrive tick by tick; the session tab's agent
 ##     indicator (`session_tabs.agentOf`, what the strip draws) says running
 ##     exactly while the pane's prompt says Stop, and both say done at the end;
-##     a reader who scrolled up stays on their line while rows arrive.
+##     a reader who scrolled up stays on their line while rows arrive;
+##   * THE STATUS LINE after a recording button (§2.2.4): `[Open in new tab]`
+##     opens a NEW session tab, `[Open recording]` replaces this tab's
+##     session when it is a replay and otherwise opens a new tab and says
+##     why — and the status line says where each went;
+##   * THE PROMPT'S "ADD CONTEXT" MENU (§2.2.7): `[+]` pressed with SGR bytes
+##     opens the desktop's four items; *Editor selection* attaches the shown
+##     file at the caret's line, *Files & folders* and *Recording / trace*
+##     open the omnibox on `:attach ` / `:attach-recording ` and attach what
+##     is chosen there, a path that does not exist is refused on the status
+##     line; each attachment is a row with `[×]`, which removes it; the next
+##     `/ai` prompt reaches the REAL agent process with the desktop's
+##     `Context paths:` header (read back from the agent's own `--prompt-log`)
+##     and the attachments are cleared.
 ##
 ## No mocks. The agent is the documented ACP test double of the AA suites
 ## (`agent-activity-deepreview/fixtures/acp-replay-agent.js`, whose header
 ## justifies it: a production agent cannot hold a known session on demand);
 ## everything on CodeTracer's side is production code. THE ONE STAND-IN is
 ## the window's `openRecording` seam — in the shipped terminal
-## `app.recordingOpener`, which starts a replay in a new tab (the PTY suite,
-## `real_terminal/test_plat54_agent_activity_pty.nim`, drives that half).
-## Here it records the request, and the suite checks the folder it names is
-## a real recording: it captures, it does not pretend.
+## `app.recordingOpener`, which starts a replay in a new tab or in place of
+## the current one (the PTY suite, `real_terminal/test_plat54_agent_activity_pty.nim`,
+## drives that half) — with its companion `currentTabReplaceable`, the
+## window's answer to "is this tab a replay". Here the first records the
+## request and the second is set by the suite to each answer in turn; the
+## suite checks the folder named is a real recording: it captures, it does
+## not pretend.
 
 import std/[json, os, osproc, strutils, monotimes, times, unittest]
 
@@ -60,7 +76,7 @@ import ./fixtures/fixture_provider
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 56
+const ExpectedAssertions = 97
 
 var countedAssertions = 0
 
@@ -256,7 +272,29 @@ proc open(path: string): (TuiRuntime, TuiSession, VcsSource) =
     vcs.publish(rt)
   rt.app.agentPrompt = proc(text: string): string = s.agentPrompt(rt, text)
   rt.app.agentStop = proc(): string = s.agentStop(rt)
+  rt.app.agentAttach = proc(context: string; mustExist: bool): string =
+    s.agentAttach(rt, context, mustExist)
   (rt, s, vcs)
+
+proc pressMenuEntry(s: TuiSession; rt: TuiRuntime; label: string): bool =
+  ## Press the open menu's entry `label` on the cell it was painted in.
+  if not rt.app.contextMenu.open:
+    return false
+  let area = rt.shellScreenOf().contextMenuArea
+  for i, e in rt.app.contextMenu.menu.entries:
+    if e.label == label:
+      s.press(rt, area.row + 1 + i, area.col + 2)
+      return true
+  false
+
+proc pressAdd(s: TuiSession; rt: TuiRuntime): bool =
+  ## Press the prompt's `[+]` where it was painted.
+  let (area, screen) = rt.agentPaneScreen()
+  if screen.addCol < 0:
+    return false
+  s.press(rt, screen.promptRow, screen.addCol + 1)
+  discard area
+  true
 
 createDir(scratch)
 writeDataset(evidenceDir / "iteration-1.json", "Iteration one", 0, 2)
@@ -339,6 +377,31 @@ suite "PLAT-54: the terminal's Agent Activity pane":
     ck opened[0].policy == topNewTab
     ck opened[0].tracePath == calc.tracePath
     ck traceFolderProblem(opened[0].tracePath) == ""
+    # THE STATUS LINE says where it went (§2.2.4): a new session tab…
+    let name = extractFilename(calc.tracePath.strip(leading = false,
+                                                    chars = {'/'}))
+    checkpoint("status: " & rt.app.notification)
+    ck rt.app.notification == "Opened " & name & " in a new session tab"
+    # …and `[Open recording]`, the desktop's current-tab open, replaces
+    # this tab's session when it is a replay (the window answers through
+    # `currentTabReplaceable`; the shipped terminal's replacement itself is
+    # the PTY suite's)…
+    var replaceable = true
+    s.agent.currentTabReplaceable = proc(): bool = replaceable
+    ck s.pressButton(rt, "[Open recording]", 0)
+    ck opened.len == 2
+    ck opened[1].policy == topCurrentTab
+    checkpoint("status: " & rt.app.notification)
+    ck rt.app.notification == "Opened " & name & " " & ThisTabNote
+    # …and opens a new tab, saying why, when this tab is an editing session
+    # (rule 3: an editing session is never replaced by a replay).
+    replaceable = false
+    ck s.pressButton(rt, "[Open recording]", 0)
+    ck opened.len == 3
+    ck opened[2].policy == topNewTab
+    checkpoint("status: " & rt.app.notification)
+    ck rt.app.notification == "Opened " & name & " in a new session tab: " &
+                              EditingSessionKeptNote
     # THE DESKTOP'S RUN CARD, captured from Electron: title, status, state,
     # and every test's outcome, name, duration and recording affordance.
     let desk = parseJson(readFile(answersPath))["testRun"]
@@ -424,6 +487,96 @@ suite "PLAT-54: the terminal's Agent Activity pane":
     ck held
     ck not rt.app.agent.scroll.follow
     ck rt.app.agent.scroll.anchorKey == heldKey
+
+  test "the prompt's add-context menu: attachments reach the agent":
+    let (rt, s, _) = open(calc.tracePath)
+    defer: s.close()
+    let promptLog = scratch / "prompts.jsonl"
+    removeFile(promptLog)
+    s.agent.agentCommand = findExe("node")
+    s.agent.agentArgs = @[replayAgent, "--evidence",
+                          "--evidence-dir=" & evidenceDir,
+                          "--prompt-log=" & promptLog]
+    s.agent.cwd = scratch
+    s.refreshAgent(rt)
+    s.showAgentTab(rt)
+    ck rt.findOnScreen(AgentAddContextLabel & " [Send]")[0] >= 0
+    # `[+]`: the desktop's four items, in its order.
+    ck s.pressAdd(rt)
+    ck rt.app.contextMenu.open
+    ck rt.app.contextMenu.menu.kind == cmkAgentAddContext
+    ck rt.app.contextMenu.menu.labels == @["Upload attachment",
+      "Files & folders", "Editor selection", "Recording / trace"]
+    # A replay shows a file, so *Editor selection* is live: the shown file
+    # at the caret's line.
+    let selection = rt.app.contextMenu.menu.target.path
+    checkpoint("editor selection: " & selection)
+    ck selection.startsWith(rt.app.source.path & ":")
+    ck s.pressMenuEntry(rt, "Editor selection")
+    ck not rt.app.contextMenu.open
+    ck s.agent.vm.contextPaths.val == @[selection]
+    ck rt.app.notification == "Attached " & selection &
+                              ": it goes with the next prompt"
+    # *Files & folders*: the omnibox on `:attach `, a folder typed there.
+    ck s.pressAdd(rt)
+    ck s.pressMenuEntry(rt, "Files & folders")
+    ck rt.app.omnibar.isOpen and rt.app.omnibar.query == AttachQuery
+    rt.app.omnibar.setQuery(AttachQuery & evidenceDir)
+    s.send(rt, "\r")
+    ck not rt.app.omnibar.isOpen
+    ck s.agent.vm.contextPaths.val == @[selection, evidenceDir]
+    # A path that is not there is refused, and says so.
+    rt.openOmnibar(AttachQuery & scratch / "no-such-file")
+    s.send(rt, "\r")
+    ck "no such file or folder" in rt.app.notification
+    ck s.agent.vm.contextPaths.val.len == 2
+    # *Recording / trace*: the omnibox on `:attach-recording `.
+    ck s.pressAdd(rt)
+    ck s.pressMenuEntry(rt, "Recording / trace")
+    ck rt.app.omnibar.isOpen and rt.app.omnibar.query == AttachRecordingQuery
+    rt.app.omnibar.setQuery(AttachRecordingQuery & calc.tracePath)
+    s.send(rt, "\r")
+    ck s.agent.vm.contextPaths.val == @[selection, evidenceDir,
+                                         calc.tracePath]
+    # Each attachment is a row above the prompt; `[×]` removes its own.
+    ck rt.paneHas(AgentContextChipLead & evidenceDir)
+    # (A long path wraps; its `[×]` moves to the row's next line, whole.)
+    var removeAt = -1
+    let chipRows = rt.app.agent.rows
+    for i, l in rt.agentPaneScreen().screen.lines:
+      let row = chipRows[l.row]
+      if row.kind == frContextPath and row.buttons.len == 1 and
+         row.buttons[0].arg == evidenceDir and "[×]" in l.lineText:
+        removeAt = i
+    ck removeAt >= 0
+    ck s.pressLine(rt, removeAt, "[×]")
+    ck s.agent.vm.contextPaths.val == @[selection, calc.tracePath]
+    ck not rt.paneHas(AgentContextChipLead & evidenceDir)
+    # THE PROMPT: what the REAL agent process received carries the header.
+    rt.openOmnibar("/ai summarize the change")
+    s.send(rt, "\r")
+    ck s.agent.vm.contextPaths.val.len == 0
+    let deadline = getMonoTime() + initDuration(milliseconds = LiveBudgetMs)
+    while getMonoTime() < deadline and not fileExists(promptLog):
+      discard s.pumpAgent(rt)
+      sleep(30)
+    ck fileExists(promptLog)
+    var sent = ""
+    if fileExists(promptLog):
+      let blocks = parseJson(readFile(promptLog).splitLines()[0])
+      for b in blocks:
+        sent.add b{"text"}.getStr("")
+    checkpoint("the agent received: " & sent)
+    ck sent == "Context paths:\n- " & selection & "\n- " & calc.tracePath &
+               "\n\nsummarize the change"
+    # The user's turn shows what was typed, as the desktop's does; no
+    # attachment row is left.
+    ck rt.paneHas("summarize the change")
+    ck not rt.paneHas("Context paths:")
+    var chips = 0
+    for r in rt.app.agent.rows:
+      if r.kind == frContextPath: inc chips
+    ck chips == 0
 
   test "assertion count":
     echo "CHECKS: " & $countedAssertions

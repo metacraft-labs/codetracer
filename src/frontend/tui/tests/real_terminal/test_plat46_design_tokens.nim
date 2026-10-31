@@ -66,7 +66,9 @@ import ./lifecycle_support
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 163
+const ExpectedAssertions = 154
+  # Nine resolved desktop failure entries no longer contribute issue checks;
+  # the sole native focus exception retains its existing check.
 
 var countedAssertions = 0
 
@@ -151,35 +153,13 @@ const
     ## COUNTED: a new failing pair reddens the sweep until it is filed here
     ## and in the issue.
 
-  DesktopIssue = "codetracer-specs/issues/2026-09-27-desktop-editor-and-focus-contrast-below-aa.md"
-  DesktopParityPairs: array[10, FiledPair] = [
-    (dmDark, dtColorsUiBorderPrimary, dtColorsUiSurfaceBaseCanvas, DesktopIssue),
-    (dmDark, dtEditorThemeRuleComment, dtEditorThemeExecutionLine, DesktopIssue),
-    (dmDark, dtEditorThemeLineNumber, dtEditorThemeGround, DesktopIssue),
-    (dmLight, dtColorsUiBorderPrimary, dtColorsUiSurfaceBaseCanvas, DesktopIssue),
-    (dmLight, dtColorsUiBorderSecondary, dtColorsUiSurfaceBaseCanvas, DesktopIssue),
-    (dmLight, dtColorsEditorActionSecondary, dtEditorThemeExecutionLine, DesktopIssue),
-    (dmLight, dtEditorThemeRuleComment, dtEditorThemeExecutionLine, DesktopIssue),
-    (dmLight, dtEditorThemeLineNumber, dtEditorThemeGround, DesktopIssue),
-    (dmLight, dtEditorThemeRuleString, dtEditorThemeGround, DesktopIssue),
-    # Since the desktop's light theme paints from the Light palette, its
-    # editor ground is the light panel (#e6e2db): the default text clears AA
-    # there (7.31:1, no longer filed) and codetracerWhite's keyword blue,
-    # chosen for a near-white ground, does not (2.09:1).
-    (dmLight, dtEditorThemeRuleKeyword, dtEditorThemeGround, DesktopIssue)]
-    ## PLAT-47: THE PAIRS THE DESKTOP ITSELF RENDERS BELOW THE FLOOR, which the
-    ## terminal now reproduces because it must EQUAL the desktop: its editor is
-    ## the desktop's Monaco theme (measured resting line numbers 2.04:1, a
-    ## comment on the execution line 3.80:1), and its focused pane carries the
-    ## desktop's selected-panel outline (`ui/border/primary`, 2.01:1 against
-    ## the desktop's own panel, 2.35:1 against the terminal's divider ground).
-    ## Light is opt-in (`--theme=light`; detection never selects it) and its
-    ## editor is the desktop's `codetracerWhite` theme on the ground the
-    ## desktop's light theme measurably draws (the design system's Light
-    ## panel, `ui/surface/base/panel`, as in the dark theme). A
-    ## SEPARATE register from the design system's, which does
-    ## not grow: these are the desktop's pairs, filed against the desktop.
-    ## COUNTED, like the other.
+  NativeFocusDecision = "Native-Front-End-Parity.md §2 (owner, 2026-10-05)"
+  NativeFocusPairs: array[1, FiledPair] = [
+    (dmLight, dtColorsUiBorderSecondary, dtColorsUiSurfaceBaseCanvas,
+     NativeFocusDecision)]
+    ## The native focus highlight is intentionally subtler than the desktop's,
+    ## by the owner's explicit request. This sole existing exception is kept
+    ## separate from unresolved design-system defects and from editor text.
 
   ChromeTokens = [dtColorsUiBorderSecondary, dtColorsUiBorderFocus,
                   dtColorsUiBorderPrimary, dtColorsUiDividerSecondary,
@@ -188,7 +168,8 @@ const
                   dtColorsUiTextPrimaryDisabled, dtColorsEditorSyntaxTertiary,
                   dtColorsEditorSyntaxSubtle, dtColorsEditorSyntaxDisabled,
                   dtColorsEditorActionSecondary,
-                  dtEditorThemeLineNumber, dtEditorThemeActiveLineNumber]
+                  dtEditorThemeLineNumber, dtEditorThemeActiveLineNumber,
+                  dtEditorThemeExecutionPointer]
     ## Tokens painted as CHROME (borders, rules, muted captions, line numbers,
     ## de-emphasised code, the gutter's execution pointer), held to WCAG's
     ## 3:1 rather than 4.5:1.
@@ -381,7 +362,7 @@ proc isFiled(mode: DesignMode; fgHex, bgHex: string): bool =
   for f in FiledContrastFailures:
     if f.mode == mode and hexT(f.fg, mode) == fgHex and hexT(f.bg, mode) == bgHex:
       return true
-  for f in DesktopParityPairs:
+  for f in NativeFocusPairs:
     if f.mode == mode and hexT(f.fg, mode) == fgHex and hexT(f.bg, mode) == bgHex:
       return true
   false
@@ -470,11 +451,11 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
       checkpoint(modeName & " read back: " & $f)
       # PLAT-47: the editor is the desktop's Monaco theme. PLAT-51 (the user:
       # both focus contrasts SUBTLER): the focused pane's outline moved from
-      # the desktop's selected-panel colour (ui/border/primary) one step down
+      # the desktop's original neutral selected-panel colour one step down
       # the border ramp, to ui/border/secondary.
       ck f.keywordFg == hexT(dtEditorThemeRuleKeyword, mode)
       ck hexT(dtColorsUiBorderSecondary, mode) in f.ruleFgs
-      ck hexT(dtColorsUiBorderPrimary, mode) notin f.ruleFgs
+      ck hexT(dtColorsUiBorderAction, mode) notin f.ruleFgs
       ck focusedBorders(sess, Wide.cols, Wide.rows,
                         hexT(dtColorsUiBorderSecondary, mode)) > 0
       # PLAT-51: the focused pane's TAB STRIP takes the focus colour as its
@@ -576,10 +557,10 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
         inc genuine
       ck f.issue.startsWith("codetracer-specs/issues/2026-09-26-design-system-")
     ck genuine == FiledContrastFailures.len
-    # …and the desktop's own pairs (PLAT-47), on the same terms.
-    ck DesktopParityPairs.len == 10
+    # The sole deliberately subtle native focus pair stays below the floor.
+    ck NativeFocusPairs.len == 1
     var desktopGenuine = 0
-    for f in DesktopParityPairs:
+    for f in NativeFocusPairs:
       let ratio = contrastRatio(parseHexColour(hexT(f.fg, f.mode)),
                                 parseHexColour(hexT(f.bg, f.mode)))
       let floor = if f.fg in ChromeTokens: 3.0 else: 4.5
@@ -587,8 +568,8 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
         checkpoint("NOT A FAILURE: " & $f & " ratio " & $ratio)
       else:
         inc desktopGenuine
-      ck f.issue == DesktopIssue
-    ck desktopGenuine == DesktopParityPairs.len
+      ck f.issue == NativeFocusDecision
+    ck desktopGenuine == NativeFocusPairs.len
 
   test "OSC 11: a light answer is REPORTED and still paints Dark; a dark answer Dark":
     # PLAT-47: the user's decision of 2026-09-27 — background detection does

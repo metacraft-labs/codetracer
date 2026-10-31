@@ -28,9 +28,10 @@ relative path `../<sibling>`:
 | Repro/Nix | `repro.nim` and native workspace input overrides (`../io-mon`, `../reprobuild`, …) | sibling overrides cannot be resolved |
 
 None of the four can be pointed elsewhere per-worktree, so relocating the
-checkout is the only fix. In particular **`runquota` has no override at all** by
-design — see the tier notes in `scripts/require-siblings.sh` — so no environment
-variable can paper over a badly-placed worktree.
+checkout is the only fix. In particular **`runquota`, `io-mon` and
+`nim-stackable-hooks` have no override at all** by design — see the tier notes
+in `scripts/require-siblings.sh` — so no environment variable can paper over a
+badly-placed worktree.
 
 Create one like this, from the main checkout:
 
@@ -184,7 +185,9 @@ Suites that drive a recorder or tool from a sibling checkout (BEAM, JS and
 Ruby recorders, `ct-native-replay`, `ct-mcr`, `ct-print`, and the `ct-instrument` +
 JS recorder + `session-manager` set the materialised cross-process
 recordings are made with) provision it themselves: when no override names a
-tool, the finder in `tests/test_harness/mod.rs` runs
+tool, the finder in `tests/test_harness/mod.rs` (and, for `ct-native-replay`
+and the Ruby recorder, `src/backend-manager/tests/real_recording_integration.rs`,
+through the same `tests/test_harness/sibling_provisioning.rs`) runs
 `scripts/build-siblings.sh --only <key>` (or
 `scripts/provision-cross-process-recording.sh`) once per test binary, under
 a file lock shared by concurrent test binaries, and uses what it built. A

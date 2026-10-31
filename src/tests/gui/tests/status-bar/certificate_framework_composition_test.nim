@@ -100,7 +100,12 @@ const
   TreeB = "git-tree-sha1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     ## Content ids: what a record binds to and what W is compared with.
   Platform = "linux/amd64"
-  ReproDir = ".repro/workspace/certificates"
+  ReproDir = "<system root>"
+    ## Where the cases put reprobuild's records: the local store's SYSTEM
+    ## root, under the record's content (a daemon-signed run lands there).
+    ## Until reprobuild published to the local store this was its pooled
+    ## `.repro/workspace/certificates`, which nothing reads any more.
+  SystemRoot = "/var/lib/test-certificates/1000"
   UserRoot = "/home/u/.local/state/test-certificates"
     ## The local certificate store's user root. Since CTC-3e (2026-10-10) a
     ## `ct test` record lives there, under its own content's directory, and
@@ -163,8 +168,9 @@ proc access(world: FakeWorld): CertificateStoreAccess =
 
 proc facts(world: FakeWorld): CertificateIndicatorFacts =
   CertificateIndicatorFacts(
-    store: readCertificateStore(world.access, WorkspaceRoot, LocalStoreQuery(
-      roots: CertificateStoreRoots(available: true, user: UserRoot),
+    store: readCertificateStore(world.access, LocalStoreQuery(
+      roots: CertificateStoreRoots(available: true, user: UserRoot,
+                                   system: SystemRoot),
       contentIds: @[world.workingTree])),
     # A clean tree: H and S are W's content (SB-2b decides on all three).
     vcs: WorkspaceVcsState(known: true, repo: RepoName,
@@ -197,13 +203,24 @@ proc certificate(framework = "ct-test"; issuer = "ct-test";
       repo: RepoName, paths: @[], content: content, untracked: false),
     commands: commands)
 
+proc systemPath(content, name: string): string =
+  SystemRoot & "/" & localStoreContentDir(content).relative & "/" & name
+
 proc put(world: FakeWorld; dir, name: string; cert: TestCertificate;
          modifiedMs: int64) =
-  world.files[WorkspaceRoot & "/" & dir & "/" & name] =
+  doAssert dir == ReproDir
+  world.files[systemPath(cert.vcs.content, name)] =
     FakeFile(text: renderCertificate(cert), modifiedMs: modifiedMs)
 
 proc localPath(cert: TestCertificate; name: string): string =
   UserRoot & "/" & localStoreContentDir(cert.vcs.content).relative & "/" & name
+
+proc otherPlatform(cert: TestCertificate): TestCertificate =
+  ## The same claim for another platform: decided, and not binding here.
+  ## (Under lookup by content id a record for other CONTENT is never read, so
+  ## the stale neighbour these cases need sits in W's own directory.)
+  result = cert
+  result.platform = "macos/arm64"
 
 proc putLocal(world: FakeWorld; name: string; cert: TestCertificate;
               modifiedMs: int64) =
@@ -283,6 +300,8 @@ suite "CTC-2: a workspace with more than one framework":
       framework = "reprobuild", issuer = "repro-daemon@build-host-7",
       targets = @["t-unit", "t-integration"], content = TreeA,
       commands = @[@["repro", "test"]]), 1000)
+    world.putLocal("macos-arm64.toml", otherPlatform(certificate(content = TreeA)),
+                   2000)
     world.putLocal("linux-amd64.toml", certificate(content = TreeB), 2000)
     world.workingTree = TreeA
 
@@ -293,7 +312,7 @@ suite "CTC-2: a workspace with more than one framework":
     # The record that speaks is the one that BINDS, not the one that landed
     # last, and the disclosure names its framework rather than the newest
     # record's.
-    ck model.certificateName == ReproDir & "/build.toml"
+    ck model.certificateName == systemPath(TreeA, "build.toml")
     ck rowValue(model, "Framework") == "reprobuild"
     ck rowValue(model, "Targets") == "t-integration, t-unit"
 
@@ -383,9 +402,9 @@ suite "CTC-2: a workspace with more than one framework":
     ## state is covered by the record sitting beside it.
     let world = newWorld()
     world.putLocal("linux-amd64.toml", certificate(content = TreeA), 2000)
-    world.put(ReproDir, "neighbour.toml", certificate(
+    world.put(ReproDir, "neighbour.toml", otherPlatform(certificate(
       framework = UnknownFramework, issuer = "other-runner",
-      content = TreeB), 3000)
+      content = TreeA)), 3000)
 
     let model = world.evaluate()
     checkpoint $model.state & " — " & model.summary
@@ -440,7 +459,7 @@ suite "CTC-2: a workspace with more than one framework":
     # The two documents are genuinely different bytes, or this case would be
     # comparing a rendering with itself.
     ck ctWorld.files[localPath(ctCert, "run.toml")].text !=
-       reproWorld.files[WorkspaceRoot & "/" & ReproDir & "/run.toml"].text
+       reproWorld.files[systemPath(TreeA, "run.toml")].text
 
     # THE INDICATOR AS THE USER MEETS IT: closed, the whole rendered element —
     # label, state class, tooltip, role, every attribute and every text node —
@@ -498,13 +517,16 @@ suite "CTC-2: a workspace with more than one framework":
     ## reading; the older one is in a schema version this build does not
     ## implement, whose relevance is undecidable and MUST be assumed (§7.1).
     let world = newWorld()
-    world.files[WorkspaceRoot & "/" & ReproDir & "/future.toml"] = FakeFile(
+    world.files[systemPath(TreeA, "future.toml")] = FakeFile(
       text: "schema = \"test-certificate.v2\"\n\n[certificate]\n" &
             "framework = \"reprobuild\"\n",
       modifiedMs: 1000)
-    # In the pooled workspace carrier, so it IS read whatever W is (a `ct
-    # test` record in the local store would be looked up only by W).
-    world.put(ReproDir, "stale.toml", certificate(content = TreeB), 2000)
+    # Decided and not binding: the same claim for another platform, in W's
+    # own directory.
+    world.put(ReproDir, "stale.toml", otherPlatform(certificate(content = TreeA)),
+              2000)
+    # For the control below: a record covering other content.
+    world.putLocal("b.toml", certificate(content = TreeB), 2000)
 
     let model = world.evaluate()
     checkpoint $model.state & " — " & model.summary

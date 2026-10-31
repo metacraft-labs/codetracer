@@ -141,6 +141,11 @@ type
       ## mode): per line, the 1-based cell columns `[fromColumn, toColumn)`
       ## painted on the selection ground. `toColumn` past the line's end
       ## covers the line break, as a selection that continues does.
+    findMarks*: seq[tuple[line, fromColumn, toColumn: int; current: bool]]
+      ## PLAT-70 Part C (Find-And-Incremental-Search.md §3.3 step 4): the find
+      ## session's matches on the drawn lines (`find_vm.marksInWindow`), the
+      ## current one flagged — drawn in the editor itself, over the selection,
+      ## every match on the find ground and the current one on its own.
     columnMarks*: seq[(int, int)]
       ## PLAT-50 (K14): the column breakpoints on this file, `(line,
       ## column)` — the cell they are anchored at is marked in the code, as
@@ -509,7 +514,7 @@ proc sourcePaneLayout*(model: SourcePaneModel; area: CellArea): SourcePaneLayout
                            (if model.executionLine > 0: model.executionLine - 1
                             else: -1)))
 
-proc sourceBarOf*(model: SourcePaneModel; area: CellArea):
+proc sourceBarOf(model: SourcePaneModel; area: CellArea):
     tuple[shown: bool; row, left, cols: int; view: HorizontalView] =
   ## PLAT-70: where `paintSourcePane` draws the horizontal bar in `area`, and
   ## the view it is drawn over — what a press on it is hit-tested against.
@@ -517,7 +522,7 @@ proc sourceBarOf*(model: SourcePaneModel; area: CellArea):
   ## (`sourcePaneLayout`).
   model.sourcePaneLayout(area).bar
 
-proc sourceTrackOf*(model: SourcePaneModel; area: CellArea): SourceTrack =
+proc sourceTrackOf(model: SourcePaneModel; area: CellArea): SourceTrack =
   ## M73 (#840): where `paintSourcePane` draws the vertical bar in `area`.
   model.sourcePaneLayout(area).track
 
@@ -526,6 +531,20 @@ proc sourceCodeWidth*(model: SourcePaneModel; area: CellArea): int =
   ## horizontal view is measured against (PLAT-70), less the vertical bar's
   ## column while it is shown (M73).
   model.sourcePaneLayout(area).codeWidth
+
+proc paintCellBand*(g: var StyledGrid; row, codeCol, codeW, left,
+                    fromColumn, toColumn: int; role: SemanticRole) =
+  ## One band of a code row's ground — a selection or a find match — over the
+  ## 1-based cell columns `[fromColumn, toColumn)` of the LINE, drawn from
+  ## the view's left column and cut to the code area. One painter for both
+  ## editor panes (Debug's source, Edit's), so a band lands on the cells its
+  ## text is drawn on in either.
+  if toColumn <= fromColumn: return
+  let first = max(1, fromColumn - left)
+  let last = min(codeW + 1, toColumn - left)
+  if last > first:
+    g.restyle(row, codeCol + first - 1, last - first,
+              proc(s: CellStyle): CellStyle = s.withBackground(role))
 
 proc paintSourcePane*(g: var StyledGrid; area: CellArea;
                       model: SourcePaneModel;
@@ -701,13 +720,16 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
     # PLAT-68: THE SELECTION, on the design system's selection ground, under
     # the caret.
     for sel in model.selected:
-      if sel.line == line and sel.toColumn > sel.fromColumn:
-        let first = max(1, sel.fromColumn - left)
-        let last = min(codeW + 1, sel.toColumn - left)
-        if last > first:
-          g.restyle(row, codeCol + first - 1, last - first,
-                    proc(s: CellStyle): CellStyle =
-                      s.withBackground(srSurfaceSelection))
+      if sel.line == line:
+        paintCellBand(g, row, codeCol, codeW, left, sel.fromColumn,
+                      sel.toColumn, srSurfaceSelection)
+    # PLAT-70 Part C: THE FIND HIGHLIGHTS, over the selection (the current
+    # match is the selection, and its own style is what marks it).
+    for m in model.findMarks:
+      if m.line == line:
+        paintCellBand(g, row, codeCol, codeW, left, m.fromColumn, m.toColumn,
+                      (if m.current: srSurfaceFindMatchCurrent
+                       else: srSurfaceFindMatch))
     # PLAT-51: THE CARET, over everything — its cell reversed (a caret past
     # the line's end sits on the blank cell after it).
     if line == model.caretLine and line > 0 and

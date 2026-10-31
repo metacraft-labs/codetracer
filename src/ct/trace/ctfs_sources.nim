@@ -654,7 +654,15 @@ proc parseCtfsMetaDat(data: string): CtfsMetaDat =
       "meta.dat: invalid recording_id (length " & $recordingId.len & ")")
 
   let program = readVarStringFromMetaDat(data, pos)
-  let argsCount = int(decodeVarintFromString(data, pos))
+  # The count is recording content: a string is at least its one-byte
+  # length, so a count past the bytes left is refused before it sizes an
+  # allocation (newSeqOfCap would ask for count * sizeof(string)).
+  let argsCountRaw = decodeVarintFromString(data, pos)
+  if argsCountRaw > uint64(max(0, data.len - pos)):
+    raise newException(ValueError,
+      "meta.dat: args_count is " & $argsCountRaw & ", but only " &
+      $(data.len - pos) & " byte(s) are left")
+  let argsCount = int(argsCountRaw)
   var args = newSeqOfCap[string](argsCount)
   for _ in 0 ..< argsCount:
     args.add readVarStringFromMetaDat(data, pos)

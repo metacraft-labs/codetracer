@@ -18,6 +18,13 @@
 ## `MockBackendService`: what is asserted is the markup and, for the click a
 ## key stands for, the request it sends.
 ##
+## THE HAND IS ONLY ON CONTROLS. The last suite reads the stylesheets the views
+## are drawn with: the list scrubbers (a pane's scrollbar, pressed and dragged
+## but not a control a click activates) and the data table's body (only its
+## rows take a click) carried `cursor: pointer`, so they offered the hand with
+## no role and no keyboard path — the orphans an embedding host's pointer
+## audit found after the rows themselves were fixed.
+##
 ## THE CONTROL: a leaf call's toggle is NOT a control (it is the picture of
 ## having no children), so it must read `presentation` with no tab stop — a
 ## view that stamped `role="button"` on everything would fail it.
@@ -35,7 +42,7 @@ import ../../views/[isonim_calltrace_view, isonim_event_log_view,
                     isonim_state_view]
 
 # Counted, so a loop over an empty list cannot pass by asserting nothing.
-const ExpectedAssertions = 36
+const ExpectedAssertions = 44
 
 var checks = 0
 template ck(cond: untyped) =
@@ -164,6 +171,40 @@ suite "the shared views' clickable rows are controls":
       for l in lines:
         ck l.isControl
       dispose()
+
+const
+  ScrubberStyl = staticRead("../../../styles/components/list_scrubber.styl")
+  DataTablesStyl = staticRead("../../../styles/components/data_tables.styl")
+
+proc stylBlock(text, header: string; indent: int): string =
+  ## The lines of the Stylus block whose header line is exactly `header` at
+  ## `indent` spaces, up to the next non-blank line indented no deeper.
+  var inside = false
+  for line in text.splitLines:
+    let stripped = line.strip(leading = true, trailing = true)
+    let depth = line.len - line.strip(leading = true, trailing = false).len
+    if inside:
+      if stripped.len > 0 and depth <= indent and not stripped.startsWith("//"):
+        break
+      result.add line & "\n"
+    elif depth == indent and stripped == header:
+      inside = true
+
+suite "the hand is drawn only on a control":
+
+  test "a list scrubber is a scrollbar, not a control, and shows no hand":
+    for header in [".ct-list-scrubber", ".ct-hscrubber"]:
+      let rule = stylBlock(ScrubberStyl, header, 0)
+      ck rule.len > 0                     # the rule is where this test looks
+      ck "cursor: pointer" notin rule
+
+  test "a table's body shows no hand; its control rows do":
+    let body = stylBlock(DataTablesStyl, "tbody", 4)
+    ck body.len > 0
+    ck "cursor: pointer" notin body
+    let rows = stylBlock(DataTablesStyl, "&[role=\"button\"]", 4)
+    ck rows.len > 0
+    ck "cursor: pointer" in rows
 
 suite "assertion count":
   test "every assertion ran":

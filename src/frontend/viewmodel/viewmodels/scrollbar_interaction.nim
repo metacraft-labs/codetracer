@@ -97,7 +97,7 @@ const
 func otherRule*(r: TrackClickRule): TrackClickRule =
   if r == tcJump: tcPage else: tcJump
 
-func isHeld*(s: BarState): bool = s == bsHeld
+func isHeld(s: BarState): bool = s == bsHeld
 
 func widened*(s: BarState): bool =
   ## The states in which the thumb is drawn one step wider (§7.2).

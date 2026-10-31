@@ -244,6 +244,24 @@ proc dropImported(d: var EditingDocument) =
     d.state.macros.del id
   d.imported = nil
 
+func searchCaseSensitiveFor*(model: BaseKeymap): bool =
+  ## PLAT-70 Part C (Find-And-Incremental-Search.md §3.1): a base's default
+  ## for Match Case. **Case-insensitive under CUA** (VS Code) and **under
+  ## Emacs** (`case-fold-search`; the find session turns it on while the
+  ## query has an upper-case letter, `find_vm.FindCaseRule`), **case-
+  ## sensitive under Vim and Kakoune** (Vim's `noignorecase`, Kakoune's
+  ## regex).
+  model in {bkVim, bkKakoune}
+
+proc installBaseDefaults(d: var EditingDocument) =
+  ## What a document takes from its base when it opens under one (or is
+  ## re-keyed to one): the search's Match Case default, and the base's
+  ## macro rows' bodies (`KeymapDefinition.macros`), which the rows replay
+  ## from `EditorState.macros` as PLAT-36's imported macros are replayed.
+  d.state.search.options.caseSensitive = searchCaseSensitiveFor(d.model)
+  for m in keymapOf(d.model).macros:
+    d.state.macros[m.id] = m.steps
+
 proc switchModel*(d: var EditingDocument; model: BaseKeymap) =
   ## PLAT-43. Re-key an OPEN document to `model`.
   ##
@@ -254,12 +272,15 @@ proc switchModel*(d: var EditingDocument; model: BaseKeymap) =
   ## operator, a half-typed chord and a macro being recorded — a Vim `d`
   ## waiting for its motion must not be completed by a Kakoune key.
   d.dropImported()
+  for m in keymapOf(d.model).macros:
+    d.state.macros.del m.id
   d.model = model
   d.state.mode = initialModeFor(model)
   d.state.count = 0
   d.state.pendingOperator = ""
   d.state.pending = PendingChords()
   d.state.recording = ""
+  d.installBaseDefaults()
 
 const TerminalLegacyDelivery* = KeyDelivery(
     frontEnd: feTerminal, platform: hostPlatform(), keyProtocol: kpLegacy)
@@ -287,6 +308,7 @@ proc initEditingDocument*(path, text: string;
     timeline: initVersionedDocument(text),
     delivery: delivery)
   result.state.mode = initialModeFor(model)
+  result.installBaseDefaults()
 
 const ViewColumnPolicy* = ColumnPolicy(tabSize: 1, ambiguous: awNarrow)
   ## THE COLUMNS OF THE HORIZONTAL VIEW (Horizontal-Overflow.md §4): the
@@ -770,6 +792,15 @@ proc followView*(d: var EditingDocument; v: var HorizontalView;
                         lineViewWidth(text))
   v.leftCol != before
 
+proc caretFollowOf*(d: EditingDocument): CaretFollow =
+  ## The caret as `followView` records it once followed — for a front-end
+  ## that PUT the view somewhere on purpose (a find cancelled, §3.5 of
+  ## Find-And-Incremental-Search.md: both offsets restored exactly), so the
+  ## next frame's caret-follow does not move the view off it again.
+  let (text, byteCol) = d.caretLineText
+  CaretFollow(line: d.caretLine,
+              column: columnAt(text, byteCol, ViewColumnPolicy), armed: true)
+
 func offsetAt*(d: EditingDocument; line, column: int): int =
   ## The byte offset of the 0-based (line, cluster column), clamped into the
   ## document.
@@ -816,6 +847,21 @@ type
     ## A selection as a front-end paints it: per 1-based line, the 1-based
     ## display columns `[from, to)`.
 
+proc spanCellsIn(text: string; ls: openArray[string]; a, b: int;
+                 into: var SelectionCells) =
+  ## The bytes `[a, b)` of `text` as painted cells, per line — one rule for
+  ## a selection and a find match (PLAT-70 Part C), so the two cannot be
+  ## drawn over different columns.
+  let pa = caretPosOf(text, a)
+  let pb = caretPosOf(text, b)
+  for line in pa.line .. min(pb.line, ls.len - 1):
+    let lineText = ls[line]
+    let fromCol = if line == pa.line: columnAt(lineText, pa.column) else: 0
+    let toCol = if line == pb.line: columnAt(lineText, pb.column)
+                else: columnAt(lineText, lineText.len) + 1
+    if toCol > fromCol:
+      into.add (line + 1, fromCol + 1, toCol + 1)
+
 proc selectionCells*(d: EditingDocument): SelectionCells =
   ## THE SELECTION AS EVERY FRONT-END PAINTS IT — the terminal's source pane
   ## and GPUI's editor rows read this one derivation: display columns from
@@ -827,15 +873,20 @@ proc selectionCells*(d: EditingDocument): SelectionCells =
   let ls = d.lines
   for r in d.state.selection.ranges:
     if r.isEmpty: continue
-    let a = caretPosOf(text, r.rangeFrom)
-    let b = caretPosOf(text, r.rangeTo)
-    for line in a.line .. min(b.line, ls.len - 1):
-      let lineText = ls[line]
-      let fromCol = if line == a.line: columnAt(lineText, a.column) else: 0
-      let toCol = if line == b.line: columnAt(lineText, b.column)
-                  else: columnAt(lineText, lineText.len) + 1
-      if toCol > fromCol:
-        result.add (line + 1, fromCol + 1, toCol + 1)
+    spanCellsIn(text, ls, r.rangeFrom, r.rangeTo, result)
+
+proc selectedLines*(d: EditingDocument): tuple[first, last: int] =
+  ## The 1-based lines the selection covers (every range's), or the caret's
+  ## line when nothing is selected — what the Agent Activity prompt's
+  ## *Editor selection* attaches (`agent_prompt_context.editorSelectionContext`).
+  let cells = d.selectionCells
+  if cells.len == 0:
+    let line = d.caretLine
+    return (line, line)
+  result = (cells[0].line, cells[0].line)
+  for c in cells:
+    result.first = min(result.first, c.line)
+    result.last = max(result.last, c.line)
 
 func hasSelection*(d: EditingDocument): bool =
   ## Whether any range spans text. A caret is a range of zero length, so

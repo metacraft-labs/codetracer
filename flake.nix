@@ -136,6 +136,13 @@
       flake = true;
     };
 
+    # The parity gate compiles this producer's FLIP C ABI. Pin its source
+    # alongside the other sibling inputs; no additional dev shell is needed.
+    codetracer-image-diff = {
+      url = "github:metacraft-labs/codetracer-image-diff/agents";
+      flake = false;
+    };
+
     codetracer-shell-recorders = {
       url = "github:metacraft-labs/codetracer-shell-recorders";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -273,29 +280,10 @@
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
       inputs.git-hooks.follows = "git-hooks-nix";
-      # runquota's REVISION is reprobuild's to state — that is the whole point
-      # of the `runquota.follows = "reprobuild/runquota-src"` edge above. Its
-      # PARAMETERISATION is still ours, and these three restore exactly the
-      # overrides the old standalone `runquota` input carried, without
-      # reintroducing a second revision for them to disagree about.
-      #
-      # Without them runquota is evaluated against
-      # `runquota-src/nixos-modules/nixpkgs-unstable` (measured 2026-10-14:
-      # nixpkgs 3497aa5c) rather than this repo's nixpkgs (687f05a9,
-      # nixos-25.11), which would build `inputs'.runquota.packages.runquota`
-      # — used by nix/shells/ci-base.nix — from a second nixpkgs.
-      # `nixos-modules` needs no line here: runquota-src's already follows
-      # reprobuild's, which follows `nix-blockchain-development/nixos-modules`
-      # above.
-      # Nix 2.28 treats an override-only nested input as the indirect
-      # registry reference `flake:runquota-src`. State the same source URL
-      # as reprobuild so the Nix shipped in our dev-env can re-enter it.
-      # This declares no revision: the lock and the derived root follows
-      # edge above still select reprobuild's single RunQuota source.
-      inputs.runquota-src.url = "github:metacraft-labs/runquota/dev";
-      inputs.runquota-src.inputs.nixpkgs.follows = "nixpkgs";
-      inputs.runquota-src.inputs.flake-parts.follows = "flake-parts";
-      inputs.runquota-src.inputs.git-hooks.follows = "git-hooks-nix";
+      # Reprobuild owns RunQuota's source and its input parameterisation.
+      # Restating a nested URL overrides the producer's locked child when
+      # this parent is updated, even if both happen to match today. Keep
+      # the root `runquota` follows edge above and inherit the complete input.
       flake = true;
     };
 
@@ -428,6 +416,38 @@
       flake = false;
     };
 
+    # Non-flake inputs: the two shared-memory libraries io-mon's interpose shim
+    # and CLI are built on (io-mon `config.nims`, `scripts/build_shim.sh`).
+    # Pinned at the revisions repro.lock pins (the push gate requires the two
+    # locks to agree), which are what this project's siblings build against,
+    # for the monitor the Nix package ships (`ct-io-mon` in
+    # nix/packages/default.nix: `ct test run`'s read-set capture). Move them
+    # with `repro lock update`.
+    nim-shm-queue = {
+      url = "github:metacraft-labs/nim-shm-queue/91451f2250beb89d1d221f0a77be0841c19b182e";
+      flake = false;
+    };
+    nim-shm-gset = {
+      url = "github:metacraft-labs/nim-shm-gset/fb981c7f186a9507c974b7de8871fc74d6308eae";
+      flake = false;
+    };
+
+    # Non-flake input: the test-certificate standard's reference library
+    # (test-certificates-tools, Nim package `test_certificates`, stdlib only).
+    # `ct` and `ct-test` link it for the local certificate store's prune, HEAD
+    # protection and root-owner check and the native store-root resolver
+    # (src/ct_test/certificate_local_store.nim,
+    # certificate_store_roots_native.nim); the conformance walker for note
+    # framing. config.nims reads TEST_CERTIFICATES_TOOLS_SRC after the
+    # `../test-certificates-tools` sibling; the sandboxed package build and
+    # the dev shell have no sibling, so they seed it from here. Pinned at the
+    # same revision reprobuild links (reprobuild `agents` 1e70a388c) until the
+    # v0.1.0 tag carries it.
+    test-certificates-tools = {
+      url = "github:metacraft-labs/test-certificates-tools/9864082065c8acb1db315e65a6a4157a3ab77117";
+      flake = false;
+    };
+
     # Non-flake input: the reprobuild-packages catalog. Every `uses:` name in
     # `repro.nim` that reprobuild's stdlib no longer bundles — `sqlite3`,
     # `shellcheck`, `shfmt` and `prek` so far (reprobuild
@@ -476,7 +496,7 @@
     # `io-mon-src` (f79853ec2); the fix is the same single-node graft onto the
     # revision reprobuild itself declares.
     reprobuild-packages = {
-      url = "github:metacraft-labs/reprobuild-packages/4e2fd1dcabf8ae8eac28a2d27c3160233589c1e6";
+      url = "github:metacraft-labs/reprobuild-packages/7cbfee303fa2ae433b46c2a6151abd6f50ca7c29";
       flake = false;
     };
 

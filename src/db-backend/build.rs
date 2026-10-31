@@ -38,6 +38,9 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod path_tools;
+use path_tools::{bash_command, which_on_path};
+
 #[derive(Debug, Clone)]
 struct PrivateEmulatorBuild {
     emulator_dir: PathBuf,
@@ -575,19 +578,6 @@ fn link_shared_windows(objects: &[PathBuf], out_dir: &Path, link_name: &str) -> 
     dll_path
 }
 
-/// Windows: simple PATH search for an executable. Returns the first
-/// matching absolute path, or None.
-fn which_on_path(name: &str) -> Option<PathBuf> {
-    let path_var = env::var_os("PATH")?;
-    for dir in env::split_paths(&path_var) {
-        let candidate = dir.join(name);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
 // =====================================================================
 // Native target: shared library + version script.
 // =====================================================================
@@ -879,7 +869,7 @@ fn load_private_emulator_build(emulator_dir: &Path) -> PrivateEmulatorBuild {
         let env_script_arg = to_bash_posix_path(&env_script);
         #[cfg(not(target_os = "windows"))]
         let env_script_arg = env_script.to_string_lossy().into_owned();
-        let output = Command::new("bash")
+        let output = bash_command()
             .arg(&env_script_arg)
             .arg("print-env")
             .output()
@@ -1041,7 +1031,7 @@ fn regenerate_c(emulator_dir: &Path, script_path: &Path, output_dir: &Path) {
     #[cfg(target_os = "windows")]
     let status = {
         let posix_arg = to_bash_posix_path(script_path);
-        Command::new("bash").arg(&posix_arg).status()
+        bash_command().arg(&posix_arg).status()
     };
     // On POSIX we normally wrap the script in ``repro exec`` so the
     // recorder's Nim/Nimble env loads onto PATH.  Nix builds run in
@@ -1054,7 +1044,7 @@ fn regenerate_c(emulator_dir: &Path, script_path: &Path, output_dir: &Path) {
     #[cfg(not(target_os = "windows"))]
     let status = if std::env::var_os("CODETRACER_DB_BACKEND_SKIP_DIRENV").is_some() {
         let _ = recorder_root; // silence the unused-variable lint on this branch
-        Command::new("bash").arg(script_path).status()
+        bash_command().arg(script_path).status()
     } else {
         Command::new("repro")
             .arg("exec")

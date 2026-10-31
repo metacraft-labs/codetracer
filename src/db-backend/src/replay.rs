@@ -99,6 +99,14 @@ pub trait ReplaySession: std::fmt::Debug {
 
     fn load_step_events(&mut self, step_id: StepId, exact: bool) -> Vec<DbRecordEvent>;
     fn load_callstack(&mut self) -> Result<Vec<CallLine>, Box<dyn Error>>;
+    /// Search invocations without changing this replay's cursor or breakpoints.
+    fn search_calls(
+        &mut self,
+        _pattern: &str,
+        _limit: usize,
+    ) -> Result<(Vec<crate::task::Call>, usize), Box<dyn Error>> {
+        Err("call search is not supported by this replay".into())
+    }
     fn load_history(&mut self, arg: &LoadHistoryArg) -> Result<(Vec<HistoryResultWithRecord>, i64), Box<dyn Error>>;
 
     /// Register a breakpoint at `(path, line[, column])` with an

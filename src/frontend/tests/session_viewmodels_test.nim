@@ -40,6 +40,13 @@
 ##   in order for a hidden tab and delivered when it is shown, dropped for a
 ##   tab that has closed (`tab_answer_routing.deliverTabAnswer`), and the main
 ##   process echoes the request's tab (`index/tab_answers`);
+## * under `ct host`, a tab that began with page-owned ViewModels (an edit
+##   session, a dataset review) and opened a recording turns into a mirror of
+##   the server's session for it: the record decides when
+##   (`needsServerSession`), hands back its page-owned session alive until the
+##   tab's panes are rendered over the mirror (`detachPageOwnedSession`), and
+##   closing the tab disposes the mirror and stops its channel
+##   (`ui_js.adoptServerSession`, Shared-DOM-Front-Ends D2);
 ## * closing one tab disposes its ViewModels and leaves the other's alive,
 ##   and the window lets go of its Test Results ViewModel (`forgetTestResultsVM`);
 ## * a disposed pane leaves nothing running: the Call Trace scrubber's
@@ -86,6 +93,10 @@ import ../ui/test_results
 from ../ui/pane_host_lookup import tabOfPaneHost
 import ../viewmodel/session_vm
 import ../viewmodel/sdk/debugger_session
+from ../viewmodel/sync/mirror_session import createHostedPageMirror,
+  MirrorSession
+from ../viewmodel/sync/transport import newSyncChannel
+import std/json
 from ../viewmodel/viewmodels/test_results_vm import TestResultsVM, setRunAbsence
 from ../viewmodel/store/replay_data_store import ReplayDataStore
 from isonim/web/dom_api as isonim_dom import nil
@@ -111,7 +122,7 @@ proc panelMountSession(m: PanelMount): SessionViewModel =
   privateAccess(PanelMount)
   if m.isNil: nil else: m.session
 
-const ExpectedChecks = 49
+const ExpectedChecks = 62
 proc jsHasOwnProperty(o: JsObject; key: cstring): bool {.importjs:
   "Object.prototype.hasOwnProperty.call(#, #)".}
 
@@ -315,6 +326,43 @@ scenario "an answer reaches the tab that asked, whichever tab is shown":
   deliverPendingTabAnswers(tab1)
   ck delivered[^2 .. ^1] == @["hidden-1", "hidden-2"]
   ck tab1.pendingTabAnswers.len == 0
+
+scenario "a page-owned tab that opens a recording under ct host mirrors the server's session":
+  # Tab 2 holds page-owned ViewModels, as an edit session or a dataset review
+  # is set up under `ct host` (the server has no session for it).
+  let vms2 = viewModelsOf(tab2)
+  vms2.wired = true
+  # Off a server-managed deployment, or once a mirror: nothing to do.
+  ck not needsServerSession(vms2, serverOwnsSession = false)
+  ck not needsServerSession(viewModelsOf(tab0), serverOwnsSession = false)
+  ck needsServerSession(vms2, serverOwnsSession = true)
+  # What `ui_js.adoptServerSession` does: take the page-owned session out of
+  # the record, build the mirror into it, render the panes over it, and
+  # only then dispose the page-owned one.
+  let pageOwned = detachPageOwnedSession(vms2)
+  ck not pageOwned.isNil and not pageOwned.isDisposed
+  ck sessionVMOf(tab2).isNil
+  let sentToServer = newJArray()
+  let mirror = createHostedPageMirror(newSyncChannel(proc(msg: JsonNode) =
+    sentToServer.add msg))
+  var channelReleased = false
+  vms2.mirror = mirror
+  vms2.releaseMirrorChannel = proc() = channelReleased = true
+  vms2.vm = mirror.session
+  ck sessionVMOf(tab2) == mirror.session
+  ck not needsServerSession(vms2, serverOwnsSession = true)
+  # The mirror asked the server which session to follow.
+  ck sentToServer.len >= 1 and sentToServer[0]{"type"}.getStr == "hello"
+  refreshPanelSessions()
+  ck panelMountSession(mounts[2]) == mirror.session
+  pageOwned.dispose(disconnectBackend = false)
+  ck pageOwned.isDisposed
+  # The other tabs are untouched.
+  ck sessionVMOf(tab0) == vm0 and not viewModelsOf(tab0).debuggerSession.isDisposed
+  # Closing the tab disposes the mirror and stops its channel.
+  disposeViewModels(tab2)
+  ck channelReleased
+  ck sessionVMOf(tab2).isNil
 
 scenario "closing a tab disposes its ViewModels and no other tab's":
   let closingDebugger = viewModelsOf(tab1).debuggerSession

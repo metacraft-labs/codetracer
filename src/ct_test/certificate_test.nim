@@ -246,6 +246,86 @@ suite "reading a certificate back":
     check current.cert.vcs.base == based.vcs.base
     check canonicalPayload(current.cert) == canonicalPayload(based)
 
+  test "a record is closed to extensions at every level, after classification":
+    ## Standard.md §3.4, Canonical-Payload.md §5: an undefined key or table —
+    ## at the root, in [certificate], [certificate.vcs], a command entry, or
+    ## the signature block the payload excludes — makes a v1 record
+    ## malformed, never dropped. Classification comes FIRST: an unknown
+    ## schema stays unverifiable-shaped (crsUnknownSchema), and an
+    ## earlier-draft record keeps its re-issue remedy although `commit` and
+    ## `clean` are undefined keys.
+    let base = renderCertificate(minimal())
+    let content =
+      "content = \"git-tree-sha1:9f8e7d6c5b4a3928170695e4d3c2b1a099887766\"\n"
+    # Control: the record as rendered reads.
+    check readCertificate(base).status == crsOk
+    for (label, document, unknownName) in [
+        ("root key", "extra = \"x\"\n" & base, "extra"),
+        ("root table", base & "\n[extension]\nkey = \"x\"\n", "extension"),
+        ("empty root table", base & "\n[extension]\n", "extension"),
+        ("certificate key", base.replace("[certificate]\n",
+           "[certificate]\nextra = \"x\"\n"), "certificate.extra"),
+        ("vcs key", base.replace("[certificate.vcs]\n",
+           "[certificate.vcs]\nextra = \"x\"\n"), "certificate.vcs.extra"),
+        ("vcs subtable", base & "\n[certificate.vcs.extension]\nkey = \"x\"\n",
+           "certificate.vcs.extension"),
+        ("command key", base.replace("[[certificate.command]]\n",
+           "[[certificate.command]]\nextra = \"x\"\n"),
+           "certificate.command.extra"),
+        ("signature key", base & "\n[certificate.signature]\nalgorithm = \"\"\n" &
+           "value = \"\"\nextra = \"x\"\n", "certificate.signature.extra"),
+        ("signature subtable", base & "\n[certificate.signature]\n" &
+           "algorithm = \"\"\nvalue = \"\"\n[certificate.signature.extension]\n" &
+           "key = \"x\"\n", "certificate.signature.extension"),
+        ("content beside an earlier-draft key", base.replace(content,
+           content & "commit = \"a858633c1f4d7bb4b7c2e2b6a1c0d9e8f7a6b5c4\"\n"),
+           "certificate.vcs.commit")]:
+      checkpoint label
+      let read = readCertificate(document)
+      check read.status == crsMalformed
+      check not read.earlierDraft
+      check unknownName in read.detail
+      check "closed to extensions" in read.detail
+
+    # Classified first: an unknown schema with an unknown key is still an
+    # unknown schema, and an earlier draft is still an earlier draft.
+    let future = ("extra = \"x\"\n" & base).replace(
+      "schema = \"test-certificate.v1\"", "schema = \"test-certificate.v2\"")
+    check readCertificate(future).status == crsUnknownSchema
+    let earlier = base.replace(content,
+      "commit = \"a858633c1f4d7bb4b7c2e2b6a1c0d9e8f7a6b5c4\"\nclean = true\n")
+    let earlierRead = readCertificate(earlier)
+    check earlierRead.status == crsMalformed
+    check earlierRead.earlierDraft
+
+  test "command entries must be tables and known keys must have their types":
+    ## A `command` that is not an array of tables, or an optional key of the
+    ## wrong type (`key_id = true`, `paths = "src"`), is malformed. Reading
+    ## the wrong-typed value as absent would rebuild a payload without a key
+    ## the signer saw — a repair (Canonical-Payload.md §5).
+    let base = renderCertificate(minimal())
+    let noCommands = base.replace(
+      "\n[[certificate.command]]\nargv = [\"ct\", \"test\", \"run\"]\n", "")
+    require noCommands != base
+    for (label, document, needle) in [
+        ("command as a string", noCommands.replace("[certificate.vcs]\n",
+           "[certificate.vcs]\n").replace("issuer = \"ct-test@host\"\n",
+           "issuer = \"ct-test@host\"\ncommand = \"ct test run\"\n"),
+           "array of tables"),
+        ("command as strings", noCommands.replace("issuer = \"ct-test@host\"\n",
+           "issuer = \"ct-test@host\"\ncommand = [\"ct\", \"test\"]\n"),
+           "must be a table"),
+        ("key_id as a boolean", base.replace("issuer = \"ct-test@host\"\n",
+           "issuer = \"ct-test@host\"\nkey_id = true\n"), "key_id"),
+        ("paths as a string", base.replace("repo = \"example\"\n",
+           "repo = \"example\"\npaths = \"src\"\n"), "paths"),
+        ("a non-string target", base.replace("targets = [\"t-unit\"]",
+           "targets = [\"t-unit\", true]"), "targets")]:
+      checkpoint label
+      let read = readCertificate(document)
+      check read.status == crsMalformed
+      check needle in read.detail
+
   test "an empty base is refused on read, never silently dropped":
     ## Canonical-Payload.md §2 rule 10: an absent `base` is OMITTED. One
     ## present and empty names no commit, and rebuilding the payload from the

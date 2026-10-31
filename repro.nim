@@ -3,6 +3,10 @@ import std/[os, strutils]
 
 import repro_dsl_stdlib
 
+when defined(windows):
+  import "../reprobuild-packages/packages/contributions/tree-sitter/repro"
+  import "../reprobuild-packages/packages/contributions/rustup/repro"
+
 
 
 
@@ -388,6 +392,7 @@ package codeTracer:
     "bash >=4"
     "capnp >=0"
     "cargo >=1"
+    "cargo-nextest >=0"
     "emcc >=0"
     "gcc >=10"
     "git >=2"
@@ -401,6 +406,11 @@ package codeTracer:
     "rustc >=1"
     "rustup >=1"
     "sh >=1"
+    # The Windows generator uses the catalog's pinned upstream archive.
+    when defined(windows):
+      "tree-sitter ==0.27.0"
+    else:
+      "tree-sitter >=0"
     "wasm-opt >=0"
     # Zstandard's DEVELOPMENT channel -- `zstd.h` on the include path and
     # `libzstd` on the library path. NOT the same thing as `zstd` (declared
@@ -523,6 +533,33 @@ package codeTracer:
     "nim-agent-harbor >=0"
     "nim-agents >=0"
     "nim-acp >=0"
+    # The test-certificate standard's reference library (test-certificates-tools,
+    # `library test_certificates`, stdlib only). `ct` links it in
+    # src/ct_test/certificate_local_store.nim and
+    # certificate_store_roots_native.nim, reached from every `ct` build. Like
+    # the siblings above it is consumed as SOURCE through the SC-11 Nim
+    # library-source channel, and this line and its `repro.lock` entry are ONE
+    # change: a `uses:` with neither a develop override nor a committed
+    # `LockedDep` falls through to PATH and fails. The pin is the revision
+    # flake.nix's `test-certificates-tools` input names; move both together
+    # (`repro lock update test-certificates-tools --to <rev>`).
+    "test-certificates-tools >=0"
+    # `ct` imports `io_mon/depfile` and `stackable_hooks/propagation`
+    # unconditionally (src/ct_test/incremental/io_mon_capture.nim), so these two
+    # are REQUIRED siblings (scripts/require-siblings.sh) and every `ct` build
+    # reaches them. Declared here, as source inputs, so that the lock solves
+    # them as packages: that is what makes
+    # .github/actions/provision-repro-lock-siblings clone them, with no list to
+    # edit, in every job that takes its Nim siblings from that action. flake.nix
+    # names both as inputs; `repro lock update <name>` moves both locks together.
+    "io-mon >=0"
+    "nim-stackable-hooks >=0"
+    # The parity gate compiles the FLIP producer's C ABI; declare its source
+    # package so the sibling revision participates in dependency locking.
+    # Named by its repository, as every workspace producer above is
+    # (`isonim-tui`, whose package is `isonim_tui`): the repro.lock dep is
+    # `codetracer-image-diff`, and its package `image_diff` resolves from it.
+    "codetracer-image-diff >=0"
 
     # Windows-only build tools. ``nsis`` (the Nullsoft Scriptable
     # Install System compiler) is what the ``windows-installer``
@@ -557,7 +594,6 @@ package codeTracer:
     # POSIX-only / Nix-only tools — guarded off the Windows branch.
     when not defined(windows):
       "attic-client >=0"
-      "cargo-nextest >=0"
       "clang >=1"
       "ctags >=0"
       "curl >=0"
@@ -577,7 +613,6 @@ package codeTracer:
       "shellcheck >=0"
       "sqlite3 >=0"
       "tmux >=0"
-      "tree-sitter >=0"
       "vim >=0"
       "wasm-pack >=0"
       "webpack-cli >=0"
@@ -883,7 +918,7 @@ package codeTracer:
       # say "this edge uses that tool", and it is what `nim.c` itself uses for
       # the two sub-tools it knows about: `openssl` on a `-d:ssl` edge, and the
       # backend C compiler (`repro_dsl_stdlib/packages/nim.nim:716,757`).
-      # `vm-harness/repro.nim:112` spells it the same way for `pcre-config`.
+      # gosti's `repro.nim` spells it the same way for `pcre-config`.
       # An unmatched ref is inert — the resolver returns `none` for a name no
       # `uses:` entry declares — so this is a no-op on a tree whose package
       # block does not declare `zstd-dev`.
@@ -1513,6 +1548,26 @@ package codeTracer:
         else:
           @[],
         source = "src/ct_test/ct_test.nim")
+      # THE C BACKEND AND THE DEBUG-INFO PASS ARE SUB-TOOLS HERE TOO.
+      #
+      # Same rule as `ctNative` above (see its "NAMING ANY REF MAKES THIS
+      # EDGE'S `PATH` HERMETIC" note): `nim c` shells out to a bare
+      # `clang`/`gcc`, and on macOS runs `dsymutil` after the link. Without
+      # these refs the edge inherited the developer's `PATH`, found
+      # `/usr/bin/clang` (the xcode-select shim, a SIP binary), and the
+      # monitor substituted the real Command Line Tools clang with `SDKROOT`
+      # scrubbed. Measured 2026-10-28 on aarch64-darwin (CLT selected):
+      # `repro build ct-test` died on `'string.h' file not found`. Naming the
+      # Nix clang gives the edge the wrapped compiler that carries its own
+      # libc/SDK include paths, exactly as `ct-binary` already gets.
+      block:
+        const CtTestBackendCompiler =
+          when defined(macosx): "clang"
+          else: "gcc"
+        appendRegisteredActionToolIdentityRefs(ctTest.id,
+          [CtTestBackendCompiler])
+        when defined(macosx):
+          appendRegisteredActionToolIdentityRefs(ctTest.id, ["dsymutil"])
       target("ct-test", ctTest)
       codetracerActions.add(ctTest)
       auxiliaryActionIds.add(ctTest.id)
@@ -2084,6 +2139,19 @@ package codeTracer:
       cacheableValue = true,
       extraEnvValue = GateEnv)
     target("gate-flake-pin-alignment", gateFlakePinAlignment)
+
+    # The real tree's two locks agree on every sibling both pin. A GATE over
+    # the real files, so they are its inputs: a lock bump re-runs it.
+    let gateReproLockAgreement = ctShell(
+      actionIdValue = "codetracer.gate.repro-lock-flake-lock-agreement",
+      commandValue = "bash ci/test/repro-lock-flake-lock-agreement.sh",
+      extraInputsValue = @[
+        "ci/test/repro-lock-flake-lock-agreement.sh",
+        "flake.lock",
+        "repro.lock"],
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
+    target("gate-repro-lock-flake-lock-agreement", gateReproLockAgreement)
 
     let gatePythonVersionAlignment = ctShell(
       actionIdValue = "codetracer.gate.python-version-alignment",

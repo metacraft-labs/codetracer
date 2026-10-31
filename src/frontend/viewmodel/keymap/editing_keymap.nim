@@ -7,6 +7,11 @@
 ## detection over it, the configuration format that layers over it, and the one
 ## function that EXECUTES a resolution against an `EditorState`.
 ##
+## Refuses to own: any base's rows (each base's own module), the context keys
+## and `when` (`context_keys`, `when_expr`), the order of the layers and the
+## user layer (`keymap_router`, `layer_stack`, `user_keymap`), and what an
+## operation does (the editing core).
+##
 ## =========================================================================
 ## NOTHING IN THE EDITING CORE KNOWS ABOUT KEYS, AND THIS IS THE OTHER SIDE
 ## =========================================================================
@@ -350,12 +355,26 @@ type
     forms*: set[OpForm]
     reason*: string
 
+  BaseMacro* = object
+    ## One macro row's body: an id (`base:<base>-<name>`, a namespace no
+    ## register letter and no `.vimrc` import can mint) and its steps,
+    ## operation names of the vocabulary.
+    id*: string
+    steps*: seq[string]
+
   KeymapDefinition* = object
     ## A model's bindings AND the claim they are graded against, as one value,
     ## so neither can be read without the other.
     model*: BaseKeymap
     keymap*: EditingKeymap
     filed*: seq[FiledDeclaration]
+    macros*: seq[BaseMacro]
+      ## PLAT-70 Part C: the base's MACRO ROWS' bodies (Base-Keymaps §8
+      ## rule 4: *"an operation that is 'two operations in a row' is a macro
+      ## row"*) — a row binds `replay-macro(<id>)` and the steps are here, as
+      ## data. `editing_core` installs them in `EditorState.macros` when a
+      ## document opens under the base, so the row replays them as a recorded
+      ## macro is replayed (PLAT-36's macro shape).
 
   EditingKeymapErrorKind* = enum
     ekSyntax = "syntax"

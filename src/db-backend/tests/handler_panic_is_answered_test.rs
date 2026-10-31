@@ -16,6 +16,9 @@
 //! * a request carrying an id that names nothing (a frame, a call key) is
 //!   refused with a message that names the id, and the session goes on
 //!   serving as before;
+//! * a request that succeeds is answered exactly once even when it has
+//!   nothing to return, including the ones whose outcome travels in events
+//!   (the moves, the tracepoint commands, the call-trace expansions);
 //! * a request whose handler panics is answered `success: false` with a
 //!   message naming the command, its `seq` and the panic. The panic may have
 //!   left the thread's session half-changed, so the thread refuses every later
@@ -51,7 +54,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use ct_dap_client::client::DapStdioClient;
-use ct_dap_client::protocol::{DapMessage, Response};
+use ct_dap_client::protocol::{DapMessage, Event, Response};
 use ct_dap_client::types::launch::LaunchRequestArguments;
 use serde_json::json;
 
@@ -321,5 +324,316 @@ fn a_launch_whose_setup_panics_is_reported_and_later_requests_are_answered() {
         message.contains("panicked"),
         "a request after a panicked launch must be refused naming the panic. Got: {message:?}"
     );
+    let _ = client.disconnect();
+}
+
+/// How long to keep listening after the last answer for a second answer to
+/// any request. A duplicate would be sent by the same handler call that sent
+/// the first, so it follows at once; the window only has to outlast pipe and
+/// scheduling latency.
+const SECOND_ANSWER_WINDOW: Duration = Duration::from_secs(2);
+
+/// One request sent by an exactly-once check, and what its answer must be.
+struct Sent {
+    seq: i64,
+    what: String,
+    command: &'static str,
+    /// `None`: the request must succeed. `Some(text)`: it must be refused
+    /// with a message containing `text`, and not by a panic.
+    refusal: Option<&'static str>,
+}
+
+/// Everything the server sent while an exactly-once check ran: every
+/// response, whichever request it answers, and every event.
+#[derive(Default)]
+struct Transcript {
+    sent: Vec<Sent>,
+    answers: Vec<Response>,
+    events: Vec<Event>,
+}
+
+impl Transcript {
+    /// Send one request and read until it is answered (within
+    /// `ANSWER_BUDGET`), keeping every message seen on the way, an extra
+    /// answer to an earlier request among them.
+    fn send(
+        &mut self,
+        client: &mut DapStdioClient,
+        command: &'static str,
+        arguments: serde_json::Value,
+        refusal: Option<&'static str>,
+    ) {
+        let what = format!("`{command}` {arguments}");
+        let seq = client
+            .send_request(command, arguments)
+            .unwrap_or_else(|e| panic!("send {what}: {e}"));
+        let deadline = Instant::now() + ANSWER_BUDGET;
+        loop {
+            let now = Instant::now();
+            assert!(
+                now < deadline,
+                "no response to {what} (seq {seq}) within {ANSWER_BUDGET:?}; server stderr:\n{}",
+                client.recent_stderr(40).join("\n")
+            );
+            match client.recv_message(deadline - now) {
+                Ok(DapMessage::Response(r)) => {
+                    let done = r.request_seq == seq;
+                    self.answers.push(r);
+                    if done {
+                        break;
+                    }
+                }
+                Ok(DapMessage::Event(e)) => self.events.push(e),
+                Ok(_) => {}
+                Err(e) => panic!(
+                    "no response to {what} (seq {seq}): {e}; server stderr:\n{}",
+                    client.recent_stderr(40).join("\n")
+                ),
+            }
+        }
+        self.sent.push(Sent {
+            seq,
+            what,
+            command,
+            refusal,
+        });
+    }
+
+    /// The body of the latest event named `name`.
+    fn last_event(&self, name: &str) -> serde_json::Value {
+        self.events
+            .iter()
+            .rev()
+            .find(|e| e.event == name)
+            .map(|e| e.body.clone())
+            .unwrap_or_else(|| panic!("no `{name}` event was sent"))
+    }
+
+    /// Read on for `SECOND_ANSWER_WINDOW` (anything still to come is a
+    /// second answer), then check that every request was answered exactly
+    /// once, as its case says.
+    fn assert_each_answered_once(mut self, client: &mut DapStdioClient) {
+        let quiet_until = Instant::now() + SECOND_ANSWER_WINDOW;
+        loop {
+            let now = Instant::now();
+            if now >= quiet_until {
+                break;
+            }
+            match client.recv_message(quiet_until - now) {
+                Ok(DapMessage::Response(r)) => self.answers.push(r),
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+
+        let mut failures: Vec<String> = Vec::new();
+        for sent in &self.sent {
+            let Sent {
+                seq,
+                what,
+                command,
+                refusal,
+            } = sent;
+            let mine: Vec<&Response> = self.answers.iter().filter(|r| r.request_seq == *seq).collect();
+            if mine.len() != 1 {
+                failures.push(format!(
+                    "{what} (seq {seq}) was answered {} times, not once",
+                    mine.len()
+                ));
+                continue;
+            }
+            let answer = mine[0];
+            let message = answer.message.clone().unwrap_or_default();
+            if answer.command != *command {
+                failures.push(format!("{what}: the answer names `{}`", answer.command));
+            }
+            match refusal {
+                None if !answer.success => failures.push(format!("{what} must succeed, but was refused: {message:?}")),
+                Some(expected) if answer.success || !message.contains(expected) || message.contains("panicked") => {
+                    failures.push(format!(
+                        "{what} must be refused, naming {expected:?}. Got success={} {message:?}",
+                        answer.success
+                    ))
+                }
+                _ => {}
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+}
+
+/// `ct/expand-calls` and `ct/collapse-calls` are answered exactly once, on
+/// success as well as on refusal.
+///
+/// Both commands change the call trace's expansion state and carry no data
+/// back, and until this test they answered nothing when they succeeded: the
+/// handler changed the state and returned, so a client that awaited the
+/// response (the native `BackendService.send`, which blocks on it) never got
+/// one. A call key that does not parse as an integer was only logged, and
+/// was not answered either; an expansion kind the command does not make is
+/// refused rather than answered as a success that changed nothing.
+///
+/// Every response the server sends is recorded, keyed by `request_seq`, and
+/// the stream is read on for `SECOND_ANSWER_WINDOW` after the last one, so a
+/// second answer to any request fails the test as surely as a missing one.
+#[test]
+fn calltrace_expand_and_collapse_are_answered_exactly_once() {
+    let (mut client, _home) = launched(None);
+    let mut transcript = Transcript::default();
+
+    // Key 0 is the fixture's first call, which every recording with calls
+    // has; the session's own call stack is non-empty (`control_answers`).
+    let cases: [(&'static str, serde_json::Value, Option<&'static str>); 7] = [
+        (
+            "ct/collapse-calls",
+            json!({ "callKey": "0", "nonExpandedKind": 1, "count": 0 }),
+            None,
+        ),
+        (
+            "ct/expand-calls",
+            json!({ "callKey": "0", "nonExpandedKind": 1, "count": 0 }),
+            None,
+        ),
+        (
+            "ct/expand-calls",
+            json!({ "callKey": "0", "nonExpandedKind": 4, "count": 1 }),
+            None,
+        ),
+        (
+            "ct/collapse-calls",
+            json!({ "callKey": "not-a-key", "nonExpandedKind": 1, "count": 0 }),
+            Some("not-a-key"),
+        ),
+        (
+            "ct/expand-calls",
+            json!({ "callKey": "not-a-key", "nonExpandedKind": 1, "count": 0 }),
+            Some("not-a-key"),
+        ),
+        (
+            "ct/expand-calls",
+            json!({ "callKey": "", "nonExpandedKind": 1, "count": 0 }),
+            Some("call key"),
+        ),
+        // A kind that names no expansion `ct/expand-calls` makes (`Siblings`).
+        (
+            "ct/expand-calls",
+            json!({ "callKey": "0", "nonExpandedKind": 2, "count": 0 }),
+            Some("Siblings"),
+        ),
+    ];
+    for (command, arguments, refusal) in cases {
+        transcript.send(&mut client, command, arguments, refusal);
+    }
+    transcript.assert_each_answered_once(&mut client);
+
+    // The session goes on serving.
+    control_answers(&mut client, "after the expansions");
+    let _ = client.disconnect();
+}
+
+/// The arguments of `ct/setup-trace-session` / `ct/run-tracepoints` for one
+/// tracepoint, `tracepoint_id`, logging at `path:line`.
+fn session_with_tracepoint(path: &str, line: i64, tracepoint_id: u64) -> serde_json::Value {
+    json!({
+        "session": {
+            "id": 1,
+            "tracepoints": [{
+                "tracepointId": tracepoint_id,
+                "mode": 0,
+                "line": line.max(1),
+                "offset": 0,
+                "name": path,
+                "expression": "log(1)",
+                "lastRender": 0,
+                "isDisabled": false,
+                "isChanged": true,
+                "results": [],
+                "tracepointError": "",
+            }],
+            "found": [],
+            "lastCount": 0,
+            "results": {},
+        },
+        "stopAfter": -1,
+        "withLocals": false,
+    })
+}
+
+/// The commands that move the session or change its tracepoints are each
+/// answered exactly once, after the events that report what they did.
+///
+/// `restart`, `ct/run-to-entry`, `ct/history-jump` and `ct/local-step-jump`
+/// report the move with `stopped` / `ct/complete-move`; the tracepoint
+/// commands report with `ct/updated-trace` (and `ct/run-tracepoints` with
+/// `ct/tracepoint-results`). Until this test none of them answered the
+/// request itself when it succeeded, so a client that awaited the response
+/// (a DAP client's `restart`, which the server advertises with
+/// `supportsRestartRequest`) waited out its own timeout. A tracepoint id
+/// with no table panicked `ct/tracepoint-delete`; it is refused by name now.
+///
+/// The arguments are the ones the front ends send: the location a
+/// `ct/history-jump` or `ct/local-step-jump` names is the stop `restart`
+/// reported, so it is a step the fixture has.
+#[test]
+fn moves_and_tracepoint_commands_are_answered_exactly_once() {
+    let (mut client, _home) = launched(None);
+    let mut transcript = Transcript::default();
+
+    transcript.send(&mut client, "restart", json!({}), None);
+    transcript.send(&mut client, "ct/run-to-entry", json!({}), None);
+    let entry = transcript.last_event("ct/complete-move")["location"].clone();
+    let rr_ticks = entry["rrTicks"].as_i64().expect("the entry stop names its rrTicks");
+    let path = entry["path"].as_str().unwrap_or("").to_string();
+    let line = entry["line"].as_i64().unwrap_or(0);
+
+    transcript.send(&mut client, "ct/history-jump", entry.clone(), None);
+    transcript.send(
+        &mut client,
+        "ct/local-step-jump",
+        json!({
+            "path": path,
+            "line": line,
+            "stepCount": 0,
+            "targetIteration": 0,
+            "firstLoopLine": line,
+            "rrTicks": rr_ticks,
+            "reverse": false,
+            "activeIteration": 0,
+        }),
+        None,
+    );
+
+    let session = session_with_tracepoint(&path, line, 0);
+    transcript.send(&mut client, "ct/setup-trace-session", session.clone(), None);
+    transcript.send(&mut client, "ct/run-tracepoints", session, None);
+    transcript.send(&mut client, "ct/tracepoint-toggle", json!({ "id": 0 }), None);
+    transcript.send(&mut client, "ct/tracepoint-toggle", json!({ "id": 0 }), None);
+    transcript.send(&mut client, "ct/tracepoint-delete", json!({ "id": 0 }), None);
+
+    // Refusals, each named and each before anything changes.
+    transcript.send(
+        &mut client,
+        "ct/tracepoint-delete",
+        json!({ "id": UNKNOWN_ID }),
+        Some("no tracepoint has id 987654321"),
+    );
+    // A tracepoint id is a label, not a position: the largest one is as
+    // good as any, and costs one table, made for it alone. It used to be
+    // refused as out of range by `ct/tracepoint-toggle`, and to overflow
+    // `ct/setup-trace-session`, which made a table for every smaller id.
+    transcript.send(
+        &mut client,
+        "ct/setup-trace-session",
+        session_with_tracepoint(&path, line, u64::MAX),
+        None,
+    );
+    transcript.send(&mut client, "ct/tracepoint-toggle", json!({ "id": u64::MAX }), None);
+    transcript.send(&mut client, "ct/history-jump", json!({ "rrTicks": -5 }), Some("-5"));
+    // `ct/run-tracepoints` reported its results before it answered.
+    transcript.last_event("ct/tracepoint-results");
+    transcript.assert_each_answered_once(&mut client);
+
+    // The session goes on serving.
+    control_answers(&mut client, "after the moves and the tracepoint commands");
     let _ = client.disconnect();
 }

@@ -70,7 +70,10 @@ import ./gutter
 import ./source_pane
 import ./styled_row
 import ./scrubber_track
-from codetracer_embed import HorizontalView, setViewport, overflows, barModel
+from codetracer_embed import HorizontalView, setViewport, overflows, barModel,
+  EditorDiagnostic, BuildProblemLine, BuildLineSeverity, blsError, blsWarning,
+  blsInfo, blsNone, diagnosticsForFile, gutterSeverity, gutterIcon, hoverText
+import std/unicode
 
 export gutter, styled_row, highlighter, profile
 
@@ -108,6 +111,13 @@ type
     caretColumn*: int
       ## 0-based grapheme-cluster column of the caret within its line.
     selectionActive*: bool
+    selected*: seq[tuple[line, fromColumn, toColumn: int]]
+      ## PLAT-70 Part C: the selection's cells (`editing_core.selectionCells`),
+      ## drawn on the selection ground as the Debug-mode source pane draws
+      ## them — a find match is selected, and must be seen to be.
+    findMarks*: seq[tuple[line, fromColumn, toColumn: int; current: bool]]
+      ## PLAT-70 Part C: the find session's matches on the drawn lines
+      ## (`source_pane.SourcePaneModel.findMarks`' meaning).
     dirty*: bool
       ## Whether the buffer differs from what was loaded. Shown in the title as
       ## a marker, because Mode-Transitions.md §5 requires an unsaved buffer to
@@ -135,6 +145,12 @@ type
       ## the bar's mark (§4.2).
     overflowMarkers*: bool
       ## `view.overflow-markers` (§4.6): the `‹` / `›` per row.
+    diagnostics*: seq[EditorDiagnostic]
+      ## Build-Output-Pane.md §3.9: the build's diagnostics in this file
+      ## (`editor_diagnostics.diagnosticsForFile`, from the Problems pane's
+      ## rows) — each span underlined in its severity's colour, the most
+      ## severe one's icon in the gutter's pointer field (Edit mode has no
+      ## execution pointer, so the field is free), the messages on hover.
 
   EditPaneScreen* = object
     ## One painted pane, plus the counts a test asserts on. Same shape as
@@ -189,7 +205,7 @@ const
   EditDirtyStyle* = CellStyle(role: srChromeNotification, bold: true)
   EditStatementStyle* = CellStyle(role: srChromeMuted, italic: true)
   EditRuleStyle* = CellStyle(role: srBorderPane)
-  EditPaneRule* = canonical(grDividerH)
+  EditPaneRule = canonical(grDividerH)
 
 proc initEditPaneModel*(path = ""; sourceStatement = "";
                         lines: seq[string] = @[]; viewportTop = 1;
@@ -227,6 +243,69 @@ proc markFor*(model: EditPaneModel; line: int): GutterMark =
 
 proc paneGutterWidth*(model: EditPaneModel): int =
   gutterWidth(gutterNumberWidth(max(1, model.lineCount)))
+
+proc attachDiagnostics*(model: var EditPaneModel;
+                        rows: openArray[BuildProblemLine];
+                        workingDirectory, projectDir: string) =
+  ## The build's diagnostics that name this pane's file (§3.9). A row's path
+  ## resolves against the build's working directory, the pane's against the
+  ## project folder.
+  if model.path.len == 0 or rows.len == 0:
+    model.diagnostics = @[]
+    return
+  let m = model
+  model.diagnostics = diagnosticsForFile(rows, workingDirectory, m.path,
+                                         projectDir,
+                                         proc(line: int): string = m.lineAt(line))
+
+const
+  DiagnosticErrorStyle* = CellStyle(role: srChromeError, underline: true)
+  DiagnosticWarningStyle* = CellStyle(role: srChromeNotification,
+                                      underline: true)
+  DiagnosticInfoStyle* = CellStyle(role: srChromeInfo, underline: true)
+    ## A squiggle: the span underlined, in the Problems pane's severity roles
+    ## (`problems_pane.ProblemsErrorStyle` …) — a terminal has no wavy line
+    ## of its own colour, so the text takes the colour and the underline.
+
+proc diagnosticStyle*(s: BuildLineSeverity): CellStyle =
+  case s
+  of blsError: DiagnosticErrorStyle
+  of blsWarning: DiagnosticWarningStyle
+  of blsInfo, blsNone: DiagnosticInfoStyle
+
+proc diagnosticCells*(text: string; d: EditorDiagnostic): tuple[fromCell,
+                                                                 toCell: int] =
+  ## The diagnostic's span as 1-based cell columns of its line, `[from, to)`.
+  let runes = text.toRunes
+  let a = clamp(d.fromColumn, 0, runes.len)
+  let b = clamp(d.toColumn, a, runes.len)
+  let before = cellWidthOf($runes[0 ..< a])
+  let upto = cellWidthOf($runes[0 ..< b])
+  (before + 1, max(before + 2, upto + 1))
+
+proc diagnosticHoverAt*(model: EditPaneModel; area: CellArea;
+                        row, col: int): tuple[line: int; text: string] =
+  ## §3.9's hover: the messages of the diagnostics whose underlined span is
+  ## drawn at `(row, col)` of the pane painted into `area` (`hoverText`'s
+  ## wording), "" over anything else.
+  if model.diagnostics.len == 0 or row <= area.row or
+     row >= area.row + area.height:
+    return (0, "")
+  let line = model.viewportTop + (row - area.row - 1)
+  let codeCol = area.col + paneGutterWidth(model)
+  if col < codeCol or col >= area.col + area.width:
+    return (0, "")
+  var view = model.hview
+  view.setViewport(max(0, area.width - paneGutterWidth(model)))
+  let cell = col - codeCol + 1 + view.leftCol
+  let raw = model.lineAt(line)
+  var hit: seq[EditorDiagnostic]
+  for d in model.diagnostics:
+    if d.line == line:
+      let (a, b) = diagnosticCells(raw, d)
+      if cell >= a and cell < b:
+        hit.add d
+  (line, hoverText(hit, line))
 
 # `pathBaseName` IS `styled_row`'s, NOT A SECOND ONE. The first draft of this
 # module declared its own and `test_call_stack_navigation.nim` went red with
@@ -425,6 +504,50 @@ proc paintEditPane*(g: var StyledGrid; area: CellArea; model: EditPaneModel;
       if caretCell >= 0 and (caretCell < codeW or not view.overflows):
         result.caretRow = row
         result.caretCol = min(area.col + gw + caretCell, limit - 1)
+    # §3.9: THE BUILD'S DIAGNOSTICS on this line — the gutter's icon in the
+    # pointer field, each span underlined in its severity's colour.
+    let sev = gutterSeverity(model.diagnostics, line)
+    if sev != blsNone:
+      let pointerCol = area.col + GutterMarkCells + numberWidth +
+                       GutterGapCells + 1
+      if pointerCol < area.col + gw:
+        g.paint(row, pointerCol, gutterIcon(model.diagnostics, line),
+                CellStyle(role: diagnosticStyle(sev).role))
+      if codeW > 0:
+        let codeCol = area.col + gw
+        let raw = model.lineAt(line)
+        # The most severe painted last, so it is the one seen where two
+        # spans meet (gcc's error and its note on one identifier).
+        for want in [blsInfo, blsWarning, blsError]:
+          for d in model.diagnostics:
+            if d.line != line or d.severity != want:
+              continue
+            let (a, b) = diagnosticCells(raw, d)
+            let first = max(1, a - left)
+            let last = min(codeW + 1, b - left)
+            if last > first:
+              let st = diagnosticStyle(d.severity)
+              g.restyle(row, codeCol + first - 1, last - first,
+                        proc(s: CellStyle): CellStyle =
+                          var o = s
+                          o.role = st.role
+                          o.fg = ""
+                          o.underline = true
+                          o)
+    if codeW > 0:
+      # PLAT-70 Part C: the selection, then the find highlights over it —
+      # after the caret row's tint, which they sit on.
+      let codeCol = area.col + gw
+      for sel in model.selected:
+        if sel.line == line:
+          paintCellBand(g, row, codeCol, codeW, left, sel.fromColumn,
+                        sel.toColumn, srSurfaceSelection)
+      for m in model.findMarks:
+        if m.line == line:
+          paintCellBand(g, row, codeCol, codeW, left, m.fromColumn,
+                        m.toColumn,
+                        (if m.current: srSurfaceFindMatchCurrent
+                         else: srSurfaceFindMatch))
   if bar.shown:
     # §4.7: the last row, one cell high, over the code columns; the gutter's
     # cells of the row are left to the editor's ground.

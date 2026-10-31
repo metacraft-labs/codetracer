@@ -340,6 +340,10 @@ type
     clipboardFrom*: CapabilitySource
     remedies*: seq[string]
       ## The one-line fixes the report and the status line offer (§10.1).
+    clipboardRead*: bool
+      ## Whether a paste asks the terminal for its clipboard (OSC 52 read)
+      ## before it pastes the session's own copy.
+    clipboardReadFrom*: CapabilitySource
 
 const
   ClipboardInAppOnly* = "in-app only"
@@ -365,6 +369,16 @@ const
   KittyKeyboardPrograms* = ["ghostty", "WezTerm"]
     ## Terminals that advertise the Kitty keyboard protocol — the report's
     ## hint; `keyProtocol` is decided by the terminal's answer.
+
+  ClipboardReadPromptTerms* = ["xterm-kitty", "xterm-ghostty"]
+  ClipboardReadPromptPrograms* = ["ghostty"]
+    ## Terminals whose DEFAULT answer to an OSC 52 read is a permission
+    ## prompt (kitty: `clipboard_control … read-clipboard-ask`; Ghostty:
+    ## `clipboard-read = ask`), so a paste does not ask them.
+    ## Measured 2026-10-24: xterm (with `allowWindowOps`), foot, tmux (with
+    ## `set-clipboard on`) and kitty / Ghostty with reads allowed answer in
+    ## under 50 ms; xterm by default, WezTerm and tmux by default never
+    ## answer; kitty and Ghostty by default prompt.
 
   ModifyOtherKeysTermPrefixes* = ["xterm", "tmux"]
     ## `$TERM` prefixes of terminals that implement xterm's `modifyOtherKeys`
@@ -611,6 +625,10 @@ type
       ## How many cursor reports the width probe asked for. A `CSI r ; c R`
       ## is taken as a REPLY only while fewer than this have arrived (§4.3's
       ## F3 rule); after that it is Ctrl+F3 again.
+    replyWindowClosed*: bool
+      ## The reply window passed without the fence (`ReplyWindowMs`). No
+      ## owed cursor report is waited for after it, nor after the fence: a
+      ## terminal that never answers CPR must not take Ctrl+F3 for good.
     cprAnswers*: seq[int]
       ## The width each answered probe measured (column − 1), in probe order.
     rttMeasured*: bool
@@ -1063,6 +1081,21 @@ proc resolveKittyKeyboard(env: TerminalEnv): bool =
     return true
   env.termProgram in KittyKeyboardPrograms
 
+proc resolveClipboardRead*(env: TerminalEnv): (bool, CapabilitySource) =
+  ## Whether a paste asks the terminal for its clipboard (OSC 52 read) first:
+  ## yes, except on a terminal whose DEFAULT answer to a read is a permission
+  ## prompt (`ClipboardReadPromptTerms` / `ClipboardReadPromptPrograms`).
+  ## Measured 2026-10-24 (kitty 0.49.1, Ghostty 1.3.1 under Xvfb): the prompt
+  ## does not answer within the paste's 300 ms, and while it is up it takes
+  ## the keys typed after `Ctrl+V`, so every paste interrupted the user. The
+  ## user-facing setting for this axis is the terminal-adaptation profile's
+  ## `clipboard-osc52` (CodeTracer-TUI-Terminal-Adaptation.md §5.3).
+  if env.term in ClipboardReadPromptTerms or
+     env.termProgram in ClipboardReadPromptPrograms:
+    (false, csEnvironment)
+  else:
+    (true, csDefault)
+
 proc resolveCapabilities*(env: TerminalEnv; flags: CapabilityFlags;
                           probe = TerminalProbe();
                           prefs = TerminalPrefs();
@@ -1147,7 +1180,9 @@ proc resolveCapabilities*(env: TerminalEnv; flags: CapabilityFlags;
   elif env.tmux.len == 0 and identity.name in Osc52Writers:
     (clipboard, clipboardFrom) = ("osc52", csIdentity)
 
+  let (clipboardRead, clipboardReadFrom) = resolveClipboardRead(env)
   result = TerminalCapabilities(
+    clipboardRead: clipboardRead, clipboardReadFrom: clipboardReadFrom,
     colors: colors,
     borders: (if tier == tierAscii: bmAscii else: bmUnicode),
     mouse: mouse, synchronizedOutput: sync,
@@ -1244,7 +1279,7 @@ proc tmuxRgbRemedy*(caps: TerminalCapabilities): string =
   "tmux withholds 24-bit colour: set -as terminal-features ',"  & pattern &
     ":RGB'"
 
-proc tmuxExtendedKeysRemedy*(caps: TerminalCapabilities): string =
+proc tmuxExtendedKeysRemedy(caps: TerminalCapabilities): string =
   ## The one-line remedy when tmux keeps extended keys from this pane; ""
   ## otherwise (Base-Keymaps §7.2 step 6).
   if not caps.tmuxExtendedKeysOff:
@@ -1281,4 +1316,6 @@ proc describe*(caps: TerminalCapabilities): string =
   "(" & $caps.modernUnicodeFrom & ")" &
   " ambiguous=" & (if caps.ambiguousWide: "wide" else: "narrow") &
   "(" & $caps.ambiguousFrom & ")" &
-  " terminal=" & caps.identity.chainName & "(" & $caps.identityFrom & ")"
+  " terminal=" & caps.identity.chainName & "(" & $caps.identityFrom & ")" &
+  " clipboard-read=" & (if caps.clipboardRead: "on" else: "off") &
+  "(" & $caps.clipboardReadFrom & ")"

@@ -132,7 +132,7 @@ kind_for() {
 	case "$1" in
 	Debug | Build | BuildErrors | Status | SearchResults | Menu) echo "both" ;;
 	WelcomeScreen | CommandPalette | NoInfo | EditorView) echo "both" ;;
-	EventLog | State | Calltrace | Timeline | Filesystem) echo "both" ;;
+	EventLog | State | Calltrace | Filesystem) echo "both" ;;
 	Scratchpad | Repl | TraceLog | CalltraceEditor) echo "both" ;;
 	TerminalOutput | Shell | StepList | LowLevelCode) echo "both" ;;
 	AgentActivity | AgentWorkspace | CaptionBarProgress) echo "both" ;;
@@ -377,7 +377,7 @@ done
 # the baseline silently describes a product that no longer exists.
 stale=0
 for pane in Debug Build BuildErrors Status SearchResults Menu WelcomeScreen \
-	CommandPalette NoInfo EditorView EventLog State Calltrace Timeline \
+	CommandPalette NoInfo EditorView EventLog State Calltrace \
 	Filesystem Scratchpad Repl TraceLog CalltraceEditor TerminalOutput Shell \
 	StepList LowLevelCode AgentActivity AgentWorkspace CaptionBarProgress \
 	PixelHistory ShaderDebug VideoPlayer AgentActivityDeepReview RequestPanel \

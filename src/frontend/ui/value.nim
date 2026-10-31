@@ -337,7 +337,7 @@ proc addValues*(self: ChartComponent, expression: cstring, values: seq[Value]) =
     self.pieConfig.data.datasets[0].data = self.pieValues
     self.pie.toJs["update"].call(self.pie, 0)
 
-proc replaceAllValues*(self: ChartComponent, expression: cstring, values: seq[Value]) =
+proc replaceAllValues(self: ChartComponent, expression: cstring, values: seq[Value]) =
   if self.lineDatasetIndices.hasKey(expression):
     # let lineData = self.lineData(values)
     let dataset = cast[seq[JsObject]](self.datasets)[self.lineDatasetIndices[expression]]
@@ -1216,7 +1216,7 @@ proc renderValueDom*(self: ValueComponent): Node =
     depth=0
   )
 
-proc renderValueDomWithLeft*(self: ValueComponent, left: cstring): Node =
+proc renderValueDomWithLeft(self: ValueComponent, left: cstring): Node =
   ## Render a value DOM node with the legacy root ``left`` style applied.
   ##
   ## Monaco inline value view zones historically patched this style onto the

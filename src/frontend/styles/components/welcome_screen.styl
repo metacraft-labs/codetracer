@@ -73,6 +73,20 @@ body:has(> #welcomeScreen .welcome-screen-wrapper)
       opacity: 0.5
       pointer-events: none
 
+.welcome-screen-load-error
+  // Welcome is above the status toast's stacking context. Show load feedback
+  // here, above even an ongoing same-tab operation's loading veil.
+  position: absolute
+  top: 1em
+  left: 1em
+  right: 1em
+  z-index: 101
+  padding: 1em
+  background-color: by-mode(black, colors-ui-surface-primary-default)
+  color: by-mode(white, colors-ui-text-primary-body)
+  border: 1px solid currentColor
+  pointer-events: auto
+
 // A veil over the welcome screen while a trace loads, in the mode's own
 // ground: black under the dark theme, the light ground under the light one,
 // so the light theme does not black the window out. The text and the dots

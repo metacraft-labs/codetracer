@@ -131,7 +131,16 @@ type
       ## PLAT-68: the editor document's selection as display cells
       ## (`editing_core.selectionCells`) — in Debug mode the read-only
       ## document's, which a selection and a copy act on as Monaco's do.
+    findMarks*: seq[tuple[line, fromColumn, toColumn: int; current: bool]]
+      ## PLAT-70 Part C (Find-And-Incremental-Search.md §3.3 step 4): the find
+      ## session's matches on the drawn rows (`find_vm.marksInWindow`), the
+      ## current one flagged — drawn in the editor itself, over the selection.
     rows*: seq[EditorRow]
+    diagnostics*: seq[EditorDiagnostic]
+      ## Build-Output-Pane.md §3.9: the build's diagnostics in this file
+      ## (`editor_diagnostics.diagnosticsForFile`, from the Problems pane's
+      ## rows): each span squiggled in its severity's colour, the most severe
+      ## one's icon in the gutter's pointer band, the messages on hover.
     entryContext*: string
       ## PLAT-47 B1: the tokenizer state the FIRST row starts in
       ## (`SourceVM.heldLineContexts`, which the host fills from the whole

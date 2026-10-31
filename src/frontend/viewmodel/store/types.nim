@@ -548,34 +548,43 @@ type
     blsWarning  ## Compiler warning.
     blsInfo     ## Informational note.
 
+  BuildRun* = object
+    ## One styled run of a build's output line: its TEXT and the SGR
+    ## attributes it was written in, as DATA (PLAT-56, Build-Output-Pane.md
+    ## §3.5) — the same `TermAttrs` the Terminal Output pane's fragments carry
+    ## (PLAT-52), decoded by the same scanner. The desktop draws a run as a
+    ## `<span>` with `terminal_output_model.cssOf`'s declarations (the ones
+    ## `ansi_up` wrote), the terminal as cells, GPUI as text runs.
+    text*: string
+    style*: TermAttrs
+
   BuildOutputLine* = object
-    ## One rendered line in the Build panel's output stream.
+    ## One line of the Build panel's output stream, medium-neutral (PLAT-56).
     ##
-    ## ``htmlText`` carries the ANSI-converted HTML the legacy view
-    ## inserts via Karax's ``verbatim`` (the JS-side ``ansi_up``
-    ## library produces ``<span style="color:...">`` runs).  The view's
-    ## Web overload writes this string into ``innerHTML``; the Mock
-    ## overload assigns it to ``textContent`` so headless tests can
-    ## assert on the text directly.
+    ## ``text`` is the line as a reader sees it: the compiler's bytes with
+    ## every escape sequence decoded away and tabs expanded to the next
+    ## multiple of eight. ``runs`` is the same text split where the SGR
+    ## attributes change; their texts concatenated are ``text``. (Until
+    ## PLAT-56 the line carried ``htmlText``, `ansi_up`'s HTML, which only a
+    ## browser could draw.)
     ##
-    ## ``isStdout`` selects the ``build-stdout`` vs ``build-stderr``
-    ## CSS class — stderr is rendered in red/orange in production CSS.
+    ## ``isStdout`` is the stream: stderr is drawn as the desktop's
+    ## ``.build-stderr`` (the error text colour, italic).
     ##
-    ## ``severity`` is ``blsNone`` for unparseable output; otherwise it
-    ## carries the diagnostic level extracted by ``parseBuildLocation``
-    ## so the view can apply ``build-line-error`` / ``build-line-warning``
-    ## / ``build-line-info`` classes.  When the line carries a parsed
-    ## location the view turns it into a clickable jump target.
-    ##
-    ## ``locationPath`` / ``locationLine`` describe the source location
-    ## referenced by the line.  ``locationPath`` is empty when the line
-    ## has no parsed location.  ``locationLine`` is 1-based; 0 means
-    ## unknown.
-    htmlText*: string
+    ## ``severity`` is ``blsNone`` for a line that names no location;
+    ## otherwise the diagnostic level the shared reader carried onto it
+    ## (`build_diagnostics.feedBuildLine`), drawn as ``build-line-error`` /
+    ## ``-warning`` / ``-info``. A line with a location is a jump target:
+    ## ``locationPath`` (as the compiler wrote it, possibly relative),
+    ## ``locationLine`` (1-based; 0 = none) and ``locationCol`` (1-based;
+    ## 0 = none).
+    text*: string
+    runs*: seq[BuildRun]
     isStdout*: bool
     severity*: BuildLineSeverity
     locationPath*: string
     locationLine*: int
+    locationCol*: int
 
   BuildErrorLine* = object
     ## One row in the Problems / Errors view.  ``rawLocation`` is the

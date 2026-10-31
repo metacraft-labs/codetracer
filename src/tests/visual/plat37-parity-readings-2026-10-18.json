@@ -1048,5 +1048,10 @@
   "whyTHEinstrumentSTILLreads23_5onONEframe": "state's Electron mode is 23.5 with only 6 supporting deltas out of 36, and its median is 23.5 too, while Monaco says 24. The ink estimator carries about half a point of quantisation on ELECTRON frames specifically — Monaco positions and antialiases glyphs sub-pixel, so band centroids scatter — and essentially none on GPUI frames, which read exactly 24.0 where the code draws 24. That is the reason this pass added the direct Monaco read: the estimator was good enough to find a 2-point error and is not good enough to certify a half-point one.",
   "bandCounts": "GPUI 37/37/37/45/44/47 -> 35/34/34/40/40/43 (state/calltrace/editorWithMark/editor/eventLog/shell), the predicted consequence of a taller row in the same pane. Electron 37/37/38/47/43/- -> 37/37/38/47/43/46, unchanged wherever it was measured before.",
   "thePREDICTIONwasRECORDEDfirst": "Before the after-measurement was taken, `build/plat37-parity-2026-10-18/` recorded the prediction GPUI ~24.0, bands ~34-35 at laptop and ~41 at wide, Electron unchanged. Measured: 24.0-24.5, bands 34-35 and 40, Electron unchanged. The wide band count came in at 40 against a predicted 40-41."
- }
+ },
+  "captureStabilityQualification": {
+    "independentCaptureCount": null,
+    "status": "unvalidated-historical-reading",
+    "reason": "Independent capture count and pairwise within-renderer FLIP stability were not recorded. Regrading preserved frames is not another capture. eventLog figures and aggregates containing them cannot establish a validated parity baseline or delta."
+  }
 }

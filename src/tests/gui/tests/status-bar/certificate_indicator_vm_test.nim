@@ -18,15 +18,14 @@
 ## ``readKeyStore``; and the real ``certificate_verification.verifyCertificates``
 ## deciding every verdict. Nothing about the *subject* is stubbed.
 ##
-## Where the records sit (2026-10-10, CTC-3e): most cases put them in
-## reprobuild's workspace carrier (``StoreDir``), which the reader still pools
-## and which lists every record whatever its content, so these cases keep
-## exercising the ViewModel's decision over records for other content. `ct
-## test` itself now publishes to the per-user local certificate store,
-## looked up by content id; the cases that are about a record `ct test`
-## wrote put it there (``localPath``), under its own content's directory, and
-## the facts look W up in it the way the indicator source does. `ct test`'s
-## old ``.ct/certificates`` is read by nothing.
+## Where the records sit: in the per-user local certificate store
+## (``UserRoot``), under their own content's directory (``localPath``), and the
+## facts look W, H and S up in it the way the indicator source does. A record
+## for content that is none of the three is therefore never read (operator
+## decision 2026-10-09). Neither `ct test`'s old ``.ct/certificates`` nor
+## reprobuild's old ``.repro/workspace/certificates`` is read by anything any
+## more; the registered-key store a deployment may supply is handed to the
+## facts by this fake host from ``KeysPath``.
 ##
 ## The filesystem is faked for one reason, and it is a hard one: **this suite
 ## runs on both Nim backends** (`vm-native` and `vm-js`), and ``std/os`` does
@@ -103,10 +102,16 @@ const
   TreeB = "git-tree-sha1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     ## Content ids — the binding.
   Platform = "linux/amd64"
-  StoreDir = ".repro/workspace/certificates"
-    ## reprobuild's workspace carrier. (`.ct/certificates` until CTC-3e.)
+  KeysPath = "/etc/ct-test-suite/registered-keys.toml"
+    ## Where this suite's fake host keeps the deployment's registered-key
+    ## store, which it supplies as the facts' trust policy. (Until reprobuild
+    ## published to the local store this was reprobuild's pooled workspace
+    ## directory, `.repro/workspace/certificates`, which no reader reads any
+    ## more.)
   UserRoot = "/home/u/.local/state/test-certificates"
     ## The local certificate store's user root, as a host would resolve it.
+  SystemRoot = "/var/lib/test-certificates/1000"
+    ## Its system root: resolved, and empty in every case here.
 
 proc newWorld(): FakeWorld =
   FakeWorld(
@@ -201,7 +206,8 @@ proc workspaceState(world: FakeWorld): WorkspaceVcsState =
 proc localQuery(world: FakeWorld): LocalStoreQuery =
   ## The local store looked up by W, H and S, as `localStoreQuery` does on a
   ## host.
-  result.roots = CertificateStoreRoots(available: true, user: UserRoot)
+  result.roots = CertificateStoreRoots(available: true, user: UserRoot,
+                                       system: SystemRoot)
   if not world.known:
     return
   for (id, problem) in [(world.workingTree, world.workingTreeProblem),
@@ -209,9 +215,21 @@ proc localQuery(world: FakeWorld): LocalStoreQuery =
     if id.len > 0 and problem.len == 0 and id notin result.contentIds:
       result.contentIds.add id
 
+proc storeOf(world: FakeWorld): CertificateStore =
+  ## The shipped reader over the local store, plus the trust policy this fake
+  ## host supplies when the case put a registered-key store at `KeysPath`.
+  result = readCertificateStore(world.access, world.localQuery)
+  if world.files.hasKey(KeysPath):
+    result.keyStorePath = KeysPath
+    let read = world.access.readText(KeysPath)
+    result.keyStore =
+      if read.status == srOk: readKeyStore(read.text)
+      else: KeyStore(readable: false, unreadableReason: "the registered-key " &
+        "store at '" & KeysPath & "' could not be read: " & read.detail)
+
 proc facts(world: FakeWorld): CertificateIndicatorFacts =
   CertificateIndicatorFacts(
-    store: readCertificateStore(world.access, WorkspaceRoot, world.localQuery),
+    store: world.storeOf,
     vcs: world.workspaceState,
     platform: world.platform,
     signatureVerifier: world.verifier)
@@ -221,6 +239,21 @@ proc reader(world: FakeWorld): CertificateFactsReader =
 
 proc evaluate(world: FakeWorld): CertificateIndicatorModel =
   evaluateCertificateIndicator(world.facts)
+
+proc evaluateWith(world: FakeWorld; handed: seq[StoredCertificate]):
+    CertificateIndicatorModel =
+  ## The facts as `facts` reads them, plus records a host HANDS OVER from a
+  ## carrier read in full (a CI artifact, a directory given to the verifier)
+  ## rather than found by a keyed lookup. Transport.md §5.1: only such a
+  ## carrier can surface a record in an algorithm the consumer cannot
+  ## compute, or one whose content no state here has — the ViewModel must
+  ## still judge them, and these cases pin how.
+  var facts = world.facts
+  facts.store.certificates.add handed
+  if handed.len > 0:
+    facts.store.present = true
+  orderByArrival(facts.store.certificates)
+  evaluateCertificateIndicator(facts)
 
 # ---------------------------------------------------------------------------
 # Real certificate documents, produced by the shipped serializer
@@ -258,7 +291,10 @@ proc rowValue(model: CertificateIndicatorModel; label: string): string =
       return row.value
   "<absent>"
 
-proc storePath(name: string): string = WorkspaceRoot & "/" & StoreDir & "/" & name
+proc storePath(name: string): string =
+  ## A record in the local store's directory for the default W (`TreeA`),
+  ## for the cases whose record names no content a lookup could place.
+  UserRoot & "/" & localStoreContentDir(TreeA).relative & "/" & name
 
 proc localPath(content, name: string): string =
   ## Where `ct test` publishes a record for ``content`` (Transport.md §2.2).
@@ -266,7 +302,9 @@ proc localPath(content, name: string): string =
 
 proc withCertificate(world: FakeWorld; cert: TestCertificate;
                      name = "run.toml"; modifiedMs: int64 = 1000): FakeWorld =
-  world.put(storePath(name), document(cert), modifiedMs)
+  let dir = localStoreContentDir(cert.vcs.content)
+  world.put(if dir.ok: localPath(cert.vcs.content, name) else: storePath(name),
+            document(cert), modifiedMs)
   world
 
 # Signature verifiers, declared at module level rather than inline in the cases
@@ -298,7 +336,7 @@ suite "SB-1: the status bar's test-certificate indicator":
     check model.state == cisCertified
     check model.label == CertifiedLabel
     check model.summary == CommittedCertifiedSummary
-    check model.certificateName == StoreDir & "/run.toml"
+    check model.certificateName == localPath(TreeA, "run.toml")
     # THE HONESTY RULE, asserted rather than hoped for. "Valid" means binds to
     # the current state, not verified as unforgeable (Status-Bar.md Notes).
     check model.authenticity == caNotChecked
@@ -445,7 +483,7 @@ suite "SB-1: the status bar's test-certificate indicator":
     let world = newWorld()
     discard world.withCertificate(sampleCertificate(
       keyId = "repro-sign-2026-q2", signature = "AAAAsignature"))
-    world.put(storePath("registered-keys.toml"), "", 900, readable = false)
+    world.put(KeysPath, "", 900, readable = false)
 
     let model = world.evaluate()
     checkpoint "state = " & $model.state & "; summary = " & model.summary
@@ -461,7 +499,7 @@ suite "SB-1: the status bar's test-certificate indicator":
     # certificate against an EMPTY-but-readable store is not-covered, because
     # an empty store answers the question. If both rendered unverifiable this
     # test would pass while the distinction was gone.
-    world.put(storePath("registered-keys.toml"),
+    world.put(KeysPath,
               "schema = \"registered-keys.v1\"\n", 900)
     let denied = world.evaluate()
     checkpoint "empty store: " & $denied.state & " — " & denied.summary
@@ -476,7 +514,7 @@ suite "SB-1: the status bar's test-certificate indicator":
     let world = newWorld()
     discard world.withCertificate(sampleCertificate(
       keyId = "old-key", signature = "AAAAsignature"))
-    world.put(storePath("registered-keys.toml"), """
+    world.put(KeysPath, """
 schema = "registered-keys.v1"
 
 [[key]]
@@ -497,7 +535,7 @@ status = "revoked"
     let world = newWorld()
     discard world.withCertificate(sampleCertificate(
       keyId = "known-key", signature = "AAAAsignature"))
-    world.put(storePath("registered-keys.toml"), """
+    world.put(KeysPath, """
 schema = "registered-keys.v1"
 
 [[key]]
@@ -548,7 +586,9 @@ status = "active"
     # "no certificates found" usually means a fetch or a push was missed, and
     # a report that does not say where it looked cannot be acted on.
     check model.searched.len == 2
-    check ".repro/workspace/certificates" in model.searched
+    check SystemRoot & "/" & localStoreContentDir(TreeA).relative in
+          model.searched
+    check ".repro/workspace/certificates" notin model.searched
     check localPath(TreeA, "").strip(leading = false, chars = {'/'}) in
           model.searched
     check ".ct/certificates" notin model.searched
@@ -560,7 +600,7 @@ status = "active"
     ## project has no certificates while the store sits on disk in front of
     ## them.
     let world = newWorld()
-    world.unlistableDirs.add WorkspaceRoot & "/" & StoreDir
+    world.unlistableDirs.add UserRoot & "/" & localStoreContentDir(TreeA).relative
     world.put(storePath("run.toml"), document(sampleCertificate()), 1000)
     let model = world.evaluate()
     checkpoint "state = " & $model.state & " — " & model.summary
@@ -600,7 +640,7 @@ status = "active"
     check vm.lastTrigger == citWorktreeChanged
 
     # A certificate arriving in the store.
-    world.put(storePath("later.toml"),
+    world.put(localPath(TreeB, "later.toml"),
               document(sampleCertificate(content = TreeB, base = CommitB)),
               2000)
     check vm.refresh(citStoreChanged)
@@ -621,7 +661,7 @@ status = "active"
     ## explicitly not a trust input (Verification.md §4.3), so a producer with
     ## a skewed clock cannot pin itself at the top of the list.
     let world = newWorld()
-    world.put(WorkspaceRoot & "/.repro/workspace/certificates/old.toml",
+    world.put(localPath(TreeA, "old.toml"),
               document(sampleCertificate(content = TreeA)), 1000)
     world.put(localPath(TreeB, "new.toml"),
               document(sampleCertificate(content = TreeB)), 2000)
@@ -632,21 +672,20 @@ status = "active"
 
     # And the other way round, so the case cannot pass by accident of which
     # directory is searched first.
-    world.put(WorkspaceRoot & "/.repro/workspace/certificates/old.toml",
+    world.put(localPath(TreeA, "old.toml"),
               document(sampleCertificate(content = TreeA)), 3000)
     world.workingTree = TreeA
     let flipped = world.evaluate()
     check flipped.state == cisCertified
-    check flipped.certificateName ==
-      ".repro/workspace/certificates/old.toml"
+    check flipped.certificateName == localPath(TreeA, "old.toml")
 
   test "a hook-written certificate renders identically to an agent-written one":
     ## Verification item 7. The indicator is producer-agnostic; a difference in
     ## appearance would be a defect (Status-Bar.md).
     ##
     ## Two things differ between the two files and neither may reach the
-    ## display: the CARRIER (a hook writes into reprobuild's store, an agent
-    ## into `ct test`'s) and the BYTES (a hook may write a perfectly valid
+    ## display: the ROOT (a privileged hook service writes the system root,
+    ## `ct test` the user root) and the BYTES (a hook may write a perfectly valid
     ## non-canonical rendering — different key order, comments, CRLF, a
     ## trailing comma — which must parse to the same record).
     let agentCert = sampleCertificate()
@@ -680,7 +719,7 @@ status = "active"
       "argv = [\"ct\", \"test\", \"run\"]\r\n")
     let hookWorld = newWorld()
     hookWorld.put(
-      WorkspaceRoot & "/.repro/workspace/certificates/hook.toml",
+      SystemRoot & "/" & localStoreContentDir(TreeA).relative & "/hook.toml",
       hookText, 1000)
 
     let agent = agentWorld.evaluate()
@@ -738,7 +777,7 @@ status = "active"
     seen.add foreign.evaluate().state
 
     let broken = newWorld()
-    broken.put(storePath("registered-keys.toml"), "", 900, readable = false)
+    broken.put(KeysPath, "", 900, readable = false)
     discard broken.withCertificate(sampleCertificate(
       keyId = "k", signature = "AAAA"))
     seen.add broken.evaluate().state
@@ -761,13 +800,22 @@ status = "active"
     ## Where the client cannot tell, it must say so. A consumer that does not
     ## know which repository it is in cannot decide the content binding either
     ## way, and reporting "not certified" would send an operator to run tests
-    ## over a VCS problem.
+    ## over a VCS problem. A record handed over cannot be judged here.
     let world = newWorld()
-    discard world.withCertificate(sampleCertificate())
     world.known = false
-    let model = world.evaluate()
+    let model = world.evaluateWith(@[StoredCertificate(
+      name: "artifact/run.toml", receivedAtMs: 1000,
+      text: document(sampleCertificate()))])
     check model.state == cisUnverifiable
     check model.remedy == FixConfigurationRemedy
+    # With nothing to judge — the store is keyed by content id, and there is
+    # no repository to compute one for — nothing was found: "No
+    # certificates", saying why, never certified and never unverifiable
+    # (the same rule as a working tree with no content id, Status-Bar.md).
+    discard world.withCertificate(sampleCertificate())
+    let nothing = world.evaluate()
+    check nothing.state == cisNoCertificates
+    check NoRepositorySentence in nothing.summary
 
   test "a platform this build could not establish is unverifiable":
     ## Same argument on the other required field. A green run on one platform
@@ -823,8 +871,9 @@ framework = "ct-test"
         "git-tree-sha256:" & repeat('a', 64),
         "blake3-manifest-v1:" & repeat('a', 64)]:
       let world = newWorld()
-      discard world.withCertificate(sampleCertificate(content = content))
-      let model = world.evaluate()
+      let model = world.evaluateWith(@[StoredCertificate(
+        name: "artifact/run.toml", receivedAtMs: 1000,
+        text: document(sampleCertificate(content = content)))])
       checkpoint content & ": " & $model.state & " — " & model.summary
       check model.state == cisUnverifiable
       check model.state != cisWasCertified
@@ -838,8 +887,9 @@ framework = "ct-test"
     for content in [TreeA.toUpperAscii.replace("GIT-TREE-SHA1", "git-tree-sha1"),
                     TreeA[0 ..< 26]]:
       let world = newWorld()
-      discard world.withCertificate(sampleCertificate(content = content))
-      let model = world.evaluate()
+      let model = world.evaluateWith(@[StoredCertificate(
+        name: "artifact/run.toml", receivedAtMs: 1000,
+        text: document(sampleCertificate(content = content)))])
       checkpoint content & ": " & $model.state & " — " & model.summary
       check model.state != cisCertified
       check model.state != cisUnverifiable
@@ -984,7 +1034,8 @@ proc fakePlatform(world: FakeWorld; workingTreeFails = false;
   result.fs.certificateStoreRoots = proc():
       PlatformFuture[PlatformOutcome[CertificateStoreRoots]] =
     if localStore:
-      resolvedOk(CertificateStoreRoots(available: true, user: UserRoot))
+      resolvedOk(CertificateStoreRoots(available: true, user: UserRoot,
+                                       system: SystemRoot))
     else:
       resolvedOk(noLocalStore("this host has no per-user directory"))
   result.fs.listDir = proc(path: string):
@@ -1077,10 +1128,10 @@ suite "SB-2b: the indicator decides on content":
     ## content, so the label is "No certificates" — never "was certified".
     let world = newWorld()
     world.inLocalStore(sampleCertificate(content = TreeA))
-    # A pooled reprobuild record for the old content too, newest of all: a
+    # The old content's record in the system root too, newest of all: a
     # "newest record in the store speaks" fallback would pick it up.
-    world.put(storePath("build.toml"),
-              document(sampleCertificate(content = TreeA)), 5000)
+    world.put(SystemRoot & "/" & localStoreContentDir(TreeA).relative &
+              "/build.toml", document(sampleCertificate(content = TreeA)), 5000)
     check world.evaluate().state == cisCertified
     world.workingTree = TreeB
     world.head = TreeB
@@ -1286,12 +1337,76 @@ suite "SB-2b: the indicator decides on content":
     let world = newWorld()
     world.workingTree = TreeB
     world.inLocalStore(sampleCertificate(content = TreeA))
-    world.put(storePath("sha256.toml"), document(sampleCertificate(
-      content = "git-tree-sha256:" & repeat('e', 64))), 2000)
-    let model = world.evaluate()
+    # Transport.md §5.1: a keyed lookup never surfaces such a record; one a
+    # host hands over from a carrier read in full (a CI artifact) still has
+    # to be judged, so it is handed over here.
+    let model = world.evaluateWith(@[StoredCertificate(
+      name: "artifact/sha256.toml", receivedAtMs: 2000,
+      text: document(sampleCertificate(
+        content = "git-tree-sha256:" & repeat('e', 64))))])
     checkpoint $model.state & " — " & model.summary
     check model.state == cisUnverifiable
     check model.remedy == FixConfigurationRemedy
+
+  test "a search that could not cover a root reads unverifiable, never no certificates":
+    ## Transport.md §2.1/§2.4/§5: a root that could not be searched is not
+    ## "searched and empty". Nothing found in the searched root reads
+    ## *Unverifiable* — distinctly from *No certificates*, *Not certified* and
+    ## *Changed since certified*, each of which would claim W is not covered —
+    ## with the store location as the remedy. A record in the searched root
+    ## that covers W still reads *Certified*: coverage only grows.
+    let userDir = UserRoot & "/" & localStoreContentDir(TreeA).relative
+    let systemPath = SystemRoot & "/" & localStoreContentDir(TreeA).relative &
+                     "/system.toml"
+    # Controls first: the user root readable.
+    let plain = newWorld()
+    check plain.evaluate().state == cisNoCertificates
+
+    let blind = newWorld()
+    blind.unlistableDirs.add UserRoot
+    let nothing = blind.evaluate()
+    checkpoint $nothing.state & " — " & nothing.summary
+    check nothing.state == cisUnverifiable
+    check nothing.label == UnverifiableLabel
+    check nothing.state != cisNoCertificates
+    check "The certificate search was incomplete" in nothing.summary
+    check "user root" in nothing.summary
+    check IncompleteSearchNote in nothing.summary
+    check nothing.remedy == IncompleteSearchRemedy
+
+    # H covered by a record in the SYSTEM root, W not: "changed since
+    # certified" would claim W is not covered, and the unsearched user root
+    # might cover it.
+    let changed = newWorld()
+    changed.workingTree = TreeB
+    changed.put(systemPath, document(sampleCertificate(content = TreeA)), 1000)
+    check changed.evaluate().state == cisWasCertified        # control
+    changed.unlistableDirs.add UserRoot
+    let undecided = changed.evaluate()
+    check undecided.state == cisUnverifiable
+    check undecided.remedy == IncompleteSearchRemedy
+
+    # W covered by the system root's record: certified, and the disclosure
+    # says what was not searched.
+    let covered = newWorld()
+    covered.put(systemPath, document(sampleCertificate(content = TreeA)), 1000)
+    covered.unlistableDirs.add UserRoot
+    let certified = covered.evaluate()
+    check certified.state == cisCertified
+    check certified.label == CertifiedLabel
+    check "The certificate search was incomplete" in certified.rowValue("Search")
+    discard userDir
+
+  test "the model carries the repository root the facts were gathered for":
+    ## SB-1's "the workspace is the opened folder, not the repository root":
+    ## the host arms its `.git` and working-tree watches on the repository
+    ## root the facts resolved (upwards from the opened folder), which the
+    ## model now carries; with no repository it is empty.
+    var facts = newWorld().facts
+    facts.vcs.repositoryRoot = "/w/repo"
+    check evaluateCertificateIndicator(facts).repositoryRoot == "/w/repo"
+    facts.vcs.known = false
+    check evaluateCertificateIndicator(facts).repositoryRoot == ""
 
   test "a change in .git names the fact it moved":
     ## The refresh triggers: staging rewrites `index` (S), everything else in

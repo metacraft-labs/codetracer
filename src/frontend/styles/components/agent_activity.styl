@@ -1581,7 +1581,12 @@ agent-toolbar-icon(img)
   white-space: nowrap
   dropdown-surface-row()
 
-  &:hover
+  &.ct-menu-item--disabled
+    // The row's title explains why it is disabled. Keep it hit-testable for
+    // that tooltip; the view's click guard still prevents activation.
+    pointer-events: auto
+
+  &:hover:not(.ct-menu-item--disabled)
     background: LIST_HOVER_BG
 
   .agent-add-context-menu-icon

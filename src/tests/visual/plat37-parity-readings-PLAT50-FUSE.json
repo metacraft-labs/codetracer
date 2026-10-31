@@ -285,5 +285,10 @@
     "That the grades were independently re-derived. They are read back from the pass's own persisted JSON. The final arm's .rgba buffers are retained so a re-grade IS possible, but it was not run here.",
     "That visual parity is achieved. fracOver0_10 is a whole-frame proxy for perceptible difference. No screenshot in this campaign has been VISUALLY reviewed against its Electron counterpart by any agent -- a separate, still-open gap, and the reason two widget-level differences (an extra leading toolbar icon; status-bar divergence) went unnoticed by the metric for the whole campaign.",
     "Anything about the Linux lane. Every figure here is aarch64-darwin."
-  ]
+  ],
+  "captureStabilityQualification": {
+    "independentCaptureCount": null,
+    "status": "unvalidated-historical-reading",
+    "reason": "Independent capture count and pairwise within-renderer FLIP stability were not recorded. Regrading preserved frames is not another capture. eventLog figures and aggregates containing them cannot establish a validated parity baseline or delta."
+  }
 }

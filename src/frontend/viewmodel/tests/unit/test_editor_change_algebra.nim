@@ -117,7 +117,41 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1927
+const ExpectedAssertions = 1998
+  ## *1989 -> 1998 on 2026-10-30: `viewmodels/build_auto_reveal.nim`,
+  ## `viewmodels/build_tasks.nim` and `viewmodels/editor_diagnostics.nim` (the
+  ## build residuals) x three assertions. None calls `rebase(` or spells
+  ## `mapOver`.*
+  ## *1986 -> 1989 on 2026-10-30: `backend/stderr_capture.nim` (the replay
+  ## engine's diagnostics, kept off the protocol stream) x three assertions.
+  ## It calls no `rebase(` and spells no `mapOver`.*
+  ## *1983 -> 1986 on 2026-10-28: `host/native_requests_host.nim` (the
+  ## Requests pane's native host) x three assertions. It calls no `rebase(`
+  ## and spells no `mapOver`.*
+  ## *1977 -> 1983 on 2026-10-28: `viewmodels/agent_prompt_context.nim` and
+  ## `viewmodels/build_output_model.nim` x three assertions. Neither calls
+  ## `rebase(` or spells `mapOver`.*
+  ## *1974 -> 1977 on 2026-10-28: `viewmodels/replay_open_setting.nim` x
+  ## three assertions. It calls no `rebase(` and spells no `mapOver`.*
+  ## *1966 -> 1974 on 2026-10-28: the in-document find's two modules.
+  ## `editor/find_match.nim` x five (it is in `editor/`, the directory that
+  ## calls the primitive, so the two FLAG needles apply to it too) and
+  ## `viewmodels/find_vm.nim` x three. Neither calls `rebase(`, spells
+  ## `mapOver` or declares `before: bool`.*
+  ## *1945 -> 1966 on 2026-10-27: seven production modules x three
+  ## assertions — `platform/session_allocation.nim`, `sdk/expression_eval.nim`,
+  ## `store/row_address.nim`, `viewmodels/build_diagnostics.nim`,
+  ## `views/pane_measure_dom.nim`, `views/row_link_dom.nim` and
+  ## `views/row_links.nim`. None calls `rebase(` or spells `mapOver`.*
+  ## *1930 -> 1945 on 2026-10-26: the Agent Activity pane's five production
+  ## modules (codetracer `6673057756`) — `host/agent_live_worker.nim`,
+  ## `host/agent_session_files.nim`, `host/native_agent_host.nim`,
+  ## `viewmodels/agent_activity_feed.nim` and
+  ## `viewmodels/agent_activity_text.nim` — x three assertions. None calls
+  ## `rebase(` or spells `mapOver`.*
+  ## *1927 -> 1930 on 2026-10-26: `keymap/menu_accelerators.nim` (the macOS
+  ## menu's chords from the key router) x three assertions. It calls no
+  ## `rebase(` and spells no `mapOver`.*
   ## *1876 -> 1927 on 2026-10-26, measured on `c80549db8` plus the shared
   ## rows' keyboard module: seventeen production modules x three assertions,
   ## net. Ten had been added without moving the count before 1876 was set,

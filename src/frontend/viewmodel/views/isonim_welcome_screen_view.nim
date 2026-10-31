@@ -58,6 +58,7 @@ const WelcomeScreenWrapperClass* = "welcome-screen-wrapper"
 const WelcomeScreenClass* = "welcome-screen"
 const WelcomeScreenLoadingClass* = "welcome-screen-loading"
 const WelcomeLoadingOverlayClass* = "welcome-screen-loading-overlay"
+const WelcomeLoadErrorClass* = "welcome-screen-load-error"
 const RecentFoldersEmptyText* = "Folders you open are listed here."
 const RecentFoldersFirstTimeText* =
   "Open a folder to start editing. It will be listed here afterwards."
@@ -613,6 +614,11 @@ proc renderLoadingOverlay[R, N](r: R): N =
         tdiv:
           text "Loading trace..."
 
+proc renderLoadError[R, N](r: R; message: string): N =
+  ui(r):
+    tdiv(class = WelcomeLoadErrorClass, role = "alert"):
+      text message
+
 proc renderWelcomeScreenPanel*[R, N](r: R; vm: WelcomeScreenVM;
                                      callbacks: WelcomeScreenCallbacks =
                                        WelcomeScreenCallbacks()): N =
@@ -637,6 +643,8 @@ proc renderWelcomeScreenPanel*[R, N](r: R; vm: WelcomeScreenVM;
       discard
     if vm.loading.val:
       r.appendChild(rootContainer, renderLoadingOverlay[R, N](r))
+    if vm.loadError.val.len > 0:
+      r.appendChild(rootContainer, renderLoadError[R, N](r, vm.loadError.val))
 
   panel
 

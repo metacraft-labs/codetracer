@@ -266,5 +266,10 @@
       "observation": "Every one of the six Electron scenarios had its requested window HONOURED, including the three `wide` ones at 1920x1080 points (captured 3840x2160 px at scale 2.0), on this 1728x1117-point display.",
       "whyItMatters": "regrade[PARITY-G1].whichReportMatchesThePhysicalWindow in this same file argues that 'a 1920-point-wide window does not exist on a 1728-point display'. The Electron arm appears to have obtained one. That does not overturn G1 — GPUI's clamp is still measured and still real — but the REASON given for it ('the display cannot hold such a window') is contradicted by the other renderer doing it on the same display in the same session. PARITY-G1 was deliberately NOT re-measured this pass, so this is logged as an observation for the next pass rather than a regrade."
     }
+  },
+  "captureStabilityQualification": {
+    "independentCaptureCount": null,
+    "status": "unvalidated-historical-reading",
+    "reason": "Independent capture count and pairwise within-renderer FLIP stability were not recorded. Regrading preserved frames is not another capture. eventLog figures and aggregates containing them cannot establish a validated parity baseline or delta."
   }
 }

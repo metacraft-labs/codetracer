@@ -23,7 +23,7 @@
 ## the child was alive, and its exit code, which is what tells "still opening
 ## the trace" from "the engine refused" from "the binary died".
 
-import std/[monotimes, os, posix, strtabs, strutils, sysrand, times]
+import std/[exitprocs, monotimes, os, posix, strtabs, strutils, sysrand, times]
 
 import term_assert
 
@@ -42,17 +42,28 @@ const
     ## flag, not a latch" property CTUI-11 recorded about DEC 2026's
     ## `synchronizedOutput`.
 
-  WedgeBytes* = 4096
-    ## The size of the garbage `trace.bin` the wedge folder holds.
+  WedgeContainer* = "trace.ct"
+    ## The one entry of the wedge folder: a NAMED PIPE that nothing ever
+    ## writes, under a container's name.
     ##
-    ## Big enough that `replay-server` reads a header out of it and commits to
-    ## opening the recording — which is what makes it STALL rather than refuse
-    ## — and small enough to write in one call. Measured: at this size the
-    ## engine answers `initialize`, `configurationDone` and `launch` in full
-    ## (`Content-Length: 102`, all 102 bytes, `success: true`) and then never
-    ## sends the `stopped` event the handshake waits for, and never exits. The
-    ## stall is at a MESSAGE BOUNDARY, so this folder does not exercise
-    ## `DapStdioBackend.broken`; that guard is for a stall mid-body.
+    ## WHY A PIPE, AND WHY NOT GARBAGE BYTES ANY MORE. The wedge used to be a
+    ## 4 KB `trace.bin` of pseudo-random bytes, measured (CTUI-14) to make
+    ## `replay-server` answer `launch` and then never send `stopped`. The engine
+    ## has since learnt to read that file's header and refuse it: on `agents`
+    ## `5192276c07c` it answers at once — "the replay server's handler for
+    ## launch (seq 3) panicked: Invalid file header" — and the terminal
+    ## correctly exits `ExitUnreadableRecording` (5), so every case built on
+    ## the old folder measured a refusal and called it a stall. That is the
+    ## engine getting better, not the clock getting worse, and the remedy is a
+    ## folder that STILL stalls a correct engine.
+    ##
+    ## A pipe does, for real and in the engine's own code: the folder holds a
+    ## `.ct` entry, so `host/native_host.traceFolderProblem` accepts it; the
+    ## engine opens the container to read its header, and an open of a pipe
+    ## with no writer does not return. That is the hung-network-mount shape
+    ## the handshake clock exists for. Measured on the same tree: exit 4 after
+    ## the 30 s default budget, `the replay engine stopped answering`, and no
+    ## `replay-server` left behind once the terminal gave up on it.
 
   HandshakeEnvVar* = "CODETRACER_TUI_HANDSHAKE_MS"
     ## `host/native_host.HandshakeEnvVar`. Spelled again rather than imported:
@@ -81,29 +92,34 @@ proc tuiBinary*(): string =
   repoRoot() / "build" / "bin" / "codetracer-tui"
 
 proc wedgeFolder*(): string =
-  ## A folder with a RECORDING'S SHAPE and no recording in it.
+  ## A folder with a RECORDING'S SHAPE whose recording never arrives: one
+  ## `WedgeContainer`, a named pipe nothing writes (see `WedgeContainer` for
+  ## why a pipe and not bytes).
   ##
-  ## Built rather than checked in. A 4 KB blob of pseudo-random bytes in the
-  ## repository would be a fixture nobody could read, and the property that
-  ## matters is what the construction says out loud: it holds a `trace.bin`, so
-  ## `host/native_host.traceFolderProblem` accepts it, and the bytes are not a
-  ## recording, so the engine stalls on it.
-  ##
-  ## DETERMINISTIC rather than random, because a test whose subject differs
-  ## every run is a test whose failures cannot be compared. The generator is a
-  ## plain LCG; nothing here depends on the bytes' statistical properties, only
-  ## on their not being a trace.
-  result = repoRoot() / "test-logs" / "ctui14-wedge"
+  ## Built rather than checked in — git cannot hold a pipe, and the property
+  ## that matters is what the construction says out loud. Under the TEMP
+  ## directory, per process, rather than in `test-logs/`: a pipe in a tree
+  ## people copy is a `cp -r` that never finishes. Removed when the suite
+  ## exits.
+  result = getTempDir() / "ctui14-wedge-" & $getCurrentProcessId()
   createDir(result)
-  let blob = result / "trace.bin"
-  if fileExists(blob) and getFileSize(blob) == WedgeBytes:
-    return
-  var bytes = newString(WedgeBytes)
-  var state = 0x5eed_1234'u32
-  for i in 0 ..< WedgeBytes:
-    state = state * 1103515245'u32 + 12345'u32
-    bytes[i] = char((state shr 16) and 0xff'u32)
-  writeFile(blob, bytes)
+  let pipe = result / WedgeContainer
+  var st: Stat
+  if stat(pipe.cstring, st) == 0:
+    if S_ISFIFO(st.st_mode):
+      return
+    removeFile(pipe)
+  if mkfifo(pipe.cstring, Mode(0o600)) != 0:
+    raiseOSError(osLastError(), "cannot make the wedge's pipe " & pipe)
+  let folder = result
+  addExitProc(proc() = removeDir(folder))
+
+proc isPipe*(path: string): bool =
+  ## Whether `path` is a named pipe — what `wedgeFolder`'s one entry must be.
+  ## Here rather than in the suite so the suite need not import `posix`, whose
+  ## `sleep` shadows `os.sleep`.
+  var st: Stat
+  stat(path.cstring, st) == 0 and S_ISFIFO(st.st_mode)
 
 # ---------------------------------------------------------------------------
 # This run's mark

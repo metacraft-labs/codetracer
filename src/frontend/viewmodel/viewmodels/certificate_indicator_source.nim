@@ -11,8 +11,9 @@
 ## ## Read-only, and structurally so
 ##
 ## The facade operations used are `fs.listDir`, `fs.readText`, `fs.stat`,
-## `fs.certificateStoreRoots`, and the VCS reads `repositoryRoot` and
-## `contentId` (W, H and S, SB-2a). Nothing here
+## `fs.certificateStoreRoots`, and the VCS reads `repositoryRoot`,
+## `contentId` (W, H and S, SB-2a) and `declaredScopes` (the scopes whose
+## scoped ids W, H and S are also looked up by). Nothing here
 ## writes a file, a ref or the index — computing W writes only loose,
 ## content-addressed objects into the repository's object store, which is
 ## what `vcs.contentId` documents — and `CertificateStoreAccess` (the seam
@@ -23,9 +24,13 @@
 ##
 ## The user's local certificate store (Transport.md §2), both roots, looked up
 ## by the content ids of W, H and S in every `git-tree-*` algorithm the host
-## can compute — never enumerated, because it is shared by every repository
-## the user works in — pooled with reprobuild's workspace directory. `ct
-## test`'s old workspace store, `.ct/certificates`, is not read (CTC-3e).
+## can compute — whole-repository and in every scope the repository declares
+## (Tooling §3.1), since a scoped certificate is filed under its scoped id —
+## never enumerated, because it is shared by every repository
+## the user works in. Nothing under the working tree is read: neither `ct
+## test`'s old workspace store, `.ct/certificates` (CTC-3e), nor reprobuild's
+## old `.repro/workspace/certificates`, now that reprobuild publishes to the
+## local store too.
 ## How the indicator then decides between W, H and S is the ViewModel's
 ## (`evaluateCertificateIndicator`, Status-Bar.md's table).
 ##
@@ -235,6 +240,11 @@ type
     rootAsked: bool
     rootSettled: bool
     root: PlatformOutcome[string]
+    scopesAsked: bool
+    scopesSettled: bool
+    scopes: PlatformOutcome[VcsDeclaredScopes]
+      ## The repository's declared certificate scopes (Tooling §3.1), asked
+      ## once per session, after the root.
     caches: seq[ContentFactCache]
       ## One per content state, made once the root is known.
     pending: int
@@ -433,6 +443,41 @@ proc repositoryRootOf(session: FactsSession; workspaceDir: string):
     return (false, "")
   (true, session.root.value)
 
+proc declaredScopesOf(session: FactsSession; root: string):
+    tuple[scopes: seq[seq[string]]; problem: string] =
+  ## The scopes `root` declares (the facade's `declaredScopes`), asked once
+  ## per session. A problem — the declaration could not be read, is invalid,
+  ## or the host raised — comes back as words, and the caller makes the
+  ## search incomplete with them: scoped certificates could then not be
+  ## looked up. An answer still pending (asynchronous session) is neither:
+  ## the pass is incomplete and will be read again.
+  if not session.scopesAsked:
+    session.scopesAsked = true
+    try:
+      session.settleThrough(session.host.vcs.declaredScopes(root),
+        proc(outcome: PlatformOutcome[VcsDeclaredScopes]) =
+          session.scopes = outcome
+          session.scopesSettled = true)
+    except CatchableError as err:
+      session.scopes = failed[VcsDeclaredScopes](pkFailed,
+        "reading the declared certificate scopes raised", err.msg)
+      session.scopesSettled = true
+    except:
+      session.scopes = failed[VcsDeclaredScopes](pkFailed,
+        "reading the declared certificate scopes raised",
+        getCurrentExceptionMsg())
+      session.scopesSettled = true
+  elif not session.scopesSettled:
+    session.incomplete = true
+  if not session.scopesSettled:
+    return (@[], "")
+  if not session.scopes.ok:
+    return (@[], $session.scopes.error)
+  if session.scopes.value.problems.len > 0:
+    return (@[], "the declaration is invalid: " &
+                 session.scopes.value.problems.join("; "))
+  (session.scopes.value.scopes, "")
+
 const LocalStoreAlgorithms = ["git-tree-sha1", "git-tree-sha256"]
   ## The tree algorithms a repository computes one of; the host answers
   ## "cannot compute" for the other, cheaply.
@@ -500,6 +545,7 @@ proc sessionVcsState(session: FactsSession; workspaceDir: string):
     # content alone binds, so a clone under another directory name shares
     # certificates (`certificate_verification.verifyCertificates`).
     repo: lastPathSegment(root),
+    repositoryRoot: root,
     workingTree: w.oracle,
     head: session.cacheFor(root, vbsHead).oracle,
     index: session.cacheFor(root, vbsIndex).oracle)
@@ -509,6 +555,9 @@ proc sessionVcsState(session: FactsSession; workspaceDir: string):
       result.workingTreeProblem = describeConditions(asked.conditions)
       result.workingTreeRemedy = noContentIdRemedy(asked.conditions)
       break
+  let declared = session.declaredScopesOf(root)
+  result.declaredScopes = declared.scopes
+  result.declaredScopesProblem = declared.problem
 
 proc workspaceVcsState*(host: Platform; workspaceDir: string):
     WorkspaceVcsState =
@@ -557,13 +606,21 @@ proc localStoreQuery*(host: Platform; workspaceDir: string;
   result.roots = storeRoots(host)
   if not vcs.known:
     return
+  # Whole-repository first, then every scope the repository declares
+  # (Tooling §3.1): a scoped certificate is filed under its scoped content
+  # id (Transport §2.2), so it is found only by asking for that id. The
+  # verifier then reads each record against the same memoised oracles, in
+  # the record's own scope.
+  var scopes: seq[seq[string]] = @[@[]]
+  scopes.add vcs.declaredScopes
   for state in [vcs.workingTree, vcs.head, vcs.index]:
     if state.isNil:
       continue
-    for algorithm in LocalStoreAlgorithms:
-      let answer = state(algorithm, @[])
-      if answer.computed and answer.id notin result.contentIds:
-        result.contentIds.add answer.id
+    for scope in scopes:
+      for algorithm in LocalStoreAlgorithms:
+        let answer = state(algorithm, scope)
+        if answer.computed and answer.id notin result.contentIds:
+          result.contentIds.add answer.id
 
 proc factsPass(session: FactsSession; workspaceDir: string;
                platformTriple: string;
@@ -575,8 +632,18 @@ proc factsPass(session: FactsSession; workspaceDir: string;
   let vcs = sessionVcsState(session, workspaceDir)
   let host = session.host
   let query = localStoreQuery(host, workspaceDir, vcs)
-  var store = readCertificateStore(platformStoreAccess(host), workspaceDir,
-                                   query)
+  var store = readCertificateStore(platformStoreAccess(host), query)
+  if vcs.known and vcs.declaredScopesProblem.len > 0 and
+     query.roots.available:
+    # The scoped certificates could not be looked up: their ids depend on
+    # the scopes, and the scopes could not be established. Nothing found is
+    # then not evidence that nothing exists — the same reasoning as a root
+    # that could not be searched (Transport §2.1, §5).
+    store.present = true
+    store.incomplete = true
+    store.incompleteReasons.add "the repository's declared certificate " &
+      "scopes (testCertificatesScope) could not be read, so scoped " &
+      "certificates were not looked up: " & vcs.declaredScopesProblem
   if not query.roots.available and not store.unreadable:
     # A HOST WITH NO LOCAL STORE (a browser tab) has not looked, and "no
     # certificates" would claim it had (SB-2b: the web host reads

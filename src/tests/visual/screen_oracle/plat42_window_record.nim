@@ -41,6 +41,7 @@ import ./screen_reading
 import ./domain_models
 import ./vision_producer
 import ./region_locator
+import ./plat42_code_column
 import gui_assert/[image_math, ocr]
 import ../../../frontend/gpui/tests/plat42_gutter
 
@@ -87,13 +88,9 @@ const
   MinChipPx = 12
     ## Narrower spans are a pane border or an indent guide, not a box.
   NumberFieldPx = 38
-    ## The gutter's right-aligned number field (`leaves.GutterNumberPx`):
-    ## left of it, in the margin, is the execution mark's lane only.
-  CodePastNumberPx = 50
-    ## Measured: the number's ink ends 49 px into the 110 px margin and the
-    ## code starts at its end, 61 px further; the breakpoint lane, the trace
-    ## lane and the fold chevron's ink all end within 50 px of the number.
-    ## The code column's left is the leftmost ink past this, over all rows.
+    ## Independent reading window measured from the historical captures.
+    ## Left of this number field is the execution pointer's ink. This is a
+    ## pixel-reader calibration, not a renderer layout constant.
 
 proc inkCount(img: GrayImage; x0, x1, y0, y1: int): int =
   ## Pixels more than 40 grey levels from the region's own most common level.
@@ -110,24 +107,6 @@ proc inkCount(img: GrayImage; x0, x1, y0, y1: int): int =
   for y in ya ..< yb:
     for x in xa ..< xb:
       if abs(int(img.pixels[y * img.width + x]) - bg) > 40: inc result
-
-proc firstInk(img: GrayImage; x0, x1, y0, y1: int): int =
-  ## The leftmost column of `[x0, x1)` holding ink (as `inkCount` counts it,
-  ## against the whole region's ground) in the rows, or -1.
-  var hist: array[256, int]
-  let (ya, yb) = (max(0, y0), min(img.height, y1))
-  let (xa, xb) = (max(0, x0), min(img.width, x1))
-  if xb <= xa or yb <= ya: return -1
-  for y in ya ..< yb:
-    for x in xa ..< xb:
-      inc hist[int(img.pixels[y * img.width + x])]
-  var bg = 0
-  for v in 1 .. 255:
-    if hist[v] > hist[bg]: bg = v
-  for x in xa ..< xb:
-    for y in ya ..< yb:
-      if abs(int(img.pixels[y * img.width + x]) - bg) > 40: return x
-  -1
 
 proc chipsOf(img: GrayImage; pane: Rect; codeX, y0, y1: int;
              scratch: string): seq[Chip] =
@@ -310,12 +289,17 @@ proc rowBands(img: GrayImage; pane: Rect; scratch: string): seq[RowBand] =
         votes.inc(r.number - s.j)
   if votes.len == 0: return
   let (base, support) = votes.largest
-  var codeX = pane.x + pane.w
+  var columnRows: seq[CodeColumnRow] = @[]
   for s in slots:
     if s.isLine:
-      let f = firstInk(img, gutterRight + CodePastNumberPx, pane.x + pane.w - 2,
-                       s.y0 + 1, s.y1 - 1)
-      if f >= 0: codeX = min(codeX, f)
+      columnRows.add CodeColumnRow(y0: s.y0, y1: s.y1,
+        pointer: inkCount(img, pane.x, gutterRight - NumberFieldPx,
+                          s.y0 + 1, s.y1 - 1) > 0)
+  let codeX = codeColumnLeft(img, pane, gutterRight, columnRows)
+  if codeX < 0:
+    raise newException(IOError,
+      "PLAT-42: cannot locate the code column from the execution row's " &
+      "background band; refusing to record an invented boundary")
   lastVote = (base, support, reads.len, slots.len - lineRows)
   for s in slots:
     if not s.isLine: continue
@@ -326,14 +310,13 @@ proc rowBands(img: GrayImage; pane: Rect; scratch: string): seq[RowBand] =
     var parts: seq[string] = @[]
     for w in words: parts.add w.text
     # THE POINTER is the execution mark in its own lane, left of the number
-    # field (`leaves.GutterPointerPx`). PLAT-39's reader looks for the
+    # field (read independently from the image). PLAT-39's reader looks for the
     # execution band instead — a row whose MEDIAN grey differs — and since
     # the redesign that band is drawn only on the code column, behind the
     # code and the chips: measured, it is a minority of the row whenever the
     # row carries a long chip, and the reader then reports no execution line
     # (`stepped-editor`, `advanced-state`, `continued-event-log`).
-    let pointer = inkCount(img, pane.x, gutterRight - NumberFieldPx,
-                           s.y0 + 1, s.y1 - 1) > 0
+    let pointer = columnRows[s.j].pointer
     result.add RowBand(line: base + s.j, y0: s.y0, y1: s.y1,
                        gutterRight: gutterRight, codeX: codeX,
                        pointer: pointer,

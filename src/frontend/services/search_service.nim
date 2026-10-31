@@ -11,6 +11,10 @@ import
 # ``SearchResultsVM.acceptBatch``).
 var startFindInFilesHook*: proc(query: string)
 var acceptFindInFilesBatchHook*: proc(batch: SearchResultsBatch)
+var openFindInFilesFieldHook*: proc()
+  ## PLAT-70 Part D: ``:grep`` with no pattern is ``Ctrl+Shift+F`` (Find-And-
+  ## Incremental-Search.md §5.1): the pane's field, seeded and selected
+  ## (``ui/search_results.openFindInFilesField``).
 
 #data.services.search.pluginCommands = rendererPluginCommands
 
@@ -44,7 +48,12 @@ proc run*(self: SearchService, query: cstring, includePattern: cstring, excludeP
 
 proc searchProgram*(self: SearchService, query: cstring) =
   ## The omnibar's ``:grep <query>``: a search of the Find in Files pane —
-  ## the same one its own field runs (``SearchResultsVM.search``).
+  ## the same one its own field runs (``SearchResultsVM.search``). ``:grep``
+  ## alone opens the pane's field instead, as ``Ctrl+Shift+F`` does.
+  if query.len == 0:
+    if not openFindInFilesFieldHook.isNil:
+      openFindInFilesFieldHook()
+    return
   if not startFindInFilesHook.isNil:
     startFindInFilesHook($query)
 

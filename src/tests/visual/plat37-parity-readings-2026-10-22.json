@@ -419,5 +419,10 @@
   "Verify the headless call sites end to end: they compile and are wired, but the parity lane is the windowed path and no headless capture was taken this pass.",
   "Address the gutter divergence, chip fusion, G1, S6/S7/S8, the corpus-pins platform dependence or the nix-blockchain-development pin -- all explicitly out of scope."
  ],
- "theFlakeLockHookTrap": "flake.lock was NOT edited by this pass. The managed hook reverts a lock edit before the commit object is created, so a dirty nix-blockchain-development node is left exactly as found."
+ "theFlakeLockHookTrap": "flake.lock was NOT edited by this pass. The managed hook reverts a lock edit before the commit object is created, so a dirty nix-blockchain-development node is left exactly as found.",
+  "captureStabilityQualification": {
+    "independentCaptureCount": null,
+    "status": "unvalidated-historical-reading",
+    "reason": "Independent capture count and pairwise within-renderer FLIP stability were not recorded. Regrading preserved frames is not another capture. eventLog figures and aggregates containing them cannot establish a validated parity baseline or delta."
+  }
 }

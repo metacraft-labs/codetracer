@@ -174,7 +174,8 @@ proc scopeNode(r: TerminalRenderer; kind: ElementKind; id: string): TerminalNode
   r.setAttribute(result, ScopeKindAttribute, $kind)
   r.setAttribute(result, ScopeIdAttribute, id)
 
-proc newPaneFocus*(projection: Projection; tabId = "tab:1"): PaneFocus =
+proc newPaneFocus*(projection: Projection; tabId = "tab:1";
+                   docked: seq[PaneRegion] = @[]): PaneFocus =
   ## Lift a projection's visible panes into an `isonim-tui` focus chain.
   ##
   ## One node per region, appended in projection order, each marked focusable.
@@ -191,7 +192,12 @@ proc newPaneFocus*(projection: Projection; tabId = "tab:1"): PaneFocus =
   r.appendChild(root, tab)
   result = PaneFocus(manager: newFocusManager(), root: root, regions: @[],
                      nodeIds: @[], tab: tab, inner: @[], heldPane: -1)
-  for region in projection.regions:
+  # PLAT-58: a DOCKED pane shown open (`cmdOpenDocked`) takes the focus too,
+  # after the arrangement's panes: it is on screen, a press on it focuses it,
+  # and its keys are its own (the Requests pane's `list.*`, Enter). Until
+  # then the ring held only the tree's regions, so a press on a docked-open
+  # pane left the keys with whatever had the focus before.
+  for region in projection.regions & docked:
     let node = scopeNode(r, ekPane, $region.pane)
     r.setAttribute(node, "data-focusable", "true")
     r.setAttribute(node, "data-pane", $region.pane)

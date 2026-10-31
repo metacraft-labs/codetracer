@@ -880,5 +880,10 @@
   "I did NOT measure PARITY-S6 or PARITY-S7. The brief offered them as alternatives to S10; the decomposition pointed elsewhere, so neither was examined and both stay open and unmeasured.",
   "I made NO git commits, as instructed. The isonim-gpui change is uncommitted in the working tree, and the four drafted issues are UNFILED -- recording-issues policy wants them in the owning specs repos and that needs a push.",
   "The three new FLIP tools were compiled with the ambient nim 2.2.4 rather than the project's nim-fork-2.3.1. The ten-decimal agreement with flipdiff is offered as the control that this does not matter for the FLIP computation; it is not an argument that it could never matter."
- ]
+ ],
+  "captureStabilityQualification": {
+    "independentCaptureCount": null,
+    "status": "unvalidated-historical-reading",
+    "reason": "Independent capture count and pairwise within-renderer FLIP stability were not recorded. Regrading preserved frames is not another capture. eventLog figures and aggregates containing them cannot establish a validated parity baseline or delta."
+  }
 }

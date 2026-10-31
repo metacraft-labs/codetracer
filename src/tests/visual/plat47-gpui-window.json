@@ -85,32 +85,34 @@
    1012
   ],
   "pixelsByDesktopColour": {
-   "keyword": 632,
+   "keyword": 537,
    "string": 16178,
-   "comment": 500,
-   "identifier": 2167,
+   "comment": 486,
+   "identifier": 2209,
    "delimiter": 35,
-   "lineNumber": 2111,
-   "activeLineNumber": 1343,
-   "ground": 390506,
+   "lineNumber": 2162,
+   "activeLineNumber": 2017,
+   "ground": 390555,
    "oldBand4f4f4f": 0,
-   "indentGuide4f4f4f": 152,
+   "indentGuide4f4f4f": 144,
    "chromePaneFill": 0
   },
   "desktop": {
    "background": "#282828",
-   "keyword": "#5a9dd4",
-   "string": "#d6a38d",
-   "comment": "#78a96c",
+   "keyword": "#84b6df",
+   "string": "#d7a690",
+   "comment": "#94bb8a",
    "number": "",
    "identifier": "#f3f3f3",
    "delimiter": "#b6c0cb",
-   "lineNumber": "#575757",
+   "lineNumber": "#b0b0b0",
    "activeLineNumber": "#c8c8c8",
    "executionLine": "#404040",
+   "executionPointer": "#facc15",
+   "pointerInkPixels": 26,
    "selection": "#353535"
   },
-  "text": "calc/main.py P X\n3 1 h!/usr/bin/env python3 .\n\"\"calc \u2014 the small, fast, deterministic program\nWHY THIS PROGRAM EXISTS, AND WHY IT LOOKS L\n\u2018 \u201ccodetracer-specs/Front-Ends/CodeTracer-TUI\na fixture that is \"small, fast, deterministic; the \u00a2\nTttt sk i d M [ v ot v \" d \" Al d e d e\n"
+  "text": "calc/main.py P X\n\n3 1 h!/usr/bin/env python3 .\n2 \"\"calc \u2014 the small, fast, deterministic program\n3\n4 WHY THIS PROGRAM EXISTS, AND WHY IT LOOKS L\n5 PR\n6 \u201ccodetracer-specs/Front-Ends/CodeTracer-TUI\n7 a fixture that is \"small, fast, deterministic; the \u00a2\no Tt bt sk i d M [ v or t v e \" d \" Al d e d e\n"
  },
  "band": {
   "rows": [
@@ -174,13 +176,15 @@
    "base": {
     "titleInk": "#c8c8c8",
     "activeTitlePixels": 10,
-    "inactiveTitlePixels": 1,
+    "inactiveTitlePixels": 3,
+    "labelGround": "#333333",
     "bridge": "#282828"
    },
    "vcs": {
     "titleInk": "#727272",
     "activeTitlePixels": 0,
     "inactiveTitlePixels": 10,
+    "labelGround": "#282828",
     "bridge": "#1b1b1b"
    },
    "bodyGround": "#282828"
@@ -196,12 +200,14 @@
     "titleInk": "#717171",
     "activeTitlePixels": 0,
     "inactiveTitlePixels": 0,
+    "labelGround": "#282828",
     "bridge": "#1b1b1b"
    },
    "vcs": {
-    "titleInk": "#c6c6c6",
+    "titleInk": "#c7c7c7",
     "activeTitlePixels": 0,
-    "inactiveTitlePixels": 1,
+    "inactiveTitlePixels": 2,
+    "labelGround": "#333333",
     "bridge": "#282828"
    },
    "bodyGround": "#282828"
@@ -212,12 +218,32 @@
   "liveRingLeft": 470,
   "doneRingLeft": 470,
   "pressBodyRingLeft": 470,
-  "pressBodyChanged": 2286,
+  "pressBodyChanged": 6355,
   "pressBodyChangedBox": [
    470,
-   1036,
-   208,
-   12
+   70,
+   394,
+   978
+  ],
+  "pressBodyChangedRegions": [
+   {
+    "box": [
+     851,
+     70,
+     13,
+     375
+    ],
+    "pixels": 4873
+   },
+   {
+    "box": [
+     470,
+     1036,
+     135,
+     12
+    ],
+    "pixels": 1482
+   }
   ],
   "savedLayout": {
    "version": 6,
@@ -363,7 +389,7 @@
    "vcs"
   ],
   "liftedRing": null,
-  "liftedChangedPixels": 41494,
+  "liftedChangedPixels": 47673,
   "liftedInner": [
    4,
    34,
@@ -468,11 +494,11 @@
     982
    ],
    "changedPixels": 194436,
-   "ghostChangedPixels": 2240,
+   "ghostChangedPixels": 3411,
    "ghostCentre": [
-    228,
-    228,
-    228
+    68,
+    68,
+    68
    ]
   },
   "drop-whole": {
@@ -483,11 +509,11 @@
     32
    ],
    "changedPixels": 12704,
-   "ghostChangedPixels": 2240,
+   "ghostChangedPixels": 3520,
    "ghostCentre": [
-    228,
-    228,
-    228
+    68,
+    68,
+    68
    ]
   },
   "drop-slot": {
@@ -498,11 +524,11 @@
     32
    ],
    "changedPixels": 16200,
-   "ghostChangedPixels": 2432,
+   "ghostChangedPixels": 3552,
    "ghostCentre": [
-    228,
-    228,
-    228
+    68,
+    68,
+    68
    ]
   },
   "drop-dock": {
@@ -513,14 +539,14 @@
     1014
    ],
    "changedPixels": 49484,
-   "ghostChangedPixels": 2240,
+   "ghostChangedPixels": 3520,
    "ghostCentre": [
-    228,
-    228,
-    228
+    68,
+    68,
+    68
    ]
   },
-  "pressFocusChangedPixels": 35421,
+  "pressFocusChangedPixels": 39472,
   "cancelChangedPixels": 0,
   "releasedChangedPixels": 0,
   "commitRing": [
@@ -676,11 +702,11 @@
      },
      {
       "pane": "state",
-      "label": "State",
+      "label": "Variables",
       "rect": [
        682,
        1052,
-       53,
+       76,
        24
       ]
      }
@@ -700,8 +726,8 @@
   ],
   "edge": "bottom",
   "stripGround": "#282828",
-  "stripInk": 132,
-  "slotText": "State\n",
+  "stripInk": 236,
+  "slotText": "Variables\n",
   "savedLayout": {
    "version": 6,
    "layout": {
@@ -827,6 +853,12 @@
     710,
     1912,
     338
+   ],
+   "unpin": [
+    1844,
+    714,
+    64,
+    24
    ]
   },
   "revealChangedBBox": [
@@ -835,8 +867,8 @@
    1912,
    366
   ],
-  "revealChangedPixels": 136099,
-  "revealText": "State Unpin\nLocals Globals Watches Enter a watch expression\n\u00bb 1 #!/usr/bin/env python3\n",
+  "revealChangedPixels": 132149,
+  "revealText": "Variables Unpin\nEnter a watch expression\n\u00bb 1 #|/usr/bin/env python3\n",
   "dismissChangedPixels": 0
  },
  "calltrace": {

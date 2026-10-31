@@ -1165,4 +1165,3 @@ proc runPaneServer*(): int =
   for s in srv.sessions:
     s.close()
   if srv.shutdownRequested: 0 else: 1
-

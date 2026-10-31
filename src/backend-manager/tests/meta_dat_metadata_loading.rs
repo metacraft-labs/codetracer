@@ -134,6 +134,27 @@ fn loads_meta_dat_only_trace_end_to_end() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The container is read by position, not whole: a recording one tebibyte
+/// long (sparse: its real members first, then a hole) has its metadata read
+/// without the reader allocating for the rest.  Reading the file whole would
+/// ask for a 1 TiB buffer, which the allocator refuses (the process aborts),
+/// so this test is red for any reader that holds the container in memory.
+#[test]
+fn a_container_is_read_by_position_not_whole() {
+    let dir = make_recording("read-by-position", Some(7));
+    let ct = dir.join("trace.ct");
+    let file = std::fs::OpenOptions::new().write(true).open(&ct).unwrap();
+    file.set_len(1 << 40).expect("a sparse 1 TiB container");
+    drop(file);
+
+    let meta = trace_metadata::read_trace_metadata(&dir).expect("read metadata");
+    assert_eq!(meta.recording_id, TEST_RECORDING_ID);
+    assert_eq!(meta.source_files, vec!["src/main.rs", "src/lib.rs"]);
+    assert_eq!(meta.total_events, 7);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn loads_meta_dat_only_trace_without_mcr_block() {
     let dir = make_recording("loads-meta-dat-no-mcr", None);

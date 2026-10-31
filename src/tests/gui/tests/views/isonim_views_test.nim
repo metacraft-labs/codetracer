@@ -25,6 +25,7 @@ import backend/mock_backend
 import backend/dap_commands
 import store/types
 import store/replay_data_store
+import viewmodels/build_output_model
 import viewmodels/state_vm
 import viewmodels/calltrace_vm
 import viewmodels/debug_controls_vm
@@ -1541,7 +1542,11 @@ suite "IsoNim State Panel — watches in the list":
       check iconContent.len > 0
 
     var originIconRules: seq[string] = @[]
-    for line in resourceTupfile.splitLines:
+    # Walked through a `let`, never the `const`: an inline iterator over a
+    # `const` rebuilds the whole literal at every character access on the JS
+    # backend (`ci/test/js-const-iteration-test.sh` says why and refuses it).
+    let resourceTupfileText = resourceTupfile
+    for line in resourceTupfileText.splitLines:
       if "origin-icons" in line:
         originIconRules.add(line)
     check originIconRules == @[expectedTupRule]
@@ -2527,8 +2532,10 @@ suite "IsoNim Calltrace Panel — guide-line geometry":
     ]
 
   test "connector k sits at (k+1) * pitch for a sub-pixel pitch, at any row":
-    # The desktop's measured advance. A 25 px drawer is 0.28 px off per row,
-    # more than a whole row by row 100.
+    # A sub-pixel advance that is not exact in binary — the mean the desktop
+    # measured while rows with a return value were taller than the rest
+    # (codetracer-pm issue 2026-10-18). A 25 px drawer is 0.28 px off per
+    # row, more than a whole row by row 100.
     const pitch = 25.28
     var depths: seq[int]
     for i in 0 ..< 120: depths.add(i mod 3)
@@ -4993,13 +5000,11 @@ proc makeBuildLine(text: string;
                    severity: BuildLineSeverity = blsNone;
                    path: string = "";
                    line: int = 0): BuildOutputLine =
-  BuildOutputLine(
-    htmlText: text,
-    isStdout: isStdout,
-    severity: severity,
-    locationPath: path,
-    locationLine: line,
-  )
+  ## The line a producer that writes plain text makes — the product's own
+  ## constructor, one default run (build output is styled runs since PLAT-56;
+  ## the HTML field this used to fill is gone).
+  plainBuildLine(text, isStdout = isStdout, severity = severity,
+                 path = path, line = line)
 
 # ---------------------------------------------------------------------------
 # Build structure tests
@@ -10849,6 +10854,23 @@ suite "IsoNim Welcome Screen — structure":
 
       dispose()
 
+  test "welcome load refusal renders an alert during loading and clears on retry":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      let r = MockRenderer()
+      let panel = renderWelcomeScreenPanel[MockRenderer, MockNode](r, vm)
+      vm.beginLoadingTrace("first")
+      vm.setLoadError("Another trace or session is loading. Wait and retry.")
+      let alert = findByClass(panel, WelcomeLoadErrorClass)
+      check alert.attributes["role"] == "alert"
+      check alert.textContent == "Another trace or session is loading. Wait and retry."
+      check findByClassOrNil(panel, WelcomeLoadingOverlayClass) != nil
+      vm.beginLoadingTrace("retry")
+      check findByClassOrNil(panel, WelcomeLoadErrorClass) == nil
+      check findByClassOrNil(panel, WelcomeLoadingOverlayClass) != nil
+      dispose()
+
   test "loading flag appends the loading modifier and overlay":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
@@ -12093,7 +12115,7 @@ suite "Handlers built in a loop act on their own item (codetracer#860 sweep)":
       let vm = createBuildVM(store)
       let r = MockRenderer()
       var jumps: seq[(string, int)] = @[]
-      vm.onJumpToLine = proc(path: string; line: int) = jumps.add((path, line))
+      vm.onJumpToLine = proc(path: string; line, col: int) = jumps.add((path, line))
 
       let panel = renderBuildPanel[MockRenderer, MockNode](r, vm)
       vm.appendLine(makeBuildLine("a.nim(3, 1) Error: x", severity = blsError,

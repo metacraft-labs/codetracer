@@ -313,6 +313,12 @@ const transcript = isEmpty
 
 const liveDelayMs = Number(argValue("--live-delay-ms", "0")) || 0;
 
+// `--prompt-log=<path>`: append each `session/prompt`'s `prompt` content
+// blocks to <path>, one JSON line per prompt, so a suite can assert what the
+// agent was actually SENT (the "add context" attachments' header, PLAT-54
+// DeepReview-GUI §2.2.7) rather than what the client meant to send.
+const promptLog = argValue("--prompt-log", "");
+
 function write(payload) {
   process.stdout.write(JSON.stringify(payload) + "\n");
 }
@@ -368,6 +374,10 @@ function handle(request) {
       return;
     case "session/prompt": {
       const wanted = (params && params.sessionId) || sessionId;
+      if (promptLog) {
+        require("fs").appendFileSync(
+          promptLog, JSON.stringify((params && params.prompt) || null) + "\n");
+      }
       let i = 0;
       const next = () => {
         if (i >= transcript.length) {

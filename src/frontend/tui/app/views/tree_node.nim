@@ -172,14 +172,14 @@ const
     ## presentation); `h` on the ASCII tier.
   OriginControlGlyph* = canonical(grOriginControl)
     ## PLAT-51 (K41): the value-origin badge (U+21E0); `<` on the ASCII tier.
-  RemoveWatchGlyph* = canonical(grRemoveWatch)
+  RemoveWatchGlyph = canonical(grRemoveWatch)
     ## PLAT-51: a watch's remove control (U+00D7); `x` on the ASCII tier.
   ControlCells* = 3
     ## The controls' field at the row's end: history, origin, remove (blank
     ## for a non-watch), before the reserved trailing cell.
   HistoryEntryGlyph* = canonical(grHistoryEntry)
   OriginHopGlyph* = canonical(grOriginControl)
-  AddWatchText* = "+ Add watch expression" & canonical(grTruncation)
+  AddWatchText = "+ Add watch expression" & canonical(grTruncation)
   ControlStyle* = CellStyle(role: srChromeMuted)
   ControlLitStyle* = CellStyle(role: srChromeAccent, bold: true)
   HistoryTickStyle* = CellStyle(role: srChromeMuted)
@@ -189,7 +189,7 @@ const
   IndentCells* = 2
     ## Cells one level of depth indents the NAME by.
 
-  MoreRowPrefix* = canonical(grTruncation) & " "
+  MoreRowPrefix = canonical(grTruncation) & " "
   MoreRowSuffix* = " more"
 
   ExpanderStyle* = CellStyle(role: srChromeAccent)

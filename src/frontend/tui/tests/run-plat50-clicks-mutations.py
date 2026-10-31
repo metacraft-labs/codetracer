@@ -127,6 +127,7 @@ CTXMENU = "src/frontend/tui/app/views/context_menu.nim"
 FILETREE = "src/frontend/tui/app/views/file_tree.nim"
 POINTLIST = "src/frontend/tui/app/views/point_list.nim"
 BORDERS = "src/frontend/tui/app/views/borders.nim"
+GLYPHS = "src/frontend/tui/app/views/glyph_table.nim"
 CLI = "src/frontend/tui/app/cli.nim"
 TUIAPP = "src/frontend/tui/app/tui_app.nim"
 TUIMAIN = "src/frontend/tui/main.nim"
@@ -193,7 +194,7 @@ SPEC = "src/tests/gui/tests/visual/plat50-desktop-capture.spec.ts"
 
 SUBJECTS = [PANECLICKS, RUNTIME, TUISESSION, HSESSION, STORE, NATIVEHOST,
             MOUSE, BINDING, SHELL, ROLES, TOPBAR, CTXMENU,
-            FILETREE, POINTLIST, BORDERS, CLI, TUIAPP, TUIMAIN, CHROME,
+            FILETREE, POINTLIST, GLYPHS, CLI, TUIAPP, TUIMAIN, CHROME,
             WINTOP, WINCLICKS, GPUIMAIN, GPUILEAVES, DESKEDITOR, GRENDERER,
             DESKEVLOGVIEW, EVENTLOGVM, CALLTRACEVM, VCSDETAILS, VCSSOURCE,
             EVENTLOGVIEW, SCRATCHPANE, EVENTDB, DAPHANDLER, SHIMAPP, SHIMCLIP,
@@ -583,9 +584,11 @@ ARMS = [
         "  event.ctrl = (code and 16) != 0\n",
         "  event.ctrl = (code and 8) != 0\n",
         K_CTRL, "Ctrl is read from SGR's Alt bit"),
+    # FT1 RE-AIMED 2026-10-27: PLAT-71 (`4ea31ecc4`) draws the twisty from
+    # the glyph table by role.
     Arm("FT1", FILETREE,
-        "     else: CollapsedFolderGlyph & \" \") & e.text\n",
-        "     else: FolderGlyph & \" \") & e.text\n",
+        "     else: glyphs.glyph(grTreeCollapsed) & \" \") & e.text\n",
+        "     else: glyphs.glyph(grTreeExpanded) & \" \") & e.text\n",
         K_FILES, "a collapsed folder keeps the open twisty"),
     Arm("PL1", POINTLIST,
         "      g.fillSurface(area.row + 1 + i, area.col, area.width, 1,\n                    srSurfaceSelection)\n",
@@ -942,9 +945,13 @@ ARMS = [
         "      result.add ($parts[0][0], parts[^1])\n",
         "      result.add ($parts[0][0], parts[0])\n",
         K_VCS, "a commit's files listed by their state letter"),
+    # EL1 RE-AIMED 2026-10-27: PLAT-71 (`4ea31ecc4`) draws the arrow from the
+    # glyph table by role.
     Arm("EL1", EVENTLOGVIEW,
-        '         (if model.order.ascending: " ▲" else: " ▼")',
-        '         (if model.order.ascending: " ▼" else: " ▲")',
+        '         (if model.order.ascending: " " & glyphs.glyph(grSortAscending)\n'
+        '          else: " " & glyphs.glyph(grSortDescending))',
+        '         (if model.order.ascending: " " & glyphs.glyph(grSortDescending)\n'
+        '          else: " " & glyphs.glyph(grSortAscending))',
         K_ORDER, "the header's arrow points the other way"),
     Arm("SP1", SCRATCHPANE,
         "  result = ScratchpadHit(row: i, close: col == area.col)\n",
@@ -1107,9 +1114,12 @@ ARMS = [
         "  clamp(int(float(width) * OmnibarDesktopShare + 0.5),\n",
         "  clamp(int(float(width) * 0.3 + 0.5),\n",
         R_OMNI, "the terminal's field wider than the desktop's share"),
-    Arm("TB4", TOPBAR,
-        '  FieldEdgeLeft* = "▕"\n',
-        '  FieldEdgeLeft* = " "\n',
+    # TB4, SH5 and BO1 RE-AIMED 2026-10-27: PLAT-71 (`4ea31ecc4`) moved every
+    # chrome glyph, and its ASCII stand-in, into ONE table by role and tier
+    # (`glyph_table.nim`); the views and `borders.nim` no longer spell them.
+    Arm("TB4", GLYPHS,
+        '    grFieldEdgeLeft:       ["▕",',
+        '    grFieldEdgeLeft:       [" ",',
         C_BAR, "the field's left border not drawn"),
     # GT1 RE-AIMED 2026-10-17: the redesigned caption bar centres the slot
     # between two equal shares (`share`) unless the controls are wider; the
@@ -1147,13 +1157,13 @@ ARMS = [
         "    let ground = if (row, col + 1) in strips: srTabBar\n"
         "                 else: srSurfaceCanvas\n",
         C_BODY, "body dividers on the canvas, not the pane's fill"),
-    Arm("SH5", SHELL,
-        '  DividerGlyph* = "▏"\n',
-        '  DividerGlyph* = "│"\n',
+    Arm("SH5", GLYPHS,
+        '    grDividerV:            ["▏",',
+        '    grDividerV:            ["│",',
         C_STRIPS, "the divider a centred box-drawing line"),
-    Arm("BO1", BORDERS,
-        '  ("▏", "|"), ("▕", "|"),\n',
-        '  ("▏", "|"), ("▕", "!"),\n',
+    Arm("BO1", GLYPHS,
+        '    grFieldEdgeLeft:       ["▕",      "│",    "|",',
+        '    grFieldEdgeLeft:       ["▕",      "│",    "!",',
         S_ASCII, "the field's edge degrades to a glyph that is no line"),
     Arm("CL1", CLI,
         "              if $c == dividersName:\n",

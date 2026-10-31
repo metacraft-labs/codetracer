@@ -18,7 +18,7 @@ touched.
 THREE THINGS PARTICULAR TO THIS MILESTONE:
 
   * **SUBJECTS OUTSIDE THIS REPOSITORY.** The CUA specification lives in the
-    specification checkout (`$CT_SPECS_DIR`, else `../codetracer-specs`), and
+    specification checkout (`$CT_SPECS_DIR`, else `../codetracer-pm`), and
     the restore the terminal relies on lives in `nim-termctl`
     (`$NIM_TERMCTL_SRC`, else `../nim-termctl/src`). Both are named by a
     prefix (`specs:`, `nim-termctl:`) in the control file, mutated and
@@ -76,7 +76,7 @@ ROOTS = {
     "isonim-tui:": Path(os.environ.get("ISONIM_TUI_SRC") or
                         REPO.parent / "isonim-tui/src"),
     "specs:": Path(os.environ.get("CT_SPECS_DIR") or
-                   REPO.parent / "codetracer-specs"),
+                   REPO.parent / "codetracer-pm"),
     "nim-termctl:": Path(os.environ.get("NIM_TERMCTL_SRC") or
                          REPO.parent / "nim-termctl/src"),
 }
@@ -115,6 +115,12 @@ TOP_BAR = "src/frontend/tui/app/views/top_bar.nim"
 OPERATIONS = "src/frontend/viewmodel/editor/operations.nim"
 NAVIGATION = "src/frontend/viewmodel/keymap/navigation_keymap.nim"
 EMACS = "src/frontend/viewmodel/keymap/emacs_keymap.nim"
+CAPS = "src/frontend/tui/app/theme/capabilities.nim"
+USER_KEYMAP = "src/frontend/viewmodel/keymap/user_keymap.nim"
+
+# DIFF-13's subjects: GPUI's and the desktop's decoders.
+GPUI_KEYS = "src/frontend/gpui/app/gpui_keys.nim"
+DOM_KEYS = "src/common/key_event_names.nim"
 
 # Phase B suites.
 LAYERS = "src/frontend/viewmodel/tests/unit/test_plat68_layers.nim"
@@ -127,14 +133,30 @@ NOCONF = "src/frontend/tui/app/tests/test_keymap_no_conflicts.nim"
 MONACO_T = "src/frontend/tests/monaco_operations_test.nim"
 PROPAGATION = "isonim-tui:../tests/test_event_propagation.nim"
 MENU = "src/frontend/viewmodel/tests/unit/test_plat68_menu_access.nim"
+DIFF13_POP = "src/frontend/tui/tests/support/diff13_population.nim"
+DIFF13_DEV = "src/frontend/tui/tests/support/key_devices.nim"
+
+DIFF13_DECODE = "PLAT-68 DIFF-13: the population*::every key's device form*"
+DIFF13_GPUI_CUA = "PLAT-68 DIFF-13: GPUI*::cua:*"
+
+# k2: the desktop's macOS menu accelerators and the shortcut reference.
+MENU_ACCEL = "src/frontend/viewmodel/keymap/menu_accelerators.nim"
+INDEX_MENU = "src/frontend/index/menu.nim"
+DIALOG = "src/frontend/ui/shortcut_dialog.nim"
+MENU_ACCEL_T = "src/frontend/viewmodel/tests/unit/test_plat68_menu_accelerators.nim"
+DIALOG_T = "src/frontend/tests/shortcut_dialog_test.nim"
+# The real-stack boxes' suites (k1: the terminal and GPUI halves).
+PTYC = "src/frontend/tui/tests/real_terminal/test_plat68c_pty.nim"
+GPUIC = "src/frontend/gpui/tests/test_plat68c_gpui_plan.nim"
 
 SUBJECTS = [NAMES, KEYMAP, SELECTION, WHEN, CUA, CUA_SPEC, RESTORE,
             ROUTER, STACK, IMPORTERS, CORE, ROLES, CHROME, TUI_MAIN, DRIVER,
             MOTIONS, GPUI_MAIN, MONACO, DISPATCH, RUNTIME, ALT_TAP,
-            PRODUCT_MENU, TOP_BAR, OPERATIONS, NAVIGATION, EMACS]
+            PRODUCT_MENU, TOP_BAR, OPERATIONS, NAVIGATION, EMACS, CAPS, USER_KEYMAP, GPUI_KEYS, DOM_KEYS, MENU_ACCEL, INDEX_MENU, DIALOG]
 SUITES = [DECODING, BASES, ORACLE, PTY, EXTRACTOR, "tools/cua-keymap-extractor.py",
           LAYERS, PTYB, GPUIK, DIFF13, PARITY, PLAT28, NOCONF, MONACO_T,
-          PROPAGATION, MENU]
+          PROPAGATION, MENU, DIFF13_POP, DIFF13_DEV, MENU_ACCEL_T, DIALOG_T,
+          PTYC, GPUIC]
 
 SEQUENCE = "*::the milestone's sequence, Ctrl+S, and the file on disk"
 RESTORED = "*::the pop or the reset is written on SIGTERM, SIGHUP and a crash"
@@ -245,7 +267,7 @@ ARMS = [
      "a user's `-command` row removes nothing"),
     ("B14", [(GPUI_MAIN, "    result.add element(ekEditor, \"editor:\" & path)",
               "    discard path")],
-     [(DIFF13, None)],
+     [(DIFF13, DIFF13_GPUI_CUA)],
      "GPUI's scope path loses the editor element (DIFF-13)"),
     ("B15", [(MOTIONS, "  pf.heldPane = if atWindow: pf.focusedIndex() else: -1",
               "  pf.heldPane = -1")],
@@ -326,16 +348,161 @@ ARMS = [
               "    BaseRow(chords: \"Ctrl+Alt+Enter\", operation: \"editor.toggle-tracepoint\",")],
      [(LAYERS, "*::Enter opens the tracepoint editor under every base*")],
      "Emacs: Enter in the read-only editor does nothing"),
+    # --- parent: the OSC 52 read on real terminals (measured 2026-10-24) ---
+    ("H1", [(DRIVER, "  d.framer.altChordsAsCsiU = want == 1",
+             "  d.framer.altChordsAsCsiU = false")],
+     [(PTYB, "*::a LATE clipboard answer is not typed into the document*")],
+     "a late OSC 52 answer is typed into the document as text"),
+    ("H2", [(CAPS, "  if env.term in ClipboardReadPromptTerms or",
+             "  if false and env.term in ClipboardReadPromptTerms or")],
+     [(PTYB, "*::kitty's TERM: a paste does not ask*")],
+     "kitty and Ghostty are asked, and their permission prompt takes the keys"),
+    ("H3", [(RUNTIME, "  if not rt.caps.clipboardRead or not rt.clipboardRead.asks or",
+             "  if not rt.clipboardRead.asks or")],
+     [(PTYB, "*::kitty's TERM: a paste does not ask*")],
+     "the paste ignores the terminal's clipboard-read capability"),
+
+    # --- k4: precedence, the stack, the shadow and the loader ---------------
+    # The milestone's own list of arms that Phase B did not carry: each is
+    # aimed at the one case that holds it, so its `because` is that case's.
+    ("G1", [(ROUTER, "  for i in countdown(path.len - 1, 0):",
+             "  for i in 0 .. path.len - 1:")],
+     [(LAYERS, "*::inside a base the inner scope goes first")],
+     "§5.1: within the base, the outer scope answers before the inner"),
+    ("G2", [(ROUTER, "  for source in [lsUser, lsBase]:\n"
+                     "    for (table, atFocus) in router.tablesInOrder(path):",
+             "  for (table, atFocus) in router.tablesInOrder(path):\n"
+                     "    for source in [lsUser, lsBase]:")],
+     [(LAYERS, None)],
+     "the withdrawn draft: scope compared before source (B1's case, its "
+     "cross-scope line rather than B1's same-table line)"),
+    ("G3", [(ROUTER, "      let trie = trieFor(km, scope, table, laterFirst = source == lsUser)",
+             "      let trie = trieFor(km, scope, table, laterFirst = false)")],
+     [(LAYERS, "*::two user rows for one chord in one scope*")],
+     "KL-11: of two user rows for one chord, the EARLIER fires"),
+    ("G4", [(ROUTER, "        router.shadows.add Shadow(\n"
+                     "          keyText: userRows[i].keyText, userIndex: userRows[i].index,\n"
+                     "          shadowedSource: lsBase, shadowedOperation: b.operation,",
+             "        discard Shadow(\n"
+             "          keyText: userRows[i].keyText, userIndex: userRows[i].index,\n"
+             "          shadowedSource: lsBase, shadowedOperation: b.operation,")],
+     [(LAYERS, None)],
+     "§5.6: a user row's shadow of a base row resolves but is not in the "
+     "load report"),
+    ("G5", [(STACK, "    else: next.layers.add l", "    next.layers.add l")],
+     [(LAYERS, "*::closing the owner pops its layer")],
+     "KL-5: an owner's unmount leaves its layer on the stack"),
+    ("G6", [(KEYMAP, "      if node >= 0 and shadowDefeatedAt(layer, node):",
+             "      if false:")],
+     [(LAYERS, "*::a focused field's own row with a true `when` takes its character")],
+     "§5.6: the text-entry shadow answers before the focused layer's true "
+     "`when` (a find field's bound letter types itself)"),
+    ("G7", [(USER_KEYMAP, "    fail(ueMalformedKey, \"'\" & keyNode.getStr & \"' names no key\")",
+             "    return")],
+     [(LAYERS, "*::one planted row per kind*")],
+     "KL-7: the loader skips a malformed key instead of reporting it"),
+    # --- k3: DIFF-13, the cross-front-end differential over the tables ---
+    ("F1", [(GPUI_MAIN, "      editorFactsOf(gDebugDocs[path].state, false)",
+             "      EditorFacts(readOnly: false, mode: gDebugDocs[path].state.mode)")],
+     [(DIFF13, DIFF13_GPUI_CUA)],
+     "GPUI decides `editorReadOnly` itself instead of from the document "
+     "(`contextKeysOf`'s fact): a read-only document is writable there"),
+    ("F2", [(GPUI_KEYS, "  if \"shift\" in modifiers: result.incl kmodShift",
+             "  discard")],
+     [(DIFF13, DIFF13_DECODE)],
+     "GPUI's decoder drops Shift"),
+    ("F3", [(DOM_KEYS, "  if (mods * {kmodCtrl, kmodAlt, kmodMeta}) != {}:\n"
+                       "    return chordName(mods, fromCode)",
+             "  if (mods * {kmodCtrl, kmodAlt, kmodMeta}) != {}:\n"
+             "    return (if {kmodCtrl, kmodShift} <= mods: \"Shift+\" & "
+             "chordName(mods - {kmodShift}, fromCode) "
+             "else: chordName(mods, fromCode))")],
+     [(DIFF13, DIFF13_DECODE)],
+     "the desktop's decoder spells Shift before Ctrl"),
+    ("F4", [(GPUI_MAIN, "    let kind = getAttribute(node, ScopeKindAttribute)",
+             "    let kind = (let k = getAttribute(node, ScopeKindAttribute); "
+             "(if k == \"pane\": \"\" else: k))")],
+     [(DIFF13, DIFF13_GPUI_CUA)],
+     "GPUI's scope path omits the pane level"),
+    # --- k2: the desktop's macOS menu accelerators and shortcut reference ---
+    ("E1", [(INDEX_MENU, "      let accelerator = menuRouter.menuAccelerator($node.action)",
+             "      let accelerator = (let b = data.config.shortcutMap.actionShortcuts[node.action]; if b.len == 0: \"\" else: $b[0].renderer)")],
+     [(MENU_ACCEL_T, "*::index/menu.nim's macOS arm")],
+     "the macOS menu's accelerators come from the YAML table again"),
+    ("E2", [(MENU_ACCEL, "  if code.len == 1 and not command:",
+             "  if false:")],
+     [(MENU_ACCEL_T, "*::what has no accelerator")],
+     "a bare letter (CUA's read-only `n`) becomes a registered accelerator"),
+    ("E3", [(MENU_ACCEL, "  router.chordFor(name, menuFacts(), menuScopePath(), nmNormal, arg)",
+             "  initKeymapRouter(router.base, router.delivery).chordFor(name, menuFacts(), menuScopePath(), nmNormal, arg)")],
+     [(MENU_ACCEL_T, "*::a row rebinding Step Over, and F10 removed")],
+     "the menu shows the base's chord over the user's rebinding"),
+    ("E4", [(DIALOG, "    if line.shadowedBy.len > 0:",
+             "    if false:")],
+     [(DIALOG_T, "*::the shortcut reference*")],
+     "the shortcut reference drops the shadow mark"),
+
+    # --- k1: the real-stack boxes on the terminal and GPUI ---
+    ("C1", [(CUA, "  Ro = \"productMode == debug && editorFocus && editorReadOnly && !textInputFocus\"",
+             "  Ro = \"productMode == debug && editorFocus && !textInputFocus\"")],
+     [(PTYC, "*::writable, n is typed*"),
+      (GPUIC, "*::writable, n is typed*")],
+     "the letters' `when` loses `editorReadOnly`"),
+    ("C2", [(CUA, "  Ro = \"productMode == debug && editorFocus && editorReadOnly && !textInputFocus\"",
+             "  Ro = \"productMode == debug && editorFocus && editorReadOnly\"")],
+     [(PTYC, "*::the find field takes n*"),
+      (GPUIC, "*::the find field: n is typed*")],
+     "the letters' `when` loses `!textInputFocus`"),
+    ("C3", [(ROUTER, "            by = \"your row \" & $(s.userIndex + 1)",
+             "            discard")],
+     [(PTYC, "*::a user row with no `when` takes Enter*"),
+      (GPUIC, "*::a user row with no `when` takes Enter*")],
+     "the shortcut reference does not mark a shadowed base row"),
+    ("C4", [(GPUI_MAIN, "    openArm.status = note\n    redrawEditor()",
+             "    discard note\n    redrawEditor()")],
+     [(GPUIC, "*::F12 in Edit mode*")],
+     "GPUI: a key inert in this product mode is not said on the status bar"),
+    ("C8", [(GPUI_MAIN, "      gStatusNote = (note, epochTime() + StatusNoteSeconds)",
+             "      discard note")],
+     [(GPUIC, "*::Ctrl+S in a replay saves nothing*")],
+     "GPUI: a key inert in a replay is not said on the status bar"),
+    ("C9", [(RUNTIME, "  if rt.prompt.open and (owner.len == 0 or owner == \"window\" or",
+             "  if rt.prompt.open and (true or owner == \"window\" or")],
+     [(PTYC, "*::find is its owner's*")],
+     "the terminal's find field is on the path wherever the focus is"),
+    ("C5", [(RUNTIME, "  if rt.router.expirePending(nowMs):",
+             "  if false:")],
+     [(PTYC, "*::Vim's g ends at 1000 ms*")],
+     "a timed-out prefix stays on the status line until the next key"),
+    ("C6", [(RUNTIME, "  of \"help.keyboard-shortcuts\":\n    rt.showShortcutReference(outcome)",
+             "  of \"help.keyboard-shortcuts\":\n    discard")],
+     [(PTYC, "*::a user row with no `when` takes Enter*")],
+     "the terminal's Ctrl+K Ctrl+S shows no reference"),
+    ("C7", [(ROUTER, "  for l in activeLayers(router.stack, path):\n    result.add (l.table, true)",
+             "  for l in activeLayers(router.stack, path):\n    discard l")],
+     [(PTYC, "*::with find open the reference lists its layer first*")],
+     "an open find widget's pushed layer is never asked"),
+    # C1 and C2 are DECLARED SURVIVORS, measured: a writable CUA editor
+    # already has `textInputFocus` (`context_keys`), and the resolver's
+    # text-entry shadow types a printable key before any layer that is not
+    # the focused element's is asked — so neither guard in the letters'
+    # `when` is the one that holds. C10 removes the shadow itself, and the
+    # letters test's writable and find-field halves kill it.
+    ("C10", [(KEYMAP, "  if textEntry and pending.chords.len == 0 and isTextKey(key):",
+              "  if false and textEntry and pending.chords.len == 0 and isTextKey(key):")],
+     [(PTYC, "*::writable, n is typed*"),
+      (PTYC, "*::the find field takes n*")],
+     "a printable key in a text field is not typed (no text-entry shadow)"),
 ]
-DECLARED_SURVIVORS = {"N1"}
+DECLARED_SURVIVORS = {"N1", "C1", "C2"}
 IN_BINARY = {NAMES, KEYMAP, SELECTION, WHEN, CUA, RESTORE, ROUTER, STACK,
              CORE, ROLES, TUI_MAIN, DRIVER, MOTIONS, RUNTIME, PRODUCT_MENU,
-             TOP_BAR, OPERATIONS}
+             TOP_BAR, OPERATIONS, CAPS}
   # Subjects compiled into `codetracer-tui`.
 IN_GPUI = {NAMES, KEYMAP, SELECTION, WHEN, CUA, ROUTER, STACK, CORE, CHROME,
-           GPUI_MAIN, ALT_TAP, PRODUCT_MENU, OPERATIONS}
+           GPUI_MAIN, ALT_TAP, PRODUCT_MENU, OPERATIONS, GPUI_KEYS}
   # Subjects compiled into `codetracer-gpui`.
-GPUI_SUITES = {GPUIK, DIFF13}
+GPUI_SUITES = {GPUIK, DIFF13, GPUIC}
   # Suites that run the GPUI binary.
 
 
@@ -362,7 +529,7 @@ def lane_flags(lane):
 
 
 def suite_flags(suite):
-    if suite in (PTY, PTYB):
+    if suite in (PTY, PTYB, PTYC):
         return lane_flags("tui-real-terminal")
     if suite.startswith("src/frontend/tui/"):
         return lane_flags("tui")
@@ -470,7 +637,23 @@ def run_suite(suite, test_filter):
     stem = Path(suite).stem
     env = dict(os.environ, CODETRACER_REPO_ROOT=str(REPO))
     try:
-        if suite == MONACO_T:
+        if suite == DIALOG_T:
+            # `frontend-js`: compiled to JavaScript with the lane's flags, run
+            # under node (the lane's own recipe, `run-nim-test-lane.sh`).
+            out = f"{NIMCACHE}/{stem}.js"
+            c = subprocess.run(
+                ["nim", "js", "-d:nodejs", "--hints:off", "--warnings:off"] +
+                lane_flags("frontend-js") +
+                [f"--nimcache:{NIMCACHE}/{stem}", f"-o:{out}", suite],
+                cwd=REPO, capture_output=True, text=True, timeout=TIMEOUT,
+                env=env)
+            if c.returncode != 0:
+                return "DID-NOT-COMPILE", []
+            argv = ["node", out] + ([test_filter] if test_filter and
+                                    test_filter != "GREEN" else [])
+            p = subprocess.run(argv, cwd=REPO, capture_output=True, text=True,
+                               timeout=TIMEOUT, env=env)
+        elif suite == MONACO_T:
             # `frontend-js`: compiled to JavaScript, run under node.
             out = f"{NIMCACHE}/{stem}.js"
             c = subprocess.run(
@@ -596,7 +779,7 @@ def main():
         return 3
     only = set(filter(None, a.only.split(",")))
     selected = [arm for arm in ARMS if not only or arm[0] in only]
-    needs_binary = any(s in (PTY, PTYB) for arm in selected for s, _ in arm[2])
+    needs_binary = any(s in (PTY, PTYB, PTYC) for arm in selected for s, _ in arm[2])
     needs_gpui = any(s in GPUI_SUITES for arm in selected for s, _ in arm[2])
     binary_digest = None
     gpui_digest = None
@@ -631,7 +814,7 @@ def main():
             for rel, find, replace in edits:
                 path = path_of(rel)
                 path.write_text(path.read_text().replace(find, replace, 1))
-            through_pty = any(s in (PTY, PTYB) for s, _ in suites)
+            through_pty = any(s in (PTY, PTYB, PTYC) for s, _ in suites)
             through_gpui = any(s in GPUI_SUITES for s, _ in suites)
             built, refusal = True, ""
             if through_pty and any(r in IN_BINARY for r in files):

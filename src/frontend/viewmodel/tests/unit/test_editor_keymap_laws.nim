@@ -77,7 +77,11 @@ import ../generators/vocabulary_generator
 proc describeError(e: EditingKeymapError): string =
   "keys:" & $e.line & ": " & e.message & " — in: " & e.text.strip()
 
-const ExpectedAssertions = 18556
+const ExpectedAssertions = 18612
+  ## **+56 ON 2026-10-24 (PLAT-70 Part C)**: one declaration joined the
+  ## vocabulary (`search-selection-whole-word`), swept like every other, and
+  ## Vim's editor table gained `/` / `?` (`find.open`) and the four `*`
+  ## macro rows in place of three search rows.
   ## **−755 ON 2026-10-11 (PLAT-68)**: the product default was retired for the
   ## CUA base, so the sweep lost its third model (168 scopes → 112) and the
   ## one case about its fourteen lifted rows; the CUA and Emacs bases are
@@ -604,7 +608,7 @@ suite "PLAT-31: what a keymap reaches and what it files, as an equality":
       # could otherwise use to excuse a binding that exists.
       ck coverageOverlaps(def).len == 0
       ck reach.len + filed.len == operations().len
-      ck operations().len == 245
+      ck operations().len == 246
 
   test "every model: the coverage GAP is empty":
     for def in allModels():

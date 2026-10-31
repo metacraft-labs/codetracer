@@ -56,7 +56,7 @@ from ../../view_vocabulary/pane_views import problemsPaneView,
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 60
+const ExpectedAssertions = 64
 
 var countedAssertions = 0
 
@@ -312,8 +312,10 @@ suite "PLAT-55: the terminal's Problems pane over a real build":
     ck s.paneRows() == desktopRows()
     ck s.rt.app.problems.errorBadge == "● 2"
     ck s.rt.app.problems.warningBadge == "⚠ 1"
-    # EMT-D21: the first error highlighted, nothing opened, no focus moved.
+    # EMT-D21: the first error highlighted, nothing opened, no focus moved —
+    # the row the desktop's panel highlights for the same build.
     ck s.rt.app.problems.selected == 1
+    ck parseFile(AnswersFile)["after"]["rows"][1]["selected"].getBool
     ck s.activeEditor().path == ""
     # THE VOCABULARY'S VIEW: a `Table` of the same cells.
     var table: ViewNode = nil
@@ -325,8 +327,13 @@ suite "PLAT-55: the terminal's Problems pane over a real build":
                           "Expected type bool, found type Field"]
     ck paneProblems in PaneVocabularyPanes
     ck paneProblems notin PaneAcceptedExceptions
-    # F8 — `problems.next` in Edit mode: the next error (from the highlight)
-    # opened at its line, announced; the docked pane revealed.
+    # F8 — `problems.next` in Edit mode: the HIGHLIGHTED error, where the
+    # first `next error` after a failed build lands (EMT-D21), opened at its
+    # line, announced; the docked pane revealed. The second steps on.
+    discard s.rt.handleToken("\x1b[19~", 0)
+    ck s.rt.app.problems.selected == 1
+    ck s.rt.app.problems.status == "error 1 of 2"
+    ck s.activeEditor() == ("src/util.nr", 3, 22)
     discard s.rt.handleToken("\x1b[19~", 0)
     ck s.rt.app.problems.selected == 2
     ck s.rt.app.problems.status == "error 2 of 2"

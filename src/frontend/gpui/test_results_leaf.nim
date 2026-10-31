@@ -364,6 +364,29 @@ proc testsHitAt*(vm: TestResultsVM; st: GTestsPane; body: PxRect;
   else:
     return GTestsHit(kind: gtText, row: -1)
 
+proc testsControlAt*(vm: TestResultsVM; st: GTestsPane; body: PxRect;
+                     x, y: int): tuple[title: string; at: PxRect] =
+  ## Test-Results-Pane.md §9.6: the ▶, `⟳` or `⏵` under window pixel
+  ## `(x, y)` — its title (the desktop's tooltip words, the ones the element
+  ## carries as `data-ct-title`) and its rectangle, where the hover label is
+  ## anchored. `("", _)` off every control.
+  let hit = testsHitAt(vm, st, body, x, y)
+  if hit.kind notin {gtRun, gtRefresh, gtOpen}:
+    return
+  let lay = testsLayout(vm, body)
+  if hit.kind == gtRun:
+    return (vm.runButtonTitle(), lay.run)
+  let row = vm.rows.val[hit.row]
+  let top = st.visibleTop(lay.lines.len, lay.rows)
+  let rowY = lay.list.y + (lay.lineOfRow(hit.row) - top) * TestsRowPx
+  let a = lay.list.x + lay.fit.starts[4]
+  if hit.kind == gtRefresh:
+    (vm.refreshButtonTitle(row),
+     PxRect(x: a, y: rowY, w: TestsActionPx, h: TestsRowPx))
+  else:
+    (vm.openButtonTitle(row),
+     PxRect(x: a + TestsActionPx, y: rowY, w: TestsActionPx, h: TestsRowPx))
+
 proc scrubTests*(st: var GTestsPane; vm: TestResultsVM; body: PxRect;
                  y: int; dragging: bool) =
   ## The scrubber pressed (a jump) or its thumb held (the view follows).

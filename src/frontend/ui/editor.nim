@@ -1086,7 +1086,9 @@ proc statusWidgetDom(self: FlowComponent, line: int): Node =
   var dom = cast[Node](document.createElement(cstring"div"))
   var target = cast[Node](document.createElement(cstring"div"))
   dom.appendChild(target)
-  let id = cstring(&"flow-status-widget-{line}")
+  # Scoped to this component (`flow.widgetIdScope`): the component that
+  # replaces it registers its own status widget before this one is removed.
+  let id = cstring(&"flow-status-widget-{self.widgetIdScope}-{line}")
   target.id = id
   cast[Element](target).classList.add(cstring"flow-status-widget")
   self.statusDom = dom
@@ -1106,7 +1108,7 @@ proc ensureStatusWidget(self: FlowComponent, line: int) =
 
   if add:
     let dom = self.statusWidgetDom(line)
-    self.statusWidget = self.addContentWidget(dom, line, self.maxFlowLineWidth, &"flow-status-widget-{line}", isStatusWidget = true)
+    self.statusWidget = self.addContentWidget(dom, line, self.maxFlowLineWidth, &"flow-status-widget-{self.widgetIdScope}-{line}", isStatusWidget = true)
 
 const flowStatusTexts: array[FlowUpdateStateKind, string] = [
   "not loading",
@@ -1301,6 +1303,10 @@ proc getTokenFromPosition(self: EditorViewComponent, position: js): cstring =
     cerror getCurrentExceptionMsg()
     result = ""
 
+
+proc startEditorTestAt*(self: EditorViewComponent; line: int;
+                        isPythonTest = false)
+  ## The editor's Run-test for the test at `line`; defined with the widget.
 
 proc runTest(self: EditorViewComponent, testName: cstring, path: cstring, line: int, column: int) =
   let options = RunTestOptions(
@@ -1738,15 +1744,16 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
         # fn test_1() {
         # ..
         # }
-        let column = 1
-        let path = self.name
-        let testName = self.getLineFunctionName(line + 1)
-        clog cstring"test name: " & testName
+        # THE EDITOR'S RUN-TEST, NOT A SECOND DISPATCH (Test-Results-Pane.md
+        # §9.7): it called `renderer.runTests` directly, around the host, so
+        # the recording was loaded INTO the edit session, the pane began no
+        # run and nothing spun. `startEditorTestAt` is the inline widget's own
+        # path — through the host where one is installed.
         let runTest = ContextMenuItem(
           name: "Re-record and replay this test",
           hint: "try to rebuild/re-record and replay this test",
           handler: proc(e: Event) =
-            self.runTest(testName, path, line, column)
+            self.startEditorTestAt(line)
         )
         contextMenu &= runTest
       # Call Line Jump Menu Item
@@ -2321,6 +2328,10 @@ proc loadFlow*(self: EditorViewComponent, location: types.Location) =
   if windows.len > 0 and windows[0].rrTicks == location.rrTicks:
     self.adoptFlowWindows(windows)
 
+var onMonacoEditorReady*: proc()
+  ## Installed by `ui_js`: an editor got its Monaco instance (the BUILD
+  ## panel's marks are put on it, `ui/build.refreshBuildEditorMarks`).
+
 proc createMonacoEditor*(selector: cstring, options: MonacoEditorOptions): MonacoEditor =
   result = monaco.editor.create(jq(selector), options)
 
@@ -2836,6 +2847,100 @@ proc runTestFromGutter(self: EditorViewComponent; attrLine: int) =
         "test has been established."), editorTestRunFrames * 300)
   self.api.infoMessage(&"\"{selector}\" started")
 
+proc startEditorTestAt*(self: EditorViewComponent; line: int;
+                        isPythonTest = false) =
+  ## THE EDITOR'S RUN-TEST for the test declared at `line` — the inline
+  ## widget's click, and the context menu's "Re-record and replay this test"
+  ## (Test-Results-Pane.md §9.7), so the two cannot start a run two different
+  ## ways. With a host installed (`editorTestRunHook`) the run is the host's:
+  ## the pane's run (§5), this line's widget spinning until it settles, and
+  ## the recording opened where §9.1 places it — a new tab by default. Without
+  ## one, the desktop's `CODETRACER::run-test` dispatch, as before.
+  let scannedName = if isPythonTest:
+    self.getPythonTestFunctionName(line)
+  else:
+    self.getLineFunctionName(line + 1)
+  # THE CATALOG'S NAME WHEN THERE IS ONE. `selector` is what a runner is given;
+  # `scannedName` is what the source text looks like. They differ by the module
+  # path, and the difference decides whether `--exact` selects one test or none.
+  let selector =
+    if editorTestSelectorHook.isNil: scannedName
+    else:
+      let fromCatalog = editorTestSelectorHook(self.name, line)
+      if fromCatalog.len > 0: fromCatalog else: scannedName
+  let testId = &"ct-test-action-{self.id}-{line}"
+  if selector.len == 0:
+    self.api.errorMessage("Could not work out which test this is.")
+    return
+
+  if not editorTestRunHook.isNil:
+    # ARM THE SPINNER BEFORE THE DISPATCH, for exactly the reason
+    # `runTestFromGutter` does — see the long note there. This arm carried
+    # the PRE-FIX ordering: it called the hook first and armed afterwards,
+    # so a dispatch refused SYNCHRONOUSLY INSIDE the hook settled while
+    # `spinningTestEditors` was still empty and `activeTestId` still unset,
+    # swept nothing, and then these lines armed an animation no second
+    # settle would ever arrive to clear. `loadAnimation`'s 400-frame cap was
+    # the only thing that ended it: two minutes of "Running..." under a
+    # `"<selector>" started` message, over a run that was declined before
+    # the click finished.
+    #
+    # The gutter was repaired; this widget is still painted whenever an
+    # editor has a `#[test]` or a Python test and no catalog entry for that
+    # line, and `editorTestRunHook` is installed globally, so the defect was
+    # live on the surviving arm.
+    #
+    # WHAT WAS THERE BEFORE IS REMEMBERED so the unwind puts back exactly
+    # what this click displaced: the commonest refusal is `already-running`,
+    # where a real run owns the spinner and a blanket settle would visibly
+    # "finish" it.
+    let wasSpinning = spinningTestEditors.find(self) >= 0
+    let previousTestId = self.activeTestId
+    capture testId:
+      self.activeTestId = testId
+      # The accepted run already owns its animation when this is the same
+      # button. Re-arming it would create a second timer chain.
+      if not wasSpinning or previousTestId != testId:
+        self.redrawActiveTestButton()
+    if not wasSpinning:
+      spinningTestEditors.add(self)
+
+    let refusal = editorTestRunHook(self.name, selector, line)
+    if refusal.len > 0:
+      # UNWIND WHAT THIS CLICK ARMED, and no more.
+      if wasSpinning:
+        if self.activeTestId != previousTestId:
+          # Undo only the newly clicked node. restoreTestButton would also
+          # clear the gutter owned by the accepted run in this editor.
+          let declinedButton = cast[Element](jq("#" & self.activeTestId))
+          if not declinedButton.isNil:
+            declinedButton.classList.remove(cstring"active-test-button")
+            declinedButton.textContent = cstring"Run test"
+        # Its existing timer resumes once this synchronous click returns.
+        self.activeTestId = previousTestId
+      else:
+        self.restoreTestButton(cstring"Run test")
+        rollbackRunSpinner(spinningTestEditors, self, wasSpinning)
+      self.api.errorMessage($refusal)
+      return
+
+    # ALREADY SETTLED, INSIDE THE CALL. The dispatch was refused or answered
+    # synchronously and the settle has already emptied the list. Nothing is
+    # running, so "started" is not claimed and no animation is left behind.
+    if spinningTestEditors.find(self) < 0:
+      return
+
+    self.api.infoMessage(&"\"{selector}\" started")
+    return
+
+  capture testId:
+    self.activeTestId = testId
+    self.redrawActiveTestButton()
+  if spinningTestEditors.find(self) < 0:
+    spinningTestEditors.add(self)
+  self.runTest(scannedName, self.name, line, 1)
+  self.api.infoMessage(&"\"{scannedName}\" started")
+
 proc makeTestAction(self: EditorViewComponent, line: int, isPythonTest: bool = false): Node =
   # For Python tests, the function name is on the same line (line)
   # For Rust tests, the function is on the next line (line + 1, after #[test])
@@ -2862,77 +2967,7 @@ proc makeTestAction(self: EditorViewComponent, line: int, isPythonTest: bool = f
     cstring(if selector.len > 0: "Run " & $selector else: "Run this test"))
   result.appendChild(document.createTextNode(cstring"Run test"))
   result.addEventListener(cstring"click", proc(ev: Event) =
-    if selector.len == 0:
-      self.api.errorMessage("Could not work out which test this is.")
-      return
-
-    if not editorTestRunHook.isNil:
-      # ARM THE SPINNER BEFORE THE DISPATCH, for exactly the reason
-      # `runTestFromGutter` does — see the long note there. This arm carried
-      # the PRE-FIX ordering: it called the hook first and armed afterwards,
-      # so a dispatch refused SYNCHRONOUSLY INSIDE the hook settled while
-      # `spinningTestEditors` was still empty and `activeTestId` still unset,
-      # swept nothing, and then these lines armed an animation no second
-      # settle would ever arrive to clear. `loadAnimation`'s 400-frame cap was
-      # the only thing that ended it: two minutes of "Running..." under a
-      # `"<selector>" started` message, over a run that was declined before
-      # the click finished.
-      #
-      # The gutter was repaired; this widget is still painted whenever an
-      # editor has a `#[test]` or a Python test and no catalog entry for that
-      # line, and `editorTestRunHook` is installed globally, so the defect was
-      # live on the surviving arm.
-      #
-      # WHAT WAS THERE BEFORE IS REMEMBERED so the unwind puts back exactly
-      # what this click displaced: the commonest refusal is `already-running`,
-      # where a real run owns the spinner and a blanket settle would visibly
-      # "finish" it.
-      let wasSpinning = spinningTestEditors.find(self) >= 0
-      let previousTestId = self.activeTestId
-      capture testId:
-        self.activeTestId = testId
-        # The accepted run already owns its animation when this is the same
-        # button. Re-arming it would create a second timer chain.
-        if not wasSpinning or previousTestId != testId:
-          self.redrawActiveTestButton()
-      if not wasSpinning:
-        spinningTestEditors.add(self)
-
-      let refusal = editorTestRunHook(self.name, selector, line)
-      if refusal.len > 0:
-        # UNWIND WHAT THIS CLICK ARMED, and no more.
-        if wasSpinning:
-          if self.activeTestId != previousTestId:
-            # Undo only the newly clicked node. restoreTestButton would also
-            # clear the gutter owned by the accepted run in this editor.
-            let declinedButton = cast[Element](jq("#" & self.activeTestId))
-            if not declinedButton.isNil:
-              declinedButton.classList.remove(cstring"active-test-button")
-              declinedButton.textContent = cstring"Run test"
-          # Its existing timer resumes once this synchronous click returns.
-          self.activeTestId = previousTestId
-        else:
-          self.restoreTestButton(cstring"Run test")
-          rollbackRunSpinner(spinningTestEditors, self, wasSpinning)
-        self.api.errorMessage($refusal)
-        return
-
-      # ALREADY SETTLED, INSIDE THE CALL. The dispatch was refused or answered
-      # synchronously and the settle has already emptied the list. Nothing is
-      # running, so "started" is not claimed and no animation is left behind.
-      if spinningTestEditors.find(self) < 0:
-        return
-
-      self.api.infoMessage(&"\"{selector}\" started")
-      return
-
-    capture testId:
-      self.activeTestId = testId
-      self.redrawActiveTestButton()
-    if spinningTestEditors.find(self) < 0:
-      spinningTestEditors.add(self)
-    self.runTest(scannedName, self.name, line, 1)
-    self.api.infoMessage(&"\"{scannedName}\" started"))
+    self.startEditorTestAt(line, isPythonTest))
 
 proc makeFlowLine(self: EditorViewComponent, position: int): FlowLine =
   cdebug fmt"makeFlowLine position {position}"
@@ -3426,6 +3461,9 @@ proc initMonacoForEditor(self: EditorViewComponent, host: JsObject) =
         self.data.ui.monacoEditors.add(self.monacoEditor)
       registerLspEditor(self)
       self.markEditorScope(self.monacoEditor)
+      # Build-Output-Pane.md §3.9: the last build's diagnostics in it.
+      if not onMonacoEditorReady.isNil:
+        onMonacoEditorReady()
     if not editorReady:
       return
 
@@ -4248,8 +4286,42 @@ method afterInit*(self: EditorViewComponent) {.async.} =
 func supportsFlow*(self: EditorViewComponent): bool =
   self.data.config.flow.enabled
 
+type DesktopFindOrigin = object
+  ## PLAT-70 Part C (Find-And-Incremental-Search.md §3.5): where the find
+  ## started in Monaco — every selection and both scroll offsets — taken when
+  ## `find.open` opened the widget, for the palette's **Find: Cancel and
+  ## Return** (`find.cancel`). CUA's `Escape` is Monaco's own, which keeps
+  ## the match (the user's OQ-F1); this is the other exit, reached by input.
+  editor: EditorViewComponent
+  selections: JsObject
+  scrollTop, scrollLeft: float
+
+var desktopFindOrigin: DesktopFindOrigin
+
 method onFindOrFilter*(self: EditorViewComponent) {.async.} =
+  if not self.monacoEditor.isNil:
+    let ed = self.monacoEditor.toJs
+    desktopFindOrigin = DesktopFindOrigin(
+      editor: self, selections: ed.getSelections(),
+      scrollTop: ed.getScrollTop().to(float),
+      scrollLeft: ed.getScrollLeft().to(float))
   self.monacoEditor.trigger("keyboard".cstring, "actions.find".cstring)
+
+proc cancelEditorFind*(): bool =
+  ## `find.cancel` on the desktop: Monaco's find widget closed and the
+  ## selections and both scroll offsets put back exactly as they were when
+  ## `find.open` ran. Answers whether there was a find to cancel.
+  let o = desktopFindOrigin
+  desktopFindOrigin = DesktopFindOrigin()
+  if o.editor.isNil or o.editor.monacoEditor.isNil:
+    return false
+  let ed = o.editor.monacoEditor.toJs
+  o.editor.monacoEditor.trigger("keyboard".cstring, "closeFindWidget".cstring)
+  discard ed.setSelections(o.selections)
+  discard ed.setScrollTop(o.scrollTop)
+  discard ed.setScrollLeft(o.scrollLeft)
+  discard ed.focus()
+  true
 
 proc applySourceRevisionForLocation(self: EditorViewComponent;
                                     location: types.Location) {.async.} =

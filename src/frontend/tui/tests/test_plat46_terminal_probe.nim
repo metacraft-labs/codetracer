@@ -22,7 +22,7 @@ import ../host/terminal_probe
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 45
+const ExpectedAssertions = 48
 
 var countedAssertions = 0
 
@@ -30,11 +30,12 @@ template ck(condition: untyped) =
   inc countedAssertions
   check condition
 
-proc frame(bytes: string; expect: bool): seq[string] =
+proc frame(bytes: string; expect: bool; kitty = false): seq[string] =
   ## Every complete token `bytes` frames into, with reply strings expected or
-  ## not.
+  ## not, and with the Kitty keyboard protocol on or not.
   var f = initInputFramer()
   f.expectStrings = expect
+  f.altChordsAsCsiU = kitty
   for b in bytes:
     let (complete, token) = f.feed(b)
     if complete:
@@ -82,6 +83,20 @@ suite "PLAT-46: the start-up query round":
     # A BEL-terminated OSC is a whole token too (xterm answers in the query's
     # own terminator).
     ck frame("\x1b]11;rgb:1e/1e/2e\x07", expect = true).len == 1
+
+  test "under the Kitty protocol a reply is framed whole even outside the round":
+    # Kitty's flag 1 sends Alt+<key> as `CSI … u`, so `ESC ]` can only be a
+    # terminal's answer: a LATE OSC 52 answer — kitty and Ghostty ask the
+    # user before a program may read the clipboard, so theirs arrives after
+    # the paste's wait — is one reply token, not `]` and text.
+    let late = "\x1b]52;c;WlFYSi1sYXRl\x1b\\"
+    let tokens = frame(late, expect = false, kitty = true)
+    checkpoint($tokens)
+    ck tokens == @[late]
+    # tmux answers with an empty selection field, in BEL.
+    ck frame("\x1b]52;;WlFYSg==\x07", expect = false, kitty = true).len == 1
+    # Without the protocol, outside the round, it stays Alt+`]` and text.
+    ck frame(late, expect = false)[0] == "]"
 
   test "each answer lands in the probe":
     var p = TerminalProbe()

@@ -679,6 +679,8 @@ proc scenarioSpecs*(): seq[ScenarioSpec] =
     sp("search-forward", caLine0Mid, {ckSearchChanged}, {prSearchBackward}),
     sp("search-backward", caLine0Mid, {ckSearchChanged}),
     sp("search-selection", spLine0Clusters, {ckSearchChanged}),
+    # PLAT-70 Part C: the selection with word boundaries when it is a word.
+    sp("search-selection-whole-word", spLine0Clusters, {ckSearchChanged}),
     sp("search-clear", caLine0Mid, {ckSearchChanged}, {prSearch}),
 
     sp("save", caLine0Mid, {ckIntent}),

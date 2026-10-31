@@ -42,8 +42,10 @@ func buttonWidthPx*(label: string): int =
   2 * WelcomeButtonPadPx + WelcomeCharPx * label.len
 
 func welcomeLayoutPx*(rows: seq[NativeWelcomeRow];
-                      area: PxRect): WelcomeLayoutPx =
-  ## Where everything goes inside the window's layout area.
+                      area: PxRect; focus = -1): WelcomeLayoutPx =
+  ## Where everything goes inside the window's layout area. A recent panel
+  ## holds at most `WelcomeMaxEntries` rows, scrolled so the row the focus
+  ## (an index of `rows`) is on is one of them (`shownFrom`).
   if area.isEmpty:
     return
   var y = area.y + WelcomeMarginPx
@@ -64,15 +66,17 @@ func welcomeLayoutPx*(rows: seq[NativeWelcomeRow];
                                h: panelH)
   result.tracesPanel = PxRect(x: area.x + WelcomeMarginPx + panelW + gap,
                               y: y, w: panelW, h: panelH)
+  let foldersFrom = shownFrom(folders, focus, entries)
   for k, i in folders:
-    if k < entries:
+    if k >= foldersFrom and k < foldersFrom + entries:
       result.rowRects[i] = PxRect(x: result.foldersPanel.x + 4,
-                                  y: y + (k + 1) * WelcomeRowPx + 4,
+                                  y: y + (k - foldersFrom + 1) * WelcomeRowPx + 4,
                                   w: panelW - 8, h: WelcomeRowPx)
+  let tracesFrom = shownFrom(traces, focus, entries)
   for k, i in traces:
-    if k < entries:
+    if k >= tracesFrom and k < tracesFrom + entries:
       result.rowRects[i] = PxRect(x: result.tracesPanel.x + 4,
-                                  y: y + (k + 1) * WelcomeRowPx + 4,
+                                  y: y + (k - tracesFrom + 1) * WelcomeRowPx + 4,
                                   w: panelW - 8, h: WelcomeRowPx)
   y += panelH + WelcomeMarginPx
   var x = area.x + WelcomeMarginPx

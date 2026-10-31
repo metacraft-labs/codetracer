@@ -40,6 +40,12 @@ import ui_imports, kdom, ../renderer, command_interpreter, shell, ./agent_activi
 import ./session_viewmodels
 from ./event_log import runColumnWidthCommand
 from ../viewmodel/viewmodels/omnibar_sources import ColumnWidthVerb
+from ../viewmodel/viewmodels/omnibar_vm import OmnibarEntry, OmnibarMode,
+  omBuildTask, classifyOmnibarQuery, rankOmnibar
+from ../viewmodel/viewmodels/build_tasks import BuildTaskQuery,
+  BuildVerbKind, bvkRunDefault, bvkRunCommand, parseBuildVerb,
+  buildTaskEntries, pickerNote
+import ./build as build_pane
 
 import ../communication
 import std/json
@@ -169,9 +175,44 @@ proc eventuallyClearPlaceholder(self: CommandPaletteComponent, value: cstring) =
     self.inputPlaceholder = cstring("")
     self.requestCommandPalettePanelRefresh()
 
+var buildTaskChoices: seq[OmnibarEntry]
+  ## The build task picker's entries as the palette lists them, row for row
+  ## (a row with an empty target is the task file's problem, said).
+
+proc buildTaskResults(query: string): seq[CommandPanelResult] =
+  ## Build-Output-Pane.md §3.11, §3.12: `:build: …` — the project's tasks and
+  ## the BUILD panel's commands, ranked by the shared omnibox rule (the
+  ## default task first with nothing typed); the task file's first problem,
+  ## if it has one, as a warning row above them.
+  let c = build_pane.desktopBuildTasks()
+  let needle = classifyOmnibarQuery(query).needle
+  buildTaskChoices = @[]
+  let note = pickerNote(c)
+  if note.len > 0:
+    buildTaskChoices.add OmnibarEntry(kind: omBuildTask, label: note)
+    result.add CommandPanelResult(kind: CommandQuery, value: cstring(note),
+                                  valueHighlighted: cstring(note),
+                                  level: NotificationWarning)
+  for r in rankOmnibar(buildTaskEntries(c), omBuildTask, needle, 0):
+    buildTaskChoices.add r.entry
+    let shown = r.entry.label & (if r.entry.detail.len > 0:
+                                   "   " & r.entry.detail else: "")
+    result.add CommandPanelResult(kind: CommandQuery, value: cstring(shown),
+                                  valueHighlighted: cstring(shown))
+
 proc showResults(self: CommandPaletteComponent) =
   let value = self.inputField.toJs.value.to(cstring)
   self.inputValue = value
+  if classifyOmnibarQuery($value).mode == omBuildTask:
+    self.results = buildTaskResults($value)
+    # The default task (or the first match) is chosen: the warning row, when
+    # there is one, is above it.
+    self.selected = (if self.results.len > 1 and
+                        buildTaskChoices[0].target.len == 0: 1 else: 0)
+    self.inputPlaceholder = cstring""
+    self.active = true
+    self.requestCommandPalettePanelRefresh()
+    return
   self.query = self.interpreter.parseQuery(value)
   if self.query.kind != ProgramQuery:
     self.results = self.interpreter.autocompleteQuery(self.query)
@@ -194,6 +235,25 @@ proc runQuery(self: CommandPaletteComponent) =
 
   let value = self.inputField.toJs.value.to(cstring)
   self.inputValue = value
+  # Build-Output-Pane.md §3.12: the build's commands — the task picker's
+  # choice (`:build: …`), `:build` (the default task) and `:build <command>`.
+  if classifyOmnibarQuery($value).mode == omBuildTask:
+    let i = self.selected
+    let said =
+      if i >= 0 and i < buildTaskChoices.len and
+         buildTaskChoices[i].target.len > 0:
+        build_pane.runDesktopBuildChoice(buildTaskChoices[i])
+      else: build_pane.runDesktopBuildLine($value)
+    self.close()
+    self.resetCommandPalette()
+    if said.len > 0: cwarn "build: " & said
+    return
+  if parseBuildVerb($value).kind in {bvkRunDefault, bvkRunCommand}:
+    let said = build_pane.runDesktopBuildLine($value)
+    self.close()
+    self.resetCommandPalette()
+    if said.len > 0: cwarn "build: " & said
+    return
   self.query = self.interpreter.parseQuery(value)
 
   case self.query.kind:
@@ -553,3 +613,20 @@ method register*(self: CommandPaletteComponent, api: MediatorWithSubscribers) =
   commandPaletteComponentRef = self
   self.wireCommandPaletteResultRunner()
   self.syncLegacyCommandPaletteIntoVM()
+
+build_pane.openBuildTaskPickerProc = proc(): string =
+  ## §3.11: `Ctrl+Shift+B` — the palette opened on `:build: `, the tasks
+  ## listed (`buildTaskResults`).
+  let palette = data.ui.commandPalette
+  if palette.isNil:
+    return "this window has no command palette"
+  data.search(SearchFileRealTime)
+  discard windowSetTimeout(proc() =
+    let field = kdom.document.getElementById(cstring"command-query-text")
+    if field.isNil or not palette.active:
+      return
+    palette.inputField = cast[dom.Node](field)
+    field.toJs.value = cstring(BuildTaskQuery)
+    palette.onInput(cstring(BuildTaskQuery))
+  , 250)
+  pickerNote(build_pane.desktopBuildTasks())

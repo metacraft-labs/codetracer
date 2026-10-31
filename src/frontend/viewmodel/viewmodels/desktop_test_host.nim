@@ -137,10 +137,14 @@ type
     ## learns its folder after the pane has mounted and can change it with
     ## "Open folder" without remounting anything.
 
-  DesktopOpenRecording* = proc(recordingId: string): string
-    ## Enter an EXISTING recording, by id, without running anything — in the
-    ## product, `CODETRACER::load-recent-trace`. "" when it was handed over,
-    ## else why not.
+  DesktopOpenRecording* = proc(testId, recordingId: string;
+                               policy: TraceOpenPolicy): string
+    ## Open test `testId`'s recording `recordingId`, by id, without running
+    ## anything, where `Test-Results-Pane.md` §9 places it for the destination
+    ## `policy` (the setting, inverted by the modifier) — in the desktop
+    ## product a new session tab by default (`createNewSession` +
+    ## `CODETRACER::load-recent-trace`). "" when it was handed over, else why
+    ## not.
 
   DesktopRunKind* = enum
     ## Which of the two desktop runners a pending run belongs to.
@@ -168,12 +172,20 @@ type
     line*: int
     runId*: string
     commandLine*: string
+    openAfter*: bool
+      ## A record run that OPENS its recording once it settles — the editor's
+      ## Run-test and the row's record-and-open (§9.5); false for `⟳`.
+    openPolicy*: TraceOpenPolicy
+      ## Where it opens: the destination captured at the press, because the
+      ## modifier is no longer held when the recorder answers.
 
   DesktopTestHost* = ref object
     vm*: TestResultsVM
     dispatch*: DesktopTestDispatch
-      ## Record a test and OPEN the recording: the editor's Run-test, and the
-      ## row's record-and-open.
+      ## Record a test whose recording is then OPENED: the editor's Run-test,
+      ## and the row's record-and-open. The host opens it on the settle, by
+      ## `openRecording` (`Test-Results-Pane.md` §9.5); the dispatch itself
+      ## loads nothing into the asking window.
     settleEditor*: DesktopTestSettleEditor
     pending*: Option[DesktopTestRun]
     runCounter*: int
@@ -371,6 +383,22 @@ proc settleDesktopTestRun*(host: DesktopTestHost;
     # web arm's `noirTestRecordingSink`.
     host.vm.rememberRecording(run.testId, recordingId, recordedAtText)
   host.vm.endRun()
+  if run.openAfter and recordingId.len > 0:
+    # §9.5: RECORD, THEN OPEN WHERE §9 PLACES IT. The host process loaded
+    # nothing into the asking window (the run recorded with `keepWindow`),
+    # so opening is this host's, after the run is over — a failure to open
+    # is said on the pane and does not reopen the run.
+    if host.openRecording.isNil:
+      host.vm.noteRowActionRefusal(NoReplayHostText)
+    else:
+      var refusal = ""
+      try:
+        refusal = host.openRecording(run.testId, recordingId, run.openPolicy)
+      except:
+        let detail = getCurrentExceptionMsg()
+        refusal = DesktopOpenRaisedText &
+          (if detail.len > 0: ": " & detail else: ".")
+      host.vm.noteRowActionRefusal(refusal)
 
 
 # ---------------------------------------------------------------------------
@@ -619,8 +647,8 @@ proc runDispatch(host: DesktopTestHost; run: DesktopTestRun;
   DesktopDispatchAnswer()
 
 proc dispatchRecordRun(host: DesktopTestHost; dispatch: DesktopTestDispatch;
-                       selector, file: string; line: int):
-                       DesktopDispatchAnswer =
+                       selector, file: string; line: int;
+                       openAfter: bool): DesktopDispatchAnswer =
   ## Every `ct record-test` dispatch — the editor's Run-test, the row's `⟳`
   ## and its record-and-open — which differ only in the dispatch they hand the
   ## run to (open the recording, or keep the window).
@@ -643,7 +671,9 @@ proc dispatchRecordRun(host: DesktopTestHost; dispatch: DesktopTestDispatch;
     file: file,
     line: line,
     runId: "ct-record-test-" & $host.runCounter,
-    commandLine: "ct record-test " & selector)
+    commandLine: "ct record-test " & selector,
+    openAfter: openAfter,
+    openPolicy: host.vm.effectiveOpenPolicy())
   host.runDispatch(run, proc(): string = dispatch(selector, file, line))
 
 proc startDesktopTestRun*(host: DesktopTestHost;
@@ -652,7 +682,8 @@ proc startDesktopTestRun*(host: DesktopTestHost;
   ## sentence the caller shows instead of starting a spinner.
   if host.isNil:
     return NoRunHostText
-  host.dispatchRecordRun(host.dispatch, selector, file, line).refusal
+  host.dispatchRecordRun(host.dispatch, selector, file, line,
+                         openAfter = true).refusal
 
 proc desktopSuiteCommandLine*(workspaceRoot: string): string =
   ## What the host process runs, as the pane's `run-started` quotes it. The
@@ -759,7 +790,7 @@ proc recordRow(host: DesktopTestHost; testId, selector: string;
   host.noteRowRefusal(host.dispatchRecordRun(
     dispatch, selector,
     inProject(host.currentWorkspaceRoot(), item.get.file),
-    item.get.range.startLine))
+    item.get.range.startLine, openAfter = not keepWindow))
 
 proc openExistingRow(host: DesktopTestHost; testId: string) =
   ## `⏵` over a recording that already exists: enter it, by id. NOT A RUN —
@@ -776,7 +807,8 @@ proc openExistingRow(host: DesktopTestHost; testId: string) =
     return
   var refusal = ""
   try:
-    refusal = host.openRecording(recording.recordingId)
+    refusal = host.openRecording(testId, recording.recordingId,
+                                 host.vm.effectiveOpenPolicy())
   except:
     let detail = getCurrentExceptionMsg()
     refusal = DesktopOpenRaisedText &

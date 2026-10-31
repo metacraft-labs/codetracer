@@ -38,7 +38,7 @@
 
 import ui_imports
 
-import std/[tables, options]
+import std/[json, tables, options]
 import isonim/core/signals
 
 import ../viewmodel/keymap/[keymap_router, user_keymap, client_actions,
@@ -48,11 +48,15 @@ import ../../common/[key_event_names, ct_event]
 import ../dap
 import ./shortcut_preference
 import ./chord_display
+from ./shortcut_dialog import ReferenceLine
+from ./status import onNotification
 import ./monaco_operations
+import ./native_key_operations
 import ./editor_scope
 import ./video_player   # `videoPlayerHasFocus`, `currentVideoPlayerVM`
 import ./menu_keys
 import ../viewmodel/keymap/alt_tap
+from ../viewmodel/keymap/keymap_selection import selectKeymap
 from ../viewmodel/viewmodels/omnibar_vm import paletteFieldOf
 import ../../common/key_names
 import ../viewmodel/viewmodels/video_player_vm
@@ -70,10 +74,6 @@ type
 
 const
   KeybindingsMessage = cstring"CODETRACER::keybindings"
-  NativeTables = [InputTable, PaletteTable, ContextMenuTable, FindTable]
-    ## Tables whose base rows the DOM element under the focus performs itself
-    ## (a field's caret keys, the palette's list, Monaco's find widget): the
-    ## router decides the key is theirs, and the key goes on to them.
 
 
 
@@ -443,6 +443,18 @@ proc tableScrollerOf(paneKind: cstring): JsObject {.importjs: """
   ## PLAT-70 Part I: a table pane's sideways scroll container while its
   ## columns SCROLL (`data-ct-fit="scroll"`), or nil.
 
+proc showInertNote(note: string) =
+  ## The inert key's reason on the status bar, and on `window.__ctInertNotes`
+  ## (what the Electron specs read beside the bar's text).
+  let entry = cstring(note)
+  {.emit: ["(window.__ctInertNotes = window.__ctInertNotes || []).push(",
+           entry, ");"].}
+  if not data.isNil and not data.ui.isNil and not data.ui.status.isNil:
+    data.ui.status.onNotification(newNotification(
+      NotificationKind.NotificationInfo, note))
+  else:
+    cwarn "keys: " & note
+
 proc registerHostOperation*(operation: string; run: proc()) =
   ## How THIS build performs `operation` — a catalogued operation whose rows
   ## hold only where a build supplies it (the web studio's
@@ -528,16 +540,13 @@ proc runDesktopOperation(res: EditingResolution): NativeKind =
   if hostOperations.hasKey(res.operation):
     hostOperations[res.operation]()
     return nkHandled
-  let table = if res.layer.find(':') >= 0: res.layer[res.layer.find(':') + 1 .. ^1]
-              else: ""
-  let fromUser = res.layer.startsWith("user")
   # The right-click menu's operations are performed here rather than left
   # to the menu: it is a plain `<div>` that never takes the focus, so no
   # element under the focus would move its highlight, choose or close it.
   if contextMenuIsOpen() and contextMenuOperation(res.operation):
     return nkHandled
   # The DOM element's own operations stay its own.
-  if not fromUser and table in NativeTables:
+  if res.isNativeBaseOperation:
     return nkLeaveToElement
   if res.operation in HostIntents:
     if not data.functions.update.isNil: data.functions.update(data, false)
@@ -679,10 +688,27 @@ proc routeKey(name: string; ev: JsObject) =
     handled = true
   of erOperation:
     handled = runDesktopOperation(res) == nkHandled
-  of erCharacter, erNothing:
+  of erNothing:
+    # Mode-Transitions.md §8.1: a key whose operation has no meaning in this
+    # product mode is inert AND SAYS SO, on the surface the user is looking
+    # at — the status bar, briefly (an info notice, dismissed by its timer),
+    # as the terminal says it on its status line.
+    let note = deskRouter.inertNote(res, facts, path, nmNormal)
+    if note.len > 0:
+      showInertNote(note)
+      handled = true
+  of erCharacter:
     discard
   if handled:
     stop(ev)
+
+proc canonicalKeyOfEvent(ev: JsObject): string =
+  ## A `keydown`'s canonical name — the desktop's ONE decoder
+  ## (`key_event_names.canonicalKeyOfDom`) over the event's own fields. The
+  ## listener and `probeKeys` both read an event through it.
+  canonicalKeyOfDom($ev.key.to(cstring), $ev.code.to(cstring),
+                    ev.ctrlKey.to(bool), ev.shiftKey.to(bool),
+                    ev.altKey.to(bool), ev.metaKey.to(bool))
 
 proc onKeyDown(ev: JsObject) =
   ## The ONE key listener (capture phase, on the window).
@@ -694,9 +720,7 @@ proc onKeyDown(ev: JsObject) =
     return
   # Any other key while Alt is held makes it a chord, not a tap.
   deskAltTap.interrupted()
-  let name = canonicalKeyOfDom(key, $ev.code.to(cstring),
-                               ev.ctrlKey.to(bool), ev.shiftKey.to(bool),
-                               ev.altKey.to(bool), ev.metaKey.to(bool))
+  let name = canonicalKeyOfEvent(ev)
   if name.len == 0:
     return
   if videoPlayerKey(name):
@@ -760,6 +784,29 @@ proc chordForAction*(action: ClientAction): cstring =
 
 chord_display.chordOfAction = chordForAction
 
+proc shortcutReferenceHere*(): tuple[lines: seq[ReferenceLine], scope: string] =
+  ## The shortcut reference for where the focus is NOW (the shortcuts dialog
+  ## asks as it opens, before it is in the document): the router's
+  ## `shortcutReference` — the same layers `route` resolves through — each
+  ## line with its operation's reading name.
+  syncPaletteLayer()
+  syncContextMenuLayer()
+  let path = desktopScopePath()
+  for e in deskRouter.shortcutReference(desktopFacts(), path, nmNormal):
+    result.lines.add ReferenceLine(layer: e.layer, keyText: e.keyText,
+                                   operation: e.operation,
+                                   label: operationLabelOf(e.operation),
+                                   shadowedBy: e.shadowedBy)
+  result.scope = $path
+
+proc testChordForAction(actionName: cstring): cstring =
+  ## Read-only browser-test seam: ask the live router, including the user's
+  ## rows and current scope, independently of any menu or tooltip's text.
+  try:
+    chordForAction(parseEnum[ClientAction]($actionName))
+  except ValueError:
+    cstring""
+
 # PLAT-70 Part B: the copy hint under a table row names the chord that
 # copies it where the focus is (KL-8).
 copyChordOf = proc(): string =
@@ -778,12 +825,52 @@ proc importStoredPreset() =
                   js{preset: cstring(stored.get)})
   markPresetImported()
 
+proc newKeyDownEvent(init: JsObject): JsObject {.importjs:
+  "(new KeyboardEvent('keydown', #))".}
+
+proc probeKeys(request: cstring): cstring =
+  ## **WHAT KEYS WOULD RESOLVE TO HERE, WITH NO EFFECT** — the desktop's
+  ## counterpart of GPUI's `--window-ops=probe:` and the terminal's
+  ## `probeKey`, read by the cross-front-end differential (DIFF-13, KL-6).
+  ## `request` is JSON: `{base, keybindings, events: [KeyboardEventInit]}`.
+  ## Each event is a real `KeyboardEvent` (never dispatched), named by the
+  ## listener's own decoder (`canonicalKeyOfEvent`); the scope path and the
+  ## facts are this renderer's (`desktopScopePath`, `desktopFacts`); the
+  ## router is a COPY of the live one with `base` selected and `keybindings`
+  ## laid over it. Answers JSON: `{path, answers: ["<key> -> <resolution>"]}`.
+  let req = parseJson($request)
+  syncPaletteLayer()
+  syncContextMenuLayer()
+  let path = desktopScopePath()
+  let facts = desktopFacts()
+  var router = deskRouter
+  let selection = selectKeymap(req["base"].getStr)
+  if selection.ok:
+    router.switchBase(selection.model, ksCommand)
+  router.applyUserKeymap(parseUserKeymap(req{"keybindings"}.getStr))
+  var answers = newJArray()
+  for e in req["events"]:
+    let init = JsObject{}
+    init[cstring"key"] = cstring(e["key"].getStr)
+    init[cstring"code"] = cstring(e["code"].getStr)
+    for flag in ["ctrlKey", "shiftKey", "altKey", "metaKey"]:
+      init[cstring(flag)] = e{flag}.getBool.toJs
+    let name = canonicalKeyOfEvent(newKeyDownEvent(init))
+    var probe = router
+    answers.add %(name & " -> " &
+                  describeResolution(probe.route(facts, path, nmNormal, name,
+                                                 0)))
+  cstring($(%*{"path": $path, "answers": answers}))
+
 proc installKeyRouter*() =
   ## Install the listener and wait for the user's keymap. Idempotent: the
   ## renderer's start-up paths may all call it.
   if installed:
     return
   installed = true
+  {.emit: ["window.__ctKeymapProbe = ", probeKeys, ";"].}
+  {.emit: ["window.__CODETRACER_TEST__ = window.__CODETRACER_TEST__ || {};",
+           "window.__CODETRACER_TEST__.chordForAction = ", testChordForAction, ";"].}
   {.emit: ["window.addEventListener('keydown', ", onKeyDown, ", true);",
            "window.addEventListener('keyup', ", onKeyUp, ", true);",
            "window.addEventListener('mousedown', ", onPointerDown, ", true);",

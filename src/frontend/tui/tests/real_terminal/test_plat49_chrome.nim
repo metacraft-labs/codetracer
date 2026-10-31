@@ -40,7 +40,7 @@
 ##
 ## No mocks: the real binary, a real recording, a real engine, a real pty.
 
-import std/[monotimes, os, strutils, times, unicode, unittest]
+import std/[monotimes, os, strutils, tables, times, unicode, unittest]
 
 import term_assert
 import nim_libvterm
@@ -61,7 +61,7 @@ from ../../../viewmodel/viewmodels/state_vm import VariableCategory,
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 571
+const ExpectedAssertions = 573
 
 var countedAssertions = 0
 
@@ -306,9 +306,30 @@ suite "PLAT-49 on a real terminal: a click is a click":
     let s4 = sess.settle(5000, proc(s: Snapshot): bool = tinted(s) > 100)
     let changed = tinted(s4)
     ck changed > 100
+    # THE TINT, BY ITS COLOUR: the ground most of the changed cells took.
+    # "Restored" is that colour gone from every cell that did not already
+    # carry it — what Esc is claimed to do. Comparing the WHOLE region with
+    # the pre-drag snapshot also counted transients that are not the drag's
+    # (a scrollbar thumb fading on its own clock between the two snapshots),
+    # and went red at load 90 on a screen with no tint left on it.
+    var counts = initCountTable[string]()
+    for r in 2 ..< Rows - 2:
+      for c in 30 ..< 110:
+        let now = hexOfColor(s4[r][c].bg)
+        if now != hexOfColor(s3[r][c].bg):
+          counts.inc now
+    let tint = if counts.len > 0: counts.largest.key else: ""
+    proc tintLeft(s: Snapshot): int =
+      for r in 2 ..< Rows - 2:
+        for c in 30 ..< 110:
+          if hexOfColor(s[r][c].bg) == tint and
+             hexOfColor(s3[r][c].bg) != tint:
+            inc result
+    ck tint.len > 0
+    ck tintLeft(s4) > 100
     sess.esc()
-    let s5 = sess.settle(5000, proc(s: Snapshot): bool = tinted(s) == 0)
-    let restored = tinted(s5) == 0
+    let s5 = sess.settle(5000, proc(s: Snapshot): bool = tintLeft(s) == 0)
+    let restored = tintLeft(s5) == 0
     ck restored
     sess.quit()
 

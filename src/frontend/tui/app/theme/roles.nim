@@ -156,6 +156,13 @@ type
     srSurfaceField = "surface-field"
       ## PLAT-49: a one-row input box in the top bar (the omnibar's field).
     srSurfaceSelection = "surface-selection"
+    srSurfaceFindMatch = "surface-find-match"
+      ## PLAT-70 Part C (Find-And-Incremental-Search.md §3.3 step 4): every
+      ## match of the find session's query — Monaco's
+      ## `editor.findMatchHighlightBackground`.
+    srSurfaceFindMatchCurrent = "surface-find-match-current"
+      ## The CURRENT match, in a distinct style — Monaco's
+      ## `editor.findMatchBackground`.
     srSurfaceCurrentLine = "surface-current-line"
     srSurfaceActiveRow = "surface-active-row"
       ## PLAT-49 part B: the ground of a list's ACTIVE row — the call the
@@ -540,6 +547,19 @@ const
                          dtColorsUiSurfaceInputDefault, mono = {raUnderline}),
     srSurfaceSelection: bgOnly(dgSurface, dtEditorThemeSelection,
                                mono = {raReverse}),
+    # PLAT-70 Part C: THE FIND HIGHLIGHTS. The design system publishes no
+    # find-match token (its editor theme names `findMatch` /
+    # `findMatchHighlight`, which are not Monaco colour ids, so the desktop
+    # draws Monaco's vs-dark defaults: a translucent orange for every match
+    # and a slate for the current one). The nearest published tokens carry
+    # the same two distinctions: the warning surface for every match, the
+    # information surface for the current one. Monochrome underlines a match
+    # and reverses the current one, as the selection is reversed.
+    srSurfaceFindMatch: bgOnly(dgSurface, dtColorsUiSurfaceAlertWarning,
+                               mono = {raUnderline}),
+    srSurfaceFindMatchCurrent: bgOnly(dgSurface,
+                                      dtColorsUiSurfaceAlertInformation,
+                                      mono = {raReverse, raBold}),
     srSurfaceCurrentLine: bgOnly(dgSurface, dtEditorThemeExecutionLine,
                                  mono = {raReverse}),
     # PLAT-49 part B: THE ACTIVE ROW'S GROUND. The desktop's call trace puts
@@ -569,7 +589,7 @@ const
                                        mono = {raItalic}),
     srGutterTracepoint: fgOnly(dgGutter, dtColorsEditorSyntaxType,
                                attrs = {raBold}, mono = {raBold}),
-    srGutterExecutionPointer: fgOnly(dgGutter, dtColorsEditorActionSecondary,
+    srGutterExecutionPointer: fgOnly(dgGutter, dtEditorThemeExecutionPointer,
                                      attrs = {raBold},
                                      mono = {raBold, raUnderline}),
     srGutterInspectionPointer: fgOnly(dgGutter,

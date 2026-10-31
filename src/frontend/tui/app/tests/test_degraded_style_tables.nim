@@ -65,7 +65,8 @@ import ../views/styled_row
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 3701
+const ExpectedAssertions = 3733
+  ## +32 on 2026-10-25 (PLAT-70 Part C): two more roles, swept per tier.
   ## PLAT-51: 3387 -> 3389, measured: the ASCII fallback table grew by the
   ## current-line and inspection triangles, the role table traded the `[MOD]`
   ## tag for the editor-text role, and one permitted merge was added.
@@ -83,7 +84,9 @@ const
   AllModes = [dmDark, dmLight]
   AllPalettes = [pkDesign, pkTerminal]
 
-  ExpectedRoleCount = 136
+  ExpectedRoleCount = 138
+    ## PLAT-70 Part C: +2, the find highlights (`srSurfaceFindMatch`,
+    ## `srSurfaceFindMatchCurrent`, group `dgSurface`).
     ## PLAT-70 Part H: +6, a scrollbar's parts (`srScrollbarTrack`,
     ## `srScrollbarTrackRevealed`, `srScrollbarThumb`, `srScrollbarThumbSolid`,
     ## `srScrollbarThumbHover`, `srScrollbarThumbHeld`, group `dgScrollbar`).

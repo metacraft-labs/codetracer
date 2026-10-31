@@ -138,7 +138,8 @@ suite "ct replay --ui=<other front-end>: the options are claimed by name":
       "--os-simulation=strong-kernel", "--no-color"])
     check c.rest == @["--goto=200", "/traces/a", "--no-color"]
     check c.given == @[("--thread-sync-order", some("per-object")),
-                       ("--os-simulation", some("strong-kernel"))]
+                       ("--os-simulation", some("strong-kernel")),
+                       ("--follow-request-spans", none(string))]
     let colon = claimReplayBackendOptions(["--thread-sync-order:total"])
     check colon.rest.len == 0
     check colon.given[0] == ("--thread-sync-order", some("total"))
@@ -147,7 +148,8 @@ suite "ct replay --ui=<other front-end>: the options are claimed by name":
     let c = claimReplayBackendOptions(["/traces/a", "--theme=light"])
     check c.rest == @["/traces/a", "--theme=light"]
     check c.given == @[("--thread-sync-order", none(string)),
-                       ("--os-simulation", none(string))]
+                       ("--os-simulation", none(string)),
+                       ("--follow-request-spans", none(string))]
 
   test "a name that only starts like an option is not claimed":
     let c = claimReplayBackendOptions(["--os-simulation-extra=1"])
@@ -188,3 +190,26 @@ suite "ct replay: the twin table":
     check ReplayBackendOptions[1].flag == OsSimulationFlag
     check ReplayBackendOptions[1].values ==
       @["weak-userspace", "strong-userspace", "strong-kernel"]
+
+
+suite "ct replay: explicitly follow a growing request stream":
+  test "the follow option is claimed and forwarded to every front-end":
+    let c = claimReplayBackendOptions(["--follow-request-spans=1", "/trace"])
+    check c.rest == @["/trace"]
+    let f = replayBackendForwarding(c.given, envOf([]))
+    check f.refusal.len == 0
+    check f.env == @[("CT_FOLLOW_REQUEST_SPANS", "1")]
+
+  test "the follow flag overrides its environment twin":
+    let f = replayBackendForwarding(
+      [("--follow-request-spans", some("0"))],
+      envOf({"CT_FOLLOW_REQUEST_SPANS": "1"}))
+    check f.refusal.len == 0
+    check f.env == @[("CT_FOLLOW_REQUEST_SPANS", "0")]
+
+  test "invalid follow choices are refused before launching":
+    let f = replayBackendForwarding([], envOf({"CT_FOLLOW_REQUEST_SPANS": "yes"}))
+    check f.env.len == 0
+    check f.refusal.len == 1
+    if f.refusal.len > 0:
+      check "CT_FOLLOW_REQUEST_SPANS" in f.refusal[0]

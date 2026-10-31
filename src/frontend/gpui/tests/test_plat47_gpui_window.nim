@@ -28,6 +28,9 @@ import std/[algorithm, json, os, sequtils, strutils, unittest]
 
 import gpui/window_top_bar   # `GpuiTopBandPx`: the band above the layout (PLAT-48)
 import gpui/chrome          # `crFocusOutline` (PLAT-51), the window's edges
+import styles/generated/design_tokens
+  # the selected tab's ground: ui/surface/primary/tertiary, the design
+  # system's, not a constant of this window's choosing
 from gpui/window_geometry import TabStripPx, FooterPx,
   EditorHScrollBandPx
   # the pane's tab strip, the window's footer (PLAT-49 part B), the editor's
@@ -49,7 +52,10 @@ const
   Desktop = "src/tests/visual/answers/plat47-desktop-parity.electron.json"
   Desktop50 = "src/tests/visual/answers/plat50-desktop.electron.json"
     ## The desktop's tab strip colours (PLAT-50's capture).
-  ExpectedAssertions = 133
+  ExpectedAssertions = 140
+    ## 139 -> 140 (2026-10-30): deliverable 5's press is judged region by
+    ## region — the regions account for every changed pixel, and none is
+    ## other than the caret or a scrollbar band — two readings for one.
     ## 104 -> 125 (the Electron-parity redesign, 2026-10-17, re-captured and
     ## measured): three more frames settled (counted per frame); the outline
     ## absent before the first press and drawn on the editor's own box; the
@@ -67,6 +73,8 @@ const
     ## the ground (one end check became six).
     ## 130 -> 133: validate capture platform, font and expected pitch before
     ## comparing the band against that capture rather than the test host.
+    ## 133 -> 139: B2 reads each tab's label-row ground — the selected tab's
+    ## own, an inactive tab's chip, and the two apart — for both tabs.
   GhostBoxPx = 160 * 32
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
@@ -90,10 +98,10 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
     ck n == 22
 
   test "B2: the focused pane is closed in a 1px border of the focus colour":
-    # The desktop's outline is #565656; PLAT-51 made the native focus colour
+    # The desktop's outline is #6366f1; PLAT-51 made the native focus colour
     # subtler (ui/border/secondary, `crFocusOutline`), which the recorder
     # searches the frame for.
-    ck desk["focus"]["outline"].getStr == "#565656"
+    ck desk["focus"]["outline"].getStr == "#6366f1"
     ck chromeOf(crFocusOutline) == "#3a3a3a"
     let ring = rec["focusRing"]
     # Since 2026-10-17 the outline is an OVERLAY shown after the first press,
@@ -141,6 +149,16 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
       ck a["bridge"].getStr == t["bodyGround"].getStr
       ck a["bridge"].getStr == strip["paneGround"].getStr
       ck i["bridge"].getStr == strip["groundBehindTabs"].getStr
+      # The selected tab's label row on a ground of its own — the user's
+      # direction over the desktop's single panel colour (PLAT-49 finding 4),
+      # read from the design system, as the window's plan (`chrome.tabStyle`)
+      # and the terminal's `srTabActive` say — and an inactive tab on the
+      # desktop's chip. Until 2026-10-28 the window painted both on the chip,
+      # so the selected tab differed only in its ink.
+      ck a["labelGround"].getStr ==
+         DesignTokenHex[dtColorsUiSurfacePrimaryTertiary][dmDark]
+      ck i["labelGround"].getStr == strip["inactiveTab"].getStr
+      ck a["labelGround"].getStr != i["labelGround"].getStr
 
   test "B1: the editor's ground and every token class are the desktop's colours":
     let px = rec["editor"]["pixelsByDesktopColour"]
@@ -258,20 +276,39 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
     # A press that is not on a divider resizes nothing.
     ck r["pressBodyRingLeft"].getInt == r["doneRingLeft"].getInt
     # (PLAT-51: the press places the read-only editor's CARET — a bar one
-    # cell wide at most — and, the pointer now over the editor, Monaco shows
-    # its horizontal scrollbar in the band along the editor's bottom
-    # (`EditorHScrollBandPx`); nothing else changes.)
-    let box = if r["pressBodyChanged"].getInt == 0: @[0, 0, 0, 0]
-              else: arr(r["pressBodyChangedBox"])
-    let editorBottom = arr(rec["focusRing"]["bbox"])[1] +
-                       arr(rec["focusRing"]["bbox"])[3]
-    let caretOnly =
-      r["pressBodyChanged"].getInt == 0 or
-      (box[2] <= 12 and box[3] <= rec["captureContext"]["editorRowPx"].getInt + 2) or
-      (box[0] >= r["doneRingLeft"].getInt and
-       box[1] >= editorBottom - 1 - EditorHScrollBandPx and
-       box[1] + box[3] <= editorBottom and box[3] <= EditorHScrollBandPx)
-    ck caretOnly
+    # cell wide at most — and, the pointer now over the editor, its
+    # scrollbars are revealed as Monaco reveals them on hover: the horizontal
+    # one in the band along the editor's bottom (`EditorHScrollBandPx`) and,
+    # since the scrollbars fade with pointer activity (2026-10-29), the
+    # vertical thumb in the band along its right edge (`EditorVScrollbarPx`).
+    # Nothing else changes. EACH CHANGED REGION IS JUDGED ON ITS OWN: one
+    # bounding box over the thumb and the band was the editor's whole body,
+    # which reads as "everything changed" and says nothing about either.)
+    let ring = arr(rec["focusRing"]["bbox"])
+    let editorBottom = ring[1] + ring[3]
+    let editorRight = ring[0] + ring[2]
+    let rowPx = rec["captureContext"]["editorRowPx"].getInt
+    var unexplained: seq[string] = @[]
+    var regionPixels = 0
+    for region in r["pressBodyChangedRegions"]:
+      let box = arr(region["box"])
+      regionPixels += region["pixels"].getInt
+      let caret = box[2] <= 12 and box[3] <= rowPx + 2
+      let hBand = box[0] >= r["doneRingLeft"].getInt and
+                  box[1] >= editorBottom - 1 - EditorHScrollBandPx and
+                  box[1] + box[3] <= editorBottom and
+                  box[3] <= EditorHScrollBandPx
+      let vBand = box[0] >= editorRight - 1 - EditorVScrollbarPx and
+                  box[0] + box[2] <= editorRight and
+                  box[2] <= EditorVScrollbarPx and
+                  box[1] >= ring[1] and box[1] + box[3] <= editorBottom
+      if not (caret or hBand or vBand):
+        unexplained.add $box
+    checkpoint("press-body regions not a caret or a scrollbar band: " &
+               $unexplained)
+    # Every changed pixel is in some region — the regions are the change.
+    ck regionPixels == r["pressBodyChanged"].getInt
+    ck unexplained.len == 0
     # The layout document the window wrote carries the new weight: the Files
     # column's share grew by 80 px of the row's extent (the shared default
     # gives it 20).
@@ -428,7 +465,10 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
     ck savedEdge == "bottom"
     # The label is drawn, its ink on its chip.
     ck d["stripInk"].getInt > 50
-    ck d["slotText"].getStr.splitWhitespace().join("").contains("tate")
+    # The pane's label is the desktop's tab title, "Variables" (until the
+    # frames were re-recorded on 2026-10-28 they still read the retired
+    # "State").
+    ck d["slotText"].getStr.splitWhitespace().join("").contains("Variables")
     # The pointer resting on the label (PLAT-49 part B, the desktop's
     # preview; a click docks it open) draws the pane over the tree, against
     # the bottom edge: the pixels that changed are the revealed region and
@@ -457,7 +497,9 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
     # pixel count that assumed two grounds.
     ck d["revealChangedPixels"].getInt > 0
     ck bb[2] >= rr[2] * 3 div 4 and bb[3] >= rr[3] div 2
-    ck "Locals" in d["revealText"].getStr
+    # The pane's own text: the one-list Variables pane's watch field (it
+    # has no Locals / Globals / Watches tabs any more).
+    ck "Enter a watch expression" in d["revealText"].getStr
     # Esc: every pixel back — the reveal never touched the arrangement.
     ck d["dismissChangedPixels"].getInt == 0
 

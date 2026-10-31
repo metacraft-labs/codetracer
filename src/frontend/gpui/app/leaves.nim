@@ -118,6 +118,7 @@ import isonim/core/[signals, computation]
 import ../../tui/app/syntax/lexical
 import ../../tui/app/theme/editor_theme
 import ../../styles/generated/design_tokens
+import codetracer_ui_components
 import ../devicon_marks
 from std/hashes import hash
 
@@ -216,6 +217,13 @@ const
     ## The editor's default foreground (PLAT-51: the omnibox's text in every
     ## state — Commands-And-Omnibox.md, "Omnibox colours on every front-end").
   EditorSelectionColour* = DesignTokenHex[dtEditorThemeSelection][dmDark]
+  FindMatchColour* = DesignTokenHex[dtColorsUiSurfaceAlertWarning][dmDark]
+    ## PLAT-70 Part C: every find match — the terminal's
+    ## `srSurfaceFindMatch` token (`theme/roles.nim` records why: the design
+    ## system has no find-match token).
+  FindMatchCurrentColour* =
+    DesignTokenHex[dtColorsUiSurfaceAlertInformation][dmDark]
+    ## The current match — the terminal's `srSurfaceFindMatchCurrent`.
     ## The editor's selection ground (the omnibox's selected result).
   EditorActiveLineNumberColour* =
     DesignTokenHex[dtEditorThemeActiveLineNumber][dmDark]
@@ -307,6 +315,13 @@ const
   EditorCaretAttribute* = "data-ct-caret"
     ## PLAT-51: on the read-only editor's caret, `<line>:<column>`.
   EditorSelectionAttribute* = "data-ct-selection"
+  FindMatchAttribute* = "data-ct-find-match"
+    ## PLAT-70 Part C: a find highlight's band, `line:from-to` (1-based cell
+    ## columns, `find_vm.FindMark`'s).
+  FindCurrentAttribute* = "data-ct-find-current"
+    ## On the current match's band.
+  FindWidgetAttribute* = "data-ct-find-widget"
+    ## The in-document find widget (its field, count and toggles).
     ## PLAT-68: on a selected span of an editor row,
     ## `<line>:<fromColumn>-<toColumn>` (1-based display columns, `to`
     ## exclusive).
@@ -591,7 +606,9 @@ const GutterGap* = "\u00A0\u00A0\u00A0\u00A0"
   ##   * `plat42-surface` — ABORTS: baseline
   ##     `test_gpui_editing_surface.nim` is RED on
   ##     `countedAssertions == ExpectedAssertions` (it needs `/proc/self/statm`,
-  ##     which macOS has not).
+  ##     which macOS has not). 2026-10-28: no longer true — the suite reads RSS
+  ##     through `tests/process_meter.nim` on macOS too and is 13/13 green
+  ##     there, so this harness's re-grade is now runnable; it is still owed.
   ##   * `plat47-parity`, `plat49-chrome` — *"REFUSING TO RUN:
   ##     `REPLAY_SERVER_BIN` is not exported"*. Their needle scans pass
   ##     (`0 problems`); only the environment is missing.
@@ -1088,22 +1105,9 @@ func editorNumberWidth*(rows: openArray[EditorRow]): int =
 
 const
   EditorGutterPx* = 110
-    ## The editor's left margin, the desktop's Monaco `line-numbers` box
-    ## (measured 2026-10-17): the execution mark's lane (13 px), the line
-    ## number right-aligned in 40, a 2 px gap, the diff lane (5), 2, the
-    ## breakpoint lane (9), 2, the trace lane (10), and the fold chevron's
-    ## lane to the end. The code starts here.
-  GutterPointerPx* = 13
-  GutterNumberPx* = 38
-    ## Monaco's 40 less the 2 px its digits end short of the box: the last
-    ## digit's ink ends 49 px into the margin (measured 2026-10-17), where
-    ## this lane's right-aligned text ends with no bearing.
-  GutterBreakpointX* = 62
-    ## The breakpoint lane's left, from the margin's.
+    ## The code column starts after this margin. Lane order, ownership and
+    ## widths inside it come from editor_gutter_lanes at CodeFontPx.
   GutterBreakpointPx* = 9
-  GutterFoldX* = 84
-    ## The fold chevron's box's left (`codicon-folding-expanded`, its ink
-    ## 2.6 px into the 14 px box).
   StickyFoldX* = 56
     ## A sticky header's chevron's left: Monaco's sticky widget draws the
     ## fold icon right after its line-number box, its ink 60–67 px into the
@@ -1182,7 +1186,7 @@ func editorHScrollOf*(rows: openArray[EditorRow]; numberWidth: int;
   result.thumbLeftPx = span.start
   result.view = view
 
-const EditorTopPadPx = 4
+const EditorTopPadPx* = 4
   ## The editor's top inset at rest (`window_geometry.EditorPadTopPx`).
   ## Declared here (M73) because the vertical scrubber's track starts at it.
 
@@ -1462,13 +1466,24 @@ func indentGuides*(rows: openArray[EditorRow]): seq[int] =
         if own[j] >= 0: below = own[j]; break
       result[i] = min(above, below)
 
+const
+  EditorDiagnosticAttribute* = "data-ct-diagnostic"
+    ## Build-Output-Pane.md §3.9: on a squiggle (`<severity> <line>:<from>-<to>`,
+    ## 1-based columns, `to` exclusive) and on a gutter's diagnostic icon
+    ## (`<severity>@<line>`).
+  DiagnosticSquigglePx* = 2
+    ## The squiggle's thickness at the row's foot.
+
 proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
                      numberWidth = 1; skipCols = 0;
                      caretColumn = 0;
                      selected: openArray[tuple[fromColumn, toColumn: int]] = [];
+                     findMarks: openArray[tuple[fromColumn, toColumn: int;
+                                                current: bool]] = [];
                      foldable = false; bracketDepth = 0;
                      guides = 0; stickyHeader = false;
-                     markersView = HorizontalView()):
+                     markersView = HorizontalView();
+                     diagnostics: openArray[EditorDiagnostic] = []):
                      GpuiElement =
   ## One row of the source editor. `stickyHeader`: drawn as Monaco's sticky
   ## widget draws a scope's first line — no number, a dim chevron after the
@@ -1517,26 +1532,9 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
   r.setAttribute(gutter, TextRoleAttribute, $trGutterLineNumber)
   r.setAttribute(gutter, TextMetricAttribute, gpuiMetricFor(trGutterLineNumber))
   r.setAttribute(gutter, TokenAttribute, gpuiTokenFor(trGutterLineNumber, row))
-  # THE MARKER LANES ARE LEFT OF THE NUMBER, each one reserved cell at a fixed
-  # index, and the geometry — with the measurements it was changed from — is
-  # `gutterRuns`'. The pointer sat AFTER the number until 2026-09-23, where it
-  # OCR'd as a letter glued to the digits (`44p`) and PLAT-39's gutter grammar
-  # — marker glyphs, then digits — rejected every execution row it had located
-  # by its band.
-  #
-  # THREE RUNS AND NOT ONE TEXT NODE, which is `PLAT35-F13`: the MARK has to be
-  # painted its own colour and a character inside the gutter span can only take
-  # the gutter's. Same pattern as the code column's classified `piece` spans
-  # below — a child span per run, its own `color`, `flex-shrink: 0`, inside a
-  # flex parent — so the face still comes from the ONE metric-bearing node
-  # (children inherit it, which is how the code runs are monospaced) and every
-  # role / metric / token census is unmoved.
-  # 2026-10-17: THE DESKTOP'S MARGIN, lane by lane at its measured offsets
-  # (`EditorGutterPx`): the execution mark at the left edge, the number
-  # right-aligned in its 40 px in the gutter face (14 px, light), the
-  # breakpoint lane right of the number, the trace lane beside it, and the
-  # fold chevron before the code. The three runs keep their attributes
-  # (`GutterLaneAttribute`), so a reader of the plan reads the same lanes.
+  # Reserve the shared map's bands on every row, even when no concern paints
+  # in them. The three textual runs retain their reader-facing format, but
+  # pixel geometry belongs to editor_gutter_lanes, as it does on the desktop.
   r.setStyle(gutter, "display", "flex")
   r.setStyle(gutter, "flex-shrink", "0")
   r.setStyle(gutter, "width", $EditorGutterPx & "px")
@@ -1549,21 +1547,19 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
              if row.pointer == eptExecution: EditorActiveLineNumberColour
              else: EditorLineNumberColour)
   let runs3 = gutterRuns(row, numberWidth)
-  # The desktop's order: the mark's lane is right of the number.
-  for run in [runs3[0], runs3[2], runs3[1]]:
+  for band in resolveBands(CodeFontPx, EditorGutterPx):
     let lane = r.createElement("div")
-    r.setAttribute(lane, GutterLaneAttribute, $run.kind)
-    r.setStyle(lane, "color", run.colour)
+    r.setAttribute(lane, "data-ct-gutter-band", $band.band)
     r.setStyle(lane, "flex-shrink", "0")
     r.setStyle(lane, "display", "flex")
     r.setStyle(lane, "items", "center")
+    r.setStyle(lane, "width", $(band.rightPx - band.leftPx) & "px")
     r.setStyle(lane, "height", $EditorLinePx & "px")
-    case run.kind
-    of grkPointer:
-      r.setStyle(lane, "width", $GutterPointerPx & "px")
+    case band.band
+    of gbPointer:
+      r.setAttribute(lane, GutterLaneAttribute, $grkPointer)
+      r.setStyle(lane, "color", runs3[0].colour)
       if row.pointer == eptExecution:
-        # PLAT-51: THE DESKTOP'S MARK, drawn — not a glyph that approximates
-        # it (`.gutter-highlight-active:before`, at the margin's left edge).
         r.setAttribute(lane, PointerMarkAttribute, "highlight_line_arrow.svg")
         let mark = r.createElement("img")
         r.setAttribute(mark, "src", executionMarkPath())
@@ -1571,34 +1567,68 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
         r.setStyle(mark, "height", $ExecutionMarkPx.h & "px")
         r.setStyle(mark, "flex-shrink", "0")
         r.appendChild(lane, mark)
+      elif gutterSeverity(diagnostics, row.line) != blsNone:
+        # §3.9: THE BUILD'S MOST SEVERE DIAGNOSTIC on the line, its icon in
+        # the pointer band, in its severity's colour — over the caret's
+        # inspection mark (an editor being built has no execution, and the
+        # caret is drawn in the text); the execution pointer still wins.
+        let sev = gutterSeverity(diagnostics, row.line)
+        r.setAttribute(lane, EditorDiagnosticAttribute,
+                       severityWord(sev) & "@" & $row.line)
+        r.setStyle(lane, "color", colourOf(sev))
+        r.appendChild(lane, r.createTextNode(gutterIcon(diagnostics, row.line)))
       elif row.pointer != eptNone:
-        r.appendChild(lane, r.createTextNode(run.text))
-    of grkNumber:
-      r.setStyle(lane, "width", $GutterNumberPx & "px")
+        r.appendChild(lane, r.createTextNode(runs3[0].text))
+    of gbLineNumber:
+      r.setAttribute(lane, GutterLaneAttribute, $grkNumber)
+      r.setStyle(lane, "color", runs3[2].colour)
       r.setStyle(lane, "justify", "end")
       if not stickyHeader:
         r.appendChild(lane, r.createTextNode($row.line))
-    of grkMark:
-      # Right of the number: the breakpoint lane, or the trace lane beside
-      # it — a disc in the mark's colour (`.gutter-breakpoint-enabled`,
-      # 1.1ch; `.gutter-trace`, 1.2ch).
-      let lead = GutterBreakpointX - GutterPointerPx - GutterNumberPx +
-                 (if row.mark == emTracepoint: 11 else: 0)
-      # Held to the fold lane's left, so the chevron after it is at
-      # `GutterFoldX` whatever the lane holds.
-      r.setStyle(lane, "width",
-                 $(GutterFoldX - GutterPointerPx - GutterNumberPx - lead) & "px")
-      r.setStyle(lane, "padding-left", $lead & "px")
+    of gbMarker:
+      r.setAttribute(lane, GutterLaneAttribute, $grkMark)
+      r.setStyle(lane, "color", runs3[1].colour)
+      r.setStyle(lane, "position", "relative")
       if row.mark != emNone:
+        # The breakpoint and tracepoint share the map's marker band. Their
+        # glyph sizes and separation stay local to that band; neither changes
+        # the flow width or the following folding control's position.
         let side = if row.mark == emTracepoint: 10 else: GutterBreakpointPx
         let disc = r.createElement("div")
-        r.setAttribute(disc, "data-ct-mark-glyph", run.text)
+        r.setAttribute(disc, "data-ct-mark-glyph", runs3[1].text)
+        r.setStyle(disc, "position", "absolute")
+        r.setStyle(disc, "left", (if row.mark == emTracepoint: "11px" else: "0px"))
+        r.setStyle(disc, "top", formatFloat(float(EditorLinePx - side) / 2,
+                                            ffDecimal, 1) & "px")
         r.setStyle(disc, "width", $side & "px")
         r.setStyle(disc, "height", $side & "px")
         r.setStyle(disc, "rounded", $(side div 2 + 1) & "px")
-        r.setStyle(disc, "background-color", run.colour)
+        r.setStyle(disc, "background-color", runs3[1].colour)
         r.setStyle(disc, "flex-shrink", "0")
         r.appendChild(lane, disc)
+    of gbFolding:
+      if foldable and not stickyHeader:
+        # Anchor the ordinary chevron to its owner band, never a parallel
+        # gutter-relative x. Keep the icon within the band's reserved width.
+        r.setStyle(lane, "position", "relative")
+        let side = min(14, band.rightPx - band.leftPx)
+        let holder = r.createElement("div")
+        r.setStyle(holder, "position", "absolute")
+        r.setStyle(holder, "left", "0px")
+        # Preserve the previous 14 px icon's vertical center as it is fitted.
+        r.setStyle(holder, "top", formatFloat(3.0 + float(14 - side) / 2,
+                                              ffDecimal, 1) & "px")
+        r.setStyle(holder, "width", $side & "px")
+        r.setStyle(holder, "height", $side & "px")
+        let chevron = r.createElement("img")
+        r.setAttribute(chevron, "data-ct-fold", "expanded")
+        r.setAttribute(chevron, "src", foldChevronPath())
+        r.setStyle(chevron, "width", $side & "px")
+        r.setStyle(chevron, "height", $side & "px")
+        r.appendChild(holder, chevron)
+        r.appendChild(lane, holder)
+    of gbVcs, gbVcsSplit, gbMarkerGap:
+      discard # Reserved even when this row has no indicator to paint.
     r.appendChild(gutter, lane)
   if stickyHeader:
     r.setStyle(gutter, "position", "relative")
@@ -1612,26 +1642,6 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
     let chevron = r.createElement("img")
     r.setAttribute(chevron, "data-ct-fold", "sticky")
     r.setAttribute(chevron, "src", stickyChevronPath())
-    r.setStyle(chevron, "width", "14px")
-    r.setStyle(chevron, "height", "14px")
-    r.appendChild(holder, chevron)
-    r.appendChild(gutter, holder)
-  elif foldable:
-    # Monaco's fold chevron (`.codicon-folding-expanded`), always shown on a
-    # line that opens an indented block (`alwaysShowFoldIcons`): 14 px,
-    # placed so its ink is 86–94 px into the margin and 8–12 px down the row
-    # as the desktop's glyph is (measured 2026-10-17) — absolutely, as the
-    # lanes' flow does not put it there.
-    r.setStyle(gutter, "position", "relative")
-    let holder = r.createElement("div")
-    r.setStyle(holder, "position", "absolute")
-    r.setStyle(holder, "left", $GutterFoldX & "px")
-    r.setStyle(holder, "top", "3px")
-    r.setStyle(holder, "width", "14px")
-    r.setStyle(holder, "height", "14px")
-    let chevron = r.createElement("img")
-    r.setAttribute(chevron, "data-ct-fold", "expanded")
-    r.setAttribute(chevron, "src", foldChevronPath())
     r.setStyle(chevron, "width", "14px")
     r.setStyle(chevron, "height", "14px")
     r.appendChild(holder, chevron)
@@ -1667,6 +1677,50 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
     r.setStyle(band, "height", "100%")
     r.setStyle(band, "background", EditorSelectionColour)
     r.appendChild(column, band)
+  for m in findMarks:
+    # PLAT-70 Part C: THE FIND HIGHLIGHTS (Find-And-Incremental-Search.md
+    # §3.3 step 4), Monaco's `editor.findMatchHighlightBackground` for every
+    # match and `editor.findMatchBackground` for the current one — over the
+    # selection (the current match is the selection), under the caret.
+    let fromCol = max(m.fromColumn, skipCols + 1)
+    if m.toColumn <= fromCol: continue
+    r.setStyle(column, "position", "relative")
+    let band = r.createElement("div")
+    r.setAttribute(band, FindMatchAttribute,
+                   $row.line & ":" & $m.fromColumn & "-" & $m.toColumn)
+    if m.current: r.setAttribute(band, FindCurrentAttribute, "true")
+    r.setStyle(band, "position", "absolute")
+    r.setStyle(band, "left", formatFloat(float(fromCol - 1 - skipCols) *
+                                         EditorColumnPx, ffDecimal, 1) & "px")
+    r.setStyle(band, "top", "0px")
+    r.setStyle(band, "width", formatFloat(float(m.toColumn - fromCol) *
+                                          EditorColumnPx, ffDecimal, 1) & "px")
+    r.setStyle(band, "height", "100%")
+    r.setStyle(band, "background", (if m.current: FindMatchCurrentColour
+                                    else: FindMatchColour))
+    r.appendChild(column, band)
+  for want in [blsInfo, blsWarning, blsError]:
+    for d in diagnostics:
+      # §3.9: A SQUIGGLE under each diagnostic's span — a line in its
+      # severity's colour along the row's foot (the most severe drawn last,
+      # over the others on the same characters).
+      if d.line != row.line or d.severity != want: continue
+      let fromCol = max(d.fromColumn + 1, skipCols + 1)
+      if d.toColumn + 1 <= fromCol: continue
+      r.setStyle(column, "position", "relative")
+      let band = r.createElement("div")
+      r.setAttribute(band, EditorDiagnosticAttribute,
+                     severityWord(d.severity) & " " & $row.line & ":" &
+                     $(d.fromColumn + 1) & "-" & $(d.toColumn + 1))
+      r.setStyle(band, "position", "absolute")
+      r.setStyle(band, "left", formatFloat(float(fromCol - 1 - skipCols) *
+                                           EditorColumnPx, ffDecimal, 1) & "px")
+      r.setStyle(band, "top", $(EditorLinePx - DiagnosticSquigglePx) & "px")
+      r.setStyle(band, "width", formatFloat(float(d.toColumn + 1 - fromCol) *
+                                            EditorColumnPx, ffDecimal, 1) & "px")
+      r.setStyle(band, "height", $DiagnosticSquigglePx & "px")
+      r.setStyle(band, "background", colourOf(d.severity))
+      r.appendChild(column, band)
   if caretColumn > 0 and caretColumn > skipCols:
     # PLAT-51: THE CARET of the read-only debugging editor — a thin bar
     # before its column, in the editor's foreground (Monaco's cursor),
@@ -2152,6 +2206,7 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
                    surface.sourceStatement)
   if surface.notice.len > 0:
     let note = r.createElement("div")
+    r.setAttribute(note, "data-ct-editor-notice", surface.notice)
     r.appendChild(note, r.createTextNode(surface.notice))
     r.appendChild(parent, note)
   if surface.degradedMessage.len > 0:
@@ -2202,16 +2257,20 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
     var selected: seq[tuple[fromColumn, toColumn: int]] = @[]
     for cell in surface.selection:
       if cell.line == row.line: selected.add (cell.fromColumn, cell.toColumn)
+    var found: seq[tuple[fromColumn, toColumn: int; current: bool]] = @[]
+    for m in surface.findMarks:
+      if m.line == row.line: found.add (m.fromColumn, m.toColumn, m.current)
     r.appendChild(parent, renderEditorRow(r, row, runs[i], widest,
                                           scroll.leftCols,
                                           (if row.line == surface.caretLine:
                                              surface.caretColumn else: 0),
-                                          selected, folds[i], depths[i],
+                                          selected, found, folds[i], depths[i],
                                           guideCounts[i],
                                           markersView =
                                             (if overflowMarkers and
                                                 scroll.present: scroll.view
-                                             else: HorizontalView())))
+                                             else: HorizontalView()),
+                                          diagnostics = surface.diagnostics))
   if scroll.present:
     r.appendChild(parent, renderEditorScrollbar(r, scroll, caretMark))
   if editorPaneHeightPx > 0 and viewportPx > 0:
@@ -2343,67 +2402,26 @@ const
     ## font size — the `min-height` is dead weight, not a rival that takes
     ## over once the text grows.
 
-  CallRowAdvanceEmRatio* = 1.580037
-    ## The desktop's row ADVANCE — one row's top to the next — as a multiple
-    ## of the root font size. **This, and not the row box above, is what
-    ## positions rows**, and the two differ: the box is 1.5625em (25 px) and
-    ## the advance is ~1.58em (~25.28 px), so a layout built on the box falls
-    ## behind by ~0.28 px every row.
+  CallRowPitch* = CallRowToggleEmRatio * float(CodeFontPx)
+    ## The desktop's row pitch — one row's top to the next — at the root font
+    ## size the desktop sets on `documentElement` (`ui_js.nim`'s
+    ## `style.fontSize = "{data.ui.fontSize}px"`, and `data.ui.fontSize` is
+    ## `CodeFontPx`): 1.5625 x 16 = 25 px.
     ##
-    ## The desktop does not hardcode it — `isonim_calltrace_view`'s
-    ## `measureCallRowPitch` reads it off the live layout for exactly this
-    ## reason, and says so. GPUI has no layout to measure before it draws, so
-    ## it needs the constant, and this is it.
-    ##
-    ## MEASURED, 2026-10-23, on the `PLAT50-FUSE` parity capture
-    ## (`flip-after/calltrace.{electron,gpui}.rgba`, 2880x1800, CROP_PX 56) at
-    ## codetracer `356ac4b793`: the ink-per-row profile's autocorrelation,
-    ## refined parabolically at k = 4, 6, 8, 10 and 12 periods so the period
-    ## is recovered at k times the single-period precision. Electron
-    ## **50.5612 device px = 25.28059 logical = 1.580037em**.
-    ##
-    ## **Its positive control is in the same measurement.** Run unchanged on
-    ## the GPUI arm — whose pitch is known, because this file sets it — it
-    ## returns 1.562765 against the 1.5625 actually drawn, an error of
-    ## 0.0003. An estimator that recovers a known value to 0.02% is reporting
-    ## the other arm's value, not its own bias.
-    ##
-    ## **Why this is a rule and not a fit.** The earlier `25.78` was a fitted
-    ## average ("722 px over 28 rows") and was rightly removed; the objection
-    ## recorded against re-absorbing the remainder was that a fitted pitch
-    ## re-drifts at a different font size. It cannot, here: every length in
-    ## the chain that produces the advance is `em`-relative — the toggle's
-    ## 1.5625em, the row's 1.55em `min-height` and `line-height`, its
-    ## 0.3125em `padding-left`, and SpaceMono's own 1.481em `normal` line
-    ## box — and the only two `px` literals in `calltrace.styl` (`2px`,
-    ## `13px`) belong to other components. A ratio of em-relative lengths is
-    ## scale-invariant, so this one holds at every font size by construction.
-    ##
-    ## **Where the extra ~0.018em comes from**, as far as it is established:
-    ## `.calltrace-row` is `display: inline-flex`, i.e. an ATOMIC INLINE, and
-    ## it sits on a line box in the block `.calltrace-call-line`, which sets
-    ## no `line-height` — so that block's strut is `normal`, which for
-    ## SpaceMono (unitsPerEm 1000, ascent 1120, descent 361, lineGap 0, and
-    ## `USE_TYPO_METRICS`) is 1.481em with 0.361em below the baseline. A line
-    ## box can only exceed the 25 px atomic inline on it if the strut reaches
-    ## further below the baseline than the inline does, and the strut's
-    ## 0.361em is the only candidate in the chain. That identifies the
-    ## mechanism and predicts the scale-invariance above; it is NOT a closed
-    ## derivation of 1.580037, and should not be quoted as one.
-
-  CallRowPitch* = CallRowAdvanceEmRatio * float(CodeFontPx)
-    ## The desktop's row pitch at the root font size the desktop sets on
-    ## `documentElement` (`ui_js.nim`'s `style.fontSize = "{data.ui.fontSize}px"`,
-    ## and `data.ui.fontSize` is `CodeFontPx`): 1.580037 x 16 = 25.2806 px.
-    ##
-    ## It was `CallRowToggleEmRatio * CodeFontPx` (25 px, the BOX) until
-    ## 2026-10-23, and that is what made `pane:calltrace` the largest
-    ## residual in ALL SIX parity views (share of frame error 0.35 to 0.61,
-    ## fracOver0_10 0.29): rows started level and had drifted 5 device px by
-    ## the foot of the pane. Positions accumulate in float and round once
-    ## (`callRowTopPx`), so a fractional pitch tiles rows 25/25/26/25... the
-    ## way the desktop's own fractional advance does, rather than rounding
-    ## the error in at every row.
+    ## **THE ADVANCE IS THE ROW BOX**, because nothing in a row may lay out
+    ## taller than the toggle that sets it. The one part that did — `.return`,
+    ## whose arrow (SpaceGrotesk) and value (SpaceMono) shared one
+    ## baseline-aligned line box that two faces' metrics made ~0.05em taller
+    ## than the toggle — now holds one full-height face: `calltrace.styl` sets
+    ## `.return`'s strut in SpaceMono and the arrow at `line-height: 1`
+    ## (codetracer-pm issue
+    ## 2026-10-18-electron-calltrace-row-advance-exceeds-its-own-row-box).
+    ## `ci/test/calltrace-row-box-in-browser.sh` holds every row of the
+    ## desktop at exactly 1.5625em at 12, 13, 16 and 20 px roots, so this is
+    ## derived from the stylesheet with no fitted residual. Positions still
+    ## accumulate in float and round once (`callRowTopPx`), so a pitch that
+    ## is not a whole number of pixels at another root size tiles the way the
+    ## desktop's does.
 
   CallRowPx* = int(round(CallRowPitch))
     ## A row's height, as an integer, so a press is mapped to the row it is on
@@ -2574,7 +2592,9 @@ proc callIconPath(name: string): string =
   path
 
 func callRowTopPx*(i: int): int =
-  ## Row `i`'s top below the first row's, at the desktop's fractional pitch.
+  ## Row `i`'s top below the first row's, at the desktop's pitch — which is
+  ## its row box (`CallRowPitch`). Multiplied in float and rounded once, so a
+  ## pitch that is not a whole number of pixels never accumulates rounding.
   int(round(float(i) * CallRowPitch))
 
 func callRowAtPx*(dy: int): int =

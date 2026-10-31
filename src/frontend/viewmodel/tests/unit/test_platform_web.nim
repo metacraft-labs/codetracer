@@ -914,7 +914,14 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
     # is the one that ships. `staticRead` is the idiom the other source scans
     # in this directory use (`test_edit_mode_toolbar_languages.nim`), and the
     # file is a compile-time dependency of this suite either way.
-    const renderer = staticRead("../../../renderer.nim")
+    const RendererSource = staticRead("../../../renderer.nim")
+    # BOUND TO A `let` ONCE, and the loop below walks the `let`. `splitLines`
+    # is an inline iterator: over the `const` itself, the JS backend rebuilds
+    # the whole 104 KB literal at every character access, and this case took
+    # eighteen minutes under `vm-unit-js` (codetracer-pm issue
+    # 2026-10-26-test-platform-web-takes-eighteen-minutes-under-vm-unit-js;
+    # `ci/test/js-const-iteration-test.sh` refuses the pattern).
+    let renderer = RendererSource
     # The swap goes through the checked path, not a bare assignment.
     check renderer.contains("swapThemeHrefImpl(cast[js](link)")
     # BOTH failure modes are asked about: a MIME-rejected sheet fires `error`,

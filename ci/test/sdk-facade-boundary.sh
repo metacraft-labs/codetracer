@@ -324,6 +324,15 @@ UI_PATH_ALLOWLIST=(
 	# `ui/flow.nim` to be testable on the C backend, which its own docstring
 	# says. `viewmodels/flow_vm.nim` imports it.
 	"src/frontend/ui/flow_loop_math.nim"
+	# One import (`std/strutils`), and nothing in it but text matching: the
+	# compiler-diagnostic location scanner (`parseBuildLocation`,
+	# `BuildLocationScanner`) — path, line, column, severity and sentence out
+	# of a line of build output. No class name, no style, no component. It is
+	# under `ui/` because the desktop's Build component was its first caller;
+	# since PLAT-56 the build ViewModel's reader (`viewmodels/
+	# build_output_model`, through `build_diagnostics`) reads every front-end's
+	# build with it, which is what puts it in the facade's graph.
+	"src/frontend/ui/build_location_parser.nim"
 )
 
 # Modules the SDK's graph must not contain, as POSIX ERE over the module spec

@@ -127,6 +127,9 @@ const
     ## The ▶ as the extended tier draws it — the ViewModel's
     ## `RunButtonLabel`. The painter draws the terminal's own
     ## (`grRunControl`: `►` on the basic tier, `>` on ASCII).
+  TestsRedirectBehaviour* = "redirect"
+    ## `PaneClickRequest.behaviour` of a `⏵` pressed with Ctrl: the
+    ## destination inverted for that press (Test-Results-Pane.md §9.3).
   TestsHeadlineStyle = CellStyle(role: srChromeMuted)
   TestsRunStyle = CellStyle(role: srChromeText, bold: true)
   TestsDisabledStyle = CellStyle(role: srChromeMuted, dim: true)

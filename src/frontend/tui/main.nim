@@ -94,6 +94,13 @@ import ./host/tui_session
 import ./host/vcs_source
 import ./host/test_results_source   # PLAT-53
 import ./host/problems_source       # PLAT-55
+import ./host/edit_search           # Find in Files over the project in Edit mode
+from ../viewmodel/viewmodels/test_results_vm import TraceOpenPolicy,
+  TestTabPlacement, TestTabPlacementKind, placeTestRecording, testTabOf,
+  noteTestTab, forgetTestTab   # Test-Results-Pane.md §9
+import ./host/build_output_source   # PLAT-56
+from ../viewmodel/host/native_requests_host import wireRequests   # PLAT-58
+import ./app/views/requests_pane   # PLAT-58: `RequestsAct`
 # PLAT-49 part B: the session strip's sessions — opened, adopted, closed here.
 import headless_app/headless_app
 import headless_app/session_tabs
@@ -152,6 +159,10 @@ proc idleWaitMs(rt: TuiRuntime): int =
   let bars = rt.scrollbarDueMs()
   if bars >= 0 and (due < 0 or bars < due):
     due = bars
+  # PLAT-68 (§3.7): a pending chord prefix ends at its base's timeout.
+  let prefix = rt.pendingPrefixDueMs()
+  if prefix >= 0 and (due < 0 or prefix + 1 < due):
+    due = prefix + 1
   if due < 0:
     return IdlePollMs
   clamp(int(due - nowMs()), 1, IdlePollMs)
@@ -244,6 +255,20 @@ proc wireEditServices(rt: TuiRuntime; root: string; keymapFlag: string;
     rt.app.build = state.running.session
     if state.running.session.verdict == bvRunning:
       BuildStartResult(ok: true, message: $kind & " started: " & cmd)
+    else:
+      BuildStartResult(ok: false, message: describeVerdict(state.running.session))
+  # Build-Output-Pane.md §3.6: a build TASK — its command in its own working
+  # directory, named, read by its problem matcher.
+  rt.editServices.projectDir = proc(): string = rootOf()
+  rt.editServices.startTask = proc(cmd, dir, task,
+                                   matcher: string): BuildStartResult =
+    state.running = startBuild(bkBuild, cmd, (if dir.len > 0: dir
+                                              else: rootOf()), nowMonoMs())
+    state.running.session.taskName = task
+    state.running.session.problemMatcher = matcher
+    rt.app.build = state.running.session
+    if state.running.session.verdict == bvRunning:
+      BuildStartResult(ok: true, message: "")
     else:
       BuildStartResult(ok: false, message: describeVerdict(state.running.session))
   state
@@ -937,6 +962,11 @@ proc interactive(command: TuiCommand): int =
     session.setViewportHeight(rt.sourcePaneRows())
     session.learnExtent()
     session.wireFindInFiles()
+    # PLAT-58: a request whose execution is in another recording opens it in
+    # a new session tab (`recordingOpener`, set below).
+    wireRequests(session.session, proc(path: string): string =
+      if app.recordingOpener.isNil: "this terminal cannot open " & path
+      else: app.recordingOpener(path))
     session.refresh(rt)
   except DapStalledError as e:
     driver.stop()
@@ -1000,6 +1030,12 @@ proc interactive(command: TuiCommand): int =
   # that stands in for a tab *Stop* ended (`TuiApp.stoppedTabWelcome`); only
   # then does `recordingOpener` start the session in the stopped tab.
   var openingInStoppedTab = false
+  # Test-Results-Pane.md §9.5: set around the open a placement makes in
+  # place — the tab whose session the recording REPLACES (rule 4, or the
+  # current tab chosen by the setting or Ctrl): the new slot takes its place
+  # in the strip and the old session's engine is closed, as for a stopped
+  # tab. -1 for an ordinary open.
+  var replaceTab = -1
 
   app.recordingOpener = proc(path: string): string =
     # The handshake is BOUNDED, as the first one is; no keyboard hatch: the
@@ -1031,6 +1067,9 @@ proc interactive(command: TuiCommand): int =
       title = extractFilename(opened.session.tracePath.strip(chars = {'/'})),
       layout = rt.debugArrangementOf(), adopt = opened.session.sdk)
     opened.wireFindInFiles()
+    wireRequests(opened.session, proc(path: string): string =
+      if app.recordingOpener.isNil: "this terminal cannot open " & path
+      else: app.recordingOpener(path))
     sessions[int(slot.id)] = opened
     # M76: OPENED FROM A TAB WHOSE SESSION *STOP* ENDED — *File › Open
     # Trace…* (or *Record New Trace…*) chosen there, whose welcome tab
@@ -1044,15 +1083,30 @@ proc interactive(command: TuiCommand): int =
     # the omnibar) is a new tab and leaves the stopped tab where it is:
     # *Stop* never closes a tab, and neither does a later request for a new
     # one.
-    let stoppedId = shownId
-    let replacing = openingInStoppedTab and not session.isNil and
-                    session.ended and sessions.hasKey(int(stoppedId))
+    let stoppedId = if replaceTab >= 0: HeadlessSessionId(replaceTab)
+                    else: shownId
+    let replacing =
+      (replaceTab >= 0 and sessions.hasKey(replaceTab)) or
+      (openingInStoppedTab and not session.isNil and
+       session.ended and sessions.hasKey(int(stoppedId)))
     if replacing:
       var at = -1
       for i, t in app.shell.tabsOf():
         if t.id == stoppedId:
           at = i
       if app.shell.closeSession(stoppedId, disconnectBackend = false):
+        # THE AGENT STAYS WITH THE TAB (DeepReview-GUI.md §2.2.4): the replay
+        # is what is replaced; the Agent Activity host — its conversation, a
+        # live agent, the prompt's attachments — moves onto the new session,
+        # as the desktop's panel keeps them when it loads a recording in
+        # place.
+        let old = sessions[int(stoppedId)]
+        if not old.agent.isNil:
+          let store = opened.agent.store   # the new session's own
+          opened.agent.close()
+          opened.agent = old.agent
+          old.agent = nil
+          opened.agent.rehome(store)
         sessions[int(stoppedId)].close()
         sessions.del(int(stoppedId))
         if at >= 0:
@@ -1062,6 +1116,8 @@ proc interactive(command: TuiCommand): int =
     showSession(slot.id)
     ""
 
+  var testsTabs: proc(tab: int) = nil
+    ## §9.2: tell the Test Results pane a tab closed (set once it exists).
   app.sessionCloser = proc(index: int): bool =
     # Rule 4: "Closing a tab stops its backend and removes it" — and the last
     # tab is not closed (the desktop's close control is not drawn on it).
@@ -1074,6 +1130,9 @@ proc interactive(command: TuiCommand): int =
     if sessions.hasKey(int(id)):
       sessions[int(id)].close()
       sessions.del(int(id))
+    if not testsTabs.isNil:
+      # §9.2: a closed tab is no test's tab any more.
+      testsTabs(int(id))
     showSession(app.shell.activeSessionId())
     true
   # PLAT-57: Find in Files — `:grep` searches the shown session's recording
@@ -1085,6 +1144,9 @@ proc interactive(command: TuiCommand): int =
     session.stepSearchResult(rt, delta)
   app.toggleSearchOption = proc(operation: string): string =
     session.toggleSearchOption(rt, operation)
+  # PLAT-70 Part D: the field's seed (`Ctrl+Shift+F`, `:grep` alone).
+  app.openFindInFilesField = proc(selection: string): string =
+    session.openFindInFilesField(rt, selection)
   # PLAT-54: Agent Activity — a press runs the row's action through the
   # session's `AgentActivityVM`; `/ai <prompt>` sends a prompt to the agent.
   app.agentPress = proc(row, button: int): string =
@@ -1093,6 +1155,14 @@ proc interactive(command: TuiCommand): int =
     session.agentPrompt(rt, text)
   app.agentStop = proc(): string =
     session.agentStop(rt)
+  # The prompt's "add context" menu (DeepReview-GUI.md §2.2.7).
+  app.agentAttach = proc(context: string; mustExist: bool): string =
+    session.agentAttach(rt, context, mustExist)
+  # PLAT-58: the Requests pane — a press, a menu, the URL search, a key —
+  # done through the shown session's `RequestPanelVM`; its tail is polled on
+  # the idle tick below.
+  app.requestsAct = proc(act: RequestsAct): RequestsActResult =
+    session.requestsAct(rt, act)
 
   # PLAT-47 deliverable 4: the VCS pane reads the directory the desktop's VCS
   # panel reads for a replay — the process's own working directory.
@@ -1101,18 +1171,60 @@ proc interactive(command: TuiCommand): int =
   vcs.refresh(rt)
   # PLAT-53: the Test Results pane — the window's project (`app.projectRoot`,
   # which a welcome tab's folder re-roots) and the desktop's host over the
-  # native producers; a test's recording opens in a NEW session tab
-  # (`recordingOpener`, Test-Results-Pane.md §8.3).
-  let tests = newTestsSource(
+  # native producers; a test's recording opens where Test-Results-Pane.md §9
+  # places it — a NEW session tab by default (`recordingOpener`), the
+  # test's own tab when it has one, the current tab by the setting or Ctrl.
+  var tests: TestsSource = nil
+  proc placeTestRecording(testId, recordingId, folder: string;
+                          policy: TraceOpenPolicy): string =
+    let problem = traceFolderProblem(folder)
+    if problem.len > 0:
+      return "could not open " & folder & ": " & problem
+    var place = tests.vm.placeTestRecording(testId, recordingId, policy)
+    if place.kind != ttpNewTab and not sessions.hasKey(place.tab):
+      # A tab the bookkeeping outlived: forget it, and open a new one.
+      tests.vm.forgetTestTab(place.tab)
+      place = TestTabPlacement(kind: ttpNewTab, tab: -1)
+    let own = tests.vm.testTabOf(testId) >= 0
+    case place.kind
+    of ttpShowTab:
+      discard app.shell.activate(HeadlessSessionId(place.tab))
+      showSession(HeadlessSessionId(place.tab))
+      tests.host.placedWords = " in its own tab"
+      return ""
+    of ttpReplaceTab:
+      replaceTab = place.tab
+      let why =
+        try: app.recordingOpener(folder)
+        finally: replaceTab = -1
+      if why.len > 0:
+        return why
+      tests.vm.forgetTestTab(place.tab)
+      tests.host.placedWords = if own: " in its own tab" else: " in this tab"
+    of ttpNewTab:
+      let why = app.recordingOpener(folder)
+      if why.len > 0:
+        return why
+      tests.host.placedWords = " in a new tab"
+    tests.vm.noteTestTab(testId, int(shownId), recordingId)
+    ""
+  tests = newTestsSource(
     projectRoot = proc(): string = app.projectRoot,
     ctBinary = proc(): string = nativeCtBinary(),
     resolveFolder = proc(id: string): string = recordingFolderOf(id),
-    openFolder = proc(folder: string): string =
-      let problem = traceFolderProblem(folder)
-      if problem.len > 0:
-        return "could not open " & folder & ": " & problem
-      app.recordingOpener(folder))
+    openFolder = proc(testId, recordingId, folder: string;
+                      policy: TraceOpenPolicy): string =
+      placeTestRecording(testId, recordingId, folder, policy))
   defer: tests.close()
+  proc syncTestsTabs(): bool =
+    ## §9: the current tab, and whether a replay may replace it — a live
+    ## replay in Debug mode (not a tab *Stop* ended, not Edit mode).
+    let live = sessions.hasKey(int(shownId)) and not session.isNil and
+               not session.ended
+    tests.setTabs(int(shownId), live and app.modes.product == pmDebug, true)
+  testsTabs = proc(tab: int) =
+    tests.vm.forgetTestTab(tab)
+  discard syncTestsTabs()
   tests.refresh(rt)
   # PLAT-54: each session's Agent Activity host opens a test's recording the
   # way the welcome tab does — as a session tab (`recordingOpener`) — and
@@ -1121,9 +1233,26 @@ proc interactive(command: TuiCommand): int =
     if s.isNil or s.agent.isNil:
       return
     s.agent.vcs = vcs.vm
+    # §2.2.4: `[Open recording]` replaces the current tab's session when it
+    # is a live replay in Debug mode (the Test Results pane's rule 3 test),
+    # and the host opens a new tab otherwise.
+    s.agent.currentTabReplaceable = proc(): bool =
+      sessions.hasKey(int(shownId)) and not session.isNil and
+        not session.ended and app.modes.product == pmDebug
     s.agent.openRecording = proc(request: TraceOpenRequest): string =
-      if app.recordingOpener.isNil: "this terminal cannot open a recording"
-      else: app.recordingOpener(request.tracePath)
+      if app.recordingOpener.isNil:
+        return "this terminal cannot open a recording"
+      if request.policy != topCurrentTab:
+        return app.recordingOpener(request.tracePath)
+      let replaced = int(shownId)
+      replaceTab = replaced
+      result =
+        try: app.recordingOpener(request.tracePath)
+        finally: replaceTab = -1
+      if result.len == 0 and not testsTabs.isNil:
+        # Test-Results-Pane §9.2: a tab whose session was replaced is no
+        # test's tab any more.
+        testsTabs(replaced)
   agentWiring = wireAgent
   # An evidence card's review lands in the VCS pane at once, not at its next
   # refresh.
@@ -1153,6 +1282,21 @@ proc interactive(command: TuiCommand): int =
       else:
         session.showFileAt(rt, path, line, col))
   defer: problems.close()
+  # PLAT-56: the Build Output pane over the same reader — the window's
+  # `BuildVM`, the desktop BUILD panel's ViewModel; a located line opens as a
+  # Problems row does, and Run builds the shown command again.
+  let buildOut = newBuildOutputSource(rt, problems,
+    proc(path: string; line, col: int): string =
+      if rt.app.modes.product == pmEdit:
+        rt.openWorkingFileAt(path, line, col)
+      else:
+        session.showFileAt(rt, path, line, col),
+    proc(command, noun: string): string =
+      if rt.editServices.startBuild.isNil:
+        return "this window has no build runner"
+      let started = rt.editServices.startBuild(
+        (if noun == "run": bkRun else: bkBuild), command)
+      if started.ok: "" else: started.message)
   app.notification = describe(session)
 
   # PLAT-51 deliverable 8: A NEW TAB'S WELCOME SCREEN, performed. The "+"
@@ -1350,20 +1494,29 @@ proc interactive(command: TuiCommand): int =
       # verdict, no output and no `:cancel`.
       let built = advanceBuild(rt, edit, report = true)
       let vcsChanged = vcs.tick(rt)
-      # PLAT-53: a test run that ended, and a re-rooted project.
-      let testsChanged = tests.tick(rt)
+      # PLAT-53: a test run that ended, and a re-rooted project; §9: the
+      # tab facts the `⏵` titles read.
+      let tabsMoved = syncTestsTabs()
+      if tabsMoved:
+        tests.publish(rt)
+      let testsChanged = tests.tick(rt) or tabsMoved
       # PLAT-55: the build's diagnostics, as they arrive.
-      let problemsChanged = problems.tick(rt)
+      let problemsTicked = problems.tick(rt, nowMonoMs())
+      let problemsChanged = buildOut.tick(rt) or problemsTicked
       # PLAT-57: the search in flight, a bounded step per tick.
       let searched = session.pumpFindInFiles(rt)
       # PLAT-54: what a live agent sent since the last tick.
       let agentChanged = session.pumpAgent(rt)
+      # PLAT-58: the Requests pane's tail (a live session's), and its reveal
+      # once the recording's requests are known.
+      let requestsChanged = session.pumpRequests(rt, nowMs())
       # PLAT-51: a welcome tab's recording, when it finishes.
       let recorded = pollRecording()
       # PLAT-49 part B: the auto-hide hover's clock — a preview due after
       # the pointer rested on a label, a dismissal due after it left.
       let hoverChanged = rt.tickAutoHide(nowMs()) or
-                         rt.tickCellHover(nowMs())
+                         rt.tickCellHover(nowMs()) or
+                         rt.tickPendingPrefix(nowMs())
       # PLAT-70 Part H: the scrollbars' fades and a held paging press (a
       # page of the editor is a source scroll the session makes).
       let bars = rt.tickScrollbars(nowMs())
@@ -1373,7 +1526,8 @@ proc interactive(command: TuiCommand): int =
       let keysChanged = rt.pollKeybindings(keybindings)
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
          hoverChanged or frameOwed or recorded or keysChanged or searched or
-         barsChanged or testsChanged or agentChanged or problemsChanged:
+         barsChanged or testsChanged or agentChanged or problemsChanged or
+         requestsChanged:
         paint(driver, rt)
         frameOwed = false
     of dekResize:
@@ -1437,6 +1591,8 @@ proc interactive(command: TuiCommand): int =
         # session: the panes follow it before the outcome is applied.
         if app.shell.activeSessionId() != shownId:
           showSession(app.shell.activeSessionId())
+        if syncTestsTabs():
+          tests.publish(rt)
         # PLAT-50: a click in the VCS pane is the VCS source's; PLAT-53: one
         # on Test Results' controls is the Test Results source's.
         if not vcs.applyClick(rt, outcome.paneClick) and
@@ -1698,9 +1854,12 @@ proc editInteractive(command: TuiCommand): int =
     projectRoot = proc(): string = app.projectRoot,
     ctBinary = proc(): string = nativeCtBinary(),
     resolveFolder = proc(id: string): string = recordingFolderOf(id),
-    openFolder = proc(folder: string): string =
+    openFolder = proc(testId, recordingId, folder: string;
+                      policy: TraceOpenPolicy): string =
       NoSessionTabsText & folder)
   defer: tests.close()
+  # §9: no session tabs here.
+  discard tests.setTabs(-1, false, false)
   tests.refresh(rt)
   # PLAT-55: the Problems pane over this window's builds; a row opens in the
   # editor.
@@ -1708,6 +1867,23 @@ proc editInteractive(command: TuiCommand): int =
     proc(path: string; line, col: int): string =
       rt.openWorkingFileAt(path, line, col))
   defer: problems.close()
+
+  # PLAT-56: the Build Output pane over the same reader — the window's
+  # `BuildVM`, the desktop BUILD panel's ViewModel; a located line opens as a
+  # Problems row does, and Run builds the shown command again.
+  let buildOut = newBuildOutputSource(rt, problems,
+    proc(path: string; line, col: int): string =
+      rt.openWorkingFileAt(path, line, col),
+    proc(command, noun: string): string =
+      if rt.editServices.startBuild.isNil:
+        return "this window has no build runner"
+      let started = rt.editServices.startBuild(
+        (if noun == "run": bkRun else: bkBuild), command)
+      if started.ok: "" else: started.message)
+
+  # Find in Files, which Edit mode docks, searches the project
+  # (Find-And-Incremental-Search.md §5.1); a result opens in the editor.
+  let editSearch = newEditSearchSource(rt, root)
 
   paint(driver, rt)
 
@@ -1721,6 +1897,7 @@ proc editInteractive(command: TuiCommand): int =
       discard rt.clipboardReadDue(driver)
       if not rt.clipboardRead.open:
         negotiation.closeReplyWindow(driver)
+      let searched = editSearch.tick(rt)
       # THE BUILD IS ADVANCED FROM THE SAME LOOP THAT READS THE KEYBOARD, which
       # is the whole of §5's cancellability requirement: the key that cancels is
       # read while the compiler runs, and the clock that bounds an unattended
@@ -1728,14 +1905,16 @@ proc editInteractive(command: TuiCommand): int =
       let built = advanceBuild(rt, edit, report = true)
       let vcsChanged = vcs.tick(rt)
       let testsChanged = tests.tick(rt)
-      let problemsChanged = problems.tick(rt)
+      let problemsTicked = problems.tick(rt, nowMonoMs())
+      let problemsChanged = buildOut.tick(rt) or problemsTicked
       let hoverChanged = rt.tickAutoHide(nowMs()) or
-                         rt.tickCellHover(nowMs())
+                         rt.tickCellHover(nowMs()) or
+                         rt.tickPendingPrefix(nowMs())
       let barsChanged = rt.tickScrollbars(nowMs()).repaint
       let keysChanged = rt.pollKeybindings(keybindings)
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
          hoverChanged or keysChanged or barsChanged or testsChanged or
-         problemsChanged:
+         problemsChanged or searched:
         paint(driver, rt)
     of dekResize:
       size = ev.size

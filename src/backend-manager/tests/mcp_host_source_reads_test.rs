@@ -345,8 +345,14 @@ async fn t_mcp_tools_return_no_listed_host_source_without_opt_in() {
     )
     .await;
 
-    let mut refused = start_mcp(&server, &root, &socket, &[]).await;
-    let mut allowed = start_mcp(&server, &root, &socket, &["--allow-host-source-reads"]).await;
+    let mut refused = start_mcp(&server, &root, &socket, &with_script_opt_in(&server, &[])).await;
+    let mut allowed = start_mcp(
+        &server,
+        &root,
+        &socket,
+        &with_script_opt_in(&server, &["--allow-host-source-reads"]),
+    )
+    .await;
     let mut wrong: Vec<String> = Vec::new();
 
     // 1. Without the option, first: nothing of the module, and the reason.

@@ -205,9 +205,14 @@ suite "Reprobuild HCR AppViewModel":
       app.assertGenerationVisible(Gen1StepNext, 1, 310'u64)
       check vm.recordingHeadText.val == "Head: 310"
 
+      # The generation-0 BREAKPOINT's row: line 41 at tick 100. Tick 100 has
+      # a second row — the live session's first stop, at line 1 before any
+      # source was published, which carries no source digest — so the tick
+      # and generation alone do not name the row this jump is about.
       var historicalEventIndex = -1
       for i, row in app.session.eventLogVM.eventRows.val:
-        if row.rrTicks == 100'u64 and row.sourceGeneration == 0:
+        if row.rrTicks == 100'u64 and row.sourceGeneration == 0 and
+           row.line == 41:
           historicalEventIndex = i
           break
       check historicalEventIndex >= 0

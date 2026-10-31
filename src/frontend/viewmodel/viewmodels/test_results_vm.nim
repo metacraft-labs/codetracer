@@ -155,8 +155,9 @@ import isonim/viewmodel
 import ../../../ct_test/contracts
 import test_run_summary_vm
 import table_fit
+import trace_open
 
-export test_run_summary_vm, table_fit
+export test_run_summary_vm, table_fit, trace_open
 
 type
   RunTestsProc* = proc(): string
@@ -223,6 +224,30 @@ type
       ## No recording exists, so there is nothing to reuse and Shift is
       ## irrelevant. Records, then enters. The label says so rather than saying
       ## "open".
+
+  TestTab* = object
+    ## Which session tab a test's recording was last placed in
+    ## (`Test-Results-Pane.md` §9.2). `tab` is the front-end's own id for the
+    ## tab (the desktop's `ReplaySession.id`, a native `HeadlessSessionId`).
+    testId*: string
+    tab*: int
+    recordingId*: string
+
+  TestTabPlacementKind* = enum
+    ## Where a test's recording goes (§9.1).
+    ttpNewTab = "new-tab"
+      ## A new session tab — the default.
+    ttpShowTab = "show-tab"
+      ## The test's own tab already shows this recording: switch to it.
+    ttpReplaceTab = "replace-tab"
+      ## `tab`'s session is replaced in place (its backend stopped, its
+      ## position kept): the test's own tab with an older recording (rule 4),
+      ## or the current tab when that is the destination and it is a replay.
+
+  TestTabPlacement* = object
+    kind*: TestTabPlacementKind
+    tab*: int
+      ## The tab to show or replace; -1 for a new tab.
 
   TestResultsRowState* = enum
     ## What the pane knows about one test. `trsNotRun` is the state the join
@@ -310,6 +335,37 @@ type
       ## `shiftKey`. See the header: this is what lets the tooltip and the
       ## button's own appearance change while the pointer is already resting on
       ## it, and what keeps the promise and the action a single decision.
+
+    openSetting*: Signal[TraceOpenPolicy]
+      ## The workspace's `replay-open-in` setting (§9.3): where a recording
+      ## opens when no modifier is held. `topNewTab` unless the host read
+      ## otherwise.
+    redirectHeld*: Signal[bool]
+      ## Whether the redirect modifier (Ctrl, Cmd on macOS) is down RIGHT NOW
+      ## — `shiftHeld`'s twin, for the same reason: the title changes while
+      ## it is held, and the press reads the same Signal the title did.
+    redirectKeyName*: string
+      ## How the titles name that modifier: "Ctrl", or "Cmd" on macOS.
+    currentTab*: Signal[int]
+      ## The front-end's current session tab, -1 when there is none.
+    currentTabReplaceable*: Signal[bool]
+      ## Whether that tab may be replaced by a replay: a replay session.
+      ## False for an editing session (rule 3) and when there is no tab.
+    sessionTabsShown*: Signal[bool]
+      ## Whether this front-end has session tabs at all (the terminal's `ct
+      ## edit` and the GPUI Edit window do not, §8.3).
+    testTabs*: Signal[seq[TestTab]]
+      ## Which tests have a tab (§9.2), one entry per test, one test per tab.
+    selectedTestId*: Signal[string]
+      ## The selected row's test (§9.3): what the palette's **Tests: Run** /
+      ## **Tests: Run in Current Tab** act on. Natively the keyboard reach's
+      ## selection, on the desktop a click on the row. "" for none.
+    hasCommandPolicy*: bool
+    commandPolicy*: TraceOpenPolicy
+      ## The palette pair's destination, HELD FOR ONE DISPATCH
+      ## (`runTestIn`): `effectiveOpenPolicy` answers it while it is held,
+      ## so the host captures the command's destination exactly as it
+      ## captures a press's. Plain fields, not Signals — nothing draws them.
 
     refreshRecording*: Signal[TestRowActionProc]
       ## Record this test again and KEEP THE RESULT WITHOUT NAVIGATING.
@@ -590,6 +646,149 @@ proc setShiftHeld*(vm: TestResultsVM; held: bool) =
   if vm.shiftHeld.val != held:
     vm.shiftHeld.val = held
 
+# ---------------------------------------------------------------------------
+# Which tab a test's recording opens in (`Test-Results-Pane.md` §9)
+#
+# Multi-Window-Tab-Management's "Which tab a replay opens in" as ONE rule the
+# three front-ends share: the ViewModel decides, each front-end performs the
+# answer (a new tab, a switch, a replacement in place). The facts it decides
+# from are the front-end's — its current tab and whether a replay may replace
+# it — told here through `setCurrentTab`, and the tests that have tabs, kept
+# here (`noteTestTab` / `forgetTestTab` / `movedTestTab`).
+# ---------------------------------------------------------------------------
+
+const
+  RedirectKeyName* = "Ctrl"
+    ## The redirect modifier as the titles name it; a host on macOS sets
+    ## `TestResultsVM.redirectKeyName` to "Cmd" (VS Code's `CtrlCmd`).
+  OpensInOwnTabText* = "Opens in the tab it already has."
+    ## The test has a tab (§9.2): rule 4 reuses it.
+  OpensInNewTabText* = "Opens in a new tab."
+    ## The current tab cannot be replaced (an editing session, rule 3).
+  NoSessionTabsOpenText* =
+    "This window has no session tabs, so the pane names the recording's " &
+    "folder instead."
+    ## A front-end without session tabs (§8.3).
+
+proc setOpenSetting*(vm: TestResultsVM; policy: TraceOpenPolicy) =
+  ## The workspace's `replay-open-in` setting, as the host read it (§9.3).
+  if vm.openSetting.val != policy:
+    vm.openSetting.val = policy
+
+proc setRedirectHeld*(vm: TestResultsVM; held: bool) =
+  ## Driven by the front-end's key and pointer modifiers, as `setShiftHeld`.
+  if vm.redirectHeld.val != held:
+    vm.redirectHeld.val = held
+
+proc setCurrentTab*(vm: TestResultsVM; tab: int; replaceable: bool) =
+  ## The front-end's current session tab (-1 for none) and whether a replay
+  ## may replace it — false for an editing session (rule 3).
+  if vm.currentTab.val != tab:
+    vm.currentTab.val = tab
+  let can = replaceable and tab >= 0
+  if vm.currentTabReplaceable.val != can:
+    vm.currentTabReplaceable.val = can
+
+proc setSessionTabsShown*(vm: TestResultsVM; shown: bool) =
+  if vm.sessionTabsShown.val != shown:
+    vm.sessionTabsShown.val = shown
+
+proc invert*(policy: TraceOpenPolicy): TraceOpenPolicy =
+  if policy == topNewTab: topCurrentTab else: topNewTab
+
+proc effectiveOpenPolicy*(vm: TestResultsVM; redirect: bool): TraceOpenPolicy =
+  ## The destination of a press made with (`redirect`) or without the
+  ## modifier: the modifier INVERTS the setting for that one press (§9.3).
+  if redirect: vm.openSetting.val.invert() else: vm.openSetting.val
+
+proc effectiveOpenPolicy*(vm: TestResultsVM): TraceOpenPolicy =
+  ## The destination a press made NOW would have (the held modifier read) —
+  ## or, while a palette command dispatches (`runTestIn`), the command's.
+  if vm.hasCommandPolicy:
+    return vm.commandPolicy
+  vm.effectiveOpenPolicy(vm.redirectHeld.val)
+
+proc testTabIndex(vm: TestResultsVM; testId: string): int =
+  for i, t in vm.testTabs.val:
+    if t.testId == testId:
+      return i
+  -1
+
+proc testTabOf*(vm: TestResultsVM; testId: string): int =
+  ## The tab test `testId`'s recording is in, or -1 (§9.2).
+  let i = vm.testTabIndex(testId)
+  if i < 0: -1 else: vm.testTabs.val[i].tab
+
+proc noteTestTab*(vm: TestResultsVM; testId: string; tab: int;
+                  recordingId: string) =
+  ## Test `testId`'s recording `recordingId` was placed in `tab`. A tab
+  ## holds one test: an entry of another test for the same tab goes.
+  if testId.len == 0 or tab < 0:
+    return
+  var next: seq[TestTab] = @[]
+  for t in vm.testTabs.val:
+    if t.testId != testId and t.tab != tab:
+      next.add t
+  next.add TestTab(testId: testId, tab: tab, recordingId: recordingId)
+  vm.testTabs.val = next
+
+proc forgetTestTab*(vm: TestResultsVM; tab: int) =
+  ## `tab` closed (or its session ended): no test has it any more.
+  var next: seq[TestTab] = @[]
+  var changed = false
+  for t in vm.testTabs.val:
+    if t.tab == tab: changed = true
+    else: next.add t
+  if changed:
+    vm.testTabs.val = next
+
+proc movedTestTab*(vm: TestResultsVM; fromTab, toTab: int) =
+  ## A replacement gave the tab a new id (the native front-ends open the new
+  ## session as a slot that takes the old one's place).
+  var next = vm.testTabs.val
+  var changed = false
+  for t in next.mitems:
+    if t.tab == fromTab:
+      t.tab = toTab
+      changed = true
+  if changed:
+    vm.testTabs.val = next
+
+proc placeTestRecording*(vm: TestResultsVM; testId, recordingId: string;
+                         policy: TraceOpenPolicy): TestTabPlacement =
+  ## §9.1, in order: the test's own tab (shown when it already holds this
+  ## recording, replaced in place when it holds an older one); else the
+  ## current tab, when it is the destination and a replay; else a new tab.
+  let own = vm.testTabIndex(testId)
+  if own >= 0:
+    let t = vm.testTabs.val[own]
+    if t.recordingId == recordingId:
+      return TestTabPlacement(kind: ttpShowTab, tab: t.tab)
+    return TestTabPlacement(kind: ttpReplaceTab, tab: t.tab)
+  if policy == topCurrentTab and vm.currentTabReplaceable.val and
+     vm.currentTab.val >= 0:
+    return TestTabPlacement(kind: ttpReplaceTab, tab: vm.currentTab.val)
+  TestTabPlacement(kind: ttpNewTab, tab: -1)
+
+proc openDestinationText*(vm: TestResultsVM; row: TestResultsRow): string =
+  ## The `⏵` title's last sentence: where a press now puts the recording,
+  ## then the other destination's gesture (§9.4). From the facts the press
+  ## reads, so the two cannot disagree.
+  if not vm.sessionTabsShown.val:
+    return NoSessionTabsOpenText
+  if vm.testTabOf(row.testId) >= 0:
+    return OpensInOwnTabText
+  if not vm.currentTabReplaceable.val:
+    return OpensInNewTabText
+  let key = if vm.redirectKeyName.len > 0: vm.redirectKeyName
+            else: RedirectKeyName
+  let other = if vm.redirectHeld.val: "release " & key else: key & "+click"
+  case vm.effectiveOpenPolicy()
+  of topNewTab:
+    "Opens in a new tab; " & other & " opens it in this tab."
+  of topCurrentTab:
+    "Opens in this tab, ending its session; " & other & " opens a new tab."
+
 proc setRowActions*(vm: TestResultsVM;
                     refresh, openExisting, recordAndOpen: TestRowActionProc) =
   ## Install the host's three per-row actions.
@@ -762,22 +961,25 @@ proc openButtonTitle*(vm: TestResultsVM; row: TestResultsRow;
     if vm.openButtonMode(row) == obmOpenExisting:
       return absence
     return absence & " — and " & row.recordingAbsenceText()
-  case vm.openButtonMode(row)
-  of obmOpenExisting:
-    "Open the recording of " & row.name &
-      (if row.recordedAtText.len > 0: " from " & row.recordedAtText else: "") &
-      " — nothing is re-run. " &
-      (if shiftReachable: "Hold Shift to record it again first."
-       else: NoShiftRecordAgainText)
-  of obmRefreshAndOpen:
-    "Record " & row.name & " again and open the NEW recording, replacing " &
-      (if row.recordedAtText.len > 0: "the one from " & row.recordedAtText
-       else: "the existing one") & "."
-  of obmRecordAndOpen:
-    # NOT "OPEN". There is nothing to open and the button is about to spend a
-    # compile; a label promising otherwise is the lie the header names.
-    "Record " & row.name & " and open the recording (" &
-      row.recordingAbsenceText() & ")."
+  let action =
+    case vm.openButtonMode(row)
+    of obmOpenExisting:
+      "Open the recording of " & row.name &
+        (if row.recordedAtText.len > 0: " from " & row.recordedAtText else: "") &
+        " — nothing is re-run. " &
+        (if shiftReachable: "Hold Shift to record it again first."
+         else: NoShiftRecordAgainText)
+    of obmRefreshAndOpen:
+      "Record " & row.name & " again and open the NEW recording, replacing " &
+        (if row.recordedAtText.len > 0: "the one from " & row.recordedAtText
+         else: "the existing one") & "."
+    of obmRecordAndOpen:
+      # NOT "OPEN". There is nothing to open and the button is about to spend a
+      # compile; a label promising otherwise is the lie the header names.
+      "Record " & row.name & " and open the recording (" &
+        row.recordingAbsenceText() & ")."
+  # WHERE IT OPENS (§9.4), from the facts the press reads.
+  action & " " & vm.openDestinationText(row)
 
 proc noteRowActionRefusal*(vm: TestResultsVM; message: string) =
   ## A per-row control was pressed and the host could not honour it.
@@ -952,6 +1154,78 @@ proc rowOfTest*(vm: TestResultsVM; testId: string): int =
       return i
   -1
 
+# ---------------------------------------------------------------------------
+# The palette pair: **Tests: Run** / **Tests: Run in Current Tab** (§9.3)
+# ---------------------------------------------------------------------------
+
+const
+  NoTestSelectedText* =
+    "no test of the Test Results pane is selected — select one first"
+    ## The palette pair with no row selected.
+  TestNotListedText* = "the selected test is no longer listed"
+    ## The selected test left the catalog.
+
+proc selectTest*(vm: TestResultsVM; testId: string) =
+  ## The row the palette pair acts on ("" for none).
+  if vm.selectedTestId.val != testId:
+    vm.selectedTestId.val = testId
+
+proc runTestIn*(vm: TestResultsVM; testId: string;
+                policy: TraceOpenPolicy): string =
+  ## **Tests: Run** (`topNewTab`) / **Tests: Run in Current Tab**
+  ## (`topCurrentTab`): RECORD test `testId` afresh and open the new
+  ## recording — `⇧⏵`'s refresh-and-open whether or not a recording exists —
+  ## at the COMMAND's destination, neither the setting's nor a held
+  ## modifier's; §9.1 still places it. "" when the run was dispatched, else
+  ## why it was not.
+  if testId.len == 0:
+    return NoTestSelectedText
+  let i = vm.rowOfTest(testId)
+  if i < 0:
+    return TestNotListedText
+  let absence = vm.refreshAbsence()
+  if absence.len > 0:
+    return absence
+  let action = vm.recordAndOpenRecording.val
+  if action.isNil:
+    return NoReplayHostText
+  let row = vm.rows.val[i]
+  vm.hasCommandPolicy = true
+  vm.commandPolicy = policy
+  try:
+    action(row.testId, row.selector)
+  finally:
+    vm.hasCommandPolicy = false
+  # A host that refused AT ONCE settled the run inside the call and filed
+  # its sentence on the pane; the command's caller is owed it too, rather
+  # than "recording …" over a run that never began.
+  if not vm.inFlight.val:
+    let said = vm.summary.val.diagnostics
+    if said.len > 0:
+      return said[^1].message
+  ""
+
+proc runSelectedTestIn*(vm: TestResultsVM; policy: TraceOpenPolicy): string =
+  ## The palette pair on the selected row (`selectedTestId`).
+  vm.runTestIn(vm.selectedTestId.val, policy)
+
+proc runTestStartedText*(vm: TestResultsVM; testId: string;
+                         policy: TraceOpenPolicy): string =
+  ## What a front-end says once the palette pair dispatched: which test is
+  ## recording, and where §9.1 will put it for `policy` — so **Run in
+  ## Current Tab** from an editing session says it opens a new tab (rule 3)
+  ## rather than leaving the user to find that out.
+  let i = vm.rowOfTest(testId)
+  let name = if i >= 0: vm.rows.val[i].name else: testId
+  let where =
+    if not vm.sessionTabsShown.val: "its folder is named on the pane"
+    else:
+      let place = vm.placeTestRecording(testId, "", policy)
+      if place.kind == ttpNewTab: "it opens in a new tab"
+      elif place.tab == vm.testTabOf(testId): "it opens in the tab it already has"
+      else: "it opens in this tab"
+  "recording " & name & "; " & where
+
 # The five columns' widths are `table_fit.testResultsFit` (beside the other
 # panes' declarations, so the terminal's painter reaches it through the SDK
 # facade).
@@ -1005,6 +1279,13 @@ proc createTestResultsVM*(): TestResultsVM =
 
     let recordings = createSignal(newSeq[TestRecordingRef]())
     let shiftHeld = createSignal(false)
+    let openSetting = createSignal(topNewTab)
+    let redirectHeld = createSignal(false)
+    let currentTab = createSignal(-1)
+    let currentTabReplaceable = createSignal(false)
+    let sessionTabsShown = createSignal(true)
+    let testTabs = createSignal(newSeq[TestTab]())
+    let selectedTestId = createSignal("")
     # THREE TYPED VARS, for `noRunner`'s reason and not for tidiness.
     # `createSignal(TestRowActionProc(nil))` compiles on both backends and runs
     # on one: `nim js` emits the conversion as `null.bind(null)`, which throws
@@ -1047,6 +1328,14 @@ proc createTestResultsVM*(): TestResultsVM =
       runTests: runTests,
       recordings: recordings,
       shiftHeld: shiftHeld,
+      openSetting: openSetting,
+      redirectHeld: redirectHeld,
+      redirectKeyName: RedirectKeyName,
+      currentTab: currentTab,
+      currentTabReplaceable: currentTabReplaceable,
+      sessionTabsShown: sessionTabsShown,
+      testTabs: testTabs,
+      selectedTestId: selectedTestId,
       refreshRecording: refreshRecording,
       openExistingRecording: openExistingRecording,
       recordAndOpenRecording: recordAndOpenRecording,

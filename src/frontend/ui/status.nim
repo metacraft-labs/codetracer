@@ -23,7 +23,13 @@ when defined(js):
   from ../viewmodel/views/isonim_status_view import
     StatusBaseModel, StatusNotificationActionRecord,
     StatusNotificationRecord, StatusShellCallbacks, StatusShellModel,
-    renderStatusInto
+    StatusBuildModel, renderStatusInto
+  # PLAT-56: the build indicator reads the shown tab's Build Output ViewModel.
+  from build import buildVMInstance, onBuildStatusChange, revealBuildPane
+  from ../viewmodel/viewmodels/build_vm import BuildVM, BuildStatus,
+    statusText, statusIcon
+  from isonim/core/signals import val
+  from isonim/core/computation import val
   from certificate_indicator import
     certificateIndicator, ensureCertificateIndicator, selectCertificateIndicator
   from git_cli import gitWorkingDirectory
@@ -180,6 +186,21 @@ when defined(js):
       dismissible: dismiss,
       actions: actions)
 
+  proc statusBuildModel(): StatusBuildModel =
+    ## PLAT-56 (Build-Output-Pane.md §3.10): the current build of the shown
+    ## tab, in the shared words; nothing before any build.
+    let vm = buildVMInstance
+    if vm.isNil:
+      return
+    let state = case vm.status.val
+                of bsIdle: ""
+                of bsRunning: "running"
+                of bsSucceeded: "succeeded"
+                of bsFailed: "failed"
+                of bsCancelled: "cancelled"
+    StatusBuildModel(text: vm.statusText, icon: vm.statusIcon,
+                     stateClass: state)
+
   proc statusBaseModel(self: StatusComponent): StatusBaseModel =
     let activeKey = self.data.services.editor.active
     let editor =
@@ -252,7 +273,8 @@ when defined(js):
       # `certificateIndicator()` is nil until `ensureCertificateIndicator` has
       # run, and the projection of nil is an empty model that renders nothing,
       # so the first paint of the bar is never blocked on a filesystem read.
-      certificate: statusCertificateModel(certificateIndicator()))
+      certificate: statusCertificateModel(certificateIndicator()),
+      build: statusBuildModel())
 
   proc statusShellModel(self: StatusComponent): StatusShellModel =
     var activeNotifications: seq[StatusNotificationRecord] = @[]
@@ -315,7 +337,8 @@ when defined(js):
             2000),
       onSendBugReport: proc(title: string; description: string) =
         self.sendBugReport(title, description),
-      onSelectCertificate: proc() = selectCertificateIndicator())
+      onSelectCertificate: proc() = selectCertificateIndicator(),
+      onSelectBuildStatus: proc() = revealBuildPane())
 
   # ---------------------------------------------------------------------
   # Render bookkeeping
@@ -466,6 +489,9 @@ else:
 
 method register*(self: StatusComponent, api: MediatorWithSubscribers) =
   self.api = api
+  when defined(js):
+    # PLAT-56: the build indicator follows the build.
+    onBuildStatusChange = proc() = self.requestStatusRender()
   api.subscribe(InternalStatusUpdate, proc(kind: CtEventKind, response: StatusState, sub: Subscriber) =
     self.onStatusUpdate(response)
   )

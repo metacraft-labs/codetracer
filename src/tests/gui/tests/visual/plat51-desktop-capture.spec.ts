@@ -282,11 +282,17 @@ test.describe("PLAT-51: a saved desktop layout that held the Timeline", () => {
   // Timeline's removal (git history): a Timeline tab between Event Log and
   // Terminal Output. It must open without it, and without an empty tab.
   const saved = path.join(repoRoot, "src", "tests", "visual", "plat51-layout-with-timeline.json");
-  const dir = ctUserConfigDir();
-  if (process.env.CODETRACER_HOME && fs.existsSync(saved)) {
-    fs.mkdirSync(dir, { recursive: true });
-    fs.copyFileSync(saved, path.join(dir, "default_layout.json"));
-  }
+  // Planted right before this describe's launch, not when the spec file is
+  // loaded: the worker's CODETRACER_HOME is shared by every launch in the
+  // file, and a desktop that ran earlier saves its own layout over the
+  // planted one on the way out — this case then opened that layout instead.
+  test.beforeAll(() => {
+    const dir = ctUserConfigDir();
+    if (process.env.CODETRACER_HOME && fs.existsSync(saved)) {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.copyFileSync(saved, path.join(dir, "default_layout.json"));
+    }
+  });
   test.use({
     sourcePath: recording("calc"),
     launchMode: "trace-folder",

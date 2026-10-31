@@ -1,0 +1,19 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Call trace row box probe</title>
+<link rel="stylesheet" href="./codetracer.css">
+<style>
+  /* The harness frame only: a sized box for the pane to fill, as the
+     desktop's layout gives it one. Nothing here touches a row, a font, a
+     line-height or an alignment — those are the subject, and must come from
+     codetracer.css alone. */
+  body { margin: 0; padding: 0; background: #1b1b1b; }
+  #ct-calltrace-pane { width: 900px; height: 1400px; display: flex; }
+  #ct-probe-summary { position: fixed; bottom: 2px; right: 4px;
+                      font: 10px monospace; color: #666; }
+</style>
+</head>
+<body>
+  <div id="ct-calltrace-pane"></div>
+  <div id="ct-probe-summary"></div>
+  <script src="./probe.js"></script>
+</body></html>

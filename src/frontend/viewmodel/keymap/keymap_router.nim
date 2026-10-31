@@ -27,6 +27,8 @@
 
 import std/[strutils, tables]
 
+import ../../../common/key_names
+
 import ./base_keymaps
 import ./base_rows
 import ./context_keys
@@ -321,6 +323,25 @@ proc route*(router: var KeymapRouter; facts: SessionFacts; path: ScopePath;
 proc cancelPending*(router: var KeymapRouter) =
   router.pending = PendingChords()
 
+func pendingDueMs*(router: KeymapRouter): int64 =
+  ## When the pending prefix times out (the base's timeout, §3.7), or -1:
+  ## no prefix is pending, or the base has no timeout (CUA, Emacs). A
+  ## front-end's idle loop wakes then, so the prefix is seen to end at the
+  ## timeout rather than at the next key.
+  let timeout = pendingTimeoutOf(router.base)
+  if router.pending.chords.len == 0 or timeout == NoPendingTimeout: -1'i64
+  else: router.pending.startedMs + timeout
+
+proc expirePending*(router: var KeymapRouter; nowMs: int64): bool =
+  ## Drop a pending prefix whose timeout has passed — the expiry `route`
+  ## applies when the next key arrives, applied by the clock instead.
+  ## Answers whether a prefix was dropped.
+  let due = router.pendingDueMs
+  if due >= 0 and nowMs > due:
+    router.pending = PendingChords()
+    return true
+  false
+
 # ---------------------------------------------------------------------------
 # The layer stack, through the router
 # ---------------------------------------------------------------------------
@@ -348,9 +369,11 @@ proc unmountOwner*(router: var KeymapRouter; owner: string): seq[PushedLayer] =
 # ---------------------------------------------------------------------------
 
 func pendingLabel*(router: KeymapRouter): string =
-  ## `Ctrl+K…` while a prefix waits; "" otherwise.
+  ## `Ctrl+K…` while a prefix waits; "" otherwise. Spelled as every surface
+  ## shows a chord (`key_names.displaySequence`, VS Code's `Ctrl+K`), not as
+  ## the canonical name the router keeps (`Ctrl+k`).
   if router.pending.chords.len == 0: ""
-  else: router.pending.chords.join(" ") & "…"
+  else: displaySequence(router.pending.chords) & "…"
 
 func statusLabel*(router: KeymapRouter; path: ScopePath;
                   navMode: NavigationMode): string =
@@ -497,6 +520,27 @@ proc shortcutReference*(router: KeymapRouter; facts: SessionFacts;
             by = "your row " & $(s.userIndex + 1)
       result.add ReferenceEntry(layer: layer.name, keyText: b.spelling,
                                 operation: b.operation, shadowedBy: by)
+
+func referenceLines*(entries: seq[ReferenceEntry]): seq[string] =
+  ## THE SHORTCUT REFERENCE AS EVERY FRONT-END SHOWS IT (§5.4, §5.6): one
+  ## heading per layer, in resolution order — so an active pushed layer, the
+  ## user's rows and then the base's appear in the order a key is asked of
+  ## them — and under it each binding, its operation and label, and the user
+  ## row that shadows it. One spelling, so the terminal's overlay, GPUI's and
+  ## the desktop's dialog list the same lines.
+  result = @[]
+  var layer = ""
+  for e in entries:
+    if e.layer != layer or result.len == 0:
+      layer = e.layer
+      result.add "[" & layer & "]"
+    var line = "  " & e.keyText & "  " & e.operation
+    let label = operationLabelOf(e.operation)
+    if label.len > 0 and label != e.operation:
+      line.add " — " & label
+    if e.shadowedBy.len > 0:
+      line.add "  (shadowed by " & e.shadowedBy & ")"
+    result.add line
 
 func describeResolution*(res: EditingResolution): string =
   ## A resolution as one comparable phrase — what `:keys check`, GPUI's

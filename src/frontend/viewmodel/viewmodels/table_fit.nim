@@ -282,3 +282,33 @@ proc testResultsFit*(markUnits, durationUnits, actionsUnits, viewport: int;
               neverCut: true),
     FitColumn(name: TestColumnNames[4], preferredUnits: actionsUnits,
               fixed: true)], viewport, gap)
+
+# ---------------------------------------------------------------------------
+# The Requests pane's row (PLAT-58, Request-Panel.md § N.1)
+# ---------------------------------------------------------------------------
+
+const
+  RequestsColumnNames* = ["id", "method", "url", "status", "duration", "size"]
+  RequestUrlFloorCells* = 8
+    ## The URL keeps this many cells before the pane scrolls instead.
+
+proc requestsFit*(idUnits, methodUnits, urlUnits, statusUnits, durationUnits,
+                  sizeUnits, viewport: int; unit = 1; gap = 1): TableFit =
+  ## The six columns' widths for a pane `viewport` units wide: `#`, the
+  ## method, the status, the duration and the size at their widest cell (the
+  ## header's word included) and never cut; the URL — the desktop's one
+  ## `flex: 1` column, cut with `…` — takes the rest, keeping at least
+  ## `RequestUrlFloorCells` before the pane scrolls.
+  fitTable([
+    FitColumn(name: RequestsColumnNames[0], preferredUnits: idUnits,
+              neverCut: true),
+    FitColumn(name: RequestsColumnNames[1], preferredUnits: methodUnits,
+              neverCut: true),
+    FitColumn(name: RequestsColumnNames[2], preferredUnits: urlUnits,
+              minUnits: RequestUrlFloorCells * unit, flex: 1),
+    FitColumn(name: RequestsColumnNames[3], preferredUnits: statusUnits,
+              neverCut: true),
+    FitColumn(name: RequestsColumnNames[4], preferredUnits: durationUnits,
+              neverCut: true),
+    FitColumn(name: RequestsColumnNames[5], preferredUnits: sizeUnits,
+              neverCut: true)], viewport, gap)

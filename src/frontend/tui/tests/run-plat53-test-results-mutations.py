@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """PLAT-53 — the mutation harness for the Test Results pane on the terminal
 and in the GPUI window (codetracer-pm `spec/GUI/Core-Panes/Test-Results-Pane.md`
-§8): the words every front-end draws (moved into `test_results_vm`), the one
+§8, and §9 — which tab a test's recording opens in, on every front-end, the
+`replay-open-in` setting, the Ctrl modifier, the hover tooltips, and a
+maximized terminal pane's presses; the palette pair **Tests: Run** / **Tests:
+Run in Current Tab**, `Ctrl+Enter` on a native row, and the desktop editor's
+context-menu Run-test through the host): the words every front-end draws (moved into `test_results_vm`), the one
 catalog rule (`test_catalog_answer`), the desktop's host over the native
 producers (`viewmodel/host/native_test_host`), the terminal's painter,
 runtime, host source and loop, the GPUI leaf and window, the vocabulary view,
@@ -69,6 +73,13 @@ GPUI_LEAF = "src/frontend/gpui/test_results_leaf.nim"
 GPUI_MAIN = "src/frontend/gpui/main.nim"
 VOCAB = "src/frontend/view_vocabulary/pane_views.nim"
 NS9 = "src/frontend/index/ns9_panes.nim"
+DESKTOP_HOST = "src/frontend/viewmodel/viewmodels/desktop_test_host.nim"
+SETTING = "src/frontend/viewmodel/viewmodels/replay_open_setting.nim"
+VIEW = "src/frontend/viewmodel/views/isonim_test_results_view.nim"
+UI_JS = "src/frontend/ui_js.nim"
+OMNI = "src/frontend/viewmodel/viewmodels/omnibar_sources.nim"
+CUA = "src/frontend/viewmodel/keymap/cua_keymap.nim"
+EDITOR = "src/frontend/ui/editor.nim"
 
 # Suites.
 VMU = "src/frontend/viewmodel/tests/unit/test_plat53_test_results.nim"
@@ -76,14 +87,26 @@ TBL = "src/frontend/tui/tests/test_plat53_test_results.nim"
 PTY = "src/frontend/tui/tests/real_terminal/test_plat53_test_results_pty.nim"
 PLAN = "src/frontend/gpui/tests/test_plat53_gpui_plan.nim"
 SPEC = "src/tests/gui/tests/test-results-pane/plat53-test-results-capture.spec.ts"
+VMT = "src/frontend/viewmodel/tests/unit/test_test_tab_placement.nim"
+DSPEC = "src/tests/gui/tests/test-results-pane/desktop_suite_run_verdicts.spec.ts"
+ORACLE = "src/frontend/viewmodel/tests/unit/test_plat68_cua_oracle.nim"
 
 SUBJECTS = [VM, FIT, CATALOG, HOST, TUI_PANE, RUNTIME, SHELL, PROFILE, SOURCE,
-            TUI_MAIN, GPUI_LEAF, GPUI_MAIN, VOCAB, NS9]
-SUITES = [VMU, TBL, PTY, PLAN, SPEC]
+            TUI_MAIN, GPUI_LEAF, GPUI_MAIN, VOCAB, NS9, DESKTOP_HOST, SETTING,
+            VIEW, UI_JS, OMNI, CUA, EDITOR]
+SUITES = [VMU, TBL, PTY, PLAN, SPEC, VMT, DSPEC, ORACLE]
 
 TBL_HOST = "*::catalog, ▶, verdicts, selection, a recording opened, kill, refusal"
 PLAN_OPEN = "*::the failing test's ⏵ opens its recording in a new tab; again, and with Shift"
 PLAN_AFTER = "*::the ▶: the desktop's verdicts, message and colours"
+PLAN_TAB = "*::§9: Ctrl opens in this tab; the hover label is the control's title"
+TBL_CTRL = "*::Ctrl inverts the destination; Enter and the palette use the setting"
+TBL_HOVER = "*::hovering a control puts its title on the status line; leaving restores"
+TBL_MAX = "*::a maximized Test Results answers its presses where it is drawn"
+PTY_TAB = "*::§9: a test's tab reused, Ctrl opens in this tab, hover, a maximized pane"
+TBL_RUN = "*::Ctrl+Enter inverts; the palette's Run and Run in Current Tab record"
+PLAN_RUN = "*::§9.3: Ctrl+Enter on the selected row; the palette's Tests: Run"
+PLAN_SET = "*::§9.3: the omnibox's Tests: Open Recordings in the Current Tab"
 
 # (id, [(subject, find, replace), ...], [(suite, filter), ...], what it breaks)
 ARMS = [
@@ -106,8 +129,8 @@ ARMS = [
              "    FitColumn(name: TestColumnNames[1], flex: TestWhereFlex),")],
      [(VMU, None)],
      "§8.4: the name does not outrank the location (the desktop's 1.8fr : 1fr)"),
-    ("V6", [(FIT, "              neverCut: true),",
-             "              neverCut: false),")],
+    ("V6", [(FIT, "    FitColumn(name: TestColumnNames[3], preferredUnits: durationUnits,\n              neverCut: true),",
+             "    FitColumn(name: TestColumnNames[3], preferredUnits: durationUnits,\n              neverCut: false),")],
      [(VMU, None)],
      "§8.4: the duration is cut when the pane is narrow"),
     # ---- the catalog rule ---------------------------------------------------
@@ -128,12 +151,12 @@ ARMS = [
              "                                 options = {})")],
      [(TBL, TBL_HOST)],
      "§8.1: the run is not its own process group (a kill reaches only the shell)"),
-    ("N3", [(HOST, "  if job.openAfter and recordingId.len > 0:",
+    ("N3", [(DESKTOP_HOST, "  if run.openAfter and recordingId.len > 0:",
              "  if false:")],
-     [(TBL, TBL_HOST)],
-     "§8.3: record-and-open records and never opens the recording"),
-    ("N4", [(HOST, "  let why = h.openFolder(folder)",
-             "  let why = h.openFolder(recordingId)")],
+     [(VMT, None), (TBL, TBL_HOST)],
+     "§9.5: record-and-open records and never opens the recording"),
+    ("N4", [(HOST, "  let why = h.openFolder(testId, recordingId, folder, policy)",
+             "  let why = h.openFolder(testId, recordingId, recordingId, policy)")],
      [(TBL, TBL_HOST)],
      "§8.3: the window is handed the recording's id, not its folder"),
     ("N5", [(HOST, "  let events = readQuietly(job.eventsPath)",
@@ -175,12 +198,13 @@ ARMS = [
              "                      vm.openButtonTitle(row),")],
      [(TBL, TBL_HOST)],
      "§8.4: the terminal's `⏵` promises a Shift the terminal cannot hold"),
-    ("T8", [(PROFILE, "     paneTestResults},", "     },"),
+    ("T8", [(PROFILE, "     paneTestResults,", "     "),
             (SHELL, "  elif region.pane == paneTestResults and model.tests.loaded:",
              "  elif false:")],
      [(PTY, None)],
      "§8.4: the terminal draws the report leaf, not the pane"),
-    ("T9", [(TUI_MAIN, "      app.recordingOpener(folder))", '      "")')],
+    ("T9", [(TUI_MAIN, "    of ttpNewTab:\n      let why = app.recordingOpener(folder)",
+             '    of ttpNewTab:\n      let why = ""')],
      [(PTY, None)],
      "§8.3: the terminal says it opened the recording and opens no tab"),
     # ---- GPUI -----------------------------------------------------------------
@@ -196,9 +220,150 @@ ARMS = [
              "    vm.setShiftHeld(false)")],
      [(PLAN, PLAN_OPEN)],
      "§4.4: Shift held does not arm the GPUI `⏵` (no re-record)"),
-    ("G4", [(GPUI_MAIN, "    openRecordingInTab(rr, folder)", "    discard folder")],
+    ("G4", [(GPUI_MAIN, "    let before = gSessionsOpened.len\n    openRecordingInTab(rr, folder)",
+             "    let before = gSessionsOpened.len\n    discard folder")],
      [(PLAN, PLAN_OPEN)],
      "§8.3: the GPUI window opens no tab for a test's recording"),
+    # ---- §9: which tab a test's recording opens in -------------------------
+    ("R1", [(VM, "      return TestTabPlacement(kind: ttpShowTab, tab: t.tab)",
+             "      return TestTabPlacement(kind: ttpNewTab, tab: -1)")],
+     [(VMT, None), (PLAN, PLAN_OPEN)],
+     "§9.1 arm 1: the same recording again opens a second tab"),
+    ("R2", [(VM, "    return TestTabPlacement(kind: ttpReplaceTab, tab: t.tab)",
+             "    return TestTabPlacement(kind: ttpNewTab, tab: -1)")],
+     [(VMT, None), (PTY, PTY_TAB)],
+     "§9.1 rule 4: a re-run of the same test opens another tab"),
+    ("R3", [(VM, "  if policy == topCurrentTab and vm.currentTabReplaceable.val and",
+             "  if policy == topCurrentTab and")],
+     [(VMT, None)],
+     "§9.1 rule 3: an editing session is replaced by a replay"),
+    ("R4", [(VM, "  if redirect: vm.openSetting.val.invert() else: vm.openSetting.val",
+             "  vm.openSetting.val")],
+     [(VMT, None), (TBL, TBL_CTRL)],
+     "§9.3: Ctrl does not invert the destination"),
+    ("R5", [(VM, '  action & " " & vm.openDestinationText(row)', "  action")],
+     [(VMT, None), (PLAN, PLAN_TAB)],
+     "§9.4: the ⏵ title does not say where it opens"),
+    ("R6", [(DESKTOP_HOST, "    openPolicy: host.vm.effectiveOpenPolicy())",
+             "    openPolicy: topNewTab)")],
+     [(VMT, None)],
+     "§9.5: record-and-open forgets the destination chosen at the press"),
+    ("R7", [(SETTING, "    if e.workspace != key:", "    if true:")],
+     [(VMT, None)],
+     "§9.3: setting a workspace again adds a second line for it"),
+    ("R8", [(HOST, "  h.vm.setOpenSetting(replayOpenFor(readReplayOpen(), root))",
+             "  discard root")],
+     [(TBL, TBL_CTRL)],
+     "§9.3: the native host does not read the workspace's setting"),
+    ("R9", [(VIEW, "    discard vm.testTabs.val", "    discard")],
+     [(DSPEC, None)],
+     "§9.4: the desktop's ⏵ title is not redrawn when the test gets a tab"),
+    ("M1", [(RUNTIME, "  if not rt.maximize.active or not rt.layoutBindingEnabled():\n    return rt.layoutGeometry()",
+             "  if true:\n    return rt.layoutGeometry()")],
+     [(TBL, TBL_MAX), (PTY, PTY_TAB)],
+     "CodeTracer-TUI §4.4: a maximized pane's presses go to the arrangement under it"),
+    ("H1", [(RUNTIME, "        rt.testsHoverPointer(event, result)", "        discard")],
+     [(TBL, TBL_HOVER), (PTY, PTY_TAB)],
+     "§9.6: the terminal shows no title on hover"),
+    ("H2", [(RUNTIME, "    model.status.notification = rt.app.testsHover",
+             "    discard")],
+     [(TBL, TBL_HOVER)],
+     "§9.6: the hovered title never reaches the status line"),
+    ("K1", [(RUNTIME, "                             behaviour: (if event.ctrl: TestsRedirectBehaviour",
+             "                             behaviour: (if false: TestsRedirectBehaviour")],
+     [(TBL, TBL_CTRL), (PTY, PTY_TAB)],
+     "§9.3: the terminal drops Ctrl off a ⏵ press"),
+    ("K2", [(SOURCE, "      s.vm.setRedirectHeld(true)", "      s.vm.setRedirectHeld(false)")],
+     [(TBL, TBL_CTRL)],
+     "§9.3: the terminal's Ctrl press is not held through the open"),
+    ("K3", [(RUNTIME, "  let openIn = parseReplayOpenCommandTarget(action)\n  if openIn.ok:",
+             "  let openIn = parseReplayOpenCommandTarget(action)\n  if false:")],
+     [(TBL, TBL_CTRL)],
+     "§9.3: the terminal's palette command does not set replay-open-in"),
+    ("P2", [(TUI_MAIN, "      (replaceTab >= 0 and sessions.hasKey(replaceTab)) or",
+             "      false or")],
+     [(PTY, PTY_TAB)],
+     "§9.5: the terminal opens a new tab where it should replace one"),
+    ("P3", [(TUI_MAIN, "    tests.vm.noteTestTab(testId, int(shownId), recordingId)",
+             "    discard")],
+     [(PTY, PTY_TAB)],
+     "§9.2: the terminal forgets which tab a test's recording is in"),
+    ("G5", [(GPUI_MAIN, "    vm.setRedirectHeld(gPointerCtrl)", "    vm.setRedirectHeld(false)")],
+     [(PLAN, PLAN_TAB)],
+     "§9.3: Ctrl held does not redirect a GPUI ⏵"),
+    ("G6", [(GPUI_MAIN, "      gHoverTests = over", "      discard over")],
+     [(PLAN, PLAN_TAB)],
+     "§9.6: the GPUI window shows no hover label on a Test Results control"),
+    ("G7", [(GPUI_MAIN, "  gTestsVM.noteTestTab(testId, int(gShell.app.activeSessionId()),\n                       recordingId)",
+             "  discard recordingId")],
+     [(PLAN, PLAN_OPEN)],
+     "§9.2: the GPUI window forgets which tab a test's recording is in"),
+    ("D2", [(UI_JS, "    createNewSession(data)\n    data.ipc.send cstring\"CODETRACER::load-recent-trace\",\n      js{traceId: cstring(recordingId)}",
+             "    data.openRecordingById(recordingId)")],
+     [(DSPEC, None)],
+     "§9.5: the desktop loads a test's recording into the edit session (the filed issue)"),
+    ("D3", [(UI_JS, "    saveReplayOpenIn(data, topCurrentTab),", "    saveReplayOpenIn(data, topNewTab),")],
+     [(DSPEC, None)],
+     "§9.3: the desktop's palette command writes the wrong destination"),
+    # ---- §9.3: the palette pair and Ctrl+Enter; §9.7: the context menu -----
+    ("R10", [(VM, "  vm.hasCommandPolicy = true", "  vm.hasCommandPolicy = false")],
+     [(VMT, None), (TBL, TBL_RUN)],
+     "§9.3: the palette pair's destination is not held through its dispatch"),
+    ("R11", [(VM, "  if vm.hasCommandPolicy:\n    return vm.commandPolicy",
+              "  if false:\n    return vm.commandPolicy")],
+     [(VMT, None), (TBL, TBL_RUN)],
+     "§9.3: the host captures the setting, not the command's destination"),
+    ("R12", [(VM, "  let action = vm.recordAndOpenRecording.val\n  if action.isNil:\n    return NoReplayHostText\n  let row = vm.rows.val[i]",
+              "  let action = vm.openExistingRecording.val\n  if action.isNil:\n    return NoReplayHostText\n  let row = vm.rows.val[i]")],
+     [(VMT, None), (TBL, TBL_RUN)],
+     "§9.3: Run opens the existing recording instead of recording"),
+    ("R13", [(OMNI, "                            target: runTestCommandTarget(policy))",
+              "                            target: replayOpenCommandTarget(policy))")],
+     [(PLAN, PLAN_RUN)],
+     "§9.3: the omnibox's Tests: Run sets the setting instead of running"),
+    ("K4", [(RUNTIME, '    let redirected = operation == "list.activate-redirected"',
+             "    let redirected = false")],
+     [(TBL, TBL_RUN), (PTY, PTY_TAB)],
+     "§9.3: the terminal's Ctrl+Enter opens where Enter does"),
+    ("K5", [(CUA, '    BaseRow(chords: "Ctrl+Enter", operation: "list.activate-redirected",',
+             '    BaseRow(chords: "Ctrl+Enter", operation: "list.activate",')],
+     [(ORACLE, None), (TBL, TBL_RUN)],
+     "§9.3: CUA's Ctrl+Enter on a row is a plain open"),
+    ("K6", [(RUNTIME, "  let runIn = parseRunTestCommandTarget(action)\n  if runIn.ok:",
+             "  let runIn = parseRunTestCommandTarget(action)\n  if false:")],
+     [(TBL, TBL_RUN)],
+     "§9.3: the terminal's palette pair is not dispatched"),
+    ("K7", [(SOURCE, "      s.vm.selectTest(c.path)", "      discard c.path")],
+     [(TBL, TBL_RUN)],
+     "§9.3: the terminal's palette pair ignores the selected row"),
+    ("G8", [(GPUI_MAIN, '      gTestsVM.setRedirectHeld(operation == "list.activate-redirected")',
+             "      gTestsVM.setRedirectHeld(false)")],
+     [(PLAN, PLAN_RUN)],
+     "§9.3: the GPUI window's Ctrl+Enter opens where Enter does"),
+    ("G9", [(GPUI_MAIN, "  if gpuiTestsCommand(r, action):\n    return",
+             "  if false:\n    return")],
+     [(PLAN, PLAN_RUN)],
+     "§9.3: the GPUI omnibox's test commands do nothing"),
+    ("G10", [(GPUI_MAIN, "    gTestsVM.selectTest(if sel >= 0 and sel < rows.len: rows[sel].testId",
+              "    gTestsVM.selectTest(if false: rows[sel].testId")],
+     [(PLAN, PLAN_RUN)],
+     "§9.3: the GPUI palette pair ignores the selected row"),
+    ("G11", [(GPUI_MAIN, '    traceGesture("tests: " & gTestsHost.setReplayOpen(openIn.policy))',
+              '    traceGesture("tests: ")')],
+     [(PLAN, PLAN_SET)],
+     "§9.3: the GPUI omnibox's Open Recordings in … writes no setting"),
+    ("D4", [(UI_JS, "  let why = vm.runSelectedTestIn(policy)",
+             '  let why = vm.runTestIn("", policy)')],
+     [(DSPEC, None)],
+     "§9.3: the desktop's palette pair ignores the selected row"),
+    ("D5", [(VIEW, "         onclick = proc() = vm.selectTest(row.testId)):",
+             "         onclick = proc() = discard row.testId):")],
+     [(DSPEC, None)],
+     "§9.3: a click on a desktop row selects nothing"),
+    ("D6", [(EDITOR, "            self.startEditorTestAt(line)",
+             "            self.runTest(self.getLineFunctionName(line + 1), self.name, line, 1)")],
+     [(DSPEC, None)],
+     "§9.7: the editor's context menu loads the recording into the edit session"),
     ("P1", [(VOCAB, '    children.add viewTable("tests.rows", TestResultsColumns, cells)',
              '    discard cells')],
      [(TBL, TBL_HOST)],
@@ -216,15 +381,17 @@ ARMS = [
 DECLARED_SURVIVORS = {"S1"}
 
 IN_BINARY = {VM, FIT, CATALOG, HOST, TUI_PANE, RUNTIME, SHELL, PROFILE, SOURCE,
-             TUI_MAIN, VOCAB}
+             TUI_MAIN, VOCAB, DESKTOP_HOST, SETTING, OMNI, CUA}
   # Subjects compiled into `codetracer-tui`.
-IN_GPUI = {VM, FIT, CATALOG, HOST, GPUI_LEAF, GPUI_MAIN, VOCAB}
+IN_GPUI = {VM, FIT, CATALOG, HOST, GPUI_LEAF, GPUI_MAIN, VOCAB, DESKTOP_HOST,
+           SETTING, OMNI, CUA}
   # Subjects compiled into `codetracer-gpui`.
-IN_DESKTOP = {VM, CATALOG, NS9}
+IN_DESKTOP = {VM, CATALOG, NS9, DESKTOP_HOST, SETTING, VIEW, UI_JS, OMNI, CUA,
+              EDITOR}
   # Subjects compiled into the desktop's bundle.
 PTY_SUITES = {PTY}
 GPUI_SUITES = {PLAN}
-DESKTOP_SUITES = {SPEC}
+DESKTOP_SUITES = {SPEC, DSPEC}
 
 
 def path_of(rel):

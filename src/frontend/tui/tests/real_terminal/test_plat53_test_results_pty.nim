@@ -24,7 +24,11 @@
 ##   * §5: `ct test run` KILLED MID-WAY (SIGKILL to its process group) settles
 ##     — the pane says the run was ended by a signal and nothing is left
 ##     "running…";
-##   * the terminal QUIT DURING A RUN leaves no `ct test run` behind.
+##   * the terminal QUIT DURING A RUN leaves no `ct test run` behind;
+##   * §9 — a test's tab reused and replaced in place, Ctrl+click in this tab,
+##     hover, a maximized pane; §9.3 from the keyboard: `Ctrl+Enter` on a
+##     selected row opens in this tab, and the palette's **Tests: Run**
+##     records the selected test and opens it in a new tab.
 ##
 ## No mocks: the real binary, a real recording made by the Python recorder, a
 ## real `replay-server`, the real `ct`, `ct-test` and `nargo` on a real crate,
@@ -43,7 +47,7 @@ import ../../app/theme/colour_math
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 26
+const ExpectedAssertions = 42
 
 var countedAssertions = 0
 
@@ -369,6 +373,195 @@ suite "PLAT-53: the Test Results pane on a real terminal":
       gone = runCtTestPids(project).len == 0
       sleep(50)
     ck gone
+    sess.terminate()
+    sess.close()
+    removeDir(state)
+    removeDir(project)
+
+  test "§9: a test's tab reused, Ctrl opens in this tab, hover, a maximized pane":
+    # Test-Results-Pane.md §9 on the shipped terminal: a maximized pane
+    # answers its ▶ where it is drawn (codetracer-pm issue
+    # 2026-10-24-tui-maximized-pane-receives-no-pane-clicks); hovering a
+    # control shows its title on the status line; the failing test's ⏵ opens
+    # a NEW tab, ⏵ again SHOWS that tab, a re-record opened REPLACES that
+    # tab's session in place (rule 4: the tab count stays); a Ctrl+press on
+    # the passing test's ⏵ opens it in THIS tab (the count stays again).
+    let calc = resolveFixture(FixtureSpec(
+      name: "calc", program: "test-programs/calc/main.py",
+      recorder: "codetracer-python-recorder",
+      probe: FixtureProbe(kind: pkPythonRecorder),
+      buildHint: "Install codetracer_python_recorder into the interpreter " &
+                 "`ct` will use.",
+      blockedOn: ""))
+    doAssert calc.outcome == foRecorded, calc.detail
+    let ct = fixture_provider.findCtBinary()
+    doAssert ct.len > 0, "prerequisite missing: ct (build it, or set CT_BIN)"
+    let project = writePlat53Project("ct-plat53-pty9-")
+    let state = getTempDir() / ("plat53-pty9-" & $getCurrentProcessId())
+    removeDir(state)
+    createDir(state)
+    var sess = newTuiTest(tuiBinary(), @["--theme=dark", calc.tracePath])
+      .width(Cols).height(Rows).transcript()
+      .workDir(project)
+      .envRemove("TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE", "TMUX",
+                 "STY", "NERD_FONT", "NERDFONT", "COLORFGBG")
+      .envSet("TERM", "xterm-256color").envSet("LANG", "en_US.UTF-8")
+      .envSet("COLORTERM", "truecolor")
+      .envSet("CT_BIN", ct)
+      .envSet("XDG_STATE_HOME", state)
+      .envSet("CODETRACER_HOME", state / "ct-home")
+      .envSet("CODETRACER_TUI_LAYOUT_DIR", state / "layout")
+      .envSet("TEST_CERTIFICATES_DIR", state / "certs")
+      .envSet("TEST_CERTIFICATES_SYSTEM_DIR", state / "certs-system")
+      .carryRunMark()
+      .spawn()
+    settleOnDebugger(sess, Cols, Rows)
+    proc sessionTabs(want: int): int =
+      ## How many session tabs the window holds, read off its ENGINES: each
+      ## tab's session runs its own `replay-server` (this run's, by its mark),
+      ## and a replaced session's is stopped (rule 2) — so this counts tabs
+      ## and catches a replacement that leaked its backend, which the strip
+      ## (scrolled to fit beside the omnibox) cannot show. Polled until it is
+      ## `want`, for the asynchronous exit of a stopped engine.
+      let deadline = getMonoTime() + initDuration(milliseconds = 15_000)
+      while true:
+        result = markedReplayServerPids().len
+        if result == want or getMonoTime() >= deadline:
+          return
+        sleep(100)
+    var s = sess.snap()
+    let (tr, tc) = s.testsTabAt()
+    doAssert tr >= 0, "no Tests tab:\n" & s.screenText()
+    sess.press(tr, tc)
+    discard sess.waitFor("2 tests, not run yet")
+    ck sessionTabs(1) == 1
+
+    # MAXIMIZED, through the tab's own menu, then its ▶ pressed where drawn.
+    sess.press(tr, tc, button = 2)
+    let (mr, mc) = sess.waitFor("Maximise container")
+    sess.press(mr, mc + 2)
+    let (hr, _) = sess.waitFor("2 tests, not run yet")
+    s = sess.snap()
+    let runCol = s.text(hr).cellFind("▶")
+    ck runCol > Cols div 2          # drawn across the whole body
+    sess.press(hr, runCol)
+    discard sess.waitFor("1 passed, 1 failed", RunBudgetMs)
+    # Back to the arrangement (the menu now offers to restore it).
+    s = sess.snap()
+    let (tr1, tc1) = s.testsTabAt()
+    let (tr2, tc2) = if tr1 >= 0: (tr1, tc1) else: s.findRow(" Tests")
+    sess.press(tr2, tc2 + 1, button = 2)
+    let (nr, nc) = sess.waitFor("Minimise container")
+    sess.press(nr, nc + 2)
+    sleep(400)
+
+    # HOVER: the failing test's ⏵ — its title on the status line.
+    s = sess.snap()
+    let (fr, _) = s.findRow("✗ test_fai")   # the row (its name may be cut)
+    ck fr > 0
+    let openCol = s.text(fr).cellFind("⏺⏵") + 1
+    ck openCol > 0
+    sess.mouse(35, fr, openCol)
+    discard sess.waitFor("Record test_fails and open the recording", 10_000)
+    sess.mouse(35, fr, 2)
+    sleep(400)
+    ck sess.snap().text(Rows - 1).find("Record test_fails and open") < 0
+
+    proc opened(sess: var TuiTestSession; words: string;
+                notFolder = ""): string =
+      ## The folder of the next "opened the recording <folder><words>" note
+      ## that names a folder other than `notFolder`.
+      let deadline = getMonoTime() + initDuration(milliseconds = RunBudgetMs)
+      var last: Snapshot
+      while getMonoTime() < deadline:
+        last = sess.snap()
+        for r in 0 ..< Rows:
+          let t = last.text(r)
+          let at = t.find("opened the recording ")
+          if at >= 0 and t.contains(words):
+            let folder = t[at + "opened the recording ".len .. ^1].split(' ')[0]
+            if folder != notFolder:
+              return folder
+        sleep(100)
+      raise newException(AssertionFailedError, "no note '" & words &
+                         "'; screen:\n" & last.screenText())
+    # ⏵ — record-and-open: a NEW tab.
+    sess.press(fr, openCol)
+    let first = sess.opened("in a new tab")
+    discard sess.waitFor("test_fails #1", 60_000)
+    ck sessionTabs(2) == 2
+    # ⏵ again (the pane is in this tab's arrangement too): its OWN tab.
+    proc reopen(sess: var TuiTestSession; test, glyph: string; button = 0) =
+      var s = sess.snap()
+      var (r, _) = s.findRow(test)
+      if r < 0:
+        let (t1, t2) = s.testsTabAt()
+        sess.press(t1, t2)
+        discard sess.waitFor(test)
+        s = sess.snap()
+        r = s.findRow(test)[0]
+      let c = s.text(r).cellFind(glyph) + (if glyph.runeLen > 1: 1 else: 0)
+      doAssert c >= 0, "no " & glyph & " on " & test & ":\n" & s.screenText()
+      sess.press(r, c, button)
+    sess.send("\x1b")    # a key, so the status line moves on
+    sess.reopen("· test_fai", "⏵")
+    ck sess.opened("in its own tab") == first
+    ck sessionTabs(2) == 2
+    # ⟳ records it again (and stays); ⏵ then opens the NEW recording in the
+    # test's own tab, replacing its session in place: still two tabs.
+    sess.reopen("· test_fai", "⟳")
+    sleep(500)
+    discard sess.waitFor("2 tests, not run yet", RunBudgetMs)
+    let deadline = getMonoTime() + initDuration(milliseconds = RunBudgetMs)
+    while getMonoTime() < deadline and sess.snap().findRow("running…")[0] >= 0:
+      sleep(200)
+    sess.reopen("· test_fai", "⏵")
+    let second = sess.opened("in its own tab", notFolder = first)
+    ck second != first
+    discard sess.waitFor("test_fails #1", 60_000)
+    ck sessionTabs(2) == 2
+    # Ctrl+press (SGR 16) on the passing test's ⏵: record-and-open IN THIS
+    # TAB, which is a replay — replaced, the strip keeps two tabs.
+    sess.reopen("· test_pas", "⏺⏵", button = 16)
+    let third = sess.opened("in this tab", notFolder = second)
+    ck third != second
+    discard sess.waitFor("test_passes #1", 60_000)
+    ck sessionTabs(2) == 2
+    # §9.3 FROM THE KEYBOARD. The failing test selected (a press on its
+    # name), then `Ctrl+Enter` (`CSI 13;5u`): its existing recording opens
+    # IN THIS TAB — the setting, a new tab, inverted — the count stays.
+    proc select(sess: var TuiTestSession; test: string) =
+      var s = sess.snap()
+      var (r, _) = s.findRow(test)
+      if r < 0:
+        let (t1, t2) = s.testsTabAt()
+        sess.press(t1, t2)
+        discard sess.waitFor(test)
+        s = sess.snap()
+        r = s.findRow(test)[0]
+      sess.press(r, s.text(r).cellFind(test) + 2)
+      sleep(300)
+    sess.send("\x1b")
+    sess.select("· test_fai")
+    sess.send("\x1b[13;5u")
+    ck sess.opened("in this tab", notFolder = third) == second
+    discard sess.waitFor("test_fails #1", 60_000)
+    ck sessionTabs(2) == 2
+    # The palette's **Tests: Run** on the passing test (its tab was just
+    # taken): recorded afresh and opened in a NEW tab — three tabs.
+    sess.send("\x1b")
+    sess.select("· test_pas")
+    sess.send("\x10")                # Ctrl+P, the palette
+    sleep(400)
+    sess.send(":Tests: Run")
+    sleep(300)
+    sess.send("\r")
+    let fourth = sess.opened("in a new tab", notFolder = second)
+    ck fourth != third
+    discard sess.waitFor("test_passes #1", 60_000)
+    ck sessionTabs(3) == 3
+    sess.send("\x11")
+    discard sess.waitExit(initDuration(seconds = 20))
     sess.terminate()
     sess.close()
     removeDir(state)

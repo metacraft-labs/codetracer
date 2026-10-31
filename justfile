@@ -423,14 +423,14 @@ test-reprobuild-macos-daemon-build:
 test-reprobuild-linux-smoke:
   ./ci/reprobuild/linux-smoke.sh
 
-# Drives the vm-harness Hyper-V backend through a fresh
+# Drives the gosti Hyper-V backend through a fresh
 # install -> verify -> uninstall cycle against the produced
 # CodeTracer-Setup.exe. Requires a Windows host with Hyper-V enabled
 # and a `repro-m69-hyperv` VM carrying a `base-clean` snapshot;
-# vm-harness's HyperVBackend skips with a clear message when those
+# gosti's HyperVBackend skips with a clear message when those
 # preconditions are not met. The recipe (re)builds the installer
 # first via reprobuild's `windows-installer` target, then exports
-# the path through VMH_INSTALLER_HOST_PATH so the test picks it up.
+# the path through GOSTI_INSTALLER_HOST_PATH so the test picks it up.
 test-windows-installer:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -439,13 +439,13 @@ test-windows-installer:
     *) echo "Error: test-windows-installer requires a Windows host." >&2; exit 2 ;;
   esac
 
-  vm_harness_root="${VM_HARNESS_ROOT:-../vm-harness}"
-  if [ ! -d "$vm_harness_root/src/vm_harness" ]; then
-    echo "Error: vm-harness sibling not found at $vm_harness_root." >&2
-    echo "Set VM_HARNESS_ROOT or clone metacraft-labs/vm-harness alongside codetracer." >&2
+  gosti_root="${GOSTI_ROOT:-../gosti}"
+  if [ ! -d "$gosti_root/src/gosti" ]; then
+    echo "Error: gosti sibling not found at $gosti_root." >&2
+    echo "Set GOSTI_ROOT or clone metacraft-labs/gosti alongside codetracer." >&2
     exit 2
   fi
-  vm_harness_root="$(cd "$vm_harness_root" && pwd)"
+  gosti_root="$(cd "$gosti_root" && pwd)"
 
   bash scripts/build-once.sh
   : "${REPROBUILD_BIN:=../reprobuild/build/bin/repro.exe}"
@@ -459,10 +459,10 @@ test-windows-installer:
     exit 1
   fi
 
-  cd "$vm_harness_root"
-  VMH_INSTALLER_HOST_PATH="$installer" \
+  cd "$gosti_root"
+  GOSTI_INSTALLER_HOST_PATH="$installer" \
     nim r --hints:off --warnings:off --verbosity:0 \
-      tests/e2e/t_vm_harness_hyperv_windows_installer_smoke.nim
+      tests/e2e/t_gosti_hyperv_windows_installer_smoke.nim
 
 test-reprobuild-hcr-mcr-dap:
   #!/usr/bin/env bash
@@ -1051,7 +1051,21 @@ test-rust:
   # codetracer-observability-e2e checkout, which brings one up.
   echo "NOT RUN in this lane: mcp_dive_in_fetch_gateway_test (needs a running codetracer-ci;"
   echo "  codetracer-observability-e2e: just t_mcp_dive_in_fetch_sends_token_only_to_gateway)"
-  cargo nextest run --release --run-ignored ignored-only -E "not binary(mcp_dive_in_fetch_gateway_test) and ($bm_filter)" || \
+  # daemon_socket_peer_test's t_mcp_daemon_answers_no_peer_of_another_user
+  # needs a second user, which it reaches through `sudo -n -u nobody`; it
+  # fails, never skips, where that does not work. A lane whose host provides
+  # it declares CODETRACER_TEST_SECOND_USER=1 (ci/test/non-gui.sh, Linux leg:
+  # the self-hosted Linux runners give the job user passwordless sudo) and
+  # runs it here. Anywhere else, such as a developer host without
+  # passwordless sudo, it is excluded by name and printed as NOT RUN.
+  peer_filter='all()'
+  if [ "${CODETRACER_TEST_SECOND_USER:-}" != "1" ]; then
+    peer_filter='not (binary(daemon_socket_peer_test) and test(=t_mcp_daemon_answers_no_peer_of_another_user))'
+    echo "NOT RUN in this lane (CODETRACER_TEST_SECOND_USER is not 1): daemon_socket_peer_test"
+    echo "  t_mcp_daemon_answers_no_peer_of_another_user (needs \`sudo -n -u nobody\`; runs in"
+    echo "  codetracer.yml test-non-gui, Linux leg, where ci/test/non-gui.sh declares it)"
+  fi
+  cargo nextest run --release --run-ignored ignored-only -E "not binary(mcp_dive_in_fetch_gateway_test) and ($peer_filter) and ($bm_filter)" || \
     if [ "$?" = "4" ]; then \
       echo "  (no ignored tests in backend-manager; treating as no-op)"; \
     else \
@@ -1840,6 +1854,7 @@ test-frontend-js:
   # module, so this recipe is where the variable comes from.
   source ci/lib/codetracer-home.sh
   ct_export_scratch_codetracer_home frontend-js
+  nim_sourcemap_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-nim-sourcemap-test.XXXXXX.js")"
   frontend_lang_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-frontend-lang-test.XXXXXX.js")"
   scratchpad_dispatch_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-scratchpad-add-dispatch-test.XXXXXX.js")"
   target_axes_js_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-target-axes-js-test.XXXXXX.js")"
@@ -1854,7 +1869,11 @@ test-frontend-js:
   run_to_cursor_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-run-to-cursor-test.XXXXXX.js")"
   html_sinks_probe="$(mktemp "${TMPDIR:-/tmp}/codetracer-html-sinks-probe.XXXXXX.js")"
   dap_refusal_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-dap-refusal-test.XXXXXX.js")"
-  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$monaco_operations_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$component_ids_across_sessions_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe" "$dap_refusal_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
+  trap 'rm -f "$nim_sourcemap_test" "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$monaco_operations_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$component_ids_across_sessions_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe" "$dap_refusal_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
+  echo "Running Nim Source Map V3 frontend tests..."
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctIndex -d:server \
+    --out:"$nim_sourcemap_test" js src/frontend/tests/nim_sourcemap_test.nim
+  node "$nim_sourcemap_test"
   echo "Running frontend language mapping tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$frontend_lang_test" js src/frontend/tests/frontend_lang_test.nim
@@ -2767,14 +2786,13 @@ demo-request-panel LANG="synthetic":
 # appending to a live file.  Every stage nonetheless re-seals its earlier chunks
 # to the SAME bytes — seal points and record contents are both derived from the
 # request index, never from the stage count — so each stage's span stream is a
-# strict CHUNK PREFIX of the next, which is exactly what the backend's
-# chunk-count cursor requires.  The whole reader half is therefore genuinely
-# exercised: held reader, per-poll delta, `reset` only on the first poll,
-# client-side last-record-wins across deltas.  True in-place append needs the
-# writer built on `createCtfsStreaming(path)`; that is a writer change, not a
-# panel change.
+# strict CHUNK PREFIX of the next. Replay explicitly follows requests with
+# --follow-request-spans=1: each poll asks for the count and refreshes the
+# bounded visible window, including the in-flight row's later completion.
+# Following continues until the window closes; a finalized stage does not
+# advertise whether another stage will replace it.
 #
-# Both properties are asserted headlessly by
+# The staged containers are asserted headlessly by
 # src/tests/gui/tests/request-panel/demo_recipe_vm_test.nim, over the same stage
 # sequence the loop below walks.
 demo-request-panel-live LANG="synthetic" INTERVAL="2":
@@ -2806,7 +2824,7 @@ demo-request-panel-live LANG="synthetic" INTERVAL="2":
   "$work/demo_request_session" "$demo_dir" --through=1 >/dev/null
 
   # Grow the session in the background while the GUI tails it.  The GUI polls
-  # `ct/load-request-spans-since` every 500 ms, so a 2 s stage interval makes
+  # the count and visible request window every 500 ms, so a 2 s stage interval makes
   # each new row visibly arrive on its own.
   #
   # The `--open-only` element is the in-flight step: it adds request 6's open
@@ -2836,7 +2854,7 @@ demo-request-panel-live LANG="synthetic" INTERVAL="2":
   # never reaches a `wait`.  The grower is already a detached child and keeps
   # feeding the container; it exits on its own after the eighth stage.
   echo "[demo] launching the GUI — watch rows appear in the REQUESTS panel"
-  exec ct replay -t "$demo_dir"
+  exec ct replay --follow-request-spans=1 -t "$demo_dir"
 
 # Elixir materialized trace DAP flow integration test (DB-based, no rr required).
 # Uses CODETRACER_BEAM_RECORDER_PATH for explicit sibling discovery
@@ -3788,6 +3806,15 @@ test-plat18-fake-timer:
   exec > >(tee test-logs/test-plat18-fake-timer.log) 2>&1
   bash ci/test/plat18-fake-timer-builds.sh
 
+# The marshalling mutation harness must compile the isonim tree it mutates,
+# even when the dev shell exports ISONIM_SRC for another copy.
+test-plat18-harness-grades-mutated-tree:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-plat18-harness-grades-mutated-tree.log) 2>&1
+  bash ci/test/plat18-harness-grades-the-tree-it-mutates.sh
+
 # PLAT-18 deliverable 2: the vertical slice — the variables pane with the
 # 600-member fixture, driven by PLAT-17's core, in a REAL Electron renderer
 # against a REAL document.
@@ -3959,6 +3986,13 @@ test-ct-test-certificates:
 test-nix-package-ct-test-run:
   bash ci/test/nix-package-ct-test-run.sh
 
+# CTC-3a's negative control: the conformance-vector walker the
+# `ct-test-certificates` lane built (or `walker`) passes at the committed pin
+# and fails at an earlier revision of the standard and at one the sibling
+# lacks. Run `just test-ct-test-certificates` first, or name a walker binary.
+test-certificate-vectors-wrong-pin walker="":
+  bash ci/test/certificate-vectors-wrong-pin.sh {{quote(walker)}}
+
 # GUI ViewModel suites that spawn a real backend process (`headless_session` /
 # `stdio_backend`).  `test-vm-native` and `test-vm-js` both exclude them; until
 # this recipe existed those exclusions pointed at nothing, so three of the four
@@ -4024,11 +4058,11 @@ test-host-instantiations:
 # THE RENDERER, COMPILED BY CI AT LAST — both arms.
 #
 # The lane note in `host-instantiations` above recorded, honestly, that nothing
-# in CI compiled `renderer.nim`: the JS lane family passes `-d:nodejs`, under
-# which the renderer does not build at all (`kdom`'s `createElementNS` is a
-# browser binding and node is not a browser), so forcing it in would have gated
-# it in a configuration nothing ships. The only thing compiling the renderer
-# was the tup product build, at package time.
+# in CI compiled `renderer.nim`: the JS lane family passes `-d:nodejs`, which
+# selects std/dom's dummy document instead of the page's DOM. It used to also
+# fail compilation through an obsolete SVG helper; that helper's removal did
+# not make the node configuration a shipped renderer. The only thing compiling
+# the renderer was the tup product build, at package time.
 #
 # THAT GAP COST A WORKING RENDERER ON `dev`. Commit 333ec709 removed
 # `ui/ui_imports.nim`'s blanket re-export of `electron_lib` after auditing its
@@ -4058,7 +4092,7 @@ test-renderer-browser:
   bash ci/test/renderer-browser-build.sh
 
 # Renderer modules RUN, not only compiled: the `renderer-dom` lane builds its
-# suites for the browser target (the only target `ui/state.nim` compiles for)
+# suites for the browser target (using the page's actual DOM bindings)
 # and runs them under node over jsdom (`src/frontend/tests/jsdom-run.mjs`).
 # `locals_answer_identity_test.nim` drives the web renderer's `ct/load-locals`
 # senders through the real response fan-out and asserts one request per stop,
@@ -4067,6 +4101,9 @@ test-renderer-browser:
 # `later_session_launch_failure_test.nim` delivers a refusal tagged for a tab
 # that is not on screen and asserts it reaches that tab's status bar only, and
 # is painted into `#status` when that tab is shown.
+# `tab_session_ids_test.nim` opens and closes tabs and asserts a new tab's
+# session id is never one the window has used, and that a tab's requests name
+# its replay.
 #
 # NEEDS the checkout's `node_modules/jsdom`, which the dev shell links from the
 # Nix-built node modules on entry; the runner fails (rather than skipping) when
@@ -4103,6 +4140,8 @@ test-renderer-chromium:
 # `dap_session_routing_test.nim` drives the main process's DAP router with two
 # sessions whose requests share a `seq` and asserts each answer reaches the
 # session that asked.
+# `dap_replay_selection_test.nim` asserts the router selects a tab's request
+# onto the replay the Backend Manager answered for that tab, not by its tab id.
 test-main-process:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -4296,12 +4335,9 @@ test-low-level-code-row-click: build-storybook-components
 # strip the panes are actually in, because a pane exiled at zero width
 # satisfies a presence check exactly as a working one does.
 #
-# ONE ARM SKIPS HERE, LOUDLY AND COUNTED SEPARATELY. Without a replay engine
-# and a Noir toolchain — both OPTIONAL bundle assets this recipe does not build
-# — debug mode reaches no session and opens no source file, so the debug-mode
-# editor has nothing to measure. The gate reads that from the product (the edit
-# legs carry a source tab, the debug legs carry none) and skips rather than
-# reddening; a permanently red lane stops being read.
+# The already-open source must survive every transition, even without replay
+# tools. Supplied-report tests first check that missing tabs or unpainted
+# editors fail the gate; the browser then measures the real workspace.
 #
 # Reuses an assembled bundle when CT_WEB_BUNDLE_DIR is set; assembles one
 # otherwise (~80s), then ~20s in the browser.
@@ -4310,6 +4346,7 @@ test-mode-layout-in-browser:
   set -euo pipefail
   mkdir -p test-logs
   exec > >(tee test-logs/test-mode-layout-in-browser.log) 2>&1
+  python3 ci/test/mode-layout-in-browser-test.py
   bash ci/test/mode-layout-in-browser.sh
 
 # A TEST ROW OFFERS TWO ACTIONS AND ONLY ONE OF THEM RE-RUNS.
@@ -4726,6 +4763,26 @@ test-state-values-in-browser *args:
   exec > >(tee test-logs/test-state-values-in-browser.log) 2>&1
   bash ci/test/state-values-in-browser.sh {{args}}
 
+# Every Call Trace row is exactly its row box, 1.5625em, at every zoom --
+# including the rows that show a return value.
+#
+# A row with a return value used to lay out ~0.8 px taller than the others
+# (two typefaces on one baseline-aligned line), so the pane's row advance was
+# not its row box and drifted with the data (codetracer-pm issue
+# 2026-10-18-electron-calltrace-row-advance-exceeds-its-own-row-box.md). This
+# mounts the real view under the real stylesheet and the real fonts, measures
+# every row at 16/20/13/12 px roots, and its mutation arms strip the fix to
+# show the assertion reddens for exactly those rows.
+#
+# Needs nim, Chromium and stylus from the dev shell; it EXITS 2 rather than
+# passing when any is absent. Pass a path to write a screenshot.
+test-calltrace-row-box-in-browser *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-calltrace-row-box-in-browser.log) 2>&1
+  bash ci/test/calltrace-row-box-in-browser.sh {{args}}
+
 test-noir-replay-in-browser:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -5035,6 +5092,11 @@ test-book-isonim:
   # sibling inputs by hash and a workspace whose siblings are ahead of that pin
   # fails to evaluate at all — which would turn a green suite into an
   # infrastructure error.
+  # The book compiles against its siblings through a generated nim.cfg, the
+  # one the publish uses (ci/lib/book-isonim-nimcfg.sh says why); removed on
+  # exit so the tree stays clean.
+  bash ci/lib/book-isonim-nimcfg.sh "$PWD"
+  trap 'rm -f docs/book-isonim/nim.cfg' EXIT
   if just --justfile docs/book-isonim/Justfile \
        --working-directory docs/book-isonim test; then
     exit 0
@@ -5550,6 +5612,13 @@ plat49-capture-electron *args:
 plat54-capture-electron *args:
   bash scripts/plat54-capture-electron.sh "$@"
 
+# PLAT-58: the desktop's REQUESTS panel on the RS-M4 demo session, as the
+# terminal's and GPUI's Requests panes are measured against it — written to
+# `src/tests/visual/answers/plat58-requests.electron.json`.
+[positional-arguments]
+plat58-capture-electron *args:
+  bash scripts/plat58-capture-electron.sh "$@"
+
 # The desktop's caption bar, strips, menu surface, right-click menus and click
 # behaviours, as the terminal's and GPUI's are measured against them —
 # written to `src/tests/visual/answers/plat50-desktop.electron.json`.
@@ -5582,6 +5651,22 @@ plat53-capture-electron *args:
 [positional-arguments]
 plat55-capture-electron *args:
   bash scripts/plat55-capture-electron.sh "$@"
+
+# PLAT-56: the desktop's BUILD panel and status bar are the reference the
+# terminal's and the GPUI window's Build Output panes are measured against:
+# each line's class, text and colours after real coloured `gcc` builds (one
+# failing, one passing), the verdict, the status bar's build indicator, a
+# press on a located line and the history picker — written to
+# `src/tests/visual/answers/plat56-build-output.electron.json`.
+[positional-arguments]
+plat56-capture-electron *args:
+  bash scripts/plat56-capture-electron.sh "$@"
+
+# Build-Output-Pane.md §3.2, §3.6, §3.8, §3.9, §3.11, §3.12: the desktop's
+# build tasks, task picker, Stop, BUILD panel reveal and editor diagnostics,
+# real `gcc` builds run by its main process (Xvfb 2560x1440 when no DISPLAY).
+build-tasks-electron *args:
+  bash scripts/build-tasks-electron.sh "$@"
 
 # The §30a arm: the two answer producers are independent readers.
 plat35-answer-independence:
@@ -6881,3 +6966,19 @@ plat51-capture-electron *args:
 # Ctrl+Shift+B, the user's keybindings.json and its reload).
 plat68-desktop-keys *args:
   bash scripts/plat68-desktop-keys.sh {{args}}
+
+# One keybindings.json read by the terminal (a real pty), GPUI (the window
+# plan) and the desktop (the real Electron app) in one run: a rebound pane
+# operation and a `-command` removal behave identically on all three.
+plat68-one-keymap:
+  bash ci/test/plat68-one-keymap-three-front-ends.sh
+
+# Published parity figures require two independent captures of each renderer.
+# Raw capture recipes above produce diagnostics, not stable parity scalars.
+[positional-arguments]
+plat37-parity *args:
+  bash ci/test/plat37-parity.sh "$@"
+
+# Real-FLIP stability/refusal controls, independent of GUI permissions.
+test-plat37-parity:
+  bash ci/test/plat37-parity.sh --test

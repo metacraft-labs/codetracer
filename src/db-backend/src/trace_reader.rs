@@ -1355,7 +1355,10 @@ pub trait TraceReader: std::fmt::Debug + Send {
     /// 2. Workdir-stripped relative path match
     /// 3. Suffix match (component-wise)
     /// 4. Canonicalized path match (resolves symlinks)
-    /// 5. Reverse canonicalize (stored paths may be symlink-resolved)
+    /// 5. Reverse canonicalize: stored absolute paths are canonicalized and
+    ///    compared against BOTH the requested path as given and its canonical
+    ///    form, so a client may name a host file by any spelling that resolves
+    ///    to it (CodeTracer-MCP-Server.md §2.5)
     /// 6. Filename-only match — **all** matches, no longer only a unique one
     ///
     /// On Windows, path separators are normalized at each stage.
@@ -1478,9 +1481,17 @@ pub trait TraceReader: std::fmt::Debug + Send {
             return sorted(ids);
         }
 
+        // The requested path's canonical spelling, shared by stages 4 and 5.
+        // Resolving it is a host stat, so it is computed only with host reads
+        // on; with them off it is `None` and nothing below touches the host.
+        let canonical_request: Option<std::path::PathBuf> = if host_reads.is_allowed() {
+            abs_path.canonicalize().ok()
+        } else {
+            None
+        };
+
         // 4. Canonicalize and retry (a host stat: never with host reads off).
-        if host_reads.is_allowed()
-            && let Ok(canonical) = abs_path.canonicalize()
+        if let Some(canonical) = canonical_request.as_deref()
             && canonical != abs_path
         {
             if let Some(canonical_str) = canonical.to_str() {
@@ -1504,9 +1515,14 @@ pub trait TraceReader: std::fmt::Debug + Send {
             }
         }
 
-        // 5. Reverse canonicalize: stored paths may be symlink-resolved (a
-        //    host stat of every absolute recorded path: never with host reads
-        //    off).
+        // 5. Reverse canonicalize: stored paths may be symlinks, so each
+        //    absolute recorded path is canonicalized and compared with BOTH
+        //    the requested path as given and its canonical spelling. Comparing
+        //    canonical against canonical is what lets a client name a host file
+        //    by any spelling that resolves to it — e.g. macOS's `/var/...`,
+        //    where `/var -> /private/var` (CodeTracer-MCP-Server.md §2.5). This
+        //    is a host stat of every absolute recorded path: never with host
+        //    reads off.
         let ids: Vec<PathId> = self
             .path_entries_iter()
             .filter_map(|(stored_path, id)| {
@@ -1516,7 +1532,8 @@ pub trait TraceReader: std::fmt::Debug + Send {
                 let sp = std::path::Path::new(stored_path);
                 if sp.is_absolute()
                     && let Ok(canonical_stored) = sp.canonicalize()
-                    && canonical_stored == abs_path
+                    && (canonical_stored == abs_path
+                        || canonical_request.as_deref() == Some(canonical_stored.as_path()))
                 {
                     Some(id)
                 } else {

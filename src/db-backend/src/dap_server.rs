@@ -2162,7 +2162,7 @@ pub fn handle_request(
             req.load_args::<dap_types::VariablesArguments>()?,
             sender.clone(),
         )?,
-        "restart" => handler.run_to_entry(req.clone(), None, sender.clone())?,
+        "restart" => handler.run_to_entry_request(req.clone(), sender.clone())?,
         "setBreakpoints" => handler.set_breakpoints(
             req.clone(),
             req.load_args::<dap_types::SetBreakpointsArguments>()?,
@@ -2194,8 +2194,12 @@ pub fn handle_request(
         "ct/event-load" => handler.event_load(req.clone(), sender.clone())?,
         "ct/load-terminal" => handler.load_terminal(req.clone(), sender.clone())?,
         "ct/load-terminal-lines" => handler.load_terminal_lines(req.clone(), sender.clone())?,
-        "ct/collapse-calls" => handler.collapse_calls(req.clone(), req.load_args::<CollapseCallsArgs>()?)?,
-        "ct/expand-calls" => handler.expand_calls(req.clone(), req.load_args::<CollapseCallsArgs>()?)?,
+        "ct/collapse-calls" => {
+            handler.collapse_calls(req.clone(), req.load_args::<CollapseCallsArgs>()?, sender.clone())?
+        }
+        "ct/expand-calls" => {
+            handler.expand_calls(req.clone(), req.load_args::<CollapseCallsArgs>()?, sender.clone())?
+        }
         // NOT `req.load_args::<Location>()`. `Location` is `#[serde(default)]`
         // at container level, so that call succeeds on ANY JSON object and
         // hands the handler a zeroed location — `rr_ticks == 0`, which
@@ -2290,7 +2294,7 @@ pub fn handle_request(
             handler.goto_ticks(req.clone(), GoToTicksArguments { thread_id: 0, ticks }, sender.clone())?
         }
         "ct/load-flow" => handler.load_flow(req.clone(), req.load_args::<CtLoadFlowArguments>()?, sender.clone())?,
-        "ct/run-to-entry" => handler.run_to_entry(req.clone(), None, sender.clone())?,
+        "ct/run-to-entry" => handler.run_to_entry_request(req.clone(), sender.clone())?,
         "ct/mcr-live-step" => handler.mcr_live_step(
             req.clone(),
             req.load_args::<crate::dap_handler::McrLiveStepArguments>()?,

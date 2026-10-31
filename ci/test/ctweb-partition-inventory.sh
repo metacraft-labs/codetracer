@@ -42,9 +42,21 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # converted on 2026-10-01. Shrinking is free; growing
 # means editing this table, deliberately.
 #
-#   frontend/ui_js.nim                        5  the renderer entry: the
+#   frontend/ui_js.nim                        7  the renderer entry: the
 #                                                socket.io arm (§7.5's own
-#                                                example) and four siblings
+#                                                example) and four siblings;
+#                                                +2 RECORDED 2026-10-30 (landed
+#                                                2026-10-22, `055662a6458`
+#                                                "edit-mode topbar", unrecorded
+#                                                until this sweep found the gate
+#                                                red): the import of
+#                                                `ui/desktop_edit_toolbar` and
+#                                                its one installation, the
+#                                                shape of `layout.nim`'s pair.
+#                                                The web studio composes its own
+#                                                toolbar in `ui/web_noir_build`;
+#                                                converting these two is the
+#                                                same §7.5 trade as the rest.
 #   frontend/platform_host.nim                2  the host-module switch and the
 #                                                bootstrap that matches it
 #   frontend/ui/layout.nim                    2  the `panel_transfer` import and
@@ -71,7 +83,7 @@ frontend/subwindow.nim 1
 frontend/ui/agentic_worktree_test_hooks.nim 1
 frontend/ui/layout.nim 2
 frontend/ui/panel_transfer.nim 1
-frontend/ui_js.nim 5"
+frontend/ui_js.nim 7"
 
 actual="$(
 	grep -rn 'defined(ctWeb)' src/ |

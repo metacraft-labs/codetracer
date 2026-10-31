@@ -2,18 +2,22 @@
 
 Viewport-Driven-Loading, Decided Q4: a sweep's results are bounded by the
 caller, so a script that wants every hit of a long recording says so
-(``limit=None``). These tests pin what the method SENDS to the daemon.
+(``limit=None``). These tests pin what the method SENDS to the daemon, and
+that a refused sweep raises with the daemon's reason.
 
 WHY A FAKE CONNECTION: the property under test is the request the method
-writes (``ct/py-run-tracepoints`` and its ``limit``) and the refusal of a
-call without one, neither of which needs a daemon or a recording; the
-daemon's handling of ``limit`` is covered by the backend-manager's tests.
+writes (``ct/py-run-tracepoints`` and its ``limit``), the refusal of a
+call without one, and what the method does with a refusal answer, none of
+which needs a daemon or a recording; the daemon's handling of ``limit``, and
+its passing on of a replay server's refusal as that answer, are covered by
+the backend-manager's tests.
 """
 
 from __future__ import annotations
 
 import pytest
 
+from codetracer.exceptions import TraceError
 from codetracer.trace import Trace
 
 
@@ -67,3 +71,29 @@ def test_a_bad_limit_is_refused(bad):
     with pytest.raises(ValueError):
         trace.run_tracepoints(limit=bad)
     assert connection.sent == []
+
+
+class RefusingConnection:
+    """Answers the sweep as the daemon answers a refused one."""
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+
+    def send_request(self, command: str, arguments: dict) -> dict:
+        return {
+            "type": "response",
+            "command": command,
+            "success": False,
+            "message": self.message,
+        }
+
+
+def test_a_refused_sweep_raises_with_the_daemons_reason():
+    # The daemon answers a sweep the replay server refused with
+    # ``success: false`` and the reason (it used to answer nothing, and the
+    # call waited for ever); the method must surface that reason rather
+    # than return an empty result list.
+    reason = "ct/run-tracepoints failed: no trace is loaded"
+    trace = Trace("/rec", RefusingConnection(reason))  # type: ignore[arg-type]
+    with pytest.raises(TraceError, match="no trace is loaded"):
+        trace.run_tracepoints(limit=10)

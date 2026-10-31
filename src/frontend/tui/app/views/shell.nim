@@ -69,6 +69,7 @@ import ./search_results_pane
 import ./test_results_pane
 import ./agent_activity_pane
 import ./problems_pane
+import ./requests_pane
 import ./frame_overlay
 import ./variables
 import ./context_menu
@@ -198,6 +199,10 @@ type
     problems*: ProblemsPaneModel
       ## PLAT-55. PROBLEMS, as a value: the window's `ErrorsVM`, read by
       ## `problems_source.paneModelOf`. Not loaded by default.
+    requests*: RequestsPaneModel
+      ## PLAT-58. REQUESTS, as a value: the session's `RequestPanelVM` the
+      ## desktop's panel draws too, read by `tui_session.requestsModelOf`.
+      ## Not loaded by default.
     vcs*: VcsPaneModel
       ## PLAT-47 deliverable 4. The VCS pane, as a value: the shared `VCSVM`
       ## the desktop's VCS panel draws, read by `host/vcs_source.nim`. Not
@@ -909,6 +914,10 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   elif region.pane == paneProblems and model.problems.loaded:
     belowStrip:
       discard paintProblems(g, content, model.problems)
+  # PLAT-58. REQUESTS — its filter bar is content, so below the strip.
+  elif region.pane == paneRequests and model.requests.loaded:
+    belowStrip:
+      discard paintRequests(g, content, model.requests)
   elif region.pane == paneBuildOutput:
     # NO EMPTINESS GUARD: an idle BUILD pane is a statement — `[idle] build:
     # not started` — and a user who has just pressed `:build` needs to see the
@@ -1313,6 +1322,14 @@ proc shellScreen*(model: ShellModel; width, height: int;
                 fitCells(productText, min(textCells(productText),
                                           width - productCol)),
                 productStyle(status.product))
+      # PLAT-56: the build indicator in its verdict's colour, where
+      # `statusBarText` put it.
+      let buildCol = status.buildColumn
+      if buildCol >= 0 and sc + buildCol < width:
+        g.paint(height - 1, sc + buildCol,
+                fitCells(status.build, min(textCells(status.build),
+                                           width - sc - buildCol)),
+                statusStyle(status.buildState))
     # The labels over the row's left, after the status line's ground.
     for strip in geometry.strips:
       if strip.edge == leBottom:

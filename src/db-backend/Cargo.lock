@@ -1656,6 +1656,7 @@ dependencies = [
  "once_cell",
  "origin-classifier",
  "regex",
+ "regex-syntax",
  "ruzstd",
  "schemars 0.8.22",
  "schemars-zod",

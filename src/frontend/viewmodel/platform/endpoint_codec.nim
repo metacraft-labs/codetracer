@@ -251,6 +251,33 @@ func encodeVcsContentId*(v: VcsContentId): JsonNode =
       "condition": encodeNoContentIdCondition(state.condition),
       "paths": jstrArray(state.paths)}
 
+func encodeVcsDeclaredScopes*(v: VcsDeclaredScopes): JsonNode =
+  result = %*{"scopes": newJArray(), "problems": jstrArray(v.problems)}
+  for scope in v.scopes:
+    result["scopes"].add jstrArray(scope)
+
+proc decodeVcsDeclaredScopes*(n: JsonNode): VcsDeclaredScopes =
+  let scopes = jrequire(n, "scopes")
+  if scopes.kind != JArray:
+    raise newException(ProtocolError, "'scopes' must be a list of scopes")
+  for scope in scopes.getElems():
+    if scope.kind != JArray:
+      raise newException(ProtocolError, "every scope must be a list of paths")
+    var paths: seq[string] = @[]
+    for path in scope.getElems():
+      if path.kind != JString:
+        raise newException(ProtocolError, "a scope path must be a string")
+      paths.add path.getStr
+    if paths.len == 0:
+      # An empty scope would read as a whole-repository claim.
+      raise newException(ProtocolError, "a declared scope carries no path")
+    result.scopes.add paths
+  result.problems = jstrSeq(n, "problems")
+  if result.problems.len > 0 and result.scopes.len > 0:
+    # Tooling §3.1: an invalid declaration declares nothing.
+    raise newException(ProtocolError,
+      "an invalid scope declaration carries scopes")
+
 proc decodeVcsContentId*(n: JsonNode): VcsContentId =
   result.kind = decodeVcsContentIdKind(jrequire(n, "kind"))
   result.id = jstr(n, "id")

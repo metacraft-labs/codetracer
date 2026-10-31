@@ -62,6 +62,7 @@
 ## written at the end of it. Every number was written LAST, from a run.
 
 import replay_prerequisite
+import process_meter   # residentKb, loadAverage1: Linux AND macOS
 import std/[algorithm, monotimes, os, osproc, strutils, times, unittest]
 
 import isonim_gpui/renderer
@@ -143,23 +144,6 @@ proc writeBigPayload(root: string): string =
   createDir(payload.parentDir)
   writeFile(payload, text)
   traceDir
-
-proc residentKb(): int =
-  ## This process's resident set size, in KB.
-  ##
-  ## A DIAGNOSTIC FAILURE rather than a skip when procfs is absent: a run that
-  ## silently stopped measuring memory would be a run whose memory assertion
-  ## passed for free, which is the whole subject of the Silent-Self-Pass audit.
-  const statm = "/proc/self/statm"
-  if not fileExists(statm):
-    raise newException(IOError,
-      "RSS cannot be measured: " & statm & " does not exist, and this suite's " &
-      "memory bound is the only guard here on the editor's window being a " &
-      "window. Port `residentKb` or run this lane on Linux.")
-  let fields = readFile(statm).splitWhitespace()
-  if fields.len < 2:
-    raise newException(IOError, statm & " has fewer than two fields")
-  parseInt(fields[1]) * 4
 
 proc fixtureAvailable(): bool =
   dirExists(CalcFixture)
@@ -723,7 +707,7 @@ suite "PLAT-22: the GPUI editing surface":
            " us_per_stop=" & $perFrameUs &
            " rss_start_kb=" & $rssStart & " rss_worst_kb=" & $worstRss &
            " held_worst=" & $worstHeld & " held_bound=" & $MaxHeldLines &
-           " loadavg1=" & readFile("/proc/loadavg").splitWhitespace()[0]
+           " loadavg1=" & loadAverage1()
       # The only thing asserted about the clock is that it RAN, which is the
       # non-vacuity floor (§4): a loop that did nothing would report zero.
       ck totalRenderNs > 0

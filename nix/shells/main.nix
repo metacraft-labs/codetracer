@@ -185,16 +185,27 @@ mkShell {
     # worktree is relying on, mid-flight. The decision and its full rationale
     # live in the script below so they can be tested directly; it prints its
     # reason on stderr either way, and never writes to the repository.
+    #
+    # Before it runs, copy every Reprobuild hook dispatcher aside: when another
+    # hook manager (prek) has already moved one to `<hook>.legacy`, the
+    # installer's own move overwrites it, and only this copy survives. See "A
+    # DISPATCHER THE INSTALLER DESTROYS" in ci/dev/reclaim-hook-dispatchers.sh.
+    ct_hooks_snapshot=""
+    if [ -n "$ROOT_PATH" ]; then
+      ct_hooks_snapshot="$(bash "$ROOT_PATH/ci/dev/reclaim-hook-dispatchers.sh" snapshot || true)"
+    fi
     if [ -n "$ROOT_PATH" ] && bash "$ROOT_PATH/ci/dev/should-install-git-hooks.sh"; then
       ${preCommit.installationScript}
     fi
 
     # The installer moves each Reprobuild hook dispatcher aside to
-    # `<hook>.legacy` and takes its slot; put the dispatchers back and chain the
-    # pre-commit shim as `<hook>.repro-local` (see the script).
+    # `<hook>.legacy` and takes its slot; put the dispatchers back, restore any
+    # it destroyed from the snapshot, and chain the pre-commit shim as
+    # `<hook>.repro-local` (see the script).
     if [ -n "$ROOT_PATH" ]; then
-      bash "$ROOT_PATH/ci/dev/reclaim-hook-dispatchers.sh" || true
+      bash "$ROOT_PATH/ci/dev/reclaim-hook-dispatchers.sh" --snapshot "$ct_hooks_snapshot" || true
     fi
+    unset ct_hooks_snapshot
 
     # The installer above ends by writing the RELATIVE `core.hooksPath=.git/hooks`
     # into the config every worktree shares; in a linked worktree that path names
@@ -289,6 +300,9 @@ mkShell {
     fi
     if [ -z "''${NIM_STACKABLE_HOOKS_SRC:-}" ]; then
       export NIM_STACKABLE_HOOKS_SRC="${inputs.nim-stackable-hooks}/src"
+    fi
+    if [ -z "''${TEST_CERTIFICATES_TOOLS_SRC:-}" ]; then
+      export TEST_CERTIFICATES_TOOLS_SRC="${inputs.test-certificates-tools}/src"
     fi
 
     RECORDER_SRC="''${CODETRACER_PYTHON_RECORDER_SRC:-}"

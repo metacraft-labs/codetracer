@@ -246,7 +246,13 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 3263
+  ExpectedAssertions = 3231
+    ## **3263 → 3231, 2026-10-30: THE TAB STRIP IS GONE** (`9ae2786b72a`, one
+    ## list of variables and watches). Per viewport, the strip case's eight
+    ## readings (the strip, its kind, three option indices, the labels, the
+    ## active count) become four (no strip, no active tab, the watch field,
+    ## the pane), and the active-word case's seven per stop become three (the
+    ## pane, its rows, no retired tab word) — 32 fewer over two viewports.
     ## **3269 → 3263, 2026-10-20 (PLAT-70 Part B): NO HORIZONTAL THUMB** — the
     ## state pane does not scroll sideways (Horizontal-Overflow §5), so the
     ## thumb's three readings (`position`, `h`, `left`) are gone at each of the
@@ -838,25 +844,22 @@ suite "PLAT-40 / PLAT35-F4: the pane draws the desktop's name:value rows":
           ck false
       ck horizontal == 0
 
-    test "at " & vp & " the pane's TAB STRIP is the desktop's segmented control":
+    test "at " & vp & " the pane is ONE list of variables and watches":
+      # `9ae2786b72a` ("one list of variables and watches"): the Locals /
+      # Globals / Watches tab strip is gone from every front-end, and the
+      # watch input sits in the pane, as in Visual Studio. Until 2026-10-30
+      # this case asserted the strip it replaced.
       let plan = windowPlan(w, h, PopulatedOps[0])
       let pane = plan.paneOf("state")
       ck not pane.isNil
       var tabs: JsonNode
       for n in pane.nodesWith(ViewIdAttr):
         if n.attr(ViewIdAttr) == "state.tabs": tabs = n
-      ck not tabs.isNil
-      ck tabs.attr(ViewKindAttr) == "Tabs"
-      var labels: seq[string] = @[]
-      for i, o in tabs.kids:
-        labels.add o.textOf
-        # The click model's option index, in order.
-        ck o.attr("data-option-index") == $i
-      ck labels == @["Locals", "Globals", "Watches"]
-      var active = 0
-      for n in pane.nodesWith(TabActiveAttr):
-        if n.attr(TabActiveAttr) == "true": inc active
-      ck active == 1
+      ck tabs.isNil
+      ck pane.nodesWith(TabActiveAttr).len == 0
+      # THE WATCH FIELD IS IN THE PANE, once — the strip's Watches tab was
+      # where it used to be reached.
+      ck pane.nodesWith(StateAddWatchAttribute).len == 1
       # The vocabulary binding's highlight is gone with the vocabulary strip.
       ck pane.nodesWith(HighlightedAttr).len == 0
       var treeOwners = 0
@@ -871,39 +874,23 @@ suite "PLAT-40 / PLAT35-F4: the pane draws the desktop's name:value rows":
         ck row.attr(ViewKindAttr) == "Tree"
         ck row.attr(ViewIdAttr).len > 0
 
-    test "at " & vp & " the pane draws its ACTIVE TAB's word exactly ONCE":
-      # `PLAT35-F9`: the active tab's word drawn twice (the tab, and a
-      # heading repeating it) was the finding. Counted over every text node
-      # in the pane, case-insensitively, by prefix.
+    test "at " & vp & " the pane draws none of the retired tab words":
+      # `PLAT35-F9` was the active tab's word drawn twice (the tab, and a
+      # heading repeating it). With the strip gone the words go with it: no
+      # text node in the pane is a lone `Locals`, `Globals` or `Watches` —
+      # a heading reintroducing one would be the strip coming back in prose.
       for ops in PopulatedOps:
         checkpoint(vp & " " & ops)
         let plan = windowPlan(w, h, ops)
         let pane = plan.paneOf("state")
         ck not pane.isNil
-        var tabs: JsonNode
-        for n in pane.nodesWith(ViewIdAttr):
-          if n.attr(ViewIdAttr) == "state.tabs": tabs = n
-        ck not tabs.isNil
-        var active = ""
-        var activeCount = 0
-        for o in tabs.kids:
-          if o.attr(TabActiveAttr) == "true":
-            inc activeCount
-            if active.len == 0: active = o.textOf
-        ck activeCount == 1
-        ck active == "Locals"
         ck pane.bodyRows.len > 0
-        var repeats = -1
-        var sole = ""
-        if active.len > 0:
-          repeats = 0
-          let needle = active.toLowerAscii
-          for t in pane.textNodes:
-            if t.strip().toLowerAscii().startsWith(needle):
-              inc repeats
-              sole = t
-        ck repeats == 1
-        ck sole == active
+        var retired: seq[string] = @[]
+        for t in pane.textNodes:
+          if t.strip().toLowerAscii() in ["locals", "globals", "watches"]:
+            retired.add t
+        checkpoint("retired tab words drawn: " & $retired)
+        ck retired.len == 0
 
     test "at " & vp & " `data-column` is the state pane's alone":
       # §4: scoped to the pane. The event log used to be a vocabulary

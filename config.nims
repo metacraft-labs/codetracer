@@ -80,14 +80,28 @@ addPathIfDir(workspaceRoot / "io-mon" / "src")
 addPathIfDir(getEnv("IO_MON_SRC"))
 addPathIfDir(workspaceRoot / "nim-shm-queue" / "src")
 addPathIfDir(getEnv("SHM_QUEUE_SRC"))
-# io-mon's writer now imports `shm_gset/transport` (the grow-only shared-memory
+# io-mon's writer imports `shm_gset/transport` (the grow-only shared-memory
 # set that backs io-mon's Linux dependency-capture channel), in addition to
-# `shm_queue`. Thread nim-shm-gset onto the path the same way, or the `ct`
-# compile fails with `cannot open file: shm_gset/transport`.
+# `shm_queue`. Thread nim-shm-gset onto the path the same way, or any module
+# that imports io-mon's capture half (`io_mon/writer`, `io_mon/fs_snoop`, the
+# `io_mon` umbrella) fails with `cannot open file: shm_gset/transport`. `ct`
+# itself imports only `io_mon/depfile`, whose closure reaches neither shm
+# library, which is why scripts/require-siblings.sh requires io-mon and
+# nim-stackable-hooks but leaves these two advisory.
 addPathIfDir(workspaceRoot / "nim-shm-gset" / "src")
 addPathIfDir(getEnv("SHM_GSET_SRC"))
 addPathIfDir(workspaceRoot / "nim-stackable-hooks" / "src")
 addPathIfDir(getEnv("NIM_STACKABLE_HOOKS_SRC"))
+# The test-certificate standard's reference library (test-certificates-tools,
+# Nim package `test_certificates`, stdlib only): `ct test`'s store writer
+# links its prune, HEAD protection and root-owner check
+# (src/ct_test/certificate_local_store.nim), the native store-root resolver its
+# account lookup (the Windows SID), and the conformance walker its note
+# framing and merge. Same order rule as above: the sibling, then
+# TEST_CERTIFICATES_TOOLS_SRC (seeded from the pinned flake input by the dev
+# shell and the Nix package build), which overrides it.
+addPathIfDir(workspaceRoot / "test-certificates-tools" / "src")
+addPathIfDir(getEnv("TEST_CERTIFICATES_TOOLS_SRC"))
 
 const runquotaLibs = [
   "runquota_process",

@@ -67,7 +67,7 @@ import ../viewmodel/platform/browser_facades
 import ../viewmodel/host/container_platform
 import ../index/facade_endpoint
 
-const ExpectedAssertions = 1012
+const ExpectedAssertions = 1030
 var counted = 0
 var failedChecks = 0
 
@@ -153,7 +153,7 @@ discard payloadOf("fs.createDir", %*{"path": scratch})
 suite "the dispatch table is complete and self-consistent":
 
   test "every verb is a dotted name, declared once":
-    ck facadeVerbs.len == 63
+    ck facadeVerbs.len == 64
     var seen: seq[string] = @[]
     for entry in facadeVerbs:
       ck entry.verb.contains('.')
@@ -170,7 +170,7 @@ suite "the dispatch table is complete and self-consistent":
       else:
         inc servedCount
         ck entry.unservedBecause.len == 0
-    ck servedCount == 37
+    ck servedCount == 38
     ck refusedCount == 26
 
   test "the served capability set is the table's, not a constant":
@@ -971,6 +971,45 @@ suite "vcs.contentId round-trips over the facade endpoint":
       id: nextCallId, verb: "fs.stat", args: %*{"path": contentRepo}))))
     ck stat.ok
 
+  test "vcs.declaredScopes reads Tooling §3.1's declaration, and is gated by capVcsRead":
+    ## The endpoint's verb is the one reader (`vcs.declaredScopesOver`) over
+    ## node's `spawnSync`: a real repository's `git config`, its scopes as
+    ## lists of paths, an invalid declaration as problems and no scope.
+    proc scopesReply(ep: FacadeEndpoint; repo: string): ReplyFrame =
+      inc nextCallId
+      decodeReply(ep.handleFrame(encodeCall(CallFrame(
+        id: nextCallId, verb: "vcs.declaredScopes",
+        args: %*{"repository": repo}))))
+    let none = scopesReply(endpoint, contentRepo)
+    ck none.ok
+    ck decodeVcsDeclaredScopes(none.payload).scopes.len == 0
+    discard sh(contentRepo,
+      "git config --add testCertificatesScope.db.path src/db && " &
+      "git config --add testCertificatesScope.db.path Cargo.lock && " &
+      "git config --add testCertificatesScope.docs.path docs")
+    let declared = scopesReply(endpoint, contentRepo)
+    ck declared.ok
+    let scopes = decodeVcsDeclaredScopes(declared.payload)
+    ck scopes.problems.len == 0
+    ck scopes.scopes == @[@["Cargo.lock", "src/db"], @["docs"]]
+    discard sh(contentRepo,
+      "git config --add testCertificatesScope.bad.path ../outside")
+    let invalid = decodeVcsDeclaredScopes(scopesReply(endpoint,
+                                                      contentRepo).payload)
+    ck invalid.scopes.len == 0
+    ck invalid.problems.len == 1
+    discard sh(contentRepo, "git config --remove-section testCertificatesScope.bad && " &
+      "git config --remove-section testCertificatesScope.db && " &
+      "git config --remove-section testCertificatesScope.docs")
+    let withoutRead = newFacadeEndpoint(settingsRoot = workspace & "/settings",
+                                        tempRoot = workspace,
+                                        granted = servedCapabilities() - {capVcsRead})
+    let refused = scopesReply(withoutRead, contentRepo)
+    ck not refused.ok
+    ck refused.errorKind == pkNotSupported
+    ck refused.errorMessage.contains("capVcsRead")
+    ck refused.errorMessage.contains("vcs.declaredScopes")
+
   test "fs.certificateStoreRoots is the container process's own, per Transport §2.1":
     setEnv(cstring"TEST_CERTIFICATES_DIR", cstring(workspace & "/store"))
     let roots = decodeCertificateStoreRoots(payloadOf("fs.certificateStoreRoots",
@@ -1215,6 +1254,9 @@ suite "the client and the server agree, verb by verb":
     ck head.value.kind == vcikComputed
     ck head.value.id == "git-tree-sha1:" & runScript(repository,
       "git rev-parse 'HEAD^{tree}'").stdout.strip()
+    let declared = record("vcs.declaredScopes",
+                          client.vcs.declaredScopes(repository))
+    ck declared.ok and declared.value.scopes.len == 0
 
     ck record("fs.writeText",
               client.fs.writeText(repository & "/c.txt", "third\n")).ok

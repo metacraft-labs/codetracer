@@ -41,11 +41,13 @@ import store/types
 import viewmodels/agent_activity_vm
 import viewmodels/agent_activity_feed
 import viewmodels/review_session
+import viewmodels/omnibar_vm
+import ../../editing_core
 import views/isonim_agent_activity_view
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 142
+const ExpectedAssertions = 193
 
 var countedAssertions = 0
 
@@ -428,6 +430,159 @@ suite "PLAT-54 lines and the reader's place":
       scroll.scrollTo(lines.len, rows, lines, 10)
       ck scroll.follow
       dispose()
+
+suite "PLAT-54 the prompt's add-context menu (DeepReview-GUI §2.2.7)":
+
+  test "the four items, in the desktop's order and words":
+    var labels: seq[string] = @[]
+    for item in AgentAddContextItem:
+      labels.add item.label
+    ck labels == @["Upload attachment", "Files & folders", "Editor selection",
+                   "Recording / trace"]
+    # The desktop's dropdown draws exactly these, from the same enum.
+    createRoot proc(dispose: proc()) =
+      let vm = createAgentActivityVM(nil)
+      vm.addContextDropdownOpen.val = true
+      let r = MockRenderer()
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, 1)
+      var drawn: seq[string] = @[]
+      for item in findAll(panel, "agent-add-context-menu-item"):
+        # The label alone, whatever else a row carries.
+        drawn.add textOf(findAll(item, "ct-menu-item-label")[0]).strip()
+      ck drawn == labels
+      dispose()
+
+  test "the header a prompt with attachments carries":
+    ck contextPromptText("fix it", []) == "fix it"
+    ck contextPromptText("fix it", ["src/a.nim", "src/a.nim:3-5"]) ==
+       "Context paths:\n- src/a.nim\n- src/a.nim:3-5\n\nfix it"
+    ck editorSelectionContext("src/a.nim", 5, 3) == "src/a.nim:3-5"
+    ck editorSelectionContext("src/a.nim", 7, 7) == "src/a.nim:7"
+    ck editorSelectionContext("", 1, 2) == ""
+    ck withContextPath(["a"], "a") == @["a"]
+    ck withContextPath(["a"], " b ") == @["a", "b"]
+    # The lines *Editor selection* attaches: the caret's, or the selection's.
+    var d = initEditingDocument("src/a.nim", "one\ntwo\nthree\nfour\nfive\n")
+    d.moveCaretTo(2, 0)
+    ck d.selectedLines == (first: 3, last: 3)
+    d.extendSelectionTo(3, 2)
+    ck d.selectedLines == (first: 3, last: 4)
+    d.moveCaretTo(4, 1)
+    d.extendSelectionTo(1, 0)
+    ck d.selectedLines == (first: 2, last: 5)
+    # A selection that ends at the START of a line does not cover it — on
+    # the native document, and in the desktop's reading of Monaco's ranges
+    # (`selectedLinesOf`), so the two attach the same lines.
+    d.moveCaretTo(2, 0)
+    d.extendSelectionTo(4, 0)
+    ck d.selectedLines == (first: 3, last: 4)
+    ck selectedLinesOf([(startLine: 3, startColumn: 1, endLine: 5,
+                         endColumn: 1)], 9) == (first: 3, last: 4)
+    ck selectedLinesOf([(startLine: 3, startColumn: 2, endLine: 5,
+                         endColumn: 3)], 9) == (first: 3, last: 5)
+    # Nothing selected: the caret's line. Several ranges: all of them.
+    ck selectedLinesOf([(startLine: 4, startColumn: 2, endLine: 4,
+                         endColumn: 2)], 4) == (first: 4, last: 4)
+    ck selectedLinesOf([(startLine: 7, startColumn: 1, endLine: 7,
+                         endColumn: 4),
+                        (startLine: 2, startColumn: 1, endLine: 3,
+                         endColumn: 2)], 1) == (first: 2, last: 7)
+    ck selectedLinesOf([], 6) == (first: 6, last: 6)
+    # A path is attached once, however often it is chosen.
+    createRoot proc(dispose: proc()) =
+      let vm = createAgentActivityVM(nil)
+      vm.addContextPath("src/a.nim:3")
+      vm.addContextPath("src/a.nim:3")
+      ck vm.contextPaths.val == @["src/a.nim:3"]
+      dispose()
+
+  test "the desktop's Editor selection: the editor's lines, or disabled and why":
+    # The desktop's dropdown asks its host, as it draws, why *Editor
+    # selection* is unavailable (`editorSelectionUnavailableReason`): a
+    # reason draws the item disabled with the reason as its hover text; none
+    # draws it enabled, and a press hands the host the item.
+    for (reason, enabled) in [(AgentNoEditorSelectionReason, false), ("", true)]:
+      createRoot proc(dispose: proc()) =
+        let vm = createAgentActivityVM(nil)
+        vm.addContextDropdownOpen.val = true
+        var picked = 0
+        let callbacks = AgentActivityCallbacks(
+          editorSelectionUnavailableReason: proc(): string = reason,
+          onAddEditorSelection: proc() = inc picked)
+        let r = MockRenderer()
+        let panel = renderAgentActivityPanel[MockRenderer, MockNode](
+          r, vm, 1, callbacks = callbacks)
+        let items = findAll(panel, "agent-add-context-menu-item")
+        ck items.len == 4
+        let item = items[ord(aciEditorSelection)]
+        ck textOf(item).contains(aciEditorSelection.label)
+        let disabled = findAll(item, "ct-menu-item--disabled").len > 0
+        ck disabled == not enabled
+        ck item.attributes.getOrDefault("title", "") == reason
+        item.fireEvent("click")
+        ck picked == (if enabled: 1 else: 0)
+        dispose()
+
+  test "attachments are rows above the prompt, each removable by its path":
+    createRoot proc(dispose: proc()) =
+      let vm = createAgentActivityVM(nil)
+      vm.addContextPath("src/a.nim")
+      vm.addContextPath("src/b.nim:2-4")
+      # Idle, the attachments still follow the idle rows.
+      var rows = vm.agentFeed()
+      ck rows.kinds == @[frIdleHeading, frIdleSubtitle, frIdleChip,
+                         frIdleChip, frIdleChip, frContextPath, frContextPath]
+      ck rows[5].spansText == AgentContextChipLead & "src/a.nim"
+      ck rows[6].buttons.len == 1 and
+         rows[6].buttons[0].kind == faRemoveContext and
+         rows[6].buttons[0].label == AgentContextRemoveLabel
+      # After a conversation too, last.
+      applyReviewSession(vm, replayedSession())
+      rows = vm.agentFeed()
+      ck rows[^1].kind == frContextPath and rows[^2].kind == frContextPath
+      ck rows[^3].kind != frContextPath
+      # `[×]` removes the row's own path…
+      let first = rows[^2]
+      let effect = vm.runFeedAction(first, first.buttons[0])
+      ck effect.handled
+      ck vm.contextPaths.val == @["src/b.nim:2-4"]
+      # …and a press read off a stale line removes nothing else.
+      let stale = vm.runFeedAction(first, first.buttons[0])
+      ck not stale.handled
+      ck vm.contextPaths.val == @["src/b.nim:2-4"]
+      dispose()
+
+  test "the omnibox's attach modes":
+    ck classifyOmnibarQuery(":attach src/a").mode == omAttach
+    ck classifyOmnibarQuery(":attach src/a").needle == "src/a"
+    ck classifyOmnibarQuery(":attach-recording /tmp/r").mode ==
+       omAttachRecording
+    ck classifyOmnibarQuery(":attach-recording /tmp/r").needle == "/tmp/r"
+    ck classifyOmnibarQuery(":attachx").mode == omCommand
+    ck desktopKindOf(omAttach) == omCommand and
+       desktopKindOf(omAttachRecording) == omCommand
+    let index = @[
+      OmnibarEntry(kind: omFile, label: "parser.nim", detail: "src",
+                   target: "src/parser.nim"),
+      OmnibarEntry(kind: omFile, label: "lexer.nim", detail: "src",
+                   target: "src/lexer.nim"),
+      OmnibarEntry(kind: omRecording, label: "trace-1", detail: "",
+                   target: "/tmp/traces/trace-1"),
+      OmnibarEntry(kind: omCommand, label: "Step over", target: "step")]
+    # Files and their folders, each once; no command, no recording.
+    var labels: seq[string] = @[]
+    for r in rankOmnibar(index, omAttach, ""):
+      ck r.entry.kind == omAttach
+      labels.add r.entry.label
+    ck labels.len == 3
+    ck "src/" in labels and "parser.nim" in labels and "lexer.nim" in labels
+    # A typed path is offered first, as typed.
+    let typed = rankOmnibar(index, omAttach, "docs/notes.md")
+    ck typed[0].entry.target == "docs/notes.md"
+    # The recording mode finds the recordings only.
+    let recs = rankOmnibar(index, omAttachRecording, "")
+    ck recs.len == 1 and recs[0].entry.target == "/tmp/traces/trace-1" and
+       recs[0].entry.kind == omAttachRecording
 
 suite "PLAT-54 a live session's entry as the feed":
 

@@ -344,7 +344,7 @@ suite "PLAT-49 part B on a real terminal: the footer's auto-hide panels":
     checkpoint("preview after " & $waited & " ms")
     ck waited >= 250
     ck br > StatusRow div 2 and bc == 0
-    ck sess.snap().findRow("no build has been run", below = StatusRow)[0] > br
+    ck sess.snap().findRow("No build has run.", below = StatusRow)[0] > br
     # Off the label and the overlay: still shown a moment later, then gone.
     let left = getMonoTime()
     sess.hover(10, 100)
@@ -379,7 +379,7 @@ suite "PLAT-49 part B on a real terminal: the footer's auto-hide panels":
     # nothing: it is line `br - 2`'s).
     ck s1.text(br - 2).contains(DividerGlyph & "  " & $(br - 3) & " ")
     ck not s1.text(StatusRow - 2).contains(DividerGlyph & "  46 ")
-    ck s1.findRow("no build has been run", below = StatusRow)[0] > br
+    ck s1.findRow("No build has run.", below = StatusRow)[0] > br
     # The label lit while its pane is open.
     ck s1[StatusRow][buildCol + 1].bgHex ==
        DesignTokenHex[dtColorsUiSurfacePrimaryTertiary][dmDark]

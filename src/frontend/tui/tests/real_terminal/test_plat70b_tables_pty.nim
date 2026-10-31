@@ -270,6 +270,23 @@ suite "PLAT-70 Part B on a real terminal: the table panes":
           let again = sess.snap()
           if not again.differs(quiet): break
           quiet = again
+        # WHAT A TOOLTIP IS, MEASURED WHERE IT GOES: `cellTooltipArea` puts
+        # the box on the row UNDER the cell, starting at the cell's column
+        # (a padding cell, then the text). So a tooltip changes the cells
+        # just under the hovered cell's start. "Any row changed" also counted
+        # a scrollbar thumb fading on its own clock, at the pane's edge,
+        # between the rest snapshot and the reading — red at load 90, green
+        # alone.
+        let underRow = r + 1
+        proc tooltipUnder(s: Snapshot): bool =
+          var moved = 0
+          for k in 0 .. 2:
+            let c = cellCol + k
+            if underRow < Rows and c < Cols and
+               (glyph(s[underRow][c]) != glyph(quiet[underRow][c]) or
+                $s[underRow][c].bg != $quiet[underRow][c].bg):
+              inc moved
+          moved >= 2
         sess.hover(r, cellCol + 1)
         var changed = false
         if cut:
@@ -277,11 +294,11 @@ suite "PLAT-70 Part B on a real terminal: the table panes":
           let deadline = getMonoTime() + initDuration(milliseconds = 5000)
           while getMonoTime() < deadline and not changed:
             sleep(100)
-            changed = sess.snap().differs(quiet)
+            changed = sess.snap().tooltipUnder()
         else:
           # … and on a cell that fits, nothing — after twice the delay.
           sleep(HoverWaitMs + 100)
-          changed = sess.snap().differs(quiet)
+          changed = sess.snap().tooltipUnder()
         # §5.3 + HO-8: a tooltip exactly on the cells drawn with `…`.
         if changed != cut:
           mismatches.add $r & ":" & cellText & " cut=" & $cut

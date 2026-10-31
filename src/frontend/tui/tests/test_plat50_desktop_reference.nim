@@ -27,7 +27,7 @@
 ##
 ## Reads files and pure values; no session. No mocks.
 
-import std/[json, os, strutils, unittest]
+import std/[json, os, sequtils, strutils, unittest]
 
 import headless_app/layout_model
 import headless_app/pane_clicks
@@ -36,7 +36,8 @@ import ../app/views/top_bar
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 53
+const ExpectedAssertions = 55
+  ## Native Top is the one explicit addition to each desktop dock menu.
 
 var countedAssertions = 0
 
@@ -62,9 +63,15 @@ proc dark(token: DesignToken): string = tokenHex(token, dmDark)
 suite "PLAT-50: the desktop's right-click menus are the shared models'":
 
   test "a tab, a dock label, a call, a leaf, an argument; the Files menu":
-    ck labelsOf("tab") == tabContextMenu(paneVcs, maximised = false).labels
-    ck labelsOf("dockLabelBottom") ==
-       dockLabelContextMenu(paneBuildOutput, leBottom).labels
+    # The native hosts support Top as well. Assert that single addition,
+    # then compare every desktop entry and its order without re-recording
+    # the desktop oracle to describe a menu it does not draw.
+    let tabLabels = tabContextMenu(paneVcs, maximised = false).labels
+    let dockLabels = dockLabelContextMenu(paneBuildOutput, leBottom).labels
+    ck tabLabels.count(TopPinLabel) == 1
+    ck dockLabels.count(TopPinLabel) == 1
+    ck labelsOf("tab") == tabLabels.filterIt(it != TopPinLabel)
+    ck labelsOf("dockLabelBottom") == dockLabels.filterIt(it != TopPinLabel)
     ck labelsOf("callTraceWithChildren") ==
        callTraceContextMenu(3, hasChildren = true, expanded = true).labels
     ck labelsOf("callTraceLeaf") ==

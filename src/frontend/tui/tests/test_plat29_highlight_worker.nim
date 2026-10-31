@@ -19,9 +19,11 @@
 ##      edit's latency is unaffected."* Every edit is timed together with the
 ##      frame that follows it. The same stream is first run with NO producer
 ##      at all — the baseline — and then with the worker; the edits made while
-##      a parse was in flight must cost what the baseline's did. The inline
-##      path (the same parse run on the render path) is timed too and printed,
-##      as the cost the boundary removes.
+##      a parse was in flight must not wait for it: a fraction of the parse's
+##      time, no voluntary context switch, and render-thread CPU in a band of
+##      the baseline's (see the assertions for why CPU and not wall clock).
+##      The inline path (the same parse run on the render path) is timed too
+##      and printed, as the cost the boundary removes.
 ##   3. *"The edit streams driving this come from the corpus, at real edit
 ##      rates."* Every inserted string is whole grapheme clusters drawn from a
 ##      corpus document (`change_generator.corpusClusters`), positions are
@@ -32,7 +34,7 @@
 ##
 ## NO MOCKS: the shipped worker, the shipped parse, real files, a real thread.
 
-import std/[algorithm, monotimes, os, strutils, times, unittest]
+import std/[algorithm, monotimes, os, posix, strutils, times, unittest]
 
 import codetracer_embed
 import ../app/edit_binding
@@ -82,6 +84,38 @@ proc realNimSource(): string =
 
 proc ms(d: Duration): float = d.inMicroseconds.float / 1000.0
 
+proc threadCpuMs(): float =
+  ## CPU time THIS thread has used, in ms — the render thread's own work,
+  ## whatever else the host is running.
+  var ts: Timespec
+  discard clock_gettime(ClockId(CLOCK_THREAD_CPUTIME_ID), ts)
+  ts.tv_sec.float * 1000.0 + ts.tv_nsec.float / 1_000_000.0
+
+when defined(linux):
+  const RusageThread = cint(1)   ## RUSAGE_THREAD (Linux)
+  proc voluntarySwitches(): int =
+    ## Times this thread gave up its core of its own accord — blocked on a
+    ## lock, a condition, a read. A preemption is not counted here.
+    var ru: Rusage
+    discard getrusage(RusageThread, addr ru)
+    int(ru.ru_nvcsw)
+else:
+  proc voluntarySwitches(): int = 0
+
+proc underTracer(): bool =
+  ## Whether a debugger or `strace` is attached (`TracerPid` in
+  ## `/proc/self/status`): a traced thread STOPS at its system calls, and
+  ## every stop is counted as a voluntary switch, so the switch count then
+  ## measures the tracer. Measured: median 4–7 per edit under `strace -f`,
+  ## 0 without.
+  try:
+    for line in lines("/proc/self/status"):
+      if line.startsWith("TracerPid:"):
+        return line["TracerPid:".len .. ^1].strip() != "0"
+  except IOError, OSError:
+    discard
+  false
+
 proc median(xs: seq[float]): float =
   var s = xs
   s.sort()
@@ -127,14 +161,17 @@ suite "PLAT-29 Tier 2: the highlighter off the render path, on a real thread":
 
     # THE BASELINE: the same kind of stream with no producer at all.
     var baseline: seq[float] = @[]
+    var baselineCpu: seq[float] = @[]
     block:
       rt.editServices.requestHighlight = proc(req: HighlightRequest) = discard
       var rb = initRng(Seed + 1)
       for step in 0 ..< EditCount div 2:
         let cs = edit(rb, step, 0)
         let e0 = getMonoTime()
+        let c0 = threadCpuMs()
         discard buf.doc.applyChangeSet(cs, int64(step))
         discard rt.shellScreenOf()
+        baselineCpu.add threadCpuMs() - c0
         baseline.add ms(getMonoTime() - e0)
     # THE INLINE PATH, once: what a frame costs when the parse runs on it.
     var inlineMs: float
@@ -159,6 +196,8 @@ suite "PLAT-29 Tier 2: the highlighter off the render path, on a real thread":
     var r = initRng(Seed)
     var latencies: seq[float] = @[]
     var inFlightLatencies: seq[float] = @[]
+    var inFlightCpu: seq[float] = @[]
+    var inFlightBlocks: seq[float] = @[]
     var inFlightEdits = 0
     var now = 0'i64
     for step in 0 ..< EditCount:
@@ -166,13 +205,19 @@ suite "PLAT-29 Tier 2: the highlighter off the render path, on a real thread":
       let busy = worker.submitted > worker.delivered
       now += int64(gapMs)
       let e0 = getMonoTime()
+      let c0 = threadCpuMs()
+      let v0 = voluntarySwitches()
       discard buf.doc.applyChangeSet(cs, now)
       discard rt.shellScreenOf()          # the frame that follows the edit
+      let cpu = threadCpuMs() - c0
+      let blocked = voluntarySwitches() - v0
       let lat = ms(getMonoTime() - e0)
       latencies.add lat
       if busy:
         inc inFlightEdits
         inFlightLatencies.add lat
+        inFlightCpu.add cpu
+        inFlightBlocks.add float(blocked)
       discard pump()
       sleep(int(gapMs))
 
@@ -195,16 +240,50 @@ suite "PLAT-29 Tier 2: the highlighter off the render path, on a real thread":
       "median ", median(inFlightLatencies).formatFloat(ffDecimal, 2), " ms over ",
       inFlightEdits, " edits; inline parse on the render path ",
       inlineMs.formatFloat(ffDecimal, 1), " ms"
+    echo "  render-thread CPU per edit+frame: baseline median ",
+      median(baselineCpu).formatFloat(ffDecimal, 2), " ms; in flight median ",
+      median(inFlightCpu).formatFloat(ffDecimal, 2), " ms; voluntary switches ",
+      "per in-flight edit: median ", median(inFlightBlocks), ", max ",
+      (if inFlightBlocks.len > 0: max(inFlightBlocks) else: 0.0)
     ck inFlightEdits > 0
     # THE EDIT DOES NOT WAIT FOR THE PARSE, which is the property, and it is
-    # asserted two ways. (a) An edit made while a parse runs costs a small
-    # fraction of that parse: were it waiting, it would cost the parse. (b) It
-    # stays within a band of the no-producer baseline. The band is 3x + 20 ms
-    # and not tighter because the worker is a second thread doing real work:
-    # on a shared host the two contend for cores — measured at 2.2x on a
-    # 24-core host at load 140 — and that is CPU sharing, not waiting.
+    # asserted three ways, each of a quantity the host's load cannot move on
+    # its own:
+    #
+    # (a) An edit made while a parse runs costs a small fraction of that
+    #     parse — both are wall-clock times taken on the same host at the
+    #     same moment, so a busy host stretches both. Were the edit waiting,
+    #     it would cost the parse.
+    # (b) It never gives up its thread to wait: the median in-flight edit
+    #     makes ZERO voluntary context switches (`RUSAGE_THREAD`'s
+    #     `ru_nvcsw`; Linux — elsewhere the count reads 0 and this arm says
+    #     nothing). Waiting on the worker — a lock, a condition, a channel
+    #     receive — is exactly a voluntary switch; being preempted by the
+    #     host is not one. Not asserted under a tracer (`underTracer`), which
+    #     stops the thread at every system call.
+    # (c) The render thread's own CPU time stays within 3x + 20 ms of the
+    #     no-producer baseline's. The in-flight frames do real extra work the
+    #     baseline's do not (they draw highlights, mapped forward through the
+    #     edits), measured at 1.3–1.7x; a regression that put parse work back
+    #     on the render path would cost the parse's CPU here.
+    #
+    # Until 2026-10-28 (c) was asserted on WALL-CLOCK time. That measures the
+    # host, not the boundary: the worker is a second busy thread, and on a
+    # loaded host the render thread is preempted while it runs. Measured at
+    # load 60–100 on 24 cores: wall 1.7–2.4x the baseline, with the extra
+    # wall time spent OFF the CPU (in-flight CPU 62–79 ms against wall
+    # 103–115 ms) and no voluntary switch — preemption, not waiting. It failed
+    # at load 140–155 (median 63.3 ms against a band of 62.4 ms) on the same
+    # build that passes on a quiet host (codetracer-pm issue 2026-10-28,
+    # "plat29 highlight worker latency band measures host load").
     ck median(inFlightLatencies) < parseMs / 4.0
-    ck median(inFlightLatencies) <= median(baseline) * 3.0 + 20.0
+    if underTracer():
+      echo "  (a tracer is attached: the voluntary-switch arm measures it, not ",
+           "the boundary, and is not asserted)"
+      ck true
+    else:
+      ck median(inFlightBlocks) == 0.0
+    ck median(inFlightCpu) <= median(baselineCpu) * 3.0 + 20.0
     # …and the inline path is what the boundary removes.
     ck inlineMs > median(inFlightLatencies) * 4.0
 

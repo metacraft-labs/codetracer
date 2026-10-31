@@ -332,7 +332,23 @@ type
     # focused output pane, or a table pane while its columns scroll.
     # Appended at the end, for the reason every note above gives.
     aScrollViewLeft,              # palette: View: Scroll Left
-    aScrollViewRight              # palette: View: Scroll Right
+    aScrollViewRight,             # palette: View: Scroll Right
+    # PLAT-70 Part C (Find-And-Incremental-Search.md §3.5): the palette's
+    # **Find: Cancel and Return** (`find.cancel`) — under CUA the only exit
+    # that restores the selection and the scroll. Appended at the end, for
+    # the reason every note above gives.
+    aFindCancel,                  # palette: Find: Cancel and Return
+    # Test-Results-Pane.md §9.3: the workspace's `replay-open-in` — where a
+    # test's recording opens when no modifier is held. Palette entries, the
+    # native omniboxes' `replayOpenCommands`. Appended at the end, for the
+    # reason every note above gives.
+    aTestsOpenInNewTab,           # palette: Tests: Open Recordings in a New Tab
+    aTestsOpenInCurrentTab,       # palette: Tests: Open Recordings in the Current Tab
+    # Test-Results-Pane.md §9.3: the palette pair — the selected test,
+    # recorded and opened at the command's destination. Appended at the end,
+    # for the reason every note above gives.
+    aTestsRun,                    # palette: Tests: Run
+    aTestsRunInCurrentTab         # palette: Tests: Run in Current Tab
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

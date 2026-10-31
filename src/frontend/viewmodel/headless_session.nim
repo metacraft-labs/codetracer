@@ -1301,16 +1301,16 @@ proc runTracepoints*(s: HeadlessDebugSession;
   ## the invariant that matters is that there is one conversion, not that the
   ## proc is `void`.
   ##
-  ## ``ct/run-tracepoints`` ANSWERS WITH NO DAP RESPONSE, and that is not a
-  ## guess: ``Handler::run_tracepoints`` (``src/db-backend/src/dap_handler.rs``)
-  ## sends ``ct/updated-trace`` and ``ct/tracepoint-results`` and never calls
-  ## ``respond_dap``.  A caller that used ``sendDapRequest`` here would block for
-  ## ever — measured, as a hang, on ``calc`` on 2026-09-06 before the handler was
-  ## read.  This is exactly the shape
-  ## ``codetracer-specs/Testing/Verification-Harness-Traps.md`` §3 describes: the
-  ## symptom is a timeout and the cause is a boundary that speaks a different
-  ## shape.  So the request is sent WITHOUT expecting a reply and the
-  ## synchronisation is on the ``ct/tracepoint-results`` event.
+  ## The hits are the ``ct/tracepoint-results`` EVENT, so this synchronises on
+  ## the event and sends the request without reading its reply.
+  ## ``Handler::run_tracepoints`` (``src/db-backend/src/dap_handler.rs``) sends
+  ## ``ct/updated-trace`` and ``ct/tracepoint-results`` and then answers the
+  ## request with an empty body; that answer is left unread here, and every
+  ## later read skips it (``sendDapRequest`` matches its own ``request_seq``,
+  ## ``waitForEvent`` reads events only). Until 2026-10-27 the engine sent no
+  ## answer at all, which is why a ``sendDapRequest`` here hung — measured on
+  ## ``calc`` on 2026-09-06 — and the shape
+  ## ``codetracer-specs/Testing/Verification-Harness-Traps.md`` §3 describes.
   ##
   ## Raises ``ValueError`` (from ``waitForEvent``) when the event does not
   ## arrive within the message budget, rather than returning an empty sequence:

@@ -33,6 +33,10 @@
 import std/[strutils, unicode]
 
 import ./layout_model
+# The Agent Activity prompt's "add context" items, through the SDK facade
+# (`viewmodels/agent_prompt_context`, re-exported by `codetracer_embed`).
+from codetracer_embed import AgentAddContextItem, label,
+  AgentNoEditorSelectionReason
 
 type
   ClickGesture* = enum
@@ -56,6 +60,10 @@ type
       ## The TARGET is not drawn by this front-end (the reason in `note`): a
       ## click needs something to land on. Never used for a target that is
       ## drawn.
+    nsRetired = "retired"
+      ## The desktop no longer has the target either: a later decision removed
+      ## it from every front-end (the decision in `note`). The row keeps its id
+      ## so the ids stay the milestone table's; nothing implements it.
 
   ClickBehaviour* = object
     id*: string
@@ -72,12 +80,14 @@ type
 
   ContextAction* = enum
     ## What choosing a context-menu entry does. One value per DISTINCT
-    ## operation the desktop's menus run, so a host's `case` over it is the
-    ## exhaustive list of what it must route.
+    ## operation the context menus run, so a host's `case` over it is the
+    ## exhaustive list of what it must route. Top is the native hosts'
+    ## additional auto-hide edge; the remaining operations mirror desktop.
     caNone = "none"
     caPinLeft = "pin-left"
     caPinBottom = "pin-bottom"
     caPinRight = "pin-right"
+    caPinTop = "pin-top"
     caUnpin = "unpin"
     caClosePane = "close-pane"
     caMaximise = "maximise"
@@ -108,6 +118,23 @@ type
     caFileRename = "file-rename"
     caFileDelete = "file-delete"
     caFileEdit = "file-edit"
+    caAgentAttachUpload = "agent-attach-upload"
+      ## PLAT-54: the Agent Activity prompt's `+` menu
+      ## (`agentAddContextMenu`), its four items in the desktop's order.
+    caAgentAttachFilesFolders = "agent-attach-files-folders"
+    caAgentAttachEditorSelection = "agent-attach-editor-selection"
+    caAgentAttachRecording = "agent-attach-recording"
+    caRequestGoToHandler = "request-go-to-handler"
+      ## PLAT-58: the Requests row's menu (Request-Panel.md § N.5), the
+      ## entries `RequestPanelVM.rowMenu` decides, in its order; the request
+      ## is `ContextTarget.index` (its id).
+    caRequestCopyUrl = "request-copy-url"
+    caRequestFilterMethod = "request-filter-method"
+      ## …and a Method picker's choice: the filter becomes
+      ## `ContextTarget.text` ("" for every method).
+    caRequestFilterStatus = "request-filter-status"
+      ## …and a Status picker's choice (`text`: "2xx" … "5xx", or "").
+    caRequestClearFilters = "request-clear-filters"
 
   ContextMenuKind* = enum
     cmkTab = "tab"
@@ -122,6 +149,14 @@ type
     cmkDockLabel = "dock-label"
     cmkFileTreeNode = "file-tree-node"
       ## A row of the Files pane's tree (K19).
+    cmkAgentAddContext = "agent-add-context"
+      ## The Agent Activity prompt's `+` (the desktop's
+      ## `.agent-add-context-dropdown`): opened by a press, not a right-click.
+    cmkRequestRow = "request-row"
+      ## PLAT-58: a row of the Requests pane (K59).
+    cmkRequestPicker = "request-picker"
+      ## PLAT-58: the Requests pane's Method or Status picker, opened as a
+      ## dropdown (K60): one entry per option, the current one hinted.
 
   ContextMenuEntry* = object
     label*: string
@@ -131,6 +166,10 @@ type
     enabled*: bool
     reason*: string
       ## Why a disabled entry is disabled.
+    carriesValue*: bool
+      ## PLAT-58: the entry names its own value (a picker's option), which
+      ## the chosen target carries in `text` (`choose`) — "" included.
+    value*: string
 
   NamedValue* = tuple[name, value: string]
 
@@ -180,6 +219,9 @@ const
                            "Close"]
     ## `ui/layout.addPanelTransferContextMenu`'s first four entries; the fifth
     ## names the stack's state (`MaximiseLabel` / `MinimiseLabel`).
+  TopPinLabel* = "Pin to Top"
+    ## Native front-ends support the fourth auto-hide edge too. Keep the
+    ## measured desktop labels above intact: the desktop has no Top entry.
   MaximiseLabel* = "Maximise container"
   MinimiseLabel* = "Minimise container"
   ExpandCallChildrenLabel* = "Expand Call Children"
@@ -259,13 +301,15 @@ func entry(label: string; action: ContextAction; hint = "";
 
 func tabContextMenu*(pane: PaneKind; maximised: bool): ContextMenuModel =
   ## A pane tab's right-click menu — `ui/layout.addPanelTransferContextMenu`:
-  ## pin to an edge, close, and maximise / minimise its container.
+  ## pin to an edge, close, and maximise / minimise its container, with Top
+  ## added for the native hosts' fourth auto-hide edge.
   ContextMenuModel(
     kind: cmkTab, target: ContextTarget(pane: pane),
     entries: @[
       entry(DesktopTabMenuLabels[0], caPinLeft),
       entry(DesktopTabMenuLabels[1], caPinBottom),
       entry(DesktopTabMenuLabels[2], caPinRight),
+      entry(TopPinLabel, caPinTop),
       entry(DesktopTabMenuLabels[3], caClosePane),
       entry((if maximised: MinimiseLabel else: MaximiseLabel), caMaximise)])
 
@@ -281,6 +325,8 @@ func dockLabelContextMenu*(pane: PaneKind; edge: LayoutEdge): ContextMenuModel =
     result.entries.add entry(DesktopTabMenuLabels[1], caPinBottom)
   if edge != leRight:
     result.entries.add entry(DesktopTabMenuLabels[2], caPinRight)
+  if edge != leTop:
+    result.entries.add entry(TopPinLabel, caPinTop)
   result.entries.add entry(UnpinLabel, caUnpin)
   result.entries.add entry(DesktopTabMenuLabels[3], caClosePane)
 
@@ -396,6 +442,50 @@ func fileTreeNodeContextMenu*(path: string;
                              hint = (if d.enabled: "" else: d.reason),
                              enabled = d.enabled, reason = d.reason)
 
+const RequestPickerCurrentHint* = "current"
+  ## The hint column of a picker's current option (the desktop's
+  ## `ct-menu-item--active`).
+
+func requestRowContextMenu*(id: int64;
+                            decided: openArray[tuple[label: string;
+                                                     action: ContextAction;
+                                                     enabled: bool;
+                                                     reason: string]]):
+    ContextMenuModel =
+  ## PLAT-58 (K59): a Requests row's menu, from the entries the shared model
+  ## decided (`headless_app/request_menu.requestRowContextMenuOf` reads them
+  ## off `RequestPanelVM.rowMenu`). A disabled entry's reason is its hint too,
+  ## as the Files menu's is.
+  result = ContextMenuModel(kind: cmkRequestRow,
+                            target: ContextTarget(pane: paneRequests,
+                                                  index: id))
+  for d in decided:
+    result.entries.add entry(d.label, d.action,
+                             hint = (if d.enabled: "" else: d.reason),
+                             enabled = d.enabled, reason = d.reason)
+
+func requestPickerContextMenu*(statusPicker: bool;
+                               options: openArray[(string, string)];
+                               current: string): ContextMenuModel =
+  ## PLAT-58 (K60): the Method (or Status) picker as a dropdown — the
+  ## desktop's options in its order, each choosing its value
+  ## (`ContextTarget.text`, "" for All); the current one hinted.
+  result = ContextMenuModel(kind: cmkRequestPicker,
+                            target: ContextTarget(pane: paneRequests,
+                                                  text: current,
+                                                  expression:
+                                                    (if statusPicker: "status"
+                                                     else: "method")))
+  let action = if statusPicker: caRequestFilterStatus
+               else: caRequestFilterMethod
+  for (value, label) in options:
+    var e = entry(label, action,
+                  hint = (if value == current: RequestPickerCurrentHint
+                          else: ""))
+    e.carriesValue = true
+    e.value = value
+    result.entries.add e
+
 func variablesContextMenu*(path: string): ContextMenuModel =
   ## A Variables row's right-click menu — the State pane's
   ## `buildVariableRowContextMenu`: value history and value origin.
@@ -435,6 +525,28 @@ func valueHistoryEntryContextMenu*(expression, value: string;
     entries: @[
       entry(AddToScratchpadLabel, caAddValueToScratchpad),
       entry("Show value origin", caShowValueOrigin)])
+
+func agentAddContextMenu*(editorSelection: string): ContextMenuModel =
+  ## The Agent Activity prompt's `+` menu — the desktop's four items, in its
+  ## order and words (`agent_prompt_context.AgentAddContextItem`). A native
+  ## front-end has no system file dialog, so the two file items and the
+  ## recording item open the omnibox on a path (DeepReview-GUI.md §2.2.7);
+  ## *Editor selection* attaches `editorSelection` (the editor's file and the
+  ## lines its selection covers, `editorSelectionContext`), disabled with the
+  ## reason when no file is shown.
+  ContextMenuModel(
+    kind: cmkAgentAddContext,
+    target: ContextTarget(pane: paneAgentActivity, path: editorSelection),
+    entries: @[
+      entry(aciUpload.label, caAgentAttachUpload),
+      entry(aciFilesFolders.label, caAgentAttachFilesFolders),
+      entry(aciEditorSelection.label, caAgentAttachEditorSelection,
+            hint = (if editorSelection.len > 0: ""
+                    else: AgentNoEditorSelectionReason),
+            enabled = editorSelection.len > 0,
+            reason = (if editorSelection.len > 0: ""
+                      else: AgentNoEditorSelectionReason)),
+      entry(aciRecording.label, caAgentAttachRecording)])
 
 func labels*(m: ContextMenuModel): seq[string] =
   for e in m.entries:
@@ -500,7 +612,9 @@ proc choose*(s: var ContextMenuState; index: int):
   let e = s.menu.entries[i]
   if not e.enabled:
     return (false, caNone, s.menu.target)
-  let target = s.menu.target
+  var target = s.menu.target
+  if e.carriesValue:
+    target.text = e.value
   s.close()
   (true, e.action, target)
 
@@ -524,7 +638,7 @@ func k(id, target: string; gestures: set[ClickGesture];
                  desktop: desktop, sharedOp: sharedOp, terminal: terminal,
                  gpui: gpui, note: note)
 
-const ClickInventory*: array[57, ClickBehaviour] = [
+const ClickInventory*: array[60, ClickBehaviour] = [
   k("K1", "Top bar: menu button / item", {cgClick},
     "open the menu; run the item / enter the folder", "MenuVM",
     nsExisting, nsExisting, "PLAT-48/49"),
@@ -604,7 +718,9 @@ const ClickInventory*: array[57, ClickBehaviour] = [
     "StateVM.setHideOtherProcessWatches", nsDone, nsDone,
     "the pane is one list of variables and watches; the terminal's toggle is `:watches hide|show`"),
   k("K30", "Timeline: track", {cgClick}, "seek to the tick",
-    "gotoTick", nsDone, nsDone),
+    "-", nsRetired, nsRetired,
+    "the Timeline panel was removed from every front-end (Layout-System.md, " &
+      "\"The Timeline panel is removed\")"),
   k("K31", "Point list: row", {cgClick}, "select the point",
     "PointListVM.selectPoint", nsDone, nsDone),
   k("K32", "Terminal output: line", {cgClick}, "go to that output",
@@ -650,10 +766,13 @@ const ClickInventory*: array[57, ClickBehaviour] = [
     "the terminal strip draws no pin glyph (its tab menu pins, K7); " &
       "GPUI's button is PLAT-49 part B's"),
   k("K44", "Timeline: zoom buttons", {cgClick}, "zoom the track",
-    "-", nsNotApplicable, nsNotApplicable,
-    "the native timelines draw no zoom control"),
+    "-", nsRetired, nsRetired,
+    "the Timeline panel was removed from every front-end (Layout-System.md, " &
+      "\"The Timeline panel is removed\")"),
   k("K45", "Timeline: track", {cgDrag},
-    "seek where the drag is released", "gotoTick", nsDone, nsDone),
+    "seek where the drag is released", "-", nsRetired, nsRetired,
+    "the Timeline panel was removed from every front-end (Layout-System.md, " &
+      "\"The Timeline panel is removed\")"),
   k("K46", "Flow: loop iteration controls", {cgClick, cgDoubleClick},
     "previous / next iteration; open a folded iteration", "-",
     nsNotApplicable, nsNotApplicable,
@@ -691,7 +810,22 @@ const ClickInventory*: array[57, ClickBehaviour] = [
   k("K57", "Problems / Build line", {cgClick},
     "jump to file:line", "source jump", nsNotApplicable, nsNotApplicable,
     "the panes are report leaves natively in a replay (K35 was this row " &
-      "with Find in Files' until PLAT-57 drew that pane)")]
+      "with Find in Files' until PLAT-57 drew that pane)"),
+  k("K58", "Requests: row", {cgClick, cgDoubleClick},
+    "select it / go to the request handler's entry (the Call Trace " &
+      "follows the move)", "RequestPanelVM.pressRow / activate", nsDone,
+    nsDone, "PLAT-58: the ViewModel counts the double press, which neither " &
+      "native platform reports"),
+  k("K59", "Requests: row", {cgRightClick},
+    "menu: Go to Handler, Copy URL, Filter by Method, Filter by Status, " &
+      "Clear Filters", "RequestPanelVM.rowMenu", nsDone, nsDone,
+    "PLAT-58 added the menu on all three front-ends"),
+  k("K60", "Requests: Method / Status picker, URL field", {cgClick},
+    "open the picker's options / focus the URL search",
+    "RequestPanelVM.setFilterMethod / setFilterStatus / setSearchText",
+    nsDone, nsDone,
+    "PLAT-58: the pickers open as dropdowns; the field is the omnibox's " &
+      "(the terminal's command line's) `:requests <text>`")]
 
 func behaviour*(id: string): ClickBehaviour =
   ## The inventory row named `id` (`K1` …); an empty value for an unknown id.

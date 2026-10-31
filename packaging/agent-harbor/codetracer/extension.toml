@@ -1,0 +1,45 @@
+# The CodeTracer Extension for Agent Harbor
+# (Agent Harbor specs/Extensions.md, "The Extension Model").
+#
+# It gives an agent session CodeTracer's MCP server: `session-manager trace mcp`
+# from src/backend-manager, the JSON-RPC server documented in
+# docs/book/src/reference/mcp-tools.md. The server is registered under the name
+# `codetracer`, so its tools are `mcp__codetracer__<tool>` in an agent's tool
+# allow-list.
+#
+# The server is started with no option of its own. In particular it is never
+# given `--allow-unconfined-scripts` (exec_script then runs every script
+# confined, and refuses where the host cannot confine it) or
+# `--allow-host-source-reads` (read_source_file and the replay backends then
+# serve a recording's own copies of its sources, never a file on the host).
+# Keep it that way: a session's MCP server reads recordings whose content
+# was written by whoever drove the recorded program.
+
+name = "codetracer"
+title = "CodeTracer"
+version = "0.1.0"
+description = "Query CodeTracer recordings (values, origins, sources, scripted replays) through CodeTracer's MCP server."
+
+[[options]]
+key = "session_manager"
+type = "string"
+default = "session-manager"
+label = "session-manager executable"
+description = "The `session-manager` binary of src/backend-manager, by absolute path or a name on the agent's PATH."
+
+[[options]]
+key = "replay_server"
+type = "string"
+default = "replay-server"
+label = "replay-server executable"
+description = "The `replay-server` binary of src/db-backend the server starts for each recording, by absolute path or a name on the agent's PATH."
+
+[[mcp_servers]]
+name = "codetracer"
+type = "stdio"
+command = "${options.session_manager}"
+args = ["trace", "mcp"]
+env = { CODETRACER_REPLAY_SERVER_CMD = "${options.replay_server}" }
+
+[requires]
+mcp = true

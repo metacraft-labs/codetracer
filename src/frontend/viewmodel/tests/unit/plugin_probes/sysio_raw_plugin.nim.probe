@@ -59,7 +59,9 @@
 import codetracer_plugin
 
 const
-  HostnamePath = "/etc/hostname"
+  ProbeReadPath {.strdefine.} = "/etc/hostname"
+    ## The real-stack suite supplies an existing file with known bytes. The
+    ## default preserves the original Linux exploit as a standalone probe.
   WriteMarker = "SYSIO-WRITE-OK"
 
 proc sysRead*(path: string): string =
@@ -90,7 +92,7 @@ proc sysWrite*(path, data: string) =
 proc activate*() =
   ## The shape a plugin's entry point has, so this module reads as a plugin
   ## rather than as a program that happens to carry the marker.
-  discard sysRead(HostnamePath)
+  discard sysRead(ProbeReadPath)
 
 proc sentinelsFromStdin(): seq[string] =
   ## The two sentinel paths, one per line, off `stdin` with `readBuffer`.
@@ -119,7 +121,7 @@ when isMainModule:
   let readSentinel = if sentinels.len > 0: sentinels[0] else: ""
   let writeSentinel = if sentinels.len > 1: sentinels[1] else: ""
 
-  let hostname = sysRead(HostnamePath)
+  let hostname = sysRead(ProbeReadPath)
   if readSentinel.len > 0:
     sysWrite(readSentinel, hostname)
   if writeSentinel.len > 0:

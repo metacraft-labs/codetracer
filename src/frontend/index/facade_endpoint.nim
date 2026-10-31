@@ -776,6 +776,19 @@ proc hVcsContentId(ep: FacadeEndpoint; args: JsonNode): VerbReply =
                     outcome.error.detail)
   replyOk(encodeVcsContentId(outcome.value))
 
+proc hVcsDeclaredScopes(ep: FacadeEndpoint; args: JsonNode): VerbReply =
+  ## `vcs.declaredScopes` — the certificate scopes the repository declares
+  ## (test-certificates-spec Tooling §3.1), by the ONE reader
+  ## (`vcs.declaredScopesOver`) with node's `spawnSync` as its git. REQUIRES
+  ## `capVcsRead` (`vcs.DeclaredScopesRequires`); writes nothing.
+  let repository = argText(args, "repository")
+  let outcome = declaredScopesOver(nodeContentIdHost(ep.tempRoot),
+                                   ep.grantedProfile(), repository)
+  if not outcome.ok:
+    return replyErr(outcome.error.kind, outcome.error.message,
+                    outcome.error.detail)
+  replyOk(encodeVcsDeclaredScopes(outcome.value))
+
 proc hVcsStage(ep: FacadeEndpoint; args: JsonNode): VerbReply =
   let repository = argText(args, "repository")
   let paths = decodeTextSeq(jrequire(args, "paths"))
@@ -1022,6 +1035,8 @@ let facadeVerbs*: seq[FacadeVerb] = @[
   # (that is how git computes a tree id), and nothing else — no ref, no index,
   # no working-tree file. A read in the facade's sense; see `vcs.contentId`.
   served("vcs.contentId", ContentIdRequires, hVcsContentId),
+  # REQUIRES capVcsRead; reads the repository's configuration, writes nothing.
+  served("vcs.declaredScopes", DeclaredScopesRequires, hVcsDeclaredScopes),
   served("vcs.stage", {capVcsWrite}, hVcsStage),
   served("vcs.unstage", {capVcsWrite}, hVcsUnstage),
   served("vcs.discardChanges", {capVcsWrite}, hVcsDiscardChanges),

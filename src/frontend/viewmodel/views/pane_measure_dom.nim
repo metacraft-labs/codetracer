@@ -35,7 +35,7 @@ import ../viewport
 from ../viewmodels/calltrace_vm import setViewport, setRowHeightPx
 from ../viewmodels/state_vm import setViewport
 from ../viewmodels/request_panel_vm import setViewport
-from ../viewmodels/event_log_vm import setRowHeightPx, setViewport
+from ../viewmodels/event_log_vm import reportMeasure
 from ../viewmodels/terminal_output_vm import nil
 from ../viewmodels/trace_log_vm import setViewport
 from ./isonim_calltrace_view import CallDepthIndentPx
@@ -159,7 +159,9 @@ proc measureOf(pane: MeasuredPane; session: SessionViewModel): PaneMeasure =
     # The rows the list shows (Viewport-Driven-Loading V2): the engine is
     # asked for that window (`ct/event-load`), and the scroll area is as tall
     # as the whole list at the rows' measured pitch. A hidden pane reports
-    # none and asks nothing until it is shown.
+    # none and asks nothing until it is shown. `reportMeasure` applies the
+    # first measured pitch at once, so the size the fallback pitch gave, which
+    # is only what asked for the first rows, does not outlive it.
     let vm = session.eventLogVM
     if vm.isNil: return PaneMeasure()
     PaneMeasure(
@@ -169,9 +171,7 @@ proc measureOf(pane: MeasuredPane; session: SessionViewModel): PaneMeasure =
       countPartialRow: true,
       reportHidden: true,
       fallbackRowPx: proc(): float = EventRowFallbackPx,
-      report: proc(v: Viewport; rowPx: float) =
-        vm.setRowHeightPx(rowPx)
-        vm.setViewport(v),
+      report: proc(v: Viewport; rowPx: float) = vm.reportMeasure(v, rowPx),
       changed: proc() = discard vm.eventRows.val)
   of mpRequestPanel:
     # The rows the table body shows (Viewport-Driven-Loading V2): a partly

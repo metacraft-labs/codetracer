@@ -638,6 +638,27 @@ pub fn short_root(prefix: &str) -> (tempfile::TempDir, PathBuf) {
     (root, path)
 }
 
+/// The private `CODETRACER_HOME` the harness gives the daemon and `trace mcp`
+/// it starts under `root`.
+///
+/// Every per-user location the daemon resolves (its tmp dir, which holds the
+/// script scratch parent and the replay sockets; the trace index; logs)
+/// follows `CODETRACER_HOME`, and `CODETRACER_HOME` outranks `TMPDIR`
+/// (`libs/ct-home`).  Setting only `TMPDIR`, as the harness used to, left the
+/// daemon in whatever `CODETRACER_HOME` the test run inherited: `just
+/// test-rust` exports a scratch one for the whole run, so the daemon's tmp
+/// dir was not under `root` at all, and a test that arranged a directory there
+/// (the script scratch parent) arranged one the daemon never looked at.
+pub fn daemon_home(root: &Path) -> PathBuf {
+    root.join("home")
+}
+
+/// The daemon's tmp dir (`$CODETRACER_HOME/tmp`, `ct_home::tmp_dir`) under
+/// the home [`daemon_home`] gives it.
+pub fn daemon_tmp_dir(root: &Path) -> PathBuf {
+    daemon_home(root).join("tmp")
+}
+
 /// The real daemon, with its own socket under `root`, starting the real
 /// `replay-server`.  Returns it and its socket once the socket exists.
 pub async fn start_daemon(server: &Path, root: &Path, replay_server: &Path) -> (Child, PathBuf) {
@@ -652,6 +673,64 @@ pub async fn start_daemon_with_env(
     replay_server: &Path,
     env: &[(&str, &OsStr)],
 ) -> (Child, PathBuf) {
+    start_daemon_configured(server, root, replay_server, env, |_| {}).await
+}
+
+/// [`start_daemon`] in a user namespace of its own that maps only this
+/// user's uid and gid, as a sandbox built on an unprivileged user namespace
+/// does: inside it every file of another user, `/` included, reads as owned
+/// by the overflow uid (`/proc/sys/kernel/overflowuid`).  The namespace is
+/// entered between fork and exec (`unshare(2)`, then the process writes its
+/// own one-line `uid_map` and `gid_map`, as an unprivileged process may).
+#[cfg(target_os = "linux")]
+#[allow(dead_code)]
+pub async fn start_daemon_in_own_user_namespace(
+    server: &Path,
+    root: &Path,
+    replay_server: &Path,
+) -> (Child, PathBuf) {
+    // SAFETY: getuid/getgid have no preconditions and cannot fail.
+    let (uid, gid) = unsafe { (libc::getuid(), libc::getgid()) };
+    // Prepared before the fork: the hook below only opens and writes.
+    let uid_map = format!("{uid} {uid} 1\n");
+    let gid_map = format!("{gid} {gid} 1\n");
+    start_daemon_configured(server, root, replay_server, &[], move |command| {
+        // SAFETY: the hook runs between fork and exec and calls only
+        // unshare/open/write/close, which are async-signal-safe.
+        unsafe {
+            command.pre_exec(move || {
+                if libc::unshare(libc::CLONE_NEWUSER) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                for (file, contents) in [
+                    (c"/proc/self/setgroups", "deny".as_bytes()),
+                    (c"/proc/self/uid_map", uid_map.as_bytes()),
+                    (c"/proc/self/gid_map", gid_map.as_bytes()),
+                ] {
+                    let fd = libc::open(file.as_ptr(), libc::O_WRONLY | libc::O_CLOEXEC);
+                    if fd < 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    let written = libc::write(fd, contents.as_ptr().cast(), contents.len());
+                    libc::close(fd);
+                    if written != contents.len() as isize {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                }
+                Ok(())
+            });
+        }
+    })
+    .await
+}
+
+async fn start_daemon_configured(
+    server: &Path,
+    root: &Path,
+    replay_server: &Path,
+    env: &[(&str, &OsStr)],
+    configure: impl FnOnce(&mut Command),
+) -> (Child, PathBuf) {
     let daemon_dir = root.join("codetracer");
     std::fs::create_dir_all(&daemon_dir).unwrap();
     let socket = daemon_dir.join(if cfg!(windows) {
@@ -660,17 +739,21 @@ pub async fn start_daemon_with_env(
         "daemon.sock"
     });
     let stderr_log = root.join("daemon.stderr");
-    let mut daemon = Command::new(server)
+    let mut command = Command::new(server);
+    command
         .args(["daemon", "start"])
         .env("TMPDIR", root)
+        .env("CODETRACER_HOME", daemon_home(root))
+        // It outranks CODETRACER_HOME; an inherited one would move the tmp dir.
+        .env_remove("CODETRACER_TMP_PATH")
         .env("CODETRACER_DAEMON_SOCKET", &socket)
         .env("CODETRACER_REPLAY_SERVER_CMD", replay_server)
         .envs(env.iter().map(|(k, v)| (*k, *v)))
         .stdout(Stdio::null())
         .stderr(std::fs::File::create(&stderr_log).expect("the daemon's stderr log"))
-        .kill_on_drop(true)
-        .spawn()
-        .expect("start the daemon");
+        .kill_on_drop(true);
+    configure(&mut command);
+    let mut daemon = command.spawn().expect("start the daemon");
     wait_for_daemon_socket(&mut daemon, &socket, &stderr_log).await;
     (daemon, socket)
 }
@@ -741,6 +824,9 @@ pub async fn start_mcp(server: &Path, root: &Path, socket: &Path, extra_args: &[
         .args(["trace", "mcp"])
         .args(extra_args)
         .env("TMPDIR", root)
+        .env("CODETRACER_HOME", daemon_home(root))
+        // It outranks CODETRACER_HOME; an inherited one would move the tmp dir.
+        .env_remove("CODETRACER_TMP_PATH")
         .env("CODETRACER_DAEMON_SOCK", socket)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -809,4 +895,33 @@ pub fn dap_messages(bytes: &[u8]) -> Vec<Value> {
         messages.push(serde_json::from_slice(body).expect("a DAP message"));
     }
     messages
+}
+
+/// Whether `server` can run `exec_script` scripts confined on this host
+/// (`trace check-confinement`), asked once per test binary.
+pub fn scripts_can_be_confined(server: &Path) -> bool {
+    static ANSWER: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ANSWER.get_or_init(|| {
+        std::process::Command::new(server)
+            .args(["trace", "check-confinement"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("run trace check-confinement")
+            .success()
+    })
+}
+
+/// `args` for a `trace mcp` server whose test is not about script
+/// confinement but runs `exec_script`: where the host cannot confine a
+/// script (macOS, a Linux kernel without Landlock ABI 3), the server refuses
+/// `exec_script` unless it opts out, so these tests opt out explicitly
+/// there.  Wherever confinement exists they run the confined path an agent
+/// gets.  The tests about confinement itself never call this.
+pub fn with_script_opt_in<'a>(server: &Path, args: &[&'a str]) -> Vec<&'a str> {
+    let mut out = args.to_vec();
+    if !scripts_can_be_confined(server) {
+        out.push("--allow-unconfined-scripts");
+    }
+    out
 }

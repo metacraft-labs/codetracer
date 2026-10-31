@@ -264,11 +264,6 @@ echo "self-hosted Windows jobs"
 declare -a windows_jobs=()
 declare -A job_first_step=()
 declare -A job_bootstrap_body=()
-# Jobs carrying a step that deletes the System32 WSL `bash.exe` launcher stub,
-# keyed by job -> that step's body. Recognised by BEHAVIOUR, not by step name,
-# so renaming the step cannot drop it out of the contract.
-declare -a wsl_stub_jobs=()
-declare -A job_wsl_stub_body=()
 # Every job whose `runs-on:` names a Windows runner, by ANY of the labels in
 # WINDOWS_RUNNER_LABELS -- not just the one class the lane happens to use
 # today. Section 4 below walks this set; a job moved to `eph-win-arm64` or
@@ -301,9 +296,6 @@ flush_step() {
 	[ "$step_index" -gt 0 ] || return 0
 	if [ "$current_step_name" = "$BOOTSTRAP_STEP_NAME" ]; then
 		job_bootstrap_body["$current_job"]+="$current_step_body"
-	fi
-	if [[ $current_step_body == *'System32\bash.exe'* ]]; then
-		job_wsl_stub_body["$current_job"]+="$current_step_body"
 	fi
 	# Section 4 reads `uses:`, which for an unnamed step lives in the list-item
 	# text rather than in the body, so both halves go into the blob.
@@ -370,9 +362,6 @@ flush_job() {
 	if [ -n "$current_job" ] && is_self_hosted_windows_runs_on "$current_runs_on"; then
 		windows_jobs+=("$current_job")
 		job_first_step["$current_job"]="$seen_first_step"
-		if [ -n "${job_wsl_stub_body[$current_job]:-}" ]; then
-			wsl_stub_jobs+=("$current_job")
-		fi
 	fi
 	if [ -n "$current_job" ] && is_windows_runs_on "$current_runs_on"; then
 		windows_runner_jobs+=("$current_job")
@@ -541,65 +530,24 @@ for job in "${windows_jobs[@]}"; do
 done
 
 # ---------------------------------------------------------------------------
-# 3. The steps that delete the System32 WSL `bash.exe` launcher stub.
-#
-# There are two of them (`origin-dap-windows-nightly` and
-# `windows-rust-components`) and they do the same job: clear the WSL stub so
-# `CreateProcessW`'s System32-first lookup falls through to Git for Windows'
-# bash, then make sure `bash` really resolves before the `shell: bash` steps
-# below. One of the two was hardened and the other was not, and nothing
-# noticed, because nothing was checking. This does.
-#
-# Matched on behaviour rather than on step name so a rename cannot drop a copy
-# out of the contract.
+# 3. Windows tool selection must never mutate operating-system executables.
+# The old contract demanded System32 deletion. Actual Rust launch sites now
+# select declared PATH Bash explicitly; removing OS files is never provisioning.
+# Keep a positive job census so an empty scanner cannot pass this safety gate.
 # ---------------------------------------------------------------------------
 echo
-echo "System32 WSL bash-stub steps"
-
-if [ "${#wsl_stub_jobs[@]}" -gt 0 ]; then
-	ok "the workflow still has ${WINDOWS_RUNNER_LABEL} steps that clear the WSL bash stub (${#wsl_stub_jobs[@]})"
-else
-	fail "the workflow still has ${WINDOWS_RUNNER_LABEL} steps that clear the WSL bash stub" \
-		"none were found. Either they were removed -- in which case this contract" \
-		"must be retargeted, not deleted -- or the scanner no longer matches." \
-		"Passing with zero of them would assert nothing."
-fi
-
-# The single-quoted needles inside this loop are PowerShell source quoted
-# verbatim; `$env:` and `$gitForWindowsBin` are PowerShell variables and must
-# not be expanded by this shell.
-# shellcheck disable=SC2016
-for job in "${wsl_stub_jobs[@]+"${wsl_stub_jobs[@]}"}"; do
-	body="${job_wsl_stub_body[$job]:-}"
-
-	# `C:\Program Files\Git\bin` is the GitHub-hosted windows-latest layout.
-	# On eph-win-x64 it does not exist and PortableGit is provisioned under
-	# RUNNER_TEMP instead. Appending a non-existent directory to GITHUB_PATH
-	# succeeds silently, which is what made the original breakage surface
-	# several steps away as `bash: command not found`.
-	if [[ $body == *'Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\Git\bin"'* ]]; then
-		fail "$job appends C:\\Program Files\\Git\\bin only if it exists" \
-			"it appends the literal path unconditionally. That directory is absent on" \
-			"eph-win-x64; the append then succeeds and silently supplies nothing, and" \
-			"the failure reappears as 'bash: command not found' in a later step."
-	elif [[ $body == *'Test-Path -LiteralPath $gitForWindowsBin -PathType Container'* &&
-		$body == *'Add-Content -Path $env:GITHUB_PATH -Value $gitForWindowsBin'* ]]; then
-		ok "$job appends C:\\Program Files\\Git\\bin only if it exists"
+echo "Windows Bash selection without OS mutation"
+for job in origin-dap-windows-nightly windows-rust-components windows-installer-build; do
+	if [[ -n ${job_step_blobs[$job]:-} ]]; then
+		ok "$job is present in parsed job census"
 	else
-		fail "$job appends C:\\Program Files\\Git\\bin only if it exists" \
-			'expected the directory to be bound to $gitForWindowsBin, tested with' \
-			"Test-Path -PathType Container, and appended to GITHUB_PATH only inside" \
-			"that test."
+		fail "$job is present in parsed job census" "job scanner matched no steps"
 	fi
-
-	# ...and having done whatever it can, the step must prove the result.
-	if [[ $body == *'Get-Command bash'* && $body == *'throw "No bash on PATH.'* ]]; then
-		ok "$job fails loudly if bash still does not resolve"
+	body="${job_step_blobs[$job]:-}"
+	if [[ $body == *'System32\bash.exe'* || $body == *'takeown '* || $body == *'icacls '* || $body == *'C:\Program Files\Git\bin'* ]]; then
+		fail "$job leaves OS executables and provider selection untouched" "found an OS ownership/deletion or hardcoded Git selection workaround"
 	else
-		fail "$job fails loudly if bash still does not resolve" \
-			"every step below this one is 'shell: bash'. Without an explicit check," \
-			"a missing bash is reported as whatever that step was trying to do --" \
-			"a build or test failure -- rather than as a missing tool."
+		ok "$job leaves OS executables and provider selection untouched"
 	fi
 done
 
@@ -1148,9 +1096,9 @@ done
 
 # ---------------------------------------------------------------------------
 # Self-accounting: a contract that is deleted or short-circuited must not leave
-# this script reporting success on fewer checks than it claims. Four fixed
-# assertions (script exists, script provisions bash, job set non-empty, WSL
-# stub-step set non-empty), six per Windows job, two per WSL stub step, four
+# this script reporting success on fewer checks than it claims. Three fixed
+# assertions (script exists, script provisions bash, job set non-empty),
+# six per Windows job, six fixed OS-mutation safety assertions, four
 # fixed dev-env-flavor assertions (site count, no matrix-hidden Windows leg,
 # one direct, one via composite), two per dev-env site, and ten fixed
 # long-path assertions (code-line floor, system-scope line count, the write
@@ -1160,7 +1108,7 @@ done
 # non-empty job list and one per Windows-runner job it bounds.
 # ---------------------------------------------------------------------------
 echo
-expected_assertions=$((4 + 6 * ${#windows_jobs[@]} + 2 * ${#wsl_stub_jobs[@]} + \
+expected_assertions=$((3 + 6 * ${#windows_jobs[@]} + 6 + \
 	4 + 2 * ${#dev_env_sites[@]} + 10 + 1 + ${#win_timeout_jobs[@]}))
 if [ "$assertions" -ne "$expected_assertions" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$expected_assertions"

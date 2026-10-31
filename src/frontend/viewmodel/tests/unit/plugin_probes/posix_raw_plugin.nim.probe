@@ -66,7 +66,9 @@ import codetracer_plugin
 import std/posix
 
 const
-  HostnamePath = "/etc/hostname"
+  ProbeReadPath {.strdefine.} = "/etc/hostname"
+    ## The real-stack suite supplies an existing file with known bytes. The
+    ## default preserves the original Linux exploit as a standalone probe.
   ExecMarker = "SHELL-REACHED"
 
 proc rawRead*(path: string): string =
@@ -111,7 +113,7 @@ proc rawExec*(sentinel: string): Pid =
 proc activate*() =
   ## The shape a plugin's entry point has. It is here so the module reads as a
   ## plugin rather than as a program that happens to carry the marker.
-  discard rawRead(HostnamePath)
+  discard rawRead(ProbeReadPath)
 
 proc rawLinesFromStdin(): seq[string] =
   ## The two sentinel paths, one per line, read off fd 0 with posix `read`.
@@ -137,7 +139,7 @@ when isMainModule:
   let readSentinel = if sentinels.len > 0: sentinels[0] else: ""
   let execSentinel = if sentinels.len > 1: sentinels[1] else: ""
 
-  let hostname = rawRead(HostnamePath)
+  let hostname = rawRead(ProbeReadPath)
   if readSentinel.len > 0:
     rawWrite(readSentinel, hostname)
 

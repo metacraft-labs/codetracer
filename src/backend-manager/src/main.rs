@@ -16,6 +16,7 @@ pub mod observability_fetch;
 pub mod origin_renderer;
 mod paths;
 pub mod python_bridge;
+mod script_confinement;
 mod script_executor;
 mod session;
 mod trace_metadata;
@@ -388,6 +389,14 @@ enum TraceAction {
         #[arg(long)]
         lazy: bool,
     },
+    /// Say whether `exec_script` can run scripts confined on this host.
+    ///
+    /// Exits 0 and says so when it can.  Exits 1 naming the reason when it
+    /// cannot (not Linux, Landlock missing or older than ABI 3, no seccomp):
+    /// there, `trace mcp` refuses `exec_script` unless it was started with
+    /// `--allow-unconfined-scripts`.  For harnesses that run agents and must
+    /// fail before they start rather than opt out.
+    CheckConfinement,
     /// Start the MCP (Model Context Protocol) server on stdio.
     ///
     /// The MCP server exposes CodeTracer trace querying as tools for
@@ -409,6 +418,18 @@ enum TraceAction {
         /// that reads recordings other people's traffic produced.
         #[arg(long)]
         allow_host_source_reads: bool,
+        /// Let `exec_script` run a script with this server's own privileges.
+        ///
+        /// Off by default: a script is arbitrary Python, so it runs confined
+        /// (it can write only a scratch directory made for the run and
+        /// removed after it, open no socket, and query only its own trace),
+        /// and where the host cannot confine it (an operating system or a
+        /// kernel without Landlock ABI 3 and seccomp) it does not run.  Set it
+        /// for your own scripts on such a host, or for scripts that must
+        /// write files; leave it unset for an agent that reads recordings
+        /// other people's traffic produced.
+        #[arg(long)]
+        allow_unconfined_scripts: bool,
     },
 }
 
@@ -1620,6 +1641,19 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                     write_half
                         .write_all(&DapParser::to_bytes(&results_event))
                         .await?;
+
+                    // Then the request's own answer, after the events, as
+                    // the real replay-server sends it.
+                    let response = json!({
+                        "type": "response",
+                        "command": "ct/run-tracepoints",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {}
+                    });
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
                 }
                 // --- ct/load-flow: returns mock flow/omniscience data ---
                 //
@@ -2431,6 +2465,20 @@ async fn ensure_daemon_connected(
     socket_path: &PathBuf,
     pid_path: &PathBuf,
 ) -> Result<UnixStream, Box<dyn Error>> {
+    let stream = ensure_daemon_connected_unverified(socket_path, pid_path).await?;
+    // The daemon runs this command's script and opens its trace: it must be
+    // a process of this user, not one that took the socket's place.
+    backend_manager::check_peer_is_this_user(&stream)
+        .map_err(|refusal| format!("refusing the daemon's socket: {refusal}"))?;
+    Ok(stream)
+}
+
+/// [`ensure_daemon_connected`] without the check of who answered.
+#[cfg(unix)]
+async fn ensure_daemon_connected_unverified(
+    socket_path: &PathBuf,
+    pid_path: &PathBuf,
+) -> Result<UnixStream, Box<dyn Error>> {
     // First try to connect to an already-running daemon.
     if socket_path.exists() {
         if let Ok(stream) = UnixStream::connect(socket_path).await {
@@ -2730,6 +2778,10 @@ async fn run_trace_query(
             "script": script,
             "timeout": timeout_secs,
             "sessionId": session_id,
+            // The command line runs the user's own script with the user's
+            // own authority, as it reads host sources: unconfined.  An agent
+            // reaches scripts through `trace mcp`, which confines them.
+            "unconfinedScripts": true,
         })),
         timeout_secs + 30, // daemon-side timeout + overhead for open-trace
     )
@@ -3126,6 +3178,10 @@ async fn run_trace_query(
             "script": script,
             "timeout": timeout_secs,
             "sessionId": session_id,
+            // The command line runs the user's own script with the user's
+            // own authority, as it reads host sources: unconfined.  An agent
+            // reaches scripts through `trace mcp`, which confines them.
+            "unconfinedScripts": true,
         })),
         timeout_secs + 30,
     )
@@ -3526,8 +3582,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 )
                 .await;
             }
+            TraceAction::CheckConfinement => match script_confinement::probe() {
+                Ok(()) => {
+                    println!("exec_script scripts can be confined on this host");
+                    return Ok(());
+                }
+                Err(reason) => {
+                    eprintln!("exec_script scripts cannot be confined on this host: {reason}");
+                    std::process::exit(1);
+                }
+            },
             TraceAction::Mcp {
                 allow_host_source_reads,
+                allow_unconfined_scripts,
             } => {
                 // MCP server: redirect all logging to stderr only.
                 // stdout is reserved exclusively for JSON-RPC transport.
@@ -3544,6 +3611,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     } else {
                         mcp_server::HostSourceReads::Refused
                     },
+                    unconfined_scripts: *allow_unconfined_scripts,
                 };
                 return mcp_server::run_mcp_server(config).await;
             }

@@ -59,7 +59,8 @@ from ../viewmodel/store/types as vmtypes import RequestRecord
 from ../viewmodel/viewmodels/request_panel_vm import
   RequestPanelVM, createRequestPanelVM, NO_SELECTED_INDEX,
   setRequests, clearRequests, addRequest, selectRequest,
-  jumpToHandler, setFilterMethod, setFilterStatus, setSearchText
+  jumpToHandler, setFilterMethod, setFilterStatus, setSearchText,
+  RequestSpanPollIntervalMs
 when defined(js):
   from isonim/web/dom_api import nil
   import ../viewmodel/views/isonim_request_panel_view
@@ -78,19 +79,8 @@ var requestPanelVMInstance*: RequestPanelVM
 var requestPanelVMStore: ReplayDataStore
 var requestPanelComponentRef: RequestPanelComponent
 
-const RequestSpanPollIntervalMs* = 500
-  ## RS-M3 — how often the panel polls ``ct/load-request-spans-since``.
-  ##
-  ## Polling is not an implementation detail we could drop: the backend emits
-  ## ``ct/updated-http-requests`` *alongside the response to a poll* and
-  ## suppresses it when the delta is empty (see
-  ## ``db-backend/src/dap_handler.rs::load_request_spans_since`` — "an idle
-  ## poll loop must not push an event per tick"), so without a tick there is
-  ## no event.  A poll costs only the container chunks that were *added*
-  ## since the cursor, so an idle recording makes this loop nearly free.
-  ##
-  ## Half a second is the "within one poll interval of completing" budget the
-  ## milestone's live-tail acceptance test is written against.
+# `RequestSpanPollIntervalMs` — how often the tail is polled — is the
+# ViewModel's (PLAT-58), so the native hosts' idle ticks keep the same cadence.
 
 var requestSpanPollingStarted = false
   ## Guards against installing a second timer when the panel is re-mounted
@@ -379,8 +369,16 @@ proc initRequestPanelVMFromSession*(vm: RequestPanelVM) =
     # recording that actually serves requests brings it on screen once. The
     # store merges every delta (the poll's answer and the
     # `ct/updated-http-requests` event), so its rows are the signal.
+    #
+    # A COMPLETED recording's rows are read by window, so its tail list stays
+    # empty and only its count (`recordedTotal`, the first poll's answer) says
+    # it serves requests — the same two facts `RequestPanelVM.takeReveal`
+    # reads for the native panes (PLAT-58). Watching the rows alone stopped
+    # revealing the panel for every completed recording when the window
+    # replaced the snapshot.
     createEffect proc() =
-      if store.requestSpans.requests.val.len > 0:
+      if store.requestSpans.requests.val.len > 0 or
+         store.requestSpans.recordedTotal.val > 0:
         untrack(proc() = scheduleRequestPanelReveal())
   # The poll tails the SHOWN tab's store (`requestPanelVMStore`, moved by
   # every tab switch); a hidden tab's live deltas still reach its own store

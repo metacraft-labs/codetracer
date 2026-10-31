@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""PLAT-70 Part I — the mutation harness for fit-or-scroll (the table panes'
+"""NOT-A-CI-GATE: a mutation-grading instrument its owner runs in
+Verification-Harness-Traps §39b's order (needle scan, record, grade), as every
+`run-plat*-mutations.py` beside the suites is; it edits product sources in
+place, so no lane may run it as a check. CI does start it — `ci/lint/nim.sh`'s
+harness-argument-refusal step, by discovery, with a refused flag.
+
+PLAT-70 Part I — the mutation harness for fit-or-scroll (the table panes'
 column widths from their minimum and preferred widths, and the horizontal
 bar only when the minimums do not fit; Horizontal-Overflow.md §5.5).
 

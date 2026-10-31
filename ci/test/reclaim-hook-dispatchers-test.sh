@@ -18,7 +18,8 @@
 #   * a stale `.legacy` dispatcher next to a dispatcher in the slot is dropped;
 #   * a hand-written `.repro-local` and a hand-written slot hook are left alone;
 #   * a repository with no dispatcher is not touched;
-#   * nix/shells/main.nix runs the reclaim right after the installer.
+#   * nix/shells/main.nix snapshots the dispatchers right before the installer
+#     and runs the reclaim, with that snapshot, right after it.
 #
 # Mocks: the dispatcher and the pre-commit shim are small stand-in scripts
 # carrying the real marker lines ("# reprobuild hook dispatcher" and "# File
@@ -164,10 +165,10 @@ fi
 
 echo "the dev shell"
 
-# 7: wired in, right after the installer.
+# 7: wired in, right after the installer, handed the snapshot.
 shell_nix="$REPO_ROOT/nix/shells/main.nix"
 l_install="$(grep -n 'installationScript}' "$shell_nix" | head -1 | cut -d: -f1)"
-l_reclaim="$(grep -n 'reclaim-hook-dispatchers.sh' "$shell_nix" | grep -v '#' | head -1 | cut -d: -f1)"
+l_reclaim="$(grep -n 'reclaim-hook-dispatchers.sh" --snapshot' "$shell_nix" | grep -v '^[0-9]*:[[:space:]]*#' | head -1 | cut -d: -f1)"
 if [ -n "$l_install" ] && [ -n "$l_reclaim" ] && [ "$l_reclaim" -gt "$l_install" ] &&
 	[ "$((l_reclaim - l_install))" -lt 15 ]; then
 	ok "nix/shells/main.nix reclaims the dispatchers right after the installer"
@@ -176,9 +177,21 @@ else
 		"installer line: ${l_install:-none}, reclaim line: ${l_reclaim:-none}"
 fi
 
+# 8: and the snapshot the reclaim restores from is taken before the installer.
+# The end-to-end case, with the real pre-commit and prek, is
+# ci/test/hook-dispatcher-snapshot-test.sh.
+l_snapshot="$(grep -n 'reclaim-hook-dispatchers.sh" snapshot' "$shell_nix" | grep -v '^[0-9]*:[[:space:]]*#' | head -1 | cut -d: -f1)"
+if [ -n "$l_install" ] && [ -n "$l_snapshot" ] && [ "$l_snapshot" -lt "$l_install" ] &&
+	[ "$((l_install - l_snapshot))" -lt 10 ]; then
+	ok "nix/shells/main.nix snapshots the dispatchers right before the installer"
+else
+	fail "nix/shells/main.nix snapshots the dispatchers right before the installer" \
+		"installer line: ${l_install:-none}, snapshot line: ${l_snapshot:-none}"
+fi
+
 echo
-if [ "$assertions" -ne 7 ]; then
-	echo "FAIL: ran $assertions assertions, expected 7"
+if [ "$assertions" -ne 8 ]; then
+	echo "FAIL: ran $assertions assertions, expected 8"
 	failures=$((failures + 1))
 fi
 if [ "$failures" -ne 0 ]; then

@@ -22,8 +22,22 @@ AND suites (§16c), a needle scan that gates re-recording (§39a), `because`
 derived from a run, rc 124 is a hang (§1), per-arm restore verification, and
 `ci/lib/harness_guard.py`'s argument rule before anything is touched.
 
-The builds run `$PLAT54_BUILD_TUI` / `$PLAT54_BUILD_GPUI` when set, else
-`just build-tui` / `just build-gpui`. Every Agent Activity suite drives the
+The residuals of 2026-10-28 add arms over the desktop's *Editor selection*
+(graded through the Electron capture spec, `--grep editor_selection`, after
+the desktop's renderer is rebuilt), the SDK facade guard, the workflow that
+runs the sibling Cargo.lock guard on `agents` (graded by its bash contract
+suite), `[Open recording]`'s current-tab replacement, and the selected tab's
+own ground in the REAL window (G10: the windowed binary rebuilt, a fresh
+capture on a headless sway measured into the record, the record read; G11:
+the record itself corrupted).
+
+The builds run `$PLAT54_BUILD_TUI` / `$PLAT54_BUILD_GPUI` /
+`$PLAT54_BUILD_DESKTOP` when set, else `just build-tui` / `just build-gpui`
+/ `just build-once`; `$PLAT54_DESKTOP_TEST` runs the capture spec (e.g.
+`just plat54-capture-electron`, which owns the 2560x1440 display);
+`$PLAT54_BUILD_WINDOW` and `$PLAT54_WINDOW_CAPTURE` build the windowed binary
+and capture it (no defaults: they need isonim-gpui's windowed shim and
+compositor tools). Every Agent Activity suite drives the
 AA suites' ACP replay agent (`node` must be on PATH) and the `calc`
 recording through a real `replay-server` (`REPLAY_SERVER_BIN`).
 
@@ -71,17 +85,37 @@ GPUI_LEAF = "src/frontend/gpui/agent_activity_leaf.nim"
 GPUI_MAIN = "src/frontend/gpui/main.nim"
 VOCAB = "src/frontend/view_vocabulary/pane_views.nim"
 DESKTOP = "src/frontend/viewmodel/views/isonim_agent_activity_view.nim"
+PROMPT_CTX = "src/frontend/viewmodel/viewmodels/agent_prompt_context.nim"
+OMNI = "src/frontend/viewmodel/viewmodels/omnibar_vm.nim"
+PANE_CLICKS = "src/frontend/headless_app/pane_clicks.nim"
+UI_AGENT = "src/frontend/ui/agent_activity.nim"
+AGENT_VM = VM   # the ViewModel the desktop's host attaches through
+TUI_MAIN = "src/frontend/tui/main.nim"
+LEAVES = "src/frontend/gpui/app/leaves.nim"
+WORKFLOW = ".github/workflows/sibling-cargo-locks.yml"
+RECORD47 = "src/tests/visual/plat47-gpui-window.json"
 
 # Suites.
 VMU = "src/frontend/viewmodel/tests/unit/test_plat54_agent_activity.nim"
 TBL = "src/frontend/tui/tests/test_plat54_agent_activity.nim"
 PTY = "src/frontend/tui/tests/real_terminal/test_plat54_agent_activity_pty.nim"
 PLAN = "src/frontend/gpui/tests/test_plat54_gpui_agent_activity.nim"
+BOUNDARY = "src/frontend/viewmodel/tests/unit/test_sdk_facade_boundary.nim"
+WF_SUITE = "ci/test/sibling-cargo-locks-workflow-test.sh"
+CAPTURE = ("src/tests/gui/tests/agent-activity-deepreview/"
+           "plat54-agent-activity-capture.spec.ts")
+WIN47 = "src/frontend/gpui/tests/test_plat47_gpui_window.nim"
+WINDOW = "window:" + WIN47
+  # The real GPUI window, captured afresh on a headless sway and measured
+  # (`ci/test/plat47-gpui-window.sh`, `plat47_gpui_window.py record`), then
+  # read by WIN47: an arm on the window's code is graded through the pixels
+  # it paints, not through the committed record.
 
 SUBJECTS = [TEXT, FEED, VM, FILES, HOST, WORKER, TUI_PANE, RUNTIME, SHELL,
             PROFILE, TUI_SESSION, VCS_PANE, VCS_SOURCE, GPUI_LEAF, GPUI_MAIN,
-            VOCAB, DESKTOP]
-SUITES = [VMU, TBL, PTY, PLAN]
+            VOCAB, DESKTOP, PROMPT_CTX, OMNI, PANE_CLICKS, UI_AGENT, TUI_MAIN,
+            LEAVES, WORKFLOW, RECORD47]
+SUITES = [VMU, TBL, PTY, PLAN, BOUNDARY, WF_SUITE, CAPTURE, WIN47]
 
 TBL_REVIEW = "*::a recorded session: evidence cards, a click loads each dataset"
 TBL_RUN = "*::a ct test run: a summary, a drill-down, a real recording"
@@ -89,6 +123,12 @@ TBL_LIVE = "*::a live session: rows arrive, the tab agrees, the reader stays put
 PLAN_REVIEW = "*::a recorded session: the cards, and a click loads each dataset"
 PLAN_RUN = "*::a ct test run: the card opens, a recording opens as a tab"
 PLAN_LIVE = "*::a live session: rows arrive over ACP, the tab and the pane agree"
+TBL_ADD = "*::the prompt's add-context menu: attachments reach the agent"
+PLAN_ADD = "*::the prompt's add-context menu: attachments reach the agent"
+PTY_REPLACE = "*::Open recording replaces this tab's session, and the agent stays"
+BOUNDARY_REPO = "*::the guard passes on this repository"
+CAPTURE_SEL = "editor_selection"
+WIN_B2 = "*::B2: the active tab is told from the same label inactive, as the desktop tells it"
 
 # (id, [(subject, find, replace), ...], [(suite, filter), ...], what it breaks)
 ARMS = [
@@ -184,7 +224,7 @@ ARMS = [
              "    if s.button > 0 and col >= at + w:")],
      [(TBL, TBL_REVIEW)],
      "a press on a button is read as a press on its row"),
-    ("T2", [(PROFILE, "     paneAgentActivity},", "     },"),
+    ("T2", [(PROFILE, "     paneAgentActivity,", "    "),
             (SHELL, "  elif region.pane == paneAgentActivity and model.agent.loaded:",
              "  elif false:")],
      [(PTY, None)],
@@ -243,17 +283,165 @@ ARMS = [
      "AA-2: the desktop's run card names itself differently"),
 ]
 
+# ---- the prompt's "add context" menu and the status line (§2.2.4, §2.2.7) ----
+ARMS += [
+    ("C1", [(FEED, "  result.add vm.contextRows()", "  discard vm.contextRows()")],
+     [(VMU, None), (TBL, TBL_ADD), (PLAN, PLAN_ADD)],
+     "an attachment is not shown above the prompt"),
+    ("C2", [(FEED, "      vm.removeContextPath(at)", "      discard at")],
+     [(VMU, None), (TBL, TBL_ADD), (PLAN, PLAN_ADD)],
+     "an attachment's [×] removes nothing"),
+    ("C3", [(PROMPT_CTX, "  result = AgentContextPathsHeading & \"\\n\"",
+             "  return text")],
+     [(VMU, None), (TBL, TBL_ADD), (PLAN, PLAN_ADD)],
+     "a prompt's attachments never reach the agent (no header)"),
+    ("C4", [(HOST, "  h.pendingPrompts.add contextPromptText(prompt, h.vm.contextPaths.val)",
+             "  h.pendingPrompts.add prompt")],
+     [(TBL, TBL_ADD), (PLAN, PLAN_ADD)],
+     "the native host sends the prompt without its attachments"),
+    ("C5", [(HOST, "    if mustExist and not fileExists(onDisk) and not dirExists(onDisk):",
+             "    if false:")],
+     [(TBL, TBL_ADD)],
+     "a path that does not exist is attached"),
+    ("C6", [(HOST, "                     else: recordingOpenedNote(request, placement)",
+             "                     else: why")],
+     [(TBL, TBL_RUN), (PTY, None), (PLAN, PLAN_RUN)],
+     "the status line does not say where a recording opened"),
+    ("C7", [(HOST, "  if placement == arpNewTabEditing:", "  if false:")],
+     [(TBL, TBL_RUN)],
+     "[Open recording] over an editing session does not say why it is a new tab"),
+    ("C8", [(OMNI, "      return (mode, query[prefix.len .. ^1].strip)",
+             "      discard mode")],
+     [(VMU, None), (TBL, TBL_ADD)],
+     "`:attach <path>` is read as a command, not an attachment"),
+    ("C9", [(OMNI, "          let fs = fuzzyScore(needle, dir & \"/\")",
+             "          let fs = fuzzyScore(\"\\x01\", dir)")],
+     [(VMU, None)],
+     "*Files & folders* lists no folders"),
+    ("C10", [(PANE_CLICKS, "      entry(aciRecording.label, caAgentAttachRecording)])",
+              "      entry(aciRecording.label, caAgentAttachUpload)])")],
+     [(TBL, TBL_ADD)],
+     "*Recording / trace* asks for a file, not a recording"),
+    ("C11", [(PANE_CLICKS, "            enabled = editorSelection.len > 0,",
+              "            enabled = false,")],
+     [(TBL, TBL_ADD), (PLAN, PLAN_ADD)],
+     "*Editor selection* is disabled while the editor shows a file"),
+    ("T10", [(TUI_PANE, "      return AgentPaneTarget(kind: atAddContext)",
+              "      return AgentPaneTarget(kind: atPrompt)")],
+     [(TBL, TBL_ADD)],
+     "the terminal's [+] opens the omnibox, not the menu"),
+    ("T11", [(RUNTIME, "  if mode in {omAttach, omAttachRecording}:", "  if false:")],
+     [(TBL, TBL_ADD)],
+     "the terminal's `:attach` choice attaches nothing"),
+    ("T12", [(RUNTIME, "    rt.attachAgentContext(target.path, outcome, mustExist = false)",
+              "    discard target")],
+     [(TBL, TBL_ADD)],
+     "the terminal's *Editor selection* attaches nothing"),
+    ("G6", [(GPUI_LEAF, "    return GAgentHit(kind: gaAddContext, row: -1, button: -1)",
+             "    return GAgentHit(kind: gaPrompt, row: -1, button: -1)")],
+     [(PLAN, PLAN_ADD)],
+     "the GPUI window's + opens the omnibox, not the menu"),
+    ("G7", [(GPUI_MAIN, "  if mode in {omAttach, omAttachRecording}:", "  if false:")],
+     [(PLAN, PLAN_ADD)],
+     "the GPUI window's `:attach` choice attaches nothing"),
+    ("G8", [(GPUI_MAIN, "    r.setAttribute(note, \"data-ct-footer-note\", gStatusNote)",
+             "    discard note")],
+     [(PLAN, PLAN_RUN), (PLAN, PLAN_ADD)],
+     "the GPUI window's status line shows no note"),
+    ("G9", [(GPUI_MAIN, "        sayStatus(h.message)", "        discard")],
+     [(PLAN, PLAN_RUN)],
+     "a press on Agent Activity leaves the GPUI status line silent"),
+    ("D3", [(DESKTOP, "      renderAddContextMenuItem(r, AgentAddContextUploadIcon, aciUpload.label,",
+             "      renderAddContextMenuItem(r, AgentAddContextUploadIcon, \"Upload\",")],
+     [(VMU, None)],
+     "the desktop's + menu words its first item differently"),
+]
+
+# ---- the residuals of 2026-10-28 -------------------------------------------
+ARMS += [
+    # The desktop's *Editor selection* (§2.2.7): the active editor's lines.
+    ("E1", [(UI_AGENT, "      let path = activeEditorSelectionContext()",
+             "      let path = \"\"")],
+     [(CAPTURE, CAPTURE_SEL)],
+     "the desktop's Editor selection attaches nothing"),
+    ("E2", [(UI_AGENT, "      ranges.add((sel.startLineNumber.to(int), sel.startColumn.to(int),",
+             "      discard ((sel.startLineNumber.to(int), sel.startColumn.to(int),")],
+     [(CAPTURE, CAPTURE_SEL)],
+     "the desktop attaches the caret's line, not the selection's lines"),
+    ("E3", [(PROMPT_CTX, "      if r.endColumn <= 1 and r.endLine > r.startLine: r.endLine - 1",
+             "      if false: r.endLine - 1")],
+     [(VMU, None)],
+     "a Monaco range ending at a line's start attaches that line too"),
+    ("E4", [(DESKTOP, "      else: callbacks.editorSelectionUnavailableReason()",
+             "      else: \"\"")],
+     [(VMU, None)],
+     "the desktop's Editor selection is enabled with no file shown"),
+    ("E5", [(AGENT_VM, "  vm.contextPaths.val = withContextPath(vm.contextPaths.val, path)",
+             "  vm.contextPaths.val = vm.contextPaths.val & @[path]")],
+     [(VMU, None), (CAPTURE, CAPTURE_SEL)],
+     "a path chosen twice is attached twice"),
+    ("E6", [(UI_AGENT, "      ctxPaths.add cstring(p)", "      discard p")],
+     [(CAPTURE, CAPTURE_SEL)],
+     "the desktop's attachments never reach the agent"),
+    # The SDK facade guard (the gutter bands reached through the facade).
+    ("B1", [(LEAVES, "import ../devicon_marks",
+             "import ../../viewmodel/viewmodels/editor_gutter_lanes\nimport ../devicon_marks")],
+     [(BOUNDARY, BOUNDARY_REPO)],
+     "the GPUI leaves reach the gutter bands past the SDK facade"),
+    # CI runs the sibling Cargo.lock guard on `agents`.
+    ("K1", [(WORKFLOW, "    branches: [main, dev, stable, agents]",
+             "    branches: [main, dev, stable]")],
+     [(WF_SUITE, None)],
+     "a push to agents does not run the sibling Cargo.lock guard"),
+    ("K2", [(WORKFLOW, "            env CT_SIBLING_CARGO_LOCKS_STRICT=1 just test-sibling-cargo-locks",
+             "            just test-sibling-cargo-locks")],
+     [(WF_SUITE, None)],
+     "the guard's SKIP passes CI on agents"),
+    # [Open recording] replaces the current tab natively (§2.2.4).
+    ("R1", [(HOST, "  elif currentReplaceable: arpThisTab", "  elif false: arpThisTab")],
+     [(TBL, TBL_RUN), (PTY, PTY_REPLACE), (PLAN, PLAN_RUN)],
+     "[Open recording] opens a new tab over a replay"),
+    ("R2", [(TUI_MAIN, "      replaceTab = replaced", "      discard replaced")],
+     [(PTY, PTY_REPLACE)],
+     "the terminal's [Open recording] opens a new tab, its session left running"),
+    ("R3", [(TUI_MAIN, "        if not old.agent.isNil:", "        if false:")],
+     [(PTY, PTY_REPLACE)],
+     "the terminal's replacement drops the agent's conversation"),
+    ("R4", [(GPUI_MAIN, "      if request.policy == topCurrentTab:", "      if false:")],
+     [(PLAN, PLAN_RUN)],
+     "the GPUI window's [Open recording] opens a new tab"),
+    ("R5", [(GPUI_MAIN, "      gAgentHosts[newKey] = host", "      host.close()")],
+     [(PLAN, PLAN_RUN)],
+     "the GPUI window's replacement drops the agent's conversation"),
+    # The selected tab's own ground, in the real window's pixels.
+    ("G10", [(GPUI_MAIN, "              r.setStyle(row, key, value)",
+              "              discard value")],
+     [(WINDOW, WIN_B2)],
+     "the GPUI window paints the selected tab on the others' ground"),
+    ("G11", [(RECORD47, "\"labelGround\": \"#333333\",\n    \"bridge\": \"#282828\"\n   },\n   \"vcs\": {",
+              "\"labelGround\": \"#282828\",\n    \"bridge\": \"#282828\"\n   },\n   \"vcs\": {")],
+     [(WIN47, WIN_B2)],
+     "a frame whose selected tab has no ground of its own passes"),
+]
+
 DECLARED_SURVIVORS = set()
 
 IN_BINARY = {TEXT, FEED, VM, FILES, HOST, WORKER, TUI_PANE, RUNTIME, SHELL,
-             PROFILE, TUI_SESSION, VCS_PANE, VCS_SOURCE}
+             PROFILE, TUI_SESSION, VCS_PANE, VCS_SOURCE, PROMPT_CTX, OMNI,
+             PANE_CLICKS, AGENT_VM, TUI_MAIN}
   # Subjects compiled into `codetracer-tui`.
-IN_GPUI = {TEXT, FEED, VM, FILES, HOST, WORKER, GPUI_LEAF, GPUI_MAIN, VOCAB}
+IN_GPUI = {TEXT, FEED, VM, FILES, HOST, WORKER, GPUI_LEAF, GPUI_MAIN, VOCAB,
+           PROMPT_CTX, OMNI, PANE_CLICKS, AGENT_VM, LEAVES}
   # Subjects compiled into `codetracer-gpui`.
-IN_DESKTOP = set()
+IN_DESKTOP = {UI_AGENT, DESKTOP, PROMPT_CTX, AGENT_VM}
+  # Subjects compiled into the desktop's renderer.
+IN_WINDOW = {GPUI_MAIN, LEAVES}
+  # Subjects compiled into the windowed `codetracer-gpui-window`.
 PTY_SUITES = {PTY}
 GPUI_SUITES = {PLAN}
-DESKTOP_SUITES = set()
+DESKTOP_SUITES = {CAPTURE}
+SHELL_SUITES = {WF_SUITE}
+WINDOW_SUITES = {WINDOW}
 
 
 def path_of(rel):
@@ -273,6 +461,26 @@ def lane_flags(lane):
         ["bash", "-c", ". ci/lib/test-lane-files.sh >/dev/null 2>&1 && "
                        f"test_lane_extra_flags {lane}"],
         cwd=REPO, capture_output=True, text=True, check=True).stdout.split()
+
+
+def lane_of(suite):
+    if suite == PTY:
+        return "tui-real-terminal"
+    if suite.startswith("src/frontend/tui/"):
+        return "tui"
+    if suite.startswith("src/frontend/gpui/"):
+        return "gpui-shell"
+    return "vm-unit"
+
+
+def run_library_path(suite):
+    """What the lane runner prepends to a suite's run (never its compile):
+    the GPUI runtime libraries for the lanes whose suites load the shim
+    (`ci/lib/test-lane-files.sh`, `test_lane_run_library_path`)."""
+    return subprocess.run(
+        ["bash", "-c", ". ci/lib/test-lane-files.sh >/dev/null 2>&1 && "
+                       f"test_lane_run_library_path {lane_of(suite)}"],
+        cwd=REPO, capture_output=True, text=True).stdout.strip()
 
 
 def suite_flags(suite):
@@ -356,6 +564,17 @@ def build_desktop():
     return build_with("PLAT54_BUILD_DESKTOP", "build-once")
 
 
+def build_window():
+    """The windowed `codetracer-gpui-window`, against the windowed shim
+    (`$PLAT54_BUILD_WINDOW`; there is no recipe for it alone — see
+    `ci/test/gpui-window-captures.sh`)."""
+    cmd = os.environ.get("PLAT54_BUILD_WINDOW")
+    if not cmd:
+        print("PLAT54_BUILD_WINDOW is not set: no windowed binary to build")
+        return False
+    return build_with("PLAT54_BUILD_WINDOW", "")
+
+
 def portable_cause(line):
     """A pty suite's wait names its condition and then snapshots the screen;
     the recorded cause keeps the condition and drops the snapshot."""
@@ -366,12 +585,16 @@ def portable_cause(line):
     return head + (tail.group(0) if tail else "")
 
 
-def run_spec(suite):
-    """The Electron spec: GREEN on rc 0, else RED on its first expectation."""
+def run_spec(suite, test_filter=None):
+    """The Electron spec, on the capture's display when
+    `$PLAT54_DESKTOP_TEST` names its runner (`just plat54-capture-electron`
+    starts an Xvfb at 2560x1440): GREEN on rc 0, else RED on its first
+    expectation. `test_filter` selects tests by title (`--grep`)."""
     cmd = os.environ.get("PLAT54_DESKTOP_TEST")
-    argv = ["bash", "-c", cmd] if cmd else \
+    grep = ["-g", test_filter] if test_filter else []
+    argv = ["bash", "-c", cmd + " \"$@\"", "spec"] + grep if cmd else \
         ["npx", "playwright", "test", suite.split("src/tests/gui/", 1)[1],
-         "--reporter=line"]
+         "--reporter=line"] + grep
     cwd = REPO if cmd else REPO / "src/tests/gui"
     try:
         p = subprocess.run(argv, cwd=cwd, capture_output=True, text=True,
@@ -387,12 +610,53 @@ def run_spec(suite):
     return "RED", first
 
 
+def run_shell(suite):
+    """A bash contract suite: GREEN on rc 0, else RED on its first `FAIL`."""
+    try:
+        p = subprocess.run(["bash", suite], cwd=REPO, capture_output=True,
+                           text=True, timeout=TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return "HUNG", []
+    out = (p.stdout or "") + (p.stderr or "")
+    if p.returncode == 0:
+        return "GREEN", []
+    return "RED", [ln.strip() for ln in out.splitlines()
+                   if ln.strip().startswith("FAIL")][:1]
+
+
+def run_window(suite, test_filter):
+    """The real window, captured and measured afresh
+    (`$PLAT54_WINDOW_CAPTURE`: the plat47 capture on a headless sway, then
+    its `record`), then read by the suite behind `window:`."""
+    cmd = os.environ.get("PLAT54_WINDOW_CAPTURE")
+    if not cmd:
+        print("PLAT54_WINDOW_CAPTURE is not set: no window to capture")
+        return "DID-NOT-COMPILE", []
+    try:
+        p = subprocess.run(["bash", "-c", cmd], cwd=REPO, capture_output=True,
+                           text=True, timeout=TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return "HUNG", []
+    if p.returncode != 0:
+        print((p.stdout + p.stderr)[-2000:])
+        return "DID-NOT-COMPILE", []
+    return run_suite(suite.split(":", 1)[1], test_filter)
+
+
 def run_suite(suite, test_filter):
     if suite in DESKTOP_SUITES:
-        return run_spec(suite)
+        return run_spec(suite, test_filter)
+    if suite in SHELL_SUITES:
+        return run_shell(suite)
+    if suite in WINDOW_SUITES:
+        return run_window(suite, test_filter)
     NIMCACHE.mkdir(parents=True, exist_ok=True)
     stem = Path(suite).stem
     env = dict(os.environ, CODETRACER_REPO_ROOT=str(REPO))
+    lib = run_library_path(suite)
+    if lib:
+        env["LD_LIBRARY_PATH"] = lib + (":" + env["LD_LIBRARY_PATH"]
+                                        if env.get("LD_LIBRARY_PATH") else "")
     cmd = ["nim", "c", "-r", "--hints:off", "--warnings:off",
            f"--nimcache:{NIMCACHE}/{stem}",
            f"-o:{NIMCACHE}/{stem}.out"] + suite_flags(suite) + [suite]
@@ -469,6 +733,8 @@ def main():
     needs_gpui = any(s in GPUI_SUITES for arm in selected for s, _ in arm[2])
     needs_desktop = any(s in DESKTOP_SUITES for arm in selected
                         for s, _ in arm[2])
+    needs_window = any(s in WINDOW_SUITES for arm in selected
+                       for s, _ in arm[2])
     binary_digest = gpui_digest = None
     if needs_binary:
         if not build_binary():
@@ -483,7 +749,11 @@ def main():
     if needs_desktop and not build_desktop():
         print("ABORT: the unmutated desktop does not build.")
         return 1
-    graded = sorted({(s, flt) for arm in selected for s, flt in arm[2]})
+    if needs_window and not build_window():
+        print("ABORT: the unmutated windowed binary does not build.")
+        return 1
+    graded = sorted({(s, flt) for arm in selected for s, flt in arm[2]},
+                    key=lambda t: (t[0], t[1] or ""))
     for s, flt in graded:
         v, f = run_suite(s, flt)
         if v != "GREEN":
@@ -494,7 +764,9 @@ def main():
     digests = {rel: sha(rel) for rel in SUBJECTS}
     derived, bad = {}, []
     for arm_id, edits, suites, what in selected:
-        files = sorted({rel for rel, _, _ in edits})
+        files = sorted({rel for rel, _, _ in edits} |
+                       ({RECORD47} if any(s in WINDOW_SUITES
+                                          for s, _ in suites) else set()))
         backups = {}
         for rel in files:
             path = path_of(rel)
@@ -514,6 +786,9 @@ def main():
             if built and any(s in DESKTOP_SUITES for s, _ in suites) and \
                     any(r in IN_DESKTOP for r in files):
                 built = build_desktop()
+            if built and any(s in WINDOW_SUITES for s, _ in suites) and \
+                    any(r in IN_WINDOW for r in files):
+                built = build_window()
             verdict, first = grade(suites) if built else ("DID-NOT-COMPILE", "")
         finally:
             for rel in files:
@@ -555,6 +830,9 @@ def main():
             return 1
     if needs_desktop and not build_desktop():
         print("FAIL: the desktop does not rebuild from the restored tree.")
+        return 1
+    if needs_window and not build_window():
+        print("FAIL: the windowed binary does not rebuild from the restored tree.")
         return 1
     for rel in SUBJECTS:
         if sha(rel) != digests[rel]:

@@ -120,6 +120,9 @@ type
       ## Called when the user picks "Files & folders" from the + dropdown.
     onAddEditorSelection*: proc()
       ## Called when the user picks "Editor selection" from the + dropdown.
+    editorSelectionUnavailableReason*: proc(): string
+      ## A host with no open file disables the item and explains why. Read
+      ## when the menu opens so a mounted panel follows changes of editor.
     onAddTrace*: proc()
       ## Called when the user picks "Recording / trace" from the + dropdown.
     onModelSelect*: proc()
@@ -1152,11 +1155,16 @@ const AgentAddContextEditorIcon = """<svg width="12" height="12" viewBox="0 0 12
 const AgentAddContextTraceIcon = """<svg width="13" height="13" viewBox="0 0 13 13" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5.34766 0C8.30112 0.000204603 10.6963 2.39486 10.6963 5.34863C10.6962 6.64537 10.2336 7.8339 9.46582 8.75977L11.8184 11.1133L12.1719 11.4668L11.4648 12.1738L11.1113 11.8203L8.75879 9.4668C7.83288 10.2346 6.64431 10.6972 5.34766 10.6973C2.39429 10.6971 0.000262811 8.30224 0 5.34863C3.60726e-05 2.39483 2.39415 0.000157729 5.34766 0ZM5.34766 1C2.94658 1.00016 1.00004 2.94697 1 5.34863C1.00026 7.75011 2.94672 9.69711 5.34766 9.69727C7.74855 9.69706 9.69603 7.75008 9.69629 5.34863C9.69625 2.947 7.74869 1.0002 5.34766 1Z" fill="#DDDDDD"/></svg>"""
 
 proc renderAddContextMenuItem[R](r: R; icon: string; label: string;
-                                  action: proc()): auto =
+                                  action: proc(); disabledReason = ""): auto =
   var iconRef: typeof(r.createElement("div"))
+  let disabled = disabledReason.len > 0
+  let cls = "agent-add-context-menu-item ct-menu-item" &
+    (if disabled: " ct-menu-item--disabled" else: "")
   let item = ui(r):
-    tdiv(class = "agent-add-context-menu-item ct-menu-item",
-         onclick = proc() = action()):
+    tdiv(class = cls, `aria-disabled` = (if disabled: "true" else: "false"),
+         title = disabledReason,
+         onclick = proc() =
+           if not disabled: action()):
       tdiv(ref = iconRef, class = "agent-add-context-menu-icon")
       span(class = "ct-menu-item-label"):
         text label
@@ -1183,23 +1191,26 @@ proc renderAddFilesButton[R](r: R; vm: AgentActivityVM;
       if isOpen:
         tdiv(ref = menuRef, class = "agent-add-context-dropdown")
   if isOpen:
+    let editorReason =
+      if callbacks.editorSelectionUnavailableReason.isNil: ""
+      else: callbacks.editorSelectionUnavailableReason()
     r.appendRenderedChild(menuRef,
-      renderAddContextMenuItem(r, AgentAddContextUploadIcon, "Upload attachment",
+      renderAddContextMenuItem(r, AgentAddContextUploadIcon, aciUpload.label,
         proc() =
           vm.addContextDropdownOpen.val = false
           callbacks.invokeAddFiles()))
     r.appendRenderedChild(menuRef,
-      renderAddContextMenuItem(r, AgentAddContextFolderIcon, "Files & folders",
+      renderAddContextMenuItem(r, AgentAddContextFolderIcon, aciFilesFolders.label,
         proc() =
           vm.addContextDropdownOpen.val = false
           callbacks.invokeAddFolders()))
     r.appendRenderedChild(menuRef,
-      renderAddContextMenuItem(r, AgentAddContextEditorIcon, "Editor selection",
+      renderAddContextMenuItem(r, AgentAddContextEditorIcon, aciEditorSelection.label,
         proc() =
           vm.addContextDropdownOpen.val = false
-          callbacks.invokeAddEditorSelection()))
+          callbacks.invokeAddEditorSelection(), editorReason))
     r.appendRenderedChild(menuRef,
-      renderAddContextMenuItem(r, AgentAddContextTraceIcon, "Recording / trace",
+      renderAddContextMenuItem(r, AgentAddContextTraceIcon, aciRecording.label,
         proc() =
           vm.addContextDropdownOpen.val = false
           callbacks.invokeAddTrace()))

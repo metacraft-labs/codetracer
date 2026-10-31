@@ -305,11 +305,15 @@ type
       ## rules do not depend on it.
     loadingState*: Signal[LoadingState]
     snapshotAnswered*: bool
-      ## The first poll (the snapshot) has been answered. A completed
-      ## recording is not polled again (`requestRequestSpansSince`).
+      ## A count/snapshot has succeeded. Ordinary completed replay stops;
+      ## explicit following continues (`requestRequestSpansSince`).
+    following*: bool
+      ## Backend explicitly requests continued count polls for replay-follow.
+    windowRevision*: Signal[int]
+      ## Invalidates the bounded viewport, including same-count completions.
     recordedTotal*: Signal[int]
-      ## How many requests a COMPLETED recording served, -1 until known. Its
-      ## rows are not tailed: the panel asks for the window it shows
+      ## How many requests the replay currently serves, -1 until known. Its
+      ## rows are loaded by the window the panel shows
       ## (`RequestPanelVM.setViewport`, `ct/load-request-spans`).
 
   DegradedStateStore* = object
@@ -758,6 +762,8 @@ proc clearRequestSpans*(store: ReplayDataStore) =
   store.requestSpans.requests.val = @[]
   store.requestSpans.cursor.val = 0'i64
   store.requestSpans.snapshotAnswered = false
+  store.requestSpans.following = false
+  store.requestSpans.windowRevision.val = 0
   store.requestSpans.recordedTotal.val = -1
   store.requestSpans.source.val = ""
   store.requestSpans.loadingState.val = lsIdle
@@ -850,20 +856,17 @@ proc requestRequestSpansSince*(store: ReplayDataStore) =
   ## The cursor is echoed back untouched.  A zero cursor asks for a
   ## snapshot, which is exactly what the first poll of a session wants.
   ##
-  ## The future's value is applied when it carries a delta envelope (the
-  ## mock and stdio backends resolve with the real body); in the Electron
-  ## renderer the promise resolves with ``{}`` and the body arrives through
-  ## the DAP response/event channel handled in
-  ## ``installBackendEventHandlers``.  Both paths are idempotent.
+  ## Every transport resolves the future with either the DAP response or
+  ## its body (`responseBody` normalizes the envelope). Live deltas may also
+  ## arrive through `installBackendEventHandlers`; merging both is idempotent.
   let key = "load-request-spans-since"
   let cursor = store.requestSpans.cursor.val
   if store.requestTracker.isDuplicate(key, $cursor):
     return
-  # A COMPLETED RECORDING DOES NOT GROW: once its snapshot has been answered
-  # there is nothing to tail, and the panel's poll timer asks nothing more.
-  # Only a live session (or a replay of one that is still recording) keeps
-  # polling (UI-Data-Loading-Guidelines anti-pattern 3).
-  if store.requestSpans.snapshotAnswered and
+  # Ordinary completed replay stops after its count answer. Explicit follow
+  # is independent of live-debugger mode: it keeps bounded replay pages fresh
+  # without enabling controls for a recording process that this session owns.
+  if store.requestSpans.snapshotAnswered and not store.requestSpans.following and
       not store.session.val.debugSessionMode.historicalModeTarget():
     return
   # A COMPLETED RECORDING IS READ BY WINDOW (Viewport-Driven-Loading V2): its
@@ -876,10 +879,16 @@ proc requestRequestSpansSince*(store: ReplayDataStore) =
       store.backend.send("ct/load-request-spans", %*{"limit": 1}),
       onSuccess = proc(response: JsonNode) =
         s.requestTracker.markComplete(key, $cursor)
-        s.requestSpans.snapshotAnswered = true
-        if responseSucceeded(response):
-          s.requestSpans.recordedTotal.val =
-            responseBody(response){"total"}.getInt(0),
+        let body = responseBody(response)
+        if responseSucceeded(response) and body.hasKey("total"):
+          let wasFollowing = s.requestSpans.following
+          s.requestSpans.snapshotAnswered = true
+          s.requestSpans.following = body{"open"}.getBool(false)
+          s.requestSpans.recordedTotal.val = body{"total"}.getInt(0)
+          # A completion can change a row without changing the count. The
+          # final closed answer must also publish the last row changes.
+          if wasFollowing or s.requestSpans.following:
+            s.requestSpans.windowRevision.val = s.requestSpans.windowRevision.val + 1,
       onError = proc(msg: string) =
         s.requestTracker.markComplete(key, $cursor))
     return
@@ -893,7 +902,12 @@ proc requestRequestSpansSince*(store: ReplayDataStore) =
   async_compat.onComplete(fut,
     onSuccess = proc(response: JsonNode) =
       s.requestTracker.markComplete(key, $cursor)
-      s.applyRequestSpanDelta(response)
+      # THE BODY, whatever the transport resolved with: the mock resolves
+      # with the delta itself, the stdio transport (the terminal and GPUI)
+      # with the whole DAP response — whose delta is its `body`, and which
+      # `applyRequestSpanDelta` would otherwise ignore as "not a delta
+      # envelope", so a native host's live tail never showed a row.
+      s.applyRequestSpanDelta(responseBody(response))
       s.requestSpans.snapshotAnswered = true
       if s.requestSpans.loadingState.val == lsLoading:
         s.requestSpans.loadingState.val = lsIdle,
@@ -1027,6 +1041,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
         source: createSignal(""),
         loadingState: createSignal(lsIdle),
         recordedTotal: createSignal(-1),
+        windowRevision: createSignal(0),
       ),
 
       # -- degraded state (Page-Descriptions.md §14) --

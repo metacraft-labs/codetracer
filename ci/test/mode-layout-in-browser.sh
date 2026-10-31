@@ -30,30 +30,10 @@
 # reads a config. Every check is over a rectangle or over the tab strip the
 # panes are actually in.
 #
-# THE ARM THAT IS SKIPPED, AND WHY IT IS A SKIP AND NOT A PASS
-# ------------------------------------------------------------
-# The Noir compiler, the tracer and the replay engine are OPTIONAL bundle
-# assets (see `platform/web_deployment.nim`, and the five `[SKIPPED]` lines
-# `web-bundle-assets.sh` prints without them). Without them a tab can reach the
-# Noir studio and its EDIT-mode workspace, and cannot reach a replay SESSION —
-# so DEBUG mode opens no source file, and the editor arm has nothing to
-# measure. That is read from the product's own output: the EDIT legs carry a
-# source tab in the strip (`src/main.nr`) and the DEBUG legs carry none.
-#
-# Measured on a bundle assembled by `web-bundle-assets.sh` with no wasm:
-# `.monaco-editor` in the DEBUG legs is 1600x0 with 0 `.view-line`s. Asserting
-# "the editor is never empty" there would be a permanently red lane on a
-# correct product, which is the failure `shell-gate-coverage.known-dark.txt`
-# exists to prevent — a red that is always red stops being read. So that arm
-# reports SKIPPED, skips are counted SEPARATELY from passes, and a skip can
-# never make the total look like a pass.
-#
-# THE SKIP BRANCH IS ITSELF CHECKED, IN BOTH DIRECTIONS. `CT_MODE_LAYOUT_REPORT`
-# points this script at a report it did not produce, which is how the branch was
-# verified with synthetic input rather than argued about: a report whose DEBUG
-# legs carry a source tab AND a zero-height editor makes the arm RUN and FAIL
-# (naming the leg and the box), and the same report with a painted editor makes
-# it RUN and PASS. Both were run before this file landed.
+# Editor tabs belong to the session even when replay tools are unavailable.
+# Every transition must retain the already-open source and paint its editor.
+# `mode-layout-in-browser-test.py` checks this gate with both valid reports and
+# reports missing a source tab, editor geometry, or rendered lines.
 #
 # Usage:  bash ci/test/mode-layout-in-browser.sh
 # Env:    CT_WEB_BUNDLE_DIR       reuse an assembled bundle instead of building
@@ -72,7 +52,6 @@ trap 'rm -rf "${cache}"' EXIT
 
 checks=0
 failures=0
-skips=0
 
 ok() {
 	checks=$((checks + 1))
@@ -82,10 +61,6 @@ bad() {
 	checks=$((checks + 1))
 	failures=$((failures + 1))
 	echo "  [FAILED]  $*"
-}
-skip() {
-	skips=$((skips + 1))
-	echo "  [SKIPPED] $*"
 }
 note() { echo "      $*"; }
 check() {
@@ -395,7 +370,7 @@ r = json.load(open(sys.argv[1]))
 legs = {l["leg"]: l for l in r["legs"]}
 d = set(legs["debug"]["allTabTitles"])
 e = set(legs["edit"]["allTabTitles"])
-want = ["VARIABLES", "EVENT LOG", "TIMELINE"]
+want = ["VARIABLES", "EVENT LOG"]  # the Timeline panel was removed (Layout-System.md)
 missing = [w for w in want if w not in d]
 leaked = [w for w in want if w in e]
 if missing:
@@ -403,7 +378,7 @@ if missing:
 elif leaked:
     print("no"); print("edit mode is showing debug-only panes: " + ", ".join(leaked))
 else:
-    print("ok"); print("STATE, EVENT LOG and TIMELINE are in debug and in neither edit leg")
+    print("ok"); print("VARIABLES and EVENT LOG are in debug and in neither edit leg")
 ')"
 check "$(printf '%s' "${out}" | head -1)" "the debugging panes arrive with debug mode and do not linger in edit"
 note "$(printf '%s' "${out}" | tail -n +2)"
@@ -543,11 +518,7 @@ note "$(printf '%s' "${out}" | tail -n +2)"
 echo
 
 # ---------------------------------------------------------------------------
-# §4 THE EDITOR IS NOT EMPTY — where a session exists to fill it
-#
-# `Mode-Transitions.md` §7 requires the editor never to be empty. The EDIT legs
-# can answer for it; the DEBUG legs cannot without a replay engine, and that is
-# read from the product rather than assumed. See the header.
+# §4 THE OPEN EDITOR SURVIVES EVERY MODE TRANSITION
 # ---------------------------------------------------------------------------
 echo "§4 the editor is painted and not empty"
 
@@ -555,44 +526,32 @@ out="$(q '
 import json, sys
 r = json.load(open(sys.argv[1]))
 legs = {l["leg"]: l for l in r["legs"]}
+def source_tabs(leg):
+    return [t for t in leg["allTabTitles"] if "/" in t or t.endswith(".nr")]
 bad = []
-for name in ("boot", "edit", "edit-trip2", "edit-trip3"):
-    l = legs[name]
-    ed = l["contentBoxes"].get("editor")
-    if not ed or not ed.get("w") or not ed.get("h"):
-        bad.append("%s: .monaco-editor box %s" % (name, ed))
-    elif not l.get("editorLines"):
-        bad.append("%s: %sx%s editor with 0 rendered .view-line"
-                   % (name, ed["w"], ed["h"]))
+for first, following in (
+    ("boot", ("debug", "edit", "debug-trip2", "edit-trip2", "debug-trip3", "edit-trip3")),
+    ("after-corrupt", ("after-corrupt-debug",)),
+):
+    expected = source_tabs(legs[first])
+    if not expected:
+        bad.append("%s: no source tabs to preserve" % first)
+    for name in following:
+        actual = source_tabs(legs[name])
+        if actual != expected:
+            bad.append("%s: source tabs %s, expected %s" % (name, actual, expected))
 print("no" if bad else "ok")
-print("; ".join(bad) if bad else
-      "every edit-mode leg painted a non-zero editor carrying rendered lines")
+print("; ".join(bad) if bad else "every transition retains the ordered source tabs")
 ')"
-check "$(printf '%s' "${out}" | head -1)" "in EDIT mode the editor has a box and rendered lines"
+check "$(printf '%s' "${out}" | head -1)" "both modes retain the open source tabs in order"
 note "$(printf '%s' "${out}" | tail -n +2)"
 
-# THE ABSENCE SIGNAL IS THE PRODUCT'S, NOT THIS SCRIPT'S. A debug leg that
-# opened a source file has a tab whose title is a path; one that reached no
-# session has none, and there is nothing for `.monaco-editor` to be.
-debug_source="$(q '
+out="$(q '
 import json, sys
 r = json.load(open(sys.argv[1]))
-legs = {l["leg"]: l for l in r["legs"]}
-def source_tabs(l):
-    return [t for t in l["allTabTitles"] if "/" in t or t.endswith(".nr")]
-have = [n for n in ("debug", "debug-trip2", "debug-trip3") if source_tabs(legs[n])]
-print("yes" if len(have) == 3 else "no")
-print(", ".join(sorted({t for n in ("debug","debug-trip2","debug-trip3")
-                        for t in source_tabs(legs[n])})) or "none")
-')"
-if [ "$(printf '%s' "${debug_source}" | head -1)" = yes ]; then
-	out="$(q '
-import json, sys
-r = json.load(open(sys.argv[1]))
-legs = {l["leg"]: l for l in r["legs"]}
 bad = []
-for name in ("debug", "debug-trip2", "debug-trip3"):
-    l = legs[name]
+for l in r["legs"]:
+    name = l["leg"]
     ed = l["contentBoxes"].get("editor")
     if not ed or not ed.get("w") or not ed.get("h"):
         bad.append("%s: .monaco-editor box %s" % (name, ed))
@@ -601,19 +560,10 @@ for name in ("debug", "debug-trip2", "debug-trip3"):
                    % (name, ed["w"], ed["h"]))
 print("no" if bad else "ok")
 print("; ".join(bad) if bad else
-      "every debug-mode leg painted a non-zero editor carrying rendered lines")
+      "every leg painted a non-zero editor carrying rendered lines")
 ')"
-	check "$(printf '%s' "${out}" | head -1)" "in DEBUG mode the editor has a box and rendered lines"
-	note "$(printf '%s' "${out}" | tail -n +2)"
-else
-	skip "in DEBUG mode the editor has a box and rendered lines — UNMEASURED here"
-	note "no debug leg opened a source file, so there is no editor to measure."
-	note "This deployment carries no replay engine and no Noir toolchain (both are"
-	note "OPTIONAL bundle assets; see the [SKIPPED] lines from web-bundle-assets.sh),"
-	note "so debug mode reaches no session. The arm runs where those are built:"
-	note "deploy-web-codetracer.yml assembles studio-bundle/ with all three."
-	note "source tabs seen in the debug legs: $(printf '%s' "${debug_source}" | tail -n +2)"
-fi
+check "$(printf '%s' "${out}" | head -1)" "in both modes the editor has a box and rendered lines"
+note "$(printf '%s' "${out}" | tail -n +2)"
 
 echo
 
@@ -728,13 +678,9 @@ note "$(printf '%s' "${out}" | tail -n +2)"
 echo
 
 # ---------------------------------------------------------------------------
-# The verdict. SKIPS ARE COUNTED SEPARATELY AND ARE NEVER PASSES.
+# The verdict.
 # ---------------------------------------------------------------------------
-echo "${checks} check(s), ${failures} failure(s), ${skips} skipped"
-if [ "${skips}" -gt 0 ]; then
-	echo "NOTE: ${skips} arm(s) were SKIPPED, not passed — this run could not"
-	echo "      measure them. See the [SKIPPED] line(s) above for what is missing."
-fi
+echo "${checks} check(s), ${failures} failure(s)"
 if [ "${checks}" -eq 0 ]; then
 	echo "RESULT: FAILED — no checks ran, which is not a pass"
 	exit 1

@@ -1,9 +1,10 @@
 import
   std / [ async, jsffi, strutils, sequtils, jsconsole, sugar, json, os, strformat ],
   electron_vars, traces, files, startup, install, menu, online_sharing, window, logging, config, debugger, server_config, host_clients, base_handlers, bootstrap_cache, lsp_bridge,
-  review_dataset, keybindings, table_columns,
+  review_dataset, keybindings, table_columns, replay_open_in,
   ns9_panes,
   hcr_launch,
+  build_runner,
   file_tree_operations,
   tab_answers,
   ipc_subsystems/[ dap, socket, acp_ipc ],
@@ -385,6 +386,10 @@ proc configureIpcMain* =
     # (`index/traces.onRunTestSuite`, `GUI/Core-Panes/Test-Results-Pane.md`
     # §4.3).
     "run-test-suite"
+    # The BUILD panel's builds: a task or a typed command run by the main
+    # process, and stopped (`index/build_runner`, Build-Output-Pane.md §4.2).
+    "build-start"
+    "build-cancel"
     "restart-subsystem"
 
     # welcome screen options
@@ -439,6 +444,9 @@ proc configureIpcMain* =
     # document with the terminal and GPUI (`index/table_columns`).
     "table-columns-request"
     "table-columns-save"
+    # Test-Results-Pane.md §9.3: the workspace's `replay-open-in`, one
+    # document with the terminal and GPUI (`index/replay_open_in`).
+    "replay-open-in-save"
     # Auto-hide (pinned panel) state.  It is persisted separately from the
     # GoldenLayout config because pinning a panel REMOVES it from the
     # GoldenLayout tree — see `onSaveAutoHideState` in `index/window.nim`.

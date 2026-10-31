@@ -278,7 +278,8 @@ proc runInitial*(conf: CodetracerConf; uiSelection: string = "") =
       # (`trace/replay_backend_env.nim`).
       let publishedBackendOptions = publishReplayBackendOptions(
         [(ThreadSyncOrderFlag, conf.replayThreadSyncOrder),
-         (OsSimulationFlag, conf.replayOsSimulation)])
+         (OsSimulationFlag, conf.replayOsSimulation),
+         (FollowRequestSpansFlag, conf.replayFollowRequestSpans)])
       # Resolve the effective new-trace policy:
       # CLI flags override the config setting.
       var replayPolicy =
@@ -293,8 +294,8 @@ proc runInitial*(conf: CodetracerConf; uiSelection: string = "") =
         # without a word.  A replay that carries them opens its own window.
         if conf.newTab:
           errorMessage("note: --new-tab is ignored: an open window's " &
-            "replay backend cannot take --thread-sync-order or " &
-            "--os-simulation, so this replay opens a new window")
+            "replay backend cannot take changed replay options, " &
+            "so this replay opens a new window")
         replayPolicy = "window"
       replay(
         conf.lastTraceMatchingPattern,

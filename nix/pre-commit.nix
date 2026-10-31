@@ -80,12 +80,10 @@
     # A VENDORED COPY, and byte-identity IS the contract.
     #
     # tools/check-test-assertions.sh is a byte-for-byte copy of
-    # codetracer-specs/tools/check-test-assertions.sh (37e193050 explains why
-    # it is copied rather than referenced: ci/lint/bash.sh is deliberately the
-    # lane that needs no siblings and no network). The copy is only safe
-    # because ci/test/test-assertion-baseline.sh compares the two by sha256
-    # whenever both repos are on disk, so it cannot drift silently -- and the
-    # editable original, the one with a self-test, lives in the other repo.
+    # codetracer-pm/tools/check-test-assertions.sh. The lint can run without
+    # siblings; ci/test/test-assertion-baseline.sh requires the canonical copy
+    # and compares the two by sha256 in lint-nim, whose job provisions that
+    # checkout. The editable original, the one with a self-test, lives there.
     #
     # shfmt would reformat 77 lines of it on the first commit that touches its
     # mode, breaking that sha256 against an upstream nobody had changed and

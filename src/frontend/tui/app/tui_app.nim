@@ -66,6 +66,7 @@ import ./views/search_results_pane
 import ./views/test_results_pane
 import ./views/agent_activity_pane
 import ./views/problems_pane
+import ./views/requests_pane
 import ./views/point_list
 
 export headless_app
@@ -231,9 +232,11 @@ type
       ## editor or list it searches — named when `find.open` ran, so its
       ## pushed layer is active only while that element is on the scope
       ## path (Base-Keymaps §5.3).
-    findQuery*: string
-      ## PLAT-68: the last query the find widget searched, for `F3` with the
-      ## widget closed.
+    find*: FindVM
+      ## PLAT-70 Part C (Find-And-Incremental-Search.md §3): the editor's
+      ## find session — the shared ViewModel GPUI drives too. Its query is
+      ## the editor document's `EditorState.search.pattern` (the one pattern
+      ## store), so `F3` / `n` after it closes continue that pattern.
     caret*: tuple[path: string, line, column: int]
       ## PLAT-51: the read-only debugging editor's CARET (Editor-Pane.md, "The
       ## caret in a read-only editor") — placed by a click on the text, moved
@@ -302,10 +305,40 @@ type
       ## PLAT-55. The PROBLEMS pane's model, as a value, filled by the host
       ## (`host/problems_source.nim`) from the window's `ErrorsVM`, which the
       ## window's builds feed; its `scrollTop` is the pane's own.
+    requests*: RequestsPaneModel
+      ## PLAT-58. THE REQUESTS pane's model, as a value, filled by the host
+      ## (`host/tui_session.requestsModelOf`) from the session's
+      ## `RequestPanelVM`; its `scrollTop` is the pane's own reading position.
     build*: BuildSession
       ## PLAT-16. The build or run in flight, or the last one's verdict, or
       ## `nil` for a session that has never built. `nil` is a state the pane
-      ## renders (`build: not started`) rather than one it hides.
+      ## renders (`No build has run.`) rather than one it hides.
+    buildPane*: BuildPaneModel
+      ## PLAT-56. The BUILD OUTPUT pane's model, as a value, filled by the
+      ## host (`host/build_output_source.nim`) from the window's `BuildVM` —
+      ## the desktop's BUILD panel's ViewModel — which the window's builds
+      ## feed; its `scrollTop` is the pane's own. Not loaded without a host:
+      ## the pane then draws `build` itself (`buildPaneModelFor`).
+    buildStatus*: string
+      ## PLAT-56 (Build-Output-Pane.md §3.10): the status line's build
+      ## indicator — the current build in the shared words, "" for none.
+    buildStatusState*: BuildStatus
+      ## Its verdict, for its colour.
+    buildDiagnostics*: seq[BuildProblemLine]
+      ## Build-Output-Pane.md §3.9: the Problems pane's rows (the window's
+      ## `ErrorsVM`), which the Edit pane marks in the file it shows; filled
+      ## by the host with the pane (`host/build_output_source`).
+    buildDiagnosticsDir*: string
+      ## The working directory of the build those rows came from, which a
+      ## relative path resolves against (EMT-A36).
+    buildPaneTouched*: bool
+      ## §3.8 "pin on interaction": the user pressed or scrolled in the Build
+      ## Output pane since the host last looked (the host clears it).
+    buildCommand*: proc(kind: BuildPaneCommandKind;
+                        index: int): string {.closure.}
+      ## PLAT-56: the HOST's Build Output pane — run again, stop, clear,
+      ## auto-scroll, the history picker, a located line opened. The words the
+      ## status line shows, "" for none. Nil when no host fills the pane.
     editSession*: EditSession
       ## PLAT-16. The open buffers, their carets, their scroll positions and
       ## the project's points.
@@ -339,6 +372,11 @@ type
       ## the session's `SearchResultsVM` through the shared runner
       ## (`viewmodel/host/find_in_files`); "" when it started, else why not.
       ## Nil when no host searches (an in-process caller).
+    openFindInFilesField*: proc(selection: string): string {.closure.}
+      ## PLAT-70 Part D: the HOST's `SearchResultsVM.openField` — the seed
+      ## Find in Files' field opens on for the editor's selection
+      ## `selection` (`findInFilesSeed`: a one-line selection, else the
+      ## pane's query). Nil when no host searches.
     toggleSearchOption*: proc(operation: string): string {.closure.}
       ## PLAT-57: the HOST's Find in Files toggle, by its operation
       ## (`search.toggle-case` / `-whole-word` / `-regex`): flipped, and a
@@ -362,6 +400,17 @@ type
       ## starting a session when there is none. "" when sent, else why not.
     agentStop*: proc(): string {.closure.}
       ## PLAT-54: the prompt's Stop control.
+    agentAttach*: proc(context: string; mustExist: bool): string {.closure.}
+      ## PLAT-54: the prompt's "add context" menu (DeepReview-GUI.md §2.2.7)
+      ## — the HOST attaches a file, folder, recording or editor selection to
+      ## the next prompt (`native_agent_host.attachContext`; an editor
+      ## selection is attached as the editor names it, `mustExist` false).
+      ## The words the status line shows.
+    requestsAct*: proc(act: RequestsAct): RequestsActResult {.closure.}
+      ## PLAT-58: the HOST's answer to an act on the Requests pane — a press,
+      ## a menu built or chosen, the URL search, a key — done through the
+      ## session's `RequestPanelVM` (`tui_session.requestsAct`), the pane's
+      ## model refreshed. Nil when no host owns the pane.
     recordingOpener*: proc(path: string): string {.closure.}
       ## PLAT-49 part B: the HOST's "open this recording in a new session
       ## tab" — "" when it opened, else why not. Nil when the host cannot
@@ -400,6 +449,10 @@ type
     hoveredTooltip*: string
       ## PLAT-49: the hovered control's tooltip, from
       ## `debug_controls_vm.transportTooltip`.
+    testsHover*: string
+      ## Test-Results-Pane.md §9.6: the title of the Test Results control the
+      ## pointer is over (the desktop's tooltip words), shown on the status
+      ## line while it is there; "" otherwise.
     caretDrawn*: bool
       ## PLAT-49: the terminal is not known to honour caret shapes
       ## (DECSCUSR), so the omnibar's caret is drawn into its cell.
@@ -528,6 +581,24 @@ proc welcomeViewOf*(app: TuiApp): WelcomeView =
               input: w.input, placeholder: w.placeholder,
               message: w.message)
 
+proc editPaneModel*(app: TuiApp): EditPaneModel =
+  ## The Edit pane's value: the active buffer's, with the build's
+  ## diagnostics in it (§3.9).
+  if app.editSession.isNil:
+    return initEditPaneModel()
+  result = editPaneModelFor(app.editSession, app.editSession.activeBuffer())
+  # The project folder (a session started on one names none: its builds run
+  # in it, so the build's directory stands in).
+  result.attachDiagnostics(app.buildDiagnostics, app.buildDiagnosticsDir,
+                           (if app.projectRoot.len > 0: app.projectRoot
+                            else: app.buildDiagnosticsDir))
+
+proc currentBuildPane*(app: TuiApp): BuildPaneModel =
+  ## PLAT-56: the Build Output pane's value — the host's, from the window's
+  ## `BuildVM`, or (no host) the runner's session drawn directly.
+  if app.buildPane.loaded: app.buildPane
+  else: buildPaneModelFor(app.build)
+
 proc shellModel*(app: TuiApp; width, height: int): ShellModel =
   ## The CTUI-3 screen model for this application at this terminal size.
   ##
@@ -598,7 +669,7 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
   # PLAT-70: the output panes' horizontal views and the markers setting.
   var terminalOutput = app.terminalOutput
   terminalOutput.overflowMarkers = not app.overflowMarkersOff
-  var build = buildPaneModelFor(app.build)
+  var build = app.currentBuildPane()
   build.hview = app.buildView.hview
   build.overflowMarkers = not app.overflowMarkersOff
   result = ShellModel(
@@ -626,6 +697,8 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
                         caretDrawn: app.caretDrawn),
     status: initStatusBarModel(mode = umNormal, profile = selected,
                                notification = app.notification,
+                               build = app.buildStatus,
+                               buildState = app.buildStatusState,
                                product = app.modes.product,
                                # PLAT-45: say so when the screen is the shared
                                # default FOLDED — and only then. An arrangement
@@ -668,11 +741,10 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     tests: app.tests,
     agent: app.agent,
     problems: app.problems,
+    requests: app.requests,
     build: build,
     product: app.modes.product,
-    edit: (if app.editSession.isNil: initEditPaneModel()
-           else: editPaneModelFor(app.editSession,
-                                  app.editSession.activeBuffer())))
+    edit: app.editPaneModel())
   # THE FILE INFO YIELDS TO A NOTE. The status row carries the file info, the
   # bottom labels, the mode indicators and the notification; where they do
   # not all fit, the file info is the one left out — a message the user
@@ -693,6 +765,8 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
                                        else: terminalPaneName(d.pane)))
   let modeW = textCells("COMMAND " & productIndicator(result.product) &
                         (if result.status.fold.len > 0: " " & result.status.fold
+                         else: "") &
+                        (if app.buildStatus.len > 0: "  " & app.buildStatus
                          else: ""))
   let noteW = noteRowCells(app.notification)
   let fileInfo =

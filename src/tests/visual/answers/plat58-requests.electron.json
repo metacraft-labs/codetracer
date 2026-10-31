@@ -1,0 +1,189 @@
+{
+ "_comment": [
+  "PLAT-58 — the desktop's REQUESTS panel on the RS-M4 demo session, read from the real Electron app.",
+  "Produced by src/tests/gui/tests/request-panel/plat58-requests-capture.spec.ts",
+  "(`just plat58-capture-electron`)."
+ ],
+ "rows": [
+  {
+   "cells": [
+    "02",
+    "GET",
+    "/api/users",
+    "200",
+    "12ms",
+    "2.0 KB"
+   ],
+   "statusClass": "request-status-success",
+   "statusColor": "rgb(187, 247, 208)"
+  },
+  {
+   "cells": [
+    "03",
+    "POST",
+    "/api/users",
+    "201",
+    "31ms",
+    "96 B"
+   ],
+   "statusClass": "request-status-success",
+   "statusColor": "rgb(187, 247, 208)"
+  },
+  {
+   "cells": [
+    "04",
+    "GET",
+    "/api/users/42",
+    "200",
+    "8ms",
+    "512 B"
+   ],
+   "statusClass": "request-status-success",
+   "statusColor": "rgb(187, 247, 208)"
+  },
+  {
+   "cells": [
+    "05",
+    "GET",
+    "/static/app.css",
+    "304",
+    "1ms",
+    "0 B"
+   ],
+   "statusClass": "request-status-redirect",
+   "statusColor": "rgb(147, 197, 253)"
+  },
+  {
+   "cells": [
+    "06",
+    "DELETE",
+    "/api/users/42",
+    "404",
+    "5ms",
+    "48 B"
+   ],
+   "statusClass": "request-status-client-error",
+   "statusColor": "rgb(253, 186, 116)"
+  },
+  {
+   "cells": [
+    "07",
+    "GET",
+    "/api/reports/slow",
+    "200",
+    "940ms",
+    "8.0 KB"
+   ],
+   "statusClass": "request-status-success",
+   "statusColor": "rgb(187, 247, 208)"
+  },
+  {
+   "cells": [
+    "08",
+    "PUT",
+    "/api/orders/7",
+    "500",
+    "220ms",
+    "76 B"
+   ],
+   "statusClass": "request-status-server-error",
+   "statusColor": "rgb(252, 165, 165)"
+  },
+  {
+   "cells": [
+    "09",
+    "GET",
+    "/health",
+    "200",
+    "1ms",
+    "2 B"
+   ],
+   "statusClass": "request-status-success",
+   "statusColor": "rgb(187, 247, 208)"
+  }
+ ],
+ "filterBar": {
+  "search": "Find by URL...",
+  "pickers": [
+   "Method: All",
+   "Status: All"
+  ],
+  "header": [
+   "#",
+   "method",
+   "URL",
+   "Status",
+   "Duration",
+   "Size"
+  ]
+ },
+ "rowMenu": [
+  {
+   "label": "Go to Handler",
+   "disabled": false
+  },
+  {
+   "label": "Copy URL",
+   "disabled": false
+  },
+  {
+   "label": "Filter by Method: PUT",
+   "disabled": false
+  },
+  {
+   "label": "Filter by Status: 5xx",
+   "disabled": false
+  },
+  {
+   "label": "Clear Filters",
+   "disabled": true
+  }
+ ],
+ "filteredByMethod": [
+  {
+   "cells": [
+    "08",
+    "PUT",
+    "/api/orders/7",
+    "500",
+    "220ms",
+    "76 B"
+   ],
+   "statusClass": "request-status-server-error",
+   "statusColor": "rgb(252, 165, 165)"
+  }
+ ],
+ "filteredMenu": [
+  {
+   "label": "Go to Handler",
+   "disabled": false
+  },
+  {
+   "label": "Copy URL",
+   "disabled": false
+  },
+  {
+   "label": "Filter by Method: PUT",
+   "disabled": true
+  },
+  {
+   "label": "Filter by Status: 5xx",
+   "disabled": false
+  },
+  {
+   "label": "Clear Filters",
+   "disabled": false
+  }
+ ],
+ "doubleClick": {
+  "request": "04",
+  "before": {
+   "line": 13,
+   "rrTicks": 6
+  },
+  "after": {
+   "line": 13,
+   "rrTicks": 20
+  }
+ }
+}

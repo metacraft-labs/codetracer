@@ -334,6 +334,17 @@ while read -r f; do
 	cache="${cache_root}/${lane}-${name}"
 	mkdir -p "${_ct_lane_home}/${name}"
 	export CODETRACER_HOME="${_ct_lane_home}/${name}"
+	# AND THE TWO OTHER XDG ROOTS, per file, beside it: `XDG_DATA_HOME` (the
+	# freedesktop trash, `ct install`'s launchers, and any tool under test that
+	# keeps data by the XDG rule) and `XDG_CONFIG_HOME` (config read or written
+	# by a tool that does not know `CODETRACER_HOME`). CodeTracer's own
+	# resolvers take `CODETRACER_HOME` first, so for them this changes nothing;
+	# it closes the route for everything else a suite starts. `XDG_STATE_HOME`
+	# is set below with the layout directory. `HOME` itself is kept: the
+	# toolchain (nimble's packages, git's identity, nix) reads it.
+	mkdir -p "${_ct_lane_home}/${name}.xdg-data" "${_ct_lane_home}/${name}.xdg-config"
+	export XDG_DATA_HOME="${_ct_lane_home}/${name}.xdg-data"
+	export XDG_CONFIG_HOME="${_ct_lane_home}/${name}.xdg-config"
 	if [ -n "${_ct_lane_state}" ]; then
 		mkdir -p "${_ct_lane_state}/${name}"
 		export CODETRACER_TUI_LAYOUT_DIR="${_ct_lane_state}/${name}"
@@ -352,9 +363,10 @@ while read -r f; do
 	elif [ "${backend}" = "js-browser" ] || [ "${backend}" = "js-dom" ] ||
 		[ "${backend}" = "js-chromium" ]; then
 		# `nim js` WITHOUT `-d:nodejs`. See test_lane_backend's header: the
-		# define is required by every lane that RUNS its output under node, and
-		# is fatal for a browser module — `kdom`'s `createElementNS` is absent
-		# under it, so the renderer does not compile at all.
+		# define enables unittest exit status in the ordinary node lanes, but
+		# also makes std/dom replace the page's document with a dummy object.
+		# Browser lanes must keep the actual page bindings even when a node-
+		# targeted compile happens to succeed.
 		compile_cmd=(nim js --hints:off --warnings:off
 			${extra_flags[@]+"${extra_flags[@]}"} --nimcache:"${cache}" -o:"${cache}/${name}.js" "${f}")
 		artifact="${cache}/${name}.js"
@@ -463,6 +475,14 @@ while read -r f; do
 		continue
 	fi
 
+	# THE GUARD, PER FILE: the user's state is read again around this file's
+	# run, so a write is reported against the file that was running when it
+	# happened (the lane-level comparison at the end can only say "this
+	# lane"). The file fails. A writer elsewhere on the host at the same moment
+	# (CodeTracer in use, another checkout's tests) is the other possible
+	# cause, and the message says so; run the file again on a quiet host.
+	_ct_file_before="$(_ct_user_state_snapshot)"
+
 	ct_libs="${CT_LD_LIBRARY_PATH:-${CODETRACER_LD_LIBRARY_PATH:-}}"
 	# The lane's own run-time libraries (`test_lane_run_library_path`), in
 	# front of the dev shell's set; each part only when non-empty, since an
@@ -505,6 +525,22 @@ while read -r f; do
 		fi
 		output="$(LD_LIBRARY_PATH="${run_lib_path}" \
 			timeout "${lane_timeout}" "${artifact}" 2>&1)" && rc=0 || rc=$?
+	fi
+
+	_ct_file_after="$(_ct_user_state_snapshot)"
+	if [ "${_ct_file_after}" != "${_ct_file_before}" ]; then
+		echo "TOUCHED THE USER'S STATE"
+		{
+			echo "      ${f} changed the user's own CodeTracer state while it ran" \
+				"(a file created, rewritten or removed under ${_ct_user_state}," \
+				"${_ct_user_config} or ${_ct_user_data}). If CodeTracer was in use" \
+				"on this machine at the same moment, that is the other possible cause:"
+			diff <(printf '%s\n' "${_ct_file_before}") \
+				<(printf '%s\n' "${_ct_file_after}") | grep '^[<>]' |
+				sed 's/^</        before:/; s/^>/        after: /'
+		} >&2
+		failed=$((failed + 1))
+		continue
 	fi
 
 	oks="$(printf '%s\n' "${output}" | grep -c '\[OK\]' || true)"

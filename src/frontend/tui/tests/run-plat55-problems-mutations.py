@@ -185,7 +185,7 @@ ARMS = [
              "    discard")],
      [(PLAN, PLAN_PRESS)],
      "K35: the GPUI editor opens the file with the caret not at the diagnostic"),
-    ("G4", [(GPUI_MAIN, "  let changed = gProblems.follow(gBuild.session)",
+    ("G4", [(GPUI_MAIN, "  let changed = gProblems.follow(gBuild.session, nowMonoMs())",
              "  let changed = false")],
      [(PLAN, PLAN_ROWS)],
      "the GPUI window does not read its build into the pane"),
@@ -194,8 +194,8 @@ ARMS = [
      [(TBL, TBL_BUILD)],
      "the vocabulary's Problems view lists no problem"),
     # ---- the desktop -------------------------------------------------------
-    ("D1", [(DESKTOP_BUILD, "    if fed.problem:",
-             "    if fed.problem and fed.row.severity != blsWarning:")],
+    ("D1", [(DESKTOP_BUILD, "  if read.fed.problem:",
+             "  if read.fed.problem and read.fed.row.severity != blsWarning:")],
      [(SPEC, None)],
      "§3.4: the desktop does not list the rows the shared rule reads"),
     # ---- the declared survivor ---------------------------------------------

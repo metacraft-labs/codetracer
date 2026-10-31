@@ -3,7 +3,7 @@
 ## (`headless_app/pane_clicks`).
 ##
 ##   * the INVENTORY — every desktop click behaviour the milestone's table
-##     lists, one row each (`K1` … `K57`), every row with a target, gestures,
+##     lists, one row each (`K1` … `K60`), every row with a target, gestures,
 ##     the desktop's behaviour and a state for each native front-end (done,
 ##     existing, or n/a with the reason the front-end draws no such target);
 ##   * the WORD UNDER THE POINTER (`callTokenAt`), Monaco's rule, with Rust's
@@ -35,7 +35,10 @@ import viewmodels/event_log_vm
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 248
+# 248 -> 246: K30 and K45 left the done sweep (-4 checks) for the two
+# retired-rows checks (+2) when the Timeline rows were retired.
+# 247 -> 254 (PLAT-58): K58-K60, the Requests rows (+7).
+const ExpectedAssertions = 254
 
 var countedAssertions = 0
 
@@ -51,13 +54,13 @@ func rowsWith(state: NativeState; gpui = false): seq[string] =
 
 suite "PLAT-50: the click inventory":
 
-  test "every row K1..K57, once, complete":
+  test "every row K1..K60, once, complete":
     var ids = initHashSet[string]()
     for i, b in ClickInventory:
       ck b.id == "K" & $(i + 1)
       ids.incl b.id
     ck ids.len == ClickInventory.len
-    ck ClickInventory.len == 57
+    ck ClickInventory.len == 60
     for b in ClickInventory:
       if b.target.len == 0 or b.gestures.card == 0 or b.desktop.len == 0:
         checkpoint("incomplete row " & b.id)
@@ -65,7 +68,7 @@ suite "PLAT-50: the click inventory":
       # A row the front-ends do not do says why; one an earlier milestone
       # did names it.
       for state in [b.terminal, b.gpui]:
-        if state in {nsNotApplicable, nsExisting} and b.note.len == 0:
+        if state in {nsNotApplicable, nsExisting, nsRetired} and b.note.len == 0:
           checkpoint("row " & b.id & " is " & $state & " without a note")
           ck false
 
@@ -76,10 +79,15 @@ suite "PLAT-50: the click inventory":
     # target either front-end draws is left undone.
     for id in ["K7", "K10", "K11", "K12", "K13", "K14", "K15", "K17", "K18",
                "K19", "K22", "K23", "K24", "K25", "K26", "K27", "K28",
-               "K30", "K31", "K33", "K34", "K36", "K37", "K42",
-               "K45", "K53"]:
+               "K31", "K33", "K34", "K36", "K37", "K42",
+               "K53"]:
       ck id in terminal
       ck id in gpui
+    # The Timeline's track and zoom (K30, K44, K45) went with the Timeline
+    # panel, on the desktop too: retired on both front-ends, and nothing
+    # else is.
+    ck rowsWith(nsRetired) == @["K30", "K44", "K45"]
+    ck rowsWith(nsRetired, gpui = true) == @["K30", "K44", "K45"]
     # K29 (the Variables pane's hide-other-process-watches toggle, since
     # the one list of variables and watches) is drawn by both front-ends.
     ck "K29" in gpui and "K29" in terminal
@@ -92,6 +100,10 @@ suite "PLAT-50: the click inventory":
     ck behaviour("K32").gpui == nsDone
     # PLAT-57 drew Find in Files on both: its row opens the result.
     ck behaviour("K35").terminal == nsDone and behaviour("K35").gpui == nsDone
+    # PLAT-58 drew the Requests pane on both: a row, its menu, the pickers.
+    for id in ["K58", "K59", "K60"]:
+      ck behaviour(id).terminal == nsDone and behaviour(id).gpui == nsDone
+    ck cgDoubleClick in behaviour("K58").gestures
     ck behaviour("K99").id.len == 0
     ck describe(behaviour("K24")).startsWith("K24 Event log: row [click]")
 
@@ -120,20 +132,20 @@ suite "PLAT-50: the context menus are the desktop's":
 
   test "a tab's menu, and a docked pane's label's":
     let m = tabContextMenu(paneVcs, maximised = false)
-    ck m.labels == @["Pin to Left", "Pin to Bottom", "Pin to Right", "Close",
+    ck m.labels == @["Pin to Left", "Pin to Bottom", "Pin to Right", "Pin to Top", "Close",
                      MaximiseLabel]
     ck m.target.pane == paneVcs
     ck tabContextMenu(paneVcs, maximised = true).labels[^1] == MinimiseLabel
     for e in m.entries:
       ck e.enabled
-    ck m.entries[0].action == caPinLeft and m.entries[3].action == caClosePane
+    ck m.entries[0].action == caPinLeft and m.entries[4].action == caClosePane
     # `ui/auto_hide`'s strip menu: every OTHER edge, Unpin, Close.
     let bottom = dockLabelContextMenu(paneBuildOutput, leBottom)
-    ck bottom.labels == @["Pin to Left", "Pin to Right", UnpinLabel, "Close"]
+    ck bottom.labels == @["Pin to Left", "Pin to Right", "Pin to Top", UnpinLabel, "Close"]
     ck bottom.target.edge == leBottom and bottom.target.pane == paneBuildOutput
-    ck bottom.entries[2].action == caUnpin
+    ck bottom.entries[3].action == caUnpin
     ck dockLabelContextMenu(paneVcs, leLeft).labels ==
-      @["Pin to Bottom", "Pin to Right", UnpinLabel, "Close"]
+      @["Pin to Bottom", "Pin to Right", "Pin to Top", UnpinLabel, "Close"]
 
   test "the editor's menu on a plain line: every entry enabled":
     let m = editorTextContextMenu("/a/main.py", 31,

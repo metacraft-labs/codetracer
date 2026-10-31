@@ -308,12 +308,6 @@ proc focusTraceEditorAfterLayout(self: TraceComponent, delay: int = 0) =
     self.focusTraceEditor()
   , delay, self)
 
-proc shouldRestoreTraceEditorFocus(self: TraceComponent): bool =
-  if self.monacoEditor.isNil:
-    return false
-
-  self.monacoEditor.hasTextFocus() or self.data.ui.activeFocus == self
-
 proc applyTraceDomLayout(self: TraceComponent) =
   let traceMain = document.getElementById(cstring(fmt"trace-{self.id}"))
   if traceMain.isNil:
@@ -444,16 +438,12 @@ proc updateViewZoneHeight(self: TraceComponent, newHeight: int) =
   if self.viewZone.isNil:
     return
 
-  let shouldRestoreFocus = self.shouldRestoreTraceEditorFocus()
-
-  removeMonacoViewZone(self.editorUI.monacoEditor, self.zoneId)
-
+  # Resize the existing zone without detaching its DOM. Removing and adding
+  # it clears the nested editor's focused input during Monaco's content-change
+  # event; delayed focus repair then races the user's next key.
   self.viewZone.heightInPx = newHeight
-
-  self.zoneId = addMonacoViewZone(self.editorUI.monacoEditor, self.viewZone)
+  layoutMonacoViewZone(self.editorUI.monacoEditor, self.zoneId)
   self.applyTraceDomLayout()
-  if shouldRestoreFocus:
-    self.focusTraceEditorAfterLayout()
 
 proc convertTracepointEventToProgramEvent(tracepointEvent: Stop): ProgramEvent =
   # PLAT-2: the value half is the pipeline's, at the `tracepoint` budget. The

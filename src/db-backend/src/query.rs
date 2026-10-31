@@ -88,6 +88,20 @@ pub enum ReplayQuery {
     },
     LoadAllEvents,
     LoadCallstack,
+    /// Search inside this replay operation without moving its browsing context.
+    SearchCalls {
+        pattern: String,
+        filter: String,
+        limit: usize,
+    },
+    /// Install a pending resolver; the scan applies its full expression to hits.
+    PrepareCallSearch {
+        filter: String,
+    },
+    /// Find the next invocation, passing signals and shared-library stops.
+    ContinueCallSearch {
+        breakpoint: i64,
+    },
     LoadHistory {
         arg: LoadHistoryArg,
     },

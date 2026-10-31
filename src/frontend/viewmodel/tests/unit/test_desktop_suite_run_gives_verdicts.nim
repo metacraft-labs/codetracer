@@ -277,7 +277,8 @@ proc desktopHostOverPane(spies: Spies; installControls = true):
         spies.lastFile = file
         spies.lastLine = line
         "",
-      openRecording = proc(recordingId: string): string =
+      openRecording = proc(testId, recordingId: string;
+                           policy: TraceOpenPolicy): string =
         spies.opened.add recordingId
         spies.openRefuseWith)
   (vm, panel, host)
@@ -313,7 +314,8 @@ suite "the desktop host installs the pane's run controls":
         keepWindowDispatch = proc(selector, file: string; line: int): string =
           inc spies.recordKeeping
           "",
-        openRecording = proc(recordingId: string): string =
+        openRecording = proc(testId, recordingId: string;
+                             policy: TraceOpenPolicy): string =
           spies.opened.add recordingId
           "")
 

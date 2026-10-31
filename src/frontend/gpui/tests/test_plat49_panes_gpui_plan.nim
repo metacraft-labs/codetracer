@@ -292,7 +292,7 @@ suite "PLAT-49 part B: the GPUI window's call trace":
     let entryTick = geom.tickOf
     ck entryTick >= 0
     # The rows start below the pane's inset and the search field, at the
-    # desktop's fractional pitch (`leaves.callRowTopPx`).
+    # desktop's row pitch (`leaves.callRowTopPx`).
     proc rowY(i: int): int =
       b[1] + paneInsetOf("calltrace").top + CallRowsTopPx + callRowTopPx(i) +
         (callRowTopPx(i + 1) - callRowTopPx(i)) div 2
@@ -599,14 +599,21 @@ suite "PLAT-49 part B review: the GPUI band's + opens a recording in a new tab":
     var g: JsonNode
     let opened = windowPlan("tab-add", g)
     ck opened.nodesWith("data-ct-welcome").len == 1
+    # Each drawn row's place in the model's reading order — the order the
+    # keys walk — not its place among the drawn nodes: a recent panel draws
+    # at most a panel's worth of the recordings beside calc, and with more
+    # fixtures on the host than that the two orders differ (codetracer-pm
+    # issue 2026-10-26: the walk landed on `deep_calls`).
     var rows: seq[string] = @[]
     var labels: seq[string] = @[]
+    var indices: seq[int] = @[]
     var focusAt = -1
     for n in opened.nodesWith("data-ct-welcome-row"):
       if n.attr("data-ct-welcome-focus") == "true": focusAt = rows.len
       rows.add n.attr("data-ct-welcome-row")
       labels.add n.textOf.strip
-    checkpoint("rows: " & $rows)
+      indices.add parseInt(n.attr("data-ct-welcome-index"))
+    checkpoint("rows: " & $rows & " at " & $indices)
     var pagesAt, calcAt, localAt = -1
     for i, k in rows:
       if k.startsWith("recent-trace:") and k.contains("call_pages-d6745afd1e2e"):
@@ -618,8 +625,8 @@ suite "PLAT-49 part B review: the GPUI band's + opens a recording in a new tab":
     ck pagesAt >= 0 and calcAt >= 0 and localAt >= 0
     # The focus starts on the first live start option ("Open folder").
     ck rows[focusAt] == "option:open-folder"
-    let toPages = moves(focusAt, pagesAt)
-    let toLocal = moves(focusAt, localAt)
+    let toPages = moves(indices[focusAt], indices[pagesAt])
+    let toLocal = moves(indices[focusAt], indices[localAt])
     # The recent recording, chosen: a second session, its own tab, its panes.
     let two = windowPlan("tab-add" & toPages & ",key:enter")
     var titles: seq[string] = @[]

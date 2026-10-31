@@ -585,7 +585,11 @@ suite "EMT anti-drift and exclusion — the controls":
 
     # Derive the chain from source, in order.
     var chain: seq[string] = @[]
-    for line in LanguageDetectionSrc.splitLines:
+    # Walked through a `let`, never the `const`: an inline iterator over a
+    # `const` rebuilds the whole literal at every character access on the JS
+    # backend (`ci/test/js-const-iteration-test.sh` says why and refuses it).
+    let languageDetectionText = LanguageDetectionSrc
+    for line in languageDetectionText.splitLines:
       let at = line.find("fileExists(folder / \"")
       if at >= 0:
         let rest = line[at + len("fileExists(folder / \"") .. ^1]
@@ -691,7 +695,11 @@ suite "EMT anti-drift and exclusion — the controls":
     startCount()
     var members = 0
     var inEnum = false
-    for line in CommonLangSrc.splitLines:
+    # Walked through a `let`, never the `const`: an inline iterator over a
+    # `const` rebuilds the whole literal at every character access on the JS
+    # backend (`ci/test/js-const-iteration-test.sh` says why and refuses it).
+    let commonLangText = CommonLangSrc
+    for line in commonLangText.splitLines:
       let t = line.strip
       if t.startsWith("Lang* = enum"): inEnum = true; continue
       if not inEnum: continue

@@ -68,10 +68,12 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 825
+const ExpectedAssertions = 871
   ## PLAT-68: 809 → 825 — the rows are read from the router, per preset's
   ## include set, and the last case asserts every move of a bound preset has
-  ## a chord there.
+  ## a chord there. 825 → 871: the shortcut reference's own case (10), and
+  ## its section in every dialog the no-markup walk visits (4 dialogs × 9:
+  ## the section and its heading, their text, tags and attributes).
 
 const boundPresets = [spCodeTracer, spVsCode, spChorded]
 
@@ -389,6 +391,59 @@ suite "which preset is in force, and why":
       for b in presetOf(id).bindings:
         checkpoint($id & " " & $b.action)
         counted chordOf(b.action).len > 0
+
+  test "the shortcut reference: the router's lines for the focused path, the shadow marked":
+    ## Base-Keymaps §5.4 / §5.6: the dialog lists the bindings live where the
+    ## focus is, layer by layer in resolution order, and a base row a user
+    ## row shadows says by which row. The lines are the router's
+    ## `shortcutReference` for the call trace — the same function every
+    ## front-end's reference reads — under a user `Enter` with no `when`.
+    let router = initKeymapRouter(bkCua, Desktop, user = parseUserKeymap(
+      """[{ "key": "enter", "command": "debugger.step-over" }]"""))
+    let path = @[element(ekWindow, "window"), pane("calltrace")]
+    var lines: seq[ReferenceLine] = @[]
+    for e in router.shortcutReference(SessionFacts(product: pmDebug,
+                                                   editor: sourceViewFacts()),
+                                      path, nmNormal):
+      lines.add ReferenceLine(layer: e.layer, keyText: e.keyText,
+                              operation: e.operation,
+                              label: operationLabelOf(e.operation),
+                              shadowedBy: e.shadowedBy)
+    let dialog = buildShortcutDialog(chordOfPreset(spCodeTracer),
+                                     spCodeTracer, mac = false,
+                                     reference = lines, scopeText = $path)
+    let rows = nodesWithAttr(dialog, "data-kb-ref-key")
+    counted rows.len == lines.len
+    counted attrValue(nodesWithAttr(dialog, "data-kb-reference")[0],
+                      "data-kb-reference") == $lines.len
+    counted attrValue(nodesWithAttr(dialog, "data-kb-scope")[0],
+                      "data-kb-scope") == $path
+    # The user's row leads (the user pass precedes the base pass, §5.1).
+    counted rows[0].attrValue("data-kb-ref-layer").startsWith("user:")
+    counted rows[0].attrValue("data-kb-ref-operation") == "debugger.step-over"
+    # The list's base Enter is still listed, and marked as shadowed.
+    var shadowed: seq[DialogNode] = @[]
+    for r in rows:
+      if r.attrValue("data-kb-ref-key") == "Enter" and
+         r.attrValue("data-kb-ref-operation") == "list.activate":
+        shadowed.add r
+    counted shadowed.len == 1
+    counted shadowed[0].attrValue("data-kb-ref-shadowed-by") == "your row 1"
+    counted "shadowed by your row 1" in allText(shadowed[0])
+    # The layers appear in resolution order, each once.
+    var order: seq[string] = @[]
+    for r in rows:
+      let l = r.attrValue("data-kb-ref-layer")
+      if order.len == 0 or order[^1] != l: order.add l
+    counted order.toHashSet.len == order.len
+    # No user file: nothing is shadowed.
+    let plain = initKeymapRouter(bkCua, Desktop)
+    var anyShadow = false
+    for e in plain.shortcutReference(SessionFacts(product: pmDebug,
+                                                  editor: sourceViewFacts()),
+                                     path, nmNormal):
+      if e.shadowedBy.len > 0: anyShadow = true
+    counted not anyShadow
 
   test "shortcut_dialog_assertion_count_is_measured":
     checkpoint("counted assertions: " & $countedAssertions)

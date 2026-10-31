@@ -56,6 +56,15 @@ type
       ## abbreviated away.
     detail*: seq[StatusCertificateDetailRow]
 
+  StatusBuildModel* = object
+    ## PLAT-56 (Build-Output-Pane.md §3.10): the build indicator — the
+    ## current build's verdict in the shared words (`BuildVM.statusText`),
+    ## its icon, and the verdict as a class (`running`, `succeeded`,
+    ## `failed`, `cancelled`). `text == ""` (no build) renders nothing.
+    text*: string
+    icon*: string
+    stateClass*: string
+
   StatusNotificationActionRecord* = object
     label*: string
 
@@ -110,6 +119,8 @@ type
     certificate*: StatusCertificateModel
       ## SB-1's test-certificate indicator. `certificate.label == ""` renders
       ## nothing at all — see `StatusCertificateModel`.
+    build*: StatusBuildModel
+      ## PLAT-56: the build indicator; empty renders nothing.
 
   StatusShellModel* = object
     activeNotifications*: seq[StatusNotificationRecord]
@@ -127,6 +138,9 @@ type
     onNotificationAction*: proc(notificationIndex: int; actionIndex: int)
     onCopyLocation*: proc()
     onSendBugReport*: proc(title: string; description: string)
+    onSelectBuildStatus*: proc()
+      ## PLAT-56 (§3.10): the build indicator pressed — the Build Output pane
+      ## revealed.
     onSelectCertificate*: proc()
       ## Selecting the indicator. Toggles the disclosure — and, on the way
       ## open, re-reads, because the detail is a claim about the current state
@@ -182,6 +196,10 @@ proc actionHandler(callbacks: StatusShellCallbacks;
 proc invokeCopyLocation(callbacks: StatusShellCallbacks) =
   if not callbacks.onCopyLocation.isNil:
     callbacks.onCopyLocation()
+
+proc invokeSelectBuildStatus(callbacks: StatusShellCallbacks) =
+  if not callbacks.onSelectBuildStatus.isNil:
+    callbacks.onSelectBuildStatus()
 
 proc invokeSelectCertificate(callbacks: StatusShellCallbacks) =
   if not callbacks.onSelectCertificate.isNil:
@@ -261,6 +279,9 @@ proc statusStructureSignature*(model: StatusShellModel): string =
   # deliberately absent here and patched in place by `patchStatusValues` — they
   # change when the tree does, and rebuilding the shell for a state change
   # would reintroduce exactly the re-render churn M46 removed.
+  # PLAT-56: the build indicator's presence; its words, icon and class are
+  # patched in place.
+  result.add("|bs:" & (if model.base.build.text.len > 0: "1" else: "0"))
   result.add("|ce:" & (if model.base.certificate.label.len > 0: "1" else: "0"))
   result.add("|cd:" & (if model.base.certificate.disclosed: "1" else: "0"))
   if model.base.certificate.disclosed:
@@ -370,6 +391,21 @@ proc renderStatusShell*[R, N](
           span(class = "test-movement"):
             text model.base.testMovementText
         span(class = "status-right"):
+          # PLAT-56: THE BUILD INDICATOR (Build-Output-Pane.md §3.10) — the
+          # current build's verdict, always on the bar; pressed, the Build
+          # Output pane is revealed.
+          if model.base.build.text.len > 0:
+            span(
+                class = "build-status status-inline build-status-" &
+                        model.base.build.stateClass,
+                role = "status",
+                `aria-live` = "polite",
+                title = model.base.build.text,
+                onclick = proc() = callbacks.invokeSelectBuildStatus()):
+              span(class = "build-status-icon"):
+                text model.base.build.icon
+              span(class = "build-status-text"):
+                text model.base.build.text
           # THE TEST-CERTIFICATE INDICATOR (SB-1). Ambient chrome: a fact that
           # is currently true about the tree, not an event and not a panel.
           # Rendered only when a model was supplied, so every build and mode
@@ -586,6 +622,15 @@ when defined(js):
       container.patchAttribute(
         cstring".disconnected-status", cstring"title",
         model.base.disconnectedTitle)
+    if model.base.build.text.len > 0:
+      container.patchText(cstring".build-status-text", model.base.build.text)
+      container.patchText(cstring".build-status-icon", model.base.build.icon)
+      container.patchAttribute(
+        cstring".build-status", cstring"class",
+        "build-status status-inline build-status-" &
+          model.base.build.stateClass)
+      container.patchAttribute(
+        cstring".build-status", cstring"title", model.base.build.text)
     if model.base.certificate.label.len > 0:
       container.patchText(
         cstring".test-certificate-label", model.base.certificate.label)

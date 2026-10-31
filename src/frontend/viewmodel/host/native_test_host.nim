@@ -23,7 +23,7 @@
 ## | `onRunTest`: `ct record-test …`     | `dispatchRecord`                      |
 ## | `CODETRACER::test-suite-settled`    | `settleSuite` → `settleDesktopSuiteRun` |
 ## | `CODETRACER::test-run-settled`      | `settleRecord` → `settleDesktopTestRun` |
-## | `openRecordingById` (load in place) | `openRecording` → a NEW session tab (§8.3) |
+## | `openRecording` (where §9 places it) | `openRecording` → the front-end's `openFolder`, by the same placement (§9.5) |
 ##
 ## ## Polled, not awaited
 ##
@@ -51,11 +51,13 @@ import isonim/core/signals
 import ../viewmodels/test_results_vm
 import ../viewmodels/desktop_test_host
 import ../viewmodels/test_catalog_answer
+import ../viewmodels/replay_open_setting
+import ./native_state
 from ../../../ct/trace/recorder_output import recordingIdFromOutput,
   recordTestFailureSentence
 import ../../../common/ct_home
 
-export desktop_test_host, test_results_vm
+export desktop_test_host, test_results_vm, replay_open_setting
 
 type
   NativeRunKind* = enum
@@ -73,14 +75,16 @@ type
     outPath, errPath*: string
     eventsPath*: string
       ## `nrkSuite`: the `--events` file.
-    openAfter*: bool
-      ## `nrkRecord`: open the recording once it exists (record-and-open).
     commandLine*: string
 
-  NativeOpenFolder* = proc(folder: string): string
-    ## The front-end opens a recording's folder in a NEW SESSION TAB (§8.3)
-    ## and answers "" — or why it did not (a front-end with no session tabs
-    ## says so here, which the pane then shows).
+  NativeOpenFolder* = proc(testId, recordingId, folder: string;
+                           policy: TraceOpenPolicy): string
+    ## The front-end opens test `testId`'s recording `recordingId` (at
+    ## `folder`) where §9 places it
+    ## for the destination `policy` (`TestResultsVM.placeTestRecording`: by
+    ## default a NEW SESSION TAB) and answers "" — or why it did not (a
+    ## front-end with no session tabs says so here, which the pane then
+    ## shows).
   NativeResolveFolder* = proc(recordingId: string): string
     ## Where the trace store keeps a recording (`ct trace-metadata --id`), or
     ## "".
@@ -103,6 +107,12 @@ type
     opened*: seq[string]
       ## Every recording folder handed to `openFolder` that it opened, in
       ## order.
+    openedPolicies*: seq[TraceOpenPolicy]
+      ## The destination each of those was opened for, in the same order.
+    placedWords*: string
+      ## Set by the front-end's `openFolder` as it performs a placement: where
+      ## the recording went (" in a new tab", " in its own tab", " in this
+      ## tab"), for the note.
     note*: string
       ## The last thing the host has to say on a status line (a recording
       ## opened, an open refused), consumed by the front-end (`takeNote`).
@@ -113,6 +123,20 @@ const
     ## A host with no `ct` (the desktop always has its own).
   SuiteRunsDirName* = "test-suite-runs"
     ## Under the CodeTracer tmp directory, as the desktop's.
+
+proc replayOpenPath*(): string =
+  ## §9.3's document, in the native state root (beside `table-columns`).
+  nativeStateRoot() / ReplayOpenFileName
+
+proc readReplayOpen*(): string =
+  let path = replayOpenPath()
+  try:
+    if fileExists(path): readFile(path) else: ""
+  except CatchableError:
+    ""
+
+proc writeReplayOpen*(text: string): string =
+  writeStaged(replayOpenPath(), text)
 
 proc localTimeText*(): string =
   ## When a recording was made, in the reader's own clock — the desktop's
@@ -159,6 +183,8 @@ proc refreshCatalog*(h: NativeTestHost; force = false): bool =
   if not force and root == h.catalogRoot and h.catalogRoot.len > 0:
     return false
   h.catalogRoot = root
+  # §9.3: the workspace's `replay-open-in`, read where the catalog is.
+  h.vm.setOpenSetting(replayOpenFor(readReplayOpen(), root))
   let answer = catalogAnswerFor(root)
   h.vm.setRunAbsence(answer.absence)
   if answer.hasCatalog:
@@ -244,8 +270,8 @@ proc dispatchSuite(h: NativeTestHost; root: string): string =
   h.startJob(nrkSuite, @[ct, "test", "run", "--workspace", root,
                          "--events", events], root)
 
-proc dispatchRecord(h: NativeTestHost; selector, file: string; line: int;
-                    openAfter: bool): string =
+proc dispatchRecord(h: NativeTestHost; selector, file: string;
+                    line: int): string =
   ## `ct record-test <selector> <file> <line> 1 --with-diff=HEAD
   ## --store-trace-folder-for-pid=<pid>` — `onRunTest`'s arguments.
   let ct = if h.ctBinary.isNil: "" else: h.ctBinary()
@@ -253,27 +279,42 @@ proc dispatchRecord(h: NativeTestHost; selector, file: string; line: int;
     return NoCtBinaryText
   let root = if h.projectRoot.isNil: "" else: h.projectRoot()
   let cwd = if root.len > 0 and dirExists(root): root else: getCurrentDir()
-  result = h.startJob(nrkRecord, @[ct, "record-test", selector, file, $line,
-                                   "1", "--with-diff=HEAD",
-                                   "--store-trace-folder-for-pid=" &
-                                     $getCurrentProcessId()], cwd)
-  if result.len == 0:
-    h.job.openAfter = openAfter
+  h.startJob(nrkRecord, @[ct, "record-test", selector, file, $line,
+                          "1", "--with-diff=HEAD",
+                          "--store-trace-folder-for-pid=" &
+                            $getCurrentProcessId()], cwd)
 
-proc openRecordingFolder(h: NativeTestHost; recordingId: string): string =
-  ## Open recording `recordingId` in a new session tab: its folder resolved
-  ## by the trace store, then handed to the front-end. "" when it opened.
+proc openRecordingFolder(h: NativeTestHost; testId, recordingId: string;
+                         policy: TraceOpenPolicy): string =
+  ## Open test `testId`'s recording `recordingId` where §9 places it: its
+  ## folder resolved by the trace store, then handed to the front-end. ""
+  ## when it opened.
   if h.openFolder.isNil:
     return NoReplayHostText
   let folder = if h.resolveFolder.isNil: "" else: h.resolveFolder(recordingId)
   if folder.len == 0:
     return "the trace store has no folder for recording " & recordingId
-  let why = h.openFolder(folder)
+  h.placedWords = " in a new tab"
+  let why = h.openFolder(testId, recordingId, folder, policy)
   if why.len == 0:
     h.opened.add folder
-    h.note = "opened the recording " & folder.extractFilename &
-             " in a new tab"
+    h.openedPolicies.add policy
+    h.note = "opened the recording " & folder.extractFilename & h.placedWords
   why
+
+proc setReplayOpen*(h: NativeTestHost; policy: TraceOpenPolicy): string =
+  ## The palette's **Tests: Open Recordings in …** (§9.3): write the
+  ## project's `replay-open-in` and answer the status line's sentence.
+  if h.isNil or h.vm.isNil:
+    return NoReplayHostText
+  let root = if h.projectRoot.isNil: "" else: h.projectRoot()
+  if root.len == 0:
+    return replayOpenNoWorkspaceText()
+  let why = writeReplayOpen(withReplayOpen(readReplayOpen(), root, policy))
+  if why.len > 0:
+    return "could not remember " & ReplayOpenSettingName & ": " & why
+  h.vm.setOpenSetting(policy)
+  replayOpenSetNote(root, policy)
 
 proc newNativeTestHost*(vm: TestResultsVM; projectRoot: NativeProjectRoot;
                         ctBinary: NativeCtBinary;
@@ -285,7 +326,7 @@ proc newNativeTestHost*(vm: TestResultsVM; projectRoot: NativeProjectRoot;
                          resolveFolder: resolveFolder, openFolder: openFolder)
   h.host = newDesktopTestHost(vm,
     dispatch = proc(selector, file: string; line: int): string =
-      h.dispatchRecord(selector, file, line, openAfter = true),
+      h.dispatchRecord(selector, file, line),
     settleEditor = nil)
   h.host.installDesktopSuiteRun(
     workspaceRoot = proc(): string =
@@ -294,9 +335,10 @@ proc newNativeTestHost*(vm: TestResultsVM; projectRoot: NativeProjectRoot;
       h.dispatchSuite(workspaceRoot))
   h.host.installDesktopRowActions(
     keepWindowDispatch = proc(selector, file: string; line: int): string =
-      h.dispatchRecord(selector, file, line, openAfter = false),
-    openRecording = proc(recordingId: string): string =
-      h.openRecordingFolder(recordingId))
+      h.dispatchRecord(selector, file, line),
+    openRecording = proc(testId, recordingId: string;
+                         policy: TraceOpenPolicy): string =
+      h.openRecordingFolder(testId, recordingId, policy))
   h
 
 # ---------------------------------------------------------------------------
@@ -314,8 +356,8 @@ proc settleSuite(h: NativeTestHost; job: NativeTestJob; exitCode: int) =
 
 proc settleRecord(h: NativeTestHost; job: NativeTestJob; exitCode: int) =
   ## `onRunTest`'s answer: the recording `ct record-test` reported, or the
-  ## recorder's own reason there is none — then, for record-and-open, the
-  ## recording opened in a new tab.
+  ## recorder's own reason there is none. For record-and-open the shared host
+  ## then opens the recording where §9 places it (`settleDesktopTestRun`).
   let stdoutText = readQuietly(job.outPath)
   let stderrText = readQuietly(job.errPath)
   let signal = signalOf(exitCode)
@@ -333,10 +375,6 @@ proc settleRecord(h: NativeTestHost; job: NativeTestJob; exitCode: int) =
     recordingId = recordingId,
     recordedAtText = (if recordingId.len > 0: localTimeText() else: ""),
     errorMessage = error)
-  if job.openAfter and recordingId.len > 0:
-    let why = h.openRecordingFolder(recordingId)
-    if why.len > 0:
-      h.vm.noteRowActionRefusal(why)
 
 proc finish(h: NativeTestHost; job: NativeTestJob; exitCode: int) =
   h.job = nil

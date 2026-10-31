@@ -24,7 +24,10 @@
   // Above the pane's own overlays (the event log's DataTables footer sits
   // over the bottom of its scroll body): the track takes the press there.
   z-index: 30
-  cursor: pointer
+  // NO HAND. The track is the pane's scrollbar, and a scrollbar is drawn with
+  // the default cursor, the way the app-wide (native) one is; the hand would
+  // say the track is a control a click activates, which it is not
+  // (Pointer-Affordances). Its press and drag are the scrollbar's.
   background: transparent
 
 .ct-list-scrubber-thumb
@@ -66,7 +69,10 @@
   // (`list_scrubber_dom.TrackPx` lays the two out against each other).
   height: PANEL_SCROLLBAR_SIZE
   z-index: 30
-  cursor: pointer
+  // NO HAND. The track is the pane's scrollbar, and a scrollbar is drawn with
+  // the default cursor, the way the app-wide (native) one is; the hand would
+  // say the track is a control a click activates, which it is not
+  // (Pointer-Affordances). Its press and drag are the scrollbar's.
   background: transparent
 
 .ct-hscrubber-thumb

@@ -231,5 +231,10 @@
   "THE COROLLARY FOR THIS FILE: nine of the eighteen entries above are marked `measuredThisPass: false` and carried forward. They are NOT evidence at these revisions; they are the previous pass's readings, surviving because nobody has contradicted them. Marked rather than quietly promoted.",
   "WHERE A CLAIM COULD NOT BE RECONSTRUCTED FROM THE ARTEFACTS, IT WAS RE-READ OR DEMOTED. S12 was re-read and holds. S8 could not be and is carried forward. 'Re-confirmed cheaply' was not true of either as stated.",
   "A SECOND INSTRUMENT BEATS A SECOND OPINION. The screen oracle's highlightedLineNumber settled S10's row identity in one query, after two frame readers and one prior review had disagreed about what the band meant."
- ]
+ ],
+  "captureStabilityQualification": {
+    "independentCaptureCount": null,
+    "status": "unvalidated-historical-reading",
+    "reason": "Independent capture count and pairwise within-renderer FLIP stability were not recorded. Regrading preserved frames is not another capture. eventLog figures and aggregates containing them cannot establish a validated parity baseline or delta."
+  }
 }

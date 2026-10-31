@@ -97,8 +97,8 @@ const
 #                            the commands listed (comma-separated) in
 #                            FAKE_ENGINE_ANSWERED.
 #
-# stdout is the DAP channel and the front-end merges stderr into it, so this
-# script writes NOTHING to stderr. It notes each command in $FAKE_ENGINE_LOG.
+# This fixture tests operation clocks; stderr interleaving and draining are
+# covered by test_stdio_diagnostics.nim. Commands go to $FAKE_ENGINE_LOG.
 import json, os, sys, time
 
 mode = os.environ.get("FAKE_ENGINE_MODE", "slow")

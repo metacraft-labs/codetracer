@@ -35,7 +35,8 @@ from viewmodels/product_mode import editorTabLabel
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 116
+const ExpectedAssertions = 118
+  ## Two checks cover Top in the tab and dock-label menus.
   ## K19: 108 -> 116 — a Files node opens the Files pane's menu (its four
   ## rows, the reason on three, a disabled entry inert, Edit opening the
   ## file) where the case asserted no menu (6).
@@ -481,8 +482,9 @@ suite "PLAT-50 on a real terminal: a tab's menu (K7)":
     let s = sess.snap()
     ck s.findRow("Pin to Bottom")[0] == rp + 1
     ck s.findRow("Pin to Right")[0] == rp + 2
-    ck s.findRow("Close")[0] == rp + 3
-    ck s.findRow("Maximise container")[0] == rp + 4
+    ck s.findRow("Pin to Top")[0] == rp + 3
+    ck s.findRow("Close")[0] == rp + 4
+    ck s.findRow("Maximise container")[0] == rp + 5
     let (rcl, ccl) = s.findRow("Close")
     sess.press(rcl, ccl + 1)
     discard sess.waitFor("Pin to Left", present = false)
@@ -798,8 +800,9 @@ suite "PLAT-50 on a real terminal: the status line, a dock label, the timeline (
     sess.press(rb, cb + 1, RightButton)
     let (ru, cu) = sess.waitFor("Unpin")
     let s = sess.snap()
-    ck s.findRow("Pin to Left")[0] == ru - 2
-    ck s.findRow("Pin to Right")[0] == ru - 1
+    ck s.findRow("Pin to Left")[0] == ru - 3
+    ck s.findRow("Pin to Right")[0] == ru - 2
+    ck s.findRow("Pin to Top")[0] == ru - 1
     ck s.findRow("Close", fromCol = cu - 2)[0] == ru + 1
     ck s.findRow("Pin to Bottom")[0] < 0     # it is pinned to the bottom
     sess.press(ru, cu + 1)

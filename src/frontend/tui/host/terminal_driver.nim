@@ -39,8 +39,11 @@
 ## documentation records as load-bearing:
 ##
 ##   * a lone `\x1b` is held (it is a prefix of every escape sequence), and
-##     `\x1b\x1b` delivers exactly one `Esc` token, because the second byte
-##     breaks the prefix and is honoured on its own;
+##     `\x1b\x1b` delivers exactly one `Esc` token: the first `ESC` is the
+##     key, and the second is held as the start of whatever comes next — an
+##     escape sequence it begins is framed whole, and if nothing continues it
+##     within `EscDelayMs` it is dropped (`InputFramer.paired`), so the pair
+##     is still one `Esc`;
 ##   * an unterminated CSI longer than `MaxSequenceBytes` is dropped rather than
 ##     accumulated forever.
 ##
@@ -130,6 +133,26 @@ type
       ## pure function of the bytes.
     expectStrings*: bool
       ## See above. Set by `TerminalDriver.expectReplies`.
+    altChordsAsCsiU*: bool
+      ## Set while the Kitty keyboard protocol is on (`applyKeyProtocol`). Its
+      ## flag 1 makes the terminal send Alt+<key> — and the Esc key itself —
+      ## as `CSI … u`, so `ESC ]`, `ESC P` and `ESC _` can then only begin a
+      ## terminal's REPLY, and are framed as one whether or not a query is
+      ## outstanding. That is what keeps a LATE answer out of the document: a
+      ## terminal that asks the user before it lets a program read the
+      ## clipboard (kitty's and Ghostty's defaults) answers the OSC 52 read
+      ## after the paste's wait has run out, and before this, outside the
+      ## reply window, its bytes were typed as text.
+    paired*: bool
+      ## The held lone `ESC` is the SECOND of an `ESC ESC` pair, whose first
+      ## was already delivered as the `Esc` key. It begins the next escape
+      ## sequence if one follows (`ESC ESC O P` is `Esc` and then `F1` — an
+      ## `Esc` key the loop had not read yet when the next key's sequence
+      ## arrived, which a loaded machine makes routine); any other byte is
+      ## honoured on its own; and on its own it is dropped once `EscDelayMs`
+      ## passes, so `ESC ESC` is still exactly one `Esc`. Until 2026-10-27
+      ## the second `ESC` was consumed as the pair's token, and the `O P` of
+      ## an `F1` behind it reached the document as text.
 
 const
   EscDelayMs* = 50'i64
@@ -148,13 +171,15 @@ const
     ## which the framing turns into one `Esc` and which no keyboard sends.
 
 proc initInputFramer*(): InputFramer =
-  InputFramer(pending: "", escSinceMs: 0, expectStrings: false)
+  InputFramer(pending: "", escSinceMs: 0, expectStrings: false,
+              altChordsAsCsiU: false)
 
 proc reset*(f: var InputFramer) =
   ## Forget the sequence being assembled. `expectStrings` is the DRIVER's
   ## state, not the sequence's, and survives.
   f.pending = ""
   f.escSinceMs = 0
+  f.paired = false
 
 proc holdsLoneEsc*(f: InputFramer): bool =
   f.pending.len == 1 and f.pending[0] == '\x1b'
@@ -186,7 +211,8 @@ proc feed*(f: var InputFramer; b: char): (bool, string) =
 
   f.pending.add b
   if f.pending.len > 2 and f.pending[1] in {']', 'P', '_'}:
-    # A STRING (only reachable while `expectStrings`): BEL or ST ends it.
+    # A STRING (only reachable while `expectStrings` or `altChordsAsCsiU`):
+    # BEL or ST ends it.
     if b == '\x07' or (b == '\\' and f.pending[^2] == Esc):
       let token = f.pending
       f.reset()
@@ -202,12 +228,25 @@ proc feed*(f: var InputFramer; b: char): (bool, string) =
       # A CSI or an SS3 is starting; keep accumulating.
       return (false, "")
     of ']', 'P', '_':
-      if f.expectStrings:
+      if f.expectStrings or f.altChordsAsCsiU:
         return (false, "")
       let broke = $b
       f.reset()
       return (true, broke)
     else:
+      if b == Esc:
+        # `ESC ESC`: the first is the `Esc` key, now; the second is held as
+        # the start of whatever comes next (`paired`).
+        f.pending = $Esc
+        f.escSinceMs = 0
+        f.paired = true
+        return (true, $Esc)
+      if f.paired:
+        # The pair's second `ESC`, continued by no escape sequence: the byte
+        # on its own, as `ESC ESC <byte>` has always been read.
+        let broke = $b
+        f.reset()
+        return (true, broke)
       # ALT + A PRINTABLE CHARACTER: `ESC <char>` in one burst is what a
       # terminal sends for Alt+<char> (Meta sends an ESC prefix), and it is
       # framed as ONE token so the key can be named (`key_names.keyName`:
@@ -220,14 +259,13 @@ proc feed*(f: var InputFramer; b: char): (bool, string) =
       # The same holds for `ESC` + a C0 control byte or DEL: Ctrl+Alt+<letter>
       # (`ESC 0x01`), Alt+Backspace (`ESC 0x7f`), Alt+Enter (`ESC CR`). Only
       # `ESC ESC` keeps the old reading — one `Esc` — because a second `ESC`
-      # is the start of whatever comes next, not a modifier on it.
-      if (b >= ' ' and b <= '~') or b == '\x7f' or (b < ' ' and b != Esc):
+      # is the start of whatever comes next, not a modifier on it (above).
+      if (b >= ' ' and b <= '~') or b == '\x7f' or b < ' ':
         let alt = Esc & $b
         f.reset()
         return (true, alt)
       # NOT AN ESCAPE SEQUENCE. Drop the `ESC` and honour the byte that broke
-      # it, exactly as the runtime always has: `\x1b\x1b` therefore yields one
-      # `Esc`.
+      # it, exactly as the runtime always has.
       let broke = $b
       f.reset()
       return (true, broke)
@@ -311,7 +349,7 @@ proc readByteWithTimeout*(timeoutMs: int; fd: cint = STDIN_FILENO;
 
 const
   MotionTrackingOnBytes* = "\x1b[?1003h"
-  MotionTrackingOffBytes* = "\x1b[?1003l"
+  MotionTrackingOffBytes = "\x1b[?1003l"
     ## ANY-EVENT tracking (`?1003`) since PLAT-48; button-event tracking
     ## (`?1002`) before it. A motion report with a button held drives a
     ## drag (PLAT-47); one with no button lets the top bar's controls show
@@ -608,6 +646,7 @@ proc applyKeyProtocol(d: TerminalDriver) =
   let have = if not d.keyReporting.active: 0
              elif d.keyReporting.mode == krmKitty: 1
              else: 2
+  d.framer.altChordsAsCsiU = want == 1
   if want == have:
     return
   if d.keyReporting.active:
@@ -741,7 +780,7 @@ proc start*(d: TerminalDriver) =
 
 const
   PixelMouseOnBytes* = "\x1b[?1016h"
-  PixelMouseOffBytes* = "\x1b[?1016l"
+  PixelMouseOffBytes = "\x1b[?1016l"
     ## PLAT-51: SGR-pixel mouse reporting (DECSET 1016) — the same reports as
     ## SGR-1006, in pixels.
 
@@ -767,6 +806,7 @@ proc stop*(d: TerminalDriver) =
     # Before the alternate screen is left: the Kitty pop must reach the
     # screen its push was made on.
     disableKeyReporting(d.keyReporting)
+  d.framer.altChordsAsCsiU = false
   # PLAT-71: THE ONE RESTORE BUFFER (`restoreUnion`) — 2027, 2026, 1016,
   # 1003 — the same bytes a SIGTERM or a crash writes, then forgotten.
   if d.started:
@@ -925,9 +965,46 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
   # The read below waits no longer than the time left, so the key arrives
   # `EscDelayMs` after it was pressed rather than on the next keystroke.
   let clock = (getMonoTime() - MonoTime()).inMilliseconds
+  #
+  # …UNLESS THE REST OF A SEQUENCE IS ALREADY WAITING. A loop that was busy
+  # (a repaint, a step's round trip) can come back after the delay with the
+  # tail of a sequence sitting unread: `ESC`, then `O P` written a few
+  # milliseconds later by a terminal or a pty that split `F1`. Declaring the
+  # `Esc` then typed `O` and `P` into the document. So a waiting `[` or `O`
+  # (a CSI's or an SS3's introducer) continues the sequence; any other
+  # waiting byte is a key of its own, after the `Esc`.
   if d.framer.escDue(clock):
+    var next = -1
+    if d.inputPending():
+      next = readByteWithTimeout(0, d.inFd)
+    if next >= 0 and char(next) in {'[', 'O'}:
+      var (complete, token) = d.framer.feed(char(next))
+      while not complete and d.framer.pending.len > 0:
+        let more = readByteWithTimeout(0, d.inFd)
+        if more < 0:
+          break
+        (complete, token) = d.framer.feed(char(more))
+      if complete:
+        return tokenEvent(token)
+      return DriverEvent(kind: dekIdle)
+    # The second `ESC` of a pair, continued by nothing, is dropped: the pair
+    # was one `Esc`, already delivered.
+    let paired = d.framer.paired
     d.framer.reset()
-    return DriverEvent(kind: dekToken, token: $Esc)
+    if next >= 0:
+      # The waiting byte, framed after the `Esc` (an `ESC` begins a new
+      # sequence, held from now).
+      let (complete, token) = d.framer.feed(char(next))
+      if d.framer.holdsLoneEsc:
+        d.framer.escSinceMs = (getMonoTime() - MonoTime()).inMilliseconds
+      if complete:
+        if paired:
+          return tokenEvent(token)
+        d.buffered.add token
+    if not paired:
+      return DriverEvent(kind: dekToken, token: $Esc)
+    if next >= 0:
+      return DriverEvent(kind: dekIdle)
   var wait = timeoutMs
   if d.framer.holdsLoneEsc:
     let left = int(EscDelayMs - (clock - d.framer.escSinceMs))
@@ -949,8 +1026,10 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
     if not d.watcher.isNil and d.watcher.pump():
       return DriverEvent(kind: dekResize, size: d.watcher.currentSize())
     if d.framer.escDue((getMonoTime() - MonoTime()).inMilliseconds):
+      let paired = d.framer.paired
       d.framer.reset()
-      return DriverEvent(kind: dekToken, token: $Esc)
+      if not paired:
+        return DriverEvent(kind: dekToken, token: $Esc)
     return DriverEvent(kind: dekIdle)
   var (complete, token) = d.framer.feed(char(b))
   # PLAT-48: THE REST OF A SEQUENCE THAT IS ALREADY WAITING IS TAKEN NOW.
@@ -967,10 +1046,12 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
     if more < 0:
       break
     (complete, token) = d.framer.feed(char(more))
+  # A lone `ESC` held from now — a pair's second, delivered with the pair's
+  # `Esc` token, included — waits `EscDelayMs` from this moment.
+  if d.framer.holdsLoneEsc and d.framer.escSinceMs == 0:
+    d.framer.escSinceMs = (getMonoTime() - MonoTime()).inMilliseconds
   if complete:
     return tokenEvent(token)
-  if d.framer.holdsLoneEsc:
-    d.framer.escSinceMs = (getMonoTime() - MonoTime()).inMilliseconds
   DriverEvent(kind: dekIdle)
 
 proc nowMs*(): int64 =

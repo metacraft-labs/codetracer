@@ -7,9 +7,10 @@
 #
 # NOT-A-CI-GATE: the canonical text of an inline pre-checkout step, not a script
 # any lane can call. It must run BEFORE `actions/checkout`, when this file is not
-# yet on the runner's disk, so it is pasted verbatim into seven `run:` blocks;
+# yet on the runner's disk, so it is pasted verbatim into seven `run:` blocks of
+# codetracer.yml and one of launcher-recorder-e2e.yml;
 # readonly-leftovers-sweep-test.sh extracts that body, executes it against a
-# fixture, and asserts all seven copies are byte-identical to it. Until 2026-09-06
+# fixture, and asserts all eight copies are byte-identical to it. Until 2026-09-06
 # this file counted as REACHABLE because `readonly-leftovers-sweep-test.sh` names
 # it in `CANON="ci/runner/sweep-readonly-leftovers.sh"` — an assignment feeding a
 # `python3` extractor that READS it. Naming a file is not running it, and the
@@ -81,7 +82,7 @@
 # built on `find`, which the m3 macOS runners do not have.
 # =============================================================================
 
-# --- BEGIN INLINE BODY (kept byte-identical in .github/workflows/codetracer.yml)
+# --- BEGIN INLINE BODY (kept byte-identical in .github/workflows/codetracer.yml and launcher-recorder-e2e.yml)
 set -uo pipefail
 shopt -s dotglob nullglob
 root="${RUNNER_WORKSPACE:-}"

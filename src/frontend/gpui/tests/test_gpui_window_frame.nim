@@ -95,7 +95,24 @@ import ../replay_ops
 # RE-COUNTED 2026-09-23: 535 → 555, by the second route above — PLAT-44 added
 # two non-test files under `src/frontend/gpui/app/` (`edit_arm.nim`,
 # `gpui_keys.nim`), 2 x 10 assertions in the registry scan.
-const ExpectedAssertions = 732
+const ExpectedAssertions = 786
+  ## 2026-10-28 (the native Requests pane): 777 -> 786. One more scanned
+  ## source file, `requests_leaf.nim`, at 1 + 8 = 9 per file.
+  ## 2026-10-28 (the native Build Output pane): 768 -> 777, measured —
+  ## `CHECKS: 777`. One more scanned source file, `build_output_leaf.nim`,
+  ## at 1 + 8 = 9 per file.
+  ## 2026-10-28: 759 -> 768, measured — `CHECKS: 768`. One more scanned
+  ## source file, `host/certificate_indicator.nim`, at 1 + 8 = 9 per file.
+  ## 2026-10-27 (the native Problems pane): 750 -> 759, measured —
+  ## `CHECKS: 759`, `scanned 29 source files`. One more scanned source file,
+  ## `problems_leaf.nim`, at 1 + 8 = 9 per file.
+  ## 2026-10-26 (the native Agent Activity pane): 741 -> 750, measured —
+  ## `CHECKS: 750`, `scanned 28 source files`. One more scanned source file,
+  ## `agent_activity_leaf.nim`, at 1 + 8 = 9 per file.
+  ## 2026-10-26 (the native Test Results pane): 732 -> 741, measured —
+  ## `CHECKS: 741`, `scanned 27 source files`. One more scanned source file,
+  ## `test_results_leaf.nim`; the registry subjects stay 8, so the scan's
+  ## per-file body is 1 + 8 = 9.
   ## 2026-10-21 (window activation): 731 -> 732, measured — `CHECKS: 732`
   ## against isonim-gpui `d4325e9` plus its uncommitted `onWindowActivated`.
   ## The third route: `window.nim` exports one more proc, and it joined
@@ -204,6 +221,21 @@ const
   ScenarioRel = "src/tests/visual/scenarios.json"
   GpuiSourceDir = "src/frontend/gpui"
   WindowModuleRel = "../isonim-gpui/src/isonim_gpui/window.nim"
+    ## The sibling checkout's window module. `windowModulePath` prefers the
+    ## copy `ISONIM_GPUI_SRC` names, because that is the one `config.nims`
+    ## compiles the front-end against when it is set.
+
+proc windowModulePath(): string =
+  ## The window module THIS BUILD compiles against: `$ISONIM_GPUI_SRC`'s when
+  ## it is set (a build pinned to another isonim-gpui revision — the override
+  ## `config.nims` honours), else the sibling's. Reading the sibling while
+  ## the compiler reads the override compared the front-end with a different
+  ## revision's registry: measured on a workspace whose sibling was behind the
+  ## pin, `setMinWindowSize` and `setInitialWindowState` were "not exported"
+  ## by a module the binary was not built from.
+  let override = getEnv("ISONIM_GPUI_SRC")
+  if override.len > 0: override / "isonim_gpui" / "window.nim"
+  else: WindowModuleRel
 
 proc requireFile(path, why: string): string =
   ## **A MISSING PREREQUISITE FAILS BY NAME. It does not skip.** The
@@ -1328,7 +1360,7 @@ const LaunchedWindowNames = [
 proc exportedWindowProcs(): seq[string] =
   ## Parse `proc <name>*(` out of the sibling's window module.
   result = @[]
-  for raw in readFile(requireFile(WindowModuleRel,
+  for raw in readFile(requireFile(windowModulePath(),
       "The scan's subject set is DERIVED from isonim-gpui's own window " &
       "module. A hand-typed list would be blind to a registry function added " &
       "upstream on the day it was added (§35a).")).splitLines():

@@ -108,14 +108,14 @@ const
     ## of memory per build.
 
 type
-  RunningBuild* = ref object
-    ## A started process and the session it reports into.
-    session*: BuildSession
-    process: Process
+  BuildStream = object
+    ## One of the child's two output pipes (PLAT-56: stdout and stderr are
+    ## read apart, so a line is drawn as the stream it came from — the
+    ## desktop's `.build-stderr`).
     fd: cint
-      ## The child's stdout/stderr pipe, as a DESCRIPTOR. See the module
-      ## header: it is deliberately not an `osproc` `Stream`, because that is a
-      ## `FILE*` whose reads block on an open pipe.
+      ## The pipe, as a DESCRIPTOR. See the module header: it is deliberately
+      ## not an `osproc` `Stream`, because that is a `FILE*` whose reads block
+      ## on an open pipe.
       ##
       ## `-1` once the pipe has been closed with the process. Never closed
       ## here: `osproc.close` owns it (`outputHandle`'s own warning), and this
@@ -129,6 +129,14 @@ type
       ## never be another byte. Distinct from "nothing to read right now"
       ## (`EAGAIN`), which is the state a silent build is in for most of its
       ## life, and conflating the two is precisely what the `FILE*` did.
+    stderr: bool
+
+  RunningBuild* = ref object
+    ## A started process and the session it reports into.
+    session*: BuildSession
+    process: Process
+    streams: array[2, BuildStream]
+      ## stdout, then stderr.
     killed: bool
 
 proc shellCommandFor*(kind: BuildKind; command: string): (string, seq[string]) =
@@ -156,14 +164,20 @@ proc startBuild*(kind: BuildKind; command: string; workingDir: string;
   let (exe, args) = shellCommandFor(kind, command)
   var p: Process
   try:
+    # PLAT-56: stdout and stderr on two pipes (no `poStdErrToStdOut`), so
+    # each line keeps the stream it came from.
     p = startProcess(exe, workingDir = workingDir, args = args,
-                     options = {poStdErrToStdOut, poUsePath})
+                     options = {poUsePath})
   except OSError as e:
     s.start(nowMs)
-    s.appendLine("could not start: " & e.msg)
+    s.appendLine("could not start: " & e.msg, stderr = true)
+    s.endedMs = nowMs
     s.finish(127)
-    return RunningBuild(session: s, process: nil, fd: -1, pending: "",
-                        sawEof: true, killed: false)
+    return RunningBuild(session: s, process: nil,
+                        streams: [BuildStream(fd: -1, sawEof: true),
+                                  BuildStream(fd: -1, sawEof: true,
+                                              stderr: true)],
+                        killed: false)
   s.start(nowMs)
   # `outputHandle` AND NOT `outputStream`, and the descriptor is put into
   # non-blocking mode HERE — once, at the only place that owns the process —
@@ -174,13 +188,13 @@ proc startBuild*(kind: BuildKind; command: string; workingDir: string;
   # still runs and is still cancellable through the deadline, but a reader of
   # the pane has to be able to tell "this compiler is quiet" from "this
   # front-end is about to stall on it".
-  let fd = p.outputHandle
-  let flags = fcntl(fd, F_GETFL, 0)
-  if flags == -1 or fcntl(fd, F_SETFL, flags or O_NONBLOCK) == -1:
-    s.appendLine("— could not make the output pipe non-blocking;" &
-                 " this build may not be interruptible —")
-  RunningBuild(session: s, process: p, fd: fd, pending: "", sawEof: false,
-               killed: false)
+  result = RunningBuild(session: s, process: p, killed: false)
+  for i, fd in [p.outputHandle, p.errorHandle]:
+    result.streams[i] = BuildStream(fd: fd, stderr: i == 1)
+    let flags = fcntl(fd, F_GETFL, 0)
+    if flags == -1 or fcntl(fd, F_SETFL, flags or O_NONBLOCK) == -1:
+      s.appendLine("— could not make the output pipe non-blocking;" &
+                   " this build may not be interruptible —", stderr = true)
 
 proc kill(rb: RunningBuild) =
   if rb.isNil or rb.process.isNil or rb.killed:
@@ -191,17 +205,24 @@ proc kill(rb: RunningBuild) =
   except OSError:
     discard
 
-proc absorb(rb: RunningBuild; chunk: string; count: int) =
+proc absorb(rb: RunningBuild; st: var BuildStream; chunk: string;
+            count: int) =
   ## Split `count` bytes of `chunk` into lines, carrying a straddling one.
   for i in 0 ..< count:
     let c = chunk[i]
     if c == '\n':
-      rb.session.appendLine(rb.pending.strip(leading = false, trailing = true))
-      rb.pending = ""
+      # Only a carriage return is taken off: a line's trailing spaces are
+      # the compiler's (gcc's caret rule pads with them), and the desktop
+      # draws them (PLAT-56).
+      if st.pending.endsWith("\r"):
+        st.pending.setLen(st.pending.len - 1)
+      rb.session.appendLine(st.pending, stderr = st.stderr)
+      st.pending = ""
     else:
-      rb.pending.add c
+      st.pending.add c
 
-proc drain(rb: RunningBuild; maxBytes = MaxBytesPerPoll): int =
+proc drainStream(rb: RunningBuild; st: var BuildStream;
+                 maxBytes: int): int =
   ## Move whatever the child has written SO FAR into the session, and return
   ## how many bytes that was.
   ##
@@ -220,18 +241,18 @@ proc drain(rb: RunningBuild; maxBytes = MaxBytesPerPoll): int =
   ##   `-1` + `EINTR`   a signal arrived mid-call. Retried, because it is not a
   ##                    statement about the pipe at all.
   result = 0
-  if rb.isNil or rb.fd < 0 or rb.sawEof:
+  if rb.isNil or st.fd < 0 or st.sawEof:
     return
   var chunk = newString(ReadChunkBytes)
   while result < maxBytes:
     let want = min(ReadChunkBytes, maxBytes - result)
-    let got = posix.read(rb.fd, addr chunk[0], want)
+    let got = posix.read(st.fd, addr chunk[0], want)
     if got > 0:
-      rb.absorb(chunk, got)
+      rb.absorb(st, chunk, got)
       result += got
       continue
     if got == 0:
-      rb.sawEof = true
+      st.sawEof = true
       return
     # `posix.errno` rather than `osLastError()`: this is a raw `read(2)` and
     # the three codes below are read as `cint`s against `posix`'s own
@@ -245,8 +266,13 @@ proc drain(rb: RunningBuild; maxBytes = MaxBytesPerPoll): int =
     # rather than raised: the build still has a verdict to reach, and a
     # front-end that died because a pipe misbehaved would be worse than one
     # that reports the output it got.
-    rb.sawEof = true
+    st.sawEof = true
     return
+
+proc drain(rb: RunningBuild; maxBytes = MaxBytesPerPoll): int =
+  ## Both pipes, stdout first, within one bound.
+  for i in 0 .. 1:
+    result += rb.drainStream(rb.streams[i], max(0, maxBytes - result))
 
 proc pollBuild*(rb: RunningBuild; nowMs: int64): bool =
   ## Advance the build. Returns whether anything changed that the screen shows.
@@ -287,9 +313,11 @@ proc pollBuild*(rb: RunningBuild; nowMs: int64): bool =
     # on `EAGAIN` (nothing left) or `0` (EOF), both of which a dead child
     # reaches immediately, and is bounded anyway.
     discard rb.drain(MaxBytesAtExit)
-    if rb.pending.len > 0:
-      rb.session.appendLine(rb.pending)
-      rb.pending = ""
+    for st in rb.streams.mitems:
+      if st.pending.len > 0:
+        rb.session.appendLine(st.pending, stderr = st.stderr)
+        st.pending = ""
+    rb.session.endedMs = nowMs
     rb.session.finish(code)
     try:
       rb.process.close()
@@ -300,7 +328,8 @@ proc pollBuild*(rb: RunningBuild; nowMs: int64): bool =
     # ago; `outputHandle`'s own documentation says so, and closing it here
     # would be a double close whose second victim is whatever fd the runtime
     # opened next.
-    rb.fd = -1
+    for st in rb.streams.mitems:
+      st.fd = -1
     result = true
 
 proc nowMonoMs*(): int64 =

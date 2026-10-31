@@ -289,6 +289,13 @@ export table_fit
 from viewmodels/errors_vm import problemsFit, ProblemColumnNames
 export problemsFit, ProblemColumnNames
 
+# PLAT-70 Part C: the editor's find session — highlight as you type, the
+# walk, accept and cancel, the seeds and the word-under-the-caret launchers
+# (Find-And-Incremental-Search.md §3, §4). Imports only `editing_core` (here
+# already) and `std/*`.
+import viewmodels/find_vm
+export find_vm
+
 # ---------------------------------------------------------------------------
 # Visual replay (PLAT-15)
 #
@@ -373,6 +380,13 @@ export product_mode
 # be repeating them.
 import viewmodels/build_vm
 export build_vm
+
+# The build tasks, the task picker and the `:build` grammar; when a build
+# reveals and dismisses its pane; a build's diagnostics in the editor
+# (Build-Output-Pane.md §3.6, §3.8, §3.9, §3.11, §3.12). Pure Nim over `std/*`
+# and the ViewModels above: one decision every front-end applies.
+import viewmodels/[build_tasks, build_auto_reveal, editor_diagnostics]
+export build_tasks, build_auto_reveal, editor_diagnostics
 
 # ---------------------------------------------------------------------------
 # Session lifecycle (§3.1, row 4; §6)

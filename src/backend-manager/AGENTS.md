@@ -63,6 +63,29 @@ other people's programs or traffic: a recording's source list can name any file
 on the machine that replays it. The `ct trace` commands read host sources, as
 the desktop GUI does.
 
+`exec_script` runs its script confined (`src/script_confinement.rs`): the
+script may write only a scratch directory made for the call and removed after
+it (its working directory, `HOME` and `TMPDIR`), opens no socket, sees none of
+the server's environment, and reaches the daemon only through the connection
+it inherits as descriptor 3, for its own trace's queries. Nothing it starts
+can leave its process group (`setsid` and `setpgid` are refused), which is
+killed when the call ends; it has a 4 GiB address space, 64 MiB files and no
+core file. Confinement needs Linux with Landlock ABI 3 or later and seccomp,
+and a scratch root (`<tmp>/script-scratch`) that the daemon makes itself and
+accepts only as its own directory, mode 0700, not a mount point (its mount
+id, from `statx` `STATX_MNT_ID`, must equal its parent's, which refuses a bind
+mount as well as a file system mounted over it) and not FUSE; every
+scratch directory is then made, opened and removed relative to the root's
+open descriptor, so the directories above the root may belong to anyone (as
+`/` does inside an unprivileged user namespace). Elsewhere the call is refused. `backend-manager trace check-confinement` says
+which applies on this host.
+To run scripts with the server's own privileges (scripts that write files, or
+a host that cannot confine them), add `"--allow-unconfined-scripts"` to
+`args`; leave it out for an agent that reads recordings of other people's
+programs or traffic. `timeout_seconds` is at most 600, and each output stream
+is kept up to 1 MiB. The `ct trace query` command runs scripts unconfined: it
+runs the user's own.
+
 ### Other MCP Clients
 
 Any MCP-compatible client can connect by spawning `backend-manager trace mcp`
@@ -130,8 +153,14 @@ and communicating via stdin/stdout with newline-delimited JSON-RPC 2.0.
   fails when the two disagree, so change both together.
 - `CODETRACER_DAEMON_SOCK` - The MCP server: connect to the daemon at this
   socket and never auto-start one (used in tests). The daemon also sets it
-  for `exec_script`'s Python process, and the Python API connects to it
+  for an unconfined `exec_script` Python process (a confined one inherits its
+  connection instead), and the Python API connects to it
   ahead of any other resolution.
+- `CODETRACER_REPLAY_SERVER_CMD` - The replay backend the daemon starts for
+  a trace, as `<cmd> dap-server <socket>` (default `replay-server`).
+  `CODETRACER_REPLAY_SERVER_MOCK_DAP=1` (a test flag) starts
+  `<cmd> mock-dap-backend <socket>` instead; any value but `1`, `0` or empty
+  is refused. The choice never depends on the command's path.
 - `CODETRACER_TMP_PATH`, else `$CODETRACER_HOME/tmp`, else the per-OS default
   (`TMPDIR`-based on Linux) - where the daemon socket and PID file go without
   an override.
@@ -145,7 +174,8 @@ in a different one.
 
 ### Available MCP Tools
 
-- `exec_script` - Execute a Python script against a trace.
+- `exec_script` - Execute a Python script against a trace (confined unless
+  the server was started with `--allow-unconfined-scripts`).
 - `trace_info` - Get metadata about a trace.
 - `list_source_files` - List source files in a trace.
 - `read_source_file` - Read a source file from a trace: an embedded copy, or

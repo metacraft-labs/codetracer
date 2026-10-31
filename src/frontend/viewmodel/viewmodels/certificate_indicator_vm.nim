@@ -200,6 +200,11 @@ type
       ## Where discovery looked. Transport.md §4 asks discovery to be explicit
       ## about this, and it is the first thing a "no certificates" report needs
       ## to be actionable.
+    repositoryRoot*: string
+      ## The repository root (git's top level) the facts were gathered for;
+      ## empty when it could not be established. Not shown: the host arms its
+      ## ``.git`` and working-tree watches here, so a project opened at a
+      ## subdirectory of its repository still notices a commit.
 
   WorkspaceVcsState* = object
     ## The repository state the indicator evaluates against: three content
@@ -213,6 +218,10 @@ type
     ## **unverifiable**, not "not certified".
     known*: bool
     repo*: string
+    repositoryRoot*: string
+      ## The repository's top level, as the facade resolved it upwards from
+      ## the opened folder. Informational for the decision; the host's watches
+      ## use it.
     workingTree*: ContentOracle
       ## W — the working tree's tracked files as they are. An answer that is
       ## not an id — an algorithm this host cannot compute, a working tree
@@ -235,6 +244,15 @@ type
     workingTreeRemedy*: string
       ## How to clear ``workingTreeProblem``: resolve the merge, clear the
       ## flag, commit inside the submodule.
+    declaredScopes*: seq[seq[string]]
+      ## The scopes the repository declares its certificates are issued for
+      ## (test-certificates-spec Tooling §3.1, the facade's
+      ## ``declaredScopes``). A scoped certificate is filed under its SCOPED
+      ## content id, so W, H and S are also looked up in each of these.
+    declaredScopesProblem*: string
+      ## Non-empty when the declaration could not be read or is invalid: the
+      ## scoped certificates could then not be looked up, which makes the
+      ## search incomplete (an absence there is not evidence of absence).
 
   CertificateIndicatorFacts* = object
     ## Everything the indicator is a function of. Gathering these is the
@@ -292,6 +310,12 @@ const
     "earlier-draft record, bound to a commit rather than to content, so it " &
     "covers nothing and is not translated."
   EarlierDraftRemedy* = "Run the tests to re-issue it in the current format."
+  ScopedLabelSuffix* = " (scoped)"
+    ## Appended to *Certified* / *Certified, uncommitted* when the binding
+    ## record carries `vcs.paths`.
+  NoRepositorySentence* =
+    "CodeTracer could not establish a git repository here, so there is no " &
+    "content id to look certificates up by."
 
   RunTheTestsRemedy* = "Run the tests to certify this state."
   FixConfigurationRemedy* =
@@ -361,6 +385,38 @@ proc unverifiable(facts: CertificateIndicatorFacts; summary: string;
     detail: detail,
     certificateName: name,
     searched: facts.store.searched)
+
+const
+  IncompleteSearchNote* =
+    "No certificate in what was searched covers the working tree, and one " &
+    "in the root that could not be searched might, so this cannot be told."
+    ## Follows ``incompleteSummary`` whenever an incomplete search keeps the
+    ## indicator from reading *changed since certified*, *not certified* or
+    ## *no certificates*.
+  IncompleteSearchRemedy* =
+    "Fix the certificate store location named above — set it to an " &
+    "absolute path, or make the directory readable. Running the tests " &
+    "will not change this."
+  DeclaredScopesRemedy* =
+    "Fix the repository's `testCertificatesScope` declaration named above " &
+    "in its git configuration (each `path` one repository-relative path, " &
+    "no other key), or remove it. Running the tests will not change this."
+
+proc incompleteSearch(facts: CertificateIndicatorFacts;
+                      detail: seq[CertificateDetailRow]):
+    CertificateIndicatorModel =
+  ## The answer when a root of the local store could not be searched and
+  ## nothing in the searched one covers W: *unverifiable*, with the store
+  ## location as the remedy — never "no certificates", which would claim a
+  ## search that did not happen (Transport.md §2.1, §5).
+  result = unverifiable(facts,
+    incompleteSummary(facts.store) & " " & IncompleteSearchNote,
+    detail = detail)
+  result.remedy =
+    if facts.vcs.known and facts.vcs.declaredScopesProblem.len > 0:
+      DeclaredScopesRemedy
+    else:
+      IncompleteSearchRemedy
 
 const
   NoKeysRegisteredNote* =
@@ -726,8 +782,8 @@ proc foundForStatesInFront(vcs: WorkspaceVcsState;
   ##
   ## A record looked up in the local store is in one of those content
   ## directories by construction (the reader rejects one whose content does
-  ## not match its directory). The test matters for reprobuild's pooled
-  ## workspace directory, which holds records for any content: one that is
+  ## not match its directory). The test still matters for a record a
+  ## host hands over from a carrier that is not keyed by content: one that is
   ## decidably about OTHER content is not "found" here, exactly as a record
   ## sitting in another content's directory of the local store is not read
   ## at all (operator decision 2026-10-09 — the indicator consults nothing
@@ -770,10 +826,15 @@ proc coverageRows(vcs: WorkspaceVcsState;
           if vcs.head.isNil: "no commit yet" else: "")),
     row("Staged (S)", coverageValue(s, ""))]
 
+proc scopedSentence*(paths: seq[string]): string =
+  ## The tooltip's statement of a scoped claim's reach.
+  "The certificate covers only " & sortedDeduplicated(paths).join(", ") &
+    ", not the whole repository."
+
 proc withUntrackedNote(summary: string; cert: TestCertificate): string =
   if cert.vcs.untracked: summary & " " & UntrackedNote else: summary
 
-proc evaluateCertificateIndicator*(facts: CertificateIndicatorFacts):
+proc decideIndicator(facts: CertificateIndicatorFacts):
     CertificateIndicatorModel =
   ## Decide what the status bar shows — Status-Bar.md's table, decided on
   ## the working tree's content W first, because the indicator answers "is
@@ -820,10 +881,26 @@ proc evaluateCertificateIndicator*(facts: CertificateIndicatorFacts):
   # could describe it — but with nothing to evaluate there is nothing that
   # could not be verified.
   if not facts.store.present or facts.store.certificates.len == 0:
-    var summary =
-      if facts.store.present: NoCertificatesFoundSummary
-      else: "No certificate store exists yet. " & NoCertificatesFoundSummary
+    if facts.store.incomplete:
+      # Transport.md §2.1/§5: nothing found in a search that did not cover
+      # every root is not "none found". The root it could not search might
+      # hold the certificate, so the honest answer is that this consumer
+      # cannot tell — and the remedy is the store location, not a test run.
+      return incompleteSearch(facts, @[])
+    # The same sentence whether or not the store directory exists: lookup is
+    # by content id, so "nothing for this content" is all a reader can know
+    # (the store is shared by every repository the user works in).
+    var summary = NoCertificatesFoundSummary
     var remedy = RunTheTestsRemedy
+    if not facts.vcs.known:
+      # Nothing could be looked up at all: the store is keyed by content id,
+      # and there is no repository to compute one for. As with a working
+      # tree that has no content id (Status-Bar.md, clarified 2026-10-10),
+      # nothing was found that could not be evaluated, so this is not
+      # *unverifiable*; the summary says why nothing could be found. (Until
+      # reprobuild's workspace directory stopped being pooled, a record found
+      # there for a folder that is not a repository read unverifiable.)
+      summary.add " " & NoRepositorySentence
     if facts.vcs.known and facts.vcs.workingTreeProblem.len > 0:
       summary.add " The working tree has no content id (" &
         facts.vcs.workingTreeProblem & "), so no certificate could describe it."
@@ -903,7 +980,29 @@ proc evaluateCertificateIndicator*(facts: CertificateIndicatorFacts):
       if not (sId.computed and wId.computed and sId.id == wId.id):
         summary.add " " & StagedDiffersWarning
       model.summary = withUntrackedNote(summary, w.binding)
+    if w.binding.vcs.paths.len > 0:
+      # SB-1's open gap, closed: a SCOPED certificate is not a
+      # whole-repository one (Verification.md §4.1.2), and the short
+      # surfaces — label and tooltip — must not let it read as one. The
+      # state stays *certified*: what is claimed binds; how much is claimed
+      # is what the label now says.
+      model.label.add ScopedLabelSuffix
+      model.summary.add " " & scopedSentence(w.binding.vcs.paths)
+    if facts.store.incomplete:
+      # Coverage only grows (Verification.md §5): what the searched root
+      # holds covers W whatever the other root holds, so the state stands.
+      # The disclosure still says what was not searched.
+      model.detail.add row("Search", incompleteSummary(facts.store))
     return model
+
+  # ---- The search did not cover every root -------------------------------
+  # Every state below is a claim that W is NOT covered — *changed since
+  # certified*, *not certified*, *no certificates* — and a root that could
+  # not be searched might hold the certificate that covers it. So none of
+  # them is claimed: the indicator says it cannot tell, distinctly from all
+  # three (Transport.md §2.1, §5).
+  if facts.store.incomplete:
+    return incompleteSearch(facts, coverage)
 
   # ---- W could not be evaluated ------------------------------------------
   # A record that might cover W could not be read against it, so "changed
@@ -958,6 +1057,16 @@ proc evaluateCertificateIndicator*(facts: CertificateIndicatorFacts):
     model.remedy = RunTheTestsRemedy
   model.detail = speaking.detail & coverage
   model
+
+proc evaluateCertificateIndicator*(facts: CertificateIndicatorFacts):
+    CertificateIndicatorModel =
+  ## Decide what the status bar shows (``decideIndicator``), and carry the
+  ## repository root the facts were gathered for, so the host arms its
+  ## commit and staging watches on the REPOSITORY, not on whatever folder
+  ## was opened inside it.
+  result = decideIndicator(facts)
+  result.repositoryRoot =
+    if facts.vcs.known: facts.vcs.repositoryRoot else: ""
 
 # ---------------------------------------------------------------------------
 # The ViewModel

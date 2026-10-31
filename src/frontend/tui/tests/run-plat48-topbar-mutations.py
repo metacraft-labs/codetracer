@@ -448,10 +448,13 @@ ARMS = [
         "    else:\n      discard ka\n  of thOmnibar:",
         P_CLICK,
         "a click on an enabled control does nothing"),
+    # TF1 RE-AIMED 2026-10-27: PLAT-71 (`4ea31ecc4`) also holds a hover-only
+    # frame on a slow link, so the condition is two lines; the defect is
+    # unchanged — a held frame is never marked owed, so it is never drawn.
     Arm("TF1", TUIMAIN,
-        "          if driver.holdFrame(journal.pendingReplay > 0):\n"
+        "             (hoverOnly and nowMs() - lastPaintMs < HoverCoalesceMs):\n"
         "            frameOwed = true\n",
-        "          if driver.holdFrame(journal.pendingReplay > 0):\n"
+        "             (hoverOnly and nowMs() - lastPaintMs < HoverCoalesceMs):\n"
         "            discard\n",
         P_CLICK,
         "the frame held for a click's release half is never drawn: the step "

@@ -15,7 +15,10 @@ class DaemonConnection:
     """A connection to the CodeTracer backend-manager daemon."""
 
     def __init__(
-        self, socket_path: Optional[Union[str, Path]] = ...
+        self,
+        socket_path: Optional[Union[str, Path]] = ...,
+        host_source_reads: bool = ...,
+        socket_fd: Optional[int] = ...,
     ) -> None: ...
 
     @property
