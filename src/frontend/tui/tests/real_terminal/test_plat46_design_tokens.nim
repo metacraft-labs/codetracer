@@ -52,7 +52,7 @@
 ## See `test_real_capability_negotiation.nim`: `check` inside a proc reports
 ## `[OK]` on failure.
 
-import std/[monotimes, os, osproc, strutils, tables, times, unicode, unittest]
+import std/[exitprocs, monotimes, os, osproc, strutils, tables, tempfiles, times, unicode, unittest]
 
 import nim_libvterm
 import term_assert
@@ -185,7 +185,21 @@ proc builderFor(args: seq[string]; cols, rows: int; term = "xterm-256color";
                 colorterm = "truecolor"; colorFgBg = "";
                 probeMs = ProbeWindowMs): TuiTestBuilder =
   ## The shipped binary with a KNOWN colour environment and its bytes kept.
+  ##
+  ## AND A STATE ROOT OF ITS OWN, fresh per session. The TUI remembers what a
+  ## terminal answered (`terminal-profiles.json`, keyed by what the
+  ## environment says before any answer) so frame 0 is right on a slow link.
+  ## A state root shared across sessions therefore carried the ANSWERED
+  ## case's `truecolor: true` into the next run's UNANSWERED case under the
+  ## same key, which then painted 24-bit — red on every run after the first
+  ## wherever the state directory outlives a run (a fixed
+  ## `CODETRACER_TUI_LAYOUT_DIR`), green on a fresh one. "Unanswered" means a
+  ## terminal this product has never been told about.
+  let stateRoot = createTempDir("plat46-tokens-state-", "")
+  addExitProc(proc() = removeDir(stateRoot))
   var b = newTuiTest(tuiBinary(), args).width(cols).height(rows).transcript()
+    .envSet("CODETRACER_TUI_LAYOUT_DIR", stateRoot)
+    .envSet("XDG_STATE_HOME", stateRoot / "xdg-state")
     .envRemove("TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE", "TMUX")
     .envSet("TERM", term).envSet("LANG", "en_US.UTF-8")
     .envSet("CT_TUI_PROBE_TIMEOUT_MS", $probeMs)
