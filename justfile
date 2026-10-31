@@ -27,6 +27,10 @@ portable-pre-commit-doctor:
 test-build-alignment:
   bash scripts/test-build-alignment.sh
 
+# Compile a tiny real Nim fixture and exercise compiler-aware GPUI freshness.
+test-build-freshness:
+  bash ci/test/build-freshness-test.sh
+
 # Assert that entering the dev shell from ANOTHER git repository writes nothing
 # there (no node_modules link, no hook config, no git hooks), and that entered
 # from inside this repository it still prepares this repository's top level.
@@ -1153,6 +1157,7 @@ test:
   # placed earlier it would SKIP there and verify nothing.
   bash ci/lib/run-just-lanes.sh test \
     test-build-alignment \
+    test-build-freshness \
     test-flake-pin-alignment \
     test-reprobuild-catalog-coverage \
     test-dev-env-flake-metadata \

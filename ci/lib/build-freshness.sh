@@ -59,8 +59,9 @@
 # So this file compares CONTENT, in the shape `wasm-engine-freshness.sh`
 # established: the build writes a STAMP recording the digest of the inputs it
 # compiled, and a gate recomputes that digest from the tree it is standing in.
-# The remedy therefore ALWAYS clears the gate — the stamp is rewritten from the
-# current tree on every build, whether or not the emitted bytes changed.
+# With the same compiler, rebuilding clears a source mismatch: the stamp is
+# rewritten from the current tree whether or not the emitted bytes changed.
+# A different compiler on PATH is refused separately, with a dev-shell remedy.
 #
 # WHERE THE INPUT SET COMES FROM — the compiler, not a guess
 # ----------------------------------------------------------
@@ -389,19 +390,45 @@ bf_gpui_nim_args() {
 	printf '%s\n' --mm:orc -d:release --path:src/frontend/viewmodel
 }
 
-# bf_gpui_input_digest <repo-root> — regenerate the closure and digest it.
+# bf_gpui_input_digest <repo-root> [<stamp>] — regenerate and digest the closure.
+# Gates pass the stamp to compare compiler identities BEFORE computing inputs.
+# Builders and digest-only diagnostics omit it: an older stamp must not prevent
+# an intentional toolchain upgrade from producing a new build and stamp.
 # Prints the digest on stdout; everything else goes to stderr so the caller can
 # capture it in a `$(...)`.
 bf_gpui_input_digest() {
-	local root="$1" ws deps_cache deps rc
+	local root="$1" stamp="${2:-}" ws deps_cache deps rc compiler recorded_compiler
 	ws="$(cd "${root}/.." && pwd)"
 	deps_cache="${root}/build/nimcache/codetracer-gpui-deps"
 
-	if ! command -v nim >/dev/null 2>&1; then
+	if ! compiler="$(command -v nim)"; then
 		echo "build-freshness: nim is not on PATH, so the gpui input closure" >&2
 		echo "  cannot be recomputed. Run inside the dev shell:" >&2
 		echo "      cd ${root} && nix develop" >&2
 		return 2
+	fi
+
+	# A closure computed by another compiler includes another standard library.
+	# Comparing it with the builder's closure cannot diagnose source freshness.
+	# Keep this check on the shared digest route so the capture lane (which saves
+	# the digest for its manifest) and the standalone gate cannot disagree.
+	if [ -n "${stamp}" ] && [ -f "${stamp}" ]; then
+		recorded_compiler="$(bf_stamp_field "${stamp}" built_by)"
+		if [ -z "${recorded_compiler}" ]; then
+			echo "build-freshness: the GPUI stamp records no compiler identity." >&2
+			echo "  Rebuild and stamp inside the dev shell:" >&2
+			echo "      cd ${root} && nix develop --command just build-gpui" >&2
+			return 2
+		fi
+		if [ "${compiler}" != "${recorded_compiler}" ]; then
+			echo "build-freshness: the resolved GPUI compiler differs from the one recorded in the stamp." >&2
+			echo "  artefact built by: ${recorded_compiler}" >&2
+			echo "  resolved nim:      ${compiler}" >&2
+			echo "  Source freshness cannot be compared across these compilers." >&2
+			echo "  Please re-run inside the dev shell:" >&2
+			echo "      cd ${root} && nix develop" >&2
+			return 2
+		fi
 	fi
 
 	rm -rf "${deps_cache}"
@@ -413,7 +440,7 @@ bf_gpui_input_digest() {
 	while IFS= read -r a; do args+=("${a}"); done < <(bf_gpui_nim_args)
 	(
 		cd "${root}" || exit 2
-		nim c --genDeps:on --compileOnly --hints:off --warnings:off \
+		"${compiler}" c --genDeps:on --compileOnly --hints:off --warnings:off \
 			"${args[@]}" \
 			--nimcache:"${deps_cache}" \
 			-o:"${deps_cache}/unused-deps-probe" \
@@ -452,7 +479,7 @@ bf_gpui_write_stamp() {
 # bf_gpui_assert_fresh <repo-root> — the gate.
 bf_gpui_assert_fresh() {
 	local root="$1" digest
-	digest="$(bf_gpui_input_digest "${root}")" || return 1
+	digest="$(bf_gpui_input_digest "${root}" "${root}/${BF_GPUI_STAMP}")" || return 1
 	bf_assert_fresh "${root}/${BF_GPUI_STAMP}" "${root}/${BF_GPUI_BIN}" \
 		"${digest}" "GPUI BINARY" \
 		"  Rebuild it, which rewrites the stamp from this tree:

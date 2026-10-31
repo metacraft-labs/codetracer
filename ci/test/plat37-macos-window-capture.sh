@@ -247,11 +247,11 @@ done
 # FAILURE MODE, stated rather than left to be discovered: this gate is
 # FALSE-RED-biased. It refuses after any edit inside the closure, including
 # one that cannot change the rendered frame (a comment, a log string). The
-# remedy — `just build-gpui` — always clears it, because the stamp is
+# remedy — `just build-gpui` in the same dev shell — clears it: the stamp is
 # rewritten from the current tree on every build whether or not the emitted
-# bytes changed. There is no state in which running the remedy leaves the
-# assertion still failing. That is the property mtime-based freshness cannot
-# offer, and the reason this is not an mtime check.
+# bytes changed. A different compiler on PATH is an environment refusal, with
+# a re-run-inside-the-dev-shell remedy. That is the property mtime-based
+# freshness cannot offer, and the reason this is not an mtime check.
 echo
 echo "=== the subject: is this binary of THIS tree? ==="
 # shellcheck source=ci/lib/build-freshness.sh
@@ -264,7 +264,7 @@ echo "=== the subject: is this binary of THIS tree? ==="
 # recompute it, and the closure costs ~10 s of real compiler time, so the gate
 # is driven through `bf_assert_fresh` directly with the digest in hand.
 GPUI_STAMP="${root}/${BF_GPUI_STAMP}"
-GPUI_INPUT_DIGEST="$(bf_gpui_input_digest "${root}")" ||
+GPUI_INPUT_DIGEST="$(bf_gpui_input_digest "${root}" "${GPUI_STAMP}")" ||
 	fail "the GPUI input closure could not be computed, so this lane cannot
       say what the binary it is about to photograph was built from. Refused
       rather than captured: an unknown subject is not a subject."
