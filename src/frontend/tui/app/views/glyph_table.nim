@@ -93,6 +93,15 @@ type
       ## A control that opens a list (Build Output's "History ▾").
     grCurrentEntry = "current entry mark"
       ## The entry a list shows now (Build Output's history picker).
+    grShellWorking = "shell action working"
+      ## The Shell pane's gutter (CodeTracer-Shell.md §7.5): a command still
+      ## being recorded. The extended spelling is the model's
+      ## (`shell_vm.actionGlyph`), which the desktop and GPUI draw.
+    grShellOk = "shell action done"
+      ## A recorded command whose recording a press opens.
+    grShellError = "shell action failed"
+    grShellRange = "shell action range"
+      ## An action's later lines.
 
   GlyphColumn* = enum
     gcolExtended = "extended"
@@ -168,7 +177,11 @@ const
     grCallLeaf:            ["·",      "·",    ".",   "."],
     grRunControl:          ["▶",      "►",    ">",   "▸"],
     grDropdown:            ["▾",      "▼",    "v",   "▾"],
-    grCurrentEntry:        ["●",      "●",    "*",   "*"]]
+    grCurrentEntry:        ["●",      "●",    "*",   "*"],
+    grShellWorking:        ["◌",      "○",    "~",   "~"],
+    grShellOk:             ["●",      "●",    "*",   "*"],
+    grShellError:          ["✕",      "x",    "x",   "✕"],
+    grShellRange:          ["│",      "│",    "|",   "|"]]
 
   DefaultGlyphs* = GlyphProfile()
     ## Extended, narrow, classic: the screen before profiles.

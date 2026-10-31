@@ -1034,34 +1034,33 @@ proc requestsPaneView*(vm: RequestPanelVM): PaneView =
   result.entries = entriesOf(result.root)
 
 proc shellPaneView*(vm: ShellVM): PaneView =
-  ## The shell: a `Tree` of the input `Input` and a `List` of history.
-  ##
-  ## **IT IS HISTORY AND NOT A TRANSCRIPT, BECAUSE THAT IS WHAT THE VIEWMODEL
-  ## HAS.** `ShellVM` carries `inputBuffer`, `inputHistory`, `historyIndex` and
-  ## `scrollPosition` — and no output. A view that drew an output pane would be
-  ## drawing a field nothing fills, which is the well-formed apology this
-  ## milestone exists to delete, one level further in. The absence is recorded
-  ## in `result.report` rather than papered over with an empty box.
+  ## PLAT-61. THE SHELL (CodeTracer-Shell.md §7.5): the session's state words
+  ## and the lines the pane shows, each its gutter (the action's glyph, a bar,
+  ## or a blank) and its text — the rows `shellRows` gives every front-end.
+  ## A session whose shell has not started is a report, not a blank.
   result.pane = paneShell
   if vm.isNil:
     result.report = "the shell has no ViewModel; the session has not launched"
     result.root = viewText("shell.report", result.report)
     result.entries = entriesOf(result.root)
     return
-  var children: seq[ViewNode] = @[]
-  children.add viewInput("shell.input", vm.inputBuffer.val)
-  var options: seq[ViewOption] = @[]
-  for i, h in vm.inputHistory.val:
-    options.add ViewOption(id: "shell.history." & $i, label: h)
-  let list = viewList("shell.history", options)
-  let idx = vm.historyIndex.val
-  if idx >= 0 and idx < options.len:
-    list.cursor = idx
-  children.add list
-  result.root = viewTreeNode("shell", "Shell", children)
+  var children = @[viewText("shell.status", vm.statusWords)]
+  if vm.note.val.len > 0:
+    children.add viewText("shell.note", vm.note.val)
+  var cells: seq[seq[string]] = @[]
+  for row in vm.shellRows(vm.screen.rows):
+    let gutter =
+      case row.mark
+      of srmNone: ""
+      of srmStart: vm.actions[row.action].actionGlyph
+      of srmRange: actionBar()
+    cells.add @[gutter, row.text]
+  children.add viewTable("shell.rows", @["", "Output"], cells)
+  if vm.state.val == sssIdle and vm.revision.val == 0:
+    # Nothing started and nothing written: said, never a blank box.
+    result.report = "the shell starts when the pane is shown"
+  result.root = viewTreeNode("shell", "Shell", children, expanded = true)
   result.entries = entriesOf(result.root)
-  result.report = "the shell ViewModel carries input and history and no " &
-                  "output; this pane shows what exists"
 
 # ---------------------------------------------------------------------------
 # Source — the sanctioned native escape

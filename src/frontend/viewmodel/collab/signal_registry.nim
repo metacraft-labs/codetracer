@@ -485,11 +485,16 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     stableIdNote = "String value paths are not durable identities across backend snapshots; needs stable variable ids.")
   entries.addDerived("ScratchpadVM", ["isEmpty", "rowCount"])
 
-  entries.addMany("ShellVM", ["inputBuffer", "scrollPosition", "historyIndex"],
-    vscRendererLocal,
-    "Terminal input, scroll, and history cursor are local interaction state.")
-  entries.addEntry("ShellVM", "inputHistory", vscPresenceAwareness,
-    "Command history is participant-local awareness, not replayable ViewState.")
+  entries.addEntry("ShellVM", "state", vscBackendAuthoritative,
+    "Whether the pane's shell is running, exited or failed is a fact the " &
+    "shell session reports (CodeTracer-Shell.md §7.2).")
+  entries.addEntry("ShellVM", "revision", vscBackendAuthoritative,
+    "Bumped by what the participant's own shell wrote and reported; the " &
+    "shell, its output and its commands are that participant's machine's, " &
+    "never shared session state.")
+  entries.addMany("ShellVM", ["scrollTop", "note"], vscRendererLocal,
+    "Where the participant scrolled the shell's output, and what the pane " &
+    "last said to them, are local interaction state.")
 
   entries.addMany("SearchResultsVM", ["query", "active", "options"],
     vscSharedSessionViewState,
@@ -510,9 +515,9 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "The row a participant selected (a click, F4) is their own cursor.")
   entries.addEntry("SearchResultsVM", "recentSearches", vscPresenceAwareness,
     "A participant's own last ten queries, shown in this panel's empty " &
-    "state. Same call as ShellVM.inputHistory: what one person typed is " &
-    "theirs, not replayable session state, and publishing it would put " &
-    "another participant's search history in front of everyone.")
+    "state. What one person typed is theirs, not replayable session " &
+    "state, and publishing it would put another participant's search " &
+    "history in front of everyone.")
   entries.addDerived("SearchResultsVM", ["resultCount", "fileCount", "groups"])
 
   entries.addMany("TestResultsVM", ["catalog", "summary", "projectName"],

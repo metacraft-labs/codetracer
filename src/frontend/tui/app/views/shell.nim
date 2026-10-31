@@ -73,6 +73,7 @@ import ./requests_pane
 import ./low_level_code_pane
 import ./verification_pane   # PLAT-63
 import ./constraints_pane
+import ./shell_session_pane   # PLAT-61
 import ./frame_overlay
 import ./variables
 import ./context_menu
@@ -203,6 +204,10 @@ type
       ## PLAT-55. PROBLEMS, as a value: the window's `ErrorsVM`, read by
       ## `problems_source.paneModelOf`. Not loaded by default.
     requests*: RequestsPaneModel
+    shellPane*: ShellPaneModel
+      ## PLAT-61. SHELL, as a value: the session's `ShellVM` the desktop's
+      ## Shell pane draws too, read by `tui_session.shellModelOf`. Not loaded
+      ## by default.
       ## PLAT-58. REQUESTS, as a value: the session's `RequestPanelVM` the
       ## desktop's panel draws too, read by `tui_session.requestsModelOf`.
       ## Not loaded by default.
@@ -928,6 +933,10 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   elif region.pane == paneProblems and model.problems.loaded:
     belowStrip:
       discard paintProblems(g, content, model.problems)
+  # PLAT-61. SHELL — its header row is content, so below the strip.
+  elif region.pane == paneShell and model.shellPane.loaded:
+    belowStrip:
+      discard paintShellPane(g, content, model.shellPane)
   # PLAT-58. REQUESTS — its filter bar is content, so below the strip.
   elif region.pane == paneRequests and model.requests.loaded:
     belowStrip:

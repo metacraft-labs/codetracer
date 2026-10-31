@@ -662,13 +662,14 @@ else:
       ## POSITIVE CONTROL for the case above (§4): "there is exactly one
       ## `mountPaneForState`" and "the registration calls it" are both
       ## satisfied by an empty proc.  The panel host's panes are mounted into
-      ## the restored container found in the active tab; the shell and the
-      ## caption-bar progress pane are mounted by their own arms.
+      ## the restored container found in the active tab (the Shell pane among
+      ## them: it draws the shared model, CodeTracer-Shell.md §7.7); the
+      ## caption-bar progress pane is mounted by its own arm.
       let dispatch = codeOnly(region(source(LayoutPath),
         "proc mountPaneForState", "\nproc "))
       check dispatch.contains("findPaneHost(containerId, data.activeSessionIndex)")
       check dispatch.contains("ensurePanelMounted(cast[dom_api.Element](paneHost), state.content)")
-      check dispatch.contains("createShell(paneHost)")
+      check dispatch.contains("mountCaptionBarProgress(")
       check dispatch.contains("discard component.afterInit()")
 
     test "restoreAutoHideState no longer promises a fallback that does not exist":

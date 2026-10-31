@@ -70,6 +70,7 @@ import ./views/requests_pane
 import ./views/low_level_code_pane
 import ./views/verification_pane   # PLAT-63
 import ./views/constraints_pane
+import ./views/shell_session_pane   # PLAT-61
 import ./views/point_list
 
 export headless_app
@@ -316,6 +317,9 @@ type
       ## PLAT-55. The PROBLEMS pane's model, as a value, filled by the host
       ## (`host/problems_source.nim`) from the window's `ErrorsVM`, which the
       ## window's builds feed; its `scrollTop` is the pane's own.
+    shellPane*: ShellPaneModel
+      ## PLAT-61. THE SHELL pane's model, as a value, filled by the host
+      ## (`host/tui_session.shellModelOf`) from the session's `ShellVM`.
     requests*: RequestsPaneModel
       ## PLAT-58. THE REQUESTS pane's model, as a value, filled by the host
       ## (`host/tui_session.requestsModelOf`) from the session's
@@ -438,6 +442,11 @@ type
       ## `ConstraintsVM` (`constraints_source.act`), the pane's model
       ## refreshed. Nil when no host owns the pane.
     requestsAct*: proc(act: RequestsAct): RequestsActResult {.closure.}
+    shellAct*: proc(act: ShellAct): ShellActResult {.closure.}
+      ## PLAT-61: the HOST's answer to an act on the Shell pane — a key, a
+      ## press on a recorded command, the scrollback, the pane's size — done
+      ## through the session's `ShellVM` (`tui_session.shellAct`), the pane's
+      ## model refreshed. Nil when no host owns the pane.
       ## PLAT-58: the HOST's answer to an act on the Requests pane — a press,
       ## a menu built or chosen, the URL search, a key — done through the
       ## session's `RequestPanelVM` (`tui_session.requestsAct`), the pane's
@@ -776,6 +785,7 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     lowLevel: app.lowLevel,
     verification: app.verification,
     constraints: app.constraints,
+    shellPane: app.shellPane,
     build: build,
     product: app.modes.product,
     edit: app.editPaneModel())

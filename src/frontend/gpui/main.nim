@@ -81,7 +81,8 @@ when defined(js):
 
 import ./design_fonts
 import std/[cpuinfo, json, math, options, os, sequtils, sets, strutils, tables,
-            times]
+            times, exitprocs]
+from std/unicode import runeLen   # PLAT-61: a typed character
 when defined(posix):
   import std/posix   # PLAT-53: `tests:kill`
 
@@ -172,6 +173,8 @@ import ./constraints_leaf      # PLAT-62: the Constraints pane, drawn natively
 import ../viewmodel/host/native_constraints_host   # PLAT-62: its host
 import ../viewmodel/viewmodels/constraints_vm
 import headless_app/constraint_menu   # PLAT-62: its row menu (K68)
+import ./shell_leaf            # PLAT-61: the Shell pane, drawn natively
+import ../viewmodel/host/native_shell_host   # PLAT-61: its shell's process
 from isonim/core/async_compat import drainPlatformCallbacks
 import ../viewmodel/host/native_test_host   # PLAT-53: the desktop's host, native producers
 import ./agent_activity_leaf   # PLAT-54: Agent Activity, drawn natively
@@ -313,6 +316,10 @@ OPTIONS:
                       constraints:row:<row>  constraints:menu:<row>
                       constraints:key:<operation>
                       constraints:wheel:<rows>  constraints:track:<permille>
+                    and (PLAT-61) the Shell pane (`type:` and `key:` reach
+                    its shell while it has the focus):
+                      shell:show  shell:wait:<text>[:<ms>]
+                      shell:gutter:<action>  shell:wheel:<rows>
                     and (PLAT-69) what an open window's renderer reports:
                       resize:<width>:<height> (the content area resized)
                       chrome:<spec> (its frame changed; `--window-chrome`'s
@@ -705,6 +712,8 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
                        "verify",
                        # PLAT-62: the Constraints pane's rows and menu.
                        "constraints",
+                       # PLAT-61: the Shell pane's shell and gutter.
+                       "shell",
                        # PLAT-69: the window resized, its frame changed.
                        "resize", "chrome",
                        # Build-Output-Pane.md §3.8, §3.9: a pane docked to
@@ -1181,6 +1190,7 @@ proc drawTestsPane(r: GpuiRenderer)
 proc drawRequestsPane(r: GpuiRenderer)
 proc drawConstraintsPane(r: GpuiRenderer)
   ## PLAT-62: forward-declared; defined beside the Requests pane's drawing.
+proc drawShellPane(r: GpuiRenderer)   # PLAT-61
   ## PLAT-58: forward-declared; defined beside Test Results' drawing.
   ## PLAT-53: forward-declared; defined beside Find in Files' drawing.
 proc drawAgentPane(r: GpuiRenderer)
@@ -1354,6 +1364,9 @@ var
   gConstraintsStarted = false
     ## PLAT-62: the project has been measured once (the pane was on screen).
     ## PLAT-58: the Requests pane's reading position and a held thumb.
+  gShells: seq[NativeShell] = @[]
+    ## PLAT-61: every session's Shell pane process side (`wireShellOf`), so
+    ## each is pumped and closed with the window.
     ## PLAT-53: the Test Results pane's reading position and selection.
   gTestsVM: TestResultsVM = nil
     ## PLAT-53: the WINDOW's Test Results ViewModel — its project's tests
@@ -2369,6 +2382,8 @@ proc drawArrangement(r: GpuiRenderer): bool =
   drawRequestsPane(r)
   # PLAT-62: and the Constraints pane from the window's.
   drawConstraintsPane(r)
+  # PLAT-61: and the Shell pane from the session's.
+  drawShellPane(r)
   # PLAT-54: and Agent Activity from its own.
   drawAgentPane(r)
   # PLAT-55: and Problems from its own.
@@ -3458,6 +3473,89 @@ proc drawRequestsPane(r: GpuiRenderer) =
   if drawRequests(r, pane, vm, gRequests, body):
     applyTextFaces(r, pane)
 
+proc shellVM(): ShellVM =
+  ## PLAT-61: the shown session's `ShellVM`.
+  if gSession.isNil or gSession.session.isNil: nil
+  else: gSession.session.shellVM
+
+proc shellBody(): PxRect =
+  ## PLAT-61: the Shell pane's body in window pixels — revealed, docked open,
+  ## or the visible tab of a box — or a zero rectangle.
+  if gGestures.revealing and gGestures.reveal.pane == paneShell:
+    return dockedBodyOf(gGeom.revealRectOf(gGestures.reveal.edge))
+  if not gGeom.openDock.isEmpty and gGeom.openDockPane == $paneShell:
+    return dockedBodyOf(gGeom.openDock)
+  let i = gGeom.tabsNodeOfPane($paneShell)
+  if i < 0:
+    return PxRect()
+  let n = gGeom.nodes[i]
+  if n.panes.len > 0 and n.active >= 0 and n.active < n.panes.len and
+     n.panes[n.active] != $paneShell:
+    return PxRect()
+  n.body
+
+proc drawShellPane(r: GpuiRenderer) =
+  ## PLAT-61: draw the Shell pane from the session's ViewModel, natively —
+  ## after starting its shell at the pane's size, or resizing it to the pane
+  ## (CodeTracer-Shell.md §7.2: it runs at the size the pane shows).
+  let pane = gPanes.getOrDefault($paneShell)
+  let vm = shellVM()
+  if pane.isNil or vm.isNil:
+    return
+  let body = shellBody()
+  if body.w > 0 and body.h > 0:
+    let lay = shellLayout(body)
+    if vm.state.val == sssIdle:
+      vm.startShell(lay.cols, lay.rows)
+      traceGesture("shell: started " & $lay.cols & "x" & $lay.rows & " " &
+                   vm.statusWords)
+    elif vm.state.val == sssRunning:
+      vm.resizeShell(lay.cols, lay.rows)
+  if drawShell(r, pane, vm, body):
+    applyTextFaces(r, pane)
+
+proc pumpShellWindow(r: GpuiRenderer; timeoutMs = 0): bool =
+  ## PLAT-61: what every session's shell wrote and reported since the last
+  ## pump, into its model; the shown one drawn again when it changed.
+  for n in gShells:
+    if n.pumpShell(timeoutMs) and not n.vm.isNil and n.vm == shellVM():
+      result = true
+  if result:
+    drawShellPane(r)
+
+proc shellLive(): bool =
+  ## A shell is running in some session: its output is pumped on the tick.
+  for n in gShells:
+    if not n.vm.isNil and n.vm.state.val == sssRunning:
+      return true
+  false
+
+proc shellKey(r: GpuiRenderer; key: string; mods: seq[string]): bool =
+  ## PLAT-61 (CodeTracer-Shell.md §7.5): a key while the Shell pane has the
+  ## focus and its shell runs — to the shell, as the model encodes it; the
+  ## prefix arms; after it the key is CodeTracer's (false: the router runs
+  ## it). Text with no key name (a character no keymap spells) is typed as
+  ## it is.
+  let vm = shellVM()
+  if vm.isNil or gFocusPane != $paneShell or vm.state.val != sssRunning:
+    return false
+  let name = canonicalKeyOfGpui(key, mods)
+  if name.len == 0:
+    if key.runeLen == 1 and "ctrl" notin mods and "alt" notin mods:
+      vm.sendInput(key)
+    else:
+      return false
+  else:
+    let route = vm.pressKey(shellKeyOfChord(name))
+    if route.kind == skrApp:
+      traceGesture("shell: " & name & " to CodeTracer")
+      return false
+    if route.kind == skrConsumed:
+      traceGesture("shell: prefix armed")
+  discard pumpShellWindow(r, 0)
+  drawShellPane(r)
+  true
+
 proc drawTestsPane(r: GpuiRenderer) =
   ## PLAT-53: draw Test Results from the window's ViewModel, natively,
   ## replacing whatever the leaf held.
@@ -3588,6 +3686,9 @@ proc stepSearchResult(r: GpuiRenderer; delta: int)
 proc wireSearch(s: HeadlessDebugSession)
 proc wireRequestsOf(s: HeadlessDebugSession)
 proc pumpRequestsWindow(r: GpuiRenderer): bool
+proc wireShellOf(s: HeadlessDebugSession)
+proc pressShell(r: GpuiRenderer; x, y: int): bool
+  ## PLAT-61: forward-declared; defined beside the Shell pane's host.
   ## PLAT-57: forward-declared; defined beside the editor's caret, which
   ## opening a result places.
 
@@ -4106,6 +4207,14 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
         focusWindowPane(r, $paneConstraints)
         discard drawArrangement(r)
       return
+    # PLAT-61: the Shell pane's presses (a recorded command's gutter, the
+    # scrubber, the output — which focuses it, so the keys go to its shell).
+    if pressShell(r, x, y):
+      gFocusShown = true
+      if gFocusPane != $paneShell:
+        focusWindowPane(r, $paneShell)
+        discard drawArrangement(r)
+      return
     # PLAT-54: Agent Activity's presses, on the same rule.
     if pressAgent(r, x, y):
       return
@@ -4372,6 +4481,15 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
                                  else: rows))
       drawConstraintsPane(r)
       return
+    # PLAT-61: and the Shell pane's scrollback.
+    let shellAt = shellBody()
+    if shellAt.w > 0 and shellAt.contains(x, y) and dy != 0.0 and
+       not shellVM().isNil:
+      let rows = int(round(-dy / float(ShellRowPx)))
+      shellVM().scrollShell((if rows == 0: (if dy < 0: 1 else: -1) else: rows),
+                            shellVM().screen.rows)
+      drawShellPane(r)
+      return
     # PLAT-58: and the Requests pane's list.
     let requests = requestsBody()
     if requests.w > 0 and requests.contains(x, y) and dy != 0.0 and
@@ -4519,6 +4637,10 @@ proc windowKey(key: string; mods: seq[string]) =
     return
   if folderShown() and not openArm.isNil:
     editKey(key, mods)
+    return
+  # PLAT-61: the focused, running Shell pane takes every key for its shell
+  # (CodeTracer-Shell.md §7.5) — except after its prefix.
+  if shellKey(r, key, mods):
     return
   # PLAT-52: the Terminal Output pane's own keys, while it has focus.
   if mods.len == 0 and terminalKey(r, key):
@@ -4707,6 +4829,7 @@ proc gpuiMenuRouteOf(action: string): GpuiMenuRoute =
     GpuiMenuRoute(kind: gmrPane, pane: paneLowLevelCode,
                   reason: (if gSession.isNil: "the low-level code is a " &
                              "recording's: open one to see it" else: ""))
+  of "aShell": GpuiMenuRoute(kind: gmrPane, pane: paneShell)   # PLAT-61
   of "aExit": GpuiMenuRoute(kind: gmrExit)
   # File: the Welcome Screen's own flows (Multi-Window-Tab-Management.md rule
   # 3, Welcome-Screen.md § The native front-ends), as in the terminal.
@@ -6001,6 +6124,7 @@ proc refreshReplayWindow(r: GpuiRenderer) =
   drawBuildPane(r)
   drawRequestsPane(r)
   drawConstraintsPane(r)
+  drawShellPane(r)
   drawListScrubbers(r)
   gOmnibar.setIndex(omnibarIndexOf(gSession.session.fileTreeVM,
                                    gSession.session.store, gMenu,
@@ -6087,6 +6211,7 @@ proc openRecordingInTab(r: GpuiRenderer; path: string) =
     layout = layout, adopt = opened.sdk)
   wireSearch(opened)
   wireRequestsOf(opened)
+  wireShellOf(opened)
   gSessionsOpened[int(slot.id)] = opened
   traceGesture("opened " & path & " as tab " & $slot.id)
   showSession(r, slot.id)
@@ -7561,6 +7686,10 @@ proc recordTick() {.cdecl.}
 proc searchTick() {.cdecl.}
 proc requestsTick() {.cdecl.}
 proc requestsLive(): bool
+proc shellTick() {.cdecl.}
+const ShellPollMs = 30
+  ## PLAT-61: how often a running shell's output is pumped (and every other
+  ## tick pumps it too).
 proc agentTick() {.cdecl.}
 proc certificateTick() {.cdecl.}
 const CertificatePollMs = 25
@@ -7614,6 +7743,16 @@ proc armHoverTick() =
   if due < 0 and requestsLive():
     gArmedTick = (due: -6'i64, vcs: false)
     gpui_set_tick(uint32(RequestSpanPollIntervalMs), requestsTick)
+    return
+  # PLAT-61: a running shell, every `ShellPollMs` — below the activities
+  # above, whose ticks pump it too (`pumpShellWindow`).
+  if due < 0 and shellLive() and gRecordJob.isNil and gTestJob.isNil and
+     not gTestsHost.running and (gBuild.isNil or
+                                 gBuild.session.verdict != bvRunning):
+    let want = (due: -7'i64, vcs: false)
+    if gArmedTick != want:
+      gArmedTick = want
+      gpui_set_tick(uint32(ShellPollMs), shellTick)
     return
   # PLAT-51: a welcome tab's `ct record` is polled on the same tick, every
   # `RecordPollMs`, while it runs.
@@ -9079,6 +9218,7 @@ proc pollCertificateIndicator(r: GpuiRenderer) =
 
 proc certificateTick() {.cdecl.} =
   var r: GpuiRenderer
+  discard pumpShellWindow(r)   # PLAT-61: a running shell rides every tick
   gArmedTick = (due: -2'i64, vcs: false)
   pollCertificateIndicator(r)
   armHoverTick()
@@ -9376,12 +9516,22 @@ proc requestsTick() {.cdecl.} =
   var r: GpuiRenderer
   gArmedTick = (due: -2'i64, vcs: false)
   discard pumpRequestsWindow(r)
+  discard pumpShellWindow(r)
+
+proc shellTick() {.cdecl.} =
+  ## PLAT-61: a running shell's output and reports, every `ShellPollMs`.
+  var r: GpuiRenderer
+  gArmedTick = (due: -2'i64, vcs: false)
+  discard pumpShellWindow(r)
+  pollCertificateIndicator(r)
+  armHoverTick()
   armHoverTick()
 
 proc recordTick() {.cdecl.} =
   ## PLAT-51: the welcome tab's recording, polled; when it finishes its
   ## recording opens in the tab that asked (`pollWelcomeRecording`).
   var r: GpuiRenderer
+  discard pumpShellWindow(r)   # PLAT-61: a running shell rides every tick
   gArmedTick = (due: -2'i64, vcs: false)
   discard pollWelcomeRecording(r)
   discard pollTestRun(r)
@@ -9397,6 +9547,7 @@ proc agentTick() {.cdecl.} =
   ## pane (and the session tabs' indicator) drawn again; re-armed while it
   ## works.
   var r: GpuiRenderer
+  discard pumpShellWindow(r)   # PLAT-61: a running shell rides every tick
   gArmedTick = (due: -2'i64, vcs: false)
   var changed = false
   for h in gAgentHosts.values:
@@ -9412,6 +9563,7 @@ proc searchTick() {.cdecl.} =
   ## PLAT-57: the search in flight advanced a bounded step, and the pane
   ## drawn again when what it shows moved; re-armed while it runs.
   var r: GpuiRenderer
+  discard pumpShellWindow(r)   # PLAT-61: a running shell rides every tick
   gArmedTick = (due: -2'i64, vcs: false)
   let vm = searchVM()
   let before = if vm.isNil: (-1, false) else: (vm.results.val.len,
@@ -9427,6 +9579,7 @@ proc hoverTick() {.cdecl.} =
   ## re-arm for what is due next — and the VCS refresh it shares the tick
   ## with keeps its own pace.
   var r: GpuiRenderer
+  discard pumpShellWindow(r)   # PLAT-61: a running shell rides every tick
   # The arming this tick answered is spent: whatever is due next is armed.
   gArmedTick = (due: -2'i64, vcs: false)
   applyHoverReply(r, gAutoHide.tick(hoverNowMs()))
@@ -10462,6 +10615,54 @@ proc wireRequestsOf(s: HeadlessDebugSession) =
     var r: GpuiRenderer
     openRecordingInTab(r, path)
     "")
+
+proc wireShellOf(s: HeadlessDebugSession) =
+  ## PLAT-61: the session's Shell pane gets its shell (`native_shell_host`);
+  ## a recorded command's recording opens in a new session tab
+  ## (`openRecordingInTab`).
+  if s.isNil or s.session.isNil or s.session.shellVM.isNil:
+    return
+  for n in gShells:
+    if n.vm == s.session.shellVM:
+      return
+  if gShells.len == 0:
+    # The window's shells end with it (SIGHUP, as a closed terminal's do),
+    # and their session directories go.
+    addExitProc(proc() =
+      for n in gShells: n.closeNativeShell())
+  gShells.add wireNativeShell(s.session.shellVM, proc(path: string): string =
+    var r: GpuiRenderer
+    traceGesture("shell: open " & path)
+    openRecordingInTab(r, path)
+    "")
+
+proc pressShell(r: GpuiRenderer; x, y: int): bool =
+  ## PLAT-61 (§7.6): a press on the Shell pane — a recorded command's gutter
+  ## opens its recording (or says why not), the scrubber moves the view, the
+  ## output takes the focus. Whether the press was the pane's.
+  let vm = shellVM()
+  let body = shellBody()
+  if vm.isNil or body.w <= 0 or not body.contains(x, y):
+    return false
+  let hit = vm.shellHitAt(body, x, y)
+  case hit.kind
+  of gshGutter:
+    let note = vm.activateAction(hit.action)
+    traceGesture("shell: " & note)
+    if note.len > 0:
+      gStatusNote = note
+      drawTopBar(r)
+  of gshTrack:
+    let sm = scrubberModel(vm.lineCount, vm.visibleTop(vm.screen.rows),
+                           vm.screen.rows)
+    vm.scrollShellTo(sm.scrubTop(hit.fraction, dragging = false),
+                     vm.screen.rows)
+  of gshText, gshHeader:
+    discard
+  of gshNone:
+    return false
+  drawShellPane(r)
+  true
 
 proc wireSearch(s: HeadlessDebugSession) =
   ## PLAT-57: the session's Find in Files searches go to the shared runner,
@@ -12930,6 +13131,58 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
                 track.y + min(track.h - 1, track.h * at(2) div 1000))
       else:
         return "unknown requests event '" & parts[1] & "'"
+    of "shell":
+      # PLAT-61: the Shell pane. `type:` and `key:` reach its shell through
+      # `windowKey` while it has the focus (`shell:show` gives it the focus).
+      #   shell:show                 show the pane, focused, its shell started
+      #   shell:wait:<text>[:<ms>]   pump the shell until a line shows <text>
+      #   shell:gutter:<action>      press action <action>'s gutter
+      #   shell:wheel:<rows>         the wheel over the output
+      if parts[1] == "show":
+        showPaneFromMenu(r, paneShell)
+        focusWindowPane(r, $paneShell)
+        drawShellPane(r)
+        return ""
+      let vm = shellVM()
+      let body = shellBody()
+      if vm.isNil or body.w <= 0:
+        return "the Shell pane is not drawn"
+      case parts[1]
+      of "wait":
+        let text = parts[2]
+        let limit = if parts.len > 3: at(3) else: 60_000
+        let started = epochTime()
+        proc shows(): bool =
+          for line in vm.firstKeptLine .. vm.lastLine:
+            if text in vm.lineText(line): return true
+          false
+        while not shows():
+          if (epochTime() - started) * 1000.0 > float(limit):
+            return "the shell did not show '" & text & "' in " & $limit & " ms"
+          discard pumpShellWindow(r, 50)
+        # Once more: an event a writer reported BEFORE printing <text> may
+        # have reached the report file after the last poll read it (§7.2).
+        discard pumpShellWindow(r, 0)
+        drawShellPane(r)
+      of "gutter":
+        let action = at(2)
+        if action < 0 or action >= vm.actions.len:
+          return "no shell action " & $action
+        let lay = shellLayout(body)
+        var y = -1
+        for i, row in vm.shellRows(vm.screen.rows):
+          if row.action == action and row.mark == srmStart:
+            y = lay.output.y + i * ShellRowPx + ShellRowPx div 2
+        if y < 0:
+          return "shell action " & $action & " is not in view"
+        pressAt(lay.output.x + 2, y)
+      of "wheel":
+        let lay = shellLayout(body)
+        windowPointer(r, gekWheel, lay.output.x + lay.output.w div 2,
+                      lay.output.y + lay.output.h div 2,
+                      -float(at(2) * ShellRowPx))
+      else:
+        return "unknown shell event '" & parts[1] & "'"
     of "search":
       # PLAT-57: Find in Files, aimed from the geometry it was drawn with
       # (`search_results_leaf.searchLayout`):
@@ -14354,6 +14607,7 @@ proc runOpen(cmd: GpuiCommand): int =
   applyRememberedColumnWidths()
   wireSearch(session)
   wireRequestsOf(session)
+  wireShellOf(session)
   # PLAT-48: the top bar's shared ViewModels. The menu is the product's tree
   # with what this window performs enabled, its chords none (the window has
   # no keymap of its own for the debugger yet); the omnibar searches the

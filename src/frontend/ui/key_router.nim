@@ -818,6 +818,13 @@ proc focusOnButton(): bool {.importjs: """
   ## anchors are left out: the tree answers `Enter` through the keymap.
 
 
+var paneKeyOwner*: proc(ev: JsObject): bool
+  ## PLAT-61 (CodeTracer-Shell.md §7.5): a pane whose element takes EVERY key
+  ## while it has the focus — the Shell pane, whose keys are its shell's. True
+  ## when the focused pane owns this key: the router then leaves it to the
+  ## pane's own listener. The pane answers false after its prefix, so the next
+  ## key is CodeTracer's, routed here as anywhere else. Set by `ui/shell`.
+
 proc onKeyDown(ev: JsObject) =
   ## The ONE key listener (capture phase, on the window).
   if ev[cstring"isComposing"].to(bool):
@@ -825,6 +832,8 @@ proc onKeyDown(ev: JsObject) =
   let key = $ev.key.to(cstring)
   if key in ModifierKeys:
     discard deskAltTap.modifiersChanged(heldModifiers(ev))
+    return
+  if not paneKeyOwner.isNil and paneKeyOwner(ev):
     return
   # Any other key while Alt is held makes it a chord, not a tap.
   deskAltTap.interrupted()
