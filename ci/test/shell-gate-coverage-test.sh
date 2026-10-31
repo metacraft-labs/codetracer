@@ -476,6 +476,18 @@ m_read_only_reference() {
 arm "15/a gate only assigned, grepped, catted and echoed is not a wire" \
 	"ci/test/only-read.sh is reachable from NO workflow lane" m_read_only_reference
 
+# 15d — A SCRIPT HANDED AS AN ARGUMENT TO A STDIN PROGRAM IS READ, NOT RUN.
+# `python3 - ci/test/x.sh <<'PY' … PY` runs the heredoc; `x.sh` is that
+# program's argument, which it may read as text. Crediting it as run made the
+# macOS capture gate (and everything it names) "reachable".
+m_stdin_program_argument() {
+	printf '#!/usr/bin/env bash\necho x\n' >"${work}/arm/ci/test/stdin-arg.sh"
+	printf 'python3 - ci/test/stdin-arg.sh <<'"'"'PY'"'"'\nimport sys\nprint(open(sys.argv[1]).read())\nPY\n' \
+		>>"${work}/arm/ci/test/gate2.sh"
+}
+arm "15d/a script passed to a stdin program is data, not a wire" \
+	"ci/test/stdin-arg.sh is reachable from NO workflow lane" m_stdin_program_argument
+
 # 15b — THE CONTROL THE ARM ABOVE REQUIRES, and the reason the fix is two passes
 # rather than "ignore assignments". Twenty-nine contract suites in this tree name
 # their subject in a variable and then RUN it, and a rule that dropped the

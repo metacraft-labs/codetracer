@@ -688,6 +688,13 @@ refs_of_text() {
 			if (index(DECL, " " core " ") > 0) { cmdpos = 1; want = 0; continue }
 
 			if (want) {
+				# The shape of `python3 - path`: a lone `-` says the PROGRAM
+				# comes from stdin (a heredoc), so the words after it are the
+				# ARGUMENTS of that program — data it may read, not a script the
+				# interpreter runs. `ci/test/plat37-gpui-shutdown-test.sh` hands
+				# the macOS capture script to a Python check as text, and the
+				# walk had credited the capture (and everything it names) as run.
+				if (core == "-") { want = 0; cmdpos = 0; continue }
 				if (core ~ /^-/) {
 					# `bash -lc PROGRAM` / `python3 -c PROGRAM`: what follows is
 					# not a path but a SCRIPT, so the walk restarts in command

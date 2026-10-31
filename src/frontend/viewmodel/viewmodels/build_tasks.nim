@@ -424,7 +424,7 @@ proc parseBuildVerb*(line: string): BuildVerb =
   else:
     BuildVerb(kind: bvkNone)   # `:builder`, some other word
 
-proc isBuildLine*(line: string): bool =
+proc isBuildLine(line: string): bool =
   parseBuildVerb(line).kind != bvkNone
 
 # ---------------------------------------------------------------------------

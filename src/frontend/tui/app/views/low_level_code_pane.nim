@@ -368,7 +368,7 @@ proc revealRow*(model: LowLevelPaneModel; listRows, row: int): int =
   elif row >= top + rows: row - rows + 1
   else: top
 
-proc rowOfInstruction*(model: LowLevelPaneModel; index: int): int =
+proc rowOfInstruction(model: LowLevelPaneModel; index: int): int =
   ## The display row of instruction `index`, -1 when it is not listed.
   for i, r in model.rows:
     if r.kind == lpInstruction and r.index == index:
