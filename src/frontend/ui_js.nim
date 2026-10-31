@@ -1708,6 +1708,8 @@ proc configure(data: Data) =
   # PLAT-70 Part B: `table.resize-column` on the Event Log.
   resizeEventLogColumnHook = proc(arg: string) =
     event_log.resizeEventLogColumn(arg)
+  # Space on the call trace.
+  toggleCallTraceRowHook = proc() = calltrace.toggleSelectedCall()
   # Find in Files' field toggles (`Alt+C` / `Alt+W` / `Alt+R` where the
   # field has the focus, `searchInputFocus`).
   proc registerSearchToggle(operation: string) =
