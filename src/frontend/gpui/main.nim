@@ -10336,6 +10336,9 @@ proc calltraceKey(r: GpuiRenderer; operation: string): bool =
   ## The call trace's routed list operations, using the ViewModel's row
   ## selection and the same host paging and activation as its pointer input.
   ## A selected row stays in view even when the move crosses a loaded section.
+  ## Expand and collapse are the desktop's Right and Left over the same
+  ## navigation; a call's jump has no second destination, so the redirected
+  ## open is the plain one.
   if gSession.isNil or gFocusPane != $paneCalltrace:
     return false
   let vm = gSession.session.calltraceVM
@@ -10343,10 +10346,25 @@ proc calltraceKey(r: GpuiRenderer; operation: string): bool =
     return false
   if operation notin ["list.focus-next", "list.focus-previous",
       "list.focus-first", "list.focus-last", "list.focus-page-down",
-      "list.focus-page-up", "list.activate"]:
+      "list.focus-page-up", "list.activate", "list.activate-redirected",
+      "list.clear-selection", "list.expand", "list.collapse",
+      "list.toggle-expand"]:
     return false
   let selected = vm.selectedEntry.val
-  if operation == "list.activate":
+  if operation == "list.clear-selection":
+    vm.selectEntry(none(int64))
+    redrawCalltrace(r)
+    return true
+  if operation == "list.toggle-expand":
+    if selected.isNone:
+      traceGesture("no call trace row is selected")
+      return true
+    let why = gSession.toggleCallChildren(selected.get)
+    if why.len > 0:
+      traceGesture("calltrace toggle failed: " & why)
+    redrawCalltrace(r)
+    return true
+  if operation in ["list.activate", "list.activate-redirected"]:
     if selected.isNone:
       traceGesture("no call trace row is selected")
       return true
@@ -10370,6 +10388,8 @@ proc calltraceKey(r: GpuiRenderer; operation: string): bool =
   of "list.focus-previous": vm.moveSelection(-1)
   of "list.focus-page-down": vm.pageSelection(1)
   of "list.focus-page-up": vm.pageSelection(-1)
+  of "list.expand": vm.selectFirstChild()
+  of "list.collapse": vm.selectParent()
   else: discard
   gSession.settle()
   redrawCalltrace(r)
@@ -10502,6 +10522,12 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
     # PLAT-60: and the focused Low Level Code listing's.
     if lowLevelKey(r, res.operation):
       return
+    if calltraceKey(r, res.operation):
+      return
+  of "list.clear-selection", "list.expand", "list.collapse",
+     "list.toggle-expand":
+    # The rest of the list table, on the focused call trace; another pane's
+    # press stays inert and says so below.
     if calltraceKey(r, res.operation):
       return
   of "list.copy":

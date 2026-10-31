@@ -31,7 +31,7 @@ import styles/contrast_floors     # `TabGroundContrastFloor`
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 80
+const ExpectedAssertions = 97
 
 var countedAssertions = 0
 
@@ -230,6 +230,51 @@ suite "GPUI call trace: routed list keys and keyboard focus":
     ck parseInt(up.selectedCall) < parseInt(last.selectedCall)
     ck up.selectedCall in up.values("data-call-index")
     ck clamped.selectedCall == "0"
+
+  test "the rest of the list table runs on the call trace":
+    const TreeRows = """[
+      {"key":"f6","command":"list.focus-first","when":"listFocus"},
+      {"key":"f7","command":"list.focus-next","when":"listFocus"},
+      {"key":"f2","command":"list.clear-selection","when":"listFocus"},
+      {"key":"f3","command":"list.toggle-expand","when":"listFocus"},
+      {"key":"f4","command":"list.expand","when":"listFocus"},
+      {"key":"f8","command":"list.collapse","when":"listFocus"},
+      {"key":"f9","command":"list.activate-redirected","when":"listFocus"}
+    ]"""
+    var t0, t1, t2, t3, t4, t5, t6: string
+    let base = windowPlan("click:tab:calltrace,key:f6", TreeRows, t0)
+    let cleared = windowPlan("click:tab:calltrace,key:f6,key:f2", TreeRows, t1)
+    let toggled = windowPlan("click:tab:calltrace,key:f6,key:f3", TreeRows, t2)
+    let expanded = windowPlan("click:tab:calltrace,key:f6,key:f3,key:f4", TreeRows, t3)
+    let child = windowPlan("click:tab:calltrace,key:f6,key:f4", TreeRows, t4)
+    let parent = windowPlan("click:tab:calltrace,key:f6,key:f4,key:f8", TreeRows, t5)
+    let redirected = windowPlan("key:f10,click:tab:calltrace,key:f6,key:f7,key:f9",
+                                TreeRows, t6)
+    let rows = base.values("data-call-index")
+    ck rows.len >= 2
+    ck cleared.selectedCall == ""
+    # The first call holds the rest of the trace: toggling it hides its
+    # children, and expanding brings them back.
+    ck toggled.values("data-call-index").len < rows.len
+    ck expanded.values("data-call-index").len == rows.len
+    ck child.selectedCall == rows[1]
+    ck parent.selectedCall == rows[0]
+    var t7: string
+    let stepped = windowPlan("key:f10,click:tab:calltrace,key:f6", TreeRows, t7)
+    ck redirected.executionLine != stepped.executionLine
+    for t in [t1, t2, t3, t4, t5, t6]:
+      ck "not available in this window" notin t
+    # The default chord reaches the same arm, and another focused pane's press
+    # leaves the call trace's selection alone and says it is not available.
+    var t8, t9: string
+    let escaped = windowPlan("click:tab:calltrace,key:home,key:escape", trace = t8)
+    ck escaped.selectedCall == ""
+    ck "operation list.clear-selection" in t8
+    let elsewhere = windowPlan(
+      "click:tab:calltrace,key:f6,click:tab:agentActivity,key:f2,click:tab:calltrace",
+      TreeRows, t9)
+    ck elsewhere.selectedCall == rows[0]
+    ck "not available in this window" in t9
 
 suite "PLAT-68 GPUI: the read-only editor's document":
 
