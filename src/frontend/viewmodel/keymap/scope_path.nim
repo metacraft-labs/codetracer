@@ -89,7 +89,7 @@ const
     ## The list-like panes (CUA-Keymap.md §3.6): a focused one is
     ## `listFocus` and takes the shared `list` table.
 
-  TreePaneKinds = ["state", "fileTree"]
+  TreePaneKinds = ["calltrace", "state", "fileTree"]
     ## The tree panes: `treeFocus`, so `Left` / `Right` collapse and expand.
 
   GlobalTable* = "global"

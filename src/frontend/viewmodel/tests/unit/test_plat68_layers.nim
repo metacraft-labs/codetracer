@@ -67,7 +67,7 @@ proc catalogueCoverage(def: KeymapDefinition): TableCoverage =
     if bound: result.covered.add o.name
     else: result.filed.add (o.name, filedReasonOf(def.model))
 
-const ExpectedAssertions = 159
+const ExpectedAssertions = 161
 
 var countedAssertions = 0
 
@@ -152,7 +152,10 @@ suite "§4: context keys and `when`":
     ck ro.values[ckEditorReadOnly] == "true"
     ck ro.values[ckTextInputFocus] == "false"
     ck ro.values[ckPaneKind] == "editor"
-    let list = r.contextFor(debugFacts(), CallTracePath)
+    # A list that is not a tree: the Event Log, since the Call Trace is a tree
+    # pane (CUA-Keymap.md §3.6).
+    let list = r.contextFor(debugFacts(), @[Window, Tab, pane("eventLog"),
+                                            element(ekRow, "event-7")])
     ck list.values[ckListFocus] == "true"
     ck list.values[ckTreeFocus] == "false"
     ck list.values[ckEditorFocus] == "false"
@@ -160,6 +163,9 @@ suite "§4: context keys and `when`":
     let tree = r.contextFor(debugFacts(), VariablesPath)
     ck tree.values[ckTreeFocus] == "true"
     ck tree.values[ckPaneKind] == "state"
+    let callTree = r.contextFor(debugFacts(), CallTracePath)
+    ck callTree.values[ckListFocus] == "true"
+    ck callTree.values[ckTreeFocus] == "true"
     let find = r.contextFor(debugFacts(), FindPath)
     ck find.values[ckFindInputFocus] == "true"
     ck find.values[ckTextInputFocus] == "true"

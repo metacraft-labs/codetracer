@@ -37,7 +37,7 @@ import codetracer_embed
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 39
+const ExpectedAssertions = 41
 
 var countedAssertions = 0
 
@@ -245,6 +245,15 @@ suite "PLAT-60: the Low Level Code pane in the GPUI window":
     ck refs.len == 1
     if selected.len == 1 and refs.len == 1:
       ck refs[0].textOf.contains($selected[0].lineOf)
+    # A cleared cursor leaves no row selected, as on the terminal.
+    var clearTrace = ""
+    let cleared = windowPlan("lowlevel:show,lowlevel:key:list.focus-next," &
+                             "click:tab:lowLevelCode,key:escape", subject, clearTrace)
+    var stillSelected = 0
+    for r in cleared.instructions:
+      if r.attr("data-ct-selected") == "true": inc stillSelected
+    ck stillSelected == 0
+    ck "not available in this window" notin clearTrace
     # The row's menu: the shared entries, in order.
     var target = -1
     for r in plan0.instructions:

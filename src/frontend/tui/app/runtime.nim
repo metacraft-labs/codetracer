@@ -2027,6 +2027,30 @@ const CallTraceWheelRows* = 3
   ## Rows one wheel notch scrolls the call trace — the common terminal
   ## default (xterm, VTE and tmux all scroll three lines a notch).
 
+proc callTraceTreeKey(rt: TuiRuntime; operation: string;
+                      outcome: var RuntimeOutcome): bool =
+  ## The focused call trace's tree operations. This pane has no row cursor of
+  ## its own, so they act on the current call, the row `list.copy` reads too.
+  ## Answers whether `operation` was the pane's.
+  let (had, focused) = rt.focus.focusedPane()
+  if not had or focused != paneCalltrace:
+    return false
+  outcome.repaint = true
+  let (ok, row) = rt.app.callTrace.rowAt(rt.app.callTrace.currentTraceIndex)
+  if not ok:
+    rt.note("the call trace shows no current call")
+    return true
+  let toggle = row.callOf.toggle
+  let applies =
+    case operation
+    of "list.expand": toggle == crtCollapsed
+    of "list.collapse": toggle == crtExpanded
+    else: toggle != crtLeaf
+  if applies:
+    outcome.togglesCall = true
+    outcome.callIndex = row.index
+  true
+
 proc scrollCallTrace(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
   ## PLAT-47: scroll the call trace by `delta` rows (down is positive), from
   ## where it is drawn now, and stop following the current call. The host
@@ -7678,6 +7702,9 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
     rt.note(if rt.tabMovesFocus: "Tab moves the focus (Ctrl+M again to indent)"
             else: "Tab indents")
     return
+  of "list.expand", "list.collapse", "list.toggle-expand":
+    if rt.callTraceTreeKey(res.operation, outcome):
+      return
   of "list.show-detail":
     # PLAT-70 Part B (Horizontal-Overflow.md §5.3).
     rt.showDetail(outcome)

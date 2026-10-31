@@ -8623,6 +8623,10 @@ proc lowLevelKey(r: GpuiRenderer; operation: string): bool =
   let vm = lowLevelVM()
   if vm.isNil or gFocusPane != $paneLowLevelCode:
     return false
+  if operation == "list.clear-selection":
+    vm.selectInstruction(NoSelectedInstruction)
+    drawLowLevelPane(r)
+    return true
   if operation == "list.activate":
     if vm.selected.val < 0:
       traceGesture("low-level: no instruction is selected")
@@ -10526,9 +10530,11 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
       return
   of "list.clear-selection", "list.expand", "list.collapse",
      "list.toggle-expand":
-    # The rest of the list table, on the focused call trace; another pane's
-    # press stays inert and says so below.
+    # The rest of the list table, on the focused call trace and the Low Level
+    # Code listing; another pane's press stays inert and says so below.
     if calltraceKey(r, res.operation):
+      return
+    if res.operation == "list.clear-selection" and lowLevelKey(r, res.operation):
       return
   of "list.copy":
     let (text, what) = focusedRowText()

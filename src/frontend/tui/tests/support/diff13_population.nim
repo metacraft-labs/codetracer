@@ -366,7 +366,7 @@ proc declaredSituations*(): seq[Situation] =
     Situation(name: "the read-only editor",
               path: @[WindowElement, SessionTab, pane("editor"),
                       editorElement()]),
-    Situation(name: "the call trace (a list)",
+    Situation(name: "the call trace (a tree)",
               path: @[WindowElement, SessionTab, pane("calltrace")]),
     Situation(name: "the variables (a tree)",
               path: @[WindowElement, SessionTab, pane("state")]),

@@ -31,7 +31,7 @@ import styles/contrast_floors     # `TabGroundContrastFloor`
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 97
+const ExpectedAssertions = 101
 
 var countedAssertions = 0
 
@@ -275,6 +275,18 @@ suite "GPUI call trace: routed list keys and keyboard focus":
       TreeRows, t9)
     ck elsewhere.selectedCall == rows[0]
     ck "not available in this window" in t9
+
+  test "the default Left, Right and Space reach the call trace":
+    var t0, t1, t2, t3: string
+    let base = windowPlan("click:tab:calltrace,key:home", trace = t0)
+    let child = windowPlan("click:tab:calltrace,key:home,key:right", trace = t1)
+    let parent = windowPlan("click:tab:calltrace,key:home,key:right,key:left", trace = t2)
+    let folded = windowPlan("click:tab:calltrace,key:home,key:space", trace = t3)
+    let rows = base.values("data-call-index")
+    ck child.selectedCall == rows[1]
+    ck parent.selectedCall == rows[0]
+    ck folded.values("data-call-index").len < rows.len
+    ck t3.lines("operation ")[^1] == "operation list.toggle-expand"
 
 suite "PLAT-68 GPUI: the read-only editor's document":
 
