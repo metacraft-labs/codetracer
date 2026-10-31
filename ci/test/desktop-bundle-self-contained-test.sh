@@ -373,8 +373,8 @@ echo "    read-only bundle"
 # 31,307 "Permission denied" warnings, then checkout gave up and died with
 # EACCES unlinking `.../node_modules/abbrev/LICENSE`.
 #
-# The source arm is here rather than only in the pre-checkout sweep because a
-# sweep cleans a poisoned host; only this stops the host being poisoned.
+# The source arm is here as well as in the runner host's cleanup hook because
+# the hook cleans a poisoned host; only this stops the host being poisoned.
 chmod -R a-w "${SRC}/prod-root"
 
 STAGE_OUT="$(cd "${FIX}/repo" && python3 scripts/stage-desktop-node-modules.py \

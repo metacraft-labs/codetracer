@@ -585,20 +585,14 @@ lint_step "contract suite: desktop bundle self-containment" \
 lint_step "contract suite: the capture prefix finds the dev shell's ct" \
 	bash ci/test/plat45-desktop-prefix-test.sh
 
-# The pre-checkout sweep that keeps a persistent self-hosted runner cleanable.
-# It lives as an inline `run:` block in seven jobs — it has to run BEFORE
-# actions/checkout, so it cannot be a script the repository provides — and this
-# is the ONLY place it is ever executed outside CI. Registered here rather than
-# left to be discovered because an unrun check is the defect it exists to catch,
-# and because the failure this guards is precisely a cleanup that silently
-# no-ops: it asserts a NON-ZERO count on a poisoned fixture, not merely a zero
-# afterwards. Pure bash + git + python3 over mktemp fixtures; no nix, no
-# network.
-lint_step "contract suite: the read-only-leftovers sweep runs, finds, and fixes" \
-	bash ci/test/readonly-leftovers-sweep-test.sh
+# Persistent-runner mounts and permissions are host lifecycle state. This
+# source-shape gate refuses any product-workflow copy of the pre-checkout
+# cleanup and mutation-tests the predicate that enforces the boundary.
+lint_step "contract suite: runner filesystem lifecycle remains host-owned" \
+	bash ci/test/runner-lifecycle-ownership-test.sh
 
-# The dev shell's git-hooks guard. Registered here for the same reason as the
-# sweep above: the thing it protects is developer state on a shared checkout, so
+# The dev shell's git-hooks guard. Registered here rather than left to be
+# discovered: the thing it protects is developer state on a shared checkout, so
 # it is never exercised by any other job, and an unrun guard is exactly the
 # defect it exists to catch. The suite builds real `git worktree` fixtures under
 # mktemp -- the bug is entirely about what `git rev-parse` reports in a linked

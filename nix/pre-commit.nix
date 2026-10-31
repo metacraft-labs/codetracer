@@ -90,60 +90,6 @@
     # turning the drift check into noise about whitespace. Formatting hooks
     # must not have opinions about a file this repository does not own.
     "^tools/check-test-assertions\\.sh$"
-
-    # A CANONICAL BODY WITH SEVEN PASTED COPIES, and byte-identity IS the
-    # contract -- the same reason as the entry above, arrived at from the
-    # opposite direction: that file is owned elsewhere, this one is owned here
-    # but duplicated into YAML.
-    #
-    # ci/runner/sweep-readonly-leftovers.sh keeps its body between
-    # `# --- BEGIN INLINE BODY` / `# --- END INLINE BODY` markers, and that body
-    # is pasted verbatim into SEVEN `run:` blocks in
-    # .github/workflows/codetracer.yml (jobs: reprobuild-macos-smoke,
-    # origin-dap-macos, origin-dap-macos-nightly, dmg-build, dmg-lib-check,
-    # test-non-gui, test-ui-tests). It cannot simply be invoked instead: the
-    # sweep runs BEFORE actions/checkout, when the file is not yet on the
-    # runner's disk. ci/test/readonly-leftovers-sweep-test.sh is what stops the
-    # seven copies drifting -- it de-indents each `run:` block and compares it
-    # to the canonical body with exact string equality (`found[name] != body`),
-    # so every byte of leading whitespace is contractual.
-    #
-    # WHY IT IS SAFE TODAY. This exclusion, and only this exclusion.
-    #
-    # An earlier note here said the file was safe because "shfmt reads
-    # .editorconfig, whose `[*]` stanza says space/2, so shfmt currently
-    # rewrites NOTHING here (`shfmt -l` does not list it)". That is wrong in a
-    # way worth spelling out, because the mistake is easy to repeat: `shfmt -l`
-    # DOES leave this file alone, but the hook does not run `shfmt -l`. It runs
-    # `shfmt -w -l -ln auto -s`, and shfmt consults .editorconfig only when it
-    # is given NO formatting flags -- `-ln` and `-s` each suppress it on their
-    # own. So the hook formats at shfmt's built-in default of `-i 0`, i.e.
-    # TABS, and `shfmt -l -ln auto -s` on this file lists it and wants to
-    # rewrite 84 lines. Reproduce with shfmt 3.12.0, the pinned version:
-    #
-    #     shfmt -l ci/runner/sweep-readonly-leftovers.sh                 # quiet
-    #     shfmt -l -ln auto -s ci/runner/sweep-readonly-leftovers.sh     # lists it
-    #
-    # The consequence is the opposite of what that note predicted. Adding
-    # `[*.sh] indent_style = tab` to .editorconfig is NOT the edit that breaks
-    # the seven copies -- it is a no-op for this hook, which never reads the
-    # file. (It has since been added, for the separate reason documented
-    # there.) The edit that breaks them is deleting the exclusion below.
-    #
-    # The repo-wide hazard runs the other way. Because .editorconfig is
-    # suppressed, its `[*]` = space/2 has never applied to shell scripts, and
-    # 305 of 366 tracked *.sh files are tab-indented in disagreement with it.
-    # Anything that makes shfmt start reading .editorconfig -- dropping `-s`,
-    # dropping `-ln auto`, or an upstream git-hooks.nix bump that rewrites this
-    # entry -- would have reformatted 306 files in one commit. The `[*.sh]`
-    # stanza in .editorconfig now pins the tab default explicitly, which takes
-    # that from 306 files to none.
-    #
-    # Nor could that be "resolved" by tabbing both sides: YAML block scalars
-    # cannot use tabs for indentation at all. Do not fix a future breakage here
-    # by relaxing the equality in readonly-leftovers-sweep-test.sh -- that
-    # equality is the only thing holding the seven copies together.
-    "^ci/runner/sweep-readonly-leftovers\\.sh$"
   ];
 
   hooks = {
