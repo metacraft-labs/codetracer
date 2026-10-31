@@ -1560,7 +1560,8 @@ nim-everywhere
 nim-shm-gset
 nim-shm-queue
 nim-stackable-hooks
-runquota"
+runquota
+test-certificates-tools"
 
 # The flake inputs (c) must have compared, at least.
 readonly CORE_FLAKE_PINNED_FLOOR="isonim isonim-tui runquota"

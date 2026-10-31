@@ -4836,6 +4836,15 @@ jobs:
             codetracer-trace-format=4f95fba0206476117df962204835cc9a65ad2e87
             codetracer-trace-format-nim=62325a3adf0cacd6f0f17ac55775a554f9d17e84
             codetracer-native-recorder=f1b9bf029039b3f21a15f399e000496139127076
+            # Required by scripts/require-siblings.sh, which build-once.sh runs first.
+            # BARE: this job only runs on codetracer, so clone-siblings resolves
+            # them from this commit's own committed repro.lock, which pins all of them.
+            # nim-shm-queue and nim-shm-gset travel with io-mon: its modules import both.
+            io-mon
+            nim-stackable-hooks
+            test-certificates-tools
+            nim-shm-queue
+            nim-shm-gset
 
       - name: Build CodeTracer-Setup.exe
         shell: bash
@@ -6402,7 +6411,6 @@ jobs:
             codetracer-trace-format=4f95fba0206476117df962204835cc9a65ad2e87
             codetracer-trace-format-nim=62325a3adf0cacd6f0f17ac55775a554f9d17e84
             codetracer-native-recorder=f1b9bf029039b3f21a15f399e000496139127076
-            nim-stackable-hooks=dev
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
@@ -6487,7 +6495,7 @@ jobs:
         #     error: Recipe `test-gui-prebuilt` failed with exit code 1
         #
         # The `siblings:` block in `Setup dev env` above carries
-        # trace-format, trace-format-nim, native-recorder, nim-stackable-hooks,
+        # trace-format, trace-format-nim, native-recorder,
         # visual-replay, native-backend and runquota -- and no isonim, because
         # isonim is not resolvable from the workspace lock (the `codetracer`
         # project in metacraft-manifests does not declare it). repro.lock is
@@ -6495,7 +6503,7 @@ jobs:
         uses: ./.github/actions/provision-repro-lock-siblings
 
       # NOTE: codetracer-trace-format, codetracer-trace-format-nim,
-      # codetracer-native-recorder, nim-stackable-hooks, codetracer-visual-replay and
+      # codetracer-native-recorder, codetracer-visual-replay and
       # codetracer-native-backend are now cloned adjacent to this checkout
       # (``../<name>``) at their pinned `dev` refs by the
       # ``Setup dev env`` step above. The macOS cargo path deps
@@ -7768,38 +7776,6 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
-      - name: Clone io-mon sibling
-        # certificate_untracked_reads_test.nim builds the io-mon CLI and
-        # interpose shim from this sibling and captures a real read set with
-        # them (CTC-3g). Without it the suite fails by name; it never skips.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
-        with:
-          repo: metacraft-labs/io-mon
-          ref: dev
-          path: ${{ github.workspace }}/../io-mon
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          submodules: 'false'
-
-      - name: Clone nim-stackable-hooks sibling
-        # io-mon's shim and CLI build on it (io-mon config.nims).
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
-        with:
-          repo: metacraft-labs/nim-stackable-hooks
-          ref: dev
-          path: ${{ github.workspace }}/../nim-stackable-hooks
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          submodules: 'false'
-
-      - name: Clone nim-shm-queue sibling
-        # io-mon's shim and CLI build on it (io-mon config.nims).
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
-        with:
-          repo: metacraft-labs/nim-shm-queue
-          ref: dev
-          path: ${{ github.workspace }}/../nim-shm-queue
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          submodules: 'false'
-
       - name: Clone nim-shm-gset sibling
         # io-mon's shim and CLI build on it (io-mon config.nims).
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
@@ -7825,6 +7801,10 @@ jobs:
         # uses for note framing, at the revision repro.lock pins (the same one
         # flake.nix's `test-certificates-tools` input names: `repro lock
         # update test-certificates-tools` moves both).
+        # Also io-mon, nim-stackable-hooks and nim-shm-queue:
+        # certificate_untracked_reads_test.nim builds the io-mon CLI and interpose
+        # shim from these siblings and captures a real read set with them (CTC-3g).
+        # Without them the suite fails by name; it never skips.
         uses: ./.github/actions/provision-repro-lock-siblings
 
       - name: Run the ct-test-certificates lane

@@ -163,35 +163,6 @@ KNOWN_GAPS=(
 	"codetracer.yml|windows-installer-build|nim-everywhere"
 	"codetracer.yml|windows-installer-build|runquota"
 
-	# io-mon and nim-stackable-hooks became REQUIRED on 2026-10-31 (codetracer-pm
-	# issue 2026-10-30-require-siblings-calls-io-mon-advisory-but-build-once-
-	# cannot-compile-ct-without-it). FOUND, not accepted: these jobs never
-	# provisioned either repo, so on the tup driver they could not have compiled
-	# `ct` past `cannot open file: io_mon/depfile` before this change either --
-	# the preflight now says so up front. No CI run has corroborated it, because
-	# none of them reached `build-once` in the runs checked (codetracer.yml runs
-	# up to 41895ebdf, 2026-10-30: token-mint failures and cancellations).
-	#
-	# REMEDY: most of these jobs take their Nim siblings from
-	# provision-repro-lock-siblings, which clones the members of repro.lock's
-	# develop set that the lock also solves as PACKAGES
-	# (ci/repro-lock-build-input-siblings.sh). io-mon and nim-stackable-hooks are
-	# in the develop set but not solved as packages, so the action skips them.
-	# Declaring both as from-source inputs in repro.nim and relocking closes
-	# every line below except windows-installer-build's, which needs them in its
-	# windows-diy siblings: block (bare; repro.lock pins both). Recorded, with
-	# this remedy, as codetracer-pm issue 2026-10-31-codetracer-ci-build-once-
-	# jobs-do-not-provision-io-mon-nim-stackable-hooks-or-test-certificates-tools.
-	"codetracer.yml|cross-process-linux|io-mon"
-	"codetracer.yml|cross-process-linux|nim-stackable-hooks"
-	"codetracer.yml|viewmodel-tests|io-mon"
-	"codetracer.yml|viewmodel-tests|nim-stackable-hooks"
-	"codetracer.yml|gpui-window-captures|io-mon"
-	"codetracer.yml|gpui-window-captures|nim-stackable-hooks"
-	"codetracer.yml|windows-installer-build|io-mon"
-	"codetracer.yml|windows-installer-build|nim-stackable-hooks"
-	# test-ui-tests already clones nim-stackable-hooks=dev in its siblings: block.
-	"codetracer.yml|test-ui-tests|io-mon"
 )
 
 assertions=0

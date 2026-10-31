@@ -544,6 +544,16 @@ package codeTracer:
     # flake.nix's `test-certificates-tools` input names; move both together
     # (`repro lock update test-certificates-tools --to <rev>`).
     "test-certificates-tools >=0"
+    # `ct` imports `io_mon/depfile` and `stackable_hooks/propagation`
+    # unconditionally (src/ct_test/incremental/io_mon_capture.nim), so these two
+    # are REQUIRED siblings (scripts/require-siblings.sh) and every `ct` build
+    # reaches them. Declared here, as source inputs, so that the lock solves
+    # them as packages: that is what makes
+    # .github/actions/provision-repro-lock-siblings clone them, with no list to
+    # edit, in every job that takes its Nim siblings from that action. flake.nix
+    # names both as inputs; `repro lock update <name>` moves both locks together.
+    "io-mon >=0"
+    "nim-stackable-hooks >=0"
     # The parity gate compiles the FLIP producer's C ABI; declare its source
     # package so the sibling revision participates in dependency locking.
     # Named by its repository, as every workspace producer above is

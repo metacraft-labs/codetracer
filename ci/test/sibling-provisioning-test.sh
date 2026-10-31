@@ -257,7 +257,11 @@ echo "siblings: entries pin a reproducible revision"
 # lanes build passes `ct-mcr replay-worker --parent-pid`, which only that
 # commit's ct-mcr accepts. The count had already fallen to 24 unnoticed, since
 # a ceiling reports only an increase.
-readonly BRANCH_TIP_CEILING=15
+#
+# 15 -> 14: test-ui-tests no longer lists `nim-stackable-hooks=dev`.
+# provision-repro-lock-siblings now clones it at the revision repro.lock pins.
+# Converted by deletion.
+readonly BRANCH_TIP_CEILING=14
 
 # Classify one sibling entry's ref text. Factored out of the scanner so it can
 # be exercised directly by the self-test below: a detector that silently stops
@@ -485,14 +489,20 @@ readonly REPRO_LOCK="$REPO_ROOT/repro.lock"
 # its build-input subset from 6 to 13: `codetracer-trace-format-nim` and the
 # IsoNim libraries the lock now solves as packages. All 13 are public, which
 # the credential-less clone requires and an assertion below checks.
-# The current lock also declares private-recordings and image-diff test inputs;
-# neither changes the thirteen public source-build inputs below.
-readonly LOCK_DECLARED_DEPS='isonim,isonim-tui,codetracer-trace-format-nim,nim-everywhere,nim-agent-harbor,nim-agents,nim-acp,isonim-render-serve,nim-termctl,nim-pty,isonim-gpui,isonim-freya,isonim-cocoa,reprobuild-packages,TermAssert,TermAssertClient,codetracer-beam-recorder,codetracer-ci,codetracer-evm-recorder,codetracer-js-recorder,codetracer-launcher,codetracer-native-backend,codetracer-native-recorder,codetracer-native-test-programs,codetracer-observability-cli,codetracer-observability-e2e,codetracer-observability-grafana,codetracer-observability-jaeger,codetracer-private-recordings,codetracer-python-recorder,codetracer-ruby-recorder,codetracer-test-mirror,codetracer-trace-format,codetracer-visual-replay,codetracer-vscode-extension,codetracer-wasm-instrumenter,codetracer-wasm-recorder,io-mon,isonim-examples,metacraft-github-actions,ngx-isonim,nim-faststreams,nim-libvterm,nim-shm-gset,nim-shm-queue,nim-stackable-hooks,nim-stew,reprobuild,runquota,tree-sitter-aiken,tree-sitter-nim,codetracer-image-diff'
+# The current lock also declares a private-recordings test input, which is not
+# a build input.
+#
+# 13 -> 18 (2026-10-31): test-certificates-tools and codetracer-image-diff were
+# already solved as packages, and this list had not followed them. io-mon and
+# nim-stackable-hooks are new: `ct` imports both, so repro.nim now declares them
+# from source, and io-mon brings nim-shm-queue with it. nim-shm-gset is not solved
+# as a package, so jobs that compile io-mon's capture half still name it.
+readonly LOCK_DECLARED_DEPS='isonim,isonim-tui,codetracer-trace-format-nim,nim-everywhere,nim-agent-harbor,nim-agents,nim-acp,test-certificates-tools,io-mon,nim-stackable-hooks,codetracer-image-diff,isonim-render-serve,nim-termctl,nim-pty,nim-shm-queue,isonim-gpui,isonim-freya,isonim-cocoa,reprobuild-packages,TermAssert,TermAssertClient,codetracer-beam-recorder,codetracer-ci,codetracer-evm-recorder,codetracer-js-recorder,codetracer-launcher,codetracer-native-backend,codetracer-native-recorder,codetracer-native-test-programs,codetracer-observability-cli,codetracer-observability-e2e,codetracer-observability-grafana,codetracer-observability-jaeger,codetracer-private-recordings,codetracer-python-recorder,codetracer-ruby-recorder,codetracer-test-mirror,codetracer-trace-format,codetracer-visual-replay,codetracer-vscode-extension,codetracer-wasm-instrumenter,codetracer-wasm-recorder,isonim-examples,metacraft-github-actions,ngx-isonim,nim-faststreams,nim-libvterm,nim-shm-gset,nim-stew,reprobuild,runquota,tree-sitter-aiken,tree-sitter-nim'
 # The build-input subset of that set (members that are also solved packages,
 # i.e. what `repro.nim` `uses` from source), as
 # `ci/repro-lock-build-input-siblings.sh` derives it from the lock. This is
 # what `provision-repro-lock-siblings` clones.
-readonly LOCK_BUILD_INPUT_SIBLINGS='isonim,isonim-tui,codetracer-trace-format-nim,nim-everywhere,nim-agent-harbor,nim-agents,nim-acp,isonim-render-serve,nim-termctl,nim-pty,isonim-gpui,isonim-freya,isonim-cocoa'
+readonly LOCK_BUILD_INPUT_SIBLINGS='isonim,isonim-tui,codetracer-trace-format-nim,nim-everywhere,nim-agent-harbor,nim-agents,nim-acp,test-certificates-tools,io-mon,nim-stackable-hooks,codetracer-image-diff,isonim-render-serve,nim-termctl,nim-pty,nim-shm-queue,isonim-gpui,isonim-freya,isonim-cocoa'
 readonly BUILD_INPUT_SELECTOR="$REPO_ROOT/ci/repro-lock-build-input-siblings.sh"
 
 # Anti-vacuity first: the action must exist and must still invoke the command

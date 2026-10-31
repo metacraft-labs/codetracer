@@ -860,6 +860,11 @@ jobs:
             isonim=6927da97dfd0ff92b24662d54f6d261528811632
             isonim-tui=1d123c35bd241a4af853b2df6b21c973fba9e6b7
             runquota=35b9dfe4af6e18f3f2a2242ece7cff330eb581e2
+            # Required by scripts/require-siblings.sh (`ct` links its reference
+            # library). SHA, not bare: this workflow is also called from recorder
+            # repos, whose repro.lock need not pin it. It is a flake input, so the
+            # SHA is the one flake.lock pins.
+            test-certificates-tools=9864082065c8acb1db315e65a6a4157a3ab77117
 
       - name: Check the workspace has the shape the driver expects
         # Cheap, and it turns the one class of failure a local rehearsal cannot
