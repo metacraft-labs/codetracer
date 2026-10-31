@@ -587,6 +587,45 @@ suite "the omnibar's symbols are the recording's functions":
     check found[0].target == "40"
     check found[0].detail == "calc.rs:3"
 
+  test "an answer with no symbols list leaves them alone, and does not crash":
+    ## REGRESSION. `applySymbolsResponse` read `.kind` off the result of
+    ## `getOrDefault`, which is `nil` for a missing key. Its own docstring
+    ## promises that "an answer without a `symbols` list leaves them alone",
+    ## and instead it dereferenced nil. In the shipped `-d:release` build
+    ## there is no nil check, so this killed `codetracer-gpui` at startup
+    ## (`native_host.loadRecordingPanes` applies the real
+    ## `ct/load-symbols` answer) and blocked every macOS window capture
+    ## from 2026-10-20 to 2026-10-31.
+    ##
+    ## Each shape below reached the same line. They are separate cases
+    ## because they arrive by different routes: an enveloped response whose
+    ## body carries no symbols, a bare body, an empty object, and a `body`
+    ## that is not an object at all.
+    for answer in [
+        %*{"body": {"total": 0}},        # enveloped, no `symbols` key
+        %*{"total": 0},                  # bare body, no `symbols` key
+        %*{"body": {}},                  # enveloped, empty body
+        %*{},                            # empty object
+        %*{"body": 7},                   # `body` is not an object
+        %*{"body": {"symbols": 7}}]:     # `symbols` is not an array
+      let (store, _) = storeWithMock()
+      store.applySymbolsResponse(%*{"symbols": [
+        {"name": "calc", "path": "/src/calc.rs", "line": 3,
+         "firstCallTicks": 40}]})
+      check symbolsOf(store).len == 1
+      # The point of the test: this must neither raise nor fault, and must
+      # leave the symbols that were already there untouched.
+      store.applySymbolsResponse(answer)
+      check symbolsOf(store).len == 1
+      check symbolsOf(store)[0].label == "calc"
+
+  test "a nil payload, and a payload that is not an object, are ignored":
+    let (store, _) = storeWithMock()
+    store.applySymbolsResponse(nil)
+    check symbolsOf(store).len == 0
+    store.applySymbolsResponse(%*[1, 2])
+    check symbolsOf(store).len == 0
+
 suite "origin chains":
 
   test "only the answer to the latest request, not cancelled, is applied":

@@ -838,11 +838,28 @@ proc applySymbolsResponse*(store: ReplayDataStore; payload: JsonNode) =
   let body =
     if payload.hasKey("symbols"): payload
     else: payload.getOrDefault("body")
-  if body.isNil or body.kind != JObject or
-      body.getOrDefault("symbols").kind != JArray:
+  if body.isNil or body.kind != JObject:
+    return
+  # `{}` RATHER THAN `getOrDefault`, and the nil tested before `.kind` is
+  # read. `getOrDefault` answers a MISSING key with `nil`, so
+  # `body.getOrDefault("symbols").kind` dereferenced nil for exactly the
+  # answer the docstring above promises to tolerate -- a body carrying no
+  # `symbols` list. Under `--mm:orc -d:release` there is no nil check to
+  # turn that into an exception: `kind` sits at offset 1 of the object, so
+  # the read faults at address 0x1 and the process dies with SIGSEGV.
+  #
+  # Measured 2026-10-31 on aarch64-darwin at codetracer `3eb04f9cc5`:
+  # `codetracer-gpui` died in `applySymbolsResponse` on every one of the
+  # seven PLAT-37 scenarios, before it could open a window
+  # (`EXC_BAD_ACCESS ... KERN_INVALID_ADDRESS at 0x0000000000000001`,
+  # `ldrb w8, [x0, #0x1]` at `applySymbolsResponse+244`), which is why no
+  # macOS window capture has succeeded since `0d7cf7926c` introduced the
+  # line on 2026-10-20.
+  let symbolsNode = body{"symbols"}
+  if symbolsNode.isNil or symbolsNode.kind != JArray:
     return
   var symbols: seq[RecordedSymbol]
-  for node in body["symbols"]:
+  for node in symbolsNode:
     symbols.add RecordedSymbol(
       name: node{"name"}.getStr(""),
       path: node{"path"}.getStr(""),
