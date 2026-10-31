@@ -25,13 +25,16 @@
 ##   * M74 (codetracer#841), THE FILE MENU: its items reach the welcome flow,
 ##     and a disabled item's reason is drawn beside it (EMT-D14).
 ##
-## No mocks: the shipped binary, real recordings, a real engine, a real `ct
-## record`.
+## The recording positive control uses the shipped binary, real recordings,
+## a real engine and a real `ct record`. A refusing recorder subprocess below
+## only observes which executable the window starts; it cannot supply a trace
+## or satisfy the real-recording case.
 
 import replay_prerequisite
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles,
             times, unittest]
 import ./gpui_child_env
+from ../../tui/host/native_host import nativeCtBinary
 
 import gpui/chrome
 import gpui/window_geometry
@@ -42,7 +45,8 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 63
+  ExpectedAssertions = 69
+    ## 63 -> 69: checked-recorder refusal and subprocess-selection controls.
     ## 32 -> 33 (2026-10-17): the focus case asserts that NOTHING is outlined
     ## before the first press (the desktop's behaviour since the redesign),
     ## then that a press outlines the pressed pane — one check more.
@@ -64,11 +68,22 @@ let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                    repo.parentDir / "isonim-gpui/rust/target/debug")
 let calc = repo / CalcFixture
 
+proc checkedRecorder(path: string): string =
+  ## A failed prerequisite stops the case before the native host can choose
+  ## a different recorder. Keep the resolved absolute path for the child.
+  if path.len == 0 or not fileExists(path):
+    raise newException(IOError, "prerequisite missing: ct " & path &
+      " (set CT_BIN, or just build-once)")
+  absolutePath(path)
+
 proc windowPlan(ops: string; geometry: var JsonNode; state = "";
-                pre: seq[string] = @[]; width = W): JsonNode =
+                pre: seq[string] = @[]; width = W; recorder = ""): JsonNode =
   ## The window's root after `ops`, as the shipped binary reports it, and
   ## the geometry it drew last. `state` is the product's state root (a fresh
   ## one when empty, removed afterwards); `width` the window's, in pixels.
+  let ct = if recorder.len > 0: checkedRecorder(recorder) else: ""
+  if ct.len > 0:
+    echo "ct recording prerequisite: ", ct
   if not fileExists(bin):
     raise newException(IOError, "prerequisite missing: " & bin &
                        " (just build-gpui)")
@@ -84,8 +99,7 @@ proc windowPlan(ops: string; geometry: var JsonNode; state = "";
   env["XDG_STATE_HOME"] = root / "xdg"
   # Every other per-user location of the spawned binary (common/ct_home).
   env["CODETRACER_HOME"] = root / "ct-home"
-  let ct = repo / "src/build-debug/bin/ct"
-  if fileExists(ct):
+  if ct.len > 0:
     env["CT_BIN"] = ct
   let geomFile = root / "geometry.json"
   env["CODETRACER_GPUI_GEOMETRY_OUT"] = geomFile
@@ -112,9 +126,9 @@ proc windowPlan(ops: string; geometry: var JsonNode; state = "";
   parseJson(output)
 
 proc windowPlan(ops: string; state = ""; pre: seq[string] = @[];
-                width = W): JsonNode =
+                width = W; recorder = ""): JsonNode =
   var g: JsonNode
-  windowPlan(ops, g, state, pre, width)
+  windowPlan(ops, g, state, pre, width, recorder)
 
 proc attr(n: JsonNode; name: string): string =
   if n{"attributes"}.kind == JObject: n["attributes"]{name}.getStr else: ""
@@ -291,6 +305,38 @@ suite "PLAT-51 part B GPUI: GoldenLayout's drop zones in the window":
 
 suite "PLAT-51 part B GPUI: a new tab's Welcome Screen":
 
+  test "a missing checked recorder refuses before the window can fall back":
+    let state = createTempDir("plat51b-gpui-missing-ct-", "")
+    defer: removeDir(state)
+    let missing = state / "missing-ct"
+    var refusal = ""
+    try:
+      discard windowPlan("", state, recorder = missing)
+    except IOError as e:
+      refusal = e.msg
+    checkpoint("recorder refusal: " & refusal)
+    ck missing in refusal
+    ck "just build-once" in refusal
+    ck not fileExists(state / "geometry.json")
+
+  test "the window starts the checked recorder instead of an ambient ct":
+    let state = createTempDir("plat51b-gpui-selected-ct-", "")
+    defer: removeDir(state)
+    let recorder = state / "checked-ct"
+    let invoked = state / "recorder-invoked"
+    # This deliberate failure can prove selection without impersonating a
+    # successful recorder: only the real-recording case may open a trace.
+    writeFile(recorder, "#!/bin/sh\nprintf '%s' \"$1\" > " &
+      quoteShell(invoked) & "\nexit 73\n")
+    setFilePermissions(recorder, {fpUserRead, fpUserWrite, fpUserExec})
+    let program = state / "greeter.py"
+    writeFile(program, "print('recorder selection')\n")
+    let plan = windowPlan("tab-add,key:down,key:enter,type:" & program &
+      ",key:enter,wait:240000", state, recorder = recorder)
+    ck fileExists(invoked)
+    ck (if fileExists(invoked): readFile(invoked) else: "") == "record"
+    ck plan.nodesWith("data-ct-welcome").len == 1
+
   test "the + opens it: the desktop's start options in its order, the recent panels":
     let desk = parseFile(repo / DesktopAnswers)["newTab"]
     let plan = windowPlan("tab-add")
@@ -315,9 +361,7 @@ suite "PLAT-51 part B GPUI: a new tab's Welcome Screen":
       ck panel.getStr in text
 
   test "Record new trace runs a real ct record and the recording opens in the tab":
-    let ct = repo / "src/build-debug/bin/ct"
-    if not fileExists(ct):
-      checkpoint("prerequisite missing: " & ct & " (just build-once)")
+    let ct = checkedRecorder(nativeCtBinary())
     ck fileExists(ct)
     let state = createTempDir("plat51b-gpui-record-", "")
     defer: removeDir(state)
@@ -326,7 +370,7 @@ suite "PLAT-51 part B GPUI: a new tab's Welcome Screen":
                        "print(greet('plat51'))\n")
     # The focus starts on "Open folder"; "Record new trace" is the next row.
     let plan = windowPlan("tab-add,key:down,key:enter,type:" & program &
-                          ",key:enter,wait:240000", state)
+                          ",key:enter,wait:240000", state, recorder = ct)
     var titles: seq[string] = @[]
     for t in plan.nodesWith("data-ct-session-tab"):
       titles.add t.attr("data-ct-session-tab")
