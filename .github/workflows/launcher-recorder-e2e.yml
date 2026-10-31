@@ -997,31 +997,10 @@ jobs:
         # duplicated.  A sibling with no flake.nix has nothing for a later step
         # to evaluate and is skipped.
         #
-        # REPRO'S OWN TOOL PROVISIONING IS A FETCH NO DEV SHELL EVALUATES, so
-        # it is fetched here FIRST, explicitly.  `repro exec` (build-siblings'
-        # toolchain lookup, and every sibling build after it) realizes the
-        # tools a repo's `repro.nim` declares from reprobuild's package
-        # catalog, and every `nixpkgs#` entry there resolves against ONE
-        # nixpkgs revision, `CanonicalNixpkgsRev` in reprobuild's
-        # libs/repro_dsl_stdlib/src/repro_dsl_stdlib/nixpkgs_pin.nim.  repro
-        # fetches it itself, as `github:NixOS/nixpkgs/<rev>?narHash=<hash>`,
-        # and no flake evaluated below reaches that ref.  Launcher run
-        # 40412127662's beam arm died on exactly it, ~2 h after the mint, in
-        # `Build ct-print`'s toolchain lookup:
-        #
-        #   unable to download 'https://api.github.com/repos/NixOS/nixpkgs/
-        #   tarball/addf7cf5f383...': HTTP error 401 "Bad credentials"
-        #
-        # The revision is READ, never restated: the reprobuild that provides
-        # `repro` to this job is codetracer's `reprobuild` flake input
-        # (nix/shells/ci-base.nix: `inputs'.reprobuild.packages`, and
-        # REPROBUILD_SOURCE_ROOT for the stdlib the provider compiles
-        # against), so the pin file is read out of THAT input at the revision
-        # this checkout's flake.lock locks, and the exact ref repro will ask
-        # for is fetched.  A codetracer whose flake has no direct `reprobuild`
-        # input gets repro from elsewhere and is skipped; a pin file that no
-        # longer reads is an error naming it, because skipping it silently
-        # would reopen the 401 above.
+        # The shared preparation below activates the same SDK and projects as
+        # the later builds, including bootstrap tools no flake eval reaches.
+        # This input guard does not inspect SDK source constants or select
+        # package realizations on the SDK's behalf.
         #
         # NO CREDENTIAL IS HANDLED HERE.  nix reads the token from the
         # user-level nix.conf `setup-nix` wrote (mode 600); this step never
@@ -1032,47 +1011,6 @@ jobs:
           RECORDER_REPO: ${{ inputs.recorder-repo }}
         run: |
           set -euo pipefail
-          PIN_FILE="libs/repro_dsl_stdlib/src/repro_dsl_stdlib/nixpkgs_pin.nim"
-          rb_node=""
-          if [ -f "${CT_DIR}/flake.lock" ]; then
-            rb_node="$(jq -r '.nodes.root.inputs.reprobuild // "" | if type == "string" then . else "" end' "${CT_DIR}/flake.lock")"
-          fi
-          if [ -z "${rb_node}" ]; then
-            echo "no direct reprobuild input in ${CT_DIR}/flake.lock (repro's tool-provisioning nixpkgs is not this flake's to name)"
-          else
-            rb_ref="$(jq -r --arg n "${rb_node}" '.nodes[$n].locked | if .type == "github" then "github:\(.owner)/\(.repo)/\(.rev)?narHash=\(.narHash | @uri)" else "" end' "${CT_DIR}/flake.lock")"
-            if [ -z "${rb_ref}" ]; then
-              echo "::error::codetracer's reprobuild flake input is not a locked github input, so this step cannot read the nixpkgs revision repro provisions tools from. Teach this step the input's type; skipping it would leave that fetch to after the token expires."
-              exit 1
-            fi
-            if ! rb_json="$(nix flake prefetch --json "${rb_ref}")"; then
-              echo "::error::could not fetch ${rb_ref} (codetracer's reprobuild input, which names the nixpkgs repro provisions tools from) while this job's GitHub token is still valid; nix's own diagnostic is above this line."
-              exit 1
-            fi
-            rb_src="$(jq -r '.storePath // ""' <<<"${rb_json}" 2>/dev/null || true)"
-            pin="${rb_src}/${PIN_FILE}"
-            np_rev=""
-            np_nar=""
-            if [ -n "${rb_src}" ] && [ -f "${pin}" ]; then
-              np_rev="$(sed -n -E 's|^[[:space:]]*CanonicalNixpkgsRev\*?[[:space:]]*=[[:space:]]*"([0-9a-f]{40})".*|\1|p' "${pin}")"
-              np_nar="$(sed -n -E 's|^[[:space:]]*CanonicalNixpkgsNarHash\*?[[:space:]]*=[[:space:]]*"(sha256-[A-Za-z0-9+/=]+)".*|\1|p' "${pin}")"
-            fi
-            if [ -z "${np_rev}" ] || [ -z "${np_nar}" ]; then
-              echo "::error::could not read CanonicalNixpkgsRev / CanonicalNixpkgsNarHash from ${PIN_FILE} in ${rb_ref}. That pair names the nixpkgs repro realizes every catalog tool from; this step must fetch it while the token is valid. If reprobuild moved or renamed it, update this step."
-              exit 1
-            fi
-            np_nar_q="${np_nar//+/%2B}"
-            np_nar_q="${np_nar_q//\//%2F}"
-            np_nar_q="${np_nar_q//=/%3D}"
-            np_ref="github:NixOS/nixpkgs/${np_rev}?narHash=${np_nar_q}"
-            started="${SECONDS}"
-            if ! nix flake prefetch "${np_ref}" >/dev/null; then
-              echo "::error::could not fetch ${np_ref} (the nixpkgs repro provisions tools from) while this job's GitHub token is still valid; nix's own diagnostic is above this line."
-              exit 1
-            fi
-            echo "fetched: ${np_ref} (repro tool provisioning; ${rb_ref}) ($((SECONDS - started))s)"
-          fi
-
           SYSTEM="$(nix eval --impure --raw --expr builtins.currentSystem)"
           PARENT="$(cd "${CT_DIR}/.." && pwd)"
           dirs=("${CT_DIR}" "${CT_DIR}" "${PARENT}/codetracer-trace-format-nim" "${PARENT}/${RECORDER_REPO}")
@@ -1091,6 +1029,18 @@ jobs:
             fi
             echo "fetched: ${dir} #${attr} ($((SECONDS - started))s)"
           done
+
+      - name: Prepare selected Repro toolchains before long running gates
+        # Same SDK shell and roots as build-siblings.sh and the driver.
+        # Provisioning refusals are infrastructure, before any decoder verdict.
+        uses: metacraft-labs/metacraft-github-actions/prepare-repro-envs@80542fb7298e274fd739d06c6f626f227ace308a
+        with:
+          working-directory: ${{ steps.plan.outputs.ct-dir }}
+          nix-shell: .?submodules=1#ci
+          projects: |
+            ${{ steps.plan.outputs.ct-dir }}
+            ${{ steps.plan.outputs.ct-dir }}/../codetracer-trace-format-nim
+            ${{ steps.plan.outputs.ct-dir }}/../${{ inputs.recorder-repo }}
 
       - name: Provision the musl/zig toolchain for the launcher link
         # INHERITED LRC-3 DELIVERABLE (runner prerequisites).
