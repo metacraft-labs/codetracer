@@ -9,6 +9,26 @@ proc scriptSessionLogPath*(sessionId: int): string =
   else:
     bashLogFile
 
+proc markShellTerminal*(actionId: int; status: string) =
+  ## The Shell pane's action mark (CodeTracer-Shell.md §7.4): an OSC written
+  ## to this process's terminal — the pane's pty — just before the session's
+  ## report line, so the pane knows exactly which output line a recording
+  ## started or ended on. `status` is `working`, `ok` or `error`. Nothing is
+  ## written without a terminal, or outside a pane's session.
+  when defined(posix):
+    if getEnv("CODETRACER_SHELL_REPORT_FILE", "").len == 0:
+      return
+    var tty: File
+    if not open(tty, "/dev/tty", fmWrite):
+      return
+    try:
+      tty.write("\e]6973;action=" & $actionId & ";status=" & status & "\a")
+      tty.flushFile()
+    except CatchableError:
+      discard
+    finally:
+      tty.close()
+
 proc loadSessionId*: int =
   let sessionIdRaw = getEnv("CODETRACER_SESSION_ID", "-1")
   var sessionId = -1
@@ -19,15 +39,21 @@ proc loadSessionId*: int =
   sessionId
 
 proc loadLine*(sessionId: int, sessionLogPath: string): int =
-  if sessionId == -1:
-    NO_LINE
-  else:
+  ## The shell's current output line from the session's line file (§2.5), or
+  ## `NO_LINE` when the session keeps none: the Shell pane stamps lines itself
+  ## (CodeTracer-Shell.md §7.4) and writes no such file, and a recording must
+  ## not fail over a missing or half-written one.
+  if sessionId == -1 or not fileExists(sessionLogPath):
+    return NO_LINE
+  try:
     let useScript = getEnv("CODETRACER_SHELL_USE_SCRIPT", "0") == "1"
     let raw = readFile(sessionLogPath)
     if not useScript:
-      raw.parseInt
+      raw.strip.parseInt
     else:
       raw.splitLines.len - 1
+  except CatchableError:
+    NO_LINE
 
 proc resolveRecordingId*(arg: string): Trace =
   ## M-REC-6: resolve a user-supplied recording-id argument.  Accepts:

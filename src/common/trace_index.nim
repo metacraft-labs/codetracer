@@ -1743,11 +1743,54 @@ proc sendEvent(socketPath: string, address: string, rawEvent: string) =
 # CODE REVIEW question: should we use a register event object which can include
 #   reportFile / socketPath / address / others for better maintanance/code?
 #   or is separate params everywhere ok for now?
+proc sessionEventJson*(event: SessionEvent): JsonNode =
+  ## A `SessionEvent` as one line of a shell session's report file
+  ## (CodeTracer-Shell.md §2.3, §7.3): `kind` and `status` by NAME, and of a
+  ## recording's `Trace` only what the Shell pane reads — its id, its folder
+  ## and its program — rather than the whole index row.
+  result = %*{
+    "kind": $event.kind,
+    "status": $event.status,
+    "sessionId": event.sessionId,
+    "actionId": event.actionId,
+    "command": $event.command,
+    "errorMessage": $event.errorMessage,
+    "firstLine": event.firstLine,
+    "lastLine": event.lastLine,
+    "time": $event.time,
+  }
+  case event.kind
+  of CustomCompilerFlagCommand:
+    result["program"] = %($event.program)
+  of LinkingBinary:
+    result["binary"] = %($event.binary)
+  of RecordingCommand:
+    result["recordPid"] = %event.recordPid
+    result["traceArchivePath"] = %($event.traceArchivePath)
+    if not event.trace.isNil:
+      result["trace"] = %*{
+        "recordingId": event.trace.recordingId,
+        "outputFolder": event.trace.outputFolder,
+        "program": event.trace.program,
+      }
+
+proc appendReportLine*(reportFile: string; line: string) =
+  ## Append one whole line to a shell session's report file in ONE write, so a
+  ## reader polling it (`shell_session.poll`) never sees half of it next to
+  ## another writer's.
+  var f: File
+  if not open(f, reportFile, fmAppend):
+    stderr.writeLine(fmt"WARNING: couldn't append to the shell session's report file {reportFile}")
+    return
+  defer: f.close()
+  f.write(line & "\n")
+  f.flushFile()
+
 proc registerEvent*(reportFile: string, socketPath: string, address: string, event: SessionEvent) =
+  if reportFile.len > 0:
+    appendReportLine(reportFile, $sessionEventJson(event))
   if socketPath.len > 0:
     sendEvent(socketPath, address, Json.encode(event))
-  else:
-    discard # not implemented for this backend for now
 
 proc registerRecordingForPid*(pid: int, recordingId: string, test: bool) =
   ## Map a recorder process pid to the ``recording_id`` of the trace it
@@ -1785,7 +1828,7 @@ proc registerRecordingCommand*(
     sessionId: int, actionId: int, recordPid: int, traceArchivePath: string,
     command: string,
     status: SessionEventStatus, errorMessage: string,
-    firstLine: int, lastLine: int = -1) =
+    firstLine: int, lastLine: int = -1, trace: Trace = nil) =
   registerEvent(
     reportFile,
     socketPath,
@@ -1795,12 +1838,14 @@ proc registerRecordingCommand*(
      sessionId: sessionId,
      recordPid: recordPid,
      traceArchivePath: traceArchivePath,
+     trace: trace,
      command: command,
      status: status,
      errorMessage: errorMessage,
      firstLine: firstLine,
      lastLine: lastLine,
-     actionId: actionId))
+     actionId: actionId,
+     time: $now()))
 
 
 proc all*(test: bool): seq[Trace] =

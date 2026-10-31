@@ -17,6 +17,7 @@ import
 # Nix store libraries (SQLite, PCRE, etc.) are found at runtime.
 when not defined(js):
   import std / os
+  import shell_session_command   # `ct shell-session` (CodeTracer-Shell.md §7.2)
 
 when not defined(js) and not defined(windows):
   block:
@@ -236,6 +237,11 @@ try:
         let shell = if args.len >= 2: args[1] else: ""
         runCtCompletions(shell)
         quit(QuitSuccess)
+      of "shell-session":
+        # CodeTracer-Shell.md §7.2: the desktop's Shell pane's session on
+        # stdio. Internal, and before confutils for the same reason as
+        # `ct-complete`: its `--` arguments are the shell's, not ct's.
+        quit(runShellSessionCommand(args[1 .. ^1]))
       else:
         discard
 
