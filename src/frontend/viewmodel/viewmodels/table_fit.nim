@@ -312,3 +312,29 @@ proc requestsFit*(idUnits, methodUnits, urlUnits, statusUnits, durationUnits,
               neverCut: true),
     FitColumn(name: RequestsColumnNames[5], preferredUnits: sizeUnits,
               neverCut: true)], viewport, gap)
+
+# ---------------------------------------------------------------------------
+# The Constraints pane's function row (PLAT-62)
+# ---------------------------------------------------------------------------
+
+const
+  ConstraintsColumnNames* = ["name", "kind", "count", "where"]
+  ConstraintNameFloorCells* = 6
+    ## The name keeps this many cells before the pane scrolls instead.
+  ConstraintWhereFloorCells* = 8
+
+proc constraintsFit*(nameUnits, kindUnits, countUnits, whereUnits,
+                     viewport: int; unit = 1; gap = 1): TableFit =
+  ## A function row's four columns for a pane `viewport` units wide — the
+  ## desktop's grid (`minmax(0, 1fr) auto 4em auto`): the name takes the
+  ## slack and is cut with `…`, the kind and the count are never cut, and
+  ## where the function is declared is cut last.
+  fitTable([
+    FitColumn(name: ConstraintsColumnNames[0], preferredUnits: nameUnits,
+              minUnits: ConstraintNameFloorCells * unit, flex: 1),
+    FitColumn(name: ConstraintsColumnNames[1], preferredUnits: kindUnits,
+              neverCut: true),
+    FitColumn(name: ConstraintsColumnNames[2], preferredUnits: countUnits,
+              neverCut: true),
+    FitColumn(name: ConstraintsColumnNames[3], preferredUnits: whereUnits,
+              minUnits: ConstraintWhereFloorCells * unit)], viewport, gap)

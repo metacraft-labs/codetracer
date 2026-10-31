@@ -4514,7 +4514,8 @@ proc onNs9PanesConstraints(
     sender: js,
     response: jsobject(info=cstring, provenance=cstring, absence=cstring)) =
   ## `nargo info --json`, verbatim, or a stated reason there is none — into
-  ## the Constraints ViewModel of the tab that asked.
+  ## the Constraints ViewModel of the tab that asked, with the sources its
+  ## rows are placed against (PLAT-62).
   constraints.initConstraintsVM()
   let constraintsVM = constraintsVMOf(ns9PanesTarget(response.toJs))
   if constraintsVM.isNil:
@@ -4523,6 +4524,10 @@ proc onNs9PanesConstraints(
   if absence.len > 0:
     constraintsVM.setAbsence(absence)
     return
+  let rawSources = response.toJs[cstring"sources"]
+  if not rawSources.isUndefined and not rawSources.isNull:
+    constraintsVM.setSources(
+      constraints.sourcesFromJson($rawSources.to(cstring)))
   constraintsVM.setReport(
     parseNargoInfoJson($response.info, $response.provenance))
 

@@ -5662,6 +5662,15 @@ plat52-capture-electron *args:
 plat53-capture-electron *args:
   bash scripts/plat53-capture-electron.sh "$@"
 
+# PLAT-62: the desktop's Constraints pane is the reference the terminal's and
+# the GPUI window's are measured against: its rows after a real
+# `nargo info --json` over a Noir crate, where each function is declared, what
+# a right-click on a row opens and where a press goes — written to
+# `src/tests/visual/answers/plat62-constraints.electron.json`.
+[positional-arguments]
+plat62-capture-electron *args:
+  bash scripts/plat62-capture-electron.sh "$@"
+
 # PLAT-55: the desktop's Problems panel is the reference the terminal's and the
 # GPUI window's are measured against: its rows after a real `nargo compile` of
 # a crate with one warning and two errors in two files, its filters, and what
