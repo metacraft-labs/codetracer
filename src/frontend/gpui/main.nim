@@ -1104,6 +1104,13 @@ var
     ## PLAT-49 part B: the pointer's timing over the auto-hide labels.
   gHoverClockOffsetMs = 0'i64
     ## What `--window-ops`'s `wait:<ms>` advanced the hover clock by.
+  gHoverScriptBaseMs = -1'i64
+    ## A scripted run's hover clock origin: the wall time its ops began, or
+    ## -1 for a live window. Scripted, the clock is this origin plus the
+    ## `wait:` total and NOTHING ELSE — the wall time spent running the ops
+    ## is not time the script asked to pass. Read off the wall clock, a
+    ## `wait:250` on a loaded host came to 300+ ms, and a hover the script
+    ## had held for 250 ms was already previewed.
 proc windowDrawn(): bool
 
 proc noteEditorTab(r: GpuiRenderer; label: string) =
@@ -7297,9 +7304,12 @@ proc handleTopPress(r: GpuiRenderer; x, y: int): bool =
   true
 
 proc hoverNowMs(): int64 =
-  ## The auto-hide hover's clock: the wall clock, plus what `--window-ops`'s
-  ## `wait:<ms>` advanced it by (a scripted run has no loop to wait in).
-  int64(epochTime() * 1000.0) + gHoverClockOffsetMs
+  ## The auto-hide hover's clock: the wall clock in a live window; in a
+  ## scripted run, the moment its ops began plus what `--window-ops`'s
+  ## `wait:<ms>` advanced it by (a scripted run has no loop to wait in, and
+  ## its time is the script's, see `gHoverScriptBaseMs`).
+  if gHoverScriptBaseMs >= 0: gHoverScriptBaseMs + gHoverClockOffsetMs
+  else: int64(epochTime() * 1000.0) + gHoverClockOffsetMs
 
 proc applyHoverReply(r: GpuiRenderer; reply: AutoHideReply) =
   ## What the hover machine said: open the preview overlay or close it.
@@ -12572,6 +12582,7 @@ proc reportWindowPlan(cmd: GpuiCommand; outcome: LeafRenderOutcome;
   var r: GpuiRenderer
   let root = r.createElement("div")
   paintWindowChrome(root)
+  gHoverScriptBaseMs = int64(epochTime() * 1000.0)
   for op in cmd.windowOps:
     let failure = runWindowOp(r, op)
     if failure.len > 0:
