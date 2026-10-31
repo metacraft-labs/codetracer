@@ -8352,7 +8352,7 @@ suite "IsoNim Low Level Code Panel — overlays":
       vm.setAddress(0x1000)
       let addrDiv = findByClass(panel, "low-level-code-address")
       check addrDiv != nil
-      check addrDiv.textContent == "Originating address: 0x" & toHex(0x1000)
+      check addrDiv.textContent == "Originating address: 0x" & toHex(0x1000'i64)
 
       dispose()
 

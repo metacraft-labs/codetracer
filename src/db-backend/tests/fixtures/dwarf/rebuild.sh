@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Regenerate the `hello.elf` DWARF test fixture (M-DWARF-1).
+# Regenerate the native DWARF test fixtures.
 #
-# The fixture is intentionally checked in so `cargo test` does not need a
-# C toolchain. Run this script only when `hello.c` or `hello_start.S`
-# change. Determinism note: line numbers in DWARF depend on `hello.c`, so
-# the test asserts on stable, well-known lines (e.g. line 27 — the
+# The fixtures are intentionally checked in so `cargo test` does not need a
+# C toolchain. Run this script only when their C/assembly sources change.
+# Determinism note: line numbers in DWARF depend on the source, so
+# the tests assert on stable, well-known lines (e.g. line 24 — the
 # `int sum = a + b;` line inside `add`).
 #
 # Usage:
@@ -22,3 +22,9 @@ gcc -O0 -g \
 
 echo "Built $(realpath hello.elf) — $(stat -c%s hello.elf) bytes"
 file hello.elf || true
+
+# Keep the optimized inline case separate: its addresses and instructions
+# intentionally differ from the O0 fixture's stable stepping constants.
+gcc -O2 -g -fdebug-prefix-map="$PWD"=. \
+	-no-pie -nostdlib -static -Wl,-e,outer \
+	-o inline.elf inline.c

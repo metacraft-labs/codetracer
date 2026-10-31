@@ -20,6 +20,10 @@
 ## request the desktop's Go to Source Line sends (`ct/source-line-jump`) —
 ## the real engine's answer to that request is asserted on the terminal
 ## (`tui/tests/test_plat60_low_level_code.nim`), on the real recording.
+## The native pointer case uses two explicit instruction addresses on one
+## source line to isolate PC-versus-tick selection over the real store signals.
+## Native instruction production is covered by the real DAP recording cases in
+## `src/db-backend/tests/native_calltrace_jump_test.rs`.
 
 import std/[json, strutils, tables, unittest]
 
@@ -39,7 +43,7 @@ template ck(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 91
+const ExpectedAssertions = 97
 
 const
   MainPath = "/work/noir_space_ship/src/main.nr"
@@ -126,6 +130,29 @@ suite "PLAT-60: one listing — rows, the pointer, the debugger's line":
     defer: vm2.dispose()
     ck vm2.executionIndex == 3
     ck executionIndexIn(@[], 0, true, 0, "", -1) == -1
+
+suite "Native disassembly execution pointer":
+  test "the selected frame PC picks an instruction within a source line":
+    let (vm, _) = setup(ticks = 4096)
+    defer: vm.dispose()
+    vm.applyAsmAnswer(parseJson("""{"address":4096,"error":"","instructions":[
+      {"name":"push","args":"rbp","offset":4096,"highLevelPath":"main.c","highLevelLine":13},
+      {"name":"mov","args":"rbp, rsp","offset":4097,"highLevelPath":"main.c","highLevelLine":13}]}"""),
+      AsmFunctionLocation(path: "main.c", name: "main", key: "1", line: 13))
+    vm.store.applyStopLocation(parseJson("""{"frameInfo":{"hasSelected":true,"offset":4097}}"""))
+    ck vm.executionIndex == 1
+    let marked = vm.instructionRows
+    ck marked[1].executing
+    ck not marked[0].executing
+    vm.store.applyStopLocation(parseJson("""{"location":{"offset":4097},"frameInfo":{"hasSelected":false}}"""))
+    ck vm.executionIndex == 1
+    vm.store.applyStopLocation(parseJson("""{"location":{"offset":4096},"frameInfo":{"hasSelected":true,"offset":4097}}"""))
+    ck vm.executionIndex == 1
+    var debugger = vm.store.debugger.val
+    debugger.rrTicks = 4097
+    vm.store.debugger.val = debugger
+    vm.store.applyStopLocation(parseJson("""{"frameInfo":{"hasSelected":false}}"""))
+    ck vm.executionIndex == 0
 
 suite "PLAT-60: the cross-reference, both ways":
 

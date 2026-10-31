@@ -1309,6 +1309,19 @@ impl ReplaySession for RecreatorReplaySession {
         vec![]
     }
 
+    fn load_asm_function(
+        &mut self,
+        function: &crate::task::FunctionLocation,
+    ) -> Result<crate::task::Instructions, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        Ok(serde_json::from_str(&self.stable.dispatch_replay_query(
+            ReplayQuery::LoadAsmFunction {
+                name: function.name.clone(),
+                path: function.path.clone(),
+            },
+        )?)?)
+    }
+
     fn load_callstack(&mut self) -> Result<Vec<CallLine>, Box<dyn Error>> {
         self.ensure_active_stable()?;
         let res =
