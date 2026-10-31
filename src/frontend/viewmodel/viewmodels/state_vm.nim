@@ -58,6 +58,12 @@ const
     ## The type name of a watch row whose value has not arrived yet.
 
 type
+  StateTab* = enum
+    ## The three tabs available in the state panel.
+    stLocals   ## Local variables at the current execution point
+    stGlobals  ## Global / module-level variables
+    stWatches  ## User-defined watch expressions
+
   VariableCategory* = enum
     ## PLAT-49 finding 12. WHICH GROUP A VARIABLE ROW BELONGS TO, as a value
     ## every front-end reads: every front-end lists the groups one after
@@ -120,6 +126,7 @@ type
     runtimeRole*: ViewModelRuntimeRole
 
     # -- Mutable state --
+    activeTab*: Signal[StateTab]
     expandedPaths*: Signal[HashSet[string]]
     selectedPath*: Signal[string]
       ## Empty string means "no selection".
@@ -333,6 +340,24 @@ func stateEmptyText*(): string =
   ## What an empty Variables pane says, drawn by every front-end: nothing is
   ## in scope and nothing is watched yet — and where to type a watch.
   "No variables at this point of execution. Type an expression above to watch it."
+
+func stateEmptyText*(tab: StateTab): string =
+  ## What an empty pane says, per tab — drawn by every front-end.
+  case tab
+  of stLocals:
+    "No local variables are present in the current point of execution."
+  of stGlobals:
+    "No global variables are present in the current point of execution."
+  of stWatches:
+    "No watch expressions yet — type one above to evaluate it at this step."
+
+proc selectTab*(vm: StateVM; tab: StateTab) =
+  ## Switch to a different tab. The `currentVariables` memo updates
+  ## automatically because it depends on `activeTab`.
+  if vm.actionSink.forwards("state", "selectTab",
+      %*{"tab": sinkArg(tab)}):
+    return
+  vm.activeTab.val = tab
 
 func isInvalidWatch*(row: store_types.Variable): bool =
   ## A watch row the current stop cannot answer: the engine refused it, or
@@ -876,6 +901,7 @@ proc createStateVM*(store: ReplayDataStore;
     let hideOtherProcessWatches =
       if watchOwner.isNil: createSignal(false)
       else: watchOwner.hideOtherProcessWatches
+    let activeTab = createSignal(stLocals)
     let expandedHistories = createSignal(initHashSet[string]())
     let valueHistory = createSignal(initTable[string, seq[ValueHistoryRow]]())
     let viewport = createSignal(Viewport())
@@ -889,45 +915,43 @@ proc createStateVM*(store: ReplayDataStore;
     let valueChanges = createSignal(VariableDiff())
     let originLines = createSignal(initTable[string, seq[string]]())
 
-    # Derived: THE PANE'S ONE LIST (Variable-State-Pane.md § Decisions,
-    # 2026-10-24): the locals, the globals when the backend reports any, then
-    # one row per watched expression, in the session's watch order.
-    #
-    # A watch's row is the engine's answer for it (watch answers ride the
-    # locals response, split into `store.locals.watches` by `value.isWatch`).
-    # A watch the answer has no row for is still listed — "evaluating…" while
-    # the request is in flight, "not available at this stop" once it settled —
-    # because a watch is never dropped for not evaluating. With "Hide watches
-    # from other processes" on, a watch added in another recording is left out.
+    # Derived: pick the right variable list based on the active tab.
+    # stWatches uses the full watch logic (pending/invalid placeholders, per-
+    # process filtering) from Variable-State-Pane.md § Decisions, 2026-10-24.
     let currentVariables = createMemo[seq[store_types.Variable]] proc(): seq[store_types.Variable] =
-      result = store.locals.locals.val
-      for g in store.locals.globals.val:
-        result.add g
-      let answered = store.locals.watches.val
-      let hide = hideOtherProcessWatches.val
-      let origins = watchOrigins.val
-      let loading = store.locals.loadingState.val == lsLoading
-      for expression in watchExpressions.val:
-        let origin = origins.getOrDefault(expression, "")
-        if hide and recordingId.len > 0 and origin.len > 0 and
-           origin != recordingId:
-          continue
-        var found = false
-        for row in answered:
-          if row.name == expression:
-            # A row is a watch because the user typed it, whatever flag the
-            # answer carried.
-            var watchRow = row
-            watchRow.isWatch = true
-            result.add watchRow
-            found = true
-            break
-        if not found:
-          result.add store_types.Variable(
-            name: expression,
-            value: (if loading: "evaluating…" else: "not available at this stop"),
-            typeName: (if loading: WatchPendingType else: WatchErrorType),
-            isWatch: true)
+      case activeTab.val
+      of stLocals:
+        result = store.locals.locals.val
+      of stGlobals:
+        result = store.locals.globals.val
+      of stWatches:
+        # Watches are evaluated server-side and returned as part of the
+        # locals response, split out of it by `value.isWatch` into
+        # `store.locals.watches`. Unanswered watches are listed with a
+        # placeholder; "Hide watches from other processes" filters by origin.
+        let answered = store.locals.watches.val
+        let hide = hideOtherProcessWatches.val
+        let origins = watchOrigins.val
+        let loading = store.locals.loadingState.val == lsLoading
+        for expression in watchExpressions.val:
+          let origin = origins.getOrDefault(expression, "")
+          if hide and recordingId.len > 0 and origin.len > 0 and
+             origin != recordingId:
+            continue
+          var found = false
+          for row in answered:
+            if row.name == expression:
+              var watchRow = row
+              watchRow.isWatch = true
+              result.add watchRow
+              found = true
+              break
+          if not found:
+            result.add store_types.Variable(
+              name: expression,
+              value: (if loading: "evaluating…" else: "not available at this stop"),
+              typeName: (if loading: WatchPendingType else: WatchErrorType),
+              isWatch: true)
 
     # Derived: loading indicator.
     let isLoading = createMemo[bool] proc(): bool =
@@ -952,6 +976,7 @@ proc createStateVM*(store: ReplayDataStore;
       store: store,
       collabCore: collabCore,
       runtimeRole: runtimeRole,
+      activeTab: activeTab,
       expandedPaths: expandedPaths,
       expandedHistories: expandedHistories,
       valueHistory: valueHistory,

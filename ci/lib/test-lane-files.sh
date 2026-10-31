@@ -1150,6 +1150,8 @@ test_lane_files() {
 		# keyboard goes is decided only by a browser.
 		echo src/frontend/tests/editor_focus_chromium_test.nim
 		echo src/frontend/tests/agent_editor_selection_hover_chromium_test.nim
+		# Native history context menus, exact destinations and dismissal.
+		echo src/frontend/tests/debug_history_context_menu_chromium_test.nim
 		;;
 
 	main-process)

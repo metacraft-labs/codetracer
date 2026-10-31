@@ -26,17 +26,11 @@ type
   AutoHideBottomStripRecord* = object
     title*: string
     active*: bool
-    ## Opened by a click, not a hover preview — only then the × shows, as on
-    ## the side strips (`AutoHideSideStripRecord.pinned`).
-    pinned*: bool
 
   AutoHideBottomStripCallbacks* = object
     onSelect*: proc(index: int)
     onClose*: proc(index: int)
     onUnpin*: proc(index: int)
-    ## The × on the active tab: hide its panel, keeping the tab pinned — as
-    ## the × on an active side-strip tab does (`isonim_auto_hide_side_strip_view`).
-    onHide*: proc(index: int)
     ## Called when mouse enters a tab — starts the hover-preview timer.
     onHoverEnter*: proc(index: int)
     ## Called when mouse leaves a tab — cancels the pending hover-preview timer.
@@ -60,10 +54,6 @@ const
   AutoHideBottomStripTabClass*         = "auto-hide-strip-tab"
   AutoHideBottomStripTabActiveClass*   = "auto-hide-strip-tab active"
   AutoHideBottomStripTabLabelClass*    = "auto-hide-strip-tab-label"
-  ## The × on the active tab (Nikolay, 2026-10-17): the side strips' class and
-  ## icon, after the label.
-  AutoHideBottomStripTabHideClass*     = "auto-hide-strip-tab-hide"
-  HideTabLabel = "Close panel"
   ## The three button classes below have **no producer**.  This file used to
   ## render inline close / unpin buttons on every tab; `1af471302` deleted them
   ## here and from `isonim_auto_hide_side_strip_view` in the same commit, in
@@ -84,12 +74,6 @@ proc invokeSelect(cb: AutoHideBottomStripCallbacks; i: int) =
 
 proc invokeClose(cb: AutoHideBottomStripCallbacks; i: int) =
   if not cb.onClose.isNil: cb.onClose(i)
-
-proc invokeHide(cb: AutoHideBottomStripCallbacks; i: int) =
-  if not cb.onHide.isNil: cb.onHide(i)
-
-proc showsHide(cb: AutoHideBottomStripCallbacks; tab: AutoHideBottomStripRecord): bool =
-  tab.active and tab.pinned and not cb.onHide.isNil
 
 proc invokeUnpin(cb: AutoHideBottomStripCallbacks; i: int) =
   if not cb.onUnpin.isNil: cb.onUnpin(i)
@@ -127,21 +111,6 @@ proc renderBottomStripTab[R, N](
          onclick = proc() = cb.invokeSelect(index)):
       span(class = AutoHideBottomStripTabLabelClass):
         text tab.title
-  if cb.showsHide(tab):
-    var hideEl: N
-    let hide = ui(r):
-      span(ref = hideEl, class = AutoHideBottomStripTabHideClass, role = "button",
-          title = HideTabLabel, `aria-label` = HideTabLabel,
-          onclick = proc() = cb.invokeHide(index))
-    r.appendChild(result, hide)
-    when defined(js):
-      when N is isonim_dom.Element:
-        # Stopped here: the tab's click would reopen the panel the × just
-        # closed.
-        isonim_dom.addEventListener(isonim_dom.Node(hideEl), cstring"click",
-          proc(ev: isonim_dom.Event) =
-            ev.preventDefault()
-            ev.stopPropagation())
   when defined(js):
     when N is isonim_dom.Element:
       # mouseenter on the tab triggers the 200ms hover-preview timer.

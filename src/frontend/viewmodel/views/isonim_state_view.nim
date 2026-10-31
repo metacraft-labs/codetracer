@@ -86,10 +86,24 @@ when defined(ctPlat18Slice):
 # Static label / class helpers
 # ---------------------------------------------------------------------------
 
-proc emptyOverlayText(): string =
-  ## What an empty pane says — `state_vm.stateEmptyText`, the one spelling
-  ## every front-end draws.
-  stateEmptyText()
+proc tabCssClass(tab: StateTab): string =
+  ## CSS class name for a tab button — used both for the static class
+  ## and for the dynamic active-modifier expression.
+  case tab
+  of stLocals:  "tab-locals"
+  of stGlobals: "tab-globals"
+  of stWatches: "tab-watches"
+
+proc tabLabel(tab: StateTab): string =
+  case tab
+  of stLocals:  "Locals"
+  of stGlobals: "Globals"
+  of stWatches: "Watches"
+
+proc emptyOverlayText(tab: StateTab): string =
+  ## What an empty pane says, per tab — `state_vm.stateEmptyText`, the one
+  ## spelling every front-end draws.
+  stateEmptyText(tab)
 
 proc hasOtherProcessWatches(vm: StateVM): bool =
   ## Whether some watch was added in another process than the one shown —
@@ -191,6 +205,11 @@ proc codeStateLineSource(vm: StateVM): string =
 # attribute that calls the helper is detected as dynamic, so the macro
 # wraps the call in a `createRenderEffect` and tracks its signal reads
 # automatically.
+
+proc tabClass(vm: StateVM; tab: StateTab): string =
+  ## Tab button class with the optional `active` modifier.
+  let cls = tabCssClass(tab)
+  if vm.activeTab.val == tab: cls & " active" else: cls
 
 proc atomOrCompoundClass(item: proc(): VariableViewState): string =
   ## "value-expanded-compound-parent" when the variable is an expanded
@@ -352,10 +371,11 @@ template onToggleOriginBadge*(vm: StateVM; item: proc(): VariableViewState; evTy
 # JS-only wrapper additionally converts each entry into the real
 # ``ContextMenuItem`` type from ``frontend/types.nim`` and forwards the
 # list to ``showContextMenu`` (the same primitive ``ui/value.nim`` uses).
-# The "Show value origin" action calls ``StateVM.onShowOrigin``, which puts
-# one ``ct/originChain`` on the wire: through the host bridge, whose
-# ``OriginChainVM`` sends it and opens the side panel (spec §3.2.2), or,
-# with no bridge installed, from the StateVM itself.
+# The "Show value origin" action replicates the badge-button behaviour
+# (``onToggleOriginBadge``): it calls ``toggleOriginExpansion`` to toggle
+# the in-row chain block, then loads the chain if needed (placeholder →
+# ``onShowOriginProc``; missing eager chain → ``onLoadOriginChainProc``).
+# It does NOT open the dedicated side panel — that is intentional.
 # ---------------------------------------------------------------------------
 
 proc rowLocation(vm: StateVM): store_types.Location =
@@ -383,9 +403,9 @@ proc buildVariableRowContextMenu*(vm: StateVM;
                                   item: VariableViewState):
     seq[OriginContextMenuEntry] =
   ## Build the right-click context menu for ``item`` (M4 deliverable
-  ## §3.1).  Mirrors the structure of
-  ## ``ValueComponent.createContextMenuItems`` in ``ui/value.nim`` so
-  ## the "Show value origin" entry behaves identically across surfaces.
+  ## §3.1).  The "Show value origin" entry replicates the badge-button
+  ## (``onToggleOriginBadge``): it toggles in-row expansion and loads
+  ## the chain when needed, rather than opening the side panel.
   ##
   ## The action closes over a snapshot of the row's name + the current
   ## debugger location so the menu can outlive a subsequent ``indexEach``
@@ -404,7 +424,17 @@ proc buildVariableRowContextMenu*(vm: StateVM;
     label: "Show value origin",
     hint: "Ctrl+Shift+O",
     action: proc() =
-      stateVM.onShowOrigin(name, loc),
+      let id = badgeRowId(item)
+      stateVM.toggleOriginExpansion(id)
+      let summary = summaryFor(stateVM, item)
+      if summary.isSome and summary.get.isPlaceholder:
+        if not stateVM.onShowOriginProc.isNil and not stateVM.store.isNil:
+          stateVM.onShowOriginProc(name, loc)
+      elif summary.isSome and stateVM.isOriginExpanded(id) and
+          not stateVM.onLoadOriginChainProc.isNil and not stateVM.store.isNil and
+          (stateVM.originChainLookup.isNil or
+           stateVM.originChainLookup(name).isNone):
+        stateVM.onLoadOriginChainProc(name, loc),
   )
   # Spec §14.8 — "The State Pane's right-click menu gains a 'Switch
   # process' entry that pivots to the same step coordinate in a sibling
@@ -584,6 +614,10 @@ proc chainLineIconClass(line: proc(): OriginChainLineView): string =
 # Click handler factories
 # ---------------------------------------------------------------------------
 
+proc onSelectTab(vm: StateVM; tab: StateTab): proc() =
+  let t = tab
+  result = proc() = vm.selectTab(t)
+
 proc loadMoreDisplay(vm: StateVM; item: proc(): VariableViewState): string =
   ## The row's "Load more" shows while the locals budget left part of its
   ## collection unloaded and the row is open.
@@ -717,9 +751,9 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
   ##           button.ct-origin-badge[.{terminator-icon}|.ct-origin-badge-placeholder]
   ##             span.ct-origin-badge-icon
   ##             span.ct-origin-badge-text
-  ##         div.ct-origin-inline-chain[display: block when expanded]
-  ##           div.ct-origin-inline-chain-hop (one per hop) — text "lhs = rhs"
-  ##           div.ct-origin-inline-chain-terminator
+  ##       div.ct-origin-inline-chain[display: block when expanded]  ← sibling of atom/compound-parent
+  ##         div.ct-origin-inline-chain-hop (one per hop) — text "lhs = rhs"
+  ##         div.ct-origin-inline-chain-terminator
   ##       div.ct-history-inline-container[display: block when expanded]  ← sibling of atom/compound-parent
   ##         div.ct-history-inline-row (one per history entry)
   ##           div.history-location : "{rrTicks}"
@@ -807,19 +841,14 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
                 discard
               span(class = "ct-origin-badge-text"):
                 text badgeTextForRow(vm, item())
-          # per M4 deliverable #4: in-row expanded chain block. Hidden
-          # via ``display: none`` while collapsed so the placeholder
-          # stays present in the DOM (matches the empty-overlay /
-          # loading-indicator pattern the same view already uses).
-          #
-          # Both containers below are populated AFTER the ``ui()`` block
-          # by `indexEach` (see the GOTCHA above); their bodies here are
-          # deliberately empty so the only thing the DSL emits is the
-          # container element plus its reactive ``display`` attribute.
-          tdiv(class = "ct-origin-inline-chain",
-               display = (if rowExpanded(vm, item()): "block" else: "none"),
-               ref = chainContainer):
-            discard
+      # Origin chain container is a sibling of atomOrCompoundClass — placed
+      # outside it so that expanding origin does not push the name/value
+      # layout out of line, matching the history container placement.
+      # Populated after the ui() block via renderOriginChainLines (indexEach).
+      tdiv(class = "ct-origin-inline-chain ct-mt-2",
+           display = (if rowExpanded(vm, item()): "block" else: "none"),
+           ref = chainContainer):
+        discard
       # History container is a sibling of atomOrCompoundClass — placed
       # outside it so that expanding history does not push the name/value
       # layout out of line. Populated after the ui() block via
@@ -913,15 +942,14 @@ when defined(js):
           inputNode.setInputValue(cstring""))
 
 proc renderStatePanel*[R, N](r: R; vm: StateVM): N =
-  ## The Variables pane (formerly the State pane): ONE list of the locals,
-  ## the globals when present and the watched expressions — no tabs
-  ## (Variable-State-Pane.md § Decisions, 2026-10-24).
+  ## The State panel.
   ##
   ## Structure:
   ##   div.state-component.isonim-state
-  ##     div.variables-toolbar
-  ##       button.hide-other-process-watches[.active]  (offered only when some
-  ##                                                   watch came from another process)
+  ##     div.state-tabs
+  ##       button.tab-locals[.active]   onclick = selectTab(stLocals)   "Locals"
+  ##       button.tab-globals[.active]  onclick = selectTab(stGlobals)  "Globals"
+  ##       button.tab-watches[.active]  onclick = selectTab(stWatches)  "Watches"
   ##     div#code-state-line-0.code-state-line[.no-code]
   ##     div#gdb-evaluate.watch-input-container
   ##       form > input#watch-0.watch-input
@@ -934,11 +962,16 @@ proc renderStatePanel*[R, N](r: R; vm: StateVM): N =
 
   let panel = ui(r):
     tdiv(class = "component-container active-state state-component isonim-state"):
-      tdiv(class = "variables-toolbar"):
-        button(class = hideToggleClass(vm),
-               display = (if hasOtherProcessWatches(vm): "inline-flex" else: "none"),
-               onclick = onToggleHideOtherProcessWatches(vm)):
-          text "Hide watches from other processes"
+      tdiv(class = "state-tabs"):
+        button(class = tabClass(vm, stLocals),
+               onclick = onSelectTab(vm, stLocals)):
+          text tabLabel(stLocals)
+        button(class = tabClass(vm, stGlobals),
+               onclick = onSelectTab(vm, stGlobals)):
+          text tabLabel(stGlobals)
+        button(class = tabClass(vm, stWatches),
+               onclick = onSelectTab(vm, stWatches)):
+          text tabLabel(stWatches)
       # Code-state-line: always present so `#code-state-line-0` is found
       # whatever the trace kind, and before the watch input so the lookup
       # finds the populated element ("<line> | <source>", the legacy
@@ -967,7 +1000,7 @@ proc renderStatePanel*[R, N](r: R; vm: StateVM): N =
       tdiv(class = "value-components-container"):
         tdiv(class = "empty-overlay",
              display = displayFlexIf(getStateViewState(vm).variables.len == 0)):
-          text emptyOverlayText()
+          text emptyOverlayText(vm.activeTab.val)
         tdiv(ref = rowContainer):
           discard
 

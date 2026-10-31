@@ -21,6 +21,8 @@
 //       or Tab ends in; an element the browser will not focus (inert, hidden,
 //       disabled) keeps focus where it was, which is what a suite asserting
 //       exclusivity needs.
+//   window.ctClick(selector, button = "left") -> Promise
+//       Click through Chromium's pointer input ("right" opens context menus).
 //   window.ctFinish(exitCode)
 //       The suite is done. The runner exits with the larger of this code and
 //       its own verdict (a page error, or a `[FAILED]` line, is a failure).
@@ -62,7 +64,9 @@ const timeoutMs = Number(process.env.CT_CHROMIUM_SUITE_TIMEOUT_MS || 180000);
 
 let browser;
 try {
-  browser = await chromium.launch();
+  browser = await chromium.launch({
+    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
+  });
 } catch (e) {
   console.error('chromium-run.mjs: could not launch Playwright\'s Chromium — the dev shell ' +
     `sets PLAYWRIGHT_BROWSERS_PATH to it (${String(e.message).split('\n')[0]})`);
@@ -107,6 +111,11 @@ try {
     } else {
       await page.keyboard.press(key);
     }
+  });
+
+  // Real pointer input, including native contextmenu events on a right click.
+  await page.exposeFunction('ctClick', async (selector, button = 'left') => {
+    await page.locator(selector).click({ button });
   });
 
   await page.setContent('<!DOCTYPE html><html><head><meta charset="utf-8"></head>' +

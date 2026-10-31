@@ -817,11 +817,16 @@ expect_contains "codetracer-launcher" "derivation/defaults"
 expect_contains "nim-everywhere" "derivation/defaults"
 ok "the default set spans BOTH declaration sites, from the real files"
 
-# ...and stops at the declarations. `nim-stackable-hooks` appears in this
-# repo's `siblings:` blocks only ever as `name=ref` (`=dev`), and `io-mon` only
-# ever SHA-pinned; neither resolves from the lock, so neither may be probed
-# against it. A derivation that swept every token in those blocks would fail
-# here.
+# ...and stops at the declarations. `codetracer-native-test-programs` appears
+# in this repo's `siblings:` blocks only ever as `name=ref` (`=dev`), and
+# `isonim-tui` only ever SHA-pinned; neither resolves from the lock, so neither
+# may be probed against it. A derivation that swept every token in those
+# blocks would fail here.
+#
+# These two names replaced `nim-stackable-hooks` and `io-mon` on 2026-10-31,
+# when 17b94525c9 (provision every required sibling in build-once jobs)
+# declared both bare in codetracer.yml — so they are declared now, and the
+# derivation is right to include them.
 #
 # This contract used to name `codetracer-native-backend` as the `=ref`-only
 # repo. e705fbad5 (2026-09-19, LRC-4: the native edge of the launcher<->recorder
@@ -831,8 +836,8 @@ ok "the default set spans BOTH declaration sites, from the real files"
 # role must be one that no declaration site names bare — check with
 # `--list-declared` before replacing it.
 expect_contains "codetracer-native-backend" "derivation/defaults"
-expect_not_contains "nim-stackable-hooks" "derivation/defaults"
-expect_not_contains "io-mon" "derivation/defaults"
+expect_not_contains "codetracer-native-test-programs" "derivation/defaults"
+expect_not_contains "isonim-tui" "derivation/defaults"
 # shellcheck disable=SC2016 # literal backticks, nothing to expand
 ok 'names that are only ever `=ref` or SHA-pinned in the real workflows are excluded'
 

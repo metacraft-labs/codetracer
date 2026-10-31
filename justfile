@@ -5092,6 +5092,11 @@ test-book-isonim:
   # sibling inputs by hash and a workspace whose siblings are ahead of that pin
   # fails to evaluate at all — which would turn a green suite into an
   # infrastructure error.
+  # The book compiles against its siblings through a generated nim.cfg, the
+  # one the publish uses (ci/lib/book-isonim-nimcfg.sh says why); removed on
+  # exit so the tree stays clean.
+  bash ci/lib/book-isonim-nimcfg.sh "$PWD"
+  trap 'rm -f docs/book-isonim/nim.cfg' EXIT
   if just --justfile docs/book-isonim/Justfile \
        --working-directory docs/book-isonim test; then
     exit 0
