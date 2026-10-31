@@ -152,7 +152,11 @@ esac
 
 # --- Case 5: the guard is wired into the dev shell -------------------------
 # The script passing its own tests is worth nothing if nothing calls it.
-shell_nix="$REPO_ROOT/nix/shells/main.nix"
+grep -q 'import ../git-hooks.nix' "$REPO_ROOT/nix/shells/main.nix" || {
+	echo 'FAIL: devShells.default does not import the tested hook lifecycle' >&2
+	exit 1
+}
+shell_nix="$REPO_ROOT/nix/git-hooks.nix"
 if grep -q 'should-install-git-hooks.sh' "$shell_nix" &&
 	grep -q 'installationScript' "$shell_nix"; then
 	# Here-string rather than a pipe: a pipeline ending in `grep -q` can report a
@@ -161,14 +165,14 @@ if grep -q 'should-install-git-hooks.sh' "$shell_nix" &&
 	# exists to catch exactly this and prescribes this form.
 	gate_context="$(grep -B2 'installationScript' "$shell_nix")"
 	if grep -q 'should-install-git-hooks.sh' <<<"$gate_context"; then
-		ok "nix/shells/main.nix gates installationScript on the decision script"
+		ok "nix/git-hooks.nix gates installationScript on the decision script"
 	else
-		fail "nix/shells/main.nix gates installationScript on the decision script" \
+		fail "nix/git-hooks.nix gates installationScript on the decision script" \
 			"both strings are present but the guard does not immediately precede" \
 			"the installer, so the installer may still run unconditionally."
 	fi
 else
-	fail "nix/shells/main.nix gates installationScript on the decision script" \
+	fail "nix/git-hooks.nix gates installationScript on the decision script" \
 		"the dev shell does not reference $DECIDE; hooks are installed" \
 		"unconditionally and this whole suite is decorative."
 fi

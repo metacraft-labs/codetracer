@@ -9,6 +9,10 @@ build-once:
 capture-dev-env output *nix_args:
   bash scripts/capture-dev-env.sh "$@"
 
+# Real Nix installer, linked worktrees, local checker and publication gate.
+test-nix-git-hooks:
+  bash ci/test/nix-git-hooks-test.sh
+
 # Host integration: real Nix capture, clean Bash/zsh consumers, atomic failure.
 [positional-arguments]
 test-captured-dev-env *args:
