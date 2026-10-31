@@ -101,28 +101,29 @@
     margin-top: 0.25rem
     height: 1.25rem
     padding: 0 0.625rem
-    border: 0.0625rem solid #3a3a3a
+    // Preserve the dark outline; the light mode uses its border token.
+    border: 0.0625rem solid by-mode(#3a3a3a, colors-ui-border-primary)
     border-radius: 0.3125rem
     background-color: transparent
     font-family: "SpaceGrotesk"
     font-size: 0.75rem
     line-height: 1rem
     white-space: nowrap
-    color: #b4b4b4
+    color: colors-ui-text-primary-body-subtle
     cursor: pointer
 
     &.active
-      background-color: #262626
-      color: #f3f3f3
+      background-color: colors-ui-surface-base-card
+      color: colors-ui-text-primary-body
 
   // A watch the stop cannot answer stays in the list, its value cell
   // carrying the reason in a muted colour; a watch still waiting for its
   // answer uses the same muted treatment.
   .value-watch.watch-invalid .value-expanded-text
-    color: #b4b4b4
+    color: colors-ui-text-primary-body-subtle
 
   .value-watch.watch-pending .value-expanded-text
-    color: #b4b4b4
+    color: colors-ui-text-primary-body-subtle
 
   // The line execution is stopped on, drawn the way the editor draws it —
   // the yellow arrow, the line number in the gutter's type, the code in the
