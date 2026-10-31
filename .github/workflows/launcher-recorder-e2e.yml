@@ -848,7 +848,7 @@ jobs:
             # 0a422dd91 (io-mon's new pin still carries src/io_mon/depfile.nim).
             # runquota is locked as a `follows` of reprobuild's `runquota-src`;
             # the pin below is that node's rev.
-            io-mon=6fccd929cb09da0bfc0844b93ced9ffb1ac0f74f
+            io-mon=6d07c699e5a16a8a7f40afb88bb7c356e535ddd6
             nim-shm-queue=5a8e43b52fa202859658692c9f8432967f3971ea
             nim-shm-gset=360bfc15cadab1ff583e6d1cbc20b389d5d6825f
             nim-stackable-hooks=059c549306621e2f769adf75630b0b7f29018dca
