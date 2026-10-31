@@ -39,6 +39,7 @@
 
 import std/[json, os, unittest, strutils, osproc, sequtils]
 import headless_session
+import ../../../../frontend/test_support/recording_fixtures
 import ../../../../common/replay_server_path   # the one search order
 import store/types
 
@@ -60,77 +61,15 @@ proc repoRoot(): string =
   ## parentDir hops back to the codetracer/ checkout root.
   currentSourcePath().parentDir.parentDir.parentDir.parentDir.parentDir.parentDir
 
-proc findCtFile(dir: string): string =
-  ## Return the path to the first ``.ct`` file in ``dir``, or "" if none.
-  for kind, path in walkDir(dir):
-    if kind != pcFile:
-      continue
-    if path.endsWith(".ct"):
-      return path
-  return ""
-
-proc isUsableTraceDir(dir: string): bool =
-  ## Return true if ``dir`` contains a trace format that the replay-server
-  ## can open via the DAP stdio protocol and that works with
-  ## HeadlessDebugSession.
-  ##
-  ## Supported formats:
-  ##   - ``trace.bin`` — DB-based materialized trace (used by Noir, Wasm, and
-  ##     older Python/Ruby recorders)
-  ##   - ``rr/`` subdirectory — rr-based trace replayed via ct-native-replay
-  ##     (used by Nim, Rust, C, etc.)
-  ##   - CTFS ``.ct`` files — CTFS containers produced by Python, Ruby, and
-  ##     other recorders.  The replay-server auto-detects the format and emits
-  ##     the same ``stopped``/``ct/complete-move`` DAP events as DB traces.
-  if fileExists(dir / "trace.bin"):
-    return true
-  if dirExists(dir / "rr"):
-    return true
-  if findCtFile(dir).len > 0:
-    return true
-  return false
-
-proc traceDirForRecordingId(idStr: string): string =
-  let baseDir = getHomeDir() / ".local" / "share" / "codetracer"
-  let bareDir = baseDir / idStr
-  if dirExists(bareDir):
-    return bareDir
-  let legacyDir = baseDir / ("trace-" & idStr)
-  if dirExists(legacyDir):
-    return legacyDir
-  bareDir
-
-proc findExistingTrace(programPattern: string): string =
-  ## Search ``~/.local/share/codetracer/`` for a pre-recorded trace whose
-  ## directory name matches ``programPattern``.
-  ##
-  ## M-REC-1.5: trace metadata lives in the CTFS ``meta.dat`` inside
-  ## ``trace.ct``; the legacy sidecar JSONs that this helper used to
-  ## inspect are retired.  As a lightweight fallback the heuristic
-  ## matches against the directory name (recorders name the directory
-  ## after the program).  Re-record if a finer match is needed.
-  let baseDir = getHomeDir() / ".local" / "share" / "codetracer"
-  if not dirExists(baseDir):
-    return ""
-  for kind, path in walkDir(baseDir):
-    if kind != pcDir:
-      continue
-    if not isUsableTraceDir(path):
-      continue
-    let dirname = path.extractFilename()
-    if programPattern in dirname:
-      return path
-  return ""
-
 const recordTimeoutMs = 120_000
   ## Maximum time (in milliseconds) to wait for ``ct record`` to finish.
   ## Prevents the test suite from hanging on broken or slow recorders.
 
 proc recordTraceToDefaultLocation(programPath: string; lang: string = ""): string =
   ## Record a trace using ``ct record`` without ``-o``, letting it store
-  ## into the default ``~/.local/share/codetracer/`` directory.
+  ## into the active CodeTracer data directory.
   ##
-  ## Parses the ``traceId:<N>`` line from stdout to locate the trace.
+  ## Parses the ``recordingId:<uuid>`` line from stdout to locate the trace.
   ## Returns the trace directory path.  Times out after ``recordTimeoutMs``.
   ##
   ## Recorders may produce different formats (``trace.bin``, ``rr/``, or
@@ -154,15 +93,7 @@ proc recordTraceToDefaultLocation(programPath: string; lang: string = ""): strin
 
   # Parse the recording id from the output (last line is "recordingId:<uuid>").
   # M-REC-6: stdout marker renamed from "traceId:" to "recordingId:".
-  for line in output.splitLines():
-    if line.startsWith("recordingId:"):
-      let idStr = line[("recordingId:").len..^1].strip()
-      let traceDir = traceDirForRecordingId(idStr)
-      if dirExists(traceDir):
-        return traceDir
-
-  raise newException(IOError,
-    "ct record succeeded but could not parse recordingId from output: " & output)
+  recordingDirFromOutput(output)
 
 proc findOrRecordTrace(testProgram: string; lang: string = "";
                        entryFile: string = "";
@@ -173,10 +104,11 @@ proc findOrRecordTrace(testProgram: string; lang: string = "";
   ## to recording a fresh trace.  Supports ``trace.bin``, ``rr/``, and
   ## CTFS ``.ct`` formats.
   ##
-  ## Raises ``IOError`` on failure so the calling test can skip.
+  ## Recorder availability errors may be skipped; a successful recorder with
+  ## missing output or an unusable artifact must fail.
   let pattern = if programPattern.len > 0: programPattern else: testProgram
 
-  # 1. Search user's trace store for an existing trace.
+  # 1. Search the active trace store for an existing trace.
   let existing = findExistingTrace(pattern)
   if existing.len > 0:
     echo "  Using existing trace: ", existing
@@ -189,12 +121,6 @@ proc findOrRecordTrace(testProgram: string; lang: string = "";
   echo "  Recording trace for: ", programPath
   let traceDir = recordTraceToDefaultLocation(programPath, lang)
   echo "  Recorded trace to: ", traceDir
-
-  # 3. Verify the trace uses a format supported by the replay-server.
-  if not isUsableTraceDir(traceDir):
-    raise newException(IOError,
-      "Recorded trace at " & traceDir & " uses an unrecognized format. " &
-      "Expected trace.bin, rr/, or a .ct file.")
 
   return traceDir
 
@@ -327,9 +253,8 @@ var traceCache: Table[string, string]
   ## Populated on first lookup; subsequent tests reuse the result.
 
 var traceAttempted: Table[string, bool]
-  ## Tracks whether we have already tried to find/record a trace for
-  ## a given testProgram.  Prevents repeated recording attempts for
-  ## languages whose recorders produce incompatible formats.
+  ## Tracks completed lookups, including unavailable recorders, so subsequent
+  ## cases reuse the result without hiding successful-recording failures.
 
 # ---------------------------------------------------------------------------
 # Generic test procedures (parameterized by LanguageTestConfig)
@@ -342,7 +267,6 @@ proc resolveTrace(config: LanguageTestConfig): string =
   if traceAttempted.getOrDefault(config.testProgram, false):
     return traceCache.getOrDefault(config.testProgram, "")
 
-  traceAttempted[config.testProgram] = true
   try:
     result = findOrRecordTrace(config.testProgram,
                                entryFile = config.entryFile,
@@ -356,6 +280,9 @@ proc resolveTrace(config: LanguageTestConfig): string =
     echo "  SKIP: ", config.name, " recorder not available: ", e.msg
     traceCache[config.testProgram] = ""
     result = ""
+  # Only completed lookups (including unavailable recorders) are cached.
+  # A broken successful recording must fail again instead of becoming a skip.
+  traceAttempted[config.testProgram] = true
 
 proc doTestEditorLoadsCorrectFile(config: LanguageTestConfig;
                                   tracePath: string) =

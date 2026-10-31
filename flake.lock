@@ -872,11 +872,11 @@
         "pre-commit-hooks": "pre-commit-hooks"
       },
       "locked": {
-        "lastModified": 1793167392,
-        "narHash": "sha256-jjYdJK7Yu+DDGgGJweQ09ojBTI6i1bRvhKXeKvx3H1g=",
+        "lastModified": 1793454947,
+        "narHash": "sha256-Kuo4G/rNZMJvCck7txVoOkTecGym8yzDNSpbOABh880=",
         "owner": "metacraft-labs",
         "repo": "codetracer-js-recorder",
-        "rev": "18647fa86c7f8922eadd66ca1c48416f6c386b00",
+        "rev": "35373269c0f55aa0b99638d3a352771d04cc6297",
         "type": "github"
       },
       "original": {
@@ -905,11 +905,11 @@
     "codetracer-native-recorder": {
       "flake": false,
       "locked": {
-        "lastModified": 1793418906,
-        "narHash": "sha256-mQYlZ8LKmlZKhUEQMpwVWDwIR736Po8Yx+mE3bz/dQI=",
+        "lastModified": 1793455332,
+        "narHash": "sha256-sc0GjMxCUEPsjtWDxFPYY1iM0vBFSA1DPeZIEk4gpsE=",
         "owner": "metacraft-labs",
         "repo": "codetracer-native-recorder",
-        "rev": "325ef0cb0d78013a04b14b437b25a37db50aca80",
+        "rev": "a5a3ecdac7a8c3cb6233929e5c41f89b23fb9b19",
         "type": "github"
       },
       "original": {
@@ -10164,11 +10164,11 @@
         "test-certificates-tools-src": "test-certificates-tools-src"
       },
       "locked": {
-        "lastModified": 1793452079,
-        "narHash": "sha256-MvaBmRGSGOCCK2rwbCDrZhP3nE22SoIS8HL5FlGzjUU=",
+        "lastModified": 1793457000,
+        "narHash": "sha256-tzYZrMqHi+GI/6MeAKZusIujkVCkV/VDwZph9FJ3Xng=",
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "b1435c23404076686d8e1efcdee7992132fefa38",
+        "rev": "ff79d0ed9cd391118136e20f5c6e7f54aca38c9f",
         "type": "github"
       },
       "original": {
@@ -11387,17 +11387,17 @@
     "test-certificates-tools-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1793296561,
-        "narHash": "sha256-zxOEf1NeCOiKN1KMxwFsr2leww43cfJJB0Oo2g2JZSA=",
+        "lastModified": 1793454285,
+        "narHash": "sha256-sIjVph9UdQtE1VxY62OkVNuixWp9VkOIh//nWnnk/uQ=",
         "owner": "metacraft-labs",
         "repo": "test-certificates-tools",
-        "rev": "9864082065c8acb1db315e65a6a4157a3ab77117",
+        "rev": "ddc6b18ee2987ca0fff177f51133eb3eadc9fc2a",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "test-certificates-tools",
-        "rev": "9864082065c8acb1db315e65a6a4157a3ab77117",
+        "rev": "ddc6b18ee2987ca0fff177f51133eb3eadc9fc2a",
         "type": "github"
       }
     },
