@@ -155,6 +155,7 @@ proc consumeCompleteMoveEvent(session: HeadlessDebugSession) =
   ## after a navigation command.  We consume both, but only use the
   ## ``ct/complete-move`` for position data.
   let completeMove = session.backend.waitForEvent("ct/complete-move")
+  session.backend.deliverPendingEvents()
   session.updatePositionFromCompleteMove(completeMove)
 
 proc consumeNextCompleteMove*(session: HeadlessDebugSession) =
@@ -302,6 +303,9 @@ proc newHeadlessDebugSession*(
 
     # Push initial position into the store from the ct/complete-move event.
     let completeMoveEvent = backend.waitForEvent("ct/complete-move")
+    # The raw startup handshake preceded subscriber registration. Apply its
+    # events after initialize defaults/attach, before publishing the session.
+    backend.deliverPendingEvents()
     result.updatePositionFromCompleteMove(completeMoveEvent)
   except CatchableError as e:
     try:

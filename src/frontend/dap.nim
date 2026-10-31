@@ -169,6 +169,7 @@ const EVENT_KIND_TO_DAP_MAPPING*: array[CtEventKind, cstring] = [
   CtCompleteMove: "ct/complete-move",
   DapStopped: "stopped",
   DapInitialized: "initialized",
+  DapCapabilities: "capabilities",
   DapInitialize: "initialize",
   DapInitializeResponse: "",
   DapConfigurationDone: "configurationDone",

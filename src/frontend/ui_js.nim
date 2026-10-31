@@ -2717,6 +2717,26 @@ proc configureSessionMiddleware(session: ReplaySession; withDebugger = true;
 
   dapRef.ipc = data.ipc
 
+  dapRef.on(DapCapabilities, proc(kind: CtEventKind, body: JsObject) =
+    # The replay engine is selected at launch, after initialize. Remember
+    # its capability update even if the tab's ViewModels do not exist yet.
+    # DAP capability events are partial updates: omitted flags stay as-is.
+    if body.isNil or jsMissing(body["capabilities"]):
+      return
+    let capabilities = body["capabilities"]
+    if capabilities.isNil:
+      return
+    if not jsMissing(capabilities["supportsStepBack"]):
+      vms.supportsStepBack = capabilities["supportsStepBack"].to(bool)
+      if not vms.vm.isNil:
+        vms.vm.store.setSupportsStepBack(vms.supportsStepBack)
+    if not jsMissing(capabilities["supportsSteppingGranularity"]):
+      vms.supportsSteppingGranularity =
+        capabilities["supportsSteppingGranularity"].to(bool)
+      if not vms.vm.isNil:
+        vms.vm.store.setSupportsSteppingGranularity(vms.supportsSteppingGranularity)
+  )
+
   dapRef.on(DapInitializeResponse, proc(kind: CtEventKind, response: JsObject) =
     cdebug "[PIPELINE] DapInitializeResponse: received response"
     var supportsStepBack = false

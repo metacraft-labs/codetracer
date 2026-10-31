@@ -2135,6 +2135,26 @@ pub fn handle_request(
     req: dap::Request,
     sender: Sender<DapMessage>,
 ) -> Result<(), Box<dyn Error>> {
+    // Native instruction motions bypass source/formatted-line stepping.
+    // The same capability is published with the engine's stops; sessions
+    // without native instruction history retain their existing line fallback.
+    let instruction_action = match req.command.as_str() {
+        "next" => Some((Action::NextI, false)),
+        "stepIn" => Some((Action::StepI, false)),
+        "stepBack" => Some((Action::NextI, true)),
+        "ct/reverseStepIn" => Some((Action::StepI, true)),
+        _ => None,
+    };
+    if req
+        .arguments
+        .get("granularity")
+        .and_then(Value::as_str)
+        .is_some_and(|g| g.eq_ignore_ascii_case("instruction"))
+        && let Some((action, reverse)) = instruction_action
+        && handler.replay.supports_instruction_stepping()
+    {
+        return handler.step(req, StepArg::new(action, reverse), sender);
+    }
     match req.command.as_str() {
         "scopes" => handler.scopes(
             req.clone(),
@@ -2420,8 +2440,9 @@ pub fn handle_request(
             // on the floor (the comment `for now ignoring arguments`
             // refers exactly to this).  We MUST read it here so the
             // statement-granularity runner gets activated when the
-            // client opts in; line/instruction/None all keep routing
-            // through the legacy `Action::Next` path for back-compat.
+            // client opts in. Native instruction requests were dispatched
+            // above; engines without that capability keep their legacy
+            // fallback for instruction/line/None.
             //
             // Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M2.
             if req.command == "next" {
@@ -2436,8 +2457,9 @@ pub fn handle_request(
             // field (DAP §StepBackArguments).  Symmetric to the M2
             // forward dispatch: we MUST read it here so the
             // column-aware backward statement runner gets activated
-            // when the client opts in; line / instruction / None all
-            // keep routing through the legacy reverse-`next` path so
+            // when the client opts in; after the native-instruction
+            // dispatch above, line / instruction / None keep routing
+            // through the legacy reverse-`next` path so
             // existing reverse-step UX (F9 / Ctrl+Shift+F10 / etc.)
             // remains bit-for-bit identical.
             //
@@ -2615,6 +2637,7 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
     match msg {
         DapMessage::Request(req) if req.command == "initialize" => {
             let capabilities = Capabilities {
+                supports_stepping_granularity: Some(false),
                 supports_loaded_sources_request: Some(false),
                 supports_step_back: Some(true),
                 supports_configuration_done_request: Some(true),

@@ -39,7 +39,7 @@ template ck(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 83
+const ExpectedAssertions = 91
 
 const
   MainPath = "/work/noir_space_ship/src/main.nr"
@@ -220,13 +220,31 @@ suite "PLAT-60: the header and the row menu":
 
 suite "PLAT-60: stepping at instruction granularity, where offered":
 
-  test "no engine offers it: the step goes by line, and the words say so":
+  test "an engine without instruction stepping: the step goes by line":
     let (vm, _) = setup()
     defer: vm.dispose()
     let r = vm.instructionStepRequest("debugger.step-over")
     ck not r.offered
     ck r.note == InstructionSteppingRefusal
     ck not vm.instructionStepRequest("debugger.step-out").offered
+
+  test "post-launch capability updates change stepping without losing reverse support":
+    let (vm, mock) = setup()
+    defer: vm.dispose()
+    vm.store.applyDapCapabilities(%*{"supportsStepBack": true})
+    mock.emitEvent(%*{"kind": "capabilities", "data": {
+      "capabilities": {"supportsSteppingGranularity": true}}})
+    ck vm.instructionStepOffered
+    ck vm.steppingText == SteppingByInstructionText
+    ck vm.store.session.val.supportsStepBack
+    ck vm.instructionStepRequest("debugger.step-into").args{"granularity"}.getStr == "instruction"
+    # The renderer names DAP events by CtEventKind; stdio uses the wire name.
+    mock.emitEvent(%*{"kind": "DapCapabilities", "data": {
+      "capabilities": {"supportsSteppingGranularity": false}}})
+    ck not vm.instructionStepOffered
+    ck vm.steppingText == SteppingByLineText
+    ck vm.store.session.val.supportsStepBack
+    ck not vm.instructionStepRequest("debugger.step-over").offered
 
   test "an engine that offers it: DAP's own request, by instruction":
     let (vm, _) = setup()

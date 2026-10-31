@@ -55,7 +55,7 @@
 ## - stepping at instruction granularity: offered when the engine says it
 ##   steps by instruction (DAP ``supportsSteppingGranularity``,
 ##   ``instructionStepOffered``); the request is ``instructionStepRequest``.
-##   No engine in this tree offers it yet, and the panes say so.
+##   Engines without that capability keep the pane's line-stepping fallback.
 ##
 ## ``jumpToInstruction`` emits ``ct/source-line-jump`` — what the desktop's
 ## editor dispatched for this gesture, and an engine command that both moves

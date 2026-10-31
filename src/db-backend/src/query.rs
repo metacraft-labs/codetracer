@@ -44,6 +44,7 @@ impl From<CtLoadLocalsArguments> for WireLoadLocalsArguments {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum ReplayQuery {
+    SupportsInstructionStepping,
     RunToEntry,
     LoadLocation,
     /// Load the current location with Nim sourcemap translation applied.

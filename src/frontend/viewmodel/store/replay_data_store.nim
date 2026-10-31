@@ -609,15 +609,19 @@ proc setSupportsSteppingGranularity*(store: ReplayDataStore; supports: bool) =
   session.supportsSteppingGranularity = supports
   store.session.val = session
 
-proc applyDapCapabilities*(store: ReplayDataStore; capabilities: JsonNode) =
+proc applyDapCapabilities*(store: ReplayDataStore; capabilities: JsonNode;
+                           partial = false) =
   ## The capabilities an `initialize` response's body carries that the
   ## session's panes read: `supportsStepBack` and (PLAT-60)
-  ## `supportsSteppingGranularity`. A field the engine leaves out is false.
+  ## `supportsSteppingGranularity`. Initialize replaces the flags; a DAP
+  ## capabilities event is a partial update and preserves omitted fields.
   if capabilities.isNil or capabilities.kind != JObject:
     return
-  store.setSupportsStepBack(capabilities{"supportsStepBack"}.getBool(false))
-  store.setSupportsSteppingGranularity(
-    capabilities{"supportsSteppingGranularity"}.getBool(false))
+  if not partial or capabilities.hasKey("supportsStepBack"):
+    store.setSupportsStepBack(capabilities{"supportsStepBack"}.getBool(false))
+  if not partial or capabilities.hasKey("supportsSteppingGranularity"):
+    store.setSupportsSteppingGranularity(
+      capabilities{"supportsSteppingGranularity"}.getBool(false))
 
 proc isLiveSessionMode*(mode: DebugSessionMode): bool =
   mode in {liveMcr, liveMaterialized}
@@ -962,6 +966,11 @@ proc installBackendEventHandlers(store: ReplayDataStore) =
       return
     let kind = event["kind"].getStr
     case kind
+    of "capabilities", "DapCapabilities":
+      # The engine becomes known only after launch. Stdio and worker
+      # transports use the wire name; the desktop uses CtEventKind names.
+      let payload = if event.hasKey("data"): event["data"] else: event
+      s.applyDapCapabilities(payload{"capabilities"}, partial = true)
     of "CtMcrGetRecordingHead":
       let payload =
         if event.hasKey("data"): event["data"]

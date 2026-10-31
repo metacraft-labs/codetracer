@@ -1166,10 +1166,17 @@ impl Handler {
             active_crossing_span_id,
         };
 
+        // `initialize` precedes trace selection. Refresh at the stop so
+        // launches at an explicit position and switches between recordings
+        // expose the capability of the engine currently being shown.
+        let instruction_stepping = self.replay.supports_instruction_stepping();
+        sender.send(
+            self.dap_client
+                .instruction_stepping_capabilities_event(instruction_stepping),
+        )?;
         let stopped_event = self.prepare_stopped_event(is_main)?;
         let complete_move_event = self.prepare_complete_move_event(&move_state)?;
         let output_events = self.prepare_output_events()?;
-
         info!("send stopped_event {:?}", stopped_event);
         sender.send(stopped_event)?;
         info!("send complete move event {:?}", complete_move_event);
@@ -1888,6 +1895,8 @@ impl Handler {
     ///     advance one /statement/ at a time using `DbStep.column`.
     ///   * `Some("line")` / `Some("instruction")` / `None` →
     ///     [`Handler::next`] — the existing line-granularity runner.
+    ///     Native instruction requests are handled by the DAP dispatcher
+    ///     before reaching this source-level entry point.
     ///     Per the M2 contract any non-`statement` value (including
     ///     unrecognised future values) maps to legacy line-granularity
     ///     so an over-eager DAP client never breaks back-compat.
@@ -1923,7 +1932,8 @@ impl Handler {
     ///     column on the same line.
     ///   * `Some("line")` / `Some("instruction")` / `None` → legacy
     ///     line-granularity reverse runner ([`Handler::next`] with
-    ///     `forward = false`).  Mirrors the M2 forward back-compat
+    ///     `forward = false`). Native instruction requests are handled
+    ///     earlier by the DAP dispatcher. Mirrors the M2 forward back-compat
     ///     contract: any non-`statement` value (including unrecognised
     ///     future values) keeps the legacy behaviour intact, so an
     ///     over-eager client never breaks back-compat.
@@ -2550,6 +2560,10 @@ impl Handler {
         // let original_step = self.db.steps[original_step_id];
         // let original_depth = self.db.calls[original_step.call_key].depth;
         match arg.action {
+            Action::StepI | Action::NextI => {
+                self.replay.step(arg.action, !arg.reverse)?;
+                self.step_id = self.replay.current_step_id();
+            }
             Action::StepIn => self.step_in(!arg.reverse)?,
             Action::Next => self.next(!arg.reverse)?,
             Action::StepOut => self.step_out(!arg.reverse)?,
