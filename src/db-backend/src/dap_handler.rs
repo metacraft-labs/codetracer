@@ -6592,9 +6592,9 @@ impl Handler {
         // call — the only range a language without a grammar here (Noir,
         // Cairo, Circom …) has. Before, such a function listed no lines at
         // all.
-        let enriched =
-            self.reader
-                .load_location(db_call.step_id, call_key, &mut self.flow_preloader.expr_loader);
+        let enriched = self
+            .reader
+            .load_location(db_call.step_id, call_key, &mut self.flow_preloader.expr_loader);
         let location = self.load_location(db_call.step_id);
         let function_location = self
             .flow_preloader
@@ -9856,10 +9856,10 @@ mod tests {
         let mut handler: Handler = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(db));
         let mut a_key = None;
         for key in 0..8 {
-            if let Some(call) = handler.reader.call(CallKey(key)) {
-                if handler.reader.function(call.function_id).map(|f| f.name.as_str()) == Some("a") {
-                    a_key = Some(CallKey(key));
-                }
+            if let Some(call) = handler.reader.call(CallKey(key))
+                && handler.reader.function(call.function_id).map(|f| f.name.as_str()) == Some("a")
+            {
+                a_key = Some(CallKey(key));
             }
         }
         let a_key = a_key.ok_or("the trace has a call of `a`")?;
