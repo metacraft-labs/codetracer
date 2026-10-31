@@ -10164,11 +10164,11 @@
         "test-certificates-tools-src": "test-certificates-tools-src"
       },
       "locked": {
-        "lastModified": 1793442105,
-        "narHash": "sha256-i33iGU1UAhasZiOjaddJb28kzJ9yyN7DUiJn0EqBEho=",
+        "lastModified": 1793444414,
+        "narHash": "sha256-HAPsbr6WHM/0mCMd6VBY8Ef509VhqhCAiUMnLOfm1b4=",
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "c0c48ae215ad4b01b918df46e361417012323888",
+        "rev": "7d18d5874553d7db15599424326adfd11dd702e8",
         "type": "github"
       },
       "original": {

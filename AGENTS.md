@@ -349,6 +349,30 @@ explicit Nix invocation without changing direnv trust:
 nix develop '.?submodules=1' --override-input nix-blockchain-development path:../nix-blockchain-development -c bash
 ```
 
+### Capturing the development environment for repeated commands
+
+Prefer `repro exec . -- <command>` for normal work. When a diagnostic workflow
+needs a reusable capture, use the guarded recipe from this checkout:
+
+```bash
+just capture-dev-env /tmp/codetracer-dev-env.sh
+bash -c 'source "$1" && command -v node npm Xvfb' captured-env /tmp/codetracer-dev-env.sh
+bash -c 'source "$1" && just build-once' captured-env /tmp/codetracer-dev-env.sh
+```
+
+These commands work when your outer shell is zsh: the capture is evaluated in
+Bash. Keep `&&` so a failed source stops the requested command, and leave stderr
+visible. A capture is checkout-specific and temporary; regenerate it after
+changing the checkout, flake inputs or garbage-collecting its Nix store paths.
+
+Raw `nix print-dev-env` output is Bash code. Do not source it directly from zsh
+or remove its `LINENO=` assignment: zsh treats `LINENO` as read-only and stops
+before PATH and the shell hook, while other Bash semantics can differ too.
+`just capture-dev-env` prepends a refusal before any Nix assignment and only
+replaces the destination after Nix succeeds. A non-Bash source returns 1 with
+an instruction to use Bash. Check this workflow with `just test-captured-dev-env`
+on a Linux host with Nix, Bash and zsh.
+
 ### Cadence Go helper
 
 The `detect-siblings.sh` script auto-builds `cadence-trace-helper` from

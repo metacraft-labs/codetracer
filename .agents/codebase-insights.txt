@@ -7700,8 +7700,12 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   host-supplied panes); it now takes the ViewModel a host attached to the
   same pane in `gLeafSet` (a folder tab's Files tree and VCS), which was
   otherwise drawn only from the leaf's next redraw.
-- Running `source /tmp/.../devenv.sh` from the zsh Bash tool half-works: the
-  TUI build then fails on `tree_sitter/api.h`. Source captured envs under bash.
+- Capture reusable dev environments with `just capture-dev-env /tmp/devenv.sh`,
+  then run `bash -c 'source "$1" && <command>' captured-env /tmp/devenv.sh`.
+  Raw `nix print-dev-env` output stops zsh at its read-only `LINENO` parameter,
+  before PATH and the shell hook. The recipe refuses non-Bash shells before
+  any Nix assignment; keep stderr visible and regenerate captures after input
+  or checkout changes. See AGENTS.md, "Capturing the development environment".
 - `ci/test/sdk-facade-boundary.sh` walks Nim imports WITHOUT evaluating `when`
   branches, so a JS-only import inside `isonim/core` (once
   `core/nondet.nim -> web/dom_api`) puts a renderer in the facade graph. IsoNim

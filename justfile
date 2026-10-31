@@ -4,6 +4,16 @@ build:
 build-once:
   bash scripts/build-once.sh
 
+# Capture a Bash-only dev environment with a guard before Nix's assignments.
+[positional-arguments]
+capture-dev-env output *nix_args:
+  bash scripts/capture-dev-env.sh "$@"
+
+# Host integration: real Nix capture, clean Bash/zsh consumers, atomic failure.
+[positional-arguments]
+test-captured-dev-env *args:
+  bash scripts/test-captured-dev-env.sh "$@"
+
 # Install the commit/push checks nix/pre-commit.nix declares on a host WITHOUT
 # the Nix dev shell -- native Windows is the case it exists for. The Nix shell
 # installs its own leg on entry; this one runs the same hooks through the
