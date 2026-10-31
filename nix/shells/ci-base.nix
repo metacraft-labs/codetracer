@@ -303,9 +303,21 @@ with pkgs;
     # pinned 3.12 in the PATH search. `main.nix`'s venv setup then picked it
     # up, producing a 3.13 venv that could not load the recorder's
     # `cpython-312` extension. See ../python.nix.
+    #
+    # `pythonWithRecorder` MUST stay ahead of them. Taking them from
+    # `pythonEnv.pythonPackages` settles the version, but they still propagate
+    # the bare pinned interpreter, which has no recorder. Ahead of the env on
+    # PATH, that same-version interpreter is the `python3` a shell without the
+    # venv runs. In `devShells.default`, where PYTHONPATH holds only 3.13 paths,
+    # `ct record x.py` then died with
+    #
+    #   cannot import codetracer_python_recorder: ModuleNotFoundError
+    #
+    # (`devShells.ci` masked it: its PYTHONPATH names this env.)
+    # `scripts/test-python-version-alignment.sh` (I) fails if it wins again.
+    pythonWithRecorder
     pythonEnv.pythonPackages.flake8
     pythonEnv.pythonPackages.distutils
-    pythonWithRecorder
     shellcheck
 
     # Attic cache push + GitHub CLI + AWS artifact upload — used by

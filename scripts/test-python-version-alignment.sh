@@ -745,6 +745,80 @@ the version everything is built against is one nothing tests."
 fi
 
 # ---------------------------------------------------------------------------
+# (I) Under the venv, `python3` is the interpreter that carries the recorder
+#
+# (C4) compares VERSIONS, so it cannot see this one: flake8's propagated bare
+# interpreter is the SAME 3.12 as the pinned env, only without the recorder.
+# Sitting ahead of the env on PATH it passed (C4) and then failed every
+# `ct record x.py` the venv does not cover, because src/ct/trace/record.nim falls
+# back to `python3` from PATH when CODETRACER_PYTHON_INTERPRETER is unset:
+#
+#     cannot import codetracer_python_recorder: ModuleNotFoundError
+#
+# The venv is taken off PATH for this check because it hides the defect. main.nix
+# adds it only when it could be built, and devShells.ci never adds it, so what
+# is underneath is what those shells actually run.
+#
+# An import that succeeds does not by itself mean the interpreter carries the
+# recorder, because of PYTHONPATH. Every interpreter's nixpkgs setup hook defines
+# a function of the same name, `addPythonPath`, and the one sourced last replaces
+# the others. devShells.ci holds only the pinned Python, so every package's
+# 3.12 site-packages, the env's included, lands on PYTHONPATH and the bare
+# interpreter imports the recorder through it. devShells.default also holds the
+# 3.13 that pre-commit brings, whose hook wins, so PYTHONPATH there is all 3.13
+# and the bare interpreter cannot. Hence two probes, both run from / because
+# `python -c` also searches the current directory:
+#
+#   (I2) with the ambient PYTHONPATH, which is what `ct record` passes on;
+#   (I3) without it, which is what the interpreter itself provides. (I2) alone
+#        stays green for the bare interpreter in devShells.ci, and for any
+#        shell whose PYTHONPATH happens to name a recorder.
+# ---------------------------------------------------------------------------
+
+if [ -n "${CT_PYALIGN_NO_ENV:-}" ]; then
+	na "(I) python3 under the venv -- suppressed by CT_PYALIGN_NO_ENV"
+elif [ ! -x "${CODETRACER_PYTHON_CMD:-}" ]; then
+	# Inside the dev shell a non-executable value is already a (C3) failure.
+	na "(I) python3 under the venv -- CODETRACER_PYTHON_CMD=${CODETRACER_PYTHON_CMD:-<unset>} is not executable"
+else
+	path_without_venv=""
+	IFS=: read -r -a path_entries <<<"$PATH"
+	for path_entry in "${path_entries[@]}"; do
+		case "${path_entry%/}" in
+		"$RECORDER_VENV/bin") ;;
+		*) path_without_venv="${path_without_venv:+$path_without_venv:}$path_entry" ;;
+		esac
+	done
+	under_venv_py="$(
+		PATH="$path_without_venv"
+		command -v python3 2>/dev/null || true
+	)"
+	if [ "$under_venv_py" = "$CODETRACER_PYTHON_CMD" ]; then
+		pass "(I1) under the venv, the first python3 on PATH is \$CODETRACER_PYTHON_CMD ($under_venv_py)"
+	else
+		# shellcheck disable=SC2016 # literal variable name in the check label
+		fail '(I1) under the venv, the first python3 on PATH is $CODETRACER_PYTHON_CMD' \
+			"first is ${under_venv_py:-<none>}, expected $CODETRACER_PYTHON_CMD
+a package listed ahead of pythonWithRecorder in nix/shells/ci-base.nix is
+propagating an interpreter that wins the PATH search."
+	fi
+	if [ -n "$under_venv_py" ] && (cd / && "$under_venv_py" -c 'import codetracer_python_recorder') 2>/dev/null; then
+		pass "(I2) under the venv, the first python3 on PATH can import codetracer_python_recorder"
+	else
+		fail "(I2) under the venv, the first python3 on PATH can import codetracer_python_recorder" \
+			"${under_venv_py:-<none>} cannot, so 'ct record <file>.py' refuses to record
+wherever CODETRACER_PYTHON_INTERPRETER is unset."
+	fi
+	if [ -n "$under_venv_py" ] && (cd / && env -u PYTHONPATH "$under_venv_py" -c 'import codetracer_python_recorder') 2>/dev/null; then
+		pass "(I3) under the venv, the first python3 on PATH carries codetracer_python_recorder itself, without PYTHONPATH"
+	else
+		fail "(I3) under the venv, the first python3 on PATH carries codetracer_python_recorder itself, without PYTHONPATH" \
+			"${under_venv_py:-<none>} cannot import it once PYTHONPATH is removed, so it records
+only for as long as this shell's PYTHONPATH happens to name a recorder."
+	fi
+fi
+
+# ---------------------------------------------------------------------------
 
 printf '\n%d checks, %d n/a, %d failure(s)\n' "$checks" "$nas" "$failures"
 if [ "$failures" -ne 0 ]; then

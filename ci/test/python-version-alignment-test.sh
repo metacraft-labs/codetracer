@@ -782,6 +782,146 @@ assert_contains "(C4) accuses the PATH search" "$OUT" "FAIL (C4) the first pytho
 assert_contains "and explains how that produced the original defect" "$OUT" "propagating a different interpreter"
 
 echo
+echo "under the venv, python3 is the interpreter that carries the recorder"
+
+# make_interpreter <dir> <version> <importable>, where <importable> is
+#   yes         it carries the recorder
+#   no          it does not
+#   pythonpath  only through a non-empty PYTHONPATH, as the bare interpreter
+#               does in devShells.ci
+#   cwd         only from a directory other than /, as `python -c` does when
+#               the current directory holds the package
+make_interpreter() {
+	mkdir -p "$1"
+	cat >"$1/python3" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+*version_info*) echo "$2" ;;
+*codetracer_python_recorder*)
+	case "$3" in
+	yes) ;;
+	pythonpath) [ -n "\${PYTHONPATH:-}" ] || exit 1 ;;
+	cwd) [ "\$PWD" != / ] || exit 1 ;;
+	*) exit 1 ;;
+	esac
+	;;
+esac
+exit 0
+EOF
+	chmod +x "$1/python3"
+}
+
+# run_guard_in_shell <dir> <PATH prefix> [PYTHONPATH]: the exports of a real
+# shell, with CODETRACER_PYTHON_CMD the pinned env's interpreter. PYTHONPATH is
+# always set here, so the dev shell this suite runs in cannot decide a case.
+run_guard_in_shell() {
+	env CT_PYALIGN_ROOT="$1/repo" CT_PYALIGN_RECORDER="$1/recorder" \
+		CODETRACER_PYTHON_VERSION=3.12 CODETRACER_PYTHON_ABI_TAG=cpython-312 \
+		CODETRACER_PYTHON_CMD="$1/env/bin/python3" \
+		PYTHONPATH="${3:-}" \
+		PATH="$2:$PATH" \
+		bash "$GUARD" 2>&1
+}
+
+WS="$TMP/recorderfirst"
+make_tree "$WS" 12
+make_extension "$WS" 312
+make_venv "$WS" 3.12 yes
+make_interpreter "$WS/repo/.python-recorder-venv/bin" 3.12 yes
+make_interpreter "$WS/env/bin" 3.12 yes
+make_interpreter "$WS/bare/bin" 3.12 no
+VENV_BIN="$WS/repo/.python-recorder-venv/bin"
+OUT="$(run_guard_in_shell "$WS" "$VENV_BIN:$WS/env/bin:$WS/bare/bin")"
+RC=$?
+assert_rc "the env ahead of the bare interpreter passes" "$RC" 0
+assert_contains "(I1) confirms which interpreter it found" "$OUT" "ok   (I1) under the venv, the first python3 on PATH is \$CODETRACER_PYTHON_CMD ($WS/env/bin/python3)"
+assert_contains "(I2) ran the import" "$OUT" "ok   (I2)"
+assert_contains "(I3) ran it without PYTHONPATH" "$OUT" "ok   (I3)"
+
+# The defect as it was measured: the same minor version, so (C4) stays green,
+# and hidden by a venv that worked, so only the PATH underneath shows it.
+OUT="$(run_guard_in_shell "$WS" "$VENV_BIN:$WS/bare/bin:$WS/env/bin")"
+RC=$?
+assert_rc "a bare interpreter of the same version ahead of the env fails" "$RC" 1
+assert_contains "(I1) names the interpreter that won" "$OUT" "first is $WS/bare/bin/python3, expected $WS/env/bin/python3"
+assert_contains "(I2) reports the import that fails" "$OUT" "FAIL (I2)"
+assert_contains "(I3) reports it too" "$OUT" "FAIL (I3)"
+assert_absent "(C4) cannot see it, which is why (I) exists" "$OUT" "FAIL (C4)"
+
+OUT="$(run_guard_in_shell "$WS" "$VENV_BIN/:$WS/bare/bin:$WS/env/bin")"
+RC=$?
+assert_rc "a trailing slash does not let the venv hide the bare interpreter" "$RC" 1
+assert_contains "and the venv is not what (I1) found" "$OUT" "first is $WS/bare/bin/python3"
+
+WS="$TMP/recorderless"
+make_tree "$WS" 12
+make_extension "$WS" 312
+make_venv "$WS" 3.12 yes
+make_interpreter "$WS/env/bin" 3.12 no
+OUT="$(run_guard_in_shell "$WS" "$WS/env/bin")"
+RC=$?
+assert_rc "the pinned interpreter losing the recorder fails" "$RC" 1
+assert_contains "(I1) still finds the pinned interpreter" "$OUT" "ok   (I1)"
+assert_contains "(I2) is the one that fails" "$OUT" "FAIL (I2)"
+
+assert_contains "(I3) fails with it" "$OUT" "FAIL (I3)"
+
+# devShells.ci as measured: its PYTHONPATH names the env, so the bare
+# interpreter ahead of the env imports the recorder and (I2) cannot see it.
+WS="$TMP/masked"
+make_tree "$WS" 12
+make_extension "$WS" 312
+make_venv "$WS" 3.12 yes
+make_interpreter "$WS/env/bin" 3.12 yes
+make_interpreter "$WS/bare/bin" 3.12 pythonpath
+OUT="$(run_guard_in_shell "$WS" "$WS/bare/bin:$WS/env/bin" "$WS/env/site-packages")"
+RC=$?
+assert_rc "a bare interpreter rescued by PYTHONPATH fails" "$RC" 1
+assert_contains "(I2) is green, which is why it cannot stand alone" "$OUT" "ok   (I2)"
+assert_contains "(I3) sees through PYTHONPATH" "$OUT" "FAIL (I3)"
+
+# The right path, but the recorder only arrives from outside it: nothing but
+# (I3) can see this one.
+WS="$TMP/borrowed"
+make_tree "$WS" 12
+make_extension "$WS" 312
+make_venv "$WS" 3.12 yes
+make_interpreter "$WS/env/bin" 3.12 pythonpath
+OUT="$(run_guard_in_shell "$WS" "$WS/env/bin" "$WS/elsewhere")"
+RC=$?
+assert_rc "the pinned interpreter importing the recorder only through PYTHONPATH fails" "$RC" 1
+assert_contains "(I1) cannot see it" "$OUT" "ok   (I1)"
+assert_contains "(I2) cannot see it" "$OUT" "ok   (I2)"
+assert_contains "(I3) can" "$OUT" "FAIL (I3)"
+
+WS="$TMP/fromcwd"
+make_tree "$WS" 12
+make_extension "$WS" 312
+make_venv "$WS" 3.12 yes
+make_interpreter "$WS/env/bin" 3.12 cwd
+OUT="$(run_guard_in_shell "$WS" "$WS/env/bin")"
+RC=$?
+assert_rc "a recorder found only in the current directory fails" "$RC" 1
+assert_contains "(I2) does not count the current directory" "$OUT" "FAIL (I2)"
+assert_contains "(I3) does not count it either" "$OUT" "FAIL (I3)"
+
+# The two n/a arms. Neither may be how a dev shell gets past (I).
+WS="$TMP/recorderless"
+OUT="$(run_guard "$WS")"
+assert_contains "CT_PYALIGN_NO_ENV turns (I) into n/a rather than a pass" "$OUT" "n/a  (I) python3 under the venv -- suppressed"
+assert_absent "and runs none of it" "$OUT" "(I1)"
+
+WS="$TMP/cmdgone"
+make_tree "$WS" 12
+make_extension "$WS" 312
+make_venv "$WS" 3.12 yes
+OUT="$(run_guard_in_shell "$WS" "$WS/repo/.python-recorder-venv/bin")"
+RC=$?
+assert_rc "inside a dev shell, an unusable CODETRACER_PYTHON_CMD fails the run" "$RC" 1
+assert_contains "(C3) is the failure" "$OUT" "FAIL (C3)"
+assert_contains "and (I) says why it has nothing to check" "$OUT" "n/a  (I) python3 under the venv -- CODETRACER_PYTHON_CMD="
+
+echo
 if [ "$FAILED" -ne 0 ]; then
 	echo "$PASS assertion(s) passed, $FAILED FAILED" >&2
 	exit 1
