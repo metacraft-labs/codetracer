@@ -1746,8 +1746,7 @@ when defined(js):
       let isActive = not autoHideState.isNil and (
         (not autoHideState.dockedPanel.isNil and autoHideState.dockedPanel == panel) or
         (not autoHideState.activeOverlay.isNil and autoHideState.activeOverlay == panel))
-      records.add(AutoHideSideStripRecord(title: $panel.title, active: isActive,
-        pinned: isPanelPinnedOpen(panel)))
+      records.add(AutoHideSideStripRecord(title: $panel.title, active: isActive))
 
     let panels = model.panels
     let callbacks = AutoHideSideStripCallbacks(
@@ -1771,16 +1770,6 @@ when defined(js):
           hideOverlay()
           hideDockedPanel()
           unpinPanel(autoHideLayout, panels[index]),
-      # The × on the active tab: hide the panel, docked or in the overlay, and
-      # keep the tab pinned — as the × in the status bar's tab-list menu does
-      # (Nikolay, 2026-10-16).  Not `closePanelFromStrip`, which discards it.
-      onHide: proc(index: int) =
-        if index >= 0 and index < panels.len:
-          let panel = panels[index]
-          if autoHideState.dockedVisible and autoHideState.dockedPanel == panel:
-            hideDockedPanel()
-          if autoHideState.overlayVisible and autoHideState.activeOverlay == panel:
-            hideOverlay(),
       # Clicking the collapsed line opens the edge's last panel (or its first)
       # in the overlay, which on a collapsed edge carries the edge's tabs down
       # its side (`requestOverlaySideEdgeTabsRender`) — so the click reveals
@@ -1921,8 +1910,7 @@ when defined(js):
       let isActive = not autoHideState.isNil and (
         (not autoHideState.dockedPanel.isNil and autoHideState.dockedPanel == panel) or
         (not autoHideState.activeOverlay.isNil and autoHideState.activeOverlay == panel))
-      records.add(AutoHideBottomStripRecord(title: $panel.title, active: isActive,
-        pinned: isPanelPinnedOpen(panel)))
+      records.add(AutoHideBottomStripRecord(title: $panel.title, active: isActive))
 
     let callbacks = AutoHideBottomStripCallbacks(
       onSelect: proc(index: int) =
@@ -1936,15 +1924,6 @@ when defined(js):
           hideOverlay()
           hideDockedPanel()
           unpinPanel(autoHideLayout, panels[index]),
-      # The × on the active tab, as on the side strips: hide the panel and
-      # keep the tab pinned (Nikolay, 2026-10-17).
-      onHide: proc(index: int) =
-        if index >= 0 and index < panels.len:
-          let panel = panels[index]
-          if autoHideState.dockedVisible and autoHideState.dockedPanel == panel:
-            hideDockedPanel()
-          if autoHideState.overlayVisible and autoHideState.activeOverlay == panel:
-            hideOverlay(),
       onHoverEnter: proc(index: int) =
         if index >= 0 and index < panels.len:
           # Its panel is already on screen, docked, so there is nothing to

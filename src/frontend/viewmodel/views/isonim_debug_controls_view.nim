@@ -31,6 +31,7 @@ import ./debug_control_marks
 import ./isonim_edit_mode_toolbar_view
 
 when defined(js):
+  from isonim/core/owner import onCleanup
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
 
@@ -74,6 +75,110 @@ proc action(vm: DebugControlsVM; actionId: string): proc() =
   let id = actionId
   proc() = vm.invokeToolbarAction(id)
 
+proc openHistoryMenu(vm: DebugControlsVM; kind: HistoryListKind) =
+  ## A disabled direction has no destinations. Keep the command routes, but
+  ## do not open an empty list from its toolbar button's context menu.
+  if kind == hlBefore and vm.canGoBack.val:
+    vm.invokeToolbarAction("jump-before")
+  elif kind == hlAfter and vm.canGoForward.val:
+    vm.invokeToolbarAction("jump-after")
+
+when defined(js):
+  type TooltipCleanup = proc()
+
+  proc containToolbarTooltips(panel: isonim_dom.Element): TooltipCleanup {.importjs: """
+    (function(panel) {
+      function position() {
+        var button = panel.querySelector('button:hover');
+        var tooltip = button && button.querySelector('.custom-tooltip');
+        if (!tooltip) return;
+        var anchor = button.getBoundingClientRect();
+        var bounds = tooltip.getBoundingClientRect();
+        var left = Math.max(8, Math.min(anchor.left + (anchor.width - bounds.width) / 2,
+          window.innerWidth - bounds.width - 8));
+        tooltip.style.left = left + 'px';
+        tooltip.style.top = Math.max(8, Math.min(anchor.bottom + 5,
+          window.innerHeight - bounds.height - 8)) + 'px';
+        tooltip.style.setProperty('--tooltip-arrow-left',
+          Math.max(8, Math.min(anchor.left + anchor.width / 2 - left, bounds.width - 8)) + 'px');
+      }
+      var observer = new ResizeObserver(position);
+      panel.querySelectorAll('.custom-tooltip').forEach(function(t) { observer.observe(t); });
+      panel.addEventListener('pointerover', position);
+      window.addEventListener('resize', position);
+      window.addEventListener('scroll', position, true);
+      return function() {
+        observer.disconnect();
+        panel.removeEventListener('pointerover', position);
+        window.removeEventListener('resize', position);
+        window.removeEventListener('scroll', position, true);
+      };
+    })(#)
+  """.}
+
+  proc historyPreventDefault(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
+  proc historyStopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
+  proc historyEventKey(ev: isonim_dom.Event): cstring {.importcpp: "(#.key || '')".}
+  proc historyEventInside(host: isonim_dom.Element; ev: isonim_dom.Event): bool
+    {.importjs: "#.contains(#.target)".}
+  proc focusHistoryControl(el: isonim_dom.Element) {.importcpp: "#.focus()".}
+  proc positionHistoryMenu(host, anchor: isonim_dom.Element) {.importjs: """
+    (function(host, anchor) {
+      var rect = anchor.getBoundingClientRect();
+      var width = host.getBoundingClientRect().width;
+      host.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)) + 'px';
+      host.style.top = (rect.bottom + 4) + 'px';
+      var first = host.querySelector('.history-list-entry');
+      if (first) first.focus();
+    })(#, #)
+  """.}
+
+template isHistoryDomElement(N: typedesc): bool =
+  when defined(js): N is isonim_dom.Element else: false
+
+proc bindHistoryContextMenu[R, N](r: R; button: N;
+                                 vm: DebugControlsVM; kind: HistoryListKind) =
+  ## Native contextmenu events are separate from click events in IsoNim.
+  ## Suppress the browser menu and leave left-click navigation untouched.
+  when isHistoryDomElement(N):
+    isonim_dom.addEventListener(isonim_dom.Node(button), cstring"contextmenu",
+      proc(ev: isonim_dom.Event) =
+        ev.historyPreventDefault()
+        ev.historyStopPropagation()
+        vm.openHistoryMenu(kind))
+  elif N is MockNode:
+    r.addEventListener(button, "contextmenu", proc(ev: MockEvent) =
+      ev.preventDefault()
+      ev.stopPropagation()
+      vm.openHistoryMenu(kind))
+
+proc bindHistoryMenuDismissal[R, N](r: R; host, back, forward: N;
+                                   vm: DebugControlsVM) =
+  when isHistoryDomElement(N):
+    # Own document listeners only while the popup is open. Effect cleanup
+    # also removes them when a session's toolbar is disposed or replaced.
+    createRenderEffect proc() =
+      let kind = vm.historyList.val
+      if kind == hlNone:
+        return
+      let anchor = if kind == hlBefore: back else: forward
+      positionHistoryMenu(host, anchor)
+      let outside: isonim_dom.EventHandler = proc(ev: isonim_dom.Event) =
+        if not historyEventInside(host, ev):
+          vm.stopJump()
+      let escape: isonim_dom.EventHandler = proc(ev: isonim_dom.Event) =
+        if historyEventKey(ev) == cstring"Escape":
+          ev.historyPreventDefault()
+          ev.historyStopPropagation()
+          vm.stopJump()
+          focusHistoryControl(anchor)
+      let doc = isonim_dom.Node(isonim_dom.document)
+      isonim_dom.addEventListener(doc, cstring"pointerdown", outside)
+      isonim_dom.addEventListener(doc, cstring"keydown", escape)
+      onCleanup proc() =
+        isonim_dom.removeEventListener(doc, cstring"pointerdown", outside)
+        isonim_dom.removeEventListener(doc, cstring"keydown", escape)
+
 proc historyEntryLabel*(entry: JumpEntry): string =
   ## How a jump-history entry reads in the list: where, and when.
   let file = entry.location.file
@@ -88,7 +193,7 @@ proc historyEntryLabel*(entry: JumpEntry): string =
 
 proc renderHistoryList[R, N](r: R; parent: N; vm: DebugControlsVM) =
   ## The open history list: one row per entry, most relevant first; choosing
-  ## a row jumps there, `Escape`-like closing is the close button.
+  ## a row jumps there. Close, Escape and outside clicks dismiss the list.
   show(r, parent,
     condition = proc(): bool = vm.historyList.val != hlNone,
     body = proc(): N =
@@ -119,8 +224,7 @@ proc renderHistoryList[R, N](r: R; parent: N; vm: DebugControlsVM) =
 proc renderDebugControlsPanel*[R, N](r: R; vm: DebugControlsVM): N =
   ## The debugger-controls toolbar. Its layout is the desktop's, which the
   ## Mode-Transitions rules forbid reordering:
-  ##   [history-back] [history-list-before] [history-forward]
-  ##   [history-list-after] | [reverse-next] [next] | [reverse-step-in]
+  ##   [history-back] [history-forward] | [reverse-next] [next] | [reverse-step-in]
   ##   [step-in] | [reverse-step-out] [step-out] | [reverse-continue]
   ##   [continue] | [run-to-entry] | [reset-operation] | [run-tests] | [stop]
   ## `stop` is last behind its own divider: it is the only control here that
@@ -150,21 +254,11 @@ proc renderDebugControlsPanel*[R, N](r: R; vm: DebugControlsVM): N =
              onclick = action(vm, "history-back")):
         tdiv(class = "custom-tooltip"):
           text vm.toolbarTooltip("history-back", "History back")
-      button(id = "history-list-before-image",
-             class = "ct-button-image-md-secondary ct-button-no-border history-list-toggle",
-             onclick = action(vm, "jump-before")):
-        tdiv(class = "custom-tooltip"):
-          text vm.toolbarTooltip("jump-before", "Earlier positions")
       button(ref = forwardBtn, id = "history-forward-image",
              class = "ct-button-image-md-secondary ct-button-no-border",
              onclick = action(vm, "history-forward")):
         tdiv(class = "custom-tooltip"):
           text vm.toolbarTooltip("history-forward", "History forward")
-      button(id = "history-list-after-image",
-             class = "ct-button-image-md-secondary ct-button-no-border history-list-toggle",
-             onclick = action(vm, "jump-after")):
-        tdiv(class = "custom-tooltip"):
-          text vm.toolbarTooltip("jump-after", "Later positions")
       tdiv(class = "separate-bar"):
         discard
       # -- Reverse next / Next --
@@ -267,6 +361,9 @@ proc renderDebugControlsPanel*[R, N](r: R; vm: DebugControlsVM): N =
         span(id = "debug-toolbar-mode", class = "debug-toolbar-mode"):
           text vm.toolbarModeText.val)
   renderHistoryList(r, listHost, vm)
+  bindHistoryContextMenu(r, backBtn, vm, hlBefore)
+  bindHistoryContextMenu(r, forwardBtn, vm, hlAfter)
+  bindHistoryMenuDismissal(r, listHost, backBtn, forwardBtn, vm)
 
   reactiveDisabled(r, backBtn,       proc(): bool = not vm.canGoBack.val)
   reactiveDisabled(r, forwardBtn,    proc(): bool = not vm.canGoForward.val)
@@ -286,6 +383,7 @@ proc renderDebugControlsPanel*[R, N](r: R; vm: DebugControlsVM): N =
   when defined(js):
     when N is isonim_dom.Element:
       discard attachControlMarks(panel)
+      onCleanup containToolbarTooltips(panel)
 
   panel
 

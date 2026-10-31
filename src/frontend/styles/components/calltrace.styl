@@ -437,7 +437,9 @@
     // on the same level for both no-collapse button and collapse button lines
     width: 0.875em
     height: 1.5625em
-    display: block
+    display: flex
+    align-items: center
+    justify-content: center
     margin-right: 0.25em
     z-index: 2
 
@@ -447,10 +449,6 @@
       background-image: url(CALLTRACE_COLLAPSE_IMG);
       background-size: cover;
       background-position: center;
-      display: inline-block;
-      position: relative
-      top: 0.25em
-      left: -0.125em
       cursor: pointer
 
       &.active
@@ -462,10 +460,6 @@
       background-image: url(CALLTRACE_EXPAND_IMG);
       background-size: cover;
       background-position: center;
-      display: inline-block;
-      position: relative
-      top: 0.25em
-      left: -0.125em
       cursor: pointer
 
       &.active
@@ -477,10 +471,6 @@
       background-image: url(CALLTRACE_DOT_IMG);
       background-size: cover;
       background-position: center;
-      display: block;
-      position: relative
-      bottom: -0.625em
-      left: 0.1875em
 
       &.active
         background-image: url(CALLTRACE_ACTIVE_DOT_IMG) !important
@@ -491,10 +481,6 @@
       background-image: url(CALLTRACE_EOP_IMG);
       background-size: cover;
       background-position: center;
-      display: block;
-      position: relative
-      bottom: -0.625em
-      left: 0.2em
 
     .end-of-program-error
       background-image: url(CALLTRACE_EOP_ERROR_IMG);
