@@ -40,6 +40,7 @@
 #   source ci/lib/test-lane-files.sh
 #   test_lane_ids                    # every lane id, one per line
 #   test_lane_files <id>             # the lane's files, sorted, one per line
+#   test_lane_file_skip_reason <file> <uname-s> # empty when eligible
 #   test_lane_backend <id>           # "c" or "js"
 #   test_lane_extra_flags <id>       # extra nim flags (may be empty)
 #   test_lane_description <id>       # one-line human description
@@ -2281,7 +2282,21 @@ test_lane_files() {
 	esac
 }
 
-# test_lane_all_files — the union of every lane's files, deduplicated.
+# Platform eligibility is independent of discovery: coverage inventories must
+# continue to claim Linux suites on every host. Keep the reason here, beside
+# lane data, so every runner uses the same decision.
+# An empty reason means eligible on the supplied uname -s host.
+test_lane_file_skip_reason() {
+	local file="$1" host="$2"
+	case "${file}" in
+	src/tests/ct_host/test_ct_host_killed_leaves_no_process_behind.nim)
+		[ "${host}" = Linux ] || printf '%s\n' linux-only
+		;;
+	esac
+	return 0
+}
+
+# test_lane_all_files — the union of every lane's files, sorted, unique.
 test_lane_all_files() {
 	local id
 	while read -r id; do

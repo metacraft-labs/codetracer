@@ -50,6 +50,11 @@ lint_step "test-lane coverage: every test-shaped file runs somewhere" \
 lint_step "test-lane runner: recipe-owned lanes are refused, by name" \
 	bash ci/test/recipe-owned-lanes-test.sh
 
+# Platform selection must preserve inventory and Linux coverage, and report
+# every omitted file explicitly on other hosts.
+lint_step "test-lane platform eligibility: selection and reporting" \
+	bash ci/test/lane-platform-test.sh
+
 # The lanes' BACKEND honesty: `vm-unit` compiles with C, so it must not collect
 # a suite that imports a stdlib module which is fatal off the JS target, and
 # every such suite must be in `vm-unit-js` instead. It holds the JS-only module
