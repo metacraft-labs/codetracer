@@ -465,7 +465,7 @@ jobs:
           }
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Validate env.sh syntax
         shell: bash
@@ -780,14 +780,14 @@ jobs:
 
       - name: Generate CI token
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -822,7 +822,7 @@ jobs:
         run: ./ci/ensure-origin-dap-windows-toolchain.ps1
 
       - name: Install Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -962,14 +962,14 @@ jobs:
 
       - name: Generate CI token
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -992,7 +992,7 @@ jobs:
         run: choco install capnproto -y
 
       - name: Install Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -1188,7 +1188,7 @@ jobs:
           }
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           # No later step in this job talks to a git remote, so the token has
           # nothing to do after the checkout and should not outlive it: these
@@ -1317,14 +1317,14 @@ jobs:
 
       - name: Generate CI token
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -1365,7 +1365,7 @@ jobs:
         # never got far enough to write anything, and a missing report must not
         # become a second, misleading failure.
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-env-decomposition
           path: .tmp/windows-diy/windows-env-decomposition.json
@@ -1566,14 +1566,14 @@ jobs:
 
       - name: Generate CI token
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -1673,14 +1673,14 @@ jobs:
         # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
         # secrets via the CI Token Provider GitHub App.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -1761,14 +1761,14 @@ jobs:
         # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
         # secrets via the CI Token Provider GitHub App.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -1847,14 +1847,14 @@ jobs:
         # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
         # secrets via the CI Token Provider GitHub App.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -1902,14 +1902,14 @@ jobs:
         # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
         # secrets via the CI Token Provider GitHub App.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -2011,7 +2011,7 @@ jobs:
         # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
         # secrets via the CI Token Provider GitHub App.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
@@ -2165,7 +2165,7 @@ jobs:
           while IFS= read -r k; do echo "  $k"; done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           token: ${{ steps.ci_token.outputs.token }}
           # Do not leave the installation token in `.git/config` for the rest
@@ -2206,14 +2206,14 @@ jobs:
         # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
         # secrets via the CI Token Provider GitHub App.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           token: ${{ steps.ci_token.outputs.token }}
           # Do not leave the installation token in `.git/config` for the rest
@@ -2289,7 +2289,7 @@ jobs:
         # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
         # secrets via the CI Token Provider GitHub App.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
@@ -2443,7 +2443,7 @@ jobs:
           while IFS= read -r k; do echo "  $k"; done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           # No later step in this job talks to a git remote, so the token has
           # nothing to do after the checkout and should not outlive it: these
@@ -2498,7 +2498,7 @@ jobs:
         # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
         # secrets via the CI Token Provider GitHub App.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
@@ -2652,7 +2652,7 @@ jobs:
           while IFS= read -r k; do echo "  $k"; done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           # No later step in this job talks to a git remote, so the token has
           # nothing to do after the checkout and should not outlive it: these
@@ -2705,14 +2705,14 @@ jobs:
     steps:
       - name: Generate CI token
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -2787,14 +2787,14 @@ jobs:
     steps:
       - name: Generate CI token
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -3740,7 +3740,7 @@ jobs:
 
       - name: Upload test logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: viewmodel-test-logs
           path: test-logs/
@@ -3759,14 +3759,14 @@ jobs:
         # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
         # secrets via the CI Token Provider GitHub App.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           # No later step in this job talks to a git remote, so the token has
           # nothing to do after the checkout and should not outlive it: these
@@ -3799,7 +3799,7 @@ jobs:
 
       - name: "Import GPG key for signing commits"
         id: import-gpg
-        uses: crazy-max/ghaction-import-gpg@v6
+        uses: crazy-max/ghaction-import-gpg@v7
         with:
           gpg_private_key: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY_PASS }}
@@ -3826,14 +3826,14 @@ jobs:
         # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
         # secrets via the CI Token Provider GitHub App.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           # No later step in this job talks to a git remote, so the token has
           # nothing to do after the checkout and should not outlive it: these
@@ -3891,14 +3891,14 @@ jobs:
         # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
         # secrets via the CI Token Provider GitHub App.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -3976,14 +3976,14 @@ jobs:
         # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
         # secrets via the CI Token Provider GitHub App.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -4017,14 +4017,14 @@ jobs:
         # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
         # secrets via the CI Token Provider GitHub App.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -4077,7 +4077,7 @@ jobs:
 
       - name: "Import GPG key for signing commits"
         id: import-gpg
-        uses: crazy-max/ghaction-import-gpg@v6
+        uses: crazy-max/ghaction-import-gpg@v7
         with:
           gpg_private_key: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY_PASS }}
@@ -4134,7 +4134,7 @@ jobs:
         # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
         # secrets via the CI Token Provider GitHub App.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
@@ -4288,7 +4288,7 @@ jobs:
           while IFS= read -r k; do echo "  $k"; done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -4303,7 +4303,7 @@ jobs:
 
       - name: "Import GPG key for signing commits"
         id: import-gpg
-        uses: crazy-max/ghaction-import-gpg@v6
+        uses: crazy-max/ghaction-import-gpg@v7
         with:
           gpg_private_key: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY_PASS }}
@@ -4485,14 +4485,14 @@ jobs:
 
       - name: Generate CI token
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -4555,7 +4555,7 @@ jobs:
             || { echo "non-nix-build/CodeTracer-Setup.exe was not produced" >&2; exit 1; }
 
       - name: Upload installer artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: codetracer-setup-exe
           path: non-nix-build/CodeTracer-Setup.exe
@@ -4578,14 +4578,14 @@ jobs:
     steps:
       - name: Mint installation token for cross-repo sibling access
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           token: ${{ steps.ci_token.outputs.token }}
 
@@ -4599,7 +4599,7 @@ jobs:
 
       - name: "Import GPG key for signing"
         id: import-gpg
-        uses: crazy-max/ghaction-import-gpg@v6
+        uses: crazy-max/ghaction-import-gpg@v7
         with:
           gpg_private_key: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY_PASS }}
@@ -4608,7 +4608,7 @@ jobs:
           git_commit_gpgsign: true
 
       - name: Download installer artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: codetracer-setup-exe
           path: .
@@ -4825,7 +4825,7 @@ jobs:
         # this repository is public and nothing here talks to a remote, and
         # these runners reuse their work tree, so a persisted credential would
         # outlive the job that minted nothing.
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -4975,7 +4975,7 @@ jobs:
         # this repository is public and nothing here talks to a remote, and
         # these runners reuse their work tree, so a persisted credential would
         # outlive the job that minted nothing.
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -5075,7 +5075,7 @@ jobs:
           - archlinux:latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           # No later step in this job talks to a git remote, so the token has
           # nothing to do after the checkout and should not outlive it: these
@@ -5209,7 +5209,7 @@ jobs:
         # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
         # secrets via the CI Token Provider GitHub App.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
@@ -5457,7 +5457,7 @@ jobs:
           while IFS= read -r k; do echo "  $k"; done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -5926,7 +5926,7 @@ jobs:
         # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
         # secrets via the CI Token Provider GitHub App.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
@@ -6080,7 +6080,7 @@ jobs:
           while IFS= read -r k; do echo "  $k"; done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -6652,14 +6652,14 @@ jobs:
         # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
         # secrets via the CI Token Provider GitHub App.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -6756,7 +6756,7 @@ jobs:
 
       - name: Upload test artifacts
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: ui-tests-rr-artifacts
           path: |
@@ -6788,7 +6788,7 @@ jobs:
         # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
         # secrets via the CI Token Provider GitHub App.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
@@ -6957,7 +6957,7 @@ jobs:
           while IFS= read -r k; do echo "  $k"; done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
 
       - name: Checkout CodeTracer
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -7137,7 +7137,7 @@ jobs:
 
       - name: Upload visual replay artifacts
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: visual-replay-regression-artifacts
           path: |
@@ -7194,14 +7194,14 @@ jobs:
         # tokens from the repo-local CI_TOKEN_PROVIDER_APP_ID +
         # CI_TOKEN_PROVIDER_PRIVATE_KEY secrets via the CI Token Provider App.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -7245,7 +7245,7 @@ jobs:
     steps:
       - name: Mint installation token for cross-repo sibling access
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
@@ -7253,7 +7253,7 @@ jobs:
           skip-token-revoke: false
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -7358,7 +7358,7 @@ jobs:
 
       - name: Upload sibling build logs
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: ct-test-providers-sibling-logs
           # scripts/build-siblings.sh captures each recorder build into
@@ -7390,14 +7390,14 @@ jobs:
         # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
         # secrets via the CI Token Provider GitHub App.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -7446,7 +7446,7 @@ jobs:
     steps:
       - name: Decide whether the docs channel has anything to publish
         id: scope
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             // A branch deploy republishes its channel unconditionally: the
@@ -7591,14 +7591,14 @@ jobs:
         # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
         # secrets via the CI Token Provider GitHub App.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -7711,14 +7711,14 @@ jobs:
         # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
         # secrets via the CI Token Provider GitHub App.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -7807,14 +7807,14 @@ jobs:
         # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
         # secrets via the CI Token Provider GitHub App.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           token: ${{ steps.ci_token.outputs.token }}
       - name: Install Nix
@@ -7834,7 +7834,7 @@ jobs:
 
       - name: "Import GPG key for signing commits"
         id: import-gpg
-        uses: crazy-max/ghaction-import-gpg@v6
+        uses: crazy-max/ghaction-import-gpg@v7
         with:
           gpg_private_key: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY_PASS }}
@@ -7941,7 +7941,7 @@ jobs:
           [![Download PGP Key](https://img.shields.io/badge/Download-PGP%20key-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer.pub.asc)" >> release_changelog.md
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           body_path: "release_changelog.md"
           draft: true
@@ -8027,7 +8027,7 @@ jobs:
     timeout-minutes: 300
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: false
           persist-credentials: false
@@ -8086,7 +8086,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           # Same reasoning as `ci-verdict`: no step here talks to a git remote
           # after the checkout, and these runners reuse their work tree.
@@ -8392,7 +8392,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           # No later step in this job talks to a git remote, so the token has
           # nothing to do after the checkout and should not outlive it: these
@@ -8474,7 +8474,7 @@ jobs:
     steps:
       - name: Mint installation token for the manifests repo
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
@@ -8484,7 +8484,7 @@ jobs:
         # depth 2 so HEAD's first parent is present: that is the second
         # candidate, and the one that kept `dev` resolvable for exactly one
         # commit after publication stopped.
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: false
           fetch-depth: 2

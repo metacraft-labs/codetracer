@@ -45,7 +45,7 @@ jobs:
       # `actions/checkout` needs a real git on PATH on these guests; without one
       # it falls back to the REST API. This job does not need submodules, so a
       # shallow default checkout is enough.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Cheap and hermetic, and it runs the bounds' own tests on a REAL Windows
       # host rather than only on Linux pwsh. If the negative tests behave

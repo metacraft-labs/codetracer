@@ -69,14 +69,14 @@ jobs:
         # a runner with the submodule already in its work tree gets away with
         # it, which is why it survived this long.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout codetracer
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -156,7 +156,7 @@ jobs:
 
       - name: Upload MCR DAP flow logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mcr-dap-flow-logs
           path: test-logs/

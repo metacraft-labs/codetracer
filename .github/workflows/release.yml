@@ -85,7 +85,7 @@ jobs:
       publish: ${{ steps.plan.outputs.publish }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -126,7 +126,7 @@ jobs:
     steps:
       - name: Mint installation token for cross-repo sibling access
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
@@ -134,7 +134,7 @@ jobs:
 
       # The persisted credential is used by the sibling provisioning below.
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -231,7 +231,7 @@ jobs:
               --rpm "codetracer-${VERSION}-1.x86_64.rpm" < /dev/null
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-linux-x86_64
           path: |
@@ -254,7 +254,7 @@ jobs:
       PUBLISH: ${{ needs.plan.outputs.publish }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -267,7 +267,7 @@ jobs:
           gh-token: ${{ github.token }}
 
       - name: Download all platform artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -293,7 +293,7 @@ jobs:
           done
 
       - name: Import the release signing key
-        uses: crazy-max/ghaction-import-gpg@v6
+        uses: crazy-max/ghaction-import-gpg@v7
         with:
           gpg_private_key: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY_PASS }}
@@ -409,7 +409,7 @@ jobs:
       - name: Mint a token for the organisation's package publisher
         if: needs.plan.outputs.publish == 'true'
         id: packages_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}

@@ -482,7 +482,7 @@ jobs:
         # `vars.*` is the fallback for repos that hold the App ID as a variable
         # (both spellings exist across this org today).
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID || vars.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
@@ -503,7 +503,7 @@ jobs:
         # needs libs/tree-sitter-nim, a PRIVATE submodule of this public repo,
         # which is why this step needs the App token.  On the other two edges
         # it is a no-op for repos that have no submodules.
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           submodules: recursive
