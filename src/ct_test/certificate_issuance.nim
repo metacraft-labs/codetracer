@@ -881,12 +881,19 @@ proc recordUnitResult(run: var AttestedRun; target: string;
   ## path. For those, a certificate can still name a file in which nothing ran.
   ## Closing it needs per-test reporting in each provider, not a change here.
   ##
+  ## ``rust-libtest`` sits between the two groups. ``rust_libtest.runRust`` runs
+  ## through ``native_m11_common`` and reports one outcome per unit, but it
+  ## reads libtest's summary after the exit code: a unit with no passed test
+  ## finishes ``tsSkipped``, and a single-test unit also needs that test's own
+  ## result line. A file or project unit has no per-test view, but the
+  ## orchestrator dispatches single-test units.
+  ##
   ## The registry's other providers are not on that list and are not a gap
   ## either, because they never report a finished test at all: ``js-jest`` and
   ## ``js-vitest`` wire ``provider.run`` to ``js_common.unsupportedRun``, and
-  ## ``python-pytest``, ``python-unittest``, ``nim-unittest`` and
-  ## ``rust-libtest`` wire it to their own not-implemented stub. All of them
-  ## return a diagnostic and an empty event seq, so this fold sees no
+  ## ``python-pytest``, ``python-unittest`` and ``nim-unittest`` wire it to
+  ## their own not-implemented stub. All of them return a diagnostic and an
+  ## empty event seq, so this fold sees no
   ## ``tekTestFinished`` and claims no target for them.
   ##
   ## **Do not check this with a grep for ``tsSkipped``.** A token search answers

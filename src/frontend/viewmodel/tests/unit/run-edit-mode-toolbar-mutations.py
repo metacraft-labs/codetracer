@@ -86,8 +86,8 @@ TRANSCRIPT = "the recorded transcript is the one this suite claims to be about"
 PARSERS = "the four families that DO parse still parse — no regression twin"
 CLI_CHAIN = "the CLI tests both markers and pre-empts neither — the derived control"
 CMAKE = "one CMake project fires three cpp providers — arbitration is required"
-LANG_SET = "the Lang enum is the closed set, and it has 41 members"
-LIBTEST = "EMT-A22 a provider's DECLARED capability is not its availability"
+LANG_SET = "the Lang enum is the closed set, and it has 35 members"
+LIBTEST = "EMT-A22 Rust's declared run capability has a real implementation"
 NOIR_REC = "EMT-A21 Noir refuses test RECORDING, in the provider's own words"
 # `NO_MODE` — "the topbar has no mode parameter today, and no command slots" —
 # was RETIRED with the check it named. That check recorded §1's defect as the
@@ -163,22 +163,21 @@ MUTATIONS: list[Mutation] = [
     Mutation(
         "M3",
         "src/common/common_lang.nim",
-        "    LangGdScript  # 40",
-        "    LangGdScriptRenamed  # 40",
+        "    LangGdScript  # 34",
+        "    LangGdScriptRenamed  # 34",
         LANG_SET,
-        "Drop the 41st member's name. A cardinality check that counts by a loose "
-        "pattern would still reach 41 and survive.",
+        "Drop the 35th member's name. A cardinality check that counts by a loose "
+        "pattern would still reach 35 and survive.",
     ),
-    # --- provider capability-vs-installed-proc (EMT-A22) -------------------
+    # --- provider capability + installed proc agree (EMT-A22) --------------
     Mutation(
         "M4",
         "src/ct_test/frameworks/rust_libtest.nim",
-        "  provider.run = notImplementedRun",
+        "  provider.run = runRust",
         "  provider.run = notImplementedRecord",
         LIBTEST,
-        "Change which stub is installed as `run`. The check must be reading the "
-        "INSTALLED proc, not merely the presence of the word `notImplementedRun` "
-        "somewhere in the file.",
+        "Replace the real run callback with the recording refusal. The check "
+        "must pin the INSTALLED proc, not merely the capability flags.",
     ),
     Mutation(
         "M5",
@@ -186,8 +185,8 @@ MUTATIONS: list[Mutation] = [
         "    canRunProject: true,",
         "    canRunProject: false,",
         LIBTEST,
-        "Remove the overclaim itself. If the check survives, it is not actually "
-        "pinning the contradiction that makes rust-libtest a trap.",
+        "Break the declared side of the run contract. If the check survives, "
+        "it is not pinning declared and installed support together.",
     ),
     # --- Noir's refusal to record (EMT-A21 / EMT-F6) -----------------------
     Mutation(

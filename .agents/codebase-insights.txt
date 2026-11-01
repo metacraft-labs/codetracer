@@ -2436,17 +2436,20 @@ runners exit 0 for an all-skipped suite:
   zero events read as "nothing executed" and would WITHHOLD a certificate that
   should have been issued.
 
-The remaining providers still derive a whole file's status from one subprocess
+The remaining providers still derive a run unit's status from one subprocess
 exit code (`cpp_common`, `native_m11_common`, `m12_fallback_common`,
 `smart_contract_common`, and `ruby_common`'s minitest branch), so a skip is
 indistinguishable from a pass there. All of them now at least report a FAILURE
 honestly — see "the counters read `tekTestFinished` ONLY" below — but the
-coarse granularity is unchanged either way: one event per file, not per test.
+coarse granularity remains for batch file/project scopes. rust-libtest also
+runs through `native_m11_common`, but `runRust` then requires a passed count in
+libtest's summary, anchored at line start, plus for a single test that test's
+own result line: exit 0 without them (a cfg-gated test) is `tsSkipped`.
 
 The rest of the registry -- jest, vitest,
-pytest, python-unittest, nim-unittest, rust-libtest -- has no `run` wired at
-all (`unsupportedRun` / a not-implemented stub), so it reports no finished
-test and can claim nothing; do not read it as a third category of gap.
+pytest, python-unittest and nim-unittest -- has no `run` wired at all
+(`unsupportedRun` / a not-implemented stub), so it reports no finished test
+and can claim nothing; do not read it as a third category of gap.
 
 Minitest shares `runRubyCommand` with rspec and deliberately does NOT get a
 JSON path: it has no equivalent reporter, so `buildRubyCommand` is handed an
@@ -2477,7 +2480,8 @@ counts; the `tekFailure` beside it only carries the reason.
 
 The same hole was open in three more places and is now closed in ONE:
 `cpp_common.runNativeCommand` (cpp-gtest, cpp-catch2, cpp-ctest),
-`native_m11_common.runCommand` (go-test, d-unittest, crystal-spec) and
+`native_m11_common.runCommand` (go-test, d-unittest, crystal-spec; now also
+rust-libtest) and
 `m12_fallback_common.runShellCommand` (pascal, fortran, ada, odin, v, lean,
 julia, assembly) each carried their own copy of the "emit the terminal events"
 tail, and all three failure branches were missing the `tekTestFinished`.

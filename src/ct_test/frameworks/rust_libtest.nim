@@ -1,18 +1,37 @@
-import std/[algorithm, options, os, sequtils, strutils, tables]
+import std/[algorithm, json, options, os, sequtils, strutils, tables]
 
 import ../contracts
 import ../discovery
+import ../process_exec
+import native_m11_common
 
 const
   RustLibtestProviderId* = "rust-libtest"
   RustLibtestFramework* = "libtest/cargo-test"
   RustLibtestVersion* = "m6"
+  RustLibtestNixPackages* = ["cargo", "rustc"]
+  LibraryKinds = @["lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"]
+  RunnableKinds = LibraryKinds & @["bin", "test"]
 
 type
   RustCommandScope* = enum
     rcsProject
     rcsFile
     rcsSingle
+
+  CargoTarget* = object
+    ## One entry of a package's `targets` in `cargo metadata`.
+    name*: string
+    kinds*: seq[string]
+    srcPath*: string
+
+  CargoLayout* = object
+    ## What Cargo says about the package rooted at the project. `known = false`
+    ## means Cargo could not be asked.
+    known*: bool
+    packageName*: string
+    workspaceMembers*: int
+    targets*: seq[CargoTarget]
 
   RustTestDecl* = object
     name*: string
@@ -265,18 +284,37 @@ proc braceDelta(line: string): int =
     elif ch == '}':
       dec result
 
-proc fileModulePrefix(projectRoot, filePath: string): seq[string] =
-  let rel = normalizedRelative(projectRoot, filePath)
-  if rel.startsWith("src/"):
-    var stem = rel["src/".len .. ^1]
-    if stem.endsWith(".rs"):
-      stem = stem[0 ..< stem.len - 3]
-    if stem in ["lib", "main"]:
-      return @[]
-    for part in stem.split('/'):
-      if part == "mod":
-        continue
+proc modulePathParts(stem: string): seq[string] =
+  ## The module path of a file below a crate root, from its slash-separated
+  ## stem. `mod.rs` names its directory, so it adds no segment of its own.
+  for part in stem.split('/'):
+    if part != "mod":
       result.add part
+
+proc fileModulePrefix(projectRoot, filePath: string): seq[string] =
+  ## The module path libtest prints for tests in `filePath`, relative to the
+  ## test binary that compiles the file. Each target is its own crate, so the
+  ## path starts at THAT target's root: a directory that only selects a target
+  ## (`src/bin/<x>/`, `tests/<x>/`) is not a module, and writing it into the
+  ## selector makes an exact run match nothing.
+  let rel = normalizedRelative(projectRoot, filePath)
+  if not rel.endsWith(".rs"):
+    return @[]
+  let stem = rel[0 ..< rel.len - ".rs".len]
+  if stem.startsWith("src/bin/"):
+    let parts = stem["src/bin/".len .. ^1].split('/')
+    # `src/bin/<x>.rs` and `src/bin/<x>/main.rs` are crate roots.
+    if parts.len > 1 and parts[1 .. ^1] != @["main"]:
+      result = modulePathParts(parts[1 .. ^1].join("/"))
+  elif stem.startsWith("src/"):
+    let inner = stem["src/".len .. ^1]
+    if inner notin ["lib", "main"]:
+      result = modulePathParts(inner)
+  elif stem.startsWith("tests/"):
+    let parts = stem["tests/".len .. ^1].split('/')
+    # `tests/<x>.rs` and `tests/<x>/main.rs` are crate roots.
+    if parts.len > 1 and parts[1 .. ^1] != @["main"]:
+      result = modulePathParts(parts[1 .. ^1].join("/"))
 
 proc selectorFor(prefix, modules: seq[string]; name: string): string =
   var parts: seq[string] = @[]
@@ -448,41 +486,303 @@ proc locateTestsImpl(projectRoot, filePath: string): ProviderResult[seq[TestItem
     value: catalog.value.items)
 
 proc integrationTargetName(projectRoot, filePath: string): string =
+  ## Cargo's auto-discovered integration target owning `filePath`:
+  ## `tests/<x>.rs` is target `x`, and so is everything below `tests/<x>/` when
+  ## `tests/<x>/main.rs` makes that directory a target. A directory without a
+  ## `main.rs` (the conventional `tests/common/`) is no target at all.
+  ## https://doc.rust-lang.org/cargo/guide/project-layout.html
   let rel = normalizedRelative(projectRoot, filePath)
   if rel.startsWith("tests/") and rel.endsWith(".rs"):
-    let stem = rel["tests/".len ..< rel.len - 3]
+    let stem = rel["tests/".len ..< rel.len - ".rs".len]
     if "/" notin stem:
       return stem
+    let target = stem.split('/')[0]
+    if fileExists(projectRoot / "tests" / target / "main.rs"):
+      return target
   ""
 
-proc buildRustCommand*(projectRoot, filePath, selector: string; scope: RustCommandScope): seq[string] =
+proc binaryTargetName(projectRoot, filePath: string): string =
+  ## Cargo's auto-discovered binary target owning a file under `src/bin/`.
+  let rel = normalizedRelative(projectRoot, filePath)
+  if rel.startsWith("src/bin/") and rel.endsWith(".rs"):
+    result = rel["src/bin/".len ..< rel.len - ".rs".len].split('/')[0]
+
+proc crateHasLibrary(projectRoot: string): bool =
+  ## A library target exists by Cargo's `src/lib.rs` convention or by an
+  ## explicit `[lib]` section. Only that one header matters here, so this does
+  ## not need a TOML parser.
+  if fileExists(projectRoot / "src" / "lib.rs"):
+    return true
+  let manifest = projectRoot / "Cargo.toml"
+  fileExists(manifest) and
+    readFile(manifest).splitLines.anyIt(it.strip == "[lib]")
+
+proc canonicalPath(path: string): string =
+  ## `path` with symlinks resolved, because Cargo reports resolved paths and a
+  ## project root may reach it through one (`/var` is `/private/var` on macOS).
+  try:
+    expandFilename(path)
+  except OSError:
+    absolutePath(path)
+
+proc parseCargoLayout*(metadataOutput, projectRoot: string): CargoLayout =
+  ## The package rooted at `projectRoot` out of `cargo metadata` output, with
+  ## its targets. Anything unreadable yields `known = false`, which sends the
+  ## caller back to the path conventions rather than to a wrong answer.
+  ## https://doc.rust-lang.org/cargo/commands/cargo-metadata.html#json-format
+  ##
+  ## The document is one line. `process_exec` merges stderr into the stream,
+  ## so a manifest warning can sit beside it and must not make it unreadable.
+  let manifest = canonicalPath(projectRoot / "Cargo.toml")
+  let lines = metadataOutput.splitLines.filterIt(it.startsWith("{"))
+  if lines.len == 0:
+    return CargoLayout()
+  try:
+    let root = parseJson(lines[^1])
+    for package in root["packages"].getElems:
+      if canonicalPath(package["manifest_path"].getStr) != manifest:
+        continue
+      result.packageName = package["name"].getStr
+      result.workspaceMembers = root["workspace_members"].len
+      for target in package["targets"].getElems:
+        result.targets.add CargoTarget(
+          name: target["name"].getStr,
+          kinds: target["kind"].getElems.mapIt(it.getStr),
+          srcPath: canonicalPath(target["src_path"].getStr))
+      result.known = true
+      return
+  except JsonParsingError, KeyError, ValueError:
+    return CargoLayout()
+
+proc readCargoLayout(projectRoot: string): CargoLayout =
+  ## Ask Cargo which targets the package has. `[lib]`, `[[bin]]` and `[[test]]`
+  ## may rename a target or move its file, `autobins`/`autotests` may remove
+  ## one, and a workspace may redirect the default package, so no path
+  ## convention can answer this. `--no-deps` needs no resolution or network.
+  {.cast(gcsafe).}:
+    try:
+      let probe = execCaptured(
+        @["cargo", "metadata", "--no-deps", "--format-version", "1"],
+        cwd = projectRoot)
+      if probe.exitCode == 0:
+        result = parseCargoLayout(probe.output, projectRoot)
+    except CatchableError:
+      # No usable cargo here, as on the Nix-fallback route: conventions decide.
+      result = CargoLayout()
+
+proc targetOwning(layout: CargoLayout; file: string): Option[CargoTarget] =
+  ## The test-capable target whose crate root is `file`.
+  let wanted = canonicalPath(file)
+  for target in layout.targets:
+    if target.srcPath == wanted and target.kinds.anyIt(it in RunnableKinds):
+      return some(target)
+
+proc conventionalCrateRoot(projectRoot, filePath: string): string =
+  ## The crate root that compiles a file which is not itself a root: the
+  ## `main.rs` of its `tests/<x>/` or `src/bin/<x>/` directory. Empty when the
+  ## path convention names none.
+  let rel = normalizedRelative(projectRoot, filePath)
+  for prefix in ["tests/", "src/bin/"]:
+    if rel.startsWith(prefix):
+      let parts = rel[prefix.len .. ^1].split('/')
+      if parts.len > 1:
+        return projectRoot / prefix / parts[0] / "main.rs"
+
+proc targetArgsFor(target: CargoTarget): seq[string] =
+  if "test" in target.kinds:
+    @["--test", target.name]
+  elif "bin" in target.kinds:
+    @["--bin", target.name]
+  else:
+    @["--lib"]
+
+proc layoutTargetArgs(layout: CargoLayout;
+    projectRoot, filePath: string): seq[string] =
+  ## The target selection Cargo's own target list gives for `filePath`. A
+  ## binary is always named: `--bins` would also run any other binary that has
+  ## a test of the same name, and its pass would be credited to this file.
+  var owner = layout.targetOwning(filePath)
+  let crateRoot = conventionalCrateRoot(projectRoot, filePath)
+  if owner.isNone and crateRoot.len > 0:
+    owner = layout.targetOwning(crateRoot)
+  if owner.isSome:
+    return targetArgsFor(owner.get)
+  # A module file. It belongs to the library when there is one, then to the
+  # package's default binary. Neither may be right, and that is safe: a
+  # target not holding the test matches nothing, and `runRust` reports that as
+  # skipped.
+  if layout.targets.anyIt(it.kinds.anyIt(it in LibraryKinds)):
+    return @["--lib"]
+  let mainBinary = layout.targetOwning(projectRoot / "src" / "main.rs")
+  if mainBinary.isSome:
+    return targetArgsFor(mainBinary.get)
+  @["--bins"]
+
+proc cargoTargetArgs(projectRoot, filePath: string;
+    layout: CargoLayout): seq[string] =
+  ## The Cargo target selection for one source file. `--lib` is not a safe
+  ## default: in a package without a library Cargo refuses it outright, which
+  ## reports a passing test as failed, and for a file compiled into another
+  ## target it runs a binary that does not contain the test. Cargo's target
+  ## list decides when it is available. The path conventions below are the
+  ## fallback for when it is not.
+  if layout.known:
+    return layoutTargetArgs(layout, projectRoot, filePath)
+  let integration = integrationTargetName(projectRoot, filePath)
+  if integration.len > 0:
+    return @["--test", integration]
+  let binary = binaryTargetName(projectRoot, filePath)
+  if binary.len > 0:
+    return @["--bin", binary]
+  let rel = normalizedRelative(projectRoot, filePath)
+  if rel != "src/main.rs" and crateHasLibrary(projectRoot):
+    @["--lib"]
+  else:
+    @["--bins"]
+
+proc buildRustCommand*(projectRoot, filePath, selector: string;
+    scope: RustCommandScope; layout: CargoLayout): seq[string] =
+  ## The `cargo test` argv for `scope`. A workspace names the package, because
+  ## `default-members` can otherwise point the command at a different one.
   result = @["cargo", "test"]
+  if layout.known and layout.workspaceMembers > 1:
+    result.add @["--package", layout.packageName]
   case scope
   of rcsProject:
     discard
   of rcsFile:
-    let target = integrationTargetName(projectRoot, filePath)
-    if target.len > 0:
-      result.add @["--test", target]
-    else:
-      result.add "--lib"
+    result.add cargoTargetArgs(projectRoot, filePath, layout)
   of rcsSingle:
-    let target = integrationTargetName(projectRoot, filePath)
-    if target.len > 0:
-      result.add @["--test", target]
-    else:
-      result.add "--lib"
+    result.add cargoTargetArgs(projectRoot, filePath, layout)
     result.add @["--", selector, "--exact", "--include-ignored"]
+
+proc buildRustCommand*(projectRoot, filePath, selector: string;
+    scope: RustCommandScope): seq[string] =
+  ## `buildRustCommand` with the project's layout read from Cargo.
+  buildRustCommand(projectRoot, filePath, selector, scope,
+    readCargoLayout(projectRoot))
+
+proc libtestPassedCount*(output: string): int =
+  ## The total of `N passed` over every libtest summary line in `output`.
+  ## One `cargo test` prints one `test result:` line per test binary it runs.
+  ##
+  ## Stable libtest has no machine-readable reporter (see
+  ## `framework_research/rust-libtest.md`), so this reads the human summary:
+  ## `test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out`.
+  ## Anchoring on ` passed;` rather than on the word after the colon keeps it
+  ## working when libtest colours `ok`, as `--color=always` does. A line with
+  ## an unreadable count is evidence of nothing and adds nothing.
+  ##
+  ## The line must START with the marker. Cargo's stream also carries text the
+  ## project controls: rustc quotes source lines in its warnings (`3 | ...`)
+  ## and a build script's `cargo:warning` is echoed behind a `warning:` prefix,
+  ## so a marker anywhere in a line can be a comment in the code under test.
+  for line in output.splitLines:
+    if not line.startsWith("test result:"):
+      continue
+    let countEnd = line.find(" passed;")
+    if countEnd < 0:
+      continue
+    var countStart = countEnd
+    while countStart > 0 and line[countStart - 1] in Digits:
+      dec countStart
+    try:
+      result += parseInt(line[countStart ..< countEnd])
+    except ValueError:
+      discard
+
+proc libtestRanSelector*(output, selector: string): bool =
+  ## Whether libtest printed a result line for exactly `selector`:
+  ## `test tests::passes ... ok`, or `test tests::p - should panic ... ok`.
+  ##
+  ## Only the prefix is read. A test writing to the real stdout splits the line
+  ## (`test tests::passes ... noise`, then `ok` alone), and the exit code has
+  ## already ruled out a failure. The trailing space stops `tests::pass` from
+  ## matching `tests::passes`.
+  let prefix = "test " & selector & " "
+  output.splitLines.anyIt(it.startsWith(prefix))
+
+proc cargoRefusedForFeatures*(output: string): bool =
+  ## Whether Cargo refused to build a target over its `required-features`:
+  ## ``error: target `x` in package `y` requires the features: `z` ``.
+  output.splitLines.anyIt(it.startsWith("error: target `") and
+    "requires the features:" in it)
+
+proc finishSkipped(run: var ProviderResult[seq[TestEvent]]; reason: string;
+    scope: TestScope) =
+  ## Rewrite a unit's outcome to skipped: no test ran, so it is evidence of
+  ## nothing in either direction. The failure event and the error diagnostic of
+  ## a refused command go with it, and the reason stays where a reader looks.
+  run.value.keepItIf(it.kind != tekFailure)
+  for event in run.value.mitems:
+    if event.kind in {tekTestFinished, tekRunFinished}:
+      event.status = some(tsSkipped)
+      event.message = reason
+  run.diagnostics = @[diagnostic(dsWarning, reason, scope.file)]
 
 proc notImplementedRecord(scope: TestScope): ProviderResult[seq[TestEvent]] {.gcsafe.} =
   ProviderResult[seq[TestEvent]](
     diagnostics: @[diagnostic(dsWarning, "Rust libtest trace recording is not wired in M6; use command construction for run-only support", scope.file)],
     value: @[])
 
-proc notImplementedRun(scope: TestScope): ProviderResult[seq[TestEvent]] {.gcsafe.} =
-  ProviderResult[seq[TestEvent]](
-    diagnostics: @[diagnostic(dsWarning, "Rust libtest process execution and event parsing are not wired in M6; command construction is tested", scope.file)],
-    value: @[])
+proc runRust(scope: TestScope): ProviderResult[seq[TestEvent]] {.gcsafe.} =
+  ## Execute Cargo/libtest at the granularity the orchestrator requested, and
+  ## report a pass only on libtest's own evidence that a test passed.
+  ##
+  ## **Exit code 0 is not that evidence.** `cargo test -- <name> --exact` exits
+  ## 0 with `running 0 tests` when nothing matches, and matching nothing is
+  ## reachable from correct input: discovery reads source text, so a test under
+  ## `#[cfg(windows)]` or a disabled feature is discovered and never compiled.
+  ## Reporting that as a pass would put a test that did not run into a
+  ## certificate, which test-certificates-spec `Standard.md` §8 forbids
+  ## ("producers MUST NOT claim targets that did not run"). Such a unit
+  ## finishes `tsSkipped`, the status `summarize` and `recordUnitResult` both
+  ## refuse to count as evidence. The rule holds for every scope. It also
+  ## covers a `harness = false` target, whose output has no libtest summary,
+  ## and output so large the capture bound cut the summary off: in both the
+  ## provider cannot show that a test passed.
+  ##
+  ## A single-test scope must also find the selector's own result line, so a
+  ## `harness = false` target that ignores the selector and prints a summary of
+  ## its own attests nothing about the discovered test. A file or project scope
+  ## has no one selector, and its summary says only that some test passed. The
+  ## orchestrator dispatches single-test scopes.
+  ##
+  ## Any non-zero exit stays a failure from `runCommand`, including a build
+  ## error that ran no test, with one exception: Cargo refusing a target whose
+  ## `required-features` are off. That is a `cfg(feature = ...)` gate at target
+  ## level, so it finishes the way a gated test does. One `tekTestFinished`
+  ## stands for the whole scope.
+  let commandScope =
+    case scope.kind
+    of tskProject: rcsProject
+    of tskFile: rcsFile
+    of tskSingle: rcsSingle
+  result = runCommand(RustLibtestProviderId, scope,
+    buildRustCommand(scope.projectRoot, scope.file, scope.selector,
+      commandScope), @RustLibtestNixPackages)
+
+  var
+    output = ""
+    reportedPass = false
+  for event in result.value:
+    if event.kind == tekOutput:
+      output.add event.output
+    elif event.kind == tekTestFinished and event.status == some(tsPassed):
+      reportedPass = true
+  if not reportedPass:
+    if cargoRefusedForFeatures(output):
+      result.finishSkipped("cargo did not build the target of selector '" &
+        scope.selector & "': it needs features this run does not enable",
+        scope)
+    return
+  if libtestPassedCount(output) > 0 and
+      (scope.kind != tskSingle or libtestRanSelector(output, scope.selector)):
+    return
+
+  result.finishSkipped("cargo test exited 0 but libtest reported no passed " &
+    "test for selector '" & scope.selector & "': it matched no compiled " &
+    "test (a cfg-gated test, or one outside the selected Cargo target)", scope)
 
 proc parseEventUnsupported(raw: string): ProviderResult[TestEvent] {.gcsafe.} =
   ProviderResult[TestEvent](
@@ -506,7 +806,7 @@ proc newRustLibtestM1Provider*(): M1Provider =
     discoverProjectImpl(projectRoot)
   provider.locateTests = proc(projectRoot, file: string): ProviderResult[seq[TestItem]] {.gcsafe.} =
     locateTestsImpl(projectRoot, file)
-  provider.run = notImplementedRun
+  provider.run = runRust
   provider.record = notImplementedRecord
   provider.parseEvent = parseEventUnsupported
   provider.mapTraceEntryPoints = mapTraceUnsupported

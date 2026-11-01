@@ -643,10 +643,9 @@ type
     ## pure, so `host/` calls them and the results arrive here as values.
     ##
     ## `canRun` / `canRecord` are read from the **installed proc**, never from
-    ## the declared capability flags — §2.4 hazard 3, and not hypothetical:
-    ## `rust_libtest` declares `canRunProject: true` and installs
-    ## `notImplementedRun`, so a Run Tests button built from the flags is
-    ## enabled for Rust and does nothing (EMT-A22).
+    ## the declared capability flags — §2.4 hazard 3. EMT-A22 keeps the two
+    ## halves pinned together for Rust, whose declared run capability used to
+    ## outlive its diagnostic-only callback.
     id*: string
     displayName*: string
     canRun*: bool
@@ -840,9 +839,9 @@ proc testButtons(kinds: seq[RankedKind]; declared: BuildSelection;
   let provider = providers[0]
   var runButton: ToolbarButton
   if not provider.canRun:
-    # EMT-A22 / §2.4 hazard 3: read the INSTALLED proc, never the declared
-    # capability flag. `rust_libtest` declares `canRunProject: true` and
-    # installs `notImplementedRun`.
+    # EMT-A22 / §2.4 hazard 3: read the INSTALLED proc, never only the declared
+    # capability flag. The host must still report an unavailable callback as
+    # disabled even when provider metadata drifts.
     runButton = disabled(tbaRunTests, dcProviderNotImplemented,
       provider.displayName & " is detected, but running its tests is not " &
       "implemented in this build.")
