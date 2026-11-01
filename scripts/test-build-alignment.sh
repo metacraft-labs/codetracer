@@ -115,6 +115,11 @@ make_sandbox() {
 	# Real copies of the scripts under test, so `$0`-derived SCRIPT_DIR lands
 	# inside the sandbox and the nested build-once.sh call resolves here too.
 	cp -R "$REPO_ROOT/scripts" "$sandbox/scripts"
+	# Exercise the same committed platform binding as the real Apple-arm
+	# driver. The recording repro below never reads or re-solves these files.
+	mkdir -p "$sandbox/locks"
+	cp "$REPO_ROOT/repro.lock" "$sandbox/repro.lock"
+	cp "$REPO_ROOT/locks/arm64-macosx.lock" "$sandbox/locks/arm64-macosx.lock"
 
 	local name
 	for name in "${STUB_COMMANDS[@]}"; do
@@ -154,7 +159,14 @@ EOF
 	cat >"$sandbox/bin/uname" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\t%s\t%s\n' 'uname' "$PWD" "$*" >>"$CT_ALIGN_TRACE"
-printf '%s\n' "$CT_ALIGN_UNAME"
+if [ "${1:-}" = -m ]; then
+	case "$CT_ALIGN_UNAME" in
+	Darwin) printf 'arm64\n' ;;
+	*) printf 'x86_64\n' ;;
+	esac
+else
+	printf '%s\n' "$CT_ALIGN_UNAME"
+fi
 EOF
 	chmod +x "$sandbox/bin/uname"
 
@@ -273,11 +285,11 @@ run_script() {
 # for as long as the socket path has had its current shape. Leave it unanchored
 # so the next relocation cannot silently do it again.
 normalized() {
-	# The stamp helper receives absolute repo paths, which differ between the
-	# independent sandboxes. Fold only its own cwd to a common root token;
+	# The stamp helper and native lock binding receive absolute repo paths,
+	# which differ between the independent sandboxes. Fold only their own cwd;
 	# paths outside that root still compare literally and reveal a wrong call.
 	awk -F'\t' '
-		$1 == "bf_electron_write_stamp" {
+		$1 == "bf_electron_write_stamp" || ($1 == "repro" && $3 ~ /--lock /) {
 			while ((pos = index($3, $2)) > 0) {
 				$3 = substr($3, 1, pos - 1) "<repo>" substr($3, pos + length($2))
 			}

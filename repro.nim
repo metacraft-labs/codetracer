@@ -2241,10 +2241,22 @@ package codeTracer:
     let gateBuildAlignment = ctShell(
       actionIdValue = "codetracer.gate.build-alignment",
       commandValue = "bash scripts/test-build-alignment.sh",
-      extraInputsValue = @["scripts/test-build-alignment.sh"],
+      extraInputsValue = @["scripts/test-build-alignment.sh", "repro.lock",
+        "locks/arm64-macosx.lock"],
       cacheableValue = true,
       extraEnvValue = GateEnv)
     target("gate-build-alignment", gateBuildAlignment)
+
+    let gateBuildPlatformLock = ctShell(
+      actionIdValue = "codetracer.gate.build-platform-lock",
+      commandValue = "bash scripts/test-build-once-platform-lock.sh",
+      extraInputsValue = @["scripts/test-build-once-platform-lock.sh",
+        "scripts/build-once.sh", "ci/lib/build-freshness.sh",
+        "ci/lib/sha256.sh", "repro.lock", "locks/arm64-macosx.lock",
+        "flake.lock"],
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
+    target("gate-build-platform-lock", gateBuildPlatformLock)
 
     let gateRustTestCrateCoverage = ctShell(
       actionIdValue = "codetracer.gate.rust-test-crate-coverage",
@@ -2336,6 +2348,7 @@ package codeTracer:
       gateKnownFailures]
     let ctGateLintActions = @[
       gateBuildAlignment,
+      gateBuildPlatformLock,
       gateRustTestCrateCoverage,
       gateTestLaneCoverage,
       gateSiblingProvisioning,

@@ -556,6 +556,8 @@ bf_electron_roots() {
 		src/ct \
 		libs \
 		repro.nim \
+		repro.lock \
+		locks \
 		package.json \
 		config.nims
 }

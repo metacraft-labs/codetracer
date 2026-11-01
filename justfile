@@ -64,6 +64,10 @@ test-build-once-profile-cwd:
 test-build-once-failed-bundle:
   bash scripts/test-build-once-failed-bundle.sh
 
+# The Apple-arm build binds its native solve and never rewrites the Linux lock.
+test-build-once-platform-lock:
+  bash scripts/test-build-once-platform-lock.sh
+
 # Assert this repo's `runquota` flake pin equals the `runquota-src` revision
 # its pinned `reprobuild` locks. `runquota.follows = "reprobuild/runquota-src"`
 # derives that input from reprobuild; a half-refreshed lock can still retain
@@ -1171,6 +1175,7 @@ test:
   # placed earlier it would SKIP there and verify nothing.
   bash ci/lib/run-just-lanes.sh test \
     test-build-alignment \
+    test-build-once-platform-lock \
     test-build-freshness \
     test-flake-pin-alignment \
     test-reprobuild-catalog-coverage \

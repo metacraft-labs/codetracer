@@ -191,6 +191,30 @@ if [ -n "$ct_reprobuild_host" ]; then
 	ct_repro_out_root="src/build-${ct_config}-repro"
 	# The reprobuild branch has no tup variant, hence the empty third field.
 	ct_publish_build_env "$ct_reprobuild_host" "$ct_config" "" "$ct_repro_out_root"
+	# A solved lock describes one platform. Keep the shared Linux solve
+	# intact and bind the separately committed Apple-arm solve through repro's
+	# whole-build --lock API. The watch CLI has no --lock flag; retain its
+	# existing invocation when build.sh starts its incremental watcher.
+	# `.` schedules every declared target. Two of them cannot pass on a Mac:
+	# `dmg` shells out to system tools the hermetic PATH does not carry, and
+	# `docs-book-assets` needs recorder and player builds. CI builds this same
+	# target (.github/workflows/codetracer.yml); `just build-dmg` names its own.
+	ct_repro_target="${CODETRACER_REPROBUILD_TARGET:-.}"
+	if [ "${CODETRACER_REPROBUILD_COMMAND:-build}" = build ] &&
+		[ "$ct_reprobuild_host" = darwin ] &&
+		[ -z "${CODETRACER_REPROBUILD_TARGET:-}" ]; then
+		ct_repro_target=".#macos-app"
+	fi
+	ct_lock_args=()
+	if [ "${CODETRACER_REPROBUILD_COMMAND:-build}" = build ] &&
+		[ "$ct_reprobuild_host" = darwin ] && [ "$(uname -m)" = arm64 ]; then
+		ct_native_lock="$CT_ROOT/locks/arm64-macosx.lock"
+		if [ ! -f "$ct_native_lock" ]; then
+			echo "Error: committed native lock is missing: $ct_native_lock" >&2
+			exit 1
+		fi
+		ct_lock_args=(--lock "$ct_native_lock")
+	fi
 	if [ -z "${REPRO_VARIANTS:-}" ]; then
 		export REPRO_VARIANTS="buildType=${ct_config}"
 	elif ! grep -q "buildType=" <<<"$REPRO_VARIANTS"; then
@@ -500,7 +524,8 @@ if [ -n "$ct_reprobuild_host" ]; then
 	*) ct_tool_provisioning_default="nix" ;;
 	esac
 
-	"$repro_bin" "${CODETRACER_REPROBUILD_COMMAND:-build}" "${CODETRACER_REPROBUILD_TARGET:-.}" \
+	"$repro_bin" "${CODETRACER_REPROBUILD_COMMAND:-build}" "$ct_repro_target" \
+		${ct_lock_args[@]+"${ct_lock_args[@]}"} \
 		--tool-provisioning="${CODETRACER_REPROBUILD_TOOL_PROVISIONING:-$ct_tool_provisioning_default}" \
 		--progress="${CODETRACER_REPROBUILD_PROGRESS:-bar-line}" \
 		--write-diagnostics="${CODETRACER_REPROBUILD_DIAGNOSTICS:-.repro/build/reprobuild/build-diagnostics.log}" \
