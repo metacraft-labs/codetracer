@@ -36,6 +36,7 @@ func gpuiPaneName*(kind: PaneKind): string =
   of paneProblems: "Problems"
   of paneRequests: "Requests"
   of paneLowLevelCode: "Low Level Code"
+  of paneVerification: "Verification"
 
 func desktopTabTitle*(kind: PaneKind): string =
   ## What the desktop's tab says for a built-in pane: its content's name split

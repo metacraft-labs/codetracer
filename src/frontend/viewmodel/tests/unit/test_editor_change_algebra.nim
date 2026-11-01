@@ -117,7 +117,10 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 2001
+const ExpectedAssertions = 2013
+  ## 2001 -> 2013, measured: agents db71c1840d2 already counts 2010 (three
+  ## production modules added since 2001 was written), and
+  ## `host/native_verification_host.nim` adds three more facts.
   ## *1998 -> 2001 on 2026-11-02: `viewmodels/constraints_answer.nim` (the
   ## Constraints pane's model) x three assertions. It neither calls `rebase(`
   ## nor spells `mapOver`.*

@@ -66,7 +66,8 @@ import isonim/web/web_renderer
 import ./panel_host
 from ../viewmodel/session_vm import SessionViewModel
 from ../viewmodel/viewmodels/verification_vm import
-  VerificationVM, createVerificationVM
+  VerificationVM, createVerificationVM, VerificationActivation
+from ./errors import desktopResolvedPath
 from ../viewmodel/viewmodels/counterexample_session_vm import
   CounterexampleSessionVM, createCounterexampleSessionVM
 import ../viewmodel/views/isonim_verification_view
@@ -88,6 +89,17 @@ proc initVerificationVM*() =
     verificationVMInstance = createVerificationVM()
   if counterexampleVMInstance.isNil:
     counterexampleVMInstance = createCounterexampleSessionVM()
+
+# PLAT-63: a press on a finding (or Go to Source in its menu) opens the
+# finding's file at its line in the editor — the Problems pane's opener. The
+# view hands the verifier's spelling's candidates (`sourceCandidates`); the
+# renderer cannot look at the disk, so the first — the path under the run's
+# project — is opened.
+verificationSourceOpener = proc(activation: VerificationActivation;
+                                candidates: seq[string]) =
+  let path = if candidates.len > 0: candidates[0] else: activation.file
+  discard data.openLocation(cstring(desktopResolvedPath(path)),
+                            activation.line, activation.column)
 
 # The panel host mounts the pane into the container GoldenLayout creates.
 setPanelRenderer(Content.Verification,

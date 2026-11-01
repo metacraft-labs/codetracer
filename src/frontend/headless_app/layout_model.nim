@@ -143,6 +143,12 @@ type
       ## (Generated-Code-Listing.md §10): it is opened beside the source by
       ## the desktop's gesture (`view.low-level-code`, Alt+1). Schema version
       ## 7; LAST, for the ordinal reason the PLAT-16 values give.
+    paneVerification = "verification"
+      ## PLAT-63. The desktop's View › Verification pane
+      ## (`Content.Verification`): a Verno run's findings by kind, the
+      ## counterexample a failed obligation opens. In NO default layout: View
+      ## › Verification opens it. Schema version 8; LAST, for the ordinal
+      ## reason the PLAT-16 values give.
 
   PaneRefKind* = enum
     ## PLAT-9 / Extensibility-Model.md §6.1. WHAT KIND OF PANE A SLOT HOLDS.
@@ -703,7 +709,7 @@ type
     detail*: string
 
 const
-  LayoutSchemaVersion* = 7
+  LayoutSchemaVersion* = 8
     ## Bumped when the serialised shape changes incompatibly. A decoder that
     ## meets a version it does not know raises `ldeUnknownVersion` rather than
     ## guessing — the failure mode `savedLayoutConfig` has no way to express,
@@ -760,6 +766,9 @@ const
     ## | 7 | `PaneKind` gains `lowLevelCode` (PLAT-60) — the desktop's Low
     ##       Level Code view, opened beside the source on demand. Shape
     ##       unchanged; `migrateV6toV7` re-stamps the version. |
+    ## | 8 | `PaneKind` gains `verification` (PLAT-63) — the desktop's View ›
+    ##       Verification pane, which no default places. Shape unchanged;
+    ##       `migrateV7toV8` re-stamps the version. |
     ##
     ## ### The v2→v3 migration changes nothing, and that is not a reason to
     ## ### have skipped the bump
@@ -2685,6 +2694,12 @@ proc migrateV6toV7(doc: JsonNode): JsonNode =
   result = copy(doc)
   result["version"] = %7
 
+proc migrateV7toV8(doc: JsonNode): JsonNode =
+  ## PLAT-63. `PaneKind` gained `verification`. Shape unchanged: re-stamps
+  ## the version, for the v3→v4 reason.
+  result = copy(doc)
+  result["version"] = %8
+
 proc migrateDocument(doc: JsonNode): JsonNode =
   ## Walk a document forward, ONE VERSION AT A TIME, to this build's schema
   ## version (§6).
@@ -2713,6 +2728,8 @@ proc migrateDocument(doc: JsonNode): JsonNode =
       result = migrateV5toV6(result)
     of 6:
       result = migrateV6toV7(result)
+    of 7:
+      result = migrateV7toV8(result)
     else:
       # Unreachable while the chain is complete, and this is what makes
       # "complete" checkable: a bump that forgets its migration lands here

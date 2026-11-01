@@ -39,7 +39,8 @@ import viewmodels/event_log_vm
 # retired-rows checks (+2) when the Timeline rows were retired.
 # 247 -> 254 (PLAT-58): K58-K60, the Requests rows (+7).
 # 254 -> 257 (PLAT-60): K61-K63, the Low Level Code rows (+3).
-const ExpectedAssertions = 257
+# 257 -> 260 (PLAT-63): K64-K66, the Verification rows (+3).
+const ExpectedAssertions = 260
 
 var countedAssertions = 0
 
@@ -55,13 +56,13 @@ func rowsWith(state: NativeState; gpui = false): seq[string] =
 
 suite "PLAT-50: the click inventory":
 
-  test "every row K1..K63, once, complete":
+  test "every row K1..K66, once, complete":
     var ids = initHashSet[string]()
     for i, b in ClickInventory:
       ck b.id == "K" & $(i + 1)
       ids.incl b.id
     ck ids.len == ClickInventory.len
-    ck ClickInventory.len == 63
+    ck ClickInventory.len == 66
     for b in ClickInventory:
       if b.target.len == 0 or b.gestures.card == 0 or b.desktop.len == 0:
         checkpoint("incomplete row " & b.id)

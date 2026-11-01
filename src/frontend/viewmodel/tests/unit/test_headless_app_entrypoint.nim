@@ -200,10 +200,12 @@ suite "Headless app — launch":
     # bottom (`layout_model.sharedDefaultDocked`).
     # PLAT-52: `paneTerminalOutput` left this set — the session's
     # `TerminalOutputVM` is its ViewModel. PLAT-58: `paneRequests` left it —
-    # the session's `RequestPanelVM` is its ViewModel.
+    # the session's `RequestPanelVM` is its ViewModel. PLAT-63 adds the
+    # Verification pane: its ViewModel is the WINDOW's (a run of the
+    # project), which the front-ends attach, as Problems'.
     const DesktopOnlyPanes = {paneVcs, paneAgentActivity,
                               paneTestResults, paneConstraints,
-                              paneProblems}
+                              paneProblems, paneVerification}
     var replayPanes = 0
     var editPanes = 0
     var desktopPanes = 0
@@ -225,7 +227,7 @@ suite "Headless app — launch":
         check not slot.paneViewModel(p).isNil
     checkpoint("replay panes " & $replayPanes & ", edit-only " & $editPanes)
     check editPanes == 1
-    check desktopPanes == 5
+    check desktopPanes == 6
     check replayPanes > 0
     # The pane PLAT-41 moved, pinned by name so the move cannot be undone
     # quietly by re-adding it to the set above.

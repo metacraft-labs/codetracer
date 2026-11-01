@@ -412,6 +412,12 @@ proc paneViewModel*(slot: HeadlessSessionSlot; kind: PaneKind): ViewModel =
     # one the desktop's Low Level Code view draws (loaded per stop by the
     # session's stop loader while a front-end shows it).
     ViewModel(s.lowLevelCodeVM)
+  of paneVerification:
+    # PLAT-63. A Verno run of the window's project: the WINDOW's
+    # `VerificationVM` (the desktop keeps one per window too,
+    # `ui/verification.nim`, so the pane keeps its run across trace
+    # switches). The replay session owns none, so nil, as for Problems.
+    nil
 
 proc paneIsLive*(slot: HeadlessSessionSlot; kind: PaneKind): bool =
   ## Whether the pane has a ViewModel to render. False for every pane of a
