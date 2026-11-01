@@ -2,7 +2,8 @@
  "_comment": [
   "PLAT-49 part B — the desktop's panes and session tabs, read from the real Electron app on calc.",
   "Produced by src/tests/gui/tests/visual/plat49-panes-capture.spec.ts",
-  "(`bash scripts/plat49-capture-electron.sh`)."
+  "(`bash scripts/plat49-capture-electron.sh`).",
+  "2026-11-01: footer.statusParts no longer lists the test-only move counter (span.test-movement, x 327 w 16 \"14\"). That one entry was removed by hand, not by a re-capture: the fixture now hides the counter in every launch, so a fresh capture omits it, but this host cannot re-capture at the lane's 1900x1400 window. Nothing else moves without it: in this capture and in a macOS capture taken with the counter hidden, the strip sits at (width - 358) / 2, status-right at width - w and the file info at x 10, so no other box depends on the counter. Every other value is the capture as recorded."
  ],
  "calltrace": [
   {
@@ -333,13 +334,6 @@
     "x": 1039,
     "w": 86,
     "text": "REQUESTS"
-   },
-   {
-    "id": "",
-    "cls": "test-movement",
-    "x": 327,
-    "w": 16,
-    "text": "14"
    },
    {
     "id": "",
