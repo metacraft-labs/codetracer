@@ -577,6 +577,13 @@ proc runDesktopOperation(res: EditingResolution): NativeKind =
   # The DOM element's own operations stay its own.
   if res.isNativeBaseOperation:
     return nkLeaveToElement
+  # An operation the desktop answers rather than runs (`Ctrl+Enter` on a
+  # list, CUA-Keymap.md §3.6): said on the status bar, and the key stopped.
+  let answer = desktopAnswerOf(res.operation, desktopScopePath(),
+                               mac = deskRouter.delivery.platform == pkMac)
+  if answer.len > 0:
+    showInertNote(answer)
+    return nkHandled
   if res.operation in HostIntents:
     if not data.functions.update.isNil: data.functions.update(data, false)
     return nkHandled

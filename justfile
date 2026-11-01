@@ -1897,6 +1897,7 @@ test-frontend-js:
   target_axes_js_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-target-axes-js-test.XXXXXX.js")"
   ipc_registry_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-ipc-registry-test.XXXXXX.js")"
   monaco_operations_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-monaco-operations-test.XXXXXX.js")"
+  desktop_list_operations_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-desktop-list-operations-test.XXXXXX.js")"
   shortcut_presets_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-shortcut-presets-test.XXXXXX.js")"
   shortcut_dialog_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-shortcut-dialog-test.XXXXXX.js")"
   debug_toolbar_tooltips_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-debug-toolbar-tooltips-test.XXXXXX.js")"
@@ -1906,7 +1907,7 @@ test-frontend-js:
   run_to_cursor_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-run-to-cursor-test.XXXXXX.js")"
   html_sinks_probe="$(mktemp "${TMPDIR:-/tmp}/codetracer-html-sinks-probe.XXXXXX.js")"
   dap_refusal_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-dap-refusal-test.XXXXXX.js")"
-  trap 'rm -f "$nim_sourcemap_test" "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$monaco_operations_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$component_ids_across_sessions_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe" "$dap_refusal_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
+  trap 'rm -f "$nim_sourcemap_test" "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$monaco_operations_test" "$desktop_list_operations_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$component_ids_across_sessions_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe" "$dap_refusal_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
   echo "Running Nim Source Map V3 frontend tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctIndex -d:server \
     --out:"$nim_sourcemap_test" js src/frontend/tests/nim_sourcemap_test.nim
@@ -1950,6 +1951,14 @@ test-frontend-js:
     --path:src/frontend/viewmodel \
     --out:"$monaco_operations_test" js src/frontend/tests/monaco_operations_test.nim
   node -e 'globalThis.window = globalThis; require(process.argv[1])' "$monaco_operations_test"
+  # The desktop router's list table, held to the CUA base the same way:
+  # every list row the desktop delivers runs there, or is answered on the
+  # status bar (`ui/native_key_operations.desktopAnswerOf`).
+  echo "Running the desktop router's list-table tests..."
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
+    --path:src/frontend/viewmodel \
+    --out:"$desktop_list_operations_test" js src/frontend/tests/desktop_list_operations_test.nim
+  node -e 'globalThis.window = globalThis; require(process.argv[1])' "$desktop_list_operations_test"
 
   # The preset tables, and the dialog that lists what they resolved to. Same
   # lane and same invocation as the suite above: all three read the SHIPPED

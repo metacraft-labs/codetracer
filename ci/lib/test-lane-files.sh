@@ -1373,6 +1373,9 @@ test_lane_files() {
 		# table (`ui/monaco_operations`) to the CUA base, row by row, and
 		# resolves the chords the retired Mousetrap / Monaco registries
 		# disagreed about in the desktop's own delivery (PLAT-68).
+		# `desktop_list_operations_test.nim` holds its list table the same way:
+		# every list row the desktop delivers runs there or is answered on the
+		# status bar (`Ctrl+Enter`, CUA-Keymap §3.6).
 		# `debug_toolbar_tooltips_test.nim` is the same shape one level up: the
 		# debug toolbar's tooltips must NAME the chord that is bound rather than
 		# restate it as a literal, so it asserts the shipped table drives all 13
@@ -1417,6 +1420,7 @@ test_lane_files() {
 			src/frontend/tests/component_registry_binding_test.nim \
 			src/frontend/tests/dap_refusal_surfaces_test.nim \
 			src/frontend/tests/debug_toolbar_tooltips_test.nim \
+			src/frontend/tests/desktop_list_operations_test.nim \
 			src/frontend/tests/frontend_lang_test.nim \
 			src/frontend/tests/ipc_registry_test.nim \
 			src/frontend/tests/monaco_operations_test.nim \
