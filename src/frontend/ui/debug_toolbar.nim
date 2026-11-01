@@ -101,7 +101,14 @@ proc dapStep*(api: MediatorWithSubscribers; action: string) =
     cerror kind.error
     return
   if not api.isNil:
-    api.emit(kind.value, DapStepArguments(threadId: 1))
+    # A step pressed while the Low Level Code listing has the keyboard focus
+    # goes by instruction where the engine offers it (`renderer.step` asks the
+    # same hook): DAP's `granularity: "instruction"`.
+    let stepArgs = DapStepArguments(threadId: 1).toJs
+    if not listingStepsByInstruction.isNil and
+       listingStepsByInstruction(kind.value):
+      stepArgs["granularity"] = cstring"instruction"
+    api.emit(kind.value, stepArgs)
     api.emit(InternalNewOperation,
              NewOperation(name: cstring(action), stableBusy: true))
 
