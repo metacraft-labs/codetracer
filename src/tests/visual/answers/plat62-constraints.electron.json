@@ -1,0 +1,106 @@
+{
+ "_comment": [
+  "PLAT-62 — the desktop's Constraints pane, read from the real Electron app.",
+  "Produced by src/tests/gui/tests/constraints-pane/plat62-constraints-capture.spec.ts",
+  "(`just plat62-capture-electron`)."
+ ],
+ "project": "plat62_circuit",
+ "before": {
+  "headline": "18 ACIR opcodes, 33 unconstrained",
+  "stale": false,
+  "notice": "Totals only. Build the project to see the generated opcodes themselves.",
+  "provenance": "nargo info --json, run just now",
+  "absence": "",
+  "rows": [
+   {
+    "index": 0,
+    "opcode": false,
+    "name": "main",
+    "kind": "acir",
+    "count": "18",
+    "where": "src/main.nr:3",
+    "title": "Go to src/main.nr:3",
+    "linked": true,
+    "selected": false
+   },
+   {
+    "index": 1,
+    "opcode": false,
+    "name": "halve",
+    "kind": "unconstrained",
+    "count": "16",
+    "where": "src/main.nr:11",
+    "title": "Go to src/main.nr:11",
+    "linked": true,
+    "selected": false
+   },
+   {
+    "index": 2,
+    "opcode": false,
+    "name": "directive_invert",
+    "kind": "unconstrained",
+    "count": "9",
+    "where": "",
+    "title": "No source: the compiler generated this function (a directive); no source in the project declares it",
+    "linked": false,
+    "selected": false
+   },
+   {
+    "index": 3,
+    "opcode": false,
+    "name": "directive_integer_quotient",
+    "kind": "unconstrained",
+    "count": "8",
+    "where": "",
+    "title": "No source: the compiler generated this function (a directive); no source in the project declares it",
+    "linked": false,
+    "selected": false
+   }
+  ]
+ },
+ "placedMenu": [
+  {
+   "label": "Go to Source",
+   "disabled": false,
+   "reason": ""
+  },
+  {
+   "label": "Copy Name",
+   "disabled": false,
+   "reason": ""
+  },
+  {
+   "label": "Copy Source Location",
+   "disabled": false,
+   "reason": ""
+  }
+ ],
+ "nowhereMenu": [
+  {
+   "label": "Go to Source",
+   "disabled": true,
+   "reason": "the compiler generated this function (a directive); no source in the project declares it"
+  },
+  {
+   "label": "Copy Name",
+   "disabled": false,
+   "reason": ""
+  },
+  {
+   "label": "Copy Source Location",
+   "disabled": true,
+   "reason": "the compiler generated this function (a directive); no source in the project declares it"
+  }
+ ],
+ "pressedPlaced": {
+  "path": "src/main.nr",
+  "line": 11
+ },
+ "selectedAfterPress": [
+  1
+ ],
+ "pressedNowhere": {
+  "path": "src/main.nr",
+  "line": 3
+ }
+}

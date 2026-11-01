@@ -520,3 +520,68 @@ proc noirCatalogFromSources*(files: seq[NoirSourceFile]): TestCatalog =
       continue
     for decl in parseNoirTestDeclarationsRelative(rel, file.content):
       result.items.add itemFromDeclRelative(info, rel, decl)
+
+
+# ---------------------------------------------------------------------------
+# Every function declaration — where a compiled function's NAME is declared
+# ---------------------------------------------------------------------------
+
+type
+  NoirFnDecl* = object
+    ## One `fn` declaration in one source: where its name is written.
+    name*: string
+    path*: string
+      ## The project-relative path, `/`-separated.
+    line*: int
+      ## 1-based.
+    column*: int
+      ## 1-based column of the `fn` keyword.
+    isTest*: bool
+      ## Carries `#[test]` — a test is never what a compiled program names.
+    unconstrained*: bool
+
+proc noirFunctionDeclarationsRelative*(relativePath,
+    content: string): seq[NoirFnDecl] =
+  ## Every `fn` declared in one source, by project-relative path.
+  ##
+  ## THE SAME READING AS TEST DISCOVERY, so the two cannot disagree about
+  ## where a function is: the source is sanitised first (`sanitizeNoir` masks
+  ## strings and comments, so `// fn main` is not a declaration), each line is
+  ## read with `readFnName` (a function TYPE, `fn(Field) -> Field`, names
+  ## nothing and is skipped), and a pending `#[test]` marks the declaration
+  ## that follows it. Used by the Constraints pane to place the functions
+  ## `nargo info` names on the line that declares them.
+  let sanitized = sanitizeNoir(content)
+  let rawLines = content.splitLines
+  var lineNo = 0
+  var pendingTest = false
+  for line in sanitized.splitLines:
+    inc lineNo
+    let rawLine = if lineNo <= rawLines.len: rawLines[lineNo - 1] else: line
+    let stripped = line.strip
+    if stripped.len == 0:
+      continue
+    var attr: NoirAttr
+    if parseTestAttribute(line, rawLine, lineNo, attr):
+      if attr.isTest:
+        pendingTest = true
+      continue
+    if stripped.startsWith("#["):
+      continue
+    let fnInfo = readFnName(line)
+    if fnInfo.name.len > 0:
+      result.add NoirFnDecl(name: fnInfo.name, path: relativePath,
+                            line: lineNo, column: fnInfo.column,
+                            isTest: pendingTest,
+                            unconstrained: findKeyword(line,
+                                                       "unconstrained") >= 0)
+    pendingTest = false
+
+proc noirFunctionDeclarations*(files: seq[NoirSourceFile]): seq[NoirFnDecl] =
+  ## Every `fn` in a set of read sources under `src/`, in the order given —
+  ## the files `nargo` compiles, as `noirCatalogFromSources` reads them.
+  for file in files:
+    let rel = file.path.replace("\\", "/")
+    if not rel.endsWith(".nr") or not rel.startsWith("src/"):
+      continue
+    result.add noirFunctionDeclarationsRelative(rel, file.content)

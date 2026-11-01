@@ -3832,6 +3832,15 @@ jobs:
         # its own Xvfb.
         run: nix develop .#devShells.x86_64-linux.default --command just plat53-capture-electron
 
+      - name: The desktop's Constraints pane is the reference
+        if: ${{ !cancelled() }}
+        # The desktop column of the Constraints pane: the rows of a Noir
+        # crate measured by a real `nargo info --json`, where each function is
+        # declared, what a right-click on a row opens and where a press goes —
+        # read from the REAL Electron app. Here for the reasons the steps above
+        # give; the recipe starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat62-capture-electron
+
       - name: The desktop's Agent Activity pane is the reference
         if: ${{ !cancelled() }}
         # The desktop column of the Agent Activity pane: a review's agent

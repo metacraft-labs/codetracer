@@ -83,6 +83,16 @@
 ## is what `test_constraints_stale_on_edit.nim` does. A check that sets the
 ## flag, and a spy that watches `markStale` get called, are both blind in the
 ## same way: they move with the thing they measure.
+##
+## ## The rows are the ViewModel's, and each one leads to its source (PLAT-62)
+##
+## Every row this view draws is one of `ConstraintsVM.rows`, in that order —
+## the list the terminal's pane and the GPUI window's leaf draw too. A
+## function's row names where it is declared (`constraints-where`) and its
+## title says where a press goes, or why it goes nowhere; a press selects it
+## and opens that line (`activateRow`), and a right press opens the row menu
+## the native panes show (`rowMenu`). `data-ct-row` is the row's index in
+## `rows`, which is what a reader of the DOM compares across front-ends.
 
 import std/strutils
 
@@ -93,6 +103,10 @@ when defined(js):
   # The DSL's calls on a `WebRenderer` resolve where the generic view is
   # instantiated; the overloads must be in scope there.
   import isonim/web/web_renderer
+  import isonim/web/dom_api as isonim_dom
+  import kdom
+  from ./context_menu_bridge import showContextMenu
+  from ../../context_menu_item import ContextMenuItem
 
 import ../viewmodels/constraints_vm
 
@@ -100,14 +114,6 @@ import ../viewmodels/constraints_vm
 export signals, computation, components
 
 const ConstraintsContainerClass* = "component-container constraints"
-
-proc rowClass*(kind: ConstraintFunctionKind): string =
-  "constraints-row " & $kind
-
-proc kindLabel*(kind: ConstraintFunctionKind): string =
-  case kind
-  of cfkAcir: "acir"
-  of cfkUnconstrained: "unconstrained"
 
 proc opcodeRowClass*(): string =
   ## THE GENERATED-CODE ROW, BORROWED RATHER THAN REINVENTED.
@@ -122,35 +128,6 @@ proc opcodeRowClass*(): string =
   ## prefixed clone would have been a second vocabulary for the same object,
   ## and the two would have drifted the first time either was restyled.
   "low-level-code-instruction constraints-opcode"
-
-proc opcodeIndexText*(op: ConstraintOpcode): string =
-  ## The gutter. Right-aligned by CSS so a column of indices reads as one.
-  $op.index
-
-proc listingNoticeFor*(report: ConstraintReport): string =
-  ## The line that appears when the pane has counts but NO rows, and "" when
-  ## there is nothing to explain.
-  ##
-  ## THIS IS THE STATE THE LIVE SITE IS ACTUALLY IN, and it is why this notice
-  ## exists rather than an empty listing body. The bundled report comes from
-  ## `nargo info`, which prints totals and no opcodes at all, so there is
-  ## genuinely nothing to list until something compiles. A pane that rendered a
-  ## blank listing area for that would look broken; one that says which of the
-  ## two answers it is holding is merely honest about a real difference.
-  if report.absence.len > 0:
-    return ""
-  if report.functions.len == 0:
-    return ""
-  if report.hasListing():
-    return ""
-  # WHAT THE PANE WAS TOLD BEATS WHAT IT CAN INFER. A compile that succeeded
-  # without emitting a listing knows why; the default sentence below is a
-  # guess that would be wrong in exactly that case, and wrong in the
-  # reassuring direction — it would tell a user to press Build when Build is
-  # what had just failed to produce a listing.
-  if report.listingAbsence.len > 0:
-    return report.listingAbsence
-  "Totals only. Build the project to see the generated opcodes themselves."
 
 proc containerClass*(report: ConstraintReport): string =
   ## `stale` beside the base class, so CSS can dim the rows while the headline
@@ -169,33 +146,103 @@ proc containerClass*(report: ConstraintReport): string =
 # The panel, under any renderer (Shared-DOM-Front-Ends D3)
 # ---------------------------------------------------------------------------
 
-proc renderRow[R, N](r: R; fn: ConstraintFunction): N =
-  let count = $fn.opcodes
-  let label = kindLabel(fn.kind)
-  ui(r):
-    tdiv(class = rowClass(fn.kind)):
+proc rowElementClass*(row: ConstraintRow; selected: bool): string =
+  ## A row's classes: its kind's, `selected`, and `linked` when a press goes
+  ## to a source line.
+  result = case row.kind
+           of crkFunction:
+             "constraints-row " & row.kindLabel
+           of crkOpcode:
+             opcodeRowClass()
+  if row.source.linked:
+    result.add " linked"
+  if selected:
+    result.add " selected"
+
+when defined(js):
+  proc eventClientX(ev: isonim_dom.Event): int {.importjs: "(#.clientX || 0)".}
+  proc eventClientY(ev: isonim_dom.Event): int {.importjs: "(#.clientY || 0)".}
+  proc preventMenuDefault(ev: isonim_dom.Event) {.importjs: "#.preventDefault()".}
+  proc stopMenuPropagation(ev: isonim_dom.Event) {.importjs: "#.stopPropagation()".}
+  proc writeConstraintText(text: cstring) {.importjs:
+    "(navigator.clipboard ? navigator.clipboard.writeText(#).catch(function(){}) : null)".}
+
+  proc rowMenuHandler(vm: ConstraintsVM; index: int;
+                      action: ConstraintMenuAction): proc(ev: kdom.Event) =
+    ## One entry's handler — a FACTORY, so each entry runs its own action
+    ## under the JS backend (codetracer#860).
+    result = proc(ev: kdom.Event) =
+      let outcome = vm.runRowMenu(index, action)
+      if outcome.copied.len > 0:
+        writeConstraintText(cstring(outcome.copied))
+
+  proc rowMenuItems(vm: ConstraintsVM; index: int): seq[ContextMenuItem] =
+    ## The row's context menu, the ViewModel's entries (`rowMenu`) — the same
+    ## the terminal's and GPUI's panes show.
+    for e in vm.rowMenu(index):
+      result.add ContextMenuItem(
+        name: cstring(e.label), hint: cstring"",
+        disabled: not e.enabled, disabledReason: cstring(e.reason),
+        handler: rowMenuHandler(vm, index, e.action))
+
+  proc wireRowMenu(row: isonim_dom.Element; vm: ConstraintsVM; index: int) =
+    ## A right press selects the row and opens its menu.
+    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"contextmenu",
+      proc(ev: isonim_dom.Event) =
+        ev.preventMenuDefault()
+        ev.stopMenuPropagation()
+        vm.selectRow(index)
+        showContextMenu(rowMenuItems(vm, index), ev.eventClientX(),
+                        ev.eventClientY()))
+
+proc onRowPress(vm: ConstraintsVM; index: int): proc() =
+  ## A press: select the row and open its source. A FACTORY so each row's
+  ## handler holds its own index.
+  let captured = index
+  result = proc() = discard vm.activateRow(captured)
+
+proc renderRow[R, N](r: R; vm: ConstraintsVM; row: ConstraintRow;
+                     index: int; selected: bool): N =
+  ## One function's row: its name, its kind, its count and where it is
+  ## declared.
+  let count = row.count
+  let label = row.kindLabel
+  let where = whereText(row.source)
+  result = ui(r):
+    tdiv(class = rowElementClass(row, selected), `data-ct-row` = $index,
+         title = rowTitle(row), onclick = onRowPress(vm, index)):
       span(class = "constraints-name"):
-        text fn.name
+        text row.name
       span(class = "constraints-kind"):
         text label
       span(class = "constraints-count"):
         text count
+      span(class = "constraints-where"):
+        text where
+  when defined(js):
+    when N is isonim_dom.Element:
+      wireRowMenu(result, vm, index)
 
-proc renderOpcode[R, N](r: R; op: ConstraintOpcode): N =
-  let index = opcodeIndexText(op)
-  let name = op.name
-  let args = op.args
-  ui(r):
-    tdiv(class = opcodeRowClass()):
+proc renderOpcode[R, N](r: R; vm: ConstraintsVM; row: ConstraintRow;
+                        index: int; selected: bool): N =
+  let name = row.name
+  let args = row.args
+  result = ui(r):
+    tdiv(class = rowElementClass(row, selected), `data-ct-row` = $index,
+         title = rowTitle(row), onclick = onRowPress(vm, index)):
       span(class = "low-level-code-instruction-offset"):
-        text index
+        text row.count
       span(class = "low-level-code-instruction-name"):
         text name
       span(class = "low-level-code-instruction-args"):
         text args
+  when defined(js):
+    when N is isonim_dom.Element:
+      wireRowMenu(result, vm, index)
 
-proc renderFunction[R, N](r: R; fn: ConstraintFunction): N =
-  ## ONE FUNCTION: its count row, then its opcodes.
+proc renderFunctions[R, N](r: R; vm: ConstraintsVM; into: N) =
+  ## ONE FUNCTION per block: its count row, then its opcodes — the rows of
+  ## `vm.rows`, in order.
   ##
   ## The count row is KEPT and kept FIRST. A listing with a total above it is
   ## strictly more than either alone, and the total is the part that survived a
@@ -205,18 +252,25 @@ proc renderFunction[R, N](r: R; fn: ConstraintFunction): N =
   ## under it rather than beside it.
   # Bound where instantiated: on JS this module also sees WebRenderer's.
   mixin appendChild
-  let listing = ui(r):
-    tdiv(class = "constraints-function"):
-      discard
-  r.appendChild(listing, renderRow[R, N](r, fn))
-  if fn.rows.len > 0:
-    let body = ui(r):
-      tdiv(class = "constraints-opcodes low-level-code-instructions"):
+  let rows = vm.rows.val
+  let selected = vm.selected.val
+  var i = 0
+  while i < rows.len:
+    let listing = ui(r):
+      tdiv(class = "constraints-function"):
         discard
-    for op in fn.rows:
-      r.appendChild(body, renderOpcode[R, N](r, op))
-    r.appendChild(listing, body)
-  listing
+    r.appendChild(listing, renderRow[R, N](r, vm, rows[i], i, i == selected))
+    inc i
+    if i < rows.len and rows[i].kind == crkOpcode:
+      let body = ui(r):
+        tdiv(class = "constraints-opcodes low-level-code-instructions"):
+          discard
+      while i < rows.len and rows[i].kind == crkOpcode:
+        r.appendChild(body, renderOpcode[R, N](r, vm, rows[i], i,
+                                               i == selected))
+        inc i
+      r.appendChild(listing, body)
+    r.appendChild(into, listing)
 
 proc renderConstraintsPanel*[R, N](r: R; vm: ConstraintsVM): N =
   ## The Constraints panel, mounted on the desktop by `ui/panel_host`.
@@ -255,8 +309,7 @@ proc renderConstraintsPanel*[R, N](r: R; vm: ConstraintsVM): N =
       r.setAttribute(noticeNode, "class", "constraints-listing-notice hidden")
 
     r.clearChildren(bodyContainer)
-    for fn in report.functions:
-      r.appendChild(bodyContainer, renderFunction[R, N](r, fn))
+    renderFunctions[R, N](r, vm, bodyContainer)
 
     r.clearChildren(provenanceNode)
     if report.provenance.len > 0:
