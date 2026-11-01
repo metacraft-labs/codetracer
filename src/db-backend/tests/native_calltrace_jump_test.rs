@@ -70,6 +70,13 @@
 //!   row loaded at another stop is refused by name, the session staying where
 //!   it was, rather than resolved against the current stack.
 //!
+//! * `rust_rr_..._indent_from_the_visible_root_...`: a Rust recording, whose
+//!   `main` sits below a dozen and more runtime frames the worker leaves out.
+//!   The rows' display depths count from `main`, their frame identity stays
+//!   physical, and activating the `main` row lands in `main` (codetracer-pm
+//!   issue
+//!   `2026-10-31-native-calltrace-indents-the-visible-root-by-hidden-startup-frames.md`).
+//!
 //! No mocks: the recorders record a real program, db-backend, ct-native-replay,
 //! rr, Delve and `ct-mcr debugserver` are the shipping binaries, the client
 //! speaks DAP over stdio. Recording under MCR's default attach needs a host
@@ -1152,4 +1159,109 @@ fn search_uses_the_browsing_replay_admission(recorder: &str) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+/// `let sum = a + b;` in `calculate_sum` (`test-programs/rust/rust_flow_test.rs`),
+/// and the function.
+const RUST_SUM_LINE: usize = 414;
+/// `main`, which calls `calculate_sum` on line 427.
+const RUST_MAIN_LINES: std::ops::RangeInclusive<i64> = 423..=430;
+/// The lines of `rust_flow_test.rs` the scenario relies on.
+const RUST_FLOW_LINES: &[(usize, &str)] = &[
+    (412, "fn calculate_sum(a: i32, b: i32) -> i32 {"),
+    (RUST_SUM_LINE, "let sum = a + b;"),
+    (423, "fn main() {"),
+    (427, "let result = calculate_sum(x, y);"),
+];
+
+/// The native call trace is the call stack of the current position, and the
+/// worker leaves out the callers above `main` (a Rust `main` is reached
+/// through a dozen and more `std::rt` and libc frames). The pane indents a
+/// row by its `depth`, so that depth must count from the visible root:
+/// `main` is drawn at the tree's base inset and `calculate_sum` one level in
+/// (codetracer-pm `spec/GUI/Core-Panes/Call-Trace-Pane.md`, "Tree Structure"
+/// and "Visual Design"). The frame's own identity is not presentation and
+/// stays physical: `content.call.location.callstackDepth` still counts the
+/// hidden frames, and activating the root row lands in `main`
+/// (`spec/GUI/Layout-And-Navigation/Click-Navigation.md` §2.2).
+///
+/// codetracer-pm issue
+/// `2026-10-31-native-calltrace-indents-the-visible-root-by-hidden-startup-frames.md`:
+/// before the fix the `main` row's depth was its physical depth (17 on the
+/// recording the issue measured), 136 pixels of indentation.
+#[test]
+fn rust_rr_calltrace_jump_rows_indent_from_the_visible_root_and_keep_frame_identity() {
+    let name = "rust_rr_calltrace_jump_rows_indent_from_the_visible_root_and_keep_frame_identity";
+    let Some(mut session) = open_session_for(
+        name,
+        Recorder::Rr,
+        Language::Rust,
+        "rust/rust_flow_test.rs",
+        RUST_FLOW_LINES,
+    ) else {
+        return;
+    };
+    let file = session.file.clone();
+    let client = session.runner.client();
+
+    continue_to_line(client, &file, RUST_SUM_LINE);
+    let rows = load_calltrace_rows(client);
+    let shape: Vec<(String, Value, Value)> = rows
+        .iter()
+        .map(|row| {
+            (
+                row_name(row),
+                row["depth"].clone(),
+                row["content"]["call"]["location"]["callstackDepth"].clone(),
+            )
+        })
+        .collect();
+    println!("rows (name, depth, callstackDepth): {shape:?}");
+    assert_eq!(
+        rows.len(),
+        2,
+        "the call trace inside calculate_sum is main and calculate_sum: {shape:?}"
+    );
+    let (root, child) = (&rows[0], &rows[1]);
+    assert!(
+        row_name(root).ends_with("main") && row_name(child).ends_with("calculate_sum"),
+        "the rows are main, then calculate_sum: {shape:?}"
+    );
+
+    // Presentation: the visible root sits at the base inset.
+    assert_eq!(root["depth"], json!(0), "the visible root's display depth: {shape:?}");
+    assert_eq!(child["depth"], json!(1), "calculate_sum's display depth: {shape:?}");
+
+    // Identity: the physical depths, hidden startup frames included.
+    let physical = |row: &Value| {
+        row["content"]["call"]["location"]["callstackDepth"]
+            .as_i64()
+            .unwrap_or_else(|| panic!("a row without a callstackDepth: {row}"))
+    };
+    assert!(
+        physical(root) > 0,
+        "main is called by the Rust runtime, so its physical depth counts those frames: {shape:?}"
+    );
+    assert_eq!(
+        physical(child),
+        physical(root) + 1,
+        "calculate_sum is one frame below main: {shape:?}"
+    );
+    for row in [root, child] {
+        assert_eq!(
+            row["content"]["call"]["depth"].as_i64(),
+            Some(physical(row)),
+            "the call's own depth is the worker's physical depth: {row}"
+        );
+    }
+
+    let moved = activate_row(client, root);
+    assert_in_function(
+        "activating the visible root row from inside calculate_sum",
+        client,
+        &moved,
+        "main",
+        &RUST_MAIN_LINES,
+    );
+    session.runner.finish().expect("disconnect failed");
 }

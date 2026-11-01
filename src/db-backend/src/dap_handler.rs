@@ -1584,7 +1584,8 @@ impl Handler {
             // for now callstack!
 
             let start_call_line_index = GlobalCallLineIndex(0);
-            let callstack_lines = self.replay.load_callstack()?;
+            let mut callstack_lines = self.replay.load_callstack()?;
+            indent_from_the_visible_root(&mut callstack_lines);
             let total_count = callstack_lines.len();
             let position = 0;
             CallArgsUpdateResults::finished_update_call_lines(
@@ -7951,6 +7952,29 @@ pub fn event_tick_index_of(events: &[ProgramEvent]) -> Vec<(i64, usize)> {
     by_tick
 }
 
+/// Make a native call trace's display depths count from its visible root.
+///
+/// The native replay worker serves the call stack of the current position,
+/// outermost first, and stops at the program's entry point (`main`, a test
+/// function), leaving out the runtime and libc frames that call it. Each row's
+/// `depth` is still that frame's physical depth, so the pane, which indents a
+/// row by its `depth`, drew `main` a dozen and more levels in (codetracer-pm
+/// `spec/GUI/Core-Panes/Call-Trace-Pane.md`, "Tree Structure" and "Visual
+/// Design": the visible root sits at the tree's base inset).
+///
+/// Only the row's presentation depth moves. The call's own identity,
+/// `content.call.depth` and `content.call.location.callstackDepth`, stays
+/// physical: activating the row addresses that frame
+/// (`spec/GUI/Layout-And-Navigation/Click-Navigation.md` §2.2).
+pub fn indent_from_the_visible_root(call_lines: &mut [CallLine]) {
+    let Some(root_depth) = call_lines.iter().map(|line| line.depth).min() else {
+        return;
+    };
+    for line in call_lines.iter_mut() {
+        line.depth -= root_depth;
+    }
+}
+
 /// The last event (in recorded order) at or before `at`, from
 /// `event_tick_index_of`'s index; `None` when every event is after it.
 pub fn last_event_at_or_before(index: &[(i64, usize)], at: i64) -> Option<usize> {
@@ -8360,6 +8384,44 @@ mod tests {
     use codetracer_trace_writer::trace_writer::TraceWriter;
 
     use task::{TaskKind, TraceSession, Tracepoint, TracepointMode};
+
+    /// A native call stack whose callers above `main` were left out: the rows'
+    /// display depths count from `main`, and each call keeps its physical
+    /// depth. An empty stack is left alone.
+    #[test]
+    fn native_callstack_rows_indent_from_the_visible_root() {
+        let frame = |name: &str, depth: usize| {
+            let mut call = Call {
+                raw_name: name.to_string(),
+                depth,
+                ..Call::default()
+            };
+            call.location.callstack_depth = depth;
+            CallLine::call(call, false, 1, depth)
+        };
+        let mut lines = vec![frame("main", 17), frame("accumulate", 18), frame("add", 19)];
+        indent_from_the_visible_root(&mut lines);
+        let shape: Vec<(&str, usize, usize, usize)> = lines
+            .iter()
+            .map(|line| {
+                let call = &line.content.call;
+                (
+                    call.raw_name.as_str(),
+                    line.depth,
+                    call.depth,
+                    call.location.callstack_depth,
+                )
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            vec![("main", 0, 17, 17), ("accumulate", 1, 18, 18), ("add", 2, 19, 19)]
+        );
+
+        let mut empty: Vec<CallLine> = vec![];
+        indent_from_the_visible_root(&mut empty);
+        assert!(empty.is_empty());
+    }
 
     /// The `(name, index)` that names a recreator session's worker socket.
     fn worker_identity_of(replay: &mut Box<dyn ReplaySession>) -> (String, usize) {
@@ -9968,6 +10030,66 @@ mod tests {
         }
         assert_eq!(updates.len(), 1, "one ct/updated-calltrace event");
         Ok(())
+    }
+
+    /// The `(function, depth)` of the `height` rows `ct/load-calltrace-section`
+    /// serves from `start` on, read from its response.
+    fn calltrace_section_rows(handler: &mut Handler, start: usize, height: usize) -> Vec<(String, i64)> {
+        let (sender, receiver) = mpsc::channel();
+        let args = CalltraceLoadArgs {
+            start_call_line_index: GlobalCallLineIndex(start),
+            height,
+            ..python_bridge_calltrace_args()
+        };
+        handler
+            .load_calltrace_section(dap::Request::default(), args, sender)
+            .expect("ct/load-calltrace-section");
+        let response = std::iter::from_fn(|| receiver.try_recv().ok())
+            .find_map(|message| match message {
+                DapMessage::Response(r) => Some(r),
+                _ => None,
+            })
+            .expect("a response");
+        response.body["callLines"]
+            .as_array()
+            .expect("callLines")
+            .iter()
+            .map(|row| {
+                (
+                    row["content"]["call"]["rawName"].as_str().unwrap_or("").to_string(),
+                    row["depth"].as_i64().expect("a row depth"),
+                )
+            })
+            .collect()
+    }
+
+    /// A materialized call trace is the whole call tree, and a row's depth is
+    /// its depth in that tree. A section that holds only rows below the root
+    /// keeps those depths: only the native call stack, whose callers above
+    /// `main` are left out, counts from its visible root
+    /// (`indent_from_the_visible_root`). The section is `a` and `b`, the two
+    /// calls `start` makes, and ends before the `<end of program>` row, whose
+    /// depth 0 would hide a section normalized to its shallowest row.
+    #[test]
+    fn materialized_calltrace_section_keeps_its_tree_depths() {
+        let db = setup_db_with_calls();
+        let mut handler: Handler = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(db));
+        let whole = calltrace_section_rows(&mut handler, 0, 20);
+        let a = whole
+            .iter()
+            .position(|(name, _)| name == "a")
+            .unwrap_or_else(|| panic!("no `a` row: {whole:?}"));
+        let callees = whole[a..].iter().take(2).cloned().collect::<Vec<_>>();
+        assert_eq!(
+            callees,
+            vec![("a".to_string(), 2), ("b".to_string(), 2)],
+            "`a` and `b` are called from `start`, two levels below the root: {whole:?}"
+        );
+        assert_eq!(
+            calltrace_section_rows(&mut handler, a, 2),
+            callees,
+            "a section of `a` and `b` keeps their tree depths"
+        );
     }
 
     /// On a trace that has steps, a current position that is not one of them
