@@ -157,6 +157,8 @@ jobs:
 
       - name: Provision dependency siblings from repro.lock
         uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       # The job's first token expires after an hour, and a cold runner spends
       # most of that provisioning (see .github/actions/refresh-github-token).

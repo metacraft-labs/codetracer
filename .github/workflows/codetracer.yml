@@ -1539,6 +1539,8 @@ jobs:
       # through this repo's own dev shell.
       - name: Provision dependency siblings from repro.lock
         uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Clone codetracer-pm sibling
         # `ci/test/cua-keymap-extractor.sh` (PLAT-68's CUA keymap step in
@@ -2348,6 +2350,8 @@ jobs:
         # is already installed when this runs -- which it must be, because the
         # action reaches `repro` through this repo's own dev shell.
         uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       # The envelope records the three-tier demo from this tree, and
       # scripts/materialize-recording.sh refuses without `ct-instrument` and a
@@ -2611,6 +2615,8 @@ jobs:
         # before it: the action reaches ``repro`` through this repo's dev
         # shell, which is also where the suites below run.
         uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Assert the JS ViewModel lane can observe its own failures (full suite)
         # The same contract suite `ci-verdict` runs, but here it runs INSIDE the
@@ -3801,6 +3807,8 @@ jobs:
 
       - name: Provision dependency siblings from repro.lock
         uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Build ct and replay-server
         # `ct record` records the `calc` and `call_pages` fixtures the
@@ -4019,6 +4027,8 @@ jobs:
         # After ``Install Nix``: the action reaches ``repro`` through this
         # repo's dev shell, which the build step below uses anyway.
         uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Allow direnv in cloned codetracer-native-recorder
         # ci/build/dev.sh builds src/db-backend, whose build.rs invokes
@@ -4154,6 +4164,8 @@ jobs:
         # ``Install Nix`` because the action reaches ``repro`` through this
         # repo's dev shell.
         uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Allow direnv in cloned codetracer-native-recorder
         # db-backend's build.rs invokes ``direnv exec <recorder-root> bash
@@ -5267,6 +5279,8 @@ jobs:
         # checkout -- and both have Nix by the step above, which this action
         # requires to reach ``repro``.
         uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       # --- macOS setup ---
       # No open-coded just / Python / Rust / cargo-nextest toolchain steps and
@@ -5887,6 +5901,8 @@ jobs:
         # project in metacraft-manifests does not declare it). repro.lock is
         # what answers for it, which is exactly what this action reads.
         uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       # NOTE: codetracer-trace-format, codetracer-trace-format-nim,
       # codetracer-native-recorder, codetracer-visual-replay and
@@ -6914,6 +6930,8 @@ jobs:
         # `viewmodel-tests`, and like it this runs after ``Install Nix``
         # because the action reaches ``repro`` through this repo's dev shell.
         uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Run the M16 ct-test release gate
         # The ct_test sources import runquota_process; the dev shell exports
@@ -7160,6 +7178,8 @@ jobs:
         # shim from these siblings and captures a real read set with them (CTC-3g).
         # Without them the suite fails by name; it never skips.
         uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Run the ct-test-certificates lane
         # No CT_TEST_CERTIFICATE_VECTORS: setting it would walk an exported

@@ -465,7 +465,8 @@ fi
 # meaningless if it was renamed or rewritten) and takes its `--only=` set from
 # the lock through `ci/repro-lock-build-input-siblings.sh`, it hand-writes no
 # sibling list of its own, the lock still declares the dependency set and its
-# build-input subset, and every member of that set carries an immutable
+# build-input subset, the clone is given the job's credential through the
+# channel reprobuild reads, and every member of that set carries an immutable
 # revision.
 # ---------------------------------------------------------------------------
 echo
@@ -487,10 +488,15 @@ readonly REPRO_LOCK="$REPO_ROOT/repro.lock"
 # grown from 17 members to 50 (its relocks since the last update added the
 # IsoNim renderer, TermAssert, observability and native-runtime siblings), and
 # its build-input subset from 6 to 13: `codetracer-trace-format-nim` and the
-# IsoNim libraries the lock now solves as packages. All 13 are public, which
-# the credential-less clone requires and an assertion below checks.
-# The current lock also declares a private-recordings test input, which is not
-# a build input.
+# IsoNim libraries the lock now solves as packages. The current lock also
+# declares a private-recordings test input, which is not a build input.
+#
+# Not every build input is public: `codetracer-image-diff` is private, so the
+# clone needs a credential, and assertion "the clone is given the job's
+# credential" below checks that it gets one. (This comment once said all of
+# them were public, backed by an assertion that read the lock's `visibility`
+# field. That field is a reprobuild configuration tier and says "public" for
+# every entry, private repositories included, so it could not catch this.)
 #
 # 13 -> 18 (2026-10-31): test-certificates-tools and codetracer-image-diff were
 # already solved as packages, and this list had not followed them. io-mon and
@@ -523,10 +529,10 @@ else
 	# leaving the placement root to be inferred.
 	grep -q -- '--into=' "$LOCK_ACTION" ||
 		lock_action_defects+=("it does not pass --into=, so the sibling placement root is implicit")
-	# --only=<build inputs>: the develop set also names private test-lane
-	# siblings, which this credential-less step must not try to clone. The
-	# subset comes from the lock, through the selector script, not from a list
-	# written into the action.
+	# --only=<build inputs>: the develop set also names the test-lane
+	# siblings, which no Nim build compiles and `clone-siblings` provisions
+	# where a lane needs them. The subset comes from the lock, through the
+	# selector script, not from a list written into the action.
 	grep -q -- '--only=' "$LOCK_ACTION" ||
 		lock_action_defects+=("it does not pass --only=, so it clones the whole develop set, private test-lane siblings included")
 	grep -q 'ci/repro-lock-build-input-siblings.sh' "$LOCK_ACTION" ||
@@ -553,11 +559,17 @@ if [ -f "$LOCK_ACTION" ]; then
 	fi
 	# A 40-hex string in the RUNS section would be a pin this action chose
 	# rather than one the lock supplies. (The description may quote SHAs as
-	# prose; only the executable half is scanned.)
+	# prose; only the executable half is scanned.) A step key that is exactly
+	# `uses: <action>@<40-hex>` is skipped: the commit an ACTION is pinned to
+	# (the shared git-auth action below) is not a sibling revision, and is
+	# required to be 40-hex. Only that whole-line shape is skipped, so a
+	# revision anywhere in a script body, or after anything else on a `uses:`
+	# line, is still caught.
 	# Here-string, not a pipe: `grep -q` exits on its first match, `sed` then
 	# takes SIGPIPE, and under `set -o pipefail` a SUCCESSFUL MATCH is reported
 	# as failure. See ci/test/grep-q-pipefail-gate.sh.
-	if grep -Eq '\b[0-9a-f]{40}\b' <<<"$(sed -n '/^runs:/,$p' "$LOCK_ACTION")"; then
+	if grep -Eq '\b[0-9a-f]{40}\b' <<<"$(sed -n '/^runs:/,$p' "$LOCK_ACTION" |
+		grep -Ev '^[[:space:]]*(- )?uses: [A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}[[:space:]]*$')"; then
 		lock_action_handwritten+=("its runs: section contains a hard-coded 40-hex revision")
 	fi
 fi
@@ -647,24 +659,211 @@ else
 		"actual (default lock): $minimal_path_default"
 fi
 
-# Every build input is cloned by a step that is deliberately given NO
-# credential (see the comment on that step in the action), so each one must be
-# a public repository. The lock records that: a private build input would fail
-# its anonymous clone, and the fix is a token added on purpose, not a widened
-# credential discovered from a red job.
-private_build_inputs=()
-IFS=',' read -r -a _build_inputs <<<"$actual_build_inputs"
-for dep in "${_build_inputs[@]}"; do
-	visibility="$(grep -o "{ name = \"$dep\", coord_kind = [^}]*visibility = \"[^\"]*\"" "$REPRO_LOCK" |
-		sed 's/.*visibility = "//; s/"$//' | head -n 1)"
-	[ "$visibility" = public ] || private_build_inputs+=("$dep -> visibility '${visibility:-<no deps record>}'")
-done
-if [ "${#_build_inputs[@]}" -gt 0 ] && [ "${#private_build_inputs[@]}" -eq 0 ]; then
-	ok "every build-input sibling is public, so the credential-less clone can fetch it (${#_build_inputs[@]} checked)"
+# The clone is given the job's credential, through the channel reprobuild
+# reads. `codetracer-image-diff` is a private build input (`repro.nim` uses
+# it), and the action used to clone with no credential at all, on the
+# premise that every build input was public. That premise was "checked" by
+# reading each input's `visibility` from repro.lock -- a field that names a
+# reprobuild configuration TIER, not whether GitHub serves the repository
+# anonymously, and that says "public" for every entry in this lock, private
+# ones included. The clone then died in CI with
+#
+#   fatal: could not read Username for 'https://github.com': terminal prompts disabled
+#
+# (codetracer-pm issues/2026-10-31-provision-repro-lock-siblings-cannot-clone-
+# private-codetracer-image-diff.md).
+#
+# Passing a token is not enough on its own. The job already carries one as
+# numbered git configuration (`GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` /
+# `GIT_CONFIG_VALUE_n`, exported by setup-nix's configure-git-auth.sh), and
+# plain `git ls-remote` authenticates with it -- but reprobuild scrubs numbered
+# configuration from the git commands it runs for another repository, so
+# `repro develop` never sees it. The supported channel is a GIT_CONFIG_GLOBAL
+# file, which `metacraft-github-actions/git-auth` writes privately for the
+# duration of one command. Copying that logic into this repo is forbidden by
+# policy, so the three checks below hold the shape:
+#
+#   * the action declares a required `gh-token` input;
+#   * its `repro develop` runs inside a step that `uses:` the shared git-auth
+#     action, pinned to a 40-hex commit (it handles the job's credential, so
+#     it changes only by an edit here), with that input passed to it, and
+#     nothing in the action falls back to numbered git configuration;
+#   * every workflow step that uses the action passes `gh-token:` naming a
+#     `steps.<id>.outputs.token`. That the id names a mint step in the same
+#     job is section 4's "every token reference names a mint step" check.
+#
+# All three fail on the tree that had the defect: the action had no input,
+# ran the clone in a raw `run:` step, and no caller passed anything.
+readonly GIT_AUTH_ACTION_RE='^metacraft-labs/metacraft-github-actions/git-auth@[0-9a-f]{40}$'
+
+lock_action_input_defects=()
+if [ -f "$LOCK_ACTION" ]; then
+	# The inputs block: from `inputs:` to the next top-level key.
+	lock_action_inputs="$(sed -n '/^inputs:/,/^[a-z]/p' "$LOCK_ACTION")"
+	gh_token_decl="$(sed -n '/^  gh-token:/,/^  [a-z]/p' <<<"$lock_action_inputs")"
+	if [ -z "$gh_token_decl" ]; then
+		lock_action_input_defects+=("it declares no 'gh-token' input")
+	elif ! grep -Eq '^    required: true[[:space:]]*$' <<<"$gh_token_decl"; then
+		lock_action_input_defects+=("its 'gh-token' input is not 'required: true'")
+	fi
 else
-	fail "every build-input sibling is public, so the credential-less clone can fetch it" \
-		"provision-repro-lock-siblings clones these with no token" \
-		"${private_build_inputs[@]:-no build-input sibling was selected}"
+	lock_action_input_defects+=("$LOCK_ACTION does not exist")
+fi
+if [ "${#lock_action_input_defects[@]}" -eq 0 ]; then
+	ok "provision-repro-lock-siblings declares a required gh-token input"
+else
+	fail "provision-repro-lock-siblings declares a required gh-token input" \
+		"codetracer-image-diff is a private build input, so the clone needs the" \
+		"job's token, and a caller can only hand it one through an input" \
+		"${lock_action_input_defects[@]}"
+fi
+
+# Walk the runs: section step by step. A step starts at `    - ` (four spaces,
+# the composite's step indent); its `uses:` and `with:` keys sit at six.
+lock_action_auth_defects=()
+if [ -f "$LOCK_ACTION" ]; then
+	step_uses=""
+	step_token=""
+	step_develops=0
+	authed_develops=0
+	raw_develops=0
+	numbered_lines=()
+	flush_lock_step() {
+		[ "$step_develops" -gt 0 ] || return 0
+		if [[ $step_uses =~ $GIT_AUTH_ACTION_RE ]] && [ "$step_token" = 1 ]; then
+			authed_develops=$((authed_develops + step_develops))
+		else
+			raw_develops=$((raw_develops + step_develops))
+			if [ -z "$step_uses" ]; then
+				lock_action_auth_defects+=("'repro develop' runs in a raw run: step, not through metacraft-github-actions/git-auth")
+			elif ! [[ $step_uses =~ $GIT_AUTH_ACTION_RE ]]; then
+				lock_action_auth_defects+=("'repro develop' runs through '$step_uses', not metacraft-github-actions/git-auth pinned to a 40-hex commit")
+			else
+				lock_action_auth_defects+=("the git-auth step that runs 'repro develop' is not given 'gh-token: \${{ inputs.gh-token }}'")
+			fi
+		fi
+	}
+	in_runs=0
+	lock_line_no=0
+	while IFS= read -r line || [ -n "$line" ]; do
+		lock_line_no=$((lock_line_no + 1))
+		case "$line" in
+		'runs:'*) in_runs=1 ;;
+		esac
+		[ "$in_runs" -eq 1 ] || continue
+		stripped="${line#"${line%%[![:space:]]*}"}"
+		case "$stripped" in
+		'#'*) continue ;;
+		esac
+		case "$line" in
+		'    - '*)
+			flush_lock_step
+			step_uses=""
+			step_token=""
+			step_develops=0
+			;;
+		esac
+		case "$stripped" in
+		'uses: '* | '- uses: '*)
+			step_uses="${stripped#- }"
+			step_uses="${step_uses#uses: }"
+			;;
+		esac
+		# shellcheck disable=SC2016
+		case "$stripped" in
+		'gh-token: ${{ inputs.gh-token }}') step_token=1 ;;
+		esac
+		case "$stripped" in
+		*'repro develop --all'*) step_develops=$((step_develops + 1)) ;;
+		esac
+		case "$stripped" in
+		*GIT_CONFIG_COUNT* | *GIT_CONFIG_KEY_* | *GIT_CONFIG_VALUE_* | *GIT_CONFIG_PARAMETERS*)
+			numbered_lines+=("line $lock_line_no: $stripped")
+			;;
+		esac
+	done <"$LOCK_ACTION"
+	flush_lock_step
+	unset -f flush_lock_step
+	if [ "$authed_develops" -eq 0 ] && [ "$raw_develops" -eq 0 ]; then
+		lock_action_auth_defects+=("no step runs 'repro develop --all', so there is nothing to check")
+	fi
+	for numbered in ${numbered_lines[@]+"${numbered_lines[@]}"}; do
+		lock_action_auth_defects+=("it handles numbered git configuration, which reprobuild scrubs: $numbered")
+	done
+else
+	lock_action_auth_defects+=("$LOCK_ACTION does not exist")
+fi
+if [ "${#lock_action_auth_defects[@]}" -eq 0 ]; then
+	ok "its clone runs through the pinned metacraft-github-actions/git-auth action with the token passed to it"
+else
+	fail "its clone runs through the pinned metacraft-github-actions/git-auth action with the token passed to it" \
+		"reprobuild scrubs the job's numbered GIT_CONFIG_* credential, so a" \
+		"private build input clones only when the token reaches it as a private" \
+		"GIT_CONFIG_GLOBAL file, which the shared git-auth action writes" \
+		"${lock_action_auth_defects[@]}"
+fi
+
+# Every caller hands the action a minted token. Callers are workflow steps
+# with `uses: ./.github/actions/provision-repro-lock-siblings`; the step ends
+# at the next line indented no deeper than its `- ` marker.
+lock_callers=0
+lock_untokened_callers=()
+for wf in "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml; do
+	[ -f "$wf" ] || continue
+	wf_name="${wf##*/}"
+	in_caller=0
+	caller_line=0
+	caller_token=0
+	caller_indent=0
+	line_no=0
+	while IFS= read -r line || [ -n "$line" ]; do
+		line_no=$((line_no + 1))
+		stripped="${line#"${line%%[![:space:]]*}"}"
+		indent=$((${#line} - ${#stripped}))
+		if [ "$in_caller" -eq 1 ] && [ -n "$stripped" ]; then
+			case "$stripped" in
+			'#'*) ;;
+			*)
+				if [ "$indent" -lt "$caller_indent" ] ||
+					{ [ "$indent" -eq $((caller_indent - 2)) ] && [ "${stripped:0:2}" = '- ' ]; }; then
+					[ "$caller_token" -eq 1 ] ||
+						lock_untokened_callers+=("$wf_name:$caller_line: passes no 'gh-token: \${{ steps.<id>.outputs.token }}'")
+					in_caller=0
+				fi
+				;;
+			esac
+		fi
+		if [ "$in_caller" -eq 1 ]; then
+			if [[ $stripped =~ ^gh-token:\ \$\{\{\ steps\.[A-Za-z0-9_-]+\.outputs\.token\ \}\}$ ]]; then
+				caller_token=1
+			fi
+		fi
+		case "$stripped" in
+		'uses: ./.github/actions/provision-repro-lock-siblings' | '- uses: ./.github/actions/provision-repro-lock-siblings')
+			lock_callers=$((lock_callers + 1))
+			in_caller=1
+			caller_line="$line_no"
+			caller_token=0
+			# The step's keys sit where `uses:` does, even when it is the
+			# step's first key and carries the `- ` marker.
+			caller_indent="$indent"
+			[ "${stripped:0:2}" = '- ' ] && caller_indent=$((indent + 2))
+			;;
+		esac
+	done <"$wf"
+	if [ "$in_caller" -eq 1 ] && [ "$caller_token" -eq 0 ]; then
+		lock_untokened_callers+=("$wf_name:$caller_line: passes no 'gh-token: \${{ steps.<id>.outputs.token }}'")
+	fi
+done
+if [ "$lock_callers" -gt 0 ] && [ "${#lock_untokened_callers[@]}" -eq 0 ]; then
+	ok "all $lock_callers callers of provision-repro-lock-siblings pass a minted gh-token"
+else
+	fail "every caller of provision-repro-lock-siblings passes a minted gh-token" \
+		"a caller that passes nothing hands the action an empty token, and" \
+		"git-auth fails the step rather than clone the private build input" \
+		"anonymously" \
+		"found $lock_callers caller(s)" \
+		"${lock_untokened_callers[@]+"${lock_untokened_callers[@]}"}"
 fi
 
 # ... and each of them at an IMMUTABLE revision. A branch name here would be
@@ -2261,7 +2460,13 @@ echo
 # ci-contract-suites lane runs every suite).
 # 34 -> 35: the build-input selector runs on a bash-only PATH.
 # 35 -> 36: section 5, raw steps use only their runner's tools.
-readonly EXPECTED_ASSERTIONS=36
+# 36 -> 38 (2026-11-02): "every build-input sibling is public" is gone. It read
+# the lock's `visibility` field, a reprobuild tier that says "public" for
+# private repositories too, and passed while the private codetracer-image-diff
+# clone failed. Three assertions replace it: the action declares a required
+# gh-token input, its clone runs through the pinned shared git-auth action with
+# that token, and every caller passes a minted token.
+readonly EXPECTED_ASSERTIONS=38
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))
