@@ -296,14 +296,14 @@ jobs:
         # CI_TOKEN_PROVIDER_PRIVATE_KEY secrets so the private sibling
         # codetracer-native-recorder can be cloned.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout codetracer
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -473,7 +473,7 @@ jobs:
         # Keyed on the PINNED revision, so the ~100s is paid once per bump and
         # not once per deploy. A cache miss is not a failure — the build step
         # below simply runs cold.
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         continue-on-error: true
         with:
           path: |
@@ -919,7 +919,7 @@ jobs:
         # wrote its report per arm; it was landing in a temp dir and being
         # thrown away before anyone could read it.
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pre-publish-mount-observations
           path: mount-shots/
@@ -1930,7 +1930,7 @@ jobs:
 
       - name: Upload what the browser saw on the deployed page
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: deployed-page-evidence
           path: deployed-shots/

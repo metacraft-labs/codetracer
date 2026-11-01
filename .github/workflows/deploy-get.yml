@@ -42,14 +42,14 @@ jobs:
         # the setup-nix composite needs a token that can read the sibling
         # flakes referenced by this repo's flake inputs.
         id: ci_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           token: ${{ steps.ci_token.outputs.token }}
 

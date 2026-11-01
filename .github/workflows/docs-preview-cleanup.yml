@@ -61,7 +61,7 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout the deploy script
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           # The BASE branch, never the pull request's merge ref. Two reasons,
           # both load-bearing: a pull request closed without merging may have
