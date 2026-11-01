@@ -28,7 +28,7 @@ def function(name):
 # the capture command and its assertions out: they need the GUI grant, whereas
 # these process-lifetime assertions must run in the ordinary lint lane.
 shutdown = source.split('|| cap_rc=$?\n\n', 1)[1].split('\n\t# THE RECORD', 1)[0]
-functions = "\n".join(function(n) for n in ("fail", "wait_capture_app", "restore_shim"))
+functions = "\n".join(function(n) for n in ("fail", "wait_capture_app", "quote_app_log", "restore_shim"))
 exit_trap = re.search(r"^trap .* EXIT$", source, re.M).group()
 failures = []
 # Reject a disabled auto-quit before any GUI or build prerequisite is tested.
@@ -51,10 +51,12 @@ with tempfile.TemporaryDirectory(prefix="plat37-shutdown-") as temporary:
         backup = case / "backup"
         live.write_text("windowed")
         backup.write_text("original")
+        log = case / "app.log"
+        log.write_text("the app's own last words\n")
         env = dict(os.environ, FIXTURE=str(fixture), PYTHON=sys.executable,
                    CASE=str(case), LIVE_SHIM=str(live), SHIM_BACKUP=str(backup),
-                   BIN=str(fixture), STATUS=str(status))
-        script = "set -uo pipefail\ngpid=\nview=fixture\n" + functions + r'''
+                   BIN=str(fixture), STATUS=str(status), log=str(log))
+        script = "set -uo pipefail\ngpid=\nview=fixture\nAPP_LOG_QUOTE_LINES=20\n" + functions + r'''
 "$PYTHON" "$FIXTURE" "$CASE/cleanup" "$CASE/ready" "$LIVE_SHIM" .3 "$STATUS" &
 gpid=$!
 while [ ! -f "$CASE/ready" ]; do sleep .01; done
@@ -71,6 +73,8 @@ while [ ! -f "$CASE/ready" ]; do sleep .01; done
             errors.append(f"exit {result.returncode}, expected {expected}")
         if name.startswith("trap") and live.read_text() != "original":
             errors.append("shim was not restored")
+        if name == "scenario-error" and "the app's own last words" not in result.stderr:
+            errors.append("a failed app's log was not quoted")
         if errors:
             failures.append(name + ": " + "; ".join(errors))
             print("FAIL:", failures[-1], result.stderr.strip())

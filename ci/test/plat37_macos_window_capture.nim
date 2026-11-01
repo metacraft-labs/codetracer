@@ -620,9 +620,13 @@ proc runCapture(cfg: Config) =
     sleep(cfg.settleMs)
     node["windowWait"]["settleMs"] = %cfg.settleMs
   if before.len == 0:
+    # This names what was observed and no cause: this program cannot tell an
+    # application that never started from one that closed. Offering either
+    # sent a stale-shim failure looking for a regression in the front-end.
     fail(cfg, node, "no window whose owner is '" & cfg.owner &
-         "' is in CGWindowListCopyWindowInfo. The front-end did not open " &
-         "one, or it had already closed by the time this ran.", 6)
+         "' appeared in CGWindowListCopyWindowInfo within " & $cfg.waitMs &
+         " ms. That is the observation and not a cause; any cause is in " &
+         "the log of whatever launched the application.", 6)
 
   # --- 2. PLACE, through GuiAssert's own mechanism --------------------------
   #

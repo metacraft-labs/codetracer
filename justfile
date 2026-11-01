@@ -45,6 +45,11 @@ test-build-alignment:
 test-build-freshness:
   bash ci/test/build-freshness-test.sh
 
+# Exercise the GPUI shim's stamp and the binary/shim pair gate over real
+# compiled fixtures, and the macOS capture lane's refusals through the lane.
+test-plat37-shim-gate:
+  bash ci/test/plat37-shim-gate-test.sh
+
 # Assert that entering the dev shell from ANOTHER git repository writes nothing
 # there (no node_modules link, no hook config, no git hooks), and that entered
 # from inside this repository it still prepares this repository's top level.
@@ -1177,6 +1182,7 @@ test:
     test-build-alignment \
     test-build-once-platform-lock \
     test-build-freshness \
+    test-plat37-shim-gate \
     test-flake-pin-alignment \
     test-reprobuild-catalog-coverage \
     test-dev-env-flake-metadata \

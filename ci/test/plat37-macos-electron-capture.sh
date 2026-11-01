@@ -454,7 +454,7 @@ grep_filter=()
 # The capture happens inside Playwright, in a separate process, BEFORE the
 # grading loop below ever runs. So unlike the GPUI lane — which deletes
 # `${view}.png`, `${view}.capture.json` and the rest immediately before it
-# captures each view (plat37-macos-window-capture.sh:496) and therefore cannot
+# captures each view, at the top of its scenario loop, and therefore cannot
 # physically grade a frame it did not just take — this lane's only freshness
 # test used to be `[ -f "${rec}" ]`. A scenario whose Playwright test died
 # before the capture step left the PREVIOUS run's record and PNG untouched,
