@@ -8145,8 +8145,9 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   compare with `low_level_code_vm.sameSourcePath`, never `==`. Jumps must send
   that path verbatim. The engine's function range for a language without a
   tree-sitter grammar comes from `reader.load_location`'s trace fallback; the
-  range is inclusive. rr / MCR sessions have an EMPTY reader, so they answer
-  no listing (codetracer-pm issue 2026-10-29-native-recordings-…).
+  range is inclusive. rr / MCR sessions have an EMPTY reader: their listing
+  comes from the replay worker, each offset a load address (int64 on every
+  front-end) and the pointer at `StopLocation.frameOffset`, the pc.
 - A pane added to `PaneKind` must also be added to
   `viewmodel/keymap/scope_path.nim`'s `PaneKinds` (and `ListPaneKinds` for a
   list pane) or a focused pane gets no `list.*` keys; and to the TUI
@@ -8160,3 +8161,14 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - Desktop: the Run route is `debug_toolbar.projectRunRoute` (a neutral module, so no new `-d:ctWeb` fork); `desktop_edit_toolbar` refuses only Build once it is set. The main process's `onRunProgram` waits for `files.savesInFlight` to reach 0 before `ct record`, because the renderer's saves are async IPC writes sent just before.
 - `ct record <noir package dir>` records `nargo trace` in it and prints `recordingId:`; the package needs a `Prover.toml` with `main`'s inputs (the plat53 test crate has none — `writePlat53RunProject` adds one).
 - ci/test/ctweb-partition-inventory.sh is red on origin/agents 4885be4a8 already (ui_js.nim has 7 `when defined(ctWeb)` branches, the table says 5).
+- A step pressed in the Low Level Code listing must go through
+  `HeadlessDebugSession.stepByInstruction` (waits for and applies the move);
+  `sendRawDapRequest` + `drainEvents` throws the move away and the store keeps
+  the old stop. The desktop's equivalent is `renderer.listingStepsByInstruction`
+  (set in ui_js): F10 there goes through `debug_toolbar.dapStep`, not
+  `renderer.step`, and both consult it while a listing row has the focus.
+- e2e specs record native programs with MCR by default (`ct record`'s host
+  default); `test.use({ recordBackend: "rr" })` records with rr, and
+  CODETRACER_RR_BACKEND_PRESENT=1 stops the fixture from skipping rr programs.
+- Mutation harnesses that restore a file with shutil.move keep its OLD mtime:
+  cargo/tup then keep the mutated binary. Touch it (`os.utime`) after restore.
