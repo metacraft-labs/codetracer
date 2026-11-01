@@ -559,7 +559,7 @@ suite "PLAT-31: conflict detection, on PLANTED conflicts, in four scopes":
       let chords = aTerminalChordIn(s)
       ck chords.len == 1
       var planted = keymapOf(model)
-      planted.bindings.add EditingBinding(
+      planted.addBinding EditingBinding(
         model: model, scope: BindingScope(modes: {mode}, products: {},
                                           panes: {epEditor}),
         chords: chords, operation: "undo", args: OpArgs(),
@@ -583,7 +583,7 @@ suite "PLAT-31: conflict detection, on PLANTED conflicts, in four scopes":
       let chords = aTerminalChordIn(s)
       ck chords.len == 1
       var planted = keymapOf(model)
-      planted.bindings.add EditingBinding(
+      planted.addBinding EditingBinding(
         model: model, scope: BindingScope(modes: {mode}, products: {},
                                           panes: {epEditor}),
         chords: chords & @["Ctrl+y"], operation: "redo", args: OpArgs(),
@@ -1042,7 +1042,7 @@ suite "PLAT-31: the trie is the structure resolution walks":
     # `conflictsIn`, which is the wrapper.
     let s = scopeFor(bkVim, emNormal)
     var planted = vim.keymap
-    planted.bindings.add EditingBinding(
+    planted.addBinding EditingBinding(
       model: bkVim, scope: BindingScope(modes: {emNormal}, products: {},
                                         panes: {epEditor}),
       chords: @["x"], operation: "undo", args: OpArgs(), spelling: "x")

@@ -211,5 +211,5 @@ proc definitionOf*(base: BaseKeymap; rows: openArray[BaseRow]): KeymapDefinition
   if problems.len > 0:
     raise newException(BaseRowError, $base & ": " & problems.join("; "))
   bound.sort()
-  KeymapDefinition(model: base, keymap: EditingKeymap(bindings: bindings),
+  KeymapDefinition(model: base, keymap: newEditingKeymap(bindings),
                    filed: filedFor(base, bound))
