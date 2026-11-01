@@ -268,6 +268,9 @@ suite "Embed SDK facade — DebuggerSession lifecycle (spec §3.1 row 4, §6)":
     check mock.receivedCommands[2].command == "launch"
     check mock.receivedCommands[2].args == %*{"traceFolder": "/tmp/trace"}
     check session.trace.kind == tskLocalFolder
+    # An embedder's call trace marks the call the debugger is in after every
+    # move, as the desktop's and the web's do (`ui/panel_host.prepare`).
+    check session.session.calltraceVM.followsDebuggerCall
     session.dispose()
 
   test "a failed launch never wakes the panels":

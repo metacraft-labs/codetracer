@@ -1,0 +1,88 @@
+## test_calltrace_follows_debugger.nim — **after a jump, the call trace shows
+## the call the debugger is in**, however far from the rows it holds.
+##
+## Call-Trace-Pane.md § Smart Collapsing: after a jump the pane shows the new
+## current call. `CalltraceVM.followDebuggerCall` makes the selection follow
+## the engine's `currentCallLineIndex` once per stop. It used to act only when
+## that line was inside the section the store held, so a jump to a call past
+## it (a Starknet transaction's failed call, 15,904 steps in, against a pane
+## holding the first 35 lines) left the old section and the old mark on
+## screen: nothing else moves the viewport. The follow now scrolls the pane to
+## the line, and selects it once the section around it arrives.
+##
+## Driven through a store over a `MockBackendService` that does not answer
+## (`autoRespond = false`), so each section the store holds is the one this
+## test put there; a mock because what is asserted is the ViewModel's own
+## reaction to the store, not an engine's answer.
+
+import std/[options, unittest]
+
+import isonim/core/signals
+
+import backend/[backend_service, mock_backend]
+import store/[replay_data_store, types]
+import viewport
+import viewmodels/calltrace_vm
+
+proc line(index: int): CallLine =
+  CallLine(index: index.int64, name: "f" & $index, depth: 1,
+           callKey: "k" & $index,
+           location: Location(file: "/src/main.cairo", line: index + 1),
+           rrTicks: uint64(index + 1))
+
+proc section(first, count: int): seq[CallLine] =
+  for i in first ..< first + count: result.add line(i)
+
+const Total = 300'u64
+
+proc setup(follow: bool): (ReplayDataStore, CalltraceVM) =
+  let mock = newMockBackendService(autoRespond = false)
+  let store = createReplayDataStore(mock.toBackendService())
+  let vm = createCalltraceVM(store)
+  if follow: vm.followDebuggerCall()
+  store.updateCalltraceSection(section(0, 35), 0'i64, Total)
+  vm.setViewport(Viewport(rows: 10, firstRow: 0))
+  (store, vm)
+
+proc stopAt(store: ReplayDataStore; ticks: uint64; currentLine: int64) =
+  ## A move: the debugger is at a new stop, and the engine names the line of
+  ## the call it is in.
+  store.debugger.val = DebuggerState(rrTicks: ticks,
+    location: Location(file: "/src/main.cairo", line: int(ticks)))
+  store.calltrace.currentLineIndex.val = currentLine
+
+suite "after a jump the call trace shows the current call":
+
+  test "control: a current call inside the held section is selected in place":
+    let (store, vm) = setup(follow = true)
+    store.stopAt(20, 12)
+    check vm.selectedEntry.val == some(12'i64)
+    check vm.viewport.val.firstRow == 0
+
+  test "a current call past the held section scrolls the pane to it":
+    let (store, vm) = setup(follow = true)
+    let serial = vm.revealScroll.val.serial
+    store.stopAt(15904, 250)
+    check vm.viewport.val.firstRow == 245     # centred: 250 - rows div 2
+    check vm.revealScroll.val.serial == serial + 1
+    check vm.revealScroll.val.firstRow == 245
+
+  test "and the call is selected once the section around it arrives":
+    let (store, vm) = setup(follow = true)
+    store.stopAt(15904, 250)
+    store.updateCalltraceSection(section(240, 30), 240'i64, Total)
+    store.calltrace.currentLineIndex.val = 250
+    check vm.selectedEntry.val == some(250'i64)
+
+  test "control: without the follow, a jump moves neither the pane nor the mark":
+    let (store, vm) = setup(follow = false)
+    store.stopAt(15904, 250)
+    check vm.viewport.val.firstRow == 0
+    check vm.selectedEntry.val == none(int64)
+
+  test "a stop is revealed once, so the reader can scroll away from it":
+    let (store, vm) = setup(follow = true)
+    store.stopAt(15904, 250)
+    vm.setViewport(Viewport(rows: 10, firstRow: 0))
+    store.calltrace.currentLineIndex.val = 250   # the same stop answering again
+    check vm.viewport.val.firstRow == 0
