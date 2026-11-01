@@ -19,18 +19,18 @@
   justify-content space-between
   align-items center
   padding 6px 16px
-  background-color var(--bg-secondary, #1e1f26)
-  border-bottom 1px solid var(--border-color, #3a3b44)
+  background-color colors-ui-surface-base-panel
+  border-bottom 1px solid colors-ui-border-secondary
   flex-shrink 0
 
 .agent-workspace-header-label
   font-size 13px
   font-weight bold
-  color var(--text-primary, #c9c9c9)
+  color colors-ui-text-primary-body
 
 .agent-workspace-header-path
   font-size 12px
-  color var(--text-secondary, #8e8f92)
+  color colors-ui-text-primary-label-subtle
   margin-left 12px
   white-space nowrap
   overflow hidden
@@ -39,14 +39,14 @@
 
 .agent-workspace-view-toggle
   font-size 12px
-  color var(--accent-color, #A5F3FC)
+  color colors-ui-text-primary-active
   cursor pointer
   padding 3px 8px
   border-radius 4px
   transition background-color 0.15s ease
 
   &:hover
-    background-color var(--bg-hover, #2a2b34)
+    background-color LIST_HOVER_BG
 
 // --- Summary bar ---
 
@@ -55,11 +55,11 @@
   align-items center
   gap 16px
   padding 4px 16px
-  background-color var(--bg-secondary, #1e1f26)
-  border-bottom 1px solid var(--border-color, #3a3b44)
+  background-color colors-ui-surface-base-panel
+  border-bottom 1px solid colors-ui-border-secondary
   flex-shrink 0
   font-size 12px
-  color var(--text-secondary, #8e8f92)
+  color colors-ui-text-primary-label-subtle
 
 .agent-workspace-summary-item
   white-space nowrap
@@ -67,14 +67,14 @@
 .agent-workspace-overlay-toggle
   margin-left auto
   cursor pointer
-  color var(--accent-color, #A5F3FC)
+  color colors-ui-text-primary-active
   font-size 11px
   padding 2px 6px
   border-radius 3px
   transition background-color 0.15s ease
 
   &:hover
-    background-color var(--bg-hover, #2a2b34)
+    background-color LIST_HOVER_BG
 
 // --- Body (two-panel layout) ---
 
@@ -86,7 +86,7 @@
 .agent-workspace-empty
   padding 24px
   font-size 14px
-  color var(--text-secondary, #8e8f92)
+  color colors-ui-text-primary-label-subtle
   text-align center
 
 // --- File list sidebar ---
@@ -95,14 +95,14 @@
   width 240px
   min-width 180px
   overflow-y auto
-  border-right 1px solid var(--border-color, #3a3b44)
-  background-color var(--bg-primary, #1a1b22)
+  border-right 1px solid colors-ui-border-secondary
+  background-color colors-ui-surface-primary-default
   flex-shrink 0
 
 .agent-workspace-file-item
   padding 6px 12px
   cursor pointer
-  border-bottom 1px solid var(--border-color, #2a2b34)
+  border-bottom 1px solid colors-ui-border-tertiary
   transition background-color 0.15s ease
 
   // The list hover (LIST_HOVER_BG, button.styl).
@@ -110,18 +110,18 @@
     background-color LIST_HOVER_BG
 
   &.selected
-    background-color var(--bg-selected, #333444)
+    background-color colors-ui-surface-primary-secondary-hover
 
 .agent-workspace-file-name
   font-size 13px
-  color var(--text-primary, #c9c9c9)
+  color colors-ui-text-primary-body
   white-space nowrap
   overflow hidden
   text-overflow ellipsis
 
 .agent-workspace-file-path
   font-size 11px
-  color var(--text-secondary, #8e8f92)
+  color colors-ui-text-primary-label-subtle
   white-space nowrap
   overflow hidden
   text-overflow ellipsis
@@ -131,8 +131,8 @@
   display inline-block
   margin-top 2px
   font-size 11px
-  color var(--text-secondary, #8e8f92)
-  background-color var(--bg-hover, #2a2b34)
+  color colors-ui-text-primary-label-subtle
+  background-color colors-ui-surface-primary-secondary
   padding 1px 6px
   border-radius 3px
 

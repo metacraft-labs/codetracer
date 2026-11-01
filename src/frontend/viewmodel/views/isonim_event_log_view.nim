@@ -31,6 +31,17 @@ when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
 
+  # The Columns menu's drag (`wireColumnDrag`): the few DOM calls the
+  # isonim DOM API does not carry.  HTML drag and drop —
+  # https://developer.mozilla.org/en-US/docs/Web/API/HTML_Drag_and_Drop_API
+  proc preventDefault(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
+  proc startDrag(ev: isonim_dom.Event; payload: cstring) {.importcpp:
+    "(function(e, p){ if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', p); } })(#, #)".}
+  proc showMoveCursor(ev: isonim_dom.Event) {.importcpp:
+    "(function(e){ if (e.dataTransfer) { e.dataTransfer.dropEffect = 'move'; } })(#)".}
+  proc addClass(el: isonim_dom.Element; cls: cstring) {.importcpp: "#.classList.add(#)".}
+  proc removeClasses(el: isonim_dom.Element; a, b, c: cstring) {.importcpp: "#.classList.remove(#, #, #)".}
+
 import ../store/types
 import ../viewmodels/event_log_vm
 
@@ -87,15 +98,32 @@ const
   EventLogColumnsMenuClass* = "eventLog-columns-menu"
   EventLogColumnOptionClass* = "eventLog-column-option"
   EventLogColumnCheckClass* = "eventLog-column-check"
-  EventLogColumnLeftClass* = "eventLog-column-left"
-  EventLogColumnRightClass* = "eventLog-column-right"
+  ## The drag handle at a row's end (Nikolay, 2026-10-20): the design
+  ## system's `type=arrows-expand-vertical-diamond, theme=dark`.  Rows are
+  ## reordered by dragging; it replaced the move-left / move-right arrows.
+  EventLogColumnHandleClass* = "eventLog-column-handle"
+  EventLogColumnDraggingClass = "dragging"
+  EventLogColumnDropBeforeClass = "drop-before"
+  EventLogColumnDropAfterClass = "drop-after"
+
+proc columnsButtonClass(vm: EventLogVM): string =
+  ## The "Columns +" button: the medium control size (26px, the height of the
+  ## search field beside it), and `open` while its menu is up — the button
+  ## look's active state, the brand border every menu trigger shows
+  ## (`control-button-active`, button.styl).
+  let base = "ct-button-md-secondary " & EventLogColumnsButtonClass
+  if vm.columnsMenuOpen.val: base & " open" else: base
 
 proc columnCheckClass*(vm: EventLogVM; col: EventLogColumn): string =
-  EventLogColumnCheckClass &
+  ## The check is the shared menu row's icon slot (`ct-menu-item-icon`,
+  ## menu_item.styl); `checked` stays for the GUI tests that read it.
+  EventLogColumnCheckClass & " ct-menu-item-icon" &
     (if vm.columns.val.isVisible(col): " checked" else: "")
 
-proc columnCheckGlyph*(vm: EventLogVM; col: EventLogColumn): string =
-  if vm.columns.val.isVisible(col): "☑" else: "☐"
+proc columnCheckState*(vm: EventLogVM; col: EventLogColumn): string =
+  ## `data-state` of the shared checkbox (`ct-checkmark`, checkmark.styl) —
+  ## it replaced the ☑ / ☐ text glyphs.
+  if vm.columns.val.isVisible(col): "checked" else: "unchecked"
 
 proc columnOptionTitle*(col: EventLogColumn): string =
   eventLogColumnTitle(col)
@@ -346,6 +374,61 @@ proc renderEventLogPanel*(r: MockRenderer; vm: EventLogVM): MockNode =
 
 when defined(js):
 
+  type ColumnDrag = ref object
+    ## The Columns menu row being dragged, shared by every row's handlers.
+    column: Option[EventLogColumn]
+
+  proc clearDropLine(el: isonim_dom.Element) =
+    el.removeClasses(cstring EventLogColumnDropBeforeClass,
+                     cstring EventLogColumnDropAfterClass,
+                     cstring EventLogColumnDropAfterClass)
+
+  proc clearDropMarks(el: isonim_dom.Element) =
+    el.removeClasses(cstring EventLogColumnDraggingClass,
+                     cstring EventLogColumnDropBeforeClass,
+                     cstring EventLogColumnDropAfterClass)
+
+  proc wireColumnDrag(vm: EventLogVM; rowEl: isonim_dom.Element;
+                      item: proc(): EventLogColumn; drag: ColumnDrag) =
+    ## Drag a Columns menu row onto another to put its column there
+    ## (`EventLogVM.placeColumn`).  While over a row, a brand line marks where
+    ## the dragged one will land: above it when dragging up, below it when
+    ## dragging down — the side the dragged row comes from.  `item()` is read
+    ## at event time: `indexEach` reuses a row for whatever column is at its
+    ## index after a reorder.
+    let node = isonim_dom.Node(rowEl)
+    isonim_dom.addEventListener(node, cstring"dragstart",
+      proc(ev: isonim_dom.Event) =
+        drag.column = some(item())
+        ev.startDrag(cstring($item()))
+        rowEl.addClass(cstring EventLogColumnDraggingClass))
+    isonim_dom.addEventListener(node, cstring"dragover",
+      proc(ev: isonim_dom.Event) =
+        if drag.column.isNone or drag.column.get == item():
+          return
+        # Allows the drop (the default refuses it).
+        ev.preventDefault()
+        ev.showMoveCursor()
+        let order = vm.columns.val.order
+        let down = order.find(drag.column.get) < order.find(item())
+        rowEl.clearDropLine()
+        rowEl.addClass(cstring(if down: EventLogColumnDropAfterClass
+                               else: EventLogColumnDropBeforeClass)))
+    isonim_dom.addEventListener(node, cstring"dragleave",
+      proc(ev: isonim_dom.Event) =
+        rowEl.clearDropLine())
+    isonim_dom.addEventListener(node, cstring"drop",
+      proc(ev: isonim_dom.Event) =
+        ev.preventDefault()
+        rowEl.clearDropMarks()
+        if drag.column.isSome:
+          discard vm.placeColumn(drag.column.get, item())
+        drag.column = none(EventLogColumn))
+    isonim_dom.addEventListener(node, cstring"dragend",
+      proc(ev: isonim_dom.Event) =
+        rowEl.clearDropMarks()
+        drag.column = none(EventLogColumn))
+
   proc renderWebEventLogPanel*(r: WebRenderer;
                                 vm: EventLogVM;
                                 componentId: int;
@@ -375,7 +458,7 @@ when defined(js):
           tdiv(class = "eventLog-switch eventLog-button eventLog-normal-color-button"):
             span(id = "detailed"):
               text "detailed"
-          button(class = "ct-button-sm-secondary " & EventLogColumnsButtonClass,
+          button(class = columnsButtonClass(vm),
                  title = "Show, hide or move the event log's columns",
                  onclick = proc() = vm.toggleColumnsMenu()):
             text EventLogColumnsButtonText
@@ -420,26 +503,32 @@ when defined(js):
         renderMarkerRow(r, vm, item))
 
     # The column menu's rows: the ViewModel's ORDER, hidden columns in their
-    # places (a hidden column cannot move; its arrows do nothing).
+    # places.  `dragged` is the row being dragged, shared by every row's
+    # handlers; none between drags.
+    let dragged = ColumnDrag(column: none(EventLogColumn))
     indexEach[EventLogColumn, WebRenderer, isonim_dom.Element](r, columnsMenu,
       proc(): seq[EventLogColumn] = vm.columns.val.order,
       proc(item: proc(): EventLogColumn, index: int): isonim_dom.Element =
-        ui(r):
-          tdiv(class = EventLogColumnOptionClass,
+        # Each row is the shared menu row (`ct-menu-item`): its height, text
+        # and hover are every dropdown's.  The check and the title toggle the
+        # column; the whole row drags to reorder, the handle says so.
+        var rowEl: isonim_dom.Element
+        result = ui(r):
+          tdiv(ref = rowEl,
+               class = EventLogColumnOptionClass & " ct-menu-item",
+               draggable = "true",
                `data-column` = $item()):
             span(class = columnCheckClass(vm, item()),
                  onclick = proc() = discard vm.toggleColumn(item())):
-              text columnCheckGlyph(vm, item())
-            span(class = "eventLog-column-title"):
+              span(class = "ct-checkmark",
+                   `data-state` = columnCheckState(vm, item()),
+                   `aria-hidden` = "true")
+            span(class = "eventLog-column-title ct-menu-item-label",
+                 onclick = proc() = discard vm.toggleColumn(item())):
               text columnOptionTitle(item())
-            button(class = EventLogColumnLeftClass,
-                   title = "Move left",
-                   onclick = proc() = discard vm.moveColumn(item(), -1)):
-              text "◀"
-            button(class = EventLogColumnRightClass,
-                   title = "Move right",
-                   onclick = proc() = discard vm.moveColumn(item(), 1)):
-              text "▶")
+            span(class = EventLogColumnHandleClass,
+                 title = "Drag to reorder", `aria-hidden` = "true")
+        wireColumnDrag(vm, rowEl, item, dragged))
 
     panel
 

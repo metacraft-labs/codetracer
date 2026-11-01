@@ -528,3 +528,22 @@ ct-images-notification-error = url("../../public/resources/notifications/error_i
 ct-images-notification-success = url("../../public/resources/notifications/success_icon_dark.svg")
 
 ct-images-close-button = url("../../public/resources/shared/close_button_dark.svg")
+
+// Constants the components use that this theme never defined.  Stylus passes an
+// unknown name through as a bare word, so each of these compiled to invalid CSS
+// and the rule painted nothing.  Hex, as above, from the token named beside it.
+BACKGROUND_NEIGHBOUR_COLOR=#262626 // surface/base/card
+BACKGROUND_OPPOSITE_COLOR=#B4B4B4 // surface/on-color/default
+CALLGRAP_TOOLTIP_BORDER_COLOR=LINE_STROKE // border/secondary
+ELEMENT_COMPONENT_CLOSE_ICON=url('../../public/resources/shared/element_component_close_dark.svg')
+EVENT_LOG_FA_DOWN_ICON=url("../../public/resources/shared/fa_down_dark.svg")
+EVENT_LOG_FA_UP_ICON=url("../../public/resources/shared/fa_up_dark.svg")
+FLOW_INLINE_AFTER_VALUE_COLOR=FLOW_INLINE_BEFORE_ONLY_VALUE_COLOR
+FLOW_INLINE_BEFORE_VALUE_BACKGROUND_COLOR=DROPDOWN_BASE // surface/input/default
+FLOW_PARALLEL_ITERATION_INFO_COLOR=#919191 // text/primary/label-subtle
+FLOW_PARALLEL_SLIDER_COLOR=LINE_STROKE // border/secondary
+FULL_CALLTRACE_BG_COLOR=#282828 // surface/base/panel
+FULL_CALLTRACE_FG_COLOR=PRIMARY_TEXT_COLOR // text/primary/body
+OPPOSITE_COLOR=#1B1B1B // text/on-color/body: text on the bright speed bars
+PRIMARY_COLOR=PRIMARY_TEXT_COLOR // text/primary/body
+TERMINAL_LESS_VISIBLE_COLOR=#727272 // text/primary/caption-subtle

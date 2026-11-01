@@ -11,10 +11,10 @@
   width 560px
   max-width calc(100vw - 48px)
   padding 18px
-  border 1px solid var(--border-color)
+  border 1px solid colors-ui-border-secondary
   border-radius 6px
-  background var(--panel-background)
-  color var(--text-color)
+  background colors-ui-surface-base-panel
+  color colors-ui-text-primary-body
   box-shadow 0 12px 32px rgba(0, 0, 0, 0.35)
 
 .file-conflict-dialog h2
@@ -37,11 +37,8 @@
 .file-conflict-dialog-actions button
   min-height 30px
   padding 5px 10px
-  border 1px solid var(--border-color)
   border-radius 4px
-  background var(--button-background)
-  color var(--text-color)
-  cursor pointer
+  control-button()
 
 .file-conflict-dialog-actions button:hover
-  background var(--button-hover-background)
+  control-button-hover()

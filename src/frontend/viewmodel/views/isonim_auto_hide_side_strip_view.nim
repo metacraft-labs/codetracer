@@ -15,6 +15,9 @@ when defined(js):
 type
   AutoHideSideStripRecord* = object
     title*: string
+    ## Unique per panel (`auto_hide.panelKey`), unlike `title`: the outline
+    ## builder in `ui/layout.nim` finds this tab by it as `data-ct-panel-key`.
+    key*: string
     active*: bool
     ## Opened by a click (docked, or the overlay pinned open) rather than shown
     ## as a hover preview.  Only such a tab gets the × (Nikolay, 2026-10-17):
@@ -124,6 +127,7 @@ proc renderSideStripTab(
   result = ui(r):
     tdiv(
         class = cls,
+        `data-ct-panel-key` = tab.key,
         onclick = proc() = callbacks.invokeSelect(index)):
       span(class = AutoHideSideStripTabLabelClass):
         text tab.title
@@ -161,6 +165,7 @@ when defined(js):
     result = ui(r):
       tdiv(ref = tabEl,
            class = cls,
+           `data-ct-panel-key` = tab.key,
            onclick = proc() = callbacks.invokeSelect(index)):
         span(class = AutoHideSideStripTabLabelClass):
           text tab.title

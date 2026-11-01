@@ -1,51 +1,64 @@
+@import "../generated/index"
+
 /* checkmark.styl
+
+ * Design-system checkbox: base class `.ct-checkmark`.
  *
- * Design-system checkmark / checkbox component
- * Base class: .ct-checkmark
+ * THE SOURCE OF TRUTH is the Design System's ❖ Checkbox page (Figma file
+ * Ytr6Ux4bYZYRUBpgNsSVml, node 69:2282 — Nikolay, 2026-10-20: "every check
+ * component in CodeTracer is originating from this page").  Every checkbox in
+ * the app is this component; none draws its own.  Values below are that page's:
+ *
+ *   size      16px (default) · 18px (`data-size="md"`) · 24px (`data-size="lg"`)
+ *   corners   4px at 16, 6px at 18 and 24
+ *   border    1px, inside the box
+ *   type      unselected · selected (check, 1.5px) · indeterminate (bar, 1px)
+ *
+ *   status    fill                       border                mark
+ *   default   surface/primary/default    border/primary        icon/primary/default
+ *   hover     surface/primary/default-…  border/primary/hover  icon/primary/default
+ *   focused   none                       border/contrast       icon/primary/default
+ *   disabled  surface/primary/disabled   none                  icon/primary/disabled
+ *   error     surface/primary/default    border/error          icon/error/primary
+ *
+ * The marks are the page's own paths, drawn as masks over the box and painted
+ * with the mark colour, so a state changes only colours.  The border is an
+ * inset shadow, not `border`, so the mask can cover the whole box.
  *
  * Preferred API:
  *   data-state="unchecked" | "checked" | "indeterminate"
- *   data-error="true"      (optional)
- *   data-size="sm|md|lg"   (optional)
+ *     — or none, next to a real `.ct-checkmark-input`: then `:checked` /
+ *       `:indeterminate` on the input set the type
+ *   data-error="true" · data-size="md|lg"
  *
  * Recommended markup:
  *
  * <label class="ct-checkmark-field">
  *   <input class="ct-checkmark-input" type="checkbox" />
- *   <span class="ct-checkmark" data-state="checked" aria-hidden="true"></span>
+ *   <span class="ct-checkmark" aria-hidden="true"></span>
  *   <span class="ct-checkmark-label">Label</span>
  * </label>
  */
 
+CHECKMARK_CHECK_16 = url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M3 8.063L6.663 11.5L13 4.5' stroke='black' stroke-width='1.5' stroke-linecap='square'/%3E%3C/svg%3E")
+CHECKMARK_BAR_16 = url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M3 8L13 8' stroke='black' stroke-width='1' stroke-linecap='square'/%3E%3C/svg%3E")
+CHECKMARK_CHECK_18 = url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 18 18' fill='none'%3E%3Cpath d='M4 9.063L7.66 12.5L14 5.5' stroke='black' stroke-width='1.5' stroke-linecap='square'/%3E%3C/svg%3E")
+CHECKMARK_BAR_18 = url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 18 18' fill='none'%3E%3Cpath d='M4 9L14 9' stroke='black' stroke-width='1' stroke-linecap='square'/%3E%3C/svg%3E")
+CHECKMARK_CHECK_24 = url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M5.92 12.078L10.38 16.285L18.08 7.715' stroke='black' stroke-width='1.5' stroke-linecap='square'/%3E%3C/svg%3E")
+CHECKMARK_BAR_24 = url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M7 12L17 12' stroke='black' stroke-width='1' stroke-linecap='square'/%3E%3C/svg%3E")
+
 .ct-checkmark
-  --ct-checkmark-size: 1.5em
-  --ct-checkmark-radius: 0.25em
-  --ct-checkmark-border-width: 0.0625em
-  --ct-checkmark-icon-stroke: 0.125em
+  --ct-checkmark-size: 1rem
+  --ct-checkmark-radius: 0.25rem
+  --ct-checkmark-check: CHECKMARK_CHECK_16
+  --ct-checkmark-bar: CHECKMARK_BAR_16
 
-  --ct-checkmark-check-width: 0.625em
-  --ct-checkmark-check-height: 0.375em
-  --ct-checkmark-minus-width: 0.625em
-  --ct-checkmark-minus-height: 0.125em
-
-  --ct-checkmark-bg: transparent
-  --ct-checkmark-bg-hover: rgba(255, 255, 255, 0.03)
-  --ct-checkmark-bg-disabled: rgba(255, 255, 255, 0.08)
-
-  --ct-checkmark-border: rgba(255, 255, 255, 0.28)
-  --ct-checkmark-border-hover: rgba(255, 255, 255, 0.42)
-  --ct-checkmark-border-focus: #2f81ff
-  --ct-checkmark-border-error: #f2a0a6
-  --ct-checkmark-border-disabled: transparent
-
-  --ct-checkmark-icon: #f5f5f5
-  --ct-checkmark-icon-disabled: rgba(255, 255, 255, 0.38)
-  --ct-checkmark-icon-error: #f7b0b4
+  --ct-checkmark-bg: colors-ui-surface-primary-default
+  --ct-checkmark-border: colors-ui-border-primary
+  --ct-checkmark-icon: colors-ui-icon-primary-default
 
   position: relative
   display: inline-flex
-  align-items: center
-  justify-content: center
   inline-size: var(--ct-checkmark-size)
   block-size: var(--ct-checkmark-size)
   min-inline-size: var(--ct-checkmark-size)
@@ -54,59 +67,47 @@
   box-sizing: border-box
   margin: 0
   padding: 0
-  border: var(--ct-checkmark-border-width) solid var(--ct-checkmark-border)
+  border: none
   border-radius: var(--ct-checkmark-radius)
   background: var(--ct-checkmark-bg)
+  box-shadow: inset 0 0 0 0.0625rem var(--ct-checkmark-border)
   vertical-align: middle
   pointer-events: none
-  transition: background-color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease, opacity 0.14s ease
+  transition: background-color 0.14s ease, box-shadow 0.14s ease
 
   &::before
     content: ''
     position: absolute
-    box-sizing: border-box
+    inset: 0
+    background-color: var(--ct-checkmark-icon)
+    mask: var(--ct-checkmark-check) center / 100% 100% no-repeat
     opacity: 0
-    transition: opacity 0.14s ease, border-color 0.14s ease, background-color 0.14s ease, transform 0.14s ease
 
-  &[data-state="checked"]::before
-    inline-size: var(--ct-checkmark-check-width)
-    block-size: var(--ct-checkmark-check-height)
-    border-left: var(--ct-checkmark-icon-stroke) solid var(--ct-checkmark-icon)
-    border-bottom: var(--ct-checkmark-icon-stroke) solid var(--ct-checkmark-icon)
-    transform: translateY(-0.0625em) rotate(-45deg)
+  &[data-size="md"]
+    --ct-checkmark-size: 1.125rem
+    --ct-checkmark-radius: 0.375rem
+    --ct-checkmark-check: CHECKMARK_CHECK_18
+    --ct-checkmark-bar: CHECKMARK_BAR_18
+
+  &[data-size="lg"]
+    --ct-checkmark-size: 1.5rem
+    --ct-checkmark-radius: 0.375rem
+    --ct-checkmark-check: CHECKMARK_CHECK_24
+    --ct-checkmark-bar: CHECKMARK_BAR_24
+
+  // Selected and indeterminate: set on the box, or by the real input beside it.
+  &[data-state="checked"]::before,
+  .ct-checkmark-input:checked + &::before
     opacity: 1
 
-  &[data-state="indeterminate"]::before
-    inline-size: var(--ct-checkmark-minus-width)
-    block-size: var(--ct-checkmark-minus-height)
-    border-radius: 999em
-    background: var(--ct-checkmark-icon)
+  &[data-state="indeterminate"]::before,
+  .ct-checkmark-input:indeterminate + &::before
+    mask-image: var(--ct-checkmark-bar)
     opacity: 1
 
   &[data-error="true"]
-    border-color: var(--ct-checkmark-border-error)
-
-  &[data-error="true"][data-state="checked"]::before
-    border-left-color: var(--ct-checkmark-icon-error)
-    border-bottom-color: var(--ct-checkmark-icon-error)
-
-  &[data-error="true"][data-state="indeterminate"]::before
-    background: var(--ct-checkmark-icon-error)
-
-  &[data-size="sm"]
-    --ct-checkmark-size: 1.25em
-    --ct-checkmark-check-width: 0.5em
-    --ct-checkmark-check-height: 0.3125em
-    --ct-checkmark-minus-width: 0.5em
-
-  &[data-size="md"]
-    --ct-checkmark-size: 1.5em
-
-  &[data-size="lg"]
-    --ct-checkmark-size: 1.75em
-    --ct-checkmark-check-width: 0.75em
-    --ct-checkmark-check-height: 0.4375em
-    --ct-checkmark-minus-width: 0.75em
+    --ct-checkmark-border: colors-ui-border-error
+    --ct-checkmark-icon: colors-ui-icon-error-primary
 
 
 .ct-checkmark-field
@@ -142,29 +143,26 @@
   line-height: 1.2
 
 
-.ct-checkmark-input:hover + .ct-checkmark
-.ct-checkmark-field:hover .ct-checkmark
-  background: var(--ct-checkmark-bg-hover)
-  border-color: var(--ct-checkmark-border-hover)
+// Hover — over the box, its label, or the menu row it sits in.
+.ct-checkmark-input:hover + .ct-checkmark:not([data-error="true"])
+.ct-checkmark-field:hover .ct-checkmark:not([data-error="true"])
+.ct-menu-item:hover .ct-checkmark:not([data-error="true"])
+  --ct-checkmark-bg: colors-ui-surface-primary-default-hover
+  --ct-checkmark-border: colors-ui-border-primary-hover
 
 
+// Focused — keyboard focus on the real input: a white border, no fill.
 .ct-checkmark-input:focus-visible + .ct-checkmark
-  border-color: var(--ct-checkmark-border-focus)
-  box-shadow: 0 0 0 0.0625em rgba(47, 129, 255, 0.18)
+  --ct-checkmark-bg: transparent
+  --ct-checkmark-border: colors-ui-border-contrast
 
 
+// Disabled — a flat fill, no border, a dimmed mark.  Last, so it wins over
+// hover and error.
 .ct-checkmark-input:disabled + .ct-checkmark
 .ct-checkmark-field[data-disabled="true"] .ct-checkmark
-  background: var(--ct-checkmark-bg-disabled)
-  border-color: var(--ct-checkmark-border-disabled)
-
-
-.ct-checkmark-input:disabled + .ct-checkmark[data-state="checked"]::before
-.ct-checkmark-field[data-disabled="true"] .ct-checkmark[data-state="checked"]::before
-  border-left-color: var(--ct-checkmark-icon-disabled)
-  border-bottom-color: var(--ct-checkmark-icon-disabled)
-
-
-.ct-checkmark-input:disabled + .ct-checkmark[data-state="indeterminate"]::before
-.ct-checkmark-field[data-disabled="true"] .ct-checkmark[data-state="indeterminate"]::before
-  background: var(--ct-checkmark-icon-disabled)
+.ct-menu-item--disabled .ct-checkmark
+.ct-checkmark[data-disabled="true"]
+  --ct-checkmark-bg: colors-ui-surface-primary-disabled
+  --ct-checkmark-border: transparent
+  --ct-checkmark-icon: colors-ui-icon-primary-disabled

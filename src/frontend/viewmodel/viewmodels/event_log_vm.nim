@@ -280,6 +280,22 @@ func moveColumn*(c: var EventLogColumns; col: EventLogColumn;
       inc k
   true
 
+func placeColumn*(c: var EventLogColumns; col, target: EventLogColumn): bool =
+  ## Put `col` where `target` is in the FULL order, hidden columns included —
+  ## a row of the Columns menu dragged onto another row (Nikolay, 2026-10-20:
+  ## dragging replaced the move-left / move-right arrows).  Dragged down, `col`
+  ## lands after `target`; dragged up, before it — so it always ends up in the
+  ## row it was dropped on.  Unlike `moveColumn` a hidden column can be placed:
+  ## the menu lists every column, and its place is where it comes back.  False
+  ## when nothing moves (`col == target`, or either is not in the order).
+  let at = c.order.find(col)
+  let to = c.order.find(target)
+  if col == target or at < 0 or to < 0:
+    return false
+  c.order.delete(at)
+  c.order.insert(col, to)
+  true
+
 func parseEventLogColumn*(name: string): (bool, EventLogColumn) =
   ## A column by its title or its enum name, case-insensitively — what a
   ## typed command names (`:column-hide location`).
@@ -512,6 +528,11 @@ proc toggleColumn*(vm: EventLogVM; col: EventLogColumn): bool =
 proc moveColumn*(vm: EventLogVM; col: EventLogColumn; delta: int): bool =
   var c = vm.columns.val
   result = c.moveColumn(col, delta)
+  if result: vm.columns.val = c
+
+proc placeColumn*(vm: EventLogVM; col, target: EventLogColumn): bool =
+  var c = vm.columns.val
+  result = c.placeColumn(col, target)
   if result: vm.columns.val = c
 
 proc setSearchQuery*(vm: EventLogVM; query: string) =

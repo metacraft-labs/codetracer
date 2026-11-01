@@ -39,7 +39,7 @@ import headless_app/footer_info
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 217
+const ExpectedAssertions = 227
 
 var countedAssertions = 0
 
@@ -159,6 +159,23 @@ suite "PLAT-49 part B: the event log's columns are the ViewModel's":
     ck ok and col == elcLocation
     ck parseEventLogColumn("#")[1] == elcIndex
     ck not parseEventLogColumn("nope")[0]
+
+  test "place a column on another's row: the Columns menu's drag":
+    var c = defaultEventLogColumns()
+    # Dragged up: lands before the row it is dropped on.
+    ck c.placeColumn(elcOutput, elcIndex)
+    ck c.order == @[elcTick, elcOutput, elcIndex, elcLocation, elcKind]
+    # Dragged down: lands after it.
+    ck c.placeColumn(elcTick, elcLocation)
+    ck c.order == @[elcOutput, elcIndex, elcLocation, elcTick, elcKind]
+    # A hidden column can be placed too; it stays hidden.
+    ck c.placeColumn(elcLocation, elcOutput)
+    ck c.order == @[elcLocation, elcOutput, elcIndex, elcTick, elcKind]
+    ck elcLocation in c.hidden
+    ck c.visibleColumns == @[elcOutput, elcIndex, elcTick, elcKind]
+    # Onto itself: nothing moves.
+    ck not c.placeColumn(elcKind, elcKind)
+    ck c.order == @[elcLocation, elcOutput, elcIndex, elcTick, elcKind]
 
   test "the omnibar's column commands: show / hide and move, every column":
     let cmds = eventLogColumnCommands()

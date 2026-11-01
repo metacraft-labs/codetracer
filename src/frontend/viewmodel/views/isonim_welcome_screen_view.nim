@@ -423,6 +423,10 @@ proc renderNewRecordModeMock(r: MockRenderer; vm: WelcomeScreenVM;
                       checked =
                         (if vm.newRecord.val.defaultOutputFolder: "true"
                          else: "false"))
+                # The visible box: the shared checkbox (checkmark.styl), its
+                # tick driven by the input's own `:checked`.  Without it the
+                # input is visually hidden and the option showed no box.
+                span(class = "ct-checkmark", `aria-hidden` = "true")
                 span(class = "ct-checkmark-label"):
                   text "Use default output folder"
             tdiv(class = "new-record-form-row"):
@@ -791,6 +795,7 @@ when defined(js):
                   input(ref = checkbox,
                         `type` = "checkbox",
                         class = "ct-checkmark-input")
+                  span(class = "ct-checkmark", `aria-hidden` = "true")
                   span(class = "ct-checkmark-label"):
                     text "Use default output folder"
               tdiv(class = "new-record-form-row"):

@@ -173,11 +173,13 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     display: flex
     align-items: center
     justify-content: center
-    border-radius: 3px
-    cursor: pointer
+    box-sizing: border-box
+    border-radius: CONTROL_RADIUS
     font-size: 12px
-    color: colors-ui-text-primary-label
     user-select: none
+    // The button look (button.styl).  The icon is a mask painted `currentColor`
+    // (below), so it follows the look's text colour.
+    control-button()
 
     // Icon = a ui-icons SVG (design system, icons-lg) used as a mask, so it
     // takes the button's `color` in every state below.
@@ -190,15 +192,17 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       mask: var(--build-ctrl-icon) center / contain no-repeat
 
     &:hover
-      color: colors-ui-text-primary-body
-      background-color: rgba(255, 255, 255, 0.1)
+      control-button-hover()
 
     &.disabled
       color: colors-ui-text-primary-label-subtle
       cursor: default
       pointer-events: none
 
+    // Auto-scroll on: the look's active state.  Its icon keeps the green it
+    // had, which says "following" as well as "on".
     &.active
+      control-button-active()
       color: colors-ui-text-success-primary
 
   .build-run-btn
@@ -1154,7 +1158,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
   color: white !important
 
 .toggle-search-results
-  color: OPPOSITE_COLOR
+  color: colors-ui-text-primary-body
 
 .debug-notification
   min-width: fit-content

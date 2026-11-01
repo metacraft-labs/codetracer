@@ -71,18 +71,16 @@
   display: inline-flex
   align-items: center
   height: CONTROL_HEIGHT_SM
+  box-sizing: border-box
   padding: 0 8px
-  border-radius: 4px
-  cursor: pointer
+  border-radius: CONTROL_RADIUS
   font-size: 12px
-  color: colors-ui-text-primary-body
-  background: transparent
+  // The button look (button.styl); the selected filter is its active state.
+  control-button()
   &:hover
-    background: colors-ui-surface-input-default
+    control-button-hover()
   &.active
-    background: colors-ui-surface-input-default
-    color: colors-ui-text-primary-body
-    font-weight: 600
+    control-button-active()
 
 // -- Problem list --
 

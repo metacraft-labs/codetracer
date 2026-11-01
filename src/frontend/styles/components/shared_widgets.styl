@@ -847,21 +847,19 @@ input:checked ~ .checkmark:after
   gap: 0.375em
   user-select: none
   border-radius: 0.5em
-  border: 0.03125em solid colors-ui-border-primary
-  background: colors-ui-surface-primary-default
+  // The button look (button.styl) — these pickers are where it was taken from,
+  // and every other button now follows them.
+  control-button()
   font-family: "SpaceGrotesk"
   font-size: 0.75rem
-  color: colors-ui-text-primary-body-subtle
   white-space: nowrap
   min-width: 7.5em
 
   &:hover
-    background: colors-ui-surface-primary-default-hover
-    color: colors-ui-text-primary-body
+    control-button-hover()
 
   &.ct-picker-trigger--open
-    border-color: colors-ui-border-action
-    color: colors-ui-text-primary-body
+    control-button-active()
 
 .ct-picker-chevron
   display: flex

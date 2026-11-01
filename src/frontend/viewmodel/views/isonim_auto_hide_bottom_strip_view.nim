@@ -21,6 +21,9 @@ when defined(js):
 type
   AutoHideBottomStripRecord* = object
     title*: string
+    ## Unique per panel (`auto_hide.panelKey`), unlike `title`: the outline
+    ## builder in `ui/layout.nim` finds this tab by it as `data-ct-panel-key`.
+    key*: string
     active*: bool
     ## Opened by a click, not a hover preview — only then the × shows, as on
     ## the side strips (`AutoHideSideStripRecord.pinned`).
@@ -111,7 +114,8 @@ proc renderBottomStripTab(
   let cls = if tab.active: AutoHideBottomStripTabActiveClass
             else: AutoHideBottomStripTabClass
   result = ui(r):
-    tdiv(class = cls, onclick = proc() = cb.invokeSelect(index)):
+    tdiv(class = cls, `data-ct-panel-key` = tab.key,
+        onclick = proc() = cb.invokeSelect(index)):
       span(class = AutoHideBottomStripTabLabelClass):
         text tab.title
   if cb.showsHide(tab):
@@ -152,6 +156,7 @@ when defined(js):
     result = ui(r):
       tdiv(ref = tabEl,
            class = cls,
+           `data-ct-panel-key` = tab.key,
            onclick = proc() = cb.invokeSelect(index)):
         span(class = AutoHideBottomStripTabLabelClass):
           text tab.title

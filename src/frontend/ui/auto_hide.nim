@@ -874,6 +874,7 @@ proc hideDockedPanel*() =
       # the outline builder resumes and re-outlines the focused stack.
       containerEl.classList.remove(cstring"ct-docked-focused")
       containerEl.removeAttribute(cstring"data-ct-docked-title")
+      containerEl.removeAttribute(cstring"data-ct-docked-key")
 
   autoHideState.dockedPanel = nil
   autoHideState.dockedVisible = false
@@ -884,6 +885,18 @@ proc hideDockedPanel*() =
 
   deferredUpdateGLSize()
   dispatchLayoutUpdated()
+
+proc panelKey*(panel: AutoHidePanel): string =
+  ## A name for `panel` that no other pinned panel shares, for the outline
+  ## builder in `ui/layout.nim` to find the panel's strip tab by.
+  ##
+  ## The title is not one: two panels of a kind open at once — two UNIFIED
+  ## DIFFs — carry the same label, and a lookup by title always landed on the
+  ## first, drawing the docked / overlay outline around the wrong tab.  The
+  ## content kind plus its id within that kind is what GoldenLayout itself
+  ## tells components apart by (`componentState.content` / `.id`); standalone
+  ## panels all use id 0, but each is a different content kind.
+  $panel.content & ":" & $panel.componentId
 
 proc showDockedPanel*(panel: AutoHidePanel) =
   ## Expand the inline docked sidebar for `panel` (triggered by tab click).
@@ -952,6 +965,8 @@ proc showDockedPanel*(panel: AutoHidePanel) =
   # first.  The border marks the docked panel only, so the docked tab has to be
   # named outright.
   containerEl.setAttribute(cstring"data-ct-docked-title", panel.title)
+  # The title can be shared by two panels; the key cannot (`panelKey`).
+  containerEl.setAttribute(cstring"data-ct-docked-key", cstring(panelKey(panel)))
 
   # Restore the remembered size so docked and overlay share the same dimensions.
   # Without this the CSS default (360px/280px) always wins on first dock.
@@ -1430,6 +1445,9 @@ proc doShowOverlayImpl(panel: AutoHidePanel) =
   let titleEl = document.getElementById(cstring"auto-hide-overlay-title")
   if not titleEl.isNil:
     titleEl.textContent = panel.title
+  # Which strip tab this overlay belongs to, for the outline builder in
+  # `ui/layout.nim` — by key, since two open panels can share a title.
+  overlayEl.setAttribute(cstring"data-ct-panel-key", cstring(panelKey(panel)))
 
   # Apply edge-specific class and make visible.
   overlayEl.classList.remove(cstring"auto-hide-overlay-left")
@@ -1695,8 +1713,8 @@ when defined(js):
       let isActive = not autoHideState.isNil and (
         (not autoHideState.dockedPanel.isNil and autoHideState.dockedPanel == panel) or
         (not autoHideState.activeOverlay.isNil and autoHideState.activeOverlay == panel))
-      records.add(AutoHideSideStripRecord(title: $panel.title, active: isActive,
-        pinned: isPanelPinnedOpen(panel)))
+      records.add(AutoHideSideStripRecord(title: $panel.title, key: panelKey(panel),
+        active: isActive, pinned: isPanelPinnedOpen(panel)))
 
     let panels = model.panels
     let callbacks = AutoHideSideStripCallbacks(
@@ -1870,8 +1888,8 @@ when defined(js):
       let isActive = not autoHideState.isNil and (
         (not autoHideState.dockedPanel.isNil and autoHideState.dockedPanel == panel) or
         (not autoHideState.activeOverlay.isNil and autoHideState.activeOverlay == panel))
-      records.add(AutoHideBottomStripRecord(title: $panel.title, active: isActive,
-        pinned: isPanelPinnedOpen(panel)))
+      records.add(AutoHideBottomStripRecord(title: $panel.title, key: panelKey(panel),
+        active: isActive, pinned: isPanelPinnedOpen(panel)))
 
     let callbacks = AutoHideBottomStripCallbacks(
       onSelect: proc(index: int) =
