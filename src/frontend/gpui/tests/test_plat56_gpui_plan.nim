@@ -29,6 +29,7 @@
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
 
 import ../../viewmodel/tests/unit/build_fixtures/plat56_c_build
+import ../../viewmodel/tests/unit/build_fixtures/plat56_gcc_quotes
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -133,7 +134,9 @@ proc compareLines(plan: JsonNode; want: JsonNode): int =
     var diffs: seq[string] = @[]
     if l.attr("data-ct-build-class") != w["class"].getStr:
       diffs.add "class " & l.attr("data-ct-build-class")
-    if l.attr("data-ct-text") != w["text"].getStr: diffs.add "text"
+    # The desktop's words, in the local `gcc`'s quotes (`plat56_gcc_quotes`).
+    if l.attr("data-ct-text") != plat56LocalGccText(w["text"].getStr):
+      diffs.add "text"
     # The window draws the runs inside its view's columns (a line wider than
     # the pane continues past its right edge, reached by the horizontal
     # bar): the drawn runs are the desktop's first ones.

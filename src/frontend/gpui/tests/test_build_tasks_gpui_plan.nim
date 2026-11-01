@@ -28,6 +28,7 @@
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
 
 import ../../viewmodel/tests/unit/build_fixtures/plat56_c_build
+import ../../viewmodel/tests/unit/build_fixtures/plat56_gcc_quotes
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -214,7 +215,9 @@ suite "build tasks in the GPUI window":
     let tips = plan.nodesWith("data-ct-cell-tooltip")
     ck tips.len == 1
     if tips.len == 1:
-      ck textOf(tips[0]).contains("‘undefined_name’ undeclared")
+      # Its quotes are the local `gcc`'s (`plat56_gcc_quotes`).
+      ck textOf(tips[0]).contains(
+        plat56LocalGccText("‘undefined_name’ undeclared"))
       ck textOf(tips[0]).contains("note: each undeclared identifier")
     # A NEW BUILD CLEARS THEM.
     (plan, tr) = windowPlan(project, opened & "," & omnibox(":build: pass") &
