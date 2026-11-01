@@ -167,12 +167,13 @@ sibling_remote_org="${CODETRACER_SIBLING_REMOTE_ORG:-https://github.com/metacraf
 # is not a coincidence any more: the action clones whatever the lock declares,
 # so this tier and CI's provisioning have one source. `isonim-tui` joined the
 # list on 2026-09-25, once the editor model began importing
-# `isonim_tui/text/width`; the other three advisory IsoNim-family entries below
-# (isonim-gpui, nim-termctl, nim-pty) used to be cloned alongside them and are
-# not any more -- nothing declares them, nothing imports them, and the
-# paragraph below already said builds succeed without them. They stay here as warnings so a local workspace that
-# does carry them keeps working and one that does not is told why a
-# `--path` silently went missing.
+# `isonim_tui/text/width`. The other three IsoNim-family entries below
+# (isonim-gpui, nim-termctl, nim-pty) are declared too -- repro.lock solves
+# them as packages, so `ci/repro-lock-build-input-siblings.sh` lists them and
+# the action clones them -- and src/ imports all three (see their rows). Being
+# lock-declared does not make a sibling required: this tier is what a
+# `build-once` build cannot compile without, and theirs are other targets'
+# needs (the advisory paragraph below).
 #
 # `runquota` was added to that tier after issue #641. `src/ct/codetracer.nim`
 # imports `../ct_test/ct_test`, which reaches `src/ct_test/process_exec.nim` ->
@@ -231,7 +232,16 @@ sibling_remote_org="${CODETRACER_SIBLING_REMOTE_ORG:-https://github.com/metacraf
 # Everything else the source references across a relative path goes in the
 # advisory tier: a warning naming the module that will fail to resolve, and a
 # zero exit. `isonim-gpui` / `nim-termctl` / `nim-pty` are on
-# `src/Tuprules.tup`'s `--path` list but builds succeed without them.
+# `src/Tuprules.tup`'s `--path` list and are imported, but only by the GPUI and
+# TUI frontends and their tests (`just build-gpui`, `just build-tui`,
+# `just test-tui`), which `build-once` does not compile: no file in the import
+# closure of its targets (src/ct/{codetracer,db_backend_record}.nim,
+# src/ct_test/ct_test.nim, the src/frontend/{index,subwindow,ui_js}.nim JS
+# bundles and the two src/frontend/tests JS tests) reaches any of them.
+# Note isonim-tui's umbrella imports nim_termctl, but `build-once` reaches
+# only `isonim_tui/text/width`, which does not. `just test`'s plat37 shim gate
+# (`ci/test/plat37-shim-gate-test.sh`) reads `${ISONIM_GPUI:-../isonim-gpui}/tools`
+# and refuses by name on its own when that is absent, so it needs no tier here.
 # `nim-shm-queue` / `nim-shm-gset` are on `config.nims`'s search path for
 # io-mon's CAPTURE half (`io_mon/writer`, `io_mon/fs_snoop`, and so the
 # `io_mon` umbrella), which nothing in this repo imports: the closure of
@@ -249,9 +259,9 @@ sibling_remote_org="${CODETRACER_SIBLING_REMOTE_ORG:-https://github.com/metacraf
 required_siblings=(
 	'isonim|src/isonim.nim|ISONIM_SRC|the reactive UI framework the whole renderer is written against — hundreds of `import isonim/...` sites across the frontend; count them with: grep -rl "import isonim/" --include=*.nim src | wc -l . Also the source `build-tailwind.sh` extracts utility classes from'
 	'nim-agents|src/nim_agents.nim||`import nim_agents` in src/frontend/viewmodel/agent_service.nim and the agentic-session UI'
-	"nim-agent-harbor|src/nim_agent_harbor.nim||the session/worktree backend nim_agents is written against; passed unconditionally by src/Tuprules.tup:79"
-	"nim-acp|src||the Agent Client Protocol bindings src/Tuprules.tup:78 puts on the Nim search path"
-	"nim-everywhere|src||the patched Nim 2.x distribution src/Tuprules.tup:77 puts on the Nim search path"
+	"nim-agent-harbor|src/nim_agent_harbor.nim||the session/worktree backend nim_agents is written against; passed unconditionally by src/Tuprules.tup:80"
+	"nim-acp|src||the Agent Client Protocol bindings src/Tuprules.tup:79 puts on the Nim search path"
+	"nim-everywhere|src||the patched Nim 2.x distribution src/Tuprules.tup:78 puts on the Nim search path"
 	'isonim-tui|src/isonim_tui/text/width.nim|ISONIM_TUI_SRC|`import isonim_tui/text/width` -- the grapheme segmenter -- in src/frontend/viewmodel/editor/{selection,selection_ops,wrap}.nim, so every editor-model build and the editor import-closure gate need it'
 	'codetracer-trace-format-nim|src/codetracer_ct_print_lib.nim|CODETRACER_TRACE_FORMAT_NIM_SRC|`ct print` (src/ct/cli/print_trace.nim) imports codetracer_trace_writer/* and codetracer_ct_print_lib'
 	'codetracer-trace-format|codetracer_trace_types/Cargo.toml||every `path = "../../../codetracer-trace-format/..."` dependency in src/db-backend/Cargo.toml resolves through it (grep -c that path in the manifest for how many); cargo cannot even parse the manifest without them'
@@ -294,9 +304,12 @@ advisory_siblings=(
 	# -- imports them, and nothing in this repo imports that half.
 	"nim-shm-queue|src/shm_queue.nim|SHM_QUEUE_SRC|io-mon's capture half (\`io_mon/writer\`, the \`io_mon\` umbrella) imports \`shm_queue\`; \`ct\`'s \`io_mon/depfile\` closure does not, so this matters only to code that imports that half"
 	"nim-shm-gset|src/shm_gset.nim|SHM_GSET_SRC|io-mon's capture half (\`io_mon/writer\`, \`io_mon/fs_snoop\`) imports \`shm_gset/transport\` (the symptom config.nims documents); \`ct\`'s \`io_mon/depfile\` closure does not"
-	"isonim-gpui|src||src/Tuprules.tup:74 puts it on the Nim search path"
-	"nim-termctl|src||src/Tuprules.tup:75 puts it on the Nim search path"
-	"nim-pty|src||src/Tuprules.tup:76 puts it on the Nim search path"
+	# Not in `build-once`'s import closure either: only the GPUI/TUI frontends
+	# and their tests import these (see the tier notes above). Probe a module
+	# file, so a checkout that is only an empty `src` is not a pass.
+	"isonim-gpui|src/isonim_gpui/renderer.nim||\`import isonim_gpui/...\` in src/frontend/gpui/main.nim and the rest of src/frontend/gpui/, and in src/frontend/view_vocabulary/gpui_binding.nim, so \`just build-gpui\` needs it; \`just test-plat37-shim-gate\` reads its tools/ and refuses without it"
+	"nim-termctl|src/nim_termctl.nim||\`import nim_termctl\` in src/frontend/tui/host/terminal_driver.nim and resize.nim (and isonim-tui's \`isonim_tui\` umbrella), so \`just build-tui\` needs it"
+	"nim-pty|src/nim_pty.nim||\`import nim_pty\` in src/frontend/tui/tests/test_terminal_driver_start.nim, test_focus_reporting.nim and src/frontend/tui/benchmarks/tui_benchmarks.nim, so \`just test-tui\` and \`just build-tui-benchmarks\` need it"
 )
 
 if [ -n "${CODETRACER_STRICT_SIBLING_CHECK:-}" ]; then

@@ -1022,6 +1022,99 @@ run_sibling_probe_alignment_check() {
 }
 
 # ---------------------------------------------------------------------------
+# (K) Each advisory sibling's "what breaks" must name a file that imports it.
+# ---------------------------------------------------------------------------
+#
+# The advisory rows of `scripts/require-siblings.sh` are what a developer reads
+# when a sibling is missing, so they must say who will fail. They did not: the
+# isonim-gpui / nim-termctl / nim-pty rows said only "src/Tuprules.tup puts it
+# on the Nim search path", and the tier notes said all three were no longer
+# cloned -- "nothing declares them, nothing imports them" -- while repro.lock
+# solved all three (so CI clones them), src/frontend/gpui/ and
+# src/frontend/tui/ imported them, and the plat37 shim gate refused without
+# isonim-gpui (codetracer-pm issue 2026-11-01-require-siblings-says-isonim-
+# gpui-is-no-longer-cloned-in-ci).
+#
+# So, per advisory row: derive the Nim module from the probe (`src/<mod>.nim`
+# or `src/<mod>/...`; a bare `src` probe names no module and fails, since it
+# also passes for a checkout missing every file), find importers under src/,
+# and when there are any require the reason text to cite one of them by its
+# repo-relative path. A sibling nothing imports passes (nim-shm-queue,
+# nim-shm-gset). Then refuse the stale "nothing declares/imports them" claim
+# while any advisory sibling is lock-declared or imported: a general
+# negated-claim detector is not tractable over prose, and these are the exact
+# words that were wrong.
+run_advisory_sibling_importer_check() {
+	local rs="$REPO_ROOT/scripts/require-siblings.sh"
+	local rows row name probe reason mod importers f cited lock_listed
+	local contradicted=""
+
+	# The array literal alone, evaluated in a child shell: the script itself
+	# is not sourced (it would run the check).
+	rows="$(bash -c 'eval "$(sed -n "/^advisory_siblings=(/,/^)/p" "$1")"
+		printf "%s\n" "${advisory_siblings[@]}"' _ "$rs")"
+	if [ -z "$rows" ]; then
+		fail "(K) advisory_siblings parsed from scripts/require-siblings.sh" \
+			"no rows found"
+		return
+	fi
+
+	lock_listed="$(cd "$REPO_ROOT" && bash ci/repro-lock-build-input-siblings.sh 2>/dev/null | tr ',' '\n')"
+
+	while IFS= read -r row; do
+		[ -n "$row" ] || continue
+		IFS='|' read -r name probe _ reason <<<"$row"
+		case $'\n'"$lock_listed"$'\n' in
+		*$'\n'"$name"$'\n'*) contradicted="$contradicted $name(repro.lock)" ;;
+		esac
+		mod="$(printf '%s' "$probe" | sed -nE 's#^src/([A-Za-z0-9_]+)(\.nim|/.*)$#\1#p')"
+		if [ -z "$mod" ]; then
+			fail "(K) $name: probe names the Nim module the sibling provides" \
+				"probe '$probe' is not src/<module>.nim or src/<module>/...; it cannot tell a missing module from a present one"
+			continue
+		fi
+
+		# `import <mod>`, `import <mod>/...`, `from <mod>[/...] import`, also
+		# as a later item of a one-line import list.
+		importers="$(grep -rlE "^[[:space:]]*(import|from)[[:space:]]+([^#]*[,[[:space:]])?${mod}([/[:space:],]|\$)" \
+			--include='*.nim' "$REPO_ROOT/src" 2>/dev/null |
+			sed "s#^$REPO_ROOT/##" | LC_ALL=C sort)"
+
+		if [ -z "$importers" ]; then
+			pass "(K) $name: nothing under src/ imports $mod, so no importer to cite"
+			continue
+		fi
+		contradicted="$contradicted $name(imported)"
+
+		cited=""
+		while IFS= read -r f; do
+			case "$reason" in
+			*"$f"*)
+				cited="$f"
+				break
+				;;
+			esac
+		done <<<"$importers"
+		if [ -n "$cited" ]; then
+			pass "(K) $name: reason cites a real importer of $mod ($cited)"
+		else
+			fail "(K) $name: reason cites a real importer of $mod" \
+				"$(printf 'reason:    %s\nimporters: %s' "$reason" \
+					"$(printf '%s' "$importers" | head -n 5 | tr '\n' ' ')")"
+		fi
+	done <<<"$rows"
+
+	local stale
+	stale="$(grep -niE 'nothing (declares|imports) (them|it)' "$rs")"
+	if [ -n "$stale" ] && [ -n "$contradicted" ]; then
+		fail "(K) require-siblings.sh does not call lock-declared or imported siblings undeclared/unimported" \
+			"$(printf '%s\ncontradicted by:%s' "$stale" "$contradicted")"
+	else
+		pass "(K) require-siblings.sh does not call lock-declared or imported siblings undeclared/unimported"
+	fi
+}
+
+# ---------------------------------------------------------------------------
 
 echo "Build-alignment harness: executing scripts/build.sh and scripts/build-once.sh"
 echo "under recording stubs, and comparing their traces."
@@ -1034,6 +1127,7 @@ run_scenario windows MINGW64_NT-10.0-22631 repro src/build-debug-repro
 run_port_busy_scenario
 run_nim_flag_alignment_check
 run_sibling_probe_alignment_check
+run_advisory_sibling_importer_check
 
 printf '\n%d checks, %d failure(s)\n' "$checks" "$failures"
 if [ "$failures" -ne 0 ]; then
