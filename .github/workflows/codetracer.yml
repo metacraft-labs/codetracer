@@ -1088,6 +1088,18 @@ jobs:
           sibling-strategy: repro-lock
           repro-version: v0.2.17
           gh-token: ${{ steps.ci_token.outputs.token }}
+          # THIS LIST HOLDS ONLY WHAT THE LOCK PATH WILL NOT CLONE. `repro develop
+          # --all` materialises what repro.lock pins, but it skips a row a recipe
+          # pins (flake.nix names it by commit), and repro.nim imports its Windows
+          # contributions from `../reprobuild-packages` when the environment
+          # activates. Naming that one source hands it to clone-siblings at the
+          # committed lock revision. Naming a row the bulk develop does clone gains
+          # nothing: it is dropped as redundant, with a warning. It stays a `|`
+          # block because ci/verdict/workspace-lock-freshness.sh reads the declared
+          # set from block entries, and an inline value would drop this name from
+          # it.
+          siblings: |
+            reprobuild-packages
 
       - name: Upload env.ps1 component decomposition
         # env.ps1 writes a per-component breakdown of the bootstrap -- wall
@@ -7376,9 +7388,9 @@ jobs:
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=f52b20cced5f016d95c99ebcfd15264dffff8079
             codetracer-trace-format-nim=d655392565ee57e398bd29e755472bf14f35d871
-            io-mon=6d07c699e5a16a8a7f40afb88bb7c356e535ddd6
-            nim-shm-queue=5a8e43b52fa202859658692c9f8432967f3971ea
-            nim-shm-gset=360bfc15cadab1ff583e6d1cbc20b389d5d6825f
+            io-mon=327e7ab90e8efa48cff58de799212665515914af
+            nim-shm-queue=91451f2250beb89d1d221f0a77be0841c19b182e
+            nim-shm-gset=fb981c7f186a9507c974b7de8871fc74d6308eae
             nim-stackable-hooks=dev
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
@@ -7685,9 +7697,9 @@ jobs:
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=f52b20cced5f016d95c99ebcfd15264dffff8079
             codetracer-trace-format-nim=d655392565ee57e398bd29e755472bf14f35d871
-            io-mon=6d07c699e5a16a8a7f40afb88bb7c356e535ddd6
-            nim-shm-queue=5a8e43b52fa202859658692c9f8432967f3971ea
-            nim-shm-gset=360bfc15cadab1ff583e6d1cbc20b389d5d6825f
+            io-mon=327e7ab90e8efa48cff58de799212665515914af
+            nim-shm-queue=91451f2250beb89d1d221f0a77be0841c19b182e
+            nim-shm-gset=fb981c7f186a9507c974b7de8871fc74d6308eae
             nim-stackable-hooks=dev
             codetracer-native-recorder=441db7efac736c1373dd722432ef4f22cab96d91
             codetracer-js-recorder=dev

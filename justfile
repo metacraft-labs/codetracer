@@ -1465,7 +1465,7 @@ test-launcher-recorder-e2e recorder="codetracer-python-recorder" lang="python":
 # name the workflow can emit, and that the primary `actions/checkout` still
 # pins the repo under test to the caller's `github.sha` expression -- since
 # LRC-6 dropped the `*-ref` inputs, that one line IS the repo-under-test
-# guarantee.  Thirteen mutations of real wiring, each of which must be
+# guarantee.  Fourteen mutations of real wiring, each of which must be
 # rejected, plus a positive control, keep the checker itself honest.
 # Stock bash: no Nix, no dev shell, no network.
 # See ci/test/launcher-recorder-e2e-workflow-test.sh.

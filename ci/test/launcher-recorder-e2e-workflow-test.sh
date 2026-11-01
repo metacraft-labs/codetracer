@@ -95,8 +95,10 @@
 #      `codetracer` itself, which is never its own sibling.
 #   9. Every `setup-dev-env` / `clone-siblings` call site in this repo passes an
 #      explicit `siblings:` input, so adding the clone-list changed no existing
-#      job.  The day one stops, this fails and the change is deliberate.
-#  10. THE CHECKER'S OWN MUTATION TEST: thirteen mutations of real files, each of
+#      job.  The day one stops, this fails and the change is deliberate.  A call
+#      site that forces `sibling-strategy: repro-lock` must also name every
+#      sibling source `repro.nim` imports by relative path.
+#  10. THE CHECKER'S OWN MUTATION TEST: fourteen mutations of real files, each of
 #      which must be REJECTED, plus a positive control on the unmutated copies
 #      so a checker that always fails cannot pass this section.
 #
@@ -853,9 +855,138 @@ if [ "${#sibless[@]}" -eq 0 ]; then
 	ok "all $n_call_sites setup-dev-env / clone-siblings call sites pass an explicit siblings: subset"
 else
 	fail "every setup-dev-env / clone-siblings call site passes an explicit siblings: subset" \
-		"these would silently fall back to .github/sibling-repos, cloning five repos and" \
+		"these would silently fall back to .github/sibling-repos, cloning every repo on it and" \
 		"requiring a workspace-lock entry for each -- make that switch deliberately:" \
 		"${sibless[@]}"
+fi
+
+# A call site that forces `sibling-strategy: repro-lock` leaves the siblings to
+# the lock, and its `siblings:` list shrinks to what the lock path will not
+# materialise.  `repro develop --all` skips a row a recipe pins, so a sibling
+# source that `repro.nim` imports by relative path has to be on that list:
+# setup-dev-env hands it to clone-siblings at the committed lock revision.  A
+# list that omits one passes the explicit-subset check above, and the job then
+# dies at recipe activation on a missing import.  So the names are DERIVED from
+# the recipe, never restated here, and finding none is a refusal rather than a
+# pass.
+readonly REPRO_RECIPE="$REPO_ROOT/repro.nim"
+
+# repro_nim_sibling_sources RECIPE -> the sibling names RECIPE imports by
+# relative path, one per line.  Anchored at the start of the line so a
+# commented-out import does not count.
+repro_nim_sibling_sources() {
+	strip_cr "$1" 2>/dev/null |
+		sed -nE 's/^[[:space:]]*import[[:space:]]+"?\.\.\/([^/"[:space:]]+)\/.*$/\1/p' |
+		sort -u
+}
+
+# repro_lock_call_sites FILE -> `<line of with:><TAB><declared names>` for each
+# `with:` block that forces repro-lock and declares `siblings:`.  An entry is
+# reduced to its bare repo name the way setup-dev-env's reconcile step reduces
+# it (`owner/name`, `name=ref`, `name!=ref`), and an inline value and a block
+# scalar read alike.  Keys are told from scalar lines by indentation alone.
+repro_lock_call_sites() {
+	strip_cr "$1" | awk '
+		function indent_of(s) { match(s, /^ */); return RLENGTH }
+		function add_entries(text,    parts, n, i, t) {
+			sub(/#.*/, "", text)
+			n = split(text, parts, /[ \t]+/)
+			for (i = 1; i <= n; i++) {
+				t = parts[i]
+				if (t == "") continue
+				sub(/=.*/, "", t)
+				sub(/!$/, "", t)
+				sub(/.*\//, "", t)
+				names = names " " t
+			}
+		}
+		function close_with() {
+			if (with_line && strategy == "repro-lock" && has_siblings)
+				print with_line "\t" names
+			with_line = 0
+		}
+		{
+			if (with_line) {
+				if ($0 ~ /^ *(#.*)?$/) next
+				ind = indent_of($0)
+				if (ind <= with_indent) {
+					close_with()
+				} else {
+					if (key_indent < 0) key_indent = ind
+					if (ind > key_indent) {
+						if (in_siblings) add_entries($0)
+						next
+					}
+					key = $0
+					sub(/^ */, "", key)
+					value = key
+					sub(/:.*$/, "", key)
+					sub(/^[^:]*:[ \t]*/, "", value)
+					sub(/(^|[ \t]+)#.*$/, "", value)
+					sub(/[ \t]+$/, "", value)
+					gsub(/["\047]/, "", value)
+					in_siblings = 0
+					if (key == "sibling-strategy") strategy = value
+					if (key == "siblings") {
+						has_siblings = 1
+						if (value ~ /^[|>][-+]?$/ || value == "") in_siblings = 1
+						else add_entries(value)
+					}
+					next
+				}
+			}
+			if ($0 ~ /^ *with:[ \t]*$/) {
+				with_line = NR
+				with_indent = indent_of($0)
+				key_indent = -1
+				strategy = ""
+				has_siblings = 0
+				in_siblings = 0
+				names = ""
+			}
+		}
+		END { close_with() }
+	'
+}
+
+# check_repro_lock_sources RECIPE FILE... -> prints one violation per line; exit
+# 1 when there is at least one, or when there was nothing to check.  Factored so
+# M14 can point it at mutated copies.
+check_repro_lock_sources() {
+	local recipe="$1" f sources src line names checked=0 bad=0
+	shift
+	sources="$(repro_nim_sibling_sources "$recipe")"
+	if [ -z "$sources" ]; then
+		echo "$recipe yielded no \`import \"../<name>/...\"\`, so this check proves nothing"
+		return 1
+	fi
+	for f in "$@"; do
+		while IFS=$'\t' read -r line names; do
+			[ -z "$line" ] && continue
+			checked=$((checked + 1))
+			for src in $sources; do
+				case " $names " in
+				*" $src "*) ;;
+				*)
+					echo "$f:$line forces repro-lock and its siblings: omits '$src', which repro.nim imports; bulk develop skips a recipe-pinned row, so the job fails at recipe activation"
+					bad=1
+					;;
+				esac
+			done
+		done < <(repro_lock_call_sites "$f")
+	done
+	if [ "$checked" -eq 0 ]; then
+		echo "no call site that forces sibling-strategy: repro-lock and declares siblings: was found, so this check proves nothing"
+		return 1
+	fi
+	return "$bad"
+}
+
+if rl_out="$(check_repro_lock_sources "$REPRO_RECIPE" "${CALL_SITE_FILES[@]}")"; then
+	ok "every repro-lock call site names the sibling sources repro.nim imports ($(repro_nim_sibling_sources "$REPRO_RECIPE" | tr '\n' ' ' | sed 's/ *$//'))"
+else
+	mapfile -t rl_lines <<<"$rl_out"
+	fail "every repro-lock call site names the sibling sources repro.nim imports" "${rl_lines[@]}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -1821,6 +1952,21 @@ cp "$CLONE_LIST" "$MUT/sibling-repos"
 
 mut_bad=()
 
+# sed_in_place FILE SED_ARG... -> applies the edit to FILE.  Not `sed -i`: GNU
+# reads an optional suffix attached to that flag and BSD requires one as the next
+# argument, so one spelling cannot serve both, and BSD would take the script for
+# the suffix.  Writing to a sibling file and moving it back works on both.
+sed_in_place() {
+	local file="$1"
+	shift
+	sed "$@" "$file" >"$file.new" && mv "$file.new" "$file"
+}
+
+# A newline in a sed replacement, in the POSIX spelling.  `\n` is a GNU extension
+# that BSD sed turns into a literal `n`.
+# https://pubs.opengroup.org/onlinepubs/9799919799/utilities/sed.html
+readonly SED_NL=$'\\\n'
+
 # Positive control.
 if check_contract "$MUT/reusable.yml" "$MUT/caller.yml" "control" >/dev/null 2>&1 &&
 	check_clone_list "$MUT/sibling-repos" >/dev/null 2>&1 &&
@@ -1836,14 +1982,14 @@ fi
 
 # M1 -- an undeclared `with:` key.
 cp "$DESKTOP_EDGE" "$MUT/m1.yml"
-sed -i 's/^      recorder-lang: /      bogus-input: x\n      recorder-lang: /' "$MUT/m1.yml"
-grep -q 'bogus-input' "$MUT/m1.yml" || mut_bad+=("M1 was not applied (the sed matched nothing)")
+sed_in_place "$MUT/m1.yml" "s/^      recorder-lang: /      bogus-input: x${SED_NL}      recorder-lang: /"
+grep -q '^      bogus-input: x$' "$MUT/m1.yml" || mut_bad+=("M1 was not applied (the sed matched nothing)")
 check_contract "$MUT/reusable.yml" "$MUT/m1.yml" "M1" >/dev/null 2>&1 &&
 	mut_bad+=("M1 SURVIVED: an undeclared 'with:' key was accepted")
 
 # M2 -- a required input left unpassed.
 cp "$DESKTOP_EDGE" "$MUT/m2.yml"
-sed -i '/^      recorder-lang: /d' "$MUT/m2.yml"
+sed_in_place "$MUT/m2.yml" '/^      recorder-lang: /d'
 grep -q '^      recorder-lang:' "$MUT/m2.yml" && mut_bad+=("M2 was not applied")
 check_contract "$MUT/reusable.yml" "$MUT/m2.yml" "M2" >/dev/null 2>&1 &&
 	mut_bad+=("M2 SURVIVED: a required input was allowed to go unpassed")
@@ -1851,14 +1997,14 @@ check_contract "$MUT/reusable.yml" "$MUT/m2.yml" "M2" >/dev/null 2>&1 &&
 # M3 -- THE defect actionlint misses: a misspelling that is simultaneously an
 # unknown key and a required input left unpassed.
 cp "$DESKTOP_EDGE" "$MUT/m3.yml"
-sed -i 's/^      recorder-repo: /      recorder-repos: /' "$MUT/m3.yml"
+sed_in_place "$MUT/m3.yml" 's/^      recorder-repo: /      recorder-repos: /'
 grep -q '^      recorder-repos:' "$MUT/m3.yml" || mut_bad+=("M3 was not applied")
 check_contract "$MUT/reusable.yml" "$MUT/m3.yml" "M3" >/dev/null 2>&1 &&
 	mut_bad+=("M3 SURVIVED: a misspelled input key was accepted")
 
 # M4 -- `secrets: inherit` dropped.
 cp "$DESKTOP_EDGE" "$MUT/m4.yml"
-sed -i '/^    secrets: inherit$/d' "$MUT/m4.yml"
+sed_in_place "$MUT/m4.yml" '/^    secrets: inherit$/d'
 grep -q '^    secrets: inherit$' "$MUT/m4.yml" && mut_bad+=("M4 was not applied")
 check_contract "$MUT/reusable.yml" "$MUT/m4.yml" "M4" >/dev/null 2>&1 &&
 	mut_bad+=("M4 SURVIVED: a caller that inherits no secrets was accepted")
@@ -1877,10 +2023,12 @@ awk '
 	{ print }
 ' "$MUT/reusable.yml" >"$MUT/m5-reusable.yml"
 cp "$DESKTOP_EDGE" "$MUT/m5.yml"
-sed -i 's/^      recorder-lang: /      launcher-ref: dev\n      recorder-lang: /' "$MUT/m5.yml"
+sed_in_place "$MUT/m5.yml" "s/^      recorder-lang: /      launcher-ref: dev${SED_NL}      recorder-lang: /"
 if ! grep -q '^launcher-ref' <<<"$(wf_inputs "$MUT/m5-reusable.yml")"; then
 	mut_bad+=("M5 was not applied (the reintroduced input is not parsed as declared)")
 fi
+grep -q '^      launcher-ref: dev$' "$MUT/m5.yml" ||
+	mut_bad+=("M5 was not applied (the caller does not pass the reintroduced input)")
 check_contract "$MUT/m5-reusable.yml" "$MUT/m5.yml" "M5" >/dev/null 2>&1 &&
 	mut_bad+=("M5 SURVIVED: a re-introduced '*-ref' input was accepted")
 
@@ -1996,7 +2144,7 @@ else
 fi
 
 # M12 -- an unrelated call site stops passing `siblings:`, which would silently
-# switch it onto the whole five-repo clone-list.  Through check_call_sites.
+# switch it onto the whole clone-list.  Through check_call_sites.
 cp "$REPO_ROOT/.github/workflows/codetracer.yml" "$MUT/m12.yml" 2>/dev/null || true
 if [ -f "$MUT/m12.yml" ]; then
 	awk '
@@ -2039,10 +2187,51 @@ else
 		mut_bad+=("M13 SURVIVED: the planner emitted '<name>=<ref>' entries and the explicit-ref rule did not fire (got: ${m13_out:-<nothing>})")
 fi
 
-if [ "${#mut_bad[@]}" -eq 0 ]; then
-	ok "M1-M13: all thirteen mutations of real wiring are rejected"
+# M14 -- a repro-lock call site's `siblings:` list loses a source repro.nim
+# imports.  The entry is swapped for another name rather than deleted, so the
+# list stays explicit: check_call_sites must still accept the mutant, which is
+# the gap this rule closes, and check_repro_lock_sources must reject it by name.
+# The real files are the control; the victim comes from the recipe.  The last
+# three arms prove the rule is not vacuous: a recipe with no such import and a
+# file with no such call site are refused, and a further import in the recipe
+# is demanded, so the required set really is derived.
+cp "$REPO_ROOT/.github/workflows/codetracer.yml" "$MUT/m14.yml" 2>/dev/null || true
+m14_victim="$(repro_nim_sibling_sources "$REPRO_RECIPE" | head -n 1)"
+if [ ! -f "$MUT/m14.yml" ] || [ -z "$m14_victim" ]; then
+	mut_bad+=("M14 could not be built: no codetracer.yml copy, or repro.nim imports no sibling source")
+elif ! check_repro_lock_sources "$REPRO_RECIPE" "$MUT/m14.yml" >/dev/null 2>&1; then
+	mut_bad+=("M14 control failed: the unmutated codetracer.yml was rejected, so a rejection below proves nothing")
 else
-	fail "M1-M13: all thirteen mutations of real wiring are rejected" "${mut_bad[@]}"
+	sed "s/^\( *\)${m14_victim}\$/\1codetracer-launcher/" "$MUT/m14.yml" >"$MUT/m14-mut.yml"
+	if cmp -s "$MUT/m14.yml" "$MUT/m14-mut.yml"; then
+		mut_bad+=("M14 was not applied (no '$m14_victim' siblings: entry found to replace)")
+	else
+		check_call_sites "$MUT/m14-mut.yml" >/dev/null 2>&1 ||
+			mut_bad+=("M14 was not the intended defect: the explicit-subset check rejected the mutant too")
+		if m14_out="$(check_repro_lock_sources "$REPRO_RECIPE" "$MUT/m14-mut.yml" 2>&1)" ||
+			! grep -qF "omits '$m14_victim'" <<<"$m14_out"; then
+			mut_bad+=("M14 SURVIVED: a repro-lock list omitting '$m14_victim' was accepted (got: ${m14_out:-<nothing>})")
+		fi
+	fi
+	: >"$MUT/m14-no-imports.nim"
+	check_repro_lock_sources "$MUT/m14-no-imports.nim" "$MUT/m14.yml" >/dev/null 2>&1 &&
+		mut_bad+=("M14 SURVIVED: a recipe with no relative import passed vacuously")
+	check_repro_lock_sources "$REPRO_RECIPE" "$MUT/reusable.yml" >/dev/null 2>&1 &&
+		mut_bad+=("M14 SURVIVED: a file with no repro-lock call site passed vacuously")
+	{
+		strip_cr "$REPRO_RECIPE"
+		printf '  import "../m14-new-source/repro"\n'
+	} >"$MUT/m14-repro.nim"
+	if m14_out="$(check_repro_lock_sources "$MUT/m14-repro.nim" "$MUT/m14.yml" 2>&1)" ||
+		! grep -qF "omits 'm14-new-source'" <<<"$m14_out"; then
+		mut_bad+=("M14 SURVIVED: a new import in the recipe was not demanded of the call site (got: ${m14_out:-<nothing>})")
+	fi
+fi
+
+if [ "${#mut_bad[@]}" -eq 0 ]; then
+	ok "M1-M14: all fourteen mutations of real wiring are rejected"
+else
+	fail "M1-M14: all fourteen mutations of real wiring are rejected" "${mut_bad[@]}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -2050,7 +2239,7 @@ fi
 # reporting success on fewer checks than it claims.
 # ---------------------------------------------------------------------------
 echo
-readonly EXPECTED_ASSERTIONS=44
+readonly EXPECTED_ASSERTIONS=45
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))
