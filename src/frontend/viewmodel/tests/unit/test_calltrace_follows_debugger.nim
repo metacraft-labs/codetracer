@@ -44,12 +44,22 @@ proc setup(follow: bool): (ReplayDataStore, CalltraceVM) =
   vm.setViewport(Viewport(rows: 10, firstRow: 0))
   (store, vm)
 
-proc stopAt(store: ReplayDataStore; ticks: uint64; currentLine: int64) =
-  ## A move: the debugger is at a new stop, and the engine names the line of
-  ## the call it is in.
+proc moveTo(store: ReplayDataStore; ticks: uint64) =
+  ## A move: the debugger is at a new stop. No section has answered for it
+  ## yet.
   store.debugger.val = DebuggerState(rrTicks: ticks,
     location: Location(file: "/src/main.cairo", line: int(ticks)))
+
+proc answer(store: ReplayDataStore; currentLine: int64) =
+  ## A section answering at the current stop, as `applyCalltraceResponse`
+  ## records one: the engine's `currentCallLineIndex`, tagged with the stop.
   store.calltrace.currentLineIndex.val = currentLine
+  store.calltrace.answeredStop.val = stopIdentityOf(store.debugger.val)
+
+proc stopAt(store: ReplayDataStore; ticks: uint64; currentLine: int64) =
+  ## A move, and the section's answer for it.
+  store.moveTo(ticks)
+  store.answer(currentLine)
 
 suite "after a jump the call trace shows the current call":
 
@@ -71,7 +81,22 @@ suite "after a jump the call trace shows the current call":
     let (store, vm) = setup(follow = true)
     store.stopAt(15904, 250)
     store.updateCalltraceSection(section(240, 30), 240'i64, Total)
-    store.calltrace.currentLineIndex.val = 250
+    store.answer(250)
+    check vm.selectedEntry.val == some(250'i64)
+
+  test "the previous stop's answer is not followed for the next stop":
+    # The race an Event Log jump hit: the landing marked line 1, the jump
+    # moved the debugger, and the store still held the landing's answer.
+    let (store, vm) = setup(follow = true)
+    store.stopAt(20, 1)
+    check vm.selectedEntry.val == some(1'i64)
+    store.moveTo(15904)                         # no answer for it yet
+    check vm.selectedEntry.val == some(1'i64)   # nothing re-marked from stale data
+    check vm.viewport.val.firstRow == 0
+    store.answer(250)                           # the answer for the jump
+    check vm.viewport.val.firstRow == 245       # and it is followed
+    store.updateCalltraceSection(section(240, 30), 240'i64, Total)
+    store.answer(250)
     check vm.selectedEntry.val == some(250'i64)
 
   test "control: without the follow, a jump moves neither the pane nor the mark":

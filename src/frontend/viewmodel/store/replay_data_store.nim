@@ -124,6 +124,14 @@ type
       ## PLAT-51: the global call-line index of the call the debugger is in
       ## (the engine's `currentCallLineIndex`), -1 when unknown — the row a
       ## list pane's scrollbar scrubber marks (Scrollbar-Scrubbers.md §3.5).
+    answeredStop*: Signal[string]
+      ## The stop (`stopIdentityOf(debugger)`) the store was at when the
+      ## section held arrived, "" before any. The engine answers in order, so
+      ## an answer that arrives after a move describes the new position and
+      ## one that arrives before it describes the old: `currentLineIndex` is
+      ## the current call's line only while this equals the current stop. A
+      ## pane that follows the debugger's call reads it so it never marks the
+      ## PREVIOUS stop's call for the new one.
     finished*: Signal[bool]
     loadingState*: Signal[LoadingState]
 
@@ -1043,6 +1051,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
         startLineIndex: createSignal(0'i64),
         totalCallsCount: createSignal(0'u64),
         currentLineIndex: createSignal(-1'i64),
+        answeredStop: createSignal(""),
         finished: createSignal(false),
         loadingState: createSignal(lsIdle),
       ),
@@ -2777,6 +2786,7 @@ proc applyCalltraceResponse*(store: ReplayDataStore; body: JsonNode): int =
   store.calltrace.currentLineIndex.val =
     if not current.isNil and current.kind == JInt: current.getBiggestInt.int64
     else: -1'i64
+  store.calltrace.answeredStop.val = stopIdentityOf(store.debugger.val)
   lines.len
 
 proc stepDirectionToDapCommand*(direction: StepDirection): string =

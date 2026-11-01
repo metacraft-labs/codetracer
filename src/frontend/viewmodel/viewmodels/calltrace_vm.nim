@@ -1151,15 +1151,26 @@ proc createCalltraceVM*(store: ReplayDataStore;
     # engine's `currentCallLineIndex`, once per stop; the auto-load effect asks
     # for the section around it, and when that answer holds the line this
     # effect runs again and selects it.
+    #
+    # ONLY AN ANSWER FOR THIS STOP IS FOLLOWED. A move changes the debugger
+    # before the section re-asked for it arrives, and in between the store
+    # still holds the previous stop's `currentLineIndex`; following that
+    # marked the PREVIOUS call and then ignored the right answer as "this
+    # stop is already followed" (an Event Log jump to a failed call left the
+    # landing's frame marked). `answeredStop` says which stop the held
+    # section answered.
     var followedStop = ""
     var revealedStop = ""
     createEffect proc() =
       let lines = store.calltrace.lines.val
       let start = store.calltrace.startLineIndex.val
       let current = store.calltrace.currentLineIndex.val
+      let answered = store.calltrace.answeredStop.val
       let stop = stopIdentityOf(store.debugger.val)
       untrack(proc() =
         if not vm.followsDebuggerCall or stop == followedStop or current < 0:
+          return
+        if answered != stop:
           return
         let at = current - start
         if at < 0 or at >= lines.len.int64:
