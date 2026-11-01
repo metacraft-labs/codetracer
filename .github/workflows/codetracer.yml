@@ -1688,6 +1688,11 @@ jobs:
       - name: Rust built in the dev shell unwinds its panics
         run: nix develop .#devShells.x86_64-linux.default --command just test-dev-shell-rust-unwinds
 
+      # PYTHONPATH in the dev shells names the declared Python minor version
+      # only: the header of ci/test/dev-shell-pythonpath-test.sh.
+      - name: The dev shells' PYTHONPATH carries the declared Python only
+        run: nix develop .#devShells.x86_64-linux.default --command just test-dev-shell-pythonpath
+
       # build-once.sh sources the cached dev-shell profile with THIS repository
       # as its working directory: scripts/test-build-once-profile-cwd.sh.
       - name: build-once prepares this checkout, whatever directory it runs from

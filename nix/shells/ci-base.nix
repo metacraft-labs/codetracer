@@ -308,8 +308,8 @@ with pkgs;
     # `pythonEnv.pythonPackages` settles the version, but they still propagate
     # the bare pinned interpreter, which has no recorder. Ahead of the env on
     # PATH, that same-version interpreter is the `python3` a shell without the
-    # venv runs. In `devShells.default`, where PYTHONPATH holds only 3.13 paths,
-    # `ct record x.py` then died with
+    # venv runs. In `devShells.default`, whose PYTHONPATH then held only 3.13
+    # paths (see `binariesOnly` in ../python.nix), `ct record x.py` died with
     #
     #   cannot import codetracer_python_recorder: ModuleNotFoundError
     #
@@ -323,9 +323,11 @@ with pkgs;
     # Attic cache push + GitHub CLI + AWS artifact upload — used by
     # several CI steps (attic push at the end of a successful nix
     # build, gh for dispatch/observe, awscli2 for artifact storage).
+    # awscli2 is built for nixpkgs' default Python, not the pin, so only its
+    # executables go on PATH; see `binariesOnly` in ../python.nix.
     attic-client
     gh
-    awscli2
+    (pythonEnv.binariesOnly "awscli2-bin" [ awscli2 ])
 
     # Cloudflare Pages deploy. ONE wrangler, TWO Pages projects — `dev` and
     # `stable` each grew this entry independently, with the same package and

@@ -70,6 +70,14 @@ test-dev-shell-writes-nothing-elsewhere:
 test-dev-shell-rust-unwinds:
   bash ci/test/dev-shell-rust-unwinds-test.sh
 
+# Assert that in the default and the `ci` dev shell PYTHONPATH carries
+# site-packages of the declared Python minor version only, so the pinned
+# interpreter imports no package built for another one. Runs `nix develop`, so
+# it is slow and not part of the in-shell suites. See the header of
+# ci/test/dev-shell-pythonpath-test.sh.
+test-dev-shell-pythonpath:
+  bash ci/test/dev-shell-pythonpath-test.sh
+
 # Assert that build-once.sh sources the cached dev-shell profile (and so runs
 # its shellHook) inside this repository, not in the directory it is invoked
 # from. Runs the real script against a stub profile; no toolchain, a second.

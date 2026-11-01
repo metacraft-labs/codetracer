@@ -40,6 +40,11 @@ let
   };
   ourPkgs = self'.packages;
   preCommit = config.pre-commit;
+  pythonEnv = import ../python.nix { inherit pkgs inputs; };
+  # The hooks that are Python packages are built for nixpkgs' default Python,
+  # not the pin, like pre-commit itself; see the package list below.
+  preCommitPythonHooks = builtins.filter (p: p ? pythonModule) preCommit.settings.enabledPackages;
+  preCommitOtherHooks = builtins.filter (p: !(p ? pythonModule)) preCommit.settings.enabledPackages;
   toolchainsPkgs = inputs'."codetracer-toolchains".packages;
 in
 with pkgs;
@@ -139,7 +144,9 @@ mkShell {
       # AppImage build (local release artifacts).
       inputs'.appimage-channel.legacyPackages.appimagekit
       appimage-run
-      pax-utils
+      # lddtree is built for nixpkgs' default Python; see `binariesOnly` in
+      # ../python.nix.
+      (pythonEnv.binariesOnly "pax-utils-bin" [ pax-utils ])
     ]
     ++ pkgs.lib.optionals stdenv.isDarwin [
       # macOS DMG build (local release artefacts).
@@ -148,8 +155,16 @@ mkShell {
     # Pre-commit hooks (dev-only — CI runs `pre-commit run` explicitly
     # against the staged diff, it doesn't need the hook scripts staged
     # into .git/hooks).
-    ++ [ preCommit.settings.package ]
-    ++ preCommit.settings.enabledPackages;
+    #
+    # pre-commit and its Python hooks are built for nixpkgs' default Python,
+    # not the pin. Listed directly, their interpreter's setup hook replaced the
+    # pinned one's and PYTHONPATH held 3.13 site-packages only, which the
+    # pinned interpreter then imported. So only their executables go on PATH;
+    # see `binariesOnly` in ../python.nix.
+    ++ [
+      (pythonEnv.binariesOnly "pre-commit-bin" ([ preCommit.settings.package ] ++ preCommitPythonHooks))
+    ]
+    ++ preCommitOtherHooks;
 
   # Compose: build-critical exports from ci-base, then dev-only tail. The tail
   # runs with its stdout sent to stderr, for the reason ci-base.nix gives at

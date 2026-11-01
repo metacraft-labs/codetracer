@@ -89,4 +89,32 @@ in
   # interpreter. Replaces `mkCodetracerPackages pkgs pkgs.python312`, which was
   # this repo asserting a version at the repo that owns it.
   recorderPackages = inputs."codetracer-python-recorder".lib.mkCodetracerPackagesDefault pkgs;
+
+  # Put tools that are built for ANOTHER interpreter (pre-commit and its
+  # Python hooks, awscli2, pax-utils' lddtree: nixpkgs' default Python, 3.13
+  # on the current pin) on a dev shell's PATH without letting that interpreter
+  # into the shell.
+  #
+  # Listed directly in `packages`, such a tool propagates its interpreter, and
+  # every interpreter's nixpkgs setup hook defines a function named
+  # `addPythonPath` that adds `lib/python3.N/site-packages` of ITS version for
+  # every input of the shell. The definition sourced last replaces the others,
+  # so one 3.13 tool can turn PYTHONPATH into 3.13 site-packages only:
+  # devShells.default had 25 such entries and none for the pin, and the
+  # pinned interpreter imported pytest from the 3.13 copy, since PYTHONPATH is
+  # searched ahead of its own site-packages.
+  #
+  # The tools are wrapped executables that find their own modules, so their
+  # `bin/` is all a shell needs. A buildEnv of `/bin` alone has no
+  # `nix-support/`, hence no propagated inputs and no setup hooks. It links
+  # only the listed packages' own executables, so the interpreter they carry
+  # stays off PATH as well. `scripts/test-python-version-alignment.sh` (J)
+  # fails a shell whose PYTHONPATH names another minor version.
+  binariesOnly =
+    name: drvs:
+    pkgs.buildEnv {
+      inherit name;
+      paths = drvs;
+      pathsToLink = [ "/bin" ];
+    };
 }

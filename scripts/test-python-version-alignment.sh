@@ -788,12 +788,13 @@ fi
 # An import that succeeds does not by itself mean the interpreter carries the
 # recorder, because of PYTHONPATH. Every interpreter's nixpkgs setup hook defines
 # a function of the same name, `addPythonPath`, and the one sourced last replaces
-# the others. devShells.ci holds only the pinned Python, so every package's
-# 3.12 site-packages, the env's included, lands on PYTHONPATH and the bare
-# interpreter imports the recorder through it. devShells.default also holds the
-# 3.13 that pre-commit brings, whose hook wins, so PYTHONPATH there is all 3.13
-# and the bare interpreter cannot. Hence two probes, both run from / because
-# `python -c` also searches the current directory:
+# the others. The dev shells hold only the pinned Python's hook (see (J)), so
+# every package's 3.12 site-packages, the env's included, lands on PYTHONPATH
+# and the bare interpreter imports the recorder through it. When
+# devShells.default still held the 3.13 that pre-commit brings, that hook won,
+# PYTHONPATH there was all 3.13 and the bare interpreter could not. Hence two
+# probes, both run from / because `python -c` also searches the current
+# directory:
 #
 #   (I2) with the ambient PYTHONPATH, which is what `ct record` passes on;
 #   (I3) without it, which is what the interpreter itself provides. (I2) alone
@@ -842,6 +843,59 @@ wherever CODETRACER_PYTHON_INTERPRETER is unset."
 		fail "(I3) under the venv, the first python3 on PATH carries codetracer_python_recorder itself, without PYTHONPATH" \
 			"${under_venv_py:-<none>} cannot import it once PYTHONPATH is removed, so it records
 only for as long as this shell's PYTHONPATH happens to name a recorder."
+	fi
+fi
+
+# ---------------------------------------------------------------------------
+# (J) PYTHONPATH names no site-packages of another minor version
+#
+# PYTHONPATH is searched ahead of the interpreter's own site-packages, so every
+# entry on it is imported by the pinned interpreter and by the venv built from
+# it. An entry built for another minor version is the ABI split again, one
+# import at a time: a pure-Python package happens to load, a compiled one fails
+# or misbehaves.
+#
+# devShells.default carried 25 entries for 3.13 and none for 3.12, and the
+# pinned interpreter's `import pytest` loaded the 3.13 copy. Each interpreter's
+# nixpkgs setup hook defines `addPythonPath`, the one sourced last replaces the
+# others, and that one adds `lib/python3.N/site-packages` of ITS version for
+# every input; pre-commit and the other 3.13 applications in that shell won the
+# race. ../nix/python.nix's `binariesOnly` is how the shells put such
+# applications on PATH without their hooks.
+#
+# Entries that name no `lib/python3.N` directory (a source checkout, the
+# recorder sibling) are not built for any version and are not judged here.
+# ---------------------------------------------------------------------------
+
+if [ -n "${CT_PYALIGN_NO_ENV:-}" ]; then
+	na "(J) PYTHONPATH -- suppressed by CT_PYALIGN_NO_ENV"
+elif [ -z "$env_version" ] && [ -z "$in_dev_shell" ]; then
+	na "(J) PYTHONPATH -- not inside the dev shell (CT_DEV_SHELL and CODETRACER_PYTHON_VERSION unset)"
+else
+	foreign_entries=""
+	foreign_count=0
+	pin_count=0
+	IFS=: read -r -a pythonpath_entries <<<"${PYTHONPATH:-}"
+	for pythonpath_entry in "${pythonpath_entries[@]}"; do
+		entry_version="$(printf '%s\n' "$pythonpath_entry" | sed -nE 's#.*/lib/python(3\.[0-9]+)/.*#\1#p; s#.*/lib/python(3\.[0-9]+)$#\1#p' | head -n 1)"
+		if [ -z "$entry_version" ]; then
+			continue
+		elif [ "$entry_version" = "$PIN_VERSION" ]; then
+			pin_count=$((pin_count + 1))
+		else
+			foreign_count=$((foreign_count + 1))
+			foreign_entries="$foreign_entries
+$pythonpath_entry"
+		fi
+	done
+	if [ "$foreign_count" -eq 0 ]; then
+		pass "(J1) PYTHONPATH names no site-packages of another minor version ($pin_count for $PIN_VERSION)"
+	else
+		fail "(J1) PYTHONPATH names no site-packages of another minor version" \
+			"$foreign_count entr$([ "$foreign_count" -eq 1 ] && echo y || echo ies) built for another version than the declared $PIN_VERSION ($pin_count for $PIN_VERSION):${foreign_entries}
+the pinned interpreter imports these ahead of its own site-packages. A package
+in the shell carries another interpreter's setup hook; put it on PATH with
+nix/python.nix's binariesOnly."
 	fi
 fi
 

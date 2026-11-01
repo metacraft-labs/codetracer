@@ -927,6 +927,57 @@ assert_contains "(C3) is the failure" "$OUT" "FAIL (C3)"
 assert_contains "and (I) says why it has nothing to check" "$OUT" "n/a  (I) python3 under the venv -- CODETRACER_PYTHON_CMD="
 
 echo
+echo "PYTHONPATH names no site-packages of another minor version"
+
+# devShells.default as measured: the 3.13 hook won, so every versioned entry
+# was 3.13 and none was the pin.
+WS="$TMP/foreignpath"
+make_tree "$WS" 12
+make_extension "$WS" 312
+make_venv "$WS" 3.12 yes
+make_interpreter "$WS/env/bin" 3.12 yes
+FOREIGN="/nix/store/x-python3.13-pytest-8.4.2/lib/python3.13/site-packages"
+OUT="$(run_guard_in_shell "$WS" "$WS/env/bin" "$FOREIGN:/nix/store/y-pre-commit-4.3.0/lib/python3.13/site-packages")"
+RC=$?
+assert_rc "a PYTHONPATH of another minor version fails" "$RC" 1
+assert_contains "(J1) is the failure" "$OUT" "FAIL (J1) PYTHONPATH names no site-packages of another minor version"
+assert_contains "and counts both entries against the pin" "$OUT" "2 entries built for another version than the declared 3.12 (0 for 3.12)"
+assert_contains "and names them" "$OUT" "$FOREIGN"
+assert_contains "and says where the fix goes" "$OUT" "binariesOnly"
+
+# One foreign entry among pinned ones is still the defect: it is searched
+# ahead of the interpreter's own site-packages wherever it sits.
+OUT="$(run_guard_in_shell "$WS" "$WS/env/bin" "/nix/store/z-python3-3.12.13-env/lib/python3.12/site-packages:$FOREIGN")"
+RC=$?
+assert_rc "one foreign entry among pinned ones fails" "$RC" 1
+assert_contains "(J1) counts it" "$OUT" "1 entry built for another version than the declared 3.12 (1 for 3.12)"
+
+# devShells.ci as measured, plus an unversioned source checkout, which is not
+# built for any interpreter.
+OUT="$(run_guard_in_shell "$WS" "$WS/env/bin" "/nix/store/z-python3-3.12.13-env/lib/python3.12/site-packages:/nix/store/w-python3.12-flake8-7.3.0/lib/python3.12/site-packages:$WS/recorder/src")"
+RC=$?
+assert_rc "a PYTHONPATH of the pinned version passes" "$RC" 0
+assert_contains "(J1) confirms it and counts the pinned entries" "$OUT" "ok   (J1) PYTHONPATH names no site-packages of another minor version (2 for 3.12)"
+
+# The verdict follows the declaration, not a literal: the same 3.13 path is
+# the pin's own once the recorder declares 3.13.
+WS="$TMP/foreignpath313"
+make_tree "$WS" 13
+make_extension "$WS" 313
+make_venv "$WS" 3.13 yes
+make_interpreter "$WS/env/bin" 3.13 yes
+OUT="$(env CT_PYALIGN_ROOT="$WS/repo" CT_PYALIGN_RECORDER="$WS/recorder" \
+	CODETRACER_PYTHON_VERSION=3.13 CODETRACER_PYTHON_ABI_TAG=cpython-313 \
+	CODETRACER_PYTHON_CMD="$WS/env/bin/python3" PYTHONPATH="$FOREIGN" \
+	PATH="$WS/env/bin:$PATH" bash "$GUARD" 2>&1)"
+assert_contains "(J1) passes the same entry when 3.13 is declared" "$OUT" "ok   (J1) PYTHONPATH names no site-packages of another minor version (1 for 3.13)"
+
+WS="$TMP/foreignpath"
+OUT="$(run_guard "$WS" PYTHONPATH="$FOREIGN")"
+assert_contains "CT_PYALIGN_NO_ENV turns (J) into n/a rather than a pass" "$OUT" "n/a  (J) PYTHONPATH -- suppressed"
+assert_absent "and runs none of it" "$OUT" "(J1)"
+
+echo
 echo "a dev shell that lost its exports is not a run outside the dev shell"
 
 # Every other case above sets CODETRACER_PYTHON_VERSION, or suppresses the
