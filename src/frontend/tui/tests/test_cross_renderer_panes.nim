@@ -634,8 +634,9 @@ suite "PLAT-21: the product's panes, in the vocabulary, on a real recording":
     # exception that reports rather than renders blank). PLAT-48 adds the
     # desktop's PROBLEMS and REQUESTS footer panels, accepted exceptions too
     # (+6). PLAT-51 removes the timeline escape (5 -> 1 assertion: -4).
-    # The Low Level Code pane joined the vocabulary panes (+3).
-    expectCount(63)
+    # The Low Level Code pane joined the vocabulary panes (+3), and so did
+    # the Verification pane (+3).
+    expectCount(66)
 
   liveTest "the entries each pane uses are the ones the module declares":
     publishTracepoints()
@@ -1108,7 +1109,8 @@ suite "PLAT-21: the session is closed":
 # PLAT-51: -4, the timeline escape's five assertions became one.
 # +3: the Low Level Code pane is a vocabulary pane, three assertions like
 # every other.
-const ExpectedAssertions = 266
+# PLAT-63 +3: the Verification pane is a vocabulary pane, three more.
+const ExpectedAssertions = 269
 
 suite "PLAT-21: the assertion count":
   test "every case in this file ran":

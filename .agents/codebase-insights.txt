@@ -8172,3 +8172,25 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   CODETRACER_RR_BACKEND_PRESENT=1 stops the fixture from skipping rr programs.
 - Mutation harnesses that restore a file with shutil.move keep its OLD mtime:
   cargo/tup then keep the mutated binary. Touch it (`os.utime`) after restore.
+
+- Verification pane (PLAT-63): the window-level pair `VerificationVM` +
+  `CounterexampleSessionVM` (one per window, as `ui/verification.nim` keeps
+  one) is drawn by EVERY front-end from `VerificationVM.panelModel(session)
+  .lines` (notes, counterexample offers, findings grouped in
+  `FindingGroupOrder`, then an open counterexample's steps); selection is a
+  KEY (`finding:<row>`, `offer:<id>`, `step:<i>`), not an index. The native
+  hosts run the project's declared Verno action through
+  `viewmodel/host/native_verification_host` (VN-M3's `project_action_runner`,
+  non-blocking `pump`); the desktop's renderer has no process launcher, so it
+  draws no Run control (`canRun` is false unless a host calls `offerRun`).
+- A Verno finding's file is spelled from the PACKAGE ROOT in the payload
+  (`src/main.nr`) but from the package root's PARENT in the printed text tier
+  (`typeerr/src/main.nr`): `VerificationVM.sourceCandidates` yields root/file
+  then parent/file and the host opens the first that exists.
+- `verno` cannot be built here (venir/rustc-dev); the PLAT-63 suites put a
+  replaying `verno` on PATH (`tui/tests/fixtures/plat63_verno_projects`) that
+  prints a recorded run and re-stamps the payload's run timestamps — the
+  consumer refuses a report older than its run (StalePayloadToleranceMs).
+- In an IsoNim view instantiated with BOTH MockRenderer and the web renderer,
+  JS-only DOM wiring must be `when defined(js): when N is dom.Element:` —
+  `vm-unit-js` instantiates the view with MockNode under `defined(js)`.

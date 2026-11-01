@@ -68,6 +68,7 @@ import ./views/agent_activity_pane
 import ./views/problems_pane
 import ./views/requests_pane
 import ./views/low_level_code_pane
+import ./views/verification_pane   # PLAT-63
 import ./views/point_list
 
 export headless_app
@@ -306,6 +307,10 @@ type
       ## PLAT-60. THE LOW LEVEL CODE pane's model, as a value, filled by the
       ## host (`host/tui_session.lowLevelModelOf`) from the session's
       ## `LowLevelCodeVM`; its `scrollTop` is the pane's own reading position.
+    verification*: VerificationPaneModel
+      ## PLAT-63. The VERIFICATION pane's model, as a value, filled by the
+      ## host (`host/verification_source.nim`) from the window's
+      ## `VerificationVM`; its `scrollTop` is the pane's own.
     problems*: ProblemsPaneModel
       ## PLAT-55. The PROBLEMS pane's model, as a value, filled by the host
       ## (`host/problems_source.nim`) from the window's `ErrorsVM`, which the
@@ -391,6 +396,12 @@ type
       ## press, a menu built or chosen, a key, the sync toggle, a step —
       ## done through the session's `LowLevelCodeVM`, the pane's model
       ## refreshed. Nil when no host owns the pane.
+    verificationAct*: proc(act: VerificationAct):
+        VerificationActResult {.closure.}
+      ## PLAT-63: the HOST's answer to an act on the Verification pane — a
+      ## press, a menu built or chosen, a key, Run, Stop — done through the
+      ## window's `VerificationVM`, the pane's model refreshed. Nil when no
+      ## host owns the pane.
     problemsCommand*: proc(kind: ProblemsCommandKind;
                            index: int): string {.closure.}
       ## PLAT-55: the HOST's Problems pane — select diagnostic `index`, open
@@ -753,6 +764,7 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     problems: app.problems,
     requests: app.requests,
     lowLevel: app.lowLevel,
+    verification: app.verification,
     build: build,
     product: app.modes.product,
     edit: app.editPaneModel())
