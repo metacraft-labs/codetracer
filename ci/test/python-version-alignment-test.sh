@@ -43,6 +43,11 @@
 # (no python3.13 needed to test the 3.13 case) and lets it seed versions that
 # do not exist on the host.
 #
+# One more covers the vacuous pass that lies in the shell rather than the tree:
+# `a dev shell that lost its exports is not a run outside the dev shell` runs
+# the guard with CT_DEV_SHELL set and the CODETRACER_PYTHON_* exports gone, and
+# asserts the failure that a run outside the shell, also covered, does not get.
+#
 # Pure bash. No network, no nix, no dev shell, no real Python, about a second.
 #
 # Run: bash ci/test/python-version-alignment-test.sh
@@ -920,6 +925,110 @@ RC=$?
 assert_rc "inside a dev shell, an unusable CODETRACER_PYTHON_CMD fails the run" "$RC" 1
 assert_contains "(C3) is the failure" "$OUT" "FAIL (C3)"
 assert_contains "and (I) says why it has nothing to check" "$OUT" "n/a  (I) python3 under the venv -- CODETRACER_PYTHON_CMD="
+
+echo
+echo "a dev shell that lost its exports is not a run outside the dev shell"
+
+# Every other case above sets CODETRACER_PYTHON_VERSION, or suppresses the
+# environment, so none of them can tell these two runs apart: with the exports
+# gone, (C) and (I) have nothing to read either way. What separates them is
+# CT_DEV_SHELL, which ci-base.nix's hook exports independently of those
+# variables.
+#
+# run_guard_in_marked_shell <dir> <PATH prefix> [assignments...]: starts from no
+# CODETRACER_PYTHON_* exports and no marker, whatever shell this suite runs in,
+# and applies only what the case names.
+run_guard_in_marked_shell() {
+	local ws="$1" path_prefix="$2"
+	shift 2
+	env -u CT_DEV_SHELL -u CT_PYALIGN_NO_ENV \
+		-u CODETRACER_PYTHON_VERSION -u CODETRACER_PYTHON_ABI_TAG \
+		-u CODETRACER_PYTHON_CMD -u CODETRACER_PYTHON_INTERPRETER \
+		CT_PYALIGN_ROOT="$ws/repo" CT_PYALIGN_RECORDER="$ws/recorder" \
+		PYTHONPATH="" PATH="$path_prefix:$PATH" \
+		"$@" bash "$GUARD" 2>&1
+}
+
+WS="$TMP/marked"
+make_tree "$WS" 12
+make_extension "$WS" 312
+make_venv "$WS" 3.12 yes
+make_interpreter "$WS/env/bin" 3.12 yes
+GOOD_CMD="CODETRACER_PYTHON_CMD=$WS/env/bin/python3"
+GOOD_VERSION="CODETRACER_PYTHON_VERSION=3.12"
+GOOD_ABI="CODETRACER_PYTHON_ABI_TAG=cpython-312"
+
+# The issue's case: everything below (A) still passes, so without (C1) and (C3)
+# this exits 0 exactly as a run outside the shell does.
+OUT="$(run_guard_in_marked_shell "$WS" "$WS/env/bin" CT_DEV_SHELL=1)"
+RC=$?
+assert_rc "a dev shell without its Python exports fails" "$RC" 1
+assert_contains "(C1) names the missing version export" "$OUT" "FAIL (C1)"
+assert_contains "and says which file exports it" "$OUT" "nix/shells/ci-base.nix"
+assert_contains "(C2) reports the missing ABI tag" "$OUT" "FAIL (C2)"
+assert_contains "(C3) reports the missing interpreter" "$OUT" "FAIL (C3)"
+assert_contains "(A1) falls back to the sibling declaration" "$OUT" "(A1) declared version comes from $WS/recorder/.python-version: 3.12"
+assert_absent "and does not claim the run is outside the dev shell" "$OUT" "not in the dev shell"
+assert_contains "(I) says why it has nothing to check" "$OUT" "n/a  (I) python3 under the venv -- CODETRACER_PYTHON_CMD=<unset>"
+
+OUT="$(run_guard_in_marked_shell "$WS" "$WS/env/bin" CT_DEV_SHELL=1 "$GOOD_CMD" "$GOOD_ABI")"
+RC=$?
+assert_rc "a dev shell without CODETRACER_PYTHON_VERSION alone fails" "$RC" 1
+assert_contains "(C1) is the failure" "$OUT" "FAIL (C1)"
+assert_absent "(C3) is not accused" "$OUT" "FAIL (C3)"
+assert_contains "and (I) still ran" "$OUT" "ok   (I3)"
+
+OUT="$(run_guard_in_marked_shell "$WS" "$WS/env/bin" CT_DEV_SHELL=1 "$GOOD_VERSION" "$GOOD_ABI")"
+RC=$?
+assert_rc "a dev shell without CODETRACER_PYTHON_CMD alone fails" "$RC" 1
+assert_contains "(C3) is the failure" "$OUT" "FAIL (C3)"
+assert_contains "(C1) is not accused" "$OUT" "ok   (C1)"
+
+OUT="$(run_guard_in_marked_shell "$WS" "$WS/env/bin" CT_DEV_SHELL=1 "$GOOD_VERSION" "$GOOD_ABI" "$GOOD_CMD")"
+RC=$?
+assert_rc "a dev shell with all of its exports passes" "$RC" 0
+assert_contains "(C1) confirms the export" "$OUT" "ok   (C1)"
+
+# The converse. IN_NIX_SHELL is in the environment of every Nix shell, .#lint
+# and .#pre-commit among them, and neither exports these variables; that this
+# stays green is why the guard does not identify the shell by it.
+OUT="$(run_guard_in_marked_shell "$WS" "$WS/env/bin" IN_NIX_SHELL=impure)"
+RC=$?
+assert_rc "another Nix shell is not mistaken for the dev shell" "$RC" 0
+assert_contains "(C) is n/a there" "$OUT" "n/a  (C) dev-shell exports -- not inside the dev shell"
+assert_contains "and so is (I)" "$OUT" "n/a  (I) python3 under the venv"
+assert_absent "and (C1) does not run" "$OUT" "(C1)"
+
+OUT="$(run_guard_in_marked_shell "$WS" "$WS/env/bin" CT_DEV_SHELL=1 CT_PYALIGN_NO_ENV=1)"
+RC=$?
+assert_rc "CT_PYALIGN_NO_ENV ignores the marker with the other exports" "$RC" 0
+assert_contains "(C) reports the suppression" "$OUT" "n/a  (C) dev-shell exports -- suppressed"
+
+# Everything above takes the marker as given, so this is what ties it to the
+# real shell. Without the export the dev shell would read as "outside", and
+# every case above would stay green while the guard went back to n/a. Top-level
+# indentation is the check that it sits in no conditional of the hook; before
+# the Python exports is the order the hook's top guarantees.
+CI_BASE_NIX="$REPO_ROOT/nix/shells/ci-base.nix"
+hook_line="$(grep -n -m1 -E '^  shellHook = ' "$CI_BASE_NIX" | cut -d: -f1)"
+marker_line="$(grep -n -m1 -E '^    export CT_DEV_SHELL=1$' "$CI_BASE_NIX" | cut -d: -f1)"
+python_line="$(grep -n -m1 -E '^    export CODETRACER_PYTHON_CMD=' "$CI_BASE_NIX" | cut -d: -f1)"
+if [ -n "$hook_line" ] && [ -n "$marker_line" ] && [ -n "$python_line" ] &&
+	[ "$hook_line" -lt "$marker_line" ] && [ "$marker_line" -lt "$python_line" ]; then
+	ok "ci-base.nix's hook exports CT_DEV_SHELL unconditionally, before the Python exports"
+else
+	bad "ci-base.nix's hook exports CT_DEV_SHELL unconditionally, before the Python exports" \
+		"shellHook line: ${hook_line:-<none>}; marker line: ${marker_line:-<none>}; python line: ${python_line:-<none>}"
+fi
+LINT_NIX="$REPO_ROOT/nix/shells/lint.nix"
+if [ ! -f "$LINT_NIX" ]; then
+	bad "the lint shell, which has no Python exports, does not claim to be the dev shell" \
+		"$LINT_NIX does not exist, so there is nothing to read"
+elif grep -qE '^[[:space:]]*export CT_DEV_SHELL' "$LINT_NIX"; then
+	bad "the lint shell, which has no Python exports, does not claim to be the dev shell"
+else
+	ok "the lint shell, which has no Python exports, does not claim to be the dev shell"
+fi
 
 echo
 if [ "$FAILED" -ne 0 ]; then

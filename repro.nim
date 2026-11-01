@@ -2153,11 +2153,17 @@ package codeTracer:
       extraEnvValue = GateEnv)
     target("gate-repro-lock-flake-lock-agreement", gateReproLockAgreement)
 
+    # The two nix files are inputs because the suite reads them: it asserts
+    # that the dev shell's hook exports CT_DEV_SHELL and that the lint shell
+    # does not. Without them, deleting that export would be served the cached
+    # pass of the tree that still had it.
     let gatePythonVersionAlignment = ctShell(
       actionIdValue = "codetracer.gate.python-version-alignment",
       commandValue = "bash ci/test/python-version-alignment-test.sh",
       extraInputsValue = @[
         "ci/test/python-version-alignment-test.sh",
+        "nix/shells/ci-base.nix",
+        "nix/shells/lint.nix",
         "scripts/test-python-version-alignment.sh"],
       cacheableValue = true,
       extraEnvValue = GateEnv)

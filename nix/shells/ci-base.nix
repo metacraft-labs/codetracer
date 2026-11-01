@@ -550,6 +550,18 @@ with pkgs;
   # sibling-repo detection, reprobuild ASP solver paths) lives in
   # main.nix's shellHook.
   shellHook = hookOnStderr ''
+    # NAMED, so that this shell can be told from a run outside it without
+    # reading what it is supposed to provide. devShells.default and
+    # devShells.ci both compose this hook.
+    # `scripts/test-python-version-alignment.sh` fails a shell carrying this
+    # marker when its CODETRACER_PYTHON_* exports are missing, and reports `n/a`
+    # without it. IN_NIX_SHELL cannot say this: it is also set in `.#lint`,
+    # `.#pre-commit` and every unrelated Nix shell, none of which export them.
+    # Nor can CODETRACER_REPO_ROOT_PATH: the env.sh / env.ps1 DIY lanes set it
+    # with no such exports, and it is unset in a shell entered outside a
+    # checkout, which still has them.
+    export CT_DEV_SHELL=1
+
     # PLAT-37 — THE GPUI RUNTIME LIBRARY PATH, exported under its OWN name
     # rather than prepended to `LD_LIBRARY_PATH`.
     #

@@ -78,7 +78,14 @@
 #
 #   CT_PYALIGN_ROOT         repo root to inspect       (default: this repo)
 #   CT_PYALIGN_RECORDER     recorder sibling to inspect (default: ../codetracer-python-recorder)
-#   CT_PYALIGN_NO_ENV=1     ignore the ambient CODETRACER_PYTHON_* exports
+#   CT_PYALIGN_NO_ENV=1     ignore the ambient CODETRACER_PYTHON_* exports and
+#                           CT_DEV_SHELL
+#
+# Read from the environment, not an override:
+#
+#   CT_DEV_SHELL            set by nix/shells/ci-base.nix's hook. It says this
+#                           run is inside the dev shell, so missing exports are
+#                           a failure; see (C).
 # =============================================================================
 set -uo pipefail
 
@@ -137,8 +144,10 @@ PYTHON_NIX="$REPO_ROOT/nix/python.nix"
 RECORDER_DECL="$RECORDER_DIR/.python-version"
 
 env_version=""
+in_dev_shell=""
 if [ -z "${CT_PYALIGN_NO_ENV:-}" ]; then
 	env_version="${CODETRACER_PYTHON_VERSION:-}"
+	in_dev_shell="${CT_DEV_SHELL:-}"
 fi
 
 file_version=""
@@ -163,7 +172,7 @@ elif [ -n "$env_version" ]; then
 	pass "(A1) declared version comes from the flake input: $env_version (no recorder sibling to cross-check)"
 	PIN_VERSION="$env_version"
 elif [ -n "$file_version" ]; then
-	pass "(A1) declared version comes from $RECORDER_DECL: $file_version (not in the dev shell, so no flake-input cross-check)"
+	pass "(A1) declared version comes from $RECORDER_DECL: $file_version (\$CODETRACER_PYTHON_VERSION unset, so no flake-input cross-check)"
 	PIN_VERSION="$file_version"
 else
 	# Deliberately a hard failure and not an `n/a`. Without the declaration
@@ -311,13 +320,30 @@ fi
 # against the sibling checkout's `.python-version`; what is left to check here
 # is that the DERIVED exports and the actual interpreters agree with it. Every
 # consumer that reads these variables is believing them.
+#
+# With the exports gone, this section and (I) have nothing to read, which is
+# also what a run outside the dev shell looks like. Those two runs must not get
+# the same verdict, so the shell is identified by CT_DEV_SHELL, which the same
+# hook exports independently of these variables: inside it a missing export
+# fails (C1), (C2) or (C3); outside it the section is n/a. A shell that exports
+# CODETRACER_PYTHON_VERSION without the marker, as the recorder's own dev shell
+# does, is checked too.
 # ---------------------------------------------------------------------------
 
 if [ -n "${CT_PYALIGN_NO_ENV:-}" ]; then
 	na "(C) dev-shell exports -- suppressed by CT_PYALIGN_NO_ENV"
-elif [ -z "${CODETRACER_PYTHON_VERSION:-}" ]; then
-	na "(C) dev-shell exports -- not inside the dev shell (CODETRACER_PYTHON_VERSION unset)"
+elif [ -z "$env_version" ] && [ -z "$in_dev_shell" ]; then
+	na "(C) dev-shell exports -- not inside the dev shell (CT_DEV_SHELL and CODETRACER_PYTHON_VERSION unset)"
 else
+	if [ -n "$env_version" ]; then
+		pass "(C1) \$CODETRACER_PYTHON_VERSION is exported ($env_version)"
+	else
+		# shellcheck disable=SC2016 # literal variable name in the check label
+		fail '(C1) $CODETRACER_PYTHON_VERSION is exported' \
+			"CT_DEV_SHELL says this is the dev shell, but it does not export
+CODETRACER_PYTHON_VERSION. nix/shells/ci-base.nix is what exports it."
+	fi
+
 	if [ "${CODETRACER_PYTHON_ABI_TAG:-}" = "$PIN_ABI_TAG" ]; then
 		pass "(C2) \$CODETRACER_PYTHON_ABI_TAG (${CODETRACER_PYTHON_ABI_TAG:-<unset>}) is derived from the declared $PIN_VERSION"
 	else
@@ -778,7 +804,8 @@ fi
 if [ -n "${CT_PYALIGN_NO_ENV:-}" ]; then
 	na "(I) python3 under the venv -- suppressed by CT_PYALIGN_NO_ENV"
 elif [ ! -x "${CODETRACER_PYTHON_CMD:-}" ]; then
-	# Inside the dev shell a non-executable value is already a (C3) failure.
+	# Inside the dev shell a missing or non-executable value is already a (C3)
+	# failure, whether or not CODETRACER_PYTHON_VERSION is set.
 	na "(I) python3 under the venv -- CODETRACER_PYTHON_CMD=${CODETRACER_PYTHON_CMD:-<unset>} is not executable"
 else
 	path_without_venv=""
