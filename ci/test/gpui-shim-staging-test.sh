@@ -70,6 +70,12 @@
 #       refused removal of the marker fails the restore and can be retried. A
 #       failed restore keeps a status that was already non-zero. A signal during
 #       the restore does not stop it between its two removals.
+#   (p) a backup left under a lane's own name by a run killed before the lanes
+#       shared this library (`<live>.plat38-backup` and the like) is the original
+#       too: it is taken over, and the restore puts it back. Two of them cannot
+#       both be the original, so a stage refuses them, names both and touches
+#       nothing. The stale arm at the live path is what makes the first case
+#       fail without the takeover.
 #
 # REAL: bash, python3, the lane scripts themselves, run end to end from a copy
 # in a sandbox workspace against `src/tests/visual/scenarios.json`, and a real
@@ -716,7 +722,7 @@ check_pinned() {
 # exports is meant to stay in it.
 # shellcheck disable=SC2030,SC2031
 check_library() {
-	local dir="${work}/library" shim before
+	local dir="${work}/library" shim before leftover
 	shim="${dir}/live"
 	mkdir -p "${dir}"
 	printf 'stale arm\n' >"${shim}"
@@ -796,6 +802,47 @@ check_library() {
 	[ ! -e "${shim}" ] && [ ! -e "${shim}.gpui-lane-no-original" ] ||
 		report "(n) a signal stopped the restore between its removals"
 	verdict "library: (n) a signal during the restore does not stop it" "${before}"
+
+	# (p) What a run of a lane from before this library left when it was killed.
+	before="${failures}"
+	rm -f "${shim}" "${shim}".*
+	printf 'stale arm\n' >"${shim}"
+	printf 'original\n' >"${shim}.plat38-backup"
+	(
+		# shellcheck source=ci/lib/gpui-shim-stage.sh disable=SC1091
+		source "${root}/ci/lib/gpui-shim-stage.sh"
+		gpui_shim_stage "${shim}" "${dir}/arm" || exit 3
+		[ "$(read_bytes "${shim}")" = arm ] || exit 4
+		gpui_shim_restore || exit 5
+	) >"${output}" 2>&1 || report "(p) staging over an old lane's backup failed with status $?"
+	[ "$(read_bytes "${shim}")" = original ] ||
+		report "(p) after the run the live path holds [$(read_bytes "${shim}")], not the old lane's backup"
+	leftover="$(find "${dir}" -name 'live.*')"
+	[ -z "${leftover}" ] || report "(p) left over: ${leftover}"
+	verdict "library: (p) an old lane's backup is taken over as the original" "${before}"
+
+	before="${failures}"
+	rm -f "${shim}" "${shim}".*
+	printf 'stale arm\n' >"${shim}"
+	printf 'original\n' >"${shim}.plat38-backup"
+	printf 'older arm\n' >"${shim}.plat42-backup"
+	(
+		# shellcheck source=ci/lib/gpui-shim-stage.sh disable=SC1091
+		source "${root}/ci/lib/gpui-shim-stage.sh"
+		if gpui_shim_stage "${shim}" "${dir}/arm"; then exit 3; fi
+		gpui_shim_restore || exit 4
+	) >"${output}" 2>&1 || report "(p) two old backups: the stage or the restore exited $?"
+	local named
+	for named in plat38 plat42; do
+		grep -qF "${shim}.${named}-backup" "${output}" ||
+			report "(p) the refusal does not name ${shim}.${named}-backup"
+	done
+	[ "$(read_bytes "${shim}")" = 'stale arm' ] &&
+		[ "$(read_bytes "${shim}.plat38-backup")" = original ] &&
+		[ "$(read_bytes "${shim}.plat42-backup")" = 'older arm' ] &&
+		[ ! -e "${shim}.gpui-lane-backup" ] && [ ! -e "${shim}.gpui-lane-no-original" ] ||
+		report "(p) a refused stage changed what it found"
+	verdict "library: (p) two old backups are refused and left as they are" "${before}"
 }
 
 check_library
