@@ -15,6 +15,8 @@ import sys
 import tempfile
 
 lane = Path(sys.argv[1])
+# The real staging library, so that a case below stages as the lane does.
+stage_lib = lane.parent.parent / "lib" / "gpui-shim-stage.sh"
 if len(sys.argv) > 2:
     assert sys.argv[2] == "--lane" and len(sys.argv) == 4
     lane = Path(sys.argv[3])
@@ -28,7 +30,8 @@ def function(name):
 # the capture command and its assertions out: they need the GUI grant, whereas
 # these process-lifetime assertions must run in the ordinary lint lane.
 shutdown = source.split('|| cap_rc=$?\n\n', 1)[1].split('\n\t# THE RECORD', 1)[0]
-functions = "\n".join(function(n) for n in ("fail", "wait_capture_app", "quote_app_log", "restore_shim"))
+functions = "\n".join(function(n) for n in ("fail", "wait_capture_app", "quote_app_log", "restore_shim",
+                                                 "capture_exit_trap"))
 exit_trap = re.search(r"^trap .* EXIT$", source, re.M).group()
 failures = []
 # Reject a disabled auto-quit before any GUI or build prerequisite is tested.
@@ -48,15 +51,19 @@ with tempfile.TemporaryDirectory(prefix="plat37-shutdown-") as temporary:
         case = scratch / name
         case.mkdir()
         live = case / "live"
-        backup = case / "backup"
-        live.write_text("windowed")
-        backup.write_text("original")
+        arm = case / "windowed"
+        live.write_text("original")
+        arm.write_text("windowed")
         log = case / "app.log"
         log.write_text("the app's own last words\n")
         env = dict(os.environ, FIXTURE=str(fixture), PYTHON=sys.executable,
-                   CASE=str(case), LIVE_SHIM=str(live), SHIM_BACKUP=str(backup),
-                   BIN=str(fixture), STATUS=str(status), log=str(log))
-        script = "set -uo pipefail\ngpid=\nview=fixture\nAPP_LOG_QUOTE_LINES=20\n" + functions + r'''
+                   CASE=str(case), LIVE_SHIM=str(live), ARM=str(arm),
+                   SHIM_BACKUP=str(live) + ".gpui-lane-backup",
+                   STAGE_LIB=str(stage_lib), BIN=str(fixture), STATUS=str(status),
+                   log=str(log))
+        script = "set -uo pipefail\ngpid=\nview=fixture\nAPP_LOG_QUOTE_LINES=20\n" + \
+            'source "$STAGE_LIB"\n' + functions + r'''
+gpui_shim_stage "$LIVE_SHIM" "$ARM" || exit 99
 "$PYTHON" "$FIXTURE" "$CASE/cleanup" "$CASE/ready" "$LIVE_SHIM" .3 "$STATUS" &
 gpid=$!
 while [ ! -f "$CASE/ready" ]; do sleep .01; done
@@ -86,14 +93,21 @@ while [ ! -f "$CASE/ready" ]; do sleep .01; done
     if not (scratch / "explicit-restore" / "continued").exists():
         failures.append("explicit restore exited before the lane verdict")
         print("FAIL:", failures[-1])
-    run("restore-filesystem-error", shutdown + '\nLIVE_SHIM="$CASE/missing/live"\nrestore_shim\n', expected=1)
-    if not (scratch / "restore-filesystem-error" / "backup").exists():
+    run("restore-filesystem-error", shutdown + '\nmv() { return 1; }\nrestore_shim\n', expected=1)
+    if not (scratch / "restore-filesystem-error" / "live.gpui-lane-backup").exists():
         failures.append("failed restoration lost its backup")
         print("FAIL:", failures[-1])
     run("scenario-error", shutdown, status=7, expected=1)
     run("trap-capture-error", exit_trap + "\nexit 23\n", expected=23)
     run("trap-app-error-successful-lane", exit_trap + "\nexit 0\n", status=7, expected=7)
     run("trap-app-error", exit_trap + "\nexit 23\n", status=7, expected=23)
+    # The signal is acted on after the `sleep`, which is shorter than the app's life,
+    # so the EXIT trap still has to wait for the app before it restores.
+    run("trap-sigterm", exit_trap + "\ngpui_shim_trap_signals\nkill -TERM $$\nsleep .01\nexit 0\n",
+        expected=143)
+    # A second signal, as a cancelled CI job sends, lands while the EXIT trap waits
+    # for the app. It must not abandon the restore that the wait is there for.
+    run("trap-second-signal", exit_trap + "\ngpui_shim_trap_signals\n(sleep .1; kill -TERM $$) &\nexit 0\n")
 
     # An unrelated session of precisely the same executable must survive the
     # EXIT trap. Wait it ourselves so a failing old pkill cannot leave children.
@@ -106,9 +120,11 @@ while [ ! -f "$CASE/ready" ]; do sleep .01; done
     while not (case / "ready").exists():
         import time
         time.sleep(.01)
-    result = subprocess.run(["bash", "-c", "set -uo pipefail\ngpid=\n" + functions +
+    result = subprocess.run(["bash", "-c", "set -uo pipefail\ngpid=\n" +
+                             'source "$STAGE_LIB"\n' + functions +
                              "\n" + exit_trap + "\nexit 0\n"],
-                            env=dict(os.environ, BIN=str(fixture), SHIM_BACKUP=""),
+                            env=dict(os.environ, BIN=str(fixture), SHIM_BACKUP="",
+                                     STAGE_LIB=str(stage_lib)),
                             capture_output=True, text=True)
     child_status = child.wait()
     if result.returncode or child_status or not (case / "cleanup").exists():

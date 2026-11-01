@@ -235,16 +235,11 @@ check_prereqs() {
 # original is restored on exit whatever happens.
 SHIM_DIR="${ISONIM_GPUI}/rust/target/plat37"
 LIVE_SHIM="${ISONIM_GPUI}/rust/target/debug/libgpui_nim_shim.so"
-SHIM_BACKUP=""
 
-restore_shim() {
-	if [ -n "${SHIM_BACKUP}" ] && [ -f "${SHIM_BACKUP}" ]; then
-		mv -f "${SHIM_BACKUP}" "${LIVE_SHIM}"
-		SHIM_BACKUP=""
-		echo "restored ${LIVE_SHIM}"
-	fi
-}
-trap restore_shim EXIT
+# Stages and restores the shim: `ci/lib/gpui-shim-stage.sh` says how, and why.
+# shellcheck source=ci/lib/gpui-shim-stage.sh disable=SC1091
+source "${root}/ci/lib/gpui-shim-stage.sh" || fail "ci/lib/gpui-shim-stage.sh could not be loaded"
+gpui_shim_install_traps
 
 use_shim() {
 	local config="$1"
@@ -258,29 +253,9 @@ use_shim() {
       This lane does NOT build them: measured 2026-09-22, the windowed link
       fails from codetracer's shell with three 'unable to find library'
       errors."
-	if [ -z "${SHIM_BACKUP}" ] && [ -f "${LIVE_SHIM}" ]; then
-		SHIM_BACKUP="${LIVE_SHIM}.plat37-backup"
-		mv -f "${LIVE_SHIM}" "${SHIM_BACKUP}" ||
-			fail "the live shim could not be moved aside, so nothing was staged"
-	fi
-	# MOVED ASIDE ON THE FIRST CALL, UNLINKED ON EVERY LATER ONE, NEVER COPIED
-	# OVER. Cargo uplifts `target/debug/libgpui_nim_shim.so` as a HARDLINK to
-	# `target/debug/deps/…`, so a `cp` onto the live path rewrites cargo's own
-	# cached output through the shared inode. Cargo judges freshness by
-	# fingerprint, not by bytes, so the next `cargo build` reports the unit fresh
-	# and re-uplifts THIS arm's bytes — measured 2026-10-18: after a capture,
-	# `isonim-gpui`'s `plat37-shims` staged a "featureless" shim byte-identical to
-	# the headless one (341,153,248 bytes; a genuine featureless link is
-	# 8,083,520).
-	#
-	# The move above takes cargo's inode out of the way and keeps it, so the
-	# restore puts that same inode back and the hardlink survives the run. A
-	# backup made by copying would restore the bytes on a new inode and leave the
-	# hardlink broken. The `rm` is what a later arm needs: by then the live path
-	# holds the previous arm, and copying onto that inode would rewrite what its
-	# app had mapped.
-	rm -f "${LIVE_SHIM}"
-	cp -f "${src}" "${LIVE_SHIM}" ||
+	# Moved aside on the first call, unlinked on every later one, never copied
+	# over: `ci/lib/gpui-shim-stage.sh` says why.
+	gpui_shim_stage "${LIVE_SHIM}" "${src}" ||
 		fail "the ${config} shim could not be staged at ${LIVE_SHIM}"
 	echo "shim in place: ${config} ($(wc -c <"${LIVE_SHIM}") bytes, \
 $(ldd "${LIVE_SHIM}" | wc -l) ldd entries)"

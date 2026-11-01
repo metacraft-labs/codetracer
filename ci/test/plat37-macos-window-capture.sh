@@ -403,7 +403,11 @@ timeout "${CAPTURE_TIMEOUT_S}" "${CAPTURE}" host \
 # ---------------------------------------------------------------------------
 # The app and the staged shim: both belong to this lane until it exits
 # ---------------------------------------------------------------------------
-SHIM_BACKUP=""
+# Stages and restores the shim: `ci/lib/gpui-shim-stage.sh` says how, and why.
+# shellcheck source=ci/lib/gpui-shim-stage.sh
+# The pre-commit hook runs shellcheck WITHOUT `-x`: see `build-freshness.sh` above.
+# shellcheck disable=SC1091
+. "${root}/ci/lib/gpui-shim-stage.sh" || fail "ci/lib/gpui-shim-stage.sh could not be loaded"
 # Only this lane's outstanding child belongs to its cleanup. Never sweep by
 # executable name: another capture or an operator may be running the same app.
 gpid=""
@@ -437,26 +441,31 @@ quote_app_log() {
 	tail -n "${APP_LOG_QUOTE_LINES}" "${log}" | sed 's/^/    | /' >&2
 }
 
+# `$1`, or else the status of the command before the call, is the lane's verdict.
 restore_shim() {
-	local lane_rc=$? app_rc=0
+	local lane_rc="${1:-$?}" app_rc=0
 	# A failed capture still owns a live app. Let its armed quit finish before
 	# replacing the library it loaded; preserve the lane's original exit code.
 	wait_capture_app || app_rc=$?
-	if [ -n "${SHIM_BACKUP}" ] && [ -f "${SHIM_BACKUP}" ]; then
-		if mv -f "${SHIM_BACKUP}" "${LIVE_SHIM}"; then
-			SHIM_BACKUP=""
-			echo "restored ${LIVE_SHIM}"
-		else
-			echo "failed to restore ${LIVE_SHIM}; backup remains at ${SHIM_BACKUP}" >&2
-			[ "${lane_rc}" -ne 0 ] || lane_rc=1
-		fi
-	fi
+	gpui_shim_restore || {
+		[ "${lane_rc}" -ne 0 ] || lane_rc=1
+	}
 	# Preserve a prior capture failure, while refusing a failed app even if
 	# the lane otherwise reached a successful exit.
 	[ "${lane_rc}" -ne 0 ] || lane_rc=${app_rc}
 	return "${lane_rc}"
 }
-trap 'restore_shim; exit $?' EXIT
+# Further signals are ignored for the reason `gpui_shim_exit_trap` gives, and here
+# the window is seconds wide: the restore waits for the app's armed quit, and a
+# signal trap's `exit` inside this handler would abandon it.
+capture_exit_trap() {
+	local rc=$?
+	trap '' INT TERM
+	restore_shim "${rc}"
+	exit $?
+}
+trap capture_exit_trap EXIT
+gpui_shim_trap_signals
 
 # The recording. REFUSED rather than skipped when absent: a green run over no
 # recording is worth less than a red one.
@@ -593,20 +602,8 @@ PY
 # ---------------------------------------------------------------------------
 # Stage the windowed shim and drive the scenarios
 # ---------------------------------------------------------------------------
-# MOVED ASIDE, NEVER COPIED OVER. Both `cp -f` builds write through an existing
-# inode. macOS caches a code signature per file, so an app loading new bytes
-# from an inode that was mapped before dies with SIGKILL (Code Signature
-# Invalid), which reads as a front-end crash. Measured 2026-11-01. Cargo's
-# `deps/` output is not at risk on this host, because cargo copies the uplifted
-# file here and hardlinks it only on Linux
-# (https://github.com/rust-lang/cargo/issues/10060). Moving keeps the
-# operator's inode for the restore and gives the staged shim a new one.
-if [ -z "${SHIM_BACKUP}" ] && [ -f "${LIVE_SHIM}" ]; then
-	SHIM_BACKUP="${LIVE_SHIM}.plat37macos-backup"
-	mv -f "${LIVE_SHIM}" "${SHIM_BACKUP}" ||
-		fail "the live shim could not be moved aside, so nothing was staged"
-fi
-cp "${WINDOWED_SHIM}" "${LIVE_SHIM}" ||
+# Moved aside and never copied over: `ci/lib/gpui-shim-stage.sh` says why.
+gpui_shim_stage "${LIVE_SHIM}" "${WINDOWED_SHIM}" ||
 	fail "the windowed shim could not be staged at ${LIVE_SHIM}"
 echo
 echo "shim in place: windowed ($(wc -c <"${LIVE_SHIM}" | tr -d ' ') bytes)"

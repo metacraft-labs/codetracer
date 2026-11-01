@@ -23,7 +23,16 @@
 # The real driver's refusal text is asserted from its source below. `ffmpeg` is
 # a stand-in on the lane's PATH too: the lane uses it only to synthesise the
 # frame the stand-in grader never opens, and the macOS dev shell does not carry
-# it, so the real one would turn this test into a test of the runner's PATH.
+# it, so the real one would turn this test into a test of the runner's PATH. `mv`
+# is a stand-in that refuses a restore and is the real tool otherwise, because a
+# read-only directory does not stop root and a CI container may run as root.
+#
+# The kill of the lane is real: the fixture app is the lane's direct child, so
+# the app's `kills-lane` mode sends its parent a SIGKILL while the shim is staged.
+# The SIGINT is real too: `timeout` is a stand-in that sends it to the lane, from
+# the foreground child the lane is waiting for, and is the real tool otherwise.
+# `ci/test/gpui-shim-staging-test.sh` holds the staging library to the rest of its
+# rules; this lane is the one it cannot run, because it needs Darwin and a stamp.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 lane="${root}/ci/test/plat37-macos-window-capture.sh"
@@ -128,14 +137,15 @@ mkdir -p "${sandbox}/src/frontend/gpui" "${sandbox}/src/tests/visual" \
 	"${sandbox}/build/bin" "${sandbox}/ci/test" "${sandbox}/ci/lib" \
 	"${isonim}/tools" "${isonim}/rust/gpui-nim-shim/src" \
 	"$(dirname "${live}")" "$(dirname "${staged}")" "${work}/trace"
-cp "${root}/ci/lib/build-freshness.sh" "${root}/ci/lib/sha256.sh" "${sandbox}/ci/lib/"
+cp "${root}/ci/lib/build-freshness.sh" "${root}/ci/lib/gpui-shim-stage.sh" \
+	"${root}/ci/lib/sha256.sh" "${sandbox}/ci/lib/"
 # Named through a variable so that `shell-gate-coverage.sh` does not credit the
 # real capture lane as run: this copy runs against the stand-ins described above.
 sandbox_lane="${sandbox}/ci/test/$(basename "${lane}")"
 cp "${lane}" "${sandbox_lane}"
 cp "${root}/src/tests/visual/scenarios.json" "${sandbox}/src/tests/visual/"
 cat >"${sandbox}/${BF_GPUI_ENTRY}" <<NIM
-import std/os
+import std/[os, posix]
 proc gpui_launch() {.importc: "gpui_launch", cdecl, dynlib: "${live}".}
 proc gpui_set_window_activated_dispatcher()
   {.importc: "gpui_set_window_activated_dispatcher", cdecl, dynlib: "${live}".}
@@ -147,6 +157,8 @@ of "logs":
   stderr.writeLine("the app says the display went away")
 of "silent":
   discard
+of "kills-lane":
+  discard kill(getppid(), SIGKILL)
 else:
   gpui_launch()
   gpui_set_window_activated_dispatcher()
@@ -340,7 +352,24 @@ cat >"${work}/stand-ins/ffmpeg" <<'SH'
 for output; do :; done
 : >"${output}"
 SH
-chmod +x "${work}/stand-ins/ffmpeg"
+cat >"${work}/stand-ins/mv" <<SH
+#!/bin/sh
+# Stand-in: see the test's header.
+if [ "\$3" = "\${PLAT37_REFUSE_MV_TO:-}" ]; then
+	echo 'stand-in mv: refused' >&2
+	exit 1
+fi
+exec "$(command -v mv)" "\$@"
+SH
+cat >"${work}/stand-ins/timeout" <<SH
+#!/bin/sh
+# Stand-in: see the test's header. Only once the backup shows the shim is staged.
+if [ -n "\${PLAT37_INTERRUPT_LANE:-}" ] && [ -e "${live}.gpui-lane-backup" ]; then
+	kill -INT "\${PPID}"
+fi
+exec "$(command -v timeout)" "\$@"
+SH
+chmod +x "${work}/stand-ins/ffmpeg" "${work}/stand-ins/mv" "${work}/stand-ins/timeout"
 
 out="${work}/lane-out"
 driver="${sandbox}/build/plat37_macos_window_capture"
@@ -354,10 +383,13 @@ run_lane() {
 	local app="$1"
 	lane_rc=0
 	rm -rf "${out}" "${driver}" "${sandbox}/build/plat37_macos_window_grade"
-	PATH="${work}/stand-ins:${PATH}" PLAT37_TEST_APP="${app}" ISONIM_GPUI="${isonim}" \
-		CODETRACER_PLAT37_TRACE="${work}/trace" REPLAY_SERVER_BIN=/usr/bin/true \
-		CODETRACER_PLAT37_SETTLE_S=0 CODETRACER_PLAT37_WAIT_MS=0 \
-		bash "${sandbox_lane}" --only shell --out "${out}" >"${output}" 2>&1 || lane_rc=$?
+	# The group's redirection is for bash's own `Killed: 9` notice about the lane.
+	{
+		PATH="${work}/stand-ins:${PATH}" PLAT37_TEST_APP="${app}" ISONIM_GPUI="${isonim}" \
+			CODETRACER_PLAT37_TRACE="${work}/trace" REPLAY_SERVER_BIN=/usr/bin/true \
+			CODETRACER_PLAT37_SETTLE_S=0 CODETRACER_PLAT37_WAIT_MS=0 \
+			bash "${sandbox_lane}" --only shell --out "${out}" >"${output}" 2>&1 || lane_rc=$?
+	} 2>/dev/null
 }
 # The operator's shim is back, and a scenario log shows the lane really ran one.
 assert_restored() {
@@ -378,7 +410,9 @@ says 'a' "${bin}"
 says 'a' "${staged}"
 says 'a' 'just plat37-shims'
 grep -q 'the build the operator had in place' "${live}" || report 'a: the stale shim was staged'
-[ ! -e "${live}.plat37macos-backup" ] || report 'a: a backup was taken for a staging that must not happen'
+backup="${live}.gpui-lane-backup"
+[ ! -e "${backup}" ] || report 'a: a backup was taken for a staging that must not happen'
+[ ! -e "${live}.gpui-lane-no-original" ] || report 'a: a marker was left for a staging that must not happen'
 [ ! -e "${out}/shell.gpui.log" ] || report 'a: a scenario ran'
 [ ! -e "${driver}" ] || report 'a: the capture driver was built before the refusal'
 verdict 'lane: a shim that lacks an import refuses before anything is staged' "${before}"
@@ -453,6 +487,45 @@ record = json.loads(open(f"{sys.argv[1]}/records.jsonl").read().splitlines()[0])
 assert record["appLog"] == [], record
 PY
 verdict 'lane: a silent app is reported as silent, with no cause offered' "${before}"
+
+# The kill's own result is the control: the re-run below has something to keep.
+before="${failures}"
+run_lane kills-lane
+[ "${lane_rc}" -eq 137 ] || report "f: the lane exited ${lane_rc}, not by the SIGKILL"
+cmp -s "${staged}" "${live}" || report 'f: the kill did not leave the arm at the live path'
+[ "${backup}" -ef "${cargo_output}" ] || report "f: the kill did not leave cargo's inode in the backup"
+run_lane silent
+[ "${lane_rc}" -ne 0 ] || report 'f: the lane passed a refused scenario'
+says 'f' "kept the original shim at ${backup}"
+assert_restored 'f'
+[ ! -e "${backup}" ] || report 'f: the backup remains'
+verdict 'lane: a run after a SIGKILL keeps the backup and restores it' "${before}"
+
+# The scenario is refused here whatever the restore does, so the status cannot
+# show that the restore alone fails the lane: `says` is what ties this to it.
+before="${failures}"
+PLAT37_REFUSE_MV_TO="${live}" run_lane silent
+[ "${lane_rc}" -ne 0 ] || report 'g: the lane exited 0 after its restore failed'
+says 'g' 'stand-in mv: refused'
+says 'g' "failed to restore ${live}; backup remains at ${backup}"
+says 'g' 'restoring the capture shim failed'
+grep -q 'the build the operator had in place' "${backup}" || report 'g: the backup lost the original'
+cmp -s "${staged}" "${live}" || report 'g: the arm did not stay at the live path'
+run_lane silent
+assert_restored 'g'
+[ ! -e "${backup}" ] || report 'g: the backup remains after a later run'
+verdict 'lane: a refused restore names the backup, and a later run recovers' "${before}"
+
+# A SIGINT from the foreground child, and not a SIGTERM from the app, because the
+# status is then the control. Without the lane's signal traps a SIGTERM still exits
+# 143 through its EXIT trap, and bash ignores a SIGINT sent to it alone once the
+# child it waits for has exited normally, so the lane would run on and refuse.
+before="${failures}"
+PLAT37_INTERRUPT_LANE=1 run_lane silent
+[ "${lane_rc}" -eq 130 ] || report "h: a SIGINT while staged exited ${lane_rc}, not 130"
+assert_restored 'h'
+[ ! -e "${backup}" ] || report 'h: the backup remains'
+verdict 'lane: a SIGINT while staged ends the lane, restored' "${before}"
 
 [ "${failures}" -eq 0 ] || {
 	echo "FAIL: ${failures} assertion(s) failed" >&2

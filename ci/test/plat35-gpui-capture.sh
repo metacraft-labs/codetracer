@@ -103,16 +103,11 @@ esac
 SHIM_DIR="${ISONIM_GPUI}/rust/target/plat37"
 LIVE_SHIM="${ISONIM_GPUI}/rust/target/debug/libgpui_nim_shim.${SHIM_EXT}"
 HEADLESS_SHIM="${SHIM_DIR}/libgpui_nim_shim.headless.${SHIM_EXT}"
-SHIM_BACKUP=""
 
-restore_shim() {
-	if [ -n "${SHIM_BACKUP}" ] && [ -f "${SHIM_BACKUP}" ]; then
-		mv -f "${SHIM_BACKUP}" "${LIVE_SHIM}"
-		SHIM_BACKUP=""
-		echo "restored ${LIVE_SHIM}"
-	fi
-}
-trap restore_shim EXIT
+# Stages and restores the shim: `ci/lib/gpui-shim-stage.sh` says how, and why.
+# shellcheck source=ci/lib/gpui-shim-stage.sh disable=SC1091
+source "${root}/ci/lib/gpui-shim-stage.sh" || fail "ci/lib/gpui-shim-stage.sh could not be loaded"
+gpui_shim_install_traps
 
 [ -x "${BIN}" ] || fail "${BIN} is not built. Run \`just build-gpui\`."
 [ -f "${SCENARIOS}" ] || fail "the scenario set is not at ${SCENARIOS}"
@@ -199,21 +194,8 @@ PY
 # ---------------------------------------------------------------------------
 # Stage the headless shim and capture
 # ---------------------------------------------------------------------------
-# MOVED ASIDE, NEVER COPIED OVER, on both hosts, for a different reason on each.
-# On Linux `target/debug/<shim>` is a hardlink to cargo's `deps/` output, so a
-# `cp` onto it rewrites what cargo believes it built. On macOS cargo copies the
-# uplifted file instead (https://github.com/rust-lang/cargo/issues/10060,
-# measured with cargo 1.96 on 2026-11-01), so `deps/` is out of reach and the
-# risk is the code signature: an app loading new bytes from an inode that was
-# mapped before dies with SIGKILL (Code Signature Invalid).
-# `plat37-macos-window-capture.sh` carries that measurement. Moving keeps
-# cargo's file for the restore and gives the staged shim a new inode.
-if [ -z "${SHIM_BACKUP}" ] && [ -f "${LIVE_SHIM}" ]; then
-	SHIM_BACKUP="${LIVE_SHIM}.plat35-backup"
-	mv -f "${LIVE_SHIM}" "${SHIM_BACKUP}" ||
-		fail "the live shim could not be moved aside, so nothing was staged"
-fi
-cp -f "${HEADLESS_SHIM}" "${LIVE_SHIM}" ||
+# Moved aside and never copied over: `ci/lib/gpui-shim-stage.sh` says why.
+gpui_shim_stage "${LIVE_SHIM}" "${HEADLESS_SHIM}" ||
 	fail "the headless shim could not be staged at ${LIVE_SHIM}"
 echo "shim in place: headless ($(wc -c <"${LIVE_SHIM}" | tr -d ' ') bytes)"
 
@@ -307,7 +289,7 @@ print(json.dumps(rec))" "${png}.json" "${verdict}" >>"${RECORDS}"
 	fi
 done <"${SPEC}"
 
-restore_shim
+gpui_shim_restore || fail "the live shim could not be restored after the captures"
 
 echo
 echo "=== ${captured} captured, ${refused} refused ==="
