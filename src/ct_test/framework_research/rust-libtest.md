@@ -6,7 +6,8 @@
 - Framework/runtime: Cargo's default `cargo test` flow and rustc's built-in
   libtest harness.
 - Milestone: M6, first provider slice.
-- Status: discovery, source locations, selector construction, command
+- Status: discovery, source locations, selector construction, reconciliation
+  with the compiled binaries' `--list`, doc-test discovery, command
   construction, and Cargo/libtest execution are implemented. The run callback
   reports one normalized terminal outcome per requested unit, from the command's
   exit code and libtest's summary line. CodeTracer recording, framework-native
@@ -45,13 +46,22 @@ before execution.
 
 ## How To Detect The Framework
 
-- Project marker: `Cargo.toml` at the workspace/package root.
-- Candidate source roots for M6:
-  - `src/**/*.rs` for unit tests compiled into package targets.
-  - `tests/*.rs` and `tests/**/*.rs` as candidate integration test source files.
-- Cargo itself treats each `tests/*.rs` file as a separate integration test
-  target by convention; deeper files are normally modules/helpers unless
-  explicitly declared as targets in `Cargo.toml`.
+- Project marker: `Cargo.toml` at the workspace/package root. A virtual
+  workspace (a root manifest with only `[workspace]`) is a project too.
+- Which files hold tests is Cargo's answer, not a directory convention.
+  `cargo metadata --no-deps` names every workspace member at or below the
+  project root and, for each, its targets with their root files, editions and
+  `test`/`doctest` flags. A file belongs to a target when that target's `mod`
+  declarations reach it, followed the way rustc resolves them (beside a crate
+  root or `mod.rs`, in a directory named after any other file, `#[path]`
+  relative to the declaring file's directory, inline modules adding their own
+  components). A file no target reaches is not compiled and holds no units.
+  When several targets compile one file, it belongs to the first of library,
+  binary, integration test, example, bench.
+  <https://doc.rust-lang.org/reference/items/modules.html#module-source-filenames>
+- Only when Cargo cannot be asked (no usable `cargo`, as on the Nix-fallback
+  route) do the conventions decide: `src/**/*.rs` and `tests/**/*.rs` of the
+  root package, with module paths guessed from file paths.
 - Custom harnesses (`harness = false`) and non-Cargo build systems are out of
   scope for M6 and must be detected/researched before execution support relies
   on them.
@@ -68,16 +78,25 @@ M6 identifies:
 - `#[ignore] #[test] fn name()`
 - `#[tokio::test] async fn name()`
 - `#[async_std::test] async fn name()`
+- any of these written on one line, such as `#[test] fn name() {}`
 - nested inline `mod` paths such as `tests::inner::case`
-- standard file-module prefixes for `src/foo.rs`, such as `foo::case`
+- file-module prefixes from the owning target's module tree, such as
+  `foo::case` for `src/foo.rs`, including modules under a custom `[lib]` or
+  `[[bin]]` path or a `#[path]` attribute
+- raw identifiers as libtest prints them: rustc keeps `r#` only for a word
+  reserved in the crate's edition, so `fn r#try` is `r#try` in 2018 and later
+  and `try` in 2015, and `fn r#plain` is `plain`
+- doc tests, by the name rustdoc gives them (`src/lib.rs - item (line N)`),
+  located at the opening fence on line `N`
 - integration test file items without a file-name selector prefix, such as
   `integration_smoke` from `tests/integration_sample.rs`
 
 M6 does not identify:
 
-- macro-generated tests;
-- proc-macro-expanded test functions beyond the known async test attributes;
-- doctests;
+- macro-generated tests and proc-macro-expanded test functions beyond the
+  known async test attributes: no source line declares them. Project
+  discovery still sees them in the binaries' `--list` and names them in a
+  warning diagnostic, so the omission is never silent;
 - benchmarks;
 - custom test harness items;
 - selectors that require rust-analyzer's full semantic model.
@@ -129,9 +148,34 @@ Observed/expected mapping:
 - `cargo test -- --list` can list built tests, but it may require compiling the
   full package and does not provide source ranges.
 
-M6 selectors are source-derived and libtest-like. Before actual execution is
-considered final, the provider should optionally reconcile them with
-`cargo test -- --list` or target-specific `cargo test --test NAME -- --list`.
+Discovery reconciles. File discovery (`--file`, editor gutters) reads source
+and `cargo metadata` only, so it compiles nothing and lists no doc tests.
+Project discovery then builds the test targets
+(`cargo test --no-run --message-format=json --package <member>...`), runs each
+test executable with `--list`, and runs `cargo test --doc --package <member>
+-- --list` for each library with doc tests:
+
+- a source selector the binary lists is confirmed;
+- one the binary spells differently, ignoring `r#` prefixes, takes the
+  binary's spelling;
+- one the binary does not list stays a unit (a `#[cfg]`-gated test), which
+  the run reports skipped;
+- a listed test no source declaration places is named in a warning
+  diagnostic and is not a unit;
+- each doc test becomes a unit, its file resolved against the workspace root
+  rustdoc names paths from;
+- a target that did not build, or whose `--list` failed or timed out, keeps
+  its source selectors, and the diagnostic says which targets were not
+  checked. A certificate covers exactly the targets it names, and partial
+  coverage is permitted (test-certificates-spec `Standard.md` §8), so a test
+  discovery could not place is a coverage gap, never a false claim.
+
+A doc test cannot be selected alone: rustdoc splits a filter on whitespace and
+ORs the pieces. A doc-test unit runs `cargo test --doc -- <file path>`, which
+runs every doc test of that file, and is judged on its own
+`test <name> ... ok|FAILED|ignored` line alone, in both directions. A failing
+sibling therefore fails only its own unit, and an `ignore` block finishes
+`skipped`.
 
 ## How To Run Tests
 
@@ -184,9 +228,10 @@ Notes:
 
 ## How To Run All Tests In A Project
 
-Use `cargo test` from the package/workspace root. Workspaces require package
-selection policy (`--package`, `--workspace`, or current package) before the
-contract is frozen.
+Use `cargo test` from the package/workspace root. Units are dispatched one
+test at a time, and each command names its member with `--package` whenever
+the workspace has several members or the member is not the project root's
+own package.
 
 ## How To Capture Output Of Individual Tests
 
@@ -229,13 +274,16 @@ M6 uses a modular Nim provider:
 - provider id: `rust-libtest`
 - language: `rust`
 - framework: `libtest/cargo-test`
-- discovery: source parser
+- discovery: source parser over the module trees `cargo metadata` describes,
+  reconciled with the compiled binaries' `--list` and rustdoc's doc-test list
+  (see "Selectors And libtest `--list`")
 - command construction: explicit helper returning argv parts
 - target selection: `cargo metadata --no-deps` names the targets, so a
   `[[bin]]` or `[[test]]` renamed in the manifest runs under its declared name.
-  A crate root selects its own target, and a file below `tests/<x>/` or
-  `src/bin/<x>/` selects that directory's `main.rs` target. Other files use
-  `--lib` when the package has a library, then the `src/main.rs` binary. In a
+  A file runs under the target whose module tree reaches it. A file no tree
+  reaches falls back to its directory's `main.rs` target below `tests/<x>/` or
+  `src/bin/<x>/`, then `--lib` when the package has a library, then the
+  `src/main.rs` binary. In a
   workspace the command also names the package, because `default-members` can
   otherwise redirect it. When Cargo cannot be asked, as on the Nix-fallback
   route, the same choice is made from the path conventions
@@ -270,10 +318,13 @@ The M6 fixture crate includes:
 
 ## Risks And Open Questions
 
-- Source-derived selectors are not macro-perfect; rust-analyzer or cargo/libtest
-  reconciliation is needed before final execution support.
+- Project discovery compiles the test targets, so its cost is a test build;
+  the run that follows reuses it.
+- `#[cfg]` is not evaluated when module trees are followed, so a gated module's
+  tests are units that run as skipped.
+- A module several targets compile is attributed to one of them; the other
+  targets' copies are named in the unplaced-test diagnostic.
 - File-scoped source execution is approximate for `src/*.rs`.
-- Workspace/package target selection is not designed in M6.
 - libtest-native JSON/event parsing and per-test output attribution remain
   open; current results are run-unit outcomes read from the exit code and
   libtest's text summary.

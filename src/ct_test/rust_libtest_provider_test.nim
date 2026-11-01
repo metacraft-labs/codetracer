@@ -11,7 +11,7 @@
 ## suite points `TEST_CERTIFICATES_DIR` (and the system root) at a scratch
 ## directory before anything runs.
 
-import std/[json, options, os, osproc, sequtils, strutils, unittest]
+import std/[algorithm, json, options, os, osproc, sequtils, strutils, unittest]
 
 import certificate_issuance
 import contracts
@@ -109,27 +109,81 @@ mod tests {
 }
 """
 
+proc scratchCargoTree(name: string;
+    files: openArray[(string, string)]): string =
+  ## A scratch directory holding exactly `files`, manifests included, for the
+  ## layouts a single generated `[package]` cannot express.
+  require findExe("cargo").len > 0
+  result = getTempDir() / ("ct-rust-libtest-" & name & "-" &
+    $getCurrentProcessId())
+  removeDir(result)
+  createDir(result)
+  for (path, content) in files:
+    createDir(parentDir(result / path))
+    writeFile(result / path, content)
+
 proc scratchCargoProject(name: string;
     sources: openArray[(string, string)]): string =
   ## A real Cargo package with no registry dependencies and the given source
   ## files. Keeping these apart from the discovery corpus avoids compiling that
   ## corpus's async development dependencies and its deliberately failing
   ## integration test.
-  require findExe("cargo").len > 0
-  result = getTempDir() / ("ct-rust-libtest-" & name & "-" &
-    $getCurrentProcessId())
-  removeDir(result)
-  createDir(result)
-  writeFile(result / "Cargo.toml", """
+  result = scratchCargoTree(name, @[("Cargo.toml", """
 [package]
 name = """ & "\"" & PackageName & "\"" & """
 
 version = "0.1.0"
 edition = "2021"
-""")
-  for (path, content) in sources:
-    createDir(parentDir(result / path))
-    writeFile(result / path, content)
+""")] & @sources)
+
+proc cargoListedTests(project: string): seq[string] =
+  ## Every test name Cargo's own binaries list for the whole workspace, doc
+  ## tests included, sorted. This is the ground truth discovery must equal:
+  ## it is read from `cargo test -- --list`, not from anything the provider
+  ## computes. A test binary prints `<name>: test` per test
+  ## (https://doc.rust-lang.org/rustc/tests/index.html#--list).
+  let (output, code) = execCmdEx(
+    "cargo test --workspace -- --list", workingDir = project)
+  if code != 0:
+    checkpoint(output)
+  require code == 0
+  for line in output.splitLines:
+    if line.endsWith(": test"):
+      result.add line[0 ..< line.len - ": test".len]
+  result.sort(system.cmp[string])
+
+proc discoverWorkspace(project: string): DiscoverResponse =
+  ## Workspace discovery through the default registry, as `ct test run` does.
+  discover(
+    DiscoverRequest(scope: dskWorkspace, workspaceRoot: project,
+      jsonOutput: true),
+    newDefaultProviderRegistry(), newDiscoveryCache())
+
+proc rustCatalog(response: DiscoverResponse): TestCatalog =
+  for catalog in response.catalogs:
+    if catalog.provider.id == RustLibtestProviderId:
+      return catalog
+  raise newException(ValueError, "no rust-libtest catalog")
+
+proc sortedSelectors(catalog: TestCatalog): seq[string] =
+  result = catalog.selectors
+  result.sort(system.cmp[string])
+
+proc runItem(project: string; item: TestItem):
+    ProviderResult[seq[TestEvent]] =
+  ## Run one item exactly as `run_orchestration.scopeForItem` dispatches it.
+  newRustLibtestM1Provider().provider.run(TestScope(
+    kind: tskSingle,
+    projectRoot: project,
+    file: project / item.file,
+    testId: item.id,
+    selector: item.selector))
+
+proc finishedStatus(runResult: ProviderResult[seq[TestEvent]]):
+    TestResultStatus =
+  let finished = runResult.value.eventsOfKind(tekTestFinished)
+  require finished.len == 1
+  finished[0].status.get
 
 proc git(repo: string; args: openArray[string]) =
   let (output, code) = execCmdEx(
@@ -281,12 +335,15 @@ suite "ct-test M6 Rust libtest provider":
     check catalog.validateCatalog.valid
 
   test "project discovery aggregates src and integration test files":
+    # Source and `cargo metadata` only: reconciling would compile the corpus,
+    # and with it the async runtimes it names, from the registry. The
+    # reconciled route is covered on dependency-free crates below.
     let response = discover(
       DiscoverRequest(
         scope: dskWorkspace,
         workspaceRoot: rustRoot(),
         jsonOutput: true),
-      newRustLibtestProviderRegistry(),
+      newRustLibtestProviderRegistry(reconcile = false),
       newDiscoveryCache())
 
     check discoverExitCode(response) == 0
@@ -605,9 +662,13 @@ harness = false
       layout = parseCargoLayout(
         "warning: unused manifest key: x\n" & document, project)
     check layout.known
-    check layout.packageName == "p"
+    require layout.packages.len == 1
+    check layout.packages[0].name == "p"
     check layout.workspaceMembers == 1
-    check layout.targets.len == 1
+    check layout.packages[0].targets.len == 1
+    # Cargo's defaults stand in for flags an older Cargo leaves out.
+    check layout.packages[0].targets[0].test
+    check layout.packages[0].targets[0].edition == "2015"
     check not parseCargoLayout("", project).known
     check not parseCargoLayout("{not json", project).known
     check not parseCargoLayout("{}", project).known
@@ -743,12 +804,14 @@ required-features = ["extra"]
     check libtestPassedCount("3 | // test result: ok. 9 passed;") == 0
 
   test "selectors start at the crate root of the file's own target":
+    # A file is compiled only when a `mod` declaration reaches it, so the
+    # directory target declares both of its modules.
     let project = scratchCargoProject("selectors", {
       "src/bin/tool.rs": PassingTestModule,
-      "src/bin/dir/main.rs": PassingTestModule,
+      "src/bin/dir/main.rs": "mod sub;\nmod deep;\n" & PassingTestModule,
       "src/bin/dir/sub.rs": PassingTestModule,
       "src/bin/dir/deep/mod.rs": PassingTestModule,
-      "tests/it/main.rs": "#[test]\nfn passes() {}\n",
+      "tests/it/main.rs": "mod sub;\n#[test]\nfn passes() {}\n",
       "tests/it/sub.rs": "#[test]\nfn passes() {}\n"})
     defer: removeDir(project)
     proc selectors(relativeFile: string): seq[string] =
@@ -759,6 +822,193 @@ required-features = ["extra"]
     check selectors("src/bin/dir/deep/mod.rs") == @["deep::tests::passes"]
     check selectors("tests/it/main.rs") == @["passes"]
     check selectors("tests/it/sub.rs") == @["sub::passes"]
+
+  test "rust_libtest_reconciles_source_and_binary_names":
+    ## Regression for
+    ## 2026-11-01-rust-libtest-discovery-omits-or-misnames-valid-tests.md, its
+    ## first group: selectors derived from the file path named no compiled
+    ## test, so these units ran nothing and reported skipped. A `[lib]` and a
+    ## `[[bin]]` with custom paths, a module only a binary includes (in a
+    ## crate that also has a library), a `#[path]` module, raw identifiers, a
+    ## brace hidden between two lifetimes, and a one-line test. Discovery must
+    ## equal what Cargo's own binaries list, and every unit must really pass.
+    let project = committed(scratchCargoTree("reconcile", {
+      "Cargo.toml": """
+[package]
+name = "ct-rust-reconcile"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "lib/root.rs"
+
+[[bin]]
+name = "tool"
+path = "app/tool.rs"
+""",
+      "lib/root.rs": """
+mod sub;
+#[path = "extra/paths.rs"]
+mod renamed;
+#[test] fn one_line() {}
+#[test]
+fn r#try() {}
+#[test]
+fn r#plain() {}
+mod r#match {
+    #[test]
+    fn inside() {}
+}
+""",
+      "lib/sub.rs": """
+pub struct Holder<'a> { pub value: &'a u8 }
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn after_lifetimes() {}
+}
+""",
+      "lib/extra/paths.rs": "#[test]\nfn via_path_attribute() {}\n",
+      "app/tool.rs": "mod only_tool;\nfn main() {}\n",
+      "app/only_tool.rs": "#[test]\nfn in_tool() {}\n",
+      "src/main.rs": "mod helpers;\nfn main() {}\n",
+      "src/helpers.rs": PassingTestModule}))
+    defer: removeDir(project)
+    let listed = cargoListedTests(project)
+    check "r#try" in listed
+    check "plain" in listed
+    check "one_line" in listed
+    check "renamed::via_path_attribute" in listed
+    check "only_tool::in_tool" in listed
+    check "helpers::tests::passes" in listed
+    let response = discoverWorkspace(project)
+    checkpoint(allMessages(response))
+    let catalog = response.rustCatalog
+    check catalog.sortedSelectors == listed
+    check catalog.validateCatalog.valid
+    # A file's own catalog agrees with the project's, without compiling.
+    check rustFileCatalog(project, project / "src/helpers.rs").value.
+      selectors == @["helpers::tests::passes"]
+    check rustFileCatalog(project, project / "lib/root.rs").value.
+      selectors == @["one_line", "r#try", "plain", "r#match::inside"]
+
+    let (code, summary) = runCli(project)
+    checkpoint($summary)
+    check code == ExitRunPassed
+    check summary["total"].getInt == listed.len
+    check summary["executed"].getInt == listed.len
+    check summary["passed"].getInt == listed.len
+    check summary["certificate"]["issued"].getBool
+
+  test "a raw identifier keeps r# only where the crate's edition reserves it":
+    ## libtest prints `r#try` in a 2018+ crate and `try` in a 2015 one, where
+    ## `try` is no keyword; `r#match` everywhere, and never `r#plain`.
+    let project = scratchCargoTree("raw-2015", {
+      "Cargo.toml": "[package]\nname = \"raw\"\nversion = \"0.1.0\"\n" &
+        "edition = \"2015\"\n",
+      "src/lib.rs": "#[test]\nfn r#try() {}\n#[test]\nfn r#match() {}\n" &
+        "#[test]\nfn r#plain() {}\n"})
+    defer: removeDir(project)
+    check rustFileCatalog(project, project / "src/lib.rs").value.selectors ==
+      @["try", "r#match", "plain"]
+    check cargoListedTests(project) == @["plain", "r#match", "try"]
+
+  test "virtual workspace members are discovered and run":
+    ## Regression for the issue's second group: a root `Cargo.toml` holding
+    ## only `[workspace]` has no `src/`, so discovery found nothing at all and
+    ## `ct test run` had no unit to execute for either member.
+    let project = committed(scratchCargoTree("virtual", {
+      "Cargo.toml": "[workspace]\nmembers = [\"crates/a\", \"crates/b\"]\n" &
+        "resolver = \"2\"\n",
+      "crates/a/Cargo.toml": "[package]\nname = \"a\"\nversion = \"0.1.0\"\n" &
+        "edition = \"2021\"\n",
+      "crates/a/src/lib.rs": PassingTestModule,
+      "crates/b/Cargo.toml": "[package]\nname = \"b\"\nversion = \"0.1.0\"\n" &
+        "edition = \"2015\"\n",
+      "crates/b/src/lib.rs": "#[test]\nfn r#try() {}\n",
+      "crates/b/tests/flat.rs": "#[test]\nfn flat() {}\n"}))
+    defer: removeDir(project)
+    let listed = cargoListedTests(project)
+    check listed == @["flat", "tests::passes", "try"]
+    let catalog = discoverWorkspace(project).rustCatalog
+    check catalog.sortedSelectors == listed
+    check catalog.itemBySelector("tests::passes").file == "crates/a/src/lib.rs"
+    check catalog.itemBySelector("flat").file == "crates/b/tests/flat.rs"
+    let (code, summary) = runCli(project)
+    checkpoint($summary)
+    check code == ExitRunPassed
+    check summary["executed"].getInt == 3
+    check summary["passed"].getInt == 3
+    check summary["certificate"]["issued"].getBool
+
+  test "doc tests are discovered at their fence and judged on their own line":
+    ## Regression for the issue's second group: doc tests were never units,
+    ## so a certificate could silently omit them. rustdoc splits a filter on
+    ## whitespace, so a unit runs its file's doc tests and must report only
+    ## its own result line: the failing sibling may not fail the passing one.
+    let project = committed(scratchCargoTree("doctests", {
+      "Cargo.toml": "[package]\nname = \"docs\"\nversion = \"0.1.0\"\n" &
+        "edition = \"2021\"\n",
+      "src/lib.rs": """
+//! ```
+//! assert_eq!(docs::answer(), 42);
+//! ```
+
+/// ```
+/// assert_eq!(docs::answer(), 42);
+/// ```
+///
+/// ```compile_fail
+/// let x: u8 = "not a number";
+/// ```
+///
+/// ```ignore
+/// this is not rust
+/// ```
+pub fn answer() -> i32 { 42 }
+
+/// ```
+/// assert_eq!(docs::answer(), 41);
+/// ```
+pub fn wrong() {}
+"""}))
+    defer: removeDir(project)
+    let listed = cargoListedTests(project)
+    check listed == @["src/lib.rs - (line 1)", "src/lib.rs - answer (line 13)",
+      "src/lib.rs - answer (line 5)", "src/lib.rs - answer (line 9)",
+      "src/lib.rs - wrong (line 18)"]
+    let catalog = discoverWorkspace(project).rustCatalog
+    check catalog.sortedSelectors == listed
+    check catalog.validateCatalog.valid
+    let fence = catalog.itemBySelector("src/lib.rs - answer (line 5)")
+    check fence.file == "src/lib.rs"
+    check fence.range.startLine == 5
+    check "doctest" in fence.tags
+    for (selector, expected) in [
+        ("src/lib.rs - (line 1)", tsPassed),
+        ("src/lib.rs - answer (line 5)", tsPassed),
+        ("src/lib.rs - answer (line 9)", tsPassed),
+        ("src/lib.rs - answer (line 13)", tsSkipped),
+        ("src/lib.rs - wrong (line 18)", tsFailed)]:
+      checkpoint(selector)
+      let runResult = runItem(project, catalog.itemBySelector(selector))
+      check runResult.finishedStatus == expected
+      for event in runResult.value:
+        check event.validateEvent.valid
+
+  test "a test only a macro expands is reported, never silently omitted":
+    ## The binary lists it, but no source line declares it, so discovery
+    ## cannot place it in a file. It must say so where a reader looks.
+    let project = scratchCargoProject("macro-made", {"src/lib.rs": """
+macro_rules! make_test { ($name:ident) => { #[test] fn $name() {} }; }
+make_test!(made_by_macro);
+#[test]
+fn written() {}
+"""})
+    defer: removeDir(project)
+    let response = discoverWorkspace(project)
+    check response.rustCatalog.selectors == @["written"]
+    check "made_by_macro" in allMessages(response)
 
   test "command construction is explicit and recording remains unsupported":
     let unitSelector = rustFileCatalog(rustRoot(), libFile()).value.

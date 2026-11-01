@@ -132,6 +132,7 @@ dllinject
 dlopen
 docbook
 docstrings
+doctest
 doctests
 dont
 drainable
@@ -252,6 +253,7 @@ rpms
 rubytracer
 runbook
 rustc
+rustdoc
 rustfmt
 rustup
 seekable
