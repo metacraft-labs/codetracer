@@ -1685,8 +1685,11 @@ pub fn program_event_of_record(reader: &dyn TraceReader, event_record: &DbRecord
         metadata: event_record.metadata.to_string(),
         // `Write` is standard output and `WriteStderr` standard error
         // (`spec/Trace-Files/MCR-Event-Log-Stream.md` §2.3). A write to
-        // standard error is terminal output, but not standard output.
-        stdout: event_record.kind != EventLogKind::WriteStderr,
+        // standard error is terminal output, but not standard output, and an
+        // event that is not a write at all (an `Error`, a contract's
+        // `EvmEvent`, a file read) is neither: marking it `stdout` made every
+        // Event Log print it as `stdout: …`. Only `Write` is standard output.
+        stdout: event_record.kind == EventLogKind::Write,
         event_index: index,
         tracepoint_result_index: NO_INDEX,
         high_level_path: path,
@@ -6234,5 +6237,62 @@ mod classifier_lang_tests {
     fn an_unknown_extension_has_no_grammar() {
         assert_eq!(classifier_lang_for_path("/w/main.unknownext"), None);
         assert_eq!(classifier_lang_for_path("/w/Makefile"), None);
+    }
+}
+
+#[cfg(test)]
+mod event_stdout_tests {
+    //! Which events an Event Log row marks as standard output.
+    //!
+    //! `program_event_of_record` builds the rows of `ct/event-load` and of
+    //! `ct/load-terminal` alike, and a front-end prints a row whose `stdout`
+    //! is set as `stdout: <content>` (`event_log_vm.eventLogText`). It marked
+    //! every event that was not a `WriteStderr` that way, so a Starknet
+    //! contract's failed entry point read "stdout: Entry point … not found in
+    //! contract." in the Event Log. These tests pin both halves: the terminal's
+    //! own two kinds keep the flag they had, and no other kind claims it.
+    //!
+    //! No mock: the reader is the in-memory one the other tests here use, and
+    //! the record is built exactly as the CTFS loader builds one.
+    use std::path::PathBuf;
+
+    use codetracer_trace_types::{EventLogKind, StepId};
+
+    use super::{Db, DbRecordEvent, program_event_of_record};
+    use crate::in_memory_trace_reader::InMemoryTraceReader;
+
+    fn stdout_of(kind: EventLogKind) -> bool {
+        let reader = InMemoryTraceReader::new(Db::new(&PathBuf::from("/tmp/ct-event-stdout")));
+        let record = DbRecordEvent {
+            kind,
+            content: "Entry point EntryPointSelector(0xfe80f537) not found in contract.".to_string(),
+            step_id: StepId(0),
+            metadata: String::new(),
+        };
+        program_event_of_record(&reader, &record, 0).stdout
+    }
+
+    /// The terminal's input is unchanged: it takes `Write` and `WriteStderr`
+    /// only (`dap_handler::terminal_output_category`) and tells them apart by
+    /// this flag.
+    #[test]
+    fn terminal_writes_keep_their_stream() {
+        assert!(stdout_of(EventLogKind::Write), "a Write is standard output");
+        assert!(!stdout_of(EventLogKind::WriteStderr), "a WriteStderr is standard error");
+    }
+
+    #[test]
+    fn an_event_that_is_not_standard_output_is_not_marked_stdout() {
+        for kind in [
+            EventLogKind::Error,
+            EventLogKind::EvmEvent,
+            EventLogKind::TraceLogEvent,
+            EventLogKind::WriteFile,
+            EventLogKind::WriteOther,
+            EventLogKind::Read,
+            EventLogKind::Open,
+        ] {
+            assert!(!stdout_of(kind), "{kind:?} is not standard output");
+        }
     }
 }
