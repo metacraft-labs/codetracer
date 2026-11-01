@@ -27,6 +27,9 @@ proc envOf(pairs: openArray[(string, string)]): StoreEnvironment =
 suite "the local certificate store's roots (Transport.md §2.1)":
 
   test "the JS-shared resolver agrees with the reference library on every row":
+    # ct-home-sweep: not codetracer state -- HOME / XDG_STATE_HOME /
+    # LOCALAPPDATA are inputs to the cross-tool test-certificates store's own
+    # §2.1 rules, which CODETRACER_HOME deliberately does not override.
     let cases: seq[(StoreRootPlatform, seq[(string, string)], string)] = @[
       (srpUnix, @[("HOME", "/home/u")], "1000"),
       (srpUnix, @[("HOME", "/home/u"), ("XDG_STATE_HOME", "/xdg")], "1000"),
