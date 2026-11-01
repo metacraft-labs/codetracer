@@ -26,10 +26,11 @@ source ci/lib/lint-steps.sh
 
 # See the note in ci/lint/bash.sh: the stage names its tools before it runs, so
 # a shell missing one says so by name instead of failing obscurely inside a
-# contract suite. `nimsuggest` is here for ci/test/nimsuggest-check.sh, and
-# python3 for ci/test/dap-command-sync.py.
+# contract suite. `nimsuggest` is here for ci/test/nimsuggest-check.sh, python3
+# for ci/test/dap-command-sync.py, and `nim` and `node` for
+# ci/test/chromium-theme-build-dir-test.sh.
 lint_step "tools this stage invokes are present" \
-	bash ci/lib/require-tools.sh bash git python3 nimsuggest awk diff sha256sum perl
+	bash ci/lib/require-tools.sh bash git python3 nimsuggest nim node awk diff sha256sum perl
 
 # The contract suite runs before the guard it covers, and for the same reason
 # ci/lint/bash.sh executes scripts/resolve-sibling-rev-test.sh: a guard that has
@@ -54,6 +55,15 @@ lint_step "test-lane runner: recipe-owned lanes are refused, by name" \
 # every omitted file explicitly on other hosts.
 lint_step "test-lane platform eligibility: selection and reporting" \
 	bash ci/test/lane-platform-test.sh
+
+# A suite that embeds the compiled theme finds it through the dev shell's
+# build directory on every platform. This compiles the real suite, because a
+# fixed path only fails on the hosts that build elsewhere. The stage's plain
+# nixpkgs `nim` compiles it, in seconds, against the siblings this job
+# provisions (isonim, isonim-tui, nim-everywhere). The lane's own compile with
+# the pinned toolchain stays in the renderer-chromium CI step.
+lint_step "renderer-chromium: the embedded theme comes from CODETRACER_BUILD_DIR" \
+	bash ci/test/chromium-theme-build-dir-test.sh
 
 # The lanes' BACKEND honesty: `vm-unit` compiles with C, so it must not collect
 # a suite that imports a stdlib module which is fatal off the JS target, and
