@@ -58,6 +58,13 @@ test-plat37-shim-gate:
 test-dev-shell-writes-nothing-elsewhere:
   bash ci/test/dev-shell-writes-nothing-elsewhere-test.sh
 
+# Assert that a Rust crate built with plain `cargo test` in the dev shell,
+# outside this checkout, unwinds its panics (on macOS the shell's `cc` is GCC,
+# which drops the unwind index). Runs `nix develop`, so it is slow and not part
+# of the in-shell suites. See the header of ci/test/dev-shell-rust-unwinds-test.sh.
+test-dev-shell-rust-unwinds:
+  bash ci/test/dev-shell-rust-unwinds-test.sh
+
 # Assert that build-once.sh sources the cached dev-shell profile (and so runs
 # its shellHook) inside this repository, not in the directory it is invoked
 # from. Runs the real script against a stub profile; no toolchain, a second.

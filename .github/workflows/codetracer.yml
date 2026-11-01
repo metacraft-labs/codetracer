@@ -1671,6 +1671,11 @@ jobs:
       - name: The dev shell writes nothing into the repository it is entered from
         run: nix develop .#devShells.x86_64-linux.default --command just test-dev-shell-writes-nothing-elsewhere
 
+      # Rust built in the dev shell outside this checkout unwinds its panics:
+      # the header of ci/test/dev-shell-rust-unwinds-test.sh.
+      - name: Rust built in the dev shell unwinds its panics
+        run: nix develop .#devShells.x86_64-linux.default --command just test-dev-shell-rust-unwinds
+
       # build-once.sh sources the cached dev-shell profile with THIS repository
       # as its working directory: scripts/test-build-once-profile-cwd.sh.
       - name: build-once prepares this checkout, whatever directory it runs from
@@ -2048,6 +2053,12 @@ jobs:
 
       - name: Run Reprobuild macOS smoke
         run: nix develop . --command just test-reprobuild-macos-smoke
+
+      # A crate built with plain `cargo test` in the dev shell, outside this
+      # checkout, unwinds its panics: ci/test/dev-shell-rust-unwinds-test.sh.
+      # macOS is where it can fail -- the shell's `cc` is GCC there.
+      - name: Rust built in the dev shell unwinds its panics (macOS)
+        run: bash ci/test/dev-shell-rust-unwinds-test.sh
 
       - name: Run Reprobuild HCR MCR DAP test (macOS arm64)
         run: nix develop . --command just test-reprobuild-hcr-mcr-dap

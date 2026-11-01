@@ -815,6 +815,37 @@ with pkgs;
     ${pkgs.lib.optionalString stdenv.isDarwin ''
       export DYLD_LIBRARY_PATH="${pkgs.clingo}/lib''${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
     ''}
+
+    # macOS: Rust links through the wrapped clang, never through `cc`.
+    #
+    # rustc's default linker driver on Darwin is `cc`, and in this shell `cc`
+    # is the gcc-wrapper (GCC 14.3.0): `gcc` precedes `clang` in the package
+    # list above, and Nim's gcc backend relies on that order. GCC's Darwin
+    # driver passes `-no_compact_unwind`, so the Mach-O it links has no
+    # `__TEXT,__unwind_info`, Apple's libunwind finds no unwind info, and
+    # EVERY unwinding panic aborts with
+    #
+    #     fatal runtime error: failed to initiate panic, error 5, aborting
+    #
+    # A passing `#[should_panic]` or `catch_unwind` test then fails, and a
+    # failing assertion prints nothing.
+    #
+    # The repository's `.cargo/config.toml` already names `clang` for these
+    # targets, but cargo reads that file only for invocations under this
+    # checkout. A crate anywhere else built in this shell -- a sibling
+    # repository, or the scratch projects `ct test`'s rust-libtest provider
+    # tests create under the temp directory -- linked through `cc` and
+    # aborted (codetracer-pm issues/2026-11-01-darwin-dev-shell-cargo-tests-
+    # abort-on-any-unwinding-panic.md). The environment variable applies to
+    # every cargo invocation in the shell and outranks config files
+    # (https://doc.rust-lang.org/cargo/reference/config.html#targettriplelinker).
+    # It names the WRAPPED clang, which supplies the SDK and libiconv paths
+    # Rust's std links against. `ci/test/dev-shell-rust-unwinds-test.sh` is
+    # the regression guard.
+    ${pkgs.lib.optionalString stdenv.isDarwin ''
+      export CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="${clang}/bin/clang"
+      export CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER="${clang}/bin/clang"
+    ''}
     ${pkgs.lib.optionalString stdenv.isLinux ''
       export LD_LIBRARY_PATH="${pkgs.clingo}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     ''}
