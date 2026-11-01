@@ -1289,7 +1289,7 @@ function attachErrorCollectors(page: Page, bucket: string[]): void {
   pageConsoleErrors.set(page, bucket);
 
   const initScript = () => {
-    const handleErr = (error: any, type: string) => {
+    const handleErr = (error: any, type: string, origin?: string) => {
       const visited = new Set();
       function nimValueToString(v: any): string {
         if (v === null || v === undefined) return "";
@@ -1325,12 +1325,27 @@ function attachErrorCollectors(page: Page, bucket: string[]): void {
           console.error(`[BROWSER_ERROR_INSPECT][${type}] Failed to inspect: ${e}`);
         }
       } else {
-        console.error(`[BROWSER_ERROR_INSPECT][${type}] Non-object error: ${error}`);
+        // A non-object payload has no message and no stack of its own, so
+        // the event's source location is all that can attribute it.
+        console.error(
+          `[BROWSER_ERROR_INSPECT][${type}] Non-object error: ${error}` +
+            (origin ? ` (${origin})` : ""),
+        );
       }
     };
 
     window.addEventListener("error", (event) => {
-      handleErr(event.error, "error");
+      // `event.error` is null when the browser itself raised the event
+      // rather than a script: a `ResizeObserver` loop report, or a script
+      // whose origin hides the exception. `message` and the location are
+      // then the only record of what happened.
+      // https://html.spec.whatwg.org/multipage/webappapis.html#the-errorevent-interface
+      handleErr(
+        event.error,
+        "error",
+        `message=${JSON.stringify(event.message)} ` +
+          `at ${event.filename || "<no file>"}:${event.lineno}:${event.colno}`,
+      );
     });
     window.addEventListener("unhandledrejection", (event) => {
       handleErr(event.reason, "unhandledrejection");

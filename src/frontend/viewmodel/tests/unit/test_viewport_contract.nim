@@ -574,6 +574,35 @@ suite "the locals budget follows the state pane":
     check asked[0]["countBudget"].getInt ==
       (10 + LeadRows + TrailRows) * LocalsMinCountLimit
 
+  test "at one stop a shorter pane asks nothing, and a taller one asks more":
+    # The State pane's loading indicator takes a row from the pane while a
+    # load is in flight and gives it back with the answer. A budget that
+    # followed that would ask again on both edges, forever.
+    let mock = newMockBackendService(autoRespond = true)
+    let session = createSessionVM(mock.toBackendService())
+    session.store.claimLocalsLoading()
+    session.initializePanelViewModels()
+    session.stateVM.setViewport(Viewport(rows: 19))
+    session.store.updateDebuggerPosition(5'u64, "main.nim", 2)
+    let loader = createStopLoader(session)
+    loader.follow()
+    check mock.sent("ct/load-locals").len == 1
+    session.stateVM.setViewport(Viewport(rows: 18))
+    session.stateVM.setViewport(Viewport(rows: 19))
+    check mock.sent("ct/load-locals").len == 1
+    session.stateVM.setViewport(Viewport(rows: 25))
+    let grown = mock.sent("ct/load-locals")
+    check grown.len == 2
+    check grown[1]["countBudget"].getInt ==
+      (25 + LeadRows + TrailRows) * LocalsMinCountLimit
+    # The next stop holds nothing yet, so it goes by the pane again.
+    session.stateVM.setViewport(Viewport(rows: 18))
+    session.store.updateDebuggerPosition(6'u64, "main.nim", 3)
+    let next = mock.sent("ct/load-locals")
+    check next.len == 3
+    check next[2]["countBudget"].getInt ==
+      (18 + LeadRows + TrailRows) * LocalsMinCountLimit
+
 suite "the omnibar's symbols are the recording's functions":
 
   test "the engine's list, each going to its first call":

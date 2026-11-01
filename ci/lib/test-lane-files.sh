@@ -1153,6 +1153,9 @@ test_lane_files() {
 		echo src/frontend/tests/agent_editor_selection_hover_chromium_test.nim
 		# Native history context menus, exact destinations and dismissal.
 		echo src/frontend/tests/debug_history_context_menu_chromium_test.nim
+		# Measuring a pane stays out of the browser's ResizeObserver delivery.
+		# Only a browser has that delivery loop; jsdom observes nothing.
+		echo src/frontend/tests/pane_measure_resize_loop_chromium_test.nim
 		;;
 
 	main-process)
