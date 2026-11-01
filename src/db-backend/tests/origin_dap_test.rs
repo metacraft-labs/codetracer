@@ -742,6 +742,55 @@ fn test_origin_chain_partial_recording_terminator() {
 
     assert_eq!(chain.terminator.kind, TerminatorKind::RecordingStart);
     assert!(chain.hops.is_empty());
+    // Spec §4.1 / §6.1.6: a `RecordingStart` terminator is a boundary
+    // terminator and carries a descriptor — the variable the backward
+    // scan reached at the recording boundary — so the badge built from
+    // it names something. Only placeholder summaries are empty.
+    assert_eq!(chain.terminator.expression, "x");
+}
+
+#[test]
+fn test_origin_chain_recording_start_names_the_variable_reached_after_hops() {
+    // `b = a` copies a value `a` held from before the recording began:
+    // the chain hops `b <- a` and then stops at the boundary, so the
+    // terminator must name `a`, the variable it reached, not `b`.
+    let recipe = Recipe {
+        source_path: "fixture.py",
+        source: "# a already holds its value\nb = a\nprint(b)\n",
+        function_name: "main",
+        steps: vec![
+            (1, vec![("a", int_value(7))]),
+            (2, vec![("a", int_value(7)), ("b", int_value(7))]),
+            (3, vec![("a", int_value(7)), ("b", int_value(7))]),
+        ],
+        extra_calls: Vec::new(),
+    };
+    let (db, tmpdir) = build_trace(recipe);
+    let chain = run_chain(db, "b", 2, tmpdir.path());
+
+    assert_eq!(chain.terminator.kind, TerminatorKind::RecordingStart);
+    assert_eq!(chain.hops.len(), 1, "expected one `b <- a` hop: {:?}", chain.hops);
+    assert_eq!(chain.terminator.expression, "a");
+}
+
+#[test]
+fn test_origin_chain_recording_start_when_variable_never_seen_names_it() {
+    // `x` is a known variable of the trace, but no step at or before
+    // the query step carries it: the backward scan itself runs off the
+    // start of the recording (`BackwardScanOutcome::RecordingStart`),
+    // a different exit from the unparseable-line-at-step-0 one above.
+    let recipe = Recipe {
+        source_path: "fixture.py",
+        source: "pass\nx = 1\n",
+        function_name: "main",
+        steps: vec![(1, vec![]), (2, vec![("x", int_value(1))])],
+        extra_calls: Vec::new(),
+    };
+    let (db, tmpdir) = build_trace(recipe);
+    let chain = run_chain(db, "x", 0, tmpdir.path());
+
+    assert_eq!(chain.terminator.kind, TerminatorKind::RecordingStart);
+    assert_eq!(chain.terminator.expression, "x");
 }
 
 #[test]
@@ -1468,6 +1517,77 @@ fn test_load_locals_origin_summary_populated() {
         "second load_locals must hit the cache — chain builds should be unchanged (was {}, now {})",
         builds_after_first, builds_after_second
     );
+}
+
+#[test]
+fn test_load_locals_recording_start_summary_names_its_origin() {
+    // Regression: the State view draws a `RecordingStart` badge from
+    // the `ct/load-locals` `originSummary`, and the summary's
+    // `terminatorExpr` was empty, so the badge named nothing. Spec
+    // §4.1 allows an empty `terminatorExpr` only on placeholder
+    // summaries; an eager boundary summary names the variable the
+    // chain reached at the recording start.
+    let recipe = Recipe {
+        source_path: "fixture.py",
+        source: "# a already holds its value\nb = a\nprint(b)\n",
+        function_name: "main",
+        steps: vec![
+            (1, vec![("a", int_value(7))]),
+            (2, vec![("a", int_value(7)), ("b", int_value(7))]),
+            (3, vec![("a", int_value(7)), ("b", int_value(7))]),
+        ],
+        extra_calls: Vec::new(),
+    };
+    let (db, _tmp) = build_trace(recipe);
+    let mut handler = handler_with_trace(db);
+    handler.step_id = StepId(2);
+    handler.replay.jump_to(StepId(2)).expect("jump_to step 2");
+
+    let (tx, rx) = mpsc::channel::<DapMessage>();
+    let req = make_request(
+        1,
+        "ct/load-locals",
+        serde_json::json!({
+            "rrTicks": 2,
+            "countBudget": 1000,
+            "minCountLimit": 0,
+            "lang": Lang::PythonDb.wire_name(),
+            "watchExpressions": [],
+            "depthLimit": -1,
+        }),
+    );
+    let args: CtLoadLocalsArguments = req.load_args().expect("load CtLoadLocalsArguments");
+    handler.load_locals(req.clone(), args, tx).expect("load_locals");
+    let body = take_response_body(&rx, "ct/load-locals");
+
+    let locals = body.get("locals").and_then(JsonValue::as_array).expect("locals array");
+    let mut seen = Vec::new();
+    for v in locals {
+        let name = v
+            .get("expression")
+            .and_then(JsonValue::as_str)
+            .expect("local expression")
+            .to_string();
+        let summary = v.get("originSummary").expect("each variable carries originSummary");
+        assert_eq!(summary.get("isPlaceholder").and_then(JsonValue::as_bool), Some(false));
+        assert_eq!(
+            summary.get("terminatorKind").and_then(JsonValue::as_str),
+            Some("recordingStart"),
+            "`{}` traces to the recording boundary: {:?}",
+            name,
+            summary
+        );
+        assert_eq!(
+            summary.get("terminatorExpr").and_then(JsonValue::as_str),
+            Some("a"),
+            "`{}`'s RecordingStart badge must name the variable it reached: {:?}",
+            name,
+            summary
+        );
+        seen.push(name);
+    }
+    seen.sort();
+    assert_eq!(seen, vec!["a".to_string(), "b".to_string()]);
 }
 
 #[test]

@@ -3840,7 +3840,11 @@ impl MaterializedReplaySession {
                         current_step = StepId(binding_step.0 - 1);
                         continue;
                     }
+                    // Spec §6.1.6: a boundary terminator has no hop to
+                    // copy an expression from, so it names the variable
+                    // the scan reached; the badge shows it (§4.1).
                     terminator = Terminator::new(TerminatorKind::RecordingStart);
+                    terminator.expression = current_var_name.clone();
                     break;
                 }
                 BackwardScanOutcome::BudgetExhausted {
@@ -4163,6 +4167,11 @@ impl MaterializedReplaySession {
                         });
                     }
                     terminator = Terminator::new(kind);
+                    if kind == TerminatorKind::RecordingStart {
+                        // Same boundary descriptor as the scan-ran-off-
+                        // step-0 exit above (spec §6.1.6).
+                        terminator.expression = current_var_name.clone();
+                    }
                     terminator.source_line = Some(line_text);
                     break;
                 }
