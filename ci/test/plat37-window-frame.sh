@@ -260,18 +260,28 @@ use_shim() {
       errors."
 	if [ -z "${SHIM_BACKUP}" ] && [ -f "${LIVE_SHIM}" ]; then
 		SHIM_BACKUP="${LIVE_SHIM}.plat37-backup"
-		cp -f "${LIVE_SHIM}" "${SHIM_BACKUP}"
+		mv -f "${LIVE_SHIM}" "${SHIM_BACKUP}" ||
+			fail "the live shim could not be moved aside, so nothing was staged"
 	fi
-	# UNLINK FIRST, NEVER COPY ONTO IT. Cargo uplifts `target/debug/
-	# libgpui_nim_shim.so` as a HARDLINK to `target/debug/deps/…`, so a `cp`
-	# onto the live path rewrites cargo's own cached output through the shared
-	# inode. Cargo judges freshness by fingerprint, not by bytes, so the next
-	# `cargo build` reports the unit fresh and re-uplifts THIS arm's bytes —
-	# measured 2026-10-18: after a capture, `isonim-gpui`'s `plat37-shims`
-	# staged a "featureless" shim byte-identical to the headless one
-	# (341,153,248 bytes; a genuine featureless link is 8,083,520).
+	# MOVED ASIDE ON THE FIRST CALL, UNLINKED ON EVERY LATER ONE, NEVER COPIED
+	# OVER. Cargo uplifts `target/debug/libgpui_nim_shim.so` as a HARDLINK to
+	# `target/debug/deps/…`, so a `cp` onto the live path rewrites cargo's own
+	# cached output through the shared inode. Cargo judges freshness by
+	# fingerprint, not by bytes, so the next `cargo build` reports the unit fresh
+	# and re-uplifts THIS arm's bytes — measured 2026-10-18: after a capture,
+	# `isonim-gpui`'s `plat37-shims` staged a "featureless" shim byte-identical to
+	# the headless one (341,153,248 bytes; a genuine featureless link is
+	# 8,083,520).
+	#
+	# The move above takes cargo's inode out of the way and keeps it, so the
+	# restore puts that same inode back and the hardlink survives the run. A
+	# backup made by copying would restore the bytes on a new inode and leave the
+	# hardlink broken. The `rm` is what a later arm needs: by then the live path
+	# holds the previous arm, and copying onto that inode would rewrite what its
+	# app had mapped.
 	rm -f "${LIVE_SHIM}"
-	cp -f "${src}" "${LIVE_SHIM}"
+	cp -f "${src}" "${LIVE_SHIM}" ||
+		fail "the ${config} shim could not be staged at ${LIVE_SHIM}"
 	echo "shim in place: ${config} ($(wc -c <"${LIVE_SHIM}") bytes, \
 $(ldd "${LIVE_SHIM}" | wc -l) ldd entries)"
 }

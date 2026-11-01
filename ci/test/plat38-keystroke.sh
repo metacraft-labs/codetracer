@@ -193,8 +193,15 @@ select_windowed_shim() {
       It was built before PLAT-38 widened the shim's ABI. Rebuild it."
 	fi
 	SHIM_BACKUP="${LIVE_SHIM}.plat38-backup"
-	[ -f "${LIVE_SHIM}" ] && mv -f "${LIVE_SHIM}" "${SHIM_BACKUP}"
-	cp -f "${src}" "${LIVE_SHIM}"
+	# A MOVE THAT FAILED STOPS THE LANE. Otherwise the `cp -f` below still succeeds
+	# and writes through cargo's hardlink. `use_shim` in `plat37-window-frame.sh`
+	# says what that does to the next build.
+	if [ -f "${LIVE_SHIM}" ]; then
+		mv -f "${LIVE_SHIM}" "${SHIM_BACKUP}" ||
+			fail "the live shim could not be moved aside, so nothing was staged"
+	fi
+	cp -f "${src}" "${LIVE_SHIM}" ||
+		fail "the windowed shim could not be staged at ${LIVE_SHIM}"
 	echo "selected the WINDOWED shim at ${LIVE_SHIM}"
 }
 

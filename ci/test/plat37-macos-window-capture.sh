@@ -594,12 +594,13 @@ PY
 # Stage the windowed shim and drive the scenarios
 # ---------------------------------------------------------------------------
 # MOVED ASIDE, NEVER COPIED OVER. Both `cp -f` builds write through an existing
-# inode, and that does two kinds of damage. `target/debug/<shim>` is a hardlink
-# to cargo's `deps/` output, so copying onto it rewrites what cargo believes it
-# built. And macOS caches a code signature per file: an app loading new bytes
+# inode. macOS caches a code signature per file, so an app loading new bytes
 # from an inode that was mapped before dies with SIGKILL (Code Signature
-# Invalid), which reads as a front-end crash. Measured 2026-11-01. Moving keeps
-# the operator's inode for the restore and gives the staged shim a new one.
+# Invalid), which reads as a front-end crash. Measured 2026-11-01. Cargo's
+# `deps/` output is not at risk on this host, because cargo copies the uplifted
+# file here and hardlinks it only on Linux
+# (https://github.com/rust-lang/cargo/issues/10060). Moving keeps the
+# operator's inode for the restore and gives the staged shim a new one.
 if [ -z "${SHIM_BACKUP}" ] && [ -f "${LIVE_SHIM}" ]; then
 	SHIM_BACKUP="${LIVE_SHIM}.plat37macos-backup"
 	mv -f "${LIVE_SHIM}" "${SHIM_BACKUP}" ||

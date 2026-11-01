@@ -50,6 +50,11 @@ test-build-freshness:
 test-plat37-shim-gate:
   bash ci/test/plat37-shim-gate-test.sh
 
+# Run the five GPUI lanes that stage a shim at the live path against a sandbox
+# fixture, and assert that cargo's hardlinked output survives each of them.
+test-gpui-shim-staging:
+  bash ci/test/gpui-shim-staging-test.sh
+
 # Assert that entering the dev shell from ANOTHER git repository writes nothing
 # there (no node_modules link, no hook config, no git hooks), and that entered
 # from inside this repository it still prepares this repository's top level.
@@ -1190,6 +1195,7 @@ test:
     test-build-once-platform-lock \
     test-build-freshness \
     test-plat37-shim-gate \
+    test-gpui-shim-staging \
     test-flake-pin-alignment \
     test-reprobuild-catalog-coverage \
     test-dev-env-flake-metadata \

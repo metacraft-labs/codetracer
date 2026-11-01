@@ -123,8 +123,15 @@ grep -q 'gpui_frame_count' <<<"$(nm -D --defined-only "${WINDOWED_SHIM}" 2>/dev/
 # the shared file is swapped for the run and restored by the trap.
 if [ "${CODETRACER_WINDOW_BIN_PINS_SHIM:-0}" != "1" ]; then
 	SHIM_BACKUP="${LIVE_SHIM}.plat42-backup"
-	[ -f "${LIVE_SHIM}" ] && mv -f "${LIVE_SHIM}" "${SHIM_BACKUP}"
-	cp -f "${WINDOWED_SHIM}" "${LIVE_SHIM}"
+	# A MOVE THAT FAILED STOPS THE LANE. Otherwise the `cp -f` below still succeeds
+	# and writes through cargo's hardlink. `use_shim` in `plat37-window-frame.sh`
+	# says what that does to the next build.
+	if [ -f "${LIVE_SHIM}" ]; then
+		mv -f "${LIVE_SHIM}" "${SHIM_BACKUP}" ||
+			fail "the live shim could not be moved aside, so nothing was staged"
+	fi
+	cp -f "${WINDOWED_SHIM}" "${LIVE_SHIM}" ||
+		fail "the windowed shim could not be staged at ${LIVE_SHIM}"
 fi
 bash "${ISONIM_GPUI}/scripts/wayland-run-test.sh" -- \
 	bash "${root}/ci/test/plat42-frame-budget.sh" --inside
