@@ -99,6 +99,24 @@
 # not-a-gate, 33 recorded dark, 0 UNRECORDED. The ceiling moved 21 -> 33 in the
 # open, which is the rule at the top of the inventory working as written.
 #
+# AND AN EIGHTH, ON 2026-11-01, WHICH IS ARMS 16-19. `refs_of_text` split a line
+# on whitespace before it knew anything about quotes, so a word inside a string
+# had a shell position. `lint_step "guard: ... (quadratic under node)" \` read
+# `node` as an interpreter, which ate the `bash` on the next line as its file, and
+# `ci/test/js-const-iteration-test.sh` went dark until the label was reworded. In
+# the other direction `echo "bash ci/x.sh"` was a wire. A quoted string is now one
+# word. Arms 16 are the first shape, 17 the second, 18 the strings that really are
+# programs, and 19 the limit, a line whose quotes do not balance. 18 is the half
+# that decides whether this is a fix: of the seven gates a first cut lost on the
+# real tree, all seven were run by `in_compositor_shell "bash ci/test/...sh"`,
+# whose body joins its arguments with `$*` inside a `bash -c`, and 18u is that
+# shape, frozen.
+#
+# Honest figures, same tree: 426 found, 361 reachable before and after, the same
+# 361 by name, and the ceiling did not move. What did move is the recipe count, 140
+# to 129: eleven recipes were credited by a remedy message or other quoted prose
+# and nothing else, and none of them was the only way to any gate.
+#
 # A NOTE ON WHAT AN ARM IS WORTH. Arm 7's mutation is deliberately generous: a
 # real recipe, in the real justfile, with a real `bash` invocation of a real
 # file. The ONLY thing wrong with it is that no lane calls the recipe. An arm
@@ -534,6 +552,228 @@ else
 	bad "15c/a gate run by a local wrapper was reported dark — the position rule stops at the call"
 	printf '%s\n' "${wrapper_out}" | grep -E '\[FAILED\]' | head -3 | sed 's/^/           /'
 fi
+
+# ---------------------------------------------------------------------------
+# ARMS 16-19 — A QUOTED STRING IS ONE SHELL WORD. See the header paragraph at
+# the top of this file for the incident.
+#
+# `plant` and `plant_recipe` are mutations in the `arm` shape: `arm` wants a red
+# naming the file, and `credited` below wants the same mutation to stay green.
+# Sharing them keeps the two directions of each rule on one fixture shape, so
+# an arm cannot pass because its control tested something else.
+# ---------------------------------------------------------------------------
+quoted_gate="ci/test/quoted-target.sh"
+quoted_dark="ci/test/quoted-target.sh is reachable from NO workflow lane"
+in_gate2="ci/test/gate2.sh"
+in_workflow=".github/workflows/t.yml"
+
+# `plant FILE LINE...` — the gate, plus lines appended to FILE. The gate is
+# otherwise referenced by nothing, so whatever the verdict is, those lines are
+# what decided it.
+plant() {
+	local file="$1"
+	shift
+	printf '#!/usr/bin/env bash\necho x\n' >"${work}/arm/${quoted_gate}"
+	printf '%s\n' "$@" >>"${work}/arm/${file}"
+}
+
+# `plant_recipe FILE LINE...` — the same, with the gate one hop further away:
+# recipe `via-call` runs it, and the planted lines either call that recipe or
+# do not. The base justfile recipe `unwired` cannot serve: it names a gate that
+# does not exist, so crediting it would change nothing a run could report.
+plant_recipe() {
+	printf '\nvia-call:\n  bash %s\n' "${quoted_gate}" >>"${work}/arm/justfile"
+	plant "$@"
+}
+
+# The control shape 14c, 15b and 15c spell out by hand, for a table of them.
+credited() {
+	local name="$1"
+	shift
+	stage "${work}/arm"
+	"$@" || {
+		bad "${name}: the fixture could not be written"
+		return
+	}
+	local out
+	out="$(run_guard "${work}/arm")"
+	if grep -q 'RESULT: OK' <<<"${out}"; then
+		ok "${name}: credited"
+	else
+		bad "${name}: reported dark — the quoting rule dropped a real wire"
+		printf '%s\n' "${out}" | grep -E '\[FAILED\]' | head -3 | sed 's/^/           /'
+	fi
+}
+
+# THE TEXT BELOW IS WRITTEN INTO FIXTURES VERBATIM, so `$1`, `$(...)` and
+# `${...}` in single quotes are the fixture's, not this suite's, and a single-quoted
+# trailing backslash is the continuation the fixture line has to end in.
+# shellcheck disable=SC2016,SC1003
+{
+	# ARMS 16 — THE ISSUE, in every spelling of a label that ends in an INTERP
+	# word. Each is green only if the interpreter clause does not fire inside
+	# the label, because the fired clause eats `bash` as its file.
+	credited "16/the label that hid a gate: (quadratic under node)" plant "${in_gate2}" \
+		'lint_step "guard: x (quadratic under node)" \' "	bash ${quoted_gate}"
+	credited "16b/a label ending in bash" plant "${in_gate2}" \
+		'lint_step "guard: slow under bash" \' "	bash ${quoted_gate}"
+	credited "16c/a label ending in python3" plant "${in_gate2}" \
+		'lint_step "guard: slow under python3" \' "	bash ${quoted_gate}"
+	credited "16d/a label whose last word is the dot builtin" plant "${in_gate2}" \
+		'lint_step "guard: see . " \' "	bash ${quoted_gate}"
+	credited "16e/a single-quoted label" plant "${in_gate2}" \
+		"lint_step 'guard: slow under node' \\" "	bash ${quoted_gate}"
+	# A LABEL OF ONE WORD. It has no space to mask, so it reaches the walk looking
+	# exactly like a bare word, and only its quotes say it stands in no position.
+	credited "16f/a one-word label naming an interpreter" plant "${in_gate2}" \
+		"lint_step \"node\" bash ${quoted_gate}"
+	credited "16g/a one-word label that is the dot builtin" plant "${in_gate2}" \
+		"lint_step \".\" bash ${quoted_gate}"
+	credited "16h/a one-word single-quoted label" plant "${in_gate2}" \
+		"lint_step 'sh' bash ${quoted_gate}"
+	# A label that expands is not one literal, so only the mask stands between
+	# its last word and the interpreter clause.
+	credited "16i/a label carrying a variable" plant "${in_gate2}" \
+		'lint_step "built for ${HOST} under node" \' "	bash ${quoted_gate}"
+
+	# ARMS 17 — THE CONVERSE. A word inside a string is in no position, so a
+	# program quoted as text confers nothing. The assignment line is two shapes:
+	# a path first in the value was already safe, a path after the first word
+	# stood in the command position the assignment leaves open.
+	arm "17/echo of a quoted command is not a wire" "${quoted_dark}" \
+		plant "${in_gate2}" "echo \"bash ${quoted_gate}\""
+	arm "17b/printf of a quoted command is not a wire" "${quoted_dark}" \
+		plant "${in_gate2}" "printf '%s' 'bash ${quoted_gate}'"
+	arm "17c/a message assigned and never run is not a wire" "${quoted_dark}" \
+		plant "${in_gate2}" "MSG=\"${quoted_gate} is stale\"" "MSG2=\"stale: ${quoted_gate}\""
+	arm "17d/a command assigned and never run is not a wire" "${quoted_dark}" \
+		plant "${in_gate2}" "CMD=\"bash ${quoted_gate} --flag\""
+	# `-c` reads as a program flag wherever it stands, and on `grep` it is not
+	# one. The string after it may be walked, and what it finds stays in it.
+	arm "17e/grep -c with a quoted pattern, then a file" "${quoted_dark}" \
+		plant "${in_gate2}" "grep -c \"under node\" ${quoted_gate}"
+	arm "17f/the same one level down, inside a real program" "${quoted_dark}" \
+		plant "${in_gate2}" "bash -c \"grep -c \\\"under node\\\" ${quoted_gate}\""
+	# A wrapper that only PRINTS its argument. 15c is the same shape reversed.
+	arm "17g/a string handed to a wrapper that reads it" "${quoted_dark}" \
+		plant "${in_gate2}" 'check() {' '	echo "$2"' '}' \
+		"check \"desc\" \"bash ${quoted_gate}\""
+	arm "17h/a string naming just is not a recipe call" "${quoted_dark}" \
+		plant_recipe "${in_gate2}" 'echo "run just via-call"'
+	# `"$@"` keeps its arguments apart, so a string is one word, a command with
+	# a space in its name. 18u is the same wrapper with `$*`, which joins them.
+	arm '17i/a string handed to a wrapper that runs "$@"' "${quoted_dark}" \
+		plant "${in_gate2}" 'run_it() {' '	"$@"' '}' "run_it \"bash ${quoted_gate}\""
+	# Both of these only read the file, and both were invented by the rule that
+	# credits a variable in command position, on the real tree, while it was
+	# being written. A quoted pattern shaped like an assignment left command
+	# position open, and the last line of a multi-line program looks like a
+	# fresh line.
+	arm "17j/a pattern shaped like an assignment is not one" "${quoted_dark}" \
+		plant "${in_gate2}" "G=\"${quoted_gate}\"" \
+		'grep -oE '"'"'MAX=[0-9]+'"'"' "${G}"'
+	arm "17k/the last line of a multi-line program is not a command" "${quoted_dark}" \
+		plant "${in_gate2}" "G=\"${quoted_gate}\"" 'out="$(awk '"'" '	{ print }' \
+		"'"' "${G}")"'
+	# The same line must not teach a wrapper that it executes its `$1` either.
+	arm "17l/nor does it make a parameter an executed one" "${quoted_dark}" \
+		plant "${in_gate2}" 'count() {' "	awk '" '	{ n++ }' "' \"\$1\"" '}' \
+		"count ${quoted_gate}"
+	# The converse of 16f-16h: a quoted word is no interpreter and no `just`.
+	arm "17m/a quoted interpreter word is an argument" "${quoted_dark}" \
+		plant "${in_gate2}" "echo \"bash\" \"${quoted_gate}\""
+	arm "17n/a quoted just word is an argument" "${quoted_dark}" \
+		plant_recipe "${in_gate2}" 'echo "just" via-call'
+	# A string after an interpreter is one word, and this one is no file.
+	arm "17p/a quoted sentence after an interpreter is not a file" "${quoted_dark}" \
+		plant "${in_gate2}" "node \"usage: ${quoted_gate} <url>\""
+	# The lane dispatcher credits every word after it, so a string that merely
+	# ends in its name must not start that.
+	arm "17o/a string naming the lane dispatcher runs no lane" "${quoted_dark}" \
+		plant_recipe "${in_gate2}" 'echo "see ci/lib/run-just-lanes.sh" via-call'
+
+	# ARMS 18 — A STRING THAT IS A PROGRAM STAYS WALKABLE. These are the arms
+	# that decide whether the rule is a fix or a new way of inventing dark gates.
+	credited "18/bash -c, double-quoted" plant "${in_gate2}" "bash -c \"bash ${quoted_gate}\""
+	credited "18b/sh -lc, single-quoted" plant "${in_gate2}" "sh -lc 'bash ${quoted_gate}'"
+	credited "18c/eval of a string" plant "${in_gate2}" "eval \"bash ${quoted_gate}\""
+	credited "18d/a workflow run: value in quotes" plant "${in_workflow}" \
+		"      - run: \"bash ${quoted_gate}\""
+	credited "18e/nix develop -c with a quoted program" plant "${in_gate2}" \
+		"nix develop -c \"bash ${quoted_gate}\""
+	credited "18f/a substitution on the right of an assignment" plant "${in_gate2}" \
+		"x=\"\$(bash ${quoted_gate})\""
+	credited "18g/a substitution inside a string stays live" plant "${in_gate2}" \
+		"echo \"a \$(bash ${quoted_gate}) b\""
+	credited "18h/a wrapper that evals its second argument" plant "${in_gate2}" \
+		'check() {' '	eval "$2"' '}' "check \"desc\" \"bash ${quoted_gate}\""
+	credited "18i/one level of escaping removed for a nested label" plant "${in_gate2}" \
+		"bash -c \"lint_step \\\"x under node\\\" bash ${quoted_gate}\""
+	credited "18j/a program whose string carries a substitution" plant "${in_gate2}" \
+		"bash -c \"cd \$(pwd) && bash ${quoted_gate}\""
+	credited "18k/a command held in a variable, run by eval" plant "${in_gate2}" \
+		"CMD=\"bash ${quoted_gate} --flag\"" 'eval "$CMD"'
+	credited "18l/a command held in a variable, run bare" plant "${in_gate2}" \
+		"CMD=\"bash ${quoted_gate} --flag\"" '$CMD'
+	credited "18m/the path after a substitution, run" plant "${in_gate2}" \
+		"bash \"\$(pwd)/${quoted_gate}\""
+	credited "18n/the path after a substitution, assigned then run" plant "${in_gate2}" \
+		"G=\"\$(pwd)/${quoted_gate}\"" 'bash "${G}"'
+	credited "18o/the positional clause, single-quoted program" plant "${in_gate2}" \
+		"LIB=\"${quoted_gate}\"" "bash -c 'source \"\$1\"; go \"\$2\"' _ \"\${LIB}\""
+	credited "18p/the positional clause, double-quoted program" plant "${in_gate2}" \
+		"LIB=\"${quoted_gate}\"" 'bash -c "source \"$1\"; go \"$@\"" _ "${LIB}"'
+	credited "18u/a wrapper joining its arguments into a nested program" plant "${in_gate2}" \
+		'in_shell() {' '	(cd x && nix develop --command bash -c "cd y && $*")' '}' \
+		"in_shell \"bash ${quoted_gate}\""
+	credited "18w/a program argument carrying a substitution" plant "${in_gate2}" \
+		'check() {' '	eval "$2"' '}' "check \"desc\" \"cd \$(pwd) && bash ${quoted_gate}\""
+	credited "18v/a variable in command position" plant "${in_gate2}" \
+		"G=\"${quoted_gate}\"" '"$G" --flag'
+	# 18x and 18y: the walk starts a fresh command at every `$(`, and the wrapper
+	# whose argument held it still has arguments to come.
+	credited "18x/an executed argument after a substitution" plant "${in_gate2}" \
+		'check() {' '	eval "$2"' '}' "check \"\$(date)\" \"bash ${quoted_gate}\""
+	credited "18y/the same after a labelled substitution" plant "${in_gate2}" \
+		'check() {' '	eval "$2"' '}' "check \"at \$(date) now\" 'bash ${quoted_gate}'"
+	# What closes a program is its own quote, not the end of the word: the `)`
+	# here would otherwise leave the nested label unbalanced, and unmasked.
+	credited "18ac/a nested label in a program inside a subshell" plant "${in_gate2}" \
+		"(bash -c \"lint_step \\\"x under node\\\" bash ${quoted_gate}\")"
+	# The first `)` closes the subshell, not the substitution around it.
+	credited "18ad/a subshell inside a substitution inside a string" plant "${in_gate2}" \
+		"echo \"\$( (cd x) && bash ${quoted_gate} ) end\""
+	# `""` strips to nothing and is still an argument, so the count has to move.
+	credited "18ab/an executed argument after an empty one" plant "${in_gate2}" \
+		'check() {' '	eval "$2"' '}' "check \"\" \"bash ${quoted_gate}\""
+	# The shell runs a trap handler, so it is a program as an `eval` string is.
+	credited "18z/a trap handler" plant "${in_gate2}" "trap 'bash ${quoted_gate}' EXIT"
+	# 16f-16h must not cost the wrapper that really does run its quoted words.
+	credited "18aa/a wrapper running quoted interpreter and path" plant "${in_gate2}" \
+		'wrap() {' '	"$1" "$2"' '}' "wrap \"bash\" \"${quoted_gate}\""
+	credited "18q/bash -c just" plant_recipe "${in_gate2}" 'bash -c "just via-call"'
+	credited "18r/a run: value calling just" plant_recipe "${in_workflow}" \
+		'      - run: "just via-call"'
+	credited "18s/just in a substitution" plant_recipe "${in_gate2}" 'x="$(just via-call)"'
+	credited "18t/just in a substitution inside a string" plant_recipe "${in_gate2}" \
+		'echo "a $(just via-call) b"'
+
+	# ARMS 19 — THE LIMIT, PINNED. A line whose quotes do not balance is not
+	# lexed: an apostrophe in prose and the opening line of a multi-line program
+	# look alike, and no single quote state survives shell, YAML, Python and JS.
+	# So the line reads as it always did. The last arm is a known over-credit,
+	# stated here so that nobody meets it as a surprise.
+	credited "19/an apostrophe does not hide a command after it" plant "${in_gate2}" \
+		"echo don't stop; bash ${quoted_gate}"
+	credited "19b/a multi-line program opened by a lone quote" plant "${in_gate2}" \
+		"bash -c '" "	bash ${quoted_gate}" "'"
+	credited "19c/an apostrophe keeps the old word split" plant "${in_gate2}" \
+		"echo it's \"bash ${quoted_gate}\""
+	# A string only another machine runs is a value here, and the gate says so
+	# by name, which is the direction that gets looked at.
+	arm "19d/a string another tool runs is reported dark" "${quoted_dark}" \
+		plant "${in_gate2}" "ssh host \"bash ${quoted_gate}\""
+}
 
 echo
 echo "${checks} check(s), ${failures} failure(s)"
