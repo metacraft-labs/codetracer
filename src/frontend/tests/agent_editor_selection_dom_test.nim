@@ -31,8 +31,8 @@ from isonim/web/dom_api as idom import nil
 var failures = 0
 var assertions = 0
 var completedTests = 0
-const ExpectedAssertions = 19
-const ExpectedTests = 6
+const ExpectedAssertions = 23
+const ExpectedTests = 7
 type ExitStatusFormatter = ref object of OutputFormatter
 method testEnded(formatter: ExitStatusFormatter; result: TestResult) =
   inc completedTests
@@ -165,6 +165,33 @@ suite "desktop Agent Activity attaches the editor selection":
     openMenu()
     click(menuItem("Editor selection"))
     ck vm.getContextPaths() == @["/project/source.nim:14"]
+
+    # Beside a real selection, an empty range is a second cursor, not a line
+    # of the selection: line 20 must not stretch the attachment to 3-20.
+    vm.clearContextPaths()
+    setEditorSelections(cstring"/project/source.nim",
+      @[(3, 2, 5, 9).EditorRange, (20, 4, 20, 4).EditorRange], 5)
+    openMenu()
+    click(menuItem("Editor selection"))
+    ck vm.getContextPaths() == @["/project/source.nim:3-5"]
+
+  test "an editor with no model has no selection to attach":
+    vm.clearContextPaths()
+    # Monaco types `getSelections()` as `Selection[] | null`; its editor widget
+    # answers null when it has no model.
+    setEditorSelections(cstring"/project/source.nim", @[], 1)
+    data.ui.editors[cstring"/project/source.nim"].monacoEditor.toJs.getSelections =
+      proc(): JsObject = nil
+    channels = @[]
+    openMenu()
+    let item = menuItem("Editor selection")
+    ck item.attribute(cstring"aria-disabled") == cstring"true"
+    click(item)
+    ck vm.getContextPaths().len == 0
+    ck "CODETRACER::acp-pick-files" notin channels
+    # A disabled item leaves the menu open; close it for the next case.
+    if not host.toJs.querySelector(cstring".agent-add-context-dropdown").isNil:
+      openMenu()
 
   test "an untitled buffer has no file to attach":
     vm.clearContextPaths()
