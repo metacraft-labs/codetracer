@@ -85,6 +85,11 @@ test-build-once-failed-bundle:
 test-build-once-platform-lock:
   bash scripts/test-build-once-platform-lock.sh
 
+# build-once uses the sibling reprobuild build only while it is fresh and
+# carries the flake's pinned revision, and names the repro it runs.
+test-build-once-repro-selection:
+  bash scripts/test-build-once-repro-selection.sh
+
 # Assert this repo's `runquota` flake pin equals the `runquota-src` revision
 # its pinned `reprobuild` locks. `runquota.follows = "reprobuild/runquota-src"`
 # derives that input from reprobuild; a half-refreshed lock can still retain
@@ -1193,6 +1198,7 @@ test:
   bash ci/lib/run-just-lanes.sh test \
     test-build-alignment \
     test-build-once-platform-lock \
+    test-build-once-repro-selection \
     test-build-freshness \
     test-plat37-shim-gate \
     test-gpui-shim-staging \
