@@ -6,9 +6,12 @@
 - Framework/runtime: Cargo's default `cargo test` flow and rustc's built-in
   libtest harness.
 - Milestone: M6, first provider slice.
-- Status: discovery, source locations, selector construction, and command
-  construction only. CodeTracer recording, event parsing, per-test output
-  capture, and trace entry-point mapping are not wired in this milestone.
+- Status: discovery, source locations, selector construction, command
+  construction, and Cargo/libtest execution are implemented. The run callback
+  reports one normalized terminal outcome per requested unit, from the command's
+  exit code and libtest's summary line. CodeTracer recording, framework-native
+  per-test event parsing/output attribution, and trace entry-point mapping are
+  not wired in this milestone.
 
 ## Existing Editor Extension Research
 
@@ -187,11 +190,12 @@ contract is frozen.
 
 ## How To Capture Output Of Individual Tests
 
-M6 does not capture per-test output. Stable libtest text output interleaves with
-parallel execution unless run with controlled threads and `--nocapture`.
-Machine-readable JSON output has historically been unstable/nightly-only; Rust
-RFC 3558 documents the need for stable libtest JSON, but this milestone does
-not depend on it.
+M6 preserves the combined Cargo/libtest process output on the run unit, but it
+does not parse or attribute that stream per test. Stable libtest text output
+interleaves with parallel execution unless run with controlled threads and
+`--nocapture`. Machine-readable JSON output has historically been
+unstable/nightly-only; Rust RFC 3558 documents the need for stable libtest JSON,
+but this milestone does not depend on it.
 
 Future options:
 
@@ -227,7 +231,25 @@ M6 uses a modular Nim provider:
 - framework: `libtest/cargo-test`
 - discovery: source parser
 - command construction: explicit helper returning argv parts
-- run/record callbacks: return diagnostics only
+- target selection: `cargo metadata --no-deps` names the targets, so a
+  `[[bin]]` or `[[test]]` renamed in the manifest runs under its declared name.
+  A crate root selects its own target, and a file below `tests/<x>/` or
+  `src/bin/<x>/` selects that directory's `main.rs` target. Other files use
+  `--lib` when the package has a library, then the `src/main.rs` binary. In a
+  workspace the command also names the package, because `default-members` can
+  otherwise redirect it. When Cargo cannot be asked, as on the Nix-fallback
+  route, the same choice is made from the path conventions
+- run callback: executes the constructed Cargo command through the shared
+  process bridge, with one terminal event for the requested run unit. A
+  non-zero exit is `failed`, except that Cargo refusing a target whose
+  `required-features` are off is `skipped`. Exit zero is `passed` only when
+  libtest's `test result:` lines count at least one passed test and, for a
+  single test, libtest printed that test's own result line; otherwise it is
+  `skipped`, because `cargo test` also exits zero when a selector matches
+  nothing, as it does for a discovered test its `#[cfg]` keeps out of the build.
+  Both markers must start a line: rustc's warnings quote source text and a
+  build script's warnings are echoed, so the marker can appear inside either
+- record callback: returns an explicit unsupported diagnostic
 
 A future external adapter could provide rust-analyzer-derived locations and
 selectors directly. The manifest should remain declarative: Cargo markers,
@@ -252,6 +274,8 @@ The M6 fixture crate includes:
   reconciliation is needed before final execution support.
 - File-scoped source execution is approximate for `src/*.rs`.
 - Workspace/package target selection is not designed in M6.
-- libtest JSON/event parsing and per-test output attribution remain open.
+- libtest-native JSON/event parsing and per-test output attribution remain
+  open; current results are run-unit outcomes read from the exit code and
+  libtest's text summary.
 - Async runtime attributes are treated as source markers only; M6 does not
   compile or run those tests.
