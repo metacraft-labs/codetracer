@@ -576,6 +576,15 @@ lint_step "desktop bundle self-containment (static half)" \
 lint_step "contract suite: desktop bundle self-containment" \
 	bash ci/test/desktop-bundle-self-contained-test.sh
 
+# The prefix every desktop capture lane assembles takes the `ct` of the dev
+# shell's build output (`CODETRACER_BUILD_DIR`), and a missing one fails with a
+# message. It used to read `src/build-debug` alone and, under `set -e`, die
+# silently in `readlink -f` on any host that builds elsewhere. Pure bash +
+# python3 over mktemp checkouts carrying the real script, with a stub `nim`;
+# no nix, no build.
+lint_step "contract suite: the capture prefix finds the dev shell's ct" \
+	bash ci/test/plat45-desktop-prefix-test.sh
+
 # The pre-checkout sweep that keeps a persistent self-hosted runner cleanable.
 # It lives as an inline `run:` block in seven jobs — it has to run BEFORE
 # actions/checkout, so it cannot be a script the repository provides — and this

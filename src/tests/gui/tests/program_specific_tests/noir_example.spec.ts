@@ -256,9 +256,9 @@ test.describe("noir example — state and navigation", () => {
   });
 
   // TODO(skipped): Debug movement (continue/next) does not work for noir traces in browser mode.
-  //   The backend does not implement the `.test-movement` counter that the test helpers rely on.
-  //   Hypothesis: The noir db-backend needs to emit a movement counter (or CtCompleteMove event)
-  //   after each continue/next operation so the test can detect when the step has completed.
+  //   Hypothesis: the noir db-backend does not emit `CtCompleteMove` after each continue/next
+  //   operation, so the test cannot detect when the step has completed (no helper reads the
+  //   `.test-movement` counter; the completed move is what they wait for).
   test.fixme("continue", async () => {
     // Requires debug movement counter support in noir backend.
   });
