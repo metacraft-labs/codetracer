@@ -86,15 +86,13 @@
     justify-content: center
     align-items: center
 
-  &:focus
+  &:focus:not(:focus-visible)
     outline: none !important
     box-shadow: none !important
     cursor: pointer
     background-color: colors-ui-surface-base-panel
 
   &:focus-visible
-    outline: none !important
-    box-shadow: inset 0 0 0 0.125em colors-ui-border-focus !important
     cursor: pointer
     background-color: colors-ui-surface-base-panel
 
@@ -361,7 +359,6 @@ table.dataTable tbody tr:not(.active):hover
       // Border and ring come from the shared active state (input.styl);
       // the surface stays the field's own, as it does for every other field.
       &:focus-visible
-        outline: none !important
         background: colors-ui-surface-input-secondary
 
   .eventLog-detailed-table
@@ -776,9 +773,6 @@ label
         height: 100%
         background-color: colors-ui-icon-primary-default
         mask: url("../../public/resources/shared/arrows_expand_vertical_diamond_dark.svg") center / contain no-repeat
-      &:focus-visible
-        outline: none
-        box-shadow: 0 0 0 0.125em colors-ui-border-focus
     // The row being dragged stays in place, faded, until it is dropped.
     &.dragging
       opacity: 0.4

@@ -210,6 +210,20 @@ contrast target without asking Nikolay. (2026-08-21, reaffirmed 2026-11-02)
 src/frontend/styles/components/golden_layout.styl :: SELECTED_PANEL_BORDER_COLOR = colors-ui-border-primary
 ```
 
+### D-16: key-focus is the one keyboard selection style
+
+A control selected from the keyboard shows `key-focus`: a 1.5px `#3B82F6` border
+inside its edge, the same on every control and in every theme. It matches the
+main menu buttons. Do not give a control its own focus ring, and do not remove
+one. Text fields show it only when reached with Tab. (2026-11-02)
+
+```guard
+src/frontend/styles/components/button.styl :: KEY_FOCUS_WIDTH = 0.09375rem
+src/frontend/styles/components/button.styl :: KEY_FOCUS_COLOR = colors-blue-500
+src/frontend/styles/components/button.styl :: key-focus()
+src/frontend/styles/components/shared_widgets.styl :: *:focus-visible:where(:not(input
+```
+
 ## Standing rules
 
 These apply to all new UI work. A source check cannot judge them, so they have

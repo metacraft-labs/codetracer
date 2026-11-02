@@ -369,6 +369,23 @@ EMPTY_OVERLAY_SIDE_GAP = 2.5rem
   outline: none !important
   box-shadow: none !important
 
+// key-focus on everything the keyboard can select (D-16; the look is in
+// button.styl).  A focusable panel or editor surface is not a control: focus
+// lands there from code as well, and a ring round a whole panel would read as
+// the selected panel outline.  `:where` keeps the specificity low, so the
+// "no ring on a mouse click" rule above still wins.
+*:focus-visible:where(:not(input, textarea, select, [contenteditable="true"], html, body, [data-scope-kind], .monaco-editor *, .xterm *, .filesystem, .component-container, .constraints, .code-editor, #navigation-menu, .context-menu))
+  key-focus()
+
+// A text field always matches :focus-visible, so it takes key-focus only when
+// it was reached with Tab.  Hidden inputs show it on their visible box, and a
+// field inside a wider control leaves it to that control.
+[data-focus-mode="keyboard"] input:focus:not(.ct-checkmark-input):not(.ct-toggle *):not(.command-input-row *):not(.agent-interaction *),
+[data-focus-mode="keyboard"] textarea:focus:not(.monaco-editor *):not(.xterm *):not(.agent-interaction *),
+[data-focus-mode="keyboard"] select:focus,
+[data-focus-mode="keyboard"] .command-input-row:focus-within
+  key-focus()
+
 html, body
   padding: 0
   margin: 0

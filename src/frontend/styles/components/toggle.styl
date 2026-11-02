@@ -75,9 +75,9 @@
   &[data-checked="true"]:hover
     background: var(--ct-toggle-track-on-hover)
 
-  // Focus ring — uses :focus-within so keyboard tab reaches the hidden input
-  &:focus-within
-    box-shadow: 0 0 0 0.125em colors-ui-border-focus
+  // The real input is visually hidden, so the track carries key-focus.
+  &:has(input:focus-visible)
+    key-focus()
 
 // ---------------------------------------------------------------------------
 // Thumb — the circular indicator

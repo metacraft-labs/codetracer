@@ -57,6 +57,20 @@ LIST_HOVER_BG = colors-ui-surface-primary-secondary-hover
 // lag — the hover showed ~110ms late and settled at ~280ms (Nikolay,
 // 2026-10-20: "the buttons started to behave slow").  Imported first
 // (codetracer.styl), so every stylesheet can use it.
+// key-focus (Nikolay, 2026-11-02; docs/UI-Design-Decisions.md, D-16): the one
+// look of a control selected from the keyboard, everywhere.  A 1.5px #3B82F6
+// border drawn inside the control's edge, as an outline so it follows the
+// corners, sits above the control's children and takes no layout.  Applied to
+// every control by the catch-all in shared_widgets.styl; call it only where a
+// control's focus lands on another element.
+KEY_FOCUS_WIDTH = 0.09375rem
+KEY_FOCUS_COLOR = colors-blue-500
+
+key-focus()
+  outline: KEY_FOCUS_WIDTH solid KEY_FOCUS_COLOR !important
+  outline-offset: -(KEY_FOCUS_WIDTH) !important
+  box-shadow: none !important
+
 BUTTON_TRANSITION_TIMING = 100ms ease
 BUTTON_TRANSITION = background-color BUTTON_TRANSITION_TIMING, color BUTTON_TRANSITION_TIMING, border-color BUTTON_TRANSITION_TIMING
 
@@ -109,8 +123,7 @@ button
     color: colors-ui-text-primary-body
 
   &:focus-visible:not(:disabled)
-    outline: none !important
-    box-shadow: inset 0 0 0 0.125em colors-ui-border-focus !important
+    key-focus()
     color: colors-ui-text-primary-body
 
   &:disabled
@@ -596,8 +609,7 @@ button
     border-color: colors-ui-border-primary-hover
 
   &:focus-visible
-    outline: none
-    box-shadow: 0 0 0 0.125em colors-ui-border-focus
+    key-focus()
 
   &:has(.ct-origin-badge-text:empty)
     width: CONTROL_HEIGHT_XS

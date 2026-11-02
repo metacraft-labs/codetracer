@@ -151,10 +151,10 @@ CHECKMARK_BAR_24 = url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/
   --ct-checkmark-border: colors-ui-border-primary-hover
 
 
-// Focused — keyboard focus on the real input: a white border, no fill.
+// Focused — keyboard focus on the real input, which is visually hidden, so
+// the visible box carries key-focus.
 .ct-checkmark-input:focus-visible + .ct-checkmark
-  --ct-checkmark-bg: transparent
-  --ct-checkmark-border: colors-ui-border-contrast
+  key-focus()
 
 
 // Disabled — a flat fill, no border, a dimmed mark.  Last, so it wins over

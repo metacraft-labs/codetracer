@@ -1186,6 +1186,9 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
     outline: SELECTED_PANEL_BORDER solid colors-brand-600
     outline-offset: 0
 
+  [data-focus-mode="keyboard"] &:focus-within
+    key-focus()
+
 .prompt-wrapper
   background: colors-ui-surface-base-canvas
   border-radius: 0.375em
