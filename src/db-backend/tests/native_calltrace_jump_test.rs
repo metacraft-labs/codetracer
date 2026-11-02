@@ -232,15 +232,11 @@ fn open_session_for(
         Recorder::Mcr => recording.trace_dir.clone(),
         Recorder::Rr => recording.trace_dir.join("rr"),
     };
-    let runner = FlowTestRunner::new_with_envs(
-        &db_backend,
-        &trace,
-        &[(
-            "CT_NATIVE_REPLAY_BIN",
-            ct_native_replay.to_str().expect("native worker path is UTF-8"),
-        )],
-    )
-    .unwrap_or_else(|e| panic!("DAP init failed for the {recorder:?} trace: {e}"));
+    // No worker is handed to the runner: its own finder must resolve the one
+    // `find_ct_native_replay` resolved (and built) above, which a plain
+    // `cargo test` with no override exercises.
+    let runner = FlowTestRunner::new(&db_backend, &trace)
+        .unwrap_or_else(|e| panic!("DAP init failed for the {recorder:?} trace: {e}"));
     Some(Session {
         file: source_path.to_str().unwrap().to_string(),
         runner,
