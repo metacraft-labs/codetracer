@@ -101,6 +101,9 @@ is_provisioning_step() { # $1 = a stripped YAML line
 	# still naming nixos-modules is still genuinely provisioned.
 	*'devops-modules/.github/setup-nix'*) return 0 ;;
 	*'devops-modules/.github/install-nix'*) return 0 ;;
+	# Release jobs use the shared action's scoped Git authentication as well
+	# as its Nix installation and configuration.
+	*'metacraft-github-actions/setup-nix'*) return 0 ;;
 	*'metacraft-github-actions/setup-dev-env'*) return 0 ;;
 	*'.github/actions/setup-db-backend-siblings'*) return 0 ;;
 	*'DeterminateSystems/nix-installer-action'*) return 0 ;;

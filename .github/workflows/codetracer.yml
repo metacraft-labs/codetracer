@@ -7726,20 +7726,18 @@ jobs:
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
-      - name: Install Nix
-        uses: metacraft-labs/devops-modules/.github/install-nix@dev
+      - name: Install Nix and configure private repository authentication
+        # The shared action keeps the Git credential in job-scoped headers,
+        # scoped to our organization, and removes stale token-bearing rewrites
+        # from reused runner homes. Keep checkout's credentials above: the tag
+        # push authenticates through its repository-local header.
+        uses: metacraft-labs/metacraft-github-actions/setup-nix@a190f3a8b37c5a239d88b8c964b6d13f64fbaa0d
         with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          token-owner: metacraft-labs
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
-
-      - name: Configure Nix for private repos
-        run: |
-          mkdir -p ~/.config/nix
-          echo "access-tokens = github.com=${{ steps.ci_token.outputs.token }}" >> ~/.config/nix/nix.conf
-          git config --global url."https://x-access-token:${{ steps.ci_token.outputs.token }}@github.com/".insteadOf "git@github.com:"
-          git config --global url."https://x-access-token:${{ steps.ci_token.outputs.token }}@github.com/".insteadOf "ssh://git@github.com/"
-          git config --global url."https://x-access-token:${{ steps.ci_token.outputs.token }}@github.com/".insteadOf "https://github.com/"
 
       - name: Create tag
         if: ${{ github.ref == 'refs/heads/main' }}
@@ -7821,20 +7819,17 @@ jobs:
         uses: actions/checkout@v5
         with:
           token: ${{ steps.ci_token.outputs.token }}
-      - name: Install Nix
-        uses: metacraft-labs/devops-modules/.github/install-nix@dev
+      - name: Install Nix and configure private repository authentication
+        # The shared action keeps the Git credential in job-scoped headers,
+        # scoped to our organization, and removes stale token-bearing rewrites
+        # from reused runner homes before the release's Nix commands run.
+        uses: metacraft-labs/metacraft-github-actions/setup-nix@a190f3a8b37c5a239d88b8c964b6d13f64fbaa0d
         with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          token-owner: metacraft-labs
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
-
-      - name: Configure Nix for private repos
-        run: |
-          mkdir -p ~/.config/nix
-          echo "access-tokens = github.com=${{ steps.ci_token.outputs.token }}" >> ~/.config/nix/nix.conf
-          git config --global url."https://x-access-token:${{ steps.ci_token.outputs.token }}@github.com/".insteadOf "git@github.com:"
-          git config --global url."https://x-access-token:${{ steps.ci_token.outputs.token }}@github.com/".insteadOf "ssh://git@github.com/"
-          git config --global url."https://x-access-token:${{ steps.ci_token.outputs.token }}@github.com/".insteadOf "https://github.com/"
 
       - name: "Import GPG key for signing commits"
         id: import-gpg

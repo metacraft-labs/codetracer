@@ -432,6 +432,12 @@ lint_step "contract suite: a job that runs nix installs Nix first" \
 lint_step "contract suite: a private substituter comes with a credential" \
 	bash ci/test/private-substituter-credential-test.sh
 
+# Release jobs use the shared scoped credential implementation rather than
+# persisting an installation token in global Git URL rewrites. Offline wiring
+# checks and mutation controls; the shared action owns the functional suite.
+lint_step "contract suite: release Git credentials stay scoped to the job and organization" \
+	python3 ci/test/release-git-auth-test.py
+
 # The guard for this whole shape: no ci/lint script may let one failing step
 # hide another. It drives every ci/lint/*.sh with a PATH in which every
 # external command fails, and asserts each still reports every step it declares.
