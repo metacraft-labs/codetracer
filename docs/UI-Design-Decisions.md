@@ -221,7 +221,7 @@ one. Text fields show it only when reached with Tab. (2026-11-02)
 src/frontend/styles/components/button.styl :: KEY_FOCUS_WIDTH = 0.09375rem
 src/frontend/styles/components/button.styl :: KEY_FOCUS_COLOR = colors-blue-500
 src/frontend/styles/components/button.styl :: key-focus()
-src/frontend/styles/components/shared_widgets.styl :: *:focus-visible:where(:not(input
+src/frontend/styles/components/shared_widgets.styl :: html:not([data-focus-mode="mouse"]) *:focus-visible:not(input)
 ```
 
 ## Standing rules

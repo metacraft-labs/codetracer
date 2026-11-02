@@ -372,9 +372,10 @@ EMPTY_OVERLAY_SIDE_GAP = 2.5rem
 // key-focus on everything the keyboard can select (D-16; the look is in
 // button.styl).  A focusable panel or editor surface is not a control: focus
 // lands there from code as well, and a ring round a whole panel would read as
-// the selected panel outline.  `:where` keeps the specificity low, so the
-// "no ring on a mouse click" rule above still wins.
-*:focus-visible:where(:not(input, textarea, select, [contenteditable="true"], html, body, [data-scope-kind], .monaco-editor *, .xterm *, .filesystem, .component-container, .constraints, .code-editor, #navigation-menu, .context-menu))
+// the selected panel outline.  This long selector outranks the "no ring on a
+// mouse click" rule above, so it leaves out mouse mode itself.  Keep it free of
+// commas and `:where`: Stylus splits those, and `*` then matches every element.
+html:not([data-focus-mode="mouse"]) *:focus-visible:not(input):not(textarea):not(select):not([contenteditable="true"]):not(body):not([data-scope-kind]):not(.monaco-editor *):not(.xterm *):not(.filesystem):not(.component-container):not(.constraints):not(.code-editor):not(#navigation-menu):not(.context-menu)
   key-focus()
 
 // A text field always matches :focus-visible, so it takes key-focus only when
