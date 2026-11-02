@@ -721,6 +721,9 @@ fi
 # Walk the runs: section step by step. A step starts at `    - ` (four spaces,
 # the composite's step indent); its `uses:` and `with:` keys sit at six.
 lock_action_auth_defects=()
+# Every distinct git-auth pin a `repro develop` step uses; checked below
+# against the metacraft-github-actions sibling.
+git_auth_pins=()
 if [ -f "$LOCK_ACTION" ]; then
 	step_uses=""
 	step_token=""
@@ -732,6 +735,7 @@ if [ -f "$LOCK_ACTION" ]; then
 		[ "$step_develops" -gt 0 ] || return 0
 		if [[ $step_uses =~ $GIT_AUTH_ACTION_RE ]] && [ "$step_token" = 1 ]; then
 			authed_develops=$((authed_develops + step_develops))
+			git_auth_pins+=("${step_uses##*@}")
 		else
 			raw_develops=$((raw_develops + step_develops))
 			if [ -z "$step_uses" ]; then
@@ -801,6 +805,38 @@ else
 		"private build input clones only when the token reaches it as a private" \
 		"GIT_CONFIG_GLOBAL file, which the shared git-auth action writes" \
 		"${lock_action_auth_defects[@]}"
+fi
+
+# A 40-hex pin is only well formed. A placeholder (the implementation of this
+# check pinned 0000...0000 until the shared action was committed) or a commit
+# that was never pushed passes the shape check above and fails every job at
+# "Set up job", when GitHub cannot download the action. So each pin must name a
+# commit of the metacraft-github-actions sibling -- a member of repro.lock's
+# develop set, checked out beside this repo -- that carries
+# git-auth/action.yml. A missing sibling or an unfetched commit is a failure
+# with its remedy, not a skip: the check is no weaker for being offline.
+GIT_AUTH_SIBLING="$REPO_ROOT/../metacraft-github-actions"
+git_auth_pin_defects=()
+if [ "${#git_auth_pins[@]}" -eq 0 ]; then
+	git_auth_pin_defects+=("no git-auth pin was found to check (see the assertion above)")
+elif ! git -C "$GIT_AUTH_SIBLING" rev-parse --git-dir >/dev/null 2>&1; then
+	git_auth_pin_defects+=("no metacraft-github-actions checkout at $GIT_AUTH_SIBLING; check it out beside codetracer")
+else
+	for pin in "${git_auth_pins[@]}"; do
+		if ! git -C "$GIT_AUTH_SIBLING" cat-file -e "${pin}^{commit}" 2>/dev/null; then
+			git_auth_pin_defects+=("git-auth@$pin is not a commit of $GIT_AUTH_SIBLING (if it was pushed, run: git -C $GIT_AUTH_SIBLING fetch origin)")
+		elif ! git -C "$GIT_AUTH_SIBLING" cat-file -e "${pin}:git-auth/action.yml" 2>/dev/null; then
+			git_auth_pin_defects+=("git-auth@$pin has no git-auth/action.yml")
+		fi
+	done
+fi
+if [ "${#git_auth_pin_defects[@]}" -eq 0 ]; then
+	ok "its git-auth pin names a metacraft-github-actions commit that carries the action"
+else
+	fail "its git-auth pin names a metacraft-github-actions commit that carries the action" \
+		"GitHub downloads the pinned action before the job's first step, so a pin" \
+		"to a commit that does not exist fails every job that uses this action" \
+		"${git_auth_pin_defects[@]}"
 fi
 
 # Every caller hands the action a minted token. Callers are workflow steps
@@ -2466,7 +2502,8 @@ echo
 # clone failed. Three assertions replace it: the action declares a required
 # gh-token input, its clone runs through the pinned shared git-auth action with
 # that token, and every caller passes a minted token.
-readonly EXPECTED_ASSERTIONS=38
+# 38 -> 39: the git-auth pin names a sibling commit that carries the action.
+readonly EXPECTED_ASSERTIONS=39
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))
