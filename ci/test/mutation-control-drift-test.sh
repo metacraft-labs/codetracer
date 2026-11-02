@@ -232,7 +232,27 @@ stage "${A}"
 printf '# edited\n' >>"${A}/src/c/subj4.nim"
 expect_red "NEW DRIFT on a control no harness names: the gate says there is none" \
 	"$(run_guard "${A}")" \
-	"NEW DRIFT" "control: ${C3}" "no run-plat*-mutations.py in src/c names this control file"
+	"NEW DRIFT" "control: ${C3}" "no run-*-mutations.py in src/c names this control file"
+
+# --- NEW DRIFT, a harness without the `plat` prefix ---------------------------
+# Not every harness is a `run-plat*`: `run-hsf-sdk-mutations.py` and
+# `run-build-residuals-mutations.py` own control files too. The gate must name
+# them, not report the control file as having no harness. Staged in this arm
+# only, so the counts the other arms assert are unchanged.
+stage "${A}"
+mkdir -p "${A}/src/d"
+printf 'proc five*() = discard\n' >"${A}/src/d/subj5.nim"
+printf 'CONTROL_HASHES = HERE / "hsf1-alpha-mutation-control.sha256"\n' \
+	>"${A}/src/d/run-hsf1-alpha-mutations.py"
+printf '%s  src/d/subj5.nim\n' "$(sha "${A}/src/d/subj5.nim")" \
+	>"${A}/src/d/hsf1-alpha-mutation-control.sha256"
+git -C "${A}" add -A
+printf '# edited\n' >>"${A}/src/d/subj5.nim"
+expect_red "NEW DRIFT on a control owned by a non-plat harness names that harness" \
+	"$(run_guard "${A}")" \
+	"NEW DRIFT" "control: src/d/hsf1-alpha-mutation-control.sha256" \
+	"harness: src/d/run-hsf1-alpha-mutations.py" \
+	"$(ledger_line "${A}" src/d/hsf1-alpha-mutation-control.sha256 src/d/subj5.nim)"
 
 # --- NEW DRIFT, subject absent ----------------------------------------------
 stage "${A}"
