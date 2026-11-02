@@ -125,7 +125,6 @@ src/frontend/viewmodel/views/isonim_event_log_view.nim :: "ct-button-md-secondar
 src/frontend/viewmodel/viewmodels/event_log_vm.nim :: func placeColumn*
 src/frontend/viewmodel/viewmodels/event_log_vm.nim :: func placeColumnLower*
 src/frontend/viewmodel/views/isonim_event_log_view.nim :: wireColumnHandleKey(vm, handleEl, item)
-src/frontend/ui/key_router.nim :: if key == "Enter" and focusInColumnsMenu():
 ```
 
 ### D-08: Every checkbox is the design system's Checkbox
@@ -214,14 +213,26 @@ src/frontend/styles/components/golden_layout.styl :: SELECTED_PANEL_BORDER_COLOR
 
 A control selected from the keyboard shows `key-focus`: a 1.5px `#3B82F6` border
 inside its edge, the same on every control and in every theme. It matches the
-main menu buttons. Do not give a control its own focus ring, and do not remove
-one. Text fields show it only when reached with Tab. (2026-11-02)
+main menu buttons. The current row of a menu or the command palette shows it too,
+in place of a filled row. Do not give a control its own focus ring, and do not
+remove one. Text fields show it only when reached with Tab. (2026-11-02)
 
 ```guard
 src/frontend/styles/components/button.styl :: KEY_FOCUS_WIDTH = 0.09375rem
 src/frontend/styles/components/button.styl :: KEY_FOCUS_COLOR = colors-blue-500
+src/frontend/styles/components/menu_item.styl :: &.ct-menu-item--active:not(.ct-menu-item--disabled)
 src/frontend/styles/components/button.styl :: key-focus()
 src/frontend/styles/components/shared_widgets.styl :: html:not([data-focus-mode="mouse"]) *:focus-visible:not(input)
+```
+
+### D-17: Enter and Space both press a focused button
+
+A button or link selected from the keyboard answers both keys, in every panel. A
+list's row, an open menu, the command palette and the editor keep their own Enter.
+(2026-11-02)
+
+```guard
+src/frontend/ui/key_router.nim :: if name == "Enter" and not menuIsOpen() and not contextMenuIsOpen() and
 ```
 
 ## Standing rules

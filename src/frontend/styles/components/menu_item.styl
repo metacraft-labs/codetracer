@@ -98,20 +98,12 @@
   &:hover:not(.ct-menu-item--disabled)
     background: LIST_HOVER_BG
 
-  // ── Keyboard navigation active (blue) ────────────────────
-  // Only .ct-menu-item--active gets the blue background.
-  // :focus-visible is intentionally excluded — it fires on
-  // mouse clicks too and would override the hover gray.
-  //
-  // Sublabel keeps colors-ui-text-primary-body-subtle on the
-  // blue background (same as default/hover per design spec).
+  // ── Keyboard navigation active (key-focus) ────────────────────
+  // The current row of a menu shows key-focus, not a filled row (Nikolay,
+  // 2026-11-02; docs/UI-Design-Decisions.md, D-16).
 
   &.ct-menu-item--active:not(.ct-menu-item--disabled)
-    outline: none
-    background: colors-ui-border-focus
-
-    .ct-menu-item-sublabel
-      color: colors-ui-text-primary-body-subtle
+    key-focus()
 
   // ── Disabled ──────────────────────────────────────────────
 

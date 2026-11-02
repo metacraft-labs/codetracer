@@ -710,12 +710,14 @@ proc canonicalKeyOfEvent(ev: JsObject): string =
                     ev.ctrlKey.to(bool), ev.shiftKey.to(bool),
                     ev.altKey.to(bool), ev.metaKey.to(bool))
 
-proc focusInColumnsMenu(): bool {.importjs: """
+proc focusOnButton(): bool {.importjs: """
   (function () {
     var el = document.activeElement;
-    return !!(el && el.closest && el.closest('.eventLog-columns-menu'));
+    return !!(el && el.matches &&
+      el.matches('button:not(:disabled), a[href]:not(.jstree-anchor), [role="button"]:not(tr)'));
   })()""".}
-  ## The Event Log's Columns menu is open and holds the focus.
+  ## A button or link holds the focus.  A list's row is left out: it answers
+  ## `Enter` through the keymap (`list.activate`).
 
 proc onKeyDown(ev: JsObject) =
   ## The ONE key listener (capture phase, on the window).
@@ -733,10 +735,12 @@ proc onKeyDown(ev: JsObject) =
   if videoPlayerKey(name):
     stop(ev)
     return
-  # `Enter` in the Columns menu belongs to its focused check or drag handle
-  # (`isonim_activation`; docs/UI-Design-Decisions.md, D-07), not to the Event
-  # Log's list behind the menu.
-  if key == "Enter" and focusInColumnsMenu():
+  # `Enter` on a focused button is that button's: the browser clicks a native
+  # one, and `isonim_activation` a `role="button"`.  Routed, it ran the pane's
+  # `list.activate` and stopped the event, so no button in a pane answered it
+  # (docs/UI-Design-Decisions.md, D-17).  An open menu keeps its own keys.
+  if name == "Enter" and not menuIsOpen() and not contextMenuIsOpen() and
+     focusOnButton():
     return
   routeKey(name, ev)
 
