@@ -258,7 +258,8 @@ done
 # provisions Nix through setup-dev-env, env-flavor nix, before its first `nix`.
 #
 # 40 -> 41: codetracer.yml's `tui-tests`, the job that runs `just test-tui` and
-# `just test-tui-real-terminal`. A new job, not a scanner change: the found
+# `just test-tui-real-terminal` (codetracer-pm issues/2026-11-01-no-ci-lane-
+# calls-the-test-tui-recipes.md). A new job, not a scanner change: the found
 # list differs from the previous one by exactly this entry. It provisions Nix
 # through setup-db-backend-siblings, env-flavor nix, before its first `nix`, as
 # `gpui-window-captures` does.

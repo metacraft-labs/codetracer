@@ -3730,8 +3730,9 @@ jobs:
     # WHY THIS JOB EXISTS. `just test-tui` and `just test-tui-real-terminal` are
     # the only routes to the `tui` and `tui-real-terminal` lanes of
     # `ci/lib/run-nim-test-lane.sh` -- 133 and 64 files -- and until this job no
-    # workflow called either. The TUI's Tier-1 suites are meant to run fast, on
-    # every pull request, and Tier 2 is its check against real terminals, so
+    # workflow called either (codetracer-pm issues/2026-11-01-no-ci-lane-calls-
+    # the-test-tui-recipes.md). CodeTracer-TUI.md §7.1.6 asserts the TUI's
+    # Tier-1 content "fast, per-PR" and makes Tier 2 the terminal-peer check, so
     # both run here, on every push and pull request this workflow runs on.
     # `ci/test/ci-reached-recipes-test.sh` fails if either recipe stops being
     # reached by a workflow lane.
@@ -8224,8 +8225,9 @@ jobs:
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # `just test-tui` and `just test-tui-real-terminal` are the only routes
         # to the TUI's two Nim lanes, and no workflow called either: every
-        # guard stayed green, because none of them has recipes as its subject.
-        # This suite reads the recipe set `shell-gate-coverage.sh`
+        # guard stayed green, because none of them has recipes as its subject
+        # (codetracer-pm issues/2026-11-01-no-ci-lane-calls-the-test-tui-
+        # recipes.md). This suite reads the recipe set `shell-gate-coverage.sh`
         # already walks from the workflows and fails, by name, on any recipe
         # listed in `ci/test/ci-reached-recipes.txt` that is not in it -- with a
         # negative control that deletes the workflow steps from a copy of the

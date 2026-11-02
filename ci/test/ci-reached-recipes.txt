@@ -5,7 +5,7 @@
 # `ci/test/shell-gate-coverage.sh` does not reach from `.github/workflows/`.
 # "Reach" is that walk's rule: a workflow step invokes the recipe, or a recipe or
 # script a reached step invokes does. A remedy message that names the recipe in a
-# string is not a call that runs it.
+# string is not a wire (Verification-Harness-Traps.md §4f).
 #
 # WHAT BELONGS HERE. A recipe that is the ONLY route to a body of tests, so that
 # no lane calling it means those tests run nowhere -- and nothing else fails,
@@ -24,9 +24,9 @@
 # Blank lines and `#` lines are ignored.
 
 # The only route to the `tui` Nim lane (ci/lib/run-nim-test-lane.sh tui):
-# TUI Tier 1, meant to run fast, on every pull request. Run by the `tui-tests` job.
-test-tui # TUI Tier-1 suites
+# CodeTracer-TUI.md §7.1.6, Tier 1, "fast, per-PR". Run by the `tui-tests` job.
+test-tui # TUI Tier-1 suites (codetracer-pm issues/2026-11-01-no-ci-lane-calls-the-test-tui-recipes.md)
 
-# The only route to the `tui-real-terminal` Nim lane: TUI Tier 2, the check
-# against real terminals. Run by the `tui-tests` job.
-test-tui-real-terminal # TUI Tier-2 suites
+# The only route to the `tui-real-terminal` Nim lane: CodeTracer-TUI.md §7.1.6,
+# Tier 2, the terminal-peer check. Run by the `tui-tests` job.
+test-tui-real-terminal # TUI Tier-2 suites (same issue)
