@@ -472,13 +472,13 @@ suite "PLAT-47: the focused pane is outlined as the desktop outlines it":
     let deskHex = desk["focus"]["outline"].getStr
     # PLAT-49: dividers sit on the panes' own ground, the panel.
     let canvas = DesignTokenHex[dtColorsUiSurfaceBasePanel][dmDark]
-    # The colour relationship. The desktop's outline is ui/border/action
+    # The colour relationship. The desktop's outline is ui/border/primary
     # (measured); PLAT-51 (the user: both focus contrasts SUBTLER) moved the
-    # native front-ends' to the subtler ui/border/secondary —
+    # native front-ends' one step down the border ramp, ui/border/secondary —
     # a declared deviation (Native-Front-End-Parity.md §2): it stands off
     # the panel by less than the desktop's does, and is still a ring.
     let focusHex = DesignTokenHex[dtColorsUiBorderSecondary][dmDark]
-    ck DesignTokenHex[dtColorsUiBorderAction][dmDark] == deskHex
+    ck DesignTokenHex[dtColorsUiBorderPrimary][dmDark] == deskHex
     ck contrastOf(focusHex, canvas) < contrastOf(deskHex, canvas)
     for (cols, rows) in Sizes:
       var sess = spawnTui(@["--theme=dark"], cols, rows)

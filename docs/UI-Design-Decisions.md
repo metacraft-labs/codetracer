@@ -193,6 +193,18 @@ The shared look in D-06 is for the panels of an open trace only. (2026-10-21)
 src/frontend/styles/components/welcome_screen.styl :: // The welcome screens keep their own button look
 ```
 
+### D-15: The selected panel outline is subtle and grey
+
+It uses `colors-ui-border-primary`, `#565656` in the dark theme, and not the brand
+colour. This is a deliberate exception to the 3:1 contrast floor: the outline
+measures about 2:1 against the panel. Commit `4424bd111` had changed it to
+`colors-ui-border-action` to meet that floor. Do not change it back to meet a
+contrast target without asking Nikolay. (2026-08-21, reaffirmed 2026-11-02)
+
+```guard
+src/frontend/styles/components/golden_layout.styl :: SELECTED_PANEL_BORDER_COLOR = colors-ui-border-primary
+```
+
 ## Standing rules
 
 These apply to all new UI work. A source check cannot judge them, so they have
@@ -221,6 +233,3 @@ Not protected until Nikolay and the team settle them.
   toolbar are in `dev` today, restored by PR #893. `Variable-State-Pane.md`
   ("Decisions (2026-10-24)") and the tests in `isonim_views_test.nim` still expect
   one list with no tabs, so those tests fail on `dev`.
-- **Selected panel outline colour.** Commit `4424bd111` changed it from
-  `colors-ui-border-primary` to `colors-ui-border-action` to meet a contrast floor.
-  It stays changed unless Nikolay decides otherwise.
