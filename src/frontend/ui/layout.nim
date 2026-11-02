@@ -798,12 +798,12 @@ proc setupSelectedPanelOutline() =
         // hover overlay, so while hovering two tabs carry it and picking the
         // first drew this border around whichever tab the pointer was over.
         // The border is for the docked panel alone.
-        var wanted = panel.getAttribute('data-ct-docked-title');
-        var tab = null;
-        var candidates = document.querySelectorAll(stripSel + ' .auto-hide-strip-tab');
-        for (var ti = 0; ti < candidates.length; ti++) {
-          if (candidates[ti].textContent.trim() === wanted) { tab = candidates[ti]; break; }
-        }
+        //
+        // And by the panel's KEY, not its title: two panels of a kind open at
+        // once (two UNIFIED DIFFs) share a title, and the first match drew the
+        // border around the other one's tab.  stripTabFor below explains.
+        var tab = stripTabFor(stripSel, panel.getAttribute('data-ct-docked-key'),
+                              panel.getAttribute('data-ct-docked-title'));
         if (tab === null) {
           path.setAttribute('d', dockedPanelOnlyPath(p, rr, inset));
           return;
@@ -816,6 +816,29 @@ proc setupSelectedPanelOutline() =
         path.setAttribute('d', side === 'bottom'
           ? dockedWithTabPathBottom(p, tb, rr, radii(tab), inset)
           : dockedWithTabPath(p, tb, rr, radii(tab), inset, side));
+      }
+
+      // The strip tab of one pinned panel, or null.
+      //
+      // By the data-ct-panel-key attribute (panelKey in ui/auto_hide.nim:
+      // content kind + id), which no two pinned panels share.  The title is
+      // only the fallback for a tab or panel that carries no key, because a
+      // title can belong to two tabs: a first-match-by-title is how the
+      // outline of the second UNIFIED DIFF ended up drawn around the first.
+      function stripTabFor(stripSel, key, title) {
+        var candidates = document.querySelectorAll(stripSel + ' .auto-hide-strip-tab');
+        var ci;
+        if (key) {
+          for (ci = 0; ci < candidates.length; ci++) {
+            if (candidates[ci].getAttribute('data-ct-panel-key') === key) { return candidates[ci]; }
+          }
+        }
+        var wanted = (title || '').trim();
+        if (wanted === '') { return null; }
+        for (ci = 0; ci < candidates.length; ci++) {
+          if (candidates[ci].textContent.trim() === wanted) { return candidates[ci]; }
+        }
+        return null;
       }
 
       // ---------------------------------------------------------------------
@@ -940,15 +963,10 @@ proc setupSelectedPanelOutline() =
         // the one being previewed, so while a preview is open two tabs carry
         // the class; the overlay's tab is the one whose label matches the
         // title the overlay was opened with.
+        // Keyed first, for the same reason (two panels can share a title).
         var titleEl = document.getElementById('auto-hide-overlay-title');
-        var wanted = titleEl === null ? '' : titleEl.textContent.trim();
-        var tab = null;
-        if (wanted !== '') {
-          var candidates = document.querySelectorAll(stripSel + ' .auto-hide-strip-tab');
-          for (var ti = 0; ti < candidates.length; ti++) {
-            if (candidates[ti].textContent.trim() === wanted) { tab = candidates[ti]; break; }
-          }
-        }
+        var tab = stripTabFor(stripSel, overlay.getAttribute('data-ct-panel-key'),
+                              titleEl === null ? '' : titleEl.textContent);
         if (tab === null) {
           // No tab found: an overlay opened by a command rather than from a
           // strip, or a collapsed strip. The panel alone is still a shape.

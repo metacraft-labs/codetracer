@@ -243,27 +243,21 @@
     justify-content: center
     min-width: 28px
     height: 28px
+    box-sizing: border-box
     padding: 0 6px
-    border: 1px solid transparent
-    border-radius: 4px
-    background: transparent
-    color: var(--video-player-fg)
-    cursor: pointer
+    border-radius: CONTROL_RADIUS
+    // The button look (button.styl); pressed is its active state.
+    control-button()
     font-size: 14px
     line-height: 1
     user-select: none
 
     &:hover
-      background: var(--video-player-button-hover-bg)
+      control-button-hover()
 
     &:active,
     &.pressed
-      background: var(--video-player-button-active-bg)
-      // The pressed button: a blue ring and white glyph on the dark
-      // transport bar; on the light one the focus border and body text
-      // tokens (`by-mode`, defaults.styl).
-      border-color: by-mode(rgba(80, 160, 255, 0.85), colors-ui-border-focus)
-      color: by-mode(#ffffff, colors-ui-text-primary-body)
+      control-button-active()
 
   .video-player-divider
     width: 1px

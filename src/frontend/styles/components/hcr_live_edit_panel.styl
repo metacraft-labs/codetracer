@@ -18,10 +18,10 @@
   width 420px
   max-width calc(100vw - 48px)
   padding 16px
-  border 1px solid var(--border-color)
+  border 1px solid colors-ui-border-secondary
   border-radius 6px
-  background var(--panel-background)
-  color var(--text-color)
+  background colors-ui-surface-base-panel
+  color colors-ui-text-primary-body
   box-shadow 0 12px 32px rgba(0, 0, 0, 0.35)
 
 .hcr-live-edit-panel h2
@@ -45,10 +45,10 @@
   width 100%
   min-height 28px
   padding 4px 8px
-  border 1px solid var(--border-color)
+  border 1px solid colors-ui-border-secondary
   border-radius 4px
-  background var(--input-background, var(--panel-background))
-  color var(--text-color)
+  background colors-ui-surface-input-default
+  color colors-ui-text-primary-body
   font-family monospace
   font-size 13px
 
@@ -61,14 +61,11 @@
 .hcr-live-edit-row button
   min-height 28px
   padding 4px 10px
-  border 1px solid var(--border-color)
   border-radius 4px
-  background var(--button-background)
-  color var(--text-color)
-  cursor pointer
+  control-button()
 
 .hcr-live-edit-row button:hover
-  background var(--button-hover-background)
+  control-button-hover()
 
 // The status line is where the provider's answer STAYS. Notifications expire;
 // a panel that publishes on every pause needs somewhere the last named outcome

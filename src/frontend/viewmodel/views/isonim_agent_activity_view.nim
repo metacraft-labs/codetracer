@@ -18,6 +18,7 @@ import isonim/dsl/[ui, components]
 import isonim/testing/mock_dom
 
 when defined(js):
+  import ./dropdown_focus
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
   import jsffi
@@ -1161,7 +1162,8 @@ proc renderAddContextMenuItem[R](r: R; icon: string; label: string;
   let cls = "agent-add-context-menu-item ct-menu-item" &
     (if disabled: " ct-menu-item--disabled" else: "")
   let item = ui(r):
-    tdiv(class = cls, `aria-disabled` = (if disabled: "true" else: "false"),
+    tdiv(class = cls, role = "button", tabindex = "0",
+         `aria-disabled` = (if disabled: "true" else: "false"),
          title = disabledReason,
          onclick = proc() =
            if not disabled: action()):
@@ -1189,7 +1191,7 @@ proc renderAddFilesButton[R](r: R; vm: AgentActivityVM;
              onclick = proc() =
                vm.addContextDropdownOpen.val = not vm.addContextDropdownOpen.val)
       if isOpen:
-        tdiv(ref = menuRef, class = "agent-add-context-dropdown")
+        tdiv(ref = menuRef, class = "agent-add-context-dropdown", tabindex = "-1")
   if isOpen:
     let editorReason =
       if callbacks.editorSelectionUnavailableReason.isNil: ""

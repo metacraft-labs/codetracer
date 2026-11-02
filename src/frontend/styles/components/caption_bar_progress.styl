@@ -32,7 +32,7 @@
   transition background-color 0.15s ease
 
   &:hover
-    background-color var(--bg-hover, #2a2b34)
+    background-color LIST_HOVER_BG
 
 // --- State-dependent colour coding ---
 //
@@ -45,7 +45,7 @@
 
 .caption-progress-idle
   .caption-progress-state
-    color var(--text-secondary, #8e8f92)
+    color colors-ui-text-primary-label-subtle
 
 .caption-progress-initializing
   .caption-progress-state
@@ -95,7 +95,7 @@
 .caption-progress-bar
   flex 1
   height 4px
-  background-color var(--bg-secondary, #2a2b34)
+  background-color colors-ui-surface-primary-tertiary
   border-radius 2px
   overflow hidden
   min-width 60px
@@ -114,20 +114,20 @@
   min-width 40px
 
 .caption-progress-task
-  color var(--text-primary, #c9c9c9)
+  color colors-ui-text-primary-body
   white-space nowrap
   overflow hidden
   text-overflow ellipsis
   max-width 200px
 
 .caption-progress-count
-  color var(--text-secondary, #8e8f92)
+  color colors-ui-text-primary-label-subtle
   white-space nowrap
   min-width 30px
   text-align right
 
 .caption-progress-current
-  color var(--text-secondary, #8e8f92)
+  color colors-ui-text-primary-label-subtle
   white-space nowrap
   overflow hidden
   text-overflow ellipsis
@@ -142,8 +142,8 @@
   left 0
   right 0
   z-index 1000
-  background-color var(--bg-primary, #1a1b22)
-  border 1px solid var(--border-color, #3a3b44)
+  background-color colors-ui-surface-primary-default
+  border 1px solid colors-ui-border-secondary
   border-radius 4px
   box-shadow 0 4px 12px rgba(0, 0, 0, 0.3)
   padding 4px 0
@@ -153,7 +153,7 @@
 .caption-progress-milestone-empty
   padding 8px 12px
   font-size 12px
-  color var(--text-secondary, #8e8f92)
+  color colors-ui-text-primary-label-subtle
   font-style italic
 
 .caption-progress-milestone-item
@@ -162,10 +162,10 @@
   gap 8px
   padding 4px 12px
   font-size 12px
-  color var(--text-primary, #c9c9c9)
+  color colors-ui-text-primary-body
 
   &:hover
-    background-color var(--bg-hover, #2a2b34)
+    background-color LIST_HOVER_BG
 
 .caption-progress-milestone-icon
   // Space Mono deliberately (font rule, font_family.styl): the "[x]" / "[>]" /
@@ -193,7 +193,7 @@
 
 .milestone-pending
   .caption-progress-milestone-icon
-    color var(--text-secondary, #8e8f92)
+    color colors-ui-text-primary-label-subtle
 
 .milestone-in-progress
   .caption-progress-milestone-icon
@@ -209,7 +209,7 @@
 
 .milestone-skipped
   .caption-progress-milestone-icon
-    color var(--text-secondary, #6e6e6e)
+    color colors-ui-text-primary-caption-subtle
 
   .caption-progress-milestone-content
     text-decoration line-through

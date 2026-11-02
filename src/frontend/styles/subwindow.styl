@@ -1,4 +1,6 @@
 @import "defaults"
+@import "generated/index"
+@import "components/checkmark"
 
 // TODO: integrate themes with subwindow
 // or move subwindow to a div inside normal window
@@ -121,38 +123,8 @@ body
   margin-bottom: 32px
   font-family: "SpaceGrotesk"
 
-.dialog-options input[type="checkbox"]
-  appearance none
-  width 16px
-  height 16px
-  border-radius 4px
-  border 1px solid #ABABAB
-  background-color transparent
-  cursor pointer
-  display flex
-  align-items center
-  justify-content center
-  position relative
-
-.dialog-options input[type="checkbox"]:checked
-  background-color transparent
-  border-color #ABABAB
-
-.dialog-options input[type="checkbox"]:checked::after
-  content: ""
-  position: absolute
-  display: block
-  left: 3.8px;
-  top: 1px;
-  width: 4px;
-  height: 8px;
-  border: solid #16A34A;
-  border-width: 0 2px 2px 0;
-  border-radius: 2px
-  -webkit-transform: rotate(45deg);
-  -ms-transform: rotate(45deg);
-  transform: rotate(45deg);
-
+// Checkboxes are the shared component (components/checkmark.styl, imported
+// at the top) — the Design System's ❖ Checkbox — not a restyled native input.
 .dialog-options label
   display flex
   align-items center
@@ -164,9 +136,6 @@ body
   line-height: normal
   cursor pointer
 
-.dialog-options input[type="checkbox"]
-  margin-right 8px
-  accent-color #6a5acd
 
 .custom-tooltip
   display: block
@@ -210,9 +179,6 @@ body
   display: flex
   align-items: flex-end
 
-.dialog-ask-again input[type="checkbox"]
-  margin-left: 8px
-  margin-right: 0px !important
 
 .dialog-install-status
   font-family: "SpaceGrotesk"

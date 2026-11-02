@@ -55,6 +55,7 @@ when defined(js):
 
   # Enter and Space on a `role="button"` row are its click.
   import ./isonim_activation
+  import ./dropdown_focus
   from isonim/core/owner import onCleanup
 
 import isonim/core/[signals, computation]
@@ -252,7 +253,7 @@ proc renderFilterPicker[R](r: R; label: string; isOpen: bool;
   ## ``currentValue`` — the active filter value (``""`` means unfiltered).
   ## ``options``      — (filterValue, displayLabel) pairs; the entry whose
   ##                    ``filterValue == currentValue`` gets the
-  ##                    ``ct-menu-item--active`` modifier.
+  ##                    ``ct-menu-item--chosen`` modifier.
   ## ``onToggle``     — called when the trigger is clicked.
   ## ``onSelect(v)``  — called when a dropdown item is clicked.
   var chevronHost: typeof(r.createElement("span"))
@@ -263,21 +264,25 @@ proc renderFilterPicker[R](r: R; label: string; isOpen: bool;
   let displayLabel = if currentValue == "": label else: currentValue
   let panel = ui(r):
     tdiv(class = "ct-picker ct-picker--chevron-right"):
-      tdiv(class = triggerClass, onclick = onToggle):
+      tdiv(class = triggerClass, role = "button", tabindex = "0",
+           `aria-haspopup` = "true",
+           `aria-expanded` = (if isOpen: "true" else: "false"),
+           onclick = onToggle):
         span(ref = chevronHost, class = "ct-picker-chevron")
         span(class = "ct-picker-label"):
           text displayLabel
       if isOpen:
-        tdiv(ref = dropdown, class = "ct-picker-dropdown")
+        tdiv(ref = dropdown, class = "ct-picker-dropdown", tabindex = "-1")
   r.setInnerHtml(chevronHost, chevronSvg)
   if isOpen:
     for (optValue, optLabel) in options:
       let v = optValue
       let ol = optLabel
-      let itemClass = if v == currentValue: "ct-menu-item ct-menu-item--active"
+      let itemClass = if v == currentValue: "ct-menu-item ct-menu-item--chosen"
                       else: "ct-menu-item"
       let item = ui(r):
-        tdiv(class = itemClass, onclick = pickerSelectHandler(onSelect, v)):
+        tdiv(class = itemClass, role = "button", tabindex = "0",
+             onclick = pickerSelectHandler(onSelect, v)):
           span(class = "ct-menu-item-label"):
             text ol
       r.appendChild(dropdown, item)
