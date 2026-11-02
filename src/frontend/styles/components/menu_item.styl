@@ -105,6 +105,11 @@
   &.ct-menu-item--active:not(.ct-menu-item--disabled)
     key-focus()
 
+  // The option a dropdown has chosen: a saved value, not where the keyboard
+  // is, so never key-focus (D-18).
+  &.ct-menu-item--chosen:not(.ct-menu-item--disabled)
+    background: colors-ui-surface-primary-tertiary
+
   // ── Disabled ──────────────────────────────────────────────
 
   &.ct-menu-item--disabled

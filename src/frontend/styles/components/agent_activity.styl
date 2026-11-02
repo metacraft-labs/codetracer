@@ -1186,7 +1186,9 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
     outline: SELECTED_PANEL_BORDER solid colors-brand-600
     outline-offset: 0
 
-  [data-focus-mode="keyboard"] &:focus-within
+  // The prompt box itself; a button inside it shows its own key-focus, and only
+  // one thing looks selected at a time (D-18).
+  [data-focus-mode="keyboard"] &:has(textarea:focus)
     key-focus()
 
 .prompt-wrapper

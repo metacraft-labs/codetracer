@@ -719,6 +719,14 @@ proc focusOnButton(): bool {.importjs: """
   ## A button or link holds the focus.  A list's row is left out: it answers
   ## `Enter` through the keymap (`list.activate`).
 
+proc focusInDropdown(): bool {.importjs: """
+  (function () {
+    var el = document.activeElement;
+    return !!(el && el.closest &&
+      el.closest('.ct-picker-dropdown, .vcs-branch-dropdown, .agent-add-context-dropdown'));
+  })()""".}
+  ## A dropdown's row holds the focus (`views/dropdown_focus`).
+
 proc onKeyDown(ev: JsObject) =
   ## The ONE key listener (capture phase, on the window).
   if ev[cstring"isComposing"].to(bool):
@@ -741,6 +749,10 @@ proc onKeyDown(ev: JsObject) =
   # (docs/UI-Design-Decisions.md, D-17).  An open menu keeps its own keys.
   if name == "Enter" and not menuIsOpen() and not contextMenuIsOpen() and
      focusOnButton():
+    return
+  # A dropdown's rows answer these keys themselves (D-18).
+  if key in ["ArrowUp", "ArrowDown", "Home", "End", "Escape"] and
+     focusInDropdown():
     return
   routeKey(name, ev)
 

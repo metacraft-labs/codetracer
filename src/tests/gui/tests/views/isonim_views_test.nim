@@ -11780,7 +11780,7 @@ suite "IsoNim VCS Panel — structure":
       let options = findAllByClass(dropdown, "ct-menu-item")
       check options.len == 3
       # The checked-out branch is marked so the picker shows where you are.
-      check options[0].attributes["class"].contains("ct-menu-item--active")
+      check options[0].attributes["class"].contains("ct-menu-item--chosen")
       check options[0].textContent.contains("main")
       check options[1].textContent.contains("feature-1")
       check options[2].textContent.contains("feature-2")
@@ -12213,6 +12213,14 @@ suite "Handlers built in a loop act on their own item (codetracer#860 sweep)":
       let options = findAllByClass(findByClass(panel, "ct-picker-dropdown"),
                                    "ct-menu-item")
       check options.len == MethodPickerOptions.len
+      # docs/UI-Design-Decisions.md, D-18: reachable from the keyboard, and the
+      # chosen option is not marked as the keyboard's place.
+      check findByClass(panel, "ct-picker-trigger").attributes["tabindex"] == "0"
+      for option in options:
+        check option.attributes["tabindex"] == "0"
+        check option.attributes["role"] == "button"
+      check findAllByClass(panel, "ct-menu-item--active").len == 0
+      check findAllByClass(panel, "ct-menu-item--chosen").len == 1
       if options.len == MethodPickerOptions.len:
         options[1].fireEvent("click")
         check vm.filterMethod.val == MethodPickerOptions[1][0]

@@ -384,7 +384,7 @@ html:not([data-focus-mode="mouse"]) *:focus-visible:not(input):not(textarea):not
 [data-focus-mode="keyboard"] input:focus:not(.ct-checkmark-input):not(.ct-toggle *):not(.command-input-row *):not(.agent-interaction *),
 [data-focus-mode="keyboard"] textarea:focus:not(.monaco-editor *):not(.xterm *):not(.agent-interaction *),
 [data-focus-mode="keyboard"] select:focus,
-[data-focus-mode="keyboard"] .command-input-row:focus-within
+[data-focus-mode="keyboard"] .command-view:not(:has(.ct-menu-item--active)) .command-input-row:focus-within
   key-focus()
 
 html, body

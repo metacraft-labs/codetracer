@@ -235,6 +235,23 @@ list's row, an open menu, the command palette and the editor keep their own Ente
 src/frontend/ui/key_router.nim :: if name == "Enter" and not menuIsOpen() and not contextMenuIsOpen() and
 ```
 
+### D-18: Dropdowns work from the keyboard, and one thing looks selected
+
+A dropdown's trigger and rows can be reached with the keyboard. Opening moves to
+the chosen row, the arrow keys move between rows, Enter or Space picks one, Escape
+closes and returns to the trigger, and moving focus away closes it. At most one
+dropdown is open. The chosen option has a subtle grey fill, not `key-focus`,
+because it marks a saved value rather than the keyboard's place. Only one element
+shows `key-focus` at a time. (2026-11-02)
+
+```guard
+src/frontend/viewmodel/views/dropdown_focus.nim :: installDropdownFocus(cstring ContainerSelector
+src/frontend/viewmodel/views/isonim_request_panel_view.nim :: "ct-menu-item ct-menu-item--chosen"
+src/frontend/viewmodel/views/isonim_vcs_view.nim :: "ct-menu-item ct-menu-item--chosen"
+src/frontend/styles/components/menu_item.styl :: &.ct-menu-item--chosen:not(.ct-menu-item--disabled)
+src/frontend/ui/key_router.nim :: focusInDropdown():
+```
+
 ## Standing rules
 
 These apply to all new UI work. A source check cannot judge them, so they have
