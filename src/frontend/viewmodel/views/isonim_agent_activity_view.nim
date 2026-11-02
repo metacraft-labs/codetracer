@@ -18,7 +18,7 @@ import isonim/dsl/[ui, components]
 import isonim/testing/mock_dom
 
 when defined(js):
-  import ./dropdown_focus
+  import ./keyboard_focus
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
   import jsffi
@@ -1162,7 +1162,7 @@ proc renderAddContextMenuItem[R](r: R; icon: string; label: string;
   let cls = "agent-add-context-menu-item ct-menu-item" &
     (if disabled: " ct-menu-item--disabled" else: "")
   let item = ui(r):
-    tdiv(class = cls, role = "button", tabindex = "0",
+    tdiv(class = cls, role = "button", tabindex = "-1",
          `aria-disabled` = (if disabled: "true" else: "false"),
          title = disabledReason,
          onclick = proc() =

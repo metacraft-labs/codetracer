@@ -804,7 +804,7 @@ proc renderCalltracePanel*[R, N](r: R; vm: CalltraceVM;
     # No id: the host the panel is mounted into carries the pane's id
     # (`calltraceComponent-<n>`), and an id names one element.
     tdiv(class = "calltrace-view isonim-calltrace",
-         `data-label` = "calltrace-data-label-0", tabindex = "2"):
+         `data-label` = "calltrace-data-label-0", tabindex = "-1"):
       tdiv:
         tdiv(class = "calltrace-search"):
           form(ref = formEl, class = "calltrace-search-form-0"):

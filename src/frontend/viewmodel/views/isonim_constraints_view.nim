@@ -226,7 +226,7 @@ proc renderConstraintsPanel*[R, N](r: R; vm: ConstraintsVM): N =
       absenceNode: N
 
   let panel = ui(r):
-    tdiv(class = ConstraintsContainerClass, tabIndex = "2"):
+    tdiv(class = ConstraintsContainerClass, tabIndex = "-1"):
       tdiv(ref = headlineNode, class = "constraints-headline"):
         discard
       tdiv(ref = noticeNode, class = "constraints-listing-notice hidden"):

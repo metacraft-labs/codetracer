@@ -84,7 +84,7 @@ proc renderEditorContainer*[R, N](r: R; vm: EditorVM;
          `data-execution-cursor-kind` = vm.executionCursorKind.val,
          `data-source-generation` = $vm.activeSourceGeneration.val,
          `data-source-digest` = vm.activeSourceDigest.val,
-         tabindex = "2"):
+         tabindex = "-1"):
       if testControls.placement != etcpDisabled and testControls.controls.len > 0:
         testControlsNode()
 

@@ -199,7 +199,7 @@ suite "IsoNim Editor Panel - structure":
       check panel.attributes["id"] == "editorComponent-7"
       check panel.attributes["class"] == "editor code-editor tab"
       check panel.attributes["data-label"] == "src/main.nim"
-      check panel.attributes["tabindex"] == "2"
+      check panel.attributes["tabindex"] == "-1"
 
       dispose()
 
@@ -253,7 +253,7 @@ suite "IsoNim Editor Panel - structure":
       check panel.attributes["id"] == "expanded-42"
       check panel.attributes["class"] == "editor code-editor tab expansion expansion-2"
       check panel.attributes["data-label"] == "expanded-42"
-      check panel.attributes["tabindex"] == "2"
+      check panel.attributes["tabindex"] == "-1"
 
       dispose()
 
@@ -12212,18 +12212,27 @@ suite "Handlers built in a loop act on their own item (codetracer#860 sweep)":
       findByClass(panel, "ct-picker-trigger").fireEvent("click")
       let options = findAllByClass(findByClass(panel, "ct-picker-dropdown"),
                                    "ct-menu-item")
-      check options.len == MethodPickerOptions.len
+      # docs/UI-Design-Decisions.md, D-19: no "Method: All" row.
+      check options.len == MethodPickerOptions.len - 1
       # docs/UI-Design-Decisions.md, D-18: reachable from the keyboard, and the
       # chosen option is not marked as the keyboard's place.
       check findByClass(panel, "ct-picker-trigger").attributes["tabindex"] == "0"
       for option in options:
-        check option.attributes["tabindex"] == "0"
+        check option.attributes["tabindex"] == "-1"
         check option.attributes["role"] == "button"
       check findAllByClass(panel, "ct-menu-item--active").len == 0
-      check findAllByClass(panel, "ct-menu-item--chosen").len == 1
-      if options.len == MethodPickerOptions.len:
-        options[1].fireEvent("click")
+      check findAllByClass(panel, "ct-menu-item--chosen").len == 0
+      if options.len == MethodPickerOptions.len - 1:
+        options[0].fireEvent("click")
         check vm.filterMethod.val == MethodPickerOptions[1][0]
+
+        # D-19: the chosen row, picked again, turns the filter off.
+        findByClass(panel, "ct-picker-trigger").fireEvent("click")
+        let chosen = findAllByClass(panel, "ct-menu-item--chosen")
+        check chosen.len == 1
+        if chosen.len == 1:
+          chosen[0].fireEvent("click")
+          check vm.filterMethod.val == ""
 
       dispose()
 

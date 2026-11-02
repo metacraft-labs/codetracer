@@ -1,0 +1,214 @@
+## keyboard_focus.nim — how the keyboard moves through the desktop's composite
+## controls (docs/UI-Design-Decisions.md, "Focus rules").
+##
+## Tab moves between components and arrow keys move inside them, so each list,
+## set of tabs or dropdown is one Tab stop. This module holds that behaviour for:
+##
+##   * dropdowns (a trigger that opens a list): the Requests filters, the VCS
+##     branch picker, the agent's add-context menu and the Event Log's Columns
+##     menu. Opening moves to the chosen row, else the first; Up, Down, Home and
+##     End move; Escape closes; closing returns to the trigger; focus leaving
+##     closes it, without moving the focus from where it went;
+##   * roving composites: the Variables tabs and list controls, the strip tabs,
+##     the Event Log's header and rows, and the file tree.
+##
+## A view's elements carry `role="button"` and a tab stop, so `isonim_activation`
+## presses them with Enter or Space.
+##
+## THE LISTENERS ARE ON THE DOCUMENT, ONCE. Views rebuild these elements as they
+## change, so nothing attached to one would survive. For the same reason the Tab
+## stops are settled when Tab is pressed, not when a view renders; no work runs
+## until a key or click involves one of these controls.
+
+when defined(js):
+  const
+    DropdownListSelector* =
+      ".ct-picker-dropdown, .vcs-branch-dropdown, .agent-add-context-dropdown, .eventLog-columns-menu"
+    CompositeItemSelector* =
+      ".state-tabs button, #auto-hide-bottom-strip .auto-hide-strip-tab, " &
+      "#auto-hide-bottom-strip .auto-hide-strip-tab-hide, " &
+      "#auto-hide-strip-left .auto-hide-strip-tab, #auto-hide-strip-left .auto-hide-strip-tab-hide, " &
+      "#auto-hide-strip-right .auto-hide-strip-tab, #auto-hide-strip-right .auto-hide-strip-tab-hide, " &
+      ".eventLog-column-header .eventLog-cell, .eventLog-rows .eventLog-row, " &
+      ".isonim-state .value-history-button, .isonim-state .ct-origin-badge"
+      ## Elements whose arrow keys are handled here. The router leaves them be.
+
+  proc focusIsIn*(selector: cstring): bool {.importjs: """
+    (function (sel) {
+      var el = document.activeElement;
+      return !!(el && el.closest && el.closest(sel));
+    })(#)""".}
+
+  proc installKeyboardFocus(lists: cstring) {.importjs: """
+    (function (LIST) {
+      if (typeof document === 'undefined' || globalThis.__ctKeyboardFocus) return;
+      globalThis.__ctKeyboardFocus = true;
+      var CONTAINER = '.ct-picker, .vcs-branch-picker, .agent-add-context-wrapper';
+      var TRIGGER = '.ct-picker-trigger, .vcs-branch-current, .agent-add-context-button, .eventLog-columns-button';
+      var COLUMNS = '.eventLog-columns-menu';
+      var COLUMN_ITEM = '.eventLog-column-check, .eventLog-column-handle';
+      var STRIP_ITEM = '.auto-hide-strip-tab, .auto-hide-strip-tab-hide';
+      var COMPOSITES = [
+        { box: '.state-tabs', item: 'button', axis: 'h', press: true, current: '.active' },
+        { box: '[id="auto-hide-bottom-strip"]', item: STRIP_ITEM, axis: 'h', current: '.active' },
+        { box: '[id="auto-hide-strip-left"], [id="auto-hide-strip-right"]', item: STRIP_ITEM, axis: 'v', current: '.active' },
+        { box: '.eventLog-column-header', item: '.eventLog-cell', axis: 'h' },
+        { box: '.eventLog-rows', item: '.eventLog-row', axis: 'v' },
+        { box: '.isonim-state', item: '.value-history-button, .ct-origin-badge', axis: 'both' },
+        { box: '.filesystem', item: '.jstree-anchor' }
+      ];
+      // Closing it ourselves clicks the trigger; that click must not move focus.
+      var closing = false;
+      // A press inside a dropdown is not focus leaving it: on macOS a pressed
+      // button takes no focus, and closing here would let its click reopen it.
+      var pressed = null;
+      function closest(el, sel) { return el && el.closest ? el.closest(sel) : null; }
+      function all(root, sel) { return Array.prototype.slice.call(root.querySelectorAll(sel)); }
+      function shown(el) { return !!el && getComputedStyle(el).display !== 'none'; }
+      function triggerFor(list) {
+        var box = closest(list, CONTAINER);
+        if (box) return box.querySelector(TRIGGER);
+        var pane = closest(list, '.eventLog');
+        return pane ? pane.querySelector('.eventLog-columns-button') : null;
+      }
+      function listFor(trigger) {
+        var box = closest(trigger, CONTAINER);
+        var list = box ? box.querySelector(LIST)
+                       : (closest(trigger, '.eventLog') || document).querySelector(COLUMNS);
+        return shown(list) ? list : null;
+      }
+      function itemsOf(list) {
+        return all(list, list.matches(COLUMNS) ? COLUMN_ITEM : '.ct-menu-item');
+      }
+      function triggerIndex(el) { return all(document, TRIGGER).indexOf(el); }
+      function afterRender(fn) { requestAnimationFrame(fn); }
+      function settleStops() {
+        COMPOSITES.forEach(function (c) {
+          all(document, c.box).forEach(function (box) {
+            var items = all(box, c.item);
+            var active = document.activeElement;
+            var stop = items.indexOf(active) >= 0 ? active
+              : (c.current && box.querySelector(c.current)) || items[0];
+            items.forEach(function (it) { it.setAttribute('tabindex', it === stop ? '0' : '-1'); });
+            if (c.item === '.jstree-anchor' && items.length) box.setAttribute('tabindex', '-1');
+          });
+        });
+      }
+      function moveInComposite(ev) {
+        for (var i = 0; i < COMPOSITES.length; i++) {
+          var c = COMPOSITES[i];
+          if (!c.axis) continue;
+          var box = closest(ev.target, c.box);
+          if (!box || !ev.target.matches(c.item)) continue;
+          var items = all(box, c.item);
+          var at = items.indexOf(ev.target);
+          var both = c.axis === 'both';
+          var back = c.axis === 'h' ? 'ArrowLeft' : 'ArrowUp';
+          var on = c.axis === 'h' ? 'ArrowRight' : 'ArrowDown';
+          var next = ev.key === on || (both && ev.key === 'ArrowRight') ? items[Math.min(at + 1, items.length - 1)]
+            : ev.key === back || (both && ev.key === 'ArrowLeft') ? items[Math.max(at - 1, 0)]
+            : ev.key === 'Home' ? items[0]
+            : ev.key === 'End' ? items[items.length - 1] : null;
+          if (!next || next === ev.target) return;
+          ev.preventDefault();
+          next.focus();
+          if (c.press) {
+            var index = items.indexOf(next);
+            var sel = c.box;
+            next.click();
+            afterRender(function () {
+              var b = document.querySelector(sel);
+              var now = b ? all(b, c.item)[index] : null;
+              if (now) now.focus();
+            });
+          }
+          return;
+        }
+      }
+      function moveInList(ev, list) {
+        var items = itemsOf(list);
+        var at = items.indexOf(closest(ev.target, list.matches(COLUMNS) ? COLUMN_ITEM : '.ct-menu-item'));
+        var step = list.matches(COLUMNS) ? 2 : 1;
+        var next = ev.key === 'ArrowDown' ? items[at + step]
+          : ev.key === 'ArrowUp' ? items[at - step]
+          : ev.key === 'ArrowRight' && step === 2 && at % 2 === 0 ? items[at + 1]
+          : ev.key === 'ArrowLeft' && step === 2 && at % 2 === 1 ? items[at - 1]
+          : ev.key === 'Home' ? items[at % step]
+          : ev.key === 'End' ? items[items.length - step + (at % step)] : null;
+        if (ev.key === 'Escape') {
+          var trigger = triggerFor(list);
+          var index = triggerIndex(trigger);
+          ev.preventDefault();
+          ev.stopPropagation();
+          closing = true; trigger.click(); closing = false;
+          afterRender(function () {
+            var now = all(document, TRIGGER)[index];
+            if (now) now.focus();
+          });
+          return;
+        }
+        if (next) { ev.preventDefault(); next.focus(); }
+      }
+      document.addEventListener('mousedown', function (ev) { pressed = ev.target; }, true);
+      document.addEventListener('mouseup', function () {
+        setTimeout(function () { pressed = null; }, 0);
+      }, true);
+      document.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Tab') settleStops();
+      }, true);
+      document.addEventListener('keydown', function (ev) {
+        var list = closest(ev.target, LIST);
+        if (list) moveInList(ev, list);
+        else moveInComposite(ev);
+      });
+      document.addEventListener('click', function (ev) {
+        if (closing) return;
+        var trigger = closest(ev.target, TRIGGER);
+        if (trigger) {
+          var index = triggerIndex(trigger);
+          afterRender(function () {
+            var now = all(document, TRIGGER)[index];
+            var list = now ? listFor(now) : null;
+            var to = !now ? null : !list ? now
+              : list.querySelector('.ct-menu-item--chosen') || itemsOf(list)[0] || now;
+            if (to) to.focus();
+          });
+          return;
+        }
+        var list = closest(ev.target, LIST);
+        if (list) {
+          var opener = triggerFor(list);
+          var at = triggerIndex(opener);
+          afterRender(function () {
+            if (document.contains(list) && shown(list)) return;
+            var now = all(document, TRIGGER)[at];
+            if (now) now.focus();
+          });
+          return;
+        }
+        var tab = closest(ev.target, STRIP_ITEM);
+        var key = tab ? closest(tab, '[data-ct-panel-key]') : null;
+        if (key) {
+          var panel = key.getAttribute('data-ct-panel-key');
+          afterRender(function () {
+            if (document.activeElement && document.activeElement !== document.body) return;
+            var again = document.querySelector('.auto-hide-strip-tab[data-ct-panel-key="' + panel + '"]');
+            if (again) again.focus();
+          });
+        }
+      }, true);
+      document.addEventListener('focusout', function (ev) {
+        var t = ev.target;
+        if (!document.contains(t) || !document.hasFocus()) return;
+        var list = closest(t, LIST);
+        var trigger = list ? triggerFor(list) : closest(t, TRIGGER);
+        if (!list && trigger) list = listFor(trigger);
+        if (!list || !trigger || !shown(list)) return;
+        var to = ev.relatedTarget;
+        if (to && (list.contains(to) || trigger.contains(to))) return;
+        if (pressed && (list.contains(pressed) || trigger.contains(pressed))) return;
+        closing = true; trigger.click(); closing = false;
+      });
+    })(#)""".}
+
+  installKeyboardFocus(cstring DropdownListSelector)

@@ -36,6 +36,14 @@
   height: INPUT_HEIGHT_MD
   max-height: INPUT_HEIGHT_MD
 
+// The Status dropdown, wide enough for its longest row. The picker is the last
+// control in the bar, at the panel's right edge, so the dropdown keeps its right
+// side on the trigger and grows left (docs/UI-Design-Decisions.md, D-19).
+.request-panel-filters > :last-child .ct-picker-dropdown
+  left: auto
+  // 106px: "5xx Server Error" and the row padding, on a whole pixel.
+  width: 6.625rem
+
 
 // ---------------------------------------------------------------------------
 // Table header

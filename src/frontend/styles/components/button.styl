@@ -58,16 +58,16 @@ LIST_HOVER_BG = colors-ui-surface-primary-secondary-hover
 // 2026-10-20: "the buttons started to behave slow").  Imported first
 // (codetracer.styl), so every stylesheet can use it.
 // key-focus (Nikolay, 2026-11-02; docs/UI-Design-Decisions.md, D-16): the one
-// look of a control selected from the keyboard, everywhere.  A 1.5px #3B82F6
-// border drawn inside the control's edge, as an outline so it follows the
+// look of a control selected from the keyboard, everywhere.  A 1.5px border,
+// #3B82F6 in the dark themes and #2563EB in the light ones, drawn inside the
+// control's edge, as an outline so it follows the
 // corners, sits above the control's children and takes no layout.  Applied to
 // every control by the catch-all in shared_widgets.styl; call it only where a
 // control's focus lands on another element.
 KEY_FOCUS_WIDTH = 0.09375rem
-KEY_FOCUS_COLOR = colors-blue-500
 
 key-focus()
-  outline: KEY_FOCUS_WIDTH solid KEY_FOCUS_COLOR !important
+  outline: KEY_FOCUS_WIDTH solid by-mode(colors-blue-500, colors-blue-600) !important
   outline-offset: -(KEY_FOCUS_WIDTH) !important
   box-shadow: none !important
 

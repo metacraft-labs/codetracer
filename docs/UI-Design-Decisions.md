@@ -115,7 +115,9 @@ A drag handle on each row of the Columns menu replaced the move-left and
 move-right arrows. Hidden columns can be placed too. The menu uses the shared
 menu row, and the "Columns +" button uses the medium control size. From the
 keyboard, the handle takes focus and Enter or Space moves its row one position
-lower; a mouse click on it moves nothing. (2026-10-20, 2026-11-02)
+lower; a mouse click on it moves nothing. Inside the menu, Up and Down move
+between rows and Left and Right between a row's check and handle. (2026-10-20,
+2026-11-02)
 
 ```guard
 src/frontend/viewmodel/views/isonim_event_log_view.nim :: EventLogColumnHandleClass
@@ -211,15 +213,16 @@ src/frontend/styles/components/golden_layout.styl :: SELECTED_PANEL_BORDER_COLOR
 
 ### D-16: key-focus is the one keyboard selection style
 
-A control selected from the keyboard shows `key-focus`: a 1.5px `#3B82F6` border
-inside its edge, the same on every control and in every theme. It matches the
-main menu buttons. The current row of a menu or the command palette shows it too,
+A control selected from the keyboard shows `key-focus`: a 1.5px border inside its
+edge, `#3B82F6` in the dark themes and `#2563EB` in the light ones, the same on
+every control. It matches the main menu buttons. The width is deliberate: 2px is
+only required at WCAG's AAA level, and an outer ring would crowd these dense panels. The current row of a menu or the command palette shows it too,
 in place of a filled row. Do not give a control its own focus ring, and do not
 remove one. Text fields show it only when reached with Tab. (2026-11-02)
 
 ```guard
 src/frontend/styles/components/button.styl :: KEY_FOCUS_WIDTH = 0.09375rem
-src/frontend/styles/components/button.styl :: KEY_FOCUS_COLOR = colors-blue-500
+src/frontend/styles/components/button.styl :: by-mode(colors-blue-500, colors-blue-600)
 src/frontend/styles/components/menu_item.styl :: &.ct-menu-item--active:not(.ct-menu-item--disabled)
 src/frontend/styles/components/button.styl :: key-focus()
 src/frontend/styles/components/shared_widgets.styl :: html:not([data-focus-mode="mouse"]) *:focus-visible:not(input)
@@ -237,20 +240,77 @@ src/frontend/ui/key_router.nim :: if name == "Enter" and not menuIsOpen() and no
 
 ### D-18: Dropdowns work from the keyboard, and one thing looks selected
 
-A dropdown's trigger and rows can be reached with the keyboard. Opening moves to
-the chosen row, the arrow keys move between rows, Enter or Space picks one, Escape
-closes and returns to the trigger, and moving focus away closes it. At most one
-dropdown is open. The chosen option has a subtle grey fill, not `key-focus`,
+A dropdown is one Tab stop. Opening moves to the chosen row, the arrow keys move
+between rows, Enter or Space picks one, Escape closes and returns to the trigger,
+and Tab or a click elsewhere closes it. At most one dropdown is open. The chosen option has a subtle grey fill, not `key-focus`,
 because it marks a saved value rather than the keyboard's place. Only one element
 shows `key-focus` at a time. (2026-11-02)
 
 ```guard
-src/frontend/viewmodel/views/dropdown_focus.nim :: installDropdownFocus(cstring ContainerSelector
+src/frontend/viewmodel/views/keyboard_focus.nim :: installKeyboardFocus(cstring DropdownListSelector
 src/frontend/viewmodel/views/isonim_request_panel_view.nim :: "ct-menu-item ct-menu-item--chosen"
 src/frontend/viewmodel/views/isonim_vcs_view.nim :: "ct-menu-item ct-menu-item--chosen"
 src/frontend/styles/components/menu_item.styl :: &.ct-menu-item--chosen:not(.ct-menu-item--disabled)
-src/frontend/ui/key_router.nim :: focusInDropdown():
+src/frontend/ui/key_router.nim :: focusIsIn(cstring DropdownListSelector)
 ```
+
+### D-19: The REQUESTS filter dropdowns have no "All" row
+
+The Method and Status dropdowns list only real values. With no filter on, the
+trigger still reads "Method: All" or "Status: All". Picking the chosen row again
+turns its filter off, so a filter can always be cleared, even when it leaves no
+rows to right-click for Clear Filters. The Status dropdown is as wide as its
+longest row. It sits at the panel's right edge, so it grows left. (2026-11-02)
+
+```guard
+src/frontend/viewmodel/views/isonim_request_panel_view.nim :: if v.len == 0:
+src/frontend/viewmodel/views/isonim_request_panel_view.nim :: pickerSelectHandler(onSelect, if isChosen: "" else: v)
+src/frontend/styles/components/request_panel.styl :: .request-panel-filters > :last-child .ct-picker-dropdown
+```
+
+## Focus rules
+
+Agreed by Nikolay on 2026-11-02, from
+[WebAIM](https://webaim.org/techniques/keyboard/), the
+[W3C ARIA Authoring Practices](https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/)
+and [Subux](https://subux.pro/guides/article/focus-states). They apply to all new UI
+work.
+
+**How it looks**
+
+1. **Always visible.** Everything the keyboard can land on shows `key-focus`. Never
+   remove it without a replacement. The code editor's own cursor and focus line are
+   the one exception.
+2. **One style.** `key-focus` is defined once, as an outline, because shadows
+   disappear in Windows high-contrast mode.
+3. **Keyboard only.** It appears when navigating by keyboard, not after a click.
+4. **One at a time.** Only one element shows it.
+5. **Each state looks different.** Focus is where the keyboard is. It must look
+   different from hover and from selection, which is a saved choice that stays after
+   focus leaves.
+
+**How it moves**
+
+6. **Tab moves between components; arrow keys move inside them.** A list, menu, set
+   of tabs or dropdown is one Tab stop. Add new ones to `views/keyboard_focus.nim`.
+7. **Entering a component.** Focus lands on the selected item, or the first.
+8. **Order follows the layout.** Left to right, top to bottom, one section at a time.
+   Never use a positive `tabindex`.
+9. **Only controls take focus.** Text, cells that do nothing and containers do not.
+   A pane is focused by a click or from code (`tabindex="-1"`), and a closed panel
+   is hidden from Tab.
+10. **Focus is never lost.** When something closes, focus returns to what opened it.
+    When an item is deleted, it moves to the next item.
+11. **No traps.** Esc closes menus and dialogs. A non-modal one closes when focus
+    leaves it.
+
+**Which keys do what**
+
+12. **Standard keys.** Buttons: Enter or Space. Links: Enter. Checkboxes: Space. Tabs
+    and lists: arrow keys.
+13. **Shortcuts are extras.** Everything must also be reachable with Tab or arrows.
+14. **Real controls first.** Use native buttons and links where possible. Custom ones
+    must behave the same way.
 
 ## Standing rules
 

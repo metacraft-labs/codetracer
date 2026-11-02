@@ -941,6 +941,11 @@ body:has(#auto-hide-strip-right .auto-hide-strip-tab.active:first-child)
 // same job — hide the panel that is showing, keep the tab.  It sits where the
 // label's text ends: below it on the left strip (read top-to-bottom), above it
 // on the right (read bottom-to-top), 4px from the label.
+// Panels parked off-screen until a tab opens them.  Hidden as well, so Tab does
+// not land where nobody can see it (docs/UI-Design-Decisions.md, Focus rule 1).
+#auto-hide-standalone-host
+  visibility: hidden
+
 .auto-hide-strip-tab-hide
   display: block
   flex: 0 0 1rem

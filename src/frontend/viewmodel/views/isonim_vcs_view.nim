@@ -32,7 +32,7 @@ import std/[strformat, strutils]
 when defined(js):
   # Enter and Space on a `role="button"` row are its click.
   import ./isonim_activation
-  import ./dropdown_focus
+  import ./keyboard_focus
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
@@ -323,7 +323,7 @@ proc renderBranchOption[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
   let itemClass = if isActive: "ct-menu-item ct-menu-item--chosen"
                   else: "ct-menu-item"
   ui(r):
-    tdiv(class = itemClass, role = "button", tabindex = "0",
+    tdiv(class = itemClass, role = "button", tabindex = "-1",
          onclick = proc() =
            callbacks.invokeCheckoutBranch(branchName)):
       span(class = "ct-menu-item-label"):

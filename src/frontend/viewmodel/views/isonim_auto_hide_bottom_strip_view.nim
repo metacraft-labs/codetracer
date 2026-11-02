@@ -128,13 +128,14 @@ proc renderBottomStripTab[R, N](
     tdiv(ref = tabEl,
          class = cls,
          `data-ct-panel-key` = tab.key,
+         role = "button", tabindex = "0",
          onclick = proc() = cb.invokeSelect(index)):
       span(class = AutoHideBottomStripTabLabelClass):
         text tab.title
   if cb.showsHide(tab):
     var hideEl: N
     let hide = ui(r):
-      span(ref = hideEl, class = AutoHideBottomStripTabHideClass, role = "button",
+      span(ref = hideEl, class = AutoHideBottomStripTabHideClass, role = "button", tabindex = "-1",
           title = HideTabLabel, `aria-label` = HideTabLabel,
           onclick = proc() = cb.invokeHide(index))
     r.appendChild(result, hide)
