@@ -330,40 +330,18 @@ proc collectMarkerEvents(reader: var NewTraceReader): seq[JsonNode] =
   ## The correlation markers among the container's `--full` events, in
   ## document order.
   ##
-  ## The events are taken one at a time from `forEachFullEvent` and dropped
-  ## unless they are markers, so only the markers are ever held. Building the
-  ## whole document first (`buildFullDocument`) costs hundreds of bytes per
-  ## decoded value: on an 11 MB Python trace that tree grew past 32 GB
+  ## Through `forEachMarkerEvent`, which builds the marker events alone: it is
+  ## the full event stream filtered by `isCorrelationMarker`, without the
+  ## other events. Building the whole document first (`buildFullDocument`)
+  ## costs hundreds of bytes per decoded value: on an 11 MB Python trace that
+  ## tree grew past 32 GB, and filtering the streamed events instead still
+  ## decoded every step's variables just to drop them, which took minutes
   ## (codetracer-pm
   ## `issues/2026-10-31-ct-print-full-uses-32-gb-to-decode-an-11-mb-python-trace.md`).
   var markers: seq[JsonNode] = @[]
-  reader.forEachFullEvent(FullOpts(), proc(ev: JsonNode) {.raises: [].} =
-    if isCorrelationMarker(ev):
-      markers.add(ev))
+  reader.forEachMarkerEvent(FullOpts(), proc(ev: JsonNode) {.raises: [].} =
+    markers.add(ev))
   markers
-
-proc countMarkerEvents(reader: var NewTraceReader): int =
-  ## `collectMarkerEvents(reader).len`, without decoding the other events.
-  ##
-  ## Only an IO event can be a marker: `full_document_json` tags an event
-  ## `correlation_marker` in `addEventMetadata`, which only its IO event
-  ## builder calls. `forEachFullEvent` emits every IO event the reader can
-  ## read exactly once (at its step, or in the drain past the last one), so
-  ## applying the same tagging to each readable IO event gives the same
-  ## count. Walking every event instead decodes every step's variables just to
-  ## drop them: about as long as writing the whole `--format json` document.
-  ## `print_trace_streams_test.nim` holds the two to the same answer.
-  let total = reader.ioEventCount()
-  if total.isErr:
-    return 0
-  for i in 0'u64 ..< total.get():
-    let ev = reader.ioEvent(i)
-    if ev.isErr:
-      continue
-    var tagged = newJObject()
-    addEventMetadata(tagged, ev.get().metadata)
-    if isCorrelationMarker(tagged):
-      inc result
 
 proc renderMarkerTable(program: string, markers: seq[JsonNode]) =
   ## Human-readable rendering shared by the CTFS and JSON trace shapes.
@@ -448,9 +426,9 @@ proc printCtfsTrace(path: string, opts: PrintOptions) =
   # `codetracer-trace-format-spec/trace-events.md`, "Assembling an event
   # stream", requires an assembler that writes the stream out to stream it.
   # Each mode therefore takes the header (`buildFullHeader`, every key but
-  # `events`) and the events one at a time (`forEachFullEvent`), or for the
-  # summary's marker count only the IO events (`countMarkerEvents`), and its
-  # output is byte for byte what it was when it printed the tree.
+  # `events`) and the events one at a time (`forEachFullEvent`), or only the
+  # marker events (`collectMarkerEvents`), and its output is byte for byte
+  # what it was when it printed the tree.
 
   if opts.filter == "markers":
     let markers = collectMarkerEvents(reader)
@@ -484,7 +462,7 @@ proc printCtfsTrace(path: string, opts: PrintOptions) =
   if counts != nil:
     for k, v in counts.pairs:
       echo fmt"  {k}: {v}"
-  echo fmt"  Correlation markers: {countMarkerEvents(reader)}"
+  echo fmt"  Correlation markers: {collectMarkerEvents(reader).len}"
   printContainerRequestSection(path, opts)
   echo ""
   echo "  Use --filter markers for the boundary-crossing detail,"

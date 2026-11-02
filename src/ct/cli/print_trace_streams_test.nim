@@ -30,6 +30,11 @@
 ##    `--filter markers --format json` is the `pretty` of the tree's marker
 ##    events, and the text summary and the marker table report the tree's
 ##    metadata, counts and markers.
+## 3. **Markers alone.** The marker table and the summary's marker count go
+##    through `forEachMarkerEvent`, which builds only the marker events, so on
+##    the large container the table takes under a quarter of `--format
+##    json`'s time. Filtering every streamed event instead, as this printer
+##    first did once it streamed, took about half of json's time here.
 ##
 ## Each print runs in a child process: this test binary re-executes itself
 ## with `ChildFlag`, and the child calls the production `runPrint`. A fresh
@@ -417,6 +422,7 @@ when defined(posix):
 
       # `--filter markers --format json` collects its markers as the table
       # does; its text is checked on the small container.
+      var jsonSeconds, markersSeconds = 0.0
       for (format, filter) in [("json", ""), ("text", ""), ("text", "markers")]:
         let label = "ct print --format " & format &
           (if filter.len > 0: " --filter " & filter else: "")
@@ -427,7 +433,9 @@ when defined(posix):
         check not m.timedOut
         check m.exitCode == 0
         check m.peakBytes < bound
+        if filter == "markers": markersSeconds = m.seconds
         if format == "json" and filter.len == 0:
+          jsonSeconds = m.seconds
           # The rendered output alone is this size, and the tree it would be
           # rendered from is larger: a printer that holds either cannot stay
           # under a quarter of it.
@@ -440,6 +448,13 @@ when defined(posix):
           var reader = openNewTrace(container).get()
           check steps == int(reader.logicalStepCount().get())
         removeFile(outPath)
+      # The marker table builds the marker events alone
+      # (`forEachMarkerEvent`). Filtering every streamed event instead costs
+      # about what `--format json` costs, decoding each step's variables only
+      # to drop them: 54 s against json's 104 s on this container, and still
+      # unfinished after 16 minutes on the issue's trace. A ratio of two runs
+      # of the same printer on the same container, not an absolute clock.
+      check markersSeconds * 4.0 < jsonSeconds
 
     removeDir(dir)
 else:
