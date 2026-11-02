@@ -113,7 +113,9 @@ src/frontend/styles/components/button.styl :: BUTTON_TRANSITION_TIMING = 100ms e
 
 A drag handle on each row of the Columns menu replaced the move-left and
 move-right arrows. Hidden columns can be placed too. The menu uses the shared
-menu row, and the "Columns +" button uses the medium control size. (2026-10-20)
+menu row, and the "Columns +" button uses the medium control size. From the
+keyboard, the handle takes focus and Enter or Space moves its row one position
+lower; a mouse click on it moves nothing. (2026-10-20, 2026-11-02)
 
 ```guard
 src/frontend/viewmodel/views/isonim_event_log_view.nim :: EventLogColumnHandleClass
@@ -121,6 +123,9 @@ src/frontend/viewmodel/views/isonim_event_log_view.nim :: wireColumnDrag(vm, row
 src/frontend/viewmodel/views/isonim_event_log_view.nim :: " ct-menu-item"
 src/frontend/viewmodel/views/isonim_event_log_view.nim :: "ct-button-md-secondary "
 src/frontend/viewmodel/viewmodels/event_log_vm.nim :: func placeColumn*
+src/frontend/viewmodel/viewmodels/event_log_vm.nim :: func placeColumnLower*
+src/frontend/viewmodel/views/isonim_event_log_view.nim :: wireColumnHandleKey(vm, handleEl, item)
+src/frontend/ui/key_router.nim :: if key == "Enter" and focusInColumnsMenu():
 ```
 
 ### D-08: Every checkbox is the design system's Checkbox

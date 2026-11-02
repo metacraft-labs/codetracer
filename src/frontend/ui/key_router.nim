@@ -710,6 +710,13 @@ proc canonicalKeyOfEvent(ev: JsObject): string =
                     ev.ctrlKey.to(bool), ev.shiftKey.to(bool),
                     ev.altKey.to(bool), ev.metaKey.to(bool))
 
+proc focusInColumnsMenu(): bool {.importjs: """
+  (function () {
+    var el = document.activeElement;
+    return !!(el && el.closest && el.closest('.eventLog-columns-menu'));
+  })()""".}
+  ## The Event Log's Columns menu is open and holds the focus.
+
 proc onKeyDown(ev: JsObject) =
   ## The ONE key listener (capture phase, on the window).
   if ev[cstring"isComposing"].to(bool):
@@ -725,6 +732,11 @@ proc onKeyDown(ev: JsObject) =
     return
   if videoPlayerKey(name):
     stop(ev)
+    return
+  # `Enter` in the Columns menu belongs to its focused check or drag handle
+  # (`isonim_activation`; docs/UI-Design-Decisions.md, D-07), not to the Event
+  # Log's list behind the menu.
+  if key == "Enter" and focusInColumnsMenu():
     return
   routeKey(name, ev)
 

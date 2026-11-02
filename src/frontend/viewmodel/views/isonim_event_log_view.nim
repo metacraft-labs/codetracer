@@ -48,6 +48,9 @@ when defined(js):
     "(function(e){ if (e.dataTransfer) { e.dataTransfer.dropEffect = 'move'; } })(#)".}
   proc addClass(el: isonim_dom.Element; cls: cstring) {.importcpp: "#.classList.add(#)".}
   proc removeClasses(el: isonim_dom.Element; a, b, c: cstring) {.importcpp: "#.classList.remove(#, #, #)".}
+  proc clickDetail(ev: isonim_dom.Event): int {.importcpp: "#.detail".}
+  proc stopClick(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
+  proc focusElement(el: isonim_dom.Element) {.importcpp: "#.focus()".}
 
 import ../store/types
 import ./row_links
@@ -663,6 +666,21 @@ when defined(js):
         rowEl.clearDropMarks()
         drag.column = none(EventLogColumn))
 
+when defined(js):
+  proc wireColumnHandleKey(vm: EventLogVM; handleEl: isonim_dom.Element;
+                           item: proc(): EventLogColumn) =
+    ## Enter or Space on the focused drag handle moves its row one lower
+    ## (Nikolay, 2026-11-02).  `isonim_activation` turns those keys into a
+    ## `click()`, whose `detail` is 0; a mouse click's is 1 or more, and the
+    ## mouse reorders by dragging, so it moves nothing here.  Moving the row
+    ## drops the focus, so the handle takes it back and can be pressed again.
+    isonim_dom.addEventListener(isonim_dom.Node(handleEl), cstring"click",
+      proc(ev: isonim_dom.Event) =
+        ev.stopClick()
+        if ev.clickDetail == 0:
+          discard vm.placeColumnLower(item())
+          handleEl.focusElement())
+
 proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM;
                                 links: RowLinks = nil): N =
   ## The Event Log panel. `links` is a host's link builder
@@ -792,7 +810,7 @@ proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM;
       # Each row is the shared menu row (`ct-menu-item`): its height, text and
       # hover are every dropdown's.  The check and the title toggle the column;
       # the whole row drags to reorder, the handle says so.
-      var rowEl: N
+      var rowEl, handleEl: N
       result = ui(r):
         tdiv(ref = rowEl,
              class = EventLogColumnOptionClass & " ct-menu-item",
@@ -808,11 +826,14 @@ proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM;
           span(class = "eventLog-column-title ct-menu-item-label",
                onclick = onToggleColumn(vm, item())):
             text columnOptionTitle(item())
-          span(class = EventLogColumnHandleClass,
-               title = "Drag to reorder", `aria-hidden` = "true")
+          span(ref = handleEl, class = EventLogColumnHandleClass,
+               role = "button", tabindex = "0",
+               title = "Drag to reorder",
+               `aria-label` = "Move " & columnOptionTitle(item()) & " down")
       when defined(js):
         when N is isonim_dom.Element:
-          wireColumnDrag(vm, rowEl, item, dragged))
+          wireColumnDrag(vm, rowEl, item, dragged)
+          wireColumnHandleKey(vm, handleEl, item))
 
   when defined(js):
     when N is isonim_dom.Element:

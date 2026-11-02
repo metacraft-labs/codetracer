@@ -311,6 +311,14 @@ func placeColumn*(c: var EventLogColumns; col, target: EventLogColumn): bool =
   c.order.insert(col, to)
   true
 
+func placeColumnLower*(c: var EventLogColumns; col: EventLogColumn): bool =
+  ## Put `col` one row lower in the FULL order: the Columns menu's drag handle
+  ## pressed from the keyboard (Nikolay, 2026-11-02).  False on the last row.
+  let at = c.order.find(col)
+  if at < 0 or at == c.order.high:
+    return false
+  c.placeColumn(col, c.order[at + 1])
+
 const EventLogTableName* = EventLogTablePane
   ## The event log's name in the remembered widths
   ## (`table_overflow.encodeColumnWidths`).
@@ -828,6 +836,11 @@ proc moveColumn*(vm: EventLogVM; col: EventLogColumn; delta: int): bool =
 proc placeColumn*(vm: EventLogVM; col, target: EventLogColumn): bool =
   var c = vm.columns.val
   result = c.placeColumn(col, target)
+  if result: vm.columns.val = c
+
+proc placeColumnLower*(vm: EventLogVM; col: EventLogColumn): bool =
+  var c = vm.columns.val
+  result = c.placeColumnLower(col)
   if result: vm.columns.val = c
 
 proc setColumnWidth*(vm: EventLogVM; col: EventLogColumn;

@@ -39,7 +39,7 @@ import headless_app/footer_info
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 227
+const ExpectedAssertions = 233
 
 var countedAssertions = 0
 
@@ -159,6 +159,17 @@ suite "PLAT-49 part B: the event log's columns are the ViewModel's":
     ck ok and col == elcLocation
     ck parseEventLogColumn("#")[1] == elcIndex
     ck not parseEventLogColumn("nope")[0]
+
+  test "a column moves one row lower: the drag handle from the keyboard":
+    var c = defaultEventLogColumns()
+    ck c.placeColumnLower(elcTick)
+    ck c.order == @[elcIndex, elcTick, elcLocation, elcKind, elcOutput]
+    # A hidden column moves too; it stays hidden.
+    ck c.placeColumnLower(elcLocation)
+    ck c.order == @[elcIndex, elcTick, elcKind, elcLocation, elcOutput]
+    ck elcLocation in c.hidden
+    # The last row has nowhere lower to go.
+    ck not c.placeColumnLower(elcOutput)
 
   test "place a column on another's row: the Columns menu's drag":
     var c = defaultEventLogColumns()
