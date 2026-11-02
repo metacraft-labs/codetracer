@@ -7048,6 +7048,13 @@ plat51-capture-electron *args:
 plat68-desktop-keys *args:
   bash scripts/plat68-desktop-keys.sh {{args}}
 
+# plat68-desktop-keys.sh starts its specs only once the Xvfb it started
+# answers, and fails naming Xvfb when it never does. Runs the real script with
+# stand-ins for the prefix and Playwright and a real, delayed Xvfb; seconds.
+# See the header of scripts/test-plat68-desktop-keys-xvfb-start.sh.
+test-plat68-desktop-keys-xvfb-start:
+  bash scripts/test-plat68-desktop-keys-xvfb-start.sh
+
 # One keybindings.json read by the terminal (a real pty), GPUI (the window
 # plan) and the desktop (the real Electron app) in one run: a rebound pane
 # operation and a `-command` removal behave identically on all three.
