@@ -84,18 +84,42 @@
 # file green. See the inventory's header for why it is an equality and not a
 # ceiling with slack.
 #
+# AND A QUESTION THIS WALK ANSWERS THAT ITS VERDICT DOES NOT ASK
+# ----------------------------------------------------------------
+# Step 2 computes which `just` recipes a CI lane reaches, prints the count, and
+# then uses the set only to reach SCRIPTS. Recipes are not this guard's subject,
+# so a recipe no lane calls never fails it: `test-tui` and
+# `test-tui-real-terminal` -- the only routes to the `tui` and
+# `tui-real-terminal` Nim lanes -- went unreached and nothing failed
+# (codetracer-pm issues/2026-11-01-no-ci-lane-calls-the-test-tui-recipes.md).
+#
+# `--print-reached-recipes` hands that set to a caller that DOES have recipes as
+# its subject, one name per line on stdout, sorted, and exits after Step 2. It
+# is the same walk, not a second implementation of it: a recipe is reached by
+# exactly the rule a gate is, so a remedy string that names a recipe confers
+# nothing here either (Verification-Harness-Traps.md §4f). The report the walk
+# prints on the way goes to stderr in this mode, so stdout is only the list.
+# Without the flag nothing about this guard's output or verdict changes.
+# `ci/test/ci-reached-recipes-test.sh` is that caller.
+#
 # Usage:
 #   ci/test/shell-gate-coverage.sh
 #   ci/test/shell-gate-coverage.sh --root DIR      (for the self-test)
+#   ci/test/shell-gate-coverage.sh --print-reached-recipes [--root DIR]
 
 set -uo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+print_reached_recipes=0
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--root)
 		root="$(cd "$2" && pwd)"
 		shift 2
+		;;
+	--print-reached-recipes)
+		print_reached_recipes=1
+		shift
 		;;
 	*)
 		echo "unknown argument: $1" >&2
@@ -104,6 +128,13 @@ while [ $# -gt 0 ]; do
 	esac
 done
 cd "${root}" || exit 2
+
+# In `--print-reached-recipes` mode stdout carries the list and nothing else:
+# fd 3 keeps the real stdout for it, and every line the report below prints
+# goes to stderr, where a failure in Steps 0-2 is still read.
+if [ "${print_reached_recipes}" -eq 1 ]; then
+	exec 3>&1 1>&2
+fi
 
 MARKER_SCAN_LINES=40
 MARKER='NOT-A-CI-GATE:'
@@ -1172,6 +1203,13 @@ refs_of_text() {
 			}
 			if (t ~ /run-just-lanes\.sh$/) { dispatch = 1; continue }
 			if (t != "just" || arr[i] ~ QWORD) continue
+			# A BACKTICK-QUOTED `just` IS PROSE, by the rule `walk` states above
+			# its splitter: SC2006 keeps backtick substitution out of this tree,
+			# so a backtick before the word is a quotation mark. Without this a
+			# YAML `description:` block that wrote (``just test-tui``) in a
+			# composite action credited that recipe as called by CI, and no
+			# workflow called it.
+			if (arr[i] ~ /^[^A-Za-z0-9_.\/-]*`/) continue
 			# Skip flags, and the VALUE of a flag that takes one — otherwise
 			# `just --justfile X recipe` reports the recipe as `--justfile`.
 			j = i + 1
@@ -1374,6 +1412,18 @@ reached_recipes="$(sort -u "${tmp}/rreached" | grep -c . || true)"
 note "a CI lane reaches ${reached_recipes} of ${recipe_count} recipe(s)"
 note "reachable after the transitive walk: ${reachable_count} of ${gate_count}"
 echo
+
+# The recipe set is complete here. A caller that asked for it gets it now, and
+# only if the walk it came from was sound: a Step 0-2 failure is a non-zero exit
+# with no list, never a partial list a caller could read as an answer.
+if [ "${print_reached_recipes}" -eq 1 ]; then
+	if [ "${failures}" -gt 0 ]; then
+		echo "RESULT: FAILED — the walk is unsound, so no recipe list is printed"
+		exit 1
+	fi
+	sort -u "${tmp}/rreached" >&3
+	exit 0
+fi
 
 # ---------------------------------------------------------------------------
 echo "Step 3: every gate is reachable, or declares why it is not"

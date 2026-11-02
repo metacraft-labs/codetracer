@@ -3713,6 +3713,137 @@ jobs:
           path: test-logs/
           retention-days: 30
 
+  tui-tests:
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; same label as `viewmodel-tests` and `gpui-window-captures`
+    # NEW, NO SAMPLE YET, and no local timing either: the host this job was
+    # written on could not materialise the dev shell within its free disk.
+    # So this bound is structural. The body is Nix and sibling provisioning,
+    # `just build-once` (a job whose work is mostly that, `cross-process-
+    # linux`, is bounded at 45m), isonim-gpui's shim and `build-gpui` (one
+    # cargo build and one front-end compile), `build-tui`, and then ~197 Nim programs
+    # compiled and run ONE AT A TIME -- at an ASSUMED 20-30s per
+    # compile-and-run of a program importing isonim-tui (an estimate, not a
+    # measurement), 65-100m on its own. 180m clears the sum of those upper ends by about a third and stays
+    # half of GitHub's 360m default. Tighten it from the first green runs.
+    timeout-minutes: 180
+    name: TUI tests (Tier 1 + Tier 2)
+    # WHY THIS JOB EXISTS. `just test-tui` and `just test-tui-real-terminal` are
+    # the only routes to the `tui` and `tui-real-terminal` lanes of
+    # `ci/lib/run-nim-test-lane.sh` -- 133 and 64 files -- and until this job no
+    # workflow called either (codetracer-pm issues/2026-11-01-no-ci-lane-calls-
+    # the-test-tui-recipes.md). CodeTracer-TUI.md §7.1.6 asserts the TUI's
+    # Tier-1 content "fast, per-PR" and makes Tier 2 the terminal-peer check, so
+    # both run here, on every push and pull request this workflow runs on.
+    # `ci/test/ci-reached-recipes-test.sh` fails if either recipe stops being
+    # reached by a workflow lane.
+    #
+    # WHY ITS OWN JOB AND NOT TWO STEPS OF `viewmodel-tests`. That job is
+    # already at its 75-minute bound with no green sample, and these lanes
+    # compile ~197 Nim programs serially. Added there, they would either push
+    # it past its bound or be cut off by it, and its token (one mint per job,
+    # 60-minute life) could not cover a longer job's clones anyway -- here every
+    # authenticated clone happens in the first steps.
+    steps:
+      - name: Generate CI token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        # Recursive: `tui-prereqs` builds the grammar archive the TUI links from
+        # the `libs/tree-sitter-*` submodules.
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      # EVERY AUTHENTICATED CLONE IS IN THIS BLOCK, at the top of the job: the
+      # installation token minted above expires an hour after it is minted (see
+      # `viewmodel-tests`), and this job's bound is longer than that.
+      - name: Setup db-backend siblings and the terminal-test siblings
+        # The db-backend siblings are what `just build-once` needs to build
+        # `replay-server` (see `gpui-window-captures`). The three extra ones are
+        # the Tier-2 lane's: `ci/lib/test-lane-files.sh` compiles every
+        # `tui-real-terminal` file with `--path:../TermAssert/src`,
+        # `../TermAssertClient/src` and `../nim-libvterm/src`. All three are in
+        # this repo's committed `repro.lock`, so they are named BARE and clone
+        # at the revision that lock pins -- not at a branch tip.
+        uses: ./.github/actions/setup-db-backend-siblings
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          extra-siblings: |
+            TermAssert
+            TermAssertClient
+            nim-libvterm
+
+      - name: Clone runquota sibling
+        # `just build-once` compiles `ct`, which imports `runquota_process`
+        # (see `cross-process-linux`).
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/runquota
+          ref: dev
+          path: ${{ github.workspace }}/../runquota
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Provision dependency siblings from repro.lock
+        # isonim, isonim-tui, nim-pty, nim-termctl et al., which every TUI suite
+        # compiles against through codetracer's top-level `config.nims`. After
+        # the step above, which installed Nix: this action reaches `repro`
+        # through the dev shell. The token is required: one build input,
+        # codetracer-image-diff, is private.
+        uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Build ct and replay-server
+        # `test_fixture_corpus.nim` (Tier 1) opens real recorded traces through
+        # a real `replay-server`, and on a cold `test-logs/tui-fixtures/` cache
+        # records them with `ct`. A missing `replay-server` fails that file by
+        # design and an all-skipped corpus fails it too (see the comment above
+        # `test-tui` in the justfile), so both are built first.
+        env:
+          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+        run: nix develop .#devShells.x86_64-linux.default --command just build-once
+
+      - name: Build the GPUI front-end the cross-front-end suites drive
+        # Four files in these lanes hold the terminal to the same answers as
+        # the GPUI front-end and run the SHIPPED `build/bin/codetracer-gpui`
+        # over the same recording (`test_plat68_diff13.nim`,
+        # `test_plat45_three_media.nim`, `test_plat41_parity.nim`,
+        # `real_terminal/test_plat42_diff11.nim`); a missing binary is a
+        # failure naming `just build-gpui`, not a skip. The binary dlopens
+        # isonim-gpui's featureless shim from `../isonim-gpui/rust/target/debug`,
+        # which is built in isonim-gpui's OWN dev shell, as
+        # `ci/test/gpui-window-captures.sh` builds it. `../isonim-gpui` is the
+        # checkout `provision-repro-lock-siblings` made, at the lock's revision.
+        run: |
+          (cd ../isonim-gpui && nix develop --command bash -c 'cd rust && cargo build')
+          nix develop .#devShells.x86_64-linux.default --command just build-gpui
+
+      - name: TUI Tier 1 — the suites that need no terminal
+        run: nix develop .#devShells.x86_64-linux.default --command just test-tui
+
+      - name: TUI Tier 2 — the real binary in a real pty
+        # `!cancelled()`, so a Tier-1 failure does not hide whether Tier 2 holds.
+        # The recipe builds `build/bin/codetracer-tui` itself (`build-tui`).
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-tui-real-terminal
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tui-test-logs
+          path: test-logs/
+          retention-days: 30
+
   gpui-window-captures:
     runs-on: [self-hosted, linux, x64]  # the label isonim-gpui's "GUI tests (headless sway)" job runs green on
     # NEW, NO SAMPLE YET. The work is two cargo builds of isonim-gpui's shim
@@ -8090,6 +8221,20 @@ jobs:
         # `set -euo pipefail` that killed the script before it printed a word.
         run: bash ci/test/build-once-workspace-test.sh
 
+      - name: Assert a workflow lane reaches every recipe that must run in CI
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        # `just test-tui` and `just test-tui-real-terminal` are the only routes
+        # to the TUI's two Nim lanes, and no workflow called either: every
+        # guard stayed green, because none of them has recipes as its subject
+        # (codetracer-pm issues/2026-11-01-no-ci-lane-calls-the-test-tui-
+        # recipes.md). This suite reads the recipe set `shell-gate-coverage.sh`
+        # already walks from the workflows and fails, by name, on any recipe
+        # listed in `ci/test/ci-reached-recipes.txt` that is not in it -- with a
+        # negative control that deletes the workflow steps from a copy of the
+        # tree and requires each listed recipe to be reported unreached.
+        # Static, bash and coreutils only, about a minute.
+        run: bash ci/test/ci-reached-recipes-test.sh
+
       - name: Check the launcher<->recorder gate's cross-repo workflow wiring
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # The other half of the same class of defect, reached from the
@@ -8336,6 +8481,7 @@ jobs:
       - cross-process-linux
       - ct-host-container-gate
       - viewmodel-tests
+      - tui-tests
       - visual-replay-regression-gate
       - ct-test-release-gate
       - ct-test-providers

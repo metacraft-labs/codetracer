@@ -245,6 +245,46 @@ else
 	bad "CONTROL: the reachable-recipe count is not 1 — the recipe edge is not what it appears"
 	printf '%s\n' "${base_out}" | grep 'recipe' | sed 's/^/           /'
 fi
+
+# `--print-reached-recipes` is how `ci/test/ci-reached-recipes-test.sh` reads
+# the walk's recipe set. On this tree the answer is known: `lint`, which a
+# workflow calls, and NOT `unwired`, which only the justfile names. Stdout must
+# be that list and nothing else, because the caller reads it as data; the report
+# goes to stderr.
+printed="$(bash "${guard}" --root "${work}/base" --print-reached-recipes 2>/dev/null)"
+printed_rc=$?
+if [ "${printed_rc}" -eq 0 ] && [ "${printed}" = "lint" ]; then
+	ok "CONTROL: --print-reached-recipes prints exactly the reached recipe, lint, on stdout"
+else
+	bad "CONTROL: --print-reached-recipes printed something other than \`lint\` (exit ${printed_rc})"
+	printf '%s\n' "${printed}" | head -4 | sed 's/^/           /'
+fi
+
+# A recipe named in BACKTICK-QUOTED PROSE is not called. A composite action's
+# `description:` block wrote (``just test-tui``) and the walk credited the
+# recipe as reached by CI while no workflow called it. The prose goes on a
+# non-comment line of a workflow, in both the doubled and the single spelling;
+# `unwired` must stay unreached. The second half is the arm's own control: the
+# same file with a real `run: just unwired` step must reach it, so the first
+# half cannot pass merely because the walk never reads that line.
+stage "${work}/prose"
+# shellcheck disable=SC2016 # literal backticks: the prose under test
+printf '    env:\n      HINT: run ``just unwired`` or `just unwired` once\n' \
+	>>"${work}/prose/.github/workflows/u.yml"
+printed="$(bash "${guard}" --root "${work}/prose" --print-reached-recipes 2>/dev/null)"
+if [ "${printed}" = "lint" ]; then
+	ok "a recipe named only in backtick-quoted prose is not reached"
+else
+	bad "a recipe named only in backtick-quoted prose was credited as reached"
+	printf '%s\n' "${printed}" | head -4 | sed 's/^/           /'
+fi
+printf '      - run: just unwired\n' >>"${work}/prose/.github/workflows/u.yml"
+printed="$(bash "${guard}" --root "${work}/prose" --print-reached-recipes 2>/dev/null)"
+if grep -Fxq unwired <<<"${printed}"; then
+	ok "CONTROL: the same workflow with a real run: just unwired step reaches it"
+else
+	bad "CONTROL: a real run: just unwired step did not reach it — the prose check above proves nothing"
+fi
 echo
 
 arm() {
