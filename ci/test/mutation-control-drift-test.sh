@@ -254,6 +254,27 @@ expect_red "NEW DRIFT on a control owned by a non-plat harness names that harnes
 	"harness: src/d/run-hsf1-alpha-mutations.py" \
 	"$(ledger_line "${A}" src/d/hsf1-alpha-mutation-control.sha256 src/d/subj5.nim)"
 
+# --- NEW DRIFT, a harness that builds its control file's name ----------------
+# The plat71 harnesses never spell their control file: they pass a stem to
+# plat71_mutation_engine.py, which opens `<stem>-mutation-control.sha256`. Their
+# file name is the link, `run-<stem>-mutations.py`, so the gate must name them
+# by it. The orphan arm above keeps a same-directory harness whose stem differs
+# from being taken for the owner.
+stage "${A}"
+mkdir -p "${A}/src/d"
+printf 'proc six*() = discard\n' >"${A}/src/d/subj6.nim"
+printf 'HARNESS = Harness("plat9-built", HERE)\n' \
+	>"${A}/src/d/run-plat9-built-mutations.py"
+printf '%s  src/d/subj6.nim\n' "$(sha "${A}/src/d/subj6.nim")" \
+	>"${A}/src/d/plat9-built-mutation-control.sha256"
+git -C "${A}" add -A
+printf '# edited\n' >>"${A}/src/d/subj6.nim"
+expect_red "NEW DRIFT on a control whose harness builds its name names that harness" \
+	"$(run_guard "${A}")" \
+	"NEW DRIFT" "control: src/d/plat9-built-mutation-control.sha256" \
+	"harness: src/d/run-plat9-built-mutations.py" \
+	"$(ledger_line "${A}" src/d/plat9-built-mutation-control.sha256 src/d/subj6.nim)"
+
 # --- NEW DRIFT, subject absent ----------------------------------------------
 stage "${A}"
 rm "${A}/src/b/subj3.nim"

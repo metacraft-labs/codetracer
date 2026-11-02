@@ -189,15 +189,20 @@ is_sibling() {
 # same directory whose source names the control file. Looked up by NAME rather
 # than by directory, because one directory holds dozens of harnesses. Not
 # only `run-plat*`: `run-hsf-sdk-`, `run-build-residuals-` and
-# `run-wd7-session-allocation-` own control files too.
+# `run-wd7-session-allocation-` own control files too. A harness that never
+# spells the name is still found by its own file name: the plat71 harnesses
+# pass a stem to plat71_mutation_engine.py, which opens
+# `<stem>-mutation-control.sha256`, so `run-<stem>-mutations.py` is the owner.
 declare -A harness_of=()
 harness_for() {
-	local c="$1" dir base h found=""
+	local c="$1" dir base stem h found=""
 	dir="$(dirname "${c}")"
 	base="$(basename "${c}")"
+	stem="${base%-mutation-control.sha256}"
 	for h in "${dir}"/run-*-mutations.py; do
 		[ -f "${h}" ] || continue
-		if grep -qF -- "${base}" "${h}"; then
+		if [ "$(basename "${h}")" = "run-${stem}-mutations.py" ] ||
+			grep -qF -- "${base}" "${h}"; then
 			found="${found:+${found}, }${h}"
 		fi
 	done
