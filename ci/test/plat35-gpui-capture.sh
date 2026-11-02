@@ -204,40 +204,8 @@ RECORDS="${OUT}/records.jsonl"
 captured=0
 refused=0
 
-while IFS=$'\t' read -r id view width height ops; do
-	[ -n "${id}" ] || continue
-	if [ -n "${ONLY}" ] && [ "${view}" != "${ONLY}" ]; then
-		continue
-	fi
-	png="${OUT}/${view}.png"
-	log="${OUT}/${view}.capture.log"
-	rm -f "${png}" "${png}.json" "${log}"
-	argv=("${BIN}" "--width=${width}" "--height=${height}"
-		"--pixels-out=${png}" "--pixels-view=${view}"
-		"--pixels-scenario=${id}")
-	[ -n "${ops}" ] && argv+=("--replay-ops=${ops}")
-	argv+=("${TRACE}")
-	echo
-	echo "### ${id} -> ${view} at ${width}x${height} [${ops:-no operations}]"
-	if "${argv[@]}" >"${log}" 2>&1; then
-		rc=0
-	else
-		rc=$?
-	fi
-	tail -3 "${log}"
-	# THE CENSUS IS THE VERDICT, not the exit code and not the file's size.
-	# A record is written on every path the binary reaches, INCLUDING a
-	# refusal, so "the capture ran and this host has no headless renderer"
-	# is distinguishable from "the capture did not run"
-	# (Verification-Harness-Traps §4).
-	if [ ! -f "${png}.json" ]; then
-		echo "  no census written (rc ${rc})" >&2
-		refused=$((refused + 1))
-		continue
-	fi
-	verdict="$(
-		python3 - "${png}.json" "${png}" "${width}" "${height}" "${id}" \
-			"${view}" <<'PY'
+capture_verdict() {
+	python3 - "$@" <<'PY'
 import json, os, struct, sys
 rec = json.load(open(sys.argv[1]))
 png, width, height, sid, view = sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), sys.argv[5], sys.argv[6]
@@ -269,7 +237,40 @@ if not problems:
                 problems.append(f"the PNG's IHDR is {iw}x{ih}")
 print("OK" if not problems else "BAD: " + "; ".join(problems))
 PY
-	)"
+}
+
+while IFS=$'\t' read -r id view width height ops; do
+	[ -n "${id}" ] || continue
+	if [ -n "${ONLY}" ] && [ "${view}" != "${ONLY}" ]; then
+		continue
+	fi
+	png="${OUT}/${view}.png"
+	log="${OUT}/${view}.capture.log"
+	rm -f "${png}" "${png}.json" "${log}"
+	argv=("${BIN}" "--width=${width}" "--height=${height}"
+		"--pixels-out=${png}" "--pixels-view=${view}"
+		"--pixels-scenario=${id}")
+	[ -n "${ops}" ] && argv+=("--replay-ops=${ops}")
+	argv+=("${TRACE}")
+	echo
+	echo "### ${id} -> ${view} at ${width}x${height} [${ops:-no operations}]"
+	if "${argv[@]}" >"${log}" 2>&1; then
+		rc=0
+	else
+		rc=$?
+	fi
+	tail -3 "${log}"
+	# THE CENSUS IS THE VERDICT, not the exit code and not the file's size.
+	# A record is written on every path the binary reaches, INCLUDING a
+	# refusal, so "the capture ran and this host has no headless renderer"
+	# is distinguishable from "the capture did not run"
+	# (Verification-Harness-Traps §4).
+	if [ ! -f "${png}.json" ]; then
+		echo "  no census written (rc ${rc})" >&2
+		refused=$((refused + 1))
+		continue
+	fi
+	verdict="$(capture_verdict "${png}.json" "${png}" "${width}" "${height}" "${id}" "${view}")"
 	echo "  ${verdict}"
 	if [ "${verdict}" = "OK" ]; then
 		captured=$((captured + 1))

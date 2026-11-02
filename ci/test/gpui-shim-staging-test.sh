@@ -76,6 +76,9 @@
 #       both be the original, so a stage refuses them, names both and touches
 #       nothing. The stale arm at the live path is what makes the first case
 #       fail without the takeover.
+#   (q) every selected lane parses with the host's system Bash. On Darwin this
+#       deliberately means `/bin/bash`, the 3.2 interpreter macOS supplies, and
+#       not the newer Bash from the development shell that runs this test.
 #
 # REAL: bash, python3, the lane scripts themselves, run end to end from a copy
 # in a sandbox workspace against `src/tests/visual/scenarios.json`, and a real
@@ -213,6 +216,27 @@ arms_seen() {
 }
 
 cargo_bytes='cargo output of the shim'
+
+# Parse the real lane before any stand-in can hide a failure. Every host runs
+# this case: Darwin selects the platform Bash whose compatibility is the
+# contract; other hosts select their real Bash and retain a syntax check.
+check_system_bash_parse() {
+	local name="$1" lane="$2" before parser rc=0 parse_output=""
+	before="${failures}"
+	case "$(uname -s)" in
+	Darwin) parser=/bin/bash ;;
+	*) parser="$(command -v bash)" ;;
+	esac
+	if [ ! -x "${parser}" ]; then
+		report "${name}: (q) the system Bash is not executable at ${parser:-<empty>}"
+	elif parse_output="$("${parser}" -n "${lane}" 2>&1)"; then
+		:
+	else
+		rc=$?
+		report "${name}: (q) ${parser} rejected the lane with status ${rc}: ${parse_output}"
+	fi
+	verdict "${name}: (q) parses with the host's system Bash (${parser:-unresolved})" "${before}"
+}
 
 # The stand-ins --------------------------------------------------------------
 stand_ins="${work}/stand-ins"
@@ -849,6 +873,7 @@ check_library
 
 i=0
 while [ "${i}" -lt "${#chosen_names[@]}" ]; do
+	check_system_bash_parse "${chosen_names[${i}]}" "${chosen_paths[${i}]}"
 	check_lane "${chosen_names[${i}]}" "${chosen_paths[${i}]}"
 	check_refusal "${chosen_names[${i}]}" "${chosen_paths[${i}]}" mv e "the move aside"
 	check_refusal "${chosen_names[${i}]}" "${chosen_paths[${i}]}" cp f "staging"
