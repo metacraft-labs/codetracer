@@ -1,5 +1,18 @@
 # Instructions for Codex
 
+## UI design decisions are not yours to undo
+
+`docs/UI-Design-Decisions.md` records the desktop interface's deliberate design
+decisions. Read it before changing anything under `src/frontend/styles/` or the
+views in `src/frontend/viewmodel/views/`. Do not remove, undo or restyle a recorded
+decision as part of a refactor, regression fix, test repair or merge. If one blocks
+your task or looks like the cause of a bug, stop and ask Nikolay Fenixov (`fenix-ov`).
+
+After any change or merge touching the frontend, run
+`python3 ci/test/ui-design-decisions.py`. If a guard fails, restore the decision.
+Do not edit the guard. Git can drop a decision in a merge with no conflict, so
+check after every merge.
+
 ## Where a checkout — or a worktree — has to live
 
 **A checkout of this repo must sit DIRECTLY under the workspace root, beside its

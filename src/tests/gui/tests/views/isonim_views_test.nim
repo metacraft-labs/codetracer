@@ -434,6 +434,54 @@ suite "IsoNim Auto-hide Bottom Strip — structure":
     check panel.attributes["class"] == ""
     check panel.children.len == 0
 
+  # docs/UI-Design-Decisions.md, D-01 and D-02: part 6's × had no test, so its
+  # removal changed no result.
+  test "the × shows on the active bottom tab only when a click opened it":
+    let r = MockRenderer()
+    var hidden: seq[int]
+    let callbacks = AutoHideBottomStripCallbacks(
+      onHide: proc(index: int) = hidden.add index)
+    let panel = renderAutoHideBottomStripPanel[MockRenderer, MockNode](
+      r,
+      tabs = @[
+        AutoHideBottomStripRecord(title: "BUILD", key: "Build:0", active: true,
+          pinned: true),
+        AutoHideBottomStripRecord(title: "PROBLEMS", key: "BuildErrors:0",
+          active: true, pinned: false),
+        AutoHideBottomStripRecord(title: "REQUESTS", key: "RequestPanel:0",
+          active: false, pinned: true)
+      ],
+      callbacks)
+    check findAllByClass(panel.children[0], AutoHideBottomStripTabHideClass).len == 1
+    check findAllByClass(panel.children[1], AutoHideBottomStripTabHideClass).len == 0
+    check findAllByClass(panel.children[2], AutoHideBottomStripTabHideClass).len == 0
+    check panel.children[0].attributes["data-ct-panel-key"] == "Build:0"
+    fireEvent(findByClass(panel.children[0], AutoHideBottomStripTabHideClass), "click")
+    check hidden == @[0]
+
+  test "the × shows on the active side tab only when a click opened it":
+    let r = MockRenderer()
+    var hidden: seq[int]
+    let callbacks = AutoHideSideStripCallbacks(
+      onHide: proc(index: int) = hidden.add index)
+    let panel = renderAutoHideSideStripPanel[MockRenderer, MockNode](
+      r,
+      tabs = @[
+        AutoHideSideStripRecord(title: "FILES", key: "Filesystem:0", active: true,
+          pinned: true),
+        AutoHideSideStripRecord(title: "STATE", key: "State:0", active: true,
+          pinned: false)
+      ],
+      collapsed = false,
+      callbacks = callbacks)
+    let tabs = findAllByClass(panel, "auto-hide-strip-tab")
+    check tabs.len == 2
+    check findAllByClass(tabs[0], AutoHideSideStripTabHideClass).len == 1
+    check findAllByClass(tabs[1], AutoHideSideStripTabHideClass).len == 0
+    check tabs[0].attributes["data-ct-panel-key"] == "Filesystem:0"
+    fireEvent(findByClass(tabs[0], AutoHideSideStripTabHideClass), "click")
+    check hidden == @[0]
+
   test "bottom tabs render strip-tab selector contract and titles":
     let r = MockRenderer()
     let panel = renderAutoHideBottomStripPanel[MockRenderer, MockNode](

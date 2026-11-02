@@ -1,0 +1,65 @@
+name: UI design decisions
+
+# `ci/test/ui-design-decisions.py`: every decision recorded in
+# `docs/UI-Design-Decisions.md` is still in the source tree.
+#
+# WHY A WORKFLOW OF ITS OWN, AND WHY NO PATH FILTER.
+#
+# The widest suites are often red for unrelated reasons, so a design regression
+# failing inside them is easy to miss: PR #893 removed part 6's × with the
+# ViewModel suite already failing. This job needs no build and takes seconds, so
+# its result means one thing and it can be a required status check. A required
+# check must report on every pull request, which a path filter would prevent.
+#
+# Pull requests into any base but `agents`, which is landed on directly, as in
+# the repository's other narrow workflows.
+
+on:
+  push:
+    branches: [dev, stable]
+  pull_request:
+    branches-ignore: [agents]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ui-design-decisions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    name: UI design decisions are in the code
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Every recorded decision is still in the source tree
+        run: python3 ci/test/ui-design-decisions.py
+
+      # Rule 3 of the document: an edit to the record, or to what enforces it,
+      # comes from its owner or carries the owner's approval.
+      - name: Only the design owner changes the record
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'design-approved') }}
+        run: |
+          changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA" -- \
+            docs/UI-Design-Decisions.md \
+            ci/test/ui-design-decisions.py \
+            .github/workflows/ui-design-decisions.yml \
+            .github/CODEOWNERS)"
+          if [ -z "$changed" ] || [ "$AUTHOR" = "fenix-ov" ] || [ "$APPROVED" = "true" ]; then
+            exit 0
+          fi
+          echo "These files need Nikolay Fenixov's approval (the design-approved label):"
+          echo "$changed"
+          exit 1

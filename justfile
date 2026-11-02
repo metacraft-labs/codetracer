@@ -111,6 +111,10 @@ test-sibling-cargo-locks:
   bash ci/test/sibling-cargo-locks-test.sh
   bash scripts/test-sibling-cargo-locks.sh
 
+# See the header of ci/test/ui-design-decisions.py and docs/UI-Design-Decisions.md.
+test-ui-design-decisions:
+  python3 ci/test/ui-design-decisions.py
+
 # Assert the GUI harness's `npm install` leaves `src/tests/gui/yarn.lock` alone.
 # npm >= 7 keeps an existing yarn.lock "up to date" by rewriting it from the
 # tree it installed, and on Linux that tree has no `fsevents` (playwright's
