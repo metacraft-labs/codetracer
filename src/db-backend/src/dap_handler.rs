@@ -1523,7 +1523,15 @@ impl Handler {
             // for now callstack!
 
             let start_call_line_index = GlobalCallLineIndex(0);
-            let callstack_lines = self.replay.load_callstack()?;
+            let mut callstack_lines = self.replay.load_callstack()?;
+            // The native stack can omit startup frames above main. Indent
+            // from the shallowest visible frame, not those hidden callers.
+            // Keep each call's location.callstack_depth unchanged: navigation
+            // uses the physical frame depth, independently of the row's inset.
+            let root_depth = callstack_lines.iter().map(|line| line.depth).min().unwrap_or(0);
+            for line in &mut callstack_lines {
+                line.depth = line.depth.saturating_sub(root_depth);
+            }
             let total_count = callstack_lines.len();
             let position = 0;
             CallArgsUpdateResults::finished_update_call_lines(
