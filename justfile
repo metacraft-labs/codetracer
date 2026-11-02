@@ -804,15 +804,11 @@ test-hmr-e2e:
       cd src/tests/gui && ./node_modules/.bin/playwright test tests/hmr/hmr_views_and_styles.spec.ts
       ;;
     *)
-      DISPLAY_NUM=99
-      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
-        DISPLAY_NUM=$((DISPLAY_NUM + 1))
-      done
-      Xvfb ":${DISPLAY_NUM}" -screen 0 1920x1080x24 -nolisten tcp &
-      XVFB_PID=$!
-      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
-      sleep 1
-      export DISPLAY=":${DISPLAY_NUM}"
+      # Started through the shared helper, which waits for the display to
+      # answer instead of sleeping (scripts/lib/own-xvfb.sh).
+      . "{{justfile_directory()}}/scripts/lib/own-xvfb.sh"
+      trap "own_xvfb_stop" EXIT
+      own_xvfb_start -screen 0 1920x1080x24 -nolisten tcp || exit 1
       cd src/tests/gui && ./node_modules/.bin/playwright test tests/hmr/hmr_views_and_styles.spec.ts
       ;;
   esac
@@ -1244,15 +1240,11 @@ test-gui-prebuilt *args:
       ;;
     *)
       # Linux: start a persistent Xvfb so Playwright/Electron tests have a display.
-      DISPLAY_NUM=99
-      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
-        DISPLAY_NUM=$((DISPLAY_NUM + 1))
-      done
-      Xvfb ":${DISPLAY_NUM}" -screen 0 1920x1080x24 -nolisten tcp &
-      XVFB_PID=$!
-      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
-      sleep 1
-      export DISPLAY=":${DISPLAY_NUM}"
+      # Started through the shared helper, which waits for the display to
+      # answer instead of sleeping (scripts/lib/own-xvfb.sh).
+      . "{{justfile_directory()}}/scripts/lib/own-xvfb.sh"
+      trap "own_xvfb_stop" EXIT
+      own_xvfb_start -screen 0 1920x1080x24 -nolisten tcp || exit 1
 
       just test-e2e "$@"
       ;;
@@ -5477,15 +5469,11 @@ plat35-capture-electron *args:
       just test-e2e tests/visual/visual-alignment-capture.spec.ts "$@"
       ;;
     *)
-      DISPLAY_NUM=99
-      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
-        DISPLAY_NUM=$((DISPLAY_NUM + 1))
-      done
-      Xvfb ":${DISPLAY_NUM}" -screen 0 2560x1440x24 -dpi 96 -nolisten tcp &
-      XVFB_PID=$!
-      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
-      sleep 1
-      export DISPLAY=":${DISPLAY_NUM}"
+      # Started through the shared helper, which waits for the display to
+      # answer instead of sleeping (scripts/lib/own-xvfb.sh).
+      . "{{justfile_directory()}}/scripts/lib/own-xvfb.sh"
+      trap "own_xvfb_stop" EXIT
+      own_xvfb_start -screen 0 2560x1440x24 -dpi 96 -nolisten tcp || exit 1
       just test-e2e tests/visual/visual-alignment-capture.spec.ts "$@"
       ;;
   esac
@@ -5631,15 +5619,11 @@ plat46-capture-electron *args:
       just test-e2e tests/visual/plat46-token-parity-capture.spec.ts "$@"
       ;;
     *)
-      DISPLAY_NUM=99
-      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
-        DISPLAY_NUM=$((DISPLAY_NUM + 1))
-      done
-      Xvfb ":${DISPLAY_NUM}" -screen 0 2560x1440x24 -dpi 96 -nolisten tcp &
-      XVFB_PID=$!
-      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
-      sleep 1
-      export DISPLAY=":${DISPLAY_NUM}"
+      # Started through the shared helper, which waits for the display to
+      # answer instead of sleeping (scripts/lib/own-xvfb.sh).
+      . "{{justfile_directory()}}/scripts/lib/own-xvfb.sh"
+      trap "own_xvfb_stop" EXIT
+      own_xvfb_start -screen 0 2560x1440x24 -dpi 96 -nolisten tcp || exit 1
       just test-e2e tests/visual/plat46-token-parity-capture.spec.ts "$@"
       ;;
   esac
@@ -6046,15 +6030,11 @@ plat40-capture-electron *args:
       # A screen LARGER than the 1920x1080 window, as PLAT-35's capture uses:
       # on a 1920x1080 screen the window's content area lands at 1920x1081
       # and the capture refuses it.
-      DISPLAY_NUM=99
-      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
-        DISPLAY_NUM=$((DISPLAY_NUM + 1))
-      done
-      Xvfb ":${DISPLAY_NUM}" -screen 0 2560x1440x24 -dpi 96 -nolisten tcp &
-      XVFB_PID=$!
-      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
-      sleep 1
-      export DISPLAY=":${DISPLAY_NUM}"
+      # Started through the shared helper, which waits for the display to
+      # answer instead of sleeping (scripts/lib/own-xvfb.sh).
+      . "{{justfile_directory()}}/scripts/lib/own-xvfb.sh"
+      trap "own_xvfb_stop" EXIT
+      own_xvfb_start -screen 0 2560x1440x24 -dpi 96 -nolisten tcp || exit 1
       just test-e2e tests/visual/plat40-panes-capture.spec.ts "$@"
       ;;
   esac
@@ -6082,15 +6062,11 @@ plat41-capture-electron *args:
       just test-e2e tests/visual/plat41-parity-capture.spec.ts "$@"
       ;;
     *)
-      DISPLAY_NUM=99
-      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
-        DISPLAY_NUM=$((DISPLAY_NUM + 1))
-      done
-      Xvfb ":${DISPLAY_NUM}" -screen 0 2560x1440x24 -dpi 96 -nolisten tcp &
-      XVFB_PID=$!
-      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
-      sleep 1
-      export DISPLAY=":${DISPLAY_NUM}"
+      # Started through the shared helper, which waits for the display to
+      # answer instead of sleeping (scripts/lib/own-xvfb.sh).
+      . "{{justfile_directory()}}/scripts/lib/own-xvfb.sh"
+      trap "own_xvfb_stop" EXIT
+      own_xvfb_start -screen 0 2560x1440x24 -dpi 96 -nolisten tcp || exit 1
       just test-e2e tests/visual/plat41-parity-capture.spec.ts "$@"
       ;;
   esac
@@ -7048,12 +7024,13 @@ plat51-capture-electron *args:
 plat68-desktop-keys *args:
   bash scripts/plat68-desktop-keys.sh {{args}}
 
-# plat68-desktop-keys.sh starts its specs only once the Xvfb it started
-# answers, and fails naming Xvfb when it never does. Runs the real script with
-# stand-ins for the prefix and Playwright and a real, delayed Xvfb; seconds.
-# See the header of scripts/test-plat68-desktop-keys-xvfb-start.sh.
-test-plat68-desktop-keys-xvfb-start:
-  bash scripts/test-plat68-desktop-keys-xvfb-start.sh
+# Every script and recipe that starts its own Xvfb starts its clients only once
+# the server answers (scripts/lib/own-xvfb.sh), and fails naming Xvfb when it
+# never does: plat68-desktop-keys.sh run with stand-ins for the prefix and
+# Playwright and a real, delayed Xvfb, plus a gate over every launch; seconds.
+# See the header of scripts/test-own-xvfb.sh.
+test-own-xvfb:
+  bash scripts/test-own-xvfb.sh
 
 # One keybindings.json read by the terminal (a real pty), GPUI (the window
 # plan) and the desktop (the real Electron app) in one run: a rebound pane

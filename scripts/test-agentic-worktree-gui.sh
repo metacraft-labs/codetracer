@@ -122,15 +122,11 @@ MINGW* | MSYS* | CYGWIN* | *_NT*)
 	just test-e2e tests/agentic-coding/agentic-worktree.spec.ts
 	;;
 *)
-	display_num=99
-	while [ -e "/tmp/.X${display_num}-lock" ]; do
-		display_num=$((display_num + 1))
-	done
-	Xvfb ":${display_num}" -screen 0 1920x1080x24 -nolisten tcp &
-	xvfb_pid=$!
-	trap 'cleanup; kill "$xvfb_pid" 2>/dev/null || true' EXIT
-	sleep 1
-	export DISPLAY=":${display_num}"
+	# Started through the shared helper, which waits for the display to
+	# answer instead of sleeping (scripts/lib/own-xvfb.sh).
+	. "$repo_root/scripts/lib/own-xvfb.sh"
+	trap 'cleanup; own_xvfb_stop' EXIT
+	own_xvfb_start -screen 0 1920x1080x24 -nolisten tcp || exit 1
 
 	just test-e2e tests/agentic-coding/agentic-worktree.spec.ts
 	;;

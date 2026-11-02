@@ -73,37 +73,11 @@ MINGW* | MSYS* | CYGWIN* | *_NT* | Darwin)
 	if [ -n "${DISPLAY:-}" ]; then
 		run_spec "$@"
 	else
-		# The specs start when the display answers, not after a fixed sleep: a
-		# one-second sleep was outlasted on a loaded host and the run failed
-		# with "Missing X server". Xvfb picks a free display itself and writes
-		# its number and a newline to `-displayfd` only once it accepts
-		# connections (Xserver(1), "-displayfd"), so a complete line in that
-		# file is the readiness signal; `read` refuses a line without its
-		# newline, so a half-written number is never taken.
-		# `PLAT68_XVFB_WAIT_SECONDS` bounds the wait.
-		wait_seconds="${PLAT68_XVFB_WAIT_SECONDS:-60}"
-		display_file="$work/xvfb-display"
-		: >"$display_file"
-		Xvfb -displayfd 3 -screen 0 2560x1440x24 -dpi 96 -nolisten tcp \
-			3>"$display_file" >"$work/xvfb.log" 2>&1 &
-		xvfb_pid=$!
-		trap 'kill $xvfb_pid 2>/dev/null || true; rm -rf "$work"' EXIT
-		deadline=$((SECONDS + wait_seconds))
-		until IFS= read -r display_num <"$display_file" && [ -n "$display_num" ]; do
-			if ! kill -0 "$xvfb_pid" 2>/dev/null; then
-				echo "FAIL: Xvfb exited before its display answered; its output:" >&2
-				cat "$work/xvfb.log" >&2
-				exit 1
-			fi
-			if [ "$SECONDS" -ge "$deadline" ]; then
-				echo "FAIL: Xvfb's display did not answer within ${wait_seconds}s" \
-					"(PLAT68_XVFB_WAIT_SECONDS); its output:" >&2
-				cat "$work/xvfb.log" >&2
-				exit 1
-			fi
-			sleep 0.1
-		done
-		export DISPLAY=":${display_num}"
+		# Started through the shared helper, which waits for the display to
+		# answer instead of sleeping (scripts/lib/own-xvfb.sh).
+		. "$repo/scripts/lib/own-xvfb.sh"
+		trap 'own_xvfb_stop; rm -rf "$work"' EXIT
+		own_xvfb_start -screen 0 2560x1440x24 -dpi 96 -nolisten tcp || exit 1
 		run_spec "$@"
 	fi
 	;;

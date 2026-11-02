@@ -1703,10 +1703,10 @@ jobs:
       - name: Failed build-once invalidates stale and partial renderer bundles
         run: bash scripts/test-build-once-failed-bundle.sh
 
-      # plat68-desktop-keys.sh starts its specs once the Xvfb it started
-      # answers: scripts/test-plat68-desktop-keys-xvfb-start.sh.
-      - name: The desktop keys script waits for its own Xvfb
-        run: nix develop .#devShells.x86_64-linux.default --command just test-plat68-desktop-keys-xvfb-start
+      # Every script that starts its own Xvfb starts its clients once the
+      # server answers: scripts/test-own-xvfb.sh.
+      - name: Scripts that start their own Xvfb wait for it to answer
+        run: nix develop .#devShells.x86_64-linux.default --command just test-own-xvfb
 
       # The front door's Functions served by the pinned wrangler, on
       # localhost — no network, no deploy (ci/test/web-front-door-local.sh).
