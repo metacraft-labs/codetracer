@@ -273,4 +273,3 @@ iterator unionChildren*(value: Value): (defaultstring, Value) =
         yield (defaultstring($i), element)
   else:
     discard
-

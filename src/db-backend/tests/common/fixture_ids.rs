@@ -97,7 +97,9 @@ pub const MCR_ANDROID_ARM64_RECORDING_ID: &str = "019e3a35-2544-7a00-8aaa-43ff20
 /// `recording_id` for `mcr/android-arm64/trace-portable.ct` — portable export of the above.
 pub const MCR_ANDROID_ARM64_PORTABLE_RECORDING_ID: &str = "019e3a35-2544-7a00-8aaa-43ff20050002";
 
-/// `recording_id` for `mcr/windows-x86_64/trace.ct` — raw MCR trace (Windows 11 x64 interpose).
+/// `recording_id` for `mcr/windows-x86_64/trace.ct` — raw MCR trace (Windows x64 stage-0
+/// recording with global turns). The committed trace carries the id the recorder minted
+/// (`ct-mcr record` has no `--recording-id`).
 pub const MCR_WINDOWS_X86_64_RECORDING_ID: &str = "019e3a35-2545-7a00-8aaa-43ff20060001";
 
 /// `recording_id` for `mcr/windows-x86_64/trace-portable.ct` — portable export of the above.

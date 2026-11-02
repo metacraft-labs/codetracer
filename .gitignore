@@ -192,6 +192,8 @@ src/tests/run/quicktests/*/*.js
 /codetracer
 !python-api/codetracer/
 client*
+# `client*` is for build outputs; this source module only shares the prefix.
+!src/frontend/viewmodel/keymap/client_actions.nim
 server
 *.nims
 # ct_test ships a checked-in NimScript config that resolves the runquota_process
@@ -496,6 +498,9 @@ repro.paths
 # per-run temporaries with randomized suffixes and must never be committed.
 /src/tests/gui/non-nix-build/
 
+# `just test-gui` scratch: per-run `ct-tp-err-gui-*` temporaries.
+/src/tests/gui/scratch/
+
 # Run lock for the PLAT-7 boundary mutation harness. Held with flock for the
 # lifetime of a run so a second instance in the same worktree refuses to start;
 # two instances corrupt each other's in-memory restores.
@@ -733,3 +738,10 @@ src/common/**/test_*
 # A test-helper DIRECTORY matches `test_*` too, and git cannot re-include a file
 # below an excluded directory, so the directory itself is re-included.
 !src/frontend/test_support/
+
+# The same, for WD7's session-allocation harness. A third lock rather than a
+# shared one, for the reason the PLAT-8 note gives: its subject set is one file
+# (`viewmodel/platform/session_allocation.nim`), it shares no file with either
+# of the harnesses above, and one lock would serialise runs that do not collide
+# while telling a reader they do.
+src/frontend/viewmodel/tests/unit/.wd7-session-allocation-mutation.lock

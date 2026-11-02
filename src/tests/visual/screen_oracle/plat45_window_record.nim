@@ -46,9 +46,11 @@ const
   ActiveTabGroundHex = chromeOf(crTabActiveBackground)
     ## The selected tab's own ground (ui/surface/primary/tertiary, Dark).
 
-proc isDocumentName(word: string): bool =
+proc isDocumentName(text: string): bool =
   ## A file name as a tab shows it: a stem, one dot, an extension of letters
-  ## and digits (`main.py`, `calc.nim`).
+  ## and digits (`main.py`, `calc.nim`) — after the folders the tab may name
+  ## before it (`calc/main.py`).
+  let word = text[text.rfind('/') + 1 .. ^1]
   let dot = word.rfind('.')
   if dot <= 0 or dot >= word.len - 1:
     return false
@@ -81,7 +83,9 @@ proc labelsIn(text: string): seq[string] =
   # Punctuation the engine hangs on a word ("Test Results." was read so on the
   # first frame) is not part of any label.
   var words: seq[string] = @[]
-  for w in text.multiReplace(("[", " "), ("]", " "), ("|", " ")).splitWhitespace():
+  # The engine reads a capital V of the window's face as `\/` ("\/CS").
+  for w in text.multiReplace(("[", " "), ("]", " "), ("|", " "),
+                             ("\\/", "V")).splitWhitespace():
     let bare = w.strip(chars = PunctuationChars)
     if bare.len > 0: words.add bare
   var i = 0
@@ -174,16 +178,30 @@ proc outlineOf(img: GrayImage; x, y, w, h: int): JsonNode =
                     edgeOutlined(img, x + w, y + 4, x + w, y + h - 5, want))}
 
 proc ocrStrip(img: GrayImage; r: Rect; scratch: string): string =
-  ## A tab strip's labels, read against the strip's two grounds
-  ## (`vision_producer.ocrOnGrounds`).
-  var words: seq[string] = @[]
+  ## A tab strip's labels, read two ways, and the reading that names more
+  ## labels kept (the masked one on a tie):
+  ##
+  ##   * against the strip's grounds (`vision_producer.ocrOnGrounds`), which
+  ##     reads a dim inactive label beside a bright selected one;
+  ##   * as it is drawn, upscaled (`ocrRegion`, psm 7). Since the window
+  ##     draws its labels in capitals on ONE ground, with the selected one in
+  ##     bold (PLAT-49/PLAT-68), the mask's hard threshold fills the bold
+  ##     capitals in ("VARIABLES" was read "IVA_HI;-QBLES"); the plain
+  ##     reading spells them.
+  var masked: seq[string] = @[]
   # PLAT-50: the pane's own ground too — the probe runs past the strip into
   # the pane's first rows, which were a solid black band in the mask.
   for w in ocrOnGrounds(img, r, scratch,
                         [grayOf(StripGroundHex), grayOf(ActiveTabGroundHex),
                          grayOf(chromeOf(crPaneBackground))]):
-    words.add w.text
-  words.join(" ").strip()
+    masked.add w.text
+  var plain: seq[string] = @[]
+  let line = Rect(x: r.x, y: r.y, w: r.w, h: min(r.h, TitleStripHeight))
+  for w in ocrRegion(img, line, scratch, psm = 7, upscale = 3.0):
+    plain.add w.text
+  let a = masked.join(" ").strip()
+  let b = plain.join(" ").strip()
+  if labelsIn(b).len > labelsIn(a).len: b else: a
 
 proc activeRun(img: GrayImage; r: Rect): Rect =
   ## The selected tab's own ground along the strip: the widest run of
@@ -207,6 +225,33 @@ proc activeRun(img: GrayImage; r: Rect): Rect =
       start = -1
   if best.start < 0: return Rect()
   Rect(x: best.start, y: r.y, w: best.len, h: r.h)
+
+proc activeByInk(img: GrayImage; r: Rect; scratch: string): string =
+  ## The selected tab of a strip drawn on ONE ground: the label whose glyphs
+  ## are the brightest. The window draws the selected label in
+  ## `crTabActiveForeground`, bold, and every other one in the disabled tier
+  ## (`chrome.tabStyle`), so its ink is the lightest on the strip; the
+  ## selected tab's own ground, which `activeRun` looks for, is no longer
+  ## told apart in the frame. "" when no label is read.
+  let line = Rect(x: r.x, y: r.y, w: r.w, h: min(r.h, TitleStripHeight))
+  let words = ocrRegion(img, line, scratch, psm = 7, upscale = 3.0)
+  var best = -1
+  for i, w in words:
+    let next = if i + 1 < words.len: words[i + 1].text else: ""
+    let found = labelsIn(w.text & " " & next)
+    if found.len == 0:
+      continue
+    let squeezed = found[0].replace(" ", "").toLowerAscii
+    let word = w.text.strip(chars = PunctuationChars).toLowerAscii
+    if word.len == 0 or not squeezed.startsWith(word):
+      continue
+    var ink = 0
+    for y in line.y + w.bbox[1] ..< min(img.height, line.y + w.bbox[1] + w.bbox[3]):
+      for x in line.x + w.bbox[0] ..< min(img.width, line.x + w.bbox[0] + w.bbox[2]):
+        ink = max(ink, int(img.pixels[y * img.width + x]))
+    if ink > best:
+      best = ink
+      result = found[0]
 
 proc readFrame(path, scratch: string): JsonNode =
   result = %*{"frame": path.extractFilename, "located": false, "reason": "",
@@ -259,6 +304,9 @@ proc readFrame(path, scratch: string): JsonNode =
         heading = ocrStrip(img, run, scratch)
         let under = labelsIn(heading)
         if under.len > 0: active = under[0]
+      if active.len == 0:
+        active = activeByInk(img, stripRect, scratch)
+        heading = active
     elif tabs.len == 1:
       active = tabs[0]
     regions.add %*{"x": cell.x, "y": top, "w": cell.w, "h": height,

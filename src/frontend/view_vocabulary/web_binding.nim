@@ -372,13 +372,21 @@ func nativeDefaultChangesState*(k: ViewKind; open: bool;
   ## claim the key. Such a key must be `preventDefault`-ed anyway, or the page
   ## shows a state the model does not have. Measured in headless Chromium by
   ## `src/frontend/tests/view_vocabulary_chromium_test.nim`, case "what the
-  ## browser does on its own":
+  ## browser does on its own", which also checks, on whatever platform it
+  ## runs, that every key whose default changes a closed `<select>` is in
+  ## this set:
   ##
-  ##   `<select>`, closed   ArrowUp / ArrowDown / Home / End / PageUp /
-  ##                        PageDown and a printable character (type-ahead)
-  ##                        each COMMIT a different option at once. The
-  ##                        entry's highlight/commit split exists natively
-  ##                        only inside the opened popup.
+  ##   `<select>`, closed   Linux and Windows: ArrowUp / ArrowDown / Home /
+  ##                        End / PageUp / PageDown and a printable character
+  ##                        (type-ahead) each COMMIT a different option at
+  ##                        once. macOS: ArrowUp / ArrowDown OPEN the popup
+  ##                        without committing, Home / End / PageUp / PageDown
+  ##                        do nothing, and type-ahead commits. The set is the
+  ##                        UNION, deliberately one answer for every platform:
+  ##                        an opened popup is a state the model does not have
+  ##                        either, and preventing a default that does nothing
+  ##                        costs nothing. The entry's highlight/commit split
+  ##                        exists natively only inside the opened popup.
   ##   `<input type=text>`  ArrowUp and ArrowDown move the caret to the start
   ##                        and the end; the entry claims neither.
   ##

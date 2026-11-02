@@ -278,18 +278,7 @@ if [ "$SKIP_BUILD" = "0" ]; then
 	# (${REPO_ROOT}/../<repo>). Removed after the build so the tree stays clean.
 	# Still required: `config.nims` is matched by the repo-wide `*.nims` line in
 	# .gitignore and is therefore absent from every checkout, CI's included.
-	SIBLINGS_ABS="$(cd "$REPO_ROOT/.." && pwd)"
-	cat >docs/book-isonim/nim.cfg <<NIMCFG
---path:"$SIBLINGS_ABS/isonim-docs/src"
---path:"$SIBLINGS_ABS/codetracer-design-system/nim"
---path:"$SIBLINGS_ABS/isonim/src"
---path:"$SIBLINGS_ABS/nim-everywhere/src"
---path:"$SIBLINGS_ABS/nim-faststreams"
---path:"$SIBLINGS_ABS/nim-stew"
---path:"$SIBLINGS_ABS/isonim/vendor/chronicles"
---path:"$SIBLINGS_ABS/isonim/vendor/serialization"
---path:"$SIBLINGS_ABS/isonim/vendor/json_serialization"
-NIMCFG
+	bash "$REPO_ROOT/ci/lib/book-isonim-nimcfg.sh" "$REPO_ROOT"
 
 	# CT_DOCS_BASE_PATH is read by docs/book-isonim/src/build.nim: it is the URL
 	# prefix the channel is served under, and the SSG rewrites every root-relative

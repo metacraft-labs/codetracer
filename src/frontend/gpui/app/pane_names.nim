@@ -10,17 +10,19 @@
 ## "Event Log", "Debug Controls"), extended to every `PaneKind`, with no `else`
 ## so a new pane cannot arrive nameless.
 
+import std/strutils
+
 import headless_app/layout_model
 
 func gpuiPaneName*(kind: PaneKind): string =
   case kind
   of paneEditor: "Editor"
   of paneCalltrace: "Call Trace"
-  of paneState: "State"
+  of paneState: "Variables"
   of paneEventLog: "Event Log"
   of paneDebugControls: "Debug Controls"
   of paneFlow: "Flow"
-  of paneSearch: "Search"
+  of paneSearch: "Find in Files"
   of panePointList: "Points"
   of paneScratchpad: "Scratchpad"
   of paneShell: "Shell"
@@ -33,3 +35,11 @@ func gpuiPaneName*(kind: PaneKind): string =
   of paneConstraints: "Constraints"
   of paneProblems: "Problems"
   of paneRequests: "Requests"
+
+func desktopTabTitle*(kind: PaneKind): string =
+  ## What the desktop's tab says for a built-in pane: its content's name split
+  ## at the capitals and upper-cased (`ui/layout.nim`'s caption proc), so
+  ## `Calltrace` reads CALLTRACE where this window's own name is "Call Trace".
+  case kind
+  of paneCalltrace: "CALLTRACE"
+  else: gpuiPaneName(kind).toUpperAscii

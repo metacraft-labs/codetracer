@@ -107,5 +107,5 @@ ct_sha256_file() {
 ct_sha256_short() {
 	local full n="${2:-16}"
 	full="$(ct_sha256_file "$1")" || return $?
-	printf '%s' "${full:0:${n}}"
+	printf '%s' "${full:0:n}"
 }

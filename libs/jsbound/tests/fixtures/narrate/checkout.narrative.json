@@ -1,0 +1,2852 @@
+{
+  "arms": {
+    "checkout": "B"
+  },
+  "build_hash": "5e1f5e1f5e1f5e1f5e1f5e1f5e1f5e1f5e1f5e1f5e1f5e1f5e1f5e1f5e1f5e1f",
+  "counts": {
+    "entries": {
+      "declassifications": 2,
+      "inputs": 266,
+      "marks": 2,
+      "requests": 2
+    },
+    "input_events": {
+      "beforeinput": 37,
+      "blur": 6,
+      "change": 3,
+      "click": 5,
+      "focus": 7,
+      "focusin": 7,
+      "focusout": 6,
+      "input": 37,
+      "keydown": 37,
+      "keypress": 36,
+      "keyup": 37,
+      "mousedown": 5,
+      "mousemove": 5,
+      "mouseout": 4,
+      "mouseover": 5,
+      "mouseup": 5,
+      "pointerdown": 5,
+      "pointermove": 5,
+      "pointerout": 4,
+      "pointerover": 5,
+      "pointerup": 5
+    },
+    "records": 621
+  },
+  "declassified": [
+    {
+      "fn_id": "isValidEmail",
+      "output": false
+    },
+    {
+      "fn_id": "isValidEmail",
+      "output": true
+    }
+  ],
+  "derived_by": "jsbound 0.1.0",
+  "end": "stopped",
+  "end_time": 1793056764431.0,
+  "first_seq": 1,
+  "framework": "",
+  "full": [
+    {
+      "data": {
+        "arm": "B"
+      },
+      "kind": "mark",
+      "name": "exposure:checkout",
+      "seq": 3,
+      "text": "mark exposure:checkout {\"arm\":\"B\"}",
+      "time": null
+    },
+    {
+      "event": "pointerover",
+      "kind": "input",
+      "label": null,
+      "seq": 9,
+      "target": "path:html",
+      "text": "pointerover on path:html",
+      "time": null
+    },
+    {
+      "event": "mouseover",
+      "kind": "input",
+      "label": null,
+      "seq": 11,
+      "target": "path:html",
+      "text": "mouseover on path:html",
+      "time": null
+    },
+    {
+      "event": "pointerout",
+      "kind": "input",
+      "label": null,
+      "seq": 13,
+      "target": "path:html",
+      "text": "pointerout on path:html",
+      "time": null
+    },
+    {
+      "event": "pointerover",
+      "kind": "input",
+      "label": "Add to cart",
+      "seq": 15,
+      "target": "path:#add",
+      "text": "pointerover on “Add to cart”",
+      "time": null
+    },
+    {
+      "event": "mouseout",
+      "kind": "input",
+      "label": null,
+      "seq": 17,
+      "target": "path:html",
+      "text": "mouseout on path:html",
+      "time": null
+    },
+    {
+      "event": "mouseover",
+      "kind": "input",
+      "label": "Add to cart",
+      "seq": 19,
+      "target": "path:#add",
+      "text": "mouseover on “Add to cart”",
+      "time": null
+    },
+    {
+      "event": "pointermove",
+      "kind": "input",
+      "label": "Add to cart",
+      "seq": 21,
+      "target": "path:#add",
+      "text": "pointermove on “Add to cart”",
+      "time": null
+    },
+    {
+      "event": "mousemove",
+      "kind": "input",
+      "label": "Add to cart",
+      "seq": 23,
+      "target": "path:#add",
+      "text": "mousemove on “Add to cart”",
+      "time": null
+    },
+    {
+      "event": "pointerdown",
+      "kind": "input",
+      "label": "Add to cart",
+      "seq": 25,
+      "target": "path:#add",
+      "text": "pointerdown on “Add to cart”",
+      "time": null
+    },
+    {
+      "event": "mousedown",
+      "kind": "input",
+      "label": "Add to cart",
+      "seq": 27,
+      "target": "path:#add",
+      "text": "mousedown on “Add to cart”",
+      "time": null
+    },
+    {
+      "event": "focus",
+      "kind": "input",
+      "label": "Add to cart",
+      "seq": 30,
+      "target": "path:#add",
+      "text": "focus on “Add to cart”",
+      "time": null
+    },
+    {
+      "event": "focusin",
+      "kind": "input",
+      "label": "Add to cart",
+      "seq": 33,
+      "target": "path:#add",
+      "text": "focusin on “Add to cart”",
+      "time": null
+    },
+    {
+      "event": "pointerup",
+      "kind": "input",
+      "label": "Add to cart",
+      "seq": 35,
+      "target": "path:#add",
+      "text": "pointerup on “Add to cart”",
+      "time": null
+    },
+    {
+      "event": "mouseup",
+      "kind": "input",
+      "label": "Add to cart",
+      "seq": 37,
+      "target": "path:#add",
+      "text": "mouseup on “Add to cart”",
+      "time": null
+    },
+    {
+      "event": "click",
+      "kind": "input",
+      "label": "Add to cart",
+      "seq": 39,
+      "target": "path:#add",
+      "text": "click on “Add to cart”",
+      "time": null
+    },
+    {
+      "event": "pointerout",
+      "kind": "input",
+      "label": "Add to cart",
+      "seq": 41,
+      "target": "path:#add",
+      "text": "pointerout on “Add to cart”",
+      "time": null
+    },
+    {
+      "event": "pointerover",
+      "kind": "input",
+      "label": "Show details",
+      "seq": 43,
+      "target": "path:#details",
+      "text": "pointerover on “Show details”",
+      "time": null
+    },
+    {
+      "event": "mouseout",
+      "kind": "input",
+      "label": "Add to cart",
+      "seq": 45,
+      "target": "path:#add",
+      "text": "mouseout on “Add to cart”",
+      "time": null
+    },
+    {
+      "event": "mouseover",
+      "kind": "input",
+      "label": "Show details",
+      "seq": 47,
+      "target": "path:#details",
+      "text": "mouseover on “Show details”",
+      "time": null
+    },
+    {
+      "event": "pointermove",
+      "kind": "input",
+      "label": "Show details",
+      "seq": 49,
+      "target": "path:#details",
+      "text": "pointermove on “Show details”",
+      "time": null
+    },
+    {
+      "event": "mousemove",
+      "kind": "input",
+      "label": "Show details",
+      "seq": 51,
+      "target": "path:#details",
+      "text": "mousemove on “Show details”",
+      "time": null
+    },
+    {
+      "event": "pointerdown",
+      "kind": "input",
+      "label": "Show details",
+      "seq": 53,
+      "target": "path:#details",
+      "text": "pointerdown on “Show details”",
+      "time": null
+    },
+    {
+      "event": "mousedown",
+      "kind": "input",
+      "label": "Show details",
+      "seq": 55,
+      "target": "path:#details",
+      "text": "mousedown on “Show details”",
+      "time": null
+    },
+    {
+      "event": "blur",
+      "kind": "input",
+      "label": "Add to cart",
+      "seq": 57,
+      "target": "path:#add",
+      "text": "blur on “Add to cart”",
+      "time": null
+    },
+    {
+      "event": "focusout",
+      "kind": "input",
+      "label": "Add to cart",
+      "seq": 59,
+      "target": "path:#add",
+      "text": "focusout on “Add to cart”",
+      "time": null
+    },
+    {
+      "event": "focus",
+      "kind": "input",
+      "label": "Show details",
+      "seq": 62,
+      "target": "path:#details",
+      "text": "focus on “Show details”",
+      "time": null
+    },
+    {
+      "event": "focusin",
+      "kind": "input",
+      "label": "Show details",
+      "seq": 65,
+      "target": "path:#details",
+      "text": "focusin on “Show details”",
+      "time": null
+    },
+    {
+      "event": "pointerup",
+      "kind": "input",
+      "label": "Show details",
+      "seq": 67,
+      "target": "path:#details",
+      "text": "pointerup on “Show details”",
+      "time": null
+    },
+    {
+      "event": "mouseup",
+      "kind": "input",
+      "label": "Show details",
+      "seq": 69,
+      "target": "path:#details",
+      "text": "mouseup on “Show details”",
+      "time": null
+    },
+    {
+      "event": "click",
+      "kind": "input",
+      "label": "Show details",
+      "seq": 71,
+      "target": "path:#details",
+      "text": "click on “Show details”",
+      "time": null
+    },
+    {
+      "event": "blur",
+      "kind": "input",
+      "label": "Show details",
+      "seq": 73,
+      "target": "path:#details",
+      "text": "blur on “Show details”",
+      "time": null
+    },
+    {
+      "event": "focusout",
+      "kind": "input",
+      "label": "Show details",
+      "seq": 75,
+      "target": "path:#details",
+      "text": "focusout on “Show details”",
+      "time": null
+    },
+    {
+      "event": "focus",
+      "kind": "input",
+      "label": "Name",
+      "seq": 78,
+      "target": "path:#name",
+      "text": "focus on “Name”",
+      "time": null
+    },
+    {
+      "event": "focusin",
+      "kind": "input",
+      "label": "Name",
+      "seq": 81,
+      "target": "path:#name",
+      "text": "focusin on “Name”",
+      "time": null
+    },
+    {
+      "event": "keydown",
+      "key": "A",
+      "kind": "input",
+      "label": "Name",
+      "seq": 83,
+      "target": "path:#name",
+      "text": "keydown A on “Name”",
+      "time": null
+    },
+    {
+      "event": "keypress",
+      "key": "A",
+      "kind": "input",
+      "label": "Name",
+      "seq": 85,
+      "target": "path:#name",
+      "text": "keypress A on “Name”",
+      "time": null
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "Name",
+      "seq": 87,
+      "target": "path:#name",
+      "text": "beforeinput on “Name”",
+      "time": null
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "Name",
+      "seq": 91,
+      "target": "path:#name",
+      "text": "input on “Name”: A",
+      "time": null,
+      "value": "A"
+    },
+    {
+      "event": "keyup",
+      "key": "A",
+      "kind": "input",
+      "label": "Name",
+      "seq": 93,
+      "target": "path:#name",
+      "text": "keyup A on “Name”",
+      "time": null
+    },
+    {
+      "event": "keydown",
+      "key": "d",
+      "kind": "input",
+      "label": "Name",
+      "seq": 95,
+      "target": "path:#name",
+      "text": "keydown d on “Name”",
+      "time": null
+    },
+    {
+      "event": "keypress",
+      "key": "d",
+      "kind": "input",
+      "label": "Name",
+      "seq": 97,
+      "target": "path:#name",
+      "text": "keypress d on “Name”",
+      "time": null
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "Name",
+      "seq": 99,
+      "target": "path:#name",
+      "text": "beforeinput on “Name”",
+      "time": null
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "Name",
+      "seq": 103,
+      "target": "path:#name",
+      "text": "input on “Name”: Ad",
+      "time": null,
+      "value": "Ad"
+    },
+    {
+      "event": "keyup",
+      "key": "d",
+      "kind": "input",
+      "label": "Name",
+      "seq": 105,
+      "target": "path:#name",
+      "text": "keyup d on “Name”",
+      "time": null
+    },
+    {
+      "event": "keydown",
+      "key": "a",
+      "kind": "input",
+      "label": "Name",
+      "seq": 107,
+      "target": "path:#name",
+      "text": "keydown a on “Name”",
+      "time": null
+    },
+    {
+      "event": "keypress",
+      "key": "a",
+      "kind": "input",
+      "label": "Name",
+      "seq": 109,
+      "target": "path:#name",
+      "text": "keypress a on “Name”",
+      "time": null
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "Name",
+      "seq": 111,
+      "target": "path:#name",
+      "text": "beforeinput on “Name”",
+      "time": null
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "Name",
+      "seq": 115,
+      "target": "path:#name",
+      "text": "input on “Name”: Ada",
+      "time": null,
+      "value": "Ada"
+    },
+    {
+      "event": "keyup",
+      "key": "a",
+      "kind": "input",
+      "label": "Name",
+      "seq": 117,
+      "target": "path:#name",
+      "text": "keyup a on “Name”",
+      "time": null
+    },
+    {
+      "event": "change",
+      "kind": "input",
+      "label": "Name",
+      "seq": 121,
+      "target": "path:#name",
+      "text": "change on “Name”: Ada",
+      "time": null,
+      "value": "Ada"
+    },
+    {
+      "event": "blur",
+      "kind": "input",
+      "label": "Name",
+      "seq": 123,
+      "target": "path:#name",
+      "text": "blur on “Name”",
+      "time": null
+    },
+    {
+      "event": "focusout",
+      "kind": "input",
+      "label": "Name",
+      "seq": 125,
+      "target": "path:#name",
+      "text": "focusout on “Name”",
+      "time": null
+    },
+    {
+      "event": "focus",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 128,
+      "target": "path:#email",
+      "text": "focus on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "focusin",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 131,
+      "target": "path:#email",
+      "text": "focusin on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 133,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 135,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 137,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 140,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": null,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 142,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 144,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 146,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 148,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 151,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": null,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 153,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 155,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 157,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 159,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 162,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": null,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 164,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 166,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 168,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 170,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 173,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": null,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 175,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 177,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 179,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 181,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 184,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": null,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 186,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 188,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 190,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 192,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 195,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": null,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 197,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 199,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 201,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 203,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 206,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": null,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 208,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 210,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 212,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 214,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 217,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": null,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 219,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 221,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 223,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 225,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 228,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": null,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 230,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 232,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 234,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 236,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 239,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": null,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 241,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 243,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 245,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 247,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 250,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": null,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 252,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 254,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 256,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 259,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 262,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": null,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 264,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 266,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 268,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 270,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 273,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": null,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 275,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 277,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 279,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 281,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 284,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": null,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 286,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 288,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 290,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 292,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 295,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": null,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 297,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 299,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 301,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 303,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 306,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": null,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 308,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 310,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 312,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 314,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 317,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": null,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 319,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 321,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 323,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 325,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 328,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": null,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 330,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "pointerout",
+      "kind": "input",
+      "label": "Show details",
+      "seq": 332,
+      "target": "path:#details",
+      "text": "pointerout on “Show details”",
+      "time": null
+    },
+    {
+      "event": "pointerover",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 334,
+      "target": "path:#continue",
+      "text": "pointerover on “Continue”",
+      "time": null
+    },
+    {
+      "event": "mouseout",
+      "kind": "input",
+      "label": "Show details",
+      "seq": 336,
+      "target": "path:#details",
+      "text": "mouseout on “Show details”",
+      "time": null
+    },
+    {
+      "event": "mouseover",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 338,
+      "target": "path:#continue",
+      "text": "mouseover on “Continue”",
+      "time": null
+    },
+    {
+      "event": "pointermove",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 340,
+      "target": "path:#continue",
+      "text": "pointermove on “Continue”",
+      "time": null
+    },
+    {
+      "event": "mousemove",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 342,
+      "target": "path:#continue",
+      "text": "mousemove on “Continue”",
+      "time": null
+    },
+    {
+      "event": "pointerdown",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 344,
+      "target": "path:#continue",
+      "text": "pointerdown on “Continue”",
+      "time": null
+    },
+    {
+      "event": "mousedown",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 346,
+      "target": "path:#continue",
+      "text": "mousedown on “Continue”",
+      "time": null
+    },
+    {
+      "event": "change",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 349,
+      "target": "path:#email",
+      "text": "change on “E-mail”: ‹sensitive›",
+      "time": null,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "blur",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 351,
+      "target": "path:#email",
+      "text": "blur on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "focusout",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 353,
+      "target": "path:#email",
+      "text": "focusout on “E-mail”",
+      "time": null
+    },
+    {
+      "event": "focus",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 356,
+      "target": "path:#continue",
+      "text": "focus on “Continue”",
+      "time": null
+    },
+    {
+      "event": "focusin",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 359,
+      "target": "path:#continue",
+      "text": "focusin on “Continue”",
+      "time": null
+    },
+    {
+      "event": "pointerup",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 361,
+      "target": "path:#continue",
+      "text": "pointerup on “Continue”",
+      "time": null
+    },
+    {
+      "event": "mouseup",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 363,
+      "target": "path:#continue",
+      "text": "mouseup on “Continue”",
+      "time": null
+    },
+    {
+      "event": "click",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 365,
+      "target": "path:#continue",
+      "text": "click on “Continue”",
+      "time": 1793056764334.0
+    },
+    {
+      "fn_id": "isValidEmail",
+      "kind": "declassify",
+      "output": false,
+      "seq": 367,
+      "text": "isValidEmail → false",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keydown",
+      "key": "Delete",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 369,
+      "target": "path:#email",
+      "text": "keydown Delete on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 371,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 374,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": 1793056764334.0,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "Delete",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 376,
+      "target": "path:#email",
+      "text": "keyup Delete on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 378,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 380,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 382,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 385,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": 1793056764334.0,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 387,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 389,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 391,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 393,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 396,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": 1793056764334.0,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 398,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 400,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 402,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 404,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 407,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": 1793056764334.0,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 409,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 411,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 413,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 415,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 418,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": 1793056764334.0,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 420,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 422,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 424,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 426,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 429,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": 1793056764334.0,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 431,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 433,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 435,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 437,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 440,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": 1793056764334.0,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 442,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 444,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 446,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 448,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 451,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": 1793056764334.0,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 453,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 455,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 457,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 459,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 462,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": 1793056764334.0,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 464,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 466,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 468,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 470,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 473,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": 1793056764334.0,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 475,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 477,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 479,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 481,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 484,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": 1793056764334.0,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 486,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 488,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 490,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 492,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 495,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": 1793056764334.0,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 497,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 499,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 501,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 503,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 506,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": 1793056764334.0,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 508,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 510,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 512,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 514,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 518,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": 1793056764334.0,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 520,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 522,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 524,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 526,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 529,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": 1793056764334.0,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 531,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keydown",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 533,
+      "target": "path:#email",
+      "text": "keydown * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "keypress",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 535,
+      "target": "path:#email",
+      "text": "keypress * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "beforeinput",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 537,
+      "target": "path:#email",
+      "text": "beforeinput on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "input",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 540,
+      "target": "path:#email",
+      "text": "input on “E-mail”: ‹sensitive›",
+      "time": 1793056764334.0,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "keyup",
+      "key": "*",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 542,
+      "target": "path:#email",
+      "text": "keyup * on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "pointermove",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 544,
+      "target": "path:#continue",
+      "text": "pointermove on “Continue”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "mousemove",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 546,
+      "target": "path:#continue",
+      "text": "mousemove on “Continue”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "pointerdown",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 548,
+      "target": "path:#continue",
+      "text": "pointerdown on “Continue”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "mousedown",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 550,
+      "target": "path:#continue",
+      "text": "mousedown on “Continue”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "change",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 553,
+      "target": "path:#email",
+      "text": "change on “E-mail”: ‹sensitive›",
+      "time": 1793056764334.0,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "blur",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 555,
+      "target": "path:#email",
+      "text": "blur on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "focusout",
+      "kind": "input",
+      "label": "E-mail",
+      "seq": 557,
+      "target": "path:#email",
+      "text": "focusout on “E-mail”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "focus",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 560,
+      "target": "path:#continue",
+      "text": "focus on “Continue”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "focusin",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 563,
+      "target": "path:#continue",
+      "text": "focusin on “Continue”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "pointerup",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 565,
+      "target": "path:#continue",
+      "text": "pointerup on “Continue”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "mouseup",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 567,
+      "target": "path:#continue",
+      "text": "mouseup on “Continue”",
+      "time": 1793056764334.0
+    },
+    {
+      "event": "click",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 569,
+      "target": "path:#continue",
+      "text": "click on “Continue”",
+      "time": 1793056764417.0
+    },
+    {
+      "fn_id": "isValidEmail",
+      "kind": "declassify",
+      "output": true,
+      "seq": 571,
+      "text": "isValidEmail → true",
+      "time": 1793056764417.0
+    },
+    {
+      "api": "fetch",
+      "kind": "network",
+      "method": "POST",
+      "outcome": "response",
+      "response_seq": 575,
+      "seq": 572,
+      "status": 200,
+      "text": "fetch POST http://127.0.0.1:47811/api/checkout → 200",
+      "time": 1793056764417.0,
+      "url": "http://127.0.0.1:47811/api/checkout"
+    },
+    {
+      "event": "pointerout",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 582,
+      "target": "path:#continue",
+      "text": "pointerout on “Continue”",
+      "time": 1793056764431.0
+    },
+    {
+      "event": "pointerover",
+      "kind": "input",
+      "label": "Pay now",
+      "seq": 584,
+      "target": "path:#pay",
+      "text": "pointerover on “Pay now”",
+      "time": 1793056764431.0
+    },
+    {
+      "event": "mouseout",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 586,
+      "target": "path:#continue",
+      "text": "mouseout on “Continue”",
+      "time": 1793056764431.0
+    },
+    {
+      "event": "mouseover",
+      "kind": "input",
+      "label": "Pay now",
+      "seq": 588,
+      "target": "path:#pay",
+      "text": "mouseover on “Pay now”",
+      "time": 1793056764431.0
+    },
+    {
+      "event": "pointermove",
+      "kind": "input",
+      "label": "Pay now",
+      "seq": 590,
+      "target": "path:#pay",
+      "text": "pointermove on “Pay now”",
+      "time": 1793056764431.0
+    },
+    {
+      "event": "mousemove",
+      "kind": "input",
+      "label": "Pay now",
+      "seq": 592,
+      "target": "path:#pay",
+      "text": "mousemove on “Pay now”",
+      "time": 1793056764431.0
+    },
+    {
+      "event": "pointerdown",
+      "kind": "input",
+      "label": "Pay now",
+      "seq": 594,
+      "target": "path:#pay",
+      "text": "pointerdown on “Pay now”",
+      "time": 1793056764431.0
+    },
+    {
+      "event": "mousedown",
+      "kind": "input",
+      "label": "Pay now",
+      "seq": 596,
+      "target": "path:#pay",
+      "text": "mousedown on “Pay now”",
+      "time": 1793056764431.0
+    },
+    {
+      "event": "blur",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 598,
+      "target": "path:#continue",
+      "text": "blur on “Continue”",
+      "time": 1793056764431.0
+    },
+    {
+      "event": "focusout",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 600,
+      "target": "path:#continue",
+      "text": "focusout on “Continue”",
+      "time": 1793056764431.0
+    },
+    {
+      "event": "focus",
+      "kind": "input",
+      "label": "Pay now",
+      "seq": 603,
+      "target": "path:#pay",
+      "text": "focus on “Pay now”",
+      "time": 1793056764431.0
+    },
+    {
+      "event": "focusin",
+      "kind": "input",
+      "label": "Pay now",
+      "seq": 606,
+      "target": "path:#pay",
+      "text": "focusin on “Pay now”",
+      "time": 1793056764431.0
+    },
+    {
+      "event": "pointerup",
+      "kind": "input",
+      "label": "Pay now",
+      "seq": 608,
+      "target": "path:#pay",
+      "text": "pointerup on “Pay now”",
+      "time": 1793056764431.0
+    },
+    {
+      "event": "mouseup",
+      "kind": "input",
+      "label": "Pay now",
+      "seq": 610,
+      "target": "path:#pay",
+      "text": "mouseup on “Pay now”",
+      "time": 1793056764431.0
+    },
+    {
+      "event": "click",
+      "kind": "input",
+      "label": "Pay now",
+      "seq": 612,
+      "target": "path:#pay",
+      "text": "click on “Pay now”",
+      "time": 1793056764431.0
+    },
+    {
+      "api": "fetch",
+      "kind": "network",
+      "method": "POST",
+      "outcome": "response",
+      "response_seq": 616,
+      "seq": 613,
+      "status": 200,
+      "text": "fetch POST http://127.0.0.1:47811/api/pay → 200",
+      "time": 1793056764431.0,
+      "url": "http://127.0.0.1:47811/api/pay"
+    },
+    {
+      "data": {
+        "items": 1
+      },
+      "kind": "mark",
+      "name": "conversion:purchase",
+      "seq": 617,
+      "text": "mark conversion:purchase {\"items\":1}",
+      "time": 1793056764431.0
+    }
+  ],
+  "full_truncated": false,
+  "has_error": false,
+  "last_seq": 618,
+  "protocol_level": 0,
+  "recording_id": "01920f3e-7c4a-7b2e-9d1f-3a5b7c9e1f20",
+  "replayable": true,
+  "session_id": "287086f51b512e673f262048693a0b8a",
+  "start_time": 1793056764334.0,
+  "steps": [
+    {
+      "data": {
+        "arm": "B"
+      },
+      "kind": "mark",
+      "name": "exposure:checkout",
+      "seq": 3,
+      "text": "mark exposure:checkout {\"arm\":\"B\"}",
+      "time": null
+    },
+    {
+      "event": "click",
+      "kind": "input",
+      "label": "Add to cart",
+      "seq": 39,
+      "target": "path:#add",
+      "text": "click on “Add to cart”",
+      "time": null
+    },
+    {
+      "event": "click",
+      "kind": "input",
+      "label": "Show details",
+      "seq": 71,
+      "target": "path:#details",
+      "text": "click on “Show details”",
+      "time": null
+    },
+    {
+      "characters": 3,
+      "kind": "typed",
+      "label": "Name",
+      "named_keys": [],
+      "seq": 83,
+      "target": "path:#name",
+      "text": "typed 3 characters into “Name”: Ada",
+      "time": null,
+      "value": "Ada"
+    },
+    {
+      "characters": 18,
+      "kind": "typed",
+      "label": "E-mail",
+      "named_keys": [],
+      "seq": 133,
+      "target": "path:#email",
+      "text": "typed 18 characters into “E-mail”: ‹sensitive›",
+      "time": null,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "click",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 365,
+      "target": "path:#continue",
+      "text": "click on “Continue”",
+      "time": 1793056764334.0
+    },
+    {
+      "fn_id": "isValidEmail",
+      "kind": "declassify",
+      "output": false,
+      "seq": 367,
+      "text": "isValidEmail → false",
+      "time": 1793056764334.0
+    },
+    {
+      "characters": 15,
+      "kind": "typed",
+      "label": "E-mail",
+      "named_keys": [
+        "Delete"
+      ],
+      "seq": 369,
+      "target": "path:#email",
+      "text": "typed 15 characters into “E-mail” (keys: Delete): ‹sensitive›",
+      "time": 1793056764334.0,
+      "value": "‹sensitive›"
+    },
+    {
+      "event": "click",
+      "kind": "input",
+      "label": "Continue",
+      "seq": 569,
+      "target": "path:#continue",
+      "text": "click on “Continue”",
+      "time": 1793056764417.0
+    },
+    {
+      "fn_id": "isValidEmail",
+      "kind": "declassify",
+      "output": true,
+      "seq": 571,
+      "text": "isValidEmail → true",
+      "time": 1793056764417.0
+    },
+    {
+      "api": "fetch",
+      "kind": "network",
+      "method": "POST",
+      "outcome": "response",
+      "response_seq": 575,
+      "seq": 572,
+      "status": 200,
+      "text": "fetch POST http://127.0.0.1:47811/api/checkout → 200",
+      "time": 1793056764417.0,
+      "url": "http://127.0.0.1:47811/api/checkout"
+    },
+    {
+      "event": "click",
+      "kind": "input",
+      "label": "Pay now",
+      "seq": 612,
+      "target": "path:#pay",
+      "text": "click on “Pay now”",
+      "time": 1793056764431.0
+    },
+    {
+      "api": "fetch",
+      "kind": "network",
+      "method": "POST",
+      "outcome": "response",
+      "response_seq": 616,
+      "seq": 613,
+      "status": 200,
+      "text": "fetch POST http://127.0.0.1:47811/api/pay → 200",
+      "time": 1793056764431.0,
+      "url": "http://127.0.0.1:47811/api/pay"
+    },
+    {
+      "data": {
+        "items": 1
+      },
+      "kind": "mark",
+      "name": "conversion:purchase",
+      "seq": 617,
+      "text": "mark conversion:purchase {\"items\":1}",
+      "time": 1793056764431.0
+    }
+  ],
+  "steps_truncated": false,
+  "summary": [
+    {
+      "data": {
+        "arm": "B"
+      },
+      "kind": "mark",
+      "name": "exposure:checkout",
+      "seq": 3,
+      "text": "mark exposure:checkout {\"arm\":\"B\"}",
+      "time": null
+    },
+    {
+      "fn_id": "isValidEmail",
+      "kind": "declassify",
+      "output": false,
+      "seq": 367,
+      "text": "isValidEmail → false",
+      "time": 1793056764334.0
+    },
+    {
+      "fn_id": "isValidEmail",
+      "kind": "declassify",
+      "output": true,
+      "seq": 571,
+      "text": "isValidEmail → true",
+      "time": 1793056764417.0
+    },
+    {
+      "data": {
+        "items": 1
+      },
+      "kind": "mark",
+      "name": "conversion:purchase",
+      "seq": 617,
+      "text": "mark conversion:purchase {\"items\":1}",
+      "time": 1793056764431.0
+    }
+  ],
+  "summary_truncated": false,
+  "ua_major": 141,
+  "url": "http://127.0.0.1:47811/index.html",
+  "version": 1
+}

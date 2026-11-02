@@ -3,12 +3,17 @@
 ##
 ## In the default mode (`[certificate] untracked = "reads"`) a certificate is
 ## withheld with ``wrUntrackedInput`` when the run's captured read set names
-## an untracked file. `ct test run` captures no read set today, so the check
-## is dormant on that path (``certificate_issuance_test.nim`` covers what it
-## does instead). What this suite establishes is that the check is right on
-## the read sets that DO exist: the incremental engine's read-file capture,
-## which runs a process under io-mon's interpose monitor and writes the
-## ``native_readfiles.json`` projection.
+## an untracked file. Two suites:
+##
+## * the check on the incremental engine's read-file capture, which runs a
+##   process under io-mon's interpose monitor and writes the
+##   ``native_readfiles.json`` projection;
+## * the same check on `ct test run`'s OWN capture: ``runAndAttest`` runs
+##   every process a provider launches through the shared launcher under
+##   io-mon (``run_read_capture``) when untracked files exist, and judges them
+##   by what those processes read. Driven through the real ``runAndAttest``
+##   with a leaf provider that launches a real ``cat`` (see that suite's
+##   note for why the leaf is the only seam).
 ##
 ## HOW A READ SET IS PRODUCED HERE
 ## -------------------------------
@@ -27,9 +32,13 @@
 ## neither works the suite FAILS, naming what is missing: a skipped case here
 ## would be a read-set check nobody ran.
 
-import std/[os, osproc, streams, strtabs, strutils, unittest]
+import std/[options, os, osproc, streams, strtabs, strutils, unittest]
 
 import certificate_issuance
+import contracts
+import discovery
+import process_exec
+import run_orchestration
 import incremental/io_mon_capture
 
 let scratchRoot = getTempDir() / "ct-test-cert-reads-" & $getCurrentProcessId()
@@ -202,6 +211,208 @@ suite "the default untracked mode's read-set check, on a real capture":
     let judged = judgeUntracked(umReads, missing, ["scratch.log"], corrupt)
     check not judged.withhold
     check "no read set was captured" in judged.note
+
+
+# ---------------------------------------------------------------------------
+# The `ct test run` path: `runAndAttest` captures the read set itself
+# ---------------------------------------------------------------------------
+#
+# The leaf provider below is the one seam, as in `certificate_issuance_test`:
+# a test provider is what a language adapter supplies, and this one does what
+# a real adapter does — it launches its test as a process through the shared
+# launcher (`process_exec.execCaptured`) and reports the outcome. The process
+# is a real `cat` of the files the selector names; everything around it — the
+# worker pool, the io-mon wrapping, the depfiles, the probe, the judgement —
+# is the shipped code. `inproc` reads in process and launches nothing, which
+# is what a provider that the monitor cannot see looks like.
+
+const
+  ReaderProviderId = "fixture-reader"
+
+proc readerInfo(): TestProviderInfo =
+  TestProviderInfo(
+    id: ReaderProviderId, language: "fixture", framework: "reader",
+    displayName: "Fixture provider that reads files", version: "test",
+    capabilities: TestCapabilities(
+      canDiscoverProject: true, canDiscoverFile: true, canLocateTests: true,
+      canRunProject: true, canRunFile: true, canRunSingle: true,
+      emitsStructuredEvents: true))
+
+proc readerRun(scope: TestScope): ProviderResult[seq[TestEvent]] {.gcsafe.} =
+  ## Selector: ``<name>::<how>::<file>[,<file>…]``; ``how`` is ``cat`` (a
+  ## launched process reads the files) or ``inproc`` (this process does).
+  let parts = scope.selector.split("::")
+  let files = parts[2].split(',')
+  var ok = true
+  if parts[1] == "cat":
+    var argv = @["cat"]
+    for file in files:
+      argv.add scope.projectRoot / file
+    ok = execCaptured(argv, cwd = scope.projectRoot).exitCode == 0
+  else:
+    for file in files:
+      discard readFile(scope.projectRoot / file)
+  result.value = @[
+    TestEvent(schemaVersion: TestEventSchemaVersion, kind: tekTestStarted,
+              providerId: ReaderProviderId, runId: scope.testId,
+              testId: scope.testId),
+    TestEvent(schemaVersion: TestEventSchemaVersion, kind: tekTestFinished,
+              providerId: ReaderProviderId, runId: scope.testId,
+              testId: scope.testId,
+              status: some(if ok: tsPassed else: tsFailed), durationMs: 1)]
+
+proc readerItem(name, how: string; files: openArray[string]): TestItem =
+  let file = "tests/" & name & "_test.sh"
+  let selector = name & "::" & how & "::" & files.join(",")
+  TestItem(
+    id: makeTestItemId(ReaderProviderId, "fixture", "reader", file, selector),
+    providerId: ReaderProviderId, language: "fixture", framework: "reader",
+    name: name, kind: tikCase, file: file,
+    range: SourceRange(startLine: 1, startColumn: 1, endLine: 1, endColumn: 2),
+    selector: selector, tags: @["fixture"],
+    location: LocationProvenance(source: lskPattern, detail: "fixture",
+                                 confidence: lcHigh))
+
+proc runReading(repo: string; items: seq[TestItem];
+                mode = umReads): Issuance =
+  ## A whole run through the exported entry point, two workers.
+  var provider = TestProvider(info: readerInfo())
+  provider.run = readerRun
+  var registry = ProviderRegistry(providers: @[
+    M1Provider(provider: provider, relevantConfigFiles: @[])])
+  let response = DiscoverResponse(
+    schemaVersion: DiscoverSchemaVersion, workspaceRoot: repo,
+    catalogs: @[TestCatalog(schemaVersion: TestCatalogSchemaVersion,
+                            provider: readerInfo(), items: items)])
+  runAndAttest(registry, response, emptyPartition(), 2,
+               @[@["ct", "test", "run", "--workspace", "."]],
+               IssuanceOptions(issuer: "ct-test@suite", untrackedMode: mode)).issuance
+
+proc repoWithUntracked(name: string): string =
+  result = committedRepo(name)
+  writeFile(result / "fixture-input.txt", "an input the test reads\n")
+  writeFile(result / "unread.txt", "never opened\n")
+
+suite "`ct test run` captures the read set the untracked rule judges":
+
+  test "an untracked file the run read withholds":
+    ## Through the real `runAndAttest`: one unit's test process reads the
+    ## untracked `fixture-input.txt`, another reads only the tracked `a.txt`,
+    ## on two workers. The run's own capture names the untracked file, so
+    ## the default mode withholds (Standard.md §3.2) — and names only that
+    ## file, not the untracked file nobody read.
+    require provisioned.len == 0
+    let repo = repoWithUntracked("run-reads-untracked")
+    let issuance = runReading(repo, @[
+      readerItem("reads_input", "cat", ["fixture-input.txt"]),
+      readerItem("reads_tracked", "cat", ["a.txt"])])
+    checkpoint issuance.message
+    checkpoint issuance.untracked.note
+    check issuance.untracked.readSetCaptured
+    check not issuance.issued
+    check issuance.reason == wrUntrackedInput
+    check issuance.untracked.offending == @["fixture-input.txt"]
+    check "io-mon" in issuance.message
+    # The tests themselves ran and passed: withholding changes no verdict.
+    check issuance.vcs.untrackedPaths == @["fixture-input.txt", "unread.txt"]
+
+  test "an untracked file the run did not read only sets untracked = true":
+    ## The control: the same repository, the same untracked files, a run
+    ## whose test process reads only tracked files. The read set is captured
+    ## and judged — no note, nothing offending — so the certificate issues,
+    ## reporting `untracked = true` because untracked files are present.
+    require provisioned.len == 0
+    let repo = repoWithUntracked("run-reads-tracked")
+    let issuance = runReading(repo, @[
+      readerItem("reads_tracked", "cat", ["a.txt"])])
+    checkpoint issuance.message
+    check issuance.untracked.readSetCaptured
+    check issuance.issued
+    check issuance.untracked.offending.len == 0
+    check issuance.untracked.note.len == 0
+    check issuance.certificate.vcs.untracked
+
+  test "a unit whose test the monitor could not see leaves the read set not captured":
+    ## A provider that reads in process launches nothing the monitor wraps.
+    ## Its reads are unknown, so the whole read set is "not captured" — never
+    ## a set that silently lacks that unit — even though the other unit's
+    ## launch was captured. The default mode then issues with
+    ## `untracked = true` and says why.
+    require provisioned.len == 0
+    let repo = repoWithUntracked("run-reads-inproc")
+    let issuance = runReading(repo, @[
+      readerItem("reads_input_inproc", "inproc", ["fixture-input.txt"]),
+      readerItem("reads_tracked", "cat", ["a.txt"])])
+    checkpoint issuance.untracked.note
+    check not issuance.untracked.readSetCaptured
+    check issuance.issued
+    check issuance.certificate.vcs.untracked
+    check NoReadSetOnRunPath in issuance.untracked.note
+    check "launched no process" in issuance.untracked.note
+
+  test "without the monitor, the read set is not captured and says why":
+    require provisioned.len == 0
+    let repo = repoWithUntracked("run-reads-no-monitor")
+    let saved = getEnv(IoMonSnoopEnvVar)
+    let savedPath = getEnv("PATH")
+    putEnv(IoMonSnoopEnvVar, repo / "no-such-io-mon")
+    # `io-mon` may also be on PATH in a dev shell; hide it for this case.
+    var path: seq[string]
+    for dir in savedPath.split(PathSep):
+      if not fileExists(dir / IoMonSnoopBinaryName):
+        path.add dir
+    putEnv("PATH", path.join($PathSep))
+    let issuance = runReading(repo, @[
+      readerItem("reads_input", "cat", ["fixture-input.txt"])])
+    putEnv(IoMonSnoopEnvVar, saved)
+    putEnv("PATH", savedPath)
+    checkpoint issuance.untracked.note
+    check not issuance.untracked.readSetCaptured
+    check issuance.issued
+    check "io-mon monitor is not available" in issuance.untracked.note
+
+  test "a shim override naming no file is no read set, never a failed run":
+    ## io-mon's shim discovery refuses a `$REPRO_MONITOR_SHIM_LIB` that names
+    ## no file (it raises rather than fall through to another shim). The run
+    ## must neither crash nor capture with some other shim: the read set is
+    ## "not captured", with the reason, and the certificate issues with
+    ## `untracked = true`. Before this was handled the exception escaped
+    ## `runAndAttest` and `ct test run` died.
+    require provisioned.len == 0
+    let repo = repoWithUntracked("run-reads-bad-shim")
+    let saved = getEnv(IoMonShimEnvVar)
+    putEnv(IoMonShimEnvVar, repo / "no-such-shim.so")
+    var issuance: Issuance
+    var raised = ""
+    try:
+      issuance = runReading(repo, @[
+        readerItem("reads_input", "cat", ["fixture-input.txt"])])
+    except CatchableError as err:
+      raised = err.msg
+    putEnv(IoMonShimEnvVar, saved)
+    checkpoint raised
+    checkpoint issuance.untracked.note
+    check raised.len == 0
+    check not issuance.untracked.readSetCaptured
+    check issuance.issued
+    check issuance.certificate.vcs.untracked
+    check "shim could not be located" in issuance.untracked.note
+
+  test "strict mode and a run with no untracked file start no capture":
+    ## A capture only where it can change the outcome: strict mode needs no
+    ## read set, and with no untracked file nothing could be implicated.
+    require provisioned.len == 0
+    let clean = committedRepo("run-reads-clean")
+    let issuance = runReading(clean, @[
+      readerItem("reads_tracked", "cat", ["a.txt"])])
+    check issuance.issued
+    check not issuance.untracked.readSetCaptured
+    check not issuance.certificate.vcs.untracked
+    let repo = repoWithUntracked("run-reads-strict")
+    let strict = runReading(repo, @[
+      readerItem("reads_tracked", "cat", ["a.txt"])], umStrict)
+    check not strict.issued
+    check not strict.untracked.readSetCaptured
 
 # Module level, not an exit hook: `scratchRoot` is a module-level `let`.
 try: removeDir(scratchRoot)

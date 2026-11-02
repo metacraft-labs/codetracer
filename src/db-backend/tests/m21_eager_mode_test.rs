@@ -905,10 +905,11 @@ fn test_eager_mode_indicator_renders_current_trace_mode() {
 // Test 9a + 9b — Playwright hand-off stubs.
 //
 // These two stubs render nothing themselves; they stand in for browser
-// tests that were supposed to live in `tsc-ui-tests/`. Previously they
-// printed a SKIP sentinel on both branches and passed unconditionally,
-// so the milestone's verification table cited a browser test that had
-// never been written. They now fail instead, because that is still true.
+// tests that were supposed to live in the Playwright suite, `src/tests/gui/`.
+// Previously they printed a SKIP sentinel on both branches and passed
+// unconditionally, so the milestone's verification table cited a browser
+// test that had never been written. They now fail instead, because that is
+// still true.
 // See `codetracer-specs/Testing/Silent-Self-Pass-Audit-2026-08-23.md`.
 //
 // A test for coverage that does not exist cannot pass, and failing it in
@@ -939,9 +940,8 @@ fn missing_playwright_coverage(test_name: &str, what: &str) -> ! {
     panic!(
         "MISSING PLAYWRIGHT COVERAGE: `{test_name}` is a hand-off stub for a browser test that \
          was never written.\n\
-         It claims the run is driven by `tsc-ui-tests/`; as of 2026-09-05 that directory holds a \
-         single unrelated spec (`tests/elixir/elixir_trace_smoke.spec.ts`) and no spec under \
-         `src/tests/gui/` covers {what}.\n\
+         It hands off to the Playwright suite, `src/tests/gui/`, and no spec under \
+         `src/tests/gui/tests/` covers {what}.\n\
          Either write the Playwright spec and have this stub assert against it, or delete this \
          stub together with the M21 verification row it backs. Do not restore the unconditional \
          SKIP — it reported success for coverage that does not exist.\n\

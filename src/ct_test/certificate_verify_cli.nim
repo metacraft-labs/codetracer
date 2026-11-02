@@ -15,8 +15,11 @@
 ##
 ## and answers with three exit codes (Verification.md §7): ``0`` covered,
 ## ``1`` not covered, ``2`` could not decide — a state with no content id, a
-## record this consumer cannot evaluate that might have covered the gap, an
-## unreadable store or configuration, an empty requirement, or a command line
+## record this consumer cannot evaluate that might have covered the gap, a
+## store search that could not cover one of the two roots (unresolved, or
+## existing and unreadable — Transport.md §2.1, §2.4) when what was searched
+## does not cover the state, an unreadable configuration, an empty
+## requirement, or a command line
 ## it cannot act on. Exactly one line on stderr says which and why. "No
 ## certificate found for this content" and "certificates found, none
 ## matched" are different lines (Transport.md §5): the first usually means
@@ -538,7 +541,7 @@ proc evaluateVerify*(options: VerifyOptions; registry: ProviderRegistry;
     return undecided(report, "--platform names no platform")
 
   # ---- the store ---------------------------------------------------------
-  let store = readCertificateStore(nativeStoreAccess(), options.workspace,
+  let store = readCertificateStore(nativeStoreAccess(),
     LocalStoreQuery(roots: nativeCertificateStoreRoots(),
                     contentIds: @[content.id]))
   report["searched"] = %store.searched
@@ -548,6 +551,8 @@ proc evaluateVerify*(options: VerifyOptions; registry: ProviderRegistry;
   report["found"] = %foundNames
   report["store_rejected"] = %store.rejected
   report["store_problems"] = %store.problems
+  report["search_incomplete"] = %store.incomplete
+  report["search_incomplete_reasons"] = %store.incompleteReasons
   if store.unreadable:
     return undecided(report, "the certificate store could not be read: " &
       store.unreadableReason)
@@ -609,7 +614,24 @@ proc evaluateVerify*(options: VerifyOptions; registry: ProviderRegistry;
     tail.add problem
   for problem in store.problems:
     tail.add "note: " & problem
+  if store.incomplete and verdict.outcome == ocCovered:
+    # A certificate the searched root holds counts whatever the other root
+    # holds (coverage only grows, Verification.md §5), so the verdict stands;
+    # the line still says what was not searched.
+    tail.add "note: " & store.incompleteSummary
   let tailText = (if tail.len > 0: "; " & tail.join("; ") else: "")
+
+  # Transport.md §2.1/§5: a search that could not cover a root has not shown
+  # that nothing covers this state — a certificate in that root might — so
+  # "not covered" (exit 1, "run the tests") would be a guess. It is exit 2,
+  # naming the root and the reason, like any other state this consumer could
+  # not decide.
+  if store.incomplete and verdict.outcome != ocCovered:
+    report["finding"] = %"search-incomplete"
+    return undecided(report, store.incompleteSummary & " No certificate " &
+      "found in what WAS searched covers " & what & " (" & content.id &
+      ") for " & requirementText & ", and one in the root that was not " &
+      "searched might" & tailText)
 
   case verdict.outcome
   of ocCovered:

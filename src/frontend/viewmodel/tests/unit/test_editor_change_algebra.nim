@@ -117,7 +117,107 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1762
+const ExpectedAssertions = 1998
+  ## *1989 -> 1998 on 2026-10-30: `viewmodels/build_auto_reveal.nim`,
+  ## `viewmodels/build_tasks.nim` and `viewmodels/editor_diagnostics.nim` (the
+  ## build residuals) x three assertions. None calls `rebase(` or spells
+  ## `mapOver`.*
+  ## *1986 -> 1989 on 2026-10-30: `backend/stderr_capture.nim` (the replay
+  ## engine's diagnostics, kept off the protocol stream) x three assertions.
+  ## It calls no `rebase(` and spells no `mapOver`.*
+  ## *1983 -> 1986 on 2026-10-28: `host/native_requests_host.nim` (the
+  ## Requests pane's native host) x three assertions. It calls no `rebase(`
+  ## and spells no `mapOver`.*
+  ## *1977 -> 1983 on 2026-10-28: `viewmodels/agent_prompt_context.nim` and
+  ## `viewmodels/build_output_model.nim` x three assertions. Neither calls
+  ## `rebase(` or spells `mapOver`.*
+  ## *1974 -> 1977 on 2026-10-28: `viewmodels/replay_open_setting.nim` x
+  ## three assertions. It calls no `rebase(` and spells no `mapOver`.*
+  ## *1966 -> 1974 on 2026-10-28: the in-document find's two modules.
+  ## `editor/find_match.nim` x five (it is in `editor/`, the directory that
+  ## calls the primitive, so the two FLAG needles apply to it too) and
+  ## `viewmodels/find_vm.nim` x three. Neither calls `rebase(`, spells
+  ## `mapOver` or declares `before: bool`.*
+  ## *1945 -> 1966 on 2026-10-27: seven production modules x three
+  ## assertions — `platform/session_allocation.nim`, `sdk/expression_eval.nim`,
+  ## `store/row_address.nim`, `viewmodels/build_diagnostics.nim`,
+  ## `views/pane_measure_dom.nim`, `views/row_link_dom.nim` and
+  ## `views/row_links.nim`. None calls `rebase(` or spells `mapOver`.*
+  ## *1930 -> 1945 on 2026-10-26: the Agent Activity pane's five production
+  ## modules (codetracer `6673057756`) — `host/agent_live_worker.nim`,
+  ## `host/agent_session_files.nim`, `host/native_agent_host.nim`,
+  ## `viewmodels/agent_activity_feed.nim` and
+  ## `viewmodels/agent_activity_text.nim` — x three assertions. None calls
+  ## `rebase(` or spells `mapOver`.*
+  ## *1927 -> 1930 on 2026-10-26: `keymap/menu_accelerators.nim` (the macOS
+  ## menu's chords from the key router) x three assertions. It calls no
+  ## `rebase(` and spells no `mapOver`.*
+  ## *1876 -> 1927 on 2026-10-26, measured on `c80549db8` plus the shared
+  ## rows' keyboard module: seventeen production modules x three assertions,
+  ## net. Ten had been added without moving the count before 1876 was set,
+  ## and `viewmodels/shared_pane_state.nim` (counted at 1858 -> 1861) has
+  ## since been deleted (codetracer-pm issues/2026-10-23-editor-change-
+  ## algebra-assertion-tally-misses-ten-new-viewmodel-modules.md):
+  ## `viewmodels/no_project_folder.nim`, `views/isonim_flow_inline_view.nim`,
+  ## `pane_viewport.nim`, `sync/webview_transport.nim`,
+  ## `viewmodels/action_sink.nim`, `viewmodels/flow_line_values.nim`,
+  ## `views/isonim_flow_value_view.nim`, `sdk/breakpoints.nim`,
+  ## `viewmodels/calltrace_navigation.nim` and `sdk/scrub_queue.nim`. Eight
+  ## more since: `codetracer_ui_components.nim`, `host/native_file_tree.nim`,
+  ## `viewmodels/scrollbar_interaction.nim`, `viewmodels/table_fit.nim`,
+  ## `views/table_fit_dom.nim`, `views/isonim_activation.nim`,
+  ## `host/native_test_host.nim` and `viewmodels/test_catalog_answer.nim`.
+  ## Each was read for the needles: none calls `rebase(` and none spells
+  ## `mapOver`.*
+  ## *1867 -> 1876 on 2026-10-22: three table-overflow production modules —
+  ## `viewmodels/table_overflow.nim`, `host/table_column_widths.nim` and
+  ## `views/table_overflow_dom.nim` — x three assertions. None calls `rebase(`.*
+  ## *1864 -> 1867 on 2026-10-22: `viewmodels/point_menu_ops.nim` (the Debug
+  ## menu's Stop and its breakpoint and tracepoint items, codetracer#843) x
+  ## three assertions. It calls no `rebase(` and spells no `mapOver`.*
+  ## *1861 -> 1864 on 2026-10-21: `viewmodels/run_control_ownership.nim`
+  ## (codetracer#731, a7f6ef42d) adds three production-module scan assertions.
+  ## It calls no `rebase(` and spells no `mapOver`; every functional check stays.*
+  ## *1858 -> 1861 on 2026-10-21: `viewmodels/shared_pane_state.nim` (each
+  ## window tab's Files, Test Results and Constraints state, codetracer#835)
+  ## x three assertions. It calls no `rebase(` and spells no `mapOver`.*
+  ## *1855 -> 1858 on 2026-10-21: `viewmodels/origin_chain_bridges.nim` (the
+  ## origin badge, side panel and Scratchpad bridges, codetracer#856) x three
+  ## assertions. It calls no `rebase(` and spells no `mapOver`.*
+  ## *1849 -> 1855 on 2026-10-20: the session mirror over a socket
+  ## (`sync/hosted_primary.nim`, `sync/socket_transport.nim`, `a928063082` / `86c11d2afb`)
+  ## x three assertions. Neither calls `rebase(`.*
+  ## *1846 -> 1849 on 2026-10-20: `viewmodels/diff_target.nim` (`0101549581`, a review
+  ## commit's file rows) x three assertions. It calls no `rebase(`.*
+  ## *1828 -> 1846 on 2026-10-20: six production modules the latest
+  ## refactors added without moving the count — the session mirror
+  ## (`sync/mirror_session`, `sync_host`, `synced_signals`, `transport`,
+  ## `9e06354dd3`), the viewport contract (`viewport.nim`, `403d8d7db0`) and
+  ## the toolbar's history cursor (`viewmodels/history_cursor.nim`,
+  ## `b7f4511527`) — x three assertions. None calls `rebase(` or spells
+  ## `mapOver`.*
+  ## *1822 -> 1828 on 2026-10-19: two production modules the per-stop loader
+  ## added (`d883db0e2b`) — `sdk/stop_loader.nim` and
+  ## `store/locals_answer.nim` — x three assertions, which that change did not
+  ## count. Neither calls `rebase(` or spells `mapOver`.*
+  ## *1819 -> 1822 on 2026-10-16 (PLAT-70 Part A): one new production module
+  ## under `viewmodels/` — `horizontal_scroll.nim` (a text pane's horizontal
+  ## view and its overflow-only bar) — x three assertions. It calls no
+  ## `rebase(` and spells no `mapOver`.*
+  ## *1813 -> 1819 on 2026-10-16 (PLAT-57): two new production modules under
+  ## `host/` — `find_in_files.nim` (the one search runner) and
+  ## `text_match.nim` (its matcher) — x three assertions. Neither calls
+  ## `rebase(` or spells `mapOver`.*
+  ## *1774 -> 1813 on 2026-10-12 (PLAT-68 Phase B): thirteen new production
+  ## modules — under `keymap/` `keymap_router`, `scope_path`, `layer_stack`,
+  ## `operation_catalogue`, `user_keymap`, `binding_sets`, `keymap_importers`,
+  ## `client_actions`, `navigation_keymap`, `base_keymaps`, `alt_tap`, and
+  ## under `host/` `keybindings_file`, `keybindings_location` — x three
+  ## assertions. None calls `rebase(` or spells `mapOver`.*
+  ## *1762 -> 1774 on 2026-10-11 (PLAT-68): five new production modules under
+  ## `viewmodel/keymap/` — `context_keys`, `when_expr`, `base_rows`,
+  ## `cua_keymap`, `emacs_keymap` — and one deleted (`product_keymap`), x three
+  ## assertions. None calls `rebase(` or spells `mapOver`.*
   ## *1759 -> 1762 on 2026-10-10 (SB-2a): one new production module under
   ## `viewmodel/`, `host/node_certificate_host.nim` (node's git runner and
   ## store-root resolver for the content facts) x three assertions. It calls

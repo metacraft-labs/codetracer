@@ -1,0 +1,22 @@
+# Control digests for run-plat70d-grep-mutations.py — the
+# subjects AND the suites the arms are graded by (§16c).
+# Refreshed with --record-control-hashes, gated by the
+# needle scan (§39a).
+8106d185a3428072a28f729089776f159e18b2928bfa47afff5ad1f11f5d32fc  src/frontend/viewmodel/viewmodels/search_results_vm.nim
+3fd0377f44aa385db785b4b70beea34af7d221133b1d90e2470a93a800748e71  src/frontend/viewmodel/viewmodels/omnibar_vm.nim
+006e8b1fb91bee64ac7291a60e43c32bb056a07069b4200643c9843ed30691a6  src/frontend/viewmodel/host/find_in_files.nim
+8626e8c7e0d213f2a75adde7a85e3df397bd6f31242bf161db4b67285e140952  src/frontend/tui/app/runtime.nim
+bbbd782995be63b288d3a2dc844a0153daa89c7158465cb19265919cabc8ebb2  src/frontend/tui/app/views/top_bar.nim
+d0a4ba7c494d1c82522e58750281a189f253485d567be02e0c96208a929830e0  src/frontend/tui/host/tui_session.nim
+6ae9e28a8b842f1b75c15b1728974d974d506fb81b8a76cd087d9bacd9cee5a7  src/frontend/tui/host/terminal_driver.nim
+175597742672a9182ee9dd735819e28a63aac5aa8c86bf7d7c9b906d03f581d9  src/frontend/gpui/main.nim
+80ddf5825743b24ffced8cf77b3e00e7542db164b1fa543a28611745b4bff4df  src/frontend/viewmodel/views/isonim_search_results_view.nim
+65324d226e97f19b00ab6259c09bcb681521f9f8f3e03aeaf21c1902dd4b81c2  src/frontend/ui/search_results.nim
+b8998e2b5fc91952871ae707835d69ac6f61715a2934440ebe7e2cc87a0d3623  src/frontend/services/search_service.nim
+bac3e30c4e6204bab01aa10bd911daa868320357d84fadd6cb7c741f881749bc  src/frontend/ui_js.nim
+f92b1a583010e0656514b781bde434fd64f95f2db7531ecbd6ef401dea8b0897  src/frontend/viewmodel/tests/unit/test_plat70d_grep_vm.nim
+bbcfad49df653125741549133e9490e8bc56357c440c35fc4c75820138edfb02  src/frontend/viewmodel/tests/unit/test_plat57_find_in_files.nim
+0a3841d9b84a8bde4b90c2a98fb5567863cc517515585c664fe8998fed9ded0d  src/frontend/tui/tests/test_esc_delay.nim
+6d43ac5e204f4e66f95c34bd40a5ce053069f76486b0c728d180250b9af6ac99  src/frontend/tui/tests/real_terminal/test_plat70d_grep_pty.nim
+7b97ef80ed6e9de92eada2ff14a6e03a0a7a107e56b0fe7380cb36907c5c7129  src/frontend/gpui/tests/test_plat70d_gpui_plan.nim
+871751dfed8d7d4a5d580b6db4092cb378c61d83f15866f393d703db04f71fb1  src/tests/gui/tests/search/plat70d-grep.spec.ts

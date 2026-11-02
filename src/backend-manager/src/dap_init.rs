@@ -57,6 +57,13 @@ pub struct DapLaunchOptions {
     /// Path to the `ct-native-replay` binary, included as `ctRRWorkerExe`
     /// in the launch request when `Some`.
     pub ct_rr_worker_exe: Option<PathBuf>,
+    /// Whether the replay server may read the recording's listed sources
+    /// from this host, sent as the `launch` argument `hostSourceReads` when
+    /// `Some`.  The daemon always sends it, as a session's host-read setting
+    /// is part of its identity (`crate::session::SessionKey`); a replay
+    /// server that receives no value keeps reading the host, which is what a
+    /// client that launches it directly (the desktop GUI) expects.
+    pub host_source_reads: Option<crate::session::HostSourceReads>,
 }
 
 // ---------------------------------------------------------------------------
@@ -397,6 +404,9 @@ pub async fn run_dap_init(
     });
     if let Some(worker_exe) = &opts.ct_rr_worker_exe {
         launch_args["ctRRWorkerExe"] = json!(worker_exe.to_string_lossy());
+    }
+    if let Some(reads) = opts.host_source_reads {
+        launch_args[crate::session::HostSourceReads::REQUEST_FIELD] = json!(reads.is_allowed());
     }
     send_request(sender, "launch", 2, launch_args, "launch-send")?;
 

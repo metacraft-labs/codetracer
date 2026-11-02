@@ -17,19 +17,21 @@
 ## 1. ``utils.nim::makeFilesystemComponent`` constructs the legacy
 ##    ``FilesystemComponent`` and registers it under
 ##    ``Content.Filesystem`` (one instance per panel id).
-## 2. ``layout.nim`` registers the GL container, then detects
-##    ``Content.Filesystem`` is in ``isIsoNimComponent`` and calls
-##    ``tryMountIsoNimFilesystemPanel`` instead of invoking Karax.
-## 3. The mount helper appends the IsoNim panel inside the
-##    ``filesystemComponent-{id}`` container and the reactive effects
-##    keep the DOM in sync with the VM.
+## 2. GoldenLayout's component factory (``layout.nim``) builds the
+##    pane's container and the panel host (``ui/panel_host``) mounts the
+##    generic view into it; reactive effects keep the DOM in sync with the
+##    VM.
+## 3. The legacy event handlers feed the session's VM.
 ## 4. ``configureMiddleware`` (in ``ui_js.nim``) installs the shared-
-##    store version of the VM via ``initFilesystemVMWithStore`` so the
+##    store version of the VM via ``initFilesystemVMFromSession`` so the
 ##    panel uses the production ``ReplayDataStore``.
 ##
-## NOTE: rich jstree affordances (animated open/close, contextmenu
-## plugin, search plugin, drag-and-drop) remain a follow-up.  The
-## IsoNim view renders a dependency-free collapsible tree; the legacy
+## The row context menu (Create, Rename, Delete, Edit) is decided by the
+## VM and drawn by the view; this module wires its requests to the index
+## process (``file-tree-create`` / ``-rename`` / ``-delete``) and handles
+## the answer (``onFileTreeOperationDone``).  jstree's animated
+## open/close, search plugin and drag-and-drop have no counterpart yet.
+## The IsoNim view renders a dependency-free collapsible tree; the legacy
 ## ``changeIcons`` helper is kept exported because ui_js.nim's
 ## ``filesystem-category-loaded`` handler uses it to populate the
 ## devicon class on freshly-loaded subtrees.
@@ -37,9 +39,9 @@
 
 import
   ui_imports,
+  session_viewmodels,
   # A MOUNT LATCH THAT DIES WITH ITS CONTAINER.
-  isonim_panel_mount,
-  ../[ types, communication ],
+  ../[ types, communication, event_helpers ],
   tables,
   sets,
   isonim/core/signals
@@ -53,11 +55,11 @@ from ../viewmodel/store/types as vmtypes import
 from ../viewmodel/viewmodels/filesystem_vm import
   FilesystemVM, createFilesystemVM,
   setRoot, clearRoot, toggleExpanded, expandPath, collapsePath,
-  setExpandedPaths, isExpanded, setDiffEntries, emptyEntry
-when defined(js):
-  from isonim/web/dom_api import nil
-  from ../viewmodel/views/isonim_filesystem_view import
-    mountIsoNimFilesystemPanel
+  setExpandedPaths, isExpanded, setDiffEntries, emptyEntry, failLoad,
+  showNoProjectFolder, FileTreeHostFacts, ToolbarMode
+from ../lib/electron_presence import inElectron
+from ../../common/trace_source_paths import isSamePath
+from git_cli import sessionHasNoProjectFolder, startOptionsHaveNoProjectFolder
 
 proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#)".}
 
@@ -217,16 +219,12 @@ proc openTab*(currentPath: cstring) =
 # the pattern used by trace_log / scratchpad / request_panel / step_list.
 # ---------------------------------------------------------------------------
 
+# The session's ViewModel and the registered component, so the legacy
+# event-bus handlers can feed the one and replay the other. The pane's view
+# is mounted by the panel host (`ui/panel_host`).
 var filesystemVMInstance*: FilesystemVM
-var filesystemVMStore: ReplayDataStore
 var filesystemComponentRef: FilesystemComponent
-# Track which FilesystemComponent ids have already mounted their IsoNim
-# view for each session. GoldenLayout component ids are reused across
-# sessions, so the key must include the active session index.
-var isoNimFilesystemMountedIds {.used.}: JsAssoc[cstring, bool] =
-  JsAssoc[cstring, bool]{}
 
-proc tryMountIsoNimFilesystemPanel*()
 
 proc findFileByPath(file: CodetracerFile; path: string): CodetracerFile =
   if file.isNil:
@@ -239,44 +237,209 @@ proc findFileByPath(file: CodetracerFile; path: string): CodetracerFile =
       return found
   return nil
 
+proc nodeForPathContent*(root: CodetracerFile; parentIndices: seq[int];
+                         index: int; path: string): CodetracerFile =
+  ## The tree node an ``update-path-content`` answer replaces: the stub at
+  ## ``parentIndices`` / ``index`` below ``root``, when that walk stays in
+  ## bounds and lands on a node whose path is ``path``; otherwise the node
+  ## found by ``path``.  ``nil`` when neither finds it.
+  ##
+  ## The indices alone are not trusted.  They are positions within the tree
+  ## ONE root load built, and ``ui_js.onFilesystemCategoryLoaded`` wraps
+  ## that tree in a new "Files" root when a second category arrives, which
+  ## shifts every walk by one level.  Writing the answer over whatever node
+  ## a stale walk reaches would replace an unrelated folder; the path check
+  ## turns that into a lookup.  Now that every folder below a root arrives
+  ## as a stub (``index/files.FilesystemLoadDepth``), these answers are
+  ## the common case rather than the exception.
+  var node = root
+  var walked = not root.isNil
+  if walked:
+    for position in parentIndices:
+      if position < 0 or position >= node.children.len:
+        walked = false
+        break
+      node = node.children[position]
+  if walked and index >= 0 and index < node.children.len:
+    let candidate = node.children[index]
+    if not candidate.original.path.isNil and
+        $candidate.original.path == path:
+      return candidate
+  findFileByPath(root, path)
+
+proc isLoadingStub(file: CodetracerFile): bool =
+  ## A folder whose entries were not loaded yet: its only child is the
+  ## "Loading..." placeholder (`index/files.loadFile`).
+  file.children.len > 0 and $file.children[0].text == "Loading..."
+
+proc requestFolderContent(file: CodetracerFile)
+
 proc loadFolderContentIfNeeded*(path: string) =
+  ## Ask the index process for the entries of the folder at ``path`` when
+  ## it is still a "Loading..." stub — every folder below a root arrives as
+  ## one (``index/files.FilesystemLoadDepth``).  The stub's
+  ## ``payloadPath`` goes with the request: it is where a self-contained
+  ## trace's payload holds the folder, which the display path alone does
+  ## not say for a folder overlaid from the payload's top level.
   if data.isNil or data.services.editor.filesystem.isNil:
     return
   let file = findFileByPath(data.services.editor.filesystem, path)
   if file.isNil:
     return
-  if file.children.len > 0 and $file.children[0].text == "Loading...":
-    let nodeId = "j1_" & $file.index
-    let nodeIndex = file.index
-    let nodeParentIndices = file.parentIndices
-    data.ipc.send "CODETRACER::load-path-content", js{
-      path: cstring(path),
-      nodeId: cstring(nodeId),
-      nodeIndex: nodeIndex,
-      nodeParentIndices: nodeParentIndices
-    }
+  if file.isLoadingStub:
+    requestFolderContent(file)
+
+proc requestFolderContent(file: CodetracerFile) =
+  ## Send ``load-path-content`` for the folder node ``file``; the answer
+  ## (``ui_js.onUpdatePathContent``) replaces the node with a fresh listing.
+  let nodeId = "j1_" & $file.index
+  # Absent (`undefined`) on a node an older index process sent.
+  let payloadPathValue = file.original.payloadPath.toJs
+  let payloadPath =
+    if payloadPathValue.isNull or payloadPathValue.isUndefined: cstring""
+    else: file.original.payloadPath
+  data.ipc.send "CODETRACER::load-path-content", js{
+    path: file.original.path,
+    payloadPath: payloadPath,
+    nodeId: cstring(nodeId),
+    nodeIndex: file.index,
+    nodeParentIndices: file.parentIndices
+  }
+
+proc findFolderNamed(file: CodetracerFile; path: string): CodetracerFile =
+  ## The folder row whose path names the same folder as ``path``
+  ## (``isSamePath``). The index process answers with a resolved path
+  ## (``path.resolve`` / ``path.dirname``), which has no trailing separator,
+  ## while the opened folder's own row keeps the one ``ct edit`` gives it
+  ## (``/proj/``): an exact match would miss that row, and a Create in the
+  ## opened folder, or a Rename or Delete of one of its entries, would then
+  ## leave the tree stale.
+  if file.isNil:
+    return nil
+  if not file.original.path.isNil and isSamePath($file.original.path, path):
+    return file
+  for child in file.children:
+    let found = findFolderNamed(child, path)
+    if not found.isNil:
+      return found
+  return nil
+
+proc loadExpandedStubsBelow*(file: CodetracerFile) =
+  ## After ``file``'s listing was replaced (``ui_js.onUpdatePathContent``),
+  ## ask again for every folder below it that the pane shows EXPANDED but
+  ## that came back as a "Loading..." stub.
+  ##
+  ## A listing is one level deep, so its sub-folders arrive as stubs. On a
+  ## first expansion none of them is expanded yet. On a RELOAD — after a
+  ## Create, Rename or Delete in the folder — the user's expanded
+  ## sub-folders are still in the ViewModel's ``expandedPaths``, and nothing
+  ## else would ask for their entries: they would show "Loading..." until
+  ## collapsed and expanded again. Each answer comes back through the same
+  ## handler, so deeper expanded levels load in turn.
+  if file.isNil or filesystemVMInstance.isNil:
+    return
+  for child in file.children:
+    if child.isNil or child.original.path.isNil or child.original.path.len == 0:
+      continue
+    if child.isLoadingStub and filesystemVMInstance.isExpanded($child.original.path):
+      requestFolderContent(child)
+
+proc reloadFolderContent*(path: string) =
+  ## Re-read the folder at ``path`` after a Create, Rename or Delete changed
+  ## it, whether or not it was loaded before. A folder that is not in the
+  ## tree is not shown, so there is nothing to reload.
+  if data.isNil or data.services.editor.filesystem.isNil or path.len == 0:
+    return
+  let file = findFolderNamed(data.services.editor.filesystem, path)
+  if file.isNil:
+    cwarn "file tree: no folder " & path & " to reload"
+    return
+  requestFolderContent(file)
+
+proc stringField(response: JsObject; name: cstring): string =
+  let value = response[name]
+  if value.isNil or value.isUndefined: "" else: $value.to(cstring)
+
+proc onFileTreeOperationDone*(sender: js; response: JsObject) =
+  ## The index process's answer to a Create, Rename or Delete
+  ## (``index/file_tree_operations``): on success reload the folder it names
+  ## — the target folder for Create, the entry's parent for Rename and
+  ## Delete — and open a created file in the editor; on failure leave the
+  ## tree as it is and show the reason as a notification. Open editor tabs
+  ## are not touched either way (Filesystem-Pane.md § "After an operation").
+  let operation = stringField(response, cstring"operation")
+  let error = stringField(response, cstring"error")
+  if error.len > 0:
+    let what =
+      case operation
+      of "create": "Could not create the file: "
+      of "rename": "Could not rename: "
+      of "delete": "Could not move to the trash: "
+      else: "The file operation failed: "
+    data.viewsApi.errorMessage(cstring(what & error))
+    return
+  reloadFolderContent(stringField(response, cstring"folder"))
+  if operation == "create":
+    let created = stringField(response, cstring"path")
+    if created.len > 0:
+      openTab(cstring(created))
+
+const FileTreeRequests = [cstring"CODETRACER::file-tree-create",
+                          cstring"CODETRACER::file-tree-rename",
+                          cstring"CODETRACER::file-tree-delete"]
+
+proc ipcAnswersOne(ipc: JsObject; id: cstring): bool {.importjs: """
+  (function (ipc, id) {
+    if (!ipc) return false;
+    if (ipc.responders === undefined) return true;
+    return !!ipc.responders[id];
+  })(#, #)""".}
+  ## Whether a request `id` sent on `ipc` reaches something that answers it.
+  ## Electron's `ipcRenderer` and the `ct host` socket always lead to an
+  ## index process. The in-page transport of a front end with no index
+  ## process (`ui_js.newWebIpc`, the web IDE) answers only the messages it
+  ## has a responder for, and warns and drops the rest.
+
+proc ipcAnswers(ipc: JsObject; ids: openArray[cstring]): bool =
+  for id in ids:
+    if not ipcAnswersOne(ipc, id):
+      return false
+  true
 
 proc wireFilesystemOpenBridge() =
   if filesystemVMInstance.isNil:
     return
   filesystemVMInstance.onOpenFile = proc(path: string) =
     openTab(cstring(path))
+  # The context menu's host facts and requests (Filesystem-Pane.md
+  # § "Context menu"); the ViewModel decides what they allow.
+  filesystemVMInstance.hostFacts = proc(): FileTreeHostFacts =
+    if data.isNil:
+      return FileTreeHostFacts()
+    let folder =
+      if data.startOptions.folder.isNil: "" else: $data.startOptions.folder
+    FileTreeHostFacts(
+      layout: ToolbarMode(data.ui.mode.ord),
+      # The tree is the opened folder only in a session that opened one
+      # (`ct edit`, Open Folder, a web template). A replay session switched
+      # to the Edit layout keeps `startOptions.edit` false and its
+      # recording's tree.
+      openedFolder: (if data.startOptions.edit: folder else: ""),
+      hasIndexProcess: ipcAnswers(data.ipc, FileTreeRequests),
+      # The renderer is in Electron exactly when its index process is
+      # Electron's main process, which has `shell.trashItem`; `ct host` has
+      # no trash, and its index process refuses a delete in the same words.
+      canTrash: inElectron)
+  filesystemVMInstance.onCreateFile = proc(folder, name: string) =
+    data.ipc.send "CODETRACER::file-tree-create",
+      js{folder: cstring(folder), name: cstring(name)}
+  filesystemVMInstance.onRenamePath = proc(path, newName: string) =
+    data.ipc.send "CODETRACER::file-tree-rename",
+      js{path: cstring(path), newName: cstring(newName)}
+  filesystemVMInstance.onDeletePath = proc(path: string) =
+    data.ipc.send "CODETRACER::file-tree-delete", js{path: cstring(path)}
   filesystemVMInstance.onFolderExpanded = proc(path: string) =
     loadFolderContentIfNeeded(path)
-
-# ---------------------------------------------------------------------------
-# Component extension (ctInExtension boiler-plate).
-#
-# Preserved from the legacy module so the extension entry-point still
-# resolves to a valid ``FilesystemComponent``; the in-extension render
-# path installs an empty shell since the IsoNim view is the production
-# renderer.  Same pattern as
-# request_panel §1.51 / scratchpad §1.70.
-# ---------------------------------------------------------------------------
-
-when defined(ctInExtension):
-  var filesystemComponentForExtension* {.exportc.}: FilesystemComponent =
-    makeFilesystemComponent(data, 0)
 
 # ---------------------------------------------------------------------------
 # Legacy → VM translation helpers
@@ -382,43 +545,62 @@ proc syncLegacyFilesystemIntoVM*(self: FilesystemComponent) =
   if self.isNil:
     return
   filesystemComponentRef = self
-  if filesystemVMInstance.isNil:
+  # The ViewModel of this component's own tab (`ownPaneVM`).
+  let ownVM = ownPaneVM(self, filesystemVMInstance, fileTreeVM)
+  if ownVM.isNil:
     return
-  if not self.service.isNil and not self.service.filesystem.isNil:
+  # Whether THIS component's tab has a project folder: `data.startOptions`
+  # is the tab on screen's, and this sync also runs for a tab that is not
+  # shown (its own `filesystem-loaded` answer, a queued refresh).
+  let ownSession = data.sessionOfComponent(self)
+  let noProjectFolder =
+    if ownSession.isNil:
+      sessionHasNoProjectFolder(if self.data.isNil: data else: self.data)
+    else:
+      startOptionsHaveNoProjectFolder(ownSession.startOptions)
+  if noProjectFolder:
+    # NEW FILE: the session has no project folder, so its tree is the empty
+    # "source folders" container and nothing will ever be loaded into it.
+    # Checked BEFORE the tree, because that empty container is a perfectly
+    # good tree to `setRoot`, and the pane would then show the generic
+    # "No filesystem loaded yet." — which reads as a load still to come and,
+    # with the hidden "Loading..." overlay beside it, was reported as a pane
+    # stuck loading (codetracer-pm issue 2026-10-21). `Welcome-Screen.md`
+    # §"New file, and what it creates": an empty project, not a tree.
+    ownVM.showNoProjectFolder()
+  elif not self.service.isNil and not self.service.filesystem.isNil:
     var openedPaths = initHashSet[string]()
     collectLegacyOpenedPaths(self.service.filesystem, openedPaths)
-    filesystemVMInstance.setRoot(legacyFileToVm(self.service.filesystem))
-    var mergedPaths = filesystemVMInstance.expandedPaths.val
+    ownVM.setRoot(legacyFileToVm(self.service.filesystem))
+    var mergedPaths = ownVM.expandedPaths.val
     for path in openedPaths:
       mergedPaths.incl(path)
-    filesystemVMInstance.setExpandedPaths(mergedPaths)
+    ownVM.setExpandedPaths(mergedPaths)
+  elif not self.service.isNil and not self.service.filesystemLoadError.isNil and
+      self.service.filesystemLoadError.len > 0:
+    # The root load answered with a failure: end the pane on it rather
+    # than on "Loading..." (GitHub #785).
+    ownVM.failLoad($self.service.filesystemLoadError)
   else:
-    filesystemVMInstance.clearRoot()
-  filesystemVMInstance.setDiffEntries(legacyDiffEntries())
+    # No answer yet: the pane waits for ``filesystem-loaded``.
+    ownVM.clearRoot()
+  ownVM.setDiffEntries(legacyDiffEntries())
 
 proc refreshIsoNimFilesystemPanel*() =
-  ## Re-sync the mounted IsoNim tree after IPC handlers mutate the
-  ## legacy EditorService filesystem cache.
+  ## Re-sync the session's ViewModel after IPC handlers mutate the legacy
+  ## EditorService filesystem cache; the mounted view follows it.
   if not filesystemComponentRef.isNil:
     syncLegacyFilesystemIntoVM(filesystemComponentRef)
-  tryMountIsoNimFilesystemPanel()
 
 # ---------------------------------------------------------------------------
 # VM bootstrap
 # ---------------------------------------------------------------------------
 
-proc initFilesystemVMWithStore*(store: ReplayDataStore) =
-  ## Initialise (or replace) the parallel ``FilesystemVM`` using an
-  ## externally-provided ``ReplayDataStore`` (typically the shared
-  ## store from ``SessionViewModel``).  Called from
-  ## ``ui_js.configureMiddleware``.  If a stub-backed instance already
-  ## exists (created by ``initFilesystemVM`` before the real backend
-  ## was available) it is replaced so the panel uses the real backend.
-  if filesystemVMInstance != nil:
-    clog "FilesystemVM: replacing existing instance with shared-store version"
-    isoNimFilesystemMountedIds = JsAssoc[cstring, bool]{}
-  filesystemVMStore = store
-  filesystemVMInstance = createFilesystemVM(store)
+proc initFilesystemVMFromSession*(vm: FilesystemVM) =
+  ## Hand the pane the session's `FilesystemVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
+  filesystemVMInstance = vm
   wireFilesystemOpenBridge()
   when defined(js):
     if not data.isNil:
@@ -427,154 +609,14 @@ proc initFilesystemVMWithStore*(store: ReplayDataStore) =
       for _, component in data.ui.componentMapping[Content.Filesystem]:
         syncLegacyFilesystemIntoVM(FilesystemComponent(component))
         break
-  tryMountIsoNimFilesystemPanel()
-
-proc initFilesystemVM*() =
-  ## Lazy fallback used when no shared store has been provided yet.
-  ## Same shape as ``initScratchpadVM`` / ``initTraceLogVM`` — a stub
-  ## backend so the panel can still render before
-  ## ``configureMiddleware`` runs.
-  if filesystemVMInstance != nil:
-    return
-
-  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-    when defined(js):
-      result = newPromise proc(resolve: proc(resp: JsonNode)) =
-        resolve(%*{})
-    else:
-      var fut = newFuture[JsonNode]("stub-backend")
-      fut.complete(%*{})
-      result = fut
-
-  let stubBackend = BackendService(
-    sendProc: stubSend,
-    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-    disconnectProc: proc() = discard,
-  )
-
-  filesystemVMStore = createReplayDataStore(stubBackend)
-  filesystemVMInstance = createFilesystemVM(filesystemVMStore)
-  wireFilesystemOpenBridge()
-  tryMountIsoNimFilesystemPanel()
 
 # ---------------------------------------------------------------------------
-# Mount helper — Web only
-# ---------------------------------------------------------------------------
-
-when defined(js):
-  proc findFilesystemMountContainer(
-      keyedId, legacyId: cstring;
-      sessionIndex: int): dom_api.Element =
-    let activeSessionContainer = document.getElementById(
-      cstring("session-container-" & $sessionIndex))
-    if not activeSessionContainer.isNil:
-      let keyed = cast[Element](findNodeInElement(
-        Node(activeSessionContainer),
-        cstring("#" & $keyedId)))
-      if not keyed.isNil:
-        return cast[dom_api.Element](keyed)
-
-      let legacy = cast[Element](findNodeInElement(
-        Node(activeSessionContainer),
-        cstring("#" & $legacyId)))
-      if not legacy.isNil:
-        return cast[dom_api.Element](legacy)
-
-    result = dom_api.getElementById(dom_api.document, keyedId)
-    if dom_api.isNodeNil(dom_api.Node(result)):
-      result = dom_api.getElementById(dom_api.document, legacyId)
-
-  proc tryMountIsoNimFilesystemPanel*() =
-    ## Mount the IsoNim Filesystem panel view into the GoldenLayout-
-    ## managed container.  The container's id is
-    ## ``filesystemComponent-{id}`` — each open Filesystem panel
-    ## instance has its own mount.
-    ##
-    ## Safe to call multiple times — mounts only once per component
-    ## id.  Retries via ``setTimeout`` until the DOM container appears
-    ## (capped at 200 attempts, ~2 s) since GoldenLayout creates the
-    ## host slightly after the layout state changes (mirrors
-    ## ``tryMountIsoNimScratchpadPanel`` / ``tryMountIsoNimTraceLogPanel``).
-    if filesystemVMInstance.isNil:
-      return
-    if filesystemComponentRef.isNil:
-      return
-    let componentId = filesystemComponentRef.id
-    let sessionIndex = data.activeSessionIndex
-    let mountKey = cstring($sessionIndex & ":" & $componentId)
-    # THE LATCH IS ASKED OF THE CONTAINER, NOT OF THE KEY, so the check moves
-    # inside `doMount` where a container exists to ask. `swapLayout` destroys
-    # this pane's host and builds a fresh one with the same id, while
-    # `layout.nim` suppresses `itemDestroyed` for the swap — so nothing clears
-    # a key-based latch and the pane came back mounted and empty. See
-    # `ui/isonim_panel_mount.nim`.
-    let keyedId = cstring("filesystemComponent-" & $componentId)
-    let legacyId = cstring"filesystemComponent"
-    var retryCount = 0
-    proc doMount() =
-      retryCount += 1
-      let container = findFilesystemMountContainer(
-        keyedId,
-        legacyId,
-        sessionIndex)
-      if dom_api.isNodeNil(dom_api.Node(container)):
-        if retryCount > 200:
-          cerror "tryMountIsoNimFilesystemPanel: not ready after 200 retries, giving up"
-          return
-        discard setTimeout(proc() = doMount(), 10)
-        return
-
-      if not isoNimPanelNeedsMount(
-          idLatchSaysMounted = isoNimFilesystemMountedIds.hasKey(mountKey),
-          containerCarriesMark = isoNimPanelContainerIsMounted(container)):
-        return
-
-      # Replace any prior content (Karax may have planted a stub
-      # element before the IsoNim mount fires).
-      let containerNode = dom_api.Node(container)
-      while not dom_api.isNodeNil(containerNode.firstChild):
-        discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-      try:
-        mountIsoNimFilesystemPanel(container, filesystemVMInstance)
-        markIsoNimPanelContainerMounted(container)
-        isoNimFilesystemMountedIds[mountKey] = true
-      except:
-        if isoNimFilesystemMountedIds.hasKey(mountKey):
-          isoNimFilesystemMountedIds.del(mountKey)
-        cerror "tryMountIsoNimFilesystemPanel: mount EXCEPTION: " &
-          getCurrentExceptionMsg()
-        if retryCount <= 200:
-          discard setTimeout(proc() = doMount(), 10)
-        return
-
-      # Re-sync any state the legacy component already carries so the
-      # freshly-mounted view reflects the latest tree.
-      if not filesystemComponentRef.isNil:
-        syncLegacyFilesystemIntoVM(filesystemComponentRef)
-
-    doMount()
-else:
-  proc tryMountIsoNimFilesystemPanel*() =
-    ## Native compilation has no DOM — keep the proc available so
-    ## callers (``initFilesystemVM*``) compile on every backend.
-    discard
-
-# ---------------------------------------------------------------------------
-# Component registration — IsoNim primary renderer; no Karax method
-# render.  Generic callers are expected to use direct IsoNim mount paths.
+# Component registration. The pane's view is mounted by the panel host.
 # ---------------------------------------------------------------------------
 
 method register*(self: FilesystemComponent, api: MediatorWithSubscribers) =
-  ## Register the FilesystemComponent with the mediator.  Bring up the
-  ## IsoNim FilesystemVM lazily so the mount procedure can find it; the
-  ## shared-store version is installed by ``configureMiddleware`` if
-  ## the ViewModel layer is enabled.
+  ## Register the FilesystemComponent with the mediator. Its handlers feed
+  ## the session's `FilesystemVM` once `initFilesystemVMFromSession` has
+  ## installed it.
   self.api = api
-  initFilesystemVM()
   filesystemComponentRef = self
-  tryMountIsoNimFilesystemPanel()
-
-proc registerFilesystemComponent*(component: FilesystemComponent,
-                                   api: MediatorWithSubscribers) {.exportc.} =
-  component.register(api)

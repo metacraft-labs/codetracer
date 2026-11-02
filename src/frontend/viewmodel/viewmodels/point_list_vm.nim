@@ -14,6 +14,8 @@
 ##   echo vm.selectedPoint.val      # some(3)
 
 import std/options
+import std/json
+import ./action_sink
 
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
@@ -40,6 +42,9 @@ type
     ##
     ## The store reference is kept for potential future backend queries
     ## (e.g. toggle-enable, delete point).
+    actionSink*: ActionSink
+      ## Set in a mirror session: user actions go to the primary
+      ## (`action_sink`); nil on a primary.
     store*: ReplayDataStore
 
     # -- Mutable state --
@@ -63,15 +68,23 @@ type
 
 proc selectPoint*(vm: PointListVM; index: Option[int]) =
   ## Set the selected point index. Pass `none(int)` to clear.
+  if vm.actionSink.forwards("pointList", "selectPoint",
+      %*{"index": sinkArg(index)}):
+    return
   vm.selectedPoint.val = index
 
 proc startEditing*(vm: PointListVM; index: int) =
   ## Begin editing the point at `index`. Also selects that point.
+  if vm.actionSink.forwards("pointList", "startEditing",
+      %*{"index": index}):
+    return
   vm.editingPoint.val = some(index)
   vm.selectedPoint.val = some(index)
 
 proc stopEditing*(vm: PointListVM) =
   ## Stop editing any point. Clears the editingPoint signal.
+  if vm.actionSink.forwards("pointList", "stopEditing", %*{}):
+    return
   vm.editingPoint.val = none(int)
 
 proc setPoints*(vm: PointListVM; points: openArray[PointListEntry]) =

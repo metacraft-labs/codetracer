@@ -115,7 +115,6 @@
   }
  ],
  "eventLog": {
-  "id": "eventLog-0-dense-table-0",
   "columns": [
    {
     "title": "tick",
@@ -130,7 +129,7 @@
     "visible": false
    },
    {
-    "title": "",
+    "title": "kind",
     "visible": true
    },
    {
@@ -159,7 +158,9 @@
     "cls": "eventLog-text eventLog-cell",
     "shown": true
    }
-  ]
+  ],
+  "rows": 6,
+  "locationCells": 0
  },
  "eventLogMenu": {
   "button": true,
@@ -258,9 +259,9 @@
    "h": 32
   },
   "stripBox": {
-   "x": 327,
+   "x": 771,
    "y": 1372,
-   "w": 957,
+   "w": 358,
    "h": 24
   },
   "labels": [
@@ -301,65 +302,58 @@
    {
     "id": "auto-hide-bottom-strip",
     "cls": "auto-hide-bottom-strip has-tabs",
-    "x": 327,
-    "w": 957,
+    "x": 771,
+    "w": 358,
     "text": "BUILD\nPROBLEMS\nFIND IN FILES\nREQUESTS"
    },
    {
     "id": "",
     "cls": "auto-hide-strip-tab",
-    "x": 331,
+    "x": 775,
     "w": 58,
     "text": "BUILD"
    },
    {
     "id": "",
     "cls": "auto-hide-strip-tab",
-    "x": 393,
+    "x": 837,
     "w": 89,
     "text": "PROBLEMS"
    },
    {
     "id": "",
     "cls": "auto-hide-strip-tab",
-    "x": 485,
+    "x": 930,
     "w": 106,
     "text": "FIND IN FILES"
    },
    {
     "id": "",
     "cls": "auto-hide-strip-tab",
-    "x": 595,
+    "x": 1039,
     "w": 86,
     "text": "REQUESTS"
    },
    {
     "id": "",
     "cls": "test-movement",
-    "x": 1283,
+    "x": 327,
     "w": 16,
     "text": "14"
    },
    {
     "id": "",
     "cls": "status-right",
-    "x": 1299,
-    "w": 601,
-    "text": "No certificates\n/home/zahary/m/codetracer-gui/codetracer-gre"
+    "x": 1810,
+    "w": 90,
+    "text": "No certificates"
    },
    {
     "id": "",
     "cls": "test-certificate-status status-inline test-certificate-none",
-    "x": 1299,
+    "x": 1810,
     "w": 82,
     "text": "No certificates"
-   },
-   {
-    "id": "location-status",
-    "cls": "",
-    "x": 1389,
-    "w": 503,
-    "text": "/home/zahary/m/codetracer-gui/codetracer-green2/test-program"
    }
   ],
   "overlayAfter120ms": false,
@@ -395,10 +389,10 @@
    "h": 1
   },
   "right": {
-   "x": 0.89,
-   "y": -0.05,
-   "w": 0.11,
-   "h": 2.11
+   "x": 0.5,
+   "y": 0,
+   "w": 0.5,
+   "h": 1
   },
   "right-bottom": {
    "x": 0.5,
@@ -472,6 +466,40 @@
     "y": 1319,
     "w": 1891,
     "h": 49
+   },
+   "probe": {
+    "right": {
+     "x": 1851,
+     "y": 1049,
+     "along": [
+      731,
+      1367
+     ]
+    },
+    "left": {
+     "x": 49,
+     "y": 717,
+     "along": [
+      66,
+      1367
+     ]
+    },
+    "top": {
+     "x": 950,
+     "y": 74,
+     "along": [
+      54,
+      1845
+     ]
+    },
+    "bottom": {
+     "x": 950,
+     "y": 1323,
+     "along": [
+      54,
+      1845
+     ]
+    }
    }
   },
   "headerPlaceholderIndex": 0,
@@ -482,14 +510,22 @@
     "EVENT LOG"
    ],
    "lastFullHeight": true,
-   "lastShare": 0.24
+   "lastShare": 0.27,
+   "probe": {
+    "x": 1851,
+    "y": 1049,
+    "along": [
+     731,
+     1367
+    ]
+   }
   }
  },
  "sessionTabs": {
   "barClassSingle": "session-tab-bar single-session",
   "addTitle": "New tab",
   "addBox": {
-   "x": 1159,
+   "x": 1179,
    "y": 6,
    "w": 26,
    "h": 26
@@ -500,7 +536,7 @@
     "label": "main.py",
     "active": false,
     "close": true,
-    "x": 1159,
+    "x": 1179,
     "w": 160,
     "background": "rgb(51, 51, 51)",
     "colour": "rgb(243, 243, 243)",
@@ -511,7 +547,7 @@
     "label": "Trace 2",
     "active": true,
     "close": true,
-    "x": 1323,
+    "x": 1343,
     "w": 160,
     "background": "rgb(60, 60, 60)",
     "colour": "rgb(255, 255, 255)",

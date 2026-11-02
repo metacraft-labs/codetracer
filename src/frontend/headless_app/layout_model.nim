@@ -915,7 +915,7 @@ proc defaultReplayLayout*(): LayoutNode =
       pane(paneEditor, "Editor", weight = 3.0),
       column([
         pane(paneCalltrace, "Call Trace", weight = 1.0),
-        stack([pane(paneState, "State"), pane(paneEventLog, "Event Log")],
+        stack([pane(paneState, "Variables"), pane(paneEventLog, "Event Log")],
               activeIndex = 0, weight = 1.0)],
         weight = 2.0)],
       weight = 9.0)])
@@ -2167,12 +2167,20 @@ proc setWeight*(node: LayoutNode; kind: PaneKind; weight: float): bool =
   ## with `lpNegativeWeight` and `validate` reports as a defect. Writing one
   ## through this door and reading it back through `validate` would have been
   ## the model contradicting itself.
+  ##
+  ## A pane in a STACK shares its region with the stack's other tabs, and the
+  ## region's size is the stack's weight among its siblings — a weight on the
+  ## leaf itself sizes nothing. So it is the stack's weight that is set.
   if weight < 0.0:
     return false
   let leaf = find(node, kind)
   if leaf.isNil:
     return false
-  leaf.weight = weight
+  let parent = parentOf(node, leaf)
+  if not parent.isNil and parent.kind == lnStack:
+    parent.weight = weight
+  else:
+    leaf.weight = weight
   true
 
 proc removePane*(node: LayoutNode; kind: PaneKind): bool =
@@ -3090,7 +3098,8 @@ proc sharedEditLayout*(): SharedLayout =
   ## column leaves Files 20 / Editor 55 / NS9 25). The placement relation is
   ## asserted equal to "the debug default minus `EditModeHiddenPanes`, plus
   ## the build pane" by `test_shared_default_layout.nim`, so the two trees
-  ## cannot drift apart silently.
+  ## cannot drift apart silently. Its docked panes are the desktop's footer
+  ## less the panes the tree places (PLAT-55).
   let tree = row([
     stack([pane(paneFileTree), pane(paneVcs)], weight = 20.0),
     pane(paneEditor, weight = 55.0),
@@ -3098,7 +3107,15 @@ proc sharedEditLayout*(): SharedLayout =
       stack([pane(paneBuildOutput), pane(paneTestResults)]),
       stack([pane(paneConstraints)])],
       weight = 25.0)])
-  SharedLayout(tree: tree, folds: @[
+  # PLAT-55: THE DESKTOP'S FOOTER, as in Debug mode — the desktop registers
+  # `sharedDefaultDocked` in every mode (`ui/layout.nim`), so its Edit mode
+  # docks PROBLEMS, FIND IN FILES and REQUESTS too. A pane this tree already
+  # places (the terminal's BUILD) is not docked a second time.
+  var docked: seq[DockedPane] = @[]
+  for d in sharedDefaultDocked():
+    if find(tree, d.pane).isNil:
+      docked.add d
+  SharedLayout(tree: tree, docked: docked, folds: @[
     FoldStep(region: paneConstraints, into: paneBuildOutput),
     FoldStep(region: paneFileTree, into: paneBuildOutput),
     FoldStep(region: paneBuildOutput, into: paneEditor)])

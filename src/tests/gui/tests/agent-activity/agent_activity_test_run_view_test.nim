@@ -157,7 +157,7 @@ suite "AA-2 the session feed renders a ct test run as a summary":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 81)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 81)
 
       feed(vm, plainRun())
 
@@ -179,7 +179,7 @@ suite "AA-2 the session feed renders a ct test run as a summary":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 82)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 82)
 
       vm.setMessages(@[AgentActivityMessageEntry(
         id: "s:0", content: "I will run ct test next", role: aamrAgent)])
@@ -193,7 +193,7 @@ suite "AA-2 the session feed renders a ct test run as a summary":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 83)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 83)
 
       feed(vm, plainRun())
       check findByClass(panel, AgentActivityTestRowClass) == nil
@@ -213,7 +213,7 @@ suite "AA-2 the session feed renders a ct test run as a summary":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 84)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 84)
 
       feed(vm, [
         line("run-started", ""),
@@ -246,7 +246,7 @@ suite "AA-2 drilling from a test into its recording":
       vm.traceOpen = TraceOpenService(
         openProc: proc(request: TraceOpenRequest) = opened.add request)
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 85)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 85)
 
       feed(vm, runWithRecording())
       vm.toggleTestRun("s:1")
@@ -275,7 +275,7 @@ suite "AA-2 drilling from a test into its recording":
       vm.traceOpen = TraceOpenService(
         openProc: proc(request: TraceOpenRequest) = inc opened)
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 86)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 86)
 
       feed(vm, plainRun())
       vm.toggleTestRun("s:1")
@@ -294,7 +294,7 @@ suite "AA-2 drilling from a test into its recording":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 87)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 87)
 
       feed(vm, failedRecording())
       vm.toggleTestRun("s:1")
@@ -323,7 +323,7 @@ suite "AA-2 an in-progress run, and a run with nothing to report":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 88)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 88)
 
       feed(vm, [
         line("run-started", ""),
@@ -353,7 +353,7 @@ suite "AA-2 an in-progress run, and a run with nothing to report":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 89)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 89)
 
       feed(vm, [
         line("run-started", ""),

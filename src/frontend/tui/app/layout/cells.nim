@@ -102,7 +102,7 @@ proc terminalPaneName*(kind: PaneKind): string =
   of paneEventLog: "Event Log"
   of paneDebugControls: "Debug Controls"
   of paneFlow: "Flow"
-  of paneSearch: "Search"
+  of paneSearch: "Find in Files"
   of panePointList: "Points"
   of paneScratchpad: "Scratchpad"
   of paneShell: "Shell"
@@ -128,4 +128,3 @@ proc minPaneWidth*(kind: PaneKind): int =
   ## reachable as a tab — rather than being drawn illegibly, and a drawable
   ## pane's strip always spells the tab it is on.
   max(contentMinWidth(kind), terminalPaneName(kind).len + 2)
-

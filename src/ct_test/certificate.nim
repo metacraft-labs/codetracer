@@ -417,6 +417,29 @@ type
       ## report can name the version it did not implement.
     cert*: TestCertificate
 
+const
+  CertificateRootKeys* = ["schema", "certificate"]
+  CertificateTableKeys* = ["framework", "project", "platform", "targets",
+    "result", "issued_at", "issuer", "key_id", "vcs", "command", "signature"]
+  CertificateVcsKeys* = ["repo", "paths", "content", "untracked", "base"]
+  CertificateCommandKeys* = ["argv"]
+  CertificateSignatureKeys* = ["algorithm", "value"]
+    ## Standard.md §3.1–§3.3 and §6.1: the ONLY keys each table of a
+    ## ``test-certificate.v1`` record may carry. A record is closed to
+    ## extensions (Standard.md §3.4): any other key, and any other table
+    ## (a table is a key of its parent, empty or not), makes it malformed.
+
+proc unknownKeysOf(table: TomlNode; allowed: openArray[string];
+                   prefix: string; into: var seq[string]) =
+  ## Every key of ``table`` outside ``allowed``, spelled with its path, in
+  ## document order. Not judged here: the caller rejects the record only once
+  ## it has been classified (see ``readCertificate``).
+  if table == nil or table.kind != tomlTable:
+    return
+  for key in table.fields.keys:
+    if key notin allowed:
+      into.add prefix & key
+
 proc readCertificate*(text: string): CertificateRead =
   ## Parse one certificate record.
   ##
@@ -479,6 +502,100 @@ proc readCertificate*(text: string): CertificateRead =
                 "translated — run the tests to re-issue it in the current shape")
     return CertificateRead(status: crsMalformed, schema: result.schema,
                            detail: "vcs.content is required")
+
+  # ---- A closed schema (Standard.md §3.4) ---------------------------------
+  # Checked only NOW, after the unknown-schema and earlier-draft
+  # classifications above, and that order is part of the contract: an
+  # earlier-draft record carries `vcs.commit` and `vcs.clean`, which this
+  # schema does not define, and calling it merely "unknown keys" would lose
+  # the re-issue remedy its owner needs. Every other undefined key or table —
+  # at the root, in `[certificate]`, `[certificate.vcs]`, any
+  # `[[certificate.command]]` entry, or the signature block the payload
+  # excludes (Canonical-Payload.md §5: excluding it from the payload does not
+  # exempt it from the schema) — makes the record malformed: decidably
+  # invalid, never silently dropped, and with no canonical payload.
+  var unknown: seq[string] = @[]
+  unknownKeysOf(root, CertificateRootKeys, "", unknown)
+  unknownKeysOf(certificate, CertificateTableKeys, "certificate.", unknown)
+  unknownKeysOf(vcs, CertificateVcsKeys, "certificate.vcs.", unknown)
+  let commandsNode = certificate.field("command")
+  if commandsNode != nil:
+    # `[[certificate.command]]` is an array of TABLES. Anything else in that
+    # place — `command = "x"`, `command = ["x"]` — is not a command record
+    # the schema defines, and skipping it would read the record as one with
+    # fewer commands than it claims.
+    if commandsNode.kind != tomlArray:
+      return CertificateRead(status: crsMalformed, schema: result.schema,
+        detail: "certificate.command must be an array of tables " &
+                "([[certificate.command]])")
+    for entry in commandsNode.items:
+      if entry.kind != tomlTable:
+        return CertificateRead(status: crsMalformed, schema: result.schema,
+          detail: "every certificate.command entry must be a table " &
+                  "([[certificate.command]])")
+      unknownKeysOf(entry, CertificateCommandKeys, "certificate.command.",
+                    unknown)
+  let signatureNode = certificate.field("signature")
+  if signatureNode != nil:
+    if signatureNode.kind != tomlTable:
+      return CertificateRead(status: crsMalformed, schema: result.schema,
+        detail: "certificate.signature must be a table")
+    unknownKeysOf(signatureNode, CertificateSignatureKeys,
+                  "certificate.signature.", unknown)
+  if unknown.len > 0:
+    return CertificateRead(status: crsMalformed, schema: result.schema,
+      detail: "unknown key or table " & unknown.join(", ") & ": a " &
+              CertificateSchema & " record is closed to extensions " &
+              "(Standard.md §3.4), so it is malformed")
+
+  # ---- Known keys of the wrong type ---------------------------------------
+  # `strField` / `strSeqField` read a wrong-typed value as absent, which for an
+  # OPTIONAL key (`key_id = true`, `paths = "src"`) would silently drop part of
+  # what the signer saw and rebuild a different payload: a repair, which
+  # Canonical-Payload.md §5 forbids. So every defined key that is present must
+  # have its defined type, and every element of a string array must be a
+  # string.
+  proc typeProblem(table: TomlNode; key, path: string;
+                   kind: TomlKind): string =
+    let node = table.field(key)
+    if node == nil:
+      return ""
+    if node.kind != kind:
+      return path & " must be a " &
+        (case kind
+         of tomlString: "string"
+         of tomlBool: "boolean"
+         of tomlArray: "array of strings"
+         of tomlTable: "table")
+    if kind == tomlArray:
+      for item in node.items:
+        if item.kind != tomlString:
+          return path & " must be an array of strings"
+    ""
+  var typeProblems: seq[string] = @[]
+  for (key, kind) in [("schema", tomlString)]:
+    typeProblems.add typeProblem(root, key, key, kind)
+  for (key, kind) in [("framework", tomlString), ("project", tomlString),
+                      ("platform", tomlString), ("targets", tomlArray),
+                      ("result", tomlString), ("issued_at", tomlString),
+                      ("issuer", tomlString), ("key_id", tomlString)]:
+    typeProblems.add typeProblem(certificate, key, "certificate." & key, kind)
+  for (key, kind) in [("repo", tomlString), ("paths", tomlArray),
+                      ("untracked", tomlBool), ("base", tomlString)]:
+    typeProblems.add typeProblem(vcs, key, "certificate.vcs." & key, kind)
+  if commandsNode != nil:
+    for entry in commandsNode.items:
+      typeProblems.add typeProblem(entry, "argv", "certificate.command.argv",
+                                   tomlArray)
+  if signatureNode != nil:
+    for key in CertificateSignatureKeys:
+      typeProblems.add typeProblem(signatureNode, key,
+                                   "certificate.signature." & key, tomlString)
+  for problem in typeProblems:
+    if problem.len > 0:
+      return CertificateRead(status: crsMalformed, schema: result.schema,
+                             detail: problem)
+
   if contentNode.kind != tomlString:
     return CertificateRead(status: crsMalformed, schema: result.schema,
                            detail: "vcs.content is not a string")

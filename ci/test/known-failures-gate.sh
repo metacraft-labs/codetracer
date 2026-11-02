@@ -262,11 +262,15 @@ fi
 echo
 echo "The real ledger parses, and every row names a real lane"
 # ---------------------------------------------------------------------------
-real_rows="$(grep -cvE '^\s*(#|$)' ci/lib/known-test-failures.tsv || true)"
-if [ "${real_rows}" -gt 0 ]; then
-	ck ok "the shipped ledger has ${real_rows} row(s)"
+# An EMPTY ledger is a valid state — it is the one this file exists to reach
+# (codetracer 2026-10-26: the last row, `ct/load-step-lines`, was retired by
+# its engine arm). What must hold is that the shipped file parses under the
+# loader the lanes use, whatever its row count; the fixtures above are what
+# prove the mechanism still excuses a registered red and reddens a green.
+if real_rows="$(python3 -c 'import sys; sys.path.insert(0, "ci/lib"); import known_failures; print(len(known_failures.load_ledger()))' 2>&1)"; then
+	ck ok "the shipped ledger parses (${real_rows} row(s))"
 else
-	ck no "the shipped ledger has rows"
+	ck no "the shipped ledger parses: ${real_rows}"
 fi
 bad_fields="$(awk -F'\t' '!/^[[:space:]]*(#|$)/ && NF != 4 {n++} END {print n+0}' \
 	ci/lib/known-test-failures.tsv)"

@@ -8,8 +8,10 @@
 ##
 ##   1. `test_session_vm_switches_active_process` — three-recording
 ##      session, switching the active recording rotates the StateVM
-##      alias and asserts state isolation (the M29 spec
-##      "test_state_vm_per_process_scoping" companion).
+##      alias; expansion state stays per process, the watch list is the
+##      session's, a watch another process cannot answer shows as not
+##      valid, and the "hide watches from other processes" option works
+##      (§5.3 as amended 2026-10-24).
 ##   2. `test_session_vm_processTree_populated_from_listprocesses` —
 ##      decoding a `ct/listProcesses` JSON body populates
 ##      `processTree.entries` with the wire shape the Rust wire-shape
@@ -102,53 +104,71 @@ suite "M29 — SessionVM multi-process state":
       check session.stateVM == session.stateVMs["rec-fe"]
       check session.activeStateVM() == session.stateVMs["rec-fe"]
 
-      # Mutate the frontend StateVM so the test can later prove the
-      # backend / worker VMs are *not* observing the same signal.
+      # What is per process is the view of that process's facts — here the
+      # expansion state. The WATCH LIST is the session's
+      # (Cross-Process-Origin-E2E-Test-Design.md §5.3, amended 2026-10-24):
+      # a watch added in one process is still listed after a switch, and
+      # records the recording it was added in.
       let feVM = session.stateVMs["rec-fe"]
-      feVM.selectTab(stWatches)
       feVM.addWatch("frontend_balance")
       feVM.toggleExpand("locals.req")
 
-      check feVM.activeTab.val == stWatches
       check feVM.watchExpressions.val == @["frontend_balance"]
       check "locals.req" in feVM.expandedPaths.val
+      check feVM.watchOrigin("frontend_balance") == "rec-fe"
 
-      # Now switch to the backend. The alias must rotate and the
-      # backend VM's signals must be untouched (default state).
+      # Switch to the backend. The alias rotates; the backend VM's expansion
+      # state is its own, but the frontend's watch is listed.
       session.onSwitchProcess("rec-be")
       check session.activeProcessRecordingId.val == "rec-be"
       let beVM = session.stateVMs["rec-be"]
       check session.stateVM == beVM
-      check beVM.activeTab.val == stLocals
-      check beVM.watchExpressions.val.len == 0
       check beVM.expandedPaths.val.len == 0
-      # The frontend VM's mutations are preserved across the switch.
-      check feVM.activeTab.val == stWatches
-      check feVM.watchExpressions.val == @["frontend_balance"]
+      check beVM.watchExpressions.val == @["frontend_balance"]
+      check beVM.watchOrigin("frontend_balance") == "rec-fe"
+      # The frontend VM's expansion state is preserved across the switch.
       check "locals.req" in feVM.expandedPaths.val
 
-      # Mutate the backend VM and verify the worker stays isolated.
-      beVM.selectTab(stGlobals)
+      # The backend's stop does not answer the frontend's watch: the row
+      # stays in the list, marked not valid, instead of vanishing.
+      drain()
+      session.store.locals.watches.val = @[]
+      let beRows = beVM.currentVariables.val
+      check beRows.len == 1
+      check beRows[0].name == "frontend_balance"
+      check isInvalidWatch(beRows[0])
+
+      # A watch added in the backend joins the same list.
       beVM.addWatch("backend_payload")
+      check feVM.watchExpressions.val == @["frontend_balance", "backend_payload"]
+      check beVM.watchOrigin("backend_payload") == "rec-be"
+
+      # Hiding the watches from other processes leaves the backend's own.
+      beVM.setHideOtherProcessWatches(true)
+      let hidden = beVM.currentVariables.val
+      check hidden.len == 1
+      check hidden[0].name == "backend_payload"
+      beVM.setHideOtherProcessWatches(false)
+      check beVM.currentVariables.val.len == 2
+
       session.onSwitchProcess("rec-wk")
       let wkVM = session.stateVMs["rec-wk"]
       check session.stateVM == wkVM
-      check wkVM.activeTab.val == stLocals
-      check wkVM.watchExpressions.val.len == 0
-      check beVM.activeTab.val == stGlobals
-      check beVM.watchExpressions.val == @["backend_payload"]
+      check wkVM.expandedPaths.val.len == 0
+      check wkVM.watchExpressions.val == @["frontend_balance", "backend_payload"]
 
       # No-op self-switch must not flip the alias nor reset signals.
       session.onSwitchProcess("rec-wk")
       check session.activeProcessRecordingId.val == "rec-wk"
       check session.stateVM == wkVM
 
-      # Switching back to the frontend restores its original
-      # mutations (this is the load-bearing isolation guarantee).
+      # Switching back to the frontend restores its own expansion state, and
+      # removing a watch there removes it for the session.
       session.onSwitchProcess("rec-fe")
       check session.stateVM == feVM
-      check feVM.activeTab.val == stWatches
-      check feVM.watchExpressions.val == @["frontend_balance"]
+      check "locals.req" in feVM.expandedPaths.val
+      feVM.removeWatch("backend_payload")
+      check wkVM.watchExpressions.val == @["frontend_balance"]
 
       session.dispose()
       disposeRoot()

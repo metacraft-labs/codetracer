@@ -1,0 +1,9 @@
+# Control digests for run-plat71c-report-mutations.py — the
+# subjects AND the suites the arms are graded by.
+# Refreshed with --record-control-hashes, gated by the
+# needle scan.
+63a69aadaf3156aa96a50ae2fcd5bb274cfdea09638a484763b90260cba846d3  src/frontend/tui/app/theme/terminal_report.nim
+1fb3df770e31fb218fa24f79db4eeb761852c6b1273302ca7a3abf767e9aa216  src/frontend/tui/app/runtime.nim
+950fa7ea3516f043674fc99f96a190e531ff9e7a0bdc7b3d6d853270379ffccb  src/frontend/tui/app/tests/test_plat71_terminal_profile.nim
+b9f3a5aea6abf78a9cb25c224f6bd7cfe12226b244aa13fc7db951c0eae522f1  src/frontend/tui/tests/real_terminal/test_plat71_terminal_pty.nim
+0007aaf532a43e5d5aa55031759552bc048dee43170920b8ed3c71d912356804  src/frontend/tui/tests/test_plat71_glyph_table.nim

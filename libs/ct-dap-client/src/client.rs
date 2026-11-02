@@ -64,6 +64,33 @@ use crate::types::*;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
+/// The event db-backend sends when a `launch` it has already acknowledged
+/// cannot succeed. Its body is `{ "message": <why> }`.
+///
+/// Mirrors `LAUNCH_FAILED_EVENT` in `src/db-backend/src/dap_server.rs`, which
+/// documents the contract: the event exists so that a client waiting for the
+/// handshake's `stopped` can stop waiting when the launch has failed. This
+/// crate cannot import that constant (db-backend depends on this crate, not
+/// the other way round), so the name is spelled here once and
+/// `tests/wait_for_stopped_launch_failed_test.rs` pins the behaviour.
+///
+/// `ct/notification` of kind `Error` is deliberately NOT treated as terminal:
+/// db-backend also emits one for a trace that opened fine whose first step
+/// carries a recorded error event.
+pub const LAUNCH_FAILED_EVENT: &str = "ct/launch-failed";
+
+/// The human-readable reason carried by a [`LAUNCH_FAILED_EVENT`] body.
+///
+/// Falls back to the raw body, so an engine that changes the body's shape
+/// still gets its words into the test failure instead of losing them.
+fn launch_failed_reason(body: &Value) -> String {
+    match body.get("message").and_then(Value::as_str) {
+        Some(message) => message.to_string(),
+        None if body.is_null() => "(the event carried no body)".to_string(),
+        None => format!("(no `message` string in the event body) {body}"),
+    }
+}
+
 fn validate_set_breakpoints_body(body: &Value, expected_count: usize) -> Result<(), BoxError> {
     let breakpoints = body
         .get("breakpoints")
@@ -325,6 +352,11 @@ impl DapStdioClient {
     }
 
     /// Wait for a `stopped` event (emitted after configurationDone + runToEntry).
+    ///
+    /// Returns an error at once, carrying the engine's reason, when the
+    /// engine sends [`LAUNCH_FAILED_EVENT`]: no `stopped` can follow it, so
+    /// waiting out `timeout` would only replace the reason with a timeout.
+    /// The timeout path remains for an engine that really goes quiet.
     pub fn wait_for_stopped(&mut self, timeout: Duration) -> Result<(), BoxError> {
         let start = std::time::Instant::now();
         let deadline = start + timeout;
@@ -363,6 +395,29 @@ impl DapStdioClient {
                 Ok(Ok(DapMessage::Event(e))) => {
                     if e.event == "stopped" {
                         return Ok(());
+                    }
+                    if e.event == LAUNCH_FAILED_EVENT {
+                        let stderr = self.recent_stderr(20);
+                        let mut msg = format!(
+                            "Launch failed: db-backend sent '{}' after {:.1}s while waiting for 'stopped': {}",
+                            LAUNCH_FAILED_EVENT,
+                            start.elapsed().as_secs_f64(),
+                            launch_failed_reason(&e.body)
+                        );
+                        if !received_events.is_empty() {
+                            msg.push_str(&format!(
+                                "\n  Events received before it: {:?}",
+                                received_events
+                            ));
+                        }
+                        if !stderr.is_empty() {
+                            msg.push_str(&format!(
+                                "\n  db-backend stderr (last {} lines):\n    {}",
+                                stderr.len(),
+                                stderr.join("\n    ")
+                            ));
+                        }
+                        return Err(msg.into());
                     }
                     eprintln!(
                         "[wait_for_stopped] received event '{}' at {:.1}s",
@@ -500,19 +555,49 @@ impl DapStdioClient {
 
     /// Run tracepoints and collect results.
     ///
-    /// Sends `ct/run-tracepoints`, then waits for a `ct/tracepoint-results`
-    /// event carrying the aggregate results. Note: this request does not
-    /// produce a DAP response — only events (trace updates + results).
+    /// Sends `ct/run-tracepoints` and returns the aggregate results.
+    ///
+    /// The results arrive as events (`ct/updated-trace` per tracepoint, then
+    /// `ct/tracepoint-results`), and the request's own response follows the
+    /// last of them. Both are read here: the response must not be left for
+    /// the next [`Self::recv_response`], which takes the first response it
+    /// finds whatever its `request_seq`. A refused run answers
+    /// `success: false` with no results event, and is returned as that
+    /// refusal instead of waiting the timeout out.
     pub fn run_tracepoints(
         &mut self,
         args: RunTracepointsArg,
     ) -> Result<TracepointResultsAggregate, BoxError> {
-        self.send_request("ct/run-tracepoints", serde_json::to_value(&args)?)?;
+        let seq = self.send_request("ct/run-tracepoints", serde_json::to_value(&args)?)?;
 
-        // Wait for the aggregate results event (skips intermediate trace update events)
-        let event = self.recv_event("ct/tracepoint-results", scaled(Duration::from_secs(10)))?;
-        let results: TracepointResultsAggregate = serde_json::from_value(event.body)?;
-        Ok(results)
+        let deadline = std::time::Instant::now() + scaled(Duration::from_secs(10));
+        let mut results: Option<TracepointResultsAggregate> = None;
+        let mut answered = false;
+        while results.is_none() || !answered {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                return Err(format!(
+                    "Timeout waiting for ct/run-tracepoints (results event seen: {}, response seen: {answered})",
+                    results.is_some()
+                )
+                .into());
+            }
+            match self.recv_message(remaining)? {
+                DapMessage::Event(e) if e.event == "ct/tracepoint-results" => {
+                    results = Some(serde_json::from_value(e.body)?);
+                }
+                DapMessage::Response(r) if r.request_seq == seq => {
+                    if !r.success {
+                        return Err(
+                            format!("ct/run-tracepoints was refused: {:?}", r.message).into()
+                        );
+                    }
+                    answered = true;
+                }
+                other => info!("DAP <- {other:?} (while running tracepoints)"),
+            }
+        }
+        results.ok_or_else(|| "ct/run-tracepoints: no results event".into())
     }
 
     // === Terminal output ===
@@ -777,7 +862,18 @@ impl Drop for DapStdioClient {
 mod tests {
     use serde_json::json;
 
-    use super::validate_set_breakpoints_body;
+    use super::{launch_failed_reason, validate_set_breakpoints_body};
+
+    #[test]
+    fn launch_failed_reason_reads_the_message_and_keeps_an_unexpected_body() {
+        assert_eq!(launch_failed_reason(&json!({ "message": "why" })), "why");
+        let odd = launch_failed_reason(&json!({ "reason": "why" }));
+        assert!(
+            odd.contains("\"reason\":\"why\""),
+            "body was dropped: {odd}"
+        );
+        assert!(launch_failed_reason(&serde_json::Value::Null).contains("no body"));
+    }
 
     #[test]
     fn validates_verified_set_breakpoints_response() {

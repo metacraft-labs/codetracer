@@ -9,7 +9,7 @@ import
   ../ct_test/ct_test_delegate,
   codetracerconf, confutils,
   review_cli,
-  trace/record_child_argv,
+  trace/[record_child_argv, replay_backend_env],
   version
 
 # M4: Inline library path setup (replaces ct_wrapper.nim + ct_paths.json).
@@ -56,6 +56,21 @@ when not defined(js) and not defined(windows):
     appendSegment(composed, current)
     if composed.len > 0:
       putEnv("LD_LIBRARY_PATH", composed)
+
+when not defined(js):
+  proc handoffReplayArgs(scan: UiScan; args: seq[string]): seq[string] =
+    ## `ct replay`'s replay-engine options on a `--ui=tui|gpui|webui` handoff.
+    ## The other front-ends have no slot for `--thread-sync-order` or
+    ## `--os-simulation` and refuse them as unknown, but they reach the
+    ## replay engine through processes that inherit the environment, exactly
+    ## as Electron does.  So the options are claimed here, decided, and
+    ## published as their twins (a bad value exits 1 before the handoff),
+    ## and the front-end gets the rest of the argument list.
+    if scan.command != "replay":
+      return args
+    let claim = claimReplayBackendOptions(args)
+    discard publishReplayBackendOptions(claim.given)
+    claim.rest
 
 try:
   # PLAT-1 (`codetracer-specs/CLI/ct/ui-selection.md`).  `uiCleanArgs` is what
@@ -114,13 +129,13 @@ try:
             plan.componentName & "' component and it is not installed; " &
             "install it, or set " & envVar & " to its binary")
           quit(2)
-        execHandoff(binary, plan.handoffArgs)
+        execHandoff(binary, handoffReplayArgs(scan, plan.handoffArgs))
       of upkRewrite:
         # §7.3: `--ui=webui` must not become a SECOND implementation of
         # hosting.  It is not one: the argv is rewritten into `ct host`'s and
         # falls through to the same confutils parse and the same
         # `hostCommand`.
-        uiCleanArgs = plan.rewrittenArgs
+        uiCleanArgs = handoffReplayArgs(scan, plan.rewrittenArgs)
         uiSelectionValue = $plan.frontEnd
       of upkInProcess:
         uiCleanArgs = plan.ctArgs

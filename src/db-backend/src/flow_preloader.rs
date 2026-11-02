@@ -3,7 +3,7 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 
 use codetracer_trace_types::{CallKey, Line, NO_KEY, StepId, TypeKind, TypeRecord, TypeSpecificInfo};
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 
 use crate::{
     db::DbRecordEvent,
@@ -25,6 +25,37 @@ const LOAD_FLOW_VALUE_RR_DEPTH_LIMIT: usize = 2;
 
 fn should_seek_materialized_call_body_from_line_only_location(location: &Location) -> bool {
     location.rr_ticks.0 == 0 && location.event == 0 && location.line > 0
+}
+
+/// Why a call flow cannot be loaded at `location` on a replayed
+/// (non-materialized) trace, or `None` when it can be attempted.
+///
+/// A call flow is the walk of the call that contains a source position, so a
+/// location without one has no call to walk. That is the location a replay
+/// reports once it has run past the end of the recording (`<unknown>:-1`,
+/// carrying the end-of-trace tick count), and the worker cannot be sent there:
+/// every way of reaching it seeks rr to that tick, which rr refuses (no event
+/// of the trace matches), and before the native backend checked rr's answer
+/// the seek's follow-up `stepi` crashed LLDB and killed the worker (codetracer-pm
+/// issue 2026-10-21 "Rust rr flow worker segfaults in LLDB, so the flow finds
+/// no variables"). Refusing here names the cause before any worker is driven.
+///
+/// Materialized traces are not judged by this: their locations are step ids,
+/// and some recorders legitimately emit line 0 for a function's declaration.
+fn replayed_call_flow_refusal(location: &Location) -> Option<String> {
+    if location.line > 0 && !location.path.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "cannot load a call flow at {}:{}: the location has no source position (a replay stands \
+         there once it has run past the end of the recording), so there is no call to walk",
+        if location.path.is_empty() {
+            "<no path>"
+        } else {
+            &location.path
+        },
+        location.line
+    ))
 }
 
 /// Remove `.` components from a path so two spellings of the same file compare
@@ -101,6 +132,12 @@ impl FlowPreloader {
         FlowPreloader {
             expr_loader: ExprLoader::new(CoreTrace::default()),
         }
+    }
+
+    /// Puts this preloader, and every walk it starts, under a session's
+    /// source-reading rule (see [`crate::source_access`]).
+    pub fn set_source_access(&mut self, source_access: crate::source_access::SourceAccessHandle) {
+        self.expr_loader.set_source_access(source_access);
     }
 
     pub fn load(
@@ -302,6 +339,22 @@ pub struct CallFlowPreloader<'a> {
     /// DROPPED — a walk that stopped is not evidence about the branch it
     /// stopped on.
     pending_branches: Vec<PendingBranch>,
+    /// The loader every `load_location` of this walk is given.
+    ///
+    /// `load_location` populates the loader it is handed: it calls
+    /// `load_file`, which reads the step's source file and parses it with
+    /// tree-sitter unless the loader already holds it. The walk used to hand
+    /// it a fresh loader on every step, so a file was re-read and re-parsed
+    /// twice per walked step — a ~1100-step walk of a loop-heavy function
+    /// parsed ~2200 times and took about thirty seconds (codetracer-pm
+    /// `issues/2026-10-06-a-stop-inside-a-loop-heavy-python-function-takes-thirty-seconds.md`).
+    /// One loader per walk parses each file once.
+    ///
+    /// It is the preloader's own loader that cannot be used here:
+    /// `load_location` needs `&mut ExprLoader`, and this type holds only
+    /// `&'a FlowPreloader`. It is per walk, not per session, so a source
+    /// rewritten on disk between two flow loads is read again by the next one.
+    walk_expr_loader: ExprLoader,
 }
 
 impl<'a> CallFlowPreloader<'a> {
@@ -326,11 +379,45 @@ impl<'a> CallFlowPreloader<'a> {
             trace_kind,
             lang: lang_from_context(Path::new(&location.path)),
             pending_branches: vec![],
+            // Under the session's source-reading rule, as the preloader's
+            // own loader is.
+            walk_expr_loader: ExprLoader::with_source_access(
+                CoreTrace::default(),
+                flow_preloader.expr_loader.source_access().clone(),
+            ),
         }
     }
 
     // TODO:
     // refactor load_flow to several methods
+
+    /// Load the flow for `location`, or an error update saying why it could
+    /// not be loaded: a call flow at a location with no source position on a
+    /// replayed trace (`replayed_call_flow_refusal`), a failure of the walk
+    /// itself, or the death of the replay worker the walk drove.
+    pub fn load_flow(&mut self, location: Location, replay: &mut dyn ReplaySession) -> FlowUpdate {
+        if self.mode == FlowMode::Call
+            && self.trace_kind != TraceKind::Materialized
+            && let Some(refusal) = replayed_call_flow_refusal(&location)
+        {
+            warn!("flow refused: {refusal}");
+            return FlowUpdate::error(&refusal);
+        }
+
+        let flow_update = self.walk_flow(location, replay);
+
+        // A worker that died during the walk must surface as the flow's
+        // failure, whatever the walk made of the query that observed it: the
+        // walk reads many failures as "stop here" or answers them with a
+        // fallback, and either turns a death into a short or substituted flow
+        // that looks successful. Checked last so it also covers a death the
+        // walk swallowed (see `ReplaySession::worker_death`).
+        if let Some(death) = replay.worker_death() {
+            error!("flow failed: {death}");
+            return FlowUpdate::error(&format!("the flow was not loaded: {death}"));
+        }
+        flow_update
+    }
 
     // TODO:
     //   we can add a NonEmptyVec or VecWithSizeAtLeast<1, ..>
@@ -343,7 +430,7 @@ impl<'a> CallFlowPreloader<'a> {
     //   last
     //
     #[allow(clippy::unwrap_used)]
-    pub fn load_flow(&mut self, location: Location, replay: &mut dyn ReplaySession) -> FlowUpdate {
+    fn walk_flow(&mut self, location: Location, replay: &mut dyn ReplaySession) -> FlowUpdate {
         // Update location on flow load
         if self.mode == FlowMode::Call {
             // let step_id = StepId(location.rr_ticks.0);
@@ -437,7 +524,7 @@ impl<'a> CallFlowPreloader<'a> {
             }
             Err(e) => {
                 error!("flow error: {e:?}");
-                FlowUpdate::error(&format!("{:?}", e))
+                FlowUpdate::error(&e.to_string())
             }
         }
     }
@@ -535,7 +622,7 @@ impl<'a> CallFlowPreloader<'a> {
     }
 
     fn move_to_first_step(
-        &self,
+        &mut self,
         from_step_id: StepId,
         replay: &mut dyn ReplaySession,
     ) -> Result<(StepId, bool, bool), Box<dyn Error>> {
@@ -564,8 +651,7 @@ impl<'a> CallFlowPreloader<'a> {
                 let hit = replay.step(Action::Continue, true)?;
                 let _ = replay.delete_breakpoint(&bp);
                 if hit {
-                    let mut expr_loader = ExprLoader::new(CoreTrace::default());
-                    let at_line_loc = replay.load_location(&mut expr_loader)?;
+                    let at_line_loc = replay.load_location(&mut self.walk_expr_loader)?;
                     match replay.jump_to_call(&at_line_loc) {
                         Ok(call_start_loc) => {
                             step_id = StepId(call_start_loc.rr_ticks.0);
@@ -604,8 +690,7 @@ impl<'a> CallFlowPreloader<'a> {
                 // makes the window — and hence the iteration count — invariant
                 // under movement inside the call.
                 replay.jump_to(step_id)?;
-                let mut expr_loader = ExprLoader::new(CoreTrace::default());
-                match replay.load_location(&mut expr_loader) {
+                match replay.load_location(&mut self.walk_expr_loader) {
                     Ok(current_location) => match replay.jump_to_call(&current_location) {
                         Ok(call_start_loc) => {
                             step_id = StepId(call_start_loc.rr_ticks.0);
@@ -647,8 +732,7 @@ impl<'a> CallFlowPreloader<'a> {
                         move_error = true;
                     }
                 } else {
-                    let mut expr_loader = ExprLoader::new(CoreTrace::default());
-                    match replay.load_location(&mut expr_loader) {
+                    match replay.load_location(&mut self.walk_expr_loader) {
                         Ok(current_location) => match replay.jump_to_call(&current_location) {
                             Ok(call_start_loc) => {
                                 step_id = StepId(call_start_loc.rr_ticks.0);
@@ -705,11 +789,10 @@ impl<'a> CallFlowPreloader<'a> {
                     return (from_step_id, false, true); // assume we will break the flow loop if `progressing` is false
                 }
 
-                let mut expr_loader = ExprLoader::new(CoreTrace::default());
                 // for MaterializedReplaySession actually those replay methods shouldn't fail;
                 //   but this might be unreliable/change in the future
                 //   and for RR they can also surely fail
-                match replay.load_location(&mut expr_loader) {
+                match replay.load_location(&mut self.walk_expr_loader) {
                     Ok(location) => {
                         let new_step_id = StepId(location.rr_ticks.0);
                         let progressing = if self.trace_kind == TraceKind::Materialized {
@@ -807,22 +890,24 @@ impl<'a> CallFlowPreloader<'a> {
             }
 
             iter_step_id = step_id;
-            // THIS LOADER IS DELIBERATELY EMPTY, AND THAT COSTS THE WINDOW ITS
-            // EXTENT — see the re-derivation below.
+            // THE WALK'S OWN LOADER, NOT THE PRELOADER'S — see the
+            // re-derivation below.
             //
             // `load_location` takes `&mut ExprLoader` and is called once per
             // step of the flow walk; handing it the preloader's own loader
             // would need a mutable borrow that `CallFlowPreloader` (which holds
-            // `&'a FlowPreloader`) does not have. A throwaway is fine for the
-            // per-step work — `load_location` only needs it to look up variable
-            // names, and the trace-embedded fallback covers that.
+            // `&'a FlowPreloader`) does not have, so it gets
+            // `walk_expr_loader`, which it fills on the first step and reuses
+            // on every later one (see the field for why that matters: a fresh
+            // loader per step re-parsed the file on every step).
             //
-            // It is NOT fine for the function boundaries, because an empty
-            // `ExprLoader` has an empty `processed_files`, so
-            // `get_first_last_fn_lines` returns `(-1, -1)` and
-            // `use_trace_function_boundaries` (`trace_reader.rs`) always wins.
-            let mut expr_loader = ExprLoader::new(CoreTrace::default());
-            let new_location = replay.load_location(&mut expr_loader)?;
+            // That loader is built without the trace's context, and
+            // `load_location` loads the step's RECORDED path into it, so the
+            // function boundaries it derives can fall through to the
+            // trace-record heuristic (`use_trace_function_boundaries`,
+            // `trace_reader.rs`). The window's extent is therefore taken from
+            // the preloader's loader instead, below.
+            let new_location = replay.load_location(&mut self.walk_expr_loader)?;
             if step_count == 0 {
                 self.location = new_location.clone();
 
@@ -832,8 +917,8 @@ impl<'a> CallFlowPreloader<'a> {
                 // WHAT WAS WRONG. `step_count == 0` is the first step after
                 // `move_to_first_step` widened to the ENCLOSING CALL'S ENTRY,
                 // so this assignment is what sets the extent the frontend
-                // draws. Taken from the throwaway loader above, it always fell
-                // through to the trace-record derivation, which computes:
+                // draws. Taken from the walk's loader above, it fell through
+                // to the trace-record derivation, which computes:
                 //
                 //   function_first = FunctionRecord.line
                 //   function_last  = max line over the CONTIGUOUS run of steps
@@ -865,8 +950,8 @@ impl<'a> CallFlowPreloader<'a> {
                 // WHY TREE-SITTER IS THE RIGHT SOURCE AND IS AVAILABLE HERE.
                 // `FlowPreloader::load` has already called
                 // `self.expr_loader.load_file(...)` for this path, so the
-                // preloader's loader holds the parsed AST — it is only the
-                // per-step throwaway that does not. `get_first_last_fn_lines`
+                // preloader's loader holds the parsed AST under the path the
+                // window is keyed by — the walk's loader need not. `get_first_last_fn_lines`
                 // takes `&self`, so the shared borrow this type already holds
                 // is enough. The AST knows the function's real end line, which
                 // is precisely the thing the trace format cannot store.
@@ -938,7 +1023,7 @@ impl<'a> CallFlowPreloader<'a> {
                 //   should be fixed/improved in ct-native-replay
                 if self.trace_kind == TraceKind::Materialized {
                     replay.step(Action::StepIn, false)?; // hopefully go back to the end of our original function
-                    let return_location = replay.load_location(&mut expr_loader)?;
+                    let return_location = replay.load_location(&mut self.walk_expr_loader)?;
                     // maybe this can be improved with a limited loop/jump to return/exit of call in the future
                     if let Ok(return_call_key) = self.call_key_from(&return_location)
                         && return_call_key == tracked_call_key
@@ -1022,15 +1107,19 @@ impl<'a> CallFlowPreloader<'a> {
             flow_view_update.add_step_count(line, step_count);
             info!("  process loops");
             let path_buf = &PathBuf::from(&new_location.path);
+            // Both helpers take the update by value and hand it back, so it is
+            // MOVED through them. Cloning it here copied every step walked so
+            // far — values included — on every step: quadratic in the walk,
+            // and a large share of a loop-heavy function's flow time.
             flow_view_update = self.process_loops(
-                flow_view_update.clone(),
+                flow_view_update,
                 Position(new_location.line),
                 replay.current_step_id(),
                 path_buf,
                 step_count,
             );
             flow_view_update = self.log_expressions(
-                flow_view_update.clone(),
+                flow_view_update,
                 Position(new_location.line),
                 replay,
                 step_id,
@@ -1171,7 +1260,10 @@ impl<'a> CallFlowPreloader<'a> {
         // here is registered against the pass this step belongs to.
         self.resolve_pending_branches(&mut flow_view_update, line, path_buf);
         self.register_pending_branch(&flow_view_update, line, path_buf);
-        info!("    branches taken {:?}", flow_view_update.branches_taken);
+        // `debug!`, not `info!`: the table grows with the walk, so formatting
+        // all of it on every step is quadratic, and the replay server logs
+        // `info!` unconditionally.
+        debug!("    branches taken {:?}", flow_view_update.branches_taken);
         flow_view_update
     }
 
@@ -1568,6 +1660,10 @@ mod tests {
         current_location: Location,
         call_entry_location: Location,
         current_step_id: StepId,
+        /// When set, the replay worker this double stands in for has died:
+        /// every seek fails and `worker_death` reports this text, as
+        /// `RecreatorReplaySession::without_respawn_after_worker_death` does.
+        death: Option<String>,
     }
 
     impl MockReplay {
@@ -1577,6 +1673,7 @@ mod tests {
                 current_location,
                 call_entry_location,
                 calls: vec![],
+                death: None,
             }
         }
     }
@@ -1673,6 +1770,9 @@ mod tests {
 
         fn jump_to_call(&mut self, location: &Location) -> Result<Location, Box<dyn Error>> {
             self.calls.push(format!("jump_to_call:{}", location.rr_ticks.0));
+            if let Some(death) = &self.death {
+                return Err(death.clone().into());
+            }
             self.current_step_id = StepId(self.call_entry_location.rr_ticks.0);
             Ok(self.call_entry_location.clone())
         }
@@ -1687,6 +1787,9 @@ mod tests {
 
         fn location_jump(&mut self, location: &Location) -> Result<(), Box<dyn Error>> {
             self.calls.push(format!("location_jump:{}", location.rr_ticks.0));
+            if let Some(death) = &self.death {
+                return Err(death.clone().into());
+            }
             self.current_step_id = StepId(location.rr_ticks.0);
             Ok(())
         }
@@ -1707,6 +1810,10 @@ mod tests {
             self.current_step_id
         }
 
+        fn worker_death(&self) -> Option<String> {
+            self.death.clone()
+        }
+
         fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
             self
         }
@@ -1722,6 +1829,37 @@ mod tests {
         }
     }
 
+    /// STRICT — this test double must NOT claim it can answer
+    /// value-change watchpoints.
+    ///
+    /// `ReplaySession::has_per_step_values` defaults to `false`, so a
+    /// backend has to OPT IN to claiming it keeps a per-step variable
+    /// value table.  `MaterializedReplaySession` is the only
+    /// implementation in the tree that does; `MockReplay` here,
+    /// `EmulatorReplaySession` and `RecreatorReplaySession` all inherit
+    /// the refusal.
+    ///
+    /// The default points that way deliberately.  The watchpoint
+    /// feature was broken for its whole life precisely because a test
+    /// double — the daemon's mock DAP backend — answered
+    /// `verified: true` for a command the real backend could not
+    /// handle at all.  A capability that defaults to "yes" makes that
+    /// mistake silent and free; one that defaults to "no" makes it a
+    /// visible line of code someone has to write.
+    ///
+    /// If this test ever needs `MockReplay` to answer watchpoints, the
+    /// honest fix is to implement `set_watchpoints` on it too, not to
+    /// flip the flag.
+    #[test]
+    fn the_flow_test_double_does_not_claim_it_can_answer_watchpoints() {
+        let mock = MockReplay::new(make_location(15, 42, 0), make_location(10, 17, 0));
+        assert!(
+            !mock.has_per_step_values(),
+            "a test double that claims a capability the component it stands in for lacks is \
+             how watchpoints stayed broken through every test in the tree"
+        );
+        assert!(!mock.knows_variable("anything"));
+    }
     #[test]
     fn materialized_call_body_entry_guard_accepts_only_line_only_source_locations() {
         assert!(should_seek_materialized_call_body_from_line_only_location(
@@ -1806,7 +1944,7 @@ mod tests {
         let current_location = request_location.clone();
         let call_entry_location = make_location(10, 17, 0);
         let mut replay = MockReplay::new(current_location, call_entry_location);
-        let preloader = CallFlowPreloader::new(
+        let mut preloader = CallFlowPreloader::new(
             &flow_preloader,
             request_location,
             HashSet::new(),
@@ -1834,7 +1972,7 @@ mod tests {
         let current_location = request_location.clone();
         let call_entry_location = make_location(19, 64, 7);
         let mut replay = MockReplay::new(current_location, call_entry_location);
-        let preloader = CallFlowPreloader::new(
+        let mut preloader = CallFlowPreloader::new(
             &flow_preloader,
             request_location,
             HashSet::new(),
@@ -1854,5 +1992,104 @@ mod tests {
             replay.calls,
             vec!["location_jump:84", "load_location", "jump_to_call:84"]
         );
+    }
+
+    /// The guard's rule, in both directions: only a location without a source
+    /// position is refused.
+    #[test]
+    fn replayed_call_flow_refusal_refuses_only_locations_without_a_source_position() {
+        assert_eq!(replayed_call_flow_refusal(&make_location(21, 84, 7)), None);
+        // A line-only location (no ticks, no event) still has a position.
+        assert_eq!(replayed_call_flow_refusal(&make_location(5, 0, 0)), None);
+
+        let mut end_of_trace = make_location(-1, 50140, 0);
+        end_of_trace.path = "<unknown>".to_string();
+        // line -1 has no source position.
+        let refusal = replayed_call_flow_refusal(&end_of_trace);
+        assert!(
+            refusal
+                .as_deref()
+                .is_some_and(|r| r.contains("<unknown>:-1") && r.contains("no source position")),
+            "the refusal must name the location and the reason: {refusal:?}"
+        );
+        assert!(replayed_call_flow_refusal(&make_location(0, 12, 3)).is_some());
+
+        let mut no_path = make_location(12, 84, 7);
+        no_path.path.clear();
+        assert!(replayed_call_flow_refusal(&no_path).is_some());
+    }
+
+    /// A call flow at the end-of-trace location of an rr recording is refused
+    /// before the worker is asked anything. Sending the worker there is what
+    /// killed it: the seek's tick is past the last event, rr refuses it, and
+    /// the native backend used to `stepi` LLDB into a crash regardless.
+    #[test]
+    fn a_replayed_call_flow_at_the_end_of_the_trace_is_refused_before_any_query() {
+        let flow_preloader = FlowPreloader::new();
+        let mut end_of_trace = make_location(-1, 50140, 0);
+        end_of_trace.path = "<unknown>".to_string();
+        let mut replay = MockReplay::new(end_of_trace.clone(), make_location(19, 64, 7));
+        let mut preloader = CallFlowPreloader::new(
+            &flow_preloader,
+            end_of_trace.clone(),
+            HashSet::new(),
+            HashSet::new(),
+            FlowMode::Call,
+            TraceKind::Recreator,
+        );
+
+        let update = preloader.load_flow(end_of_trace, &mut replay);
+
+        assert!(update.error, "expected an error update, got {update:?}");
+        assert!(
+            update.error_message.contains("no source position"),
+            "got: {}",
+            update.error_message
+        );
+        assert!(update.view_updates.is_empty());
+        assert!(
+            replay.calls.is_empty(),
+            "the worker must not be driven toward a location it cannot reach: {:?}",
+            replay.calls
+        );
+    }
+
+    /// A flow whose worker died is an error naming the worker, not the short
+    /// "successful" flow the walk makes of its failed seeks.
+    ///
+    /// Here the death makes `location_jump` and its `jump_to_call` fallback
+    /// fail, so the walk stops before its first step and, unchecked, returns an
+    /// empty flow with `error: false` — the shape of "this call has no
+    /// variables".
+    #[test]
+    fn a_flow_whose_worker_died_is_an_error_naming_the_worker() {
+        let flow_preloader = FlowPreloader::new();
+        let request_location = make_location(21, 84, 7);
+        let mut replay = MockReplay::new(request_location.clone(), make_location(19, 64, 7));
+        let death = "the `flow` replay worker (index 1, pid 4242) died while answering LocationJump: \
+                     it closed its connection without answering; the process ended with signal: 11 \
+                     (SIGSEGV) (core dumped)";
+        replay.death = Some(death.to_string());
+        let mut preloader = CallFlowPreloader::new(
+            &flow_preloader,
+            request_location.clone(),
+            HashSet::new(),
+            HashSet::new(),
+            FlowMode::Call,
+            TraceKind::Recreator,
+        );
+
+        let update = preloader.load_flow(request_location, &mut replay);
+
+        assert!(
+            update.error,
+            "a dead worker's flow must be an error update, got {update:?}"
+        );
+        assert!(
+            update.error_message.contains(death),
+            "the error must carry the death as reported: {}",
+            update.error_message
+        );
+        assert!(update.view_updates.is_empty());
     }
 }

@@ -92,6 +92,8 @@ proc ck(cond: bool; name: string) =
 proc nodeRequire(m: cstring): JsObject {.importjs: "require(#)".}
 proc exitProcess(code: int) {.importjs: "process.exit(#)".}
 proc setEnv(key, value: cstring) {.importjs: "process.env[#] = #".}
+
+const TestSessionSecret = "facade-endpoint-over-socket-test-session-secret"
 proc makeTempDir(prefix: cstring): cstring {.importjs:
   "require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), #))".}
 proc removeTree(path: cstring) {.importjs:
@@ -112,7 +114,8 @@ proc connectClient(port: int; onFrame: proc(frame: cstring);
     {.importjs: """(function (port, onFrame, onReady, onFailure) {
   var io = require('socket.io-client');
   var sock = io('http://127.0.0.1:' + port, {
-    transports: ['websocket'], reconnection: false, timeout: 5000 });
+    transports: ['websocket'], reconnection: false, timeout: 5000,
+    query: { ct_session: process.env.CT_TEST_SESSION_SECRET } });
   globalThis.__ctFacadeSocket = sock;
   sock.on('CODETRACER::facade', function (frame) { onFrame(frame); });
   sock.on('connect', function () { onReady(); });
@@ -318,6 +321,11 @@ scratch = $makeTempDir(cstring"ct-facade-socket-")
 # so naming only XDG would not keep this suite's settings in `scratch`.
 setEnv(cstring"CODETRACER_HOME", (scratch & "/ct-home").cstring)
 setEnv(cstring"XDG_CONFIG_HOME", (scratch & "/config").cstring)
+# The session secret a supervisor would give `ct host`: the server admits the
+# client only with it (`index/host_session_guard.nim`). `setupServer` removes
+# the variable it reads, so the client reads its own copy.
+setEnv(cstring"CODETRACER_HOST_SESSION_SECRET", TestSessionSecret.cstring)
+setEnv(cstring"CT_TEST_SESSION_SECRET", TestSessionSecret.cstring)
 
 freePort(proc(p1: int) =
   freePort(proc(p2: int) =

@@ -84,6 +84,7 @@ pub mod db;
 pub mod deepreview;
 pub mod diff;
 pub mod distinct_vec;
+pub mod step_table;
 // M-DWARF-1: DWARF parsing infrastructure. Compiles on both native and
 // wasm32 targets — addr2line/gimli/object are no_std-friendly and contain
 // no C dependencies. M-DWARF-2/3/4 will wire this into the recorder,
@@ -225,6 +226,10 @@ pub mod replay;
 // owning trace's handler. See spec §14.1 and the M24 milestone.
 pub mod session_handler;
 pub mod session_manifest;
+// Where a replay session may read a recording's source text from: the
+// recording's own copies, and the recorded path on this host only when the
+// session allows it (the `launch` argument `hostSourceReads`).
+pub mod source_access;
 // M-DWARF-4: DWARF CFI walker for multi-frame stack unwinding.
 // Owns the parsed `.eh_frame` / `.debug_frame` sections and offers an
 // `unwind` entry point that the `EmulatorReplaySession::load_callstack`
@@ -233,12 +238,14 @@ pub mod session_manifest;
 pub mod stack_unwinder;
 pub mod step_lines_loader;
 pub mod task;
+pub mod terminal_lines;
 pub mod trace_processor;
 pub mod trace_reader;
 pub mod tracepoint_interpreter;
 pub mod transport;
 pub mod transport_endpoint;
 pub mod value;
+pub mod value_budget;
 
 #[cfg(feature = "browser-transport")]
 #[wasm_bindgen(start)]
@@ -246,6 +253,18 @@ pub fn _start() {
     console_error_panic_hook::set_once();
 
     wasm_logger::init(wasm_logger::Config::default());
+}
+
+/// Make the engine's handler for `command` panic on purpose, for a test of
+/// the browser panic net (`dap.rs`, `browser_panic_net`): no real request is
+/// guaranteed to panic, so a test needs a deliberate one. Call it after the
+/// module is initialised and before `wasm_start`; nothing calls it in
+/// production. The native server is armed by an environment variable
+/// instead (`dap_server::TEST_PANIC_ON_COMMAND_ENV`).
+#[cfg(feature = "browser-transport")]
+#[wasm_bindgen]
+pub fn wasm_test_panic_on_command(command: &str) -> Result<(), JsValue> {
+    dap_server::arm_test_panic_on_command(command).map_err(|e| JsValue::from_str(&e))
 }
 
 /// Write a file into the in-memory VFS so that trace data is accessible to the

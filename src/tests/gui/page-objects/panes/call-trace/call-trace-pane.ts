@@ -101,12 +101,25 @@ export class CallTracePane {
   async getEntries(forceReload = false): Promise<CallTraceEntry[]> {
     if (forceReload || this.entries.length === 0) {
       await this.waitForReady();
-      const roots = await this.linesContainer()
-        .locator(".calltrace-call-line")
-        .all();
-      this.entries = roots.map(
-        (l) => new CallTraceEntry(this, l, this.contextMenu),
+      const rows = this.linesContainer().locator(".calltrace-call-line");
+      const roots = await rows.all();
+      // Pin each entry to its CALL (`data-call-key`), not to its position:
+      // the pane renders only the section it holds and reloads it around a
+      // jump, so the row at a given index can be another call (or gone) by
+      // the time the entry is read. A row without a key keeps its position.
+      const keys = await rows.evaluateAll((els) =>
+        els.map((e) => e.getAttribute("data-call-key") || ""),
       );
+      this.entries = roots.map((l, i) => {
+        const key = keys[i] ?? "";
+        const root =
+          key.length > 0
+            ? this.linesContainer()
+                .locator(`.calltrace-call-line[data-call-key="${key.replace(/["\\]/g, "\\$&")}"]`)
+                .first()
+            : l;
+        return new CallTraceEntry(this, root, this.contextMenu);
+      });
     }
     return this.entries;
   }
@@ -202,7 +215,10 @@ export class CallTracePane {
         entry = await this.findEntry(functionName, true);
         return entry !== null;
       },
-      { maxAttempts: 10, delayMs: 500 },
+      // The jump reloads the section around the call; on a loaded host that
+      // takes longer than five seconds, so this waits as long as the search
+      // itself is allowed to.
+      { maxAttempts: maxSearchAttempts, delayMs },
     );
 
     if (entry !== null) {

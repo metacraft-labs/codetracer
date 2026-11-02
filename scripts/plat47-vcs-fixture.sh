@@ -27,11 +27,11 @@ git -c init.defaultBranch=plat47-vcs init -q .
 git config user.name "$GIT_AUTHOR_NAME"
 git config user.email "$GIT_AUTHOR_EMAIL"
 git config commit.gpgsign false
-printf 'first line\n' > notes.txt
-printf 'stays as committed\n' > unchanged.txt
+printf 'first line\n' >notes.txt
+printf 'stays as committed\n' >unchanged.txt
 git add notes.txt unchanged.txt
 git commit -q -m "Initial fixture commit"
-printf 'first line\nan edit the index has not seen\n' > notes.txt
-printf 'a new file, staged\n' > added.txt
+printf 'first line\nan edit the index has not seen\n' >notes.txt
+printf 'a new file, staged\n' >added.txt
 git add added.txt
-printf 'never added\n' > scratch.txt
+printf 'never added\n' >scratch.txt

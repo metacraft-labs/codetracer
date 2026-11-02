@@ -32,10 +32,11 @@
 ##
 ## No mocks: the real core, the shipped binary, the real shim, real files.
 
-import std/[json, os, osproc, sets, streams, strtabs, strutils, tables,
+import std/[json, os, osproc, sets, streams, strutils, tables,
             tempfiles, unittest]
 
 import codetracer_embed
+import ./gpui_child_env
 import ./plat44_translation
 
 var CHECKS = 0
@@ -77,8 +78,7 @@ proc runBinary(project, state: string; specs: seq[string]): (int, string) =
   let p = startProcess(bin,
     args = @["--edit", "--report-plan", "--width=1600", "--height=1200",
              "--edit-keys=" & specs.join(","), project],
-    env = newStringTable({"LD_LIBRARY_PATH": shimDir,
-                          "CODETRACER_TUI_LAYOUT_DIR": state}),
+    env = gpuiChildEnv(shimDir, state),
     options = {poStdErrToStdOut})
   let output = p.outputStream.readAll()
   let rc = p.waitForExit()
@@ -100,7 +100,7 @@ proc caretRowOf(plan: string): int =
     discard
 
 const
-  ReachableSequences = 23
+  ReachableSequences = 24
     ## MEASURED 2026-09-23: how many of the thirty a key route reaches. Pinned
     ## so a keymap change that opens or closes a route moves a number here.
     ##
@@ -111,6 +111,13 @@ const
     ## closed the only route to `edit-blank-line-below`, which is now the
     ## seventh unreachable sequence (no key for `insert-blank-line-below`).
     ## The window record was re-typed against the new keymap the same day.
+    ##
+    ## 23 -> 24 on 2026-10-11 (PLAT-68): the CUA base replaced the product
+    ## default, and CUA binds `add-cursor-below` (`Shift+Alt+Down` on Linux, VS Code's
+    ## `editor.action.insertCursorBelow`) while typing stays `insert-text` in
+    ## the same model — so `multi-cursor-insert` is now reached step by step
+    ## by ONE model, the first route to it. The window record was re-typed
+    ## against the CUA base the same day.
     ## The six that no key reaches, each reported with the first step the
     ## FIRST model tried (the product default) has no key for:
     ## `move-subword-forward`, `split-line`, `add-cursor-below`,
@@ -159,7 +166,7 @@ suite "PLAT-44: the thirty, as keys":
         var specs: seq[string] = @[]
         for k in t.arrange & t.keys: specs.add gpuiSpec(k)
         # Leave any insert mode (Esc changes no text), then save.
-        if t.model != kmProductDefault: specs.add "escape"
+        if t.model != bkCua: specs.add "escape"
         specs.add "control-s"
         let (rc, plan) = runBinary(project, state, specs)
         checkpoint("rc " & $rc & " keys " & specs.join(","))

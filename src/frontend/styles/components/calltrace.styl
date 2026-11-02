@@ -191,7 +191,9 @@
 
   .calltrace-row
   .call-name
-    cursor: pointer
+    // No hand on the whole call: only its text and its toggle answer a click
+    // (each a `role="button"`, `isonim_calltrace_view.renderCallLineRow`),
+    // and a pointer cursor is a promise that the element under it does.
     display: inline-flex
     //padding: 0.125em
     // font-size: 1em
@@ -207,6 +209,11 @@
     padding-left: 0.125em
     display: inline
     z-index: 2
+    cursor: pointer
+
+  .call-text:focus-visible, .toggle-call:focus-visible
+    outline: 1px solid colors-ui-border-focus
+    outline-offset: 1px
 
   .end-of-program-text
     color: CALLTRACE_END_OF_PROGRAM_TEXT
@@ -244,8 +251,10 @@
       .value-expanded-default
         background-color: colors-ui-surface-base-panel !important
 
+    // A return value's name: orange for the dark ground; the editor's
+    // parameter colour, its orange, on the light one (`by-mode`, defaults.styl).
     &.return-value .value-expanded-name-text
-      color: #e48e59
+      color: by-mode(#e48e59, colors-editor-syntax-parameter)
 
   .value-expanded-name
     color: CALLTRACE_ARGS_COLOR
@@ -347,6 +356,43 @@
   .return-text
     color: CALLTRACE_RETURN_COLOR
 
+  // A ROW THAT SHOWS A RETURN VALUE MUST NOT BE TALLER THAN ONE THAT DOESN'T.
+  //
+  // The row box is the toggle's `height: 1.5625em` (`.toggle-call` below);
+  // the text line inside it is `line-height: 1.55em` (`.calltrace-row`), a
+  // little shorter, so normally no text sets the row's height. `.return` was
+  // the exception. It is a flex item of `.call-child-box`, so it is a block
+  // with ONE line box, and that line holds boxes in two typefaces: its own
+  // strut in the panel's SpaceGrotesk, the arrow in SpaceGrotesk, and the
+  // value in SpaceMono (`code_font.styl`). Each box is `line-height` tall
+  // around ITS OWN font's ascent and descent, and baseline alignment
+  // (https://www.w3.org/TR/CSS2/visudet.html#line-height) sets the two faces'
+  // boxes at different offsets, so the line box they share was taller than
+  // either — 25.796875 px at a 16 px root, against the 25 px toggle. That
+  // grew every row with a return value by ~0.8 px, and only those rows,
+  // which is why the pane's mean row advance measured ~25.28 px against a
+  // 25 px box and moved with the data (codetracer-pm issue
+  // 2026-10-18-electron-calltrace-row-advance-exceeds-its-own-row-box.md).
+  //
+  // So the line is given ONE full-height face: `.return`'s strut is set in
+  // SpaceMono, the value's own face, and the arrow keeps SpaceGrotesk but
+  // with `line-height: 1`, a box well inside the strut's. The line box is
+  // then exactly the strut, `line-height` tall, and the toggle sets the row
+  // again: every row is 1.5625em at every zoom. And because nothing leaves
+  // the baseline, the arrow, the value and the call's name (`.call-text`, a
+  // SpaceMono block of the same `line-height`) all sit on one baseline.
+  // (`vertical-align: top` on the two spans also fixes the height, but sets
+  // the arrow ~1 px above the value it introduces.)
+  // `ci/test/calltrace-row-box-in-browser.sh` holds both the height and the
+  // shared baseline, with the real fonts loaded, and shows each declaration
+  // is needed.
+  .return
+    font-family: "SpaceMono"
+
+  .return-arrow
+    font-family: "SpaceGrotesk", sans-serif
+    line-height: 1
+
   .hidden-calls-button
     background-color: colors-ui-surface-input-default
     border-radius: 0.625em
@@ -391,7 +437,9 @@
     // on the same level for both no-collapse button and collapse button lines
     width: 0.875em
     height: 1.5625em
-    display: block
+    display: flex
+    align-items: center
+    justify-content: center
     margin-right: 0.25em
     z-index: 2
 
@@ -401,10 +449,6 @@
       background-image: url(CALLTRACE_COLLAPSE_IMG);
       background-size: cover;
       background-position: center;
-      display: inline-block;
-      position: relative
-      top: 0.25em
-      left: -0.125em
       cursor: pointer
 
       &.active
@@ -416,10 +460,6 @@
       background-image: url(CALLTRACE_EXPAND_IMG);
       background-size: cover;
       background-position: center;
-      display: inline-block;
-      position: relative
-      top: 0.25em
-      left: -0.125em
       cursor: pointer
 
       &.active
@@ -431,10 +471,6 @@
       background-image: url(CALLTRACE_DOT_IMG);
       background-size: cover;
       background-position: center;
-      display: block;
-      position: relative
-      bottom: -0.625em
-      left: 0.1875em
 
       &.active
         background-image: url(CALLTRACE_ACTIVE_DOT_IMG) !important
@@ -445,10 +481,6 @@
       background-image: url(CALLTRACE_EOP_IMG);
       background-size: cover;
       background-position: center;
-      display: block;
-      position: relative
-      bottom: -0.625em
-      left: 0.2em
 
     .end-of-program-error
       background-image: url(CALLTRACE_EOP_ERROR_IMG);
@@ -460,31 +492,6 @@
   .collapsed-callstack
     color: CALLTRACE_COLOR_PREVIOUS
     cursor: pointer
-
-  .speed-very-fast
-    color: colors-ui-text-primary-body
-    // background: linear-gradient(to right, #fff, SPEED_VERY_FAST_BG)
-    background-color: SPEED_VERY_FAST_BG
-  //box-shadow: 0.625em 0.3125em 0.3125em SPEED_VERY_FAST_BG
-
-  .speed-fast
-    color: OPPOSITE_COLOR
-    // background: linear-gradient(to right, #fff, SPEED_FAST_BG)
-    background-color: SPEED_FAST_BG
-  // box-shadow: 0.625em 0.3125em 0.3125em SPEED_FAST_BG
-
-  .speed-medium
-    color: OPPOSITE_COLOR
-    // background: linear-gradient(to right, #fff, SPEED_MEDIUM_BG)
-    background-color: SPEED_MEDIUM_BG
-  // box-shadow: 0.625em 0.3125em 0.3125em SPEED_MEDIUM_BG
-
-  .speed-slow
-    color: OPPOSITE_COLOR
-    // background: linear-gradient(to right, #fff, SPEED_SLOW_BG)
-    background-color: SPEED_SLOW_BG
-    opacity: 0.5
-  // box-shadow: 0.625em 0.3125em 0.3125em SPEED_SLOW_BG
 
   .duration
     margin-left: 1.25em
@@ -504,15 +511,6 @@
   // if !IS_EXTENSION
   //   padding-left: 0.25em
   // background-color: colors-ui-surface-base-panel
-
-.full-calltrace
-  background-color: FULL_CALLTRACE_BG_COLOR
-  color: FULL_CALLTRACE_FG_COLOR
-  height: 100%
-  // font-size: 0.875em
-  overflow-x: hidden
-  overflow-y: scroll
-  width: 31.25em
 
 // .local-calltrace
 //   background-color: colors-ui-surface-base-panel
@@ -583,7 +581,7 @@
 
   .step-line-location
     width: auto
-    color: #9cdcfe
+    color: by-mode(#9cdcfe, colors-ui-text-information-primary)
 
   .step-line-source-code
     width: auto
@@ -807,8 +805,13 @@
     padding-right: 0.5em
 
 // TODO: Fix event-selected
+//
+// The selected row's ground is the design system's selection surface,
+// `colors-editor-surface-select` — the token whose Dark value is the #3E3E3B
+// this rule used to spell as a literal. As a literal it stayed dark in the
+// light theme, a dark bar under the light theme's dark text.
 .event-selected
-  background: #3E3E3B !important
+  background: colors-editor-surface-select !important
 
 .code-state-line
   color:colors-ui-text-primary-body

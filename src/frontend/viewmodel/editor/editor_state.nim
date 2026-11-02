@@ -68,9 +68,12 @@
 
 import std/[options, tables]
 
+import ./find_match
 import ./history
 import ./selection
 import ./text_store
+
+export find_match
 
 export history
 
@@ -109,8 +112,20 @@ type
     ## pattern, not a regular expression: §5.1 forbids an operation that waits,
     ## and nothing here needs a regex engine to make the four operations
     ## executable and total.
+    ##
+    ## PLAT-70 Part C (Find-And-Incremental-Search.md §2 principle 2): THE
+    ## ONE PATTERN STORE. The find session's query is this `pattern` while
+    ## the session is open, and `options` are the toggles it matches with,
+    ## so `n` / `F3` after the session closes match exactly what it
+    ## highlighted. The session (`viewmodels/find_vm`) holds no copy.
     pattern*: string
     direction*: SearchDirection
+    options*: MatchOptions
+      ## Case and whole word (`find_match.MatchOptions`). `initEditorState`
+      ## opens case-sensitive (Vim's `noignorecase`, Kakoune's regex);
+      ## `editing_core.initEditingDocument` sets each base's default (§3.1:
+      ## CUA case-insensitive, as VS Code; Emacs case-folding, as
+      ## `case-fold-search`).
 
   LanguageComments* = object
     ## §2.2 C: *"comment tokens are per-language data, not a constant"*. They
@@ -300,7 +315,8 @@ proc initEditorState*(doc: string; selection = default(EditorSelection);
     lastChange: @[], marks: initTable[string, int](), jumps: @[], jumpIndex: 0,
     folded: @[], breakpoints: @[], tracepoints: @[], flowOverlay: false,
     trackedLines: @[], journal: @[],
-    search: SearchState(pattern: "", direction: sdForward),
+    search: SearchState(pattern: "", direction: sdForward,
+                        options: MatchOptions(caseSensitive: true)),
     comments: comments, indentUnit: indentUnit, parse: parse,
     filters: @[],
     history: initHistory())
@@ -309,7 +325,8 @@ func `==`*(a, b: Register): bool =
   a.text == b.text and a.kind == b.kind
 
 func `==`*(a, b: SearchState): bool =
-  a.pattern == b.pattern and a.direction == b.direction
+  a.pattern == b.pattern and a.direction == b.direction and
+    a.options == b.options
 
 func `==`*(a, b: LanguageComments): bool =
   a.lineToken == b.lineToken and a.blockOpen == b.blockOpen and

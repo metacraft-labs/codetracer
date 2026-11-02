@@ -99,6 +99,14 @@ NAMED = {"Down": "Down", "Up": "Up", "Left": "Left", "Right": "Right",
          "Enter": "Return", "Esc": "Escape", "Backspace": "BackSpace",
          "Delete": "Delete", "Tab": "Tab", "Space": "space"}
 MODS = {"Ctrl": "ctrl", "Alt": "alt", "Shift": "shift"}
+# A SHIFTED SYMBOL IS TYPED AS THE KEYSYM A US KEYBOARD PRODUCES. `wtype`'s
+# virtual keymap gives every character its own one-level key, so `-M shift [`
+# reaches the client as `bracketleft` and the Shift is consumed on the way:
+# measured 2026-10-11, PLAT-68's `Ctrl+Shift+[` (fold) arrived as `Ctrl+[`
+# (dedent). A real keyboard's Shift+[ is `braceleft`; typing that keysym with
+# Shift held is the same event, and the GPUI decoder folds `{` + Shift back to
+# `Shift+[` (`key_names.chordName`).
+US_SHIFTED = dict(zip("`1234567890-=[]\\;',./", '~!@#$%^&*()_+{}|:"<>?'))
 # PRIME THE VIRTUAL KEYBOARD. Measured on the first run of this lane: in
 # about a third of the windows the FIRST key never reached the editor (the
 # exit report's `keysApplied` one short, the caret one motion behind) — a new
@@ -111,6 +119,8 @@ for k in keys:
     if k.endswith("++"):
         parts = k[:-2].split("+") + ["+"]
     mods, base = parts[:-1], parts[-1]
+    if "Shift" in mods and base in US_SHIFTED:
+        base = US_SHIFTED[base]
     for m in mods:
         args += ["-M", MODS[m]]
     if base in NAMED:

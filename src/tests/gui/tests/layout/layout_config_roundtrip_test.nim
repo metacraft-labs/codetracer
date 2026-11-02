@@ -532,7 +532,7 @@ when defined(js):
       showDockedPanel(live)
 
       # THE DISCRIMINATING ASSERTION.  `stateComponent-0` is the id
-      # `state.tryMountIsoNimStatePanel` resolves its container by; a restore
+      # `panel_host.ensurePanelMountedById` finds the State pane's container by; a restore
       # that produces no such node in the document produces an empty pane,
       # whatever the JSON says.  See
       # `auto-hide/auto_hide_restore_mount_test.nim` for the rest of #691.
@@ -630,14 +630,16 @@ else:
       check serializer.contains("overlayWidth")
       check serializer.contains("overlayHeight")
       # A panel mid-unpin is a transient; persisting it would resurrect a
-      # panel the user just dragged back into the layout.  A standalone pane
-      # (BUILD / PROBLEMS / FIND IN FILES / REQUESTS) is re-registered from
-      # scratch every launch, live element and all, so a persisted copy would
-      # only suppress that registration and leave a strip tab whose overlay is
-      # empty.  (It DOES carry a re-attachable GL config since M46 — see
-      # `auto-hide/auto_hide_unpin_test.nim` — but the config is not what the
-      # overlay shows; the live element is, and that one cannot be persisted.)
-      check serializer.contains("panel.isUnpinning or panel.standalone")
+      # panel the user just dragged back into the layout.
+      check serializer.contains("if panel.isUnpinning:")
+      # A standalone pane (BUILD / PROBLEMS / SEARCH RESULTS / REQUESTS) IS
+      # persisted: §6.3 of `Auto-Hide-Panes.md` saves every auto-hidden
+      # panel's edge and order, and skipping these four is what sent a pane
+      # re-pinned to Left back to Bottom on restart (#807).  The live element
+      # still cannot be persisted; the next launch's registration adopts the
+      # restored entry and gives it one — see
+      # `auto-hide/auto_hide_restore_mount_test.nim`, suite "#807".
+      check not serializer.contains("panel.standalone")
       for forbidden in ["liveElement", "domTab", "containerElement"]:
         check not serializer.contains("\"" & forbidden & "\"")
 
@@ -651,10 +653,11 @@ else:
       check body[start ..< stop].contains("standalone: true")
 
     test "a restored entry never shadows a standalone pane":
-      ## The standalone registration loop skips a content that is already in
-      ## the auto-hide state.  A restored entry for one of the four
-      ## standalone panes has no live element and nothing to build one from,
-      ## so it must be replaced rather than honoured.
+      ## The standalone registration loop skips a content that already has a
+      ## LIVE pane in the auto-hide state.  A restored entry for one of the
+      ## four standalone panes has no live element, so it must not be
+      ## honoured as-is; `addStandaloneAutoHidePanel` adopts it (keeping its
+      ## saved edge, #807) and gives it this launch's live element.
       let body = source(LayoutPath)
       check body.contains("existing.standalone or not existing.liveElement.isNil")
 

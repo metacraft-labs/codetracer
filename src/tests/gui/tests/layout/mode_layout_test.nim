@@ -33,6 +33,7 @@ when defined(js):
 
   import ../../../../frontend/index/layout_config_repair
   import ../../../../frontend/index/mode_default_layout
+  import ../../../../frontend/index/editor_working_set
   import ../../../../common/types
 
   const bundledDefaultLayoutJson =
@@ -361,3 +362,114 @@ when defined(js):
         let hidden = modeHiddenContentIds(mode)
         for placement in paneHomesForMode(mode):
           check placement[0] notin hidden
+
+  proc workingTabs(config: js): seq[cstring] {.importjs: """
+    (function(config) {
+      const paths = [];
+      const walk = node => {
+        if (!node) return;
+        if (node.componentState && node.componentState.content === 777)
+          paths.push(node.componentState.label);
+        for (const child of node.content || []) walk(child);
+      };
+      walk(config.root || config);
+      return paths;
+    })(#)
+  """.}
+
+  proc activeWorkingTabs(config: js): seq[cstring] {.importjs: """
+    (function(config) {
+      const paths = [];
+      const walk = node => {
+        if (!node) return;
+        if (node.type === 'stack') {
+          const active = node.content[node.activeItemIndex || 0];
+          if (active.componentState && active.componentState.content === 777)
+            paths.push(active.componentState.label);
+        }
+        for (const child of node.content || []) walk(child);
+      };
+      walk(config.root || config);
+      return paths;
+    })(#)
+  """.}
+
+  proc liveWorkingTabs(): js = jsonParse(cstring"""{
+    "root":{"type":"row","content":[
+      {"type":"stack","size":"20%","content":[
+        {"type":"component","componentState":{"content":9,"label":"source-only-pane"}}]},
+      {"type":"stack","size":"80%","activeItemIndex":1,"content":[
+        {"type":"component","componentState":{"content":777,"id":4,"label":"a.py"}},
+        {"type":"component","componentState":{"content":777,"id":9,"label":"c.py"}}]}]}}
+    """)
+
+  proc equalLayouts(a, b: js): bool {.importjs:
+    "require('node:util').isDeepStrictEqual(#, #)".}
+
+  suite "mode layouts carry the current editor working set":
+    test "first entry carries tabs into the entering mode's unclaimed area":
+      let target = modeLayout(DebugMode)
+      let live = liveWorkingTabs()
+      let beforeTarget = jsonStringify(target)
+      let beforeLive = jsonStringify(live)
+      let projected = carryEditorWorkingSet(target, live, 777, cstring"c.py")
+      check workingTabs(projected) == @[cstring"a.py", cstring"c.py"]
+      check activeWorkingTabs(projected) == @[cstring"c.py"]
+      check cast[cstring](rootOf(projected).content[1].size) ==
+        cstring($unclaimedTopLevelPercent(target) & "%")
+      check componentCount(projected, ord(Content.Filesystem)) ==
+        componentCount(target, ord(Content.Filesystem))
+      check jsonStringify(target) == beforeTarget
+      check jsonStringify(live) == beforeLive
+      check activeIndicesInRange(projected)
+      check equalLayouts(carryEditorWorkingSet(projected, live, 777,
+                                              cstring"c.py"), projected)
+
+    test "returning replaces stale tabs without restoring a closed document":
+      let target = jsonParse(cstring"""{"root":{"type":"row","content":[
+        {"type":"stack","size":"30%","content":[
+          {"type":"component","componentState":{"content":9,"label":"FILES"}}]},
+        {"type":"stack","size":"70%","activeItemIndex":1,"content":[
+          {"type":"component","componentState":{"content":777,"label":"a.py"}},
+          {"type":"component","componentState":{"content":777,"label":"closed.py"}}]}]}}""")
+      let projected = carryEditorWorkingSet(target, liveWorkingTabs(), 777, cstring"a.py")
+      check workingTabs(projected) == @[cstring"a.py", cstring"c.py"]
+      check activeWorkingTabs(projected) == @[cstring"a.py"]
+      check cast[cstring](rootOf(projected).content[1].size) == cstring"70%"
+      let empty = jsonParse(cstring"""{"root":{"type":"stack","content":[
+        {"type":"component","componentState":{"content":9,"label":"FILES"}}]}}""")
+      let closed = carryEditorWorkingSet(projected, empty, 777, cstring"")
+      check workingTabs(closed).len == 0
+      check componentCount(closed, 9) == 1
+      check activeIndicesInRange(closed)
+
+    test "split editor groups travel without carrying auxiliary panes":
+      let split = jsonParse(cstring"""{"root":{"type":"row","content":[
+        {"type":"component","componentState":{"content":41,"label":"leaving-only"}},
+        {"type":"column","content":[
+          {"type":"stack","activeItemIndex":0,"size":"40%","content":[
+            {"type":"component","componentState":{"content":777,"label":"a.py"}}]},
+          {"type":"stack","activeItemIndex":0,"size":"60%","content":[
+            {"type":"component","componentState":{"content":777,"label":"c.py"}}]}]}]}}""")
+      let target = jsonParse(cstring"""{"root":{"type":"row","content":[
+        {"type":"component","size":"20%","componentState":{"content":9,"label":"FILES"}},
+        {"type":"stack","size":"80%","content":[
+          {"type":"component","componentState":{"content":777,"label":"stale.py"}}]}]}}""")
+      let projected = carryEditorWorkingSet(target, split, 777, cstring"c.py")
+      check isNodeType(rootOf(projected).content[1], cstring"column")
+      check workingTabs(projected) == @[cstring"a.py", cstring"c.py"]
+      check activeWorkingTabs(projected) == @[cstring"a.py", cstring"c.py"]
+      check componentCount(projected, 41) == 0
+      check componentCount(projected, 9) == 1
+      check activeIndicesInRange(projected)
+
+    test "a mixed stack keeps its auxiliary tabs and selects the live editor":
+      let target = jsonParse(cstring"""{"root":{"type":"stack","activeItemIndex":2,"content":[
+        {"type":"component","componentState":{"content":9,"label":"FILES"}},
+        {"type":"component","componentState":{"content":777,"label":"stale.py"}},
+        {"type":"component","componentState":{"content":41,"label":"VCS"}}]}}""")
+      let projected = carryEditorWorkingSet(target, liveWorkingTabs(), 777, cstring"c.py")
+      check stackContentsHolding(projected, 9) == @[9, 777, 777, 41]
+      check workingTabs(projected) == @[cstring"a.py", cstring"c.py"]
+      check activeWorkingTabs(projected) == @[cstring"c.py"]
+      check activeIndicesInRange(projected)

@@ -314,7 +314,8 @@ suite "VN-M3 test_an_unsupported_construct_is_not_reported_as_a_failed_proof":
   test "the rendered panel says 'verifier limitation' in words":
     let vm = finishedVM(UnsupportedLambdaOutput, 101)
     var renderer: MockRenderer
-    let node = renderVerificationPanel(renderer, panelModel(vm))
+    let node = renderVerificationPanel[MockRenderer, MockNode](
+      renderer, panelModel(vm))
     let rows = nodesWithAttribute(node, "data-ct-verification-kind")
     check rows.len == 1
     check rows[0].attributes["data-ct-verification-kind"] == "limitation"
@@ -364,7 +365,8 @@ suite "VN-M3 test_the_text_tier_never_offers_replay":
     var renderer: MockRenderer
 
     proc assertNoReplay(model: VerificationPanelModel; what: string) =
-      let node = renderVerificationPanel(renderer, model)
+      let node = renderVerificationPanel[MockRenderer, MockNode](
+        renderer, model)
       let haystack = (renderedText(node) & " " & allAttributeText(node)).toLowerAscii
       for word in replayVocabulary:
         check(not haystack.contains(word))
@@ -607,7 +609,8 @@ suite "VN-M4 a payload changes what is known, not what is promised":
     check vm.currentPayload().get.counterexampleTraces[0].steps.len == 4
 
     var renderer: MockRenderer
-    let node = renderVerificationPanel(renderer, panelModel(vm))
+    let node = renderVerificationPanel[MockRenderer, MockNode](
+      renderer, panelModel(vm))
     let haystack = (renderedText(node) & " " & allAttributeText(node)).toLowerAscii
     check haystack.len > 0                # the scan reached the tree
     for word in stillForbidden:
@@ -649,7 +652,8 @@ suite "VN-M4 a payload changes what is known, not what is promised":
     check counterexampleOffers(vm).len == 0
 
     var renderer: MockRenderer
-    let node = renderVerificationPanel(renderer, panelModel(vm))
+    let node = renderVerificationPanel[MockRenderer, MockNode](
+      renderer, panelModel(vm))
     let haystack = (renderedText(node) & " " & allAttributeText(node)).toLowerAscii
     check haystack.len > 0
 

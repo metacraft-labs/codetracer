@@ -4,8 +4,12 @@
 ## later consume the same attributes to mount gutter glyphs or view zones.
 
 import isonim/dsl/ui
-import isonim/core/computation
+import isonim/core/[signals, computation]
+import isonim/dsl/components
 import isonim/testing/mock_dom
+
+# The generic proc expands the DSL at its caller.
+export signals, computation, components
 
 when defined(js):
   import isonim/web/web_renderer
@@ -27,7 +31,10 @@ proc buttonText(action: EditorTestControlAction): string =
   of etcakStatus:
     if action.status.len == 0: "idle" else: action.status
 
-template renderEditorTestControlsImpl(r, plan: untyped): untyped =
+proc renderEditorTestControls*[R, N](r: R;
+                                   plan: EditorTestControlRenderPlan): N =
+  ## The ct-test controls of one editor, for every renderer. `plan` is a
+  ## value, so the loops below run once per render, by design.
   ui(r):
     tdiv(class = "ct-test-editor-controls",
          `data-ct-test-controls` = "true",
@@ -55,13 +62,3 @@ template renderEditorTestControlsImpl(r, plan: untyped): untyped =
                    `aria-label` = action.ariaLabel,
                    title = action.ariaLabel):
               text buttonText(action)
-
-proc renderEditorTestControls*(r: MockRenderer;
-                               plan: EditorTestControlRenderPlan): MockNode =
-  renderEditorTestControlsImpl(r, plan)
-
-when defined(js):
-  proc renderEditorTestControls*(r: WebRenderer;
-                                 plan: EditorTestControlRenderPlan):
-                                 isonim_dom.Element =
-    renderEditorTestControlsImpl(r, plan)

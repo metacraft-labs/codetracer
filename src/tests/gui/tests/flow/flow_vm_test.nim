@@ -388,12 +388,16 @@ suite "FlowVM totalIterations":
       dispose()
 
 # ---------------------------------------------------------------------------
-# Auto-load effect
+# The window request
+#
+# The window is loaded once per stop by the session's stop loader (`spFlow`,
+# `test_stop_loader.nim` pins WHEN); these cases pin WHAT `requestWindow`
+# asks and what it does with the answer.
 # ---------------------------------------------------------------------------
 
-suite "FlowVM auto-load effect":
+suite "FlowVM window request":
 
-  test "changing rrTicks triggers flow data request":
+  test "a window request asks for the stop the debugger is at":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createFlowVM(store)
@@ -407,6 +411,8 @@ suite "FlowVM auto-load effect":
       var dbg = store.debugger.val
       dbg.rrTicks = 200'u64
       store.debugger.val = dbg
+      drain()
+      vm.requestWindow()   # the stop loader's `spFlow` load
       drain()
 
       var found = false
@@ -429,7 +435,7 @@ suite "FlowVM auto-load effect":
 
       dispose()
 
-  test "changing flowMode triggers flow data request":
+  test "every view granularity asks the engine's call query":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createFlowVM(store)
@@ -444,6 +450,8 @@ suite "FlowVM auto-load effect":
       let countBefore = mock.receivedCommands.len
 
       vm.setMode(fmFunction)
+      drain()
+      vm.requestWindow()   # the stop loader's `spFlow` load
       drain()
 
       # A new request should have been sent with the updated mode.
@@ -464,7 +472,7 @@ suite "FlowVM auto-load effect":
 
       dispose()
 
-  test "auto-load does not fire for rrTicks == 0":
+  test "a window request asks nothing before the debugger has a tick":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createFlowVM(store)
@@ -473,6 +481,8 @@ suite "FlowVM auto-load effect":
       var dbg = store.debugger.val
       dbg.rrTicks = 0'u64
       store.debugger.val = dbg
+      drain()
+      vm.requestWindow()   # the stop loader's `spFlow` load
       drain()
 
       for cmd in mock.receivedCommands:
@@ -503,6 +513,8 @@ suite "FlowVM auto-load effect":
       var dbg = store.debugger.val
       dbg.rrTicks = 14'u64
       store.debugger.val = dbg
+      drain()
+      vm.requestWindow()   # the stop loader's `spFlow` load
       drain()
 
       check mock.findCommand("ct/load-flow").isSome
@@ -745,13 +757,15 @@ suite "FlowVM — the ct/load-flow engine boundary":
   test "the request carries flowMode and location, and nothing else":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
-      discard createFlowVM(store)
+      let vm = createFlowVM(store)
       drain()
 
       var dbg = store.debugger.val
       dbg.rrTicks = 314'u64
       dbg.location = Location(file: "main.nr", line: 9, callstackDepth: 2)
       store.debugger.val = dbg
+      drain()
+      vm.requestWindow()   # the stop loader's `spFlow` load
       drain()
 
       var found = false
@@ -876,6 +890,8 @@ suite "FlowVM per-line facts (PLAT-42)":
       dbg.rrTicks = 121'u64
       store.debugger.val = dbg
       drain()
+      vm.requestWindow()   # the stop loader's `spFlow` load
+      drain()
       check mock.findCommand("ct/load-flow").isSome
       check vm.loadingState.val == lsLoading
 
@@ -905,6 +921,8 @@ suite "FlowVM per-line facts (PLAT-42)":
       var dbg = store.debugger.val
       dbg.rrTicks = 121'u64
       store.debugger.val = dbg
+      drain()
+      vm.requestWindow()   # the stop loader's `spFlow` load
       drain()
 
       mock.settleAllDeferred(%*{"type": "response", "success": true,

@@ -30,7 +30,7 @@ THE DISCIPLINE, inherited from the harnesses before it (run-plat43-…):
   * RESTORE IS VERIFIED PER ARM; a failed restore aborts the run. An arm graded
     against the binary REBUILDS it after the restore too, so the next arm and
     the next lane see the product, not the mutant.
-  * ONE DECLARED SURVIVOR, behaviour-preserving (N1).
+  * TWO DECLARED SURVIVORS, behaviour-preserving (N1, S4).
 
 Run it with REPLAY_SERVER_BIN exported (the Tier-2 arm spawns the shipped
 binary on a real recording).
@@ -82,8 +82,9 @@ TIER2_FILTER = "token fidelity and surfaces, read back, in the dark mode"
   # The one Tier-2 case a binary arm is graded by, so the arm costs one
   # screen rather than the whole suite…
 TIER2_FILTERS = {"P5": ":theme switches the design-system mode on a live session",
-                 # S4: the editor's fill is visible in the LIGHT mode, where the
-                 # editor's measured ground (the desktop's) is not the panel.
+                 # S4 is a declared survivor (see DECLARED_SURVIVORS); it is
+                 # still run against the light case, the one that killed it
+                 # while the light editor's ground differed from the panel.
                  "S4": "token fidelity and surfaces, read back, in the light mode"}
   # …unless the arm names its own.
 
@@ -157,12 +158,18 @@ ARMS = [
 ]
 
 UNGRADED: set = set()
-DECLARED_SURVIVORS = {"N1"}
-  # S4 is NOT a survivor. In the dark mode the editor's ground and text ARE
-  # the pane's surface and body text (#282828 / #f3f3f3 both), so dropping the
-  # editor fill changes no dark cell — but the light mode's editor is the
-  # desktop's measured light editor, on #282828, which the light panel is
-  # not. S4 is therefore graded by the light case (`TIER2_FILTERS`).
+DECLARED_SURVIVORS = {"N1", "S4"}
+  # S4 IS behaviour-preserving now, in both modes. The editor's ground is the
+  # desktop's measured one (`dtEditorThemeGround`), and the desktop renders
+  # Monaco transparent over its pane, so that ground IS the pane's surface:
+  # #282828 in Dark and, since the desktop's light theme paints from the
+  # design system's Light palette, #e6e2db in Light. Dropping the editor fill
+  # leaves the pane's own fill showing, the same colour, so no cell changes.
+  # It was killed by the light case only while the desktop's light theme kept
+  # the dark panel under its light editor; measured SURVIVED on 2026-10-20.
+  # The fill is still asserted where it is observable: the light and dark
+  # cases check the editor's cells are the editor ground and that no cell is
+  # unfilled.
 
 
 def sha(rel):

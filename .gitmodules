@@ -108,3 +108,6 @@
 [submodule "libs/tree-sitter-cadence"]
 	path = libs/tree-sitter-cadence
 	url = https://github.com/metacraft-labs/tree-sitter-cadence.git
+[submodule "libs/nim-regex"]
+	path = libs/nim-regex
+	url = https://github.com/nitely/nim-regex

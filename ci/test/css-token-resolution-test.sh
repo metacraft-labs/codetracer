@@ -67,7 +67,6 @@ make_fixture() {
 		: theme.styl |> !stylus |> theme.css
 	EOF
 	printf '%s\n' "${css}" >"${root}/css/theme.css"
-	printf 'theme.css = 0\n' >"${root}/ci/test/css-token-resolution-legacy.baseline"
 }
 
 run_guard() {
@@ -196,58 +195,43 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 8. LEGACY ARM, upward. A palette variable that did not resolve reaches the
-#    output as SCREAMING_CASE. Above the ceiling it fails.
+# 8. LEGACY ARM. A palette variable that did not resolve reaches the output
+#    as SCREAMING_CASE, and that fails outright, naming the declaration and
+#    the variable — a single leak is enough. (`BACKGROUND_NEIGHBOUR_COLOR`
+#    is the shape that shipped: one palette defined it, the other did not.)
 # ---------------------------------------------------------------------------
 make_fixture "${work}/f8" '.pane {
+  color: #fff;
   background-color: BACKGROUND_NEIGHBOUR_COLOR;
 }'
 out="$(run_guard "${work}/f8" || true)"
-if grep -q "ratchet only turns one way" <<<"${out}" && grep -q "^FAIL" <<<"${out}"; then
-	report ok "a legacy leak above the ceiling fails"
+if grep -q "theme.css:3  background-color: BACKGROUND_NEIGHBOUR_COLOR" <<<"${out}" &&
+	grep -q "legacy SCREAMING_CASE" <<<"${out}" && grep -q "^FAIL" <<<"${out}"; then
+	report ok "a single legacy leak fails and is named"
 else
-	report fail "a legacy leak above the ceiling fails" "${out}"
+	report fail "a single legacy leak fails and is named" "${out}"
 fi
 
 # ---------------------------------------------------------------------------
-# 9. LEGACY ARM, downward. A ceiling left above reality is room for a
-#    regression to hide in, so under-running the ceiling fails too, with the
-#    edit that fixes it.
+# 9. LEGACY ARM, no tolerance left. This arm used to be a ratchet whose
+#    per-stylesheet ceilings lived in `ci/test/css-token-resolution-legacy.
+#    baseline`; the backlog was cleared and the file deleted. A ceilings
+#    file restored at that path must not excuse a leak again — if the guard
+#    ever goes back to reading one, this arm goes red.
 # ---------------------------------------------------------------------------
 make_fixture "${work}/f9" '.pane {
-  color: #fff;
-}'
-printf 'theme.css = 3\n' >"${work}/f9/ci/test/css-token-resolution-legacy.baseline"
-out="$(run_guard "${work}/f9" || true)"
-if grep -q "Lower the ceiling to 0" <<<"${out}" && grep -q "^FAIL" <<<"${out}"; then
-	report ok "a ceiling that has drifted above reality fails"
-else
-	report fail "a ceiling that has drifted above reality fails" "${out}"
-fi
-
-# ---------------------------------------------------------------------------
-# 10. LEGACY ARM, enforcing. The mode this repo switches to once the backlog
-#     in css-token-resolution-legacy.baseline is cleared.
-# ---------------------------------------------------------------------------
-make_fixture "${work}/f10" '.pane {
   background-color: BACKGROUND_NEIGHBOUR_COLOR;
 }'
-printf 'theme.css = 1\n' >"${work}/f10/ci/test/css-token-resolution-legacy.baseline"
-out="$(run_guard "${work}/f10" || true)"
-if grep -q "^OK" <<<"${out}"; then
-	report ok "a legacy leak at its ceiling is tolerated by the ratchet"
+printf 'theme.css = 1\n' >"${work}/f9/ci/test/css-token-resolution-legacy.baseline"
+out="$(run_guard "${work}/f9" || true)"
+if grep -q "BACKGROUND_NEIGHBOUR_COLOR" <<<"${out}" && grep -q "^FAIL" <<<"${out}"; then
+	report ok "a legacy leak fails even beside an old ceilings file"
 else
-	report fail "a legacy leak at its ceiling is tolerated by the ratchet" "${out}"
-fi
-out="$(run_guard "${work}/f10" --enforce-legacy || true)"
-if grep -q "enforce-legacy" <<<"${out}" && grep -q "^FAIL" <<<"${out}"; then
-	report ok "--enforce-legacy fails on a leak the ratchet tolerates"
-else
-	report fail "--enforce-legacy fails on a leak the ratchet tolerates" "${out}"
+	report fail "a legacy leak fails even beside an old ceilings file" "${out}"
 fi
 
 # ---------------------------------------------------------------------------
-# 11. END TO END, over the real tree. Compiles the shipped stylesheets with
+# 10. END TO END, over the real tree. Compiles the shipped stylesheets with
 #     the real stylus and asserts the real guard is green. Read-only.
 #     Skipped rather than failed when stylus is absent, so the suite is still
 #     useful outside the dev shell — the arms above need only python3.

@@ -909,16 +909,19 @@ MUTATIONS: list[Mutation] = [
         control_replace="  if not (size <= MaxDefinitionBytes):",
     ),
     Mutation(
+        # RE-AIMED 2026-10-17: `readCheckoutDefinition` (CTC-3f) checks its
+        # scope with the same two lines, so the needle occurred twice; it now
+        # quotes the scan loop's scope-count guard above them.
         "D3", DIR,
-        "    let sp = pathProblem(scope)\n    if sp != ppOk:",
-        "    let sp = ppOk\n    if sp != ppOk:",
+        "      break\n    let sp = pathProblem(scope)\n    if sp != ppOk:",
+        "      break\n    let sp = ppOk\n    if sp != ppOk:",
         C_SCOPE, NIM_CLI, "wanted pdcScopeEscapesProject, got:",
         "a caller's package scope stops being checked at the point it is "
         "joined to the checkout root, so `../elsewhere` and `/etc` become "
         "directories this scanner walks",
         control_name="the verdict is read through a second named binding",
-        control_find="    let sp = pathProblem(scope)\n    if sp != ppOk:",
-        control_replace="    let verdict = pathProblem(scope)\n"
+        control_find="      break\n    let sp = pathProblem(scope)\n    if sp != ppOk:",
+        control_replace="      break\n    let verdict = pathProblem(scope)\n"
                         "    let sp = verdict\n    if sp != ppOk:",
     ),
     Mutation(

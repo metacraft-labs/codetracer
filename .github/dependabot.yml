@@ -8,5 +8,3 @@ updates:
       github-actions:
         patterns:
           - "*"
-    exclude-paths:
-      - "tsc-ui-tests" # TypeScript Playwright e2e tests (managed separately)

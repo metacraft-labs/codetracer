@@ -31,7 +31,7 @@
 
 import
   std / [ jsffi ],
-  electron_vars, config,
+  electron_vars, config, tab_answers,
   ../types,
   ../lib/[ jslib ],
   ../../common/ct_logging
@@ -135,10 +135,12 @@ proc abbreviatedReviewCommit(sha: cstring): cstring =
 
 proc sendReviewDatasetRead(anchorId, datasetPath: cstring; kind: cstring;
                            ok: bool; message: cstring; fileCount: int;
-                           commit: cstring; dataset: DeepReviewData) =
+                           commit: cstring; dataset: DeepReviewData;
+                           tab: JsObject) =
+  ## `tab`: the tab whose Agent Activity feed asked (`tab_answers`).
   if mainWindow.isNil:
     return
-  mainWindow.webContents.send "CODETRACER::review-dataset-read", js{
+  mainWindow.webContents.send "CODETRACER::review-dataset-read", withTab(js{
     anchorId: anchorId,
     datasetPath: datasetPath,
     kind: kind,
@@ -147,7 +149,7 @@ proc sendReviewDatasetRead(anchorId, datasetPath: cstring; kind: cstring;
     fileCount: fileCount,
     commit: commit,
     dataset: dataset
-  }
+  }, tab)
 
 proc onOpenReviewDataset*(sender: js,
     response: jsobject(anchorId=cstring, datasetPath=cstring, kind=cstring)) =
@@ -169,17 +171,18 @@ proc onOpenReviewDataset*(sender: js,
   let datasetPath = response.datasetPath
   let anchorId = response.anchorId
   let kind = if response.kind.isNil: cstring"inspect" else: response.kind
+  let tab = askingTab(response.toJs)
   if datasetPath.len == 0:
     errorPrint "onOpenReviewDataset: empty dataset path"
     sendReviewDatasetRead(anchorId, datasetPath, kind, false,
-      cstring"No dataset path was given.", 0, cstring"", nil)
+      cstring"No dataset path was given.", 0, cstring"", nil, tab)
     return
 
   let read = readReviewDatasetFile(datasetPath)
   if not read.ok:
     infoPrint "index: review dataset unreadable at ", datasetPath
     sendReviewDatasetRead(anchorId, datasetPath, kind, false, read.message,
-      0, cstring"", nil)
+      0, cstring"", nil, tab)
     return
 
   if kind == cstring"open":
@@ -191,4 +194,4 @@ proc onOpenReviewDataset*(sender: js,
 
   sendReviewDatasetRead(anchorId, datasetPath, kind, true, cstring"",
     read.fileCount, abbreviatedReviewCommit(read.commitSha),
-    if kind == cstring"open": read.data else: nil)
+    if kind == cstring"open": read.data else: nil, tab)

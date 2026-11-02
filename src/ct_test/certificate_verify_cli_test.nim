@@ -627,14 +627,25 @@ suite "ct test verify (CTC-3f)":
     check verify(repo, "--worktree").code == VerifyUndecided
 
   test "a state ct test verify cannot judge exits 2":
-    # A git-tree-sha256 record in a SHA-1 repository: this consumer cannot
-    # compute that algorithm here, so the record is unevaluated and — being
-    # about the required targets — makes the outcome unverifiable, never "not
-    # covered". A content-addressed lookup cannot reach such a record (its
-    # directory is named by an id nobody here can compute); it is found in
-    # the workspace carrier the store reader pools.
+    # A record this consumer cannot evaluate, found where a keyed lookup
+    # does find it — in the state's own content directory: a later schema
+    # version (Verification.md §7: unverifiable, never invalid). Being about
+    # the required targets as far as anyone can tell, it makes the outcome
+    # unverifiable, never "not covered". (Until reprobuild published to the
+    # local store this case used a git-tree-sha256 record in reprobuild's
+    # pooled workspace directory; that directory is no longer read, and
+    # Transport.md §5.1 says a keyed lookup never surfaces an algorithm the
+    # consumer cannot compute — the verifier's rule for one stays pinned by
+    # the `verify/content-unknown-algorithm` vector.)
     let repo = newRepo("sha256-record")
-    discard freshStore()
+    let laterStore = freshStore()
+    let w = stateContent(repo, workingTreeState())
+    let later = certificateFor(w, "sha256-record",
+      @["tests/a.fixture", "tests/b.fixture"]).replace(
+        "schema = \"test-certificate.v1\"", "schema = \"test-certificate.v2\"")
+    createDir(contentDir(laterStore, w))
+    writeFile(contentDir(laterStore, w) / "later.toml", later)
+    # Nor is the old pooled directory read: a sha256 record there is not seen.
     let carrier = repo / ".repro" / "workspace" / "certificates"
     createDir(carrier)
     writeFile(carrier / "sha256.toml", certificateFor(
@@ -644,7 +655,8 @@ suite "ct test verify (CTC-3f)":
     check unverifiable.ran.code == VerifyUndecided
     let line = stderrLine(unverifiable.ran)
     check "could not decide (exit 2)" in line
-    check "git-tree-sha256" in line
+    check "test-certificate.v2" in line
+    check "git-tree-sha256" notin line
     check unverifiable.report["unevaluated"].len == 1
     # ...and once the requirement is covered by records evaluated end to
     # end, the unevaluated one no longer matters (Verification.md §7.1).
@@ -750,6 +762,63 @@ suite "ct test verify (CTC-3f)":
     if getuid() != 0:
       check blocked.code == VerifyCovered
       check "system root" in stderrLine(blocked)
+
+  test "a search that could not cover a root exits 2, never 1":
+    ## Transport.md §2.1/§2.4/§5: a root that is unresolved, or exists and
+    ## cannot be read, is not "searched and empty". A certificate in the
+    ## other root still covers (exit 0, with a note), but when nothing in
+    ## what WAS searched covers the state the answer is "could not decide"
+    ## (exit 2) naming the root — not "none found" (exit 1), which would send
+    ## the user to re-run tests that may already be certified.
+    let repo = newRepo("incomplete")
+    let store = freshStore()
+    writeFile(repo / "a.txt", "alpha edited\n")
+    # Control: a complete search with nothing in it is exit 1, none found.
+    let none = verifyJson(repo, "--worktree")
+    check none.ran.code == VerifyNotCovered
+    check none.report["finding"].getStr == "none-found"
+    check not none.report["search_incomplete"].getBool
+
+    let issued = testRun(repo)
+    let document = readFile(issued["written_to"].getStr)
+    removeFile(issued["written_to"].getStr)
+
+    # The USER root UNRESOLVED: every variable it could come from is
+    # relative or empty. The system root is still searched.
+    let savedHome = getEnv("HOME")
+    let savedState = getEnv("XDG_STATE_HOME")
+    putEnv(UserRootVariable, "relative/user-root")
+    putEnv("XDG_STATE_HOME", "relative/state")
+    putEnv("HOME", "relative-home")
+    discard placeInStore(store, document, system = true)
+    let systemCovers = verifyJson(repo, "--worktree")
+    check systemCovers.ran.code == VerifyCovered
+    check systemCovers.report["search_incomplete"].getBool
+    check "user root could not be resolved" in stderrLine(systemCovers.ran)
+    removeDir(store.systemRoot)
+    let unresolved = verifyJson(repo, "--worktree")
+    check unresolved.ran.code == VerifyUndecided
+    check unresolved.report["finding"].getStr == "search-incomplete"
+    let unresolvedLine = stderrLine(unresolved.ran)
+    check "could not decide (exit 2)" in unresolvedLine
+    check "search was incomplete" in unresolvedLine
+    check "user root could not be resolved" in unresolvedLine
+    check "none found" notin unresolvedLine
+    putEnv("HOME", savedHome)
+    if savedState.len > 0: putEnv("XDG_STATE_HOME", savedState)
+    else: delEnv("XDG_STATE_HOME")
+    putEnv(UserRootVariable, store.user)
+
+    # The USER root UNREADABLE (mode bits; unavailable to root, which reads
+    # through them): exit 2 naming it.
+    createDir(store.user)
+    setFilePermissions(store.user, {})
+    let blocked = verify(repo, "--worktree")
+    setFilePermissions(store.user, {fpUserRead, fpUserWrite, fpUserExec})
+    if getuid() != 0:
+      check blocked.code == VerifyUndecided
+      check "user root" in stderrLine(blocked)
+      check "search was incomplete" in stderrLine(blocked)
 
   test "only ct-test records are evaluated":
     let repo = newRepo("frameworks")

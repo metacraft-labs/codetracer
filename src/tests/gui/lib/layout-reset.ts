@@ -1,11 +1,33 @@
 /**
- * Helpers for ensuring the bundled default layout is used during tests.
+ * The saved desktop arrangement a GUI test launches over.
  *
- * Some tests rely on specific tabs (BUILD, PROBLEMS, FIND IN FILES) being
- * present in the layout.  If the user has a saved custom layout that removed
- * these tabs, the tests would fail.  These helpers backup the user layout,
- * replace it with the bundled default from the source tree, and restore the
- * original on teardown.
+ * A launch's arrangement is decided by the files under
+ * `$CODETRACER_HOME/config` (`lib/ct-home.ts`): `default_layout.json` (the
+ * debug-mode layout), `auto_hide_state.json` (pinned panels) and
+ * `default_edit_layout.json` (edit and review mode). Tests in one worker share
+ * that directory, so the launch fixture (`lib/fixtures.ts`) resets all three
+ * before every launch through the helpers below, unless a spec opts out.
+ *
+ * WHICH `default_layout.json` A LAUNCH GETS — `prepareUserLayout`:
+ *
+ *   * by default, NONE. The file is removed, so the index process takes the
+ *     product's own first-run path (`index/config.installModeDefault`): it
+ *     installs the Debug mode's default derived from the prefix's
+ *     `config/default_layout.json` by `index/mode_default_layout.modeDefaultLayout`
+ *     — TESTS a tab of the FILES stack, no CONSTRAINTS. That is the
+ *     arrangement a user opens a recording with, and the one every CodeTracer
+ *     front-end shares, so a spec that says nothing about the layout measures
+ *     what the product shows;
+ *   * `bundledLayout` — the bundled `src/config/default_layout.json` copied
+ *     VERBATIM (`ensureDefaultLayout`). No mode draws that tree (its third
+ *     column is a standing TEST RESULTS stack over a CONSTRAINTS stack), so it
+ *     is only for a spec whose subject is the tree itself;
+ *   * `preserveUserLayout` — whatever an earlier launch of the worker saved,
+ *     untouched, for a spec that observes the desktop restoring its own layout.
+ *
+ * Until 2026-10-22 the bundled copy was the DEFAULT, so every spec that did
+ * not opt out launched on that tree (codetracer-pm issue
+ * `2026-10-14-gui-test-fixture-defaults-every-launch-to-the-bundled-layout-the-product-calls-nobodys-layout.md`).
  */
 
 import * as fs from "node:fs";
@@ -25,9 +47,12 @@ function currentLayoutPaths(): { userLayoutDir: string; userLayoutPath: string; 
 
 const backupSuffix = ".backup_build_tests";
 
+/** The bundled `default_config.yaml` must carry exactly this many top-level `theme:` lines. */
+const ThemeLinesPerConfig = 1;
+
 /**
  * The bundled default layout shipped with the source tree.
- * `codetracerInstallDir` should be the repo root (one level above tsc-ui-tests).
+ * `codetracerInstallDir` should be the repo root (three levels above src/tests/gui/).
  */
 function bundledDefaultLayoutPath(codetracerInstallDir: string): string {
   return path.join(codetracerInstallDir, "src", "config", "default_layout.json");
@@ -48,22 +73,33 @@ export function ensureDefaultConfig(codetracerInstallDir: string, theme = ""): v
   }
   const target = path.join(userLayoutDir, ".config.yaml");
   fs.copyFileSync(bundled, target);
-  if (theme.length > 0) {
+  if (theme !== "") {
     // The bundled config names its theme on one top-level `theme:` line; a
     // config without exactly one is a changed schema, and silently launching
     // in the default theme would make a light capture a dark one.
-    const text = fs.readFileSync(target, "utf8");
-    const line = /^theme:.*$/m;
-    if ((text.match(/^theme:.*$/gm) ?? []).length !== 1) {
+    // Matched line by line rather than with a regex: the lint config demands
+    // the `v` flag on every regex, and the suite's `tsconfig.json` targets
+    // ES2022, which rejects it (TS1501).
+    const isThemeLine = (line: string): boolean => line.startsWith("theme:");
+    const lines = fs.readFileSync(target, "utf8").split("\n");
+    if (lines.filter(isThemeLine).length !== ThemeLinesPerConfig) {
       throw new Error(`${bundled} does not carry exactly one top-level 'theme:' line`);
     }
-    fs.writeFileSync(target, text.replace(line, `theme: "${theme}"`));
+    const themed = lines.map((line) => (isThemeLine(line) ? `theme: "${theme}"` : line));
+    fs.writeFileSync(target, themed.join("\n"));
   }
 }
 
 /**
- * Backup the user's layout and replace it with the bundled default.
- * Call this from `test.beforeAll()`.
+ * Back up the saved `default_layout.json` and replace it with the bundled
+ * `src/config/default_layout.json`, VERBATIM.
+ *
+ * The desktop then finds a saved layout and loads it as-is, so the product's
+ * first-run derivation of the Debug mode's default never runs: the window
+ * opens on the raw bundled tree, which no mode draws. The launch fixture calls
+ * this only for a spec that sets `bundledLayout` (`prepareUserLayout`); a
+ * spec does not call it itself — the fixture's reset runs at launch, after a
+ * `beforeAll`, and would undo it.
  */
 export function ensureDefaultLayout(codetracerInstallDir: string): void {
   const { userLayoutDir, userLayoutPath, backupPath } = currentLayoutPaths();
@@ -87,15 +123,59 @@ export function ensureDefaultLayout(codetracerInstallDir: string): void {
 /**
  * PLAT-45: remove the user's saved `default_layout.json` (and its `.broken`
  * sibling) so the next launch takes the product's own first-run path — the
- * index process copies `<prefix>/config/default_layout.json` itself.
+ * index process installs the Debug mode's default derived from
+ * `<prefix>/config/default_layout.json` itself.
  */
 export function removeUserLayout(): void {
   const { userLayoutPath } = currentLayoutPaths();
-  for (const victim of [userLayoutPath, userLayoutPath + ".broken"]) {
+  for (const victim of [userLayoutPath, `${userLayoutPath}.broken`]) {
     if (fs.existsSync(victim)) {
       fs.unlinkSync(victim);
     }
   }
+}
+
+/** The launch fixture's two `default_layout.json` options (`lib/fixtures.ts`). */
+export interface UserLayoutOptions {
+  /** Install the raw bundled tree instead of taking the first-run path. */
+  bundledLayout: boolean;
+  /** Leave whatever an earlier launch of the worker saved. */
+  preserveUserLayout: boolean;
+}
+
+/** What `prepareUserLayout` did to `default_layout.json`. */
+export type UserLayoutPreparation = "first-run" | "bundled" | "preserved";
+
+/**
+ * Put `default_layout.json` in the state the next launch should find — the
+ * launch fixture's decision, as one function so it is testable without
+ * Electron (`tests/harness/layout-reset.spec.ts`). See this module's header
+ * for the three outcomes; the default (neither option) is the product's own
+ * first-run path.
+ *
+ * Throws when both options are set: one asks for the bundled tree to be
+ * written, the other for the saved file to be left alone, and silently
+ * honouring either would launch a spec on a layout it did not ask for.
+ */
+export function prepareUserLayout(
+  options: UserLayoutOptions,
+  codetracerInstallDir: string,
+): UserLayoutPreparation {
+  if (options.bundledLayout && options.preserveUserLayout) {
+    throw new Error(
+      "layout-reset: `bundledLayout` and `preserveUserLayout` contradict each other — " +
+        "one installs the bundled tree, the other keeps the saved layout; set at most one",
+    );
+  }
+  if (options.preserveUserLayout) {
+    return "preserved";
+  }
+  if (options.bundledLayout) {
+    ensureDefaultLayout(codetracerInstallDir);
+    return "bundled";
+  }
+  removeUserLayout();
+  return "first-run";
 }
 
 /**
@@ -156,7 +236,7 @@ export function editLayoutPath(): string {
  */
 export function resetEditLayout(): void {
   const target = editLayoutPath();
-  for (const victim of [target, target + ".broken"]) {
+  for (const victim of [target, `${target}.broken`]) {
     if (fs.existsSync(victim)) {
       fs.unlinkSync(victim);
     }

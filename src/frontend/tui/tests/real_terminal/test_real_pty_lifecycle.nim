@@ -49,7 +49,9 @@
 ## handshake waits for, and never exits. The old blocking read never
 ## returned, behind an alternate screen the driver had already claimed, with
 ## `ISIG` cleared by `cfmakeraw` and no input loop running — so `Ctrl+c` reached
-## nothing.
+## nothing. (The engine has since learnt to refuse that garbage outright, so
+## the folder these cases use now stalls it with a container that is a pipe
+## nobody writes — `lifecycle_support.WedgeContainer`.)
 ##
 ## Both halves of the fix are asserted below, and each is PINNED BY A CHECK THAT
 ## REDDENS:
@@ -80,7 +82,7 @@ import ./lifecycle_support
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 59
+const ExpectedAssertions = 63
 
 var countedAssertions = 0
 
@@ -137,14 +139,14 @@ suite "CTUI-14 Tier 2: the pty lifecycle, and the wedge that used to end it":
     tracePath = resolved.tracePath
     checkpoint("trace: " & tracePath)
     ck dirExists(tracePath)
-    # THE GARBAGE FOLDER IS BUILT HERE, once, and it is built rather than
-    # checked in: a 4 KB file of urandom in a repository would be a fixture
-    # nobody could read, and the property that matters — "shape-valid, and not
-    # a recording" — is what the construction says out loud.
+    # THE WEDGE FOLDER IS BUILT HERE, once, and it is built rather than
+    # checked in: its one entry is a pipe nothing writes, under a container's
+    # name (`lifecycle_support.WedgeContainer` says why), and the property that
+    # matters — "shape-valid, and never a recording" — is what the
+    # construction says out loud.
     let wedge = wedgeFolder()
     checkpoint("shape-valid non-recording: " & wedge)
-    ck fileExists(wedge / "trace.bin")
-    ck getFileSize(wedge / "trace.bin") == WedgeBytes
+    ck isPipe(wedge / WedgeContainer)
 
   test "a session quit with `:quit` exits 0 with a paired alternate screen":
     # §4.3's `quit` command, typed at the `:` prompt, which is the exit path
@@ -181,13 +183,16 @@ suite "CTUI-14 Tier 2: the pty lifecycle, and the wedge that used to end it":
     ck noSurvivingReplayServer()
     sess.close()
 
-  test "`q` and Ctrl+c reach the same clean exit through the same restore":
-    # THE OTHER TWO QUIT KEYS §4.2 binds, so `:quit` above is one path of three
-    # rather than the only one that was ever tried. Both are asserted on the
-    # SAME three observables, because "it exited" is not the claim.
+  test "each base's quit keys reach the same clean exit through the same restore":
+    # THE OTHER QUIT KEYS, so `:quit` above is one path of several rather than
+    # the only one that was ever tried: the CUA base's `Ctrl+Q` (the default,
+    # PLAT-68), and §4.2's `q` and `Ctrl+c` under the Vim base. All are
+    # asserted on the SAME observables, because "it exited" is not the claim.
     var paths = 0
-    for key in ["q", "\x03"]:
-      var sess = tuiSession(@[tracePath], cols = Cols, rows = Rows)
+    for (key, base) in [("\x11", ""), ("q", "--keymap=vim"),
+                        ("\x03", "--keymap=vim")]:
+      let args = (if base.len > 0: @[base] else: @[]) & @[tracePath]
+      var sess = tuiSession(args, cols = Cols, rows = Rows)
       settleOnDebugger(sess, Cols, Rows)
       sess.send(key)
       let status = sess.waitExit(initDuration(seconds = 30))
@@ -203,12 +208,13 @@ suite "CTUI-14 Tier 2: the pty lifecycle, and the wedge that used to end it":
       sess.close()
       inc paths
     checkpoint("quit paths exercised: " & $paths)
-    ck paths == 2
+    ck paths == 3
     ck noSurvivingReplayServer()
 
   test "THE WEDGE: a stalled handshake ends on the clock, not on the user":
     # The folder passes every `stat` `traceFolderProblem` makes — it holds a
-    # `trace.bin` — and `replay-server` accepts it and then stops answering.
+    # `.ct` container — and `replay-server` opens it and then waits for bytes
+    # that never come.
     # Before CTUI-14 this hung for ever with the alternate screen claimed.
     let wedge = wedgeFolder()
     let started = getMonoTime()
@@ -362,7 +368,10 @@ suite "CTUI-14 Tier 2: the pty lifecycle, and the wedge that used to end it":
     # NOT CLAIMED AT ALL, which is the whole difference from the case above.
     ck counts.enters == 0
     ck counts.leaves == 0
-    ck screen.contains("not a CodeTracer recording")
+    # Read across the screen's row breaks: the message names the folder, so
+    # where it wraps depends on the checkout's path (`/home/…/codetracer`
+    # put the break inside "CodeTracer" on an 80-column screen).
+    ck screen.replace("\n", "").contains("not a CodeTracer recording")
     sess.close()
 
   test "assertion count":

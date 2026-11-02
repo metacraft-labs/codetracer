@@ -20,12 +20,11 @@
 # checker, not written down twice — a theme added to the build is covered the
 # day it is added.
 #
+# Both arms enforce: an unresolved design token and an unresolved legacy
+# SCREAMING_CASE palette variable each fail the run.
+#
 # Env:
 #   CT_CSS_TOKEN_JSON        write the findings as JSON to this path
-#   CT_CSS_TOKEN_ENFORCE_LEGACY=1
-#                            fail on any SCREAMING_CASE leak instead of
-#                            honouring the ratchet ceilings in
-#                            ci/test/css-token-resolution-legacy.baseline
 
 set -euo pipefail
 
@@ -60,9 +59,6 @@ done <"${ship_list}"
 args=()
 if [[ -n ${CT_CSS_TOKEN_JSON:-} ]]; then
 	args+=(--json "${CT_CSS_TOKEN_JSON}")
-fi
-if [[ ${CT_CSS_TOKEN_ENFORCE_LEGACY:-0} == "1" ]]; then
-	args+=(--enforce-legacy)
 fi
 
 # Not `exec`: the EXIT trap that removes the scratch directory has to run.

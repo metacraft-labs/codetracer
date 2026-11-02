@@ -53,15 +53,33 @@ import std/[algorithm, os, sequtils, strutils, tables, unittest]
 # (`CT_SPECS_DIR`, or the workspace sibling, at the `spec/` layout).
 import ../../../test_support/spec_documents
 
+import codetracer_embed
+
 import ../input/keymap
 import ../input/modal_state
+import ./navigation_table
+
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 309
+const ExpectedAssertions = 329
+  ## PLAT-70 Part B: +3 — `Shift+K` (`list.show-detail`) in NORMAL and
+  ## INSPECT (their two reachability checks), and `K` decoded.
+  ## PLAT-70 Part A: +8 — five output-pane view bindings (`z h`, `z l`, `z H`,
+  ## `z L`, `0`), their three new key bytes decoded.
+  ## The shared jump history: +6 — `Alt+Left` / `Alt+Right` bound (two chord
+  ## checks), two xterm sequences decoded, and their two reachability checks.
+  ## PLAT-68 Phase B: +2 — the `.cttui-keys` case is the one-time importer
+  ## now (the file translated, laid over the Vim base through the router,
+  ## its gaps reported), and the planted-`r` arm is the loader's refusal (one
+  ## check where two were); then −6, the import on a real file moved to
+  ## `tests/test_plat68_keybindings_file.nim` (a host module).
   ## PLAT-51: +3 — Ctrl+Enter in both modified-key forms and Alt+t decode
   ## (the desktop's "Add tracepoint" chords on the read-only editor's caret).
+  ## PLAT-68: +7 — three key spellings (F6, Shift+F6, Ctrl+Shift+p), their
+  ## three bindings' chord checks, three newly decodable modifier forms, and
+  ## two junk forms fewer.
 
 var countedAssertions = 0
 
@@ -81,12 +99,12 @@ const
   SpecSectionHeading = "### 4.2 Keybindings Reference Table"
   SpecRelativePath = specDocumentRef("Front-Ends/CodeTracer-TUI.md")
 
-  ExpectedSpecRows = 33
+  ExpectedSpecRows = 34
     ## §4.2's row count, counted from the document on 2026-09-06. Asserted so
     ## that a parser which silently stopped at the first odd row — or a table
     ## that lost a row — is red here rather than quietly checking less.
 
-  ExpectedBindingCount = 90
+  ExpectedBindingCount = 102
     ## Every binding in `defaultKeymap()`, across all four modes. The
     ## NON-VACUITY FLOOR: every "for every binding …" sweep below is satisfied
     ## for free by an empty table, and this is the one assertion that is not.
@@ -102,6 +120,17 @@ const
     ## two actions — `g t` / `g T` and `Ctrl+Tab` / `Ctrl+Shift+Tab`.
     ## `specSectionOf` answers `ssSpec331` for both, and the case below asserts
     ## that exactly those two come from that section.
+    ##
+    ## 93 SINCE PLAT-68: `F6` / `Shift+F6` (focus the next / previous pane —
+    ## the way off an editor whose `Tab` now indents) and `Ctrl+Shift+p` (the
+    ## command palette, VS Code's chord, beside `F1`), CodeTracer-TUI.md §4.2.
+    ##
+    ## 95 SINCE the shared jump history: `Alt+Left` / `Alt+Right`, history
+    ## back / forward (CodeTracer-TUI.md §4.2's "History Back / Forward").
+    ##
+    ## 102 SINCE PLAT-70 Part B: `Shift+K` (`list.show-detail`) in NORMAL and
+    ## INSPECT — an operation of the shared Vim base with no terminal
+    ## `KeyAction`, like Part A's output-pane view rows (100), so not a §4.2 row.
 
   # Real xterm byte sequences, and the canonical name each must decode to.
   # This list is the "reachability" oracle of check 4, and it is written from
@@ -114,10 +143,14 @@ const
     ("f", "f"), ("r", "r"), ("c", "c"), ("o", "o"), ("O", "O"), ("j", "j"),
     ("k", "k"), ("l", "l"), ("h", "h"), ("m", "m"), ("x", "x"), ("q", "q"),
     ("g", "g"), ("G", "G"), ("t", "t"), ("T", "T"), ("i", "i"),
+    ("H", "H"), ("L", "L"), ("0", "0"), ("K", "K"),
     ("[", "["), ("]", "]"), ("{", "{"), ("}", "}"), (".", "."),
     ("/", "/"), ("?", "?"), (":", ":"), (" ", "Space"),
     ("\r", "Enter"), ("\n", "Enter"), ("\x7f", "Backspace"),
-    ("\b", "Backspace"), ("\x1b", "Esc"),
+    # PLAT-68: of `0x08` and `0x7f`, the one the tty's VERASE names is
+    # Backspace and the other is Ctrl+Backspace; `keyName`'s default VERASE is
+    # `0x7f`, every modern terminal's.
+    ("\b", "Ctrl+Backspace"), ("\x1b", "Esc"),
     ("\x1b[A", "Up"), ("\x1b[B", "Down"), ("\x1b[C", "Right"),
     ("\x1b[D", "Left"),
     ("\x15", "Ctrl+u"), ("\x04", "Ctrl+d"), ("\x10", "Ctrl+p"),
@@ -137,6 +170,14 @@ const
     # "modifyOtherKeys"), and the `CSI u` convention as `CSI 9 ; m u`.
     ("\x1b[27;5;9~", "Ctrl+Tab"), ("\x1b[27;6;9~", "Ctrl+Shift+Tab"),
     ("\x1b[9;5u", "Ctrl+Tab"), ("\x1b[9;6u", "Ctrl+Shift+Tab"),
+    # PLAT-68's pane and palette chords: `CSI 17 ~` is F6, and Ctrl+Shift+p
+    # has no legacy encoding (it is `0x10`, Ctrl+p) — the Kitty `CSI u` form
+    # carries it, which is why the palette keeps `F1` beside it.
+    # The history's chords: an arrow with a modifier is `CSI 1 ; m D|C`
+    # (ctlseqs, "PC-Style Function Keys"), Alt is `1 + 2 = 3`.
+    ("\x1b[1;3D", "Alt+Left"), ("\x1b[1;3C", "Alt+Right"),
+    ("\x1b[17~", "F6"), ("\x1b[17;2~", "Shift+F6"),
+    ("\x1b[112;6u", "Ctrl+Shift+p"),
   ]
 
 # ---------------------------------------------------------------------------
@@ -238,7 +279,7 @@ proc sortedUnique(items: seq[string]): seq[string] =
 
 # ---------------------------------------------------------------------------
 
-let km = defaultKeymap()
+let km = navigationKeymap()
 let rows = readSpecRows(specPath())
 
 suite "CTUI-9: the keymap is §4.2, and it has no conflicts":
@@ -389,7 +430,9 @@ suite "CTUI-9: the keymap is §4.2, and it has no conflicts":
             if note notin duplicates:
               duplicates.add note
           elif a.chords.len < bnd.chords.len and
-               bnd.chords[0 ..< a.chords.len] == a.chords:
+               bnd.chords[0 ..< a.chords.len] == a.chords and
+               canBothHold(parseWhen(a.whenText).expr,
+                           parseWhen(bnd.whenText).expr):
             # `a` SHADOWS `bnd`: a user who types `a`'s sequence can never
             # reach `bnd`, because the shorter one fires first.
             shadowed.add $mode & ": " & a.chords.join(" ") & " (" & $a.action &
@@ -419,23 +462,19 @@ suite "CTUI-9: the keymap is §4.2, and it has no conflicts":
 
     # THE MUTATION ARM. The check above must be able to FAIL, or it is
     # indistinguishable from one that is not reading the table. A bare `r`
-    # planted beside §4.2's `rf` is the exact defect it exists to catch.
-    var mutated = defaultKeymap()
-    mutated.bindings.add Binding(mode: mmNormal, spelling: "r", chords: @["r"],
-                                 action: kaStepInto)
-    var mutantShadows = 0
-    let mutatedNormal = mutated.bindingsFor(mmNormal)
-    for i in 0 ..< mutatedNormal.len:
-      for j in 0 ..< mutatedNormal.len:
-        if i == j: continue
-        let a = mutatedNormal[i]
-        let bnd = mutatedNormal[j]
-        if a.chords.len < bnd.chords.len and
-           bnd.chords[0 ..< a.chords.len] == a.chords:
-          inc mutantShadows
-    checkpoint("planted a bare `r`: " & $mutantShadows & " shadowing pair(s)")
-    # Exactly two: `r` makes `rf` unreachable and `rc` unreachable.
-    ck mutantShadows == 2
+    # planted beside §4.2's `rf` is the exact defect it exists to catch — and
+    # since PLAT-68 the table's LOADER refuses it (`base_rows.definitionOf`),
+    # so a base with that row does not load at all.
+    var refused = ""
+    try:
+      discard definitionOf(bkVim, NavigationRows & @[BaseRow(
+        chords: "r", operation: "debugger.step-into", table: GlobalTable,
+        navModes: {nmNormal})])
+    except BaseRowError as e:
+      refused = e.msg
+    checkpoint("planted a bare `r`: " & refused)
+    # Exactly two: `r` makes `r f` unreachable and `r c` unreachable.
+    ck refused.count("prefix r (debugger.step-into)") == 2
 
   test "every chord in the table is reachable from real xterm bytes":
     # `keyName` is asserted against the byte sequences first, so the name set
@@ -451,7 +490,7 @@ suite "CTUI-9: the keymap is §4.2, and it has no conflicts":
       if got notin names:
         names.add got
     ck decoded == KeyBytes.len
-    ck decoded == 68
+    ck decoded == 77
 
     var unreachable: seq[string] = @[]
     var chordsChecked = 0
@@ -468,12 +507,14 @@ suite "CTUI-9: the keymap is §4.2, and it has no conflicts":
     checkpoint("chords checked: " & $chordsChecked)
     # Every binding contributes one chord, plus one extra for each of the SEVEN
     # two-chord bindings §4.2 has: `Ctrl+w` h/j/k/l, `rf`, `rc` and `g` `g` —
-    # and the TWO §3.3.1 adds, `g t` and `g T`: nine.
+    # and the TWO §3.3.1 adds, `g t` and `g T`: nine — and the FOUR the output
+    # panes' view adds (Horizontal-Overflow.md §4.4), `z h` / `z l` / `z H` /
+    # `z L`: thirteen.
     var twoChord = 0
     for bnd in km.bindings:
       if bnd.chords.len == 2:
         inc twoChord
-    ck twoChord == 9
+    ck twoChord == 13
     ck chordsChecked == ExpectedBindingCount + twoChord
 
     # …and the decoder REFUSES what is not a key, so "every chord decodes" is
@@ -482,13 +523,19 @@ suite "CTUI-9: the keymap is §4.2, and it has no conflicts":
     # desktop's Ctrl+Enter "Add tracepoint" chord, which a terminal can send
     # in no other form: another codepoint, or a modifier outside xterm's
     # table, is still not a key.
-    for junk in ["", "\x1b[<0;12;5M", "\x1b[", "\x1b[99~", "\x1b[1;9P",
-                 "\x1b[15;99~", "\x1bOZ", "\x1b[0;1;2X",
-                 "\x1b[27;5;14~", "\x1b[14;5u", "\x1b[27;99;9~",
-                 "\x1b[9;99u", "\x1b[9u"]:
+    # PLAT-68 widened the modifier to the whole xterm / Kitty bit set
+    # (Shift 1, Alt 2, Ctrl 4, Super 8 and Meta 32 both `Meta`, the lock bits
+    # 64 / 128 ignored), so `CSI 1 ; 9 P` is Meta+F1 now, not junk; Hyper (16)
+    # is still not a key, nor is a modifier of 0.
+    for junk in ["", "\x1b[<0;12;5M", "\x1b[", "\x1b[99~", "\x1b[1;17P",
+                 "\x1b[15;0~", "\x1bOZ", "\x1b[0;1;2X",
+                 "\x1b[27;5;14~", "\x1b[14;5u", "\x1b[27;17;9~"]:
       checkpoint("must not decode: " & junk.escape())
       ck keyName(junk) == ""
     ck keyName("\x1b[13;5u") == "Ctrl+Enter"
+    ck keyName("\x1b[1;9P") == "Meta+F1"
+    ck keyName("\x1b[15;99~") == "Alt+Meta+F5"
+    ck keyName("\x1b[9u") == "Tab"
     ck keyName("\x1b[27;5;13~") == "Ctrl+Enter"
     # …and Alt + a printable key, the ESC-prefixed form (Alt+T, the same
     # chord's other spelling).
@@ -549,45 +596,40 @@ suite "CTUI-9: the keymap is §4.2, and it has no conflicts":
     ck palRaises
     ck palEvent == meOpenCommand
 
-  test "a `.cttui-keys` file layers over the table and reports what it cannot":
-    let base = defaultKeymap()
+  test "a `.cttui-keys` file is imported ONCE into keybindings.json, and reports what it cannot":
+    # PLAT-68 (Base-Keymaps-And-Layer-Stack.md §3.5): `.cttui-keys` is no
+    # longer read; it is translated into the one user keymap, once, with a
+    # report of what translated, and the result layers over the base like
+    # any user row.
     let text = """
 # CTUI-9 user keymap.
 NORMAL  Ctrl+w  l  = focus-left      # deliberately crossed over
 NORMAL  n          = -               # unbind step over
 INSPECT y          = value-origin
 """
-    let loaded = loadKeymap(base, text)
-    ck loaded.errors.len == 0
-    # The rebinding replaced rather than added.
-    var crossed = 0
-    for bnd in loaded.keymap.bindings:
-      if bnd.mode == mmNormal and bnd.chords == @["Ctrl+w", "l"]:
-        inc crossed
-        ck bnd.action == kaFocusLeft
-    ck crossed == 1
-    # The unbind removed exactly one binding, and left `F10` — §4.2's other
-    # spelling of the same action — alone.
-    var nInNormal = 0
-    var f10InNormal = 0
-    for bnd in loaded.keymap.bindings:
-      if bnd.mode == mmNormal and bnd.chords == @["n"]:
-        inc nInNormal
-      if bnd.mode == mmNormal and bnd.chords == @["F10"]:
-        inc f10InNormal
-    ck nInNormal == 0
-    ck f10InNormal == 1
-    # One added (`INSPECT y`), one removed (`NORMAL n`), one replaced
-    # (`NORMAL Ctrl+w l`), so the total is unchanged.
-    ck loaded.keymap.bindings.len == base.bindings.len
-
-    # …and the ORIGINAL is untouched, which is what makes `base` reusable and
-    # what stops a user's file from editing the product's defaults in place.
-    var nInBase = 0
-    for bnd in base.bindings:
-      if bnd.mode == mmNormal and bnd.chords == @["n"]:
-        inc nInBase
-    ck nInBase == 1
+    let imp = importCttuiKeys(text)
+    ck imp.total == 3
+    ck imp.translated == 2
+    ck imp.gaps.len == 1
+    ck imp.gaps[0].line == 4
+    checkpoint(imp.summary)
+    ck imp.summary.startsWith(".cttui-keys: 2 of 3 translated")
+    # Laid over the Vim base, the rows do what the old file did: the crossed
+    # chord, and `n` removed while F10 — §4.2's other spelling — stays.
+    let uk = parseUserKeymap(keybindingsText([imp]))
+    ck uk.errors.len == 0
+    var r = initKeymapRouter(bkVim, KeyDelivery(frontEnd: feTerminal,
+      platform: pkLinux, keyProtocol: kpLegacy), user = uk)
+    let path = @[element(ekWindow, "window"), element(ekTab, "tab:1"),
+                 pane("calltrace")]
+    let facts = SessionFacts(product: pmDebug, editor: sourceViewFacts())
+    discard r.route(facts, path, nmNormal, "Ctrl+w", 0)
+    let crossed = r.route(facts, path, nmNormal, "l", 1)
+    ck crossed.kind == erOperation
+    ck crossed.operation == "layout.focus-left"
+    ck r.route(facts, path, nmNormal, "n", 2).kind == erNothing
+    ck r.route(facts, path, nmNormal, "F10", 3).operation == "debugger.step-over"
+    ck r.removed == 1
 
     # EVERY WAY A LINE CAN BE WRONG IS REPORTED, one per kind, with its number.
     let bad = """
@@ -596,45 +638,19 @@ VISUAL n = step-over
 NORMAL n = teleport
 NORMAL = step-over
 """
-    let broken = loadKeymap(base, bad)
-    var kinds: seq[KeymapErrorKind] = @[]
-    for e in broken.errors:
-      kinds.add e.kind
-      checkpoint(describeError(e))
-    ck broken.errors.len == 4
-    ck kinds == @[keSyntax, keUnknownMode, keUnknownAction, keEmptyChords]
-    ck broken.errors[0].line == 1
-    ck broken.errors[1].line == 2
-    ck broken.errors[2].line == 3
-    ck broken.errors[3].line == 4
-    # A file of nothing but errors changes NOTHING, which is the property that
-    # makes reporting them worth doing.
-    ck broken.keymap.bindings.len == base.bindings.len
-    ck describeError(broken.errors[1]).contains("VISUAL")
-    ck describeError(broken.errors[1]).startsWith(KeymapFileName & ":2:")
+    let broken = importCttuiKeys(bad)
+    for g in broken.gaps: checkpoint($g.line & ": " & g.reason)
+    ck broken.translated == 0
+    ck broken.gaps.len == 4
+    ck broken.gaps[0].reason.contains("no '='")
+    ck broken.gaps[1].reason.contains("VISUAL-mode")
+    ck broken.gaps[2].reason.contains("'teleport' is not an action")
+    ck broken.gaps[3].reason.contains("a mode and at least one chord")
 
-    # THE FILE ITSELF. `loadKeymapFile` is what makes the table "loadable from
-    # a `.cttui-keys` file" rather than from a string somebody else read.
-    let dir = getTempDir() / "ctui9-keymap-" & $getCurrentProcessId()
-    createDir(dir)
-    let path = dir / KeymapFileName
-    writeFile(path, text)
-    let fromFile = loadKeymapFile(base, path)
-    ck fromFile.errors.len == 0
-    ck fromFile.keymap.bindings.len == loaded.keymap.bindings.len
-    var crossedInFile = 0
-    for bnd in fromFile.keymap.bindings:
-      if bnd.mode == mmNormal and bnd.chords == @["Ctrl+w", "l"] and
-         bnd.action == kaFocusLeft:
-        inc crossedInFile
-    ck crossedInFile == 1
-    # A MISSING FILE IS NOT AN ERROR and changes nothing — nobody is required
-    # to have one. The positive twin is the load above, through the same call.
-    removeFile(path)
-    let absent = loadKeymapFile(base, path)
-    ck absent.errors.len == 0
-    ck absent.keymap.bindings.len == base.bindings.len
-    removeDir(dir)
+    # THE FILE ITSELF — the one-time import writing `keybindings.json` on the
+    # real filesystem — is `tests/test_plat68_keybindings_file.nim`'s: it
+    # needs `viewmodel/host/keybindings_file`, which this declared SDK
+    # consumer may not import (`ci/test/sdk-facade-boundary.sh`).
 
   test "assertion count":
     echo "CHECKS: " & $countedAssertions

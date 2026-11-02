@@ -50,6 +50,7 @@ import viewmodels/[
   timeline_vm,
   debug_controls_vm,
   search_vm,
+  search_results_vm,
   point_list_vm,
   scratchpad_vm,
   shell_vm,
@@ -57,6 +58,16 @@ import viewmodels/[
   origin_chain_vm,
   origin_chain_types,
   terminal_output_vm,
+  build_vm,
+  errors_vm,
+  no_source_vm,
+  step_list_vm,
+  calltrace_editor_vm,
+  repl_vm,
+  low_level_code_vm,
+  request_panel_vm,
+  trace_log_vm,
+  command_palette_vm,
 ]
 
 type
@@ -104,7 +115,17 @@ type
     editorVM*: EditorVM
     timelineVM*: TimelineVM
     debugControlsVM*: DebugControlsVM
+    debugCommands*: DebugCommands
+      ## What the toolbar's actions do on this host, set by the host BEFORE
+      ## `initializePanelViewModels` builds `debugControlsVM` with it (D6: no
+      ## callback is assigned onto a VM afterwards). Left unset, the VM gets
+      ## `defaultDebugCommands` over the session's backend.
     searchVM*: SearchVM
+    searchResultsVM*: SearchResultsVM
+      ## PLAT-57. The Find in Files pane's ViewModel on the native
+      ## front-ends (`headless_app.paneViewModel(paneSearch)`); its searches
+      ## run in the host's loop through `host/find_in_files`. The desktop
+      ## keeps its own instance in `ui/search_results.nim`.
     pointListVM*: PointListVM
     scratchpadVM*: ScratchpadVM
     shellVM*: ShellVM
@@ -118,6 +139,23 @@ type
       ## program's output as lines and as a screen. Filled by the native
       ## hosts' `loadRecordingPanes` (`ct/load-terminal`); the desktop keeps
       ## its own instance in `ui/terminal_output.nim`.
+    buildVM*: BuildVM
+    errorsVM*: ErrorsVM
+    noSourceVM*: NoSourceVM
+    stepListVM*: StepListVM
+    calltraceEditorVM*: CalltraceEditorVM
+    replVM*: ReplVM
+    lowLevelCodeVM*: LowLevelCodeVM
+    requestPanelVM*: RequestPanelVM
+    traceLogVM*: TraceLogVM
+    commandPaletteVM*: CommandPaletteVM
+      ## The remaining panes' ViewModels, built with the others by
+      ## `initializePanelViewModels` so every front-end reads one instance
+      ## per session. None sends anything on construction. Not here: the
+      ## visual-replay panes (frame viewer, pixel history, shader debugger,
+      ## video player), built over their producer's `VisualReplayClient`
+      ## rather than the session's store; and the agent activity and agent
+      ## workspace panes, which keep one ViewModel per pane instance.
     originChainVM*: OriginChainVM
       ## Optional Value Origin Tracking VM. The host attaches it via
       ## `attachOriginChainVM` so the derived `crossProcessSpans`
@@ -133,9 +171,10 @@ type
       ## explicitly (tests).
     stateVMs*: Table[string, StateVM]
       ## Per-recording StateVM table — each entry owns independent
-      ## `activeTab` / `expandedPaths` / `watchExpressions` /
-      ## `selectedPath` signals so switching the active process does
-      ## not corrupt the inactive recording's per-step view.
+      ## `expandedPaths` / `selectedPath` / history signals so switching the
+      ## active process does not corrupt the inactive recording's per-step
+      ## view. The watch list is NOT per recording: every entry shares the
+      ## session's (Variable-State-Pane.md § Decisions, 2026-10-24).
     crossProcessSpans*: Memo[seq[CrossProcessSpan]]
       ## Derived view of
       ## `originChainVM.activeChain.crossProcessSpans` (§5.3). Empty
@@ -233,9 +272,15 @@ proc initializePanelViewModels*(session: SessionViewModel) =
   if session.timelineVM.isNil:
     session.timelineVM = createTimelineVM(session.store)
   if session.debugControlsVM.isNil:
-    session.debugControlsVM = createDebugControlsVM(session.store)
+    session.debugControlsVM = createDebugControlsVM(session.store,
+      if session.debugCommands.step.isNil:
+        defaultDebugCommands(session.store)
+      else:
+        session.debugCommands)
   if session.searchVM.isNil:
     session.searchVM = createSearchVM(session.store)
+  if session.searchResultsVM.isNil:
+    session.searchResultsVM = createSearchResultsVM(session.store)
   if session.pointListVM.isNil:
     session.pointListVM = createPointListVM(session.store)
   if session.scratchpadVM.isNil:
@@ -246,6 +291,26 @@ proc initializePanelViewModels*(session: SessionViewModel) =
     session.fileTreeVM = createFilesystemVM(session.store)
   if session.terminalOutputVM.isNil:
     session.terminalOutputVM = createTerminalOutputVM(session.store)
+  if session.buildVM.isNil:
+    session.buildVM = createBuildVM(session.store)
+  if session.errorsVM.isNil:
+    session.errorsVM = createErrorsVM(session.store)
+  if session.noSourceVM.isNil:
+    session.noSourceVM = createNoSourceVM(session.store)
+  if session.stepListVM.isNil:
+    session.stepListVM = createStepListVM(session.store)
+  if session.calltraceEditorVM.isNil:
+    session.calltraceEditorVM = createCalltraceEditorVM(session.store)
+  if session.replVM.isNil:
+    session.replVM = createReplVM(session.store)
+  if session.lowLevelCodeVM.isNil:
+    session.lowLevelCodeVM = createLowLevelCodeVM(session.store)
+  if session.requestPanelVM.isNil:
+    session.requestPanelVM = createRequestPanelVM(session.store)
+  if session.traceLogVM.isNil:
+    session.traceLogVM = createTraceLogVM(session.store)
+  if session.commandPaletteVM.isNil:
+    session.commandPaletteVM = createCommandPaletteVM(session.store)
 
 # ---------------------------------------------------------------------------
 # M29 §5.3 — multi-process session management
@@ -258,8 +323,14 @@ proc ensureStateVM*(session: SessionViewModel;
   ## switching the active process does not corrupt the inactive
   ## recording's per-step view.
   ##
+  ## THE WATCH LIST IS THE SESSION'S (Variable-State-Pane.md § Decisions,
+  ## 2026-10-24): every per-recording VM shares the session's primary StateVM's
+  ## `watchExpressions` / `watchOrigins` signals and edits them through it
+  ## (`watchOwner`), so a watch survives a process switch and remembers the
+  ## recording it was added in.
+  ##
   ## Note: per-recording StateVMs are built WITHOUT a CollaborativeSessionCore
-  ## reference — `selectTab` / `toggleExpand` / `addWatch` go through
+  ## reference — `toggleExpand` / `addWatch` go through
   ## `collabCore.dispatchLocalViewOp` (a single shared CRDT document
   ## state) which would otherwise mirror every mutation across every
   ## recording's VM via the same `statePane.*` slot. Local signal
@@ -267,10 +338,25 @@ proc ensureStateVM*(session: SessionViewModel;
   ## demands. The active-recording's StateVM (rotated by
   ## `onSwitchProcess`) is the one the collab projection bridge
   ## targets via the legacy single-VM path — out of scope for M29's
-  ## ship-core deliverable, in scope for the collab follow-on.
+  ## ship-core deliverable, in scope for the collab follow-on. The one
+  ## exception is the recording the first `setProcessTree` selects: it is
+  ## given the session's existing `stateVM`, collaboration core and all,
+  ## because that is the VM the host already shows (see `setProcessTree`).
   if session.stateVMs.hasKey(recordingId):
     return session.stateVMs[recordingId]
-  let vm = createStateVM(session.store, nil, session.runtimeRole)
+  # The owner is the session's StateVM; before it has one (a process tree
+  # seeded without `initializePanelViewModels`), the first per-recording VM.
+  var anchor = session.stateVM
+  if anchor.isNil:
+    for existing in session.stateVMs.values:
+      anchor = existing
+      break
+  let owner =
+    if anchor.isNil: nil
+    elif anchor.watchOwner.isNil: anchor
+    else: anchor.watchOwner
+  let vm = createStateVM(session.store, nil, session.runtimeRole,
+                         watchOwner = owner, recordingId = recordingId)
   session.stateVMs[recordingId] = vm
   vm
 
@@ -281,6 +367,29 @@ proc setProcessTree*(session: SessionViewModel;
   ## `onSwitchProcess` finds the VM ready (no race with the first
   ## panel render). When the active recording is empty (first reply)
   ## the first entry is selected automatically.
+  ##
+  ## THE FIRST REPLY NAMES THE STATEVM THE SESSION ALREADY HAS. The engine
+  ## sends `ct/listProcesses` on every launch, a single-trace one included
+  ## (`dap_server.rs::dispatch_session_load_event`), so in an ordinary session
+  ## this runs once, after `initializePanelViewModels` built `stateVM` and the
+  ## host bound its views, its watch input and the collaboration projection to
+  ## it. That VM is the recording being viewed, and it is registered as the
+  ## entry about to be selected rather than replaced by a fresh one. Replacing
+  ## it left two StateVMs: the one the user edits, and the one the stop loader
+  ## reads the watch list from (`stop_loader.watchList`), which held none — so
+  ## a move asked for no watches and emptied the Watches tab, and only a watch
+  ## edit on a VM still subscribed asked with the list again (#855).
+  if session.activeProcessRecordingId.val.len == 0 and entries.len > 0 and
+     not session.stateVM.isNil and
+     not session.stateVMs.hasKey(entries[0].recordingId):
+    var registered = false
+    for vm in session.stateVMs.values:
+      if vm == session.stateVM:
+        registered = true
+        break
+    if not registered:
+      session.stateVMs[entries[0].recordingId] = session.stateVM
+      session.stateVM.recordingId = entries[0].recordingId
   var seqEntries = newSeq[ProcessTreeEntry](entries.len)
   for i, e in entries:
     seqEntries[i] = e
@@ -449,6 +558,8 @@ proc dispose*(session: SessionViewModel; disconnectBackend: bool = true) =
     session.debugControlsVM.dispose()
   if not session.searchVM.isNil:
     session.searchVM.dispose()
+  if not session.searchResultsVM.isNil:
+    session.searchResultsVM.dispose()
   if not session.pointListVM.isNil:
     session.pointListVM.dispose()
   if not session.scratchpadVM.isNil:
@@ -459,6 +570,26 @@ proc dispose*(session: SessionViewModel; disconnectBackend: bool = true) =
     session.fileTreeVM.dispose()
   if not session.terminalOutputVM.isNil:
     session.terminalOutputVM.dispose()
+  if not session.buildVM.isNil:
+    session.buildVM.dispose()
+  if not session.errorsVM.isNil:
+    session.errorsVM.dispose()
+  if not session.noSourceVM.isNil:
+    session.noSourceVM.dispose()
+  if not session.stepListVM.isNil:
+    session.stepListVM.dispose()
+  if not session.calltraceEditorVM.isNil:
+    session.calltraceEditorVM.dispose()
+  if not session.replVM.isNil:
+    session.replVM.dispose()
+  if not session.lowLevelCodeVM.isNil:
+    session.lowLevelCodeVM.dispose()
+  if not session.requestPanelVM.isNil:
+    session.requestPanelVM.dispose()
+  if not session.traceLogVM.isNil:
+    session.traceLogVM.dispose()
+  if not session.commandPaletteVM.isNil:
+    session.commandPaletteVM.dispose()
   if not session.processTree.isNil:
     session.processTree.dispose()
   if not session.store.isNil:

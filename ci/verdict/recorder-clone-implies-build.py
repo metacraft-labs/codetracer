@@ -51,6 +51,7 @@ That was checked rather than assumed.
 Contract suite: ci/test/recorder-clone-implies-build-test.sh
 """
 
+import re
 import sys
 import pathlib
 
@@ -171,6 +172,54 @@ def expand_just_targets(text, recipes, _seen=None):
     return "\n".join(out)
 
 
+# A `scripts/<name>.sh` path as a step, a recipe or another script spells it:
+# `./scripts/x.sh`, `bash scripts/x.sh`, `"$REPO_ROOT/scripts/x.sh"`.
+SCRIPT_CALL = re.compile(r"(?<![A-Za-z0-9_.-])(?:\./)?(scripts/[A-Za-z0-9_./-]+\.sh)\b")
+
+
+def code_lines(text):
+    """`text` without its full-line `#` comments (shell, YAML and just alike)."""
+    return "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+
+
+def expand_script_calls(text, repo_root, _seen=None):
+    """Append the code of any repo `scripts/*.sh` that `text` names.
+
+    The same reason `just <target>` is followed, one hop further. The
+    `cross-process-linux` job clones the JS recorder and runs
+    `just test-cross-process`, whose recipe is `exec ./scripts/test-cross-process.sh`;
+    that gate builds the recorder through scripts/provision-cross-process-recording.sh,
+    which runs `build-siblings.sh --only codetracer-js-recorder`. Read only as
+    far as the recipe, the job looks like a clone with no build -- a false
+    positive, which costs what a missing check costs. Comment lines of a
+    followed script are dropped, and a script named only on a comment line is
+    not followed, so a script or recipe that only TALKS about building a
+    recorder does not count as building it. This is still a textual check: a
+    path inside a string (`echo "see scripts/x.sh"`) is followed as if it were
+    run. Only files under `scripts/` are followed -- it is where the repo's
+    build and gate entry points live -- and a path that resolves outside it
+    (`scripts/../x.sh`) is not. Each script is followed once, so a cycle of
+    scripts that name each other terminates.
+    """
+    if _seen is None:
+        _seen = set()
+    out = [text]
+    scripts_dir = (repo_root / "scripts").resolve()
+    for rel in SCRIPT_CALL.findall(code_lines(text)):
+        if rel in _seen:
+            continue
+        _seen.add(rel)
+        path = (repo_root / rel).resolve()
+        if scripts_dir not in path.parents or not path.is_file():
+            continue
+        code = code_lines(path.read_text(errors="replace"))
+        out.append(code)
+        out.append(expand_script_calls(code, repo_root, _seen))
+    return "\n".join(out)
+
+
 def step_clones(step):
     """Return the recorder repo a step clones, or None."""
     if not isinstance(step, dict):
@@ -183,14 +232,14 @@ def step_clones(step):
     return name if name in COMPILED_RECORDERS else None
 
 
-def step_builds(step, repo, recipes):
-    """True if this step's `run:` block -- or a `just` target it invokes -- builds `repo`."""
+def step_builds(step, repo, recipes, repo_root):
+    """True if this step's `run:` block -- or a `just` target or repo script it invokes -- builds `repo`."""
     if not isinstance(step, dict):
         return False
     run = step.get("run")
     if not isinstance(run, str):
         return False
-    run = expand_just_targets(run, recipes)
+    run = expand_script_calls(expand_just_targets(run, recipes), repo_root)
     # The step must reference the repo AND a build command. Requiring both
     # keeps `cd ../codetracer-ruby-recorder && ls` from counting, and keeps a
     # `just build` for some unrelated sibling from counting either.
@@ -244,7 +293,7 @@ def main(argv):
                 label, _ = COMPILED_RECORDERS[repo]
                 # The build must come AFTER the clone; a build step above the
                 # clone would run against whatever the previous job left.
-                if not any(step_builds(s, repo, recipes) for s in steps[clone_idx + 1:]):
+                if not any(step_builds(s, repo, recipes, repo_root) for s in steps[clone_idx + 1:]):
                     violations.append(
                         f"{path}: job '{job_id}' clones {repo} but never builds it "
                         f"({label}). The clone leaves a tree with no compiled "

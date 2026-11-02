@@ -59,7 +59,7 @@ const
     ## check its own assumption. Moving this file four directories up from the
     ## checkout root would otherwise make `CheckoutRoot` quietly wrong.
 
-  SpecRepoDirName* = "codetracer-specs"
+  SpecRepoDirName* = "codetracer-pm"
     ## The sibling checkout's directory name, beside this one.
 
   SpecSubdir* = "spec"
@@ -79,7 +79,7 @@ const
   SpecsDirEnvVar = "CT_SPECS_DIR"
     ## An explicit `codetracer-specs` checkout to read instead of the
     ## workspace sibling — the same variable, with the same meaning, that
-    ## `ci/test/shortcut-shadow-spec-agreement.sh` and
+    ## `ci/test/cua-keymap-extractor.sh` and
     ## `ci/test/editor-model-case-floor.sh` honour. It exists because the
     ## sibling directory is a SHARED checkout in a multi-repo workspace: it can
     ## sit on a branch from before `1735345d`, and a worktree under test has no

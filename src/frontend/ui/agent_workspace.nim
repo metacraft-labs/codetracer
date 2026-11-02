@@ -21,7 +21,7 @@
 ## Reference: codetracer-specs/DeepReview/Agentic-Coding-Integration.md
 
 import
-  ui_imports, ../utils, ../communication,
+  ui_imports, session_viewmodels, ../utils, ../communication,
   std/[strformat, jsconsole]
 
 import std/json
@@ -36,8 +36,10 @@ from ../viewmodel/viewmodels/agent_workspace_vm import
   setCoverageOverlayEnabled, setNotificationCount
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
-  from ../viewmodel/views/isonim_agent_workspace_view import
-    mountIsoNimAgentWorkspacePanel, AgentWorkspaceCallbacks
+  import ../viewmodel/views/isonim_agent_workspace_view
+  import isonim/web/web_renderer
+  import ./panel_host
+  from ../viewmodel/session_vm import SessionViewModel
 
 # ---------------------------------------------------------------------------
 # Monaco FFI helpers (similar to deepreview.nim but prefixed to avoid
@@ -64,11 +66,8 @@ var agentWorkspaceVMInstances*: JsAssoc[int, AgentWorkspaceVM] =
   JsAssoc[int, AgentWorkspaceVM]{}
 var agentWorkspaceComponentRefs: JsAssoc[int, AgentWorkspaceComponent] =
   JsAssoc[int, AgentWorkspaceComponent]{}
-var isoNimAgentWorkspaceMountedIds {.used.}: JsAssoc[int, bool] =
-  JsAssoc[int, bool]{}
 
 proc syncLegacyAgentWorkspaceIntoVM*(self: AgentWorkspaceComponent)
-proc tryMountIsoNimAgentWorkspacePanel*(componentId: int)
 proc requestAgentWorkspacePanelRefresh*(self: AgentWorkspaceComponent)
 
 # ---------------------------------------------------------------------------
@@ -161,38 +160,37 @@ proc legacyFileEntriesToVm(entries: seq[ActivityFileEntry]):
     result.add(legacyFileEntryToVm(entry))
 
 proc ensureAgentWorkspaceVM(self: AgentWorkspaceComponent): AgentWorkspaceVM =
+  ## The ViewModel of the pane `self`, on the session's store. `nil` until the
+  ## session's store is installed (`initAgentWorkspaceVMWithStore`): the
+  ## panel host mounts the pane only once the session exists.
+  ##
+  ## Per tab: on the store of the tab that holds `self`, keyed by that tab as
+  ## well as the component id (`tabScopedId`: every tab's first pane has id 0).
   if self.isNil:
     return nil
-  if agentWorkspaceVMInstances.hasKey(self.id):
-    return agentWorkspaceVMInstances[self.id]
-
-  if agentWorkspaceVMStore.isNil:
-    let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-      when defined(js):
-        result = newPromise proc(resolve: proc(resp: JsonNode)) =
-          resolve(%*{})
-      else:
-        var fut = newFuture[JsonNode]("stub-backend")
-        fut.complete(%*{})
-        result = fut
-    let stubBackend = BackendService(
-      sendProc: stubSend,
-      onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-      disconnectProc: proc() = discard,
-    )
-    agentWorkspaceVMStore = createReplayDataStore(stubBackend)
-
-  result = createAgentWorkspaceVM(agentWorkspaceVMStore)
-  agentWorkspaceVMInstances[self.id] = result
+  let key = data.tabScopedId(self)
+  if agentWorkspaceVMInstances.hasKey(key):
+    return agentWorkspaceVMInstances[key]
+  let ownTab = sessionVMOf(data.sessionOfComponent(self))
+  let store =
+    if not ownTab.isNil: ownTab.store
+    elif not data.anySessionViewModels(): agentWorkspaceVMStore
+    else: nil
+  if store.isNil:
+    return nil
+  result = createAgentWorkspaceVM(store)
+  agentWorkspaceVMInstances[key] = result
 
 proc initAgentWorkspaceVMWithStore*(store: ReplayDataStore) =
+  ## Install the shown tab's store, and build the ViewModel of every pane that
+  ## has none yet, each on its own tab's store. Called on every tab switch: a
+  ## pane that has its ViewModel keeps it.
   agentWorkspaceVMStore = store
-  agentWorkspaceVMInstances = JsAssoc[int, AgentWorkspaceVM]{}
-  isoNimAgentWorkspaceMountedIds = JsAssoc[int, bool]{}
-  for _, component in agentWorkspaceComponentRefs:
+  for key, component in agentWorkspaceComponentRefs:
+    if component.isNil or agentWorkspaceVMInstances.hasKey(key):
+      continue
     discard ensureAgentWorkspaceVM(component)
     component.syncLegacyAgentWorkspaceIntoVM()
-    tryMountIsoNimAgentWorkspacePanel(component.id)
 
 proc initAgentWorkspaceVM*(self: AgentWorkspaceComponent) =
   discard ensureAgentWorkspaceVM(self)
@@ -200,7 +198,7 @@ proc initAgentWorkspaceVM*(self: AgentWorkspaceComponent) =
 proc syncLegacyAgentWorkspaceIntoVM*(self: AgentWorkspaceComponent) =
   if self.isNil:
     return
-  agentWorkspaceComponentRefs[self.id] = self
+  agentWorkspaceComponentRefs[data.tabScopedId(self)] = self
   let vm = ensureAgentWorkspaceVM(self)
   if vm.isNil:
     return
@@ -215,13 +213,11 @@ proc syncLegacyAgentWorkspaceIntoVM*(self: AgentWorkspaceComponent) =
   vm.setNotificationCount(self.notifications.len)
 
 proc requestAgentWorkspacePanelRefresh*(self: AgentWorkspaceComponent) =
-  ## Refresh the Agent Workspace IsoNim mount after legacy component state
-  ## changes.  Signal writes update mounted views; the mount attempt covers the
-  ## first refresh after the GoldenLayout host is created.
+  ## Bring the pane's ViewModel up to the component's state; the mounted
+  ## view follows its signals.
   if self.isNil:
     return
   self.syncLegacyAgentWorkspaceIntoVM()
-  tryMountIsoNimAgentWorkspacePanel(self.id)
 
 # ---------------------------------------------------------------------------
 # Notification handling
@@ -437,36 +433,39 @@ proc toggleCoverageOverlay(self: AgentWorkspaceComponent) =
   self.updateDecorations()
   self.syncLegacyAgentWorkspaceIntoVM()
 
-proc tryMountIsoNimAgentWorkspacePanel*(componentId: int) =
-  when defined(js):
-    if isoNimAgentWorkspaceMountedIds.hasKey(componentId) and
-       isoNimAgentWorkspaceMountedIds[componentId]:
-      return
-    if not agentWorkspaceComponentRefs.hasKey(componentId):
-      return
-    let component = agentWorkspaceComponentRefs[componentId]
-    let vm = ensureAgentWorkspaceVM(component)
-    if vm.isNil:
-      return
-    let container = document.getElementById(
-      cstring(fmt"agentWorkspaceComponent-{componentId}"))
-    if container.isNil:
-      return
-    let callbacks = AgentWorkspaceCallbacks(
-      onToggleView: proc() =
-        component.toggleWorkspaceView(),
-      onToggleOverlay: proc() =
-        component.toggleCoverageOverlay(),
-      onSelectFile: proc(index: int) =
-        component.switchToFile(index),
-      afterDynamicRender: proc() =
-        component.initEditor(),
-    )
-    mountIsoNimAgentWorkspacePanel(
-      cast[isonim_dom_api.Element](container), vm, componentId, callbacks)
-    isoNimAgentWorkspaceMountedIds[componentId] = true
-  else:
-    discard
+when defined(js):
+  proc hostComponentId(host: isonim_dom_api.Element): int {.importjs:
+    "(function(e){var p=(e.id||'').split('-');var n=Number(p[p.length-1]);return isNaN(n)?0:n;})(#)".}
+    ## The `<id>` of the host's `agentWorkspaceComponent-<id>`.
+
+  # The panel host mounts each Agent Workspace pane into the container
+  # GoldenLayout creates (`ui/panel_host`); the factory has created its
+  # component by then.
+  setPanelRenderer(Content.AgentWorkspace,
+    proc(r: WebRenderer; host: isonim_dom_api.Element;
+         session: SessionViewModel): isonim_dom_api.Element =
+      if agentWorkspaceVMStore.isNil and not session.isNil:
+        agentWorkspaceVMStore = session.store
+      let componentId = hostComponentId(host)
+      # The pane of the tab whose container holds `host`.
+      let component = AgentWorkspaceComponent(
+        data.hostTabComponent(host, Content.AgentWorkspace, componentId))
+      component.syncLegacyAgentWorkspaceIntoVM()
+      let vm = ensureAgentWorkspaceVM(component)
+      if vm.isNil:
+        return isonim_dom_api.createElement(isonim_dom_api.document, cstring"div")
+      let callbacks = AgentWorkspaceCallbacks(
+        onToggleView: proc() =
+          component.toggleWorkspaceView(),
+        onToggleOverlay: proc() =
+          component.toggleCoverageOverlay(),
+        onSelectFile: proc(index: int) =
+          component.switchToFile(index),
+        afterDynamicRender: proc() =
+          component.initEditor(),
+      )
+      renderAgentWorkspacePanel[WebRenderer, isonim_dom_api.Element](
+        r, vm, componentId, callbacks))
 
 # ---------------------------------------------------------------------------
 # IPC handlers

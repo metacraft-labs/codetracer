@@ -210,7 +210,7 @@ export function javascriptRecorderUnavailableReason(): string | null {
     return "node is not available on PATH";
   }
   const env = process.env.CODETRACER_JS_RECORDER_PATH;
-  if (env && fs.existsSync(env)) {
+  if (env && fs.statSync(env, { throwIfNoEntry: false })?.isFile()) {
     return null;
   }
   if (findOnPath("codetracer-js-recorder") !== null) {

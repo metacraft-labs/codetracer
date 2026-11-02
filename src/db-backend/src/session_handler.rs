@@ -242,6 +242,37 @@ impl SessionHandler {
         PairIndex::build(&events)
     }
 
+    /// Ask every loaded trace for the DAP threads it contributes
+    /// ([`Handler::collect_thread_descriptors`]), in slot order.
+    ///
+    /// Takes `&mut self` because the per-trace query goes through
+    /// `ReplaySession::list_processes`, which may talk to a replay worker.
+    /// The result is collected up front so the pure aggregators below can
+    /// read it while borrowing the session immutably.
+    fn collect_inner_threads(&mut self) -> Vec<Vec<(u32, String)>> {
+        self.traces
+            .iter_mut()
+            .map(|loaded| loaded.handler.collect_thread_descriptors())
+            .collect()
+    }
+
+    /// The session-wide DAP thread list, built from each trace's own
+    /// thread descriptors — the production input to
+    /// [`SessionHandler::aggregated_thread_list`]. This is what the DAP
+    /// `threads` request returns for a session.
+    pub fn thread_list(&mut self) -> Result<Vec<AggregatedThread>, SessionHandlerError> {
+        let per_slot = self.collect_inner_threads();
+        self.aggregated_thread_list(|slot| threads_of_slot(&per_slot, slot))
+    }
+
+    /// The `ct/listProcesses` payload, built from each trace's own thread
+    /// descriptors — the production input to
+    /// [`SessionHandler::list_processes`].
+    pub fn process_list(&mut self) -> Result<Vec<ProcessListEntry>, SessionHandlerError> {
+        let per_slot = self.collect_inner_threads();
+        self.list_processes(|slot| threads_of_slot(&per_slot, slot))
+    }
+
     /// Build the aggregated thread list returned by the DAP `threads`
     /// request. Each trace's threads are prefixed with the manifest's
     /// `default_thread_prefix` so the user sees a flat list with
@@ -310,6 +341,18 @@ impl SessionHandler {
         }
         Ok(out)
     }
+}
+
+/// The inner threads of `slot` out of a per-slot snapshot taken by
+/// `SessionHandler::collect_inner_threads`.
+fn threads_of_slot(
+    per_slot: &[Vec<(u32, String)>],
+    slot: TraceSlot,
+) -> Result<Vec<(u32, String)>, SessionHandlerError> {
+    per_slot
+        .get(slot as usize)
+        .cloned()
+        .ok_or(SessionHandlerError::UnknownSlot { slot })
 }
 
 /// One row of the aggregated thread list. Equivalent to

@@ -581,6 +581,65 @@ suite "EMT §8 disabled versus hidden, and the browser's capability tier":
         pending(ToolbarAwaited & " — the disabled-button corpus")
       expectCount(5)
 
+suite "EMT §8 a host with no command route refuses, never fakes (#812)":
+
+  test "refuseCommands disables Build and Run with the host's reason":
+    ## The Electron desktop composes the edit bar from `desktopProfile`, which
+    ## has `capProcessArbitraryPrograms`, so `nargo compile` is ENABLED by the
+    ## model — and the desktop has no route that builds from the toolbar yet
+    ## (its `CODETRACER::update` has no main-process handler). An enabled
+    ## button that does nothing is what EMT-D14 forbids; the host says so with
+    ## `refuseCommands`, and the bar it renders must agree with the fields a
+    ## pane control reads.
+    startCount()
+    when EditModeToolbarBuilt:
+      const why = "Building and running from the toolbar is not available " &
+        "in the desktop app yet."
+      let composed = editModeToolbar(desktopProfile, EditMode,
+                                     listing = @["Nargo.toml", "src/main.nr"])
+      # The control: without the refusal the desktop model really is enabled,
+      # so the refusal below is what turns it off, not the fixture.
+      ck composed.build.enabled
+      ck composed.run.enabled
+
+      let refused = composed.refuseCommands(why)
+      ck not refused.build.enabled
+      ck not refused.run.enabled
+      ck refused.build.reason == why
+      ck refused.run.reason == why
+      ck refused.build.cause == dcCapability
+      ck refused.run.cause == dcCapability
+      # `buttons` is what the bar renders: it carries the refused buttons, not
+      # stale enabled copies of them.
+      ck refused.buttons.len == composed.buttons.len
+      var everyRenderedButtonOff = true
+      for button in refused.buttons:
+        if button.action in {tbaBuild, tbaRun} and button.enabled:
+          everyRenderedButtonOff = false
+      ck everyRenderedButtonOff
+      # Refused, NOT hidden: the slots, the group and the mode are unchanged,
+      # so the bar still shows the two buttons and §7.3's set is intact.
+      ck refused.actions == composed.actions
+      ck tbaDebuggerControls notin refused.actions
+      ck refused.commandGroupVisible
+      # The command stays on the button, so a reader can still see what the
+      # project would run.
+      ck refused.build.commandLine == composed.build.commandLine
+
+      # A button already off keeps ITS reason: the refusal applies to what the
+      # model would have run, the way `platformVerdict` does after selection.
+      let foundry = editModeToolbar(desktopProfile, EditMode,
+                                    listing = @["foundry.toml"])
+      let foundryRefused = foundry.refuseCommands(why)
+      ck not foundry.run.enabled
+      ck foundryRefused.run.reason == foundry.run.reason
+      ck foundryRefused.run.cause == foundry.run.cause
+      ck foundryRefused.build.reason == why
+    else:
+      for _ in 0 ..< 18:
+        pending(ToolbarAwaited & " — refuseCommands")
+    expectCount(18)
+
 suite "EMT §9 Run means record-then-replay, and the verdict is the artefact":
 
   test "EMT-A51/A52/A53/A55 four outcomes, and exit 0 is not one of them":

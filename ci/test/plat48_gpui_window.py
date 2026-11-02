@@ -29,17 +29,16 @@ does — a REAL pointer (isonim-gpui's `build/virtual-pointer`, a
   reveal-esc      `Esc`: every pixel as before
   key-reveal      `Ctrl+O`: the first footer pane revealed by key
   hover-slot      the pointer on a strip label: its hover label
-  pinned          a click on the State stack's pin button: docked
+  pinned          a click on the Variables tab's own pin icon: docked
   unpinned        its label hovered, then Unpin: placed again
-  top-docked      the Variables tab dragged to the margin above the layout
-                  and released: a TOP strip
+  top-docked      the Variables tab's context menu, Pin to Top: a TOP strip
   top-revealed    the pointer resting on the top label: the pane over the
                   tree, from the
                   top
   top-esc         `Esc`: every pixel as before
   top-back        the top label dragged back into the tree: placed
   session B, a layout document with a TOP-docked pane WRITTEN BY THE
-  TERMINAL — `codetracer-tui` on `calc` in a pty, `1` (its call-trace pane),
+  TERMINAL — `codetracer-tui` on `calc` in a pty, `1` (focus a pane),
   `:dock top`, `q`; its own layout store saves the document — opened with
   `--layout`:
   doc-top         the window opens with that pane in its top strip
@@ -143,14 +142,15 @@ class Window:
         self.geometry = os.path.join(OUT, sid + ".geometry.json")
         env = dict(os.environ)
         env.update({
-            "XDG_STATE_HOME": self.state,
+            "CODETRACER_HOME": os.path.join(self.state, "home"),
             "CODETRACER_TUI_LAYOUT_DIR": self.state,
             "CODETRACER_GPUI_GEOMETRY_OUT": self.geometry,
             "CODETRACER_GPUI_GESTURE_TRACE": "1",
         })
         self.log = open(os.path.join(OUT, sid + ".run.log"), "w")
+        # Ctrl+O is the modal bases' dock reveal; CUA uses it for Open File.
         self.proc = subprocess.Popen(
-            [BIN, "--quit-after-ms=900000", f"--width={FRAME_W}",
+            [BIN, "--keymap=vim", "--quit-after-ms=900000", f"--width={FRAME_W}",
              f"--height={FRAME_H}"] + (extra or []) + [trace],
             cwd=OUT, env=env, stdout=self.log, stderr=subprocess.STDOUT)
 
@@ -193,9 +193,9 @@ class Pointer:
         self.send(f"abs {x} {y}", "sleep 120")
         self.at = (x, y)
 
-    def click(self, x, y):
+    def click(self, x, y, button="left"):
         self.jump(x, y)
-        self.send("down", "sleep 120", "up", "sleep 300")
+        self.send("down " + button, "sleep 120", "up " + button, "sleep 300")
 
     def close(self):
         self.send("quit")
@@ -296,8 +296,8 @@ def omnibar_query(win, text, attempts=3):
 
 
 def terminal_top_docked_document():
-    """`codetracer-tui` on `calc` in a pseudo-terminal: `1` focuses its call
-    trace, `:dock top` docks it to the top edge, `q` quits. The terminal's
+    """`codetracer-tui` on `calc` in a pseudo-terminal: `1` focuses a pane,
+    `:dock top` docks that pane to the top edge, `q` quits. The terminal's
     own layout store writes the document (`tui-layout.json` under
     `CODETRACER_TUI_LAYOUT_DIR`); its path is returned."""
     store = os.path.join(OUT, "tui-layout")
@@ -306,7 +306,7 @@ def terminal_top_docked_document():
     env = {k: v for k, v in os.environ.items()
            if k not in ("TMUX", "STY", "TERM_PROGRAM", "NO_COLOR", "NERD_FONT")}
     env.update({"TERM": "xterm-256color", "COLORTERM": "truecolor",
-                "LANG": "en_US.UTF-8", "XDG_STATE_HOME": store,
+                "LANG": "en_US.UTF-8", "CODETRACER_HOME": os.path.join(store, "home"),
                 "CODETRACER_TUI_LAYOUT_DIR": store})
     log = open(os.path.join(OUT, "tui.transcript"), "wb")
     pid, fd = pty.fork()
@@ -409,6 +409,10 @@ def capture():
         shutil.copy(win.geometry, os.path.join(OUT, "a-menu.geometry.json"))
         pop = g["topBar"]["popovers"][1]
         rows = {r["label"]: r for r in pop["rows"]}
+        # Enter the submenu across Debug's row before moving down it. Vim's
+        # longer shortcuts widen this popover: a diagonal to its centre
+        # crosses Help in the parent menu and correctly opens that instead.
+        ptr.move(pop["rect"][0] + 12, centre(first["Debug"]["rect"])[1])
         ptr.move(*centre(rows["Step In"]["rect"]))
         steps["menu-hover"] = settle("menu-hover")
         facts["menuHover"] = win.geom()["topBar"]["highlight"]
@@ -482,7 +486,7 @@ def capture():
         # ---- pin / unpin ------------------------------------------------------
         g = win.geom()
         state = node_of(g, "state")
-        pin = [state["rect"][0] + state["rect"][2] - 26, state["strip"][1] + 3, 24, 24]
+        pin = state["pins"][state["panes"].index("state")]
         ptr.click(*centre(pin))
         steps["pinned"] = settle("pinned")
         g = win.geom()
@@ -493,8 +497,7 @@ def capture():
         if st is not None:
             rv = hover_reveal(win, ptr, st["rect"])
             if rv:
-                rr = rv["rect"]
-                ptr.click(rr[0] + rr[2] - 40, rr[1] + 15)
+                ptr.click(*centre(rv["unpin"]))
         steps["unpinned"] = settle("unpinned")
         g = win.geom()
         shutil.copy(win.geometry, os.path.join(OUT, "a-unpinned.geometry.json"))
@@ -502,20 +505,16 @@ def capture():
         # WHERE it went: the stack it was pinned from (`DockedPane.beside`).
         un = node_of(g, "state")
         facts["unpinnedStack"] = un["panes"] if un else []
-        # ---- the TOP edge: drag there, reveal, Esc, drag back ---------------
+        # ---- the TOP edge: Pin to Top, reveal, Esc, drag back ---------------
         steps["top-base"] = settle("top-base")
         g = win.geom()
         state = node_of(g, "state")
-        if state["tabs"]:
-            sx, sy = centre(state["tabs"][state["panes"].index("state")])
-        else:
-            # A bare pane: its heading row is its one tab (`tabAt`).
-            sx, sy = state["body"][0] + 40, state["body"][1] + 12
-        area = g["area"]
-        ptr.jump(sx, sy)
-        ptr.send("down", "sleep 150")
-        ptr.move(FRAME_W // 2, area[1] - 3)
-        ptr.send("sleep 300", "up", "sleep 400")
+        sx, sy = centre(state["tabs"][state["panes"].index("state")])
+        ptr.click(sx, sy, "right")
+        steps["top-menu"] = settle("top-menu")
+        # Left, Bottom, Right, Top: navigate the actual context menu by
+        # real keys. A missing or misrouted entry cannot manufacture a strip.
+        wt("-k", "Down", "-k", "Down", "-k", "Down", "-k", "Return")
         ptr.jump(FRAME_W - 6, 4)
         steps["top-docked"] = settle("top-docked")
         g = win.geom()
@@ -646,6 +645,22 @@ def jload(name):
     return json.load(open(os.path.join(OUT, name)))
 
 
+def strip_ocr(frame_path, strip, name):
+    """Read each actual label separately. Status/path text sharing the
+    footer is outside these labels and must not set their OCR line spacing."""
+    return "\n".join(ocr(frame_path, sl["rect"], f"{name}-{i}").strip()
+                     for i, sl in enumerate(strip["slots"]))
+
+
+def reveal_ocr(frame_path, revealed, name):
+    """Read the pane's heading and its Unpin control from their own pixels,
+    without unrelated output rows becoming part of the same OCR text block."""
+    rr, ur = revealed["rect"], revealed["unpin"]
+    title = [rr[0], rr[1], min(250, ur[0] - rr[0]), ur[1] + ur[3] - rr[1]]
+    return (ocr(frame_path, title, name + "-title", STRIP_GROUNDS).strip() + "\n" +
+            ocr(frame_path, ur, name + "-unpin", STRIP_GROUNDS).strip())
+
+
 def record():
     manifest = jload("manifest.json")
     facts = jload("facts.json")
@@ -689,7 +704,7 @@ def record():
     out["menuRoot"] = {"popover": root["rect"],
                        "button": seg(g, "menu")["rect"]}
     bottom = next(s for s in g["strips"] if s["edge"] == "bottom")
-    out["footerOcr"] = ocr(path("base"), bottom["rect"], "footer").strip()
+    out["footerOcr"] = strip_ocr(path("base"), bottom, "footer")
     # ---- the menu ------------------------------------------------------------
     gm = jload("a-menu.geometry.json")
     pop = gm["topBar"]["popovers"][1]
@@ -731,30 +746,32 @@ def record():
     n, box = changed(fr["reveal-base"], fr["reveal-bottom"])
     out["revealBottom"] = {"rect": rect, "changedBox": box,
                            "changedOutside": changed_outside(fr["reveal-base"], fr["reveal-bottom"], rect, gr),
-                           "ocr": ocr(path("reveal-bottom"), [rect[0], rect[1], rect[2], 80], "reveal",
-                                      STRIP_GROUNDS).strip()}
+                           "ocr": reveal_ocr(path("reveal-bottom"), gr["revealed"], "reveal")}
     n, _ = changed(fr["reveal-base"], fr["reveal-esc"])
     out["revealEscChanged"] = n
     gk = jload("a-keyreveal.geometry.json")
     reported["keyReveal"] = gk["revealed"]["pane"] if gk["revealed"] else None
     if gk["revealed"]:
-        kr = gk["revealed"]["rect"]
-        out["keyRevealOcr"] = ocr(path("key-reveal"), [kr[0], kr[1], kr[2], 80],
-                                  "keyreveal", STRIP_GROUNDS).strip()
+        out["keyRevealOcr"] = reveal_ocr(path("key-reveal"), gk["revealed"], "keyreveal")
     # ---- pin / unpin ---------------------------------------------------------
     reported["pinnedDocked"] = facts["pinnedDocked"]
     reported["unpinnedPlaced"] = facts["unpinnedPlaced"]
     reported["unpinnedStack"] = facts.get("unpinnedStack", [])
     gp = jload("a-pinned.geometry.json")
+    out["ticksReportedByWindow"]["pinned"] = gp["topBar"]["tick"]
     pb = next(s for s in gp["strips"] if s["edge"] == "bottom")
-    out["pinnedFooterOcr"] = ocr(path("pinned"), pb["rect"], "pinnedfooter").strip()
+    out["pinnedFooterOcr"] = strip_ocr(path("pinned"), pb, "pinnedfooter")
     gu = jload("a-unpinned.geometry.json")
+    out["ticksReportedByWindow"]["unpinned"] = gu["topBar"]["tick"]
     ub = next(s for s in gu["strips"] if s["edge"] == "bottom")
-    out["unpinnedFooterOcr"] = ocr(path("unpinned"), ub["rect"], "unpinnedfooter").strip()
+    out["unpinnedFooterOcr"] = strip_ocr(path("unpinned"), ub, "unpinnedfooter")
     un = next((n for n in gu["nodes"] if n["kind"] == "tabs" and "state" in n["panes"]), None)
-    out["unpinnedTabsOcr"] = (ocr(path("unpinned"), un["strip"], "unpinnedtabs",
-                                  STRIP_GROUNDS).strip()
-                              if un and un["strip"][2] > 0 else "")
+    # The actual pin's left edge bounds the caption. The pin and close
+    # marks are separate controls, not characters of the pane's name.
+    out["unpinnedTabsOcr"] = ("\n".join(
+        ocr(path("unpinned"), [t[0], t[1], un["pins"][i][0] - t[0], t[3]],
+            f"unpinnedtab-{i}").strip()
+        for i, t in enumerate(un["tabs"])) if un else "")
     # ---- the top edge --------------------------------------------------------
     gt = jload("a-top.geometry.json")
     top = next((s for s in gt["strips"] if s["edge"] == "top"), None)
@@ -766,8 +783,7 @@ def record():
         rr = gtr["revealed"]["rect"]
         out["topReveal"] = {"rect": rr,
                             "changedOutside": changed_outside(fr["top-docked"], fr["top-revealed"], rr, gtr),
-                            "ocr": ocr(path("top-revealed"), [rr[0], rr[1], rr[2], 80],
-                                       "toprev", STRIP_GROUNDS).strip()}
+                            "ocr": reveal_ocr(path("top-revealed"), gtr["revealed"], "toprev")}
         reported["topRevealPane"] = gtr["revealed"]["pane"]
         n, _ = changed(fr["top-docked"], fr["top-esc"])
         out["topEscChanged"] = n

@@ -101,7 +101,10 @@ for o in [d.get("origin", "")] + [x.get("origin", "") for x in d.get("languageOr
         seen.add(o)
         out.append(o)
 print("\n".join(out))
-')" || { echo "could not read the descriptor" >&2; exit 2; }
+')" || {
+	echo "could not read the descriptor" >&2
+	exit 2
+}
 
 # The paths to compare. EVERY `/assets/` path comes from the descriptor, so a
 # deployment that adds one is covered without editing this file; the rest are

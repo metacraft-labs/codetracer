@@ -390,7 +390,7 @@ suite "RS-M9 JavaScript request panel":
       let store = createReplayDataStore(mock.toBackendService())
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       let tableBody = findByClass(panel, "request-table-body")
       check tableBody != nil
       check tableBody.children.len == 0
@@ -555,7 +555,7 @@ suite "RS-M9 JavaScript request panel":
       let mock = newMockBackendService(autoRespond = true)
       let store = createReplayDataStore(mock.toBackendService())
       let vm = createRequestPanelVM(store)
-      let panel = renderRequestPanel(MockRenderer(), vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](MockRenderer(), vm)
       let body = findByClass(panel, "request-table-body")
       store.applyRequestSpanDelta(deltaBody(wire, cursor = 2, reset = true))
       require body.children.len == 2

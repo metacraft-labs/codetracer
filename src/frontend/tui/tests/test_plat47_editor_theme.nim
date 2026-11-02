@@ -31,6 +31,7 @@ import isonim_tui
 import ../app/syntax/highlighter
 import ../app/theme/editor_theme
 import ../app/theme/roles
+import ../app/theme/colour_math
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -136,14 +137,19 @@ suite "PLAT-47: the terminal's editor is the desktop's Monaco theme":
                            ("lineNumber", dtEditorThemeLineNumber),
                            ("activeLineNumber", dtEditorThemeActiveLineNumber),
                            ("executionLine", dtEditorThemeExecutionLine),
+                           ("executionPointer", dtEditorThemeExecutionPointer),
                            ("selection", dtEditorThemeSelection)]:
         let v = blk[key].getStr
         if v.startsWith("{"):
           # A reference into the design system (the dark file's ground and
           # active line number): the design system's own token, in this mode.
           let want = if key == "ground": dtColorsUiSurfaceBasePanel
+                     elif key == "executionPointer" and mode == dmDark:
+                       dtColorsEditorActionSecondary
                      else: dtColorsUiTextPrimaryLabel
           ck v == (if key == "ground": "{colors.ui.surface.base.panel}"
+                   elif key == "executionPointer" and mode == dmDark:
+                     "{colors.editor.action.secondary}"
                    else: "{colors.ui.text.primary.label}")
           ck DesignTokenHex[token][mode] == DesignTokenHex[want][mode]
         else:
@@ -180,6 +186,7 @@ suite "PLAT-47: the terminal's editor is the desktop's Monaco theme":
           ("lineNumber", dtEditorThemeLineNumber),
           ("activeLineNumber", dtEditorThemeActiveLineNumber),
           ("executionLine", dtEditorThemeExecutionLine),
+          ("executionPointer", dtEditorThemeExecutionPointer),
           ("selection", dtEditorThemeSelection)]:
         let measured = ed[key].getStr
         if measured != DesignTokenHex[token][mode]:
@@ -187,6 +194,52 @@ suite "PLAT-47: the terminal's editor is the desktop's Monaco theme":
                      ", generated " & DesignTokenHex[token][mode])
         ck measured.len == 7
         ck measured == DesignTokenHex[token][mode]
+
+  test "editor text clears AA on the editor and execution-line grounds":
+    # Read every shipped lexical and semantic rule, not only the handful of
+    # token classes visible in the calc fixture. No mocks or exception list.
+    for mode in DesignMode:
+      for background in [dtEditorThemeGround, dtEditorThemeExecutionLine]:
+        let bg = parseHexColour(DesignTokenHex[background][mode])
+        for rule in docs[mode]["rules"]:
+          if not rule.hasKey("foreground"): continue
+          let fg = "#" & rule["foreground"].getStr.strip(chars = {'#'})
+          let ratio = contrastRatio(parseHexColour(fg), bg)
+          checkpoint($mode & " lexical " & rule{"token"}.getStr &
+                     " on " & $background & ": " & $ratio)
+          ck ratio >= 4.5
+        for scope, colour in docs[mode]["semanticTokenColors"]:
+          let ratio = contrastRatio(parseHexColour(colour.getStr), bg)
+          checkpoint($mode & " semantic " & scope & " on " &
+                     $background & ": " & $ratio)
+          ck ratio >= 4.5
+        let numberRatio = contrastRatio(
+          parseHexColour(DesignTokenHex[dtEditorThemeLineNumber][mode]), bg)
+        checkpoint($mode & " resting line number on " & $background &
+                   ": " & $numberRatio)
+        ck numberRatio >= 4.5
+        let activeNumberRatio = contrastRatio(
+          parseHexColour(DesignTokenHex[dtEditorThemeActiveLineNumber][mode]), bg)
+        checkpoint($mode & " active line number on " & $background &
+                   ": " & $activeNumberRatio)
+        ck activeNumberRatio >= 4.5
+        let pointerRatio = contrastRatio(
+          parseHexColour(DesignTokenHex[RoleSpecs[srGutterExecutionPointer].fg][mode]), bg)
+        checkpoint($mode & " execution pointer on " & $background &
+                   ": " & $pointerRatio)
+        ck pointerRatio >= 3.0
+
+  test "the measured desktop focus outline clears AA on its adjacent surfaces":
+    let root = currentSourcePath().parentDir.parentDir.parentDir.parentDir.parentDir
+    for name in ["plat47-desktop-parity.electron.json",
+                 "plat47-desktop-parity-light.electron.json"]:
+      let capture = parseJson(readFile(root / "src/tests/visual/answers" / name))
+      ck capture["focus"]["outlineCount"].getInt > 0
+      let fg = parseHexColour(capture["focus"]["outline"].getStr)
+      for key in ["panel", "unfocusedEdge"]:
+        let ratio = contrastRatio(fg, parseHexColour(capture["focus"][key].getStr))
+        checkpoint(name & " focus on " & key & ": " & $ratio)
+        ck ratio >= 3.0
 
   test "every syntax and editor role paints a generated editor-theme token":
     for c in TokenClass:
@@ -203,6 +256,7 @@ suite "PLAT-47: the terminal's editor is the desktop's Monaco theme":
     ck RoleSpecs[srSurfaceEditor].bg == dtEditorThemeGround
     ck RoleSpecs[srSurfaceEditor].fg == dtEditorThemeRuleDefault
     ck RoleSpecs[srLineNumber].fg == dtEditorThemeLineNumber
+    ck RoleSpecs[srGutterExecutionPointer].fg == dtEditorThemeExecutionPointer
     ck RoleSpecs[srLineNumberActive].fg == dtEditorThemeActiveLineNumber
     ck RoleSpecs[srLineExecution].bg == dtEditorThemeExecutionLine
     ck RoleSpecs[srSurfaceCurrentLine].bg == dtEditorThemeExecutionLine
@@ -216,7 +270,7 @@ suite "PLAT-47: the terminal's editor is the desktop's Monaco theme":
     ck editorScopeToken("") == dtEditorThemeRuleDefault
     # The desktop's measured identifier colour on `calc` is the default rule.
     ck DesignTokenHex[tokenClassToken(tcIdentifier)][dmDark] == "#f3f3f3"
-    ck DesignTokenHex[tokenClassToken(tcKeyword)][dmDark] == "#5a9dd4"
+    ck DesignTokenHex[tokenClassToken(tcKeyword)][dmDark] == "#84b6df"
 
   test "the table covers every capture the terminal's grammars emit":
     var reached: set[TokenClass] = {}

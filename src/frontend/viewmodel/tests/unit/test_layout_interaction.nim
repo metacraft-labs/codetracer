@@ -1184,6 +1184,32 @@ suite "Interaction — dragging one divider (§4.3)":
     # And none of it touched the committed layout.
     check $saveLayout(l) == before
 
+  test "returning a divider to its start restores exact weights":
+    for weights in [@[1.0, 1.0, 1.0], @[0.1, 0.2, 0.7],
+                    @[1.0, 2.0, 4.0], @[0.001, 4.0, 7.0]]:
+      let l = initLayout(row([
+        pane(paneEditor, "Editor", weight = weights[0]),
+        pane(paneState, "State", weight = weights[1]),
+        pane(paneFlow, "Flow", weight = weights[2])]))
+      let before = $saveLayout(l)
+      let total = weights[0] + weights[1] + weights[2]
+      var boundary = 0.0
+      for divider in 0 .. 1:
+        boundary += weights[divider]
+        let started = beginResizeDivider(l, "", divider).get
+        let moved = started.proposeDivider(l, 0.5)
+        let restored = moved.proposeDivider(l, boundary / total)
+        check restored.proposed == weights
+        check commit(l, restored).isNone
+        checkNoOp apply(l, pendingCommand(l, restored).get)
+        check $saveLayout(l) == before
+    # Exact restoration must not swallow a real, very small movement.
+    let l = threeInARow()
+    let moved = beginResizeDivider(l, "", 1).get.proposeDivider(
+      l, 2.0 / 3.0 + 1e-12)
+    check moved.proposed != @[1.0, 1.0, 1.0]
+    check commit(l, moved).isSome
+
   test "a divider between stacks, or between whole containers, is draggable":
     # `beginResize` names a PANE and refuses a tab; a divider is named by its
     # container and index, so the two sides may be stacks or nested rows —

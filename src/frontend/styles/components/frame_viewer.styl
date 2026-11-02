@@ -39,12 +39,14 @@
 
     &.connected
       background: rgba(61, 135, 90, 0.24)
-      color: #8cd9a8
+      // Pale green and amber read on the dark toolbar; on the light one the
+      // success / warning text tokens (`by-mode`, defaults.styl).
+      color: by-mode(#8cd9a8, colors-ui-text-success-primary)
 
     &.disconnected,
     &.absent
       background: rgba(142, 119, 56, 0.24)
-      color: #d8c06f
+      color: by-mode(#d8c06f, colors-ui-text-warning-primary)
 
   .frame-viewer-frame-controls
     display: inline-flex

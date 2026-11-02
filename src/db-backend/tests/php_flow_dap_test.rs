@@ -52,15 +52,16 @@ fn test_php_debugger_line_jump() {
     let recording =
         TestRecording::create_db_trace(&source_path, Language::Php, &version_label).expect("PHP recording failed");
 
-    // Breakpoint at line 6 (entry of calculate_sum).
-    // The C extension registers a step event at function entry, which corresponds to line 6.
+    // Breakpoint at line 6, the entry of calculate_sum: the recorder keeps a
+    // call's entry step at its `function` line. Since the recorder records a
+    // step per executed statement (codetracer-php-recorder ec75871), `Next`
+    // from that entry reaches the body's first statement, line 7, and the
+    // next one line 8. (Before, the entry was followed by a second step on
+    // line 6, which is what this test used to expect.)
     let config = SteppingTestConfig {
         source_file: source_path.to_str().unwrap().to_string(),
         breakpoint_line: 6,
-        steps: vec![
-            // Landing line at breakpoint should be line 6
-            (StepAction::Next, 6),
-        ],
+        steps: vec![(StepAction::Next, 7), (StepAction::Next, 8)],
     };
 
     let mut runner =

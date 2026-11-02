@@ -74,10 +74,14 @@ fn go_mcr_streaming_flow_variables_and_values() {
 
     println!("MCR trace recorded at: {}", recording.trace_dir.display());
 
-    // Linux: db-backend replays the trace through `ct-mcr debugserver`,
-    // whose trace mode refuses it until HS-M2 U4b4, which returns this test
-    // to replay; the refusal is asserted on the trace by name.
-    if test_harness::mcr_linux_trace_mode_refused("go_mcr_streaming_flow_variables_and_values", &recording.trace_dir) {
+    // Linux: db-backend replays the trace through `ct-mcr debugserver`, which
+    // serves the stage0 emulator replay of a single-threaded process only.  A
+    // Go program always runs several threads (measured: 5 recorded threads),
+    // so the server refuses it naming XMR-B1 (multi-threaded emulator replay,
+    // HS-M2 decision D9), which returns this test to replay; until then the
+    // refusal is asserted on the trace by name.
+    if test_harness::mcr_linux_multi_thread_refused("go_mcr_streaming_flow_variables_and_values", &recording.trace_dir)
+    {
         return;
     }
 

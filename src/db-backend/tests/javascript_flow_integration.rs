@@ -41,7 +41,7 @@ fn create_javascript_flow_config() -> FlowTestConfig {
         ],
         // console and calculate_sum should NOT appear as variables
         excluded_identifiers: vec!["console".to_string(), "calculate_sum".to_string()],
-        expected_values,
+        expected_values: expected_values.into(),
     }
 }
 

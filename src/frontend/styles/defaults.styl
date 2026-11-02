@@ -5,10 +5,6 @@ CALLTRACE_COLOR_PREVIOUS = #00f
 CALLTRACE_COLOR_NEXT = #3aa4b5
 CALLTRACE_COLOR_CHILDREN = #0ff
 CALLTRACE_SUMMARY_BG = #a2a
-SPEED_VERY_FAST_BG = #52F373
-SPEED_FAST_BG = #4BA02F
-SPEED_MEDIUM_BG = #DCF438
-SPEED_SLOW_BG = #F02D2D
 HIGHLIGHT_COLOR = #62F4D4
 ERROR_COLOR_FG = #fff
 ERROR_COLOR_BG = #a00
@@ -101,3 +97,21 @@ BORDER_COLOR=DEFAULT
 HEADER_ELEMENT_BACKGROUND_COLOR=#eef
 
 TOOLTIP_DELAY_TIMER = 0.20s
+
+// by-mode(dark, light) — `light` when this stylesheet paints the design
+// system's Light mode (`COLOR_MODE = "Light"`, set by the light theme's palette
+// file), else `dark`.
+//
+// For a rule that painted a hard-coded colour in every theme, so the light
+// theme kept a dark surface. `light` is the design token of the rule's role,
+// which the light sheet resolves to its Light value. `dark` is the colour the
+// dark sheets have always painted there, kept verbatim so that they compile
+// byte-identically: none of the mapped tokens has that exact Dark value. When
+// one does, use the token alone and not this.
+//
+// A function, not a variable: it reads `COLOR_MODE` when a rule calls it,
+// after the palette file has set it, whereas this file is imported before.
+by-mode(dark, light)
+  if COLOR_MODE is defined and COLOR_MODE == "Light"
+    return light
+  dark

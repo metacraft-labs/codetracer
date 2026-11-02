@@ -6,8 +6,12 @@
 ## and refreshes this direct DOM surface whenever the overlay changes.
 
 import isonim/dsl/ui
-from isonim/core/computation import createRenderEffect
+import isonim/core/[signals, computation]
+import isonim/dsl/components
 import isonim/testing/mock_dom
+
+# The generic procs expand the DSL at their caller.
+export signals, computation, components
 
 when defined(js):
   import isonim/web/web_renderer
@@ -42,54 +46,36 @@ proc invokeSelect(callbacks: AutoHideOverlayTabsCallbacks; index: int) =
   if not callbacks.onSelect.isNil:
     callbacks.onSelect(index)
 
-proc renderOverlayTab(
-    r: MockRenderer;
+proc renderOverlayTab[R, N](
+    r: R;
     tab: AutoHideOverlayTabRecord;
     index: int;
-    callbacks: AutoHideOverlayTabsCallbacks): MockNode =
+    callbacks: AutoHideOverlayTabsCallbacks): N =
   ui(r):
     tdiv(class = overlayTabClass(tab.active),
          onclick = proc() = callbacks.invokeSelect(index)):
       text tab.title
 
-when defined(js):
-  proc renderOverlayTab(
-      r: WebRenderer;
-      tab: AutoHideOverlayTabRecord;
-      index: int;
-      callbacks: AutoHideOverlayTabsCallbacks): isonim_dom.Element =
-    ui(r):
-      tdiv(class = overlayTabClass(tab.active),
-           onclick = proc() = callbacks.invokeSelect(index)):
-        text tab.title
-
-proc renderAutoHideOverlayTabsPanel*(
-    r: MockRenderer;
+proc renderAutoHideOverlayTabsPanel*[R, N](
+    r: R;
     tabs: seq[AutoHideOverlayTabRecord];
     visible: bool;
     edgeClass: string;
     callbacks: AutoHideOverlayTabsCallbacks =
-      AutoHideOverlayTabsCallbacks()): MockNode =
+      AutoHideOverlayTabsCallbacks()): N =
+  ## The overlay's side tabs, for every renderer. `tabs` is a value the
+  ## caller re-derives and redraws (`renderAutoHideOverlayTabsInto`).
+  # A plain name for the child call: the `ui` macro passes a call through as
+  # a child only when its callee is an identifier, and `f[R, N](...)` is not.
+  template overlayTab(tab: AutoHideOverlayTabRecord; i: int): N =
+    renderOverlayTab[R, N](r, tab, i, callbacks)
   ui(r):
     tdiv(class = overlayTabsClass(visible, edgeClass)):
       if visible:
         for i, tab in tabs:
-          renderOverlayTab(r, tab, i, callbacks)
+          overlayTab(tab, i)
 
 when defined(js):
-  proc renderAutoHideOverlayTabsPanel*(
-      r: WebRenderer;
-      tabs: seq[AutoHideOverlayTabRecord];
-      visible: bool;
-      edgeClass: string;
-      callbacks: AutoHideOverlayTabsCallbacks =
-        AutoHideOverlayTabsCallbacks()): isonim_dom.Element =
-    ui(r):
-      tdiv(class = overlayTabsClass(visible, edgeClass)):
-        if visible:
-          for i, tab in tabs:
-            renderOverlayTab(r, tab, i, callbacks)
-
   proc renderAutoHideOverlayTabsInto*(
       r: WebRenderer;
       container: isonim_dom.Element;
@@ -103,6 +89,6 @@ when defined(js):
       discard isonim_dom.removeChild(containerNode, containerNode.firstChild)
 
     # This surface is refreshed into a static Golden Layout overlay host.
-    let panel = renderAutoHideOverlayTabsPanel(
+    let panel = renderAutoHideOverlayTabsPanel[WebRenderer, isonim_dom.Element](
       r, tabs, visible, edgeClass, callbacks)
     discard isonim_dom.appendChild(containerNode, isonim_dom.Node(panel))

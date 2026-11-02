@@ -198,8 +198,8 @@ build renderer src/frontend/ui_js.nim "${out_dir}/ui.js" \
 	-d:chronicles_enabled=off -d:ctRenderer -d:ctWeb
 # NO `-d:nodejs`, and that is a correction rather than a tidy-up. This script
 # assembles the bundle that gets DEPLOYED, and `-d:nodejs` selects Nim's node
-# arm — the same define `ci/test/renderer-browser-build.sh` proves the renderer
-# cannot even compile under, and which `web-bundle-smoke.sh` passes for the one
+# arm — the same define `ci/test/renderer-browser-build.sh` proves substitutes
+# std/dom's dummy document, and which `web-bundle-smoke.sh` passes for the one
 # legitimate reason that it then runs the result under `node`. Assembling the
 # shipped bundle with it meant the file uploaded to a CDN was a node build that
 # happened to contain no `require(`. The renderer arm beside it has always been

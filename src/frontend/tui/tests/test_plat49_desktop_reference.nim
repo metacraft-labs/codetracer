@@ -14,8 +14,9 @@
 ##     (`window_top_bar.gpuiTopBarLayout` / `gpuiMenuPopovers`) lay the same
 ##     open Menu ViewModel out in the same relations;
 ##   * finding 5, THE TOOLTIPS — every transport button's tooltip on the
-##     desktop is the ViewModel's `transportTooltip` over the desktop's own
-##     binding — the very text the GPUI window's hover popover draws;
+##     desktop is the ViewModel's `transportTooltip` over the chord the
+##     desktop's router runs it with (PLAT-68) — the very text the GPUI
+##     window's hover popover draws;
 ##   * finding 6, THE PLACEHOLDER — the desktop's palette input shows the
 ##     Omnibar ViewModel's `OmnibarPlaceholder`, the words the terminal's
 ##     field and GPUI's draw.
@@ -29,6 +30,29 @@ import std/[json, os, strutils, tables, unittest]
 import codetracer_embed
 import ../app/views/top_bar
 import ../../gpui/window_top_bar
+
+import ../../viewmodel/keymap/[keymap_router, client_actions, context_keys,
+                               editing_keymap, operation_catalogue,
+                               scope_path]
+
+const DesktopDelivery = KeyDelivery(frontEnd: feDesktop, platform: pkLinux,
+                                    keyProtocol: kpNative)
+
+proc desktopChord(clientAction: string): string =
+  ## THE ORACLE: the chord the desktop's router runs `clientAction` with at
+  ## the window -- what its toolbar tooltip shows (`ui/shortcut_labels`,
+  ## `ui/chord_display`, `keymap_router.chordFor`; PLAT-68). The CUA base is
+  ## the desktop's default, and the capture runs with no `keybindings.json`.
+  ## It used to read the YAML `bindings:` table, which is legacy data since
+  ## PLAT-68: the desktop stopped showing it, so a fresh capture disagreed
+  ## with an oracle nothing draws any more.
+  let op = operationOfClientAction(clientAction)
+  if op.len == 0:
+    return ""
+  let (name, arg) = splitOperation(op)
+  initKeymapRouter(bkCua, DesktopDelivery).chordFor(
+    name, SessionFacts(product: pmDebug, editor: sourceViewFacts()),
+    @[element(ekWindow, "window")], nmNormal, arg)
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
@@ -134,15 +158,14 @@ suite "PLAT-49: the desktop is the reference":
       ck abs(pops[1].rect.y - debugY) <= 4
 
     test "every transport tooltip is the ViewModel's, over the desktop's binding":
-      let bindings = desktopBindings()
       var compared = 0
       for c in TransportControls:
         let desk = a["tooltips"]{c.id}.getStr
-        checkpoint(c.id & ": desktop '" & desk & "'")
-        ck desk == transportTooltip(c.id, bindings.getOrDefault(c.clientAction))
+        let chord = desktopChord(c.clientAction)
+        checkpoint(c.id & ": desktop '" & desk & "', router '" & chord & "'")
+        ck desk == transportTooltip(c.id, chord)
         # …which is exactly what GPUI's hover popover draws for it.
-        ck desk == controlTooltip(controlIndex(c.id),
-                                  bindings.getOrDefault(c.clientAction))
+        ck desk == controlTooltip(controlIndex(c.id), chord)
         inc compared
       ck compared == TransportControls.len
 

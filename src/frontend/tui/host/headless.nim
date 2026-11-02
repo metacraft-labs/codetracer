@@ -124,6 +124,12 @@ proc runHeadless*(traceFolder: string; flags: app_capabilities.CapabilityFlags;
     # of the two to retry. See `cli.ExitUnreadableRecording`.
     stderr.writeLine(TuiProgramName & ": cannot open " & folder & ": " & e.msg)
     return ExitUnreadableRecording
+  except EngineStalledAfterOpenError as e:
+    # The engine read the recording and went quiet on the first request
+    # after it: the tty path's after-open wording and its exit code (§8b).
+    for line in stalledAfterOpenReport(TuiProgramName, folder, e.msg):
+      stderr.writeLine(line)
+    return ExitEngineStalled
   except DapStalledError as e:
     # The tty path's distinction, kept here: an engine that went quiet is not a
     # usage error, and a CI log that said `ExitUsage` would send the next
@@ -141,9 +147,18 @@ proc runHeadless*(traceFolder: string; flags: app_capabilities.CapabilityFlags;
   # filled the pane HERE only, so `--headless` showed files the interactive
   # terminal never did.
   session.header(rt)
-  session.setViewportHeight(rt.sourcePaneRows())
-  session.learnExtent()
-  session.refresh(rt)
+  # THE FIRST PANE LOADS, under the same clock as the open: nobody watches
+  # this mode, so an engine that answers none of them ends the run after ONE
+  # budget (`learnExtent` raises rather than costing one budget per request),
+  # reported as the tty path reports it (§8b).
+  try:
+    session.setViewportHeight(rt.sourcePaneRows())
+    session.learnExtent()
+    session.refresh(rt)
+  except DapStalledError as e:
+    for line in stalledAfterOpenReport(TuiProgramName, folder, e.msg):
+      stderr.writeLine(line)
+    return ExitEngineStalled
   app.notification = describe(session)
 
   # §6.2's `--goto=<tick>`, AFTER `learnExtent` and BEFORE the one frame this

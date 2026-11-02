@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Mutation arms for the Edit-mode-toolbar ViewModel suites.
 
-Run:
+Run (`[c|js]` is optional and defaults to `c`; every other argument is
+refused by name, with exit 2, before anything is compiled or mutated):
     direnv exec . python3 \
-      src/frontend/viewmodel/tests/unit/run-edit-mode-toolbar-mutations.py
+      src/frontend/viewmodel/tests/unit/run-edit-mode-toolbar-mutations.py [c|js]
 
 WHAT THIS HARNESS IS FOR, AND WHY IT IS NOT THE USUAL SHAPE
 ===========================================================
@@ -56,6 +57,7 @@ CLASSIFICATION (Verification-Harness-Traps.md §1)
 
 from __future__ import annotations
 
+import argparse
 import re
 import subprocess
 import sys
@@ -64,6 +66,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[5]
 SUITE_DIR = "src/frontend/viewmodel/tests/unit"
+
+#: The Nim backends this harness grades on. The documented `[c|js]` positional
+#: is optional and defaults to the first. A tuple of plain strings is
+#: deliberately invisible to `ci/lib/harness_guard.py`'s arm-id reader, which
+#: only looks at objects with an `id`/`name` and at tuples of three or more
+#: fields — so naming a backend here does not make it a declared ARM.
+BACKENDS = ("c", "js")
 
 SUITES = [
     f"{SUITE_DIR}/test_noir_build_diagnostics.nim",
@@ -439,10 +448,45 @@ def apply(mut: Mutation) -> str:
     return original
 
 
+sys.path.insert(0, str(ROOT / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main() -> int:
-    backend = sys.argv[1] if len(sys.argv) > 1 else "c"
-    if backend not in ("c", "js"):
-        raise SystemExit("usage: run-edit-mode-toolbar-mutations.py [c|js]")
+    # THE ARGUMENT RULE FIRST — before any compile or mutation
+    # (`ci/lib/harness_guard.py`, the rule
+    # `ci/test/harness-argument-refusal.sh` enforces).
+    #
+    # AN INVALID POSITIONAL AND AN UNKNOWN FLAG ARE THE SAME CASE HERE: both
+    # are an argument this harness does not know, and both answer exit 2
+    # naming what they refused and touching nothing. Only the *phrase* differs,
+    # because only the positional has a documented shape worth pointing at —
+    # a bad backend keeps the `usage: … [c|js]` line it always had, now under
+    # `unknown argument:` and exit 2 instead of a bare exit 1 that named
+    # nothing the rule recognises.
+    #
+    # A MISSING positional is NOT a refusal: `[c|js]` has always been optional
+    # and has always defaulted to `c`, and that is preserved exactly. So the
+    # backend is taken off the command line here, before the shared rule sees
+    # the rest — otherwise `… c` would be read as an arm id named "c" and this
+    # harness would refuse its own documented invocation.
+    argv = list(sys.argv[1:])
+    backend = "c"
+    if argv and not argv[0].startswith("-"):
+        backend = argv.pop(0)
+        if backend not in BACKENDS:
+            print(f"unknown argument: {backend!r} is not a backend; "
+                  f"usage: {Path(__file__).name} [{'|'.join(BACKENDS)}]")
+            return 2
+    refused = refuse_undeclared_arms(argv, globals())
+    if refused:
+        return refused
+    # argparse owns the FLAGS, as in `ci/test/run-plat70i-fit-mutations.py`:
+    # this harness declares none, so every flag but `-h` is answered with
+    # argparse's own `unrecognized arguments: …` and its own exit code 2.
+    argparse.ArgumentParser(
+        prog=Path(__file__).name,
+        description=__doc__.splitlines()[0]).parse_args(argv)
 
     print(f"=== control run ({backend} backend) ===")
     control = run_suites(backend)

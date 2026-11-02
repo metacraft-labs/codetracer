@@ -2,7 +2,7 @@ import
   std/[ async, jsffi, jsconsole, json, os, strformat ],
   results,
   window, traces, files, config, install, electron_vars, debugger, launch_config,
-  recent_items,
+  recent_items, keybindings, load_admission, tab_answers,
   ipc_subsystems/socket,
   ../[ config, types, trace_metadata ],
   ../lib/[ jslib, electron_lib ],
@@ -36,6 +36,10 @@ when not defined(server):
     f.call(self, cast[cstring](id), data)
 
 proc onStarted*(sender: js, response: js) {.async.} =
+  # PLAT-68: the renderer is listening — its key router gets the user's
+  # `keybindings.json` (imported once from the old files first), and again
+  # whenever the file changes.
+  startKeybindings()
   if not startedFuture.isNil:
     startedReceived = true
     startedFuture()
@@ -45,6 +49,13 @@ proc onStarted*(sender: js, response: js) {.async.} =
     mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
       "test": cstring("hello from index"),
     })
+
+const StartupAnnouncesAtStart = defined(server)
+  ## Whether the startup replay is announced as soon as it starts. In the
+  ## server (`ct host`) a page that connects is sent the cached announcement
+  ## (`bootstrap_cache`) and `host_clients` binds the replay to a client from
+  ## it, so it goes out at once, as it always has. On the desktop the one
+  ## window must be listening, so it waits for `started()` (`init`).
 
 proc started*: Future[void] =
   var future = newPromise() do (resolve: (proc: void)):
@@ -112,13 +123,23 @@ proc onLoadCodetracerShell*(sender: js, response: js) {.async.} =
   await wait(1_000)
   await started()
 
-proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers) {.async.} =
-  # Copy into a local var to work around Nim 2.2's capture check for
-  # var parameters in async procs.  On the JS backend, ServerData is a
-  # reference type (JS object), so mutations to 'data' propagate back
-  # to the caller.
-  var data = dataArg
+proc init*(config: Config, layout: js, helpers: Helpers) {.async.} =
+  ## Start the session this process was launched for: a replay, an edit
+  ## session, the welcome screen, the shell UI or a DeepReview.
+  ##
+  ## Works on the index process's own state, the global `config.data`, which
+  ## every handler after startup reads. It used to take `dataArg: var
+  ## ServerData` and work on `var data = dataArg` (an async proc cannot
+  ## capture a `var` parameter), but `ServerData` is an `object`, so on the
+  ## JS backend that was a COPY (`nimCopy`): the edit session's folder and
+  ## save, and the start options' `isInstalled`, never reached the process
+  ## state. A replay's trace did, but only because `prepareForLoadingTrace`
+  ## assigns the global itself.
   debugPrint "index: init"
+  # createData starts the renderer with session id 0. Keep its asynchronous
+  # load addressed to that session even if the user opens/switches a tab.
+  doAssert beginLoad(js{tab: 0}), "startup must own load admission"
+  defer: finishLoad()
   let bypass = true
 
   data.config = config
@@ -160,17 +181,21 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
     # with a recording loaded, and keep the debugging layout.
     let reviewLayout = await mainWindow.loadReviewLayoutConfig(
       string(userLayoutDir / "default_edit_layout.json"))
-    mainWindow.webContents.send "CODETRACER::start-deepreview", js{
+    mainWindow.webContents.send "CODETRACER::start-deepreview", forLoadTab(js{
       config: data.config,
       layout: reviewLayout,
       startOptions: data.startOptions
-    }
+    })
     # DeepReview is a normal window with a session tab bar, so its "+" opens a
     # welcome tab too (issue #568).
     await pushRecentItems(data.startOptions)
     return
 
   # TODO: leave this to backend/DAP if possible
+  # Why the startup trace's replay did not start, or "": reported once the
+  # renderer has its `init` below, because before that it has no window to
+  # show it in.
+  var replayFailure = cstring""
   if not data.startOptions.edit and not data.startOptions.welcomeScreen:
     if bypass:
       let trace = await electron_vars.app.findTraceWithCodetracer(data.startOptions.recordingID)
@@ -181,9 +206,26 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
       data.pluginClient.trace = trace
       if data.trace.compileCommand.len == 0:
         data.trace.compileCommand = data.config.defaultBuild
-      await prepareForLoadingTrace(trace.recordingId, nodeProcess.pid.to(int))
+      # Started now, announced below: the renderer is not listening yet.
+      replayFailure = await startReplayForTrace(trace.recordingId,
+        nodeProcess.pid.to(int), announce = StartupAnnouncesAtStart)
 
   await started()
+  # THE FIRST TAB LEARNS ITS REPLAY HERE, once the renderer listens. The
+  # replay's `dap-replay-selected` used to go out from `startReplayForTrace`
+  # above, before `started()` — the handshake that waits for the renderer to
+  # answer — and was lost: the window's first tab never learned its replay
+  # id. Harmless only while the main process selected replays by the TAB's id
+  # (tab 0 and replay 0 coincided); its Stop found no replay to stop, closing
+  # it stopped none, and once requests are selected by the replay the tab
+  # names (`GUI/Multi-Window-Tab-Management.md` §Tab Behavior rule 8) its
+  # requests named none. Sent before `init`, as it was before it: the
+  # renderer holds it until its first trace load is ready for it
+  # (`ui_js.onDapReplaySelected`) and gives the tab its replay at once.
+  when not StartupAnnouncesAtStart:
+    if replayFailure.len == 0 and startedReplayId() >= 0 and
+        not data.startOptions.edit and not data.startOptions.welcomeScreen:
+      announceReplaySelected(startedReplayId())
   let configSnapshot = data.config
   let startOptionsSnapshot = data.startOptions
 
@@ -193,14 +235,14 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
 
     mainWindow.webContents.send(
       "CODETRACER::init",
-      js{
+      forLoadTab(js{
         home: paths.home.cstring,
         config: configSnapshot,
         layout: layout,
         helpers: helpers,
         startOptions: startOptionsSnapshot,
         bypass: bypass
-    })
+    }))
 
     # echo "Trying to send acp msg"
     #
@@ -218,9 +260,13 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
     #   "id": cstring("2")
     # })
 
-    if bypass:
+    if replayFailure.len > 0:
+      # The session has no replay: say so, and load nothing into its panes
+      # (a trace loaded over no backend is the empty editor this replaces).
+      reportTraceLoadFailure(replayFailure)
+    elif bypass:
       if not data.trace.isNil:
-        await data.loadTrace(mainWindow, data.trace, data.config, helpers)
+        await loadTrace(mainWindow, data.trace, data.config, helpers)
 
     try:
       let instanceClient = await startSocket(CT_DEBUG_INSTANCE_PATH_BASE & cstring($callerProcessPid), expectPossibleFail=true)
@@ -236,7 +282,8 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
   elif startOptionsSnapshot.edit:
     let file = ($startOptionsSnapshot.name)
     var folder = startOptionsSnapshot.folder
-    # Store workspace folder for later use when switching modes
+    # The opened folder, which the Files pane's operations, its lazy loads
+    # and a later mode switch read.
     data.workspaceFolder = folder
     var filenames = await loadFilenames(@[folder], traceFolder=cstring"", selfContained=false)
     var filesystem = await loadFilesystem(@[folder], traceFilesPath=cstring"", selfContained=false)
@@ -246,7 +293,7 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
     let editLayout = await mainWindow.loadEditLayoutConfig(
       string(userLayoutDir / "default_edit_layout.json"))
 
-    mainWindow.webContents.send "CODETRACER::no-trace", js{
+    mainWindow.webContents.send "CODETRACER::no-trace", forLoadTab(js{
       path: startOptionsSnapshot.name,
       lang: save.project.lang,
       home: paths.home.cstring,
@@ -258,7 +305,7 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
       filesystem: filesystem,
       functions: functions,
       save: save
-    }
+    })
 
     # Load and send launch configs for the workspace
     let launchConfigs = getLaunchConfigsForWorkspace(folder)
@@ -278,7 +325,7 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
           configType: config.configType,
           env: envJs
         })
-      mainWindow.webContents.send "CODETRACER::launch-configs-loaded", js{configs: configsJs}
+      mainWindow.webContents.send "CODETRACER::launch-configs-loaded", forLoadTab(js{configs: configsJs})
 
   else:
     let recentTraces = await electron_vars.app.findRecentTracesWithCodetracer(limit=RECENT_ITEMS_LIMIT)

@@ -138,7 +138,7 @@ bad() {
 # the third instance of this file's own recurring defect — a dark-gate finder
 # that cannot see most of its subject reports a clean sweep of the part it can.
 # 43 gates under `ci/` are Node or Python: browser probes driven by Playwright
-# (`mode_layout_probe.mjs`, `chord_double_fire_probe.mjs`), guards in pure
+# (`mode_layout_probe.mjs`, `one_key_one_operation_probe.mjs`), guards in pure
 # python3 (`frontend-reachability-guard.py`, `macho-closure.py`), and the
 # `noir-wasm-worker/` harness. Twelve of the 43 were reachable from nothing, and
 # three of those were referenced NOWHERE IN THE REPOSITORY at all — not by a
@@ -550,7 +550,7 @@ refs_of_text() {
 	# Phase 2 prints the paths it holds — literally, or through the variable it
 	# names. Phase 1 prints nothing and instead LEARNS: a positional parameter in
 	# this position means the enclosing function EXECUTES that argument, which is
-	# what makes `probe chords ci/test/chord_double_fire_probe.mjs` a wire and
+	# what makes `probe keys ci/test/one_key_one_operation_probe.mjs` a wire and
 	# `expect_leak leaky.sh REPO_ROOT` a read.
 	function invoke(tok, phase,   v, p) {
 		p = posref(tok)

@@ -59,6 +59,7 @@ NIM_REPO_PATH_FLAGS=\
 --path:$(ROOT)/libs/nim-prompt\
 --path:$(ROOT)/libs/nim-stew\
 --path:$(ROOT)/libs/nim-unicodedb/src\
+--path:$(ROOT)/libs/nim-regex/src\
 --path:$(ROOT)/libs/poly\
 --path:$(ROOT)/libs/quicktest\
 --path:$(ROOT)/libs/chronos\
@@ -524,6 +525,8 @@ export RUSTUP_HOME
 # default ~/.cargo, which tup doesn't allow as an undeclared output.
 export CARGO_HOME
 export PATH
+# Let Cargo/Nim FFI caches follow the operator's scratch directory.
+export TMPDIR
 export LIB
 export LIBPATH
 export INCLUDE
@@ -559,6 +562,14 @@ export CODETRACER_DB_BACKEND_SKIP_DIRENV
 export CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL
 export CT_EMULATOR_EXTRA_NIM_PATHS
 export CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS
+
+# The test-certificate reference library (test-certificates-tools) that `ct`
+# links (src/ct_test/certificate_local_store.nim). config.nims takes it from
+# the `../test-certificates-tools` sibling, else from this variable, which
+# the dev shell seeds from the pinned flake input (nix/shells/main.nix). Kept
+# through tup's environment sanitization so a CI job with no sibling checkout
+# still resolves `test_certificates/*` from the dev shell.
+export TEST_CERTIFICATES_TOOLS_SRC
 
 # Keep linker selection in Cargo config/env instead of inline --config args.
 # This avoids shell-quoting differences between Windows environments.

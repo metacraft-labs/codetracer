@@ -121,7 +121,7 @@ suite "NS4 view: fidelity reaches the rows (GCL-A7)":
     ], PositionalSupport)
 
     let r = MockRenderer()
-    let panel = renderLowLevelCodePanel(r, vm)
+    let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
 
     let rows = findAll(panel, "low-level-code-instruction")
     counted rows.len == 5
@@ -152,7 +152,7 @@ suite "NS4 view: fidelity reaches the rows (GCL-A7)":
     defer: vm.dispose()
     vm.setInstructions(@[instr(0, "ASSERT", 9), instr(1, "RANGE", 10)])
     let r = MockRenderer()
-    let panel = renderLowLevelCodePanel(r, vm)
+    let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
     for row in findAll(panel, "low-level-code-instruction"):
       counted textOf(row, "low-level-code-instruction-fidelity") == "unmapped"
 
@@ -171,7 +171,7 @@ suite "NS4 view: a count is never a bare zero (GCL-D3)":
                     count: ExecutedCount(value: 0, provenance: cpNone)),
     ], PositionalSupport)
     let r = MockRenderer()
-    let panel = renderLowLevelCodePanel(r, vm)
+    let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
     counted findAll(panel, "low-level-code-instruction-count").len == 0
 
   test "an_executed_count_renders_and_an_approximate_one_is_distinguishable":
@@ -192,7 +192,7 @@ suite "NS4 view: a count is never a bare zero (GCL-D3)":
                                          provenance: cpApproximate)),
     ], PositionalSupport)
     let r = MockRenderer()
-    let panel = renderLowLevelCodePanel(r, vm)
+    let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
     let counts = findAll(panel, "low-level-code-instruction-count")
     counted counts.len == 2
     counted counts[0].textContent == "×1024"
@@ -257,7 +257,7 @@ suite "NS4 view: the three not-aligned states are told apart (GCL-A8, §9.4)":
     vm.setInstructions(@[instr(0, "ASSERT", 9)])
     vm.setSyncEnabled(false)
     let r = MockRenderer()
-    let panel = renderLowLevelCodePanel(r, vm)
+    let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
     let notice = findAll(panel, "low-level-code-notice")
     counted notice.len == 1
     counted notice[0].textContent == mappingNotice(vm)
@@ -272,7 +272,7 @@ suite "NS4 view: the sync toggle has a visible state (§3, §9.4)":
     let vm = createLowLevelCodeVM(newStore())
     defer: vm.dispose()
     let r = MockRenderer()
-    let panel = renderLowLevelCodePanel(r, vm)
+    let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
 
     counted vm.syncSettings.val.enabled          # defaults ON, per §3
     let onText = textOf(panel, "low-level-code-sync")

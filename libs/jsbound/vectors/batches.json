@@ -1,0 +1,233 @@
+{
+  "format": "jsbound shared batch vectors (Boundary-Ingest.md §4)",
+  "vectors": [
+    {
+      "bytes": "batch_first.bin",
+      "class": "valid",
+      "description": "a session's first batch: Header, Env and three seq-bearing records",
+      "expected": "batch_first.json",
+      "name": "batch_first"
+    },
+    {
+      "bytes": "batch_final_dropped.bin",
+      "class": "valid",
+      "description": "a final batch after a dropped range, ending with End",
+      "expected": "batch_final_dropped.json",
+      "name": "batch_final_dropped"
+    },
+    {
+      "bytes": "batch_end_only.bin",
+      "class": "valid",
+      "description": "a final batch carrying only End, with no seq-bearing record",
+      "expected": "batch_end_only.json",
+      "name": "batch_end_only"
+    },
+    {
+      "bytes": "batch_defaults.bin",
+      "class": "valid",
+      "description": "an envelope without dropped and final, which default to [] and false",
+      "expected": "batch_defaults.json",
+      "name": "batch_defaults"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_bad_magic.bin",
+      "class": "refusal",
+      "description": "the first byte of the magic changed",
+      "expected": "batch_bad_magic.json",
+      "name": "batch_bad_magic"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_version_2.bin",
+      "class": "refusal",
+      "description": "batch version 2",
+      "expected": "batch_version_2.json",
+      "name": "batch_version_2"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_envelope_too_large.bin",
+      "class": "refusal",
+      "description": "an envelope length of 4097",
+      "expected": "batch_envelope_too_large.json",
+      "name": "batch_envelope_too_large"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_short_prefix.bin",
+      "class": "refusal",
+      "description": "three bytes, shorter than the magic and version",
+      "expected": "batch_short_prefix.json",
+      "name": "batch_short_prefix"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_cut_in_envelope_length.bin",
+      "class": "refusal",
+      "description": "cut inside the envelope length",
+      "expected": "batch_cut_in_envelope_length.json",
+      "name": "batch_cut_in_envelope_length"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_cut_in_envelope.bin",
+      "class": "refusal",
+      "description": "cut inside the envelope",
+      "expected": "batch_cut_in_envelope.json",
+      "name": "batch_cut_in_envelope"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_cut_in_frame.bin",
+      "class": "refusal",
+      "description": "the last frame's last byte missing",
+      "expected": "batch_cut_in_frame.json",
+      "name": "batch_cut_in_frame"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_unknown_field.bin",
+      "class": "refusal",
+      "description": "an envelope field the envelope does not have",
+      "expected": "batch_unknown_field.json",
+      "name": "batch_unknown_field"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_missing_batch_seq.bin",
+      "class": "refusal",
+      "description": "no batch_seq",
+      "expected": "batch_missing_batch_seq.json",
+      "name": "batch_missing_batch_seq"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_repeated_field.bin",
+      "class": "refusal",
+      "description": "batch_seq given twice",
+      "expected": "batch_repeated_field.json",
+      "name": "batch_repeated_field"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_float_seq.bin",
+      "class": "refusal",
+      "description": "batch_seq written as the float 0.0",
+      "expected": "batch_float_seq.json",
+      "name": "batch_float_seq"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_negative_seq.bin",
+      "class": "refusal",
+      "description": "first_seq -1",
+      "expected": "batch_negative_seq.json",
+      "name": "batch_negative_seq"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_null_dropped.bin",
+      "class": "refusal",
+      "description": "dropped null, not omitted",
+      "expected": "batch_null_dropped.json",
+      "name": "batch_null_dropped"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_null_final.bin",
+      "class": "refusal",
+      "description": "final null, not omitted",
+      "expected": "batch_null_final.json",
+      "name": "batch_null_final"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_string_final.bin",
+      "class": "refusal",
+      "description": "final as the string \"false\"",
+      "expected": "batch_string_final.json",
+      "name": "batch_string_final"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_dropped_from_zero.bin",
+      "class": "refusal",
+      "description": "a dropped range starting at seq 0",
+      "expected": "batch_dropped_from_zero.json",
+      "name": "batch_dropped_from_zero"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_dropped_reversed.bin",
+      "class": "refusal",
+      "description": "a dropped range whose end precedes its start",
+      "expected": "batch_dropped_reversed.json",
+      "name": "batch_dropped_reversed"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_dropped_triple.bin",
+      "class": "refusal",
+      "description": "a dropped range of three numbers",
+      "expected": "batch_dropped_triple.json",
+      "name": "batch_dropped_triple"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_upper_session_id.bin",
+      "class": "refusal",
+      "description": "session_id in uppercase hex",
+      "expected": "batch_upper_session_id.json",
+      "name": "batch_upper_session_id"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_short_build_hash.bin",
+      "class": "refusal",
+      "description": "build_hash one digit short",
+      "expected": "batch_short_build_hash.json",
+      "name": "batch_short_build_hash"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_envelope_array.bin",
+      "class": "refusal",
+      "description": "an envelope that is a JSON array",
+      "expected": "batch_envelope_array.json",
+      "name": "batch_envelope_array"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_envelope_bom.bin",
+      "class": "refusal",
+      "description": "the envelope preceded by a UTF-8 byte-order mark",
+      "expected": "batch_envelope_bom.json",
+      "name": "batch_envelope_bom"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_envelope_invalid_utf8.bin",
+      "class": "refusal",
+      "description": "an envelope string holding a byte that is not UTF-8",
+      "expected": "batch_envelope_invalid_utf8.json",
+      "name": "batch_envelope_invalid_utf8"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_empty_frame.bin",
+      "class": "refusal",
+      "description": "a frame of length 0 after the records",
+      "expected": "batch_empty_frame.json",
+      "name": "batch_empty_frame"
+    },
+    {
+      "base": "batch_first",
+      "bytes": "batch_unknown_tag.bin",
+      "class": "refusal",
+      "description": "a frame with an unknown record tag after the records",
+      "expected": "batch_unknown_tag.json",
+      "name": "batch_unknown_tag"
+    }
+  ]
+}

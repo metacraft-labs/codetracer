@@ -123,7 +123,7 @@ when defined(ctIndex) or defined(ctTest) or
 
   proc setupLdLibraryPath* =
     # originally in src/tester/tester.nim
-    # adapted for javascript backend, as in tsc-ui-tests/lib/ct_helpers.ts
+    # adapted for javascript backend, as in src/tests/gui/lib/fixtures.ts
     # for more info, please read the comment for `setupLdLibraryPath` there
     nodeProcess.env["LD_LIBRARY_PATH"] = nodeProcess.env["CT_LD_LIBRARY_PATH"]
 
@@ -188,6 +188,83 @@ when defined(ctIndex) or defined(ctTest) or
         resolve(raw))
       process.toJs.on("exit", proc(code: int, signal: cstring) =
         resolve(raw))
+    return newPromise(futureHandler)
+
+  type
+    ProcessOutcome* = object
+      ## Everything a finished child process said, however it finished.
+      exitCode*: int
+        ## The exit status, or -1 when the process never reached one: it
+        ## could not be started (`spawnError`), or a signal ended it
+        ## (`signal`).
+      signal*: cstring
+        ## The signal that ended it, or "".
+      stdout*: cstring
+      stderr*: cstring
+      spawnError*: cstring
+        ## Why the process could not be started, or "" when it was.
+
+  proc nodeExitCode(code: JsObject): int {.importjs:
+    "(function(c){ return (c === null || c === undefined) ? -1 : c; })(#)".}
+    ## Node passes `null` for `code` when a signal ended the child.
+
+  proc nodeErrorText(error: JsObject): cstring {.importjs:
+    "(function(e){ return (e && e.message) ? String(e.message) : String(e); })(#)".}
+
+  proc readProcessOutcome*(
+      path: cstring,
+      args: seq[cstring],
+      options: JsObject = js{}): Future[ProcessOutcome] =
+    ## Run a child to completion and resolve with its exit status AND both of
+    ## its streams. NEVER REJECTS: a child that could not be started resolves
+    ## with `spawnError` set, so a caller has one value to branch on and no
+    ## path out of an `await` that escapes it.
+    ##
+    ## The two helpers above answer narrower questions and each drops what
+    ## this one is for: `readProcessOutput` turns every non-zero exit into an
+    ## error carrying only `Exit with code <n>` (no stdout, no stderr), and
+    ## `readProcessOutputAnyExit` keeps stdout but loses the exit status. A
+    ## caller that must tell "the tests failed" (exit 1) from "no test ran"
+    ## (exit 2) from "the runner never started", and quote the runner's own
+    ## stderr for each, needs all of it.
+    ##
+    ## Resolves on `close`, not `exit`: Node emits `exit` before the child's
+    ## stdio streams are drained, so output read at `exit` can be truncated.
+    ## https://nodejs.org/api/child_process.html#event-close
+    var outcome = ProcessOutcome(exitCode: -1, signal: cstring"",
+                                 stdout: cstring"", stderr: cstring"",
+                                 spawnError: cstring"")
+    let futureHandler = proc(resolve: proc(res: ProcessOutcome)) =
+      var settled = false
+      proc finish() =
+        if not settled:
+          settled = true
+          resolve(outcome)
+      try:
+        setupLdLibraryPath()
+        options.windowsHide = true
+        let process = nodeStartProcess.spawn(path, args, options)
+        process.stdout.setEncoding(cstring"utf8")
+        process.stderr.setEncoding(cstring"utf8")
+        process.stdout.toJs.on("data", proc(data: cstring) =
+          outcome.stdout.add(data))
+        process.stderr.toJs.on("data", proc(data: cstring) =
+          outcome.stderr.add(data))
+        process.toJs.on("error", proc(error: JsObject) =
+          # `error` without a following `close` is how Node reports a binary
+          # that could not be spawned; with one, `close` carries the status.
+          outcome.spawnError = nodeErrorText(error)
+          finish())
+        process.toJs.on("close", proc(code: JsObject, signal: JsObject) =
+          outcome.exitCode = nodeExitCode(code)
+          if not signal.isNil and not signal.isUndefined:
+            outcome.signal = signal.to(cstring)
+          finish())
+      except:
+        # `spawn` itself can throw synchronously (an invalid argument); that
+        # is a child that could not be started, not an exception to escape.
+        outcome.spawnError = cstring(getCurrentExceptionMsg())
+        finish()
     return newPromise(futureHandler)
 
   proc readProcessOutputStreaming*(

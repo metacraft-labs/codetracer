@@ -39,7 +39,12 @@
 ## checkable in a way a delegation is not.
 ##
 ## Wheel events arrive on the same protocol as buttons 64 and 65, which is why
-## scrolling is decoded here rather than in a second module.
+## scrolling is decoded here rather than in a second module. A HORIZONTAL wheel
+## (a touchpad's sideways swipe, a tilt wheel) is buttons 66 and 67 — xterm's
+## `ctlseqs`, "buttons 6 and 7" with the wheel flag — and is its own pair,
+## `mbWheelLeft` / `mbWheelRight` (Horizontal-Overflow.md §3 finding 2: both
+## used to be read as the vertical wheel, so a sideways swipe scrolled the
+## pane up and down).
 
 import std/strutils
 
@@ -50,6 +55,8 @@ type
     mbRight
     mbWheelUp
     mbWheelDown
+    mbWheelLeft
+    mbWheelRight
     mbOther
 
   MouseEventKind* = enum
@@ -162,7 +169,11 @@ proc decodeMouse*(token: string): (bool, MouseEvent) =
     else: mekPress
   event.button =
     if (code and 64) != 0:
-      if (code and 1) == 0: mbWheelUp else: mbWheelDown
+      case code and 3
+      of 0: mbWheelUp
+      of 1: mbWheelDown
+      of 2: mbWheelLeft
+      else: mbWheelRight
     else:
       case code and 3
       of 0: mbLeft

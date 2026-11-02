@@ -7,6 +7,12 @@
  * See: codetracer-specs/Testing/Performance-Targets.md
  */
 
+import {
+  contentionAdjustedMs,
+  contentionBetween,
+  sampleProcessTree,
+} from "./process-contention";
+
 // ---------------------------------------------------------------------------
 // Startup & initialization (milliseconds)
 // ---------------------------------------------------------------------------
@@ -104,22 +110,65 @@ export const LIMIT_RELOAD_RECONNECT_MS = 8_000;
  *     await layout.waitForAllComponentsLoaded();
  *   });
  */
+/**
+ * `CODETRACER_PERF_LIMIT_SCALE` multiplies every limit `timed` enforces. It is
+ * for lanes whose subject is NOT performance — the visual captures
+ * (`just plat35-capture-electron`) — run on a host they do not have to
+ * themselves: on 2026-10-17 a 32-core workstation at load 53 from other
+ * sessions' builds failed all six captures on "base components loaded"
+ * (81 s against 45 s), which says nothing about the frames they take. A lane
+ * that gates performance must never set it. Unset, or not a number >= 1,
+ * means 1.
+ */
+const limitScale = (() => {
+  const v = Number(process.env.CODETRACER_PERF_LIMIT_SCALE ?? "1");
+  return Number.isFinite(v) && v >= 1 ? v : 1;
+})();
+
+/**
+ * The limit is graded against the CONTENTION-ADJUSTED duration, not raw wall
+ * clock: the time this process tree (the test runner and everything it
+ * launched) spent runnable but waiting for a CPU is taken out first, see
+ * `lib/process-contention.ts`. A shared host's load otherwise decides the
+ * verdict — at load 33-48 on 24 cores a clean tree measured `first window` at
+ * 10.3 s against 10 s and failed its own `tests/build/` specs (codetracer-pm
+ * issue `2026-10-17-electron-build-specs-fail-on-clean-agents-under-host-load`).
+ * On an idle host there is no run-queue wait and the adjusted duration IS the
+ * wall clock; off Linux it is always the wall clock. The adjustment never
+ * takes off more than the measured wait, and more work still grades longer:
+ * under contention it is scaled by the same factor as the rest (see
+ * `contentionAdjustedMs` for what a loaded host can still discount).
+ *
+ * The returned `durationMs` stays the raw wall clock, which is what callers
+ * print and compare between steps.
+ */
 export async function timed<T>(
   label: string,
-  limitMs: number,
+  rawLimitMs: number,
   fn: () => Promise<T>,
 ): Promise<{ result: T; durationMs: number }> {
+  const limitMs = rawLimitMs * limitScale;
+  // Sampled outside the timed interval so reading /proc is not part of it.
+  const before = sampleProcessTree();
   const t0 = Date.now();
   const result = await fn();
   const durationMs = Date.now() - t0;
-  const pct = Math.round((durationMs / limitMs) * 100);
-  const status = durationMs > limitMs ? "EXCEEDED" : pct > 70 ? "SLOW" : "ok";
+  const contention = contentionBetween(before, sampleProcessTree());
+  const gradedMs = Math.round(contentionAdjustedMs(durationMs, contention));
+  const pct = Math.round((gradedMs / limitMs) * 100);
+  const status = gradedMs > limitMs ? "EXCEEDED" : pct > 70 ? "SLOW" : "ok";
+  // Print the raw figure and both scheduler totals whenever they differ, so a
+  // graded number can always be traced back to what was measured.
+  const detail = gradedMs === durationMs
+    ? `${durationMs}ms`
+    : `${gradedMs}ms adjusted (wall ${durationMs}ms, cpu ${Math.round(contention.cpuMs)}ms, ` +
+      `run-queue wait ${Math.round(contention.waitMs)}ms)`;
   console.log(
-    `# timing: ${label}: ${durationMs}ms / ${limitMs}ms (${pct}%) [${status}]`,
+    `# timing: ${label}: ${detail} / ${limitMs}ms (${pct}%) [${status}]`,
   );
-  if (durationMs > limitMs) {
+  if (gradedMs > limitMs) {
     throw new Error(
-      `Performance limit exceeded: "${label}" took ${durationMs}ms (limit: ${limitMs}ms)`,
+      `Performance limit exceeded: "${label}" took ${detail} (limit: ${limitMs}ms)`,
     );
   }
   return { result, durationMs };

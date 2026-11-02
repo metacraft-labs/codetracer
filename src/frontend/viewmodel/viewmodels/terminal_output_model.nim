@@ -33,7 +33,7 @@
 ##     and where the program cleared the screen or switched to / from the
 ##     alternate screen.
 
-import std/[base64, hashes, json, math, strutils, tables, unicode]
+import std/[base64, hashes, json, math, sets, strutils, tables, unicode]
 
 import ../store/types
 
@@ -474,6 +474,76 @@ proc buildTerminalLines*(events: openArray[TerminalOutputEvent]):
   for ev in events:
     b.addEvent(ev)
   b.finishLines()
+
+proc lineOfSegments*(index: int; prefix: string;
+                     segments: openArray[TerminalOutputEvent]): TerminalLine =
+  ## One line of a `ct/load-terminal-lines` answer, decoded by the same line
+  ## builder a whole stream goes through: `prefix` (the SGR sequences in
+  ## effect where the line starts) sets the colours, then each piece of a
+  ## write is fed as that write. A line whose pieces put no text on it keeps
+  ## one empty fragment of its last write, as `endLine` does.
+  var b = TerminalLineBuilder()
+  if prefix.len > 0:
+    b.addEvent(TerminalOutputEvent(content: prefix, eventIndex: -1))
+  for seg in segments:
+    b.addEvent(seg)
+  result = TerminalLine(lineIndex: index)
+  for line in b.finishLines():
+    result.fragments.add line.fragments
+  if result.fragments.len == 0 and segments.len > 0:
+    result.fragments.add TerminalEventFragment(
+      text: "", style: b.attrs, eventIndex: segments[^1].eventIndex,
+      rrTicks: segments[^1].rrTicks)
+
+type
+  TerminalLinesWindow* = object
+    ## One `ct/load-terminal-lines` answer (Viewport-Driven-Loading Q3): a
+    ## window of the output's lines and the totals.
+    ok*: bool
+    start*: int
+    total*: int
+      ## Lines in the whole output.
+    writes*: int
+      ## Writes in the whole output (the screen view's scrubber range).
+    screenOffered*: bool
+    currentLine*: int
+      ## The line of the position the request named, -1 for none.
+    lines*: seq[TerminalLine]
+    namedWrites*: seq[TerminalOutputEvent]
+      ## Each write the lines' pieces name, without its text: what a click
+      ## on a fragment jumps to.
+
+proc terminalLinesWindowFromJson*(body: JsonNode): TerminalLinesWindow =
+  ## Decode a `ct/load-terminal-lines` answer body. `ok` is false when the
+  ## body is not one.
+  if body.isNil or body.kind != JObject or not body.hasKey("total"):
+    return
+  result.ok = true
+  result.start = body{"start"}.getInt(0)
+  result.total = body{"total"}.getInt(0)
+  result.writes = body{"writes"}.getInt(0)
+  result.screenOffered = body{"screenOffered"}.getBool(false)
+  result.currentLine = body{"currentLine"}.getInt(-1)
+  var seen = initHashSet[int]()
+  for i, l in body{"lines"}.getElems:
+    var segs: seq[TerminalOutputEvent]
+    for s in l{"segments"}.getElems:
+      let ev = TerminalOutputEvent(
+        content: s{"content"}.getStr(""),
+        rrTicks: uint64(max(0'i64, s{"directLocationRRTicks"}.getBiggestInt(0))),
+        eventIndex: s{"write"}.getInt(0),
+        logIndex: s{"eventIndex"}.getInt(0),
+        path: s{"highLevelPath"}.getStr(""),
+        line: s{"highLevelLine"}.getInt(0),
+        stdout: s{"stdout"}.getBool(true))
+      segs.add ev
+      if ev.eventIndex notin seen:
+        seen.incl ev.eventIndex
+        var named = ev
+        named.content = ""
+        result.namedWrites.add named
+    result.lines.add lineOfSegments(l{"index"}.getInt(result.start + i),
+                                    l{"prefix"}.getStr(""), segs)
 
 func lineText*(line: TerminalLine): string =
   for f in line.fragments:

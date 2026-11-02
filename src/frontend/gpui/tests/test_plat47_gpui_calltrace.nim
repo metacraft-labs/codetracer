@@ -19,12 +19,14 @@
 ##
 ## No mocks: a real recording, a real replay-server, the real ViewModel.
 
+import replay_prerequisite
 import std/[os, strutils, unittest]
 
 import gpui/host/gpui_host
 import view_vocabulary/pane_views
 import ../../../common/view_vocabulary
 import isonim/core/signals
+from viewmodels/calltrace_vm import CallRowIndentPx
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -35,8 +37,19 @@ const
   PagesFixture = "test-logs/tui-fixtures/call_pages-d6745afd1e2e"
   Rows = 15
   ExpectedAssertions = 10
+  PaneWidthPx = 600
+    ## The call-trace pane's body width the suite reports. HSF-V2: GPUI's
+    ## pane reports its width with its rows (`pageCalltrace`'s `widthPx`), so
+    ## the ViewModel knows how many depth levels fit across it; any ordinary
+    ## pane width serves this suite, which grades the rows paged, not the
+    ## depth shown.
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
+
+proc page(session: HeadlessDebugSession; delta: int): CalltracePage =
+  ## Scroll the pane by `delta` rows, as GPUI's window does: the pane's rows,
+  ## its width and the window's indent per depth level (`CallRowIndentPx`).
+  session.pageCalltrace(Rows, delta, PaneWidthPx, CallRowIndentPx)
 
 proc labels(session: HeadlessDebugSession): seq[string] =
   let pv = calltracePaneView(session.session.calltraceVM)
@@ -59,16 +72,16 @@ suite "PLAT-47 B3: GPUI's call trace scrolls and pages":
     checkpoint("total " & $total)
     ck total == 603
     # The first section is the one the window opened with: the head.
-    discard session.pageCalltrace(Rows, 0)
+    discard session.page(0)
     ck labels(session).len == Rows
     ck "#602" notin labels(session).join("|")
     var sections = 0
     var last = -1
     for _ in 0 ..< 100:
-      let page = session.pageCalltrace(Rows, 30)
-      if page.loaded: inc sections
-      if page.top == last: break
-      last = page.top
+      let moved = session.page(30)
+      if moved.loaded: inc sections
+      if moved.top == last: break
+      last = moved.top
     checkpoint("sections read " & $sections & ", top " & $last)
     ck last == total - Rows
     ck sections > 1
@@ -79,7 +92,7 @@ suite "PLAT-47 B3: GPUI's call trace scrolls and pages":
     ck atEnd[^1].split('(')[0] == "leaf #602"
     # Back to the top: the head is read again.
     for _ in 0 ..< 100:
-      if session.pageCalltrace(Rows, -60).top == 0: break
+      if session.page(-60).top == 0: break
     let atTop = labels(session)
     checkpoint($atTop[0 ..< 3])
     ck atTop.len == Rows

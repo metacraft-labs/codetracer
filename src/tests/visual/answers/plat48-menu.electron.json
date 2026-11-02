@@ -25,16 +25,16 @@
   ]
  },
  "debugShortcuts": {
-  "Continue": "F8 F2",
+  "Continue": "F8",
   "Step Over": "F10",
   "Step In": "F11",
   "Step Out": "F12",
-  "Reverse Continue": "SHIFT+F8",
-  "Reverse Step Over": "SHIFT+F10",
-  "Reverse Step In": "SHIFT+F11",
-  "Reverse Step Out": "SHIFT+F12",
-  "Stop": "SHIFT+F5",
-  "Keyboard Shortcuts": "CTRL+ALT+K",
+  "Reverse Continue": "Shift+F8",
+  "Reverse Step Over": "Shift+F10",
+  "Reverse Step In": "Shift+F11",
+  "Reverse Step Out": "Shift+F12",
+  "Stop": "Shift+F5",
+  "Keyboard Shortcuts": "Ctrl+K Ctrl+S",
   "Add a Breakpoint": "",
   "Delete Breakpoint": "",
   "Delete All Breakpoints": "",
@@ -52,7 +52,7 @@
   "Invite to Collaborative Session...": ""
  },
  "stepOver": {
-  "before": 1,
+  "before": 0,
   "after": 2,
   "closed": true
  },

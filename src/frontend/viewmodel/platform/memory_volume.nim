@@ -59,6 +59,12 @@ type
       ## Makes `move` fail. This models the *other* half of an interrupted
       ## atomic replace — the temp file is written and the rename never
       ## happens — which is the case that must leave the original untouched.
+    failMovesInto*: string
+      ## A path prefix whose atomic replaces fail with `pkFailed`, the way
+      ## `failMoves` fails all of them. A store write lands in a temp file and
+      ## is then moved onto its destination, so `failWritesUnder` cannot fail
+      ## the write of ONE working-tree file; this can, which is what a seed
+      ## that fails for a single template file needs. Empty disables it.
     writeCount*: int
     moveCount*: int
 
@@ -241,7 +247,8 @@ proc asVolume*(volume: MemoryVolume): StoreVolume =
            ): PlatformFuture[PlatformOutcome[Nothing]] =
     let from0 = volumePath(source)
     let to0 = volumePath(destination)
-    if volume.failMoves:
+    if volume.failMoves or
+       (volume.failMovesInto.len > 0 and isUnder(volume.failMovesInto, to0)):
       return resolvedErr[Nothing](pkFailed,
         "the replace of '" & to0 & "' was interrupted", "injected fault")
     if not volume.files.hasKey(from0):

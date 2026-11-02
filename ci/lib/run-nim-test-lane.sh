@@ -16,6 +16,18 @@
 # ci/lib/test-lane-files.sh says which files and which compiler flags, and this
 # script says what running them means. A new lane is a one-line `just` recipe.
 #
+# EXCEPT FOR A RECIPE-OWNED LANE, which this script REFUSES (exit 2) by name.
+# Some lanes are listed in ci/lib/test-lane-files.sh only so the coverage guard
+# can see their files; their execution lives in a bespoke `just` recipe that
+# does what this loop cannot — per-file defines and a `window` alias, a CLI
+# that is compiled and never run, BPF capabilities, a sibling framework's
+# paths, a different scoring of `MISSING-RECORDER SKIP:` output.
+# `test_lane_recipe` names that recipe. Running such a lane here used to report
+# red for reasons that were artefacts of this runner (3 + 1 + 4 + 10 failures
+# over four lanes at codetracer `661744f2c`), indistinguishable in a sweep from
+# product failures; refusing it, and printing the recipe, is the honest answer.
+# ci/test/recipe-owned-lanes-test.sh holds both halves of that to account.
+#
 # Behaviour worth knowing:
 #
 #   * Compile and run are SEPARATE steps, never a single `nim c -r`. Conflating
@@ -26,7 +38,9 @@
 #   * The run inherits CT_LD_LIBRARY_PATH (the dev shell's
 #     sqlite/pcre/glib/openssl/zstd set). It is applied to the RUN only, never
 #     to the compile, so those libraries are not put in front of the Nim
-#     compiler's own loader path.
+#     compiler's own loader path. A lane that needs more run-time libraries
+#     names them in `test_lane_run_library_path` (ci/lib/test-lane-files.sh);
+#     they go in front of that set, for the run only as well.
 #
 #   * The verdict comes from ci/lib/test-lane-report.sh, which reads the exit
 #     status before the [OK]/[FAILED] tally. A lane must never invent `OK (0
@@ -58,8 +72,13 @@ source "${repo_root}/ci/lib/test-lane-report.sh"
 lane="${1:-}"
 if [ -z "${lane}" ]; then
 	echo "usage: run-nim-test-lane.sh <lane-id> [--compile-only]" >&2
+	# Only the lanes this script will actually run; listing the recipe-owned
+	# ones here would advertise an invocation the check below refuses.
 	echo "lanes:" >&2
-	test_lane_ids | sed 's/^/  /' >&2
+	while read -r _ct_id; do
+		[ -z "$(test_lane_recipe "${_ct_id}")" ] && printf '  %s\n' "${_ct_id}" >&2
+	done < <(test_lane_ids)
+	echo "(recipe-owned lanes are run by their 'just' recipe; 'just test-lanes' names each one's recipe)" >&2
 	exit 2
 fi
 shift
@@ -75,6 +94,27 @@ while [ $# -gt 0 ]; do
 	esac
 	shift
 done
+
+# A RECIPE-OWNED LANE IS REFUSED HERE, BEFORE ANYTHING ELSE HAPPENS — before
+# the cache root, the scratch state directories, the user-state snapshot or a
+# single compiler call — and with `--compile-only` too. Its file list exists
+# for the coverage question only; what running it MEANS is in the recipe, and
+# a partial imitation of that here is exactly the false red this refusal
+# replaces (see the header and `test_lane_recipe`). Exit 2 is this script's
+# usage-error status, so a sweep cannot mistake the refusal for a lane result.
+_ct_lane_recipes="$(test_lane_recipe "${lane}")"
+if [ -n "${_ct_lane_recipes}" ]; then
+	{
+		echo "run-nim-test-lane.sh: lane '${lane}' is recipe-owned; this runner does not run it."
+		echo "  Its files are listed in ci/lib/test-lane-files.sh for coverage accounting"
+		echo "  only. Its execution lives in the recipe below, which does what this"
+		echo "  generic loop cannot (see test_lane_recipe there for what). Run:"
+		for _ct_r in ${_ct_lane_recipes}; do
+			echo "    just ${_ct_r}"
+		done
+	} >&2
+	exit 2
+fi
 
 # THE CACHE ROOT IS PER-CHECKOUT, AND THAT IS THE WHOLE POINT.
 #
@@ -217,6 +257,7 @@ _ct_user_state_snapshot() {
 _ct_user_state_before="$(_ct_user_state_snapshot)"
 backend="$(test_lane_backend "${lane}")"
 read -r -a extra_flags <<<"$(test_lane_extra_flags "${lane}")"
+lane_run_libs="$(test_lane_run_library_path "${lane}")"
 # Expanded below as ${extra_flags[@]+"${extra_flags[@]}"}, not
 # "${extra_flags[@]}": under `set -u`, bash 3.2 -- the /bin/bash every macOS
 # ships -- treats an EMPTY array's "${a[@]}" as an unbound variable and
@@ -293,6 +334,17 @@ while read -r f; do
 	cache="${cache_root}/${lane}-${name}"
 	mkdir -p "${_ct_lane_home}/${name}"
 	export CODETRACER_HOME="${_ct_lane_home}/${name}"
+	# AND THE TWO OTHER XDG ROOTS, per file, beside it: `XDG_DATA_HOME` (the
+	# freedesktop trash, `ct install`'s launchers, and any tool under test that
+	# keeps data by the XDG rule) and `XDG_CONFIG_HOME` (config read or written
+	# by a tool that does not know `CODETRACER_HOME`). CodeTracer's own
+	# resolvers take `CODETRACER_HOME` first, so for them this changes nothing;
+	# it closes the route for everything else a suite starts. `XDG_STATE_HOME`
+	# is set below with the layout directory. `HOME` itself is kept: the
+	# toolchain (nimble's packages, git's identity, nix) reads it.
+	mkdir -p "${_ct_lane_home}/${name}.xdg-data" "${_ct_lane_home}/${name}.xdg-config"
+	export XDG_DATA_HOME="${_ct_lane_home}/${name}.xdg-data"
+	export XDG_CONFIG_HOME="${_ct_lane_home}/${name}.xdg-config"
 	if [ -n "${_ct_lane_state}" ]; then
 		mkdir -p "${_ct_lane_state}/${name}"
 		export CODETRACER_TUI_LAYOUT_DIR="${_ct_lane_state}/${name}"
@@ -311,9 +363,10 @@ while read -r f; do
 	elif [ "${backend}" = "js-browser" ] || [ "${backend}" = "js-dom" ] ||
 		[ "${backend}" = "js-chromium" ]; then
 		# `nim js` WITHOUT `-d:nodejs`. See test_lane_backend's header: the
-		# define is required by every lane that RUNS its output under node, and
-		# is fatal for a browser module — `kdom`'s `createElementNS` is absent
-		# under it, so the renderer does not compile at all.
+		# define enables unittest exit status in the ordinary node lanes, but
+		# also makes std/dom replace the page's document with a dummy object.
+		# Browser lanes must keep the actual page bindings even when a node-
+		# targeted compile happens to succeed.
 		compile_cmd=(nim js --hints:off --warnings:off
 			${extra_flags[@]+"${extra_flags[@]}"} --nimcache:"${cache}" -o:"${cache}/${name}.js" "${f}")
 		artifact="${cache}/${name}.js"
@@ -422,7 +475,21 @@ while read -r f; do
 		continue
 	fi
 
+	# THE GUARD, PER FILE: the user's state is read again around this file's
+	# run, so a write is reported against the file that was running when it
+	# happened (the lane-level comparison at the end can only say "this
+	# lane"). The file fails. A writer elsewhere on the host at the same moment
+	# (CodeTracer in use, another checkout's tests) is the other possible
+	# cause, and the message says so; run the file again on a quiet host.
+	_ct_file_before="$(_ct_user_state_snapshot)"
+
 	ct_libs="${CT_LD_LIBRARY_PATH:-${CODETRACER_LD_LIBRARY_PATH:-}}"
+	# The lane's own run-time libraries (`test_lane_run_library_path`), in
+	# front of the dev shell's set; each part only when non-empty, since an
+	# empty element makes the loader search the current directory.
+	if [ -n "${lane_run_libs}" ]; then
+		ct_libs="${lane_run_libs}${ct_libs:+:${ct_libs}}"
+	fi
 	if [ "${backend}" = "js" ]; then
 		output="$(timeout "${lane_timeout}" node "${artifact}" 2>&1)" && rc=0 || rc=$?
 	elif [ "${backend}" = "js-dom" ]; then
@@ -452,8 +519,28 @@ while read -r f; do
 		# a module that only works by emulation.
 		output="$(timeout "${lane_timeout}" node "${artifact}" 2>&1)" && rc=0 || rc=$?
 	else
-		output="$(LD_LIBRARY_PATH="${ct_libs}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+		run_lib_path="${ct_libs}"
+		if [ -n "${LD_LIBRARY_PATH:-}" ]; then
+			run_lib_path="${run_lib_path:+${run_lib_path}:}${LD_LIBRARY_PATH}"
+		fi
+		output="$(LD_LIBRARY_PATH="${run_lib_path}" \
 			timeout "${lane_timeout}" "${artifact}" 2>&1)" && rc=0 || rc=$?
+	fi
+
+	_ct_file_after="$(_ct_user_state_snapshot)"
+	if [ "${_ct_file_after}" != "${_ct_file_before}" ]; then
+		echo "TOUCHED THE USER'S STATE"
+		{
+			echo "      ${f} changed the user's own CodeTracer state while it ran" \
+				"(a file created, rewritten or removed under ${_ct_user_state}," \
+				"${_ct_user_config} or ${_ct_user_data}). If CodeTracer was in use" \
+				"on this machine at the same moment, that is the other possible cause:"
+			diff <(printf '%s\n' "${_ct_file_before}") \
+				<(printf '%s\n' "${_ct_file_after}") | grep '^[<>]' |
+				sed 's/^</        before:/; s/^>/        after: /'
+		} >&2
+		failed=$((failed + 1))
+		continue
 	fi
 
 	oks="$(printf '%s\n' "${output}" | grep -c '\[OK\]' || true)"

@@ -234,26 +234,23 @@ ARMS = [
     # THE PRODUCT — the wiring PLAT-34 is about
     # =====================================================================
     Arm(
-        "M1", CORE,
-        "  of kmProductDefault: emInsert\n",
-        "  of kmProductDefault: emNormal\n",
-        "DIFF-1: move-line-ladder",
-        "**A PRODUCT DOCUMENT OPENS IN THE WRONG EDITING MODE AND THE "
-        "TERMINAL'S KEYS STOP RESOLVING.** `product_keymap`'s thirteen rows "
-        "are scoped to `{emInsert}` — `ProductDefaultModes`, whose reason is "
-        "that the terminal's Edit mode has no modal editing at all — and "
-        "`initEditorState` opens at `emNormal` because that is the right "
-        "default for a modal model. The one line this arm changes is what "
-        "reconciles the two. Under it `Down`, `Home`, `End`, `Ctrl+z` and "
-        "`Enter` resolve to nothing, so the terminal arm of the differential "
-        "acts on none of its steps while the GPUI arm (which has no keys and "
-        "goes through `applyNamed`) acts on all of them. The cell whose every "
-        "step is a bound key is where that is unmissable.",
+        "M1", KEYMAP,
+        "  of bkCua, bkEmacs: false\n",
+        "  of bkCua, bkEmacs: true\n",
+        "UNDO GROUPING BREAKS ON THE CLOCK, through the terminal's own path",
+        "**CUA BECOMES A MODAL BASE AND THE TERMINAL'S KEYS STOP RESOLVING.** "
+        "(Re-aimed 2026-10-11, PLAT-68: the product default this arm first "
+        "targeted was retired for the CUA base; re-aimed again 2026-10-12, "
+        "Phase B: `initialModeFor` now READS `isModal`, so the defect is "
+        "planted where the answer is decided.) With CUA modal a document "
+        "opens at `emNormal`, a printable key stops standing for itself, and "
+        "the terminal arm of the differential diverges from the GPUI arm "
+        "(which has no keys and goes through `applyNamed`).",
     ),
     Arm(
         "M2", CORE,
-        "               mode: d.state.mode, textEntry: d.state.mode == emInsert)\n",
-        "               mode: d.state.mode, textEntry: false)\n",
+        "               textEntry: not isModal(d.model) or d.state.mode == emInsert,\n",
+        "               textEntry: false,\n",
         "the terminal's SCOPE is the five values the differential drives",
         "**THE TERMINAL STOPS BEING A TEXT FIELD.** §4.3's text-entry "
         "dimension is what makes a printable key stand for itself, and Edit "

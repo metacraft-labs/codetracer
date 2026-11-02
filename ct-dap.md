@@ -1,5 +1,7 @@
 # CodeTracer DAP Requests
 
+<!-- cspell:words watchpoints -->
+
 This document describes the Debug Adapter Protocol (DAP) requests that the
 CodeTracer db-backend accepts, with emphasis on the custom `ct/*` commands.
 For the base protocol and standard request shapes, see the DAP specification:
@@ -20,16 +22,50 @@ spec and use the auto-generated DAP types in `src/db-backend/src/dap_types.rs`.
 
 | Request | Arguments type | Response body | Notes |
 | --- | --- | --- | --- |
-| `initialize` | `InitializeRequestArguments` | `Capabilities` | Returns CodeTracer capabilities defined in `src/db-backend/src/dap.rs`. |
+| `initialize` | `InitializeRequestArguments` | `Capabilities` | Returns CodeTracer capabilities defined in `src/db-backend/src/dap.rs`, including `supportsDataBreakpoints: true`. |
 | `launch` | `LaunchRequestArguments` | `{}` | Uses CodeTracer-specific launch fields (see type reference below). |
 | `configurationDone` | none | `{}` | Signals that configuration is complete. |
 | `setBreakpoints` | `SetBreakpointsArguments` | `SetBreakpointsResponseBody` | Clears and re-applies breakpoints each request. |
+| `dataBreakpointInfo` | `DataBreakpointInfoArguments` | `{dataId, description, accessTypes, canPersist}` or `{dataId: null, description, refusalCode, refusal}` | The "can I watch this?" handshake. A watchable variable comes back with its name as the `dataId` and `accessTypes: ["write"]` — a recording does not record reads. Anything unwatchable comes back `dataId: null` with a closed-set refusal (see below). |
+| `setDataBreakpoints` | `SetDataBreakpointsArguments` | `{breakpoints: [...]}` | Value-change watchpoints. Replace semantics like `setBreakpoints`: the request defines the whole set and an empty array clears it. Each entry is answered individually with `verified`, plus `refusalCode` / `refusal` when refused; only admitted entries are installed. |
 | `threads` | `ThreadsArguments` | `ThreadsResponseBody` | Single-threaded model. |
 | `stackTrace` | `StackTraceArguments` | `StackTraceResponseBody` | Uses db-backend call stack. |
 | `scopes` | `ScopesArguments` | `ScopesResponseBody` | Standard variable scopes. |
 | `variables` | `VariablesArguments` | `VariablesResponseBody` | Standard variables resolution. |
-| `restart` | none | `{}` | Mapped to `ct/run-to-entry`. |
+| `restart` | none | `{}` | Mapped to `ct/run-to-entry`; responds with an empty body (the DAP `RestartResponse`). |
 | `stepIn` / `stepOut` / `next` / `continue` / `stepBack` / `reverseContinue` | `StepInArguments` etc. | `{}` | Emit `stopped`, `ct/complete-move`, and `output` events. |
+
+### Data breakpoints are value-change watchpoints
+
+`initialize` advertises `supportsDataBreakpoints: true`. That bit is load-bearing
+rather than decorative: a conforming client greys out its "break on value change"
+affordance unless it is set, so implementing the two commands without advertising
+them would ship a feature no client offers.
+
+A live debugger implements a data breakpoint with a hardware watch register that
+traps on an access to an address. A recording has no CPU — what it has is the
+value each variable held at each recorded step. So what these two commands honour
+is a **value-change watchpoint**: `continue` stops at the first later step at
+which the named variable's recorded value differs from the value it held before.
+
+Everything the recording cannot support is refused through the closed set
+`ct_data_breakpoints::DataBreakpointRefusal` (crate `libs/ct-data-breakpoints`),
+which travels on the wire as an integer `refusalCode` in the 62xx block plus a
+stable camelCase `refusal` token, so a client branches on the code and never on
+the prose:
+
+| Code | `refusal` | Meaning |
+| --- | --- | --- |
+| 6201 | `emptyDataId` | The `dataId` was empty or whitespace. |
+| 6202 | `expressionNotAWatchableVariable` | Not a plain identifier. A recording indexes values by variable, so `obj.field`, `arr[0]`, `*ptr` and `counter + 1` cannot be watched. |
+| 6203 | `accessTypeNotRecorded` | `read` / `readWrite` was asked for. Intrinsic to replay: a recording samples what a variable *held*, not that it was *read*, so `write` is the only access type a value table can answer. |
+| 6204 | `conditionNotSupported` | A `condition` or `hitCondition` was supplied; the value-change scan has no evaluator, and honouring the request while ignoring the condition would stop in the wrong place. |
+| 6205 | `variableNotInTrace` | A well-formed name this recording never captured. |
+| 6206 | `backendLacksValueHistory` | This backend keeps no per-step value table — the MCR/emulator and recreator sessions, which already refuse `ct/load-history` for the same reason. |
+
+The same `ct_data_breakpoints::verdict` function decides for the real backend
+(`dap_handler::set_data_breakpoints`) and for the daemon's mock DAP backend, so a
+test double cannot claim a capability the product lacks.
 
 ## Custom `ct/*` Requests
 
@@ -43,24 +79,24 @@ response behavior per command.
 | `ct/update-table` | `UpdateTableArgs` | Emits `ct/updated-table` with `CtUpdatedTableResponseBody`. |
 | `ct/event-load` | none | Emits `ct/updated-events` and `ct/updated-events-content`. |
 | `ct/load-terminal` | none | Emits `ct/loaded-terminal`. |
-| `ct/collapse-calls` | `CollapseCallsArgs` | Updates internal calltrace state. |
-| `ct/expand-calls` | `CollapseCallsArgs` | Updates internal calltrace state. |
+| `ct/collapse-calls` | `CollapseCallsArgs` | Updates internal calltrace state; responds with an empty body (`success: false` for a call key no call has, or one that is not an integer). |
+| `ct/expand-calls` | `CollapseCallsArgs` | Updates internal calltrace state; responds as `ct/collapse-calls` does, and refuses a `nonExpandedKind` that names no expansion (`Siblings`, `Calls`, `CallstackInternalChild`). |
 | `ct/load-calltrace-section` | `CalltraceLoadArgs` | Emits `ct/updated-calltrace`. |
 | `ct/calltrace-jump` | `Location` (must carry `rrTicks`) | Emits `stopped`, `ct/complete-move`, `output`. |
 | `ct/event-jump` | `ProgramEvent` | Emits `stopped`, `ct/complete-move`, `output`. |
 | `ct/load-history` | `LoadHistoryArg` | Emits `ct/updated-history`. |
-| `ct/history-jump` | `Location` (must carry `rrTicks`) | Emits `stopped`, `ct/complete-move`, `output`. |
+| `ct/history-jump` | `Location` (must carry `rrTicks`) | Emits `stopped`, `ct/complete-move`, `output`, then responds with an empty body. |
 | `ct/search-calltrace` | `CallSearchArg` | Emits `ct/calltrace-search-res`. |
 | `ct/source-line-jump` | `SourceLocation` | Emits `stopped`, `ct/complete-move`, `output`. |
 | `ct/source-call-jump` | `SourceCallJumpTarget` | Emits `stopped`, `ct/complete-move`, `output`, and may emit `ct/notification` on failure. |
-| `ct/local-step-jump` | `LocalStepJump` | Emits `stopped`, `ct/complete-move`, `output`. |
-| `ct/tracepoint-toggle` | `TracepointId` | Emits `ct/updated-trace` (refreshes trace log). |
-| `ct/tracepoint-delete` | `TracepointId` | Emits `ct/updated-trace` (refreshes trace log). |
+| `ct/local-step-jump` | `LocalStepJump` | Emits `stopped`, `ct/complete-move`, `output`, then responds with an empty body. |
+| `ct/tracepoint-toggle` | `TracepointId` | Emits `ct/updated-trace` (refreshes trace log), then responds with an empty body. |
+| `ct/tracepoint-delete` | `TracepointId` | Emits `ct/updated-trace` (refreshes trace log), then responds with an empty body; an id with no trace table yet is refused. |
 | `ct/trace-jump` | `ProgramEvent` | Emits `stopped`, `ct/complete-move`, `output`. |
 | `ct/load-flow` | `CtLoadFlowArguments` | Emits `ct/updated-flow`. |
-| `ct/run-to-entry` | none | Emits `stopped`, `ct/complete-move`, `output`. |
-| `ct/run-tracepoints` | `RunTracepointsArg` | Emits `ct/updated-trace` per tracepoint. |
-| `ct/setup-trace-session` | `RunTracepointsArg` | Prepares trace tables; no payload. |
+| `ct/run-to-entry` | none | Emits `stopped`, `ct/complete-move`, `output`, then responds with an empty body. |
+| `ct/run-tracepoints` | `RunTracepointsArg` | Emits `ct/updated-trace` per tracepoint and `ct/tracepoint-results`, then responds with an empty body. |
+| `ct/setup-trace-session` | `RunTracepointsArg` | Prepares trace tables; responds with an empty body. |
 | `ct/load-asm-function` | `FunctionLocation` | Response body `Instructions`. |
 | `ct/reverseStepIn` | none | Reverse step-in; emits `stopped`, `ct/complete-move`, `output`. |
 | `ct/reverseStepOut` | none | Reverse step-out; emits `stopped`, `ct/complete-move`, `output`. |

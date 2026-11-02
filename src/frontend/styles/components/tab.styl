@@ -35,7 +35,10 @@
 
   &:hover:not([data-disabled="true"]):not([data-selected="true"])
     background: colors-ui-surface-primary-secondary-hover
-    border-bottom-color: colors-ui-border-contrast
+    // `border/contrast` is white in both modes: the strongest line on the
+    // dark ground, invisible on the light one. The light theme takes the
+    // strongest neutral border token instead (`by-mode`, defaults.styl).
+    border-bottom-color: by-mode(colors-ui-border-contrast, colors-ui-border-primary-hover)
 
   // ── Selected ──────────────────────────────────────────────
 

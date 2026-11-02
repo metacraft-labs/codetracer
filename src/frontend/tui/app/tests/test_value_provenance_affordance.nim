@@ -210,7 +210,7 @@ match = "Point"
 summary = "({x}, {y})"
 """)
     let spec = model.rowSpecFor(model.paneRows()[0], 120)
-    ck spec.formattedValue(40) == "(10, 20)"
+    ck spec.valueCell(40).text == "(10, 20)"
     let title = model.titleRowText(160)
     checkpoint "title: " & title
     ck title.contains("project:.codetracer/visualisers.toml#0")
@@ -226,7 +226,7 @@ summary = "({x}, {y})"
     var model = modelWith("locals.p")
     ck model.visualisers.len == 0
     let spec = model.rowSpecFor(model.paneRows()[0], 120)
-    ck spec.formattedValue(40) == "Point(x:10, y:20)"
+    ck spec.valueCell(40).text == "Point(x:10, y:20)"
     ck model.titleRowText(160).contains("builtin.record")
     ck not model.titleRowText(160).contains("project:")
     ck model.provenanceOf().contains("unopposed")
@@ -246,7 +246,7 @@ media = "image/png"
 mediaFrom = "pixels"
 """)
     let spec = model.rowSpecFor(model.paneRows()[2], 200)
-    let shown = spec.formattedValue(120)
+    let shown = spec.valueCell(120).text
     checkpoint "row: " & shown
     ck shown.startsWith("Image(")
     ck shown.contains("width:64")
@@ -272,7 +272,7 @@ media = "application/octet-stream"
 mediaFrom = "pixels"
 """)
     let spec = model.rowSpecFor(model.paneRows()[2], 200)
-    ck spec.formattedValue(120) == "<application/octet-stream, 40 bytes>"
+    ck spec.valueCell(120).text == "<application/octet-stream, 40 bytes>"
     ck model.degradationOf() == ""
     ck not model.provenanceOf().contains("media-degraded")
     # And a row with no value at all has nothing to report either.

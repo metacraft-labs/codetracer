@@ -26,20 +26,21 @@
 ##   same names, same arithmetic (`ui/flow_loop_math`) — see
 ##   `counterexample_session_vm`. There is no second slider.
 ##
-## One `template …Impl` materialised per renderer, so the headless Mock tree
-## and the browser DOM are the same tree.
+## One generic tree for every renderer (Shared-DOM-Front-Ends D6), so the
+## headless Mock tree and the browser DOM are the same tree.
 
 import std/options
 
-import isonim/dsl/ui
-import isonim/core/computation
-import isonim/testing/mock_dom
+import isonim/core/[signals, computation]
+import isonim/dsl/[ui, components]
 
 when defined(js):
+  # The browser instantiation needs the WebRenderer procs in scope.
   import isonim/web/web_renderer
-  import isonim/web/dom_api as isonim_dom
 
 import ../viewmodels/counterexample_session_vm
+
+export signals, computation, components
 
 type
   CounterexampleHandlers* = object
@@ -81,7 +82,8 @@ proc takenLabel(taken: Option[bool]): string =
   elif taken.get: "branch taken"
   else: "branch not taken"
 
-template renderCounterexampleSessionImpl(r, mdl, hnd: untyped): untyped =
+proc renderCounterexampleSessionTree[R, N](r: R; mdl: CounterexampleSessionModel;
+                                           hnd: CounterexampleHandlers): N =
   ui(r):
     tdiv(class = "ct-counterexample",
          `data-ct-counterexample` = "true",
@@ -260,27 +262,24 @@ template renderCounterexampleSessionImpl(r, mdl, hnd: untyped): untyped =
              `data-ct-counterexample-closed` = "true"):
           text "No counterexample is open."
 
-proc renderCounterexampleSession*(r: MockRenderer;
-                                  model: CounterexampleSessionModel): MockNode =
+proc renderCounterexampleSession*[R, N](r: R;
+                                        model: CounterexampleSessionModel): N =
   ## The pure render, from a plain record. No handlers: the controls are in the
   ## tree and inert, which is what lets the suite assert the *markup* without
   ## a live session behind it.
-  renderCounterexampleSessionImpl(r, model, CounterexampleHandlers())
+  renderCounterexampleSessionTree[R, N](r, model, CounterexampleHandlers())
 
-proc renderCounterexampleSessionLive*(r: MockRenderer;
-                                      vm: CounterexampleSessionVM): MockNode =
+proc renderCounterexampleSessionLive*[R, N](r: R;
+                                            vm: CounterexampleSessionVM): N =
   ## The live render: the same tree, with the session's own controls behind its
-  ## buttons.
+  ## buttons, from the session as it is now.
   ##
-  ## **One render, not a reactive tree, and the reason is a constraint of the
-  ## DSL rather than a choice.** `ui`'s attribute parser requires the template's
-  ## arguments to substitute as idents; passing `sessionModel(vm)` as the model
-  ## *expression* — which is what would make each attribute re-evaluate — makes
-  ## it reject the tree with "DSL attribute name must be an ident … got
-  ## nnkCall". So the model is bound once here, and freshness is the mount's
-  ## job: `mountIsoNimCounterexampleSession` re-runs this inside a
-  ## `createEffect`, so every signal `sessionModel` reads is tracked and the
-  ## panel is rebuilt when any of them changes.
+  ## **One render, not a reactive tree.** The tree branches and loops over the
+  ## model (`if mdl.isOpen`, `for` over the steps), and a branch over a signal
+  ## inside `ui` is evaluated once. So the model is read once here, and
+  ## freshness is `renderCounterexamplePane`'s job: it re-runs this inside an
+  ## effect, so every signal `sessionModel` reads is tracked and the panel is
+  ## rebuilt when any of them changes.
   ##
   ## The alternative — a second, VM-reading tree written the way
   ## `isonim_flow_view` writes one — was rejected: two trees drift, and the
@@ -288,37 +287,24 @@ proc renderCounterexampleSessionLive*(r: MockRenderer;
   ## mounts.
   let m = sessionModel(vm)
   let h = handlersFor(vm)
-  renderCounterexampleSessionImpl(r, m, h)
+  renderCounterexampleSessionTree[R, N](r, m, h)
 
-when defined(js):
-  proc renderCounterexampleSession*(r: WebRenderer;
-                                    model: CounterexampleSessionModel):
-                                    isonim_dom.Element =
-    renderCounterexampleSessionImpl(r, model, CounterexampleHandlers())
-
-  proc renderCounterexampleSessionLive*(r: WebRenderer;
-                                        vm: CounterexampleSessionVM):
-                                        isonim_dom.Element =
-    let m = sessionModel(vm)
-    let h = handlersFor(vm)
-    renderCounterexampleSessionImpl(r, m, h)
-
-  proc mountIsoNimCounterexampleSession*(container: isonim_dom.Element;
-                                         vm: CounterexampleSessionVM) =
-    ## Mount the counterexample panel as a child of `container`, and keep it
-    ## current.
-    ##
-    ## Coarse-grained on purpose: the whole panel is rebuilt inside a
-    ## `createEffect`, so every signal `sessionModel` touches — `isOpen`, the
-    ## trace, the current step, and the memos over them — is tracked, and any
-    ## of them changing repaints. `mountIsoNimFlow` gets finer granularity by
-    ## reading its VM inside the tree; this panel cannot (see
-    ## `renderCounterexampleSessionLive`), and a counterexample is a handful of
-    ## rows, so a full rebuild per step is the cheaper trade against a second
-    ## tree that would drift.
-    createEffect proc() =
-      let panel = renderCounterexampleSessionLive(WebRenderer(), vm)
-      let containerNode = isonim_dom.Node(container)
-      while not isonim_dom.isNodeNil(containerNode.firstChild):
-        discard isonim_dom.removeChild(containerNode, containerNode.firstChild)
-      isonim_dom.appendChild(containerNode, isonim_dom.Node(panel))
+proc renderCounterexamplePane*[R, N](r: R; vm: CounterexampleSessionVM): N =
+  ## The counterexample panel, kept current: a host whose content is
+  ## `renderCounterexampleSessionLive`, rebuilt by an effect.
+  ##
+  ## Coarse-grained on purpose: every signal `sessionModel` touches — `isOpen`,
+  ## the trace, the current step, and the memos over them — is tracked, and any
+  ## of them changing repaints. A counterexample is a handful of rows, so a
+  ## full rebuild per step is the cheaper trade against a second tree that
+  ## would drift.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin clearChildren, appendChild
+  var host: N
+  let pane = ui(r):
+    tdiv(ref = host, class = "ct-counterexample-host")
+  createRenderEffect proc() =
+    let panel = renderCounterexampleSessionLive[R, N](r, vm)
+    r.clearChildren(host)
+    r.appendChild(host, panel)
+  pane

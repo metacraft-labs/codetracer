@@ -1,0 +1,44 @@
+{
+  "records": [
+    {
+      "build_hash": "9c1e4b7a2d5f8e3c6b9a0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a",
+      "capabilities": "[]",
+      "framework": "",
+      "prev_session": "",
+      "protocol_level": 0,
+      "record": "Header",
+      "recorder_id": "codetracer-boundary-shim/0.1.0",
+      "session_id": "5f0c2a9e7b6d4e1f8a3c9b2d1e0f7a6b",
+      "vocab": 1
+    },
+    {
+      "arms": "{\"hero\":\"b\"}",
+      "color_scheme": 1,
+      "dpr": 1.5,
+      "fonts_digest": "a1b2c3d4",
+      "locale": "en-GB",
+      "record": "Env",
+      "reduced_motion": 0,
+      "referrer_origin": "https://search.example",
+      "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+      "tz": "Europe/Sofia",
+      "ua": "Mozilla/5.0 (X11; Linux x86_64) Chrome/141.0.0.0",
+      "ua_major": 141,
+      "url": "https://shop.example/checkout",
+      "viewport_h": 800,
+      "viewport_w": 1280
+    },
+    {
+      "detail": "setTimeout string",
+      "feature": "unrecordable-timer-handler",
+      "record": "Refusal",
+      "seq": "1"
+    },
+    {
+      "last_seq": "1",
+      "reason": 1,
+      "record": "End"
+    }
+  ],
+  "termination": "Complete"
+}

@@ -35,13 +35,15 @@ suite "legacy mdBook *.html URLs redirect to the new clean URLs":
   let redirects = legacyRedirects(summaryPath())
 
   test "the old book SUMMARY yields the expected legacy URL count":
-    # 45 SUMMARY-listed pages + the mdBook root copy (/index.html).
-    check redirects.len == 46
+    # 46 SUMMARY-listed pages (the 45 of the migration + the watchpoints
+    # reference the old book gained since) + the mdBook root copy
+    # (/index.html).
+    check redirects.len == 47
     var needStub = 0
     for r in redirects:
       if r.needsStub: inc needStub
-    check needStub == 45
-    check stubsWritten.legacy == 45
+    check needStub == 46
+    check stubsWritten.legacy == 46
     # The second family (`movedRoutes`) is counted separately so this suite
     # keeps asserting the mdBook migration is intact even as the book's own
     # moves accumulate. DS-1's `/usage_guide/deep_review` is the first.
@@ -83,12 +85,13 @@ suite "legacy mdBook *.html URLs redirect to the new clean URLs":
     # `getting_started/introduction` split + the three WebFlow utility pages
     # faq/support/sign-in = 50, + the nine live-request-tracking pages + the
     # `sign-up` page = 60, + the five `deep_review` section pages DS-1 split the
-    # single `usage_guide/deep_review` article into = 65); the framework output
-    # must still be intact.
+    # single `usage_guide/deep_review` article into = 65, + the watchpoints
+    # reference and the terminal setup guide = 67); the framework output must
+    # still be intact.
     check dirExists(publicDir())
     check fileExists(publicDir() / "index.html")
     let entries = loadContentEntries(contentDir())
-    check entries.len == 65
+    check entries.len == 67
 
   test "every moved clean route redirects to where its content went":
     ## The second redirect family. These are URLs the SSG itself published and

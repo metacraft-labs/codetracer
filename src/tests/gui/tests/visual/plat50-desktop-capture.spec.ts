@@ -56,7 +56,6 @@ function recording(): string {
 test.use({
   sourcePath: recording(),
   launchMode: "trace-folder",
-  noUserLayout: true,
   codetracerPrefixOverride: process.env.PLAT50_DESKTOP_PREFIX ?? "",
 });
 test.setTimeout(300_000);
@@ -196,7 +195,8 @@ test("PLAT-50: the desktop's caption bar, strips, menu surface and click behavio
   menus.tab = await rightClickMenu(ctPage.locator(".lm_tab", { hasText: "VCS" }).first());
   menus.callTraceWithChildren = await rightClickMenu(ctPage.locator(".calltrace-view .call-text", { hasText: "apply_op" }).first());
   menus.callTraceLeaf = await rightClickMenu(ctPage.locator(".calltrace-view .call-text", { hasText: "add" }).first());
-  // A Files node: NO menu (its four entries did nothing and were removed).
+  // A Files node: the Files pane's own menu (Filesystem-Pane.md, "Context
+  // menu"): Create, Rename, Delete, Edit, always all four, in that order.
   await ctPage.locator(".jstree-anchor", { hasText: "main.py" }).first().click({ button: "right" });
   await ctPage.waitForTimeout(800);
   menus.filesNode = (await ctPage.locator("#context-menu-container").isVisible())
@@ -210,22 +210,56 @@ test("PLAT-50: the desktop's caption bar, strips, menu surface and click behavio
   // then lies far right of the visible text, the press scrolls the editor
   // sideways, and lands on nothing.
   menus.editorText = await rightClickMenu(line31, { x: 60, y: 8 });
-  // AND A PRESS THAT LANDS ON NO TEXT POSITION, kept on purpose: the
-  // editor's own vertical scrollbar, which Monaco's mouse target resolves to
-  // no position. The editor's mouse handler once read `lineNumber` off that
-  // null position and threw (`ui/editor.nim`, "A press Monaco resolves to no
-  // text position"); `pageErrors` below is what notices it. No menu is
-  // expected there, so none is waited for. This press used to happen by
-  // accident — the right-click on the line's text above landed at the centre
-  // of a `.view-line` as wide as the widest line — and the line's own press
-  // now lands on its text, so the null-position press is made explicitly.
-  // The scrollbar track is drawn only while hovered, so the press is made at
-  // its place — the editor's right edge — rather than on its element.
+  // A right press on the editor's own vertical scrollbar, kept: it once
+  // landed on no text position and made the editor's mouse handler throw
+  // (`ui/editor.nim`, "A press Monaco resolves to no text position");
+  // `pageErrors` below is what notices a throw. No menu is expected there,
+  // so none is waited for. The scrollbar track is drawn only while hovered,
+  // so the press is made at its place — the editor's right edge — rather
+  // than on its element.
   const editorBox = await line31.locator("xpath=ancestor::div[contains(@class,'monaco-editor')][1]").boundingBox();
   expect(editorBox).not.toBeNull();
   await ctPage.mouse.click(editorBox!.x + editorBox!.width - 4, editorBox!.y + editorBox!.height / 2,
     { button: "right" });
   await ctPage.keyboard.press("Escape");
+  // Monaco now resolves the scrollbar press above to a position too (target
+  // type 11), so it no longer reaches the guard. A press that DOES reach it:
+  // one on an OVERLAY WIDGET, which Monaco resolves to no position (target
+  // type 12) — its own find widget, opened with Ctrl+F in the editor. The
+  // editor's `onMouseDown` sees the press (overlay widgets are inside the
+  // editor's view), and a listener of this spec reads the target it got, so
+  // the case proves the null-position branch was entered rather than
+  // assuming it. Escape closes the widget again.
+  await line31.click({ position: { x: 60, y: 8 } });
+  await ctPage.keyboard.press("Control+F");
+  const findWidget = ctPage.locator(".monaco-editor .find-widget.visible").first();
+  await findWidget.waitFor({ state: "visible", timeout: 10_000 });
+  // The widget slides in from above the editor (a CSS transition): measured
+  // at once, its box is still off its resting place and the press misses it.
+  await ctPage.waitForTimeout(1_000);
+  await ctPage.evaluate(() => {
+    const g = globalThis as any;
+    g.__plat50PressTargets = [];
+    for (const ed of g.monaco.editor.getEditors()) {
+      ed.onMouseDown((e: any) => g.__plat50PressTargets?.push({
+        type: e.target.type, hasPosition: e.target.position != null }));
+    }
+  });
+  const findBox = await findWidget.boundingBox();
+  expect(findBox).not.toBeNull();
+  await ctPage.mouse.click(findBox!.x + 4, findBox!.y + findBox!.height / 2, { button: "right" });
+  await ctPage.waitForTimeout(500);
+  out.nullPositionPress = await ctPage.evaluate(() => {
+    const g = globalThis as any;
+    const seen = g.__plat50PressTargets ?? [];
+    g.__plat50PressTargets = undefined;
+    return seen;
+  });
+  await ctPage.keyboard.press("Escape");
+  await ctPage.mouse.click(5, 300);
+  await findWidget.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => undefined);
+  // The press reached the editor's handler with no position: the guard ran.
+  expect(out.nullPositionPress).toContainEqual({ type: 12, hasPosition: false });
   // A call's ARGUMENT, and a docked pane's label in the footer.
   menus.callArgument = await rightClickMenu(ctPage.locator(".calltrace-view .call-arg", { hasText: "left" }).first());
   menus.dockLabelBottom = await rightClickMenu(ctPage.locator(".auto-hide-strip-tab", { hasText: /^BUILD$/i }).first());
@@ -260,18 +294,42 @@ test("PLAT-50: the desktop's caption bar, strips, menu surface and click behavio
     await ctPage.locator(".monaco-editor .margin-view-overlays .gutter[data-line='31'] .gutter-breakpoint-enabled")
       .first().click({ button: "right" });
     await ctPage.waitForTimeout(800);
+    // AND NO MENU: the marker's right-click is the enable / disable toggle and
+    // nothing else (`Editor-Pane.md`, the gutter's gesture 8). Monaco's own
+    // `onContextMenu` used to answer the same press with the editor's menu,
+    // built BEFORE the toggle ran, so it offered "Disable breakpoint" for the
+    // breakpoint the press had just disabled — and that stale menu was still
+    // open when the next right-click read it (codetracer-pm issue
+    // 2026-10-04-desktop-editor-menu-offers-disable-for-a-just-disabled-
+    // breakpoint).
+    clicks.gutterRightClickMenu = await ctPage.locator("#context-menu-container").isVisible();
     clicks.gutterDisabled = await ctPage.locator(
       ".monaco-editor .margin-view-overlays .gutter[data-line='31'] .gutter-breakpoint-disabled").count() > 0;
     // The editor's menu on a line WITH a breakpoint — the one just disabled,
-    // so its entry reads "Enable breakpoint". MEASURED: the FIRST menu
-    // opened after the gutter's right-click still offers "Disable
-    // breakpoint" although the breakpoint table holds it disabled (codetracer-
-    // specs issue 2026-10-04-desktop-editor-menu-offers-disable-for-a-just-
-    // disabled-breakpoint); the second reads the state. Both are recorded;
-    // the second is the reference.
-    menus.editorTextOnBreakpointFirst = await rightClickMenu(
-      ctPage.locator(".monaco-editor .view-line", { hasText: "return left + right" }).first());
-    menus.editorTextOnBreakpoint = await rightClickMenu(ctPage.locator(".monaco-editor .view-line", { hasText: "return left + right" }).first());
+    // so its entry reads "Enable breakpoint", on the FIRST press as on the
+    // second. Both are recorded and both are asserted below.
+    //
+    // Each press is made on line 31 brought to the editor's CENTRE first. By
+    // now the debugger has moved and the editor has scrolled line 31 under
+    // Monaco's sticky-scroll header (`.overlayWidgets`), which then takes the
+    // press: Playwright reports it intercepting pointer events and the press
+    // never reaches the line. The press is made near the line's start, as the
+    // breakpoint-free `editorText` press above is, and for its reason.
+    const centreLine31 = async () => {
+      await ctPage.evaluate(() => {
+        const editors = (globalThis as any).data?.ui?.editors ?? {};
+        for (const key of Object.keys(editors)) {
+          editors[key]?.monacoEditor?.revealLineInCenter?.(31);
+        }
+      });
+      await ctPage.waitForTimeout(300);
+    };
+    const line31OnBreakpoint = () =>
+      ctPage.locator(".monaco-editor .view-line", { hasText: "return left + right" }).first();
+    await centreLine31();
+    menus.editorTextOnBreakpointFirst = await rightClickMenu(line31OnBreakpoint(), { x: 60, y: 8 });
+    await centreLine31();
+    menus.editorTextOnBreakpoint = await rightClickMenu(line31OnBreakpoint(), { x: 60, y: 8 });
   }
   // A disabled breakpoint does not stop the jumps below.
   const start = await where();
@@ -310,11 +368,13 @@ test("PLAT-50: the desktop's caption bar, strips, menu surface and click behavio
   // click on the `output` column (and after a second click).
   const firstOutput = async () =>
     ctPage.evaluate(() => {
-      const cell = document.querySelector("table[id*=\"-dense-table-\"] tbody tr .eventLog-text") as HTMLElement | null;
+      // The Event Log is one view over its ViewModel: its rows are the held
+      // window's, under the scroll body (`views/isonim_event_log_view`).
+      const cell = document.querySelector(".eventLog-scroll-body tbody tr .eventLog-text") as HTMLElement | null;
       return cell ? cell.innerText.trim() : "";
     });
-  // The header the desktop shows is its own strip (`ui/event_log.
-  // renderColumnHeader`; DataTables' header row is hidden).
+  // The header the desktop shows is the view's own strip
+  // (`views/isonim_event_log_view`, `.eventLog-column-header`).
   const header = ctPage.locator(".eventLog-column-header .eventLog-cell", { hasText: /^output( [▲▼])?$/ }).first();
   if ((await header.count()) > 0) {
     const before = await firstOutput();
@@ -340,9 +400,36 @@ test("PLAT-50: the desktop's caption bar, strips, menu surface and click behavio
     moved: argTo.ticks !== argFrom.ticks,
   };
   // The status bar's copy control: the location on the clipboard.
+  //
+  // THE CONTROL IS HIDDEN BY DESIGN, AND THE ACTION IS WHAT IS MEASURED.
+  // `status_bar.styl`'s "HIDDEN FOR NOW" rule (2026-10-15) sets the location
+  // path and `#copy-path-image` to `display: none`, so a pointer click waits
+  // for a box that never appears and the capture died here, before writing
+  // any answers. Whether the readout comes back is an open design decision
+  // (codetracer-pm issue 2026-10-20-ready-on-entry-waits-for-a-location-path-
+  // the-status-bar-now-hides-by-design.md), not this capture's to make. What
+  // the native front-ends are compared against is the copy ACTION the control
+  // is wired to (`isonim_status_view`'s `onclick`, `invokeCopyLocation`), so
+  // a hidden control gets the same `click` event dispatched straight to it.
+  // `statusCopyControlVisible` records which of the two happened, so the
+  // answers file says whether a user could have made this press at all.
+  //
+  // Not a way around a failure: the clipboard is emptied first and read
+  // after, and a gate below requires the location on it, so a copy action
+  // that did not run fails this capture rather than writing answers. The
+  // emptying matters when the capture runs on a real desktop's DISPLAY,
+  // whose clipboard can still hold the path an earlier run copied.
   const copy = ctPage.locator("#copy-path-image").first();
   if ((await copy.count()) > 0) {
-    await copy.click();
+    await ctPage.evaluate(() => {
+      (globalThis as any).require?.("electron")?.clipboard?.writeText?.("");
+    });
+    clicks.statusCopyControlVisible = await copy.isVisible();
+    if (clicks.statusCopyControlVisible) {
+      await copy.click();
+    } else {
+      await copy.dispatchEvent("click");
+    }
     await ctPage.waitForTimeout(500);
     clicks.statusLocationCopied = await ctPage.evaluate(async () => {
       try {
@@ -362,11 +449,16 @@ test("PLAT-50: the desktop's caption bar, strips, menu surface and click behavio
   expect(clicks.gutterDisabled).toBe(true);
   expect(clicks.eventLogRow).toMatchObject({ moved: true });
   expect(menus.tab.slice(0, 4)).toEqual(["Pin to Left", "Pin to Bottom", "Pin to Right", "Close"]);
-  expect(menus.filesNode).toEqual([]);
+  expect(menus.filesNode).toEqual(["Create", "Rename", "Delete", "Edit"]);
   const sort = clicks.eventLogSort as { ascending: unknown; descending: unknown };
   expect(sort.ascending).not.toEqual(sort.descending);
   expect(menus.callTraceWithChildren).toEqual(["Collapse Call Children"]);
+  expect(clicks.gutterRightClickMenu).toBe(false);
+  expect(menus.editorTextOnBreakpointFirst).toContain("Enable breakpoint");
   expect(menus.editorTextOnBreakpoint).toContain("Enable breakpoint");
+  // The status bar's copy action put the location on the clipboard (pressed
+  // or, while the control is hidden, dispatched to it; see above).
+  expect(String(clicks.statusLocationCopied ?? "")).toContain("main.py");
   // An argument takes no left press of its own on the desktop: no tooltip,
   // and the debugger stays (only the call's name is the row's target).
   expect(clicks.callArgumentClick).toMatchObject({ tooltip: false, moved: false });

@@ -13,11 +13,14 @@
 .ct-omni-name
     color: colors-ui-icon-primary-subtle
 
+// The name colours are brand steps picked for the dark ground (cyan-300 is
+// 1.3:1 on the light one, red-400 2.6:1). The light theme takes the text
+// token of each role instead (`by-mode`, defaults.styl).
 .ct-omni-name-std
-    color: colors-secondary-300
+    color: by-mode(colors-secondary-300, colors-ui-text-information-primary)
 
 .ct-omni-name-error
-    color: colors-error-400
+    color: by-mode(colors-error-400, colors-ui-text-error-primary)
 
 [class*="ct-omni-name"]
     margin-right: 0.5em

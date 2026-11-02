@@ -2,7 +2,7 @@
   "B1": "banded == @[($surface.rows[2].line, ExecutionRowBand)]",
   "E1": "bare.presence(row, ecLineStatus) == prDegraded",
   "E2": "at == wantCol",
-  "E3": "annStyles{\"position\"}.getStr notin [\"absolute\", \"fixed\"]",
+  "E3": "annStyles{\"left\"}.getStr == $wantLeft & \"px\"",
   "F1": "facts.positions(flskSkip) == @[4, 5]",
   "F2": "(\"efsNotTaken\", FlowNotTakenOpacity) in opacityByFlow",
   "F3": "st.role in [FlowNotTakenStyle.role, AnnotationStyle.role]",
@@ -12,6 +12,6 @@
   "L3": "not first.awaitsMove",
   "P1": "row.pointer == eptExecution",
   "S1": "\"ct/updated-calltrace\" in seen",
-  "V1": "\"inlineValues = values)\" in src",
+  "V1": "\"lineValues = flowValues)\" in src",
   "W1": "w == (\"nowrap\", \"hidden\")"
 }

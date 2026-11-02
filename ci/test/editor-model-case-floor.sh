@@ -111,11 +111,13 @@ MILESTONE_ID="${1:-PLAT-24}"
 
 # The specification checkout: the workspace sibling, or the one CT_SPECS_DIR
 # names (the variable `src/frontend/test_support/spec_documents.nim` and
-# `ci/test/shortcut-shadow-spec-agreement.sh` honour too). Its layout is the
-# one codetracer-specs `1735345d` adopted: topical documents under `spec/`,
+# `ci/test/cua-keymap-extractor.sh` honour too). The sibling is
+# `../codetracer-pm`, the name `codetracer-specs` was renamed to and the default
+# `spec_documents.nim`'s `SpecRepoDirName` holds. Its layout is the one
+# codetracer-specs `1735345d` adopted: topical documents under `spec/`,
 # milestone files under `milestones/`. An override, never a fallback — a file
 # absent there still fails by name below.
-SPECS_DIR="${CT_SPECS_DIR:-../codetracer-specs}"
+SPECS_DIR="${CT_SPECS_DIR:-../codetracer-pm}"
 SPEC_REL="${SPECS_DIR}/milestones/CodeTracer-Platform.milestones.org"
 LAWS_REL="${SPECS_DIR}/spec/Testing/Editor-Model-Conformance-Suite.md"
 
@@ -677,7 +679,7 @@ SUITE_FLAGS=("${SUITE_FLAGS[@]:-}")
 
 if [ ! -f "${SPEC_REL}" ]; then
 	echo "FAIL: the milestone file is not here: ${SPEC_REL}"
-	echo "      The floor is published in codetracer-specs and read at run"
+	echo "      The floor is published in codetracer-pm and read at run"
 	echo "      time, never transcribed. A missing sibling checkout fails BY"
 	echo "      NAME rather than skipping: a check that detects a missing"
 	echo "      prerequisite, returns early and is counted PASSED is the defect"

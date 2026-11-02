@@ -59,6 +59,14 @@ type
     totalCallsCount*: int
     scrollPosition*: int
     maxDepth*: int
+    currentCallLineIndex*: int
+      ## The engine's `current_call_line_index` (`CallArgsUpdateResults` in
+      ## `src/db-backend/src/task.rs`): the global call-line index of the call
+      ## the debugger is in, or of the nearest call line before it when that
+      ## call is folded away. The wire carries `null` when it is unknown, so a
+      ## reader must not take the field's value at face value —
+      ## `ui/calltrace.currentCallLineIndexOf` answers -1 for anything that is
+      ## not a number. Declared so the JS backend's typed copies keep it.
 
   CallSearchArg* = object
     value*: langstring

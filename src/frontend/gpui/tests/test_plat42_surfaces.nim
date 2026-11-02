@@ -39,9 +39,11 @@ const Scenarios = ["entry-shell", "stepped-editor", "advanced-state",
                    "returned-calltrace", "continued-event-log",
                    "breakpoint-editor"]
 
-# Stops whose execution line NAMES something in scope, so the execution-line-
-# only rule must produce values there — and the stops whose line names nothing
-# in scope, where it must not. Measured on the shipped binary 2026-09-23.
+# Stops whose execution line NAMES something in scope, so values must be drawn
+# there. Measured on the shipped binary 2026-09-23. (The other three stops were
+# asserted to carry none while values followed the execution line only; since
+# 2026-10-17 they follow the flow, which records module globals at the `def`
+# the stop is on — see surface 3.)
 const ValuesExpected = ["advanced-state", "returned-calltrace",
                         "continued-event-log"]
 
@@ -99,25 +101,59 @@ suite "PLAT-42 surface 1 — the execution pointer":
           ck r["pointer"].getStr == "eptExecution"
       ck banded == 1
 
-suite "PLAT-42 surface 3 — inline values, on the EXECUTION LINE ONLY":
-  ## The rule is deliberate and documented at `editor_surface.nim`: a value at
-  ## the stop drawn beside a line thirty rows above it that has not run would be
-  ## stale. It DIVERGES from Electron, which annotates every mentioning line —
-  ## recorded by PLAT-34 as PLAT22-PG3.
+suite "PLAT-42 surface 3 — inline values, on the lines the run REACHED":
+  ## Until 2026-10-17 the GPUI editor drew values on the execution line only
+  ## (`editor_surface.nim`: a value at the stop beside a line that has not run
+  ## would be stale), DIVERGING from Electron — PLAT22-PG3. The redesign draws
+  ## them as the desktop does (`editor_surface.flowValuesByLine`): every line of the
+  ## current function that the run reached carries its first step's recorded
+  ## values. The staleness the old rule guarded against is still the rule: a
+  ## value is never drawn on a line the run did not reach — a declined arm
+  ## above all — and the function's own header is the one line that carries
+  ## values (its arguments, its `return`) without a flow state of its own.
+
+  proc reachedOrHeader(r: JsonNode): bool =
+    if r["flow"].getStr == "efsTaken": return true
+    if r["flow"].getStr != "efsUnknown": return false
+    # The header: the row's code (after its gutter number) is a definition.
+    var code = r["text"].getStr
+    let n = gutterLineOf(code)
+    let at = code.find($n)
+    if at >= 0: code = code[at + len($n) .. ^1]
+    code = code.replace("\xC2\xA0", " ").strip()
+    for kw in ["def ", "fn ", "pub fn "]:
+      if code.startsWith(kw): return true
+    false
 
   for s in Scenarios:
-    test "no row other than the execution row carries values — " & s:
+    test "a row carries values only if the run reached it — " & s:
+      var carrying = 0
       for r in rowsOf(s):
-        if r["pointer"].getStr != "eptExecution":
-          ck r["values"].getStr.len == 0
+        if r["values"].getStr.len > 0:
+          inc carrying
+          checkpoint(s & " row " & r["text"].getStr & " flow " &
+                     r["flow"].getStr)
+          ck reachedOrHeader(r)
+      ck carrying > 0
 
-  for s in Scenarios:
-    test "values appear exactly where the stop line names something in scope — " & s:
+  test "the declined arm carries no value, and every value is on a reached line — noir":
+    var declined, carrying = 0
+    for r in rec()["flowScenarios"]["noir-declined-arm"]["rows"]:
+      if r["flow"].getStr == "efsNotTaken":
+        inc declined
+        ck r["values"].getStr.len == 0
+      if r["values"].getStr.len > 0:
+        inc carrying
+        ck reachedOrHeader(r)
+    ck declined > 0
+    ck carrying > 0
+
+  for s in ValuesExpected:
+    test "the execution row carries values where the stop line names something in scope — " & s:
       let rows = execRows(s)
       ck rows.len == 1
       if rows.len == 1:
-        if s in ValuesExpected: ck rows[0]["values"].getStr.len > 0
-        else: ck rows[0]["values"].getStr.len == 0
+        ck rows[0]["values"].getStr.len > 0
 
 suite "PLAT-42 surface 2 — per-line status":
   for s in Scenarios:
@@ -129,7 +165,7 @@ suite "PLAT-42 surface 2 — per-line status":
       else: ck marks == 0
 
 const FlowScenario = "noir-declined-arm"
-  ## `noir_space_ship`'s `shield.nr`, stopped (`stepIn=33`) on line 29 in the
+  ## `noir_space_ship`'s `shield.nr`, stopped (`stepIn=28`; `stepIn=33` until 2026-10-17, when the recording began five steps later) on line 29 in the
   ## first call of `calculate_damage`: the shield is full, so `shield_pct ==
   ## 100` took its arm and declined the `else` (lines 32-33), and `damage >
   ## remaining_shield` declined its arm (lines 35-36). `calc` cannot carry this

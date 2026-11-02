@@ -52,14 +52,17 @@
 ## Usage:
 ##   let editor = createEditorVM(store)
 ##   let vm = createSourceVM(store, editor)
-##   vm.setViewport(height = 20, overscan = 5)
+##   vm.setOverscan(5)
+##   vm.setViewport(vm.viewport.withRows(20))
 ##   for request in vm.requestMissing():
 ##     discard   # hand `request` to a SourceProvider, then call `vm.fulfill(...)`
 
-import isonim/core/[signals, computation, owner]
+import isonim/core/[signals, computation, owner, batch]
 import isonim/viewmodel
 
 import ../store/replay_data_store
+import ../viewport
+export viewport
 import editor_vm
 
 type
@@ -280,6 +283,19 @@ func topCentringIfOutside*(currentTop, line, viewportHeight,
     clampTop(line - (viewportHeight - 1) div 2, viewportHeight,
              totalLineCount)
 
+func topCentring*(currentTop, line, viewportHeight, totalLineCount: int): int =
+  ## The top that puts `line` in the MIDDLE of the viewport, whether or not it
+  ## is visible now — `topCentringIfOutside` without its "if outside".
+  ##
+  ## M73 (#840): CodeTracer-TUI.md §4.2's `.`, *"Reset source scroll so the
+  ## current execution pointer is centered"*. A reset is unconditional: after
+  ## the user scrolled the pointer to the pane's last row, `.` must still
+  ## centre it, which the stop rule (leave a visible line where it is) would
+  ## refuse to do.
+  if viewportHeight <= 0 or line <= 0:
+    return clampTop(currentTop, viewportHeight, totalLineCount)
+  clampTop(line - (viewportHeight - 1) div 2, viewportHeight, totalLineCount)
+
 # ---------------------------------------------------------------------------
 # Reading the window
 # ---------------------------------------------------------------------------
@@ -332,17 +348,33 @@ proc visibleReads*(vm: SourceVM): seq[SourceRead] =
 # Actions
 # ---------------------------------------------------------------------------
 
-proc setViewport*(vm: SourceVM; height: int; overscan: int = -1) =
-  ## Set the pane's height in lines, and optionally the overscan.
+proc viewport*(vm: SourceVM): Viewport =
+  ## The pane's viewport as this ViewModel holds it: its height in lines and
+  ## its first visible line (0-based `firstRow` for 1-based `viewportTop`).
+  ## A view that reports only its size changes the rows of THIS and leaves
+  ## the scroll where the ViewModel put it (it follows the execution line).
+  Viewport(rows: vm.viewportHeight.val, firstRow: max(0, vm.viewportTop.val - 1))
+
+proc setViewport*(vm: SourceVM; v: Viewport) =
+  ## The size and scroll position the view was given — the ONE way a view
+  ## tells this ViewModel what it shows (Viewport-Driven-Loading V1). The
+  ## window it then holds is the visible lines plus `overscan` either side.
   ##
-  ## A negative or zero height is clamped to 1: a viewport of zero lines would
-  ## make every window empty and every read a request, which reads exactly like
-  ## a provider that never answers.
-  vm.viewportHeight.val = max(1, height)
+  ## An unmeasured viewport (`rows = 0`) changes nothing: a viewport of zero
+  ## lines would make every window empty and every read a request, which
+  ## reads exactly like a provider that never answers.
+  if v.rows <= 0:
+    return
+  batch(proc() =
+    vm.viewportHeight.val = v.rows
+    vm.viewportTop.val = clampTop(max(0, v.firstRow) + 1, vm.viewportHeight.val,
+                                  vm.totalLineCount.val))
+
+proc setOverscan*(vm: SourceVM; overscan: int) =
+  ## The lines held beyond the visible ones on either side — the medium's
+  ## choice (a terminal pages differently from a window), not a size.
   if overscan >= 0:
     vm.overscan.val = overscan
-  vm.viewportTop.val = clampTop(vm.viewportTop.val, vm.viewportHeight.val,
-                                vm.totalLineCount.val)
 
 proc scrollTo*(vm: SourceVM; top: int) =
   ## Put `top` at the top of the viewport, clamped to the file.
@@ -356,6 +388,12 @@ proc scrollBy*(vm: SourceVM; delta: int) =
 proc followCursor*(vm: SourceVM) =
   ## Scroll the least amount that brings `EditorVM.cursorLine` — the editor
   ## CARET — into view.
+  ##
+  ## M73 (#840): the terminal's and GPUI's read-only editors call this after
+  ## the user moves the caret (having written it with `EditorVM.setCursor`),
+  ## so a caret moved below the last row brings the drawn window with it.
+  ## Until then it had no caller outside the tests, and the caret could leave
+  ## the screen.
   vm.viewportTop.val = topFollowingCursor(
     vm.viewportTop.val, vm.editor.cursorLine.val,
     vm.viewportHeight.val, vm.totalLineCount.val)
@@ -371,6 +409,16 @@ proc followExecutionPointer*(vm: SourceVM) =
     vm.viewportTop.val, vm.executionLine.val,
     vm.viewportHeight.val, vm.totalLineCount.val)
 
+proc centreOnExecutionPointer*(vm: SourceVM) =
+  ## Put the execution line in the middle of the viewport, visible or not —
+  ## the user's `.` (CodeTracer-TUI.md §4.2), as against the stop's
+  ## `followExecutionPointer`, which leaves a visible pointer where it is.
+  ## M73 (#840): until then a front-end that let the user scroll had no way
+  ## back that was not a step.
+  vm.viewportTop.val = topCentring(
+    vm.viewportTop.val, vm.executionLine.val,
+    vm.viewportHeight.val, vm.totalLineCount.val)
+
 proc trimToWindow*(vm: SourceVM) =
   ## Drop every held line outside the window (viewport plus overscan).
   ##
@@ -383,6 +431,13 @@ proc trimToWindow*(vm: SourceVM) =
     vm.heldLines.val = @[]
     vm.heldLineContexts.val = @[]
     vm.heldFirstLine.val = 1
+    # The length belonged to the held revision too. Kept, it clamped the NEW
+    # file's window to the OLD file's length: going from a 5-line file to a
+    # 6-line one asked for lines 1-5 only, and line 6 read `⋯ loading` until
+    # something else moved the window. Unknown (0) until the new file answers.
+    if not vm.heldRevision.val.isEmpty:
+      vm.heldRevision.val = SourceRevision()
+      vm.totalLineCount.val = 0
     return
   let first = vm.windowFirstLine.val
   let last = vm.windowLastLine.val

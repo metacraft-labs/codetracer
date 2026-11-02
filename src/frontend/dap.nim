@@ -39,6 +39,9 @@ type
     command*: cstring
     message*: cstring
     body*: JsObject
+    sessionId*: int
+      ## The `DapApi.sessionId` of the tab whose request this was — which
+      ## tab's status bar a refusal belongs in (`middleware.setupMiddlewareApis`).
 
 when not defined(ctInExtension):
 
@@ -48,6 +51,27 @@ when not defined(ctInExtension):
       ipc*: Jsobject
       seq*: int
       sessionId*: int  ## M8: id of the owning ReplaySession, attached to outgoing DAP requests.
+      hasReplay*: bool
+      replayId*: int
+        ## The replay this session's tab talks to — the id the Backend Manager
+        ## answered `ct/start-replay` with for it — when `hasReplay`; set and
+        ## cleared through `setReplay` (`types.assignReplay`). NOT the tab's
+        ## `sessionId`: the Backend Manager numbers replays in start order and
+        ## never reuses one, so the two numbers part (Stop and a new run, a
+        ## refused start, a "+" tab left on the Welcome Screen). A flag beside
+        ## the id rather than `-1`, because a `DapApi` built without naming
+        ## the field would otherwise claim replay 0.
+      routingThreadId*: int
+        ## M42 §14.8: the composed thread id of the recording this session's
+        ## requests go to (`setRoutingThreadId`); `0` for a single-recording
+        ## session. PER SESSION: each tab's process tree chooses its own
+        ## recording, and a choice made in one tab must not route another
+        ## tab's requests.
+      notificationsWired*: bool
+        ## Whether `event_helpers.wireSessionNotifications` has already
+        ## connected this API's `ct/notification` and `ct/launch-failed` to its
+        ## session's views mediator. Every session's API is wired once, and a
+        ## second wiring would show each notification twice.
       pendingResponses*: JsAssoc[cstring, proc(outcome: DapRequestOutcome)]
         ## M49 — in-flight `asyncSendCtRequest` continuations, keyed by
         ## the request's wire `seq`.
@@ -89,8 +113,40 @@ else:
       context*: VsCodeContext
       editor*: JsObject
       sessionId*: int  ## M8: id of the owning ReplaySession (unused in extension mode for now).
+      hasReplay*: bool
+      replayId*: int
+        ## See the fields of the same name in the desktop arm above.
+      routingThreadId*: int
+        ## M42 §14.8: the composed thread id of the recording this session's
+        ## requests go to (`setRoutingThreadId`); `0` for a single-recording
+        ## session. PER SESSION: each tab's process tree chooses its own
+        ## recording, and a choice made in one tab must not route another
+        ## tab's requests.
+      notificationsWired*: bool
+        ## See the field of the same name in the desktop arm above.
       # flowFunction*: proc(editor: JsObject)
       # completeMoveFunction*: proc(editor: JsObject, response: MoveState, dapApi: DapApi)
+
+proc setReplay*(dap: DapApi; replayId: int) =
+  ## `dap`'s tab talks to replay `replayId` from now on; none when negative.
+  if dap.isNil:
+    return
+  dap.hasReplay = replayId >= 0
+  dap.replayId = if replayId >= 0: replayId else: -1
+
+proc replayOf*(dap: DapApi): int =
+  ## The replay `dap`'s tab talks to, or `-1` when it has none.
+  if dap.isNil or not dap.hasReplay: -1 else: dap.replayId
+
+proc stampReplay*(packet: JsObject; dap: DapApi) =
+  ## Name `dap`'s replay on an outgoing request (`replayId`), beside the tab's
+  ## own `sessionId`: the main process selects the replay by it
+  ## (`index/ipc_subsystems/dap.onDapRawMessage`), and the tab id says only
+  ## which tab the answer and the events are for. A tab with no replay names
+  ## none, and the main process then does not run the request on a replay
+  ## another tab owns.
+  if not dap.isNil and dap.hasReplay:
+    packet["replayId"] = dap.replayId
 
 type
   DapRequest* = ref object
@@ -175,6 +231,7 @@ const EVENT_KIND_TO_DAP_MAPPING*: array[CtEventKind, cstring] = [
   InternalNewOperation: "",
   InternalTraceMapUpdate: "",
   CtNotification: "ct/notification",
+  CtLaunchFailed: "ct/launch-failed",
   TracepointLocals: "tracepoint-locals",
   CtTracepointResults: "ct/tracepoint-results",
   CtFlowJump: "ct/flow-jump",
@@ -208,6 +265,12 @@ const EVENT_KIND_TO_DAP_MAPPING*: array[CtEventKind, cstring] = [
   # ``dapEventToCtEventKind`` without any further wiring.
   CtLoadRequestSpansSince: "ct/load-request-spans-since",
   CtUpdatedHttpRequests: "ct/updated-http-requests",
+  # Viewport-Driven-Loading (HSF-V1) windowed reads, sent by ViewModels.
+  CtLoadRequestSpans: "ct/load-request-spans",
+  CtLoadSymbols: "ct/load-symbols",
+  CtLoadValueElements: "ct/load-value-elements",
+  CtLoadTerminalLines: "ct/load-terminal-lines",
+  CtLoadStepLines: "ct/load-step-lines",
   # Multi-process sessions (M29 §5.2 / M42 §14.8). The same command
   # string names both the request the frontend may issue and the
   # session-load event the backend dispatches unsolicited, so a single
@@ -239,11 +302,11 @@ const EVENT_KIND_TO_DAP_MAPPING*: array[CtEventKind, cstring] = [
 # `0` means "not a multi-process session" and leaves every request
 # byte-identical to the pre-M42 wire, so single-recording sessions —
 # i.e. every existing test — are unaffected. The process tree installs
-# a real id via `setActiveSessionThreadId` only once a session with
-# more than one recording reports its process list.
+# a real id via `setRoutingThreadId` only once a session with more than
+# one recording reports its process list. The id is the SESSION's
+# (`DapApi.routingThreadId`): every window tab is its own session with its
+# own process tree.
 # ---------------------------------------------------------------------------
-
-var activeSessionThreadId: int = 0
 
 proc isMissingArgs(value: JsObject): bool {.
   importjs: "((function(v) { return v === undefined || v === null; })(#))".}
@@ -251,14 +314,11 @@ proc isMissingArgs(value: JsObject): bool {.
   ## `isNil` covers `null` but not `undefined`, and both reach here from
   ## call sites that pass a bare `js{}` or omit the argument entirely.
 
-proc setActiveSessionThreadId*(threadId: int) =
-  ## Route subsequent DAP requests to the recording owning `threadId`.
-  ## Pass `0` to restore the default (slot 0) routing.
-  activeSessionThreadId = threadId
-
-proc getActiveSessionThreadId*(): int =
-  ## Current session-wide routing thread id; `0` when unset.
-  activeSessionThreadId
+proc setRoutingThreadId*(dap: DapApi; threadId: int) =
+  ## Route `dap`'s subsequent requests — one session's — to the recording
+  ## owning `threadId`. Pass `0` to restore the default (slot 0) routing.
+  if not dap.isNil:
+    dap.routingThreadId = threadId
 
 var DAP_TO_EVENT_KIND_MAPPING = JsAssoc[cstring, CtEventKind]{}
 
@@ -420,6 +480,26 @@ proc isTracked(kind: CtEventKind): bool =
       return true
   false
 
+proc ctRequestSessionId*(requestId: cstring): int =
+  ## The session id `ctRequestId` wrote into `requestId` — which tab's
+  ## `DapApi` sent the request, so an observer of every tab's requests
+  ## (`trackCtRequests`) can act on that tab's ViewModels. -1 for an id
+  ## this module did not make.
+  let text = $requestId
+  var colon = -1
+  for i, c in text:
+    if c == ':':
+      colon = i
+      break
+  if colon <= 0:
+    return -1
+  result = 0
+  for i in 0 ..< colon:
+    let c = text[i]
+    if c < '0' or c > '9':
+      return -1
+    result = result * 10 + (ord(c) - ord('0'))
+
 proc ctRequestIdOf*(body: JsObject): cstring =
   ## The identity `deliverDapResponse` wrote into a tracked answer's body, or
   ## "" for an answer that carries none.
@@ -546,6 +626,7 @@ when not defined(ctInExtension):
     ## the `seq` alone is not unique.
     cstring($dap.sessionId & ":" & $requestSeq)
 
+
   proc resolvePendingDapResponse*(dap: DapApi, raw: JsObject) =
     ## M49 — hand a DAP response frame to the `asyncSendCtRequest`
     ## continuation that is waiting for it, if any.
@@ -612,12 +693,12 @@ when not defined(ctInExtension):
     # M42 §14.8 — stamp the active recording's composed thread id so the
     # session router in `dap_server.rs` dispatches to the process the
     # user selected in the process tree. No-op (and no allocation) for
-    # single-recording sessions, where `activeSessionThreadId` is 0.
+    # single-recording sessions, where the session's `routingThreadId` is 0.
     var args = rawValue
-    if activeSessionThreadId != 0:
+    if dap.routingThreadId != 0:
       if isMissingArgs(args):
         args = JsObject{}
-      args["threadId"] = activeSessionThreadId
+      args["threadId"] = dap.routingThreadId
 
     let requestSeq = dap.seq
     let command = toDapCommandOrEvent(kind)
@@ -630,9 +711,11 @@ when not defined(ctInExtension):
 
     dap.seq += 1
 
-    # M8: Attach the session id so the main process can route
-    # the request to the correct backend session in the future.
+    # M8: the TAB's id, which the answer and the events come back tagged
+    # with; and the tab's REPLAY, which the main process selects the request
+    # onto (`stampReplay`). Two numbers: see `DapApi.replayId`.
     packet["sessionId"] = dap.sessionId
+    packet.stampReplay(dap)
 
     # M49 — park the continuation under this request's `seq` *before*
     # writing the frame. The IPC round-trip cannot complete inside this
@@ -652,6 +735,7 @@ when not defined(ctInExtension):
       # is waiting on — otherwise the notification says "something failed".
       if claimed.command.len == 0:
         claimed.command = command
+      claimed.sessionId = api.sessionId
       onOutcome(claimed)
     setResponseTimeout(proc() =
       if settled:
@@ -668,7 +752,8 @@ when not defined(ctInExtension):
         timedOut: true,
         command: command,
         message: cstring"",
-        body: js{})), DAP_RESPONSE_TIMEOUT_MS)
+        body: js{},
+        sessionId: api.sessionId)), DAP_RESPONSE_TIMEOUT_MS)
     # THE REQUEST IS NAMED BEFORE IT IS WRITTEN, from this one send path, so
     # no caller can issue a tracked request its answer cannot be matched to.
     if isTracked(kind):

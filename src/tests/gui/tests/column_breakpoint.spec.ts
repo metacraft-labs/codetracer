@@ -10,7 +10,7 @@
  *   1. With a column-aware minified JS recording loaded into the GUI,
  *      programmatically adding a breakpoint at `(line=1, column=N)`
  *      via the debugger service plumbs the column all the way to
- *      `data.services.debugger.breakpointTable[path][line].column`.
+ *      the session's breakpoint row for `(path, line)` (`ctBreakpointRows`) `.column`.
  *   2. The frontend's `dapSetBreakpoints` ships the column on the
  *      DAP wire so the replay-server registers a column-aware
  *      breakpoint (verified end-to-end by the continue-then-assert
@@ -191,7 +191,7 @@ interface BreakpointSnapshot {
 }
 
 /** Read the registered breakpoint at `(path, line)` from the
- *  frontend's `breakpointTable`.  Returns `null` when no breakpoint
+ *  session's breakpoint rows (`ctBreakpointRows`).  Returns `null` when no breakpoint
  *  exists at that key. */
 async function readBreakpoint(
   editor: EditorPane,
@@ -200,7 +200,7 @@ async function readBreakpoint(
   return editor.page.evaluate(
     ({ path: p, line: l }) => {
       const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-      const table = w?.data?.services?.debugger?.breakpointTable;
+      const table = (w?.ctBreakpointRows ? w.ctBreakpointRows().reduce((t: any, r: any) => { (t[r.path] ??= {})[r.line] = r; return t; }, {}) : undefined);
       if (!table) return null;
       const aliases = [p];
       if (p.startsWith("/private/var/")) aliases.push(p.slice("/private".length));
@@ -261,7 +261,7 @@ test.describe("M1 — Column-aware breakpoint", () => {
     await addColumnBreakpoint(editor, 1, fixture.laterStatementColumn);
 
     // The frontend MUST store the bound column on the
-    // `breakpointTable` entry — without this surface the M1 GUI
+    // the session's breakpoint rows entry — without this surface the M1 GUI
     // affordance is not wired through.
     const bp = await readBreakpoint(editor, 1);
     expect(bp, "breakpoint must be registered at line 1").not.toBeNull();

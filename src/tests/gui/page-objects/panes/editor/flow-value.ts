@@ -47,6 +47,7 @@ export class FlowValue {
     }
 
     // ID pattern: flow-{mode}-value-box-{i}-{step}-{expression}
+    // Dual pattern: flow-{mode}-value-box-{i}-{step}-{before|after}-{expression}
     // Stdout pattern: flow-{mode}-value-box-{i}-{step}
     const parts = id.split("-");
     return parts.length >= 6;

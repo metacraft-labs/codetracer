@@ -6,7 +6,7 @@
 ## progress indicator displays milestone progress, the activity pane shows
 ## DeepReview data, and real-time data collection works during agent execution.
 ##
-## Implementation note: actual Playwright E2E tests live in ``tsc-ui-tests/``
+## Implementation note: actual Playwright E2E tests live in ``src/tests/gui/tests/``
 ## and require a full Electron build + launch. This file serves as a reference
 ## for the required test coverage AND as a compilable Nim module that validates
 ## the type definitions and basic logic are correct.

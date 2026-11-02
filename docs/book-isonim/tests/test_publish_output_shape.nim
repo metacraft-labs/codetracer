@@ -5,7 +5,7 @@
 ## docs.codetracer.com -- has the shape GitHub Pages must serve:
 ##
 ##   * the real home page `index.html` (a rendered page, NOT a redirect stub),
-##   * all 65 rendered section/utility pages (one `<route>/index.html` per
+##   * all 67 rendered section/utility pages (one `<route>/index.html` per
 ##     content page), incl. a representative spread across every top-level
 ##     section and the WebFlow-parity faq/support/sign-in utility pages,
 ##   * the hashed, cache-busted theme stylesheet under `assets/` plus the
@@ -56,7 +56,7 @@ suite "the gh-pages publish output has the expected shape":
     check html.contains("<html")
     check html.toLowerAscii.contains("codetracer")
 
-  test "all 65 rendered pages are present as clean-route index.html files":
+  test "all 67 rendered pages are present as clean-route index.html files":
     # The SSG emits every content page at `<route>/index.html`; the count must
     # match the ported content set exactly (46 M1 pages + the M5
     # `getting_started/introduction` article split out of the old root
@@ -64,7 +64,8 @@ suite "the gh-pages publish output has the expected shape":
     # WebFlow-parity utility pages faq/support/sign-in = 50, + the nine
     # live-request-tracking pages + the `sign-up` page = 60, + the five
     # `deep_review` section pages DS-1 split the single DeepReview article
-    # into = 65).
+    # into = 65, + the watchpoints reference and the terminal setup guide =
+    # 67).
     #
     # `index.html` is no longer a sufficient test for "a rendered page". DS-1's
     # moved-route redirects are stubs at `<old route>/index.html` -- that is the
@@ -77,9 +78,9 @@ suite "the gh-pages publish output has the expected shape":
       if path.lastPathPart == "index.html":
         if isRedirectStub(readFile(path)): inc stubsAtPagePaths
         else: inc pageCount
-    check pageCount == 65
+    check pageCount == 67
     # Cross-check against the content source of truth.
-    check loadContentEntries(contentDir()).len == 65
+    check loadContentEntries(contentDir()).len == 67
     # ...and the moved-route stubs are all accounted for, none of them shadowing
     # a route the site still serves.
     check stubsAtPagePaths == movedRoutes.len
@@ -143,10 +144,10 @@ suite "the gh-pages publish output has the expected shape":
       let stub = pub / rel
       check fileExists(stub)
       check isMetaRefresh(readFile(stub))
-    # And there are many of them (M2 emits 45).
+    # And there are many of them (M2 emits 45, plus the watchpoints reference the old book gained since).
     var stubCount = 0
     for path in walkDirRec(pub, yieldFilter = {pcFile}):
       if path.endsWith(".html") and path.lastPathPart != "index.html" and
          isMetaRefresh(readFile(path)):
         inc stubCount
-    check stubCount == 45
+    check stubCount == 46

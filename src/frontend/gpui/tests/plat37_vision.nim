@@ -367,6 +367,9 @@ type
     scenario*, config*, productMode*, ops*, outcome*: string
     frame*, blank*, plan*, runLog*, captureLog*: string
     binaryRc*, captureRc*, elapsedMs*, quitAfterMs*: int
+    refusal*: string
+      ## The `codetracer-gpui: …` line a run that could not open a window
+      ## printed (`window_preflight.nim`), or "" when it printed none.
 
 proc toRun*(j: JsonNode): FrameRun =
   FrameRun(
@@ -383,7 +386,8 @@ proc toRun*(j: JsonNode): FrameRun =
     binaryRc: j{"binaryRc"}.getInt,
     captureRc: j{"captureRc"}.getInt,
     elapsedMs: j{"elapsedMs"}.getInt,
-    quitAfterMs: j{"quitAfterMs"}.getInt)
+    quitAfterMs: j{"quitAfterMs"}.getInt,
+    refusal: j{"refusal"}.getStr)
 
 proc runsByScenario*(manifest: JsonNode; config: string): Table[string, FrameRun] =
   result = initTable[string, FrameRun]()
@@ -459,6 +463,7 @@ proc measureRun*(run: FrameRun; ocrCache: var Table[string, string]): JsonNode =
     "ops": run.ops,
     "outcome": run.outcome,
     "binaryRc": run.binaryRc,
+    "refusal": run.refusal,
     "captureRc": run.captureRc,
     "elapsedMs": run.elapsedMs,
     "quitAfterMs": run.quitAfterMs,

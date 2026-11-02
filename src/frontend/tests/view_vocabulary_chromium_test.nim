@@ -96,6 +96,16 @@ proc newDiv(): Element {.importjs: "(document.createElement('div'))".}
 proc appendEl(p, c: Element) {.importjs: "#.appendChild(#)".}
 proc removeEl(e: Element) {.importjs: "#.remove()".}
 proc showModalEl(e: Element) {.importjs: "#.showModal()".}
+proc macPlatform(): bool {.importjs: "(/^Mac/.test(navigator.platform))".}
+  ## Whether the browser runs on macOS, read from the PAGE rather than from
+  ## the runner: what decides a native element's key handling is the platform
+  ## the browser was built for. Headless Chromium on macOS answers `MacIntel`
+  ## on arm64 too.
+  ## https://html.spec.whatwg.org/multipage/system-state.html#dom-navigator-platform
+proc blurEl(e: Element) {.importjs: "#.blur()".}
+proc setSelectedIndex(e: Element; i: int) {.importjs: "#.selectedIndex = #".}
+proc preventAllKeys(e: Element) {.importjs:
+  "#.addEventListener('keydown', (ev) => ev.preventDefault())".}
 proc countClicks(e: Element) {.importjs:
   "((el) => { el.__clicks = 0; el.addEventListener('click', () => el.__clicks++); })(#)".}
 proc setValue(e: Element; v: cstring) {.importjs: "#.value = #".}
@@ -131,8 +141,12 @@ proc endCase(name: string) =
     inc passedCases
     echo "  [OK] " & name
 
-const ExpectedChecks = 561
-  ## Written from a run. See the end of `main`.
+const
+  ExpectedChecksMac = 587
+  ExpectedChecksElsewhere = 576
+  ## Written from a run. See the end of `main`. Two numbers because the
+  ## closed-`<select>` group of "what the browser does on its own" asserts
+  ## each platform's own facts: 17 checks on macOS, 6 elsewhere.
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -199,6 +213,12 @@ proc nativeMismatches(): seq[string] =
   for e in qsa("select[data-view-id]"):
     if int(propNum(e, "selectedIndex")) != parseInt($attr(e, "data-selected")):
       result.add $attr(e, "data-view-id") & ": .selectedIndex"
+    # The entry's `open` is the binding's, never the browser's own popup:
+    # on macOS a closed `<select>` OPENS its popup on Up / Down instead of
+    # committing, so without the guard the selection stays right and this is
+    # the only reading that shows the browser acting behind the model.
+    if matchesSel(e, ":open"):
+      result.add $attr(e, "data-view-id") & ": select:open"
   for e in qsa("dialog[data-view-id]"):
     let open = $attr(e, "data-open") == "true"
     if propBool(e, "open") != open:
@@ -312,9 +332,10 @@ proc caseNativeSemantics() {.async.} =
   ## WHAT THE BROWSER DOES ON ITS OWN, with no binding and no handler: bare
   ## HTML elements, trusted keys. `mappings.webMapping`'s notes cite these
   ## as their evidence, and `web_binding.nativeDefaultChangesState` is built
-  ## from the last two groups. They are facts about Chromium; if a release
-  ## changes one, this case goes red and the note it supports is the thing
-  ## to re-read.
+  ## from the last two groups. They are facts about Chromium ON THE PLATFORM
+  ## IT RUNS ON — a closed `<select>` follows the platform's convention, so
+  ## that group asserts per platform; if a release changes one, this case
+  ## goes red and the note it supports is the thing to re-read.
   beginCase()
   let h = freshHost()
   setHtml(h, "<input type=checkbox id=ncb><button id=nbt>b</button>" &
@@ -333,17 +354,79 @@ proc caseNativeSemantics() {.async.} =
   await ctPress("#nbt", "Enter")
   await ctPress("#nbt", "Space")
   ck int(propNum(qs("#nbt"), "__clicks")) == 2
-  # Select, CLOSED: Down and End COMMIT at once — no highlight step.
-  await ctPress("#nsel", "ArrowDown")
-  ck int(propNum(qs("#nsel"), "selectedIndex")) == 1
-  await ctPress("#nsel", "End")
-  ck int(propNum(qs("#nsel"), "selectedIndex")) == 2
-  await ctPress("#nsel", "Home")
-  ck int(propNum(qs("#nsel"), "selectedIndex")) == 0
-  await ctPress("#nsel", "c")                      # type-ahead
-  ck int(propNum(qs("#nsel"), "selectedIndex")) == 2
-  await ctPress("#nsel", "ArrowUp")
-  ck int(propNum(qs("#nsel"), "selectedIndex")) == 1
+  # Select, CLOSED. Chromium follows the PLATFORM's convention for a closed
+  # popup control, so this group is two sets of facts, and each platform is
+  # held to its own (2026-10-21 issue "native-select case is red on macOS").
+  # `:open` is the popup's state, which a page can read but not style.
+  # https://html.spec.whatwg.org/multipage/semantics-other.html#selector-open
+  if macPlatform():
+    # macOS, the popup-menu convention (measured, Chromium 141 headless on
+    # aarch64-darwin): Up, Down (and Space) OPEN the popup and commit
+    # nothing; Home, End, PageUp and PageDown do nothing; type-ahead still
+    # commits at once. The popup is the platform's own menu, which a
+    # headless browser never shows, so no key reaches it — Escape and Enter
+    # leave it `:open` — and the case closes it the way a click elsewhere
+    # does, by taking focus away (`blur`, which ends in the same place as
+    # Tab).
+    await ctPress("#nsel", "ArrowDown")
+    ck int(propNum(qs("#nsel"), "selectedIndex")) == 0
+    ck matchesSel(qs("#nsel"), ":open"), "Down did not open the popup"
+    blurEl(qs("#nsel"))
+    ck not matchesSel(qs("#nsel"), ":open")
+    ck int(propNum(qs("#nsel"), "selectedIndex")) == 0
+    for k in ["End", "PageDown"]:
+      await ctPress("#nsel", k.cstring)
+      ck int(propNum(qs("#nsel"), "selectedIndex")) == 0, k & " moved it"
+      ck not matchesSel(qs("#nsel"), ":open"), k & " opened it"
+    await ctPress("#nsel", "c")                    # type-ahead
+    ck int(propNum(qs("#nsel"), "selectedIndex")) == 2
+    for k in ["Home", "PageUp"]:
+      await ctPress("#nsel", k.cstring)
+      ck int(propNum(qs("#nsel"), "selectedIndex")) == 2, k & " moved it"
+      ck not matchesSel(qs("#nsel"), ":open"), k & " opened it"
+    await ctPress("#nsel", "ArrowUp")
+    ck int(propNum(qs("#nsel"), "selectedIndex")) == 2
+    ck matchesSel(qs("#nsel"), ":open"), "Up did not open the popup"
+    blurEl(qs("#nsel"))
+    ck not matchesSel(qs("#nsel"), ":open")
+    ck int(propNum(qs("#nsel"), "selectedIndex")) == 2
+  else:
+    # Linux and Windows: Down and End COMMIT at once — no highlight step,
+    # and no popup.
+    await ctPress("#nsel", "ArrowDown")
+    ck int(propNum(qs("#nsel"), "selectedIndex")) == 1
+    await ctPress("#nsel", "End")
+    ck int(propNum(qs("#nsel"), "selectedIndex")) == 2
+    await ctPress("#nsel", "Home")
+    ck int(propNum(qs("#nsel"), "selectedIndex")) == 0
+    await ctPress("#nsel", "c")                    # type-ahead
+    ck int(propNum(qs("#nsel"), "selectedIndex")) == 2
+    await ctPress("#nsel", "ArrowUp")
+    ck int(propNum(qs("#nsel"), "selectedIndex")) == 1
+    ck not matchesSel(qs("#nsel"), ":open")
+  # What the binding's guard needs, on EVERY platform: each key the closed
+  # entry leaves to the browser (Enter and Space it claims, to open) whose
+  # default changes the element — a commit here, an opened popup there — is
+  # one `nativeDefaultChangesState` prevents; and preventing it leaves the
+  # element exactly as it was. A fresh element per key, so an opened popup
+  # cannot carry into the next press; beside the host, not in place of it,
+  # because the groups below still use the host's elements.
+  for k in ["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown", "c"]:
+    for prevented in [false, true]:
+      let g = newDiv()
+      appendEl(body(), g)
+      setHtml(g, "<select id=gsel><option>a<option>b<option>c</select>")
+      setSelectedIndex(qs("#gsel"), 1)
+      if prevented: preventAllKeys(qs("#gsel"))
+      await ctPress("#gsel", k.cstring)
+      let changed = int(propNum(qs("#gsel"), "selectedIndex")) != 1 or
+                    matchesSel(qs("#gsel"), ":open")
+      if prevented:
+        ck not changed, k & ": its default ran through preventDefault"
+      else:
+        ck (not changed) or wbind.nativeDefaultChangesState(pkSelect, false, k),
+          k & " changes a closed <select> natively and the guard lets it"
+      removeEl(g)
   # Details: Enter and Space on the summary disclose and close.
   await ctPress("#nsum", "Enter")
   ck propBool(qs("#ndet"), "open")
@@ -388,9 +471,11 @@ proc main() {.async.} =
   # than a silent pass. `CHECKS:` is the line the lane runner reads.
   inc checks
   echo "CHECKS: " & $checks
-  if checks != ExpectedChecks:
+  let expectedChecks =
+    if macPlatform(): ExpectedChecksMac else: ExpectedChecksElsewhere
+  if checks != expectedChecks:
     caseFailed = true
-    echo "    assertion count is " & $checks & ", expected " & $ExpectedChecks
+    echo "    assertion count is " & $checks & ", expected " & $expectedChecks
   endCase("every assertion above ran")
   ctFinish(if failedCases > 0: 1 else: 0)
 

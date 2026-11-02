@@ -15,12 +15,11 @@
  * every recorded language — see `lib/js-trace-fixture.ts`.
  */
 
-import { test, expect, codetracerInstallDir } from "../../lib/fixtures";
+import { test, expect } from "../../lib/fixtures";
 import { recordChromeTraceFixture } from "../../lib/js-trace-fixture";
 import { retry } from "../../lib/retry-helpers";
 import { ProblemsPane } from "../../page-objects/panes/build/problems-pane";
 import { LayoutPage } from "../../page-objects/layout-page";
-import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
 import {
   BOTTOM_STRIP_TAB_SELECTOR,
   DOCKED_BOTTOM_CONTENT_SELECTOR,
@@ -33,9 +32,6 @@ const fixture = recordChromeTraceFixture("problems-panel");
 test.describe("Problems Panel", () => {
   test.setTimeout(120_000);
   test.use({ sourcePath: fixture.traceDir, launchMode: "trace-folder" });
-
-  test.beforeAll(() => ensureDefaultLayout(codetracerInstallDir));
-  test.afterAll(() => restoreUserLayout());
 
   test("problems panel is present as auto-hide bottom tab", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);

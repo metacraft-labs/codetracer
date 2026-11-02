@@ -8,11 +8,12 @@
 ##
 ## ## What this suite is built against
 ##
-## `backend/dap_dialect.md` §7 lists nine commands the ViewModels send that
+## `backend/dap_dialect.md` §7 listed nine commands the ViewModels send that
 ## exist in no mapping table — not `VALID_DAP_COMMANDS`, not
 ## `EVENT_KIND_TO_DAP_MAPPING`, neither Rust dispatch table in `dap_server.rs`,
 ## and not `authority.nim`'s `DriverOnlyDebugCommands`. No engine implements any
-## of them. Every one of the nine had tests, and every test passed, because
+## of them. (Eight now: `ct/load-step-lines` left the list when the engine
+## gained its arm.) Every one of the nine had tests, and every test passed, because
 ## `MockBackendService.send` did no validation at all: a test asserting "the
 ## command was dispatched" passes for a command nothing implements.
 ##
@@ -29,10 +30,13 @@
 ##     *failed future* handed to `discard` is dropped without a word — which
 ##     would reproduce, inside the validator, the exact silence it exists to
 ##     break. The cases here call through a bare `discard` on purpose;
-##   * all nine of §7's commands are rejected, and **the count is asserted**.
+##   * all eight of §7's commands are rejected, and **the count is asserted**.
 ##     That last part is what stops the quiet regression this whole area is
-##     about: adding one of the nine to `VALID_DAP_COMMANDS` to turn some other
-##     red test green would drop `rejected` to 8 and redden this case by name.
+##     about: adding one of the eight to `VALID_DAP_COMMANDS` to turn some other
+##     red test green would drop `rejected` to 7 and redden this case by name.
+##     A command leaves the list only with its engine arm, as
+##     `ct/load-step-lines` did — and then the list, §7 and these counts move
+##     in that same commit.
 ##
 ## Every assertion is `counted` and the count itself is asserted by the last
 ## case, so a guard that returned early — or a loop over a list that turned out
@@ -51,16 +55,15 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 26
+const ExpectedAssertions = 25
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
 const DialectSection7Commands = [
-  ## The nine from `backend/dap_dialect.md` §7, in the order that table lists
+  ## The eight from `backend/dap_dialect.md` §7, in the order that table lists
   ## them. This is a *pinned copy*: the doc, the allow-list and this array
   ## disagreeing is precisely the drift the suite is here to catch.
   "ct/jump-location",
-  "ct/load-step-lines",
   "ct/line-step-jump",
   "ct/asm-instruction-jump",
   "ct/build-cancel",
@@ -116,9 +119,9 @@ suite "MockBackendService validates the command it is handed":
     counted "ct/load-locals".isValidDapCommand
     counted mock.receivedCommands.len == 1
 
-  test "every command in dap_dialect.md §7 is rejected, and there are nine":
-    # The nine at once — which is the whole argument for validating here rather
-    # than at nine call sites. `rejected` is counted and its total asserted, so
+  test "every command in dap_dialect.md §7 is rejected, and there are eight":
+    # The eight at once — which is the whole argument for validating here rather
+    # than at eight call sites. `rejected` is counted and its total asserted, so
     # quietly adding one of these to VALID_DAP_COMMANDS to turn another test
     # green reddens THIS case, by name, instead of passing unnoticed.
     var rejected = 0
@@ -133,8 +136,8 @@ suite "MockBackendService validates the command it is handed":
       # rejected — asserted separately so a failure says which fact broke.
       counted not command.isValidDapCommand
 
-    counted rejected == 9
-    counted DialectSection7Commands.len == 9
+    counted rejected == 8
+    counted DialectSection7Commands.len == 8
 
   test "validateCommands = false restores the old silence, and only then":
     # The documented transport-level escape hatch. It is asserted here so that

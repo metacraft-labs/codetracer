@@ -15,23 +15,20 @@
     padding-left: PANEL_INSET
     padding-right: PANEL_INSET
 
+  // PLAT-70 Part B (Variable-State-Pane Decision 3): the pane does NOT
+  // scroll sideways. A value that does not fit is cut with `…`
+  // (`components/table_overflow.styl`), and its whole text is on hover and
+  // under the row.
   .value-components-container
     padding-right: 0
-    overflow-x: auto
+    overflow-x: hidden
 
-  // Prevent value rows from wrapping when the panel is narrow;
-  // the container scrolls horizontally instead.
+  // Value rows do not wrap: a long value is cut instead.
   .value-view
     flex-wrap: nowrap
 
   // The watch field sits on the tabs' row, to their right, 6px from them —
   // one control bar instead of two stacked rows.
-  //
-  // The panel is otherwise a single column, and the code line renders between
-  // the tabs and the field, so this is a grid rather than a markup change:
-  // row 1 is the tabs (as wide as they need) and the field (the rest), and
-  // everything else spans the full width below.  A `display: none` child
-  // (the loading line, or a hidden code line) simply leaves its row empty.
   //
   // `&`: `isonim-state` and `state-component` are classes of the SAME element.
   &.state-component
@@ -46,13 +43,12 @@
       grid-area: tabs
 
     // No left inset of its own here: the 6px gap is the only space between
-    // it and the tabs.  Its right inset matches the rows below.
+    // it and the tabs. Its right inset matches the rows below.
     > #gdb-evaluate
       grid-area: field
       padding-left: 0
 
-    // The source line of the stopped position, 8px below the tabs/field bar
-    // (it sat flush against it).
+    // The source line of the stopped position, 8px below the tabs/field bar.
     > .code-state-line
       grid-area: code
       margin-top: PANEL_INSET
@@ -92,22 +88,41 @@
         bottom: 0
 
   // Locals / Globals / Watches — the design system's mode-switcher
-  // (CodeTracer Design System, "I2 · Mode switcher", node 4342:744): one
-  // outlined track with the selected view raised inside it.  These are three
-  // ways to look at the same stopped state, which is what that component is
-  // for; the filter chips on the same page are for narrowing one list.
-  //
-  // Until now the buttons carried no styles at all, so they drew as the
-  // browser's default light-grey buttons, and the active one was identical to
-  // the other two — nothing said which view was showing.
-  //
-  // The shared segmented tabs (`segmented-tabs()`, shared_widgets.styl): a
-  // 26px track, the same height as the watch field beside it, with 20px tabs.
+  // (CodeTracer Design System, "I2 · Mode switcher"): one outlined track
+  // with the selected view raised inside it.
   .state-tabs
     segmented-tabs()
     // Keeps the 8px inset from the rule at the top of this block, as a margin:
     // the track's own padding is the 2px around the tabs.
     margin-left: PANEL_INSET
+
+  // "Hide watches from other processes": a small toggle, raised while on.
+  .hide-other-process-watches
+    margin-top: 0.25rem
+    height: 1.25rem
+    padding: 0 0.625rem
+    border: 0.0625rem solid #3a3a3a
+    border-radius: 0.3125rem
+    background-color: transparent
+    font-family: "SpaceGrotesk"
+    font-size: 0.75rem
+    line-height: 1rem
+    white-space: nowrap
+    color: #b4b4b4
+    cursor: pointer
+
+    &.active
+      background-color: #262626
+      color: #f3f3f3
+
+  // A watch the stop cannot answer stays in the list, its value cell
+  // carrying the reason in a muted colour; a watch still waiting for its
+  // answer uses the same muted treatment.
+  .value-watch.watch-invalid .value-expanded-text
+    color: #b4b4b4
+
+  .value-watch.watch-pending .value-expanded-text
+    color: #b4b4b4
 
   // The line execution is stopped on, drawn the way the editor draws it —
   // the yellow arrow, the line number in the gutter's type, the code in the
@@ -117,7 +132,7 @@
   //
   // The band runs the full width of the panel (it covers the 8px side
   // insets), as the editor's band runs the full width of the code area; the
-  // arrow then starts on the panel inset, under the tabs.
+  // arrow then starts on the panel inset, under the watch field.
   .code-state-line
     display: flex
     // Number and code share a baseline although their sizes differ, as in
@@ -128,7 +143,7 @@
     // stretch the row to 25px (only empty line-box space falls outside).
     height: 1.5rem
     line-height: 1.5rem
-    background-color: CURRENT_LINE_BG
+    background-color: editor-theme-execution-line
     // The ellipsis moves to the code (below): on a flex row it applies to
     // the children, not to the row.
     text-overflow: clip
@@ -143,10 +158,7 @@
     width: 0.4375rem
     height: 0.625rem
     margin-right: 0.375rem
-    background-image: HIGHLIGHT_LINE_ARROW
-    background-repeat: no-repeat
-    background-position: center
-    background-size: contain
+    editor-execution-pointer()
 
   // The active line number in the editor's gutter: Space Mono Light at 14px
   // (`line-number-type()`, text_editor.styl), in the bright label colour
@@ -209,7 +221,8 @@
     font-size: inherit
 
 .value-non-expanded
-  color: orange
+  // The warning text token in the light theme (`by-mode`, defaults.styl).
+  color: by-mode(orange, colors-ui-text-warning-primary)
 
 .value-error
   color: colors-ui-text-error-primary
@@ -223,7 +236,7 @@
   background: colors-ui-surface-base-panel
 
 .value-watch
-  font-style: italic
+  font-style: normal
 
 .value-selected
   opacity: 0.5
@@ -328,13 +341,50 @@
   font-size: 0
   overflow: hidden
 
+// Source excerpts preserve their real line breaks and indentation. Long lines
+// scroll inside the expansion instead of wrapping or widening the State pane.
+.ct-origin-inline-chain,
+.ct-history-inline-container
+  min-width: 0
+  max-width: 100%
+  overflow: auto
+
+.ct-origin-inline-chain-hop,
+.ct-origin-inline-chain-terminator,
+.ct-history-inline-row
+  width: max-content
+  min-width: 100%
+  white-space: pre
+
+// -- Inline origin chain rows --
+.ct-origin-inline-chain
+  background-color: colors-ui-surface-primary-default
+  font-family: "SpaceMono"
+  padding: 0.25em 0
+  max-height: 8em
+
+.ct-origin-inline-chain-hop,
+.ct-origin-inline-chain-terminator
+  display: flex
+  align-items: baseline
+  line-height: 1.5em
+  justify-content: flex-start
+  gap: 0.5em
+
+  .ct-origin-inline-chain-hop-text
+    color: colors-ui-text-warning-primary
+    text-align: left
+
+  .ct-origin-inline-chain-terminator-text
+    color: colors-ui-text-primary-body
+    text-align: left
+
 // -- Inline value history rows --
 .ct-history-inline-container
   background-color: colors-ui-surface-primary-default
   font-family: "SpaceMono"
   padding: 0.25em 0
   max-height: 5em
-  overflow-y: auto
 
 .ct-history-inline-row
   display: flex
@@ -348,8 +398,10 @@
     min-width: 4em
     text-align: right
 
+  // `text/warning/primary`, whose Dark value is this amber; its Light value
+  // reads on the light ground.
   .history-value
-    color: #FDBA74
+    color: colors-ui-text-warning-primary
     text-align: left
 
 

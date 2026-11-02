@@ -160,7 +160,11 @@ suite "book nav matches the book's four-section organization":
     # `usage_guide/deep_review` article split into an Introduction that argues
     # why the feature exists plus four articles: collecting, reading, the agent
     # workflow, and the deferrals.
-    check entries.len == 65
+    #
+    # +2 = `reference/watchpoints` (the watchpoints reference) and
+    # `usage_guide/terminal-setup` (PLAT-71: setting up your terminal for the
+    # terminal front-end; its own contract is `test_terminal_setup_page`).
+    check entries.len == 67
 
   test "content collapses to exactly the four sections":
     var sections: seq[string] = @[]
@@ -394,6 +398,23 @@ suite "book nav matches the book's four-section organization":
         if stale in text:
           echo path.relativePath(dir), ": still says: ", stale
         check stale notin text
+
+  test "the book points at the helper tool for certificates as files and with a push":
+    ## CTC-3h: `ct test` writes certificates only to the local store and
+    ## pushes nothing. The reader who wants one as a file, or wants them to
+    ## travel with a push, is sent to the test-certificates helper tool, with
+    ## the commands that do it and a link to the tool's public documentation.
+    let section = normalizedProse(ctTestSection(
+      readFile(dir / "reference" / "ct_cli.md")))
+    for phrase in ["`test-certificates find --worktree`",
+                   "`test-certificates put <file>`",
+                   "`test-certificates hook install`",
+                   "`test-certificates hook pre-push`",
+                   "`refs/notes/test-certificates/certificates`",
+                   "https://github.com/metacraft-labs/test-certificates-tools",
+                   "It never fails the push."]:
+      checkpoint phrase
+      check section.contains(phrase)
 
   test "the book does not document the removed --certificate flag":
     ## CTC-3e removed `ct test run --certificate <path>`: every certificate

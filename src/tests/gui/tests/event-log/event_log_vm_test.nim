@@ -9,7 +9,7 @@
 ## - nextPage / prevPage update currentPage with clamping
 ## - sort toggles direction or sets new column
 ## - setSearchQuery updates query and resets page to 0
-## - setPageSize updates size and resets page to 0
+## - setViewport sets the page size and the page (the viewport contract)
 ## - totalPages memo computes from totalEventCount and pageSize
 ## - isLoading memo reflects loading state
 ## - Auto-load effect fires for page/sort/search changes, not debugger moves
@@ -64,11 +64,11 @@ suite "EventLogVM initial state":
       check vm.currentPage.val == 0
       dispose()
 
-  test "pageSize defaults to DEFAULT_PAGE_SIZE":
+  test "pageSize is 0 until a view reports its size":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
-      check vm.pageSize.val == DEFAULT_PAGE_SIZE
+      check vm.pageSize.val == 0
       dispose()
 
   test "searchQuery starts as empty string":
@@ -231,6 +231,7 @@ suite "EventLogVM pagination":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
+      vm.setViewport(Viewport(rows: 50))
 
       # Set total event count so there are multiple pages.
       vm.totalEventCount.val = 200
@@ -246,10 +247,11 @@ suite "EventLogVM pagination":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
+      vm.setViewport(Viewport(rows: 50))
 
       # 60 events, page size 50 -> 2 pages (indices 0, 1).
       vm.totalEventCount.val = 60
-      vm.currentPage.val = 1
+      vm.setViewport(Viewport(rows: 50, firstRow: 50))
 
       vm.nextPage()
       # Should stay at 1 (max page index).
@@ -261,9 +263,10 @@ suite "EventLogVM pagination":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
+      vm.setViewport(Viewport(rows: 50))
 
       vm.totalEventCount.val = 200
-      vm.currentPage.val = 3
+      vm.setViewport(Viewport(rows: 50, firstRow: 150))
 
       vm.prevPage()
       check vm.currentPage.val == 2
@@ -274,42 +277,36 @@ suite "EventLogVM pagination":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
+      vm.setViewport(Viewport(rows: 50))
 
       vm.prevPage()
       check vm.currentPage.val == 0
 
       dispose()
 
-  test "setPageSize resets page to 0":
+  test "a viewport sets the page size and the page it shows":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
 
       vm.totalEventCount.val = 200
-      vm.currentPage.val = 3
-
-      vm.setPageSize(25)
+      vm.setViewport(Viewport(rows: 25, firstRow: 75))
       check vm.pageSize.val == 25
-      check vm.currentPage.val == 0
+      check vm.currentPage.val == 3
 
       dispose()
 
-  test "setPageSize ignores non-positive values":
+  test "an unmeasured viewport has no pages to turn":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
 
-      vm.setPageSize(0)
-      check vm.pageSize.val == DEFAULT_PAGE_SIZE
-
-      vm.setPageSize(-5)
-      check vm.pageSize.val == DEFAULT_PAGE_SIZE
+      vm.totalEventCount.val = 200
+      vm.nextPage()
+      check vm.currentPage.val == 0
+      check vm.pageSize.val == 0
 
       dispose()
-
-# ---------------------------------------------------------------------------
-# Sorting
-# ---------------------------------------------------------------------------
 
 suite "EventLogVM sorting":
 
@@ -377,7 +374,7 @@ suite "EventLogVM search":
       let vm = createEventLogVM(store)
 
       vm.totalEventCount.val = 200
-      vm.currentPage.val = 3
+      vm.setViewport(Viewport(rows: 50, firstRow: 150))
 
       vm.setSearchQuery("warning")
       check vm.currentPage.val == 0
@@ -394,9 +391,10 @@ suite "EventLogVM totalPages":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
+      vm.setViewport(Viewport(rows: 50))
 
       vm.totalEventCount.val = 120
-      # pageSize is 50 by default -> ceil(120/50) = 3
+      # 50 rows a page -> ceil(120/50) = 3
       check vm.totalPages.val == 3
 
       dispose()
@@ -405,6 +403,7 @@ suite "EventLogVM totalPages":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
+      vm.setViewport(Viewport(rows: 50))
 
       check vm.totalPages.val == 0
 
@@ -414,21 +413,23 @@ suite "EventLogVM totalPages":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
+      vm.setViewport(Viewport(rows: 50))
 
       vm.totalEventCount.val = 30
       check vm.totalPages.val == 1
 
       dispose()
 
-  test "totalPages updates when pageSize changes":
+  test "totalPages updates when the viewport's rows change":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
+      vm.setViewport(Viewport(rows: 50))
 
       vm.totalEventCount.val = 100
       check vm.totalPages.val == 2  # 100 / 50 = 2
 
-      vm.setPageSize(25)
+      vm.setViewport(Viewport(rows: 25))
       check vm.totalPages.val == 4  # 100 / 25 = 4
 
       dispose()
@@ -470,20 +471,23 @@ suite "EventLogVM isLoading":
 
 suite "EventLogVM auto-load effect":
 
-  test "the event log loads once on creation, before any debugger position":
-    # The auto-load effect fires on its first evaluation whether or not
-    # the debugger has reported a position yet (`hasDebuggerPosition or
-    # not hasFired`). That is deliberate: the panel must show the
-    # recording's events as soon as it opens, and a trace whose entry
-    # stop is at rrTicks 0 would otherwise render permanently empty.
-    #
-    # These two tests used to assert the opposite — that nothing loads
-    # until the debugger moves. That contract was retired when the
-    # marker-rendering work made the first evaluation unconditional, and
-    # the assertions were left behind.
+  test "nothing loads until a view reports its size":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      discard createEventLogVM(store)
+      drain()
+      for cmd in mock.receivedCommands:
+        check cmd.command != "ct/event-load"
+      dispose()
+
+  test "a measured pane loads its window once, before any debugger position":
+    # The panel shows the recording's events as soon as it is sized,
+    # whether or not the debugger has reported a position yet: a trace
+    # whose entry stop is at rrTicks 0 would otherwise render empty.
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createEventLogVM(store)
+      vm.setViewport(Viewport(rows: 30))
       drain()
 
       var initialLoads = 0
@@ -493,9 +497,9 @@ suite "EventLogVM auto-load effect":
           # PLAT-50: the request names the sorted column too (`sortKey`), the
           # one the engine orders by — the name of the shown column at
           # `sortColumn`.
+          # The window of a 30-row pane at the top: the rows and `LeadRows`.
           check cmd.args == %*{
-            "page": vm.currentPage.val, "pageSize": vm.pageSize.val,
-            "searchQuery": vm.searchQuery.val, "sortColumn": vm.sortColumn.val,
+            "start": 0, "count": 30 + LeadRows,
             "sortAscending": vm.sortAscending.val,
             "sortKey": $vm.columns.val.visibleColumns[vm.sortColumn.val]}
           initialLoads += 1
@@ -508,6 +512,7 @@ suite "EventLogVM auto-load effect":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createEventLogVM(store)
+      vm.setViewport(Viewport(rows: 30))
       drain()
       var initialLoads = 0
       for cmd in mock.receivedCommands:

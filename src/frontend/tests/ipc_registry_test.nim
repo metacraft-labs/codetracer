@@ -71,3 +71,71 @@ suite "ipc registry":
     check secondHit
     # ensure old socket no longer has the handler registered
     check not first.registered.hasKey("CODETRACER::open-tab")
+
+suite "ipc registry, several sockets (ct host's clients)":
+  test "a socket added beside another gets every handler, and keeps it when the other goes":
+    var registry = initIpcRegistry()
+    var hits: seq[string] = @[]
+    registry.registerHandler("CODETRACER::open-tab",
+      functionAsJs(proc(_: JsObject) = hits.add "open-tab"))
+
+    let first = newFakeSocket()
+    let second = newFakeSocket()
+    registry.addSocket(first.obj)
+    registry.addSocket(second.obj)
+    first.trigger("CODETRACER::open-tab")
+    second.trigger("CODETRACER::open-tab")
+    check hits.len == 2
+
+    registry.removeSocket(first.obj)
+    check not first.registered.hasKey("CODETRACER::open-tab")
+    second.trigger("CODETRACER::open-tab")
+    check hits.len == 3
+
+  test "a handler registered later reaches every socket already added":
+    var registry = initIpcRegistry()
+    let first = newFakeSocket()
+    let second = newFakeSocket()
+    registry.addSocket(first.obj)
+    registry.addSocket(second.obj)
+    let handler = newJsObject()
+    registry.registerHandler("CODETRACER::started", handler)
+    check first.registered["CODETRACER::started"] == handler
+    check second.registered["CODETRACER::started"] == handler
+
+  test "each socket's handlers run through that socket's wrap":
+    var registry = initIpcRegistry()
+    var ran: seq[string] = @[]
+    registry.registerHandler("CODETRACER::open-tab",
+      functionAsJs(proc(_: JsObject) = ran.add "handler"))
+    proc wrapFor(label: string): HandlerWrap =
+      result = proc(handler: JsObject): JsObject =
+        let inner = jsAsFunction[proc(data: JsObject)](handler)
+        functionAsJs(proc(data: JsObject) =
+          ran.add label
+          inner(data))
+    let first = newFakeSocket()
+    let second = newFakeSocket()
+    registry.addSocket(first.obj, wrapFor("first"))
+    registry.addSocket(second.obj, wrapFor("second"))
+    second.trigger("CODETRACER::open-tab")
+    check ran == @["second", "handler"]
+    first.trigger("CODETRACER::open-tab")
+    check ran == @["second", "handler", "first", "handler"]
+    # `off` is handed the wrapped function the socket was given.
+    registry.removeSocket(second.obj)
+    check not second.registered.hasKey("CODETRACER::open-tab")
+    check first.registered.hasKey("CODETRACER::open-tab")
+
+  test "attachSocket keeps one socket: every other is unbound":
+    var registry = initIpcRegistry()
+    registry.registerHandler("CODETRACER::open-tab", newJsObject())
+    let first = newFakeSocket()
+    let second = newFakeSocket()
+    let third = newFakeSocket()
+    registry.addSocket(first.obj)
+    registry.addSocket(second.obj)
+    registry.attachSocket(third.obj)
+    check not first.registered.hasKey("CODETRACER::open-tab")
+    check not second.registered.hasKey("CODETRACER::open-tab")
+    check third.registered.hasKey("CODETRACER::open-tab")

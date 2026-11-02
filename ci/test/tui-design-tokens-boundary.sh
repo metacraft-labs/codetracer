@@ -70,6 +70,9 @@ ansi_hits() {
 	grep -nE '"(black|red|green|yellow|blue|magenta|cyan|white|bright_(black|red|green|yellow|blue|magenta|cyan|white))"' || true
 }
 
+# indent TEXT -> TEXT with four spaces before every line, for the hit listings.
+indent() { printf '    %s\n' "${1//$'\n'/$'\n'    }"; }
+
 mapfile -t app_files < <(find "$app" -name '*.nim' -not -path "$app/tests/*" | sort)
 mapfile -t painter_files < <(find "$app/views" "$app/formatters" -name '*.nim' | sort)
 
@@ -80,7 +83,7 @@ for f in "${app_files[@]}"; do
 	hits="$(strip_comments "$f" | hex_hits)"
 	if [ -n "$hits" ]; then
 		echo "FAIL: hand-written #rrggbb in $f:" >&2
-		echo "$hits" | sed 's/^/    /' >&2
+		indent "$hits" >&2
 		hex_found=1
 	fi
 done
@@ -93,7 +96,7 @@ for f in "${painter_files[@]}"; do
 	hits="$(strip_comments "$f" | ansi_hits)"
 	if [ -n "$hits" ]; then
 		echo "FAIL: ANSI colour name painted directly in $f (paint a role):" >&2
-		echo "$hits" | sed 's/^/    /' >&2
+		indent "$hits" >&2
 		ansi_found=1
 	fi
 done

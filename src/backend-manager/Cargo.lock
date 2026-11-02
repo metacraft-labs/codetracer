@@ -273,6 +273,7 @@ checksum = "b94f61472cee1439c0b966b47e3aca9ae07e45d070759512cd390ea2bebc6675"
 name = "codetracer_ctfs"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.2.17",
  "serde",
  "serde_json",
  "sha2",
@@ -387,8 +388,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ct-data-breakpoints"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "ct-home"
 version = "0.1.0"
+
+[[package]]
+name = "ct-open-beneath"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "darling"
@@ -1510,9 +1525,12 @@ dependencies = [
  "codetracer_trace_reader",
  "codetracer_trace_types",
  "codetracer_trace_writer",
+ "ct-data-breakpoints",
  "ct-home",
+ "ct-open-beneath",
  "flexi_logger",
  "futures-util",
+ "httparse",
  "libc",
  "log",
  "serde",
@@ -1520,6 +1538,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-tungstenite",
+ "ureq",
 ]
 
 [[package]]

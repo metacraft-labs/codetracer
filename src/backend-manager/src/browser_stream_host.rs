@@ -35,6 +35,17 @@
 //! the session runs and renamed into place when it ends, so a reader of
 //! `<out_dir>` never meets a half-written recording.
 //!
+//! # The recording id
+//!
+//! Every recording carries a `recording_id` (a canonical UUIDv7) in its
+//! `meta.dat`.  By default the trace writer mints a fresh one per
+//! recording.  A caller that runs the host for exactly one recording whose
+//! identity it must control passes [`BrowserStreamHostConfig::recording_id`]
+//! (`record-web --recording-id`): CodeTracer's JS boundary replay runner
+//! does, so that materialising the same boundary session twice yields a
+//! byte-identical trace (JS-Boundary-Recording.md §12).  Such a host writes
+//! one recording; a second one would share the id, and is refused.
+//!
 //! # Feeding the streaming consumer (opt-in)
 //!
 //! `WASM-Replay-Snapshots-And-Slices.md` §2 derives snapshots *during*
@@ -58,7 +69,7 @@ use std::io::Write;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -161,6 +172,48 @@ pub struct BrowserStreamHostConfig {
     /// [`DEFAULT_IDLE_TIMEOUT`] for why the host has to reap itself rather
     /// than trusting its launcher to do it.
     pub idle_timeout: Option<Duration>,
+    /// The `recording_id` the host's recording carries, instead of one the
+    /// writer mints (see the module documentation, "The recording id").
+    /// `None` mints one per recording.
+    pub recording_id: Option<PinnedRecordingId>,
+}
+
+/// A recording id a caller chose for the one recording a host writes.
+///
+/// Clones share one claim, so every connection of a host sees whether the
+/// id has been used: the first recording takes it and any later one is
+/// refused rather than written under the same identity.
+#[derive(Debug, Clone)]
+pub struct PinnedRecordingId {
+    id: String,
+    taken: Arc<AtomicBool>,
+}
+
+impl PinnedRecordingId {
+    /// `id`, which must be a canonical lowercase UUIDv7 (the form
+    /// `meta.dat` requires; `codetracer-trace-format-spec`
+    /// `internal-files.md` "Metadata (meta.dat)").
+    pub fn new(id: &str) -> Result<Self, String> {
+        if !crate::meta_dat::is_canonical_uuid_v7(id) {
+            return Err(format!(
+                "the recording id `{id}` is not a canonical lowercase UUIDv7"
+            ));
+        }
+        Ok(Self {
+            id: id.to_string(),
+            taken: Arc::new(AtomicBool::new(false)),
+        })
+    }
+
+    /// The id.
+    pub fn as_str(&self) -> &str {
+        &self.id
+    }
+
+    /// Take the id for a recording; `false` when a recording already has.
+    fn claim(&self) -> bool {
+        !self.taken.swap(true, Ordering::SeqCst)
+    }
 }
 
 /// How long the host tolerates having no connected browser before it
@@ -298,6 +351,7 @@ impl BrowserStreamHostConfig {
             workdir,
             stream_consumer: StreamConsumerConfig::default(),
             idle_timeout: Some(DEFAULT_IDLE_TIMEOUT),
+            recording_id: None,
         }
     }
 }
@@ -482,11 +536,14 @@ async fn handle_connection(
     // shared with the receiver through the `CtfsWriter` trait so the
     // unit-test suite (in `browser_stream_receiver::tests`) can reuse the
     // same plumbing with `InMemoryCtfsWriter`.
-    let writer_handle = Arc::new(Mutex::new(CtfsRecordingWriter::with_stream_consumer(
-        config.out_dir.clone(),
-        config.workdir.clone(),
-        config.stream_consumer.clone(),
-    )));
+    let writer_handle = Arc::new(Mutex::new(
+        CtfsRecordingWriter::with_stream_consumer(
+            config.out_dir.clone(),
+            config.workdir.clone(),
+            config.stream_consumer.clone(),
+        )
+        .with_recording_id(config.recording_id.clone()),
+    ));
     let writer = shared_writer_from(writer_handle.clone());
     let mut receiver = StreamReceiver::new(writer);
 
@@ -617,6 +674,10 @@ pub struct CtfsRecordingWriter {
     pub session_ended: bool,
     /// The `.ct` the session was finalised into, for logging and tests.
     pub last_output_path: Option<PathBuf>,
+    /// The id the recording carries, when its host was given one
+    /// ([`BrowserStreamHostConfig::recording_id`]); the trace writer mints
+    /// one otherwise.
+    recording_id: Option<PinnedRecordingId>,
 }
 
 /// The parts of a recording that only exist between its first record and
@@ -801,7 +862,15 @@ impl CtfsRecordingWriter {
             host_initial_seen: false,
             session_ended: false,
             last_output_path: None,
+            recording_id: None,
         }
+    }
+
+    /// Write the recording under `recording_id` instead of a minted id
+    /// (see the module documentation, "The recording id").
+    pub fn with_recording_id(mut self, recording_id: Option<PinnedRecordingId>) -> Self {
+        self.recording_id = recording_id;
+        self
     }
 
     /// The `.ct` this recording lands in, chosen from the program name the
@@ -832,6 +901,17 @@ impl CtfsRecordingWriter {
         if self.open.is_some() {
             return Ok(());
         }
+        // A pinned id belongs to one recording: claim it before anything is
+        // written, so a second recording is refused without leaving a file.
+        if let Some(pinned) = &self.recording_id
+            && !pinned.claim()
+        {
+            return Err(io::Error::other(format!(
+                "this host was given the recording id {} for one recording, which it has \
+                 already written; a second recording is refused",
+                pinned.as_str(),
+            )));
+        }
         let output_path = self.resolve_output_path();
         let file_name = output_path
             .file_name()
@@ -846,6 +926,11 @@ impl CtfsRecordingWriter {
         }
 
         let mut writer = CtfsTraceWriter::new(&self.program, &self.args);
+        if let Some(pinned) = &self.recording_id {
+            // Before the first record: `meta.dat`, which carries the id, is
+            // committed with it.
+            writer.set_recording_id(pinned.as_str());
+        }
         TraceWriter::set_workdir(&mut writer, &self.workdir);
         TraceWriter::begin_writing_trace_events(&mut writer, &partial_path).map_err(|e| {
             io::Error::other(format!("could not start {}: {e}", partial_path.display()))
@@ -854,7 +939,10 @@ impl CtfsRecordingWriter {
         // `None` takes type id 0, which is `NONE_TYPE_ID` by the trace
         // format's convention; every other type is registered on first use.
         let mut types = std::collections::HashMap::new();
-        types.insert("None", TraceWriter::ensure_type_id(&mut writer, TypeKind::None, "None"));
+        types.insert(
+            "None",
+            TraceWriter::ensure_type_id(&mut writer, TypeKind::None, "None"),
+        );
 
         let mut boundary = Vec::with_capacity(4096);
         boundary.extend_from_slice(&boundary_log::stream_prefix());
@@ -951,7 +1039,7 @@ impl CtfsRecordingWriter {
         // The recording first, the tee second: the recording is the source
         // of truth (spec §2), snapshots are derived data, so the `.ct` must
         // never be short of a record the consumer already has.
-        open.apply(&record);
+        open.apply(&record)?;
         open.boundary.extend_from_slice(&frame);
         open.records += 1;
         if let Some(tee) = open.tee.as_mut() {
@@ -1409,8 +1497,9 @@ impl OpenRecording {
         }
     }
 
-    /// Write one boundary-log record into the CTFS recording.
-    fn apply(&mut self, record: &boundary_log::Record) {
+    /// Write one boundary-log record into the CTFS recording, refusing an
+    /// `Event` whose kind is not an assigned `EventLogKind`.
+    fn apply(&mut self, record: &boundary_log::Record) -> io::Result<()> {
         use boundary_log::Record;
         use codetracer_trace_types::{
             CallRecord, FullValueRecord, FunctionId, FunctionRecord, Line, PathId, RecordEvent,
@@ -1483,21 +1572,32 @@ impl OpenRecording {
             } => TraceWriter::add_event(
                 &mut self.writer,
                 TraceLowLevelEvent::Event(RecordEvent {
-                    kind: event_log_kind(*kind),
+                    kind: event_log_kind(*kind)?,
                     metadata: metadata.clone(),
                     content: content.clone(),
                 }),
             ),
         }
+        Ok(())
     }
 }
 
-/// The recording's event kind for a boundary-log `Event` kind.
-fn event_log_kind(kind: i32) -> EventLogKind {
-    match kind {
-        EVENT_KIND_TRACE_LOG_EVENT => EventLogKind::TraceLogEvent,
-        _ => EventLogKind::Write,
-    }
+/// The recording's event kind for a boundary-log `Event` kind: the
+/// `EventLogKind` with that ordinal. A value that is not an assigned
+/// `EventLogKind` is refused, naming it, rather than given a substitute kind.
+fn event_log_kind(kind: i32) -> io::Result<EventLogKind> {
+    u8::try_from(kind)
+        .ok()
+        .and_then(EventLogKind::from_ordinal)
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "boundary-log event kind {kind} is not an assigned EventLogKind (0-{})",
+                    EventLogKind::ALL.len() - 1
+                ),
+            )
+        })
 }
 
 // ---------------------------------------------------------------------------
@@ -1660,15 +1760,19 @@ impl CtfsWriter for CtfsRecordingWriter {
 /// `EventLogKind::TraceLogEvent` discriminator, as the boundary log carries
 /// it — mirrors `FfiEventLogKind::FFI_EVENT_TRACE_LOG_EVENT = 12` in
 /// `codetracer_trace_writer.h`.
-const EVENT_KIND_TRACE_LOG_EVENT: i32 = 12;
-/// Stdout / stderr discriminator.
-const EVENT_KIND_WRITE: i32 = 0;
+const EVENT_KIND_TRACE_LOG_EVENT: i32 = EventLogKind::TraceLogEvent as i32;
+/// `EventLogKind::Write`: output to stdout.
+const EVENT_KIND_WRITE: i32 = EventLogKind::Write as i32;
+/// `EventLogKind::WriteStderr`: output to stderr.
+const EVENT_KIND_WRITE_STDERR: i32 = EventLogKind::WriteStderr as i32;
 
+/// The event kind of a page write on `channel`: `stderr` is `WriteStderr`,
+/// `stdout` is `Write`. The channel name also rides in the metadata field.
 fn write_channel_to_kind(channel: &str) -> i32 {
-    // Stdout / stderr both map onto the generic Write kind — the channel
-    // tag rides in the metadata field.
-    let _ = channel;
-    EVENT_KIND_WRITE
+    match channel {
+        "stderr" => EVENT_KIND_WRITE_STDERR,
+        _ => EVENT_KIND_WRITE,
+    }
 }
 
 /// Convert a browser-side encoded value into its boundary-log value.
@@ -2327,7 +2431,11 @@ mod tests {
         let ct = drive(&mut writer, &wide_event_sequence()).expect("the sequence ends the session");
 
         assert_eq!(ct, tmp.path().join("frontend.ct"));
-        assert!(ct.is_file(), "a recording is a single CTFS file: {}", ct.display());
+        assert!(
+            ct.is_file(),
+            "a recording is a single CTFS file: {}",
+            ct.display()
+        );
         assert_eq!(visible_entries(tmp.path()), vec!["frontend.ct".to_string()]);
         let partial = tmp.path().join(PARTIAL_DIR_NAME);
         assert!(
@@ -2400,6 +2508,88 @@ mod tests {
         );
     }
 
+    /// The page's stdout is recorded as `Write` and its stderr as
+    /// `WriteStderr`, in the recording and in the boundary log alike.
+    #[test]
+    fn stdout_and_stderr_are_recorded_under_their_own_kinds() {
+        use codetracer_trace_types::TraceLowLevelEvent as E;
+        let tmp = TempDir::new().expect("create tempdir");
+        let mut writer = writer_in(&tmp);
+        // An event is recorded at a step, so the page reaches one first.
+        let manifest = serde_json::json!({
+            "paths": ["src/app.js"],
+            "functions": [],
+            "sites": [{"pathIndex": 0, "line": 3}],
+        });
+        let events = vec![
+            BrowserEvent::SessionStart {
+                program: "streams".to_string(),
+                args: vec![],
+            },
+            BrowserEvent::Manifest { manifest },
+            BrowserEvent::Step { site_id: 0 },
+            BrowserEvent::Write {
+                channel: "stdout".to_string(),
+                content: "to stdout\n".to_string(),
+            },
+            BrowserEvent::Write {
+                channel: "stderr".to_string(),
+                content: "to stderr\n".to_string(),
+            },
+            BrowserEvent::SessionEnd {},
+        ];
+        let ct = drive(&mut writer, &events).expect("the sequence ends the session");
+
+        let recorded: Vec<(EventLogKind, String)> = recorded_events(&ct)
+            .into_iter()
+            .filter_map(|e| match e {
+                E::Event(ev) => Some((ev.kind, ev.content)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            recorded,
+            vec![
+                (EventLogKind::Write, "to stdout\n".to_string()),
+                (EventLogKind::WriteStderr, "to stderr\n".to_string()),
+            ]
+        );
+
+        let logged: Vec<(i32, String)> = decode_log(&stored_boundary_log(&ct))
+            .records
+            .into_iter()
+            .filter_map(|r| match r {
+                Record::Event { kind, metadata, .. } => Some((kind, metadata)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            logged,
+            vec![(0, "stdout".to_string()), (14, "stderr".to_string())]
+        );
+    }
+
+    /// A boundary-log event kind is the `EventLogKind` with that ordinal,
+    /// for every assigned kind; any other value is refused, naming it.
+    #[test]
+    fn a_boundary_log_event_kind_is_exact_or_refused() {
+        for kind in EventLogKind::ALL {
+            assert_eq!(
+                event_log_kind(kind as i32).unwrap(),
+                kind,
+                "{}",
+                kind.name()
+            );
+        }
+        for raw in [24, 255, 256, -1] {
+            let err = event_log_kind(raw).expect_err("an unassigned kind must be refused");
+            assert!(
+                err.to_string().contains(&raw.to_string()),
+                "the refusal of kind {raw} does not name it: {err}"
+            );
+        }
+    }
+
     /// `boundary.log` inside the container is the record sequence, in
     /// order, with the tables positional — the replaying recorder
     /// resolves `path_id`, `function_id` and `variable_id` by index, so a
@@ -2442,7 +2632,10 @@ mod tests {
             vec![
                 Record::Path("src/vendor.js".into()),
                 Record::Path("src/app.js".into()),
-                Record::Step { path_id: 1, line: 20 },
+                Record::Step {
+                    path_id: 1,
+                    line: 20
+                },
                 Record::Function {
                     name: "renderBalance".into(),
                     path_id: 1,
@@ -2452,7 +2645,10 @@ mod tests {
                     function_id: 0,
                     args: vec![(0, int("42"))],
                 },
-                Record::Step { path_id: 1, line: 13 },
+                Record::Step {
+                    path_id: 1,
+                    line: 13
+                },
                 Record::VariableName("total".into()),
                 Record::Value {
                     variable_id: 0,
@@ -2468,14 +2664,20 @@ mod tests {
                     function_id: 1,
                     args: vec![(0, Value::Float("1.5".into())), (1, Value::Bool(true))],
                 },
-                Record::Step { path_id: 2, line: 4 },
+                Record::Step {
+                    path_id: 2,
+                    line: 4
+                },
                 Record::VariableName("cents".into()),
                 Record::Value {
                     variable_id: 1,
                     value: int("7"),
                 },
                 Record::Return(Value::String("12.34".into())),
-                Record::Step { path_id: 1, line: 20 },
+                Record::Step {
+                    path_id: 1,
+                    line: 20
+                },
                 Record::VariableName("rows".into()),
                 Record::Value {
                     variable_id: 2,
@@ -2500,7 +2702,10 @@ mod tests {
                     args: vec![],
                 },
                 Record::Return(Value::None),
-                Record::Step { path_id: 2, line: 7 },
+                Record::Step {
+                    path_id: 2,
+                    line: 7
+                },
                 Record::End,
             ]
         );
@@ -2603,7 +2808,12 @@ mod tests {
             "mid-session the output directory shows nothing: {:?}",
             visible_entries(tmp.path()),
         );
-        assert!(tmp.path().join(PARTIAL_DIR_NAME).join("pending.ct").is_file());
+        assert!(
+            tmp.path()
+                .join(PARTIAL_DIR_NAME)
+                .join("pending.ct")
+                .is_file()
+        );
         writer.session_end().unwrap();
         assert_eq!(visible_entries(tmp.path()), vec!["pending.ct".to_string()]);
     }
@@ -2663,7 +2873,12 @@ mod tests {
         let teed = wait_for_nonempty(&sink);
         let live = decode_log(&teed);
         assert!(!live.complete, "the session is still open");
-        assert_eq!(live.records.len(), 3, "Header, Path, Step: {:?}", live.records);
+        assert_eq!(
+            live.records.len(),
+            3,
+            "Header, Path, Step: {:?}",
+            live.records
+        );
         assert!(!writer.session_ended);
 
         let ct = writer.session_end().unwrap();
@@ -2705,10 +2920,16 @@ mod tests {
             // Dropping the writer without `session_end` is the crash.
         }
         let log = decode_log(&std::fs::read(&sink).unwrap());
-        assert!(!log.complete, "an interrupted stream must NOT look complete");
+        assert!(
+            !log.complete,
+            "an interrupted stream must NOT look complete"
+        );
         assert_eq!(log.torn_bytes, 0, "every frame the consumer got is whole");
         assert!(log.records.len() > 10, "expected a substantial prefix");
-        assert!(visible_entries(&out).is_empty(), "no recording for a killed session");
+        assert!(
+            visible_entries(&out).is_empty(),
+            "no recording for a killed session"
+        );
     }
 
     /// A consumer that cannot be spawned, or that dies early, costs seek
@@ -2757,7 +2978,10 @@ mod tests {
             ],
         };
         let err = config.validate().unwrap_err();
-        assert!(err.contains("{trace_dir}") && err.contains("{trace}"), "{err}");
+        assert!(
+            err.contains("{trace_dir}") && err.contains("{trace}"),
+            "{err}"
+        );
         assert!(StreamConsumerConfig::default().validate().is_ok());
     }
 
@@ -2776,7 +3000,10 @@ mod tests {
             let ct = recordings.join(fixture);
             assert!(ct.is_file(), "{} must be a CTFS file", ct.display());
             let log = decode_log(&stored_boundary_log(&ct));
-            assert!(log.complete, "{fixture}: the page ended its session cleanly");
+            assert!(
+                log.complete,
+                "{fixture}: the page ended its session cleanly"
+            );
             assert!(
                 log.records.len() >= 15,
                 "{fixture} should be a substantial recording; got {} records",
@@ -2813,6 +3040,7 @@ mod tests {
             // Not under test here, and a watchdog firing mid-handshake
             // would make this smoke test flaky for an unrelated reason.
             idle_timeout: None,
+            recording_id: None,
         };
         let host = BrowserStreamHost::new(config);
         let running = host.bind().await.expect("bind");
@@ -2845,9 +3073,117 @@ mod tests {
         use codetracer_trace_types::TraceLowLevelEvent as E;
         let events = recorded_events(&ct);
         assert_eq!(events.iter().filter(|e| matches!(e, E::Step(_))).count(), 3);
-        assert_eq!(events.iter().filter(|e| matches!(e, E::Value(_))).count(), 2);
+        assert_eq!(
+            events.iter().filter(|e| matches!(e, E::Value(_))).count(),
+            2
+        );
         let log = decode_log(&stored_boundary_log(&ct));
         assert!(matches!(&log.records[0], Record::Header { program, .. } if program == "smoke"));
+    }
+
+    /// The `recording_id` in a finished recording's `meta.dat`.
+    fn recorded_recording_id(ct: &Path) -> String {
+        let mut reader = codetracer_ctfs::CtfsReader::open(ct)
+            .unwrap_or_else(|e| panic!("open {} as CTFS: {e:?}", ct.display()));
+        let meta = reader
+            .read_file("meta.dat")
+            .unwrap_or_else(|e| panic!("{} has no meta.dat: {e:?}", ct.display()));
+        crate::meta_dat::parse_meta_dat(&meta)
+            .unwrap_or_else(|e| panic!("{}: meta.dat does not parse: {e:?}", ct.display()))
+            .recording_id
+    }
+
+    /// Run a host with `recording_id`, record one session per program name
+    /// (each over its own connection, one after the other), and return the
+    /// output directory.
+    async fn record_sessions(
+        recording_id: Option<PinnedRecordingId>,
+        programs: &[&str],
+    ) -> TempDir {
+        use futures_util::SinkExt;
+
+        let tmp = TempDir::new().expect("create tempdir");
+        let host = BrowserStreamHost::new(BrowserStreamHostConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            out_dir: tmp.path().to_path_buf(),
+            // The same in every run: it is recorded in the metadata, and the
+            // byte comparison below is about the recording id.
+            workdir: PathBuf::from("/ct-pinned-recording-id-test"),
+            stream_consumer: StreamConsumerConfig::default(),
+            idle_timeout: None,
+            recording_id,
+        });
+        let running = host.bind().await.expect("bind");
+        let url = format!("ws://{}/ct-stream", running.local_addr);
+        for program in programs {
+            let (mut ws, _resp) = tokio_tungstenite::connect_async(&url)
+                .await
+                .expect("connect");
+            let batch = [
+                format!(r#"{{"kind":"SessionStart","program":"{program}","args":[]}}"#),
+                r#"{"kind":"Step","siteId":0}"#.to_string(),
+                r#"{"kind":"SessionEnd"}"#.to_string(),
+            ]
+            .join("\n");
+            ws.send(Message::Text(batch)).await.expect("send");
+            ws.close(None).await.ok();
+            tokio::time::sleep(Duration::from_millis(300)).await;
+        }
+        running.stop().await.expect("stop");
+        tmp
+    }
+
+    /// `record-web --recording-id`: the recording carries the id it was
+    /// given, so a caller that derives the id (the JS boundary replay
+    /// runner, JS-Boundary-Recording.md §12) gets a byte-identical trace when
+    /// it writes the same recording again; and the id is used once.
+    ///
+    /// Control in the same test: a host given no id writes a minted one,
+    /// different in each of two recordings of the same session.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_pinned_recording_id_is_written_into_one_recording() {
+        const PINNED: &str = "01890a5d-ac96-774b-bcce-b302099a8057";
+        let pinned = PinnedRecordingId::new(PINNED).expect("a canonical UUIDv7");
+        let tmp = record_sessions(Some(pinned), &["first", "second"]).await;
+        assert_eq!(recorded_recording_id(&tmp.path().join("first.ct")), PINNED);
+        // The second recording would share the id: refused, nothing written.
+        assert_eq!(visible_entries(tmp.path()), vec!["first.ct".to_string()]);
+
+        // Byte identity is what the id is pinned for: the same session
+        // through two hosts given the same id writes the same bytes.
+        let again =
+            record_sessions(Some(PinnedRecordingId::new(PINNED).unwrap()), &["first"]).await;
+        let first = std::fs::read(tmp.path().join("first.ct")).unwrap();
+        assert!(!first.is_empty());
+        assert!(
+            first == std::fs::read(again.path().join("first.ct")).unwrap(),
+            "the same session under the same pinned id is byte-identical",
+        );
+
+        let minted_a = record_sessions(None, &["first"]).await;
+        let minted_b = record_sessions(None, &["first"]).await;
+        let a = recorded_recording_id(&minted_a.path().join("first.ct"));
+        let b = recorded_recording_id(&minted_b.path().join("first.ct"));
+        assert!(crate::meta_dat::is_canonical_uuid_v7(&a), "{a}");
+        assert_ne!(a, b, "without a pinned id every recording mints its own");
+        assert_ne!(a, PINNED);
+    }
+
+    #[test]
+    fn a_recording_id_that_is_not_a_canonical_uuid_v7_is_refused() {
+        for bad in [
+            "",
+            "not-a-uuid",
+            // A v4 UUID: version nibble 4.
+            "01890a5d-ac96-474b-bcce-b302099a8057",
+            // Upper case is not the canonical form.
+            "01890A5D-AC96-774B-BCCE-B302099A8057",
+        ] {
+            assert!(
+                PinnedRecordingId::new(bad).is_err(),
+                "{bad:?} must be refused"
+            );
+        }
     }
 }
 
@@ -3165,6 +3501,7 @@ mod idle_watchdog_tests {
             workdir: tmp.path().to_path_buf(),
             stream_consumer: StreamConsumerConfig::default(),
             idle_timeout,
+            recording_id: None,
         }
     }
 

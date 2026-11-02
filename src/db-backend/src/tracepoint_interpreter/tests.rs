@@ -23,6 +23,7 @@ use super::TracepointInterpreter;
 
 #[test]
 fn log_array() -> Result<(), Box<dyn Error>> {
+    const TEST_NAME: &str = "tracepoint_interpreter::tests::log_array";
     let src = "log(arr)";
 
     let expected = vec![var("arr", seq_val(vec![int_val(42), int_val(-13), int_val(5)]))];
@@ -35,14 +36,18 @@ fn log_array() -> Result<(), Box<dyn Error>> {
         ]),
     )];
 
-    check_tracepoint_evaluate(src, 3, "array", Lang::RubyDb, &expected)?;
-    run_noir_variant(src, 3, "array", &noir_expected)?;
+    gate_missing_prerequisite(
+        TEST_NAME,
+        check_tracepoint_evaluate(src, 3, "array", Lang::RubyDb, &expected),
+    )?;
+    gate_missing_prerequisite(TEST_NAME, run_noir_variant(src, 3, "array", &noir_expected))?;
 
     Ok(())
 }
 
 #[test]
 fn array_indexing() -> Result<(), Box<dyn Error>> {
+    const TEST_NAME: &str = "tracepoint_interpreter::tests::array_indexing";
     let src = "log(arr[0])
 log(arr[1])
 log(arr[2])";
@@ -58,8 +63,11 @@ log(arr[2])";
         var("arr[2]", noir_field(FIELD_5)),
     ];
 
-    check_tracepoint_evaluate(src, 3, "array", Lang::RubyDb, &expected)?;
-    run_noir_variant(src, 3, "array", &noir_expected)?;
+    gate_missing_prerequisite(
+        TEST_NAME,
+        check_tracepoint_evaluate(src, 3, "array", Lang::RubyDb, &expected),
+    )?;
+    gate_missing_prerequisite(TEST_NAME, run_noir_variant(src, 3, "array", &noir_expected))?;
 
     Ok(())
 }
@@ -76,6 +84,56 @@ fn run_noir_variant(
 // ----------------------------------------------------------------------------------------------------------------
 // HELPERS
 // ----------------------------------------------------------------------------------------------------------------
+
+/// A recorder these tests need is not available on this machine: the Ruby
+/// recorder is not checked out, its native extension is not built, or `nargo`
+/// is not on PATH. This is an environment gap, not a result of the code under
+/// test, so it goes through the crate's missing-prerequisite gate instead of
+/// failing as if the interpreter were wrong. Every other recording failure
+/// (the recorder crashed, or wrote a container the reader refuses) stays an
+/// ordinary error and fails the test.
+#[derive(Debug)]
+struct MissingPrerequisite {
+    what: String,
+    remedy: &'static str,
+}
+
+impl std::fmt::Display for MissingPrerequisite {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "missing prerequisite: {} ({})", self.what, self.remedy)
+    }
+}
+
+impl Error for MissingPrerequisite {}
+
+fn missing(what: impl Into<String>, remedy: &'static str) -> Box<dyn Error> {
+    Box::new(MissingPrerequisite {
+        what: what.into(),
+        remedy,
+    })
+}
+
+/// Route a [`MissingPrerequisite`] through
+/// [`crate::test_prerequisite::skip_or_fail_missing_prerequisite`]: a strict
+/// lane (`CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false`) fails, any other run
+/// reports the check as SKIPPED (NOT VERIFIED). Any other outcome is returned
+/// unchanged.
+fn gate_missing_prerequisite(test_name: &str, result: Result<(), Box<dyn Error>>) -> Result<(), Box<dyn Error>> {
+    match result {
+        Err(e) => match e.downcast_ref::<MissingPrerequisite>() {
+            Some(m) => {
+                crate::test_prerequisite::skip_or_fail_missing_prerequisite(test_name, &m.what, m.remedy);
+                Ok(())
+            }
+            None => Err(e),
+        },
+        ok => ok,
+    }
+}
+
+const RUBY_RECORDER_REMEDY: &str = "check out the codetracer-ruby-recorder sibling and run `just build-extension` in it, \
+     or set CODETRACER_RUBY_RECORDER_PATH";
+const NARGO_REMEDY: &str = "run inside the codetracer dev shell, which provides `nargo`";
 fn var(name: &str, value: Value) -> StringAndValueTuple {
     StringAndValueTuple {
         field0: name.to_string(),
@@ -289,11 +347,7 @@ fn find_ruby_recorder() -> Option<PathBuf> {
 fn record_ruby_trace(program_dir: &Path, target_dir: &Path) -> Result<(), Box<dyn Error>> {
     let recorder = match find_ruby_recorder() {
         Some(r) => r,
-        None => {
-            return Err("Ruby recorder not found \
-                 (set CODETRACER_RUBY_RECORDER_PATH or check out sibling repo)"
-                .into());
-        }
+        None => return Err(missing("the Ruby recorder is not found", RUBY_RECORDER_REMEDY)),
     };
     let main_path = program_dir.join("main.rb");
     // The native Ruby recorder always writes a `.ct` CTFS container.
@@ -308,10 +362,23 @@ fn record_ruby_trace(program_dir: &Path, target_dir: &Path) -> Result<(), Box<dy
         .output()
         .unwrap();
 
+    // The recorder prints this, and exits non-zero, exactly when its native
+    // extension cannot be loaded (typically: it was never built).
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    if !result.status.success() && stderr.contains("native tracer unavailable") {
+        return Err(missing(
+            format!(
+                "the Ruby recorder's native extension cannot be loaded ({})",
+                stderr.trim()
+            ),
+            RUBY_RECORDER_REMEDY,
+        ));
+    }
+
     if !result.status.success() {
         return Err(format!(
             "Recording trace failed!\n    stderr: {:?},\n    stdout: {:?}",
-            String::from_utf8_lossy(&result.stderr),
+            stderr,
             String::from_utf8_lossy(&result.stdout)
         )
         .into());
@@ -320,11 +387,17 @@ fn record_ruby_trace(program_dir: &Path, target_dir: &Path) -> Result<(), Box<dy
 }
 
 fn record_noir_trace(program_dir: &Path, target_dir: &Path) -> Result<(), Box<dyn Error>> {
-    let result = Command::new("nargo")
+    let result = match Command::new("nargo")
         .args(["trace", "--out-dir", target_dir.to_str().unwrap()])
         .current_dir(program_dir)
         .output()
-        .unwrap();
+    {
+        Ok(result) => result,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(missing("`nargo` is not on PATH", NARGO_REMEDY));
+        }
+        Err(e) => return Err(format!("cannot run `nargo`: {e}").into()),
+    };
 
     if !result.status.success() {
         return Err(format!("Recording trace failed!\n{:#?}.", result).into());

@@ -115,18 +115,22 @@ proc terminalCapability*(): PaneCapability =
      paneScratchpad,
      # PLAT-52: the recorded program's terminal output
      # (`views/terminal_output_pane.nim`).
-     paneTerminalOutput},
+     paneTerminalOutput,
+     # PLAT-57: Find in Files (`views/search_results_pane.nim`).
+     paneSearch,
+     # PLAT-53: Test Results (`views/test_results_pane.nim`).
+     paneTestResults,
+     # PLAT-54: Agent Activity (`views/agent_activity_pane.nim`).
+     paneAgentActivity,
+     # PLAT-55: Problems (`views/problems_pane.nim`).
+     paneProblems,
+     # PLAT-58: Requests (`views/requests_pane.nim`).
+     paneRequests},
     [(paneDebugControls, "the terminal draws the debugger controls in its " &
                          "top bar, not as a pane"),
      (paneFlow, "the terminal draws flow inside the source pane"),
-     (paneSearch, "search results open in the command line, not a pane"),
      (paneShell, "the terminal has no embedded shell view yet"),
-     (paneAgentActivity, "the terminal has no agent-activity view yet"),
-     (paneTestResults, "the terminal has no test-results view yet"),
-     (paneConstraints, "the terminal has no constraints view yet"),
-     (paneProblems, "the terminal has no problems view yet; a build's " &
-                    "errors are in the Build pane"),
-     (paneRequests, "the terminal has no requests view yet")])
+     (paneConstraints, "the terminal has no constraints view yet")])
 
 # ---------------------------------------------------------------------------
 # PLAT-45 deliverable 5 — the fold depth this terminal needs
@@ -363,12 +367,23 @@ proc layoutForMode*(product: ProductMode; profile: LayoutProfile): LayoutNode =
 proc dockedForMode*(product: ProductMode): seq[DockedPane] =
   ## PLAT-48: the panes a mode's DEFAULT docks beside `layoutForMode`'s tree —
   ## Debug mode's footer panels (`sharedDefaultDocked`, as
-  ## `profileLayoutValue` carries them), nothing for Edit mode. So a runtime
-  ## with no layout binding and no session paints the footer strip the bound
-  ## one does.
+  ## `profileLayoutValue` carries them), and Edit mode's (the same footer
+  ## less the BUILD pane its tree places — PLAT-55: the desktop docks
+  ## PROBLEMS in Edit mode too). So a runtime with no layout binding and no
+  ## session paints the footer strip the bound one does.
   case product
   of pmDebug: sharedDefaultLayout().docked
-  of pmEdit: @[]
+  of pmEdit: sharedEditLayout().docked
+
+proc layoutValueForMode*(product: ProductMode; profile: LayoutProfile): Layout =
+  ## A mode's DEFAULT as a whole `Layout` — `layoutForMode`'s tree with
+  ## `dockedForMode`'s panes beside it — which is what a LAYOUT BINDING is
+  ## seeded with, re-flowed to and reset to for that mode. For Debug mode it is
+  ## `profileLayoutValue`; for Edit mode it is the arrangement `shellModel`
+  ## draws for an unbound Edit-mode runtime, so a binding enabled there leaves
+  ## the first frame of `ct edit` exactly as it was (codetracer-pm issue
+  ## 2026-10-21: the bare `profileLayoutValue` would have painted Debug's).
+  initLayout(layoutForMode(product, profile), dockedForMode(product))
 
 proc resizeShares*(tree: LayoutNode; product: ProductMode;
                    profile: LayoutProfile) =

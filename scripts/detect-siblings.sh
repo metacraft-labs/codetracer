@@ -163,7 +163,12 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-native-b
 		if grep -qE "liblldb.*not found|libstdc\+\+.*not found" <<<"$(ldd "$_CT_WORKSPACE_ROOT/codetracer-native-backend/target/debug/ct-native-replay" 2>/dev/null)"; then
 			_ct_lldb_dir=""
 			if command -v nix >/dev/null 2>&1; then
-				_ct_lldb_dir="$(nix build --no-link --print-out-paths nixpkgs#lldb 2>/dev/null)/lib"
+				# `--inputs-from` resolves `nixpkgs` from codetracer's flake.lock.
+				# A bare `nixpkgs#lldb` is the machine's flake REGISTRY, which can
+				# be a newer nixpkgs than the glibc this binary was linked against:
+				# on 2026-10-21 that gave an LLDB needing GLIBC_2.42 to a binary
+				# whose interpreter is glibc 2.40, and it could not start.
+				_ct_lldb_dir="$(nix build --no-link --print-out-paths --inputs-from "$_CT_ROOT_DIR" nixpkgs#lldb 2>/dev/null)/lib"
 			fi
 			_ct_stdcpp_dir=""
 			if command -v g++ >/dev/null 2>&1; then
@@ -270,23 +275,11 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-python-r
 		export CODETRACER_PYTHON_INTERPRETER="$_CT_WORKSPACE_ROOT/codetracer/.python-recorder-venv/bin/python"
 	fi
 
-	# THE SAME GAP THE RUBY BLOCK BELOW HAD, in its Python spelling.
-	#
-	# Everything above keys off DIRECTORIES that exist in a fresh clone: the
-	# source tree, and a venv that `nix develop` materialises whether or not
-	# the recorder was ever installed into it. This block therefore used to
-	# report "detected" unconditionally.
-	#
-	# `codetracer-python-recorder` is a maturin/pyo3 project -- a COMPILED
-	# extension, not a pure-Python package -- so a resolved interpreter proves
-	# nothing about whether `import codetracer_python_recorder` will work. On
-	# the machine this was written on, it did not: the venv existed, the
-	# interpreter ran, and the import raised ModuleNotFoundError while this
-	# script printed "detected".
-	#
-	# Probe site-packages for the installed distribution rather than starting
-	# the interpreter: this file is sourced on every dev-shell entry, and a
-	# `python -c import` on that path is a cost paid by every shell.
+	# Shell entry must remain a filesystem-only observation. Local package
+	# files neither establish importability nor rule out a recorder inherited
+	# from the declared base environment (include-system-site-packages=true).
+	# Do not run the interpreter or construct/install a package to refine this
+	# advisory result; principal and recording qualification happen elsewhere.
 	if [ -n "${CODETRACER_PYTHON_INTERPRETER:-}" ]; then
 		_ct_py_installed=""
 		for _ct_py_sp in "$(dirname "$(dirname "$CODETRACER_PYTHON_INTERPRETER")")"/lib/python*/site-packages; do
@@ -297,13 +290,12 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-python-r
 			fi
 		done
 		if [ -n "$_ct_py_installed" ]; then
-			_ct_detect_summary "codetracer-python-recorder (installed)"
+			_ct_detect_summary "codetracer-python-recorder (local package files found; import unverified)"
 		else
-			echo "  WARNING: codetracer-python-recorder is NOT installed in the venv." >&2
+			echo "  WARNING: codetracer-python-recorder has no local package files in the venv." >&2
 			echo "    interpreter: $CODETRACER_PYTHON_INTERPRETER" >&2
-			echo "    'import codetracer_python_recorder' will fail; the sources alone are not enough" >&2
-			echo "    (this is a maturin/pyo3 extension and has to be built)." >&2
-			_ct_detect_summary "codetracer-python-recorder (sources present, NOT installed)"
+			echo "    The recorder may be inherited from the base environment; import availability is unverified." >&2
+			_ct_detect_summary "codetracer-python-recorder (no local package files; availability unverified)"
 		fi
 		unset _ct_py_installed _ct_py_sp
 	else
@@ -571,9 +563,19 @@ fi
 # libpcre.so(.3|.1|)" when invoked from a shell that lacks it (e.g. the
 # codetracer dev shell rather than codetracer-nim's own).  Mirror the lldb
 # nix-build resolution used for ct-native-replay above.
+#
+# The sibling's bin/ is deliberately NOT put on PATH. The `nim` on PATH is the
+# pinned fork (reprobuild's `packages.nim-fork`, built from the same
+# codetracer-nim history at the revision reprobuild's flake.lock names), and it
+# compiles every Nim program this shell builds, the db-backend tests' Nim
+# fixtures included. bin/nim is whatever someone last built in the sibling,
+# and nothing rebuilds it when the checkout moves, so putting it first let a
+# stale local build shadow the pin: the Nim MCR flow test compiled its fixture
+# with a compiler that predated the source-map fix the pin carries. Only the
+# consumers that ask for the sibling by name get it, through
+# CODETRACER_NIM_BIN.
 if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-nim/bin/nim" ]; then
 	export CODETRACER_NIM_BIN="$_CT_WORKSPACE_ROOT/codetracer-nim/bin/nim"
-	export PATH="$_CT_WORKSPACE_ROOT/codetracer-nim/bin:$PATH"
 	_ct_pcre_dir=""
 	if command -v nix >/dev/null 2>&1; then
 		_ct_pcre_dir="$(nix build --no-link --print-out-paths "nixpkgs#pcre.out" 2>/dev/null)/lib"

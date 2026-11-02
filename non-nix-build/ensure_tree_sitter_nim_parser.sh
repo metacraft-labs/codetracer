@@ -2,6 +2,15 @@
 
 set -euo pipefail
 
+# This gate produces a FILE (libs/tree-sitter-nim/src/parser.c), never output.
+# Everything it, npm and `tree-sitter generate` print is a diagnostic, so all
+# of it goes to stderr. Both dev shells run it from their shellHook, and a
+# caller of `nix develop --command <cmd>` reads stdout as <cmd>'s output; the
+# "src/parser.c is up to date" line used to arrive there, prepended to the
+# value the caller asked for. ci/test/dev-shell-writes-nothing-elsewhere-test.sh
+# runs this script directly and fails if it writes to stdout.
+exec >&2
+
 # Allow callers to override ROOT_DIR, but derive a safe default when unset.
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 : "${ROOT_DIR:=$(cd "$SCRIPT_DIR/.." && pwd)}"

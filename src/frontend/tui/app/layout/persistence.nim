@@ -354,6 +354,19 @@ proc adoptLayoutDocument*(b: LayoutBinding; path, text: string):
     status: lrsRestored, path: path, kind: "",
     message: "layout restored from " & path)
 
+proc layoutPersistPlan*(layout: Layout; userModified, quarantined: bool):
+    LayoutPersistPlan =
+  ## The plan for an ARRANGEMENT rather than for a binding: the terminal's
+  ## document holds the DEBUG arrangement, and while a bound runtime is in Edit
+  ## mode that arrangement is in the mode register, not in the binding
+  ## (`runtime.layoutPersistPlanOf`). The same three answers, from the same
+  ## two facts.
+  if quarantined:
+    return LayoutPersistPlan(intent: lpiQuarantine, text: "")
+  if not userModified or layout.tree.isNil:
+    return LayoutPersistPlan(intent: lpiRemove, text: "")
+  LayoutPersistPlan(intent: lpiWrite, text: pretty(saveLayout(layout)) & "\n")
+
 proc layoutPersistPlan*(b: LayoutBinding; quarantined: bool):
     LayoutPersistPlan =
   ## What to do with the terminal's document after a committed change and on
@@ -363,8 +376,6 @@ proc layoutPersistPlan*(b: LayoutBinding; quarantined: bool):
   ## is that they are a FUNCTION of two facts the session already has —
   ## `userModified` and "did this session start from a document it could not
   ## read" — rather than a sequence of conditions spread through `main.nim`.
-  if quarantined:
-    return LayoutPersistPlan(intent: lpiQuarantine, text: "")
-  if b.isNil or not b.userModified:
-    return LayoutPersistPlan(intent: lpiRemove, text: "")
-  LayoutPersistPlan(intent: lpiWrite, text: pretty(b.saveDocument()) & "\n")
+  if b.isNil:
+    return layoutPersistPlan(Layout(), false, quarantined)
+  layoutPersistPlan(b.layout, b.userModified, quarantined)

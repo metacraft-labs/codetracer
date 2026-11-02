@@ -173,7 +173,7 @@ suite "PLAT-46: the terminal and the desktop paint one design system":
       .spawn()
     settleOnDebugger(sess, Cols, Rows)
     var terminal = terminalColumn(sess)
-    sess.send("q")
+    sess.send("\x11")  # Ctrl+Q, the CUA base's quit
     discard sess.waitExit(initDuration(seconds = 15))
     sess.close()
     # THE EDITOR'S SYNTAX needs a taller screen: `def add` is line 29.
@@ -192,7 +192,7 @@ suite "PLAT-46: the terminal and the desktop paint one design system":
       # The function's name: an identifier, the default token colour.
       terminal["syntax-identifier"] = hexOfColor(
         tall.cellAt(defRow, colOf(tall, defRow, "def add") + 4).fg)
-    tall.send("q")
+    tall.send("\x11")  # Ctrl+Q, the CUA base's quit
     discard tall.waitExit(initDuration(seconds = 15))
     tall.close()
     checkpoint("terminal: " & $terminal)

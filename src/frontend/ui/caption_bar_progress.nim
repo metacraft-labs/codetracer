@@ -212,24 +212,22 @@ when defined(js):
 
     r.appendChild(container, panel)
 
-  proc tryMountCaptionBarProgress*(containerId: cstring;
-                                    self: CaptionBarProgressComponent) =
-    ## Mount the IsoNim caption bar progress into a DOM container.
-    ## Called from layout.nim when the GL component is created.
-    ## Re-renders on every call.
-    self.containerId = containerId
-    let container = isonim_dom.getElementById(isonim_dom.document, containerId)
-    if isonim_dom.isNodeNil(isonim_dom.Node(container)):
+  proc mountCaptionBarProgress*(host: isonim_dom.Element;
+                                 self: CaptionBarProgressComponent) =
+    ## Render the caption bar progress into `host`, the container GoldenLayout
+    ## built for it, and remember the host for later refreshes.
+    self.host = host.toJs
+    if isonim_dom.isNodeNil(isonim_dom.Node(host)):
       return
     let r = WebRenderer()
-    renderIsoNimCaptionBarProgress(r, container, self)
+    renderIsoNimCaptionBarProgress(r, host, self)
 
   proc requestCaptionBarProgressRender*(self: CaptionBarProgressComponent) =
     ## Refresh the direct IsoNim caption-bar mount after explicit progress or
     ## local UI-state changes. This replaces the old global redrawAll hook.
-    if self.containerId.len == 0:
+    if self.host.isNil:
       return
-    tryMountCaptionBarProgress(self.containerId, self)
+    mountCaptionBarProgress(cast[isonim_dom.Element](self.host), self)
 else:
   proc requestCaptionBarProgressRender*(self: CaptionBarProgressComponent) =
     discard

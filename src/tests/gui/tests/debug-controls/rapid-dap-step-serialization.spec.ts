@@ -7,18 +7,59 @@
  * `currentStep`/location state and, on the wire, occasionally caused
  * one of the overlapping `next` requests to be silently dropped.
  *
- * Post-fix: ``ui/debug.nim::dapStep`` gates new requests on the
- * `data.status.stableBusy` flag, which the middleware flips back to
- * `false` only on `CtCompleteMove`.  We observe the effect via the
- * existing ``__CODETRACER_TEST__.vmBackendRequests`` log appended by
- * ``recordDapStep`` AFTER the guard.
+ * The keyboard reaches `ui/debug_toolbar.nim::dapStep` through the real
+ * window key router and toolbar ViewModel. Its stableBusy guard drops steps
+ * until middleware processes CtCompleteMove.
+ *
+ * Dispatch each burst in one renderer task: separate awaited Playwright
+ * keyboard presses allow a fast backend to complete between presses, so two
+ * accepted requests do not imply overlap. No backend is mocked or delayed;
+ * only key delivery is synchronous, keeping completion IPC outside the burst.
  */
 
 import { test, expect } from "../../lib/fixtures";
+import type { Page } from "@playwright/test";
 
-type Req = { command?: string; source?: string };
+async function focusEditor(ctPage: Page) {
+  // Focus the input, not the centre of the potentially clipped view-lines
+  // canvas: neighbouring panes can cover that point in the default layout.
+  await ctPage.evaluate(() => {
+    const d = (window as any).data;
+    d.ui.editors[d.services.editor.active].monacoEditor.focus();
+  });
+  await expect.poll(() => ctPage.evaluate(() => {
+    const d = (window as any).data;
+    return d.ui.editors[d.services.editor.active].monacoEditor.hasTextFocus();
+  })).toBe(true);
+}
 
-async function waitStableBusyFalse(ctPage: { evaluate: Function }) {
+async function pressF10Burst(ctPage: Page, count: number, repeat = false) {
+  return ctPage.evaluate(({ count, repeat }) => {
+    const target = document.activeElement;
+    if (!target?.closest(".monaco-editor")) {
+      throw new Error("F10 burst requires focus in the Monaco editor");
+    }
+    const busy: boolean[] = [];
+    for (let i = 0; i < count; i += 1) {
+      target.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "F10", code: "F10", keyCode: 121, which: 121,
+        bubbles: true, cancelable: true, repeat: repeat && i > 0,
+      }));
+      busy.push((window as unknown as {
+        data: { status: { stableBusy: boolean } };
+      }).data.status.stableBusy);
+      if (!repeat || i === count - 1) {
+        target.dispatchEvent(new KeyboardEvent("keyup", {
+          key: "F10", code: "F10", keyCode: 121, which: 121,
+          bubbles: true, cancelable: true,
+        }));
+      }
+    }
+    return busy;
+  }, { count, repeat });
+}
+
+async function waitStableBusyFalse(ctPage: Page) {
   await expect
     .poll(
       () =>
@@ -32,7 +73,7 @@ async function waitStableBusyFalse(ctPage: { evaluate: Function }) {
     .toBe(true);
 }
 
-async function resetRequestLog(ctPage: { evaluate: Function }) {
+async function resetRequestLog(ctPage: Page) {
   await ctPage.evaluate(() => {
     const t = (window as unknown as { __CODETRACER_TEST__?: { vmBackendRequests?: unknown[] } })
       .__CODETRACER_TEST__ ?? {};
@@ -41,21 +82,15 @@ async function resetRequestLog(ctPage: { evaluate: Function }) {
   });
 }
 
-async function countStepRequests(ctPage: { evaluate: Function }): Promise<number> {
+async function countStepRequests(ctPage: Page): Promise<number> {
   return ctPage.evaluate(() => {
     type R = { command?: string; source?: string };
     const log =
       ((window as unknown as { __CODETRACER_TEST__?: { vmBackendRequests?: R[] } })
         .__CODETRACER_TEST__?.vmBackendRequests ?? []) as R[];
-    return log.filter(
-      (r) =>
-        (r.source === "dapStep" || typeof r.source === "undefined") &&
-        typeof r.command === "string" &&
-        (r.command.includes("next") ||
-          r.command === "DapNext" ||
-          r.command === "stepIn" ||
-          r.command === "stepOut"),
-    ).length;
+    // Count the accepted desktop step once, after dapStep's guard, rather
+    // than mixing in the store's independent request-observer records.
+    return log.filter((r) => r.source === "dapStep" && r.command === "next").length;
   });
 }
 
@@ -67,31 +102,34 @@ test.describe("FU-E — Rapid DAP step serialization", () => {
     launchMode: "trace",
   });
 
-  test("five rapid F10 presses emit at most one DAP step request", async ({ ctPage }) => {
+  test("five in-flight F10 presses emit exactly one DAP step request", async ({ ctPage }) => {
     await expect(ctPage.locator(".monaco-editor").first()).toBeVisible({ timeout: 60_000 });
-    await ctPage.locator(".monaco-editor .view-lines").first().click();
+    await focusEditor(ctPage);
     // Initial ``runToEntry`` seeds `data.status.stableBusy = true`; wait
     // until the first `CtCompleteMove` flips it.
     await waitStableBusyFalse(ctPage);
     await resetRequestLog(ctPage);
 
-    for (let i = 0; i < 5; i += 1) {
-      await ctPage.keyboard.press("F10");
-    }
-    // Without serialization, the pre-fix code path would record 5 entries.
-    expect(await countStepRequests(ctPage)).toBeLessThanOrEqual(1);
+    expect(await pressF10Burst(ctPage, 5)).toEqual([true, true, true, true, true]);
+    expect(await countStepRequests(ctPage)).toBe(1);
+    await waitStableBusyFalse(ctPage);
+    // Dropped presses must not have queued work to send on completion.
+    expect(await countStepRequests(ctPage)).toBe(1);
   });
 
   test("F10 is accepted again after the previous step completes", async ({ ctPage }) => {
     await expect(ctPage.locator(".monaco-editor").first()).toBeVisible({ timeout: 60_000 });
-    await ctPage.locator(".monaco-editor .view-lines").first().click();
+    await focusEditor(ctPage);
     await waitStableBusyFalse(ctPage);
     await resetRequestLog(ctPage);
 
-    await ctPage.keyboard.press("F10");
+    expect(await pressF10Burst(ctPage, 5, true)).toEqual([true, true, true, true, true]);
+    expect(await countStepRequests(ctPage)).toBe(1);
     await waitStableBusyFalse(ctPage); // CtCompleteMove released the guard.
-    await ctPage.keyboard.press("F10");
-
-    expect(await countStepRequests(ctPage)).toBeGreaterThanOrEqual(2);
+    expect(await countStepRequests(ctPage)).toBe(1);
+    expect(await pressF10Burst(ctPage, 1)).toEqual([true]);
+    expect(await countStepRequests(ctPage)).toBe(2);
+    await waitStableBusyFalse(ctPage);
+    expect(await countStepRequests(ctPage)).toBe(2);
   });
 });

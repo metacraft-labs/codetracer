@@ -38,16 +38,17 @@
 ## FAILURE arrives (`wasm_worker.finish` routes it there on the `start` path),
 ## and a failure must be painted even though no `VfsResponse` was ever sent.
 ##
-## ## HTML ESCAPING IS A CORRECTNESS REQUIREMENT HERE, NOT HYGIENE
+## ## A COMPILER QUOTES THE USER'S SOURCE, AND IT REACHES THE PANE AS TEXT
 ##
-## `views/isonim_build_view.nim` assigns `line.htmlText` to `innerHTML` —
-## deliberately, because the desktop's producer passes ANSI runs through
-## `ansi_up`, which emits `<span style=...>`. Nothing this module produces is
-## ANSI: it is compiler diagnostics, and a compiler diagnostic QUOTES THE
-## USER'S OWN SOURCE (`expected type Foo<Bar>, found …`). On a product whose
-## §1b.3 links can carry a project, that is script injection with extra steps.
-## So every string that reaches `htmlText` goes through `escapeHtmlText`, and
-## the suite asserts it with a source file that contains a `<script>`.
+## A compiler diagnostic quotes the user's own source (`expected type
+## Foo<Bar>, found …`). On a product whose §1b.3 links can carry a project, a
+## pane that put it into `innerHTML` would be script injection with extra
+## steps. Until PLAT-56 the pane did exactly that with `htmlText`, so this
+## module escaped every string; since PLAT-56 a line is its TEXT and its styled
+## runs (`BuildOutputLine.runs`), which `views/isonim_build_view.nim` draws as
+## text nodes — so the text is passed as written, and the suite asserts that a
+## source file containing a `<script>` is drawn as those characters and
+## creates no element.
 
 import std/[json, strutils]
 
@@ -56,8 +57,12 @@ import ../platform/process
 import ../store/types
 import ./build_vm
 import ../backend/replay_session_service
+import ../../../common/html_text
 
 export noir_build
+export html_text.escapeHtmlText
+  # Re-exported: the helper lived here until the desktop Event Log needed the
+  # same escaping, and this module's callers and tests reach it through it.
 
 type
   NoirBuildPhase* = enum
@@ -208,20 +213,8 @@ const
 # Escaping and paths
 # ---------------------------------------------------------------------------
 
-proc escapeHtmlText*(text: string): string =
-  ## The five characters that must not reach `innerHTML` as markup.
-  ##
-  ## `&` first, or every entity this proc writes gets its own `&` escaped a
-  ## second time and the pane renders `&amp;lt;` where a user wrote `<`.
-  result = newStringOfCap(text.len + 16)
-  for ch in text:
-    case ch
-    of '&': result.add "&amp;"
-    of '<': result.add "&lt;"
-    of '>': result.add "&gt;"
-    of '"': result.add "&quot;"
-    of '\'': result.add "&#39;"
-    else: result.add ch
+# `escapeHtmlText` is `common/html_text`'s, shared with the desktop Event Log
+# and re-exported from this module above.
 
 proc rendererPathFor*(projectRoot, packageDir, vfsPath: string): string =
   ## `rendererPath`'s rule, WITHOUT a producer.
@@ -379,12 +372,9 @@ proc emit(producer: NoirBuildProducer; text: string; isStdout: bool;
   ## with literal `\n` in it — the pane gives each row its own class and its
   ## own click target.
   for part in text.split('\n'):
-    producer.vm.appendLine(BuildOutputLine(
-      htmlText: escapeHtmlText(part),
-      isStdout: isStdout,
-      severity: severity,
-      locationPath: path,
-      locationLine: line))
+    producer.vm.appendLine(plainBuildLine(part, isStdout = isStdout,
+                                          severity = severity, path = path,
+                                          line = line))
 
 proc note(producer: NoirBuildProducer; text: string) =
   ## A line the STUDIO wrote, not the toolchain. See `noirBuildFaultPrefix`.

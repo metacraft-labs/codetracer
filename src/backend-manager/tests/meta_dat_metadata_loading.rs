@@ -80,12 +80,21 @@ fn make_recording(test_name: &str, mcr_total_events: Option<u64>) -> PathBuf {
     // carries no copy of them.
     let paths_dat = b"src/main.rssrc/lib.rs".to_vec();
     let paths_off = [0u64, 11, 21].map(u64::to_le_bytes).concat();
+    // With the other three interning tables, empty: a container carries the
+    // four all together or none (`internal-files.md` "Interning Tables").
+    let empty_off = 0u64.to_le_bytes();
     meta_dat::write_minimal_ctfs(
         &dir.join("trace.ct"),
         &[
             ("meta.dat", &dat_bytes),
             ("paths.dat", &paths_dat),
             ("paths.off", &paths_off),
+            ("funcs.dat", &[]),
+            ("funcs.off", &empty_off),
+            ("types.dat", &[]),
+            ("types.off", &empty_off),
+            ("varnames.dat", &[]),
+            ("varnames.off", &empty_off),
         ],
     )
     .expect("write minimal ctfs");
@@ -121,6 +130,27 @@ fn loads_meta_dat_only_trace_end_to_end() {
     assert_eq!(meta.language, "rust");
     // total_events comes from the MCR block.
     assert_eq!(meta.total_events, 424242);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The container is read by position, not whole: a recording one tebibyte
+/// long (sparse: its real members first, then a hole) has its metadata read
+/// without the reader allocating for the rest.  Reading the file whole would
+/// ask for a 1 TiB buffer, which the allocator refuses (the process aborts),
+/// so this test is red for any reader that holds the container in memory.
+#[test]
+fn a_container_is_read_by_position_not_whole() {
+    let dir = make_recording("read-by-position", Some(7));
+    let ct = dir.join("trace.ct");
+    let file = std::fs::OpenOptions::new().write(true).open(&ct).unwrap();
+    file.set_len(1 << 40).expect("a sparse 1 TiB container");
+    drop(file);
+
+    let meta = trace_metadata::read_trace_metadata(&dir).expect("read metadata");
+    assert_eq!(meta.recording_id, TEST_RECORDING_ID);
+    assert_eq!(meta.source_files, vec!["src/main.rs", "src/lib.rs"]);
+    assert_eq!(meta.total_events, 7);
 
     let _ = std::fs::remove_dir_all(&dir);
 }

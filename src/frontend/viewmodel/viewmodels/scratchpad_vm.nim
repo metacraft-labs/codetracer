@@ -61,6 +61,8 @@
 ## ``cstring`` / ``langstring`` conversion noise.
 
 import std/sets
+import std/json
+import ./action_sink
 import std/strutils
 import std/tables
 
@@ -73,6 +75,9 @@ import origin_chain_types
 type
   ScratchpadVM* = ref object of ViewModel
     ## Reactive state for the Scratchpad panel.
+    actionSink*: ActionSink
+      ## Set in a mirror session: user actions go to the primary
+      ## (`action_sink`); nil on a primary.
     store*: ReplayDataStore
 
     # -- Mutable state --
@@ -146,6 +151,9 @@ proc addValue*(vm: ScratchpadVM; entry: ScratchpadValueEntry) =
   ##
   ## Rows that cannot be merged (a different expression, a composite value,
   ## an error) are appended, preserving insertion order.
+  if vm.actionSink.forwards("scratchpad", "addValue",
+      %*{"entry": sinkArg(entry)}):
+    return
   var existing = vm.entries.val
   for i in 0 ..< existing.len:
     if not canMergeSamples(existing[i], entry):
@@ -168,6 +176,9 @@ proc removeValue*(vm: ScratchpadVM; index: int) =
   ## Drop the row at ``index``.  Out-of-range indices are silent
   ## no-ops so the IsoNim view's per-row click handler can dispatch
   ## without re-validating the index.
+  if vm.actionSink.forwards("scratchpad", "removeValue",
+      %*{"index": index}):
+    return
   let existing = vm.entries.val
   if index < 0 or index >= existing.len:
     return
@@ -180,6 +191,8 @@ proc removeValue*(vm: ScratchpadVM; index: int) =
 proc clearValues*(vm: ScratchpadVM) =
   ## Drop every captured row.  Used during a session switch / fresh
   ## debugging run.
+  if vm.actionSink.forwards("scratchpad", "clearValues", %*{}):
+    return
   vm.entries.val = @[]
   vm.expandedPaths.val = initHashSet[string]()
 
@@ -208,6 +221,9 @@ proc addChain*(vm: ScratchpadVM; chain: OriginChain) =
   vm.chainEntries.val = existing
 
 proc removeChain*(vm: ScratchpadVM; index: int) =
+  if vm.actionSink.forwards("scratchpad", "removeChain",
+      %*{"index": index}):
+    return
   let existing = vm.chainEntries.val
   if index < 0 or index >= existing.len:
     return
@@ -218,9 +234,14 @@ proc removeChain*(vm: ScratchpadVM; index: int) =
   vm.chainEntries.val = updated
 
 proc clearChains*(vm: ScratchpadVM) =
+  if vm.actionSink.forwards("scratchpad", "clearChains", %*{}):
+    return
   vm.chainEntries.val = @[]
 
 proc toggleExpand*(vm: ScratchpadVM; path: string) =
+  if vm.actionSink.forwards("scratchpad", "toggleExpand",
+      %*{"path": path}):
+    return
   var paths = vm.expandedPaths.val
   if path in paths:
     paths.excl(path)
@@ -235,6 +256,9 @@ proc addFromExpression*(vm: ScratchpadVM; expression: string) =
   ## expression is a silent no-op (the legacy code logged
   ## ``"Variable not found."`` to the console; the new flow
   ## intentionally drops the noise).
+  if vm.actionSink.forwards("scratchpad", "addFromExpression",
+      %*{"expression": expression}):
+    return
   let lookup = vm.localsByExpression.val
   if not lookup.hasKey(expression):
     return

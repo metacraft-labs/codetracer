@@ -64,8 +64,14 @@ type
       ## The output contains screen control: the screen view is offered.
     view*: TerminalView
     lines*: seq[TerminalLine]
-      ## Every line of the output (the whole population: the output is
-      ## loaded whole).
+      ## The lines held: the window the engine answered from `linesStart`
+      ## (Viewport-Driven-Loading Q3) when `windowed`, else every line.
+    windowed*: bool
+      ## The engine serves the lines by window.
+    linesStart*: int
+      ## The output line `lines[0]` is (windowed).
+    total*: int
+      ## Lines in the whole output (windowed).
     currentTicks*: uint64
       ## The debugger's position: fragments are past / active / future
       ## against it.
@@ -89,6 +95,24 @@ type
       ## The write the held scrubber last moved the debugger to — the
       ## scrubber is REAL-TIME (the user, 2026-10-06): a drag moves the
       ## recording position to each write it crosses, one jump per write.
+    writeOf*: proc(write: int): TerminalOutputEvent {.closure.}
+      ## The host's: write `write` (its tick and place in the event log),
+      ## known from the held lines when the writes are not loaded; an event
+      ## with `eventIndex` -1 for an unknown one. Nil without a host.
+    refetch*: proc(m: TerminalOutputPaneModel;
+                   rows: int): TerminalOutputPaneModel {.closure.}
+      ## The host's: bring the held lines to the ones `rows` rows of the line
+      ## view show from `m`'s position, and answer the model with them (nil
+      ## when the lines are held whole). Painting never calls it — the pane
+      ## stays a pure function of what is held; a caller that scrolls does,
+      ## through `ensureShown`.
+    hview*: HorizontalView
+      ## PLAT-70 (Horizontal-Overflow.md §4): the line view's horizontal
+      ## view; the screen view has none (§7, OQ-H3).
+    widths*: ContentWidth
+      ## The widest line measured so far of THIS output (§4.1).
+    overflowMarkers*: bool
+      ## `view.overflow-markers` (§4.6).
 
   TerminalPaneGeometry* = object
     ## Where each part of the pane is, for a model painted into an area.
@@ -106,6 +130,12 @@ type
     screenTrackCol*, screenTrackWidth*: int
     linesToggle*, screenToggle*: tuple[col, width: int]
       ## The two toggle buttons on `headerRow`.
+    barRow*: int
+      ## PLAT-70: the line view's horizontal bar, -1 when the lines fit. It
+      ## spans the text columns; the cell where it meets the vertical track
+      ## (`trackCol`) belongs to neither (§4.7, HO-7).
+    view*: HorizontalView
+      ## The line view's horizontal view at this pane's text width.
 
   TerminalHitKind* = enum
     thNone
@@ -116,6 +146,9 @@ type
     thLineThumb        ## its thumb: `fraction`, `thumbOffset` (track units)
     thScreenTrack      ## the screen scrubber's track: `fraction`
     thScreen           ## the screen itself
+    thHBarTrack        ## PLAT-70: the horizontal bar's track: `fraction`
+    thHBarThumb        ## its thumb: `fraction`
+    thCorner           ## the cell between the two tracks: no gesture
 
   TerminalHit* = object
     kind*: TerminalHitKind
@@ -149,7 +182,8 @@ proc terminalPaneGeometry*(m: TerminalOutputPaneModel;
   ## The parts of the pane painted into `area` (whose first row is its tab
   ## strip, as every pane's is).
   result = TerminalPaneGeometry(headerRow: -1, trackCol: -1,
-                                screenTrackRow: -1, screenMarksRow: -1)
+                                screenTrackRow: -1, screenMarksRow: -1,
+                                barRow: -1)
   result.bodyTop = area.row + 1
   let bottom = area.row + area.height       # exclusive
   var top = result.bodyTop
@@ -177,14 +211,29 @@ proc terminalPaneGeometry*(m: TerminalOutputPaneModel;
       result.textWidth = area.width - 1
     else:
       result.textWidth = area.width
+    # PLAT-70: the overflow-only horizontal bar, in the last row, while the
+    # widest line is wider than the text columns; the vertical track loses
+    # that row (§4.7).
+    result.view = m.hview
+    result.view.setViewport(result.textWidth)
+    if result.view.overflows and result.contentRows >= 2:
+      result.barRow = bottom - 1
+      result.contentRows -= 1
 
-func lineCount*(m: TerminalOutputPaneModel): int = m.lines.len
+func lineCount*(m: TerminalOutputPaneModel): int =
+  ## Lines in the whole output — the view's scroll range.
+  if m.windowed: m.total else: m.lines.len
+
+func heldAt*(m: TerminalOutputPaneModel; index: int): int =
+  ## Where output line `index` is in `lines`, -1 when it is not held.
+  let at = index - (if m.windowed: m.linesStart else: 0)
+  if at >= 0 and at < m.lines.len: at else: -1
 
 proc visibleTop*(m: TerminalOutputPaneModel; rows: int): int =
   ## The first line shown in `rows` rows: the reader's position, or — when
   ## following — the current line at the bottom of the view, as a terminal
   ## shows the output up to now.
-  let maxTop = max(0, m.lines.len - rows)
+  let maxTop = max(0, m.lineCount - rows)
   if m.follow:
     # Before the first write nothing is "up to now": the view starts at the
     # top, where the output will begin.
@@ -193,10 +242,16 @@ proc visibleTop*(m: TerminalOutputPaneModel; rows: int): int =
   else:
     max(0, min(maxTop, m.scrollTop))
 
+proc ensureShown*(m: var TerminalOutputPaneModel; rows: int) =
+  ## Hold the lines `rows` rows of the line view show (Viewport-Driven-
+  ## Loading Q3) — after the reader scrolled, or the pane was resized.
+  if not m.refetch.isNil and rows > 0 and not m.screenShown:
+    m = m.refetch(m, rows)
+
 proc scrubberOf*(m: TerminalOutputPaneModel; rows: int): ScrubberModel =
   ## The line view's scrollbar scrubber: the WHOLE output (every line), the
   ## view's first row and height, the current line.
-  scrubberModel(m.lines.len, m.visibleTop(rows), rows, m.currentLine)
+  scrubberModel(m.lineCount, m.visibleTop(rows), rows, m.currentLine)
 
 # ---------------------------------------------------------------------------
 # Thumb cells, in eighths
@@ -244,7 +299,7 @@ proc fragmentStyle*(f: TerminalEventFragment;
     result.dim = true
 
 proc clipNote*(m: TerminalOutputPaneModel; geo: TerminalPaneGeometry;
-               area: CellArea): string =
+               area: CellArea; sep = canonical(grSeparator)): string =
   ## What the header says when the recorded screen does not fit the pane:
   ## the part shown, of the whole (the screen is never re-wrapped).
   if not m.screenShown:
@@ -253,7 +308,8 @@ proc clipNote*(m: TerminalOutputPaneModel; geo: TerminalPaneGeometry;
   let rows = m.screen.rows
   if rows <= geo.contentRows and cols <= area.width:
     return ""
-  " · clipped " & $min(cols, area.width) & "x" & $min(rows, geo.contentRows) &
+  " " & sep & " clipped " & $min(cols, area.width) & "x" &
+    $min(rows, geo.contentRows) &
     " of " & $cols & "x" & $rows
 
 proc paintToggle(g: var StyledGrid; geo: TerminalPaneGeometry;
@@ -271,40 +327,47 @@ proc paintToggle(g: var StyledGrid; geo: TerminalPaneGeometry;
     if screen and not m.screen.isNil:
       let n = m.screen.writeCount
       (if m.shownWrite < 0: "before the first write"
-       else: "write " & $(m.shownWrite + 1) & " / " & $n & " · tick " &
+       else: "write " & $(m.shownWrite + 1) & " / " & $n & " " &
+             g.glyphText(grSeparator) & " tick " &
              $m.screen.writes[m.shownWrite].rrTicks) &
-      (if m.previewing: " · scrubbing" else: "") & clipNote(m, geo, area)
+      (if m.previewing: " " & g.glyphText(grSeparator) & " scrubbing"
+       else: "") & clipNote(m, geo, area, g.glyphText(grSeparator))
     else:
-      $m.lines.len & " line" & (if m.lines.len == 1: "" else: "s")
+      $m.lineCount & " line" & (if m.lineCount == 1: "" else: "s")
   let used = geo.linesToggle.width + geo.screenToggle.width + 1
   let room = area.width - used
   if room > 0:
     g.paint(geo.headerRow, area.col + used, fitCells(info, room), InfoStyle)
 
 proc paintLineAt(g: var StyledGrid; row, col, width: int;
-                 line: TerminalLine; currentTicks: uint64) =
-  var c = col
-  let stop = col + width
+                 line: TerminalLine; currentTicks: uint64; left = 0) =
+  ## One line, its cells `[left, left + width)` drawn from column `col`.
+  var c = 0                       # the fragment's first cell in the line
   for f in line.fragments:
-    if c >= stop: break
+    if c >= left + width: break
     if f.text.len == 0: continue
-    let text = truncateToCells(f.text, stop - c)
-    g.paint(row, c, text, fragmentStyle(f, currentTicks))
-    c += cellWidthOf(text)
+    let w = cellWidthOf(f.text)
+    if c + w > left:
+      let text = cellSlice(f.text, max(0, left - c), left + width - c)
+      g.paint(row, col + max(0, c - left), text,
+              fragmentStyle(f, currentTicks))
+    c += w
+
+proc measureContent*(m: var TerminalOutputPaneModel; generation: int) =
+  ## PLAT-70 (§4.1): the line view's content width — the widest line
+  ## measured so far of output `generation`, over every window of it the
+  ## pane has held; it only grows while the output is the same and starts
+  ## again when it is replaced. Never a function of the pane's width.
+  m.hview.setContent(m.widths.measureWindow(generation, m.lines,
+    proc(line: TerminalLine): int = cellWidthOf(lineText(line))))
 
 proc paintLineScrubber(g: var StyledGrid; geo: TerminalPaneGeometry;
                        m: TerminalOutputPaneModel) =
+  ## The line view's scrollbar: every scrollbar's painter (PLAT-70 Part H).
   if geo.trackCol < 0 or geo.contentRows <= 0:
     return
-  let sm = m.scrubberOf(geo.contentRows)
-  let span = sm.thumbSpan(geo.contentRows * 8, 8)
-  let cells = thumbCells(span, geo.contentRows, vertical = true)
-  for i, cell in cells:
-    g.paint(geo.contentTop + i, geo.trackCol, cell.glyph, styleOf(cell.kind))
-  let f = sm.currentFraction
-  if f >= 0.0:
-    let r = min(geo.contentRows - 1, int(floor(f * float(geo.contentRows))))
-    g.paint(geo.contentTop + r, geo.trackCol, ThumbFullGlyph, MarkStyle)
+  g.paintVerticalScrubber(geo.trackCol, geo.contentTop, geo.contentRows,
+                          m.scrubberOf(geo.contentRows))
 
 proc paintScreen(g: var StyledGrid; geo: TerminalPaneGeometry;
                  m: TerminalOutputPaneModel; area: CellArea): TermScreen =
@@ -333,7 +396,9 @@ proc paintScreenScrubber(g: var StyledGrid; geo: TerminalPaneGeometry;
     if n <= 1 or m.shownWrite < 0: 0
     else: int(round(fractionOfWrite(n, m.shownWrite) * float(units - 8)))
   let cells = thumbCells(ThumbSpan(start: pos, length: 8), w,
-                         vertical = false)
+                         vertical = false,
+                         modern = g.scrollbars.options.modernUnicode,
+                         glyphs = g.glyphs)
   for i, cell in cells:
     g.paint(geo.screenTrackRow, geo.screenTrackCol + i, cell.glyph,
             styleOf(cell.kind))
@@ -352,7 +417,7 @@ proc paintTerminalOutput*(g: var StyledGrid; area: CellArea;
     return
   let geo = terminalPaneGeometry(m, area)
   paintToggle(g, geo, m, area)
-  if m.lines.len == 0 and not m.screenShown:
+  if m.lineCount == 0 and not m.screenShown:
     if geo.contentTop < area.row + area.height:
       g.paint(geo.contentTop, area.col, fitCells(emptyText(m), area.width),
               TerminalMutedStyle)
@@ -365,13 +430,26 @@ proc paintTerminalOutput*(g: var StyledGrid; area: CellArea;
     paintScreenScrubber(g, geo, m)
     return
   let top = m.visibleTop(geo.contentRows)
+  let left = geo.view.leftCol
   for i in 0 ..< geo.contentRows:
     let li = top + i
-    if li >= m.lines.len: break
+    if li >= m.lineCount: break
+    # A line outside the held window is painted when its window arrives.
+    let at = m.heldAt(li)
+    if at < 0:
+      result.add ""
+      continue
     paintLineAt(g, geo.contentTop + i, geo.textCol, geo.textWidth,
-                m.lines[li], m.currentTicks)
-    result.add truncateToCells(lineText(m.lines[li]), geo.textWidth)
+                m.lines[at], m.currentTicks, left)
+    let text = lineText(m.lines[at])
+    if m.overflowMarkers:
+      paintOverflowMarkers(g, geo.contentTop + i, geo.textCol,
+                           cellWidthOf(text), geo.view)
+    result.add cellSlice(text, left, left + geo.textWidth)
   paintLineScrubber(g, geo, m)
+  if geo.barRow >= 0:
+    paintHorizontalBar(g, geo.barRow, geo.textCol, geo.textWidth,
+                       geo.view.barModel)
 
 # ---------------------------------------------------------------------------
 # Hit testing
@@ -392,7 +470,7 @@ proc fragmentAt*(line: TerminalLine; cell: int): int =
   line.fragments.len - 1
 
 proc terminalOutputHitAt*(m: TerminalOutputPaneModel; area: CellArea;
-                          row, col: int): TerminalHit =
+                          row, col: int; cellX = -1.0): TerminalHit =
   ## What a press at `(row, col)` is on, for the pane painted into `area` by
   ## `paintTerminalOutput`.
   result = TerminalHit(kind: thNone, eventIndex: -1, line: -1)
@@ -415,6 +493,15 @@ proc terminalOutputHitAt*(m: TerminalOutputPaneModel; area: CellArea;
     if row >= geo.contentTop and row < geo.contentTop + geo.contentRows:
       return TerminalHit(kind: thScreen, eventIndex: -1, line: -1)
     return
+  if row == geo.barRow and geo.barRow >= 0:
+    # PLAT-70: the horizontal bar; the corner cell is no gesture (HO-7).
+    let hit = horizontalBarHit(geo.view.barModel, geo.textCol, geo.textWidth,
+                               col, cellX)
+    return TerminalHit(kind: (case hit.kind
+                              of shThumb: thHBarThumb
+                              of shTrack: thHBarTrack
+                              of shNone: thCorner),
+                       eventIndex: -1, line: -1, fraction: hit.fraction)
   if row < geo.contentTop or row >= geo.contentTop + geo.contentRows:
     return
   if col == geo.trackCol:
@@ -428,10 +515,11 @@ proc terminalOutputHitAt*(m: TerminalOutputPaneModel; area: CellArea;
     return TerminalHit(kind: thLineTrack, eventIndex: -1, line: -1,
                        fraction: fraction)
   let li = m.visibleTop(geo.contentRows) + (row - geo.contentTop)
-  if li < 0 or li >= m.lines.len:
+  let at = m.heldAt(li)
+  if at < 0:
     return
-  let fi = fragmentAt(m.lines[li], col - geo.textCol)
+  let fi = fragmentAt(m.lines[at], col - geo.textCol + geo.view.leftCol)
   if fi < 0:
     return
   result = TerminalHit(kind: thFragment, line: li,
-                       eventIndex: m.lines[li].fragments[fi].eventIndex)
+                       eventIndex: m.lines[at].fragments[fi].eventIndex)

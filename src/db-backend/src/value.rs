@@ -33,6 +33,14 @@ pub struct Value {
     /// `ct/load-locals` response, so this is what lets the State pane sort
     /// a watch row out of the locals list.
     pub is_watch: bool,
+    /// Set when the locals budget (`value_budget`) cut this collection: its
+    /// full length, of which `elements` carries the first ones; the rest are
+    /// fetched with `ct/load-value-elements`. 0 when nothing was cut.
+    ///
+    /// Deliberately NOT `partiallyExpanded`: that field says the RECORDING is
+    /// incomplete (drawn `..`), and a budget cut is a fact about the answer,
+    /// not about the trace (`value_presentation/value_model.nim`, `partial`).
+    pub elements_total: usize,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]

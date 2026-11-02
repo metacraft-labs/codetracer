@@ -55,6 +55,17 @@
 //   --evidence-dir=<path>    the directory those commands name their
 //                            datasets in
 //
+// PLAT-54 adds a LIVE session, for the native front-ends' Agent Activity
+// pane, which speak ACP themselves rather than through `ct`:
+//
+//   session/new     → answers with the held session id
+//   session/prompt  → streams the selected transcript (the one session/load
+//                     would replay) as `session/update` notifications, one
+//                     every `--live-delay-ms=<n>` milliseconds (default 0),
+//                     then answers `{stopReason: "end_turn"}` — what a
+//                     working agent's turn looks like on the wire, so the
+//                     pane's rows can be watched arriving
+//
 // The test-run pair are also settable per invocation, as `--test-run` and
 // `--trace-dir=<path>` in the dataset's own `agentArgs`.  That matters
 // because `--workers=1` puts every Playwright spec file in one process:
@@ -300,6 +311,14 @@ const transcript = isEmpty
       { sessionUpdate: "status", status: "completed" },
     ];
 
+const liveDelayMs = Number(argValue("--live-delay-ms", "0")) || 0;
+
+// `--prompt-log=<path>`: append each `session/prompt`'s `prompt` content
+// blocks to <path>, one JSON line per prompt, so a suite can assert what the
+// agent was actually SENT (the "add context" attachments' header, PLAT-54
+// DeepReview-GUI §2.2.7) rather than what the client meant to send.
+const promptLog = argValue("--prompt-log", "");
+
 function write(payload) {
   process.stdout.write(JSON.stringify(payload) + "\n");
 }
@@ -348,6 +367,32 @@ function handle(request) {
       }
       // ACP's session/load result is null: the replay is the payload.
       ok(id, null);
+      return;
+    }
+    case "session/new":
+      ok(id, { sessionId });
+      return;
+    case "session/prompt": {
+      const wanted = (params && params.sessionId) || sessionId;
+      if (promptLog) {
+        require("fs").appendFileSync(
+          promptLog, JSON.stringify((params && params.prompt) || null) + "\n");
+      }
+      let i = 0;
+      const next = () => {
+        if (i >= transcript.length) {
+          ok(id, { stopReason: "end_turn" });
+          return;
+        }
+        write({
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: { sessionId: wanted, update: transcript[i] },
+        });
+        i += 1;
+        setTimeout(next, liveDelayMs);
+      };
+      setTimeout(next, liveDelayMs);
       return;
     }
     default:

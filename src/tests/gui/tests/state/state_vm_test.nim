@@ -4,13 +4,13 @@
 ## panel.
 ##
 ## Verifies:
-## - Initial state defaults (activeTab, expandedPaths, selectedPath, etc.)
-## - Tab switching via selectTab updates activeTab and currentVariables
+## - Initial state defaults (expandedPaths, selectedPath, etc.)
+## - currentVariables is one list: locals, globals, then the watches
+## - a watch with no answer, or a refused one, stays listed as not valid
+## - watch origins and the "hide watches from other processes" option
 ## - toggleExpand adds/removes paths from expandedPaths
 ## - selectPath sets the selected variable path
 ## - addWatch / removeWatch manage the watch expressions list
-## - currentVariables memo returns locals when on stLocals tab
-## - currentVariables memo returns globals when on stGlobals tab
 ## - isLoading memo reflects store loading state
 ## - Auto-load effect fires requestLocals when debugger rrTicks changes
 ##
@@ -45,13 +45,6 @@ proc makeStoreWithMock(autoRespond: bool = true):
 # ---------------------------------------------------------------------------
 
 suite "StateVM initial state":
-
-  test "activeTab defaults to stLocals":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createStateVM(store)
-      check vm.activeTab.val == stLocals
-      dispose()
 
   test "expandedPaths starts empty":
     createRoot proc(dispose: proc()) =
@@ -93,115 +86,189 @@ suite "StateVM initial state":
       dispose()
 
 # ---------------------------------------------------------------------------
-# Tab switching
+# One list of variables and watches
 # ---------------------------------------------------------------------------
+#
+# The pane has no Locals / Globals / Watches tabs (Variable-State-Pane.md,
+# "Decisions (2026-10-24)"): `currentVariables` is the locals, then the
+# globals, then one row per watch expression, in the order the user added them.
 
-suite "StateVM tab switching":
+suite "StateVM one list":
 
-  test "selectTab changes activeTab signal":
+  test "currentVariables lists the locals":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
-
-      vm.selectTab(stGlobals)
-      check vm.activeTab.val == stGlobals
-
-      vm.selectTab(stWatches)
-      check vm.activeTab.val == stWatches
-
-      vm.selectTab(stLocals)
-      check vm.activeTab.val == stLocals
-
-      dispose()
-
-  test "currentVariables returns locals when on stLocals tab":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createStateVM(store)
-
-      # Populate the store's locals signal directly.
-      let testLocals = @[
-        Variable(name: "x", value: "42", typeName: "int",
-                 hasChildren: false, children: @[]),
-        Variable(name: "y", value: "hello", typeName: "string",
-                 hasChildren: false, children: @[]),
+      store.locals.locals.val = @[
+        Variable(name: "x", value: "42", typeName: "int"),
+        Variable(name: "y", value: "hello", typeName: "string"),
       ]
-      store.locals.locals.val = testLocals
-
-      vm.selectTab(stLocals)
       check vm.currentVariables.val.len == 2
       check vm.currentVariables.val[0].name == "x"
       check vm.currentVariables.val[1].name == "y"
-
       dispose()
 
-  test "currentVariables returns globals when on stGlobals tab":
+  test "globals follow the locals in the same list":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
-
-      # Populate globals.
-      let testGlobals = @[
-        Variable(name: "gCounter", value: "7", typeName: "int",
-                 hasChildren: false, children: @[]),
-      ]
-      store.locals.globals.val = testGlobals
-
-      vm.selectTab(stGlobals)
-      check vm.currentVariables.val.len == 1
-      check vm.currentVariables.val[0].name == "gCounter"
-
-      dispose()
-
-  test "currentVariables returns empty seq when on stWatches tab":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createStateVM(store)
-
-      # Even if locals and globals have data, watches tab returns empty
-      # (watch results are not yet wired through the store).
       store.locals.locals.val = @[
-        Variable(name: "x", value: "1", typeName: "int",
-                 hasChildren: false, children: @[]),
-      ]
+        Variable(name: "local1", value: "a", typeName: "string")]
       store.locals.globals.val = @[
-        Variable(name: "g", value: "2", typeName: "int",
-                 hasChildren: false, children: @[]),
-      ]
-
-      vm.selectTab(stWatches)
-      check vm.currentVariables.val.len == 0
-
+        Variable(name: "gCounter", value: "7", typeName: "int")]
+      let rows = vm.currentVariables.val
+      check rows.len == 2
+      check rows[0].name == "local1"
+      check rows[1].name == "gCounter"
       dispose()
 
-  test "currentVariables updates reactively when tab changes":
+  test "an answered watch follows the variables, in the order added":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
-
+      drain()
       store.locals.locals.val = @[
-        Variable(name: "local1", value: "a", typeName: "string",
-                 hasChildren: false, children: @[]),
-      ]
-      store.locals.globals.val = @[
-        Variable(name: "global1", value: "b", typeName: "string",
-                 hasChildren: false, children: @[]),
-      ]
+        Variable(name: "x", value: "1", typeName: "int")]
+      vm.addWatch("x + 1")
+      vm.addWatch("y * 2")
+      store.locals.watches.val = @[
+        Variable(name: "y * 2", value: "8", typeName: "int", isWatch: true),
+        Variable(name: "x + 1", value: "2", typeName: "int", isWatch: true)]
+      let rows = vm.currentVariables.val
+      check rows.len == 3
+      check rows[0].name == "x"
+      check rows[1].name == "x + 1"
+      check rows[1].value == "2"
+      check rows[1].isWatch
+      check rows[2].name == "y * 2"
+      check rows[2].value == "8"
+      dispose()
 
-      # Track via an effect.
+  test "a watch with no answer stays in the list, marked not valid":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStateVM(store)
+      drain()
+      vm.addWatch("missing")
+      drain()
+      store.locals.watches.val = @[]
+      let rows = vm.currentVariables.val
+      check rows.len == 1
+      check rows[0].name == "missing"
+      check rows[0].isWatch
+      check isInvalidWatch(rows[0])
+      check rows[0].value == "not available at this stop"
+      dispose()
+
+  test "a watch the engine refused shows the refusal as not valid":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStateVM(store)
+      drain()
+      vm.addWatch("nosuch")
+      store.locals.watches.val = @[
+        Variable(name: "nosuch", value: "name 'nosuch' is not defined",
+                 typeName: WatchErrorType, isWatch: true)]
+      let rows = vm.currentVariables.val
+      check rows.len == 1
+      check isInvalidWatch(rows[0])
+      check rows[0].value == "name 'nosuch' is not defined"
+      dispose()
+
+  test "a watch waiting for its answer reads as pending, not invalid":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStateVM(store)
+      vm.addWatch("later")
+      store.locals.loadingState.val = lsLoading
+      let rows = vm.currentVariables.val
+      check rows.len == 1
+      check isPendingWatch(rows[0])
+      check not isInvalidWatch(rows[0])
+      dispose()
+
+  test "the list updates reactively":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStateVM(store)
+      drain()
       var observed: seq[Variable] = @[]
       createEffect proc() =
         observed = vm.currentVariables.val
-
-      # Initially on locals tab.
+      store.locals.locals.val = @[
+        Variable(name: "local1", value: "a", typeName: "string")]
       check observed.len == 1
-      check observed[0].name == "local1"
-
-      # Switch to globals.
-      vm.selectTab(stGlobals)
+      vm.addWatch("w")
+      check observed.len == 2
+      check observed[1].name == "w"
+      vm.removeWatch("w")
       check observed.len == 1
-      check observed[0].name == "global1"
+      dispose()
 
+  test "the empty text invites a watch":
+    check stateEmptyText().contains("watch")
+
+# ---------------------------------------------------------------------------
+# Watch origins and the hide option
+# ---------------------------------------------------------------------------
+
+suite "StateVM watch origins":
+
+  test "a watch records the recording it was added in":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStateVM(store, recordingId = "rec-a")
+      vm.addWatch("x")
+      check vm.watchOrigin("x") == "rec-a"
+      dispose()
+
+  test "editing a watch keeps its origin; removing it forgets it":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStateVM(store, recordingId = "rec-a")
+      vm.addWatch("x")
+      vm.editWatch("x", "x + 1")
+      check vm.watchOrigin("x + 1") == "rec-a"
+      check vm.watchOrigin("x") == ""
+      vm.removeWatch("x + 1")
+      check vm.watchOrigin("x + 1") == ""
+      dispose()
+
+  test "a VM sharing an owner's watches sees them and records its own origin":
+    createRoot proc(dispose: proc()) =
+      let (storeA, _) = makeStoreWithMock()
+      let (storeB, _) = makeStoreWithMock()
+      let a = createStateVM(storeA, recordingId = "rec-a")
+      let b = createStateVM(storeB, watchOwner = a, recordingId = "rec-b")
+      a.addWatch("fromA")
+      b.addWatch("fromB")
+      check a.watchExpressions.val == @["fromA", "fromB"]
+      check b.watchExpressions.val == @["fromA", "fromB"]
+      check b.watchOrigin("fromA") == "rec-a"
+      check a.watchOrigin("fromB") == "rec-b"
+      dispose()
+
+  test "hiding other processes' watches keeps only this recording's":
+    createRoot proc(dispose: proc()) =
+      let (storeA, _) = makeStoreWithMock()
+      let (storeB, _) = makeStoreWithMock()
+      let a = createStateVM(storeA, recordingId = "rec-a")
+      let b = createStateVM(storeB, watchOwner = a, recordingId = "rec-b")
+      drain()
+      a.addWatch("fromA")
+      b.addWatch("fromB")
+      check b.currentVariables.val.len == 2
+      check b.hideOtherProcessWatches.val == false
+      b.setHideOtherProcessWatches(true)
+      check a.hideOtherProcessWatches.val   # one setting per session
+      let rowsB = b.currentVariables.val
+      check rowsB.len == 1
+      check rowsB[0].name == "fromB"
+      let rowsA = a.currentVariables.val
+      check rowsA.len == 1
+      check rowsA[0].name == "fromA"
+      b.setHideOtherProcessWatches(false)
+      check b.currentVariables.val.len == 2
       dispose()
 
 # ---------------------------------------------------------------------------

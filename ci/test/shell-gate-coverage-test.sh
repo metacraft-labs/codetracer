@@ -491,16 +491,17 @@ via_var_out="$(run_guard "${work}/arm")"
 if grep -q 'RESULT: OK' <<<"${via_var_out}"; then
 	ok "15b/a gate RUN through the variable that names it IS credited"
 else
-	bad "15b/a gate run as \${VAR} was reported dark — the position rule dropped a real wire"
+	# shellcheck disable=SC2016 # literal ${VAR}: the spelling the case names
+	bad '15b/a gate run as ${VAR} was reported dark — the position rule dropped a real wire'
 	printf '%s\n' "${via_var_out}" | grep -E '\[FAILED\]' | head -3 | sed 's/^/           /'
 fi
 
-# 15c — AND THROUGH A LOCAL WRAPPER. `chord-and-pane-uniqueness.sh` runs three
+# 15c — AND THROUGH A LOCAL WRAPPER. `chord-and-pane-uniqueness.sh` runs its
 # browser probes as `probe <label> ci/test/<probe>.mjs /noir`, and `probe` is its
 # own function: the path is an ARGUMENT, and only the function body says whether
 # that argument is executed or read. It executes `$2`; `expect_leak` in
 # `sourced-var-collision-gate.sh` greps `$1`. Without this the position rule
-# calls all three probes dark.
+# calls every one of them dark.
 stage "${work}/arm"
 printf '// a probe a wrapper runs\nconsole.log("x");\n' \
 	>"${work}/arm/ci/test/via_wrapper_probe.mjs"
@@ -515,7 +516,8 @@ printf '// a probe a wrapper runs\nconsole.log("x");\n' \
 } >>"${work}/arm/ci/test/gate2.sh"
 wrapper_out="$(run_guard "${work}/arm")"
 if grep -q 'RESULT: OK' <<<"${wrapper_out}"; then
-	ok "15c/a gate a local wrapper EXECUTES as \$2 IS credited"
+	# shellcheck disable=SC2016 # literal $2: the wrapper argument the case names
+	ok '15c/a gate a local wrapper EXECUTES as $2 IS credited'
 else
 	bad "15c/a gate run by a local wrapper was reported dark — the position rule stops at the call"
 	printf '%s\n' "${wrapper_out}" | grep -E '\[FAILED\]' | head -3 | sed 's/^/           /'

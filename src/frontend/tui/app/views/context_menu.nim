@@ -125,6 +125,10 @@ type
     top*: int
       ## The first line shown, for a text longer than the box (the wheel and
       ## Up / Down / Page Up / Page Down scroll it).
+    refill*: proc(top: int): string {.closure.}
+      ## The host's, for a text whose lines are read as they are shown (a
+      ## tracepoint sweep's hits, whose values are read by window): the text
+      ## again, with the lines around `top` read. Nil for a fixed text.
 
 proc wrapLines(text: string; width: int): seq[string] =
   ## `text` (its `\n` escapes as line breaks, as the desktop's view shows
@@ -161,6 +165,8 @@ proc scroll*(o: var ContentOverlay; delta: int) =
   ## Move the first line shown by `delta`, kept inside the text.
   let n = o.text.replace("\\n", "\n").countLines()
   o.top = max(0, min(o.top + delta, n - 1))
+  if not o.refill.isNil:
+    o.text = o.refill(o.top)
 
 func diffLineRole(line: string): SemanticRole =
   ## A unified diff line's colour: added and removed as the desktop's diff

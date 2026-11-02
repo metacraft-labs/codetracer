@@ -333,7 +333,7 @@ proc run() =
         # ---- MOUNT ----
         resetMeter()
         var t0 = nowNs()
-        let panel = renderStatePanel(r, vm)
+        let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
         var t1 = nowNs()
         if metered: mountS.add snapshot(countRows(panel))
         else: mountW.add(t1 - t0)
@@ -439,7 +439,7 @@ when defined(ctPlat18Slice):
     ##
     ## So: render the SAME panel over the SAME VM state through BOTH
     ## renderers, and require the same total. They receive the same operation
-    ## stream by construction (one view, one `renderStatePanelImpl`), so any
+    ## stream by construction (one view, one generic `renderStatePanel`), so any
     ## difference is a difference between the two encodings — a field one of
     ## them charges for and the other does not.
     for phase in ["MOUNT", "EXPAND"]:
@@ -456,7 +456,7 @@ when defined(ctPlat18Slice):
         meterEnabled = true
         meterCodec = false
         resetMeter()
-        let panel = renderStatePanel(r, vm)
+        let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
         if phase == "EXPAND":
           resetMeter()
           vm.toggleExpand(WideName)
@@ -473,7 +473,7 @@ when defined(ctPlat18Slice):
         store.locals.locals.val = @[narrowVariable(0), wide]
         drain()
         resetFrameRenderer()
-        let panel = renderStatePanel(fr, vm)
+        let panel = renderStatePanel[FrameRenderer, FrameNode](fr, vm)
         if phase == "EXPAND":
           wireReset()
           vm.toggleExpand(WideName)

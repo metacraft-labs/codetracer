@@ -60,8 +60,8 @@
 ## Required environment:
 ##
 ##   * ``REPLAY_SERVER_BIN`` — path to a built replay-server binary.
-##     Defaults to ``src/build-debug/bin/replay-server`` or
-##     ``src/db-backend/target/debug/replay-server``.
+##     When unset, the search order of ``src/common/replay_server_path.nim``
+##     applies: the Repro build output first, cargo's trees last.
 ##
 ##   * ``CODETRACER_CADENCE_RECORDER_PATH`` — path to a built
 ##     ``codetracer-flow-recorder`` binary.  Defaults to
@@ -81,6 +81,7 @@
 import std/[json, options, os, osproc, streams, strtabs, strutils, unittest]
 
 import ../../headless_session
+import ../../../../common/replay_server_path   # the one search order
 import recorder_gate
 
 # ---------------------------------------------------------------------------
@@ -101,20 +102,12 @@ proc repoRoot(): string =
     "could not locate codetracer repo root from " & currentSourcePath())
 
 proc findReplayServer(): string =
-  let envBin = getEnv("REPLAY_SERVER_BIN", "")
-  if envBin.len > 0 and fileExists(envBin):
-    return envBin
-  let candidates = [
-    repoRoot() / "src" / "build-debug" / "bin" / "replay-server",
-    repoRoot() / "src" / "db-backend" / "target" / "debug" / "replay-server",
-    repoRoot() / "src" / "db-backend" / "target" / "release" / "replay-server",
-  ]
-  for c in candidates:
-    if fileExists(c):
-      return c
-  raise newException(IOError,
-    "missing replay-server; set REPLAY_SERVER_BIN or build via " &
-    "`cd src/db-backend && cargo build`")
+  ## The engine `src/common/replay_server_path` resolves -- the one search
+  ## order the native front-ends use too -- or an `IOError` naming every path
+  ## searched, because this suite cannot run without one.
+  result = locateReplayServer()
+  if result.len == 0:
+    raise newException(IOError, missingReplayServerMessage())
 
 proc findFlowRecorder(): string =
   ## Locate the ``codetracer-flow-recorder`` binary.  This mirrors the

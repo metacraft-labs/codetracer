@@ -57,7 +57,7 @@
 
 import std/[algorithm, json, options, strutils, tables, unittest]
 
-import isonim/core/[signals, computation]
+import isonim/core/[signals, computation, owner]
 import isonim/testing/mock_dom
 
 import ../../../../ct_test/contracts
@@ -186,20 +186,20 @@ proc containsDigit(text: string): bool =
 
 proc renderSessionLive(vm: CounterexampleSessionVM): MockNode =
   var renderer: MockRenderer
-  renderCounterexampleSessionLive(renderer, vm)
+  renderCounterexampleSessionLive[MockRenderer, MockNode](renderer, vm)
 
 proc renderPanelLive(vm: VerificationVM;
                      session: CounterexampleSessionVM): MockNode =
   var renderer: MockRenderer
-  renderVerificationPanelLive(renderer, vm, session)
+  renderVerificationPanelLive[MockRenderer, MockNode](renderer, vm, session)
 
 proc renderSession(model: CounterexampleSessionModel): MockNode =
   var renderer: MockRenderer
-  renderCounterexampleSession(renderer, model)
+  renderCounterexampleSession[MockRenderer, MockNode](renderer, model)
 
 proc renderPanel(model: VerificationPanelModel): MockNode =
   var renderer: MockRenderer
-  renderVerificationPanel(renderer, model)
+  renderVerificationPanel[MockRenderer, MockNode](renderer, model)
 
 # ---------------------------------------------------------------------------
 
@@ -773,11 +773,44 @@ suite "VN-M5 the panel is reachable, and only where the data allows":
     ck not inert.isOpen.val
     expectCount(8)
 
+  test "the mounted pane follows the click into the session and its steps":
+    # The pane the panel host mounts (`renderVerificationPane`), not a single
+    # render: one tree, kept current by its own effects. Clicking the offer in
+    # it must show the counterexample, and moving the session must move the
+    # current step, with no re-render by the test.
+    startCount()
+    let vm = vmWith(SolverModelPayload)
+    let session = createCounterexampleSessionVM()
+    var renderer: MockRenderer
+    var pane: MockNode
+    createRoot proc(dispose: proc()) =
+      pane = renderVerificationPane[MockRenderer, MockNode](
+        renderer, vm, session)
+    proc currentSteps(): seq[MockNode] =
+      nodesWithAttributeValue(pane, "data-ct-counterexample-step-current",
+                              "true")
+    ck nodesWithAttributeValue(pane, "data-ct-counterexample-open",
+                               "true").len == 0
+    let buttons = nodesWithAttributeValue(pane, "data-ct-verification-action",
+                                          "open-counterexample")
+    ck buttons.len == 1
+    fireEvent(buttons[0], "click")
+    ck nodesWithAttributeValue(pane, "data-ct-counterexample-open",
+                               "true").len == 1
+    ck currentSteps().len == 1
+    ck currentSteps()[0].attributes["data-ct-counterexample-step"] == "0"
+    session.stepForward()
+    ck currentSteps().len == 1
+    ck currentSteps()[0].attributes["data-ct-counterexample-step"] == "1"
+    # The run is still shown above it: the session's repaint did not clear
+    # the run's host.
+    ck nodesWithAttribute(pane, "data-ct-verification-findings").len == 1
+    expectCount(8)
+
   test "clicking the controls walks the session, and a repaint follows it":
     # The other half of reachable: the controls in the mounted markup move the
-    # session. `mountIsoNimCounterexampleSession` re-runs the render inside a
-    # `createEffect`, so what a browser shows after a click is what a re-render
-    # shows here.
+    # session. `renderCounterexamplePane` re-runs the render inside an effect,
+    # so what a browser shows after a click is what a re-render shows here.
     startCount()
     let session = sessionOn(SolverModelPayload, "f1")
     let first = renderSessionLive(session)
@@ -860,9 +893,10 @@ suite "VN-M5 the panel is reachable, and only where the data allows":
     #
     # Nothing failed. Both trees rendered, both carried the right *text*, and
     # only an assertion on the attribute in the *live* tree could see it. The
-    # parameters are now `mdl`/`hnd`, which are tokens no attribute name
-    # contains — but the rename is a convention, and this check is what makes
-    # it enforced.
+    # tree is now a generic proc (`renderVerificationPanelTree`), whose
+    # parameters are not substituted into attribute names at all — and this
+    # check is what keeps it that way if the tree ever becomes a template
+    # again.
     startCount()
     proc attributeNames(node: MockNode): seq[string] =
       var acc: seq[string] = @[]

@@ -516,12 +516,17 @@ suite "DebugControlsVM step actions":
 
       dispose()
 
-  test "toolbar click prefers DAP bridge callback when installed":
+  test "toolbar click goes through the host's step command when one is given":
+    # A host hands its own step route in at construction (`DebugCommands`);
+    # the desktop's routes a step through DAP with its operation status. The
+    # click must reach that route alone, and remember the action for the
+    # history entry its move creates.
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
-      let vm = createDebugControlsVM(store)
       var clickedAction = ""
-      vm.onDapStep = proc(action: cstring) = clickedAction = $action
+      var commands = defaultDebugCommands(store)
+      commands.step = proc(actionId: string) = clickedAction = actionId
+      let vm = createDebugControlsVM(store, commands)
       drain()
 
       store.setDebuggerStatus(dsIdle)
@@ -532,10 +537,35 @@ suite "DebugControlsVM step actions":
 
       check clickedAction == "next"
       check mock.receivedCommands.len == cmdCountBefore
+      check vm.pendingOperation == "next"
 
       dispose()
 
-  test "toolbar click falls back to store request when bridge is absent":
+  test "toolbar click without a step command dispatches the VM's own step":
+    # A nil `step` is a host that offers no step route; the click then falls
+    # to the VM's action procs, which still issue the step over the store.
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createDebugControlsVM(store, DebugCommands())
+      drain()
+
+      store.setDebuggerStatus(dsIdle)
+      let cmdCountBefore = mock.receivedCommands.len
+
+      vm.invokeToolbarStep("step-in")
+      drain()
+
+      var found = false
+      for i in cmdCountBefore ..< mock.receivedCommands.len:
+        if mock.receivedCommands[i].command == "stepIn":
+          found = true
+          break
+      check found
+      check vm.pendingOperation == ""
+
+      dispose()
+
+  test "toolbar click through the default commands sends the step to the backend":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createDebugControlsVM(store)

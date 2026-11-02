@@ -870,6 +870,31 @@ type
           "interactively choosing " &
           "a trace"
       .}: Option[bool]
+      # Replay-engine options for native (MCR) recordings.  They reach the
+      # engine as their Rule 3 environment twins, which every process between
+      # `ct` and the engine passes on unchanged; see
+      # `trace/replay_backend_env.nim`.  Values are checked before anything is
+      # launched.  When neither the flag nor its variable is given, nothing is
+      # published and the engine's own default applies.
+      replayThreadSyncOrder* {.
+        name: "thread-sync-order",
+        desc: "Thread synchronization order the replay enforces on a " &
+          "Windows native recording: 'total' or 'per-object' " &
+          "(env CT_THREAD_SYNC_ORDER; the flag wins). " &
+          "Unset: the replay backend's default"
+      .}: Option[string]
+      replayOsSimulation* {.
+        name: "os-simulation",
+        desc: "Replay mode for a native recording: 'weak-userspace', " &
+          "'strong-userspace' or 'strong-kernel' " &
+          "(env CT_OS_SIMULATION; the flag wins). " &
+          "Unset: the replay backend's default"
+      .}: Option[string]
+      replayFollowRequestSpans* {.
+        name: "follow-request-spans",
+        desc: "Follow requests in a growing container: '1' or '0' " &
+          "(env CT_FOLLOW_REQUEST_SPANS; the flag wins). Default off"
+      .}: Option[string]
     of StartupCommand.run:
       runTracePathOrId* {.
         argument
@@ -1521,7 +1546,8 @@ type
         argument,
         defaultValue: "",
         desc: "Recorder to probe " &
-          "(python, ruby, javascript, ...). " &
+          "(python, ruby, javascript, ...), or `terminal` for this " &
+          "terminal's capability report and glyph test card. " &
           "Omit to probe every known recorder."
       .}: string
 

@@ -70,7 +70,7 @@ jobs:
   choose:
     # Owner: zah. Same selector, pin and rationale as metacraft-desktop-packages'
     # publish-release.yaml.
-    uses: metacraft-labs/devops-modules/.github/workflows/reusable-choose-runner.yml@cd73eba732b9190499ec78e1e65b0dd784507440
+    uses: metacraft-labs/devops-modules/.github/workflows/reusable-choose-runner.yml@146ea35853f859bcf78cc5da7fa53705a825da30
     with:
       preferred: ubuntu-24.04
       fallback: '["eph-linux-x64-release"]'

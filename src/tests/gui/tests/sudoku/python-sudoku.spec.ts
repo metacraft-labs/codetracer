@@ -45,8 +45,11 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
 //     auto-load effect) were producing different-sized responses that
 //     clobbered the store mid-render.  Removed the legacy paths and
 //     pinned `bufferStart=0` whenever `autoLoad` expands `totalHeight`
-//     to `totalCalls` (≤ FULL_WINDOW_CAP), so post-jump section
-//     anchoring no longer drops the parent function's row.
+//     to `totalCalls`, so post-jump section anchoring no longer drops the
+//     parent function's row. (Since then the whole-trace load is gone: the
+//     pane asks for the window it shows, Viewport-Driven-Loading V2/V4, and
+//     `CallTracePane.navigateToEntry` reaches a call outside it through the
+//     search and its reveal.)
 test.describe("PythonSudoku", () => {
   test.use({ sourcePath: "py_sudoku_solver/main.py", launchMode: "trace" });
 

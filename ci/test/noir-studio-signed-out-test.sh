@@ -163,8 +163,12 @@ if [ "${rc}" = "0" ] && grep -q "RESULT: OK" "${work}/out"; then
 	printf '  [OK]     control: the gate passes over the unmutated product, %s checks\n' "${control_checks}"
 	# The assertion count is a fingerprint: diff it across runs and a silent
 	# skip becomes visible (Verification-Harness-Traps.md 4b).
-	if [ "${control_checks}" != "15" ]; then
-		miss "control: expected 15 checks, saw ${control_checks} — an assertion appeared or vanished"
+	# 19 since WD7 and its review: the `session-allocation` surface's own
+	# count, the credentialed-request check reading the dynamic-surface SUM
+	# rather than collab alone, the `credentials`-key accounting identity, and
+	# the same-origin check over the allocation sites.
+	if [ "${control_checks}" != "19" ]; then
+		miss "control: expected 19 checks, saw ${control_checks} — an assertion appeared or vanished"
 	fi
 else
 	arms=$((arms + 1))
@@ -264,8 +268,8 @@ fi
 	printf '\nvar ctExtraCredentialed = { credentials: "include" };\n'
 } >"${work}/m8.js"
 rc="$(run_gate "${BASE_LOOP}" "${work}/m8.js")"
-expect_red "M8 an eighth credentialed request, with only 7 collab sites" "${rc}" \
-	"credentialed requests: 8 (budget 7), collab egress sites: 7"
+expect_red "M8 a tenth credentialed request, with only 9 dynamic-surface sites" "${rc}" \
+	"credentialed requests: 10 (budget 9), dynamic-surface egress sites: 9"
 
 # --- M9: the loop arm attaches credentials ---------------------------------
 {
@@ -320,12 +324,159 @@ rc="$(run_gate "${BASE_LOOP}" "${work}/m11.js")"
 expect_red "M11 one site reclassified visual-replay -> agentic, total unchanged" "${rc}" \
 	"surface 'visual-replay': 3 egress site(s), budget says 4" \
 	"surface 'agentic': 2 egress site(s), budget says 1"
-if still_green "the scanner reports 13 egress sites on the renderer arm"; then
-	note "    isolated: the TOTAL stayed 13 — only the per-surface split moved,"
+if still_green "the scanner reports 15 egress sites on the renderer arm"; then
+	note "    isolated: the TOTAL stayed 15 — only the per-surface split moved,"
 	note "    which is the case a total-only budget would pass over"
 else
 	miss "M11 isolation: the total also moved, so this does not prove the split is checked"
 fi
+
+# --- M12: a credentialed request in the SPELLING the old pattern missed -----
+# WD7's arm, and the one that proves the WIDENING is load-bearing rather than
+# cosmetic. The gate used to count the literal `credentials: "include"`; the
+# allocation client writes `credentials: 'same-origin'`, which is equally
+# attributable and which that pattern does not match. So before the widening,
+# this mutation left the gate GREEN — a credentialed request the budget could
+# not see. M8 above covers the spelling the old pattern did see; this one
+# covers the spelling it did not, and without both the pattern can be narrowed
+# back without any arm noticing.
+{
+	cat "${BASE_REND}"
+	printf "\nvar ctSameOriginCredentialed = { credentials: 'same-origin' };\n"
+} >"${work}/m12.js"
+rc="$(run_gate "${BASE_LOOP}" "${work}/m12.js")"
+expect_red "M12 a credentialed request spelled 'same-origin' (the spelling the old pattern could not see)" "${rc}" \
+	"credentialed requests: 10 (budget 9), dynamic-surface egress sites: 9"
+
+# --- M13: a session-allocation site reclassified, total unchanged -----------
+# M11's shape for WD7's surface: the COUNT is still 15, so step 3 stays green,
+# and only the split moves. The marker is replaced inside the window the
+# classifier actually reads — `n-20 .. n+8` around the FIRST allocation site,
+# located by search rather than by a line number so this survives a rebuild.
+# The two allocation sites are far enough apart that their windows do not
+# overlap, which the arm checks rather than assumes: if the mutation moved both
+# markers the per-surface counts would move by two and the arm would not
+# isolate the split.
+sa_line="$(grep -na 'CODETRACER_SESSION_ALLOCATION' "${BASE_REND}" | head -1 | cut -d: -f1)"
+sa_count="$(grep -ca 'CODETRACER_SESSION_ALLOCATION' "${BASE_REND}" || true)"
+if [ -z "${sa_line}" ] || [ "${sa_count}" != "2" ]; then
+	miss "M13 setup: expected 2 allocation markers in the renderer arm, found ${sa_count:-0}"
+else
+	awk -v want="${sa_line}" \
+		'NR==want { gsub(/CODETRACER_SESSION_ALLOCATION/, "CODETRACER_COLLAB") } { print }' \
+		"${BASE_REND}" >"${work}/m13.js"
+	if [ "$(grep -ca 'CODETRACER_SESSION_ALLOCATION' "${work}/m13.js" || true)" != "1" ]; then
+		miss "M13 setup: the mutation did not leave exactly one allocation marker, so it does not isolate the split"
+	fi
+	if [ "$(grep -caE '(await )?fetch\(|new XMLHttpRequest|new WebSocket\(' "${work}/m13.js" || true)" \
+		!= "$(grep -caE '(await )?fetch\(|new XMLHttpRequest|new WebSocket\(' "${BASE_REND}" || true)" ]; then
+		miss "M13 setup: the mutation changed the egress-site count, so it does not isolate the split"
+	fi
+	rc="$(run_gate "${BASE_LOOP}" "${work}/m13.js")"
+	expect_red "M13 one site reclassified session-allocation -> collab, total unchanged" "${rc}" \
+		"surface 'collab': 8 egress site(s), budget says 7" \
+		"surface 'session-allocation': 1 egress site(s), budget says 2"
+	if still_green "the scanner reports 15 egress sites on the renderer arm"; then
+		note "    isolated: the TOTAL stayed 15 — only the per-surface split moved"
+	else
+		miss "M13 isolation: the total also moved"
+	fi
+fi
+
+# --- M14: an allocation site rewritten to a CROSS-ORIGIN absolute URL -------
+# REVIEW'S ARM, and it survived every assertion this file had: the egress total,
+# the per-surface split, the marker count and the credentialed count were all
+# identical to the control, so the gate did not notice that the bundle had
+# acquired a hostname and was sending the login cookie to it.
+#
+# `session_allocation_client.nim` rests its whole argument on same-origin --
+# the front door routes `/api/v1` to `API_ORIGIN`, so the product is fixed by
+# the api-server's deployment, and *"a bundle that chose an origin would be a
+# bundle choosing which grant it spends against"* (D-S13). That was argued in a
+# comment and measured nowhere.
+#
+# The rewrite ADDS NO SITE: it edits the existing `fetch(` argument, so a kill
+# here cannot come from the total moving. The arm checks that rather than
+# assuming it.
+m14_line="$(grep -na 'CODETRACER_SESSION_ALLOCATION' "${BASE_REND}" | head -1 | cut -d: -f1)"
+m14_fetch="$(awk -v n="${m14_line}" 'NR>=n && NR<=n+28 && /fetch\(/ { print NR; exit }' "${BASE_REND}")"
+if [ -z "${m14_fetch}" ]; then
+	miss "M14 setup: no fetch( found below the first allocation marker"
+else
+	awk -v want="${m14_fetch}" \
+		'NR==want { sub(/fetch\(/, "fetch(\"https://wd7-m14-not-our-origin.example.net\" + ") } { print }' \
+		"${BASE_REND}" >"${work}/m14.js"
+	m14_before="$(grep -caoE '(await )?fetch\(|new XMLHttpRequest|new WebSocket\(' "${BASE_REND}" || true)"
+	m14_after="$(grep -caoE '(await )?fetch\(|new XMLHttpRequest|new WebSocket\(' "${work}/m14.js" || true)"
+	if [ "${m14_before}" != "${m14_after}" ]; then
+		miss "M14 setup: the rewrite changed the egress-site count (${m14_before} -> ${m14_after}), so a kill would not isolate the origin"
+	elif [ "$(grep -ca 'wd7-m14-not-our-origin.example.net' "${work}/m14.js" || true)" = "0" ]; then
+		miss "M14 setup: the hostname was not planted, so this arm tests nothing"
+	elif [ "$(grep -ca 'wd7-m14-not-our-origin.example.net' "${BASE_REND}" || true)" != "0" ]; then
+		miss "M14 setup: the nonce host already occurs in the control bundle"
+	else
+		rc="$(run_gate "${BASE_LOOP}" "${work}/m14.js")"
+		expect_red "M14 an allocation site rewritten to a cross-origin absolute URL" "${rc}" \
+			"a session-allocation site names an absolute URL"
+		# Isolated on the SURFACE COUNT rather than on the total, deliberately.
+		# The total is only 15 when the renderer arm was built against CI's
+		# pinned siblings; a local override build carries extra sites of its own,
+		# and an isolation needle that can never be green there tells you nothing
+		# about the arm. The allocation surface's own count is 2 either way.
+		if still_green "surface 'session-allocation': 2 egress site(s), as budgeted"; then
+			note "    isolated: both allocation sites are still classified and still"
+			note "    counted -- the host name is the only thing that changed, and"
+			note "    before this assertion existed nothing here could see it"
+		else
+			miss "M14 isolation: the split moved too, so this does not isolate the origin"
+		fi
+	fi
+fi
+
+# --- M15: `credentials: 'omit'`, which must NOT be counted as credentialed ---
+# THE OVER-COUNT ARM, and it is a MUST-STAY-GREEN one. `omit` is the Fetch
+# standard's explicit opt-out: it attaches nothing. The first version of the
+# widened pattern matched any quoted value, so this plant pushed the
+# credentialed count to 10 against a budget of 9 and turned the gate red for a
+# change that made the product MORE private. The accounting identity keeps the
+# site visible without mis-counting it.
+{
+	cat "${BASE_REND}"
+	printf "\nvar ctOptedOutOfCredentials = { credentials: 'omit' };\n"
+} >"${work}/m15.js"
+# Read on the TWO CREDENTIALS ASSERTIONS rather than on the gate's exit code.
+# "The whole gate is green" is only available when the renderer arm was built
+# against CI's pinned siblings; this arm's claim is narrower than that and is
+# checkable wherever it runs. It is also the isolation the rest of this file
+# asks for: the assertion under test, by name, with its numbers.
+#
+# `still_green` anchors its needle immediately after the `[OK]` column, so a
+# needle taken from the MIDDLE of a message never matches and reports a miss
+# while the assertion it names is green. Both needles here start at the first
+# word of their message for that reason, and neither contains a backtick --
+# the formatter rewrites a backtick-bearing literal into single quotes and the
+# linter then objects to it, so the messages carry none.
+rc="$(run_gate "${BASE_LOOP}" "${work}/m15.js")"
+arms=$((arms + 1))
+if still_green "all 9 credentialed requests are dynamic-surface sites" &&
+	still_green "every one of the 10 credentials keys is accounted for (9 attributable + 1 omit)"; then
+	pass "M15 \`credentials: 'omit'\` is SEEN and accounted for, and NOT counted as credentialed (gate rc ${rc})"
+else
+	miss "M15 an 'omit' site was counted as credentialed, or was not seen at all; it attaches no cookies and is not attributable"
+	grep -E '\[(OK|FAILED)\].*credential' "${work}/out" | sed 's/^/    /'
+fi
+
+# --- M16: a `credentials` spelling no pattern recognises --------------------
+# The other half of M15. Narrowing the pattern to the two attributable values
+# would be a regression if it also stopped SEEING an unrecognised spelling, so
+# the identity is asserted and this arm is what proves it bites.
+{
+	cat "${BASE_REND}"
+	printf '\nvar ctHiddenCredentials = { credentials: ctPickedAtRuntime };\n'
+} >"${work}/m16.js"
+rc="$(run_gate "${BASE_LOOP}" "${work}/m16.js")"
+expect_red "M16 a credentials value no pattern recognises is still SEEN" "${rc}" \
+	"a spelling this gate cannot classify attaches cookies to something it is not counting"
 
 echo
 echo "${arms} arm(s), ${misses} miss(es)"

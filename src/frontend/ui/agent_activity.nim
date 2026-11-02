@@ -1,6 +1,8 @@
 import ../utils, ../communication, ../../common/ct_event, value, ui_imports, shell, editor, times, std/[strformat, jsconsole]
+import ./session_viewmodels
 from unified_diff import registerAgentDiffEntry
-from git_cli import gitWorkingDirectory, gitExec, isGitRepository
+from git_cli import gitWorkingDirectory, gitExec, isGitRepository,
+  sessionHasNoProjectFolder
 
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
@@ -23,12 +25,16 @@ from ../viewmodel/viewmodels/review_open import ReviewOpenService
 from ../viewmodel/viewmodels/evidence_call_vm import EvidenceDataset
 from ../viewmodel/viewmodels/review_session import
   ReviewSession, ReviewSessionState, rssAbsent, applyReviewSession
+from ../viewmodel/viewmodels/agent_prompt_context import
+  editorSelectionContext, AgentNoEditorSelectionReason, EditorRange,
+  selectedLinesOf
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
-  from ../viewmodel/views/isonim_agent_activity_view import
-    mountIsoNimAgentActivityPanel, AgentActivityCallbacks
+  import ../viewmodel/views/isonim_agent_activity_view
+  import isonim/web/web_renderer
+  import ./panel_host
+  from ../viewmodel/session_vm import SessionViewModel
 
-const HEIGHT_OFFSET = 2
 const AGENT_MSG_DIV = "msg-content"
 const DIFF_EDITOR_DIV = "diff-editor"
 const PLACEHOLDER_MSG = "placeholder-msg"
@@ -46,9 +52,6 @@ proc setDiffModel*(editor: DiffEditor, original, modified: js)
 proc setValue*(model: js, value: cstring)
   {.importjs: "#.setValue(#)".}
 
-proc computedFontSizePx(el: js): float
-  {.importjs: "parseFloat(window.getComputedStyle(#).fontSize)".}
-
 var originalModel = createModel("".cstring, "plaintext".cstring)
 var modifiedModel = createModel("".cstring, "plaintext".cstring)
 
@@ -61,16 +64,12 @@ var msgSegmentStartOffset = JsAssoc[cstring, int]{}
   ## Buffer byte offset where the current text segment began.
   ## Updated each time a tool call arrives so subsequent text chunks show only
   ## post-tool content rather than the full accumulated message buffer.
-var isoNimAgentActivityMountedIds {.used.}: JsAssoc[int, bool] =
-  JsAssoc[int, bool]{}
-
 var agentActivityTraceOpenService: TraceOpenService = nil
   ## AA-2 — how this panel opens the recording of a `ct test` test.
   ##
   ## Latched at the host level for the same reason `reviewSessionForPanels`
-  ## is: `tryMountIsoNimAgentActivityPanel` retries asynchronously, so a
-  ## panel's VM can be created either side of the moment `ui_js` installs the
-  ## service, and both orders have to end up wired.
+  ## is: a panel's VM can be created either side of the moment `ui_js`
+  ## installs the service, and both orders have to end up wired.
   ##
   ## The service itself is supplied by `ui_js`, because that is where the tab
   ## model lives — the current-tab / new-tab distinction is `createNewSession`
@@ -117,8 +116,13 @@ proc applyAgentActivityEvidenceDataset*(datasetPath: string;
       vm.applyEvidenceDataset(datasetPath, dataset)
 
 proc syncLegacyAgentActivityIntoVM*(self: AgentActivityComponent)
-proc tryMountIsoNimAgentActivityPanel*(componentId: int)
 proc requestAgentActivityPanelRefresh*(self: AgentActivityComponent)
+proc clear(self: AgentActivityComponent)
+  ## Declared ahead because `updateAgentUi` calls it before its body. Without
+  ## this, `self.clear()` there bound to the base `method clear(Component)`
+  ## in `types.nim`, which does nothing, so the host's own clear (empty the
+  ## element, resize it, republish) never ran after a submit, and only the
+  ## view's VM -> element sync emptied and resized the box.
 
 proc scrollAgentCom() =
   let el = document.getElementsByClassName("agent-com")
@@ -126,17 +130,11 @@ proc scrollAgentCom() =
     e.toJs.scrollTop = e.toJs.scrollHeight
 
 proc autoResizeTextarea(id: cstring) =
+  ## The view owns the prompt's auto-resize, because its VM -> element sync
+  ## needs it too; this only finds the element by id.
   let el = document.getElementById(id)
   if el.isNil: return
-  let fontSizePx = computedFontSizePx(el.toJs)
-  el.style.height = "auto"
-  let heightInEm =
-    if fontSizePx > 0:
-      el.toJs.scrollHeight.to(float) / fontSizePx
-    else:
-      el.toJs.scrollHeight.to(float)
-  el.style.height = cstring($(heightInEm) & "em")
-  el.toJs.scrollTop = el.toJs.scrollHeight.to(int) + HEIGHT_OFFSET
+  resizeInputToContent(cast[isonim_dom_api.Element](el))
 
 proc componentBySessionId(sessionId: cstring): AgentActivityComponent =
   ## Locate the AgentActivity component for a given sessionId. Match either the
@@ -263,7 +261,7 @@ var reviewSessionForPanels = ReviewSession(state: rssAbsent)
   ## entered ends up in the state that routine already computed.  Two things
   ## make it necessary:
   ##
-  ##   * `tryMountIsoNimAgentActivityPanel` retries asynchronously, so the
+  ##   * the panel host mounts a panel when its container is created, so the
   ##     panel's VM can be created after `startDeepReviewNavigation` has run;
   ##   * `syncLegacyAgentActivityIntoVM` republishes the *legacy* conversation
   ##     over the VM on every sync, which would otherwise wipe a loaded
@@ -298,30 +296,30 @@ proc replayReviewSessionInto(vm: AgentActivityVM) =
   ## none, which is every non-review session.
   applyReviewSession(vm, reviewSessionForPanels)
 
-proc ensureAgentActivityVM(self: AgentActivityComponent): AgentActivityVM =
+proc ensureAgentActivityVM(self: AgentActivityComponent;
+                           mountStore: ReplayDataStore = nil): AgentActivityVM =
+  ## `mountStore` is the store of the session the panel host mounts this pane
+  ## with — the pane's own tab's (`panel_host.sessionFor`) — and is used when
+  ## the component's tab has no ViewModels of its own to name yet.
   if self.isNil:
     return nil
-  if agentActivityVMInstances.hasKey(self.id):
-    return agentActivityVMInstances[self.id]
+  if agentActivityVMInstances.hasKey(data.tabScopedId(self)):
+    return agentActivityVMInstances[data.tabScopedId(self)]
 
-  if agentActivityVMStore.isNil:
-    let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-      when defined(js):
-        result = newPromise proc(resolve: proc(resp: JsonNode)) =
-          resolve(%*{})
-      else:
-        var fut = newFuture[JsonNode]("stub-backend")
-        fut.complete(%*{})
-        result = fut
-    let stubBackend = BackendService(
-      sendProc: stubSend,
-      onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-      disconnectProc: proc() = discard,
-    )
-    agentActivityVMStore = createReplayDataStore(stubBackend)
-
-  result = createAgentActivityVM(agentActivityVMStore)
-  agentActivityVMInstances[self.id] = result
+  # On the store of the tab that holds this pane — each tab's Agent Activity
+  # pane has its own ViewModel over its own session's store, keyed by the tab
+  # as well as the component id (`tabScopedId`: every tab's first pane has
+  # id 0). The panel host mounts the pane only once its session exists.
+  let ownTab = sessionVMOf(data.sessionOfComponent(self))
+  let store =
+    if not ownTab.isNil: ownTab.store
+    elif not mountStore.isNil: mountStore
+    elif not data.anySessionViewModels(): agentActivityVMStore
+    else: nil
+  if store.isNil:
+    return nil
+  result = createAgentActivityVM(store)
+  agentActivityVMInstances[data.tabScopedId(self)] = result
   # AA-2: a panel created after `ui_js` installed the service still opens
   # recordings; one created before is back-filled by the installer.
   result.traceOpen = agentActivityTraceOpenService
@@ -332,16 +330,17 @@ proc ensureAgentActivityVM(self: AgentActivityComponent): AgentActivityVM =
   replayReviewSessionInto(result)
 
 proc initAgentActivityVMWithStore*(store: ReplayDataStore) =
-  ## Install the shared ViewModel store used by production panels.
-  ## Existing per-component VM instances are recreated so they stop
-  ## using the early stub backend.
+  ## Install the shown tab's store, and build the ViewModel of every pane that
+  ## has none yet, each on its own tab's store (`ensureAgentActivityVM`).
+  ## Called again on every tab switch, so a pane that already has its
+  ## ViewModel keeps it: rebuilding them all, as this did while the window had
+  ## one session, would drop every tab's conversation on each switch.
   agentActivityVMStore = store
-  agentActivityVMInstances = JsAssoc[int, AgentActivityVM]{}
-  isoNimAgentActivityMountedIds = JsAssoc[int, bool]{}
-  for _, component in agentActivityComponentRefs:
+  for key, component in agentActivityComponentRefs:
+    if component.isNil or agentActivityVMInstances.hasKey(key):
+      continue
     discard ensureAgentActivityVM(component)
     component.syncLegacyAgentActivityIntoVM()
-    tryMountIsoNimAgentActivityPanel(component.id)
 
 proc initAgentActivityVM*(self: AgentActivityComponent) =
   discard ensureAgentActivityVM(self)
@@ -398,6 +397,8 @@ proc legacyMessageToVm(message: AgentMessage): AgentActivityMessageEntry =
     createdAt: message.createdAt,
     duration: message.duration,
     images: message.images,
+    failed: message.failed,
+    errorMessage: safeStr(message.errorMessage),
   )
 
 proc currentMessagesToVm(self: AgentActivityComponent):
@@ -440,7 +441,7 @@ proc ensureAgentActivityRuntime(self: AgentActivityComponent) =
 proc syncLegacyAgentActivityIntoVM*(self: AgentActivityComponent) =
   if self.isNil:
     return
-  agentActivityComponentRefs[self.id] = self
+  agentActivityComponentRefs[data.tabScopedId(self)] = self
   self.ensureAgentActivityRuntime()
   let vm = ensureAgentActivityVM(self)
   if vm.isNil:
@@ -460,6 +461,12 @@ proc syncLegacyAgentActivityIntoVM*(self: AgentActivityComponent) =
   # their defaults, so the ACP backend can push authoritative values later
   # without them being overwritten on every sync.
   block branchSync:
+    # A session with no project folder (New File) has no branch to show:
+    # `gitWorkingDirectory` answers "" for it, and git would read the launch
+    # directory's repository instead (see `git_cli.sessionHasNoProjectFolder`).
+    # A worktree session names its own directory and is unaffected.
+    if self.workspaceDir.len == 0 and sessionHasNoProjectFolder(self.data):
+      break branchSync
     let cwd = if self.workspaceDir.len > 0: self.workspaceDir
               else: gitWorkingDirectory(self.data)
     if not isGitRepository(cwd):
@@ -483,13 +490,11 @@ proc syncLegacyAgentActivityIntoVM*(self: AgentActivityComponent) =
   replayReviewSessionInto(vm)
 
 proc requestAgentActivityPanelRefresh*(self: AgentActivityComponent) =
-  ## Refresh the Agent Activity IsoNim mount after legacy component state
-  ## changes. Signal writes update mounted views; the mount attempt covers the
-  ## first refresh after the GoldenLayout host is created.
+  ## Bring the pane's ViewModel up to the component's state; the mounted
+  ## view follows its signals.
   if self.isNil:
     return
   self.syncLegacyAgentActivityIntoVM()
-  tryMountIsoNimAgentActivityPanel(self.id)
 
 proc ensureSessionMessageList(self: AgentActivityComponent, sessionKey: cstring) =
   if not self.sessionMessageIds.hasKey(sessionKey):
@@ -541,7 +546,13 @@ proc sendAcpPrompt(self: AgentActivityComponent, prompt: cstring) =
   console.log cstring(fmt"[agent-activity] sending prompt sessionKey={self.currentSessionKey()} sessionId={self.sessionId} pending={self.pendingSessionId} prompt={prompt}")
   let vm = ensureAgentActivityVM(self)
   let images = if not vm.isNil: vm.getPastedImages() else: newSeq[string]()
-  let ctxPaths = if not vm.isNil: vm.getContextPaths() else: newSeq[string]()
+  # The attachments as JavaScript strings: a Nim `string` crosses the IPC as
+  # an array of byte values, which the main process cannot read as a path
+  # (`acp_ipc.onAcpPrompt` turned it into a `TypeError` and sent no prompt).
+  var ctxPaths: seq[cstring] = @[]
+  if not vm.isNil:
+    for p in vm.getContextPaths():
+      ctxPaths.add cstring(p)
   data.ipc.send ("CODETRACER::acp-prompt"), js{
     "sessionId": self.sessionId,
     "clientSessionId": self.pendingSessionId,
@@ -658,6 +669,38 @@ proc afterAgentActivityDynamicRender(self: AgentActivityComponent) =
     data.lastAgentPrompt = ""
 
 when defined(js):
+  proc activeEditorSelectionContext(): string =
+    ## Read at activation, rather than capturing the editor when the panel or
+    ## menu was built: the active file can change while either stays mounted.
+    if data.isNil or data.sessions.len == 0 or data.activeSessionIndex < 0 or
+       data.activeSessionIndex >= data.sessions.len or data.services.isNil or
+       data.services.editor.isNil or data.ui.isNil:
+      return ""
+    let active = data.services.editor.active
+    if active.isNil or active.len == 0 or not data.ui.editors.hasKey(active):
+      return ""
+    let editor = data.ui.editors[active]
+    if editor.isNil or editor.path.isNil or editor.path.len == 0 or
+       editor.monacoEditor.isNil or
+       (not editor.tabInfo.isNil and editor.tabInfo.untitled):
+      return ""
+    # Every one of Monaco's selections, its lines counted by the rule the
+    # native selection follows (`selectedLinesOf`): a range that ends at
+    # column 1 of a later line stops at the line break before it.
+    let monacoEditor = editor.monacoEditor.toJs
+    let selections = monacoEditor.getSelections()
+    if selections.isNil:
+      return ""
+    var ranges: seq[EditorRange] = @[]
+    for i in 0 ..< selections.length.to(int):
+      let sel = selections[i]
+      ranges.add((sel.startLineNumber.to(int), sel.startColumn.to(int),
+                  sel.endLineNumber.to(int), sel.endColumn.to(int)))
+    let position = monacoEditor.getPosition()
+    let caretLine = if position.isNil: 1 else: position.lineNumber.to(int)
+    let (first, last) = selectedLinesOf(ranges, caretLine)
+    editorSelectionContext($editor.path, first, last)
+
   proc buildAgentActivityCallbacks(self: AgentActivityComponent):
       AgentActivityCallbacks =
     result.onFocusInput = proc() =
@@ -719,7 +762,15 @@ when defined(js):
     result.onAddFolders = proc() =
       data.ipc.send("CODETRACER::acp-pick-files", js{"kind": cstring"folders"})
     result.onAddEditorSelection = proc() =
-      data.ipc.send("CODETRACER::acp-pick-files", js{"kind": cstring"files"})
+      let path = activeEditorSelectionContext()
+      let vm = ensureAgentActivityVM(self)
+      if path.len > 0 and not vm.isNil:
+        vm.addContextPath(path)
+    result.editorSelectionUnavailableReason = proc(): string =
+      if activeEditorSelectionContext().len == 0:
+        AgentNoEditorSelectionReason
+      else:
+        ""
     result.onAddTrace = proc() =
       data.ipc.send("CODETRACER::acp-pick-files", js{"kind": cstring"trace"})
     result.onModelSelect = proc() =
@@ -784,57 +835,40 @@ when defined(js):
       self.data.openLayoutTab(Content.UnifiedDiff, newId, isEditor = true,
                               path = cstring("diff:agent-diff:" & target))
 
-  proc tryMountIsoNimAgentActivityPanel*(componentId: int) =
-    if not agentActivityVMInstances.hasKey(componentId):
-      return
-    if not agentActivityComponentRefs.hasKey(componentId):
-      return
-    if isoNimAgentActivityMountedIds.hasKey(componentId):
-      return
+  proc hostComponentId(host: isonim_dom_api.Element): int {.importjs:
+    "(function(e){var p=(e.id||'').split('-');var n=Number(p[p.length-1]);return isNaN(n)?0:n;})(#)".}
+    ## The `<id>` of the host's `agentActivityComponent-<id>`.
 
-    let component = agentActivityComponentRefs[componentId]
-    let key = cstring("agentActivityComponent-" & $componentId)
-    var retryCount = 0
-    proc doMount() =
-      if isoNimAgentActivityMountedIds.hasKey(componentId):
-        return
-      retryCount += 1
-      let container = isonim_dom_api.getElementById(
-        isonim_dom_api.document, key)
-      if isonim_dom_api.isNodeNil(isonim_dom_api.Node(container)):
-        if retryCount > 200:
-          cerror "tryMountIsoNimAgentActivityPanel: not ready after 200 retries, giving up"
-          return
-        discard setTimeout(proc() = doMount(), 10)
-        return
-
-      let containerNode = isonim_dom_api.Node(container)
-      while not isonim_dom_api.isNodeNil(containerNode.firstChild):
-        discard isonim_dom_api.removeChild(containerNode, containerNode.firstChild)
-
-      isoNimAgentActivityMountedIds[componentId] = true
-      try:
-        component.syncLegacyAgentActivityIntoVM()
-        mountIsoNimAgentActivityPanel(
-          container,
-          agentActivityVMInstances[componentId],
-          componentId,
-          safeStr(component.commandInputId),
-          component.buildAgentActivityCallbacks())
-      except:
-        cerror "tryMountIsoNimAgentActivityPanel: mount EXCEPTION: " &
-          getCurrentExceptionMsg()
-
-    doMount()
-else:
-  proc tryMountIsoNimAgentActivityPanel*(componentId: int) = discard
+  # The panel host mounts each Agent Activity pane into the container
+  # GoldenLayout creates (`ui/panel_host`); the factory has created its
+  # component by then.
+  setPanelRenderer(Content.AgentActivity,
+    proc(r: WebRenderer; host: isonim_dom_api.Element;
+         session: SessionViewModel): isonim_dom_api.Element =
+      if agentActivityVMStore.isNil and not session.isNil:
+        agentActivityVMStore = session.store
+      let componentId = hostComponentId(host)
+      # The pane of the tab whose container holds `host`.
+      let key = tabScopedKey(data.hostTab(host), componentId)
+      let component =
+        if agentActivityComponentRefs.hasKey(key):
+          agentActivityComponentRefs[key]
+        else: nil
+      let vm = ensureAgentActivityVM(
+        component, if session.isNil: nil else: session.store)
+      if vm.isNil:
+        return isonim_dom_api.createElement(isonim_dom_api.document,
+                                            cstring"div")
+      component.syncLegacyAgentActivityIntoVM()
+      renderAgentActivityPanel[WebRenderer, isonim_dom_api.Element](
+        r, vm, componentId, safeStr(component.commandInputId),
+        component.buildAgentActivityCallbacks()))
 
 method register*(self: AgentActivityComponent, api: MediatorWithSubscribers) =
   self.api = api
-  agentActivityComponentRefs[self.id] = self
+  agentActivityComponentRefs[data.tabScopedId(self)] = self
   self.initAgentActivityVM()
   self.syncLegacyAgentActivityIntoVM()
-  tryMountIsoNimAgentActivityPanel(self.id)
 
 proc asyncSleep(ms: int): Future[void] =
   newPromise(proc(resolve: proc(): void) =
@@ -878,9 +912,15 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
   let hasImage = jsHasKey(response, cstring"image")
   let imageSrc = if hasImage: cast[cstring](response[cstring"image"]) else: cstring""
 
-  let isFinal = jsHasKey(response, cstring"stopReason")
+  # #862: the main process ends a turn the agent refused with `error` (the
+  # agent's reason) instead of `stopReason`.  It is just as final: the turn is
+  # over, so the spinner must stop and the prompt must accept the next one.
+  let failed = jsHasKey(response, cstring"error")
+  let failureMessage =
+    if failed: cast[cstring](response[cstring"error"]) else: cstring""
+  let isFinal = failed or jsHasKey(response, cstring"stopReason")
   let stopReason =
-    if isFinal:
+    if jsHasKey(response, cstring"stopReason"):
       cast[cstring](response[cstring"stopReason"])
     else:
       cstring""
@@ -955,6 +995,17 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
       self.activeAgentMessageId = cstring""
     except:
       discard
+    if failed:
+      # Mark the turn's own message failed (AgentFailed), creating it when the
+      # agent refused before streaming anything — the usual case, since the
+      # placeholder that stood in for it was dropped above.
+      self.addAgentMessage(messageId)
+      for msg in self.sessionMessageIds[self.sessionId]:
+        if msg.id == messageId:
+          msg.failed = true
+          msg.errorMessage = failureMessage
+          break
+      console.log cstring(fmt"[agent-activity] turn failed sessionId={sessionId} messageId={messageId} error={failureMessage}")
     self.isLoading = false
     self.sessionMessageIds[self.sessionId][^1].isLoading = false
     self.promptInFlight = false

@@ -573,8 +573,7 @@ const
     "no values have been pinned to the scratchpad",
     "the shell ViewModel carries input and history and no output; this pane " &
       "shows what exists",
-    "the buildOutput pane is an edit-mode view; a replay session does not " &
-      "build the working tree and will not claim to"]
+    "the build output has no ViewModel; no host attached one"]
     ## The products' own empty messages, as whole sentences — the `srEmpty`
     ## warrant, as PLAT-39's state reader takes "No local variables are
     ## present" to be one. Written out because this reader imports no product

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Mutation arms for `test_run_control_refusal_is_shown.nim`.
 
-Run:
+Run (it takes NO arguments, and refuses every one it is given):
     direnv exec . python3 \
       src/frontend/viewmodel/tests/unit/run-run-control-refusal-mutations.py
 
@@ -42,35 +42,50 @@ says out loud that the two guards are redundant with each other, so a future
 reader removing either one will find out from M2b which of them was load
 bearing.
 """
+import argparse
 import os
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
-REPO = subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                      capture_output=True, text=True,
-                      check=True).stdout.strip()
+# The repository root by path arithmetic, NOT by `git rev-parse`. The argument
+# rule in `main()` has to run before this harness starts a SUBPROCESS, not
+# merely before it mutates a file, and a module-level `git rev-parse` is a
+# subprocess — one that would run on a command line the harness is about to
+# refuse.
+HERE = Path(__file__).resolve().parent
+REPO = str(HERE.parents[4])
 VM = os.path.join(
     REPO, "src/frontend/viewmodel/viewmodels/test_results_vm.nim")
 TEST = "src/frontend/viewmodel/tests/unit/test_run_control_refusal_is_shown.nim"
-OUT = os.path.join(tempfile.mkdtemp(prefix="run-control-mut-"), "suite")
 
-# name, anchor, replacement, file, [second (anchor, replacement)]
+# id, what the arm does, anchor, replacement, file,
+# [second (anchor, replacement)]
+#
+# THE ID IS THE TUPLE'S FIRST FIELD, which is what makes it a *declared* arm
+# id to `ci/lib/harness_guard.py`: that guard reads field 0 of every tuple in
+# an upper-case module global, so an id spelled only inside a prose sentence
+# would leave this harness declaring nothing — and a guard that can read no
+# arm ids refuses every command line, including the empty one.
 MUTATIONS = [
     (
-        "M1 the runner's answer is discarded (THE DEFECT AS IT SHIPPED)",
+        "M1",
+        "the runner's answer is discarded (THE DEFECT AS IT SHIPPED)",
         "  vm.noteRunRefusal(runner())",
         "  discard runner()",
         VM,
     ),
     (
-        "M2a startRun files a sentence on EVERY click (over-firing)",
+        "M2a",
+        "startRun files a sentence on EVERY click (over-firing)",
         "  vm.noteRunRefusal(runner())",
         "  discard runner()\n  vm.noteRunRefusal(\"could not start\")",
         VM,
     ),
     (
-        "M2b BOTH empty-message guards removed "
+        "M2b",
+        "BOTH empty-message guards removed "
         "(noteRunRefusal AND runFailureLines)",
         "  if message.len == 0:\n    return\n  var current = vm.summary.val",
         "  var current = vm.summary.val",
@@ -80,13 +95,15 @@ MUTATIONS = [
          "    result.add diagnostic.message"),
     ),
     (
-        "M3 the refusal is filed as a deployment absence instead",
+        "M3",
+        "the refusal is filed as a deployment absence instead",
         "  let runner = vm.runTests.val\n  vm.noteRunRefusal(runner())",
         "  let runner = vm.runTests.val\n  vm.setRunAbsence(runner())",
         VM,
     ),
     (
-        "M4 startRun stops guarding on canRun",
+        "M4",
+        "startRun stops guarding on canRun",
         "  ## something a user can see.\n  if not vm.canRun():\n    return",
         "  ## something a user can see.\n  if false:\n    return",
         VM,
@@ -110,12 +127,12 @@ def run(cmd):
                           cwd=REPO)
 
 
-def measure():
+def measure(out):
     compiled = run(
-        f"nim c --hints:off --warnings:off -o:{OUT} {TEST}")
+        f"nim c --hints:off --warnings:off -o:{out} {TEST}")
     if compiled.returncode != 0:
         return "COMPILE-FAILED", compiled.stdout + compiled.stderr
-    ran = run(OUT)
+    ran = run(out)
     return ("GREEN" if ran.returncode == 0 else "RED"), ran.stdout
 
 
@@ -124,11 +141,36 @@ def failing_arms(output):
             if line.strip().startswith("[FAILED]")]
 
 
+sys.path.insert(0, os.path.join(REPO, "ci", "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main() -> int:
+    # THE ARGUMENT RULE FIRST — before a compile, a mutation, a temporary
+    # directory, or any other subprocess. This harness takes no arguments at
+    # all, so every one of them is refused by name with exit 2, which is what
+    # `ci/test/harness-argument-refusal.sh` requires: before this, an
+    # unrecognised flag was simply ignored and the harness performed a full
+    # five-arm grading run, mutating `test_results_vm.nim` for 51 s, for a
+    # command line that had asked for nothing.
+    #
+    # `ci/lib/harness_guard.py` owns the ARM IDS (an undeclared id, and an
+    # empty `--only=`, which is not "every arm"); argparse owns the FLAGS, as
+    # in `ci/test/run-plat70i-fit-mutations.py`. This harness declares no
+    # flags, so argparse answers every one but `-h` with its own
+    # `unrecognized arguments: …` and its own exit code 2.
+    refused = refuse_undeclared_arms(sys.argv[1:], globals())
+    if refused:
+        return refused
+    argparse.ArgumentParser(
+        prog=Path(__file__).name,
+        description=__doc__.splitlines()[0]).parse_args(sys.argv[1:])
+
+    out = os.path.join(tempfile.mkdtemp(prefix="run-control-mut-"), "suite")
     print("=== BASELINE (the tree as committed) ===")
-    verdict, out = measure()
+    verdict, out_text = measure(out)
     print(f"  {verdict}")
-    for line in out.splitlines():
+    for line in out_text.splitlines():
         if line.strip().startswith(("[OK]", "[FAILED]", "[Suite]")):
             print("   ", line.strip())
     if verdict != "GREEN":
@@ -137,9 +179,9 @@ def main() -> int:
 
     problems = 0
     for mutation in MUTATIONS:
-        name, anchor, replacement, path = mutation[:4]
-        second = mutation[4] if len(mutation) > 4 else None
-        arm = name.split()[0]
+        arm, what, anchor, replacement, path = mutation[:5]
+        second = mutation[5] if len(mutation) > 5 else None
+        name = f"{arm} {what}"
 
         source = open(path).read()
         if source.count(anchor) != 1:
@@ -158,14 +200,14 @@ def main() -> int:
 
         open(path, "w").write(mutated)
         try:
-            verdict, out = measure()
+            verdict, out_text = measure(out)
         finally:
             # RESTORED WHETHER OR NOT THE MEASUREMENT SUCCEEDED. A harness that
             # leaves a mutation on disk after an exception has edited the
             # product and told nobody.
             run(f"git checkout -- {path}")
 
-        reds = failing_arms(out)
+        reds = failing_arms(out_text)
         print(f"\n=== {name} ===")
         print(f"  {verdict}")
         for red in reds:

@@ -85,6 +85,8 @@ type
 
   VideoPlayerVM* = ref object of ViewModel
     frameVm*: FrameViewerVM
+    stageWidth, stageHeight: int
+      ## The frame stage's size in device pixels (`setStageSize`).
     reactiveOwner: OwnerBase
 
     playState*: Signal[VideoPlayerPlayState]
@@ -595,12 +597,32 @@ proc scrubTo*(vm: VideoPlayerVM; frame: int) =
 # Picker mode and magnifier.
 # ---------------------------------------------------------------------------
 
+proc applyFrameSize(vm: VideoPlayerVM) =
+  ## Frames at the stage's size (Viewport-Driven-Loading, Decided Q5) — and
+  ## at the framebuffer's own while the pixel picker is on, because its loupe
+  ## samples source pixels 1:1 (Visual-Replay.md §Loupe Specification).
+  if vm.pickerState.val == PickerActive:
+    vm.frameVm.setFrameSize(0, 0)
+  elif vm.stageWidth > 0 and vm.stageHeight > 0:
+    vm.frameVm.setFrameSize(vm.stageWidth, vm.stageHeight)
+
+proc setStageSize*(vm: VideoPlayerVM; width, height: int) =
+  ## The size, in device pixels, the frame stage shows the frame at. A hidden
+  ## stage (no size) changes nothing.
+  if width <= 0 or height <= 0:
+    return
+  vm.stageWidth = width
+  vm.stageHeight = height
+  vm.applyFrameSize()
+
 proc enterPickerMode*(vm: VideoPlayerVM) =
   vm.pause()
   vm.pickerState.val = PickerActive
+  vm.applyFrameSize()
 
 proc exitPickerMode*(vm: VideoPlayerVM) =
   vm.pickerState.val = PickerOff
+  vm.applyFrameSize()
   vm.magnifier.val = none(MagnifierPosition)
   vm.magnifierCenterColor.val = none(VisualReplayPixelColor)
 

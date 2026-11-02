@@ -5,24 +5,20 @@ import
   ../[ types ]
 
 when defined(ctmacos):
-  let modMap* : JsAssoc[cstring, cstring] = JsAssoc[cstring, cstring]{
-    $"ctrl":    $"cmdorctrl",
-    $"meta":    $"cmd",
-    $"super":   $"cmd",
-    $"shift":   $"shift",
-    $"alt":     $"option",
-  }
+  # The native application menu's accelerators are the ROUTER's chords
+  # (Base-Keymaps-And-Layer-Stack.md KL-8): the base the desktop runs with the
+  # user's `keybindings.json` laid over it — the same text the renderer's
+  # router reads (`index/keybindings`) — never the legacy YAML `bindings:`
+  # table, which no key is delivered through since every key reaches the one
+  # router (`ui/key_router`). Rebuilt whenever the file changes on disk.
+  import ../viewmodel/keymap/[keymap_router, user_keymap, context_keys,
+                              editing_keymap, menu_accelerators]
+  import ./keybindings
 
-  proc lookup(map: JsAssoc[cstring,cstring], tok: string): string =
-    let v = map[tok.cstring]
-    if v.isNil: tok else: $v
-
-  proc toAccelerator* (raw: cstring): string =
-    let s = $raw
-    result = s
-      .split({'+'})
-      .mapIt(lookup(modMap, it.toLowerAscii))
-      .join("+")
+  var
+    menuRouter = initKeymapRouter(bkCua, KeyDelivery(
+      frontEnd: feDesktop, platform: pkMac, keyProtocol: kpNative))
+    lastMenu: MenuNode = nil
 
   proc menuNodeToItem(node: MenuNode): js =
     if node.kind == MenuFolder:
@@ -34,28 +30,35 @@ when defined(ctmacos):
             items.add(js{type: cstring"separator"})
       js{ label: node.name, enabled: node.enabled, submenu: cast[js](items), role: node.role }
     else:
-      let binding = data.config.shortcutMap.actionShortcuts[node.action]
-      let resultBinding = if binding.len == 0: "" else: toAccelerator($binding[0].renderer)
+      let accelerator = menuRouter.menuAccelerator($node.action)
       if node.role != "":
         js{ role: node.role }
       else:
         js{
           label: node.name,
           enabled: node.enabled,
-          accelerator: cstring(resultBinding),
+          accelerator: cstring(accelerator),
           click: proc(menuItem: js, win: js) =
             mainWindow.webContents.send("CODETRACER::menu-action", js{action: node.action})
         }
 
-  proc onRegisterMenu*(sender: js, response: jsobject(menu=MenuNode)) =
+  proc applyMenu(menu: MenuNode) =
     var elements: seq[js] = @[]
-    for child in response.menu.elements:
+    for child in menu.elements:
       if child.menuOs != ord(MenuNodeOSNonMacOS):
         elements.add(menuNodeToItem(child))
         if child.isBeforeNextSubGroup:
           elements.add(js{type: cstring"separator"})
-    let menu = Menu.buildFromTemplate(cast[js](elements))
-    Menu.setApplicationMenu(menu)
+    Menu.setApplicationMenu(Menu.buildFromTemplate(cast[js](elements)))
+
+  keybindings.onKeybindingsText = proc(text: string) =
+    menuRouter.applyUserKeymap(parseUserKeymap(text))
+    if not lastMenu.isNil:
+      applyMenu(lastMenu)
+
+  proc onRegisterMenu*(sender: js, response: jsobject(menu=MenuNode)) =
+    lastMenu = response.menu
+    applyMenu(lastMenu)
 
 else:
   proc onRegisterMenu*(sender: js, response: jsobject(menu=MenuNode)) = discard

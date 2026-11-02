@@ -350,7 +350,7 @@ suite "RS-M10 native request panel":
       let store = createReplayDataStore(mock.toBackendService())
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       let tableBody = findByClass(panel, "request-table-body")
       check tableBody != nil
       check tableBody.children.len == 0

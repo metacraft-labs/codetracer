@@ -85,7 +85,16 @@ import ../generators/vocabulary_generator
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a static assertion count when a suite dies before printing.
-const ExpectedAssertions = 8962
+const ExpectedAssertions = 9702
+  ## **+37 ON 2026-10-24 (PLAT-70 Part C)**: one declaration joined the
+  ## vocabulary (`search-selection-whole-word`), the ~37 checks per operation
+  ## the +703 below measured for nineteen.
+  ## **+703 ON 2026-10-11 (PLAT-68)**: nineteen declarations joined the
+  ## vocabulary (CUA's and Emacs's — the clipboard, the mark and the kill
+  ## ring, the match commands, recursive folding, `toggle-block-comment`),
+  ## each swept by the same per-document cases as the other 226 operations —
+  ## 37 assertions apiece.
+  ##
   ## **+144 ON 2026-09-19**, and they are one case: PLAT-31's §36a repair —
   ## the marks and the jump list mapped through the change set instead of
   ## clamped — had NO case that could see it removed. The arm re-aimed onto
@@ -110,10 +119,11 @@ const
     ## `page-up` / `page-down`'s parameter. Small, so a page is smaller than
     ## the scenario documents and both directions have somewhere to go.
 
-  ExpectedOperations = 226
-  ExpectedDeclarations = 142
+  ExpectedOperations = 246
+    ## 245 until PLAT-70 Part C added `search-selection-whole-word`.
+  ExpectedDeclarations = 162
   ExpectedDisplayDependent = 24
-  ExpectedDisplayIndependent = 202
+  ExpectedDisplayIndependent = 222
   ExpectedScenarioDocs = 18
   ExpectedCorpusClasses = 9
 
@@ -419,6 +429,12 @@ proc witnessFailures(sc: Scenario; op: Operation; res: OpResult;
         fail "the scenario's lines were not commented to begin with"
       elif commentedLines(aDoc, after.selection, after.comments.lineToken) != 0:
         fail "a line is still commented"
+    of ckClipboardChanged:
+      if after.registerOf(ClipboardRegister) == before.registerOf(ClipboardRegister):
+        fail "the clipboard register did not change"
+    of ckKillChanged:
+      if after.registerOf("kill-0") == before.registerOf("kill-0"):
+        fail "the kill ring's newest entry did not change"
     of ckIndented:
       let n = touchedLineCount(bDoc, before.selection)
       if aDoc.len != bDoc.len + n * before.indentUnit.len:

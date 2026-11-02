@@ -175,9 +175,14 @@ clone_rr_backend() {
 
 	(
 		cd "$CLONE_DIR"
+		# A ref the clone does not have is a refusal. This used to fall back to
+		# `main`, so a mistyped or unpublished pin built a tree nobody chose
+		# while the job reported the ref it was asked for -- contradicting the
+		# "no main fallback" promise at the top of this file.
 		git checkout "$ref" || {
-			echo "Warning: ref '$ref' not found, falling back to main" >&2
-			git checkout main
+			echo "Error: ref '$ref' does not exist in codetracer-native-backend; refusing to build another tree in its place." >&2
+			echo "  Check the pin (RR_BACKEND_REF, or the workspace lock) and that the commit is published." >&2
+			exit 1
 		}
 
 		# Initialize submodules and explicitly rewrite their URLs

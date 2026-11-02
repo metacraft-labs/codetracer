@@ -140,7 +140,7 @@ const
     ## (`shell.paneTitle(paneCalltrace)` uppercased), so every CTUI-3 and CTUI-5
     ## assertion that reads `CALL STACK` off a shell row still reads it once
     ## this pane fills that rectangle.
-  PaneRule* = "─"
+  PaneRule* = canonical(grDividerH)
   RecursionGroupMinimum* = 3
     ## The shortest run that collapses. Two identical frames are an ordinary
     ## call of a helper by itself and reading `2 x f` costs a reader more than
@@ -273,7 +273,8 @@ proc groupContaining*(model: CallStackModel; frame: int): int =
 # Painting
 # ---------------------------------------------------------------------------
 
-proc titleRowSpans*(model: CallStackModel; width: int): StyledRow =
+proc titleRowSpans*(model: CallStackModel; width: int;
+                    glyphs = DefaultGlyphs): StyledRow =
   ## `CALL STACK 51 frame(s) <thread 1> ────`.
   ##
   ## The frame COUNT is in the title because it is the number CTUI-6's
@@ -303,7 +304,7 @@ proc titleRowSpans*(model: CallStackModel; width: int): StyledRow =
     result.add StyledSpan(text: " ", style: DefaultCellStyle)
     inc used
   if used < width:
-    result.add StyledSpan(text: repeatGlyph(PaneRule, width - used),
+    result.add StyledSpan(text: repeatGlyph(glyphs.glyph(grDividerH), width - used),
                           style: RuleStyle)
 
 proc titleRowText*(model: CallStackModel; width: int): string =
@@ -384,7 +385,7 @@ proc paintCallStack*(g: var StyledGrid; area: CellArea;
   result.indexWidth = indexWidth
 
   var spanAt = area.col
-  for span in titleRowSpans(model, area.width):
+  for span in titleRowSpans(model, area.width, g.glyphs):
     g.paint(area.row, spanAt, span.text, span.style)
     spanAt += cellWidthOf(span.text)
 

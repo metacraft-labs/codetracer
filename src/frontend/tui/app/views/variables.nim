@@ -78,9 +78,19 @@ import isonim_tui
 import ../../../../common/value_presentation
 from codetracer_embed import VariableCategory, vcLocal, vcArgument,
   vcGlobal, vcReturnValue, vcRegister, vcWatch, categoryTag
+# M71 (#838): the pane's ordinary scrollbar is the shared scrubber model.
+from codetracer_embed import ScrubberModel, scrubberModel
 import ../layout/profile
 import ./styled_row
 import ./tree_node
+import ./scrubber_track
+import ./table_hscroll
+# PLAT-70 Part I: fit or scroll (Horizontal-Overflow.md §5.5).
+from codetracer_embed import TableFit, FitColumn, fitTable, settle, overflows,
+  barModel, HorizontalView, fmScroll
+from codetracer_embed import DetailToggle, CutCell, detailView, isOpen,
+  VariablesTablePane,
+  fullValueText
 
 export tree_node, styled_row, profile
 
@@ -112,7 +122,7 @@ type
     value*: string
       ## The presenter's answer at the `tui-value` budget. Carried for the rows
       ## that have no `presented` (a scope header, a `… n more` marker) and as
-      ## what a diff compares; `tree_node.formattedValue` re-presents from
+      ## what a diff compares; `tree_node.valueCell` re-presents from
       ## `presented` at the ROW's budget, so nothing here reformats and two
       ## panes cannot disagree.
     memberCount*: int
@@ -150,6 +160,11 @@ type
       ## PLAT-51: a hop of the row above's value origin chain.
     vrkAddWatch
       ## PLAT-51: the Watches group's "Add watch expression…" row.
+    vrkDetail
+      ## PLAT-70 Part B: one line of the full value open under the row above
+      ## (`list.show-detail`, a click on its `…`). Painted, never a pane row:
+      ## `paneRows` does not produce it, so the cursor and the scroll do not
+      ## count it.
 
   HistoryEntry* = object
     ## PLAT-51: one value of a variable's history — where (the tick a click
@@ -220,6 +235,15 @@ type
     nameCells*: int
       ## PLAT-51: the name column's width, when the user dragged its
       ## separator (0: the default share).
+    detail*: DetailToggle
+      ## PLAT-70 Part B: the variable whose full value is open under its row
+      ## (Horizontal-Overflow.md §5.3); its key is the variable's path.
+    copyChord*: string
+      ## The resolved `list.copy` chord the detail's hint names (KL-8).
+    hview*: HorizontalView
+      ## PLAT-70 Part I: the rows' horizontal view (Horizontal-Overflow.md
+      ## §5.5) — what the wheel and the bar move; settled over each frame's
+      ## fit.
     populations*: int
       ## How many times `children` has been called. Asserted by the expansion
       ## suite: a re-expansion that did no work — the CTUI-4 shape, where the
@@ -244,6 +268,30 @@ type
       ## gone). REPORTED rather than recomputed by the caller, for the reason
       ## `frame_item.FrameItem` records.
     nameColumn*: int
+    top*: int
+      ## M71 (#838): the first row shown — `scrollTop`, clamped.
+    contentWidth*: int
+      ## M71: the cells the rows are laid out in: the area's width, less the
+      ## scrollbar's column while the rows overflow. The row controls
+      ## (`controlAt`) are found in it, as `rowSpecFor` placed them.
+    trackCol*: int
+      ## M71: the scrollbar's column (the body's rows, `bodyHeight` of them,
+      ## from the row under the title), -1 while the rows fit.
+    cuts*: seq[CutCell]
+      ## PLAT-70 Part B: every cell drawn cut, with its `…` (HO-8).
+    detailRows*: seq[int]
+      ## The SCREEN rows the open detail's lines are on.
+    fit*: TableFit
+      ## PLAT-70 Part I: the name and value fields' fit this frame.
+    hview*: HorizontalView
+      ## The horizontal view the rows were drawn from.
+    tableWidth*: int
+      ## The width the rows were laid out at: `contentWidth` in FIT and
+      ## SHRINK, wider in SCROLL.
+    nameCells*: int
+      ## The name field's width the rows were laid out with (the fit's).
+    barRow*: int
+      ## The SCREEN row of the horizontal bar, -1 when none is drawn.
 
 const
   ProvenanceBudgetCells* = 40
@@ -264,7 +312,7 @@ const
     ## (`shell.paneTitle(paneState)` uppercased), so every CTUI-3 assertion that
     ## reads `VARIABLES` off a shell row still reads it once this pane fills
     ## that rectangle.
-  PaneRule* = "─"
+  PaneRule* = canonical(grDividerH)
   DefaultPageSize* = 100
     ## Members materialised per expansion step.
     ##
@@ -282,6 +330,10 @@ const
   TitleDetailStyle* = CellStyle(role: srChromeMuted)
   RuleStyle* = CellStyle(role: srBorderPane)
   EmptyPaneText* = "no variables reported"
+  DetailPaneName* = VariablesTablePane
+    ## PLAT-70 Part B: this pane's name in a `DetailToggle` / a cut cell.
+  DetailValueStyle* = CellStyle(role: srChromeText)
+    ## An open detail's lines: the value in full.
   EmptyPaneStyle* = CellStyle(role: srChromeMuted, italic: true)
 
 func categoryOf*(kind: ScopeKind): VariableCategory =
@@ -512,6 +564,11 @@ proc paneRows*(model: VariablesModel): seq[VariablesRow] =
     if scope.kind == skWatches:
       result.add VariablesRow(kind: vrkAddWatch, scope: scope.kind, depth: 1)
 
+proc fullValueOf*(model: VariablesModel; node: VarNode): string =
+  ## PLAT-70 Part B: a variable's WHOLE value — its detail's, its tooltip's
+  ## and `list.copy`'s text (`table_overflow.fullValueText`).
+  fullValueText(node.presented, node.value, withVisualisers(model.visualisers))
+
 proc rowOfPath*(rows: openArray[VariablesRow]; path: string): int =
   ## The row showing `path`, or -1.
   result = -1
@@ -567,7 +624,10 @@ proc rowSpecFor*(model: VariablesModel; row: VariablesRow;
       historyOpen: model.histories.hasKey(row.node.path),
       originOpen: model.origins.hasKey(row.node.path),
       watch: row.scope == skWatches and row.depth == 1,
-      nameCells: model.nameCells)
+      nameCells: model.nameCells, key: row.node.path)
+  of vrkDetail:
+    TreeRowSpec(kind: trkNote, name: row.note, depth: row.depth,
+                memberCount: -1, width: width, tag: tag, tagRole: tagRole)
 
 # ---------------------------------------------------------------------------
 # Painting
@@ -698,7 +758,8 @@ proc degradationOf*(model: VariablesModel): string =
   # sentence has one implementation and two callers (§14).
   describeDegradation(spec.presentation(ProvenanceBudgetCells))
 
-proc titleRowSpans*(model: VariablesModel; width: int): StyledRow =
+proc titleRowSpans*(model: VariablesModel; width: int;
+                    glyphs = DefaultGlyphs): StyledRow =
   ## `VARIABLES 22 name(s) 1 changed  builtin.record tier=builtin … ────`.
   ##
   ## The two numbers are the facts the suites assert against data they derived
@@ -747,7 +808,7 @@ proc titleRowSpans*(model: VariablesModel; width: int): StyledRow =
     result.add StyledSpan(text: " ", style: DefaultCellStyle)
     inc used
   if used < width:
-    result.add StyledSpan(text: repeatGlyph(PaneRule, width - used),
+    result.add StyledSpan(text: repeatGlyph(glyphs.glyph(grDividerH), width - used),
                           style: RuleStyle)
 
 proc titleRowText*(model: VariablesModel; width: int): string =
@@ -761,19 +822,97 @@ proc clampScrollTop*(scrollTop, totalRows, bodyHeight: int): int =
   elif scrollTop > totalRows - bodyHeight: totalRows - bodyHeight
   else: scrollTop
 
+proc scrubberOf*(screen: VariablesScreen): ScrubberModel =
+  ## M71 (#838): the pane's scrollbar over what `paintVariables` drew — the
+  ## population is every row of the pane (`totalRows`), the view its body
+  ## from `top`. No current-position mark: the rows are values, not a
+  ## timeline.
+  scrubberModel(screen.totalRows, screen.top, screen.bodyHeight)
+
+const VariablesFixedCells* = NameFieldCol + ReservedTrailingCells +
+                             ControlCells + 1
+  ## PLAT-70 Part I (§5.5.3): a variable row's fixed parts — the tag, the
+  ## expander, the value controls and the trailing cell — outside the name
+  ## and value fields.
+
+proc variablesFit*(model: VariablesModel; rows: openArray[VariablesRow];
+                   width: int): TableFit =
+  ## §5.5.3, the terminal's Variables pane: the name field (at least
+  ## `MinimumNameCells`, and at least the deepest shown row's indent and the
+  ## first `MinimumNameCells` of its name; preferred the field's share, or the
+  ## dragged separator) and the value field (at least `MinimumValueCells`,
+  ## the flex column) in what a row `width` cells wide leaves after its fixed
+  ## parts. The type field is the one a narrow row drops (`fieldWidths`).
+  let fields = width - VariablesFixedCells
+  var nameFloor = MinimumNameCells
+  for row in rows:
+    if row.kind == vrkVariable:
+      nameFloor = max(nameFloor,
+                      max(0, row.depth - 1) * IndentCells +
+                      min(cellWidthOf(row.node.name), MinimumNameCells))
+  let share = min(max(fields div 3, MinimumNameCells), MaximumNameCells)
+  var name = FitColumn(name: "name", minUnits: nameFloor,
+                       preferredUnits: max(share, nameFloor))
+  if model.nameCells > 0:
+    # The dragged separator, kept inside the row as PLAT-51 keeps it (a
+    # value field of at least `MinimumValueCells` survives).
+    name.userUnits = max(nameFloor,
+                         min(model.nameCells, fields - MinimumValueCells - 1))
+  let value = FitColumn(name: "value", minUnits: MinimumValueCells,
+                        preferredUnits: MinimumValueCells, flex: 1)
+  fitTable([name, value], max(0, fields), gap = 1)
+
+type
+  VariablesGeometry* = object
+    ## PLAT-70 Part I: the pane's horizontal geometry this frame — what the
+    ## runtime's wheel and bar read, without painting the rows.
+    width*: int
+      ## The cells the rows are shown in (the scrollbar's column excluded).
+    fit*: TableFit
+    view*: HorizontalView
+    barRow*: int
+      ## The SCREEN row of the horizontal bar, -1 when none.
+
+proc variablesGeometry*(model: VariablesModel; area: CellArea): VariablesGeometry =
+  ## The same decisions `paintVariables` makes, in the same order.
+  result.barRow = -1
+  result.width = area.width
+  if area.width <= 0 or area.height <= 1:
+    return
+  let bodyHeight = area.height - 1
+  let rows = model.paneRows()
+  if rows.len == 0:
+    return
+  let overflow = rows.len > bodyHeight and area.width > ScrubberTrackCells
+  result.width = if overflow: area.width - ScrubberTrackCells else: area.width
+  let top = clampScrollTop(model.scrollTop, rows.len, bodyHeight)
+  result.fit = model.variablesFit(rows[top ..< min(rows.len, top + bodyHeight)],
+                                  result.width)
+  result.view = model.hview
+  result.view.settle(result.fit)
+  if result.fit.overflows and bodyHeight > 1:
+    result.barRow = area.row + bodyHeight
+
 proc paintVariables*(g: var StyledGrid; area: CellArea;
                      model: VariablesModel): VariablesScreen =
   ## Paint the pane into `area` of `g`, and report what it painted.
+  ##
+  ## PLAT-70 Part I (Horizontal-Overflow.md §5.5): the rows are laid out at
+  ## the table's width — the pane's while the name and value fields' floors
+  ## fit, wider in SCROLL — into a scratch grid, and the window `[leftCol,
+  ## leftCol + width)` of each is copied to the pane.
   result = VariablesScreen(
     rows: @[], area: area, visible: @[], bodyHeight: 0, totalRows: 0,
     scopeRows: 0, variableRows: 0, moreRows: 0, noteRows: 0, modifiedRows: 0,
     valueColumn: area.col + valueFieldColumn(area.width, model.nameCells),
-    nameColumn: area.col + nameFieldColumn())
+    nameColumn: area.col + nameFieldColumn(), top: 0,
+    contentWidth: area.width, trackCol: -1, tableWidth: area.width,
+    nameCells: model.nameCells, barRow: -1)
   if area.width <= 0 or area.height <= 0:
     return
 
   var spanAt = area.col
-  for span in titleRowSpans(model, area.width):
+  for span in titleRowSpans(model, area.width, g.glyphs):
     g.paint(area.row, spanAt, span.text, span.style)
     spanAt += cellWidthOf(span.text)
 
@@ -782,38 +921,121 @@ proc paintVariables*(g: var StyledGrid; area: CellArea;
       result.rows.add g.rowSpansIn(r, area.col, area.width)
     return
 
-  let bodyHeight = area.height - 1
-  result.bodyHeight = bodyHeight
+  var bodyHeight = area.height - 1
   let rows = model.paneRows()
   result.totalRows = rows.len
 
   if rows.len == 0:
+    result.bodyHeight = bodyHeight
     g.paint(area.row + 1, area.col,
             truncateToCells(EmptyPaneText, area.width), EmptyPaneStyle)
     for r in area.row ..< area.row + area.height:
       result.rows.add g.rowSpansIn(r, area.col, area.width)
     return
 
-  let top = clampScrollTop(model.scrollTop, rows.len, bodyHeight)
-  for i in 0 ..< bodyHeight:
-    let rowIndex = top + i
-    if rowIndex >= rows.len:
-      break
-    let screenRow = area.row + 1 + i
+  # M71 (#838): WHILE THE ROWS OVERFLOW, THE RIGHTMOST COLUMN IS THE PANE'S
+  # SCROLLBAR (Scrollbar-Scrubbers.md §2: a pane whose whole content is in
+  # hand keeps an ordinary scrollbar; §4: the terminal's track is the pane's
+  # rightmost column, inside its own rectangle) and the rows are laid out in
+  # the cells left of it. The population is every row `paneRows` lists — an
+  # open value history's entries included, which is what makes a long
+  # history overflow. Rows that fit keep the whole width.
+  let overflow = rows.len > bodyHeight and area.width > ScrubberTrackCells
+  let width = if overflow: area.width - ScrubberTrackCells else: area.width
+  result.contentWidth = width
+  # PLAT-70 Part I: the fields' fit over the rows the body shows.
+  var top = clampScrollTop(model.scrollTop, rows.len, bodyHeight)
+  let fit = model.variablesFit(rows[top ..< min(rows.len, top + bodyHeight)],
+                               width)
+  var view = model.hview
+  view.settle(fit)
+  if fit.overflows and bodyHeight > 1:
+    dec bodyHeight
+    result.barRow = area.row + 1 + bodyHeight
+    top = clampScrollTop(model.scrollTop, rows.len, bodyHeight)
+  result.bodyHeight = bodyHeight
+  result.top = top
+  result.fit = fit
+  result.hview = view
+  let tableW = width + max(0, fit.contentUnits - fit.viewportUnits)
+  result.tableWidth = tableW
+  let nameCells = fit.widths[0]
+  result.nameCells = nameCells
+  var laidModel = model
+  laidModel.nameCells = nameCells
+  let left = view.leftCol
+  let shift = area.col - left
+  result.valueColumn = shift + valueFieldColumn(tableW, nameCells)
+  result.nameColumn = shift + nameFieldColumn()
+  let direct = left == 0 and tableW == width
+  var table: StyledGrid
+  var line = 0
+  var rowIndex = top
+  while line < bodyHeight and rowIndex < rows.len:
+    let screenRow = area.row + 1 + line
     let modelRow = rows[rowIndex]
-    let spec = rowSpecFor(model, modelRow, area.width)
-    var at = area.col
-    for span in treeRow(spec):
-      g.paint(screenRow, at, span.text, span.style)
-      at += cellWidthOf(span.text)
+    inc rowIndex
+    let spec = rowSpecFor(laidModel, modelRow, tableW)
+    let laid = treeRowLayout(spec, g.glyphs, g.ambiguous)
+    if direct:
+      # The table is the pane (FIT / SHRINK, the view at 0): painted in place,
+      # with no scratch row — the common case keeps its old cost.
+      var at = area.col
+      for span in laid.spans:
+        g.paint(screenRow, at, span.text, span.style)
+        at += cellWidthOf(span.text, g.ambiguous)
+    else:
+      table = newStyledGridLike(g, tableW, 1)
+      var at = 0
+      for span in laid.spans:
+        table.paint(0, at, span.text, span.style)
+        at += cellWidthOf(span.text, g.ambiguous)
+      g.copySlice(screenRow, area.col, table, 0, left, width)
+    var placedCuts: seq[CutCell]
+    for c in laid.cuts:
+      var placed = c
+      placed.row = screenRow
+      placedCuts.add placed
+    result.cuts.add shiftCuts(placedCuts, shift, area.col, area.col + width)
     result.visible.add modelRow
+    inc line
     case modelRow.kind
     of vrkScope: inc result.scopeRows
     of vrkVariable: inc result.variableRows
     of vrkMore: inc result.moreRows
-    of vrkNote, vrkHistory, vrkOrigin, vrkAddWatch: inc result.noteRows
+    of vrkNote, vrkHistory, vrkOrigin, vrkAddWatch, vrkDetail:
+      inc result.noteRows
     if spec.modified:
       inc result.modifiedRows
+    # PLAT-70 Part B (Horizontal-Overflow.md §5.3): the open row's full value
+    # under it, wrapped inside the value column, capped at `DetailMaxLines`
+    # with the copy hint — rows that are painted, not pane rows.
+    if modelRow.kind == vrkVariable and
+       model.detail.isOpen(DetailPaneName, modelRow.node.path):
+      let valueAt = max(area.col, shift + valueFieldColumn(tableW, nameCells))
+      let cells = max(1, min(fieldWidths(tableW, nameCells).value,
+                             area.col + width - valueAt))
+      let view = detailView(model.fullValueOf(modelRow.node), cells,
+                            bodyHeight, model.copyChord, terminalMeasure)
+      for text in view.lines:
+        if line >= bodyHeight:
+          break
+        let detailRow = area.row + 1 + line
+        g.paint(detailRow, valueAt, padRight(text, cells),
+                DetailValueStyle)
+        result.visible.add VariablesRow(kind: vrkDetail, scope: modelRow.scope,
+                                        depth: modelRow.depth,
+                                        node: modelRow.node, note: text)
+        result.detailRows.add detailRow
+        inc result.noteRows
+        inc line
+  if overflow:
+    result.trackCol = area.col + width
+    g.paintVerticalScrubber(result.trackCol, area.row + 1, bodyHeight,
+                            result.scrubberOf)
+  if result.barRow >= 0:
+    # §4.7: the bar on the body's last row; the corner is neither track's.
+    paintHorizontalBar(g, result.barRow, area.col, width, view.barModel)
 
   for r in area.row ..< area.row + area.height:
     result.rows.add g.rowSpansIn(r, area.col, area.width)
@@ -874,17 +1096,20 @@ proc controlAt*(screen: VariablesScreen; model: VariablesModel;
                 screenRow, col: int): VariablesControl =
   ## PLAT-51: which of a variable row's controls a press at `col` is on —
   ## the history button, the origin badge, a watch's remove control — or the
-  ## name column's separator (a drag resizes it).
+  ## name column's separator (a drag resizes it). Found in the width the rows
+  ## were laid out in (`contentWidth`: M71's scrollbar column excluded).
   let (ok, row) = screen.rowAtScreenRow(screenRow)
   if not ok or row.kind != vrkVariable:
     return vcNone
-  let at = screen.area.col + controlColumn(screen.area.width)
+  # PLAT-70 Part I: the rows were laid out at `tableWidth` and drawn from
+  # the view's `leftCol`.
+  let origin = screen.area.col - screen.hview.leftCol
+  let at = origin + controlColumn(screen.tableWidth)
   if col == at: return vcHistory
   if col == at + 1: return vcOrigin
   if col == at + 2 and row.scope == skWatches and row.depth == 1:
     return vcRemoveWatch
-  if col == screen.area.col + nameSeparatorColumn(screen.area.width,
-                                                  model.nameCells):
+  if col == origin + nameSeparatorColumn(screen.tableWidth, screen.nameCells):
     return vcNameSeparator
   vcNone
 

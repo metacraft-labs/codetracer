@@ -1,0 +1,19 @@
+{
+  "canonical": true,
+  "envelope": {
+    "batch_seq": 3,
+    "build_hash": "9c1e4b7a2d5f8e3c6b9a0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a",
+    "dropped": [],
+    "final": true,
+    "first_seq": 0,
+    "last_seq": 0,
+    "session_id": "5f0c2a9e7b6d4e1f8a3c9b2d1e0f7a6b"
+  },
+  "records": [
+    {
+      "last_seq": "9",
+      "reason": 1,
+      "record": "End"
+    }
+  ]
+}

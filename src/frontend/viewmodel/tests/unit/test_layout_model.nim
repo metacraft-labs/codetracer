@@ -169,6 +169,20 @@ suite "Layout model — activation":
     check l.find(paneEditor).weight == 7.5
     check not l.setWeight(paneShell, 1.0)
 
+  test "setWeight on a pane in a stack resizes the stack":
+    # The region a stacked pane occupies is its stack's; the leaf's own
+    # weight sizes nothing, so a resize recorded there was lost (an editor
+    # front-end's resized State pane came back at its old width).
+    let l = defaultReplayLayout()
+    let leaf = l.find(paneState)
+    check not leaf.isNil
+    let stack = l.parentOf(leaf)
+    check not stack.isNil and stack.kind == lnStack
+    let leafBefore = leaf.weight
+    check l.setWeight(paneState, 61.0)
+    check stack.weight == 61.0
+    check leaf.weight == leafBefore
+
 # ---------------------------------------------------------------------------
 # Adding and removing
 # ---------------------------------------------------------------------------

@@ -85,12 +85,26 @@ type
     imageRef*: string
     flavour*: string
 
+  SessionPlacement* = enum
+    ## Where the debugging session lives (Shared-DOM-Front-Ends D2). The bundle
+    ## is the same either way; the deployment says which it is.
+    spPage = "page"
+      ## The page builds and owns the session: the desktop, the static web
+      ## build and Noir Studio, whose backend runs in the browser. First, so it
+      ## is the zero value: a deployment that says nothing keeps the session in
+      ## the page, as every deployment did before this field existed.
+    spServer = "server"
+      ## The server owns the session and the page mirrors it over the socket
+      ## (`ct host`, the container deployment).
+
   SessionCoordinates* = object
     ## Which trace, and where in it. Changes every session, which is why it is
     ## not in the entry document.
     traceId*: string
     projectId*: string
     runtime*: ProjectRuntime
+    placement*: SessionPlacement
+      ## Whether this page or its server owns the session.
 
   ConnectionParameters* = object
     ## The two fields `views/server_index.ejs` interpolates today, and the
@@ -136,7 +150,8 @@ proc encodeDescriptor*(d: SessionDescriptor): JsonNode =
     "session": %*{
       "traceId": d.session.traceId,
       "projectId": d.session.projectId,
-      "runtime": encodeRuntime(d.session.runtime)},
+      "runtime": encodeRuntime(d.session.runtime),
+      "placement": $d.session.placement},
     "connection": %*{
       "frontendSocketPort": d.connection.frontendSocketPort,
       "frontendSocketParameters": d.connection.frontendSocketParameters,
@@ -186,6 +201,18 @@ proc decodeRuntime*(n: JsonNode): ProjectRuntime =
       "empty reference allocates from the substrate's own base image, which " &
       "is the wrong environment presented as a working one")
 
+proc decodePlacement*(name: string): SessionPlacement =
+  ## An absent placement is `spPage`, the arrangement every deployment had
+  ## before the field. An unknown one RAISES: guessing would either leave a
+  ## page without a session or give it a second one beside the server's.
+  if name.len == 0:
+    return spPage
+  for p in SessionPlacement:
+    if $p == name:
+      return p
+  raise newException(DescriptorError,
+    "'" & name & "' is not a session placement this bundle knows")
+
 proc decodeDescriptor*(text: string): SessionDescriptor =
   var node: JsonNode
   try:
@@ -206,6 +233,7 @@ proc decodeDescriptor*(text: string): SessionDescriptor =
   result.session.projectId = optStr(session, "projectId")
   result.session.runtime = decodeRuntime(
     if session.isNil: nil else: session{"runtime"})
+  result.session.placement = decodePlacement(optStr(session, "placement"))
 
   let connection = node{"connection"}
   result.connection.frontendSocketPort = optInt(connection,

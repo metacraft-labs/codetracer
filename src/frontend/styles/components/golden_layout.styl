@@ -431,7 +431,7 @@ TAB_CORNER_RADIUS = 0.375rem
 // surface no longer changes — and a sub-pixel stroke is antialiased down to
 // roughly half strength, which read as no indicator at all against the panel.
 SELECTED_PANEL_BORDER = 0.0625rem
-SELECTED_PANEL_BORDER_COLOR = colors-ui-border-primary
+SELECTED_PANEL_BORDER_COLOR = colors-ui-border-action
 
 // A last tab sits flush with its panel's right edge, so it runs straight down
 // into the body: there is no corner to round, and no room to its right for a
@@ -512,3 +512,9 @@ SELECTED_PANEL_BORDER_COLOR = colors-ui-border-primary
     // hands back a custom property's `em` token unresolved, and the builder
     // needs pixels.  Draws nothing — an SVG path has no border to round.
     border-top-left-radius: LAYOUT_TAB_CONNECTOR_RADIUS
+
+// PLAT-68: a pane is focusable (`tabindex="-1"`, `ui/layout.markPaneScope`)
+// so a click into its body puts the keyboard's scope there; the selected
+// panel already has its own outline, so the browser's focus ring is not drawn.
+[data-scope-kind="pane"]:focus
+  outline: none

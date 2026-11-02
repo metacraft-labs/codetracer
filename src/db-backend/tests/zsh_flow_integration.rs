@@ -22,11 +22,11 @@ fn get_zsh_source_path() -> PathBuf {
 fn create_zsh_flow_config() -> FlowTestConfig {
     let mut expected_values = HashMap::new();
     // a=10, b=32, sum_val=42, doubled=84, final_result=94
-    expected_values.insert("a".to_string(), 10);
-    expected_values.insert("b".to_string(), 32);
-    expected_values.insert("sum_val".to_string(), 42);
-    expected_values.insert("doubled".to_string(), 84);
-    expected_values.insert("final_result".to_string(), 94);
+    expected_values.insert("a".to_string(), "10".to_string());
+    expected_values.insert("b".to_string(), "32".to_string());
+    expected_values.insert("sum_val".to_string(), "42".to_string());
+    expected_values.insert("doubled".to_string(), "84".to_string());
+    expected_values.insert("final_result".to_string(), "94".to_string());
 
     FlowTestConfig {
         source_path: get_zsh_source_path(),
@@ -41,7 +41,7 @@ fn create_zsh_flow_config() -> FlowTestConfig {
         ],
         // Function names and command names should NOT appear as variables
         excluded_identifiers: vec!["print".to_string(), "calculate_sum".to_string()],
-        expected_values,
+        expected_values: expected_values.into(),
     }
 }
 

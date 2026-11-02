@@ -299,6 +299,25 @@ case "${build_text}" in
 	;;
 esac
 
+# AND THE ENGINE OPENED IT. "Opening a replay session" is what the BUILD pane
+# says when it hands the trace over, not what the engine said back. The engine
+# answers `configurationDone` by opening the trace from the virtual filesystem,
+# and refuses one it cannot read with a sentence naming why. Before this
+# assertion that refusal was visible only as six empty-pane failures below —
+# measured with the tracer module published at ide.codetracer.com, whose
+# version-6 `meta.dat` the engine built from this commit refuses — and none of
+# them named the cause. This one does, so every pane assertion after it can be
+# read against it. A refused trace gets TWO `configurationDone` responses — an
+# acknowledgement, then the refusal — and the probe keeps the first refusal
+# among them, so the acknowledgement cannot pass for an open.
+if [ "$(q replayOpen.answered)" != "True" ]; then
+	ck fail "the replay engine never answered configurationDone, so no trace was opened"
+elif [ "$(q replayOpen.success)" = "True" ]; then
+	ck ok "the replay engine opened the trace (none of $(q replayOpen.responses) configurationDone response(s) refused it)"
+else
+	ck fail "the replay engine REFUSED the trace: $(q replayOpen.message | cut -c1-300)"
+fi
+
 # NON-VACUITY FOR THE ASSERTION ABOVE, and the other half of the same claim.
 # Now that a 2-second appearance satisfies it, that assertion alone would no
 # longer notice an overlay that went up and STAYED up — a transparent
@@ -470,7 +489,9 @@ echo
 # other half of the claim the pane's replay-session message makes, and it is
 # what keeps that message's assertion non-vacuous now that the message is
 # sampled during its 2-second window rather than at the end of the run.
-expect_count 17
+# 17 -> 18: arm C gained "the replay engine opened the trace", which names the
+# engine's refusal when every pane after it is empty for that one reason.
+expect_count 18
 if [ "${failures}" -eq 0 ]; then
 	printf 'RESULT: PASSED — %d assertion(s) over ui.js %s.\n' "${checks}" "${ui_digest}"
 	exit 0

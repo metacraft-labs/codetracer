@@ -57,7 +57,7 @@ import ../apps/app_wide_glyphs as wideApp
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 79
+const ExpectedAssertions = 80
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40)]
@@ -205,22 +205,27 @@ suite "CTUI-2: cross-tier snapshot equivalence":
       ck a.rune == b.rune
       ck a.fg == b.fg
 
-  test "the combining mark is dropped before the bytes are emitted":
-    # WHAT THE HOSTILE CASE ACTUALLY PROVES. isonim-tui's `rawCellsForEntry`
-    # skips every rune of display width 0, so U+0301 never reaches the pty and
-    # both tiers agree about a screen it is absent from. Asserting the current
-    # behaviour rather than letting a green equivalence run imply the stronger
-    # claim: the day the compositor attaches combining marks to their base
-    # cluster, this case goes red and somebody reads the sentence above.
+  test "the combining mark is drawn with its base, and only Tier 1 can see it":
+    # WHAT THE HOSTILE CASE PROVES NOW. Until isonim-tui `7012421` the
+    # compositor skipped every rune of display width 0, U+0301 never reached
+    # the pty, and this case asserted the mark was ABSENT from both tiers — and
+    # said it would go red the day the compositor attached combining marks to
+    # their base. It did, and it is the better behaviour: the glyph a text
+    # holds is the glyph drawn. Tier 1's text carries the mark; Tier 2 reads
+    # one rune per cell and cannot, which is the
+    # `zero-width-runes-have-no-tier-2-representation` exclusion — exercised
+    # here, by name, rather than hypothetical.
     let dir = dualSnapCaseDir("app_wide_glyphs-120x40")
     let tier1 = readFile(dir / "tier1" / "plaintext.txt")
     let tier2 = readFile(dir / "tier2" / "plaintext.txt")
     # Positive twin first, through the same strings: a plaintext that failed to
-    # be written would satisfy both "does not contain" assertions for free.
-    ck tier1.contains("世界")
-    ck tier2.contains("世界")
-    ck not tier1.contains(wideApp.CombiningAcute)
+    # be written would satisfy a "does not contain" assertion for free.
+    ck tier1.contains("世")
+    ck tier2.contains("世")
+    ck tier1.contains("世" & wideApp.CombiningAcute)
     ck not tier2.contains(wideApp.CombiningAcute)
+    # …and with the exclusion applied the two texts are the same text.
+    ck withoutZeroWidthRunes(tier1).strip() == tier2.strip()
 
   test "wide glyphs occupy two columns on both sides of the comparison":
     # The defect this milestone found, asserted directly rather than only

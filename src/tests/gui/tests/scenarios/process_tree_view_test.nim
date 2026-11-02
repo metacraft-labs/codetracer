@@ -103,7 +103,7 @@ proc renderedTree(model: ProcessTreeModel;
   ## Render through IsoNim's own headless renderer — the same view code
   ## the browser runs, minus the browser.
   let r = MockRenderer()
-  r.renderProcessTree(model, callbacks)
+  renderProcessTree[MockRenderer, MockNode](r, model, callbacks)
 
 proc renderedMarkup(model: ProcessTreeModel): string =
   flatten(renderedTree(model))
@@ -259,6 +259,27 @@ suite "M42 §14.8 — process tree projection and click dispatch":
       session.processTreeCallbacks().onSelectProcess(
         "018f0000-0000-7000-8000-backendnode1")
       check bridged.len == 1
+
+      session.dispose()
+      disposeRoot()
+
+  test "process_tree_click_selects_the_clicked_row_not_the_last":
+    # codetracer#860 sweep: the rows are built in a loop, and a handler
+    # closing over a loop-body `let` sends every click to the LAST row --
+    # `backend`, the very row the test above clicks, so it could not see it.
+    # The first and middle rows tell them apart.
+    createRoot proc(disposeRoot: proc()) =
+      let session = makeSession()
+      session.consumeListProcessesEvent(threeTraceListProcessesBody())
+      var selected: seq[string] = @[]
+      let root = renderedTree(session.processTreeModel(),
+        ProcessTreeCallbacks(onSelectProcess: proc(recordingId: string) =
+          selected.add(recordingId)))
+
+      check clickRowWithRole(root, "frontend-js")
+      check clickRowWithRole(root, "frontend-wasm")
+      check selected == @["018f0000-0000-7000-8000-frontendjs01",
+                          "018f0000-0000-7000-8000-frontendwsm1"]
 
       session.dispose()
       disposeRoot()
@@ -444,8 +465,13 @@ suite "M42 §14.8 — State Pane 'Switch process' menu entry":
       check menu[2].label == "Switch process: frontend-js"
       check menu[3].label == "Switch process: frontend-wasm"
 
+      # Each entry switches to its OWN target, the first one too: entries
+      # built in a loop used to share one captured id, so every entry switched
+      # to the last target -- all a lone click on the last entry could see
+      # (codetracer#860 sweep).
+      menu[2].action()
       menu[3].action()
-      check switched == @["rec-fe-wasm"]
+      check switched == @["rec-fe-js", "rec-fe-wasm"]
 
       session.dispose()
       disposeRoot()

@@ -143,9 +143,15 @@ source "${repo_root}/ci/lib/published-asset.sh"
 # is how the control arm ended up with two `shasum` invocations where only one
 # path was checked for existence.
 if command -v shasum >/dev/null 2>&1; then
-	digest_of() { [ -f "$1" ] || return 0; shasum -a 256 "$1" | cut -d' ' -f1; }
+	digest_of() {
+		[ -f "$1" ] || return 0
+		shasum -a 256 "$1" | cut -d' ' -f1
+	}
 elif command -v sha256sum >/dev/null 2>&1; then
-	digest_of() { [ -f "$1" ] || return 0; sha256sum "$1" | cut -d' ' -f1; }
+	digest_of() {
+		[ -f "$1" ] || return 0
+		sha256sum "$1" | cut -d' ' -f1
+	}
 else
 	echo "neither shasum nor sha256sum is on PATH" >&2
 	exit 2

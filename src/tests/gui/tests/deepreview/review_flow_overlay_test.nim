@@ -629,10 +629,9 @@ suite "the values are laid out in the flow view's parallel columns (UD-3)":
   ## UD-3: "The parallel value columns the flow feature uses, rather than
   ## RV-5's single strip."
   ##
-  ## The debugger's `ui/flow.renderFlow` draws one `.flow-parallel-values`
-  ## column per loop iteration, side by side, starting at the iteration the
-  ## slider names (`if index < self.selectedIndex: continue`). These cases pin
-  ## the same shape on the review's side of the same DOM.
+  ## The parallel layout is one `.flow-parallel-values` column per loop
+  ## iteration, side by side, starting at the iteration the slider names.
+  ## These cases pin that shape on the review's side of the DOM.
 
   proc computePlan(file: ct.DeepReviewFileData): ReviewFlowPlan =
     reviewFlowPlan(file, invocationOf(file, "compute", 0))
@@ -659,8 +658,7 @@ suite "the values are laid out in the flow view's parallel columns (UD-3)":
       for column in annotation.columns:
         seen.add(column.iteration)
         selected.add(column.selected)
-    # Starting at the selected pass, exactly as `renderFlow` skips every
-    # iteration below `selectedIndex`.
+    # Starting at the selected pass: every iteration below it is skipped.
     check seen == @[1, 2]
     check selected == @[true, false]
 

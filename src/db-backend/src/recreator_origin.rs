@@ -499,6 +499,7 @@ pub fn run_rr_origin_chain(
                     &probe_path,
                     candidate_source_origin,
                     meta_dat_sources_root,
+                    expr_loader,
                 );
             }
 
@@ -900,25 +901,21 @@ fn track_source_digest(
     probe_path: &std::path::Path,
     origin: SourceOrigin,
     meta_dat_sources_root: Option<&std::path::Path>,
+    expr_loader: &ExprLoader,
 ) {
     let path_str = probe_path.to_string_lossy().to_string();
     if digests.iter().any(|d| d.path == path_str) {
         return;
     }
-    let (origin_kind, digest_path) = match origin {
-        SourceOrigin::BundledMetaData => match meta_dat_sources_root {
-            Some(root) => (
-                SourceOriginKind::BundledMetaData,
-                root.join(probe_path.strip_prefix("/").unwrap_or(probe_path)),
-            ),
-            None => (SourceOriginKind::BundledMetaData, probe_path.to_path_buf()),
-        },
-        SourceOrigin::Filesystem => (SourceOriginKind::Filesystem, probe_path.to_path_buf()),
+    let origin_kind = match origin {
+        SourceOrigin::BundledMetaData => SourceOriginKind::BundledMetaData,
+        SourceOrigin::Filesystem => SourceOriginKind::Filesystem,
         SourceOrigin::Unavailable => return,
     };
-    let bytes = match std::fs::read(&digest_path) {
-        Ok(b) => b,
-        Err(_) => return,
+    // The loader decides which bytes stand for the line: with host reads
+    // off it never reads the recorded path on this host, not even to hash it.
+    let Some(bytes) = expr_loader.source_digest_bytes(probe_path, origin, meta_dat_sources_root) else {
+        return;
     };
     digests.push(SourceDigest {
         path: path_str,

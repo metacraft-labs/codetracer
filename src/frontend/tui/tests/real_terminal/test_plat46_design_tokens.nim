@@ -66,7 +66,9 @@ import ./lifecycle_support
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 161
+const ExpectedAssertions = 154
+  # Nine resolved desktop failure entries no longer contribute issue checks;
+  # the sole native focus exception retains its existing check.
 
 var countedAssertions = 0
 
@@ -151,30 +153,13 @@ const
     ## COUNTED: a new failing pair reddens the sweep until it is filed here
     ## and in the issue.
 
-  DesktopIssue = "codetracer-specs/issues/2026-09-27-desktop-editor-and-focus-contrast-below-aa.md"
-  DesktopParityPairs: array[10, FiledPair] = [
-    (dmDark, dtColorsUiBorderPrimary, dtColorsUiSurfaceBaseCanvas, DesktopIssue),
-    (dmDark, dtEditorThemeRuleComment, dtEditorThemeExecutionLine, DesktopIssue),
-    (dmDark, dtEditorThemeLineNumber, dtEditorThemeGround, DesktopIssue),
-    (dmLight, dtColorsUiBorderPrimary, dtColorsUiSurfaceBaseCanvas, DesktopIssue),
-    (dmLight, dtColorsUiBorderSecondary, dtColorsUiSurfaceBaseCanvas, DesktopIssue),
-    (dmLight, dtColorsEditorActionSecondary, dtEditorThemeExecutionLine, DesktopIssue),
-    (dmLight, dtEditorThemeRuleComment, dtEditorThemeExecutionLine, DesktopIssue),
-    (dmLight, dtEditorThemeLineNumber, dtEditorThemeGround, DesktopIssue),
-    (dmLight, dtEditorThemeRuleString, dtEditorThemeGround, DesktopIssue),
-    (dmLight, dtEditorThemeRuleDefault, dtEditorThemeGround, DesktopIssue)]
-    ## PLAT-47: THE PAIRS THE DESKTOP ITSELF RENDERS BELOW THE FLOOR, which the
-    ## terminal now reproduces because it must EQUAL the desktop: its editor is
-    ## the desktop's Monaco theme (measured resting line numbers 2.04:1, a
-    ## comment on the execution line 3.80:1), and its focused pane carries the
-    ## desktop's selected-panel outline (`ui/border/primary`, 2.01:1 against
-    ## the desktop's own panel, 2.35:1 against the terminal's divider ground).
-    ## Light is opt-in (`--theme=light`; detection never selects it) and its
-    ## editor is the desktop's `codetracerWhite` theme on the ground the
-    ## desktop's light theme measurably draws (its dark panel, #282828). A
-    ## SEPARATE register from the design system's, which does
-    ## not grow: these are the desktop's pairs, filed against the desktop.
-    ## COUNTED, like the other.
+  NativeFocusDecision = "Native-Front-End-Parity.md §2 (owner, 2026-10-05)"
+  NativeFocusPairs: array[1, FiledPair] = [
+    (dmLight, dtColorsUiBorderSecondary, dtColorsUiSurfaceBaseCanvas,
+     NativeFocusDecision)]
+    ## The native focus highlight is intentionally subtler than the desktop's,
+    ## by the owner's explicit request. This sole existing exception is kept
+    ## separate from unresolved design-system defects and from editor text.
 
   ChromeTokens = [dtColorsUiBorderSecondary, dtColorsUiBorderFocus,
                   dtColorsUiBorderPrimary, dtColorsUiDividerSecondary,
@@ -183,7 +168,8 @@ const
                   dtColorsUiTextPrimaryDisabled, dtColorsEditorSyntaxTertiary,
                   dtColorsEditorSyntaxSubtle, dtColorsEditorSyntaxDisabled,
                   dtColorsEditorActionSecondary,
-                  dtEditorThemeLineNumber, dtEditorThemeActiveLineNumber]
+                  dtEditorThemeLineNumber, dtEditorThemeActiveLineNumber,
+                  dtEditorThemeExecutionPointer]
     ## Tokens painted as CHROME (borders, rules, muted captions, line numbers,
     ## de-emphasised code, the gutter's execution pointer), held to WCAG's
     ## 3:1 rather than 4.5:1.
@@ -248,7 +234,7 @@ proc waitForStatus(sess: var TuiTestSession; cols, rows: int; needle: string;
   statusRowText(sess, cols, rows)
 
 proc finish(sess: var TuiTestSession) =
-  sess.send("q")
+  sess.send("\x11")  # Ctrl+Q, the CUA base's quit
   discard sess.waitExit(initDuration(seconds = 15))
   sess.close()
 
@@ -294,8 +280,10 @@ proc readWide(sess: var TuiTestSession): Fidelity =
     result.currentLineBg = hexOfColor(sess.cellAt(execRow, c).bg)
   result.statusBg = hexOfColor(sess.cellAt(rows - 1, cols - 1).bg)
   # The mode indicator, found by its text: since PLAT-49 part B the footer's
-  # auto-hide labels open the status row, and the mode follows them.
-  let modeCol = colOf(sess, rows - 1, cols, "NORMAL")
+  # auto-hide labels open the status row, and the mode follows them. Since
+  # PLAT-68 the label is the base's name (`CUA`) when the base has no modes,
+  # beside the product mode (`CUA [DEBUG]`).
+  let modeCol = colOf(sess, rows - 1, cols, "CUA [")
   result.modeFg = hexOfColor(sess.cellAt(rows - 1, max(0, modeCol)).fg)
   # A pane body: the Variables pane's last column before its separator, three
   # rows under its tab strip (PLAT-49: the strip is the pane's first row).
@@ -309,12 +297,18 @@ proc readWide(sess: var TuiTestSession): Fidelity =
   # The editor body: the last cell of a short source line (line 3 is empty)
   # before the Source pane's separator — found by the separator, because the
   # shared default's Source pane is narrower than a fixed offset.
-  # Searched in the Source pane's own columns (from its `main.py` tab on):
+  # Searched in the Source pane's own columns (from its `calc/main.py` tab on):
   # since PLAT-49 part B the event log's `#` column spells `   3 ` too.
+  # Since 2026-10-17 the lone editor's tab names the file's folder and name
+  # (`product_mode.editorTabLabel`: `calc/main.py`, as the desktop's does),
+  # so the tab is found by `/main.py ` and its start is the space before the
+  # folder.
   var srcRow = -1
-  let tabRow = rowOf(sess, cols, rows, " main.py ")
+  let tabRow = rowOf(sess, cols, rows, "/main.py ")
   if tabRow >= 0:
-    let srcCol = max(0, colOf(sess, tabRow, cols, " main.py ") - 1)
+    let tabText = sess.regionText(tabRow, 0, cols, 1)
+    let lead = max(0, tabText.rfind(' ', last = tabText.find("/main.py ")))
+    let srcCol = max(0, tabText[0 ..< lead].runeLen - 1)
     for r in tabRow + 1 ..< rows:
       if sess.regionText(r, srcCol, 8, 1).contains("   3 "):
         srcRow = r
@@ -368,7 +362,7 @@ proc isFiled(mode: DesignMode; fgHex, bgHex: string): bool =
   for f in FiledContrastFailures:
     if f.mode == mode and hexT(f.fg, mode) == fgHex and hexT(f.bg, mode) == bgHex:
       return true
-  for f in DesktopParityPairs:
+  for f in NativeFocusPairs:
     if f.mode == mode and hexT(f.fg, mode) == fgHex and hexT(f.bg, mode) == bgHex:
       return true
   false
@@ -401,6 +395,12 @@ proc contrastViolations(sess: var TuiTestSession; cols, rows: int;
       # text-contrast floor is not theirs (Scrollbar-Scrubbers.md §4).
       if ch in ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "▎", "▍", "▌", "▋", "▊",
                 "▉"]:
+        continue
+      # PLAT-70 Part H: so is every scrollbar glyph (Scrollbar-Scrubbers.md
+      # §7.2) — a thumb or a track is a shape over the pane's ground, in the
+      # scrollbar tokens of §7.3, and fades through intermediate colours.
+      if ch in ["┃", "╹", "╻", "╿", "╽", "━", "╸", "╺", "╾", "╼", "▐", "▝",
+                "▗", "▖", "▀", "▔", "█", "🮇", "🮈", "🮂", "🮃", "🮄", "🮅", "🮆"]:
         continue
       let fg = hexOfColor(cell.fg)
       let bg = hexOfColor(cell.bg)
@@ -451,15 +451,21 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
       checkpoint(modeName & " read back: " & $f)
       # PLAT-47: the editor is the desktop's Monaco theme. PLAT-51 (the user:
       # both focus contrasts SUBTLER): the focused pane's outline moved from
-      # the desktop's selected-panel colour (ui/border/primary) one step down
+      # the desktop's original neutral selected-panel colour one step down
       # the border ramp, to ui/border/secondary.
       ck f.keywordFg == hexT(dtEditorThemeRuleKeyword, mode)
       ck hexT(dtColorsUiBorderSecondary, mode) in f.ruleFgs
-      ck hexT(dtColorsUiBorderPrimary, mode) notin f.ruleFgs
+      ck hexT(dtColorsUiBorderAction, mode) notin f.ruleFgs
       ck focusedBorders(sess, Wide.cols, Wide.rows,
                         hexT(dtColorsUiBorderSecondary, mode)) > 0
       # PLAT-51: the focused pane's TAB STRIP takes the focus colour as its
-      # ground — one strip row's worth of cells, and nothing else does.
+      # ground — on one row, and nothing else does. PLAT-68: its SELECTED
+      # tab stands apart on its own ground (`srTabActiveFocused`,
+      # ui/surface/primary/default) by the contrast floor, so the focus
+      # colour is the strip's UNSELECTED tabs. On this layout the focused
+      # strip is the side panel's: ` Files ` selected (7 cells on the tab
+      # ground), `VC` beside it (4 cells on the focus colour) — measured
+      # 2026-10-12, both modes.
       var focusGround = 0
       var focusRows: seq[int] = @[]
       for r in 0 ..< Wide.rows:
@@ -470,7 +476,15 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
             if r notin focusRows: focusRows.add r
       checkpoint(modeName & ": " & $focusGround & " cell(s) on the focus " &
                  "colour, rows " & $focusRows)
-      ck focusGround >= 10 and focusRows.len == 1
+      ck focusGround >= 4 and focusRows.len == 1
+      var tabGround = 0
+      if focusRows.len == 1:
+        for c in 0 ..< Wide.cols:
+          if hexOfColor(sess.cellAt(focusRows[0], c).bg) ==
+             hexT(dtColorsUiSurfacePrimaryDefault, mode):
+            inc tabGround
+      checkpoint(modeName & ": " & $tabGround & " selected-tab cell(s)")
+      ck tabGround >= 7
       ck f.statusBg == hexT(dtColorsUiSurfaceBaseRaised, mode)
       ck f.modeFg == hexT(dtColorsUiTextSuccessPrimary, mode)
       ck f.currentLineBg == hexT(dtEditorThemeExecutionLine, mode)
@@ -479,16 +493,13 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
       # DELIVERABLE 8: NO CELL shows the terminal's own background.
       ck f.cells == Wide.cols * Wide.rows
       ck f.unfilled == 0
-      # THE EDITOR SITS WHERE THE DESKTOP'S DOES (PLAT-47). Dark: on the
-      # pane's own surface — the desktop renders Monaco transparent over its
-      # pane (PLAT-46 had kept the two apart by OKLab distance). Light: on the
-      # ground the desktop's light theme MEASURABLY draws, its dark panel
-      # (`plat47-desktop-parity-light.electron.json`), which is not the design
-      # system's light panel the terminal's chrome uses.
-      if mode == dmDark:
-        ck f.editorBg == f.panelBg
-      else:
-        ck f.editorBg != f.panelBg
+      # THE EDITOR SITS WHERE THE DESKTOP'S DOES (PLAT-47): on the pane's own
+      # surface, in both modes — the desktop renders Monaco transparent over
+      # its pane (PLAT-46 had kept the two apart by OKLab distance), and its
+      # light theme paints that pane from the design system's Light palette
+      # (`plat47-desktop-parity-light.electron.json` measures it), the same
+      # light panel the terminal's chrome uses.
+      ck f.editorBg == f.panelBg
       # CONTRAST, over every painted pair on this screen.
       var pairs = 0
       let bad = contrastViolations(sess, Wide.cols, Wide.rows, mode, pairs)
@@ -546,10 +557,10 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
         inc genuine
       ck f.issue.startsWith("codetracer-specs/issues/2026-09-26-design-system-")
     ck genuine == FiledContrastFailures.len
-    # …and the desktop's own pairs (PLAT-47), on the same terms.
-    ck DesktopParityPairs.len == 10
+    # The sole deliberately subtle native focus pair stays below the floor.
+    ck NativeFocusPairs.len == 1
     var desktopGenuine = 0
-    for f in DesktopParityPairs:
+    for f in NativeFocusPairs:
       let ratio = contrastRatio(parseHexColour(hexT(f.fg, f.mode)),
                                 parseHexColour(hexT(f.bg, f.mode)))
       let floor = if f.fg in ChromeTokens: 3.0 else: 4.5
@@ -557,8 +568,8 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
         checkpoint("NOT A FAILURE: " & $f & " ratio " & $ratio)
       else:
         inc desktopGenuine
-      ck f.issue == DesktopIssue
-    ck desktopGenuine == DesktopParityPairs.len
+      ck f.issue == NativeFocusDecision
+    ck desktopGenuine == NativeFocusPairs.len
 
   test "OSC 11: a light answer is REPORTED and still paints Dark; a dark answer Dark":
     # PLAT-47: the user's decision of 2026-09-27 — background detection does
@@ -753,7 +764,14 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
         let lines = capture.splitLines()
         if lines.len >= paneRows:
           status = lines[paneRows - 1]
-          if status.contains("NORMAL") and not status.contains("opening"):
+          # The two cases that read the SOURCE's colours also wait for the
+          # source: a startup remedy notice (tmux's `extended-keys` one, since
+          # the terminal is told its key protocol) replaces the "opening …"
+          # progress text before the source is drawn, and a capture taken then
+          # has no keyword to find. `default` reads the status line's notice,
+          # which the position text later crowds to the line's edge.
+          if status.contains("[DEBUG]") and not status.contains("opening") and
+             (name == "default" or capture.contains("def add")):
             break
       checkpoint(name & " status: " & status.substr(0, 400))
       case name
@@ -762,7 +780,10 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
         ck status.contains("tmux withholds 24-bit colour")
         ck not capture.contains("38;2;")
       of "rgb":
-        ck not status.contains("tmux withholds")
+        # The COLOUR remedy is gone. (Since PLAT-68 the status line may also
+        # name tmux's `extended-keys` remedy — a different axis this session's
+        # tmux leaves at its default, off.)
+        ck not status.contains("tmux withholds 24-bit colour")
         let kw = parseHexColour(hexT(dtEditorThemeRuleKeyword, dmDark))
         ck capture.contains("38;2;" & $kw.r & ";" & $kw.g & ";" & $kw.b)
       else:
@@ -770,8 +791,8 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
         # (PLAT-47, `AutoDetectSelectsLight`) still painted Dark.
         let ed = parseHexColour(hexT(dtEditorThemeGround, dmDark))
         ck capture.contains("48;2;" & $ed.r & ";" & $ed.g & ";" & $ed.b)
-        # The LIGHT panel is the marker: the light editor's ground is the
-        # desktop's measured #282828, the same as the dark one.
+        # The LIGHT panel is the marker: it is the light editor's ground and
+        # the light chrome's, and nothing in the Dark mode paints it.
         let light = parseHexColour(hexT(dtColorsUiSurfaceBasePanel, dmLight))
         ck not capture.contains("48;2;" & $light.r & ";" & $light.g & ";" &
                                 $light.b)

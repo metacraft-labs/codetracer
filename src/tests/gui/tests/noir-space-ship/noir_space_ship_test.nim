@@ -1,7 +1,7 @@
 ## test_noir_space_ship.nim
 ##
 ## Headless ViewModel equivalents of the Playwright Noir Space Ship GUI tests
-## from ``tsc-ui-tests/tests/noir-space-ship/noir-space-ship.spec.ts``.
+## from ``src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts``.
 ##
 ## Each test uses HeadlessDebugSession with a real replay-server backend and
 ## the actual noir_space_ship trace.  Instead of verifying DOM elements, these
@@ -23,7 +23,8 @@
 ##                                     multiple positions
 ##
 ## Prerequisites:
-##   - replay-server built: ``src/build-debug/bin/replay-server``
+##   - replay-server built, anywhere ``src/common/replay_server_path.nim``
+##     searches (``REPLAY_SERVER_BIN`` overrides)
 ##   - ct binary built: ``src/build-debug/bin/ct``
 ##   - A noir_space_ship trace recorded (or the test will record one)
 ##
@@ -35,6 +36,7 @@ import vm_test_helpers
 import isonim/core/[computation, signals]
 import isonim/viewmodel
 import headless_session
+import ../../../../common/replay_server_path   # the one search order
 import store/types
 import viewmodels/[calltrace_vm, scratchpad_vm, trace_log_vm]
 
@@ -49,16 +51,12 @@ proc repoRoot(): string =
   currentSourcePath().parentDir.parentDir.parentDir.parentDir.parentDir.parentDir
 
 proc findReplayServer(): string =
-  ## Locate the replay-server binary.
-  let envBin = getEnv("REPLAY_SERVER_BIN", "")
-  if envBin.len > 0 and fileExists(envBin):
-    return envBin
-  let candidate = repoRoot() / "src" / "build-debug" / "bin" / "replay-server"
-  if fileExists(candidate):
-    return candidate
-  raise newException(IOError,
-    "Could not find replay-server binary. Set REPLAY_SERVER_BIN or " &
-    "build it with 'cargo build' in src/db-backend/. Tried: " & candidate)
+  ## The engine `src/common/replay_server_path` resolves -- the one search
+  ## order the native front-ends use too -- or an `IOError` naming every path
+  ## searched, because this suite cannot run without one.
+  result = locateReplayServer()
+  if result.len == 0:
+    raise newException(IOError, missingReplayServerMessage())
 
 proc findCtFile(dir: string): string =
   for kind, path in walkDir(dir):
@@ -1559,7 +1557,7 @@ suite "Noir Space Ship: calltrace search":
     session.requestAndLoadCalltrace(depth = 30)
 
     # Use the CalltraceVM's search feature to find "main".
-    session.session.calltraceVM.setViewportHeight(50)
+    session.session.calltraceVM.setViewport(session.session.calltraceVM.viewport.val.withRows(50))
     session.session.calltraceVM.setSearchQuery("main")
 
     # Drain reactive updates.

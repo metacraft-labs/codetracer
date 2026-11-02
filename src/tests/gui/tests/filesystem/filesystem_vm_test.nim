@@ -9,6 +9,17 @@
 ## - toggleExpanded / expandPath / collapsePath / isExpanded
 ##   (twisty / jstree-open-state mirror).
 ## - setDiffEntries (legacy ``data.startOptions.diff.files`` read).
+## - A root load that fails or comes back empty (#785): the pane must end on
+##   a tree, an empty state or an error, never on a permanent "Loading...".
+##   The view is rendered through ``MockRenderer`` (isonim/testing/mock_dom),
+##   the in-memory DOM the headless view tests use, because the assertion is
+##   about which overlay the user sees, and only the view decides that.
+## - The roots an imported trace's file tree is built from (#785).  The rule
+##   is pure; the payload is described by a predicate instead of a directory
+##   on disk, so each case states exactly which payload folders hold files.
+## - Where a lazily loaded payload folder is read (`payloadPathOf` /
+##   `payloadReadPathFor`): a location relative to `files/`, refused when it
+##   is empty, absolute or leaves `files/` (`..`).
 ##
 ## DR-R8 removed ``setDeepReview`` / ``deepReviewFiles`` /
 ## ``FilesystemDeepReviewFile`` and the "FilesystemVM deep review" suite that
@@ -26,7 +37,7 @@
 ## Compile and run:
 ##   nim c -r src/tests/gui/tests/filesystem/filesystem_vm_test.nim
 
-import std/[sets, unittest]
+import std/[sets, strutils, tables, unittest]
 import vm_test_helpers
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
@@ -35,6 +46,8 @@ import backend/mock_backend
 import store/types
 import store/replay_data_store
 import viewmodels/filesystem_vm
+import views/isonim_filesystem_view
+import isonim/testing/mock_dom
 import ../../../../common/trace_source_paths
 
 # ---------------------------------------------------------------------------
@@ -248,6 +261,106 @@ suite "lazy file-tree content roots (#574)":
     # The synthetic container root is a grouping node, not a folder.
     check not isAncestorPathOf("", "/proj/main.rs")
     check not isAncestorPathOf("/proj", "")
+
+suite "payload locations of lazily loaded folders":
+  ## A trace payload's Files tree arrives one level at a time
+  ## (`Viewport-Driven-Loading.md` § V5, codetracer-pm issue
+  ## 2026-10-21-filesystem-pane-renders-the-whole-enclosing-checkout-
+  ## expanded-and-freezes-the-window.md).  Each payload node carries the
+  ## place it was read from (`payloadPath`), and the lazy load of a folder
+  ## reads from there again.  The value comes back from the renderer, so the
+  ## index process may only follow it INSIDE the payload.
+
+  const filesRoot = "/traces/trace-7/files"
+
+  test "a node's payload location is relative to files/":
+    check payloadPathOf(filesRoot, "/traces/trace-7/files/src") == "src"
+    check payloadPathOf(filesRoot, "/traces/trace-7/files/home/dev/p/lib") ==
+      "home/dev/p/lib"
+    check payloadPathOf("D:\\traces\\t\\files", "D:\\traces\\t\\files\\src\\a") ==
+      "src/a"
+
+  test "a node outside the payload has no payload location":
+    check payloadPathOf(filesRoot, "/home/dev/p/src") == ""
+    check payloadPathOf(filesRoot, filesRoot) == ""
+    check payloadPathOf(filesRoot, "/traces/trace-7/filesx/src") == ""
+    check payloadPathOf("", "/traces/trace-7/files/src") == ""
+
+  test "a relative payload location is read below files/":
+    check payloadReadPathFor(filesRoot, "src") == "/traces/trace-7/files/src"
+    check payloadReadPathFor(filesRoot, "home/dev/p/lib") ==
+      "/traces/trace-7/files/home/dev/p/lib"
+    check payloadReadPathFor(filesRoot & "/", "src\\lib") ==
+      "/traces/trace-7/files/src/lib"
+    check payloadReadPathFor(filesRoot, "./src//lib/") ==
+      "/traces/trace-7/files/src/lib"
+
+  test "the location round-trips through payloadPathOf":
+    let readPath = "/traces/trace-7/files/home/dev/p/src"
+    check payloadReadPathFor(filesRoot, payloadPathOf(filesRoot, readPath)) ==
+      readPath
+
+  test "an empty location, or no payload, is refused":
+    check payloadReadPathFor(filesRoot, "") == ""
+    check payloadReadPathFor(filesRoot, ".") == ""
+    check payloadReadPathFor(filesRoot, "/") == ""
+    check payloadReadPathFor("", "src") == ""
+
+  test "a location with a .. segment is refused":
+    check payloadReadPathFor(filesRoot, "..") == ""
+    check payloadReadPathFor(filesRoot, "../trace-8/files/src") == ""
+    check payloadReadPathFor(filesRoot, "src/../../../etc") == ""
+    check payloadReadPathFor(filesRoot, "src\\..\\..\\etc") == ""
+    # Even one that would land back inside the payload.
+    check payloadReadPathFor(filesRoot, "src/../src") == ""
+
+  test "an absolute location is refused":
+    check payloadReadPathFor(filesRoot, "/etc") == ""
+    check payloadReadPathFor(filesRoot, "/traces/trace-7/files/src") == ""
+    check payloadReadPathFor(filesRoot, "\\etc") == ""
+    check payloadReadPathFor(filesRoot, "C:\\Windows") == ""
+    check payloadReadPathFor(filesRoot, "C:/Windows") == ""
+    check payloadReadPathFor(filesRoot, "C:Windows") == ""
+    check payloadReadPathFor(filesRoot, "\\\\server\\share") == ""
+
+  test "a location with a NUL byte is refused":
+    check payloadReadPathFor(filesRoot, "src\0/x") == ""
+
+suite "file-tree ancestors of the active file":
+  ## `isTreeAncestorOf`, which reveal-active-file uses to match a tree node
+  ## (absolute, or relative for a payload root such as `src`) against the
+  ## absolute path the debugger reports.
+
+  test "a relative tree folder matches an absolute target on segment boundaries":
+    # A payload root is relative (`src`); the debugger's path is absolute.
+    check isTreeAncestorOf("src", "/home/u/proj/src/main.nr")
+    check isTreeAncestorOf("src/sub", "/home/u/proj/src/sub/deep.nr")
+    check isTreeAncestorOf("src/", "/home/u/proj/src/main.nr")
+    check isTreeAncestorOf("./src", "/home/u/proj/src/main.nr")
+    # Absolute folders keep the strict-prefix rule.
+    check isTreeAncestorOf("/home/u/proj/src", "/home/u/proj/src/main.nr")
+    check not isTreeAncestorOf("/home/u/other/src", "/home/u/proj/src/main.nr")
+
+  test "a relative tree folder does not match a partial segment or itself":
+    check not isTreeAncestorOf("src", "/x/mysrc/a.nr")
+    check not isTreeAncestorOf("src", "/x/srcs/a.nr")
+    check not isTreeAncestorOf("src/sub", "/x/src/subway/a.nr")
+    check not isTreeAncestorOf("lib", "/home/u/proj/src/main.nr")
+    # A file is not the ancestor of itself.
+    check not isTreeAncestorOf("src/main.nr", "/home/u/proj/src/main.nr")
+    # Empty paths are never ancestors.
+    check not isTreeAncestorOf("", "/home/u/proj/src/main.nr")
+    check not isTreeAncestorOf("src", "")
+
+  test "Windows separators and drive letters are matched as segments":
+    check isTreeAncestorOf("src", "C:\\Users\\u\\proj\\src\\main.nr")
+    check isTreeAncestorOf("src\\sub", "C:\\Users\\u\\proj\\src\\sub\\deep.nr")
+    check not isTreeAncestorOf("src", "C:\\Users\\u\\mysrc\\main.nr")
+    check isTreeAncestorOf("C:\\Users\\u\\proj", "C:/Users/u/proj/src/main.nr")
+
+  test "a relative target keeps the prefix rule":
+    check isTreeAncestorOf("src", "src/main.nr")
+    check not isTreeAncestorOf("src", "lib/src/main.nr")
 
 suite "FilesystemVM initial state":
 
@@ -540,8 +653,8 @@ suite "FilesystemVM reveals the active file":
       dispose()
 
   test "onFolderExpanded fires for each ancestor so lazy subtrees load":
-    # Folders deeper than the edit-mode depth limit arrive as
-    # "Loading..." stubs; only the ``onFolderExpanded`` bridge asks the
+    # Every folder below a root's own entries arrives as a
+    # "Loading..." stub (one level per load); only the ``onFolderExpanded`` bridge asks the
     # index process for their children.  A bulk ``expandedPaths`` write
     # would mark them open and leave them empty, so the ordering AND the
     # per-ancestor callback are both load-bearing.
@@ -563,8 +676,8 @@ suite "FilesystemVM reveals the active file":
       dispose()
 
   test "a lazily filled subtree expands the next-deeper ancestor":
-    # In folder/edit mode the tree is only loaded two levels deep, so
-    # ``/proj/src/db`` is not in the tree at first.  When the index
+    # The tree is listed one level per load, so ``/proj/src/db`` is not
+    # in the tree at first.  When the index
     # process answers ``load-path-content`` the bridge re-publishes the
     # tree, and the newly revealed ancestor must expand in turn.
     createRoot proc(dispose: proc()) =
@@ -574,7 +687,7 @@ suite "FilesystemVM reveals the active file":
       vm.onFolderExpanded = proc(path: string) =
         expandedOrder.add(path)
 
-      # Depth-limited tree: ``/proj/src`` still shows the stub child.
+      # ``/proj/src`` still shows the stub child.
       vm.setRoot(makeSourceFoldersRoot(@[
         makeEntry("proj", path = "/proj", isFolder = true, children = @[
           makeEntry("src", path = "/proj/src", isFolder = true, children = @[
@@ -597,6 +710,129 @@ suite "FilesystemVM reveals the active file":
       check vm.isExpanded("/proj/src/db")
 
       dispose()
+
+  test "a relative payload root reveals an absolute active file one answer at a time":
+    # What a Noir recording really shows (measured in the GUI on the
+    # noir_example and noir_space_ship traces): the tree's root is the
+    # payload folder `src`, whose nodes carry RELATIVE paths (`src`,
+    # `src/main.nr`), while the debugger reports the ABSOLUTE path it was
+    # recorded at (`/…/test-programs/noir_space_ship/src/main.nr`).  When a
+    # payload was walked whole every folder arrived expanded and hid the
+    # mismatch; with one level per load the reveal must match the relative
+    # folders itself, or a file below a stub is never shown.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      var listed = false
+
+      proc publish() =
+        let sub =
+          if listed:
+            makeEntry("sub", path = "src/sub", isFolder = true, children = @[
+              makeEntry("deep.nr", path = "src/sub/deep.nr"),
+              makeEntry("notes.md", path = "src/sub/notes.md")])
+          else:
+            makeEntry("sub", path = "src/sub", isFolder = true,
+                      children = @[makeEntry("Loading...", path = "")])
+        vm.setRoot(makeSourceFoldersRoot(@[
+          makeEntry("src", path = "src", isFolder = true, children = @[
+            sub, makeEntry("main.nr", path = "src/main.nr")]),
+        ]))
+
+      var requested: seq[string] = @[]
+      var pending: seq[string] = @[]
+      vm.onFolderExpanded = proc(path: string) =
+        requested.add path
+        pending.add path
+
+      publish()
+      store.updateDebuggerPosition(rrTicks = 1'u64,
+                                   file = "/home/u/proj/src/sub/deep.nr",
+                                   line = 3)
+      var answers = 0
+      while pending.len > 0 and answers < 10:
+        let path = pending[0]
+        pending.delete(0)
+        inc answers
+        if path == "src/sub" and not listed:
+          listed = true
+          publish()
+
+      check requested == @["src", "src/sub"]
+      check vm.isExpanded("src")
+      check vm.isExpanded("src/sub")
+      check not vm.isExpanded("src/sub/deep.nr")
+
+      dispose()
+
+  test "a tree listed one level per load reveals the file one answer at a time":
+    # Every folder below a root's own entries arrives as a "Loading..."
+    # stub, for a trace payload as for the live disk
+    # (`Viewport-Driven-Loading.md` § V5; codetracer-pm issue 2026-10-21-
+    # filesystem-pane-renders-the-whole-enclosing-checkout-expanded-and-
+    # freezes-the-window).  A file three folders below the root therefore
+    # needs three round-trips, each started by the previous answer.  The
+    # index process is played by hand: a request ``onFolderExpanded`` makes
+    # is answered afterwards, as the IPC answer is, by publishing the tree
+    # with that folder listed — what ``ui_js.onUpdatePathContent`` →
+    # ``syncLegacyFilesystemIntoVM`` does.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let chain = @["/work/src", "/work/src/game", "/work/src/game/ship"]
+      var listed = 0
+
+      proc folderAt(depth: int): FilesystemEntryNode =
+        ## ``chain[depth]`` as the tree holds it once ``listed`` folders of
+        ## the chain have been answered.  A listed folder also holds a file,
+        ## so no single-child chain lets ``collectSmartExpansionPaths``
+        ## expand anything on its own.
+        let folder = chain[depth]
+        let children =
+          if depth >= listed:
+            @[makeEntry("Loading...", path = "")]
+          elif depth == chain.len - 1:
+            @[makeEntry("main.nr", path = folder & "/main.nr"),
+              makeEntry("notes.md", path = folder & "/notes.md")]
+          else:
+            @[folderAt(depth + 1),
+              makeEntry("notes.md", path = folder & "/notes.md")]
+        makeEntry(folder.split('/')[^1], path = folder, isFolder = true,
+                  children = children)
+
+      proc publish() =
+        vm.setRoot(makeSourceFoldersRoot(@[
+          makeEntry("work", path = "/work", isFolder = true, children = @[
+            folderAt(0), makeEntry("Nargo.toml", path = "/work/Nargo.toml")]),
+        ]))
+
+      var requested: seq[string] = @[]
+      var pending: seq[string] = @[]
+      vm.onFolderExpanded = proc(path: string) =
+        requested.add path
+        pending.add path
+
+      publish()
+      store.updateDebuggerPosition(rrTicks = 1'u64,
+                                   file = "/work/src/game/ship/main.nr",
+                                   line = 3)
+      var answers = 0
+      while pending.len > 0 and answers < 10:
+        let path = pending[0]
+        pending.delete(0)
+        inc answers
+        if listed < chain.len and path == chain[listed]:
+          inc listed
+          publish()
+
+      check listed == chain.len
+      check requested == @["/work"] & chain
+      for folder in chain:
+        check vm.isExpanded(folder)
+      check not vm.isExpanded("/work/src/game/ship/main.nr")
+
+      dispose()
+
 
   test "a manual collapse survives while the active file is unchanged":
     createRoot proc(dispose: proc()) =
@@ -689,4 +925,769 @@ suite "FilesystemVM diff entries":
       check vm.diffEntries.val.len == 0
       check not vm.hasDiff.val
 
+      dispose()
+
+# ---------------------------------------------------------------------------
+# A root load that fails or comes back empty (#785)
+# ---------------------------------------------------------------------------
+
+proc findOverlay(node: MockNode; cls: string): MockNode =
+  ## First element under ``node`` whose class list contains ``cls``.
+  if node.isNil:
+    return nil
+  if node.kind == mnkElement and node.attributes.hasKey("class"):
+    for part in node.attributes["class"].split(' '):
+      if part == cls:
+        return node
+  for child in node.children:
+    let found = findOverlay(child, cls)
+    if not found.isNil:
+      return found
+  nil
+
+proc isShown(node: MockNode): bool =
+  not node.isNil and "hidden" notin node.attributes["class"].split(' ')
+
+proc emptySourceFoldersRoot(): FilesystemEntryNode =
+  ## What ``legacyFileToVm`` makes of a ``filesystem-loaded`` whose
+  ## ``loadFilesystem`` found nothing under any root: the synthetic
+  ## "source folders" container with no children (and so, by the
+  ## bridge's "has children" rule, not even a folder).
+  FilesystemEntryNode(
+    id: "0",
+    text: "source folders",
+    path: "",
+    icon: "",
+    isFolder: false,
+    isExpanded: false,
+    diffClass: fdcNone,
+    children: @[],
+  )
+
+suite "FilesystemVM a root load that fails or comes back empty (#785)":
+  ## GitHub #785: a Noir trace left the FILES pane on "Loading..." for good.
+  ## ``createFilesystemVM`` starts at ``lsLoading`` and nothing ever set
+  ## ``lsError``, so a root load that failed had no state to end in.  A
+  ## load must leave the pane showing a tree, an empty state or an error
+  ## (codetracer-pm ``spec/GUI/Core-Panes/Filesystem-Pane.md`` §"Loading").
+
+  test "a failed root load leaves the loading state and says why":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      check vm.loadingState.val == lsLoading
+
+      vm.failLoad("cannot read /proj: EACCES")
+
+      check vm.loadingState.val == lsError
+      check vm.loadError.val == "cannot read /proj: EACCES"
+      check vm.isEmpty.val
+
+      dispose()
+
+  test "the panel replaces Loading... with the failure reason":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
+      check isShown(findOverlay(panel, "filesystem-loading-overlay"))
+
+      vm.failLoad("cannot read /proj: EACCES")
+
+      check not isShown(findOverlay(panel, "filesystem-loading-overlay"))
+      check not isShown(findOverlay(panel, "filesystem-empty-overlay"))
+      let errorOverlay = findOverlay(panel, "filesystem-error-overlay")
+      check isShown(errorOverlay)
+      check "cannot read /proj: EACCES" in errorOverlay.textContent
+      check findOverlay(panel, "filesystem").attributes["aria-busy"] == "false"
+
+      dispose()
+
+  test "a later successful load clears the failure":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
+      vm.failLoad("cannot read /proj: EACCES")
+
+      vm.setRoot(makeSourceFoldersRoot(@[makeEntry("main.nr", path = "src/main.nr")]))
+
+      check vm.loadingState.val == lsIdle
+      check vm.loadError.val == ""
+      check not isShown(findOverlay(panel, "filesystem-error-overlay"))
+      check not isShown(findOverlay(panel, "filesystem-loading-overlay"))
+
+      dispose()
+
+  test "a session reset after a failure waits for the next load again":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      vm.failLoad("cannot read /proj: EACCES")
+
+      vm.clearRoot()
+
+      check vm.loadingState.val == lsLoading
+      check vm.loadError.val == ""
+
+      dispose()
+
+  test "an empty root load ends on the empty state, not on a bare container row":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
+
+      vm.setRoot(emptySourceFoldersRoot())
+
+      check vm.loadingState.val == lsIdle
+      check vm.isEmpty.val
+      check not isShown(findOverlay(panel, "filesystem-loading-overlay"))
+      check isShown(findOverlay(panel, "filesystem-empty-overlay"))
+      check findOverlay(panel, "filesystem-tree").children.len == 0
+
+      dispose()
+
+suite "FilesystemVM a session with no project folder (New File)":
+  ## codetracer-pm issue 2026-10-21 "A New File session's Files pane never
+  ## leaves Loading…": Welcome screen → New File left FILES reading
+  ## "No filesystem loaded yet. Loading…" for good. The spec
+  ## (``GUI/Welcome-And-Sessions/Welcome-Screen.md`` §"New file, and what it
+  ## creates") says the session has no project folder and *"the Files panel
+  ## shows an empty project rather than a tree"*. There is no load to wait
+  ## for — nothing will ever answer one — so the pane must not be in the
+  ## loading state at all, and its empty state must say why it is empty
+  ## (the same "No project folder is open." the Test Results and Constraints
+  ## panes show) rather than claim nothing has been loaded YET.
+
+  test "a folderless session is an empty project, not a load in progress":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
+
+      vm.showNoProjectFolder()
+
+      check vm.loadingState.val == lsIdle
+      check vm.loadError.val == ""
+      check vm.noProjectFolder.val
+      check vm.isEmpty.val
+      check not isShown(findOverlay(panel, "filesystem-loading-overlay"))
+      check not isShown(findOverlay(panel, "filesystem-error-overlay"))
+      let emptyOverlay = findOverlay(panel, "filesystem-empty-overlay")
+      check isShown(emptyOverlay)
+      check emptyOverlay.textContent == FilesystemNoProjectFolderText
+      check FilesystemNoProjectFolderText == "No project folder is open."
+      check findOverlay(panel, "filesystem-tree").children.len == 0
+      check findOverlay(panel, "filesystem").attributes["aria-busy"] == "false"
+
+      dispose()
+
+  test "it replaces a tree an earlier load left in the VM":
+    # A folderless session must drop whatever tree the VM already held.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
+      vm.setRoot(makeSourceFoldersRoot(@[makeEntry("main.nr", path = "src/main.nr")]))
+      check findOverlay(panel, "filesystem-tree").children.len > 0
+
+      vm.showNoProjectFolder()
+
+      check vm.isEmpty.val
+      check findOverlay(panel, "filesystem-tree").children.len == 0
+      check isShown(findOverlay(panel, "filesystem-empty-overlay"))
+
+      dispose()
+
+  test "opening a folder, a failure or a session reset leaves the folderless state":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
+
+      vm.showNoProjectFolder()
+      vm.setRoot(emptySourceFoldersRoot())
+      check not vm.noProjectFolder.val
+      # An opened folder that holds nothing keeps the generic empty state.
+      check findOverlay(panel, "filesystem-empty-overlay").textContent ==
+        FilesystemEmptyStateText
+
+      vm.showNoProjectFolder()
+      vm.failLoad("cannot read /proj: EACCES")
+      check not vm.noProjectFolder.val
+      check not isShown(findOverlay(panel, "filesystem-empty-overlay"))
+
+      vm.showNoProjectFolder()
+      vm.clearRoot()
+      check not vm.noProjectFolder.val
+      check vm.loadingState.val == lsLoading
+
+      # (A tab switch no longer resets a shared VM: each tab has its own, so
+      # there is no `resetToInitial` left to check here.)
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# The roots of an imported trace's file tree (#785)
+# ---------------------------------------------------------------------------
+
+proc payloadWith(roots: openArray[string]): proc(root: string): bool =
+  ## A trace payload in which exactly ``roots`` hold files.
+  let present = @roots
+  result = proc(root: string): bool = root in present
+
+suite "the roots of an imported trace's file tree (#785)":
+  ## The reporter's shape, measured with ``ct record`` on
+  ## ``test-programs/noir_example`` at codetracer ``cdeb13b12``: nargo
+  ## records RELATIVE paths (``src/main.nr``, ``std/lib.nr``), so the
+  ## recording's ``source_folders`` column is the git root the program
+  ## lives in; the payload holds ``files/src/main.nr`` and an empty
+  ## ``files/std`` (the std sources are not copied), and no ``paths.json``
+  ## sidecar is written.  The tree was rooted at the live git root and the
+  ## index process walked the whole repository.
+
+  const gitRoot = "/home/dev/repo"
+  const noirWorkdir = "/home/dev/repo/test-programs/noir_example"
+
+  test "a Noir trace without paths.json is rooted in its payload, not the recorded git root":
+    let roots = importedTraceTreeRoots(
+      ImportedTraceTreeInputs(
+        recordedSourceFolders: @[gitRoot],
+        workdir: noirWorkdir,
+        tracePathsRead: false,
+        payloadTopLevel: @["src", "std"],
+        liveFallback: @[noirWorkdir]),
+      payloadWith(["src"]))
+    check roots == @["src"]
+
+  test "a paths.json root that is empty in the payload does not send the tree to the live disk":
+    let roots = importedTraceTreeRoots(
+      ImportedTraceTreeInputs(
+        recordedSourceFolders: @[gitRoot],
+        workdir: noirWorkdir,
+        tracePathsRead: true,
+        tracePaths: @["src/main.nr", "std/lib.nr"],
+        payloadTopLevel: @["src", "std"],
+        liveFallback: @[noirWorkdir]),
+      payloadWith(["src"]))
+    check roots == @["src"]
+
+  test "a trace with no payload still falls back to its recorded folders":
+    # Unchanged: with nothing in the payload, the live folders are all
+    # there is, and the loader reads them with the live-filesystem limits.
+    let roots = importedTraceTreeRoots(
+      ImportedTraceTreeInputs(
+        recordedSourceFolders: @[gitRoot],
+        workdir: noirWorkdir,
+        tracePathsRead: false,
+        liveFallback: @[noirWorkdir]),
+      payloadWith([]))
+    check roots == @[gitRoot]
+
+  test "a workdir mirrored in the payload is the root":
+    # Unchanged: the root-stripped absolute layout (`files/home/dev/repo/...`).
+    let roots = importedTraceTreeRoots(
+      ImportedTraceTreeInputs(
+        recordedSourceFolders: @[gitRoot],
+        workdir: noirWorkdir,
+        payloadTopLevel: @["home"]),
+      payloadWith([noirWorkdir]))
+    check roots == @[noirWorkdir]
+
+  test "paths.json roots that are all in the payload are the roots":
+    # Unchanged: the shape every recorder that writes paths.json produces.
+    let roots = importedTraceTreeRoots(
+      ImportedTraceTreeInputs(
+        recordedSourceFolders: @[gitRoot],
+        workdir: noirWorkdir,
+        tracePathsRead: true,
+        tracePaths: @["src/main.nr", "lib/util.nr"],
+        payloadTopLevel: @["src", "lib"]),
+      payloadWith(["src", "lib"]))
+    check roots == @["src", "lib"]
+
+# ---------------------------------------------------------------------------
+# Files context menu (codetracer-pm `spec/GUI/Core-Panes/Filesystem-Pane.md`
+# § "Context menu"; issue 2026-10-21-isonim-files-pane-has-no-context-menu)
+# ---------------------------------------------------------------------------
+#
+# Right-clicking a row opens the shared CodeTracer context menu with Create,
+# Rename, Delete and Edit, always all four and in that order; an entry that
+# cannot act is disabled with its reason, never left out. The decisions —
+# which entries, which are disabled and why, the name rule, the open name
+# field — are the ViewModel's, so every renderer shares them; the view only
+# binds `contextmenu` and draws the field. The view cases render through
+# `MockRenderer` (isonim/testing/mock_dom), the in-memory DOM the headless
+# view tests use: the issue is that a right-click on a row produced nothing,
+# and only the view decides what a row's right-click does. The disk side of
+# the entries is the index process's and is tested over a real directory in
+# `src/frontend/tests/file_tree_operations_test.nim`.
+
+const MenuOrder = @["Create", "Rename", "Delete", "Edit"]
+
+proc makeEditTree(): FilesystemEntryNode =
+  ## An opened folder, as the index process lists it in edit mode:
+  ##
+  ##   source folders            (synthetic, path "")
+  ##   └── /proj
+  ##       ├── /proj/src
+  ##       │   ├── /proj/src/main.nr
+  ##       │   └── /proj/src/lib.nr
+  ##       └── /proj/README.md
+  makeSourceFoldersRoot(@[
+    makeEntry("proj", path = "/proj", isFolder = true, children = @[
+      makeEntry("src", path = "/proj/src", isFolder = true, children = @[
+        makeEntry("main.nr", path = "/proj/src/main.nr"),
+        makeEntry("lib.nr", path = "/proj/src/lib.nr"),
+      ]),
+      makeEntry("README.md", path = "/proj/README.md"),
+    ])
+  ])
+
+type HostCalls = ref object
+  ## What the pane asked the index process and the editor to do.
+  created: seq[(string, string)]
+  renamed: seq[(string, string)]
+  deleted: seq[string]
+  opened: seq[string]
+
+proc filesVMWith(store: ReplayDataStore; facts: FileTreeHostFacts):
+    (FilesystemVM, HostCalls) =
+  ## A FilesystemVM over `makeEditTree`, with the host facts the bridge
+  ## (`ui/filesystem.wireFilesystemOpenBridge`) supplies, and recorders for
+  ## the requests it makes.
+  let vm = createFilesystemVM(store)
+  let calls = HostCalls()
+  vm.hostFacts = proc(): FileTreeHostFacts = facts
+  vm.onCreateFile = proc(folder, name: string) = calls.created.add((folder, name))
+  vm.onRenamePath = proc(path, newName: string) = calls.renamed.add((path, newName))
+  vm.onDeletePath = proc(path: string) = calls.deleted.add(path)
+  vm.onOpenFile = proc(path: string) = calls.opened.add(path)
+  vm.setRoot(makeEditTree())
+  (vm, calls)
+
+proc filesVM(store: ReplayDataStore; editMode: bool; canTrash = true):
+    (FilesystemVM, HostCalls) =
+  ## The two common sessions: the opened folder `/proj` in the Edit layout,
+  ## or a replay (Debug layout, the tree a recording's sources). An index
+  ## process answers in both.
+  filesVMWith(store, FileTreeHostFacts(
+    layout: (if editMode: ToolbarMode.EditMode else: ToolbarMode.DebugMode),
+    openedFolder: (if editMode: "/proj" else: ""),
+    hasIndexProcess: true,
+    canTrash: canTrash))
+
+proc labels(menu: seq[FileTreeMenuEntry]): seq[string] =
+  for entry in menu: result.add entry.label
+
+proc entry(menu: seq[FileTreeMenuEntry]; label: string): FileTreeMenuEntry =
+  for e in menu:
+    if e.label == label: return e
+  raise newException(KeyError, "no menu entry " & label)
+
+template choose(e: FileTreeMenuEntry) =
+  ## Choose a menu entry as a click would. A TEMPLATE, so its `check` belongs
+  ## to the test that uses it (a `check` in a plain proc reports `[OK]` under
+  ## a printed failure); a disabled entry has no action, which fails here
+  ## rather than crashing the suite on a nil closure.
+  let chosen = e
+  check not chosen.run.isNil
+  if not chosen.run.isNil:
+    chosen.run()
+
+proc findRow(node: MockNode; label: string): MockNode =
+  ## The `li.jstree-node` whose own anchor reads `label`.
+  if node.isNil:
+    return nil
+  if node.kind == mnkElement and node.tag == "li":
+    for child in node.children:
+      if child.kind == mnkElement and child.tag == "a" and
+          child.textContent == label:
+        return node
+  for child in node.children:
+    let found = findRow(child, label)
+    if not found.isNil:
+      return found
+  nil
+
+proc anchorOf(row: MockNode): MockNode =
+  for child in row.children:
+    if child.kind == mnkElement and child.tag == "a":
+      return child
+  nil
+
+proc childrenListOf(row: MockNode): MockNode =
+  for child in row.children:
+    if child.kind == mnkElement and child.tag == "ul":
+      return child
+  nil
+
+proc rightClick(row: MockNode): MockEvent =
+  result = MockEvent(`type`: "contextmenu", target: row, currentTarget: row)
+  row.fireEventWith("contextmenu", result)
+
+proc press(node: MockNode; key: string) =
+  node.fireEventWith("keydown", MockEvent(`type`: "keydown", key: key,
+                                          target: node, currentTarget: node))
+
+suite "Files context menu":
+
+  test "the name rule: empty, . and .., and a separator are refused":
+    check fileEntryNameRefusal("main.nr") == ""
+    check fileEntryNameRefusal(".hidden") == ""
+    check fileEntryNameRefusal("a..b") == ""
+    check fileEntryNameRefusal("") != ""
+    check fileEntryNameRefusal(".") != ""
+    check fileEntryNameRefusal("..") != ""
+    check fileEntryNameRefusal("a/b") != ""
+    check fileEntryNameRefusal("a\\b") != ""
+    check fileEntryNameRefusal("/") != ""
+
+  test "isSamePath ignores a trailing separator and the separator style":
+    # `ct edit <dir>` names the opened folder `/proj/`; the index process
+    # answers `/proj`. Both name the root row (Rename/Delete disabled on it,
+    # the folder reloaded after an operation in it).
+    check isSamePath("/proj/", "/proj")
+    check isSamePath("/proj", "/proj//")
+    check isSamePath("C:\\proj\\", "C:/proj")
+    check isSamePath("/", "/")
+    check not isSamePath("/proj", "/proj/src")
+    check not isSamePath("/proj", "/pro")
+    check not isSamePath("", "")
+    check not isSamePath("", "/")
+
+  test "every row lists Create, Rename, Delete and Edit, in that order":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      for editMode in [true, false]:
+        let (vm, _) = filesVM(store, editMode)
+        for path in ["/proj/src/main.nr", "/proj/src", "/proj", ""]:
+          check vm.fileTreeMenu(path).labels == MenuOrder
+      dispose()
+
+  test "a replay session: Create, Rename and Delete are read-only, Edit opens a file":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, calls) = filesVM(store, editMode = false)
+      for path in ["/proj/src/main.nr", "/proj/src"]:
+        let menu = vm.fileTreeMenu(path)
+        for label in ["Create", "Rename", "Delete"]:
+          check menu.entry(label).disabled
+          check menu.entry(label).disabledReason == ReadOnlySourcesReason
+      check ReadOnlySourcesReason == "A recording's sources are read-only"
+      let edit = vm.fileTreeMenu("/proj/src/main.nr").entry("Edit")
+      check not edit.disabled
+      edit.run()
+      check calls.opened == @["/proj/src/main.nr"]
+      check calls.created.len == 0 and calls.renamed.len == 0 and
+        calls.deleted.len == 0
+      dispose()
+
+  test "Edit on a folder is disabled: only a file opens in the editor":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      for editMode in [true, false]:
+        let (vm, _) = filesVM(store, editMode)
+        for path in ["/proj/src", ""]:
+          let edit = vm.fileTreeMenu(path).entry("Edit")
+          check edit.disabled
+          check edit.disabledReason == OnlyFilesOpenReason
+        check OnlyFilesOpenReason == "Only a file can be opened in the editor"
+      dispose()
+
+  test "edit mode: Create, Rename and Delete are enabled on files and folders":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, _) = filesVM(store, editMode = true)
+      for path in ["/proj/src/main.nr", "/proj/src", "/proj/README.md"]:
+        let menu = vm.fileTreeMenu(path)
+        for label in ["Create", "Rename", "Delete"]:
+          check not menu.entry(label).disabled
+          check menu.entry(label).disabledReason == ""
+      check not vm.fileTreeMenu("/proj/src/main.nr").entry("Edit").disabled
+      dispose()
+
+  test "Delete is disabled where the host has no trash":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, calls) = filesVM(store, editMode = true, canTrash = false)
+      let delete = vm.fileTreeMenu("/proj/src/main.nr").entry("Delete")
+      check delete.disabled
+      check delete.disabledReason == "This host has no trash"
+      check not vm.fileTreeMenu("/proj/src/main.nr").entry("Rename").disabled
+      check calls.deleted.len == 0
+      dispose()
+
+  test "the source folders container is not a folder on disk":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, _) = filesVM(store, editMode = true)
+      let menu = vm.fileTreeMenu("")
+      for label in ["Create", "Rename", "Delete"]:
+        check menu.entry(label).disabled
+        check menu.entry(label).disabledReason == NotOnDiskReason
+      check NotOnDiskReason == "Not a folder on disk"
+      dispose()
+
+  test "Delete asks the index process to move the entry to the trash":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, calls) = filesVM(store, editMode = true)
+      vm.fileTreeMenu("/proj/src").entry("Delete").run()
+      check calls.deleted == @["/proj/src"]
+      dispose()
+
+  test "Create opens a name field in the target folder and expands it":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, _) = filesVM(store, editMode = true)
+      check not vm.isExpanded("/proj/src")
+      vm.fileTreeMenu("/proj/src").entry("Create").run()
+      check vm.nameEdit.val.kind == fneCreate
+      check vm.nameEdit.val.folder == "/proj/src"
+      check vm.nameEdit.val.name == ""
+      check vm.isExpanded("/proj/src")
+      # On a file, the target is the file's folder.
+      vm.cancelNameEdit()
+      vm.fileTreeMenu("/proj/README.md").entry("Create").run()
+      check vm.nameEdit.val.kind == fneCreate
+      check vm.nameEdit.val.folder == "/proj"
+      dispose()
+
+  test "Rename opens a name field holding the current name":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, _) = filesVM(store, editMode = true)
+      vm.fileTreeMenu("/proj/src/main.nr").entry("Rename").run()
+      check vm.nameEdit.val.kind == fneRename
+      check vm.nameEdit.val.path == "/proj/src/main.nr"
+      check vm.nameEdit.val.folder == "/proj/src"
+      check vm.nameEdit.val.name == "main.nr"
+      dispose()
+
+  test "committing a valid name sends it to the index process and closes the field":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, calls) = filesVM(store, editMode = true)
+      vm.fileTreeMenu("/proj/src").entry("Create").run()
+      check vm.commitNameEdit("new.nr")
+      check calls.created == @[("/proj/src", "new.nr")]
+      check vm.nameEdit.val.kind == fneNone
+      vm.fileTreeMenu("/proj/src/lib.nr").entry("Rename").run()
+      check vm.commitNameEdit("util.nr")
+      check calls.renamed == @[("/proj/src/lib.nr", "util.nr")]
+      check vm.nameEdit.val.kind == fneNone
+      dispose()
+
+  test "a refused name keeps the field open and says why":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, calls) = filesVM(store, editMode = true)
+      vm.fileTreeMenu("/proj/src").entry("Create").run()
+      for bad in ["", ".", "..", "a/b", "a\\b", "main.nr"]:
+        check not vm.commitNameEdit(bad)
+        check vm.nameEdit.val.kind == fneCreate
+        check vm.nameEdit.val.name == bad
+        check vm.nameEdit.val.error.len > 0
+      check vm.nameEdit.val.error == "\"main.nr\" already exists in this folder"
+      vm.cancelNameEdit()
+      # Renaming onto a sibling's name is refused too.
+      vm.fileTreeMenu("/proj/src/lib.nr").entry("Rename").run()
+      check not vm.commitNameEdit("main.nr")
+      check vm.nameEdit.val.kind == fneRename
+      check calls.created.len == 0 and calls.renamed.len == 0
+      dispose()
+
+  test "cancelling the field closes it and sends nothing":
+    # The keys and the blur that cancel it are the view cases below.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, calls) = filesVM(store, editMode = true)
+      vm.fileTreeMenu("/proj/src").entry("Create").run()
+      vm.cancelNameEdit()
+      check vm.nameEdit.val.kind == fneNone
+      check calls.created.len == 0
+      dispose()
+
+  test "a right-click on a row opens the Files menu and suppresses the browser's":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, _) = filesVM(store, editMode = false)
+      vm.expandPath("/proj")
+      vm.expandPath("/proj/src")
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
+      let row = findRow(panel, "main.nr")
+      check not row.isNil
+      let ev = rightClick(row)
+      check ev.defaultPrevented
+      check ev.propagationStopped
+      check vm.lastContextMenu.labels == MenuOrder
+      check vm.lastContextMenu.entry("Create").disabledReason ==
+        ReadOnlySourcesReason
+      check not vm.lastContextMenu.entry("Edit").disabled
+      # A folder row's menu is the folder's.
+      discard rightClick(findRow(panel, "src"))
+      check vm.lastContextMenu.entry("Edit").disabled
+      dispose()
+
+  test "the diff list rows have no menu":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, _) = filesVM(store, editMode = false)
+      vm.setDiffEntries(@[FilesystemDiffEntry(path: "/proj/src/main.nr")])
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
+      let diffRow = findOverlay(panel, "diff-file-path")
+      check not diffRow.isNil
+      check "contextmenu" notin diffRow.eventHandlers
+      check "contextmenu" notin diffRow.eventListeners
+      dispose()
+
+  test "Create shows the field as the first child of the expanded folder":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, calls) = filesVM(store, editMode = true)
+      vm.expandPath("/proj")
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
+      discard rightClick(findRow(panel, "src"))
+      vm.lastContextMenu.entry("Create").run()
+      let srcRow = findRow(panel, "src")
+      let list = childrenListOf(srcRow)
+      check not list.isNil
+      check list.children.len == 3
+      let fieldNode = list.children[0]
+      let input = findOverlay(fieldNode, "filesystem-name-input")
+      check not input.isNil
+      check findRow(panel, "main.nr") == list.children[1]
+      # Enter commits the name typed into the field.
+      MockRenderer().setInputValue(input, "new.nr")
+      input.press("Enter")
+      check calls.created == @[("/proj/src", "new.nr")]
+      check findOverlay(panel, "filesystem-name-input").isNil
+      dispose()
+
+  test "a refused name keeps the field open with its reason; Escape closes it":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, calls) = filesVM(store, editMode = true)
+      vm.expandPath("/proj")
+      vm.expandPath("/proj/src")
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
+      vm.fileTreeMenu("/proj/src").entry("Create").run()
+      var input = findOverlay(panel, "filesystem-name-input")
+      MockRenderer().setInputValue(input, "lib.nr")
+      input.press("Enter")
+      input = findOverlay(panel, "filesystem-name-input")
+      check not input.isNil
+      check MockRenderer().inputValue(input) == "lib.nr"
+      let reason = findOverlay(panel, "filesystem-name-error")
+      check not reason.isNil
+      check "already exists" in reason.textContent
+      input.press("Escape")
+      check findOverlay(panel, "filesystem-name-input").isNil
+      check calls.created.len == 0
+      dispose()
+
+  test "Rename replaces the row's label with the field; leaving it cancels":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, calls) = filesVM(store, editMode = true)
+      vm.expandPath("/proj")
+      vm.expandPath("/proj/src")
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
+      discard rightClick(findRow(panel, "lib.nr"))
+      vm.lastContextMenu.entry("Rename").run()
+      check findRow(panel, "lib.nr").isNil
+      let input = findOverlay(panel, "filesystem-name-input")
+      check not input.isNil
+      check MockRenderer().inputValue(input) == "lib.nr"
+      input.fireEvent("blur")
+      check vm.nameEdit.val.kind == fneNone
+      check not findRow(panel, "lib.nr").isNil
+      check calls.renamed.len == 0
+      dispose()
+
+  test "every editing layout over the opened folder acts on the disk":
+    # Edit mode is `edit_mode_toolbar.isEditing` — Edit, Quick Edit and
+    # Interactive Edit — when the tree is the opened folder.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      for layout in [ToolbarMode.EditMode, ToolbarMode.QuickEditMode,
+                     ToolbarMode.InteractiveEditMode]:
+        let (vm, calls) = filesVMWith(store, FileTreeHostFacts(
+          layout: layout, openedFolder: "/proj", hasIndexProcess: true,
+          canTrash: true))
+        let menu = vm.fileTreeMenu("/proj/src/main.nr")
+        for label in ["Create", "Rename", "Delete"]:
+          checkpoint $layout & " " & label
+          check not menu.entry(label).disabled
+        choose menu.entry("Delete")
+        check calls.deleted == @["/proj/src/main.nr"]
+      dispose()
+
+  test "an editing layout over a recording's sources is a replay":
+    # A replay session switched to the Edit layout keeps its recording's
+    # tree: the layout edits, the tree is not the opened folder.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      for facts in [
+          FileTreeHostFacts(layout: ToolbarMode.EditMode, openedFolder: "",
+                            hasIndexProcess: true, canTrash: true),
+          FileTreeHostFacts(layout: ToolbarMode.CalltraceLayoutMode,
+                            openedFolder: "/proj", hasIndexProcess: true,
+                            canTrash: true)]:
+        let (vm, calls) = filesVMWith(store, facts)
+        let menu = vm.fileTreeMenu("/proj/src/main.nr")
+        for label in ["Create", "Rename", "Delete"]:
+          checkpoint $facts.layout & " " & label
+          check menu.entry(label).disabled
+          check menu.entry(label).disabledReason == ReadOnlySourcesReason
+        check not menu.entry("Edit").disabled
+        check calls.deleted.len == 0
+      dispose()
+
+  test "with no index process, Create, Rename and Delete are disabled and nothing is sent":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, calls) = filesVMWith(store, FileTreeHostFacts(
+        layout: ToolbarMode.EditMode, openedFolder: "/proj",
+        hasIndexProcess: false, canTrash: false))
+      check NoFileOperationsReason == "This front end cannot change files"
+      for path in ["/proj/src/main.nr", "/proj/src", "/proj"]:
+        let menu = vm.fileTreeMenu(path)
+        for label in ["Create", "Rename", "Delete"]:
+          checkpoint path & " " & label
+          check menu.entry(label).disabled
+          check menu.entry(label).disabledReason == NoFileOperationsReason
+          check menu.entry(label).run.isNil
+      check not vm.fileTreeMenu("/proj/src/main.nr").entry("Edit").disabled
+      # "Not a folder on disk" still wins on the container.
+      check vm.fileTreeMenu("").entry("Create").disabledReason == NotOnDiskReason
+      check vm.nameEdit.val.kind == fneNone
+      check calls.created.len == 0 and calls.renamed.len == 0 and
+        calls.deleted.len == 0
+      dispose()
+
+  test "the opened folder's row takes a new file but is not renamed or deleted":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      check OpenedFolderRowReason ==
+        "The opened folder cannot be renamed or deleted from the tree"
+      # Also when the folder is named with a trailing separator.
+      for opened in ["/proj", "/proj/"]:
+        let (vm, calls) = filesVMWith(store, FileTreeHostFacts(
+          layout: ToolbarMode.EditMode, openedFolder: opened,
+          hasIndexProcess: true, canTrash: true))
+        let menu = vm.fileTreeMenu("/proj")
+        check not menu.entry("Create").disabled
+        for label in ["Rename", "Delete"]:
+          checkpoint opened & " " & label
+          check menu.entry(label).disabled
+          check menu.entry(label).disabledReason == OpenedFolderRowReason
+        # A folder below it is an ordinary folder.
+        check not vm.fileTreeMenu("/proj/src").entry("Rename").disabled
+        choose menu.entry("Create")
+        check vm.nameEdit.val.kind == fneCreate
+        check vm.nameEdit.val.folder == "/proj"
+        check calls.renamed.len == 0 and calls.deleted.len == 0
       dispose()

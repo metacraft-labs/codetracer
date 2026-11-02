@@ -2,6 +2,8 @@ import * as childProcess from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+import { ctfsMagic, readableCtfsVersions } from "./ctfs-container";
+
 export const repoRoot = path.resolve(__dirname, "../../../..");
 export const elixirOutDir = path.join(repoRoot, "target", "beam-ui-fixtures", "elixir-canonical-flow");
 export const erlangOutDir = path.join(repoRoot, "target", "beam-ui-fixtures", "erlang-canonical-flow");
@@ -10,21 +12,19 @@ export const erlangOutDir = path.join(repoRoot, "target", "beam-ui-fixtures", "e
  * The `meta.dat` schema version a cached fixture must carry to be reused.
  *
  * Must track `SUPPORTED_VERSIONS` in
- * `src/db-backend/src/ctfs_trace_reader/meta_dat.rs`, which is `&[6]`:
+ * `src/db-backend/src/ctfs_trace_reader/meta_dat.rs`, which is `&[7]`:
  * a cached container the backend would refuse is not a reusable
  * fixture. Version 6 dropped the path list that versions 3 to 5 wrote after
- * `recorder_id`, so no earlier version reads as it.
+ * `recorder_id`, and version 7 allocated the event kinds 14-23, so no earlier
+ * version reads as it.
  *
  * Getting this stale is quiet in both directions: too low and every run
  * judges a current fixture stale and re-records it, too high and a run
  * reuses one the backend will reject.
  */
-const expectedMetaDatVersion = 6;
-/** The CTFS container versions the backend reads (`ctfs-container.md` §1, §1a). */
-const readableCtfsVersions = [5, 6];
+const expectedMetaDatVersion = 7;
 /** Bit 63 of `MapBlock`: the rest is the member's only data block (§2). */
 const ctfsDirect = 1n << 63n;
-const ctfsMagic = Buffer.from([0xc0, 0xde, 0x72, 0xac, 0xe2]);
 const base40Alphabet = "\0" + "0123456789abcdefghijklmnopqrstuvwxyz./-";
 
 type PreparedBeamFixtures = {

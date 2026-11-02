@@ -8,7 +8,7 @@
 ## `#<x>Component-<id>` — and then dispatches on `state.content` to mount the
 ## pane's IsoNim view into it. Twenty-five panes were mounted that way. Five
 ## were not: `State`, `Calltrace`, `Timeline`, `EventLog` and `TerminalOutput`
-## mounted from their `register` method, or from their `initXVMWithStore`, and
+## mounted from their `register` method, or from their `initXVMFromSession`, and
 ## then POLLED for a container neither of those moments can guarantee.
 ##
 ## Measured on 25 real Electron desktop session logs (2026-09), on the modern
@@ -70,7 +70,15 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 36
+const ExpectedAssertions = 32
+  ## HSF-D6: 31 -> 32. The Event Log joined the panel host: its mount-proc
+  ## check became "it is a panel host kind", and its poll's absence is
+  ## asserted with the others' (+1).
+  ## HSF-D6: 36 -> 32. The control-data test counts the removed arms and the
+  ## panel host's shared arm as two group assertions, and the surviving arms
+  ## as two, instead of one per pane — so this count no longer changes when a
+  ## pane joins the panel host. 32 -> 31: Terminal Output's own mount-proc
+  ## check went with its poll.
   ## PLAT-51: 42 -> 36. The Timeline panel is removed: its arm, its mount
   ## proc and its give-up lines went (the control-data loop -1, the mount
   ## proc -1, the give-up triple -3, the two `clog` guards -2), and one
@@ -141,11 +149,32 @@ proc directMountContents(source: string): seq[string] =
     result.add t["Content.".len ..< t.len].strip(chars = {',', ' '})
   result.sort()
 
+const
+  PanelHostPath = "src/frontend/ui/panel_host.nim"
+  PanelHostArm = "if state.content in PanelHostKinds:"
+    ## The ONE arm for every pane the panel host mounts (Shared-DOM-Front-Ends
+    ## D4): its kinds are read out of `panel_host.nim` below.
+
+proc panelHostKinds(): seq[string] =
+  ## `PanelHostKinds`' members, as `panel_host.nim` declares them.
+  let source = readFile(PanelHostPath)
+  let at = source.find("PanelHostKinds* = {")
+  if at < 0:
+    return
+  let close = source.find("}", at)
+  for part in source[at + "PanelHostKinds* = {".len ..< close].split(','):
+    let t = part.strip()
+    if t.startsWith("Content."):
+      result.add t["Content.".len ..< t.len]
+
 proc dispatchArms(source: string): seq[string] =
   ## The `Content` values the factory dispatches on.
   result = @[]
   for line in dispatchRegion(source).splitLines:
     let t = line.strip()
+    if t == PanelHostArm:
+      result.add panelHostKinds()
+      continue
     if not t.startsWith("if state.content == Content."):
       continue
     let tail = t["if state.content == Content.".len ..< t.len]
@@ -180,7 +209,8 @@ proc withArmsRemoved(source: string; contents: openArray[string]): string =
     let t = line.strip()
     var dropped = false
     for content in contents:
-      if t == "if state.content == Content." & content & ":":
+      if t == "if state.content == Content." & content & ":" or
+         (t == PanelHostArm and content in panelHostKinds()):
         dropped = true
         skipNext = true
         break
@@ -221,7 +251,7 @@ suite "the factory mounts every mountable pane":
       echo "direct-mount Content values with no factory arm: ", missing.join(", ")
     counted missing.len == 0
 
-  test "CONTROL DATA: the same scan reports exactly four on the pre-fix source":
+  test "CONTROL DATA: the same scan reports exactly the removed arms on the pre-fix source":
     # Without this the suite could pass because `dispatchArms` matched every
     # line in the file, or because `directMountContents` returned nothing.
     # The pre-fix source is the current one with the five arms deleted, so the
@@ -230,16 +260,28 @@ suite "the factory mounts every mountable pane":
     let preFix = source.withArmsRemoved(ArmsAddedByThisChange)
     counted preFix.len < source.len
     let missing = armsMissingFrom(preFix)
-    counted missing.len == 4
-    for pane in ArmsAddedByThisChange:
-      counted pane in missing
+    # The panel host's panes share ONE arm (`PanelHostArm`), so deleting it
+    # for State and Calltrace also removes the other panes it mounts; they are
+    # missing too, by name.
+    var sharedArm: seq[string] = @[]
+    for kind in panelHostKinds():
+      if kind notin ArmsAddedByThisChange:
+        sharedArm.add kind
+    counted missing.len == ArmsAddedByThisChange.len + sharedArm.len
+    # One assertion per group rather than per pane, so this suite's measured
+    # assertion count does not change each time a pane joins the panel host.
+    counted ArmsAddedByThisChange.allIt(it in missing)
+    counted sharedArm.allIt(it in missing)
 
-    # And the deletion took only what it claimed: the other twenty-odd arms
-    # survive it, so "five missing" is a measurement and not an artefact of a
-    # butchered source.
-    counted "Build" in dispatchArms(preFix)
-    counted "Filesystem" in dispatchArms(preFix)
-    counted "Scratchpad" in dispatchArms(preFix)
+    # And the deletion took only what it claimed: every other arm survives
+    # it, so the missing count is a measurement and not an artefact of a
+    # butchered source. The other arms are the panes not yet on the panel
+    # host, fewer with each pane converted; one is enough for the check to
+    # mean something.
+    let survivors = layoutSource().dispatchArms().filterIt(
+      it notin ArmsAddedByThisChange and it notin panelHostKinds())
+    counted survivors.len >= 1
+    counted survivors.allIt(it in dispatchArms(preFix))
 
   test "the desktop-blank panes are dispatched, each by name; the retired one is not":
     # Named individually, not left to the aggregate above: "some pane has an
@@ -271,17 +313,23 @@ suite "the factory mounts every mountable pane":
       counted content notin dispatchArms(source)
 
   test "the mount procs the arms call are reachable from layout.nim":
-    # The arms are `tryMountIsoNimX()` calls, which compile only if the proc is
-    # exported and the module imported. Both were changed by this commit, and a
-    # revert of either would make the arm text above true and the build false —
-    # so the scan asserts them rather than trusting that a green build implies
-    # it, since this suite does not build `layout.nim`.
+    # The arms are calls into the panel host (and the shell's and the
+    # caption-bar progress pane's own mounts), which compile only if the procs
+    # are exported and the modules imported. A revert of either would make the
+    # arm text above true and the build false — so the scan asserts them
+    # rather than trusting that a green build implies it, since this suite
+    # does not build `layout.nim`.
     let source = layoutSource()
-    counted source.contains("calltrace, trace, event_log, terminal_output,")
-    for procName in ["tryMountIsoNimStatePanel", "tryMountIsoNimCalltrace",
-                     "tryMountIsoNimEventLogPanel",
-                     "tryMountIsoNimTerminalOutputPanel"]:
-      counted dispatchRegion(source).contains(procName & "()")
+    counted source.contains("trace, event_log, terminal_output,")
+    counted "EventLog" in panelHostKinds()
+    # The panel host's panes: mounted by the factory synchronously, and here
+    # into the container a restored panel rebuilt, found in the active tab.
+    counted dispatchRegion(source).contains(
+      "ensurePanelMounted(cast[dom_api.Element](paneHost), state.content)")
+    counted source.contains("discard mountPanel(")
+    counted "Calltrace" in panelHostKinds()
+    counted "State" in panelHostKinds()
+    counted "LowLevelCode" in panelHostKinds()
 
   test "all three give-ups are audible, and none of them claims the session":
     # Not a dispatch property, and here anyway because it is this dispatch seen
@@ -298,8 +346,8 @@ suite "the factory mounts every mountable pane":
     # Too loud, and FALSE: all three then said ERROR and called the cap
     # terminal — "never mounted for the rest of the session", "nothing calls
     # the mount again". The factory arms this suite asserts are what falsify
-    # that. Each `tryMountIsoNim*` re-enters with a fresh retry counter, so the
-    # cap ends one ATTEMPT; the `*PanelIsLive` guards report mounted, never
+    # that. Each poller (since deleted) re-entered with a fresh retry counter,
+    # so the cap ended one ATTEMPT; the `*PanelIsLive` guards report mounted, never
     # failed; and the losing pollers run BEFORE the container can exist, so
     # they lose by construction. The lines fire in healthy sessions, which is
     # why `ci/test/noir-replay-in-browser.sh` records them instead of asserting
@@ -309,19 +357,12 @@ suite "the factory mounts every mountable pane":
     # A log that asserts terminal failure on every good run is how a real
     # failure gets scrolled past, so WARN is the level that is both true and
     # audible, and this test pins both walls.
-    for (path, procName) in [
-        ("src/frontend/ui/state.nim", "tryMountIsoNimStatePanel"),
-        ("src/frontend/ui/calltrace.nim", "tryMountIsoNimCalltrace")]:
-      let source = readFile(path)
-      # Audible, and at the level that does not overclaim.
-      counted source.contains("cwarn \"[PIPELINE] " & procName &
-                              ": container absent after ")
-      # Never ERROR again. Matched on the call, not on prose: the surrounding
-      # comments discuss the old ERROR spelling on purpose.
-      counted not source.contains("cerror \"[PIPELINE] " & procName)
-      # And it says what actually ended, which is this poll and not the pane.
-      counted source.contains("abandoning THIS poll")
-    # PLAT-51: the third, the Timeline's, went with the panel.
+    # The State and Call Trace polls went with the panel host, which mounts
+    # them into the container it creates; PLAT-51: the Timeline's went with
+    # the panel.
+    counted not readFile("src/frontend/ui/state.nim").contains("tryMountIsoNimStatePanel")
+    counted not readFile("src/frontend/ui/calltrace.nim").contains("tryMountIsoNimCalltrace")
+    counted not readFile("src/frontend/ui/event_log.nim").contains("tryMountIsoNimEventLogPanel")
     let trace = readFile("src/frontend/ui/trace.nim")
     counted not trace.contains("tryMountIsoNimTimelinePanel")
 

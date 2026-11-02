@@ -1,0 +1,3 @@
+# Check sourced helpers too, including build-once.sh's source= directive for
+# ci/lib/build-freshness.sh, whose path is resolved from the checkout root.
+external-sources=true

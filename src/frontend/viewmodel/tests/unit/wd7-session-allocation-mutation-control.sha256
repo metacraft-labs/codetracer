@@ -1,0 +1,12 @@
+# Control digests for run-wd7-session-allocation-mutations.py.
+#
+# ABSOLUTE, and that is the point. A baseline taken at start-up
+# cannot tell a clean tree from one a killed run left a mutation in:
+# it reads the mutation as the baseline, every restore then verifies
+# against the mutated bytes and agrees, and the only symptom is a red
+# control suite.
+#
+# Rewrite with --record-control-hashes, deliberately, when the
+# subject changes on purpose.
+
+77312ede0e3db734448d65de10843afad3ec6659cd4590087bddeb1450316d28  src/frontend/viewmodel/platform/session_allocation.nim

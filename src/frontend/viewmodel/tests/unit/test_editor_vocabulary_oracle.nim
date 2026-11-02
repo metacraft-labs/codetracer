@@ -69,11 +69,12 @@
 import std/[algorithm, strutils, tables, unittest]
 
 import ../../editor/operations
-import ../../../../common/editing_key_bindings
 import ../generators/vocabulary_generator
 import ../../../test_support/spec_documents
 
-const ExpectedAssertions = 1050
+const ExpectedAssertions = 1052
+  ## +6 on 2026-10-24 (PLAT-70 Part C): `search-selection-whole-word`, one
+  ## more row of §2.2 compared both ways.
 
 var countedAssertions = 0
 
@@ -94,11 +95,13 @@ const
   SectionStart = "### 2.2 The four categories"
   SectionEnd = "### 2.3 "
 
-  ExpectedDeclarations = 142
-  ExpectedOperations = 226
+  ExpectedDeclarations = 162
+    ## 161 until PLAT-70 Part C added `search-selection-whole-word` to D's
+    ## Search row (and the census, both parsers, re-taken).
+  ExpectedOperations = 246
   ExpectedDisplayDependent = 24
-  ExpectedDisplayIndependent = 202
-  ExpectedPerCategory = [34, 16, 20, 72]      ## A, B, C, D
+  ExpectedDisplayIndependent = 222
+  ExpectedPerCategory = [34, 16, 21, 91]      ## A, B, C, D
   ExpectedDisplayColumnRows = 50              ## A's 34 and B's 16 carry one
 
   # The forms each category generates. §2.2 A and §2.2 B state them; this is
@@ -329,7 +332,11 @@ suite "PLAT-30: the oracle is PARSED, and the parser is asserted first":
     # never read, and the note column is never read in any category.
     var groupLabels = 0
     var noteTokens = 0
-    for raw in SpecSource.splitLines():
+    # Walked through a `let`, never the `const`: an inline iterator over a
+    # `const` rebuilds the whole literal at every character access on the JS
+    # backend (`ci/test/js-const-iteration-test.sh` says why and refuses it).
+    let specText = SpecSource
+    for raw in specText.splitLines():
       let line = raw.strip()
       if not line.startsWith("| Insertion") and not line.startsWith("| Deletion by unit"):
         continue
@@ -476,85 +483,16 @@ suite "PLAT-30: the published table, compared row by row":
           ck operationNamed(n) >= 0
 
 # ===========================================================================
-# 14 CASES — `applyEditKey`'s behaviours, asserted to survive its retirement
-# ===========================================================================
-
-let scenarioDoc0 = scenarioDocs()[0]
-
-suite "PLAT-30: the fourteen behaviours survive the retirement, by name":
-  for row in TuiEditBindings:
-    test "behaviour: " & $row.behaviour:
-      checkpoint("key '" & row.key & "' -> " & row.operation & " (" &
-                 $row.effect & ")")
-      # 1. The row names a PUBLISHED operation. This is the join that stops
-      #    the terminal's editing path being a third orphan vocabulary beside
-      #    `ClientAction` and `KeyAction`.
-      ck row.operation in implNamesAll
-      ck row.operation in specNamesAll
-      ck operationNamed(row.operation) >= 0
-      # 2. The behaviour is bound exactly once.
-      var bound = 0
-      for other in TuiEditBindings:
-        if other.behaviour == row.behaviour: inc bound
-      ck bound == 1
-      # 3. RUNNING the named operation over a real corpus document produces
-      #    the effect the row declares. A row naming an operation whose
-      #    behaviour is not the key's would otherwise read as a join and be a
-      #    label.
-      let opIdx = operationNamed(row.operation)
-      let declName = vocabulary()[operations()[opIdx].decl].name
-      let sc = scenarioFor(scenarioDoc0, specFor(declName))
-      let res = applyOperationAt(sc.state, opIdx, sc.args,
-                                 wrapSettings(DisplayWrapA), 4)
-      ck res.outcome == ooActed
-      case row.effect
-      of eeMoved:
-        ck res.state.doc == sc.state.doc
-        ck res.state.selection != sc.state.selection
-      of eeChanged:
-        ck res.state.doc != sc.state.doc
-
-# ===========================================================================
 # THE BOUNDARY WITH THE TWO EXISTING VOCABULARIES
 # ===========================================================================
+#
+# The fourteen behaviours `applyEditKey` had (`editing_key_bindings.
+# TuiEditBindings`) were graded here until PLAT-68 retired that table for the
+# CUA base keymap. Their survival is now `test_plat68_cua_oracle.nim`'s
+# product-default superset law: each of the fourteen has a CUA row with the
+# same chord and the same operation, or one of three named refinements.
 
 suite "PLAT-30: three vocabularies, and the resolution order between them":
-
-  test "the binding table answers the three questions a `case` could not":
-    ck TuiEditBindings.len == EditBehaviourCount
-    ck ord(high(EditBehaviour)) - ord(low(EditBehaviour)) + 1 == EditBehaviourCount
-    ck duplicateEditKeys().len == 0
-    ck unboundBehaviours().len == 0
-    # The thirteen keys `applyEditKey` had an `of` arm for, by name, plus the
-    # `else` arm as the default row. This is the "fourteen behaviours" claim
-    # in the only form that can fail.
-    let wanted = ["Left", "Right", "Up", "Down", "Home", "End", "Backspace",
-                  "Delete", "Enter", "Tab", "Shift+Tab", "Ctrl+z", "Ctrl+y"]
-    ck wanted.len == 13
-    for k in wanted:
-      checkpoint("key must still be bound: " & k)
-      ck editBindingIndex(k) >= 0
-    ck defaultEditBindingIndex() >= 0
-    ck TuiEditBindings[defaultEditBindingIndex()].key == DefaultEditKey
-    # A key the table does not bind resolves to nothing, which is what lets
-    # `applyEditKey` hand it back to the keymap.
-    ck editBindingIndex("F5") < 0
-    ck editBindingIndex("Ctrl+w") < 0
-
-  test "the two divergences are declared, counted, and are exactly two":
-    let divs = declaredDivergences()
-    for d in divs:
-      checkpoint("divergent row: " & d)
-    ck divs.len == 2
-    ck "Home" in divs
-    ck "Tab" in divs
-    # …and every non-divergent row's operation is one whose published meaning
-    # the row performs unchanged. Stated as a count so a third divergence
-    # arriving without a note is red rather than unnoticed.
-    var clean = 0
-    for row in TuiEditBindings:
-      if row.divergence.len == 0: inc clean
-    ck clean == EditBehaviourCount - 2
 
   test "neither existing vocabulary is extended into this one":
     # §1.1: `ClientAction` (194 members, Monaco's names) and `KeyAction` (51
@@ -573,14 +511,6 @@ suite "PLAT-30: three vocabularies, and the resolution order between them":
     for w in wrongShape: checkpoint("not a vocabulary name: " & w)
     ck wrongShape.len == 0
     ck implNamesAll.len == ExpectedOperations
-    # The RESOLUTION ORDER, stated in code rather than left an accident
-    # (§1.1's *"a chord may resolve to a debugger action or to an editing
-    # operation, and which one it resolves to is decided by scope"*): at this
-    # milestone the editing table is consulted FIRST for a key, and a key it
-    # does not bind is handed back. `editBindingIndex` returning -1 is that
-    # hand-back, and the two keys above are the evidence it happens.
-    ck editBindingIndex("Left") >= 0
-    ck editBindingIndex("F10") < 0
 
   test "assertion count":
     echo "CHECKS: " & $countedAssertions

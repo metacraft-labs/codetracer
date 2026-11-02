@@ -35,6 +35,7 @@ use db_backend::catalog_autoload::{AutoloadOutcome, autoload_enabled, install_to
 use db_backend::ctfs_trace_reader::CTFSTraceReader;
 use db_backend::dap_handler::Handler;
 use db_backend::recreator_session::RecreatorArgs;
+use db_backend::source_access::{HostSourceReads, SourceAccess};
 use db_backend::task::TraceKind;
 use db_backend::trace_reader::TraceReader;
 use mapping_catalog::{Catalog, compute_file_sha256};
@@ -213,6 +214,41 @@ fn catalog_autoload_on_applies_matching_entry() {
 
     set_env("CT_CATALOG_AUTOLOAD", orig_on.as_deref());
     set_env("CT_CATALOG_AUTOLOAD_DISABLED", orig_off.as_deref());
+}
+
+/// A session launched with host reads off (`hostSourceReads: false`) does not
+/// scan the recorded paths on this host against the catalog, even with
+/// `CT_CATALOG_AUTOLOAD=1`: the scan reads each file to fingerprint it. The
+/// matching case above is the control.
+#[test]
+fn catalog_autoload_does_not_read_recorded_paths_without_host_reads() {
+    let _g = env_lock().lock().unwrap_or_else(|p| p.into_inner());
+    let orig_on = std::env::var("CT_CATALOG_AUTOLOAD").ok();
+    let orig_off = std::env::var("CT_CATALOG_AUTOLOAD_DISABLED").ok();
+    set_env("CT_CATALOG_AUTOLOAD", Some("1"));
+    set_env("CT_CATALOG_AUTOLOAD_DISABLED", None);
+
+    let (_cat_guard, cat_root, _trace_guard, trace_dir, bundle_path) = build_tinylib_fixture();
+    let reader = build_trace_for_bundle(&bundle_path);
+    let mut handler = Handler::construct_with_reader_and_source_access(
+        TraceKind::Materialized,
+        RecreatorArgs::default(),
+        reader,
+        false,
+        SourceAccess {
+            host_reads: HostSourceReads::Refused,
+            ..SourceAccess::default()
+        },
+    );
+    handler.load_catalog_autoload(&trace_dir, Some(&cat_root));
+    let applied = handler.sourcemap_cache.has_rename_list();
+
+    set_env("CT_CATALOG_AUTOLOAD", orig_on.as_deref());
+    set_env("CT_CATALOG_AUTOLOAD_DISABLED", orig_off.as_deref());
+    assert!(
+        !applied,
+        "a session without host reads fingerprinted a recorded path on the host"
+    );
 }
 
 /// §P8.3 — even with `CT_CATALOG_AUTOLOAD=1`, a SHA mismatch prevents

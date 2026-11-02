@@ -3,11 +3,12 @@
 # ## Why this file exists when `flake.lock` already pins them
 #
 # It is NOT a second pin, and it must not be read as one. `flake.lock` is the
-# pin: the Nim compiler in the dev shell is `codetracer-toolchains`'
-# `packages.nim-2_2` (`nix/packages/default.nix`'s `nim-codetracer`), and
-# `rustc`/`cargo` are `fenix`'s stable toolchain combined in
-# `nix/shells/ci-base.nix`. Both are root inputs of `flake.nix` with 40-hex
-# locked revs, so the commit ALREADY determines them.
+# pin: the Nim compiler in the dev shell is the metacraft-labs/nim fork that
+# the `reprobuild` input builds (`nix/packages/default.nix`'s `nim-fork`, first
+# on PATH in `nix/shells/ci-base.nix`), and `rustc`/`cargo` are `fenix`'s
+# stable toolchain combined in `nix/shells/ci-base.nix`. Both are root inputs
+# of `flake.nix` with 40-hex locked revs, so the commit ALREADY determines
+# them.
 #
 # What the commit did not have was any way to state, cheaply and without
 # evaluating the flake, WHICH COMPILER IT EXPECTS — so nothing could tell a
@@ -48,33 +49,35 @@
 # by channel), so this is provenance for the reader rather than a key — but if
 # a version ever DOES differ by platform, this line is where the reader learns
 # which one was written down.
-TOOLCHAIN_HOST_MEASURED=aarch64-darwin
-TOOLCHAIN_MEASURED_ON=2026-09-02
+TOOLCHAIN_HOST_MEASURED=x86_64-linux
+TOOLCHAIN_MEASURED_ON=2026-10-23
 
 # --- Nim --------------------------------------------------------------------
 #
-# From `codetracer-toolchains`' `nim-2_2`, wrapped as `nim-codetracer` in
-# `nix/packages/default.nix`. Provides both `nim` and `nim2`.
-EXPECT_NIM_VERSION=2.2.8
+# From the metacraft-labs/nim fork (`nix/packages/default.nix`'s `nim-fork`,
+# which is `inputs.reprobuild.packages.<system>.nim-fork`). It supplies `nim`,
+# `nimpretty` and `nim-gdb`; `nim-codetracer` (nixpkgs Nim 2.2.8) stays on
+# PATH behind it for `nimsuggest`, `nim2` and the other tools the fork does
+# not build — `nix/shells/ci-base.nix` records why the order matters.
+EXPECT_NIM_VERSION=2.3.1
 
-# UPSTREAM, and this was MEASURED rather than assumed, because the opposite was
-# the standing hypothesis and it was wrong. `flake.lock` does carry a
-# `nim-fork-src` node — `git+https://github.com/metacraft-labs/nim`, ref
-# `codetracer`, rev 0b5b5ec507d2d9c731d222184c625851377a02c8 — and the obvious
-# reading is that the dev shell's Nim is that fork. It is not. `nim-fork-src`
-# is an input of `reprobuild` and of nothing else, so it builds `repro`, not
-# CodeTracer. The dev shell's compiler resolves to a derivation whose `src` is
+# FORK, MEASURED. This line said `upstream` until 2026-10-23 and was true when
+# it was written: the compiler then came from
+# `https://nim-lang.org/download/nim-2.2.8.tar.xz`, and `nim-fork-src` built
+# `repro` and nothing else. `ccbb85a0a` ("use the CodeTracer Nim fork as the
+# dev-shell compiler") changed that and this file was not re-measured, so
+# `--verify` refused every run on "nim is 2.3.1, but ci/toolchain.pin expects
+# 2.2.8" — and `ci/deploy/build-noir-wasm.sh`, which refuses on any
+# declaration drift, could not build the browser's Noir modules at all.
 #
-#     https://nim-lang.org/download/nim-2.2.8.tar.xz
-#     sha256-EUGRr6CDxQWdy+XOiNvk9CVCz/BOLDAXZo7kOLwLjPw=
-#
-# reached by `nix-store -q --deriver $(command -v nim)` and then
-# `nix derivation show` on the `.drv` and on its `src` input. A guess would
-# have been recorded here as a gap; this is a measurement, so it is recorded as
-# a value, and `--verify` re-checks the REACHABILITY half of it (that
-# `nim-fork-src` has not become reachable from `codetracer-toolchains`) on
-# every run.
-EXPECT_NIM_SOURCE=upstream
+# Re-measured the same way the old value was: `nix-store -q --deriver
+# $(command -v nim)` names `nim-fork-2.3.1-codetracer`, `nix derivation show`
+# gives its `src` as a store path, and `nix hash path` of that path is
+# `sha256-QzKwbFDJCU9OPEICN4cq8bnT31h+1Np3AuhXTblpD3I=` — the `narHash` of the
+# `nim-fork-src` node in `flake.lock` (rev 73545515). `--verify` re-checks the
+# REACHABILITY half on every run: with `fork` declared, `nim-fork-src` must be
+# reachable from `reprobuild`, the input `nim-fork` is taken from.
+EXPECT_NIM_SOURCE=fork
 
 # --- Rust -------------------------------------------------------------------
 #
@@ -114,7 +117,19 @@ EXPECT_RUSTC_COMMIT=ac68faa20
 # `flake.lock`. Do not "fix" a mismatch by editing these lines alone: they are
 # a claim that the EXPECT_* values above were observed at these revisions, and
 # editing them without re-measuring makes that claim false.
-LOCK_CODETRACER_TOOLCHAINS=942c995a36469853351af605da90025314ffc58e
+#
+# RE-MEASURED 2026-10-23 on x86_64-linux, all of them, with
+# `scripts/toolchain-pins.sh --stamp` inside `nix develop .#ci` at codetracer
+# `a882da133`: nim 2.3.1 (`nim-fork-2.3.1-codetracer`), rustc 1.96.0
+# (ac68faa20) and cargo 1.96.0 (`rust-mixed`), nargo 1.0.0-beta.26. The two
+# moves below had each been made in `flake.lock` without this step —
+# `d3f44f9a0` moved `codetracer-toolchains` from 942c995a to e830fd32, and
+# `23b8020f5` and `a51c609bc` moved `noir` to 73160a51 and then a5e92b84 — and
+# the guard refused every run from the first of them on. The deploy's
+# `ci/deploy/build-noir-wasm.sh` is one of those runs, so the browser's Noir
+# modules could not be rebuilt and `ide.codetracer.com` kept serving a tracer
+# that writes a version-6 `meta.dat` its own replay engine refuses.
+LOCK_CODETRACER_TOOLCHAINS=e830fd3211db97b07ab04612bc116a3cb1ceab6e
 LOCK_FENIX=dd2c80d0b88463ccc0402c86e9e72dbb354ac091
 # Moved from 5e98f904 (ref `codetracer-temp`) to ca080a58 (ref `codetracer`).
 #
@@ -157,4 +172,17 @@ LOCK_FENIX=dd2c80d0b88463ccc0402c86e9e72dbb354ac091
 # x86_64-linux on 2026-10-02: rustc 1.96.0 (ac68faa20) and cargo 1.96.0 are
 # unchanged, and nargo reports 1.0.0-beta.26. The Nim lines above were not
 # re-measured by this move.
-LOCK_NOIR=c008e89028a360a7854ac9e0e017b647bf8fd0a8
+#
+# Moved to 1786e598 (`codetracer`, built against the trace format with the
+# exact I/O event kinds, `codetracer-trace-format` c8e57b1), the revision
+# `ci/deploy/noir-wasm.pin` already names. At c008e890 `nargo trace` wrote a
+# version-6 `meta.dat`, which the db-backend reader at the current
+# trace-format pin refuses (it reads version 7 only), so every Noir recording
+# made with the dev shell's `nargo` failed to open.
+#
+# Moved to a5e92b84 (`codetracer`, the recorder writes each call record once
+# the callee's parameters are bound), through 73160a51 (`nargo trace
+# --test-name`). Both descend from 1786e598 and keep its trace-format pin,
+# `codetracer-trace-format` c8e57b1, so `nargo trace` still writes `meta.dat`
+# version 7.
+LOCK_NOIR=a5e92b847ec95a7f20eadee36745b55d7c8f9659

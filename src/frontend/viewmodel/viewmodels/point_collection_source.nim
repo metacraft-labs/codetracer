@@ -74,7 +74,8 @@ func rowOf*(r: PointResolution; collection: string; enabled: bool):
     enabled: enabled,
     collection: collection,
     resolution: describe(r.outcome),
-    detail: r.detail)
+    detail: r.detail,
+    expression: r.point.expression)
 
 func rowsOf*(resolutions: openArray[CollectionResolution];
              enabledCollections: HashSet[string]): seq[PointListEntry] =

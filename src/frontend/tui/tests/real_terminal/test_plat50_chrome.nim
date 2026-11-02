@@ -122,7 +122,7 @@ proc press(sess: var TuiTestSession; row, col: int) =
   sess.send("\x1b[<0;" & $(col + 1) & ";" & $(row + 1) & "m")
 
 proc quit(sess: var TuiTestSession) =
-  sess.send("q")
+  sess.send("\x11")  # Ctrl+Q, the CUA base's quit
   discard sess.waitExit(initDuration(seconds = 10))
   sess.terminate()
   sess.close()
@@ -186,7 +186,11 @@ suite "PLAT-50 on a real terminal: the top bar":
     var sess = open()
     discard sess.waitFor("Navigate to file")
     sess.press(0, 1)
-    let (rf, cf) = sess.waitFor("File")
+    # The item is found WITH the frame's left edge before it: a bare "File"
+    # also matches the Files pane's tab, which is on screen before the menu
+    # opens, and then the frame's cells are read off the tab's row.
+    let (rb, cb) = sess.waitFor("│ File")
+    let (rf, cf) = (rb, cb + 2)
     let s = sess.snap()
     # The frame: `┌` one row above the first item, in ui/border/primary.
     ck s[rf - 1][cf - 2].glyph == "┌"

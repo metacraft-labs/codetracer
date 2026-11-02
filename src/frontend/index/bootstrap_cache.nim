@@ -32,6 +32,11 @@ const
     # may replay in any order relative to the heavier trace messages.
     cstring"CODETRACER::recent-items",
     cstring"CODETRACER::trace-loaded",
+    # A load that FAILED is as much the session's state as one that loaded:
+    # a page that connects (or reconnects) after the startup's replay could
+    # not be started must be told so, or it waits on a session that will
+    # never come. `host_clients.remember` drops it when a later load succeeds.
+    cstring"CODETRACER::trace-load-error",
     cstring"CODETRACER::filenames-loaded",
     cstring"CODETRACER::filesystem-loaded",
     cstring"CODETRACER::symbols-loaded",

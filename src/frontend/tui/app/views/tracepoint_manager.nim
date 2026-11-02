@@ -21,15 +21,13 @@
 ##      a `◆` on `app/views/timeline_bar.nim`'s track, so this is the surface the
 ##      marks come from.
 ##
-##      **It answers with NO DAP RESPONSE.** `Handler::run_tracepoints`
+##      **Its hits are an EVENT, not the response.** `Handler::run_tracepoints`
 ##      (`src/db-backend/src/dap_handler.rs`) sends `ct/updated-trace` and
-##      `ct/tracepoint-results` and never calls `respond_dap`, so a client that
-##      waits for the reply waits for ever — measured, as a hang, before it was
-##      read in the source. `headless_session.runTracepoints` therefore sends
-##      without expecting a response and synchronises on the EVENT. Recorded
-##      here because it is exactly the shape
-##      `codetracer-specs/Testing/Verification-Harness-Traps.md` §3 is about: the
-##      symptom is a timeout and the cause is not a slow backend.
+##      `ct/tracepoint-results`, then answers the request with an empty body.
+##      `headless_session.runTracepoints` synchronises on the EVENT and leaves
+##      the answer unread. Until 2026-10-27 there was no answer at all, and a
+##      client that waited for one waited for ever — the shape
+##      `codetracer-specs/Testing/Verification-Harness-Traps.md` §3 is about.
 ##
 ##   2. **The DAP LOGPOINT is the live one**, and it is not a substitute.
 ##      `setBreakpoints` with a `logMessage` verifies the line and emits one
@@ -165,7 +163,7 @@ const
   # ambiguous in every suite that imports the shell — caught by
   # `tests/test_call_stack_navigation.nim` refusing to compile.
   TracepointDialogTitle* = "TRACEPOINTS"
-  DialogBorder* = "─"
+  DialogBorder = canonical(grDividerH)
 
   MaxExpressionCells* = 40
 
@@ -184,7 +182,7 @@ const
   TitleStyle* = CellStyle(role: srChromeTitle)
   TitleDetailStyle* = CellStyle(role: srChromeMuted)
   RuleStyle* = CellStyle(role: srBorderPane)
-  MarkGlyph* = "◆"
+  MarkGlyph* = canonical(grTracepoint)
     ## A tracepoint's mark. (It was the Timeline scrubber's too; the Timeline
     ## panel is removed, 2026-10-05.)
   TracepointMarkStyle* = CellStyle(role: srTimelineMark)
@@ -417,7 +415,8 @@ proc recordSubmission*(model: var TracepointManagerModel;
 # Painting
 # ---------------------------------------------------------------------------
 
-proc titleRowSpans*(model: TracepointManagerModel; width: int): StyledRow =
+proc titleRowSpans*(model: TracepointManagerModel; width: int;
+                    glyphs = DefaultGlyphs): StyledRow =
   result = @[]
   if width <= 0:
     return
@@ -441,11 +440,11 @@ proc titleRowSpans*(model: TracepointManagerModel; width: int): StyledRow =
     result.add StyledSpan(text: " ", style: DefaultCellStyle)
     inc used
   if used < width:
-    result.add StyledSpan(text: repeatGlyph(DialogBorder, width - used),
+    result.add StyledSpan(text: repeatGlyph(glyphs.glyph(grDividerH), width - used),
                           style: RuleStyle)
 
 proc entryRowSpans*(model: TracepointManagerModel; index: int;
-                    width: int): StyledRow =
+                    width: int; glyphs = DefaultGlyphs): StyledRow =
   ## `◆ ok   main.py:31       log(left)                2 hit(s)`.
   result = @[]
   if width <= 0 or index < 0 or index >= model.entries.len:
@@ -453,7 +452,7 @@ proc entryRowSpans*(model: TracepointManagerModel; index: int;
   let entry = model.entries[index]
   let selected = index == model.selected and not model.editing
   var spans: seq[StyledSpan] = @[]
-  spans.add StyledSpan(text: MarkGlyph & " ",
+  spans.add StyledSpan(text: glyphs.glyph(grTracepoint) & " ",
                        style: (if entry.draft.enabled: TracepointMarkStyle
                                else: DisabledStyle))
   spans.add StyledSpan(text: entryStateLabel(entry),
@@ -529,7 +528,7 @@ proc paintTracepointManager*(g: var StyledGrid; area: CellArea;
     return
 
   var spanAt = area.col
-  for span in titleRowSpans(model, area.width):
+  for span in titleRowSpans(model, area.width, g.glyphs):
     g.paint(area.row, spanAt, span.text, span.style)
     spanAt += cellWidthOf(span.text)
 
@@ -551,7 +550,7 @@ proc paintTracepointManager*(g: var StyledGrid; area: CellArea;
     if row > lastRow - 1:
       break
     var at = area.col
-    for span in entryRowSpans(model, i, area.width):
+    for span in entryRowSpans(model, i, area.width, g.glyphs):
       g.paint(row, at, span.text, span.style)
       at += cellWidthOf(span.text)
     if i == model.selected:

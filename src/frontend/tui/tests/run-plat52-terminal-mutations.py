@@ -89,7 +89,7 @@ MODEL = "src/frontend/viewmodel/viewmodels/terminal_output_model.nim"
 SCRUB = "src/frontend/viewmodel/viewmodels/scrollbar_scrubber.nim"
 TVM = "src/frontend/viewmodel/viewmodels/terminal_output_vm.nim"
 DVIEW = "src/frontend/viewmodel/views/isonim_terminal_output_view.nim"
-DESK = "src/frontend/ui/terminal_output.nim"
+PHOST = "src/frontend/ui/panel_host.nim"
 TPANE = "src/frontend/tui/app/views/terminal_output_pane.nim"
 RUNTIME = "src/frontend/tui/app/runtime.nim"
 TSESSION = "src/frontend/tui/host/tui_session.nim"
@@ -115,7 +115,7 @@ GPLAN = "src/frontend/gpui/tests/test_plat52_gpui_plan.nim"
 DESKTOP_GATE = "scripts/plat52-capture-electron.sh"
 SPEC = "src/tests/gui/tests/visual/plat52-terminal-capture.spec.ts"
 
-SUBJECTS = [MODEL, SCRUB, TVM, DVIEW, DESK, TPANE, RUNTIME, TSESSION, PROFILE,
+SUBJECTS = [MODEL, SCRUB, TVM, DVIEW, PHOST, TPANE, RUNTIME, TSESSION, PROFILE,
             GLEAF, GMAIN, PVIEWS, SOURCE]
 SUITES = [VMU, VNAT, T1S, REF, PTY, REFT, GPLAN, DESKTOP_GATE]
 
@@ -325,16 +325,18 @@ ARMS = [
         N_EACH, "every fragment goes to the last write"),
     # --- the terminal ---------------------------------------------------------
     Arm("T1", TPANE,
-        "  scrubberModel(m.lines.len, m.visibleTop(rows), rows, m.currentLine)\n",
-        "  scrubberModel(min(m.lines.len, rows), m.visibleTop(rows), rows,\n                m.currentLine)\n",
+        "  scrubberModel(m.lineCount, m.visibleTop(rows), rows, m.currentLine)\n",
+        "  scrubberModel(min(m.lineCount, rows), m.visibleTop(rows), rows,\n                m.currentLine)\n",
         T_SCRUB, "the terminal's scrubber spans the rows on screen"),
     Arm("T2", RUNTIME,
         "  if w != m.scrubSent:\n",
         "  if false:\n",
         T_REALTIME, "the terminal's screen drag moves no debugger while held"),
+    # PLAT-70 Part H: the line view's bar is every bar's (`runtime.pressBar`
+    # → `applyBarTop`).
     Arm("T3", RUNTIME,
-        "  of thLineTrack:\n    rt.scrubTerminalLines(area, event.row, click = true)\n",
-        "  of thLineTrack:\n    discard rt.terminalWriteJump(0, outcome)\n    rt.scrubTerminalLines(area, event.row, click = true)\n",
+        "    of paneTerminalOutput:\n      rt.app.terminalOutput.scrollTop = top\n",
+        "    of paneTerminalOutput:\n      discard rt.terminalWriteJump(0, outcome)\n      rt.app.terminalOutput.scrollTop = top\n",
         T_SCRUB, "a track click moves the debugger"),
     Arm("T4", TPANE,
         "  case fragmentTense(currentTicks, f.rrTicks)\n",
@@ -349,17 +351,21 @@ ARMS = [
         "  result = CellStyle(fg: \"\", bg: termHex(bg), bold: a.bold,\n",
         T_PAINT, "the terminal paints no program colour"),
     Arm("T7", PROFILE,
-        "     paneTerminalOutput},\n",
-        "     paneEditor},\n",
+        "     paneTerminalOutput,\n",
+        "     paneEditor,\n",
         T_LEAF, "the terminal reports the pane instead of drawing it"),
     Arm("T8", TPANE,
-        "  if f >= 0.0:\n    let r = min(geo.contentRows - 1, int(floor(f * float(geo.contentRows))))\n",
-        "  if false:\n    let r = min(geo.contentRows - 1, int(floor(f * float(geo.contentRows))))\n",
+        "  scrubberModel(m.lineCount, m.visibleTop(rows), rows, m.currentLine)\n",
+        "  scrubberModel(m.lineCount, m.visibleTop(rows), rows, -1)\n",
         T_MARK, "the current position is not marked on the track"),
+    # Both lookups: the screen's writes when they are loaded, else the
+    # writes the held lines name (the line view is windowed).
     Arm("T9", RUNTIME,
-        "  let ev = m.screen.writes[write]\n  outcome.requestClick(PaneClickRequest(\n",
-        "  let ev = m.screen.writes[min(write + 1, m.screen.writes.high)]\n  outcome.requestClick(PaneClickRequest(\n",
-        T_CLICK, "a click lands on the write after the clicked one"),
+        "    ev = m.screen.writes[write]\n",
+        "    ev = m.screen.writes[min(write + 1, m.screen.writes.high)]\n",
+        T_CLICK, "a click lands on the write after the clicked one",
+        also=((RUNTIME, "    ev = m.writeOf(write)\n",
+               "    ev = m.writeOf(write + 1)\n"),)),
     Arm("P1", MODEL,
         "  (0, 0, 0), (187, 0, 0), (0, 187, 0), (187, 187, 0),\n",
         "  (0, 0, 0), (170, 0, 0), (0, 187, 0), (187, 187, 0),\n",
@@ -377,14 +383,21 @@ ARMS = [
         "  let lines = vm.lines.val\n  if lines.len == 0:\n    result.report =\n",
         "  let lines = newSeq[TerminalLine]()\n  if lines.len == 0:\n    result.report =\n",
         T_VOCAB, "the vocabulary view reports instead of listing the lines"),
+    # The native hosts' producer is the line window the pane shows
+    # (`showTerminalLines`, Viewport-Driven-Loading Q3): since `9a5c980825`
+    # `loadTerminalOutput`'s `setEvents` feeds only whole-output consumers.
     Arm("SO1", SOURCE,
-        "  if not vm.isNil:\n    vm.setEvents(events)\n",
-        "  if not vm.isNil:\n    vm.setEvents(@[])\n",
+        "  vm.setViewport(v)\n  pumpCallbacks()\n",
+        "  discard v\n  pumpCallbacks()\n",
         T_DATA, "the native producer hands the ViewModel no writes"),
     # --- the desktop's real app ----------------------------------------------
-    Arm("DE1", DESK,
-        "  terminalOutputVMInstance.setEvents(terminalOutputEventsOf(self.cachedEvents))\n",
-        "  terminalOutputVMInstance.setEvents(@[])\n",
+    # The desktop's pane loads the lines it shows: the panel host reports
+    # the pane's viewport and the ViewModel asks the engine for that window.
+    # `ui/terminal_output.nim`'s `setEvents` path has no caller left
+    # (`onLoadedTerminal` is never dispatched), so the arm lives here.
+    Arm("DE1", PHOST,
+        "        terminal_output_vm.setViewport(vm, v),\n",
+        "        discard v,\n",
         D_DESKTOP, "the desktop's pane loads no output"),
     Arm("R1", MODEL,
         "  if a.bold: parts.add \"font-weight:bold\"\n",
@@ -400,8 +413,8 @@ ARMS = [
         "  if false:\n",
         G_REALTIME, "GPUI's screen drag moves no debugger while held"),
     Arm("G3", GLEAF,
-        "  scrubberModel(vm.lines.val.len, vm.visibleTop(st, rows), rows,\n",
-        "  scrubberModel(min(rows, vm.lines.val.len), vm.visibleTop(st, rows), rows,\n",
+        "  scrubberModel(vm.lineCount, vm.visibleTop(st, rows), rows,\n",
+        "  scrubberModel(min(rows, vm.lineCount), vm.visibleTop(st, rows), rows,\n",
         G_SCRUB, "GPUI's scrubber spans the rows drawn"),
     Arm("G4", GMAIN,
         "  of ghWrite:\n    return terminalJump(r, hit.write)\n",

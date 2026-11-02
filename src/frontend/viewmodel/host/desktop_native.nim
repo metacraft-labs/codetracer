@@ -271,6 +271,13 @@ proc desktopProcess(profile: PlatformProfile): ProcessFacade =
       resolvedErr[ProcessRunResult](
         pkFailed, "running " & spec.command & " failed", err.msg)
 
+  # `runLater` keeps `unavailableProcess`'s refusal. `run` above waits for the
+  # child, so it cannot stand in; `start` below delivers no output until the
+  # host's loop polls, so a run built on it would need that loop to drain the
+  # pipes as well. No native caller wants one — the native front ends read the
+  # repository through `native_vcs` — and refusing is what the facade asks of
+  # an instantiation that cannot keep `runLater`'s promise.
+
   result.start = proc(spec: ProcessSpec;
                       onOutput: proc(chunk: ProcessOutputChunk);
                       onExit: proc(exit: ProcessExit)

@@ -33,10 +33,7 @@
 ## and the native replay backend renders values through the named language's
 ## printers. Now B is the ONE request per move, naming the stop's tick and
 ## the file's language (`ReplayDataStore.sourceLanguageOf`, installed by
-## `initStateVMWithStore`), and A stands down once the StateVM runs over the
-## session's store. Where it does not — the stub-backed StateVM a host that
-## never builds the session's store is left with (the VS Code extension) — A
-## is still the one sender, and the first suite asserts it still asks.
+## `installSourceLanguage`), and A is gone: the State component asks nothing.
 ##
 ## This suite drives the real senders and the delivery and reads the store
 ## and the wire.
@@ -47,11 +44,21 @@
 ## `sendCtRequest`, `deliverDapResponse`), `middleware.setupMiddlewareApis`
 ## (the view -> DAP request relay and the DAP -> views response relay), the
 ## views mediator and a component mediator built by `types`' own
-## constructors, `StateComponent.register` / `onCompleteMove` / `loadLocals` /
-## `registerLocals`, `state.wireLocalsAnswers` (called by `ui_js` in
-## production), the StateVM and its auto-load effect over a
-## `ReplayDataStore` whose backend is `newDapBackendService` (the constructor
-## `ui_js` uses), and the frame shape the backend answers with.
+## constructors, `StateComponent.register` / `onCompleteMove`,
+## `state.wireLocalsAnswers` (called by `ui_js` in
+## production, once per tab's session with that session's mediator and
+## store), and the session `ui_js.configureSessionMiddleware` builds: a
+## `DebuggerSession` over `newDapBackendService` (the constructor `ui_js`
+## uses), its panel ViewModels and its stop loader, attached to a trace as
+## `ui_js.attachLoadedTrace` attaches it. The frame shape the backend answers
+## with is the real one.
+##
+## THE ANSWER IS MATCHED BY ITS OWN REQUEST'S FUTURE. Since HSF-S1 the stop
+## loader is the web's sender and applies what it asked for when that
+## request's future settles — `DapApi` resolves it from the response whose
+## `request_seq` names it, in the session that sent it. The fan-out
+## (`syncStoreLocals`) stands down on such a store. Settling happens on the
+## microtask queue, so every read below follows `settle()`.
 ##
 ## THE ONE STAND-IN: the `ipc` object's `send`, which records the request
 ## frame instead of writing it to the Backend Manager — and the answer frames,
@@ -67,11 +74,10 @@
 ##
 ## Lane: `renderer-dom` — the BROWSER target (`nim js -d:ctRenderer`, no
 ## `-d:nodejs`: `ui/state.nim`'s kdom graph does not compile under it), run
-## by `jsdom-run.mjs` over a real DOM. WITHOUT `-d:ctInExtension`: the
-## extension transport carries no request `seq`. Without `-d:nodejs`
+## by `jsdom-run.mjs` over a real DOM. Without `-d:nodejs`
 ## `std/unittest` cannot set the exit status, so this suite sets it.
 
-import std/[unittest, jsffi, strutils, asyncjs]
+import std/[unittest, jsffi, strutils, asyncjs, json]
 
 import ../types
 import ../dap
@@ -80,9 +86,13 @@ import ../communication
 import ../middleware
 import ../../common/ct_event
 import ../ui/state
+from ../ui/process_tree import consumeListProcessesEvent
 import ../lang
 from ../viewmodel/viewmodels/state_vm import addWatch, removeWatch
 import ../viewmodel/store/replay_data_store
+import ../viewmodel/session_vm
+import ../viewmodel/sdk/[debugger_session, trace_source]
+from ../viewmodel/sdk/stop_loader import claimLocalsLoading
 from ../viewmodel/store/types as store_types import nil
 import ../viewmodel/editor/reconcile
 import isonim/core/signals
@@ -141,17 +151,17 @@ proc localsAnswer(requestSeq: int; marker: int): JsObject =
   }
 
 # ---------------------------------------------------------------------------
-# The renderer, wired as `ui_js.configureMiddleware` wires it
+# The renderer, wired as `ui_js.configureSessionMiddleware` wires it
 # ---------------------------------------------------------------------------
 
 let dapApi = DapApi(ipc: recordingIpc(), seq: 0, sessionId: 0)
 let viewsApi = setupSinglePageViewsApi(cstring"test-views")
 setupMiddlewareApis(dapApi, viewsApi)
 
-# The State component registers FIRST, over the stub-backed StateVM
-# `register` builds — the order a host that never builds the session's store
-# (the VS Code extension) is left in, and the order the desktop is in when
-# `createUIComponents` beats `configureMiddleware`.
+# The State component registers FIRST, before the session's StateVM exists —
+# the order the desktop is in when `createUIComponents` beats
+# `configureSessionMiddleware`. Its moves are delivered by hand (`moveTo`): the
+# component's `onCompleteMove` moves the store's debugger position.
 let component = StateComponent(
   id: 0,
   values: JsAssoc[cstring, ValueComponent]{},
@@ -192,30 +202,50 @@ proc watchesOf(packet: JsObject): seq[string] =
   for i in 0 ..< raw["length"].to(int):
     result.add $raw[i].to(cstring)
 
+proc jsPush(arr: JsObject; item: JsObject) {.importjs: "#.push(#)".}
+
+proc answerFromRequest(packet: JsObject; marker: int): JsObject =
+  ## `localsAnswer`, plus the watch rows the REQUEST asked for: one copy of
+  ## the fixture's `initial_shield` value per expression in the request's
+  ## `watchExpressions`, renamed to that expression and marked
+  ## `value.isWatch` — the shape `db-backend/src/watch_expression.rs` gives a
+  ## watch answer. A request that named no watches gets no watch rows, as
+  ## from the engine, so a request that dropped the watch list (#855) cannot
+  ## be hidden by an answer that carries one anyway.
+  result = localsAnswer(seqOf(packet), marker)
+  let rows = result["body"]["locals"]
+  for expression in watchesOf(packet):
+    let row = jsonParse(readFixture())["locals"][1]
+    row["value"]["i"] = cstring($marker)
+    row["expression"] = cstring(expression)
+    row["value"]["isWatch"] = true
+    rows.jsPush(row)
+
 # The language `calc.rs` is in, as the wire names it — resolved the way the
 # renderer resolves it, so the suite does not restate the table.
 let rustWire = langWireName(toLangFromFilename(cstring"/src/calc.rs"))
 doAssert rustWire != LoadLocalsDefaultLang
 
-suite "where the StateVM runs over a stub store, the State component asks":
-
-  test "the stub-store host still asks once per move, in the file's language":
-    # Before `initStateVMWithStore` the StateVM's auto-load goes to a stub
-    # backend that sends nothing, so the legacy component is the only
-    # sender: it must still ask, and name the file's language.
-    let base = localsRequests().len
-    moveTo(50, 5)
-    let sent = newSince(base)
-    ck sent.len == 1
-    ck sent.len == 1 and langOf(sent[0]) == rustWire
-
 # ---------------------------------------------------------------------------
-# The session's store, wired as `ui_js.configureMiddleware` wires it
+# The session, built as `ui_js.configureSessionMiddleware` builds it
 # ---------------------------------------------------------------------------
 
-let store = createReplayDataStore(newDapBackendService(dapApi))
-initStateVMWithStore(store)
-wireLocalsAnswers(viewsApi)
+let session = newDebuggerSession(newDapBackendService(dapApi))
+let store = session.store
+installSourceLanguage(store)
+store.claimLocalsLoading()
+session.session.initializePanelViewModels()
+initStateVMFromSession(session.session.stateVM)
+wireLocalsAnswers(viewsApi, store)
+session.attach(localFolderTrace("/trace"))
+# The engine answers every launch with an unsolicited `ct/listProcesses`, a
+# single-trace launch too (`dap_server.rs::dispatch_session_load_event`, over
+# `wrap_single_trace_as_session`); `ui_js`'s `subscribeListProcesses` hands it
+# to `consumeListProcessesEvent`. Delivered here, as at session load, because
+# it decides which StateVM the session reads the watch list from (#855).
+session.session.consumeListProcessesEvent(%*{"processes": [{
+  "recordingId": "calc", "role": "", "displayName": "calc.ct",
+  "defaultThreadPrefix": "", "threadCount": 1, "threadIds": [1]}]})
 
 proc deliver(frame: JsObject) =
   ## What `ui_js.onDapReceiveResponse` does with a response frame.
@@ -228,49 +258,71 @@ proc shown(): seq[string] =
 proc dropped(): int =
   store.stops.report.count(pkInlineValues, roDropped)
 
-# The StateVM's effect asked once at construction, before `wireLocalsAnswers`
-# ran — the boot request `resetForNewSession` is about. Not recorded, so its
-# answer, were it to arrive, would name no stop.
+proc settle(): Future[void] =
+  ## Yield to the event loop until every pending microtask has run — the
+  ## stop loader applies an answer in its request future's continuation,
+  ## which never runs inside the delivering call.
+  newPromise proc(resolve: proc()) =
+    {.emit: "setTimeout(`resolve`, 0);".}
+
+# Attaching asks nothing: the store has no stop yet.
 let bootRequests = localsRequests().len
 
-suite "the web renderer matches a ct/load-locals answer to its request":
+var caseName = "the session attaches to the trace"
+  ## Until the first section begins, a failure is the setup's.
+var caseFailuresBefore = 0
+var caseOpen = false
 
-  test "one request per move, in the file's language; a stale answer is dropped":
-    moveTo(100, 10)
-    let atStop1 = newSince(bootRequests)
-    # ONE REQUEST PER MOVE — the StateVM's auto-load over the session's
-    # store; the legacy component stands down. It names the language of the
-    # file the debugger stopped in (`rust`, from `calc.rs`), not the store's
-    # fallback `c`, and the stop's own tick.
-    ck atStop1.len == 1
-    ck atStop1.len == 1 and langOf(atStop1[0]) == rustWire
-    ck atStop1.len == 1 and ticksOf(atStop1[0]) == 100
-    ck store.pendingLocals.len == 1
+proc beginCase(name: string) =
+  ## The checks below are ONE async walk (the stop loader applies an answer
+  ## in a continuation), not `unittest` tests; each section still reports
+  ## its verdict by name, in `unittest`'s spelling, so a reader of the run —
+  ## a mutation harness naming its killer case — finds it as any other case.
+  caseName = name
+  caseFailuresBefore = failedChecks
+  caseOpen = true
 
-    moveTo(200, 20)
-    let atStop2 = newSince(bootRequests + 1)
-    ck atStop2.len == 1
-    ck atStop2.len == 1 and langOf(atStop2[0]) == rustWire
-    ck store.pendingLocals.len == 2
+proc endCase() =
+  caseOpen = false
+  echo (if failedChecks == caseFailuresBefore: "  [OK] " else: "  [FAILED] ") &
+       caseName
 
-    # The FAST MOVE: stop 1's answer arrives after the debugger reached stop 2.
-    let droppedBefore = dropped()
-    deliver(localsAnswer(seqOf(atStop1[0]), 10))
-    ck "initial_shield=10" notin shown()
-    ck shown().len == 0
-    # Counted once per ANSWER, however many subscribers it was fanned out to.
-    ck dropped() - droppedBefore == 1
-    # A record lives exactly as long as its answer's delivery.
-    ck store.pendingLocals.len == 1
+proc sessionChecks() {.async.} =
+  beginCase("one request per move, in the file's language; a stale answer is dropped")
+  moveTo(100, 10)
+  let atStop1 = newSince(bootRequests)
+  # ONE REQUEST PER MOVE — the stop loader's; the legacy component stands
+  # down. It names the language of the file the debugger stopped in (`rust`,
+  # from `calc.rs`), not the store's fallback `c`, and the stop's own tick.
+  ck atStop1.len == 1
+  ck atStop1.len == 1 and langOf(atStop1[0]) == rustWire
+  ck atStop1.len == 1 and ticksOf(atStop1[0]) == 100
 
-    deliver(localsAnswer(seqOf(atStop2[0]), 20))
-    ck shown() == @["initial_shield=20"]
-    ck dropped() - droppedBefore == 1
-    ck store.pendingLocals.len == 0
-    # The legacy component's own subscription received the answer as well.
-    ck component.locals.len == 1
+  moveTo(200, 20)
+  let atStop2 = newSince(bootRequests + 1)
+  ck atStop2.len == 1
+  ck atStop2.len == 1 and langOf(atStop2[0]) == rustWire
 
-  test "an answer overtaken by a later one is still judged by its own stop":
+  # The FAST MOVE: stop 1's answer arrives after the debugger reached stop 2.
+  let droppedBefore = dropped()
+  deliver(localsAnswer(seqOf(atStop1[0]), 10))
+  await settle()
+  ck "initial_shield=10" notin shown()
+  ck shown().len == 0
+  # Counted once per ANSWER, however many subscribers it was fanned out to.
+  ck dropped() - droppedBefore == 1
+
+  deliver(localsAnswer(seqOf(atStop2[0]), 20))
+  await settle()
+  ck shown() == @["initial_shield=20"]
+  ck dropped() - droppedBefore == 1
+  # The component keeps no copy of the answer: on the desktop and the web it
+  # subscribes to nothing, and the pane renders the session's store.
+  ck component.locals.len == 0
+
+  endCase()
+  beginCase("an answer overtaken by a later one is still judged by its own stop")
+  block:
     let base = localsRequests().len
     moveTo(300, 30)
     let atStop3 = newSince(base)
@@ -279,12 +331,15 @@ suite "the web renderer matches a ct/load-locals answer to its request":
     ck atStop3.len == 1 and atStop4.len == 1
     # Stop 4's answer overtakes stop 3's.
     deliver(localsAnswer(seqOf(atStop4[0]), 40))
+    await settle()
     ck shown() == @["initial_shield=40"]
     deliver(localsAnswer(seqOf(atStop3[0]), 30))
+    await settle()
     ck shown() == @["initial_shield=40"]
-    ck store.pendingLocals.len == 0
 
-  test "a repeated move asks nothing; a new stop at the same tick asks":
+  endCase()
+  beginCase("a repeated move asks nothing; a new stop at the same tick asks")
+  block:
     let base = localsRequests().len
     moveTo(450, 45)
     ck newSince(base).len == 1
@@ -300,10 +355,12 @@ suite "the web renderer matches a ct/load-locals answer to its request":
     ck sent.len == 2 and ticksOf(sent[1]) == 450
     deliver(localsAnswer(seqOf(sent[0]), 45))
     deliver(localsAnswer(seqOf(sent[1]), 46))
+    await settle()
     ck shown() == @["initial_shield=46"]
-    ck store.pendingLocals.len == 0
 
-  test "a watch-list change asks once, with the watch, in the file's language":
+  endCase()
+  beginCase("a watch-list change asks once, with the watch, in the file's language")
+  block:
     let base = localsRequests().len
     activeStateVM().addWatch("initial_shield")
     let sent = newSince(base)
@@ -311,98 +368,153 @@ suite "the web renderer matches a ct/load-locals answer to its request":
     ck sent.len == 1 and watchesOf(sent[0]) == @["initial_shield"]
     ck sent.len == 1 and langOf(sent[0]) == rustWire
     deliver(localsAnswer(seqOf(sent[^1]), 47))
+    await settle()
     activeStateVM().removeWatch("initial_shield")
     let after = newSince(base)
     ck after.len == 2
     ck after.len == 2 and watchesOf(after[1]).len == 0
     deliver(localsAnswer(seqOf(after[^1]), 48))
-    ck store.pendingLocals.len == 0
+    await settle()
+    ck shown() == @["initial_shield=48"]
 
-  test "an answer to a request this store never recorded is not applied":
+  endCase()
+  beginCase("#855: a watch's result survives a move")
+  block:
+    # Reported: add a watch, step, and the Watches tab is empty until
+    # another watch is added. On the desktop the move reaches the store from
+    # the State component (`onCompleteMove`), the session's stop loader asks,
+    # and the store writes `store.locals.watches` from that answer — so the
+    # answer to the MOVE must still carry the watch. Each answer here carries
+    # exactly the watches its own request named (`answerFromRequest`).
+    proc watchRows(): seq[string] =
+      for row in store.locals.watches.val:
+        result.add row.name & "=" & row.value
+    let base = localsRequests().len
+    activeStateVM().addWatch("initial_shield")
+    let added = newSince(base)
+    ck added.len == 1
+    deliver(answerFromRequest(added[^1], 81))
+    await settle()
+    ck watchRows() == @["initial_shield=81"]
+    moveTo(810, 81)
+    let moved = newSince(base + 1)
+    ck moved.len == 1
+    ck moved.len == 1 and watchesOf(moved[0]) == @["initial_shield"]
+    deliver(answerFromRequest(moved[^1], 82))
+    await settle()
+    ck shown() == @["initial_shield=82"]
+    ck watchRows() == @["initial_shield=82"]
+    # And a second move.
+    moveTo(820, 82)
+    let movedAgain = newSince(base + 2)
+    ck movedAgain.len == 1
+    deliver(answerFromRequest(movedAgain[^1], 83))
+    await settle()
+    ck watchRows() == @["initial_shield=83"]
+    # Leave the session as the blocks below expect it: no watches.
+    activeStateVM().removeWatch("initial_shield")
+    let removed = newSince(base + 3)
+    ck removed.len == 1 and watchesOf(removed[0]).len == 0
+    deliver(answerFromRequest(removed[^1], 84))
+    await settle()
+    ck watchRows().len == 0
+
+  endCase()
+  beginCase("an answer to a request this session never sent is not applied")
+  block:
     let before = shown()
-    let droppedBefore = dropped()
     deliver(localsAnswer(9_999, 999))
+    await settle()
     ck shown() == before
-    ck dropped() - droppedBefore == 1
 
-  test "the identity travels in the body every subscriber receives":
-    let base = localsRequests().len
-    moveTo(500, 50)
-    let sent = newSince(base)
-    ck sent.len == 1
-    let frame = localsAnswer(seqOf(sent[^1]), 50)
-    deliver(frame)
-    ck $ctRequestIdOf(frame["body"]) == "0:" & $seqOf(sent[^1])
-    ck shown() == @["initial_shield=50"]
-
-  test "an answer is named by the session that sent it, not the one on screen":
+  endCase()
+  beginCase("an answer is named by the session that sent it, not the one on screen")
+  block:
     # Every replay session's `DapApi` numbers its requests from zero, so two
-    # sessions routinely have a request with the same `seq` in flight. The
-    # answer must be judged against the stop of the request ITS session sent
-    # — named by the `DapApi` that sent it (`responseDap`), not by the one the
-    # fan-out goes through (`fanOut`, the session on screen).
+    # sessions routinely have a request with the same `seq` in flight. An
+    # answer settles the request ITS session sent — named by the `DapApi`
+    # that sent it (`responseDap`), not by the one the fan-out goes through
+    # (`fanOut`, the session on screen) — so another session's answer never
+    # reaches this session's store.
     let base = localsRequests().len
-    let pendingBefore = store.pendingLocals.len
     moveTo(600, 60)
     let atStop6 = newSince(base)
     ck atStop6.len == 1
     moveTo(700, 70)
     let atStop7 = newSince(base + 1)
     ck atStop7.len == 1
-    # A second session asks at stop 7 with the same wire `seq` session 0
-    # used at stop 6.
+    # A second session asks with the same wire `seq` session 0 used at stop 6.
     let other = DapApi(ipc: recordingIpc(), seq: seqOf(atStop6[0]),
                        sessionId: 1)
     discard other.asyncSendCtRequest(CtLoadLocals, JsObject{})
-    ck store.pendingLocals.len == pendingBefore + 3
-    # Session 1's answer: about the current stop, so applied — although
-    # session 0's identically numbered request is about stop 6.
     deliverDapResponse(dapApi, other, localsAnswer(seqOf(atStop6[0]), 71))
-    ck shown() == @["initial_shield=71"]
+    await settle()
+    ck "initial_shield=71" notin shown()
+    # And another session asking with the seq of the request session 0 has
+    # in flight for the stop it is AT: an answer that settled THAT request
+    # would be drawn, since it would be about the current stop.
+    let third = DapApi(ipc: recordingIpc(), seq: seqOf(atStop7[0]),
+                       sessionId: 2)
+    discard third.asyncSendCtRequest(CtLoadLocals, JsObject{})
+    deliverDapResponse(dapApi, third, localsAnswer(seqOf(atStop7[0]), 73))
+    await settle()
+    ck "initial_shield=73" notin shown()
     # Session 0's answer to that seq: about stop 6, dropped.
     deliver(localsAnswer(seqOf(atStop6[0]), 60))
-    ck shown() == @["initial_shield=71"]
+    await settle()
+    ck "initial_shield=60" notin shown()
     deliver(localsAnswer(seqOf(atStop7[0]), 72))
+    await settle()
     ck shown() == @["initial_shield=72"]
-    ck store.pendingLocals.len == pendingBefore
 
-proc settle(): Future[void] =
-  ## Yield to the event loop until every pending microtask has run — the
-  ## continuations that retire an ANSWERED request (`requestLocals`'
-  ## `onComplete`) run there, never inside a synchronous test block.
-  newPromise proc(resolve: proc()) =
-    {.emit: "setTimeout(`resolve`, 0);".}
+  endCase()
+  beginCase("a status-only change is not a new stop, and asks nothing")
+  block:
+    # The debugger is marked stepping at the stop it is LEAVING — a write to
+    # `status` alone, which is what `store.requestStep` does before the new
+    # position arrives. The stop loader keys a load on the stop's identity,
+    # so it asks nothing about the stop being left.
+    let base = localsRequests().len
+    var stepping = store.debugger.val
+    stepping.status = store_types.dsStepping
+    store.debugger.val = stepping
+    ck newSince(base).len == 0
+    # A real move afterwards is asked about, once.
+    moveTo(900, 90)
+    ck newSince(base).len == 1
 
-proc afterAnswersSettle() {.async.} =
-  await settle()
-  suite "once an answer has settled":
+  endCase()
+  beginCase("every move the State component is handed completes")
+  ck moveFailures.len == 0
+  endCase()
+  echo "CHECKS: ", checks
+  if failedChecks > 0:
+    {.emit: "process.exitCode = 1;".}
 
-    test "a status-only change is not a new stop, and asks nothing":
-      # The debugger is marked stepping at the stop it is LEAVING — a write
-      # to `status` alone, which is what `store.requestStep` does before the
-      # new position arrives. Once the stop's own request has been answered
-      # nothing is in flight to absorb a second one, so only the auto-load's
-      # reading of the STOP (not the whole state) keeps it from asking about
-      # the stop being left — an answer that could only be dropped.
-      let base = localsRequests().len
-      var stepping = store.debugger.val
-      stepping.status = store_types.dsStepping
-      store.debugger.val = stepping
-      ck newSince(base).len == 0
-      # A real move afterwards is asked about, once.
-      moveTo(900, 90)
-      ck newSince(base).len == 1
+# A section that RAISES (an index past what a broken sender sent) fails by
+# its name, as a `unittest` case that raised would, instead of leaving the
+# run with no verdict for it. So does one whose senders raise where nothing
+# awaits them (a rejected promise no one handles), which node would
+# otherwise end the run on before any verdict is written.
+proc failRunningCase(how: string) =
+  ## Inside a section the failure is one of its checks, reported once by
+  ## `endCase`; outside one (the setup, or a section that never ends) it is
+  ## reported here.
+  echo "    ", how
+  inc failedChecks
+  if not caseOpen:
+    echo "  [FAILED] ", caseName
+  {.emit: "process.exitCode = 1;".}
 
-    ck moveFailures.len == 0
-    echo "CHECKS: ", checks
-    if failedChecks > 0:
-      {.emit: "process.exitCode = 1;".}
+proc onUnhandledRejection(handler: proc(reason: JsObject))
+    {.importjs: "process.on('unhandledRejection', #)".}
 
-block:
-  # The last answered request's retirement (a microtask) must have run.
-  let base = localsRequests().len
-  moveTo(800, 80)
-  let sent = newSince(base)
-  doAssert sent.len == 1
-  deliver(localsAnswer(seqOf(sent[0]), 80))
-  discard afterAnswersSettle()
+onUnhandledRejection(proc(reason: JsObject) =
+  discard reason
+  failRunningCase("a promise nothing awaits was rejected"))
+
+discard sessionChecks().catch(
+  proc(e: Error) =
+    discard e
+    caseOpen = false
+    failRunningCase("the section raised"))

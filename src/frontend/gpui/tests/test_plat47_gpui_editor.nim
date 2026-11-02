@@ -12,8 +12,11 @@
 ## state — shows what the state is for: its docstring lines are read as code.
 ##
 ## The colours: every run is painted `editor_theme.tokenClassToken` of its
-## class (Dark); that the classes and colours are the DESKTOP's is
-## `test_plat47_gpui_parity.nim` (the plan against the Electron capture) and
+## class (Dark), except a bracket outside a string or comment, which is
+## painted Monaco's bracket-pair colour for its nesting depth
+## (`editorBracketHighlight.foregroundN` of the desktop's `codetracerDark`
+## theme, read here from that theme file); that the classes and colours are
+## the DESKTOP's is `test_plat47_gpui_parity.nim` (the plan against the Electron capture) and
 ## `test_plat47_gpui_window.nim` (the window's pixels).
 ##
 ## No mocks: the real surface, leaves, tokenizer and shim plan.
@@ -36,7 +39,11 @@ const
   First = 5
   Last = 40
   DocstringEnd = 26
-  ExpectedAssertions = 9
+  DesktopTheme = "src/public/third_party/monaco-themes/themes/customThemes/" &
+                 "json/codetracerDark.json"
+  ExpectedAssertions = 10
+    ## 9 -> 10: brackets are Monaco's pair colours now, and that some were
+    ## drawn is asserted.
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 
@@ -103,12 +110,28 @@ suite "PLAT-47 B1: GPUI's editor rows, classified and painted":
     ck sawCode
 
   test "every run is painted its class's editor-theme colour":
+    # The desktop's bracket-pair palette, in Monaco's cycling order.
+    let themeColours = parseJson(readFile(repo / DesktopTheme))["colors"]
+    var bracketPalette: seq[string] = @[]
+    for i in 1 .. 6:
+      let key = "editorBracketHighlight.foreground" & $i
+      if themeColours.hasKey(key): bracketPalette.add themeColours[key].getStr
+    doAssert bracketPalette.len > 0, "no bracket palette in " & DesktopTheme
     var mismatched = 0
     var runs = 0
+    var brackets = 0
+    var depth = 0
+      ## The window opens inside the docstring: no bracket is open at line 5.
     for (line, rs) in runsByLine(entry[0]):
       for (cls, colour, text) in rs:
         inc runs
         var want = ""
+        if cls == "bracket":
+          # One bracket per run; a closer is coloured at the depth it closes.
+          inc brackets
+          if text in [")", "]", "}"]: depth = max(0, depth - 1)
+          want = bracketPalette[depth mod bracketPalette.len].toUpperAscii
+          if text in ["(", "[", "{"]: inc depth
         for c in TokenClass:
           if $c == cls: want = tokenColour(c)
         if colour != want:
@@ -116,6 +139,7 @@ suite "PLAT-47 B1: GPUI's editor rows, classified and painted":
           checkpoint("line " & $line & " " & cls & " '" & text & "': " &
                      colour & " want " & want)
     ck runs > 50
+    ck brackets > 0
     ck mismatched == 0
 
   test "the twin: the same window with no entry state reads the docstring as code":

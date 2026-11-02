@@ -123,7 +123,7 @@ suite "AA-3 an evidence tool call renders distinctly":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 91)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 91)
 
       feed(vm, HandoffCommand)
       vm.applyEvidenceDataset("review.json", ready(4, "a1b2c3d4e5f6..."))
@@ -141,7 +141,7 @@ suite "AA-3 an evidence tool call renders distinctly":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 92)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 92)
 
       feed(vm, CollectCommand)
       vm.applyEvidenceDataset("review.json", ready(4, "a1b2c3d4e5f6..."))
@@ -161,7 +161,7 @@ suite "AA-3 an evidence tool call renders distinctly":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 93)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 93)
 
       vm.setMessages(@[prose("s:0", "I will run " & HandoffCommand)])
 
@@ -175,7 +175,7 @@ suite "AA-3 the affordance exists exactly where the review does":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 94)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 94)
 
       feed(vm, HandoffCommand)
       vm.applyEvidenceDataset("review.json", ready(2))
@@ -191,7 +191,7 @@ suite "AA-3 the affordance exists exactly where the review does":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 95)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 95)
 
       feed(vm, HandoffCommand)
       vm.applyEvidenceDataset("review.json", EvidenceDataset(
@@ -213,7 +213,7 @@ suite "AA-3 the affordance exists exactly where the review does":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 96)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 96)
 
       feed(vm, CollectCommand, status = "failed")
       # Even with a readable dataset at that path, a command that failed did
@@ -236,7 +236,7 @@ suite "AA-3 the affordance exists exactly where the review does":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 97)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 97)
 
       vm.setMessages(@[
         prose("s:0", "Collecting the review dataset"),
@@ -255,7 +255,7 @@ suite "AA-3 the affordance exists exactly where the review does":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 98)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 98)
 
       feed(vm, HandoffCommand)
 
@@ -271,7 +271,7 @@ suite "AA-3 the affordance exists exactly where the review does":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 99)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 99)
 
       feed(vm, HandoffCommand)
       check findByClass(panel, AgentActivityEvidenceOpenClass) == nil
@@ -297,7 +297,7 @@ suite "AA-3 selecting an evidence call asks for its dataset":
         onOpenEvidence: proc(anchorId, datasetPath: string) =
           observed.add anchorId & " " & datasetPath)
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 100,
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 100,
                                            callbacks = callbacks)
 
       feed(vm, HandoffCommand)
@@ -320,7 +320,7 @@ suite "AA-3 selecting an evidence call asks for its dataset":
         requestProc: proc(request: ReviewDatasetRequest) =
           requests.add request)
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 101)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 101)
 
       vm.setMessages(@[
         toolCall("s:0",
@@ -355,7 +355,7 @@ suite "AA-3 selecting an evidence call asks for its dataset":
         requestProc: proc(request: ReviewDatasetRequest) =
           requests.add request)
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 102)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 102)
 
       feed(vm, HandoffCommand)
       vm.applyEvidenceDataset("review.json", EvidenceDataset(
@@ -372,7 +372,7 @@ suite "Agent Activity pasted image rendering":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 103)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 103)
       let image = "data:image/png;base64,aGVsbG8="
       vm.pastedImages.val = @[image]
       let thumbnail = findByClass(panel, "agent-paste-img")

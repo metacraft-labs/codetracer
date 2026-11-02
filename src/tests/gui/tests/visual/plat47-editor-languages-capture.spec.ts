@@ -52,7 +52,6 @@ test.use({
   launchMode: "edit",
   editFolderPath: folder,
   editWorkingDirectory: folder,
-  noUserLayout: true,
   codetracerPrefixOverride: process.env.PLAT47_DESKTOP_PREFIX ?? "",
 });
 test.setTimeout(300_000);

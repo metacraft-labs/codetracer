@@ -55,10 +55,13 @@ SUITES = [SUITE_ARM, SUITE_SHIPPED, SUITE_BOTH]
 
 # (id, subject, find, replace, suites, what it breaks)
 ARMS = [
-    ("K1", KEYS, "      return $base[0].toUpperAscii", "      return base",
+    # K1 / K2 RE-AIMED 2026-10-11 (PLAT-68): the decoder spells a chord
+    # through `key_names.chordName` now, so the defects are planted where the
+    # GPUI modifiers become the chord's.
+    ("K1", KEYS, "  if \"shift\" in modifiers: result.incl kmodShift", "  discard",
      [SUITE_ARM], "a shifted letter decodes as the unshifted one"),
-    ("K2", KEYS, "      return ModifierNames[m] & \"+\" & base",
-     "      return base", [SUITE_ARM], "Ctrl+s decodes as `s`: saving types an s"),
+    ("K2", KEYS, "  if \"control\" in modifiers: result.incl kmodCtrl",
+     "  discard", [SUITE_ARM], "Ctrl+s decodes as `s`: saving types an s"),
     ("A1", ARM,
      "  let applied = arm.doc.applyKey(editScopeOf(arm.doc), name, nowMs)",
      "  let applied = arm.doc.applyKey(EditingScope(model: arm.doc.model, "
@@ -74,7 +77,11 @@ ARMS = [
      "    d = arm.doc, medium = GpuiMedium, mutableHere = false,",
      [SUITE_ARM, SUITE_SHIPPED],
      "the surface is read-only again and carries the notice"),
-    ("M1", MAIN, "      redrawEditor()", "      discard",
+    # M1 RE-AIMED 2026-10-17: `refitEditorRows` (the redesign's resize
+    # refit) also calls `redrawEditor()` at this indent, so the needle
+    # occurred twice; it now quotes the edit-key condition it closes.
+    ("M1", MAIN, "       openArm.status.len > 0:\n      redrawEditor()",
+     "       openArm.status.len > 0:\n      discard",
      [SUITE_SHIPPED], "an edit is never redrawn in the pane"),
     ("M2", MAIN, "    armEditorPane(r)", "    discard",
      [SUITE_SHIPPED], "the headless keys reach no focused element"),

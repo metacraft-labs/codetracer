@@ -23,5 +23,6 @@
 ## Limitations And Capability Diagnostics
 
 - `canRunSingle=false` and `canRecordSingle=false`.
-- AUnit test selectors are hidden until a reliable AUnit discovery/listing adapter exists.
+- AUnit test selectors are hidden until a reliable AUnit discovery/listing
+  adapter exists.
 - Missing `gnatmake` reports a missing-tool diagnostic.

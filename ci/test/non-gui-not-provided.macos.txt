@@ -1,5 +1,5 @@
-# db-backend integration tests the macOS `test-non-gui` lane does NOT provide
-# the tools for.
+# Integration tests (db-backend and backend-manager) the macOS `test-non-gui`
+# lane does NOT provide the tools for.
 #
 # The macOS leg runs `just test-rust` with CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false,
 # exactly like the Linux leg (see non-gui-not-provided.linux.txt for the
@@ -21,12 +21,16 @@
 #
 # Not on this leg, and the tests that need them:
 #
-#   - `ct-mcr` / `ct-native-replay`: the MCR flow tests (run on Linux in
-#     mcr-dap-flow);
+#   - `ct-mcr` / `ct-native-replay`: the MCR flow tests and the backend-manager
+#     tests that record with `ct-mcr` (run on Linux in mcr-dap-flow). Of the
+#     latter only meta_dat_real_mcr_recording's recording test is compiled on
+#     macOS; real_recording_integration's goto_geid test is Linux x86_64 only;
 #   - rr: Linux-only. The rr flow tests (go/lean/nim/rust_flow_integration) and
 #     origin_rr_smoke are compiled only on Linux/Windows, so they are not in
 #     this list; the `rr::` origin tests are excluded by `just test-rust`
-#     (CODETRACER_RR_BACKEND_PRESENT=0);
+#     (CODETRACER_RR_BACKEND_PRESENT=0). backend-manager's rr tests in
+#     real_recording_integration ARE compiled here, and fail without the
+#     codetracer-native-backend checkout and rr, so they are listed below;
 #   - the blockchain and PHP recorders, and forc / cargo-build-sbf, which the
 #     dev shell ships only on Linux (nix/shells/main.nix): the recorder-tests
 #     lane;
@@ -34,6 +38,8 @@
 #
 # Format and checks: as in non-gui-not-provided.linux.txt
 # (ci/test/lane-not-provided-test.sh).
+
+# ── db-backend (src/db-backend/tests/) ──
 
 binary(ada_mcr_streaming_flow_test)     | ct-mcr, ct-native-replay | mcr-dap-flow (Linux)
 binary(c_mcr_streaming_flow_test)       | ct-mcr, ct-native-replay | mcr-dap-flow (Linux)
@@ -74,3 +80,16 @@ binary(solidity_flow_dap_test)          | codetracer-evm-recorder | recorder-tes
 binary(solidity_flow_integration)       | codetracer-evm-recorder | recorder-tests (cross-repo-tests.yml, Linux)
 binary(sway_flow_dap_test)              | codetracer-fuel-recorder | recorder-tests (cross-repo-tests.yml, Linux)
 binary(tolk_flow_dap_test)              | codetracer-ton-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+
+# ── backend-manager (src/backend-manager/tests/) ──
+#
+# The same entries as non-gui-not-provided.linux.txt, which says why each is
+# spelled the way it is; rr-backend-tests and mcr-dap-flow select them from
+# that list.
+
+binary(real_recording_integration) and test(/^test_real_rr_(session|trace|dap|navigate|locals|evaluate|stack|breakpoint|remove|reverse|multiple|flow|calltrace|search|events|terminal|single|query|example)_[a-z0-9_]+$/) | rr, ct-native-replay, codetracer-native-backend | rr-backend-tests (cross-repo-tests.yml, Linux)
+binary(real_recording_integration) and test(/^test_real_rr_mcp_(trace_info|exec_script|exec_script_f64_locals|list_source_files|read_source_file|resources_list|resource_read_info|resource_read_source|response_timing)$/) | rr, ct-native-replay, codetracer-native-backend | rr-backend-tests (cross-repo-tests.yml, Linux)
+binary(real_recording_integration) and test(/^test_cli_trace_(info_rr|query_rr_[a-z0-9_]+)$/) | rr, ct-native-replay, codetracer-native-backend | rr-backend-tests (cross-repo-tests.yml, Linux)
+binary(real_recording_integration) and test(/^test_rr_trace_opens_without_trace_metadata_json$/) | rr, ct-native-replay, codetracer-native-backend | rr-backend-tests (cross-repo-tests.yml, Linux)
+
+binary(meta_dat_real_mcr_recording) and test(/^a_native_recording_and_each_of_its_slices_name_the_recording$/) | ct-mcr (CPUID faulting) | mcr-dap-flow (Linux)

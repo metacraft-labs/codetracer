@@ -18,8 +18,5 @@ proc gpuiCapability*(): PaneCapability =
   var reasons: seq[(PaneKind, string)] = @[]
   for p in PaneAcceptedExceptions:
     reasons.add (p,
-      if p == paneBuildOutput:
-        "an edit-mode pane; a replay session does not build the working tree"
-      else:
-        "drawn by the desktop front-end; this window has no view for it yet")
+      "drawn by the desktop front-end; this window has no view for it yet")
   paneCapability(feGpui, PaneVocabularyPanes + PaneNativePanes, reasons)

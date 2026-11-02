@@ -1,0 +1,125 @@
+name: Sibling Cargo locks
+
+# `scripts/test-sibling-cargo-locks.sh` (`just test-sibling-cargo-locks`):
+# every committed Cargo.lock that resolves crates out of the sibling
+# `codetracer-trace-format` checkout is the lock cargo writes for the
+# trace-format revision this commit pins, and `repro.lock` and `flake.lock`
+# pin the same revision. The script's header gives the defect it exists for.
+#
+# WHY A WORKFLOW OF ITS OWN, AND WHERE IT RUNS.
+#
+# Until this existed the check ran only inside `just test`, i.e. the
+# `test-non-gui` job of `codetracer.yml`, which a push triggers on
+# `main`/`dev`/`stable` and never on `agents`. Changes land on `agents` first,
+# so the strict guard must also run locally before an agent landing. Agent
+# branches do not run CI; this workflow verifies permitted mainline pushes,
+# pull requests and manual qualification on other refs.
+#
+# `codetracer.yml` itself stays off `agents`. It is the widest workflow in the
+# repository, every push to it starts a three-platform matrix on a fleet that
+# is already short of runners, and a push there also runs jobs that publish
+# (`push-install-script` uploads the install script on every branch push). The
+# check needs one Linux runner, the trace-format sibling at its pin and the
+# cargo registry index, so it runs here, on exactly the files that can make a
+# lock stale, without repeating agent-local gates on a shared runner.
+#
+# The triggers follow the repository's narrow workflows
+# (`cross-repo-tests.yml`, `request-panel-sidecar-retirement.yml`): push on
+# the branches that receive changes, with a path filter; pull requests into
+# any base but `agents`, which is landed on directly, never through a pull
+# request.
+
+on:
+  push:
+    branches: [main, dev, stable]
+    paths:
+      - '**/Cargo.lock'
+      - '**/Cargo.toml'
+      - 'repro.lock'
+      - 'flake.lock'
+      - 'scripts/test-sibling-cargo-locks.sh'
+      - 'ci/test/sibling-cargo-locks-test.sh'
+      - '.github/workflows/sibling-cargo-locks.yml'
+  pull_request:
+    branches-ignore: [agents]
+    paths:
+      - '**/Cargo.lock'
+      - '**/Cargo.toml'
+      - 'repro.lock'
+      - 'flake.lock'
+      - 'scripts/test-sibling-cargo-locks.sh'
+      - 'ci/test/sibling-cargo-locks-test.sh'
+      - '.github/workflows/sibling-cargo-locks.yml'
+  workflow_dispatch:
+
+# One run per branch or pull request. What matters is whether the TIP's locks
+# agree with its pins, so a superseded run is worth nothing and is cancelled;
+# the job publishes nothing, so cancelling it never strands a result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  sibling-cargo-locks:
+    # Dispatch accepts a ref, so enforce the same no-CI agent role manually.
+    if: ${{ github.ref != 'refs/heads/agents' }}
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    timeout-minutes: 30
+    name: Cargo.locks agree with the pinned trace-format
+    steps:
+      - name: Mint installation token for cross-repo sibling access
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout codetracer
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Setup dev env
+        # BARE entries: `setup-dev-env` resolves them from this commit's own
+        # committed `repro.lock`, so the trace-format sibling sits at the pin
+        # the check compares against (its checks 2 and 3 need that revision's
+        # objects). Its `-nim` half comes with it: the two are one FFI
+        # boundary, and the Rust half's build script reads the other.
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          attic-cache: ${{ vars.ATTIC_CACHE }}
+          siblings: |
+            codetracer-trace-format
+            codetracer-trace-format-nim
+
+      - name: Fill the cargo registry index
+        # The check re-resolves each lock OFFLINE, from the local registry
+        # index, and a fresh runner has none (in `just test` it is `test-rust`
+        # that fills it). `cargo fetch` without `--locked`, so a stale lock is
+        # reported by the check, which names the cause, rather than here as
+        # "--locked was passed"; the committed locks are then restored, since
+        # the check compares the committed bytes.
+        run: |
+          set -euo pipefail
+          for crate in src/db-backend src/backend-manager; do
+            nix develop .#devShells.x86_64-linux.default --command \
+              cargo fetch --manifest-path "$crate/Cargo.toml"
+          done
+          git checkout -- src/db-backend/Cargo.lock src/backend-manager/Cargo.lock
+
+      - name: Check the sibling Cargo.locks
+        # STRICT: a check that could not run is a failure here, not a SKIP.
+        run: |
+          nix develop .#devShells.x86_64-linux.default --command \
+            env CT_SIBLING_CARGO_LOCKS_STRICT=1 just test-sibling-cargo-locks

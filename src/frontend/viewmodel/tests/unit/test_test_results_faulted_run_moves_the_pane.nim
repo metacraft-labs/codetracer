@@ -190,7 +190,7 @@ suite "a run that faulted must not leave the pane saying the tests never ran":
       vm.setCatalog(TestCatalog(items: fiveTests()))
 
       let r = MockRenderer()
-      let panel = renderTestResultsPanel(r, vm)
+      let panel = renderTestResultsPanel[MockRenderer, MockNode](r, vm)
 
       # BEFORE THE CLICK, spelled out. This is the string the defect leaves on
       # screen after the click too, which is why it is asserted by value here
@@ -235,7 +235,7 @@ suite "a run that faulted must not leave the pane saying the tests never ran":
       vm.setCatalog(TestCatalog(items: fiveTests()))
 
       let r = MockRenderer()
-      let panel = renderTestResultsPanel(r, vm)
+      let panel = renderTestResultsPanel[MockRenderer, MockNode](r, vm)
       ck paneText(panel, "test-results-headline") == "5 tests, not run yet"
 
       drive(vm, CheckRefused)
@@ -264,7 +264,7 @@ suite "a run that faulted must not leave the pane saying the tests never ran":
       vm.setCatalog(TestCatalog(items: fiveTests()))
 
       let r = MockRenderer()
-      let panel = renderTestResultsPanel(r, vm)
+      let panel = renderTestResultsPanel[MockRenderer, MockNode](r, vm)
 
       drive(vm, OnePassed)
 
@@ -286,7 +286,7 @@ suite "a run that faulted must not leave the pane saying the tests never ran":
       vm.setCatalog(TestCatalog(items: fiveTests()))
 
       let r = MockRenderer()
-      let panel = renderTestResultsPanel(r, vm)
+      let panel = renderTestResultsPanel[MockRenderer, MockNode](r, vm)
 
       drive(vm, CheckRefused)
       ck paneText(panel, "test-results-failure").len > 0
@@ -319,7 +319,7 @@ suite "a run that faulted must not leave the pane saying the tests never ran":
       vm.setCatalog(TestCatalog(items: fiveTests()))
 
       let r = MockRenderer()
-      let panel = renderTestResultsPanel(r, vm)
+      let panel = renderTestResultsPanel[MockRenderer, MockNode](r, vm)
 
       vm.beginRun()
       let response = parseNoirTestResponse(CheckRefused)

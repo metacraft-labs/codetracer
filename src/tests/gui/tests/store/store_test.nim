@@ -58,9 +58,27 @@ suite "RequestTracker":
     let t = newRequestTracker()
     t.markPending("load-locals", "100")
     check t.isDuplicate("load-locals", "100")
-    t.markComplete("load-locals")
+    t.markComplete("load-locals", "100")
     check not t.isDuplicate("load-locals", "100")
     check not t.hasPending("load-locals")
+
+  test "a completion retires only its own request, not a newer one":
+    # The answer to an OLDER request arrives after a newer one was issued
+    # under the same key: the newer request is still in flight, so a
+    # duplicate of it must still be refused.
+    let t = newRequestTracker()
+    t.markPending("load-locals", "100")
+    t.markPending("load-locals", "200")
+    t.markComplete("load-locals", "100")
+    check t.isDuplicate("load-locals", "200")
+    t.markComplete("load-locals", "200")
+    check not t.hasPending("load-locals")
+
+  test "forget clears whatever request is pending":
+    let t = newRequestTracker()
+    t.markPending("load-calltrace", "a")
+    t.forget("load-calltrace")
+    check not t.hasPending("load-calltrace")
 
   test "clear removes all pending entries":
     let t = newRequestTracker()
@@ -197,7 +215,14 @@ suite "ReplayDataStore requests":
     ]
     let request = tracepointSweepRequest(specs)
     check request["stopAfter"].getInt == -1
+    # Q4: the answer carries hits' ticks and locations; locals by window.
+    check request["withLocals"].getBool == false
+    check tracepointSweepRequest(specs, withLocals = true)["withLocals"].getBool
     check request["session"]["id"].getInt == 0
+    # Each sweep's own id rides as `session.id`, which the engine echoes as
+    # the answer's `sessionId`: how `runTracepoints` tells its answer from an
+    # earlier sweep's late one.
+    check tracepointSweepRequest(specs, sweepId = 7)["session"]["id"].getInt == 7
     let tracepoints = request["session"]["tracepoints"]
     check tracepoints.len == 2
     for i, spec in specs:

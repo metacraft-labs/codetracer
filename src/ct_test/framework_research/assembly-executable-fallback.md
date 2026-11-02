@@ -17,7 +17,8 @@
 
 ## Recording Feasibility
 
-- Native recording through `ct-mcr` is feasible after building the executable with debug info.
+- Native recording through `ct-mcr` is feasible after building the executable
+  with debug info.
 
 ## Limitations And Capability Diagnostics
 

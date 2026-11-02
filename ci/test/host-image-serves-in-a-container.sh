@@ -35,17 +35,31 @@
 # stand-in is the trace, which is a committed fixture; the substrate supplies a
 # real one by mounting a project.
 #
-# Usage:  bash ci/test/host-image-serves-in-a-container.sh [--alias NAME] [--keep]
+# Usage:  bash ci/test/host-image-serves-in-a-container.sh [--alias NAME]
+#           [--project NAME] [--keep]
 # Needs:  `incus` with a managed bridge, and the image already published by
 #         `ci/publish-host-image.sh`. Pass `--alias` to name it.
+#
+# The container is launched in the SUBSTRATE'S Incus project, which is where
+# the substrate starts sessions and where the publisher puts the image:
+# `--project`, default `$ISONIM_SESSION_INCUS_PROJECT` or `isonim-dev`, the
+# same default as `sessionctl` and `ci/publish-host-image.sh` (whose header
+# says why a project-less import cannot be confirmed). Every `incus` call
+# below goes through `incus_p`, so none of them can fall back to whichever
+# project the CLI happens to have selected.
 set -uo pipefail
 
 alias_name="${CT_HOST_IMAGE_ALIAS:-}"
+project="${ISONIM_SESSION_INCUS_PROJECT:-isonim-dev}"
 keep=0
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--alias)
 		alias_name="${2:-}"
+		shift 2
+		;;
+	--project)
+		project="${2:-}"
 		shift 2
 		;;
 	--keep)
@@ -73,11 +87,17 @@ bad() {
 	echo "  [FAILED] $1"
 }
 
+# `--project` is a global flag, so it goes before the verb: after it, an
+# `exec`'s `--` would hand it to the command inside the container.
+incus_p() {
+	incus --project "${project}" "$@"
+}
+
 name="ct-host-serves-$$"
 work="$(mktemp -d "${TMPDIR:-/tmp}/ct-serve-XXXXXX")"
 cleanup() {
 	if [ "${keep}" -eq 0 ]; then
-		incus delete -f "${name}" >/dev/null 2>&1
+		incus_p delete -f "${name}" >/dev/null 2>&1
 	fi
 	rm -rf "${work}" 2>/dev/null
 	return 0
@@ -95,7 +115,7 @@ if [ -z "${alias_name}" ]; then
 fi
 
 echo "Step 1: the image launches as a container"
-if incus launch "${alias_name}" "${name}" >/dev/null 2>&1; then
+if incus_p launch "${alias_name}" "${name}" >/dev/null 2>&1; then
 	ok "launched ${name} from ${alias_name}"
 else
 	bad "the image launched (no /sbin/init is the usual cause)"
@@ -108,7 +128,7 @@ fi
 # working session as a D-S12 regression.
 status=""
 for _ in $(seq 1 40); do
-	status="$(incus exec "${name}" -- /bin/sh -c 'cat /run/isonim-net.status 2>/dev/null || echo absent' 2>/dev/null | tr -d ' \r\n')"
+	status="$(incus_p exec "${name}" -- /bin/sh -c 'cat /run/isonim-net.status 2>/dev/null || echo absent' 2>/dev/null | tr -d ' \r\n')"
 	[ "${status}" = "ok" ] && break
 	[ "${status}" = "no-lease" ] && break
 	sleep 1
@@ -121,7 +141,7 @@ fi
 
 ip=""
 for _ in $(seq 1 30); do
-	ip="$(incus list "${name}" --format csv -c 4 2>/dev/null | awk '{print $1}')"
+	ip="$(incus_p list "${name}" --format csv -c 4 2>/dev/null | awk '{print $1}')"
 	[ -n "${ip}" ] && break
 	sleep 1
 done
@@ -137,13 +157,13 @@ echo
 echo "Step 2: the binary in the image actually runs"
 # The whole of defect (1) above, in one assertion. `--version` is enough: the
 # failure was a `dlopen` at start-up, not anything to do with arguments.
-if incus exec "${name}" -- /bin/ct --version >/dev/null 2>&1; then
+if incus_p exec "${name}" -- /bin/ct --version >/dev/null 2>&1; then
 	ok '`ct --version` succeeds (the wrapper carries LD_LIBRARY_PATH)'
 else
 	bad "\`ct --version\` succeeds — see defect (1) in this file's header"
 fi
 # Defect (3): an OCI runtime never asks who it is; node does.
-if incus exec "${name}" -- /bin/sh -c 'test -s /etc/passwd' >/dev/null 2>&1; then
+if incus_p exec "${name}" -- /bin/sh -c 'test -s /etc/passwd' >/dev/null 2>&1; then
 	ok "/etc/passwd exists, so node's os.userInfo() can resolve uid 0"
 else
 	bad "/etc/passwd exists — without it the server exits on uv_os_get_passwd"
@@ -156,9 +176,9 @@ echo "Step 3: a trace is imported by the image's own \`ct import\`"
 	echo "CHECKS: $((pass + fail))"
 	exit 1
 }
-incus exec "${name}" -- /bin/sh -c 'mkdir -p /workspace' >/dev/null 2>&1
-incus file push "${work}/trace.zip" "${name}/workspace/trace.zip" >/dev/null 2>&1
-recorded="$(incus exec "${name}" -- /bin/sh -c \
+incus_p exec "${name}" -- /bin/sh -c 'mkdir -p /workspace' >/dev/null 2>&1
+incus_p file push "${work}/trace.zip" "${name}/workspace/trace.zip" >/dev/null 2>&1
+recorded="$(incus_p exec "${name}" -- /bin/sh -c \
 	'cd /workspace && /bin/ct import /workspace/trace.zip /workspace/imported 2>&1' 2>/dev/null |
 	awk '/recorded with id/ { print $NF; exit }')"
 if [ -n "${recorded}" ]; then
@@ -171,22 +191,27 @@ fi
 
 echo
 echo 'Step 4: `ct host` auto-assigns, reports, and SERVES'
-incus exec "${name}" -- /bin/sh -c \
+incus_p exec "${name}" -- /bin/sh -c \
 	"cd /workspace && (/bin/ct host --bind 0.0.0.0 ${recorded} > /workspace/host.log 2>&1 &)" \
 	>/dev/null 2>&1
 
 url=""
 for _ in $(seq 1 60); do
-	url="$(incus exec "${name}" -- /bin/sh -c 'cat /workspace/host.log 2>/dev/null' 2>/dev/null |
-		awk -F= '/^CODETRACER_HOST_URL=/ { print $2; exit }')"
+	url="$(incus_p exec "${name}" -- /bin/sh -c 'cat /workspace/host.log 2>/dev/null' 2>/dev/null |
+		sed -n 's/^CODETRACER_HOST_URL=//p' | head -n 1)"
 	[ -n "${url}" ] && break
 	sleep 1
 done
-if [ -n "${url}" ]; then
-	ok "it printed a machine-readable URL line (${url})"
+# The URL carries the session secret `ct host` generated
+# (`http://<bind>:<port>/?ct_session=<secret>`); the page and its descriptor
+# answer only a request presenting it. It is kept out of this log.
+secret="${url##*ct_session=}"
+url="${url%%/\?*}"
+if [ -n "${url}" ] && [ "${secret}" != "${url}" ] && [ -n "${secret}" ]; then
+	ok "it printed a machine-readable URL line with a session secret (${url}/?ct_session=...)"
 else
 	bad "it printed CODETRACER_HOST_URL="
-	incus exec "${name}" -- /bin/sh -c 'tail -20 /workspace/host.log' 2>/dev/null | sed 's/^/      /'
+	incus_p exec "${name}" -- /bin/sh -c 'tail -20 /workspace/host.log' 2>/dev/null | sed 's/^/      /'
 	echo "CHECKS: $((pass + fail))"
 	exit 1
 fi
@@ -200,7 +225,7 @@ fi
 
 # THE ASSERTION THE WHOLE FILE IS FOR. From OUTSIDE the container's network
 # namespace, over the bridge, to the port the server chose for itself.
-code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "http://${ip}:${port}/" 2>/dev/null || true)"
+code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -H "X-CodeTracer-Session: ${secret}" "http://${ip}:${port}/" 2>/dev/null || true)"
 if [ "${code}" = "200" ]; then
 	ok "the HOST can GET / from the container (${code})"
 else
@@ -209,8 +234,8 @@ fi
 
 # And WD1c's descriptor endpoint, from the same outside. A 200 on `/` could be a
 # static file; this is the server answering a question only it can answer.
-descriptor="$(curl -sS --max-time 20 "http://${ip}:${port}/deployment.json" 2>/dev/null || true)"
-if printf '%s' "${descriptor}" | grep -q '"connection"'; then
+descriptor="$(curl -sS --max-time 20 -H "X-CodeTracer-Session: ${secret}" "http://${ip}:${port}/deployment.json" 2>/dev/null || true)"
+if grep -q '"connection"' <<<"${descriptor}"; then
 	ok "and /deployment.json answers — WD1c's endpoint, from inside a session"
 else
 	bad "and /deployment.json answers (got: ${descriptor})"

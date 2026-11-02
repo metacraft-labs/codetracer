@@ -73,6 +73,13 @@ type
     InternalNewOperation,
     InternalTraceMapUpdate,
     CtNotification,
+    # `ct/launch-failed`: the replay server's statement that a `launch` it
+    # acknowledged cannot succeed, with the reason as `{message}`. It travels
+    # beside the Error `ct/notification` carrying the same sentence; the
+    # notification is what the status bar shows, and this event is what ends
+    # the tab's busy state (`ui/status.nim`). Without a kind here the renderer
+    # dropped it as an unmapped event.
+    CtLaunchFailed,
     TracepointLocals,
     CtTracepointResults,
     CtFlowJump,
@@ -109,6 +116,16 @@ type
     # §RS-M3 and codetracer-specs/GUI/Core-Panes/Request-Panel.md.
     CtLoadRequestSpansSince,
     CtUpdatedHttpRequests,
+    # Viewport-Driven-Loading (HSF-V1): windowed reads a ViewModel sends
+    # through `BackendService`. Each needs a kind, or `dapCommandToEventKind`
+    # raises and the Electron renderer never writes the request. Their
+    # answers come back to the sender's continuation (M49); the response
+    # fans out as the request's own kind, as `ct/load-request-spans-since`'s.
+    CtLoadRequestSpans,
+    CtLoadSymbols,
+    CtLoadValueElements,
+    CtLoadTerminalLines,
+    CtLoadStepLines,
     # Multi-process sessions (M29 §5.2 / M42 §14.8). `ct/listProcesses`
     # is unusual in that the backend speaks it in BOTH directions: as a
     # request the frontend may issue, and as an unsolicited event
@@ -206,6 +223,36 @@ func commandToCtResponseEventKind*(command: string): CtEventKind =
   # `src/tests/gui/tests/request-panel/request_panel_live_vm_test.nim`):
   # `reset` replaces and a non-reset delta merges on `id`, last wins.
   of "ct/load-request-spans-since": CtLoadRequestSpansSince
+  of "ct/load-request-spans": CtLoadRequestSpans
+  # The engine answers both with an empty body once the call trace's
+  # expansion state has changed (every request is answered, as the DAP
+  # requires). The answer fans out as the request's own kind, as the
+  # request-span arms above do. Nothing acts on it there: the desktop's
+  # subscriptions to these kinds are on the views mediator, where they SEND
+  # the request, and the one `DapApi` handler that receives every mapped kind
+  # (`dap_backend.newDapBackendService`) hands it to `BackendService.onEvent`
+  # handlers, each of which matches the event kinds it applies and ignores
+  # the rest. So the fan-out is a no-op instead of the `ignoring response for
+  # unmapped command` log line, and the caller reads the change through its
+  # next `ct/load-calltrace-section`.
+  of "ct/collapse-calls": CtCollapseCalls
+  of "ct/expand-calls": CtExpandCalls
+  # Likewise for the commands whose outcome travels in events: the moves
+  # (`stopped` / `ct/complete-move`) and the tracepoint commands
+  # (`ct/updated-trace`, and `ct/tracepoint-results` for a run). The engine
+  # answers each with an empty body after those events; the answer fans out
+  # as the request's own kind, which no handler acts on.
+  of "ct/history-jump": CtHistoryJump
+  of "ct/local-step-jump": CtLocalStepJump
+  of "ct/run-to-entry": CtRunToEntry
+  of "ct/tracepoint-toggle": CtTracepointToggle
+  of "ct/tracepoint-delete": CtTracepointDelete
+  of "ct/setup-trace-session": CtSetupTraceSession
+  of "ct/run-tracepoints": CtRunTracepoints
+  of "ct/load-symbols": CtLoadSymbols
+  of "ct/load-value-elements": CtLoadValueElements
+  of "ct/load-terminal-lines": CtLoadTerminalLines
+  of "ct/load-step-lines": CtLoadStepLines
   # Multi-process sessions (M42 §14.8)
   of "ct/listProcesses": CtListProcessesResponse
   of "ct/pairIndexLookup": CtPairIndexLookupResponse

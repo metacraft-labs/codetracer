@@ -159,12 +159,17 @@ proc eventsTo(session: int): seq[JsObject] =
 # ---------------------------------------------------------------------------
 
 proc rendererSends(session: int; seq: int; command = "ct/load-locals") =
+  ## Tab `session` sends a request. Each tab here talks to the replay of the
+  ## same number, and names it (`replayId`, `dap.stampReplay`): the router
+  ## selects by the replay, not by the tab (`dap_replay_selection_test.nim`
+  ## holds it to that when the two numbers differ).
   let packet = newJsObject()
   packet["seq"] = seq
   packet["type"] = cstring"request"
   packet["command"] = cstring(command)
   packet["arguments"] = newJsObject()
   packet["sessionId"] = session
+  packet["replayId"] = session
   discard onDapRawMessage(nil, packet)
 
 proc forwarded(): seq[JsObject] =
@@ -192,8 +197,8 @@ suite "the main process routes each DAP answer to the session that asked":
     ck reqs[0]["sessionId"].to(int) == 0
     ck reqs[1]["sessionId"].to(int) == 1
     ck wireSeqOf(reqs[0]) != wireSeqOf(reqs[1])
-    # The router still switches the Backend Manager to session 1 before its
-    # request (the `ct/select-replay` it writes itself).
+    # The router still switches the Backend Manager to session 1's replay
+    # before its request (the `ct/select-replay` it writes itself).
     ck written.len == 3
     ck written[1]["command"].to(cstring) == cstring"ct/select-replay"
     ck written[1]["arguments"].to(int) == 1

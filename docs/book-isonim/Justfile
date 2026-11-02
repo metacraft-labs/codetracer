@@ -27,6 +27,7 @@ test: build
     nim c -r tests/test_chrome.nim
     nim c -r tests/test_home_landing.nim
     nim c -r tests/test_support_pages.nim
+    nim c -r tests/test_terminal_setup_page.nim
     nim c -r tests/test_deep_review_section.nim
     nim c -r tests/test_legacy_url_redirects.nim
     nim c -r tests/test_publish_output_shape.nim

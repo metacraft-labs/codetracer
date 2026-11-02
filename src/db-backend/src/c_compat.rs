@@ -227,7 +227,7 @@ pub extern "C" fn abort() -> ! {
 /// # Safety
 /// `s1` and `s2` must each be valid for reads up to the first NUL or `n`
 /// bytes, whichever comes first — the same contract libc has.
-pub extern "C" fn strncmp(s1: *const c_char, s2: *const c_char, n: usize) -> c_int {
+pub unsafe extern "C" fn strncmp(s1: *const c_char, s2: *const c_char, n: usize) -> c_int {
     if n == 0 {
         return 0;
     }
@@ -256,7 +256,7 @@ pub extern "C" fn clock() -> c_int {
 
         use web_sys::js_sys;
         let ms = js_sys::Date::now() as u64;
-        return (ms & 0x7fff_ffff) as c_int;
+        (ms & 0x7fff_ffff) as c_int
     }
 }
 

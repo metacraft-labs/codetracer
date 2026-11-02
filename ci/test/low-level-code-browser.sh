@@ -35,13 +35,19 @@ source "${repo_root}/ci/lib/nim-cache-root.sh"
 cd "${repo_root}" || exit 2
 
 cache="$(ct_nim_cache_root "${repo_root}")/low-level-code-browser"
-rm -rf "${cache}"; mkdir -p "${cache}"
+rm -rf "${cache}"
+mkdir -p "${cache}"
 
-checks=0; failures=0
+checks=0
+failures=0
 ck() {
 	checks=$((checks + 1))
-	if [ "$1" = "ok" ]; then printf '  [OK]      %s\n' "$2"
-	else failures=$((failures + 1)); printf '  [FAILED]  %s\n' "$2"; fi
+	if [ "$1" = "ok" ]; then
+		printf '  [OK]      %s\n' "$2"
+	else
+		failures=$((failures + 1))
+		printf '  [FAILED]  %s\n' "$2"
+	fi
 }
 
 echo "=== the Low Level Code pane paints a real circuit ==="
@@ -56,8 +62,8 @@ if [ ! -s "${cache}/probe.js" ]; then
 	tail -20 "${cache}/build.log" >&2
 	exit 1
 fi
-echo "  built ${cache}/probe.js ($(wc -c <"${cache}/probe.js" | tr -d ' ') bytes,"\
-     "sha256 $(shasum -a 256 "${cache}/probe.js" | awk '{print $1}'))"
+echo "  built ${cache}/probe.js ($(wc -c <"${cache}/probe.js" | tr -d ' ') bytes," \
+	"sha256 $(shasum -a 256 "${cache}/probe.js" | awk '{print $1}'))"
 
 cp ci/test/low-level-code-probe/index.html "${cache}/index.html"
 cp ci/test/low-level-code-probe/run.mjs "${cache}/run.mjs"

@@ -153,7 +153,7 @@ proc recordingClient(): RecordedClient =
                                            frame: some(3),
                                            width: FrameWidth,
                                            height: FrameHeight)),
-    getDrawCallsProc: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]] =
+    getDrawCallsProc: proc(frame: int): VisualReplayFuture[seq[VisualReplayDrawCall]] =
       inc rec.drawCallRequests
       newCompletedFuture(@[
         VisualReplayDrawCall(index: 0, geid: 100'u64, name: "glClear",

@@ -1,5 +1,6 @@
 use crate::{
     lang::Lang,
+    source_access::{HOST_READS_REFUSED, SourceAccessHandle},
     task::{
         Branch, BranchExtent, BranchId, BranchState, CoreTrace, Location, LoopShape, LoopShapeId, NO_BRANCH_ID,
         NO_POSITION, Position,
@@ -612,12 +613,41 @@ fn locatable_extent(branch: &Branch) -> Option<BranchExtent> {
     })
 }
 
+thread_local! {
+    /// How many source files [`ExprLoader::parse_file`] has parsed on this
+    /// thread. See [`tree_sitter_parses_on_this_thread`].
+    static TREE_SITTER_PARSES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// The number of tree-sitter parses [`ExprLoader::parse_file`] has run on the
+/// calling thread since it started.
+///
+/// This is the observable for the parse budget of a flow walk. Parsing is a
+/// whole-file cost, so it has to be paid once per file a request touches, not
+/// once per step it visits: a flow walk that parsed its file on every step
+/// made `ct/load-flow` over a loop-heavy function take about thirty seconds
+/// (codetracer-pm `issues/2026-10-06-a-stop-inside-a-loop-heavy-python-function-takes-thirty-seconds.md`).
+/// A caller reads it before and after a request and compares the difference
+/// with the number of files involved.
+///
+/// It is per thread so that tests running in parallel in one binary do not
+/// see each other's parses; a request handled in-process runs on the caller's
+/// thread.
+pub fn tree_sitter_parses_on_this_thread() -> u64 {
+    TREE_SITTER_PARSES.with(|count| count.get())
+}
+
 #[derive(Debug, Clone)]
 pub struct ExprLoader {
     // parser: Parser,
     processed_files: HashMap<PathBuf, FileInfo>,
     loop_index: i64,
     pub trace: CoreTrace,
+    /// Where source text may be read from: the session's rule, shared with
+    /// every other loader of the session (see [`crate::source_access`]).
+    /// A loader made with [`Self::new`] has its own, which reads the host
+    /// as this loader always did.
+    source_access: SourceAccessHandle,
     /// FALSIFIER ARM ONLY — see the arm's note in `get_source_line_v2`. Keyed
     /// by path STRING, which is the whole point: it is design §7.2's named
     /// implementation error made real so the reverse-navigation gate can be
@@ -669,7 +699,7 @@ pub struct ExprLoader {
 /// into the container is *not* sufficient on its own — nothing read the VFS
 /// for source before this — and once it is read, position resolution and
 /// origin classification are served by the same read.
-fn vfs_source_text(path: &Path) -> Option<String> {
+pub(crate) fn vfs_source_text(path: &Path) -> Option<String> {
     crate::vfs::vfs_read(path.to_string_lossy().as_ref()).and_then(|bytes| String::from_utf8(bytes).ok())
 }
 
@@ -711,12 +741,95 @@ pub fn source_text(path: &Path) -> Option<String> {
 #[allow(clippy::unwrap_used)]
 impl ExprLoader {
     pub fn new(trace: CoreTrace) -> Self {
+        Self::with_source_access(trace, SourceAccessHandle::default())
+    }
+
+    /// A loader that reads source text under a session's rule.
+    pub fn with_source_access(trace: CoreTrace, source_access: SourceAccessHandle) -> Self {
         ExprLoader {
             processed_files: HashMap::new(),
             loop_index: 1,
             trace,
+            source_access,
             #[cfg(feature = "gdh7-falsify-string-keyed-cache")]
             gdh7_string_keyed_cache: HashMap::new(),
+        }
+    }
+
+    /// The rule this loader reads source text under.
+    pub fn source_access(&self) -> &SourceAccessHandle {
+        &self.source_access
+    }
+
+    /// Puts this loader under a session's rule. Every file read so far is
+    /// dropped, so nothing read under the previous rule is served under
+    /// the new one.
+    pub fn set_source_access(&mut self, source_access: SourceAccessHandle) {
+        self.source_access = source_access;
+        self.processed_files.clear();
+    }
+
+    /// The spelling of a recorded path the origin code probes: under the
+    /// recorded working directory when that file is reachable, else the
+    /// recorded path as given ([`crate::db::source_probe_path`]). With host
+    /// reads off nothing on this host is consulted to choose (the
+    /// working-directory spelling is used; the recording's copies are found
+    /// from it by suffix), so a recorded path is never stat'ed there.
+    pub fn source_probe_path(&self, workdir: &Path, path_str: &str) -> PathBuf {
+        if self.source_access.get().host_reads_allowed() {
+            crate::db::source_probe_path(workdir, path_str)
+        } else {
+            workdir.join(path_str)
+        }
+    }
+
+    /// The current bytes of `path` for checking a continuation token's
+    /// `filesystem` digest (spec §5.3.1 step 3). The token is client data, so
+    /// `path` is whatever the client wrote: with host reads allowed it is
+    /// read on this host, as the digest was issued from it; with host reads
+    /// off only the recording's own copy is consulted (the one
+    /// [`Self::source_digest_bytes`] hashed at issue), and `None` means
+    /// there is nothing to compare, never a host read.
+    pub fn token_digest_bytes(&self, path: &Path) -> Option<Vec<u8>> {
+        let access = self.source_access.get();
+        if access.host_reads_allowed() {
+            return fs::read(path).ok();
+        }
+        if let Some(info) = self.processed_files.get(path) {
+            return Some(info.source_code.clone().into_bytes());
+        }
+        access.read_recording_copy(path).map(String::into_bytes)
+    }
+
+    /// The bytes a continuation token's source digest covers for a line read
+    /// from `probe_path` with `origin` (spec §5.3.1): the bundled copy for
+    /// [`SourceOrigin::BundledMetaData`]; for [`SourceOrigin::Filesystem`]
+    /// the file on this host when host reads are allowed, and otherwise the
+    /// recording's copy this loader actually served. With host reads off the
+    /// host file is never read, not even to hash it.
+    pub fn source_digest_bytes(
+        &self,
+        probe_path: &Path,
+        origin: SourceOrigin,
+        meta_dat_sources_root: Option<&Path>,
+    ) -> Option<Vec<u8>> {
+        let host_reads = self.source_access.get().host_reads_allowed();
+        match origin {
+            SourceOrigin::BundledMetaData => match meta_dat_sources_root {
+                Some(root) => {
+                    let candidate = root.join(probe_path.strip_prefix("/").unwrap_or(probe_path));
+                    crate::source_access::read_contained(root, &candidate).map(String::into_bytes)
+                }
+                None if host_reads => fs::read(probe_path).ok(),
+                None => None,
+            },
+            SourceOrigin::Filesystem if host_reads => fs::read(probe_path).ok(),
+            SourceOrigin::Filesystem => self
+                .processed_files
+                .get(probe_path)
+                .map(|info| info.source_code.clone().into_bytes()),
+            SourceOrigin::Unavailable if host_reads => fs::read(probe_path).ok(),
+            SourceOrigin::Unavailable => None,
         }
     }
 
@@ -776,6 +889,7 @@ impl ExprLoader {
 
     #[cfg(feature = "syntax-highlight")]
     pub fn parse_file(&self, path: &PathBuf) -> Result<Tree, Box<dyn Error>> {
+        TREE_SITTER_PARSES.with(|count| count.set(count.get() + 1));
         let raw = &self.processed_files[path].source_code;
         let lang = self.get_current_language(path);
         info!(
@@ -933,8 +1047,12 @@ impl ExprLoader {
             // half of why `srcviews.dat` never surfaced there. `source_text`
             // keeps the filesystem first and adds the VFS behind it, so the
             // native answer is unchanged.
+            // Opened beneath the root without following a symlink below it
+            // (`source_access::read_contained`): the branch labels what it
+            // reads as the recording's own copy, so it must not be led out
+            // of the bundle by a link planted inside it.
             if let Some(candidate) = candidate
-                && let Some(text) = source_text(&candidate)
+                && let Some(text) = crate::source_access::read_contained(root, &candidate)
             {
                 // Match `get_source_line`'s 1-indexed convention: the
                 // bundled-source branch is invoked with the same `row`
@@ -2376,6 +2494,16 @@ impl ExprLoader {
 
     pub fn file_source_code(&self, path: &PathBuf) -> Result<String, Box<dyn Error>> {
         if !self.processed_files.contains_key(path) {
+            // With host reads off, only the recording's own copies are read
+            // (see `crate::source_access`); `path` is recorded data and is
+            // never opened where it points.
+            let access = self.source_access.get();
+            if !access.host_reads_allowed() {
+                return match access.read_recording_copy(path) {
+                    Some(text) => Ok(text),
+                    None => Err(format!("{}: {}", path.display(), HOST_READS_REFUSED).into()),
+                };
+            }
             let read_path = self.find_real_path(path);
             info!("try to read {read_path:?}");
             let source_result = fs::read_to_string(&read_path);
@@ -2693,8 +2821,15 @@ impl ExprLoader {
                 }
             }
         }
-        let real_path = self.find_real_path(path_buf);
-        updated_location.missing_path = !source_is_reachable(&real_path);
+        let access = self.source_access.get();
+        updated_location.missing_path = if access.host_reads_allowed() {
+            let real_path = self.find_real_path(path_buf);
+            !source_is_reachable(&real_path)
+        } else {
+            // Whether the RECORDING carries the file: the host is not asked,
+            // so a location does not report whether a listed host file exists.
+            !access.has_recording_copy(path_buf)
+        };
         updated_location
     }
 
@@ -2906,13 +3041,83 @@ pub fn contained_bundled_source_path(root: &Path, source_path: &Path, generation
 /// `a/./b` and `a/b` name the same bundle entry.
 ///
 /// `..` is deliberately NOT dropped here. Dropping it would silently rewrite
-/// `a/../b` into `a/b`, which may be a different file; the callers skip any
-/// suffix that contains one instead, which refuses rather than reinterprets.
+/// `a/../b` into `a/b`, which is a different file; the callers fold each `..`
+/// into the component before it first ([`resolve_dot_segments`]) and skip any
+/// suffix that still contains one — a path climbing out of its root, refused
+/// rather than reinterpreted.
 pub(crate) fn bundle_path_components(recorded: &str) -> Vec<&str> {
     recorded
         .split(['/', '\\'])
         .filter(|component| !component.is_empty() && *component != ".")
         .collect()
+}
+
+/// `path` with its `.` components dropped and each `..` folded into the
+/// component before it — the file the path NAMES, spelled the way a
+/// recording's bundle spells it.
+///
+/// A recorder reports a location with the path the program used: a Python
+/// program that put `app/../shared` on `sys.path` is reported at
+/// `…/app/../shared/helpers.py`, while the recording bundles the file under
+/// its normalised path `…/shared/helpers.py`. Matched as given, the stop's own
+/// file was never found.
+///
+/// Lexical, not physical — nothing on this machine is consulted; the bundle is
+/// the only filesystem the answer is looked up in. Kept as given: the root (a
+/// leading separator, a `C:` drive with its separator, or a Godot `res://` /
+/// `user://` scheme); a `..` with nothing before it to fold into (a path
+/// climbing out of its root, which the lookup refuses); and, byte for byte, a
+/// path with no `.` or `..` component.
+///
+/// `src/frontend/viewmodel/sdk/source_provider.nim`'s `resolveDotSegments` is
+/// the same function: the two read sides must map one recorded path onto one
+/// candidate list.
+pub fn resolve_dot_segments(path: &str) -> String {
+    let mut prefix = "";
+    let mut rest = path;
+    for scheme in ["res://", "user://"] {
+        if let Some(stripped) = rest.strip_prefix(scheme) {
+            prefix = scheme;
+            rest = stripped;
+            break;
+        }
+    }
+    if prefix.is_empty() {
+        let bytes = rest.as_bytes();
+        if bytes.len() >= 3 && bytes[1] == b':' && (bytes[2] == b'/' || bytes[2] == b'\\') {
+            prefix = &path[..3];
+            rest = &rest[3..];
+        } else if !bytes.is_empty() && (bytes[0] == b'/' || bytes[0] == b'\\') {
+            prefix = &path[..1];
+            rest = &rest[1..];
+        }
+    }
+    let mut parts: Vec<&str> = Vec::new();
+    let mut changed = false;
+    for component in rest.split(['/', '\\']) {
+        match component {
+            "." => changed = true,
+            ".." => {
+                changed = true;
+                if parts.last().is_some_and(|last| *last != "..") {
+                    parts.pop();
+                } else {
+                    parts.push("..");
+                }
+            }
+            "" => {}
+            other => parts.push(other),
+        }
+    }
+    if !changed {
+        return path.to_string();
+    }
+    // Rejoined with the separator the path itself uses first, so a Windows
+    // recording keeps its backslashes.
+    let sep = rest.chars().find(|c| *c == '/' || *c == '\\').unwrap_or('/');
+    let mut out = String::from(prefix);
+    out.push_str(&parts.join(&sep.to_string()));
+    out
 }
 
 /// The file under `root` that holds `source_path`'s bundled bytes, or `None`
@@ -2969,7 +3174,15 @@ pub(crate) fn bundle_path_components(recorded: &str) -> Vec<&str> {
 /// Both exact steps are skipped outright for a recorded path carrying a `..`
 /// component, so the two sides answer such a path identically: from the walk,
 /// or not at all.
+///
+/// # `..` and `.` are resolved first, on both sides
+///
+/// Both steps work on [`resolve_dot_segments`]'s answer, so
+/// `…/app/../shared/helpers.py` finds the bundle's `…/shared/helpers.py`. Only
+/// a `..` left after that — one climbing out of the root — keeps the refusal.
 pub fn resolve_bundled_source(root: &Path, source_path: &Path) -> Option<PathBuf> {
+    let resolved = resolve_dot_segments(&source_path.to_string_lossy());
+    let source_path = Path::new(&resolved);
     let source_str = source_path.to_string_lossy();
     // Strip the Godot scheme here too, so the walk sees the same components
     // `bundled_source_path` would have mapped.
@@ -3128,6 +3341,81 @@ mod tests {
             resolve_bundled_source(&root, Path::new("/home/x/proj/src/main.nr")),
             Some(root.join("src").join("main.nr"))
         );
+
+        let _ = fs::remove_dir_all(&base);
+        Ok(())
+    }
+
+    /// A recorded path that names a bundled file through `..` reads THAT
+    /// file — and never a different one.
+    ///
+    /// `multi_root`'s runner puts `app/../shared` on `sys.path`, so the Python
+    /// recorder reports `…/multi_root/app/../shared/helpers.py` while the
+    /// bundle holds `…/multi_root/shared/helpers.py` (and, beside it,
+    /// `…/shared/pkg/extra.py`). Before the path was resolved, the exact step
+    /// was skipped for any `..` path and the walk only reached `shared/…`
+    /// suffixes, which a full-path bundle does not hold, so the stop's own file
+    /// was never found.
+    #[test]
+    fn resolve_bundled_source_resolves_a_parent_component_to_the_same_file() -> Result<(), Box<dyn std::error::Error>> {
+        let base = std::env::temp_dir().join(format!("dotdot-bundle-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let root = base.join("files");
+        let shared = root.join("home/x/multi_root/shared");
+        fs::create_dir_all(shared.join("pkg"))?;
+        fs::create_dir_all(root.join("home/x/multi_root/app"))?;
+        fs::write(shared.join("helpers.py"), "def add(left, right):\n")?;
+        fs::write(shared.join("pkg").join("extra.py"), "def scale(value, factor):\n")?;
+        fs::write(root.join("home/x/multi_root/app/main.py"), "import helpers\n")?;
+
+        assert_eq!(
+            resolve_bundled_source(&root, Path::new("/home/x/multi_root/app/../shared/helpers.py")),
+            Some(root.join("home/x/multi_root/shared/helpers.py"))
+        );
+        assert_eq!(
+            resolve_bundled_source(&root, Path::new("/home/x/multi_root/app/../shared/pkg/extra.py")),
+            Some(root.join("home/x/multi_root/shared/pkg/extra.py"))
+        );
+        // `.` and `..` together, and a `..` that folds two levels.
+        assert_eq!(
+            resolve_bundled_source(&root, Path::new("/home/x/multi_root/app/./x/../../shared/helpers.py")),
+            Some(root.join("home/x/multi_root/shared/helpers.py"))
+        );
+        // A name the bundle does not hold is not found — not answered with a
+        // sibling file.
+        assert_eq!(
+            resolve_bundled_source(&root, Path::new("/home/x/multi_root/app/../shared/missing.py")),
+            None
+        );
+
+        // The function itself: the root and the separator are kept, a `..`
+        // with nothing before it is kept, and a plain path is returned as is.
+        assert_eq!(resolve_dot_segments("/a/b/../c/./d.py"), "/a/c/d.py");
+        assert_eq!(resolve_dot_segments("C:\\a\\b\\..\\c.py"), "C:\\a\\c.py");
+        assert_eq!(resolve_dot_segments("res://scenes/../main.gd"), "res://main.gd");
+        assert_eq!(resolve_dot_segments("/../x.py"), "/../x.py");
+        assert_eq!(resolve_dot_segments("/a/../../x.py"), "/../x.py");
+        assert_eq!(resolve_dot_segments("/a//b.py"), "/a//b.py");
+
+        // The table the Nim read side's test reads too
+        // (`test_source_provider_revisions.nim`), so the two implementations
+        // answer every vector identically.
+        let vectors = include_str!("../tests/data/resolve_dot_segments_vectors.tsv");
+        let mut checked = 0;
+        for line in vectors.lines() {
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let (input, expected) = line.split_once('\t').ok_or("a vector without a tab")?;
+            let unescape = |s: &str| if s == "<empty>" { String::new() } else { s.to_string() };
+            assert_eq!(
+                resolve_dot_segments(&unescape(input)),
+                unescape(expected),
+                "vector {input:?}"
+            );
+            checked += 1;
+        }
+        assert!(checked >= 25, "only {checked} vectors read");
 
         let _ = fs::remove_dir_all(&base);
         Ok(())

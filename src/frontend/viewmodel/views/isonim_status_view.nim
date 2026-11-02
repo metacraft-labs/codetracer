@@ -2,11 +2,15 @@
 ##
 ## State derivation and legacy side effects stay in ``ui/status.nim``; this
 ## module owns the DOM structure for the shared ``#status`` host and exposes a
-## MockRenderer/WebRenderer-compatible surface for focused structure tests.
+## generic view (`renderStatusShell[R, N]`) rendered under every renderer.
 
 import isonim/dsl/ui
-from isonim/core/computation import createRenderEffect
+import isonim/core/[signals, computation]
+import isonim/dsl/components
 import isonim/testing/mock_dom
+
+# The generic proc expands the DSL at its caller.
+export signals, computation, components
 
 when defined(js):
   import jsffi
@@ -51,6 +55,15 @@ type
       ## unforgeable". Rendered in the disclosure unconditionally, never
       ## abbreviated away.
     detail*: seq[StatusCertificateDetailRow]
+
+  StatusBuildModel* = object
+    ## PLAT-56 (Build-Output-Pane.md §3.10): the build indicator — the
+    ## current build's verdict in the shared words (`BuildVM.statusText`),
+    ## its icon, and the verdict as a class (`running`, `succeeded`,
+    ## `failed`, `cancelled`). `text == ""` (no build) renders nothing.
+    text*: string
+    icon*: string
+    stateClass*: string
 
   StatusNotificationActionRecord* = object
     label*: string
@@ -106,6 +119,8 @@ type
     certificate*: StatusCertificateModel
       ## SB-1's test-certificate indicator. `certificate.label == ""` renders
       ## nothing at all — see `StatusCertificateModel`.
+    build*: StatusBuildModel
+      ## PLAT-56: the build indicator; empty renders nothing.
 
   StatusShellModel* = object
     activeNotifications*: seq[StatusNotificationRecord]
@@ -123,6 +138,9 @@ type
     onNotificationAction*: proc(notificationIndex: int; actionIndex: int)
     onCopyLocation*: proc()
     onSendBugReport*: proc(title: string; description: string)
+    onSelectBuildStatus*: proc()
+      ## PLAT-56 (§3.10): the build indicator pressed — the Build Output pane
+      ## revealed.
     onSelectCertificate*: proc()
       ## Selecting the indicator. Toggles the disclosure — and, on the way
       ## open, re-reads, because the detail is a claim about the current state
@@ -156,9 +174,32 @@ proc invokeAction(
   if not callbacks.onNotificationAction.isNil:
     callbacks.onNotificationAction(notificationIndex, actionIndex)
 
+proc dismissHandler(callbacks: StatusShellCallbacks;
+                    notificationIndex: int): proc() =
+  ## The click handler of one notification's dismiss button.
+  ##
+  ## A FACTORY, as is `actionHandler` below: the notifications and their
+  ## action buttons are built in `for` loops, and Nim closures capture by
+  ## reference -- a `let` in a loop body is ONE variable for the whole loop.
+  ## The inline closures these replace made every dismiss button dismiss the
+  ## LAST notification, and every action button fire the last notification's
+  ## last action (codetracer#860 sweep;
+  ## https://nim-lang.org/docs/manual.html#procedures-closures).
+  result = proc() = callbacks.invokeDismiss(notificationIndex)
+
+proc actionHandler(callbacks: StatusShellCallbacks;
+                   notificationIndex, actionIndex: int): proc() =
+  ## The click handler of one notification action button; per button for
+  ## the reason `dismissHandler` gives.
+  result = proc() = callbacks.invokeAction(notificationIndex, actionIndex)
+
 proc invokeCopyLocation(callbacks: StatusShellCallbacks) =
   if not callbacks.onCopyLocation.isNil:
     callbacks.onCopyLocation()
+
+proc invokeSelectBuildStatus(callbacks: StatusShellCallbacks) =
+  if not callbacks.onSelectBuildStatus.isNil:
+    callbacks.onSelectBuildStatus()
 
 proc invokeSelectCertificate(callbacks: StatusShellCallbacks) =
   if not callbacks.onSelectCertificate.isNil:
@@ -238,6 +279,9 @@ proc statusStructureSignature*(model: StatusShellModel): string =
   # deliberately absent here and patched in place by `patchStatusValues` — they
   # change when the tree does, and rebuilding the shell for a state change
   # would reintroduce exactly the re-render churn M46 removed.
+  # PLAT-56: the build indicator's presence; its words, icon and class are
+  # patched in place.
+  result.add("|bs:" & (if model.base.build.text.len > 0: "1" else: "0"))
   result.add("|ce:" & (if model.base.certificate.label.len > 0: "1" else: "0"))
   result.add("|cd:" & (if model.base.certificate.disclosed: "1" else: "0"))
   if model.base.certificate.disclosed:
@@ -258,10 +302,13 @@ proc statusStructureSignature*(model: StatusShellModel): string =
     for notification in model.notificationHistory:
       result.add("\x1e" & notificationSignature(notification))
 
-template renderStatusShellImpl(
-    r: untyped;
+proc renderStatusShell*[R, N](
+    r: R;
     model: StatusShellModel;
-    callbacks: StatusShellCallbacks): untyped =
+    callbacks: StatusShellCallbacks = StatusShellCallbacks()): N =
+  ## The status bar shell, for every renderer. `model` is a value: the host
+  ## redraws on a structural change and patches values in place otherwise
+  ## (`renderStatusInto`), so the loops below run once per render.
   ui(r):
     tdiv(id = "status", class = StatusRootClass):
       tdiv(
@@ -281,8 +328,7 @@ template renderStatusShellImpl(
                 tdiv(
                     class = "notification-button dismiss-notification-button " &
                       notification.kindClass,
-                    onclick = proc() =
-                      callbacks.invokeDismiss(notificationIndex)):
+                    onclick = dismissHandler(callbacks, notificationIndex)):
                   discard
             for actionIndex, action in notification.actions:
               let currentActionIndex = actionIndex
@@ -290,8 +336,8 @@ template renderStatusShellImpl(
                 tdiv(
                     class = "notification-action-button action-notification-button " &
                       notification.kindClass,
-                    onclick = proc() =
-                      callbacks.invokeAction(notificationIndex, currentActionIndex)):
+                    onclick = actionHandler(callbacks, notificationIndex,
+                                           currentActionIndex)):
                   text action.label
 
       if model.hasOperationNotification:
@@ -308,8 +354,7 @@ template renderStatusShellImpl(
                 tdiv(
                     class = "notification-button dismiss-notification-button " &
                       notification.kindClass,
-                    onclick = proc() =
-                      callbacks.invokeDismiss(notificationIndex)):
+                    onclick = dismissHandler(callbacks, notificationIndex)):
                   discard
             for actionIndex, action in notification.actions:
               let currentActionIndex = actionIndex
@@ -317,8 +362,8 @@ template renderStatusShellImpl(
                 tdiv(
                     class = "notification-action-button action-notification-button " &
                       notification.kindClass,
-                    onclick = proc() =
-                      callbacks.invokeAction(notificationIndex, currentActionIndex)):
+                    onclick = actionHandler(callbacks, notificationIndex,
+                                           currentActionIndex)):
                   text action.label
 
       tdiv(id = StatusBaseId):
@@ -346,6 +391,21 @@ template renderStatusShellImpl(
           span(class = "test-movement"):
             text model.base.testMovementText
         span(class = "status-right"):
+          # PLAT-56: THE BUILD INDICATOR (Build-Output-Pane.md §3.10) — the
+          # current build's verdict, always on the bar; pressed, the Build
+          # Output pane is revealed.
+          if model.base.build.text.len > 0:
+            span(
+                class = "build-status status-inline build-status-" &
+                        model.base.build.stateClass,
+                role = "status",
+                `aria-live` = "polite",
+                title = model.base.build.text,
+                onclick = proc() = callbacks.invokeSelectBuildStatus()):
+              span(class = "build-status-icon"):
+                text model.base.build.icon
+              span(class = "build-status-text"):
+                text model.base.build.text
           # THE TEST-CERTIFICATE INDICATOR (SB-1). Ambient chrome: a fact that
           # is currently true about the tree, not an event and not a panel.
           # Rendered only when a model was supplied, so every build and mode
@@ -447,8 +507,7 @@ template renderStatusShellImpl(
                   tdiv(
                       class = "notification-button dismiss-notification-button " &
                         notification.kindClass,
-                      onclick = proc() =
-                        callbacks.invokeDismiss(notificationIndex)):
+                      onclick = dismissHandler(callbacks, notificationIndex)):
                     discard
               for actionIndex, action in notification.actions:
                 let currentActionIndex = actionIndex
@@ -456,8 +515,8 @@ template renderStatusShellImpl(
                   tdiv(
                       class = "notification-action-button action-notification-button " &
                         notification.kindClass,
-                      onclick = proc() =
-                        callbacks.invokeAction(notificationIndex, currentActionIndex)):
+                      onclick = actionHandler(callbacks, notificationIndex,
+                                             currentActionIndex)):
                     text action.label
 
       if model.showBugReport:
@@ -483,12 +542,6 @@ template renderStatusShellImpl(
                   onclick = proc() =
                     callbacks.invokeSendBugReport("", "")):
                 text "Send report"
-
-proc renderStatusShell*(
-    r: MockRenderer;
-    model: StatusShellModel;
-    callbacks: StatusShellCallbacks = StatusShellCallbacks()): MockNode =
-  renderStatusShellImpl(r, model, callbacks)
 
 when defined(js):
   proc inputValue(node: isonim_dom.Element): cstring {.importjs: "(#.value || '')".}
@@ -522,13 +575,6 @@ when defined(js):
         proc(ev: isonim_dom.Event) =
           if ev.isCtrlEnter():
             sendBugReportFromDom(callbacks))
-
-  proc renderStatusShell*(
-      r: WebRenderer;
-      model: StatusShellModel;
-      callbacks: StatusShellCallbacks = StatusShellCallbacks()):
-        isonim_dom.Element =
-    renderStatusShellImpl(r, model, callbacks)
 
   proc querySelectorIn(
       root: isonim_dom.Element;
@@ -576,6 +622,15 @@ when defined(js):
       container.patchAttribute(
         cstring".disconnected-status", cstring"title",
         model.base.disconnectedTitle)
+    if model.base.build.text.len > 0:
+      container.patchText(cstring".build-status-text", model.base.build.text)
+      container.patchText(cstring".build-status-icon", model.base.build.icon)
+      container.patchAttribute(
+        cstring".build-status", cstring"class",
+        "build-status status-inline build-status-" &
+          model.base.build.stateClass)
+      container.patchAttribute(
+        cstring".build-status", cstring"title", model.base.build.text)
     if model.base.certificate.label.len > 0:
       container.patchText(
         cstring".test-certificate-label", model.base.certificate.label)
@@ -658,7 +713,8 @@ when defined(js):
     while not isonim_dom.isNodeNil(containerNode.firstChild):
       discard isonim_dom.removeChild(containerNode, containerNode.firstChild)
 
-    let shell = renderStatusShell(r, model, callbacks)
+    let shell = renderStatusShell[WebRenderer, isonim_dom.Element](
+      r, model, callbacks)
     let shellNode = isonim_dom.Node(shell)
     while not isonim_dom.isNodeNil(shellNode.firstChild):
       discard isonim_dom.appendChild(containerNode, shellNode.firstChild)

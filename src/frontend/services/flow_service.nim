@@ -1,16 +1,8 @@
 import service_imports
 
-proc loadFlow*(self: FlowService, taskId: TaskId) {.async.} =
-  # cdebug "flow_service: loadFlow enabled:" & $self.enabledFlow, taskId
-  if self.enabledFlow:
-    # cdebug "send load-flow"
-    self.data.ipc.send "CODETRACER::load-flow", FlowQuery(
-      location: self.data.services.debugger.location,
-      taskId: taskId)
-
-proc loadFlowShape*(self: FlowService) {.async.} =
-  if self.enabledFlow:
-    self.data.ipc.send "CODETRACER::load-flow-shape", self.data.services.debugger.location
+# The flow window is loaded per stop by the session's stop loader
+# (`viewmodel/sdk/stop_loader`, pane `spFlow`) and held by the session's
+# `FlowVM`.
 
 proc loadStepLines*(self: FlowService, location: Location, count: int) =
   self.data.ipc.send "CODETRACER::load-step-lines", LoadStepLinesArg(

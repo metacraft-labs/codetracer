@@ -110,12 +110,9 @@ test.describe("noir example — basic layout", () => {
     await filesystem.clickTab();
     await filesystem.waitForReady();
 
-    const mainNr = await filesystem.nodeByPath(
-      "source folders",
-      "noir_example",
-      "src",
-      "main.nr",
-    );
+    // The tree is rooted in the sources the recording carries (`files/src/
+    // main.nr`), not in the folder it was recorded from: GitHub #785.
+    const mainNr = await filesystem.nodeByPath("source folders", "src", "main.nr");
     await mainNr.leftClick();
 
     await expect
@@ -142,12 +139,9 @@ test.describe("noir example — basic layout", () => {
     ).length;
     expect(beforeCount).toBe(1);
 
-    const mainNr = await filesystem.nodeByPath(
-      "source folders",
-      "noir_example",
-      "src",
-      "main.nr",
-    );
+    // The tree is rooted in the sources the recording carries (`files/src/
+    // main.nr`), not in the folder it was recorded from: GitHub #785.
+    const mainNr = await filesystem.nodeByPath("source folders", "src", "main.nr");
     await mainNr.leftClick();
 
     await expect

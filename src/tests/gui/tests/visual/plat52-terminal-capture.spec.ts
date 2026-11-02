@@ -127,7 +127,10 @@ async function waitMoved(page: any, from: { ticks: number }) {
   return now;
 }
 
-async function readLines(page: any): Promise<{ text: string; fragments: Fragment[] }[]> {
+type Line = { index: number; text: string; fragments: Fragment[] };
+
+/** The lines the line view holds NOW, each with its output index. */
+async function readHeldLines(page: any): Promise<Line[]> {
   return page.evaluate(() => {
     const hex = (css: string): string => {
       const m = css.match(/rgba?\(\s*(\d+)[ ,]+(\d+)[ ,]+(\d+)(?:[ ,/]+([\d.]+))?/);
@@ -152,8 +155,78 @@ async function readLines(page: any): Promise<{ text: string; fragments: Fragment
           opacity: getComputedStyle(frag as HTMLElement).opacity,
         };
       });
-      return { text: line.textContent ?? "", fragments };
+      const index = Number((line as HTMLElement).id.replace("terminal-line-", ""));
+      return { index, text: line.textContent ?? "", fragments };
     });
+  });
+}
+
+/**
+ * EVERY line of the output, in order. The line view holds a WINDOW of the
+ * lines — the ones it shows plus 20 lines after and 10 before them
+ * (`listWindow` in `src/frontend/viewmodel/viewport.nim`) — inside a `pre`
+ * padded to the whole output,
+ * so its scroll range is every line's. The reference needs every line, so
+ * this scrolls the view from the top to the bottom a page at a time, as a
+ * user would, waits at each stop for the window that covers it, and keys
+ * each line it reads by its output index. The view is left at the top.
+ */
+async function readLines(page: any): Promise<{ text: string; fragments: Fragment[] }[]> {
+  const pre = ".isonim-terminal-output > pre";
+  const geometry = (): Promise<{ top: number; height: number; full: number; row: number }> =>
+    page.evaluate((sel: string) => {
+      const el = document.querySelector(sel) as HTMLElement;
+      const line = el.querySelector(".terminal-line") as HTMLElement | null;
+      return {
+        top: el.scrollTop,
+        height: el.clientHeight,
+        full: el.scrollHeight,
+        row: line ? line.getBoundingClientRect().height : 0,
+      };
+    }, pre);
+  const scrollTo = (top: number) =>
+    page.evaluate(([sel, t]: [string, number]) => {
+      (document.querySelector(sel) as HTMLElement).scrollTop = t;
+    }, [pre, top] as [string, number]);
+  // How many lines the output has: the line view's scrubber spans them all
+  // (`data-ct-scrub-total`, the ViewModel's `lineCount`).
+  const total = Number(await page.locator("[data-ct-list-scrubber='terminalOutput']")
+    .getAttribute("data-ct-scrub-total"));
+  expect(total).toBeGreaterThan(0);
+  // Scroll to `top` and wait for the window that covers it. It has arrived
+  // when the first AND the last line the view shows are held: the window held
+  // before the scroll may still hold one of them, so waiting for either
+  // alone can read the stale window.
+  const settleAt = async (top: number) => {
+    await scrollTo(top);
+    const g = await geometry();
+    const firstShown = g.row > 0 ? Math.floor(g.top / g.row) : 0;
+    const lastShown = g.row > 0
+      ? Math.min(total - 1, Math.floor((g.top + g.height - 1) / g.row))
+      : 0;
+    await expect
+      .poll(async () => {
+        const held = new Set((await readHeldLines(page)).map((l) => l.index));
+        return held.has(firstShown) && held.has(lastShown);
+      }, { timeout: 30_000 })
+      .toBe(true);
+    return g;
+  };
+  const byIndex = new Map<number, Line>();
+  let top = 0;
+  for (;;) {
+    const g = await settleAt(top);
+    for (const line of await readHeldLines(page)) byIndex.set(line.index, line);
+    if (g.top + g.height >= g.full - 1) break;
+    top = g.top + Math.max(1, g.height);
+  }
+  await settleAt(0);
+  const indices = [...byIndex.keys()].sort((a, b) => a - b);
+  // No gap and nothing missing: every line of the output was read.
+  expect(indices).toEqual(Array.from({ length: total }, (_, i) => i));
+  return indices.map((i) => {
+    const { text, fragments } = byIndex.get(i)!;
+    return { text, fragments };
   });
 }
 
@@ -161,7 +234,6 @@ test.describe("PLAT-52: the desktop's line view", () => {
   test.use({
     sourcePath: recording("terminal_colours"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     codetracerPrefixOverride: prefix,
   });
 
@@ -227,7 +299,6 @@ test.describe("PLAT-52: the desktop's screen view", () => {
   test.use({
     sourcePath: recording("terminal_screen"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     codetracerPrefixOverride: prefix,
   });
 

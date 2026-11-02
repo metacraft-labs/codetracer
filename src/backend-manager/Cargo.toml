@@ -6,8 +6,28 @@ edition = "2024"
 [dependencies]
 # Every per-user location (and its CODETRACER_HOME override) resolves here.
 ct-home = { path = "../../libs/ct-home" }
+# The admission rules for DAP data breakpoints (watchpoints), shared
+# with `src/db-backend` — the REAL replay backend this crate's mock DAP
+# backend stands in for.
+#
+# This dependency exists because of a specific defect: the mock used to
+# answer `setDataBreakpoints` with `verified: true` unconditionally,
+# while the real backend had no arm for the command at all and refused
+# every request.  The test double was more capable than the component
+# it stood in for, so every test of the watchpoint path passed against
+# a mock that could do something the product could not, and watchpoints
+# were broken for the whole life of the feature without one test going
+# red.  The mock now asks the same function the real backend asks.
+ct-data-breakpoints = { path = "../../libs/ct-data-breakpoints" }
+# Opens a file a recording carries beneath its directory without following
+# a symlink below it; shared with `src/db-backend`, whose reads of a
+# recording's own source copies apply the same rule.
+ct-open-beneath = { path = "../../libs/ct-open-beneath" }
 clap = { version = "4.5.42", features = ["derive"] }
 libc = "0.2"
+# Chunk-size lines of chunked gateway responses (already in the tree via
+# tungstenite; observability_fetch.rs decodes the framing around it).
+httparse = "1.10"
 log = "0.4.27"
 flexi_logger = "0.31"
 serde = { version = "1.0", features = ["derive"] }
@@ -42,5 +62,8 @@ tokio-tungstenite = { version = "0.24", default-features = false, features = [
   "connect",
 ] }
 tempfile = "3"
+# The gateway test uploads a recording to codetracer-ci and creates its
+# share link (already in the tree via codetracer_ctfs, same features).
+ureq = { version = "2.12", features = ["json"] }
 # Reads `record-web`'s recordings back the way any CTFS consumer does.
 codetracer_trace_reader = { path = "../../../codetracer-trace-format/codetracer_trace_reader" }

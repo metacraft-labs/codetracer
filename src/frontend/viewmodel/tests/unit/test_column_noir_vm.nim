@@ -22,39 +22,26 @@
 ##     (legacy `nargo` builds emit traces without columns, which would
 ##     make the column assertions fail confusingly; force opt-in).
 ##   * ``REPLAY_SERVER_BIN`` — path to a built replay-server binary.
-##     Defaults to the standard cargo-debug or just-build path.
+##     When unset, the search order of ``src/common/replay_server_path.nim``
+##     applies: the Repro build output first, cargo's trees last.
 
 import std/[json, options, os, osproc, strutils, unittest]
 
 import ../../headless_session
+import ../../../../common/replay_server_path   # the one search order
 import recorder_gate
 
 # ---------------------------------------------------------------------------
-# Repo root discovery — shared with the JS sibling test
+# replay-server discovery — the checkout root is the helper's to find
 # ---------------------------------------------------------------------------
 
-proc repoRoot(): string =
-  ## Walk upward from this file to find the codetracer repo root.
-  var dir = currentSourcePath().parentDir
-  while dir.len > 0:
-    if dirExists(dir / "src" / "db-backend") and dirExists(dir / "src" / "frontend"):
-      return dir
-    let parent = dir.parentDir
-    if parent == dir: break
-    dir = parent
-  raise newException(IOError, "no codetracer root from " & currentSourcePath())
-
 proc findReplayServer(): string =
-  ## Resolve a replay-server binary (env override or standard build paths).
-  let envBin = getEnv("REPLAY_SERVER_BIN", "")
-  if envBin.len > 0 and fileExists(envBin): return envBin
-  for c in [repoRoot() / "src" / "build-debug" / "bin" / "replay-server",
-            repoRoot() / "src" / "db-backend" / "target" / "debug" / "replay-server",
-            repoRoot() / "src" / "db-backend" / "target" / "release" / "replay-server"]:
-    if fileExists(c): return c
-  raise newException(IOError,
-    "missing replay-server; set REPLAY_SERVER_BIN or build via " &
-    "`cd src/db-backend && cargo build`")
+  ## The engine `src/common/replay_server_path` resolves -- the one search
+  ## order the native front-ends use too -- or an `IOError` naming every path
+  ## searched, because this suite cannot run without one.
+  result = locateReplayServer()
+  if result.len == 0:
+    raise newException(IOError, missingReplayServerMessage())
 
 # ---------------------------------------------------------------------------
 # Noir gating — NARGO_PATH must point at a column-aware nargo build

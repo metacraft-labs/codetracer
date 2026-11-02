@@ -119,7 +119,13 @@ proc urlPortIn(text: string): int =
     let marker = "CODETRACER_HOST_URL="
     let at = line.find(marker)
     if at < 0: continue
-    let url = line[at + marker.len .. ^1].strip()
+    var url = line[at + marker.len .. ^1].strip()
+    # The authority only: the URL carries a path and the session secret's
+    # query when `ct host` generated the secret.
+    let scheme = url.find("://")
+    if scheme >= 0:
+      let slash = url.find('/', scheme + 3)
+      if slash >= 0: url = url[0 ..< slash]
     let colon = url.rfind(':')
     if colon < 0: continue
     try: return parseInt(url[colon + 1 .. ^1])

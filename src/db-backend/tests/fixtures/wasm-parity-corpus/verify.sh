@@ -136,7 +136,12 @@ for entry in "${CASES[@]}"; do
 	if [ "$name" = "vault_apply" ]; then
 		# The spec §3.3/§3.4 state rides in the recording's event stream —
 		# its only carrier, and the one a streaming consumer reads.
-		if ! "$CT_PRINT" --full "$dir/$program.ct" | grep -q 'wasm-host-state'; then
+		# Captured, then searched as a here-string: piping ct-print into
+		# `grep -q` under pipefail reports an early match as a failure
+		# (SIGPIPE; see ci/test/grep-q-pipefail-gate.sh). ct-print's own
+		# failure still fails.
+		if ! host_state_dump="$("$CT_PRINT" --full "$dir/$program.ct")" ||
+			! grep -q 'wasm-host-state' <<<"$host_state_dump"; then
 			echo "[verify]     FAIL: the recording carries no host-state record." >&2
 			echo "[verify]           Its module imports its memory, so it cannot replay without one." >&2
 			failed=1

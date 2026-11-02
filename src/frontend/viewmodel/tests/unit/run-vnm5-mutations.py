@@ -17,10 +17,12 @@ exit code. `nim c -r` exits non-zero for a *compile* error too, and a compile
 error is not a kill: it is a mutation that never ran. A run producing no result
 lines at all is reported as a harness error.
 
-Usage (from the repository root):
+Usage (from the repository root). It takes NO arguments, and refuses every one
+it is given before it compiles or mutates anything:
   direnv exec . python3 src/frontend/viewmodel/tests/unit/run-vnm5-mutations.py
 """
 
+import argparse
 import re
 import subprocess
 import sys
@@ -158,7 +160,32 @@ def apply(mut: Mutation) -> str:
     return original
 
 
+sys.path.insert(0, str(ROOT / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main() -> int:
+    # THE ARGUMENT RULE FIRST — before any compile, any mutation, any
+    # subprocess. This harness takes no arguments, so every one of them is
+    # refused by name with exit 2, which is what
+    # `ci/test/harness-argument-refusal.sh` requires: before this, an
+    # unrecognised flag was simply ignored and the harness performed a full
+    # eight-arm grading run against `verification_payload.nim` — and when the
+    # probe's 60 s timeout killed it mid-run it left that file MUTATED in the
+    # working tree.
+    #
+    # `ci/lib/harness_guard.py` owns the ARM IDS (an undeclared id, and an
+    # empty `--only=`, which is not "every arm"); argparse owns the FLAGS, as
+    # in `ci/test/run-plat70i-fit-mutations.py`. This harness declares no
+    # flags, so argparse answers every one but `-h` with its own
+    # `unrecognized arguments: …` and its own exit code 2.
+    refused = refuse_undeclared_arms(sys.argv[1:], globals())
+    if refused:
+        return refused
+    argparse.ArgumentParser(
+        prog=Path(__file__).name,
+        description=__doc__.splitlines()[0]).parse_args(sys.argv[1:])
+
     print("== control ==")
     control = run_suite()
     if control.failed or not control.compiled:

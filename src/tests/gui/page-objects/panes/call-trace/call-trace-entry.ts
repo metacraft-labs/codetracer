@@ -137,10 +137,18 @@ export class CallTraceEntry {
     return this.hasClass("event-selected");
   }
 
+  /**
+   * Whether the row has children to expand or collapse. The view draws
+   * `.collapse-call-img` on an expanded parent, `.expand-call-img` on a
+   * collapsed one and `.dot-call-img` on a leaf (`toggleIconClass` in
+   * `isonim_calltrace_view.nim`). Counting the leaf's dot and not the
+   * collapsed parent's icon made `expandChildren()` return without
+   * clicking on exactly the rows it exists to open.
+   */
   async hasToggle(): Promise<boolean> {
     return (
       (await this.toggleLocator()
-        .locator(".collapse-call-img, .dot-call-img")
+        .locator(".collapse-call-img, .expand-call-img")
         .count()) > 0
     );
   }
@@ -155,9 +163,15 @@ export class CallTraceEntry {
       : EXPAND_CHILDREN_OPTIONS;
   }
 
-  async contextMenuEntries(): Promise<string[]> {
+  /** Right-clicks the call's text and waits for the context menu to show. */
+  async openContextMenu(): Promise<ContextMenu> {
     await this.callTextLocator().click({ button: "right" });
     await this.contextMenu.waitForVisible();
+    return this.contextMenu;
+  }
+
+  async contextMenuEntries(): Promise<string[]> {
+    await this.openContextMenu();
     const entries = await this.contextMenu.getEntries();
     await this.contextMenu.dismiss();
     return entries.map((e) => e.text);

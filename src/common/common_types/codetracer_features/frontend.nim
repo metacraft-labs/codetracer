@@ -239,11 +239,9 @@ type
     aRunToEntry,                  # CTRL+ALT+E — toolbar `run-to-entry`
     aResetOperation,              # CTRL+ALT+R — toolbar `reset-operation`
     aRunTests,                    # ALT+L      — toolbar `run-tests`
-    # OPENS THE KEYBOARD-SHORTCUTS DIALOG, and it is an action rather than a
-    # hardcoded `Mousetrap.bind` for the same reason everything above it is:
-    # a chord bound in code is one `renderChord` cannot see, so the menu item
-    # that opens the shortcuts dialog would be the one menu item in the product
-    # with no chord printed beside it.
+    # OPENS THE KEYBOARD-SHORTCUTS DIALOG, and it is an action so the menu item
+    # that opens it shows the chord that runs it (`help.keyboard-shortcuts`,
+    # CUA's `Ctrl+K Ctrl+S`, resolved by the key router).
     #
     # Appended, per the note above — `actions` in `ui_js.nim` is a positional
     # literal and an insertion anywhere else re-points every handler after it.
@@ -320,7 +318,37 @@ type
     # the desktop's own saved layout files (the terminal and the GPUI window
     # keep theirs, and are not touched). Appended at the end, for the reason
     # every note above gives.
-    aResetLayout                  # View > Reset Layout
+    aResetLayout,                 # View > Reset Layout
+    # PLAT-70 Part B (Horizontal-Overflow.md §5): the table panes' palette
+    # entries — **Show Detail** (`list.show-detail`, the focused row's full
+    # text under it) and **Widen Column** / **Narrow Column**
+    # (`table.resize-column` on the Event Log's focused column). Appended at
+    # the end, for the reason every note above gives.
+    aShowDetail,                  # palette: Show Detail
+    aWidenColumn,                 # palette: Widen Column
+    aNarrowColumn,                # palette: Narrow Column
+    # PLAT-70 Part I (Horizontal-Overflow.md §4.4, §5.5): **View: Scroll
+    # Left** / **View: Scroll Right** (`view.scroll-left` / `-right`) on the
+    # focused output pane, or a table pane while its columns scroll.
+    # Appended at the end, for the reason every note above gives.
+    aScrollViewLeft,              # palette: View: Scroll Left
+    aScrollViewRight,             # palette: View: Scroll Right
+    # PLAT-70 Part C (Find-And-Incremental-Search.md §3.5): the palette's
+    # **Find: Cancel and Return** (`find.cancel`) — under CUA the only exit
+    # that restores the selection and the scroll. Appended at the end, for
+    # the reason every note above gives.
+    aFindCancel,                  # palette: Find: Cancel and Return
+    # Test-Results-Pane.md §9.3: the workspace's `replay-open-in` — where a
+    # test's recording opens when no modifier is held. Palette entries, the
+    # native omniboxes' `replayOpenCommands`. Appended at the end, for the
+    # reason every note above gives.
+    aTestsOpenInNewTab,           # palette: Tests: Open Recordings in a New Tab
+    aTestsOpenInCurrentTab,       # palette: Tests: Open Recordings in the Current Tab
+    # Test-Results-Pane.md §9.3: the palette pair — the selected test,
+    # recorded and opened at the command's destination. Appended at the end,
+    # for the reason every note above gives.
+    aTestsRun,                    # palette: Tests: Run
+    aTestsRunInCurrentTab         # palette: Tests: Run in Current Tab
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

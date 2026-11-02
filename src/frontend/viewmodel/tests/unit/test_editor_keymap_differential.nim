@@ -64,7 +64,8 @@ import ../../keymap/kakoune_keymap
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a static assertion count when a suite dies before printing.
-const ExpectedAssertions = 16077
+const ExpectedAssertions = 16078
+  ## +1 on 2026-10-24 (PLAT-70 Part C): one more vocabulary operation.
 
 var countedAssertions = 0
 
@@ -77,8 +78,8 @@ let
   vim = vimKeymap()
   kak = kakouneKeymap()
   settings = wrapSettings(DisplayWrapA)
-  vimReach = reachableOperations(vim.keymap, kmVim)
-  kakReach = reachableOperations(kak.keymap, kmKakoune)
+  vimReach = reachableOperations(vim.keymap, bkVim)
+  kakReach = reachableOperations(kak.keymap, bkKakoune)
 
 const
   ExpectedScenarioDocs = 18
@@ -105,11 +106,11 @@ proc vimScope(): EditingScope =
   ## **CALLED BY NAME, AND COUNTED IN THIS FILE'S SOURCE.** See the header's
   ## third arming: the two arms are two named constructors, and a body in which
   ## one of them appeared twice would be the substitution §30a describes.
-  EditingScope(model: kmVim, product: pmEdit, pane: epEditor, mode: emNormal,
+  EditingScope(model: bkVim, product: pmEdit, pane: epEditor, mode: emNormal,
                textEntry: false)
 
 proc kakouneScope(): EditingScope =
-  EditingScope(model: kmKakoune, product: pmEdit, pane: epEditor,
+  EditingScope(model: bkKakoune, product: pmEdit, pane: epEditor,
                mode: emNormal, textEntry: false)
 
 proc runVim(d: ScenarioDoc; t: EditingTask): (EditorState, seq[string]) =
@@ -194,7 +195,11 @@ suite "PLAT-31: the DIFF-4 population, before a single task is compared":
     # counted, which is the same rule `ci/lib/nim-imports.sh` keeps for the
     # closure gates and is kept here for the same reason.
     var code = ""
-    for line in Raw.splitLines():
+    # Walked through a `let`, never the `const`: an inline iterator over a
+    # `const` rebuilds the whole literal at every character access on the JS
+    # backend (`ci/test/js-const-iteration-test.sh` says why and refuses it).
+    let raw = Raw
+    for line in raw.splitLines():
       let text = line.strip()
       if text.startsWith("#"): continue
       code.add line
@@ -220,8 +225,8 @@ suite "PLAT-31: the DIFF-4 population, before a single task is compared":
     ck not Body.contains("vim.keymap, " & "kakouneScope()")
     ck not Body.contains("kak.keymap, " & "vimScope()")
     # The two scopes carry the two models, one each.
-    ck Body.count("model: " & "kmVim") == 1
-    ck Body.count("model: " & "kmKakoune") == 1
+    ck Body.count("model: " & "bkVim") == 1
+    ck Body.count("model: " & "bkKakoune") == 1
     # And the keys each arm drives come from its OWN column of the row. A row
     # carries both sequences precisely so neither is derived from the other
     # (§30); an arm reading the wrong column would compare one path twice.
@@ -280,8 +285,8 @@ suite "PLAT-31: the two reachable sets, and every difference a FILED entry":
     ck union.len > kakReach.len
     for name in union:
       ck operationNamed(name) >= 0
-    ck unpublishedOperations(vim.keymap, kmVim).len == 0
-    ck unpublishedOperations(kak.keymap, kmKakoune).len == 0
+    ck unpublishedOperations(vim.keymap, bkVim).len == 0
+    ck unpublishedOperations(kak.keymap, bkKakoune).len == 0
 
 # ---------------------------------------------------------------------------
 # 41 TASKS x 2 KEYMAPS

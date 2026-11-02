@@ -1,5 +1,14 @@
 @import "defaults"
 
+// The design system's colour mode this theme paints in. Every rule that reads
+// a design-token variable (`colors-ui-surface-base-panel`, …) gets its value
+// from `generated/index.styl`, and that index re-assigns the `Light` mode's
+// values (`generated/mapped-light.styl`) whenever this is set — on every
+// import, including the ones components make themselves. Without it the
+// tokens keep their default value, which is the DARK mode, and the panels and
+// the editor's ground paint dark under this light palette.
+COLOR_MODE = "Light"
+
 BOLD_WEIGHT=500
 
 // Design system light-mode palette (clay / warm neutral)
@@ -29,7 +38,61 @@ TRACEPOINT_LINE_NUMBER_COLOR=#b5ae9f
 DEBUG_BUTTON_HOVER_BACKGROUND=#dbd6cc
 DEBUG_BUTTON_ACTIVE_BACKGROUND=#c8c2b5
 
+// The agent pane's and command palette's icons. The dark palette's files bake
+// in a colour drawn for a dark ground (#DDDDDD-#FAFAFA, #919191, indigo.200),
+// which all but vanishes on this palette's light ones, so each `*_white.svg`
+// beside it is the same drawing recoloured:
+//
+//   * near-white ink -> #353430, `icon/primary/default`'s Light value
+//     (clay.900), which is also the ink of the secondary and tertiary buttons
+//     most of these sit on;
+//   * the #919191 tier (`icon/primary/subtle` in the dark mode) -> #7a756a,
+//     clay.700. The subtle token's own Light value, clay.550, is 2.9:1 on this
+//     palette's input ground, under the 3:1 WCAG 1.4.11 asks of an icon;
+//     clay.700 is the light caption tier the gutter numbers already use;
+//   * the AI avatar's indigo.200 -> indigo.500, the brand colour both
+//     palettes already use for CT_PRIMARY_DEFAULT and TRACEPOINT_COLOR;
+//   * the permission dot's red.400 -> red.600, `icon/error/primary`'s Light
+//     value, as its label next to it takes the error text token here.
+//
+// Two keep the dark theme's file on purpose. The send button's white glyph
+// sits on the primary action surface, whose content colour in this mode is
+// `text/on-action-primary`, grey.50 — near-white is the design system's own
+// choice there. The stop button's #DDDDDD glyph sits on red.700 in both
+// themes.
+COMMAND_PALETTE_START_MSG_IMG=url("../../public/resources/shared/send_msg.svg")
+COMMAND_PALETTE_ADD_FILE_IMG=url("../../public/resources/shared/add_file_white.svg")
+COMMAND_PALETTE_ARROW_IMG=url("../../public/resources/shared/command_arrow_white.svg")
+AGENT_USER_AVATAR_IMG=url("../../public/resources/agent/agent_user_avatar_white.svg")
+AGENT_USER_COPY_IMG=url("../../public/resources/agent/agent_user_copy_white.svg")
+AGENT_USER_COPY_SUCCESS_IMG=url("../../public/resources/agent/agent_user_copy_success_white.svg")
+AGENT_PERMISSION_DOT_IMG=url("../../public/resources/agent/agent_permission_dot_white.svg")
+COMMAND_PALETTE_AI_IMG=url("../../public/resources/agent/ai_img_white.svg")
+COMMAND_PALETTE_COPY_IMG=url("../../public/resources/agent/command_palette_copy_white.svg")
+COMMAND_PALETTE_EDIT_IMG=url("../../public/resources/agent/command_palette_edit_white.svg")
+COMMAND_PALETTE_UPLOAD_IMG=url("../../public/resources/agent/command_palette_upload_white.svg")
+COMMAND_PALETTE_REDO_IMG=url("../../public/resources/agent/command_palette_redo_white.svg")
+AGENT_BRANCH_IMG=url("../../public/resources/agent/agent_branch_white.svg")
+AGENT_MODEL_IMG=url("../../public/resources/agent/agent_model_white.svg")
+AGENT_ADD_CONTEXT_IMG=url("../../public/resources/agent/agent_add_context_white.svg")
+AGENT_STOP_IMG=url("../../public/resources/agent/agent_stop.svg")
+AGENT_SETTINGS_IMG=url("../../public/resources/agent/agent_settings_white.svg")
+// Both animations are SVG (`<animate>`), so they recolour like the rest: the
+// loading dots take the subtle tier, the re-record bars the ink.
+AI_LOADING_ANIMATION=url("../../public/resources/shared/agent_loading_animation_white.svg")
+RERECORD_AGENT_IMAGE=url('../../public/resources/shared/run_test_img_white.svg')
+RERECORD_AGENT_ANIMATION=url('../../public/resources/shared/rerecord_animation_white.svg')
+
+// The tracepoint toolbar's run and menu icons, recoloured to the ink above
+// (TRACEPOINT_HAMBURGER_ICON below is the same file).
+RUN_TRACEPOINT_IMAGE=url("../../public/resources/tracepoints/run_tracepoints_white.svg")
+TRACE_HAMBURGER_IMAGE=url("../../public/resources/tracepoints/trace_hamburger_white.svg")
+
 NOUI_SLIDER_HANDLER_IMAGE=url("../../public/resources/shared/noUiSlider_handle_icon_dark.svg")
+// The dark theme's file: its #818181 glyph is drawn on the active handle,
+// which paints `text/primary/body-subtle` (flow.styl), clay.900 in this mode,
+// so the glyph keeps 3.2:1 on it.
+NOUI_SLIDER_ACTIVE_HANDLER_IMAGE=url("../../public/resources/shared/noUiSlider_handle_active_icon_dark.svg")
 NOUI_SLIDER_HANDLER_BACKGROUND=#b6b6b6
 NOUI_SLIDER_HANDLER_BORDER=BACKGROUND_COLOR
 NOUI_SLIDER_BACKGROUND_COLOR=BACKGROUND_COLOR
@@ -60,6 +123,9 @@ FLOW_SHOW_ICON = url('../../public/resources/shared/flow_show_dark.svg')
 WINDOW_MINIMIZE_ICON_PATH = url('../../public/resources/window/minimize_16_white.svg')
 WINDOW_MAXIMIZE_ICON_PATH = url('../../public/resources/window/maximize_16_white.svg')
 WINDOW_CLOSE_ICON_PATH = url('../../public/resources/window/close_16_white.svg')
+// The caption bar's restore button: the maximize icon, as in the dark theme,
+// so the button looks the same whichever state the window is in.
+WINDOW_RESTORE_ICON_PATH = WINDOW_MAXIMIZE_ICON_PATH
 
 WELCOME_SCREEN_WINDOW_MINIMIZE_ICON_PATH = url('../../public/resources/window/minimize_16_grey.svg')
 WELCOME_SCREEN_WINDOW_MAXIMIZE_ICON_PATH = url('../../public/resources/window/maximize_16_grey.svg')
@@ -80,11 +146,16 @@ LAYOUT_MINIMIZE_ICON_PATH = url('../../public/resources/menu/minimize_16_white.s
 LAYOUT_MAXIMIZE_ICON_PATH = url('../../public/resources/menu/maximize_16_white.svg')
 LAYOUT_CLOSE_ICON_PATH = url('../../public/resources/menu/close_16_white.svg')
 LAYOUT_TAB_CLOSE_ICON_PATH = url('../../public/third_party/golden-layout/dist/img/lm_close_black.png')
+// Painted through `mask-image` (`tab-icon`, shared_widgets.styl), so the file
+// supplies only the shape and TAB_ICON_COLOR fills it: one file for both themes.
+LAYOUT_TAB_PIN_ICON_PATH = url('../../public/resources/menu/lm_pin_tab_dark.svg')
 LAYOUT_TAB_NESTED_ICON = url('../../public/resources/window/layout_nested_button_dark.svg')
 ACTIVE_LAYOUT_TAB_NESTED_ICON = url('../../public/resources/window/active_layout_nested_button_dark.svg')
 LAYOUT_DROPDOWN_ICON_COLOR = #778088
 
-ELEMENT_COMPONENT_CLOSE_ICON = url('../../public/resources/shared/element_component_close_dark.svg')
+// `.scratchpad-value-close`: the dark theme's near-white drawing in the ink of
+// the agent icons above.
+ELEMENT_COMPONENT_CLOSE_ICON = url('../../public/resources/shared/element_component_close_white.svg')
 
 SHARED_OPEN_FA_ICON = url('../../public/resources/shared/filesystem/filesystem_open_toggle_dark.svg')
 SHARED_CLOSE_FA_ICON = url('../../public/resources/shared/filesystem/filesystem_close_toggle_dark.svg')
@@ -93,18 +164,31 @@ HIGHLIGHT_LINE_ARROW = url('../../public/resources/shared/highlight_line_arrow.s
 // #65737e55 (see the note in default_dark_theme.styl).
 CURRENT_LINE_BG = rgba(#65737e, 0.333)
 
-TRACEPOINT_HAMBURGER_ICON = url('../../public/resources/tracepoints/trace_hamburger_dark.svg')
+TRACEPOINT_HAMBURGER_ICON = url('../../public/resources/tracepoints/trace_hamburger_white.svg')
 
 // text-primary-body light = clay.950
 TEXT_CONTENT_COLOR = #272522
 
+// `.repl-input-history` (repl.styl), the REPL's echoed input rows.
 // surface-primary-secondary-hover light = clay.300
 BACKGROUND_NEIGHBOUR_COLOR=#c8c2b5
-BACKGROUND_OPPOSITE_COLOR=#1d1c1a
+
+// A bare token name, here and below, although the tokens are imported after
+// this file: Stylus resolves a variable holding a bare identifier where it is
+// USED, by which time `generated/index` has defined the token and, under
+// `COLOR_MODE = "Light"`, re-assigned its Light value. (A function call on a
+// token, such as `rgba(token, a)`, is evaluated here, before the token
+// exists, and fails.)
+//
+// `.recording-head-indicator`, the "Head: N" readout of a live recording on
+// the debug toolbar: information text, as in the dark palette.
+PRIMARY_COLOR=colors-ui-text-information-primary
+// `.unknown-location .unknown-border`, the rules between the sections of the
+// "no source" pane.
+CALLGRAP_TOOLTIP_BORDER_COLOR=colors-ui-border-secondary
 
 COLOR=#272522
 NEIGHBOUR_COLOR=#353430
-OPPOSITE_COLOR=#f8f6f2
 
 // border-tertiary light = clay.150
 COLOR_PANEL_BORDER=#e6e2db
@@ -113,12 +197,18 @@ GUTTER_COLOR_BG = #e6e2db
 GUTTER_FLOW_COLOR_BG = #0f0
 // text-primary-caption light = clay.700
 GUTTER_LINE_TEXT_COLOR = #7a756a
-QUERY_COMPLETION_BG = #000
-QUERY_COMPLETION_FG = #fff
+// `.viewer-search`, a floating search box: a raised surface and body text,
+// not the dark theme's black box.
+QUERY_COMPLETION_BG = colors-ui-surface-base-raised
+QUERY_COMPLETION_FG = colors-ui-text-primary-body
 FUTURE_COLOR_BG = #00f
 FUTURE_COLOR_FG = #fff
-TRACE_COLOR_BG = #008
-TRACE_COLOR_FG = #fff
+// `.code-editor .tra`: a trace highlight in the old DOM editor, navy with
+// white text. No current view emits the class; it follows the mode anyway, as
+// the action surface with body text, so that nothing in this sheet keeps the
+// dark theme's ground.
+TRACE_COLOR_BG = colors-ui-surface-action-primary
+TRACE_COLOR_FG = colors-ui-text-primary-body
 ON_COLOR_BG = #FAFA57
 ON_COLOR_FG = #00f
 INLINE_EXPANDED_COLOR = #fff
@@ -128,18 +218,23 @@ INLINE_NAME_COLOR = #00f
 INLINE_RIGHT_VAR_COLOR_BG = #38b088
 INLINE_RIGHT_VAR_COLOR_FG = #fff
 INLINE_RIGHT_NAME_COLOR = #fff
-JUMP_COLOR = #fff
+// `.jump`, a link in the old DOM editor: white, the dark theme's ink, until
+// it took the information text token.
+JUMP_COLOR = colors-ui-text-information-primary
 TRACE_SIMPLE_COLOR = #000
 TRACE_VAR_COLOR = #000
-TRACE_ENUM_COLOR = #0f0
+// `.trace-enum`: pure green (1.3:1 on the light ground) until it took the
+// success text token.
+TRACE_ENUM_COLOR = colors-ui-text-success-primary
 TRACE_EXPAND_COLOR = #00f
 TRACE_EVEN_COLOR_BG = #222
 TRACE_ODD_COLOR_BG = #111
 TRACE_SEARCH_COLOR = #00f
 ACTIVE_COLOR_BG = #222
 ACTIVE_COLOR_FG = #fff
-DIALOG_COLOR_BG = #000
-DIALOG_COLOR_FG = #fff
+// `#dialog` (calltrace.styl): a raised surface and body text.
+DIALOG_COLOR_BG = colors-ui-surface-base-raised
+DIALOG_COLOR_FG = colors-ui-text-primary-body
 INLINE_SEGMENT_CHANGED_COLOR_FG = #000
 INLINE_SEGMENT_CHANGED_COLOR_BG = #294
 LOADING_COLOR_BG = #b8f
@@ -149,6 +244,14 @@ GUTTER_COLOR_FG = #000
 GUTTER_COLOR_BG = #eee
 GUTTER_FLOW_COLOR_BG = #0f0
 GUTTER_BREAKPOINT_COLOR_BG = #f00
+// `.breakpoint-program-select` / `.breakpoint-frame-select` (text_editor.styl),
+// the two breakpoint-scope swatches, blue and yellow in the dark palette.
+// Every ground in this sheet takes a token of the light mode
+// (ci/test/css-light-theme-grounds.sh) rather than a colour hard-coded for
+// every theme, so: the action surface (indigo, #a5b4fc here) for the blue one
+// and the subtle warning surface (orange, #ea580c) for the yellow one.
+BREAKPOINT_MENU_0 = colors-ui-surface-action-primary
+BREAKPOINT_MENU_1 = colors-ui-surface-alert-warning-subtle
 ON_BG_COLOR = rgb(245, 245, 140)
 
 LINE_NUMBERS_TEXT_COLOR = #7a756a
@@ -194,6 +297,14 @@ CALLTRACE_EXPAND_IMG='../../public/resources/calltrace/expand-call-calltrace-whi
 CALLTRACE_DOT_IMG='../../public/resources/calltrace/dot-call-calltrace-white.svg'
 CALLTRACE_EOP_IMG='../../public/resources/calltrace/end-of-program-white.svg'
 CALLTRACE_EOP_ERROR_IMG='../../public/resources/calltrace/end-of-program-dark.svg'
+// The active call's chevrons and dot. The chevrons are the dark theme's files:
+// they draw amber (#FCD34D) on a #3A3A3A chip of their own, so they carry
+// their ground with them. The dot has no chip, and amber.300 is 1.1:1 on this
+// palette's panel (clay.150); its light file is the same square in amber.700,
+// the same hue at 3.9:1 there.
+CALLTRACE_ACTIVE_COLLAPSE_IMG='../../public/resources/calltrace/collapse-active-call-calltrace-dark.svg'
+CALLTRACE_ACTIVE_EXPAND_IMG='../../public/resources/calltrace/expand-active-call-calltrace-dark.svg'
+CALLTRACE_ACTIVE_DOT_IMG='../../public/resources/calltrace/dot-active-call-calltrace-white.svg'
 
 OUTPUT_COLOR_FG = #fff
 OUTPUT_COLOR_BG = #000
@@ -209,23 +320,23 @@ CALLTRACE_ARGS_COLOR = #15803D
 CALLTRACE_RETURN_COLOR = #2563EB
 CALLTRACE_TOOLTIP_BACKGROUND_COLOR = white
 CALLTRACE_TOOLTIP_BORDER_COLOR = #6e6e6e
-CALLTRACE_TRACE_LINE_COLOR = #3E3E3E
+// The call tree's trace lines and dots (`.call-offset-icon-{1,2,3,6}`): ink,
+// the same `text/primary/label` the trace chevron's baseline is drawn in.
+CALLTRACE_TRACE_LINE_COLOR = colors-ui-text-primary-label
 CALLTRACE_NEXT_CALL_POINTER_COLOR = #eb4f64
-SPEED_VERY_FAST_BG = #52F373
-SPEED_FAST_BG = #4BA02F
-SPEED_MEDIUM_BG = #DCF438
-SPEED_SLOW_BG = #F02D2D
 HIGHLIGHT_COLOR = #62F4D4
 ERROR_COLOR_FG = #fff
 ERROR_COLOR_BG = #a00
 NORMAL_COLOR_FG = #fff
 NORMAL_COLOR_BG = #0a0
-WARN_COLOR_FG = #fff
+// `.message-warn`'s text on the cyan WARN_COLOR_BG: white was 1.3:1 there.
+WARN_COLOR_FG = colors-ui-text-primary-body
 WARN_COLOR_BG = #0ff
 FUZZY_RESULT_COLOR_BG = #888
 LOADING_TEXT_COLOR_FG = #00f
 SEARCHED_TOKEN_COLOR = #ECF53D
-BREAK_COLOR = #fff
+// `.break` text: white, the dark theme's ink, until it took body text.
+BREAK_COLOR = colors-ui-text-primary-body
 INSTANTIATIONS_MENU_COLOR_BG = #3761D3
 INSTANTIATIONS_MENU_COLOR_FG = #D3E9E9
 INCODE_COLOR_BG = #77DA1D
@@ -275,7 +386,9 @@ FLOW_PARALLEL_NAME_COLOR=white
 FLOW_PARALLEL_BEFORE_VALUE_BORDER_COLOR=#aaa
 FLOW_PARALLEL_BEFORE_VALUE_COLOR=black
 FLOW_PARALLEL_NAME_BORDER_COLOR=#777
-FLOW_PARALLEL_BEFORE_VALUE_BACKGROUND_COLOR=#aaa
+// Read only as `.flow-parallel-values`'s right border (flow.styl): the
+// primary border token, as #aaa was 2.2:1 on the light ground.
+FLOW_PARALLEL_BEFORE_VALUE_BACKGROUND_COLOR=colors-ui-border-primary
 FLOW_PARALLEL_BEFORE_ONLY_VALUE_BORDER_COLOR=#ccc
 FLOW_PARALLEL_BEFORE_ONLY_VALUE_BACKGROUND_COLOR=#e0e1e1
 FLOW_PARALLEL_BEFORE_ONLY_VALUE_COLOR=#3D993D
@@ -304,13 +417,22 @@ FLOW_MULTILINE_LOOP_VALUE_BACKGROUND_COLOR=#C2C4CD
 FLOW_MULTILINE_LOOP_VALUE_COLOR=#3D993D
 FLOW_MULTILINE_ACTIVE_LOOP_ITERATION_BACKGROUND_COLOR=#4fa05a
 FLOW_MULTILINE_BEFORE_ONLY_VALUE_BACKGROUND_COLOR=#C2C4CD
-FLOW_MULTILINE_BEFORE_ONLY_VALUE_COLOR=#3D993D
+// A before-only value on its #C2C4CD box: #3D993D was 2.1:1 there; the
+// editor's function green reads.
+FLOW_MULTILINE_BEFORE_ONLY_VALUE_COLOR=colors-editor-syntax-function
 FLOW_MULTILINE_VALUE_BOX_SHADOW_COLOR=#9A9DA7
 
 FLOW_INLINE_BACKGROUND_COLOR=BACKGROUND_COLOR
 FLOW_INLINE_ACTIVE_LOOP_ITERATION_BACKGROUND_COLOR=#4fa05a
 FLOW_INLINE_BEFORE_ONLY_VALUE_BACKGROUND_COLOR=#C2C4CD
-FLOW_INLINE_BEFORE_ONLY_VALUE_COLOR=#3D993D
+// The inline value box paints `editor/surface/primary` (flow.styl), mid-grey
+// in this mode, on which #3D993D was 1.3:1: code text for a coloured surface.
+FLOW_INLINE_BEFORE_ONLY_VALUE_COLOR=colors-editor-syntax-on-color
+// `.flow-inline-value-after-only` is the before-only box's mirror on the same
+// ground: the same text colour, and the same input-surface shadow cast
+// up-left (see the dark palette).
+FLOW_INLINE_AFTER_VALUE_COLOR=FLOW_INLINE_BEFORE_ONLY_VALUE_COLOR
+FLOW_INLINE_BEFORE_VALUE_BACKGROUND_COLOR=colors-ui-surface-input-default
 
 FLOW_CONDITION_TAKEN = #B9F8B9
 FLOW_CONDITION_NOT_TAKEN = #F8B9B9

@@ -1,0 +1,22 @@
+# Control digests for run-plat70c-find-mutations.py — the
+# subjects AND the suites the arms are graded by (§16c).
+# Refreshed with --record-control-hashes, gated by the
+# needle scan (§39a).
+085731b1ac292e06d6947610ed9dd8a4035c8a21ae1b6e65c68df8bee222b31e  src/frontend/viewmodel/editor/find_match.nim
+e42183b013ddd0c4ca9c23a00ad9dbf32db6657f426a71f56de73505055aba72  src/frontend/viewmodel/editor/operations.nim
+8a231b60bee07475768c09f36454af0745527a615f33aa937e184fe749e6ec6b  src/frontend/viewmodel/viewmodels/find_vm.nim
+51235077a2d216d61e378cc7b6bbe05e06234adf5aacc5a419748e1d6266f965  src/frontend/viewmodel/keymap/vim_keymap.nim
+3878c7cf1226f9dc854712eca2466ee9c6bc2fa6e2cb5a6d61b0835d823e94c3  src/frontend/viewmodel/keymap/kakoune_keymap.nim
+f85be95a20f9570fbba1b329204851ad7f2ea04ba8d8c95efd95e76f22f88b44  src/frontend/viewmodel/keymap/cua_keymap.nim
+f2016b0b324e4a31110377bf33f779362679e526507d4ea6143a1eb440b93500  src/frontend/viewmodel/keymap/emacs_keymap.nim
+4e0cd2c1b5e2f1a4a7930c6a1bc4e4513423fee12bafb81b9de418988cf4e2e8  src/frontend/tui/app/views/search.nim
+19450cc4469547601219da7001debb006719f017217383614d85edf88f936477  src/frontend/tui/app/views/source_pane.nim
+06534e85eac664c4b116bdb2d723d20c580c01fadd3bbe247e91bc3c337f00f1  src/frontend/tui/app/runtime.nim
+be67611ce26b83d2496a604da5907c3d610d24c5fab0d85c6622743d08e2bc4a  src/frontend/gpui/main.nim
+490d15b34f650ea2edb190a5a24df881d6e11e99de6a5e3a9118f42b4b4ac9b3  src/frontend/gpui/app/leaves.nim
+5593befdc41d410f22697ce9955ed0bca9931faae51609d4a4b823dbe43ba8e9  src/frontend/ui/editor.nim
+68a60b45242b173c137db2fcebd04185c808db5303c83fef175a53d5464c8c83  src/frontend/viewmodel/tests/unit/test_plat70c_find_vm.nim
+7d57cbbeacf216e107e844032855cff29ea45844c633951b06464272ef337af0  src/frontend/tui/tests/test_plat70c_find.nim
+616f17e76c0187517d8eeb5c431f9f02b70a7203f153843c681d2abe3cdfaaaa  src/frontend/tui/tests/real_terminal/test_plat70c_find_pty.nim
+86703de1be195fb8734738b1e568b2ab4fb66600f432043f4b3ca85a88399ca9  src/frontend/gpui/tests/test_plat70c_gpui_plan.nim
+81dec40cc391a7d6a1133bfede143eb422fd09d62b37a4ce7bb8992cf849fa7d  src/tests/gui/tests/editor/plat70c-incremental-find.spec.ts

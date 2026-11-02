@@ -67,7 +67,7 @@ import ../viewmodel/platform/browser_facades
 import ../viewmodel/host/container_platform
 import ../index/facade_endpoint
 
-const ExpectedAssertions = 1002
+const ExpectedAssertions = 1030
 var counted = 0
 var failedChecks = 0
 
@@ -153,7 +153,7 @@ discard payloadOf("fs.createDir", %*{"path": scratch})
 suite "the dispatch table is complete and self-consistent":
 
   test "every verb is a dotted name, declared once":
-    ck facadeVerbs.len == 63
+    ck facadeVerbs.len == 64
     var seen: seq[string] = @[]
     for entry in facadeVerbs:
       ck entry.verb.contains('.')
@@ -170,7 +170,7 @@ suite "the dispatch table is complete and self-consistent":
       else:
         inc servedCount
         ck entry.unservedBecause.len == 0
-    ck servedCount == 37
+    ck servedCount == 38
     ck refusedCount == 26
 
   test "the served capability set is the table's, not a constant":
@@ -778,6 +778,53 @@ suite "vcs is served by running git, and reads back what git wrote":
     ck not nowhere.ok
     ck nowhere.errorKind == pkNotFound
 
+  # VCS-Panel.md, "Reading the repository never takes the index lock". A
+  # repository whose index has a STALE STAT CACHE — `tracked.txt` committed,
+  # then its mtime moved with its content unchanged — is the state in which a
+  # plain `git status` or `git diff` refreshes the cache and writes the index
+  # back: `.git/index.lock` is created and renamed over `.git/index`, so the
+  # index's inode changes. A read that leaves the inode alone took no lock.
+  # Each verb gets its own repository, so one read's refresh cannot hide
+  # another's write, and each ends with the CONTROL: a plain `git status` in
+  # the same repository DOES rewrite the index, so the repository really was
+  # stale and the verb really had something to refresh.
+  proc staleStatRepository(name: string): string =
+    result = workspace & "/" & name
+    ck runScript(workspace,
+      "git -c init.defaultBranch=main init -q " & name & " && cd " & name &
+      " && printf 'one\\n' > tracked.txt && git add tracked.txt" &
+      " && git -c user.name=x -c user.email=x@example.invalid" &
+      " -c commit.gpgsign=false commit -q -m one" &
+      # 2001-09-09, POSIX `touch -t` ([[CC]YY]MMDDhhmm): years older than
+      # the index, so the recorded stat no longer matches.
+      " && touch -t 200109090146 tracked.txt").exit.exitCode == 0
+
+  proc indexInode(repo: string): int =
+    nodeFs.statSync(cstring(repo & "/.git/index")).ino.to(int)
+
+  proc controlRewritesIndex(repo: string; before: int): bool =
+    runScript(repo, "git status --porcelain").exit.exitCode == 0 and
+      indexInode(repo) != before
+
+  test "vcs.status and vcs.diff never write the index, so never take its lock":
+    let statusRepo = staleStatRepository("stale-status")
+    let statusBefore = indexInode(statusRepo)
+    let status = decodeVcsStatus(
+      payloadOf("vcs.status", %*{"repository": statusRepo}))
+    ck status.branch == "main" and status.changes.len == 0
+    ck indexInode(statusRepo) == statusBefore
+    ck not nodeFs.existsSync(cstring(statusRepo & "/.git/index.lock")).to(bool)
+    ck controlRewritesIndex(statusRepo, statusBefore)
+
+    let diffRepo = staleStatRepository("stale-diff")
+    let diffBefore = indexInode(diffRepo)
+    ck decodeText(payloadOf("vcs.diff", %*{
+      "repository": diffRepo, "paths": [], "staged": false,
+      "contextLines": 3})) == ""
+    ck indexInode(diffRepo) == diffBefore
+    ck not nodeFs.existsSync(cstring(diffRepo & "/.git/index.lock")).to(bool)
+    ck controlRewritesIndex(diffRepo, diffBefore)
+
 # ---------------------------------------------------------------------------
 # 5b. vcs.contentId — SB-2a: the content facts W, H and S, and the store roots
 # ---------------------------------------------------------------------------
@@ -923,6 +970,45 @@ suite "vcs.contentId round-trips over the facade endpoint":
     let stat = decodeReply(withoutRead.handleFrame(encodeCall(CallFrame(
       id: nextCallId, verb: "fs.stat", args: %*{"path": contentRepo}))))
     ck stat.ok
+
+  test "vcs.declaredScopes reads Tooling §3.1's declaration, and is gated by capVcsRead":
+    ## The endpoint's verb is the one reader (`vcs.declaredScopesOver`) over
+    ## node's `spawnSync`: a real repository's `git config`, its scopes as
+    ## lists of paths, an invalid declaration as problems and no scope.
+    proc scopesReply(ep: FacadeEndpoint; repo: string): ReplyFrame =
+      inc nextCallId
+      decodeReply(ep.handleFrame(encodeCall(CallFrame(
+        id: nextCallId, verb: "vcs.declaredScopes",
+        args: %*{"repository": repo}))))
+    let none = scopesReply(endpoint, contentRepo)
+    ck none.ok
+    ck decodeVcsDeclaredScopes(none.payload).scopes.len == 0
+    discard sh(contentRepo,
+      "git config --add testCertificatesScope.db.path src/db && " &
+      "git config --add testCertificatesScope.db.path Cargo.lock && " &
+      "git config --add testCertificatesScope.docs.path docs")
+    let declared = scopesReply(endpoint, contentRepo)
+    ck declared.ok
+    let scopes = decodeVcsDeclaredScopes(declared.payload)
+    ck scopes.problems.len == 0
+    ck scopes.scopes == @[@["Cargo.lock", "src/db"], @["docs"]]
+    discard sh(contentRepo,
+      "git config --add testCertificatesScope.bad.path ../outside")
+    let invalid = decodeVcsDeclaredScopes(scopesReply(endpoint,
+                                                      contentRepo).payload)
+    ck invalid.scopes.len == 0
+    ck invalid.problems.len == 1
+    discard sh(contentRepo, "git config --remove-section testCertificatesScope.bad && " &
+      "git config --remove-section testCertificatesScope.db && " &
+      "git config --remove-section testCertificatesScope.docs")
+    let withoutRead = newFacadeEndpoint(settingsRoot = workspace & "/settings",
+                                        tempRoot = workspace,
+                                        granted = servedCapabilities() - {capVcsRead})
+    let refused = scopesReply(withoutRead, contentRepo)
+    ck not refused.ok
+    ck refused.errorKind == pkNotSupported
+    ck refused.errorMessage.contains("capVcsRead")
+    ck refused.errorMessage.contains("vcs.declaredScopes")
 
   test "fs.certificateStoreRoots is the container process's own, per Transport §2.1":
     setEnv(cstring"TEST_CERTIFICATES_DIR", cstring(workspace & "/store"))
@@ -1168,6 +1254,9 @@ suite "the client and the server agree, verb by verb":
     ck head.value.kind == vcikComputed
     ck head.value.id == "git-tree-sha1:" & runScript(repository,
       "git rev-parse 'HEAD^{tree}'").stdout.strip()
+    let declared = record("vcs.declaredScopes",
+                          client.vcs.declaredScopes(repository))
+    ck declared.ok and declared.value.scopes.len == 0
 
     ck record("fs.writeText",
               client.fs.writeText(repository & "/c.txt", "third\n")).ok

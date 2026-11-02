@@ -90,16 +90,17 @@
 ##   file the tests actually read yields a certificate that is formally clean
 ##   and substantively false. It gets its own milestone.
 ##
-## * **A read set on the ``test run`` path.** Standard.md §3.2 binds a
-##   producer that KNOWS its tests consumed an untracked file. The check is
-##   here (``judgeUntracked``, below), but ``runAndAttest`` drives providers
-##   that report test events and nothing about the files a test opened, so
-##   no read set reaches it today: in the default mode a run with untracked
-##   files issues with ``untracked = true`` and its report says that no read
-##   set was captured, so they could not be judged. The read-file evidence
-##   that does exist is the incremental engine's (``incremental_cli``, its
-##   ``native_readfiles.json`` projection), and that path issues no
-##   certificate. See "UNTRACKED FILES" below.
+## * **A read set from every run.** Standard.md §3.2 binds a producer that
+##   KNOWS its tests consumed an untracked file. ``runAndAttest`` knows only
+##   when it watched: in the default ``reads`` mode, and only when untracked
+##   files exist as the run starts, it runs every process the providers
+##   launch through the shared launcher under io-mon's interpose monitor
+##   (``run_read_capture``) and judges the untracked files by what those
+##   processes read. When it cannot watch — no io-mon CLI or shim here, a
+##   process the shim could not enter (macOS SIP binaries, static binaries),
+##   a unit whose provider ran its test without launching a process — the
+##   read set is "not captured" with the reason, never empty, and the run
+##   issues with ``untracked = true`` and says so. See "UNTRACKED FILES".
 ##
 ## ============================================================================
 ## WHAT A CERTIFICATE IS BOUND TO, AND WHEN THAT IS MEASURED
@@ -142,9 +143,13 @@
 ## ``.codetracer/test.toml``, or ``--untracked``):
 ##
 ## * ``reads`` (the default) withholds with ``wrUntrackedInput`` only when a
-##   read set the RUN CAPTURED names an untracked, non-ignored file. With no
-##   read set it issues and reports ``untracked = true``, and says that no
-##   read set was captured — it never guesses which files were read.
+##   read set the RUN CAPTURED names an untracked, non-ignored file. The run
+##   captures one by running its test processes under io-mon when untracked
+##   files exist as it starts; a file a process read before writing it, and
+##   every binary it launched, count as read (a file a process created and
+##   then read is its own output). With no read set it issues and reports
+##   ``untracked = true``, and says why no read set was captured — it never
+##   guesses which files were read.
 ## * ``strict`` withholds whenever any untracked, non-ignored file exists in
 ##   scope (the whole repository; ``paths`` is never written), before or
 ##   after the run, naming them. It needs no read set.
@@ -160,12 +165,14 @@
 ## decision over values (it neither runs nor signs), so the policy can be
 ## checked against a read set the real capture code produced.
 
-import std/[algorithm, options, os, sequtils, sets, strutils, tables, times]
+import std/[algorithm, atomics, options, os, sequtils, sets, strutils, tables,
+            tempfiles, times]
 
 import contracts
 import certificate
 import ../common/project_definitions/model as project_model
 import incremental/native_readfiles
+import incremental/io_mon_capture
 
 # ``IssuanceOptions.untrackedMode``'s type, declared with the configuration
 # file that selects it.
@@ -175,6 +182,7 @@ import certificate_content_id_native
 import discovery
 import process_exec
 import run_orchestration
+import run_read_capture
 import workspace_scope
 
 const
@@ -580,9 +588,9 @@ proc probeVcs*(workspaceRoot: string; captureLimit = 0): VcsProbe =
 
 const
   NoReadSetOnRunPath* =
-    "the `ct test run` path does not capture the files its tests read"
-    ## Why ``runAndAttest`` has no read set today: providers report test
-    ## events, not the files a test opened.
+    "the `ct test run` path captured no read set for this run"
+    ## The prefix of every "not captured" reason ``runAndAttest`` records;
+    ## the rest says why (``startReadCapture``, ``readSetFromCapture``).
 
 proc readSetFromProjection*(dir: string): ReadSet =
   ## The read set in ``<dir>/native_readfiles.json`` — the projection the
@@ -601,6 +609,91 @@ proc readSetFromProjection*(dir: string): ReadSet =
   result = ReadSet(captured: true, source: dir / NativeReadFilesFile)
   for read in reads.get:
     result.paths.add read.path
+
+proc notCaptured(why: string): ReadSet =
+  ReadSet(captured: false, source: NoReadSetOnRunPath & ": " & why)
+
+proc startReadCapture(session: var ReadCaptureSession;
+                      mode: UntrackedMode; modeProblem: string;
+                      before: VcsProbe): string =
+  ## Prepare ``session`` for a run whose read set the untracked-files rule
+  ## needs, and return "" — or return why there will be no read set. Private:
+  ## only ``runAndAttest`` starts a capture, so a read set reaches the
+  ## issuance from the run alone (§6.2).
+  ##
+  ## A capture is started only when it can change the outcome: the default
+  ## ``reads`` mode, with untracked files present when the run starts. Strict
+  ## mode needs no read set, and with no untracked file there is nothing a
+  ## read set could implicate — so the common run pays nothing for it.
+  if mode != umReads or modeProblem.len > 0:
+    return "the untracked mode does not use one"
+  if not before.determined:
+    return "the repository state before the run could not be determined"
+  if before.untrackedPaths.len == 0:
+    return "no untracked file existed when the run started, so none was " &
+      "watched for"
+  let snoop = findSnoopCli()
+  var shim = ""
+  try:
+    shim = findShimLibrary()
+  except IOError as err:
+    # io-mon refuses an override (`$REPRO_MONITOR_SHIM_LIB`) that names no
+    # file, rather than falling through to another shim. That is a reason
+    # there is no read set, never a reason to fail the run.
+    return "the io-mon interpose shim could not be located: " & err.msg
+  except OSError as err:
+    return "the io-mon interpose shim could not be located: " & err.msg
+  if snoop.len == 0 or shim.len == 0:
+    return "the io-mon monitor is not available here (" &
+      (if snoop.len == 0: "no `" & IoMonSnoopBinaryName & "` on PATH or in $" &
+         IoMonSnoopEnvVar
+       else: "no interpose shim; set $" & IoMonShimEnvVar) & ")"
+  try:
+    session.dir = createTempDir("ct-test-reads-", "")
+  except OSError as err:
+    return "no directory for the capture could be created: " & err.msg
+  session.snoopCli = snoop
+  session.shimLib = shim
+  ""
+
+proc readSetFromCapture(session: var ReadCaptureSession): ReadSet =
+  ## The run's read set from the depfiles its monitored launches wrote — or,
+  ## when any part of the run went unwatched, "not captured" with the reason.
+  ## Never a partial set: a read set missing one process's reads is the false
+  ## "read nothing" the default mode must not act on.
+  let launches = session.launches.load
+  let unmonitored = session.unitsUnmonitored.load
+  if unmonitored > 0:
+    return notCaptured($unmonitored & " test unit(s) launched no process " &
+      "through the shared launcher, so what they read was not observed")
+  if launches == 0:
+    return notCaptured("no test process was launched")
+  var paths: seq[string]
+  for n in 1 .. launches:
+    let path = session.depfilePath(n)
+    if not fileExists(path):
+      return notCaptured("the monitor wrote no record for launch " & $n &
+        " (" & path & "); io-mon could not start it")
+    var dep: MonitorDepFile
+    try:
+      dep = readMonitorDepFile(path)
+    except CatchableError as err:
+      return notCaptured("the record of launch " & $n & " is unreadable: " &
+        err.msg)
+    let inputs = capturedInputPaths(dep)
+    if inputs.isErr:
+      return notCaptured("launch " & $n & ": " & inputs.error)
+    for input in inputs.get:
+      paths.add input
+  paths.sort(system.cmp[string])
+  ReadSet(captured: true, paths: paths.deduplicate(isSorted = true),
+          source: "io-mon's capture of the " & $launches &
+                  " process(es) the run's tests launched")
+
+proc finishReadCapture(session: ReadCaptureSession) =
+  if session.dir.len > 0:
+    try: removeDir(session.dir)
+    except OSError: discard   # a leaked temporary directory changes no verdict
 
 proc canonicalPath(path: string): string =
   ## ``path`` with symbolic links resolved where it exists, so a read
@@ -703,8 +796,9 @@ type
     readSet: ReadSet
       ## The files the run read, as the run captured them (CTC-3g). Private
       ## for the same reason: a caller cannot hand the issuance a read set
-      ## that leaves out the untracked file its tests opened. No run path
-      ## captures one today, so ``runAndAttest`` records why there is none.
+      ## that leaves out the untracked file its tests opened. ``runAndAttest``
+      ## sets it from its own capture (``startReadCapture``), or records why
+      ## there is none.
 
 proc beginAttestedRun(workspaceRoot, project, platform: string): AttestedRun =
   AttestedRun(
@@ -1268,7 +1362,23 @@ proc runAndAttest*(registry: var ProviderRegistry;
   var before = VcsProbe()
   if not options.disabled:
     before = probeVcs(response.workspaceRoot, options.gitCaptureLimit)
-  result.runResult = runUnits(registry, units, partition, threads)
+  # The read set (CTC-3g): captured by the run itself when the untracked
+  # rule needs one, never supplied by a caller.
+  var capture: ReadCaptureSession
+  var notCapturedWhy = "attestation is disabled"
+  if not options.disabled:
+    notCapturedWhy = startReadCapture(capture, options.untrackedMode,
+                                      options.untrackedModeProblem, before)
+  try:
+    result.runResult = runUnits(registry, units, partition, threads,
+      if notCapturedWhy.len == 0: addr capture else: nil)
+  except CatchableError:
+    finishReadCapture(capture)
+    raise
+  let readSet =
+    if notCapturedWhy.len == 0: readSetFromCapture(capture)
+    else: notCaptured(notCapturedWhy)
+  finishReadCapture(capture)
   result.summary = summarize(result.runResult)
 
   if options.disabled:
@@ -1282,9 +1392,7 @@ proc runAndAttest*(registry: var ProviderRegistry;
     response.workspaceRoot, response.workspaceRoot.lastPathPart,
     currentPlatform())
   run.before = before
-  # No run path captures the files its tests read (module header), so the
-  # default untracked mode cannot judge them, and the report says so.
-  run.readSet = ReadSet(captured: false, source: NoReadSetOnRunPath)
+  run.readSet = readSet
   for argv in invocations:
     run.recordExecutedCommand(argv)
 

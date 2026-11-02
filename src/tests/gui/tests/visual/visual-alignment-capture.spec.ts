@@ -78,6 +78,12 @@ import {
   type DebugToolbarButton,
 } from "../../page-objects/debug-toolbar-ids";
 import { extractLayoutAnswers } from "../../tools/layout-answers";
+import {
+  type ProgramState,
+  type SettledEntry,
+  assertSampledSettled,
+  awaitSettledEntry,
+} from "../../lib/session-settle";
 
 // `__dirname` is `<repo>/src/tests/gui/tests/visual`, so the repository root is
 // five levels up. It was four for one run, which produced
@@ -96,7 +102,7 @@ interface ScenarioOp {
   line?: number;
 }
 
-/**
+/*
  * Where the program IS, read from the renderer's own debugger service.
  *
  * `rrTicks` is the only field that moves on EVERY operation. Measured
@@ -106,13 +112,10 @@ interface ScenarioOp {
  * genuinely happened. `real-tab-switching.spec.ts` reads the same field for
  * the same reason, and `stepping-through-views.spec.ts` records the rule:
  * *"the line may wrap back on loops, but ticks always advance forward"*.
+ *
+ * `ProgramState` itself, and the entry settle, live in `lib/session-settle.ts`,
+ * shared with `plat37-electron-window-capture.spec.ts`.
  */
-interface ProgramState {
-  line: number;
-  path: string;
-  rrTicks: number;
-  busy: boolean | null;
-}
 
 interface Scenario {
   id: string;
@@ -494,18 +497,29 @@ async function waitForEditorFrameSettled(
 async function drive(
   layout: LayoutPage,
   ops: ScenarioOp[],
-): Promise<{ moves: number; trajectory: string[]; final: ProgramState }> {
+): Promise<{
+  moves: number;
+  trajectory: string[];
+  final: ProgramState;
+  entrySettle: SettledEntry;
+}> {
   let moves = 0;
   const trajectory: string[] = [];
-  // THE STARTING POINT IS ASSERTED, not assumed. A session that has not
-  // finished opening reports `rrTicks: -1`, and driving from there would make
-  // the first operation's postcondition true by arithmetic on a sentinel.
-  let state = await readProgramState(layout.page);
-  expect(
-    state.rrTicks,
-    "the session had no position before the first operation; the capture " +
-      "would then be driving a window that has not opened",
-  ).toBeGreaterThanOrEqual(0);
+  // THE STARTING POINT IS SETTLED, not sampled. The only other settle is per
+  // operation, inside `waitForMove`, and the population-control scenario
+  // `entry-shell` has no operation to force one — the PLAT-37 Electron twin
+  // of this loop recorded it as `{line: 0, path: "", rrTicks: 0, busy: true}`
+  // beside a frame that drew line 1 (codetracer-pm issue 2026-10-12-the-
+  // electron-capture-lanes-entry-shell-samples-...). `awaitSettledEntry`
+  // waits on the product's own busy flag until two consecutive reads agree on
+  // a resolved position, and THROWS rather than return one that never got
+  // there; a session with no position (`rrTicks: -1`) is refused with it.
+  const entrySettle = await awaitSettledEntry(
+    async () => readProgramState(layout.page),
+    async (ms) => layout.page.waitForTimeout(ms),
+    { what: "PLAT-35 entry" },
+  );
+  let { state } = entrySettle;
   trajectory.push(`entry=${state.line}@${state.rrTicks}`);
 
   for (const op of ops) {
@@ -601,7 +615,10 @@ async function drive(
       await waitForEditorFrameSettled(layout.page);
     }
   }
-  return { moves, trajectory, final: state };
+  // A busy final state is a lane failure, never a recorded `stoppedLine`:
+  // the `setBreakpoint` branch reads without waiting, so this covers it.
+  assertSampledSettled(state, "PLAT-35 final state");
+  return { moves, trajectory, final: state, entrySettle };
 }
 
 /**
@@ -875,13 +892,32 @@ async function captureSettled(
 
 for (const scenario of definition.scenarios) {
   test.describe(`PLAT-35 capture: ${scenario.id}`, () => {
-    test.use({ sourcePath: recordingPath, launchMode: "trace-folder" });
+    // No layout option: the launch fixture's default is the product's own
+    // first-run layout (the shared default). Do not set `bundledLayout`: the
+    // raw bundled tree it installs drew a fourth column here (TESTS over
+    // CONSTRAINTS) that no CodeTracer mode opens with, and a parity review
+    // read the GPUI front-end — which draws the shared default — as the
+    // deficient side (measured 2026-10-17, when that tree was still the
+    // fixture's default; the same defect as PARITY-S1 in
+    // `plat37-electron-window-capture.spec.ts`).
+    test.use({
+      sourcePath: recordingPath,
+      launchMode: "trace-folder",
+    });
 
     test(`captures the '${scenario.view}' view and its eight answers`, async ({
       ctPage,
       electronApp,
     }) => {
-      test.setTimeout(240_000);
+      // The budget grows with the operations the scenario declares: under
+      // Xvfb's software rendering a scenario with none took three to four
+      // minutes end to end (measured 2026-10-17, 17.8 min for four), and a
+      // flat 240 s timed out the two that step eight and twenty-two times.
+      const opCount = scenario.operations.reduce(
+        (n: number, op: { times?: number }) => n + (op.times ?? 1),
+        0,
+      );
+      test.setTimeout(300_000 + 30_000 * opCount);
       const size = definition.viewports[scenario.viewport];
       expect(size, `scenario '${scenario.id}' names viewport '${scenario.viewport}'`)
         .toBeTruthy();
@@ -977,6 +1013,50 @@ for (const scenario of definition.scenarios) {
       // removing that from the frame is the repair, not a side effect.
       await waitForEditorFrameSettled(ctPage);
       const answers = await extractLayoutAnswers(ctPage, scenario.id);
+      // THE STYLE DUMP: the computed style and box of every visible element of
+      // the frame the PNG is of, written beside it as
+      // `captures/electron/<scenario>.styles.json`. It is the reference the
+      // GPUI front-end is aligned to — exact faces, sizes, line heights,
+      // paddings and colours, where a pixel reading can only estimate them.
+      // A record, not a gate: nothing asserts over it.
+      const styles = await ctPage.evaluate(() => {
+        const keys = [
+          "font-family", "font-size", "font-weight", "line-height",
+          "letter-spacing", "text-transform", "color", "background-color",
+          "padding-top", "padding-right", "padding-bottom", "padding-left",
+          "border-top-width", "border-bottom-width", "border-left-width",
+          "border-right-width", "border-top-color", "border-bottom-color",
+          "border-radius", "opacity", "display",
+        ];
+        const out: object[] = [];
+        for (const el of Array.from(document.querySelectorAll("*"))) {
+          const r = el.getBoundingClientRect();
+          if (r.width < 1 || r.height < 1) continue;
+          if (r.bottom < 0 || r.right < 0 || r.top > window.innerHeight ||
+              r.left > window.innerWidth) continue;
+          const cs = getComputedStyle(el);
+          if (cs.visibility === "hidden" || cs.display === "none") continue;
+          const style: Record<string, string> = {};
+          for (const k of keys) style[k] = cs.getPropertyValue(k);
+          let ownText = "";
+          for (const n of Array.from(el.childNodes)) {
+            if (n.nodeType === Node.TEXT_NODE) ownText += n.textContent ?? "";
+          }
+          out.push({
+            tag: el.tagName.toLowerCase(),
+            id: el.id || undefined,
+            cls: (el.getAttribute("class") || "").slice(0, 120) || undefined,
+            rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)],
+            text: ownText.trim().slice(0, 60) || undefined,
+            style,
+          });
+        }
+        return out;
+      });
+      fs.writeFileSync(
+        path.join(capturesDir, `${scenario.id}.styles.json`),
+        JSON.stringify(styles),
+      );
       // THE PROVENANCE TRAVELS WITH THE ANSWER. The Nim comparison suite reads
       // this file as a RECORDED CAPTURE: it was produced by a shipped binary,
       // but not in the run that reads it. `Editor-Model-Conformance-Suite.md`
@@ -1069,6 +1149,9 @@ for (const scenario of definition.scenarios) {
             stoppedPath: path.basename(driven.final.path),
             rrTicks: driven.final.rrTicks,
             trajectory: driven.trajectory,
+            // The entry settle's evidence; `firstSample` is what an
+            // unsettled first read would have recorded.
+            entrySettle: driven.entrySettle,
             // The measured viewport and the captured image, so the two can be
             // checked against the declaration without re-running the lane.
             viewportCss: `${size.width}x${size.height}`,

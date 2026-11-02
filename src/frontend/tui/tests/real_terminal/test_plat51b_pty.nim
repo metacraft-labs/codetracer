@@ -43,9 +43,13 @@ import ./lifecycle_support
 import ../../app/theme/colour_math
 import ../../../styles/generated/design_tokens
 
+const EditorTabText = " calc/main.py "
+  ## The lone editor's tab: the file's folder and name since 2026-10-17
+  ## (`product_mode.editorTabLabel`, as the desktop's tab), not the name alone.
+
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 38
+const ExpectedAssertions = 41
 
 var countedAssertions = 0
 
@@ -72,6 +76,18 @@ proc freshDir(tag: string): string =
   removeDir(result)
   createDir(result)
 
+
+proc ctUnderTest(): string =
+  ## The ONE `ct` the "Record new trace" case may run: `CT_BIN` when the
+  ## environment names one, else this checkout's debug build. It is resolved
+  ## once and pinned into the child's `CT_BIN`, so the binary the case checks
+  ## is the binary the terminal front-end runs — never another `ct` that
+  ## `native_host.findCtBinary` would fall through to (`PATH`, or one beside
+  ## the engine) when this one is missing.
+  let named = getEnv("CT_BIN", "")
+  if named.len > 0: named
+  else: lifecycle_support.repoRoot() / "src" / "build-debug" / "bin" / "ct"
+
 proc builder(args: seq[string]; layoutDir: string;
              subject = ""): TuiTestBuilder =
   let target =
@@ -89,9 +105,11 @@ proc builder(args: seq[string]; layoutDir: string;
     .envSet("XDG_STATE_HOME", layoutDir / "xdg")
     .envSet("CODETRACER_HOME", layoutDir / "ct-home")
     .envSet("CODETRACER_TUI_LAYOUT_DIR", layoutDir)
-  let ct = lifecycle_support.repoRoot() / "src" / "build-debug" / "bin" / "ct"
+  let ct = ctUnderTest()
   if fileExists(ct):
     result = result.envSet("CT_BIN", ct)
+  else:
+    result = result.envRemove("CT_BIN")
 
 proc open(args: seq[string]; layoutDir: string): TuiTestSession =
   result = builder(args, layoutDir).spawn()
@@ -247,8 +265,9 @@ suite "PLAT-51 part B on a real terminal: the focus highlight":
                $first.rowsOf())
     # ONE strip row, a strip's worth of cells.
     ck first.len >= 6 and first.rowsOf().len == 1
-    # Tab moves the focus, and the strip with it.
-    sess.send("\t")
+    # F6 (the CUA base's next pane, PLAT-68) moves the focus, and the strip
+    # with it.
+    sess.send("\e[17~")
     var moved: seq[(int, int)] = @[]
     let deadline = getMonoTime() + initDuration(seconds = 10)
     while getMonoTime() < deadline:
@@ -297,7 +316,7 @@ suite "PLAT-51 part B on a real terminal: the focus highlight":
         seen.add cells
         problems.add sess.snap().edgeProblems(cells, checkedLeft,
                                                checkedRight, bodyRows)
-      sess.send("\t")
+      sess.send("\e[17~")              # F6, the next pane
     sess.quit()
     checkpoint("focus positions " & $seen.len & ", left edges " &
                $checkedLeft & ", right edges " & $checkedRight &
@@ -319,7 +338,7 @@ suite "PLAT-51 part B on a real terminal: live reflow while a divider is dragged
     let divs = s0.dividerCols(row)
     ck divs.len >= 2
     let d = divs[0]
-    let srcAt = s0.text(1).cellFind(" main.py ")
+    let srcAt = s0.text(1).cellFind(EditorTabText)
     sess.cellReport(0, row, d)
     for dc in [2, 4, 6, 8]:
       sess.cellReport(32, row, d + dc)
@@ -331,7 +350,7 @@ suite "PLAT-51 part B on a real terminal: live reflow while a divider is dragged
     # was laid out again: its tab label moved with it.
     ck d notin midDivs and (d + 8 in midDivs or d + 7 in midDivs or
                             d + 9 in midDivs)
-    ck mid.text(1).cellFind(" main.py ") > srcAt
+    ck mid.text(1).cellFind(EditorTabText) > srcAt
     # The committed layout has not been written yet.
     ck not fileExists(dir / "tui-layout.json")
     sess.cellReport(0, row, d + 8, release = true)
@@ -420,7 +439,7 @@ proc editorBox(s: Snapshot): Box =
   ## The Source pane's BOX, read off the screen: its tab on the strip row,
   ## the dividers either side of it on a body row (its own divider column is
   ## a splitter, in no stack's area); the whole body tall.
-  let at = s.text(1).cellFind(" main.py ")
+  let at = s.text(1).cellFind(EditorTabText)
   let divs = s.dividerCols(10)
   var left = 0
   var right = Cols - 1
@@ -529,40 +548,44 @@ suite "PLAT-51 part B on a real terminal: GoldenLayout's decisions, cells and pi
 suite "PLAT-51 part B on a real terminal: a new tab's Welcome Screen":
 
   test "Record new trace runs a real ct record and opens the recording in the tab":
-    let ct = lifecycle_support.repoRoot() / "src" / "build-debug" / "bin" / "ct"
+    let ct = ctUnderTest()
+    checkpoint("ct under test: " & ct)
     if not fileExists(ct):
-      checkpoint("prerequisite missing: " & ct & " (just build-once)")
+      checkpoint("prerequisite missing: " & ct &
+                 " (just build-once, or CT_BIN); the terminal is not run " &
+                 "against any other ct")
     ck fileExists(ct)
-    let dir = freshDir("record")
-    let work = dir / "program"
-    createDir(work)
-    let program = work / "greeter.py"
-    writeFile(program, "def greet(name):\n    return 'hello ' + name\n\n" &
-                       "print(greet('plat51'))\n")
-    var sess = open(@[], dir)
-    let plus = sess.snap().text(0).cellFind(" + ")
-    ck plus > 0
-    sess.click(0, plus + 1)
-    discard sess.waitFor("Welcome to CodeTracer")
-    let (rr, rc) = sess.waitFor(" Record new trace ")
-    sess.click(rr, rc + 2)
-    discard sess.waitFor("Program to record")
-    sess.send(program)
-    sess.send("\r")
-    # The recording runs in the background; when it is done it opens HERE.
-    discard sess.waitFor("greet #", timeoutMs = 240000)
-    let top = sess.snap().text(0)
-    checkpoint("top bar: " & top)
-    ck top.contains("greeter")
-    ck not sess.snap().text(2).contains("Welcome to CodeTracer")
-    # Recorded under the product's state root.
-    var recorded = 0
-    if dirExists(dir / "recordings"):
-      for kind, path in walkDir(dir / "recordings"):
-        if kind == pcDir and path.extractFilename.startsWith("greeter-"):
-          inc recorded
-    ck recorded == 1
-    sess.quit()
+    if fileExists(ct):
+      let dir = freshDir("record")
+      let work = dir / "program"
+      createDir(work)
+      let program = work / "greeter.py"
+      writeFile(program, "def greet(name):\n    return 'hello ' + name\n\n" &
+                         "print(greet('plat51'))\n")
+      var sess = open(@[], dir)
+      let plus = sess.snap().text(0).cellFind(" + ")
+      ck plus > 0
+      sess.click(0, plus + 1)
+      discard sess.waitFor("Welcome to CodeTracer")
+      let (rr, rc) = sess.waitFor(" Record new trace ")
+      sess.click(rr, rc + 2)
+      discard sess.waitFor("Program to record")
+      sess.send(program)
+      sess.send("\r")
+      # The recording runs in the background; when it is done it opens HERE.
+      discard sess.waitFor("greet #", timeoutMs = 240000)
+      let top = sess.snap().text(0)
+      checkpoint("top bar: " & top)
+      ck top.contains("greeter")
+      ck not sess.snap().text(2).contains("Welcome to CodeTracer")
+      # Recorded under the product's state root.
+      var recorded = 0
+      if dirExists(dir / "recordings"):
+        for kind, path in walkDir(dir / "recordings"):
+          if kind == pcDir and path.extractFilename.startsWith("greeter-"):
+            inc recorded
+      ck recorded == 1
+      sess.quit()
 
   test "Open folder turns the tab into an editing session on that folder":
     let dir = freshDir("folder")
@@ -582,6 +605,54 @@ suite "PLAT-51 part B on a real terminal: a new tab's Welcome Screen":
     let (mr, _) = sess.waitFor("main.py", timeoutMs = 30000)
     ck mr > 0
     ck sess.snap().text(0).contains("plat51proj")
+    ck sess.snap().findRow("Welcome to CodeTracer")[0] < 0
+    sess.quit()
+
+suite "M74 (#841) on a real terminal: the File menu reaches the welcome flow":
+
+  test "Alt+F, New Trace Tab shows a welcome tab; its Open local trace opens the fixture":
+    # codetracer#841: File › New Trace Tab was greyed out. Here it is chosen
+    # with the bytes a terminal sends — `Alt+F` (`ESC f`, CUA-Keymap.md §3.8's
+    # File mnemonic under the default CUA base), `Down` to the item, `Enter`
+    # — and the welcome tab it opens is used end to end: its "Open local
+    # trace" form opens the recording, through the shipped host, in the tab.
+    let calc = resolveFixture("calc")
+    require calc.outcome == foRecorded
+    let dir = freshDir("file-menu")
+    var sess = open(@[], dir)
+    let name = calc.tracePath.strip(chars = {'/'}).extractFilename
+    # A session tab is drawn as its title and its close control (`" calc-… ×
+    # "`), and only once there are several sessions: one recording shows its
+    # name in the header alone.
+    let tab = name & " ×"
+    checkpoint("top bar before: " & sess.snap().text(0))
+    ck sess.snap().text(0).count(tab) == 0
+    sess.send("\x1bf")
+    discard sess.waitFor(" New Trace Tab ")
+    # The folder opens on its first item (Open Trace…); New Trace Tab is the
+    # fourth.
+    for _ in 0 ..< 3:
+      sess.send("\x1b[B")
+    sess.send("\r")
+    discard sess.waitFor("Welcome to CodeTracer")
+    let (lr, lc) = sess.waitFor(" Open local trace ")
+    sess.click(lr, lc + 2)
+    discard sess.waitFor("Recording to open")
+    sess.send(calc.tracePath)
+    sess.send("\r")
+    # The recording opens in the welcome tab's place, as a session of its
+    # own: the strip shows two sessions of that recording, and no Welcome
+    # Screen.
+    let deadline = getMonoTime() + initDuration(seconds = 60)
+    var top = ""
+    while getMonoTime() < deadline:
+      top = sess.snap().text(0)
+      if top.count(tab) >= 2 and
+         sess.snap().findRow("Welcome to CodeTracer")[0] < 0:
+        break
+      sleep(100)
+    checkpoint("top bar after: " & top)
+    ck top.count(tab) == 2
     ck sess.snap().findRow("Welcome to CodeTracer")[0] < 0
     sess.quit()
 

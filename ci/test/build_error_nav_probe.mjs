@@ -195,14 +195,14 @@ try {
   // is registered on a timeout after GoldenLayout has built every container.
   await page.waitForTimeout(2500);
 
-  // Blur the editor before the BUILD chord, exactly as `noir_build_probe.mjs`
-  // does — Mousetrap ignores a chord raised inside Monaco's textarea, so Ctrl+B
-  // has to come from outside it.
+  // The BUILD chord: CUA's `build.run`, `Ctrl+Shift+B` (`Ctrl+B` toggles the
+  // side panels, as in VS Code). The key router hears it wherever the caret
+  // is; the click below only puts the focus somewhere known.
   try {
     await page.click('#menu', { position: { x: 5, y: 5 }, timeout: 3000 });
   } catch (e) { /* reported by the mount assertions */ }
 
-  await page.keyboard.press('Control+b');
+  await page.keyboard.press('Control+Shift+KeyB');
 
   for (let i = 0; i < 40; i += 1) {
     const seen = await page.evaluate(() => !!document.getElementById('build'));
@@ -266,9 +266,9 @@ try {
 
   // THE KEYSTROKE, ISSUED WITH THE CARET IN THE EDITOR.
   //
-  // This is the whole point: a user presses "next error" while editing. A
-  // global Mousetrap binding alone would be swallowed here, which is why the
-  // chord is in MONACO_SHORTCUTS_WHITELIST and delegated to the editor.
+  // This is the whole point: a user presses "next error" while editing. The
+  // key router's capture-phase listener runs ahead of Monaco, so the chord
+  // (`problems.next`, CUA's `Ctrl+Alt+N`) reaches it with the caret here.
   await page.keyboard.press('Control+Alt+KeyN');
   await page.waitForTimeout(1200);
 
@@ -336,16 +336,14 @@ try {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(500);
 
-    // BLUR THE EDITOR. `ctrl+m` is Monaco's own "toggle tab focus mode"
-    // binding, so with the caret still in the code from the navigation above it
-    // never reaches the application and the menu silently does not open —
-    // measured, as five failed menu assertions over a menu that was never
-    // shown. A user opening a menu clicks the chrome; so does this.
+    // Focus somewhere known before opening the menu.
     try {
       await page.click('#menu', { position: { x: 5, y: 5 }, timeout: 3000 });
     } catch (e) { /* the mount assertions cover a missing topbar */ }
     await page.waitForTimeout(400);
-    await page.keyboard.press('Control+m');
+    // The program menu from the keyboard: `Alt` pressed and released alone
+    // (CUA-Keymap.md §3.8).
+    await page.keyboard.press('Alt');
     await page.waitForTimeout(900);
     report.menuRootLabels = await page.evaluate(() =>
       Array.from(document.querySelectorAll('.ct-menu-item-label'))

@@ -14,13 +14,16 @@
 //! Nim-side `ct_reader_step_locations` FFI streams whole chunks at a
 //! time and pays a single FFI hop per chunked call.  This test
 //! exercises both paths on a synthetic 2400-step trace (matching the
-//! python_sudoku_solver fixture cited in §5.2(o)) and asserts:
+//! python_sudoku_solver fixture cited in §5.2(o)) and asserts their exact
+//! equivalence.
 //!
-//!   * exact equivalence between per-step and bulk results;
-//!   * a meaningful speedup on the bulk path (target: ≥ 5× faster).
-//!
-//! The microbenchmark is light enough to live inside the regular
-//! `cargo test` suite; the wall-time numbers are printed for triage.
+//! The re-scan in point 2 is gone: codetracer-trace-format-nim 0bbdfd4
+//! made the per-step accessor keep the positions of the chunk it decoded
+//! (fd74d6c reworked that into a per-chunk decode-as-far-as-read table),
+//! so the two paths now differ only by the per-call FFI hop and their
+//! speed ratio is not asserted here (see the end of
+//! `bulk_step_locations_matches_per_step`).  The wall-time numbers are
+//! still printed for triage.
 
 #![cfg(feature = "nim-reader")]
 
@@ -160,21 +163,23 @@ fn bulk_step_locations_matches_per_step() {
         step_count, per_step_elapsed, bulk_elapsed, speedup
     );
 
-    // Sanity: the bulk path must beat the per-step path by a
-    // comfortable margin.  Without the bulk variant the §5.2(o)
-    // ct host startup latency on python_sudoku_solver was ~40 s; the
-    // §1.97 fix targets ≥ 5× on this microbenchmark.  The assertion
-    // is intentionally conservative (3×) to absorb the noise of CI
-    // shared runners while still flagging an accidental regression
-    // back to the per-step path.
-    assert!(
-        speedup >= 3.0,
-        "bulk path should be ≥ 3× faster than per-step (got {:.1}x: \
-         per_step={:?}, bulk={:?})",
-        speedup,
-        per_step_elapsed,
-        bulk_elapsed
-    );
+    // NO SPEED RATIO IS ASSERTED, and that is deliberate.  This test used
+    // to require the bulk drain to be ≥ 3× faster, because the per-step
+    // accessor re-decoded its exec chunk from the boundary on every call.
+    // codetracer-trace-format-nim 0bbdfd4 ("resolving steps one call at a
+    // time costs one decode, not one per step", reworked by fd74d6c) made
+    // the per-step accessor keep each decoded chunk's positions, so both
+    // paths now decode every record once and differ only by the per-call
+    // FFI hop.  Measured on a warm reader the ratio is 1.1-1.3×; the old
+    // single sample cleared 3× only because the per-step drain ran first,
+    // on a cold reader, and it failed under a loaded parallel `cargo test`.
+    // A threshold the code no longer meets by design is not a guard.  The
+    // regression it stood for, per-step resolution growing with the chunk,
+    // is guarded where that code lives: that repository's
+    // `tests/test_per_step_location_cost.nim` holds per-call resolution
+    // under 10× one sequential decode.  Here the timings are printed for
+    // triage, and the assertion that remains is the exact equivalence of
+    // the two paths.
 }
 
 /// The bulk FFI must clamp `count` to the remaining step count and

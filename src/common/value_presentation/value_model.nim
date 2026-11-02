@@ -115,6 +115,11 @@ type
       ## Distinct from a budget elision: one is a fact about the trace and the
       ## other is a fact about the surface, and conflating them tells a reader
       ## the debugger has no more data when the pane simply has no more room.
+    elementsTotal*: int
+      ## How many elements the collection has when the ANSWER carries only
+      ## the first ones (the engine's `elementsTotal`, set by the locals
+      ## budget); 0 when nothing was held back. A fact about the answer, not
+      ## the recording — `partial` is the recording's.
     mediaType*: string   ## `pvkMedia` only, e.g. `image/png`
     mediaBytes*: int     ## `pvkMedia` only
 

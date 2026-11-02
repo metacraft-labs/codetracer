@@ -6,8 +6,12 @@
 ## when that session list, active index, or visible trace label changes.
 
 import isonim/dsl/ui
-from isonim/core/computation import createRenderEffect
+import isonim/core/[signals, computation]
+import isonim/dsl/components
 import isonim/testing/mock_dom
+
+# The generic procs expand the DSL at their caller.
+export signals, computation, components
 
 when defined(js):
   import isonim/web/web_renderer
@@ -123,178 +127,91 @@ proc tabCloseHandler(
   let capturedIndex = index
   result = proc() = callbacks.invokeClose(capturedIndex)
 
-proc renderSessionTab(
-    r: MockRenderer;
+when defined(js):
+  proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
+
+proc renderSessionTab[R, N](
+    r: R;
     tab: SessionTabRecord;
     index: int;
     active: bool;
     multiSession: bool;
-    callbacks: SessionTabsCallbacks): MockNode =
-  ui(r):
+    callbacks: SessionTabsCallbacks): N =
+  var closeBtn: N
+  result = ui(r):
     tdiv(class = tabClass(active),
          id = SessionTabIdPrefix & $index,
-         onclick = proc() = callbacks.invokeSelect(index)):
+         onclick = tabSelectHandler(callbacks, index)):
       span(class = SessionTabLabelClass):
         text tab.label
       if multiSession:
-        span(class = SessionTabCloseClass,
-             onclick = proc() = callbacks.invokeClose(index)):
+        span(ref = closeBtn, class = SessionTabCloseClass,
+             onclick = tabCloseHandler(callbacks, index)):
           discard
+  when defined(js):
+    when N is isonim_dom.Element:
+      if multiSession:
+        # Stopped here: the tab's own click would select the tab being closed.
+        isonim_dom.addEventListener(isonim_dom.Node(closeBtn), cstring"click",
+          proc(ev: isonim_dom.Event) = ev.stopPropagation())
 
-proc renderAddButton(
-    r: MockRenderer;
-    callbacks: SessionTabsCallbacks): MockNode =
+proc renderAddButton[R, N](
+    r: R;
+    callbacks: SessionTabsCallbacks): N =
   ui(r):
     button(class = "ct-button-image-sm-secondary ct-button-no-border session-tab-add",
            title = SessionTabAddTitle,
            onclick = proc() = callbacks.invokeAdd()):
       discard
 
-proc renderOverflowButton(r: MockRenderer): MockNode =
-  ui(r):
-    tdiv(class = SessionTabOverflowClass):
-      text "⌄"
-
-proc renderOverflowMenu(
-    r: MockRenderer;
+proc renderOverflowMenu[R, N](
+    r: R;
     tabs: seq[SessionTabRecord];
     activeIndex: int;
-    callbacks: SessionTabsCallbacks): MockNode =
+    callbacks: SessionTabsCallbacks): N =
   result = ui(r):
     tdiv(class = SessionTabOverflowMenuClass):
       discard
   for i, tab in tabs:
-    let tabIndex = i
     let itemClass = SessionTabOverflowItemClass &
       (if i == activeIndex: " active" else: "")
     let item = ui(r):
       tdiv(class = itemClass,
-           onclick = tabSelectHandler(callbacks, tabIndex)):
+           onclick = tabSelectHandler(callbacks, i)):
         text tab.label
     r.appendChild(result, item)
 
-when defined(js):
-  proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
+proc renderOverflowButton[R, N](
+    r: R;
+    callbacks: SessionTabsCallbacks): N =
+  ui(r):
+    tdiv(class = SessionTabOverflowClass,
+         onclick = proc() = callbacks.invokeToggleOverflow()):
+      text "⌄"
 
-  proc renderSessionTab(
-      r: WebRenderer;
-      tab: SessionTabRecord;
-      index: int;
-      active: bool;
-      multiSession: bool;
-      callbacks: SessionTabsCallbacks): isonim_dom.Element =
-    var closeBtn: isonim_dom.Element
-    let node = ui(r):
-      tdiv(class = tabClass(active),
-           id = SessionTabIdPrefix & $index,
-           onclick = proc() = callbacks.invokeSelect(index)):
-        span(class = SessionTabLabelClass):
-          text tab.label
-        if multiSession:
-          span(ref = closeBtn, class = SessionTabCloseClass):
-            discard
-
-    if multiSession:
-      isonim_dom.addEventListener(isonim_dom.Node(closeBtn), cstring"click",
-        proc(ev: isonim_dom.Event) =
-          ev.stopPropagation()
-          callbacks.invokeClose(index))
-    node
-
-  proc renderAddButton(
-      r: WebRenderer;
-      callbacks: SessionTabsCallbacks): isonim_dom.Element =
-    ui(r):
-      button(class = "ct-button-image-sm-secondary ct-button-no-border session-tab-add",
-             title = SessionTabAddTitle,
-             onclick = proc() = callbacks.invokeAdd()):
-        discard
-
-  proc renderOverflowMenu(
-      r: WebRenderer;
-      tabs: seq[SessionTabRecord];
-      activeIndex: int;
-      callbacks: SessionTabsCallbacks): isonim_dom.Element =
-    result = ui(r):
-      tdiv(class = SessionTabOverflowMenuClass):
-        discard
-    for i, tab in tabs:
-      let tabIndex = i
-      let itemClass = SessionTabOverflowItemClass &
-        (if i == activeIndex: " active" else: "")
-      let item = ui(r):
-        tdiv(class = itemClass,
-             onclick = tabSelectHandler(callbacks, tabIndex)):
-          text tab.label
-      r.appendChild(result, item)
-
-  proc renderOverflowButton(
-      r: WebRenderer;
-      callbacks: SessionTabsCallbacks): isonim_dom.Element =
-    ui(r):
-      tdiv(class = SessionTabOverflowClass,
-           onclick = proc() = callbacks.invokeToggleOverflow()):
-        text "⌄"
-
-proc renderSessionTabsPanel*(
-    r: MockRenderer;
+proc renderSessionTabsPanel*[R, N](
+    r: R;
     tabs: seq[SessionTabRecord];
     activeIndex: int;
     visibleTabCount: int = -1;
-    callbacks: SessionTabsCallbacks = SessionTabsCallbacks()): MockNode =
+    callbacks: SessionTabsCallbacks = SessionTabsCallbacks()): N =
+  ## The session tab bar, for every renderer. `tabs` is a value the caller
+  ## re-derives and redraws (`renderSessionTabsInto`). Each handler is built
+  ## by a factory (`tabSelectHandler`), so every row's closure owns its index.
   let multiSession = tabs.len > 1
   let visibleCount = normalizedVisibleTabCount(tabs.len, visibleTabCount)
   let visibleIndexes = visibleTabIndexes(tabs.len, activeIndex, visibleCount)
-  ui(r):
-    tdiv(id = SessionTabBarId, class = tabBarClass(tabs.len, visibleCount)):
-      for visibleIndex in visibleIndexes:
-        let tabIndex = visibleIndex
-        let tab = tabs[tabIndex]
-        tdiv(class = tabClass(tabIndex == activeIndex),
-             id = SessionTabIdPrefix & $tabIndex,
-             onclick = tabSelectHandler(callbacks, tabIndex)):
-          span(class = SessionTabLabelClass):
-            text tab.label
-          if multiSession:
-            span(class = SessionTabCloseClass,
-                 onclick = tabCloseHandler(callbacks, tabIndex)):
-              discard
-      tdiv(class = SessionTabOverflowClass):
-        text "⌄"
-      button(class = "ct-button-image-sm-secondary ct-button-no-border session-tab-add",
-             title = SessionTabAddTitle,
-             onclick = proc() = callbacks.invokeAdd()):
-        discard
-      tdiv(class = SessionTabOverflowMenuClass):
-        for i, tab in tabs:
-          let tabIndex = i
-          let itemClass = SessionTabOverflowItemClass &
-            (if i == activeIndex: " active" else: "")
-          tdiv(class = itemClass,
-               onclick = tabSelectHandler(callbacks, tabIndex)):
-            text tab.label
+  result = ui(r):
+    tdiv(id = SessionTabBarId, class = tabBarClass(tabs.len, visibleCount))
+  for i in visibleIndexes:
+    r.appendChild(result,
+      renderSessionTab[R, N](r, tabs[i], i, i == activeIndex, multiSession,
+                             callbacks))
+  r.appendChild(result, renderOverflowButton[R, N](r, callbacks))
+  r.appendChild(result, renderAddButton[R, N](r, callbacks))
+  r.appendChild(result, renderOverflowMenu[R, N](r, tabs, activeIndex, callbacks))
 
 when defined(js):
-  proc renderSessionTabsPanel*(
-      r: WebRenderer;
-      tabs: seq[SessionTabRecord];
-      activeIndex: int;
-      visibleTabCount: int = -1;
-      callbacks: SessionTabsCallbacks = SessionTabsCallbacks()):
-      isonim_dom.Element =
-    let multiSession = tabs.len > 1
-    let visibleCount = normalizedVisibleTabCount(tabs.len, visibleTabCount)
-    let visibleIndexes = visibleTabIndexes(tabs.len, activeIndex, visibleCount)
-    result = ui(r):
-      tdiv(id = SessionTabBarId, class = tabBarClass(tabs.len, visibleCount))
-    for i in visibleIndexes:
-      let tab = tabs[i]
-      r.appendChild(result,
-        renderSessionTab(r, tab, i, i == activeIndex, multiSession, callbacks))
-    r.appendChild(result, renderOverflowButton(r, callbacks))
-    r.appendChild(result, renderAddButton(r, callbacks))
-    r.appendChild(result, renderOverflowMenu(r, tabs, activeIndex, callbacks))
-
   proc renderSessionTabsInto*(
       r: WebRenderer;
       container: isonim_dom.Element;
@@ -308,7 +225,7 @@ when defined(js):
 
     let visibleCount = normalizedVisibleTabCount(tabs.len, visibleTabCount)
     r.setAttribute(container, "class", tabBarClass(tabs.len, visibleCount))
-    let panel = renderSessionTabsPanel(
+    let panel = renderSessionTabsPanel[WebRenderer, isonim_dom.Element](
       r, tabs, activeIndex, visibleCount, callbacks)
     let panelNode = isonim_dom.Node(panel)
     while not isonim_dom.isNodeNil(panelNode.firstChild):

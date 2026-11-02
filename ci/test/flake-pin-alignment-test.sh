@@ -2,10 +2,10 @@
 #
 # Contract suite for scripts/test-flake-pin-alignment.sh.
 #
-# The guard it covers exists because `inputs.runquota-src.follows = "runquota"`
-# makes the pinned `reprobuild` COMPILE against whatever this repo's `runquota`
-# input resolves to, so the two pins must be equal. That much the guard's own
-# header explains.
+# The guard checks that runquota follows reprobuild/runquota-src and that
+# the resolved revision equals reprobuild's own committed lock. A stale lock
+# graph must be repaired by re-locking the parent, preserving that follows
+# relationship rather than introducing an independent runquota pin.
 #
 # What THIS suite is for is narrower and was learned the hard way: a check whose
 # failure path accuses the wrong thing is worse than no check. Three separate
@@ -91,7 +91,8 @@ write_lock() {
   "nodes": {
     "root": { "inputs": { "runquota": "runquota", "reprobuild": "reprobuild" } },
     "runquota": {
-      "locked": { "rev": "$2", "type": "github", "owner": "metacraft-labs", "repo": "runquota" }
+      "locked": { "rev": "$2", "type": "github", "owner": "metacraft-labs", "repo": "runquota" },
+      "original": { "type": "github", "owner": "metacraft-labs", "repo": "runquota", "ref": "agents" }
     },
     "reprobuild": {
       "locked": { "rev": "$3", "type": "github", "owner": "metacraft-labs", "repo": "reprobuild" }
@@ -128,7 +129,8 @@ make_reprobuild() {
       "locked": { "rev": "$decoy", "type": "github", "owner": "metacraft-labs", "repo": "runquota" }
     },
     "runquota-src_2": {
-      "locked": { "rev": "$rev", "type": "github", "owner": "metacraft-labs", "repo": "runquota" }
+      "locked": { "rev": "$rev", "type": "github", "owner": "metacraft-labs", "repo": "runquota" },
+      "original": { "type": "github", "owner": "metacraft-labs", "repo": "runquota", "ref": "agents" }
     }
   },
   "root": "root",
@@ -141,7 +143,8 @@ EOF
   "nodes": {
     "root": { "inputs": { "runquota-src": "runquota-src" } },
     "runquota-src": {
-      "locked": { "rev": "$rev", "type": "github", "owner": "metacraft-labs", "repo": "runquota" }
+      "locked": { "rev": "$rev", "type": "github", "owner": "metacraft-labs", "repo": "runquota" },
+      "original": { "type": "github", "owner": "metacraft-labs", "repo": "runquota", "ref": "agents" }
     }
   },
   "root": "root",
@@ -180,6 +183,27 @@ RC=$?
 assert_rc "aligned pins exit 0" "$RC" 0
 assert_contains "aligned pins say so" "$OUT" "OK: runquota is pinned to exactly the revision"
 
+# Equal locked revisions do not make an independent source override safe:
+# the next parent update re-resolves that override instead of the producer's
+# own input. These minimal Git/lock fixtures exercise the guard offline;
+# a separate Nix consumer regression covers actual locking.
+WS="$TMP/source-override"
+make_ws "$WS" "$RQ_A" "$RQ_A" >/dev/null
+python3 - "$WS/repo/flake.lock" <<'PY_SOURCE'
+import json, sys
+path = sys.argv[1]
+with open(path) as handle:
+    lock = json.load(handle)
+lock["nodes"]["runquota"]["original"]["ref"] = "dev"
+with open(path, "w") as handle:
+    json.dump(lock, handle)
+PY_SOURCE
+OUT="$(bash "$WS/repo/scripts/test-flake-pin-alignment.sh" 2>&1)"
+RC=$?
+assert_rc "equal revisions with a different source fail" "$RC" 1
+assert_contains "source override names the producer boundary" "$OUT" "RunQuota source differs from reprobuild"
+assert_absent "source override cannot claim alignment" "$OUT" "OK: runquota is pinned"
+
 WS="$TMP/misaligned"
 make_ws "$WS" "$RQ_A" "$RQ_B" >/dev/null
 OUT="$(bash "$WS/repo/scripts/test-flake-pin-alignment.sh" 2>&1)"
@@ -188,7 +212,8 @@ assert_rc "misaligned pins exit 1" "$RC" 1
 assert_contains "misaligned pins demand equality" "$OUT" "They must be EQUAL"
 assert_contains "misaligned pins name this repo's rev" "$OUT" "$RQ_A"
 assert_contains "misaligned pins name reprobuild's rev" "$OUT" "$RQ_B"
-assert_contains "misaligned pins give the remedy url" "$OUT" "github:metacraft-labs/runquota/$RQ_B"
+assert_contains "misaligned pins relock the parent" "$OUT" "nix flake update reprobuild"
+assert_absent "remedy preserves the derived input" "$OUT" "set the runquota input url"
 
 echo
 echo "a homonym node deeper in reprobuild's closure does not shadow the root's own input"
@@ -205,7 +230,7 @@ make_ws "$WS" "$RQ_B" "$RQ_A" "$RQ_B" >/dev/null
 OUT="$(bash "$WS/repo/scripts/test-flake-pin-alignment.sh" 2>&1)"
 RC=$?
 assert_rc "a real divergence is still caught through the shadow" "$RC" 1
-assert_contains "and the remedy names the root's rev" "$OUT" "github:metacraft-labs/runquota/$RQ_A"
+assert_contains "and the comparison names the root's rev" "$OUT" "runquota-src = $RQ_A"
 
 echo
 echo "a missing python3 names ITSELF and does not accuse the lock file"

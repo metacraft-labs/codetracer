@@ -207,10 +207,12 @@ when defined(js):
   # NOT COVERED, and no claim is made about it:
   #   * GoldenLayout itself.  It is a browser library; there is no DOM here.
   #     `fakeLayout` below stands in for it.
-  #   * `layout.nim`'s `genericUiComponent` registration.  It is a closure
-  #     built inside `initLayout`, which needs a document, a `data` graph and
-  #     a live GL instance; it cannot be reached headlessly.  `fakeLayout`'s
-  #     component factory stands in for it too.
+  #   * `layout.nim`'s `editorComponent` and `genericUiComponent`
+  #     registrations.  Each is a closure built inside `initLayout`, which
+  #     needs a document, a `data` graph and a live GL instance; neither can
+  #     be reached headlessly.  `fakeLayout`'s component factory stands in for
+  #     them, and the source contract at the end of this file holds both to
+  #     the `releaseReparentedPanel` call that factory makes.
   #   * The DOM reparenting — moving the live element's children into the new
   #     GL container — which is entirely inside that registration.
   #   * `auto_hide.unpinPanelTarget`.  In the shipped product `initLayout`
@@ -347,10 +349,10 @@ when defined(js):
       jsIsTrue(jsField(state, cstring"isReparenting"))
     observed.reparentFlagSeen = isReparenting
     if isReparenting:
-      # layout.nim:1893 — the pane stops being an auto-hide panel.
-      autoHideState.panels = autoHideState.panels.filterIt(it != panel)
-      if not autoHideState.onChanged.isNil:
-        autoHideState.onChanged()
+      # The pane stops being an auto-hide panel — through the production
+      # `releaseReparentedPanel`, the call `layout.nim`'s registrations make
+      # (the source contract below holds every registration to it).
+      releaseReparentedPanel(panel)
 
   proc fakeLayout(registeredComponent: cstring): GoldenLayout =
     ## A GoldenLayout whose registry holds exactly `registeredComponent`.
@@ -711,3 +713,23 @@ else:
       check body.contains("discard main.addItem(panel.config")
       check body.contains("let edge = panel.edge")
       check not body.contains("panel.config.componentState.isEditor")
+
+    test "every registration that reparents a pinned pane takes it off the strip":
+      ## An unpinned EDITOR came back to the layout and kept its strip tab
+      ## (codetracer-pm issue
+      ## `2026-10-22-auto-hide-panes-editor-unpin-and-independent-sidebar-tests-fail-on-agents.md`,
+      ## Playwright "editor unpin behavior").  `genericUiComponent` dropped the
+      ## reparented panel from `autoHideState.panels`; `editorComponent` moved
+      ## the live element and dropped nothing, so `unpinPanel`'s `finally` saw
+      ## the panel still registered and put it back on its strip.  Both
+      ## registrations sit inside `initLayout` and cannot run headlessly (see
+      ## suite 2's header), so each is read here.
+      let layoutSource = source(LayoutPath)
+      for component in ["editorComponent", "genericUiComponent"]:
+        let body = codeOnly(region(layoutSource,
+          "layout.registerComponent(cstring\"" & component & "\")",
+          "\n  layout.registerComponent(", "\n  {.emit:"))
+        # POSITIVE CONTROL: the slice is the registration's reparenting
+        # branch, not an empty or mis-cut subject.
+        check body.contains("panel.liveElement.childNodes")
+        check body.contains("releaseReparentedPanel(panel)")

@@ -4,12 +4,14 @@
 // pane inside `#auto-hide-standalone-host`, a div parked at `left: -9999px` so
 // mounts keep measurable dimensions while hidden (`layout.nim:1715-1721`). One
 // copy there is by design. TWO elements carrying the same component id is not:
-// `ui/errors.nim`'s `tryMountIsoNimErrorsPanel` resolves its container with
-// `getElementById`, which returns the FIRST match, and `mountIsoNimErrors`
-// (`views/isonim_errors_view.nim:289`) has no owner and no disposal — so a
-// remount that resolves to a different node leaves the previous subtree live.
+// the Problems pane used to resolve its container with `getElementById`, which
+// returns the FIRST match, and to leave the previous subtree live on a remount.
+// It is now mounted into the container it is created with (`ui/panel_host`),
+// which no longer depends on the id, but an id that names two elements is
+// still wrong (https://html.spec.whatwg.org/multipage/dom.html#the-id-attribute)
+// and other code still looks panes up by it.
 //
-// The id is what this measures, because the id is what the mount resolves.
+// The id is what this measures.
 
 import { chromium } from 'playwright';
 

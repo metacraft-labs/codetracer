@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use super::navigation::Location;
 
 /// Launch request arguments matching db-backend's dap::LaunchRequestArguments.
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Default)]
 pub struct LaunchRequestArguments {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub program: Option<String>,
@@ -35,27 +35,6 @@ pub struct LaunchRequestArguments {
     pub typ: Option<String>,
     #[serde(rename = "__sessionId", skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
-}
-
-impl Default for LaunchRequestArguments {
-    fn default() -> Self {
-        LaunchRequestArguments {
-            program: None,
-            trace_folder: None,
-            trace_file: None,
-            raw_diff_index: None,
-            ct_rr_worker_exe: None,
-            restore_location: None,
-            pid: None,
-            cwd: None,
-            no_debug: None,
-            restart: None,
-            name: None,
-            request: None,
-            typ: None,
-            session_id: None,
-        }
-    }
 }
 
 /// Capabilities returned by the initialize response.

@@ -64,6 +64,7 @@ let
   });
   pythonWithRecorder = pythonEnv.package.withPackages (ps: [
     ps.black
+    ps.pytest
     pythonRecorderPkg
   ]);
 
@@ -111,6 +112,31 @@ let
     pkgs.liberation_ttf
   ];
   fontsConf = pkgs.makeFontsConf { fontDirectories = fontPackages; };
+
+  # Runs a shellHook body with its STDOUT sent to stderr.
+  #
+  # `nix develop --command <cmd>` writes the hook's stdout and <cmd>'s stdout
+  # to the same stream, so a caller that captures `$(nix develop … --command
+  # …)` reads every progress line the hook printed as part of the command's
+  # answer. That is not hypothetical: "  workspace: detected (…)" and the
+  # tree-sitter-nim helper's "src/parser.c is up to date" were prepended to
+  # CODETRACER_REPO_ROOT_PATH in ci/test/dev-shell-writes-nothing-elsewhere-test.sh
+  # (codetracer-pm issues/2026-10-22-codetracer-dev-shell-hook-writes-
+  # diagnostics-to-stdout.md). A hook has no output of its own -- only
+  # exports and diagnostics -- so the whole body goes to stderr, and the
+  # helpers and sourced scripts it runs (detect-siblings.sh, the git-hook
+  # installer, pip, the tree-sitter helper) are covered without each of them
+  # having to remember a `>&2`.
+  #
+  # A `{ …; }` group, not a subshell: the body's exports, functions and
+  # PATH edits must still land in the shell the user gets. A `$(…)` inside the
+  # body is unaffected -- command substitution gives its command a stdout of
+  # its own.
+  hookOnStderr = body: ''
+    {
+    ${body}
+    } >&2
+  '';
 in
 with pkgs;
 {
@@ -143,6 +169,14 @@ with pkgs;
     # test-non-gui and every build job used to declare `needs: lint-rust`,
     # that single missing binary silently skipped the entire test suite.
     direnv
+
+    # ssh-keygen makes the signing keys the ct-test certificate suites sign
+    # with (`certificate_issuance_test.generateSigningKey`). Undeclared, it
+    # came from the runner: a NixOS host's own binary passed, and a stock
+    # Ubuntu GARM slot's /usr/bin/ssh-keygen loaded this shell's OpenSSL
+    # through LD_LIBRARY_PATH and died on `GLIBC_2.38' not found`, so the
+    # lane's verdict was a property of which runner picked it up.
+    openssh
 
     # jq parses the `needs` payload in ci/verdict/required-jobs.sh. That
     # gate runs on a stock GitHub-hosted runner (where jq is preinstalled)
@@ -480,13 +514,30 @@ with pkgs;
     # and the key is LOST — silently, with `wtype` exiting 0. Every
     # invocation in this repo's lanes leads with `-s`.
     wtype
+  ]
+  ++ pkgs.lib.optionals stdenv.isDarwin [
+    # `setsid`, and nothing else from util-linux. The `ct host` end-to-end
+    # suites (src/tests/ct_host/ct_host_harness.nim `startHost`, and
+    # src/tests/ct_host_manifest/) start the server as
+    # `/usr/bin/env setsid bash -c ...`, so that stopping its session stops
+    # the node index it starts. Linux hosts ship `setsid` in util-linux;
+    # macOS has none, so on macOS `env` exited 127, `ct host` never ran, and
+    # every case failed with "printed no CODETRACER_HOST_URL". nixpkgs builds
+    # util-linux's `setsid` for darwin (it calls setsid(2), which macOS has).
+    # Only that one binary is exposed: util-linux's `kill`, `getopt`,
+    # `script`, `hexdump`, `column`, ... would otherwise shadow the macOS
+    # tools of the same names for every command run in this shell.
+    (pkgs.runCommand "setsid-${pkgs.util-linux.version}" { } ''
+      mkdir -p "$out/bin"
+      ln -s ${pkgs.util-linux.bin}/bin/setsid "$out/bin/setsid"
+    '')
   ];
 
   # Build-critical environment exports only. Developer convenience
   # (pre-commit install, Python-recorder venv setup, workspace +
   # sibling-repo detection, reprobuild ASP solver paths) lives in
   # main.nix's shellHook.
-  shellHook = ''
+  shellHook = hookOnStderr ''
     # PLAT-37 — THE GPUI RUNTIME LIBRARY PATH, exported under its OWN name
     # rather than prepended to `LD_LIBRARY_PATH`.
     #
@@ -517,8 +568,13 @@ with pkgs;
     # process this shell starts — `cargo`, `node`, Electron, the recorders'
     # own loaders — and putting a GL / Vulkan / Wayland stack in front of all
     # of them to serve one lane is how an unrelated test starts resolving a
-    # different `libGL`. `ci/test/plat37-window-frame.sh` prepends this for
-    # the processes that need it, and nothing else does.
+    # different `libGL`. The processes that need it prepend it themselves: the
+    # window captures and probes under `ci/test/` (`plat37-window-frame.sh`,
+    # `plat38-keystroke.sh`, the `*-window.sh` scripts, through
+    # `ci/lib/gpui-window-capture.sh` too), the GPUI test suites for the
+    # `codetracer-gpui` they start (`src/frontend/gpui/tests/gpui_child_env.nim`),
+    # and the Nim test lanes whose suites load the shim in-process
+    # (`test_lane_run_library_path` in `ci/lib/test-lane-files.sh`).
     # LINUX ONLY, and the guard is not cosmetic: every package in this list
     # is a Linux graphics library. `pkgs.wayland`, `pkgs.mesa`,
     # `pkgs.libglvnd`, `pkgs.vulkan-loader` and the `xorg.*` set all declare
@@ -531,11 +587,9 @@ with pkgs;
     #
     # — which takes out every lane a macOS developer can run, not just the
     # GPUI ones: `just test-vm-native`, `just test-vm-js` and `just
-    # build-once` all start with `nix develop`. The variable itself is
-    # consumed only by `ci/test/plat37-window-frame.sh` and
-    # `ci/test/plat38-keystroke.sh`, both of which drive a real Wayland
-    # compositor and so cannot run on Darwin at all; leaving it unset there
-    # loses nothing.
+    # build-once` all start with `nix develop`. Every consumer
+    # named above treats it as optional, and the shim needs none of these
+    # libraries on Darwin, so leaving it unset there loses nothing.
     ${pkgs.lib.optionalString (!stdenv.isDarwin) ''
       export CODETRACER_GPUI_RUNTIME_LIB_PATH="${
         pkgs.lib.makeLibraryPath [
@@ -729,10 +783,14 @@ with pkgs;
     # via the `.envrc` override. `scripts/build-once.sh` calls `repro`
     # which reads these.
     export REPROBUILD_SOURCE_ROOT=${inputs.reprobuild}
-    # The package catalog `repro.nim`'s `uses: "sqlite3"` resolves from (see
-    # the `reprobuild-packages` input in flake.nix). When it is set, reprobuild
-    # consults no other location, so this is also the catalog every lane of
-    # this shell agrees on.
+    # The package catalog every `uses:` name in `repro.nim` that reprobuild's
+    # stdlib no longer bundles resolves from — `shellcheck` and `sqlite3` at
+    # codetracer 845e390fb2 (see the `reprobuild-packages` input in flake.nix).
+    # When it is set, reprobuild consults no other location, so this is also
+    # the catalog every lane of this shell agrees on — and a name it lacks
+    # means the recipe does not compile in this shell, whatever a sibling
+    # checkout holds. `scripts/test-reprobuild-catalog-coverage.sh` enforces
+    # that the pinned catalog covers the recipe.
     export REPROBUILD_PACKAGES_ROOT=${inputs.reprobuild-packages}
     export REPROBUILD_USE_SYSTEM_HASH_LIBS=1
     export BLAKE3_PREFIX=${pkgs.libblake3}

@@ -12,6 +12,8 @@ readonly SCRIPT_DIR
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
 readonly REPO_ROOT
 readonly GATE="$REPO_ROOT/scripts/test-cross-process.sh"
+python3 "$SCRIPT_DIR/js-recorder-path-test.py"
+
 readonly EVENT_LOG_SPEC="$REPO_ROOT/src/tests/gui/tests/value-origin/event-log-correlation-markers-three-trace.spec.ts"
 
 fail() {
@@ -31,8 +33,11 @@ require_source_line "$EVENT_LOG_SPEC" \
 	'from "../../lib/fixtures";' \
 	"event-log spec must import the CodeTracer fixture"
 require_source_line "$EVENT_LOG_SPEC" \
-	'test.use({ sourcePath: fixtureDir, launchMode: "trace-folder" });' \
+	'  launchMode: "trace-folder",' \
 	"event-log spec must launch the materialized fixture through Electron"
+require_source_line "$EVENT_LOG_SPEC" \
+	'    await use(threeTraceRecordingRoot());' \
+	"event-log spec must materialize recordings during fixture setup"
 require_source_line "$EVENT_LOG_SPEC" \
 	'await readyOnEntry(ctPage);' \
 	"event-log spec must wait for the launched CodeTracer renderer"
@@ -78,6 +83,8 @@ for step in \
 	"Checkout" \
 	"Setup db-backend siblings" \
 	"Provision dependency siblings from repro.lock" \
+	"Clone codetracer-wasm-instrumenter sibling" \
+	"Clone codetracer-js-recorder sibling" \
 	"Build frontend (needed by gated Playwright stage)" \
 	"Run cross-process envelope"; do
 	[ "$(printf '%s\n' "$cross_process_job" | grep -cFx -- "      - name: $step")" -eq 1 ] ||
@@ -90,6 +97,8 @@ for step in \
 	"Checkout" \
 	"Setup db-backend siblings" \
 	"Provision dependency siblings from repro.lock" \
+	"Clone codetracer-wasm-instrumenter sibling" \
+	"Clone codetracer-js-recorder sibling" \
 	"Build frontend (needed by gated Playwright stage)" \
 	"Run cross-process envelope"; do
 	line="$(printf '%s\n' "$cross_process_job" | grep -nFx -- "      - name: $step" | cut -d: -f1)"
@@ -123,6 +132,9 @@ fixture="$fake_root/src/db-backend/tests/fixtures/cross_process/account-balance-
 # passing if the gate regressed to reading recordings out of the source
 # tree.
 recordings="$tmp_dir/recordings"
+# What the fake provisioner prints and the fake materialiser must receive as
+# CODETRACER_RECORD_WEB_BIN (see the provisioner stub below).
+fake_session_manager="$tmp_dir/session-manager"
 mkdir -p \
 	"$fake_bin" \
 	"$fake_root/src/build-debug/bin" \
@@ -156,9 +168,32 @@ cat >"$fake_root/scripts/materialize-recording.sh" <<FAKE_MATERIALIZER
 #!/usr/bin/env bash
 set -euo pipefail
 [ "\${1:-}" = "cross-process-three-trace" ] || { echo "unexpected fixture \${1:-}" >&2; exit 1; }
+[ "\${CODETRACER_RECORD_WEB_BIN:-}" = "$fake_session_manager" ] ||
+	{ echo "materialiser ran without the provisioned session-manager (CODETRACER_RECORD_WEB_BIN='\${CODETRACER_RECORD_WEB_BIN:-}')" >&2; exit 1; }
 printf '%s\\n' "$recordings"
 FAKE_MATERIALIZER
+printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_session_manager"
+chmod +x "$fake_session_manager"
 chmod +x "$fake_root/scripts/materialize-recording.sh"
+
+# The gate builds the recording tools through
+# scripts/provision-cross-process-recording.sh before it records. That
+# script's own behaviour (sibling builds, loud failure on a missing sibling) is
+# pinned by ci/test/frontend-units-cross-process-provisioning-test.sh; here it
+# is a stub that logs the stage, prints a session-manager path and fails on
+# request, so this suite checks that the gate calls it first, exports what it
+# prints to the materialiser, and stops when it fails -- without building
+# anything.
+cat >"$fake_root/scripts/provision-cross-process-recording.sh" <<FAKE_PROVISIONER
+#!/usr/bin/env bash
+set -euo pipefail
+echo provision >>"\$FAKE_STAGE_LOG"
+if [ "\${FAKE_PROVISION_FAIL:-0}" = "1" ]; then
+	echo "provision-cross-process-recording: ERROR: required sibling 'codetracer-wasm-instrumenter' is not checked out" >&2
+	exit 1
+fi
+printf '%s\\n' "$fake_session_manager"
+FAKE_PROVISIONER
 printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_root/src/build-debug/bin/ct"
 chmod +x "$fake_root/src/build-debug/bin/ct"
 for spec in \
@@ -336,7 +371,7 @@ printf '%s\n' "$success_output" |
 	grep -Fq 'cross-process Playwright summary: expected=2 executed=2 skipped=0' ||
 	fail "strict fake gate omitted the exact Playwright completion summary"
 
-expected_stages=$'cargo:list:cross_process_origin_test\ncargo:nocapture:cross_process_origin_test\ncargo:list:cross_process_three_trace_dap_test\ncargo:nocapture:cross_process_three_trace_dap_test\ncargo:list:dap_server_list_processes_event_test\ncargo:nocapture:dap_server_list_processes_event_test\njust:test-gui-prebuilt:tests/value-origin/cross-tracer-three-recording.spec.ts:tests/value-origin/event-log-correlation-markers-three-trace.spec.ts:--reporter=json'
+expected_stages=$'provision\ncargo:list:cross_process_origin_test\ncargo:nocapture:cross_process_origin_test\ncargo:list:cross_process_three_trace_dap_test\ncargo:nocapture:cross_process_three_trace_dap_test\ncargo:list:dap_server_list_processes_event_test\ncargo:nocapture:dap_server_list_processes_event_test\njust:test-gui-prebuilt:tests/value-origin/cross-tracer-three-recording.spec.ts:tests/value-origin/event-log-correlation-markers-three-trace.spec.ts:--reporter=json'
 actual_stages="$(cat "$stage_log")"
 [ "$actual_stages" = "$expected_stages" ] ||
 	fail "required stage order/arguments drifted; got: $actual_stages"
@@ -352,6 +387,23 @@ mv "$fake_root/scripts/materialize-recording.sh" "$fake_root/scripts/materialize
 expect_failure "absent materialiser" "recording materialiser is missing" run_gate
 mv "$fake_root/scripts/materialize-recording.sh.off" "$fake_root/scripts/materialize-recording.sh"
 
+# Nothing on this gate's path used to build the recording tools, so a host
+# without them -- the cross-process-linux job included -- could only fail
+# inside the materialiser. The gate now provisions them first, and a failed
+# provisioning stops it before any recording or test stage runs.
+mv "$fake_root/scripts/provision-cross-process-recording.sh" \
+	"$fake_root/scripts/provision-cross-process-recording.sh.off"
+expect_failure "absent provisioner" "recording-tool provisioner is missing" run_gate
+mv "$fake_root/scripts/provision-cross-process-recording.sh.off" \
+	"$fake_root/scripts/provision-cross-process-recording.sh"
+: >"$stage_log"
+FAKE_PROVISION_FAIL=1
+export FAKE_PROVISION_FAIL
+expect_failure "failed provisioning" "could not provision the tools the three-tier recording needs" run_gate
+unset FAKE_PROVISION_FAIL
+[ "$(cat "$stage_log")" = "provision" ] ||
+	fail "a failed provisioning must stop the gate before any test stage; stages: $(cat "$stage_log")"
+
 printf '#!/usr/bin/env bash\nexit 3\n' >"$fake_root/scripts/materialize-recording.sh"
 chmod +x "$fake_root/scripts/materialize-recording.sh"
 expect_failure "failed recording" "could not record the three-tier demo" run_gate
@@ -359,6 +411,8 @@ cat >"$fake_root/scripts/materialize-recording.sh" <<FAKE_MATERIALIZER
 #!/usr/bin/env bash
 set -euo pipefail
 [ "\${1:-}" = "cross-process-three-trace" ] || { echo "unexpected fixture \${1:-}" >&2; exit 1; }
+[ "\${CODETRACER_RECORD_WEB_BIN:-}" = "$fake_session_manager" ] ||
+	{ echo "materialiser ran without the provisioned session-manager (CODETRACER_RECORD_WEB_BIN='\${CODETRACER_RECORD_WEB_BIN:-}')" >&2; exit 1; }
 printf '%s\\n' "$recordings"
 FAKE_MATERIALIZER
 chmod +x "$fake_root/scripts/materialize-recording.sh"

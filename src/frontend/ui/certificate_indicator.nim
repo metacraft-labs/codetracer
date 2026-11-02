@@ -23,11 +23,10 @@
 ## | trigger | moves | wired by |
 ## |---|---|---|
 ## | first render | — | `ensureCertificateIndicator` |
-## | a commit, checkout, rebase, merge | H (and W, S on a checkout) | a watch on `<repo>/.git`: `citCommitChanged` |
+## | a commit, checkout, rebase, merge | H (and W, S on a checkout) | a watch on `<repository root>/.git`: `citCommitChanged` |
 ## | staging or unstaging (`git add`, `git reset`) | S | the same watch, on `index`: `citIndexChanged` (`gitDirTrigger`) |
-## | an edit to a tracked file at the top level | W | a watch on the workspace root: `citWorktreeChanged` |
+## | an edit to a tracked file at the top level of the repository | W | a watch on the repository root: `citWorktreeChanged` |
 ## | a certificate arriving, being replaced or removed | the store | watches on the local store's root, layout and algorithm directories and on every content directory looked up (`citStoreChanged`), re-armed after each refresh |
-## | reprobuild's workspace store appearing or changing | the store | watches on that directory and the workspace root |
 ## | the user selecting the indicator | — | `selectCertificateIndicator` |
 ## | anything else, every `RevalidateIntervalMs` | W | a `setInterval` |
 ##
@@ -57,6 +56,17 @@
 ## a running app left the indicator's label unchanged for the whole wait, and
 ## only selecting it moved the answer. A timer fires whether or not anything is
 ## drawing, which is what "refresh when the underlying facts change" needs.
+##
+## **A REFRESH NEVER STALLS THE WINDOW** (Status-Bar.md). Every refresh runs
+## git — several processes per content id, and W, H and S in both tree
+## algorithms — and it used to run them through node's `spawnSync` on this,
+## the renderer's main thread: 170 ms to 1.2 s of frozen input and redraw per
+## refresh, every `RevalidateIntervalMs`. The ViewModel is now built over
+## `platformCertificateFactsGatherer`, the Electron facade answers
+## `vcs.contentId` and `vcs.repositoryRoot` from child processes, and the
+## indicator updates when the gather completes (`onRefreshed`). Until then it
+## shows its previous answer; a trigger during a refresh queues exactly one
+## more.
 ##
 ## **A bare edit to a tracked file DEEP in the tree touches nothing in `.git`
 ## and nothing at the workspace root.** A recursive watch would catch it and
@@ -98,10 +108,14 @@ when defined(js):
 
   const RevalidateIntervalMs* = 15000
     ## How often the backstop looks again. Fifteen seconds is chosen against
-    ## what a revalidation COSTS — one `git status` and two directory listings —
-    ## rather than against how fresh a fact could be: the precise triggers above
-    ## carry the cases that matter, and this is the backstop for the one they
-    ## cannot see.
+    ## what a revalidation COSTS — the content ids of W, H and S, each several
+    ## git processes (W reads every tracked file: `StatDistrustTime`), plus
+    ## the store's directory listings — rather than against how fresh a fact
+    ## could be: the precise triggers above carry the cases that matter, and
+    ## this is the backstop for the one they cannot see. The git work runs in
+    ## child processes and does not block this thread; the interval bounds the
+    ## CPU and disk it spends, and a tick that lands while a refresh is still
+    ## in flight queues one follow-up rather than a second concurrent one.
 
   var
     indicator: CertificateIndicatorVm = nil
@@ -164,13 +178,30 @@ when defined(js):
     ## layout directory and both algorithm directories (a content directory
     ## being created), and every directory the last refresh SEARCHED — W's,
     ## H's and S's content directories in both roots, which change as the
-    ## facts do. Workspace-relative entries of `searched` (reprobuild's
-    ## carrier) are watched once at start-up instead.
+    ## facts do — and the REPOSITORY the facts were gathered for: its `.git`
+    ## (commit, checkout, staging) and its root (a top-level edit).
+    ##
+    ## The repository root comes from the facts (`model.repositoryRoot`, the
+    ## facade's `repositoryRoot`, resolved upwards from the opened folder), so
+    ## a project opened at a SUBDIRECTORY of its repository gets the same
+    ## commit and staging triggers as one opened at the root. Nothing here is
+    ## relative to the opened folder any more: the store is looked up by
+    ## content id, and no working-tree directory is read for certificates.
     if indicator.isNil:
       return
     let host = ctPlatform()
     if not host.can(capFilesystemWatch):
       return
+    let repoRoot = indicator.model.repositoryRoot
+    if repoRoot.len > 0:
+      # `<root>/.git` is a FILE in a linked worktree (`gitdir: …`); the watch
+      # is then refused and ignored, and the timer carries commits there.
+      watchDirectory(host, repoRoot & "/.git",
+        proc(event: FsWatchEvent): CertificateIndicatorTrigger =
+          gitDirTrigger(event.path))
+      # NOT RECURSIVE: one slot, catching a top-level edit (W). A recursive
+      # watch would also catch every build artefact in the tree.
+      watchDirectory(host, repoRoot, always(citWorktreeChanged))
     var roots: CertificateStoreRoots
     try:
       let outcome = ctAwaitSync(host.fs.certificateStoreRoots())
@@ -190,14 +221,26 @@ when defined(js):
         watchDirectory(host, dir, always(citStoreChanged))
 
   proc refreshFor(trigger: CertificateIndicatorTrigger) =
-    ## One refresh, for any trigger: re-read, re-arm the store's watches for
-    ## the content now in front of the user, and repaint if the answer moved.
+    ## One refresh, for any trigger. What follows it — re-arming the store's
+    ## watches for the content now in front of the user, and repainting if
+    ## the answer moved — happens when the gather COMPLETES, in the
+    ## ViewModel's `onRefreshed` (`refreshedHandler`), because on the desktop
+    ## that is a later turn of the event loop.
     if indicator.isNil:
       return
-    let changed = indicator.refresh(trigger)
-    armStoreWatches()
-    if changed and not onIndicatorChanged.isNil:
-      onIndicatorChanged()
+    discard indicator.refresh(trigger)
+
+  proc refreshedHandler(vm: CertificateIndicatorVm): proc(changed: bool) =
+    ## `onRefreshed` for `vm`. A completion from a ViewModel that is no longer
+    ## the current `indicator` — the workspace changed while its gather was
+    ## in flight — is ignored: its facts are about the previous workspace, and
+    ## arming watches or repainting for it would be acting on a stale answer.
+    result = proc(changed: bool) =
+      if indicator.isNil or indicator != vm:
+        return
+      armStoreWatches()
+      if changed and not onIndicatorChanged.isNil:
+        onIndicatorChanged()
 
   proc revalidateCertificateIndicator() =
     ## The backstop, on its own timer. Runs whether or not anything is drawing,
@@ -234,14 +277,20 @@ when defined(js):
       return
 
     let host = ctPlatform()
-    indicator = newCertificateIndicatorVm(
-      platformCertificateFactsReader(host, workspaceDir, currentHostPlatform()))
+    # A GATHERER, not a reader: the facts are gathered without waiting for
+    # git (module header, "A refresh never stalls the window").
+    let vm = newCertificateIndicatorVmWith(
+      platformCertificateFactsGatherer(host, workspaceDir, currentHostPlatform()))
+    vm.onRefreshed = refreshedHandler(vm)
+    indicator = vm
     indicatorWorkspace = workspaceDir
     # The previous workspace's watches stay armed (the facade's handles are
     # not kept), and every one of them refreshes whichever indicator is
     # current, so they cost a re-read and never a wrong answer. Forgetting
     # them here is what lets the new workspace arm its own.
     watchedDirs = @[]
+    # The first paint shows "not looked yet"; the answer is painted when this
+    # gather completes (`onIndicatorChanged`, through `refreshedHandler`).
     discard indicator.refresh(citStartup)
 
     if not timerInstalled:
@@ -249,39 +298,10 @@ when defined(js):
       setRepeating(proc() = revalidateCertificateIndicator(),
                    RevalidateIntervalMs)
 
-    if not host.can(capFilesystemWatch):
-      return
-    # EVERYTHING HERE IS RELATIVE TO THE OPENED WORKSPACE DIRECTORY, not to
-    # the repository root, and that is a stated limit rather than an
-    # oversight. `readCertificateStore` searches `<workspaceDir>/.repro`
-    # (beside the local certificate store, which is per user), so the
-    # workspace carrier this indicator speaks for is the one beside the
-    # folder the user opened; using a different root for the watch than for
-    # the store would make the two disagree.
-    #
-    # The consequence, for a project opened at a SUBDIRECTORY of its
-    # repository: `<workspaceDir>/.git` does not exist, `watchDirectory`'s
-    # refusal is ignored (see its header), and the commit and staging
-    # triggers degrade to the periodic backstop. The content facts are still
-    # right — the facade resolves the repository upwards — so the indicator is
-    # correct and merely slower to notice a commit.
-    watchDirectory(host, workspaceDir & "/.git",
-      proc(event: FsWatchEvent): CertificateIndicatorTrigger =
-        gitDirTrigger(event.path))
-    for dir in CertificateStoreDirs:
-      # A store directory that does not exist yet cannot be watched; the
-      # workspace-root watch below is what notices it being created.
-      watchDirectory(host, workspaceDir & "/" & dir, always(citStoreChanged))
-    # NOT RECURSIVE. One watch on the workspace root costs one inotify slot and
-    # catches the two things a root watch can catch that nothing else does: an
-    # edit to a tracked file at the top level (W), and reprobuild's store
-    # directory appearing for the first time. A recursive watch would also
-    # catch every build artefact in the tree, which is the cost this indicator
-    # does not earn.
-    watchDirectory(host, workspaceDir,
-      proc(event: FsWatchEvent): CertificateIndicatorTrigger =
-        if "/.repro" in event.path: citStoreChanged else: citWorktreeChanged)
-    armStoreWatches()
+    # The repository and store watches are armed once the first gather
+    # completes (`refreshedHandler` -> `armStoreWatches`), because the
+    # repository root they are armed on is one of the facts that gather
+    # establishes.
 
   proc selectCertificateIndicator*() =
     ## The user selected the indicator: re-read, then toggle the disclosure.
@@ -306,14 +326,21 @@ when defined(js):
   # are values; a facade operation that throws must make the spec's
   # `page.evaluate` reject, which is what lets the spec catch `jsGuard`
   # losing its bare `except:` arm (SB-1's fix, which had no in-Electron test).
+  #
+  # `contentId` answers with a PROMISE of the JSON text: the facade computes
+  # content ids asynchronously (git in child processes, so the window never
+  # waits for it), and `ctAwaitSync` would report its `pkTimeout` for every
+  # one. `page.evaluate` awaits a returned promise, so the spec reads the same
+  # text; a throw inside an `async` proc rejects it, so the spec still sees
+  # one.
 
-  import std/[enumutils, json]
+  import std/[asyncjs, enumutils, json]
 
   proc errorJson(error: PlatformError): JsonNode =
     %*{"ok": false, "errorKind": $error.kind, "errorMessage": error.message}
 
   proc contentIdJson(repository, state, algorithm: cstring;
-                     scope: seq[cstring]): cstring =
+                     scope: seq[cstring]): Future[cstring] {.async.} =
     var source = vbsWorkingTree
     case $state
     of "W": source = vbsWorkingTree
@@ -323,17 +350,17 @@ when defined(js):
                                "errorMessage": "state must be W, S or H"}))
     var paths: seq[string] = @[]
     for path in scope: paths.add $path
-    let outcome = ctAwaitSync(ctPlatform().vcs.contentId(
-      $repository, source, $algorithm, paths))
+    let outcome = await ctPlatform().vcs.contentId(
+      $repository, source, $algorithm, paths)
     if not outcome.ok:
       return cstring($errorJson(outcome.error))
     var conditions = newJArray()
     for state in outcome.value.conditions:
       conditions.add %*{"condition": symbolName(state.condition),
                         "paths": state.paths}
-    cstring($(%*{"ok": true, "kind": $outcome.value.kind,
-                 "id": outcome.value.id, "algorithm": outcome.value.algorithm,
-                 "reason": outcome.value.reason, "conditions": conditions}))
+    return cstring($(%*{"ok": true, "kind": $outcome.value.kind,
+                        "id": outcome.value.id, "algorithm": outcome.value.algorithm,
+                        "reason": outcome.value.reason, "conditions": conditions}))
 
   proc storeRootsJson(): cstring =
     let outcome = ctAwaitSync(ctPlatform().fs.certificateStoreRoots())
@@ -353,7 +380,7 @@ when defined(js):
 
   proc installCertificateFactsProbe(
       contentId: proc(repository, state, algorithm: cstring;
-                      scope: seq[cstring]): cstring;
+                      scope: seq[cstring]): Future[cstring];
       storeRoots: proc(): cstring;
       listDir: proc(path: cstring): cstring)
     {.importjs: "(typeof window !== 'undefined') && (window.__ctCertificateFacts = {contentId: #, storeRoots: #, listDir: #})".}

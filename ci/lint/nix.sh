@@ -34,6 +34,12 @@ flake_check() {
 		${override_args[@]+"${override_args[@]}"}
 }
 
+# Check the package's actual source and check tools in a Nix sandbox, before
+# paying for the Rust build. Missing ct-home or Python must fail packaging.
+lint_step "backend-manager sandbox package inputs" \
+	nix build --impure --no-link --max-jobs 2 --cores 2 \
+	--expr 'import ./ci/test/backend-manager-package-inputs.nix { }'
+
 lint_step "nix flake check" flake_check
 
 lint_summary

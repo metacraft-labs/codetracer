@@ -66,6 +66,8 @@
 //! everywhere has not been shown to discriminate — this campaign has now found
 //! seven falsifiers that could not.
 
+mod test_harness;
+
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -77,6 +79,7 @@ use db_backend::ctfs_trace_reader::CTFSTraceReader;
 use db_backend::dap::{DapMessage, ProtocolMessage, Request};
 use db_backend::dap_handler::Handler;
 use db_backend::recreator_session::RecreatorArgs;
+use db_backend::task::GoToTicksArguments;
 use db_backend::task::TraceKind;
 use db_backend::trace_reader::TraceReader;
 use serde_json::Value as JsonValue;
@@ -190,26 +193,20 @@ fn container(dir: &Path) -> PathBuf {
     ct
 }
 
-/// `ct-print`, the campaign's container inspector, resolved at the sibling path
-/// every GDH driver already uses.
+/// `ct-print`, the campaign's container inspector: the workspace's
+/// codetracer-trace-format-nim sibling builds it at the fixed path every GDH
+/// driver already uses (`../codetracer-trace-format-nim/ct-print`), and the
+/// harness builds or refreshes it there (`test_harness::find_ct_print`;
+/// `CODETRACER_CT_PRINT` overrides it).
 ///
 /// It is a SECOND, INDEPENDENT reader, deliberately not the one under test: the
 /// reload markers this harness ties its navigation to must be read from the
 /// container rather than assumed from the fixture, and reading them with the
-/// very reader whose correctness is the subject would be circular.
+/// very reader whose correctness is the subject would be circular. Its absence
+/// is an instrument failure, never a reason to skip: `find_ct_print` panics,
+/// naming the sibling, when it cannot be built.
 fn ct_print() -> PathBuf {
-    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../codetracer-trace-format-nim/ct-print")
-        .canonicalize()
-        .unwrap_or_else(|e| {
-            panic!(
-                "GDH7-CHECK-FAIL: ct-print not resolvable next to the workspace \
-                 (../../../codetracer-trace-format-nim/ct-print): {e}. Build it with \
-                 `scripts/build-siblings.sh --only codetracer-trace-format-nim/ct-print` (or \
-                 `just build-ct-print` in that checkout). It is this harness's independent \
-                 container reader and its absence is an instrument failure, not a reason to skip."
-            )
-        });
+    let p = test_harness::find_ct_print();
     assert!(
         p.is_file(),
         "GDH7-CHECK-FAIL: ct-print at {} is not a file",
@@ -471,20 +468,35 @@ fn stop_after(handler: &mut Handler, step: StepId) -> JsonValue {
     step_forward(handler)
 }
 
-/// The stop a freshly launched session reports: the production run-to-entry
-/// path, which positions at the recording's first step and emits that stop
-/// WITHOUT advancing past it.
+/// The stop at the recording's first step (step 0), reached by the production
+/// `ct/goto-ticks` runner as the session's first move.
 ///
-/// This is how a forward-only session can stand on step 0 at all. `stop_after`
-/// cannot — it lands one step after the step it positions at — and step 0 is a
-/// real stop: `start` emits the recording's entry step there
-/// (`trace-events.md`, "The entry step is part of `start`").
-fn entry_stop(handler: &mut Handler) -> JsonValue {
+/// Step 0 is a real stop — `start` emits the recording's entry step there
+/// (`trace-events.md`, "The entry step is part of `start`") — and a backward
+/// navigation can land on it, but neither of the other forward routes reaches
+/// it: `stop_after` lands one step after the step it positions at, and the
+/// launch stop (`ct/run-to-entry`) is the program's entry call, which in a
+/// recording rooted in a wrapping `<toplevel>` call is the first call nested
+/// inside it, not the root's entry step. A handler whose first move is this
+/// jump has never moved backward, so its bundled-source state cannot have been
+/// shaped by a backward read.
+fn first_step_stop(handler: &mut Handler) -> JsonValue {
     let (tx, rx) = mpsc::channel::<DapMessage>();
     handler
-        .run_to_entry(make_request("ct/run-to-entry"), None, tx)
-        .unwrap_or_else(|e| panic!("GDH7-CHECK-FAIL: run_to_entry failed on a materialized trace: {e}"));
-    move_location(&rx)
+        .goto_ticks(
+            make_request("ct/goto-ticks"),
+            GoToTicksArguments { thread_id: 0, ticks: 0 },
+            tx,
+        )
+        .unwrap_or_else(|e| panic!("GDH7-CHECK-FAIL: goto_ticks(0) failed on a materialized trace: {e}"));
+    let loc = move_location(&rx);
+    assert_eq!(
+        ticks_of(&loc),
+        0,
+        "GDH7-CHECK-FAIL: ct/goto-ticks 0 reported a stop at step {}, not the recording's first step",
+        ticks_of(&loc)
+    );
+    loc
 }
 
 /// One production `stepIn`, returning the stop it lands on.
@@ -528,8 +540,8 @@ fn container_ordinal_at(reader: &Arc<dyn TraceReader>, loc: &JsonValue) -> Optio
 /// number of stops against what the container declares.
 fn walk_all_stops(handler: &mut Handler, reader: &Arc<dyn TraceReader>) -> Vec<JsonValue> {
     let mut stops = Vec::new();
-    // From the launch stop, so the walk includes the entry step at step 0.
-    let mut loc = entry_stop(handler);
+    // From step 0, so the walk includes the recording's entry step.
+    let mut loc = first_step_stop(handler);
     stops.push(loc.clone());
     let bound = reader.step_count() + 8;
     let mut last = ticks_of(&loc);
@@ -752,51 +764,22 @@ fn gdh7_no_step_is_attributed_to_the_wrong_version_through_dap() {
     // fixture bytes, 124 stops below); the two claims here add the other half,
     // by grounding the reader's STEP INDEX SPACE against `ct-print`.
     //
-    // A MARKER CONSUMES A STEP INDEX. The container's step indices are
-    // therefore NOT contiguous: GDH-M6's corrected invariant puts this
-    // recording's versions at [0,76] / [78,177] / [179,311] with 77 and 178 as
-    // holes, and `ct-print` reports exactly that — 310 steps over 312 slots.
-    //
-    // THE READER UNDER TEST DOES NOT REPRODUCE THE HOLES. `step_count()` is
-    // 312 and `step()` answers `Some` at every index in it, returning at each
-    // marker slot a DUPLICATE of the step before it. So the version ranges the
-    // consumer sees are the contiguous [0,77] / [78,178] / [179,311]. This is
-    // pre-existing — GDH-M7 touches neither `step` nor `step_count` — and no
-    // container before this campaign's had a hole for it to get wrong. It is
-    // PINNED rather than asserted away: the deviation is allowed to be exactly
-    // the marker indices and nothing else, and each phantom must be a copy of
-    // its predecessor, so a third phantom, a moved one, or one that invents a
-    // position of its own turns this gate red.
-    //
-    // It errs toward the OLD version (index 77 reads as v1, which is the side
-    // the marker separates from), so it does not misattribute across the
-    // boundary — but a phantom step is still a position the debugger reports
-    // that the recording does not contain, and it is filed as such.
+    // Reload markers occupy execution indices, but carry no source location.
+    // Compare the COMPLETE step set with the independent decoder so neither a
+    // phantom marker nor an accidentally dropped real step can pass.
     let reader_indices: BTreeSet<u64> = (0..reader.step_count())
         .filter(|i| reader.step(StepId(*i as i64)).is_some())
         .map(|i| i as u64)
         .collect();
     let marker_indices: BTreeSet<u64> = dump.markers.iter().map(|(i, _, _, _)| *i).collect();
-    let phantom: BTreeSet<u64> = reader_indices.difference(&dump.step_indices).copied().collect();
     ck.eq(
-        phantom.clone(),
-        marker_indices.clone(),
-        "the ONLY indices where the reader claims a step and the independent reader reports none \
-         are the reload-marker indices — a marker consumes a step index, and the reader answers a \
-         phantom at each one (pre-existing; GDH-M7 touches neither `step` nor `step_count`)",
+        reader_indices.clone(),
+        dump.step_indices.clone(),
+        "the reader exposes exactly the real steps reported by the independent decoder",
     );
     ck.ck(
-        !phantom.is_empty()
-            && phantom.iter().all(
-                |i| match (reader.step(StepId(*i as i64)), reader.step(StepId(*i as i64 - 1))) {
-                    (Some(here), Some(before)) => here.path_id == before.path_id && here.line == before.line,
-                    _ => false,
-                },
-            ),
-        format!(
-            "each phantom is a DUPLICATE of the step before it, not a position of its own \
-             ({phantom:?}) — so the deviation is the known one and a new shape would show up here"
-        ),
+        !marker_indices.is_empty() && reader_indices.is_disjoint(&marker_indices),
+        format!("source-reload annotations are never exposed as steps ({marker_indices:?})"),
     );
 
     // ---- no step's version can be answered by failing to look -------------
@@ -812,13 +795,12 @@ fn gdh7_no_step_is_attributed_to_the_wrong_version_through_dap() {
     let mut unresolvable: Vec<String> = Vec::new();
     let mut steps_examined = 0usize;
     for idx in 0..reader.step_count() {
-        // An index below the reader's own step count that it cannot answer is
-        // not a step to skip: it is a position the debugger can be asked for
-        // and cannot resolve, so it is filed with the other failures to look.
+        // Only holes independently identified as reload annotations may be
+        // absent. Every real step still has to resolve its registered version.
         let Some(step) = reader.step(StepId(idx as i64)) else {
-            unresolvable.push(format!(
-                "step {idx}: the reader has no step at an index below its own step count"
-            ));
+            if !marker_indices.contains(&(idx as u64)) {
+                unresolvable.push(format!("step {idx}: real step is absent from the reader"));
+            }
             continue;
         };
         steps_examined += 1;
@@ -840,8 +822,8 @@ fn gdh7_no_step_is_attributed_to_the_wrong_version_through_dap() {
     }
     ck.eq(
         steps_examined,
-        reader.step_count(),
-        "the registry check examined EVERY step index below the reader's step count",
+        dump.step_indices.len(),
+        "the registry check examined EVERY independently decoded real step",
     );
     ck.ck(
         unresolvable.is_empty(),
@@ -1292,8 +1274,8 @@ fn gdh7_reverse_across_the_boundary_shows_v1() {
     //
     // The control is a SEPARATE handler that has only ever moved forward, so
     // its bundled-source state cannot have been influenced by a backward read.
-    // It starts at the launch stop (the entry step, step 0) and walks forward
-    // with the production `stepIn` runner until it stands on the same step id,
+    // It starts at step 0, the recording's entry step (`first_step_stop`), and
+    // walks forward with the production `stepIn` runner until it stands on the same step id,
     // so it can reach every step the backward run can land on — including the
     // entry step itself. Failing to reach it is a CHECK-FAIL: comparing against
     // nothing is how a gate passes for free.
@@ -1301,7 +1283,7 @@ fn gdh7_reverse_across_the_boundary_shows_v1() {
     let control_text = {
         let creader = open_reader(&ct);
         let mut chandler = build_handler(&ct, creader);
-        let mut loc = entry_stop(&mut chandler);
+        let mut loc = first_step_stop(&mut chandler);
         let mut guard = 0usize;
         while ticks_of(&loc) < back_ticks && guard < bound {
             loc = step_forward(&mut chandler);

@@ -38,7 +38,7 @@ import ../../platform/platform
 import ../../platform/endpoint_codec
 import ../../host/container_platform
 
-const ExpectedAssertions = 422
+const ExpectedAssertions = 450
 var counted = 0
 template ck(cond: untyped) =
   inc counted
@@ -338,6 +338,23 @@ suite "process verbs":
       ck outcome.value.stdout == "compiled"
       ck outcome.value.stderr == Awkward
 
+  test "process.runLater is process.run on the wire, not a verb of its own":
+    # The container's answer already comes back over the socket, so its
+    # `runLater` is `run` (`ProcessFacade.runLater`): a second verb would be
+    # one the endpoint does not serve.
+    withEndpoint:
+      nextPayload = encodeProcessRunResult(ProcessRunResult(
+        exit: ProcessExit(exitCode: 0), stdout: "main", stderr: ""))
+      let outcome = awaitOutcome(remote.process.runLater(
+        processSpec("git", @["branch", "--show-current"], workingDir = "/w")))
+      ck seenVerb == "process.run"
+      let sent = decodeProcessSpec(jrequire(seenArgs, "spec"))
+      ck sent.command == "git"
+      ck sent.args == @["branch", "--show-current"]
+      ck sent.workingDir == "/w"
+      ck outcome.ok
+      ck outcome.value.stdout == "main"
+
   test "process.start returns an opaque handle and sends neither callback":
     withEndpoint:
       var chunks = 0
@@ -555,6 +572,53 @@ suite "version-control verbs":
         "/w", vbsHead, "git-tree-sha1", @[]))
       ck not outcome.ok
       ck outcome.error.kind == pkTransport
+
+  test "vcs.declaredScopes names the repository and decodes scopes and problems":
+    ## Tooling §3.1. A scope travels as its list of paths; an invalid
+    ## declaration as its problems and no scope. A reply that breaks either
+    ## rule — an empty scope (which would read as the whole repository), or
+    ## scopes beside problems — is a transport fault, never an answer.
+    withEndpoint:
+      nextPayload = encodeVcsDeclaredScopes(VcsDeclaredScopes(
+        scopes: @[@["Cargo.lock", "src/db"], @[Awkward]]))
+      let outcome = awaitOutcome(remote.vcs.declaredScopes("/w"))
+      ck seenVerb == "vcs.declaredScopes"
+      ck jstr(seenArgs, "repository") == "/w"
+      ck outcome.ok
+      ck outcome.value.scopes == @[@["Cargo.lock", "src/db"], @[Awkward]]
+      ck outcome.value.problems.len == 0
+      nextPayload = encodeVcsDeclaredScopes(VcsDeclaredScopes(
+        problems: @["testCertificatesScope.x.path: an empty scope path"]))
+      let invalid = awaitOutcome(remote.vcs.declaredScopes("/w"))
+      ck invalid.ok and invalid.value.scopes.len == 0
+      ck invalid.value.problems.len == 1
+      for bad in [%*{"scopes": [[]], "problems": []},
+                  %*{"scopes": [["src"]], "problems": ["x"]},
+                  %*{"scopes": ["src"], "problems": []},
+                  %*{"problems": []}]:
+        nextPayload = bad
+        let refused = awaitOutcome(remote.vcs.declaredScopes("/w"))
+        ck not refused.ok
+        ck refused.error.kind == pkTransport
+
+  test "vcs.declaredScopes is refused locally, naming capVcsRead, when the profile lacks it":
+    var sent = 0
+    let counting: RemoteTransport = proc(request: RemoteRequest
+                                        ): PlatformFuture[RemoteResponse] =
+      inc sent
+      newCompletedFuture(remoteOk(encodeVcsDeclaredScopes(VcsDeclaredScopes())))
+    let holding = newContainerPlatform(counting, containerProfile.withCapabilities(
+      {capVcsRead}, @[]))
+    ck awaitOutcome(holding.vcs.declaredScopes("/w")).ok
+    ck sent == 1
+    let narrow = newContainerPlatform(counting, containerProfile.withCapabilities(
+      containerProfile.capabilities - {capVcsRead}, @[]))
+    let outcome = awaitOutcome(narrow.vcs.declaredScopes("/w"))
+    ck sent == 1
+    ck not outcome.ok
+    ck outcome.error.kind == pkNotSupported
+    ck "capVcsRead" in outcome.error.message
+    ck "vcs.declaredScopes" in outcome.error.message
 
   test "vcs.contentId is refused locally, naming capVcsRead, when the profile lacks it":
     ## And a profile that holds it sends the call: the gate is the

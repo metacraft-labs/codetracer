@@ -397,7 +397,8 @@ committing.
 
 There is no option to write a certificate to a path of your choice: every
 certificate goes to the local certificate store (below). To have one as a file,
-copy it out of the store.
+ask the test-certificates helper tool for its path (see "Certificates as files,
+and with a push" below), or copy it out of the store.
 
 `ct test run` exits `0` when tests ran and all passed, `1` when tests ran and
 one did not (or the command line was rejected), and `2` when **no test ran at
@@ -443,13 +444,41 @@ another holding the same content. Several certificates for the same content
 (other platforms, other partial runs) sit side by side.
 
 The store is a cache. Each run that writes keeps the 20 most recently written
-content directories, plus the one for the current `HEAD`'s content, and
-removes the rest. A removed certificate is re-issued by running the tests
+content directories, plus those for the current `HEAD`'s content (for the whole
+repository and for every scope the repository declares for its certificates),
+and removes the rest. A removed certificate is re-issued by running the tests
 again.
 
-`ct test` does not push certificates anywhere. Carrying them to another
-machine, for example as git notes, is the job of the test-certificates helper
-tools, which are not part of CodeTracer.
+A user root owned by another account is refused before anything is written,
+and certificate files are created readable by you only. When the content ids
+of `HEAD` cannot be computed, the store is not trimmed at all on that run.
+
+Readers search both roots. When one cannot be searched (its location cannot
+be resolved, or it exists and cannot be read), a certificate found in the
+other still counts, but "no certificate found" is never claimed: `ct test
+verify` exits `2` and the status bar reads *Unverifiable*, naming the root.
+
+#### Certificates as files, and with a push
+
+`ct test` writes certificates only to your local store and pushes them
+nowhere. The [test-certificates helper
+tool](https://github.com/metacraft-labs/test-certificates-tools) (`test-certificates`,
+not part of CodeTracer) works on the same store:
+
+- **A certificate as a file.** `test-certificates find --worktree` (or
+  `--staged`, or `--commit <rev>`) prints the paths of the certificates stored
+  for that state's content, from both roots; copy the one you need.
+  `test-certificates put <file>` puts a certificate you were given into your
+  store, under its content-addressed name.
+- **Certificates with every push.** `test-certificates hook install` installs a
+  `pre-push` hook (when the repository has none) whose body,
+  `test-certificates hook pre-push`, copies the certificates for the commits a
+  push introduces into the shared git notes ref
+  `refs/notes/test-certificates/certificates` and pushes it. It never fails the
+  push. A repository that already has a `pre-push` hook calls
+  `test-certificates hook pre-push "$@"` from it; the tool's [user
+  guide](https://github.com/metacraft-labs/test-certificates-tools/blob/stable/docs/users/README.md)
+  shows how to share the hook's standard input.
 
 :::note
 Earlier versions of `ct test` wrote certificates to `.ct/certificates/` inside
@@ -490,9 +519,15 @@ untracked mode decides when they withhold one. It is `--untracked` when given,
 else `[certificate] untracked` in `.codetracer/test.toml`, else `reads`:
 
 - **`reads`** withholds only when the run captured the files its tests read and
-  one of them is untracked. `ct test run` does not capture reads today, so in
-  this mode it issues, records `untracked = true` when untracked files exist,
-  and its summary says `read_set = not-captured`.
+  one of them is untracked. When untracked files exist as a run starts, `ct
+  test run` runs the processes its tests launch under the io-mon file monitor
+  and records what they read (`read_set = captured`). The Nix package installs
+  the monitor beside `ct-test`. Where it cannot watch — the monitor is not
+  installed, or a process escaped it (a statically linked test binary, such as
+  Go's; a JIT runtime such as node, whose generated code the monitor cannot
+  vouch for; on macOS, a system-protected binary for which no unprotected copy
+  is on `PATH`) — it does not guess: it issues, records `untracked = true`, and
+  its summary says `read_set = not-captured` and why.
 - **`strict`** withholds whenever an untracked file that git does not ignore
   exists, and names the files.
 
@@ -550,7 +585,7 @@ Coverage may be split across several certificates.
 | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `0`  | Covered                                                                                                                                        |
 | `1`  | Not covered: no certificate exists for this content, or some exist and none covers what is required. The message says which. Run the tests.   |
-| `2`  | Could not decide: a state with no content id, a certificate it cannot evaluate that might have covered the gap, an unreadable store or `.codetracer/test.toml`, an empty requirement, or a command line it cannot act on |
+| `2`  | Could not decide: a state with no content id, a certificate it cannot evaluate that might have covered the gap, a search that could not cover one of the store's two roots (when what was searched does not cover the state), an unreadable `.codetracer/test.toml`, an empty requirement, or a command line it cannot act on |
 
 It always prints exactly one line on stderr saying which, and why.
 

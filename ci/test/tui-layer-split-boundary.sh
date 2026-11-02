@@ -42,10 +42,13 @@
 # --------------------------------------------------------------------------
 # `DECIDERS` below is this gate's claim about what the population IS, and it is
 # a SHORT list on purpose. It is NOT "everything under `app/`", and that is
-# measured rather than assumed: `app/input/keymap.nim` genuinely imports
-# `std/os` and genuinely calls `readFile`, because `loadKeymap` layers a user's
-# `.cttui-keys` over the built-in table. A blanket ban under `app/` would be red
-# on the day it was written, and a gate that is red on arrival gets switched off.
+# measured rather than assumed: `app/runtime.nim` genuinely imports `std/os`
+# and genuinely calls `readFile` (through its edit services: a file `:e` opens,
+# a script `:source` reads). A blanket ban under `app/` would be red on the day it was
+# written, and a gate that is red on arrival gets switched off. (Until PLAT-68
+# the control was `app/input/keymap.nim`, which read a user's `.cttui-keys`;
+# the user keymap is `keybindings.json` now, read by `viewmodel/host`, and
+# that module does no I/O any more.)
 #
 # So the subject is the DECISION HALF OF A DECLARED PAIR: a module whose own
 # header says it does no I/O because a named `host/` module does it instead.
@@ -53,7 +56,7 @@
 # asserted so a rename or a deletion reddens this gate rather than silently
 # shrinking it.
 #
-# `keymap.nim` is not merely excluded — it is USED, as check 4's positive
+# `runtime.nim` is not merely excluded — it is USED, as check 4's positive
 # control. The same ban predicate is run over it and is REQUIRED to fire. A
 # blocklist that has stopped matching anything passes every "must not contain"
 # rule it makes (§4), and a real file under the very directory being scanned is
@@ -78,7 +81,7 @@
 # `sdk-facade-boundary.sh` and `value-presentation-boundary.sh` each have a
 # sibling `-test.sh` contract suite that drives them over synthetic trees. This
 # gate carries its controls INSIDE it instead — checks 3, 4, 5 and 6 — because
-# every one of them can be run against the real tree: `keymap.nim` really does
+# every one of them can be run against the real tree: `runtime.nim` really does
 # import `std/os`, the two performers really do call the routines the deciders
 # must not, and `persistence.nim` really does name those routines in prose. A
 # control that runs on every invocation of the gate is stronger than one that
@@ -136,7 +139,7 @@ DECIDER_EXPECTED_IMPORT=(
 # fire on something other than a planted string. `loadKeymap` layers a user's
 # `.cttui-keys` file over the built-in table; the I/O is deliberate and is
 # documented in that module's own header.
-BAN_CONTROL="${TUI}/app/input/keymap.nim"
+BAN_CONTROL="${TUI}/app/runtime.nim"
 
 # Effectful stdlib modules a decision layer must not reach. `os` is the one this
 # gate was written for; the rest are here because "no I/O" is the claim, not "no

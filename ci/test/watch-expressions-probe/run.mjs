@@ -1,12 +1,12 @@
-// run.mjs — drive the State pane in a real browser and TYPE a watch
+// run.mjs — drive the Variables pane in a real browser and TYPE a watch
 // expression into it, the way a user does.
 //
-// Every interaction below is a gesture on the product's own controls: a
-// click on the Watches tab button, keystrokes into `#watch-0`, Enter to
-// submit the form. Nothing calls a ViewModel. That is the whole point —
-// until the tab strip was added to the WebRenderer panel, `stWatches` was
-// reachable only from `vm.selectTab`, so a probe that switched tabs that
-// way would have passed against a product no user could navigate.
+// Every interaction below is a gesture on the product's own controls:
+// keystrokes into `#watch-0`, Enter to submit the form. Nothing calls a
+// ViewModel. The pane is one list of variables and watches
+// (Variable-State-Pane.md, "Decisions (2026-10-24)"): there is no tab to
+// open, and each watch row is marked `value-watch` (`watch-invalid` when the
+// stop cannot answer it).
 //
 // This program asserts nothing. It reports facts and lets
 // `ci/test/watch-expressions-in-browser.sh` count assertions over them, so
@@ -66,7 +66,12 @@ const readRows = () => page.evaluate(() => {
     if (!(top === el || el.contains(top) || top.contains(el))) {
       rejected.push(name + ': covered-by-' + top.tagName); continue;
     }
-    out.push({ name, text });
+    out.push({
+      name,
+      text,
+      watch: el.classList.contains('value-watch'),
+      invalid: el.classList.contains('watch-invalid'),
+    });
   }
   // ONE ROW PER NAME. The view stamps `data-variable-name` on two nested
   // elements per row (the row and its name span), so every row matches
@@ -84,15 +89,9 @@ const readRows = () => page.evaluate(() => {
   return { rows: kept, rejected: rejected.filter((r) => !keptNames.has(r.split(':')[0])) };
 });
 
-const tabState = () => page.evaluate(() => {
-  const cls = (s) => {
-    const el = document.querySelector('#ct-state-pane ' + s);
-    return el ? el.className : null;
-  };
+const paneState = () => page.evaluate(() => {
   return {
-    localsTab: cls('.tab-locals'),
-    globalsTab: cls('.tab-globals'),
-    watchesTab: cls('.tab-watches'),
+    tabStrip: !!document.querySelector('#ct-state-pane .state-tabs'),
     emptyOverlay: (() => {
       const el = document.querySelector('#ct-state-pane .empty-overlay');
       if (!el) return null;
@@ -108,38 +107,16 @@ report.summary = await page.evaluate(
 report.paneMounted = await page.evaluate(
   () => !!document.querySelector('#ct-state-pane .state-component'));
 
-// ---- 1. the tab strip exists at all, in the WEB renderer ----------------
-report.tabsBefore = await tabState();
+// ---- 1. one list: no tab strip, and the watch input in the pane ---------
+report.paneBefore = await paneState();
 report.watchInputPresent = await page.evaluate(
   () => !!document.querySelector('#ct-state-pane #watch-0'));
 
-// ---- 2. the LOCALS tab is what opens, and holds the recorded locals -----
+// ---- 2. the list holds the recorded locals, then the watches -----------
 {
   const r = await readRows();
-  report.localsRows = r.rows;
-  report.localsRejected = r.rejected;
-}
-
-// ---- 3. CLICK the Watches tab. A gesture, not a ViewModel call. --------
-//
-// ABSENCE IS A RESULT, NOT A CRASH. Mutation arm A removes the tab strip to
-// reproduce the pre-fix WebRenderer, and a probe that threw on the missing
-// button would report "the probe did not complete" — an instrument failure
-// where the arm needs a product reading. So the click is attempted, its
-// outcome recorded, and everything after it runs either way.
-report.watchesTabClicked = false;
-try {
-  await page.click('#ct-state-pane .tab-watches', { timeout: 4000 });
-  report.watchesTabClicked = true;
-} catch (e) {
-  report.watchesTabError = String((e && e.message) || e).split('\n')[0];
-}
-await page.waitForTimeout(400);
-report.tabsAfterClick = await tabState();
-{
-  const r = await readRows();
-  report.watchRows = r.rows;
-  report.watchRejected = r.rejected;
+  report.rows = r.rows;
+  report.rejected = r.rejected;
 }
 
 // ---- 4. TYPE a new expression into the product's own input -------------

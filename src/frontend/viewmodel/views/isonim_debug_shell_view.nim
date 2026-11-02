@@ -2,11 +2,15 @@
 ##
 ## The shell is the small chrome host that keeps the command palette mount point
 ## available near the top menu. The actual debug controls toolbar is mounted
-## separately into ``#isonim-debug-controls`` by ``ui/debug.nim``.
+## separately into ``#isonim-debug-controls`` by ``ui/debug_toolbar.nim``.
 
 import isonim/dsl/ui
-from isonim/core/computation import createRenderEffect
+import isonim/core/[signals, computation]
+import isonim/dsl/components
 import isonim/testing/mock_dom
+
+# The generic proc expands the DSL at its caller.
+export signals, computation, components
 
 when defined(js):
   import isonim/web/web_renderer
@@ -21,9 +25,11 @@ const
 proc commandPaletteHostId*(componentId: int): string =
   DebugCommandPaletteHostPrefix & $componentId
 
-proc renderDebugChromePanel*(
-    r: MockRenderer;
-    commandPaletteComponentId: int): MockNode =
+proc renderDebugChromePanel*[R, N](
+    r: R;
+    commandPaletteComponentId: int): N =
+  ## The debug shell: the header host that keeps the command palette's mount
+  ## point near the top menu. One proc for every renderer.
   ui(r):
     tdiv(id = DebugShellId, class = DebugShellClass):
       if commandPaletteComponentId >= 0:
@@ -33,17 +39,6 @@ proc renderDebugChromePanel*(
           discard
 
 when defined(js):
-  proc renderDebugChromePanel*(
-      r: WebRenderer;
-      commandPaletteComponentId: int): isonim_dom.Element =
-    ui(r):
-      tdiv(id = DebugShellId, class = DebugShellClass):
-        if commandPaletteComponentId >= 0:
-          tdiv(
-              id = commandPaletteHostId(commandPaletteComponentId),
-              class = DebugCommandPaletteHostClass):
-            discard
-
   proc renderDebugChromeInto*(
       r: WebRenderer;
       container: isonim_dom.Element;
@@ -57,7 +52,8 @@ when defined(js):
       cstring"class",
       cstring DebugShellClass)
 
-    let shell = renderDebugChromePanel(r, commandPaletteComponentId)
+    let shell = renderDebugChromePanel[WebRenderer, isonim_dom.Element](
+      r, commandPaletteComponentId)
     let shellNode = isonim_dom.Node(shell)
     while not isonim_dom.isNodeNil(shellNode.firstChild):
       discard isonim_dom.appendChild(containerNode, shellNode.firstChild)

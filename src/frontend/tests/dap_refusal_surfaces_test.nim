@@ -117,7 +117,7 @@ proc paintStatusBar(): MockNode =
       text: text,
       dismissible: true))
   let r = MockRenderer()
-  renderStatusShell(r, StatusShellModel(activeNotifications: records))
+  renderStatusShell[MockRenderer, MockNode](r, StatusShellModel(activeNotifications: records))
 
 # ---------------------------------------------------------------------------
 # A DapApi whose transport is a recorder

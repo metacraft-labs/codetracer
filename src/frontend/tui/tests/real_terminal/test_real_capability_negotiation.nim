@@ -89,7 +89,11 @@ import ../fixtures/fixture_provider
 # declaration is invisible to it.
 # 76 -> 77 (2026-10-04): the cold start is sampled `ColdStarts` times and the
 # sample count is asserted beside the frame-0 check.
-const ExpectedAssertions = 77
+const ExpectedAssertions = 79
+  ## 77 until PLAT-68, which turned the Kitty case from "told nothing" into
+  ## "asked, and not assumed": +2 for the query in the transcript and no push
+  ## without a reply (the three `modifyOtherKeys` checks now expect level 2,
+  ## the level an xterm is told, instead of 0).
 
 var countedAssertions = 0
 
@@ -232,7 +236,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     ck tracePath.len > 0
     ck dirExists(tracePath)
 
-  test "a capable terminal is told SGR-1006 mouse, and nothing about keys":
+  test "a capable terminal is told SGR-1006 mouse, and modifyOtherKeys for keys":
     var sess = baseSession(@[tracePath]).spawn()
     settleOnDebugger(sess)
 
@@ -244,25 +248,26 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
                " modifyOtherKeys=" & $sess.modifyOtherKeys())
     ck sess.mouseProtocol() == mpSgr
 
-    # NOTHING WAS SAID ABOUT THE KEY ENCODING, and that is a decision rather
-    # than an omission — `app/theme/capabilities.TerminalCapabilities.
-    # kittyKeyboard` argues it at length. Both protocols re-encode every key,
-    # `app/input/keymap.keyName` decodes xterm's classic encoding, and a driver
-    # that switched without a decoder would make §4.2's function keys
-    # unreachable on exactly the terminals users pick for key handling.
+    # THE KEY ENCODING, SINCE PLAT-68 (Base-Keymaps-And-Layer-Stack.md §7):
+    # this terminal did not answer the Kitty query (libvterm answers no
+    # query), and it is xterm-compatible, so it is told `modifyOtherKeys`
+    # level 2 — the decoder (`key_names.keyName`) reads `CSI 27 ; m ; c ~` for
+    # every key. It was "nothing" until the decoder could read it; the
+    # reversal is the milestone's and is recorded in
+    # `TerminalCapabilities.keyProtocol`.
     ck sess.kittyKeyboardFlags() == {}
-    ck sess.modifyOtherKeys() == 0
+    ck sess.modifyOtherKeys() == 2
 
     # THE POSITIVE CONTROL ON THE SCREEN ITSELF: a blank screen would satisfy
     # every "does not contain" below for free.
     let text = screenText(sess)
     checkpoint("status row: " & statusRowText(sess))
     ck text.contains(" Call Trace ")
-    ck text.contains(" main.py ")
+    ck text.contains(" calc/main.py ")
     ck text.contains(" Variables ")
     ck text.contains("Event Log")   # PLAT-51: the Timeline tab is removed
 
-    sess.send("q")
+    sess.send("\x11")  # Ctrl+Q, the CUA base's quit
     let status = sess.waitExit(initDuration(seconds = 15))
     checkpoint("exit: " & (if status.isSome: $status.get() else: "none"))
     ck status.isSome
@@ -277,32 +282,41 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     settleOnDebugger(sess)
     checkpoint("--no-mouse: mouseProtocol=" & $sess.mouseProtocol())
     ck sess.mouseProtocol() == mpNone
+    # The key protocol is not the mouse's: `--no-mouse` leaves it as it was.
     ck sess.kittyKeyboardFlags() == {}
-    ck sess.modifyOtherKeys() == 0
+    ck sess.modifyOtherKeys() == 2
     # …and the screen is otherwise the same debugger, so the flag turned off a
     # protocol and not the application.
     let text = screenText(sess)
     ck text.contains(" Call Trace ")
-    ck text.contains(" main.py ")
-    sess.send("q")
+    ck text.contains(" calc/main.py ")
+    sess.send("\x11")  # Ctrl+Q, the CUA base's quit
     let status = sess.waitExit(initDuration(seconds = 15))
     ck status.isSome
     ck status.get() == 0
     sess.close()
 
-  test "a Kitty-advertising terminal is STILL told nothing about keys":
-    # The decision, asserted where it matters: on a terminal that would have
-    # accepted the protocol. `TERM=xterm-kitty` also resolves synchronized
-    # output on, so this case doubles as the DEC 2026 environment.
-    var sess = baseSession(@[tracePath], term = "xterm-kitty").spawn()
+  test "a Kitty-advertising terminal is ASKED, and not assumed, about keys":
+    # PLAT-68 reversed the decision this case used to assert ("STILL told
+    # nothing"), and the reversal is "ask, do not guess" (Base-Keymaps §7.2):
+    # `TERM=xterm-kitty` ADVERTISES the protocol, the binary QUERIES it
+    # (`CSI ? u`), and a terminal that does not answer — libvterm answers no
+    # query — is not pushed a Kitty frame on the strength of its name; it is
+    # xterm-compatible, so it gets `modifyOtherKeys`. The answered case is
+    # `test_plat68_keymaps_pty.nim`'s. `TERM=xterm-kitty` also resolves
+    # synchronized output on, so this case doubles as the DEC 2026 environment.
+    var sess = baseSession(@[tracePath], term = "xterm-kitty").transcript().spawn()
     settleOnDebugger(sess)
     checkpoint("xterm-kitty: kitty=" & $sess.kittyKeyboardFlags() &
                " modifyOtherKeys=" & $sess.modifyOtherKeys() &
                " mouse=" & $sess.mouseProtocol())
+    let written = sess.transcriptBytes()
+    ck written.contains("\e[?u")
+    ck not written.contains("\e[>1u")
     ck sess.kittyKeyboardFlags() == {}
-    ck sess.modifyOtherKeys() == 0
+    ck sess.modifyOtherKeys() == 2
     ck sess.mouseProtocol() == mpSgr
-    sess.send("q")
+    sess.send("\x11")  # Ctrl+Q, the CUA base's quit
     let status = sess.waitExit(initDuration(seconds = 15))
     ck status.isSome
     ck status.get() == 0
@@ -366,9 +380,9 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     # The positive twin for that loop, through the same haystack: the Unicode
     # glyphs really would have been findable if they were there.
     ck text.len > 0
-    ck text.contains(" main.py ")
+    ck text.contains(" calc/main.py ")
 
-    sess.send("q")
+    sess.send("\x11")  # Ctrl+Q, the CUA base's quit
     let status = sess.waitExit(initDuration(seconds = 15))
     ck status.isSome
     ck status.get() == 0
@@ -406,7 +420,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     # …and a 256-colour terminal is NOT sent 24-bit SGR, which is the whole
     # point of the middle rung of the ladder.
     ck rgb == 0
-    sess.send("q")
+    sess.send("\x11")  # Ctrl+Q, the CUA base's quit
     discard sess.waitExit(initDuration(seconds = 15))
     sess.close()
 
@@ -433,7 +447,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
                " plain ANSI")
     ck rgb > 0
     ck palette256 == 0
-    sess.send("q")
+    sess.send("\x11")  # Ctrl+Q, the CUA base's quit
     discard sess.waitExit(initDuration(seconds = 15))
     sess.close()
 
@@ -505,9 +519,9 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     # and not a no-op.
     let after = screenText(sess)
     checkpoint("after step: " & statusRowText(sess))
-    ck after.contains(" main.py ")
+    ck after.contains(" calc/main.py ")
     ck statusRowText(sess).len > 0
-    sess.send("q")
+    sess.send("\x11")  # Ctrl+Q, the CUA base's quit
     discard sess.waitExit(initDuration(seconds = 15))
     sess.close()
 
@@ -536,7 +550,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
       # debugger. Every sample, not only the best.
       if firstRow.contains("opening "): inc openingFrames
       if i < ColdStarts - 1:
-        sess.send("q")
+        sess.send("\x11")  # Ctrl+Q, the CUA base's quit
         discard sess.waitExit(initDuration(seconds = 15))
         sess.close()
     let firstFrameMs = min(samples)
@@ -555,7 +569,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
          " ms)"
     checkpoint("debugger painted at " & $debuggerMs & " ms")
     ck debuggerMs >= firstFrameMs
-    sess.send("q")
+    sess.send("\x11")  # Ctrl+Q, the CUA base's quit
     discard sess.waitExit(initDuration(seconds = 15))
     sess.close()
 
@@ -568,7 +582,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     settleOnDebugger(sess)
     # The negotiated set is named on the status line while it runs …
     ck sess.mouseProtocol() == mpSgr
-    sess.send("q")
+    sess.send("\x11")  # Ctrl+Q, the CUA base's quit
     discard sess.waitExit(initDuration(seconds = 15))
     sess.close()
 

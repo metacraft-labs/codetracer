@@ -159,6 +159,16 @@ pub struct LaunchRequestArguments {
     /// to do instead — see [`TraceSourceArgument::unsupported_reason`].
     #[serde(rename = "traceSource", skip_serializing_if = "Option::is_none")]
     pub trace_source: Option<TraceSourceArgument>,
+    /// Whether the session may read the recording's listed sources where
+    /// they point on this host (`crate::source_access`). `false` limits
+    /// every source read of the session to the recording's own copies;
+    /// `true` or no value keeps reading the host, as a client that launches
+    /// this server directly (the desktop GUI) expects. The CodeTracer daemon
+    /// always sends it. A server that predates the field refuses a launch
+    /// carrying it (`deny_unknown_fields`), so a daemon never ends up with a
+    /// backend that silently ignores a refusal.
+    #[serde(rename = "hostSourceReads", skip_serializing_if = "Option::is_none")]
+    pub host_source_reads: Option<bool>,
 }
 
 /// The trace-source vocabulary shared with the embed SDK.
@@ -259,6 +269,21 @@ pub struct Capabilities {
     /// step-in / step-out buttons.
     #[serde(rename = "supportsColumnMotions", skip_serializing_if = "Option::is_none")]
     pub supports_column_motions: Option<bool>,
+    /// DAP standard — this adapter answers `setDataBreakpoints` and
+    /// `dataBreakpointInfo`.
+    ///
+    /// Load-bearing for discoverability, not decorative: a conforming
+    /// DAP client greys out its "break on value change" affordance
+    /// unless this bit is set, so a backend that implements the
+    /// commands but omits the bit has a feature no client will offer.
+    ///
+    /// What is advertised is the value-change (write) watchpoint
+    /// described in `ct_data_breakpoints`.  `dataBreakpointInfo`
+    /// reports `accessTypes: ["write"]` per variable, so a client that
+    /// honours the handshake never offers `read` — which a recording
+    /// cannot answer, because reads leave no trace in the data.
+    #[serde(rename = "supportsDataBreakpoints", skip_serializing_if = "Option::is_none")]
+    pub supports_data_breakpoints: Option<bool>,
 }
 
 pub fn new_dap_variable(name: &str, value: &str, variables_reference: i64) -> dap_types::Variable {
@@ -412,7 +437,9 @@ impl DapClient {
     pub fn stopped_event(&mut self, reason: &str) -> DapResult<DapMessage> {
         let body = StoppedEventBody {
             reason: reason.to_string(),
-            thread_id: Some(1),
+            // The replayed process is always DAP thread 1
+            // (`dap_handler::REPLAYED_THREAD_ID`); it is the one that stopped.
+            thread_id: Some(i64::from(crate::dap_handler::REPLAYED_THREAD_ID)),
             all_threads_stopped: Some(true),
             hit_breakpoint_ids: Some(vec![]),
             description: None,
@@ -850,6 +877,130 @@ fn post_decode_failure(scope: &web_sys::DedicatedWorkerGlobalScope, identity: &I
 }
 
 #[cfg(feature = "browser-transport")]
+thread_local! {
+    /// `(seq, command)` of the request the browser engine is dispatching,
+    /// for [`browser_panic_net`]. The engine is single-threaded and runs one
+    /// message to completion before the next, so there is at most one.
+    static IN_FLIGHT_REQUEST: std::cell::RefCell<Option<(i64, String)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Install the browser engine's panic hook: the console report
+/// `console_error_panic_hook` gives, followed by [`browser_panic_net`].
+#[cfg(feature = "browser-transport")]
+fn install_browser_panic_net() {
+    std::panic::set_hook(Box::new(|info| {
+        console_error_panic_hook::hook(info);
+        browser_panic_net(info);
+    }));
+}
+
+/// Answer the request whose handler panicked, and every request after it.
+///
+/// The Debug Adapter Protocol requires a response to every request
+/// (<https://microsoft.github.io/debug-adapter-protocol/overview#requests>).
+/// The native server catches a handler's panic and answers it
+/// (`dap_server::run_answering_panics`), but on `wasm32-unknown-unknown` a
+/// panic aborts: once this hook returns, the engine traps, the message handler
+/// never returns, and nothing the handler was in the middle of can be
+/// trusted again. So the hook does the answering itself, before the trap:
+///
+/// * the request in flight ([`IN_FLIGHT_REQUEST`]) is answered
+///   `success: false`, naming its command, its `seq` and the panic;
+/// * the worker's `onmessage` is replaced by a small refusing closure that
+///   answers every later request `success: false` with the same reason and
+///   touches none of the engine's state. A client learns at once that this engine is
+///   gone and that it must start a new one, instead of waiting out a timeout
+///   on each request.
+///
+/// It is the browser counterpart of the native thread's poisoning, with one
+/// difference that the abort forces: a native thread can be relaunched, a
+/// trapped engine cannot.
+#[cfg(feature = "browser-transport")]
+fn browser_panic_net(info: &std::panic::PanicHookInfo<'_>) {
+    use wasm_bindgen::{JsCast, JsValue, prelude::Closure};
+    use web_sys::{
+        MessageEvent,
+        js_sys::{self, Function, JSON},
+    };
+
+    let reason = crate::dap_server::panic_payload_text(info.payload());
+    let in_flight = IN_FLIGHT_REQUEST.with(|slot| slot.try_borrow_mut().ok().and_then(|mut slot| slot.take()));
+    let Ok(scope) = js_sys::global().dyn_into::<web_sys::DedicatedWorkerGlobalScope>() else {
+        return;
+    };
+
+    let what = match &in_flight {
+        Some((seq, command)) => format!("the replay engine's handler for {command} (seq {seq}) panicked: {reason}"),
+        None => format!("the replay engine panicked: {reason}"),
+    };
+    if let Some((request_seq, command)) = in_flight {
+        let response = DapMessage::Response(Response {
+            base: ProtocolMessage {
+                seq: 0,
+                type_: "response".to_string(),
+            },
+            request_seq,
+            success: false,
+            command,
+            message: Some(format!(
+                "{what}; this engine has stopped, start a new one to replay again"
+            )),
+            body: serde_json::json!({}),
+        });
+        if let Ok(json) = serde_json::to_string(&response) {
+            let _ = scope.post_message(&JsValue::from_str(&json));
+        }
+    }
+
+    // Every later message is refused by a closure of its own. It reads the
+    // message the way `setup_onmessage_callback` does (a JSON string or an
+    // object), answers only requests, and touches nothing of the engine's: not
+    // the handler, not the session, not the dispatch closure the trap left
+    // mid-call. It is a Rust closure rather than JavaScript source handed to
+    // `new Function`, so a Content-Security-Policy without `unsafe-eval`
+    // cannot stop it.
+    let refusal = format!("{what}; this engine has stopped, start a new one to replay again. Refused: ");
+    let refuse_scope = scope.clone();
+    let refuser = Closure::wrap(Box::new(move |event: MessageEvent| {
+        let data = event.data();
+        let Some(text) = data
+            .as_string()
+            .or_else(|| JSON::stringify(&data).ok().and_then(|s| s.as_string()))
+        else {
+            return;
+        };
+        let Ok(message) = parse_inbound_str::<Value>(&text) else {
+            return;
+        };
+        if message.get("type").and_then(Value::as_str) != Some("request") {
+            return;
+        }
+        let command = message
+            .get("command")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let response = DapMessage::Response(Response {
+            base: ProtocolMessage {
+                seq: 0,
+                type_: "response".to_string(),
+            },
+            request_seq: message.get("seq").and_then(Value::as_i64).unwrap_or(0),
+            success: false,
+            message: Some(format!("{refusal}{command}")),
+            command,
+            body: serde_json::json!({}),
+        });
+        if let Ok(json) = serde_json::to_string(&response) {
+            let _ = refuse_scope.post_message(&JsValue::from_str(&json));
+        }
+    }) as Box<dyn FnMut(MessageEvent)>)
+    .into_js_value()
+    .unchecked_into::<Function>();
+    scope.set_onmessage(Some(&refuser));
+}
+
+#[cfg(feature = "browser-transport")]
 pub fn setup_onmessage_callback() -> Result<(), DapError> {
     use std::rc::Rc;
 
@@ -860,6 +1011,8 @@ pub fn setup_onmessage_callback() -> Result<(), DapError> {
     };
 
     use crate::dap_server::Ctx;
+
+    install_browser_panic_net();
 
     let global = js_sys::global();
 
@@ -946,7 +1099,21 @@ pub fn setup_onmessage_callback() -> Result<(), DapError> {
         // WASM is single-threaded, so the drain happens synchronously.
         let (sender, receiver) = std::sync::mpsc::channel::<DapMessage>();
 
-        let handler_result = handle_message_browser(&dap_message, sender, &mut ctx, &mut handler);
+        // The request in flight is what the panic hook answers if its
+        // handler panics (see `browser_panic_net`). Cleared once the handler
+        // has returned; a panic never returns here, and the hook takes it.
+        let in_flight = match &dap_message {
+            DapMessage::Request(r) => Some((r.base.seq, r.command.clone())),
+            _ => None,
+        };
+        IN_FLIGHT_REQUEST.with(|slot| *slot.borrow_mut() = in_flight);
+        let handler_result = {
+            if let DapMessage::Request(r) = &dap_message {
+                crate::dap_server::panic_if_test_hook_names(&r.command);
+            }
+            handle_message_browser(&dap_message, sender, &mut ctx, &mut handler)
+        };
+        IN_FLIGHT_REQUEST.with(|slot| *slot.borrow_mut() = None);
 
         // Drain whatever messages handle_message_browser already produced
         // before failing — e.g. a partial responses sequence — so the

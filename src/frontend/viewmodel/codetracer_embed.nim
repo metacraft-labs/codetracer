@@ -35,6 +35,7 @@
 ## | Source access       | `SourceVM` (`viewmodels/source_vm`) and `SourceProvider` (`sdk/source_provider`) |
 ## | `BackendService`    | `backend/backend_service`, `backend/mock_backend`, `backend/dap_commands` |
 ## | Session lifecycle   | `DebuggerSession`, `SessionViewModel`, `AppViewModel`                     |
+## | Seek coalescing     | `ScrubQueue` (`sdk/scrub_queue`)                                          |
 ## | `TraceSource`       | `sdk/trace_source`                                                        |
 ## | Clock               | `isonim/core/clock`, `isonim/testing/test_utils` (`withFakeTime`)         |
 ## | Types               | `store/types` — the trace, location, frame, value, event and span models  |
@@ -264,6 +265,37 @@ export terminal_output_vm
 import viewmodels/scrollbar_scrubber
 export scrollbar_scrubber
 
+# PLAT-70: a text pane's horizontal view and its overflow-only bar — the
+# scrubber model on the column axis (Horizontal-Overflow.md §4). Pure; imports
+# only `scrollbar_scrubber`.
+import viewmodels/horizontal_scroll
+export horizontal_scroll
+
+# PLAT-70 Part B: the table panes' cut cells, their full text on hover and
+# under the row, and the columns' widths (Horizontal-Overflow.md §5). Pure;
+# imports only `std/*` and the presenter's vocabulary, already here.
+import viewmodels/table_overflow
+export table_overflow
+
+# PLAT-70 Part I: the table panes' column widths and whether a table pane
+# scrolls sideways — CSS's automatic table layout over each column's minimum
+# and preferred widths (Horizontal-Overflow.md §5.5). Pure; imports only
+# `horizontal_scroll`.
+import viewmodels/table_fit
+export table_fit
+
+# PLAT-55: the Problems pane's row — its four parts as the desktop's flex row
+# lays them out (`errors_vm.problemsFit`), which the terminal's pane fits.
+from viewmodels/errors_vm import problemsFit, ProblemColumnNames
+export problemsFit, ProblemColumnNames
+
+# PLAT-70 Part C: the editor's find session — highlight as you type, the
+# walk, accept and cancel, the seeds and the word-under-the-caret launchers
+# (Find-And-Incremental-Search.md §3, §4). Imports only `editing_core` (here
+# already) and `std/*`.
+import viewmodels/find_vm
+export find_vm
+
 # ---------------------------------------------------------------------------
 # Visual replay (PLAT-15)
 #
@@ -349,6 +381,13 @@ export product_mode
 import viewmodels/build_vm
 export build_vm
 
+# The build tasks, the task picker and the `:build` grammar; when a build
+# reveals and dismisses its pane; a build's diagnostics in the editor
+# (Build-Output-Pane.md §3.6, §3.8, §3.9, §3.11, §3.12). Pure Nim over `std/*`
+# and the ViewModels above: one decision every front-end applies.
+import viewmodels/[build_tasks, build_auto_reveal, editor_diagnostics]
+export build_tasks, build_auto_reveal, editor_diagnostics
+
 # ---------------------------------------------------------------------------
 # Session lifecycle (§3.1, row 4; §6)
 # ---------------------------------------------------------------------------
@@ -366,6 +405,12 @@ export debugger_session
 # ---------------------------------------------------------------------------
 import sdk/trace_source
 export trace_source
+
+# The scrubber's seek coalescer (Shared-DOM-Front-Ends D8): at most one seek
+# outstanding, a newer target superseding the waiting one. Pure data, so a host
+# drives it from its own pointer events and transport.
+import sdk/scrub_queue
+export scrub_queue
 
 # ---------------------------------------------------------------------------
 # The plugin surface (PLAT-7, Extensibility-Model.md §2.1, §4.2, §5)
@@ -415,6 +460,17 @@ export plugin_api
 import editing_core
 export editing_core
 
+# THE KEYMAP ROUTER (PLAT-68): the base keymaps, the user's
+# `keybindings.json`, the layer stack and the one resolver every front-end
+# routes keys through (Base-Keymaps-And-Layer-Stack.md §6). Here for the
+# reason the editing core is: a front-end that cannot see it would
+# reimplement it. Pure — the file's text arrives from the host.
+import keymap/keymap_router
+import keymap/keymap_importers
+import keymap/client_actions
+import keymap/navigation_keymap
+export keymap_router, keymap_importers, client_actions, navigation_keymap
+
 # PLAT-8's I/O primitives are DELIBERATELY NOT HERE, and the reason is the
 # whole of §8's argument.
 #
@@ -441,10 +497,14 @@ export editing_core
 # plain Nim over `std/*` and the ViewModels this facade already exports —
 # `filesystem_vm` is `session_vm`'s own import, exported so its type is
 # nameable — so the facade's graph gains no renderer, no I/O and no process.
+#
+# M76 (codetracer#843): `point_menu_ops` too — the Debug menu's Stop and its
+# breakpoint / tracepoint items as one action table, which both native menus
+# read to enable an item and to run it. Pure Nim over `std/*`.
 import viewmodels/[menu_vm, product_menu, omnibar_vm, omnibar_sources,
-                   transport_icons, filesystem_vm]
+                   transport_icons, filesystem_vm, point_menu_ops]
 export menu_vm, product_menu, omnibar_vm, omnibar_sources, transport_icons,
-       filesystem_vm
+       filesystem_vm, point_menu_ops
 
 # PLAT-51 part B: the native front-ends' Welcome Screen of a new tab
 # (`native_welcome`, over the desktop's `WelcomeScreenVM` and a store that
@@ -453,6 +513,17 @@ export menu_vm, product_menu, omnibar_vm, omnibar_sources, transport_icons,
 # `omnibar_sources`). Plain Nim over the ViewModels above: no renderer, no I/O.
 import viewmodels/[native_welcome, layout_settings]
 export native_welcome, layout_settings
+
+# PLAT-54: the Agent Activity pane's words and rows (`agent_activity_feed`,
+# re-exporting `agent_activity_text`) — the one projection of the desktop's
+# `AgentActivityVM` both native panes draw, so a view under
+# `src/frontend/tui/app/` paints the same rows through this door. The
+# ViewModel itself stays withheld: the feed exports its own row and action
+# types only. Plain Nim over `std/*`, `isonim/core/*` and `store/*` (the
+# ViewModel and the evidence / test-run projections it reads): no renderer,
+# no I/O, no process — the agent connection is the native host's.
+import viewmodels/agent_activity_feed
+export agent_activity_feed
 
 const
   CodeTracerEmbedFacadeModule* = "codetracer_embed"

@@ -152,6 +152,20 @@ suite "WorkerBackendService — event routing":
     check got.value.isNil
     check w.pendingCount == 1
 
+  test "a DAP event also carries the SDK's envelope: kind and data":
+    # The ViewModel layer's subscribers read `kind` / `data` (the shape the
+    # desktop transport delivers); a DAP event names them `event` / `body`.
+    let t = newTransport()
+    let w = t.attach()
+    var events: seq[JsonNode] = @[]
+    w.onEvent(proc(e: JsonNode) = events.add(e))
+    w.deliver("""{"type":"event","event":"ct/updated-flow","body":{"viewUpdates":[]}}""")
+    drain()
+    check events.len == 1
+    check events[0]["kind"].getStr == "ct/updated-flow"
+    check events[0]["data"].hasKey("viewUpdates")
+    check events[0]["event"].getStr == "ct/updated-flow"   # still the DAP shape
+
   test "worker bootstrap messages are control traffic, not DAP events":
     # `vfs-ack` must never reach `dapCommandToEventKind`.
     let t = newTransport()

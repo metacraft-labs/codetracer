@@ -4,6 +4,10 @@
 ## Owns: one `KeymapDefinition` — the noun-then-verb bindings, and the
 ## explicit, reasoned list of published operations this model does NOT claim.
 ##
+## Refuses to own: resolution (`editing_keymap.resolveLayers`, the one
+## resolver), what an operation does (the editing core), and the navigation
+## layer the modal bases share outside the editor (`navigation_keymap`).
+##
 ## =========================================================================
 ## NOUN THEN VERB, AND WHY THERE IS NO OPERATOR-PENDING ROW ANYWHERE BELOW
 ## =========================================================================
@@ -79,7 +83,7 @@ const
 
 proc eb(chords: seq[string]; op: string; modes: set[EditingMode];
         args = OpArgs()): EditingBinding =
-  EditingBinding(model: kmKakoune,
+  EditingBinding(model: bkKakoune,
                  scope: BindingScope(modes: modes, products: {}, panes: {epEditor}),
                  chords: chords, operation: op, args: args,
                  spelling: chords.join(" "))
@@ -239,9 +243,22 @@ proc buildKakouneKeymap(): EditingKeymap =
   r.add eb(@["Ctrl+g"], "add-cursor-at-each-line-of-selection", KakouneLiveModes)
   r.add eb(@["Ctrl+w"], "remove-primary-cursor", KakouneLiveModes)
   r.add eb(@["Ctrl+b"], "rotate-primary-cursor", KakouneLiveModes)
-  r.add eb(@["/"], "search-forward", {emNormal})
-  r.add eb(@["?"], "search-backward", {emNormal})
-  r.add eb(@["s"], "search-selection", KakouneLiveModes)
+  # PLAT-70 Part C (Find-And-Incremental-Search.md §3, §4.4). `/` and `?`
+  # open the find session — the global rows the modal bases share
+  # (`navigation_keymap`), no longer shadowed here by the bare direction
+  # setters. `*` sets the search register to the main selection, with word
+  # boundaries when the selection is a word, and does not move; `Alt+*`
+  # (`Shift+Alt+8` canonically: `ESC *` on the wire, which `key_names`
+  # decodes) does the same literally. `n` then searches. The idiom for the
+  # word at the caret is `[ w *` here (`<a-i> w *` upstream; `[` is this
+  # table's object prefix, see `objectRows`).
+  #
+  # **`s` IS NO LONGER `search-selection`.** Kakoune's `s` SELECTS THE REGEX
+  # MATCHES INSIDE THE SELECTION, an operation the vocabulary does not have;
+  # the row was wrong (§4.4). `s` is unbound and recorded in
+  # `KakouneUncoveredKeys` with that reason.
+  r.add eb(@["*"], "search-selection-whole-word", KakouneLiveModes)
+  r.add eb(@["Shift+Alt+8"], "search-selection", KakouneLiveModes)
   r.add eb(@["Ctrl+l"], "search-clear", {emNormal})
   r.add eb(@["Ctrl+s"], "save", {emNormal, emInsert})
   r.add eb(@["z", "c"], "fold", {emNormal})
@@ -263,6 +280,16 @@ proc buildKakouneKeymap(): EditingKeymap =
   EditingKeymap(bindings: r)
 
 const
+  KakouneUncoveredKeys*: seq[tuple[key, reason: string]] = @[
+    ## Kakoune keys this table leaves unbound because the vocabulary has no
+    ## operation for them (KL-2's filed set, for keys rather than
+    ## declarations).
+    ("s", "Kakoune's `s` selects the regex matches inside the selection " &
+          "(`select-matches`), which the vocabulary does not publish; it was " &
+          "bound to `search-selection` until PLAT-70 Part C, which is " &
+          "Kakoune's `Alt+*` (Find-And-Incremental-Search.md §4.4)"),
+  ]
+
   NoCollapsingForm* = [
     ## The nine motions whose `move-` form Kakoune does not have. Named as data
     ## so the nine filed rows below are generated from one list, and so the
@@ -286,6 +313,11 @@ proc buildKakouneFiled(): seq[FiledDeclaration] =
       "because inventing a chord for a variant the model does not have would " &
       "be this preset diverging from the editor it is named after (§6.4)")
   result.add @[
+    FiledDeclaration(decl: "search-forward", forms: {}, reason:
+      "PLAT-70 Part C: `/` opens the find session, which sets the direction " &
+      "(Find-And-Incremental-Search.md §3.2), so the bare setter has no key"),
+    FiledDeclaration(decl: "search-backward", forms: {}, reason:
+      "as `search-forward`: `?` opens the session backward"),
     FiledDeclaration(decl: "group-backward", forms: {}, reason:
       "`<a-b>` upstream. `keyName` spells `Alt+` only for the function keys " &
       "and the arrows — a bare `Alt+b` is two tokens on the wire — so there " &
@@ -358,6 +390,38 @@ proc buildKakouneFiled(): seq[FiledDeclaration] =
       "as `toggle-breakpoint`"),
     FiledDeclaration(decl: "jump-to-value-origin", forms: {}, reason:
       "as `toggle-breakpoint`"),
+    # --- PLAT-68: the CUA and Emacs additions (CUA-Keymap.md §7) ----------
+    FiledDeclaration(decl: "toggle-block-comment", forms: {}, reason:
+      "VS Code's `Shift+Alt+A`; Kakoune has no block-comment key"),
+    FiledDeclaration(decl: "select-child-syntax", forms: {}, reason:
+      "needs a parse (§5.1), as `select-parent-syntax`"),
+    FiledDeclaration(decl: "expand-line-selection", forms: {}, reason:
+      "VS Code's `Ctrl+L`; Kakoune composes it with the line object"),
+    FiledDeclaration(decl: "select-all-matches", forms: {}, reason:
+      "VS Code's `Ctrl+Shift+L`; Kakoune reaches it through search, a composition"),
+    FiledDeclaration(decl: "move-last-cursor-to-next-match", forms: {}, reason:
+      "VS Code's `Ctrl+K Ctrl+D`, a multi-cursor refinement Kakoune does not have"),
+    FiledDeclaration(decl: "add-cursor-at-point", forms: {}, reason:
+      "a POINTER gesture (Alt+click, Input-Routing §5.1), not a key in any base"),
+    FiledDeclaration(decl: "clipboard-cut", forms: {}, reason:
+      "Kakoune reaches the system clipboard through the `+` REGISTER and its " &
+      "own operators (`\"+d`), not through VS Code's empty-selection operation"),
+    FiledDeclaration(decl: "clipboard-copy", forms: {}, reason: "as `clipboard-cut`"),
+    FiledDeclaration(decl: "clipboard-paste", forms: {}, reason: "as `clipboard-cut`"),
+    FiledDeclaration(decl: "fold-recursively", forms: {}, reason:
+      "VS Code's `Ctrl+K Ctrl+[`; Kakoune's folds are the `z` family bound here"),
+    FiledDeclaration(decl: "unfold-recursively", forms: {}, reason: "as `fold-recursively`"),
+    FiledDeclaration(decl: "set-mark", forms: {}, reason:
+      "EMACS'S MARK. Base-Keymaps §3.3: no base borrows another's rows, and " &
+      "Kakoune's selection is its own visual mode"),
+    FiledDeclaration(decl: "deactivate-mark", forms: {}, reason: "as `set-mark`, Emacs's mark"),
+    FiledDeclaration(decl: "exchange-point-and-mark", forms: {}, reason: "as `set-mark`, Emacs's mark"),
+    FiledDeclaration(decl: "kill-line", forms: {}, reason:
+      "EMACS'S KILL RING; Kakoune's registers are its own (`\"a`, the unnamed register)"),
+    FiledDeclaration(decl: "kill-region", forms: {}, reason: "as `kill-line`, Emacs's kill ring"),
+    FiledDeclaration(decl: "copy-region", forms: {}, reason: "as `kill-line`, Emacs's kill ring"),
+    FiledDeclaration(decl: "yank", forms: {}, reason: "as `kill-line`, Emacs's kill ring"),
+    FiledDeclaration(decl: "yank-pop", forms: {}, reason: "as `kill-line`, Emacs's kill ring"),
   ]
 
 let
@@ -374,5 +438,5 @@ let
 proc kakouneKeymap*(): KeymapDefinition =
   ## **THE KAKOUNE MODEL.** Called by name — see `vimKeymap`'s note on why the
   ## two constructors are two names rather than one with a parameter.
-  KeymapDefinition(model: kmKakoune, keymap: KakouneKeymapTable,
+  KeymapDefinition(model: bkKakoune, keymap: KakouneKeymapTable,
                    filed: KakouneFiledTable)

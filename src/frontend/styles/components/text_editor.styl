@@ -717,32 +717,6 @@
       position:absolute
       width: 100%
 
-  .flow-multiline
-    font-size: 0.9375em
-    background-color: BACKGROUND_NEIGHBOUR_COLOR
-
-    .flow-multiline-previous
-      background-color: #0ff
-
-    .flow-multiline-next
-      background-color: #00f
-
-    .flow-multiline-loop
-      left: 28.125em
-      position: absolute
-      width: 43.75em
-      max-width: 43.75em
-      overflow-x: scroll
-      float: right
-
-    td.multiline-group
-      min-width: 11.25em
-      max-width: 11.25em
-
-      span
-        display: block
-
-
   .zfuture-expression::after
     background-color: #0ff
 
@@ -821,29 +795,6 @@
 
     .asm-code .asm-highlight
       color: red
-
-#breakpoint-list_wrapper, #tracepoint-list_wrapper
-  width: 50%
-  float: left
-  tr
-    height: 1.25em
-
-  .odd
-    background-color: BACKGROUND_NEIGHBOUR_COLOR
-
-  .even
-    background-color: colors-ui-surface-base-panel
-
-  color: colors-ui-text-primary-body
-
-  .dataTables_length
-    display: none
-
-  .dataTables_info
-    display: none
-
-  .dataTables_paginate
-    display: none
 
 .context-menu
   position: fixed
@@ -1022,7 +973,8 @@
     padding-right: 0.15em
     text-align: right
     white-space: nowrap
-    opacity: 0.5
+    // Keep the measured resting line-number colour at full strength.
+    opacity: 1
     // overflow: hidden
     cursor: default
 //font-weight: bold
@@ -1094,8 +1046,11 @@ line-number-type()
   padding-right: 0 !important
   // color: LINE_NUMBERS_TEXT_COLOR !important
 
+.line-numbers:not(.active-line-number):not(.unified-diff-editor *)
+  color: editor-theme-line-number !important
+
 .on
-  background-color: ON_BG_COLOR
+  background-color: editor-theme-execution-line
   position: relative
   z-index: -2
 
@@ -1161,6 +1116,19 @@ line-number-type()
   50%
     opacity: 1
 
+// The desktop and native execution marks share the theme block's colour.
+// Mask the existing SVG so Light can use legible ink without a second asset.
+editor-execution-pointer()
+  background-color: editor-theme-execution-pointer
+  -webkit-mask-image: HIGHLIGHT_LINE_ARROW
+  mask-image: HIGHLIGHT_LINE_ARROW
+  -webkit-mask-repeat: no-repeat
+  mask-repeat: no-repeat
+  -webkit-mask-position: center
+  mask-position: center
+  -webkit-mask-size: contain
+  mask-size: contain
+
 .gutter-highlight-active:before
   content: ""
   display: block
@@ -1169,10 +1137,9 @@ line-number-type()
   left: var(--ct-gutter-highlight-left)
   width: var(--ct-gutter-highlight-size)
   height: var(--ct-gutter-highlight-size)
-  background-image: HIGHLIGHT_LINE_ARROW
-  background-repeat: no-repeat
-  background-position: center
-  background-size: 0.47em
+  editor-execution-pointer()
+  -webkit-mask-size: 0.47em
+  mask-size: 0.47em
   transform: translate(-40%, -40%)
   z-index: 0
 
@@ -1232,7 +1199,9 @@ line-number-type()
   color: red
 
 .expand-inline
-  color: #0ff
+  // A link: cyan on the dark ground, the information text token on the light
+  // one (`by-mode`, defaults.styl).
+  color: by-mode(#0ff, colors-ui-text-information-primary)
 
 .expand-trace:hover
   opacity: 1
@@ -1431,11 +1400,14 @@ else
 
 .line-diff-added
   background-color: rgba(63, 185, 80, 0.18)
-  border-left: 0.1875em solid #3fb950
+  // The gutter stripes are graphics that carry the change kind: in the light
+  // theme the success / warning icon tokens, as the dark theme's GitHub-dark
+  // greens and ambers are 2.3:1 there (`by-mode`, defaults.styl).
+  border-left: 0.1875em solid by-mode(#3fb950, colors-ui-icon-success-primary)
 
 .line-diff-modified
   background-color: rgba(210, 153, 34, 0.18)
-  border-left: 0.1875em solid #d29922
+  border-left: 0.1875em solid by-mode(#d29922, colors-ui-icon-warning-primary)
 
 .line-diff-removed
   background-color: rgba(248, 81, 73, 0.18)

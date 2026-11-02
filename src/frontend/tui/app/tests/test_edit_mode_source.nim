@@ -60,6 +60,7 @@ import codetracer_embed
 
 import ../edit_binding
 import ../runtime
+import ./editor_ownership
 import ../theme/capabilities
 import ../views/shell
 

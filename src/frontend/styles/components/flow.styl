@@ -84,8 +84,11 @@
   .flow-step-index
     color: colors-ui-text-primary-body
 
+  // A location link and a value, in VS Code dark's light blue and pale green
+  // (1.4:1 and 1.6:1 on the light ground). The light theme takes the
+  // information text token and the editor's number colour (`by-mode`, defaults.styl).
   .flow-step-location
-    color: #9cdcfe
+    color: by-mode(#9cdcfe, colors-ui-text-information-primary)
 
   .flow-step-expression
     color: colors-ui-text-primary-body
@@ -94,7 +97,7 @@
     white-space: nowrap
 
   .flow-step-value
-    color: #b5cea8
+    color: by-mode(#b5cea8, colors-editor-syntax-number)
     overflow: hidden
     text-overflow: ellipsis
     white-space: nowrap
@@ -382,9 +385,12 @@
     margin-left: 15%
     position: relative
 
+  // The multiline value colour is meant for that box's light grey ground;
+  // this inline box sits on `editor/surface/primary`, mid-grey in the light
+  // theme, so it reads the inline value colour there (`by-mode`, defaults.styl).
   .flow-inline-value-before-only
     background-color: colors-editor-surface-primary
-    color: FLOW_MULTILINE_BEFORE_ONLY_VALUE_COLOR
+    color: by-mode(FLOW_MULTILINE_BEFORE_ONLY_VALUE_COLOR, FLOW_INLINE_BEFORE_ONLY_VALUE_COLOR)
     box-shadow: 1px 1px 1px FLOW_MULTILINE_VALUE_BOX_SHADOW_COLOR
 
 .flow-loop-background
@@ -637,7 +643,9 @@
 
   .flow-tooltip-step-info
     font-style: italic
-    color: colors-ui-surface-primary-secondary-hover
+    // A surface token as text, 2.6:1 on the light tooltip's #7a756a; the
+    // light theme takes the tooltip's own body text (`by-mode`, defaults.styl).
+    color: by-mode(colors-ui-surface-primary-secondary-hover, colors-ui-text-primary-body)
 
   .add-to-scratchpad-button
     width: 1em
@@ -983,9 +991,13 @@
   // Stating the colour rather than an alpha is what made this checkable: the
   // regression is one line of arithmetic against the new wash, where an
   // `opacity` would have had to be decoded from a screenshot first.
+  //
+  // All of the above measures the DARK theme. In the light one #a2a2a2 is
+  // 2.4:1 on the window ground, so it takes the caption text token, the
+  // light palette's own dimmed text (`by-mode`, defaults.styl).
   .review-flow-more,
   .review-flow-more-passes
-    color: #a2a2a2
+    color: by-mode(#a2a2a2, colors-ui-text-primary-caption)
     padding: 0 0.4em
     align-self: center
     flex: 0 0 auto

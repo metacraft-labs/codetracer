@@ -4,14 +4,21 @@ from pathlib import Path
 from typing import Optional, Union
 
 def default_daemon_socket_path() -> Path:
-    """Return the platform-specific well-known daemon socket path."""
+    """Return the socket of the daemon this process should talk to.
+
+    $CODETRACER_DAEMON_SOCK when the daemon handed one over, else the
+    daemon's own resolution (backend-manager `DaemonConfig::daemon_paths`).
+    """
     ...
 
 class DaemonConnection:
     """A connection to the CodeTracer backend-manager daemon."""
 
     def __init__(
-        self, socket_path: Optional[Union[str, Path]] = ...
+        self,
+        socket_path: Optional[Union[str, Path]] = ...,
+        host_source_reads: bool = ...,
+        socket_fd: Optional[int] = ...,
     ) -> None: ...
 
     @property

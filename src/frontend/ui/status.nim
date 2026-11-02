@@ -23,7 +23,13 @@ when defined(js):
   from ../viewmodel/views/isonim_status_view import
     StatusBaseModel, StatusNotificationActionRecord,
     StatusNotificationRecord, StatusShellCallbacks, StatusShellModel,
-    renderStatusInto
+    StatusBuildModel, renderStatusInto
+  # PLAT-56: the build indicator reads the shown tab's Build Output ViewModel.
+  from build import buildVMInstance, onBuildStatusChange, revealBuildPane
+  from ../viewmodel/viewmodels/build_vm import BuildVM, BuildStatus,
+    statusText, statusIcon
+  from isonim/core/signals import val
+  from isonim/core/computation import val
   from certificate_indicator import
     certificateIndicator, ensureCertificateIndicator, selectCertificateIndicator
   from git_cli import gitWorkingDirectory
@@ -137,6 +143,17 @@ proc onNotification*(self: StatusComponent, notification: Notification) =
   self.notifications.add(notification)
   self.redraw()
 
+proc onLaunchFailed*(self: StatusComponent, failure: LaunchFailure) =
+  ## This tab's replay cannot start (`ct/launch-failed`).
+  ##
+  ## Nothing will ever answer the operation the bar shows as running, so it
+  ## stops showing the tab busy. The reason itself is not drawn from here: the
+  ## server sends the same sentence as an Error `ct/notification` beside this
+  ## event, and that arrives through `onNotification` like any other notice.
+  self.state.stableBusy = false
+  self.state.currentOperation = cstring""
+  self.redraw()
+
 when defined(js):
   proc displayLocation(self: StatusComponent): types.Location =
     ## When ViewTargetSource is active for Nim traces, show the C location so
@@ -168,6 +185,21 @@ when defined(js):
       text: $notification.text,
       dismissible: dismiss,
       actions: actions)
+
+  proc statusBuildModel(): StatusBuildModel =
+    ## PLAT-56 (Build-Output-Pane.md §3.10): the current build of the shown
+    ## tab, in the shared words; nothing before any build.
+    let vm = buildVMInstance
+    if vm.isNil:
+      return
+    let state = case vm.status.val
+                of bsIdle: ""
+                of bsRunning: "running"
+                of bsSucceeded: "succeeded"
+                of bsFailed: "failed"
+                of bsCancelled: "cancelled"
+    StatusBuildModel(text: vm.statusText, icon: vm.statusIcon,
+                     stateClass: state)
 
   proc statusBaseModel(self: StatusComponent): StatusBaseModel =
     let activeKey = self.data.services.editor.active
@@ -241,7 +273,8 @@ when defined(js):
       # `certificateIndicator()` is nil until `ensureCertificateIndicator` has
       # run, and the projection of nil is an empty model that renders nothing,
       # so the first paint of the bar is never blocked on a filesystem read.
-      certificate: statusCertificateModel(certificateIndicator()))
+      certificate: statusCertificateModel(certificateIndicator()),
+      build: statusBuildModel())
 
   proc statusShellModel(self: StatusComponent): StatusShellModel =
     var activeNotifications: seq[StatusNotificationRecord] = @[]
@@ -304,7 +337,8 @@ when defined(js):
             2000),
       onSendBugReport: proc(title: string; description: string) =
         self.sendBugReport(title, description),
-      onSelectCertificate: proc() = selectCertificateIndicator())
+      onSelectCertificate: proc() = selectCertificateIndicator(),
+      onSelectBuildStatus: proc() = revealBuildPane())
 
   # ---------------------------------------------------------------------
   # Render bookkeeping
@@ -337,6 +371,28 @@ when defined(js):
     ## Forward-declared: `renderStatusNow` below hands this to the certificate
     ## indicator as its "the answer moved, draw again" callback, and the two
     ## are mutually recursive through that callback rather than through a call.
+
+  proc shownStatus(self: StatusComponent): StatusComponent =
+    ## The status component whose state belongs in `#status` now: that of the
+    ## tab on screen.
+    ##
+    ## There is ONE `#status` element per window and one `StatusComponent`
+    ## per tab, each registered on its own tab's views mediator. Any of them
+    ## can ask for a render — a hidden tab receives its own notifications and
+    ## moves — and without this the last one to ask painted its tab's bar over
+    ## the tab the user is looking at.
+    ##
+    ## `self.data` is the window's `Data`, so `self.data.ui` is the active
+    ## tab's components. `self` answers for itself when there is no active
+    ## tab to compare with (a window still being built).
+    let d = self.data
+    if d.isNil or d.activeSessionIndex < 0 or
+        d.activeSessionIndex >= d.sessions.len:
+      return self
+    let ui = d.sessions[d.activeSessionIndex].ui
+    if ui.isNil or ui.status.isNil:
+      return self
+    ui.status
 
   proc renderStatusNow(self: StatusComponent) =
     ## Perform one coalesced render pass. Never call this directly from
@@ -384,13 +440,27 @@ when defined(js):
     ## in the test suite polls (`expect.poll`, `toHaveText`, `StatusBar`'s
     ## own retry loop), so a one-turn delay is not observable, while the
     ## burst of identical renders it removes is.
+    ##
+    ## Only the bar of the tab on screen is drawn. A hidden tab's request is
+    ## dropped, and its state waits on the component: a notification that
+    ## arrives while its tab is hidden stays active, and its auto-dismiss
+    ## timer — started when a render first lists it (`statusShellModel`) — has
+    ## not begun. Switching to the tab redraws its bar
+    ## (`session_switch.switchSession`), so the user sees the
+    ## notice for its full display time, in its own tab and never over
+    ## another one.
+    if self.shownStatus() != self:
+      return
     inc statusRenderRequests
     if statusRenderScheduled:
       return
     statusRenderScheduled = true
     discard windowSetTimeout(proc() =
       statusRenderScheduled = false
-      self.renderStatusNow()
+      # Resolved again when the pass runs, not when it was asked for: a tab
+      # switch inside the same turn finds a pass already scheduled, and that
+      # pass must draw the tab now on screen.
+      self.shownStatus().renderStatusNow()
     , 0)
 
   proc statusRenderStats*(): JsObject =
@@ -419,6 +489,9 @@ else:
 
 method register*(self: StatusComponent, api: MediatorWithSubscribers) =
   self.api = api
+  when defined(js):
+    # PLAT-56: the build indicator follows the build.
+    onBuildStatusChange = proc() = self.requestStatusRender()
   api.subscribe(InternalStatusUpdate, proc(kind: CtEventKind, response: StatusState, sub: Subscriber) =
     self.onStatusUpdate(response)
   )
@@ -427,4 +500,7 @@ method register*(self: StatusComponent, api: MediatorWithSubscribers) =
   )
   api.subscribe(CtNotification, proc(kind: CtEventKind, response: Notification, sub: Subscriber) =
     self.onNotification(response)
+  )
+  api.subscribe(CtLaunchFailed, proc(kind: CtEventKind, response: LaunchFailure, sub: Subscriber) =
+    self.onLaunchFailed(response)
   )

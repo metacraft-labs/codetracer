@@ -40,10 +40,13 @@
  * (`nix/packages/default.nix`), so both resolve in CI's `result/` tree as
  * well as in a local `src/build-debug` — deliberately unlike the geometry
  * guard's list, two thirds of which only exist after a local `just
- * build-once`.  They are also, measurably, the same stylesheet for this bar:
- * `default_white_theme.styl` redefines not one `colors-*` token, so the
- * footer is `#1b1b1b` in both.  `verify_the_light_theme_is_not_a_different_
- * bar` states that as an assertion rather than leaving it as a surprise.
+ * build-once`.  They paint this bar from DIFFERENT palettes: the light theme
+ * sets `COLOR_MODE = "Light"`, so every design-token colour in the bar takes
+ * the design system's Light value (`#f8f6f2` ground where the dark theme has
+ * `#1b1b1b`).  `verify_the_light_theme_paints_the_light_palette` states that;
+ * the light run's per-theme check holds it to AA except for the pairs the
+ * design system itself fails, which are filed and COUNTED in
+ * `LIGHT_FILED_PAIRS` (see `lib/light-theme-contrast.ts`).
  *
  * IT DATES THE BUILD IT TRUSTS, exactly as its sibling does.  It reads
  * whatever `src/build-debug` (or the nix output) currently holds, and
@@ -68,6 +71,13 @@ import {
 } from "../../page-objects/status-footer-contrast";
 import { SURVIVING_HIDE_SPELLINGS } from "../../page-objects/status-footer-contract";
 import { resolveBuiltThemeCss } from "../../lib/built-theme-css";
+import {
+  DESIGN_SYSTEM_CONTRAST_ISSUE,
+  designTokenHex,
+  rgbToHex,
+  unfiledLightFailures,
+  type FiledLightPair,
+} from "../../lib/light-theme-contrast";
 
 /** Repo root, from `src/tests/gui/tests/status-bar`. */
 const repoRoot = path.resolve(__dirname, "../../../../..");
@@ -86,6 +96,27 @@ const THEMES = [
   "default_dark_theme_electron.css",
   "default_white_theme_electron.css",
 ] as const;
+
+/**
+ * The light theme's footer pairs that the DESIGN SYSTEM fails: its Light text
+ * tiers on its Light grounds, filed in `DESIGN_SYSTEM_CONTRAST_ISSUE`. COUNTED
+ * — see `lib/light-theme-contrast.ts`. Measured with the light build of
+ * `default_white_theme_electron.css`; the ground is `ui/surface/primary/default`
+ * Light (#f8f6f2) unless a row says otherwise.
+ */
+const LIGHT_FILED_PAIRS: readonly FiledLightPair[] = [
+  { selector: "#status-base .file-info-status-language", ratio: 3.30, measured: "ui/text/primary/label-subtle #8e8778, 3.30:1" },
+  { selector: "#status-base .file-info-status-encoding", ratio: 3.30, measured: "ui/text/primary/label-subtle #8e8778, 3.30:1" },
+  { selector: "#status-base .location-path", ratio: 3.30, measured: "ui/text/primary/label-subtle #8e8778, 3.30:1" },
+  { selector: "#status-base .build-identity", ratio: 3.30, measured: "ui/text/primary/label-subtle #8e8778, 3.30:1" },
+  { selector: "#status-base #stable-status", ratio: 3.05, measured: "ui/text/success/primary #16a34a, 3.05:1" },
+  { selector: "#status-base .disconnected-status", ratio: 3.30, measured: "ui/text/warning/primary #ea580c, 3.30:1" },
+  {
+    selector: "#status-base .auto-hide-strip-tab:not(.active) .auto-hide-strip-tab-label",
+    ratio: 2.76,
+    measured: "ui/text/primary/label-subtle #8e8778 on ui/surface/base/panel #e6e2db, 2.76:1",
+  },
+];
 
 /**
  * The built stylesheet is the artefact under test, so it is resolved by
@@ -212,6 +243,30 @@ test.describe("status bar contrast (WCAG 1.4.3 / 1.4.11)", () => {
           "does not, FOOTER_MARKUP has drifted from isonim_status_view.nim",
       ).toEqual([]);
 
+      if (theme === "default_white_theme_electron.css") {
+        // The design system's own Light failures are filed, not adjusted;
+        // everything else must clear the threshold here exactly as in dark.
+        const { unfiled, nowPassing } = unfiledLightFailures(
+          contrastFailures(probes),
+          LIGHT_FILED_PAIRS,
+        );
+        expect(
+          nowPassing,
+          "these filed light-theme pairs no longer fail at their registered " +
+            "ratio. If they now pass, the palette was fixed: remove them from " +
+            "LIGHT_FILED_PAIRS and from " + DESIGN_SYSTEM_CONTRAST_ISSUE + ". If " +
+            "they fail at another ratio, their colours changed: re-measure and " +
+            "re-file them" + "\n\n" + formatContrastTable(probes),
+        ).toEqual([]);
+        expect(
+          unfiled,
+          `\`${theme}\` paints part of the status bar too faintly to read, ` +
+            "and the pair is not one the design system is filed as failing.\n\n" +
+            formatContrastTable(probes),
+        ).toEqual([]);
+        return;
+      }
+
       expect(
         contrastFailures(probes),
         `\`${theme}\` paints part of the status bar too faintly to read.\n\n` +
@@ -231,29 +286,24 @@ test.describe("status bar contrast (WCAG 1.4.3 / 1.4.11)", () => {
     });
   }
 
-  test("verify_the_light_theme_is_not_a_different_bar", async ({ page }) => {
-    // Stated as an assertion because it is genuinely surprising, and because
-    // a future divergence must be a decision rather than a discovery: the
-    // light theme's status bar is the DARK one.  `default_white_theme.styl`
-    // redefines not a single `colors-*` token, so every design-system colour
-    // in this bar resolves identically in both builds.  If that stops being
-    // true, this bar needs measuring twice over on two different surfaces,
-    // and whoever changes it should find out from here.
-    const measured: Record<string, string> = {};
+  test("verify_the_light_theme_paints_the_light_palette", async ({ page }) => {
+    // The light theme's bar sits on the design system's LIGHT surface and the
+    // dark theme's on its Dark one — the same token, `ui/surface/primary/
+    // default`, in each mode. Until the light theme set `COLOR_MODE`, both
+    // builds painted this bar identically dark; this is the assertion that
+    // it no longer does, and that the light run above is measuring a
+    // different surface rather than the dark one twice.
+    const grounds: Record<string, string> = {};
     for (const theme of THEMES) {
       await layOutFooter(page, theme);
       const probes = await probeBarContrast(page);
-      measured[theme] = probes
-        .map((p) => `${p.selector} ${p.composited} on ${p.background}`)
-        .join("\n");
+      const bar = probes.find((p) => p.found && p.backgroundFrom === "div#status-base");
+      grounds[theme] = bar ? rgbToHex(bar.background) : "";
     }
-    expect(
-      measured[THEMES[1]],
-      "the light theme's status bar has diverged from the dark theme's. " +
-        "That may well be correct — but it means the palette now has two " +
-        "surfaces to satisfy, and the thresholds must be re-derived for the " +
-        "second one rather than assumed to carry over.",
-    ).toBe(measured[THEMES[0]]);
+    expect(grounds).toEqual({
+      [THEMES[0]]: designTokenHex(repoRoot, "dtColorsUiSurfacePrimaryDefault", "Dark"),
+      [THEMES[1]]: designTokenHex(repoRoot, "dtColorsUiSurfacePrimaryDefault", "Light"),
+    });
   });
 
   test("verify_the_guard_fires_for_colours_it_has_never_seen", async ({

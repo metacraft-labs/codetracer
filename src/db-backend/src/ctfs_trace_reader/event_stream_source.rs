@@ -299,29 +299,14 @@ impl SeekableEventStream {
 
 /// The `EventLogKind` an `events.dat` kind byte stands for: the recorder's
 /// exact `EventLogKind`, by ordinal (`trace-events.md` §"EventLogKind (u8
-/// enum)"). Values 14-255 are unassigned and refused, naming the value: a
+/// enum)"). Values 24-255 are unassigned and refused, naming the value: a
 /// substitute kind would report an event as something it was not.
 pub fn event_log_kind_from_ordinal(kind: u8) -> Result<EventLogKind, String> {
-    Ok(match kind {
-        0 => EventLogKind::Write,
-        1 => EventLogKind::WriteFile,
-        2 => EventLogKind::WriteOther,
-        3 => EventLogKind::Read,
-        4 => EventLogKind::ReadFile,
-        5 => EventLogKind::ReadOther,
-        6 => EventLogKind::ReadDir,
-        7 => EventLogKind::OpenDir,
-        8 => EventLogKind::CloseDir,
-        9 => EventLogKind::Socket,
-        10 => EventLogKind::Open,
-        11 => EventLogKind::Error,
-        12 => EventLogKind::TraceLogEvent,
-        13 => EventLogKind::EvmEvent,
-        other => {
-            return Err(format!(
-                "events.dat: event kind {other} is not an assigned EventLogKind (0-13)"
-            ));
-        }
+    EventLogKind::from_ordinal(kind).ok_or_else(|| {
+        format!(
+            "events.dat: event kind {kind} is not an assigned EventLogKind (0-{})",
+            EventLogKind::ALL.len() - 1
+        )
     })
 }
 
@@ -349,7 +334,7 @@ mod tests {
     /// enum)", by ordinal. Spelled out rather than derived from the enum, so
     /// that a reordering of the enum fails here instead of silently
     /// relabelling every recording.
-    const SPEC_KINDS: [(u8, EventLogKind); 14] = [
+    const SPEC_KINDS: [(u8, EventLogKind); 24] = [
         (0, EventLogKind::Write),
         (1, EventLogKind::WriteFile),
         (2, EventLogKind::WriteOther),
@@ -364,6 +349,16 @@ mod tests {
         (11, EventLogKind::Error),
         (12, EventLogKind::TraceLogEvent),
         (13, EventLogKind::EvmEvent),
+        (14, EventLogKind::WriteStderr),
+        (15, EventLogKind::Exec),
+        (16, EventLogKind::ReadEnv),
+        (17, EventLogKind::WriteEnv),
+        (18, EventLogKind::Stat),
+        (19, EventLogKind::CreateDir),
+        (20, EventLogKind::RemoveDir),
+        (21, EventLogKind::RemoveFile),
+        (22, EventLogKind::Rename),
+        (23, EventLogKind::ChangeDir),
     ];
 
     fn record(kind: u8) -> IoEventRecord {
@@ -388,11 +383,11 @@ mod tests {
         }
     }
 
-    /// Values 14-255 are unassigned, and a record carrying one is refused,
+    /// Values 24-255 are unassigned, and a record carrying one is refused,
     /// naming the value, rather than given a substitute kind.
     #[test]
     fn an_unassigned_kind_is_refused_by_value() {
-        for raw in [14u8, 15, 99, 255] {
+        for raw in [24u8, 25, 99, 255] {
             let err = io_event_record_to_db_event(&record(raw)).unwrap_err();
             assert!(
                 err.contains(&raw.to_string()) && err.contains("EventLogKind"),

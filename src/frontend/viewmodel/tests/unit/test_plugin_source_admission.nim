@@ -26,7 +26,7 @@
 ## matters — `under admission, neither effect happens` — asserts on the
 ## SENTINELS:
 ##
-##   * the READ sentinel holds the bytes the probe pulled out of `/etc/hostname`
+##   * the READ sentinel holds the known bytes the probe pulled out of its input file
 ##     with posix `open`/`read`, holding no `fs:read` grant;
 ##   * the EXEC sentinel is written BY `/bin/sh`, so its existence means `execv`
 ##     succeeded and a shell ran — not merely that `fork` returned.
@@ -85,6 +85,9 @@ const
   repoRoot = currentSourcePath().parentDir.parentDir.parentDir.parentDir
     .parentDir.parentDir
     ## `src/frontend/viewmodel/tests/unit/<this file>` — six hops.
+
+  ProbeReadBytes = "UNGRANTED-READ-FROM-A-REAL-FILE\n"
+  ProbeInputName = "ungranted-source.txt"
 
   ProbeDir = "src/frontend/viewmodel/tests/unit/plugin_probes"
   PosixProbe = "posix_raw_plugin"
@@ -173,6 +176,7 @@ proc compileProbe(probe, outBin: string): Ran =
   doAssert findExe("nim").len > 0, "nim is required to compile the probe"
   runBounded("nim", @["c", "--hints:off", "--warnings:off",
                     "--path:src/frontend/viewmodel",
+                    "-d:ProbeReadPath=" & (outBin.parentDir / ProbeInputName),
                     "--nimcache:" & outBin & ".cache",
                     "-o:" & outBin, probe],
              budget = CompileBudget)
@@ -257,6 +261,9 @@ suite "PLAT-8: a plugin that declines to use the SDK":
       work = repoRoot / "build" / ("plat8-admission-" & $getCurrentProcessId())
       removeDir(work)
       createDir(work)
+      # A host configuration path is not a portable prerequisite. These bytes
+      # must travel through the real ungranted read and into its sentinel.
+      writeFile(work / ProbeInputName, ProbeReadBytes)
 
   test "the posix exploit is REAL — it reads the file and it reaches the shell":
     ## THE POSITIVE TWIN FOR EVERYTHING BELOW. A gate that refuses a program
@@ -280,6 +287,7 @@ suite "PLAT-8: a plugin that declines to use the SDK":
     # probe's own summary line.
     ck fileExists(readSentinel)
     ck slurpIfAny(readSentinel).strip().len > 0
+    ck slurpIfAny(readSentinel) == ProbeReadBytes
     ck fileExists(execSentinel)
     ck slurpIfAny(execSentinel).contains("SHELL-REACHED")
 
@@ -336,7 +344,7 @@ suite "PLAT-8: a plugin that declines to use the SDK":
     # evidence of the write, at a path that did not exist before.
     ck fileExists(readSentinel)
     ck slurpIfAny(readSentinel).strip().len > 0
-    ck slurpIfAny(readSentinel).strip() == slurpIfAny("/etc/hostname").strip()
+    ck slurpIfAny(readSentinel) == ProbeReadBytes
     ck fileExists(writeSentinel)
     ck slurpIfAny(writeSentinel).contains("SYSIO-WRITE-OK")
 
@@ -384,6 +392,7 @@ suite "PLAT-8: a plugin that declines to use the SDK":
     let admittedRun = admitAndRun(true, sysioBin, admittedRead, admittedWrite)
     ck admittedRun.output.contains("SYSIO-PROBE-DONE")
     ck fileExists(admittedRead)
+    ck slurpIfAny(admittedRead) == ProbeReadBytes
     ck fileExists(admittedWrite)
     ck slurpIfAny(admittedWrite).contains("SYSIO-WRITE-OK")
 
@@ -449,6 +458,7 @@ suite "PLAT-8: a plugin that declines to use the SDK":
     let admittedRun = admitAndRun(true, posixBin, admittedRead, admittedExec)
     ck admittedRun.output.contains("POSIX-PROBE-DONE")
     ck fileExists(admittedRead)
+    ck slurpIfAny(admittedRead) == ProbeReadBytes
     ck fileExists(admittedExec)
     ck slurpIfAny(admittedExec).contains("SHELL-REACHED")
 
@@ -565,7 +575,7 @@ suite "PLAT-8: a plugin that declines to use the SDK":
     ## a silent skip — an early `return`, a guard that swallowed a case — would
     ## leave the suite green with fewer assertions than it claims. The number is
     ## written from a run, and it fails until somebody moves it deliberately.
-    check countedAssertions == 97
+    check countedAssertions == 100
     # DECLARE THE TALLY TO THE LANE. `run-nim-test-lane.sh` reads
     # `CHECKS: <n>` out of a suite's OUTPUT; a file that prints none is
     # counted as unmeasured and named as such, because a CASE count is

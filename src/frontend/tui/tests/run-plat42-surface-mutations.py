@@ -58,6 +58,7 @@ RUNTIME = "src/frontend/tui/app/runtime.nim"
 RULE = "src/common/flow_line_rule.nim"
 FLOWVM = "src/frontend/viewmodel/viewmodels/flow_vm.nim"
 SESSION = "src/frontend/viewmodel/headless_session.nim"
+BREAKPOINTS = "src/frontend/viewmodel/sdk/breakpoints.nim"
 
 LAWS = "src/frontend/tui/tests/test_plat42_laws.nim"
 FLOW_TERM = "src/frontend/tui/tests/test_plat42_flow_overlay_terminal.nim"
@@ -66,13 +67,14 @@ FACTS = "src/frontend/viewmodel/tests/unit/test_flow_line_facts.nim"
 EDITING = "src/frontend/gpui/tests/test_gpui_editing_surface.nim"
 LINE_TERM = "src/frontend/tui/tests/test_plat42_line_status_terminal.nim"
 
-SUBJECTS = [SURFACE, LEAVES, PANE, HOST, STDIO, RULE, FLOWVM, RUNTIME, SESSION]
+SUBJECTS = [SURFACE, LEAVES, PANE, HOST, STDIO, RULE, FLOWVM, RUNTIME, SESSION,
+            BREAKPOINTS]
 SUITES = [LAWS, FLOW_TERM, VALUES_TERM, FACTS, EDITING, LINE_TERM]
 
 ARMS = [
     # --- a surface drawn on EVERY row -------------------------------------
-    ("P1", SURFACE, "      if held and result.pointer == eptExecution:",
-     "      if held:", [EDITING],
+    ("P1", SURFACE, "  if held and result.pointer == eptExecution:",
+     "  if held:", [EDITING],
      "inline values drawn on every held row, not only the execution line"),
     ("B1", LEAVES,
      "  if row.pointer == eptExecution:\n    r.setStyle(column, \"background\", ExecutionRowBand)",
@@ -92,10 +94,21 @@ ARMS = [
      "          g.paint(row, codeCol + shown + AnnotationGap, span.text, span.style)",
      "          g.paint(row, codeCol, span.text, span.style)",
      [LAWS], "the terminal paints the value at a fixed column over the code"),
-    ("E3", LEAVES, "    r.appendChild(column, ann)",
-     "    r.setStyle(ann, \"position\", \"absolute\")\n    r.appendChild(column, ann)",
-     [LAWS], "GPUI draws the value absolutely positioned: no reflow"),
-    ("W1", LEAVES, '  r.setStyle(el, "white-space", "nowrap")', "  discard",
+    # E3 RE-AIMED 2026-10-17: the redesign places the chips ABSOLUTELY, as
+    # the desktop's flow does (`calc(<line length>ch + 1ch)`), so "made
+    # absolute" is no longer the overlay — the old mutation was a no-op and
+    # SURVIVED. LAW-E2's claim now rests on the computed `left`: the defect
+    # pins every chip at one fixed x, whatever the code's length.
+    ("E3", LEAVES,
+     "    r.setStyle(ann, \"left\", $(int(round(float(row.text.runeLen + 1) *",
+     "    r.setStyle(ann, \"left\", $(int(round(float(40) *",
+     [LAWS], "GPUI draws the value at a fixed x over the code: no reflow"),
+    # W1 RE-AIMED 2026-10-17: the redesign's other rows (calltrace, event
+    # log, file tree) are `nowrap` too, so the one-line needle occurred four
+    # times; it now quotes `renderEditorRow`'s comment line above it.
+    ("W1", LEAVES,
+     '  # it (`test_plat42_window.nim`).\n  r.setStyle(el, "white-space", "nowrap")',
+     '  # it (`test_plat42_window.nim`).\n  discard',
      [LAWS], "GPUI rows soft-wrap again: one line takes the rows below it"),
     # --- per-line status on the shipped terminal ---------------------------
     ("L1", HOST, "    points = s.points,\n", "", [LINE_TERM],
@@ -106,10 +119,12 @@ ARMS = [
     # breakpoint, column breakpoints keep their column) and hands them to
     # `sendBreakpoints` since PLAT-50; the `sendBreakpointLines(path, lines,
     # …)` line this needle named is gone, and the scan said so.
-    ("L2", SESSION,
-     "    anchors.add (line, 0)\n  s.sendBreakpoints(path, anchors, disabled)\n",
-     "    anchors.add (line, 0)\n  s.sendBreakpoints(path, "
-     "(if removing: @[] else: @[(line, 0)]), disabled)\n",
+    # The toggle is planned by the shared producer (`sdk/breakpoints`), which
+    # the headless session sends: dropping the file's other breakpoints from
+    # the plan is the same defect as sending only the toggled line.
+    ("L2", BREAKPOINTS,
+     "    else: result.add sp\n  if not removing:\n",
+     "    else: discard sp\n  if not removing:\n",
      [LINE_TERM],
      "a toggle sends only its own line: setBreakpoints clears the others"),
     ("L3", RUNTIME,
@@ -121,7 +136,10 @@ ARMS = [
      "    discard", [LAWS], "GPUI does not dim a not-taken line"),
     ("F3", PANE, "      if line in model.notTakenLines and shown > 0:",
      "      if false:", [FLOW_TERM], "the terminal does not dim a not-taken line"),
-    ("F4", FLOWVM, "  vm.styledLines.val = flowLineFacts(view)",
+    # F4 RE-AIMED 2026-10-23 (HSF-D5): the facts are read off the decoded
+    # window (`flowLineFactsOf(windows[0])`, the same rule over the same
+    # view) instead of a second private parse of the wire.
+    ("F4", FLOWVM, "  vm.styledLines.val = flowLineFactsOf(windows[0])",
      "  vm.styledLines.val = @[]", [FACTS, FLOW_TERM],
      "the flow window's per-line facts are discarded again (PLAT22-PG2)"),
     ("S1", STDIO, "    deliver()", "    discard", [FLOW_TERM],
@@ -131,10 +149,15 @@ ARMS = [
     # the stop-reconciled `InlineValueGate`, bound to `values` a few lines up,
     # so the line that hands them over is `inlineValues = values)`. RE-RUN,
     # not only re-recorded.
+    # RE-AIMED 2026-10-17: the host hands the pane the FLOW's values per
+    # line (`flowValuesByLine`, the rule GPUI's surface calls) after the
+    # names in scope, so the line that closes the call is `lineValues =
+    # flowValues)`; dropping it puts the terminal back on the execution-line-
+    # only rule GPUI no longer draws.
     ("V1", HOST,
-     "    inlineValues = values)",
-     "    inlineValues = @[])", [VALUES_TERM],
-     "the shipped terminal draws no inline value again"),
+     "    lineValues = flowValues)",
+     "    lineValues = initTable[int, seq[EditorValue]]())", [VALUES_TERM],
+     "the shipped terminal draws the flow's values on no line again"),
     # --- the declared survivor ---------------------------------------------
     ("N1", RULE, "      return true\n", "      return (true)\n", [FACTS],
      "behaviour-preserving: the DECLARED SURVIVOR"),

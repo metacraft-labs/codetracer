@@ -44,17 +44,17 @@
   "declaredAgentReadings": 6,
   "reviews": {
     "entry-shell": {
-      "reviewer": "claude-opus-5.5 (stabilisation re-reading, recording with the <toplevel> root)",
+      "reviewer": "claude-opus-5.5 (re-reading of the 2026-10-17 capture: shared first-run layout, editor at its declared 25% share)",
       "reviewerKind": "agent",
-      "reviewedAt": "2026-10-04",
+      "reviewedAt": "2026-10-17",
       "viewportPixels": "1920x1080",
-      "againstUiBundleMtime": "2026-10-04T20:29:19.263Z",
+      "againstUiBundleMtime": "2026-10-17T06:18:07.464Z",
       "score": 6,
-      "summary": "Expected elements: present. The transport strip with its icons, the source editor with its gutter at line 1, the call-trace pane (now rooted in `<toplevel> #0`, with `<__main__> #1` current) and an unstepped state pane that says `No local variables are present in the current point of execution` — the correct picture at the entry. A dense, consistent dark surface, but the editor no longer dominates: it is the narrowest of the three middle columns.",
+      "summary": "Expected elements: present. The debug-controls strip with its transport icons; FILES | VCS | TESTS at 20%, the editor at 25% with its gutter and the execution mark on line 1, and the 55% region with STATE | SCRATCHPAD beside CALLTRACE | AGENT ACTIVITY over EVENT LOG | TERMINAL OUTPUT — exactly the brief's 20 / 25 / 55 arrangement, with no Timeline tab. The state pane is correctly empty at the entry and says so. A dense, consistent dark surface.",
       "findings": [
         {
           "kind": "design",
-          "text": "Editor pane width: at 1920 the source column (≈470 px) is narrower than the state and call-trace columns beside it, so the pane the view is about is the one most cut at its right edge (`\"\"\"calc — the small, fast, determinis`)."
+          "text": "Editor pane, every long line: at its declared 25% (480 px at 1920) the editor cuts lines 2-25 of the module docstring at its right edge with no wrap, so the pane the view is about shows the least of its content of the three columns."
         },
         {
           "kind": "design",
@@ -63,55 +63,55 @@
       ]
     },
     "stepped-editor": {
-      "reviewer": "claude-opus-5.5 (stabilisation re-reading, recording with the <toplevel> root)",
+      "reviewer": "claude-opus-5.5 (re-reading of the 2026-10-17 capture: shared first-run layout, editor at its declared 25% share)",
       "reviewerKind": "agent",
-      "reviewedAt": "2026-10-04",
+      "reviewedAt": "2026-10-17",
       "viewportPixels": "1920x1080",
-      "againstUiBundleMtime": "2026-10-04T20:29:19.263Z",
+      "againstUiBundleMtime": "2026-10-17T06:18:07.464Z",
       "score": 6,
-      "summary": "Expected elements: present. One execution pointer, on line 44 (`def div(left, right):`) only, with the row's background distinguished; the state pane lists named values with types; the call trace marks `<__main__> #1` current; line numbers 22-65 are contiguous. The stop is at module level, so the variables are the module's.",
+      "summary": "Expected elements: present. One execution pointer, on line 44 (`def div(left, right):`), with the row's background distinguished; the state pane lists named values with types; the call trace marks `<__main__> #1` current; line numbers 22-65 are contiguous. The stop is at module level, so the variables are the module's.",
       "findings": [
         {
           "kind": "design",
-          "text": "State pane: the first seven rows are the interpreter's module attributes (`__builtins__`, `__cached__`, `__doc__`, `__file__`, `__loader__`, `__name__`, `__spec__`) before any name the program bound, pushing the program's own `add`, `mul`, `sub` to the bottom of the pane."
+          "text": "State pane: the first eight rows are the interpreter's module attributes (`__builtins__`, `__cached__`, `__doc__`, `__file__`, `__loader__`, `__name__`, `__package__`, `__spec__`) before any name the program bound, and `__builtins__` / `__doc__` / `__file__` run past the pane's right edge."
         },
         {
           "kind": "design",
-          "text": "Editor, def lines 29-44: the greyed inline chips read `__builtins__` — the interpreter's builtins dictionary, not a value the program bound — and are cut at the pane edge; state and call-trace text is cut mid-glyph (`<function add at 0x78a58cf5c4a0> Ob`) with no ellipsis."
+          "text": "Editor, def lines 29-44 and 53-57: the inline chips (`__builtins__`, `add <function add at 0`) are cut at the 25% editor's right edge, so they show only that a value exists."
         }
       ]
     },
     "advanced-state": {
-      "reviewer": "claude-opus-5.5 (stabilisation re-reading, recording with the <toplevel> root)",
+      "reviewer": "claude-opus-5.5 (re-reading of the 2026-10-17 capture: shared first-run layout, editor at its declared 25% share)",
       "reviewerKind": "agent",
-      "reviewedAt": "2026-10-04",
+      "reviewedAt": "2026-10-17",
       "viewportPixels": "1440x900",
-      "againstUiBundleMtime": "2026-10-04T20:29:19.263Z",
+      "againstUiBundleMtime": "2026-10-17T06:18:07.464Z",
       "score": 3,
       "summary": "Expected elements: DISTORTED at the narrower viewport. The scenario reached its state — line 56 inside the `OPERATIONS` table, inline value chips beside lines 53-57, a state pane that differs from `stepped-editor`'s (it now holds `div`) — but this block requires that at the narrower viewport nothing is clipped, and the value text is cut mid-glyph. Reported first and rated below 4 per the brief's own rule; `PLAT35-PD1` stands.",
       "findings": [
         {
           "kind": "missing-element",
-          "text": "Value text cut mid-glyph, the case this block names: state pane `add:<function add at 0x78a58c`, `__file__:\"/home/zahary/m/code`; call-trace pane `evaluate #3 (expression=`. No ellipsis, no scrollbar."
+          "text": "Value text cut mid-glyph, the case this block names: state pane `add:<function add at 0x7fffe862c400> Ob`, `__file__:\"/home/zahary/m/codetracer/tes`; call-trace pane `evaluate #3 (expression=\"2 + 3\") =>`, `apply_op #4 (symbol=\"+\", left=2, r`. No ellipsis, no scrollbar."
         },
         {
           "kind": "missing-element",
-          "text": "Truncated pane title: the right-hand stack's header reads `AGENT ACTI...` at 1440 wide."
+          "text": "Truncated control text at 1440 wide: the state pane's watch field reads `Enter a watch expres`, cut mid-word."
         },
         {
           "kind": "design",
-          "text": "The inline value chips beside lines 54-57 are clipped to `add <fun` / `sub <fun`, so the annotation shows only that a value exists."
+          "text": "The inline value chips beside lines 53-57 are clipped to `add <fun` / `sub <fun`, so the annotation shows only that a value exists."
         }
       ]
     },
     "returned-calltrace": {
-      "reviewer": "claude-opus-5.5 (stabilisation re-reading, recording with the <toplevel> root)",
+      "reviewer": "claude-opus-5.5 (re-reading of the 2026-10-17 capture: shared first-run layout, editor at its declared 25% share)",
       "reviewerKind": "agent",
-      "reviewedAt": "2026-10-04",
+      "reviewedAt": "2026-10-17",
       "viewportPixels": "1440x900",
-      "againstUiBundleMtime": "2026-10-04T20:29:19.263Z",
-      "score": 6,
-      "summary": "Expected elements: present. The call trace marks `main #2` current with `evaluate #3` behind it; the editor shows `main`'s body with the pointer on line 110, the statement after the `evaluate(...)` call; the state pane is populated and labelled. The capture is correct; the polish is held back by clipping and one overlap.",
+      "againstUiBundleMtime": "2026-10-17T06:18:07.464Z",
+      "score": 5,
+      "summary": "Expected elements: present. The call trace marks `main #2` current with `evaluate #3` behind it; the editor shows `main`'s body with the pointer on line 110, the statement after the `evaluate(...)` call; the state pane is populated and labelled. The capture is correct; the polish is held back by clipping in the narrow editor and one overlap.",
       "findings": [
         {
           "kind": "design",
@@ -119,18 +119,18 @@
         },
         {
           "kind": "design",
-          "text": "Narrow-viewport clipping as in every capture at 1440: `add:<function add at 0x78a58`, `evaluate #3 (expression=`."
+          "text": "Narrow-viewport clipping: at its 25% share (360 px at 1440) the editor cuts `results.append(va`, `print(\"%s = %d\" %` and the loop control's chips at its right edge; state and call-trace values are cut too (`add:<function add at 0x7fffe862c400> Ol`, `evaluate #3 (expression=\"2 + 3\") =>`)."
         }
       ]
     },
     "continued-event-log": {
-      "reviewer": "claude-opus-5.5 (stabilisation re-reading, recording with the <toplevel> root)",
+      "reviewer": "claude-opus-5.5 (re-reading of the 2026-10-17 capture: shared first-run layout, editor at its declared 25% share)",
       "reviewerKind": "agent",
-      "reviewedAt": "2026-10-04",
+      "reviewedAt": "2026-10-17",
       "viewportPixels": "1920x1080",
-      "againstUiBundleMtime": "2026-10-04T20:29:19.263Z",
+      "againstUiBundleMtime": "2026-10-17T06:18:07.464Z",
       "score": 7,
-      "summary": "Expected elements: present. The event-log table is populated with six distinct rows under `tick`, `#` and `output` headers, its footer reads `Rows 1 to 6 of 6`, the transport strip is present and the session ended without an error banner. A dense, legible table.",
+      "summary": "Expected elements: present. The event-log table is populated with six distinct rows under `tick`, `#` and `output` headers, its footer reads `Rows 1 to 6 of 6`, the transport strip is present and the session ended without an error banner. A dense, legible table, and the editor shows the final `return results` with its value chip.",
       "findings": [
         {
           "kind": "design",
@@ -143,11 +143,11 @@
       ]
     },
     "breakpoint-editor": {
-      "reviewer": "claude-opus-5.5 (stabilisation re-reading, recording with the <toplevel> root)",
+      "reviewer": "claude-opus-5.5 (re-reading of the 2026-10-17 capture: shared first-run layout, editor at its declared 25% share)",
       "reviewerKind": "agent",
-      "reviewedAt": "2026-10-04",
+      "reviewedAt": "2026-10-17",
       "viewportPixels": "1440x900",
-      "againstUiBundleMtime": "2026-10-04T20:29:19.263Z",
+      "againstUiBundleMtime": "2026-10-17T06:18:07.464Z",
       "score": 5,
       "summary": "Expected elements: present. A red breakpoint disc in the gutter on line 26 and the execution pointer on line 44 — different rows, different glyphs, different colours, both legible. This block does not carry the `nothing is clipped` clause, so the clipping below is a design finding rather than a missing element.",
       "findings": [
@@ -157,7 +157,7 @@
         },
         {
           "kind": "design",
-          "text": "Mid-glyph clipping at the narrower viewport, as in every other capture: `\"\"\"Integer multiplica`, `add:<function add at 0x78a58c`."
+          "text": "Mid-glyph clipping at the narrower viewport, in the 360 px editor and the panes beside it: `\"\"\"Integer addition,`, `add:<function add at 0x7fffe862c400> Ob`, `evaluate #3 (expression=\"2 + 3\") =>`."
         }
       ]
     }

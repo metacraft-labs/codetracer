@@ -29,6 +29,7 @@ import std/strutils
 
 import isonim/core/[signals, computation]
 import isonim/web/dom_api as dom
+import isonim/web/web_renderer
 
 import ../../src/common/noir_constraints
 import ../../src/frontend/viewmodel/viewmodels/constraints_vm
@@ -88,7 +89,8 @@ proc mountInto(containerId: string; report: ConstraintReport) =
   let container = dom.getElementById(dom.document, cstring(containerId))
   let vm = createConstraintsVM()
   vm.setReport(report)
-  mountIsoNimConstraintsPanel(container, vm)
+  discard dom.appendChild(dom.Node(container), dom.Node(
+    renderConstraintsPanel[WebRenderer, dom.Element](WebRenderer(), vm)))
 
 proc main() =
   # THE COMPILE'S OWN LISTING — what the pane shows after this change.
@@ -112,7 +114,8 @@ proc main() =
     "This build's Noir compiler does not print a constraint listing, so " &
     "the generated code cannot be shown for what it just compiled.")
   let degraded = dom.getElementById(dom.document, cstring"ct-degraded-pane")
-  mountIsoNimConstraintsPanel(degraded, vm)
+  discard dom.appendChild(dom.Node(degraded), dom.Node(
+    renderConstraintsPanel[WebRenderer, dom.Element](WebRenderer(), vm)))
 
   # A machine-readable line beside the painted DOM, so a probe can tell "the
   # pane painted the wrong thing" from "the fixture never loaded".

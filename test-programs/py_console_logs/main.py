@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 
@@ -83,7 +84,11 @@ def use_logging_module(logger: logging.Logger) -> None:
 
 
 def use_file_like_object() -> None:
-    dummy_file = Path("console_output.txt")
+    # A directory of its own, not the working directory: test suites record this
+    # program from several workers at once in one checkout, and a shared
+    # `console_output.txt` let one run unlink the file another was about to read.
+    scratch_dir = Path(tempfile.mkdtemp(prefix="py_console_logs-"))
+    dummy_file = scratch_dir / "console_output.txt"
     print(
         "10. print using print(..., file=handle) to write into a file",
         flush=True,
@@ -105,6 +110,7 @@ def use_file_like_object() -> None:
                 flush=True,
             )
     dummy_file.unlink(missing_ok=True)
+    scratch_dir.rmdir()
     sys.stdout.flush()
 
 

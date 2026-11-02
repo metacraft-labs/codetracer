@@ -17,11 +17,9 @@
 # primary checkout if it were.
 #
 # WHAT READS IT.  `clone-siblings` reads `$GITHUB_WORKSPACE/.github/sibling-repos`
-# only when its `siblings:` input is EMPTY.  Every setup-dev-env call site in
-# this repo passes an explicit `siblings:` subset today, so this file changes
-# no existing job -- `ci/test/sibling-provisioning-test.sh` asserts that, so
-# the day a job stops passing one is the day this list becomes its clone set,
-# deliberately and visibly.
+# only when its `siblings:` input is EMPTY. Most call sites pass an explicit
+# subset. The reprobuild Windows Rust job uses this declaration to materialize
+# source imports at their committed lock revisions before environment activation.
 #
 # `.github/workflows/launcher-recorder-e2e.yml` passes a subset of this list:
 # the gate needs ONE recorder per matrix row, not all three, and on the
@@ -45,3 +43,6 @@ codetracer-ruby-recorder
 codetracer-js-recorder
 codetracer-beam-recorder
 codetracer-native-backend
+
+# The Windows tree-sitter contribution is an immutable recipe source import.
+reprobuild-packages

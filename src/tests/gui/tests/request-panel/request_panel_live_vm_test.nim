@@ -68,8 +68,14 @@ proc findByClass(node: MockNode; cls: string): MockNode =
 
 proc makeStoreWithMock(autoRespond: bool = true):
     tuple[store: ReplayDataStore, mock: MockBackendService] =
+  ## A LIVE session's store: the tail (`ct/load-request-spans-since`) is a
+  ## live session's; a completed recording's panel reads its window instead
+  ## (`test_request_panel_window.nim`).
   let mock = newMockBackendService(autoRespond = autoRespond)
   let store = createReplayDataStore(mock.toBackendService())
+  var session = store.session.val
+  session.debugSessionMode = liveMcr
+  store.session.val = session
   (store, mock)
 
 proc spanJson(id: int; httpMethod = "GET"; url = "/"; statusCode = 200;
@@ -264,7 +270,7 @@ suite "RequestPanelVM in-flight rows":
       let (store, mock) = makeStoreWithMock()
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       let body = findByClass(panel, "request-table-body")
 
       # --- The recorder publishes the request as it STARTS ---------------

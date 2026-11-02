@@ -108,6 +108,33 @@ proc absoluteVariable(platform: StoreRootPlatform; env: StoreEnvironment;
     return ""
   value
 
+proc isValidAccount*(platform: StoreRootPlatform; account: string): bool =
+  ## Whether ``account`` can name a system partition (§2.1): a decimal uid on
+  ## POSIX systems, a string SID (``S-1-…``, decimal sub-authorities) on
+  ## Windows. Mirrors the reference library's rule.
+  if account.len == 0 or account.len > 184:
+    return false
+  case platform
+  of srpWindows:
+    if account.len < 5 or account[0 .. 3] != "S-1-":
+      return false
+    var part = 0
+    for c in account[4 .. ^1]:
+      if c == '-':
+        if part == 0:
+          return false
+        part = 0
+      elif c in {'0'..'9'}:
+        inc part
+      else:
+        return false
+    part > 0
+  of srpUnix, srpMacos:
+    for c in account:
+      if c notin {'0'..'9'}:
+        return false
+    true
+
 proc resolveCertificateStoreRoots*(platform: StoreRootPlatform;
                                    env: StoreEnvironment;
                                    account: string): CertificateStoreRoots =
@@ -164,6 +191,13 @@ proc resolveCertificateStoreRoots*(platform: StoreRootPlatform;
     result.problems.add "the system root cannot be resolved: this host " &
       "does not know the account's " &
       (if platform == srpWindows: "SID" else: "uid")
+    return
+  if not isValidAccount(platform, account):
+    # An account id that is not a decimal uid / a string SID could name a
+    # path outside the system root (`..`, a separator). The same refusal as
+    # the reference library's `resolveRoots`.
+    result.problems.add "the system root cannot be resolved: `" & account &
+      "` is not a valid account id"
     return
   if explicitSystem.len > 0:
     result.system = joinOn(platform, explicitSystem, account)

@@ -163,7 +163,7 @@ async function measureStrip(page: any, themeCss: string, bundle: string) {
   await page.addStyleTag({ path: themeCss });
   await page.addScriptTag({ path: bundle });
 
-  return await page.evaluate(() => {
+  return await page.evaluate(async () => {
     const host = document.getElementById("host")!;
     // The real Nim view, not a transcription of it.
     (window as any).mountCodeTracerStory(
@@ -262,14 +262,33 @@ async function measureStrip(page: any, themeCss: string, bundle: string) {
 
     // The inert treatment, measured rather than assumed: force one control
     // disabled and read the colour the cascade actually gives it.
+    //
+    // Every `button` animates `color` (`BUTTON_TRANSITION_TIMING`,
+    // components/button.styl: 250 ms after a 100 ms delay), so the computed
+    // colour read in the same task as the attribute change is the
+    // transition's START value — the previous state's colour. Read there, the
+    // check compared the enabled colour with itself and reported the disabled
+    // rule as dropped in both themes while it applied. `settledColor` reads
+    // the END state instead: reading the computed style flushes the change,
+    // which is what starts the transition, and every animation then running
+    // on the element (a `CSSTransition` is one) is awaited before the colour
+    // is read again. The cascade is not touched, so a disabled rule that stops
+    // applying still settles on the enabled colour and fails below.
+    // https://drafts.csswg.org/css-transitions-1/#starting
+    // https://drafts.csswg.org/web-animations-1/#dom-animatable-getanimations
+    const settledColor = async (el: HTMLElement): Promise<string> => {
+      void getComputedStyle(el).color;
+      await Promise.all(el.getAnimations().map((a) => a.finished));
+      return getComputedStyle(el).color;
+    };
     const probe = host.querySelector("#continue-image") as HTMLElement | null;
     let enabledInk: string | null = null;
     let disabledInk: string | null = null;
     if (probe) {
       probe.removeAttribute("disabled");
-      enabledInk = getComputedStyle(probe).color;
+      enabledInk = await settledColor(probe);
       probe.setAttribute("disabled", "true");
-      disabledInk = getComputedStyle(probe).color;
+      disabledInk = await settledColor(probe);
       probe.removeAttribute("disabled");
     }
 

@@ -537,15 +537,23 @@ ARMS = [
     Arm(
         id="G1",
         path=LANE_FILES,
-        find="\t\t\t\t'/test_project_action_runner\\.nim$'\n",
-        replace="\t\t\t\t'/test_project_action_runner\\.nim$' \\\n\t\t\t\t'/test_sync\\.nim$'\n",
+        # The last two entries of the wasm lane's list, not the last one
+        # alone: since K19 both `vm-unit-js` and `vm-unit-wasm` end with
+        # `test_native_file_tree_operations`, so the one-line spelling has two
+        # targets (§16). Re-aimed 2026-10-26; it was the single line
+        # `test_project_action_runner` while that ended the list.
+        find=("\t\t\t\t'/test_project_action_runner\\.nim$' \\\n"
+              "\t\t\t\t'/test_native_file_tree_operations\\.nim$'\n"),
+        replace=("\t\t\t\t'/test_project_action_runner\\.nim$' \\\n"
+                 "\t\t\t\t'/test_native_file_tree_operations\\.nim$' \\\n"
+                 "\t\t\t\t'/test_sync\\.nim$'\n"),
         grader=G_PARITY_ONE,
         killer="(contract 1 — the documented exclusion set)",
         expect="script-fails",
-        why="an UNDOCUMENTED seventh exclusion — a suite leaving the wasm "
+        why="an UNDOCUMENTED extra exclusion — a suite leaving the wasm "
             "lane with nobody writing down why, which is the exact shape "
             "PLAT-17's risk section names",
-        control_name="the six rejections are reordered",
+        control_name="two adjacent rejections are swapped",
         control_find="\t\t\t\t'/test_sdk_facade_boundary\\.nim$' \\\n\t\t\t\t'/test_plugin_io_sdk\\.nim$' \\\n",
         control_replace="\t\t\t\t'/test_plugin_io_sdk\\.nim$' \\\n\t\t\t\t'/test_sdk_facade_boundary\\.nim$' \\\n",
     ),
@@ -556,16 +564,19 @@ ARMS = [
         # file — the `vm-unit-js` lane rejects the same suite — and an arm
         # whose needle has two targets hits neither (§16's "exactly once, not
         # at least once"). The needle scan caught it on the first run.
+        # Re-aimed 2026-10-26: the second line no longer ends the list (K19
+        # appended `test_native_file_tree_operations`), so it carries the
+        # continuation backslash; the pair is still unique to the wasm lane.
         find=("\t\t\t\t'/test_platform_desktop_native\\.nim$' \\\n"
-              "\t\t\t\t'/test_project_action_runner\\.nim$'\n"),
-        replace="\t\t\t\t'/test_project_action_runner\\.nim$'\n",
+              "\t\t\t\t'/test_project_action_runner\\.nim$' \\\n"),
+        replace="\t\t\t\t'/test_project_action_runner\\.nim$' \\\n",
         grader=G_PARITY_ONE,
         killer="(contract 1 — the documented exclusion set)",
         expect="script-fails",
         why="a STALE exclusion — a file still on the documented list that "
             "the lane no longer excludes. The other direction of contract 1, "
             "and the one that keeps an exclusion from outliving its reason",
-        control_name="the six rejections are reordered",
+        control_name="two adjacent rejections are swapped",
         control_find="\t\t\t\t'/test_plugin_grant_lifecycle\\.nim$' \\\n\t\t\t\t'/test_plugin_source_admission\\.nim$' \\\n",
         control_replace="\t\t\t\t'/test_plugin_source_admission\\.nim$' \\\n\t\t\t\t'/test_plugin_grant_lifecycle\\.nim$' \\\n",
     ),

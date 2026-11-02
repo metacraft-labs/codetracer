@@ -1,0 +1,7 @@
+{
+  "D1": "not bytes.contains(\"\\ePtmux;\")",
+  "D2": "asked < 900",
+  "D3": "j.axis(\"linkConservative\").getBool",
+  "D4": "screen.contains(\"slow link\")",
+  "D5": "caps.identity.name == \"kitty\" and caps.identity.via == @[\"tmux 3.4\"]"
+}

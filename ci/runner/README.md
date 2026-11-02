@@ -1,5 +1,9 @@
 # Self-hosted macOS runner defects — the register
 
+<!-- cspell:words chdir setsid reprobuild runquotad RUNQUOTA extraheader mmin -->
+<!-- cspell:words uncleanable codesign materialises extconf maturin DLEXT -->
+<!-- cspell:words importability -->
+
 These runners are **persistent**. Their home directory, work directory, git
 config, nix store and background daemons survive between jobs, so a defect one
 job leaves behind is inherited by whatever runs next — usually a different job,
@@ -36,7 +40,7 @@ recounted from memory, and memory rounds down.
 
 **Symptom.** Any `repro build` on the runner dies with:
 
-```
+```text
 daemon-hosted build failed: No such file or directory
 ```
 
@@ -165,7 +169,9 @@ afterwards.
 
 ---
 
-## 5 & 6. `/usr/bin` missing from a raw `run:` step's PATH → exit 127 — CLOSED per site, STRUCTURALLY OPEN
+## 5 & 6. `/usr/bin` missing from a raw `run:` step's PATH → exit 127
+
+**CLOSED per site, STRUCTURALLY OPEN.**
 
 These were logged as two defects and are one root cause, which is why they kept
 recurring under new names.
@@ -234,9 +240,13 @@ which says the maturin/pyo3 extension was ever installed.
 > recorder, probe the file its *loader* opens, and check the probe against the
 > loader's own resolution order.
 
-**State.** Both probes now track the compiled artefact and resolve the platform
+**State.** The Ruby probe tracks the compiled artefact and resolves the platform
 DLEXT (`.bundle` on macOS — `.so` is the Linux spelling and was wrong on every
-Mac). `test-non-gui` and `test-ui-tests` build the ruby extension; `test-ui-tests`
+Mac). The Python probe reports local package files as filesystem evidence only:
+files present do not prove importability, and files absent do not exclude a
+recorder inherited from the base environment. It never executes the interpreter
+at shell entry, and reports import availability as unverified. `test-non-gui` and
+`test-ui-tests` build the ruby extension; `test-ui-tests`
 builds the JS recorder. Both new steps assert the **artefact**, not the exit
 code. `scripts/build-siblings.sh`'s hard-coded `.so` was made platform-aware,
 since otherwise a green macOS build reports its own artefact missing.
@@ -246,7 +256,7 @@ the recorder into `.python-recorder-venv` on every `nix develop`, and writes
 `.broken` (which `scripts/test-python-version-alignment.sh` fails on) when it
 cannot. Asserting one would be a false failure. Checked, not assumed.
 
-**Gates.** `ci/test/detect-siblings-recorder-artifacts-test.sh` (13 assertions)
+**Gates.** `ci/test/detect-siblings-recorder-artifacts-test.sh` (16 assertions)
 and `ci/verdict/recorder-clone-implies-build.py` with
 `ci/test/recorder-clone-implies-build-test.sh` (12 assertions), both in the bash
 lint lane. Every "must warn" is paired with a "must not warn", because a probe

@@ -136,25 +136,26 @@ proc buildSendToWindowMenuItems*(
   let winLen = cast[int](winArray.length)
 
   for i in 0 ..< winLen:
-    let win = winArray[i]
-    let windowId = win["id"].to(int)
-    let windowTitle = win["title"].to(cstring)
-    let winSessionId = win["sessionId"].to(int)
-    # Capture for closure.
-    let capturedWindowId = windowId
-    let capturedSessionId = sessionId
-    let capturedItem = contentItem
+    closureScope:
+      let win = winArray[i]
+      let windowId = win["id"].to(int)
+      let windowTitle = win["title"].to(cstring)
+      let winSessionId = win["sessionId"].to(int)
+      # Capture for closure.
+      let capturedWindowId = windowId
+      let capturedSessionId = sessionId
+      let capturedItem = contentItem
 
-    if winSessionId == sessionId:
-      # Compatible window — same session/trace.
-      let label = cstring(fmt"Send to: {windowTitle}")
-      items.add(ContextMenuItem(
-        name: label,
-        hint: cstring"",
-        handler: proc(ev: kdom.Event) =
-          detachAndSendPanel(capturedItem, capturedWindowId, capturedSessionId)
-      ))
-    # Incompatible windows (different session) are silently omitted.
+      if winSessionId == sessionId:
+        # Compatible window — same session/trace.
+        let label = cstring(fmt"Send to: {windowTitle}")
+        items.add(ContextMenuItem(
+          name: label,
+          hint: cstring"",
+          handler: proc(ev: kdom.Event) =
+            detachAndSendPanel(capturedItem, capturedWindowId, capturedSessionId)
+        ))
+      # Incompatible windows (different session) are silently omitted.
 
   # Always offer "Send to New Window" which creates a secondary window
   # bound to this panel's session.

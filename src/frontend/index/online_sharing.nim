@@ -2,6 +2,7 @@ import
   std / [ async, jsffi, json, options, strutils, sequtils ],
   results,
   traces,
+  tab_answers,
   electron_vars,
   ../[ types ],
   ../lib/[ jslib, electron_lib ],
@@ -60,12 +61,14 @@ proc onUploadTraceFile*(sender: JsObject, response: UploadTraceArg) =
     onData = proc(data: string) =
       let jsonLine = parseJson(data.split("\n")[^2].strip())
       if jsonLine.hasKey("progress"):
+        # Every answer of an upload goes to the tab that started it
+        # (`tab_answers`).
         mainWindow.webContents.send("CODETRACER::upload-trace-progress",
-        UploadProgress(
+        answerFor(response.toJs, UploadProgress(
           id: response.trace.recordingId,
           progress: jsonLine["progress"].getInt(),
           msg: jsonLine["message"].getStr("")
-        )),
+        ).toJs)),
     onDone = proc(success: bool, result: string) =
       if success:
         # AS-2: `ct upload`'s machine-readable result is the LAST non-empty
@@ -97,18 +100,20 @@ proc onUploadTraceFile*(sender: JsObject, response: UploadTraceArg) =
           # as an empty result rather than crashing the IPC handler, which is
           # what an unguarded `parseJson` here used to do.
           discard
-        mainWindow.webContents.send("CODETRACER::upload-trace-file-received", js{
+        mainWindow.webContents.send("CODETRACER::upload-trace-file-received", answerFor(response.toJs, js{
           "argId": cstring(response.trace.program & ":" & $response.trace.recordingId),
           "value": uploadData
-        })
+        }))
       else:
-        mainWindow.webContents.send("CODETRACER::uploaded-trace-file-received", js{
+        mainWindow.webContents.send("CODETRACER::uploaded-trace-file-received", answerFor(response.toJs, js{
           "argId": cstring(response.trace.program & ":" & $response.trace.recordingId),
           "value": UploadedTraceData(shareUrl: "Errored")
-        })
+        }))
   )
 
 proc onDownloadTraceFile*(sender: js, response: jsobject(downloadKey = seq[cstring])) {.async.} =
+  # The download, and the recording it loads, answer the tab that asked.
+  startLoadFor(response.toJs)
   let res = await readProcessOutput(
     codetracerExe.cstring,
     @[cstring"download"].concat(response.downloadKey)
@@ -118,12 +123,15 @@ proc onDownloadTraceFile*(sender: js, response: jsobject(downloadKey = seq[cstri
     # M-REC-3: ``ct download`` prints the UUIDv7 recording-id of the
     # imported trace on stdout (one line).  Take it verbatim.
     let recordingId = cstring(($res.value).strip())
-    await prepareForLoadingTrace(recordingId, nodeProcess.pid.to(int))
-    await loadExistingRecord(recordingId)
-    mainWindow.webContents.send "CODETRACER::successful-download"
+    # The download itself succeeded; a replay that then does not start is
+    # reported as a load failure, not as a successful download.
+    if await prepareForLoadingTrace(recordingId, nodeProcess.pid.to(int)):
+      await loadExistingRecord(recordingId)
+      mainWindow.webContents.send "CODETRACER::successful-download",
+        forLoadTab(js{})
   else:
     mainWindow.webContents.send "CODETRACER::failed-download",
-      js{errorMessage: cstring"codetracer server down or wrong download key"}
+      forLoadTab(js{errorMessage: cstring"codetracer server down or wrong download key"})
 
 proc onDeleteOnlineTraceFile*(sender: js, response: DeleteTraceArg) {.async.} =
   # M-REC-8: forward the UUIDv7 ``recording_id`` via ``--id=`` (the
@@ -143,10 +151,10 @@ proc onDeleteOnlineTraceFile*(sender: js, response: DeleteTraceArg) {.async.} =
 
   mainWindow.webContents.send(
     "CODETRACER::delete-online-trace-file-received",
-    js{
+    answerFor(response.toJs, js{
       "argId": cstring($response.recordingId & ":" & response.controlId),
       "value": res.isOk
-    }
+    })
   )
 
 proc onSendBugReportAndLogs*(sender: js, response: BugReportArg) {.async.} =

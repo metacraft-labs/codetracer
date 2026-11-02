@@ -9,7 +9,7 @@
  *
  *   1. The frontend `data.services.debugger.addColumnBreakpoint(path,
  *      line, column, condition)` API accepts the optional condition
- *      parameter and stores it on the `breakpointTable` entry
+ *      parameter and stores it on the the session's breakpoint rows entry
  *      alongside the column.
  *   2. The frontend's `dapSetBreakpoints` ships both the column and
  *      the condition on the DAP wire so the replay-server registers
@@ -191,7 +191,7 @@ async function readBreakpoint(
   return editor.page.evaluate(
     ({ path: p, line: l }) => {
       const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-      const table = w?.data?.services?.debugger?.breakpointTable;
+      const table = (w?.ctBreakpointRows ? w.ctBreakpointRows().reduce((t: any, r: any) => { (t[r.path] ??= {})[r.line] = r; return t; }, {}) : undefined);
       if (!table) return null;
       const aliases = [p];
       if (p.startsWith("/private/var/")) aliases.push(p.slice("/private".length));
@@ -234,13 +234,10 @@ async function getCurrentLine(editor: EditorPane): Promise<number | null> {
   });
 }
 
-/** Clear a breakpoint at `(path, line)` by directly mutating the
- *  frontend's `breakpointTable` slot.  The Nim `deleteBreakpoint`
- *  proc is name-mangled in the compiled JS bundle and not directly
- *  callable from `page.evaluate`, so we synthesise the cleanup by
- *  removing the table entry — the next `addColumnBreakpoint` call
- *  rewrites the slot anyway, but doing a clean wipe here keeps the
- *  test's intermediate state easy to reason about. */
+/** Clear a breakpoint at `(path, line)` through `ctDeleteBreakpoint`, the
+ *  page's test hook into the session's breakpoints (the Nim service procs
+ *  are name-mangled in the compiled bundle and not callable from
+ *  `page.evaluate`). */
 async function clearBreakpointAt(editor: EditorPane, line: number): Promise<void> {
   await editor.page.evaluate(
     ({ path: p, line: l }) => {
@@ -251,20 +248,7 @@ async function clearBreakpointAt(editor: EditorPane, line: number): Promise<void
       if (p.startsWith("/private/var/")) aliases.push(p.slice("/private".length));
       else if (p.startsWith("/var/")) aliases.push("/private" + p);
       for (const alias of aliases) {
-        if (dbg.breakpointTable?.[alias]?.[l]) {
-          delete dbg.breakpointTable[alias][l];
-          break;
-        }
-      }
-      // Also drop the matching entry from the point list so the
-      // gutter marker disappears.
-      const pointList = w?.data?.pointList?.breakpoints;
-      if (Array.isArray(pointList)) {
-        for (let i = pointList.length - 1; i >= 0; i--) {
-          if (pointList[i] && pointList[i].line === l) {
-            pointList.splice(i, 1);
-          }
-        }
+        if (w.ctDeleteBreakpoint?.(alias, l)) break;
       }
     },
     { path: editor.filePath, line },
@@ -312,7 +296,7 @@ test.describe("M9 — Column-aware conditional breakpoint", () => {
     await addColumnBreakpointWithCondition(editor, fixture.loopBodyLine, probedCol, "i > 1");
 
     // The frontend MUST store BOTH the column and the condition on
-    // the `breakpointTable` entry.
+    // the the session's breakpoint rows entry.
     const bp = await readBreakpoint(editor, fixture.loopBodyLine);
     expect(bp, "M9 breakpoint must be registered").not.toBeNull();
     expect(bp!.column).toBe(probedCol);

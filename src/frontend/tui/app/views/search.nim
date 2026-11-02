@@ -52,6 +52,8 @@
 
 import std/strutils
 
+from codetracer_embed import matchesOf, MatchOptions, MatchSpan
+
 # `textCells` / `fitCells` live in `header.nim` — the one width-measurement
 # rule the whole shell shares, exactly as `status_bar.nim` records. A second
 # copy of it is how a highlight's columns and a status line's columns come
@@ -125,30 +127,21 @@ proc matchesInLine*(line: string; query: string; caseSensitive: bool;
   ## Every NON-OVERLAPPING occurrence of `query` in one line, appended to
   ## `into`, and how many were found.
   ##
-  ## NON-OVERLAPPING is a decision and it is Vim's: `aa` in `aaaa` is two
-  ## matches, not three. Overlapping would make `n` visit a position the
-  ## highlight already covers, and the count in the status bar would exceed the
-  ## number of places a reader can see.
-  ##
-  ## The scan is over CELLS, not bytes: `column` and `length` index the same
-  ## space `styled_row.cellSlice` does, so a match found here can be
+  ## **THE MATCHING IS THE EDITOR'S ONE MATCHER** (PLAT-70 Part C,
+  ## Find-And-Incremental-Search.md §2 principle 3, FS-1):
+  ## `find_match.matchesOf`, which the find session, `search-next` and the
+  ## highlights also ask. This module only turns its byte spans into the
+  ## CELLS `styled_row.cellSlice` indexes, so a match found here is
   ## highlighted without a second width calculation that could disagree.
+  ## NON-OVERLAPPING is that matcher's rule and Vim's: `aa` in `aaaa` is two
+  ## matches, not three.
   result = 0
-  if query.len == 0:
-    return
-  let haystack = if caseSensitive: line else: line.toLowerAscii
-  let needle = if caseSensitive: query else: query.toLowerAscii
-  var byteAt = 0
-  while byteAt <= haystack.len - needle.len:
-    let found = haystack.find(needle, byteAt)
-    if found < 0:
-      break
+  for m in matchesOf(line, query, MatchOptions(caseSensitive: caseSensitive)):
     into.add SearchMatch(
       line: lineNumber,
-      column: cellWidthOf(line[0 ..< found]),
-      length: cellWidthOf(line[found ..< found + needle.len]))
+      column: cellWidthOf(line[0 ..< m.a]),
+      length: cellWidthOf(line[m.a ..< m.b]))
     inc result
-    byteAt = found + max(1, needle.len)
 
 proc findMatches*(lines: openArray[string]; query: string;
                   caseSensitive = false): seq[SearchMatch] =

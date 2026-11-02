@@ -717,7 +717,7 @@ proc checkViewModel(d: Diagnostics; lang: LanguageRow;
     let store = createReplayDataStore(mock.toBackendService())
     let vm = createRequestPanelVM(store)
     let r = MockRenderer()
-    let panel = renderRequestPanel(r, vm)
+    let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
     let tableBody = findByClass(panel, "request-table-body")
     if tableBody == nil:
       d.note("view", "the panel rendered no request-table-body")

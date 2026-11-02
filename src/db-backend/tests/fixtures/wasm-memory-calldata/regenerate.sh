@@ -288,7 +288,13 @@ missing=()
 # shellcheck disable=SC1091 # resolved at runtime from the checkout root
 source "$CODETRACER_ROOT/ci/lib/recording-dump.sh"
 resolve_ct_print
-if [ ${#missing[@]} -gt 0 ] || ! recording_full_json "$OUT_DIR/ledger-settle.ct" | grep -q 'wasm-host-state'; then
+# The dump is captured first and searched as a here-string, not piped into
+# `grep -q`: under pipefail an early match kills ct-print with SIGPIPE and the
+# pipeline reports the match as a failure (ci/test/grep-q-pipefail-gate.sh).
+# Capturing also keeps ct-print's own exit status in the verdict.
+if [ ${#missing[@]} -gt 0 ] ||
+	! host_state_dump="$(recording_full_json "$OUT_DIR/ledger-settle.ct")" ||
+	! grep -q 'wasm-host-state' <<<"$host_state_dump"; then
 	echo "[regenerate] the recording carries no host-state record (or ct-print is missing)." >&2
 	echo "[regenerate] This fixture exists to demonstrate spec §3.3/§3.4;" >&2
 	echo "[regenerate] a recording without that state is not one." >&2

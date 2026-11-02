@@ -141,7 +141,11 @@ suite "PLAT-47 deliverable 6: the drop indication on a real terminal":
     # Found when PLAT-48's footer strip was absent from such a document.
     removeDir(state)
     createDir(state)
-    var sess = newTuiTest(tuiBinary(), @[resolved.tracePath])
+    # The scrollbars are pinned to a look that does not change with time:
+    # bars that fade after the pointer leaves them would make the colours
+    # before the drag and after `Esc` differ by the fade, not the drop.
+    var sess = newTuiTest(tuiBinary(), @["--scrollbar-fade=off",
+                                         resolved.tracePath])
       .width(Cols).height(Rows)
       .envRemove("TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE", "TMUX")
       .envSet("TERM", "xterm-256color").envSet("LANG", "en_US.UTF-8")

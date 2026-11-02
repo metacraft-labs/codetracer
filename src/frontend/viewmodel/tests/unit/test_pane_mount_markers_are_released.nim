@@ -46,26 +46,30 @@
 ## heuristic, not a finding, so `clearsMarkerOnRegister` is now checked beside
 ## `releasesItsMarker` and both count as released.
 ##
-## ## The debt list is the point
+## ## The panel host removed the shape
 ##
-## Seven panes still carry the defect, down from fifteen. They are listed,
-## counted, and the count is asserted — so the list can only shrink
-## deliberately, and a NEW pane that arrives with a marker and no release fails
-## immediately rather than joining a silent majority.
+## Shared-DOM-Front-Ends D4/D6 mount panes from the code that creates their
+## containers (`ui/panel_host`), which keeps no marker: a mount lives and dies
+## with its container. Every pane converted that way dropped its marker table,
+## so this scan now finds one pane where it found eighteen, and the panes the
+## panel host mounts are asserted to hold none — a marker reintroduced into
+## one of them is the defect coming back.
+##
+## ## No pane holds one now
+##
+## HSF-D6 mounted the last panes through the panel host and moved the editor's
+## latch onto the editor component itself (`renderedByIsoNim`), which dies with
+## the component. So the scan now asserts that NO `ui/*.nim` declares an
+## `isoNim…MountedIds` table: a marker reappearing anywhere is the defect
+## coming back. The predicate is kept honest by positive controls on
+## synthetic source, so an empty result cannot come from a scan that has
+## stopped matching.
 ##
 ## ## WHAT THIS SCAN STILL CANNOT SEE, and it cuts both ways
 ##
 ## It answers "does a release site exist at all", never "does it fire on every
 ## teardown path". A pane releasing at two sites is not proof it releases at
 ## all of them, so absence from the debt list is not a clearance.
-##
-## And in the other direction, three panes on the list below DO clear their
-## marker somewhere — `ui/editor.nim:385`, `ui/unified_diff.nim:360` and
-## `ui/filesystem.nim:535` — just not from `register` or `unregister`. They stay
-## on the list rather than being cleared by a widened pattern, because a
-## `jsDelete` on some other code path is exactly the thing this scan is not
-## competent to judge. Widening the predicate to match them would trade a
-## known-incomplete list for a list that is wrong and looks complete.
 ##
 ## Compile and run:
 ##   nim c -r --path:src/frontend/viewmodel \
@@ -79,58 +83,29 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 48
-  ## Was 46. +2 for the two polarities of the declaration predicate in
-  ## `panesWithMountMarkers` (the "the scan finds ..." case): a file that only
-  ## MENTIONS a marker table in prose is not a pane, and a pane that declares
-  ## one with a pragma between name and type still is.
-  ## Was 42. The debt list shrank from 15 to 7 (-16 assertions across the two
-  ## loops over it) and two new cases were added: six panes x 2 assertions for
-  ## the unregister-override fixes, two panes x 3 for the register-side clear,
-  ## and two controls on the widened predicate (+20).
+const ExpectedAssertions = 35
+  ## The directory guard, the empty-scan assertion, three predicate controls,
+  ## and two per panel-host pane (15 x 2).
 
 const UiDir = "src/frontend/ui"
 
-const KnownMissingRelease = [
-  ## Panes that carry a mounted-marker and do NOT release it. Every one of
-  ## these comes back blank after a session switch or a panel close.
-  ##
-  ## This is a DEBT LIST, not a permission list. Shrink it by adding the
-  ## `unregister` override — `ui/constraints.nim` is the worked example, and
-  ## `ui/scratchpad.nim` is the original — or by clearing the marker on
-  ## `register`, as `ui/verification.nim` and `ui/command.nim` do.
-  ##
-  ## Was fifteen. Six were fixed with the `unregister` override
-  ## (`calltrace_editor`, `low_level_code`, `repl`, `request_panel`,
-  ## `step_list`, `trace_log`), `command` was fixed on the register side, and
-  ## `verification` was never broken — it already cleared on register, and the
-  ## old predicate could not see it.
-  ##
-  ## The seven that remain are NOT the same shape as the six that were fixed,
-  ## which is why they were not swept with them:
-  ##   * `agent_activity`, `agent_workspace`, `unified_diff` and `vcs` key their
-  ##     component refs by id in a `JsAssoc` rather than holding one write-once
-  ##     ref, so "release the slot" means something different for each;
-  ##   * `no_source` carries a marker and no component ref at all;
-  ##   * `editor`, `unified_diff` and `filesystem` already `jsDelete`/`del`
-  ##     their marker on SOME path, so the question for them is which teardowns
-  ##     reach it — which this scan cannot answer.
-  ## Each needs reading, not a template.
+const PanelHostPanes = [
+  ## Panes mounted through `ui/panel_host`, which keeps no marker. Each held
+  ## one before; a marker reappearing in one is the defect coming back.
   "agent_activity",
   "agent_workspace",
-  "editor",
+  "calltrace_editor",
+  "command",
+  "constraints",
   "filesystem",
-  "no_source",
+  "repl",
+  "request_panel",
+  "scratchpad",
+  "step_list",
+  "test_results",
+  "trace_log",
   "unified_diff",
   "vcs",
-]
-
-const ClearsOnRegister = [
-  ## Panes that clear the mounted marker in `register` instead of overriding
-  ## `unregister`. Named explicitly rather than matched by a loose pattern: the
-  ## claim is about these two files, checked below against their source, and a
-  ## third pane cannot join by accident.
-  "command",
   "verification",
 ]
 
@@ -183,124 +158,33 @@ proc panesWithMountMarkers(): seq[string] =
       result.add paneName(path)
   result.sort()
 
-proc overridesUnregister(pane: string): bool =
-  ## True when the pane overrides `unregister`.
-  let source = readFile(UiDir / (pane & ".nim"))
-  source.contains("method unregister*(self: ")
+suite "no pane keeps a mount marker":
 
-proc clearsMarkerOnRegister(pane: string): bool =
-  ## True when `register` itself drops the marker for the incoming id.
-  ##
-  ## Matched on the `jsDelete` of the pane's own `MountedIds` table keyed by
-  ## `self.id`, which is the whole of the idiom, rather than on the mere
-  ## presence of `jsDelete` — `ui/low_level_code.nim:332` `jsDelete`s a DOM
-  ## node and has nothing to do with mount markers.
-  let source = readFile(UiDir / (pane & ".nim"))
-  for line in source.splitLines:
-    let t = line.strip()
-    if t.startsWith("discard jsDelete(isoNim") and
-        t.contains("MountedIds[self.id])"):
-      return true
-  false
-
-proc releasesItsMarker(pane: string): bool =
-  ## Either mechanism counts. See the header: clearing on the way in is not a
-  ## lesser fix, and scoring it as debt was a defect in this scan.
-  overridesUnregister(pane) or clearsMarkerOnRegister(pane)
-
-suite "panes release their mount markers":
-
-  test "the scan finds the pane directory and a plausible number of panes":
-    # THE EMPTY-HAYSTACK GUARD. Every assertion below is over
-    # `panesWithMountMarkers()`, and all of them pass vacuously if it returns
-    # nothing — a moved directory, a renamed marker, or a test run from the
-    # wrong working directory would turn this whole suite green while
-    # measuring an empty set. `Verification-Harness-Traps.md` trap 4.
+  test "the scan finds the pane directory, and no pane declares a marker":
     counted dirExists(UiDir)
     let panes = panesWithMountMarkers()
-    counted panes.len >= 15
-    counted "constraints" in panes
-    counted "test_results" in panes
-    counted "scratchpad" in panes
-    # BOTH POLARITIES OF THE DECLARATION PREDICATE. The prose-only module is
-    # not a pane, and `vcs` — declared as `var isoNimVCSMountedIds {.used.}:`
-    # — still is, so narrowing the match did not drop the pragma form.
-    counted "isonim_panel_mount" notin panes
-    counted "vcs" in panes
+    if panes.len > 0:
+      echo "panes declaring a mount marker: ", panes.join(", ")
+    counted panes.len == 0
 
-  test "constraints and test_results release their markers":
-    # The two panes this change fixes. Named individually rather than left to
-    # the allowlist, because "absent from a debt list" is satisfied by a pane
-    # that no longer exists.
-    counted releasesItsMarker("constraints")
-    counted releasesItsMarker("test_results")
-    counted "constraints" notin KnownMissingRelease
-    counted "test_results" notin KnownMissingRelease
+  test "the predicate still recognises a marker, and not prose about one":
+    # THE EMPTY-HAYSTACK GUARD (`Verification-Harness-Traps.md` trap 4): the
+    # assertion above passes vacuously if the predicate has stopped matching,
+    # so it is exercised on source that does declare a marker.
+    counted declaresMountMarker(
+      "var isoNimFooMountedIds = JsAssoc[int, bool]{}")
+    counted declaresMountMarker(
+      "var isoNimFooMountedIds* {.used.}: JsAssoc[int, bool]")
+    counted not declaresMountMarker(
+      "  if isoNimVCSMountedIds.hasKey(componentId): return")
 
-  test "the six panes fixed with an unregister override do release":
-    # Named individually and asserted through `overridesUnregister`, not the
-    # combined predicate, so a later edit that deleted one of these overrides
-    # cannot be masked by the register-side pattern matching something else.
-    for pane in ["calltrace_editor", "low_level_code", "repl",
-                 "request_panel", "step_list", "trace_log"]:
-      counted overridesUnregister(pane)
-      counted pane notin KnownMissingRelease
-
-  test "the register-side clear is real, and is not the unregister override":
-    # BOTH DIRECTIONS. Without the second assertion, `clearsMarkerOnRegister`
-    # could be satisfied by a pane that also overrode `unregister`, and the
-    # widened predicate would be untested.
-    for pane in ClearsOnRegister:
-      counted clearsMarkerOnRegister(pane)
-      counted not overridesUnregister(pane)
-      counted pane notin KnownMissingRelease
-
-    # The control on the widened predicate: a pane that clears nothing on
-    # register must not match it, or "both mechanisms count" would be a way of
-    # counting everything.
-    counted not clearsMarkerOnRegister("no_source")
-    counted not clearsMarkerOnRegister("agent_activity")
-
-  test "scratchpad still releases its marker":
-    # The original, and the control: if `releasesItsMarker` were broken so that
-    # it returned false for everything, the assertions above would be
-    # meaningless and this would catch it.
-    counted releasesItsMarker("scratchpad")
-
-  test "every pane either releases its marker or is on the debt list":
+  test "the panes the panel host mounts hold no marker":
+    # Each file is asserted to exist first, so a renamed pane fails here
+    # rather than passing "notin" over a file that is not there.
     let panes = panesWithMountMarkers()
-    var offenders: seq[string] = @[]
-    for pane in panes:
-      if releasesItsMarker(pane):
-        continue
-      if pane in KnownMissingRelease:
-        continue
-      offenders.add pane
-    if offenders.len > 0:
-      echo "panes with a mount marker and no release, not on the debt list: ",
-        offenders.join(", ")
-    counted offenders.len == 0
-
-  test "the debt list is exact, so it can only shrink deliberately":
-    # WHY AN EXACT COUNT. A debt list that merely "contains" the offenders
-    # grows silently — a pane added tomorrow with a marker and no release could
-    # be appended in the same commit that introduced it, and nothing would
-    # notice. The count is asserted, so shrinking it is a deliberate edit and
-    # growing it is a conversation.
-    counted KnownMissingRelease.len == 7
-
-    # And every name on it is real: a stale entry would mask a pane that had
-    # been renamed rather than fixed.
-    let panes = panesWithMountMarkers()
-    for pane in KnownMissingRelease:
-      counted pane in panes
-
-  test "the debt list names no pane that has since been fixed":
-    # The other direction, and the one that makes the list decay usefully:
-    # fixing a pane without removing its entry would leave the count truthful
-    # and the list a lie.
-    for pane in KnownMissingRelease:
-      counted not releasesItsMarker(pane)
+    for pane in PanelHostPanes:
+      counted fileExists(UiDir / (pane & ".nim"))
+      counted pane notin panes
 
 suite "mount-marker suite self-check":
 

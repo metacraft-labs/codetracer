@@ -108,7 +108,7 @@ test.describe("Frame Viewer StoryBook", () => {
       "Visual replay connected",
     );
     await expect(page.locator(".lm_tab", { hasText: "src/main.nr" })).toBeVisible();
-    await expect(page.locator(".lm_tab", { hasText: "STATE" })).toBeVisible();
+    await expect(page.locator(".lm_tab", { hasText: "VARIABLES" })).toBeVisible();
     await expect(page.locator(".lm_tab", { hasText: "CALLTRACE" })).toBeVisible();
     await expect(page.locator(".lm_tab", { hasText: "EVENT LOG" })).toBeVisible();
     await expect(page.locator(".lm_tab", { hasText: "TERMINAL OUTPUT" })).toBeVisible();

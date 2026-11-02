@@ -54,7 +54,11 @@ import ../../frontend/tui/tests/fixtures/fixture_provider
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 218
+const ExpectedAssertions = 200
+  ## Was 218. -18 on 2026-10-24: `PaneTitles` lost the Timeline with its pane
+  ## (`740d76be2`), so every `ckFrame` / `ckNoFrame` sweeps one title fewer:
+  ## nine `ckFrame`, and `ckNoFrame` once directly, three times in the
+  ## `--headless` loop and once in each of the five `ckUsageError`s.
   ## Was 225. -7 on 2026-09-25: the `--ui=gpui` case stopped being a refusal
   ## (PLAT-20 accepted it), so its `ckUsageError` (11 counted checks: rc,
   ## stdout, line count, two needles, their tally, and `ckNoFrame`'s five)
@@ -73,24 +77,24 @@ const
   TuiRecipe = "just build-tui"
   LauncherRecipe = "cd ../codetracer-launcher && just build"
 
-  PaneTitles: array[4, string] = ["Call Trace", "Variables", "Event Log",
-                                  "Timeline"]
+  PaneTitles: array[3, string] = ["Call Trace", "Variables", "Event Log"]
     ## §3.1's screen, as the pane names a real headless frame carries. Since
     ## PLAT-49 a pane has no title row: its TAB STRIP names it, in the
-    ## desktop's spelling (`Call Trace`, not `CALL STACK`), and these are four
+    ## desktop's spelling (`Call Trace`, not `CALL STACK`), and these are the
     ## strips of the shared default at the pinned geometry. The uppercase
-    ## titles this list used to hold had not been drawn since then.
-    ## Asserted as a counted sweep rather than as four loose `contains` calls,
+    ## titles this list used to hold had not been drawn since then, and the
+    ## Timeline, the fourth, left with its pane (`740d76be2`).
+    ## Asserted as a counted sweep rather than as loose `contains` calls,
     ## so a partially painted screen cannot satisfy "at least one".
     ##
-    ## FOUR OF THEM ONLY BECAUSE THE GEOMETRY IS PINNED. `host/headless.
-    ## headlessGeometry` reads the tty when there is one, then `COLUMNS`/
-    ## `LINES`, then a fallback; the fallback is 80x24, which selects the
-    ## COMPACT profile, and TIMELINE is then a TAB of the state stack rather
-    ## than a rectangle with a title. Measured, not assumed: the first run of
-    ## this suite failed on `TIMELINE` alone. `HeadlessColumns`/`HeadlessRows`
-    ## below pin the STANDARD profile for every child, so the sweep asserts the
-    ## same four panes whether or not the runner has a terminal.
+    ## THE GEOMETRY IS PINNED. `host/headless.headlessGeometry` reads the tty
+    ## when there is one, then `COLUMNS`/`LINES`, then a fallback; the
+    ## fallback is 80x24, which selects the COMPACT profile, where a pane can
+    ## be a TAB of another stack rather than a rectangle of its own (the first
+    ## run of this suite failed on the then-present TIMELINE alone).
+    ## `HeadlessColumns`/`HeadlessRows` below pin the STANDARD profile for
+    ## every child, so the sweep asserts the same panes whether or not the
+    ## runner has a terminal.
 
   HeadlessColumns = "120"
   HeadlessRows = "40"

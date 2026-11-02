@@ -14,13 +14,15 @@
 ## that `createMonacoEditor(selector, options)` can find it and attach
 ## the editor instance.
 ##
-## The container shape is identical for both renderers, so the markup
-## lives in a single `renderEditorContainerImpl` template that is
-## materialised into one concrete proc per renderer (Mock / Web).
+## One generic proc renders the container under every renderer.
 
 import isonim/dsl/ui
-import isonim/core/computation  # createRenderEffect — emitted by the DSL
+import isonim/core/[signals, computation]
+import isonim/dsl/components
 import isonim/testing/mock_dom
+
+# The generic procs expand the DSL at their caller.
+export signals, computation, components
 
 when defined(js):
   import isonim/web/web_renderer
@@ -63,72 +65,40 @@ proc editorHostId*(index: int; hostId: string = ""): string =
 # The `data-label` attribute is set to `path` so that GoldenLayout tab
 # rendering and Playwright tests can locate the editor.
 
-template renderEditorContainerImpl(r, index, path,
-                                    cursorKind, sourceGeneration,
-                                    sourceDigest,
-                                    isExpansion, expansionDepth,
-                                    hostId, testControls: untyped):
-                                    untyped =
+proc renderEditorContainer*[R, N](r: R; vm: EditorVM;
+                                  index: int; path: string;
+                                  isExpansion: bool; expansionDepth: int;
+                                  hostId: string = "";
+                                  testControls = EditorTestControlRenderPlan(
+                                    placement: etcpDisabled)): N =
+  ## The editor's container, for every renderer. The execution cursor kind
+  ## and the source revision follow the ViewModel; `testControls` is a value
+  ## drawn once.
+  # A plain name for the child call: the `ui` macro passes a call through as
+  # a child only when its callee is an identifier, and `f[R, N](...)` is not.
+  template testControlsNode(): N = renderEditorTestControls[R, N](r, testControls)
   ui(r):
     tdiv(id = editorHostId(index, hostId),
          class = editorClass(isExpansion, expansionDepth),
          `data-label` = path,
-         `data-execution-cursor-kind` = cursorKind,
-         `data-source-generation` = $sourceGeneration,
-         `data-source-digest` = sourceDigest,
+         `data-execution-cursor-kind` = vm.executionCursorKind.val,
+         `data-source-generation` = $vm.activeSourceGeneration.val,
+         `data-source-digest` = vm.activeSourceDigest.val,
          tabindex = "2"):
       if testControls.placement != etcpDisabled and testControls.controls.len > 0:
-        renderEditorTestControls(r, testControls)
+        testControlsNode()
 
-# ---------------------------------------------------------------------------
-# Renderer overloads
-# ---------------------------------------------------------------------------
-
-proc renderEditorContainer*(r: MockRenderer; vm: EditorVM;
-                            index: int; path: string;
-                            isExpansion: bool; expansionDepth: int;
-                            hostId: string = "";
-                            testControls = EditorTestControlRenderPlan(
-                              placement: etcpDisabled)): MockNode =
-  ## Mock-renderer overload — used by headless tests.
-  renderEditorContainerImpl(r, index, path, vm.executionCursorKind.val,
-                            vm.activeSourceGeneration.val,
-                            vm.activeSourceDigest.val,
-                            isExpansion, expansionDepth, hostId, testControls)
-
-proc renderEditorPanel*(r: MockRenderer; vm: EditorVM;
-                        index: int; path: string;
-                        isExpansion: bool; expansionDepth: int;
-                        hostId: string = "";
-                        testControls = EditorTestControlRenderPlan(
-                          placement: etcpDisabled)): MockNode =
-  ## Public name retained for symmetry with the other panel views.
-  renderEditorContainer(r, vm, index, path, isExpansion, expansionDepth, hostId,
-                        testControls)
-
-when defined(js):
-  proc renderEditorContainer*(r: WebRenderer; vm: EditorVM;
+proc renderEditorPanel*[R, N](r: R; vm: EditorVM;
                               index: int; path: string;
-                              isExpansion: bool;
-                              expansionDepth: int;
+                              isExpansion: bool; expansionDepth: int;
                               hostId: string = "";
                               testControls = EditorTestControlRenderPlan(
-                                placement: etcpDisabled)): isonim_dom.Element =
-    renderEditorContainerImpl(r, index, path, vm.executionCursorKind.val,
-                              vm.activeSourceGeneration.val,
-                              vm.activeSourceDigest.val,
-                              isExpansion, expansionDepth, hostId, testControls)
+                                placement: etcpDisabled)): N =
+  ## Public name retained for symmetry with the other panel views.
+  renderEditorContainer[R, N](r, vm, index, path, isExpansion, expansionDepth,
+                              hostId, testControls)
 
-  proc renderEditorPanel*(r: WebRenderer; vm: EditorVM;
-                          index: int; path: string;
-                          isExpansion: bool;
-                          expansionDepth: int;
-                          hostId: string = "";
-                          testControls = EditorTestControlRenderPlan(
-                            placement: etcpDisabled)): isonim_dom.Element =
-    renderEditorContainer(r, vm, index, path, isExpansion, expansionDepth, hostId,
-                          testControls)
-
+when defined(js):
   proc mountIsoNimEditor*(container: isonim_dom.Element;
                           vm: EditorVM;
                           index: int; path: string;
@@ -143,7 +113,7 @@ when defined(js):
     ## returns the element reference because Monaco needs it for
     ## initialisation.
     let r = WebRenderer()
-    let panel = renderEditorPanel(r, vm, index, path, isExpansion, expansionDepth,
-                                  hostId, testControls)
+    let panel = renderEditorPanel[WebRenderer, isonim_dom.Element](
+      r, vm, index, path, isExpansion, expansionDepth, hostId, testControls)
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
     panel

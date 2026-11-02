@@ -36,6 +36,7 @@ import ../../platform/platform
 import ../../host/native_vcs
 import ../../host/desktop_native
 import ../../../../ct_test/certificate_store_roots
+from test_certificates/scopes as tcscopes import nil
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -359,6 +360,127 @@ suite "contentId requires capVcsRead":
       ck "capVcsRead" in refused.error.message
       ck "vcs.contentId" in refused.error.message
 
+suite "declaredScopes reads Tooling §3.1's declaration, as the reference library does":
+  ## The facade's `declaredScopes` against real repositories configured with
+  ## `git config --add testCertificatesScope.<name>.path …`, compared with the
+  ## reference library's `declaredScopes` (test-certificates-tools) on the
+  ## SAME repository: the one reader every instantiation shares must not
+  ## drift from the rule the helper tooling publishes notes by.
+
+  proc scopesOf(vcs: VcsFacade; repo: string): PlatformOutcome[VcsDeclaredScopes] =
+    awaitSync(vcs.declaredScopes(repo))
+
+  proc libraryScopes(repo: string): tuple[ok: bool; scopes: seq[seq[string]];
+                                          problems: int] =
+    let declared = tcscopes.declaredScopes(repo)
+    result.ok = declared.ok
+    result.problems = declared.problems.len
+    for scope in declared.scopes:
+      result.scopes.add scope.paths
+
+  test "nothing declared is a valid, empty declaration":
+    let repo = newRepo()
+    put(repo, "a.txt", "a\n")
+    commitAll(repo)
+    for vcs in [desktop.vcs, tuiVcs]:
+      let outcome = scopesOf(vcs, repo)
+      ck outcome.ok
+      if outcome.ok:
+        ck outcome.value.scopes.len == 0 and outcome.value.problems.len == 0
+    let library = libraryScopes(repo)
+    ck library.ok and library.scopes.len == 0
+
+  test "sections are scopes, values are paths, sorted and once each, sets deduplicated":
+    let repo = newRepo()
+    put(repo, "a.txt", "a\n")
+    commitAll(repo)
+    for (name, path) in [("db", "src/db-backend"), ("db", "Cargo.lock"),
+                         ("db", "src/db-backend"), ("Docs", "docs"),
+                         ("again", "Cargo.lock"), ("again", "src/db-backend")]:
+      discard git(repo, "config", "--add",
+                  "testCertificatesScope." & name & ".path", path)
+    let expected = @[@["Cargo.lock", "src/db-backend"], @["docs"]]
+    for vcs in [desktop.vcs, tuiVcs]:
+      let outcome = scopesOf(vcs, repo)
+      ck outcome.ok
+      if outcome.ok:
+        ck outcome.value.problems.len == 0
+        ck outcome.value.scopes == expected
+    let library = libraryScopes(repo)
+    ck library.ok and library.scopes == expected
+
+  test "an invalid declaration is void as a whole, every problem named":
+    for bad in ["../escape", "src/", "/abs", "a//b", "a/./b", "a\\b"]:
+      let repo = newRepo()
+      put(repo, "a.txt", "a\n")
+      commitAll(repo)
+      discard git(repo, "config", "--add", "testCertificatesScope.good.path",
+                  "src")
+      discard git(repo, "config", "--add", "testCertificatesScope.bad.path", bad)
+      let outcome = scopesOf(desktop.vcs, repo)
+      checkpoint bad
+      ck outcome.ok
+      if outcome.ok:
+        ck outcome.value.scopes.len == 0
+        ck outcome.value.problems.len == 1
+        if outcome.value.problems.len == 1:
+          ck "testCertificatesScope.bad.path" in outcome.value.problems[0]
+      let library = libraryScopes(repo)
+      ck not library.ok and library.problems == 1
+    # A misspelt key and a value-less `path` make it invalid too.
+    let repo = newRepo()
+    put(repo, "a.txt", "a\n")
+    commitAll(repo)
+    discard git(repo, "config", "--add", "testCertificatesScope.x.paths", "src")
+    writeFile(repo / ".git" / "config",
+              readFile(repo / ".git" / "config") &
+              "[testCertificatesScope \"y\"]\n\tpath\n")
+    let outcome = scopesOf(tuiVcs, repo)
+    ck outcome.ok
+    if outcome.ok:
+      ck outcome.value.scopes.len == 0
+      ck outcome.value.problems.len == 2
+    ck libraryScopes(repo).problems == 2
+
+  test "outside a repository nothing is declared":
+    let outside = suiteDir / "not-a-repo-for-scopes"
+    createDir(outside)
+    # `git config` outside a repository reads only the global and system
+    # files, which this suite points at an empty file and disables, so it
+    # finds nothing and exits 1: indistinguishable from "nothing declared".
+    # The facade is asked about a REPOSITORY; the caller establishes one
+    # first (`repositoryRoot`), and the indicator never asks otherwise.
+    let outcome = scopesOf(desktop.vcs, outside)
+    ck outcome.ok and outcome.value.scopes.len == 0
+
+  test "the pure reader, on git's own -z output, including the edge entries":
+    ck parseDeclaredScopes("").scopes.len == 0
+    let parsed = parseDeclaredScopes(
+      "testcertificatesscope.Db.path\nsrc/db\x00" &
+      "testcertificatesscope.Db.path\nCargo.lock\x00")
+    ck parsed.problems.len == 0
+    ck parsed.scopes == @[@["Cargo.lock", "src/db"]]
+    ck parseDeclaredScopes("testcertificatesscope.db.path\x00").problems.len == 1
+    ck parseDeclaredScopes("testcertificatesscope.path\nsrc\x00").problems.len == 1
+    ck parseDeclaredScopes("testcertificatesscope..path\nsrc\x00").problems.len == 1
+    # Byte order, not locale order: upper case sorts before lower case.
+    ck parseDeclaredScopes("testcertificatesscope.s.path\nb\x00" &
+                           "testcertificatesscope.s.path\nB\x00").scopes ==
+       @[@["B", "b"]]
+
+  test "a host without capVcsRead is refused, by name":
+    let repo = newRepo()
+    put(repo, "a.txt", "a\n")
+    commitAll(repo)
+    let withoutRead = nativeVcs(NativeVcsProfile.withCapabilities(
+      {capVcsWrite, capVcsRemote}, @[]))
+    let refused = scopesOf(withoutRead, repo)
+    ck not refused.ok
+    if not refused.ok:
+      ck refused.error.kind == pkNotSupported
+      ck "capVcsRead" in refused.error.message
+      ck "vcs.declaredScopes" in refused.error.message
+
 suite "the host resolves the local certificate store's roots":
 
   proc roots(): CertificateStoreRoots =
@@ -458,8 +580,8 @@ suite "the host resolves the local certificate store's roots":
     ck win.user == r"C:\Users\u\AppData\Local\test-certificates"
     ck win.system == r"C:\ProgramData\test-certificates\" & sid
     ck win.problems.len == 1 and "TEST_CERTIFICATES_DIR" in win.problems[0]
-    # With no SID (what every host answers on Windows today) the system root
-    # is left unresolved and the reason recorded, never guessed.
+    # With no SID (a host that could not read it) the system root is left
+    # unresolved and the reason recorded, never guessed.
     let noSid = resolveCertificateStoreRoots(srpWindows,
       envOf(@[("LOCALAPPDATA", r"C:\L"), ("ProgramData", r"C:\ProgramData")]), "")
     ck noSid.system == ""

@@ -212,10 +212,10 @@ ok "empty manifest -> exit 3, refuses to pass vacuously"
 declare -A malformed=(
 	[unparseable]='not json at all'
 	[truncated]='{"lint-bash": {"result": "suc'
-	[empty-file]=''
-	[json-null]='null'
-	[json-array]='[]'
-	[entry-not-object]='{"test-non-gui": "success"}'
+	["empty-file"]=''
+	["json-null"]='null'
+	["json-array"]='[]'
+	["entry-not-object"]='{"test-non-gui": "success"}'
 )
 for name in "${!malformed[@]}"; do
 	bad="${tmp_dir}/bad-${name}.json"

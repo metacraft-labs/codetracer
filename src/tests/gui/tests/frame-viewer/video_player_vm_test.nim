@@ -112,7 +112,7 @@ proc makeMinimalClient(): VisualReplayClient =
         geid: some(uint64(100 + draw)), frame: some(0),
         width: 64, height: 64,
       )),
-    getDrawCallsProc: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]] =
+    getDrawCallsProc: proc(frame: int): VisualReplayFuture[seq[VisualReplayDrawCall]] =
       newCompletedFuture(@[
         VisualReplayDrawCall(index: 0, geid: 0'u64, name: "a", pipeline: ""),
         VisualReplayDrawCall(index: 1, geid: 1'u64, name: "b", pipeline: ""),

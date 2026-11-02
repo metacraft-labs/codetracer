@@ -391,10 +391,10 @@ ARMS = [
         C_REPORTS,
         "the report list silently omits one undrawable pane"),
     Arm("C2", GSHELL,
-        "  for slot in arrangement.slots:\n    var leaf = GpuiLeaf(",
+        "  for slot in arrangement.slots:\n    result.leaves.add leafOf(",
         "  for slot in arrangement.slots:\n"
         "    if slot.pane == \"testResults\": continue\n"
-        "    var leaf = GpuiLeaf(",
+        "    result.leaves.add leafOf(",
         C_GPUI3,
         "the GPUI window silently omits an undrawable pane from its plan "
         "instead of drawing its report"),

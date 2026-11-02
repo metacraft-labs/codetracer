@@ -278,42 +278,17 @@ async function disableBreakpoint(
   await editor.page.evaluate(
     ({ path, line }) => {
       const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-      const service = w?.data?.services?.debugger;
-      if (!service) return;
-      const normalize = (raw: string): string =>
-        raw.startsWith("/private/var/") ? raw.slice("/private".length) : raw;
       const aliases = [path];
       if (path.startsWith("/private/var/")) {
         aliases.push(path.slice("/private".length));
       } else if (path.startsWith("/var/")) {
         aliases.push(`/private${path}`);
       }
+      // The session's breakpoints, through the page's test hook (the Nim
+      // service procs are name-mangled in the compiled bundle).
       for (const alias of [...new Set(aliases)]) {
-        service.deleteBreakpoint?.(alias, line);
+        w.ctDeleteBreakpoint?.(alias, line);
       }
-      const target = normalize(path);
-      const table = service.breakpointTable;
-      if (table) {
-        for (const key of Object.keys(table)) {
-          if (normalize(key) === target && table[key]?.[line]) {
-            delete table[key][line];
-          }
-        }
-      }
-      const pointList = w?.data?.pointList?.breakpoints;
-      if (Array.isArray(pointList)) {
-        for (let index = pointList.length - 1; index >= 0; index--) {
-          const breakpoint = pointList[index];
-          if (
-            breakpoint &&
-            normalize(String(breakpoint.path ?? "")) === target &&
-            Number(breakpoint.line) === line
-          ) {
-            pointList.splice(index, 1);
-          }
-        }
-      }
-      service.dapSetBreakpoints?.();
       w?.data?.redraw?.();
     },
     { path: editor.filePath, line },

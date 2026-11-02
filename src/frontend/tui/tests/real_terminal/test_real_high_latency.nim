@@ -264,7 +264,7 @@ suite "CTUI-14 Tier 2: a hundred steps over a link with injected delay":
     ck fast.injectedMs == 0
     # THE NON-VACUITY FLOOR, and it is the important one in this file: two
     # blank screens are equal. The reconstructed screen has to be the DEBUGGER.
-    ck fast.plain.contains(" main.py ")
+    ck fast.plain.contains(" calc/main.py ")
     ck fast.plain.contains(" Call Trace ")
     ck fast.plain.contains(" Variables ")
     ck fast.plain.contains("Event Log")   # PLAT-51: the Timeline is removed
@@ -314,7 +314,7 @@ suite "CTUI-14 Tier 2: a hundred steps over a link with injected delay":
     # is SUPPOSED to be — §3.1's furniture, and the published colour of the
     # rule every pane is drawn with.
     ck slow.cells.len == Cols * Rows
-    ck slow.plain.contains(" main.py ")
+    ck slow.plain.contains(" calc/main.py ")
     ck slow.plain.contains(" Variables ")
     var glyphs = 0
     var mutedRule = 0
@@ -365,7 +365,7 @@ suite "CTUI-14 Tier 2: a hundred steps over a link with injected delay":
     # THE TEXT COMPARISON HAS THE SAME ARM: a screen with one glyph changed is
     # not equal to the original.
     var mutatedText = fast.plain
-    let at = mutatedText.find(" main.py ") + 1
+    let at = mutatedText.find(" calc/main.py ") + 1
     ck at >= 0
     mutatedText[at] = 'X'
     ck mutatedText != fast.plain

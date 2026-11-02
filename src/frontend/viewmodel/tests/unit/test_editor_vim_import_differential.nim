@@ -108,7 +108,7 @@ third line of text
     ## so the header's own discussion of `vimKeymap` cannot satisfy it.
 
 proc vimScope(m: EditingMode): EditingScope =
-  EditingScope(model: kmVim, product: pmEdit, pane: epEditor, mode: m,
+  EditingScope(model: bkVim, product: pmEdit, pane: epEditor, mode: m,
                textEntry: false)
 
 proc importScopeFor(b: EditingBinding): EditingScope =
@@ -117,7 +117,7 @@ proc importScopeFor(b: EditingBinding): EditingScope =
     if m in b.scope.modes:
       mode = m
       break
-  EditingScope(model: kmVim, product: pmEdit,
+  EditingScope(model: bkVim, product: pmEdit,
                pane: (if epEditor in b.scope.panes or b.scope.panes.len == 0:
                         epEditor else: epOtherPane),
                mode: mode, textEntry: isTextEntryMode(mode))
@@ -347,7 +347,7 @@ suite "PLAT-36: DIFF-5 and the imported keymap resolved against":
       let bindings = imp.keymap.bindings
       # Every operation the import produced is one of PLAT-30's 224. A
       # keymap-private operation would be a name the core cannot run.
-      ck unpublishedOperations(imp.keymap, kmVim).len == 0
+      ck unpublishedOperations(imp.keymap, bkVim).len == 0
       var resolved = 0
       var shadowed = 0
       var pendingSeen = 0

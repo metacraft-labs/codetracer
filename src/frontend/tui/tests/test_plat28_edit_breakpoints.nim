@@ -48,7 +48,7 @@ proc caps(): TerminalCapabilities =
                     lang = "en_US.UTF-8"),
     initCapabilityFlags())
 
-proc editingRuntime(model = kmProductDefault): TuiRuntime =
+proc editingRuntime(model = bkCua): TuiRuntime =
   let app = newTuiApp()
   app.modes = initModeRegister(pmEdit)
   app.editSession = newEditSession(model)
@@ -123,7 +123,7 @@ suite "PLAT-28: a breakpoint follows its line":
     ck rt.linesOf(FileA) == @[4]
 
   test "`dd` on its line REMOVES it; the line that took its place gets nothing":
-    let rt = editingRuntime(kmVim)
+    let rt = editingRuntime(bkVim)
     rt.runPrompt(":break 2")
     rt.runPrompt(":break 4")
     rt.caretTo(2)
@@ -132,7 +132,7 @@ suite "PLAT-28: a breakpoint follows its line":
     ck rt.linesOf(FileA) == @[3]            # `four`, one line up
 
   test "`J` keeps it, on the joined line":
-    let rt = editingRuntime(kmVim)
+    let rt = editingRuntime(bkVim)
     rt.runPrompt(":break 3")
     rt.caretTo(2)
     rt.typeKeys(["J"])
@@ -157,7 +157,7 @@ suite "PLAT-28: Vim's and Kakoune's `o` / `O` open a line AND enter insert mode"
   ## and `n`, `e`, `w` as commands.
 
   test "Vim `O` then text: the text is on a new line ABOVE, the breakpoint moves":
-    let rt = editingRuntime(kmVim)
+    let rt = editingRuntime(bkVim)
     rt.runPrompt(":break 2")
     rt.caretTo(2)
     rt.typeKeys(["O", "#", " ", "n", "e", "w", "\x1b"])
@@ -165,11 +165,11 @@ suite "PLAT-28: Vim's and Kakoune's `o` / `O` open a line AND enter insert mode"
     ck rt.linesOf(FileA) == @[3]
 
   test "Vim `o` below the LAST line, and Kakoune `o` / `O`":
-    let vim = editingRuntime(kmVim)
+    let vim = editingRuntime(bkVim)
     vim.caretTo(5)
     vim.typeKeys(["o", "z", "\x1b"])
     ck vim.app.editSession.activeBuffer().text == "one\ntwo\nthree\nfour\nfive\nz\n"
-    let kak = editingRuntime(kmKakoune)
+    let kak = editingRuntime(bkKakoune)
     kak.caretTo(3)
     kak.typeKeys(["o", "b", "\x1b", "O", "a", "\x1b"])
     ck kak.app.editSession.activeBuffer().text == "one\ntwo\nthree\na\nb\nfour\nfive\n"

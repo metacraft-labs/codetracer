@@ -147,6 +147,17 @@ when defined(js):
     let raw = $jsReadLocal(cstring(ShortcutPresetStorageKey))
     if raw.len == 0: none(string) else: some(raw)
 
+  const PresetImportedKey = "CODETRACER_KEYBINDINGS_PRESET_IMPORTED"
+    ## PLAT-68: set once this browser's stored choice was handed to the main
+    ## process for the one-time import into `keybindings.json`
+    ## (`ui/key_router.importStoredPreset`).
+
+  proc presetImported*(): bool =
+    ($jsReadLocal(cstring(PresetImportedKey))).len > 0
+
+  proc markPresetImported*() =
+    jsWriteLocal(cstring(PresetImportedKey), cstring"1")
+
   proc storePreset*(id: ShortcutPresetId) =
     ## Remember a choice for this browser.
     jsWriteLocal(cstring(ShortcutPresetStorageKey), cstring($id))

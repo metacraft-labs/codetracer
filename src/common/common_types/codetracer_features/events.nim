@@ -1,31 +1,37 @@
 type
-  # IMPORTANT: must update `pub const EVENT_KINDS_COUNT` in db-backend/src/task.rs
-  # on changes here!
-  # also must update codetracer-ruby-tracer trace.rb `EVENT_KIND_..` consts
-  # and overally this is based on and MUST be in sync with the runtime_tracing lib
-  # which defines `pub enum EventLogKind`
+  # The kinds of `trace-events.md` §"EventLogKind (u8 enum)", by ordinal: MUST
+  # list the same kinds in the same order as `codetracer_trace_types`'s
+  # `pub enum EventLogKind`, whose ordinals are what the db-backend sends.
+  # `EVENT_KINDS_COUNT` in db-backend/src/task.rs is the number of kinds, and
+  # `selectedKinds` (`array[EventLogKind, bool]`) crosses to it by ordinal.
+  # Also keep in sync: the `Kind*` constants in
+  # src/frontend/tui/app/views/event_log.nim, `EventLogKind` in
+  # libs/ct-dap-client/src/types/common.rs, and the kind table in README.md.
   EventLogKind* {.pure.} = enum
-    Write,
+    Write,          ## output to stdout, or a write with no more specific kind
     WriteFile,
-    WriteOther,
-    Read,
+    WriteOther,     ## a write no other kind describes
+    Read,           ## input from stdin, or a read with no more specific kind
     ReadFile,
-    ReadOther,
-    # not really used for now
-    # we might remove them or implement them
-    # in the future
+    ReadOther,      ## a read no other kind describes
     ReadDir,
     OpenDir,
     CloseDir,
     Socket,
     Open,
     Error,
-
-    # used for trace log events
-    TraceLogEvent,
-
-    # used for stylus evm events
-    EvmEvent,
+    TraceLogEvent,  ## trace log events
+    EvmEvent,       ## Stylus EVM events
+    WriteStderr,    ## output to stderr
+    Exec,           ## running a program or spawning a process
+    ReadEnv,        ## reading an environment variable or testing one is set
+    WriteEnv,       ## setting or removing an environment variable
+    Stat,           ## existence/metadata query of a filesystem entry, PATH search
+    CreateDir,      ## creating a directory, including copying a directory tree
+    RemoveDir,
+    RemoveFile,
+    Rename,         ## renaming or moving a file or directory
+    ChangeDir,      ## changing the working directory
 
   OrdValue* = object ## Order value for a column in a TableArgs object
     column*: int

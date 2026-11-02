@@ -171,7 +171,7 @@ proc mountedPane(): (TestResultsVM, MockNode) =
   let vm = createTestResultsVM()
   vm.setCatalog(TestCatalog(items: fiveTests()))
   let r = MockRenderer()
-  (vm, renderTestResultsPanel(r, vm))
+  (vm, renderTestResultsPanel[MockRenderer, MockNode](r, vm))
 
 # ---------------------------------------------------------------------------
 

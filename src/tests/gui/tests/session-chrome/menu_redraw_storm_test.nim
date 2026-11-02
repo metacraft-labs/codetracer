@@ -111,7 +111,8 @@ type
     gate: MenuRenderGate
     shell: MockNode           ## the `#menu` host itself — a stable node, as in
                               ## the document, where `#menu` is not re-created
-    controlsMounted: bool     ## `ui/debug.nim`'s `isoNimDebugMounted`
+    controlsMounted: bool     ## the toolbar has been rendered at least once
+    toolbarHost: MockNode     ## `ui/debug_toolbar.nim`'s `toolbarHost`
     useGate: bool             ## false reproduces the pre-#555 behaviour
     preserveHost: bool        ## false reproduces the pre-fix `renderMenuShellInto`
     detachAndRestore: bool    ## reproduces the FIRST attempt at preserving the
@@ -169,7 +170,7 @@ proc redraw(sim: MenuChromeSim; model: MenuShellModel;
     # the loss of node identity instead of measuring it.)
     let r = MockRenderer()
     if sim.preserveHost:
-      renderMenuShellInto(r, sim.shell, model)
+      renderMenuShellInto[MockRenderer, MockNode](r, sim.shell, model)
     elif sim.detachAndRestore:
       # THE FIRST ATTEMPT AT THE FIX, kept because it is the arm for "never
       # detached": the same node is carried across, but it is taken OUT of the
@@ -181,7 +182,7 @@ proc redraw(sim: MenuChromeSim; model: MenuShellModel;
       if not carried.isNil:
         r.removeChild(sim.shell, carried)
       r.clearChildren(sim.shell)
-      let fresh = renderMenuShell(r, model)
+      let fresh = renderMenuShell[MockRenderer, MockNode](r, model)
       let moving = fresh.children
       for child in moving:
         if not carried.isNil and
@@ -197,18 +198,20 @@ proc redraw(sim: MenuChromeSim; model: MenuShellModel;
       # production proc, because production has no such flag and must not grow
       # one for a test.
       r.clearChildren(sim.shell)
-      let fresh = renderMenuShell(r, model)
+      let fresh = renderMenuShell[MockRenderer, MockNode](r, model)
       let moving = fresh.children
       for child in moving:
         r.appendChild(sim.shell, child)
     sim.shellRenders += 1
     sim.gate.noteRendered(signature)
 
-  # --- ui/debug.nim: requestDebugControlsRender ------------------------------
+  # --- ui/debug_toolbar.nim: ensureDebugToolbar ------------------------------
   let host = findById(sim.shell, "isonim-debug-controls")
   if host.isNil:
     return
-  if shouldRemountDebugControls(sim.controlsMounted, host.children.len > 0):
+  if shouldFillToolbarHost(hostIsNew = host != sim.toolbarHost,
+                           hostHasChildren = host.children.len > 0):
+    sim.toolbarHost = host
     let r = MockRenderer()
     let toolbar = r.createElement("div")
     r.setAttribute(toolbar, "class", "isonim-debug-controls")
@@ -541,9 +544,9 @@ suite "issue #555 — render gate primitives":
     gate.invalidate()
     check gate.shouldRender("sig", hostIntact = true)
 
-  test "the debug controls remount only when the host lost its children":
-    check shouldRemountDebugControls(mounted = false, hostHasChildren = false)
-    check shouldRemountDebugControls(mounted = false, hostHasChildren = true)
-    # The case a menu-shell rebuild creates: flag still set, host emptied.
-    check shouldRemountDebugControls(mounted = true, hostHasChildren = false)
-    check not shouldRemountDebugControls(mounted = true, hostHasChildren = true)
+  test "the toolbar host is filled when it is new or lost its children":
+    check shouldFillToolbarHost(hostIsNew = true, hostHasChildren = false)
+    check shouldFillToolbarHost(hostIsNew = true, hostHasChildren = true)
+    # The case a menu-shell rebuild creates: the same host, emptied.
+    check shouldFillToolbarHost(hostIsNew = false, hostHasChildren = false)
+    check not shouldFillToolbarHost(hostIsNew = false, hostHasChildren = true)

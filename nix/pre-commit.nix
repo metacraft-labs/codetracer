@@ -59,15 +59,31 @@
     # above. The corpus needs both.
     "^src/frontend/viewmodel/tests/corpus/vimrc/.*\\.vim$"
 
+    # PLAT-47'S LEXER SAMPLES, where the bytes are compared against a capture.
+    #
+    # Each `sample.<ext>` is lexer INPUT, not a program: it is never run, and
+    # its mixed quoting and spacing are there to exercise token rules.
+    # `src/tests/visual/answers/plat47-monaco-lexers.electron.json` holds the
+    # desktop Monaco's tokens for every line of every sample, and
+    # `src/frontend/tui/tests/test_plat47_monaco_lexers.nim` checks the line
+    # count and then the token type and colour at every character offset of
+    # the file on disk against it. A formatter that touches a sample makes
+    # the file disagree with the capture.
+    #
+    # MEASURED, 2026-10-22: shfmt (`-w -l -ln auto -s`, 3.12.0) rewrote
+    # `sample.sh`. It changed the indentation, split `local level="$1"; shift`
+    # into two lines and removed quotes inside `[[ ]]`, so the line count and
+    # most column offsets moved. The way to change a sample is to edit it and
+    # recapture (`just plat47-capture-electron`), not to let a hook rewrite it.
+    "^src/frontend/tui/tests/fixtures/monaco_lexers/"
+
     # A VENDORED COPY, and byte-identity IS the contract.
     #
     # tools/check-test-assertions.sh is a byte-for-byte copy of
-    # codetracer-specs/tools/check-test-assertions.sh (37e193050 explains why
-    # it is copied rather than referenced: ci/lint/bash.sh is deliberately the
-    # lane that needs no siblings and no network). The copy is only safe
-    # because ci/test/test-assertion-baseline.sh compares the two by sha256
-    # whenever both repos are on disk, so it cannot drift silently -- and the
-    # editable original, the one with a self-test, lives in the other repo.
+    # codetracer-pm/tools/check-test-assertions.sh. The lint can run without
+    # siblings; ci/test/test-assertion-baseline.sh requires the canonical copy
+    # and compares the two by sha256 in lint-nim, whose job provisions that
+    # checkout. The editable original, the one with a self-test, lives there.
     #
     # shfmt would reformat 77 lines of it on the first commit that touches its
     # mode, breaking that sha256 against an upstream nobody had changed and
@@ -238,7 +254,6 @@
         "^src/db-backend/" # db-backend internal docs
         "^examples/" # Example project READMEs with varied formatting
         "^test-programs/" # Test program READMEs
-        "^tsc-ui-tests/" # TypeScript UI tests
         "^src/tracer/" # Tracer docs
         "^CHANGELOG\\.md$" # Auto-generated changelog
         "^CONTRIBUTING\\.md$"

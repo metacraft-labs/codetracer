@@ -37,6 +37,8 @@
 
 import std/[json, os, osproc, streams, strtabs, strutils, unittest]
 
+import ../../common/replay_server_path   # the one search order
+
 const
   BaseProgram = """fn main(x: Field) {
     let mut sum: Field = 0;
@@ -79,18 +81,15 @@ proc ctBinary(): string =
   result = buildDir / "bin" / "ct"
 
 proc replayServerBinary(): string =
-  ## The db-backend collector, the way `regenerate-materialized-review.sh`
-  ## finds it: the documented override first, then the two places a
-  ## development build leaves it.
+  ## The db-backend collector: `ct review`'s documented override first, then
+  ## this checkout's build through `src/common/replay_server_path` (the one
+  ## search order the front-ends and the headless suites share), then `PATH`.
   result = getEnv("CODETRACER_REPLAY_SERVER_PATH", "")
   if result.len > 0:
     return
-  for candidate in [
-      repoRoot() / "src" / "build-debug" / "bin" / "replay-server",
-      repoRoot() / "src" / "db-backend" / "target" / "debug" / "replay-server"]:
-    if fileExists(candidate):
-      return candidate
-  result = findExe("replay-server")
+  result = locateReplayServer()
+  if result.len == 0:
+    result = findExe("replay-server")
 
 type
   RunResult = object

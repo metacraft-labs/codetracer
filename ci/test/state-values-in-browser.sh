@@ -6,7 +6,7 @@
 # WHAT THIS ASSERTS THAT NOTHING ELSE DOES
 # ----------------------------------------
 # `watch_expressions_dap_test.rs` proves the backend answers `ct/load-locals`
-# correctly. `watch-expressions-in-browser.sh` proves the State pane's tabs
+# correctly. `watch-expressions-in-browser.sh` proves the Variables pane's list
 # and inputs are reachable by gesture. Between the two there is a gap the
 # size of this gate, and two defects lived in it.
 #
@@ -15,6 +15,9 @@
 #    `ui/value.nim:789` feeds to the Editor, Call Trace, Flow and Trace —
 #    and `text`/`$value`, a multi-line dump ABOUT a value. `state.nim`'s
 #    `valueDisplayText` was `$v`, so the State pane painted the dump.
+#    (Both renderers have since been replaced by the one presenter in
+#    `src/common/value_presentation/`, `b723bde4c`; the State pane paints
+#    through it like every other surface, which is what this checks.)
 #
 #    Neither existing gate could see it. `watch_expressions_browser_probe`
 #    builds its rows by HAND out of the wire's JSON, so it painted the
@@ -241,8 +244,6 @@ ck "$([ "$(q "${control}" 'rowval(d["localsRows"], "initial_shield") == "10000"'
 
 # THE REFUSAL. An `Error` value whose `msg` IS the explanation. `text()` has
 # no `of Error` branch and painted the bare word "Error".
-ck "$([ "$(q "${control}" 'd["watchesTabClicked"]')" = True ] && echo ok || echo no)" \
-	"the Watches tab opens by gesture"
 refusal="$(q "${control}" 'rowval(d["watchRows"], "initial_shield + 1")')"
 note "initial_shield + 1 value cell: ${refusal}"
 ck "$([ "$(q "${control}" 'rowval(d["watchRows"], "initial_shield + 1") != "Error"')" = True ] && echo ok || echo no)" \
@@ -350,9 +351,12 @@ echo
 
 # ---------------------------------------------------------------------------
 echo "Mutation arm O: nothing clears the tracker when the worker arrives"
-echo "    Reddens every Part 2 assertion and nothing in Part 1. This is the"
-echo "    state the product shipped in: RequestTracker.clear existed and"
-echo "    had zero call sites, so the boot key outlived the worker."
+echo "    The state the product shipped in: RequestTracker.clear existed and"
+echo "    had zero call sites, so the boot key outlived the worker. It used"
+echo "    to redden every Part 2 assertion. The load-locals key now names the"
+echo "    STOP as well as its tick, so the stranded boot key (about no stop)"
+echo "    cannot match the first move's, and the pane asks anyway: the arm now"
+echo "    shows that second guard holding without the clear."
 # ---------------------------------------------------------------------------
 arm_o="${cache}/arm-o"
 mkdir -p "${arm_o}"
@@ -374,12 +378,18 @@ if build_probe "${arm_o}" -d:OrderingArm:no-hook; then
 		PY
 		ck "$([ "$(q "${arm_o_out}" 'd["ordering"]["pendingAfterWorker"]')" = True ] && echo ok || echo no)" \
 			"arm O: the stranded key survives the worker's arrival"
-		ck "$([ "$(q "${arm_o_out}" 'd["ordering"]["sentAfterMove"]')" = "0" ] && echo ok || echo no)" \
-			"arm O: and the first move ISSUES NOTHING — the pane never asks"
-		ck "$([ "$(q "${arm_o_out}" 'len(d["orderingRows"])')" = "0" ] && echo ok || echo no)" \
-			"arm O: so pane B paints no rows at all"
-		ck "$([ "$(q "${arm_o_out}" 'd["loadingVisibleB"]')" = True ] && echo ok || echo no)" \
-			'arm O: and sits on "Loading...", waiting for an answer nobody was asked for'
+		# RE-MEASURED 2026-10-24. Before the stop joined the dedup key
+		# (`replay_data_store.requestLocals`, "AND THE STOP, not only its
+		# tick") this arm read 0 requests, 0 rows and "Loading...". With it,
+		# the boot key — taken before any stop — differs from the first
+		# move's, so the arm can no longer strand the pane. Asserted, so a
+		# key that lost the stop again is seen here: these three go red.
+		ck "$([ "$(q "${arm_o_out}" 'd["ordering"]["sentAfterMove"]')" = "1" ] && echo ok || echo no)" \
+			"arm O: and the first move STILL ASKS — the request names the stop, so the stranded key does not match it"
+		ck "$([ "$(q "${arm_o_out}" 'len(d["orderingRows"]) > 0')" = True ] && echo ok || echo no)" \
+			"arm O: so pane B paints rows ($(q "${arm_o_out}" 'len(d["orderingRows"])'))"
+		ck "$([ "$(q "${arm_o_out}" 'd["loadingVisibleB"]')" = False ] && echo ok || echo no)" \
+			'arm O: and is not left on "Loading..."'
 		# THE ARM BREAKS ONE THING.
 		ck "$([ "$(q "${arm_o_out}" 'd["ordering"]["sentAtBoot"]')" = "1" ] && echo ok || echo no)" \
 			"arm O: the boot request still happens (the arm removes the CLEAR, not the ask)"

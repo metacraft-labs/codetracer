@@ -71,6 +71,14 @@ fail() {
 	fi
 }
 
+# The flake.lock lookup below runs python3 with its errors discarded, so without
+# python3 every commit-pinned sibling reads as "flake.lock has no locked rev" --
+# a missing tool reported as a missing pin. Refuse by name instead.
+if ! command -v python3 >/dev/null 2>&1; then
+	echo "ERROR: python3 is not on PATH; this suite reads flake.lock with it." >&2
+	exit 1
+fi
+
 for f in "$FLAKE" "$WORKFLOW"; do
 	if [ ! -f "$f" ]; then
 		echo "ERROR: $f does not exist; this suite cannot check anything." >&2
@@ -146,7 +154,8 @@ for repo in $(printf '%s\n' "$flake_list" "$workflow_list" | cut -f1 | sort -u);
 		# reported as one -- otherwise this branch would turn "pin it to a
 		# commit" into a way to opt out of the contract, which is the failure
 		# mode this whole file is written against.
-		locked=$(python3 - "$repo" <<'PY' 2>/dev/null || true
+		locked=$(
+			python3 - "$repo" <<'PY' 2>/dev/null || true
 import json,sys
 repo=sys.argv[1]
 try: nodes=json.load(open("flake.lock"))["nodes"]

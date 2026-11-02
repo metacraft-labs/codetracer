@@ -32,14 +32,21 @@
 
 import std/[json, options, sets, sequtils, hashes, tables]
 
-import isonim/core/[signals, computation, owner]
+import isonim/core/[signals, computation, owner, async_compat]
 import isonim/viewmodel
 
 import ../backend/backend_service
 import ../store/[replay_data_store, types]
+from ../store/stop_timeline import stopIdentityOf
 import origin_chain_types
 
 type
+  RowChain* = object
+    ## A State-pane row's origin chain and the stop it was asked at
+    ## (`stop_timeline.stopIdentityOf`).
+    stop*: string
+    chain*: OriginChain
+
   OriginQueryRequest* = object
     ## Per-issued `ct/originChain` request. Tracking it on the VM lets
     ## `onCancelLoad` ignore late responses by comparing the response's
@@ -84,8 +91,30 @@ type
     inFlightSummary*: Signal[bool]
       ## True while a batched `ct/originSummary` request is in flight.
     latestRequestId*: Signal[int]
+    latestTransportRequest*: string
+      ## The transport's identity of the latest `ct/originChain` sent, by the
+      ## VM or by a host's own menu (`noteChainRequestSent`); "" when none is
+      ## outstanding or it was cancelled. `applyChainAnswer` accepts only its
+      ## answer.
       ## Counter incremented on every `onShowOrigin`. Used by
       ## `applyChainResponse` to ignore stale responses.
+    sendingRowChainRequest: bool
+      ## True only around `loadRowChain`'s own send: that request is a
+      ## State-pane row's (§3.2.1), not the side panel's, so
+      ## `noteChainRequestSent` does not make it the request whose answer
+      ## `applyChainAnswer` shows. A request a host menu sends without the VM
+      ## finds it false.
+    rowChains*: Signal[Table[string, RowChain]]
+      ## The chain of each State-pane row, by variable name, with the stop it
+      ## was asked at: what the in-row block draws (spec §3.2.1). Every
+      ## current-stop answer (`stepId` -1) lands here, whichever entry point
+      ## asked, so expanding one row never empties another, and a chain asked
+      ## at another stop is never drawn as this stop's (`rowChainAt`).
+    rowChainsAskedStop: string
+    rowChainsAsked: HashSet[string]
+      ## The rows `loadRowChain` has asked about at `rowChainsAskedStop`, so a
+      ## row is asked once per stop however often it is expanded or its
+      ## summaries arrive. Reset when the stop changes.
     lastResolvedSummaries*: Signal[Table[string, OriginSummary]]
       ## Token → resolved-summary cache populated by responses to
       ## `ct/originSummary`. The State Pane subscribes and replaces
@@ -102,8 +131,9 @@ type
       ## Optional bridge installed by the host so `onSeekToHop` can
       ## reuse the existing `ct/history-jump` / `ct/goto-ticks` wiring.
     onPinChainProc*: proc(chain: OriginChain)
-      ## Optional bridge installed by `state.nim` to forward pinned
-      ## chains into `ScratchpadVM`.
+      ## Bridge to `ScratchpadVM.addChain`, installed by
+      ## `origin_chain_bridges.wireOriginChainBridges` (which `ui/state.nim`
+      ## calls). Nil only in a host that has not wired the VM.
     onSwitchProcessProc*: proc(recordingId: string)
       ## Optional bridge installed by `state.nim` to forward
       ## breadcrumb-chip clicks into `SessionViewModel.onSwitchProcess`
@@ -143,37 +173,131 @@ proc derivePreferences(vm: OriginChainVM; key: string;
 # Actions
 # ---------------------------------------------------------------------------
 
-proc onShowOrigin*(vm: OriginChainVM; expression: string; location: Location;
-                   stepId: int64 = -1) =
-  ## Dispatch a `ct/originChain` request (spec §5.3) for `expression`
-  ## at `(location, stepId)`. The request is tracked via
-  ## `latestRequestId` so `onCancelLoad` can ignore the late response.
-  ## The breadcrumb stack is updated immediately so the user sees the
-  ## navigation reflected even before the response arrives.
+proc applyChainResponse*(vm: OriginChainVM; chain: OriginChain;
+                         requestId: int = -1)
+proc applySummaryResponse*(vm: OriginChainVM; tokens: openArray[string];
+                           summaries: openArray[OriginSummary])
+proc recordRowChain(vm: OriginChainVM; expression, stop: string;
+                    chain: OriginChain)
+proc forgetRowRequest(vm: OriginChainVM; expression, stop: string)
+proc onCancelLoad*(vm: OriginChainVM)
+
+proc sendChainQuery(vm: OriginChainVM; expression: string; stepId: int64;
+                    forSidePanel: bool) =
+  ## Send one `ct/originChain` (spec §5.3) for `expression`, asked about
+  ## `stepId`, and route its answer. Every current-stop answer (`stepId` -1)
+  ## is kept as that row's chain AT THE STOP IT WAS ASKED AT (`rowChains`),
+  ## whoever asked; only a side-panel request's answer becomes the side
+  ## panel's chain (`activeChain`), and only while it is the latest one.
   ##
-  ## Per spec §3.2.2 + M4 deliverable §9, ``onShowOrigin`` also opens
-  ## the dedicated Origin Chain side panel. The State-Pane right-click
-  ## "Show value origin" menu item routes here; the in-row badge
-  ## click toggles the inline expansion and goes through the same
-  ## entry-point.
-  if vm.store.isNil or vm.store.backend.isNil:
-    return
-  let nextId = vm.latestRequestId.val + 1
-  vm.latestRequestId.val = nextId
-  vm.loading.val = true
-  vm.sidePanelOpen.val = true
-
-  var stack = vm.breadcrumbStack.val
-  stack.add(BreadcrumbEntry(variableName: expression, stepId: stepId))
-  vm.breadcrumbStack.val = stack
-
+  ## THE QUERY IS ABOUT `stepId`: the step the engine walks back from. -1 is
+  ## the current stop, which is what the State pane's rows are about; a caller
+  ## asking about another moment (a history entry, a hop) passes that step.
   let prefs = vm.preferences.val
   let args = originChainArgs(
     expression = expression,
     stepId = stepId,
     maxHops = prefs.defaultMaxHops,
   )
-  discard vm.store.backend.send("ct/originChain", args)
+  # The side panel applies the answer to THIS request when it arrives —
+  # unless a newer side-panel request or a cancel came first
+  # (`applyChainResponse`'s id check), so a late answer never replaces the
+  # chain the user asked for since. A row's request takes no id: it never
+  # supersedes the side panel's.
+  var panelId = -1
+  if forSidePanel:
+    panelId = vm.latestRequestId.val + 1
+    vm.latestRequestId.val = panelId
+    vm.loading.val = true
+  let askedAt = stopIdentityOf(vm.store.debugger.val)
+  let vmRef = vm
+  # The transport names the request from inside `send`
+  # (`dap.dispatchCtRequest` runs the `trackCtRequests` hook before it
+  # writes the frame, synchronously), so `noteChainRequestSent` sees this
+  # flag; clearing it afterwards keeps a later request from a host menu,
+  # which never passes through here, counted as the side panel's.
+  vm.sendingRowChainRequest = not forSidePanel
+  try:
+    async_compat.onComplete(vm.store.backend.send("ct/originChain", args),
+      onSuccess = proc(response: JsonNode) =
+        let body = responseBody(response)
+        if responseSucceeded(response) and body.hasKey("hops"):
+          let chain = parseOriginChain(body)
+          if stepId < 0:
+            vmRef.recordRowChain(expression, askedAt, chain)
+          if forSidePanel:
+            vmRef.applyChainResponse(chain, panelId)
+        elif not forSidePanel:
+          vmRef.forgetRowRequest(expression, askedAt),
+      onError = proc(message: string) =
+        if not forSidePanel:
+          vmRef.forgetRowRequest(expression, askedAt))
+  finally:
+    vm.sendingRowChainRequest = false
+
+proc onShowOrigin*(vm: OriginChainVM; expression: string; location: Location;
+                   stepId: int64 = -1) =
+  ## "Show value origin" — the State-Pane right-click menu, the command
+  ## palette, the `origin(expr)` watch: dispatch a `ct/originChain` request
+  ## (spec §5.3) for `expression` at `(location, stepId)` and, per spec §3.1 /
+  ## §3.2.2 + M4 deliverable §9, open the dedicated Origin Chain side panel
+  ## and push a breadcrumb, so the user sees the navigation even before the
+  ## response arrives. The request is tracked via `latestRequestId` so
+  ## `onCancelLoad` can ignore the late response.
+  ##
+  ## `location` is where the value is SHOWN — the source position the State
+  ## pane's row belongs to — and does not change the question.
+  ##
+  ## The origin badge's in-place fetch is `loadRowChain`, which touches
+  ## neither the side panel nor its breadcrumb trail.
+  if vm.store.isNil or vm.store.backend.isNil:
+    return
+  vm.sidePanelOpen.val = true
+  var stack = vm.breadcrumbStack.val
+  stack.add(BreadcrumbEntry(variableName: expression, stepId: stepId))
+  vm.breadcrumbStack.val = stack
+  vm.sendChainQuery(expression, stepId, forSidePanel = true)
+
+proc recordRowChain(vm: OriginChainVM; expression, stop: string;
+                    chain: OriginChain) =
+  var chains = vm.rowChains.val
+  chains[expression] = RowChain(stop: stop, chain: chain)
+  vm.rowChains.val = chains
+
+proc forgetRowRequest(vm: OriginChainVM; expression, stop: string) =
+  ## A row's request that produced no chain may be asked again: re-expanding
+  ## the row retries it.
+  if vm.rowChainsAskedStop == stop:
+    vm.rowChainsAsked.excl(expression)
+
+proc rowChainAt*(vm: OriginChainVM; expression, stop: string): Option[OriginChain] =
+  ## The chain of the State-pane row `expression` at `stop`, if one was
+  ## answered there. Reactive: reads `rowChains`.
+  let chains = vm.rowChains.val
+  if chains.hasKey(expression) and chains[expression].stop == stop:
+    some(chains[expression].chain)
+  else:
+    none(OriginChain)
+
+proc loadRowChain*(vm: OriginChainVM; expression: string; location: Location) =
+  ## Ask for the chain of the State-pane row `expression` at the current
+  ## stop, for the in-row block (spec §3.2.1, "expands the row in place"):
+  ## the answer lands in `rowChains` only, so the side panel's chain, its
+  ## pending request and its breadcrumb trail are left alone. Asked at most
+  ## once per row per stop, so the expand click and the re-ask after a move
+  ## cannot duplicate it.
+  if vm.store.isNil or vm.store.backend.isNil:
+    return
+  let stop = stopIdentityOf(vm.store.debugger.val)
+  if vm.rowChainAt(expression, stop).isSome:
+    return
+  if vm.rowChainsAskedStop != stop:
+    vm.rowChainsAskedStop = stop
+    vm.rowChainsAsked = initHashSet[string]()
+  if expression in vm.rowChainsAsked:
+    return
+  vm.rowChainsAsked.incl(expression)
+  vm.sendChainQuery(expression, stepId = -1, forSidePanel = false)
 
 proc openSidePanel*(vm: OriginChainVM) =
   ## Force-open the side panel (used by the command palette / keyboard
@@ -185,6 +309,50 @@ proc closeSidePanel*(vm: OriginChainVM) =
   ## same chain can be re-opened without re-fetching). Wired to the
   ## panel's Esc key handler per spec §13.0.
   vm.sidePanelOpen.val = false
+
+proc noteChainRequestSent*(vm: OriginChainVM; transportId: string) =
+  ## A `ct/originChain` is being sent NOW, by whatever issued it (the VM or a
+  ## host's own menu), under the transport's identity. Every request but a
+  ## State-pane row's (`loadRowChain`) is the side panel's: it becomes the
+  ## request whose answer `applyChainAnswer` accepts and shows there. A
+  ## row's request leaves that tracking alone, so it neither supersedes a
+  ## side-panel request still outstanding nor has its own answer shown in
+  ## the side panel (spec §3.2.1 vs §3.2.2).
+  if vm.sendingRowChainRequest:
+    return
+  vm.latestTransportRequest = transportId
+  vm.loading.val = true
+
+proc rejectChainAnswer*(vm: OriginChainVM; transportId: string): bool =
+  ## A `ct/originChain` answer that arrived on the transport without a chain.
+  ## It ends the side panel's wait (`onCancelLoad`) only when it answers the
+  ## side panel's latest request — or names none while one is outstanding —
+  ## so a row's failed fetch never cancels the side panel's; `true` when it
+  ## did.
+  if transportId.len > 0:
+    if transportId != vm.latestTransportRequest:
+      return false
+  elif not vm.loading.val:
+    return false
+  vm.onCancelLoad()
+  true
+
+proc applyChainAnswer*(vm: OriginChainVM; chain: OriginChain;
+                       transportId: string): bool =
+  ## Apply a chain that arrived on the transport, named by the request it
+  ## answers. Only the answer to the latest request sent, and not cancelled
+  ## since, is applied; `true` when it was. An answer that carries no
+  ## identity (a transport that names none) is applied while a request is
+  ## outstanding.
+  if transportId.len > 0:
+    if transportId != vm.latestTransportRequest:
+      return false
+  elif not vm.loading.val:
+    return false
+  vm.activeChain.val = some(chain)
+  vm.loading.val = false
+  vm.latestTransportRequest = ""
+  true
 
 proc applyChainResponse*(vm: OriginChainVM; chain: OriginChain;
                          requestId: int = -1) =
@@ -199,9 +367,11 @@ proc applyChainResponse*(vm: OriginChainVM; chain: OriginChain;
 
 proc onCancelLoad*(vm: OriginChainVM) =
   ## Drop the spinner flag and bump the request counter so any future
-  ## arriving response is treated as stale.
+  ## arriving response is treated as stale — the VM's own and one named by
+  ## the transport alike.
   vm.loading.val = false
   vm.latestRequestId.val = vm.latestRequestId.val + 1
+  vm.latestTransportRequest = ""
 
 proc onSeekToHop*(vm: OriginChainVM; hop: OriginHop) =
   ## Invoke the host-provided seek bridge (spec §3.3 "Click a hop").
@@ -332,7 +502,22 @@ proc flushPlaceholderFill*(vm: OriginChainVM) =
     return
   vm.inFlightSummary.val = true
   let args = originSummaryArgs(queue)
-  discard vm.store.backend.send("ct/originSummary", args)
+  # THE ANSWER IS APPLIED HERE, and the next batch follows: the fill used to
+  # set `inFlightSummary` and wait for a caller of `applySummaryResponse`
+  # that no host had, so it stopped after the first batch.
+  let vmRef = vm
+  let sent = queue
+  async_compat.onComplete(vm.store.backend.send("ct/originSummary", args),
+    onSuccess = proc(response: JsonNode) =
+      if responseSucceeded(response):
+        vmRef.applySummaryResponse(sent,
+          parseOriginSummariesResponse(responseBody(response)))
+      else:
+        vmRef.inFlightSummary.val = false
+      # Whatever was queued while this batch was in flight goes next.
+      vmRef.flushPlaceholderFill(),
+    onError = proc(message: string) =
+      vmRef.inFlightSummary.val = false)
 
 proc applySummaryResponse*(vm: OriginChainVM; tokens: openArray[string];
                            summaries: openArray[OriginSummary]) =
@@ -444,6 +629,8 @@ proc createOriginChainVM*(store: ReplayDataStore): OriginChainVM =
       lastResolvedSummaries: createSignal(
         initTable[string, OriginSummary]()),
       sidePanelOpen: createSignal(false),
+      rowChains: createSignal(initTable[string, RowChain]()),
+      sendingRowChainRequest: false,
       disposeProc: dispose,
     )
     vm

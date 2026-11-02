@@ -25,6 +25,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::paths::Paths;
+
 // ---------------------------------------------------------------------------
 // Environment variable names
 // ---------------------------------------------------------------------------
@@ -64,7 +66,8 @@ pub struct DaemonConfig {
     /// Maximum number of concurrently loaded trace sessions.
     pub max_sessions: usize,
     /// Optional override for the daemon's Unix socket path.
-    /// When `None`, the daemon uses the well-known default from [`crate::paths`].
+    /// When `None`, the well-known default from [`crate::paths`] is used.
+    /// Read it through [`DaemonConfig::daemon_paths`], never directly.
     pub socket_path: Option<PathBuf>,
     /// Optional override for the daemon log file path.
     pub log_file: Option<PathBuf>,
@@ -136,6 +139,50 @@ impl DaemonConfig {
 
         cfg
     }
+
+    /// The daemon's socket (a TCP port file on Windows) and PID file.
+    ///
+    /// This is the ONE place those two paths are resolved.  The daemon binds
+    /// and writes them (`daemon start`), and every client looks for them:
+    /// the CLI verbs that auto-start the daemon (`trace info`, `trace query`,
+    /// ...), `daemon stop` / `status` / `connect`, the MCP server, and the
+    /// socket the daemon hands to `exec_script`'s Python process.  Resolving
+    /// them anywhere else lets an override move one side and not the other:
+    /// the client then polls a path the daemon it started never binds, and
+    /// times out.
+    ///
+    /// With an override (`CODETRACER_DAEMON_SOCKET`, or `socket_path` in the
+    /// config file) the PID file sits beside the socket as `<socket>.pid`;
+    /// otherwise both come from `defaults` (`$CODETRACER_TMP_PATH`, else
+    /// `$CODETRACER_HOME/tmp`, else the per-OS default).
+    ///
+    /// The Python API cannot call this and mirrors it in
+    /// `python-api/codetracer/connection.py` (`default_daemon_socket_path`);
+    /// change both together. `tests/python_daemon_socket_agreement_test.rs`
+    /// starts the daemon under each override and fails when they disagree.
+    pub fn daemon_paths(&self, defaults: &Paths) -> DaemonPaths {
+        match &self.socket_path {
+            Some(socket) => DaemonPaths {
+                socket: socket.clone(),
+                pid: socket.with_extension("pid"),
+            },
+            None => DaemonPaths {
+                socket: defaults.daemon_socket_path(),
+                pid: defaults.daemon_pid_path(),
+            },
+        }
+    }
+}
+
+/// Where the daemon listens and where it records its PID, as resolved by
+/// [`DaemonConfig::daemon_paths`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DaemonPaths {
+    /// The Unix socket (Unix) or TCP port file (Windows).
+    pub socket: PathBuf,
+    /// The PID file `daemon start` writes, and refuses to overwrite while
+    /// the process it names is alive.
+    pub pid: PathBuf,
 }
 
 // ---------------------------------------------------------------------------
@@ -267,6 +314,31 @@ socket_path = /tmp/test.sock
 
         // Should remain at default.
         assert_eq!(cfg.default_ttl, Duration::from_secs(300));
+    }
+
+    fn defaults_in(dir: &str) -> Paths {
+        Paths {
+            tmp_path: PathBuf::from(dir),
+        }
+    }
+
+    #[test]
+    fn daemon_paths_without_override_are_the_defaults() {
+        let defaults = defaults_in("/scratch/tmp");
+        let paths = DaemonConfig::default().daemon_paths(&defaults);
+        assert_eq!(paths.socket, defaults.daemon_socket_path());
+        assert_eq!(paths.pid, defaults.daemon_pid_path());
+    }
+
+    #[test]
+    fn daemon_paths_override_moves_socket_and_pid_together() {
+        let cfg = DaemonConfig {
+            socket_path: Some(PathBuf::from("/elsewhere/run/daemon.sock")),
+            ..DaemonConfig::default()
+        };
+        let paths = cfg.daemon_paths(&defaults_in("/scratch/tmp"));
+        assert_eq!(paths.socket, PathBuf::from("/elsewhere/run/daemon.sock"));
+        assert_eq!(paths.pid, PathBuf::from("/elsewhere/run/daemon.pid"));
     }
 
     #[test]

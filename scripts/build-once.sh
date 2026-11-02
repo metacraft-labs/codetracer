@@ -4,12 +4,83 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+case "$(uname -s)" in
+Darwin) ct_reprobuild_host="darwin" ;;
+Linux)
+	# Reprobuild is the default build driver on macOS, but on Linux it is
+	# still experimental: keep `just build-once` on the legacy tup path by
+	# default while we gain more experience with reprobuild here. Developers
+	# can opt in per-invocation with CODETRACER_REPROBUILD_LINUX=1. Windows
+	# keeps the reprobuild branch because it has no tup fallback in this
+	# script.
+	if [ -n "${CODETRACER_REPROBUILD_LINUX:-}" ]; then
+		ct_reprobuild_host="linux"
+	else
+		ct_reprobuild_host=""
+	fi
+	;;
+MINGW* | MSYS* | CYGWIN*) ct_reprobuild_host="windows" ;;
+*) ct_reprobuild_host="" ;;
+esac
+
+if [ -z "$ct_reprobuild_host" ]; then
+	ct_tup_config="${CODETRACER_CONFIG:-debug}"
+	ct_tup_variant="build-${ct_tup_config}"
+	# Invalidate both webpack's output and the published renderer before starting.
+	# Failed compiles must leave an absent renderer, not yesterday's runnable
+	# bundle. Also remove partially written outputs while keeping the tool's status.
+	ct_invalidate_renderer() {
+		rm -f -- "$CT_ROOT/src/public/dist/frontend_bundle.js" \
+			"$CT_ROOT/src/public/dist/frontend_bundle.js.map" \
+			"$CT_ROOT/src/$ct_tup_variant/public/dist/frontend_bundle.js" \
+			"$CT_ROOT/src/$ct_tup_variant/public/dist/frontend_bundle.js.map"
+	}
+	ct_renderer_exit() {
+		local status="$?"
+		if [ "$status" -ne 0 ]; then
+			if ct_invalidate_renderer; then
+				echo "build-once: build failed; renderer bundle invalidated" >&2
+			else
+				echo "build-once: ERROR: failed to invalidate renderer after build failure" >&2
+			fi
+		fi
+		exit "$status"
+	}
+	trap ct_renderer_exit EXIT
+	ct_invalidate_renderer
+fi
+
 # Bootstrap the dev-shell PATH when key build tools (tup, nim, node) are not
 # already available.  The .direnv/flake-profile-*.rc file is the nix-direnv
 # cached evaluation of the codetracer flake — sourcing it is instant (no
-# network, no nix evaluation) and sets PATH, NIX_*, etc. exactly as the dev
-# shell would.  This makes `just build-once` work from a plain terminal that
-# hasn't run `direnv allow` or `nix develop`.
+# network, no nix evaluation) and sets PATH, NIX_*, etc. as the dev shell did
+# WHEN THE CACHE WAS WRITTEN.  This makes `just build-once` work from a plain
+# terminal that hasn't run `direnv allow` or `nix develop`.
+#
+# IT IS A CACHE, NOT AN EQUIVALENT OF `nix develop`, AND THE DIFFERENCE IS NOT
+# COSMETIC.  nix-direnv does not revalidate this file on a flake input bump, so
+# it can name store paths arbitrarily older than the ones a live `nix develop`
+# would give you.  Sourcing it therefore makes a toolchain OLDER, silently, and
+# the thing it makes older is not always a compiler.
+#
+# Measured here, 2026-10-12, aarch64-darwin.  The rc in this checkout was
+# written 2026-08-27 and names
+#   CODETRACER_PYTHON_CMD=/nix/store/xx6ypzy…-python3-3.12.13-env  (registered
+#   2026-08-18), while a live `nix develop` resolves it to
+#   /nix/store/jnf5kir…-python3-3.12.13-env  (registered 2026-10-12).
+# The Python recorder is selected by that interpreter, and the 08-18 one writes
+# CTFS container v4, which the current replay-server refuses:
+#   "CTFS container version 4 is not readable: this reader reads versions 5 and 6"
+# A reviewer's advice to "re-enter the dev shell via the cached profile" to
+# refresh a stale recorder was followed and would have made it two months
+# staler.  All three store paths are the same Python 3.12.13, so no version
+# check can see this; only the store path can.
+#
+# So: for a BUILD this cache is fine and is why it exists.  To refresh anything
+# that is pinned by a store path — the Python recorder above being the case
+# that has already cost two days — run a real `nix develop`.  The dev shell's
+# own `_ct_venv_matches_pin` (nix/shells/main.nix) now compares interpreter
+# PATHS for exactly this reason.
 #
 # The profile carries the dev shell's whole shellHook, which prepares the git
 # checkout enclosing the CURRENT directory (`node_modules` link, hook config,
@@ -104,24 +175,6 @@ EOF
 # every tool the codetracer `uses:` clause references on its Windows
 # branch. On all three, the codetracer recipe lives in `reprobuild.nim`
 # and is built end-to-end via the local `repro` binary.
-case "$(uname -s)" in
-Darwin) ct_reprobuild_host="darwin" ;;
-Linux)
-	# Reprobuild is the default build driver on macOS, but on Linux it is
-	# still experimental: keep `just build-once` on the legacy tup path by
-	# default while we gain more experience with reprobuild here. Developers
-	# can opt in per-invocation with CODETRACER_REPROBUILD_LINUX=1. Windows
-	# keeps the reprobuild branch because it has no tup fallback in this
-	# script.
-	if [ -n "${CODETRACER_REPROBUILD_LINUX:-}" ]; then
-		ct_reprobuild_host="linux"
-	else
-		ct_reprobuild_host=""
-	fi
-	;;
-MINGW* | MSYS* | CYGWIN*) ct_reprobuild_host="windows" ;;
-*) ct_reprobuild_host="" ;;
-esac
 
 if [ -n "$ct_reprobuild_host" ]; then
 	# Build configuration (debug/release), selected by CODETRACER_CONFIG
@@ -234,16 +287,25 @@ if [ -n "$ct_reprobuild_host" ]; then
 	#     codetracer_trace_writer_nim's build.rs from running a network
 	#     ``nimble install``.
 	#   * CT_EMULATOR_EXTRA_NIM_PATHS / CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS
-	#     inject codetracer's vendored ``stew`` tree (which ships the newer
-	#     results.nim those scripts rely on) so their ``nim c`` resolves
-	#     ``results`` / ``stew`` without a nimble package store.
+	#     inject codetracer's vendored ``stew`` tree and the standalone
+	#     ``results`` package (``libs/nim-result``) so their ``nim c`` resolves
+	#     ``results`` / ``stew`` without a nimble package store. The standalone
+	#     package must be on the path, and LAST: Nim gives the most recently
+	#     added ``--path`` precedence, and ``libs/nim-stew/stew`` carries an
+	#     older ``results.nim`` whose ``unsafeError`` is declared
+	#     ``[T, E: not void]`` and so does not match the ``Result[void, E]``
+	#     values codetracer-trace-format-nim uses. Without it the trace
+	#     writer's archive fails with "undeclared field: 'unsafeError' for type
+	#     results.Result [type declared in libs/nim-stew/stew/results.nim]".
+	#     The Linux tup branch below appends it; this branch did not, so a
+	#     macOS build-once failed there.
 	# Windows skips direnv unconditionally in build.rs and sets up Nim via
 	# env.ps1, so leave that branch untouched.
 	if [ "$ct_reprobuild_host" != "windows" ]; then
 		export CODETRACER_DB_BACKEND_SKIP_DIRENV="${CODETRACER_DB_BACKEND_SKIP_DIRENV:-1}"
 		export CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL="${CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL:-1}"
 		if [ -z "${CT_EMULATOR_EXTRA_NIM_PATHS:-}" ] && [ -d "$PWD/libs/nim-stew/stew" ]; then
-			ct_nim_paths_lib="$PWD/libs/nim-stew/stew:$PWD/libs/nim-stew"
+			ct_nim_paths_lib="$PWD/libs/nim-stew/stew:$PWD/libs/nim-stew:$PWD/libs/nim-result"
 			export CT_EMULATOR_EXTRA_NIM_PATHS="$ct_nim_paths_lib"
 			export CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS="${CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS:-$ct_nim_paths_lib}"
 		fi
@@ -456,6 +518,35 @@ if [ -n "$ct_reprobuild_host" ]; then
 	# A build that exits 0 having produced a `ct` that cannot start is the
 	# defect this check ends. See scripts/require-runtime-assets.sh.
 	"${BASH:-bash}" "$SCRIPT_DIR/require-runtime-assets.sh" "$ct_repro_out_root"
+
+	# THE FRESHNESS STAMP, as the build's last act.
+	#
+	# `require-runtime-assets.sh` above answers "can this bundle start?".
+	# This answers the other half — "is this bundle of the sources that are
+	# here now?" — and the two are not substitutes. The bundle is gitignored
+	# build-once output: it survives every branch switch, every rebase and
+	# every worktree copy, because nothing in git's model touches it. It is
+	# stale by default rather than by accident.
+	#
+	# Measured 2026-10-12: PLAT-37's two capture lanes published a parity
+	# reading over a GPUI binary and an Electron bundle **127 commits
+	# apart**, and eleven findings were raised against the pair. Neither lane
+	# could have detected it, because neither artefact carried a statement of
+	# what it was built from. `ci/test/plat37-macos-electron-capture.sh` now
+	# REFUSES to capture through an unstamped bundle, so this write is what
+	# keeps that lane runnable.
+	#
+	# A stamp failure does NOT fail the build: the bundle is good and runnable
+	# either way, and taking a working build away over a provenance record
+	# would be the wrong trade. It warns, and the lane's refusal is what
+	# carries the consequence.
+	# shellcheck source=ci/lib/build-freshness.sh
+	. "$CT_ROOT/ci/lib/build-freshness.sh"
+	bf_electron_write_stamp "$CT_ROOT" "$CT_ROOT/$ct_repro_out_root" || {
+		echo "WARNING: the bundle was built but could not be stamped." >&2
+		echo "  It will run, but ci/test/plat37-macos-electron-capture.sh" >&2
+		echo "  will refuse to capture through it, by design." >&2
+	}
 	exit 0
 fi
 
@@ -463,8 +554,6 @@ fi
 # builds the `build-release` variant (src/build-release/tup.config, CONFIG_DEBUG=0
 # → release Nim flags); the default is `build-debug`. The two variants live in
 # separate output dirs so they don't collide.
-ct_tup_config="${CODETRACER_CONFIG:-debug}"
-ct_tup_variant="build-${ct_tup_config}"
 ct_publish_build_env "" "$ct_tup_config" "$ct_tup_variant" "src/$ct_tup_variant"
 
 # Mirror the reprobuild branch's env-var setup so cargo build scripts work

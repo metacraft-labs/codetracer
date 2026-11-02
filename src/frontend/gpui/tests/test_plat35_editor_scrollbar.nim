@@ -116,7 +116,7 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 352
+  ExpectedAssertions = 361
   Calc = "test-programs/calc/main.py"
     ## The corpus's own program — `scenarios.json`'s recording is a trace of
     ## it — so the widths here are the widths the frames were graded on and
@@ -320,26 +320,51 @@ suite "PLAT-35 tier 3 — PLAT35-F3: the editor's horizontal scrollbar":
     # survived in `gutterLanes.png`, against twelve at 1920x1080).
     ck styleOf(track, "position") == "absolute"
     ck styleOf(track, "bottom") == "0px"
-    # Inset by the pane's padding, so the track covers exactly the span the
-    # rows do. `ChromePaddingPx` and not a literal: `stylePaneBox` adds the
-    # same one.
-    ck styleOf(track, "left") == $ChromePaddingPx & "px"
+    # Inset by the editor's side padding, so the track covers exactly the
+    # span the rows do. `EditorPadSidePx` and not a literal: the window's
+    # `editorBodyWidthOf` takes the same one out of the pane (since
+    # 2026-10-17 it is 0 — the desktop's Monaco fills its panel).
+    ck styleOf(track, "left") == $EditorPadSidePx & "px"
     # The thumb is painted and the track is not, which is the reference's
     # own look.
     ck styleOf(thumb, "bg") == EditorScrollbarThumbColour
     ck styleOf(track, "bg") == ""
 
+  test "the thumb is invisible at rest and shown while the pointer is over":
+    # Monaco's scrollbars FADE: a frame of the desktop's editor at rest has
+    # no slider, and hovering the editor shows it. The window flips
+    # `editorScrollbarShown`; the node itself still EXISTS at rest (the
+    # cases above measure it), so this is visibility, not presence.
+    let saved = editorScrollbarShown
+    editorScrollbarShown = false
+    let rest = draw(calcSurface(5, 40), 326, 0)
+    let restTrack = nodesWith(rest.plan, EditorScrollbarAttribute)[0]
+    ck restTrack{"attributes"}{"data-ct-scrollbar-visible"}.getStr == "false"
+    ck styleOf(nodesWith(rest.plan, EditorScrollbarThumbAttribute)[0],
+               "opacity") == "0"
+    editorScrollbarShown = true
+    let hover = draw(calcSurface(5, 40), 326, 0)
+    let hoverTrack = nodesWith(hover.plan, EditorScrollbarAttribute)[0]
+    ck hoverTrack{"attributes"}{"data-ct-scrollbar-visible"}.getStr == "true"
+    ck styleOf(nodesWith(hover.plan, EditorScrollbarThumbAttribute)[0],
+               "opacity") notin ["0", "0.0"]
+    editorScrollbarShown = saved
+
   test "the thumb's share of the track is the viewport's share of the content":
-    # Monaco's own formula (`scrollbarState.js`, `_computeValues`), with
-    # `representableSize == visibleSize` because this scrollbar has no
-    # arrows. Asserted over a RANGE of content widths, so a constant thumb
-    # cannot pass.
+    # PLAT-70 (Horizontal-Overflow.md §4.2): THE BAR IS THE SHARED SCRUBBER
+    # MODEL on the column axis — the thumb is `viewportCols / contentCols`
+    # of the track, at least Monaco's 20 px. It replaced Monaco's slider
+    # formula (`scrollbarState.js`), which PLAT35-F3 first transcribed, so
+    # every bar in the product is one arithmetic. Restated here from the
+    # specification's sentence, over a RANGE of content widths, so a
+    # constant thumb cannot pass.
     var widths: seq[int] = @[]
+    let viewCols = editorViewCols(326)
     for cols in [40, 60, 80, 120, 200, 400]:
       let scroll = editorHScrollOf(rowsOfWidth(cols, 3), 1, 326)
       ck scroll.present
       ck scroll.thumbPx == min(326, max(EditorScrollbarMinThumbPx,
-        int(floor(326.0 * 326.0 / float(scroll.contentPx)))))
+        int(round(326.0 * float(viewCols) / float(cols)))))
       widths.add scroll.thumbPx
     # STRICTLY NARROWER as the content grows, until the floor binds. A thumb
     # that ignored the content would be flat here.
@@ -350,7 +375,7 @@ suite "PLAT-35 tier 3 — PLAT35-F3: the editor's horizontal scrollbar":
     # content in a 326 px pane is 0.8% of the track, 2 px without it.
     let huge = editorHScrollOf(rowsOfWidth(4000, 3), 1, 326)
     ck huge.thumbPx == EditorScrollbarMinThumbPx
-    ck int(floor(326.0 * 326.0 / float(huge.contentPx))) <
+    ck int(round(326.0 * float(viewCols) / 4000.0)) <
        EditorScrollbarMinThumbPx
 
   test "the scroll is clamped by the model, in both directions":
@@ -359,14 +384,20 @@ suite "PLAT-35 tier 3 — PLAT35-F3: the editor's horizontal scrollbar":
     ck rest.present
     ck rest.maxLeftCols > 0
     ck editorHScrollOf(rows, 1, 326, -5).leftCols == 0
+    # Past the end, the model keeps ONE column beyond `maxLeftCols` and no
+    # more: the cell after the widest line's last character, where only the
+    # caret's follow puts the view (Horizontal-Overflow.md §4.5, HO-5).
     ck editorHScrollOf(rows, 1, 326, rest.maxLeftCols + 50).leftCols ==
-       rest.maxLeftCols
+       rest.maxLeftCols + 1
     ck editorHScrollOf(rows, 1, 326, 7).leftCols == 7
     # `maxLeftCols` is exactly the code columns that do not fit, with the
-    # gutter's own width taken out of the pane — and the gutter's width is
-    # asked of `gutterRuns` rather than recomputed.
+    # gutter's own width taken out of the pane. Since 2026-10-17 the gutter
+    # is the desktop's fixed Monaco margin (`EditorGutterPx`, 110 px) rather
+    # than a run of columns; the reported column count is still the one
+    # `gutterRuns` gives, and the content width is the margin plus the code.
     ck rest.gutterCols == gutterText(EditorRow(line: 1), 1).runeLen
-    let visibleCode = int(floor(float(326 - columnsPx(rest.gutterCols)) /
+    ck rest.contentPx == EditorGutterPx + columnsPx(100)
+    let visibleCode = int(floor(float(326 - EditorGutterPx) /
                                 EditorColumnPx))
     ck rest.maxLeftCols == 100 - visibleCode
     # A pane that holds everything scrolls nowhere.
@@ -405,7 +436,7 @@ suite "PLAT-35 tier 3 — PLAT35-F3: the editor's horizontal scrollbar":
     # reachable" is not "is the tail in the plan"; it is "does the tail's
     # column fall inside the pane", which is arithmetic over the same two
     # numbers the scrollbar is decided from.
-    let visibleCodeCols = int(floor(float(326 - columnsPx(scroll.gutterCols)) /
+    let visibleCodeCols = int(floor(float(326 - EditorGutterPx) /
                                     EditorColumnPx))
     ck codeOf(0) == widestText
     ck visibleCodeCols < widest          # the clip the finding named
@@ -463,16 +494,19 @@ suite "PLAT-35 tier 3 — PLAT35-F3: the editor's horizontal scrollbar":
         ck styleOf(col, "text_overflow") == ""
     ck rows == 36
 
-  test "the window's editor rectangle: the pane, less the pane's padding":
+  test "the window's editor rectangle: the pane, less the editor's padding":
     # `editorBodyWidthOf` is what the window hands `renderEditor`, and it has
     # to be the SAME rectangle `editorRowsOf` answers from — a scrollbar
     # deciding against a width the pane does not have is worse than none.
+    # Since 2026-10-17 the editor fills its pane edge to edge, as the
+    # desktop's Monaco fills its panel (`EditorPadSidePx` == 0), so the
+    # rectangle is the pane's whole body.
     for (w, h) in Viewports:
       let g = geometryAt(w, h)
       let i = g.tabsNodeOfPane("editor")
       ck i >= 0
-      ck editorBodyWidthOf(g) == g.nodes[i].body.w - 2 * ChromePaddingPx
-      ck editorBodyWidthOf(g) < g.nodes[i].body.w
+      ck editorBodyWidthOf(g) == g.nodes[i].body.w - 2 * EditorPadSidePx
+      ck editorBodyWidthOf(g) == g.nodes[i].body.w
       # AND THE CONTENT REALLY DOES NOT FIT AT EITHER VIEWPORT, which is the
       # product claim `PLAT35-F3` made and the reason this suite exists. If
       # a later layout change made the editor wide enough for 88 columns,

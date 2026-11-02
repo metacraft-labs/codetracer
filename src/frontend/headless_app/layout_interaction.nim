@@ -921,10 +921,20 @@ proc proposeDivider*(interaction: Interaction; layout: Layout;
     return interaction
   var total = 0.0
   var before = 0.0
+  var weights: seq[float] = @[]
   for i, c in parent.children:
+    weights.add(effectiveWeight(c))
     total += effectiveWeight(c)
     if i < min(at, across):
       before += effectiveWeight(c)
+  # Compare in position space before converting back to weights. On ARM the
+  # multiply/subtract below may be fused, leaving a one-ulp change even at the
+  # exact starting fraction. Restore all original weights (including a side
+  # below the resize floor), without an epsilon that swallows real movement.
+  let currentPosition = (before + weights[min(at, across)]) / total
+  if position == currentPosition:
+    return Interaction(kind: ikResizingSplit, node: interaction.node,
+                       proposed: weights, divider: interaction.divider)
   # The divider's position is the end of the EARLIER of the two children, so
   # the earlier one's weight is `position * total - before`. The node is the
   # earlier one when the divider is after it.

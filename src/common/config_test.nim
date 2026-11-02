@@ -85,3 +85,38 @@ traceSharing:
   enabled: true
   notARealKey: 1
 """))
+
+proc withoutWindow(): string =
+  ## The shipped default with its `window:` section removed — the shape of
+  ## every config file written before PLAT-69 added it.
+  var lines: seq[string] = @[]
+  var skipping = false
+  for line in shippedDefault.splitLines():
+    if line.startsWith("window:"):
+      skipping = true
+      continue
+    if skipping and line.startsWith("  "):
+      continue
+    skipping = false
+    lines.add line
+  lines.join("\n")
+
+suite "config schema — window (PLAT-69)":
+
+  test "the shipped default carries the window entry, and it loads":
+    check "\nwindow:\n" in shippedDefault
+    let config = parseConfig(shippedDefault)
+    check config.window.initial == "maximized"
+    check (config.window.width, config.window.height) == (1900, 1400)
+
+  test "a config from before the entry existed still loads, maximized":
+    let older = withoutWindow()
+    check "\nwindow:" notin older
+    let config = parseConfig(older)
+    check config.window.initial == "maximized"
+    check (config.window.width, config.window.height) == (1900, 1400)
+
+  test "a window entry that gives only some of its keys loads":
+    let config = parseConfig(withoutWindow() & "\nwindow:\n  initial: windowed\n")
+    check config.window.initial == "windowed"
+    check (config.window.width, config.window.height) == (1900, 1400)

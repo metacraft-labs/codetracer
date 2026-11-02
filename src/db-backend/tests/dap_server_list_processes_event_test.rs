@@ -105,10 +105,10 @@ default_thread_prefix = "be"
 /// Build a SessionHandler from on-disk session.toml + one synthetic
 /// Handler per entry. The synthetic handlers are sufficient for the
 /// event-emission test because the event payload is derived solely
-/// from the manifest + the `SessionHandler::list_processes` projection
-/// (which under the M24 `inner_threads_for_slot` fallback synthesises
-/// `[(1, "<thread 1>")]` per trace and does not touch the handler's
-/// trace contents).
+/// from the manifest + the `SessionHandler::process_list` projection.
+/// A materialized handler with an empty `Db` has no process metadata,
+/// so `Handler::collect_thread_descriptors` yields the single-process
+/// `[(1, "<thread 1>")]` per trace without touching trace contents.
 fn load_session_from_disk(manifest_path: &std::path::Path, trace_count: usize) -> SessionHandler {
     let manifest = SessionManifest::load(manifest_path).expect("load synthetic session.toml");
     assert_eq!(manifest.traces.len(), trace_count, "manifest entry count");
@@ -158,13 +158,13 @@ fn dap_server_emits_list_processes_on_session_load() {
 
     // Stage 2 — build the SessionHandler from the real on-disk
     // manifest plus synthetic handlers.
-    let session = load_session_from_disk(&manifest_path, 3);
+    let mut session = load_session_from_disk(&manifest_path, 3);
     assert_eq!(session.trace_count(), 3);
 
     // Stage 3 — set up the DAP wire (a `Sender<DapMessage>` channel),
     // dispatch the session-load event, and snapshot what landed.
     let (tx, rx) = mpsc::channel::<DapMessage>();
-    dispatch_session_load_event(&session, &tx);
+    dispatch_session_load_event(&mut session, &tx);
     let messages = drain_messages(&rx);
 
     assert_eq!(
@@ -237,8 +237,8 @@ fn dap_server_emits_idempotent_list_processes_on_session_reload() {
     let (tx, rx) = mpsc::channel::<DapMessage>();
 
     // First load — dispatch the initial snapshot.
-    let session_v1 = load_session_from_disk(&manifest_path, 2);
-    dispatch_session_load_event(&session_v1, &tx);
+    let mut session_v1 = load_session_from_disk(&manifest_path, 2);
+    dispatch_session_load_event(&mut session_v1, &tx);
 
     // Simulate "recording added": rewrite the session.toml with the
     // three-entry fixture (the frontend-wasm trace is the new one).
@@ -247,8 +247,8 @@ fn dap_server_emits_idempotent_list_processes_on_session_reload() {
     // session.toml.
     std::fs::write(&manifest_path, three_trace_session_toml()).expect("rewrite session.toml");
 
-    let session_v2 = load_session_from_disk(&manifest_path, 3);
-    dispatch_session_load_event(&session_v2, &tx);
+    let mut session_v2 = load_session_from_disk(&manifest_path, 3);
+    dispatch_session_load_event(&mut session_v2, &tx);
 
     // Both events landed on the wire — the contract is "every event
     // is a total snapshot"; a late consumer replays both.
@@ -290,10 +290,10 @@ fn dap_server_emits_list_processes_for_single_trace_session() {
     let trace_path = PathBuf::from("/tmp/single-trace-example.ct");
     let manifest = SessionManifest::single_trace(trace_path.clone());
     let recording_id = manifest.traces[0].recording_id.0.clone();
-    let session = SessionHandler::new(manifest, vec![make_handler("single")]).expect("session");
+    let mut session = SessionHandler::new(manifest, vec![make_handler("single")]).expect("session");
 
     let (tx, rx) = mpsc::channel::<DapMessage>();
-    dispatch_session_load_event(&session, &tx);
+    dispatch_session_load_event(&mut session, &tx);
     let messages = drain_messages(&rx);
 
     assert_eq!(messages.len(), 1);
@@ -328,10 +328,10 @@ fn dap_server_list_processes_event_falls_back_to_recording_id_when_path_empty() 
         correlation: Default::default(),
         base_dir: PathBuf::from("."),
     };
-    let session = SessionHandler::new(manifest, vec![make_handler("live")]).expect("session");
+    let mut session = SessionHandler::new(manifest, vec![make_handler("live")]).expect("session");
 
     let (tx, rx) = mpsc::channel::<DapMessage>();
-    dispatch_session_load_event(&session, &tx);
+    dispatch_session_load_event(&mut session, &tx);
     let messages = drain_messages(&rx);
 
     assert_eq!(messages.len(), 1);
@@ -445,13 +445,13 @@ fn dap_server_emits_list_processes_for_three_trace_wasm_fixture() {
     // Stage 2 — drive the production session-load path: real
     // `SessionManifest::load` parses the on-disk TOML, real
     // `SessionHandler::new` aggregates the synthetic per-trace handlers.
-    let session = load_session_from_disk(&manifest_path, 3);
+    let mut session = load_session_from_disk(&manifest_path, 3);
     assert_eq!(session.trace_count(), 3);
 
     // Stage 3 — dispatch the event the way `dap_server` does in
     // production; snapshot what landed on the wire.
     let (tx, rx) = mpsc::channel::<DapMessage>();
-    dispatch_session_load_event(&session, &tx);
+    dispatch_session_load_event(&mut session, &tx);
     let messages = drain_messages(&rx);
 
     // Exactly one event lands per session-load — the §5.2 contract.

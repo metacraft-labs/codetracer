@@ -69,7 +69,9 @@ import ../app/theme/capabilities
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 206
+const ExpectedAssertions = 214
+  ## +8: a note's directories give way before the file info does (the
+  ## status row's yield rule measured against the note's shortest form).
   ## PLAT-51: +3, measured — the call trace's rows end in their scrollbar
   ## scrubber's cell, one more span per row the selected-row sweeps visit,
   ## and the scrubber cell's own role check.
@@ -409,6 +411,49 @@ suite "PLAT-49 part B review: the status row in the desktop's order":
     # With no file, the labels start the row (nothing to put before them).
     ck footerLeadCells("") == 0
 
+  test "a note's directories give way before the file info does":
+    # The startup note is `tui_session.describe`'s `<file>:<line>  tick <n>
+    # extent <a>..<b>`, and `<file>` is ABSOLUTE: its length is the length of
+    # the checkout's path. The status row shortens such a note's directories
+    # to `…` (`fitNoteCells`), so the note stays readable in far fewer cells
+    # than its full length. The file info is left out only when the row
+    # cannot hold the note even shortened (PLAT-49 part B, finding 9). A
+    # checkout under a long directory used to lose the file info at open,
+    # which moved every bottom label left by the file info's width.
+    let app = newTuiApp()
+    discard app.enableLayoutBinding(200, 50)
+    let file = "/home/someone/" & "a-long-worktree-directory/".repeat(4) &
+               "test-programs/calc/main.py"
+    app.source.path = file
+    app.notification = file & ":1  tick 1  extent 0..171"
+    let model = app.shellModel(200, 50)
+    checkpoint("fileInfo '" & model.fileInfo & "'")
+    ck model.fileInfo == "Python | UTF-8"
+    # The binding's hit-test reads the same lead as the paint.
+    ck app.layoutBinding.footerLead == footerLeadCells("Python | UTF-8")
+    let row = shellScreen(model, 200, 50).rows[49]
+    checkpoint(row)
+    ck row.startsWith(" Python | UTF-8   BUILD ")
+    # The note is still there, its directories shortened and its facts whole.
+    ck row.contains("…")
+    ck row.endsWith("/main.py:1  tick 1  extent 0..171")
+    # At EVERY width the file info is kept, the note keeps every fact: the
+    # yield rule counts what the status text really gives the note, so the
+    # widths just past the yield point do not cut the note's end instead.
+    var cut: seq[int] = @[]
+    for w in 80 .. 220:
+      let m = app.shellModel(w, 50)
+      if m.fileInfo.len > 0 and not shellScreen(m, w, 50).rows[49].strip(
+          leading = false).endsWith("/main.py:1  tick 1  extent 0..171"):
+        cut.add w
+    checkpoint("widths that kept the file info and cut the note: " & $cut)
+    ck cut.len == 0
+    # A note the row cannot hold beside the file info even shortened (no
+    # absolute path to shorten) still wins: the file info is left out.
+    app.notification = "n".repeat(150)
+    ck app.shellModel(200, 50).fileInfo == ""
+    ck app.layoutBinding.footerLead == 0
+
 suite "PLAT-49 part B review: the strip's + opens a recording in a new tab":
 
   test "the + after the tabs — with one session too — and its tooltip":
@@ -506,7 +551,10 @@ suite "PLAT-49 part B: the call trace's rows are their semantic parts":
     # its toggle in the body colour (the `active` icon). No other row.
     # (PLAT-51: up to the pane's scrollbar SCRUBBER, which is its last
     # column — the desktop's selected row also ends at its scrollbar.)
-    const ScrubberRoles = {srScrubberTrack, srScrubberThumb, srScrubberMark}
+    const ScrubberRoles = {srScrubberMark, srScrollbarTrack,
+                           srScrollbarTrackRevealed, srScrollbarThumb,
+                           srScrollbarThumbSolid, srScrollbarThumbHover,
+                           srScrollbarThumbHeld}
     var current = false
     for s in g.rowSpans(4):
       if s.style.bold and s.text.contains("add"): current = true
@@ -516,7 +564,11 @@ suite "PLAT-49 part B: the call trace's rows are their semantic parts":
         ck s.style.role == srChromeText
     ck current
     ck g.styleAt(4, 78).surface == srSurfaceActiveRow
-    ck g.styleAt(4, 79).role in ScrubberRoles
+    # (PLAT-70 Part H: the scrollbar's cell, whatever it draws there.)
+    var onBar = false
+    for b in g.bars:
+      if b.contains(4, 79): onBar = true
+    ck onBar
     for s in g.rowSpans(3):
       ck not s.style.bold
       ck s.style.surface != srSurfaceActiveRow

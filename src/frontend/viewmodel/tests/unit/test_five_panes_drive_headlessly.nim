@@ -230,8 +230,8 @@ suite "M2b — the five panes drive headlessly (MockBackendService, no renderer)
   test "CalltraceVM: viewport signals drive the visibleLines memo":
     createRoot proc(dispose: proc()) =
       let p = openPanes()
-      p.calltrace.setViewportHeight(3)
-      p.calltrace.scroll(-4)
+      p.calltrace.setViewport(p.calltrace.viewport.val.withRows(3))
+      p.calltrace.setViewport(p.calltrace.viewport.val.scrolledTo(-4))
       check p.calltrace.scrollPosition.val == 0'i64
       check p.calltrace.visibleLines.val.len == 0
       p.store.updateCalltraceSection(@[
@@ -244,59 +244,50 @@ suite "M2b — the five panes drive headlessly (MockBackendService, no renderer)
       check p.calltrace.visibleLines.val[0].name == "main"
       check p.calltrace.hasMoreAbove.val == false
       check p.calltrace.hasMoreBelow.val == true
-      p.calltrace.scroll(1)
+      p.calltrace.setViewport(p.calltrace.viewport.val.scrolledTo(1))
       check p.calltrace.hasMoreAbove.val == true
       p.calltrace.setSearchQuery("wri")
       check p.calltrace.highlightedMatches.val == @[2'i64]
       p.closePanes()
       dispose()
 
-  test "StateVM: tabs, watches and expansion drive currentVariables":
+  test "StateVM: one list of variables and watches, and expansion":
     createRoot proc(dispose: proc()) =
       let p = openPanes()
-      check p.state.activeTab.val == stLocals
       p.store.updateLocals(@[makeVariable("x", "1", "int")])
       p.store.locals.globals.val = @[makeVariable("g", "9", "int")]
-      check p.state.currentVariables.val.len == 1
+      # One list (Variable-State-Pane.md, "Decisions (2026-10-24)"): the
+      # locals, then the globals, then the watches.
+      check p.state.currentVariables.val.len == 2
       check p.state.currentVariables.val[0].name == "x"
-      p.state.selectTab(stGlobals)
-      check p.state.currentVariables.val[0].name == "g"
-      p.state.selectTab(stWatches)
-      check p.state.currentVariables.val.len == 0
-      # THE WATCHES TAB SHOWS THE WATCH ANSWERS.
+      check p.state.currentVariables.val[1].name == "g"
+      # THE LIST SHOWS THE WATCH ANSWERS.
       #
-      # This arm of `currentVariables` used to be a literal
-      # `newSeq[store_types.Variable]()`, so it could show nothing
-      # whatever the backend answered — and the check above, on its own,
-      # passed against that stub for exactly the same reason it passes
-      # now. An assertion that only ever observes an EMPTY tab cannot
-      # tell a working tab from a hard-coded one, so the tab is also
-      # asserted with something in it.
+      # The Watches tab this list replaced was once a literal empty seq, and
+      # an assertion that only observes an empty list cannot tell a working
+      # one from a hard-coded one, so the list is asserted with answers in it.
+      p.state.addWatch("asteroid_masses[1]")
+      p.state.addWatch("x + 1")
       p.store.updateWatches(@[
         makeVariable("asteroid_masses[1]", "2000", "Field"),
         makeVariable("x + 1", "cannot evaluate `x + 1`: `+` would have to be computed", "watch error"),
       ])
-      # `require`, not `check`: against the pre-fix stub this arm answers
-      # an EMPTY seq, and the row reads below would then die with an
-      # `IndexDefect` whose message says only "the container is empty" —
-      # naming the symptom and not the defect. Aborting here makes the
-      # failure report the sentence that is actually false.
-      require p.state.currentVariables.val.len == 2 # the Watches tab shows the watch answers
-      check p.state.currentVariables.val[0].name == "asteroid_masses[1]"
-      check p.state.currentVariables.val[0].value == "2000"
+      # `require`, not `check`: the row reads below would otherwise die with
+      # an `IndexDefect` naming the symptom and not the defect.
+      require p.state.currentVariables.val.len == 4
+      check p.state.currentVariables.val[2].name == "asteroid_masses[1]"
+      check p.state.currentVariables.val[2].value == "2000"
+      check p.state.currentVariables.val[2].isWatch
       # A REFUSED watch is a row carrying its reason, not an absence.
-      check p.state.currentVariables.val[1].name == "x + 1"
-      check p.state.currentVariables.val[1].value.contains("cannot evaluate")
-      # And the watches must not have leaked into the Locals tab.
-      p.state.selectTab(stLocals)
-      check p.state.currentVariables.val.len == 1
-      check p.state.currentVariables.val[0].name == "x"
-      p.state.selectTab(stWatches)
-      p.state.addWatch("x + 1")
+      check p.state.currentVariables.val[3].name == "x + 1"
+      check p.state.currentVariables.val[3].value.contains("cannot evaluate")
+      check isInvalidWatch(p.state.currentVariables.val[3])
+      p.state.removeWatch("asteroid_masses[1]")
       p.state.addWatch("x + 1")
       check p.state.watchExpressions.val == @["x + 1"]
       p.state.removeWatch("x + 1")
       check p.state.watchExpressions.val.len == 0
+      check p.state.currentVariables.val.len == 2
       p.state.toggleExpand("x.field")
       check "x.field" in p.state.expandedPaths.val
       p.state.selectPath("x.field")
@@ -312,7 +303,7 @@ suite "M2b — the five panes drive headlessly (MockBackendService, no renderer)
   test "EventLogVM: paging, sorting and filtering are pure derivations":
     createRoot proc(dispose: proc()) =
       let p = openPanes()
-      p.eventLog.setPageSize(2)
+      p.eventLog.setViewport(Viewport(rows: 2))
       p.eventLog.appendLiveDebuggerStop(storageWriteRow(0, "a.nr", 1, 10'u64))
       p.eventLog.appendLiveDebuggerStop(storageWriteRow(1, "a.nr", 2, 11'u64))
       p.eventLog.appendLiveDebuggerStop(storageWriteRow(2, "b.nr", 3, 12'u64))

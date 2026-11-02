@@ -1,20 +1,17 @@
 ## The keyboard-shortcuts dialog: what is bound right now, and how to change it.
 ##
-## ## IT LISTS THE CONFIG, NOT THE PRESET
+## ## IT LISTS WHAT THE ROUTER RUNS, NOT THE PRESET
 ##
-## Every row below is read from `config.shortcutMap.actionShortcuts` — the same
-## structure `configureShortcuts` binds from, `delegateShortcuts` delegates
-## from and `renderChord` labels from. It is NOT read from the preset table.
+## Every chord below comes from the `ChordOf` the caller passes —
+## `key_router.chordForAction`, the chord the ONE key router RUNS the action
+## with (the base keymap, the user's `keybindings.json` over it, a chosen
+## preset's `include` set among its rows). It is NOT read from the preset
+## table.
 ##
-## That distinction is the whole value of the dialog and it is not pedantry.
-## `initShortcutMap` is FIRST-WRITER-WINS: a preset chord already claimed by
-## another action is silently dropped into `conflictList`, which nothing reads,
-## and the action ends up with no chord at all. A dialog built from the preset
-## would confidently print the chord that was dropped — it would be a fourth
-## copy of the binding table, and the one a user believes.
-##
-## Built from the config, a dropped binding shows up as what it is: the row is
-## absent, or its chord is empty. The dialog cannot flatter the preset.
+## That distinction is the whole value of the dialog: a preset chord a user's
+## own row removed, or that a row of theirs shadows, shows up as what it is —
+## absent, or the user's chord — and what did not load is listed under it
+## (`notes`). The dialog cannot flatter the preset.
 ##
 ## ## WHY A NODE TREE AND NOT AN HTML STRING
 ##
@@ -78,15 +75,34 @@ proc labelFor*(action: ClientAction): string =
       return entry.label
   $action
 
-proc shortcutDialogRows*(config: Config; mac: bool): seq[ShortcutDialogRow] =
+type
+  ReferenceLine* = object
+    ## One line of the shortcut reference (Base-Keymaps-And-Layer-Stack.md
+    ## §5.4, §5.6): a binding live where the focus is, in resolution order —
+    ## `keymap_router.shortcutReference`'s `ReferenceEntry`, as the dialog
+    ## states it.
+    layer*: string
+      ## `user:<table>` or `base:<table>` — the layer it resolves in.
+    keyText*: string
+    operation*: string
+    label*: string
+      ## The operation's reading name (`operationLabelOf`).
+    shadowedBy*: string
+      ## "" or the user row that takes this chord (`your row 3`).
+
+type ChordOf = proc(action: ClientAction): string
+  ## The chord that runs an action where the focus is — on the desktop,
+  ## `ui/key_router.chordForAction` (PLAT-68: the router's, not the YAML's).
+
+proc shortcutDialogRows*(chordOf: ChordOf; mac: bool): seq[ShortcutDialogRow] =
   ## The bindings in force, in reading order.
   ##
   ## An action with NO chord produces NO ROW. That is what makes the `None`
-  ## preset's dialog honest, and it is also what would expose a preset chord
-  ## that `initShortcutMap` dropped — the row would simply be missing, rather
-  ## than present and lying.
+  ## preset's dialog honest, and it is also what would expose a chord the
+  ## user's `keybindings.json` removed — the row would simply be missing,
+  ## rather than present and lying.
   for entry in PresetActionLabels:
-    let chord = renderChord(entry.action, config)
+    let chord = chordOf(entry.action)
     if chord.len == 0:
       continue
     result.add ShortcutDialogRow(
@@ -95,8 +111,45 @@ proc shortcutDialogRows*(config: Config; mac: bool): seq[ShortcutDialogRow] =
       chord: describeChord(chord, mac),
       hazard: hazardOf(chord, mac))
 
-proc buildShortcutDialog*(config: Config; active: ShortcutPresetId;
-                          mac: bool): DialogNode =
+proc referenceNode*(reference: seq[ReferenceLine];
+                    scopeText: string): DialogNode =
+  ## **THE SHORTCUT REFERENCE** (§5.4: *"the shortcut reference lists the
+  ## active layers in order"*; §5.6: each user shadow *"is listed in the load
+  ## report and in the shortcut reference"*): every binding live for the
+  ## focused scope path, layer by layer in the order a key is resolved, a
+  ## shadowed base row marked with the user row that takes its chord.
+  result = DialogNode(tag: "div", attrs: @[
+    ("class", "kb-reference"), ("data-kb-reference", $reference.len),
+    ("data-kb-scope", scopeText),
+    ("style", "max-height: 40vh; overflow: auto")])
+  result.children.add DialogNode(tag: "h3", attrs: @[("class", "kb-ref-title")],
+                                 text: "Bindings here, in the order a key " &
+                                       "is resolved (" & scopeText & ")")
+  var layer = ""
+  for line in reference:
+    if line.layer != layer:
+      layer = line.layer
+      result.children.add DialogNode(tag: "div",
+        attrs: @[("class", "kb-ref-layer"), ("data-kb-ref-layer-title", layer)],
+        text: layer)
+    var attrs = @[("class", "kb-ref-row"), ("data-kb-ref-layer", line.layer),
+                  ("data-kb-ref-key", line.keyText),
+                  ("data-kb-ref-operation", line.operation)]
+    var cells = @[
+      DialogNode(tag: "kbd", attrs: @[("class", "kb-ref-key")],
+                 text: line.keyText),
+      DialogNode(tag: "span", attrs: @[("class", "kb-ref-label")],
+                 text: (if line.label.len > 0: line.label else: line.operation))]
+    if line.shadowedBy.len > 0:
+      attrs.add ("data-kb-ref-shadowed-by", line.shadowedBy)
+      cells.add DialogNode(tag: "span", attrs: @[("class", "kb-ref-shadow")],
+                           text: "shadowed by " & line.shadowedBy)
+    result.children.add DialogNode(tag: "div", attrs: attrs, children: cells)
+
+proc buildShortcutDialog*(chordOf: ChordOf; active: ShortcutPresetId;
+                          mac: bool; notes: seq[string] = @[];
+                          reference: seq[ReferenceLine] = @[];
+                          scopeText = ""): DialogNode =
   ## The whole dialog, as a value.
   ##
   ## `data-kb-rows` DECLARES THE COUNT IT DREW, and it is `$rows.len` rather
@@ -104,7 +157,7 @@ proc buildShortcutDialog*(config: Config; active: ShortcutPresetId;
   ## a mutation replacing the expression with the literal `"9"` is invisible to
   ## any test that only looks at a preset. `shortcut_dialog_test.nim` builds a
   ## config whose count is not nine for exactly that reason.
-  let rows = shortcutDialogRows(config, mac)
+  let rows = shortcutDialogRows(chordOf, mac)
 
   var table = DialogNode(tag: "div", attrs: @[("class", "kb-rows"),
                                               ("data-kb-rows", $rows.len)])
@@ -151,6 +204,18 @@ proc buildShortcutDialog*(config: Config; active: ShortcutPresetId;
                  text: "Keyboard shortcuts"),
       table,
       picker,
+      # PLAT-68: what the last `keybindings.json` load said — a row that did
+      # not load, a base row a user row shadows — never silent.
+      DialogNode(tag: "div", attrs: @[("class", "kb-notes"),
+                                      ("data-kb-notes", $notes.len)],
+                 children: (block:
+                   var lines: seq[DialogNode] = @[]
+                   for n in notes:
+                     lines.add DialogNode(tag: "div",
+                                          attrs: @[("class", "kb-note")],
+                                          text: n)
+                   lines)),
+      referenceNode(reference, scopeText),
       DialogNode(tag: "button",
                  attrs: @[("class", "kb-close"), ("data-kb-close", "true")],
                  text: "Close"),

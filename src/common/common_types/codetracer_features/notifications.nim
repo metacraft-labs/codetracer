@@ -19,6 +19,13 @@ type
     # notification is sent
     actions*: seq[NotificationAction]
 
+  LaunchFailure* = ref object
+    ## The body of a `ct/launch-failed` event: the replay server's reason a
+    ## `launch` it acknowledged cannot succeed. The server sends the same
+    ## sentence as an Error `ct/notification` right beside it (see
+    ## `send_launch_failure_notification` in `src/db-backend/src/dap_server.rs`).
+    message*: langstring
+
   NotificationActionKind* = enum
     ButtonAction
 

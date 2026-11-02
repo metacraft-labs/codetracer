@@ -214,7 +214,7 @@ proc paneWithThreeTests(calls: Calls): (TestResultsVM, MockRenderer, MockNode) =
   vm.setCatalog(TestCatalog(items: threeTests()))
   vm.installHosts(calls)
   let r = MockRenderer()
-  (vm, r, renderTestResultsPanel(r, vm))
+  (vm, r, renderTestResultsPanel[MockRenderer, MockNode](r, vm))
 
 # ---------------------------------------------------------------------------
 
@@ -468,7 +468,7 @@ suite "the TESTS pane offers two different per-row actions":
       vm.setCatalog(TestCatalog(items: threeTests()))
       vm.installHosts(calls, withRefresh = false)
       let r = MockRenderer()
-      let panel = renderTestResultsPanel(r, vm)
+      let panel = renderTestResultsPanel[MockRenderer, MockNode](r, vm)
 
       let row = rowNamed(panel, "a")
       ck refreshButtonOf(row).isDisabled()
@@ -488,7 +488,7 @@ suite "the TESTS pane offers two different per-row actions":
       vm.setCatalog(TestCatalog(items: threeTests()))
       vm.installHosts(calls, withOpenExisting = false)
       let r = MockRenderer()
-      let panel = renderTestResultsPanel(r, vm)
+      let panel = renderTestResultsPanel[MockRenderer, MockNode](r, vm)
 
       vm.ingestEvent(finished("a", tsPassed))
       vm.ingestEvent(recordingCreated("a", "rec-1"))

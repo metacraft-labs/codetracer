@@ -241,8 +241,12 @@ proc findCommand*(mock: MockBackendService;
 # ---------------------------------------------------------------------------
 
 proc emitEvent*(mock: MockBackendService, event: JsonNode) =
-  ## Simulate a backend event — calls every registered handler.
-  for h in mock.eventHandlers:
+  ## Simulate a backend event — calls every handler registered when it is
+  ## emitted. A handler may register another (a session attaching on a stop
+  ## builds ViewModels that subscribe), so the list is copied first; the new
+  ## handler hears the next event, as on every real transport.
+  let handlers = mock.eventHandlers
+  for h in handlers:
     h(event)
 
 # ---------------------------------------------------------------------------

@@ -114,35 +114,10 @@ proc restoreUserWorkspace*(vm: AgenticSessionVM) =
   vm.editor.switchTab(snap.activeTabIndex)
   vm.editor.setCursor(snap.cursorLine, snap.cursorColumn)
 
-proc eventToActivityMessage(event: AgentServiceEventEntry):
-    AgentActivityMessageEntry =
-  var content = event.text
-  if content.len == 0:
-    content = event.toolName
-  if content.len == 0:
-    content = event.filePath
-  if content.len == 0:
-    content = $event.kind
-  AgentActivityMessageEntry(
-    id: event.id,
-    content: content,
-    role: aamrAgent,
-    canceled: event.kind == aseCancelled,
-    isLoading: event.kind notin {aseCompleted, aseCancelled, aseError},
-    # AA-3: the tool identity survives the projection instead of being
-    # collapsed into `content` above.  `content` still falls back to the tool
-    # name so nothing renders blank; these fields say *why* it reads that way.
-    toolName: event.toolName,
-    toolCallId: event.toolCallId,
-    status: event.status)
-
 proc projectActivity(vm: AgenticSessionVM; session: AgentServiceSessionEntry) =
-  var messages: seq[AgentActivityMessageEntry] = @[]
-  for event in session.events:
-    messages.add event.eventToActivityMessage()
-  vm.activity.setMessages(messages)
-  vm.activity.setLoading(session.lifecycle in {aslConnecting, aslRunning})
-  vm.activity.setSessionKey(session.tabId)
+  # The projection is the panel model's own (`agent_activity_vm
+  # .applyAgentSession`), shared with the native front-ends' agent host.
+  vm.activity.applyAgentSession(session)
 
 proc diffRows(diff: string): seq[VCSDiffLineRow] =
   var oldLine = 0

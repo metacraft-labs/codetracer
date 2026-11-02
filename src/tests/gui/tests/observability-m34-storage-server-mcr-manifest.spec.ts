@@ -17,14 +17,20 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as process from "node:process";
 
-import { test as base, expect, chromium, type Page } from "@playwright/test";
+import { test as base, expect, chromium, type BrowserContext, type Page } from "@playwright/test";
 
 import {
   codetracerInstallDir,
   codetracerPath,
 } from "../lib/fixtures";
+import { codetracerCiDevShellCommand } from "../lib/codetracer-ci-dev-shell";
 import * as helpers from "../lib/language-smoke-test-helpers";
 import { getFreeTcpPort } from "../lib/port-allocator";
+import {
+  CT_HOST_SESSION_SECRET,
+  ctHostPageUrl,
+  withCtHostSessionSecret,
+} from "../lib/ct-host-session";
 import { retry } from "../lib/retry-helpers";
 import { LayoutPage } from "../page-objects/layout-page";
 
@@ -384,6 +390,9 @@ function makeCleanEnv(extra?: Record<string, string>): Record<string, string> {
   delete env.CODETRACER_PREFIX;
   delete env.WAYLAND_DISPLAY;
   delete env.XDG_SESSION_TYPE;
+  // The session secret every `ct host` started here is given
+  // (../lib/ct-host-session.ts).
+  withCtHostSessionSecret(env);
   env.CODETRACER_IN_UI_TEST = "1";
   env.CODETRACER_TEST = "1";
   env.CODETRACER_ELECTRON_ARGS = [
@@ -777,6 +786,26 @@ function forceSelectedSegmentPrimaryReplicaMiss(
   };
 }
 
+/**
+ * The tab a clicked dive-in link opens, or null when it opened none (the
+ * caller then follows the click in its own tab).
+ *
+ * Wait for it as long as for the page itself, not a few seconds.  Playwright
+ * emits a popup's `page` event only once the popup has navigated to its first
+ * URL (https://playwright.dev/docs/api/class-browsercontext#browser-context-event-page),
+ * and the debug-session endpoint answers only after it has resolved the span
+ * and launched the replay.  On a storage failure that answer comes after the
+ * replica reads have failed, which on a loaded host took longer than the 5 s
+ * this used to wait: the popup then showed the expected `storage_failure`
+ * while the test waited for the Grafana tab to navigate, and timed out.
+ */
+function waitForDiveInPopup(
+  context: BrowserContext,
+  timeoutMs: number,
+): Promise<Page | null> {
+  return context.waitForEvent("page", { timeout: timeoutMs }).catch(() => null);
+}
+
 async function waitForOutput(
   output: string[],
   pattern: RegExp,
@@ -851,19 +880,18 @@ async function startStorageHarness(
   inputPath: string,
 ): Promise<{ process: childProcess.ChildProcess; ready: StorageHarnessReady; output: string[] }> {
   const output: string[] = [];
+  const harnessProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+    "dotnet",
+    "run",
+    "--project",
+    storageHarnessProject,
+    "--",
+    "storage-server-manifest",
+    inputPath,
+  ]);
   const harnessProcess = childProcess.spawn(
-    "direnv",
-    [
-      "exec",
-      codetracerCiDir,
-      "dotnet",
-      "run",
-      "--project",
-      storageHarnessProject,
-      "--",
-      "storage-server-manifest",
-      inputPath,
-    ],
+    harnessProcessCommand.command,
+    harnessProcessCommand.args,
     {
       cwd: codetracerCiDir,
       env: makeCleanEnv(),
@@ -899,20 +927,19 @@ async function startDebugSessionHarness(
   inputPath: string,
 ): Promise<{ process: childProcess.ChildProcess; ready: DebugSessionReplayReady; output: string[] }> {
   const output: string[] = [];
+  const harnessProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+    "dotnet",
+    "run",
+    "--project",
+    storageHarnessProject,
+    "-p:NuGetAudit=false",
+    "--",
+    "storage-server-debug-session",
+    inputPath,
+  ]);
   const harnessProcess = childProcess.spawn(
-    "direnv",
-    [
-      "exec",
-      codetracerCiDir,
-      "dotnet",
-      "run",
-      "--project",
-      storageHarnessProject,
-      "-p:NuGetAudit=false",
-      "--",
-      "storage-server-debug-session",
-      inputPath,
-    ],
+    harnessProcessCommand.command,
+    harnessProcessCommand.args,
     {
       cwd: codetracerCiDir,
       env: makeCleanEnv(),
@@ -993,20 +1020,19 @@ async function startPlatformLinkHarness(
   inputPath: string,
 ): Promise<{ process: childProcess.ChildProcess; ready: PlatformLinkReady; output: string[] }> {
   const output: string[] = [];
+  const harnessProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+    "dotnet",
+    "run",
+    "--project",
+    storageHarnessProject,
+    "-p:NuGetAudit=false",
+    "--",
+    "storage-server-platform-link",
+    inputPath,
+  ]);
   const harnessProcess = childProcess.spawn(
-    "direnv",
-    [
-      "exec",
-      codetracerCiDir,
-      "dotnet",
-      "run",
-      "--project",
-      storageHarnessProject,
-      "-p:NuGetAudit=false",
-      "--",
-      "storage-server-platform-link",
-      inputPath,
-    ],
+    harnessProcessCommand.command,
+    harnessProcessCommand.args,
     {
       cwd: codetracerCiDir,
       env: makeCleanEnv(),
@@ -1042,20 +1068,19 @@ async function startMaterializedPlatformLinkHarness(
   inputPath: string,
 ): Promise<{ process: childProcess.ChildProcess; ready: MaterializedPlatformLinkReady; output: string[] }> {
   const output: string[] = [];
+  const harnessProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+    "dotnet",
+    "run",
+    "--project",
+    storageHarnessProject,
+    "-p:NuGetAudit=false",
+    "--",
+    "storage-server-materialized-platform-link",
+    inputPath,
+  ]);
   const harnessProcess = childProcess.spawn(
-    "direnv",
-    [
-      "exec",
-      codetracerCiDir,
-      "dotnet",
-      "run",
-      "--project",
-      storageHarnessProject,
-      "-p:NuGetAudit=false",
-      "--",
-      "storage-server-materialized-platform-link",
-      inputPath,
-    ],
+    harnessProcessCommand.command,
+    harnessProcessCommand.args,
     {
       cwd: codetracerCiDir,
       env: makeCleanEnv(),
@@ -1093,20 +1118,19 @@ async function startRetentionGapHarness(
   inputPath: string,
 ): Promise<{ process: childProcess.ChildProcess; ready: RetentionGapReady; output: string[] }> {
   const output: string[] = [];
+  const harnessProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+    "dotnet",
+    "run",
+    "--project",
+    storageHarnessProject,
+    "-p:NuGetAudit=false",
+    "--",
+    "storage-server-retention-gap",
+    inputPath,
+  ]);
   const harnessProcess = childProcess.spawn(
-    "direnv",
-    [
-      "exec",
-      codetracerCiDir,
-      "dotnet",
-      "run",
-      "--project",
-      storageHarnessProject,
-      "-p:NuGetAudit=false",
-      "--",
-      "storage-server-retention-gap",
-      inputPath,
-    ],
+    harnessProcessCommand.command,
+    harnessProcessCommand.args,
     {
       cwd: codetracerCiDir,
       env: makeCleanEnv(),
@@ -1142,20 +1166,19 @@ async function startPolicyDeniedHarness(
   inputPath: string,
 ): Promise<{ process: childProcess.ChildProcess; ready: RetentionGapReady; output: string[] }> {
   const output: string[] = [];
+  const harnessProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+    "dotnet",
+    "run",
+    "--project",
+    storageHarnessProject,
+    "-p:NuGetAudit=false",
+    "--",
+    "storage-server-policy-denied",
+    inputPath,
+  ]);
   const harnessProcess = childProcess.spawn(
-    "direnv",
-    [
-      "exec",
-      codetracerCiDir,
-      "dotnet",
-      "run",
-      "--project",
-      storageHarnessProject,
-      "-p:NuGetAudit=false",
-      "--",
-      "storage-server-policy-denied",
-      inputPath,
-    ],
+    harnessProcessCommand.command,
+    harnessProcessCommand.args,
     {
       cwd: codetracerCiDir,
       env: makeCleanEnv(),
@@ -1187,32 +1210,76 @@ async function startPolicyDeniedHarness(
   };
 }
 
-function parseReplayAgentEnv(commandLine: string): Record<string, string> {
+/**
+ * What the ReplayAgent's runner would start for a replay, as codetracer-ci's
+ * `ReplayAgent print-runner-command` prints it: the `docker run` command line,
+ * and the environment the runner gives the docker client. The runner passes
+ * credentials (the ct host session secret, the storage replay token) as
+ * `-e NAME` with the value in that environment, never on the command line,
+ * which its process executor logs.
+ */
+interface ReplayAgentRunnerCommand {
+  commandLine: string;
+  environment: Record<string, string>;
+}
+
+/**
+ * The environment `docker run` would give the replay container: each
+ * `-e 'NAME=VALUE'` sets NAME to VALUE, and each bare `-e NAME` copies NAME
+ * from the docker client's environment, or leaves it unset when that has none
+ * (https://docs.docker.com/reference/cli/docker/container/run/#env). The runner
+ * single-quotes every `NAME=VALUE`, writing a quote inside one as `'"'"'`.
+ */
+function parseReplayAgentEnv(command: ReplayAgentRunnerCommand): Record<string, string> {
   const env: Record<string, string> = {};
-  const pattern = /-e '([^=']+)=([^']*)'/g;
-  for (const match of commandLine.matchAll(pattern)) {
-    env[match[1]] = match[2];
+  const pattern = /(?:^|\s)-e (?:'((?:[^']|'"'"')*)'|([A-Za-z_][A-Za-z0-9_]*))(?=\s|$)/g;
+  for (const match of command.commandLine.matchAll(pattern)) {
+    if (match[1] !== undefined) {
+      const assignment = match[1].replace(/'"'"'/g, "'");
+      const equals = assignment.indexOf("=");
+      if (equals > 0) {
+        env[assignment.slice(0, equals)] = assignment.slice(equals + 1);
+      }
+    } else if (Object.hasOwn(command.environment, match[2])) {
+      env[match[2]] = command.environment[match[2]];
+    }
   }
   return env;
 }
 
-function generateReplayAgentCommand(payload: any, rootDir: string): string {
+/**
+ * Runs the ReplayAgent's runner on `payload` (codetracer-ci
+ * `print-runner-command`) and returns what it would start.
+ *
+ * The payload's `hostSessionSecret` is set to `CT_HOST_SESSION_SECRET` first.
+ * In production the Monolith chooses that secret, puts it in this command, and
+ * the replay proxy presents it; here the test is the client that opens the
+ * `ct host` page (`ctHostPageUrl`), so it is the one choosing it. The runner
+ * hands the secret to the container by name like any credential, so without
+ * this the container's secret would be one the page does not present.
+ */
+function generateReplayAgentCommand(payload: any, rootDir: string): ReplayAgentRunnerCommand {
+  const payloadWithSecret: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(payload)) {
+    // The agent reads the payload case-insensitively; drop every spelling.
+    if (key.toLowerCase() !== "hostsessionsecret") payloadWithSecret[key] = value;
+  }
+  payloadWithSecret.hostSessionSecret = CT_HOST_SESSION_SECRET;
   const payloadPath = path.join(rootDir, "replay-provisioning-requested.json");
-  fs.writeFileSync(payloadPath, JSON.stringify(payload, null, 2));
-  return childProcess.execFileSync(
-    "direnv",
-    [
-      "exec",
-      codetracerCiDir,
-      "dotnet",
-      "run",
-      "--project",
-      replayAgentProject,
-      "-p:NuGetAudit=false",
-      "--",
-      "print-runner-command",
-      payloadPath,
-    ],
+  fs.writeFileSync(payloadPath, JSON.stringify(payloadWithSecret, null, 2));
+  const printRunnerCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+    "dotnet",
+    "run",
+    "--project",
+    replayAgentProject,
+    "-p:NuGetAudit=false",
+    "--",
+    "print-runner-command",
+    payloadPath,
+  ]);
+  const printed = childProcess.execFileSync(
+    printRunnerCommand.command,
+    printRunnerCommand.args,
     {
       cwd: codetracerCiDir,
       env: makeCleanEnv(),
@@ -1221,6 +1288,18 @@ function generateReplayAgentCommand(payload: any, rootDir: string): string {
       windowsHide: true,
     },
   ).trim();
+  // The verb prints one JSON object on its last line.
+  const lastLine = printed.split("\n").pop() ?? "";
+  let command: ReplayAgentRunnerCommand;
+  try {
+    command = JSON.parse(lastLine) as ReplayAgentRunnerCommand;
+  } catch (error) {
+    throw new Error(`print-runner-command printed no JSON object (${String(error)}):\n${printed}`);
+  }
+  if (typeof command.commandLine !== "string" || typeof command.environment !== "object" || command.environment === null) {
+    throw new Error(`print-runner-command printed no commandLine/environment:\n${printed}`);
+  }
+  return command;
 }
 
 function shellQuote(value: string): string {
@@ -1252,7 +1331,7 @@ async function connectToHost(
   let connected = false;
   for (let attempt = 1; attempt <= maxConnectAttempts && !connected; attempt++) {
     try {
-      await page.goto(`http://localhost:${httpPort}`, {
+      await page.goto(ctHostPageUrl(httpPort), {
         timeout: gotoTimeoutMs,
       });
       connected = true;
@@ -2851,14 +2930,14 @@ function startPlatformLaunchBridge(options: {
       const replayPayload = await fetchJsonFromUrl(
         `${options.ready.baseUrl}/__tests/replay-provisioning/latest`,
       );
-      const replayAgentCommandLine = generateReplayAgentCommand(
+      const replayAgentCommand = generateReplayAgentCommand(
         replayPayload,
         options.runnerRoot,
       );
-      const replayEnv = parseReplayAgentEnv(replayAgentCommandLine);
+      const replayEnv = parseReplayAgentEnv(replayAgentCommand);
       const httpPort = await getFreeTcpPort();
       const backendPort = await getFreeTcpPort();
-      const hostUrl = `http://127.0.0.1:${httpPort}`;
+      const hostUrl = ctHostPageUrl(httpPort, "127.0.0.1");
       const hostOutput: string[] = [];
       const shimDir = createCtPathShim(options.runnerRoot);
       const entrypointPath = path.join(
@@ -2989,18 +3068,18 @@ function startMaterializedPlatformLaunchBridge(options: {
         linkReady.materializedArtifactKey,
       );
       options.bridgeEvents.push("generating-runner-command");
-      const replayAgentCommandLine = generateReplayAgentCommand(
+      const replayAgentCommand = generateReplayAgentCommand(
         replayPayload,
         options.runnerRoot,
       );
       options.bridgeEvents.push("generated-runner-command");
-      expect(replayAgentCommandLine).toContain("docker run ");
-      expect(replayAgentCommandLine).toContain(
+      expect(replayAgentCommand.commandLine).toContain("docker run ");
+      expect(replayAgentCommand.commandLine).toContain(
         "CODETRACER_TRACE_MATERIALIZED_ARTIFACTS=",
       );
-      expect(replayAgentCommandLine).toContain("trace_metadata.json");
-      expect(replayAgentCommandLine).toContain("trace_paths.json");
-      const replayEnv = parseReplayAgentEnv(replayAgentCommandLine);
+      expect(replayAgentCommand.commandLine).toContain("trace_metadata.json");
+      expect(replayAgentCommand.commandLine).toContain("trace_paths.json");
+      const replayEnv = parseReplayAgentEnv(replayAgentCommand);
       expect(replayEnv.CODETRACER_TRACE_MANIFEST_KEY).toBeTruthy();
       expect(replayEnv.CODETRACER_STORAGE_BASE_URL).toBe(options.ready.baseUrl);
       expect(replayEnv.CODETRACER_STORAGE_REPLAY_TOKEN).toBe(
@@ -3009,10 +3088,14 @@ function startMaterializedPlatformLaunchBridge(options: {
       expect(replayEnv.CODETRACER_STORAGE_REPLAY_TOKEN).toMatch(
         /^ct_replay_storage_/,
       );
+      // It reaches the container by name only: never on the command line.
+      expect(replayAgentCommand.commandLine).not.toContain(
+        replayPayload.traceSource.storageReplayToken,
+      );
 
       const httpPort = await getFreeTcpPort();
       const backendPort = await getFreeTcpPort();
-      const hostUrl = `http://127.0.0.1:${httpPort}`;
+      const hostUrl = ctHostPageUrl(httpPort, "127.0.0.1");
       const hostOutput: string[] = [];
       const shimDir = createCtPathShim(options.runnerRoot);
       const entrypointPath = path.join(
@@ -3145,19 +3228,19 @@ function startMixedPlatformLaunchBridge(options: {
         );
       }
 
-      const replayAgentCommandLine = generateReplayAgentCommand(
+      const replayAgentCommand = generateReplayAgentCommand(
         replayPayload,
         options.runnerRoot,
       );
       if (materializedLink) {
-        expect(replayAgentCommandLine).toContain("CODETRACER_TRACE_MATERIALIZED_ARTIFACTS=");
+        expect(replayAgentCommand.commandLine).toContain("CODETRACER_TRACE_MATERIALIZED_ARTIFACTS=");
       } else {
-        expect(replayAgentCommandLine).toContain("CODETRACER_TRACE_MANIFEST_KEY=");
+        expect(replayAgentCommand.commandLine).toContain("CODETRACER_TRACE_MANIFEST_KEY=");
       }
-      const replayEnv = parseReplayAgentEnv(replayAgentCommandLine);
+      const replayEnv = parseReplayAgentEnv(replayAgentCommand);
       const httpPort = await getFreeTcpPort();
       const backendPort = await getFreeTcpPort();
-      const hostUrl = `http://127.0.0.1:${httpPort}`;
+      const hostUrl = ctHostPageUrl(httpPort, "127.0.0.1");
       const hostOutput: string[] = [];
       const shimDir = createCtPathShim(options.runnerRoot);
       const entrypointPath = path.join(
@@ -3298,24 +3381,23 @@ function startStorageFailureProblemBridge(options: {
       );
       const payloadPath = path.join(options.runnerRoot, "replay-provisioning-requested.json");
       fs.writeFileSync(payloadPath, JSON.stringify(options.ready.replayPayload, null, 2));
+      const ctProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+        "dotnet",
+        "run",
+        "--project",
+        replayAgentProject,
+        "-p:NuGetAudit=false",
+        "--",
+        "run-host-entrypoint-problem",
+        payloadPath,
+        options.runnerRoot,
+        codetracerInstallDir,
+        entrypointPath,
+        shimDir,
+      ]);
       const ctProcess = childProcess.spawn(
-        "direnv",
-        [
-          "exec",
-          codetracerCiDir,
-          "dotnet",
-          "run",
-          "--project",
-          replayAgentProject,
-          "-p:NuGetAudit=false",
-          "--",
-          "run-host-entrypoint-problem",
-          payloadPath,
-          options.runnerRoot,
-          codetracerInstallDir,
-          entrypointPath,
-          shimDir,
-        ],
+        ctProcessCommand.command,
+        ctProcessCommand.args,
         {
           cwd: codetracerCiDir,
           env: makeCleanEnv(),
@@ -3429,8 +3511,11 @@ function startPersistedStorageFailureBridge(options: {
         );
       }
       const upstreamLocation = upstreamResponse.headers.get("location") ?? "";
-      if (!/\/replay\/ready\//.test(upstreamLocation)) {
-        throw new Error(`debug-session did not return replay-ready redirect: ${upstreamLocation}`);
+      // The browser route redirects to the queued replay's waiting room,
+      // `/{tenant slug}/{replay id}/preparing`; the older
+      // `/{slug}/replay/ready/{id}` form is retired and no page serves it.
+      if (!/^(https?:\/\/[^/]+)?\/[^/?]+\/[0-9a-fA-F-]{36}\/preparing(\?|$)/.test(upstreamLocation)) {
+        throw new Error(`debug-session did not redirect to the replay's waiting room: ${upstreamLocation}`);
       }
 
       const replayPayload = await fetchJsonFromUrl(
@@ -3462,24 +3547,23 @@ function startPersistedStorageFailureBridge(options: {
       );
       const payloadPath = path.join(options.runnerRoot, `replay-provisioning-${Date.now()}.json`);
       fs.writeFileSync(payloadPath, JSON.stringify(replayPayload, null, 2));
+      const ctProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+        "dotnet",
+        "run",
+        "--project",
+        replayAgentProject,
+        "-p:NuGetAudit=false",
+        "--",
+        "run-host-entrypoint-problem",
+        payloadPath,
+        options.runnerRoot,
+        codetracerInstallDir,
+        entrypointPath,
+        shimDir,
+      ]);
       const ctProcess = childProcess.spawn(
-        "direnv",
-        [
-          "exec",
-          codetracerCiDir,
-          "dotnet",
-          "run",
-          "--project",
-          replayAgentProject,
-          "-p:NuGetAudit=false",
-          "--",
-          "run-host-entrypoint-problem",
-          payloadPath,
-          options.runnerRoot,
-          codetracerInstallDir,
-          entrypointPath,
-          shimDir,
-        ],
+        ctProcessCommand.command,
+        ctProcessCommand.args,
         {
           cwd: codetracerCiDir,
           env: makeCleanEnv(),
@@ -3859,19 +3943,31 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
             ),
         ),
       ).toBe(true);
-      const replayAgentCommandLine = generateReplayAgentCommand(
+      const replayAgentCommand = generateReplayAgentCommand(
         debugHarness.ready.replayPayload,
         runnerRoot,
       );
-      expect(replayAgentCommandLine).toContain("docker run ");
-      expect(replayAgentCommandLine).toContain(
+      expect(replayAgentCommand.commandLine).toContain("docker run ");
+      expect(replayAgentCommand.commandLine).toContain(
         "CODETRACER_TRACE_SHARDED_MCR_SEGMENTS=",
       );
-      expect(replayAgentCommandLine).toContain(
+      // The storage replay token is a credential: the runner names it on the
+      // command line, which its executor logs, and hands the value to docker
+      // through the client's environment.
+      expect(replayAgentCommand.commandLine).toContain(
+        " -e CODETRACER_STORAGE_REPLAY_TOKEN ",
+      );
+      expect(replayAgentCommand.commandLine).not.toContain(
         "CODETRACER_STORAGE_REPLAY_TOKEN=",
       );
+      expect(replayAgentCommand.commandLine).not.toContain(
+        debugHarness.ready.replayToken,
+      );
+      expect(replayAgentCommand.environment.CODETRACER_STORAGE_REPLAY_TOKEN).toBe(
+        debugHarness.ready.replayToken,
+      );
 
-      const replayEnv = parseReplayAgentEnv(replayAgentCommandLine);
+      const replayEnv = parseReplayAgentEnv(replayAgentCommand);
       expect(replayEnv.CODETRACER_TRACE_MANIFEST_KEY).toBe(
         debugHarness.ready.manifestKey,
       );
@@ -4085,11 +4181,11 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       );
       expect(supportFileServers).toContain(secondaryServerId);
 
-      const replayAgentCommandLine = generateReplayAgentCommand(
+      const replayAgentCommand = generateReplayAgentCommand(
         debugHarness.ready.replayPayload,
         runnerRoot,
       );
-      const replayEnv = parseReplayAgentEnv(replayAgentCommandLine);
+      const replayEnv = parseReplayAgentEnv(replayAgentCommand);
       expect(replayEnv.CODETRACER_TRACE_SHARDED_MCR_SEGMENTS).toContain(
         primaryServerId,
       );
@@ -4588,7 +4684,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         ),
       ).toBe(true);
 
-      const popupPromise = context.waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+      const popupPromise = waitForDiveInPopup(context, 120_000);
       await link.click();
       const problemPage = (await popupPromise) ?? page;
       await problemPage.waitForURL(/\/observability\/v0\/debug-session\?/, {
@@ -4598,6 +4694,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       expect(bodyText).toContain("storage_failure");
       expect(bodyText).toContain("Replay storage objects could not be read");
       expect(bodyText).not.toContain("/replay/ready/");
+      expect(bodyText).not.toContain("/preparing");
       expect(bodyText).not.toContain("codetracer-replay");
       if (problemPage !== page) {
         await problemPage.close();
@@ -4836,7 +4933,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
           ),
         ).toBe(true);
 
-        const popupPromise = context.waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        const popupPromise = waitForDiveInPopup(context, 120_000);
         await link.click();
         const problemPage = (await popupPromise) ?? page;
         await problemPage.waitForURL(/\/observability\/v0\/debug-session\?/, {
@@ -4846,6 +4943,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         expect(bodyText, `${linkReady.language} Grafana browser body`).toContain("storage_failure");
         expect(bodyText, `${linkReady.language} Grafana browser body`).toContain("Replay storage objects could not be read");
         expect(bodyText, `${linkReady.language} Grafana browser body`).not.toContain("/replay/ready/");
+        expect(bodyText, `${linkReady.language} Grafana browser body`).not.toContain("/preparing");
         expect(bodyText, `${linkReady.language} Grafana browser body`).not.toContain("codetracer-replay");
         browserProblems.push({ language: linkReady.language, bodyText });
         if (problemPage !== page) {
@@ -5023,6 +5121,9 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         expect(bodyText, `${testcase.name} browser body`).not.toContain(
           "/replay/ready/",
         );
+        expect(bodyText, `${testcase.name} browser body`).not.toContain(
+          "/preparing",
+        );
       }
 
       const tempoHttpPort = await freeTcpPort();
@@ -5198,7 +5299,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
           );
         }
 
-        const popupPromise = context.waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        const popupPromise = waitForDiveInPopup(context, 60_000);
         await link.click();
         const problemPage = (await popupPromise) ?? page;
         await problemPage.waitForURL(/\/observability\/v0\/debug-session\?/, {
@@ -5213,6 +5314,9 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         );
         expect(bodyText, `${testcase.name} Grafana browser body`).not.toContain(
           "/replay/ready/",
+        );
+        expect(bodyText, `${testcase.name} Grafana browser body`).not.toContain(
+          "/preparing",
         );
         grafanaBrowserProblems.push({
           name: testcase.name,
@@ -5274,7 +5378,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       const link = page.locator('a[title="Debug in CodeTracer"]').first();
       await expect(link).toBeVisible({ timeout: 60_000 });
       expect(await link.getAttribute("href")).toBe(mcrDebugUrl);
-      const popupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+      const popupPromise = waitForDiveInPopup(page.context(), 60_000);
       await link.click();
       const problemPage = (await popupPromise) ?? page;
       await problemPage.waitForURL(new RegExp(escapeRegExp(mcrDebugUrl)), {
@@ -5583,7 +5687,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         const link = page.locator('a[title="Debug in CodeTracer"]').first();
         await expect(link).toBeVisible({ timeout: 60_000 });
         expect(await link.getAttribute("href")).toBe(debugUrl);
-        const popupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        const popupPromise = waitForDiveInPopup(page.context(), 60_000);
         await link.click();
         const problemPage = (await popupPromise) ?? page;
         await problemPage.waitForURL(new RegExp(escapeRegExp(debugUrl)), {
@@ -5613,7 +5717,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       const jaegerMcrLink = page.locator('a[title="Debug in CodeTracer"]').first();
       await expect(jaegerMcrLink).toBeVisible({ timeout: 60_000 });
       expect(await jaegerMcrLink.getAttribute("href")).toBe(mcrDebugUrl);
-      const jaegerMcrPopupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+      const jaegerMcrPopupPromise = waitForDiveInPopup(page.context(), 60_000);
       await jaegerMcrLink.click();
       const jaegerMcrProblemPage = (await jaegerMcrPopupPromise) ?? page;
       await jaegerMcrProblemPage.waitForURL(new RegExp(escapeRegExp(mcrDebugUrl)), {
@@ -5668,7 +5772,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         } else {
           assertM36DebugUrl(grafanaHref ?? "", retentionCaseAsPlatformReady(policyHarness.ready, testcase));
         }
-        const popupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        const popupPromise = waitForDiveInPopup(page.context(), 60_000);
         await link.click();
         const problemPage = (await popupPromise) ?? page;
         await problemPage.waitForURL(/\/observability\/v0\/debug-session\?/, {
@@ -5840,7 +5944,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       await expect(link).toBeVisible({ timeout: 60_000 });
       expect(await link.getAttribute("href")).toBe(debugUrl);
 
-      const popupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+      const popupPromise = waitForDiveInPopup(page.context(), 120_000);
       await link.click();
       const popup = await popupPromise;
       const replayPage = popup ?? page;
@@ -6230,7 +6334,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
           timeout: 60_000,
         });
         expect(await link.getAttribute("href")).toBe(debugUrl);
-        const popupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        const popupPromise = waitForDiveInPopup(page.context(), 120_000);
         await link.click();
         const replayPage = (await popupPromise) ?? page;
         await replayPage.waitForURL(/http:\/\/127\.0\.0\.1:\d+\//, {
@@ -6455,7 +6559,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         ),
       ).toBe(true);
 
-      const popupPromise = context.waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+      const popupPromise = waitForDiveInPopup(context, 120_000);
       await link.click();
       const replayPage = (await popupPromise) ?? page;
       await replayPage.waitForURL(/http:\/\/127\.0\.0\.1:\d+\//, {
@@ -6695,7 +6799,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         ).toBe(true);
 
         const previousLaunches = launches.length;
-        const popupPromise = context.waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        const popupPromise = waitForDiveInPopup(context, 120_000);
         await link.click();
         const replayPage = (await popupPromise) ?? page;
         await replayPage.waitForURL(/http:\/\/127\.0\.0\.1:\d+\//, {

@@ -192,7 +192,11 @@ mkShell {
 
   # ldLibraryPaths = "${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib";
 
+  # The body runs with stdout sent to stderr, for the reason ci-base.nix gives
+  # at `hookOnStderr`: `nix develop --command` callers read stdout as the
+  # command's output, and this hook has none of its own.
   shellHook = ''
+    {
     # ROOT_PATH is the CodeTracer checkout this shell prepares: the git
     # toplevel of the current directory when it is a CodeTracer checkout, and
     # "" otherwise, in which case nothing is written (see ci-base.nix).
@@ -276,5 +280,6 @@ mkShell {
     export CODETRACER_LOG_LEVEL=INFO
 
     figlet "Welcome to CodeTracer"
+    } >&2
   '';
 }

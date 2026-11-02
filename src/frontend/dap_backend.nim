@@ -1,6 +1,6 @@
 ## dap_backend.nim — the ViewModel store's `BackendService` over a `DapApi`.
 ##
-## The renderer's ONE construction of it (`ui_js.configureMiddleware`), in a
+## The renderer's ONE construction of it (`ui_js.configureSessionMiddleware`), in a
 ## module of its own so a test can build the very same service rather than a
 ## copy: every command the store sends goes through `DapApi.asyncSendCtRequest`
 ## — and so through `dap.dispatchCtRequest`, the send path request tracking

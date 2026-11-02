@@ -21,14 +21,20 @@
 ## tree this file is the single place to declare the new structure.
 
 import isonim/core/[signals, computation]
-import isonim/dsl/ui
-import isonim/testing/mock_dom
+import isonim/dsl/[ui, components]
 
 when defined(js):
+  # The DSL's calls on a `WebRenderer` resolve where the generic view is
+  # instantiated; the overloads must be in scope there.
   import isonim/web/web_renderer
+
+when defined(js):
   import isonim/web/dom_api as isonim_dom
 
 import ../viewmodels/calltrace_editor_vm
+
+# The generic view expands the DSL where it is instantiated.
+export signals, computation, components
 
 const
   CalltraceEditorContainerClass* = "component-container calltrace-editor"
@@ -39,54 +45,25 @@ const
     ## list without depending on the template.
 
 # ---------------------------------------------------------------------------
-# Mock renderer — headless test DOM
+# The panel
 # ---------------------------------------------------------------------------
 
-proc renderCalltraceEditorPanel*(r: MockRenderer;
-                                 vm: CalltraceEditorVM): MockNode =
-  ## Render the calltrace-editor placeholder for the Mock renderer.
+proc renderCalltraceEditorPanel*[R, N](r: R; vm: CalltraceEditorVM): N =
+  ## The calltrace-editor placeholder, under any renderer
+  ## (Shared-DOM-Front-Ends D3), mounted on the desktop by `ui/panel_host`.
   ##
-  ## Deliberately childless — matches the legacy Karax shell.  An
-  ## outer ``createRenderEffect`` is reserved for future use (e.g.
-  ## conditionally rendering nested editors when ``vm.mounted`` flips)
-  ## but currently emits no DOM mutations.
+  ## Deliberately childless — matches the legacy Karax shell. The effect
+  ## reads `vm.mounted` so a future reader has the subscription edge; in a
+  ## browser the render marks the ViewModel mounted, as the pane's mount did.
   let panel = ui(r):
     tdiv(class = CalltraceEditorContainerClass):
       discard
 
-  # Touch the ``mounted`` signal so future readers establish the
-  # subscription edge.  No DOM work needed today; the legacy Karax
-  # render produced no children either.
   createRenderEffect proc() =
     discard vm.mounted.val
 
+  when defined(js):
+    when N is isonim_dom.Element:
+      vm.markMounted()
+
   panel
-
-# ---------------------------------------------------------------------------
-# Web renderer — production DOM
-# ---------------------------------------------------------------------------
-
-when defined(js):
-
-  proc renderCalltraceEditorPanel*(r: WebRenderer;
-                                   vm: CalltraceEditorVM): isonim_dom.Element =
-    ## Render the panel for the real DOM.  Mirrors the Mock-renderer
-    ## shape so the resulting structure is identical across backends.
-    let panel = ui(r):
-      tdiv(class = CalltraceEditorContainerClass):
-        discard
-
-    createRenderEffect proc() =
-      discard vm.mounted.val
-
-    panel
-
-  proc mountIsoNimCalltraceEditor*(container: isonim_dom.Element;
-                                   vm: CalltraceEditorVM) =
-    ## Mount the IsoNim calltrace-editor placeholder as a child of
-    ## ``container``.  Sets ``vm.mounted`` to true so any headless
-    ## lifecycle assertions and future reactive consumers can react.
-    let r = WebRenderer()
-    let panel = renderCalltraceEditorPanel(r, vm)
-    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
-    vm.markMounted()

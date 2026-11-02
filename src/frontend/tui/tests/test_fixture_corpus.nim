@@ -54,10 +54,11 @@
 ## two runs.
 ##
 ## `replay-server` is NOT part of that skip machinery. It is located exactly as
-## `src/tests/gui/tests/noir-space-ship/noir_space_ship_test.nim` locates it —
-## `REPLAY_SERVER_BIN`, then `src/build-debug/bin/replay-server`, then a
-## diagnostic failure naming the build command — because a run without it has
-## not tested a corpus, it has tested nothing.
+## the TUI host and every headless suite locate it — through
+## `src/common/replay_server_path`, whose order runs from `REPLAY_SERVER_BIN`
+## through the build's output roots to cargo's trees — and its absence is a
+## diagnostic failure naming the build command and every path searched,
+## because a run without it has not tested a corpus, it has tested nothing.
 ##
 ## ## No mocks
 ##

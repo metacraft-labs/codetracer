@@ -123,7 +123,9 @@
       border-radius: 8px
       background-position: center
       font-size: 12px
-      color: white
+      // The status text beside the icon: body text in the light theme
+      // (`by-mode`, defaults.styl).
+      color: by-mode(white, colors-ui-text-primary-body)
       text-indent: 20px
       font-weight: bold
 
@@ -174,7 +176,7 @@
       .shell-event-summary
         position: absolute
         font-size: 16px
-        color: white
+        color: by-mode(white, colors-ui-text-primary-body)
         display: block
         padding: 10px
         margin-left: 20px

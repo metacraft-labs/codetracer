@@ -23,7 +23,7 @@ const
 type
   Translation* = object
     ok*: bool
-    model*: KeymapModel
+    model*: BaseKeymap
     arrange*: seq[string]
     keys*: seq[string]
     missing*: string
@@ -55,7 +55,7 @@ proc applyAll*(d: var EditingDocument; keys: openArray[string]; now: var int64) 
     discard d.applyKey(editScopeOf(d), k, now)
 
 proc translate*(s: OperationSequence; d: ScenarioDoc;
-               model: KeymapModel): Translation =
+               model: BaseKeymap): Translation =
   result = Translation(ok: false, model: model)
   var now = 0'i64
   var cur = initEditingDocument(ProjectFile, d.text, model)
@@ -90,7 +90,7 @@ proc translate*(s: OperationSequence; d: ScenarioDoc;
   result.ok = true
 
 proc translateAny*(s: OperationSequence; d: ScenarioDoc): Translation =
-  for model in [kmProductDefault, kmVim, kmKakoune]:
+  for model in [bkCua, bkVim, bkKakoune]:
     let t = translate(s, d, model)
     if t.ok: return t
     if result.missing.len == 0: result = t

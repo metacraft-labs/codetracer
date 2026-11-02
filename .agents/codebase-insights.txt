@@ -79,7 +79,7 @@
   durable fix is to update nix-blockchain-development itself; local testing with
   Sui 1.70.2 and metacraft-labs/nixos-modules b4c1815 built successfully when
   using a large Nix build dir such as `/var/tmp`.
-- ViewModel headless tests are organized under `src/frontend/viewmodel/tests/` in three subdirectories: `unit/` (pure VM tests with MockBackendService), `scenarios/` (headless mirrors of GUI tests in `tsc-ui-tests/tests/`), and `integration/` (tests using real replay-server). Every GUI test category has a corresponding scenario file. See `tests/README.md` for the naming convention and mapping table.
+- ViewModel headless tests are organized under `src/frontend/viewmodel/tests/` in three subdirectories: `unit/` (pure VM tests with MockBackendService), `scenarios/` (headless mirrors of GUI tests in `src/tests/gui/tests/`), and `integration/` (tests using real replay-server). Every GUI test category has a corresponding scenario file. See `tests/README.md` for the naming convention and mapping table.
 - When adding new UI component modules under `src/frontend/ui/`, import them from `src/frontend/ui_js.nim` (the main entry point) so their registration, direct render entrypoints, and IsoNim mount helpers are compiled into the JS output. The old base `Component.render()` fallback was removed during the IsoNim migration; generic render dispatch should not be reintroduced.
 - Ruby loops were originally detected only for 'while' and 'until'.
 - 'each' loops can be recognized by handling 'call' nodes with a block whose method name is 'each'.
@@ -125,7 +125,7 @@
 - `launchElectron()` uses `execv` on POSIX to replace the ct process with Electron, allowing Playwright to connect via CDP. It sets up `LINKS_PATH_DIR` and `NIX_CODETRACER_EXE_DIR` before execv so the Electron renderer can locate `backend-manager`. The `--inspect` and `--remote-debugging-port` flags are forwarded to Electron.
 - The `ct host` CLI expects options in the `--flag=value` form; passing space-delimited values (e.g. `--frontend-socket 1234`) leaves the value empty and the command falls back to default ports, so parallel hosts collide.
 - `ct host` exposes a single socket.io listener; keep `--frontend-socket` equal to `--backend-socket-port` when launching multiple hosts so the browser connects to the active socket server.
-- In server mode `ct host` registers IPC handlers on the first socket.io client only; after a browser reload/new tab the backend never reattaches listeners, so the fresh socket cannot reach the handler table.
+- `ct host` serves several clients at once (`src/frontend/index/host_clients.nim`): each client (the `ct_client` id its page keeps in `sessionStorage`) has its own replay, its own server-owned `DebuggerSession` and its own reconnect bootstrap. IPC handlers are bound to every client socket and run inside that client's Node `AsyncLocalStorage` context (`served_client.nim`); the server-mode `mainWindow.webContents.send` routes by that context (asking client) or, outside any, to every client. Long-lived watchers that serve everyone (keybindings, open source files) must send through `forEveryClient`; one connection that carries several clients' sessions (the Backend Manager, the ACP agent) must run each message as its session's owner (`host_clients.deliverDap`, `acp_ipc.runAsSessionOwner`), and state a page names by its own choice of id is keyed by `currentClientKey` too. Name a new index file anything but `client*`: `.gitignore` ignores that prefix.
 - Server builds now accept `--welcome-screen` so host smoke tests can boot the welcome flow; bootstrap replay requires acknowledging `CODETRACER::started` before the rest of the cached payloads emit.
 - Server-mode `mainWindow.webContents.send` now caches bootstrap IPC payloads (started/init/welcome/no-trace/trace load) in `data.bootstrapMessages`; `ipc.replayBootstrap` replays the cache to the latest socket using `bootstrap_cache.nim` ordering.
 - 2025-11-07: The temporary `ui-tests-playground` and `ui-tests-startup-example` folders were removed; their startup/bootstrap guidance now lives in `ui-tests-v3/docs/` (notably `launching-multi-instance.md` and `settings-infrastructure.md`). Refer to those docs instead of the deleted projects.
@@ -163,7 +163,7 @@
 - Tab-vs-window policy: `newTracePolicy` config field and `--new-tab`/`--new-window` CLI flags control whether a second `ct run`/`ct replay` opens a new tab or a new window. The mechanism uses Electron's `requestSingleInstanceLock()` + `second-instance` event in `src/frontend/index.nim`. The renderer's `onOpenTraceInTabReady` handler (in `ui_js.nim`) creates a new session tab and triggers `load-recent-trace`.
 - The `uiIpcHandlers` macro in `ui_js.nim` converts message strings to camelCase handler names (e.g., `"open-trace-in-tab-ready"` -> `onOpenTraceInTabReady`). For simple string messages, the handler receives `(sender, response)` from ipcRenderer.
 - Multi-session trace loading: to load a trace into a new session tab, create the session via the "+" button (which sets activeSessionIndex), then send `CODETRACER::load-recent-trace` IPC with the target traceId. The main process's `onLoadRecentTrace` calls `prepareForLoadingTrace` then `loadExistingRecord` (sends init + trace-loaded to renderer). The renderer's `onTraceLoaded` stores the trace in `data.sessions[activeSessionIndex]`. `prepareForLoadingTrace` no longer stops previous replays — multiple DAP connections run simultaneously. Each session stores its `replayId` (from `dap-replay-selected`), and `closeSession` sends `close-replay-session` IPC with that replayId to stop it.
-- `recordTestProgram` is exported from `tsc-ui-tests/lib/fixtures.ts` so tests can pre-record additional programs and load them into new sessions via IPC.
+- `recordTestProgram` is exported from `src/tests/gui/lib/fixtures.ts` so tests can pre-record additional programs and load them into new sessions via IPC.
 - `#session-tab-bar` must live OUTSIDE `#ROOT` in `index.html`; `destroyCurrentLayout` clears `#ROOT` innerHTML during session switches, which would destroy the direct IsoNim tab bar host if the tab bar were nested inside `#ROOT`.
 - Session tab bar DOM is owned by `viewmodel/views/isonim_session_tabs_view.nim` and refreshed via explicit `requestSessionTabsRender(data)` calls from session/trace mutation paths; it no longer has a Karax `setRenderer` host stub. Caption-bar progress now follows the same pattern with `requestCaptionBarProgressRender(component)` from progress and hover mutation paths; `directDomRedrawCallbacks` has been removed entirely.
 - The global debug shell is no longer a child of the Karax menu renderer. `index.html` owns the static `#debug` host, `ui/debug.nim::requestDebugShellRender` mounts `viewmodel/views/isonim_debug_shell_view.nim` into it once, and `#isonim-debug-controls` remains the separate toolbar mount.
@@ -982,8 +982,9 @@ and a correlation marker's counterpart is by definition in another process.
     Anything that asks "is panel X in the layout?" must also consult the
     auto-hide state (`~/.config/codetracer/auto_hide_state.json`), or pinning
     FILES makes the loader declare the layout incompatible and delete it.
-  * The GUI fixture copies the bundled default over `default_layout.json` on
-    EVERY test setup (`src/tests/gui/lib/layout-reset.ts`), and the index
+  * The GUI fixture resets `default_layout.json` on EVERY test setup (removes
+    it, or installs the bundled tree under `bundledLayout`;
+    `src/tests/gui/lib/layout-reset.ts` `prepareUserLayout`), and the index
     process reads the layout file exactly once at startup. A layout-loading
     spec must therefore write `default_edit_layout.json` from a `beforeEach`
     that requests no fixture — writing after `ctPage.reload()` tests nothing.
@@ -1347,7 +1348,10 @@ inside the directory.
   (`lib/fixtures.ts` mkdtemps it at module scope). So anything a test leaves
   in `~/.config/codetracer` is input to every later test in that worker. The
   `ctPage` fixture resets all three pieces of the saved arrangement before a
-  launch: `default_layout.json` (`ensureDefaultLayout`), `auto_hide_state.json`
+  launch: `default_layout.json` (`prepareUserLayout` — REMOVED by default, so
+  the launch takes the product's first-run path and opens the Debug mode's
+  default; `bundledLayout: true` installs the raw bundled tree no mode draws,
+  `preserveUserLayout: true` keeps the saved one), `auto_hide_state.json`
   (`resetAutoHideState`) and — since a `ct review` launch reads it —
   `default_edit_layout.json` (`resetEditLayout`). Specs that seed one of those
   themselves must do it in a fixture-free `beforeEach` (which runs BEFORE the
@@ -2892,16 +2896,10 @@ commands.
   `viewmodels/noir_build_producer.nim`, and both are pure so `vm-unit` and
   `vm-unit-js` run all of it. Four obstacles were found by measurement and
   each is worth knowing before touching this area:
-  * **`ui/shortcuts.nim`'s hard-coded `ctrl+b` shadows a CONFIGURED shortcut.**
-    `default_config.yaml` binds `build: "CTRL+B"`, the YAML loop binds it, and
-    then a later `Mousetrap.bind` in the same proc replaces it — Mousetrap
-    overwrites rather than chains. The YAML entry has been dead on every
-    platform. It is now excluded from `-d:ctWeb`, and the web arm installs
-    `data.actions[ClientAction.build]` instead, which `bindShortcut` reads AT
-    PRESS TIME. A `Mousetrap.bind` from `ui_js.nim`'s web arm does NOT work:
-    `onNoTrace` is `{.async.}` and calls `configureShortcuts()` again in a
-    later microtask, so it rebinds over anything installed there — measured,
-    with `Mousetrap.trigger('ctrl+b')` from the page also reaching nothing.
+  * (Superseded by PLAT-68 Phase B: the desktop's and the web's keys go
+    through ONE router, `ui/key_router.nim`; under CUA `build.run` is
+    `Ctrl+Shift+B` and `Ctrl+B` toggles the side panels, as in VS Code. The
+    Mousetrap binding loop this bullet described is gone.)
   * **The generated entry document had the auto-hide STRIPS and not the
     OVERLAY.** BUILD, PROBLEMS, FIND IN FILES and REQUESTS are standalone
     auto-hide panes (`ui/layout.nim`): their DOM lives in
@@ -3324,6 +3322,11 @@ commands.
     but it adds that path BEFORE the `../io-mon/src` sibling and Nim resolves
     later `--path` entries first, so the env var cannot override a colliding
     module in the sibling checkout.
+    UPDATE 2026-10-31: io-mon and nim-stackable-hooks are now REQUIRED
+    siblings (probing `io_mon/depfile.nim` / `stackable_hooks/propagation.nim`,
+    no env override because tup strips IO_MON_SRC / NIM_STACKABLE_HOOKS_SRC),
+    so the preflight refuses such a tree by name. nim-shm-queue / nim-shm-gset
+    stay optional: `ct`'s `io_mon/depfile` closure does not import them.
 - 2026-09-05: **a `HeadlessDebugSession` that steps in a loop and never calls
   `drainEvents()` grows without bound.** Every `continue`/step makes
   replay-server push events the session buffers until somebody asks for them,
@@ -4459,6 +4462,11 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   reported `SKIP ... already built`. The failure names the TRACE, not the stale
   recorder, so it reads as a corrupt fixture. Remedy until this is fixed:
   `bash scripts/build-siblings.sh --force --only <sibling>`.
+  FIXED 2026-10-21: an artifact is reused only when its build stamp (under
+  `.tools/build-siblings-stamps/`) matches the sibling's and both trace-format
+  repos' HEADs and tracked modifications, the build command and the artifact's
+  sha256. A trace-format move now rebuilds every recorder. Contract:
+  `ci/test/sibling-artifact-freshness-test.sh`.
 - 2026-09-14: A STALE RENDERER BUNDLE CAN SURVIVE A "SUCCESSFUL" SOURCE REVERT,
   and it looks exactly like a product bug. `just build-once` runs tup, and tup
   ABORTS ON THE FIRST FAILED JOB — so when the `db-backend` step dies (e.g. the
@@ -4546,13 +4554,12 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   four are tests that a deliberate product change left behind, none of which
   touched this file in the same commit:
     * `loadStepLinesFor emits ct/load-step-lines with location + count` and
-      `… falls back to default panel height when unset` —
-      `InvalidDapCommandDefect`. `ct/load-step-lines` is genuinely dead as a
-      command: absent from `VALID_DAP_COMMANDS_SEQ`, no arm in `dap_server.rs`.
-      `backend/dap_dialect.md` §7 records the disposition and says no spec
-      requires the panel. REGISTERED KNOWN FAILURES — do not allow-list the
-      string to go green; `test_mock_backend_validates_dap_commands.nim` pins
-      the §7 set on purpose.
+      `… falls back to default panel height when unset` — RESOLVED. The second
+      was retired on 2026-10-19 (an unmeasured list asks for nothing); the
+      first passes since 2026-10-26, when the engine gained its
+      `ct/load-step-lines` arm (`db-backend/tests/load_step_lines_test.rs`)
+      and the command entered `VALID_DAP_COMMANDS_SEQ`. The known-failure
+      ledger has no rows left.
     * `diff previews and terminals preserve legacy ids` —
       `MockNodeNotFoundError` for class `agent-editor`. `ecd864ed` ("feat: Diff
       view redesign for agent activity") deleted the Monaco diff host AND the
@@ -4731,23 +4738,17 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   (`NIM_COMMON_FLAGS` + `NIM_REPO_PATH_FLAGS` + `CODETRACER_FLAGS`; `ct` also
   needs `-d:ctEntrypoint`, `db_backend_record.nim` does not).
 
-- `index/startup.nim`'s `init(dataArg: var ServerData, ...)` does `var data =
-  dataArg` and its comment claims "on the JS backend, ServerData is a reference
-  type, so mutations propagate back". IT DOES NOT. `ServerData` is an `object`,
-  and Nim's JS backend emits `nimCopy` for that assignment (see
-  `HEX3Aenv_*.data0 = nimCopy(...)` in `src/build-debug/index.js`), so every
-  write to `data` inside `init` lands in a COPY. The one that bites is the edit
-  branch's `data.workspaceFolder = folder`: after `ct edit <folder>` the global
-  `data.workspaceFolder` is still `nil`, so anything reading it — launch
-  configs (`getLaunchConfigsForWorkspace`, `onRecordWithLaunchConfig`),
-  `loadTrace`'s filesystem categorisation, `pathContentRootFor` — behaves as if
-  no folder were open. The Welcome-screen path is unaffected because
-  `traces.nim`'s `onInitEditMode` assigns the global directly, which is why the
-  same folder behaves differently depending on how it was opened. Measured
-  2026-09-16 while building the HCR launch path, which works around it by
-  reading `data.startOptions.folder` (never copied) in edit mode.
-  `loadTrace` in `traces.nim` carries the identical comment and the identical
-  assumption.
+- Nim's JS backend COPIES an `object` on assignment (`nimCopy`), so the
+  "async proc cannot capture a `var` parameter" workaround `var data = dataArg`
+  silently turns every write into a write to a local copy. `index/startup.init`
+  and `index/traces.loadTrace` did exactly this with `ServerData` (an `object`)
+  until 2026-10-23: a `ct edit <folder>` launch left the global
+  `data.workspaceFolder` nil (measured 2026-09-16 as `hcr-no-workspace-folder`),
+  and `data.save` and `startOptions.isInstalled` never reached the process
+  state. Both now work on the global `config.data` directly, and
+  `src/frontend/tests/index_startup_state_test.nim` holds that. When a proc
+  must change a long-lived `object`, write the global (or make the type a
+  `ref`); never copy it into a local and mutate the local.
 
 - `calls.dat` stores call arguments ONE ENTRY PER ARGUMENT, each with its own
   interned name — `CallStreamRecord.args: Vec<CallArg>` where
@@ -6463,7 +6464,8 @@ Two traps in the same area, both live:
     so guides draw for container nodes too. TUI mouse: press on a region's last
     column/row whose neighbour is its sibling = divider drag (`dividerAt`);
     release elsewhere drops (`dropDivider`), same cell = click/focus.
-  * `ci/test/frontend-reachability.sh` ratchet (1296) counts exported symbols no
+  * `ci/test/frontend-reachability.sh` ratchet (ceiling: the
+    `CT_REACHABILITY_MAX` setter in `ci/lint/nim.sh`) counts exported symbols no
     PRODUCT code reaches — a new exported API used only by tests fails
     `ci/lint/nim.sh`; wire it (or remove the last product use of an old one and
     you strand it: `regionOfPane` nearly went that way).
@@ -6541,7 +6543,7 @@ Two traps in the same area, both live:
     Monaco id from `DiffLanguageByExtension` (TOML excepted — drawn plain, as
     the terminal does), the recording language only as the fallback.
     `toCLang` alone has no `.ts/.java/.sh/.json/.yaml` and opened them plain.
-- The desktop's light theme (config `theme: default_white`) keeps the DARK panels (#282828) and only switches Monaco to codetracerWhite; codetracerWhite.json's `codetracer` block holds the values MEASURED in that state (plat47-desktop-parity-light.electron.json). Launch a light desktop in Playwright with the fixture option `configTheme: "default_white"`.
+- The desktop's light theme (config `theme: default_white`) paints from the design system's LIGHT palette: `default_white_theme.styl` sets `COLOR_MODE = "Light"`, and `generated/index.styl` then imports `generated/mapped-light.styl` (emitted by `scripts/tokens-to-styl.sh`) on EVERY import of the index, so components that re-import it keep the Light values. Panels and the editor's ground are `ui/surface/base/panel` Light (#e6e2db); Monaco's codetracerWhite sits transparent on it. codetracerWhite.json's `codetracer` block holds the values MEASURED in that state (plat47-desktop-parity-light.electron.json); `just test-css-light-theme-grounds` guards the compiled light stylesheet. Launch a light desktop in Playwright with the fixture option `configTheme: "default_white"`.
 - Real-PTY suites launched without CODETRACER_TUI_LAYOUT_DIR read/write the user's ~/.local/state/codetracer/tui-layout.json; a remembered non-default arrangement then fails layout/colour read-backs. Export CODETRACER_TUI_LAYOUT_DIR (and XDG_STATE_HOME) to a scratch dir when running them by hand.
 - PLAT-48 (top bar + auto-hide panels on every front-end):
   * ONE menu: `viewmodel/viewmodels/product_menu.productMenuTree` is the tree
@@ -6703,11 +6705,11 @@ Two traps in the same area, both live:
   it is red; stage the gitlink at 3d0703d with `git update-index --cacheinfo`
   to grade, and restore it after.
 - PLAT-49 part B (2026-10-02) facts:
-  * The engine sends NO DAP response to `ct/expand-calls` / `ct/collapse-calls`
-    (the desktop fires them with `backend.send`). A blocking
-    `DapStdioBackend.sendDapRequest` for either never returns and wedges the
-    front-end's loop; use `sendDapRequestNoResponse`, then reload the section.
-    After a collapse the section's `#N` indices RENUMBER (`callLineOf` numbers a
+  * `ct/expand-calls` / `ct/collapse-calls` are answered (an empty body, or a
+    refusal naming the key) since the 2026-10-27 fix; until then the engine
+    sent nothing on success. The TUI still fires them with
+    `sendDapRequestNoResponse` and reloads the section, leaving the answer
+    unread (every later read matches by `request_seq`). After a collapse the section's `#N` indices RENUMBER (`callLineOf` numbers a
     row by its place in the section), on the desktop too.
   * Call rows: `ct/load-calltrace-section` carries every call's `args` (with
     `value`s) and `returnValue`; the response's top-level `args` /
@@ -7020,10 +7022,11 @@ Two traps in the same area, both live:
   `src/build-debug/bin/ct`, then PATH; an old `ct` on PATH records a trace the
   engine refuses ("unsupported CTFS version"). The PTY / plan suites set
   `CT_BIN` to the checkout's own.
-- 2026-10-08: A GPUI PANE DOCKED WHEN THE WINDOW OPENS HAS NO ELEMENT
-  (`gShell.leavesFor` walks the dock PROJECTION, and a top-docked pane is the
-  window's own strip, not in it): its label hover "previews" and draws nothing.
-  Filed (codetracer-specs issues/2026-10-08-gpui-pane-docked-at-start-...).
+- 2026-10-22: `GpuiShell.leavesFor` is NOT only the dock projection: a
+  top-docked pane is the window's own strip (gpui-kit has no `top`
+  placement), so its leaf comes from `layout.dockedAt(leTop)` and carries
+  `topStrip = true`. Before this a pane docked there when the window opened had
+  no element, and its label's hover previewed nothing.
 - 2026-10-09: A MUTATION HARNESS KILLED MID-ARM (the shared host's disk filled
   to 99%, and long chains were killed outright) can leave its subject EMPTIED
   — `run-plat14-image-mutations.py` left `tui/app/theme/image_capability.nim`
@@ -7067,3 +7070,1058 @@ hook's `GIT_INDEX_FILE` is the index being committed (`.git/index.lock` for
 `commit -a`, a temporary one for `commit <paths>`); `ct test verify --staged`
 relies on child git calls INHERITING it, so never scrub it from the
 environment of the content-id host.
+
+BASE KEYMAPS, ONE KEY SPELLING, AND THE TERMINAL'S KEY PROTOCOL (2026-10-11,
+PLAT-68 Phase A).
+- ONE SPELLING: `common/key_names.chordName(mods, key)` is the only place a
+  chord name is built (order Ctrl, Shift, Alt, Meta; a letter lowercased
+  under Ctrl/Alt/Meta, a shifted letter alone is the capital; `Esc`, not
+  `Escape`). Every decoder calls it: the terminal's `keyName(token,
+  eraseByte)`, GPUI's `gpui_keys.canonicalKeyOfGpui` (`platform` is Meta),
+  the DOM's `key_event_names.canonicalKeyOfDom`. Data rows written in VS Code
+  notation (`Ctrl+Shift+K`, `Ctrl+K S`) go through `normalizeChord`, where a
+  letter is a KEY and Shift is explicit — never compare a written chord with
+  a decoded name without it.
+- `0x08` vs `0x7f`: the byte the terminal's termios VERASE names is
+  `Backspace`, the other is `Ctrl+Backspace` (`TerminalDriver.eraseByte`). A
+  test that sends `\b` and expects `Backspace` is assuming a ^H terminal.
+- THE BASES ARE DATA: `viewmodel/keymap/cua_keymap.nim` / `emacs_keymap.nim`
+  are `BaseRow` lists (chords in VS Code notation, a vocabulary operation
+  with or without `editor.`, a `when` string, platforms) built by
+  `base_rows.definitionOf`, which RAISES on a bad row at module init — a typo
+  in a row crashes every suite that imports `editing_core`, not one test.
+  Since Phase B every row is bound (panes, lists, overlays, the debugger);
+  Vim and Kakoune stay PLAT-31's procedural tables plus the shared
+  `navigation_keymap` (CodeTracer-TUI.md §4.2).
+- `when` (`keymap/when_expr`) is parsed against the closed `ContextKey`
+  catalogue (`keymap/context_keys`); an unknown key is a parse error, never
+  false. The editor's keys come from `editorContextKeys(state, product,
+  delivery)`; `keyProtocol == legacy` gates the §3.10 fallback rows, so an
+  in-process test of a legacy fallback must build its document with a legacy
+  `KeyDelivery`.
+- PENDING TIMEOUT IS THE BASE'S (`pendingTimeoutOf`): none under CUA/Emacs.
+  A CUA `Ctrl+K` with no second key waits forever; the router owns the
+  pending prefix (`KeymapRouter.pending`), so the key after it goes to the
+  same router and either continues it or ends it.
+- The editor owns a key iff it is text or the base claims it
+  (`runtime.editorOwnsToken`); there is no exclusion list. Under CUA `Tab`
+  indents; `F6` / `Shift+F6` leave the editor; `Ctrl+Shift+p` and `F1` open
+  the palette (Emacs: `Alt+X`). Tests that used `Tab` to leave a buffer must
+  use `F6` — under CUA and Vim/Kakoune; Emacs has no `F6` (`Ctrl+X O`).
+- THE TERMINAL'S KEY PROTOCOL: `CSI ? u` is sent before the DA1 fence; a
+  reply means Kitty (`CSI > 1 u` pushed AFTER the alt screen is entered — the
+  flag stack is per screen), else `modifyOtherKeys` 2 on an `xterm*`/`tmux*`
+  TERM, else legacy (`capabilities.resolveKeyProtocol`). Reporting is enabled
+  in `TerminalDriver.adoptCapabilities`, never in `start()` (the reply is not
+  in yet). nim-termctl's `restoreTerminalSafe` pops/resets it FIRST, also on
+  SIGSEGV/SIGBUS/SIGFPE/SIGILL/SIGABRT (chained to the previous handler). The
+  pty suites answer `CSI ? u` themselves (no Kitty emulator in CI); a pty
+  test that does not answer gets legacy (or modifyOtherKeys under
+  TERM=xterm*), so `Ctrl+Shift+K` arrives as `Ctrl+K`.
+- nim-libvterm (the TermAssert screen model) has Kitty push/pop INVERTED
+  (`>` treated as pop, `<` as push) — do not trust its kitty-flags state in
+  assertions; read the transcript bytes.
+- GPUI WINDOW LANES WITH `wtype`: a shifted symbol must be typed as its US
+  keysym (`-M shift {`, not `-M shift [`) — wtype's one-level virtual keymap
+  consumes the Shift and `Ctrl+Shift+[` arrives as `Ctrl+[`.
+- The isonim-gpui-pin's prebuilt `rust/target/{debug,windowed}` shims (Oct 1)
+  predate `gpui_write_clipboard`; binaries built against the pin die with
+  "could not import: gpui_write_clipboard". Build the shim from the pin into
+  scratch (`CARGO_TARGET_DIR=…`, windowed needs `LIBRARY_PATH=
+  $CODETRACER_GPUI_RUNTIME_LIB_PATH` for -lxcb/-lxkbcommon) and pin it with
+  `-d:gpuiShimPath=…`.
+- `run-plat68-keymaps-mutations.py` MUTATES TWO CHECKOUTS OUTSIDE THIS REPO:
+  the specification (`$CT_SPECS_DIR`, CUA-Keymap.md, arm O2) and nim-termctl
+  (`$NIM_TERMCTL_SRC`, arm R1). Do not run any lane or suite that reads
+  either while it grades — measured: a vm-unit lane run beside it read the
+  O2-mutated CUA-Keymap.md and reported a false oracle failure. An arm the
+  loader refuses (a base whose rows conflict does not LOAD, `BaseRowError`
+  at module init) is graded as a kill on that line.
+- TermAssert's IPC socket lives in `$TMPDIR`; a TMPDIR under a long scratch
+  path exceeds the 108-byte `sun_path` limit and every pty suite dies with
+  "socket path too long". Keep TMPDIR short (e.g. `/tmp/<tag>`) for harness
+  runs.
+- "RED ON A CLEAN BASE" WAS MOSTLY THE ENVIRONMENT (measured 2026-10-11 on a
+  clean agents f8781d4b5): the workspace's shared `replay-server`
+  (codetracer/src/build-debug/bin, Sep 25) predates the event log's
+  `total`/`indexAtTick` (e1ff0ced3), and the shared fixture cache
+  (codetracer/test-logs/tui-fixtures) holds CTFS container v4, which the
+  current engine refuses ("reads versions 5 and 6"). With an engine built at
+  the base's own pins (db-backend plus codetracer-trace-format /
+  codetracer-trace-format-nim at their repro.lock revisions) and v5
+  recordings, the `tui` lane is red only on test_plat40_producers (the
+  event-log footer seam, filed 2026-10-08). The fixture cache key does not
+  include the container version — check the header byte (offset 5) before
+  trusting a copied cache. `test_plat45_three_media` also needs
+  `just build-gpui` (build/bin/codetracer-gpui), or it is red for the
+  prerequisite, not the product.
+
+ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
+- EVERY KEY GOES THROUGH `KeymapRouter.route(facts, scopePath, navMode,
+  name, nowMs)` (`viewmodel/keymap/keymap_router.nim`): user rows, then base
+  rows (KL-11); pushed layers before the scope path, innermost scope first.
+  A front-end only supplies the scope path and facts: the terminal reads the
+  `isonim-tui` focus tree (`runtime.scopePath`), GPUI the element focus chain
+  (`windowScopePath`), the desktop the DOM focus chain
+  (`ui/key_router.desktopScopePath`, elements stamped `data-scope-kind` /
+  `data-scope-id`). `describeResolution` is the one spelling of an answer;
+  `test_plat68_diff13` compares the terminal's and GPUI's answers key by key.
+- THERE IS NO SECOND KEY REGISTRY ANYWHERE. The terminal's old keymap, GPUI's
+  `chordOfKey`/`actionForChord`, the desktop's Mousetrap loop, hard binds and
+  Monaco `commands` table are deleted. A key that does nothing under a base
+  is a missing ROW, not a missing handler: e.g. Emacs binds no `F6` and no
+  bare `:` — the command line is the palette's `:` line there.
+- THE PALETTE'S `:` LINE IS A COMMAND LINE FIRST (`runtime.acceptOmnibar`):
+  `:w`, `:q`, `:keymap vim` run as typed (`runCommandLine`); only a line
+  whose verb is no command picks the highlighted fuzzy entry. Under CUA and
+  Emacs this is the only route to the command line in Edit mode.
+- `rt.focus` IS LONG-LIVED; FRAME NODE IDS ARE NOT. `terminal_driver`'s
+  `composite` resets node ids per frame; `frameNodeIds` saves and restores
+  `nextTerminalNodeId` around it, or a frame's nodes collide with the focus
+  tree's and the focus hops pane to pane on every key (measured: "left" typed
+  as "l"). An overlay hung at the window keeps the pane it covered in
+  `heldPane`; `scopePath` starts with `dropInner()`.
+- THE DESKTOP'S FOCUSED EDITOR is the `.code-editor` view containing
+  `document.activeElement` (a click lands on the `.editor.code-editor.tab`
+  div, tabindex 2, not on Monaco) — `editor_scope.editorScopeElement`; an
+  editing op focuses Monaco first (`runMonaco`). `window.__ctKeyTrace` records
+  every operation the router ran — what the Electron specs read.
+- `keybindings.json` (`host/keybindings_location`, `$CODETRACER_KEYBINDINGS`):
+  the desktop's main process reads/watches it and sends it over IPC; the
+  renderer asks for it (`keybindings-request`) because a send before the
+  listener exists is lost. Electron specs plant it under
+  `ctUserConfigDir()` — the worker's scratch `CODETRACER_HOME`.
+- `layout.toggleSidePanels` (Ctrl+B) pins the sides of the editor's row and
+  records their container TREE (`PinnedNode`); the second press rebuilds the
+  same rows/columns/stacks through `auto_hide.unpinPanelTarget`.
+  `unpinPanel` alone puts each panel in a new stack. Iterate a COPY of
+  `contentItems` while pinning (`childrenOf`): GoldenLayout removes emptied
+  containers from the array under the walk (Nim's seq iterator asserts).
+- `-d:ctWeb` CATCHES WHAT THE ELECTRON BUILD DOES NOT: a `for x in seq`
+  variable captured in a closure is `lent` there and refused ("cannot be
+  captured as it would violate memory safety"). `ci/test/web-bundle-assets.sh`
+  (run by the browser gates) is the web compile check.
+- OSC 52 (`app/clipboard_read`): copy writes `ESC ] 52 ; c ; <b64> BEL`;
+  paste asks `ESC ] 52 ; c ; ? BEL` and waits 300 ms; a terminal that stays
+  silent is not asked again (libvterm never answers — the pty suites answer
+  it themselves when they test the answered path).
+- THE PROGRAM MENU FROM THE KEYBOARD (CUA-Keymap.md §3.8): `Alt` pressed and
+  released alone is the canonical key name `Alt` (row → `menu.toggle`,
+  Linux/Windows), recognised by `viewmodel/keymap/alt_tap` from the desktop's
+  keydown/keyup and GPUI's `modifierschange` (a shim event added for it); a
+  terminal never sees a modifier alone, so `` Alt+` `` (`menu.open`, Emacs's
+  tmm-menubar chord) is its key, on every front-end. `F10` opens the menu in
+  Edit mode only (step over in Debug). `Alt+<mnemonic>` → `menu.open-folder(x)`;
+  the letters live in `product_menu` (File f, Edit i, View w, Build b, Reset r,
+  Debug d, Help h — `Alt+E/V/C` are pane focus) and `test_plat68_menu_access`
+  holds data and rows together. An OPEN menu owns its keys on all three
+  front-ends (TUI `handleMenuKey`, GPUI `handleTopKey`, desktop
+  `ui/menu_keys.menuAccess`), except the keymap's own menu keys.
+- Nim is STYLE-INSENSITIVE ACROSS MODULE AND IDENTIFIER NAMES: a module
+  `menu_access` and a var `menuAccess` in the same scope are "ambiguous"
+  ("expression 'menu_access' has no type"). Name the module differently.
+- `.gitignore`'s `client*` (for build outputs) IGNORED
+  `viewmodel/keymap/client_actions.nim`; it is negated explicitly now. Check
+  `git status --ignored` for source files before landing new modules.
+- THE WEB STUDIO IS `frontEnd == web` (`key_router` under `-d:ctWeb`): its Run
+  (`Ctrl+Enter`, `build.run-program`) and Export (`Ctrl+Shift+E`,
+  `project.export`) are router operations a build registers with
+  `registerHostOperation`; a `Mousetrap.bind` can never fire behind the
+  capture-phase router (Mousetrap is gone from the bundle).
+- `ci/test/chord-and-pane-uniqueness.sh` hard-codes `/usr/bin/python3`
+  (absent on NixOS hosts); run a copy with `python3` and a fixed `repo_root`
+  locally. Its key part reads the router's `window.__ctKeyTrace` through
+  `ci/test/one_key_one_operation_probe.mjs`.
+- `just test-e2e` runs the tree `$CODETRACER_REPO_ROOT_PATH` names (a
+  captured dev env may point it at another checkout) and `npm install`s into
+  the shared `node_modules`; run a worktree's spec with `npx playwright test`
+  from its own `src/tests/gui` instead.
+- A MODAL BASE'S READ-ONLY EDITOR HAS NO EDITOR LAYER (`keymap_router.
+  layersFor` skips `EditorTable` for Vim / Kakoune while `editorReadOnly`, so
+  §4.2's navigation rows answer there). A row meant for the read-only editor
+  under those bases therefore goes in the GLOBAL table with a `when`
+  (`navigation_keymap.ModalSurfaceRows`' `Enter` → `editor.toggle-tracepoint`),
+  and a §4.2 row on the same key must say what it is for (`Enter` →
+  `list.expand` is `!editorTextFocus`), so the two are disjoint.
+- `frontend-reachability-guard.py` takes `--allowlist <file>` (since
+  2026-10-22); a synthetic tree must pass its own, as
+  `reachability-ratchet-test.sh` does, or every entry of the repository's list
+  is reported "stale" there and the run exits 2. On a declaration line the
+  guard drops only the name(s) declared there and counts everything else
+  (types, initializers, one-line bodies); before 2026-10-22 it dropped the
+  whole line, which put 89 false findings into the count.
+- The trace format v7 engine refuses meta.dat v6. A v6 fixture recording is
+  upgraded by its version byte alone (the `CTMD` magic, then a u16 LE
+  version), as `2dbbbcdda` did for the committed fixtures: v7 changed no
+  header byte, and a v6 recording carries none of the new event kinds.
+- The orphan-sensitive pty suites (`test_real_no_orphans`,
+  `test_real_pty_lifecycle`, `test_real_signal_handling`, plus the engine
+  checks in `test_plat47_vcs_focus_refresh` and `test_plat49_panes`) count only
+  `replay-server` processes whose `/proc/<pid>/environ` carries this run's
+  `CODETRACER_TUI_TEST_RUN_TOKEN` (`lifecycle_support.markedReplayServerPids`).
+  Other worktrees' engines no longer redden them, and no private PID namespace
+  is needed. A session spawned without `tuiSession` / `carryRunMark()` is
+  invisible to them, so its leak would pass.
+- A pty suite's wait failure prints the status line, which carries the
+  recording's source path and tick; `run-plat68-keymaps-mutations.py`'s
+  `portable_cause` drops that snapshot from a recorded cause so causes match
+  across checkouts. The other pty harnesses still record it.
+- A recorded source path may carry `..` (`multi_root`: Python reports
+  `…/app/../shared/helpers.py`) while the recording's `files/` store holds the
+  normalised path. Both payload resolvers (`source_provider.resolvePayload`,
+  `expr_loader::resolve_bundled_source`) resolve `.`/`..` LEXICALLY first
+  (`resolveDotSegments` / `resolve_dot_segments`, one rule); only a `..` left
+  over (climbing out of the root) is refused. Nim's `os./` also folds `..`
+  textually, so a test that wants an OS-unresolvable path must build it with
+  `&`, not `/`.
+- `SourceVM.trimToWindow` drops `totalLineCount` with the held revision; a
+  kept length clamped the next file's window to the previous file's length.
+- In `--report-window-plan`, `click:call:<i>:left` does NOT jump (only the
+  right button is routed there); a call jump is `press:<x>:<y>,release:…` at
+  the row's place in the geometry file (`CODETRACER_GPUI_GEOMETRY_OUT`).
+- The desktop does not share the TUI/GPUI source provider for self-contained
+  traces: it reads `files/` through `index/config.selfContainedReadPathCandidates`
+  and Node's `path.join`, which folds `..` itself.
+- Find in Files is ONE runner, `viewmodel/host/find_in_files.nim`, compiled to
+  C (terminal, GPUI: pumped from the host loop, `rg`'s pipe O_NONBLOCK) and to
+  JS (Electron's main process, `index/ipc_utils.onSearchProgram`: node drives
+  it). `rg --json` with an argument vector when `rg` is on PATH, else an
+  in-process walker that must give the same rows in the same order (FS-8 in
+  `test_plat57_find_in_files.nim`): `--no-ignore` (the walker reads no ignore
+  files), `--sort path` (siblings by byte order of their names, depth first),
+  hidden entries / symlinks / NUL-holding files skipped. The scope is
+  `findInFilesScope` (the recording's `files/` store with its prefix
+  stripped, else the outermost existing source folders). A new search cancels
+  the run in flight AND `SearchResultsVM.acceptBatch` drops any batch whose
+  `runId` is not the latest — two guards, each graded by its own arm.
+- `SearchResultsVM` is the one Find in Files model; every front-end draws
+  `displayRows` / `rowParts` / `summaryText` / `emptyText`. The highlight is
+  the RUNNER's match (`SearchResultLine.matchStart` / `matchLength`), never a
+  second search of the line by a view. The toggles re-run the search inside
+  the VM, so every front-end gets that for free.
+- On the terminal, a pane shown by `showPane` may be the REVEALED overlay of a
+  docked pane: `runtime.paneAt` asks the reveal first (it is painted over the
+  arrangement), then the tiled regions, then an open dock. A click handler
+  that asks only `regionIndexAt` lands on the pane under the overlay.
+- GPUI `--window-ops` key names are lower case (`enter`, `f4`) and the
+  modifier is spelled `control`; `wait:<ms>` pumps a streaming search.
+- Desktop `:grep foo`: `command_interpreter` must take
+  `classifyOmnibarQuery(...).needle`; the query past its first character is
+  `grep foo`.
+- Find in Files' matcher is `viewmodel/host/text_match.nim` (beside the
+  runner, NOT in `editor/`): every pattern, literal or regular expression, is
+  compiled once into the expression `rg` builds from the same flags (literal
+  escaped with `escapeRe`, `regexCaseless`, whole word as
+  `(?<!\w)(?:…)(?!\w)` = `rg -w`'s half word boundaries) on nim-regex
+  (`libs/nim-regex`, v0.27.0, pure Nim, C and JS; it needs
+  `libs/nim-unicodedb` >= 0.13.2). The editor core's import closure
+  (`ci/test/editor-import-closure.sh`) cannot resolve a third-party package
+  and refuses it, which is why the matcher is not an `editor/` module; the
+  toggles (`TextMatchOptions`) are a `store/types` value.
+- nim-regex vs `rg` 15, measured: look-around and `\1` are nim-regex-only
+  (refused for both engines in `refusalOf`, with `rg`'s words), `\n` is
+  refused by `rg`; `\p{Greek}` / `\p{Uppercase}` (scripts, binary
+  properties) do not compile in nim-regex; case-insensitively nim-regex does
+  not fold `[[:upper:]]` / `\p{Lu}` and misses the Kelvin sign and long `ſ`
+  in a bracket RANGE. A walker line keeps a CRLF's `\r` (as `rg` searches
+  it); both engines strip it from the row's text and clip the match to it.
+- Find in Files' field keys (`Alt+C` / `Alt+W` / `Alt+R`) hold where
+  `searchInputFocus` is true: the scope element `search-query` — the
+  desktop pane's `#fif-input` (stamped `data-scope-*`), or on the terminal
+  and GPUI the palette's field while its line is `:grep`
+  (`omnibar_vm.paletteFieldOf`). They are G rows; CUA's pane-focus `Alt+C`
+  and the menu's `Alt+W` / `Alt+R` say `!searchInputFocus`.
+- `src/tests/gui/lib/js-trace-fixture.ts` records with
+  `CODETRACER_JS_RECORDER_PATH` (the CLI FILE) or else the workspace
+  sibling's `packages/cli/dist/index.js`, whatever revision it was built at.
+  A stale sibling build writes CTFS container v4 and every chrome spec
+  (`tests/build/search-results-e2e.spec.ts`, …) dies in `ct host` with
+  "ct host did not import trace folder … container version 4". Build the
+  recorder at the repro.lock pin (a real copy with the trace-format siblings
+  symlinked to the pins; `npm install`, `npx napi build --release
+  --manifest-path crates/recorder_native/Cargo.toml --output-dir
+  crates/recorder_native/`, `npm run build`) and export the CLI path.
+- Horizontal scroll (PLAT-70 Part A) is ONE model:
+  `viewmodel/viewmodels/horizontal_scroll.nim` (`HorizontalView` over
+  `scrollbar_scrubber`'s column axis, `CaretFollow`, `ContentWidth`,
+  `wheelColumnsOf`, `overflowMarkers`). The editor's content width is exact
+  and maintained per line in `editing_core.drainJournal` (`LineWidths`,
+  re-measured per change set once `contentCols` has measured the document);
+  the output panes keep the widest line measured so far, reset when the
+  session (generation) changes. `settle` allows `maxLeftCol + 1` so a caret
+  just past the widest line's end stays in view; explicit scrolls clamp to
+  `maxLeftCol`.
+- GPUI wheel deltas arrive as pixels (`pixel_delta(window.line_height())`);
+  a Wayland wheel notch is 3 lines, so one hardware notch is 18 editor
+  columns (6 per line-equivalent, Horizontal-Overflow §4.3). A sway headless
+  output is 1920x1080 whatever `--width`/`--height` the window asks for; the
+  virtual pointer must be started with the OUTPUT's size or every `abs` lands
+  scaled (`ci/test/plat70a_gpui_window.py`).
+- `isonim-gpui/tools/virtual_pointer.c` needs `hwheel N`
+  (WL_POINTER_AXIS_HORIZONTAL_SCROLL) for the PLAT-70 window capture; the
+  windowed capture driver (`ci/test/gpui-window-captures.sh plat70a`) builds
+  the virtual pointer from the isonim-gpui checkout, so that change must land
+  there first.
+- In the TUI, Shift-modified mouse reports stand down EXCEPT the wheel:
+  Shift + wheel-up/down is converted to wheel-left/right in `runtime.nim`
+  (`routeHorizontalWheel`). Terminal Output's `Left`/`Right` (step by write)
+  are screen-view only; in the line view CUA's `Left`/`Right` are
+  `view.scroll-left/right` (`OutputPanesWhen`), and Vim's single `z`
+  maximize is narrowed with `!(OutputPanesWhen)` so `z h`/`z l` resolve.
+- Capture scripts and harnesses pick the first X display with no
+  `/tmp/.X<n>-lock`. Dead Xvfbs of this user leave locks AND sockets; once
+  they pile up (99..139 here) the next free number can be one another user's
+  Xvfb holds through the ABSTRACT socket namespace (`:140`, github-runner):
+  our Xvfb then fails ("SocketCreateListener() failed") while DISPLAY still
+  points there, and the Electron controls go red at random. Remove this
+  user's stale locks/sockets (pid dead) before grading Electron gates.
+- plat50-stop-path / plat50-clicks engine arms: point `CT_STOP_PATH_ENGINE_DIR`
+  / `CT_P50_ENGINE_DIR` at a real-copy sandbox `src/db-backend` whose
+  `../../../codetracer-trace-format*` are the repro.lock revisions and whose
+  `src` is a symlink to the worktree's `src/db-backend/src` (the mutation
+  lands there; Cargo resolves path deps from the real manifest).
+- plat68's `isonim-tui:` propagation suite compiles in `$ISONIM_TUI_SRC/..`
+  and needs `build/grammars/libisonim_tui_grammars.a` there plus the
+  siblings (isonim-examples, isonim-render-serve, nim-pty, nim-faststreams,
+  nim-stew, nim-everywhere) beside it at their pins.
+- A malformed `tui-layout.json` left in the lanes' shared
+  `CODETRACER_TUI_LAYOUT_DIR` makes every frame's status row say "saved
+  layout ignored (MissingField)" and turns ~7 pty suites red; empty the
+  directory before a whole lane run.
+- The horizontal view counts VIEW columns (`editing_core.ViewColumnPolicy`,
+  tab = one column, wide glyph two), not the editing settings' policy (tabs
+  to the next multiple of 4, which decides goal columns): the terminal's grid
+  (`styled_row.cellWidthOf`) and GPUI's rows (`leaves.dropColumns`, by rune)
+  both draw a tab in one column, so measuring with tab stops made a tabbed
+  line's bar promise columns no pane draws. `caretViewColumn` is the bar's
+  mark and the caret-follow's caret.
+- The ASCII tier degrades by GLYPH (`borders.AsciiFallbackTable`), and `▏`
+  is a divider's `|` there. A scrollbar thumb's cells are therefore degraded
+  by their STYLE instead (`theme/degradation.degradeRow`: role
+  `srScrubberThumb` or surface `srScrubberThumbGround` → `#` per cell), so a
+  horizontal thumb that starts or ends one eighth into a cell is not drawn
+  with a track-looking `|` inside it. Every scrubber, vertical or horizontal,
+  is `#` in ASCII; the horizontal track is the box-drawing `─` → `-`.
+- The output panes' content width is `horizontal_scroll.measureLines` (the
+  lines not yet measured, from nothing again for another output or one that
+  shrank) on every front-end: TUI Terminal Output and Build Output, GPUI
+  Terminal Output. Their output identity is the ViewModel / BuildSession
+  reference.
+- GPUI reports a wheel in PIXELS, `ScrollDelta.pixel_delta(window
+  .line_height())`, and the window's line height is GPUI's default text
+  style's (16 px × φ ≈ 25.9 px), not the editor's row pitch. The horizontal
+  view converts by that (`main.GpuiWheelLinePx`): dividing by `EditorLinePx`
+  (22 px since the redesign) made a Wayland notch 21 columns instead of 18.
+- The desktop prefixes the Electron capture gates build
+  (`scripts/plat45-desktop-prefix.sh`) LINK `src/build-debug/public/css` and
+  `frontend/styles` — a stale `src/build-debug` makes every desktop gate red
+  (the renderer runs old CSS/JS around new `ui.js`). Run `just build-once`
+  first; under CI load set `CODETRACER_PERF_LIMIT_SCALE` for capture runs
+  only (never for a lane that gates performance).
+- Windowed desktop list views (Terminal Output's line view): never size the
+  rows a window does not hold with PADDING on the scroll container. A box
+  cannot be shorter than its padding, so a flex item padded taller than its
+  panel overflows the panel and its scroll range breaks (the `pre` grew to
+  2000 px in a 629 px panel). Spacers must be content: the line view uses
+  `pre::before` / `::after` sized by `--ct-terminal-lines-above/-below`
+  (`terminal.styl`). A blank `.terminal-line` (a flex row with no fragments)
+  collapsed to 0 px until it got `min-height: 1lh`; any row model that
+  assumes uniform row heights breaks on a zero-height row.
+- The shared desktop list scrubber (`views/list_scrubber_dom.nim`) counts a
+  view as ROUND(clientHeight / rowH) rows, so `maxFirstVisible * rowH` can
+  stop short of the scroll range's end; `moveViewTo` scrolls to the range's
+  end instead when asked for the last page. Views that pass their own
+  `firstVisible` must round too (the Event Log's floor read row 49 at the end).
+- Monaco resolves a press on its scrollbars to a POSITION now (target type
+  11); a press with no position is one on an overlay widget (type 12), e.g.
+  its find widget (Ctrl+F in the editor). Content widgets are type 9, but the
+  desktop editor has none on screen in the calc capture (the flow's value
+  boxes are outside Monaco's mouse handling).
+- A replayed (rr) flow walk turns failed queries into "stop here" or into a
+  fallback (`location_jump` → `jump_to_call` → `run_to_entry`), so a dead
+  `flow` worker used to come back as a short or substituted flow with
+  `error: false`. Its session is now built `without_respawn_after_worker_death`,
+  and `CallFlowPreloader::load_flow` checks `ReplaySession::worker_death()` last,
+  so a death is reported as `FlowUpdate::error` naming the worker and its exit
+  status. A call flow at a location with no source position (`<unknown>:-1`,
+  where a replay stands after running off the end of the recording) is refused
+  before any worker is driven (`replayed_call_flow_refusal`).
+- The db-backend test harness's `set_breakpoint` helpers require the breakpoint
+  to come back `verified: true`. A fixture anchor that resolves to no code then
+  fails as "breakpoint at X:N was not verified" instead of as an empty flow at
+  the end of the trace. Derive anchors with `find_line_containing`.
+- A pane on the panel host (`ui/panel_host.nim`, `PanelHostKinds`) renders
+  nothing until `setPanelSession` is called, and only `ui_js.configureSessionMiddleware`
+  (through `bindWindowToSession`) calls it. Every renderer launch handler (`onTraceLoaded`, `onNoTrace`,
+  `onStartDeepReview`) must therefore run that routine; a handler that skips it
+  shows the pane's tab over an empty container (the dataset review did, and lost
+  its VCS and Agent Activity panes). A launch with no replay engine passes
+  `withDebugger = false`, which skips the DAP `initialize` (it would time out
+  into a status-bar error) and the stepping toolbar.
+- Desktop window tabs each own their ViewModels: `ReplaySession.viewModels` (`ui/session_viewmodels.nim`) holds the tab's `SessionViewModel`, its `DebuggerSession` (or the `ct host` mirror, first tab only), and its Test Results / Constraints VMs. `ui_js.configureSessionMiddleware` builds them once per tab; `bindWindowToSession` (called by `session_switch.switchSession`) points the window-level pane bridges (toolbar, footer panes, module-level `init*VMFromSession` slots) at the shown tab. The panel host renders each mount over the session of the tab whose `#session-container-<n>` holds it. Legacy component handlers that write a VM should resolve their own tab's (`sessionVMOf(data.sessionOfComponent(c))`), not the module slot, or a hidden tab's answer lands in the shown tab.
+- The Playwright fixtures and the `ct host` suites make their scratch `CODETRACER_HOME` under `/tmp` and refuse one too deep for the session manager's sockets (`src/tests/gui/lib/socket-path-bound.ts`, `src/tests/ct_host/ct_host_scratch.nim`); a home under macOS's `/var/folders/.../T/` does not fit the 104-byte `sun_path`. Node does not refuse a too-long Unix socket path: `net.createConnection`/`listen` truncate it silently (a connect then fails with ENOTSOCK/ENOENT on the truncated name), so it is no probe of the bound.
+- `#stable-status` no longer exists in the status bar; wait for a step through `data.sessions[i].status.stableBusy` instead (`multi-replay/second_tab_panes_render.spec.ts`).
+
+## PLAT-70 Part B — table panes: truncation, the full value, column widths
+
+- ONE ViewModel for every table pane on every front-end:
+  `viewmodel/viewmodels/table_overflow.nim`. `fitCell` is the presenter's
+  `clipToCells` over one line (`oneLine`); a VALUE cell is never fitted again,
+  it carries the presenter's `Presentation.truncated` (`presentedCell`) — the
+  value-presentation-boundary gate refuses a post-cut. A painter records the
+  cells it cut as `CutCell`s in its own units (terminal cells, GPUI px) and the
+  pointer, the `…` press and the tooltip anchor are hit-tested against those,
+  never against a second layout. `DetailToggle` (one row open), `HoverClock`
+  (500 ms, only a truncated cell starts it), `detailView` / `tooltipView`
+  (capped at `detailMaxLines` with the copy hint) are the shared answers.
+- The whole value (tooltip, detail, `list.copy`) is `fullValueText`: the
+  presenter at `surfaces.tableFullBudget()` (the state panel's depth and
+  member caps, one line, no cell bound) — NOT a `SurfaceBudgets` member, for
+  `tuiRowBudget`'s reason.
+- Column widths live in the MODEL (`EventLogColumns.widths`, cells of
+  `ColumnCellPx` = 8 px, minimum 3) and are remembered in ONE document,
+  `table-columns` in the native state root (`host/table_column_widths.nim`;
+  the desktop's main process: `index/table_columns.nim` over IPC
+  `table-columns-request` / `-save`). Front-ends never keep a width of their
+  own. GPUI applies it in `applyRememberedColumnWidths` wherever `gSession` is
+  assigned.
+- GPUI: a real press reaches the ROW'S element listeners first
+  (`window_clicks`, `onPaneClick`) and the window root's pointer router after.
+  A gesture the root owns over a row (a cut cell's `…`, an Event Log column
+  separator over its header cell) must be refused in `onPaneClick`
+  (`tableGestureAt`), or the row jumps the debugger / the header orders the
+  log. The plan's `press:` op reaches only the root, so it cannot see this;
+  `click:<part>:<key>@<x>x<y>` delivers a pixel press as the window does (row,
+  then root). Also: `redrawListPane` does not wire clicks — a redraw that
+  makes new rows must call `wireClicks` (`redrawTablePane` does), and a
+  header cell's FIRST child must be its title (`window_clicks` matches the
+  header by `textContent(nthChild(el, 0))`).
+- Desktop: a row carries only its cell KEY (`data-ct-cell`); the whole value
+  is asked of the pane (`attachTableOverflow(..., fullValueOf)`,
+  `state_view.fullValueOf`) only once the fit pass finds the cell cut, and kept
+  on the cell beside the drawn text it belongs to. Sending every row's whole
+  value doubled the state panel's marshalled bytes (plat18's probe: MOUNT
+  7834 -> 15144).
+- Desktop: the state pane's value span is `display: contents` and parts are
+  absolutely positioned; `table_overflow.styl` overrides that for the fitted
+  cell. Fit with the cell's FRACTIONAL inner width over one character's width
+  (integer `clientWidth` rounds a cell that fits down a pixel). The `…` press
+  is a capture-phase mousedown that swallows the following click — otherwise
+  the row's click jumps the debugger.
+- Nim's JS backend: a closure created inside a `for` loop captures the loop
+  variable BY REFERENCE (every grip resized the last column). Build each
+  listener in a factory proc (`columnGrip`).
+- Desktop event-log cells are HTML strings: escape the output and location
+  text (`escapeCellHtml`) — `<<LEFT-EDGE>>` was eaten as a tag.
+- PLAT-70 Part I (Horizontal-Overflow.md §5.5): the desktop's Call Trace IS a
+  table pane now — its call boxes carry `data-ct-cell` and are cut at the
+  row column's edge (`views/table_fit_dom.fitCallTrace` sets their
+  `max-width`; the `…` is a `::after` overlay because the box is a flex row
+  `text-overflow` cannot cut); the list scrolls sideways only when a row's
+  indent + callee name do not fit. This is OQ-H5, PROPOSED and awaiting the
+  user's confirmation — it replaces Part B's "the desktop scrolls, the others
+  cut" split; if the user rules otherwise, `callFitRow`'s floor is the knob.
+- The table panes' names (`VariablesTablePane`, `EventLogTablePane`,
+  `CallTraceTablePane`), the remembered document's merge
+  (`mergeColumnWidths`) and `table.resize-column`'s target
+  (`event_log_vm.columnResizeTarget`) are shared; a front-end only measures
+  the column's drawn width.
+- A desktop build from a worktree needs the pinned siblings beside it (tup's
+  `../isonim` paths): copy the tree's `git ls-files` (with
+  `--recurse-submodules`; a `.gitignore`-filtered rsync drops tracked files
+  such as `frontend/tests/test_suites/`) into a scratch workspace whose
+  siblings are at the pins and `just build-once` there with
+  `CODETRACER_SKIP_SIBLING_CHECK=1` (the copy's submodules have no `.git`).
+- Electron specs that call `readyOnEntryTest` cannot pass on a tree whose
+  status bar hides `.location-path` (the "HIDDEN FOR NOW" rule of
+  2026-10-15, issue 2026-10-20-ready-on-entry-...): to compare two trees,
+  apply the same local removal of that rule to both scratch copies.
+- `src/Tuprules.tup` hard-codes `CARGO_TARGET_BASE = /tmp/codetracer`, so
+  every `just build-once` on the host shares one replay-server target. Two
+  concurrent builds there (or two scratch copies sharing one
+  `codetracer-native-recorder`) interleave the emulator's generated C and the
+  link fails with `undefined reference to eqdestroy___…` / `hidden symbol …
+  isn't defined` in `libmcr_emulator.so`. In a scratch copy, point
+  `CARGO_TARGET_BASE` at a target of its own, give it its own native-recorder
+  copy, and delete that copy's `ct_emulator/build/` after such a failure.
+- `scripts/build-tui-grammars.sh` proves generation did not dirty a grammar
+  submodule with `git -C libs/<grammar> diff`. In a scratch copy whose
+  submodules carry no `.git`, that reads the PARENT checkout's diff, which
+  moves while a harness records its controls, and the build refuses. Copy a
+  finished `build/grammars/` (with `cp -a`, keeping mtimes) into the copy.
+- Recordings under `test-logs/tui-fixtures/` hold ABSOLUTE source paths
+  (`files/<abs path>`). Never rsync one checkout's fixtures over another's:
+  the two `files/` trees merge, the Files pane shows both roots, and
+  `test_plat50_clicks`' folder case fails. Record each checkout's own
+  (`test_fixture_corpus.nim`, `fixtures/window_capture_fixtures.nim`, and
+  `test_plat52_terminal_output.nim` for the terminal recordings; the GPUI
+  plan suites never record, they only look).
+- Mutation harnesses that edit SIBLING sources (plat49 CR1 `isonim-tui`,
+  plat50 IG1 and the shim arms `isonim-gpui`, plat68 `nim-termctl`,
+  `isonim-tui` and the specs checkout) must not share those siblings with a
+  concurrent build or harness: give each run its own copies.
+- A proc named like a field the type does not have calls ITSELF
+  (`proc beforeCount*(step: FlowLayoutStep): int = step.beforeCount + …`
+  in `ui/flow.nim` recursed until the JS stack overflowed). The Electron
+  capture gates catch it only as a page error (`expect(pageErrors)`).
+- GPUI's list-scrubber press order: a track press at the track's END lands
+  below the last drawn call row, so it cannot tell "the scrubber answers
+  first" from "the row answers first"; `test_plat51_gpui_plan`'s Call Trace
+  case also presses the track's middle, where a row lies under it.
+- tup compiles every Nim binary of `just build-once` into `/tmp/ct-nim-cache`
+  (fixed in `src/Tuprules.tup`), whatever `CT_NIM_CACHE_ROOT` says: two
+  scratch copies building at once interleave their objects and `ct` /
+  `db-backend-record` fail to link. Run their `build-once`s one at a time.
+- The desktop Event Log's whole-log size reaches the store as the engine's
+  `unfilteredTotal` (`applyEventLogResponse`); `total` is the searched /
+  kind-filtered count. A defect in `total` alone shows only in a searched view.
+
+## PLAT-70 Part I — table panes fit or scroll (Horizontal-Overflow.md §5.5)
+- ONE solver, `viewmodel/viewmodels/table_fit.nim` (`fitTable`): CSS's
+  automatic table layout over `FitColumn`s (min / preferred / flex /
+  neverCut / userUnits / fixed) → FIT (slack to flex), SHRINK (between floor
+  and preferred, pane filled) or SCROLL (floors, wider than the pane, the
+  §4 bar over `HorizontalView`). UNITS ARE THE CALLER'S: the terminal passes
+  cells, GPUI pixels (`gpuiCellUnits()` = one code-face cell, `unit=`), the
+  desktop characters (`EventLogVM.tableMetrics`). The declaration helpers
+  take `unit` for the cell-stated minimums.
+- The slack and the shrink are shared by Jefferson's divisor rule, one unit
+  at a time: a largest-remainder share is NOT monotone in the pane width
+  (Alabama paradox) and the sweep test caught it.
+- `HorizontalView.settle(fit)`: content = `contentUnits` only in SCROLL, so
+  the view returns to 0 when the bar goes. The TUI keeps each table pane's
+  view in its model (`EventLogModel.hview`, `CallTraceModel.hview`,
+  `VariablesModel.hview`); `runtime.syncTableViews` stores the settled view
+  every frame (painting is pure over a copy of the model), and
+  `tableViewOf` is the one geometry the wheel / bar / palette `view.*` read.
+- The TUI table painters lay the table out at its own width into a scratch
+  `StyledGrid` and `table_hscroll.copySlice` the `[leftCol, +width)` window —
+  header and rows through the same slice; cut cells are moved with
+  `shiftCuts` (a `…` off screen is not pressable).
+- Preferred widths are measured over the rows ON SCREEN (a windowed pane
+  cannot measure its population), so a vertical scroll can change the fit;
+  the Call Trace's composite floor is the deepest shown row's.
+- GPUI's call trace holds only its loaded section (15 rows in a plan): a
+  plan test that needs deep rows scrolls first (`wheel:calltrace:40`).
+- The desktop Event Log in SCROLL: explicit widths come from the view's
+  `columnWidthStyle` (reactive on `tableMetrics`); the header strip is a
+  sibling of the scrolling body, so `table_fit_dom.attachEventLogFit`
+  translates it by the body's `scrollLeft` (its own scrollLeft cannot move:
+  it is as wide as the table).
+
+## Terminal Output loading paths and mutation re-grades (2026-10-24)
+- The Terminal Output pane's LINES are loaded by window on every front-end
+  (Viewport-Driven-Loading Q3). Native hosts: `terminal_output_source.
+  showTerminalLines` -> `vm.setViewport`. Desktop: `ui/panel_host.nim`'s
+  `PaneMeasure.report` for `Content.TerminalOutput` -> `setViewport`.
+  `ui/terminal_output.nim`'s `onLoadedTerminal` / `syncTerminalOutputVM`
+  (`setEvents`) has NO dispatcher left, and `loadTerminalOutput` feeds only
+  whole-output consumers (reference tests). A mutation on either `setEvents`
+  survives; aim loading arms at the viewport reports.
+- The Electron capture scripts (`scripts/plat4[57]-capture-electron.sh`,
+  plat52's) start Xvfb at 2560x1440x24 -dpi 96 when DISPLAY is unset. A
+  scratch display at another size changes the committed geometry answers and
+  turns the parity controls red; start your own display with the same
+  geometry.
+- Every Electron gate runs `just test-e2e`, which type-checks ALL specs under
+  `src/tests/gui` first: one spec using a removed fixture option (e.g.
+  `noUserLayout`, retired by the first-run-layout default) fails every gate
+  with rc=2 and no result lines.
+- `test_capability_resolution.nim` reads the TUI CLI options from
+  `CT_SPECS_DIR`'s CodeTracer-TUI.md §6.2; a pm checkout whose spec publishes
+  options the code has not landed yet (Part H's `--scrollbar-*`) reddens it.
+  Grade with a spec checkout that matches the code under test.
+- TUI scrollbars (PLAT-70 Part H): every bar is drawn by
+  `app/views/scrollbar_styles.paintBar` (via `scrubber_track.paintVerticalScrubber`
+  / `paintHorizontalBar`), which reads the options, the pointer state and the
+  fade off the grid (`StyledGrid.scrollbars`, set by `shell.shellScreen` from
+  `ShellModel.scrollbars`) and RECORDS each bar (`StyledGrid.bars` ->
+  `ShellScreen.bars`). `runtime.routeScrollbars` hit-tests the pointer against
+  those records for every pane (hover, grab with offset, jump / page + hold
+  repeat, fade wake); a pane only contributes `runtime.applyBarTop`. The old
+  per-pane scrubber press/drag paths (listScrub, hbarDrag, scrubEventLog …) are
+  gone. `tickScrollbars` returns a RuntimeOutcome the host must apply (an
+  editor page is a source scroll).
+- A pty test that reads scrollbar glyphs must pin the look
+  (`--scrollbar-thickness=thin --scrollbar-track=on --scrollbar-fade=off`):
+  the defaults are a hairline thumb, no track, and bars that fade out after
+  1.2 s of quiet.
+- `CellStyle.faded` (0..1) is resolved in `palette.resolveRoles` like `dim`:
+  blended at 24 bits on colour rungs, hidden from 1/2 on 16 colours.
+- Scrollbar fade-in timing: the TUI loop steps a GONE bar only at its idle tick
+  (`IdlePollMs`, 200 ms apart), so `FadeState.wake` restarts the step clock
+  when the bar was not wanted; otherwise a pointer arriving just before the next
+  tick is credited with up to 200 ms and the 180 ms fade-in is instant. A unit
+  test that sets `steppedMs` by hand hides this; drive it through the runtime.
+- `modern-unicode` applies to the whole terminal UI: also the position sliders
+  (`scrubber_track.thumbCells(..., modern)`: right / upper eighths from Symbols
+  for Legacy Computing instead of a reversed cell).
+- Scratch-workspace copies of codetracer need a `.git` (gitfile) before
+  `just build-once`: `db-backend/build.rs` stamps replay-server's
+  `--build-revision` from git, and without it GPUI suites refuse the engine
+  ("revision handshake unsupported ... unknown unknown"); touch build.rs to
+  re-stamp. Never copy `src/build-debug` between trees (tup rejects the variant).
+- layout_settings now carries VALUED settings (`settingValues`, `parseValue`,
+  `assignValue`, `valueText`); `savePreference` hooks take (name, value: string).
+- Files pane menu (K19) in the native front-ends: the entries are
+  `FilesystemVM.fileTreeMenu`'s, converted by `headless_app/file_tree_menu`
+  (`fileTreeContextMenuOf`, `runFileTreeAction`); a `ContextMenuModel` holds
+  no closures, so a chosen entry re-asks the VM. The TUI's Edit-mode tree is
+  a FLAT list (`FileTreeModel.files`), backed for the menu by
+  `TuiApp.editFilesVM` (`projectTreeOf` over the walk, absolute paths) and
+  refreshed by `runtime.installProjectListing`. The disk half is
+  `viewmodel/host/native_file_tree.nim` (C only; freedesktop trash under
+  `$XDG_DATA_HOME/Trash` — tests MUST point XDG_DATA_HOME at a temp dir).
+  Name entry is the `:` command line with `create `/`rename `/`trash `
+  typed; those words are read only while the VM has a field/question open.
+  `editInteractive`'s listFiles serves the pre-claim listing once, then walks.
+- The command line hides the status notification while open: show a
+  question with `CommandLineModel.message` (drawn after the buffer; the next
+  edit clears it).
+- GPUI's Edit mode (an Edit window and a folder tab) draws the opened
+  folder's Files tree: `main.editFilesVMOf` (one `FilesystemVM` per folder,
+  `projectTreeOf` over `listProjectFiles`, wired by `wireNativeFileOperations`)
+  attached to the Files leaf by `attachEditFiles`; `windowFilesVM()` is the
+  tree the window's clicks and menu act on. The name field is drawn INLINE by
+  `leaves.renderFileTree` (`fileTreeLines`: field / reason / question lines),
+  its keys read by `file_tree_menu.applyFilesFieldKey` via `editOverlayKey`
+  at the top of `editKey`. Each file opened from the tree gets its own edit
+  arm (`gEditArms`, by absolute path).
+- An Edit window has no `gMenu`/`gOmnibar`: `drawTopBar` used to return at
+  once there, so no right-click menu was drawn and NO ROW WAS EVER WIRED for
+  clicks (`wireClicks` runs at its end). It now draws the popovers and wires.
+  `runContextAction` returns early without a session except for Files
+  entries; `onPaneClick` likewise lets only Files presses through.
+- `FilesystemVM.commitNameEdit(vm.nameEditDraft)` is an aliasing bug: the
+  proc clears the draft before sending `name`, and the parameter aliases the
+  freed buffer (measured: a Create of "new.py" asked for "tmp/g"). Pass a
+  `var` copy.
+- `adoptNewLeaves` re-derives leaves from `gShell.leavesFor` (vm nil for the
+  host-supplied panes); it now takes the ViewModel a host attached to the
+  same pane in `gLeafSet` (a folder tab's Files tree and VCS), which was
+  otherwise drawn only from the leaf's next redraw.
+- Running `source /tmp/.../devenv.sh` from the zsh Bash tool half-works: the
+  TUI build then fails on `tree_sitter/api.h`. Source captured envs under bash.
+- `ci/test/sdk-facade-boundary.sh` walks Nim imports WITHOUT evaluating `when`
+  branches, so a JS-only import inside `isonim/core` (once
+  `core/nondet.nim -> web/dom_api`) puts a renderer in the facade graph. IsoNim
+  now keeps the listener boundary generic over the event type and its
+  `tests/test_core_layering.py` holds core to core/std/nim_everywhere imports.
+- The same guard enumerates sources with `git ls-files` (+ `--others
+  --exclude-standard`): in a plain scratch copy of the tree it sees no files and
+  reports consumer-declared / plugin-io-edge-is-real / tui-layers violations.
+  `git init` the copy, exclude the submodule paths in `.git/info/exclude`, and
+  `git add -f` the few tracked-but-ignored .nim files so the listing matches.
+- `ci/test/keymap-clean-code.sh` (Base-Keymaps §8 / KL-10) holds the keymap's
+  clean-code rules mechanically: exactly one routine walks a binding trie
+  (`editing_keymap.resolveLayers`; `nodeAfter` is its walk primitive), only
+  `key_names` turns terminal key BYTES into names (a view matching `"\x1b[A"`
+  is a second decoder — pass names through `keyName`), `chordName`'s callers
+  are the declared decoders (gpui_keys, key_event_names, vim_import), and every
+  `viewmodel/keymap/*.nim` header needs `Owns:` and `Refuses to own:` lines.
+  Written chords in the base data (`"Alt+Shift+M"`) are exempt from the
+  modifier-order rule because `normalizeChord` orders them on load.
+- In the PLAT-68 harness, `B1` (base before user) and `G2` (scope before
+  source) are told apart by the first lines of test_plat68_layers' KL-11 case:
+  a SAME-table user/base pair (only B1 fails it) precedes the cross-scope pair.
+- DIFF-13 (KL-6) is `src/frontend/tui/tests/test_plat68_diff13.nim` over a population DERIVED from the four bases'
+  tables (`tui/tests/support/diff13_population.nim`, ~4.6k row tuples, ~4.5k probes); the key synthesiser for all three
+  devices is `tui/tests/support/key_devices.nim`. The desktop half is `src/tests/gui/tests/keymaps/plat68-diff13-desktop.spec.ts`
+  reading the committed `diff13/answers-<base>.json` (split per base: the repo refuses added files > 500 KB); regenerate
+  them with `CT_DIFF13_WRITE=1` and the suite filtered to "PLAT-68 DIFF-13: the population*::*". The desktop answers through
+  `window.__ctKeymapProbe(json)` (ui/key_router.probeKeys), GPUI through `--window-ops=probe:<key>[:mods]` (the key field is
+  percent-decoded: `%2C` `,`, `%3A` `:`, `%25` `%`), the terminal through `runtime.probeKey`.
+- A situation that opens something (palette, writable editor) must be reached with THAT base's own chord
+  (`openingChords` via `chordFor`): Ctrl+P / Ctrl+E are other operations under Emacs. GPUI cannot switch its base after
+  start and Vim/Kakoune bind no key to `editor.toggle-read-only`, so the writable editor under a modal base is unreachable
+  on GPUI (counted). The desktop's `desktopFacts` reports a writable editor as insert mode under every base (no modal
+  editing in Monaco) — counted as inexpressible on the desktop.
+- The desktop's session-container-<n> carries `data-scope-kind=tab` / `data-scope-id=tab:<n+1>` so its scope path has the
+  session tab like the terminal's and GPUI's (window / tab:tab:1 / pane:… ).
+- The macOS native menu (`index/menu.nim`, `when defined(ctmacos)`) is
+  compiled by NO Linux lane; `nim check -b:js <Tuprules NIM_COMMON_FLAGS>
+  -d:ctIndex -d:nodejs -d:ctmacos src/frontend/index.nim` type-checks it on
+  Linux. Its accelerators come from `viewmodel/keymap/menu_accelerators`
+  (a main-process router over the same keybindings.json), and
+  `test_plat68_menu_accelerators` source-checks the arm.
+- `index/keybindings.onKeybindingsText` is called with the file's text every
+  time it is sent to the renderer — the hook the macOS menu re-keys on.
+- The desktop shortcuts dialog has NO stylesheet (no `kb-*` rules anywhere);
+  its shortcut-reference section carries an inline max-height/overflow.
+- `shortcut_dialog_test`'s no-markup walk counts 3 checks per node per dialog
+  (text, tag, each attribute): a new dialog section moves ExpectedAssertions
+  by (nodes × checks × 4 presets), not only by the new case's checks.
+- Changing node-packages/yarn.lock: set the platform's hash in
+  `yarn-project.nix` to `sentinelHash`, `nix build .#packages.x86_64-linux.
+  node-modules-derivation`, paste the `got:` (it is the yarn-cache FOD), build
+  again. The yarn-cache build takes ~15 s here (680 MiB of packages).
+- Re-syncing a /tmp mirror (`sync.sh`) while `build-once.sh` runs in it
+  reverts the patched `src/Tuprules.tup`, and cargo then builds into the
+  SHARED `/tmp/codetracer/db_backend_target`. Never sync a mirror mid-build.
+- Keymap router pending prefixes expire LAZILY in `resolveLayers` (at the next
+  key). The terminal now also expires them on the idle clock
+  (`keymap_router.expirePending` / `runtime.tickPendingPrefix`, woken by
+  `idleWaitMs`), so Vim's `g…` leaves the status line at 1000 ms.
+  `pendingLabel` spells the prefix with `key_names.displaySequence`
+  (`Ctrl+K…`), not the router's canonical `Ctrl+k`.
+- Under CUA a writable editor already has `textInputFocus` true
+  (`context_keys`), and the resolver's text-entry shadow types a printable key
+  before any non-focused layer is asked: the letter rows' `editorReadOnly` and
+  `!textInputFocus` are defence in depth, not the only guard.
+- The terminal's find field (`rt.prompt`, kind != pkCommand) is on the scope
+  path only while the focus is on its owner (`rt.app.findOwner`: the editor's
+  element id or the pane `/` was typed in); elsewhere `Escape` is that pane's.
+- GPUI's EDIT window (`--edit`, `openArm`) delivers keys to the document's
+  own resolution (`edit_arm.applyGpuiKey` -> `doc.applyKey`), NOT through
+  `gRouter.route`; only `editKeyInert` asks the router (for the inert-key
+  status-bar note). A replay window's keys go through `routeWindowKey`.
+- GPUI's status bar is `drawFooter` (`data-ct-footer="status-bar"`); its
+  transient note is `gStatusNote` (`data-ct-footer-note`).
+- The shortcut reference's text is `keymap_router.referenceLines` of
+  `shortcutReference`: `[user:<table>]` / `[base:<table>]` headings in
+  resolution order, rows `  <key>  <operation> — <label>  (shadowed by your
+  row N)`. Terminal: `:keys reference` and `help.keyboard-shortcuts`
+  (`Ctrl+K Ctrl+S`) open it in the content overlay; GPUI the same op.
+- Test Results natively (PLAT-53): the native hosts install the DESKTOP's
+  `desktop_test_host` unchanged over `viewmodel/host/native_test_host.nim`'s
+  producers (`ct test run --events`, `ct record-test`, run via `/bin/sh -c
+  'exec "$0" "$@" >out 2>err'` with `poDaemon` = its own process group, so
+  `kill(-pid)` ends ct, ct-test and nargo together; polled, never awaited).
+  ONE `TestResultsVM` PER WINDOW (TUI `test_results_source.TestsSource` beside
+  the VCS source in both loops; GPUI `gTestsVM`, attached to the leaf like
+  `attachVcs`) — `headless_app.paneViewModel` stays nil for testResults. The
+  catalog rule is `viewmodels/test_catalog_answer` (desktop ns9_panes calls it).
+  A `⏵` record run calls `beginRun`, which CLEARS the last verdicts (desktop
+  behaviour): after record-and-open the headline is "N tests, not run yet".
+- `native_host` re-exports `headless_session`, whose `findCtBinary` collides
+  with native_host's own: callers that see both use `nativeCtBinary()`.
+- TUI: a MAXIMIZED pane gets no pane clicks — `routePaneClick` hit-tests the
+  binding's un-maximized geometry (`paintedAreaOf` knows the maximized one).
+  Widen a pane in a pty test by dragging its divider, and wait for the
+  status line's `setDivider(...) applied` before reading positions.
+- Desktop row messages repeat the nargo failure text twice (the fold appends
+  both `output` and `failure.output`); every front-end shows the same.
+
+## Terminal capability profile and the one glyph table (PLAT-71)
+- `app/theme/capabilities.resolveCapabilities(env, flags, probe, prefs,
+  session, cache)` is the WHOLE profile, pure, with §5.2's ranks: `session` is
+  rank 1 (`:set`), `flags.choices` rank 2, `env.ct*` (`CODETRACER_TUI_*`) rank
+  3, `prefs.scoped` (`[terminal "<glob>"]`) rank 4, `prefs.global` rank 5.
+  `auto` SAYS NOTHING at a rank (falls through) except for `modern-unicode`,
+  whose `auto` is a value. The cache beats only conservative env guesses.
+- `ChromeTier` is ordered RICHEST first (`tierExtended` is the zero value) so
+  a ShellModel/StyledGrid built without a profile paints the old Unicode screen.
+- Views ask `views/glyph_table` for a ROLE: `g.glyphText(grX)` (or
+  `g.paintGlyph`) on a grid; helpers that build rows without a grid take a
+  `glyphs = DefaultGlyphs` parameter and the painter passes `g.glyphs`. The
+  published `*Glyph` constants are `canonical(role)` (the extended column) for
+  tests. `tests/test_plat71_glyph_table.nim`'s TA-6 gate fails on any table
+  code point in `app/views/*.nim` code outside glyph_table / scrollbar_styles /
+  borders.
+- `degradation.degradeRow` no longer rewrites TEXT on the ASCII tier — content
+  (a docstring's em dash) is drawn verbatim. Status-line notes, which are
+  CodeTracer's own prose, go through `glyph_table.asciiProse` on ASCII.
+- The shared call-trace row carries its toggle as the desktop's glyphs
+  (`calltrace_vm.CallToggleGlyphs`); the TUI painter maps `csToggle` segments
+  to `grCallExpanded/Collapsed/Leaf`.
+- `StyledGrid.ambiguous` and `isonim_tui.newCompositor(…, ambiguous)` must
+  agree, or rows shift under an ambiguous-wide profile. `cellWidthOf` and
+  friends count zero-width runes as 0 (the compositor draws no cell for them).
+  `cellWidthOf` has a 1-arg overload because `measureLines` takes it as a value.
+- The start-up round (`host/terminal_probe.queriesFor`) now always asks
+  XTVERSION, DA2, DECRQM 2026/2027 and the six-glyph CPR width probe before the
+  DA1 fence; `probeWanted` is false only for a dumb terminal or the probe off.
+  CPR tokens are replies only while `probe.cprOpen` (the F3 rule); use
+  `isReplyTokenFor(probe, token)`, not `isReplyToken`, for late replies.
+- tmux facts come from ONE `tmux display -p` with every format (`TmuxFormats`),
+  spawned before the round's write and collected after the wait. tmux prints
+  boolean options as 0/1 (`#{mouse}` = "0"), not on/off.
+- TermAssert (pinned) blocks `TMUX` by default; a case that SETS it must not
+  also `envRemove` it. A real-tmux pty case is best done as plat46 does: the
+  tmux CLIENT is the TermAssert child; `tmux pipe-pane -o 'cat > f'` inside the
+  pane records the bytes the inner program writes.
+- `nim-termctl.setExtraRestore(bytes)` registers the app's own mode resets
+  (2027, 2026, 1016, 1003) with the async-signal-safe restore; the driver's
+  `restoreUnion` is that buffer and `stop` writes the same bytes.
+- Per-terminal cache: `<state root>/terminal-profiles.json` (state root =
+  `CODETRACER_TUI_LAYOUT_DIR` if set). Pty suites must give each case its own
+  state dir or one case's cache answers the next.
+- Agent Activity on the native front-ends: the desktop's panel words and
+  decisions live in `viewmodels/agent_activity_text.nim` (the desktop view
+  re-exports it); `agent_activity_feed.agentFeed` walks `AgentActivityVM` in
+  the desktop's order and yields one row per thing the desktop draws, with the
+  press/button actions (`runFeedAction`). Native painters only wrap
+  (`wrapFeed`, a measure proc: cells or Grotesk pixels) and place.
+  `FeedScroll` keeps the reader on a row KEY across re-derived rows.
+- The headless replay session owns no `AgentActivityVM`; the native host
+  (`viewmodel/host/native_agent_host`) does, over the SESSION'S store, so a
+  live agent's `agentSessions` entry is what the session tab's indicator
+  reads. The TUI keeps one host per `TuiSession`; GPUI one per
+  `HeadlessDebugSession` (keyed by address) and attaches its VM to the leaf.
+- A live native agent is `nim-agents`' synchronous ACP client on a worker
+  thread (`agent_live_worker`); reports cross as JSON lines over a Channel,
+  events in `AgentEvent.toJson` form, applied by `agent_service.applyEvents`.
+  The pane's "working" is the session's lifecycle only (`agentSessionRunning`)
+  — an agent's own `status: completed` update ends it before the turn returns.
+- The agent command is `codex-acp` (the desktop's), overridable by
+  `CODETRACER_AGENT_ACP_COMMAND` / `CODETRACER_AGENT_ACP_ARGS`. The prompt is
+  typed in the omnibox as `/ai <text>` (the desktop's agent query).
+- `acp-replay-agent.js` (AA fixtures) also answers `session/new` and streams
+  `session/prompt` updates `--live-delay-ms` apart: the live-session double.
+- Session tabs are drawn only from TWO sessions on (TUI and GPUI), so a test
+  of the tab's agent indicator must open a second tab first.
+- TUI: a press that opens a recording runs `recordingOpener` (a new tab, shown)
+  INSIDE `TuiSession.agentPress`; main's closure re-refreshes the now-shown
+  session's pane, or the old session's rows overwrite it.
+- `replay-server --build-revision` must match `replaySourceFingerprint` of the
+  checkout (src/db-backend + src/libs + libs file bytes); a binary built from
+  an older tree is refused by the GPUI suites even when db-backend is
+  unchanged (libs/jsbound moves often).
+
+## Grapheme continuation, width fences, cut kinds, stops (PLAT-70 I / PLAT-71 residuals)
+
+- A zero-width rune (combining mark, ZWJ, VS16) is carried WITH the cell before
+  it twice: `styled_row.paint` appends it to the previous StyledCell's rune
+  string, and isonim-tui's `rawCellsForEntry` puts it in `Cell.extra`. Every
+  emitter must write `cellText(cell)`, not `cell.rune` — `ssh_tuning.emitRuns`,
+  `terminal_driver`'s plain frame, `hyperlinks.frameBytesWithHyperlinks` and
+  isonim-tui's drivers/snapshots all do. Controls (TAB) are never attached.
+- Width fences (`CSI <col> G` after a cell) are decided by
+  `ssh_tuning.widthFencesOf(caps)` from the width probe's UNKNOWNS; a terminal
+  that answered nothing (the silent persona, most unit tests' caps) fences
+  every EAW-A / Unicode-13 / text-pictograph content cell. Box drawing and
+  block elements (U+2500–U+259F) never fence, so borders cost no bytes.
+- §9.2's cut position is `table_overflow.fitCellAs(full, cells, kind)` with
+  `cutKindOf(pane, column)`; a middle cut records `FittedCell.midMarker` so
+  `markCut` puts the ASCII tier's `~` where the `…` is. The desktop draws the
+  middle cut by rewriting the cell's TEXT NODE (`table_overflow_dom.
+  middleCutPass`, `data-ct-mid-text` / `data-ct-mid-of`), because CSS
+  `text-overflow` cuts only the end.
+- SIGTSTP: `nim-termctl.onSuspend` restores, raises the stop with SIGTSTP
+  unblocked inside the handler, and on SIGCONT re-takes raw mode / alt screen /
+  modes, writes `setExtraResume` bytes and pokes the SIGWINCH pipe;
+  `terminal_driver.nextEvent` sees `takeResumed()` and returns a resize event
+  after resetting the emitter (a whole frame). Under TermAssert the child is a
+  session leader in an ORPHANED process group, so the kernel discards the stop
+  and the continue happens at once — the pty test sees restore then resume;
+  nim-termctl's own suite uses `setpgid(0,0)` to get a real stop.
+- The desktop command palette's search splits on spaces (the first token is a
+  command name, the rest its argument), so a spec searches `:ScrollRight`, not
+  `:View: Scroll Right`. GPUI's palette commands are reached with Ctrl+P then
+  `:` (`type::view: scroll right`), not Ctrl+Shift+P.
+- docs/book-isonim tests need a hand-written `nim.cfg` (paths to isonim-docs,
+  codetracer-design-system/nim, isonim, vendor chronicles …; see its README);
+  its nav test counts every content page (`entries.len`), so a new page bumps it.
+- PLAT-70 Part C (incremental search): the ONE matcher is
+  `viewmodel/editor/find_match.matchesOf` (literal, case + whole word; the
+  editor core may not import nim-regex). The pattern AND its options live in
+  `EditorState.search` (`options: MatchOptions`); `find_vm.FindVM` is the
+  session (origin, matches, current) and holds no pattern after close
+  (FS-2). The terminal's find field is the status-line prompt
+  (`pkSearchForward/Backward`); each prompt edit calls `findFieldEdited`.
+  GPUI's widget is drawn inside `drawEditorBody` (`data-ct-find-widget`).
+- Base macro rows: a base's `KeymapDefinition.macros` (`BaseMacro`) are
+  installed into `EditorState.macros` by `editing_core.installBaseDefaults`
+  (init + `switchModel`); a row binds `replay-macro(base:<id>)`. Vim's `*`
+  family is `vim_keymap.VimMacros`.
+- Vim/Kakoune `/` and `?` in the EDITOR now fall through to the navigation
+  table's `find.open` (the editor table no longer binds the bare
+  `search-forward` / `search-backward`, which are filed).
+- A committed search under a modal base is SEARCH browsing:
+  `runtime.navMode` maps `mmSearch`+`spBrowsing` to `nmSearch` (so `n` walks
+  until `Escape`); GPUI mirrors it with `gFindBrowsing`.
+- Letters typed into a find field resolve as characters even where the
+  global table binds them (`n`, `l`): the router gives the focused input's
+  text priority.
+- Build Output (PLAT-56): a `BuildOutputLine` is `text` + styled `runs`
+  (`TermAttrs`), no HTML; the reader is `build_output_model.BuildLineReader`,
+  owned by each `BuildVM` (`beginBuild` / `feedOutput` / `finishBuild`), and
+  its `fed` result is the Problems row — the native `build_problems.follow`
+  and the desktop's `appendBuild` read each line ONCE through it. The native
+  runner reads stdout and stderr on two pipes (`BuildSession.stderrFlags`)
+  and keeps trailing spaces (gcc's caret rule pads with them).
+- `parseBuildLocation` reads `alert(1)` as a Nim `path(line)` location: a test
+  string with parentheses and digits becomes a located error line.
+- The desktop `#build` panel's generic DOM view needs `mixin createElement,
+  setStyle, …` in generic procs: under JS the module imports `web_renderer`,
+  and the Mock renderer's overloads are not found without the mixin.
+- The GPUI Edit window (`--edit`, no menu) drew no footer until PLAT-56; it
+  now draws `drawFooter` in `drawTopBar`'s K19 branch (the build indicator).
+- On the desktop, after a failed build the bottom OVERLAY (BUILD/PROBLEMS)
+  covers the dock: Playwright presses must Escape it first; clicking a docked
+  footer tab again CLOSES it (`openBottomPanel` toggles).
+- Agent Activity's "add context" menu natively (DeepReview-GUI §2.2.7): the
+  menu is a `pane_clicks.ContextMenuModel` (`agentAddContextMenu`,
+  `cmkAgentAddContext`) opened by a LEFT press on the prompt's `[+]` / `+`, so
+  it rides the right-click menu machinery of both front-ends (TUI
+  `runContextAction`, GPUI `runContextAction`; the GPUI scripted op `ctx:<label>`
+  chooses an entry). The file items open the omnibox on `:attach ` /
+  `:attach-recording ` (`omnibar_vm.omAttach*`, mapped to `omCommand` on the
+  desktop by `desktopKindOf`, so `ui/command_interpreter`'s case must list
+  them). Attachments are `contextPaths`, shown as `frContextPath` rows at the
+  END of the feed; the prompt header is `agent_prompt_context.contextPromptText`,
+  which the desktop's main process (`acp_ipc`) uses too.
+- The GPUI window's status line is its footer note (`gStatusNote`,
+  `sayStatus`, `data-ct-footer-note`); before it, GPUI only had the gesture
+  trace for host messages.
+- A native recording press reports through `native_agent_host.message`
+  (`recordingOpenedNote`). `[Open in new tab]` opens a new session tab;
+  `[Open recording]` replaces the current tab's session (the host decides,
+  `agentRecordingPlacement`, from the front-end's `currentTabReplaceable`).
+  A replacement MOVES the Agent Activity host onto the new session
+  (`rehome`, which moves the live store entry too): in the terminal
+  `recordingOpener`'s replace path, in GPUI `replaceSessionTab` (Test
+  Results' replacement goes through both as well). Because of that,
+  `tui_session.agentPress` holds the host in a local: after a press that
+  replaced the session, `s.agent` is nil.
+- Desktop renderer -> main IPC: a Nim `string` (or a `seq[string]` passed
+  through `.toJs`) crosses as an ARRAY OF BYTE VALUES, not a JS string; the
+  main process's `$cstring` then throws `charCodeAt is not a function` inside
+  an async handler and the request silently does nothing. Convert to
+  `cstring` before `toJs` (the Agent Activity prompt's `contextPaths` never
+  reached the agent until 2026-10-28 because of this).
+- The desktop's Agent Activity `+` menu asks its host what *Editor
+  selection* would attach as it draws (`AgentActivityCallbacks.
+  editorSelectionContext`); "" draws it disabled with the reason. Monaco
+  ranges -> lines: `agent_prompt_context.selectedLinesOf` (a range ending at
+  column 1 of a later line does not cover that line, as the native cells).
+- The GPUI pane tab strips are painted by `main.drawNode`, NOT from
+  `chrome.tabStyle` (the session tabs, dock slots and ghost use tabStyle).
+  The selected tab's own ground is on its label ROW (`data-ct-tab-ground`);
+  the tab element itself stays the pane's ground so the bridge joins the
+  body. The real-window check is `test_plat47_gpui_window` B2 over the plat47
+  record (`labelGround`).
+- A replay-server built from a plain COPY of the tree reports provenance
+  `unknown` and real-engine plan suites refuse it (`replay_prerequisite`).
+  Make the copy a git repo holding exactly the checkout's regular tracked
+  files under src/db-backend and libs: the fingerprint is content-based
+  (path + blob hash), so it then matches the checkout's.
+- `ci/lib/test-lane-files.sh` `test_lane_run_library_path`: the GPUI runtime
+  libraries (libxcb, libxkbcommon...) the shim needs are NOT on the dev
+  shell's LD_LIBRARY_PATH; a hand-run GPUI suite must prepend
+  `$CODETRACER_GPUI_RUNTIME_LIB_PATH` to its RUN (the lane runner does).
+- `acp-replay-agent.js --prompt-log=<path>` appends each `session/prompt`'s
+  content blocks as a JSON line: assert what the agent RECEIVED.
+- Building in a fresh worktree: the submodules are not checked out (`git
+  submodule update --init -- libs`, then `git submodule foreach 'git checkout
+  -f HEAD'` for any left empty); a `reprobuild.paths` file (gitignored) lists
+  extra `--path`s that win over the workspace siblings (nim-everywhere,
+  nim-agents, nim-acp at their pins). The tup build's nimcache is hard-wired to
+  /tmp/ct-nim-cache, shared by every checkout on the host.
+
+## The Requests pane natively (PLAT-58, 2026-10-26)
+- The session's `RequestPanelVM` (built by `initializePanelViewModels`, the
+  desktop's own) is the native panes' model: `headless_app.paneViewModel`
+  answers it for `paneRequests`. Everything a painter decides is in
+  `request_panel_vm`: `displayRows` (cells + `RequestTone` / `MethodTone`),
+  `pressRow` (the VM counts the double press — neither the terminal nor the
+  GPUI shim reports a click count; `RequestDoubleClickMs`), `activate`
+  (`RequestActivation`: raSeek / raRefused / raExternal), `rowMenu` /
+  `runRowMenu`, `moveSelection`, `pollTail` (the 500 ms cadence, moved from
+  `ui/request_panel.nim`), `takeReveal` (once), `requestsCommandOf`
+  (`:requests`). The native host is `viewmodel/host/native_requests_host`;
+  the menus as `ContextMenuModel` are `headless_app/request_menu`.
+- A completed recording's rows are WINDOWED: `filteredRequests` is the held
+  window (`windowRows`), `windowStart` its first position, `matchingCount`
+  the scroll range. A filter change sends `ct/load-request-spans` from an
+  effect at once, but the stdio transport's callbacks are DEFERRED: read the
+  pane only after `drainPlatformCallbacks()` (both native hosts do it before
+  they read), or the rows are the previous filter's.
+- `ct/seek-to-geid` used to REFUSE every materialized trace ("restore-at is
+  only available for live replay sessions"), so the desktop's double click
+  on a request moved nothing on a completed recording. A request's
+  `startGeid` is its span's `start_step`; for a materialized trace the
+  handler now `jump_to`s that step (`dap_handler.seek_to_geid`). A DB
+  trace's position is its step (`getCurrentRRTicks`); `getCurrentGeid` is
+  none there.
+- `ReplayDataStore.requestRequestSpansSince` applied the transport's whole
+  answer; the stdio transport resolves with the DAP response ENVELOPE, which
+  `applyRequestSpanDelta` ignores — a native live tail never showed a row.
+  It now applies `responseBody(response)`.
+- The demo container (`src/tools/demo_request_session.writeDemoRequestSession`,
+  RS-M4) is replayable and is the fixture: request `i` (0-based) has span id
+  `i + 2` and handler entry step `6 + 7 i` (line 13 of demo_server.py); its
+  `--through=` stages grow a container under a running engine (the tail).
+- TUI focus: the ring (`motions.newPaneFocus`) now takes the DOCKED-OPEN pane
+  after the tree's regions; a press on the Requests pane sets
+  `layoutBinding.focus`. `showPane` on an already-open docked pane focuses it
+  instead of starting a reveal (a reveal left `ikRevealingDock` live and the
+  next Esc cancelled it instead of reaching the pane). GPUI's
+  `showPaneFromMenu` has the same rule.
+- GPUI: an `applyGestureCommand` does not redraw — call `drawArrangement`
+  after it. The first session's reveal runs in the root builder after the
+  arrangement is drawn (`paintWindowChrome`), so `--report-window-plan` sees
+  the pane. `--window-ops` requests:* (show, row/double/menu by request id,
+  method, status, field, handler, key, wheel, track).
+- Omniboxes trim their line, so `:requests ` cannot carry "clear": the bare
+  `:requests` clears an active search and opens the field otherwise.
+- A column-alignment table is only enforced where it is READ: the terminal
+  Requests painter used `RightAligned[i]` for the header and literal `true`
+  for the rows, so mutating the table moved only a header that fills its
+  column anyway (arm T1 survived). Every cell now reads the table.
+- A docked list pane whose rows sit below the fold needs a wheel before a
+  colour check can see every bucket: the GPUI suite's 5xx row was never
+  drawn, so G1 survived until the suite checked every row after a wheel.
+- Real-stack suites now refuse a `replay-server` whose `--build-revision`
+  does not match the checkout's source fingerprint
+  (`common/replay_server_path`). A binary copied out of the SHARED
+  `/tmp/codetracer/db_backend_target` can carry `unknown` or another tree's
+  revision; build it in a private `CARGO_TARGET_DIR` from the tree under test.
+- Docked panes take keys two ways now: a press records `dockKeys`
+  (Problems, PLAT-55) and the focus ring includes the open dock (Requests,
+  PLAT-58, which also lets `:requests` focus an already-open dock).
+
+- Lane user-state guard (2026-10-28): ci/lib/run-nim-test-lane.sh snapshots the
+  user's ~/.local/state/codetracer, ~/.config/codetracer and trace_index.db
+  around EVERY file's run (not only the lane), fails that file with "TOUCHED THE
+  USER'S STATE", and gives each file XDG_DATA_HOME/XDG_CONFIG_HOME of its own
+  beside CODETRACER_HOME. The snapshot is host-global: a CodeTracer process
+  outside the lane (the user's TUI in tmux, another agent's manual run) trips
+  it too — strace -f on the lane's RUN steps showed no lane process writing
+  there (2026-10-28). ci/test/lane-user-state-guard-test.sh drives the runner
+  with a `nim` stub in a scratch HOME.
+- GPUI Edit window: keys go to the document (editKey); only the operations in
+  EditWindowRoutedOperations (Find in Files') and keys while the omnibox is open
+  go through the window router. gMenu/gOmnibar are created for the Edit window
+  too since 2026-10-28; before that both were nil there (openOmnibar segfaulted).
+- Welcome Screen recent panels scroll to the focused row
+  (native_welcome.shownFrom, used by GPUI welcome_leaf and TUI welcome_view);
+  GPUI rows carry data-ct-welcome-index (the model's order, the keys' order).
+- test_plat29_highlight_worker measures render-thread CPU (CLOCK_THREAD_CPUTIME_ID)
+  and voluntary context switches (RUSAGE_THREAD), not a wall-clock band: wall
+  time under host load is preemption, not waiting.
+- Test Results' palette pair (Test-Results-Pane.md §9.3): **Tests: Run** / **Tests: Run in Current Tab** call `TestResultsVM.runTestIn(testId, policy)`, which HOLDS the command's destination in the plain fields `hasCommandPolicy`/`commandPolicy` for the one synchronous call into the host's record-and-open action; `effectiveOpenPolicy()` (no-arg) answers it while held, so `desktop_test_host.dispatchRecordRun` captures it exactly as it captures a press's (setting XOR Ctrl). A host that refuses synchronously settles the run inside the call; `runTestIn` then returns the pane's last diagnostic instead of "".
+- The selection the pair acts on is `TestResultsVM.selectedTestId`. The native front-ends keep their own row index (TUI `rt.app.tests.selected`, GPUI `gTests.selected`) and write the VM's selection only when a palette command runs (the TUI passes the id in `PaneClickRequest.path` of `pcTestsRunIn`); the desktop writes it on a row click (the ⟳/⏵ clicks bubble to the row).
+- `Ctrl+Enter` → `list.activate-redirected` is a CUA-only `ListTable` row (`listFocus && frontEnd != web`, because the web studio's `Ctrl+Enter` is Run). It is in CUA-Keymap.md §3.6, so the oracle (`test_plat68_cua_oracle`, `ExpectedCuaTuples`) and `test_plat68_base_keymaps`' count move with it. The terminal only sees it with Kitty/modifyOtherKeys (`CSI 13;5u`); a legacy terminal delivers plain Enter.
+- The GPUI window's omnibox listed the `replayOpenIn:` commands but `runGpuiMenuAction` had no branch for them (they fell through to `gpuiMenuRouteOf` and were refused). `gpuiTestsCommand` (forward-declared before `runGpuiMenuAction`, defined after `placeGpuiTestRecording` so it can call `syncTestsTabs`) now handles both `replayOpenIn:` and `runTestIn:`.
+- The desktop editor's context-menu "Re-record and replay this test" now calls `editor.startEditorTestAt(line)` — the inline Run-test widget's own handler, through `editorTestRunHook` into the desktop host — instead of `renderer.runTests` directly (which loaded the recording into the edit session and began no pane run).
+- Local desktop build hazard: tup's style rules need `stylus` on PATH (`node_modules/.bin`); the f53 env did not put it there, so a stylus edit made tup fail with "stylus: command not found" and leave the old CSS.
+- Find in Files' field (PLAT-70 Part D): on the terminal and GPUI it is the
+  omnibar's `:grep` line, opened with `OmnibarVM.openSelected(":grep ", seed)`
+  so the seed is selected (`anchor`..`cursor`); the seed rule is
+  `search_results_vm.findInFilesSeed` (one-line selection, else the pane's
+  query). The TUI app layer reaches the VM only through the host closure
+  `app.openFindInFilesField` (search_results_vm is not in the SDK facade).
+  The desktop's panel acts on `SearchResultsVM.fieldRequest` (numbered,
+  consumed once via `fieldHandled`).
+- Input framer: `ESC ESC` delivers one Esc and HOLDS the second ESC as
+  `paired`; it begins a following CSI/SS3 (`ESC ESC O P` = Esc, F1) and is
+  dropped silently after `EscDelayMs` if nothing continues it. Before this,
+  an Esc the loop had not consumed when F1 arrived made `O`,`P` typed text
+  (the keymap selector's DIFF-12 flake under load).
+- GPUI `--window-ops`: every event verb must also be listed in the command-line parser's whitelist (gpui/main.nim, near "unknown event"), or the run exits with a usage error before any op runs — a new `of "<verb>":` arm alone is not enough.
+- GPUI Edit window: `EditWindowRoutedOperations` also carries build.run, problems.next/previous and the palette-opening operations (Build-Output-Pane.md §3.11); its omnibox is the full top bar's (the window has a gMenu since 2026-10-28).
+- Edit-mode surfaces mark the caret line `eptInspection` (GPUI): a gutter mark in the pointer band must test `!= eptExecution`, not `== eptNone`, to show on the caret's line.
+- Desktop builds: the Electron main process runs them (`index/build_runner`, `CODETRACER::build-start` / `build-cancel`); `build-code` carries `runner: true` for these, and `onBuildCode` then leaves the mode alone (the legacy record-and-debug `build-code` without it still switches modes). Tests that feed `build-*` by hand (PLAT-55/56 captures) take the legacy path.
+- TUI auto-reveal: `layoutBinding.interaction.pane` is a variant field — read it only after checking `interaction.kind == ikRevealingDock` or the binary dies with FieldDefect.
+- A bare createAppViewModel has NO StopLoader: the per-stop loads (ct/load-locals
+  as the loader issues them, ct/load-flow, low-level code) come from the SDK's
+  StopLoader that DebuggerSession.markReady attaches. A ViewModel scenario that
+  expects ct/load-flow on a move must build the app as markReady does
+  (src/tests/gui/tests/scenarios/stop_loading_app.nim, createStopLoadingApp).
+- The desktop REQUESTS panel's self-reveal hangs on the store's recordedTotal,
+  set by the first {limit: 1} ct/load-request-spans answer. That poll runs before
+  the trace is ready; latching snapshotAnswered on a refused answer stopped the
+  poll for good and the panel never revealed (fixed: latch only on an answer
+  that carries `total`). Clicking a docked auto-hide panel's strip label TOGGLES
+  it closed, so Electron specs must not click REQUESTS after the reveal.

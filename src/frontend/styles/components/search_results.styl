@@ -146,7 +146,8 @@ FIF_BADGE_GAP = 0.5rem
   width: -webkit-fill-available
   width: stretch
   padding-left: "calc(%s + %s + %s - %s)" % (FIF_BADGE_LEFT FIF_BADGE_WIDTH FIF_BADGE_GAP CONTROL_BORDER_WIDTH) !important
-  padding-right: 1.75rem !important
+  // The clear button and the three option toggles (`.fif-option`).
+  padding-right: 6.25rem !important
 
   &::placeholder
     color: colors-ui-text-primary-body-subtle
@@ -174,6 +175,46 @@ FIF_BADGE_GAP = 0.5rem
   &:hover
     background-color: colors-ui-surface-primary-secondary-hover
     color: colors-ui-text-primary-body
+
+// The pane's options, inside the field at its right edge, left of the clear
+// button: Match Case (`Aa`), Match Whole Word (`ab`) and Use Regular
+// Expression (`.*`), as VS Code's search view draws them. `fif-option-on`
+// while the option is set. Their wrapper (`.fif-options`) is not positioned,
+// so each is placed against the bar.
+.fif-option
+  position: absolute
+  top: 50%
+  transform: translateY(-50%)
+  display: flex
+  align-items: center
+  justify-content: center
+  width: 1.375rem
+  height: 1.25rem
+  border-radius: 0.25rem
+  font-size: 0.75rem
+  line-height: 1
+  color: colors-ui-text-primary-body-subtle
+  cursor: pointer
+  user-select: none
+  border: 1px solid transparent
+
+  &:hover
+    background-color: colors-ui-surface-primary-secondary-hover
+    color: colors-ui-text-primary-body
+
+.fif-option-case
+  right: 4.75rem
+
+.fif-option-word
+  right: 3.25rem
+
+.fif-option-regex
+  right: 1.75rem
+
+.fif-option-on
+  color: colors-ui-text-primary-body
+  background-color: colors-ui-surface-primary-secondary-hover
+  border-color: colors-ui-border-secondary
 
 // ---------------------------------------------------------------------------
 // Body: scrollable results area
@@ -305,6 +346,10 @@ FIF_BADGE_GAP = 0.5rem
 
   &:hover
     background-color: colors-ui-surface-primary-secondary-hover
+
+// The selected result (a click, `F4` / `:cnext`).
+.fif-match-row-selected
+  background-color: colors-ui-surface-primary-secondary-hover
 
 .fif-line-number
   min-width: 36px

@@ -32,7 +32,7 @@
 ## - ``clearLineSteps``       — drop every row (used during a session
 ##                              switch / fresh ``loadStepLinesFor``).
 ## - ``setCurrentLocation``   — refresh the active-row reference.
-## - ``setPanelHeight``       — cache the latest measured row capacity.
+## - ``setViewport``          — the rows the pane shows (its viewport).
 ## - ``loadStepLinesFor``     — emit a ``ct/load-step-lines`` request
 ##                              for the given location.  In production
 ##                              the legacy ``FlowService.loadStepLines``
@@ -50,19 +50,16 @@
 ## ``aStepList`` has no binding in ``config/default_config.yaml``, the
 ## pane is absent from ``config/default_layout.json`` (which is also
 ## what the web bundle loads), and ``Content.StepList`` is listed in
-## ``editModeHiddenContentIds()``.  Even when opened programmatically it
-## renders no rows: ``lineSteps`` is only ever filled by
-## ``ui/step_list.nim``'s ``onUpdatedLoadStepLines``, whose producer —
-## ``dap_handler.rs::load_step_lines`` — is a stub that builds
-## ``vec![]`` and has its ``send_event`` commented out, while the
-## ``ct/load-step-lines`` DAP command has no arm at all.
+## ``editModeHiddenContentIds()``.
 ##
-## The ``jumpToStepLine`` fix below is therefore a latent-defect fix,
-## not a live one.  It is still worth having — the command it used to
-## send could never have worked — but do not un-comment the menu entry
-## to "make it reachable" until ``load_step_lines`` actually returns
-## rows, or the pane will open empty and the gesture will still be
-## untestable.
+## The engine answers ``ct/load-step-lines`` (``dap_handler.rs::
+## load_step_lines`` over ``StepLinesLoader``, materialized traces only),
+## and ``loadStepLinesFor`` applies the answer itself, so a front-end that
+## drives this VM gets rows. The desktop component (``ui/step_list.nim``)
+## still sends the legacy ``CODETRACER::load-step-lines`` IPC message,
+## which nothing in the index process handles; making the pane reachable
+## on the desktop is a separate decision (no spec lists the pane among the
+## Core Panes) and would route that component through this VM first.
 ##
 ## The VM consumes the same ``LoadStepLinesUpdate`` semantics as the
 ## legacy component: ``onUpdatedLoadStepLines`` would call
@@ -73,23 +70,20 @@
 
 import std/[algorithm, json]
 
-import isonim/core/[signals, computation, owner]
+import isonim/core/[signals, computation, owner, batch, async_compat]
 import isonim/viewmodel
 
 import ../backend/backend_service
 import ../store/[replay_data_store, types]
+import ../viewport
+export viewport
 
 const DEFAULT_STEP_LIST_PANEL_HEIGHT* = 16
-  ## Conservative default for the row capacity used by
-  ## ``loadStepLinesFor`` when the host has not yet measured the GL
-  ## container.  The legacy code defaulted to ``offsetHeight / 26``;
-  ## ~16 rows roughly matches a half-screen panel and avoids issuing a
-  ## zero-row request.
-  ##
-  ## Exported because the HOST needs the same number: `ui/step_list.nim`
-  ## measures the GL container's `offsetHeight`, and when the panel is not in
-  ## the layout at all there is nothing to measure and this is the answer. Two
-  ## copies of "the default row capacity" would be free to disagree.
+  ## The row capacity the DOM view binding reports when it cannot measure the
+  ## GL container (the panel is not in the layout). The fallback is the
+  ## binding's to apply, not this ViewModel's: an unmeasured viewport issues
+  ## no request (Viewport-Driven-Loading V2). ~16 rows roughly matches a
+  ## half-screen panel.
 
 type
   StepListVM* = ref object of ViewModel
@@ -99,6 +93,9 @@ type
     # -- Mutable state --
     lineSteps*: Signal[seq[StepLine]]
     currentLocation*: Signal[StepLineLocation]
+    viewport*: Signal[Viewport]
+      ## What the view was given (`setViewport`). `panelHeight` is its rows,
+      ## kept for the collaboration registry and the view.
     panelHeight*: Signal[int]
 
     # -- Derived state --
@@ -121,6 +118,43 @@ proc isCurrentRow*(line: StepLine; loc: StepLineLocation): bool =
   line.location.rrTicks == loc.rrTicks and
     line.location.path == loc.path and
     line.location.line == loc.line
+
+proc stepLinesOf(body: JsonNode): seq[StepLine] =
+  ## The rows of a ``ct/load-step-lines`` answer — the engine's
+  ## ``LoadStepLinesUpdate`` (``db-backend/src/task.rs``): ``results`` is a
+  ## list of ``LineStep``, whose ``kind`` is ``LineStepKind``'s ordinal
+  ## (Line 0 / Call 1 / Return 2, ``serde_repr``) and whose ``values`` are
+  ## ``{expression, value}`` pairs, rendered here with the call-trace
+  ## argument budget (``callArgTextOf``) so the view gets text.
+  if body.isNil or body.kind != JObject:
+    return
+  let results = body.getOrDefault("results")
+  if results.isNil or results.kind != JArray:
+    return
+  for r in results:
+    if r.kind != JObject:
+      continue
+    let kindOrd = r.getOrDefault("kind").getInt(0)
+    let loc = r.getOrDefault("location")
+    var line = StepLine(
+      kind: (if kindOrd in ord(low(StepLineKind))..ord(high(StepLineKind)):
+               StepLineKind(kindOrd)
+             else: slkLine),
+      delta: r.getOrDefault("delta").getInt(0),
+      sourceLine: r.getOrDefault("sourceLine").getStr(""))
+    if not loc.isNil and loc.kind == JObject:
+      line.location = StepLineLocation(
+        path: loc.getOrDefault("path").getStr(""),
+        line: loc.getOrDefault("line").getInt(0),
+        functionName: loc.getOrDefault("functionName").getStr(""),
+        rrTicks: loc.getOrDefault("rrTicks").getInt(0))
+    let values = r.getOrDefault("values")
+    if not values.isNil and values.kind == JArray:
+      for v in values:
+        line.values.add StepLineFlowValue(
+          expression: v.getOrDefault("expression").getStr(""),
+          value: callArgTextOf(v))
+    result.add line
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -162,16 +196,15 @@ proc setCurrentLocation*(vm: StepListVM; loc: StepLineLocation) =
   ## record.
   vm.currentLocation.val = loc
 
-proc setPanelHeight*(vm: StepListVM; rows: int) =
-  ## Cache the latest measured row capacity.  ``rows`` is the number of
-  ## rows the panel can show — the legacy code computed it as
-  ## ``offsetHeight div STEP_LINE_HEIGHT_PX``.  Values <=0 are clamped
-  ## to ``DEFAULT_STEP_LIST_PANEL_HEIGHT`` so a missing measurement
-  ## does not produce a degenerate request.
-  if rows <= 0:
-    vm.panelHeight.val = DEFAULT_STEP_LIST_PANEL_HEIGHT
-  else:
-    vm.panelHeight.val = rows
+proc setViewport*(vm: StepListVM; v: Viewport) =
+  ## The size the view was given — the ONE way a view tells this ViewModel
+  ## how many rows it shows (Viewport-Driven-Loading V1). The view binding
+  ## measures it (`offsetHeight div STEP_LINE_HEIGHT_PX`) and applies the
+  ## GUI's fallback when it cannot measure; an unmeasured list asks for
+  ## nothing (`loadStepLinesFor`).
+  batch(proc() =
+    vm.viewport.val = v
+    vm.panelHeight.val = max(0, v.rows))
 
 proc loadStepLinesFor*(vm: StepListVM; loc: StepLineLocation) =
   ## Issue a ``ct/load-step-lines`` request for ``loc``.  Resets the
@@ -204,18 +237,16 @@ proc loadStepLinesFor*(vm: StepListVM; loc: StepLineLocation) =
   ## ``flow_service.loadStepLines`` fills ``forwardCount`` and
   ## ``backwardCount`` from it.
   ##
-  ## Correcting the shape does NOT make this request work, and is not
-  ## meant to: ``ct/load-step-lines`` is absent from
-  ## ``VALID_DAP_COMMANDS`` and has no arm in either ``dap_server.rs``
-  ## dispatch table, so the two cases covering it stay red and stay
-  ## registered in ``ci/lib/known-test-failures.tsv``.  What changes is
-  ## that they now pin what both peers declare instead of a shape that
-  ## would still have been wrong the day an engine arm landed.
+  ## The engine answers with the whole window in one ``LoadStepLinesUpdate``
+  ## (``finish: true``); the rows replace the list, unless the current
+  ## location has moved on to a newer request in the meantime.
   vm.clearLineSteps()
   vm.setCurrentLocation(loc)
-  let count =
-    if vm.panelHeight.val <= 0: DEFAULT_STEP_LIST_PANEL_HEIGHT
-    else: vm.panelHeight.val
+  # The rows the pane shows, either side of the current line; an unmeasured
+  # pane asks for nothing (Viewport-Driven-Loading V2).
+  let count = vm.panelHeight.val
+  if count <= 0:
+    return
   let args = %*{
     "location": {
       "path": loc.path,
@@ -228,7 +259,15 @@ proc loadStepLinesFor*(vm: StepListVM; loc: StepLineLocation) =
     "forwardCount": count,
     "backwardCount": count,
   }
-  discard vm.store.backend.send("ct/load-step-lines", args)
+  # The answer is the whole window at once (`finish: true`); it replaces the
+  # rows unless a newer request has moved the list on since.
+  let asked = loc.rrTicks
+  async_compat.onComplete(vm.store.backend.send("ct/load-step-lines", args),
+    onSuccess = proc(response: JsonNode) =
+      if responseSucceeded(response) and
+          vm.currentLocation.val.rrTicks == asked:
+        vm.setLineSteps(stepLinesOf(responseBody(response))),
+    onError = proc(msg: string) = discard)
 
 proc jumpToStepLine*(vm: StepListVM; line: StepLine) =
   ## Move the debugger to the step the clicked row names.
@@ -263,7 +302,7 @@ proc jumpToStepLine*(vm: StepListVM; line: StepLine) =
   ## live bug in ``event_log_vm``'s copy of this payload, which sends
   ## ``rrTicks``/``ticks`` and no ``threadId``).  ``dap.nim`` only stamps
   ## a ``threadId`` when a *multi-process* session is active
-  ## (``activeSessionThreadId != 0``), and overwrites ours when it does —
+  ## (the session's ``DapApi.routingThreadId != 0``), and overwrites ours when it does —
   ## which is the desired precedence, since that value is the routing id.
   ##
   ## KNOWN GAP, deliberately not papered over: legacy's *non*-materialized
@@ -307,7 +346,8 @@ proc createStepListVM*(store: ReplayDataStore): StepListVM =
   withViewModel proc(dispose: proc()): StepListVM =
     let lineSteps = createSignal(newSeq[StepLine]())
     let currentLocation = createSignal(StepLineLocation())
-    let panelHeight = createSignal(DEFAULT_STEP_LIST_PANEL_HEIGHT)
+    let viewport = createSignal(Viewport())
+    let panelHeight = createSignal(0)
 
     let isEmpty = createMemo[bool] proc(): bool =
       lineSteps.val.len == 0
@@ -316,6 +356,7 @@ proc createStepListVM*(store: ReplayDataStore): StepListVM =
       store: store,
       lineSteps: lineSteps,
       currentLocation: currentLocation,
+      viewport: viewport,
       panelHeight: panelHeight,
       isEmpty: isEmpty,
       disposeProc: dispose,

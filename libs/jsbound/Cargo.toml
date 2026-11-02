@@ -1,0 +1,39 @@
+[package]
+name = "jsbound"
+version = "0.1.0"
+edition = "2021"
+description = "The JS boundary log (`jsbound.*` CTFS members): encoder, strict decoder and the `ct-jsbound` assembler."
+license = "MIT OR Apache-2.0"
+
+# Specified by codetracer-pm spec/Recording-Backends/JS-Boundary-Recording.md
+# §5 and registered in spec/Trace-Files/CTFS-Binary-Format.md §4.8.
+#
+# The crate is a leaf of this repository: nothing here depends on it yet. The
+# boundary ingest (codetracer-ci) runs the `ct-jsbound` binary out of process,
+# and later milestones (the narrative deriver) extend it. Its tests are run by
+# `just test-rust` (ci/test/rust-test-crate-coverage.sh would name it
+# otherwise).
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "ct-jsbound"
+path = "src/main.rs"
+
+[dependencies]
+# The container writer and reader (CtfsWriter / CtfsReader). Same sibling path
+# as src/db-backend and src/backend-manager use, so the three consumers are
+# held to one trace-format tree by scripts/test-sibling-cargo-locks.sh.
+codetracer_ctfs = { path = "../../../codetracer-trace-format/codetracer_ctfs" }
+# `encode_meta_dat` / `decode_meta_dat`: the one Rust implementation of the
+# `meta.dat` layout, rather than a fourth copy of it here.
+codetracer_trace_writer = { path = "../../../codetracer-trace-format/codetracer_trace_writer" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# Content addresses of `jsbound.blb` bodies (spec §5.4). Already in the
+# dependency graph through codetracer_ctfs.
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"

@@ -14,7 +14,8 @@
 ## Source Discovery And Entry Points
 
 - The containing Odin package is the executable entry point.
-- File discovery creates one item per Odin source file, but file run executes the package because Odin compiles package units.
+- File discovery creates one item per Odin source file, but file run executes
+  the package because Odin compiles package units.
 
 ## Recording Feasibility
 

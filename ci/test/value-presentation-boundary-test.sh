@@ -123,7 +123,7 @@ EOF
 	# vacuously, which is a case of its own (`no-prose`) rather than the
 	# baseline.
 	local s
-	for s in state value trace trace_log scratchpad flow step_list calltrace; do
+	for s in state value trace trace_log scratchpad flow step_list; do
 		cat >"${t}/src/frontend/ui/${s}.nim" <<'EOF'
 ## PLAT-2: this used to call textRepr and classifyValue, and truncateValue
 ## afterwards.
@@ -134,6 +134,15 @@ EOF
 	cat >"${t}/src/frontend/viewmodel/headless_session.nim" <<'EOF'
 import ../../common/value_presentation
 proc decode*(v: int): int = v
+EOF
+	# The call-trace chips' surface: the store renders their text since
+	# `730399e0e` reduced `ui/calltrace.nim` to a mount. It carries no
+	# migration prose, so the `no-prose` case still strips every line the
+	# banned patterns could match.
+	mkdir -p "${t}/src/frontend/viewmodel/store"
+	cat >"${t}/src/frontend/viewmodel/store/replay_data_store.nim" <<'EOF'
+from ../../../common/value_presentation import present
+proc callArgTextOf*(v: int): int = v
 EOF
 	cat >"${t}/src/frontend/tui/app/views/tree_node.nim" <<'EOF'
 import ../../../../common/value_presentation
@@ -469,7 +478,8 @@ assert_fires "${t}" "stub-is-a-reexport" \
 # THE COMPILER ARM. The purity rule the effect system enforces, watched failing.
 # ---------------------------------------------------------------------------
 if ! command -v nim >/dev/null 2>&1; then
-	skip_loudly "purity is compiler-enforced: no \`nim\` on PATH, so the strongest of the purity checks was NOT exercised"
+	# shellcheck disable=SC2016 # literal markdown backticks
+	skip_loudly 'purity is compiler-enforced: no `nim` on PATH, so the strongest of the purity checks was NOT exercised'
 else
 	planted="${work}/planted"
 	mkdir -p "${planted}"

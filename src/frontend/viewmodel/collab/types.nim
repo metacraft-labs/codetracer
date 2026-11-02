@@ -68,7 +68,6 @@ type
     vokSetCalltraceSelection,
     vokToggleCalltraceExpansion,
     vokSetCalltraceSearch,
-    vokSetStateTab,
     vokToggleStatePath,
     vokExpand,
     vokCollapse,
@@ -202,7 +201,6 @@ type
     expandedNodes*: seq[AddWinsSetEntry]
 
   SharedStateViewState* = object
-    activeTab*: LwwStringRegister
     selectedPath*: LwwStringRegister
     expandedPaths*: seq[AddWinsSetEntry]
     watchExpressions*: seq[SharedWatch]

@@ -62,7 +62,8 @@ proc freePort(cb: proc(port: int)) {.importjs: """(function (cb) {
 proc fetchBody(port: int; path: cstring;
                cb: proc(status: int; body: cstring)) {.importjs: """(function (port, path, cb) {
   var req = require('http').request(
-    { host: '127.0.0.1', port: port, path: path, method: 'GET' },
+    { host: '127.0.0.1', port: port, path: path, method: 'GET',
+      headers: { 'X-CodeTracer-Session': process.env.CT_TEST_SESSION_SECRET } },
     function (res) {
       var chunks = '';
       res.setEncoding('utf8');
@@ -77,7 +78,8 @@ proc connectClient(port: int; onFrame: proc(frame: cstring);
                    onReady: proc()) {.importjs: """(function (port, onFrame, onReady) {
   var io = require('socket.io-client');
   var sock = io('http://127.0.0.1:' + port, {
-    transports: ['websocket'], reconnection: false, timeout: 5000 });
+    transports: ['websocket'], reconnection: false, timeout: 5000,
+    query: { ct_session: process.env.CT_TEST_SESSION_SECRET } });
   globalThis.__ctDescriptorSocket = sock;
   sock.on('CODETRACER::facade', function (f) { onFrame(f); });
   sock.on('connect', function () { onReady(); });
@@ -159,11 +161,21 @@ proc afterFetch(status: int; body: cstring) =
     sendFrame(encodeHello(
       HelloFrame(contractVersion: EndpointContractVersion)).cstring))
 
+proc setEnv(key, value: cstring) {.importjs: "process.env[#] = #".}
+
+const TestSessionSecret = "index-serves-one-deployment-descriptor-test-secret"
+
 proc start(httpPort, socketPort: int) =
   httpPortUsed = httpPort
   socketPortUsed = socketPort
   data.startOptions.port = httpPort
   data.startOptions.backendSocket.port = socketPort
+  # The session secret a supervisor would give `ct host`: the descriptor and
+  # the socket answer only a client presenting it
+  # (`index/host_session_guard.nim`). `setupServer` removes the variable it
+  # reads, so the clients read their own copy.
+  setEnv(cstring"CODETRACER_HOST_SESSION_SECRET", TestSessionSecret.cstring)
+  setEnv(cstring"CT_TEST_SESSION_SECRET", TestSessionSecret.cstring)
   setupServer()
   fetchBody(httpPort, cstring"/deployment.json", afterFetch)
 

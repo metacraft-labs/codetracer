@@ -146,11 +146,12 @@ import ./views/styled_row
 
 export styled_row
 
-const
-  OriginEventName* = "ct/updated-origin-chain"
-    ## The DAP event `Handler::respond_origin_chain` emits beside every
-    ## `ct/originChain` response (`dap.rs`'s `updated_origin_chain_event`).
+# `OriginEventName`, the DAP event this module decodes, reaches this module
+# through `codetracer_embed` (it is defined in `viewmodels/origin_chain_types`).
+# It is defined there so the native hosts' `host/session_driver` can name it
+# without importing this terminal module.
 
+const
   OriginPendingText* = "origin: querying…"
     ## What the notification area reads while a query is in flight. THE VISIBLE
     ## PENDING STATE — see this module's header.

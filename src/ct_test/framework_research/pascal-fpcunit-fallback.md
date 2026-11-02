@@ -14,7 +14,8 @@
 ## Source Discovery And Entry Points
 
 - M12 creates one file-level `TestItem` per Pascal source file.
-- Location is reported as fallback provenance at line 1 because executable fallback cannot identify FPCUnit cases.
+- Location is reported as fallback provenance at line 1 because executable
+  fallback cannot identify FPCUnit cases.
 
 ## Recording Feasibility
 
@@ -24,5 +25,6 @@
 ## Limitations And Capability Diagnostics
 
 - `canRunSingle=false` and `canRecordSingle=false`.
-- FPCUnit selectors are not advertised because M12 does not implement reliable suite/case listing or single-case filtering.
+- FPCUnit selectors are not advertised because M12 does not implement reliable
+  suite/case listing or single-case filtering.
 - Missing FPC reports a toolchain diagnostic instead of exposing fake support.

@@ -233,6 +233,20 @@ proc activate*(w: NativeWelcome; row: int; folderDefault = "") =
     of wsoRecordNewTrace: w.openForm(nwfRecord)
     else: w.message = r.label & ": " & StartOptionUnavailableHereReason
 
+proc chooseOption*(w: NativeWelcome; kind: WelcomeStartOptionKind;
+                   folderDefault = "") =
+  ## Choose the start option `kind` as a click on its row would — a live
+  ## option opens its form, a refused one says why on the message line. What
+  ## the program menu's File items reach (codetracer#841): *Open Trace…* is
+  ## "Open local trace", *Record New Trace…* is "Record new trace", so a menu
+  ## item and the screen's own option cannot do different things.
+  let key = startOptionKey(kind)
+  for i, r in w.rowsOf():
+    if r.kind == nwrOption and r.key == key:
+      w.activate(i, folderDefault)
+      return
+  w.message = "this screen has no " & key & " option"
+
 proc splitCommandLine*(text: string): seq[string] =
   ## `prog "an arg" b` -> @["prog", "an arg", "b"]: whitespace separates,
   ## double quotes group.
@@ -285,6 +299,19 @@ proc submit*(w: NativeWelcome) =
       return
     w.form = nwfNone
     w.message = "recording " & words.join(" ") & " …"
+
+func shownFrom*(panelRows: openArray[int]; focus, entries: int): int =
+  ## The first of a recent panel's rows that the screen draws when it has
+  ## room for `entries` of them: 0, unless the focus (an index of `rowsOf`)
+  ## is on one of this panel's rows that would fall below the room — then
+  ## the panel scrolls so that row is its last one. The keys walk every row
+  ## of `rowsOf`, so a row the focus can reach must be one the screen draws;
+  ## a panel that kept showing its first `entries` rows left the focus on a
+  ## recording nobody could see, and Enter opened it.
+  for k, i in panelRows:
+    if i == focus:
+      return max(0, k - entries + 1)
+  0
 
 proc moveFocus*(w: NativeWelcome; delta: int) =
   let n = w.rowsOf().len

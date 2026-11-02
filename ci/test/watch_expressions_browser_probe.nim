@@ -1,4 +1,4 @@
-## watch_expressions_browser_probe.nim — mount the STATE pane in a REAL
+## watch_expressions_browser_probe.nim — mount the Variables pane in a REAL
 ## browser and let a user type a watch expression into it.
 ##
 ## ## WHY THIS EXISTS
@@ -10,7 +10,7 @@
 ## what a headless test calls — and from no gesture in any shipping product.
 ## A mock-only suite was green over a tab no user could open.
 ##
-## So this mounts `renderStatePanel(WebRenderer, ...)`: the procedure the
+## So this mounts `renderStatePanel[WebRenderer, Element]`: the procedure the
 ## browser actually runs. The probe asserts nothing; it paints, and
 ## `ci/test/watch-expressions-in-browser.sh` reads what painted.
 ##
@@ -30,9 +30,10 @@
 ##
 ## ## WHAT IS AND IS NOT UNDER TEST HERE
 ##
-## Under test: the tab strip is reachable, the Watches tab renders watch
-## answers, a refused watch renders its reason, the locals tab is unaffected,
-## and typing into `#watch-0` reaches `StateVM.addWatch`.
+## Under test: the pane is one list (Variable-State-Pane.md, "Decisions
+## (2026-10-24)") — the locals, then a row per watch with its answer, a
+## refused watch rendering its reason — and typing into `#watch-0` reaches
+## `StateVM.addWatch`.
 ##
 ## NOT under test: the transport. There is no engine in this page. The
 ## request/response half is what `watch_expressions_dap_test.rs` proves over
@@ -127,8 +128,14 @@ proc main() =
 
   # THE PRODUCT'S OWN SPLIT. Not a local reimplementation: this is the
   # single entry point `ui/state.nim` and `headless_session.nim` both use.
-  store.applyLocalsResponse(rows)
+  discard store.applyLocalsResponse(rows, store.stopStamp())
   store.updateCodeStateLine(2, "let shield = 10000;")
+
+  # THE WATCHES A USER TYPED BEFORE THIS STOP — the expressions the fixture's
+  # request asked for, except `landing_point.x`, which the probe TYPES below.
+  # Named here rather than read off the response, so mutation arm B (a
+  # response with no watch rows) still has a session holding these watches.
+  vm.watchExpressions.val = @["asteroid_masses[1]", "initial_shield + 1"]
 
   # WHAT THE TYPED GESTURE DOES, without an engine on the page.
   #
@@ -157,7 +164,7 @@ proc main() =
           children = @[],
           isWatch = true,
         ))
-    store.applyLocalsResponse(next)
+    discard store.applyLocalsResponse(next, store.stopStamp())
     settle(store)
 
   let container = dom.getElementById(dom.document, cstring"ct-state-pane")

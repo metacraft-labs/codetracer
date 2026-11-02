@@ -90,6 +90,11 @@ import ../../../ui/build_location_parser
 const RecordedNargoStderr =
   staticRead("../../../../../test-programs/noir_build_error/recorded-nargo-compile.stderr")
 
+# Walked through a `let`, never the `const`: an inline iterator over a
+# `const` rebuilds the whole literal at every character access on the JS
+# backend (`ci/test/js-const-iteration-test.sh` says why and refuses it).
+let recordedNargoStderrText = RecordedNargoStderr
+
 const RecordedNargoStdout = ""
   ## Measured: `nargo compile` wrote 0 bytes to stdout for this package.
 
@@ -195,7 +200,7 @@ suite "EMT §11 a nargo failure becomes navigable Problems rows":
     # fields below are unchanged; only what produces the rows is.
     var scanner: BuildLocationScanner
     var rows: seq[ParsedBuildLocation] = @[]
-    for line in RecordedNargoStderr.splitLines:
+    for line in recordedNargoStderrText.splitLines:
       let scanned = scanner.scan(line)
       if scanned.found:
         rows.add scanned
@@ -250,7 +255,7 @@ suite "EMT §11 a nargo failure becomes navigable Problems rows":
     # an error does.
     var scanner: BuildLocationScanner
     var rows: seq[ParsedBuildLocation] = @[]
-    for line in RecordedNargoStderr.splitLines:
+    for line in recordedNargoStderrText.splitLines:
       let scanned = scanner.scan(line)
       if scanned.found:
         rows.add scanned
@@ -368,7 +373,7 @@ suite "EMT §11 a nargo failure becomes navigable Problems rows":
 
     var scanner: BuildLocationScanner
     var rows: seq[ParsedBuildLocation] = @[]
-    for line in RecordedNargoStderr.splitLines:
+    for line in recordedNargoStderrText.splitLines:
       let parsed = scanner.scan(line)
       if parsed.found:
         rows.add parsed

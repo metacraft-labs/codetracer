@@ -61,7 +61,11 @@ import ./fixtures/fixture_provider
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 73
+const ExpectedAssertions = 71
+  ## 73 -> 71, measured: the seek case typed the recording's last tick with
+  ## one assertion PER DIGIT, so the count followed the recording — three
+  ## digits until the trace-format pins moved (`1b2bdf6f57`), two after. The
+  ## digits are now one assertion.
 
 var countedAssertions = 0
 
@@ -396,8 +400,14 @@ suite "CTUI-8: `]` walks the call boundaries the backend reports":
       ck state.applyKey(KeySeekPrompt, targets, 0'u64).action ==
         tkaSeekEntryBegan
       ck state.mode == tkmSeekEntry
+      # ONE assertion over every digit, not one per digit: the tick comes
+      # from the recording, and its length is not this suite's to fix — a
+      # recording one digit shorter moved the declared count.
+      var everyDigitEdited = true
       for ch in $destination:
-        ck state.applyKey($ch, targets, 0'u64).action == tkaSeekEntryEdited
+        everyDigitEdited = everyDigitEdited and
+          state.applyKey($ch, targets, 0'u64).action == tkaSeekEntryEdited
+      ck everyDigitEdited
       ck state.buffer == $destination
       ck state.promptText() == SeekPromptPrefix & $destination
       let committed = state.applyKey(KeyEnter, targets, 0'u64)

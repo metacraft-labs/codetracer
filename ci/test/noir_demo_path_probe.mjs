@@ -41,6 +41,53 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1680, height: 1050 } });
 const pageErrors = [];
 page.on('pageerror', (e) => pageErrors.push(String((e && e.message) || e).slice(0, 300)));
+
+// THE ENGINE'S ANSWER TO THE TRACE, read off the line `web_replay_host.report`
+// writes for every inbound DAP frame:
+//
+//   codetracer-replay: frame response configurationDone success=<bool>[ message=<why>]
+//
+// `configurationDone` is the request that makes the engine open the trace from
+// the virtual filesystem, so a trace the engine cannot read is refused in a
+// `configurationDone` response — and the refusal carries the engine's own
+// sentence.
+//
+// A REFUSAL COMES SECOND. When the trace opens there is one response,
+// `success=true`. When it cannot be opened the engine has already acknowledged
+// the request, so there are two: measured with the published tracer,
+// `success=true`, then `success=false message=… meta.dat: version 6 is not
+// readable …`. So every response is read and the first
+// refusal wins; keeping only the first response recorded a success over a
+// trace the engine had refused, and this check passed on the very failure it
+// was written for.
+//
+// WITHOUT THIS THE PANES CANNOT SAY WHY THEY ARE EMPTY. Measured on codetracer
+// `agents` at 8c3dcc8fe with the Noir modules published at
+// ide.codetracer.com: Run compiled, traced, switched to the debugging surface
+// and reported "opening a replay session" — and the calltrace, the event log
+// and the flow view stayed empty because the engine had answered
+//
+//   meta.dat: version 6 is not readable: this reader reads version 7 only
+//
+// to a trace from a tracer module built before the trace-format bump. Six
+// assertions below failed, each naming a pane, and none naming that sentence.
+const replayOpen = { answered: false, success: null, message: '', responses: 0 };
+page.on('console', (m) => {
+  const match = /codetracer-replay: frame response configurationDone success=(true|false)(?: message=(.*))?/s
+    .exec(m.text());
+  if (!match) return;
+  replayOpen.answered = true;
+  replayOpen.responses += 1;
+  if (match[1] === 'false') {
+    // The first refusal is kept; a later acknowledgement cannot overwrite it.
+    if (replayOpen.success !== false) {
+      replayOpen.success = false;
+      replayOpen.message = (match[2] || '').slice(0, 400);
+    }
+  } else if (replayOpen.success === null) {
+    replayOpen.success = true;
+  }
+});
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const out = {};
 
@@ -161,6 +208,9 @@ out.buildNonEmptySamples = buildNonEmptySamples;
 // populated `buildText` is the pane correctly getting out of the way, while
 // both empty is the pane never having reported at all.
 out.buildTextFinal = await readBuildText();
+// Copied now, after the run window, so a late answer is still seen and the
+// reload arm below — a second page — cannot contribute one.
+out.replayOpen = { ...replayOpen };
 
 // AND THAT IT GOT OUT OF THE WAY. The assertion above can now be satisfied by
 // a 2-second appearance, so on its own it would no longer notice an overlay

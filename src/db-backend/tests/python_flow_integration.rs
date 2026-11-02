@@ -41,7 +41,7 @@ fn create_python_flow_config() -> FlowTestConfig {
         ],
         // print() and calculate_sum() should NOT appear as variables
         excluded_identifiers: vec!["print".to_string(), "calculate_sum".to_string()],
-        expected_values,
+        expected_values: expected_values.into(),
     }
 }
 

@@ -420,6 +420,9 @@ proc syncVcs(launcher: AgenticSessionLauncher) =
   let comp = VCSComponent(data.ui.componentMapping[Content.VCS][VcsId])
   if comp.isNil:
     return
+  # The panel's first load answers later; one still in flight must not
+  # replace the agent's worktree state written below.
+  comp.adoptExternalState()
   comp.currentBranch = cstring"agent-worktree"
   comp.branches = @[cstring"agent-worktree"]
   comp.commits = @[]
@@ -435,7 +438,6 @@ proc syncVcs(launcher: AgenticSessionLauncher) =
   # behind it is `data.deepReviewData`, which `syncDeepReview` below sets from
   # the same source this used to copy in here.
   comp.syncLegacyVCSIntoVM()
-  vcs.tryMountIsoNimVCSPanel(comp.id)
 
 proc syncDeepReview(launcher: AgenticSessionLauncher) =
   ## The agentic handoff into DeepReview — Agentic-Coding-Integration.md §4.4,

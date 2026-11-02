@@ -7,7 +7,8 @@
 ##     children, a leaf, a call argument, the editor's text on a plain line
 ##     and on a breakpoint's, a Variables row, an inline value — are the
 ##     shared models' (`headless_app/pane_clicks`), label for label, in the
-##     desktop's order, and a Files node has none;
+##     desktop's order, and a Files node's is the Files pane's four entries,
+##     as the native menu the shared Files model builds lists them;
 ##   * the COLOURS the terminal paints its chrome with are the tokens the
 ##     desktop's chrome resolves to (its caption bar, transport buttons,
 ##     omnibox ground and border, the ground behind its tabs, its splitters,
@@ -26,7 +27,7 @@
 ##
 ## Reads files and pure values; no session. No mocks.
 
-import std/[json, os, strutils, unittest]
+import std/[json, os, sequtils, strutils, unittest]
 
 import headless_app/layout_model
 import headless_app/pane_clicks
@@ -35,7 +36,8 @@ import ../app/views/top_bar
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 51
+const ExpectedAssertions = 55
+  ## Native Top is the one explicit addition to each desktop dock menu.
 
 var countedAssertions = 0
 
@@ -60,18 +62,32 @@ proc dark(token: DesignToken): string = tokenHex(token, dmDark)
 
 suite "PLAT-50: the desktop's right-click menus are the shared models'":
 
-  test "a tab, a dock label, a call, a leaf, an argument; no Files menu":
-    ck labelsOf("tab") == tabContextMenu(paneVcs, maximised = false).labels
-    ck labelsOf("dockLabelBottom") ==
-       dockLabelContextMenu(paneBuildOutput, leBottom).labels
+  test "a tab, a dock label, a call, a leaf, an argument; the Files menu":
+    # The native hosts support Top as well. Assert that single addition,
+    # then compare every desktop entry and its order without re-recording
+    # the desktop oracle to describe a menu it does not draw.
+    let tabLabels = tabContextMenu(paneVcs, maximised = false).labels
+    let dockLabels = dockLabelContextMenu(paneBuildOutput, leBottom).labels
+    ck tabLabels.count(TopPinLabel) == 1
+    ck dockLabels.count(TopPinLabel) == 1
+    ck labelsOf("tab") == tabLabels.filterIt(it != TopPinLabel)
+    ck labelsOf("dockLabelBottom") == dockLabels.filterIt(it != TopPinLabel)
     ck labelsOf("callTraceWithChildren") ==
        callTraceContextMenu(3, hasChildren = true, expanded = true).labels
     ck labelsOf("callTraceLeaf") ==
        callTraceContextMenu(4, hasChildren = false, expanded = false).labels
     ck labelsOf("callArgument") ==
        callArgumentContextMenu(4, "left", "2").labels
-    # The desktop's Files node has no menu (its entries ran nothing).
-    ck labelsOf("filesNode").len == 0
+    # The desktop's Files node opens the Files pane's own menu, all four
+    # entries in their order (Filesystem-Pane.md, "Context menu").
+    ck labelsOf("filesNode") == @["Create", "Rename", "Delete", "Edit"]
+    # …and so does the terminal's and GPUI's: the native menu the shared
+    # Files model builds for a row (`headless_app/file_tree_menu`).
+    ck labelsOf("filesNode") == @FileTreeMenuLabels
+    ck labelsOf("filesNode") ==
+       fileTreeNodeContextMenu("/rec/main.py", @[
+         ("Create", false, "r"), ("Rename", false, "r"),
+         ("Delete", false, "r"), ("Edit", true, "")]).labels
 
   test "the editor's text, on a plain line and on a breakpoint's":
     ck labelsOf("editorText") == editorTextContextMenu("main.py", 31).labels

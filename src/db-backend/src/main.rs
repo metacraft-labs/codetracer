@@ -47,6 +47,7 @@ mod dap_types;
 mod db;
 mod diff;
 mod distinct_vec;
+mod step_table;
 // M17 — the lib already exports these via `lib.rs`; the bin needs its
 // own copies because dap_handler.rs is `mod dap_handler` here rather
 // than a re-export from the lib. The lib's `#![allow(clippy::expect_used)]`
@@ -155,16 +156,20 @@ mod catalog_autoload;
 // SessionHandler via the `crate::session_handler` path.
 mod session_handler;
 mod session_manifest;
+// Where a session may read source text from; see `source_access.rs`.
+mod source_access;
 #[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 mod stack_unwinder;
 mod step_lines_loader;
 mod task;
+mod terminal_lines;
 mod trace_processor;
 mod trace_reader;
 mod tracepoint_interpreter;
 mod transport;
 mod transport_endpoint;
 mod value;
+mod value_budget;
 // The one clock in this crate; see `wall_clock.rs`. The binary compiles the
 // modules directly rather than through the lib, so it needs its own
 // declaration.
@@ -354,6 +359,15 @@ fn main() {}
 
 #[cfg(feature = "io-transport")]
 fn main() -> Result<(), Box<dyn Error>> {
+    // A prerequisite probe must not initialize logging, user state or DAP.
+    if std::env::args().skip(1).eq(["--build-revision"]) {
+        println!(
+            "codetracer-replay-build-v1 {} {}",
+            env!("CT_REPLAY_REVISION"),
+            env!("CT_REPLAY_FINGERPRINT")
+        );
+        return Ok(());
+    }
     panic::set_hook(Box::new(panic_handler));
 
     // env_logger setup based and adapted from

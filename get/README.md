@@ -1,4 +1,4 @@
-# `get/` — source for https://get.codetracer.com
+# `get/` — source for <https://get.codetracer.com>
 
 This directory is the source tree for CodeTracer's install/onboarding host,
 `get.codetracer.com`, per

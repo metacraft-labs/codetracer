@@ -64,21 +64,23 @@ tokens) and every other ``.styl`` under ``styles/`` (the per-theme palettes),
 so the ``ct-images-*`` namespace the palettes define is protected on the same
 terms as ``colors-*``.
 
-THE RULE (legacy arm — ratchet)
--------------------------------
+THE RULE (legacy arm — enforcing)
+---------------------------------
 The palettes also carry the older ``SCREAMING_CASE`` variables, and they leak
 in exactly the same way and for a related reason: ``codetracer.styl`` uses a
 name that one palette defines and another does not, so the build that omits it
 emits the bare identifier.  No legal CSS value is ``[A-Z][A-Z0-9]*(_[A-Z0-9]+)+``,
-so no namespace test is needed — every such identifier in a value is a leak.
+so no namespace test is needed — every such identifier in a value is a leak,
+and any leak fails, exactly as an unresolved token does.
 
-This arm is a RATCHET, not a gate, because it starts with a backlog: 23
-declarations in the dark build and 34 in the light one, and clearing them means
-choosing colours for 57 surfaces, which is a different piece of work from
-installing the guard.  ``css-token-resolution-legacy.baseline`` records the
-ceiling per stylesheet.  Going ABOVE a ceiling fails.  Going BELOW it also
-fails, with the one-line edit that fixes it — a ceiling allowed to drift above
-reality is a hole, and the point of a ratchet is that it only turns one way.
+This arm started as a ratchet, because it was installed over a backlog (23
+declarations in the dark build, 34 in the light one) whose per-stylesheet
+ceilings lived in ``css-token-resolution-legacy.baseline``.  The backlog has
+been cleared — each variable is now defined in both shipped palettes, or the
+rule that read it was deleted because no view emits its selector — so the
+ceilings file is gone and there is nothing left to tolerate.  When a palette
+loses a variable ``codetracer.styl`` reads, define it in BOTH palettes; do not
+bring the ceilings back.
 
 INSTRUMENT CHECKS
 -----------------
@@ -264,20 +266,6 @@ def scan(
     return token_findings, legacy_findings, count
 
 
-def read_baseline(path: str) -> Dict[str, int]:
-    ceilings: Dict[str, int] = {}
-    if not os.path.exists(path):
-        return ceilings
-    with open(path, encoding="utf-8") as handle:
-        for raw in handle:
-            line = raw.split("#", 1)[0].strip()
-            if not line:
-                continue
-            stylesheet, _, count = line.partition("=")
-            ceilings[stylesheet.strip()] = int(count.strip())
-    return ceilings
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--repo-root", required=True)
@@ -286,21 +274,12 @@ def main() -> int:
         required=True,
         help="directory holding the COMPILED stylesheets, one per Tupfile output",
     )
-    parser.add_argument("--baseline", default=None)
     parser.add_argument("--json", default=None)
-    parser.add_argument(
-        "--enforce-legacy",
-        action="store_true",
-        help="fail on any legacy leak instead of honouring the ratchet ceilings",
-    )
     args = parser.parse_args()
 
     styles_dir = os.path.join(args.repo_root, "src", "frontend", "styles")
     generated_dir = os.path.join(styles_dir, "generated")
     tupfile = os.path.join(styles_dir, "Tupfile")
-    baseline_path = args.baseline or os.path.join(
-        args.repo_root, "ci", "test", "css-token-resolution-legacy.baseline"
-    )
 
     names, namespaces = read_defined_variables(styles_dir)
     generated_names, _ = read_defined_variables(generated_dir)
@@ -381,44 +360,25 @@ def main() -> int:
     scanned = [out for out in decl_counts if decl_counts[out] > 0]
     observed = {out: per_theme.get(out, 0) for out in scanned}
 
-    # ---- legacy arm: ratchet ---------------------------------------------
-    ceilings = read_baseline(baseline_path)
-    for output in sorted(legacy_counts):
-        if decl_counts.get(output, 0) == 0:
-            continue
-        found = legacy_counts[output]
-        if args.enforce_legacy:
-            if found:
-                failures.append(
-                    f"{output}: {found} legacy SCREAMING_CASE variable(s) "
-                    "reached the output unresolved (--enforce-legacy)."
-                )
-            continue
-        if output not in ceilings:
-            failures.append(
-                f"{output}: no ceiling in {os.path.basename(baseline_path)}. "
-                f"Add `{output} = {found}` with a reason, or the ratchet is "
-                "not holding this stylesheet at all."
-            )
-        elif found > ceilings[output]:
-            examples = "\n".join(
-                f"    {f.stylesheet}:{f.line}  {f.prop}: {f.identifier}"
-                for f in all_legacy
-                if f.stylesheet == output
-            )
-            failures.append(
-                f"{output}: {found} legacy leaks, ceiling is "
-                f"{ceilings[output]}. The ratchet only turns one way — a "
-                "palette is missing a variable codetracer.styl uses.\n"
-                + examples
-            )
-        elif found < ceilings[output]:
-            failures.append(
-                f"{output}: {found} legacy leaks, ceiling is "
-                f"{ceilings[output]}. Lower the ceiling to {found} in "
-                f"{os.path.basename(baseline_path)}. A ceiling above reality "
-                "is room for a regression to hide in."
-            )
+    # ---- legacy arm: enforcing -------------------------------------------
+    # Listed per declaration, like the token arm, so the failure names the
+    # variable to define rather than only a count to chase.
+    if all_legacy:
+        lines = [
+            f"  {f.stylesheet}:{f.line}  {f.prop}: {f.identifier}" for f in all_legacy
+        ]
+        distinct = sorted({f.identifier for f in all_legacy})
+        failures.append(
+            f"{len(all_legacy)} declaration(s) carry a legacy SCREAMING_CASE "
+            f"palette variable that reached the output unresolved, across "
+            f"{len(distinct)} distinct identifier(s). A palette is missing a "
+            "variable codetracer.styl reads: define it in BOTH "
+            "default_dark_theme.styl and default_white_theme.styl, or delete "
+            "the rule if no view emits its selector.\n"
+            + "\n".join(lines)
+            + "\n  distinct: "
+            + ", ".join(distinct)
+        )
 
     if args.json:
         with open(args.json, "w", encoding="utf-8") as handle:

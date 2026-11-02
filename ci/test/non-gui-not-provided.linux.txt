@@ -1,21 +1,38 @@
-# db-backend integration tests the Linux `test-non-gui` lane does NOT provide
-# the tools for.
+# Integration tests (db-backend and backend-manager) the Linux `test-non-gui`
+# lane does NOT provide the tools for.
 #
 # That lane runs `just test-rust` with CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false,
 # so a test whose prerequisite is missing FAILS there instead of passing having
 # asserted nothing. The tests below need tools the lane does not install; they
-# are excluded by name, and `just test-rust` prints every line of this file as
-# NOT RUN, with the lane that does run it.
+# are excluded by name from both crates' nextest runs, and `just test-rust`
+# prints every line of this file that applies to a crate as NOT RUN, with the
+# lane that does run it.
 #
 # A new test that needs a tool this lane lacks fails the lane until it is added
 # here or the lane provisions the tool. That is intended: the decision is made
 # once, in review, instead of the test quietly skipping forever.
 #
 # Format: <nextest filterset> | <prerequisite the lane lacks> | <lane that runs it>
+#
+# The filterset is `binary(<target>)`, or `binary(<target>) and
+# test(/<regex>/)` for a binary only some of whose tests need the tool. The
+# target is an integration test of exactly one crate,
+# src/db-backend/tests/<target>.rs or src/backend-manager/tests/<target>.rs:
+# ci/lib/not-provided-filter.sh hands each crate's nextest run only that
+# crate's entries, because nextest refuses a `binary()` that names none of its
+# binaries. A regex is anchored and kept to the syntax POSIX ERE and Rust's
+# regex crate read alike (it may contain `|`; the field separators are the
+# line's last two), so ci/test/lane-not-provided-test.sh can evaluate it.
+#
 # The lane is the id of the job that runs the test, optionally followed by a
 # parenthesised note. ci/test/lane-not-provided-test.sh checks that every
-# filterset names a test binary that exists and every lane names a job in
-# .github/workflows/; there is no "runs nowhere" entry.
+# target exists in one crate, every regex matches a test there, and every lane
+# names a job in .github/workflows/; there is no "runs nowhere" entry. A
+# backend-manager entry's lane selects its tests from this same line
+# (`ci/lib/not-provided-filter.sh --lane <job>`), so the lane that excludes a
+# test and the lane that runs it cannot disagree about which tests those are.
+
+# ── db-backend (src/db-backend/tests/) ──
 
 binary(ada_mcr_streaming_flow_test)     | ct-mcr, ct-native-replay | mcr-dap-flow
 binary(c_mcr_streaming_flow_test)       | ct-mcr, ct-native-replay | mcr-dap-flow
@@ -27,12 +44,14 @@ binary(nim_mcr_streaming_flow_test)     | ct-mcr, ct-native-replay | mcr-dap-flo
 binary(pascal_mcr_streaming_flow_test)  | ct-mcr, ct-native-replay | mcr-dap-flow
 binary(rust_mcr_streaming_flow_test)    | ct-mcr, ct-native-replay | mcr-dap-flow
 binary(mcr_streaming_unified_reader_test) | ct-mcr, ct-native-replay | mcr-dap-flow
+binary(native_calltrace_jump_test) and test(/^c_mcr_[a-z0-9_]+$/) | ct-mcr (CPUID faulting), ct-native-replay | mcr-dap-flow
 
 binary(go_flow_integration)             | rr, ct-native-replay, dlv | rr-backend-tests (cross-repo-tests.yml)
 binary(lean_flow_integration)           | rr, ct-native-replay | rr-backend-tests (cross-repo-tests.yml)
 binary(nim_flow_integration)            | rr, ct-native-replay | rr-backend-tests (cross-repo-tests.yml)
 binary(rust_flow_integration)           | rr, ct-native-replay | rr-backend-tests (cross-repo-tests.yml)
 binary(origin_rr_smoke)                 | rr, ct-native-replay | rr-backend-tests (cross-repo-tests.yml)
+binary(native_calltrace_jump_test) and test(/^(c|go)_rr_[a-z0-9_]+$/) | rr, ct-native-replay, dlv | rr-backend-tests (cross-repo-tests.yml)
 
 binary(origin_aiken_dap_test)           | codetracer-cardano-recorder | recorder-tests (cross-repo-tests.yml)
 binary(origin_cairo_dap_test)           | codetracer-cairo-recorder | recorder-tests (cross-repo-tests.yml)
@@ -62,3 +81,27 @@ binary(solidity_flow_dap_test)          | codetracer-evm-recorder | recorder-tes
 binary(solidity_flow_integration)       | codetracer-evm-recorder | recorder-tests (cross-repo-tests.yml)
 binary(sway_flow_dap_test)              | codetracer-fuel-recorder | recorder-tests (cross-repo-tests.yml)
 binary(tolk_flow_dap_test)              | codetracer-ton-recorder | recorder-tests (cross-repo-tests.yml)
+
+# ── backend-manager (src/backend-manager/tests/) ──
+#
+# real_recording_integration's rr tests: every test that calls
+# `check_rr_prerequisites()`, which fails without CODETRACER_RR_BACKEND_PATH
+# (the codetracer-native-backend checkout), rr, ct-native-replay and
+# replay-server. They are spelled out by name and prefix rather than as
+# `^test_real_rr_`, because test_real_rr_mcp_error_actionable needs only
+# replay-server and runs here. ci/test/lane-not-provided-test.sh checks that
+# these entries select exactly the tests that call the probe. rr-backend-tests
+# runs them: `scripts/run-cross-repo-tests.sh backend-manager-rr`.
+
+binary(real_recording_integration) and test(/^test_real_rr_(session|trace|dap|navigate|locals|evaluate|stack|breakpoint|remove|reverse|multiple|flow|calltrace|search|events|terminal|single|query|example)_[a-z0-9_]+$/) | rr, ct-native-replay, codetracer-native-backend | rr-backend-tests (cross-repo-tests.yml)
+binary(real_recording_integration) and test(/^test_real_rr_mcp_(trace_info|exec_script|exec_script_f64_locals|list_source_files|read_source_file|resources_list|resource_read_info|resource_read_source|response_timing)$/) | rr, ct-native-replay, codetracer-native-backend | rr-backend-tests (cross-repo-tests.yml)
+binary(real_recording_integration) and test(/^test_cli_trace_(info_rr|query_rr_[a-z0-9_]+)$/) | rr, ct-native-replay, codetracer-native-backend | rr-backend-tests (cross-repo-tests.yml)
+binary(real_recording_integration) and test(/^test_rr_trace_opens_without_trace_metadata_json$/) | rr, ct-native-replay, codetracer-native-backend | rr-backend-tests (cross-repo-tests.yml)
+
+# The tests that record with `ct-mcr` (`find_ct_mcr()`), which refuses a host
+# without CPUID faulting. meta_dat_real_mcr_recording's other tests are the
+# meta_dat / trace_metadata unit tests it compiles in through #[path]; they
+# need nothing and run here. mcr-dap-flow runs these: `just test-mcr-dap-flow`.
+
+binary(real_recording_integration) and test(/^mcp_exec_script_goto_geid_native_recording$/) | ct-mcr (CPUID faulting), ct-native-replay | mcr-dap-flow
+binary(meta_dat_real_mcr_recording) and test(/^a_native_recording_and_each_of_its_slices_name_the_recording$/) | ct-mcr (CPUID faulting) | mcr-dap-flow

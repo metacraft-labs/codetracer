@@ -224,7 +224,8 @@ proc openHarness(tracePath: string): SourceHarness =
   ## per working-tree policy.
   let session = newHeadlessDebugSession(tracePath, findReplayServer())
   let vm = createSourceVM(session.session.store, session.session.editorVM)
-  vm.setViewport(height = 12, overscan = 4)
+  vm.setOverscan(4)
+  vm.setViewport(vm.viewport.withRows(12))
   let backendService = session.backend.toBackendService()
   SourceHarness(
     session: session,

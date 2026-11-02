@@ -239,13 +239,13 @@ ARMS = [
         "branch that chooses the text."),
 
     Arm("G7", SHELL,
-        "      leaf.kind = if classified.kind == prContributed: glkContributed\n"
-        "                  else: glkUnloadedExtension",
-        "      leaf.kind = glkContributed",
+        "    result.kind = if classified.kind == prContributed: glkContributed\n"
+        "                    else: glkUnloadedExtension",
+        "    result.kind = glkContributed",
         SUITE_SPLIT,
         "a contributed pane from an unloaded extension keeps its slot",
-        "      let classified = classify(PaneRef(kind: prContributed, id: slot.pane),",
-        "      let classified = classify(PaneRef(kind: prContributed, id: slot.pane),  # ctl",
+        "    let classified = classify(PaneRef(kind: prContributed, id: slot.pane),",
+        "    let classified = classify(PaneRef(kind: prContributed, id: slot.pane),  # ctl",
         "This is the mistake the first draft of `leavesFor` actually made: "
         "being IN THE LAYOUT and being provided by a LOADED EXTENSION are "
         "different questions, and only `classify` asks the second."),

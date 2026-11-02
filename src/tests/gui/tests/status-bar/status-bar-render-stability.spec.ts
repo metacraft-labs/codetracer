@@ -52,13 +52,29 @@
  * `Cannot read properties of null (reading 'scroller')` four times on every
  * launch.
  *
+ * **Readiness, and why this file does not use `readyOnEntryTest`.**  The
+ * shared fixture waits for `.location-path` to be *visible*.  Since
+ * `d83de2484` the status-bar designer hides `.location-path` and
+ * `#copy-path-image` on purpose ("HIDDEN FOR NOW" in `status_bar.styl`), and
+ * whether they come back is a design decision that is still open (codetracer-pm
+ * `issues/2026-10-20-ready-on-entry-waits-for-a-location-path-the-status-bar-now-hides-by-design.md`
+ * and `issues/2026-10-20-footer-visibility-guard-red-after-ui-design-work.md`).
+ * Footer VISIBILITY has its own guards — `footer-visibility-css-guard.spec.ts`
+ * and `status-bar-footer-contract.spec.ts` — which stay red as the trackers of
+ * that decision.  This file is about render CHURN, which does not depend on
+ * whether the path is painted: the element is still rendered, still carries
+ * the `path:line#ticks` text, and is still patched or rebuilt like every other
+ * node of the shell.  So it reads the two facts the fixture's visibility wait
+ * stands for directly (`readyOnEntryWithHiddenPath`): the entry location was
+ * reported (`.location-path` attached with non-empty text — it is rendered
+ * only once `locationText` is non-empty) and the footer is laid out (the
+ * test-certificate readout, the bar's visible right-hand readout under the
+ * current design, has a box).  The node-identity case tags that readout too,
+ * so in-place patching is proven on a node the user actually sees.
+ *
  * No mocks: a real JavaScript recording opened by the real Electron app.
  */
-import {
-  test,
-  expect,
-  readyOnEntryTest as readyOnEntry,
-} from "../../lib/fixtures";
+import { test, expect, READY_ON_ENTRY_BUDGET_MS } from "../../lib/fixtures";
 import { recordJsTraceFixture } from "../../lib/js-trace-fixture";
 import {
   BOTTOM_STRIP_IN_FOOTER_SELECTOR,
@@ -98,6 +114,33 @@ test.use({ sourcePath: fixture.traceDir, launchMode: "trace-folder" });
  */
 const MAX_SHELL_REBUILDS = 8;
 
+/** The test-certificate readout: always rendered, and visible under the
+ * current design (with the path hidden it is the bar's last readout). */
+const CERTIFICATE_READOUT = "#status-base .test-certificate-status";
+
+/**
+ * The launch reached its entry location and the footer is laid out, read
+ * without requiring `.location-path` to be painted (see the file header).
+ *
+ * Not `state: "attached"` alone, which `readyOnEntryTest`'s comment rightly
+ * warns against: the element exists before the bar has a box.  The visible
+ * certificate readout in the same `#status-base` is what says the bar has one.
+ */
+async function readyOnEntryWithHiddenPath(
+  page: import("@playwright/test").Page,
+): Promise<void> {
+  const path = page.locator(".location-path");
+  await path.waitFor({ state: "attached", timeout: READY_ON_ENTRY_BUDGET_MS });
+  await expect
+    .poll(async () => ((await path.textContent()) ?? "").trim(), {
+      timeout: READY_ON_ENTRY_BUDGET_MS,
+    })
+    .not.toBe("");
+  await page
+    .locator(CERTIFICATE_READOUT)
+    .waitFor({ state: "visible", timeout: READY_ON_ENTRY_BUDGET_MS });
+}
+
 interface StatusRenderStats {
   requests: number;
   passes: number;
@@ -125,7 +168,7 @@ test.describe("status bar render stability", () => {
   test.setTimeout(180_000);
 
   test("verify_status_bar_nodes_survive_a_redraw", async ({ ctPage }) => {
-    await readyOnEntry(ctPage);
+    await readyOnEntryWithHiddenPath(ctPage);
 
     // Tag the nodes whose identity the milestone cares about.  A tag set
     // from the page survives only as long as the element object does: if
@@ -138,6 +181,9 @@ test.describe("status bar render stability", () => {
         "#file-info-status",
         "#auto-hide-bottom-strip",
         "#auto-hide-collapsed-icon-zone",
+        // The visible right-hand readout under the current design (literal:
+        // this list is also evaluated inside the page).
+        "#status-base .test-certificate-status",
       ];
       const missing: string[] = [];
       for (const selector of ids) {
@@ -202,6 +248,8 @@ test.describe("status bar render stability", () => {
         "#file-info-status",
         "#auto-hide-bottom-strip",
         "#auto-hide-collapsed-icon-zone",
+        // The certificate readout, tagged above.
+        "#status-base .test-certificate-status",
       ].sort(),
     );
   });
@@ -209,7 +257,7 @@ test.describe("status bar render stability", () => {
   test("verify_status_render_count_is_bounded_on_trace_open", async ({
     ctPage,
   }) => {
-    await readyOnEntry(ctPage);
+    await readyOnEntryWithHiddenPath(ctPage);
 
     // Give the startup bursts (`refreshStatusFromDebugger` polls ten times
     // at 500ms, and the replay backend settles the entry location over a
@@ -250,7 +298,7 @@ test.describe("status bar render stability", () => {
   test("verify_bottom_strip_renders_its_tabs_as_direct_children", async ({
     ctPage,
   }) => {
-    await readyOnEntry(ctPage);
+    await readyOnEntryWithHiddenPath(ctPage);
 
     // The strip is in the footer, per Auto-Hide-Panes.md §3.1.
     await expect(
@@ -294,7 +342,7 @@ test.describe("status bar render stability", () => {
     ctPage,
     consoleErrors,
   }) => {
-    await readyOnEntry(ctPage);
+    await readyOnEntryWithHiddenPath(ctPage);
     // Let the panels finish initialising: the DataTable null dereference
     // this guards fired while the event log was still building its tables.
     await ctPage.waitForTimeout(8_000);

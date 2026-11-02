@@ -40,22 +40,43 @@ func gutterLineOf*(text: string): int =
   if digits.len == 0: -1 else: parseInt(digits)
 
 func valueCommentName*(text: string): string =
-  ## The name an inline-value comment starts with — `x` in `/* x: 1 */`, or
-  ## the legible part of it when the pane clipped the comment (`/* re…`) — or
-  ## "". Read from the COMMENT, never from the code: a value is shown because
+  ## The name an inline-value CHIP's text starts with, as OCR reads the chip,
+  ## or "".
+  ##
+  ## Until 2026-10-17 the window drew a row's values as a C comment after the
+  ## code, `/* x: 1 */`, and this read the name out of the comment. The window
+  ## now draws them as the desktop's flow does: one rounded `#1b1b1b` box per
+  ## value, the name (#919191), then the value (bold #f3f3f3), led by a 30 px
+  ## "view more" eye cell when the value is long. In the row's own OCR the
+  ## chips are spelled exactly like more code (`results.append(value) results
+  ## @[] value 5`), so the window record finds each box BY ITS GROUND, leaves
+  ## the eye cell out, and OCRs the box alone; this parses that text, whose
+  ## measured spellings are `mul <function mul at Ox7fffe862ch..`,
+  ## `__builtins__ al("__name__", "builti`, `results a[]`, `value &` (a bold
+  ## `5`) and `<stdout> CHNCCKS`.
+  ##
+  ## THE GRAMMAR: `name SPACE value` — `name` an identifier, or an event's
+  ## `<identifier>` — and nothing in front of it. Anything else is "", not a
+  ## guess: a chip read with its eye cell (`& mul <fun…`), a bare word with no
+  ## value, or code (`results.append(value) …`, whose identifier runs into a
+  ## `.`). Read from the CHIP, never from the row: a value is shown because
   ## its variable is named on the line, so "the name appears in the row" is
   ## true of every row that has one whether or not a value was drawn.
-  var at = text.find("/*")
-  while at >= 0:
-    var i = at + 2
-    while i < text.len and text[i] == ' ': inc i
-    var name = ""
-    while i < text.len and (text[i].isAlphaNumeric or text[i] == '_'):
-      name.add text[i]
-      inc i
-    if name.len > 0: return name
-    at = text.find("/*", at + 2)
-  ""
+  var i = 0
+  var name = ""
+  if i < text.len and text[i] == '<':
+    name.add '<'
+    inc i
+  if i >= text.len or not (text[i].isAlphaAscii or text[i] == '_'): return ""
+  while i < text.len and (text[i].isAlphaNumeric or text[i] == '_'):
+    name.add text[i]
+    inc i
+  if name[0] == '<':
+    if i >= text.len or text[i] != '>': return ""
+    name.add '>'
+    inc i
+  if i + 1 < text.len and text[i] == ' ' and text[i + 1] != ' ': name
+  else: ""
 
 func legiblyNames*(comment, name: string): bool =
   ## Whether a value comment's legible name is `name` — all of it, or, when
@@ -63,9 +84,24 @@ func legiblyNames*(comment, name: string): bool =
   comment.len >= min(2, name.len) and name.startsWith(comment)
 
 when isMainModule:
-  doAssert valueCommentName("113 return results/* re...") == "re"
-  doAssert valueCommentName("56 \"*\": mul/* mul: <fun...") == "mul"
-  doAssert valueCommentName("45 \"\"\"Floor division. *//*") == ""
+  # Chips as OCR read them off the 2026-10-17 window frames.
+  doAssert valueCommentName("mul <function mul at Ox7fffe862ch..") == "mul"
+  doAssert valueCommentName("__builtins__ al(\"__name__\", \"builti") ==
+    "__builtins__"
+  doAssert valueCommentName("OPERATIONS @[(\"+\", <function add at Ox7f.") ==
+    "OPERATIONS"
+  doAssert valueCommentName("results a[]") == "results"
+  doAssert valueCommentName("value &") == "value"
+  doAssert valueCommentName("<stdout> CHNCCKS") == "<stdout>"
+  # Not chips: the row's own spelling, a chip read with its eye cell, a word
+  # with no value, the retired comment spelling, nothing.
+  doAssert valueCommentName("results.append(value) results @[] value &") == ""
+  doAssert valueCommentName("& mul <function mul at Ox7fffe862ch..") == ""
+  doAssert valueCommentName("results") == ""
+  doAssert valueCommentName("results ") == ""
+  doAssert valueCommentName("<stdout CHNCCKS") == ""
+  doAssert valueCommentName("/* mul: <fun...") == ""
+  doAssert valueCommentName("") == ""
   doAssert legiblyNames("re", "results")
   doAssert not legiblyNames("r", "results")
   doAssert not legiblyNames("mu", "results")

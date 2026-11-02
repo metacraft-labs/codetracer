@@ -15,7 +15,10 @@ COMMAND_INPUT_BOTTOM = COMMAND_INPUT_HEIGHT
   align-items: flex-start
   justify-content: center
   padding-top: 10vh
-  background: rgba(27, 27, 27, 0.96)
+  // The window's ground, nearly opaque, behind the palette: `rgba(27, 27, 27,
+  // 0.96)` was exactly this token's Dark value, so the dark sheets are
+  // unchanged and the light one gets its own ground instead of a black screen.
+  background: rgba(colors-ui-surface-primary-default, 0.96)
   box-sizing: border-box
   font-family: "SpaceGrotesk", sans-serif
 
@@ -147,11 +150,16 @@ COMMAND_INPUT_BOTTOM = COMMAND_INPUT_HEIGHT
     background: colors-ui-surface-primary-secondary !important
     padding-left: 8px !important
 
+  // The agent prompt's text and placeholder: pale cyan on the dark input,
+  // 1.2:1 on the light one. The dark theme keeps it (no token has that Dark
+  // value; `by-mode`, defaults.styl); the light one takes the information
+  // text token, the accent the agent panes' links and toggles take there
+  // (`--accent-color`, agent_workspace.styl).
   .agent-command-input
-    color: #A5F3FC !important
+    color: by-mode(#A5F3FC, colors-ui-text-information-primary) !important
 
     &::placeholder
-      color: #a5f3fc
+      color: by-mode(#a5f3fc, colors-ui-text-information-primary)
 
   #command-results
     width: 100%

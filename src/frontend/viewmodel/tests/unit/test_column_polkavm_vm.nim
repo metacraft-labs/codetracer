@@ -30,6 +30,7 @@
 import std/[json, options, os, osproc, unittest]
 
 import ../../headless_session
+import ../../../../common/replay_server_path   # the one search order
 import recorder_gate
 
 # ---------------------------------------------------------------------------
@@ -51,21 +52,12 @@ proc repoRoot(): string =
     "could not locate codetracer repo root from " & currentSourcePath())
 
 proc findReplayServer(): string =
-  ## Mirrors ``test_column_breakpoint_vm.nim``.
-  let envBin = getEnv("REPLAY_SERVER_BIN", "")
-  if envBin.len > 0 and fileExists(envBin):
-    return envBin
-  let candidates = [
-    repoRoot() / "src" / "build-debug" / "bin" / "replay-server",
-    repoRoot() / "src" / "db-backend" / "target" / "debug" / "replay-server",
-    repoRoot() / "src" / "db-backend" / "target" / "release" / "replay-server",
-  ]
-  for c in candidates:
-    if fileExists(c):
-      return c
-  raise newException(IOError,
-    "missing replay-server; set REPLAY_SERVER_BIN or build via " &
-    "`cd src/db-backend && cargo build`")
+  ## The engine `src/common/replay_server_path` resolves -- the one search
+  ## order the native front-ends use too -- or an `IOError` naming every path
+  ## searched, because this suite cannot run without one.
+  result = locateReplayServer()
+  if result.len == 0:
+    raise newException(IOError, missingReplayServerMessage())
 
 proc findPolkavmRecorder(): string =
   ## Mirrors ``find_polkavm_recorder`` in ``test_harness/mod.rs``.

@@ -1,5 +1,5 @@
 ## test_plat50_gpui_plan.nim — PLAT-50 on GPUI: the desktop's click
-## behaviours, colours, centred omnibox and dividers in the WINDOW, read from
+## behaviours, colours, omnibox and dividers in the WINDOW, read from
 ## the shipped `codetracer-gpui`'s window plan (`--report-window-plan`) after
 ## `--window-ops` presses.
 ##
@@ -26,8 +26,9 @@
 ##   * K27 / K28 — a value expands; a variable's menu;
 ##   * (K30, the timeline's track, went with the Timeline panel — PLAT-51;)
 ##   * K17 / K18 / K19 — Files (on `multi_root`): a file opens in the editor
-##     (its tab names it), a folder collapses, a node opens no menu (the
-##     desktop has none);
+##     (its tab names it), a folder collapses, a node opens the Files pane's
+##     menu — Create, Rename, Delete read-only in a replay with their reason,
+##     Edit opening the file;
 ##   * K23 / K33 — an argument pinned to the scratchpad, its close button;
 ##   * K26 — an event-log header orders the log, again reverses it;
 ##   * K14 / K15 — Alt+click anchors a column breakpoint, Ctrl+Alt+click and
@@ -41,20 +42,23 @@
 ##
 ## And the chrome (deliverables 4-6): the band and the window on the
 ## desktop's ground (ui/surface/primary/default), panes on the panel, the
-## omnibox the desktop's `clamp(24em, 24vw, 40em)` and centred, inside a
-## ui/border/secondary border; a right-click menu on the dropdown surface in
+## omnibox the desktop's `clamp(24em, 24vw, 40em)` after the controls
+## (centred where they leave room), inside a ui/border/secondary border; a right-click menu on the dropdown surface in
 ## ui/border/primary; `--dividers=subtle` draws a line in each gap between
 ## side-by-side panes, the default none.
 ##
 ## No mocks: the shipped binary, real recordings, a real `replay-server`.
 
+import replay_prerequisite
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
+import ./gpui_child_env
 from std/unicode import runeLen
 
 import gpui/chrome
 import gpui/window_geometry
 import gpui/window_top_bar
 import styles/generated/design_tokens
+from viewmodels/state_vm import stateEmptyText
 from ../../../common/view_vocabulary/layout_questions import trGutterLineNumber
 
 var CHECKS = 0
@@ -63,7 +67,12 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 108
+  ExpectedAssertions = 121
+    ## The native Top action adds two checks of the actual window plan.
+    ## Four checks keep a file opened from Files through docking and resize.
+    ## K19: 108 -> 115 — a Files node opens the Files pane's menu (its
+    ## entries, kind, the reason drawn on each, a disabled entry, Edit) where
+    ## the case asserted no menu (2).
     ## PLAT-51: 112 -> 108 — the Timeline's K30 case (3) removed with the
     ## pane, and the history / origin read in the pane, not over it (-1).
   CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
@@ -95,8 +104,7 @@ proc windowPlan(ops: string; subject = ""; pre: seq[string] = @[];
   var env = newStringTable()
   for k, v in envPairs():
     env[k] = v
-  env["LD_LIBRARY_PATH"] = shimDir &
-    (if existsEnv("LD_LIBRARY_PATH"): ":" & getEnv("LD_LIBRARY_PATH") else: "")
+  env["LD_LIBRARY_PATH"] = gpuiLibraryPath(shimDir)
   env[StateDirEnvVar] = state
   env["XDG_STATE_HOME"] = state
   # Every other per-user location (trace index, config, caches) of the
@@ -222,7 +230,10 @@ suite "PLAT-50 GPUI: the event log, the editor and the timeline":
   test "an event row goes to the event; a right click shows its content":
     let plan = windowPlan("click:event:1:left")
     ck plan.executionLine == 111
-    ck plan.textOf.contains("tick 68")
+    # The footer's location, the desktop's `path:line#ticks`.
+    var position = ""
+    for n in plan.nodesWith("data-ct-footer-position"): position = n.textOf
+    ck position.endsWith("/calc/main.py:111#68")
     let shown = windowPlan("click:event:2:right")
     let content = shown.nodesWith("data-ct-event-content")
     ck content.len == 1
@@ -323,9 +334,9 @@ suite "PLAT-50 GPUI: the call trace, a tab and the variables":
     let plan = windowPlan("click:tab:vcs:right")
     var labels: seq[string] = @[]
     for (l, _) in plan.menuEntries: labels.add l
-    ck labels == @["Pin to Left", "Pin to Bottom", "Pin to Right", "Close",
+    ck labels == @["Pin to Left", "Pin to Bottom", "Pin to Right", "Pin to Top", "Close",
                    "Maximise container"]
-    ck plan.menuEntries[4][1] == "true"
+    ck plan.menuEntries[5][1] == "true"
     # Maximise: the container alone in the window, then back.
     let full = windowPlan("click:tab:vcs:right,ctx:Maximise container")
     var boxes = 0
@@ -341,6 +352,19 @@ suite "PLAT-50 GPUI: the call trace, a tab and the variables":
     for n in closed.nodesWith("data-ct-tab-pane"):
       if n.attr("data-ct-tab-pane") == "vcs": vcs = true
     ck not vcs
+
+  test "Pin to Top routes the tab menu to the fourth auto-hide edge":
+    let plan = windowPlan("click:tab:vcs:right,ctx:Pin to Top")
+    var topPanes: seq[string] = @[]
+    for strip in plan.nodesWith("data-ct-dock-strip"):
+      if strip.attr("data-ct-dock-strip") == "top":
+        for slot in strip.nodesWith("data-ct-dock-slot"):
+          topPanes.add slot.attr("data-ct-dock-slot")
+    ck topPanes == @["vcs"]
+    var placed = false
+    for n in plan.nodesWith("data-ct-tab-pane"):
+      if n.attr("data-ct-tab-pane") == "vcs": placed = true
+    ck not placed
 
   test "a value expands; a variable's menu":
     let open = windowPlan("click:event:3:left,click:var:EXPRESSIONS:left")
@@ -388,6 +412,16 @@ suite "PLAT-50 GPUI: Files":
       for n in opened.nodesWith("data-ct-tabs"):
         if n.attr("data-ct-tabs").contains("helpers.py"): tabNamesIt = true
       ck tabNamesIt
+      # Realising a different editor viewport must preserve the file the
+      # reader opened. Neither a dock command nor a resize moves execution.
+      for change in [",click:tab:state:right,ctx:Pin to Top", ",resize:1200:900"]:
+        checkpoint(change)
+        let refitted = windowPlan("click:file:" & helpers & ":left" & change, mr)
+        ck refitted.textOf.contains("def add(left, right):")
+        var tabStillNamesIt = false
+        for n in refitted.nodesWith("data-ct-tabs"):
+          if n.attr("data-ct-tabs").contains("helpers.py"): tabStillNamesIt = true
+        ck tabStillNamesIt
       # One press, one row: the folder the file is in heard the press too (a
       # press bubbles) and did NOT collapse — its file is still drawn.
       var stillListed = false
@@ -401,10 +435,28 @@ suite "PLAT-50 GPUI: Files":
       for n in collapsed.nodesWith("data-ct-clicks"):
         if n.attr("data-view-id") == helpers: still = true
       ck not still
-      # No Files menu, as on the desktop.
+      # K19: the Files pane's menu (Filesystem-Pane.md § "Context menu"):
+      # the four entries in the desktop's order, from the shared Files model;
+      # a recording's sources are read-only, the reason drawn beside each
+      # disabled entry; Edit opens the file.
       let menu = windowPlan("click:file:" & helpers & ":right", mr)
-      ck menu.menuEntries.len == 0
-      ck menu.nodesWith("data-ct-context-menu").len == 0
+      ck menu.menuEntries == @[("Create", "false"), ("Rename", "false"),
+                               ("Delete", "false"), ("Edit", "true")]
+      let boxes = menu.nodesWith("data-ct-context-menu")
+      ck boxes.len == 1 and
+        boxes[0].attr("data-ct-context-menu") == "file-tree-node"
+      for n in menu.nodesWith("data-ct-context-entry"):
+        ck n.textOf.contains("A recording's sources are read-only") ==
+          (n.attr("data-ct-context-entry") != "Edit")
+      # A disabled entry runs nothing: the menu stays open.
+      let inert = windowPlan("click:file:" & helpers & ":right,ctx:Delete",
+                             mr)
+      ck inert.menuEntries.len == 4
+      # Edit opens the file in the editor, as a click on its row does.
+      let edited = windowPlan("click:file:" & helpers & ":right,ctx:Edit",
+                              mr, trace = trace)
+      ck edited.menuEntries.len == 0
+      ck edited.textOf.contains("def add(left, right):")
 
 suite "PLAT-50 GPUI: the sweep's other rows":
 
@@ -466,9 +518,11 @@ suite "PLAT-50 GPUI: the sweep's other rows":
                             ":left:ctrl,click:tab:scratchpad:left")
     ck pinned.viewText("scratchpad").len > 0
 
-  test "the Variables tabs, a point, the footer's location, a dock label":
-    let globals = windowPlan("click:statetab:1:left")
-    ck globals.viewText("state.root").startsWith("globals")
+  test "the Variables list, a point, the footer's location, a dock label":
+    let entry = windowPlan("")
+    # One list of variables and watches: `calc` has none at the entry, so
+    # the pane says so in its own words (`stateEmptyText`).
+    ck entry.viewText("state.root") == stateEmptyText()
     var trace = ""
     let points = windowPlan("click:gutter:31:left,click:gutter:36:left," &
       "key:p:control,key:colon" & typed("Breakp") & ",key:enter," &
@@ -492,7 +546,7 @@ suite "PLAT-50 GPUI: the sweep's other rows":
     let labelMenu = windowPlan("label-menu:buildOutput")
     var labels: seq[string] = @[]
     for (l, _) in labelMenu.menuEntries: labels.add l
-    ck labels == @["Pin to Left", "Pin to Right", "Unpin", "Close"]
+    ck labels == @["Pin to Left", "Pin to Right", "Pin to Top", "Unpin", "Close"]
 
   test "the VCS pane: a file's diff, a commit's files":
     let repo = createTempDir("plat50-vcs-gpui-", "") / "repo"
@@ -513,7 +567,7 @@ suite "PLAT-50 GPUI: the sweep's other rows":
 
 suite "PLAT-50 GPUI: the chrome":
 
-  test "the desktop's grounds, a centred bordered omnibox":
+  test "the desktop's grounds, a bordered omnibox after the controls":
     let plan = windowPlan("")
     let band = plan.nodesWith("data-ct-top-bar")
     var bandBg = ""
@@ -526,11 +580,21 @@ suite "PLAT-50 GPUI: the chrome":
     let omni = plan.nodesWith("data-ct-omnibar")
     ck omni.len == 1
     let o = omni[0]
-    ck o.px("w") == omnibarDesktopPx(W)
-    ck o.px("w") == OmnibarDesktopFloorPx          # 24% of 1440 is below it
-    ck abs(o.px("left") + o.px("w") div 2 - W div 2) <= 1
-    # PLAT-51: the EDITOR's ground (it was ui/surface/input/default).
-    ck o.style("bg") == dark(dtEditorThemeGround)
+    # The field: the desktop's `clamp(24em, 24vw, 40em)` slot, less the
+    # input row's inset in it.
+    ck o.px("w") == omnibarDesktopPx(W) - OmnibarFieldInsetPx
+    ck o.px("w") == OmnibarDesktopFloorPx - OmnibarFieldInsetPx  # 24% of 1440 is below it
+    # Centred between equal shares only where the controls leave room; at
+    # 1440 px they do not, so the slot follows them (never over them): the
+    # caption bar's part gap after the last control or tool.
+    var controlsEnd = 0
+    for attribute in ["data-ct-control", "data-ct-tool"]:
+      for n in plan.nodesWith(attribute):
+        controlsEnd = max(controlsEnd, n.px("left") + n.px("w"))
+    ck o.px("left") == controlsEnd + MenuPartGapPx + OmnibarFieldInsetPx
+    # 2026-10-17: the bar's own ground, as the desktop's
+    # `.command-input-row` is measured — the window's (it was the editor's).
+    ck o.style("bg") == chromeOf(crWindowBackground)
     ck o.style("border_color") == dark(dtColorsUiBorderSecondary)
     # No transport control has a ground of its own.
     var groundless = true

@@ -367,7 +367,7 @@ proc runLanguageSmoke(config: LanguageSmokeConfig) =
     calltraceVm.viewportHeight.val = 10
 
     # 3. Locals: populate the store.locals signal so StateVM's
-    #    currentVariables memo (on the default stLocals tab) reflects
+    #    currentVariables memo (the one list, locals first) reflects
     #    the canned locals.
     store.locals.locals.val = config.locals
 
@@ -392,7 +392,7 @@ proc runLanguageSmoke(config: LanguageSmokeConfig) =
       check visible[0].location.file == config.sourceFile
 
     # 3. State panel exposes at least one local on the default tab
-    #    (stLocals).  Each local has a non-empty name (a pre-condition
+    #    (the locals).  Each local has a non-empty name (a pre-condition
     #    the legacy state panel relies on for tooltip/hover identity).
     let vars = stateVm.currentVariables.val
     check vars.len >= 1

@@ -36,6 +36,7 @@ import std/[algorithm, cpuinfo, json, locks, options, os, sets, strutils,
 
 import contracts
 import discovery
+import run_read_capture
 
 type
   PartitionMode* = enum
@@ -370,6 +371,8 @@ type
     resultsLock: ptr Lock
     outcomes: ptr seq[RunUnitOutcome]
     handoff: ptr ResultHandoff
+    capture: ptr ReadCaptureSession
+      ## The read-set capture of the run, or nil (`run_read_capture`).
 
 proc resolveThreadCount*(requested: int): int =
   ## Resolve the effective worker-thread count. An explicit positive
@@ -432,7 +435,8 @@ proc isRunnableUnit*(registry: ProviderRegistry; unit: RunUnit): bool =
   false
 
 proc runUnitOutcome(
-    registry: ptr ProviderRegistry; unit: RunUnit): RunUnitOutcome {.gcsafe.} =
+    registry: ptr ProviderRegistry; unit: RunUnit;
+    capture: ptr ReadCaptureSession = nil): RunUnitOutcome {.gcsafe.} =
   ## Execute one run unit by invoking the owning provider's ``run`` proc with
   ## the unit's scope, and tag the returned events. A missing provider, a
   ## provider with no ``run`` proc, or a provider that declares it cannot run
@@ -485,7 +489,14 @@ proc runUnitOutcome(
       unit.item.file)
     return
 
-  let providerResult = provider.run(unit.scope)
+  # Only a unit whose provider is actually invoked takes part in a read-set
+  # capture: a refused unit above ran nothing and read nothing.
+  beginUnitCapture(capture)
+  var providerResult: ProviderResult[seq[TestEvent]]
+  try:
+    providerResult = provider.run(unit.scope)
+  finally:
+    endUnitCapture()
   result.events = providerResult.value
   result.diagnostics = providerResult.diagnostics
 
@@ -496,7 +507,7 @@ proc workerLoop(args: WorkerArgs) =
     var unit: RunUnit
     if not nextUnit(args.queue, unit):
       break
-    let outcome = runUnitOutcome(args.registry, unit)
+    let outcome = runUnitOutcome(args.registry, unit, args.capture)
     acquire(args.resultsLock[])
     args.outcomes[].add outcome
     release(args.resultsLock[])
@@ -545,9 +556,14 @@ proc runUnits*(
     registry: var ProviderRegistry;
     units: seq[RunUnit];
     partition: PartitionSpec = emptyPartition();
-    threads = 0): TestRunResult =
+    threads = 0;
+    capture: ptr ReadCaptureSession = nil): TestRunResult =
   ## Run ``units`` in parallel, honouring the partition allow-list and the
   ## requested thread count, and aggregate the per-unit event streams.
+  ##
+  ## ``capture``, when not nil, runs every process a provider launches under
+  ## io-mon for the run's read set (``run_read_capture``); it must outlive
+  ## the call. Only ``certificate_issuance.runAndAttest`` passes one.
   ##
   ## ``registry`` is taken ``var`` because the worker threads need a stable
   ## ``ptr`` into the live provider closures; the registry itself is not
@@ -588,7 +604,8 @@ proc runUnits*(
     registry: addr registry,
     resultsLock: addr resultsLock,
     outcomes: addr outcomes,
-    handoff: addr handoff)
+    handoff: addr handoff,
+    capture: capture)
 
   var workers = newSeq[Thread[WorkerArgs]](workerCount)
   let wallStart = epochTime()
@@ -701,6 +718,37 @@ proc summarize*(runResult: TestRunResult): TestRunSummary =
         inc result.failed
       of tsSkipped:
         inc result.skipped
+
+proc runEvents*(runResult: TestRunResult): seq[TestEvent] =
+  ## Every ``TestEvent`` the run's providers produced, in a DETERMINISTIC
+  ## order: units sorted by test id (then provider id), and each unit's own
+  ## events in the order its provider emitted them.
+  ##
+  ## ``outcomes`` is in completion order, which a worker pool makes different
+  ## on every run; a consumer that folds these events — the desktop Test
+  ## Results pane does — must not see two identical runs as two different
+  ## streams, and a reader comparing two runs must be able to ``diff`` them.
+  ## A unit's internal order is left alone because it is meaningful
+  ## (``test-started`` before ``test-finished``, a ``failure`` before the
+  ## ``test-finished`` that closes it). ``sort`` is a stable merge sort, so
+  ## units with equal keys keep their relative order too.
+  var ordered = runResult.outcomes
+  ordered.sort(proc(a, b: RunUnitOutcome): int =
+    result = cmp(a.testId, b.testId)
+    if result == 0:
+      result = cmp(a.providerId, b.providerId))
+  for outcome in ordered:
+    for event in outcome.events:
+      result.add event
+
+proc runEventsJsonLines*(runResult: TestRunResult): string =
+  ## ``runEvents`` as JSON Lines — one ``contracts.eventToJsonLine`` per line,
+  ## each terminated by ``\n`` — which is what ``ct-test test run --events
+  ## <path>`` writes. The serialiser is the contracts one and nothing else, so
+  ## the reader's ``testEventFromJson`` is its exact inverse.
+  for event in runEvents(runResult):
+    result.add eventToJsonLine(event)
+    result.add '\n'
 
 proc unrunnableByProvider*(runResult: TestRunResult):
     seq[tuple[providerId: string; units: int]] =

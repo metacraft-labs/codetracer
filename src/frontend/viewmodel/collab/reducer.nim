@@ -503,8 +503,6 @@ proc applyScalarRegister(state: var SharedSessionViewState; op: ViewOpEnvelope):
     state.calltrace.selectedEntry.applyRegister(value, op.stamp)
   of "calltrace.searchQuery":
     state.calltrace.searchQuery.applyRegister(value, op.stamp)
-  of "statePane.activeTab":
-    state.statePane.activeTab.applyRegister(value, op.stamp)
   of "statePane.selectedPath":
     state.statePane.selectedPath.applyRegister(value, op.stamp)
   of "editor.activeDocumentId":
@@ -523,9 +521,6 @@ proc applyTypedScalar(state: var SharedSessionViewState; op: ViewOpEnvelope): bo
   of vokSetCalltraceSearch:
     state.calltrace.searchQuery.applyRegister(
       getStrField(op.payload, ["query", "value"]), op.stamp)
-  of vokSetStateTab:
-    state.statePane.activeTab.applyRegister(
-      getStrField(op.payload, ["tab", "value"]), op.stamp)
   else:
     false
 
@@ -688,7 +683,7 @@ const
 func mergeFamilyOf*(kind: ViewOpKind): MergeFamily =
   case kind
   of vokSetRegister, vokSetFocusedPanel, vokSetCalltraceSelection,
-      vokSetCalltraceSearch, vokSetStateTab, vokFollowParticipant,
+      vokSetCalltraceSearch, vokFollowParticipant,
       vokUnfollowParticipant:
     mfLww
   of vokToggleCalltraceExpansion, vokToggleStatePath, vokExpand, vokCollapse,
@@ -761,7 +756,7 @@ proc requiredCapability(op: ViewOpEnvelope): tuple[needed: bool, cap: Capability
   ## rather than named and duplicated.
   case op.kind
   of vokSetRegister, vokSetFocusedPanel, vokSetCalltraceSelection,
-      vokSetCalltraceSearch, vokSetStateTab, vokToggleCalltraceExpansion,
+      vokSetCalltraceSearch, vokToggleCalltraceExpansion,
       vokToggleStatePath, vokExpand, vokCollapse:
     (true, capMutateSharedViewState, op.opTargetPath(""))
   of vokAddWatch, vokEditWatch, vokRemoveWatch, vokMoveWatch:
@@ -866,8 +861,7 @@ proc applyViewOp*(document: var SharedSessionDocument; op: ViewOpEnvelope): Appl
     if not document.state.hasRequiredCapability(op):
       return rejected("principal lacks capability for scalar register mutation")
     changed = document.state.applyScalarRegister(op)
-  of vokSetFocusedPanel, vokSetCalltraceSelection, vokSetCalltraceSearch,
-      vokSetStateTab:
+  of vokSetFocusedPanel, vokSetCalltraceSelection, vokSetCalltraceSearch:
     if not document.state.hasRequiredCapability(op):
       return rejected("principal lacks capability for scalar register mutation")
     changed = document.state.applyTypedScalar(op)

@@ -14,7 +14,9 @@
 //! different container type. Three readers of one format is how they drifted,
 //! so this suite pins the db-backend's to the library's on the SAME bytes:
 //! same decoded records, same refusal message, and every committed recording
-//! still opens.
+//! still opens, through both. The same holds for a container that carries
+//! some but not all of the four tables, which both refuse in the same words
+//! (`internal-files.md` §"Interning Tables": all four or none).
 //!
 //! No mocks: the containers are real CTFS files read back by both production
 //! readers.
@@ -116,6 +118,58 @@ fn write_container(dir: &Path, name: &str, bit12: bool, funcs: &[Vec<u8>], types
 fn db_backend_open(ct: &Path) -> Result<Option<InterningTables>, String> {
     let mut ctfs = CtfsReader::open(ct).expect("the container opens");
     InterningTables::open_from_ctfs(&mut ctfs)
+}
+
+/// The four interning tables are carried all four or none
+/// (`internal-files.md` §"Interning Tables"). A container with any strict
+/// subset of their eight members is refused by both readers with the same
+/// message, naming what it carries and what it lacks; all eight and none open.
+#[test]
+fn a_partial_table_set_is_refused_with_the_library_readers_message() {
+    const MEMBERS: [&str; 8] = codetracer_ctfs::interning_set::INTERNING_TABLE_MEMBERS;
+    let dir = tempfile::tempdir().unwrap();
+    let meta = serialize_meta_dat(&MetaDat {
+        version: META_DAT_VERSION,
+        flags: 0,
+        recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_owned(),
+        program: "partial".to_owned(),
+        args: vec![],
+        workdir: String::new(),
+        recorder_id: "test".to_owned(),
+        ext_flags: 0,
+        mcr: None,
+        replay_launch: None,
+        layout_snapshot: None,
+        filter_provenance: vec![],
+        has_filter_provenance: false,
+    });
+    let empty_off = 0u64.to_le_bytes();
+    let mut refused = 0;
+    for mask in 0u32..256 {
+        let mut files: Vec<(&str, &[u8])> = vec![("meta.dat", &meta)];
+        for (i, name) in MEMBERS.iter().enumerate() {
+            if mask & (1 << i) != 0 {
+                files.push((name, if name.ends_with(".off") { &empty_off } else { &[] }));
+            }
+        }
+        let ct = dir.path().join(format!("set-{mask:03}.ct"));
+        write_minimal_ctfs(&ct, &files).expect("write the container");
+        let library = open_interning_tables(&ct).map(|t| t.is_some());
+        let ours = db_backend_open(&ct).map(|t| t.is_some());
+        assert_eq!(
+            ours, library,
+            "set {mask:08b}: the db-backend verdict must be the library reader's"
+        );
+        let want = codetracer_ctfs::interning_set::interning_set_refusal(|n| files.iter().any(|(f, _)| *f == n));
+        match want {
+            Some(message) => {
+                assert_eq!(ours, Err(message), "set {mask:08b}");
+                refused += 1;
+            }
+            None => assert_eq!(ours, Ok(mask == 255), "set {mask:08b}: all eight or none opens"),
+        }
+    }
+    assert_eq!(refused, 254);
 }
 
 /// A bare-name `funcs.dat` record in a bit-12-clear container is refused, and
@@ -262,33 +316,16 @@ const NOT_YET_RE_RECORDED: &[(&str, &str)] = &[
         "examples/recordings/mcr/ios-arm64/trace-portable.ct",
         "exported from ios-arm64/trace.ct, which must be re-recorded first",
     ),
+    // Not recordings to re-record: the version-4 originals the converter in
+    // tools/ctfs-v4-to-v5 regenerates the eme5 fixtures from. They stay at
+    // version 4, and the same container-version refusal is all they may get.
     (
-        "examples/recordings/mcr/macos-arm64/emulator/eme5/null_main.ct",
-        "re-recorded only on macOS, by ct_cli/tests/record_macos_*.nim in codetracer-native-recorder",
+        "examples/recordings/tools/ctfs-v4-to-v5/testdata/null_main.v4.ct",
+        "the version-4 original of eme5/null_main.ct, kept as the converter's input",
     ),
     (
-        "examples/recordings/mcr/macos-arm64/emulator/eme5/one_puts.ct",
-        "re-recorded only on macOS, by ct_cli/tests/record_macos_*.nim in codetracer-native-recorder",
-    ),
-    (
-        "examples/recordings/mcr/macos-arm64/emulator/eme5_inject/one_write.ct",
-        "re-recorded only on macOS, by ct_cli/tests/record_macos_*.nim in codetracer-native-recorder",
-    ),
-    (
-        "examples/recordings/mcr/macos-arm64/emulator/eme5_predyld/one_write.ct",
-        "re-recorded only on macOS, by ct_cli/tests/record_macos_*.nim in codetracer-native-recorder",
-    ),
-    (
-        "examples/recordings/mcr/macos-arm64/emulator/eme_m9c_2006/one_write.ct",
-        "re-recorded only on macOS, by ct_cli/tests/record_macos_*.nim in codetracer-native-recorder",
-    ),
-    (
-        "examples/recordings/mcr/windows-x86_64/trace.ct",
-        "re-recorded only on Windows in a VS Developer shell (mcr/windows-x86_64/regenerate.ps1)",
-    ),
-    (
-        "examples/recordings/mcr/windows-x86_64/trace-portable.ct",
-        "exported from windows-x86_64/trace.ct, which must be re-recorded first",
+        "examples/recordings/tools/ctfs-v4-to-v5/testdata/one_puts.v4.ct",
+        "the version-4 original of eme5/one_puts.ct, kept as the converter's input",
     ),
 ];
 
@@ -343,9 +380,15 @@ fn every_committed_recording_opens() {
             continue;
         }
         let mut ctfs = CtfsReader::open(ct).unwrap_or_else(|e| panic!("{}: container: {e}", ct.display()));
-        if let Some(tables) =
-            InterningTables::open_from_ctfs(&mut ctfs).unwrap_or_else(|e| panic!("{}: {e}", ct.display()))
-        {
+        let ours = InterningTables::open_from_ctfs(&mut ctfs);
+        let library = open_interning_tables(ct);
+        assert_eq!(
+            ours.as_ref().map(Option::is_some),
+            library.as_ref().map(Option::is_some),
+            "{}: the db-backend and the library reader disagree",
+            ct.display()
+        );
+        if let Some(tables) = ours.unwrap_or_else(|e| panic!("{}: {e}", ct.display())) {
             assert!(
                 !tables.paths.is_empty(),
                 "{}: interning tables with no paths",

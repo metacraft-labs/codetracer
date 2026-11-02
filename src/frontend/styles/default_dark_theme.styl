@@ -123,6 +123,31 @@ CURRENT_LINE_BG = rgba(#3A3A3A, 0.7)
 
 TRACEPOINT_HAMBURGER_ICON = url('../../public/resources/tracepoints/trace_hamburger_dark.svg')
 
+// Variables `codetracer.styl` reads that this palette did not define, so the
+// dark sheets emitted each one's bare name and the browser dropped the
+// declaration (`ci/test/css-token-resolution.sh` now fails on any such leak).
+//
+// A bare token name below is resolved where the variable is USED, by which
+// time `generated/index` has defined it (the note above PRIMARY_COLOR in
+// default_white_theme.styl explains why this works and `rgba(token, a)` would
+// not).
+//
+// `.scratchpad-value-close`'s icon: the near-white file this palette named
+// until the design-system rework dropped the line; the light palette has its
+// own dark-ink copy.
+ELEMENT_COMPONENT_CLOSE_ICON = url('../../public/resources/shared/element_component_close_dark.svg')
+// `.repl-input-history`, the echoed input rows of the REPL: one step off the
+// panel ground. The same token whose Light value (clay.300) the light palette
+// spells out.
+BACKGROUND_NEIGHBOUR_COLOR = colors-ui-surface-primary-secondary-hover
+// `.recording-head-indicator`, the "Head: N" readout of a live recording on
+// the debug toolbar: information text, so it stands apart from the
+// neighbouring mode label without reading as a warning.
+PRIMARY_COLOR = colors-ui-text-information-primary
+// `.unknown-location .unknown-border`, the rules between the sections of the
+// "no source" pane.
+CALLGRAP_TOOLTIP_BORDER_COLOR = colors-ui-border-secondary
+
 MAIN_BACKGROUND_COLOR = #FFFFFF
 
 TEXT_CONTENT_COLOR = PRIMARY_TEXT_COLOR
@@ -263,10 +288,6 @@ CALLTRACE_TOOLTIP_BACKGROUND_COLOR = DROPDOWN_BASE
 CALLTRACE_TOOLTIP_BORDER_COLOR = #444857
 CALLTRACE_TRACE_LINE_COLOR = #E8E8E8
 CALLTRACE_NEXT_CALL_POINTER_COLOR = #FF9870
-SPEED_VERY_FAST_BG = #52F373
-SPEED_FAST_BG = #4BA02F
-SPEED_MEDIUM_BG = #DCF438
-SPEED_SLOW_BG = #F02D2D
 HIGHLIGHT_COLOR = #4F4F4F
 ERROR_COLOR_FG = #fff
 ERROR_COLOR_BG = #a00
@@ -349,6 +370,12 @@ FLOW_PARALLEL_DUAL_VALUE_COLOR=PRIMARY_TEXT_COLOR
 FLOW_PARALLEL_AFTER_VALUE_BORDER_COLOR=#eee
 FLOW_PARALLEL_AFTER_VALUE_BACKGROUND_COLOR=DROPDOWN_BASE
 FLOW_PARALLEL_AFTER_VALUE_COLOR=PRIMARY_TEXT_COLOR
+// `.flow-iteration-info`, the loop's "iteration N" chip on
+// `editor/surface/primary`: body text, as the light palette's `white` is on
+// that surface's mid-grey Light value.
+FLOW_PARALLEL_ITERATION_INFO_COLOR=colors-ui-text-primary-body
+// `.flow-loop-slider`'s track outline.
+FLOW_PARALLEL_SLIDER_COLOR=colors-ui-border-primary
 
 FLOW_PARALLEL_ERROR_NAME=FLOW_INLINE_BEFORE_ONLY_VALUE_BACKGROUND_COLOR
 FLOW_PARALLEL_ERROR_BOX=DROPDOWN_BASE
@@ -375,6 +402,11 @@ FLOW_INLINE_BACKGROUND_COLOR=BACKGROUND_COLOR
 FLOW_INLINE_ACTIVE_LOOP_ITERATION_BACKGROUND_COLOR=#4F89A0
 FLOW_INLINE_BEFORE_ONLY_VALUE_BACKGROUND_COLOR=#1C5990
 FLOW_INLINE_BEFORE_ONLY_VALUE_COLOR=#BEBFC1
+// `.flow-inline-value-after-only` (flow.styl) is the before-only box's mirror
+// on the same `editor/surface/primary` ground: the same text colour, and the
+// same input-surface shadow, which it casts up-left instead of down-right.
+FLOW_INLINE_AFTER_VALUE_COLOR=FLOW_INLINE_BEFORE_ONLY_VALUE_COLOR
+FLOW_INLINE_BEFORE_VALUE_BACKGROUND_COLOR=colors-ui-surface-input-default
 
 FLOW_CONDITION_TAKEN = #16653489
 FLOW_CONDITION_NOT_TAKEN = #991b1b4d

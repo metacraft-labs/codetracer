@@ -161,8 +161,8 @@ CTL = {
            "func isWordChar(c: char): bool =  ## ctl"),
     SURFACE: ("func degradedMessageFor*(state: PaneDegradation): string =",
               "func degradedMessageFor*(state: PaneDegradation): string =  ## ctl"),
-    LEAVES: ("proc slotPath(slot: DockPaneSlot): string =",
-             "proc slotPath(slot: DockPaneSlot): string =  ## ctl"),
+    LEAVES: ("proc slotPath(leaf: GpuiLeaf): string =",
+             "proc slotPath(leaf: GpuiLeaf): string =  ## ctl"),
     HAPP: ("proc activatePane*(slot: HeadlessSessionSlot; kind: PaneKind): bool =",
            "proc activatePane*(slot: HeadlessSessionSlot; kind: PaneKind): bool =  ## ctl"),
     UISEL: ("func gapMessage(command: string; frontEnd: UiFrontEnd; gap: string): string =",
@@ -398,8 +398,13 @@ ARMS = [
         "    if leaf.kind == glkBuiltin and leaf.builtin == paneEditor:",
         "    if leaf.kind == glkBuiltin and leaf.builtin == paneFlow:",
         SUITE_EDIT,
-        "THE SHIPPED BINARY draws the editor — Tier 2, through --report-plan",
+        "EDIT mode reaches this front-end, reads the CORE's contract, and says what it cannot do",
         CTL[LEAVES][0], CTL[LEAVES][1],
+        "(KILLER MOVED 2026-10-17: the redesigned window redraws the editor's "
+        "rows itself after the leaf is rendered (`main.redrawEditorRows`), so "
+        "the Tier-2 plan no longer shows a leaf that took the wrong branch and "
+        "the arm SURVIVED there; the edit-mode case now renders the editor's "
+        "leaf, not live, through `renderLeaf` and requires the surface.) "
         "UNDECLARED, AND IT RESTORES A DEFECT THIS MILESTONE MEASURED ON THE "
         "BINARY. Deciding the editor by `leaf.live` rather than by the surface "
         "made `ct edit --ui=gpui <project>` draw 'Editor — waiting for the "
@@ -410,8 +415,8 @@ ARMS = [
         "rather than at the predicate."),
 
     Arm("U3", SURFACE,
-        "      if held and result.pointer == eptExecution:\n        result.values = valuesForLine(text, values)",
-        "      if held:\n        result.values = valuesForLine(text, values)",
+        "  if held and result.pointer == eptExecution:\n    result.values = valuesForLine(text, values)",
+        "  if held:\n    result.values = valuesForLine(text, values)",
         SUITE_EDIT,
         "INLINE VALUES are presented at the GPUI ROW budget, on the execution line only",
         CTL[SURFACE][0], CTL[SURFACE][1],
@@ -488,13 +493,48 @@ def take_lock():
     return fh
 
 
+def resolve_replay_server() -> Path | None:
+    """The `replay-server` the suite will spawn, or None when none is built.
+
+    `src/common/replay_server_path.nim` is the AUTHORITY for this order; it is
+    restated here only because Python cannot import Nim. Keep the two in step:
+    `$REPLAY_SERVER_BIN` (when it names a file), `$CT_BUILD_OUT_ROOT/bin`, then
+    `$CODETRACER_BUILD_DIR/bin` (both relative to the checkout or absolute),
+    then `src/build-<config>-repro/bin` and tup's `src/build-<config>/bin`
+    (`<config>` = `$CODETRACER_CONFIG`, default `debug`), then cargo's
+    `target/debug` and `target/release`. Each is tested for the FILE: the
+    tracked `src/build-debug/` exists everywhere, holding only `tup.config`.
+    """
+    exe = "replay-server.exe" if os.name == "nt" else "replay-server"
+    candidates: list[Path] = []
+    override = os.environ.get("REPLAY_SERVER_BIN", "")
+    if override:
+        candidates.append(Path(override))
+    for var in ("CT_BUILD_OUT_ROOT", "CODETRACER_BUILD_DIR"):
+        tree = os.environ.get(var, "")
+        if tree:
+            candidates.append((REPO / tree) / "bin" / exe)  # absolute wins
+    config = os.environ.get("CODETRACER_CONFIG", "") or "debug"
+    candidates += [
+        REPO / "src" / f"build-{config}-repro" / "bin" / exe,
+        REPO / "src" / f"build-{config}" / "bin" / exe,
+        REPO / "src" / "db-backend" / "target" / "debug" / exe,
+        REPO / "src" / "db-backend" / "target" / "release" / exe,
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def check_replay_server_runnable() -> bool:
     """Refuse to grade when the suite's `replay-server` cannot be executed.
 
     **PLAT-22 residue 13, closed by PLAT-23.** Every case in
     `test_gpui_editing_surface.nim` spawns a real `replay-server`, and the
-    binary `native_host.findReplayServer` picks first —
-    `src/build-debug/bin/replay-server` — resolves `libmcr_emulator.so` through
+    binary `native_host.findReplayServer` picks (`resolve_replay_server`
+    below; the tup tree `src/build-debug/bin/replay-server` when PLAT-23
+    measured it) resolves `libmcr_emulator.so` through
     neither an rpath nor `CT_LD_LIBRARY_PATH`. Without the emulator's build
     directory on `LD_LIBRARY_PATH` the suite is RED on an UNMUTATED tree, and
     the harness scored **5 of 15** with eight `MIS-ATTRIBUTED` and two
@@ -521,11 +561,12 @@ def check_replay_server_runnable() -> bool:
     which is why the residue is a harness residue; this check gives the harness
     the same property.
     """
-    binary = REPO / "src" / "build-debug" / "bin" / "replay-server"
-    if not binary.exists():
-        print("REFUSED: %s does not exist, so every case that spawns a "
-              "replay-server would fail on an UNMUTATED tree and every arm "
-              "would score MIS-ATTRIBUTED. Nothing was mutated." % binary)
+    binary = resolve_replay_server()
+    if binary is None:
+        print("REFUSED: no replay-server is built (the search order of "
+              "src/common/replay_server_path.nim found nothing), so every case "
+              "that spawns one would fail on an UNMUTATED tree and every arm "
+              "would score MIS-ATTRIBUTED. Nothing was mutated.")
         return False
     p = subprocess.run(["ldd", str(binary)], capture_output=True, text=True)
     missing = [ln.strip() for ln in p.stdout.splitlines() if "not found" in ln]

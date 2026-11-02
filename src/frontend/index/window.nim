@@ -4,7 +4,7 @@ import
   visual_replay_player,
   ../lib/[ jslib, electron_lib ],
   ../[ types, config as frontend_config ],
-  ../../common/[ paths, ct_logging ]
+  ../../common/[ paths, ct_logging, window_policy ]
 
 var
   close = false
@@ -42,9 +42,42 @@ proc onClose*(e: js) =
     mainWindow.webContents.send "CODETRACER::close", js{}
     close = true
 
-proc createMainWindow*: js =
+proc windowLaunchOf*(config: Config): WindowLaunch =
+  ## PLAT-69 (C5): how the window opens, from the user's `window:` entry —
+  ## the policy the GPUI front-end applies too (`common/window_policy`).
+  ##
+  ## The entry is read as UNTYPED JavaScript: js-yaml hands back whatever the
+  ## file holds, so a field is taken only when it has the type the setting
+  ## needs, and anything else counts as "not given" and is reported. A config
+  ## file from before the entry existed has none, and opens maximized as the
+  ## desktop always did.
+  var initial = ""
+  var width, height = 0
+  var problems: seq[string]
+  if not config.isNil:
+    let entry = config.toJs[cstring"window"]
+    if not entry.isUndefined and not entry.isNull:
+      if jsTypeOf(entry[cstring"initial"]) == cstring"string":
+        initial = $entry[cstring"initial"].to(cstring)
+      elif not entry[cstring"initial"].isUndefined:
+        problems.add "window.initial is not a string"
+      proc extent(key: string; problems: var seq[string]): int =
+        let value = entry[cstring(key)]
+        if jsTypeOf(value) == cstring"number":
+          result = value.to(int)
+          if result == 0:
+            problems.add "window." & key & ": 0 is not a window size"
+        elif not value.isUndefined:
+          problems.add "window." & key & " is not a number"
+      width = extent("width", problems)
+      height = extent("height", problems)
+  let parsed = parseWindowSetting(initial, width, height)
+  for p in problems & parsed.problems:
+    warnPrint "config: ", p
+  resolveWindowLaunch(parsed.setting)
+
+proc createMainWindow*(config: Config = nil): js =
   when not defined(server):
-    # TODO load from config
 
     let
       bundledIconPath = codetracerPrefix / "resources" / "Icon.iconset" / "icon_256x256.png"
@@ -56,14 +89,24 @@ proc createMainWindow*: js =
         else:
           sourceIconPath
 
+    # PLAT-69: the size and state the user configured (`window:`), clamped to
+    # the screen's work area — a configured size larger than this screen
+    # would open a window whose edges cannot be reached.
+    let launch = windowLaunchOf(config)
+    let workArea = electron.screen.getPrimaryDisplay().workAreaSize
+    let screenW = if workArea.isNil: 0 else: workArea.width.to(int)
+    let screenH = if workArea.isNil: 0 else: workArea.height.to(int)
+    let width = if screenW > 0: min(launch.width, screenW) else: launch.width
+    let height = if screenH > 0: min(launch.height, screenH) else: launch.height
+
     var initInfo = newJsObject()
     initInfo = js{
       "title": cstring"CodeTracer",
       "icon": iconPath,
-      "width": 1900,
-      "height": 1400,
-      "minWidth": 1050,
-      "minHeight": 600,
+      "width": width,
+      "height": height,
+      "minWidth": min(launch.minWidth, width),
+      "minHeight": min(launch.minHeight, height),
       "webPreferences": js{
         "nodeIntegration": true,
         "contextIsolation": false,
@@ -95,7 +138,14 @@ proc createMainWindow*: js =
       win.webContents.executeJavaScript("document.body.style.backgroundColor = 'black';"))
     win.on("unmaximize", proc() =
       win.webContents.executeJavaScript("document.body.style.backgroundColor = 'transparent';"))
-    win.maximize()
+    # PLAT-69: maximized only when the setting says so (its default does).
+    # Said in the log, because a compositor that ignores the request (sway,
+    # for a floating window) leaves the request itself unobservable.
+    infoPrint "index: window opens ",
+              (if launch.maximized: "maximized" else: "windowed"), " ",
+              $width, "x", $height
+    if launch.maximized:
+      win.maximize()
     let url = "file://" & $codetracerExeDir & "/index.html"
 
     win.loadURL(cstring(url))
@@ -340,7 +390,7 @@ proc createSecondaryWindow*(sessionId: int): JsObject =
   ## The window reuses the same creation logic as the main window so it
   ## gets the same dimensions, webPreferences and URL.
   when not defined(server):
-    let win = createMainWindow()
+    let win = createMainWindow(data.config)
     let windowId = win.id.to(int)
     windowTable[windowId] = win
 

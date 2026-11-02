@@ -51,7 +51,7 @@ test.describe("MCR visual replay additive tab placement", () => {
     // pre-M3 replacement layout, where these panes were re-arranged into a
     // visual-replay-specific configuration.
     await expect(ctPage.locator(".lm_tab", { hasText: /\.(py|rb|nr)\b/ })).toBeVisible();
-    await expect(ctPage.locator(".lm_tab", { hasText: "STATE" })).toBeVisible();
+    await expect(ctPage.locator(".lm_tab", { hasText: "VARIABLES" })).toBeVisible();
     await expect(ctPage.locator(".lm_tab", { hasText: "CALLTRACE" })).toBeVisible();
     await expect(ctPage.locator(".lm_tab", { hasText: "EVENT LOG" })).toBeVisible();
     await expect(ctPage.locator(".lm_tab", { hasText: "TERMINAL OUTPUT" })).toBeVisible();

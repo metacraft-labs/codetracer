@@ -36,7 +36,8 @@ import headless_app/layout_model
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 35
+const ExpectedAssertions = 40
+  ## Five assertions drive the native Top menu through the real runtime.
 
 var countedAssertions = 0
 
@@ -82,14 +83,14 @@ suite "PLAT-50: a tab's right-click menu in the terminal":
     rt.press(1, col + 2, 2)
     ck rt.app.contextMenu.open
     ck rt.app.contextMenu.menu.labels == @["Pin to Left", "Pin to Bottom",
-                                            "Pin to Right", "Close",
+                                            "Pin to Right", "Pin to Top", "Close",
                                             "Maximise container"]
     let area = rt.shellScreenOf().contextMenuArea
     ck area.row == 2 and area.col <= col + 2
-    # The keyboard starts on the first entry; three Downs reach Close.
-    for _ in 0 ..< 3:
+    # The keyboard starts on the first entry; four Downs reach Close.
+    for _ in 0 ..< 4:
       discard rt.handleToken(Down, 0)
-    ck rt.app.contextMenu.selected == 3
+    ck rt.app.contextMenu.selected == 4
     discard rt.handleToken(Enter, 0)
     ck not rt.app.contextMenu.open
     ck not rt.shellScreenOf().rows[1].contains(" VCS ")
@@ -101,12 +102,28 @@ suite "PLAT-50: a tab's right-click menu in the terminal":
     rt.press(1, col + 2, 2)
     let area = rt.shellScreenOf().contextMenuArea
     # The frame's top edge is the area's first row; entry i is one below it.
-    let closeRow = area.row + 1 + 3
+    let closeRow = area.row + 1 + 4
     ck rt.shellScreenOf().rows[closeRow].contains("Close")
     rt.press(closeRow, area.col + 3)
     ck not rt.app.contextMenu.open
     ck not rt.shellScreenOf().rows[1].contains(" VCS ")
     ck not rt.maximize.active
+
+  test "Pin to Top reaches the fourth dock edge through the runtime":
+    let rt = newRuntime(200, 50)
+    let col = rt.shellScreenOf().rows[1].cellOf(" VCS ")
+    ck col > 0
+    rt.press(1, col + 2, 2)
+    ck rt.app.contextMenu.open
+    let top = rt.app.contextMenu.menu.labels.find("Pin to Top")
+    require top >= 0
+    for _ in 0 ..< top:
+      discard rt.handleToken(Down, 0)
+    discard rt.handleToken(Enter, 0)
+    let docked = rt.app.layoutBinding.layout.dockedAt(leTop)
+    ck docked.len == 1 and docked[0].pane == paneVcs
+    ck not rt.app.layoutBinding.layout.tree.contains(paneVcs)
+    ck not rt.app.contextMenu.open
 
   test "Esc closes the menu, and an event's content overlay":
     let rt = newRuntime(200, 50)

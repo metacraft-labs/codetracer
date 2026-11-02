@@ -70,9 +70,9 @@ proc sharedLog(): seq[ViewOpEnvelope] =
     op(vokSetRegister, "select-state-path", 6,
       targetPath = "statePane.selectedPath",
       payload = %*{"value": "frame.locals.counter"}),
-    op(vokSetStateTab, "state-tab-watches", 7,
-      targetPath = "statePane.activeTab",
-      payload = %*{"tab": "stWatches"}),
+    op(vokToggleStatePath, "state-expand-counter", 7,
+      targetPath = "statePane.expandedPaths",
+      payload = %*{"path": "frame.locals.counter", "expanded": true}),
     op(vokSetRegister, "editor-active-document", 8,
       targetPath = "editor.activeDocumentId",
       payload = %*{"value": "file://src/main.nim"}),
@@ -146,7 +146,6 @@ suite "collaborative ViewModel M7 front-end adapters":
         it.id == "panel-calltrace" and it.kind == lpkCalltrace and it.isFocused)
       check adapter.projection.calltraceSelectionId == "call-42"
       check adapter.projection.stateSelectedPath == "frame.locals.counter"
-      check adapter.projection.stateActiveTab == "stWatches"
       check adapter.projection.activeDocumentId == "file://src/main.nim"
       check adapter.projection.driverControls.activePrincipalId == DriverPrincipal
       check adapter.projection.driverControls.leaseId == "lease-driver"

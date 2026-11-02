@@ -92,14 +92,18 @@ proc welcomeLayout*(v: WelcomeView; body: CellArea): WelcomeLayout =
                                  width: panelW, height: entries + 1)
   result.tracesPanel = CellArea(col: body.col + margin + panelW + gap,
                                 row: row, width: panelW, height: entries + 1)
+  # The panel scrolls to keep the focused row on screen (`shownFrom`).
+  let foldersFrom = shownFrom(folders, v.focus, entries)
   for k, i in folders:
-    if k < entries:
+    if k >= foldersFrom and k < foldersFrom + entries:
       result.rowAreas[i] = CellArea(col: result.foldersPanel.col,
-                                    row: row + 1 + k, width: panelW, height: 1)
+                                    row: row + 1 + k - foldersFrom, width: panelW, height: 1)
+  # The panel scrolls to keep the focused row on screen (`shownFrom`).
+  let tracesFrom = shownFrom(traces, v.focus, entries)
   for k, i in traces:
-    if k < entries:
+    if k >= tracesFrom and k < tracesFrom + entries:
       result.rowAreas[i] = CellArea(col: result.tracesPanel.col,
-                                    row: row + 1 + k, width: panelW, height: 1)
+                                    row: row + 1 + k - tracesFrom, width: panelW, height: 1)
   row += entries + 2
   # THE START OPTIONS, one flex row (Welcome-Screen.md: `.start-options` is a
   # single row); wrapped only when the body is narrower than the six.

@@ -357,8 +357,8 @@ async function switchMode(page, want) {
 // ---------------------------------------------------------------------------
 //
 // `Ctrl+Enter` is the product's Run chord. The topbar is clicked first to move
-// focus out of Monaco's textarea, because Mousetrap's default `stopCallback`
-// drops a chord raised inside one. This is spelled the same way as
+// focus out of Monaco's textarea, so the press starts where it always has (the
+// key router resolves it inside Monaco too). This is spelled the same way as
 // `ci/test/editor_context_menu_modes_probe.mjs` on purpose.
 async function runToDebugMode(page) {
   try {

@@ -134,14 +134,15 @@ proc heatStyle*(heat: LineHeat; line: int): CellStyle =
   ## The flame colour for `line`.
   HeatPalette[heatLevel(heat, line)]
 
-proc heatCountText*(heat: LineHeat; line: int): string =
+proc heatCountText*(heat: LineHeat; line: int;
+                    glyphs = DefaultGlyphs): string =
   ## What the gutter's number field shows in heatmap mode.
   ##
   ## A line that never ran shows `·` rather than `0`, because a column of
   ## zeroes is noise and the point of the mode is to make the hot lines jump
   ## out. One cell wide, so it right-aligns into the same field a count does.
   let count = heat.countFor(line)
-  if count <= 0: "·" else: $count
+  if count <= 0: glyphs.glyph(grDotFill) else: $count
 
 proc largestCount*(heat: LineHeat): int =
   heat.maxCount

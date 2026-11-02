@@ -61,7 +61,8 @@ from ../viewmodel/viewmodels/generated_code_anchors import
 from ../viewmodel/viewmodels/noir_build_producer import rendererPathFor
 
 from ../viewmodel/store/types as vmtypes import LowLevelInstruction
-from low_level_code import showGeneratedListing
+from ../viewmodel/viewmodels/low_level_code_vm import showGeneratedListing
+from ./panel_host import panelSession
 
 const NO_HIGH_LEVEL_LINE = -1
   ## `LowLevelInstruction.highLevelLine` is the LEGACY per-row back-pointer the
@@ -256,8 +257,10 @@ proc showGeneratedCode*(data: Data; path: cstring; line: int;
     # show WHY rather than resolving into an empty listing, and a command that
     # silently does nothing is the same defect as a listing nobody paints.
     data.openLowLevelCode()
-    discard showGeneratedListing(@[], @[], ArtefactSupport(), $path, line,
-      failure)
+    let session = panelSession()
+    if not session.isNil:
+      discard session.lowLevelCodeVM.showGeneratedListing(
+        @[], @[], ArtefactSupport(), $path, line, failure)
     return
   generatedCodeVMInstance.openListing(listing, line)
 
@@ -284,8 +287,11 @@ proc showGeneratedCode*(data: Data; path: cstring; line: int;
     rows.add LowLevelInstruction(
       name: r.text, args: "", other: r.annotation, offset: r.index,
       highLevelPath: "", highLevelLine: NO_HIGH_LEVEL_LINE)
-  discard showGeneratedListing(rows, listing.anchors, listing.support,
-    $path, line, listing.listingAbsence)
+  let session = panelSession()
+  if not session.isNil:
+    discard session.lowLevelCodeVM.showGeneratedListing(
+      rows, listing.anchors, listing.support, $path, line,
+      listing.listingAbsence)
 
 # `showFirstGeneratedCodeTarget` WAS HERE AND IS DELETED, with
 # `generated_code_operation.keybindingTarget` behind it.

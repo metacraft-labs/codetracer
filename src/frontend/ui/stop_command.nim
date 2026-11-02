@@ -162,7 +162,11 @@ proc terminateActiveReplay(data: Data): (ReplayTermination, int) =
   # would be a session the user cannot restart, because `dap-replay-selected`
   # would overwrite a stale id and `middleware.nim:52` would suppress the
   # relaunch — and an edit tab that Run can start a new debugging session in.
-  session.replayId = -1
+  # `assignReplay`, not the field alone: the tab's `DapApi` stops naming the
+  # dead replay on its requests too, so the main process does not select it
+  # (the Backend Manager refuses a stopped id and would leave whichever
+  # replay it served before, another tab's).
+  session.assignReplay(-1)
   session.liveDebugSession = false
 
   (termination, replayId)

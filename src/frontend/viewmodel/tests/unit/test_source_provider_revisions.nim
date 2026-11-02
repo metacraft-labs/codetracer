@@ -106,7 +106,8 @@ proc newHarness(): Harness =
   store.updateDebuggerPosition(rrTicks = 0, file = RecordedPath, line = 1)
   let editor = createEditorVM(store)
   let vm = createSourceVM(store, editor)
-  vm.setViewport(height = 10, overscan = 2)
+  vm.setOverscan(2)
+  vm.setViewport(vm.viewport.withRows(10))
 
   let provider = newCtfsSourceProvider(traceDir, allowWorkingTree = false)
   provider.registerSourceRevision(RecordedPath, 1, patched, Generation1Digest)
@@ -282,6 +283,76 @@ suite "CTUI-4 — the payload root is a containment boundary":
       check fetch.origin == soTracePayload
       check fetch.lines == @["def total(values):", "    return sum(values)"]
 
+suite "a recorded path with `..` reads the file it names":
+  ## A recorder reports the path the program used. `multi_root`'s runner puts
+  ## `app/../shared` on `sys.path`, so Python reports
+  ## `…/app/../shared/helpers.py` while the recording stores the file under its
+  ## normalised path. The provider must read THAT entry — and, when the named
+  ## file is not in the recording, say so for that path rather than answer with
+  ## a neighbour. (The real-stack half: `real_terminal/
+  ## test_stop_path_parent_component.nim` and the GPUI plan suite.)
+
+  test "`a/../b` reads the payload entry stored as `b`":
+    let h = newHarness()
+    defer: h.teardown()
+    # A sibling in the same folder, so a lookup that fell back to "some file
+    # in the folder" would have something to wrongly answer with.
+    writeFile(h.traceDir / "files" / "opt/ctui4/revisions/sibling.src",
+              "SIBLING\n")
+    for path in ["/opt/ctui4/elsewhere/../revisions/hot.src",
+                 "/opt/ctui4/a/b/../../revisions/./hot.src"]:
+      # The folders the path climbs out of do not exist under `files/`, so an
+      # OS-resolved join could not have found the file: the lookup resolved
+      # the path itself.
+      check not fileExists(h.traceDir & "/files" & path)
+      let fetch = h.fetchOnce(path, 0)
+      check fetch.status == sfsAvailable
+      check fetch.origin == soTracePayload
+      check fetch.lines == @["def total(values):", "    return sum(values)"]
+      check fetch.detail.endsWith("opt/ctui4/revisions/hot.src")
+
+  test "a `..` path naming a file the recording lacks is absent, naming the path":
+    let h = newHarness()
+    defer: h.teardown()
+    writeFile(h.traceDir / "files" / "opt/ctui4/revisions/sibling.src",
+              "SIBLING\n")
+    let path = "/opt/ctui4/elsewhere/../revisions/missing.src"
+    let fetch = h.fetchOnce(path, 0)
+    check fetch.status == sfsPathUnavailable
+    check not fetch.hasText
+    check fetch.origin == soNone
+    check fetch.detail.contains(path)
+
+  test "resolveDotSegments keeps the root, the separator and an escaping `..`":
+    check resolveDotSegments("/a/b/../c/./d.py") == "/a/c/d.py"
+    check resolveDotSegments("C:\\a\\b\\..\\c.py") == "C:\\a\\c.py"
+    check resolveDotSegments("res://scenes/../main.gd") == "res://main.gd"
+    check resolveDotSegments("/../x.py") == "/../x.py"
+    check resolveDotSegments("/a/../../x.py") == "/../x.py"
+    # No `.` or `..`: returned byte for byte.
+    check resolveDotSegments("/a//b.py") == "/a//b.py"
+    check resolveDotSegments("rel/x.py") == "rel/x.py"
+    # The table the engine's resolver test reads too
+    # (`expr_loader.rs`, `resolve_dot_segments`), so the two read sides answer
+    # every vector identically.
+    const Vectors = staticRead(currentSourcePath().parentDir / ".." / ".." /
+      ".." / ".." / "db-backend" / "tests" / "data" /
+      "resolve_dot_segments_vectors.tsv")
+    var vectorsChecked = 0
+    for line in Vectors.splitLines:
+      if line.len == 0 or line.startsWith("#"):
+        continue
+      let fields = line.split('\t')
+      check fields.len == 2
+      if fields.len != 2:
+        continue
+      let input = (if fields[0] == "<empty>": "" else: fields[0])
+      let expected = (if fields[1] == "<empty>": "" else: fields[1])
+      checkpoint("vector " & input)
+      check resolveDotSegments(input) == expected
+      inc vectorsChecked
+    check vectorsChecked >= 25
+
 suite "CTUI-4 — an unavailable revision degrades, and never substitutes":
 
   test "a generation the provider does not hold is a typed refusal":
@@ -412,3 +483,73 @@ suite "CTUI-4 — the refusal reaches the pane as §14's existing row":
       check chosen.kind == spkCtfsMaterialized
       check chosen.name == "ctfs:" & h.traceDir
     check selectSourceProvider([unusable]).isNil
+
+suite "a container the reader refuses names its reason in the answer":
+  ## A provider handed a bare `.ct` folder unpacks it on first fetch
+  ## (`ensureMaterialized`). When the reader REFUSES the container — here, a
+  ## container version it does not read — the per-request answer has to carry
+  ## the refusal's text, or the user is told "no bundled source" for a trace
+  ## whose real problem is that it must be re-recorded
+  ## (`codetracer-trace-format-spec` `ctfs-container.md`: "A reader must name
+  ## the field it is refusing on"; codetracer-pm issue
+  ## `2026-10-04-ct-importer-turns-a-container-refusal-into-false.md`).
+  ##
+  ## The container is hand-built and only its header is real: the CTFS magic
+  ## and a version byte. That is all the reader inspects before it refuses,
+  ## and no correct writer produces a refused version, so there is no
+  ## recorder-made fixture to use instead.
+
+  proc writeContainerHeader(path: string; version: int) =
+    ## One 1024-byte block 0: the CTFS magic (`ctfs-container.md` §1), the
+    ## container version at offset 5, block size 1024 at offset 8, and no
+    ## entries.
+    var data = newString(1024)
+    for i in 0 ..< data.len: data[i] = '\0'
+    for i, b in [0xC0, 0xDE, 0x72, 0xAC, 0xE2]:
+      data[i] = char(b)
+    data[5] = char(version)
+    data[9] = char(4)  # 1024, little-endian
+    writeFile(path, data)
+
+  proc bareContainerFolder(name: string; version: int): string =
+    result = getTempDir() / ("ct-refused-" & name & "-" &
+      $getCurrentProcessId())
+    removeDir(result)
+    createDir(result)
+    writeContainerHeader(result / "trace.ct", version)
+
+  proc fetchFrom(provider: SourceProvider; path: string): SourceFetch =
+    var captured: SourceFetch
+    provider.fetch(
+      SourceLineRequest(path: path, sourceGeneration: 0,
+                        firstLine: 1, lastLine: 10),
+      proc(fetch: SourceFetch) = captured = fetch)
+    captured
+
+  test "the path-unavailable detail carries the container's refusal":
+    let traceDir = bareContainerFolder("v3", 3)
+    defer: removeDir(traceDir)
+    let provider = newCtfsSourceProvider(traceDir, allowWorkingTree = false)
+    check provider.supports()
+    let fetch = provider.fetchFrom(RecordedPath)
+    checkDegradedWithNoText(fetch, sfsPathUnavailable)
+    check fetch.detail.contains(RecordedPath)
+    check fetch.detail.contains("CTFS container version 3 is not readable")
+    check fetch.detail.contains("Re-record the trace")
+    # Asked again, the provider does not unpack twice, and the reason is
+    # still there: it is state, not a one-shot message.
+    let again = provider.fetchFrom(UnrecordedPath)
+    check again.status == sfsPathUnavailable
+    check again.detail.contains("CTFS container version 3 is not readable")
+
+  test "a container the reader accepts adds no refusal to the detail":
+    ## The control: the same header at a version the reader reads opens, so
+    ## the text above is the refusal's and not something every answer says.
+    let traceDir = bareContainerFolder("v5", 5)
+    defer: removeDir(traceDir)
+    let provider = newCtfsSourceProvider(traceDir, allowWorkingTree = false)
+    let fetch = provider.fetchFrom(RecordedPath)
+    checkDegradedWithNoText(fetch, sfsPathUnavailable)
+    check fetch.detail.contains(RecordedPath)
+    check not fetch.detail.contains("not readable")
+    check not fetch.detail.contains("could not be unpacked")

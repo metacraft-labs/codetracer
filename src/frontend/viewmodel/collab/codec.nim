@@ -371,7 +371,6 @@ proc toJson*(state: SharedSessionViewState): JsonNode =
       "expandedNodes": calltraceExpanded,
     },
     "statePane": {
-      "activeTab": state.statePane.activeTab.toJson,
       "selectedPath": state.statePane.selectedPath.toJson,
       "expandedPaths": stateExpanded,
       "watchExpressions": watches,
@@ -418,8 +417,6 @@ proc parseSharedSessionViewState*(node: JsonNode): SharedSessionViewState =
     parseLwwStringRegister(node{"calltrace"}{"selectedEntry"})
   result.calltrace.searchQuery =
     parseLwwStringRegister(node{"calltrace"}{"searchQuery"})
-  result.statePane.activeTab =
-    parseLwwStringRegister(node{"statePane"}{"activeTab"})
   result.statePane.selectedPath =
     parseLwwStringRegister(node{"statePane"}{"selectedPath"})
   for entry in node{"statePane"}{"expandedPaths"}.getElems(@[]):

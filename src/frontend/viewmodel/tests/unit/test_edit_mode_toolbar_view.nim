@@ -96,8 +96,8 @@ suite "EMT §7.3 the model becomes elements":
     ck "record-tests-image" notin ids
 
     var rendered: seq[string] = @[]
-    let panel = renderEditModeToolbarPanel(
-      MockRenderer(), model, proc(id: string) = discard)
+    let panel = renderEditModeToolbarPanel[MockRenderer, MockNode](
+      MockRenderer(), (proc(): EditToolbarModel = model), proc(id: string) = discard)
     collectIds(panel, rendered)
     # Every button the model carries reached the DOM, and nothing else did.
     ck rendered.len == buttons.len
@@ -143,8 +143,8 @@ suite "EMT §7.3 the model becomes elements":
     ck ids.len == 0
 
     var rendered: seq[string] = @[]
-    let panel = renderEditModeToolbarPanel(
-      MockRenderer(), model, proc(id: string) = discard)
+    let panel = renderEditModeToolbarPanel[MockRenderer, MockNode](
+      MockRenderer(), (proc(): EditToolbarModel = model), proc(id: string) = discard)
     collectIds(panel, rendered)
     ck "build-image" notin rendered
     ck "run-image" notin rendered
@@ -173,8 +173,8 @@ suite "EMT §7.3 the model becomes elements":
     ck disabledSeen > 0
 
     var renderedDisabled: seq[string] = @[]
-    let panel = renderEditModeToolbarPanel(
-      MockRenderer(), model, proc(id: string) = discard)
+    let panel = renderEditModeToolbarPanel[MockRenderer, MockNode](
+      MockRenderer(), (proc(): EditToolbarModel = model), proc(id: string) = discard)
     collectDisabled(panel, renderedDisabled)
     ck renderedDisabled.len == disabledSeen
     expectCount(3 + disabledSeen * 2)
@@ -187,8 +187,8 @@ suite "EMT §7.3 the model becomes elements":
     let model = editModeToolbar(desktopProfile, EditMode,
                                 listing = noirListing())
     var invoked: seq[string] = @[]
-    let panel = renderEditModeToolbarPanel(
-      MockRenderer(), model, proc(id: string) = invoked.add id)
+    let panel = renderEditModeToolbarPanel[MockRenderer, MockNode](
+      MockRenderer(), (proc(): EditToolbarModel = model), proc(id: string) = invoked.add id)
 
     proc clickAll(node: MockNode) =
       if node.attributes.hasKey("id") and

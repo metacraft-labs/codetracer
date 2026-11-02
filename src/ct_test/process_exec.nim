@@ -24,6 +24,8 @@
 
 import runquota_process
 
+import run_read_capture
+
 type
   CapturedRun* = object
     ## Result of running one provider subprocess to completion.
@@ -83,10 +85,17 @@ proc execCaptured*(argv: openArray[string]; cwd = "";
   ##
   ## Unlike ``execCmdEx``, passing ``argv`` directly avoids a shell round-trip
   ## and the quoting hazards of joining into a command string.
+  #
+  # When `ct test run` is capturing what its tests read (CTC-3g), the launch
+  # is wrapped in `io-mon run` here, on the one path every provider shares;
+  # otherwise `monitoredLaunch` returns `argv` unchanged. See
+  # `run_read_capture`.
+  var childEnv = @env
+  let launched = monitoredLaunch(argv, childEnv)
   var child = launchProcess(commandSpec(
-    argv = @argv,
+    argv = launched,
     cwd = cwd,
-    env = @env,
+    env = childEnv,
     stdoutLimit = captureLimit,
     stderrLimit = captureLimit))
   let completion = waitForCompletion(child, timeoutMs)

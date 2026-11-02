@@ -47,7 +47,9 @@
     opacity: 0.48
 
 .point-list-kind
-  color: #d7ba7d
+  // A kind label in VS Code dark's gold (1.7:1 on the light ground); the
+  // editor's string colour, its gold, in the light theme (`by-mode`, defaults.styl).
+  color: by-mode(#d7ba7d, colors-editor-syntax-string)
   text-transform: uppercase
   font-size: 11px
 

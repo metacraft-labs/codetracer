@@ -162,7 +162,7 @@ proc makeMinimalClient(): VisualReplayClient =
         imageSrc: "draw-" & $draw,
         geid: some(uint64(100 + draw)), frame: some(0),
         width: 64, height: 64)),
-    getDrawCallsProc: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]] =
+    getDrawCallsProc: proc(frame: int): VisualReplayFuture[seq[VisualReplayDrawCall]] =
       newCompletedFuture(newSeq[VisualReplayDrawCall]()),
     getPixelHistoryProc: proc(x, y, frame: int):
         VisualReplayFuture[seq[VisualReplayPixelHistoryEntry]] =
@@ -463,7 +463,7 @@ suite "FrameViewerVM clearFrames signal":
         newCompletedFuture(stubFrame),
       getFrameByDrawProc: proc(draw: int): VisualReplayFuture[VisualReplayFrame] =
         newCompletedFuture(stubFrame),
-      getDrawCallsProc: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]] =
+      getDrawCallsProc: proc(frame: int): VisualReplayFuture[seq[VisualReplayDrawCall]] =
         newCompletedFuture(newSeq[VisualReplayDrawCall]()),
       getPixelHistoryProc: proc(x, y, frame: int):
           VisualReplayFuture[seq[VisualReplayPixelHistoryEntry]] =
@@ -507,7 +507,7 @@ suite "FrameViewerVM clearFrames signal":
         newCompletedFuture(stubFrame),
       getFrameByDrawProc: proc(draw: int): VisualReplayFuture[VisualReplayFrame] =
         newCompletedFuture(stubFrame),
-      getDrawCallsProc: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]] =
+      getDrawCallsProc: proc(frame: int): VisualReplayFuture[seq[VisualReplayDrawCall]] =
         newCompletedFuture(newSeq[VisualReplayDrawCall]()),
       getPixelHistoryProc: proc(x, y, frame: int):
           VisualReplayFuture[seq[VisualReplayPixelHistoryEntry]] =

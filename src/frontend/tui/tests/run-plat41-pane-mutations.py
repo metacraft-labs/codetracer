@@ -80,8 +80,15 @@ ARMS = [
      "               expanded = kids.len > 0 and vm.isExpanded(e.path))",
      "               expanded = false)", [COVERAGE],
      "the file tree drawn with every folder shut"),
-    ("N1", FLOWVM, "  let base = file[file.rfind('/') + 1 .. ^1]",
-     "  let base = file[(file.rfind('/') + 1) .. ^1]", [PARITY],
+    # N1 RE-AIMED 2026-10-17: `flowStepEventsOf` (added with the redesign)
+    # derives the same `base`, so the one-line needle occurred twice; it now
+    # quotes the step-entries loop head that follows it.
+    ("N1", FLOWVM, "  let base = file[file.rfind('/') + 1 .. ^1]\n"
+     "  for st in steps:\n    if st.kind != JObject: continue\n"
+     "    let line = jsonInt(st{\"position\"}, 0)",
+     "  let base = file[(file.rfind('/') + 1) .. ^1]\n"
+     "  for st in steps:\n    if st.kind != JObject: continue\n"
+     "    let line = jsonInt(st{\"position\"}, 0)", [PARITY],
      "behaviour-preserving: the DECLARED SURVIVOR"),
 ]
 DECLARED_SURVIVORS = {"N1"}

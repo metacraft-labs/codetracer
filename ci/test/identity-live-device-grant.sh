@@ -44,11 +44,46 @@
 # password check, a real consent click, a real RS256 signature over a real
 # JWKS.
 #
+# WHERE THE ISSUER COMES FROM, AND WHY THAT CHANGED
+# ------------------------------------------------
+# This gate used to need `isonim-platform`'s ELEVEN-PROCESS local stack up,
+# only to borrow the Zitadel inside it. That is the duplication
+# `reprobuild-specs/spec/Shared-Development-Services.md` §1 measures and §9.6
+# names outright: "`codetracer` needs isonim's whole eleven-service stack to
+# get a login" versus "`repro up --activity ide`".
+#
+# So it now prefers the WORKSPACE'S SHARED IDENTITY PROVIDER, declared once in
+# `infra/repro.nim` as a `stable` service with `workspace` scope and started
+# with
+#
+#     cd infra && REPRO_ENVIRONMENT=development repro up --activity sso
+#
+# Everything this gate needs is read out of that instance's descriptor
+# (`infra/.repro/sso/sso-dev.json`): the issuer, this product's own client id,
+# and the fixture user. NO IDENTITY HOSTNAME OR CLIENT ID IS WRITTEN IN THIS
+# FILE for the shared path -- that is the point, and the "this file names no
+# identity host" check below is the grep that keeps it true rather than a
+# claim in a comment.
+#
+# isonim's stack remains a FALLBACK, so the gate still runs for anyone who has
+# that stack up and not the shared instance. When the shared instance is used,
+# the gate ASSERTS that isonim's processes are absent -- the claim being tested
+# is "without standing up isonim's stack", and a run that happened to have both
+# up would not test it.
+#
 # Usage:  bash ci/test/identity-live-device-grant.sh
 # Env:
+#   MCL_SSO_DEV_DESCRIPTOR  the shared instance's descriptor (default: the
+#                           sibling ../infra/.repro/sso/sso-dev.json). `infra`'s
+#                           dev environment exports this variable.
+#   CT_SSO_SOURCE           shared | isonim — force one source instead of
+#                           preferring the shared instance. Exists so both
+#                           legs stay exercised.
 #   CT_ISONIM_PLATFORM      the isonim-platform checkout that runs the stack
 #                           (default: the sibling ../isonim-platform)
-#   CT_IDENTITY_ISSUER      issuer URL (default https://login.metacraft-labs.test:8443)
+#   CT_IDENTITY_ISSUER      issuer URL. Default: the shared instance's own
+#                           issuer, or isonim's
+#                           https://login.metacraft-labs.test:8443
 #   CT_IDENTITY_CLIENT_ID   override the CLI relying party's client id. Exists
 #                           for the negative control that points the probe at
 #                           an unregistered client and expects red.
@@ -73,15 +108,12 @@ cd "${repo_root}" || exit 2
 PROBE_SRC="ci/test/identity_live_device_grant_probe.nim"
 APPROVE_MJS="ci/test/identity-device-approve.mjs"
 
-platform="${CT_ISONIM_PLATFORM:-$(cd "${repo_root}/.." 2>/dev/null && pwd)/isonim-platform}"
-issuer="${CT_IDENTITY_ISSUER:-https://login.metacraft-labs.test:8443}"
+workspace="$(cd "${repo_root}/.." 2>/dev/null && pwd)"
+platform="${CT_ISONIM_PLATFORM:-${workspace}/isonim-platform}"
+descriptor="${MCL_SSO_DEV_DESCRIPTOR:-${workspace}/infra/.repro/sso/sso-dev.json}"
+sso_source="${CT_SSO_SOURCE:-auto}"
 action="${CT_DEVICE_ACTION:-allow}"
 grant_timeout="${CT_DEVICE_GRANT_TIMEOUT:-180}"
-
-issuer_hostport="${issuer#https://}"
-issuer_host="${issuer_hostport%%:*}"
-issuer_port="${issuer_hostport##*:}"
-[ "${issuer_port}" = "${issuer_host}" ] && issuer_port=443
 
 checks=0
 failures=0
@@ -115,8 +147,6 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "=== WD3: a running issuer accepts a token this code verifies ==="
-echo "  issuer:   ${issuer}"
-echo "  platform: ${platform}"
 echo "  action:   ${action}"
 echo
 
@@ -137,34 +167,122 @@ command -v unshare >/dev/null 2>&1 ||
 [ -f "${PROBE_SRC}" ] || skip "${PROBE_SRC} is missing" "this gate has no subject"
 [ -f "${APPROVE_MJS}" ] || skip "${APPROVE_MJS} is missing" "this gate has no browser leg"
 
-[ -d "${platform}" ] ||
-	skip "no isonim-platform checkout at ${platform}" \
-		"repro ws enable isonim, or set CT_ISONIM_PLATFORM=<path>"
+command -v jq >/dev/null 2>&1 ||
+	skip "jq is not on PATH" "run inside the dev shell: nix develop"
 
-ca_file="${platform}/local-dev/state/ca/isonim-dev-ca.crt"
-client_id_file="${platform}/local-dev/state/idp/cli-client-id"
-rp_env="${platform}/local-dev/state/idp/relying-party.env"
+# ---------------------------------------------------------------------------
+# WHICH ISSUER. The shared instance first, isonim's stack second, and whichever
+# is chosen is NAMED so a reader of the log knows which claim this run tested.
+# ---------------------------------------------------------------------------
+source_used=""
+if [ "${sso_source}" != "isonim" ] && [ -s "${descriptor}" ]; then
+	# The shared instance. Its descriptor is the contract -- `infra`'s
+	# `dev-server.sh` writes it LAST, after every contributed relying party is
+	# registered, so a descriptor that exists is a fully seeded instance.
+	jq -e . "${descriptor}" >/dev/null 2>&1 ||
+		skip "the shared instance descriptor at ${descriptor} is not JSON" \
+			"cd ${workspace}/infra && REPRO_ENVIRONMENT=development repro up --activity sso"
+	source_used="shared"
+	issuer="${CT_IDENTITY_ISSUER:-$(jq -r '.issuer // empty' "${descriptor}")}"
+	client_id="${CT_IDENTITY_CLIENT_ID:-$(jq -r '.clients["codetracer-cli"] // empty' "${descriptor}")}"
+	login_user="$(jq -r '.devUser.loginName // empty' "${descriptor}")"
+	login_password="$(jq -r '.devUser.password // empty' "${descriptor}")"
+	# §5.1 of environment-domains-and-dev-certificates.md: the org development
+	# root is installed at a KNOWN PATH and a project "reads that path or fails
+	# loudly. It must not carry its own copy, generate its own CA, or accept a
+	# path from the environment."
+	ca_file="/etc/mcl-dev-certs/root-ca.crt"
+	[ -n "${issuer}" ] ||
+		skip "the shared instance descriptor names no issuer" \
+			"cd ${workspace}/infra && REPRO_ENVIRONMENT=development repro up --activity sso"
+	[ -n "${client_id}" ] ||
+		skip 'the shared instance has no codetracer-cli relying party' \
+			"check infra/repro.nim's \`relyingParties\` -- the member name is the key in .clients"
+	[ -r "${ca_file}" ] ||
+		skip "the org development root CA is absent (${ca_file})" \
+			"this host is missing infra's services/dev-certificates"
 
-[ -f "${ca_file}" ] ||
-	skip "the dev CA is absent (${ca_file})" \
-		"cd ${platform} && just dev-up   (it generates the CA on first start)"
-[ -f "${client_id_file}" ] ||
-	skip "the CLI relying party is not registered (${client_id_file})" \
-		"cd ${platform} && just dev-up   (isonim-dev-idp's ensure_cli_app registers it)"
-[ -f "${rp_env}" ] ||
-	skip "no fixture credentials (${rp_env})" \
-		"cd ${platform} && just dev-up   (isonim-dev-idp writes the fixture user there)"
+	# THE CLAIM UNDER TEST, ASSERTED RATHER THAN ASSUMED. "codetracer obtains a
+	# working local login WITHOUT standing up isonim's stack" is only tested by
+	# a run in which isonim's stack is NOT up. A run with both up would pass
+	# for the wrong reason, and this gate's whole history is of borrowing that
+	# stack.
+	isonim_live="$(pgrep -af 'isonim-dev|process-compose|stub-upstream-provider' 2>/dev/null |
+		grep -v 'identity-live-device-grant' || true)"
+	if [ -n "${isonim_live}" ]; then
+		bad "isonim's stack appears to be running, so this run cannot show that codetracer needs no part of it"
+		printf '%s\n' "${isonim_live}" | sed 's/^/            /'
+		note "re-run with isonim's stack down, or with CT_SSO_SOURCE=isonim to test the other leg deliberately"
+	else
+		ok "isonim's stack is NOT running — this login uses only the shared instance"
+	fi
+else
+	[ -d "${platform}" ] ||
+		skip "no shared instance descriptor at ${descriptor} and no isonim-platform checkout at ${platform}" \
+			"cd ${workspace}/infra && REPRO_ENVIRONMENT=development repro up --activity sso"
+	source_used="isonim"
+	issuer="${CT_IDENTITY_ISSUER:-https://login.metacraft-labs.test:8443}"
 
-client_id="${CT_IDENTITY_CLIENT_ID:-$(tr -d '[:space:]' <"${client_id_file}")}"
-[ -n "${client_id}" ] || skip "the client id is empty" "re-run the stack's IdP provisioning"
+	ca_file="${platform}/local-dev/state/ca/isonim-dev-ca.crt"
+	client_id_file="${platform}/local-dev/state/idp/cli-client-id"
+	rp_env="${platform}/local-dev/state/idp/relying-party.env"
 
-# The fixture user, read from the stack's own state rather than hardcoded —
-# a credential written into this file would be a credential that drifts.
-login_user="$(sed -n 's/^ISONIM_DEV_IDP_TEST_USER="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "${rp_env}" | head -1)"
-login_password="$(sed -n 's/^ISONIM_DEV_IDP_TEST_PASSWORD="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "${rp_env}" | head -1)"
-[ -n "${login_user}" ] && [ -n "${login_password}" ] ||
-	skip "could not read the fixture user out of ${rp_env}" \
-		"cd ${platform} && just dev-up   (or check that file's ISONIM_DEV_IDP_TEST_* lines)"
+	[ -f "${ca_file}" ] ||
+		skip "the dev CA is absent (${ca_file})" \
+			"cd ${workspace}/infra && REPRO_ENVIRONMENT=development repro up --activity sso   (or: cd ${platform} && just dev-up)"
+	[ -f "${client_id_file}" ] ||
+		skip "the CLI relying party is not registered (${client_id_file})" \
+			"cd ${platform} && just dev-up   (isonim-dev-idp's ensure_cli_app registers it)"
+	[ -f "${rp_env}" ] ||
+		skip "no fixture credentials (${rp_env})" \
+			"cd ${platform} && just dev-up   (isonim-dev-idp writes the fixture user there)"
+
+	client_id="${CT_IDENTITY_CLIENT_ID:-$(tr -d '[:space:]' <"${client_id_file}")}"
+	# The fixture user, read from the stack's own state rather than hardcoded —
+	# a credential written into this file would be a credential that drifts.
+	login_user="$(sed -n 's/^ISONIM_DEV_IDP_TEST_USER="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "${rp_env}" | head -1)"
+	login_password="$(sed -n 's/^ISONIM_DEV_IDP_TEST_PASSWORD="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "${rp_env}" | head -1)"
+	[ -n "${login_user}" ] && [ -n "${login_password}" ] ||
+		skip "could not read the fixture user out of ${rp_env}" \
+			"cd ${platform} && just dev-up   (or check that file's ISONIM_DEV_IDP_TEST_* lines)"
+fi
+
+[ -n "${client_id}" ] || skip "the client id is empty" "re-run the issuer's relying-party provisioning"
+
+# ---------------------------------------------------------------------------
+# THIS FILE NAMES NO IDENTITY HOST, AND THAT IS CHECKED RATHER THAN CLAIMED.
+# Shared-Development-Services.md's gate asserts "neither product names a
+# hostname ... by grep"; this is that grep, run as part of the gate so it
+# cannot rot. The issuer, the port, the client id and the fixture user all come
+# out of the shared instance's descriptor, which is written by the OWNER of the
+# service (`infra`). Two exceptions are named rather than excluded wholesale:
+#
+#   * the isonim FALLBACK leg still carries isonim's own default issuer, and it
+#     is the leg that exists for people without the shared instance. The `sed`
+#     deletes exactly that block, so a hostname anywhere else still fails;
+#   * `/etc/mcl-dev-certs/` is a PATH, not a host, and §5.1 of
+#     environment-domains-and-dev-certificates.md requires it to be literal
+#     ("reads that path or fails loudly ... must not accept a path from the
+#     environment").
+self_src="$(sed '/^else$/,/^fi$/d' "${BASH_SOURCE[0]}" | grep -v '^[[:space:]]*#')"
+stray_hosts="$(printf '%s\n' "${self_src}" |
+	grep -oE '(login|app|dev|staging|idp)[.][A-Za-z0-9.-]+[.](test|com|localhost)' |
+	sort -u || true)"
+if [ -z "${stray_hosts}" ]; then
+	ok "this file names no identity host — the issuer comes from the instance"
+else
+	bad "this file names an identity host: $(printf '%s' "${stray_hosts}" | tr '\n' ' ')"
+	note "the issuer, port, client id and fixture user belong in the shared instance's descriptor"
+fi
+
+issuer_hostport="${issuer#https://}"
+issuer_host="${issuer_hostport%%:*}"
+issuer_port="${issuer_hostport##*:}"
+[ "${issuer_port}" = "${issuer_host}" ] && issuer_port=443
+
+echo "  issuer:   ${issuer}   (source: ${source_used})"
+echo "  client:   ${client_id}"
+echo
 
 # IS THE ISSUER ACTUALLY UP. This is what separates "the stack is down" (skip)
 # from "the client id is wrong" (fail) — without it, the negative control below
@@ -174,7 +292,7 @@ if ! curl -fsS --max-time 10 --cacert "${ca_file}" \
 	--resolve "${issuer_host}:${issuer_port}:127.0.0.1" \
 	"${issuer}/.well-known/openid-configuration" >"${work}/discovery.json" 2>"${work}/discovery.err"; then
 	skip "the issuer at ${issuer} did not serve its discovery document" \
-		"cd ${platform} && just dev-up   ($(head -1 "${work}/discovery.err" 2>/dev/null))"
+		"start the ${source_used} issuer ($(head -1 "${work}/discovery.err" 2>/dev/null))"
 fi
 
 # Chromium and playwright. Found the way ci/test/constraints-listing-browser.sh
@@ -212,7 +330,7 @@ if command -v certutil >/dev/null 2>&1; then
 	profile="${work}/browser-profile"
 	mkdir -p "${profile}/.pki/nssdb"
 	certutil -N -d "sql:${profile}/.pki/nssdb" --empty-password >/dev/null 2>&1 || true
-	if certutil -d "sql:${profile}/.pki/nssdb" -A -t "C,," -n "isonim-dev-ca" \
+	if certutil -d "sql:${profile}/.pki/nssdb" -A -t "C,," -n "mcl-dev-ca" \
 		-i "${ca_file}" >/dev/null 2>&1; then
 		note "the dev CA is in a throwaway NSS database at ${profile}"
 	else

@@ -8,13 +8,14 @@
 # The sweep has to run BEFORE `actions/checkout`, so it cannot be a script the
 # repository provides (the repository is not on disk yet) and it cannot be a
 # local composite action (same reason). It is an inline `run:` block, pasted
-# into seven jobs. An inline block has no other way to be executed outside CI,
+# into seven jobs of codetracer.yml and the one job of launcher-recorder-e2e.yml.
+# An inline block has no other way to be executed outside CI,
 # and "we will see it in the log" is exactly the standard that let a `grep`
 # exit 127, get swallowed by `|| true`, and print an EMPTY count as a pass on
 # this same runner class.
 #
 # So: ci/runner/sweep-readonly-leftovers.sh holds the canonical body, this
-# suite asserts the seven pasted copies are byte-identical to it, and this
+# suite asserts the eight pasted copies are byte-identical to it, and this
 # suite RUNS it against fixtures.
 #
 # ## What it asserts
@@ -113,6 +114,9 @@ import sys
 # are both unambiguous at the line level -- a job key at two spaces, and a
 # block scalar under a known step name.
 workflow, body_path, canon = sys.argv[1], sys.argv[2], sys.argv[3]
+# Optional: the exact jobs that must carry the sweep, comma-separated, for a
+# workflow whose persistent-runner jobs are not the aarch64-darwin class.
+explicit = sys.argv[4].split(",") if len(sys.argv) > 4 and sys.argv[4] else None
 body = open(body_path, encoding="utf-8").read()
 lines = open(workflow, encoding="utf-8").read().splitlines(keepends=True)
 
@@ -144,6 +148,8 @@ expected = {"test-non-gui", "test-ui-tests"}
 for i, line in enumerate(lines):
     if line.strip().startswith("runs-on:") and "aarch64-darwin" in line:
         expected.add(job_at(i))
+if explicit is not None:
+    expected = set(explicit)
 
 found = {}
 for i, line in enumerate(lines):
@@ -195,6 +201,20 @@ if [ "${SYNC_RC}" -eq 0 ]; then
 	pass "every aarch64-darwin job carries the sweep, byte-identical to ${CANON}"
 else
 	fail "every aarch64-darwin job carries the sweep, byte-identical to ${CANON}" ""
+fi
+
+# The launcher <-> recorder gate runs on the persistent self-hosted LINUX
+# class, whose work directories inherit the same 0555 leftovers (an `EACCES`
+# on `studio-bundle/.../goldenlayout-base.css` failed its checkout), so its
+# one job carries the same body -- held to the same bytes here.
+readonly LRC_WORKFLOW=".github/workflows/launcher-recorder-e2e.yml"
+SYNC_OUT="$(python3 "${FIX}/sync.py" "${REPO_ROOT}/${LRC_WORKFLOW}" "${BODY}" "${CANON}" launcher-recorder-e2e 2>&1)"
+SYNC_RC=$?
+printf '%s\n' "${SYNC_OUT}" | while IFS= read -r line; do printf '  %s\n' "${line}"; done
+if [ "${SYNC_RC}" -eq 0 ]; then
+	pass "the launcher-recorder-e2e job carries the sweep, byte-identical to ${CANON}"
+else
+	fail "the launcher-recorder-e2e job carries the sweep, byte-identical to ${CANON}" ""
 fi
 
 # -----------------------------------------------------------------------------

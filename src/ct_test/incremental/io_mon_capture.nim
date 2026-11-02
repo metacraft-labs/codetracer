@@ -135,13 +135,21 @@ proc findSnoopCli*(): string =
   ## rather than in-process. Lookup order:
   ##   1. `$IO_MON` (operator / dev-shell / test pin) — used as-is if it
   ##      names an existing file.
-  ##   2. `io-mon` on `$PATH` (the dev shell prepends io-mon's build/bin
+  ##   2. `io-mon` beside the running executable — the packaged layout: the
+  ##      Nix package installs it in the `bin/` that holds `ct` and `ct-test`,
+  ##      with the shim in the `lib/` io-mon's own discovery reads
+  ##      (`<bin>/../lib`), so the CLI and the shim found are the pair that
+  ##      shipped together.
+  ##   3. `io-mon` on `$PATH` (the dev shell prepends io-mon's build/bin
   ##      when the sibling is present).
   ## Returns the absolute path of the first existing candidate, or "" when no
   ## snoop CLI is locatable (⇒ the live arm gates / fails safe — never faked).
   let pinned = getEnv(IoMonSnoopEnvVar)
   if pinned.len > 0 and fileExists(pinned):
     return absolutePath(pinned)
+  let beside = getAppDir() / addFileExt(IoMonSnoopBinaryName, ExeExt)
+  if fileExists(beside):
+    return beside
   let onPath = findExe(IoMonSnoopBinaryName)
   if onPath.len > 0:
     return onPath
@@ -528,3 +536,43 @@ proc captureReadFilesLive*(command: seq[string];
   except CatchableError as e:
     return err("io-mon depfile unreadable: " & e.msg)
   readFilesFromDepFile(dep)
+
+proc capturedInputPaths*(dep: MonitorDepFile): Result[seq[string], string] =
+  ## The files one monitored process tree consumed, for a JUDGEMENT rather
+  ## than a fold: every path it read before writing it
+  ## (``readPathsFromDepFile``) and every binary it launched
+  ## (``launchedBinaryPathsFromDepFile``), as recorded, without the capture-time
+  ## ``stat`` ``readFilesFromDepFile`` needs (a test may legitimately delete a
+  ## file it read, and that must not turn the capture into a failure).
+  ##
+  ## Used by `ct test run`'s read-set capture (``certificate_issuance``,
+  ## CTC-3g). A capture that cannot be trusted to be COMPLETE is an ``Err``,
+  ## never a shorter set, because a missing read there is a missed untracked
+  ## input:
+  ##   * the depfile does not say it is complete (``requireCompleteDepFile``);
+  ##   * no process in it announced that the shim loaded (no
+  ##     ``mrProcessStart``): the root ran unmonitored — macOS strips the
+  ##     injection from SIP-protected binaries, and a static binary never
+  ##     loads it — so an empty set would mean "could not see", not "read
+  ##     nothing";
+  ##   * a spawned child never confirmed it was monitored
+  ##     (``unconfirmedSpawnedSubtrees``).
+  ? requireCompleteDepFile(dep)
+  var started = false
+  for rec in dep.records:
+    if rec.kind == mrProcessStart:
+      started = true
+      break
+  if not started:
+    return err("the monitored process never reported that the io-mon shim " &
+      "loaded in it, so what it read was not observed")
+  let unconfirmed = unconfirmedSpawnedSubtrees(dep)
+  if unconfirmed.len > 0:
+    return err($unconfirmed.len & " process(es) the run spawned were not " &
+      "monitored (pids " & $unconfirmed & "), so their reads were not observed")
+  var paths = readPathsFromDepFile(dep)
+  for path in launchedBinaryPathsFromDepFile(dep):
+    if path notin paths:
+      paths.add path
+  paths.sort(cmp)
+  ok(paths)

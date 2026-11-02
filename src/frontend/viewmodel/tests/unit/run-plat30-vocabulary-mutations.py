@@ -80,7 +80,11 @@ ROOT = HERE.parents[4]            # .../codetracer
 # -- subjects ---------------------------------------------------------------
 OPS = "src/frontend/viewmodel/editor/operations.nim"
 STATE = "src/frontend/viewmodel/editor/editor_state.nim"
-BINDINGS = "src/common/editing_key_bindings.nim"
+CUA = "src/frontend/viewmodel/keymap/cua_keymap.nim"
+    # PLAT-68 deleted `src/common/editing_key_bindings.nim` (the fourteen
+    # rows) for the CUA base; its two arms were re-aimed onto the CUA data
+    # and the core's scope, and the TUI suite's cases onto the retired rows
+    # driven through the CUA base.
 DISPATCH = "src/frontend/tui/app/edit_binding.nim"
 EDITING_CORE = "src/frontend/viewmodel/editing_core.nim"
 GENERATOR = "src/frontend/viewmodel/tests/generators/vocabulary_generator.nim"
@@ -88,7 +92,7 @@ LAWS = "src/frontend/viewmodel/tests/unit/test_editor_vocabulary_laws.nim"
 ORACLE = "src/frontend/viewmodel/tests/unit/test_editor_vocabulary_oracle.nim"
 TUI = "src/frontend/tui/app/tests/test_edit_binding_vocabulary.nim"
 
-TOUCHED = [OPS, STATE, BINDINGS, EDITING_CORE, GENERATOR, LAWS, ORACLE, TUI]
+TOUCHED = [OPS, STATE, CUA, EDITING_CORE, GENERATOR, LAWS, ORACLE, TUI]
 
 # **READ, NOT MUTATED.** The terminal's dispatch builds its scope through
 # `editing_core.editScopeOf` now, so `M14` sits on the core; the dispatch module
@@ -147,10 +151,10 @@ ORACLE_PARSE = "the published section was found and parsed, category by category
 REFUSAL_ARM = "the refusal arm exists and is reached, two-sidedly"
 POPULATION = "the scenario table is one row per declaration, in the vocabulary's order"
 CARDINALITY = "the vocabulary's own cardinalities, asserted before anything is swept"
-BEHAVIOUR_DELETE = "behaviour: delete-cluster-before"
-BINDING_TABLE = "the binding table answers the three questions a `case` could not"
-MODEL_LEFT = "behaviour through the model: move-caret-left"
-MODEL_HOME = "behaviour through the model: move-caret-line-start"
+BEHAVIOUR_DELETE = "retired behaviour through the terminal: delete-char-backward"
+BINDING_TABLE = "retired behaviour through the terminal: insert-text"
+MODEL_LEFT = "retired behaviour through the terminal: move-char-left"
+MODEL_HOME = "retired behaviour through the terminal: move-line-start"
 OP_ENTER_VISUAL = "operation: enter-visual"
 
 NAMED_CASES = [
@@ -315,8 +319,13 @@ ARMS = [
         "than with the operation's own boundary table",
     ),
     Arm(
+        # RE-AIMED 2026-10-11 (PLAT-68): `toggle-fold` is bound by a CUA ROW
+        # now, and a base row naming an operation the vocabulary lacks raises
+        # at load (`base_rows.bindingOf`) — every suite then dies before its
+        # first case and the arm "never ran". The declaration removed is one
+        # no data base binds, so the arm grades §7.1 again.
         "M7", OPS,
-        '    commandDecl("toggle-fold", cToggleFold),\n',
+        '    commandDecl("flip-selections", cFlipSelections),\n',
         "",
         ORACLE_L3,
         "A PUBLISHED DECLARATION VANISHES FROM THE IMPLEMENTATION. The first "
@@ -373,24 +382,26 @@ ARMS = [
         "the outcome",
     ),
     Arm(
-        "M12", BINDINGS,
-        '                   operation: "delete-char-backward", effect: eeChanged,\n',
-        '                   operation: "delete-word-backward", effect: eeChanged,\n',
+        "M12", CUA,
+        '    BaseRow(chords: "Backspace", operation: "editor.delete-char-backward", whenText: Writable),\n',
+        '    BaseRow(chords: "Backspace", operation: "editor.delete-char-forward", whenText: Writable),\n',
         BEHAVIOUR_DELETE,
-        "A BINDING ROW NAMES AN OPERATION THE VOCABULARY DOES NOT HAVE — and "
-        "`delete-word-backward` is deliberately a FUSED name, the shape §2.1 "
-        "says the vocabulary must not contain at all. This is the arm on the "
-        "join: without it the table's `operation` column is a comment",
+        "A BINDING ROW NAMES THE WRONG OPERATION. Re-aimed 2026-10-11 (PLAT-68) "
+        "from the retired table onto the CUA row that replaced it: the row's "
+        "`operation` is the join between a key and the vocabulary, and "
+        "without this arm the column is a comment. `Backspace` now deletes "
+        "forward; the retired-row case asserts the operation the key reached",
     ),
     Arm(
-        "M13", BINDINGS,
-        '    EditBindingRow(key: "", behaviour: ebInsertText,\n',
-        '    EditBindingRow(key: "Insert", behaviour: ebInsertText,\n',
+        "M13", EDITING_CORE,
+        "               textEntry: not isModal(d.model) or d.state.mode == emInsert,\n",
+        "               textEntry: isModal(d.model) and d.state.mode == emInsert,\n",
         BINDING_TABLE,
-        "THE DEFAULT ROW STOPS BEING THE DEFAULT. `applyEditKey`'s `else` arm "
-        "is the fourteenth behaviour and it is expressed as the row whose key "
-        "is empty; a row bound to a real key instead leaves typing itself "
-        "unbound, which is the entire editing path",
+        "TYPING STOPS BEING THE DEFAULT. Re-aimed 2026-10-11 (PLAT-68): the "
+        "retired table expressed typing as its empty-key row; under the CUA "
+        "base it is §4.1's CHARACTER outcome, admitted by the scope's "
+        "text-entry dimension. With that dimension false under CUA a printable "
+        "key binds nothing and types nothing, which is the entire editing path",
     ),
     # M14 WAS RE-AIMED BY PLAT-34 AND WAS NOT DROPPED (§32).
     #
@@ -676,13 +687,14 @@ CASE_TEMPLATES = [
     ('test "display: " & op.name:', LAWS, "THE DISPLAY SWEEP'S CELL"),
     ('test "FUZZ-8 x corpus class " & $cls:', LAWS, "THE FUZZ-8 CELL"),
     ('test "row: " & specDecl.name:', ORACLE, "THE ORACLE ROW CELL"),
-    ('test "behaviour: " & $row.behaviour:', ORACLE, "THE BINDING-ROW CELL"),
-    ('test "behaviour through the model: " & $row.behaviour:', TUI,
+    # PLAT-68: the oracle's fourteen-row binding cell went with the table, and
+    # the dispatch cell drives each RETIRED row through the CUA base.
+    ('test "retired behaviour through the terminal: " & row.operation:', TUI,
      "THE DISPATCH CELL"),
 ]
 
 COMPOSED_PREFIXES = ("operation: ", "display: ", "FUZZ-8 x corpus class ",
-                     "row: ", "behaviour: ", "behaviour through the model: ")
+                     "row: ", "retired behaviour through the terminal: ")
 
 
 def check_killer_names(problems: int) -> int:

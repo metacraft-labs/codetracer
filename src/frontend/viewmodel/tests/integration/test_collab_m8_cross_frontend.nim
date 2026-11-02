@@ -27,6 +27,7 @@ import ../../collab/[
   types,
 ]
 import ../../headless_session
+import ../../../../common/replay_server_path   # the one search order
 import ../../session_vm
 import ../../store/types as store_types
 import ../../sync/signal_serializer except SessionViewModel
@@ -156,14 +157,11 @@ proc ensureEmulatorLibraryPath() =
            if existing.len == 0: newest else: newest & ":" & existing)
 
 proc findReplayServer(): string =
+  ## The engine `src/common/replay_server_path` resolves — the order the
+  ## native front-ends use too — after making its emulator library loadable.
   ensureEmulatorLibraryPath()
-  let envBin = getEnv("REPLAY_SERVER_BIN", "")
-  if envBin.len > 0 and fileExists(envBin):
-    return envBin
-  let candidate = repoRoot() / "src" / "build-debug" / "bin" / "replay-server"
-  doAssert fileExists(candidate),
-    "missing replay-server; set REPLAY_SERVER_BIN or build src/build-debug/bin/replay-server"
-  candidate
+  result = locateReplayServer()
+  doAssert result.len > 0, missingReplayServerMessage()
 
 proc findM8TraceFixture(): string =
   let envTrace = getEnv("M8_COLLAB_TRACE_PATH", "")

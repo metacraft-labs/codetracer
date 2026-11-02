@@ -285,7 +285,8 @@ if [ -n "${found}" ]; then
 			echo "  whenever the producer is still writing when grep exits. Rewrite each"
 			echo "  of these as a here-string:"
 			echo
-			echo "      grep -q PAT <<<\"\$var\"        or        grep -q PAT <<<\"\$(producer)\""
+			# shellcheck disable=SC2016 # literal $var and $(producer): the remedy text the gate prints
+			echo '      grep -q PAT <<<"$var"        or        grep -q PAT <<<"$(producer)"'
 			echo
 		fi
 		printf '    %s\n' "${hit}"

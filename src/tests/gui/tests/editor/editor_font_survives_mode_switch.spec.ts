@@ -31,11 +31,21 @@
  * Changing the default code font stays a legal edit; losing it does not.
  * Naming `SpaceMono` here would also have passed on the broken build for any
  * reader who only checked the first sample.
+ *
+ * THE SWITCH IS Ctrl+F5 IN AND STOP OUT, NOT RUN. The report came from the
+ * browser, but `ct edit` is an Electron launch, and the desktop has no Run
+ * that leaves Edit mode: `#run-image` is absent for a folder with no project
+ * marker, which `test-programs/` is, and disabled for one with a marker, until
+ * the desktop gains a route that runs toolbar commands. Clicking it timed out
+ * and the font was never read. `Ctrl+F5` reaches the same `switchToDebug` a
+ * Run reaches, and Stop the same `switchToEdit`, so `setEditorsEditable` runs
+ * both ways exactly as before. See `lib/mode-switch.ts`.
  */
 
 import * as path from "node:path";
 
 import { test, expect, codetracerInstallDir } from "../../lib/fixtures";
+import { enterDebugMode, stopToEditMode } from "../../lib/mode-switch";
 
 const testFolder = path.join(codetracerInstallDir, "test-programs");
 
@@ -69,7 +79,8 @@ test.describe("Editor font across a mode switch", () => {
   test.use({
     launchMode: "edit",
     editFolderPath: testFolder,
-    deploymentMode: "web",
+    // The `edit` launch is always Electron (`ct edit`); `lib/mode-switch.ts`.
+    deploymentMode: "electron",
   });
 
   test("entering and leaving debug mode leaves the code font alone", async ({
@@ -85,9 +96,7 @@ test.describe("Editor font across a mode switch", () => {
       .not.toEqual("");
 
     // Enter debug mode.
-    await ctPage.locator("#run-image").click({ timeout: 30_000 });
-    await ctPage.waitForSelector(".isonim-debug-controls", { timeout: 180_000 });
-    await ctPage.waitForSelector(".view-line", { timeout: 60_000 });
+    await enterDebugMode(ctPage);
 
     const during = await readEditorFont(ctPage);
     expect(
@@ -99,9 +108,7 @@ test.describe("Editor font across a mode switch", () => {
     // Leave it again. This is the "never recovers" half: the same proc runs
     // on the way out, so a one-way check would miss a fix that only held in
     // one direction.
-    await ctPage.locator("#stop-image").click({ timeout: 30_000 });
-    await ctPage.waitForSelector(".edit-mode-toolbar", { timeout: 180_000 });
-    await ctPage.waitForSelector(".view-line", { timeout: 60_000 });
+    await stopToEditMode(ctPage);
 
     const after = await readEditorFont(ctPage);
     expect(

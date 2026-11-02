@@ -67,6 +67,29 @@ PIN_SRC="$REPO_ROOT/ci/toolchain.pin"
 	exit 1
 }
 
+# THE NIM VERSION THE FIXTURE COMPILERS REPORT, READ FROM THE DECLARATION for
+# the reason `write_lock` reads its revisions from it: `make_fixture` copies
+# the REAL `ci/toolchain.pin`, so a literal here that lags that file fails the
+# baseline arms on "ci/toolchain.pin expects …" instead of on what they test.
+# It was the literal 2.2.8, and the pin's move to the fork's 2.3.1 is exactly
+# that lag.
+PIN_NIM_VERSION="$(sed -n 's/^EXPECT_NIM_VERSION=//p' "$PIN_SRC")"
+[ -n "$PIN_NIM_VERSION" ] || {
+	echo "FAIL: $PIN_SRC declares no EXPECT_NIM_VERSION; the fixture compilers have no version to report" >&2
+	exit 1
+}
+
+# Rewrite one `KEY=value` line of a fixture's copied declaration. For the arms
+# that need the declaration to say something the real one does not.
+set_fixture_pin() {
+	local key="$1" value="$2"
+	sed -i.bak "s/^${key}=.*/${key}=${value}/" "$REPO/ci/toolchain.pin" && rm -f "$REPO/ci/toolchain.pin.bak"
+	grep -qx "${key}=${value}" "$REPO/ci/toolchain.pin" || {
+		echo "FAIL: could not set ${key}=${value} in the fixture declaration" >&2
+		exit 1
+	}
+}
+
 PASS=0
 FAIL=0
 
@@ -128,10 +151,23 @@ write_lock() {
 		fork_owner=*) fork_owner="${arg#fork_owner=}" ;;
 		esac
 	done
-	python3 - "$out" "$fork_owner" <<'PY'
-import json, sys
+	python3 - "$out" "$fork_owner" "$PIN_SRC" <<'PY'
+import json, re, sys
 
-out, fork_owner = sys.argv[1], sys.argv[2]
+out, fork_owner, pin_path = sys.argv[1], sys.argv[2], sys.argv[3]
+
+# The three toolchain-determining revisions come from the declaration
+# make_fixture copies (see the note above the nodes), never from literals here.
+pin = {}
+with open(pin_path) as handle:
+    for line in handle:
+        m = re.match(r"^(LOCK_[A-Z_]+)=([0-9a-f]{40})\s*$", line)
+        if m:
+            pin[m.group(1)] = m.group(2)
+for key in ("LOCK_CODETRACER_TOOLCHAINS", "LOCK_FENIX", "LOCK_NOIR"):
+    if key not in pin:
+        sys.exit("write_lock: %s declares no 40-hex %s, so the fixture lock "
+                 "cannot agree with it" % (pin_path, key))
 
 nodes = {
     "root": {
@@ -151,10 +187,16 @@ nodes = {
     # the baseline "a matching pin passes" arm fail for a reason that has
     # nothing to do with the arm — the guard would be correctly reporting a
     # declaration that lags its lock, in a fixture that meant to say neither.
-    # They move together with `ci/toolchain.pin` or not at all.
-    "codetracer-toolchains_7": {"locked": {"rev": "942c995a36469853351af605da90025314ffc58e"}},
-    "fenix_4": {"locked": {"rev": "dd2c80d0b88463ccc0402c86e9e72dbb354ac091"}},
-    "noir": {"locked": {"rev": "ca080a58b05106e37a7b5178a11a8f4503951a2b"}},
+    #
+    # They used to be literals kept in step with the pin by hand, and that
+    # rotted: dde31f257 and 75f76f2b3 moved LOCK_NOIR twice while these lines
+    # kept ca080a58, so 17 arms failed on "ci/toolchain.pin records noir=..."
+    # rather than on anything they test. They are now READ from that file, so
+    # "the fixture lock agrees with the declaration" holds by construction;
+    # arms that need a disagreement (arm 7) still create one explicitly.
+    "codetracer-toolchains_7": {"locked": {"rev": pin["LOCK_CODETRACER_TOOLCHAINS"]}},
+    "fenix_4": {"locked": {"rev": pin["LOCK_FENIX"]}},
+    "noir": {"locked": {"rev": pin["LOCK_NOIR"]}},
     "reprobuild": {"inputs": {"nim-fork-src": "nim-fork-src"}, "locked": {"rev": "2f124aebbc8a9e61e87de1aa13e15298a83f88c6"}},
     "nim-fork-src": {"locked": {"rev": "0b5b5ec507d2d9c731d222184c625851377a02c8"}},
     # The decoys: same NAME as a root input, different rev. Reading these
@@ -186,9 +228,9 @@ make_tool() {
 # set. Versions match ci/toolchain.pin, so a fixture is green unless an arm
 # breaks something specific.
 seed_store_tools() {
-	local nimdir="$STORE/aaaaaaaa-nim-2.2.8/bin"
+	local nimdir="$STORE/aaaaaaaa-nim-$PIN_NIM_VERSION/bin"
 	local rustdir="$STORE/bbbbbbbb-rust-mixed/bin"
-	make_tool "$nimdir/nim" "Nim Compiler Version 2.2.8 [Linux: amd64]"
+	make_tool "$nimdir/nim" "Nim Compiler Version $PIN_NIM_VERSION [Linux: amd64]"
 	make_tool "$rustdir/rustc" "rustc 1.96.0 (ac68faa20 2026-05-25)"
 	make_tool "$rustdir/cargo" "cargo 1.96.0 (ac68faa20 2026-05-25)"
 	FIX_PATH="$nimdir:$rustdir:$FIX/bin"
@@ -304,7 +346,7 @@ make_fixture
 seed_store_tools
 run_guard --verify
 expect_rc 0 "a fully store-resident toolchain matching the declaration verifies"
-expect_says "nim 2.2.8" "the pass names the Nim it checked"
+expect_says "nim $PIN_NIM_VERSION" "the pass names the Nim it checked"
 expect_says "RESULT: PASSED" "and reports PASSED"
 
 # -----------------------------------------------------------------------------
@@ -342,7 +384,7 @@ expect_says "2.2.4-against-2.2.8" "and names the measured case it reproduces"
 # -----------------------------------------------------------------------------
 make_fixture
 seed_store_tools
-rm -f "$STORE/aaaaaaaa-nim-2.2.8/bin/nim"
+rm -f "$STORE/aaaaaaaa-nim-$PIN_NIM_VERSION/bin/nim"
 run_guard --verify
 expect_rc 1 "an absent required compiler fails"
 expect_says "is not on PATH at all" "and is reported as absent rather than skipped"
@@ -353,10 +395,10 @@ expect_says "An absent compiler is not a skip" "and the diagnostic says why that
 # -----------------------------------------------------------------------------
 make_fixture
 seed_store_tools
-make_tool "$STORE/aaaaaaaa-nim-2.2.8/bin/nim" "Nim Compiler Version 2.2.9 [Linux: amd64]"
+make_tool "$STORE/aaaaaaaa-nim-$PIN_NIM_VERSION/bin/nim" "Nim Compiler Version 0.0.1 [Linux: amd64]"
 run_guard --verify
 expect_rc 1 "a Nim that is not the declared version fails"
-expect_says "but ci/toolchain.pin expects 2.2.8" "and the diagnostic names both sides"
+expect_says "but ci/toolchain.pin expects $PIN_NIM_VERSION" "and the diagnostic names both sides"
 
 # -----------------------------------------------------------------------------
 # 6. SAME VERSION, DIFFERENT BUILD. rustc's upstream commit is the one identity
@@ -414,21 +456,54 @@ expect_says "eeeeeeeeeeee" "and the decoy's revision is what gets named"
 
 # -----------------------------------------------------------------------------
 # 9. THE FORK QUESTION, AS A LIVE ASSERTION.
-#    `nim-fork-src` reachable only from `reprobuild` is the measured reality and
-#    must pass. Reachable from `codetracer-toolchains` — the input that supplies
-#    Nim — must FAIL while ci/toolchain.pin still says EXPECT_NIM_SOURCE=upstream,
+#    Two declarations, each held to the lock shape that supports it.
+#
+#    `upstream` (stock Nim from `codetracer-toolchains`): `nim-fork-src`
+#    reachable only from `reprobuild` passes; reachable from
+#    `codetracer-toolchains` — the input that would then supply Nim — FAILS,
 #    because at that point the file asserts a source nothing supports.
+#
+#    `fork` (the measured reality since `ccbb85a0a`: `nim-fork` is
+#    `inputs.reprobuild`'s build of `nim-fork-src`): reachable from
+#    `reprobuild` passes; a lock in which `reprobuild` no longer reaches it
+#    FAILS, because `nix/packages/default.nix` takes the compiler from there.
 # -----------------------------------------------------------------------------
 make_fixture
 seed_store_tools
+set_fixture_pin EXPECT_NIM_SOURCE upstream
 run_guard --verify
-expect_says "reachable only from: reprobuild" "nim-fork-src reachable only from reprobuild is reported, not refused"
+expect_says "reachable only from: reprobuild" "upstream: nim-fork-src reachable only from reprobuild is reported, not refused"
 
 make_fixture fork_owner=codetracer-toolchains
 seed_store_tools
+set_fixture_pin EXPECT_NIM_SOURCE upstream
 run_guard --verify
-expect_rc 1 "nim-fork-src becoming reachable from the input that supplies Nim fails"
+expect_rc 1 "upstream: nim-fork-src becoming reachable from the input that supplies Nim fails"
 expect_says "declares EXPECT_NIM_SOURCE=upstream" "and the diagnostic names the claim it can no longer support"
+
+make_fixture
+seed_store_tools
+set_fixture_pin EXPECT_NIM_SOURCE fork
+run_guard --verify
+expect_rc 0 "fork: nim-fork-src reachable from reprobuild verifies"
+expect_says "is reachable from reprobuild, the input nim-fork is taken from" "and the pass says which input supports the declaration"
+
+make_fixture fork_owner=codetracer-toolchains
+seed_store_tools
+set_fixture_pin EXPECT_NIM_SOURCE fork
+run_guard --verify
+expect_rc 1 "fork: a lock in which reprobuild no longer reaches nim-fork-src fails"
+expect_says "declares EXPECT_NIM_SOURCE=fork, but nim-fork-src" "and the diagnostic names the claim it can no longer support"
+expect_says "reachable from: codetracer-toolchains" "and says where the node went instead"
+
+# A source the guard does not recognise is a refusal to run, not a pass: the
+# fork check branches on it, and an unknown word would be checked as neither.
+make_fixture
+seed_store_tools
+set_fixture_pin EXPECT_NIM_SOURCE frok
+run_guard --verify
+expect_rc 2 "an unrecognised EXPECT_NIM_SOURCE stops the guard"
+expect_says "it must be 'upstream' or 'fork'" "and the diagnostic names the two accepted values"
 
 # -----------------------------------------------------------------------------
 # 10. THE STALE-BINARY ARM — measured on this workstation: a nargo built five
@@ -619,7 +694,7 @@ for t in bash sed cut tr git awk grep wc uname basename dirname mktemp cat head 
 done
 OUT="$(
 	cd "$REPO" && env -i HOME="$FAKEHOME" \
-		PATH="$STORE/aaaaaaaa-nim-2.2.8/bin:$STORE/bbbbbbbb-rust-mixed/bin:$FIX/nopy" \
+		PATH="$STORE/aaaaaaaa-nim-$PIN_NIM_VERSION/bin:$STORE/bbbbbbbb-rust-mixed/bin:$FIX/nopy" \
 		IN_NIX_SHELL=impure TOOLCHAIN_PINS_STORE_PREFIX="$STORE" \
 		bash "$REPO/scripts/toolchain-pins.sh" --verify 2>&1
 )"

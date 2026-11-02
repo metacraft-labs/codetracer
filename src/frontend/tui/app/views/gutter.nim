@@ -124,10 +124,10 @@ const
   GutterGapCells* = 1
   MinGutterNumberCells* = 2
 
-  BreakpointGlyph* = "●"
-  BreakpointDisabledGlyph* = "○"
-  TracepointGlyph* = "◆"
-  ExecutionPointerMark = "▸"
+  BreakpointGlyph* = canonical(grBreakpoint)
+  BreakpointDisabledGlyph* = canonical(grBreakpointDisabled)
+  TracepointGlyph* = canonical(grTracepoint)
+  ExecutionPointerMark = canonical(grExecPointer)
     ## PLAT-51 (CodeTracer-TUI.md §3.3.2, Native-Front-End-Parity.md §3): the
     ## desktop's execution mark is a small right-pointing triangle
     ## (`.gutter-highlight-active:before`,
@@ -139,7 +139,7 @@ const
     ## emoji presentation two cells wide, which shifts the gutter. The ASCII
     ## tier draws `>` (`borders.AsciiFallbacks`). It replaced `-->`.
   ExecutionPointerGlyph* = " " & ExecutionPointerMark & " "
-  InspectionPointerMark = "▹"
+  InspectionPointerMark = canonical(grInspectPointer)
     ## The inspection cursor's mark: the same shape, hollow (U+25B9, no emoji
     ## presentation either). The desktop draws no distinct mark for it, so it
     ## is the execution mark's outline rather than a second shape; the ASCII
@@ -205,12 +205,12 @@ proc gutterWidth*(numberWidth: int): int =
   GutterMarkCells + max(0, numberWidth) + GutterGapCells +
     GutterPointerCells + GutterGapCells
 
-proc markGlyph*(mark: GutterMark): string =
+proc markGlyph*(mark: GutterMark; glyphs = DefaultGlyphs): string =
   case mark
   of gmNone: " "
-  of gmBreakpoint: BreakpointGlyph
-  of gmBreakpointDisabled: BreakpointDisabledGlyph
-  of gmTracepoint: TracepointGlyph
+  of gmBreakpoint: glyphs.glyph(grBreakpoint)
+  of gmBreakpointDisabled: glyphs.glyph(grBreakpointDisabled)
+  of gmTracepoint: glyphs.glyph(grTracepoint)
 
 proc markStyle*(mark: GutterMark): CellStyle =
   case mark
@@ -240,7 +240,7 @@ proc initGutterLineSpec*(line: int; numberWidth: int;
                  isInspectionLine: isInspectionLine,
                  provenance: provenance, numberWidth: numberWidth)
 
-proc gutterRow*(spec: GutterLineSpec): StyledRow =
+proc gutterRow*(spec: GutterLineSpec; glyphs = DefaultGlyphs): StyledRow =
   ## One line's gutter, as styled spans, exactly `gutterWidth(spec.numberWidth)`
   ## cells wide.
   ##
@@ -250,7 +250,8 @@ proc gutterRow*(spec: GutterLineSpec): StyledRow =
   ## gutter whose SPAN COUNT changed when a breakpoint appeared would
   ## invalidate every entry on the row rather than one.
   result = @[]
-  result.add StyledSpan(text: markGlyph(spec.mark), style: markStyle(spec.mark))
+  result.add StyledSpan(text: markGlyph(spec.mark, glyphs),
+                        style: markStyle(spec.mark))
 
   let number =
     if spec.numberText.len > 0: spec.numberText
@@ -273,10 +274,10 @@ proc gutterRow*(spec: GutterLineSpec): StyledRow =
   # stronger claim; the call stack pane still shows both markers on that frame's
   # row, so nothing is lost.
   if spec.isExecutionLine:
-    result.add StyledSpan(text: ExecutionPointerGlyph,
+    result.add StyledSpan(text: glyphs.pointerField(grExecPointer),
                           style: ExecutionPointerStyle)
   elif spec.isInspectionLine:
-    result.add StyledSpan(text: InspectionPointerGlyph,
+    result.add StyledSpan(text: glyphs.pointerField(grInspectPointer),
                           style: InspectionPointerStyle)
   else:
     result.add StyledSpan(text: NoPointerGlyph, style: DefaultCellStyle)

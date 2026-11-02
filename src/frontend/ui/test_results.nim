@@ -25,112 +25,100 @@
 
 import
   ui_imports,
-  # A MOUNT LATCH THAT DIES WITH ITS CONTAINER. See the module header for why
-  # `isoNimTestResultsMountedIds` alone cannot answer this after a mode swap.
-  isonim_panel_mount,
+  session_viewmodels,
   ../[ types, communication ]
 
+from isonim/web/dom_api import nil
+from ./pane_host_lookup import tabOfPaneHost
+import isonim/web/web_renderer
+import ./panel_host
+from ../viewmodel/session_vm import SessionViewModel
 from ../viewmodel/viewmodels/test_results_vm import
   TestResultsVM, createTestResultsVM, setCatalog, setRunAbsence, clearRun,
   ingestEvent, applyRunText
-when defined(js):
-  from isonim/web/dom_api import nil
-  from ../viewmodel/views/isonim_test_results_view import
-    mountIsoNimTestResultsPanel
+import ../viewmodel/views/isonim_test_results_view
 
 var testResultsVMInstance*: TestResultsVM
-var testResultsComponentRef: TestResultsComponent
-var isoNimTestResultsMountedIds {.used.}: JsAssoc[int, bool] =
-  JsAssoc[int, bool]{}
+  ## The SHOWN tab's Test Results ViewModel. Each tab has its own
+  ## (`session_viewmodels.testResultsVMOf`: a tab is an independent session,
+  ## `GUI/Multi-Window-Tab-Management.md` §Tab Behavior rule 1, and keeps
+  ## what it showed while another tab is shown, rule 6); this names the one
+  ## the window's hosts write into now, and is moved by `bindTestResultsVM` on
+  ## every tab switch. Each tab's pane renders its own tab's
+  ## (`testResultsVMForHost`).
+var hostInstallers: seq[proc(vm: TestResultsVM)]
+  ## What a host installs on EVERY tab's ViewModel (`onEachTestResultsVM`).
+var installedVMs: seq[TestResultsVM]
+  ## The ViewModels the installers have already run on.
 
-proc tryMountIsoNimTestResultsPanel*()
+proc applyHostInstallers(vm: TestResultsVM) =
+  if vm.isNil or vm in installedVMs:
+    return
+  installedVMs.add vm
+  for install in hostInstallers:
+    install(vm)
+
+proc bindTestResultsVM*(vm: TestResultsVM) =
+  ## Make `vm` — the shown tab's — the one the window's hosts write into.
+  if vm.isNil or vm == testResultsVMInstance:
+    return
+  testResultsVMInstance = vm
+  applyHostInstallers(vm)
+
+proc onEachTestResultsVM*(install: proc(vm: TestResultsVM)) =
+  ## Run `install` on every tab's Test Results ViewModel — those that exist
+  ## and each one created from now on: what a host installs (the runner, the
+  ## row actions) belongs to the window, not to one tab's project.
+  hostInstallers.add install
+  for vm in installedVMs:
+    install(vm)
+  if not testResultsVMInstance.isNil and testResultsVMInstance notin installedVMs:
+    applyHostInstallers(testResultsVMInstance)
+
+proc forgetTestResultsVM*(vm: TestResultsVM) =
+  ## Drop `vm` — a closed tab's — from the ViewModels the installers have run
+  ## on, so the window keeps no reference to it and a host installing later
+  ## (`onEachTestResultsVM`) does not write into a disposed ViewModel.
+  if vm.isNil:
+    return
+  var kept: seq[TestResultsVM] = @[]
+  for installed in installedVMs:
+    if installed != vm:
+      kept.add installed
+  installedVMs = kept
+  if testResultsVMInstance == vm:
+    testResultsVMInstance = nil
 
 proc initTestResultsVM*() =
-  ## The VM needs no store: its inputs arrive from a host as a catalog and a
-  ## run, never from the replay data store. That is why there is no
-  ## `initTestResultsVMWithStore` twin — a `ReplayDataStore` parameter would
-  ## be a promise this pane does not keep.
-  if testResultsVMInstance != nil:
-    return
-  testResultsVMInstance = createTestResultsVM()
-  clog "TestResultsVM: instance created"
-  tryMountIsoNimTestResultsPanel()
-
-when defined(js):
-  proc tryMountIsoNimTestResultsPanel*() =
-    ## Mount into `testResultsComponent-{id}`, retrying until GoldenLayout has
-    ## created the host. Same shape and same 200-attempt cap as
-    ## `trace_log.tryMountIsoNimTraceLogPanel`; see its comment for why the
-    ## retry is needed at all.
+  ## Bind the shown tab's ViewModel, created on first use. A page with no tab
+  ## yet keeps one window-wide instance, as before tabs owned theirs.
+  if data.sessions.len == 0:
     if testResultsVMInstance.isNil:
-      return
-    if testResultsComponentRef.isNil:
-      return
-    let componentId = testResultsComponentRef.id
-    # THE LATCH IS ASKED OF THE CONTAINER, NOT OF THE ID, and the question can
-    # only be asked once the container has been found — so there is no early
-    # return here any more. `isoNimTestResultsMountedIds` is kept as the record
-    # of which ids this module has ever mounted, and `unregister` still clears
-    # it, but it no longer decides: a mode swap destroys the container while
-    # `layout.nim` suppresses `itemDestroyed`, so `unregister` never runs and
-    # the id latch outlives the mount it describes. See `ui/isonim_panel_mount.nim`.
-    let key = cstring("testResultsComponent-" & $componentId)
-    var retryCount = 0
-    proc doMount() =
-      retryCount += 1
-      let container = dom_api.getElementById(dom_api.document, key)
-      if dom_api.isNodeNil(dom_api.Node(container)):
-        if retryCount > 200:
-          cerror "tryMountIsoNimTestResultsPanel: not ready after 200 retries"
-          return
-        discard setTimeout(proc() = doMount(), 10)
-        return
+      testResultsVMInstance = createTestResultsVM()
+      applyHostInstallers(testResultsVMInstance)
+      clog "TestResultsVM: instance created"
+    return
+  bindTestResultsVM(testResultsVMOf(data.activeSession))
 
-      if not isoNimPanelNeedsMount(
-          idLatchSaysMounted = isoNimTestResultsMountedIds.hasKey(componentId),
-          containerCarriesMark = isoNimPanelContainerIsMounted(container)):
-        return
+proc testResultsVMForHost(host: dom_api.Element): TestResultsVM =
+  ## The ViewModel of the tab whose container holds `host` — so tab 1's pane
+  ## shows tab 1's catalog and run whichever tab is on screen. A host outside
+  ## every tab shows the shown tab's.
+  let tab = tabOfPaneHost(host)
+  if tab >= 0 and tab < data.sessions.len:
+    result = testResultsVMOf(data.sessions[tab])
+    applyHostInstallers(result)
+  else:
+    initTestResultsVM()
+    result = testResultsVMInstance
 
-      let containerNode = dom_api.Node(container)
-      while not dom_api.isNodeNil(containerNode.firstChild):
-        discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-      isoNimTestResultsMountedIds[componentId] = true
-      try:
-        mountIsoNimTestResultsPanel(container, testResultsVMInstance)
-        markIsoNimPanelContainerMounted(container)
-      except:
-        cerror "tryMountIsoNimTestResultsPanel: mount EXCEPTION: " &
-          getCurrentExceptionMsg()
-
-    doMount()
-else:
-  proc tryMountIsoNimTestResultsPanel*() =
-    discard
+# The panel host mounts the pane into the container GoldenLayout creates.
+setPanelRenderer(Content.TestResults,
+  proc(r: WebRenderer; host: dom_api.Element;
+       session: SessionViewModel): dom_api.Element =
+    renderTestResultsPanel[WebRenderer, dom_api.Element](r,
+      testResultsVMForHost(host)))
 
 method register*(self: TestResultsComponent, api: MediatorWithSubscribers) =
   self.api = api
   initTestResultsVM()
-  if testResultsComponentRef.isNil:
-    testResultsComponentRef = self
-    tryMountIsoNimTestResultsPanel()
-
-method unregister*(self: TestResultsComponent) =
-  ## Release the module-global slot and the mounted marker. See
-  ## `ui/constraints.nim`'s twin for the full account — the two panes share the
-  ## write-once ref plus write-once mounted-marker shape, and therefore share
-  ## the failure: after a session switch or a panel close the pane comes back
-  ## blank and silent, because its mount returns early at a guard that nothing
-  ## ever clears.
-  ##
-  ## The VM stays, deliberately: a test catalog and the last run's rows describe
-  ## a project rather than a panel, and re-running the suite because someone
-  ## closed a pane would be a worse answer than keeping them.
-  if testResultsComponentRef == self:
-    testResultsComponentRef = nil
-  discard jsDelete(isoNimTestResultsMountedIds[self.id])
-  procCall unregister(Component(self))
-
-proc registerTestResultsComponent*(component: TestResultsComponent,
-                                   api: MediatorWithSubscribers) {.exportc.} =
-  component.register(api)

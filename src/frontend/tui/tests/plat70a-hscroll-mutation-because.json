@@ -1,0 +1,20 @@
+{
+  "C1": "Unhandled exception: never: the track click centred its column",
+  "D1": "Unhandled exception: never: wheel-left moved the view back",
+  "D2": "Unhandled exception: never: Shift + wheel-down moved the view right",
+  "G1": "moved.editorStamp.field(\"leftCols\") == cols",
+  "G2": "corner[0].px(\"left\") == bar.px(\"left\") + trackW",
+  "K1": "run(bkCua, paneKind, \"Left\") != \"view.scroll-left\"",
+  "K2": "Unhandled exception: vim: prefix z (layout.maximize-pane) of z h (view.scroll-left); prefix z (layout.maximize-pane) of z l (view.scroll-right); prefix z (layout.maximize-pane) of z H (view.scroll-left-half); prefix z (layout.maximize-pane) of z L (view.scroll-right-half) [BaseRowError]",
+  "M1": "productDefaults(lpTerminal).overflowMarkers",
+  "S1": "found.len == 0",
+  "T1": "disjoint == barred",
+  "V1": "v.overflows == (content > view)",
+  "V2": "marginOk == moves",
+  "V3": "hv2.leftCol == 100 - 40 + 1",
+  "V4": "w.measure(1, 12) == 30",
+  "V5": "ok == cases",
+  "V6": "d.contentCols == view",
+  "V7": "hv.leftCol == scrolled",
+  "W1": "v.leftCol == 6"
+}

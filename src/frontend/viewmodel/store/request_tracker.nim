@@ -49,10 +49,23 @@ proc markPending*(tracker: RequestTracker; key: string;
   ## key + args will return true until `markComplete` is called.
   tracker.pending[key] = argsKey(args)
 
-proc markComplete*(tracker: RequestTracker; key: string) =
-  ## Remove the pending entry for `key`, allowing a new request with
-  ## the same key to be issued.
+proc forget*(tracker: RequestTracker; key: string) =
+  ## Remove the pending entry for `key`, whatever request it records: the
+  ## one deliberate re-ask of a request whose answer is known to be stale
+  ## (the engine changed the data under the same arguments). A completing
+  ## request uses `markComplete`, which retires only its own entry.
   tracker.pending.del(key)
+
+proc markComplete*(tracker: RequestTracker; key: string;
+                   args: varargs[string]) =
+  ## The request `key` + `args` completed: retire its entry — and only its
+  ## own. When a newer request under the same key was issued since, the entry
+  ## is that request's, and clearing it would let a duplicate of the newer
+  ## request be sent while it is still in flight (UI-Data-Loading-Guidelines
+  ## Pattern 5).
+  let serialised = argsKey(args)
+  if key in tracker.pending and tracker.pending[key] == serialised:
+    tracker.pending.del(key)
 
 proc hasPending*(tracker: RequestTracker; key: string): bool =
   ## Check whether there is any pending request under `key`

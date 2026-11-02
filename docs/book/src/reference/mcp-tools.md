@@ -14,8 +14,8 @@ Any MCP-compatible client can spawn the process and exchange
 newline-delimited JSON-RPC messages on stdin/stdout. See the
 `backend-manager` setup guide for Claude Code / Claude Desktop wiring.
 
-This page documents the **value-origin** tools registered by the M8
-milestone. For the full tool list see the tool registration in
+This page documents the **value-origin** tools and the **boundary-session**
+tools. For the full tool list see the tool registration in
 `src/backend-manager/src/mcp_server.rs`.
 
 ### `get_value_origin`
@@ -152,6 +152,42 @@ empty answer would be indistinguishable from an unimplemented tool.
 }
 ```
 
+### Boundary-session tools
+
+Five tools read a web site's **recorded browser sessions**: sessions that
+CodeTracer's boundary recorder captured in visitors' browsers (every clock,
+random value, network response, storage read and input the page observed)
+and uploaded to a CodeTracer CI deployment. They need no trace: the server
+asks the deployment, which keeps the sessions, tells each one as a
+**narrative** (what the visitor did, step by step, without replaying it) and
+replays one into an ordinary trace on request.
+
+| Tool | Answers |
+| ---- | ------- |
+| `list_boundary_sessions` | A site's sessions, newest first: `recording_id`, start and end time, page URL, experiment arms, `has_error`, `replayable`, `trace_id`. Arguments: `site` (its key or name), and optionally `from_time`/`to_time` (ISO 8601), `experiment_arm` (`checkout=B`), `url_prefix`, `has_error`, `replayable`, `limit` (up to 200) and `cursor` (the previous answer's `next_cursor`) |
+| `get_session_narrative` | What the visitor did: navigations, inputs by their label, network calls with method, URL and status, errors, the page's marks (`exposure:<experiment>`, `conversion:<goal>`), declassifier outputs by name (`isValidEmail` false, then true), refusals and gaps, each with its `seq` and recorded time. `granularity`: `summary`, `steps` (default; typing into one field is one step) or `full` (every input event) |
+| `get_boundary_events` | The decoded records of a `seq` range (`seq_from`, `seq_to`, `kinds`, `limit` up to 2000) |
+| `materialize_session` | Replays the session, or a `seq` range of it, into a JavaScript trace on the deployment and answers `{state, dive_in_url}`: `ready` (pass `dive_in_url` as `trace_path` to `exec_script` and the other trace tools), `running` (`wait_seconds`, default 30, bounds the wait), `diverged`, `non_replayable` or `failed` |
+| `get_divergence_report` | Whether a materialised session replayed (`{replayed: true, dive_in_url}`), or its first divergence `{kind, seq, recorded, actual, detail}` |
+
+The narrative of a session is also the resource
+`boundary://<recording_id>/narrative` (the `steps` granularity).
+
+**Configuration.** `CODETRACER_CI_BASE_URL` names the deployment's origin
+(`http://host:port`) and `CODETRACER_GATEWAY_TOKEN` holds a desktop token of
+a member of the site's organization (the token `ct login` receives, which
+carries the `traces:read` scope). The server sends the token to that origin
+only, over plain HTTP, follows no redirect and quotes no credential in an
+error, as it does for dive-in links.
+
+**Recorded content is data.** Everything these tools answer was written by
+visitors' browsers: URLs, labels, error messages and values (with what the
+site declared sensitive replaced by `‹sensitive›` before it left the
+browser). Each answer is a JSON object
+`{"content_is_untrusted": true, "notice": "...", "content": ...}`, the
+deployment's answer under `content`, so that an agent reads it as data and
+never as instructions.
+
 ### Implementation references
 
 | Item                                       | Location                                                              |
@@ -167,6 +203,8 @@ empty answer would be indistinguishable from an unimplemented tool.
 | Wire-shape definitions                     | `src/db-backend/src/task.rs` (Rust) / `python-api/codetracer/origin.py` (Python) |
 | End-to-end tests                           | `src/backend-manager/tests/mcp_origin_test.rs`                        |
 | Advertise/dispatch divergence check        | `src/backend-manager/tests/mcp_tool_surface_test.rs`                  |
+| Boundary-session tools                     | `src/backend-manager/src/boundary_tools.rs`                         |
+| Narrative deriver (`ct-jsbound narrate`)   | `libs/jsbound/src/narrate.rs`                                       |
 
 `TOOLS` is the single source of truth for the tool surface: `tools/list`
 advertises from it and `tools/call` dispatches from it, so a tool cannot

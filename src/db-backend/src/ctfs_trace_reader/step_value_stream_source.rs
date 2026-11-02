@@ -168,16 +168,6 @@ impl SeekableStepStream {
     /// `steps.idx` are read through the caller's current source/overlay instead
     /// of re-opening the `.ct` by filesystem path.
     pub fn open_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<SeekableStepStream>, String> {
-        // Existence is answered by STRUCTURAL PRESENCE of `steps.dat`, never by
-        // `meta.dat`'s `has_step_stream` hint bit — a writer may stamp that bit
-        // only at close, so gating on it (or on `meta.dat` being present at all,
-        // which the writer also emits only at close) would refuse a step stream
-        // that structurally exists in a still-recording trace (trace-format spec:
-        // "Stream-presence flags are a hint, not a gate"). The container's own
-        // `meta.dat` is therefore never read here: `from_files` is handed
-        // `structural_presence_meta()`, which states the presence THIS call has
-        // already established structurally. See that helper for why passing an
-        // empty slice instead silently refused every split-stream container.
         let dat = match ctfs.read_file("steps.dat") {
             Ok(dat) => dat,
             Err(_) => return Ok(None),
@@ -186,13 +176,32 @@ impl SeekableStepStream {
             .read_file("steps.idx")
             .map_err(|e| format!("steps.idx missing despite steps.dat presence: {e}"))?;
 
+        // Only a structurally present step stream needs step metadata. A
+        // container without steps.dat can carry unrelated or legacy metadata.
+        // Presence is structural, but extended flags are semantic:
+        // dropping has_source_reload rejects tag 8 and silently sends a native
+        // reader back to the cursor-projection FFI path. Preserve the actual
+        // declaration while retaining the presence-header compatibility bridge.
+        //
+        // An absent or still-empty (not yet committed) `meta.dat` declares no
+        // extended capability. A committed member that cannot be read is an
+        // error: treating it as absent would silently drop its declarations.
+        let mut meta = super::structural_presence_meta();
+        if ctfs.file_size("meta.dat").is_some_and(|size| size > 0) {
+            let recorded_meta = ctfs
+                .read_file("meta.dat")
+                .map_err(|e| format!("meta.dat is committed but cannot be read: {e}"))?;
+            let flags = codetracer_trace_writer::meta_dat::read_meta_dat_ext_flags(&recorded_meta)?;
+            meta[8..12].copy_from_slice(&flags.to_le_bytes());
+        }
+
         // Read the path table through the SAME reader, so the space a line-only
         // address is inverted through comes from the same bytes the addresses
         // did.
         let line_space = super::line_position_space::container_line_space(ctfs).map(Arc::new);
 
         let form = ctfs.chunk_form();
-        match StepStreamReader::from_member_as(&super::structural_presence_meta(), dat.into(), &idx, form)? {
+        match StepStreamReader::from_member_as(&meta, dat.into(), &idx, form)? {
             Some(reader) => {
                 let record_count = reader.count();
                 let chunk_size = reader.chunk_size();
@@ -325,6 +334,16 @@ impl SeekableStepStream {
     /// [`with_position_decoder`]: Self::with_position_decoder
     /// [`with_line_space`]: Self::with_line_space
     pub fn step_position(&self, step_id: StepId) -> Option<(PathId, Line, Option<Line>)> {
+        self.position_for_record(self.read_record(step_id)?)
+    }
+
+    /// Source reloads occupy an execution ID but never define a source step.
+    /// Classify the decoded tag; repeated source positions remain real steps.
+    pub fn is_source_reload(&self, step_id: StepId) -> bool {
+        matches!(self.read_record(step_id), Some(StepStreamRecord::SourceReload { .. }))
+    }
+
+    fn read_record(&self, step_id: StepId) -> Option<StepStreamRecord> {
         if step_id.0 < 0 || step_id.0 as u64 >= self.record_count.load(Ordering::Relaxed) {
             return None;
         }
@@ -341,6 +360,10 @@ impl SeekableStepStream {
             self.chunk_decompressions.fetch_add(1, Ordering::Relaxed);
         }
 
+        Some(record)
+    }
+
+    fn position_for_record(&self, record: StepStreamRecord) -> Option<(PathId, Line, Option<Line>)> {
         match record {
             StepStreamRecord::Step { global_line_index } => {
                 if let Some(decoder) = self.position_decoder.as_ref()
@@ -622,37 +645,31 @@ fn decode_value(blob: &[u8]) -> ValueRecord {
 /// This is the exact reconstruction the M24c `LazyStepCache::reconstruct` did
 /// inline; it is hoisted to a free function so every replay sink and every
 /// range-fill caller produces byte-identical steps. Steps whose stream record
-/// carries no source line (a Raise/Catch/ThreadSwitch marker) — or an
-/// out-of-range read — degrade to a `(PathId(0), Line(0))` location, the same
-/// neutral slot the materialized path produced for a marker step.
-///
-/// `column` comes from the stream, and is `None` on exactly the containers that
-/// carry no column data. This used to be hard-coded `None` on the grounds that
-/// "the lazy/replay path is only taken for NON-column-aware traces" — an
-/// invariant the NATIVE (Nim FFI) router does hold, but which the browser's
-/// pure-Rust `open_new_format_rust` silently broke by taking the lazy path
-/// unconditionally. The hard-coded `None` is therefore not a statement of fact
-/// but a second bug stacked on the first: it is why a container flagged
-/// `has_column_aware_steps` reported `column: None` for every step. Reading the
-/// column from the stream makes the value true on both routes instead of true
-/// on one and assumed on the other.
+/// carries no source line (a Raise/Catch/ThreadSwitch marker) retains the
+/// inherited neutral location. SourceReload is deliberately absent: unlike a
+/// source step it has no location and must not enter any step table or index.
 pub fn reconstruct_db_step(
     stream: &SeekableStepStream,
     call_keys: &[CallKey],
     global_call_keys: &[CallKey],
     index: usize,
-) -> DbStep {
-    let (path_id, line, column) = stream
-        .step_position(StepId(index as i64))
-        .unwrap_or((PathId(0), Line(0), None));
-    DbStep {
+) -> Option<DbStep> {
+    let record = stream.read_record(StepId(index as i64));
+    if matches!(record.as_ref(), Some(StepStreamRecord::SourceReload { .. })) {
+        return None;
+    }
+    let (path_id, line, column) =
+        record
+            .and_then(|record| stream.position_for_record(record))
+            .unwrap_or((PathId(0), Line(0), None));
+    Some(DbStep {
         step_id: StepId(index as i64),
         path_id,
         line,
         column,
         call_key: call_keys.get(index).copied().unwrap_or(CallKey(-1)),
         global_call_key: global_call_keys.get(index).copied().unwrap_or(CallKey(-1)),
-    }
+    })
 }
 
 /// A SINK the unified replay engine feeds each reconstructed step into.
@@ -800,7 +817,9 @@ pub fn replay_steps_into_sinks(
     let lo = range.start;
     let hi = std::cmp::min(range.end, call_keys.len());
     for index in lo..hi {
-        let step = reconstruct_db_step(stream, call_keys, global_call_keys, index);
+        let Some(step) = reconstruct_db_step(stream, call_keys, global_call_keys, index) else {
+            continue;
+        };
         for sink in sinks.iter_mut() {
             sink.accept_step(index, &step);
         }
@@ -929,7 +948,7 @@ fn split_disjoint_ranges(count: usize, threads: usize) -> Vec<std::ops::Range<us
 ///   replays each on its OWN thread through the SAME M25a engine over an
 ///   INDEPENDENT per-thread reader, then MERGES the per-thread partials in range
 ///   order. The merge is deterministic: the `DbStep` arrays concatenate by
-///   ascending range (so `steps[i]` is step `i`), and each path's line→step
+///   ascending range (with each row retaining its execution ID), and each path's line→step
 ///   lists concatenate in range order (so a line's step list is in ascending
 ///   step order — IDENTICAL to the sequential build, where the single ascending
 ///   walk appends in step order).
@@ -1050,7 +1069,7 @@ fn build_partials_parallel(
 ///
 /// * `steps`: concatenated in range order — since the ranges tile `[0, count)`
 ///   ascending and each partial holds its range's steps in index order,
-///   `steps[i]` is exactly step `i`.
+///   the rows keep their original execution IDs, with annotations omitted.
 /// * `step_map`: for each path, each line's step list from each partial (already
 ///   in ascending step order within the partial) is appended in range order, so
 ///   the final per-line list is in global ascending step order — IDENTICAL to the
@@ -1150,7 +1169,9 @@ pub fn replay_forward_until(
 ) -> Option<StepId> {
     let count = call_keys.len();
     for index in start_step..count {
-        let step = reconstruct_db_step(stream, call_keys, global_call_keys, index);
+        let Some(step) = reconstruct_db_step(stream, call_keys, global_call_keys, index) else {
+            continue;
+        };
         // Populate the sink BEFORE testing the predicate so the search-scoped
         // population includes the hit step (the next breakpoint/tracepoint hit
         // is itself part of the data a caller wants populated).
@@ -1229,13 +1250,13 @@ pub fn find_next_line_hit(
 /// preserving the exact populated-set / bounded-decompression behaviour the M24c
 /// range-aware fill had (a step already in the cache is never overwritten).
 struct SlotFillSink<'a> {
-    slots: &'a [OnceCell<DbStep>],
+    slots: &'a [OnceCell<Option<DbStep>>],
 }
 
 impl StepReplaySink for SlotFillSink<'_> {
     fn accept_step(&mut self, index: usize, step: &DbStep) {
         if let Some(slot) = self.slots.get(index) {
-            let _ = slot.get_or_init(|| *step);
+            let _ = slot.get_or_init(|| Some(*step));
         }
     }
 }
@@ -1388,7 +1409,7 @@ pub struct LazyStepCache {
     /// Last-started call key at-or-before each step, computed at open.
     global_call_keys: Vec<CallKey>,
     /// One slot per step; empty until the step's chunk is first filled.
-    slots: Vec<OnceCell<DbStep>>,
+    slots: Vec<OnceCell<Option<DbStep>>>,
     /// Records-per-chunk granularity of the backing `steps.dat` stream — the size
     /// of the RANGE a single point lookup populates.
     chunk_size: usize,
@@ -1519,7 +1540,7 @@ impl LazyStepCache {
     /// call-key arrays. Delegates to the UNIFIED [`reconstruct_db_step`] so the
     /// lazy path, the whole-table build, and the omniscient build all produce
     /// byte-identical steps (M25a).
-    fn reconstruct(&self, index: usize) -> DbStep {
+    fn reconstruct(&self, index: usize) -> Option<DbStep> {
         reconstruct_db_step(&self.stream, &self.call_keys, &self.global_call_keys, index)
     }
 
@@ -1542,6 +1563,11 @@ impl LazyStepCache {
             lo..hi,
             &mut [&mut sink],
         );
+        // Cache annotation holes too: a repeated query must not refill its
+        // entire chunk merely because there is no DbStep to borrow there.
+        for slot in &self.slots[lo..hi] {
+            let _ = slot.get_or_init(|| None);
+        }
     }
 
     /// Replay a step `range` into a set of EXTERNAL sinks (M25a) through the
@@ -1632,11 +1658,11 @@ impl LazyStepCache {
         // `fill_range_for` over a whole chunk-aligned range, so a populated slot
         // also means its neighbours are already free, exactly as before.
         if let Some(step) = self.slots[index].get() {
-            return Some(step);
+            return step.as_ref();
         }
         // Fill the whole range so neighbours are free; then borrow this slot.
         self.fill_range_for(index);
-        self.slots[index].get()
+        self.slots[index].get().and_then(Option::as_ref)
     }
 }
 

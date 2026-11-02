@@ -804,7 +804,7 @@ function Ensure-NodeModulesJunction {
 # with `core.symlinks=false` it materializes as a ~44-byte text-file
 # stub.  The Tup rule `: third_party/golden-layout/dist |> !tup_preserve
 # |> %f` treats that stub as a single opaque leaf - exactly the way the
-# sibling `third_party/monaco-editor/min`, `@exuanbo`, `mousetrap`,
+# sibling `third_party/monaco-editor/min`, `@exuanbo`,
 # `vex-js`, and `xterm` stubs are handled.  This MUST stay a plain-file
 # stub in the source tree: if it is materialized as a real directory
 # (junction or directory symlink) Tup's scanner registers `dist` as a

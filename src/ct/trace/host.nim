@@ -40,6 +40,10 @@ type
     monotonicTimeNs*: string
     materializedArtifactKey*: string
     materializedMomentId*: string
+    # The key of the recording-manifest slice that holds the position
+    # (`replay_start.slice_key`), which `ct host` imports: such slices carry no
+    # geid range to select by. Empty when the start names no slice.
+    sliceKey*: string
 
   HostResolvedTrace* = object
     # M-REC-3: UUIDv7 recording-id string.  Pre-M-REC-2 this was the
@@ -90,6 +94,37 @@ proc emitReplayProblemForHostFailure(message: string) =
       "Storage failure",
       "Replay storage objects could not be read from any available replica.")
     flushFile(stdout)
+
+template importOrQuit(importedPath: string; body: untyped): untyped =
+  ## ``body`` — importing ``importedPath``, the ``--trace-path`` the user
+  ## passed — with any failure it raises turned into one ``ct host: error:
+  ## cannot import <importedPath>: <reason>`` line and exit 1, the way the
+  ## neighbouring import failures end. Usable as an expression: ``body``'s
+  ## value is the result.
+  ##
+  ## The reason is printed verbatim because the readers name the field they
+  ## refuse on (``ctfs-container.md``: "A reader must name the field it is
+  ## refusing on"), e.g. *"CTFS container version 3 is not readable: this
+  ## reader reads versions 5 and 6. Re-record the trace"* from ``openCtfs``
+  ## (raised by ``materializeCtfsSources``), or *"meta.dat: version 6 is not
+  ## readable: …"* from ``readCtfsMetaDat`` (raised by ``importTrace``);
+  ## ``src/tests/gui/tests/cross-platform-replay.spec.ts`` matches the first.
+  ## Either one raising uncaught gave the user a Nim stack trace instead of
+  ## the reason (codetracer-pm issue
+  ## ``2026-10-04-ct-importer-turns-a-container-refusal-into-false.md``).
+  ##
+  ## It wraps the ``--trace-path`` imports in ``hostCommand`` rather than the
+  ## steps inside ``importCtFile`` / ``importTraceFolder``, because those two
+  ## are also reached from a manifest (``importLocalManifest``), whose own
+  ## handler already reports a failure as ``failed to load local manifest:
+  ## <reason>`` and must keep doing so; and there the path being imported is
+  ## a resolved or downloaded file, not one the user passed.
+  try:
+    body
+  except CatchableError as e:
+    emitReplayProblemForHostFailure(e.msg)
+    echo "ct host: error: cannot import ", importedPath, ": ", e.msg
+    quit(1)
 
 const DefaultHostBind* = "127.0.0.1"
   ## LOOPBACK, because `CLI/ct/host.md` says so and gives the reason: "a trace
@@ -385,7 +420,11 @@ proc importCtFile(ctFilePath: string): string =
 
   # M-REC-1.5: importTrace now reads metadata from the CTFS `meta.dat`
   # directly — no more legacy JSON sidecar bridge files.
-  let ctfsSourcesExtracted = materializeCtfsSources(tempDir / "trace.ct", tempDir)
+  # A container the reader refuses raises here with the reader's reason;
+  # the caller reports it (`importOrQuit` for `--trace-path`, the manifest
+  # handler for a manifest).
+  let ctfsSourcesExtracted =
+    materializeCtfsSources(tempDir / "trace.ct", tempDir)
   if ctfsSourcesExtracted:
     echo "ct host: extracted CTFS source metadata"
 
@@ -405,6 +444,9 @@ proc importCtFile(ctFilePath: string): string =
           createDir(filesDir)
           copyFile(entry.path, filesDir / entry.path.extractFilename)
 
+  # `importTrace` reads `meta.dat` itself, so a container that opened above
+  # can still be refused here (a `meta.dat` version this reader does not
+  # read, or none at all); that raises to the caller, as above.
   let trace = importTrace(
     tempDir,
     NO_RECORDING_ID,
@@ -488,6 +530,10 @@ proc importTraceFolder(traceFolderPath: string): string =
   of TraceShapeCtfs:
     # CTFS materialization writes `paths.json` for the frontend; the
     # importTrace path reads metadata fields directly from `meta.dat`.
+    # Whether a sidecar was written does not matter here (a container that
+    # names no sources still imports). A container the reader refuses raises
+    # with the reader's reason, which the caller reports (`importOrQuit` for
+    # `--trace-path`, the manifest handler for a manifest).
     discard materializeCtfsSources(shape.path, fullPath)
   of TraceShapeMaterialized:
     # The materialized shape ships its own `trace_paths.json`; there is
@@ -500,6 +546,9 @@ proc importTraceFolder(traceFolderPath: string): string =
   if shape.kind != TraceShapeMaterialized:
     normalizeImportedTracePaths(fullPath)
 
+  # As in `importCtFile`: `importTrace` reads `meta.dat` (or the
+  # materialized shape's metadata) itself and may refuse it, raising to the
+  # caller.
   let trace = importTrace(
     fullPath,
     NO_RECORDING_ID,
@@ -829,6 +878,7 @@ proc readReplayStart(node: JsonNode): HostStartCoordinates =
   result.wallTimeUnixNs = node.jsonString(["wall_time_unix_ns", "wallTimeUnixNs", "timestamp_unix_nanos"])
   result.monotonicTimeNs = node.jsonString(["monotonic_time_ns", "monotonicTimeNs"])
   result.materializedMomentId = node.jsonString(["moment_id", "momentId", "materializedMomentId"])
+  result.sliceKey = node.jsonString(["slice_key", "sliceKey"])
 
 proc parseUintOrZero(value: string): uint64 =
   if value.len == 0:
@@ -1219,6 +1269,30 @@ proc resolveSharedManifest(
   else:
     raise newException(ValueError, "unsupported shared manifest source kind: " & kind)
 
+proc selectMcrSlice(manifest: JsonNode, start: HostStartCoordinates,
+                    keySource: string): JsonNode =
+  ## The slice of a recording manifest's `mcrSlices` to import, or nil when it
+  ## lists none. Recording-manifest slices carry no geid range, so `ct host`
+  ## cannot find the slice holding the start geid by itself: the replay start
+  ## names it (`replay_start.slice_key`, which the replay agent takes from the
+  ## slice the debug-session lookup resolved, or `CODETRACER_START_SLICE_KEY`
+  ## when the manifest names none; CLI/ct/host.md, "The start position"). A
+  ## named slice the manifest does not list is refused rather than answered
+  ## with another slice, whose replay would refuse the start geid; the refusal
+  ## names `keySource`, where the key came from. Without a name, the first
+  ## slice.
+  if start.sliceKey.len == 0:
+    return manifest.firstObject(["mcrSlices", "mcr_slices"])
+  let slices = manifest.jsonField(["mcrSlices", "mcr_slices"])
+  if not slices.isNil and slices.kind == JArray:
+    for slice in slices:
+      if slice.kind == JObject and
+          slice.jsonString(["sliceKey", "slice_key"]) == start.sliceKey:
+        return slice
+  raise newException(ValueError,
+    "mcr_slices manifest does not list the slice " & keySource & " names: " &
+    start.sliceKey)
+
 proc resolveRecordingManifest(
     manifestPath: string,
     manifest: JsonNode,
@@ -1231,25 +1305,39 @@ proc resolveRecordingManifest(
     raise newException(ValueError, "recording manifest is missing or expired")
   case kind
   of "mcr_slices":
+    var start = readReplayStart(manifest.jsonField(["replayStart", "replay_start"]))
+    # A stored recording manifest (`CODETRACER_LOCAL_MANIFEST_PATH`) is handed
+    # over as recorded, so its replay start names no slice; the replay agent
+    # exports the slice the request named beside it. The manifest's own value
+    # wins, and the refusal says which of the two named a slice it does not
+    # list (CLI/ct/host.md, "The start position").
+    var keySource = "its replay start"
+    if start.sliceKey.len == 0:
+      start.sliceKey = getEnv("CODETRACER_START_SLICE_KEY", "")
+      keySource = "CODETRACER_START_SLICE_KEY"
     let shardedSegments = manifest.jsonField(["shardedMcrSegments", "sharded_mcr_segments"])
     if not shardedSegments.isNil and shardedSegments.kind == JArray and shardedSegments.len > 0:
-      result.recordingId = importShardedSegment(selectedSegment(shardedSegments, readReplayStart(manifest.jsonField(["replayStart", "replay_start"]))), storageOptions)
+      # Sharded segments carry geid ranges, so the geid selects; a slice key
+      # names no segment.
+      result.recordingId = importShardedSegment(selectedSegment(shardedSegments, start), storageOptions)
     else:
-      let slice = manifest.firstObject(["mcrSlices", "mcr_slices"])
+      let slice = selectMcrSlice(manifest, start, keySource)
       if slice.isNil:
         raise newException(ValueError, "mcr_slices manifest has no retained slices")
       requireReadableObject(slice, "MCR slice")
-      let path = resolveLocalReference(slice.jsonString(["sliceKey", "slice_key"]), manifestPath, manifestKey)
+      let sliceKey = slice.jsonString(["sliceKey", "slice_key"])
+      echo "ct host: selected mcr slice: ", sliceKey
+      let path = resolveLocalReference(sliceKey, manifestPath, manifestKey)
       if path.len > 0 and fileExists(path):
         result.recordingId = importCtFile(path)
       else:
         let obj = %*{
-          "objectKey": slice.jsonString(["sliceKey", "slice_key"]),
+          "objectKey": sliceKey,
           "uploadCompletionState": slice.jsonString(["uploadCompletionState", "upload_completion_state"]),
           "retentionStatus": slice.jsonString(["retentionStatus", "retention_status"])
         }
         result.recordingId = importCtFile(writeStorageObjectToTemp(obj, storageOptions, "MCR slice", ".ct"))
-    result.start = readReplayStart(manifest.jsonField(["replayStart", "replay_start"]))
+    result.start = start
   of "materialized_trace":
     let artifact = manifest.firstObject(["materializedTraceArtifacts", "materialized_trace_artifacts"])
     if artifact.isNil:
@@ -1287,6 +1375,54 @@ proc importLocalManifest(
   echo "ct host: loaded local manifest: ", fullPath
   flushFile(stdout)
 
+
+when defined(posix):
+  from std/posix import Pid, Sigaction, sigaction, sigemptyset, SA_RESTART,
+    SIG_DFL, SIGTERM, SIGINT, SIGHUP, kill
+
+  var terminationSignalTarget: Pid = 0
+    ## The node server's pid, once it runs; read by the signal handler, so a
+    ## plain integer and nothing the GC owns.
+
+  proc forwardTerminationSignal(signal: cint) {.noconv, stackTrace: off.} =
+    ## Only `kill(2)`, which is async-signal-safe
+    ## (https://man7.org/linux/man-pages/man7/signal-safety.7.html), and no
+    ## stack-trace frame bookkeeping around it.
+    let target = terminationSignalTarget
+    if target > 0:
+      discard posix.kill(target, signal)
+
+  proc forwardTerminationSignals(child: int) =
+    ## `ct host` and what it started end together (`CLI/ct/host.md`, "Corner
+    ## Cases"). A supervisor or a test fixture stops `ct host` by signalling
+    ## its pid, not its process group, so the signal reaches `ct host` alone;
+    ## it is handed on to the node server, whose own handlers stop the
+    ## session-manager and the replays beneath it. `ct host` itself then
+    ## returns from waiting for the node server as it does after any other
+    ## exit. SA_RESTART keeps that wait from failing with EINTR.
+    ##
+    ## SIGKILL cannot be forwarded, and a forwarded signal stops only a wrapper
+    ## when `CODETRACER_NODE_EXE_PATH` names one that forks node; the node
+    ## server covers both by watching for `ct host` to go away
+    ## (`src/frontend/index/server_lifetime.nim`).
+    terminationSignalTarget = Pid(child)
+    var action: Sigaction
+    action.sa_handler = forwardTerminationSignal
+    discard sigemptyset(action.sa_mask)
+    action.sa_flags = SA_RESTART
+    for signal in [SIGTERM, SIGINT, SIGHUP]:
+      discard sigaction(signal, action, nil)
+
+  proc stopForwardingTerminationSignals() =
+    ## Once the node server has been reaped its pid may be reused, so a late
+    ## signal must not be handed on to whatever holds that pid now: it ends
+    ## `ct host` the default way instead, the only process left to end.
+    terminationSignalTarget = 0
+    var action: Sigaction
+    action.sa_handler = SIG_DFL
+    discard sigemptyset(action.sa_mask)
+    for signal in [SIGTERM, SIGINT, SIGHUP]:
+      discard sigaction(signal, action, nil)
 
 proc hostCommand*(
     port: int,
@@ -1386,11 +1522,13 @@ proc hostCommand*(
       echo "ct host: imported as trace id ", traceId
     elif fileExists(tracePath) and tracePath.endsWith(".ct"):
       echo "ct host: importing .ct file: ", tracePath
-      traceId = importCtFile(tracePath)
+      traceId = importOrQuit(tracePath):
+        importCtFile(tracePath)
       echo "ct host: imported as trace id ", traceId
     elif dirExists(tracePath):
       echo "ct host: importing trace folder: ", tracePath
-      traceId = importTraceFolder(tracePath)
+      traceId = importOrQuit(tracePath):
+        importTraceFolder(tracePath)
       echo "ct host: imported as trace id ", traceId
     else:
       echo "ct host: error: --trace-path not found: ", tracePath
@@ -1490,4 +1628,15 @@ proc hostCommand*(
     env = childEnv,
     options={poParentStreams})
   var electronPid = process.processID
-  echo "status code:", waitForExit(process)
+  when defined(posix):
+    forwardTerminationSignals(electronPid)
+  let exitStatus = waitForExit(process)
+  when defined(posix):
+    stopForwardingTerminationSignals()
+  echo "status code:", exitStatus
+  # The server's failure is `ct host`'s: a server that exits non-zero could
+  # not serve (its session manager could not start, its log says why), and a
+  # supervisor or a test reads that from `ct host`'s exit status, not from a
+  # line in its output.
+  if exitStatus != 0:
+    quit(exitStatus)

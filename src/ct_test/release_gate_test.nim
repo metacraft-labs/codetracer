@@ -234,6 +234,16 @@ suite "ct-test M16 release gate":
     checkpoint(JsAxesTest & " must NOT be in the frontend-native-units lane")
     check(not nativeLane.contains(JsAxesTest))
 
+  test "cli_replay_gate_tests_exist_and_are_registered":
+    # `ct replay`'s replay-engine options, on the same runner as the CLI
+    # lanes above.
+    for cliPath in CliReplayGateTests:
+      checkpoint(cliPath)
+      check fileExists(cliPath)
+      checkNoHardSkips(cliPath)
+
+    checkCliLaneCovers(CliReplayGateTests)
+
   test "no_mock_only_gui_test_features":
     for entry in GuiActionGateEntries:
       checkpoint(entry.action)

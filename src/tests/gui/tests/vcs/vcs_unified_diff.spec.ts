@@ -90,13 +90,16 @@ async function openVcsPanel(ctPage: any): Promise<void> {
 /// file rows.  The button is `display: none` until the row is hovered, so the
 /// hover is part of the interaction, not a workaround.
 ///
-/// Expanding is conditional because a commit header is a TOGGLE: the second
-/// call in "clicking View Diff twice" would otherwise collapse the accordion
-/// the first call opened, and the file row it needs would be gone.
+/// The commit is expanded with its expand control, `.vcs-commit-toggle`, not
+/// its header: a header click opens the commit's whole-commit diff
+/// (VCS-Panel.md, "Commit History"), which would be a second diff tab here.
+/// Expanding is conditional because the control is a TOGGLE: the second call
+/// in "clicking View Diff twice" would otherwise collapse the accordion the
+/// first call opened, and the file row it needs would be gone.
 async function clickViewDiffOnNewestCommit(ctPage: any): Promise<void> {
   const fileRow = ctPage.locator(".vcs-accordion-file").first();
   if ((await fileRow.count()) === 0) {
-    await ctPage.locator(".vcs-commit-header").first().click();
+    await ctPage.locator(".vcs-commit-toggle").first().click();
   }
   await expect(fileRow).toBeVisible({ timeout: 15_000 });
   await fileRow.hover();
@@ -630,7 +633,9 @@ test.describe("VCS unified diff — context expansion in normal git mode", () =>
       .filter({ hasText: "edit the middle" })
       .first();
     await expect(middleEntry).toBeVisible({ timeout: 30_000 });
-    await middleEntry.locator(".vcs-commit-header").first().click();
+    // Expanded with its control: a header click would also open the commit's
+    // whole-commit diff (VCS-Panel.md, "Commit History").
+    await middleEntry.locator(".vcs-commit-toggle").first().click();
 
     const fileRow = middleEntry.locator(".vcs-accordion-file").first();
     await expect(fileRow).toBeVisible({ timeout: 15_000 });
@@ -717,5 +722,175 @@ test.describe("VCS unified diff — context expansion in normal git mode", () =>
 
     // The commit whose blob was fetched is the one the tab shows, not HEAD.
     expect(middleCommitSha).toBeTruthy();
+  });
+});
+
+// The whole-commit document — the owner's 2026-10-23 decision on #753
+// (VCS-Panel.md, "Commit History", "Changed Files", "Whole-Commit Document"):
+//
+//   VCS-011  clicking a commit opens its whole-commit document
+//   VCS-012  a file under the expanded commit scrolls the document to it
+//   VCS-014  a heading's file name opens the full file
+//
+// Fixture: a commit changing two files in different languages, each change
+// long enough that the first file's section is taller than the tab, so
+// scrolling to the second file is a real scroll.
+const documentFixture = fs.mkdtempSync(
+  path.join(os.tmpdir(), "codetracer-vcs-document-"),
+);
+
+function documentGit(...args: string[]): void {
+  childProcess.execFileSync("git", args, { cwd: documentFixture, stdio: "ignore" });
+}
+
+function documentCommit(message: string): void {
+  documentGit("add", ".");
+  documentGit(
+    "-c", "user.name=CodeTracer Tests",
+    "-c", "user.email=tests@codetracer.dev",
+    "-c", "commit.gpgsign=false",
+    "commit", "-m", message,
+  );
+}
+
+/// `count` numbered lines, each with `word` in it.
+function numbered(prefix: string, word: string, count: number): string {
+  return Array.from({ length: count }, (_, i) => `${prefix}${word} ${i}`).join("\n") + "\n";
+}
+
+fs.mkdirSync(path.join(documentFixture, "src"), { recursive: true });
+fs.mkdirSync(path.join(documentFixture, "lib"), { recursive: true });
+fs.writeFileSync(path.join(documentFixture, "src", "main.nim"),
+  numbered('echo "', 'before"', 120));
+fs.writeFileSync(path.join(documentFixture, "lib", "helper.py"),
+  numbered("print('", "before')", 120));
+documentGit("init");
+documentCommit("initial");
+fs.writeFileSync(path.join(documentFixture, "src", "main.nim"),
+  numbered('echo "', 'after"', 120));
+fs.writeFileSync(path.join(documentFixture, "lib", "helper.py"),
+  numbered("print('", "after')", 120));
+documentCommit("touch both files");
+
+test.describe("VCS whole-commit document", () => {
+  test.use({ launchMode: "edit", editFolderPath: documentFixture });
+
+  /// The newest commit's entry in the panel.
+  function newestEntry(ctPage: any) {
+    return ctPage
+      .locator(".vcs-commit-entry")
+      .filter({ hasText: "touch both files" })
+      .first();
+  }
+
+  /// The whole-commit document's tab: titled `Diff: ` and the commit's
+  /// first six hash characters (`layout.nim`'s tab title for `commit:<hash>`).
+  function commitDiffTabs(ctPage: any) {
+    return ctPage.locator(".lm_tab .lm_title", { hasText: /^Diff: [0-9a-f]{6}$/ });
+  }
+
+  /// The open document's sections.
+  function sections(ctPage: any) {
+    return ctPage.locator(".unified-diff-document-section");
+  }
+
+  async function openNewestCommit(ctPage: any): Promise<void> {
+    await openVcsPanel(ctPage);
+    await expect(newestEntry(ctPage)).toBeVisible({ timeout: 30_000 });
+    await newestEntry(ctPage).locator(".vcs-commit-header").first().click();
+    await expect(sections(ctPage)).toHaveCount(2, { timeout: 15_000 });
+  }
+
+  test("VCS-011: clicking a commit opens its whole-commit document", async ({
+    ctPage,
+  }) => {
+    await openNewestCommit(ctPage);
+
+    // One tab, titled after the commit.
+    await expect(
+      commitDiffTabs(ctPage),
+    ).toHaveCount(1);
+
+    // Two sections, in git's order, each with its own heading and its own
+    // diff editor — not one model holding both files.
+    await expect(sections(ctPage).nth(0)).toHaveAttribute("data-path", "lib/helper.py");
+    await expect(sections(ctPage).nth(1)).toHaveAttribute("data-path", "src/main.nim");
+    for (const index of [0, 1]) {
+      const section = sections(ctPage).nth(index);
+      await expect(section.locator(".unified-diff-file-header-path")).toHaveCount(1);
+      await expect(section.locator(DIFF_BODY)).toHaveCount(1, { timeout: 15_000 });
+    }
+    // Each file keeps its own language: two models per section, and the
+    // sections' modified models are in two different languages.
+    const languages = await ctPage.evaluate(() =>
+      (window as any).monaco.editor
+        .getModels()
+        .map((m: any) => m.getLanguageId()),
+    );
+    expect(languages).toEqual(expect.arrayContaining(["python", "nim"]));
+
+    // The commit is expanded in the tree too.
+    await expect(newestEntry(ctPage).locator(".vcs-accordion-file")).toHaveCount(2);
+
+    // A second click focuses the same document rather than opening another.
+    await newestEntry(ctPage).locator(".vcs-commit-header").first().click();
+    await expect(
+      commitDiffTabs(ctPage),
+    ).toHaveCount(1);
+  });
+
+  test("VCS-012: a file under the commit scrolls the document to it", async ({
+    ctPage,
+  }) => {
+    await openNewestCommit(ctPage);
+    const scroller = ctPage.locator(".unified-diff-document-sections").first();
+    const second = sections(ctPage).nth(1);
+    // Wait until the first section has grown to its content, so the second
+    // starts below the fold.
+    await expect
+      .poll(async () => {
+        const box = await second.boundingBox();
+        const view = await scroller.boundingBox();
+        return box && view ? box.y - view.y : 0;
+      }, { timeout: 15_000 })
+      .toBeGreaterThan(200);
+
+    await newestEntry(ctPage)
+      .locator(".vcs-accordion-file")
+      .filter({ hasText: "main.nim" })
+      .first()
+      .click();
+
+    // The section's heading is now at the top of the document.
+    await expect
+      .poll(async () => {
+        const box = await second.boundingBox();
+        const view = await scroller.boundingBox();
+        return box && view ? Math.abs(box.y - view.y) : 9999;
+      }, { timeout: 15_000 })
+      .toBeLessThan(4);
+    // Still one document: the click focused it, it did not open another.
+    await expect(
+      commitDiffTabs(ctPage),
+    ).toHaveCount(1);
+  });
+
+  test("VCS-014: a heading's file name opens the full file", async ({
+    ctPage,
+  }) => {
+    await openNewestCommit(ctPage);
+    await sections(ctPage)
+      .nth(0)
+      .locator(".unified-diff-file-header-link")
+      .click();
+    // A source tab for the file — not a diff tab.
+    await expect
+      .poll(
+        async () =>
+          (await ctPage.locator(".lm_tab .lm_title").allTextContents())
+            .map((t: string) => t.trim()),
+        { timeout: 15_000 },
+      )
+      .toEqual(expect.arrayContaining([expect.stringMatching(/^(?!Diff).*helper\.py$/)]));
   });
 });

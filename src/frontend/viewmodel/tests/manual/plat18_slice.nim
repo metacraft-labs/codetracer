@@ -152,7 +152,7 @@ when defined(ctPlat18Frame):
 
   proc p18Mount() {.exportc.} =
     wireReset()
-    thePanelRoot = renderStatePanel(theRenderer, theVm)
+    thePanelRoot = renderStatePanel[FrameRenderer, FrameNode](theRenderer, theVm)
     # The panel's own root has to reach the host's document; nothing in the
     # view says where it goes. Handle 0 is the host's container by
     # convention — the one index this module never allocates.
@@ -173,7 +173,7 @@ else:
       {.importjs: "document.getElementById('ct-p18-root')".}
 
   proc p18Mount() {.exportc.} =
-    let panel = renderStatePanel(theRenderer, theVm)
+    let panel = renderStatePanel[WebRenderer, isonim_dom.Element](theRenderer, theVm)
     isonim_dom.appendChild(isonim_dom.Node(hostContainer()),
                            isonim_dom.Node(panel))
 

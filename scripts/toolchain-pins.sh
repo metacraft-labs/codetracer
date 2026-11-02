@@ -76,8 +76,9 @@
 # ## What is pinned, what is verified, and why the split is drawn here
 #
 # PINNED — by `flake.lock`, already, per-commit, before this file existed. The
-# Nim compiler is `codetracer-toolchains`' `nim-2_2` (`nix/packages/default.nix`
-# wraps it as `nim-codetracer`); `rustc`/`cargo` are `fenix`'s stable toolchain
+# Nim compiler is the metacraft-labs/nim fork `reprobuild` builds
+# (`nix/packages/default.nix`'s `nim-fork`; it was `codetracer-toolchains`'
+# `nim-2_2`, wrapped as `nim-codetracer`, until `ccbb85a0a`); `rustc`/`cargo` are `fenix`'s stable toolchain
 # combined in `nix/shells/ci-base.nix`. Both are root inputs with 40-hex locked
 # revs. There was never a missing pin here. What was missing was any statement
 # of WHICH COMPILER THE COMMIT EXPECTS that a build could be held to without
@@ -118,15 +119,18 @@
 #     plus the store path. Named here and on the passing line.
 #
 #   * THE FORK QUESTION IS ANSWERED, NOT ASSUMED. `flake.lock` carries a
-#     `nim-fork-src` node (`metacraft-labs/nim`, ref `codetracer`) and the
-#     obvious reading is that it is the compiler. It is not: it is an input of
-#     `reprobuild` and of nothing else, and the dev shell's `nim` derives from
-#     `https://nim-lang.org/download/nim-2.2.8.tar.xz`. That was measured
-#     through `nix-store -q --deriver` and `nix derivation show`. The
-#     REACHABILITY half is re-checked on every run below (`nim-fork-src` must
-#     not become reachable from `codetracer-toolchains`); the derivation half
-#     is a one-time measurement recorded in `ci/toolchain.pin`, and its staleness
-#     is bounded by the `LOCK_CODETRACER_TOOLCHAINS` cross-check.
+#     `nim-fork-src` node (`metacraft-labs/nim`, ref `codetracer`). Whether it
+#     is the compiler is a measurement recorded in `ci/toolchain.pin` as
+#     `EXPECT_NIM_SOURCE`: it was `upstream` while the dev shell's `nim` came
+#     from `https://nim-lang.org/download/nim-2.2.8.tar.xz`, and it is `fork`
+#     since `ccbb85a0a` put `nim-fork` — `inputs.reprobuild`'s build of that
+#     node — first on PATH. Either way it was measured through
+#     `nix-store -q --deriver` and `nix derivation show`. The REACHABILITY
+#     half is re-checked on every run below (`upstream`: `nim-fork-src` must
+#     not become reachable from `codetracer-toolchains`; `fork`: it must stay
+#     reachable from `reprobuild`); the derivation half is a one-time
+#     measurement, and its staleness is bounded by the `LOCK_*` cross-check
+#     and by `--strict`'s store-path comparison.
 #
 #   * IT COVERS THE TOOLS IT NAMES. `TOOLS` below is a list. C/C++ (`CT_TEST_CC`
 #     is a clang-wrapper store path), Go, the recorder toolchains and the Nim
@@ -263,6 +267,17 @@ read_pin() {
   Every one of these is load-bearing. A pin file that declares only some of
   what it is asked about would let this guard report a pass having compared
   the rest against nothing."
+
+	# THE SOURCE IS ONE OF TWO WORDS, checked rather than assumed. The fork
+	# check branches on it, and a value it does not recognise (`frok`, or the
+	# line left empty) would fall through to the `upstream` branch and pass
+	# against a declaration that says neither.
+	case "$PIN_NIM_SOURCE" in
+	upstream | fork) ;;
+	*) die "$PIN declares EXPECT_NIM_SOURCE='$PIN_NIM_SOURCE'; it must be 'upstream' or 'fork'.
+  The fork-reachability check reads it, and an unrecognised value would be
+  checked as neither." ;;
+	esac
 }
 
 # --- reading flake.lock ------------------------------------------------------
@@ -633,6 +648,27 @@ verify_declaration() {
 # The fork question, as a live assertion rather than a remembered conclusion.
 verify_fork_reachability() {
 	CHECKED=$((CHECKED + 1))
+	# THE FORK DECLARED. `nix/packages/default.nix` takes `nim-fork` from
+	# `inputs.reprobuild` rather than declaring the fork's source itself, so
+	# the declaration is supported only while `nim-fork-src` is a node
+	# `reprobuild` reaches. A lock that lost the node, or moved it under
+	# another input, no longer says what `EXPECT_NIM_SOURCE=fork` claims.
+	if [ "$PIN_NIM_SOURCE" = fork ]; then
+		case ",$LOCK_NIM_FORK_OWNERS," in
+		*,reprobuild,*)
+			ok "nim-fork-src ($(short "$LOCK_NIM_FORK")) is reachable from reprobuild, the input nim-fork is taken from, and EXPECT_NIM_SOURCE=fork agrees"
+			;;
+		*)
+			fail "ci/toolchain.pin declares EXPECT_NIM_SOURCE=fork, but nim-fork-src (${LOCK_NIM_FORK:-absent})" \
+				"is not reachable from reprobuild (reachable from: ${LOCK_NIM_FORK_OWNERS:-none})." \
+				'`nix/packages/default.nix` takes `nim-fork` from `inputs.reprobuild`, so the' \
+				"declaration no longer describes this lock. Re-measure:" \
+				'  nix-store -q --deriver "$(command -v nim)"' \
+				"and set EXPECT_NIM_SOURCE to what the src actually is."
+			;;
+		esac
+		return
+	fi
 	if [ -z "$LOCK_NIM_FORK" ] || [ "$LOCK_NIM_FORK" = absent ]; then
 		ok "flake.lock has no nim-fork-src node; EXPECT_NIM_SOURCE has nothing to contradict it"
 		return
@@ -875,20 +911,26 @@ verify_store_paths() {
 		note 'the store-path comparison was skipped: `nix eval` could not report the current system.'
 		return
 	fi
-	expected="$(nix eval --raw "$REPO_ROOT#packages.$sys.nim-codetracer" 2>/dev/null)"
+	# WHICH PACKAGE IS THE COMPILER follows the declared source: the fork is
+	# `nim-fork` (first on PATH in `nix/shells/ci-base.nix`), stock Nim is
+	# `nim-codetracer`. Comparing a fork build against `nim-codetracer` would
+	# report a mismatch for the compiler this commit actually declares.
+	local attr=nim-codetracer
+	[ "$PIN_NIM_SOURCE" = fork ] && attr=nim-fork
+	expected="$(nix eval --raw "$REPO_ROOT#packages.$sys.$attr" 2>/dev/null)"
 	if [ -z "$expected" ]; then
 		STRICT_STORE_NOTE="skipped: the flake did not evaluate"
-		note "the store-path comparison was skipped: \`nix eval .#packages.$sys.nim-codetracer\` produced nothing." \
+		note "the store-path comparison was skipped: \`nix eval .#packages.$sys.$attr\` produced nothing." \
 			"Reported as a TOOLING failure, not as a verdict about the compiler."
 		return
 	fi
 	probe_tool nim
 	if [ "$T_STORE" = "$expected" ]; then
-		STRICT_STORE_NOTE="checked: nim is this flake's nim-codetracer"
-		ok "nim's store path IS this flake's nim-codetracer ($expected)"
+		STRICT_STORE_NOTE="checked: nim is this flake's $attr"
+		ok "nim's store path IS this flake's $attr ($expected)"
 	else
 		STRICT_STORE_NOTE="checked: MISMATCH"
-		fail "nim resolves to $T_STORE, but this flake's nim-codetracer is $expected." \
+		fail "nim resolves to $T_STORE, but this flake's $attr is $expected." \
 			"Same version string is not the same compiler; this is the check that" \
 			"separates them."
 	fi

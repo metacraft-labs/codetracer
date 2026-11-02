@@ -31,6 +31,10 @@ Module._initPaths();
 
 const io = require("socket.io-client");
 
+// The session secret this smoke test gives each host it starts, as a
+// supervisor would.
+const sessionSecret = require("node:crypto").randomBytes(32).toString("base64url");
+
 const nodeBin = path.join(buildDir, "bin", "node");
 const serverIndex = path.join(buildDir, "server_index.js");
 const testHome = path.join(buildDir, "tests", "reload-bootstrap-home");
@@ -109,6 +113,7 @@ async function bootstrapRound(port, label, expectedOrder, attempts = 4) {
       forceNew: true,
       reconnection: false,
       timeout: 3_000,
+      query: { ct_session: sessionSecret },
     });
     try {
       const result = await collectBootstrap(client, expectedOrder, `${label}-attempt-${i}`);
@@ -166,6 +171,8 @@ async function runScenario(label, scenarioArgs, expectedOrder, portBase) {
     NIX_CODETRACER_EXE_DIR: buildDir,
     LINKS_PATH_DIR: buildDir,
     CODETRACER_TEST: "1",
+    // The host admits a socket only with this secret (index/host_session_guard.nim).
+    CODETRACER_HOST_SESSION_SECRET: sessionSecret,
   };
   fs.mkdirSync(env.XDG_CONFIG_HOME, { recursive: true });
 

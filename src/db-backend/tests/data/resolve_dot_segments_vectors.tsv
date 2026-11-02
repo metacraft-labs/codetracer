@@ -1,0 +1,48 @@
+# Shared test vectors for resolving a recorded path's `.` and `..` components.
+#
+# Read by BOTH read sides' tests, so the two implementations cannot drift:
+#   src/db-backend/src/expr_loader.rs              resolve_dot_segments
+#   src/frontend/viewmodel/sdk/source_provider.nim  resolveDotSegments
+#     (tests: expr_loader.rs `resolve_bundled_source_resolves_a_parent_component_to_the_same_file`,
+#      test_source_provider_revisions.nim "resolveDotSegments keeps the root, the separator and an escaping `..`")
+#
+# One vector per line: <recorded path> TAB <resolved path>. Lines starting with
+# `#` and blank lines are ignored. Backslashes are literal. `<empty>` stands for
+# the empty string.
+
+# A `..` folds into the component before it; `.` is dropped.
+/a/b/../c/./d.py	/a/c/d.py
+/home/x/multi_root/app/../shared/helpers.py	/home/x/multi_root/shared/helpers.py
+/home/x/multi_root/app/../shared/pkg/extra.py	/home/x/multi_root/shared/pkg/extra.py
+/home/x/multi_root/app/./x/../../shared/helpers.py	/home/x/multi_root/shared/helpers.py
+./a.py	a.py
+a/b/..	a
+/ä/../ö.py	/ö.py
+
+# The root is kept: a leading separator, a drive with its separator, a Godot scheme.
+C:\a\b\..\c.py	C:\a\c.py
+C:/a/b/../c.py	C:/a/c.py
+\a\b\..\c.py	\a\c.py
+res://scenes/../main.gd	res://main.gd
+user://a/./b.gd	user://a/b.gd
+
+# Windows separators are recognised, and the first separator the path uses is the
+# one it is rejoined with.
+C:\proj\app\..\shared/helpers.py	C:\proj\shared\helpers.py
+/a\b/../c	/a\c
+
+# A `..` with nothing before it climbs out of the root: it is KEPT, so the lookup
+# refuses it rather than reinterpreting it as some other file.
+/../x.py	/../x.py
+/a/../../x.py	/../x.py
+../x.py	../x.py
+a/../../x.py	../x.py
+C:\..\x.py	C:\..\x.py
+res://../x.gd	res://../x.gd
+
+# A path with no `.` or `..` component is returned byte for byte.
+/a//b.py	/a//b.py
+rel/x.py	rel/x.py
+/	/
+<empty>	<empty>
+/a/.hidden/..x/x..py	/a/.hidden/..x/x..py

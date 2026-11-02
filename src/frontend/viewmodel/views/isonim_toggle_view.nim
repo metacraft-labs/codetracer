@@ -15,7 +15,7 @@
 ##   let cb = ToggleCallbacks(onChange: proc() = ...)
 ##
 ##   # In a MockRenderer context (tests / SSR):
-##   let node = r.renderToggle(rec, cb)
+##   let node = renderToggle[MockRenderer, MockNode](r, rec, cb)
 ##
 ##   # In the browser — mount into a stable host element:
 ##   mountToggleInto(hostElement, rec, cb)
@@ -25,8 +25,12 @@
 ## elements.  No JS timer or animation logic lives here.
 
 import isonim/dsl/ui
-from isonim/core/computation import createRenderEffect
+import isonim/core/[signals, computation]
+import isonim/dsl/components
 import isonim/testing/mock_dom
+
+# The generic proc expands the DSL at its caller.
+export signals, computation, components
 
 when defined(js):
   import isonim/web/web_renderer
@@ -58,13 +62,13 @@ proc invokeChange(cb: ToggleCallbacks) =
   if not cb.onChange.isNil: cb.onChange()
 
 # ---------------------------------------------------------------------------
-# MockRenderer
+# The toggle, for every renderer
 # ---------------------------------------------------------------------------
 
-proc renderToggle*(r: MockRenderer;
-                   rec: ToggleRecord;
-                   cb: ToggleCallbacks = ToggleCallbacks()): MockNode =
-  ## Render a toggle switch as a MockNode (for tests / SSR).
+proc renderToggle*[R, N](r: R;
+                         rec: ToggleRecord;
+                         cb: ToggleCallbacks = ToggleCallbacks()): N =
+  ## Render a toggle switch.
   let checkedAttr  = if rec.isChecked: "true" else: "false"
   let sizeAttr     = if rec.size == "sm": "sm" else: "md"
   let disabledAttr = if rec.isDisabled: "true" else: ""
@@ -84,34 +88,7 @@ proc renderToggle*(r: MockRenderer;
       span(class = "ct-toggle-label"):
         text rec.label
 
-# ---------------------------------------------------------------------------
-# WebRenderer (browser only)
-# ---------------------------------------------------------------------------
-
 when defined(js):
-  proc renderToggle*(r: WebRenderer;
-                     rec: ToggleRecord;
-                     cb: ToggleCallbacks = ToggleCallbacks()): isonim_dom.Element =
-    ## Render a toggle switch as a live DOM element.
-    let checkedAttr  = if rec.isChecked: "true" else: "false"
-    let sizeAttr     = if rec.size == "sm": "sm" else: "md"
-    let disabledAttr = if rec.isDisabled: "true" else: ""
-    ui(r):
-      label(class = "ct-toggle-field",
-            `data-disabled` = disabledAttr):
-        span(class = "ct-toggle",
-             `data-checked` = checkedAttr,
-             `data-size`    = sizeAttr,
-             `aria-hidden`  = "true",
-             onclick        = proc() = cb.invokeChange()):
-          input(class = "ct-toggle-input",
-                `type`  = "checkbox",
-                role    = "switch")
-          span(class = "ct-toggle-thumb"):
-            discard
-        span(class = "ct-toggle-label"):
-          text rec.label
-
   proc mountToggleInto*(container: isonim_dom.Element;
                         rec: ToggleRecord;
                         cb: ToggleCallbacks = ToggleCallbacks()) =
@@ -125,7 +102,7 @@ when defined(js):
       discard isonim_dom.removeChild(containerNode, containerNode.firstChild)
 
     let r     = WebRenderer()
-    let el    = renderToggle(r, rec, cb)
+    let el    = renderToggle[WebRenderer, isonim_dom.Element](r, rec, cb)
     let elNode = isonim_dom.Node(el)
     # Move children (the label, its span children) into the stable host.
     while not isonim_dom.isNodeNil(elNode.firstChild):

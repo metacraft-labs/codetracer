@@ -14,14 +14,18 @@
 import std/[os, osproc, streams, strutils]
 
 import ../platform/outcome
+import ../platform/vcs
 import ./native_vcs
 
 type
   CommitFile* = tuple[status, path: string]
 
 proc runGit(repository: string; args: seq[string]): (bool, string) =
+  ## `args` run by the system git, with the shared `NoIndexLockGitOptions`
+  ## prefix every front-end git call carries (`platform/vcs`).
   try:
-    let child = startProcess("git", workingDir = repository, args = args,
+    let child = startProcess("git", workingDir = repository,
+                             args = noIndexLockGitArgs(args),
                              options = {poUsePath})
     let output = child.outputStream.readAll()
     discard child.errorStream.readAll()

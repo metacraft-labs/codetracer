@@ -195,21 +195,70 @@ DEBUG_STAGE_MARKER="__viewmodelZviewmodelsZdebug95controls95vm_"
 #                   need an account (ID4 says participants are identified by
 #                   the shared account). What matters for NS7a is that it is
 #                   gated off the development loop — step 5.
+#   session         TWO, both in `ui/session_allocation_client.nim`'s `importjs`
+#     allocation    literals: WD7's descriptor read
+#                   (`GET /api/v1/apps/{project}/deployment.json`) and the
+#                   allocation itself
+#                   (`POST /api/v1/projects/{project}/sessions`). A DYNAMIC
+#                   surface for the same reason collab is one, and more
+#                   plainly: an allocation spends a `session.concurrent` lease
+#                   against a named principal, so it is attributable BY
+#                   DESIGN. It is reached only from `/p/{locator}` — see
+#                   `Hosted-Session-Allocation.md` §3.2 and §5 — and it is not
+#                   reachable from `web_main.nim` at all, which is why the loop
+#                   arm's zero below is the construction half of §5's
+#                   `test_noir_studio_allocates_nothing`.
 declare -a EGRESS_BUDGET=(
 	"lsp:lsp:1"
 	"visualreplay:visual-replay:4"
 	"agentic:agentic:1"
 	"collab:collab:7"
+	"session:session-allocation:2"
 )
-EGRESS_EXPECTED_TOTAL=13
+EGRESS_EXPECTED_TOTAL=15
 
 # The loop arm's budget is the whole point and is not a table.
 LOOP_ARM_EGRESS_EXPECTED=0
 
-# Every credentialed request must be a collab one. `credentials: "include"`
-# attaches cookies, which is the mechanism by which reading becomes
-# attributable — ID3's `test_reading_is_never_attributable`.
-CREDENTIALED_EXPECTED=7
+# Every credentialed request must belong to a DYNAMIC surface. Attaching
+# cookies is the mechanism by which reading becomes attributable — ID3's
+# `test_reading_is_never_attributable` — so what matters is that no credentialed
+# request is reachable from the development loop, not which surface owns it.
+#
+# **It used to say "must be a collab one", and the pattern it counted was the
+# literal `credentials: "include"`.** WD7's allocation client writes
+# `credentials: 'same-origin'`, which is equally attributable and which that
+# pattern does not match — so the old assertion would have gone on passing
+# while two credentialed requests appeared that it could not see. A property
+# that holds because of a quoting accident is the "evidence that could not
+# fail" shape this gate exists to avoid, so the pattern now matches any
+# `credentials:` value and the budget is the sum of the dynamic surfaces.
+CREDENTIALED_EXPECTED=9
+# **THE VALUE MATTERS, AND `omit` IS NOT A CREDENTIALED REQUEST.** `credentials`
+# is a closed enum in the Fetch standard -- `omit`, `same-origin`, `include` --
+# and only the last two attach anything. A pattern matching ANY quoted value
+# counts `omit` as attributable, so a site that deliberately opts OUT of cookies
+# would push the count past the budget and turn this gate red for a change that
+# made the product MORE private. Measured as latent rather than live: `omit`
+# appears zero times in either arm today, so nothing was mis-counted -- but the
+# pattern said something it did not mean.
+#
+# So there are THREE patterns and an ACCOUNTING IDENTITY between them, which is
+# what keeps the narrowing from re-introducing the blindness it replaced:
+#
+#   every occurrence of the key  ==  the attributable ones + the exempt ones
+#
+# A spelling none of them recognises -- a variable, an unquoted value, a fourth
+# word -- breaks that identity and is reported by name. That is strictly
+# stronger than matching any quoted value: it catches `credentials: opts.cred`,
+# which no value pattern can see at all.
+CREDENTIALED_PATTERN="credentials:[ ]*['\"](include|same-origin)['\"]"
+CREDENTIALS_KEY_PATTERN="credentials:"
+CREDENTIALS_EXEMPT_PATTERN="credentials:[ ]*['\"]omit['\"]"
+# The surfaces a credentialed request may belong to, BY BUDGET KEY (the
+# `shfmt`-safe first field of an `EGRESS_BUDGET` row, which is what `observed`
+# is keyed on — not the human name in the second field).
+declare -a CREDENTIALED_SURFACES=("collab" "session")
 
 # The path guard that keeps the collab surface off the loop. Present in the
 # source and in the built bundle; step 5 asserts both.
@@ -247,6 +296,14 @@ surface_of() {
 	*visual_replay_client_factory*) printf 'visual-replay' ;;
 	*agentic_session_launcher*) printf 'agentic' ;;
 	*lsp95controller*) printf 'lsp' ;;
+	# BEFORE the collab case, deliberately. The collab patterns are the loosest
+	# here — `*collab*` matches anywhere in a 29-line window — so a site whose
+	# window happened to carry a collab identifier would be filed under collab
+	# and the per-surface counts would be wrong in BOTH directions at once.
+	# Measured at codetracer `ea66311ec` plus this change: with this case in
+	# this position the collab count is unchanged at 7 and the two new sites
+	# are the only members of `session-allocation`.
+	*CODETRACER_SESSION_ALLOCATION*) printf 'session-allocation' ;;
 	*collab* | *CODETRACER_COLLAB*) printf 'collab' ;;
 	*) printf 'UNCLASSIFIED' ;;
 	esac
@@ -519,19 +576,77 @@ else
 	bad "the guard is absent from the built renderer arm — it is in the source but not in what ships"
 fi
 
-# Every credentialed request is a collab one. `credentials: "include"` is the
-# mechanism by which a request becomes attributable to a signed-in user, and
+# Every credentialed request belongs to a dynamic surface. Attaching cookies is
+# the mechanism by which a request becomes attributable to a signed-in user, and
 # ID3's second verification is that reading never is.
-credentialed="$(grep -oaE 'credentials: "include"' "${renderer_arm}" 2>/dev/null | grep -c . || true)"
-collab_sites="${observed[collab]:-0}"
+#
+# The equality, not an inequality: if the credentialed sites and the dynamic
+# sites merely had to be "at least as many", a credentialed request in a THIRD
+# surface would satisfy it. Asserted both against the written budget and
+# against the observed per-surface counts, so a budget edited to match a
+# regression still fails.
+credentialed="$(grep -oaE "${CREDENTIALED_PATTERN}" "${renderer_arm}" 2>/dev/null | grep -c . || true)"
+dynamic_sites=0
+dynamic_names=""
+for name in "${CREDENTIALED_SURFACES[@]}"; do
+	dynamic_sites=$((dynamic_sites + ${observed[${name}]:-0}))
+	dynamic_names="${dynamic_names:+${dynamic_names}, }${name} ${observed[${name}]:-0}"
+done
 if [ "${credentialed}" -eq "${CREDENTIALED_EXPECTED}" ] &&
-	[ "${credentialed}" -eq "${collab_sites}" ]; then
-	ok "all ${credentialed} credentialed requests are collab sites, and there are exactly as many of each"
+	[ "${credentialed}" -eq "${dynamic_sites}" ]; then
+	ok "all ${credentialed} credentialed requests are dynamic-surface sites (${dynamic_names}), and there are exactly as many of each"
 else
-	bad "credentialed requests: ${credentialed} (budget ${CREDENTIALED_EXPECTED}), collab egress sites: ${collab_sites} — a credentialed request outside the collab surface attaches cookies to something the loop can reach"
+	bad "credentialed requests: ${credentialed} (budget ${CREDENTIALED_EXPECTED}), dynamic-surface egress sites: ${dynamic_sites} (${dynamic_names}) — a credentialed request outside the dynamic surfaces attaches cookies to something the loop can reach"
 fi
 
-loop_credentialed="$(grep -oaE 'credentials: "include"' "${loop_arm}" 2>/dev/null | grep -c . || true)"
+# THE ACCOUNTING IDENTITY, which is what stops the narrowing above from
+# becoming the blindness it replaced. Every occurrence of the `credentials` KEY
+# must be either attributable or the explicit `omit` opt-out; a spelling that is
+# neither is a credentialed request this gate cannot see, and the budget would
+# go on matching while it appeared.
+cred_keys="$(grep -oaE "${CREDENTIALS_KEY_PATTERN}" "${renderer_arm}" 2>/dev/null | grep -c . || true)"
+cred_exempt="$(grep -oaE "${CREDENTIALS_EXEMPT_PATTERN}" "${renderer_arm}" 2>/dev/null | grep -c . || true)"
+if [ "${cred_keys}" -eq $((credentialed + cred_exempt)) ]; then
+	ok "every one of the ${cred_keys} credentials keys is accounted for (${credentialed} attributable + ${cred_exempt} omit)"
+else
+	bad "the renderer arm has ${cred_keys} credentials key(s) but only ${credentialed} attributable + ${cred_exempt} omit are recognised — a spelling this gate cannot classify attaches cookies to something it is not counting"
+fi
+
+# THE DYNAMIC SURFACES ARE SAME-ORIGIN, AND THE BUNDLE NAMES NO HOSTNAME.
+#
+# Review's arm, and it SURVIVED every other assertion here: an allocation site
+# rewritten to `fetch("https://<host>" + path, ...)` left the egress total, the
+# per-surface split, the marker count and the credentialed count all identical,
+# so nothing in this gate noticed that the bundle had acquired a hostname.
+#
+# That is not a cosmetic gap. `session_allocation_client.nim` rests its whole
+# argument on same-origin: the front door routes `/api/v1` to `API_ORIGIN`, so
+# the product is fixed by the api-server's own deployment, and *"a bundle that
+# chose an origin would be a bundle choosing which grant it spends against"* —
+# the one thing `Shared-Services-Decisions.md` D-S13 exists to prevent. A
+# property argued in a comment and measured nowhere is the shape this gate is
+# written against.
+#
+# Scoped to the allocation sites' own windows rather than to the whole bundle,
+# because a bundle legitimately carries URLs in strings and docs; measured at 0
+# at both sites on the tree as committed, and at 1 under the arm above.
+sa_absolute=0
+# Process substitution rather than a pipe, so the accumulator stays in THIS
+# shell; and `while read` rather than `for ... in $(...)`, which splits on
+# whitespace (shellcheck SC2013).
+while read -r sa_marker_line; do
+	[ -n "${sa_marker_line}" ] || continue
+	hits="$(awk -v n="${sa_marker_line}" 'NR>=n-20 && NR<=n+28' "${renderer_arm}" |
+		grep -coE "https?://|[\"'](//)[a-zA-Z0-9]" || true)"
+	sa_absolute=$((sa_absolute + hits))
+done < <(grep -na 'CODETRACER_SESSION_ALLOCATION' "${renderer_arm}" 2>/dev/null | cut -d: -f1)
+if [ "${sa_absolute}" -eq 0 ]; then
+	ok "the session-allocation sites name no host — both calls are same-origin, so the deployment fixes the product"
+else
+	bad "a session-allocation site names an absolute URL (${sa_absolute} occurrence(s)) — a bundle that chooses an origin chooses which grant it spends against"
+fi
+
+loop_credentialed="$(grep -oaE "${CREDENTIALED_PATTERN}" "${loop_arm}" 2>/dev/null | grep -c . || true)"
 if [ "${loop_credentialed}" -eq 0 ]; then
 	ok "the loop arm attaches credentials to nothing"
 else

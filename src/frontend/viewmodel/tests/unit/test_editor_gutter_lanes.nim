@@ -1,3 +1,4 @@
+## SDK-CONSUMER: gutter geometry is part of the UI components surface.
 ## The editor gutter's band map — asserted as NUMBERS.
 ##
 ## WHAT THIS SUITE IS FOR
@@ -37,7 +38,7 @@
 
 import std/[sequtils, strutils, unittest]
 
-import ../../viewmodels/editor_gutter_lanes
+import codetracer_ui_components
 
 const
   FontSize = 15

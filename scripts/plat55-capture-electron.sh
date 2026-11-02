@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# plat55-capture-electron.sh — PLAT-55: the REAL Electron front-end's Problems
+# panel after a real `nargo compile` of the PLAT-55 crate (two files, one
+# warning and two errors): its rows, its Errors filter and Group by File, what
+# a right-click on a row opens and what a press on a row opens — the reference
+# the terminal's and the GPUI window's panes are measured against. Writes
+# `src/tests/visual/answers/plat55-problems.electron.json`. Without a DISPLAY
+# an Xvfb is started (2560x1440, 96 dpi). Needs `nargo` on PATH (the dev
+# shell's) or `$NARGO`.
+set -euo pipefail
+
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo"
+
+export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
+
+run_spec() {
+	just test-e2e tests/problems-pane/plat55-problems-capture.spec.ts "$@"
+}
+
+case "$(uname -s)" in
+MINGW* | MSYS* | CYGWIN* | *_NT* | Darwin)
+	run_spec "$@"
+	;;
+*)
+	if [ -n "${DISPLAY:-}" ]; then
+		run_spec "$@"
+	else
+		display_num=99
+		while [ -e "/tmp/.X${display_num}-lock" ]; do
+			display_num=$((display_num + 1))
+		done
+		Xvfb ":${display_num}" -screen 0 2560x1440x24 -dpi 96 -nolisten tcp &
+		xvfb_pid=$!
+		trap 'kill $xvfb_pid 2>/dev/null || true' EXIT
+		sleep 1
+		export DISPLAY=":${display_num}"
+		run_spec "$@"
+	fi
+	;;
+esac

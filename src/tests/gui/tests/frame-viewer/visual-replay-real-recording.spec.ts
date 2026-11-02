@@ -66,7 +66,7 @@ test.describe("MCR visual replay real recording GUI integration", () => {
 
     // Pixel History + Shader Debug live in the state stack alongside STATE.
     const stateStack = ctPage.locator(".lm_stack", {
-      has: ctPage.locator(".lm_tab", { hasText: "STATE" }),
+      has: ctPage.locator(".lm_tab", { hasText: "VARIABLES" }),
     });
     await expect(
       stateStack.locator(".lm_tab", { hasText: "PIXEL HISTORY" }),

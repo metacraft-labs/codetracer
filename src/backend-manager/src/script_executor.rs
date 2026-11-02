@@ -15,16 +15,20 @@
 //!    CodeTracer Python API (found by [`resolve_python_api_path`]), or, when
 //!    no copy was found, names the places searched if `codetracer` is not
 //!    importable on its own.
-//! 2. Sets environment variables so the API knows which daemon socket to use.
+//! 2. Sets environment variables so the API knows which daemon socket to use
+//!    (a confined script is handed an inherited connection instead; see
+//!    `crate::script_confinement`).
 //! 3. Opens the trace via `codetracer.open_trace()`, binding it as `trace`.
 //! 4. Runs the user code inside a `try/finally` so the trace is closed even on
 //!    errors.
 //!
 //! # Timeout
 //!
-//! The subprocess is given a configurable timeout (default 30 seconds).  If the
-//! process exceeds this limit it is killed and a timeout result is returned with
-//! exit code 124 (matching the convention used by the `timeout(1)` command).
+//! The subprocess is given a configurable timeout (default 120 seconds, at
+//! most [`MAX_TIMEOUT_SECS`]).  If the process exceeds this limit its process
+//! group is killed and a timeout result is returned with exit code 124
+//! (matching the convention used by the `timeout(1)` command).  Its output is
+//! bounded the same way ([`MAX_SCRIPT_OUTPUT_BYTES`] per stream).
 //!
 //! # Error handling
 //!
@@ -38,6 +42,8 @@ use std::process::Stdio;
 use tokio::process::Command;
 use tokio::time::{Duration, timeout};
 
+use crate::session::HostSourceReads;
+
 /// Default timeout for script execution in seconds.
 ///
 /// 120 s is generous enough for large Python DB traces (which can be
@@ -49,6 +55,34 @@ pub const DEFAULT_TIMEOUT_SECS: u64 = 120;
 ///
 /// Matches the exit code used by the `timeout(1)` coreutils command.
 pub const TIMEOUT_EXIT_CODE: i32 = 124;
+
+/// The longest timeout a caller may set, in seconds.  A caller's timeout is
+/// model output for an MCP agent; a longer one is refused (not shortened), so
+/// one call cannot hold a Python process and a replay for an unbounded time.
+pub const MAX_TIMEOUT_SECS: u64 = 600;
+
+/// The most bytes of each of a script's standard output and standard error
+/// that are kept.  A script that writes more is stopped (its process group
+/// killed) and reported with [`OUTPUT_LIMIT_EXIT_CODE`], so neither the
+/// session manager nor the client holds an unbounded answer.
+pub const MAX_SCRIPT_OUTPUT_BYTES: usize = 1024 * 1024;
+
+/// Exit code reported for a script stopped for writing more than
+/// [`MAX_SCRIPT_OUTPUT_BYTES`] to one stream.  A script can exit with any
+/// code itself, so the result's `output_limit_exceeded` flag, not this code,
+/// is what says the script was stopped.
+pub const OUTPUT_LIMIT_EXIT_CODE: i32 = 125;
+
+/// Check a caller's timeout: at least 1 second and at most
+/// [`MAX_TIMEOUT_SECS`].
+pub fn check_timeout(seconds: u64) -> Result<u64, String> {
+    if seconds == 0 || seconds > MAX_TIMEOUT_SECS {
+        return Err(format!(
+            "timeout {seconds} s is outside 1 to {MAX_TIMEOUT_SECS} seconds"
+        ));
+    }
+    Ok(seconds)
+}
 
 /// The environment variable that names the directory holding the
 /// `codetracer` Python package (the `python-api` directory of a CodeTracer
@@ -441,6 +475,97 @@ pub struct ScriptResult {
     pub exit_code: i32,
     /// Whether the subprocess was killed because it exceeded the timeout.
     pub timed_out: bool,
+    /// Whether the subprocess was killed for writing more than
+    /// [`MAX_SCRIPT_OUTPUT_BYTES`] to one stream; the streams then hold what
+    /// was kept.
+    pub output_limit_exceeded: bool,
+}
+
+/// How the daemon is reached from the script's process.
+pub enum DaemonEndpoint {
+    /// The daemon's socket, connected to by path (an unconfined script).
+    Socket(String),
+    /// A connection the script inherits as this file descriptor (a confined
+    /// script, which may open no socket).
+    InheritedFd(i32),
+}
+
+/// The descriptor a confined script inherits its daemon connection as.
+pub const SCRIPT_DAEMON_FD: i32 = 3;
+
+/// What the script's process may do.
+pub enum ScriptIsolation {
+    /// The session manager's own privileges: only for a client that opted
+    /// out of confinement (`trace mcp --allow-unconfined-scripts`, or the
+    /// `ct trace` command line, which runs the user's own script).
+    Unconfined { socket_path: String },
+    /// Confined (`crate::script_confinement`): the script writes only
+    /// `scratch` (its `HOME` and `TMPDIR`; its working directory is set on
+    /// `scratch_dir`, the directory's descriptor, so no path is resolved
+    /// for it), gets a cleared environment, and reaches the daemon only
+    /// through `daemon`, which it inherits as [`SCRIPT_DAEMON_FD`].
+    Confined {
+        confinement: crate::script_confinement::Confinement,
+        scratch: PathBuf,
+        #[cfg(unix)]
+        scratch_dir: std::os::fd::OwnedFd,
+        #[cfg(unix)]
+        daemon: std::os::fd::OwnedFd,
+    },
+}
+
+/// What a stream reader has read so far, shared with the caller, so the
+/// bytes read are kept even if the reader is abandoned before the stream
+/// ends (a process outside the call holding the stream open).
+type ReadSoFar = std::sync::Arc<std::sync::Mutex<Vec<u8>>>;
+
+/// Read at most `limit` bytes of `handle` into `out`; once it holds more,
+/// keep the first `limit` bytes, stop reading and tell `over`.
+async fn read_bounded<R: tokio::io::AsyncRead + Unpin>(
+    handle: Option<R>,
+    limit: usize,
+    out: ReadSoFar,
+    over: tokio::sync::mpsc::Sender<()>,
+) {
+    use tokio::io::AsyncReadExt;
+    let Some(mut handle) = handle else {
+        return;
+    };
+    let mut chunk = vec![0u8; 64 * 1024];
+    loop {
+        match handle.read(&mut chunk).await {
+            Ok(0) | Err(_) => return,
+            Ok(n) => {
+                let exceeded = {
+                    let mut out = out
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let keep = n.min(limit - out.len());
+                    out.extend_from_slice(&chunk[..keep]);
+                    keep < n
+                };
+                if exceeded {
+                    let _ = over.send(()).await;
+                    return;
+                }
+            }
+        }
+    }
+}
+
+/// Kill the script's whole process group (the script was its leader, so the
+/// group's id is the script's pid), so a process it started does not outlive
+/// the call.  The group outlives its leader while any member is left, and
+/// its id is not handed to a new process meanwhile; once it is empty the
+/// signal finds nothing (`ESRCH`).
+#[cfg(unix)]
+fn kill_process_group(group: Option<u32>) {
+    if let Some(group) = group {
+        // SAFETY: signalling a process group we created; no memory is touched.
+        unsafe {
+            libc::kill(-(group as libc::pid_t), libc::SIGKILL);
+        }
+    }
 }
 
 /// The interpreter file name looked for in `PATH`.
@@ -510,39 +635,64 @@ pub fn find_python3(path: Option<&std::ffi::OsStr>) -> Result<PathBuf, String> {
 ///
 /// Spawns a `python3` subprocess (found by [`find_python3`], run in isolated
 /// mode) with the CodeTracer Python API available, wrapping the user script
-/// with trace initialization code.  The subprocess
-/// connects back to the daemon over `socket_path` to execute trace queries.
+/// with trace initialization code.  The subprocess connects back to the
+/// daemon (by its socket path, or through the connection it inherits when it
+/// is confined) to execute trace queries.
 ///
 /// # Arguments
 ///
 /// * `script` - The user's Python code to execute.
 /// * `trace_path` - Filesystem path to the trace directory.
-/// * `socket_path` - Path to the daemon's Unix socket (passed to the Python
-///   API via the `daemon_socket` parameter of `open_trace()`).
+/// * `isolation` - Whether the script is confined, and how it reaches the
+///   daemon ([`ScriptIsolation`]).
 /// * `python_api` - Where the `codetracer` Python package was found (added
 ///   to `sys.path`), or where it was looked for (named in the script's error
 ///   when the package is not importable on its own).
 /// * `timeout_seconds` - Maximum execution time in seconds before the
-///   subprocess is killed.
+///   subprocess is killed (checked by [`check_timeout`]).
+/// * `session_id` - A persistent debugging session to reuse, if any.
+/// * `host_source_reads` - The host-read setting of the client that asked
+///   for the script; the script's trace session is opened with it (see
+///   `crate::session::SessionKey`).
+///
+/// Each of standard output and standard error is kept up to
+/// [`MAX_SCRIPT_OUTPUT_BYTES`]; a script that writes more is stopped.  The
+/// script runs as the leader of its own process group, and the whole group
+/// is killed when the call ends, however it ends.
 ///
 /// # Errors
 ///
-/// Returns `Err(String)` if the Python subprocess cannot be spawned (e.g.
-/// `python3` is not found in an absolute `PATH` directory).  Script-level errors (syntax errors,
-/// runtime exceptions) are represented as a successful `ScriptResult` with a
+/// Returns `Err(String)` if the timeout is outside the accepted range or the
+/// Python subprocess cannot be spawned (e.g. `python3` is not found in an
+/// absolute `PATH` directory).  Script-level errors (syntax errors, runtime
+/// exceptions) are represented as a successful `ScriptResult` with a
 /// non-zero `exit_code` and the traceback in `stderr`.
 pub async fn execute_script(
     script: &str,
     trace_path: &str,
-    socket_path: &str,
+    isolation: ScriptIsolation,
     python_api: &PythonApiLookup,
     timeout_seconds: u64,
     session_id: Option<&str>,
+    host_source_reads: HostSourceReads,
 ) -> Result<ScriptResult, String> {
-    let wrapper = build_wrapper_script(script, trace_path, socket_path, python_api, session_id);
+    let timeout_seconds = check_timeout(timeout_seconds)?;
+    let endpoint = match &isolation {
+        ScriptIsolation::Unconfined { socket_path } => DaemonEndpoint::Socket(socket_path.clone()),
+        ScriptIsolation::Confined { .. } => DaemonEndpoint::InheritedFd(SCRIPT_DAEMON_FD),
+    };
+    let wrapper = build_wrapper_script_for(
+        script,
+        trace_path,
+        &endpoint,
+        python_api,
+        session_id,
+        host_source_reads,
+    );
 
     let python = find_python3(std::env::var_os("PATH").as_deref())?;
-    let mut child = Command::new(&python)
+    let mut command = Command::new(&python);
+    command
         // Isolated mode (`-I`): the interpreter ignores every `PYTHON*`
         // environment variable (`PYTHONPATH`, `PYTHONHOME`, `PYTHONSTARTUP`,
         // ...), leaves the user's site-packages out, and does not put the
@@ -573,67 +723,171 @@ pub async fn execute_script(
         // starts the interpreter, so removing the inherited value only drops
         // what the daemon's environment happened to carry.
         .env_remove("NIX_PYTHONPATH")
+        // The same `sitecustomize` sets `sys.executable` to
+        // `NIX_PYTHONEXECUTABLE` (outside a virtual environment): a relative
+        // value such as `./python3` would make a script that starts
+        // `sys.executable` (`subprocess`, `multiprocessing`) run a `python3`
+        // from the working directory.  The wrapper scripts Nix generates set
+        // it themselves, so only the inherited value is dropped.
+        .env_remove("NIX_PYTHONEXECUTABLE")
         // Prevent the child from inheriting stdin (avoids blocking on tty reads).
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        // A script that outlives its timeout is killed when its handle is
+        // dropped. `tokio::process::Child` does not kill on drop by default
+        // (<https://docs.rs/tokio/latest/tokio/process/struct.Command.html#method.kill_on_drop>):
+        // without this the timed-out script ran on, to the end of whatever it
+        // was doing, and past the daemon's own exit.
+        .kill_on_drop(true);
+    // Its own process group, so the processes a script starts are killed
+    // with it (`kill_process_group`).
+    #[cfg(unix)]
+    command.process_group(0);
+
+    if let ScriptIsolation::Confined {
+        confinement,
+        scratch,
+        #[cfg(unix)]
+        scratch_dir,
+        #[cfg(unix)]
+        daemon,
+    } = &isolation
+    {
+        #[cfg(not(unix))]
+        let _ = confinement;
+        // A confined script sees none of the session manager's environment
+        // (which may carry credentials, such as a gateway token): only what
+        // finding programs and decoding text need, and the scratch directory
+        // as its home, temporary directory and working directory.
+        command.env_clear();
+        for name in ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ"] {
+            if let Some(value) = std::env::var_os(name) {
+                command.env(name, value);
+            }
+        }
+        command.env("HOME", scratch).env("TMPDIR", scratch);
+        #[cfg(not(unix))]
+        command.current_dir(scratch);
+        #[cfg(unix)]
+        {
+            use std::os::fd::AsRawFd;
+            let daemon_fd = daemon.as_raw_fd();
+            let scratch_fd = scratch_dir.as_raw_fd();
+            // The ruleset descriptor stays open: `isolation` outlives the
+            // spawn below.
+            let child_confinement = confinement.for_child();
+            // SAFETY: runs in the child between fork and exec; it calls only
+            // fchdir/dup2/fcntl and `ChildConfinement::apply`, all
+            // async-signal-safe.
+            unsafe {
+                command.pre_exec(move || {
+                    // The working directory is the scratch directory's
+                    // descriptor (still open here; it closes at exec).
+                    if libc::fchdir(scratch_fd) != 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    if daemon_fd == SCRIPT_DAEMON_FD {
+                        // dup2 onto itself keeps close-on-exec: clear it.
+                        if libc::fcntl(daemon_fd, libc::F_SETFD, 0) != 0 {
+                            return Err(std::io::Error::last_os_error());
+                        }
+                    } else if libc::dup2(daemon_fd, SCRIPT_DAEMON_FD) < 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    child_confinement.apply()
+                });
+            }
+        }
+    }
+
+    let mut child = command
         .spawn()
         .map_err(|e| format!("Failed to spawn {}: {e}", python.display()))?;
+    // The child holds its copy of the daemon connection now; the parent's
+    // copy is closed when `isolation` is dropped at the end of this call.
 
-    // Take ownership of the stdout/stderr handles so we can read them
-    // concurrently with waiting for the process to exit.  This also lets
-    // us kill the child on timeout without a borrow conflict.
-    let mut stdout_handle = child.stdout.take();
-    let mut stderr_handle = child.stderr.take();
+    // Read stdout and stderr concurrently with waiting for the process, each
+    // up to the limit; the first to pass it says so on `over`.
+    let (over_tx, mut over_rx) = tokio::sync::mpsc::channel::<()>(2);
+    let stdout_read = ReadSoFar::default();
+    let stderr_read = ReadSoFar::default();
+    let stdout_task = tokio::spawn(read_bounded(
+        child.stdout.take(),
+        MAX_SCRIPT_OUTPUT_BYTES,
+        stdout_read.clone(),
+        over_tx.clone(),
+    ));
+    let stderr_task = tokio::spawn(read_bounded(
+        child.stderr.take(),
+        MAX_SCRIPT_OUTPUT_BYTES,
+        stderr_read.clone(),
+        over_tx,
+    ));
 
-    // Collect stdout and stderr concurrently while waiting for the process.
-    let wait_result = timeout(Duration::from_secs(timeout_seconds), async {
-        // Read stdout and stderr in background tasks.
-        let stdout_task = tokio::spawn(async move {
-            let mut buf = Vec::new();
-            if let Some(ref mut handle) = stdout_handle {
-                let _ = tokio::io::AsyncReadExt::read_to_end(handle, &mut buf).await;
-            }
-            buf
-        });
-        let stderr_task = tokio::spawn(async move {
-            let mut buf = Vec::new();
-            if let Some(ref mut handle) = stderr_handle {
-                let _ = tokio::io::AsyncReadExt::read_to_end(handle, &mut buf).await;
-            }
-            buf
-        });
+    enum Ending {
+        Exited(std::io::Result<std::process::ExitStatus>),
+        TimedOut,
+        OutputLimit,
+    }
+    let group = child.id();
+    let ending = tokio::select! {
+        status = child.wait() => Ending::Exited(status),
+        Some(()) = over_rx.recv() => Ending::OutputLimit,
+        () = tokio::time::sleep(Duration::from_secs(timeout_seconds)) => Ending::TimedOut,
+    };
+    // Whatever ended the call, nothing the script started outlives it.
+    #[cfg(unix)]
+    kill_process_group(group);
+    if !matches!(ending, Ending::Exited(_)) {
+        let _ = child.kill().await;
+    }
+    // A process outside the script's group (an unconfined script may leave
+    // one) can hold its output open after the call: the readers are given a
+    // moment, not the timeout over again, and what they read is kept either
+    // way.
+    for mut task in [stdout_task, stderr_task] {
+        if timeout(Duration::from_secs(5), &mut task).await.is_err() {
+            // The stream stays open elsewhere: stop reading it.
+            task.abort();
+        }
+    }
+    let take = |read: &ReadSoFar| {
+        let bytes = read
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        String::from_utf8_lossy(&bytes).to_string()
+    };
+    let stdout = take(&stdout_read);
+    let stderr = take(&stderr_read);
+    drop(isolation);
 
-        let status = child.wait().await;
-        let stdout_bytes = stdout_task.await.unwrap_or_default();
-        let stderr_bytes = stderr_task.await.unwrap_or_default();
-
-        (status, stdout_bytes, stderr_bytes)
-    })
-    .await;
-
-    match wait_result {
-        Ok((Ok(status), stdout_bytes, stderr_bytes)) => Ok(ScriptResult {
-            stdout: String::from_utf8_lossy(&stdout_bytes).to_string(),
-            stderr: String::from_utf8_lossy(&stderr_bytes).to_string(),
+    match ending {
+        Ending::Exited(Ok(status)) => Ok(ScriptResult {
+            stdout,
+            stderr,
             exit_code: status.code().unwrap_or(1),
             timed_out: false,
+            output_limit_exceeded: false,
         }),
-        Ok((Err(e), _, _)) => Err(format!("Script execution I/O error: {e}")),
-        Err(_) => {
-            // Timeout reached — kill the subprocess and return a timeout result.
-            //
-            // Note: `child` was moved into the async block above, but the
-            // timeout means that block's future was dropped.  The drop
-            // implementation of `tokio::process::Child` kills the child
-            // process automatically when the handle is dropped.
-            Ok(ScriptResult {
-                stdout: String::new(),
-                stderr: format!("Script execution timed out after {timeout_seconds} seconds"),
-                exit_code: TIMEOUT_EXIT_CODE,
-                timed_out: true,
-            })
-        }
+        Ending::Exited(Err(e)) => Err(format!("Script execution I/O error: {e}")),
+        Ending::TimedOut => Ok(ScriptResult {
+            stdout: String::new(),
+            stderr: format!("Script execution timed out after {timeout_seconds} seconds"),
+            exit_code: TIMEOUT_EXIT_CODE,
+            timed_out: true,
+            output_limit_exceeded: false,
+        }),
+        Ending::OutputLimit => Ok(ScriptResult {
+            stdout,
+            stderr: format!(
+                "{stderr}\nScript stopped: it wrote more than {MAX_SCRIPT_OUTPUT_BYTES} bytes to \
+                 one output stream"
+            ),
+            exit_code: OUTPUT_LIMIT_EXIT_CODE,
+            timed_out: false,
+            output_limit_exceeded: true,
+        }),
     }
 }
 
@@ -647,23 +901,44 @@ pub async fn execute_script(
 ///    searched and
 ///    [`PYTHON_API_PATH_ENV`], instead of ending in a bare `ImportError`.
 ///    Copies refused by the trust rule are named on stderr in any case.
-/// 2. Sets `CODETRACER_DAEMON_SOCK` and `CODETRACER_TRACE_PATH` environment
-///    variables for any downstream code that needs them.
+/// 2. Sets `CODETRACER_TRACE_PATH`, and for an unconfined script
+///    `CODETRACER_DAEMON_SOCK`, for any downstream code that needs them.
 /// 3. Opens the trace via `codetracer.open_trace()`, passing the daemon socket
-///    explicitly so the Python API does not need to discover it.
+///    explicitly (or, for a confined script, the descriptor of the connection
+///    it inherits) so the Python API does not need to discover it, and the
+///    requesting client's host-read setting, so the script's trace session
+///    is the one that client would get (`crate::session::SessionKey`).
 /// 4. Executes the user script with `trace` in scope.
 /// 5. Closes the trace in a `finally` block.
-fn build_wrapper_script(
+fn build_wrapper_script_for(
     script: &str,
     trace_path: &str,
-    socket_path: &str,
+    daemon: &DaemonEndpoint,
     python_api: &PythonApiLookup,
     session_id: Option<&str>,
+    host_source_reads: HostSourceReads,
 ) -> String {
     // Escape backslashes and quotes in the path strings so they are safe inside
     // Python string literals.  This prevents injection when paths contain
     // special characters (e.g. backslashes on Windows or quotes in file names).
-    let sock_escaped = escape_for_python(socket_path);
+    //
+    // A confined script reaches the daemon only through the connection it
+    // inherits, so the API is handed that descriptor and no socket path.
+    let (sock_env_line, daemon_argument) = match daemon {
+        DaemonEndpoint::Socket(path) => {
+            let sock_escaped = escape_for_python(path);
+            (
+                format!("os.environ[\"CODETRACER_DAEMON_SOCK\"] = \"{sock_escaped}\"\n"),
+                format!("daemon_socket=\"{sock_escaped}\""),
+            )
+        }
+        DaemonEndpoint::InheritedFd(fd) => (String::new(), format!("daemon_fd={fd}")),
+    };
+    let host_reads_literal = if host_source_reads.is_allowed() {
+        "True"
+    } else {
+        "False"
+    };
     let trace_escaped = escape_for_python(trace_path);
     let indented = indent_script(script);
 
@@ -706,8 +981,7 @@ fn build_wrapper_script(
     format!(
         r#"import sys, os
 {STRIP_WORKING_DIRECTORY}
-{sys_path_line}{refused_line}os.environ["CODETRACER_DAEMON_SOCK"] = "{sock_escaped}"
-os.environ["CODETRACER_TRACE_PATH"] = "{trace_escaped}"
+{sys_path_line}{refused_line}{sock_env_line}os.environ["CODETRACER_TRACE_PATH"] = "{trace_escaped}"
 try:
     from codetracer import open_trace
 except ImportError as _ct_import_error:
@@ -716,12 +990,31 @@ except ImportError as _ct_import_error:
              + "; looked for its python-api directory in: {searched_escaped}"
              + "; set {PYTHON_API_PATH_ENV} to that directory or install the package"
              + " into the site-packages of " + sys.executable)
-trace = open_trace("{trace_escaped}", daemon_socket="{sock_escaped}")
+trace = open_trace("{trace_escaped}", {daemon_argument}, host_source_reads={host_reads_literal})
 try:
 {indented}
 finally:
 {finally_block}
 "#
+    )
+}
+
+/// [`build_wrapper_script_for`] with host reads off, the tests' wrapper.
+#[cfg(test)]
+fn build_wrapper_script(
+    script: &str,
+    trace_path: &str,
+    socket_path: &str,
+    python_api: &PythonApiLookup,
+    session_id: Option<&str>,
+) -> String {
+    build_wrapper_script_for(
+        script,
+        trace_path,
+        &DaemonEndpoint::Socket(socket_path.to_string()),
+        python_api,
+        session_id,
+        HostSourceReads::Refused,
     )
 }
 
@@ -1524,10 +1817,13 @@ mod tests {
         let result = execute_script(
             &script,
             "/nonexistent/trace",
-            "/nonexistent/daemon.sock",
+            ScriptIsolation::Unconfined {
+                socket_path: "/nonexistent/daemon.sock".to_string(),
+            },
             &lookup,
             60,
             None,
+            HostSourceReads::Refused,
         )
         .await
         .expect("python3 spawns");
@@ -1585,8 +1881,20 @@ mod tests {
     /// ordinary way: what the tests then see not running is held back by
     /// `execute_script`, not inert.  The `NIX_PYTHONPATH` control needs a
     /// Nixpkgs interpreter on `PATH`, as the development shell provides.
+    ///
+    /// The directory is returned resolved, because what the script process
+    /// reports about it (`os.getcwd()`, and every path Python derives from
+    /// the working directory) is resolved, and the temp root need not be: on
+    /// macOS `/tmp`, and with it the dev shell's `TMPDIR=/tmp/nix-shell.*`,
+    /// is a symlink to `/private/tmp`.  Against the unresolved path the
+    /// `cwd` check fails, and every `starts_with(&shared)` refusal holds
+    /// whatever the reported path names.
     fn make_planted_shared_dir(root: &Path) -> PathBuf {
-        let shared = root.join("shared");
+        std::fs::create_dir_all(root.join("shared")).expect("create shared dir");
+        let shared = root
+            .join("shared")
+            .canonicalize()
+            .expect("resolve shared dir");
         std::fs::create_dir_all(shared.join("codetracer")).expect("create planted package");
         std::fs::create_dir_all(shared.join("lib")).expect("create planted lib");
         std::fs::create_dir_all(shared.join("bin")).expect("create planted bin");
@@ -1677,7 +1985,7 @@ mod tests {
         std::fs::write(
             stand_in.join("codetracer/__init__.py"),
             "class _Trace:\n    def close(self):\n        pass\n\n\
-             def open_trace(path, daemon_socket=None):\n    return _Trace()\n",
+             def open_trace(path, daemon_socket=None, host_source_reads=False):\n    return _Trace()\n",
         )
         .expect("write stand-in");
         tighten(&stand_in);
@@ -1873,6 +2181,90 @@ mod tests {
         assert!(!stderr.contains(PLANTED), "{stderr}");
         assert_ne!(exit, 0, "{stderr}");
         assert!(stderr.contains("/nonexistent/daemon.sock"), "{stderr}");
+    }
+
+    /// A relative `NIX_PYTHONEXECUTABLE` in the daemon's environment does not
+    /// reach the script: a script that starts `sys.executable` runs the real
+    /// interpreter, not the `python3` planted in the shared working directory
+    /// (`./python3`) or below it (`bin/python3`).
+    ///
+    /// Nixpkgs' `sitecustomize` honours the variable only outside a virtual
+    /// environment, and the `python3` first on the development shell's
+    /// `PATH` belongs to one, which would make both runs vacuous; as in
+    /// `test_exec_script_does_not_use_the_user_site_packages`, the directory
+    /// the interpreter was built for goes first on `PATH` for both.  The
+    /// control: that interpreter started the ordinary way under the same
+    /// variable does run the plant.
+    #[tokio::test]
+    async fn test_exec_script_ignores_a_relative_nix_python_executable() {
+        if std::env::var_os(CWD_PROBE_ENV).is_some() {
+            return cwd_probe().await;
+        }
+        let root = tempfile::tempdir().expect("tempdir");
+        let shared = make_planted_shared_dir(root.path());
+        let stand_in = make_stand_in_api(root.path());
+        let base = std::process::Command::new("python3")
+            .args([
+                "-I",
+                "-c",
+                "import sysconfig; print(sysconfig.get_config_var('BINDIR'))",
+            ])
+            .output()
+            .expect("python3 runs");
+        let base_bin = PathBuf::from(String::from_utf8_lossy(&base.stdout).trim());
+        let python = base_bin.join("python3");
+        assert!(is_executable_file(&python), "{}", python.display());
+        let path = format!(
+            "{}:{}",
+            base_bin.display(),
+            std::env::var("PATH").expect("PATH is set")
+        );
+        let script = "import subprocess\n\
+                      print('executable', sys.executable)\n\
+                      subprocess.run([sys.executable, '-c', 'print(\"child ran\")'], check=True)\n\
+                      print('user script ran')";
+        for (value, tag) in [("./python3", "cwd-python3"), ("bin/python3", "bin-python3")] {
+            let control = std::process::Command::new(&python)
+                .args([
+                    "-c",
+                    "import subprocess, sys; subprocess.run([sys.executable, '-c', 'pass'])",
+                ])
+                .current_dir(&shared)
+                .env("NIX_PYTHONEXECUTABLE", value)
+                .output()
+                .expect("python3 runs");
+            let control = String::from_utf8_lossy(&control.stderr);
+            assert!(
+                control.contains(&format!("{PLANTED} {tag}")),
+                "control: NIX_PYTHONEXECUTABLE={value} did not run the planted {tag} \
+                 for {}: {control}",
+                python.display()
+            );
+
+            let (exit, stdout, stderr) = run_cwd_probe(
+                "test_exec_script_ignores_a_relative_nix_python_executable",
+                &shared,
+                &[
+                    ("CT_TEST_PROBE_API", stand_in.display().to_string()),
+                    ("CT_TEST_PROBE_SCRIPT", script.to_string()),
+                    ("NIX_PYTHONEXECUTABLE", value.to_string()),
+                    ("PATH", path.clone()),
+                ],
+            );
+            assert!(!stderr.contains(PLANTED), "{value}: {stderr}");
+            assert_eq!(exit, 0, "{value}: {stdout} {stderr}");
+            assert!(stdout.contains("child ran"), "{value}: {stdout}");
+            assert!(stdout.contains("user script ran"), "{value}: {stdout}");
+            let executable = stdout
+                .lines()
+                .find_map(|l| l.strip_prefix("executable "))
+                .unwrap_or_else(|| panic!("no executable line: {stdout}"));
+            assert!(Path::new(executable).is_absolute(), "{value}: {executable}");
+            assert!(
+                !Path::new(executable).starts_with(&shared),
+                "{value}: {executable}"
+            );
+        }
     }
 
     /// With no trusted copy found, a `codetracer/` package planted in the

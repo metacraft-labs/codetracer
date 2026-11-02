@@ -87,6 +87,36 @@ proc recordWithCtRrSupport(
   result = importTrace(traceFolder, recordingId, NO_PID, LangUnknown, DB_SELF_CONTAINED_DEFAULT, traceKind=traceKind)
 
 
+proc copyMacroSourcemaps(nimcacheDir, traceFolder: string) =
+  ## Copy the compiler's ``macro_sourcemap*.json`` from ``nimcacheDir`` to the
+  ## trace folder root.
+  ##
+  ## The codetracer Nim fork writes the macro-expansion map into the nimcache
+  ## (codetracer-nim ``compiler/cgen.nim`` ``cgenWriteModules``: "a build side
+  ## output … written into the nimcache"), but every reader looks for it in
+  ## the trace folder ROOT: replay-server's ``load_macro_sourcemaps``
+  ## (``src/db-backend/src/macro_sourcemap.rs``, called with the launch's
+  ## trace folder), the native backend's twin of it, and the GUI's
+  ## ``findMacroSourcemapPath`` (``src/frontend/index/traces.nim``), whose
+  ## answer decides ``hasMacroSourcemap``.  All three document it as "placed
+  ## in the trace directory during recording"; this is that placement.
+  ##
+  ## Best effort, like the native backend's ``copy_sourcemap_files``: the
+  ## recording is complete without it (only macro-expansion views lose their
+  ## data), so a failure is reported and the recording goes on.
+  if not dirExists(nimcacheDir):
+    return
+  for kind, path in walkDir(nimcacheDir):
+    if kind notin {pcFile, pcLinkToFile}:
+      continue
+    let name = path.extractFilename
+    if name.startsWith("macro_sourcemap") and name.endsWith(".json"):
+      try:
+        copyFile(path, traceFolder / name)
+      except OSError:
+        echo fmt"warning: could not copy {path} to {traceFolder}: " &
+          getCurrentExceptionMsg()
+
 proc recordNim(
     program: string, args: seq[string],
     traceFolder: string,
@@ -101,10 +131,18 @@ proc recordNim(
   ##   ``feature/M-nim-column-aware``) emits a CTFS-format ``.ct`` container
   ##   straight into the trace folder, which importTrace then ingests.
   ##
-  ## * ``.nim`` (default) — first compiled to a native binary with
-  ##   ``nim c -o:<binary> <program>`` into the trace folder, then recorded
-  ##   with the MCR ``ct-mcr record`` tool.  MCR writes a ``trace.ct``
-  ##   container next to the binary, again consumable by importTrace.
+  ## * ``.nim`` (default) — first compiled to a native binary in the trace
+  ##   folder with debug info, no optimisation and the generated C kept in
+  ##   ``<traceFolder>/nimcache`` (``nimNativeCompileArgs`` in
+  ##   ``trace/recorder_dispatch.nim``, the counterpart of the native backend's
+  ##   ``compile_nim``), then recorded with the MCR ``ct-mcr record`` tool.
+  ##   MCR writes a ``trace.ct`` container next to the binary, again
+  ##   consumable by importTrace.  The replay needs that DWARF to place even
+  ##   its entry stop: a ``-d:release`` build without it recorded fine and
+  ##   then failed every launch with "MCR run-to-entry stopped without source
+  ##   location".  The compiler's ``macro_sourcemap_*.json`` is copied from
+  ##   the nimcache to the trace folder root, where its readers look
+  ##   (``copyMacroSourcemaps``).
   ##
   ## The temp compile step is the simplest plausible bridge — it intentionally
   ## does not handle multi-file Nim projects with ``.nimble`` manifests or
@@ -150,21 +188,16 @@ proc recordNim(
 
   let compiledName = program.splitFile.name
   let binaryPath = traceFolder / compiledName
-  let compileArgs = @[
-    "c",
-    "--hints:off",
-    "-d:release",
-    "-o:" & binaryPath,
-    program
-  ]
+  let nimcacheDir = traceFolder / "nimcache"
   let compileProcess = startProcess(
     nimCompilerExe(),
-    args = compileArgs,
+    args = nimNativeCompileArgs(program, binaryPath, nimcacheDir),
     options = {poEchoCmd, poParentStreams})
   let compileExit = waitForExit(compileProcess)
   if compileExit != 0:
     echo fmt"error: nim c exited with {compileExit} for {program}"
     quit(1)
+  copyMacroSourcemaps(nimcacheDir, traceFolder)
 
   # MCR ``record -o <out.ct>`` produces a single CTFS container.  We point it
   # at ``<traceFolder>/trace.ct`` so importTrace's findCtFileInFolder picks
@@ -270,7 +303,7 @@ proc recordDb(
     # M-REC-3: UUIDv7 recording-id string; empty == NO_RECORDING_ID.
     recordingId: string, pythonActivationPath: string = "",
     pythonTestFramework: string = "", pythonTestArgs: seq[string] = @[],
-    server: bool = false): Trace =
+    server: bool = false, noirTestName: string = ""): Trace =
   ## `sel` selects the recorder; `lang` is the summary the recording is
   ## registered under (`Trace.lang`, a per-file fact summarised per recording
   ## — see `src/common/common_types/debugger_features/trace.nim`).
@@ -305,7 +338,8 @@ proc recordDb(
       pythonActivationPath: pythonActivationPath,
       pythonTestFramework: pythonTestFramework,
       pythonTestArgs: pythonTestArgs,
-      server: server))
+      server: server,
+      noirTestName: noirTestName))
 
   if invocation.exe.len == 0:
     # Unreachable via ``requireRecorder`` above; kept as a hard stop so a
@@ -361,7 +395,7 @@ proc record(
     traceKind: string = "db", rrSupportPath: string = "",
     pythonInterpreter: string = "", pythonActivationPath: string = "", pythonWithDiff: bool = false,
     pythonTestFramework: string = "", pythonTestArgs: seq[string] = @[],
-    server: bool = false): Trace =
+    server: bool = false, noirTestName: string = ""): Trace =
   var traceID: string
   if traceIDRecord == NO_RECORDING_ID:
     traceID = trace_index.newID(test)
@@ -477,7 +511,8 @@ proc record(
         # for noir for now "executable" is the noir folder
         recordSymbols(executable, outputFolder, lang)
       return recordDb(sel, lang, executable, args, backend, outputFolder,
-                      stylusTrace, traceId, server = server)
+                      stylusTrace, traceId, server = server,
+                      noirTestName = noirTestName)
     elif sel.language == slPython and sel.approach == raInstrumentedRuntime and
          tool.supported:
       var activationPathResolved = pythonActivationPath
@@ -591,6 +626,7 @@ proc main*(): Trace =
   #   [-t/--stylus-trace <trace-path>]
   #   [-a/--address <address>] [--socket <socket-path>]
   #   [--trace-kind db/rr/ttd] [--rr-support-path <rr-support-path>]
+  #   [--noir-test-name <name>]
   #   <program> [<args>]
   let args = os.commandLineParams()
   if args.len == 0:
@@ -621,6 +657,9 @@ proc main*(): Trace =
   var server = false
   var pythonTestFramework = ""
   var pythonTestArgs: seq[string] = @[]
+  var noirTestName = ""
+    ## `--noir-test-name <name>`: trace that Noir test function instead of
+    ## `main` (`ct record-test` on a `.nr` file; see `recordTest`).
 
   echo args
 
@@ -710,6 +749,12 @@ proc main*(): Trace =
         displayHelp()
         return
       rrSupportPath = args[i + 1]
+      i += 2
+    elif arg == "--noir-test-name":
+      if args.len() < i + 2:
+        displayHelp()
+        return
+      noirTestName = args[i + 1]
       i += 2
     elif arg == "--pytest":
       # Collect all remaining args as pytest arguments
@@ -826,7 +871,8 @@ proc main*(): Trace =
       pythonInterpreter=pythonInterpreter,
       pythonTestFramework=pythonTestFramework,
       pythonTestArgs=pythonTestArgs,
-      server=server)
+      server=server,
+      noirTestName=noirTestName)
     traceId = trace.recordingId
     outputFolder = trace.outputFolder
 

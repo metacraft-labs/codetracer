@@ -42,9 +42,9 @@
 ##   * the outcome says `ioRefused`, and its message names the capability;
 ##   * the plugin's handle accounting did not move, so nothing was opened and
 ##     then closed;
-##   * and for the teardown case, the OPERATING SYSTEM agrees — `/proc/<pid>`
-##     is gone and the process's socket file descriptors are back to what they
-##     were.
+##   * and for the teardown case, the OPERATING SYSTEM agrees — the child
+##     is absent and the process's socket file descriptors are back to what
+##     they were.
 ##
 ## A test that asserted only the first would pass on a host that refused
 ## politely and spawned anyway.
@@ -54,12 +54,11 @@
 ## Verification-Harness-Traps §4: a scanner that finds nothing passes every
 ## "must not contain". `processIsAlive` and `openSocketCount` are read BEFORE
 ## the teardown as well as after, and the before-reading is asserted to be the
-## other answer. A `/proc` probe that always said "gone" would otherwise make
+## other answer. A process probe that always said "gone" would otherwise make
 ## the teardown case unfalsifiable.
 ##
-## And they do not match themselves: liveness is `[ -d /proc/<pid> ]` plus
-## `kill(pid, 0)`, never a `pgrep -f` over a pattern that also matches the
-## shell running the test.
+## They select exact PIDs, never a `pgrep -f` pattern that also matches the
+## shell running the test. Direct-child absence is also checked with kill(pid, 0).
 ##
 ## ## TRAP 13 (Verification-Harness-Traps §13)
 ##
@@ -68,15 +67,15 @@
 ##
 ## ## PLATFORM
 ##
-## The teardown case's OS measurement is `/proc`, so it is Linux. The suite
-## says so out loud and FAILS rather than skipping if `/proc` is absent, per
-## the silent-self-pass audit: a prerequisite that is missing must be loud.
+## Linux reads `/proc`; macOS queries exact PID states through `ps` and counts
+## socket descriptors with `fstat` over `/dev/fd`. Both probes have real positive
+## controls. Missing prerequisites fail rather than skip.
 ##
 ## Compile and run:
 ##   nim c -r --path:src/frontend/viewmodel \
 ##     src/frontend/viewmodel/tests/unit/test_plugin_io_sdk.nim
 
-import std/[asyncdispatch, os, osproc, posix, strutils, times, unittest]
+import std/[asyncdispatch, os, osproc, posix, strutils, tempfiles, times, unittest]
 
 import codetracer_embed
 import plugin_host/host
@@ -119,62 +118,54 @@ const
 # What the OS says. None of these asserts; they answer, and `ck` decides.
 # ---------------------------------------------------------------------------
 
-proc processIsAlive(pid: int): bool =
-  ## Alive AND not a zombie. A killed-but-unreaped child still answers
-  ## `kill(pid, 0)` with success, so a teardown that killed without waiting
-  ## would pass a liveness probe that asked only that — and a zombie is a
-  ## process the OS still lists, which is precisely what "no surviving child"
-  ## must exclude.
-  if pid <= 0: return false
-  if not dirExists("/proc/" & $pid): return false
-  let statPath = "/proc/" & $pid & "/stat"
-  if not fileExists(statPath): return false
-  var state = ""
-  try:
-    let text = readFile(statPath)
-    let close = text.rfind(')')
-    if close >= 0 and close + 2 < text.len:
-      state = $text[close + 2]
-  except CatchableError:
-    return false
-  state != "Z" and state.len > 0
-
 proc processState(pid: int): string =
-  ## The single state letter out of `/proc/<pid>/stat`, or `""` when the
-  ## process is gone entirely. `processIsAlive` folds "gone" and "zombie"
-  ## together, which is right for its question and wrong for F5's.
-  ##
-  ## A GRANDCHILD CANNOT BE REAPED BY THIS PROCESS, and that is the whole
-  ## reason this exists. `rawKill` reaps the child it spawned — `peekExitCode`
-  ## is a `waitpid` and the child is ours. A grandchild is our child's child:
-  ## once `killpg` kills both, the grandchild is reparented to `init` or to the
-  ## session's subreaper, and IT does the reaping, on its own schedule. So
-  ## "gone from /proc" is not an assertion this suite may make about a
-  ## grandchild without racing the reaper; "dead rather than running" is, and
-  ## it is the claim the finding is about.
+  ## A kernel process-state letter, or "" when the PID is absent. A zombie
+  ## grandchild is dead but belongs to its new parent to reap; a direct child
+  ## must be absent altogether after the host has waited for it.
   if pid <= 0: return ""
-  let statPath = "/proc/" & $pid & "/stat"
-  if not fileExists(statPath): return ""
-  try:
-    let text = readFile(statPath)
-    let close = text.rfind(')')
-    if close >= 0 and close + 2 < text.len:
-      return $text[close + 2]
-  except CatchableError:
-    return ""
-  ""
+  when defined(macosx):
+    # Exact PID selection avoids matching a probe's own command line. ps is
+    # macOS's process-table reader; an unavailable/failed probe must be loud.
+    let queried = execCmdEx("/bin/ps -p " & $pid & " -o stat=")
+    let state = queried.output.strip()
+    if queried.exitCode == 1 and state.len == 0:
+      return ""
+    if queried.exitCode != 0 or state.len == 0:
+      raise newException(OSError, "process-state probe failed: " & queried.output)
+    return $state[0]
+  else:
+    let statPath = "/proc/" & $pid & "/stat"
+    if not fileExists(statPath): return ""
+    try:
+      let text = readFile(statPath)
+      let close = text.rfind(')')
+      if close >= 0 and close + 2 < text.len:
+        return $text[close + 2]
+    except CatchableError:
+      return ""
+    ""
+
+proc processIsAlive(pid: int): bool =
+  ## A killed-but-unreaped process still answers kill(pid, 0). Query its
+  ## state so the grandchild check distinguishes dead from running.
+  processState(pid) notin ["", "Z"]
 
 proc openSocketCount(): int =
-  ## Every socket file descriptor this process holds, counted through
-  ## `/proc/self/fd`. Sockets rather than all fds, because the nim dispatcher
-  ## opens and closes epoll and eventfd descriptors on its own schedule and a
-  ## raw fd count would be noise.
-  for _, path in walkDir("/proc/self/fd"):
-    try:
-      let target = expandSymlink(path)
-      if target.startsWith("socket:"): inc result
-    except CatchableError:
-      discard
+  ## Count sockets, not dispatcher pipes/event descriptors. Both platform
+  ## arms inspect this process's actual descriptor table.
+  when defined(macosx):
+    for _, path in walkDir("/dev/fd", checkDir = true):
+      var info: Stat
+      if posix.fstat(cint(parseInt(path.extractFilename())), info) == 0 and
+          S_ISSOCK(info.st_mode):
+        inc result
+  else:
+    for _, path in walkDir("/proc/self/fd"):
+      try:
+        let target = expandSymlink(path)
+        if target.startsWith("socket:"): inc result
+      except CatchableError:
+        discard
 
 template waitUntil(cond: untyped; timeoutMs: int): bool =
   ## Bounded polling for a condition the OS reaches on its own schedule.
@@ -316,8 +307,9 @@ var workDir = ""
 
 proc setupWorkDir(): string =
   if workDir.len == 0:
-    workDir = getTempDir() / "plat8-io-" & $getCurrentProcessId()
-    createDir(workDir)
+    # Darwin sun_path holds 104 bytes. Nix's nested TMPDIR can exceed that
+    # before the socket's basename is added, so keep real Unix peers short.
+    workDir = createTempDir("plat8-io-", "", "/tmp")
   workDir
 
 proc reapPeer(p: Process) =
@@ -342,6 +334,38 @@ proc requireTool(name: string): string =
   p
 
 # ---------------------------------------------------------------------------
+
+suite "PLAT-8: the OS probes have positive and negative controls":
+
+  test "the socket probe sees a real pair and their closure":
+    let before = openSocketCount()
+    var sockets: array[2, cint]
+    doAssert posix.socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0
+    try:
+      ck openSocketCount() == before + 2
+    finally:
+      discard posix.close(sockets[0])
+      discard posix.close(sockets[1])
+    ck openSocketCount() == before
+
+  test "the process probe sees a live child and its reaping":
+    discard requireTool("sleep")
+    # Preserve argv[0]: findExe follows Nix's sleep -> coreutils symlink,
+    # and invoking that resolved path runs the multicall dispatcher instead.
+    let child = startProcess("sleep", args = @["300"], options = {poUsePath})
+    let pid = child.processID()
+    try:
+      ck processIsAlive(pid)
+      ck processState(pid).len > 0
+      child.kill()
+      discard child.waitForExit()
+      ck processState(pid) == ""
+      ck not processIsAlive(pid)
+    finally:
+      if child.running():
+        child.kill()
+      discard child.waitForExit()
+      child.close()
 
 suite "PLAT-8: there is no synchronous form of any I/O call":
 
@@ -757,6 +781,7 @@ suite "PLAT-8: a real local socket, with framing, against a real tool":
     let peer = startProcess(python, args = @[script, sockPath], options = {})
     try:
       ck waitUntil(fileExists(sockPath & ".ready"), 10000)
+      doAssert fileExists(sockPath & ".ready"), "Unix peer did not bind " & sockPath
 
       let g = grantsFor({capSocketLocal})
       let p = newIoSocketPlugin(sockPath, "hello framing")
@@ -784,7 +809,7 @@ suite "PLAT-8: a real local socket, with framing, against a real tool":
 suite "PLAT-8: deactivation closes every handle, measured against the OS":
 
   test "no surviving child and no leaked socket, after a mid-operation teardown":
-    if not dirExists("/proc"):
+    if not defined(macosx) and not dirExists("/proc"):
       raise newException(OSError,
         "this case measures the teardown against /proc and there is none. " &
         "Skipping would report a green run for the assertion the milestone " &
@@ -799,6 +824,7 @@ suite "PLAT-8: deactivation closes every handle, measured against the OS":
     removeFile(sockPath & ".ready")
     let peer = startProcess(python, args = @[script, sockPath], options = {})
     ck waitUntil(fileExists(sockPath & ".ready"), 10000)
+    doAssert fileExists(sockPath & ".ready"), "Unix peer did not bind " & sockPath
 
     let socketsAtStart = openSocketCount()
 
@@ -831,6 +857,7 @@ suite "PLAT-8: deactivation closes every handle, measured against the OS":
     ck child.spawnStatus == ioOk
     ck survivor.spawnStatus == ioOk
     ck sock.connectStatus == ioOk
+    doAssert sock.connectStatus == ioOk, "teardown needs a connected Unix peer"
 
     let tornPid = child.process.pid
     let survivorPid = survivor.process.pid
@@ -839,7 +866,7 @@ suite "PLAT-8: deactivation closes every handle, measured against the OS":
     ck tornPid != survivorPid
 
     # THE PROBES CAN ANSWER BOTH WAYS. Asserted before the teardown, so a
-    # `/proc` probe stuck on "gone" cannot make the case below vacuous.
+    # Process probe stuck on "gone" cannot make the case below vacuous.
     ck processIsAlive(tornPid)
     ck processIsAlive(survivorPid)
     ck openSocketCount() > socketsAtStart
@@ -866,7 +893,7 @@ suite "PLAT-8: deactivation closes every handle, measured against the OS":
     # ... and the OPERATING SYSTEM agrees. A counter that reached zero is also
     # what a table that forgot a handle looks like.
     ck waitUntil(not processIsAlive(tornPid), 5000)
-    ck not dirExists("/proc/" & $tornPid)
+    ck processState(tornPid) == ""
     ck posix.kill(Pid(tornPid), cint(0)) != 0
 
     # The control did NOT die, so the sweep released this plugin's things
@@ -1497,7 +1524,7 @@ suite "PLAT-8 F4: the unspecified address is not a remote host":
 
 suite "PLAT-8 F5: no surviving child means no surviving GRANDCHILD":
 
-  test "a child that forks is killed with its process group, asserted at /proc":
+  test "a child that forks is killed with its process group, asserted against the OS":
     # THE VERIFICATION PASS'S ARM D2, re-run. `rawKill` sent SIGKILL to the
     # child pid and nothing else — no process group, no PR_SET_PDEATHSIG — so
     # for exactly the shape `startLongRunning`'s own comment names ("a
@@ -1506,7 +1533,7 @@ suite "PLAT-8 F5: no surviving child means no surviving GRANDCHILD":
     #     after deactivate: child alive=false grandchild alive=true
     #
     # The milestone's "no surviving child" was true of one process.
-    if not dirExists("/proc"):
+    if not defined(macosx) and not dirExists("/proc"):
       raise newException(OSError,
         "this case measures the teardown against /proc and there is none. " &
         "Skipping would report a green run for the assertion the finding " &
@@ -1592,7 +1619,7 @@ suite "PLAT-8 F5: no surviving child means no surviving GRANDCHILD":
     ck waitUntil(not processIsAlive(tornPid), 5000)
     ck waitUntil(not processIsAlive(tornGrand), 5000)
     # The CHILD is ours, so `rawKill` reaped it and it is gone outright.
-    ck not dirExists("/proc/" & $tornPid)
+    ck processState(tornPid) == ""
     ck posix.kill(Pid(tornPid), cint(0)) != 0
     # THE GRANDCHILD IS NOT OURS TO REAP, and the assertion says exactly what
     # is true rather than the strongest-looking thing. It is dead — its state
@@ -1678,4 +1705,6 @@ suite "PLAT-8: the counted-assertion tally":
     # Verification-Harness-Traps §4c. Written from a run.
     # 241 before the 2026-09-09 verification repairs; 377 with the F1-F6 arms
     # and their controls.
-    check countedAssertions == 531
+    check countedAssertions == 537
+    if workDir.len > 0:
+      removeDir(workDir)

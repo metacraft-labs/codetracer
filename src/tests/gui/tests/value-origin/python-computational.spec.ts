@@ -87,10 +87,14 @@ test("e2e_origin_python_pin_to_scratchpad", async ({ ctPage }) => {
   await origin.pinChain();
 
   // ---- Assert the chain landed in the Scratchpad pane -------------------
-  // Production wiring: `ui/state.nim::wireOriginChainBridges` →
+  // Production wiring: `ui/state.nim` calls
+  // `origin_chain_bridges.wireOriginChainBridges`, whose
   // `OriginChainVM.onPinChainProc` invokes `ScratchpadVM.addChain`,
-  // which renders a `.scratchpad-chain-entry` block in the panel.
-  const scratchpadChain = ctPage.locator(".scratchpad-chain-entry");
+  // which renders the pinned chain as a `.scratchpad-chain-view` card
+  // (`isonim_scratchpad_view.ScratchpadChainRowClass`). This selector read
+  // `.scratchpad-chain-entry`, a class nothing renders, so the case could not
+  // have passed once it ran.
+  const scratchpadChain = ctPage.locator(".scratchpad-chain-view");
   await expect(scratchpadChain.first()).toBeVisible({ timeout: 15_000 });
   await expect(scratchpadChain).toHaveCount(1);
 });

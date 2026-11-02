@@ -93,8 +93,7 @@ type
     ##
     ## UD-3: the debugger's Omniscience view lays a loop's passes out **side by
     ## side**, one column each, and the slider chooses where the visible run of
-    ## columns starts (`ui/flow.renderFlow`: `if index < self.selectedIndex:
-    ## continue`). This is that column.
+    ## columns starts. This is that column.
     ##
     ## `values` may be empty, and that is a statement rather than a gap: the
     ## pass this column names never reached the line. The column is still
@@ -473,7 +472,7 @@ func reviewVisibleColumnCount*(availableWidthPx, columnWidthPx: float;
   ## UD-1 and UD-2 review, and a band that stops one column early is the fix
   ## that does not depend on a CSS ellipsis landing in the right place. The
   ## passes that do not fit are still reachable — the loop control scrolls the
-  ## run of columns, exactly as `renderFlow`'s `selectedIndex` does.
+  ## run of columns, as the debugger's `selectedIndex` does.
   ##
   ## At least one column always, even at zero width: drawing none would read as
   ## "this line never executed", which is a different and false statement, and

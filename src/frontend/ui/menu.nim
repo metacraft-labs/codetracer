@@ -1,8 +1,7 @@
 from std / dom import Document
-import std / tables
+import std / [tables, times]
 import
-  ui_imports, debug, command
-from shortcut_labels import renderChord
+  ui_imports, debug_toolbar, command, chord_display, menu_keys
 # PLAT-48: the menu's logical state is the shared Menu ViewModel's.
 import ../viewmodel/viewmodels/menu_vm
 
@@ -24,6 +23,9 @@ when defined(js):
 when defined(js):
   import isonim/web/web_renderer
   from isonim/web/dom_api import nil
+  # `renderMenuShellInto` is generic: its DSL expands here.
+  import isonim/core/[signals, computation]
+  import isonim/dsl/components
   from ../viewmodel/views/isonim_menu_shell_view import
     DebugControlsHostId, MenuNestedRecord, MenuNodeRecord, MenuNodeRecordKind,
     MenuRecordElement, MenuRecordFolder, MenuSearchResultRecord,
@@ -151,15 +153,11 @@ proc openMainMenu(self: MenuComponent) =
   self.activePathWidths = JsAssoc[int, int]{}
   self.activePathOffsets = JsAssoc[int, int]{}
 
-proc loadShortcut*(action: ClientAction, config: Config): cstring =
-  ## The chord shown beside a menu item, from the live config.
-  ##
-  ## The body moved to `ui/shortcut_labels.nim` so the debug toolbar's
-  ## tooltips render chords through the SAME code. They previously did not
-  ## render them at all — the tooltips carried the chord as a hardcoded
-  ## literal — and two implementations of "spell this binding" would have been
-  ## free to disagree about the very strings this is here to keep honest.
-  cstring(renderChord(action, config))
+proc loadShortcut*(action: ClientAction): cstring =
+  ## The chord shown beside a menu item: the one the router RUNS the item's
+  ## action with (`ui/chord_display`, PLAT-68 KL-8) — the same function the
+  ## debug toolbar's tooltips and the shortcuts dialog read.
+  displayedChord(action)
 
 proc iconClass(name: cstring): cstring =
   ui_imports.jslib.join(name.toLowerCase().split(" "), "-")
@@ -280,7 +278,7 @@ proc calculateMaxMenuElementWidth(self: MenuComponent, currentMenuNode: MenuNode
       if node.kind == MenuFolder:
         cstring""
       else:
-        loadShortcut(node.action, self.data.config)
+        loadShortcut(node.action)
     let shortcutWidth =
       Math.ceil((shortcut.len).float * FONT_UPPERCASE_WIDTH_FACTOR)
 
@@ -372,7 +370,8 @@ when defined(js):
       hidden: not node.shouldRenderMenuNode(),
       separatorAfter: node.isBeforeNextSubGroup,
       os: node.menuOs,
-      role: (if node.role.isNil: "" else: $node.role))
+      role: (if node.role.isNil: "" else: $node.role),
+      mnemonic: node.mnemonic)
     for child in menuNodeChildren(node):
       result.children.add menuItemOf(child)
 
@@ -389,7 +388,7 @@ when defined(js):
       if it.action.len > 0 and not chords.hasKey(it.action):
         let node = self.nodeAtPath(p)
         if not node.isNil:
-          let chord = $loadShortcut(node.action, self.data.config)
+          let chord = $loadShortcut(node.action)
           if chord.len > 0:
             chords[it.action] = chord
     self.vm.setShortcuts(chords)
@@ -403,7 +402,7 @@ when defined(js):
     let nodeKind =
       if node.kind == MenuElement: MenuRecordElement else: MenuRecordFolder
     let shortcut =
-      if node.kind == MenuElement: $loadShortcut(node.action, self.data.config)
+      if node.kind == MenuElement: $loadShortcut(node.action)
       else: ""
     let recordNameClass =
       if node.kind == MenuElement:
@@ -427,6 +426,7 @@ when defined(js):
       path: path,
       nameWidth: folderItemWidth,
       beforeNextSubGroup: node.isBeforeNextSubGroup,
+      mnemonic: (if node.mnemonic == '\0': "" else: $node.mnemonic),
       children: @[])
     if node.kind == MenuFolder:
       for childIndex, child in menuNodeChildren(node):
@@ -454,11 +454,17 @@ when defined(js):
 
   proc nestedStyleString(self: MenuComponent; value: int; depth: int;
                          separators: int; width: int): string =
-    var left = cast[int](jq("#menu-main").toJs.clientWidth)
+    # A level not in the DOM yet (a folder opened from the keyboard in the
+    # render that also draws its parent) measures 0; the next render
+    # places it.
+    proc widthOf(selector: cstring): int =
+      let el = jq(selector)
+      if el.isNil: 0 else: cast[int](el.toJs.clientWidth)
+    var left = widthOf(cstring"#menu-main")
 
     if depth != 1:
       for i in 1..<depth:
-        left += cast[int](jq(cstring(fmt"#menu-nested-elements-{i}")).toJs.clientWidth)
+        left += widthOf(cstring(fmt"#menu-nested-elements-{i}"))
 
     # Read the actual rendered item height so the submenu position scales
     # correctly with MENU_FONT_SIZE (ct-menu-item uses em-based min-height).
@@ -595,6 +601,66 @@ when defined(js):
 
   proc setWindowProperty(name: cstring; value: JsObject) {.importjs: "window[#] = #".}
 
+  proc focusInTextField(): bool {.importjs: """(function () {
+    var a = document.activeElement;
+    return !!a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' ||
+                   a.isContentEditable);
+  })()""".}
+
+  proc menuOperation(self: MenuComponent; operation, argument: string) =
+    ## PLAT-68 (CUA-Keymap.md §3.8): a menu key. `menu.open-folder(x)` opens
+    ## folder x; `menu.open` and `menu.toggle` open the menu, highlighted for
+    ## the keyboard, or close it when it is open.
+    if operation == "menu.open-folder":
+      if not self.vm.isOpen:
+        # The top level drawn first: the folder's level is placed beside it.
+        self.openMainMenu()
+        self.requestMenuRender()
+      let i = self.vm.folderIndexOf(argument)
+      if i >= 0:
+        self.vm.openFolder(i)
+    elif self.vm.isOpen:
+      self.closeMenu()
+    else:
+      self.openMainMenu()
+      self.vm.open(keyboard = true)
+    self.requestMenuRender()
+    self.data.redraw()
+
+  proc menuKey(self: MenuComponent; name: string): bool =
+    ## The open menu's own keys (the terminal's and GPUI's alike): `Up` /
+    ## `Down` within the level, `Right` / `Enter` into a folder or run an
+    ## item, `Left` out, `Esc` out and closed at the top, a letter
+    ## type-to-select. A field in the menu (its search) keeps its letters and
+    ## its `Left` / `Right`.
+    let field = focusInTextField()
+    case name
+    of "Up":
+      if self.vm.searchResults.len > 0: self.vm.moveSearch(-1)
+      else: self.vm.moveHighlight(-1)
+    of "Down":
+      if self.vm.searchResults.len > 0: self.vm.moveSearch(1)
+      else: self.vm.moveHighlight(1)
+    of "Right":
+      if field: return false
+      discard self.vm.enterFolder()
+    of "Left":
+      if field: return false
+      discard self.vm.leaveFolder()
+    of "Enter":
+      self.enterElement()
+    of "Esc":
+      self.vm.escape()
+      if not self.vm.isOpen:
+        self.closeMenu()
+    else:
+      if field or name.len != 1:
+        return false
+      self.vm.typeToSelect(name, int64(epochTime() * 1000))
+    self.requestMenuRender()
+    self.data.redraw()
+    true
+
   proc exposeMenuViewModel(self: MenuComponent) =
     ## PLAT-48's VERIFICATION-GATE SEAM: `window.__ctMenuVM` reads and WRITES
     ## the Menu ViewModel this component renders, so a test can change the
@@ -603,6 +669,11 @@ when defined(js):
     ## that write would not reach the screen — which is exactly what the
     ## gate's mutation arm checks.
     let component = self
+    menuAccess = MenuAccess(
+      isOpen: proc(): bool = component.vm.isOpen,
+      key: proc(name: string): bool = component.menuKey(name),
+      operation: proc(operation, argument: string) =
+        component.menuOperation(operation, argument))
     setWindowProperty(cstring"__ctMenuVM", js{
       state: proc(): cstring =
         cstring("{\"isOpen\":" & $component.vm.isOpen & ",\"path\":[" &
@@ -674,10 +745,10 @@ when defined(js):
       ensureMenuDismissWiring(self)
       requestSessionTabsRenderSoon()
       if not self.data.startOptions.shellUi:
-        self.debug.requestDebugShellRender()
+        debug_toolbar.requestDebugShellRender()
         if not self.data.ui.commandPalette.isNil:
           self.data.ui.commandPalette.requestCommandPalettePanelRefresh()
-        self.debug.requestDebugControlsRender()
+        debug_toolbar.ensureDebugToolbar()
       return
 
     let callbacks = MenuShellCallbacks(
@@ -707,14 +778,14 @@ when defined(js):
         self.data.ipc.send("CODETRACER::close-app"))
 
     let r = WebRenderer()
-    renderMenuShellInto(r, container, model, callbacks)
+    renderMenuShellInto[WebRenderer, dom_api.Element](r, container, model, callbacks)
     menuShellGate.noteRendered(signature)
     requestSessionTabsRenderSoon()
     if not self.data.startOptions.shellUi:
-      self.debug.requestDebugShellRender()
+      debug_toolbar.requestDebugShellRender()
       if not self.data.ui.commandPalette.isNil:
         self.data.ui.commandPalette.requestCommandPalettePanelRefresh()
-      self.debug.requestDebugControlsRender()
+      debug_toolbar.ensureDebugToolbar()
     wireMenuKeyboard(container, self)
     if self.vm.keyNavigation:
       focusNavigationSoon()

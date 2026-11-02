@@ -31,6 +31,13 @@
 # slack, and every arm below would still look like it was working. A suite whose
 # subject is empty grades itself.
 #
+# ARM 5 IS NOT ABOUT THE RATCHET, AND HAS ITS OWN TREE (added 2026-10-22).
+# It pins what the guard COUNTS on a declaration line, because the count the
+# ratchet compares is only as good as that rule: skipping whole declaration
+# lines put 89 false findings into the 1298 measured at `d46def9e3`. It uses a
+# second synthetic tree so the four-finding fixture above, and the CONTROL that
+# asserts its count, stay exactly what they were.
+#
 # Run: bash ci/test/reachability-ratchet-test.sh
 
 set -uo pipefail
@@ -53,10 +60,19 @@ bad() {
 work="$(mktemp -d)"
 trap 'rm -rf "${work}"' EXIT
 
-# Four exported declarations, none of which another module reads. `beta` imports
-# `alpha` and calls one of them, which is deliberately NOT enough: `betaEntry` is
-# itself unreached, so the guard counts all four. The number is what matters, and
-# it is asserted below rather than assumed.
+# Four exported declarations that no other module reads: `nobodyReachesMe`,
+# `UnreadValue` and `alsoUnread` in `alpha`, and `betaEntry` in `beta`. The
+# number is what matters, and it is asserted below rather than assumed.
+#
+# `reachedByBeta` is NOT one of them, and until 2026-10-22 this fixture said it
+# was. The comment here read "`beta` ... calls one of them, which is
+# deliberately NOT enough: `betaEntry` is itself unreached, so the guard counts
+# all four." That is transitivity, which the guard does not implement (caveat 2
+# in its header), and the four was only ever produced by the defect ARM 5 pins:
+# `betaEntry`'s call sits on its own one-line declaration, and the guard skipped
+# every identifier on a declaration line. With that corrected the call counts,
+# as a cross-module call should, so `alsoUnread` was added to keep the count —
+# and every arm's number — at four for a reason that is true.
 mkdir -p "${work}/src/frontend"
 cat >"${work}/src/frontend/alpha.nim" <<'NIM'
 import beta
@@ -64,6 +80,7 @@ import beta
 proc reachedByBeta*(): int = 1
 proc nobodyReachesMe*(): int = 2
 const UnreadValue* = 7
+proc alsoUnread*(): int = 3
 NIM
 cat >"${work}/src/frontend/beta.nim" <<'NIM'
 import alpha
@@ -71,9 +88,17 @@ import alpha
 proc betaEntry*(): int = reachedByBeta()
 NIM
 
-run_guard() { python3 "${guard}" --repo-root "${work}" "$@" 2>&1; }
+# THE FIXTURE'S OWN ALLOW-LIST, EMPTY. Without `--allowlist` the guard reads
+# the repository's, whose entries name symbols this tree does not declare, so
+# every one of them is reported STALE and every arm exits 2 for a reason that
+# has nothing to do with the ratchet (it did, the day the list gained its first
+# entries: 2026-10-22).
+fixture_allowlist="${work}/empty-allowlist.txt"
+: >"${fixture_allowlist}"
 
-echo "=== reachability ratchet contract — six arms ==="
+run_guard() { python3 "${guard}" --repo-root "${work}" --allowlist "${fixture_allowlist}" "$@" 2>&1; }
+
+echo "=== reachability ratchet contract — seven arms ==="
 echo
 
 # ---------------------------------------------------------------------------
@@ -185,6 +210,107 @@ else
 	printf '%s\n' "${out}" | tail -3 | sed 's/^/           /'
 fi
 
+# ---------------------------------------------------------------------------
+# ARM 5 — A DECLARATION LINE STILL USES WHAT IT NAMES (added 2026-10-22).
+#
+# THE DEFECT. `mentions_in` skipped every identifier on a declaration line, so a
+# symbol would not count as reaching itself. That also dropped everything else
+# on the line: the types in a one-line signature, a const's initializer, a
+# one-line routine's whole body. `CallRowPitch* = CallRowToggleEmRatio *
+# float(CodeFontPx)` in `gpui/app/leaves.nim` therefore did not reach
+# `gpui/chrome.CodeFontPx`, which it plainly reads. Measured at `d46def9e3` as
+# a diff of two runs, one per rule: 89 false findings (64 types, 21 values, 4
+# routines) — 13 now read from another module, 76 now in bucket C (read only
+# on their own module's one-line declarations, not counted) — and the ratchet
+# went red over them. The same signature wrapped
+# over two lines DID count, because only the first line is a declaration line
+# — so the answer depended on where a formatter broke the line.
+#
+# THE TREE. `alpha` exports `Seed` and `Frame`; `beta` reads each of them only
+# on a ONE-LINE declaration of its own (`Derived`'s initializer, `make`'s
+# return type) and nowhere else. Under the old rule `Seed` and `Frame` are
+# findings; under the corrected one they are not. That is the check that
+# FAILED against the unfixed guard (`git show d46def9e3:ci/test/
+# frontend-reachability-guard.py`) and passes now.
+#
+# THE TWO CONTROLS, without which the arm could pass vacuously:
+#   * POSITIVE: `loner` is exported and named by nothing. A guard that had
+#     stopped reporting anything would pass the "Seed is not a finding" check,
+#     so `loner` must still be one.
+#   * SELF-REFERENCE: `selfOnly` names itself on its own declaration line and
+#     nowhere else. The exclusion that was too wide must still exclude THAT,
+#     or a symbol reaches itself. It must land in bucket "nothing" — if its own
+#     line counted, it would be "own-module-only" instead, which is not counted
+#     and would hide it.
+# `Derived` and `make` are themselves unreached, so the counted total is
+# exactly four, and that is asserted too.
+# ---------------------------------------------------------------------------
+decl_tree="${work}/decl-line"
+mkdir -p "${decl_tree}/src/frontend"
+cat >"${decl_tree}/src/frontend/alpha.nim" <<'NIM'
+const Seed* = 1
+type Frame* = object
+proc loner*(): int = 3
+proc selfOnly*(n: int): int = (if n <= 0: 0 else: selfOnly(n - 1))
+NIM
+cat >"${decl_tree}/src/frontend/beta.nim" <<'NIM'
+import alpha
+
+const Derived* = Seed + 1
+proc make*(): Frame = discard
+NIM
+
+decl_json="${work}/decl-line.json"
+decl_out="$(python3 "${guard}" --repo-root "${decl_tree}" \
+	--allowlist "${fixture_allowlist}" --json "${decl_json}" 2>&1)"
+decl_rc=$?
+# `name:bucket` per counted finding, sorted: the guard's own JSON, not its prose.
+decl_findings="$(python3 -c '
+import json, sys
+data = json.load(open(sys.argv[1]))
+print(" ".join(sorted(f["name"] + ":" + f["bucket"] for f in data["findings"])))
+' "${decl_json}" 2>&1)"
+
+if [ "${decl_rc}" -eq 0 ] && [ -n "${decl_findings}" ]; then
+	ok "5/CONTROL: the declaration-line tree ran and produced findings (${decl_findings})"
+else
+	bad "5/CONTROL: the declaration-line tree did not run cleanly (rc=${decl_rc})"
+	printf '%s\n' "${decl_out}" | head -8 | sed 's/^/           /'
+fi
+
+case " ${decl_findings} " in
+*" Seed:"* | *" Frame:"*)
+	bad "5a/an export read only on another module's ONE-LINE declaration is reported as unreached (${decl_findings})"
+	;;
+*)
+	ok "5a/a const initializer and a one-line return type reach what they name: Seed and Frame are not findings"
+	;;
+esac
+
+case " ${decl_findings} " in
+*" loner:nothing "*)
+	ok "5b/POSITIVE CONTROL: an export nothing names is still a finding"
+	;;
+*)
+	bad "5b/POSITIVE CONTROL: \`loner\` is not reported in bucket nothing (${decl_findings})"
+	;;
+esac
+
+case " ${decl_findings} " in
+*" selfOnly:nothing "*)
+	ok "5c/a name on its own declaration line does not reach itself"
+	;;
+*)
+	bad "5c/\`selfOnly\` is not in bucket nothing, so its own declaration line counted as a reader (${decl_findings})"
+	;;
+esac
+
+if [ "${decl_findings}" = "Derived:nothing loner:nothing make:nothing selfOnly:nothing" ]; then
+	ok "5d/the tree's counted findings are exactly Derived, loner, make and selfOnly"
+else
+	bad "5d/counted findings were '${decl_findings}', expected 'Derived:nothing loner:nothing make:nothing selfOnly:nothing'"
+fi
+
 echo
 echo "${checks} check(s), ${failures} failure(s)"
 if [ "${failures}" -gt 0 ]; then
@@ -192,5 +318,6 @@ if [ "${failures}" -gt 0 ]; then
 	exit 1
 fi
 echo "  The ratchet passes at its number and BELOW it, fails above it, and names"
-echo "  the value to lower the ceiling to when the tree has got better."
+echo "  the value to lower the ceiling to when the tree has got better. And the"
+echo "  count it compares reads a declaration line's uses, not only its name."
 echo "RESULT: OK"

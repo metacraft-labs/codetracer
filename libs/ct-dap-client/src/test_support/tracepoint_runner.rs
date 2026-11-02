@@ -131,6 +131,8 @@ impl TracepointTestRunner {
                 id: 1,
             },
             stop_after: -1,
+            // The results are compared value by value.
+            with_locals: true,
         };
 
         // 3. Run tracepoints

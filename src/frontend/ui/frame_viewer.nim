@@ -5,9 +5,8 @@
 ## and embeds the rendered frame canvas directly.  What survives in this file
 ## is the bootstrap for the singleton ``FrameViewerVM`` instance — the same
 ## VM the Video Player wraps — together with the JS test hooks the Playwright
-## suite uses to drive synthetic GEID transitions through that VM.  Pane
-## registration (``register*``, ``tryMountIsoNimFrameViewerPanel``) lived here
-## historically and is intentionally absent now.
+## suite uses to drive synthetic GEID transitions through that VM.  It
+## registers no pane.
 
 import
   ui_imports,

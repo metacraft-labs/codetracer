@@ -27,7 +27,7 @@ const repoRoot = path.resolve(__dirname, "../../../..");
  */
 export function findJsRecorder(): string {
   const fromEnv = process.env.CODETRACER_JS_RECORDER_PATH;
-  if (fromEnv && fs.existsSync(fromEnv)) return fromEnv;
+  if (fromEnv && fs.statSync(fromEnv, { throwIfNoEntry: false })?.isFile()) return fromEnv;
   const candidate = path.resolve(
     repoRoot,
     "..",

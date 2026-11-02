@@ -81,31 +81,22 @@
  * for recorders it cannot assume.
  */
 
-import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { test, expect } from "../../lib/fixtures";
 import type { Page } from "@playwright/test";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { retry } from "../../lib/retry-helpers";
+import { hasNargo } from "../../lib/noir-recorder";
 import { OmniscientLoopControls } from "../../page-objects/panes/editor/omniscient-loop-controls";
 
 const repoRoot = path.resolve(__dirname, "..", "..", "..", "..", "..");
 const fixtureDir = path.join(repoRoot, "test-programs", "noir_flow_loop");
 
 /**
- * Whether `nargo` — the Noir recorder `ct record` shells out to — is on PATH.
- * Resolved once at load time so the skip reason is decided before any Electron
- * process is started.
+ * Whether `nargo` is on PATH, resolved once at load time so the skip reason is
+ * decided before any Electron process is started.
  */
-function hasNargo(): boolean {
-  const pathEntries = (process.env.PATH ?? "").split(path.delimiter);
-  const names = process.platform === "win32" ? ["nargo.exe", "nargo"] : ["nargo"];
-  return pathEntries.some((dir) =>
-    dir.length > 0 && names.some((name) => fs.existsSync(path.join(dir, name))),
-  );
-}
-
 const nargoAvailable = hasNargo();
 
 /** Line of `for i in 0..10 {` in test-programs/noir_flow_loop/src/main.nr. */

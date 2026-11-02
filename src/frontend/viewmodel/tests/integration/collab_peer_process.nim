@@ -59,7 +59,6 @@ proc projectedSignalsJson(peer: PeerRuntime): JsonNode =
         newJNull()
     ),
     "calltraceExpanded": calltraceExpanded,
-    "stateTab": $peer.session.stateVM.activeTab.val,
     "stateSelectedPath": peer.session.stateVM.selectedPath.val,
     "stateExpanded": stateExpanded,
     "watches": peer.session.stateVM.watchExpressions.val,

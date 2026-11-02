@@ -1,0 +1,18 @@
+[package]
+name = "ct-open-beneath"
+version = "0.1.0"
+edition = "2021"
+description = "Open a file beneath a directory without following a symlink in any component below it."
+license = "MIT OR Apache-2.0"
+
+# A LEAF crate, deliberately.  Both `src/backend-manager` (the MCP server's
+# `read_source_file`) and `src/db-backend` (the replay server's reads of a
+# recording's own source copies) open files a recording carries through it,
+# so the two read sides apply one rule and cannot drift.  It must therefore
+# never depend on either of them.
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[lints.clippy]
+all = "warn"

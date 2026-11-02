@@ -1,6 +1,6 @@
 import
   std / [ async, jsffi, json, strutils, strformat, sequtils, jsconsole, os ],
-  electron_vars, config,
+  electron_vars, config, tab_answers,
   ../[ types, lang ],
   ../lib/[ jslib, electron_lib ],
   ../../common/[ ct_logging, trace_source_paths ]
@@ -74,11 +74,25 @@ proc shouldSkipIndexedDirectory(path: cstring): bool =
            "result", "dist", "build", "build-debug", "src/build-debug",
            "test-results", "test-diagnostics", ".next", ".cache", "nimcache"]
 
-proc editFilesystemDepthLimit(selfContained: bool): int =
-  if selfContained:
-    int.high
-  else:
-    2
+const FilesystemLoadDepth = 1
+  ## **How deep one load of the Files pane reads**: the node a load starts
+  ## at (depth 0) is opened and its entries listed; every folder among them
+  ## (depth 1) arrives collapsed, with a single "Loading..." child, and is
+  ## read only when it is expanded (``load-path-content``, answered by
+  ## ``onLoadPathContent``).
+  ##
+  ## One rule for every tree: a root load (``loadFilesystem``) and a lazy
+  ## load (``loadPathContentPartially``), a trace's ``files/`` payload and
+  ## the live disk.  It used to be two — no limit at all for a payload and
+  ## two levels for the live disk — so the cost of opening a recording grew
+  ## with the size of its folders, and a payload or an enclosing checkout
+  ## large enough froze the window (codetracer-pm issue
+  ## ``2026-10-21-filesystem-pane-renders-the-whole-enclosing-checkout-
+  ## expanded-and-freezes-the-window.md``; ``Viewport-Driven-Loading.md``
+  ## § V5).  Now a load lists one folder: one ``readdir`` of it and one
+  ## ``lstat`` per entry, plus one ``readdir`` per subfolder, kept only to
+  ## leave an empty folder without a "Loading..." child.  Nothing below a
+  ## subfolder is read, so no folder's depth decides what a load costs.
 
 proc loadFile(
     path: cstring,
@@ -87,7 +101,31 @@ proc loadFile(
     parentIndices: seq[int],
     traceFilesPath: cstring,
     selfContained: bool,
-    readPathOverride: cstring = cstring""): Future[CodetracerFile] {.async.} =
+    readPathOverride: cstring = cstring"",
+    overlayPayloadTopLevel: bool = false): Future[CodetracerFile] {.async.} =
+  ## Load the Files-pane node for ``path`` (its display path) and, when it
+  ## is a folder at a depth below ``FilesystemLoadDepth``, its entries.
+  ##
+  ## Where it is read:
+  ## - ``readPathOverride`` when set: the exact place to read, used for the
+  ##   payload's top-level entries overlaid into a root and for a lazy load
+  ##   that knows its node's payload location (``payloadPath``);
+  ## - otherwise ``path`` itself on the live disk (``selfContained`` false),
+  ##   or ``files/<path without its root>`` in the trace payload, falling
+  ##   back to ``path`` on the live disk when the payload lacks it.
+  ##
+  ## ``index`` is the node's POSITION among its parent's children and
+  ## ``parentIndices`` the positions leading to that parent:
+  ## ``ui_js.onUpdatePathContent`` walks them to find the node a lazy load
+  ## answers.  An entry that yields no node (a skipped folder, a failed
+  ## ``lstat``) therefore does not use up an index.
+  ##
+  ## ``overlayPayloadTopLevel`` is set by a ROOT load only (``loadRoot``):
+  ## it presents the payload's top-level entries inside an absolute
+  ## recorded folder (see the overlay block below).  A lazy load never
+  ## overlays — the folder it lists already holds what the root load put in
+  ## the tree, and an overlaid copy would duplicate the payload's top level
+  ## into every folder the user opens.
   var data: js
   var res: CodetracerFile
 
@@ -104,6 +142,16 @@ proc loadFile(
       # instead of just returning the absolute path.
       nodePath.join(traceFilesPath, stripPathRoot(path))
 
+  # Whether this node is read from the trace payload.  It stops being so
+  # when the payload lacks ``path`` and the loader falls back to the live
+  # disk below.  From then on the live-filesystem rules apply to the node
+  # and everything under it: the skipped directories (``.git``,
+  # ``node_modules``, build output), no payload overlay and no payload
+  # location.  Without them a fallback onto a repository root walked every
+  # file in the repository before the tree was sent (GitHub #785: 35 764
+  # rows for a Noir program inside the codetracer checkout).
+  var readsPayload = selfContained
+
   try:
     data = await cast[Future[js]](fsAsync.lstat(realPath))
   except:
@@ -111,6 +159,7 @@ proc loadFile(
       try:
         data = await cast[Future[js]](fsAsync.lstat(path))
         realPath = path
+        readsPayload = false
       except:
         errorPrint "lstat error: ", getCurrentExceptionMsg()
         return res
@@ -132,65 +181,82 @@ proc loadFile(
   if name.len == 0:
     name = strippedPath
 
+  # Where in the payload this node was read, relative to ``files/``; ""
+  # for a node read from the live disk.  The renderer sends it back when it
+  # asks for the node's entries, and ``loadPathContentPartially`` reads
+  # from there again — the display path cannot be mapped back to it for a
+  # folder the overlay below placed under an absolute root.
+  let payloadPath =
+    if readsPayload and traceFilesPath.len > 0:
+      cstring(payloadPathOf($nodePath.join(traceFilesPath),
+                            $nodePath.join(realPath)))
+    else:
+      cstring""
+
   if cast[bool](data.isDirectory()):
-    if not selfContained and shouldSkipIndexedDirectory(realPath):
+    if not readsPayload and shouldSkipIndexedDirectory(realPath):
       return res
 
     try:
       # returning just the filenames, not full paths!
       let files = await cast[Future[seq[cstring]]](fsAsync.readdir(realPath))
-      let depthLimit = editFilesystemDepthLimit(selfContained)
+      let listed = depth < FilesystemLoadDepth
       res = CodetracerFile(
         text: name,
         children: @[],
-        state: js{opened: depth < depthLimit},
+        state: js{opened: listed},
         index: index,
         parentIndices: parentIndices,
-        original: CodetracerFileData(text: name, path: path))
+        original: CodetracerFileData(text: name, path: path,
+                                     payloadPath: payloadPath))
 
-      if depth >= depthLimit:
-        res.state.opened = false
+      if not listed:
+        # A folder below the listed level: one placeholder child, which is
+        # what makes the renderer draw it as an expandable folder and what
+        # ``ui/filesystem.loadFolderContentIfNeeded`` keys on to ask for
+        # its entries.  An empty folder gets none — there is nothing to load.
         if files.len > 0:
           res.children.add(CodetracerFile(text: "Loading..."))
         return res
 
-      if files.len > 0:
-        var newParentIndices = parentIndices
-        newParentIndices.add(index)
-        for fileIndex, file in files:
-          var child = await loadFile(
-            nodePath.join(path, file),
-            depth + 1,
-            fileIndex,
-            newParentIndices,
-            traceFilesPath,
-            selfContained,
-            if readPathOverride.len > 0:
-              nodePath.join(readPathOverride, file)
-            else:
-              cstring"")
-          if not child.isNil:
-            res.children.add(child)
+      var childParentIndices = parentIndices
+      childParentIndices.add(index)
+      for file in files:
+        var child = await loadFile(
+          nodePath.join(path, file),
+          depth + 1,
+          res.children.len,
+          childParentIndices,
+          traceFilesPath,
+          readsPayload,
+          if readPathOverride.len > 0:
+            nodePath.join(readPathOverride, file)
+          else:
+            cstring"")
+        if not child.isNil:
+          res.children.add(child)
 
-      if selfContained and readPathOverride.len == 0 and
+      if overlayPayloadTopLevel and readsPayload and
+          readPathOverride.len == 0 and
           traceFilesPath.len > 0 and isAbsoluteTraceSourcePath($path):
         # Portable self-contained traces can store source files relative to
         # the recorded workdir (`files/src/main.nr`) while project metadata
         # may still be mirrored under the root-stripped absolute path
         # (`files/home/user/project/Nargo.toml`).  Present both as one tree
-        # rooted at the recorded source folder.
+        # rooted at the recorded source folder.  Each overlaid entry is read
+        # through its own ``readPathOverride`` and so carries a
+        # ``payloadPath`` naming the top-level entry (``src``), which is
+        # what lets its later lazy load find it.
         let skippedRoot = firstPathSegment(stripTraceSourceRoot($path))
         let rootFiles = await cast[Future[seq[cstring]]](fsAsync.readdir(traceFilesPath))
-        var overlayParentIndices = parentIndices
-        overlayParentIndices.add(index)
-        for rootIndex, file in rootFiles:
+        for file in rootFiles:
           if ($file).len == 0 or $file == skippedRoot or files.containsPathName(file):
             continue
           var child = await loadFile(
             nodePath.join(path, file),
             depth + 1,
-            files.len + rootIndex,
-            overlayParentIndices,
+            res.children.len,
+            childParentIndices,
             traceFilesPath,
             selfContained,
             nodePath.join(traceFilesPath, file))
@@ -202,7 +268,10 @@ proc loadFile(
         text: name,
         children: @[],
         state: js{opened: true},
-        original: CodetracerFileData(text: name, path: path))
+        index: index,
+        parentIndices: parentIndices,
+        original: CodetracerFileData(text: name, path: path,
+                                     payloadPath: payloadPath))
 
   elif cast[bool](data.isFile()) or cast[bool](data.isSymbolicLink()):
     let icon = await fileIcons.getClass(name, js{})
@@ -212,23 +281,70 @@ proc loadFile(
       icon: $icon,
       index: index,
       parentIndices: parentIndices,
-      original: CodetracerFileData(text: name, path: path))
+      original: CodetracerFileData(text: name, path: path,
+                                   payloadPath: payloadPath))
 
   else:
     res = CodetracerFile(
       text: name,
       children: @[],
       state: js{opened: true},
-      original: CodetracerFileData(text: name, path: path))
+      index: index,
+      parentIndices: parentIndices,
+      original: CodetracerFileData(text: name, path: path,
+                                   payloadPath: payloadPath))
 
   res.toJs.path = path
 
   return res
 
 
-proc loadPathContentPartially*(path: cstring, index: int, parentIndices: seq[int], traceFilesPath: cstring, selfContained: bool): Future[CodetracerFile] {.async.} =
-  let depth = 0
-  return await loadFile(path, depth, index, parentIndices, traceFilesPath, selfContained)
+proc loadPathContentPartially*(
+    path: cstring,
+    index: int,
+    parentIndices: seq[int],
+    traceFilesPath: cstring,
+    selfContained: bool,
+    payloadPath: cstring = cstring""): Future[CodetracerFile] {.async.} =
+  ## **A lazy load**: the entries of the folder at ``path``, one level deep
+  ## (``FilesystemLoadDepth``), for the "Loading..." stub the renderer
+  ## asked about (``onLoadPathContent``).  ``index`` / ``parentIndices``
+  ## are the stub's, so the answer takes its place.
+  ##
+  ## ``payloadPath`` is the stub's own payload location
+  ## (``CodetracerFileData.payloadPath``), as the renderer sent it back.
+  ## For a self-contained trace it is where the folder is read — the place
+  ## the root load read it, which for an overlaid folder (``files/src``
+  ## shown under the absolute recorded folder) is not derivable from
+  ## ``path``.  It is followed only inside ``traceFilesPath``
+  ## (``payloadReadPathFor`` refuses an absolute value or one that leaves
+  ## ``files/``); a refused or empty value falls back to resolving ``path``
+  ## as before, payload first, then the live disk.
+  ##
+  ## A lazy load never overlays the payload's top level: only a root load
+  ## does (``loadRoot``).
+  var readPathOverride = cstring""
+  if selfContained and not payloadPath.isNil and payloadPath.len > 0 and
+      not traceFilesPath.isNil and traceFilesPath.len > 0:
+    let resolved = payloadReadPathFor(
+      $nodePath.join(traceFilesPath), $payloadPath)
+    if resolved.len > 0:
+      readPathOverride = nodePath.join(cstring(resolved))
+    else:
+      warnPrint "load-path-content: refusing payload location '", payloadPath,
+        "' for ", path, ": it is not inside ", traceFilesPath
+  return await loadFile(path, 0, index, parentIndices, traceFilesPath,
+                        selfContained, readPathOverride,
+                        overlayPayloadTopLevel = false)
+
+proc loadRoot(path: cstring, index: int, traceFilesPath: cstring,
+              selfContained: bool): Future[CodetracerFile] {.async.} =
+  ## **A root load**: one source folder of the Files pane, one level deep,
+  ## with the payload's top level overlaid into it when it is an absolute
+  ## recorded folder read from a portable payload (see ``loadFile``).
+  ## The only caller that asks for the overlay.
+  return await loadFile(path, 0, index, @[], traceFilesPath, selfContained,
+                        overlayPayloadTopLevel = true)
 
 proc loadFilesystem*(paths: seq[cstring], traceFilesPath: cstring, selfContained: bool): Future[CodetracerFile] {.async.}=
   # not a real file, but artificial(root):
@@ -244,9 +360,10 @@ proc loadFilesystem*(paths: seq[cstring], traceFilesPath: cstring, selfContained
       text: cstring"source folders",
       path: cstring""))
 
-  var parentIndices: seq[int] = @[]
-  for index, path in paths:
-    let file = await loadPathContentPartially(path, index, parentIndices, traceFilesPath, selfContained)
+  for path in paths:
+    # Indexed by position, as in ``loadFile``: a root that yields nothing
+    # does not shift the ones after it.
+    let file = await loadRoot(path, folderGroup.children.len, traceFilesPath, selfContained)
     if not file.isNil:
       folderGroup.children.add(file)
 
@@ -264,9 +381,8 @@ proc loadFilesystemWithCategory*(categoryName: cstring, paths: seq[cstring], tra
       text: categoryName,
       path: cstring""))
 
-  var parentIndices: seq[int] = @[]
-  for index, path in paths:
-    let file = await loadPathContentPartially(path, index, parentIndices, traceFilesPath, selfContained)
+  for path in paths:
+    let file = await loadRoot(path, folderGroup.children.len, traceFilesPath, selfContained)
     if not file.isNil:
       folderGroup.children.add(file)
 
@@ -298,11 +414,12 @@ proc onSaveFile*(sender: js, response: jsobject(name=cstring, raw=cstring, saveA
     suppressSelfWrite(response.name)
     discard await writeFileAsync(fsAsync, response.name, response.raw)
     suppressSelfWrite(response.name)
-    mainWindow.webContents.send "CODETRACER::saved-file", js{name: response.name}
+    mainWindow.webContents.send "CODETRACER::saved-file",
+      answerFor(response.toJs, js{name: response.name})
   except:
     errorPrint "save-file error: ", getCurrentExceptionMsg()
     mainWindow.webContents.send "CODETRACER::save-file-error",
-      js{name: response.name, error: cstring(getCurrentExceptionMsg())}
+      answerFor(response.toJs, js{name: response.name, error: cstring(getCurrentExceptionMsg())})
 
 proc untitledSaveSuggestion*(bufferName: string): string =
   ## The name to pre-fill the save dialog with, for a buffer that has no path.
@@ -363,17 +480,18 @@ proc onSaveUntitled*(sender: js, response: jsobject(name=cstring, raw=cstring, s
         # would leave that request armed for ever, and would leave the buffer
         # dirty with no account of why.
         mainWindow.webContents.send "CODETRACER::save-file-error",
-          js{name: response.name, error: cstring"saving was cancelled"}
+          answerFor(response.toJs, js{name: response.name, error: cstring"saving was cancelled"})
         return
       destination = chosen
     suppressSelfWrite(destination)
     discard await writeFileAsync(fsAsync, destination, response.raw)
     suppressSelfWrite(destination)
-    mainWindow.webContents.send "CODETRACER::saved-file", js{name: response.name}
+    mainWindow.webContents.send "CODETRACER::saved-file",
+      answerFor(response.toJs, js{name: response.name})
   except:
     errorPrint "save-untitled error: ", getCurrentExceptionMsg()
     mainWindow.webContents.send "CODETRACER::save-file-error",
-      js{name: response.name, error: cstring(getCurrentExceptionMsg())}
+      answerFor(response.toJs, js{name: response.name, error: cstring(getCurrentExceptionMsg())})
 
 proc onNoReloadFile*(sender: js, response: jsobject(path=cstring)) =
   if data.tabs.hasKey(response.path):
@@ -429,12 +547,12 @@ proc onPathValidation*(
       message = cstring("Path does not exist.")
 
   mainWindow.webContents.send "CODETRACER::path-validated",
-    js{
+    answerFor(response.toJs, js{
       execPath: response.path,
       isValid: isValid,
       fieldName: response.fieldName,
       message: message
-    }
+    })
 
 
 proc onLoadPathForRecord*(sender: js, response: jsobject(fieldName=cstring)) {.async.} =
@@ -455,7 +573,7 @@ proc onLoadPathForRecord*(sender: js, response: jsobject(fieldName=cstring)) {.a
   let selection = await selectFileOrFolder(options)
 
   mainWindow.webContents.send "CODETRACER::record-path",
-    js{ execPath: selection, fieldName: response.fieldName }
+    answerFor(response.toJs, js{ execPath: selection, fieldName: response.fieldName })
 
 
 proc onChooseDir*(sender: js, response: jsobject(fieldName=cstring)) {.async.} =
@@ -463,7 +581,7 @@ proc onChooseDir*(sender: js, response: jsobject(fieldName=cstring)) {.async.} =
   if selection != "":
     let dirExists = await pathExists(selection)
     mainWindow.webContents.send "CODETRACER::record-path",
-      js{execPath: selection, fieldName: response.fieldName}
+      answerFor(response.toJs, js{execPath: selection, fieldName: response.fieldName})
 
 proc onAcpPickFiles*(sender: js,
                      response: jsobject(kind=cstring)) {.async.} =
@@ -499,17 +617,27 @@ proc onAcpPickFiles*(sender: js,
       for p in filePaths:
         selections.add(p)
   mainWindow.webContents.send "CODETRACER::acp-files-selected",
-    js{paths: selections.toJs}
+    answerFor(response.toJs, js{paths: selections.toJs})
 
 proc onLoadPathContent*(
   sender: js,
   response: jsobject(
     path=cstring,
+    payloadPath=cstring,
     nodeId=cstring,
     nodeIndex=int,
     nodeParentIndices=seq[int])) {.async.} =
   ## Fill in the children of a file-tree folder that was loaded as a
-  ## "Loading..." stub (see ``editFilesystemDepthLimit``).
+  ## "Loading..." stub (see ``FilesystemLoadDepth``): one more directory
+  ## listing, under the same one-level rule as the root load.
+  ##
+  ## ``payloadPath`` is the stub's payload location, sent back by
+  ## ``ui/filesystem.loadFolderContentIfNeeded``.  For a self-contained
+  ## trace ``loadPathContentPartially`` reads the folder from there, so a
+  ## folder the root load overlaid from the payload's top level is read
+  ## from the same place again; it is absent for a live-disk folder and for
+  ## a renderer that predates it, and refused when it would leave
+  ## ``files/``.
   ##
   ## The renderer replaces the stub with whatever this handler sends
   ## back, so the ONE thing this handler must never do is fail to answer:
@@ -534,13 +662,19 @@ proc onLoadPathContent*(
       traceImported,
       workspaceFolder,
       $response.path)
+    # Absent (``undefined``) from a sender that does not know the field.
+    let payloadPathValue = response.toJs[cstring"payloadPath"]
+    let payloadPath =
+      if payloadPathValue.isNull or payloadPathValue.isUndefined: cstring""
+      else: payloadPathValue.to(cstring)
 
     content = await loadPathContentPartially(
       response.path,
       response.nodeIndex,
       response.nodeParentIndices,
       cstring(contentRoot.filesRoot),
-      selfContained = contentRoot.selfContained)
+      selfContained = contentRoot.selfContained,
+      payloadPath = payloadPath)
   except:
     errorPrint "load-path-content error for ", response.path, ": ",
       getCurrentExceptionMsg()
@@ -560,25 +694,30 @@ proc onLoadPathContent*(
       original: CodetracerFileData(text: name, path: response.path))
     content.toJs.path = response.path
 
-  mainWindow.webContents.send "CODETRACER::update-path-content", js{
+  # To the tab whose Files pane asked (`tab_answers`): its node indices are
+  # into THAT tab's tree.
+  mainWindow.webContents.send "CODETRACER::update-path-content", answerFor(response.toJs, js{
     content: content,
     nodeId: response.nodeId,
     nodeIndex: response.nodeIndex,
-    nodeParentIndices: response.nodeParentIndices}
+    nodeParentIndices: response.nodeParentIndices})
 
-proc openTab(main: js, location: types.Location, lang: Lang, editorView: EditorView, line: int = -1): Future[void] {.async.} =
-  await data.open(main, location, editorView, "tab-load-received", data.replay, data.exe, lang, line)
+proc openTab(main: js, location: types.Location, lang: Lang, editorView: EditorView, line: int = -1,
+             tab: JsObject = jsUndefined): Future[void] {.async.} =
+  await data.open(main, location, editorView, "tab-load-received", data.replay, data.exe, lang, line, tab)
 
 proc onTabLoad*(sender: js, response: jsobject(location=types.Location, name=cstring, editorView=EditorView, lang=Lang)) {.async.} =
   console.log response
   case response.lang:
   of LangC, LangCpp, LangRust, LangNim, LangGo, LangRubyDb:
     if response.editorView in {ViewSource, ViewTargetSource, ViewCalltrace}:
-      discard mainWindow.openTab(response.location, response.lang, response.editorView)
+      discard mainWindow.openTab(response.location, response.lang, response.editorView,
+                                 tab = askingTab(response.toJs))
     else:
      discard
   else:
-    discard mainWindow.openTab(response.location, response.lang, response.editorView)
+    discard mainWindow.openTab(response.location, response.lang, response.editorView,
+                               tab = askingTab(response.toJs))
 
 proc onLoadLowLevelTab*(sender: js, response: jsobject(pathOrName=cstring, lang=Lang, view=EditorView)) {.async.} =
   case response.lang:
@@ -602,9 +741,11 @@ proc onOpenTab*(sender: js, response: js) {.async.} =
   let file = await selectFileOrFolder(options)
   if file != "":
     if file.slice(-4) == cstring".nim":
-      mainWindow.webContents.send "CODETRACER::opened-tab", js{path: file, lang: LangNim}
+      mainWindow.webContents.send "CODETRACER::opened-tab",
+        answerFor(response, js{path: file, lang: LangNim})
     else:
-      mainWindow.webContents.send "CODETRACER::opened-tab", js{path: file, lang: LangUnknown}
+      mainWindow.webContents.send "CODETRACER::opened-tab",
+        answerFor(response, js{path: file, lang: LangUnknown})
 
 var childProcessExec* {.importcpp: "helpers.childProcessExec(#, #)".}: proc(cmd: cstring, options: js = jsUndefined): Future[(cstring, cstring, js)]
 

@@ -126,6 +126,7 @@ proc toPValue*(node: JsonNode; depth: int = MaxWireDepth): PValue =
   let typeName = typeNameOf(node)
   let sourceKind = wireKindName(kind)
   let partial = node.getOrDefault("partiallyExpanded").getBool(false)
+  let elementsTotal = node.getOrDefault("elementsTotal").getInt(0)
 
   template scalarOf(k: PValueKind; field: string): PValue =
     PValue(kind: k, typeName: typeName, sourceKind: sourceKind,
@@ -158,13 +159,16 @@ proc toPValue*(node: JsonNode; depth: int = MaxWireDepth): PValue =
            text: (if node.getOrDefault("b").getBool(false): "true" else: "false"))
   of tkSeq, tkSet, tkHashSet, tkOrderedSet, tkArray, tkVarargs, tkSlice:
     PValue(kind: pvkSequence, typeName: typeName, sourceKind: sourceKind,
-           members: membersOf(false), partial: partial)
+           members: membersOf(false), partial: partial,
+           elementsTotal: elementsTotal)
   of tkStruct:
     PValue(kind: pvkRecord, typeName: typeName, sourceKind: sourceKind,
-           members: membersOf(true), partial: partial)
+           members: membersOf(true), partial: partial,
+           elementsTotal: elementsTotal)
   of tkTuple:
     PValue(kind: pvkTuple, typeName: typeName, sourceKind: sourceKind,
-           members: membersOf(false), partial: partial)
+           members: membersOf(false), partial: partial,
+           elementsTotal: elementsTotal)
   of tkTable:
     # `Value.items` is a list of two-element `[key, value]` arrays.
     var entries: seq[PEntry] = @[]
@@ -175,7 +179,8 @@ proc toPValue*(node: JsonNode; depth: int = MaxWireDepth): PValue =
           entries.add PEntry(key: toPValue(item[0], depth - 1),
                              val: toPValue(item[1], depth - 1))
     PValue(kind: pvkMap, typeName: typeName, sourceKind: sourceKind,
-           entries: entries, partial: partial)
+           entries: entries, partial: partial,
+           elementsTotal: elementsTotal)
   of tkUnion, tkVariant:
     let active = node.getOrDefault("activeVariantValue")
     var members: seq[PMember] = @[]
@@ -185,7 +190,8 @@ proc toPValue*(node: JsonNode; depth: int = MaxWireDepth): PValue =
       members = membersOf(true)
     PValue(kind: pvkVariant, typeName: typeName, sourceKind: sourceKind,
            variantName: node.getOrDefault("activeVariant").getStr(""),
-           members: members, partial: partial)
+           members: members, partial: partial,
+           elementsTotal: elementsTotal)
   of tkEnum, tkEnum16, tkEnum32:
     # The ordinal rides `i` as a STRING and the member names ride `typ.labels`.
     # Out of range the ordinal is kept and `enumName` stays empty, which is what

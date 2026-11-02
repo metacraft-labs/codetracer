@@ -401,16 +401,10 @@ try {
   // so waiting here measures the product rather than a state no one is in.
   await page.waitForTimeout(2500);
 
-  // BLUR THE EDITOR FIRST, and this is a real property of the product rather
-  // than a harness convenience. Mousetrap's default `stopCallback` ignores a
-  // chord raised inside an INPUT / TEXTAREA / contenteditable, and Monaco's
-  // input surface is a textarea that takes focus when the editor pane mounts.
-  // A user pressing Ctrl+B with the caret in the editor is in exactly that
-  // state, so if the chord has to be reached from elsewhere, the gate should
-  // find that out rather than paper over it: the click below targets the
-  // topbar, which is where a user's pointer is when they have just used a
-  // menu, and the assertion that the build ran is what says whether it was
-  // enough.
+  // The BUILD chord is CUA's `build.run`, `Ctrl+Shift+B` (`Ctrl+B` toggles
+  // the side panels, as in VS Code). The key router hears it wherever the
+  // caret is; the click below only puts the focus somewhere known — the
+  // topbar, where a user's pointer is when they have just used a menu.
   try {
     await page.click('#menu', { position: { x: 5, y: 5 }, timeout: 3000 });
   } catch (e) { /* no topbar is itself reported by the mount assertions */ }
@@ -421,7 +415,7 @@ try {
     // would be taking a key away from the user rather than giving them one.
     await page.keyboard.press('Control+Enter');
   } else {
-    await page.keyboard.press('Control+b');
+    await page.keyboard.press('Control+Shift+KeyB');
   }
 
   // The pane is created on demand by `openLayoutTab(Content.Build)`, then the
@@ -500,7 +494,7 @@ try {
   // THE CONSTRAINTS PANE, AFTER DISMISSING THE BUILD OVERLAY. The pane's tab
   // is already `lm_active` — `default_layout.json` puts it in the right-hand
   // column and nothing deactivates it — so this is NOT a tab switch. The
-  // BUILD pane that Ctrl+B just opened is an auto-hide overlay drawn ON TOP
+  // BUILD pane that Ctrl+Shift+B just opened is an auto-hide overlay drawn ON TOP
   // of that column, and it is what the hit test finds: measured,
   // `elementFromPoint` over the pane's centre returns
   // `DIV.build-output-container` while all 34 opcode rows sit in the DOM

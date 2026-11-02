@@ -64,6 +64,15 @@ type
       ## so each colour keeps its hue at reduced strength; where either colour
       ## is the terminal's own (monochrome, `--palette=terminal`, a cell with
       ## no ground) it is SGR 2, faint.
+    faded*: float32
+      ## PLAT-70 Part H (Scrollbar-Scrubbers.md §7.5): how far the foreground
+      ## has faded into the cell's ground, 0 (as resolved) to 1 (gone) — a
+      ## fading scrollbar. Resolved by `palette.resolveRoles` as `dim` is: on
+      ## a colour rung of the design palette the foreground is BLENDED that
+      ## far toward the resolved background at 24 bits and put on the rung;
+      ## where no blend has a colour to land on (16 colours,
+      ## `--palette=terminal`), the foreground is drawn as it is below 1/2
+      ## and as the ground (invisible) from 1/2; monochrome draws it.
 
 const DefaultCellStyle* = CellStyle()
   ## No role, no surface, the terminal's own colours and no attributes.

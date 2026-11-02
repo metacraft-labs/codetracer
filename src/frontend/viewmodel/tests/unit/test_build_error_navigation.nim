@@ -44,7 +44,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 128
+const ExpectedAssertions = 130
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
@@ -304,8 +304,11 @@ suite "build error navigation":
     counted vm.selectedIndex.val == 0
     counted host.jumps.len == 0        # the caret did NOT move
     counted host.reveals == 0          # and nothing was focused
-    # And it gives `next error` an origin: the following next goes to the
-    # SECOND error, not back to the first.
+    # And the highlight is where the first `next error` LANDS
+    # (Edit-Mode-Toolbar.md §11.2, decided 2026-10-27): it opens the
+    # highlighted error itself; the one after it goes to the second.
+    counted vm.gotoNextError() == enoMoved
+    counted vm.selectedIndex.val == 0
     counted vm.gotoNextError() == enoMoved
     counted vm.selectedIndex.val == 2
 

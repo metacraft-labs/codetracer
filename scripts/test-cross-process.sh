@@ -122,6 +122,24 @@ record_fixture() {
 	local materializer="$REPO_ROOT/scripts/materialize-recording.sh"
 	[ -x "$materializer" ] || die "recording materialiser is missing: $materializer"
 
+	# The materialiser refuses to record without `ct-instrument`
+	# (codetracer-wasm-instrumenter), `session-manager` and a built
+	# codetracer-js-recorder, and nothing on this gate's path used to build
+	# them: a host that had not built them by hand, the cross-process-linux CI
+	# job included, could only fail here.
+	# scripts/provision-cross-process-recording.sh is the one place that builds
+	# all three (shared with `just test-frontend-units`, `just
+	# demo-cross-tracer` and the db-backend test harness). It fails, naming the
+	# sibling, when one is not checked out or does not build, and prints the
+	# session-manager path because cargo may put it under CARGO_TARGET_DIR,
+	# where the materialiser does not look.
+	local provisioner="$REPO_ROOT/scripts/provision-cross-process-recording.sh"
+	[ -f "$provisioner" ] || die "recording-tool provisioner is missing: $provisioner"
+	echo "[cross-process] Building the recording tools (ct-instrument, session-manager, codetracer-js-recorder)"
+	CODETRACER_RECORD_WEB_BIN="$(bash "$provisioner")" ||
+		die "could not provision the tools the three-tier recording needs; see the list above"
+	export CODETRACER_RECORD_WEB_BIN
+
 	echo "[cross-process] Recording the three-tier demo from this tree"
 	RECORDING_DIR="$("$materializer" cross-process-three-trace)" ||
 		die "could not record the three-tier demo; nothing downstream would mean anything"
