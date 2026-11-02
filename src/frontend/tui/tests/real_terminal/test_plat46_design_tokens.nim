@@ -195,11 +195,17 @@ proc builderFor(args: seq[string]; cols, rows: int; term = "xterm-256color";
   ## wherever the state directory outlives a run (a fixed
   ## `CODETRACER_TUI_LAYOUT_DIR`), green on a fresh one. "Unanswered" means a
   ## terminal this product has never been told about.
+  ##
+  ## The whole of CodeTracer's per-user state goes with it, through
+  ## `CODETRACER_HOME` (`src/common/ct_home.nim`): it outranks every
+  ## `XDG_*_HOME`, so redirecting `XDG_STATE_HOME` instead would isolate
+  ## nothing while the harness's own scratch home is inherited — and
+  ## `ct_home_isolation_test`'s sweep A fails a suite that does that.
   let stateRoot = createTempDir("plat46-tokens-state-", "")
   addExitProc(proc() = removeDir(stateRoot))
   var b = newTuiTest(tuiBinary(), args).width(cols).height(rows).transcript()
     .envSet("CODETRACER_TUI_LAYOUT_DIR", stateRoot)
-    .envSet("XDG_STATE_HOME", stateRoot / "xdg-state")
+    .envSet("CODETRACER_HOME", stateRoot / "ct-home")
     .envRemove("TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE", "TMUX")
     .envSet("TERM", term).envSet("LANG", "en_US.UTF-8")
     .envSet("CT_TUI_PROBE_TIMEOUT_MS", $probeMs)
