@@ -986,6 +986,11 @@ test-rust:
   trap 'report_skips; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
   # The resolver itself (both sides of the CODETRACER_HOME contract).
   ( cd libs/ct-home && cargo test )
+  # `libs/ct-dap-client` is a plain path dev-dependency of src/db-backend, so
+  # db-backend's run never builds its test targets. Its own tests cover the
+  # DAP runners' ct-native-replay finder, which must resolve the worker the
+  # db-backend harness recorded with.
+  ( cd libs/ct-dap-client && cargo test )
   # `libs/ct-data-breakpoints` holds the admission rules for DAP data
   # breakpoints (watchpoints) and is a plain path dependency of BOTH
   # src/db-backend and src/backend-manager -- neither of which builds a

@@ -71,16 +71,15 @@ pub(crate) fn prepare_trace_folder(
 const NATIVE_BACKEND_REPO: &str = "codetracer-native-backend";
 
 /// Environment variables that name a `ct-native-replay` override, in priority
-/// order. The first two are what codetracer's `justfile` exports; the last two
-/// are the overrides db-backend's test harness honours
-/// (`src/db-backend/tests/test_harness/mod.rs`, `find_ct_native_replay`), so a
-/// test that recorded with the worker the harness was pointed at replays with
-/// that same worker.
-const OVERRIDE_VARS: &[&str] = &[
-    "CT_NATIVE_REPLAY_BIN",
-    "CODETRACER_CT_NATIVE_REPLAY_CMD",
+/// order. db-backend's test harness reads this same list
+/// (`src/db-backend/tests/test_harness/mod.rs`, `find_ct_native_replay`), so
+/// whichever of them are set, a test replays with the worker the harness
+/// recorded with.
+pub const CT_NATIVE_REPLAY_OVERRIDE_VARS: &[&str] = &[
     "CT_NATIVE_REPLAY_PATH",
     "CT_RR_SUPPORT_PATH",
+    "CT_NATIVE_REPLAY_BIN",
+    "CODETRACER_CT_NATIVE_REPLAY_CMD",
 ];
 
 /// The workspace directory this crate's own checkout sits in, side by side
@@ -110,7 +109,7 @@ fn canonical(path: &Path) -> PathBuf {
 /// Resolves the worker db-backend's test harness resolves (and, when no
 /// override names one, has just built), so a test records and replays with
 /// one binary. Search order:
-/// 1. The override environment variables in [`OVERRIDE_VARS`]
+/// 1. The override environment variables in [`CT_NATIVE_REPLAY_OVERRIDE_VARS`]
 /// 2. The consumer's own `target/debug`, which exists only when the package
 ///    under test is codetracer-native-backend itself: its tests replay with
 ///    the build they test, never with another `ct-native-replay` on `PATH`
@@ -124,7 +123,7 @@ fn canonical(path: &Path) -> PathBuf {
 /// for a db-backend test (`codetracer/src/db-backend/target/debug` holds no
 /// `ct-native-replay`), so it does not change what db-backend resolves.
 pub(crate) fn find_ct_native_replay() -> Result<PathBuf, BoxError> {
-    let overrides = OVERRIDE_VARS
+    let overrides = CT_NATIVE_REPLAY_OVERRIDE_VARS
         .iter()
         .filter_map(|var| std::env::var_os(var).map(PathBuf::from));
     let consumer_manifest_dir = std::env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from);
