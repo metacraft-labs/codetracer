@@ -1147,6 +1147,13 @@ fn c_mcr_calltrace_search_uses_the_browsing_replay_admission() {
 fn search_uses_the_browsing_replay_admission(recorder: &str) {
     let native = test_harness::find_ct_native_replay()
         .expect("ct-native-replay is required for the unlicensed search regression");
+    if recorder == "mcr" {
+        // The driver's `ct-native-replay record --backend mcr` needs ct-mcr.
+        // `find_ct_mcr` provisions it and exports `CODETRACER_CT_MCR_CMD` in
+        // this process, which the driver and its children inherit; without
+        // it the recording depends on a dev shell that exported one.
+        test_harness::find_ct_mcr().expect("ct-mcr is required for the MCR search regression");
+    }
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let output = std::process::Command::new("python3")
         .arg(manifest.join("tests/support/native_search_license.py"))
