@@ -351,8 +351,8 @@ proc runInitial*(conf: CodetracerConf; uiSelection: string = "") =
         function: conf.printFunction.get(""),
         limit: conf.printLimit.get(0),
         format: conf.printFormat.get("text"),
-        verify: conf.printVerify.get(false),
-        follow: conf.printFollow.get(false),
+        verify: conf.printVerify,
+        follow: conf.printFollow,
       )
       runPrint(printOpts)
     of StartupCommand.help:
