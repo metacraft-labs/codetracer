@@ -10,8 +10,7 @@
 # `ci/lib/run-nim-test-lane.sh`, and no workflow called either of them. Measured
 # at codetracer `agents` 4b64e0134: nothing under `.github/workflows/` names
 # them, and the walk in `ci/test/shell-gate-coverage.sh` reaches 132 of the
-# justfile's 376 recipes, neither of these among them
-# (codetracer-pm issues/2026-11-01-no-ci-lane-calls-the-test-tui-recipes.md).
+# justfile's 376 recipes, neither of these among them.
 #
 # Every guard that could have said so was green, each for a reason that is
 # correct about its own subject:
@@ -23,15 +22,15 @@
 #     invoke too, so no script went dark and nothing failed.
 #   * Until `ed9afd6bc` that walk even counted `test-tui` as reached, because four
 #     window gates print `run 'just test-tui' once` as a remedy. A string that
-#     names a recipe is not a wire (Verification-Harness-Traps.md §4f), and the
+#     names a recipe is not a call that runs it, and the
 #     walk stopped crediting it -- which made the recipe honestly unreached,
 #     silently, since recipes are not that guard's subject.
 #
 # This suite makes recipes a subject, for the short list of recipes whose
 # reachability is a decision rather than an accident: the ones that are the only
-# route to a body of tests a spec says CI runs. CodeTracer-TUI.md §7.1.6 says the
-# TUI's Tier-1 content is asserted "fast, per-PR" and Tier 2 is the terminal-peer
-# check, so both lanes run in the `tui-tests` job of `codetracer.yml`, and this
+# route to a body of tests CI is meant to run. The TUI's Tier-1 suites are meant
+# to run fast, on every pull request, and Tier 2 is its check against real
+# terminals, so both lanes run in the `tui-tests` job of `codetracer.yml`, and this
 # suite is what fails if either recipe stops being reached.
 #
 # THE WALK IS NOT REIMPLEMENTED HERE. `shell-gate-coverage.sh

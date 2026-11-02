@@ -90,14 +90,13 @@
 # then uses the set only to reach SCRIPTS. Recipes are not this guard's subject,
 # so a recipe no lane calls never fails it: `test-tui` and
 # `test-tui-real-terminal` -- the only routes to the `tui` and
-# `tui-real-terminal` Nim lanes -- went unreached and nothing failed
-# (codetracer-pm issues/2026-11-01-no-ci-lane-calls-the-test-tui-recipes.md).
+# `tui-real-terminal` Nim lanes -- went unreached and nothing failed.
 #
 # `--print-reached-recipes` hands that set to a caller that DOES have recipes as
 # its subject, one name per line on stdout, sorted, and exits after Step 2. It
 # is the same walk, not a second implementation of it: a recipe is reached by
 # exactly the rule a gate is, so a remedy string that names a recipe confers
-# nothing here either (Verification-Harness-Traps.md §4f). The report the walk
+# nothing here either. The report the walk
 # prints on the way goes to stderr in this mode, so stdout is only the list.
 # Without the flag nothing about this guard's output or verdict changes.
 # `ci/test/ci-reached-recipes-test.sh` is that caller.
