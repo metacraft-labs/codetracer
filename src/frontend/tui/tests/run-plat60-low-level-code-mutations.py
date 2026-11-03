@@ -7,7 +7,10 @@ both ways, the header's words, the row menu, stepping by instruction where it
 is offered), the engine's line range for a function's listing
 (`dap_handler.rs::load_steps_for_call`), the store's capabilities, the
 terminal's painter, runtime, host, editor and keys, the GPUI leaf, window and
-editor, the vocabulary view and the desktop's view.
+editor, the vocabulary view and the desktop's view — and, for a NATIVE
+recording (rr), instruction steps pressed in the terminal's listing reaching
+the store, graded by the terminal's native suite on an rr recording of
+`codetracer-native-test-programs/c/sudoku_solver`.
 
 Each arm plants ONE defect; REBUILDS the shipped `codetracer-tui` /
 `codetracer-gpui` when the defect is compiled into a binary an arm is graded
@@ -70,6 +73,7 @@ GPUI_LEAF = "src/frontend/gpui/low_level_code_leaf.nim"
 GPUI_MAIN = "src/frontend/gpui/main.nim"
 VOCAB = "src/frontend/view_vocabulary/pane_views.nim"
 DESKTOP_EDITOR = "src/frontend/ui/editor.nim"
+HEADLESS = "src/frontend/viewmodel/headless_session.nim"
 
 # Suites.
 VMU = "src/frontend/viewmodel/tests/unit/test_plat60_low_level_code.nim"
@@ -78,16 +82,19 @@ PTY = "src/frontend/tui/tests/real_terminal/test_plat60_low_level_code_pty.nim"
 PLAN = "src/frontend/gpui/tests/test_plat60_gpui_low_level_code.nim"
 RUST = "src/db-backend/src/dap_handler.rs#test_asm_listing"
 SPEC = "src/tests/gui/tests/low-level-code/plat60-low-level-code-capture.spec.ts"
+TBL_NATIVE = "src/frontend/tui/tests/test_plat60_native_low_level_code.nim"
 
 SUBJECTS = [VM, VIEW, STORE, ENGINE, TUI_PANE, SOURCE_PANE, RUNTIME, HOST,
-            KEYMAP, SCOPES, GPUI_LEAF, GPUI_MAIN, VOCAB, DESKTOP_EDITOR]
-SUITES = [VMU, TBL, PTY, PLAN, SPEC]
+            KEYMAP, SCOPES, GPUI_LEAF, GPUI_MAIN, VOCAB, DESKTOP_EDITOR,
+            HEADLESS]
+SUITES = [VMU, TBL, PTY, PLAN, SPEC, TBL_NATIVE]
 
 TBL_OPEN = "*::Alt+1 opens it beside the source, with the engine's listing"
 TBL_XREF = "*::the cross-reference both ways, a press, the menu, sync, a step"
 TBL_BAR = "*::a short pane draws the listing's scrollbar"
 PLAN_OPEN = "*::view.low-level-code opens it beside the source with the engine's listing"
 PLAN_XREF = "*::the cross-reference both ways, the menu, a press, sync off"
+TBL_N_STEP = "*::a step in the listing goes by one instruction, both ways"
 
 # (id, [(subject, find, replace), ...], [(suite, filter), ...], what it breaks)
 ARMS = [
@@ -229,6 +236,15 @@ ARMS = [
              "    discard")],
      [(SPEC, None)],
      "the desktop's Low Level Code view asks for nothing at any stop"),
+    # ---- instruction steps reach the store (the terminal's listing) --------
+    ("HS2", [(HEADLESS, "  discard s.backend.waitForEvent(\"stopped\")\n  s.consumeCompleteMoveEvent()\n\nproc stepOverStatement*(s: HeadlessDebugSession) =",
+              "  discard s.backend.waitForEvent(\"stopped\")\n\nproc stepOverStatement*(s: HeadlessDebugSession) =")],
+     [(TBL_NATIVE, TBL_N_STEP)],
+     "a step by instruction never reaches the store"),
+    ("H4", [(HOST, "        s.session.stepByInstruction(request.command, request.args)",
+             "        discard request")],
+     [(TBL_NATIVE, TBL_N_STEP)],
+     "the terminal's step in the listing asks for nothing"),
     # ---- the declared survivor ---------------------------------------------
     ("Z1", [(GPUI_LEAF, "  LowLevelGapPx = 8", "  LowLevelGapPx = 9")],
      [(PLAN, PLAN_XREF)],
@@ -238,8 +254,8 @@ ARMS = [
 DECLARED_SURVIVORS = {"Z1"}
 
 IN_BINARY = {VM, VIEW, STORE, TUI_PANE, SOURCE_PANE, RUNTIME, HOST, KEYMAP,
-             SCOPES, VOCAB}
-IN_GPUI = {VM, STORE, GPUI_LEAF, GPUI_MAIN, KEYMAP, SCOPES, VOCAB}
+             SCOPES, VOCAB, HEADLESS}
+IN_GPUI = {VM, STORE, GPUI_LEAF, GPUI_MAIN, KEYMAP, SCOPES, VOCAB, HEADLESS}
 IN_DESKTOP = set()
   # The desktop's spec is run by `$PLAT60_DESKTOP_TEST` (the capture recipe),
   # which compiles the renderer from the checkout as it stands: an arm's
@@ -381,6 +397,10 @@ def run_spec(suite):
     plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
     first = [ln.strip() for ln in plain.splitlines()
              if ln.strip().startswith("Error:")][:1]
+    if not first:
+        # A spec that runs out of time says so without an `Error:` line.
+        first = [ln.strip() for ln in plain.splitlines()
+                 if ln.strip().startswith("Test timeout of")][:1]
     return "RED", first
 
 
@@ -532,6 +552,11 @@ def main():
         finally:
             for rel in files:
                 shutil.move(backups[rel], path_of(rel))
+                # The restored bytes carry the backup's OLD modification time,
+                # older than the build output the defect produced: cargo and
+                # tup judge freshness by time and would keep the mutated
+                # binary. Restored now, they are newer than it.
+                os.utime(path_of(rel))
                 if sha(rel) != digests[rel]:
                     print(f"ABORT: restore of {rel} failed after {arm_id}.")
                     return 1

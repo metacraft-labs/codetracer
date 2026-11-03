@@ -5754,6 +5754,11 @@ build-tasks-electron *args:
 plat60-capture-electron *args:
   bash scripts/plat60-capture-electron.sh "$@"
 
+# The desktop's Low Level Code view on the native (rr) recording, captured
+# (`src/tests/visual/answers/plat60-native-low-level-code.electron.json`).
+plat60-native-capture-electron *args:
+  bash scripts/plat60-native-capture-electron.sh "$@"
+
 # The §30a arm: the two answer producers are independent readers.
 plat35-answer-independence:
   bash ci/test/plat35-answer-independence.sh
