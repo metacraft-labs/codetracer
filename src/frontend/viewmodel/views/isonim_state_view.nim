@@ -811,6 +811,7 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
             # button.ct-origin-badge`.
             button(class = badgeClassForRow(vm, item()),
                    `aria-label` = badgeAriaForRow(vm, item()),
+                   title = badgeAriaForRow(vm, item()),
                    `data-token` = badgeTokenForRow(vm, item()),
                    display = badgeDisplay(vm, item()),
                    onclick = onBadgeClick):
@@ -844,6 +845,7 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
              role = "button", tabindex = "0",
              `aria-expanded` = (if item().isExpanded: "true" else: "false"),
              `aria-label` = "Show or hide the value's parts",
+             title = "Show or hide the value's parts",
              onclick = onToggle):
           tdiv(class = caretClass(item)):
             discard)

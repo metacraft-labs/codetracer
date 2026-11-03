@@ -115,7 +115,9 @@ A drag handle on each row of the Columns menu replaced the move-left and
 move-right arrows. Hidden columns can be placed too. The menu uses the shared
 menu row, and the "Columns +" button uses the medium control size. From the
 keyboard, the handle takes focus and Enter or Space moves its row one position
-lower; a mouse click on it moves nothing. (2026-10-20, 2026-11-02)
+lower; a mouse click on it moves nothing. Inside the menu, Up and Down move
+between rows and Left and Right between a row's check and handle. (2026-10-20,
+2026-11-02)
 
 ```guard
 src/frontend/viewmodel/views/isonim_event_log_view.nim :: EventLogColumnHandleClass
@@ -211,15 +213,16 @@ src/frontend/styles/components/golden_layout.styl :: SELECTED_PANEL_BORDER_COLOR
 
 ### D-16: key-focus is the one keyboard selection style
 
-A control selected from the keyboard shows `key-focus`: a 1.5px `#3B82F6` border
-inside its edge, the same on every control and in every theme. It matches the
-main menu buttons. The current row of a menu or the command palette shows it too,
-in place of a filled row. Do not give a control its own focus ring, and do not
+A control selected from the keyboard shows `key-focus`: a 1.5px border inside its
+edge, `#3B82F6` in the dark themes and `#2563EB` in the light ones, the same on
+every control. It matches the main menu buttons. The width is deliberate: 2px is
+only required at WCAG's AAA level, and an outer ring would crowd these dense panels. The current row of a menu shows it too,
+in place of a filled row; the command palette follows D-28. Do not give a control its own focus ring, and do not
 remove one. Text fields show it only when reached with Tab. (2026-11-02)
 
 ```guard
 src/frontend/styles/components/button.styl :: KEY_FOCUS_WIDTH = 0.09375rem
-src/frontend/styles/components/button.styl :: KEY_FOCUS_COLOR = colors-blue-500
+src/frontend/styles/components/button.styl :: by-mode(colors-blue-500, colors-blue-600)
 src/frontend/styles/components/menu_item.styl :: &.ct-menu-item--active:not(.ct-menu-item--disabled)
 src/frontend/styles/components/button.styl :: key-focus()
 src/frontend/styles/components/shared_widgets.styl :: html:not([data-focus-mode="mouse"]) *:focus-visible:not(input)
@@ -237,20 +240,252 @@ src/frontend/ui/key_router.nim :: if name == "Enter" and not menuIsOpen() and no
 
 ### D-18: Dropdowns work from the keyboard, and one thing looks selected
 
-A dropdown's trigger and rows can be reached with the keyboard. Opening moves to
-the chosen row, the arrow keys move between rows, Enter or Space picks one, Escape
-closes and returns to the trigger, and moving focus away closes it. At most one
-dropdown is open. The chosen option has a subtle grey fill, not `key-focus`,
+A dropdown is one Tab stop. Opening moves to the chosen row, the arrow keys move
+between rows, Enter or Space picks one, Escape closes and returns to the trigger,
+and Tab or a click elsewhere closes it. At most one dropdown is open. The chosen option has a subtle grey fill, not `key-focus`,
 because it marks a saved value rather than the keyboard's place. Only one element
 shows `key-focus` at a time. (2026-11-02)
 
 ```guard
-src/frontend/viewmodel/views/dropdown_focus.nim :: installDropdownFocus(cstring ContainerSelector
+src/frontend/viewmodel/views/keyboard_focus.nim :: installKeyboardFocus(cstring DropdownListSelector
 src/frontend/viewmodel/views/isonim_request_panel_view.nim :: "ct-menu-item ct-menu-item--chosen"
 src/frontend/viewmodel/views/isonim_vcs_view.nim :: "ct-menu-item ct-menu-item--chosen"
 src/frontend/styles/components/menu_item.styl :: &.ct-menu-item--chosen:not(.ct-menu-item--disabled)
-src/frontend/ui/key_router.nim :: focusInDropdown():
+src/frontend/ui/key_router.nim :: focusIsIn(cstring DropdownListSelector)
 ```
+
+### D-19: The REQUESTS filter dropdowns have no "All" row
+
+The Method and Status dropdowns list only real values. With no filter on, the
+trigger still reads "Method: All" or "Status: All". Picking the chosen row again
+turns its filter off, so a filter can always be cleared, even when it leaves no
+rows to right-click for Clear Filters. The Status dropdown is as wide as its
+longest row. It sits at the panel's right edge, so it grows left. (2026-11-02)
+
+```guard
+src/frontend/viewmodel/views/isonim_request_panel_view.nim :: if v.len == 0:
+src/frontend/viewmodel/views/isonim_request_panel_view.nim :: pickerSelectHandler(onSelect, if isChosen: "" else: v)
+src/frontend/styles/components/request_panel.styl :: .request-panel-filters > :last-child .ct-picker-dropdown
+```
+
+### D-20: A disabled button keeps its fill
+
+Disabled changes only the text, the icon or the border, depending on the kind of
+button. The fill stays as it is on an enabled button, at rest and on hover, and the
+whole button is never faded with `opacity`. Applies to every kind of button,
+including primary ones and the welcome screens' own look (D-14). (2026-11-02)
+
+```guard
+src/frontend/styles/components/button.styl :: Disabled changes only the text, the icon or the border, never the fill
+src/frontend/styles/components/button.styl :: LOOP_ICON_DIM
+src/frontend/styles/components/welcome_screen.styl :: &:hover:not(:disabled):not([aria-disabled="true"])
+```
+
+### D-21: Esc closes the open dropdown first, wherever the focus is
+
+With a dropdown open, Esc closes that dropdown and does nothing else: it does not
+clear a list's selection or hide the panel. Focus returns to the dropdown's button.
+A select inside the agent settings closes before the panel does. Add every new
+dropdown to `DROPDOWNS` in `views/keyboard_focus.nim`. (2026-11-02)
+
+```guard
+src/frontend/ui/key_router.nim :: closeOpenDropdown():
+src/frontend/viewmodel/views/keyboard_focus.nim :: var DROPDOWNS = [
+src/frontend/viewmodel/views/keyboard_focus.nim :: globalThis.__ctCloseOpenDropdown = closeOpenDropdown
+```
+
+### D-22: A focused strip tab's key-focus runs around its whole panel
+
+When a strip tab has keyboard focus and its panel is open, in the footer or a side
+strip, `key-focus` is one continuous line around the tab and the panel together. The
+tab has no ring of its own, because the panel's edge and the curves that join the two
+would cut it up. This holds even if another panel is the selected one; the grey
+selection outline comes back when focus moves on. A tab whose panel is closed keeps
+its own ring. (2026-11-02)
+
+```guard
+src/frontend/ui/layout.nim :: function showKeyFocusOnOutline(svg, tab)
+src/frontend/styles/components/auto_hide.styl :: .ct-docked-outline.ct-outline--key-focus path
+src/frontend/styles/components/shared_widgets.styl :: :not(.ct-key-focus-traced)
+```
+
+### D-23: A Columns menu row shows key-focus on the whole row
+
+When a row's checkbox has keyboard focus, `key-focus` runs around the whole row, as
+on every other dropdown's rows. The drag handle keeps its own small ring, because it
+is a separate action reached with the Right arrow (D-07). Arrow keys count as
+keyboard navigation, so a menu opened with the mouse shows `key-focus` as soon as an
+arrow key moves in it. (2026-11-02)
+
+```guard
+src/frontend/styles/components/event_log.styl :: .eventLog-column-option:has(> .eventLog-column-check:focus-visible)
+src/frontend/styles/components/shared_widgets.styl :: :not(.eventLog-column-check)
+src/frontend/viewmodel/views/keyboard_focus.nim :: function moveFocus(ev, to)
+```
+
+### D-24: The Files tree's first arrow lines up with the panel title
+
+The expand arrow of the Files panel's top level starts at the same left position as
+the "FILES" title, 8px from the panel edge. Every deeper level moves with it, and the
+hover strips still run from the panel's edge. (2026-11-02)
+
+```guard
+src/frontend/styles/components/filesystem.styl :: .filesystem.jstree-default > .jstree-container-ul > .jstree-node
+```
+
+### D-25: An active strip tab stays joined to its panel when focused
+
+A click gives a strip tab focus, and the "no ring on a mouse click" rule clears
+shadows on anything focused. The active tab's shadow is what fills the gap to its
+panel, so each strip keeps it on a focused tab. Without it the strip shows through as
+a dark bar. (2026-11-02)
+
+```guard
+src/frontend/styles/components/auto_hide.styl :: box-shadow: 0em -0.48em 0em 0em colors-ui-surface-base-panel !important
+src/frontend/styles/components/auto_hide.styl :: box-shadow: 0.48em 0em 0em 0em colors-ui-surface-base-panel !important
+src/frontend/styles/components/auto_hide.styl :: box-shadow: -0.48em 0em 0em 0em colors-ui-surface-base-panel !important
+```
+
+### D-26: Every dropdown row's text is 14px
+
+All text in a dropdown row is 14px (`0.875rem`), in every menu and every theme: the
+label, the sublabel and the shortcut. A new dropdown uses the shared row
+(`ct-menu-item`), which sets this size itself, so a row must not take its size from
+the menu or panel around it. The button that opens a dropdown keeps its own control
+size. (2026-11-02)
+
+```guard
+src/frontend/styles/components/menu_item.styl :: font-size: 0.875rem
+src/frontend/styles/components/menu_bar.styl :: font-size: 0.875rem
+src/frontend/styles/components/event_log.styl :: font-size: 0.875rem
+src/frontend/styles/components/text_editor.styl :: font-size: 0.875rem
+src/frontend/styles/components/status_bar.styl :: font-size: 0.875rem
+src/frontend/styles/components/session_tabs.styl :: font-size 0.875rem
+src/frontend/styles/components/unified_diff.styl :: font-size 0.875rem
+```
+
+### D-27: Variable names use the syntax colour for identifiers
+
+A variable's name in the State, Scratchpad and value-popup rows is
+`colors/editor/syntax/plain` from the `mapped` collection: `#F3F3F3` in the dark theme
+and `#1D1C1A` in the light one. Code and program data take their colours from
+`colors/editor/syntax`. `colors/ui/text/primary/active` is for interface states, so it
+is not used for code. (2026-11-02)
+
+```guard
+src/frontend/styles/components/state.styl :: color: colors-editor-syntax-plain
+```
+
+### D-28: The command palette's first row is marked, not focused
+
+When the palette opens, the keyboard is in the search field, so the field shows
+`key-focus`. The row Enter would run has the grey chosen fill. Once the arrow keys
+move onto the rows, `key-focus` moves to the current row and the field's line goes
+away. Typing puts it back in the field. A click on the field shows no line until a
+key is pressed, as with every field. (2026-11-02)
+
+```guard
+src/frontend/viewmodel/views/isonim_command_palette_view.nim :: if keyNavigation: "ct-menu-item--active" else: "ct-menu-item--chosen"
+src/frontend/styles/components/shared_widgets.styl :: .command-view:not(:has(.ct-menu-item--active)) .command-input-row:focus-within:not(.ct-palette-clicked)
+```
+
+### D-29: Dropdown rows have no line between them
+
+No dropdown draws a line between its rows. The add-context menu, the status bar's
+tab-list menu and the command palette's results used to, through
+`dropdown-surface-row()`, while every other dropdown did not. (2026-11-02)
+
+```guard
+src/frontend/styles/components/shared_widgets.styl :: No line between rows, on any dropdown
+```
+
+### D-30: A dropdown row's hover is quieter than a list row's
+
+A dropdown row's hover uses `colors-ui-surface-primary-default-hover`, `#262626` in
+the dark themes and `#DBD6CC` in the light ones. Lists and tables keep the stronger
+`#333333`, which is also the chosen row's fill, so hover no longer looks like the
+chosen row. A dropdown painted `#242424` or lighter stays on the list hover, because
+this colour would not show on it. (2026-11-02)
+
+```guard
+src/frontend/styles/components/button.styl :: DROPDOWN_HOVER_BG = colors-ui-surface-primary-default-hover
+src/frontend/styles/components/menu_item.styl :: background: DROPDOWN_HOVER_BG
+```
+
+### D-31: One tooltip, from the design system
+
+Every tooltip looks like the Tooltip component in Figma, with no arrow. One line is `sm`:
+4px corners, 12/16 text, padding 6px and 12px in the dark theme, 4px and 8px in the light
+one. Wrapped text is `lg`: 320px wide, 8px corners, padding 6px and 8px. The dark theme
+is `colors/ui/surface/base/raised` with a 1px `colors/ui/border/tertiary` border inside
+its edge. The light theme is `colors/ui/surface/on-color/secondary` with no border and
+`colors/ui/text/primary/body` text, because Figma's `text/on-color/body` is unreadable
+on that fill in the light mode. Controls
+state their tooltip as a `title`, and `views/tooltips.nim` shows it in place of the
+operating system's. It appears after a 0.2s rest or when the keyboard reaches the
+control, and Esc, a click or moving away hides it. Every icon-only control has a tooltip.
+A tooltip that repeats the text on screen shows nothing, and text cut off with an
+ellipsis shows its full value. The debug toolbar keeps its `.custom-tooltip` children,
+which its tests read, painted the same way. The code editor shows its own hovers, but a
+tracepoint's box inside it uses this tooltip, including its run button. (2026-11-02,
+tracepoint box 2026-11-03)
+
+```guard
+src/frontend/viewmodel/views/tooltips.nim :: globalThis.__ctTooltips = true
+src/frontend/ui_js.nim :: import viewmodel/views/tooltips
+src/frontend/styles/codetracer.styl :: @import "components/tooltip"
+src/frontend/styles/components/tooltip.styl :: .ct-tooltip--lg
+src/frontend/styles/components/button.styl :: background-color: by-mode(colors-ui-surface-base-raised, colors-ui-surface-on-color-secondary)
+src/frontend/ui/layout.nim :: _pinBtn.title = 'Pin to the sidebar'
+src/frontend/viewmodel/views/isonim_agent_activity_view.nim :: title = "Agent settings"
+src/frontend/viewmodel/views/isonim_state_view.nim :: title = badgeAriaForRow(vm, item())
+src/frontend/viewmodel/views/tooltips.nim :: OURS_INSIDE = '.trace'
+src/frontend/ui/trace.nim :: runButton.setAttribute(cstring"title", cstring"Run tracepoints (Ctrl+Enter)")
+```
+
+## Focus rules
+
+Agreed by Nikolay on 2026-11-02, from
+[WebAIM](https://webaim.org/techniques/keyboard/), the
+[W3C ARIA Authoring Practices](https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/)
+and [Subux](https://subux.pro/guides/article/focus-states). They apply to all new UI
+work.
+
+**How it looks**
+
+1. **Always visible.** Everything the keyboard can land on shows `key-focus`. Never
+   remove it without a replacement. The code editor's own cursor and focus line are
+   the one exception.
+2. **One style.** `key-focus` is defined once, as an outline, because shadows
+   disappear in Windows high-contrast mode.
+3. **Keyboard only.** It appears when navigating by keyboard, not after a click.
+4. **One at a time.** Only one element shows it.
+5. **Each state looks different.** Focus is where the keyboard is. It must look
+   different from hover and from selection, which is a saved choice that stays after
+   focus leaves.
+
+**How it moves**
+
+6. **Tab moves between components; arrow keys move inside them.** A list, menu, set
+   of tabs or dropdown is one Tab stop. Add new ones to `views/keyboard_focus.nim`.
+7. **Entering a component.** Focus lands on the selected item, or the first.
+8. **Order follows the layout.** Left to right, top to bottom, one section at a time.
+   Never use a positive `tabindex`.
+9. **Only controls take focus.** Text, cells that do nothing and containers do not.
+   A pane is focused by a click or from code (`tabindex="-1"`), and a closed panel
+   is hidden from Tab.
+10. **Focus is never lost.** When something closes, focus returns to what opened it.
+    When an item is deleted, it moves to the next item.
+11. **No traps.** Esc closes menus and dialogs. A non-modal one closes when focus
+    leaves it.
+
+**Which keys do what**
+
+12. **Standard keys.** Buttons: Enter or Space. Links: Enter. Checkboxes: Space. Tabs
+    and lists: arrow keys.
+13. **Shortcuts are extras.** Everything must also be reachable with Tab or arrows.
+14. **Real controls first.** Use native buttons and links where possible. Custom ones
+    must behave the same way.
 
 ## Standing rules
 
@@ -263,6 +498,8 @@ no guard. Reviewers and agents apply them by hand.
   because it has no Light cut. Older declarations still break this rule and are
   being cleaned up.
 - **Units:** write styles in `rem` or `em` (root 16px) and land on whole pixels.
+  This one is checked: `ci/test/ui-design-decisions.py` fails on a px value in
+  any stylesheet under `src/frontend/styles`. Comments may still say px.
 - **Icons:** take them from the design system's icons page, Figma
   `Ytr6Ux4bYZYRUBpgNsSVml` node 1:12.
 - **Panels:** build them as Golden Layout stacks with the standard header and
@@ -271,6 +508,8 @@ no guard. Reviewers and agents apply them by hand.
   `margin-top: auto` alone.
 - **Spacing:** keep paddings consistent, and fix sibling panels and screens
   together.
+- **Tooltips:** give every new icon-only control a `title`, saying what it does.
+  `views/tooltips.nim` shows it in the design system's Tooltip.
 
 ## Open questions
 

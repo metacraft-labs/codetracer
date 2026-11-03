@@ -39,6 +39,7 @@ when defined(js):
   from ./table_fit_dom import attachEventLogFit
   # Enter and Space on a `role="button"` row or header cell are its click.
   import ./isonim_activation
+  import ./keyboard_focus
   from ./row_link_dom import attachRowLinkClicks
 
   proc preventDefault(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
@@ -708,7 +709,7 @@ proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM;
   var scrollBody, tbodyEl, dataTable, footerInput: N
   let panel = ui(r):
     tdiv(class = "component-container eventLog event-log-component",
-         tabindex = "2"):
+         tabindex = "-1"):
       tdiv(class = "ct-flex"):
         button(id = "category-image",
                class = "ct-button-image-md-secondary ct-button-no-border",
@@ -817,7 +818,8 @@ proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM;
              draggable = "true",
              `data-column` = $item()):
           span(class = columnCheckClass(vm, item()),
-               role = "button", tabindex = "0",
+               role = "button", tabindex = "-1",
+               title = "Show or hide this column",
                `aria-pressed` = columnShownText(vm, item()),
                onclick = onToggleColumn(vm, item())):
             span(class = "ct-checkmark",
@@ -827,8 +829,8 @@ proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM;
                onclick = onToggleColumn(vm, item())):
             text columnOptionTitle(item())
           span(ref = handleEl, class = EventLogColumnHandleClass,
-               role = "button", tabindex = "0",
-               title = "Drag to reorder",
+               role = "button", tabindex = "-1",
+               title = "Drag to reorder, or press Enter to move it down",
                `aria-label` = "Move " & columnOptionTitle(item()) & " down")
       when defined(js):
         when N is isonim_dom.Element:

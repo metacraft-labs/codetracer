@@ -5,7 +5,7 @@
   .write-file-path
     color: blue
   .write-file-content
-    height: 100px
+    height: 6.25rem
 
 
 
@@ -16,7 +16,7 @@
   .read-file-path
     color: #eee
   .read-file-content
-    height: 100px
+    height: 6.25rem
     overflow: hidden
 
 .open-dir, .read-dir
@@ -33,15 +33,15 @@
 
   .trace-log-table-header
     display: grid
-    grid-template-columns: 120px 160px 180px minmax(0, 1fr)
-    flex: 0 0 24px
+    grid-template-columns: 7.5rem 10rem 11.25rem minmax(0, 1fr)
+    flex: 0 0 1.5rem
     align-items: center
-    border-bottom: 1px solid colors-ui-surface-input-default
+    border-bottom: 0.0625rem solid colors-ui-surface-input-default
     color: colors-ui-text-primary-body
     font-family: "SpaceGrotesk"
-    font-size: 13px
-    line-height: 20px
-    padding: 0 8px
+    font-size: 0.8125rem
+    line-height: 1.25rem
+    padding: 0 0.5rem
 
   .trace-log-table-body
     flex: 1 1 auto
@@ -49,17 +49,17 @@
     overflow-y: auto
     overflow-x: hidden
     font-family: "SpaceMono", monospace
-    font-size: 13px
-    line-height: 20px
+    font-size: 0.8125rem
+    line-height: 1.25rem
 
   .trace-log-row
     display: grid
-    grid-template-columns: 120px 160px 180px minmax(0, 1fr)
-    min-height: 24px
+    grid-template-columns: 7.5rem 10rem 11.25rem minmax(0, 1fr)
+    min-height: 1.5rem
     align-items: center
-    border-top: 1px solid colors-ui-border-secondary
+    border-top: 0.0625rem solid colors-ui-border-secondary
     color: colors-ui-text-primary-body
-    padding: 0 8px
+    padding: 0 0.5rem
     cursor: pointer
 
     &:hover,
@@ -77,21 +77,21 @@
 
   .trace-col-rr-ticks
     position: relative
-    padding-left: 4px
+    padding-left: 0.25rem
 
     .event-rr-ticks-line
       position: absolute
       left: 0
-      right: 12px
-      bottom: 4px
-      height: 2px
+      right: 0.75rem
+      bottom: 0.25rem
+      height: 0.125rem
       background: colors-ui-text-primary-active
 
   .trace-log-empty
-    padding: 12px 8px
+    padding: 0.75rem 0.5rem
     color: colors-ui-text-primary-body
     font-family: "SpaceGrotesk"
-    font-size: 13px
+    font-size: 0.8125rem
 
     &.hidden
       display: none
@@ -113,7 +113,7 @@
 
 .trace-main
   // stop:8px
-  top: 8px
+  top: 0.5rem
   background-color: colors-ui-surface-base-panel
   color: colors-ui-text-primary-body
   // width: calc(100%+71px)
@@ -122,7 +122,7 @@
   // height: 36ch
   position: absolute
   if IS_EXTENSION
-    max-width: calc(100% - 15px)
+    max-width: calc(100% - 0.9375rem)
   // left: -81px
 
   .editor-textarea
@@ -250,23 +250,23 @@
 
     .trace-chevron-baseline
       position: absolute;
-      width: 80px;
-      height: 2px;
+      width: 5rem;
+      height: 0.125rem;
       top: 0;
       background-color: colors-ui-text-primary-label;
       z-index: 3;
-      left: calc(50% - 40px);
-      border-top-left-radius: 2px
-      border-top-right-radius: 2px
+      left: calc(50% - 2.5rem);
+      border-top-left-radius: 0.125rem
+      border-top-right-radius: 0.125rem
 
     .trace-chevron-baseline-cut
       position: absolute;
-      width: 10px;
-      height: 2px;
+      width: 0.625rem;
+      height: 0.125rem;
       top: 0;
       background-color: colors-ui-surface-input-default;
       z-index: 3;
-      left: calc(50% - 5px);
+      left: calc(50% - 0.3125rem);
 
     .trace-chevron-arrow
       color: colors-ui-text-primary-label
@@ -277,22 +277,22 @@
 
       &::before
         border-style: solid
-        border-width: 2px 2px 0 0
+        border-width: 0.125rem 0.125rem 0 0
         content: ''
         display: inline-block
-        height: 9px
-        left: -4.5px
+        height: 0.5625rem
+        left: -0.28125rem
         position: absolute
-        top: -5px
+        top: -0.3125rem
         transform: rotate(315deg)
         vertical-align: top
-        width: 9px
+        width: 0.5625rem
 
   .trace-modal
-    border: 1px solid black
+    border: 0.0625rem solid black
     position: relative
     display: none
-    margin-left: 60px
+    margin-left: 3.75rem
     background-color: colors-ui-surface-input-default
     width: 85%
     overflow: visible
@@ -303,15 +303,15 @@
 
     .modal-close-button
       position: absolute
-      top: 3px
+      top: 0.1875rem
       right: 0
-      height: 17px
+      height: 1.0625rem
       display: flex
       z-index: 2
 
     .modal-close-button::after
       content: "X"
-      font-size: 15px
+      font-size: 0.9375rem
       font-weight: bold
 
     .select-kind-button-container
@@ -337,17 +337,17 @@
   border-color: #00a
 
 .trace-menu
-  min-height: 36px
+  min-height: 2.25rem
   // width: 100%
   display: flex
   flex: 0 0 auto
-  padding-left: 6px
-  padding-right: 6px
+  padding-left: 0.375rem
+  padding-right: 0.375rem
   // padding-bottom: 8px
-  padding-top: 6px
+  padding-top: 0.375rem
   align-items: start
   justify-content: space-between
-  border-radius: 6px
+  border-radius: 0.375rem
 
   .trace-search
     line-height: 0
@@ -359,9 +359,9 @@
     width: fit-content !important
 
     .trace-dropdown-list-container
-      padding: 4px
+      padding: 0.25rem
       background-color: colors-ui-surface-base-raised
-      border-radius: 6px
+      border-radius: 0.375rem
 
   .dropdown-list.active
     .fa
@@ -370,15 +370,15 @@
       color: by-mode(colors-ui-surface-input-default, colors-ui-icon-primary-default)
 
   .run-trace-button
-    border-radius: 6px;
+    border-radius: 0.375rem;
     // The run glyph: white (BORDER_COLOR is DEFAULT, white) on the tertiary
     // surface, 2.2:1 in the light theme, which takes the icon token
     // (`by-mode`, defaults.styl).
     color: by-mode(BORDER_COLOR, colors-ui-icon-primary-default);
     cursor: pointer;
-    height: 24px;
+    height: 1.5rem;
     background: colors-ui-surface-primary-tertiary;
-    width: 24px;
+    width: 1.5rem;
     position: relative;
     z-index: TRACE_LOG_EDITOR_Z_INDEX + 7
     display: flex
@@ -392,7 +392,7 @@
     width: -moz-available
     width: -webkit-fill-available
     width: stretch
-    padding-right: 8px
+    padding-right: 0.5rem
 
     // input
     //   height: 24px
@@ -411,18 +411,10 @@
     //     outline: none
 
   .hamburger-dropdown
-    border-radius: 6px
-    height: 24px
+    border-radius: 0.375rem
+    height: 1.5rem
     z-index: TRACE_LOG_EDITOR_Z_INDEX + 7
     top: 0
-
-    .trace-hamburger-svg
-      height: 24px
-      width: 24px
-      background-image: TRACE_HAMBURGER_IMAGE
-      background-size: 12px 8px
-      background-repeat: no-repeat
-      background-position: center
 
   .trace-dropdown-menu
     display: none
@@ -430,20 +422,20 @@
     &.active
       background: #b8c0cf !important
       position: absolute
-      border: 1px solid
-      border-radius: 10px
+      border: 0.0625rem solid
+      border-radius: 0.625rem
       // A dropdown's outline: the primary border token in the light theme
       // (`by-mode`, defaults.styl).
       border-color: by-mode(darkgrey, colors-ui-border-primary)
       padding-top: 0
-      padding-left: 5px
-      padding-right: 10px
-      padding-bottom: 10px
-      margin-top: 5px
+      padding-left: 0.3125rem
+      padding-right: 0.625rem
+      padding-bottom: 0.625rem
+      margin-top: 0.3125rem
       z-index: 56
       top: 0
-      right: 20px
-      transform: translate3d(0px, 26px, 0px)
+      right: 1.25rem
+      transform: translate3d(0, 1.625rem, 0)
       display: block
       color: black
 
@@ -455,8 +447,8 @@
   // right: 0px
 
   .trace-menu-header
-    height: 30px
-    margin-top: 5px
+    height: 1.875rem
+    margin-top: 0.3125rem
 
     // button
     //   background-color: TRACE_HEADER_BACKGROUND_COLOR
@@ -470,17 +462,17 @@
     //   float: left
 
     .dropdown
-      border-radius: 15px
+      border-radius: 0.9375rem
       color:#434f6a
       cursor: pointer
-      height: 30px
-      margin-top: 10px
+      height: 1.875rem
+      margin-top: 0.625rem
       background-color: colors-ui-surface-input-default
-      padding-top: 2px
-      padding-left: 15px
-      padding-right: 30px
-      right: 10px
-      width: 30px
+      padding-top: 0.125rem
+      padding-left: 0.9375rem
+      padding-right: 1.875rem
+      right: 0.625rem
+      width: 1.875rem
       position: absolute
       z-index: 1
 
@@ -491,31 +483,25 @@
 
   .trace-buttons-container
     display: flex
-    gap: 6px
-
-    .trace-run-button-svg
-      height: 24px
-      width: 24px
-      background-image: RUN_TRACEPOINT_IMAGE
-      background-repeat: no-repeat
+    gap: 0.375rem
 
 .kind-dropdown-menu
   background: #b8c0cf !important
   position: absolute
-  border: 1px solid
-  border-radius: 10px
+  border: 0.0625rem solid
+  border-radius: 0.625rem
   // As `.trace-dropdown-menu` above.
   border-color: by-mode(darkgrey, colors-ui-border-primary)
   padding-top: 0
-  padding-left: 5px
-  padding-right: 10px
-  padding-bottom: 10px
-  margin-top: 5px
+  padding-left: 0.3125rem
+  padding-right: 0.625rem
+  padding-bottom: 0.625rem
+  margin-top: 0.3125rem
   width: fit-content
   z-index: 56
   top: 0 !important
   // right: 75px
-  transform: translate3d(0px, 21px, 0px)
+  transform: translate3d(0, 1.3125rem, 0)
   display: block
   color: black
   user-select: none
@@ -524,7 +510,7 @@
 .trace-simple
   color: TRACE_SIMPLE_COLOR
   cursor: pointer
-  padding-top: 5px
+  padding-top: 0.3125rem
 
 .trace-sequence
   display: flex
@@ -532,7 +518,7 @@
 
 .trace-var
   color: TRACE_VAR_COLOR
-  font-size: 20px
+  font-size: 1.25rem
 
 .trace-enum
   color: TRACE_ENUM_COLOR
@@ -559,7 +545,7 @@
   width: 100%
 
 .trace-data
-  font-size: 16px
+  font-size: 1rem
 
 .links line
   stroke: #999
@@ -567,7 +553,7 @@
 
 .nodes circle
   stroke: #fff
-  stroke-width: 1.5px
+  stroke-width: 0.09375rem
 
 .trace-slot
   width: 5%
@@ -578,7 +564,7 @@
   text-align: right
 
 
-RESIZING_BORDER_SIZE = 4px
+RESIZING_BORDER_SIZE = 0.25rem
 
 .width-border
   height RESIZING_BORDER_SIZE
@@ -595,7 +581,7 @@ RESIZING_BORDER_SIZE = 4px
 
 .trace-error
   color: colors-ui-text-error-primary
-  padding-right: 8px
+  padding-right: 0.5rem
 
 .trace-simple-metadata
   flex-grow: 20
@@ -617,12 +603,12 @@ RESIZING_BORDER_SIZE = 4px
 
 .select-view-kind-button
   text-align: center
-  height: 25px
-  width: 100px
+  height: 1.5625rem
+  width: 6.25rem
   background-color: colors-ui-surface-primary-tertiary
   color: colors-ui-text-primary-body
-  font-size: 15px
-  border-radius: 15px
+  font-size: 0.9375rem
+  border-radius: 0.9375rem
   cursor: pointer
   display: none
   position: absolute
@@ -630,17 +616,17 @@ RESIZING_BORDER_SIZE = 4px
   left: 0
 
   &.active
-    border-radius: 15px
-    border: 2px solid
+    border-radius: 0.9375rem
+    border: 0.125rem solid
     border-color: rgb(126, 126, 126)
     text-align: center
-    height: 25px
-    width: 100px
+    height: 1.5625rem
+    width: 6.25rem
     background-color: #b8c0cf
     // A surface token as text: #b5ae9f on this #b8c0cf in the light theme,
     // 1.2:1, so there body text (`by-mode`, defaults.styl).
     color: by-mode(colors-ui-surface-primary-tertiary, colors-ui-text-primary-body)
-    font-size: 15px
+    font-size: 0.9375rem
     cursor: pointer
     position: absolute
     // right: 75px
@@ -652,7 +638,7 @@ RESIZING_BORDER_SIZE = 4px
     color: by-mode(colors-ui-surface-primary-tertiary, colors-ui-text-primary-body)
 
   ::after
-    margin-left: 10px !important
+    margin-left: 0.625rem !important
 
 .expanded-compound-select-view-kind
   margin-left: 32%
@@ -665,22 +651,22 @@ RESIZING_BORDER_SIZE = 4px
 
 #save-trace
   cursor: pointer
-  font-size: 24px
+  font-size: 1.5rem
 
 .trace
   .dropdown-list-item
     display: flex
     text-indent: 0 !important
-    padding-left: 4px !important
-    padding-right: 4px !important
+    padding-left: 0.25rem !important
+    padding-right: 0.25rem !important
     text-align: start
     font-weight: 400
-    font-size: 14px
+    font-size: 0.875rem
     justify-content: start
-    border-radius: 4px
+    border-radius: 0.25rem
 
     &:hover
-      background-color: colors-ui-surface-primary-secondary-hover
+      background-color: DROPDOWN_HOVER_BG
 
   // .dropdown-list
   //   min-width: 80px !important
@@ -703,7 +689,7 @@ RESIZING_BORDER_SIZE = 4px
   font-family: "SpaceGrotesk"
   position: relative
   // top: calc(50% - 0.5ex)
-  font-size: 14px
+  font-size: 0.875rem
   text-align: center
   cursor: text
   user-select: text
@@ -727,7 +713,7 @@ RESIZING_BORDER_SIZE = 4px
 
 .error-trace
   color: colors-ui-text-error-primary
-  padding-right: 8px
+  padding-right: 0.5rem
 
 // The tracepoint view-kind menu (table / line / pie) is Bootstrap markup, and
 // Bootstrap's `.dropdown-item:hover` paints a LIGHT #f8f9fa row with dark text —

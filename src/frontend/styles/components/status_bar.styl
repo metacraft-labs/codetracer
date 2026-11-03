@@ -146,8 +146,8 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
   // The panel inset (PANEL_INSET, 8px, button.styl) at the sides; no top of
   // its own — the dock's 8px (auto_hide.styl) is the whole gap above it.
   .build-header
-    padding: 0 PANEL_INSET 4px
-    font-size: 13px
+    padding: 0 PANEL_INSET 0.25rem
+    font-size: 0.8125rem
     flex-shrink: 0
     display: flex
     align-items: center
@@ -163,7 +163,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
   .build-header-controls
     display: flex
     align-items: center
-    gap: 4px
+    gap: 0.25rem
     flex-shrink: 0
 
   .build-ctrl-btn
@@ -175,7 +175,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     justify-content: center
     box-sizing: border-box
     border-radius: CONTROL_RADIUS
-    font-size: 12px
+    font-size: 0.75rem
     user-select: none
     // The button look (button.styl).  The icon is a mask painted `currentColor`
     // (below), so it follows the look's text colour.
@@ -226,21 +226,21 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       background-color: rgba(248, 81, 73, 0.15)
 
   .build-duration
-    font-size: 12px
+    font-size: 0.75rem
     color: colors-ui-text-primary-caption
-    margin-left: 4px
+    margin-left: 0.25rem
     white-space: nowrap
 
   // PLAT-56 (Build-Output-Pane.md §3.7): the history picker — a text button
   // in the controls (shown once a build has ended before the current one) and
   // the list it opens under the header, the shown build marked.
   .build-history-btn
-    font-size: 12px
+    font-size: 0.75rem
     color: colors-ui-text-primary-label
-    padding: 0 6px
+    padding: 0 0.375rem
     height: CONTROL_HEIGHT_SM
     line-height: CONTROL_HEIGHT_SM
-    border-radius: 3px
+    border-radius: 0.1875rem
     cursor: pointer
     user-select: none
     white-space: nowrap
@@ -255,19 +255,19 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
   // PLAT-56: no build has run (the shared `BuildIdleText`).
   .build-empty
     flex-shrink: 0
-    padding: 4px PANEL_INSET
-    font-size: 13px
+    padding: 0.25rem PANEL_INSET
+    font-size: 0.8125rem
     color: colors-ui-text-primary-label
 
   .build-history-menu
     flex-shrink: 0
-    margin: 0 PANEL_INSET 4px
-    font-size: 12px
+    margin: 0 PANEL_INSET 0.25rem
+    font-size: 0.875rem
     color: colors-ui-text-primary-body
-    border-bottom: 1px solid colors-ui-border-primary
+    border-bottom: 0.0625rem solid colors-ui-border-primary
 
     .build-history-item
-      padding: 2px 6px
+      padding: 0.125rem 0.375rem
       cursor: pointer
       white-space: nowrap
 
@@ -309,20 +309,20 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     flex: 1
     overflow: auto
     font-family: "SpaceMono", monospace !important
-    font-size: 14px
-    line-height: 24px
+    font-size: 0.875rem
+    line-height: 1.5rem
     // PLAT-70 (Horizontal-Overflow.md §4): a text pane — its lines are not
     // wrapped; a line wider than the pane is reached by the horizontal bar.
     white-space: pre
 
     .build-stdout, .build-stderr, .build-output-line
-      min-height: 24px
+      min-height: 1.5rem
       // The panel inset (PANEL_INSET, button.styl) on both sides.
       padding-left: PANEL_INSET
       padding-right: PANEL_INSET
       font-family: "SpaceMono", monospace !important
-      font-size: 14px
-      line-height: 24px
+      font-size: 0.875rem
+      line-height: 1.5rem
       white-space: pre-wrap
 
 // The legacy Karax build panel. Same four declarations, same fix: the IsoNim
@@ -356,22 +356,22 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
   background-color: colors-ui-surface-base-panel
   color: colors-ui-text-primary-body
   font-family: "SpaceMono", monospace !important
-  font-size: 14px
-  line-height: 24px
+  font-size: 0.875rem
+  line-height: 1.5rem
   white-space: pre-wrap
 
   .build-stdout, .build-error
     color: colors-ui-text-primary-body
 
   .build-stdout, .build-stderr, .build-error, .build-output-line
-    min-height: 24px
+    min-height: 1.5rem
     // The panel inset (PANEL_INSET, button.styl) on both sides — this block
     // outranks the one above, so it is the one that reaches the lines.
     padding-left: PANEL_INSET
     padding-right: PANEL_INSET
     font-family: "SpaceMono", monospace !important
-    font-size: 14px
-    line-height: 24px
+    font-size: 0.875rem
+    line-height: 1.5rem
     white-space: pre-wrap
 
   .build-stderr
@@ -403,7 +403,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     color: colors-ui-text-primary-body
 
   .build-error
-    border: colors-ui-text-primary-body solid 1px
+    border: colors-ui-text-primary-body solid 0.0625rem
 
   overflow: auto
 
@@ -691,7 +691,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     .checkbox
       display: inherit
       height: auto
-      margin-bottom: 0px !important
+      margin-bottom: 0 !important
 
     .checkbox-text
       white-space: nowrap
@@ -705,17 +705,17 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       position: relative
       float: left
       width: max-content
-      margin-left: 20px
+      margin-left: 1.25rem
       background-color: colors-ui-surface-base-panel
       text-align: center
-      padding-left: 20px
-      padding-right: 20px
-      height: 21px
-      line-height: 21px
-      border-radius: 5px
+      padding-left: 1.25rem
+      padding-right: 1.25rem
+      height: 1.3125rem
+      line-height: 1.3125rem
+      border-radius: 0.3125rem
       cursor: pointer
-      margin-top: 2px
-      margin-bottom: 2px
+      margin-top: 0.125rem
+      margin-bottom: 0.125rem
       user-select: none
 
     // ALSO DEAD, AND ALSO LEFT ALONE — see `.whitespace-set` below for the
@@ -731,25 +731,25 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       color: colors-ui-border-primary
       float: left
       width: max-content
-      margin-left: 20px
+      margin-left: 1.25rem
       text-align: center
-      padding-left: 20px
-      padding-right: 20px
-      height: 21px
-      line-height: 21px
-      border-radius: 5px
+      padding-left: 1.25rem
+      padding-right: 1.25rem
+      height: 1.3125rem
+      line-height: 1.3125rem
+      border-radius: 0.3125rem
       cursor: pointer
-      margin-top: 2px
-      margin-bottom: 2px
+      margin-top: 0.125rem
+      margin-bottom: 0.125rem
 
     .new-notifications-counter
       position: absolute;
-      top: -14px;
-      right: 4px;
-      padding-left: 6px;
-      padding-right: 6px;
+      top: -0.875rem;
+      right: 0.25rem;
+      padding-left: 0.375rem;
+      padding-right: 0.375rem;
       background-color: red;
-      border-radius: 10.5px;
+      border-radius: 0.65625rem;
       color: white;
       font-weight: bold;
 
@@ -780,17 +780,17 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     .disconnected-status
       display: inline-flex
       align-items: center
-      padding: 0 8px
-      margin-right: 12px
-      border: 1px solid colors-ui-text-warning-primary
-      border-radius: 6px
+      padding: 0 0.5rem
+      margin-right: 0.75rem
+      border: 0.0625rem solid colors-ui-text-warning-primary
+      border-radius: 0.375rem
       color: colors-ui-text-warning-primary
       font-weight: 600
 
     #editor-cursor-status
       display: inline-flex
       align-items: center
-      gap: 8px
+      gap: 0.5rem
       max-width: 36em
       overflow: hidden
       white-space: nowrap
@@ -836,16 +836,16 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     // still unrendered — so if anyone ever wires it up, the guard fails and
     // sends them here instead of letting 1.51:1 ship to a user.
     .whitespace-set
-      width: 10px
+      width: 0.625rem
       float: left
-      font-size: 7px
+      font-size: 0.4375rem
       color: colors-ui-border-secondary
-      margin-top: 4px
-      margin-bottom: 2px
+      margin-top: 0.25rem
+      margin-bottom: 0.125rem
 
     .whitespace-change
-      height: 8px
-      width: 10px
+      height: 0.5rem
+      width: 0.625rem
       cursor: pointer
 
       :hover
@@ -855,9 +855,9 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
         display: block !important
 
     .whitespace-label
-      width: 80px
+      width: 5rem
       float: left
-      margin-left: 10px
+      margin-left: 0.625rem
 
     .status-buttons
       float: left
@@ -873,18 +873,18 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     #file-info-status-editor-whitespace
       margin-left: 2vw
       float: left
-      width: 100px !important
+      width: 6.25rem !important
 
     #operation-status
       float: left
-      width: 200px
+      width: 12.5rem
       // margin-left: 2vw
       white-space: nowrap
       color: colors-ui-text-success-primary
       font-family: "SpaceGrotesk"
 
     #version-control-status
-      margin-left:10px
+      margin-left:0.625rem
       float: left
 
     .status-right
@@ -894,7 +894,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       // Pinned to the right edge: the tab strip that used to fill the gap
       // (`flex: 1`) is now centred out of flow (auto_hide.styl).
       margin-left: auto
-      padding-right: 8px
+      padding-right: 0.5rem
       // Let the location readout shrink so `.location-path`'s ellipsis can
       // engage: a flex item will not go below its min-content width unless
       // `min-width` is relaxed, and a `nowrap` path's min-content is the whole
@@ -931,7 +931,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       align-items: center
       flex: 0 0 auto
       white-space: nowrap
-      margin-right: 8px
+      margin-right: 0.5rem
       cursor: default
 
     // THE TEST-CERTIFICATE INDICATOR (SB-1, GUI/Layout-And-Navigation/Status-Bar.md).
@@ -958,7 +958,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       align-items: center
       flex: 0 0 auto
       white-space: nowrap
-      margin-right: 8px
+      margin-right: 0.5rem
       cursor: pointer
       position: relative
 
@@ -969,10 +969,10 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     .build-status
       display: inline-flex
       align-items: center
-      gap: 4px
+      gap: 0.25rem
       flex: 0 0 auto
       white-space: nowrap
-      margin-right: 8px
+      margin-right: 0.5rem
       cursor: pointer
 
     // THE DISCLOSURE IS OUT OF FLOW, ON PURPOSE.
@@ -991,36 +991,36 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       bottom: 100%
       right: 0
       z-index: 20
-      min-width: 260px
-      max-width: 420px
-      padding: 8px 10px
-      margin-bottom: 6px
+      min-width: 16.25rem
+      max-width: 26.25rem
+      padding: 0.5rem 0.625rem
+      margin-bottom: 0.375rem
       text-align: left
       white-space: normal
-      border-radius: 5px
+      border-radius: 0.3125rem
       background-color: colors-ui-surface-base-panel
       color: colors-ui-text-primary-label
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45)
+      box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.45)
 
       .test-certificate-summary
-        margin-bottom: 6px
+        margin-bottom: 0.375rem
 
       // NEVER DIMMED AWAY. This is the sentence that keeps "Certified" from
       // being read as "verified as unforgeable" (Status-Bar.md Notes), so it
       // is styled as quieter-but-legible rather than as fine print.
       .test-certificate-authenticity
-        margin-bottom: 6px
+        margin-bottom: 0.375rem
         color: colors-ui-text-primary-label-subtle
 
       .test-certificate-remedy
-        margin-bottom: 6px
+        margin-bottom: 0.375rem
 
       .test-certificate-row
         display: flex
-        gap: 8px
+        gap: 0.5rem
 
         .test-certificate-row-label
-          flex: 0 0 96px
+          flex: 0 0 6rem
           color: colors-ui-text-primary-label-subtle
 
         .test-certificate-row-value
@@ -1036,30 +1036,30 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     .status-flow-buttons
       .status-flow-types-list
         position: absolute
-        top: -85px
+        top: -5.3125rem
         // On the panel ground: body text in the light theme, where white is
         // 1.3:1 (`by-mode`, defaults.styl).
         color: by-mode(white, colors-ui-text-primary-body)
         text-align: left
         background-color: colors-ui-surface-base-panel
-        border-radius: 5px
-        padding: 10px
+        border-radius: 0.3125rem
+        padding: 0.625rem
         display: none
 
         &-active
           position: absolute
-          top: -85px
+          top: -5.3125rem
           color: by-mode(white, colors-ui-text-primary-body)
           text-align: left
           background-color: colors-ui-surface-base-panel
-          border-radius: 5px
-          padding: 10px
+          border-radius: 0.3125rem
+          padding: 0.625rem
           display: block
 
       .status-flow-type
-        border-radius: 5px
-        padding-left: 5px
-        padding-right: 5px
+        border-radius: 0.3125rem
+        padding-left: 0.3125rem
+        padding-right: 0.3125rem
 
         &:hover
           background-color: grey
@@ -1088,11 +1088,11 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     display: flex
     flex-direction: column
     gap: NOTIFICATION_STACK_GAP
-    border-top: 5px solid colors-ui-surface-primary-tertiary
-    border-left: 5px solid colors-ui-surface-primary-tertiary
-    border-right: 5px solid colors-ui-surface-primary-tertiary
-    border-top-left-radius: 5px
-    border-top-right-radius: 5px
+    border-top: 0.3125rem solid colors-ui-surface-primary-tertiary
+    border-left: 0.3125rem solid colors-ui-surface-primary-tertiary
+    border-right: 0.3125rem solid colors-ui-surface-primary-tertiary
+    border-top-left-radius: 0.3125rem
+    border-top-right-radius: 0.3125rem
     color: colors-ui-text-primary-body
     position: absolute
     z-index: 100
@@ -1107,21 +1107,21 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       font-family: "SpaceGrotesk"
       font-size: 0.875rem
       font-weight: 400
-      letter-spacing: -0.14px
+      letter-spacing: -0.00875rem
       text-transform: uppercase
       color: colors-ui-text-primary-label !important
-      text-indent: 10px
+      text-indent: 0.625rem
 
   #bug-report-container
     width: 50%
     max-height: 50vh
     overflow-y: scroll
     background-color: colors-ui-surface-base-panel
-    border-top: 5px solid colors-ui-surface-primary-tertiary
-    border-left: 5px solid colors-ui-surface-primary-tertiary
-    border-right: 5px solid colors-ui-surface-primary-tertiary
-    border-top-left-radius: 5px
-    border-top-right-radius: 5px
+    border-top: 0.3125rem solid colors-ui-surface-primary-tertiary
+    border-left: 0.3125rem solid colors-ui-surface-primary-tertiary
+    border-right: 0.3125rem solid colors-ui-surface-primary-tertiary
+    border-top-left-radius: 0.3125rem
+    border-top-right-radius: 0.3125rem
     color: colors-ui-text-primary-body
     position: absolute
     z-index: 100
@@ -1129,34 +1129,34 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
 
     .bug-report-header
       color: #5885ac !important
-      text-indent: 10px
+      text-indent: 0.625rem
       font-weight: bold
 
     .bug-report-text
       color: #5885ac !important
-      text-indent: 10px
+      text-indent: 0.625rem
       margin-left: 10%
       font-weight: bold
 
     .bug-report-description
-      height: 150px
+      height: 9.375rem
 
     #bug-report-title
       margin-left: 10% !important
 
     textarea
       color: colors-ui-text-primary-body
-      height: 100px
-      min-height: 100px
-      max-height: 300px
-      font-size: 17px !important
+      height: 6.25rem
+      min-height: 6.25rem
+      max-height: 18.75rem
+      font-size: 1.0625rem !important
       border: 0
       background-color: colors-ui-surface-primary-tertiary
       width: 80%
       margin-left: 10% !important
-      margin-bottom: 5px !important
-      border-radius: 15px
-      padding-left: 15px
+      margin-bottom: 0.3125rem !important
+      border-radius: 0.9375rem
+      padding-left: 0.9375rem
       overflow-wrap: break-word
 
     .bug-report-button-container
@@ -1165,9 +1165,9 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       margin-left: 10%
 
     .bug-report-button
-      padding-top: 5px
-      padding-bottom: 5px
-      margin-bottom: 10px
+      padding-top: 0.3125rem
+      padding-bottom: 0.3125rem
+      margin-bottom: 0.625rem
 
 // [1vw] file info lang , file info encoding [2vw] file info editor whitespace [20vw] operation [25vw] errors, build output buttons [..] location version control status [3vw] end
 
@@ -1177,8 +1177,8 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
 // TODO more responsive status
 
 .copy-file-path
-  width: 14px
-  height: 14px
+  width: 0.875rem
+  height: 0.875rem
   background-repeat: no-repeat
   background-position: center
   background-image: url("../../public/resources/menu/copy_file_path_dark.svg")
@@ -1188,26 +1188,26 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     opacity: 0.5
 
 #status-expanded
-  bottom: 20px
+  bottom: 1.25rem
   background-color: #444
-  height: 200px
-  font-size: 15px
+  height: 12.5rem
+  font-size: 0.9375rem
   position: fixed
   width: 100vw
 
 #build-status
   background-color: STATUS_BACKGROUND_COLOR
-  font-size: 15px
-  height: 50px
+  font-size: 0.9375rem
+  height: 3.125rem
   float: left
 
   #build-command
-    height: 25px
+    height: 1.5625rem
     background-color: yellow
     width: 100%
 
   #build-output
-    height: 25px
+    height: 1.5625rem
     width: 100%
 
 
@@ -1217,7 +1217,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
 
 .debug-notification
   min-width: fit-content
-  max-width: 466px
+  max-width: 29.125rem
   height: fit-content
   // The left-hand operation toast stacks above the same bar as
   // `#active-notifications` and carried the same stale 38px, so it is clipped
@@ -1225,7 +1225,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
   bottom: NOTIFICATION_STACK_BOTTOM
   position: fixed
   z-index: 100
-  left: 8px
+  left: 0.5rem
 
 #debug
   float: left
@@ -1242,22 +1242,22 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
 .viewer-search
   background-color: QUERY_COMPLETION_BG
   float: right
-  width: 240px
+  width: 15rem
   overflow: hidden
   position: absolute
   z-index: 2
 
   .query-completion
     color: QUERY_COMPLETION_FG
-    font-size: 18px
+    font-size: 1.125rem
 
   .editor-layout
     display: flex
 
 
 .animate
-  width: 500px
-  height: 500px
+  width: 31.25rem
+  height: 31.25rem
 
 .event-newline
   width: 100%
@@ -1279,7 +1279,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
   width: 100%
   text-align: center
   z-index: 2
-  height: 20px
+  height: 1.25rem
 
 .message-error
   background-color: ERROR_COLOR_BG
@@ -1294,7 +1294,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
   color: WARN_COLOR_FG
 
 .debug-skip-toggle
-  margin-left: 10px
+  margin-left: 0.625rem
 
 
 // Every text in the status bar at STATUS_BAR_TEXT_SIZE (top of this file):

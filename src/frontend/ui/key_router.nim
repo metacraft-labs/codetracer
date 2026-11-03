@@ -61,6 +61,9 @@ from ../viewmodel/viewmodels/omnibar_vm import paletteFieldOf
 import ../../common/key_names
 import ../viewmodel/viewmodels/video_player_vm
 from ../viewmodel/views/list_scrubber_dom import viewOperation
+from ../viewmodel/views/keyboard_focus import focusIsIn, DropdownListSelector,
+                                               CompositeItemSelector,
+                                               closeOpenDropdown
 from ../viewmodel/views/context_menu_bridge import contextMenuIsOpen,
                                                   contextMenuOperation
 # PLAT-70 Part B (Horizontal-Overflow.md §5): the table panes' detail, copy
@@ -750,18 +753,11 @@ proc focusOnButton(): bool {.importjs: """
   (function () {
     var el = document.activeElement;
     return !!(el && el.matches &&
-      el.matches('button:not(:disabled), a[href]:not(.jstree-anchor), [role="button"]:not(tr)'));
+      el.matches('button:not(:disabled), a[href]:not(.jstree-anchor), [role="button"]'));
   })()""".}
-  ## A button or link holds the focus.  A list's row is left out: it answers
-  ## `Enter` through the keymap (`list.activate`).
+  ## A button, link or `role="button"` row holds the focus.  The file tree's
+  ## anchors are left out: the tree answers `Enter` through the keymap.
 
-proc focusInDropdown(): bool {.importjs: """
-  (function () {
-    var el = document.activeElement;
-    return !!(el && el.closest &&
-      el.closest('.ct-picker-dropdown, .vcs-branch-dropdown, .agent-add-context-dropdown'));
-  })()""".}
-  ## A dropdown's row holds the focus (`views/dropdown_focus`).
 
 proc onKeyDown(ev: JsObject) =
   ## The ONE key listener (capture phase, on the window).
@@ -786,9 +782,21 @@ proc onKeyDown(ev: JsObject) =
   if name == "Enter" and not menuIsOpen() and not contextMenuIsOpen() and
      focusOnButton():
     return
-  # A dropdown's rows answer these keys themselves (D-18).
-  if key in ["ArrowUp", "ArrowDown", "Home", "End", "Escape"] and
-     focusInDropdown():
+  # An open dropdown takes Esc wherever the focus is, and nothing else runs
+  # (docs/UI-Design-Decisions.md, D-21).  Routed, it ran the pane's
+  # `list.clear-selection`, stopped the event, and the dropdown stayed open.
+  # This listener runs first of all, so nothing later could close it.
+  if name == "Esc" and not menuIsOpen() and not contextMenuIsOpen() and
+     closeOpenDropdown():
+    stop(ev)
+    return
+  # Dropdowns and roving composites answer these keys themselves
+  # (`views/keyboard_focus`; docs/UI-Design-Decisions.md, "Focus rules").
+  if key in ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"] and
+     focusIsIn(cstring DropdownListSelector):
+    return
+  if key in ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"] and
+     focusIsIn(cstring CompositeItemSelector):
     return
   routeKey(name, ev)
 

@@ -139,13 +139,14 @@ proc renderSideStripTab[R, N](
     tdiv(ref = tabEl,
          class = cls,
          `data-ct-panel-key` = tab.key,
+         role = "button", tabindex = "0",
          onclick = proc() = callbacks.invokeSelect(index)):
       span(class = AutoHideSideStripTabLabelClass):
         text tab.title
   if callbacks.showsHide(tab):
     var hideEl: N
     let hide = ui(r):
-      span(ref = hideEl, class = AutoHideSideStripTabHideClass, role = "button",
+      span(ref = hideEl, class = AutoHideSideStripTabHideClass, role = "button", tabindex = "-1",
           title = HideTabLabel, `aria-label` = HideTabLabel,
           onclick = proc() = callbacks.invokeHide(index))
     r.appendChild(result, hide)
@@ -178,6 +179,7 @@ proc renderCollapsedLine[R, N](
   ui(r):
     tdiv(
         class = AutoHideCollapsedStripLineClass,
+        title = "Show this side's panels",
         onclick = proc() = callbacks.invokeCollapsedSelect(),
         onmouseenter = proc() = callbacks.invokeCollapsedHoverEnter())
 

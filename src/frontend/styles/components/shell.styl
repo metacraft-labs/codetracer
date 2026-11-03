@@ -8,7 +8,7 @@
   background-color: colors-ui-surface-base-panel
   color: colors-ui-text-primary-body
   font-family: "SpaceGrotesk"
-  font-size: 13px
+  font-size: 0.8125rem
   overflow: hidden
 
   .shell-output
@@ -22,8 +22,8 @@
     display: flex
     align-items: center
     gap: 0
-    min-height: 16px
-    padding: 8px
+    min-height: 1rem
+    padding: 0.5rem
     border-top: 0
 
   .shell-prompt,
@@ -34,7 +34,7 @@
   .shell-input
     flex: 1 1 auto
     min-width: 0
-    height: 16px
+    height: 1rem
     border: 0
     border-radius: 0
     background-color: transparent
@@ -85,17 +85,17 @@
       background-color: rgb(85, 232, 85) // SHELL_CUSTOM_COMPILER_FLAG_COMMAND_BACKGROUND_COLOR
 
   .shell-event
-    width: 20px
+    width: 1.25rem
     position: relative
 
     .shell-event-type
       position: absolute
-      font-size: 12px
+      font-size: 0.75rem
       width: 100%
       color: gray
       font-style: italic
       top: 100%
-      left: -8px
+      left: -0.5rem
       transform-origin: (0 0)
       transform: rotate(270deg)
       overflow: hidden
@@ -103,11 +103,11 @@
 
     .shell-event-range
       position: absolute
-      top: 8px
-      left: 9px
-      height: calc(100% - 8px)
-      width: 2px
-      border-radius: 2px
+      top: 0.5rem
+      left: 0.5625rem
+      height: calc(100% - 0.5rem)
+      width: 0.125rem
+      border-radius: 0.125rem
       overflow: hidden
 
       .shell-event-summary
@@ -116,17 +116,17 @@
     .shell-event-status
       position: absolute
       top: 0
-      left: 2px
-      width: 16px
-      height: 16px
+      left: 0.125rem
+      width: 1rem
+      height: 1rem
       background-repeat: no-repeat
-      border-radius: 8px
+      border-radius: 0.5rem
       background-position: center
-      font-size: 12px
+      font-size: 0.75rem
       // The status text beside the icon: body text in the light theme
       // (`by-mode`, defaults.styl).
       color: by-mode(white, colors-ui-text-primary-body)
-      text-indent: 20px
+      text-indent: 1.25rem
       font-weight: bold
 
       @keyframes loading {
@@ -153,17 +153,17 @@
       .shell-event-range
         position: absolute
         top: 0
-        left: 2px
-        width: 300px
-        border-radius: 8px
+        left: 0.125rem
+        width: 18.75rem
+        border-radius: 0.5rem
         transition: width 2s
-        height: 100px
+        height: 6.25rem
         z-index: 10
 
       .shell-event-status
         z-index: 10
-        left: 10px
-        top: 8px
+        left: 0.625rem
+        top: 0.5rem
         transition: top 0.5s, left 0.5s
 
         &.working
@@ -175,30 +175,30 @@
 
       .shell-event-summary
         position: absolute
-        font-size: 16px
+        font-size: 1rem
         color: by-mode(white, colors-ui-text-primary-body)
         display: block
-        padding: 10px
-        margin-left: 20px
+        padding: 0.625rem
+        margin-left: 1.25rem
 
 #ROOT > .component-container > .shell-container
-  height: calc(100% + 28px)
+  height: calc(100% + 1.75rem)
 
 .shell-gutter
   background-color: colors-ui-surface-base-panel
-  border-right: 2px solid grey
+  border-right: 0.125rem solid grey
   height: 100%
   position: absolute
   visibility: visible !important
-  width 35px
+  width 2.1875rem
   z-index: 5
 
 .terminal.xterm
-  margin-top: 8px
+  margin-top: 0.5rem
   width: 100%
   overflow: auto
   background-color: transparent
-  border-radius: 8px
+  border-radius: 0.5rem
   font-family: "SpaceMono"
 
   // &::-webkit-scrollbar-corner
@@ -216,7 +216,7 @@
 .xterm-screen
   height: 100% !important
   // position: absolute !important
-  padding: 8px
+  padding: 0.5rem
 
   .xterm-rows
     position: relative
@@ -230,7 +230,7 @@
         cursor: pointer
 
   canvas
-    left: 80px !important
+    left: 5rem !important
 
 .xterm-viewport
   position: relative

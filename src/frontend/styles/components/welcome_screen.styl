@@ -84,7 +84,7 @@ body:has(> #welcomeScreen .welcome-screen-wrapper)
   padding: 1em
   background-color: by-mode(black, colors-ui-surface-primary-default)
   color: by-mode(white, colors-ui-text-primary-body)
-  border: 1px solid currentColor
+  border: 0.0625rem solid currentColor
   pointer-events: auto
 
 // A veil over the welcome screen while a trace loads, in the mode's own
@@ -336,12 +336,8 @@ welcome-heading-type()
       // hid the explanation. `cursor: not-allowed` says the same thing to the
       // pointer without taking the hover away.
       .inactive-start-option
-        opacity: 0.45
+        color: colors-ui-text-primary-disabled !important
         cursor: not-allowed
-
-        &.hovered
-          color: inherit
-          opacity: 0.45
 
       .start-option-icon
         width: 6.25em
@@ -532,8 +528,8 @@ welcome-heading-type()
           word-break: break-all
           // Position is set via JavaScript on hover (right of the trace row).
           // Off-screen default in px so it never flashes at center.
-          left: -9999px
-          top: -9999px
+          left: -624.9375rem
+          top: -624.9375rem
           transform: none
 
     // Recent folders styles - in welcome-left-panel
@@ -1064,17 +1060,17 @@ welcome-heading-type()
 // shared button look (button.styl) is for the panels of an open trace only.
 // This is the tertiary look as it was before that change — the tertiary fill,
 // no border, and a hover that only lightens the fill.  A refused start option
-// ("CodeTracer shell") is only faded (`.inactive-start-option`); a button that
-// is truly `disabled` keeps its thin disabled border.
+// ("CodeTracer shell") only dims its text (`.inactive-start-option`); a button
+// that is truly `disabled` also has a thin disabled border.  Neither changes the
+// fill, at rest or on hover (D-20).
 .welcome-screen-wrapper [class*="-button-"][class*="-tertiary"]
   border: 0
   background-color: colors-ui-surface-primary-tertiary
   color: colors-ui-text-primary-body-subtle
 
-  &:hover:not(:disabled)
+  &:hover:not(:disabled):not([aria-disabled="true"])
     background-color: colors-ui-surface-primary-tertiary-hover
     color: colors-ui-text-primary-body-subtle
 
   &:disabled
     border: 0.03125em solid colors-ui-border-disabled
-    background-color: colors-ui-surface-primary-disabled
