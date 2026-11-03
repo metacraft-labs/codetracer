@@ -53,13 +53,13 @@ if IS_EXTENSION
 
   .sidebar-menu-header
     font-weight: 700 !important
-    margin: 8px
-    padding-left: 12px
+    margin: 0.5rem
+    padding-left: 0.75rem
     background: var(--vscode-sideBar-background)
 
   .sidebar-menu-items
     font-weight: 400 !important
-    margin-top: 8px !important
+    margin-top: 0.5rem !important
     cursor: pointer
 
     div
@@ -67,11 +67,11 @@ if IS_EXTENSION
         background: var(--vscode-button-secondaryBackground)
 
     .sidebar-menu-item
-      padding-left: 20px
-      padding-right: 16px
-      padding-top: 8px
-      padding-bottom: 8px
-      border-bottom: 1px solid var(--vscode-editorWidget-border)
+      padding-left: 1.25rem
+      padding-right: 1rem
+      padding-top: 0.5rem
+      padding-bottom: 0.5rem
+      border-bottom: 0.0625rem solid var(--vscode-editorWidget-border)
 
 input::-webkit-input-placeholder
   color: colors-ui-text-primary-label;
@@ -339,7 +339,7 @@ EMPTY_OVERLAY_SIDE_GAP = 2.5rem
 .chartjs-render-monitor
   width: 100% !important
   height: 100% !important
-  min-height: 170px
+  min-height: 10.625rem
 
 // Replace Electron/OS default accent color (orange on macOS) with our blue.
 :root
@@ -428,7 +428,7 @@ body
   padding: 0.3125em 0.5625em
 
 .separate-bar
-  width: 0px
+  width: 0
   height: 1em
   border-left: 0.031em solid colors-ui-divider-primary
 
@@ -535,7 +535,7 @@ CAPTION_BAR_HEIGHT = unquote("var(--caption-bar-height)")
   padding-left: 0.25em
 
 #main
-  font-size: 20px
+  font-size: 1.25rem
   display: flex
   flex-wrap: wrap
   flex-direction: row
@@ -584,15 +584,15 @@ CAPTION_BAR_HEIGHT = unquote("var(--caption-bar-height)")
   //   box-shadow: inset 2px 0px 0px 0px colors-ui-border-primary
 
   &:focus
-    outline: 0px
+    outline: 0
 
 .hovered
   opacity: 0.6
 
 .panel
-  font-size: 18px
+  font-size: 1.125rem
   border-color: colors-ui-text-primary-body
-  border-width: 1px
+  border-width: 0.0625rem
   border-style: solid
   overflow: hidden
   display: flex
@@ -619,8 +619,8 @@ CAPTION_BAR_HEIGHT = unquote("var(--caption-bar-height)")
 .unselectable
   user-select: none
   #trace-query
-    height: 18px
-    font-size: 16px
+    height: 1.125rem
+    font-size: 1rem
 
 .dataTables_filter
   display: none
@@ -632,14 +632,14 @@ CAPTION_BAR_HEIGHT = unquote("var(--caption-bar-height)")
   background-color: SEARCHED_TOKEN_COLOR
 
 .indeterminate-checkmark
-  border: 1px solid colors-ui-border-secondary
-  border-radius: 2.5px
+  border: 0.0625rem solid colors-ui-border-secondary
+  border-radius: 0.15625rem
   display: flex
   position: absolute
-  top: 5px
+  top: 0.3125rem
   left: 0
-  width: 15px
-  height: 15px
+  width: 0.9375rem
+  height: 0.9375rem
   background-color: colors-ui-surface-primary-tertiary
 
 .indeterminate-checkmark::after
@@ -647,11 +647,11 @@ CAPTION_BAR_HEIGHT = unquote("var(--caption-bar-height)")
   display: flex
   position: relative
   align-items: center
-  transform: translateX(4px)
+  transform: translateX(0.25rem)
 
 .checkbox
   display:none
-  width: 20px !important
+  width: 1.25rem !important
   margin-left: 0 !important
   margin-right: 5
 
@@ -671,13 +671,13 @@ input:checked ~ .checkmark:after
 
 .code-tooltip
   display: block
-  padding-left: 4px
-  padding-right: 4px
+  padding-left: 0.25rem
+  padding-right: 0.25rem
   width: fit-content
-  font-size: 14px
-  line-height: 24px
+  font-size: 0.875rem
+  line-height: 1.5rem
   overflow-wrap: normal
-  max-width: calc(100% - 8px)
+  max-width: calc(100% - 0.5rem)
   position: absolute
   background-color: colors-ui-surface-primary-tertiary
   z-index: 3
@@ -689,41 +689,41 @@ input:checked ~ .checkmark:after
   transition: opacity 0.3s ease-in-out
   white-space: normal
   pointer-events: none
-  border-radius: 6px
+  border-radius: 0.375rem
 
   .active-line
     .excerpt-code
       color: colors-ui-text-primary-body !important
     background: colors-ui-surface-base-canvas
-    border-radius: 4px
+    border-radius: 0.25rem
     width: fit-content
-    padding-right: 4px
+    padding-right: 0.25rem
 
   li
-    padding-left: 4px
+    padding-left: 0.25rem
 
 .checkmark
-  border: 0.5px solid colors-ui-border-primary
-  border-radius: 2.5px
+  border: 0.03125rem solid colors-ui-border-primary
+  border-radius: 0.15625rem
   display:block
   position: absolute
-  top: 6px
+  top: 0.375rem
   left: 0
-  width: 14px
-  height: 14px
+  width: 0.875rem
+  height: 0.875rem
   background-color: colors-ui-surface-primary-tertiary
 
   &::after
-    left: 3.6px;
+    left: 0.225rem;
     if IS_EXTENSION
-      top: 0px;
+      top: 0;
     else
-      top: 1.6px;
-    width: 6px;
-    height: 8px;
+      top: 0.1rem;
+    width: 0.375rem;
+    height: 0.5rem;
     border: solid colors-ui-text-success-primary;
-    border-width: 0 2px 2px 0;
-    border-radius: 2px
+    border-width: 0 0.125rem 0.125rem 0;
+    border-radius: 0.125rem
     -webkit-transform: rotate(45deg);
     -ms-transform: rotate(45deg);
     transform: rotate(45deg);
@@ -777,7 +777,7 @@ input:checked ~ .checkmark:after
 
 .run-trace-button
   .custom-tooltip
-    right: 0px
+    right: 0
 
 .eventLog-medium-control-button
   .custom-tooltip

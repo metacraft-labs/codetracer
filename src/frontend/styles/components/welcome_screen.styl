@@ -84,7 +84,7 @@ body:has(> #welcomeScreen .welcome-screen-wrapper)
   padding: 1em
   background-color: by-mode(black, colors-ui-surface-primary-default)
   color: by-mode(white, colors-ui-text-primary-body)
-  border: 1px solid currentColor
+  border: 0.0625rem solid currentColor
   pointer-events: auto
 
 // A veil over the welcome screen while a trace loads, in the mode's own
@@ -528,8 +528,8 @@ welcome-heading-type()
           word-break: break-all
           // Position is set via JavaScript on hover (right of the trace row).
           // Off-screen default in px so it never flashes at center.
-          left: -9999px
-          top: -9999px
+          left: -624.9375rem
+          top: -624.9375rem
           transform: none
 
     // Recent folders styles - in welcome-left-panel

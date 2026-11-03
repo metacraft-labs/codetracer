@@ -14,6 +14,9 @@ WHAT THIS CHECKS
 `text` must appear in its `path`. Standard library only and no build, so it runs
 in seconds and can be a required status check, unlike the wider suites.
 
+It also enforces the one standing rule a source check can judge: no stylesheet
+under `src/frontend/styles` sizes anything in px.
+
 Run from the repository root:
 
     python3 ci/test/ui-design-decisions.py
@@ -60,6 +63,28 @@ def missing_guards(guards, read_file):
     return missing
 
 
+STYLES_DIR = Path("src/frontend/styles")
+PX_VALUE = re.compile(r"(?<![\w.#$])\d*\.?\d+px\b")
+BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+LINE_COMMENT = re.compile(r"(?<![:\w])//.*")
+QUOTED = re.compile(r"\"[^\"\n]*\"|'[^'\n]*'|url\([^)\n]*\)")
+
+
+def px_values(stylesheet):
+    """The (line number, line) pairs that size something in px.
+
+    The units rule: styles are written in rem or em (root 16px). Comments and
+    strings may still mention px.
+    """
+    blanked = BLOCK_COMMENT.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), stylesheet)
+    found = []
+    for number, line in enumerate(blanked.splitlines(), 1):
+        code = LINE_COMMENT.sub("", QUOTED.sub('""', line))
+        if PX_VALUE.search(code):
+            found.append((number, line.strip()))
+    return found
+
+
 def read_repo_file(path):
     try:
         return Path(path).read_text(encoding="utf-8")
@@ -94,6 +119,13 @@ def run_controls():
         pass
     else:
         raise AssertionError("control: a malformed guard line was accepted")
+
+    stylesheet = (
+        ".a\n  padding: 0.5rem 4px\n  // 8px in a comment\n"
+        "  /* 2px\n  3px */\n  content: \"9px\"\n  margin: 1em // 6px\n  top: -2px\n"
+    )
+    found = [number for number, _ in px_values(stylesheet)]
+    assert found == [2, 8], f"control: px found on lines {found}"
 
 
 def main():
@@ -130,7 +162,22 @@ def main():
         )
         return 1
 
-    print(f"OK: {len(guards)} guards across {len(headed)} UI design decisions.")
+    in_px = [
+        (path, number, line)
+        for path in sorted(STYLES_DIR.rglob("*.styl"))
+        for number, line in px_values(path.read_text(encoding="utf-8"))
+    ]
+    if in_px:
+        print("FAILED: a stylesheet sizes something in px.\n")
+        for path, number, line in in_px:
+            print(f"  {path}:{number}: {line}")
+        print(
+            f"\nWrite it in rem (px / 16) or em; see Units in {DECISIONS_DOC}."
+        )
+        return 1
+
+    print(f"OK: {len(guards)} guards across {len(headed)} UI design decisions;"
+          " no px in the stylesheets.")
     return 0
 
 

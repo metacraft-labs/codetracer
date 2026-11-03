@@ -7,44 +7,44 @@
 .calltrace-async-toggle
   display flex
   align-items center
-  padding 4px 8px
-  gap 8px
-  border-bottom 1px solid colors-ui-border-secondary
+  padding 0.25rem 0.5rem
+  gap 0.5rem
+  border-bottom 0.0625rem solid colors-ui-border-secondary
 
 .async-toggle-label
-  font-size 12px
+  font-size 0.75rem
   color colors-ui-text-primary-label-subtle
 
 .async-toggle-buttons
   display flex
-  gap 2px
+  gap 0.125rem
 
 .toggle-btn
-  padding 2px 8px
-  font-size 11px
-  border 1px solid colors-ui-border-secondary
+  padding 0.125rem 0.5rem
+  font-size 0.6875rem
+  border 0.0625rem solid colors-ui-border-secondary
   background transparent
   color colors-ui-text-primary-body
   cursor pointer
-  border-radius 3px
+  border-radius 0.1875rem
   &.active
     background colors-ui-surface-base-card
     color colors-ui-text-primary-headings
 
 .continuation-jump-link
   display inline-block
-  margin-left 4px
+  margin-left 0.25rem
   // A link and its hover: GitHub-dark blues, 2.3:1 and 1.8:1 on the light
   // ground, which takes the information text tokens (`by-mode`, defaults.styl).
   color by-mode(#58a6ff, colors-ui-text-information-primary)
   cursor pointer
-  font-size 14px
+  font-size 0.875rem
   &:hover
     color by-mode(#79c0ff, colors-ui-text-information-primary-hover)
     text-decoration underline
 
 .calltrace-virtual-placeholder
-  padding 16px
+  padding 1rem
   color colors-ui-text-primary-label-subtle
-  font-size 13px
+  font-size 0.8125rem
   font-style italic

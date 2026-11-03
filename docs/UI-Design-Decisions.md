@@ -498,6 +498,8 @@ no guard. Reviewers and agents apply them by hand.
   because it has no Light cut. Older declarations still break this rule and are
   being cleaned up.
 - **Units:** write styles in `rem` or `em` (root 16px) and land on whole pixels.
+  This one is checked: `ci/test/ui-design-decisions.py` fails on a px value in
+  any stylesheet under `src/frontend/styles`. Comments may still say px.
 - **Icons:** take them from the design system's icons page, Figma
   `Ytr6Ux4bYZYRUBpgNsSVml` node 1:12.
 - **Panels:** build them as Golden Layout stacks with the standard header and
