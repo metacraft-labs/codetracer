@@ -108,6 +108,8 @@ from viewmodel/viewmodels/omnibar_sources import ShowDetailLabel,
   FindCancelLabel
 from viewmodel/viewmodels/table_overflow import ColumnStepCells
 from viewmodel/viewmodels/build_vm as build_vm import shownSnapshot
+from viewmodel/viewmodels/build_tasks import hasProjectFolder,
+  NoProjectFolderBuildText
 from viewmodel/viewmodels/build_output_model import BuildSnapshot
 
 
@@ -2599,17 +2601,26 @@ proc wireSessionViewModelHooks(vms: SessionViewModels; dapRef: DapApi) =
         # in the project folder; ■ Stop stops what the runner runs.
         let vm = sessionVM.buildVM
         vm.runBuild = proc() =
+          # Edit-Mode-Toolbar.md EMT-D34: a session with no project folder
+          # (New File) has nothing to build, and says so BEFORE anything is
+          # saved — saving first would put the untitled buffer's Save dialog
+          # in front of a build that cannot run (#837).
+          if not build.desktopBuildTaskHost().hasProjectFolder:
+            build.sayDesktopBuild(NoProjectFolderBuildText,
+                                  build.desktopBuildsRequested)
+            return
           # Edit-Mode-Toolbar.md EMT-D30 (2026-10-29): Run build writes the
           # modified editors first, as the toolbar's Build and Run do
           # (EMT-D17) — a build compiles the files on disk.
           data.saveFiles()
+          let before = build.desktopBuildsRequested
           let shown = build_vm.shownSnapshot(vm)
           let why =
             if shown.command.len == 0: build.runDesktopBuildLine(":build")
             else: build.startDesktopBuild(shown.command,
                     (if data.startOptions.folder.isNil: ""
                      else: $data.startOptions.folder), "", "")
-          if why.len > 0: cwarn "build: " & why
+          build.sayDesktopBuild(why, before)
         vm.cancelBuildProc = proc() = discard build.stopDesktopBuild()
 
 proc buildSessionViewModels(session: ReplaySession; vms: SessionViewModels;
@@ -3819,7 +3830,14 @@ proc onNoTrace(
   data.trace = nil
   data.ui.readOnly = false
   data.startOptions = response.startOptions
-  if data.startOptions.edit and response.path.len > 0:
+  # The welcome screen's Open Folder hands the folder over as `path`. A
+  # `ct edit <file>` launch sends the FILE as `path` (and as
+  # `startOptions.name`, which opens it), with its folder already in
+  # `startOptions.folder` (`index/args`) — the project is that folder
+  # (Edit-Mode-Toolbar.md EMT-D34), so a file never replaces it.
+  if data.startOptions.edit and response.path.len > 0 and
+     (data.startOptions.name.isNil or data.startOptions.name.len == 0 or
+      data.startOptions.name != response.path):
     data.startOptions.folder = response.path
   data.homedir = response.home
   data.services.debugger.paths = response.filenames

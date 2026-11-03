@@ -44,7 +44,7 @@ from ../viewmodel/viewmodels/omnibar_vm import OmnibarEntry, OmnibarMode,
   omBuildTask, classifyOmnibarQuery, rankOmnibar
 from ../viewmodel/viewmodels/build_tasks import BuildTaskQuery,
   BuildVerbKind, bvkRunDefault, bvkRunCommand, parseBuildVerb,
-  buildTaskEntries, pickerNote
+  buildTaskEntries, pickerNote, hasProjectFolder
 import ./build as build_pane
 
 import ../communication
@@ -188,7 +188,7 @@ proc buildTaskResults(query: string): seq[CommandPanelResult] =
   let c = build_pane.desktopBuildTasks()
   let needle = classifyOmnibarQuery(query).needle
   buildTaskChoices = @[]
-  let note = pickerNote(c)
+  let note = pickerNote(c, build_pane.desktopBuildTaskHost().hasProjectFolder)
   if note.len > 0:
     buildTaskChoices.add OmnibarEntry(kind: omBuildTask, label: note)
     result.add CommandPanelResult(kind: CommandQuery, value: cstring(note),
@@ -242,6 +242,7 @@ proc runQuery(self: CommandPaletteComponent) =
   # choice (`:build: …`), `:build` (the default task) and `:build <command>`.
   if classifyOmnibarQuery($value).mode == omBuildTask:
     let i = self.selected
+    let before = build_pane.desktopBuildsRequested
     let said =
       if i >= 0 and i < buildTaskChoices.len and
          buildTaskChoices[i].target.len > 0:
@@ -249,13 +250,14 @@ proc runQuery(self: CommandPaletteComponent) =
       else: build_pane.runDesktopBuildLine($value)
     self.close()
     self.resetCommandPalette()
-    if said.len > 0: cwarn "build: " & said
+    build_pane.sayDesktopBuild(said, before)
     return
   if parseBuildVerb($value).kind in {bvkRunDefault, bvkRunCommand}:
+    let before = build_pane.desktopBuildsRequested
     let said = build_pane.runDesktopBuildLine($value)
     self.close()
     self.resetCommandPalette()
-    if said.len > 0: cwarn "build: " & said
+    build_pane.sayDesktopBuild(said, before)
     return
   self.query = self.interpreter.parseQuery(value)
 
@@ -643,4 +645,5 @@ build_pane.openBuildTaskPickerProc = proc(): string =
     field.toJs.value = cstring(BuildTaskQuery)
     palette.onInput(cstring(BuildTaskQuery))
   , 250)
-  pickerNote(build_pane.desktopBuildTasks())
+  pickerNote(build_pane.desktopBuildTasks(),
+             build_pane.desktopBuildTaskHost().hasProjectFolder)

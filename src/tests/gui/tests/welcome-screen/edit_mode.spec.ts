@@ -60,8 +60,7 @@ childProcess.execFileSync(
 // A folder `projectKinds` recognises as exactly ONE project kind: `Nargo.toml`
 // at the root is Noir, whose Build (`nargo compile`) and Run proposals are both
 // canonical. An unrecognised folder hides the command group (§8's recognition
-// split), so without a marker the edit bar would carry no buttons and "Build
-// and Run are refused with a reason" could not be asserted at all.
+// split), so without a marker the edit bar would carry no buttons to assert on.
 const noirEditFixture = fs.mkdtempSync(path.join(os.tmpdir(), "codetracer-edit-toolbar-"));
 fs.mkdirSync(path.join(noirEditFixture, "src"), { recursive: true });
 fs.writeFileSync(
@@ -104,10 +103,9 @@ async function toggleProductMode(ctPage: any, expected: number) {
  * the debugger's stepping controls. `Edit-Mode-Toolbar.md` §7.3 / EMT-A1:
  * `tbaDebuggerControls` is absent in `EditMode`.
  *
- * With `withCommands`, also the two command buttons, each DISABLED and saying
- * why: the desktop has no route that builds or runs from the toolbar yet, and
- * §8 / EMT-D14 forbid an enabled button that does nothing as much as a
- * disabled one with no reason.
+ * With `withCommands`, also the two command buttons, each ENABLED and naming
+ * the command it runs: the desktop's toolbar has a route for both (EMT-D30,
+ * EMT-D33), and this fixture is a Noir package.
  */
 async function expectEditModeTopbar(ctPage: any, withCommands: boolean) {
   await expect(
@@ -125,12 +123,11 @@ async function expectEditModeTopbar(ctPage: any, withCommands: boolean) {
   for (const button of ["build", "run"] as const) {
     const locator = ctPage.locator(editToolbarSelector(button));
     await expect(locator, `#${EDIT_TOOLBAR_IDS[button]} is missing`).toBeVisible();
-    await expect(locator, `#${EDIT_TOOLBAR_IDS[button]} is enabled`).toBeDisabled();
-    const reason = ((await locator.getAttribute("title")) ?? "").trim();
-    expect(
-      reason.length,
-      `#${EDIT_TOOLBAR_IDS[button]} is disabled with no reason (EMT-A28)`,
-    ).toBeGreaterThan(0);
+    await expect(locator, `#${EDIT_TOOLBAR_IDS[button]} is disabled`).toBeEnabled();
+    await expect(locator, `#${EDIT_TOOLBAR_IDS[button]} names no command`).toHaveAttribute(
+      "title",
+      button === "build" ? /nargo compile/ : /nargo trace/,
+    );
   }
 }
 
@@ -242,7 +239,7 @@ test.describe("Edit Mode", () => {
 test.describe("Edit Mode toolbar on the desktop (#812)", () => {
   test.use({ launchMode: "edit", editFolderPath: noirEditFixture, deploymentMode: "electron" });
 
-  test("edit mode shows the edit toolbar with Build and Run refused, and no stepping controls", async ({
+  test("edit mode shows the edit toolbar with Build and Run, and no stepping controls", async ({
     ctPage,
   }) => {
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 60_000 });

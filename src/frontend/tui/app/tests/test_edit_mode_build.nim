@@ -52,7 +52,7 @@ import ../theme/degradation
 import ../views/build_output
 import ../views/shell
 
-const ExpectedAssertions = 84
+const ExpectedAssertions = 85
 
 var countedAssertions = 0
 
@@ -321,7 +321,15 @@ suite "PLAT-16 §5: `:build`, `:run` and `:cancel` on the prompt":
     ck statusRow(rt).contains("no runner")
     ck rt.app.build.isNil
     # …and `:build` alone, which runs the project's default build TASK
-    # (Build-Output-Pane.md §3.12), says there is none to run.
+    # (Build-Output-Pane.md §3.12): this runtime has no project folder, so
+    # there is nothing to build (Edit-Mode-Toolbar.md EMT-D34) …
+    discard rt.prompt.open(pkCommand)
+    for ch in ":build":
+      discard rt.prompt.applyKey($ch, @[])
+    discard rt.handleToken("\r", 0)
+    ck statusRow(rt).contains("No project folder is open")
+    # … and with a folder that declares no task, it says there is none.
+    rt.app.projectRoot = "/project"
     discard rt.prompt.open(pkCommand)
     for ch in ":build":
       discard rt.prompt.applyKey($ch, @[])
