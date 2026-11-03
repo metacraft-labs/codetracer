@@ -66,3 +66,4 @@ failStart             # Embed SDK surface (sdk/debugger_session.nim): BlockTrace
 renderTestResultsPanel  # reached by ui/test_results.nim (the desktop Test Results host mounts it), a product module whose test_* basename the name scan classifies as a test, the same misreading as testResultsFit above
 onBuildStart  # IPC handler: `indexIpcHandlers` in index/ipc_utils.nim builds it from the string "build-start" (CODETRACER::build-start, the desktop's build runner: a build task or a typed command, Build-Output-Pane.md §4.2)
 onBuildCancel  # IPC handler: `indexIpcHandlers` in index/ipc_utils.nim builds it from the string "build-cancel" (CODETRACER::build-cancel, the Build panel's ■ Stop)
+bindings=  # setter reached by assignment syntax: `km.bindings = kept` in keymap/vim_import.nim (two sites); a name scan sees `bindings`, never `bindings=`

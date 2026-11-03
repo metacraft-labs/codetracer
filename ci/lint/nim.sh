@@ -753,6 +753,17 @@ lint_step "frontend reachability: the ratchet's prose agrees with its threshold"
 #       (`viewmodel/platform`'s session helpers, `viewmodel/sync`, `gpui/app`
 #       and others), left for their features, inside the ceiling.
 #   1209 - 3 - 10 = 1196, measured, 7 under the corrected base.
+# THE CEILING MOVED 1207 -> 1206 ON 2026-11-03, DOWN. The tree had reached
+#   1210 through five new findings (the keymap's compile-once cache and the
+#   Constraints model): `editing_keymap.addBinding` is deleted (no product
+#   caller; its two suites use the `bindings=` setter the import path uses);
+#   `bindings=` is allow-listed (reached as `km.bindings = kept` in
+#   `vim_import.nim`, which a name scan reads as `bindings`);
+#   `constraints_answer.NargoInfoArgs` and `constraints_vm.
+#   ConstraintsCommandVerb` lose their `*` (nothing anywhere reads them; the
+#   terminal and GPUI hosts that will, PLAT-62's second deliverable, can
+#   export them when they do). `table_fit.constraintsFit` stays, tested-only,
+#   the bucket-A shape every earlier move carried. 1210 - 4 = 1206, measured.
 # THE CEILING MOVED 1196 -> 1207 ON 2026-10-30, after `agents` had drifted to
 #   1242 (red on the branch from the PLAT-51/53/54/56/58/68/70 landings on).
 #   THE ACCOUNT is a DIFF OF TWO RUNS of this script, by path, kind and name:
@@ -786,8 +797,8 @@ lint_step "frontend reachability: the ratchet's prose agrees with its threshold"
 #       (`CodeTracerUiComponentsModule`), and one `==` (`find_match`) a name
 #       scan cannot judge, for the reason given above for `$`.
 #   1242 - 35 = 1207, measured.
-lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1207 + allow-list hygiene)" \
-	env CT_REACHABILITY_MAX=1207 bash ci/test/frontend-reachability.sh
+lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1206 + allow-list hygiene)" \
+	env CT_REACHABILITY_MAX=1206 bash ci/test/frontend-reachability.sh
 
 # ONE CHAIN, ENFORCED, BECAUSE THE RATCHET ABOVE CANNOT ENFORCE IT.
 #

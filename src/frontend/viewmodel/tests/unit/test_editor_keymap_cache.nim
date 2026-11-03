@@ -103,7 +103,7 @@ suite "compiled editing keymap snapshot isolation":
     let scope = EditingScope(model: bkVim, mode: emNormal)
     let old = trieFor(original, scope)
     var edited = original
-    edited.addBinding row("y", "redo")
+    edited.bindings = edited.bindings & row("y", "redo")
     check original.resolved(scope, "y") == ""
     check edited.resolved(scope, "y") == "redo"
     edited.bindings = @[row("x", "redo")]

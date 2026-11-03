@@ -499,12 +499,6 @@ proc `bindings=`*(km: var EditingKeymap; rows: seq[EditingBinding]) =
   ## Replacing bindings starts a new cache and leaves copied keymaps intact.
   km = newEditingKeymap(rows)
 
-proc addBinding*(km: var EditingKeymap; row: EditingBinding) =
-  ## Construction/import helper; detach rather than invalidate a shared cache.
-  var rows = km.bindings
-  rows.add row
-  km = newEditingKeymap(rows)
-
 func nodes*(t: EditingTrie): seq[TrieNode] = t.nodeData
 func bindings*(t: EditingTrie): seq[EditingBinding] = copyBindings(t.bindingData)
 func duplicates*(t: EditingTrie): seq[string] = t.duplicateData

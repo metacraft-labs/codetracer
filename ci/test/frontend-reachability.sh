@@ -33,8 +33,12 @@
 # THE RATCHET IS ENGAGED, AND FOR TWO YEARS OF READERS' SAKE: IT WAS NOT.
 # --------------------------------------------------------------------------
 # `ci/lint/nim.sh` now invokes this script as
-# `env CT_REACHABILITY_MAX=1207 bash ci/test/frontend-reachability.sh`, so 1208
-# findings fail `lint-nim` and 1207 do not.
+# `env CT_REACHABILITY_MAX=1206 bash ci/test/frontend-reachability.sh`, so 1207
+# findings fail `lint-nim` and 1206 do not.
+#
+# THE CEILING MOVED 1207 -> 1206 ON 2026-11-03, DOWN: one deletion, two
+# un-exports and one allow-listed setter against five new findings. Account
+# in `ci/lint/nim.sh`.
 #
 # THE CEILING MOVED 1196 -> 1207 ON 2026-10-30, after `agents` had drifted to
 # 1242: 35 exports reached by nothing outside their own module were
