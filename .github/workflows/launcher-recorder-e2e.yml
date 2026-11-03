@@ -710,7 +710,7 @@ jobs:
             # repro.lock since 6850efc5e, and took the SHA shape because the
             # recorder repos' lock records these edges also resolve did not
             # carry it. They do now; going bare is a separate change.
-            isonim=a9d12d5b9c650bdf999e9530bc36bc83a97edf85
+            isonim=196dfe18a3a3480c80a54f8bd60f371f601940e0
             isonim-tui=ff295f7be6d7efc095ef4d249b1df0577d969c89
             runquota=9818dc0c90be8ba7993424a7bbfbb6e009ffa965
             # Required by scripts/require-siblings.sh (`ct` links its reference
