@@ -199,6 +199,8 @@ proc bindNode(h: TerminalTestHarness; v: ViewNode): BoundWidget =
     for o in v.options:
       items.add ListItem(id: o.id, label: o.label, disabled: o.disabled)
     let w = newListView(r, items)
+    # The view owns the initial attention row, just as it owns a Table cursor.
+    w.setHighlight(v.highlight)
     BoundWidget(id: v.id, kind: pkList, node: w.node, listW: w)
   of pkTree:
     let w = newTree(r, v.label, v.id)

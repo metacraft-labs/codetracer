@@ -307,9 +307,9 @@ advisory_siblings=(
 	# Not in `build-once`'s import closure either: only the GPUI/TUI frontends
 	# and their tests import these (see the tier notes above). Probe a module
 	# file, so a checkout that is only an empty `src` is not a pass.
-	"isonim-gpui|src/isonim_gpui/renderer.nim||\`import isonim_gpui/...\` in src/frontend/gpui/main.nim and the rest of src/frontend/gpui/, and in src/frontend/view_vocabulary/gpui_binding.nim, so \`just build-gpui\` needs it; \`just test-plat37-shim-gate\` reads its tools/ and refuses without it"
+	'isonim-gpui|src/isonim_gpui/renderer.nim||`import isonim_gpui/...` in src/frontend/gpui/main.nim and the rest of src/frontend/gpui/, and in src/frontend/view_vocabulary/gpui_binding.nim, so `just build-gpui` needs it; `just test-plat37-shim-gate` reads its tools/ and refuses without it'
 	"nim-termctl|src/nim_termctl.nim||\`import nim_termctl\` in src/frontend/tui/host/terminal_driver.nim and resize.nim (and isonim-tui's \`isonim_tui\` umbrella), so \`just build-tui\` needs it"
-	"nim-pty|src/nim_pty.nim||\`import nim_pty\` in src/frontend/tui/tests/test_terminal_driver_start.nim, test_focus_reporting.nim and src/frontend/tui/benchmarks/tui_benchmarks.nim, so \`just test-tui\` and \`just build-tui-benchmarks\` need it"
+	'nim-pty|src/nim_pty.nim||`import nim_pty` in src/frontend/tui/tests/test_terminal_driver_start.nim, test_focus_reporting.nim and src/frontend/tui/benchmarks/tui_benchmarks.nim, so `just test-tui` and `just build-tui-benchmarks` need it'
 )
 
 if [ -n "${CODETRACER_STRICT_SIBLING_CHECK:-}" ]; then

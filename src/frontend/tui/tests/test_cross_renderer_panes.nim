@@ -357,6 +357,15 @@ type
     web: WebBinding[MockRenderer, MockNode]
     gpui: GpuiBinding
 
+proc loadedCalltraceHighlight(): int =
+  ## The recorder's selected call is an INDEX, while List.highlight is a
+  ## visible row. Read the VM directly, independently of paneView and every
+  ## binding: following the current call need not start on visible row zero.
+  let vm = live.session.session.calltraceVM
+  let selected = vm.selectedEntry.val
+  if selected.isSome:
+    result = max(0, vm.visibleLines.val.mapIt(it.index).find(selected.get))
+
 proc buildThreeWay(pane: PaneKind; budget: Budget): ThreeWay =
   gpui_reset_tree()
   resetCallbacks()
@@ -666,7 +675,7 @@ suite "PLAT-21: three renderers, one pane view, the same state":
   liveTest "the call trace pane renders the same state on all three media":
     var t = buildThreeWay(paneCalltrace, GpuiPanelBudget)
     allThreeAgree(t, "the call trace as loaded")
-    allThreeSay(t, "calltrace.highlight", "0")
+    allThreeSay(t, "calltrace.highlight", $loadedCalltraceHighlight())
     expectCount(5)
 
   liveTest "the event log pane renders the same state on all three media":
@@ -710,12 +719,14 @@ suite "PLAT-21: the keyboard contract, per view, on all three media":
 
   liveTest "List: the call trace moves and clamps identically on three media":
     var t = buildThreeWay(paneCalltrace, GpuiPanelBudget)
-    allThreeSay(t, "calltrace.highlight", "0")
-    sendAll(t, "calltrace", kDown)
-    allThreeSay(t, "calltrace.highlight", "1")
+    let initial = loadedCalltraceHighlight()
     # The last row is the session's last call line (its count floored by
     # the first case's `ProgramCalls`), not a number written here.
-    let lastRow = $(live.session.session.calltraceVM.visibleLines.val.len - 1)
+    let lastIndex = live.session.session.calltraceVM.visibleLines.val.len - 1
+    let lastRow = $lastIndex
+    allThreeSay(t, "calltrace.highlight", $initial)
+    sendAll(t, "calltrace", kDown)
+    allThreeSay(t, "calltrace.highlight", $min(initial + 1, lastIndex))
     sendAll(t, "calltrace", kEnd)
     allThreeSay(t, "calltrace.highlight", lastRow)
     sendAll(t, "calltrace", kDown)
@@ -1033,18 +1044,22 @@ suite "PLAT-21: the three-way comparison CAN go red":
     # and requires `divergences` to report it. Without this, "0 divergences"
     # and "the reducer stopped discriminating" are the same transcript.
     var t = buildThreeWay(paneCalltrace, GpuiPanelBudget)
+    let initial = loadedCalltraceHighlight()
+    let lastIndex = live.session.session.calltraceVM.visibleLines.val.len - 1
+    let moved = if initial < lastIndex: initial + 1 else: initial - 1
     ck divergences(t).len == 0
-    # Move ONE arm and nothing else. The terminal binding is the independent
-    # oracle, so moving it is the sharpest version of this.
-    ck tbind.sendKey(t.terminal, "calltrace", kDown, ' ')
+    # Move ONE arm and nothing else, choosing a row different from the actual
+    # seed even if the recorder selected the final row.
+    ck tbind.sendKey(t.terminal, "calltrace",
+                    (if moved > initial: kDown else: kUp), ' ')
     let d = divergences(t)
     if d.len == 0:
       checkpoint "the three-way comparison did not see a moved terminal arm"
     ck d.len == 1
     ck d[0].contains("calltrace.highlight")
-    ck d[0].contains("terminal=1")
-    ck d[0].contains("web=0")
-    ck d[0].contains("gpui=0")
+    ck d[0].contains("terminal=" & $moved & " ")
+    ck d[0].contains("web=" & $initial & " ")
+    ck d[0].endsWith("gpui=" & $initial)
     expectCount(7)
 
   liveTest "and the shared reader is load-bearing for two of the three arms":
@@ -1059,11 +1074,13 @@ suite "PLAT-21: the three-way comparison CAN go red":
     ck t.terminal.bound[0].kind == pkList
     # The widget's own field, read directly, is what the terminal projection
     # reports — so the two projections cannot be one function.
-    ck t.terminal.bound[0].listW.highlightedIndex == 0
-    ck terminalFacts(t).getOrDefault("calltrace.highlight", "") == "0"
-    t.terminal.bound[0].listW.highlightedIndex = 3
-    ck terminalFacts(t).getOrDefault("calltrace.highlight", "") == "3"
-    ck webFacts(t).getOrDefault("calltrace.highlight", "") == "0"
+    let initial = loadedCalltraceHighlight()
+    let moved = if initial == 3: 0 else: 3
+    ck t.terminal.bound[0].listW.highlightedIndex == initial
+    ck terminalFacts(t).getOrDefault("calltrace.highlight", "") == $initial
+    t.terminal.bound[0].listW.highlightedIndex = moved
+    ck terminalFacts(t).getOrDefault("calltrace.highlight", "") == $moved
+    ck webFacts(t).getOrDefault("calltrace.highlight", "") == $initial
     expectCount(6)
 
 suite "PLAT-21: the session is closed":
