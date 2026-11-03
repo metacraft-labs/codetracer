@@ -18,8 +18,8 @@
 ##     uses): `:build` of a FAILING coloured `gcc` build typed into the
 ##     omnibox of an Edit-mode session over the PLAT-56 project — the pane's
 ##     lines are the compiler's (its recorded transcript read by the shared
-##     reader: the same compiler still writes it), each line's text and runs
-##     EQUAL to the desktop's for the same output
+##     reader, with only GCC's diagnostic quotes adapted to the real local
+##     compiler), each line's text and runs EQUAL to the desktop's for the same output
 ##     (`src/tests/visual/answers/plat56-build-output.electron.json`), the
 ##     verdict and the status line's indicator the desktop's words; a press on
 ##     a located line opens ITS file at ITS line and column (K35); a PASSING
@@ -52,6 +52,7 @@ import ../host/build_output_source
 import ../host/build_runner
 from ../host/edit_host import readProjectFile, TuiHostError
 import ../../viewmodel/tests/unit/build_fixtures/plat56_c_build
+import ../../viewmodel/tests/unit/build_fixtures/plat56_gcc_quotes
 import ../../../common/view_vocabulary
 from ../../view_vocabulary/pane_views import buildOutputPaneView,
   PaneAcceptedExceptions, PaneVocabularyPanes
@@ -97,7 +98,7 @@ proc failedVM(): BuildVM =
     vm = createBuildVM(nil)
   vm.beginBuild(Plat56FailCommand, 1000.0)
   for raw in Plat56FailTranscript:
-    discard vm.feedOutput(raw, isStdout = false)
+    discard vm.feedOutput(plat56LocalGccText(raw), isStdout = false)
   vm.finishBuild(1, 1400.0)
   vm
 
@@ -172,7 +173,7 @@ suite "PLAT-56: the terminal's Build Output painter":
       let vm = failedVM()
       vm.beginBuild(Plat56PassCommand, 2000.0)
       for raw in Plat56PassTranscript:
-        discard vm.feedOutput(raw, false)
+        discard vm.feedOutput(plat56LocalGccText(raw), false)
       vm.finishBuild(0, 2200.0)
       var m = paneModelOf(vm, historyOpen = true)
       ck m.history.len == 2
@@ -196,7 +197,7 @@ suite "PLAT-56: the terminal's Build Output painter":
       let vm = failedVM()
       vm.beginBuild(Plat56PassCommand, 2000.0)
       for raw in Plat56PassTranscript:
-        discard vm.feedOutput(raw, false)
+        discard vm.feedOutput(plat56LocalGccText(raw), false)
       vm.finishBuild(0, 2200.0)
       let m = paneModelOf(vm, historyOpen = true)
       let area = CellArea(col: 0, row: 0, width: 120, height: 12)
@@ -327,7 +328,8 @@ proc desktopLines(phase: JsonNode): seq[string] =
     var styles: seq[string] = @[]
     for st in l["runs"]:
       styles.add st["style"].getStr
-    result.add l["class"].getStr & "|" & l["text"].getStr & "|" &
+    result.add l["class"].getStr & "|" &
+               plat56LocalGccText(l["text"].getStr) & "|" &
                styles.join(";;")
 
 proc activeEditor(s: Session): tuple[path: string; line, col: int] =
@@ -350,12 +352,13 @@ suite "PLAT-56: the terminal's Build Output pane over real builds":
     let d = desktop()
     ck s.build(Plat56FailCommand) == bvFailed
     # THE LINES: the compiler's (its recorded transcript, read by the shared
-    # reader — so the real `gcc` still writes exactly it), and the desktop's
-    # for the same output, class for class, text for text, run for run.
+    # reader with only GCC's quotes adapted to the real local compiler), and
+    # the desktop's for the same output, class for class, text for text, run
+    # for run.
     var want: seq[string] = @[]
     var r: BuildLineReader
     for raw in Plat56FailTranscript:
-      want.add r.read(raw, false).line.text
+      want.add r.read(plat56LocalGccText(raw), false).line.text
     var got: seq[string] = @[]
     for line in s.rt.app.buildPane.output:
       got.add line.text
