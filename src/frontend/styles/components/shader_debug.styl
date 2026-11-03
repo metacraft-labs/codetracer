@@ -9,17 +9,17 @@
   color: colors-ui-text-primary-body
   background: colors-ui-surface-base-panel
   font-family: "SpaceGrotesk"
-  font-size: 13px
-  line-height: 20px
+  font-size: 0.8125rem
+  line-height: 1.25rem
 
   .shader-debug-header
     display: flex
     align-items: center
     justify-content: space-between
-    gap: 10px
-    padding: 7px 10px
+    gap: 0.625rem
+    padding: 0.4375rem 0.625rem
     flex: 0 0 auto
-    border-bottom: 1px solid colors-ui-surface-input-default
+    border-bottom: 0.0625rem solid colors-ui-surface-input-default
     background: colors-ui-surface-primary-tertiary
 
   .shader-debug-title
@@ -35,7 +35,7 @@
   .shader-debug-loading,
   .shader-debug-error,
   .shader-debug-empty
-    padding: 10px
+    padding: 0.625rem
     color: colors-ui-text-primary-body
 
     &[display="none"]
@@ -47,16 +47,16 @@
   .shader-debug-toolbar
     display: flex
     align-items: center
-    gap: 8px
-    padding: 7px 10px
+    gap: 0.5rem
+    padding: 0.4375rem 0.625rem
     flex: 0 0 auto
-    border-bottom: 1px solid colors-ui-border-secondary
+    border-bottom: 0.0625rem solid colors-ui-border-secondary
 
     button
-      min-width: 46px
-      height: 24px
-      border: 1px solid colors-ui-border-secondary
-      border-radius: 4px
+      min-width: 2.875rem
+      height: 1.5rem
+      border: 0.0625rem solid colors-ui-border-secondary
+      border-radius: 0.25rem
       background: colors-ui-surface-primary-tertiary
       color: colors-ui-text-primary-body
       font: inherit
@@ -72,19 +72,19 @@
 
   .shader-debug-body
     display: grid
-    grid-template-columns: minmax(0, 1.4fr) minmax(220px, 0.8fr)
+    grid-template-columns: minmax(0, 1.4fr) minmax(13.75rem, 0.8fr)
     min-height: 0
     flex: 1 1 auto
 
   .shader-debug-source
     min-height: 0
     overflow: auto
-    border-right: 1px solid colors-ui-border-secondary
+    border-right: 0.0625rem solid colors-ui-border-secondary
 
   .shader-debug-source-line
     display: grid
-    grid-template-columns: 42px minmax(0, 1fr)
-    min-height: 22px
+    grid-template-columns: 2.625rem minmax(0, 1fr)
+    min-height: 1.375rem
     align-items: baseline
 
     &.current
@@ -92,7 +92,7 @@
       color: colors-ui-text-primary-body
 
   .shader-debug-line-number
-    padding: 0 8px
+    padding: 0 0.5rem
     color: colors-ui-text-primary-body
     text-align: right
     user-select: none
@@ -106,13 +106,13 @@
   .shader-debug-inspector
     min-height: 0
     overflow: auto
-    padding: 8px 10px
+    padding: 0.5rem 0.625rem
 
   .shader-debug-instruction
     display: grid
     grid-template-columns: auto minmax(0, 1fr)
-    gap: 8px
-    margin-bottom: 10px
+    gap: 0.5rem
+    margin-bottom: 0.625rem
 
   .shader-debug-instruction-label,
   .shader-debug-values-title
@@ -126,13 +126,13 @@
     white-space: nowrap
 
   .shader-debug-values-section
-    margin-bottom: 12px
+    margin-bottom: 0.75rem
 
   .shader-debug-values-table
     display: grid
-    grid-template-columns: minmax(70px, auto) minmax(55px, auto) minmax(0, 1fr)
+    grid-template-columns: minmax(4.375rem, auto) minmax(3.4375rem, auto) minmax(0, 1fr)
     gap: 0
-    border-top: 1px solid colors-ui-border-secondary
+    border-top: 0.0625rem solid colors-ui-border-secondary
 
   .shader-debug-value-row
     display: contents
@@ -144,12 +144,12 @@
     overflow: hidden
     text-overflow: ellipsis
     white-space: nowrap
-    padding: 4px 6px
-    border-bottom: 1px solid colors-ui-border-secondary
+    padding: 0.25rem 0.375rem
+    border-bottom: 0.0625rem solid colors-ui-border-secondary
 
   .shader-debug-value-type
     color: colors-ui-text-primary-body
 
   .shader-debug-values-empty
     color: colors-ui-text-primary-body
-    padding: 4px 0
+    padding: 0.25rem 0

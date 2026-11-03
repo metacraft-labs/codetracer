@@ -1,13 +1,13 @@
 
 .flow-status-widget
-  height: 19px
+  height: 1.1875rem
   width: max-content
   display: inline-block
   background-color: colors-editor-surface-primary
   color: colors-ui-text-primary-body
-  font-size: 15px
-  padding-left: 2px
-  padding-right: 2px
+  font-size: 0.9375rem
+  padding-left: 0.125rem
+  padding-right: 0.125rem
 
 .flow-component
   display: flex
@@ -19,8 +19,8 @@
   overflow: hidden
   color: colors-ui-text-primary-body
   font-family: "SpaceGrotesk"
-  font-size: 13px
-  line-height: 20px
+  font-size: 0.8125rem
+  line-height: 1.25rem
 
   // Call / Line / Function: the shared segmented tabs (`segmented-tabs()`,
   // shared_widgets.styl), like the State panel's.  The margin is the 6px / 8px
@@ -31,7 +31,7 @@
     margin: 0.375rem 0.5rem
 
   .flow-loading
-    padding: 0 8px 6px
+    padding: 0 0.5rem 0.375rem
     color: colors-ui-text-primary-body
 
     &[display="none"]
@@ -39,10 +39,10 @@
 
   .flow-iteration-slider
     display: grid
-    grid-template-columns: max-content minmax(140px, 360px)
-    gap: 10px
+    grid-template-columns: max-content minmax(8.75rem, 22.5rem)
+    gap: 0.625rem
     align-items: center
-    padding: 0 8px 8px
+    padding: 0 0.5rem 0.5rem
     flex: 0 0 auto
 
   .iteration-range
@@ -51,7 +51,7 @@
   .flow-steps
     flex: 1 1 auto
     min-height: 0
-    border-top: 1px solid colors-ui-surface-input-default
+    border-top: 0.0625rem solid colors-ui-surface-input-default
     overflow: auto
     background: colors-editor-surface-primary
 
@@ -62,8 +62,8 @@
     align-items: center
     column-gap: 1em
     padding: 0 0.75em
-    min-height: 24px
-    border-bottom: 1px solid colors-ui-border-secondary
+    min-height: 1.5rem
+    border-bottom: 0.0625rem solid colors-ui-border-secondary
 
   .flow-steps-header
     position: sticky
@@ -71,7 +71,7 @@
     z-index: 1
     color: colors-ui-text-primary-body
     background: colors-editor-surface-primary
-    font-size: 12px
+    font-size: 0.75rem
 
   .flow-step-row
     cursor: pointer
@@ -110,16 +110,16 @@
     display: flex
     align-items: center
     justify-content: space-between
-    gap: 8px
-    padding: 4px 8px
-    border-top: 1px solid colors-ui-surface-input-default
+    gap: 0.5rem
+    padding: 0.25rem 0.5rem
+    border-top: 0.0625rem solid colors-ui-surface-input-default
     flex: 0 0 auto
 
   .raw-value-toggle
-    height: 22px
-    padding: 0 8px
+    height: 1.375rem
+    padding: 0 0.5rem
     border: 0
-    border-radius: 4px
+    border-radius: 0.25rem
     background: colors-ui-surface-primary-tertiary
     color: colors-ui-text-primary-body
     cursor: pointer
@@ -132,28 +132,28 @@
 .flow-loop-legend
   position: absolute
   display: inline-flex
-  height: 20px
+  height: 1.25rem
   overflow: visible !important
   font-size: 0.9em
-  margin-right: 10px
+  margin-right: 0.625rem
 
 .flow-parallel-values
   float: left
-  height: 20px // border: box is 18px
+  height: 1.25rem // border: box is 18px
   transition: all 400ms ease
-  border-right: 1px solid FLOW_PARALLEL_BEFORE_VALUE_BACKGROUND_COLOR
+  border-right: 0.0625rem solid FLOW_PARALLEL_BEFORE_VALUE_BACKGROUND_COLOR
 
 .flow-parallel-value
   display: inline-flex
-  padding-right: 10px
+  padding-right: 0.625rem
 
 .flow-parallel-value-name
   // font-size: 15px
   background: colors-editor-surface-primary
-  padding-left: 10px
-  padding-right: 10px
+  padding-left: 0.625rem
+  padding-right: 0.625rem
   padding-top: 0
-  padding-bottom: 3px
+  padding-bottom: 0.1875rem
   // height: 17px
   // line-height: 17px
   display: inline-block
@@ -164,9 +164,9 @@
   white-space: nowrap
 
 .flow-view-more-button
-  border-radius: 0px !important
-  border-top-left-radius: 4px !important
-  border-bottom-left-radius: 4px !important
+  border-radius: 0 !important
+  border-top-left-radius: 0.25rem !important
+  border-bottom-left-radius: 0.25rem !important
   background-position: center !important
   background-repeat: no-repeat !important
   min-width: 3.5ch
@@ -231,7 +231,7 @@
   color: colors-ui-text-primary-body-subtle
   // The split between the two halves. Without it the pair reads as one token.
   // A hairline is enough: a full border would make each chip read as two.
-  border-right: 1px solid colors-ui-border-secondary
+  border-right: 0.0625rem solid colors-ui-border-secondary
 
 .flow-parallel-value-box,
 .code-editor .flow-parallel-value-box
@@ -286,12 +286,12 @@
 //   text-overflow: ellipsis
 
 .flow-dual-value-before
-  border-top-right-radius: 0px !important
-  border-bottom-right-radius: 0px !important
+  border-top-right-radius: 0 !important
+  border-bottom-right-radius: 0 !important
 
 .flow-dual-arrow
-  border-top-left-radius: 0px !important
-  border-bottom-left-radius: 0px !important
+  border-top-left-radius: 0 !important
+  border-bottom-left-radius: 0 !important
   background-color: colors-editor-surface-primary !important
 
 // .flow-parallel-value-before-only
@@ -309,34 +309,34 @@
 //   color: colors-ui-text-primary-body
 
 .flow-inline-value-box
-  height: 17px
+  height: 1.0625rem
   width: 100%
   display: inline-block
-  padding-left: 2px
-  padding-right: 2px
+  padding-left: 0.125rem
+  padding-right: 0.125rem
   padding-top: 0
-  padding-bottom: 3px
-  line-height: 17px
+  padding-bottom: 0.1875rem
+  line-height: 1.0625rem
   box-sizing: border-box
-  font-size: 12px
+  font-size: 0.75rem
   // min-width: 20px
   // max-width: 100px // 31px // it seems we need a ~200px max or no max? (old: all width should be ~70px for two int values)
   overflow: hidden
   text-align: center
-  border-radius: 2px
+  border-radius: 0.125rem
   text-overflow: ellipsis
   font-family: monospace
-  margin-top: 1.5px
+  margin-top: 0.09375rem
 
 .flow-inline-value-before-only
   background-color: colors-editor-surface-primary
   color: FLOW_INLINE_BEFORE_ONLY_VALUE_COLOR
-  box-shadow: 1px 1px 1px colors-ui-surface-input-default
+  box-shadow: 0.0625rem 0.0625rem 0.0625rem colors-ui-surface-input-default
 
 .flow-inline-value-after-only
   background-color: colors-editor-surface-primary
   color: FLOW_INLINE_AFTER_VALUE_COLOR
-  box-shadow: -1px -1px FLOW_INLINE_BEFORE_VALUE_BACKGROUND_COLOR
+  box-shadow: -0.0625rem -0.0625rem FLOW_INLINE_BEFORE_VALUE_BACKGROUND_COLOR
 
 
 
@@ -350,35 +350,35 @@
     display: inline-block
 
   .flow-iteration-info
-    width: 70px
+    width: 4.375rem
     float: left
     background-color: colors-editor-surface-primary
     color: FLOW_PARALLEL_ITERATION_INFO_COLOR
-    height: 18px
-    line-height: 18px
-    border-radius: 1px
+    height: 1.125rem
+    line-height: 1.125rem
+    border-radius: 0.0625rem
     border: 0
 // box-shadow: -2px -2px #eee
 // box-shadow: -2px -2px #eee
 
 .flow-inline-decoration
-  height: 18px
-  width: 80px
+  height: 1.125rem
+  width: 5rem
   display: inline-block
 
   .flow-inline-value-box
     // height: 15px
     width: 80%
     display: inline-block
-    padding-left: 2px
-    padding-right: 2px
+    padding-left: 0.125rem
+    padding-right: 0.125rem
     padding-top: 0
     // top: 1.5px
     // line-height: 17px
     // font-size: 12px
     overflow: hidden
     text-align: center
-    border-radius: 2px
+    border-radius: 0.125rem
     text-overflow: ellipsis
     font-family: monospace
     font-weight: normal
@@ -391,39 +391,39 @@
   .flow-inline-value-before-only
     background-color: colors-editor-surface-primary
     color: by-mode(FLOW_MULTILINE_BEFORE_ONLY_VALUE_COLOR, FLOW_INLINE_BEFORE_ONLY_VALUE_COLOR)
-    box-shadow: 1px 1px 1px FLOW_MULTILINE_VALUE_BOX_SHADOW_COLOR
+    box-shadow: 0.0625rem 0.0625rem 0.0625rem FLOW_MULTILINE_VALUE_BOX_SHADOW_COLOR
 
 .flow-loop-background
   position: absolute
   z-index: -1
   background-color: colors-editor-surface-primary
-  border-radius: 5px
-  border: 1px solid FLOW_PARALLEL_BACKGROUND_BORDER_COLOR
+  border-radius: 0.3125rem
+  border: 0.0625rem solid FLOW_PARALLEL_BACKGROUND_BORDER_COLOR
   opacity: 0.5
 
 .flow-loop-slider-container
   position: absolute
-  width: 100px !important
+  width: 6.25rem !important
 
 .flow-component-container
-  transform: translate(0px, 2px)
+  transform: translate(0, 0.125rem)
 
 .flow-loop-slider
   border-color: FLOW_PARALLEL_SLIDER_COLOR !important
-  border-width: 1px !important
+  border-width: 0.0625rem !important
   position: absolute !important
   font-size: inherit
-  height: 2px !important
+  height: 0.125rem !important
   if IS_EXTENSION
-    transform: translate(0px, 8px)
+    transform: translate(0, 0.5rem)
 
   .noUi-base
     if IS_EXTENSION
-      width: 550px
-      margin-left: 220px
+      width: 34.375rem
+      margin-left: 13.75rem
     else
       width: 100%
-    height: 2px !important
+    height: 0.125rem !important
     background-color: colors-ui-surface-primary-tertiary
 
   .noUi-touch-area
@@ -441,12 +441,12 @@
     right: -0.2em !important
 
     if IS_EXTENSION
-      transform: translate(620px, -4px)
+      transform: translate(38.75rem, -0.25rem)
   .noUi-connect
     background: colors-editor-action-primary
   .noUi-tooltip
     position: absolute
-    font-size: 12px !important
+    font-size: 0.75rem !important
     display: none
     z-index: 100 !important
   .noUi-tooltip::after
@@ -464,9 +464,9 @@
     // width: 60% !important
     // max-width: 300px
   .noUi-target
-    width: 500px
-    margin-right: 64px !important
-    border: 0px !important
+    width: 31.25rem
+    margin-right: 4rem !important
+    border: 0 !important
     box-shadow: none !important
     background: colors-ui-surface-primary-tertiary !important
 
@@ -479,24 +479,24 @@
 
 .flow-loop-first-line
   .flow-iteration-info
-    height: 16px !important
-    line-height: 16px !important
+    height: 1rem !important
+    line-height: 1rem !important
 
   .flow-parallel-values
-    height: 18px // border: box is 16px
+    height: 1.125rem // border: box is 16px
 
   .flow-left-button
     position: fixed
-    margin-top: 20px
-    font-size: 20px
+    margin-top: 1.25rem
+    font-size: 1.25rem
     cursor: pointer
     z-index: 20
 
   .flow-right-button
     position: fixed
-    margin-top: 20px
-    font-size: 20px
-    margin-left: 570px
+    margin-top: 1.25rem
+    font-size: 1.25rem
+    margin-left: 35.625rem
     cursor: pointer
 
 .flow-tooltip-value
@@ -525,8 +525,8 @@
 .flow-loop-multiline
   left: 40ex /* TODO: custom based on annotations */
   position: fixed
-  margin-top: 19px
-  margin-bottom: 19px
+  margin-top: 1.1875rem
+  margin-bottom: 1.1875rem
 
 .flow-loop-line
   left: 80ex
@@ -539,53 +539,53 @@
 .flow-loop-empty-space-left-border
   min-width: 6%
   max-width: 6%
-  border-left: 1px solid FLOW_PARALLEL_BACKGROUND_BORDER_COLOR
-  height: 20px
+  border-left: 0.0625rem solid FLOW_PARALLEL_BACKGROUND_BORDER_COLOR
+  height: 1.25rem
 
 .flow-loop-shrinked-iteration
   background-color: #384149
   width: 100%
-  height: 16px
+  height: 1rem
   position: absolute
-  left: 1.5px
-  top: 2px
-  border-radius: 2.5px
+  left: 0.09375rem
+  top: 0.125rem
+  border-radius: 0.15625rem
 
 .flow-loop-continuous-iteration
   background-color: #384149
   width: 100%
-  height: 16px
+  height: 1rem
   position: absolute
-  top: 2px
-  border-radius: 0.5px
+  top: 0.125rem
+  border-radius: 0.03125rem
 
 .flow-loop-continuous-iteration.first
-  border-top-left-radius: 2.5px
-  border-bottom-left-radius: 2.5px
+  border-top-left-radius: 0.15625rem
+  border-bottom-left-radius: 0.15625rem
 
 .flow-loop-continuous-iteration.last
-  border-top-right-radius: 2.5px
-  border-bottom-right-radius: 2.5px
-  margin-right: 5px
+  border-top-right-radius: 0.15625rem
+  border-bottom-right-radius: 0.15625rem
+  margin-right: 0.3125rem
 
 .flow-loop-legend-expression
-  height: 17px
+  height: 1.0625rem
   width: 100%
   display: inline-block
-  padding-left: 2px
-  padding-right: 2px
-  padding-bottom: 3px
-  line-height: 17px
+  padding-left: 0.125rem
+  padding-right: 0.125rem
+  padding-bottom: 0.1875rem
+  line-height: 1.0625rem
   box-sizing: border-box
-  font-size: 12px
+  font-size: 0.75rem
   overflow: hidden
   text-align: center
-  border-radius: 2px
+  border-radius: 0.125rem
   text-overflow: ellipsis
   font-family: monospace
   background: colors-editor-surface-primary
-  box-shadow: 1px 1px 1px colors-ui-surface-input-default//#9A9DA7
-  margin-top: 1.5px
+  box-shadow: 0.0625rem 0.0625rem 0.0625rem colors-ui-surface-input-default//#9A9DA7
+  margin-top: 0.09375rem
   color: colors-ui-text-primary-body
 
 .flow-loop-value-single
@@ -720,8 +720,8 @@
   align-items: flex-end
   height: 100%
   box-sizing: border-box
-  gap: 6px
-  padding: 0 8px 2px
+  gap: 0.375rem
+  padding: 0 0.5rem 0.125rem
   font-size: 0.85em
   color: colors-ui-text-primary-body
   opacity: 0.85
@@ -737,20 +737,21 @@
 
   .review-flow-step
     background: transparent
-    border: 1px solid colors-ui-border-secondary
-    border-radius: 3px
+    border: 0.0625rem solid colors-ui-border-secondary
+    border-radius: 0.1875rem
     color: inherit
     cursor: pointer
     font: inherit
     line-height: 1
-    padding: 0 5px
+    padding: 0 0.3125rem
 
     &:hover
       background: colors-ui-surface-input-default
 
+    // Its text takes the disabled colour from `button:disabled` (D-20).
     &[disabled]
       cursor: default
-      opacity: 0.35
+      border-color: colors-ui-border-disabled
 
 // The loop iteration control sits directly under the invocation selector for
 // the same function, so it is dimmed slightly to read as the narrower choice.
@@ -771,11 +772,11 @@
 .review-loop-slider
   position: relative !important
   flex: 1 1 auto
-  min-width: 60px
-  max-width: 280px
+  min-width: 3.75rem
+  max-width: 17.5rem
   width: auto !important
-  margin-left: 8px
-  margin-right: 8px
+  margin-left: 0.5rem
+  margin-right: 0.5rem
   pointer-events: auto
   // Above Monaco's own unchanged-region boundary, which is drawn across the
   // full width of the fold it belongs to and lands on top of this control when
@@ -813,7 +814,7 @@
     .noUi-base,
     .noUi-target
       background-color: colors-ui-border-primary !important
-      height: 3px !important
+      height: 0.1875rem !important
       width: 100% !important
       margin-right: 0 !important
       margin-left: 0 !important
@@ -831,7 +832,7 @@
       height: 1.1em !important
       top: -0.5em !important
       border-radius: 0.35em !important
-      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55) !important
+      box-shadow: 0 0 0 0.0625rem rgba(0, 0, 0, 0.55) !important
 
 // The review's Omniscience values (RV-5, UD-3; §4.4 / §7).
 //
@@ -1082,11 +1083,11 @@
   // ellipsis can say what happened.
 
 .flow-taken
-  width: 100px
+  width: 6.25rem
   background: FLOW_CONDITION_TAKEN
 
 .flow-not-taken
-  width: 100px
+  width: 6.25rem
   background: FLOW_CONDITION_NOT_TAKEN
 
 .diff-added
@@ -1107,14 +1108,14 @@
     background-color: #0f0
 
 .status-timer
-  margin-left: 10px
+  margin-left: 0.625rem
 
   #slower-message
-    padding-left: 10px
+    padding-left: 0.625rem
 
 .flow-inline-value-before:after
   content: attr(data-content)
-  border: 1px solid colors-ui-text-primary-body
-  height: 18px
+  border: 0.0625rem solid colors-ui-text-primary-body
+  height: 1.125rem
   background-color: #0ff
   display: inline-block

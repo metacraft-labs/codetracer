@@ -327,7 +327,7 @@ proc renderStatusShell*[R, N](
               if notification.dismissible:
                 tdiv(
                     class = "notification-button dismiss-notification-button " &
-                      notification.kindClass,
+                      notification.kindClass, title = "Dismiss",
                     onclick = dismissHandler(callbacks, notificationIndex)):
                   discard
             for actionIndex, action in notification.actions:
@@ -353,7 +353,7 @@ proc renderStatusShell*[R, N](
               if notification.dismissible:
                 tdiv(
                     class = "notification-button dismiss-notification-button " &
-                      notification.kindClass,
+                      notification.kindClass, title = "Dismiss",
                     onclick = dismissHandler(callbacks, notificationIndex)):
                   discard
             for actionIndex, action in notification.actions:
@@ -506,7 +506,7 @@ proc renderStatusShell*[R, N](
                 if notification.dismissible:
                   tdiv(
                       class = "notification-button dismiss-notification-button " &
-                        notification.kindClass,
+                        notification.kindClass, title = "Dismiss",
                       onclick = dismissHandler(callbacks, notificationIndex)):
                     discard
               for actionIndex, action in notification.actions:

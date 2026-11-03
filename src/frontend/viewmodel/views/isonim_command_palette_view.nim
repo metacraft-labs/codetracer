@@ -155,12 +155,16 @@ proc rowZebraClass*(index: int): string =
     "command-odd"
 
 proc resultRowClass*(entry: CommandPaletteResultEntry; index: int;
-                     selected: bool): string =
+                     selected: bool; keyNavigation = false): string =
   ## Compose the full class string for a single dropdown row.  The
   ## base class is followed by per-kind, per-level, zebra, and
   ## selected modifiers in a stable order so tests can assert on the
   ## exact string.  Empty modifiers (e.g. ``cpnlInfo``) are skipped
   ## so the class string never carries spurious double spaces.
+  ##
+  ## The selected row is what Enter runs.  It shows key-focus only once the arrow
+  ## keys have moved onto the rows; until then the keyboard is in the search
+  ## field, which shows key-focus, and the row has the chosen fill (D-28).
   var parts = @["ct-menu-item", CommandPaletteResultRowClass, resultKindClass(entry.kind)]
   let lvl = resultLevelClass(entry.level)
   if lvl.len > 0:
@@ -168,7 +172,7 @@ proc resultRowClass*(entry: CommandPaletteResultEntry; index: int;
   parts.add rowZebraClass(index)
   if selected:
     parts.add "command-selected"
-    parts.add "ct-menu-item--active"
+    parts.add (if keyNavigation: "ct-menu-item--active" else: "ct-menu-item--chosen")
   parts.join(" ")
 
 proc rowSuffixText*(entry: CommandPaletteResultEntry): string =
@@ -197,11 +201,12 @@ proc containerClass*(isActive: bool): string =
 
 proc renderResultRow[R, N](r: R; vm: CommandPaletteVM;
                            entry: CommandPaletteResultEntry;
-                           index: int; selected: bool): N =
+                           index: int; selected: bool;
+                           keyNavigation: bool): N =
   ## Render a single dropdown row.  Click handler invokes
   ## ``vm.runResult`` — the run the bridge wires to the legacy
   ## interpreter (``onResultRun``).
-  let cls = resultRowClass(entry, index, selected)
+  let cls = resultRowClass(entry, index, selected, keyNavigation)
   let suffix = rowSuffixText(entry)
   let value = entry.value
   let rowIndex = index
@@ -271,6 +276,7 @@ proc renderCommandPalettePanel*[R, N](r: R; vm: CommandPaletteVM): N =
     # -- Results --
     let entries = vm.results.val
     let selectedIdx = vm.selectedIndex.val
+    let keyNavigation = vm.keyNavigation.val
     r.clearChildren(resultsContainer)
     if entries.len == 0:
       r.setAttribute(resultsContainer, "class",
@@ -280,7 +286,7 @@ proc renderCommandPalettePanel*[R, N](r: R; vm: CommandPaletteVM): N =
       r.setAttribute(resultsContainer, "class", CommandPaletteResultsClass)
       for i, entry in entries:
         let isSelected = (i == selectedIdx)
-        let row = renderResultRow[R, N](r, vm, entry, i, isSelected)
+        let row = renderResultRow[R, N](r, vm, entry, i, isSelected, keyNavigation)
         r.appendChild(resultsContainer, row)
 
     # -- Empty-state overlay --

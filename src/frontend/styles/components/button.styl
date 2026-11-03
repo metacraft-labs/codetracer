@@ -49,6 +49,12 @@ PANEL_INSET = 0.5rem
 // Not for the code editor, its gutters or code lines: those keep their own.
 LIST_HOVER_BG = colors-ui-surface-primary-secondary-hover
 
+// The hover on a dropdown's rows: a step quieter, so it reads apart from the
+// chosen row's fill (Nikolay, 2026-11-02; docs/UI-Design-Decisions.md, D-30).
+// It only shows on the dark surfaces dropdowns normally have (#161616, #1b1b1b):
+// a dropdown painted #242424 or lighter stays on LIST_HOVER_BG.
+DROPDOWN_HOVER_BG = colors-ui-surface-primary-default-hover
+
 // Button transition — ONE timing for every button's state change (hover, and
 // the welcome forms' Record / Download turning primary): the colours ease over
 // 100ms and start at once, so a button answers the pointer immediately without
@@ -58,13 +64,14 @@ LIST_HOVER_BG = colors-ui-surface-primary-secondary-hover
 // 2026-10-20: "the buttons started to behave slow").  Imported first
 // (codetracer.styl), so every stylesheet can use it.
 // key-focus (Nikolay, 2026-11-02; docs/UI-Design-Decisions.md, D-16): the one
-// look of a control selected from the keyboard, everywhere.  A 1.5px #3B82F6
-// border drawn inside the control's edge, as an outline so it follows the
+// look of a control selected from the keyboard, everywhere.  A 1.5px border,
+// #3B82F6 in the dark themes and #2563EB in the light ones, drawn inside the
+// control's edge, as an outline so it follows the
 // corners, sits above the control's children and takes no layout.  Applied to
 // every control by the catch-all in shared_widgets.styl; call it only where a
 // control's focus lands on another element.
 KEY_FOCUS_WIDTH = 0.09375rem
-KEY_FOCUS_COLOR = colors-blue-500
+KEY_FOCUS_COLOR = by-mode(colors-blue-500, colors-blue-600)
 
 key-focus()
   outline: KEY_FOCUS_WIDTH solid KEY_FOCUS_COLOR !important
@@ -139,10 +146,17 @@ button
     // SVG painted `currentColor`, so this declaration IS the inert treatment.
     // Left misspelled, the marks would inherit the enabled colour and be told
     // apart from live controls by opacity alone.
+    //
+    // Disabled changes only the text, the icon or the border, never the fill
+    // (Nikolay, 2026-11-02; docs/UI-Design-Decisions.md, D-20).  So no `opacity`
+    // on the button itself: it would fade the fill with everything else.
     color: colors-ui-text-primary-disabled !important
-    opacity: 0.5
     pointer-events: none
     cursor: not-allowed
+
+    > .ct-control-mark
+    > .edit-toolbar-mark
+      opacity: 0.5
 
 // Sizes — text buttons, on the control scale above.
 //
@@ -195,12 +209,13 @@ button
   background-color: colors-ui-surface-action-primary
   color: colors-ui-text-on-action-primary
 
-  &:hover
+  &:hover:not(:disabled)
     background-color: colors-ui-surface-action-primary-hover !important
 
-[class*="-button-"][class*="-primary"]
+  // The fill stays (D-20), so the grey disabled text would all but vanish on it
+  // (#727272 on #6366F1 is 1.1:1).  Its own text colour, dimmed, stays readable.
   &:disabled
-    background-color: colors-ui-surface-primary-disabled
+    color: rgba(colors-ui-text-on-action-primary, 0.5) !important
 
 // Secondary and tertiary are one look now: the button look (top of this file).
 // Tertiary was a second, flatter fill with no border; it is kept as a class
@@ -221,7 +236,6 @@ button
 
   &:disabled
     border-color: colors-ui-border-disabled
-    background-color: colors-ui-surface-primary-disabled
 
 // -- Icon-buttons --
 //
@@ -403,14 +417,44 @@ button
   max-width: 1.3em !important
   max-height: 1.3em !important
 
-#trace-run-button
-  background-image: ct-images-run-tracepoint
-  background-size: 1.75em 1.75em !important
+// These two paint their icon as a background image, which `color` cannot reach
+// and `opacity` cannot dim without fading the fill too (D-20).  A half-strength
+// layer of the button's own fill over the image dims only the icon.
+LOOP_ICON_DIM = linear-gradient(rgba(colors-ui-surface-primary-default, 0.5), rgba(colors-ui-surface-primary-default, 0.5))
+
+#backward-loop:disabled
+  background-image: LOOP_ICON_DIM, ct-images-omni-backward
+
+#forward-loop:disabled
+  background-image: LOOP_ICON_DIM, ct-images-omni-forward
+
+// The trace editor's run and options buttons draw the design system's ui-icons
+// (icons-lg) as the Build panel's buttons do (`.build-ctrl-btn`,
+// status_bar.styl): 16px, a mask painted `currentColor`, so the icon follows
+// the button's text colour in every state.  They had their own 28px triangle
+// and a heavy chevron, painted as fixed-colour background images.
+#trace-run-button,
+#hamburger-dropdown
+  background-image: none
+  padding: 0
+  align-items: center
+  justify-content: center
   z-index: 100
 
+  &::before
+    content: ""
+    flex: 0 0 auto
+    width: 1rem
+    height: 1rem
+    background-color: currentColor
+    -webkit-mask: var(--trace-button-icon) center / contain no-repeat
+    mask: var(--trace-button-icon) center / contain no-repeat
+
+#trace-run-button
+  --trace-button-icon: url('../../public/resources/shared/build_play.svg')
+
 #hamburger-dropdown
-  background-image: ct-images-hamburger-dropdown
-  z-index: 100
+  --trace-button-icon: url('../../public/resources/shared/build_chevron_down.svg')
 
 // The value-history toggle on each State row.  Its mark is the design system's
 // `code-icons=history-value-new` (the 2×2 grid), drawn at its 12px glyph size and
@@ -450,8 +494,7 @@ button
     transition-delay: TOOLTIP_DELAY_TIMER
 
   // Beside the button, not under it: under it the tooltip would cover the next
-  // State row.  Vertically centred on the button, 8px to its right, with the
-  // arrow on its left edge pointing back at the button.
+  // State row.  Vertically centred on the button, 8px to its right.
   .custom-tooltip
     top: 50%
     left: calc(100% + 0.5rem)
@@ -460,19 +503,6 @@ button
     // row, so without a z-index its clock icon paints over the tooltip's text.
     z-index: 1
 
-    &:after
-      content: ''
-      position: absolute
-      // The arrow box is 1em wide (0.5em border each side) and only its right
-      // border is painted, so -1em puts the triangle flush against the edge.
-      left: -1em
-      top: calc(50% - 0.5em)
-      // The shared `.custom-tooltip:after` anchors with `bottom: 100%` for an
-      // upward arrow; with `top` set too, that would fight the centring.
-      bottom: auto
-      border-width: 0.5em
-      border-style: solid
-      border-color: transparent colors-ui-surface-base-canvas transparent transparent
 
   // `[class*="ct-button-image-"]:hover > .custom-tooltip` (further down) drops
   // every icon button's tooltip BELOW the button on hover, and this button is
@@ -484,50 +514,40 @@ button
 .ct-button-no-border
   border: none !important
 
+// The design system's Tooltip (Figma: ❖ Tooltip), Size=sm.  In the light theme the
+// text is the body colour: Figma's `text/on-color/body` is #d2ccc1 there, unreadable
+// on this #f8f6f2.
+TOOLTIP_BORDER_WIDTH = by-mode(0.0625rem, 0)
+
+tooltip-look()
+  background-color: by-mode(colors-ui-surface-base-raised, colors-ui-surface-on-color-secondary)
+  color: colors-ui-text-primary-body
+  padding: by-mode(0.375rem 0.75rem, 0.25rem 0.5rem)
+  border-radius: 0.25rem
+  // Drawn inside, as Figma's border is, so it adds nothing to the size.
+  box-shadow: inset 0 0 0 TOOLTIP_BORDER_WIDTH colors-ui-border-tertiary, 0 0.5rem 1rem -0.125rem rgba(27, 33, 44, 0.12)
+  font-family: "SpaceGrotesk"
+  font-size: 0.75rem
+  font-weight: by-mode(300, 400)
+  line-height: 1rem
+
 .custom-tooltip
+  tooltip-look()
   display: block
   position: absolute
-  font-family: "SpaceGrotesk"
   top: 100%
-  background-color: colors-ui-surface-base-canvas
-  color: colors-ui-text-primary-body
-  padding: 0.3125em 0.625em
-  font-size: 0.75em
-  border-radius: 0.25em
   white-space: nowrap
-  box-shadow: 0 0.25em 0.5em rgba(0, 0, 0, 0.2)
   opacity: 0
   visibility: hidden
   transition: opacity 0.3s ease, visibility 0.3s ease, top 0.3s ease
   pointer-events: none
   text-align: start
-  line-height: 1em
 
   &.active
     opacity: 1
     visibility: visible
     top: -100%
-    height: 1.5em
     right: 0.25em
-
-    &:after
-      content: ''
-      position: absolute
-      top: 100%
-      left: unset
-      right: 0.25em
-      border-width: 0.5em
-      border-style: solid
-      border-color: colors-ui-surface-base-canvas transparent transparent transparent
-
-  &:after
-    content: ''
-    position: absolute
-    bottom: 100%
-    left: calc(50% - 0.5em)
-    border-width: 0.5em
-    border-style: solid
-    border-color: transparent transparent colors-ui-surface-base-canvas transparent
 
 [class*="ct-button-image-"]:hover > .custom-tooltip
   opacity: 1
@@ -550,26 +570,18 @@ button
 // `pointer-events: none` made unreachable now shows.
 .isonim-debug-controls button:disabled
   pointer-events: auto
-  // Dim only the mark: parent opacity also fades the tooltip's entire layer.
-  // The disabled colour and native disabled behaviour still apply.
-  opacity: 1
-
-  > .ct-control-mark
-    opacity: 0.5
 
 // Viewport coordinates are clamped by the toolbar view on hover and resize.
 // Long labels can wrap when even the full window is narrower than the text.
 .isonim-debug-controls [class*="ct-button-image-"] > .custom-tooltip
   position: fixed
   box-sizing: border-box
-  max-width: calc(100vw - 16px)
-  max-height: calc(100vh - 16px)
+  max-width: calc(100vw - 1rem)
+  max-height: calc(100vh - 1rem)
   overflow-wrap: anywhere
   white-space: normal
   transition: opacity 0.3s ease, visibility 0.3s ease
 
-  &:after
-    left: calc(var(--tooltip-arrow-left, 50%) - 0.5em)
 
 // The value-origin badge on each State row sits beside the value-history toggle
 // (above), so it is built as the same extra-small icon button: 20px tall, the

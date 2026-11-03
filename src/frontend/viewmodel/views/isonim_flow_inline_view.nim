@@ -235,6 +235,7 @@ proc renderFlowVariableChip*[R, N](r: R; flowMode, name: string;
     let button = element[R, N](r, "span",
       "flow-" & flowMode & "-value-name flow-view-more-button flow-hide-content")
     applyStyle[R, N](r, button, style)
+    r.setAttribute(button, "title", "Show the full value")
     listen(r, button, "mousedown", handlers.onViewMore, stop = true)
     r.appendChild(result, button)
   if showName:
@@ -283,6 +284,7 @@ proc renderFlowEventChip*[R, N](r: R; flowMode: string; event: FlowEventChip;
     let button = element[R, N](r, "span", "ct-omni-name" &
       event.nameClassSuffix & " flow-view-more-button flow-hide-content")
     applyStyle[R, N](r, button, style)
+    r.setAttribute(button, "title", "Show the full value")
     listen(r, button, "mousedown", onViewMore, stop = true)
     r.appendChild(result, button)
   let nameNode = element[R, N](r, "span", "ct-omni-name" & event.nameClassSuffix)

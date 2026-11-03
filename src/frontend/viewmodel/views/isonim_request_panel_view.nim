@@ -55,7 +55,7 @@ when defined(js):
 
   # Enter and Space on a `role="button"` row are its click.
   import ./isonim_activation
-  import ./dropdown_focus
+  import ./keyboard_focus
   from isonim/core/owner import onCleanup
 
 import isonim/core/[signals, computation]
@@ -253,9 +253,14 @@ proc renderFilterPicker[R](r: R; label: string; isOpen: bool;
   ## ``currentValue`` — the active filter value (``""`` means unfiltered).
   ## ``options``      — (filterValue, displayLabel) pairs; the entry whose
   ##                    ``filterValue == currentValue`` gets the
-  ##                    ``ct-menu-item--chosen`` modifier.
+  ##                    ``ct-menu-item--chosen`` modifier.  The "all" entry
+  ##                    (empty ``filterValue``) gets no row: the trigger already
+  ##                    says "All", and picking the chosen row again turns the
+  ##                    filter off (docs/UI-Design-Decisions.md, D-19).  The
+  ##                    terminal's and GPUI's menus still list it.
   ## ``onToggle``     — called when the trigger is clicked.
-  ## ``onSelect(v)``  — called when a dropdown item is clicked.
+  ## ``onSelect(v)``  — called when a dropdown item is clicked, with ``""``
+  ##                    when it was the chosen one.
   var chevronHost: typeof(r.createElement("span"))
   var dropdown: typeof(r.createElement("div"))
   let chevronSvg = if isOpen: chevronUpSvg else: chevronDownSvg
@@ -277,12 +282,15 @@ proc renderFilterPicker[R](r: R; label: string; isOpen: bool;
   if isOpen:
     for (optValue, optLabel) in options:
       let v = optValue
+      if v.len == 0:
+        continue
       let ol = optLabel
-      let itemClass = if v == currentValue: "ct-menu-item ct-menu-item--chosen"
+      let isChosen = v == currentValue
+      let itemClass = if isChosen: "ct-menu-item ct-menu-item--chosen"
                       else: "ct-menu-item"
       let item = ui(r):
-        tdiv(class = itemClass, role = "button", tabindex = "0",
-             onclick = pickerSelectHandler(onSelect, v)):
+        tdiv(class = itemClass, role = "button", tabindex = "-1",
+             onclick = pickerSelectHandler(onSelect, if isChosen: "" else: v)):
           span(class = "ct-menu-item-label"):
             text ol
       r.appendChild(dropdown, item)
@@ -538,7 +546,7 @@ proc renderRequestPanel*[R, N](r: R; vm: RequestPanelVM): N =
   var bodyContainer, detailContainer: N
 
   let panel = ui(r):
-    tdiv(ref = panelRef, class = RequestPanelContainerClass, tabIndex = "2"):
+    tdiv(ref = panelRef, class = RequestPanelContainerClass, tabIndex = "-1"):
       # Filter bar: [🔍 Find by URL...]  [Method ▼]  [Status ▼]
       tdiv(class = "request-panel-filters"):
         input(ref = searchInputEl,

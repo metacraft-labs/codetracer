@@ -88,6 +88,9 @@ type
     query*: Signal[string]
     results*: Signal[seq[CommandPaletteResultEntry]]
     selectedIndex*: Signal[int]
+    keyNavigation*: Signal[bool]
+      ## True once the arrow keys have moved onto the rows: the selected row is
+      ## then where the keyboard is, not only what Enter would run (D-28).
     activeCommandName*: Signal[string]
     onResultRun*: proc(index: int)
 
@@ -144,6 +147,7 @@ proc close*(vm: CommandPaletteVM) =
   vm.query.val = ""
   vm.results.val = @[]
   vm.selectedIndex.val = 0
+  vm.keyNavigation.val = false
   vm.mode.val = cpmNormal
   vm.activeCommandName.val = ""
 
@@ -157,6 +161,7 @@ proc clear*(vm: CommandPaletteVM) =
   vm.query.val = ""
   vm.results.val = @[]
   vm.selectedIndex.val = 0
+  vm.keyNavigation.val = false
 
 proc setQuery*(vm: CommandPaletteVM; queryText: string) =
   ## Push the new query text and reset the selection to the first
@@ -180,6 +185,10 @@ proc setSelected*(vm: CommandPaletteVM; index: int) =
   ## handlers (the legacy ``commandSelectNext`` / ``commandSelectPrevious``
   ## helpers).
   vm.selectedIndex.val = clampSelection(index, vm.results.val.len)
+
+proc setKeyNavigation*(vm: CommandPaletteVM; moved: bool) =
+  ## Whether the arrow keys have moved onto the rows.  See ``keyNavigation``.
+  vm.keyNavigation.val = moved
 
 proc runResult*(vm: CommandPaletteVM; index: int) =
   ## Run the selected visible result through the legacy command interpreter
@@ -233,6 +242,7 @@ proc createCommandPaletteVM*(store: ReplayDataStore): CommandPaletteVM =
     let query = createSignal("")
     let results = createSignal(newSeq[CommandPaletteResultEntry]())
     let selectedIndex = createSignal(0)
+    let keyNavigation = createSignal(false)
     let activeCommandName = createSignal("")
 
     let hasResults = createMemo[bool] proc(): bool =
@@ -250,6 +260,7 @@ proc createCommandPaletteVM*(store: ReplayDataStore): CommandPaletteVM =
       query: query,
       results: results,
       selectedIndex: selectedIndex,
+      keyNavigation: keyNavigation,
       activeCommandName: activeCommandName,
       hasResults: hasResults,
       resultCount: resultCount,

@@ -176,7 +176,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
 // header bar height.
 
 .deepreview-stats
-  font-size: 12px
+  font-size: 0.75rem
   color: colors-ui-text-primary-label-subtle
 
 .deepreview-trace-selector
@@ -188,13 +188,13 @@ VCS_BRANCH_PICKER_INSET = 0.25em
 // (`by-mode`, defaults.styl, keeps the dark theme's colours exactly).
 .deepreview-trace-select
   font-family: "SpaceGrotesk"
-  font-size: 12px
+  font-size: 0.875rem
   color: by-mode(#cccccc, colors-ui-text-primary-body)
   background-color: by-mode(#3c3c3c, colors-ui-surface-input-default)
-  border: 1px solid colors-ui-border-secondary
-  border-radius: 3px
-  padding: 2px 8px
-  height: 24px
+  border: 0.0625rem solid colors-ui-border-secondary
+  border-radius: 0.1875rem
+  padding: 0.125rem 0.5rem
+  height: 1.5rem
   cursor: pointer
   outline: none
   appearance: auto
@@ -217,7 +217,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   letter-spacing: 0.03125em
   color: colors-ui-text-primary-body
   background: colors-ui-surface-base-panel
-  border-bottom: 1px solid colors-ui-border-secondary
+  border-bottom: 0.0625rem solid colors-ui-border-secondary
   flex-shrink: 0
   user-select: none
 
@@ -239,7 +239,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   align-items: center
   gap: 0.375em
   padding: 0.375em 0.5em
-  border-bottom: 1px solid colors-ui-border-secondary
+  border-bottom: 0.0625rem solid colors-ui-border-secondary
   background: colors-ui-surface-base-panel
 
 .vcs-toggle-button
@@ -687,7 +687,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   flex-direction: column
   padding: 0.25em 0.5em
   cursor: pointer
-  border-bottom: 1px solid colors-ui-border-secondary
+  border-bottom: 0.0625rem solid colors-ui-border-secondary
   gap: 0.0625em
 
   &:hover
@@ -820,7 +820,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   font-size: 0.75rem
   color: colors-ui-text-primary-body
   background: colors-ui-surface-base-panel
-  border-top: 1px solid colors-ui-border-secondary
+  border-top: 0.0625rem solid colors-ui-border-secondary
   user-select: none
 
   &:hover
@@ -862,7 +862,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   justify-content: space-between
   padding: 0.25em 0.625em
   background: colors-ui-surface-base-panel
-  border: 1px solid colors-ui-border-secondary
+  border: 0.0625rem solid colors-ui-border-secondary
   border-radius: 0.25em
   margin: 0.25em 0 0.375em 0
   box-shadow: 0 0.125em 0.5em rgba(0, 0, 0, 0.3)
@@ -919,10 +919,6 @@ VCS_BRANCH_PICKER_INSET = 0.25em
     right: 0
     left: unset
     z-index: 200
-
-    &:after
-      left: unset
-      right: 0.25em
 
 .vcs-file-item:hover .vcs-file-diff-btn
   display: block
