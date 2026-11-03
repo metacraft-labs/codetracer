@@ -164,14 +164,18 @@ fn test_origin_rr_smoke_gdb_apis_available() {
     }
 
     let trace_dir = tempdir.path().join("trace");
-    let record = Command::new(&ct_native_replay)
-        .args([
-            "record",
-            "-o",
-            trace_dir.to_str().expect("utf8"),
-            binary_path.to_str().expect("utf8"),
-        ])
-        .output();
+    // On cores rr can count on (`test_harness::rr_cpu_binding`).
+    let mut record = Command::new(&ct_native_replay);
+    record.args([
+        "record",
+        "-o",
+        trace_dir.to_str().expect("utf8"),
+        binary_path.to_str().expect("utf8"),
+    ]);
+    #[cfg(target_os = "linux")]
+    test_harness::rr_cpu_binding::bind_rr_recording_to_countable_cores(&mut record)
+        .unwrap_or_else(|e| panic!("cannot bind the rr recording to countable cores: {e}"));
+    let record = record.output();
     let record_out = record.unwrap_or_else(|e| panic!("could not run {} record: {e}", ct_native_replay.display()));
     if !record_out.status.success() {
         let stderr = String::from_utf8_lossy(&record_out.stderr);
@@ -198,10 +202,13 @@ fn test_origin_rr_smoke_gdb_apis_available() {
             );
             return;
         }
-        panic!(
+        let error = format!(
             "ct-native-replay record failed for smoke fixture: status={} stderr={}",
             record_out.status, stderr
         );
+        #[cfg(target_os = "linux")]
+        let error = test_harness::rr_cpu_binding::with_rr_record_failure_explained(error, &stderr);
+        panic!("{error}");
     }
 
     // Step 5: confirm the trace directory exists and is non-empty —
