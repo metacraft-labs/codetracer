@@ -961,7 +961,7 @@
       },
       "locked": {
         "lastModified": 1793572973,
-        "narHash": "sha256-gY8kd+y9p3XQKe9bOZ65ID8Yzpq40n0Vv1pdTO48Ecw=",
+        "narHash": "sha256-3TJIz8p8m3noPceZs5/eOJq1MnhCeRue0nwQ2aGzia8=",
         "owner": "metacraft-labs",
         "repo": "codetracer-ruby-recorder",
         "rev": "6c1a64e47d638dbe8d735191b122a81d22b01933",
