@@ -213,6 +213,14 @@ if [ -n "$ct_reprobuild_host" ]; then
 			echo "Error: committed native lock is missing: $ct_native_lock" >&2
 			exit 1
 		fi
+		# The file existing is not the same as the file being right. Nothing
+		# in the workspace maintains the native solve's sibling pins -- every
+		# hook and gate is keyed on `repro.lock` -- so they drift silently,
+		# and a build off a drifted file compiles revisions nobody chose and
+		# exits 0. Measured at `agents` 0cfb1db300: 7 of 55 dependencies
+		# disagreed. See scripts/check-platform-lock-pins.sh's header.
+		"${BASH:-bash}" "$SCRIPT_DIR/check-platform-lock-pins.sh" \
+			"$ct_native_lock" "$CT_ROOT/repro.lock"
 		ct_lock_args=(--lock "$ct_native_lock")
 	fi
 	if [ -z "${REPRO_VARIANTS:-}" ]; then

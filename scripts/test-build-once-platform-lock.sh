@@ -9,6 +9,12 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/scripts" "$work/bin" "$work/locks"
 cp "$root/scripts/build-once.sh" "$work/scripts/"
+# The REAL pin check, not a stub: the driver calls it before binding the native
+# lock, and running the real one here keeps this test honest about the whole
+# step. The two fixture locks below carry no `deps` line, so it compares two
+# empty dependency sets and agrees -- which is what "nothing to compare" should
+# mean and is asserted directly by scripts/test-check-platform-lock-pins.sh.
+cp "$root/scripts/check-platform-lock-pins.sh" "$work/scripts/"
 printf 'linux lock\n' >"$work/repro.lock"
 printf 'darwin lock\n' >"$work/locks/arm64-macosx.lock"
 for helper in require-siblings build-tailwind; do

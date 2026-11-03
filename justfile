@@ -93,6 +93,17 @@ test-build-once-failed-bundle:
 test-build-once-platform-lock:
   bash scripts/test-build-once-platform-lock.sh
 
+# Do the two committed solve files name the same source? A `packages` set may
+# differ between platforms; a dependency revision may not. Answers in a second
+# and builds nothing.
+check-platform-lock-pins:
+  bash scripts/check-platform-lock-pins.sh
+
+# The arms of that check, the refusals included -- and the two cases that must
+# NOT refuse, a foreign `platform`/`packages` and a differing `self` pin.
+test-check-platform-lock-pins:
+  bash scripts/test-check-platform-lock-pins.sh
+
 # build-once uses the sibling reprobuild build only while it is fresh and
 # carries the flake's pinned revision, and names the repro it runs.
 test-build-once-repro-selection:
@@ -1207,6 +1218,7 @@ test:
   bash ci/lib/run-just-lanes.sh test \
     test-build-alignment \
     test-build-once-platform-lock \
+    test-check-platform-lock-pins \
     test-build-once-repro-selection \
     test-build-freshness \
     test-plat37-shim-gate \
