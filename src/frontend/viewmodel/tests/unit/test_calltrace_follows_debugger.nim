@@ -63,6 +63,52 @@ proc stopAt(store: ReplayDataStore; ticks: uint64; currentLine: int64) =
 
 suite "after a jump the call trace shows the current call":
 
+  test "an unmeasured bootstrap keeps the first row until the view reports its height":
+    # Native open learns totals with one metadata row, before it can report
+    # the pane's real height. Its current call may be just outside that row.
+    let mock = newMockBackendService(autoRespond = false)
+    let store = createReplayDataStore(mock.toBackendService())
+    let vm = createCalltraceVM(store)
+    vm.followDebuggerCall()
+    store.updateCalltraceSection(section(0, 1), 0'i64, Total)
+    let serial = vm.revealScroll.val.serial
+    store.stopAt(20, 1)
+    check vm.viewport.val.rows == 0
+    check vm.viewport.val.firstRow == 0
+    check vm.revealScroll.val.serial == serial
+    vm.setViewport(Viewport(rows: 10, firstRow: 0))
+    store.updateCalltraceSection(section(0, 15), 0'i64, Total)
+    store.answer(1)
+    check vm.selectedEntry.val == some(1'i64)
+    check vm.viewport.val.firstRow == 0
+
+  test "a pending far call is centred when the first measured viewport arrives":
+    let mock = newMockBackendService(autoRespond = false)
+    let store = createReplayDataStore(mock.toBackendService())
+    let vm = createCalltraceVM(store)
+    vm.followDebuggerCall()
+    store.updateCalltraceSection(section(0, 1), 0'i64, Total)
+    let serial = vm.revealScroll.val.serial
+    store.stopAt(15904, 250)
+    check vm.viewport.val.firstRow == 0
+    check vm.revealScroll.val.serial == serial
+    # No new section or stop arrives: measurement alone must resume follow.
+    vm.setViewport(Viewport(rows: 10, firstRow: 0))
+    check vm.viewport.val.firstRow == 245
+    check vm.revealScroll.val.serial == serial + 1
+    store.updateCalltraceSection(section(240, 30), 240'i64, Total)
+    store.answer(250)
+    check vm.selectedEntry.val == some(250'i64)
+
+  test "a measured one-row viewport still reveals a far current call":
+    let (store, vm) = setup(follow = true)
+    vm.setViewport(Viewport(rows: 1, firstRow: 0))
+    let serial = vm.revealScroll.val.serial
+    store.stopAt(15904, 250)
+    check vm.viewport.val.rows == 1
+    check vm.viewport.val.firstRow == 250
+    check vm.revealScroll.val.serial == serial + 1
+
   test "control: a current call inside the held section is selected in place":
     let (store, vm) = setup(follow = true)
     store.stopAt(20, 12)

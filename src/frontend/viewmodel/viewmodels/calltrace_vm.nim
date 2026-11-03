@@ -1167,6 +1167,8 @@ proc createCalltraceVM*(store: ReplayDataStore;
       let current = store.calltrace.currentLineIndex.val
       let answered = store.calltrace.answeredStop.val
       let stop = stopIdentityOf(store.debugger.val)
+      # Measurement must retry a pending reveal even if no new answer arrives.
+      let viewportRows = viewport.val.rows
       untrack(proc() =
         if not vm.followsDebuggerCall or stop == followedStop or current < 0:
           return
@@ -1174,6 +1176,10 @@ proc createCalltraceVM*(store: ReplayDataStore;
           return
         let at = current - start
         if at < 0 or at >= lines.len.int64:
+          # A bootstrap answer can name the current call before a view exists.
+          # Wait for its real height rather than centring with an invented row.
+          if viewportRows <= 0:
+            return
           if revealedStop != stop:
             revealedStop = stop
             vm.revealRow(current)
