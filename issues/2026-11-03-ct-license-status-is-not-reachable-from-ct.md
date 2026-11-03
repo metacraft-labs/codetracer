@@ -1,4 +1,4 @@
-# `ct license status` does not exist: the local licence check is only reachable as `ct-native-replay license status`
+# `ct license status` does not exist; the licence check is in ct-native-replay
 
 | field       | value |
 | ----------- | ----- |
