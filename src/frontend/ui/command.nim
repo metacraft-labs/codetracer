@@ -58,7 +58,7 @@ from ../viewmodel/store/types as vmtypes import
   cpmNormal, cpmAgent
 from ../viewmodel/viewmodels/command_palette_vm import
   CommandPaletteVM,
-  open, close, clear, setQuery, setResults, setSelected, setMode,
+  open, close, clear, setQuery, setResults, setSelected, setKeyNavigation, setMode,
   setInputPlaceholder, setActiveCommandName
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
@@ -71,6 +71,7 @@ proc requestCommandPalettePanelRefresh*(self: CommandPaletteComponent)
 
 proc clear(self: CommandPaletteComponent) =
   self.selected = 0
+  self.keyNavigation = false
   self.inputValue = ""
   self.inputPlaceholder = ""
   self.query = nil
@@ -223,6 +224,8 @@ proc showResults(self: CommandPaletteComponent) =
     discard
 
 proc onInput(self: CommandPaletteComponent, value: cstring) =
+  # Typing puts the keyboard's place back in the field (D-28).
+  self.keyNavigation = false
   self.eventuallyClearPlaceholder(value)
   self.showResults()
   if self.inputValue == cstring"/ai ":
@@ -448,6 +451,7 @@ proc syncLegacyCommandPaletteIntoVM*(self: CommandPaletteComponent) =
   vm.setResults(legacyResultsToVm(self.results))
   vm.setQuery(safeStr(self.inputValue))
   vm.setSelected(self.selected)
+  vm.setKeyNavigation(self.keyNavigation)
   vm.setInputPlaceholder(safeStr(self.inputPlaceholder))
   vm.setActiveCommandName(safeStr(self.activeCommandName))
   vm.setMode(legacyModeToVm(self))
@@ -509,6 +513,11 @@ proc initCommandPaletteVMFromSession*(vm: CommandPaletteVM) =
 
 when defined(js):
   proc focusElement(input: kdom.Element) {.importcpp: "#.focus()".}
+  proc markFieldClicked(input: kdom.Element; clicked: bool) {.importjs:
+    "#.closest('.command-input-row')?.classList.toggle('ct-palette-clicked', #)".}
+    ## Focus rule 3: a click on the search field shows no key-focus until a key
+    ## is pressed (D-28). `data-focus-mode` cannot say so: it only changes on Tab,
+    ## so it still reads "mouse" when a shortcut opens the palette after a click.
   proc scrollResultsForNavigation(
       resultsEl: kdom.Element; goingDown: bool; currentIdx: int) =
     ## Pre-scroll synchronously BEFORE redrawAll — no timing race with
@@ -553,7 +562,11 @@ when defined(js):
     input.toJs["__ctCommandPaletteWired"] = true
     self.inputField = cast[dom.Node](input)
 
+    input.addEventListener(cstring"blur", proc(ev: Event) =
+      input.markFieldClicked(false))
+
     input.addEventListener(cstring"mousedown", proc(ev: Event) =
+      input.markFieldClicked(true)
       input.focusElement()
       self.data.search(SearchFileRealTime, "".cstring))
 
@@ -562,6 +575,7 @@ when defined(js):
       self.onInput(value))
 
     input.addEventListener(cstring"keydown", proc(ev: Event) =
+      input.markFieldClicked(false)
       let keyCode = cast[int](ev.toJs.keyCode)
       if keyCode == DOWN_KEY_CODE:
         ev.preventDefault()

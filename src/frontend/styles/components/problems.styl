@@ -7,7 +7,7 @@
   height: 100%
   overflow: hidden
   color: colors-ui-text-primary-body
-  font-size: 13px
+  font-size: 0.8125rem
   font-family: "SpaceGrotesk"
   background: colors-ui-surface-base-panel
 
@@ -38,7 +38,7 @@
   // flush against the panel's top edge (see the top of this file), so its own
   // top padding is the only room its contents get there.
   padding: 0.375rem PANEL_INSET 0.25rem
-  border-bottom: 1px solid colors-ui-surface-input-default
+  border-bottom: 0.0625rem solid colors-ui-surface-input-default
   background: colors-ui-surface-primary-tertiary
   flex-shrink: 0
   user-select: none
@@ -46,10 +46,10 @@
 .problems-counts
   display: flex
   align-items: center
-  gap: 12px
+  gap: 0.75rem
 
 .problems-count-badge
-  font-size: 12px
+  font-size: 0.75rem
   opacity: 0.8
 
 .problems-count-error
@@ -65,7 +65,7 @@
 .problems-controls
   display: flex
   align-items: center
-  gap: 4px
+  gap: 0.25rem
 
 .problems-filter-btn
   // The small control size (button.styl), the height of the count badges on
@@ -73,18 +73,16 @@
   display: inline-flex
   align-items: center
   height: CONTROL_HEIGHT_SM
-  padding: 0 8px
-  border-radius: 4px
-  cursor: pointer
-  font-size: 12px
-  color: colors-ui-text-primary-body
-  background: transparent
+  box-sizing: border-box
+  padding: 0 0.5rem
+  border-radius: CONTROL_RADIUS
+  font-size: 0.75rem
+  // The button look (button.styl); the selected filter is its active state.
+  control-button()
   &:hover
-    background: colors-ui-surface-input-default
+    control-button-hover()
   &.active
-    background: colors-ui-surface-input-default
-    color: colors-ui-text-primary-body
-    font-weight: 600
+    control-button-active()
 
 // -- Problem list --
 
@@ -94,7 +92,7 @@
   overflow-x: hidden
 
 .problems-empty
-  padding: 16px 10px
+  padding: 1rem 0.625rem
   opacity: 0.6
 
 // -- Individual problem row --
@@ -102,11 +100,11 @@
 .problems-row
   display: flex
   align-items: baseline
-  gap: 8px
-  padding: 3px PANEL_INSET
+  gap: 0.5rem
+  padding: 0.1875rem PANEL_INSET
   cursor: pointer
   white-space: nowrap
-  border-bottom: 1px solid colors-ui-border-secondary
+  border-bottom: 0.0625rem solid colors-ui-border-secondary
   // The list hover (LIST_HOVER_BG, button.styl).
   &:hover
     background: LIST_HOVER_BG
@@ -137,8 +135,8 @@
 // reserved height here: an always-present empty element would push the filter
 // buttons around for no reason.
 .problems-status
-  margin-left: 10px
-  font-size: 11px
+  margin-left: 0.625rem
+  font-size: 0.6875rem
   opacity: 0.75
   font-style: italic
   white-space: nowrap
@@ -147,9 +145,9 @@
 
 .problems-icon
   flex-shrink: 0
-  width: 16px
+  width: 1rem
   text-align: center
-  font-size: 12px
+  font-size: 0.75rem
 
 .problems-icon-error
   color: #f85149
@@ -167,12 +165,12 @@
   flex-shrink: 1
   overflow: hidden
   text-overflow: ellipsis
-  font-size: 12px
+  font-size: 0.75rem
 
 .problems-location
   color: by-mode(#8b949e, colors-ui-text-primary-caption)
   flex-shrink: 0
-  font-size: 12px
+  font-size: 0.75rem
 
 .problems-message
   flex: 1
@@ -187,28 +185,28 @@
   display: block
 
 .problems-file-group
-  margin-bottom: 2px
+  margin-bottom: 0.125rem
 
 .problems-file-header
-  padding: 4px PANEL_INSET
+  padding: 0.25rem PANEL_INSET
   font-weight: 600
-  font-size: 12px
+  font-size: 0.75rem
   // Caption text, and a hairline that is about `border/tertiary` over the
   // dark panel: those tokens in the light theme (`by-mode`, defaults.styl).
   color: by-mode(#8b949e, colors-ui-text-primary-caption)
   background: rgba(255, 255, 255, 0.03)
-  border-bottom: 1px solid by-mode(rgba(255, 255, 255, 0.05), colors-ui-border-tertiary)
+  border-bottom: 0.0625rem solid by-mode(rgba(255, 255, 255, 0.05), colors-ui-border-tertiary)
 
 // Severity-tinted left border for quick scanning
 .problems-severity-error
-  border-left: 3px solid #f85149
+  border-left: 0.1875rem solid #f85149
 
 // In the light theme the severity icon tokens, as the glyphs above.
 .problems-severity-warning
-  border-left: 3px solid by-mode(#d29922, colors-ui-icon-warning-primary)
+  border-left: 0.1875rem solid by-mode(#d29922, colors-ui-icon-warning-primary)
 
 .problems-severity-info
-  border-left: 3px solid by-mode(#58a6ff, colors-ui-icon-information-primary)
+  border-left: 0.1875rem solid by-mode(#58a6ff, colors-ui-icon-information-primary)
 
 // Build-Output-Pane.md §3.9: a build diagnostic's icon in the editor's
 // gutter — the most severe one on the line, in the Problems pane's colours,

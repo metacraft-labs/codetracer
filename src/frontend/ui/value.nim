@@ -822,6 +822,7 @@ proc renderExpandButtonDom(
   fresh: cstring
 ): Node =
   result = newElement(cstring"span", cstring("value-expand-button " & fresh))
+  result.setAttribute(cstring"title", cstring"Show or hide the value's parts")
   result.addEventListener(cstring"mousedown", proc(ev: Event) =
     self.data.focusComponent(self)
     ev.stopPropagation()

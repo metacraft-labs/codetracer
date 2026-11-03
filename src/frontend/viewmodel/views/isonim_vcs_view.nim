@@ -32,6 +32,7 @@ import std/[strformat, strutils]
 when defined(js):
   # Enter and Space on a `role="button"` row are its click.
   import ./isonim_activation
+  import ./keyboard_focus
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
@@ -319,10 +320,10 @@ proc renderBranchOption[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
                            branch: string): auto =
   let branchName = branch
   let isActive = branchName == vm.currentBranch.val
-  let itemClass = if isActive: "ct-menu-item ct-menu-item--active"
+  let itemClass = if isActive: "ct-menu-item ct-menu-item--chosen"
                   else: "ct-menu-item"
   ui(r):
-    tdiv(class = itemClass,
+    tdiv(class = itemClass, role = "button", tabindex = "-1",
          onclick = proc() =
            callbacks.invokeCheckoutBranch(branchName)):
       span(class = "ct-menu-item-label"):
@@ -522,12 +523,14 @@ proc renderBranchPicker[R](r: R; vm: VCSVM; callbacks: VCSCallbacks): auto =
   let panel = ui(r):
     tdiv(class = "vcs-branch-picker"):
       tdiv(class = (if isOpen: "vcs-branch-current vcs-branch-current-open" else: "vcs-branch-current"),
+           role = "button", tabindex = "0", `aria-haspopup` = "true",
+           `aria-expanded` = (if isOpen: "true" else: "false"),
            onclick = proc() = vm.invokeToggleBranchDropdown(callbacks)):
         span(ref = chevronHost, class = "vcs-branch-chevron")
         span(class = "vcs-branch-name"):
           text vm.currentBranch.val
       if isOpen:
-        tdiv(ref = dropdown, class = "vcs-branch-dropdown")
+        tdiv(ref = dropdown, class = "vcs-branch-dropdown", tabindex = "-1")
   r.setInnerHtml(chevronHost, chevronSvg)
   if isOpen:
     for branch in vm.branches.val:

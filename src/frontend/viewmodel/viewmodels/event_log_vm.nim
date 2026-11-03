@@ -295,6 +295,30 @@ func moveColumn*(c: var EventLogColumns; col: EventLogColumn;
       inc k
   true
 
+func placeColumn*(c: var EventLogColumns; col, target: EventLogColumn): bool =
+  ## Put `col` where `target` is in the FULL order, hidden columns included —
+  ## a row of the Columns menu dragged onto another row (Nikolay, 2026-10-20:
+  ## dragging replaced the move-left / move-right arrows).  Dragged down, `col`
+  ## lands after `target`; dragged up, before it — so it always ends up in the
+  ## row it was dropped on.  Unlike `moveColumn` a hidden column can be placed:
+  ## the menu lists every column, and its place is where it comes back.  False
+  ## when nothing moves (`col == target`, or either is not in the order).
+  let at = c.order.find(col)
+  let to = c.order.find(target)
+  if col == target or at < 0 or to < 0:
+    return false
+  c.order.delete(at)
+  c.order.insert(col, to)
+  true
+
+func placeColumnLower*(c: var EventLogColumns; col: EventLogColumn): bool =
+  ## Put `col` one row lower in the FULL order: the Columns menu's drag handle
+  ## pressed from the keyboard (Nikolay, 2026-11-02).  False on the last row.
+  let at = c.order.find(col)
+  if at < 0 or at == c.order.high:
+    return false
+  c.placeColumn(col, c.order[at + 1])
+
 const EventLogTableName* = EventLogTablePane
   ## The event log's name in the remembered widths
   ## (`table_overflow.encodeColumnWidths`).
@@ -807,6 +831,16 @@ proc toggleColumn*(vm: EventLogVM; col: EventLogColumn): bool =
 proc moveColumn*(vm: EventLogVM; col: EventLogColumn; delta: int): bool =
   var c = vm.columns.val
   result = c.moveColumn(col, delta)
+  if result: vm.columns.val = c
+
+proc placeColumn*(vm: EventLogVM; col, target: EventLogColumn): bool =
+  var c = vm.columns.val
+  result = c.placeColumn(col, target)
+  if result: vm.columns.val = c
+
+proc placeColumnLower*(vm: EventLogVM; col: EventLogColumn): bool =
+  var c = vm.columns.val
+  result = c.placeColumnLower(col)
   if result: vm.columns.val = c
 
 proc setColumnWidth*(vm: EventLogVM; col: EventLogColumn;

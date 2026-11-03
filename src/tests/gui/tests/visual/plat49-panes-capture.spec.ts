@@ -239,11 +239,15 @@ test("PLAT-49 part B: the desktop's panes and session tabs", async ({ ctPage }) 
     await page.waitForTimeout(2500);
     menu.headerAfterShowLocation = await headerTitles();
     menu.optionsAfterShowLocation = await options();
-    await page.locator('.eventLog-column-option[data-column="output"] .eventLog-column-left').first().click();
+    // Rows reorder by dragging (the move arrows are gone): output dropped on
+    // kind's row lands before it — one place left.
+    await page.locator('.eventLog-column-option[data-column="output"]').first()
+      .dragTo(page.locator('.eventLog-column-option[data-column="kind"]').first());
     await page.waitForTimeout(2500);
     menu.headerAfterMoveOutputLeft = await headerTitles();
     // Put both back.
-    await page.locator('.eventLog-column-option[data-column="output"] .eventLog-column-right').first().click();
+    await page.locator('.eventLog-column-option[data-column="output"]').first()
+      .dragTo(page.locator('.eventLog-column-option[data-column="kind"]').first());
     await page.waitForTimeout(1500);
     await page.locator('.eventLog-column-option[data-column="location"] .eventLog-column-check').first().click();
     await page.waitForTimeout(2500);

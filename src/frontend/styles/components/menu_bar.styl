@@ -7,13 +7,13 @@
 // fixed size and do not scale with our font size, so an em/rem value there would
 // drift out of alignment whenever the UI scale changes.  The gap after them is
 // ours, so it follows the UI scale.
-NATIVE_WINDOW_CONTROLS_EDGE = 62px
+NATIVE_WINDOW_CONTROLS_EDGE = 3.875rem
 NATIVE_WINDOW_CONTROLS_GAP = 1rem
 NATIVE_WINDOW_CONTROLS_INSET = "calc(%s + %s)" % (NATIVE_WINDOW_CONTROLS_EDGE NATIVE_WINDOW_CONTROLS_GAP)
 
 // Left alignment for the caption bar when no OS window controls are present
 // (macOS native fullscreen).
-FULLSCREEN_EDGE_GAP = 8px
+FULLSCREEN_EDGE_GAP = 0.5rem
 
 // Command prompt: floor, viewport-tracking middle, ceiling.
 COMMAND_PROMPT_WIDTH = unquote("clamp(24em, 24vw, 40em)")
@@ -300,7 +300,7 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
       cursor: pointer
 
     #menu-root-name
-      height: 25px
+      height: 1.5625rem
       // font-size: 15px
       font-family: Arial, Helvetica, sans-serif
       font-weight: bold
@@ -308,11 +308,12 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      padding-right: 10px
+      padding-right: 0.625rem
 
   #menu-main
     font-family: "SpaceGrotesk"
-    font-size: MENU_FONT_SIZE
+    // D-26, in every theme.
+    font-size: 0.875rem
     width: fit-content
     min-width: 12em
     padding: 0
@@ -324,7 +325,7 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
     // It was once 2.1rem — 33.6px against a 34px bar — so the menu overlapped
     // the bar's bottom edge by a fraction of a pixel instead of clearing it.
     top: "calc(%s + %s)" % (CAPTION_BAR_HEIGHT DROPDOWN_TRIGGER_GAP)
-    margin-left: 6px
+    margin-left: 0.375rem
     // CHROME ONLY — see `dropdown-surface()` in components/shared_widgets.styl
     // for the two preconditions this element does not meet.  In short: the
     // submenus are absolutely-positioned children laid out BESIDE this box, so
@@ -350,17 +351,17 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
   // with the old input-surface background, margins and 4px radius the moment
   // the hooks came back.
   .menu-search-result
-    font-size: MENU_FONT_SIZE
+    font-size: 0.875rem
     height: auto
     min-width: fit-content //"calc(%s + 2px)" % MENU_NODE_MIN_WIDTH
     display: flex
-    padding-top: 2px
-    padding-bottom: 2px
+    padding-top: 0.125rem
+    padding-bottom: 0.125rem
     background-color: colors-ui-surface-input-default
-    margin-left: 4px
-    margin-right: 4px
+    margin-left: 0.25rem
+    margin-right: 0.25rem
     align-items: center
-    border-radius: 4px
+    border-radius: 0.25rem
 
   .menu-node-container
     display: block
@@ -384,30 +385,30 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
       width: stretch !important
       justify-content: space-between
       float: left
-      padding-left: 8px
-      padding-right: 8px
+      padding-left: 0.5rem
+      padding-right: 0.5rem
       color: colors-ui-text-primary-body
-      font-size: MENU_FONT_SIZE
-      border-radius: 5px
+      font-size: inherit
+      border-radius: 0.3125rem
       display: flex
       align-items: center
       font-weight: 400
-      line-height: 18px
+      line-height: 1.125rem
       white-space: nowrap
 
     .menu-node-shortcut
       width: fit-content !important
       // min-width: MENU_NODE_SHORTCUT_MIN_WIDTH
       background-color: colors-ui-surface-primary-secondary-hover
-      border-radius: 6px
+      border-radius: 0.375rem
       color: colors-ui-text-primary-body
       // overflow: hidden
-      font-size: 10px
+      font-size: inherit
       text-align: right
-      padding: 4px
-      line-height: 10px
-      margin-right: 8px
-      margin-left: 8px
+      padding: 0.25rem
+      line-height: 1.25em
+      margin-right: 0.5rem
+      margin-left: 0.5rem
       white-space: nowrap
       // padding-right: 15px
 
@@ -420,11 +421,11 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
       width: stretch !important
       justify-content: space-between
       float: left
-      padding-left: 8px
-      padding-right: 8px
+      padding-left: 0.5rem
+      padding-right: 0.5rem
       color: colors-ui-text-primary-body
-      font-size: MENU_FONT_SIZE
-      border-radius: 5px
+      font-size: inherit
+      border-radius: 0.3125rem
       display: flex
       align-items: center
       font-weight: 400
@@ -435,40 +436,40 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
       width: MENU_EXPAND_WIDTH
       float: left
       position: relative
-      margin-left: 8px
+      margin-left: 0.5rem
       display: flex
       align-items: center
 
       &::after
         position: absolute
-        right: 0px
+        right: 0
         // top: calc(50% - 6px)
-        width: 7px
-        height: 8px
+        width: 0.4375rem
+        height: 0.5rem
         content: MENU_EXTEND_ARROW_ICON
         display: flex
         align-items: center
-        padding-bottom: 2px
+        padding-bottom: 0.125rem
         // border: 6px solid transparent
         // border-left-color: colors-ui-text-primary-body
 
   .menu-node-icon
-    width: 14px
-    height: 24px
+    width: 0.875rem
+    height: 1.5rem
     display: flex
     align-items: center
-    margin-left: 4px
+    margin-left: 0.25rem
     opacity: 0.5
 
     i
-      font-size: 14px !important
+      font-size: 0.875rem !important
 
   .icon
-    width: 14px
-    height: 14px
+    width: 0.875rem
+    height: 0.875rem
     background-repeat: no-repeat
     background-position: center
-    background-size: 14px
+    background-size: 0.875rem
 
     &.file
       background-image: FILE_MENU_ICON
@@ -538,47 +539,47 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
 
   #menu-search-results
     height: auto
-    margin-top: 5px
-    margin-bottom: 5px
+    margin-top: 0.3125rem
+    margin-bottom: 0.3125rem
 
     &:empty
       display: none
 
   #menu-search
-    margin-left: 4px
-    margin-right: 4px
+    margin-left: 0.25rem
+    margin-right: 0.25rem
     // border-right: 1px solid colors-ui-text-primary-body
     border-top: 0
-    font-size: 14px
+    font-size: 0.875rem
 
   #menu-search-header
     display: block
-    height: 11px
+    height: 0.6875rem
     width: 100%
     color: colors-ui-text-primary-body
-    background: linear-gradient(to top, colors-ui-surface-input-default, transparent 1px),
-            linear-gradient(315deg, colors-ui-surface-input-default, colors-ui-surface-input-default 5px, transparent, transparent calc(6px)),
-            linear-gradient(45deg, colors-ui-surface-input-default, colors-ui-surface-input-default 5px, transparent, transparent calc(6px)),
-            linear-gradient(to top, colors-ui-surface-input-default, transparent 1px)
+    background: linear-gradient(to top, colors-ui-surface-input-default, transparent 0.0625rem),
+            linear-gradient(315deg, colors-ui-surface-input-default, colors-ui-surface-input-default 0.3125rem, transparent, transparent calc(0.375rem)),
+            linear-gradient(45deg, colors-ui-surface-input-default, colors-ui-surface-input-default 0.3125rem, transparent, transparent calc(0.375rem)),
+            linear-gradient(to top, colors-ui-surface-input-default, transparent 0.0625rem)
     background-repeat: no-repeat, no-repeat, no-repeat, no-repeat
-    background-size: 1vw 11px, 11px 11px, 11px 11px, calc(16vw - 22px) 11px
-    background-position: left 0 bottom, left 1vw bottom, left calc(1vw + 11px) bottom, left calc(1vw + 22px) bottom
+    background-size: 1vw 0.6875rem, 0.6875rem 0.6875rem, 0.6875rem 0.6875rem, calc(16vw - 1.375rem) 0.6875rem
+    background-position: left 0 bottom, left 1vw bottom, left calc(1vw + 0.6875rem) bottom, left calc(1vw + 1.375rem) bottom
     position: fixed
     border: 0
-    top: 25px
+    top: 1.5625rem
 
   #menu-search input
     position: relative
-    height: 28px
+    height: 1.75rem
     bottom: 0
     width: 100% //MENU_SEARCH_INPUT_WIDTH
     // min-width: MENU_SEARCH_INPUT_MIN_WIDTH
-    border: 0.5px solid colors-ui-border-primary
-    border-radius: 6px
+    border: 0.03125rem solid colors-ui-border-primary
+    border-radius: 0.375rem
     background-color: colors-ui-surface-base-panel
     color: colors-ui-text-primary-body
     margin: 0 !important
-    font-size: 14px !important
+    font-size: 0.875rem !important
 
     &:focus
       outline: 0 !important
@@ -611,7 +612,7 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
 
   .menu-active-node
     background-color: colors-ui-surface-input-default
-    // .ct-menu-item--active inside handles the blue focus bg via menu_item.styl
+    // .ct-menu-item--active inside handles the key-focus border via menu_item.styl
 
   .menu-active-search-result
     background-color: colors-ui-surface-primary-tertiary
@@ -620,7 +621,7 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
     background-color: colors-ui-surface-input-default
     color: colors-ui-text-primary-body
     font-style: italic
-    padding-left: 20px
+    padding-left: 1.25rem
 
 // Caption-bar controls are the LARGE control size (CONTROL_HEIGHT_LG,
 // button.styl), the same 28px as the command prompt they share the bar with.

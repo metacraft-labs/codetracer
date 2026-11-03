@@ -174,6 +174,10 @@ test-sibling-cargo-locks:
   bash ci/test/sibling-cargo-locks-test.sh
   bash scripts/test-sibling-cargo-locks.sh
 
+# See the header of ci/test/ui-design-decisions.py and docs/UI-Design-Decisions.md.
+test-ui-design-decisions:
+  python3 ci/test/ui-design-decisions.py
+
 # Assert the GUI harness's `npm install` leaves `src/tests/gui/yarn.lock` alone.
 # npm >= 7 keeps an existing yarn.lock "up to date" by rewriting it from the
 # tree it installed, and on Linux that tree has no `fsevents` (playwright's
@@ -5770,6 +5774,11 @@ build-tasks-electron *args:
 # against (`src/tests/visual/answers/plat60-low-level-code.electron.json`).
 plat60-capture-electron *args:
   bash scripts/plat60-capture-electron.sh "$@"
+
+# The desktop's Low Level Code view on the native (rr) recording, captured
+# (`src/tests/visual/answers/plat60-native-low-level-code.electron.json`).
+plat60-native-capture-electron *args:
+  bash scripts/plat60-native-capture-electron.sh "$@"
 
 # The §30a arm: the two answer producers are independent readers.
 plat35-answer-independence:

@@ -376,9 +376,8 @@ function assertReadable(answers: any): void {
     }
     expect(contrast(answers.editor.executionPointer, background), `${answers.theme} execution pointer on ${background}`).toBeGreaterThanOrEqual(3);
   }
-  for (const key of ["panel", "unfocusedEdge"]) {
-    expect(contrast(answers.focus.outline, answers.focus[key]), `${answers.theme} focus on ${key}`).toBeGreaterThanOrEqual(3);
-  }
+  // The focus outline is below the 3:1 floor by decision (docs/UI-Design-Decisions.md,
+  // D-15), so it is not asserted here.
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

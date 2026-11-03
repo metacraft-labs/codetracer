@@ -206,7 +206,6 @@
 .data-table table,
 .data-table tbody,
 .data-table tr
-  &:focus,
-  &:focus-visible
+  &:focus:not(:focus-visible)
     outline: none !important
     box-shadow: none !important

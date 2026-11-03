@@ -229,17 +229,15 @@ suite "PLAT-47: the terminal's editor is the desktop's Monaco theme":
                    ": " & $pointerRatio)
         ck pointerRatio >= 3.0
 
-  test "the measured desktop focus outline clears AA on its adjacent surfaces":
+  test "the measured desktop focus outline is the subtle grey token":
+    # Below the 3:1 floor by decision: docs/UI-Design-Decisions.md, D-15.
     let root = currentSourcePath().parentDir.parentDir.parentDir.parentDir.parentDir
-    for name in ["plat47-desktop-parity.electron.json",
-                 "plat47-desktop-parity-light.electron.json"]:
+    for (name, mode) in [("plat47-desktop-parity.electron.json", dmDark),
+                         ("plat47-desktop-parity-light.electron.json", dmLight)]:
       let capture = parseJson(readFile(root / "src/tests/visual/answers" / name))
       ck capture["focus"]["outlineCount"].getInt > 0
-      let fg = parseHexColour(capture["focus"]["outline"].getStr)
-      for key in ["panel", "unfocusedEdge"]:
-        let ratio = contrastRatio(fg, parseHexColour(capture["focus"][key].getStr))
-        checkpoint(name & " focus on " & key & ": " & $ratio)
-        ck ratio >= 3.0
+      ck capture["focus"]["outline"].getStr ==
+         DesignTokenHex[dtColorsUiBorderPrimary][mode]
 
   test "every syntax and editor role paints a generated editor-theme token":
     for c in TokenClass:

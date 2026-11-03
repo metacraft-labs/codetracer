@@ -413,6 +413,16 @@ proc importTrace*(
       let outputCt = outputFolder / CANONICAL_CT_FILE
       if ctPath != outputCt:
         copyFile(ctPath, outputCt)
+      # An rr recording's folder (`ct-native-replay record`) holds the rr
+      # trace itself in `rr/` beside a metadata-only `trace.ct`. The replay
+      # server prefers `rr/` when the folder has one
+      # (`dap_server.rs::resolve_replay_trace_path`); a copy without it
+      # left only the container, which the worker read as an MCR recording
+      # and refused ("ct-mcr binary not found"). Carry the rr trace across.
+      let rrSource = recordingSourceFolder / "rr"
+      if dirExists(rrSource) and recordingSourceFolder != outputFolder and
+          not dirExists(outputFolder / "rr"):
+        copyDir(rrSource, outputFolder / "rr")
     else:
       # M41: the materialized shape has no single container, so carry
       # the event stream and its sidecars across instead.  The replay
