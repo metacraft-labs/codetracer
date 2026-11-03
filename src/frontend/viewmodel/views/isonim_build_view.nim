@@ -163,7 +163,7 @@ proc renderBuildPanel*[R, N](r: R; vm: BuildVM): N =
   r.appendChild(header, label)
   let controls = el(r, "div", "build-header-controls")
   let historyBtn = el(r, "div", "build-history-btn")
-  r.setAttribute(historyBtn, "title", BuildHistoryLabel)
+  r.setAttribute(historyBtn, "title", "Show the build history")
   r.appendChild(historyBtn, r.createTextNode(BuildHistoryLabel & " ▾"))
   r.addEventListener(historyBtn, "click", proc() =
     historyOpen.val = not historyOpen.val)

@@ -19,7 +19,14 @@ when defined(js):
 type
   AutoHideSideStripRecord* = object
     title*: string
+    ## Unique per panel (`auto_hide.panelKey`), unlike `title`: the outline
+    ## builder in `ui/layout.nim` finds this tab by it as `data-ct-panel-key`.
+    key*: string
     active*: bool
+    ## Opened by a click (docked, or the overlay pinned open) rather than shown
+    ## as a hover preview.  Only such a tab gets the × (Nikolay, 2026-10-17):
+    ## a preview closes itself when the pointer leaves.
+    pinned*: bool
 
   AutoHideSideStripCallbacks* = object
     modeLabel*: string
@@ -28,6 +35,9 @@ type
     onSelect*: proc(index: int)
     onClose*: proc(index: int)
     onUnpin*: proc(index: int)
+    ## The × on the active tab: hide its panel, keeping the tab pinned — what
+    ## the × on the selected row of the status bar's tab-list menu does.
+    onHide*: proc(index: int)
     onCollapsedSelect*: proc()
     ## Called when the mouse enters the collapsed line — starts the same
     ## hover-preview timer a tab does, so the line opens its edge's overlay
@@ -46,6 +56,11 @@ const
   AutoHideSideStripTabClass* = "auto-hide-strip-tab"
   AutoHideSideStripTabActiveClass* = "auto-hide-strip-tab active"
   AutoHideSideStripTabLabelClass* = "auto-hide-strip-tab-label"
+  ## The × on the active tab (Nikolay, 2026-10-16): the same `close_sm` icon
+  ## and behaviour as `auto-hide-tablist-close` in the status bar's tab-list
+  ## menu — it hides the panel that is showing and leaves the tab pinned.
+  AutoHideSideStripTabHideClass* = "auto-hide-strip-tab-hide"
+  HideTabLabel = "Close panel"
   ## The four button classes below have **no producer**.  `f214d703b` added
   ## the tab context menu and `1af471302` then removed the inline close /
   ## unpin buttons from `renderSideStripTab`, so a strip tab is now just its
@@ -74,6 +89,13 @@ proc invokeSelect(callbacks: AutoHideSideStripCallbacks; index: int) =
 proc invokeClose(callbacks: AutoHideSideStripCallbacks; index: int) =
   if not callbacks.onClose.isNil:
     callbacks.onClose(index)
+
+proc invokeHide(callbacks: AutoHideSideStripCallbacks; index: int) =
+  if not callbacks.onHide.isNil:
+    callbacks.onHide(index)
+
+proc showsHide(callbacks: AutoHideSideStripCallbacks; tab: AutoHideSideStripRecord): bool =
+  tab.active and tab.pinned and not callbacks.onHide.isNil
 
 proc invokeUnpin(callbacks: AutoHideSideStripCallbacks; index: int) =
   if not callbacks.onUnpin.isNil:
@@ -116,9 +138,26 @@ proc renderSideStripTab[R, N](
   result = ui(r):
     tdiv(ref = tabEl,
          class = cls,
+         `data-ct-panel-key` = tab.key,
+         role = "button", tabindex = "0",
          onclick = proc() = callbacks.invokeSelect(index)):
       span(class = AutoHideSideStripTabLabelClass):
         text tab.title
+  if callbacks.showsHide(tab):
+    var hideEl: N
+    let hide = ui(r):
+      span(ref = hideEl, class = AutoHideSideStripTabHideClass, role = "button", tabindex = "-1",
+          title = HideTabLabel, `aria-label` = HideTabLabel,
+          onclick = proc() = callbacks.invokeHide(index))
+    r.appendChild(result, hide)
+    when defined(js):
+      when N is isonim_dom.Element:
+        # Stopped here: the tab's click would reopen the panel the × just
+        # closed.
+        isonim_dom.addEventListener(isonim_dom.Node(hideEl), cstring"click",
+          proc(ev: isonim_dom.Event) =
+            ev.preventDefault()
+            ev.stopPropagation())
   when defined(js):
     when N is isonim_dom.Element:
       # mouseenter on the tab triggers the 200ms hover-preview timer.
@@ -140,6 +179,7 @@ proc renderCollapsedLine[R, N](
   ui(r):
     tdiv(
         class = AutoHideCollapsedStripLineClass,
+        title = "Show this side's panels",
         onclick = proc() = callbacks.invokeCollapsedSelect(),
         onmouseenter = proc() = callbacks.invokeCollapsedHoverEnter())
 

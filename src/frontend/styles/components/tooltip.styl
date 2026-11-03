@@ -1,0 +1,20 @@
+// The design system's Tooltip (Figma: ❖ Tooltip), shown by
+// `viewmodel/views/tooltips.nim`: Size=sm, with the look it shares with
+// `.custom-tooltip` (`tooltip-look`, button.styl), and Size=lg once its text wraps.
+.ct-tooltip
+  tooltip-look()
+  display: none
+  position: fixed
+  z-index: 10000
+  box-sizing: border-box
+  max-width: unquote("min(20rem, calc(100vw - 1rem))")
+  overflow-wrap: anywhere
+  pointer-events: none
+
+.ct-tooltip--shown
+  display: block
+
+.ct-tooltip--lg
+  width: 20rem
+  padding: 0.375rem 0.5rem
+  border-radius: 0.5rem

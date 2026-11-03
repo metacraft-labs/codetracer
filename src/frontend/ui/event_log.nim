@@ -341,16 +341,8 @@ proc setupFilterDropdown(host: Element; vm: EventLogVM) =
     open = not open
     if not open and focused:
       cast[Element](e.target).blur())
-  filterBtn.addEventListener(cstring"keydown", proc(e: Event) =
-    ## Escape closes the menu, as it does every other drop-down; the button
-    ## holds the focus the whole time the menu is open.
-    if cast[KeyboardEvent](e).keyCode == ESC_KEY_CODE:
-      e.preventDefault()
-      e.stopPropagation()
-      focused = false
-      open = false
-      hideDropdown()
-      filterBtn.blur())
+  # Escape closes it with every other drop-down (`views/keyboard_focus`), by
+  # blurring the button: the button holds the focus while the menu is open.
 
 # ---------------------------------------------------------------------------
 # A right click opens an event's text

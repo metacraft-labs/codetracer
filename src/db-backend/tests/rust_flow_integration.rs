@@ -2,6 +2,8 @@
 //!
 //! This test verifies that tree-sitter correctly extracts variables
 //! and filters out function calls when loading flow data for Rust programs.
+//! It also checks earlier assignments in the enclosing call and iteration
+//! controls for native Rust loops using real recordings and DAP responses.
 //!
 //! It needs `ct-native-replay` and rr (or TTD on Windows); see the platform
 //! gate below.
@@ -87,6 +89,140 @@ fn test_rust_flow_integration() {
         Ok(()) => println!("Rust flow integration test passed!"),
         Err(e) => panic!("Rust flow integration test failed: {}", e),
     }
+}
+
+/// A stop in the middle of a native call must still show assignments before
+/// that stop. Drive the real Rust recorder, rr worker and DAP flow loader:
+/// a variable appearing again in a later println is insufficient evidence,
+/// so check the values on their original assignment lines.
+#[cfg(unix)]
+#[test]
+fn test_rust_flow_from_middle_includes_earlier_assignments() {
+    const TEST_NAME: &str = "test_rust_flow_from_middle_includes_earlier_assignments";
+    let Some(ct_native_replay) = rust_rr_flow_prerequisites(TEST_NAME) else {
+        return;
+    };
+    let source = get_rust_source_path();
+    let pause_line =
+        i64::try_from(find_line_containing(&source, "let final_result = doubled + 10;")).expect("source line fits i64");
+    let recording = TestRecording::create(&source, Language::Rust, &rustc_version_label(), &ct_native_replay)
+        .expect("Rust recording failed");
+    let mut client = DapTestClient::start(&recording.temp_dir, &ct_native_replay).expect("DAP start failed");
+    client
+        .initialize_and_launch(&recording, &ct_native_replay)
+        .expect("DAP launch failed");
+    client
+        .set_breakpoint(&source, u32::try_from(pause_line).expect("source line fits u32"))
+        .expect("setting breakpoint failed");
+    let location = client.continue_to_breakpoint().expect("breakpoint was not reached");
+    assert_eq!(
+        location.line, pause_line,
+        "the flow request must originate after the earlier assignments"
+    );
+    let flow = client.request_flow(location).expect("native call flow failed");
+
+    for (statement, name, expected) in [
+        ("let sum = a + b;", "sum", 42),
+        ("let doubled = sum * 2;", "doubled", 84),
+    ] {
+        let line = i64::try_from(find_line_containing(&source, statement)).expect("source line fits i64");
+        assert!(line < pause_line);
+        let step = flow
+            .steps
+            .iter()
+            .find(|step| step.line == line)
+            .unwrap_or_else(|| panic!("call flow omitted the earlier {name} assignment at line {line}"));
+        let value = step
+            .after_values
+            .get(name)
+            .unwrap_or_else(|| panic!("the assignment at line {line} has no resulting value for {name}"));
+        assert_eq!(
+            test_harness::FlowData::extract_int_value(value),
+            Some(expected),
+            "wrong {name} at its assignment"
+        );
+    }
+    let later = flow
+        .steps
+        .iter()
+        .find(|step| step.line == pause_line)
+        .expect("call flow omitted the assignment at the paused line");
+    assert_eq!(
+        later
+            .after_values
+            .get("final_result")
+            .and_then(test_harness::FlowData::extract_int_value),
+        Some(94),
+        "the flow must also retain values after the paused position"
+    );
+}
+
+/// Match the native `for` loop whose first body statement is an unused alias.
+/// The real Rust compiler/rr line table may omit that body line, so controls
+/// must be anchored to the source header and expose every executed iteration.
+#[cfg(unix)]
+#[test]
+fn test_rust_for_loop_controls_include_all_iterations() {
+    const TEST_NAME: &str = "test_rust_for_loop_controls_include_all_iterations";
+    let Some(ct_native_replay) = rust_rr_flow_prerequisites(TEST_NAME) else {
+        return;
+    };
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-programs/rust/rust_for_loop_controls.rs");
+    let header = i64::try_from(find_line_containing(&source, "for k in 0..5 {")).expect("source line fits i64");
+    let body_line = i64::try_from(find_line_containing(&source, "total = local2;")).expect("source line fits i64");
+    let recording = TestRecording::create(&source, Language::Rust, &rustc_version_label(), &ct_native_replay)
+        .expect("Rust recording failed");
+    let mut client = DapTestClient::start(&recording.temp_dir, &ct_native_replay).expect("DAP start failed");
+    client
+        .initialize_and_launch(&recording, &ct_native_replay)
+        .expect("DAP launch failed");
+    client
+        .set_breakpoint(&source, u32::try_from(body_line).expect("source line fits u32"))
+        .expect("setting loop breakpoint failed");
+    let location = client
+        .continue_to_breakpoint()
+        .expect("loop breakpoint was not reached");
+    assert_eq!(location.line, body_line);
+    let body = client
+        .request_flow_update_body(location)
+        .expect("loop flow request failed");
+    assert!(flow_update_error(&body).is_none(), "loop flow failed: {body}");
+    let view: db_backend::task::FlowViewUpdate =
+        serde_json::from_value(body["viewUpdates"][0].clone()).expect("flow view update must deserialize");
+    let loop_entry = view
+        .loops
+        .iter()
+        .find(|entry| entry.first.0 == header)
+        .unwrap_or_else(|| {
+            panic!(
+                "no loop controls registered at for header {header}; loops={:?}",
+                view.loops
+            )
+        });
+    assert_eq!(
+        loop_entry.registered_line.0, header,
+        "controls belong above the for header"
+    );
+    assert!(
+        loop_entry.iteration.0 >= 4,
+        "five executed passes must enable iteration navigation"
+    );
+    let mut values = std::collections::BTreeMap::new();
+    for step in &view.steps {
+        if step.position.0 == body_line {
+            assert_eq!(step.r#loop, loop_entry.base, "body values must belong to this loop");
+            let value = step.after_values.get("total").expect("loop assignment result missing");
+            let value =
+                test_harness::FlowData::extract_int_value(&serde_json::to_value(value).expect("value serializes"))
+                    .expect("loop result must be an integer");
+            values.insert(step.iteration.0, value);
+        }
+    }
+    assert_eq!(
+        values.values().copied().collect::<Vec<_>>(),
+        vec![1, 2, 3, 4, 5],
+        "iteration controls must reach all five loop assignment values"
+    );
 }
 
 /// A call flow requested where the replay stops at the END of the trace must

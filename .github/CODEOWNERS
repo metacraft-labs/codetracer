@@ -1,0 +1,5 @@
+# The UI design decision record and what enforces it. See docs/UI-Design-Decisions.md.
+/docs/UI-Design-Decisions.md @fenix-ov
+/ci/test/ui-design-decisions.py @fenix-ov
+/.github/workflows/ui-design-decisions.yml @fenix-ov
+/.github/CODEOWNERS @fenix-ov

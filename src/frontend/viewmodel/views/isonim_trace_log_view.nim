@@ -128,7 +128,7 @@ proc renderTraceLogPanel*[R, N](r: R; vm: TraceLogVM): N =
   var bodyContainer, emptyContainer: N
 
   let panel = ui(r):
-    tdiv(class = TraceLogContainerClass, tabIndex = "2"):
+    tdiv(class = TraceLogContainerClass, tabIndex = "-1"):
       tdiv(class = "trace-log-table-header"):
         tdiv(class = "trace-col-rr-ticks"):
           text "rr-ticks"

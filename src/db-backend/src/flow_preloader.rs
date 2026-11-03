@@ -621,6 +621,22 @@ impl<'a> CallFlowPreloader<'a> {
         todo!()
     }
 
+    fn native_call_entry_request(&self, mut current_location: Location) -> Location {
+        // A native stop may have no function extent even though the AST has
+        // already supplied one for this flow. Keep the resolved stop/ticks,
+        // but retain those boundaries so JumpToCall can find the call entry.
+        // Never borrow an extent from a different source file.
+        if current_location.path == self.location.path {
+            if current_location.function_first <= 0 {
+                current_location.function_first = self.location.function_first;
+            }
+            if current_location.function_last <= 0 {
+                current_location.function_last = self.location.function_last;
+            }
+        }
+        current_location
+    }
+
     fn move_to_first_step(
         &mut self,
         from_step_id: StepId,
@@ -733,21 +749,23 @@ impl<'a> CallFlowPreloader<'a> {
                     }
                 } else {
                     match replay.load_location(&mut self.walk_expr_loader) {
-                        Ok(current_location) => match replay.jump_to_call(&current_location) {
-                            Ok(call_start_loc) => {
-                                step_id = StepId(call_start_loc.rr_ticks.0);
-                                progressing = true;
-                                info!(
-                                    "  flow: navigated to function call entry at step {} (line {})",
-                                    step_id.0, call_start_loc.line
-                                );
+                        Ok(current_location) => {
+                            match replay.jump_to_call(&self.native_call_entry_request(current_location)) {
+                                Ok(call_start_loc) => {
+                                    step_id = StepId(call_start_loc.rr_ticks.0);
+                                    progressing = true;
+                                    info!(
+                                        "  flow: navigated to function call entry at step {} (line {})",
+                                        step_id.0, call_start_loc.line
+                                    );
+                                }
+                                Err(e) => {
+                                    warn!("  flow: jump_to_call failed, keeping current flow start: {e:?}");
+                                    step_id = replay.current_step_id();
+                                    progressing = true;
+                                }
                             }
-                            Err(e) => {
-                                warn!("  flow: jump_to_call failed, keeping current flow start: {e:?}");
-                                step_id = replay.current_step_id();
-                                progressing = true;
-                            }
-                        },
+                        }
                         Err(e) => {
                             warn!("  flow: load_location after location_jump failed: {e:?}");
                             step_id = replay.current_step_id();

@@ -358,6 +358,7 @@ proc renderRow[R, N](r: R; vm: ScratchpadVM; row: ScratchpadRowView;
     tdiv(class = rowClass(row)):
       if row.depth == 0:
         button(class = CloseButtonClass, id = "close-element",
+               title = "Remove from the scratchpad",
                onclick = onClick):
           discard
       tdiv(class = valueExpandedClass(row),
@@ -365,7 +366,8 @@ proc renderRow[R, N](r: R; vm: ScratchpadVM; row: ScratchpadRowView;
         tdiv(class = atomOrCompoundClass(row)):
           tdiv(class = "value-name-container"):
             if row.hasChildren:
-              span(class = "value-expand-button", onclick = onToggle):
+              span(class = "value-expand-button", title = "Show or hide the value's parts",
+                   onclick = onToggle):
                 tdiv(class = caretClass(row)):
                   discard
             span(class = "value-name"):
@@ -424,6 +426,7 @@ proc renderChainRow[R, N](r: R; vm: ScratchpadVM;
   let card = ui(r):
     tdiv(class = ScratchpadChainRowClass):
       button(class = ScratchpadChainCloseClass, id = "chain-close-element",
+             title = "Remove from the scratchpad",
              onclick = onClick):
         discard
       tdiv(class = ScratchpadChainTerminatorClass):

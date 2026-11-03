@@ -290,6 +290,7 @@ import dap_backend
 import viewmodel/collab/[front_end_adapter, invite_bootstrap, join_session,
   reducer, session_core, types]
 import viewmodel/app/isonim_app
+import viewmodel/views/tooltips
 import viewmodel/viewmodels/visual_replay_layout
 import viewmodel/viewmodels/deepreview_layout
 from viewmodel/viewmodels/product_menu import productMenuTree, MenuItem, mikFolder

@@ -99,6 +99,13 @@ proc appendInfoTooltip(parent: Node, lines: openArray[string]) =
   icon.appendChild(tooltip)
   parent.appendChild(icon)
 
+proc checkmarkBox(): Node =
+  ## The visible box of the shared checkbox; its tick follows the input's
+  ## `:checked` (checkmark.styl).
+  result = document.createElement(cstring"span")
+  result.setAttribute(cstring"class", cstring"ct-checkmark")
+  result.setAttribute(cstring"aria-hidden", cstring"true")
+
 proc appendCheckboxOption(
     parent: Node,
     labelText: string,
@@ -106,14 +113,19 @@ proc appendCheckboxOption(
     onToggle: proc(),
     tooltipLines: openArray[string],
   ) =
+  # The shared checkbox (styles/components/checkmark.styl): the real input,
+  # visually hidden, and the design system's box beside it.
   let label = document.createElement(cstring"label")
+  label.setAttribute(cstring"class", cstring"ct-checkmark-field")
   let input = document.createElement(cstring"input")
   input.setAttribute(cstring"type", cstring"checkbox")
+  input.setAttribute(cstring"class", cstring"ct-checkmark-input")
   input.checked = checked
   input.addEventListener(cstring"click", proc(ev: Event) =
     onToggle()
   )
   label.appendChild(input)
+  label.appendChild(checkmarkBox())
   label.appendText(labelText)
   label.appendInfoTooltip(tooltipLines)
   parent.appendChild(label)
@@ -222,14 +234,17 @@ proc dialogBox(): Node =
 
     let askAgain = newElement(cstring"div", cstring"dialog-options dialog-ask-again")
     let askLabel = document.createElement(cstring"label")
+    askLabel.setAttribute(cstring"class", cstring"ct-checkmark-field")
     askLabel.appendText("Don't ask me again!")
     let askInput = document.createElement(cstring"input")
     askInput.setAttribute(cstring"type", cstring"checkbox")
+    askInput.setAttribute(cstring"class", cstring"ct-checkmark-input")
     askInput.checked = dontAskChecked
     askInput.addEventListener(cstring"click", proc(ev: Event) =
       dontAskChecked = not dontAskChecked
     )
     askLabel.appendChild(askInput)
+    askLabel.appendChild(checkmarkBox())
     askAgain.appendChild(askLabel)
     box.appendChild(askAgain)
   else:

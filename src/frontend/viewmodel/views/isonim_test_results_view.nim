@@ -335,7 +335,7 @@ proc renderTestResultsPanel*[R, N](r: R; vm: TestResultsVM): N =
   var openHandles: seq[RowActionHandles[N]] = @[]
 
   let panel = ui(r):
-    tdiv(class = TestResultsContainerClass, tabIndex = "2"):
+    tdiv(class = TestResultsContainerClass, tabIndex = "-1"):
       tdiv(class = "test-results-header"):
         tdiv(ref = headlineNode, class = "test-results-headline"):
           discard
