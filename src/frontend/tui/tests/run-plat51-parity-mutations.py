@@ -127,8 +127,9 @@ GMAIN = "src/frontend/gpui/main.nim"
 GLEAVES = "src/frontend/gpui/app/leaves.nim"
 GLIST = "src/frontend/gpui/list_scrubber.nim"
 # The desktop Event Log is one view over its ViewModel since 2026-10-23; its
-# track press goes through the shared list scrubber to the view's `jumpTo`.
+# track uses the shared DOM movement directly; pin its view caller too.
 DEVLOG = "src/frontend/viewmodel/views/isonim_event_log_view.nim"
+DOMSCRUB = "src/frontend/viewmodel/views/list_scrubber_dom.nim"
 DCONFIG = "src/frontend/index/config.nim"
 DSTATE = "src/frontend/viewmodel/views/isonim_state_view.nim"
 ENGINE = "src/db-backend/src/dap_handler.rs"
@@ -183,18 +184,19 @@ GPLANM71 = "src/frontend/gpui/tests/test_m71_gpui_plan.nim"
 CAPTURE = "scripts/plat51-capture-electron.sh"
 SPEC = "src/tests/gui/tests/visual/plat51-desktop-capture.spec.ts"
 DE_EVENTLOG = CAPTURE + "#scrubber.spans.the.whole.log"
+DE_NEARFIT = CAPTURE + "#fractional.near-fit.Event.Log"
 DE_SAVED = CAPTURE + "#Timeline.tab.is.dropped.on.load"
 DE_CHANGED = CAPTURE + "#carries..value-changed.in.the.accent"
 
 SUBJECTS = [LAYOUT, PMENU, SCRUB, VCH, NAVIGATION, RUNTIME, TSESSION, TEVENT,
             TCALL, TTRACK, TTREE, TGLYPHS, TTOPBAR, TCTX, TFRAME,
             TDRIVER,
-            READER, GMAIN, GLEAVES, GLIST, DEVLOG, DCONFIG, DSTATE, ENGINE,
+            READER, GMAIN, GLEAVES, GLIST, DOMSCRUB, DCONFIG, DSTATE, ENGINE,
             GLHITS, LINTER, TBINDING, TSHELL, TROLES, TPALETTE, TCAPS, TPROBE,
             TOUTPANE, TMAIN, LSETTINGS, WELCOMEVM, GCHROME, LPREFS, TMOUSE,
             TVARS, TFILES, TVCS, TVCSSRC]
 SUITES = [LAYU, MODELU, SCRUBT, PARITY, PRODUCERS, FRAMEV, PTY, GPLAN,
-          DE_EVENTLOG, DE_SAVED, DE_CHANGED,
+          DE_EVENTLOG, DE_NEARFIT, DE_SAVED, DE_CHANGED,
           GLHIT, DROPREF, PARITYB, TOUT, CAPRES, PTYB, TOUTPTY, GPLANB,
           GPLANM71]
 
@@ -204,8 +206,9 @@ def suite_file(path: str) -> str:
     return path.split("#", 1)[0]
 
 
+# The Event Log view selects the shared defaults; pin that caller too.
 TOUCHED = list(dict.fromkeys(SUBJECTS + [suite_file(p) for p in SUITES] +
-                             [SPEC]))
+                             [SPEC, DEVLOG]))
 
 # How each suite is run: (backend, lane whose `--path`s it needs / the grep).
 # A desktop gate's grep is a REGEX WITHOUT SPACES OR QUOTES: `just test-e2e`
@@ -221,6 +224,7 @@ SUITE_KIND = {
     PTY: ("c", "tui-real-terminal"),
     GPLAN: ("c", "gpui-shell"),
     DE_EVENTLOG: ("electron", "scrubber.spans.the.whole.log"),
+    DE_NEARFIT: ("electron", "fractional.near-fit.Event.Log"),
     DE_SAVED: ("electron", "Timeline.tab.is.dropped.on.load"),
     DE_CHANGED: ("electron", "carries..value-changed.in.the.accent"),
     GLHIT: ("c", "vm-unit"),
@@ -333,6 +337,7 @@ Q_FILES_MOVE = ("Files: the wheel scrolls it; a press at the track's end shows "
 Q_STATE = ("a press at its track's end reaches the end the wheel does; its "
            "start the top; the thumb drags")
 D_EVENTLOG = "gate:" + DE_EVENTLOG
+D_NEARFIT = "gate:" + DE_NEARFIT
 D_SAVED = "gate:" + DE_SAVED
 D_CHANGED = "gate:" + DE_CHANGED
 
@@ -347,7 +352,7 @@ CASE_SUITE = {
     Y_TRACK: PTY, Y_ASCII: PTY, Y_CARET: PTY,
     G_EVENTS: GPLAN, G_CALLS: GPLAN, G_CHANGED: GPLAN, G_HISTORY: GPLAN,
     G_CARET: GPLAN, G_MENU: GPLAN, G_OMNIBOX: GPLAN, G_POINTER: GPLAN,
-    D_EVENTLOG: DE_EVENTLOG, D_SAVED: DE_SAVED, D_CHANGED: DE_CHANGED,
+    D_EVENTLOG: DE_EVENTLOG, D_NEARFIT: DE_NEARFIT, D_SAVED: DE_SAVED, D_CHANGED: DE_CHANGED,
     H_SURFACE: GLHIT, H_MIDDLE: GLHIT, H_PROXY: GLHIT, H_HEADER: GLHIT,
     X_IDENTICAL: DROPREF,
     B_STRIP: PARITYB, B_TOKEN: PARITYB, B_FLAGS: PARITYB, B_PREF: PARITYB,
@@ -559,10 +564,18 @@ ARMS = [
         "      let b = absBox(r, sg.rect, chromeOf(crInputBackground))\n",
         G_OMNIBOX, "GPUI's omnibox field is on the input surface"),
     # --- the desktop, the real Electron app --------------------------------
-    Arm("D1", DEVLOG,
-        "        scrollBody.setScrollTop(float(max(0, row)) * rowPx()))\n",
-        "        discard row)\n",
+    # D1 drops the common movement hand-off for both click and drag.
+    Arm("D1", DOMSCRUB,
+        "      if firstRow > 0 and firstRow >= s.model().maxFirstVisible:\n"
+        "        s.container.setScrollTop(s.container.scrollHeightOf())\n"
+        "      else:\n"
+        "        s.container.setScrollTop(float(firstRow) * max(1.0, s.rowHeight()))\n",
+        "      discard firstRow\n",
         D_EVENTLOG, "the desktop's event-log track press moves nothing"),
+    Arm("D4", DOMSCRUB,
+        "    if m.totalKnown and m.total > 0 and m.visible >= m.total and\n",
+        "    if false and m.totalKnown and m.total > 0 and m.visible >= m.total and\n",
+        D_NEARFIT, "the desktop hides physical overflow behind rounded row capacity"),
     Arm("D2", DCONFIG,
         "  sanitizeLayoutConfig(config, -1, retiredContentIds())\n",
         "  sanitizeLayoutConfig(config, -1, @[])\n",

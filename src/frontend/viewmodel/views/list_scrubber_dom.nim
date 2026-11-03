@@ -151,6 +151,24 @@ when defined(js):
     scrubberModel(total, first, visible, s.current(),
                   totalKnown = s.totalKnown())
 
+  proc projection(s: ListScrubberDom; m: ScrubberModel):
+      tuple[model: ScrubberModel, physical: bool] =
+    # Rounded row capacity can cover the population while part of its final
+    # row is still clipped. Project that real excess in pixels, without
+    # inventing a different logical row count (including for one tall row).
+    let c = s.container
+    if m.totalKnown and m.total > 0 and m.visible >= m.total and
+       c.scrollHeightOf() > c.clientHeightOf():
+      let total = max(1, int(ceil(c.scrollHeightOf())))
+      let visible = max(1, int(c.clientHeightOf()))
+      let atEnd = c.scrollTopOf() + c.clientHeightOf() >=
+                  c.scrollHeightOf() - 1.0
+      let first = if atEnd: max(0, total - visible)
+                  else: max(0, int(round(c.scrollTopOf())))
+      (scrubberModel(total, first, visible), true)
+    else:
+      (m, false)
+
   proc hbarShown(el: JsObject): bool {.importjs:
     "(#.getAttribute('data-ct-hbar') === '1')".}
 
@@ -174,10 +192,11 @@ when defined(js):
     let h = s.trackHeight()
     s.track.setStyleJs("top", cstring($int(s.container.offsetTopIn(s.host)) & "px"))
     s.track.setStyleJs("height", cstring($h & "px"))
-    let span = m.thumbSpan(h, MinThumbPx)
+    let projected = s.projection(m).model
+    let span = projected.thumbSpan(h, MinThumbPx)
     # Nothing to scroll — every row is in view — shows no thumb, as the
     # app-wide scrollbar shows none; the track stays for the "now" mark.
-    let fits = m.totalKnown and m.visible >= m.total
+    let fits = projected.totalKnown and projected.visible >= projected.total
     s.thumb.setStyleJs("display", if fits: cstring"none" else: cstring"block")
     s.thumb.setStyleJs("top", cstring($span.start & "px"))
     s.thumb.setStyleJs("height", cstring($span.length & "px"))
@@ -195,11 +214,13 @@ when defined(js):
       s.mark.setStyleJs("display", "block")
       s.mark.setStyleJs("top", cstring($min(h - MarkPx, int(f * float(h))) & "px"))
 
-  proc moveViewTo(s: ListScrubberDom; firstRow: int) =
+  proc moveViewTo(s: ListScrubberDom; firstRow: int; physical = false) =
     ## The VIEW to `firstRow` — the container's scroll, which the pane's own
     ## scroll handling turns into a window fetch.
     countJump()
-    if s.jumpTo.isNil:
+    if physical:
+      s.container.setScrollTop(float(firstRow))
+    elif s.jumpTo.isNil:
       # THE END IS THE END of the scroll range, not `firstRow` rows down. A
       # view that is not a whole number of rows tall counts as the ROUNDED
       # number of rows (see `model`), so `maxFirstVisible * rowH` can stop a
@@ -256,7 +277,8 @@ when defined(js):
       let m = s.model()
       # §3.3: the thumb follows the pointer — its start at the pointer less
       # where on the thumb it was grabbed.
-      s.moveViewTo(m.dragTo(y / float(h)))
+      let p = s.projection(m)
+      s.moveViewTo(p.model.dragTo(y / float(h)), p.physical)
     onUp = proc(ev: JsObject) =
       s.dragging = false
       unlistenDoc("mousemove", onMove)
@@ -268,7 +290,8 @@ when defined(js):
       let h = s.trackHeight()
       let y = ev.clientYOf() - s.track.trackTopOf()
       let m = s.model()
-      let span = m.thumbSpan(h, MinThumbPx)
+      let p = s.projection(m)
+      let span = p.model.thumbSpan(h, MinThumbPx)
       if y >= float(span.start) and y < float(span.start + span.length):
         # §3.3: a drag of the thumb.
         s.dragging = true
@@ -278,7 +301,7 @@ when defined(js):
       else:
         # §3.2: a click on the track JUMPS there (the row at the fraction
         # centred), instead of the platform's page-by-page step.
-        s.moveViewTo(m.clickAt(trackFractionAt(int(y), h))))
+        s.moveViewTo(p.model.clickAt(trackFractionAt(int(y), h)), p.physical))
     container.listen("scroll", proc(ev: JsObject) = s.refresh())
     # The total and "now" change without a scroll (a filter, a move): the
     # track follows them.

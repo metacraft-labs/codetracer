@@ -563,25 +563,14 @@ when defined(js):
       expander.classListToggle(cstring"flow-hide-content")
       expander.classListToggle(cstring"flow-show-content"), true)
 
-    let visible = proc(): int =
-      max(1, int(clientHeightOf(scrollBody) / rowPx()))
+    # This is the generic table's ordinary scroll body. Use the shared
+    # rounded row count and physical-end handling, including partial rows.
     discard attachListScrubber(
       cast[JsObject](scrollBody), cast[JsObject](dataTable),
       total = proc(): int = vm.listTotal,
       current = proc(): int = vm.store.eventLog.currentIndex.val,
       rowHeight = rowPx,
-      paneId = "eventLog",
-      # ROUNDED, as the shared scrubber's own default is: a jump to row `k`
-      # asks for the offset `k * rowPx()`, which the scroll body can clamp a
-      # few pixels short when the list's height is not a whole number of
-      # rows (measured on a 70-event log: a press at the track's end asked
-      # for row 50, the body stopped at 1337 px over 26.8 px rows, 49.9 rows,
-      # with the last event in view; the floor read row 49 and reported the
-      # last event as out of view).
-      firstVisible = proc(): int = int(round(scrollTopOf(scrollBody) / rowPx())),
-      visibleRows = visible,
-      jumpTo = proc(row: int) =
-        scrollBody.setScrollTop(float(max(0, row)) * rowPx()))
+      paneId = "eventLog")
 
 # ---------------------------------------------------------------------------
 # The panel

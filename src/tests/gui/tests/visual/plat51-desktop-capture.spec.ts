@@ -233,6 +233,19 @@ test.describe("PLAT-51: the desktop's Event Log scrubber, no Timeline", () => {
         })
         .map((r) => (r.textContent ?? "").replace(/\s+/g, " ").trim()).slice(-3);
     });
+    // Verify the actual final row is fully visible, independently of the
+    // scrubber's counters and of rows merely present in the virtual DOM.
+    const endGeometry = await ctPage.evaluate(() => {
+      const body = document.querySelector(".eventLog-scroll-body") as HTMLElement;
+      const rows = Array.from(body.querySelectorAll("tbody tr"));
+      const last = rows[rows.length - 1] as HTMLElement;
+      const b = body.getBoundingClientRect(), r = last.getBoundingClientRect();
+      return { position: Number(last.dataset.position), text: last.textContent ?? "",
+        rowTop: r.top, rowBottom: r.bottom, bodyTop: b.top, bodyBottom: b.bottom,
+        scrollTop: body.scrollTop, scrollHeight: body.scrollHeight,
+        clientHeight: body.clientHeight };
+    });
+    out.endGeometry = endGeometry;
     out.afterEndPress = await where(ctPage);
     await pressTrack(ctPage, "eventLog", 0.0);
     out.trackAtTop = await settledTrack(ctPage, "eventLog");
@@ -270,6 +283,10 @@ test.describe("PLAT-51: the desktop's Event Log scrubber, no Timeline", () => {
     // is not vacuous.
     expect(out.viewMenuItems as string[]).toContain("Event Log");
     expect(t0.total).toBe(70);
+    expect(endGeometry.position).toBe(69);
+    expect(endGeometry.text).toContain("shields will not hold as expected");
+    expect(endGeometry.rowTop).toBeGreaterThanOrEqual(endGeometry.bodyTop);
+    expect(endGeometry.rowBottom).toBeLessThanOrEqual(endGeometry.bodyBottom);
     expect(atEnd.first + atEnd.visible).toBeGreaterThanOrEqual(70);
     expect((out.afterEndPress as { ticks: number }).ticks).toBe(start.ticks);
     expect((out.afterDrag as { ticks: number }).ticks).toBe(start.ticks);
@@ -794,5 +811,90 @@ test.describe("PLAT-51: the desktop's new tab opens the Welcome Screen", () => {
     });
     writeAnswers("newTab", out);
     expect((out.options as any[]).length).toBe(6);
+  });
+});
+
+
+test.describe("PLAT-51: fractional Event Log physical overflow", () => {
+  test.use({ sourcePath: recording("noir_space_ship"), launchMode: "trace-folder", codetracerPrefixOverride: prefix });
+  test("PLAT-51: a fractional near-fit Event Log reaches its final filtered event", async ({ ctPage, electronApp }) => {
+    if (!electronApp) throw new Error("real Electron owner window is required");
+    await ctPage.waitForSelector(".calltrace-view .call-text", { timeout: 120_000 });
+    await showTab(ctPage, "EVENT LOG", ".eventLog-scroll-body tbody tr");
+    await ctPage.locator(".eventLog-search-field").fill("Damage:");
+    await expect.poll(async () => (await readTrack(ctPage, "eventLog"))?.total, { timeout: 30_000 }).toBe(16);
+    await expect(ctPage.locator(".data-tables-footer-rows-count")).toHaveText("16");
+    const win = await electronApp.browserWindow(ctPage);
+    const original = await win.evaluate((w) => w.getContentSize());
+    const measure = async () => ctPage.evaluate(() => {
+      const body = document.querySelector(".eventLog-scroll-body") as HTMLElement;
+      const first = body.querySelector("tbody tr") as HTMLElement;
+      const last = body.querySelector("tbody tr[data-position='15']") as HTMLElement;
+      if (!body || !first || !last) throw new Error("real filtered rows are missing");
+      const b = body.getBoundingClientRect(), r = last.getBoundingClientRect();
+      const pitch = first.getBoundingClientRect().height;
+      const track = document.querySelector(".ct-list-scrubber[data-ct-list-scrubber='eventLog']") as HTMLElement;
+      const thumb = track.querySelector(".ct-list-scrubber-thumb") as HTMLElement;
+      return { height: body.clientHeight, pitch, ratio: body.clientHeight / pitch,
+        scrollTop: body.scrollTop, scrollHeight: body.scrollHeight, clientHeight: body.clientHeight,
+        bodyTop: b.top, bodyBottom: b.bottom, rowTop: r.top, rowBottom: r.bottom,
+        position: Number(last.dataset.position), text: (last.textContent ?? "").replace(/\s+/g, " ").trim(),
+        overflowY: getComputedStyle(body).overflowY, thumbDisplay: getComputedStyle(thumb).display,
+        track: { total: Number(track.dataset.ctScrubTotal), first: Number(track.dataset.ctScrubFirst), visible: Number(track.dataset.ctScrubVisible) } };
+    });
+    const resize = async (height: number) => {
+      await win.evaluate((w, s) => { w.setResizable(true); w.setFullScreen(false); w.unmaximize(); w.setContentSize(s.width, s.height); }, { width: original[0], height });
+      await expect.poll(async () => Math.abs((await ctPage.evaluate(() => innerHeight)) - height), { timeout: 20_000 }).toBeLessThanOrEqual(2);
+      await ctPage.waitForTimeout(800);
+    };
+    const out: Record<string, any> = { initial: await measure(), original };
+    expect(out.initial.scrollHeight).toBeLessThanOrEqual(out.initial.clientHeight);
+    expect(out.initial.rowTop).toBeGreaterThanOrEqual(out.initial.bodyTop);
+    expect(out.initial.rowBottom).toBeLessThanOrEqual(out.initial.bodyBottom);
+    expect(out.initial.thumbDisplay).toBe("none");
+    try {
+      await resize(original[1] - 40);
+      const sample = await measure();
+      const slope = (out.initial.height - sample.height) / 40;
+      expect(slope).toBeGreaterThan(0);
+      let nativeHeight = original[1] - 40;
+      for (let i = 0; i < 4; i++) {
+        const g = await measure();
+        if (g.ratio > 15.5 && g.ratio < 16) break;
+        nativeHeight += Math.round((15.6 * g.pitch - g.height) / slope);
+        await resize(nativeHeight);
+      }
+      out.before = await measure();
+      console.log("PLAT51-NEARFIT-SETUP " + JSON.stringify(out));
+      expect(out.before.ratio).toBeGreaterThan(15.5); expect(out.before.ratio).toBeLessThan(16);
+      expect(out.before.scrollHeight).toBeGreaterThan(out.before.clientHeight + 1);
+      expect(out.before.thumbDisplay).toBe("block");
+      expect(out.before.rowBottom).toBeGreaterThan(out.before.bodyBottom + 1);
+      expect(out.before.position).toBe(15); expect(out.before.text).toBe(out.initial.text);
+      out.start = await where(ctPage);
+      await pressTrack(ctPage, "eventLog", 1);
+      out.afterTrack = await measure(); out.afterTrackWhere = await where(ctPage);
+      const body = await ctPage.locator(".eventLog-scroll-body").boundingBox();
+      if (!body) throw new Error("real body has no bounds for wheel control");
+      await ctPage.mouse.move(body.x + body.width / 2, body.y + body.height / 2);
+      await ctPage.mouse.wheel(0, Math.ceil(out.before.pitch * 2));
+      await ctPage.waitForTimeout(1_000);
+      out.afterWheel = await measure(); out.afterWheelWhere = await where(ctPage);
+      await pressTrack(ctPage, "eventLog", 0);
+      await dragThumb(ctPage, "eventLog", 20);
+      out.afterDrag = await measure(); out.afterDragWhere = await where(ctPage);
+      console.log("PLAT51-NEARFIT " + JSON.stringify(out));
+      expect(out.afterTrack.position).toBe(15); expect(out.afterTrack.text).toBe(out.initial.text);
+      expect(out.afterTrack.rowTop).toBeGreaterThanOrEqual(out.afterTrack.bodyTop);
+      expect(out.afterTrack.rowBottom).toBeLessThanOrEqual(out.afterTrack.bodyBottom);
+      expect(out.afterTrack.track.first + out.afterTrack.track.visible).toBeGreaterThanOrEqual(16);
+      expect(out.afterTrackWhere.ticks).toBe(out.start.ticks);
+      expect(out.afterWheel.rowBottom).toBeLessThanOrEqual(out.afterWheel.bodyBottom);
+      expect(out.afterWheelWhere.ticks).toBe(out.start.ticks);
+      expect(out.afterDrag.position).toBe(15); expect(out.afterDrag.text).toBe(out.initial.text);
+      expect(out.afterDrag.rowTop).toBeGreaterThanOrEqual(out.afterDrag.bodyTop);
+      expect(out.afterDrag.rowBottom).toBeLessThanOrEqual(out.afterDrag.bodyBottom);
+      expect(out.afterDragWhere.ticks).toBe(out.start.ticks);
+    } finally { await resize(original[1]); }
   });
 });
