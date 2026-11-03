@@ -33,3 +33,32 @@ export async function loadCodeTracerAppStyles() {
   marker.dataset.codetracerAppStyles = "true";
   document.head.appendChild(marker);
 }
+
+// The colour themes a story can be shown in, mapped to the theme name
+// CodeTracer's `loadTheme` (src/frontend/renderer.nim) resolves to
+// `frontend/styles/{name}_theme_electron.css`. Storybook's `theme` global
+// (the toolbar, or `&globals=theme:light` in a story URL) picks one.
+export const CODETRACER_THEMES = {
+  dark: "default_dark",
+  light: "default_white",
+};
+
+/**
+ * Point the app's `#theme` stylesheet at `themeKey`'s build, the way
+ * `loadTheme` does in the app, and resolve once it has loaded. The href is
+ * derived from the one the app index declares, so no stylesheet path is
+ * written down here.
+ */
+export function setCodeTracerTheme(themeKey) {
+  const name = CODETRACER_THEMES[themeKey] ?? CODETRACER_THEMES.dark;
+  const link = document.getElementById("theme");
+  if (!link) return Promise.resolve();
+  const href = link.getAttribute("href").replace(/[^/]*_theme_electron\.css$/, `${name}_theme_electron.css`);
+  document.documentElement.dataset.codetracerTheme = themeKey in CODETRACER_THEMES ? themeKey : "dark";
+  if (link.getAttribute("href") === href) return Promise.resolve();
+  return new Promise((resolve) => {
+    link.addEventListener("load", () => resolve(), { once: true });
+    link.addEventListener("error", () => resolve(), { once: true });
+    link.setAttribute("href", href);
+  });
+}

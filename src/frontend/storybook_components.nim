@@ -45,6 +45,7 @@ import viewmodel/viewmodels/[
   state_vm,
   step_list_vm,
   terminal_output_vm,
+  test_results_vm,
   trace_log_vm,
   visual_replay_client,
   vcs_vm,
@@ -87,11 +88,17 @@ import viewmodel/views/[
   isonim_status_view,
   isonim_step_list_view,
   isonim_terminal_output_view,
+  isonim_test_results_view,
   isonim_trace_log_view,
   isonim_vcs_view,
   isonim_welcome_screen_view,
 ]
 import viewmodel/app/isonim_app_shell
+# Agent Harbor front-end prototypes: the viewmodels and their fixture data
+# source come from nim-agents-isonim-viewmodels; only the views are here.
+import nim_agents_isonim_viewmodels/agent_harbor/[fixture_source, fleet_vm]
+import viewmodel/views/isonim_agent_harbor_fleet_view
+import ../ct_test/contracts as ct_test_contracts
 
 type
   DisposeProc = proc()
@@ -1355,6 +1362,83 @@ proc mountTerminalOutput(container: isonim_dom.Element; fixture: string): Dispos
     mountIsoNimTerminalOutput(container, vm)
     return proc() = vm.dispose())
 
+# ---------------------------------------------------------------------------
+# Agent Harbor
+# ---------------------------------------------------------------------------
+
+proc agentHarborFleetSource(fixture: string): AgentHarborDataSource =
+  ## The data source a fleet story reads. Every populated state is the
+  ## captured fleet snapshot; the states no capture shows come from the
+  ## data-source seam's state sources, so the view is exercised through the
+  ## same seam a live source will use.
+  case fixture
+  of "loading":
+    newPendingDataSource("waiting for the Agent Harbor server")
+  of "error":
+    newFailingDataSource(
+      "GET /api/v1/sessions failed: connection refused (the server is not " &
+      "running, or its address is wrong)", "unreachable server")
+  of "empty":
+    newSnapshotDataSource(FleetSnapshot(sourceLabel: "empty server"),
+                          "empty server")
+  else:
+    newFixtureDataSource()
+
+proc mountAgentHarborFleet(container: isonim_dom.Element;
+                           fixture: string): DisposeProc =
+  ## Fixtures: `snapshot` (the captured fleet), `needs-input` and `failed`
+  ## (the snapshot under that filter), `selected` (its first captured
+  ## session selected), `loading`, `error`, `empty`.
+  var rootDisposer: proc()
+  var vm: FleetSnapshotVM
+  createRoot proc(dispose: proc()) =
+    rootDisposer = dispose
+    let source = agentHarborFleetSource(fixture)
+    vm = newFleetSnapshotVM(source)
+    vm.load()
+    case fixture
+    of "needs-input": vm.setFilter(ffNeedsInput)
+    of "failed": vm.setFilter(ffFailed)
+    of "selected":
+      if source of FixtureDataSource:
+        let rows = vm.rows
+        if rows.len > 0: vm.select(rows[0].id)
+    else: discard
+    mountAgentHarborFleetPanel(container, vm)
+  return proc() =
+    if vm != nil: vm.dispose()
+    if rootDisposer != nil: rootDisposer()
+    container.innerHTML = ""
+
+proc mountTestResults(container: isonim_dom.Element; fixture: string): DisposeProc =
+  ## The Test Results pane over a real `ct test run --events` capture (the
+  ## Agent Harbor fixture set's first test run), folded through the pane's
+  ## own `ingestEvent`, as the desktop host folds a finished suite run.
+  var rootDisposer: proc()
+  var vm: TestResultsVM
+  createRoot proc(dispose: proc()) =
+    rootDisposer = dispose
+    vm = createTestResultsVM()
+    if fixture != "empty":
+      var runs: DataResult[seq[TestRunCapture]]
+      newFixtureDataSource().loadTestRuns(
+        proc(answer: DataResult[seq[TestRunCapture]]) = runs = answer)
+      if runs.ok and runs.value.len > 0:
+        vm.beginRun()
+        for line in runs.value[0].runnerEventsJsonl.splitLines:
+          if line.strip.len == 0: continue
+          try:
+            vm.ingestEvent(ct_test_contracts.eventFromJsonLine(line))
+          except CatchableError:
+            discard
+        vm.endRun()
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderTestResultsPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
+  return proc() =
+    if vm != nil: vm.dispose()
+    if rootDisposer != nil: rootDisposer()
+    container.innerHTML = ""
+
 proc appendRendered(container: isonim_dom.Element; node: isonim_dom.Element) =
   discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(node))
 
@@ -1532,6 +1616,8 @@ proc mountCodeTracerStory*(container: isonim_dom.Element;
     case n
     of "agent-activity": mountAgentActivity(container, f)
     of "agent-workspace": mountAgentWorkspace(container, f)
+    of "agent-harbor-fleet": mountAgentHarborFleet(container, f)
+    of "test-results": mountTestResults(container, f)
     of "build": mountBuild(container, f)
     of "calltrace": mountCalltrace(container, f)
     of "calltrace-editor": mountCalltraceEditor(container, f)

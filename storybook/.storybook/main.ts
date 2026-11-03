@@ -19,6 +19,11 @@ const config: StorybookConfig = {
     { from: "../../src/frontend/index.html", to: "/codetracer-app-index.html" },
     { from: `../../src/${buildDir}/frontend`, to: "/frontend" },
     { from: `../../src/${buildDir}/public`, to: "/public" },
+    // The design system's fonts. The app's stylesheets name them relative to
+    // the build tree (`../../../../libs/codetracer-design-system/...`), which a
+    // page served from the root resolves to `/libs/...`; without this mount
+    // every story fell back to the browser's default serif face.
+    { from: "../../libs/codetracer-design-system", to: "/libs/codetracer-design-system" },
   ],
 };
 

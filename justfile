@@ -824,6 +824,27 @@ test-hmr-e2e:
       ;;
   esac
 
+# Refresh the Agent Harbor fixtures the front-end prototypes are built over.
+# The captured set is private and is written beside this checkout, never into
+# a public repository: a READ-ONLY snapshot of the Agent Harbor server `ah` is
+# configured with, campaign plans, branch diffs, `ct test` runs with a trace,
+# and agents driven by scenario files on Agent Harbor's mock server and mock
+# agent. The synthetic set public builds use
+# (../nim-agents-isonim-viewmodels/fixtures/agent-harbor) is regenerated too.
+# Then the scrub check (no credential, prompt or infrastructure identifier in a
+# fixture; no private fixture in a public repository) and its self-test, which
+# plants a credential, a prompt and private fixtures and must see the check
+# fail on each. See scripts/capture-agent-harbor-fixtures.sh for the
+# prerequisites.
+[positional-arguments]
+capture-agent-harbor-fixtures *args:
+  bash scripts/capture-agent-harbor-fixtures.sh capture "$@"
+
+# The scrub check and its self-test alone, over the fixture sets as they are.
+[positional-arguments]
+check-agent-harbor-fixtures *args:
+  bash scripts/capture-agent-harbor-fixtures.sh check "$@"
+
 build-storybook-components:
   mkdir -p storybook/dist
   nim \
