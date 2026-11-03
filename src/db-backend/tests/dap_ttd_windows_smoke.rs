@@ -611,6 +611,7 @@ fn launch_ttd_session_with_fixture(session: &mut DapStdioSession, fixture: &TtdF
             live_recording_dir: None,
             rename_list: None,
             trace_source: None,
+            host_source_reads: None,
         })
         .map_err(|e| format!("launch request failed: {e}"))?;
     session
@@ -684,6 +685,9 @@ fn build_tracepoint_session(
             id: 0,
         },
         stop_after: 0,
+        // The locals are read the way a pane reads them, through
+        // `ct/update-table` (`request_tracepoint_locals`).
+        with_locals: false,
     }
 }
 
