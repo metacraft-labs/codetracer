@@ -117,7 +117,11 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 2001
+const ExpectedAssertions = 2004
+  ## *2001 -> 2004 on 2026-11-03: `views/dropdown_focus.nim` (keyboard
+  ## dropdowns, 41d8b6d8d6), which reached this branch from dev beside
+  ## `constraints_answer.nim` from agents, x three assertions. It neither calls
+  ## `rebase(` nor spells `mapOver`.*
   ## *1998 -> 2001 on 2026-11-02: `viewmodels/constraints_answer.nim` (the
   ## Constraints pane's model) x three assertions. It neither calls `rebase(`
   ## nor spells `mapOver`.*
