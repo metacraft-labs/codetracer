@@ -39,6 +39,13 @@ when defined(js):
       return !!(el && el.closest && el.closest(sel));
     })(#)""".}
 
+  proc closeOpenDropdown*(): bool {.importjs: """
+    (globalThis.__ctCloseOpenDropdown ? globalThis.__ctCloseOpenDropdown() : false)""".}
+    ## Closes the innermost open dropdown; false when none is open. The key
+    ## router calls this before it routes Escape, because a pane's own Escape
+    ## (`list.clear-selection`) would otherwise take the key and stop it
+    ## (docs/UI-Design-Decisions.md, D-21).
+
   proc installKeyboardFocus(lists: cstring) {.importjs: """
     (function (LIST) {
       if (typeof document === 'undefined' || globalThis.__ctKeyboardFocus) return;
@@ -56,6 +63,27 @@ when defined(js):
         { box: '.eventLog-rows', item: '.eventLog-row', axis: 'v' },
         { box: '.isonim-state', item: '.value-history-button, .ct-origin-badge', axis: 'both' },
         { box: '.filesystem', item: '.jstree-anchor' }
+      ];
+      // EVERY dropdown Escape closes, innermost first, so a settings select
+      // closes before the panel it sits in. Add new dropdowns here.
+      //   open    — matches the list, or a marker, while it is open;
+      //   box     — the control around it, where `trigger` is looked up;
+      //   trigger — clicked to close it, and given the focus afterwards;
+      //   prev    — the trigger is the element just before the list;
+      //   blur    — the button's menu follows its focus, so closing is a blur
+      //             and focus cannot go back to it without reopening it.
+      var DROPDOWNS = [
+        { open: '.agent-settings-dropdown-list', box: '.agent-settings-select-wrapper', trigger: '.agent-settings-select-trigger' },
+        { open: '.agent-settings-panel', box: '.agent-settings-host', trigger: '.agent-settings-done', focus: '.agent-settings-button' },
+        { open: '.agent-model-dropdown', box: '.agent-model-wrapper', trigger: '.agent-model-select' },
+        { open: '.agent-branch-dropdown', box: '.agent-branch-wrapper', trigger: '.agent-branch-button' },
+        { open: '.agent-add-context-dropdown', box: '.agent-add-context-wrapper', trigger: '.agent-add-context-button' },
+        { open: '.ct-picker-dropdown', box: '.ct-picker', trigger: '.ct-picker-trigger' },
+        { open: '.vcs-branch-dropdown', box: '.vcs-branch-picker', trigger: '.vcs-branch-current' },
+        { open: '.eventLog-columns-menu', box: '.eventLog', trigger: '.eventLog-columns-button' },
+        { open: '.session-tab-bar.overflow-open', box: '.session-tab-bar', trigger: '.session-tab-overflow' },
+        { open: '.dropdown-list.active', prev: true },
+        { open: '[id="category-image"].open', blur: true }
       ];
       // Closing it ourselves clicks the trigger; that click must not move focus.
       var closing = false;
@@ -82,6 +110,37 @@ when defined(js):
       }
       function triggerIndex(el) { return all(document, TRIGGER).indexOf(el); }
       function afterRender(fn) { requestAnimationFrame(fn); }
+      // An arrow key is the keyboard navigating too, even in a menu the mouse
+      // opened, so the row it lands on must show key-focus. Only here, where a
+      // key moved the focus: an arrow typed in a clicked text field stays quiet.
+      function moveFocus(ev, to) {
+        ev.preventDefault();
+        document.documentElement.setAttribute('data-focus-mode', 'keyboard');
+        to.focus();
+      }
+      // On screen: a hidden panel's open dropdown must not swallow the key.
+      function onScreen(el) { return el.getClientRects().length > 0 && shown(el); }
+      function closeOpenDropdown() {
+        for (var i = 0; i < DROPDOWNS.length; i++) {
+          var d = DROPDOWNS[i];
+          var open = all(document, d.open).filter(onScreen)[0];
+          if (!open) continue;
+          if (d.blur) { open.blur(); return true; }
+          var box = d.box ? closest(open, d.box) : null;
+          var trigger = d.prev ? open.previousElementSibling : box ? box.querySelector(d.trigger) : null;
+          if (!trigger) continue;
+          var back = d.focus || d.trigger;
+          var index = back ? all(document, back).indexOf(d.focus ? all(document, back).filter(onScreen)[0] : trigger) : -1;
+          closing = true; trigger.click(); closing = false;
+          afterRender(function () {
+            var now = back ? all(document, back)[index] : trigger;
+            if (now) now.focus();
+          });
+          return true;
+        }
+        return false;
+      }
+      globalThis.__ctCloseOpenDropdown = closeOpenDropdown;
       function settleStops() {
         COMPOSITES.forEach(function (c) {
           all(document, c.box).forEach(function (box) {
@@ -110,8 +169,7 @@ when defined(js):
             : ev.key === 'Home' ? items[0]
             : ev.key === 'End' ? items[items.length - 1] : null;
           if (!next || next === ev.target) return;
-          ev.preventDefault();
-          next.focus();
+          moveFocus(ev, next);
           if (c.press) {
             var index = items.indexOf(next);
             var sel = c.box;
@@ -135,19 +193,7 @@ when defined(js):
           : ev.key === 'ArrowLeft' && step === 2 && at % 2 === 1 ? items[at - 1]
           : ev.key === 'Home' ? items[at % step]
           : ev.key === 'End' ? items[items.length - step + (at % step)] : null;
-        if (ev.key === 'Escape') {
-          var trigger = triggerFor(list);
-          var index = triggerIndex(trigger);
-          ev.preventDefault();
-          ev.stopPropagation();
-          closing = true; trigger.click(); closing = false;
-          afterRender(function () {
-            var now = all(document, TRIGGER)[index];
-            if (now) now.focus();
-          });
-          return;
-        }
-        if (next) { ev.preventDefault(); next.focus(); }
+        if (next) moveFocus(ev, next);
       }
       document.addEventListener('mousedown', function (ev) { pressed = ev.target; }, true);
       document.addEventListener('mouseup', function () {
@@ -157,6 +203,13 @@ when defined(js):
         if (ev.key === 'Tab') settleStops();
       }, true);
       document.addEventListener('keydown', function (ev) {
+        // For a host with no key router (the VS Code extension's views). On the
+        // desktop the router has already closed it and stopped the key.
+        if (ev.key === 'Escape' && closeOpenDropdown()) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          return;
+        }
         var list = closest(ev.target, LIST);
         if (list) moveInList(ev, list);
         else moveInComposite(ev);

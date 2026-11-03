@@ -819,6 +819,7 @@ proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM;
              `data-column` = $item()):
           span(class = columnCheckClass(vm, item()),
                role = "button", tabindex = "-1",
+               title = "Show or hide this column",
                `aria-pressed` = columnShownText(vm, item()),
                onclick = onToggleColumn(vm, item())):
             span(class = "ct-checkmark",
@@ -829,7 +830,7 @@ proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM;
             text columnOptionTitle(item())
           span(ref = handleEl, class = EventLogColumnHandleClass,
                role = "button", tabindex = "-1",
-               title = "Drag to reorder",
+               title = "Drag to reorder, or press Enter to move it down",
                `aria-label` = "Move " & columnOptionTitle(item()) & " down")
       when defined(js):
         when N is isonim_dom.Element:

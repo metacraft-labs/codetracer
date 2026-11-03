@@ -230,12 +230,15 @@
     background: var(--video-player-chrome-bg)
 
     // M5 spec §Status Indicators / "Player error": controls disabled.
-    // The opacity + pointer-events: none combination greys every button
-    // visually and inertly in one place — no per-button disabled state
-    // to keep in sync with the VM error signal.
+    // This one class greys every button and makes it inert in one place — no
+    // per-button disabled state to keep in sync with the VM error signal.
+    // Text and border only, never the fill (D-20).
     &.disabled
-      opacity: 0.45
       pointer-events: none
+
+      .video-player-button
+        color: colors-ui-text-primary-disabled
+        border-color: colors-ui-border-disabled
 
   .video-player-button
     display: inline-flex

@@ -41,8 +41,10 @@
 // side on the trigger and grows left (docs/UI-Design-Decisions.md, D-19).
 .request-panel-filters > :last-child .ct-picker-dropdown
   left: auto
-  // 106px: "5xx Server Error" and the row padding, on a whole pixel.
-  width: 6.625rem
+  // As wide as "5xx Server Error" at the row's 14px (D-26), and never narrower
+  // than the trigger.
+  width: max-content
+  min-width: 100%
 
 
 // ---------------------------------------------------------------------------

@@ -197,6 +197,19 @@ OVERLAY_ELEVATION_SHADOW = 0 0.75rem 2rem rgba(0, 0, 0, 0.55), 0 0.125rem 0.5rem
   z-index: 202
   overflow: visible
 
+// A strip tab with keyboard focus, and its open panel: one continuous key-focus
+// line around the whole shape (Nikolay, 2026-11-02; docs/UI-Design-Decisions.md,
+// D-22).  The class is set in `ui/layout.nim`, which also moves the line inside
+// the edge for this width.
+.ct-docked-outline.ct-outline--key-focus path,
+.ct-overlay-outline.ct-outline--key-focus path
+  stroke: KEY_FOCUS_COLOR
+  stroke-width: KEY_FOCUS_WIDTH
+
+// The catch-all skips this tab, which would leave the browser's own ring on it.
+.ct-key-focus-traced:focus-visible
+  outline: none
+
 // ---------------------------------------------------------------------------
 // The same outline again, for the slide-in overlay.
 //
@@ -623,6 +636,10 @@ DOCK_BOTTOM_HANDLE_SIZE = 4px
     overflow: visible
     z-index: 1
 
+    // Kept when focused, as on the side strips below (D-25).
+    &:focus
+      box-shadow: 0em -0.48em 0em 0em colors-ui-surface-base-panel !important
+
     // LEFT curve — to the left of the active tab.
     &::before
       content: " "
@@ -763,6 +780,12 @@ DOCK_BOTTOM_HANDLE_SIZE = 4px
     overflow: visible
     z-index: 1
 
+    // Kept when the tab is focused (docs/UI-Design-Decisions.md, D-25): the "no ring
+    // on a mouse click" rule in shared_widgets.styl clears `box-shadow` on anything
+    // focused, and without this the strip shows through as a dark bar.
+    &:focus
+      box-shadow: 0.48em 0em 0em 0em colors-ui-surface-base-panel !important
+
     // TOP curve — above the active tab (same geometry as lm_tabs ::before rotated).
     &::before
       content: " "
@@ -808,6 +831,10 @@ DOCK_BOTTOM_HANDLE_SIZE = 4px
   // Shadow bridges the 0.25em gap to the strip left edge; overlay (z-index: 101)
   // renders above and covers the slight overlap with its panel-color background.
   box-shadow: -0.48em 0em 0em 0em colors-ui-surface-base-panel
+
+  // Kept when focused, as on the left strip above (D-25).
+  &:focus
+    box-shadow: -0.48em 0em 0em 0em colors-ui-surface-base-panel !important
 
   &::before  // TOP curve — anchored to LEFT side of tab
     left: 0em

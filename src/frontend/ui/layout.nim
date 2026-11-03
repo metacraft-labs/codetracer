@@ -237,8 +237,10 @@ proc injectPinButton(tabElement: JsObject, onPin: proc()) =
   {.emit: """
     var _pinBtn = document.createElement('div');
     _pinBtn.className = 'lm_pin_tab';
+    _pinBtn.title = 'Pin to the sidebar';
     var _closeEl = `tabElement`.querySelector('.lm_close_tab');
     if (_closeEl) {
+      _closeEl.title = 'Close panel';
       `tabElement`.insertBefore(_pinBtn, _closeEl);
     } else {
       `tabElement`.appendChild(_pinBtn);
@@ -270,8 +272,7 @@ proc markPanelTab(tabElement: JsObject, content: Content) =
   """.}
 
 proc setupDropdownDismissListeners() =
-  ## Close an open dropdown when Escape is pressed or the pointer goes down
-  ## outside it.  Without this the branch picker stayed open until its own
+  ## Close an open dropdown when the pointer goes down outside it.  Without this the branch picker stayed open until its own
   ## trigger was clicked again, so it could be left hanging over the panel while
   ## the user worked elsewhere.
   ##
@@ -334,10 +335,8 @@ proc setupDropdownDismissListeners() =
         });
       }, true);
 
-      document.addEventListener('keydown', function (ev) {
-        if (ev.key !== 'Escape' && ev.keyCode !== 27) { return; }
-        closeOpenMenus(null);
-      }, true);
+      // Escape is not here: `views/keyboard_focus` closes every dropdown, and
+      // the key router, which runs first, calls it.
     })();
   """.}
 
@@ -497,10 +496,16 @@ proc setupSelectedPanelOutline() =
         // It lives outside the GoldenLayout tree, so GL keeps its own
         // `.lm_focused` while that is so, and drawing the stack outline as well
         // would put two selection cues on screen at once.
-        if (document.querySelector('.auto-hide-docked.ct-docked-focused') !== null) {
+        //
+        // A strip tab with keyboard focus outranks the selection: its open panel
+        // gets the outline while the tab has focus (docs/UI-Design-Decisions.md,
+        // D-22), and the selection's outline comes back when focus moves on.
+        if (document.querySelector('.auto-hide-docked.ct-docked-focused') !== null ||
+            dockedPanelOfKeyFocusedTab() !== null) {
           clearOutlines(null); updateDockedOutline(); return;
         }
         removeDockedOutline();
+        markTracedTab(null);
 
         var stack = document.querySelector('.lm_stack:has(> .lm_header.lm_focused)');
         if (stack === null) { clearOutlines(null); return; }
@@ -565,6 +570,59 @@ proc setupSelectedPanelOutline() =
         var f = function (v) { var n = parseFloat(v); return isFinite(n) ? n : 0; };
         return { tl: f(cs.borderTopLeftRadius), tr: f(cs.borderTopRightRadius),
                  br: f(cs.borderBottomRightRadius), bl: f(cs.borderBottomLeftRadius) };
+      }
+
+      // ---------------------------------------------------------------------
+      // key-focus on a strip tab whose panel is open (D-22).
+      //
+      // The tab and its panel are one shape, so the tab's own ring would stop
+      // at the panel's edge and be cut up by the curves that join the two.  The
+      // outline that traces the shape turns key-focus instead, and the traced
+      // tab leaves its own ring off (the catch-all in shared_widgets.styl skips
+      // TRACED_TAB_CLASS).  The class is only set once the outline really runs
+      // around the tab, so a tab can never end up with neither.
+      // ---------------------------------------------------------------------
+      var KEY_FOCUS_OUTLINE_CLASS = 'ct-outline--key-focus';
+      var TRACED_TAB_CLASS = 'ct-key-focus-traced';
+
+      function keyFocusedStripTab() {
+        var el = document.activeElement;
+        if (el === null || !el.classList.contains('auto-hide-strip-tab')) { return null; }
+        if (document.documentElement.getAttribute('data-focus-mode') === 'mouse') { return null; }
+        return el.matches(':focus-visible') ? el : null;
+      }
+
+      function dockedPanelOfKeyFocusedTab() {
+        var tab = keyFocusedStripTab();
+        var key = tab === null ? null : tab.getAttribute('data-ct-panel-key');
+        if (!key) { return null; }
+        var open = document.querySelectorAll('.auto-hide-docked.docked-open');
+        for (var i = 0; i < open.length; i++) {
+          if (open[i].getAttribute('data-ct-docked-key') === key) { return open[i]; }
+        }
+        return null;
+      }
+
+      // Only writes on a real change: `schedule` watches `class`, and a write
+      // that changes nothing would still schedule the next pass.
+      function markTracedTab(tab) {
+        var old = document.querySelectorAll('.' + TRACED_TAB_CLASS);
+        for (var i = 0; i < old.length; i++) {
+          if (old[i] !== tab) { old[i].classList.remove(TRACED_TAB_CLASS); }
+        }
+        if (tab !== null && !tab.classList.contains(TRACED_TAB_CLASS)) {
+          tab.classList.add(TRACED_TAB_CLASS);
+        }
+      }
+
+      // `tab` is the tab the outline traces, or null. Call it before reading the
+      // stroke width, which this class changes.
+      function showKeyFocusOnOutline(svg, tab) {
+        var on = tab !== null && tab === keyFocusedStripTab();
+        if (svg.classList.contains(KEY_FOCUS_OUTLINE_CLASS) !== on) {
+          svg.classList.toggle(KEY_FOCUS_OUTLINE_CLASS, on);
+        }
+        markTracedTab(on ? tab : null);
       }
 
       function removeDockedOutline() {
@@ -728,12 +786,12 @@ proc setupSelectedPanelOutline() =
       }
 
       function updateDockedOutline() {
-        removeDockedOutline();
-        var panel = document.querySelector('.auto-hide-docked.docked-open.ct-docked-focused');
-        if (panel === null) { return; }
+        var panel = dockedPanelOfKeyFocusedTab() ||
+          document.querySelector('.auto-hide-docked.docked-open.ct-docked-focused');
+        if (panel === null) { removeDockedOutline(); markTracedTab(null); return; }
 
         var pr = panel.getBoundingClientRect();
-        if (pr.width < 1 || pr.height < 1) { return; }
+        if (pr.width < 1 || pr.height < 1) { removeDockedOutline(); markTracedTab(null); return; }
 
         // Trim the resize grip off the panel's edge.
         //
@@ -763,10 +821,6 @@ proc setupSelectedPanelOutline() =
         var side = panel.id.indexOf('right') !== -1 ? 'right'
                  : panel.id.indexOf('bottom') !== -1 ? 'bottom' : 'left';
 
-        var svg = document.createElementNS(SVG_NS, 'svg');
-        svg.setAttribute('class', DOCKED_OUTLINE_CLASS);
-        var path = document.createElementNS(SVG_NS, 'path');
-        svg.appendChild(path);
         // Into `#root-container`, NOT the body.  That element is
         // `position: fixed; z-index: 0`, so it opens a stacking context, and the
         // hover overlay lives inside it: parked on the body this outline would
@@ -777,15 +831,28 @@ proc setupSelectedPanelOutline() =
         // resolves against the viewport here (no transformed ancestor), so the
         // viewport coordinates below stay correct.
         var host = document.getElementById('root-container') || document.body;
-        host.appendChild(svg);
+
+        // REUSED, not rebuilt each pass: see the note on the overlay's outline.
+        // Removing and re-adding it was a mutation that scheduled the next pass,
+        // a loop that ran every frame for as long as a docked panel was selected.
+        var svg = host.querySelector(':scope > .' + DOCKED_OUTLINE_CLASS);
+        if (svg === null) {
+          svg = document.createElementNS(SVG_NS, 'svg');
+          svg.setAttribute('class', DOCKED_OUTLINE_CLASS);
+          svg.appendChild(document.createElementNS(SVG_NS, 'path'));
+          host.appendChild(svg);
+        }
+        var strays = document.querySelectorAll('.' + DOCKED_OUTLINE_CLASS);
+        for (var si = 0; si < strays.length; si++) {
+          if (strays[si] !== svg) { strays[si].remove(); }
+        }
+        var path = svg.firstChild;
 
         var w = window.innerWidth, h = window.innerHeight;
         svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
         svg.setAttribute('width', w);
         svg.setAttribute('height', h);
 
-        var strokeWidth = parseFloat(window.getComputedStyle(path).strokeWidth) || 1;
-        var inset = strokeWidth / 2;
         var rr = radii(panel);
 
         // The bottom strip is the status bar, and is named differently from the
@@ -804,12 +871,13 @@ proc setupSelectedPanelOutline() =
         // border around the other one's tab.  stripTabFor below explains.
         var tab = stripTabFor(stripSel, panel.getAttribute('data-ct-docked-key'),
                               panel.getAttribute('data-ct-docked-title'));
+        var tb = tab === null ? null : tab.getBoundingClientRect();
+        if (tb !== null && (tb.width < 1 || tb.height < 1)) { tab = null; }
+        showKeyFocusOnOutline(svg, tab);
+
+        var strokeWidth = parseFloat(window.getComputedStyle(path).strokeWidth) || 1;
+        var inset = strokeWidth / 2;
         if (tab === null) {
-          path.setAttribute('d', dockedPanelOnlyPath(p, rr, inset));
-          return;
-        }
-        var tb = tab.getBoundingClientRect();
-        if (tb.width < 1 || tb.height < 1) {
           path.setAttribute('d', dockedPanelOnlyPath(p, rr, inset));
           return;
         }
@@ -951,8 +1019,6 @@ proc setupSelectedPanelOutline() =
         svg.setAttribute('width', w);
         svg.setAttribute('height', h);
 
-        var strokeWidth = parseFloat(window.getComputedStyle(path).strokeWidth) || 1;
-        var inset = strokeWidth / 2;
         var rr = radii(body);
 
         var stripSel = side === 'bottom' ? '#auto-hide-bottom-strip'
@@ -967,14 +1033,15 @@ proc setupSelectedPanelOutline() =
         var titleEl = document.getElementById('auto-hide-overlay-title');
         var tab = stripTabFor(stripSel, overlay.getAttribute('data-ct-panel-key'),
                               titleEl === null ? '' : titleEl.textContent);
+        var tb = tab === null ? null : tab.getBoundingClientRect();
+        if (tb !== null && (tb.width < 1 || tb.height < 1)) { tab = null; }
+        showKeyFocusOnOutline(svg, tab);
+
+        var strokeWidth = parseFloat(window.getComputedStyle(path).strokeWidth) || 1;
+        var inset = strokeWidth / 2;
         if (tab === null) {
           // No tab found: an overlay opened by a command rather than from a
           // strip, or a collapsed strip. The panel alone is still a shape.
-          path.setAttribute('d', dockedPanelOnlyPath(p, rr, inset));
-          return true;
-        }
-        var tb = tab.getBoundingClientRect();
-        if (tb.width < 1 || tb.height < 1) {
           path.setAttribute('d', dockedPanelOnlyPath(p, rr, inset));
           return true;
         }
@@ -1000,6 +1067,10 @@ proc setupSelectedPanelOutline() =
         attributes: true, attributeFilter: ['class'], subtree: true, childList: true
       });
       window.addEventListener('resize', schedule);
+      // Keyboard focus reaching or leaving a strip tab changes the outline's
+      // look and, for an unselected panel, where it is drawn (D-22).
+      document.addEventListener('focusin', schedule);
+      document.addEventListener('focusout', schedule);
 
       // Dragging a docked panel's resize grip changes its width through inline
       // style, which the class-filtered observer above never sees.

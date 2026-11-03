@@ -53,40 +53,71 @@ ns9-row-padding = 2px 8px
 // truncates, so a long "3 passed, 2 failed" never pushes the control off the
 // pane. Same arrangement as the BUILD pane's header, which is where a reader
 // has already learned to look for a run control.
+// The ▶ keeps the panel inset (PANEL_INSET, 8px) from the right edge, as the
+// BUILD pane's controls do; the headline brings its own 8px on the left.  It
+// sat flush against the edge, and `baseline` against a button with no painted
+// text lifted it 4px from the top.
+//
+// No top padding of its own: the panel's 8px above is the whole gap, as in the
+// BUILD and EVENT LOG panes, whose first controls sit 8px down.  The
+// headline's 6px on top made this row 14px down.  The 4px below is the BUILD
+// header's.
 .test-results-header
   display: flex
-  align-items: baseline
+  align-items: center
   justify-content: space-between
   gap: 6px
+  padding: 0 PANEL_INSET 4px 0
 
   .test-results-headline
     flex: 1 1 auto
     min-width: 0
+    padding-top: 0
+    padding-bottom: 0
 
 // DISABLED IS DIMMED, NOT ABSENT — see the view's header. A control that
 // disappears cannot be told apart from a feature that is not there, and the
 // three reasons it can be disabled are all temporary or deployment-specific.
-// The button look (button.styl), at the small control size.
+// The button look (button.styl), at the small control size, and the BUILD
+// pane's run button (`.build-run-btn`, status_bar.styl): a square with the
+// design system's play icon, a 16px mask painted `currentColor`.  The view's
+// "▶" text (`RunButtonLabel`, shared with the terminal and native front ends)
+// stays in the DOM but is not painted: `font-size: 0` hides it.
 .test-results-run-btn
   flex: 0 0 auto
   display: inline-flex
   align-items: center
+  justify-content: center
   box-sizing: border-box
+  width: CONTROL_HEIGHT_SM
   height: CONTROL_HEIGHT_SM
-  padding: 0 8px
+  padding: 0
   border-radius: CONTROL_RADIUS
+  font-size: 0
   control-button()
   user-select: none
+
+  &::before
+    content: ""
+    flex: 0 0 auto
+    width: 1rem
+    height: 1rem
+    background-color: currentColor
+    -webkit-mask: url('../../public/resources/shared/build_play.svg') center / contain no-repeat
+    mask: url('../../public/resources/shared/build_play.svg') center / contain no-repeat
 
   &:hover
     control-button-hover()
 
+  // Text and border only, never the fill (D-20).
   &.disabled
-    opacity: 0.3
+    color: colors-ui-text-primary-disabled
+    border-color: colors-ui-border-disabled
     cursor: default
 
     &:hover
-      control-button()
+      background-color: colors-ui-surface-primary-default
+      color: colors-ui-text-primary-disabled
 
 .test-results-body,
 .constraints-body
@@ -157,7 +188,7 @@ ns9-row-padding = 2px 8px
   // `test_results_vm.openAbsence`), so a shared look with per-control text is
   // exactly right: same affordance, different explanation.
   &.disabled
-    opacity: 0.3
+    color: colors-ui-text-primary-disabled
     cursor: default
 
     &:hover

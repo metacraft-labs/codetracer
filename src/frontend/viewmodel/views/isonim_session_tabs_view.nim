@@ -145,7 +145,7 @@ proc renderSessionTab[R, N](
       span(class = SessionTabLabelClass):
         text tab.label
       if multiSession:
-        span(ref = closeBtn, class = SessionTabCloseClass,
+        span(ref = closeBtn, class = SessionTabCloseClass, title = "Close tab",
              onclick = tabCloseHandler(callbacks, index)):
           discard
   when defined(js):
@@ -185,7 +185,7 @@ proc renderOverflowButton[R, N](
     r: R;
     callbacks: SessionTabsCallbacks): N =
   ui(r):
-    tdiv(class = SessionTabOverflowClass,
+    tdiv(class = SessionTabOverflowClass, title = "Show all tabs",
          onclick = proc() = callbacks.invokeToggleOverflow()):
       text "⌄"
 

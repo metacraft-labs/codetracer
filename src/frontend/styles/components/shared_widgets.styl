@@ -297,28 +297,17 @@ dropdown-surface()
     animation: none
 
 // One row inside that surface.  The row's colour, height and hover come from
-// the `ct-menu-item` component; this is only the hairline between rows and the
-// corner rounding that lets the ends sit inside the container's radius.
+// the `ct-menu-item` component; this is only the corner rounding that lets the
+// ends sit inside the container's radius.  No line between rows, on any dropdown
+// (Nikolay, 2026-11-02; docs/UI-Design-Decisions.md, D-29).
 dropdown-surface-row()
   // Row height comes from the `ct-menu-item` component itself (2.25rem), which
   // every dropdown row carries — see components/menu_item.styl.
   font-size: 0.875rem
-  border-top: 0.0625rem solid colors-ui-border-tertiary
   padding-left: 0.5em
   padding-right: 0.5em
 
-  // Rows differ in how they carry their text: the layout menu puts it straight
-  // in the row, the command prompt wraps it in `ct-menu-item-label`.  That
-  // label is sized `0.875em` for the application menu, which here multiplies
-  // against the row's own 0.875rem and lands two steps down — the same list
-  // rendered visibly smaller than its neighbour.  In a dropdown the row owns
-  // the size; the label just carries the text.
-  .ct-menu-item-label,
-  .ct-menu-item-sublabel
-    font-size: inherit
-
   &:first-child
-    border-top: none
     border-radius: DROPDOWN_RADIUS DROPDOWN_RADIUS 0 0
 
   &:last-child
@@ -375,16 +364,21 @@ EMPTY_OVERLAY_SIDE_GAP = 2.5rem
 // the selected panel outline.  This long selector outranks the "no ring on a
 // mouse click" rule above, so it leaves out mouse mode itself.  Keep it free of
 // commas and `:where`: Stylus splits those, and `*` then matches every element.
-html:not([data-focus-mode="mouse"]) *:focus-visible:not(input):not(textarea):not(select):not([contenteditable="true"]):not(body):not([data-scope-kind]):not(.monaco-editor *):not(.xterm *):not(.filesystem):not(.component-container):not(.constraints):not(.code-editor):not(#navigation-menu):not(.context-menu)
+// A strip tab traced by its panel's outline shows it on that outline (D-22).
+// A Columns menu checkbox shows it on its whole row (D-23, event_log.styl).
+html:not([data-focus-mode="mouse"]) *:focus-visible:not(input):not(textarea):not(select):not([contenteditable="true"]):not(body):not([data-scope-kind]):not(.monaco-editor *):not(.xterm *):not(.filesystem):not(.component-container):not(.constraints):not(.code-editor):not(#navigation-menu):not(.context-menu):not(.ct-key-focus-traced):not(.eventLog-column-check)
   key-focus()
 
 // A text field always matches :focus-visible, so it takes key-focus only when
 // it was reached with Tab.  Hidden inputs show it on their visible box, and a
-// field inside a wider control leaves it to that control.
+// field inside a wider control leaves it to that control.  The palette's field
+// is the keyboard's place whenever no row has taken it, however the palette was
+// opened, so it does not wait for Tab; only a click on it holds the line back
+// (D-28).
 [data-focus-mode="keyboard"] input:focus:not(.ct-checkmark-input):not(.ct-toggle *):not(.command-input-row *):not(.agent-interaction *),
 [data-focus-mode="keyboard"] textarea:focus:not(.monaco-editor *):not(.xterm *):not(.agent-interaction *),
 [data-focus-mode="keyboard"] select:focus,
-[data-focus-mode="keyboard"] .command-view:not(:has(.ct-menu-item--active)) .command-input-row:focus-within
+.command-view:not(:has(.ct-menu-item--active)) .command-input-row:focus-within:not(.ct-palette-clicked)
   key-focus()
 
 html, body
@@ -784,9 +778,6 @@ input:checked ~ .checkmark:after
 .run-trace-button
   .custom-tooltip
     right: 0px
-
-    &:after
-      left: 90%
 
 .eventLog-medium-control-button
   .custom-tooltip

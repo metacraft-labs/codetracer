@@ -312,7 +312,8 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
 
   #menu-main
     font-family: "SpaceGrotesk"
-    font-size: MENU_FONT_SIZE
+    // D-26, in every theme.
+    font-size: 0.875rem
     width: fit-content
     min-width: 12em
     padding: 0
@@ -350,7 +351,7 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
   // with the old input-surface background, margins and 4px radius the moment
   // the hooks came back.
   .menu-search-result
-    font-size: MENU_FONT_SIZE
+    font-size: 0.875rem
     height: auto
     min-width: fit-content //"calc(%s + 2px)" % MENU_NODE_MIN_WIDTH
     display: flex
@@ -387,7 +388,7 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
       padding-left: 8px
       padding-right: 8px
       color: colors-ui-text-primary-body
-      font-size: MENU_FONT_SIZE
+      font-size: inherit
       border-radius: 5px
       display: flex
       align-items: center
@@ -402,10 +403,10 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
       border-radius: 6px
       color: colors-ui-text-primary-body
       // overflow: hidden
-      font-size: 10px
+      font-size: inherit
       text-align: right
       padding: 4px
-      line-height: 10px
+      line-height: 1.25em
       margin-right: 8px
       margin-left: 8px
       white-space: nowrap
@@ -423,7 +424,7 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
       padding-left: 8px
       padding-right: 8px
       color: colors-ui-text-primary-body
-      font-size: MENU_FONT_SIZE
+      font-size: inherit
       border-radius: 5px
       display: flex
       align-items: center

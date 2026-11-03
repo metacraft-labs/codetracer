@@ -172,13 +172,13 @@ proc renderFrameViewerPanel*[R, N](r: R; vm: FrameViewerVM): N =
         span(class = connectionStatusClass(vm)):
           text connectionStatusText(vm)
         tdiv(class = "frame-viewer-frame-controls"):
-          button(class = "frame-viewer-prev-frame",
+          button(class = "frame-viewer-prev-frame", title = "Previous frame",
                  onclick = proc() = vm.previousFrame()):
             text "<"
           span(class = "frame-viewer-frame-label"):
             text frameStatusText(vm)
             text frameCountText(vm)
-          button(class = "frame-viewer-next-frame",
+          button(class = "frame-viewer-next-frame", title = "Next frame",
                  onclick = proc() = vm.nextFrame()):
             text ">"
       tdiv(class = "frame-viewer-scrubber"):

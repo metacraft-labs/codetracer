@@ -261,6 +261,7 @@ proc renderMenuShell*[R, N](
           button(
               class = "ct-button-image-md-secondary ct-button-no-border",
               id = MenuRootId,
+              title = "Main menu",
               onclick = proc() = callbacks.invokeToggle()):
             tdiv(id = "menu-logo-img"):
               discard
@@ -383,21 +384,21 @@ proc renderMenuShell*[R, N](
       if model.showWindowMenu:
         tdiv(class = WindowMenuClass):
           tdiv(
-              class = "menu-button-svg minimize",
+              class = "menu-button-svg minimize", title = "Minimize",
               onclick = proc() = callbacks.invokeMinimize()):
             discard
           if model.maximized:
             tdiv(
-                class = "menu-button-svg restore",
+                class = "menu-button-svg restore", title = "Restore",
                 onclick = proc() = callbacks.invokeRestore()):
               discard
           else:
             tdiv(
-                class = "menu-button-svg maximize",
+                class = "menu-button-svg maximize", title = "Maximize",
                 onclick = proc() = callbacks.invokeMaximize()):
               discard
           tdiv(
-              class = "menu-button-svg close",
+              class = "menu-button-svg close", title = "Close",
               onclick = proc() = callbacks.invokeClose()):
             discard
 

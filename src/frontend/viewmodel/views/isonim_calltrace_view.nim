@@ -714,6 +714,7 @@ proc renderCallLineRow*[R, N](r: R; vm: CalltraceVM;
                role = toggleRole(item), tabindex = toggleTabIndex(item),
                `aria-expanded` = toggleExpanded(item),
                `aria-label` = "Show or hide the calls it makes",
+               title = "Show or hide the calls it makes",
                onclick = h.onToggle):
             tdiv(class = toggleClass(vm, item)):
               discard

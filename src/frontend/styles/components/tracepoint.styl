@@ -416,14 +416,6 @@
     z-index: TRACE_LOG_EDITOR_Z_INDEX + 7
     top: 0
 
-    .trace-hamburger-svg
-      height: 24px
-      width: 24px
-      background-image: TRACE_HAMBURGER_IMAGE
-      background-size: 12px 8px
-      background-repeat: no-repeat
-      background-position: center
-
   .trace-dropdown-menu
     display: none
 
@@ -492,12 +484,6 @@
   .trace-buttons-container
     display: flex
     gap: 6px
-
-    .trace-run-button-svg
-      height: 24px
-      width: 24px
-      background-image: RUN_TRACEPOINT_IMAGE
-      background-repeat: no-repeat
 
 .kind-dropdown-menu
   background: #b8c0cf !important
@@ -680,7 +666,7 @@ RESIZING_BORDER_SIZE = 4px
     border-radius: 4px
 
     &:hover
-      background-color: colors-ui-surface-primary-secondary-hover
+      background-color: DROPDOWN_HOVER_BG
 
   // .dropdown-list
   //   min-width: 80px !important

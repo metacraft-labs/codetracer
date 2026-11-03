@@ -97,10 +97,8 @@ when defined(js):
         var left = Math.max(8, Math.min(anchor.left + (anchor.width - bounds.width) / 2,
           window.innerWidth - bounds.width - 8));
         tooltip.style.left = left + 'px';
-        tooltip.style.top = Math.max(8, Math.min(anchor.bottom + 5,
+        tooltip.style.top = Math.max(8, Math.min(anchor.bottom + 8,
           window.innerHeight - bounds.height - 8)) + 'px';
-        tooltip.style.setProperty('--tooltip-arrow-left',
-          Math.max(8, Math.min(anchor.left + anchor.width / 2 - left, bounds.width - 8)) + 'px');
       }
       var observer = new ResizeObserver(position);
       panel.querySelectorAll('.custom-tooltip').forEach(function(t) { observer.observe(t); });

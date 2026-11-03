@@ -242,8 +242,10 @@
   -webkit-app-region no-drag
 
 .session-tab-overflow-item
-  min-height 1.75em
-  padding 0 0.625em
+  // D-26.  The height and padding are rem so they stay 28px and 10px.
+  font-size 0.875rem
+  min-height 1.75rem
+  padding 0 0.625rem
   display flex
   align-items center
   // Caption text in the light theme, as the tabs (`.session-tab`).
@@ -256,6 +258,6 @@
   &.active
     background-color by-mode(#3c3c3c, colors-ui-surface-primary-tertiary)
     color by-mode(#ffffff, colors-ui-text-primary-body)
-  // The list hover (LIST_HOVER_BG, button.styl): background only, square.
+  // The dropdown hover (DROPDOWN_HOVER_BG, button.styl): background only, square.
   &:hover
-    background-color LIST_HOVER_BG
+    background-color DROPDOWN_HOVER_BG

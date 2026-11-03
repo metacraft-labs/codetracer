@@ -179,6 +179,7 @@ proc renderCollapsedLine[R, N](
   ui(r):
     tdiv(
         class = AutoHideCollapsedStripLineClass,
+        title = "Show this side's panels",
         onclick = proc() = callbacks.invokeCollapsedSelect(),
         onmouseenter = proc() = callbacks.invokeCollapsedHoverEnter())
 

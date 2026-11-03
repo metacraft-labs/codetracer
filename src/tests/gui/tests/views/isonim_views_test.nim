@@ -10480,6 +10480,15 @@ suite "IsoNim Command Palette Panel — row rendering":
       check "command-selected" notin rows[1].attributes["class"]
       check "command-selected" in rows[2].attributes["class"]
 
+      # docs/UI-Design-Decisions.md, D-28: the selected row shows key-focus only
+      # once the arrow keys have moved onto the rows.
+      check "ct-menu-item--chosen" in rows[2].attributes["class"]
+      check "ct-menu-item--active" notin rows[2].attributes["class"]
+      vm.setKeyNavigation(true)
+      rows = findAllByClass(panel, "command-result")
+      check "ct-menu-item--active" in rows[2].attributes["class"]
+      check "ct-menu-item--chosen" notin rows[2].attributes["class"]
+
       dispose()
 
   test "zebra modifiers alternate between rows":

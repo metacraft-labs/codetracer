@@ -748,9 +748,10 @@
     &:hover
       background: colors-ui-surface-input-default
 
+    // Its text takes the disabled colour from `button:disabled` (D-20).
     &[disabled]
       cursor: default
-      opacity: 0.35
+      border-color: colors-ui-border-disabled
 
 // The loop iteration control sits directly under the invocation selector for
 // the same function, so it is dimmed slightly to read as the narrower choice.

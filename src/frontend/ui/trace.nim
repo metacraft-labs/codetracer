@@ -1430,9 +1430,7 @@ proc traceMenuDom(self: TraceComponent): Node =
   runButton.addEventListener(cstring"click", proc(ev: Event) =
     runTracepoints(self.data)
   )
-  let tooltip = traceDiv(cstring"custom-tooltip")
-  tooltip.appendTraceText(cstring"Run tracepoints (Ctrl+Enter)")
-  runButton.appendChild(tooltip)
+  runButton.setAttribute(cstring"title", cstring"Run tracepoints (Ctrl+Enter)")
   buttonsContainer.appendChild(runButton)
 
   buttonsContainer.appendChild(self.traceChartKindSwitchDom())
@@ -1443,6 +1441,7 @@ proc traceMenuDom(self: TraceComponent): Node =
   let hamburgerButton = document.createElement(cstring"button")
   hamburgerButton.setAttribute(cstring"class", cstring"ct-button-image-md-tertiary")
   hamburgerButton.setAttribute(cstring"id", cstring"hamburger-dropdown")
+  hamburgerButton.setAttribute(cstring"title", cstring"Tracepoint options")
   hamburgerButton.setAttribute(cstring"tabindex", cstring"0")
   hamburgerButton.addEventListener(cstring"click", proc(ev: Event) =
     self.toggleHamburger()
