@@ -45,3 +45,16 @@ proc writePlat53Project*(prefix = "ct-plat53-project-"): string =
   createDir(result / "src")
   writeFile(result / "Nargo.toml", Plat53NargoToml)
   writeFile(result / "src" / "main.nr", Plat53MainNr)
+
+const
+  Plat53ProverToml* = "x = \"1\"\ny = \"2\"\n"
+    ## Inputs for the crate's `main`, so the project's Run
+    ## (Edit-Mode-Toolbar.md §9.4: `ct record <folder>`, which is `nargo
+    ## trace` in it) records a program that passes its assertion.
+
+proc writePlat53RunProject*(prefix = "ct-plat53-run-"): string =
+  ## The same crate with the inputs its program needs to RUN — what the
+  ## project's Run records. The test crate (`writePlat53Project`) stays
+  ## byte for byte the desktop capture's.
+  result = writePlat53Project(prefix)
+  writeFile(result / "Prover.toml", Plat53ProverToml)

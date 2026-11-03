@@ -390,6 +390,11 @@ proc configureIpcMain* =
     # process, and stopped (`index/build_runner`, Build-Output-Pane.md §4.2).
     "build-start"
     "build-cancel"
+    # The edit-mode toolbar's Run and the palette's **Project: Run** pair:
+    # `ct record <project folder>`, answered with
+    # `CODETRACER::program-run-settled` (`index/traces.onRunProgram`,
+    # Edit-Mode-Toolbar.md §9.4).
+    "run-program"
     "restart-subsystem"
 
     # welcome screen options

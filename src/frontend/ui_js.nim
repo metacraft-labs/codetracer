@@ -1866,6 +1866,17 @@ proc refreshCommandPaletteMenuIndex*(data: Data) =
     data.ui.commandPalette.interpreter.commands[cstring(label)] = Command(
       name: cstring(label), kind: ActionCommand, action: action,
       shortcut: displayedChord(action))
+  if not debug_toolbar.projectRunRoute.isNil:
+    # Edit-Mode-Toolbar.md §9.4: the project's Run at the command's
+    # destination (the natives' `omnibar_sources.replayOpenCommands`), where
+    # the window has a route for it. The web studio runs a program in its own
+    # tab (`build.run-program`).
+    for (label, action) in [(RunProgramLabel, aRunProgram),
+                            (RunProgramInCurrentTabLabel,
+                             aRunProgramInCurrentTab)]:
+      data.ui.commandPalette.interpreter.commands[cstring(label)] = Command(
+        name: cstring(label), kind: ActionCommand, action: action,
+        shortcut: displayedChord(action))
   data.ui.commandPalette.interpreter.commandsPrepared = @[]
   for key, command in data.ui.commandPalette.interpreter.commands:
     data.ui.commandPalette.interpreter.commandsPrepared.add(
@@ -2564,6 +2575,10 @@ proc wireSessionViewModelHooks(vms: SessionViewModels; dapRef: DapApi) =
         # in the project folder; ■ Stop stops what the runner runs.
         let vm = sessionVM.buildVM
         vm.runBuild = proc() =
+          # Edit-Mode-Toolbar.md EMT-D30 (2026-10-29): Run build writes the
+          # modified editors first, as the toolbar's Build and Run do
+          # (EMT-D17) — a build compiles the files on disk.
+          data.saveFiles()
           let shown = build_vm.shownSnapshot(vm)
           let why =
             if shown.command.len == 0: build.runDesktopBuildLine(":build")
@@ -4576,6 +4591,40 @@ proc runTestFromPalette(data: Data; policy: TraceOpenPolicy) =
     data.viewsApi.infoMessage(cstring(
       vm.runTestStartedText(vm.selectedTestId.val, policy)))
 
+proc runProgramIn(data: Data; policy: TraceOpenPolicy) =
+  ## The project's Run (Edit-Mode-Toolbar.md §9.4): the modified editors
+  ## written first (EMT-D17 — the main process waits for the writes before
+  ## it records), then the project's program recorded by the main process
+  ## and opened by this window's host where §9.1 places it. The toolbar's
+  ## Run passes the setting (inverted while Ctrl is held); the palette pair
+  ## passes its own destination.
+  if desktopTestRunHost.isNil or desktopTestRunHost.vm.isNil:
+    data.viewsApi.warnMessage(cstring(NoProgramRouteText))
+    return
+  let run = debug_toolbar.lastEditToolbarRun()
+  if run.enabled and not desktopTestRunHost.programRunning:
+    # EMT-D17, as the toolbar's Build saves (`desktop_edit_toolbar`): every
+    # modified editor written first; the main process waits for the writes.
+    data.saveFiles()
+  let why = desktopTestRunHost.runProgramIn(policy, run)
+  if why.len > 0:
+    data.viewsApi.warnMessage(cstring(why))
+  else:
+    data.viewsApi.infoMessage(cstring(
+      desktopTestRunHost.programRunStartedText(policy)))
+
+proc onProgramRunSettled(sender: js,
+                         response: jsobject(recordingId=cstring,
+                                            errorMessage=cstring)) =
+  ## `index/traces.onRunProgram` answered — on EVERY one of its exits.
+  if desktopTestRunHost.isNil:
+    return
+  desktopTestRunHost.settleDesktopProgramRun(
+    recordingId = (if response.recordingId.isNil: ""
+                   else: $response.recordingId),
+    errorMessage = (if response.errorMessage.isNil: ""
+                    else: $response.errorMessage))
+
 proc onReplayOpenIn(sender: js,
                     response: jsobject(workspace=cstring, policy=cstring,
                                        error=cstring)) =
@@ -5073,6 +5122,9 @@ proc configureIPC(data: Data) =
     # AND WHAT SETTLES A DESKTOP SUITE RUN (the pane's header ▶). See
     # `onTestSuiteSettled`.
     "test-suite-settled"
+    # AND WHAT SETTLES THE PROJECT'S RUN (Edit-Mode-Toolbar.md §9.4). See
+    # `onProgramRunSettled`.
+    "program-run-settled"
     # Test-Results-Pane.md §9.3: a workspace's `replay-open-in` written. See
     # `onReplayOpenIn`.
     "replay-open-in"
@@ -6295,6 +6347,11 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     runTestFromPalette(data, topNewTab),
   aTestsRunInCurrentTab: proc(actionData: JsObject) = # aTestsRunInCurrentTab
     runTestFromPalette(data, topCurrentTab),
+  aRunProgram: proc(actionData: JsObject) = # aRunProgram
+    ## Edit-Mode-Toolbar.md §9.4 — see `runProgramIn`.
+    runProgramIn(data, topNewTab),
+  aRunProgramInCurrentTab: proc(actionData: JsObject) = # aRunProgramInCurrentTab
+    runProgramIn(data, topCurrentTab),
 ]
 
 data.actions = actions
@@ -8150,6 +8207,21 @@ if inElectron:
                              policy: TraceOpenPolicy): string =
           data.desktopPlaceTestRecording(desktopTestRunHost.vm, testId,
                                          recordingId, policy))
+      # THE PROJECT'S RUN (Edit-Mode-Toolbar.md §9.4): `ct record <folder>` by
+      # the main process (`CODETRACER::run-program`), its recording opened by
+      # `openRecording` above — the same placement as a test's, keyed by the
+      # project — and the toolbar's Run routed to it, at the workspace's
+      # `replay-open-in` inverted while Ctrl is held. Its failures are said
+      # as a notification.
+      desktopTestRunHost.installDesktopProgramRun(
+        dispatch = proc(workspaceRoot: string): string =
+          data.runProgram(workspaceRoot)
+          "",
+        note = proc(text: string) =
+          data.viewsApi.warnMessage(cstring(text)))
+      debug_toolbar.projectRunRoute = proc() =
+        runProgramIn(data, desktopTestRunHost.vm.effectiveOpenPolicy())
+      debug_toolbar.refreshEditToolbar()
       # §9: the pane this host drives lists a catalog in EDIT sessions only
       # (`ns9-panes`), so the tab it is in is an editing session, which a
       # replay never replaces (rule 3) — whatever `startOptions` says yet at

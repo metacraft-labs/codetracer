@@ -27,6 +27,12 @@
 ##     Current Tab** record the selected test with the real `ct record-test`
 ##     and open the recording where the command says, whatever the setting;
 ##     with nothing selected the command says so and runs nothing;
+##   * Edit-Mode-Toolbar.md §9.4 — the palette's **Project: Run** / **Project:
+##     Run in Current Tab** write a modified buffer first, record the
+##     project's program with the real `ct record` (one run per window: the
+##     test pair waits), and hand the recording to the window under the
+##     project's key at the command's destination; a re-run says it reuses the
+##     run's tab; a folder with no project runs nothing and says why;
 ##   * §5 — A RUN KILLED MID-WAY SETTLES: `ct test run` killed with SIGKILL
 ##     (its whole process group) leaves no "running…", says it was ended by a
 ##     signal, and the ▶ is live again; a host with no `ct` refuses with a
@@ -44,6 +50,7 @@ import std/[os, posix, strutils, monotimes, tempfiles, times, unittest]
 
 import codetracer_embed
 
+import ../app/edit_binding   # the project's Run writes a dirty buffer first
 import ../app/runtime
 import ../app/tui_app
 import ../app/theme/capabilities
@@ -60,7 +67,7 @@ from ../../view_vocabulary/pane_views import testResultsPaneView,
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 166
+const ExpectedAssertions = 191
 
 var countedAssertions = 0
 
@@ -730,6 +737,113 @@ suite "Test-Results-Pane.md §9: the destination, the hover, a maximized pane":
     ck rt.app.notification == NoTestSelectedText
     ck asked.len == 4
     src.close()
+    if lanesState.len > 0: putEnv("CODETRACER_TUI_LAYOUT_DIR", lanesState)
+    else: delEnv("CODETRACER_TUI_LAYOUT_DIR")
+    removeDir(state)
+    removeDir(project)
+
+  test "the palette's Project: Run and Run in Current Tab record the project":
+    # Edit-Mode-Toolbar.md §9.4: the project's Run from the terminal's
+    # palette — a modified buffer WRITTEN first (EMT-D17), then the project's
+    # program recorded with the real `ct record` (which is `nargo trace` in
+    # the crate) and opened where the COMMAND says, by the placement a
+    # test's recording takes; a re-run reuses the run's tab (rule 4). The
+    # opener is the capturing seam: it records the destination and the
+    # folder it was handed, a real trace the trace store resolved.
+    doAssert ctBin.len > 0, "prerequisite missing: ct (build it, or set CT_BIN)"
+    let state = createTempDir("ct-plat53-state-", "")
+    let lanesState = getEnv("CODETRACER_TUI_LAYOUT_DIR")
+    putEnv("CODETRACER_TUI_LAYOUT_DIR", state)
+    let project = writePlat53RunProject()
+    let app = newTuiApp()
+    app.projectRoot = project
+    let rt = newTuiRuntime(app, caps(), Cols, Rows)
+    discard rt.enableLayoutBinding()
+    rt.editServices.writeFile = proc(relative, text: string): EditWriteResult =
+      writeFile(project / relative, text)
+      EditWriteResult(ok: true)
+    var asked: seq[TraceOpenPolicy] = @[]
+    var keys: seq[string] = @[]
+    var folders: seq[string] = @[]
+    var placedVM: TestResultsVM = nil
+    let src = newTestsSource(
+      projectRoot = proc(): string = app.projectRoot,
+      ctBinary = proc(): string = ctBin,
+      resolveFolder = proc(id: string): string = recordingFolderOf(id),
+      openFolder = proc(testId, recordingId, folder: string;
+                        policy: TraceOpenPolicy): string =
+        asked.add policy
+        keys.add testId
+        folders.add folder
+        # As the terminal's placement does (`main.placeTestRecording`).
+        placedVM.noteTestTab(testId, 9, recordingId)
+        "")
+    placedVM = src.vm
+    src.refresh(rt)
+    # A replay tab is current; the setting says the current tab.
+    ck src.setTabs(1, replaceable = true, shown = true)
+    ck src.host.setReplayOpen(topCurrentTab).len > 0
+    # A buffer with an unsaved change.
+    app.editSession = newEditSession()
+    discard app.editSession.openFile("src/main.nr", Plat53MainNr)
+    let buf = app.editSession.activeBuffer()
+    buf.moveCaretTo(0, 0)
+    discard buf.applyEditKey("Enter", 1)
+    ck buf.isDirty
+    # **Project: Run** — a new tab, whatever the setting.
+    var outcome = RuntimeOutcome()
+    rt.runMenuAction(runProgramCommandTarget(topNewTab), outcome)
+    ck not buf.isDirty
+    ck readFile(project / "src" / "main.nr") == "\n" & Plat53MainNr
+    ck outcome.paneClick.kind == pcRunProgramIn
+    ck src.applyClick(rt, outcome.paneClick)
+    ck src.host.running
+    # The status line says what was written, then where the run opens.
+    ck rt.app.notification == "wrote src/main.nr before the run; recording " &
+      project & "; it opens in a new tab"
+    # One run per window: the palette's test pair waits for it.
+    rt.app.tests.selected = 0
+    var busy = RuntimeOutcome()
+    rt.runMenuAction(runTestCommandTarget(topNewTab), busy)
+    ck src.applyClick(rt, busy.paneClick)
+    ck rt.app.notification == DesktopRunAlreadyGoingText
+    ck rt.settle(src)
+    ck asked == @[topNewTab]
+    ck keys == @[programRunKey(project)]
+    ck folders.len == 1 and traceFolderProblem(folders[0]) == ""
+    ck rt.app.notification.startsWith("opened the recording ")
+    # The pane ran no test.
+    ck rt.app.tests.rows.len == 2 and rt.app.tests.rows[0].recordingId == ""
+    # **Project: Run in Current Tab** again: the run has a tab now, so the
+    # re-run goes there (rule 4) — and it is a NEW recording.
+    var again = RuntimeOutcome()
+    rt.runMenuAction(runProgramCommandTarget(topCurrentTab), again)
+    ck src.applyClick(rt, again.paneClick)
+    ck rt.app.notification == "recording " & project &
+      "; it opens in the tab it already has"
+    ck rt.settle(src)
+    ck asked == @[topNewTab, topCurrentTab]
+    ck folders.len == 2 and folders[1] != folders[0] and
+       traceFolderProblem(folders[1]) == ""
+    src.close()
+    # A folder with no project: the toolbar's own reason, and nothing runs.
+    let empty = createTempDir("ct-plat53-empty-", "")
+    let bare = newTestsSource(
+      projectRoot = proc(): string = empty,
+      ctBinary = proc(): string = ctBin,
+      resolveFolder = proc(id: string): string = "",
+      openFolder = proc(testId, recordingId, folder: string;
+                        policy: TraceOpenPolicy): string = "")
+    bare.refresh(rt)
+    var nothing = RuntimeOutcome()
+    rt.app.editSession = nil
+    rt.runMenuAction(runProgramCommandTarget(topNewTab), nothing)
+    ck bare.applyClick(rt, nothing.paneClick)
+    ck not bare.host.running
+    ck rt.app.notification.startsWith(
+      "CodeTracer does not recognise this folder as a project")
+    bare.close()
+    removeDir(empty)
     if lanesState.len > 0: putEnv("CODETRACER_TUI_LAYOUT_DIR", lanesState)
     else: delEnv("CODETRACER_TUI_LAYOUT_DIR")
     removeDir(state)

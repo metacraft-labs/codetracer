@@ -22,6 +22,8 @@
 import std / [ jsffi ]
 
 import electron_vars
+from files import savesInFlight
+from ../lib/jslib import windowSetTimeout
 
 proc buildRunnerStart(command, cwd: cstring;
                       send: proc(message: cstring; payload: JsObject))
@@ -109,7 +111,18 @@ proc onBuildStart*(sender: JsObject; response: JsObject) =
   let command = response["command"].to(cstring)
   let cwd = if response["cwd"].isUndefined or response["cwd"].isNull: cstring""
             else: response["cwd"].to(cstring)
-  buildRunnerStart(command, cwd, sendToRenderer)
+  # EMT-D17: the renderer wrote the modified editors just before it asked
+  # (the toolbar's Build and Run, the BUILD panel's Run build); the writes are
+  # asynchronous here and the build must see them. Bounded: a write that
+  # never finishes delays the build by 10 s, it does not block it.
+  var waited = 0
+  proc startWhenSaved() =
+    if savesInFlight > 0 and waited < 10_000:
+      waited += 20
+      discard windowSetTimeout(startWhenSaved, 20)
+    else:
+      buildRunnerStart(command, cwd, sendToRenderer)
+  startWhenSaved()
 
 proc onBuildCancel*(sender: JsObject; response: JsObject) =
   ## `CODETRACER::build-cancel`: stop the running build, if there is one.

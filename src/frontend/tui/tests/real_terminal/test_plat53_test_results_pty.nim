@@ -28,7 +28,10 @@
 ##   * §9 — a test's tab reused and replaced in place, Ctrl+click in this tab,
 ##     hover, a maximized pane; §9.3 from the keyboard: `Ctrl+Enter` on a
 ##     selected row opens in this tab, and the palette's **Tests: Run**
-##     records the selected test and opens it in a new tab.
+##     records the selected test and opens it in a new tab; Edit-Mode-Toolbar
+##     §9.4: the palette's **Project: Run in Current Tab** records the
+##     project's program (the real `ct record`) into this tab, and **Project:
+##     Run** again reuses the run's own tab.
 ##
 ## No mocks: the real binary, a real recording made by the Python recorder, a
 ## real `replay-server`, the real `ct`, `ct-test` and `nargo` on a real crate,
@@ -47,7 +50,7 @@ import ../../app/theme/colour_math
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 42
+const ExpectedAssertions = 46
 
 var countedAssertions = 0
 
@@ -559,6 +562,32 @@ suite "PLAT-53: the Test Results pane on a real terminal":
     let fourth = sess.opened("in a new tab", notFolder = second)
     ck fourth != third
     discard sess.waitFor("test_passes #1", 60_000)
+    ck sessionTabs(3) == 3
+    # Edit-Mode-Toolbar.md §9.4: the palette's **Project: Run in Current
+    # Tab** — the project's program recorded with the real `ct record` (the
+    # crate given the inputs its `main` needs) and opened IN THIS TAB, a
+    # replay: replaced, three tabs still. **Project: Run** then reuses the
+    # run's own tab (rule 4): still three.
+    writeFile(project / "Prover.toml", Plat53ProverToml)
+    sess.send("\x1b")
+    sleep(400)                       # an Esc alone, not Alt+Ctrl+P
+    sess.send("\x10")
+    sleep(400)
+    sess.send(":Project: Run in Current Tab")
+    sleep(300)
+    sess.send("\r")
+    let fifth = sess.opened("in this tab", notFolder = fourth)
+    ck fifth != fourth
+    ck sessionTabs(3) == 3
+    sess.send("\x1b")
+    sleep(400)                       # an Esc alone, not Alt+Ctrl+P
+    sess.send("\x10")
+    sleep(400)
+    sess.send(":Project: Run")
+    sleep(300)
+    sess.send("\r")
+    let sixth = sess.opened("in its own tab", notFolder = fifth)
+    ck sixth != fifth
     ck sessionTabs(3) == 3
     sess.send("\x11")
     discard sess.waitExit(initDuration(seconds = 20))

@@ -348,7 +348,12 @@ type
     # recorded and opened at the command's destination. Appended at the end,
     # for the reason every note above gives.
     aTestsRun,                    # palette: Tests: Run
-    aTestsRunInCurrentTab         # palette: Tests: Run in Current Tab
+    aTestsRunInCurrentTab,        # palette: Tests: Run in Current Tab
+    # Edit-Mode-Toolbar.md §9.4: the project's Run at the command's
+    # destination — the project's program recorded and opened. Appended at
+    # the end, for the reason every note above gives.
+    aRunProgram,                  # palette: Project: Run
+    aRunProgramInCurrentTab       # palette: Project: Run in Current Tab
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

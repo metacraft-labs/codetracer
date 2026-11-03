@@ -92,6 +92,24 @@ libraries.
 here` on an rr trace, although the worker answers `GetProcessInfo`. An rr
 trace of a real service is usually multi-process.
 
+## 8. The DAP init step timeout is hard-coded at 120 s
+
+`backend_manager.rs` sets `let dap_timeout = Duration::from_secs(120);` for
+each DAP init step, with no override. Replaying the recorded Agent Harbor
+daemon, LLDB took 96 s just to place the entry breakpoint on the 2.6 GB
+binary. Under host load the run to entry then passed 120 s and the trace
+failed to open with `DAP init timed out at step: stopped-event`. Unlike
+`CODETRACER_REPLAY_QUERY_TIMEOUT_SECS`, nothing raises it. (The evaluation
+patched it locally to read `CODETRACER_DAP_INIT_TIMEOUT_SECS`.)
+
+## 9. A failed replay deletes its own logs
+
+The worker and rr logs live in `$XDG_RUNTIME_DIR/codetracer/run-<pid>/`. That
+directory is removed when the replay-server exits, so after a failed
+`trace exec` the only remaining text is the one-line DAP error. The run
+directory of a crashed worker survived; that of one that timed out did not.
+Keep the run directory, or copy its logs, when the replay fails.
+
 ## Suggested direction
 
 - Wire `ct trace exec|query|mcp|origin` through to `session-manager`, or fix

@@ -23,6 +23,8 @@
 ## answering while a suite runs; `close` ends a run still going (its whole
 ## process group) when the loop ends.
 
+import std/strutils
+
 import ../../viewmodel/host/native_test_host
 import ../app/runtime
 import ../app/tui_app
@@ -190,6 +192,15 @@ proc applyClick*(s: TestsSource; rt: TuiRuntime; c: PaneClickRequest): bool =
       let why = s.vm.runSelectedTestIn(policy)
       rt.app.notification =
         if why.len > 0: why else: s.vm.runTestStartedText(c.path, policy)
+  of pcRunProgramIn:
+    # Edit-Mode-Toolbar.md §9.4: the project's Run, through this pane's host
+    # — its recording placed by the same rule as a test's.
+    let (ok, policy) = parsePolicyWord(c.text)
+    if ok:
+      let said = rt.app.notification
+      rt.app.notification = s.host.runProgramIn(policy)
+      if said.startsWith("wrote "):
+        rt.app.notification = said & "; " & rt.app.notification
   else:
     return false
   let note = s.host.takeNote()

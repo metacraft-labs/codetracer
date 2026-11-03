@@ -16,6 +16,9 @@
 #![allow(unused_variables)]
 
 mod sibling_provisioning;
+// Confining rr recordings to cores rr can count on, on hybrid hosts.
+#[cfg(target_os = "linux")]
+pub mod rr_cpu_binding;
 pub use sibling_provisioning::{bash_command, codetracer_root, provision_sibling, workspace_root};
 use sibling_provisioning::{is_in_workspace_sibling, provision_once, safe_canonicalize};
 
@@ -498,23 +501,30 @@ impl TestRecording {
             ));
         }
 
-        // Record the trace
-        let record_output = Command::new(ct_native_replay)
-            .args([
-                "record",
-                "-o",
-                trace_dir.to_str().unwrap(),
-                binary_path.to_str().unwrap(),
-            ])
+        // Record the trace, on cores rr can count on (`rr_cpu_binding`).
+        let mut record = Command::new(ct_native_replay);
+        record.args([
+            "record",
+            "-o",
+            trace_dir.to_str().unwrap(),
+            binary_path.to_str().unwrap(),
+        ]);
+        #[cfg(target_os = "linux")]
+        rr_cpu_binding::bind_rr_recording_to_countable_cores(&mut record)?;
+        let record_output = record
             .output()
             .map_err(|e| format!("failed to run ct-native-replay record: {}", e))?;
 
         if !record_output.status.success() {
-            return Err(format!(
+            let stderr = String::from_utf8_lossy(&record_output.stderr);
+            let error = format!(
                 "Record failed:\nstdout: {}\nstderr: {}",
                 String::from_utf8_lossy(&record_output.stdout),
-                String::from_utf8_lossy(&record_output.stderr)
-            ));
+                stderr
+            );
+            #[cfg(target_os = "linux")]
+            let error = rr_cpu_binding::with_rr_record_failure_explained(error, &stderr);
+            return Err(error);
         }
 
         Ok(TestRecording {

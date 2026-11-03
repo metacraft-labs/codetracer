@@ -424,11 +424,11 @@
     # nix/packages/default.nix: `ct test run`'s read-set capture). Move them
     # with `repro lock update`.
     nim-shm-queue = {
-      url = "github:metacraft-labs/nim-shm-queue/91451f2250beb89d1d221f0a77be0841c19b182e";
+      url = "github:metacraft-labs/nim-shm-queue/84fd76b174d4868e703ba3d599668ee340e0b6ea";
       flake = false;
     };
     nim-shm-gset = {
-      url = "github:metacraft-labs/nim-shm-gset/fb981c7f186a9507c974b7de8871fc74d6308eae";
+      url = "github:metacraft-labs/nim-shm-gset/6333cc915689559b00f81371734783c2e894ca45";
       flake = false;
     };
 

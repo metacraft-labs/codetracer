@@ -7913,12 +7913,31 @@ proc gpuiTestsCommand(r: GpuiRenderer; action: string): bool =
   ## Whether `action` was one of them.
   let openIn = parseReplayOpenCommandTarget(action)
   let runIn = parseRunTestCommandTarget(action)
-  if not openIn.ok and not runIn.ok:
+  let runProgram = parseRunProgramCommandTarget(action)
+  if not openIn.ok and not runIn.ok and not runProgram.ok:
     return false
   if gTestsVM.isNil or gTestsHost.isNil:
-    traceGesture("tests: " & NoRecorderHostText)
+    if runProgram.ok: sayStatus(NoProgramRouteText)
+    else: traceGesture("tests: " & NoRecorderHostText)
   elif openIn.ok:
     traceGesture("tests: " & gTestsHost.setReplayOpen(openIn.policy))
+  elif runProgram.ok:
+    # Edit-Mode-Toolbar.md §9.4: **Project: Run** / **Project: Run in Current
+    # Tab** — the open file written first if it has unsaved changes
+    # (EMT-D17), then the project's program recorded and placed by the
+    # pane's host, as a test's recording is.
+    var unsaved = ""
+    if not openArm.isNil and openArm.isDirty:
+      if openArm.save():
+        noteEditorTab(r, editorTabLabel(openArm.root / openArm.path,
+                                        openArm.isDirty))
+      else:
+        unsaved = "could not write " & openArm.path & " before the run"
+    syncTestsTabs()
+    let said = if unsaved.len > 0: unsaved
+               else: gTestsHost.runProgramIn(runProgram.policy)
+    sayStatus(said)
+    armRecordTick()
   else:
     syncTestsTabs()
     let rows = gTestsVM.rows.val
@@ -7937,11 +7956,18 @@ proc gpuiTestsCommand(r: GpuiRenderer; action: string): bool =
 proc pollTestsHost(r: GpuiRenderer): bool =
   ## PLAT-53: a run that ended, settled into the pane (and, for
   ## record-and-open, its recording opened in a new tab).
-  if gTestsHost.isNil or not gTestsHost.poll():
+  if gTestsHost.isNil:
+    return false
+  # Edit-Mode-Toolbar.md §9.4: the project's Run says how it ended on the
+  # status line, as its palette command said it started.
+  let programRun = gTestsHost.host.programRunning
+  if not gTestsHost.poll():
     return false
   let note = gTestsHost.takeNote()
   if note.len > 0:
     traceGesture("tests: " & note)
+    if programRun:
+      sayStatus(note)
   traceGesture("tests settled: " & gTestsVM.headline.val)
   drawTestsPane(r)
   true

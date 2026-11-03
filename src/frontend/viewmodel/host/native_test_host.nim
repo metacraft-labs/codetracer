@@ -24,6 +24,8 @@
 ## | `CODETRACER::test-suite-settled`    | `settleSuite` → `settleDesktopSuiteRun` |
 ## | `CODETRACER::test-run-settled`      | `settleRecord` → `settleDesktopTestRun` |
 ## | `openRecording` (where §9 places it) | `openRecording` → the front-end's `openFolder`, by the same placement (§9.5) |
+## | `onRunProgram`: `ct record <root>`  | `dispatchProgram` (the project's Run, Edit-Mode-Toolbar.md §9.4) |
+## | `CODETRACER::program-run-settled`   | `settleProgram` → `settleDesktopProgramRun` |
 ##
 ## ## Polled, not awaited
 ##
@@ -52,9 +54,11 @@ import ../viewmodels/test_results_vm
 import ../viewmodels/desktop_test_host
 import ../viewmodels/test_catalog_answer
 import ../viewmodels/replay_open_setting
+import ../viewmodels/edit_mode_toolbar
+from ../platform/capabilities import desktopProfile
 import ./native_state
 from ../../../ct/trace/recorder_output import recordingIdFromOutput,
-  recordTestFailureSentence
+  recordTestFailureSentence, recordProgramFailureSentence
 import ../../../common/ct_home
 
 export desktop_test_host, test_results_vm, replay_open_setting
@@ -65,6 +69,8 @@ type
       ## `ct test run`.
     nrkRecord = "record"
       ## `ct record-test`.
+    nrkProgram = "program"
+      ## `ct record <project folder>`: the project's Run.
 
   NativeTestJob* = ref object
     ## One background run.
@@ -121,6 +127,8 @@ type
 const
   NoCtBinaryText* = "no ct found to run the tests with; set CT_BIN"
     ## A host with no `ct` (the desktop always has its own).
+  NoCtForProgramText* =
+    "no ct found to record the project's program with; set CT_BIN"
   SuiteRunsDirName* = "test-suite-runs"
     ## Under the CodeTracer tmp directory, as the desktop's.
 
@@ -284,6 +292,17 @@ proc dispatchRecord(h: NativeTestHost; selector, file: string;
                           "--store-trace-folder-for-pid=" &
                             $getCurrentProcessId()], cwd)
 
+proc dispatchProgram(h: NativeTestHost; root: string): string =
+  ## `ct record <root>` in `root` — `onRunProgram`'s command: the project's
+  ## program recorded into the trace store, which names it by the recording
+  ## id it prints (Edit-Mode-Toolbar.md §9.4, EMT-D33).
+  let ct = if h.ctBinary.isNil: "" else: h.ctBinary()
+  if ct.len == 0:
+    return NoCtForProgramText
+  if not dirExists(root):
+    return "no such project folder: " & root
+  h.startJob(nrkProgram, @[ct, "record", root], root)
+
 proc openRecordingFolder(h: NativeTestHost; testId, recordingId: string;
                          policy: TraceOpenPolicy): string =
   ## Open test `testId`'s recording `recordingId` where §9 places it: its
@@ -333,6 +352,9 @@ proc newNativeTestHost*(vm: TestResultsVM; projectRoot: NativeProjectRoot;
       if h.projectRoot.isNil: "" else: h.projectRoot(),
     suiteDispatch = proc(workspaceRoot: string): string =
       h.dispatchSuite(workspaceRoot))
+  h.host.installDesktopProgramRun(
+    dispatch = proc(root: string): string = h.dispatchProgram(root),
+    note = proc(text: string) = h.note = text)
   h.host.installDesktopRowActions(
     keepWindowDispatch = proc(selector, file: string; line: int): string =
       h.dispatchRecord(selector, file, line),
@@ -376,6 +398,23 @@ proc settleRecord(h: NativeTestHost; job: NativeTestJob; exitCode: int) =
     recordedAtText = (if recordingId.len > 0: localTimeText() else: ""),
     errorMessage = error)
 
+proc settleProgram(h: NativeTestHost; job: NativeTestJob; exitCode: int) =
+  ## `onRunProgram`'s answer: the recording `ct record` reported, or the
+  ## recorder's own reason there is none (EMT-D16: exit 0 with no recording
+  ## is not a success). The shared host then opens it where §9 places it.
+  let stdoutText = readQuietly(job.outPath)
+  let stderrText = readQuietly(job.errPath)
+  let signal = signalOf(exitCode)
+  var recordingId = ""
+  var error = ""
+  if exitCode == 0:
+    recordingId = recordingIdFromOutput(stdoutText)
+  else:
+    error = recordProgramFailureSentence(exitCode,
+      (if signal > 0: $signal else: ""), stdoutText, stderrText, "")
+  h.host.settleDesktopProgramRun(recordingId = recordingId,
+                                 errorMessage = error)
+
 proc finish(h: NativeTestHost; job: NativeTestJob; exitCode: int) =
   h.job = nil
   try:
@@ -385,6 +424,7 @@ proc finish(h: NativeTestHost; job: NativeTestJob; exitCode: int) =
   case job.kind
   of nrkSuite: h.settleSuite(job, exitCode)
   of nrkRecord: h.settleRecord(job, exitCode)
+  of nrkProgram: h.settleProgram(job, exitCode)
   removeQuietly(job.outPath)
   removeQuietly(job.errPath)
   removeQuietly(job.eventsPath)
@@ -447,3 +487,55 @@ proc takeNote*(h: NativeTestHost): string =
     return ""
   result = h.note
   h.note = ""
+
+# ---------------------------------------------------------------------------
+# The project's Run (Edit-Mode-Toolbar.md §9.4)
+# ---------------------------------------------------------------------------
+
+const
+  ListingSkipped = ["target", "node_modules", ".git", "build", "dist"]
+    ## Output and dependency folders: never where a project's marker is, and
+    ## the biggest trees a walk could meet.
+  ListingDepth = 2
+    ## §6.3: a root marker outranks one a level down; deeper ones rank last
+    ## and are not worth the walk.
+
+proc projectListing*(root: string): seq[string] =
+  ## The listing `projectKinds` reads (§4.2: `/`-separated, relative to the
+  ## project) — the native front-ends' answer to the desktop's Files tree.
+  if root.len == 0 or not dirExists(root):
+    return
+  proc walk(dir, rel: string; depth: int; acc: var seq[string]) =
+    var entries: seq[(PathComponent, string)] = @[]
+    try:
+      for kind, path in walkDir(dir, relative = true):
+        entries.add((kind, path))
+    except CatchableError:
+      return
+    entries.sort(proc(a, b: (PathComponent, string)): int = cmp(a[1], b[1]))
+    for (kind, name) in entries:
+      let r = if rel.len == 0: name else: rel & "/" & name
+      if kind in {pcDir, pcLinkToDir}:
+        if depth < ListingDepth and name notin ListingSkipped and
+           not name.startsWith("."):
+          walk(dir / name, r, depth + 1, acc)
+      else:
+        acc.add r
+  walk(root, "", 0, result)
+
+proc runButtonFor*(root: string): ToolbarButton =
+  ## The edit-mode toolbar's Run for the project at `root`, as the desktop
+  ## composes it (`ui/desktop_edit_toolbar`) — the native front-ends run
+  ## native programs as the desktop does, so its profile; no wasm registry.
+  editModeToolbar(desktopProfile, EditMode,
+                  listing = projectListing(root)).run
+
+proc runProgramIn*(h: NativeTestHost; policy: TraceOpenPolicy): string =
+  ## **Project: Run** / **Project: Run in Current Tab** on this window's
+  ## project: the line its status line shows — where the recording will open,
+  ## or why nothing runs.
+  if h.isNil or h.vm.isNil:
+    return NoProgramRouteText
+  let root = if h.projectRoot.isNil: "" else: h.projectRoot()
+  let why = h.host.runProgramIn(policy, runButtonFor(root))
+  if why.len > 0: why else: h.host.programRunStartedText(policy)

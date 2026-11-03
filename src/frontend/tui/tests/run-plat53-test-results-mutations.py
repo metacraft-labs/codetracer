@@ -5,7 +5,9 @@ and in the GPUI window (codetracer-pm `spec/GUI/Core-Panes/Test-Results-Pane.md`
 `replay-open-in` setting, the Ctrl modifier, the hover tooltips, and a
 maximized terminal pane's presses; the palette pair **Tests: Run** / **Tests:
 Run in Current Tab**, `Ctrl+Enter` on a native row, and the desktop editor's
-context-menu Run-test through the host): the words every front-end draws (moved into `test_results_vm`), the one
+context-menu Run-test through the host; and the project's Run — Edit-Mode-
+Toolbar.md §9.4, **Project: Run** / **Project: Run in Current Tab** and the
+desktop toolbar's Run, placed by the same rule): the words every front-end draws (moved into `test_results_vm`), the one
 catalog rule (`test_catalog_answer`), the desktop's host over the native
 producers (`viewmodel/host/native_test_host`), the terminal's painter,
 runtime, host source and loop, the GPUI leaf and window, the vocabulary view,
@@ -80,6 +82,8 @@ UI_JS = "src/frontend/ui_js.nim"
 OMNI = "src/frontend/viewmodel/viewmodels/omnibar_sources.nim"
 CUA = "src/frontend/viewmodel/keymap/cua_keymap.nim"
 EDITOR = "src/frontend/ui/editor.nim"
+EDIT_TB = "src/frontend/ui/desktop_edit_toolbar.nim"
+TRACES = "src/frontend/index/traces.nim"
 
 # Suites.
 VMU = "src/frontend/viewmodel/tests/unit/test_plat53_test_results.nim"
@@ -93,7 +97,7 @@ ORACLE = "src/frontend/viewmodel/tests/unit/test_plat68_cua_oracle.nim"
 
 SUBJECTS = [VM, FIT, CATALOG, HOST, TUI_PANE, RUNTIME, SHELL, PROFILE, SOURCE,
             TUI_MAIN, GPUI_LEAF, GPUI_MAIN, VOCAB, NS9, DESKTOP_HOST, SETTING,
-            VIEW, UI_JS, OMNI, CUA, EDITOR]
+            VIEW, UI_JS, OMNI, CUA, EDITOR, EDIT_TB, TRACES]
 SUITES = [VMU, TBL, PTY, PLAN, SPEC, VMT, DSPEC, ORACLE]
 
 TBL_HOST = "*::catalog, ▶, verdicts, selection, a recording opened, kill, refusal"
@@ -107,6 +111,8 @@ PTY_TAB = "*::§9: a test's tab reused, Ctrl opens in this tab, hover, a maximiz
 TBL_RUN = "*::Ctrl+Enter inverts; the palette's Run and Run in Current Tab record"
 PLAN_RUN = "*::§9.3: Ctrl+Enter on the selected row; the palette's Tests: Run"
 PLAN_SET = "*::§9.3: the omnibox's Tests: Open Recordings in the Current Tab"
+TBL_PROG = "*::the palette's Project: Run and Run in Current Tab record the project"
+PLAN_PROG = "*::Edit-Mode-Toolbar §9.4: the omnibox's Project: Run pair"
 
 # (id, [(subject, find, replace), ...], [(suite, filter), ...], what it breaks)
 ARMS = [
@@ -372,6 +378,77 @@ ARMS = [
     ("D1", [(NS9, "  if answer.hasCatalog:", "  if false:")],
      [(SPEC, None)],
      "§8.2: the desktop's catalog answer (the shared rule) sends no catalog"),
+    # ---- Edit-Mode-Toolbar §9.4: the project's Run --------------------------
+    ("E1", [(DESKTOP_HOST, "    openPolicy: policy)", "    openPolicy: topNewTab)")],
+     [(VMT, None), (TBL, TBL_PROG)],
+     "§9.4: the project's Run forgets the command's destination"),
+    ("E2", [(DESKTOP_HOST, "  if host.pending.isNone or host.pending.get.kind != drkRecordTest:",
+             "  if host.pending.isNone:")],
+     [(VMT, None)],
+     "§9.4: a test's settle ends the project's Run"),
+    ("E3", [(DESKTOP_HOST, "  if host.pending.isSome:\n    return ProgramRunAlreadyGoingText",
+             "  if false:\n    return ProgramRunAlreadyGoingText")],
+     [(VMT, None)],
+     "§9.4: a second run starts while the project's Run is in flight"),
+    ("E4", [(DESKTOP_HOST, "  if not run.enabled:", "  if false:")],
+     [(VMT, None), (TBL, TBL_PROG)],
+     "§9.4: a project with no Run is recorded anyway"),
+    ("E5", [(DESKTOP_HOST, "    testId: programRunKey(root),", '    testId: "",')],
+     [(VMT, None), (TBL, TBL_PROG)],
+     "§9.4: the project's recording is placed under no key (rule 4 cannot hold)"),
+    ("E6", [(DESKTOP_HOST, "    said = if errorMessage.len > 0: errorMessage else: ProgramNoRecordingText",
+             "    said = errorMessage")],
+     [(VMT, None)],
+     "§9.4 / EMT-D16: an exit with no recording says nothing"),
+    ("E7", [(HOST, '  h.startJob(nrkProgram, @[ct, "record", root], root)',
+             '  h.startJob(nrkRecord, @[ct, "record", root], root)')],
+     [(TBL, TBL_PROG)],
+     "§9.4: the native Run's answer is read as a test's"),
+    ("E8", [(HOST, "  if exitCode == 0:\n    recordingId = recordingIdFromOutput(stdoutText)\n  else:\n    error = recordProgramFailureSentence(exitCode,",
+             "  if exitCode == 0:\n    recordingId = \"\"\n  else:\n    error = recordProgramFailureSentence(exitCode,")],
+     [(TBL, TBL_PROG)],
+     "§9.4: the native Run drops the recording it made"),
+    ("E9", [(HOST, "                  listing = projectListing(root)).run",
+             "                  listing = @[]).run")],
+     [(TBL, TBL_PROG)],
+     "§9.4: the native Run never recognises the project"),
+    ("E10", [(RUNTIME, "    if not buf.isDirty:\n      continue", "    if true:\n      continue")],
+     [(TBL, TBL_PROG)],
+     "§9.4 / EMT-D17: the terminal records without writing the modified buffers"),
+    ("E11", [(RUNTIME, "  let runProgram = parseRunProgramCommandTarget(action)\n  if runProgram.ok:",
+              "  let runProgram = parseRunProgramCommandTarget(action)\n  if false:")],
+     [(TBL, TBL_PROG), (PTY, PTY_TAB)],
+     "§9.4: the terminal's Project: Run pair is not dispatched"),
+    ("E12", [(SOURCE, "      rt.app.notification = s.host.runProgramIn(policy)",
+              "      discard policy")],
+     [(TBL, TBL_PROG)],
+     "§9.4: the terminal's host never runs the project"),
+    ("E13", [(OMNI, "                            target: runProgramCommandTarget(policy))",
+              "                            target: runTestCommandTarget(policy))")],
+     [(VMT, None), (PLAN, PLAN_PROG)],
+     "§9.4: the omnibox's Project: Run runs the selected test instead"),
+    ("E14", [(GPUI_MAIN, "               else: gTestsHost.runProgramIn(runProgram.policy)",
+              "               else: gTestsHost.runProgramIn(topNewTab)")],
+     [(PLAN, PLAN_PROG)],
+     "§9.4: the GPUI window's Run in Current Tab opens a new tab"),
+    ("E15", [(GPUI_MAIN, "    if programRun:\n      sayStatus(note)", "    if false:\n      sayStatus(note)")],
+     [(PLAN, PLAN_PROG)],
+     "§9.4: the GPUI window never says where the project's recording opened"),
+    ("E16", [(SETTING, '  RunProgramLabel* = "Project: Run"', '  RunProgramLabel* = "Run"')],
+     [(VMT, None)],
+     "§9.4: the palette pair's words differ from the spec's"),
+    ("E17", [(EDIT_TB, "    if projectRunRoute.isNil: {tbaRun} else: {}",
+              "    {tbaRun}")],
+     [(DSPEC, None)],
+     "§9.4: the desktop still refuses Run (the filed issue)"),
+    ("E18", [(UI_JS, "    # modified editor written first; the main process waits for the writes.\n    data.saveFiles()",
+              "    # modified editor written first; the main process waits for the writes.\n    discard")],
+     [(DSPEC, None)],
+     "§9.4 / EMT-D17: the desktop records without writing the modified editors"),
+    ("E19", [(TRACES, '      codetracerExe, @[cstring"record", cstring(root)],',
+              '      codetracerExe, @[cstring"record-test", cstring(root)],')],
+     [(DSPEC, None)],
+     "§9.4: the desktop's main process does not record the project"),
     # ---- the declared survivor ---------------------------------------------------
     ("S1", [(HOST, "    sleep(20)", "    sleep(25)")],
      [(TBL, TBL_HOST)],
@@ -387,7 +464,7 @@ IN_GPUI = {VM, FIT, CATALOG, HOST, GPUI_LEAF, GPUI_MAIN, VOCAB, DESKTOP_HOST,
            SETTING, OMNI, CUA}
   # Subjects compiled into `codetracer-gpui`.
 IN_DESKTOP = {VM, CATALOG, NS9, DESKTOP_HOST, SETTING, VIEW, UI_JS, OMNI, CUA,
-              EDITOR}
+              EDITOR, EDIT_TB, TRACES}
   # Subjects compiled into the desktop's bundle.
 PTY_SUITES = {PTY}
 GPUI_SUITES = {PLAN}

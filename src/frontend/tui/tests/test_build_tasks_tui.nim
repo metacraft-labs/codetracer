@@ -45,6 +45,7 @@ import ../host/build_output_source
 import ../host/build_runner
 from ../host/edit_host import readProjectFile, TuiHostError
 import ../../viewmodel/tests/unit/build_fixtures/plat56_c_build
+import ../../viewmodel/tests/unit/build_fixtures/plat56_gcc_quotes
 import ../../headless_app/layout_model
 import ../../headless_app/layout_interaction
 
@@ -345,7 +346,8 @@ suite "build tasks on the terminal":
     discard s.rt.tickCellHover(1700)
     let tip = s.rt.app.cellTooltip.lines.join("\n")
     checkpoint(tip)
-    ck tip.contains("error: ‘undefined_name’ undeclared")
+    ck tip.contains(plat56LocalGccText(
+      "error: ‘undefined_name’ undeclared"))
     ck tip.contains("note: each undeclared identifier")
     # Off the span: no tooltip.
     discard s.rt.handleToken(sgr(35, hoverRow, ed.col + paneGutterWidth(m) + 2,

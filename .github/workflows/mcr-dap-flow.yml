@@ -165,8 +165,8 @@ jobs:
           #   ct-mcr accepts the `replay-worker --parent-pid` that this
           #   native-backend passes (see setup-db-backend-siblings/action.yml).
           siblings: |
-            codetracer-native-recorder=${{ github.event.inputs.native_recorder_ref || 'c009b074c22a0a53ab764eb38eb959442697fda6' }}
-            codetracer-native-backend=${{ github.event.inputs.native_backend_ref || '1eebd50ba74623316ece25e8808f5a041d8a84c9' }}
+            codetracer-native-recorder=${{ github.event.inputs.native_recorder_ref || '9df28b83e89031961621ad31705bf393c1186050' }}
+            codetracer-native-backend=${{ github.event.inputs.native_backend_ref || 'ba742d2d39ef1be0945551de2797dfd4baca37b2' }}
             # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
             # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
             # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
@@ -174,7 +174,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=8794892b43516f033360adaa702219d0d7974449
-            codetracer-trace-format-nim=4c67a4507b1fe64752f71f287e62e8c4a3953b61
+            codetracer-trace-format-nim=4ca78ed1ce0e556e639c8389f85f2c7d56313cb7
             codetracer-visual-replay
 
       - name: Run MCR DAP flow tests

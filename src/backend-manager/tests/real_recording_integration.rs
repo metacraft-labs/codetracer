@@ -215,6 +215,13 @@ use tokio::time::{sleep, timeout};
 #[path = "../../db-backend/tests/test_harness/sibling_provisioning.rs"]
 mod sibling_provisioning;
 
+// Confining rr recordings to cores rr can count on, on hybrid hosts: the
+// same helper db-backend's harness records with.
+#[cfg(target_os = "linux")]
+#[rustfmt::skip]
+#[path = "../../db-backend/tests/test_harness/rr_cpu_binding.rs"]
+mod rr_cpu_binding;
+
 // ---------------------------------------------------------------------------
 // Shared helpers (previously in daemon_integration.rs; now consolidated here since integration
 // test files cannot share code without a helper crate or `mod` file)
@@ -1164,14 +1171,17 @@ fn create_rr_recording(
         &format!("recording trace to {}", trace_dir.display()),
     );
 
-    // Record the trace.
-    let record_output = std::process::Command::new(ct_native_replay)
-        .args([
-            "record",
-            "-o",
-            trace_dir.to_str().unwrap(),
-            binary_path.to_str().unwrap(),
-        ])
+    // Record the trace, on cores rr can count on (`rr_cpu_binding`).
+    let mut record = std::process::Command::new(ct_native_replay);
+    record.args([
+        "record",
+        "-o",
+        trace_dir.to_str().unwrap(),
+        binary_path.to_str().unwrap(),
+    ]);
+    #[cfg(target_os = "linux")]
+    rr_cpu_binding::bind_rr_recording_to_countable_cores(&mut record)?;
+    let record_output = record
         .output()
         .map_err(|e| format!("failed to run ct-native-replay record: {e}"))?;
 
@@ -1180,7 +1190,10 @@ fn create_rr_recording(
         let stderr = String::from_utf8_lossy(&record_output.stderr);
         log_line(log_path, &format!("record stdout: {stdout}"));
         log_line(log_path, &format!("record stderr: {stderr}"));
-        return Err(format!("ct-native-replay record failed:\n{stderr}"));
+        let error = format!("ct-native-replay record failed:\n{stderr}");
+        #[cfg(target_os = "linux")]
+        let error = rr_cpu_binding::with_rr_record_failure_explained(error, &stderr);
+        return Err(error);
     }
 
     log_line(log_path, "recording created successfully");
@@ -1255,14 +1268,17 @@ fn create_rr_recording_from_source(
         &format!("recording trace to {}", trace_dir.display()),
     );
 
-    // Record the trace.
-    let record_output = std::process::Command::new(ct_native_replay)
-        .args([
-            "record",
-            "-o",
-            trace_dir.to_str().unwrap(),
-            binary_path.to_str().unwrap(),
-        ])
+    // Record the trace, on cores rr can count on (`rr_cpu_binding`).
+    let mut record = std::process::Command::new(ct_native_replay);
+    record.args([
+        "record",
+        "-o",
+        trace_dir.to_str().unwrap(),
+        binary_path.to_str().unwrap(),
+    ]);
+    #[cfg(target_os = "linux")]
+    rr_cpu_binding::bind_rr_recording_to_countable_cores(&mut record)?;
+    let record_output = record
         .output()
         .map_err(|e| format!("failed to run ct-native-replay record: {e}"))?;
 
@@ -1271,7 +1287,10 @@ fn create_rr_recording_from_source(
         let stderr = String::from_utf8_lossy(&record_output.stderr);
         log_line(log_path, &format!("record stdout: {stdout}"));
         log_line(log_path, &format!("record stderr: {stderr}"));
-        return Err(format!("ct-native-replay record failed:\n{stderr}"));
+        let error = format!("ct-native-replay record failed:\n{stderr}");
+        #[cfg(target_os = "linux")]
+        let error = rr_cpu_binding::with_rr_record_failure_explained(error, &stderr);
+        return Err(error);
     }
 
     log_line(log_path, "recording created successfully");

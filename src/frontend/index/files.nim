@@ -405,7 +405,15 @@ proc getSave*(folders: seq[cstring], test: bool): Future[Save] {.async.} =
   var save = Save(project: Project(), files: @[], id: -1)
   return save
 
+var savesInFlight* = 0
+  ## Saves `onSaveFile` has started and not finished. The project's Run waits
+  ## for none to be left (`savesSettled`): the renderer writes the modified
+  ## editors before it asks for the run (Edit-Mode-Toolbar.md EMT-D17), the
+  ## messages arrive in that order, and the recording must see the writes.
+
 proc onSaveFile*(sender: js, response: jsobject(name=cstring, raw=cstring, saveAs=bool)) {.async.} =
+  inc savesInFlight
+  defer: dec savesInFlight
   try:
     # Arm the self-write window before the write (events can be raised while
     # it is still in progress) and re-arm it after, anchored to the moment the

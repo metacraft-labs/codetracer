@@ -204,6 +204,26 @@ minutes building, with the progress on stderr.
   naming the sibling's own `ct_cli` (as the dev shell exports it) is not an
   override: that build is refreshed like any other.
 
+### rr recordings on hybrid (P-core + E-core) hosts
+
+rr counts branches with the performance counter of the core it records on,
+and on an Intel hybrid CPU the E-cores (`cpu_atom`) have a different PMU from
+the P-cores (`cpu_core`). The codetracer-rr fork that the backend's dev shell
+stages as `codetracer-native-backend/target/debug/rr` counts on both, but an
+rr without hybrid support, such as nixpkgs' rr 5.9.0, fails with
+`Got 0 branch events, expected at least 500` whenever it lands on an E-core.
+`ct-native-replay` records with `$CT_RR_EXE`, else the `rr` beside it, else
+the first `rr` on `PATH`, so a test run can get either kind.
+So every harness that records with rr (`TestRecording::create`, the
+backend-manager real-recording tests, `origin_rr_smoke`) confines the
+`ct-native-replay record` child to the P-cores it may run on, through
+`src/db-backend/tests/test_harness/rr_cpu_binding.rs`. A run whose CPU
+affinity holds no P-core at all (`taskset -c` on E-cores only) is left alone,
+and if its rr fails on the counter the error names the host's core topology
+and the remedy. A new test that records with rr goes through the same helper;
+`src/db-backend/tests/rr_recording_hybrid_cores_test.rs` holds the harness to
+this with nixpkgs' rr.
+
 ### Tests never touch your real CodeTracer state: `CODETRACER_HOME`
 
 `CODETRACER_HOME` relocates EVERY per-user location CodeTracer has — the trace

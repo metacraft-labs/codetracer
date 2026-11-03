@@ -31,6 +31,9 @@ const
     ## reader (and the Test Results pane's failure block) can tell the
     ## recorder's sentence from the host's own.
 
+  RecordErrorStem* = "ct record error: "
+    ## The same for the project's Run (`ct record <project folder>`).
+
   RecorderDetailMaxChars* = 400
     ## How much of the recorder's own output a failure sentence may carry. A
     ## sentence, not a log: the full output is in the CodeTracer log.
@@ -52,9 +55,10 @@ proc recorderDetail*(output: string): string =
   if result.len > RecorderDetailMaxChars:
     result = "…" & result[result.len - RecorderDetailMaxChars .. ^1]
 
-proc recordTestFailureSentence*(exitCode: int; signal, stdoutText,
-                                stderrText, spawnError: string): string =
-  ## Why a `ct record-test` run made no recording, in the recorder's OWN words.
+proc recordFailureSentence*(stem: string; exitCode: int; signal, stdoutText,
+                            stderrText, spawnError: string): string =
+  ## Why a recorder run made no recording, in the recorder's OWN words,
+  ## under `stem` (`RecordTestErrorStem`, `RecordErrorStem`).
   ##
   ## `ct record-test` states its reason and exits 1 — for a language it has
   ## no test route for, "Assuming recording language <lang>: currently
@@ -70,12 +74,26 @@ proc recordTestFailureSentence*(exitCode: int; signal, stdoutText,
   ##
   ## PURE: asserted by `src/tests/cli/recorder_output_test.nim`.
   if spawnError.len > 0:
-    return RecordTestErrorStem & "could not be started: " & spawnError
+    return stem & "could not be started: " & spawnError
   let fromStderr = recorderDetail(stderrText)
   let detail = if fromStderr.len > 0: fromStderr else: recorderDetail(stdoutText)
   let status =
     if signal.len > 0: "ended by signal " & signal
     else: "exit code " & $exitCode
   if detail.len == 0:
-    return RecordTestErrorStem & "the recorder gave no reason (" & status & ")"
-  RecordTestErrorStem & detail & " (" & status & ")"
+    return stem & "the recorder gave no reason (" & status & ")"
+  stem & detail & " (" & status & ")"
+
+proc recordTestFailureSentence*(exitCode: int; signal, stdoutText,
+                                stderrText, spawnError: string): string =
+  ## Why a `ct record-test` run made no recording (`recordFailureSentence`
+  ## under `RecordTestErrorStem`).
+  recordFailureSentence(RecordTestErrorStem, exitCode, signal, stdoutText,
+                        stderrText, spawnError)
+
+proc recordProgramFailureSentence*(exitCode: int; signal, stdoutText,
+                                   stderrText, spawnError: string): string =
+  ## Why the project's Run — `ct record <project folder>` — made no recording
+  ## (Edit-Mode-Toolbar.md §9.4), under `RecordErrorStem`.
+  recordFailureSentence(RecordErrorStem, exitCode, signal, stdoutText,
+                        stderrText, spawnError)

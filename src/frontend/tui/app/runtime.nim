@@ -258,6 +258,12 @@ type
       ## §9.3: the palette's **Tests: Run** / **Tests: Run in Current Tab** —
       ## record the selected test (`path`: its id, "" for none) and open it
       ## at the destination `text` names (`TestResultsVM.runTestIn`).
+    pcRunProgramIn
+      ## Edit-Mode-Toolbar.md §9.4: the palette's **Project: Run** /
+      ## **Project: Run in Current Tab** — the project's program recorded and
+      ## opened at the destination `text` names, by the Test Results pane's
+      ## host (`NativeTestHost.runProgramIn`). The modified buffers are
+      ## written first (EMT-D17, `writeBuffersForRun`).
     pcFrameSeek
       ## PLAT-51: the frame viewer's own scrubber — show frame `index`
       ## (`behaviour` "drag" while held, "release" where it is let go:
@@ -619,6 +625,8 @@ proc actOnRequests*(rt: TuiRuntime; act: RequestsAct;
   ## beside the Requests pane's other helpers.
 
 proc runFileJob(rt: TuiRuntime; job: FileJob)
+proc deliverFileJob*(rt: TuiRuntime; res: FileJobResult): bool
+  ## Forward-declared for `writeBuffersForRun`; defined beside `runFileJob`.
 proc writeBuffers(rt: TuiRuntime; verb: string; all = false)
 proc sessionFacts*(rt: TuiRuntime): SessionFacts
 proc debugBuffer*(rt: TuiRuntime): EditBuffer
@@ -5165,6 +5173,33 @@ proc writeBuffers(rt: TuiRuntime; verb: string; all = false) =
       rt.note("writing " & buf.path & "…")
       rt.runFileJob(fileJobFor(fjWrite, buf.doc, buf.path, buf.serial))
 
+proc writeBuffersForRun*(rt: TuiRuntime): string =
+  ## EMT-D17: the project's Run writes every buffer with unsaved changes
+  ## FIRST, and unconditionally — a recording replays the source on disk. The
+  ## writes run inline (not on the file worker) because the recording starts
+  ## right after and must see them; each is delivered down `:w`'s path, so
+  ## the buffer is marked saved as of the bytes written. "" when every write
+  ## landed (or there was none), else why one did not.
+  if rt.app.editSession.isNil:
+    return ""
+  var saved: seq[string] = @[]
+  for buf in rt.app.editSession.buffers:
+    if not buf.isDirty:
+      continue
+    if rt.editServices.writeFile.isNil:
+      return "cannot write " & buf.path & " before the run: this session " &
+             "has no writer"
+    let job = fileJobFor(fjWrite, buf.doc, buf.path, buf.serial)
+    let w = rt.editServices.writeFile(job.path, job.text)
+    discard rt.deliverFileJob(FileJobResult(job: job, ok: w.ok,
+                                            message: w.message))
+    if not w.ok:
+      return "could not write " & buf.path & " before the run: " & w.message
+    saved.add buf.path
+  if saved.len > 0:
+    rt.note("wrote " & saved.join(", ") & " before the run")
+  ""
+
 proc ensureEditWorkspace*(rt: TuiRuntime): string =
   ## Give this session an Edit-mode workspace if it has not got one: the file
   ## tree, and the first file open in a buffer. Returns the line to put on the
@@ -6254,6 +6289,19 @@ proc runMenuAction*(rt: TuiRuntime; action: string;
                  else: ""
     outcome.requestClick(PaneClickRequest(kind: pcTestsRunIn, path: testId,
                                           text: $runIn.policy))
+    outcome.repaint = true
+    return
+  # Edit-Mode-Toolbar.md §9.4: **Project: Run** / **Project: Run in Current
+  # Tab** — the modified buffers written first (EMT-D17), then the project's
+  # program recorded and opened by the host.
+  let runProgram = parseRunProgramCommandTarget(action)
+  if runProgram.ok:
+    let unsaved = rt.writeBuffersForRun()
+    if unsaved.len > 0:
+      rt.note(unsaved)
+    else:
+      outcome.requestClick(PaneClickRequest(kind: pcRunProgramIn,
+                                            text: $runProgram.policy))
     outcome.repaint = true
     return
   # PLAT-68: the palette's base-keymap commands

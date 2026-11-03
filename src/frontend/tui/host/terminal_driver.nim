@@ -321,7 +321,7 @@ proc readByteWithTimeout*(timeoutMs: int; fd: cint = STDIN_FILENO;
     if auxWakeFd > maxFd: maxFd = auxWakeFd
   var tv: Timeval
   tv.tv_sec = posix.Time(timeoutMs div 1000)
-  tv.tv_usec = clong((timeoutMs mod 1000) * 1000)
+  tv.tv_usec = posix.Suseconds((timeoutMs mod 1000) * 1000)
   let ready = posix.select(maxFd + 1, addr rs, nil, nil, addr tv)
   if ready <= 0: return ReadTimeout
   if wakeFd >= 0 and FD_ISSET(wakeFd, rs) != 0 and FD_ISSET(fd, rs) == 0:

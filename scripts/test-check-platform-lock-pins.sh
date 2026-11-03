@@ -37,7 +37,7 @@ expect() {
 		failures=$((failures + 1))
 		return
 	fi
-	if [ -n "$want_text" ] && ! printf '%s\n' "$out" | grep -qF "$want_text"; then
+	if [ -n "$want_text" ] && ! grep -qF -- "$want_text" <<<"$out"; then
 		echo "FAIL: $name: exit $rc was right but the output never says" >&2
 		echo "  '$want_text'" >&2
 		printf '%s\n' "$out" | sed 's/^/    /' >&2
