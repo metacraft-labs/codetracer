@@ -5928,6 +5928,14 @@ plat39-record-gate:
     -o:build/test_plat39_record \
     src/tests/visual/screen_oracle/test_plat39_record.nim
 
+# Pixel geometry and title classification, using constructed rasters rather
+# than the live capture corpus. This runs in the screen-oracle lane even on a
+# host without a window server or captured frames.
+test-pane-census:
+  nim c -r --hints:off --warnings:off --path:../GuiAssert/src \
+    --nimcache:nimcache/pane-census -o:build/test_pane_census \
+    src/tests/visual/screen_oracle/test_pane_census.nim
+
 # PLAT-42 — record the GPUI editor's debugger surfaces from the SHIPPED binary.
 # Headless (`--report-plan`), but needs `just build-gpui`, the isonim-gpui shim
 # and the calc recording — none of which CI has — so the measurement is taken
