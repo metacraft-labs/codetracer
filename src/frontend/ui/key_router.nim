@@ -746,6 +746,23 @@ proc canonicalKeyOfEvent(ev: JsObject): string =
                     ev.ctrlKey.to(bool), ev.shiftKey.to(bool),
                     ev.altKey.to(bool), ev.metaKey.to(bool))
 
+proc focusOnButton(): bool {.importjs: """
+  (function () {
+    var el = document.activeElement;
+    return !!(el && el.matches &&
+      el.matches('button:not(:disabled), a[href]:not(.jstree-anchor), [role="button"]:not(tr)'));
+  })()""".}
+  ## A button or link holds the focus.  A list's row is left out: it answers
+  ## `Enter` through the keymap (`list.activate`).
+
+proc focusInDropdown(): bool {.importjs: """
+  (function () {
+    var el = document.activeElement;
+    return !!(el && el.closest &&
+      el.closest('.ct-picker-dropdown, .vcs-branch-dropdown, .agent-add-context-dropdown'));
+  })()""".}
+  ## A dropdown's row holds the focus (`views/dropdown_focus`).
+
 proc onKeyDown(ev: JsObject) =
   ## The ONE key listener (capture phase, on the window).
   if ev[cstring"isComposing"].to(bool):
@@ -761,6 +778,17 @@ proc onKeyDown(ev: JsObject) =
     return
   if videoPlayerKey(name):
     stop(ev)
+    return
+  # `Enter` on a focused button is that button's: the browser clicks a native
+  # one, and `isonim_activation` a `role="button"`.  Routed, it ran the pane's
+  # `list.activate` and stopped the event, so no button in a pane answered it
+  # (docs/UI-Design-Decisions.md, D-17).  An open menu keeps its own keys.
+  if name == "Enter" and not menuIsOpen() and not contextMenuIsOpen() and
+     focusOnButton():
+    return
+  # A dropdown's rows answer these keys themselves (D-18).
+  if key in ["ArrowUp", "ArrowDown", "Home", "End", "Escape"] and
+     focusInDropdown():
     return
   routeKey(name, ev)
 

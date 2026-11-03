@@ -86,15 +86,13 @@
     justify-content: center
     align-items: center
 
-  &:focus
+  &:focus:not(:focus-visible)
     outline: none !important
     box-shadow: none !important
     cursor: pointer
     background-color: colors-ui-surface-base-panel
 
   &:focus-visible
-    outline: none !important
-    box-shadow: inset 0 0 0 0.125em colors-ui-border-focus !important
     cursor: pointer
     background-color: colors-ui-surface-base-panel
 
@@ -159,14 +157,6 @@
       color: colors-ui-text-primary-body
       line-height: 1.15
 
-    .ct-checkmark
-      --ct-checkmark-size: 1rem
-      // A slightly fainter box than the default in the dark theme; in the
-      // light one the default box's tokens (checkmark.styl), as fainter
-      // white would not show there (`by-mode`, defaults.styl).
-      --ct-checkmark-border: by-mode(rgba(255, 255, 255, 0.22), colors-ui-border-primary)
-      --ct-checkmark-border-hover: by-mode(rgba(255, 255, 255, 0.34), colors-ui-border-primary-hover)
-      --ct-checkmark-bg-hover: by-mode(rgba(255, 255, 255, 0.02), colors-ui-surface-primary-default-hover)
 
     .ct-checkmark-label
       min-width: 0
@@ -209,12 +199,6 @@ table.dataTable tbody tr:not(.active):hover
     border-right: 0.0625em solid colors-ui-border-tertiary
     background: colors-ui-surface-base-raised
 
-    .ct-checkmark
-      --ct-checkmark-size: 1rem
-      // As the filter list's box above.
-      --ct-checkmark-border: by-mode(rgba(255, 255, 255, 0.22), colors-ui-border-primary)
-      --ct-checkmark-border-hover: by-mode(rgba(255, 255, 255, 0.34), colors-ui-border-primary-hover)
-      --ct-checkmark-bg-hover: by-mode(rgba(255, 255, 255, 0.02), colors-ui-surface-primary-default-hover)
 
 // Right column — kind checkboxes in a wrapping flex row
 .dropdown-kind-items
@@ -231,12 +215,6 @@ table.dataTable tbody tr:not(.active):hover
     line-height: 1.15
     white-space: nowrap
 
-    .ct-checkmark
-      --ct-checkmark-size: 1rem
-      // As the filter list's box above.
-      --ct-checkmark-border: by-mode(rgba(255, 255, 255, 0.22), colors-ui-border-primary)
-      --ct-checkmark-border-hover: by-mode(rgba(255, 255, 255, 0.34), colors-ui-border-primary-hover)
-      --ct-checkmark-bg-hover: by-mode(rgba(255, 255, 255, 0.02), colors-ui-surface-primary-default-hover)
 
 // The filter menu's header row: the "Trace events" / "Recorded events" tabs on
 // the left and the On/Off switch on the right.
@@ -381,7 +359,6 @@ table.dataTable tbody tr:not(.active):hover
       // Border and ring come from the shared active state (input.styl);
       // the surface stays the field's own, as it does for every other field.
       &:focus-visible
-        outline: none !important
         background: colors-ui-surface-input-secondary
 
   .eventLog-detailed-table
@@ -745,30 +722,63 @@ label
   padding: 0.125em 0.5em
   cursor: pointer
 
+// The menu is every other dropdown (Nikolay, 2026-10-20): the shared surface
+// (`dropdown-surface()`, shared_widgets.styl — the Requests pickers' menu), its
+// 4px inset, and rows that are the shared menu row (`ct-menu-item`,
+// menu_item.styl) with the shared checkbox (`ct-checkmark`) in the row's icon
+// slot.  It was a card of its own: another fill, a 1px darker border, 18px rows
+// and text glyphs for the check and the arrows.
 .eventLog-columns-menu
+  dropdown-surface()
   position: absolute
-  right: 0.5em
-  top: 2.25em
+  // Right edge on the button's right edge, and DROPDOWN_TRIGGER_GAP (6px)
+  // below it: the toolbar's 8px top inset + the 26px button + 6px.  `rem`, so
+  // the 12px menu font below does not move it.
+  right: 0.5rem
+  top: 2.5rem
   z-index: 20
-  min-width: 12em
-  padding: 0.25em 0
-  background-color: colors-ui-surface-base-card
-  border: 0.0625em solid colors-ui-border-secondary
-  border-radius: 0.375em
-  color: colors-ui-text-primary-body
+  min-width: 12rem
+  // The pickers' menu text size and inset (`.ct-picker`, 12px; 0.25em).
+  font-size: 0.75rem
+  padding: 0.25em
   .eventLog-column-option
-    display: flex
-    align-items: center
-    gap: 0.5em
-    padding: 0.125em 0.625em
-    .eventLog-column-check
-      cursor: pointer
-      width: 1em
+    // The title takes the room; the drag handle sits at the row's end.
     .eventLog-column-title
       flex: 1
-    .eventLog-column-left, .eventLog-column-right
+    .eventLog-column-check,
+    .eventLog-column-title
       cursor: pointer
-      background: transparent
-      border: none
-      color: inherit
-      font-size: 0.75em
+    // The icon slot is 1em of the 12px menu; the checkbox is 16px.  Let the
+    // slot fit it.
+    .eventLog-column-check
+      flex: 0 0 auto
+      width: auto
+      height: auto
+    // The drag handle (Nikolay, 2026-10-20): the design system's
+    // `type=arrows-expand-vertical-diamond, theme=dark`, at its 16px, painted
+    // with the icon colour through a mask.  The whole row drags; the handle
+    // is the sign that it does, so it carries the grab cursor.
+    .eventLog-column-handle
+      flex: 0 0 auto
+      width: 1rem
+      height: 1rem
+      border-radius: 0.125rem
+      cursor: grab
+      // The icon is drawn on a child box: a mask on the handle itself would
+      // also cut away its keyboard focus ring.
+      &::before
+        content: ""
+        display: block
+        width: 100%
+        height: 100%
+        background-color: colors-ui-icon-primary-default
+        mask: url("../../public/resources/shared/arrows_expand_vertical_diamond_dark.svg") center / contain no-repeat
+    // The row being dragged stays in place, faded, until it is dropped.
+    &.dragging
+      opacity: 0.4
+    // Where it will land: a 2px `border/action` line on the side it will
+    // take.  An inset shadow, so the row does not change size.
+    &.drop-before
+      box-shadow: inset 0 0.125rem 0 colors-ui-border-action
+    &.drop-after
+      box-shadow: inset 0 -0.125rem 0 colors-ui-border-action

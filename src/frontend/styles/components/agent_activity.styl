@@ -1186,6 +1186,11 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
     outline: SELECTED_PANEL_BORDER solid colors-brand-600
     outline-offset: 0
 
+  // The prompt box itself; a button inside it shows its own key-focus, and only
+  // one thing looks selected at a time (D-18).
+  [data-focus-mode="keyboard"] &:has(textarea:focus)
+    key-focus()
+
 .prompt-wrapper
   background: colors-ui-surface-base-canvas
   border-radius: 0.375em
@@ -1920,24 +1925,6 @@ agent-status-pill()
   .agent-model-label
     gap: 0
 
-
-// ---------------------------------------------------------------------------
-// Prompt toolbar: one hover for every control — a fill, no outline.
-//
-// Icon buttons app-wide carry the shared control outline and lighten it on
-// hover (button.styl, `[class*="ct-button-image-"]…`).  In this toolbar that
-// put a grey ring on add-context, settings and send, beside the branch and
-// model buttons, which have no outline and only change their fill (Nikolay,
-// 2026-10-11).  Here the outline is transparent, at rest and on hover, so all
-// five answer the pointer the same way: the hover fill alone (the send button
-// keeps its own primary hover fill).  The 1px stays, transparent, so no button
-// changes size.  Selector carries one class more than button.styl's to win.
-// ---------------------------------------------------------------------------
-.agent-buttons-container [class*="ct-button-image-"][class*="ct-button-image-"]
-  border-color: transparent !important
-
-  &:hover:not(:disabled)
-    border-color: transparent !important
 
 // ---------------------------------------------------------------------------
 // Prompt toolbar: one size, one corner — and menus that match it.

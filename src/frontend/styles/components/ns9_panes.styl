@@ -66,24 +66,27 @@ ns9-row-padding = 2px 8px
 // DISABLED IS DIMMED, NOT ABSENT — see the view's header. A control that
 // disappears cannot be told apart from a feature that is not there, and the
 // three reasons it can be disabled are all temporary or deployment-specific.
+// The button look (button.styl), at the small control size.
 .test-results-run-btn
   flex: 0 0 auto
-  padding: 4px 8px
-  cursor: pointer
-  opacity: 0.75
+  display: inline-flex
+  align-items: center
+  box-sizing: border-box
+  height: CONTROL_HEIGHT_SM
+  padding: 0 8px
+  border-radius: CONTROL_RADIUS
+  control-button()
   user-select: none
 
   &:hover
-    opacity: 1
-    background-color: colors-ui-surface-base-card
+    control-button-hover()
 
   &.disabled
     opacity: 0.3
     cursor: default
 
     &:hover
-      opacity: 0.3
-      background-color: transparent
+      control-button()
 
 .test-results-body,
 .constraints-body

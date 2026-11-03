@@ -51,13 +51,60 @@ LIST_HOVER_BG = colors-ui-surface-primary-secondary-hover
 
 // Button transition — ONE timing for every button's state change (hover, and
 // the welcome forms' Record / Download turning primary): the colours ease over
-// 250ms after a 100ms beat, so a button settles into its new state instead of
+// 100ms and start at once, so a button answers the pointer immediately without
 // snapping.  Only the timing is shared; each button keeps its own colours.
-// First introduced on the welcome screen's Record / Download buttons, then
-// made the default.  Imported first (codetracer.styl), so every stylesheet can
-// use it.
-BUTTON_TRANSITION_TIMING = 250ms ease 100ms
+// It was 250ms after a 100ms beat; once every button carried it, that read as
+// lag — the hover showed ~110ms late and settled at ~280ms (Nikolay,
+// 2026-10-20: "the buttons started to behave slow").  Imported first
+// (codetracer.styl), so every stylesheet can use it.
+// key-focus (Nikolay, 2026-11-02; docs/UI-Design-Decisions.md, D-16): the one
+// look of a control selected from the keyboard, everywhere.  A 1.5px #3B82F6
+// border drawn inside the control's edge, as an outline so it follows the
+// corners, sits above the control's children and takes no layout.  Applied to
+// every control by the catch-all in shared_widgets.styl; call it only where a
+// control's focus lands on another element.
+KEY_FOCUS_WIDTH = 0.09375rem
+KEY_FOCUS_COLOR = colors-blue-500
+
+key-focus()
+  outline: KEY_FOCUS_WIDTH solid KEY_FOCUS_COLOR !important
+  outline-offset: -(KEY_FOCUS_WIDTH) !important
+  box-shadow: none !important
+
+BUTTON_TRANSITION_TIMING = 100ms ease
 BUTTON_TRANSITION = background-color BUTTON_TRANSITION_TIMING, color BUTTON_TRANSITION_TIMING, border-color BUTTON_TRANSITION_TIMING
+
+// Button look — ONE look and ONE set of states for every button that is not a
+// primary call to action, in the panels and on the welcome screens (Nikolay,
+// 2026-10-20: "all buttons should look the same and behave the same.  They may
+// vary in sizes but not in style and hover/active states").  The source of
+// truth is the Requests panel's Method / Status pickers (`.ct-picker-trigger`,
+// shared_widgets.styl), which now take their look from here too:
+//
+//   rest    0.5px `border/primary`, `surface/primary/default`, subtle text
+//   hover   the fill lightens to `…/default-hover`, the text to `body`
+//   active  the border turns `border/action`, the text `body` — an open
+//           menu's trigger, a toggle that is on, the selected filter
+//
+// Size is NOT part of it: each button keeps its height, padding and corners.
+// Primary buttons keep their action fill; segmented tabs keep the tab look.
+BUTTON_BORDER_WIDTH = 0.03125rem
+BUTTON_BORDER_COLOR = colors-ui-border-primary
+
+control-button()
+  border: BUTTON_BORDER_WIDTH solid BUTTON_BORDER_COLOR
+  background-color: colors-ui-surface-primary-default
+  color: colors-ui-text-primary-body-subtle
+  cursor: pointer
+  transition: BUTTON_TRANSITION
+
+control-button-hover()
+  background-color: colors-ui-surface-primary-default-hover
+  color: colors-ui-text-primary-body
+
+control-button-active()
+  border-color: colors-ui-border-action
+  color: colors-ui-text-primary-body
 
 // -- Buttons --
 button
@@ -76,8 +123,7 @@ button
     color: colors-ui-text-primary-body
 
   &:focus-visible:not(:disabled)
-    outline: none !important
-    box-shadow: inset 0 0 0 0.125em colors-ui-border-focus !important
+    key-focus()
     color: colors-ui-text-primary-body
 
   &:disabled
@@ -152,34 +198,30 @@ button
   &:hover
     background-color: colors-ui-surface-action-primary-hover !important
 
-[class*="-button-"][class*="-tertiary"]
-  background-color: colors-ui-surface-primary-tertiary
-  color: colors-ui-text-primary-body-subtle
-
-  &:disabled
-    border: 0.03125em solid colors-ui-border-disabled
-
 [class*="-button-"][class*="-primary"]
-[class*="-button-"][class*="-tertiary"]
-  &:hover
-    background-color: colors-ui-surface-primary-tertiary-hover
-
   &:disabled
     background-color: colors-ui-surface-primary-disabled
 
+// Secondary and tertiary are one look now: the button look (top of this file).
+// Tertiary was a second, flatter fill with no border; it is kept as a class
+// name only, so the markup does not have to change.  `ct-button-sm-secondary`
+// had its border removed outright (`border: 0 !important`) — the "Columns +"
+// button had none; it has the shared one now.
 [class*="-button-"][class*="-secondary"]
-  background-color: colors-ui-surface-primary-default
-  border: 0.03125em solid colors-ui-border-primary
-  color: colors-ui-text-primary-body-subtle
+[class*="-button-"][class*="-tertiary"]
+  control-button()
 
-  &:hover
-    background-color: colors-ui-surface-primary-default-hover
+  &:hover:not(:disabled)
+    control-button-hover()
 
-  &:focus-visible:not(:disabled)
-    background-color: colors-ui-surface-primary-secondary
+  &.open
+  &.active
+  &[aria-expanded="true"]
+    control-button-active()
 
-[class*="ct-button-sm-secondary"]
-    border: 0em !important
+  &:disabled
+    border-color: colors-ui-border-disabled
+    background-color: colors-ui-surface-primary-disabled
 
 // -- Icon-buttons --
 //
@@ -328,31 +370,16 @@ button
   background-image: ct-images-layout-tab
   background-size: 1em auto !important
 
-  // States match the input fields (components/input.styl), which this button
-  // sits beside: the field's surface in every state, its resting border, and
-  // its hover border.  Open is the one state of its own — the blue border every
-  // menu trigger shows while its menu is up (`.vcs-branch-current`, vcs.styl).
-  //
-  // Two inherited behaviours have to be undone for that. `ct-button-no-border`
-  // sets `border: none !important`, so the width has to come back with
-  // `!important`; and `[class*="-secondary"]:hover` changes the background,
-  // which would give the button a hover the fields do not have.
-  //
-  // The width lives on the base rule and `box-sizing: border-box` is already
-  // set on `button`, so the control stays 28x28 in every state and the centred
-  // icon does not move.  This replaces an inset `box-shadow` that drew a fake
-  // border in `em` — 0.0625em against a 16px button, so a hair under 1px.
-  // The shared control outline (CONTROL_BORDER_*, top of this file).
-  border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR !important
-  background-color: colors-ui-surface-input-secondary
-
-  &:hover
-    border-color: colors-ui-border-primary-hover !important
-    background-color: colors-ui-surface-input-secondary
+  // The button look (top of this file), like every other button — it used to
+  // copy the search field it sits beside (Nikolay, 2026-10-20: the Event Log's
+  // "…" should behave as the Requests pickers do).  `ct-button-no-border` sets
+  // `border: none !important`, so the border comes back with `!important`.
+  // `box-sizing: border-box` is set on `button`, so the control keeps its size
+  // in every state and the centred icon does not move.
+  border: BUTTON_BORDER_WIDTH solid BUTTON_BORDER_COLOR !important
 
   &.open
     border-color: colors-ui-border-action !important
-    background-color: colors-ui-surface-input-secondary
 
 #close-element
   background-image: ct-images-close-button
@@ -582,8 +609,7 @@ button
     border-color: colors-ui-border-primary-hover
 
   &:focus-visible
-    outline: none
-    box-shadow: 0 0 0 0.125em colors-ui-border-focus
+    key-focus()
 
   &:has(.ct-origin-badge-text:empty)
     width: CONTROL_HEIGHT_XS
@@ -650,9 +676,10 @@ button
 .ct-origin-icon-hourglass .ct-origin-badge-icon
   mask-image: url("../../../public/resources/origin-icons/hourglass.svg")
 
-// Every icon button carries the shared control outline (CONTROL_BORDER_*, top of
-// this file) — the same 1px `border/secondary`, 6px corners, as the fields and
-// the segmented tabs — and lightens it on hover, as a field does.
+// Every icon button carries the button look's border (BUTTON_BORDER_*, top of
+// this file) and 6px corners, and answers hover and active as every other
+// button does — the fill and the text change, not the border (Nikolay,
+// 2026-10-20; it was the fields' 1px `border/secondary`, lightened on hover).
 //
 // Doubled selector for specificity, not style: `ct-button-no-border` sets
 // `border: none !important` at one class's weight, and most icon buttons carry
@@ -666,9 +693,11 @@ button
 // adds nothing to the specificity, so this rule still loses to the id-level
 // borders it lost to before (e.g. `#category-image`).  See also the toolbar's
 // transition in menu_bar.styl.
-[class*="ct-button-image-"][class*="ct-button-image-"]:not(:where(#isonim-debug-controls *))
-  border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR !important
+[class*="ct-button-image-"][class*="ct-button-image-"]:not(:where(#isonim-debug-controls *)):not([class*="-primary"])
+  border: BUTTON_BORDER_WIDTH solid BUTTON_BORDER_COLOR !important
   border-radius: CONTROL_RADIUS !important
 
-  &:hover:not(:disabled)
-    border-color: colors-ui-border-primary-hover !important
+  &.open
+  &.active
+  &[aria-expanded="true"]
+    border-color: colors-ui-border-action !important
