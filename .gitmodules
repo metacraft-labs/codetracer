@@ -111,3 +111,9 @@
 [submodule "libs/nim-regex"]
 	path = libs/nim-regex
 	url = https://github.com/nitely/nim-regex
+[submodule "libs/nim-toml-serialization"]
+	path = libs/nim-toml-serialization
+	url = https://github.com/status-im/nim-toml-serialization.git
+[submodule "libs/nim-unittest2"]
+	path = libs/nim-unittest2
+	url = https://github.com/status-im/nim-unittest2.git

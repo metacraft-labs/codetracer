@@ -45,6 +45,16 @@
 #                                 removed on exit. Without it, the run after a
 #                                 kill would mistake the arm for an original.
 #
+#   <live>.plat35-backup, .plat37-backup, .plat37macos-backup, .plat38-backup,
+#   .plat42-backup, .plat44-backup
+#                                 the same original, left by a lane killed before
+#                                 the lanes shared this file. The first stage of a
+#                                 run moves it to the shared name. Two of them
+#                                 cannot both be the original (the second was a
+#                                 killed run's arm), and the files cannot say
+#                                 which is which, so a stage refuses them and
+#                                 names both.
+#
 # A failed swap stops the lane, through the caller's `fail`, and a failed restore
 # fails it. The backup or the marker then stays, so a later run can still finish
 # the job.
@@ -62,6 +72,8 @@
 
 GPUI_SHIM_BACKUP_SUFFIX=".gpui-lane-backup"
 GPUI_SHIM_MARKER_SUFFIX=".gpui-lane-no-original"
+# The names each lane used before it sourced this file. See the header.
+GPUI_SHIM_OLD_BACKUP_SUFFIXES=".plat35-backup .plat37-backup .plat37macos-backup .plat38-backup .plat42-backup .plat44-backup"
 
 # Assigned and not defaulted, so that nothing in the environment can claim that
 # this run staged. All three belong to one run, and none of them leaves it.
@@ -81,6 +93,9 @@ gpui_shim_stage() {
 	local live="$1" arm="$2"
 	local backup="${live}${GPUI_SHIM_BACKUP_SUFFIX}"
 	local marker="${live}${GPUI_SHIM_MARKER_SUFFIX}"
+	if [ "${GPUI_SHIM_ARM_OWNS_LIVE}" != 1 ]; then
+		gpui_shim_adopt_old_backup "${live}" || return 1
+	fi
 	GPUI_SHIM_LIVE="${live}"
 	GPUI_SHIM_RESTORE_PENDING=1
 
@@ -117,6 +132,35 @@ gpui_shim_stage() {
 
 	cp -f "${arm}" "${live}" || {
 		echo "${arm} could not be staged at ${live}" >&2
+		return 1
+	}
+}
+
+# gpui_shim_adopt_old_backup <live> — move a backup left under an old per-lane
+# name to the shared one. Called before this run claims anything, so a refusal
+# leaves every file as it was and the restore has nothing to undo.
+gpui_shim_adopt_old_backup() {
+	local live="$1" suffix found=""
+	local backup="${live}${GPUI_SHIM_BACKUP_SUFFIX}"
+	for suffix in ${GPUI_SHIM_OLD_BACKUP_SUFFIXES}; do
+		[ -f "${live}${suffix}" ] && found="${found} ${live}${suffix}"
+	done
+	[ -n "${found}" ] || return 0
+	if [ -f "${backup}" ]; then
+		found="${backup}${found}"
+	else
+		found="${found# }"
+	fi
+	case "${found}" in
+	*" "*)
+		echo "more than one backup of ${live} exists, and only one can be the original:" >&2
+		echo "  ${found}" >&2
+		echo "  nothing was staged. Keep the original at ${live}, delete the others, or rebuild the shim with cargo." >&2
+		return 1
+		;;
+	esac
+	mv -f "${found}" "${backup}" || {
+		echo "the old backup ${found} could not be moved to ${backup}, so nothing was staged" >&2
 		return 1
 	}
 }

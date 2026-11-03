@@ -1141,17 +1141,48 @@ proc createCalltraceVM*(store: ReplayDataStore;
     # follows that call by its key — what the desktop's
     # `CalltraceComponent.onCompleteMove` did with the move's location key.
     # Once per stop, so a row the reader selects afterwards stays selected.
+    #
+    # A CALL OUTSIDE THE HELD SECTION IS REVEALED FIRST. A jump can land in a
+    # call thousands of lines past the rows the pane holds (a Starknet
+    # transaction's failed call, 15,904 steps in), and Call-Trace-Pane.md
+    # § Smart Collapsing has the pane show the new current call after a jump.
+    # Returning here left the old section, and the old mark, on screen for
+    # good: nothing else moves the viewport. So the pane scrolls to the
+    # engine's `currentCallLineIndex`, once per stop; the auto-load effect asks
+    # for the section around it, and when that answer holds the line this
+    # effect runs again and selects it.
+    #
+    # ONLY AN ANSWER FOR THIS STOP IS FOLLOWED. A move changes the debugger
+    # before the section re-asked for it arrives, and in between the store
+    # still holds the previous stop's `currentLineIndex`; following that
+    # marked the PREVIOUS call and then ignored the right answer as "this
+    # stop is already followed" (an Event Log jump to a failed call left the
+    # landing's frame marked). `answeredStop` says which stop the held
+    # section answered.
     var followedStop = ""
+    var revealedStop = ""
     createEffect proc() =
       let lines = store.calltrace.lines.val
       let start = store.calltrace.startLineIndex.val
       let current = store.calltrace.currentLineIndex.val
+      let answered = store.calltrace.answeredStop.val
       let stop = stopIdentityOf(store.debugger.val)
+      # Measurement must retry a pending reveal even if no new answer arrives.
+      let viewportRows = viewport.val.rows
       untrack(proc() =
         if not vm.followsDebuggerCall or stop == followedStop or current < 0:
           return
+        if answered != stop:
+          return
         let at = current - start
         if at < 0 or at >= lines.len.int64:
+          # A bootstrap answer can name the current call before a view exists.
+          # Wait for its real height rather than centring with an invented row.
+          if viewportRows <= 0:
+            return
+          if revealedStop != stop:
+            revealedStop = stop
+            vm.revealRow(current)
           return
         followedStop = stop
         vm.selectCall(lines[at.int].callKey))

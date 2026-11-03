@@ -55,9 +55,11 @@ except OSError as e:
     sys.exit(2)
 
 deps = {}
+# A lock written by repro before 2026-11-02 records an advisory `ref` before
+# `revision`; later writers record none. Both spell the same pin.
 for m in re.finditer(r'\{ name = "([^"]+)", (?:self = "true", )?coord_kind = "vcs", '
                      r'url = "https://github.com/([^"/]+)/([^"/]+?)(?:\.git)?", '
-                     r'ref = "[^"]*", revision = "([0-9a-f]{40})"', repro):
+                     r'(?:ref = "[^"]*", )?revision = "([0-9a-f]{40})"', repro):
     name, owner, repo, rev = m.groups()
     deps[name] = (owner.lower(), repo.lower(), rev)
 if not deps:

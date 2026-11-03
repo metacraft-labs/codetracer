@@ -1333,15 +1333,15 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
           env-ps1-path: ./env.ps1
           siblings: |
-            codetracer-native-recorder=441db7efac736c1373dd722432ef4f22cab96d91
+            codetracer-native-recorder=c009b074c22a0a53ab764eb38eb959442697fda6
             # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
             # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
             # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=f52b20cced5f016d95c99ebcfd15264dffff8079
-            codetracer-trace-format-nim=d655392565ee57e398bd29e755472bf14f35d871
+            codetracer-trace-format=8794892b43516f033360adaa702219d0d7974449
+            codetracer-trace-format-nim=281c5e394d418ab6fa4ca35121e05b18417825cd
 
       - name: Install Nim dependencies
         shell: bash
@@ -1539,6 +1539,8 @@ jobs:
       # through this repo's own dev shell.
       - name: Provision dependency siblings from repro.lock
         uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Clone codetracer-pm sibling
         # `ci/test/cua-keymap-extractor.sh` (PLAT-68's CUA keymap step in
@@ -1701,6 +1703,11 @@ jobs:
       - name: Failed build-once invalidates stale and partial renderer bundles
         run: bash scripts/test-build-once-failed-bundle.sh
 
+      # Every script that starts its own Xvfb starts its clients once the
+      # server answers: scripts/test-own-xvfb.sh.
+      - name: Scripts that start their own Xvfb wait for it to answer
+        run: nix develop .#devShells.x86_64-linux.default --command just test-own-xvfb
+
       # The front door's Functions served by the pinned wrangler, on
       # localhost — no network, no deploy (ci/test/web-front-door-local.sh).
       - name: The web front door's logic, served locally
@@ -1822,9 +1829,9 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=f52b20cced5f016d95c99ebcfd15264dffff8079
-            codetracer-trace-format-nim=d655392565ee57e398bd29e755472bf14f35d871
-            codetracer-native-recorder=441db7efac736c1373dd722432ef4f22cab96d91
+            codetracer-trace-format=8794892b43516f033360adaa702219d0d7974449
+            codetracer-trace-format-nim=281c5e394d418ab6fa4ca35121e05b18417825cd
+            codetracer-native-recorder=c009b074c22a0a53ab764eb38eb959442697fda6
 
       # MEASURE THE FETCH ENVIRONMENT BEFORE NIX TOUCHES THE NETWORK, and
       # before the FIRST `nix develop` in this job rather than before the
@@ -2348,6 +2355,8 @@ jobs:
         # is already installed when this runs -- which it must be, because the
         # action reaches `repro` through this repo's own dev shell.
         uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       # The envelope records the three-tier demo from this tree, and
       # scripts/materialize-recording.sh refuses without `ct-instrument` and a
@@ -2611,6 +2620,8 @@ jobs:
         # before it: the action reaches ``repro`` through this repo's dev
         # shell, which is also where the suites below run.
         uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Assert the JS ViewModel lane can observe its own failures (full suite)
         # The same contract suite `ci-verdict` runs, but here it runs INSIDE the
@@ -3702,6 +3713,137 @@ jobs:
           path: test-logs/
           retention-days: 30
 
+  tui-tests:
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; same label as `viewmodel-tests` and `gpui-window-captures`
+    # NEW, NO SAMPLE YET, and no local timing either: the host this job was
+    # written on could not materialise the dev shell within its free disk.
+    # So this bound is structural. The body is Nix and sibling provisioning,
+    # `just build-once` (a job whose work is mostly that, `cross-process-
+    # linux`, is bounded at 45m), isonim-gpui's shim and `build-gpui` (one
+    # cargo build and one front-end compile), `build-tui`, and then ~197 Nim programs
+    # compiled and run ONE AT A TIME -- at an ASSUMED 20-30s per
+    # compile-and-run of a program importing isonim-tui (an estimate, not a
+    # measurement), 65-100m on its own. 180m clears the sum of those upper ends by about a third and stays
+    # half of GitHub's 360m default. Tighten it from the first green runs.
+    timeout-minutes: 180
+    name: TUI tests (Tier 1 + Tier 2)
+    # WHY THIS JOB EXISTS. `just test-tui` and `just test-tui-real-terminal` are
+    # the only routes to the `tui` and `tui-real-terminal` lanes of
+    # `ci/lib/run-nim-test-lane.sh` -- 133 and 64 files -- and until this job no
+    # workflow called either (codetracer-pm issues/2026-11-01-no-ci-lane-calls-
+    # the-test-tui-recipes.md). CodeTracer-TUI.md §7.1.6 asserts the TUI's
+    # Tier-1 content "fast, per-PR" and makes Tier 2 the terminal-peer check, so
+    # both run here, on every push and pull request this workflow runs on.
+    # `ci/test/ci-reached-recipes-test.sh` fails if either recipe stops being
+    # reached by a workflow lane.
+    #
+    # WHY ITS OWN JOB AND NOT TWO STEPS OF `viewmodel-tests`. That job is
+    # already at its 75-minute bound with no green sample, and these lanes
+    # compile ~197 Nim programs serially. Added there, they would either push
+    # it past its bound or be cut off by it, and its token (one mint per job,
+    # 60-minute life) could not cover a longer job's clones anyway -- here every
+    # authenticated clone happens in the first steps.
+    steps:
+      - name: Generate CI token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        # Recursive: `tui-prereqs` builds the grammar archive the TUI links from
+        # the `libs/tree-sitter-*` submodules.
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      # EVERY AUTHENTICATED CLONE IS IN THIS BLOCK, at the top of the job: the
+      # installation token minted above expires an hour after it is minted (see
+      # `viewmodel-tests`), and this job's bound is longer than that.
+      - name: Setup db-backend siblings and the terminal-test siblings
+        # The db-backend siblings are what `just build-once` needs to build
+        # `replay-server` (see `gpui-window-captures`). The three extra ones are
+        # the Tier-2 lane's: `ci/lib/test-lane-files.sh` compiles every
+        # `tui-real-terminal` file with `--path:../TermAssert/src`,
+        # `../TermAssertClient/src` and `../nim-libvterm/src`. All three are in
+        # this repo's committed `repro.lock`, so they are named BARE and clone
+        # at the revision that lock pins -- not at a branch tip.
+        uses: ./.github/actions/setup-db-backend-siblings
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          extra-siblings: |
+            TermAssert
+            TermAssertClient
+            nim-libvterm
+
+      - name: Clone runquota sibling
+        # `just build-once` compiles `ct`, which imports `runquota_process`
+        # (see `cross-process-linux`).
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/runquota
+          ref: dev
+          path: ${{ github.workspace }}/../runquota
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Provision dependency siblings from repro.lock
+        # isonim, isonim-tui, nim-pty, nim-termctl et al., which every TUI suite
+        # compiles against through codetracer's top-level `config.nims`. After
+        # the step above, which installed Nix: this action reaches `repro`
+        # through the dev shell. The token is required: one build input,
+        # codetracer-image-diff, is private.
+        uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Build ct and replay-server
+        # `test_fixture_corpus.nim` (Tier 1) opens real recorded traces through
+        # a real `replay-server`, and on a cold `test-logs/tui-fixtures/` cache
+        # records them with `ct`. A missing `replay-server` fails that file by
+        # design and an all-skipped corpus fails it too (see the comment above
+        # `test-tui` in the justfile), so both are built first.
+        env:
+          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+        run: nix develop .#devShells.x86_64-linux.default --command just build-once
+
+      - name: Build the GPUI front-end the cross-front-end suites drive
+        # Four files in these lanes hold the terminal to the same answers as
+        # the GPUI front-end and run the SHIPPED `build/bin/codetracer-gpui`
+        # over the same recording (`test_plat68_diff13.nim`,
+        # `test_plat45_three_media.nim`, `test_plat41_parity.nim`,
+        # `real_terminal/test_plat42_diff11.nim`); a missing binary is a
+        # failure naming `just build-gpui`, not a skip. The binary dlopens
+        # isonim-gpui's featureless shim from `../isonim-gpui/rust/target/debug`,
+        # which is built in isonim-gpui's OWN dev shell, as
+        # `ci/test/gpui-window-captures.sh` builds it. `../isonim-gpui` is the
+        # checkout `provision-repro-lock-siblings` made, at the lock's revision.
+        run: |
+          (cd ../isonim-gpui && nix develop --command bash -c 'cd rust && cargo build')
+          nix develop .#devShells.x86_64-linux.default --command just build-gpui
+
+      - name: TUI Tier 1 — the suites that need no terminal
+        run: nix develop .#devShells.x86_64-linux.default --command just test-tui
+
+      - name: TUI Tier 2 — the real binary in a real pty
+        # `!cancelled()`, so a Tier-1 failure does not hide whether Tier 2 holds.
+        # The recipe builds `build/bin/codetracer-tui` itself (`build-tui`).
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-tui-real-terminal
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tui-test-logs
+          path: test-logs/
+          retention-days: 30
+
   gpui-window-captures:
     runs-on: [self-hosted, linux, x64]  # the label isonim-gpui's "GUI tests (headless sway)" job runs green on
     # NEW, NO SAMPLE YET. The work is two cargo builds of isonim-gpui's shim
@@ -3801,6 +3943,8 @@ jobs:
 
       - name: Provision dependency siblings from repro.lock
         uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Build ct and replay-server
         # `ct record` records the `calc` and `call_pages` fixtures the
@@ -4019,6 +4163,8 @@ jobs:
         # After ``Install Nix``: the action reaches ``repro`` through this
         # repo's dev shell, which the build step below uses anyway.
         uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Allow direnv in cloned codetracer-native-recorder
         # ci/build/dev.sh builds src/db-backend, whose build.rs invokes
@@ -4154,6 +4300,8 @@ jobs:
         # ``Install Nix`` because the action reaches ``repro`` through this
         # repo's dev shell.
         uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Allow direnv in cloned codetracer-native-recorder
         # db-backend's build.rs invokes ``direnv exec <recorder-root> bash
@@ -4520,9 +4668,9 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=f52b20cced5f016d95c99ebcfd15264dffff8079
-            codetracer-trace-format-nim=d655392565ee57e398bd29e755472bf14f35d871
-            codetracer-native-recorder=441db7efac736c1373dd722432ef4f22cab96d91
+            codetracer-trace-format=8794892b43516f033360adaa702219d0d7974449
+            codetracer-trace-format-nim=281c5e394d418ab6fa4ca35121e05b18417825cd
+            codetracer-native-recorder=c009b074c22a0a53ab764eb38eb959442697fda6
             # Required by scripts/require-siblings.sh, which build-once.sh runs first.
             # BARE: this job only runs on codetracer, so clone-siblings resolves
             # them from this commit's own committed repro.lock, which pins all of them.
@@ -5267,6 +5415,8 @@ jobs:
         # checkout -- and both have Nix by the step above, which this action
         # requires to reach ``repro``.
         uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       # --- macOS setup ---
       # No open-coded just / Python / Rust / cargo-nextest toolchain steps and
@@ -5794,9 +5944,9 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=f52b20cced5f016d95c99ebcfd15264dffff8079
-            codetracer-trace-format-nim=d655392565ee57e398bd29e755472bf14f35d871
-            codetracer-native-recorder=441db7efac736c1373dd722432ef4f22cab96d91
+            codetracer-trace-format=8794892b43516f033360adaa702219d0d7974449
+            codetracer-trace-format-nim=281c5e394d418ab6fa4ca35121e05b18417825cd
+            codetracer-native-recorder=c009b074c22a0a53ab764eb38eb959442697fda6
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
@@ -5887,6 +6037,8 @@ jobs:
         # project in metacraft-manifests does not declare it). repro.lock is
         # what answers for it, which is exactly what this action reads.
         uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       # NOTE: codetracer-trace-format, codetracer-trace-format-nim,
       # codetracer-native-recorder, codetracer-visual-replay and
@@ -6371,8 +6523,8 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=f52b20cced5f016d95c99ebcfd15264dffff8079
-            codetracer-trace-format-nim=d655392565ee57e398bd29e755472bf14f35d871
+            codetracer-trace-format=8794892b43516f033360adaa702219d0d7974449
+            codetracer-trace-format-nim=281c5e394d418ab6fa4ca35121e05b18417825cd
 
       - name: Stage codetracer-trace-format into libs/
         # The flake override below points at ./libs/codetracer-trace-format;
@@ -6435,7 +6587,7 @@ jobs:
         # what the script's stale-checkout check can hold a checkout to.
         env:
           GH_TOKEN: ${{ steps.ci_token.outputs.token }}
-          RR_BACKEND_REF: b1e07aabb86536d2c4248cb8fc162381d86350fe
+          RR_BACKEND_REF: 1eebd50ba74623316ece25e8808f5a041d8a84c9
         run: ./ci/setup-rr-backend.sh
 
       - name: Assert the ct-native-replay build-siblings builds can start
@@ -6698,9 +6850,9 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=f52b20cced5f016d95c99ebcfd15264dffff8079
-            codetracer-trace-format-nim=d655392565ee57e398bd29e755472bf14f35d871
-            io-mon=327e7ab90e8efa48cff58de799212665515914af
+            codetracer-trace-format=8794892b43516f033360adaa702219d0d7974449
+            codetracer-trace-format-nim=281c5e394d418ab6fa4ca35121e05b18417825cd
+            io-mon=8e6b67b08b79c4029c3b188df102541d8412518c
             nim-shm-queue=91451f2250beb89d1d221f0a77be0841c19b182e
             nim-shm-gset=fb981c7f186a9507c974b7de8871fc74d6308eae
             nim-stackable-hooks=dev
@@ -6710,7 +6862,7 @@ jobs:
             # the lock, as for the trace-format pair above.
             codetracer-visual-replay=71f6b70ee6c3de47973645dae45e661de076eb7b
             codetracer-native-backend=1eebd50ba74623316ece25e8808f5a041d8a84c9
-            codetracer-native-recorder=441db7efac736c1373dd722432ef4f22cab96d91
+            codetracer-native-recorder=c009b074c22a0a53ab764eb38eb959442697fda6
             codetracer-native-test-programs=dev
             codetracer-visual-replay-fixtures=dev
             runquota=dev
@@ -6914,6 +7066,8 @@ jobs:
         # `viewmodel-tests`, and like it this runs after ``Install Nix``
         # because the action reaches ``repro`` through this repo's dev shell.
         uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Run the M16 ct-test release gate
         # The ct_test sources import runquota_process; the dev shell exports
@@ -7007,13 +7161,13 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=f52b20cced5f016d95c99ebcfd15264dffff8079
-            codetracer-trace-format-nim=d655392565ee57e398bd29e755472bf14f35d871
-            io-mon=327e7ab90e8efa48cff58de799212665515914af
+            codetracer-trace-format=8794892b43516f033360adaa702219d0d7974449
+            codetracer-trace-format-nim=281c5e394d418ab6fa4ca35121e05b18417825cd
+            io-mon=8e6b67b08b79c4029c3b188df102541d8412518c
             nim-shm-queue=91451f2250beb89d1d221f0a77be0841c19b182e
             nim-shm-gset=fb981c7f186a9507c974b7de8871fc74d6308eae
             nim-stackable-hooks=dev
-            codetracer-native-recorder=441db7efac736c1373dd722432ef4f22cab96d91
+            codetracer-native-recorder=c009b074c22a0a53ab764eb38eb959442697fda6
             codetracer-js-recorder=dev
             codetracer-ruby-recorder=dev
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
@@ -7160,6 +7314,8 @@ jobs:
         # shim from these siblings and captures a real read set with them (CTC-3g).
         # Without them the suite fails by name; it never skips.
         uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Run the ct-test-certificates lane
         # No CT_TEST_CERTIFICATE_VECTORS: setting it would walk an exported
@@ -7570,20 +7726,18 @@ jobs:
         with:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
-      - name: Install Nix
-        uses: metacraft-labs/devops-modules/.github/install-nix@dev
+      - name: Install Nix and configure private repository authentication
+        # The shared action keeps the Git credential in job-scoped headers,
+        # scoped to our organization, and removes stale token-bearing rewrites
+        # from reused runner homes. Keep checkout's credentials above: the tag
+        # push authenticates through its repository-local header.
+        uses: metacraft-labs/metacraft-github-actions/setup-nix@a190f3a8b37c5a239d88b8c964b6d13f64fbaa0d
         with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          token-owner: metacraft-labs
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
-
-      - name: Configure Nix for private repos
-        run: |
-          mkdir -p ~/.config/nix
-          echo "access-tokens = github.com=${{ steps.ci_token.outputs.token }}" >> ~/.config/nix/nix.conf
-          git config --global url."https://x-access-token:${{ steps.ci_token.outputs.token }}@github.com/".insteadOf "git@github.com:"
-          git config --global url."https://x-access-token:${{ steps.ci_token.outputs.token }}@github.com/".insteadOf "ssh://git@github.com/"
-          git config --global url."https://x-access-token:${{ steps.ci_token.outputs.token }}@github.com/".insteadOf "https://github.com/"
 
       - name: Create tag
         if: ${{ github.ref == 'refs/heads/main' }}
@@ -7665,20 +7819,17 @@ jobs:
         uses: actions/checkout@v5
         with:
           token: ${{ steps.ci_token.outputs.token }}
-      - name: Install Nix
-        uses: metacraft-labs/devops-modules/.github/install-nix@dev
+      - name: Install Nix and configure private repository authentication
+        # The shared action keeps the Git credential in job-scoped headers,
+        # scoped to our organization, and removes stale token-bearing rewrites
+        # from reused runner homes before the release's Nix commands run.
+        uses: metacraft-labs/metacraft-github-actions/setup-nix@a190f3a8b37c5a239d88b8c964b6d13f64fbaa0d
         with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          token-owner: metacraft-labs
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
-
-      - name: Configure Nix for private repos
-        run: |
-          mkdir -p ~/.config/nix
-          echo "access-tokens = github.com=${{ steps.ci_token.outputs.token }}" >> ~/.config/nix/nix.conf
-          git config --global url."https://x-access-token:${{ steps.ci_token.outputs.token }}@github.com/".insteadOf "git@github.com:"
-          git config --global url."https://x-access-token:${{ steps.ci_token.outputs.token }}@github.com/".insteadOf "ssh://git@github.com/"
-          git config --global url."https://x-access-token:${{ steps.ci_token.outputs.token }}@github.com/".insteadOf "https://github.com/"
 
       - name: "Import GPG key for signing commits"
         id: import-gpg
@@ -8065,6 +8216,20 @@ jobs:
         # `set -euo pipefail` that killed the script before it printed a word.
         run: bash ci/test/build-once-workspace-test.sh
 
+      - name: Assert a workflow lane reaches every recipe that must run in CI
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        # `just test-tui` and `just test-tui-real-terminal` are the only routes
+        # to the TUI's two Nim lanes, and no workflow called either: every
+        # guard stayed green, because none of them has recipes as its subject
+        # (codetracer-pm issues/2026-11-01-no-ci-lane-calls-the-test-tui-
+        # recipes.md). This suite reads the recipe set `shell-gate-coverage.sh`
+        # already walks from the workflows and fails, by name, on any recipe
+        # listed in `ci/test/ci-reached-recipes.txt` that is not in it -- with a
+        # negative control that deletes the workflow steps from a copy of the
+        # tree and requires each listed recipe to be reported unreached.
+        # Static, bash and coreutils only, about a minute.
+        run: bash ci/test/ci-reached-recipes-test.sh
+
       - name: Check the launcher<->recorder gate's cross-repo workflow wiring
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # The other half of the same class of defect, reached from the
@@ -8311,6 +8476,7 @@ jobs:
       - cross-process-linux
       - ct-host-container-gate
       - viewmodel-tests
+      - tui-tests
       - visual-replay-regression-gate
       - ct-test-release-gate
       - ct-test-providers

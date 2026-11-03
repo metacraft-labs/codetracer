@@ -232,6 +232,9 @@ fn open_session_for(
         Recorder::Mcr => recording.trace_dir.clone(),
         Recorder::Rr => recording.trace_dir.join("rr"),
     };
+    // No worker is handed to the runner: its own finder must resolve the one
+    // `find_ct_native_replay` resolved (and built) above, which a plain
+    // `cargo test` with no override exercises.
     let runner = FlowTestRunner::new(&db_backend, &trace)
         .unwrap_or_else(|e| panic!("DAP init failed for the {recorder:?} trace: {e}"));
     Some(Session {
@@ -1144,6 +1147,13 @@ fn c_mcr_calltrace_search_uses_the_browsing_replay_admission() {
 fn search_uses_the_browsing_replay_admission(recorder: &str) {
     let native = test_harness::find_ct_native_replay()
         .expect("ct-native-replay is required for the unlicensed search regression");
+    if recorder == "mcr" {
+        // The driver's `ct-native-replay record --backend mcr` needs ct-mcr.
+        // `find_ct_mcr` provisions it and exports `CODETRACER_CT_MCR_CMD` in
+        // this process, which the driver and its children inherit; without
+        // it the recording depends on a dev shell that exported one.
+        test_harness::find_ct_mcr().expect("ct-mcr is required for the MCR search regression");
+    }
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let output = std::process::Command::new("python3")
         .arg(manifest.join("tests/support/native_search_license.py"))
@@ -1264,4 +1274,202 @@ fn rust_rr_calltrace_jump_rows_indent_from_the_visible_root_and_keep_frame_ident
         &RUST_MAIN_LINES,
     );
     session.runner.finish().expect("disconnect failed");
+}
+
+/// Native sessions have no materialized call table. Exercise the real recorder,
+/// replay worker and DAP request; no mocks or placeholder instruction records.
+fn native_low_level_listing(recorder: Recorder, name: &str) {
+    let session = open_session(name, recorder, "c_flow_test.c", FLOW_TEST_LINES)
+        .expect("native recording prerequisites are required");
+    assert_native_low_level_listing(session, CALCULATE_SUM_LINE);
+}
+
+fn assert_native_low_level_listing(session: Session, line: usize) {
+    assert_native_low_level_listing_with_name(session, line, None);
+}
+
+fn assert_native_low_level_listing_with_name(mut session: Session, line: usize, expected_name: Option<&str>) {
+    let state = continue_to_line(session.runner.client(), &session.file, line);
+    println!(
+        "native listing stop: {}:{} function={} pc=0x{:x}",
+        state.location.path, state.location.line, state.location.function_name, state.location.offset
+    );
+    if let Some(expected) = expected_name {
+        assert_eq!(
+            state.location.function_name, expected,
+            "the fixture must stop in its logical inline frame"
+        );
+    }
+    let before = serde_json::to_value(session.runner.client().stack_trace().expect("stack before listing"))
+        .expect("serialize stack");
+    let positions_before = native_frame_positions(session.runner.client());
+    let seq = session
+        .runner
+        .client()
+        .send_request(
+            "ct/load-asm-function",
+            json!({
+                "path": session.file,
+                "name": state.location.function_name,
+                "key": state.location.key,
+                "forceReload": false,
+            }),
+        )
+        .expect("request low-level listing");
+    let ((success, message, body), moved) = response_to(session.runner.client(), seq, "ct/load-asm-function");
+    assert!(success, "native disassembly refused: {message:?}; body={body}");
+    assert!(moved.is_none(), "reading disassembly must not move the session");
+    let after = serde_json::to_value(session.runner.client().stack_trace().expect("stack after listing"))
+        .expect("serialize stack");
+    assert_eq!(before, after, "loading instructions changed the selected stack");
+    assert_eq!(
+        positions_before,
+        native_frame_positions(session.runner.client()),
+        "loading instructions invalidated the selected replay position"
+    );
+    assert_eq!(body["error"], "", "disassembly producer failed: {body}");
+    let rows = body["instructions"].as_array().expect("instructions array");
+    assert!(rows.len() > 3, "expected a whole function, got {body}");
+    assert!(
+        rows.iter().all(|row| !row["name"].as_str().unwrap_or("").is_empty()),
+        "native instructions must contain mnemonics, not empty CTFS placeholders: {body}"
+    );
+    let addresses: Vec<i64> = rows
+        .iter()
+        .map(|r| r["offset"].as_i64().expect("instruction address"))
+        .collect();
+    assert!(
+        addresses.windows(2).all(|pair| pair[0] < pair[1]),
+        "instruction addresses: {addresses:?}"
+    );
+    assert!(
+        addresses[0] > 4096,
+        "instruction offsets must be addresses, not trace steps"
+    );
+    assert_eq!(
+        body["address"].as_i64(),
+        Some(addresses[0]),
+        "listing base must be its first instruction"
+    );
+    assert!(state.location.offset > 0, "native stop must report its program counter");
+    assert_eq!(
+        addresses
+            .iter()
+            .filter(|address| **address == state.location.offset)
+            .count(),
+        1,
+        "listing must contain the stopped PC exactly once: {body}"
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row["highLevelLine"] == line as i64
+                && row["highLevelPath"].as_str() == Some(session.file.as_str())),
+        "the stopped source line must map to instructions: {body}"
+    );
+    let seq = session
+        .runner
+        .client()
+        .send_request(
+            "ct/load-asm-function",
+            json!({
+                "path": session.file, "name": "no_such_recorded_function_112358",
+                "key": state.location.key, "forceReload": false,
+            }),
+        )
+        .expect("request absent function");
+    let ((success, message, _), moved) = response_to(session.runner.client(), seq, "ct/load-asm-function");
+    assert!(
+        !success && !message.unwrap_or_default().is_empty(),
+        "an absent function must be refused by name"
+    );
+    assert!(moved.is_none());
+    let after_refusal = serde_json::to_value(session.runner.client().stack_trace().expect("stack after refusal"))
+        .expect("serialize stack");
+    assert_eq!(before, after_refusal, "refusing a listing changed the selected stack");
+    let seq = session
+        .runner
+        .client()
+        .send_request(
+            "ct/load-asm-function",
+            json!({
+                "path": format!("{}.not-the-recorded-source", session.file),
+                "name": state.location.function_name, "key": state.location.key, "forceReload": false,
+            }),
+        )
+        .expect("request mismatched source");
+    let ((success, message, _), moved) = response_to(session.runner.client(), seq, "ct/load-asm-function");
+    assert!(
+        !success && !message.unwrap_or_default().is_empty(),
+        "a mismatched source must be refused"
+    );
+    assert!(moved.is_none());
+    session.runner.finish().expect("disconnect after listing");
+}
+
+#[test]
+fn c_mcr_low_level_code_lists_native_function_instructions() {
+    native_low_level_listing(Recorder::Mcr, "c_mcr_low_level_code");
+}
+
+#[test]
+fn c_rr_low_level_code_lists_native_function_instructions() {
+    native_low_level_listing(Recorder::Rr, "c_rr_low_level_code");
+}
+
+#[test]
+fn go_rr_low_level_code_lists_native_function_instructions() {
+    let session = open_go_session("go_rr_low_level_code").expect("Go native recording prerequisites are required");
+    assert_native_low_level_listing(session, GO_SUM_LINE);
+}
+
+/// Include the worker's stop serial, which standard DAP stack frames omit.
+fn native_frame_positions(client: &mut DapStdioClient) -> Vec<String> {
+    let rows = load_calltrace_rows(client);
+    let positions: Vec<String> = rows
+        .iter()
+        .filter_map(|row| row.get("content")?.get("call"))
+        .map(|call| {
+            call["location"]["replayPosition"]
+                .as_str()
+                .expect("native frame has replayPosition")
+                .to_owned()
+        })
+        .collect();
+    assert!(!positions.is_empty() && positions.iter().all(|position| !position.is_empty()));
+    positions
+}
+
+#[test]
+fn rust_rr_low_level_code_lists_native_function_instructions() {
+    let session = open_session_for(
+        "rust_rr_low_level_code",
+        Recorder::Rr,
+        Language::Rust,
+        "rust/rust_flow_test.rs",
+        &[(414, "let sum = a + b;")],
+    )
+    .expect("Rust native recording prerequisites are required");
+    assert_native_low_level_listing(session, 414);
+}
+
+/// An always-inline function has a real logical frame but no physical function
+/// of its own. Ask for the function reported by the actual stop, as the pane does.
+fn native_inline_low_level_listing(recorder: Recorder, name: &str) {
+    let session = open_session(name, recorder, "c_inline_listing_test.c", &[(7, "sink = sum;")])
+        .expect("native inline listing prerequisites are required");
+    let expected_name = match recorder {
+        Recorder::Rr => Some("inline_sum"),
+        Recorder::Mcr => None,
+    };
+    assert_native_low_level_listing_with_name(session, 7, expected_name);
+}
+
+#[test]
+fn c_rr_inline_low_level_code_lists_native_function_instructions() {
+    native_inline_low_level_listing(Recorder::Rr, "c_rr_inline_low_level_code");
+}
+
+#[test]
+fn c_mcr_inline_low_level_code_lists_native_function_instructions() {
+    native_inline_low_level_listing(Recorder::Mcr, "c_mcr_inline_low_level_code");
 }

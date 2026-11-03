@@ -423,11 +423,11 @@ jobs:
             # not build" -- `isonim_menu_shell_view.nim` calls
             # `firstElementChild`, which isonim 45673bba does not define.
             # isonim and isonim-tui refreshed again 2026-11-01.
-            isonim=63ddef2541543a91504a1f85ee67db4819f0d4d0
+            isonim=a9d12d5b9c650bdf999e9530bc36bc83a97edf85
             isonim-tui=ff295f7be6d7efc095ef4d249b1df0577d969c89
             isonim-gpui=65e7c654802f1641ef64aa1eb759c7f46f70f1bc
             nim-everywhere=2a41b67a6c0d41cbb55359c702f300eb2696682f
-            nim-termctl=322fbd406837d3b3b6da7c3b07928079c2a24ce4
+            nim-termctl=16a81f4d2fc90598a4c61b72aaf93b51162bed3e
             nim-pty=2845abd58dd2073475177301590c8b51aa5c9094
             nim-acp=478b45609289a1db28a7cbf6a2380cfffd02d6d5
             nim-agent-harbor=7953355d91edebdac055a4b5623f4454b4b760ff

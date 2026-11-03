@@ -941,9 +941,9 @@ MUTATIONS = [
     ),
     Mutation(
         "M41", DOC,
-        "  if b.isNil or not b.userModified:\n"
+        "  if not userModified or layout.tree.isNil:\n"
         '    return LayoutPersistPlan(intent: lpiRemove, text: "")',
-        "  if b.isNil:\n"
+        "  if layout.tree.isNil:\n"
         '    return LayoutPersistPlan(intent: lpiRemove, text: "")',
         P_RESET,
         "an UNTOUCHED session writes its profile default, which freezes the "
@@ -1047,7 +1047,7 @@ MUTATIONS = [
         "M46", DOC,
         "  if quarantined:\n"
         '    return LayoutPersistPlan(intent: lpiQuarantine, text: "")',
-        "  if quarantined and (b.isNil or not b.userModified):\n"
+        "  if quarantined and (not userModified or layout.tree.isNil):\n"
         '    return LayoutPersistPlan(intent: lpiQuarantine, text: "")',
         X_PRECMOD,
         "**THE ARM THIS WHOLE SUITE WAS BUILT FOR.** The quarantine branch is "
@@ -1065,9 +1065,9 @@ MUTATIONS = [
         "M47", DOC,
         "  if quarantined:\n"
         '    return LayoutPersistPlan(intent: lpiQuarantine, text: "")\n'
-        "  if b.isNil or not b.userModified:\n"
+        "  if not userModified or layout.tree.isNil:\n"
         '    return LayoutPersistPlan(intent: lpiRemove, text: "")',
-        "  if b.isNil or not b.userModified:\n"
+        "  if not userModified or layout.tree.isNil:\n"
         '    return LayoutPersistPlan(intent: lpiRemove, text: "")\n'
         "  if quarantined:\n"
         '    return LayoutPersistPlan(intent: lpiQuarantine, text: "")',
@@ -1164,14 +1164,14 @@ MUTATIONS = [
     ),
     Mutation(
         "M57", DOC,
-        "  if b.isNil or not b.userModified:",
-        "  if b.isNil or b.userModified:",
+        "  if not userModified or layout.tree.isNil:",
+        "  if userModified or layout.tree.isNil:",
         X_PLAN,
         "the second branch's CONDITION is inverted, so an untouched session "
         "writes and a rearranged one deletes. The arm for the plan table "
-        "itself: six cells over the routine's own two inputs, which is the "
-        "only place `b.isNil` — a value no session can present — is graded at "
-        "all",
+        "itself: six cells over the binding overload's two inputs, which is "
+        "the only place a nil binding — a value no session can present, and "
+        "one that overload hands on as an empty `Layout()` — is graded at all",
         suite=MATRIX,
     ),
     # --- the write is a RENAME, and a refused delete is not a delete ---------
@@ -1389,13 +1389,12 @@ DECLARED_SURVIVORS = [
     ),
     Mutation(
         "S14", DOC,
-        "  if b.isNil or not b.userModified:",
-        "  if not (not b.isNil and b.userModified):",
+        "  if not userModified or layout.tree.isNil:",
+        "  if not (userModified and not layout.tree.isNil):",
         "",
-        "De Morgan on the persist plan's guard, short-circuit and all: `not "
-        "b.isNil` is still evaluated first, so a nil binding is still never "
-        "dereferenced. IT MUST SURVIVE, and it is THE CONTROL FOR M41, which "
-        "drops one of these two conditions.",
+        "De Morgan on the persist plan's guard: the same two facts, the same "
+        "answer for all four of their combinations. IT MUST SURVIVE, and it "
+        "is THE CONTROL FOR M41, which drops one of these two conditions.",
         suite=PERSIST,
     ),
     Mutation(
@@ -1462,11 +1461,11 @@ DECLARED_SURVIVORS = [
         "S19", DOC,
         "  if quarantined:\n"
         '    return LayoutPersistPlan(intent: lpiQuarantine, text: "")\n'
-        "  if b.isNil or not b.userModified:\n"
+        "  if not userModified or layout.tree.isNil:\n"
         '    return LayoutPersistPlan(intent: lpiRemove, text: "")',
         "  if quarantined:\n"
         '    return LayoutPersistPlan(intent: lpiQuarantine, text: "")\n'
-        "  elif b.isNil or not b.userModified:\n"
+        "  elif not userModified or layout.tree.isNil:\n"
         '    return LayoutPersistPlan(intent: lpiRemove, text: "")',
         "",
         "The second branch as an `elif` rather than a second `if` — identical, "
@@ -1545,8 +1544,8 @@ DECLARED_SURVIVORS = [
     ),
     Mutation(
         "S26", DOC,
-        "  if b.isNil or not b.userModified:",
-        "  if b.isNil or (not b.userModified):",
+        "  if not userModified or layout.tree.isNil:",
+        "  if (not userModified) or layout.tree.isNil:",
         "",
         "The second branch's guard parenthesised, short-circuit and all. IT "
         "MUST SURVIVE, and it is THE CONTROL FOR M57 — S14 makes the same "

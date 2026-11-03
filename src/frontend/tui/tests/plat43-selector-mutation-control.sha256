@@ -2,12 +2,12 @@
 # the subjects AND the suites the arms are graded by (§16c).
 # Refreshed with --record-control-hashes, gated by the needle
 # scan (§39a).
-87d56b404425487fd8d6f0ac598dad1a1385ac7f5ec02fd9d2f4f41d4449ab71  src/frontend/viewmodel/keymap/keymap_selection.nim
+55c9a38aaf9318252d261113024489468331995d10d0695195f1d54b89d25ab7  src/frontend/viewmodel/keymap/keymap_selection.nim
 ba76e5129862d1da730a1201085cfc95a5698b597c42aedab4104c0843ea86bb  src/frontend/viewmodel/host/keymap_preference.nim
-12bba79e36ae21980e218a6966b5adca7ab1a5c150227cb898d2f08a0dba3948  src/frontend/tui/app/runtime.nim
-5e3973257a37fbff1832cf6d655113fdda24771283d9a9d0e191108a14997c7c  src/frontend/tui/app/edit_binding.nim
-22091e34cac128635c133093fe54db4b5aaffb70f6403f77232291833912770d  src/frontend/viewmodel/editing_core.nim
-9357299ebbadc2a4c1e992d8524458cc7e762a543b7d42d55bd24cb99f5eb929  src/frontend/viewmodel/keymap/cua_keymap.nim
-c3cca74d827e0643ed25bcbf2c301d154963bdff6bc7de250e5fb15fe919006a  src/frontend/viewmodel/keymap/keymap_router.nim
+30f956b8c907fbf609bd11a4ed8e1ca6dd2ad071a6fbb0962b15a68e9a18d677  src/frontend/tui/app/runtime.nim
+1512709577e3ce43aacee0ec9d6597b790f30709c8f22448fb52670679c9e03f  src/frontend/tui/app/edit_binding.nim
+9c7c664a71b97a33f7c6bdfc8ef01c9990d17e3d8b2e6a55459e98e8830b2e96  src/frontend/viewmodel/editing_core.nim
+56d00918278714b648fd2ab3abe63ad038dc48846f3fe84036fb716f2c774878  src/frontend/viewmodel/keymap/cua_keymap.nim
+77c2251e31ea97e80264f2b103babcf3a7833813b4204cf979fd4471bb6c0c83  src/frontend/viewmodel/keymap/keymap_router.nim
 c72791d9763bea79c1d38e0b3ce3dcc6017b1b504acdf35182e2726738f771a7  src/frontend/tui/tests/test_plat43_keymap_selector.nim
 143415d095cd417628a3632a2fc63d96315b251432cffee9410f2be962b20107  src/frontend/tui/tests/test_plat43_selector_sources.nim

@@ -91,8 +91,8 @@ type
 
     # -- Mutable state --
     instructions*: Signal[seq[LowLevelInstruction]]
-    activeOffset*: Signal[int]
-    address*: Signal[int]
+    activeOffset*: Signal[int64]
+    address*: Signal[int64]
     errorMessage*: Signal[string]
     noirProject*: Signal[bool]
     activeLine*: Signal[int]
@@ -147,7 +147,7 @@ type
 const NoSelectedInstruction* = -1
   ## `selected` when the listing's cursor is on no instruction.
 
-const NO_ACTIVE_OFFSET* = -1
+const NO_ACTIVE_OFFSET* = -1'i64
   ## Sentinel matching the legacy ``NO_LINE`` / ``findHighlight = -1``
   ## "no row active" indicator.
 
@@ -169,7 +169,7 @@ func sameSourcePath*(a, b: string): bool =
     long[long.len - short.len - 1] == '/'
 
 proc isActiveInstruction*(instr: LowLevelInstruction; activeLine: int;
-                          activePath: string; activeOffset: int): bool =
+                          activePath: string; activeOffset: int64): bool =
   ## Whether `instr` is one of the rows the debugger's position marks: one
   ## generated from the source line it is at, or the row a generated-code
   ## cursor anchored by offset.
@@ -177,7 +177,7 @@ proc isActiveInstruction*(instr: LowLevelInstruction; activeLine: int;
    (activePath.len == 0 or sameSourcePath(instr.highLevelPath, activePath))) or
     (activeOffset >= 0 and instr.offset == activeOffset)
 
-proc isActiveRow*(instr: LowLevelInstruction; activeOffset: int): bool =
+proc isActiveRow*(instr: LowLevelInstruction; activeOffset: int64): bool =
   ## True when ``instr`` should carry the ``active-instruction`` class.
   ## Mirrors the legacy ``editor.tabInfo.highlightLine`` lookup which
   ## walked ``instructionsMapping`` to find the row whose offset / line
@@ -217,14 +217,14 @@ proc setInstructions*(vm: LowLevelCodeVM; instructions: seq[LowLevelInstruction]
   ## in offset order, and the groups follow it.
   vm.instructions.val = instructions
 
-proc setActiveOffset*(vm: LowLevelCodeVM; offset: int) =
+proc setActiveOffset*(vm: LowLevelCodeVM; offset: int64) =
   ## Refresh the active-row reference.  ``offset < 0`` means "no row
   ## active".  Mirrors the legacy ``editor.tabInfo.highlightLine``
   ## reset-on-load behaviour: callers pass ``NO_ACTIVE_OFFSET`` while
   ## a fresh request is in flight.
   vm.activeOffset.val = offset
 
-proc setAddress*(vm: LowLevelCodeVM; address: int) =
+proc setAddress*(vm: LowLevelCodeVM; address: int64) =
   ## Set the function's load address.  Used by the IsoNim view to
   ## render the optional "Originating address: 0x..." line (mirrors
   ## the same line in the no_source panel).
@@ -275,11 +275,13 @@ proc clearInstructions*(vm: LowLevelCodeVM) =
 
 func instructionOf*(node: JsonNode): LowLevelInstruction =
   ## One `Instruction` of the engine's answer (`src/db-backend/src/task.rs`).
+  ## Native offsets are runtime addresses, so use the wire's 64-bit value
+  ## rather than `getInt`, which narrows to 32 bits on the JS backend.
   LowLevelInstruction(
     name: node{"name"}.getStr(""),
     args: node{"args"}.getStr(""),
     other: node{"other"}.getStr(""),
-    offset: node{"offset"}.getInt(-1),
+    offset: node{"offset"}.getBiggestInt(-1),
     highLevelPath: node{"highLevelPath"}.getStr(""),
     highLevelLine: node{"highLevelLine"}.getInt(0))
 
@@ -288,7 +290,7 @@ func instructionListOf*(body: JsonNode): LowLevelInstructionList =
   ## `instructions`, `error`).
   if body.isNil or body.kind != JObject:
     return
-  result.address = body{"address"}.getInt(0)
+  result.address = body{"address"}.getBiggestInt(0)
   result.error = body{"error"}.getStr("")
   for n in body{"instructions"}.getElems:
     result.instructions.add instructionOf(n)
@@ -625,7 +627,7 @@ const LowLevelMenuLabels*: array[LowLevelMenuAction, string] = [
   "Go to Source Line", "Show Source Line", "Copy Instruction",
   "Copy Source Location"]
 
-proc addressText*(address: int): string =
+proc addressText*(address: int64): string =
   ## The header's load address line (the desktop's no-source panel's words).
   "Originating address: 0x" & toHex(address)
 
@@ -681,7 +683,8 @@ proc emptyText*(vm: LowLevelCodeVM): string =
 
 proc executionIndexIn*(instructions: seq[LowLevelInstruction]; ticks: uint64;
                        ownCode: bool; activeLine: int; activePath: string;
-                       activeOffset: int): int =
+                       activeOffset: int64; nativeCode = false;
+                       programCounter: int64 = -1): int =
   ## THE EXECUTION POINTER: the instruction the debugger is at.
   ##
   ## For the recording's own code (`ownCode`), each instruction's `offset` is
@@ -690,12 +693,20 @@ proc executionIndexIn*(instructions: seq[LowLevelInstruction]; ticks: uint64;
   ## (`Location.rr_ticks = step_id`): the row whose offset is the tick is the
   ## current one. A generated-code listing's offsets are row indices, so only
   ## the anchored row (`activeOffset`) can be. Failing both, the first
-  ## instruction of the line the debugger is at. -1 when none applies.
-  if ownCode:
+  ## instruction of the line the debugger is at. Native disassembly instead
+  ## uses runtime addresses: only the frame's PC can select an exact row,
+  ## never the replay tick (even if the numbers happen to coincide).
+  ## -1 when none applies.
+  if ownCode and nativeCode:
+    if programCounter >= 0:
+      for i, instr in instructions:
+        if instr.offset == programCounter:
+          return i
+  elif ownCode:
     for i, instr in instructions:
       if instr.offset >= 0 and uint64(instr.offset) == ticks:
         return i
-  if activeOffset >= 0:
+  if activeOffset >= 0 and not (ownCode and nativeCode):
     for i, instr in instructions:
       if instr.offset == activeOffset:
         return i
@@ -709,10 +720,12 @@ proc executionIndexIn*(instructions: seq[LowLevelInstruction]; ticks: uint64;
 
 proc executionIndex*(vm: LowLevelCodeVM): int =
   let ticks = if vm.store.isNil: 0'u64 else: vm.store.debugger.val.rrTicks
+  let pc = if vm.store.isNil: -1'i64 else: vm.store.stop.val.frameOffset
   executionIndexIn(vm.instructions.val, ticks,
                    ownCode = vm.generatedAtStop.val.len == 0,
                    vm.activeLine.val, vm.activePath.val,
-                   vm.activeOffset.val)
+                   vm.activeOffset.val, nativeCode = vm.address.val > 0,
+                   programCounter = pc)
 
 proc sameSourceLine(path: string; line: int; at: SourceLineRef): bool =
   at.line > 0 and line == at.line and
@@ -784,7 +797,7 @@ proc displayRows*(vm: LowLevelCodeVM): seq[LowLevelRowView] =
   let executing = vm.executionIndex
   let linked = vm.linkedIndices
   let crossRef = vm.crossRefSource
-  var offsetSeen = initTable[int, int]()
+  var offsetSeen = initTable[int64, int]()
   var lineSeen = initTable[string, int]()
   var groupPath = ""
   var groupLine = 0
@@ -995,7 +1008,7 @@ proc createLowLevelCodeVM*(store: ReplayDataStore): LowLevelCodeVM =
   withViewModel proc(dispose: proc()): LowLevelCodeVM =
     let instructions = createSignal(newSeq[LowLevelInstruction]())
     let activeOffset = createSignal(NO_ACTIVE_OFFSET)
-    let address = createSignal(0)
+    let address = createSignal(0'i64)
     let errorMessage = createSignal("")
     let noirProject = createSignal(false)
     let activeLine = createSignal(0)

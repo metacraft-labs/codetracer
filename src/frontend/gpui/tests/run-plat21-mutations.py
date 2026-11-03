@@ -398,10 +398,8 @@ ARMS = [
         "  let selected = \"\"\n  var cursor = 0",
         SUITE_CROSS,
         "the state pane's cursor comes from StateVM.selectedPath",
-        "  let tabs = viewTabs(\"state.tabs\", stateTabOptions(), "
-        "selected = ord(tab))",
-        "  let tabs = viewTabs(\"state.tabs\", stateTabOptions(), "
-        "selected = ord(tab))  # ctl",
+        "  let visible = visibleRows(tree)",
+        "  let visible = visibleRows(tree)  # ctl",
         "UNDECLARED, AND IT SURVIVED ON ITS FIRST RUN — the prediction in this "
         "note was right. The state pane stops deriving its cursor from "
         "`StateVM.selectedPath` — the signal the terminal's "

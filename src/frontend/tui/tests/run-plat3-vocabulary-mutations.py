@@ -136,6 +136,14 @@ ARMS = [
         *CTL[TERMINAL],
         "THE MARKDOWN EXCLUSION COMES BACK. The widget keeps its source now; "
         "a binding that stopped reading it would report nothing."),
+    Arm("T4", TERMINAL,
+        "    w.setHighlight(v.highlight)",
+        "    discard",
+        CROSS,
+        "List: the supplied highlight survives binding and seeds motion",
+        *CTL[TERMINAL],
+        "THE LIST SEED IS DROPPED. The real terminal widget starts at zero "
+        "instead of the supplied row, and its first motion starts there too."),
     # ------------------------------------------------------------------
     # THE VOCABULARY — the cluster caret and the web's Markdown parser
     # ------------------------------------------------------------------

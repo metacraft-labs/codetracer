@@ -420,7 +420,9 @@ test_lane_recipe() {
 		# captures, needs `--path:../GuiAssert/src` and tesseract, and is
 		# scored against the milestone's case floor by
 		# `ci/test/editor-model-case-floor.sh PLAT-39` (`plat39-case-floor`).
-		echo "plat39-record-gate plat39-case-floor"
+		# The pane-census regression needs no captured frames and has its own
+		# recipe, because delegation here bypasses the generic file runner.
+		echo "plat39-record-gate test-pane-census plat39-case-floor"
 		;;
 	*) ;;
 	esac

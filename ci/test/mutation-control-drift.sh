@@ -5,7 +5,7 @@
 #
 # THE DEFECT
 # ----------
-# Each comparator harness (`run-plat*-mutations.py`) keeps a
+# Each comparator harness (`run-*-mutations.py`) keeps a
 # `*-mutation-control.sha256` beside it: the SHA-256 of every subject its arms
 # mutate and of the suite that grades them. It refuses to grade while any
 # recorded digest disagrees with the tree (`check_control_hashes()`, then
@@ -185,22 +185,29 @@ is_sibling() {
 	[ -z "${tracked_top["${p%%/*}"]+x}" ]
 }
 
-# The harness that owns a control file: every `run-plat*-mutations.py` in the
+# The harness that owns a control file: every `run-*-mutations.py` in the
 # same directory whose source names the control file. Looked up by NAME rather
-# than by directory, because one directory holds dozens of harnesses.
+# than by directory, because one directory holds dozens of harnesses. Not
+# only `run-plat*`: `run-hsf-sdk-`, `run-build-residuals-` and
+# `run-wd7-session-allocation-` own control files too. A harness that never
+# spells the name is still found by its own file name: the plat71 harnesses
+# pass a stem to plat71_mutation_engine.py, which opens
+# `<stem>-mutation-control.sha256`, so `run-<stem>-mutations.py` is the owner.
 declare -A harness_of=()
 harness_for() {
-	local c="$1" dir base h found=""
+	local c="$1" dir base stem h found=""
 	dir="$(dirname "${c}")"
 	base="$(basename "${c}")"
-	for h in "${dir}"/run-plat*-mutations.py; do
+	stem="${base%-mutation-control.sha256}"
+	for h in "${dir}"/run-*-mutations.py; do
 		[ -f "${h}" ] || continue
-		if grep -qF -- "${base}" "${h}"; then
+		if [ "$(basename "${h}")" = "run-${stem}-mutations.py" ] ||
+			grep -qF -- "${base}" "${h}"; then
 			found="${found:+${found}, }${h}"
 		fi
 	done
 	if [ -z "${found}" ]; then
-		found="(no run-plat*-mutations.py in ${dir} names this control file)"
+		found="(no run-*-mutations.py in ${dir} names this control file)"
 	fi
 	harness_of["${c}"]="${found}"
 }

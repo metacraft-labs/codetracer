@@ -683,7 +683,7 @@ proc isGutterToggleTarget(target: js): bool =
 method clear*(self: EditorViewComponent) =
   self.flow.clear()
 
-func has(tab: TabInfo, instruction: Instruction, i: int, offset: int): bool =
+func has(tab: TabInfo, instruction: Instruction, i: int, offset: int64): bool =
   if i + 1 < tab.instructions.instructions.len:
     var limit = tab.instructions.instructions[i + 1].offset
 

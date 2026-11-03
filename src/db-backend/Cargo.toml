@@ -151,6 +151,14 @@ object = { version = "0.39", default-features = false, features = [
   "elf",
   "std",
 ] }
+# The in-process replay engine needs a real x86 decoder/printer even in
+# the browser, where invoking LLDB or an external objdump is unavailable.
+# Keep only decoding and Intel formatting; no assembler or encoder tables.
+iced-x86 = { version = "1.21.0", default-features = false, features = [
+  "std",
+  "decoder",
+  "intel",
+] }
 
 ntest = "0.9.3"
 

@@ -34,7 +34,7 @@ ONE ARM PER CLAIM, each naming the case (or the gate) that must die:
   | a side strip's label reads down, one character per row | VL1 (every character on one row), VL2 (a one-row slot) |
   | pin / unpin round-trip to where the pane was | PN1 (the anchor forgotten), PN2 (a stack's first tab comes back last), DO1 (a redock to a populated edge collides) |
   | the terminal's menu: the keymap's chords, the bar's keys | TM1 (no chord shown), TM2 (Down walks up) |
-  | the top bar acts on the recording | TO1 (a tick query goes to tick 0), TC1 (a control click does nothing), TF1 (the frame after a click never drawn), DR1 (a queued mouse report split into keys) |
+  | the top bar acts on the recording | TO1 (a tick query goes to tick 0), TC1 (a control click does nothing), TF1 (the frame after a click never drawn), DR1 (a queued mouse report left for another loop turn), DR2 (a held ESC's queued tail split into keys) |
   | GPUI: the top dock edge, the popovers, the desktop keymap | GT1 (top dock refused), GT2 (the top strip misplaced), GT3 (the top margin not a dock zone), GM1 (a nested popover over its parent), GK1 (no bindings read) |
   | session tabs from the keyboard: `g t` / `g T` / `Ctrl+Tab` (terminal), `Ctrl+Alt+PageDown` / `PageUp` (GPUI) | TK1 (`g t` steps back), TK2 (`CSI u` Ctrl+Tab not a key), GS1 (the window's key does nothing) |
   | GPUI's DRAWING, read from the window's own render plan (`--report-window-plan`) | GW1 (every control the first mark), GW2 (enabled drawn in the disabled ink), GW3 (the root button without its mark), GW4 (the popover under the pin buttons), GW5 (a hover label without its chord), GW6 (the reveal an empty box), GW7 (no Unpin), GW8 (the revealed label not marked), GW9 (pins through a top reveal), GP1 (the rule that hides them), GW10 (pin docks to the wrong edge) |
@@ -207,6 +207,7 @@ R_UNBOUND = "enabling it changes NOTHING on screen, compared as rendered rows"
 R_EDGES = "no drag docks, anywhere on the screen; `:dock` is how a pane docks"
 E_LATE = ("a sequence already waiting behind its ESC is one token, however "
           "late the reader")
+E_QUEUED = "a fully queued mouse report is delivered by one nextEvent call"
 T_TABKEYS = ("g t / g T and Ctrl+Tab / Ctrl+Shift+Tab step the tabs, "
              "wrapping (§3.3.1)")
 G_TABKEYS = ("the session tabs' keys are the router's CUA rows (Ctrl+PageDown / "
@@ -233,6 +234,7 @@ CASE_SUITE = {
     W_BAND: GPLAN, W_POPOVER: GPLAN, W_HOVER: GPLAN, W_REVEAL: GPLAN,
     W_TOP: GPLAN, W_PIN: GPLAN,
     B_VERBS: BIND, R_UNBOUND: ROUTE, R_EDGES: ROUTE, E_LATE: ESCD,
+    E_QUEUED: ESCD,
     G_DESKTOP: DESKTOP_GATE,
 }
 NAMED_CASES = list(CASE_SUITE)
@@ -459,15 +461,23 @@ ARMS = [
         P_CLICK,
         "the frame held for a click's release half is never drawn: the step "
         "happened and the screen keeps the old tick"),
+    # The later ESC-continuation path can rescue the bytes on another call.
+    # Observe immediate delivery at nextEvent's boundary, not an eventual
+    # token collected by a helper that silently loops through idle events.
     Arm("DR1", DRIVER,
-        "  # measures bytes that had NOT arrived.\n  while not complete and d.framer.pending.len > 0:\n",
-        "  # measures bytes that had NOT arrived.\n  while false:\n",
+        "  while not complete and d.framer.pending.len > 0:\n"
+        "    let more = readByteWithTimeout(0, d.inFd)\n",
+        "  while false:\n"
+        "    let more = readByteWithTimeout(0, d.inFd)\n",
+        E_QUEUED,
+        "a fully queued mouse report returns idle and needs another event-loop "
+        "turn instead of being delivered immediately"),
+    Arm("DR2", DRIVER,
+        "    if next >= 0 and char(next) in {'[', 'O'}:\n",
+        "    if false:\n",
         E_LATE,
-        "the ordinary drain and late continuation recognition are both disabled: "
-        "a queued mouse report is split into Esc and keys",
-        also=((DRIVER,
-               "    if next >= 0 and char(next) in {'[', 'O'}:\n",
-               "    if false:\n"),)),
+        "the queued tail of a held ESC is split into Esc and keys instead "
+        "of being delivered as the complete report"),
     # --- GPUI ------------------------------------------------------------------------
     Arm("GT1", DOCKPROJ,
         "  let topDocked = dockGroupsOf(layout, leTop).len > 0\n",

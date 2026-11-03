@@ -70,6 +70,15 @@
 #       refused removal of the marker fails the restore and can be retried. A
 #       failed restore keeps a status that was already non-zero. A signal during
 #       the restore does not stop it between its two removals.
+#   (p) a backup left under a lane's own name by a run killed before the lanes
+#       shared this library (`<live>.plat38-backup` and the like) is the original
+#       too: it is taken over, and the restore puts it back. Two of them cannot
+#       both be the original, so a stage refuses them, names both and touches
+#       nothing. The stale arm at the live path is what makes the first case
+#       fail without the takeover.
+#   (q) every selected lane parses with the host's system Bash. On Darwin this
+#       deliberately means `/bin/bash`, the 3.2 interpreter macOS supplies, and
+#       not the newer Bash from the development shell that runs this test.
 #
 # REAL: bash, python3, the lane scripts themselves, run end to end from a copy
 # in a sandbox workspace against `src/tests/visual/scenarios.json`, and a real
@@ -207,6 +216,27 @@ arms_seen() {
 }
 
 cargo_bytes='cargo output of the shim'
+
+# Parse the real lane before any stand-in can hide a failure. Every host runs
+# this case: Darwin selects the platform Bash whose compatibility is the
+# contract; other hosts select their real Bash and retain a syntax check.
+check_system_bash_parse() {
+	local name="$1" lane="$2" before parser rc=0 parse_output=""
+	before="${failures}"
+	case "$(uname -s)" in
+	Darwin) parser=/bin/bash ;;
+	*) parser="$(command -v bash)" ;;
+	esac
+	if [ ! -x "${parser}" ]; then
+		report "${name}: (q) the system Bash is not executable at ${parser:-<empty>}"
+	elif parse_output="$("${parser}" -n "${lane}" 2>&1)"; then
+		:
+	else
+		rc=$?
+		report "${name}: (q) ${parser} rejected the lane with status ${rc}: ${parse_output}"
+	fi
+	verdict "${name}: (q) parses with the host's system Bash (${parser:-unresolved})" "${before}"
+}
 
 # The stand-ins --------------------------------------------------------------
 stand_ins="${work}/stand-ins"
@@ -716,7 +746,7 @@ check_pinned() {
 # exports is meant to stay in it.
 # shellcheck disable=SC2030,SC2031
 check_library() {
-	local dir="${work}/library" shim before
+	local dir="${work}/library" shim before leftover
 	shim="${dir}/live"
 	mkdir -p "${dir}"
 	printf 'stale arm\n' >"${shim}"
@@ -796,12 +826,54 @@ check_library() {
 	[ ! -e "${shim}" ] && [ ! -e "${shim}.gpui-lane-no-original" ] ||
 		report "(n) a signal stopped the restore between its removals"
 	verdict "library: (n) a signal during the restore does not stop it" "${before}"
+
+	# (p) What a run of a lane from before this library left when it was killed.
+	before="${failures}"
+	rm -f "${shim}" "${shim}".*
+	printf 'stale arm\n' >"${shim}"
+	printf 'original\n' >"${shim}.plat38-backup"
+	(
+		# shellcheck source=ci/lib/gpui-shim-stage.sh disable=SC1091
+		source "${root}/ci/lib/gpui-shim-stage.sh"
+		gpui_shim_stage "${shim}" "${dir}/arm" || exit 3
+		[ "$(read_bytes "${shim}")" = arm ] || exit 4
+		gpui_shim_restore || exit 5
+	) >"${output}" 2>&1 || report "(p) staging over an old lane's backup failed with status $?"
+	[ "$(read_bytes "${shim}")" = original ] ||
+		report "(p) after the run the live path holds [$(read_bytes "${shim}")], not the old lane's backup"
+	leftover="$(find "${dir}" -name 'live.*')"
+	[ -z "${leftover}" ] || report "(p) left over: ${leftover}"
+	verdict "library: (p) an old lane's backup is taken over as the original" "${before}"
+
+	before="${failures}"
+	rm -f "${shim}" "${shim}".*
+	printf 'stale arm\n' >"${shim}"
+	printf 'original\n' >"${shim}.plat38-backup"
+	printf 'older arm\n' >"${shim}.plat42-backup"
+	(
+		# shellcheck source=ci/lib/gpui-shim-stage.sh disable=SC1091
+		source "${root}/ci/lib/gpui-shim-stage.sh"
+		if gpui_shim_stage "${shim}" "${dir}/arm"; then exit 3; fi
+		gpui_shim_restore || exit 4
+	) >"${output}" 2>&1 || report "(p) two old backups: the stage or the restore exited $?"
+	local named
+	for named in plat38 plat42; do
+		grep -qF "${shim}.${named}-backup" "${output}" ||
+			report "(p) the refusal does not name ${shim}.${named}-backup"
+	done
+	[ "$(read_bytes "${shim}")" = 'stale arm' ] &&
+		[ "$(read_bytes "${shim}.plat38-backup")" = original ] &&
+		[ "$(read_bytes "${shim}.plat42-backup")" = 'older arm' ] &&
+		[ ! -e "${shim}.gpui-lane-backup" ] && [ ! -e "${shim}.gpui-lane-no-original" ] ||
+		report "(p) a refused stage changed what it found"
+	verdict "library: (p) two old backups are refused and left as they are" "${before}"
 }
 
 check_library
 
 i=0
 while [ "${i}" -lt "${#chosen_names[@]}" ]; do
+	check_system_bash_parse "${chosen_names[${i}]}" "${chosen_paths[${i}]}"
 	check_lane "${chosen_names[${i}]}" "${chosen_paths[${i}]}"
 	check_refusal "${chosen_names[${i}]}" "${chosen_paths[${i}]}" mv e "the move aside"
 	check_refusal "${chosen_names[${i}]}" "${chosen_paths[${i}]}" cp f "staging"

@@ -54,9 +54,9 @@ description: |
   WHICH OF THEM THIS ACTION CLONES. The develop set also names the siblings
   the test lanes run against (recorders, the native backend, the trace
   format), which ``clone-siblings`` resolves by bare name from the same lock.
-  Several are private, and no Nim build compiles them. This action clones
-  only the BUILD INPUTS: the members of the develop set that are also solved
-  packages in the lock, i.e. what ``repro.nim`` ``uses`` from source --
+  No Nim build compiles them. This action clones only the BUILD INPUTS: the
+  members of the develop set that are also solved packages in the lock, i.e.
+  what ``repro.nim`` ``uses`` from source --
 
       isonim, isonim-tui, codetracer-trace-format-nim, nim-everywhere,
       nim-agent-harbor, nim-agents, nim-acp, test-certificates-tools, io-mon,
@@ -68,6 +68,28 @@ description: |
   and the step passes it as ``--only=``, so the lock stays the only answer
   (declare a from-source dependency in ``repro.nim``, relock, and it is
   cloned here with no list to edit).
+
+  THE CREDENTIAL. Not every build input is public: ``codetracer-image-diff``
+  is a private repository, and ``repro.nim`` uses it, so the clone needs the
+  job's token. Callers pass it as ``gh-token`` (the job's ``ci_token`` mint
+  step output). The clone does not authenticate through the job-wide
+  numbered git configuration that ``setup-nix`` exports (``GIT_CONFIG_COUNT``
+  and ``GIT_CONFIG_KEY_n`` / ``GIT_CONFIG_VALUE_n``), because reprobuild
+  deliberately scrubs numbered configuration from the git commands it runs on
+  another repository's behalf. ``git ls-remote`` in the same job succeeds,
+  and ``repro develop`` dies with "could not read Username for
+  'https://github.com': terminal prompts disabled". The clone therefore runs
+  through ``metacraft-github-actions/git-auth``, which writes the same
+  owner-scoped header into a private ``GIT_CONFIG_GLOBAL`` file for the
+  duration of the command. That is the channel reprobuild documents for its
+  git calls, and the one ``setup-dev-env`` uses for ``repro develop --all``.
+
+  The lock cannot tell public from private. Each ``deps`` entry carries a
+  ``visibility`` field, but it names a reprobuild configuration TIER, not
+  whether GitHub lets an anonymous client read the repository: every entry
+  in this lock says ``public``, ``codetracer-image-diff`` included. So
+  ``ci/test/sibling-provisioning-test.sh`` asserts that a credential is
+  passed, not that the build inputs are public.
 
   ``repro develop --all`` is the documented consumer path for exactly this
   (see the header of ``metacraft-labs/reprobuild``'s
@@ -131,30 +153,45 @@ description: |
   shape possible: no composite action in this repo may clone cross-repo
   siblings itself.
 
+inputs:
+  gh-token:
+    description: >
+      The job's GitHub App installation token (the output of its ci_token
+      mint step). Required: codetracer-image-diff, a build input, is a private
+      repository, and git-auth fails the step rather than clone anonymously.
+    required: true
+
 runs:
   using: composite
   steps:
-    # No ``gh-token`` input, and that is deliberate: every build-input sibling
-    # is public and clones anonymously, so this step needs no credential and
-    # is given none. Reprobuild's own CI runs the same command with
-    # `GIT_CONFIG_GLOBAL=/dev/null`. The develop set's private members are
-    # test-lane siblings, which `--only=` leaves to `clone-siblings`. A future
-    # private BUILD input is the moment to add a token, and it will be visible
-    # as a failing clone rather than as a silent widening of what this step can
-    # read.
+    # The credential goes through `metacraft-github-actions/git-auth`, not
+    # through the job's numbered GIT_CONFIG_* configuration: reprobuild scrubs
+    # that from its clones, and codetracer-image-diff is a private build input
+    # (see "THE CREDENTIAL" in the description). The action reads a private
+    # GIT_CONFIG_GLOBAL file, writes it only for this command, and refuses an
+    # empty token instead of cloning anonymously. It is pinned to a commit:
+    # this is the job's credential, so its handling changes only by an edit
+    # here.
+    #
+    # The build-input list is computed inside the script rather than in an
+    # earlier step and handed over through this step's `env:`. Whether a
+    # `uses:` step's `env:` reaches a composite action's own steps is not
+    # something the workflow syntax reference states, and the script runs in
+    # the same working directory either way.
     - name: Clone the lock-pinned dependency siblings
-      shell: bash
-      run: |
-        set -euo pipefail
-        root="${GITHUB_WORKSPACE}"
-        siblings_root="$(cd "${root}/.." && pwd)"
-        cd "${root}"
-        # The selector uses bash builtins only: this step runs before the dev
-        # shell, and a nix-darwin runner has no grep or sed on its PATH here.
-        build_inputs="$(ci/repro-lock-build-input-siblings.sh repro.lock)"
-        echo "Provisioning the lock's build-input siblings: ${build_inputs}"
-        nix develop .#ci --command \
-          repro develop --all --only="${build_inputs}" --reset --into="${siblings_root}"
+      uses: metacraft-labs/metacraft-github-actions/git-auth@a190f3a8b37c5a239d88b8c964b6d13f64fbaa0d
+      with:
+        gh-token: ${{ inputs.gh-token }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          # The selector uses bash builtins only: this step runs before the
+          # dev shell, and a nix-darwin runner has no grep or sed on its PATH
+          # here.
+          build_inputs="$(ci/repro-lock-build-input-siblings.sh repro.lock)"
+          echo "Provisioning the lock's build-input siblings: ${build_inputs}"
+          siblings_root="$(cd .. && pwd)"
+          nix develop .#ci --command \
+            repro develop --all --only="${build_inputs}" --reset --into="${siblings_root}"
 
     - name: Seed isonim tailwind-styles.json placeholder
       # Still required after the switch. `scripts/build-tailwind.sh` PRODUCES

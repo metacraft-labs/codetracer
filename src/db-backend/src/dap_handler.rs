@@ -6657,6 +6657,16 @@ impl Handler {
         args: FunctionLocation,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
+        // Native replay has no materialized call/step table. Its replay
+        // session owns the loaded executable and its source-mapped instructions.
+        if matches!(self.trace_kind, TraceKind::Recreator | TraceKind::Emulator) {
+            let instructions = self
+                .replay
+                .load_asm_function(&args)
+                .map_err(|error| format!("ct/load-asm-function: {error}"))?;
+            self.respond_dap(request, instructions, sender)?;
+            return Ok(());
+        }
         let mut instructions: Vec<Instruction> = vec![];
         match args.key.parse::<i64>() {
             Ok(number) => {

@@ -37,6 +37,7 @@ ONE ARM PER CLAIM, each naming the case that must die:
   | G   | a call-trace row's click seeks one tick past the row | "a call-trace row's click jumps to that row's own tick" |
   | H   | an event-log row's click seeks nowhere | "an event-log row's click jumps to that event" |
   | CT1 | every call-trace row is given the same call key | "every call-trace row carries its own call key" |
+  | SE  | a failed call's Error return is dropped from its row | "a failed call's return is drawn as its error" |
 
 VD3 GUARDS THE MODEL, NOT THE DRAWING. Every front-end draws an added binding
 and a modified one alike, in the changed-value style
@@ -120,13 +121,14 @@ K_KEPT = "a move keeps the values on screen until its answer arrives"
 K_CALLJUMP = "a call-trace row's click jumps to that row's own tick"
 K_EVENTJUMP = "an event-log row's click jumps to that event"
 K_CALLKEY = "every call-trace row carries its own call key"
+K_ERRORRETURN = "a failed call's return is drawn as its error"
 
 NAMED_CASES = {
     K_LOCALS: T_LOADER, K_FLOW: T_LOADER,
     K_LANDING: T_JOBS, K_INT: T_JOBS, K_STRING: T_JOBS,
     K_SELECTION: T_JOBS, K_UNCHANGED: T_JOBS, K_ADDED: T_JOBS,
     K_KEPT: T_JOBS, K_CALLJUMP: T_JOBS, K_EVENTJUMP: T_JOBS,
-    K_CALLKEY: T_JOBS,
+    K_CALLKEY: T_JOBS, K_ERRORRETURN: T_JOBS,
 }
 
 BT_SELFTEST = "BlockTracer tools/journeys/selftest.mjs"
@@ -261,6 +263,19 @@ ARMS += [
         "**TWO FRAMES ANSWER TO ONE IDENTITY.** Every row is drawn, named and "
         "placed, and a link to a frame can no longer say which row it means",
         "CT1/two-frames-answer-to-one-identity",
+    ),
+    Arm(
+        "SE", STORE,
+        '  if v.getOrDefault("kind").getInt(NoneValueKind) == NoneValueKind: return ""\n',
+        '  if v.getOrDefault("kind").getInt(NoneValueKind) == NoneValueKind: return ""\n'
+        '  if v.getOrDefault("kind").getInt(NoneValueKind) == 24: return ""\n',
+        K_ERRORRETURN,
+        "**A FAILED CALL'S ERROR IS DROPPED FROM ITS ROW.** The call is drawn, "
+        "named and placed, and reads as one that returned nothing: a Starknet "
+        "entry point that failed inside a succeeding transaction is "
+        "indistinguishable from one that succeeded. BlockTracer's Starknet "
+        "journey 01 reads the same return on the live page",
+        "SE/a-failed-call-reads-as-returning-nothing",
     ),
 ]
 

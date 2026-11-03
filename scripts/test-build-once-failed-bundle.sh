@@ -18,6 +18,17 @@ cat >"$work/scripts/build-tailwind.sh" <<'TOOL'
 TOOL
 touch "$work/src/.tup/db"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$work/bin/nim"
+# The invalidation under test lives only in build-once.sh's tup branch, which
+# the script selects from `uname -s`: Darwin and Windows always take the
+# reprobuild branch. Report Linux so the tup branch runs on every host, as
+# test-build-once-platform-lock.sh does for the platform selector.
+cat >"$work/bin/uname" <<'TOOL'
+#!/usr/bin/env bash
+case "$1" in
+ -s) printf 'Linux\n' ;;
+ *) exit 2 ;;
+esac
+TOOL
 cat >"$work/bin/tup" <<'TOOL'
 #!/usr/bin/env bash
 count=0
@@ -96,9 +107,10 @@ echo 'PASS: cleanup failure preserves compiler status'
 # A cached shell profile can fail before any build tool starts. Exercise that
 # boundary with a minimal PATH so installed host Nim/Tup cannot skip sourcing.
 mkdir -p "$work/profile-bin" "$work/.direnv"
-for tool in bash dirname cat uname rm; do
+for tool in bash dirname cat rm; do
 	ln -s "$(command -v "$tool")" "$work/profile-bin/$tool"
 done
+ln -s "$work/bin/uname" "$work/profile-bin/uname"
 printf 'exit 76\n' >"$work/.direnv/flake-profile-test.rc"
 for dir in "$work/src/public/dist" "$work/src/build-debug/public/dist"; do
 	printf 'stale renderer\n' >"$dir/frontend_bundle.js"
