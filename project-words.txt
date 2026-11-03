@@ -393,3 +393,5 @@ vimrc
 vlang
 xdist
 xfail
+codetracerconf
+LLDB
