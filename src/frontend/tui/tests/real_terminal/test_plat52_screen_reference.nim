@@ -24,7 +24,7 @@
 ##
 ## No mocks: the recording, the engine and the reference emulator are real.
 
-import std/[monotimes, os, strutils, times, unicode, unittest]
+import std/[os, posix, strutils, times, unicode, unittest]
 
 import isonim/core/[signals, computation]
 import nim_libvterm
@@ -47,6 +47,16 @@ template ck(condition: untyped) =
   check condition
 
 const FrameBudgetMs = 16.0
+
+proc threadCpuNs(): int64 =
+  ## CPU time THIS thread has used, in ns. Reconstructing a screen is
+  ## computation on this thread, so this is what a scrub step costs; time
+  ## spent waiting for a core on a busy host is not in it. (At load 60 the
+  ## wall clock read 24 ms against the 16 ms budget; the same suite passes
+  ## on an idle host.)
+  var ts: Timespec
+  discard clock_gettime(ClockId(CLOCK_THREAD_CPUTIME_ID), ts)
+  ts.tv_sec.int64 * 1_000_000_000'i64 + ts.tv_nsec.int64
 
 proc sameColour(model: TermColor; other: Color): bool =
   case model.kind
@@ -150,9 +160,9 @@ suite "PLAT-52: the screen is libvterm's screen, at every write checked":
       k = (k * 31 + 11) mod n
       order.add k
     for w in order:
-      let t0 = getMonoTime()
+      let t0 = threadCpuNs()
       discard m.screenAfter(w)
-      let ms = float((getMonoTime() - t0).inNanoseconds) / 1e6
+      let ms = float(threadCpuNs() - t0) / 1e6
       worstMs = max(worstMs, ms)
       worstReplay = max(worstReplay, m.replayed)
     checkpoint("worst " & formatFloat(worstMs, ffDecimal, 3) & " ms, worst " &

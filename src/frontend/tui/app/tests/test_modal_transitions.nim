@@ -39,7 +39,7 @@
 ##
 ## ## Templates, not procs, for anything that calls `check`
 
-import std/[monotimes, strutils, times, unittest]
+import std/[posix, strutils, times, unittest]
 
 import ../input/keymap
 import ./navigation_table
@@ -153,6 +153,14 @@ proc contextState(c: Context): ModalState =
   result = initModalState(c.mode)
   result.phase = c.phase
   result.buffer = "shield"
+
+proc threadCpuNs(): int64 =
+  ## CPU time THIS thread has used, in ns. A dispatch is pure computation on
+  ## the calling thread, so this is its cost; time spent waiting for a core is
+  ## not in it.
+  var ts: Timespec
+  discard clock_gettime(ClockId(CLOCK_THREAD_CPUTIME_ID), ts)
+  ts.tv_sec.int64 * 1_000_000_000'i64 + ts.tv_nsec.int64
 
 suite "CTUI-9: the modal state machine decides every event":
 
@@ -485,9 +493,9 @@ suite "CTUI-9: the modal state machine decides every event":
           var elapsed = int64.high
           for rep in 0 ..< DispatchReps:
             var km = newNavResolver()
-            let started = getMonoTime()
+            let started = threadCpuNs()
             discard km.resolve(state, token, 0)
-            elapsed = min(elapsed, (getMonoTime() - started).inNanoseconds)
+            elapsed = min(elapsed, threadCpuNs() - started)
           inc dispatches
           totalNs += elapsed
           if elapsed > worstNs:
@@ -500,6 +508,12 @@ suite "CTUI-9: the modal state machine decides every event":
     checkpoint("worst dispatch " & $worstUs & " us over " & $dispatches &
                " dispatches; slowest " & slowest)
     # 2 ms, spelled in nanoseconds so the comparison is integer.
+    #
+    # ## REPAIRED AGAIN 2026-11-03: the clock is the thread's CPU time
+    # ## (`threadCpuNs`), not the wall. At load 55 the minimum of five
+    # ## wall-clock readings was still 6.4 ms for one binding: every rep had
+    # ## waited for a core. A dispatch is computation on this thread, so its
+    # ## CPU time is the cost the gate names, and a wait is not in it.
     #
     # ## REPAIRED 2026-10-30: each binding's reading is now the MINIMUM of
     # ## `DispatchReps` dispatches, i.e. its cost rather than the scheduler's
