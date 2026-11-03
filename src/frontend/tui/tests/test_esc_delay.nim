@@ -123,26 +123,38 @@ suite "the lone ESC delay, over a real pipe":
     let (none, _) = d.nextToken(150)
     ck none == ""
 
-  test "a sequence already waiting behind its ESC is one token, however late the reader":
-    # PLAT-48. The input loop does work between two `nextEvent` calls — a
-    # repaint, a debugger step's round trip — and read ONE byte per call. A
-    # mouse release queued behind a click on a debugger control had its `ESC`
-    # read, then the loop repainted for longer than `EscDelayMs`, and the
-    # held `ESC` was declared the Esc key with `[<0;51;1m` still waiting: the
-    # release arrived as the keys `[`, `<`, `0`, `;`, `5`, `1`, `;`, `1`, `m`.
-    # The reader here is late by construction: it takes the `ESC`, then
-    # sleeps past the delay before asking again.
+  test "a fully queued mouse report is delivered by one nextEvent call":
+    # PLAT-48 consumes bytes that are already waiting before returning to the
+    # caller's work. nextToken would hide an intermediate idle event: the
+    # late-ESC continuation path can rescue the same report on a later call.
+    # This real-pipe case therefore observes the public event boundary itself.
     let (d, w) = pipeDriver()
-    w.put("\x1b[<0;51;1m")
+    const report = "\x1b[<0;51;1m"
+    w.put(report)
     let first = d.nextEvent(20)
+    checkpoint("first event " & $first.kind & " " & first.token.escape)
+    ck first.kind == dekToken
+    ck first.token == report
     os.sleep(int(EscDelayMs) * 3)
-    var tok = ""
-    if first.kind == dekToken:
-      tok = first.token
-    else:
-      tok = d.nextToken(1000)[0]
-    checkpoint("got " & tok.escape)
-    ck tok == "\x1b[<0;51;1m"
+    let (none, _) = d.nextToken(150)
+    ck none == ""
+
+  test "a sequence already waiting behind its ESC is one token, however late the reader":
+    # Exercise the OTHER path independently: ESC really was read alone, then
+    # the mouse report's tail arrived while the caller was busy. The first
+    # event after returning late must still be the complete report, without
+    # leaking ESC or requiring another caller turn to assemble its tail.
+    let (d, w) = pipeDriver()
+    const report = "\x1b[<0;51;1m"
+    w.put("\x1b")
+    let held = d.nextEvent(20)
+    ck held.kind == dekIdle
+    w.put("[<0;51;1m")
+    os.sleep(int(EscDelayMs) * 3)
+    let first = d.nextEvent(20)
+    checkpoint("late event " & $first.kind & " " & first.token.escape)
+    ck first.kind == dekToken
+    ck first.token == report
     let (none, _) = d.nextToken(150)
     ck none == ""
 
