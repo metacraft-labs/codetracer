@@ -1341,7 +1341,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=8794892b43516f033360adaa702219d0d7974449
-            codetracer-trace-format-nim=281c5e394d418ab6fa4ca35121e05b18417825cd
+            codetracer-trace-format-nim=4c67a4507b1fe64752f71f287e62e8c4a3953b61
 
       - name: Install Nim dependencies
         shell: bash
@@ -1830,7 +1830,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=8794892b43516f033360adaa702219d0d7974449
-            codetracer-trace-format-nim=281c5e394d418ab6fa4ca35121e05b18417825cd
+            codetracer-trace-format-nim=4c67a4507b1fe64752f71f287e62e8c4a3953b61
             codetracer-native-recorder=c009b074c22a0a53ab764eb38eb959442697fda6
 
       # MEASURE THE FETCH ENVIRONMENT BEFORE NIX TOUCHES THE NETWORK, and
@@ -4669,7 +4669,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=8794892b43516f033360adaa702219d0d7974449
-            codetracer-trace-format-nim=281c5e394d418ab6fa4ca35121e05b18417825cd
+            codetracer-trace-format-nim=4c67a4507b1fe64752f71f287e62e8c4a3953b61
             codetracer-native-recorder=c009b074c22a0a53ab764eb38eb959442697fda6
             # Required by scripts/require-siblings.sh, which build-once.sh runs first.
             # BARE: this job only runs on codetracer, so clone-siblings resolves
@@ -5945,7 +5945,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=8794892b43516f033360adaa702219d0d7974449
-            codetracer-trace-format-nim=281c5e394d418ab6fa4ca35121e05b18417825cd
+            codetracer-trace-format-nim=4c67a4507b1fe64752f71f287e62e8c4a3953b61
             codetracer-native-recorder=c009b074c22a0a53ab764eb38eb959442697fda6
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
@@ -6524,7 +6524,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=8794892b43516f033360adaa702219d0d7974449
-            codetracer-trace-format-nim=281c5e394d418ab6fa4ca35121e05b18417825cd
+            codetracer-trace-format-nim=4c67a4507b1fe64752f71f287e62e8c4a3953b61
 
       - name: Stage codetracer-trace-format into libs/
         # The flake override below points at ./libs/codetracer-trace-format;
@@ -6851,7 +6851,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=8794892b43516f033360adaa702219d0d7974449
-            codetracer-trace-format-nim=281c5e394d418ab6fa4ca35121e05b18417825cd
+            codetracer-trace-format-nim=4c67a4507b1fe64752f71f287e62e8c4a3953b61
             io-mon=8e6b67b08b79c4029c3b188df102541d8412518c
             nim-shm-queue=91451f2250beb89d1d221f0a77be0841c19b182e
             nim-shm-gset=fb981c7f186a9507c974b7de8871fc74d6308eae
@@ -7162,7 +7162,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=8794892b43516f033360adaa702219d0d7974449
-            codetracer-trace-format-nim=281c5e394d418ab6fa4ca35121e05b18417825cd
+            codetracer-trace-format-nim=4c67a4507b1fe64752f71f287e62e8c4a3953b61
             io-mon=8e6b67b08b79c4029c3b188df102541d8412518c
             nim-shm-queue=91451f2250beb89d1d221f0a77be0841c19b182e
             nim-shm-gset=fb981c7f186a9507c974b7de8871fc74d6308eae
