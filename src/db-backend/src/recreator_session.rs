@@ -817,6 +817,10 @@ impl ReplayWorker {
         let Some(stream) = self.stream.as_mut() else {
             return Err(format!("the replay worker is not connected; cannot send: {raw_json}").into());
         };
+        // Report the timeout actually installed on this connection, rather
+        // than re-reading an environment variable after the query failed.
+        let query_timeout = stream.read_timeout()?;
+        let started_ms = crate::wall_clock::monotonic_ms();
 
         debug!("send to worker {raw_json}\n");
         // `clippy::unused_io_amount` catched we need write_all, not write
@@ -833,6 +837,10 @@ impl ReplayWorker {
 
         let read_result = BufReader::new(stream).read_line(&mut res);
         if let Err(e) = read_result {
+            // Capture these before cleanup kills/reaps the worker: that time
+            // is not part of the query wait, and its PID is lost on cleanup.
+            let elapsed = Duration::from_millis(crate::wall_clock::monotonic_ms().saturating_sub(started_ms));
+            let worker_pid = self.process.as_ref().map(Child::id);
             // The protocol pairs answers with queries by order alone. An
             // answer that did not arrive is still owed: the worker writes it
             // whenever it finishes, and the next query would read it as its
@@ -840,17 +848,18 @@ impl ReplayWorker {
             // so it is closed and the worker stopped; the next query starts a
             // fresh one.
             self.abandon_connection();
-            return Err(
-                if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut {
-                    format!(
-                        "dispatch_replay_query timed out ({:?}) waiting for worker response to: {raw_json}",
-                        replay_query_timeout()
-                    )
-                } else {
-                    format!("dispatch_replay_query IO error: {e}")
-                }
-                .into(),
-            );
+            let message = if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut {
+                let message = format!(
+                    "dispatch_replay_query timed out (configured timeout {query_timeout:?}; elapsed {elapsed:?}) \
+                     waiting for worker {}[{}] pid {worker_pid:?} response to: {raw_json}",
+                    self.name, self.index
+                );
+                warn!("{message}");
+                message
+            } else {
+                format!("dispatch_replay_query IO error: {e}")
+            };
+            return Err(message.into());
         }
 
         res = String::from(res.trim()); // trim newlines/whitespace!

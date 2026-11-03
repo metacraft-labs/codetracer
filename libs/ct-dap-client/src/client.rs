@@ -172,6 +172,22 @@ impl DapStdioClient {
             .arg("--stdio")
             .env("XDG_DATA_HOME", &license_iso_dir)
             .env("HOME", &license_iso_dir);
+        // This test client already allows a scaled response budget for busy
+        // hosts. Give replay-worker queries the same budget in its child,
+        // rather than letting the production ten-second default fail a query
+        // while this client is still waiting for it. Keep inherited overrides;
+        // the per-spawn overrides below retain their usual final precedence.
+        const REPLAY_QUERY_TIMEOUT: &str = "CODETRACER_REPLAY_QUERY_TIMEOUT_SECS";
+        if std::env::var_os(REPLAY_QUERY_TIMEOUT).is_none() {
+            let budget = scaled(Duration::from_secs(10));
+            // The backend accepts positive whole seconds. Round up so the
+            // conversion cannot shorten a fractional scaled budget.
+            let seconds = budget
+                .as_secs()
+                .saturating_add(u64::from(budget.subsec_nanos() != 0))
+                .max(1);
+            command.env(REPLAY_QUERY_TIMEOUT, seconds.to_string());
+        }
         for (key, value) in extra_envs {
             command.env(*key, *value);
         }
