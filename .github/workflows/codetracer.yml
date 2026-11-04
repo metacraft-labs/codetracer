@@ -8391,6 +8391,18 @@ jobs:
         # the state of the dev-shell lanes.
         run: bash tools/visual-review/deepreview-harness-test.sh
 
+      - name: Assert no web bundle is assembled inside a tup variant directory
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        # `just test-web-bundle` defaulted its output to `src/build-debug/web`,
+        # inside tup's variant directory, and the ViewModel job runs it before
+        # `build-once`: tup then refuses the variant ("Variant directory must
+        # only contain a tup.config file. Found extra files: web"), so the
+        # build step could not pass once the smoke had. Both web-bundle
+        # scripts now default to ci/lib/web-bundle-dir.sh's `build/web`; this
+        # fails when that default, or a literal one in any script, lies inside
+        # a directory holding a tracked `tup.config`. Pure bash and git.
+        run: bash ci/test/web-bundle-default-dir-test.sh
+
   ci-verdict:
     # Final gate: assert that CI actually RAN the jobs it gates on.
     #
