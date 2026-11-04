@@ -427,10 +427,14 @@ body
 .tippy-content
   padding: 0.3125em 0.5625em
 
+// A hairline divider.  The line is half a pixel, but the box is one whole
+// pixel, so what follows it stays on the pixel grid: a 0.5px-wide box put every
+// debug toolbar button after the first on a half pixel.  The line is the box's
+// left half, painted as a background, which costs nothing to draw.
 .separate-bar
-  width: 0
+  width: 0.0625rem
   height: 1em
-  border-left: 0.031em solid colors-ui-divider-primary
+  background: linear-gradient(to right, colors-ui-divider-primary 50%, transparent 50%)
 
 // .wrapper
 //   input

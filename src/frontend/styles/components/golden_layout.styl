@@ -287,9 +287,10 @@ TAB_CORNER_RADIUS = 0.375rem
 //   filter: MENU_BUTTON_SVG_FILTER
 
 .lm_header .lm_tab .lm_close_tab
-  tab-icon(LAYOUT_TAB_CLOSE_ICON_PATH, 0.6em 0.6em)
-  width: 0.6em !important
-  height: 0.6em !important
+  // 10px, a whole pixel (0.6em came to 9.6px).
+  tab-icon(LAYOUT_TAB_CLOSE_ICON_PATH, 0.625rem 0.625rem)
+  width: 0.625rem !important
+  height: 0.625rem !important
   position: static !important
   cursor: pointer
   // `.lm_tab` is a flex row and `.lm_title` asks for `width: 100%`, so the row
@@ -303,12 +304,14 @@ TAB_CORNER_RADIUS = 0.375rem
   flex-shrink: 0
 
 .lm_header .lm_tab .lm_pin_tab
-  tab-icon(LAYOUT_TAB_PIN_ICON_PATH, 0.85em 0.85em)
-  width: 0.85em !important
-  height: 0.85em !important
+  // 14px with 5px after it, whole pixels (0.85em and 0.3em came to 13.6px
+  // and 4.8px).
+  tab-icon(LAYOUT_TAB_PIN_ICON_PATH, 0.875rem 0.875rem)
+  width: 0.875rem !important
+  height: 0.875rem !important
   position: static !important
   cursor: pointer
-  margin-right: 0.3em
+  margin-right: 0.3125rem
   flex-shrink: 0
 
 // On a tab at the BACK of its group, both icons rest at 40% and come up to full

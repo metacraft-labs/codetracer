@@ -108,6 +108,18 @@ proc cancelDismissal() =
     windowClearTimeout(mouseLeaveTimeoutId)
     mouseLeaveTimeoutId = -1
 
+proc closeMenuOpenedFromZone() {.importjs: """
+  (function () {
+    if (!globalThis.__ctMenuFromZone) return;
+    globalThis.__ctMenuFromZone = false;
+    var c = document.getElementById('context-menu-container');
+    if (c) c.style.display = 'none';
+  })()""".}
+  ## Close the right-click menu if it was opened from the hover zone (see
+  ## `setupZoneTracking`): it belongs to the preview, so it goes with it rather
+  ## than float on alone over the layout.  Hidden the way every right-click menu
+  ## is (`hideContextMenu`, context_menu_bridge.nim).
+
 proc startDismissal() =
   if autoHideState.isNil or not autoHideState.overlayVisible:
     return
@@ -117,7 +129,9 @@ proc startDismissal() =
   # Don't stack timers — cancel any running one first.
   cancelDismissal()
   mouseLeaveTimeoutId = windowSetTimeout(
-    proc = hideOverlay(),
+    proc =
+      hideOverlay()
+      closeMenuOpenedFromZone(),
     MOUSE_LEAVE_DELAY_MS)
 
 proc attachHoverZone(el: Element) =
@@ -155,8 +169,32 @@ proc setupZoneTracking() =
     var CT_HOVER_ZONE = '#auto-hide-overlay, .auto-hide-strip-tab, .collapsed-strip-line, .revealed';
     var ctInZone = false;
 
+    // A right-click menu opened from inside the zone — a strip tab's Pin /
+    // Unpin / Close menu, or one inside the previewed panel — is part of the
+    // zone while it shows (Nikolay, 2026-11-03).  It is one shared element
+    // ('#context-menu-container', renderer.nim) floating outside the overlay,
+    // so moving onto it used to read as leaving, and the preview closed under
+    // the menu.  Only a menu opened from the zone counts: a menu opened
+    // anywhere else must not hold a preview open.  When the preview closes
+    // because the pointer left both, the menu closes with it
+    // (closeMenuOpenedFromZone above, which reads the same flag; no backticks
+    // here, Nim would splice the proc's body into this comment).
+    var CT_MENU = '#context-menu-container';
+    globalThis.__ctMenuFromZone = false;
+    document.addEventListener('contextmenu', function (ev) {
+      var t = ev.target;
+      globalThis.__ctMenuFromZone = !!(t && t.closest && t.closest(CT_HOVER_ZONE));
+    }, true);
+
+    function ctOnZoneMenu(target) {
+      if (!globalThis.__ctMenuFromZone || !target || !target.closest) { return false; }
+      var menu = target.closest(CT_MENU);
+      return !!menu && menu.style.display !== 'none';
+    }
+
     function ctZoneUpdate(target) {
-      var inZone = !!(target && target.closest && target.closest(CT_HOVER_ZONE));
+      var inZone = !!(target && target.closest &&
+        (target.closest(CT_HOVER_ZONE) || ctOnZoneMenu(target)));
       // Inside the zone, any pending close is cancelled on every event, not
       // only on entering it: the overlay's own `mouseleave` (attachHoverZone)
       // starts that timer too, without this tracker seeing a transition — the
