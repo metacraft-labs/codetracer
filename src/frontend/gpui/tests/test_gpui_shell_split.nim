@@ -166,7 +166,7 @@ suite "PLAT-20: the shell is renderer-free":
         if "gpui" in line.toLowerAscii or "isonim" in line.toLowerAscii or
            "tui" in line.toLowerAscii:
           inc importers
-    ck scanned == 17  # headless_app, layout_model, layout_interaction,
+    ck scanned == 18  # headless_app, layout_model, layout_interaction,
                       # window_set, extent_distribution — PLAT-45's
                       # desktop_panes, arrangement_relation and
                       # generate_default_layout — and PLAT-48's
@@ -175,7 +175,8 @@ suite "PLAT-20: the shell is renderer-free":
                       # golden_layout_hit and welcome_tabs; the Files
                       # menu's file_tree_menu; the Requests pane's
                       # request_menu (2026-10-27); the Low Level Code
-                      # pane's low_level_menu (2026-10-29)
+                      # pane's low_level_menu (2026-10-29); the
+                      # Verification pane's verification_menu
     ck importers == 0
     # The positive twin over the same reader (§4a): the scanner really is
     # reading import lines, so `importers == 0` is not an empty scan.

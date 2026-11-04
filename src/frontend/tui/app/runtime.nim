@@ -67,6 +67,7 @@ import ./views/agent_activity_pane
 import ./views/problems_pane
 import ./views/requests_pane   # PLAT-58
 import ./views/low_level_code_pane   # PLAT-60
+import ./views/verification_pane     # PLAT-63
 
 export interpreter, keymap, motions, command_line, tui_app, degradation
 export persistence
@@ -623,6 +624,10 @@ proc actOnRequests*(rt: TuiRuntime; act: RequestsAct;
                     outcome: var RuntimeOutcome): RequestsActResult
   ## PLAT-58: FORWARD-DECLARED for the command line's `:requests`; defined
   ## beside the Requests pane's other helpers.
+proc actOnVerification*(rt: TuiRuntime; act: VerificationAct;
+                        outcome: var RuntimeOutcome): VerificationActResult
+  ## PLAT-63: FORWARD-DECLARED for the command line's `:verify`; defined
+  ## beside the Verification pane's other helpers.
 
 proc runFileJob(rt: TuiRuntime; job: FileJob)
 proc deliverFileJob*(rt: TuiRuntime; res: FileJobResult): bool
@@ -1650,6 +1655,18 @@ proc runCommandLine(rt: TuiRuntime; line: string; outcome: var RuntimeOutcome;
         rt.showPane(paneRequests, outcome)
         discard rt.actOnRequests(RequestsAct(kind: rakSearch,
                                              text: requests.search), outcome)
+      outcome.detail = rt.app.notification
+      return
+    # PLAT-63: `:verify` opens the Verification pane (View › Verification);
+    # `:verify run` runs the project's declared Verno action, `:verify stop`
+    # stops it — the pane's Run and Stop controls.
+    if words.len > 0 and words[0] == "verify":
+      rt.showPane(paneVerification, outcome)
+      if words.len > 1 and words[1] in ["run", "stop"]:
+        discard rt.actOnVerification(VerificationAct(
+          kind: (if words[1] == "run": vrRun else: vrStop)), outcome)
+      elif words.len > 1:
+        rt.note(":verify takes `run` or `stop`, not '" & words[1] & "'")
       outcome.detail = rt.app.notification
       return
     if words.len == 1 and words[0] in ["cnext", "cn", "cprev", "cp"]:
@@ -3192,6 +3209,78 @@ proc runLowLevelKeyOperation(rt: TuiRuntime; operation: string;
     r.handled
   else: false
 
+# ---------------------------------------------------------------------------
+# PLAT-63: the Verification pane — a Verno run's findings by kind (K64-K66)
+# ---------------------------------------------------------------------------
+
+proc verificationPaneScreen*(rt: TuiRuntime): tuple[area: CellArea,
+    screen: VerificationPaneScreen] =
+  ## Verification below its strip, and where the painter put its parts — the
+  ## arithmetic a press is read back with.
+  let under = rt.paneAreaOf(paneVerification)
+  result.area = CellArea(col: under.col, row: under.row + 1,
+                         width: under.width, height: max(0, under.height - 1))
+  if result.area.width <= 0:
+    return
+  var g = newStyledGrid(result.area.col + result.area.width,
+                        result.area.row + result.area.height)
+  result.screen = paintVerification(g, result.area, rt.app.verification)
+
+proc scrollVerification(rt: TuiRuntime; delta: int;
+                        outcome: var RuntimeOutcome) =
+  ## The wheel over Verification scrolls its list.
+  let (_, screen) = rt.verificationPaneScreen()
+  rt.app.verification.scrollTop = clampVerificationTop(
+    rt.app.verification.lines.len, rt.app.verification.scrollTop + delta,
+    screen.listRows)
+  outcome.repaint = true
+
+proc revealVerificationCursor(rt: TuiRuntime) =
+  ## Keep the cursor's line in Verification's view.
+  let at = rt.app.verification.lineOfSelected
+  if at < 0:
+    return
+  let (_, screen) = rt.verificationPaneScreen()
+  rt.app.verification.scrollTop = rt.app.verification.revealLine(
+    screen.listRows, at)
+
+proc actOnVerification*(rt: TuiRuntime; act: VerificationAct;
+                        outcome: var RuntimeOutcome): VerificationActResult =
+  ## Hand `act` to the host (`TuiApp.verificationAct`), which does it through
+  ## the window's `VerificationVM` and refreshes the pane; its words go to the
+  ## status line and copied text to the clipboard. The cursor stays in view;
+  ## a file opened in the editor has the keyboard (EMT-D21's rule, as a
+  ## Problems row's).
+  outcome.repaint = true
+  if rt.app.verificationAct.isNil:
+    rt.note("this window has no Verification pane host")
+    return
+  result = rt.app.verificationAct(act)
+  if result.copied.len > 0:
+    rt.copyToClipboard(result.copied, "the line")
+  if result.note.len > 0 and result.copied.len == 0:
+    rt.note(result.note)
+  rt.revealVerificationCursor()
+
+proc runVerificationKeyOperation(rt: TuiRuntime; operation: string;
+                                 outcome: var RuntimeOutcome): bool =
+  ## PLAT-63 FROM THE KEYBOARD, while Verification has the focus (a list
+  ## pane, CUA-Keymap.md §3.6): Up / Down (and the modal bases' `j` / `k`),
+  ## Home / End and the pages move the cursor; Enter is the press on its
+  ## line. Answers whether `operation` was the pane's.
+  case operation
+  of "list.focus-next", "list.focus-previous", "list.focus-first",
+     "list.focus-last", "list.focus-page-down", "list.focus-page-up",
+     "editor.scroll-line-down", "editor.scroll-line-up":
+    let (_, screen) = rt.verificationPaneScreen()
+    discard rt.actOnVerification(VerificationAct(kind: vrKey,
+      operation: operation, page: max(1, screen.listRows - 1)), outcome)
+    true
+  of "list.activate":
+    discard rt.actOnVerification(VerificationAct(kind: vrActivate), outcome)
+    true
+  else: false
+
 proc openWorkingFileAt*(rt: TuiRuntime; path: string; line, col: int): string =
   ## PLAT-55 (K35): a working-tree file opened in Edit mode's editor — the
   ## `:e` route (`editServices.readFile`, `EditSession.openFile`) — with the
@@ -3842,6 +3931,9 @@ proc applyBarTop(rt: TuiRuntime; bar: BarSpot; top: int;
     of paneLowLevelCode:
       # PLAT-60: the listing's view moves; nothing is fetched.
       rt.app.lowLevel.scrollTop = top
+    of paneVerification:
+      # PLAT-63: the list's view moves.
+      rt.app.verification.scrollTop = top
     of paneBuildOutput:
       rt.app.buildPane.scrollTop = top
     of paneEditor:
@@ -4621,6 +4713,42 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
       return true
     of ltNone:
       return false
+  of paneVerification:
+    # PLAT-63 (K64 - K66): a press on a finding goes to its source location,
+    # on an offer opens its counterexample, on a step moves the
+    # counterexample there (and to its source when recorded); a right press
+    # opens the line's menu; Run and Stop act on the project's Verno run;
+    # the scrollbar is the scrollbars' (`routeScrollbars`).
+    if event.button notin {mbLeft, mbRight} or not rt.app.verification.loaded:
+      return false
+    rt.app.layoutBinding.focus = paneVerification
+    let (area, screen) = rt.verificationPaneScreen()
+    let t = rt.app.verification.verificationTargetAt(screen, area, event.row,
+                                                     event.col)
+    if event.button == mbRight:
+      if t.kind != vtLine or t.key.len == 0:
+        return t.kind != vtNone
+      let r = rt.actOnVerification(VerificationAct(kind: vrRowMenu,
+                                                   key: t.key), outcome)
+      if r.menu.entries.len > 0:
+        rt.openContextMenu(r.menu, event.row, event.col, outcome)
+      return true
+    case t.kind
+    of vtLine:
+      if t.key.len > 0:
+        discard rt.actOnVerification(VerificationAct(kind: vrPress,
+                                                     key: t.key), outcome)
+      return true
+    of vtRun:
+      discard rt.actOnVerification(VerificationAct(kind: vrRun), outcome)
+      return true
+    of vtStop:
+      discard rt.actOnVerification(VerificationAct(kind: vrStop), outcome)
+      return true
+    of vtHeader, vtTrack:
+      return true
+    of vtNone:
+      return false
   of paneTestResults:
     # PLAT-53: the ▶ runs the suite; a row's `⟳` records it again and `⏵`
     # opens its recording in a new tab; a press elsewhere on a row (or its
@@ -4840,6 +4968,13 @@ proc runContextAction(rt: TuiRuntime; action: ContextAction;
     # decides it now.
     discard rt.actOnLowLevel(LowLevelAct(kind: llaMenuChoice, action: action,
                                          target: target), outcome)
+  of caVerificationGoToSource, caVerificationOpenCounterexample,
+     caVerificationCopyMessage, caVerificationCopyLocation,
+     caVerificationCloseCounterexample:
+    # PLAT-63 (K65): a line's entry, as the shared Verification model
+    # decides it now.
+    discard rt.actOnVerification(VerificationAct(kind: vrMenuChoice,
+      action: action, target: target), outcome)
 
 proc routeOverlayMouse(rt: TuiRuntime; event: MouseEvent;
                        outcome: var RuntimeOutcome): bool =
@@ -5065,6 +5200,13 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
     if at.found and at.region.pane == paneBuildOutput and
        rt.app.buildPane.loaded:
       rt.scrollBuild(
+        (if event.button == mbWheelDown: CallTraceWheelRows
+         else: -CallTraceWheelRows), outcome)
+      return
+    # PLAT-63: the wheel scrolls the Verification list.
+    if at.found and at.region.pane == paneVerification and
+       rt.app.verification.loaded:
+      rt.scrollVerification(
         (if event.button == mbWheelDown: CallTraceWheelRows
          else: -CallTraceWheelRows), outcome)
       return
@@ -5561,6 +5703,8 @@ proc menuPaneOf*(action: string): (bool, PaneKind) =
   of "aScratchpad": (true, paneScratchpad)
   of "aPointList": (true, panePointList)
   of "aAgentActivity": (true, paneAgentActivity)
+  # PLAT-63: View › Verification.
+  of "aVerification": (true, paneVerification)
   else: (false, paneEditor)
 
 proc menuPromptLine*(action: string): string =
@@ -6158,9 +6302,14 @@ proc showPane(rt: TuiRuntime; pane: PaneKind; outcome: var RuntimeOutcome) =
   else:
     # PLAT-50: A PANE THE ARRANGEMENT DOES NOT PLACE IS OPENED, as the
     # desktop's View menu opens its panel — a tab beside the event log
-    # (the event stack), else at the root.
-    let anchor = if b.layout.tree.contains(paneEventLog): some(paneEventLog)
-                 else: none(PaneKind)
+    # (the event stack); PLAT-63: in Edit mode, which has no event log, a
+    # tab beside Tests or Build (a region added at the root of Edit mode's
+    # tree was given one column); else at the root.
+    var anchor = none(PaneKind)
+    for candidate in [paneEventLog, paneTestResults, paneBuildOutput]:
+      if b.layout.tree.contains(candidate):
+        anchor = some(candidate)
+        break
     let added = b.dispatch(cmdAddPane(pane, after = anchor))
     if added.status == lasApplied:
       rt.afterLayoutCommit()
@@ -7665,6 +7814,10 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
       return
     if had and focused == paneLowLevelCode and rt.app.lowLevel.loaded and
        rt.runLowLevelKeyOperation(res.operation, outcome):
+      return
+    if had and focused == paneVerification and
+       rt.app.verification.loaded and
+       rt.runVerificationKeyOperation(res.operation, outcome):
       return
   # PLAT-55: the docked Problems pane, pressed while shown, takes the list
   # keys too (`dockKeys`).

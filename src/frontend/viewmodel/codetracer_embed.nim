@@ -306,6 +306,20 @@ export problemsFit, ProblemColumnNames
 import viewmodels/low_level_code_vm
 export low_level_code_vm
 
+# PLAT-63: the Verification pane — a Verno run's findings by kind, the
+# counterexample a failed obligation opens, the pane's cursor, a press and
+# its row menu, which the terminal's and GPUI's panes draw as the desktop's
+# view does. Pure: `std/*`, `isonim/*`, `ct_test/contracts`,
+# `ui/flow_loop_math` and the verification modules; no process, no file.
+import viewmodels/verification_vm
+export verification_vm
+import viewmodels/verification_report
+export verification_report
+import viewmodels/verification_payload
+export verification_payload
+import viewmodels/counterexample_session_vm
+export counterexample_session_vm
+
 # PLAT-70 Part C: the editor's find session — highlight as you type, the
 # walk, accept and cancel, the seeds and the word-under-the-caret launchers
 # (Find-And-Incremental-Search.md §3, §4). Imports only `editing_core` (here

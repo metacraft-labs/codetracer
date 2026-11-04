@@ -128,7 +128,12 @@ const
     # source on demand (`openLowLevelCode`) and no default places.
     paneLowLevelCode: DesktopPane(placement: dpLayout,
                                   content: Content.LowLevelCode,
-                                  label: "lowLevelCodeComponent-0")]
+                                  label: "lowLevelCodeComponent-0"),
+    # PLAT-63: View › Verification (`aVerification` → `openLayoutTab`), in
+    # no default.
+    paneVerification: DesktopPane(placement: dpLayout,
+                                  content: Content.Verification,
+                                  label: "verificationComponent-0")]
     ## **THE TABLE.** Indexed by `PaneKind`, so a `PaneKind` added without a
     ## row does not compile. One-to-one on the rows that have a `Content`
     ## (`dpNone` is the one row without), asserted by the suite.

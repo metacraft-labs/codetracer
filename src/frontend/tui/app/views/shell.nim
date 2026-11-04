@@ -71,6 +71,7 @@ import ./agent_activity_pane
 import ./problems_pane
 import ./requests_pane
 import ./low_level_code_pane
+import ./verification_pane   # PLAT-63
 import ./frame_overlay
 import ./variables
 import ./context_menu
@@ -208,6 +209,9 @@ type
       ## PLAT-60. LOW LEVEL CODE, as a value: the session's `LowLevelCodeVM`
       ## the desktop's view draws too, read by `tui_session.lowLevelModelOf`.
       ## Not loaded by default.
+    verification*: VerificationPaneModel
+      ## PLAT-63. VERIFICATION, as a value: the window's `VerificationVM`,
+      ## read by `verification_source.paneModelOf`. Not loaded by default.
     vcs*: VcsPaneModel
       ## PLAT-47 deliverable 4. The VCS pane, as a value: the shared `VCSVM`
       ## the desktop's VCS panel draws, read by `host/vcs_source.nim`. Not
@@ -927,6 +931,11 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   elif region.pane == paneLowLevelCode and model.lowLevel.loaded:
     belowStrip:
       discard paintLowLevelCode(g, content, model.lowLevel)
+  # PLAT-63. VERIFICATION — its status and controls are content, so below
+  # the strip.
+  elif region.pane == paneVerification and model.verification.loaded:
+    belowStrip:
+      discard paintVerification(g, content, model.verification)
   elif region.pane == paneBuildOutput:
     # NO EMPTINESS GUARD: an idle BUILD pane is a statement — `[idle] build:
     # not started` — and a user who has just pressed `:build` needs to see the

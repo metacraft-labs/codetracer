@@ -102,10 +102,13 @@ suite "PLAT-41 LAW-P1 — the three sets COVER PaneKind":
     # window's `BuildVM`.
     # PLAT-60 added `paneLowLevelCode`, drawn in the vocabulary from the
     # session's `LowLevelCodeVM`.
-    ck card(allPanes()) == 20
+    # PLAT-63 added `paneVerification`, drawn in the vocabulary from the
+    # window's `VerificationVM`.
+    ck card(allPanes()) == 21
     # PLAT-58 moved `paneRequests` into the vocabulary: it draws the
     # session's `RequestPanelVM`.
-    ck card(PaneVocabularyPanes) == 18
+    # PLAT-63's Verification is in the vocabulary from its first day.
+    ck card(PaneVocabularyPanes) == 19
     ck card(PaneNativePanes) == 1
     ck card(PaneAcceptedExceptions) == 1
     ck paneFileTree in PaneVocabularyPanes

@@ -1,0 +1,20 @@
+# Control digests for run-plat63-verification-mutations.py —
+# the subjects AND the suites the arms are graded by (§16c).
+# Refreshed with --record-control-hashes, gated by the
+# needle scan (§39a).
+69c00f1732d3225d8d1bc36afd9705d2ec61c65fc2bff78b13a302a27eca5c1f  src/frontend/viewmodel/viewmodels/verification_vm.nim
+2ea093cef0d6171b844dea061c4c2c3632b3abe0d9d8e21e43db24cae640ed5a  src/frontend/viewmodel/views/isonim_verification_view.nim
+5b0063d3b01b53d2450b1c7681c6c592deb8f7450accf0f904db9200d7aaeb38  src/frontend/viewmodel/host/native_verification_host.nim
+f71d0f67a9c5364edb1114585d4df08ed6ad308a5248a748073525866f308852  src/frontend/headless_app/layout_model.nim
+56aab8dc1468e1dc051028b3464590eebaf3205acd06eb2c25e33e1e6358a921  src/frontend/headless_app/desktop_panes.nim
+29d2e8063e5013f621396ed0131003831a659c4af77827d1aef0d0e91a593fbd  src/frontend/headless_app/pane_clicks.nim
+fef8f8f2635db2d4ee7e1be6c0cbb12160ccb4beda9d6b4d2e083be94b555593  src/frontend/tui/app/views/verification_pane.nim
+1ac9781a0f9572b91a8a41663e0b4dd432d0c7b920cd06b68770e5004184dae9  src/frontend/tui/app/runtime.nim
+b2f16b66ac7e8e048fd6d2b687de8a35b752ef7542465657c5731e21dfe6d4f0  src/frontend/tui/host/verification_source.nim
+dc1f396464257a7ee2dc326a1ce208a955c0a85b0a22ccb14d377b258d0a51a4  src/frontend/gpui/verification_leaf.nim
+2b9957c155dd5db2ca2207c593a4d4cf93f403c567fe31e477380f6877383dac  src/frontend/gpui/main.nim
+db93a41f319070d0a48e76f27414fd137c15dbd2c963cbe17c18f36af08c5a1a  src/frontend/view_vocabulary/pane_views.nim
+a36edadb7b9ddcefe3a4e5f65785f4e23272a0383f35019222b2e1968f230800  src/frontend/viewmodel/tests/unit/test_plat63_verification_vm.nim
+af249a16439bc091fe296bc08c2fbddd4a6e5b4c86bbee916e509034d4f1ea8e  src/frontend/tui/tests/test_plat63_verification.nim
+2163225cfbae7389d58166ebec7bf13766261da5311f9992506fb8a82cab591c  src/frontend/tui/tests/real_terminal/test_plat63_verification_pty.nim
+26cbed5575ff5ef350d07ca527f47f3a7dd841811152c136be24014b230054b5  src/frontend/gpui/tests/test_plat63_gpui_verification.nim

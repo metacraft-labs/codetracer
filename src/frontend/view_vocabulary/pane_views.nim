@@ -101,6 +101,7 @@ import viewmodels/errors_vm
 import viewmodels/build_vm
 # PLAT-60 — the Low Level Code pane's ViewModel.
 import viewmodels/low_level_code_vm
+import viewmodels/verification_vm   # PLAT-63: the Verification pane
 
 import headless_app/layout_model
 
@@ -167,7 +168,11 @@ const
                                          # is in as instructions under their
                                          # source lines, from the session's
                                          # `LowLevelCodeVM`.
-                                         paneLowLevelCode}
+                                         paneLowLevelCode,
+                                         # PLAT-63: a Verno run's findings
+                                         # by kind, from the window's
+                                         # `VerificationVM`.
+                                         paneVerification}
     ## The panes expressed in the vocabulary. A CLOSED SET a test asserts, not
     ## a list a reader infers from which procs exist.
 
@@ -838,6 +843,45 @@ proc lowLevelCodePaneView*(vm: LowLevelCodeVM): PaneView =
                              expanded = true)
   result.entries = entriesOf(result.root)
 
+const VerificationColumns* = @["kind", "title", "message", "location"]
+  ## PLAT-63: a finding's row — its kind in words, its title, the verifier's
+  ## message and its `file:line:column`.
+
+proc verificationPaneView*(vm: VerificationVM): PaneView =
+  ## PLAT-63. THE VERIFICATION PANE (the desktop's View › Verification,
+  ## `isonim_verification_view`): the run's status and command, the notes,
+  ## then the findings BY KIND — each kind's heading over a `Table` of its
+  ## rows (`VerificationPanelModel.groups`), every word the ViewModel's.
+  ## The headless replay session owns no `VerificationVM` (a run is the
+  ## window's project's), so a front-end attaches the window's.
+  result.pane = paneVerification
+  if vm.isNil:
+    result.report = "verification has no ViewModel; no host attached one"
+    result.root = viewText("verification.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  let model = panelModel(vm)
+  var children = @[viewText("verification.status", model.statusText)]
+  if model.commandLine.len > 0:
+    children.add viewText("verification.command", model.commandLine)
+  for line in model.lines:
+    if line.kind == vlNote:
+      children.add viewText("verification.note", line.text)
+  for group in model.groups:
+    var cells: seq[seq[string]] = @[]
+    for index in group.rows:
+      let row = model.rows[index]
+      cells.add @[row.kindLabel, row.title, row.message, row.location]
+    children.add viewTreeNode("verification.group." & $group.kind,
+      group.heading,
+      @[viewTable("verification.rows." & $group.kind, VerificationColumns,
+                  cells)], expanded = true)
+  if model.groups.len == 0:
+    result.report = "no findings"
+  result.root = viewTreeNode("verification", "Verification", children,
+                             expanded = true)
+  result.entries = entriesOf(result.root)
+
 proc problemsPaneView*(vm: ErrorsVM): PaneView =
   ## PLAT-55. THE PROBLEMS PANE (`Build-Output-Pane.md` §3.3): the header's
   ## counts (and what navigation last announced), then a `Table` of the
@@ -1147,6 +1191,8 @@ proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
   of paneRequests: requestsPaneView(RequestPanelVM(vm))
   # PLAT-60.
   of paneLowLevelCode: lowLevelCodePaneView(LowLevelCodeVM(vm))
+  # PLAT-63.
+  of paneVerification: verificationPaneView(VerificationVM(vm))
   of paneConstraints:
     # **PLAT-45: THE DESKTOP'S PANES, PLACED AND REPORTED — NOT OMITTED.**
     # (PLAT-48 adds the desktop's PROBLEMS and REQUESTS footer panels, which

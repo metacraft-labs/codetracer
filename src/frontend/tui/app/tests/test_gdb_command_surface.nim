@@ -162,7 +162,9 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 124
+  ExpectedAppModules = 125
+    ## 2026-11-03 (PLAT-63): 124 → 125, `views/verification_pane.nim`, the
+    ## Verification pane's painter.
     ## 2026-10-31: 123 → 124, `tests/test_layout_keyboard_focus.nim`, keyboard
     ## focus through layout input on the real runtime.
     ## 2026-10-29 (PLAT-60): 122 → 123, `views/low_level_code_pane.nim`, the
@@ -305,7 +307,11 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 363
+  ExpectedStyleLiterals = 375
+    ## 2026-11-03 (PLAT-63): 363 → 375, measured — the Verification pane's
+    ## twelve (`views/verification_pane.nim`: the status, command, controls,
+    ## notes, headings, text and muted cells, the three kind tones, the offer
+    ## and the counterexample's heading).
     ## 2026-10-30: 359 → 363, measured — the Edit pane's diagnostics, four
     ## (`views/edit_pane.nim`: the error, warning and info underlines and the
     ## margin's severity cell), added with the build tasks.
@@ -449,7 +455,8 @@ const
     ## reachability guard's bucket B). They were deleted to bring that ratchet
     ## back under its ceiling, and `views/search.nim` had no other literal, so
     ## it leaves the styled-file count. No painted colour changed.
-  ExpectedStyledFiles = 44
+  ExpectedStyledFiles = 45
+    ## 2026-11-03 (PLAT-63): +1, `views/verification_pane.nim`.
     ## 2026-10-29 (PLAT-60): +1, `views/low_level_code_pane.nim`.
     ## 2026-10-28 (PLAT-58): +1, `views/requests_pane.nim`.
     ## 2026-10-27 (PLAT-55): +1, `views/problems_pane.nim`.

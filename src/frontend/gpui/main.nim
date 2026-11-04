@@ -154,8 +154,11 @@ import ./terminal_output_leaf
 import ./search_results_leaf   # PLAT-57: Find in Files, drawn natively
 import ./test_results_leaf     # PLAT-53: Test Results, drawn natively
 import ./problems_leaf         # PLAT-55: Problems, drawn natively
+import ./verification_leaf     # PLAT-63: Verification, drawn natively
+import ../viewmodel/host/native_verification_host   # PLAT-63: its host
 import ./low_level_code_leaf   # PLAT-60: Low Level Code, drawn natively
 import headless_app/low_level_menu   # PLAT-60: its row menu (K59)
+import headless_app/verification_menu   # PLAT-63: its row menu (K65)
 import ./build_output_leaf     # PLAT-56: Build Output, drawn natively
 # PLAT-55: the window's builds (`:build`, the terminal's runner) and the
 # shared reader that fills its Problems pane — PLAT-56's Build Output reads
@@ -294,6 +297,12 @@ OPTIONS:
                       lowlevel:choose:<label>  lowlevel:sync
                       lowlevel:key:<operation>  lowlevel:caret:<line>
                       lowlevel:wheel:<rows>
+                    and (PLAT-63) the Verification pane (`<line>` a list
+                    line's index):
+                      verify:show (View › Verification)  verify:run
+                      verify:stop  verify:wait[:<ms>]  verify:line:<line>
+                      verify:menu:<line>  verify:choose:<label>
+                      verify:key:<operation>  verify:wheel:<rows>
                     and (PLAT-69) what an open window's renderer reports:
                       resize:<width>:<height> (the content area resized)
                       chrome:<spec> (its frame changed; `--window-chrome`'s
@@ -678,6 +687,8 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
                        "requests",
                        # PLAT-60: the Low Level Code listing.
                        "lowlevel",
+                       # PLAT-63: the Verification pane.
+                       "verify",
                        # PLAT-69: the window resized, its frame changed.
                        "resize", "chrome",
                        # Build-Output-Pane.md §3.8, §3.9: a pane docked to
@@ -1159,6 +1170,8 @@ proc drawAgentPane(r: GpuiRenderer)
 proc drawProblemsPane(r: GpuiRenderer)
 proc drawLowLevelPane(r: GpuiRenderer)
   ## PLAT-60: forward-declared; defined beside Problems' drawing.
+proc drawVerificationPane(r: GpuiRenderer)
+  ## PLAT-63: forward-declared; defined beside Problems' drawing.
   ## PLAT-55: forward-declared; defined beside Test Results' drawing.
 proc drawBuildPane(r: GpuiRenderer)
   ## PLAT-56: forward-declared; defined beside Problems' drawing.
@@ -1334,6 +1347,12 @@ var
   gProblemsPane = initGProblemsPane()
   gLowLevel = initGLowLevelPane()
     ## PLAT-60: the Low Level Code listing's reading position and a held thumb.
+  gVerification: NativeVerificationHost = nil
+    ## PLAT-63: the WINDOW's Verification ViewModels and the project's Verno
+    ## run (`viewmodel/host/native_verification_host`), shared by every tab,
+    ## as the desktop keeps one pair per window.
+  gVerificationPane = initGVerificationPane()
+    ## PLAT-63: the Verification pane's reading position and a held thumb.
     ## PLAT-55: the Problems pane's reading position and a held scrubber.
   gBuildPane = initGBuildPane()
     ## PLAT-56: the Build Output pane's reading position, horizontal view,
@@ -2324,6 +2343,8 @@ proc drawArrangement(r: GpuiRenderer): bool =
   drawProblemsPane(r)
   # PLAT-60: and Low Level Code from the session's.
   drawLowLevelPane(r)
+  # PLAT-63: and Verification from the window's.
+  drawVerificationPane(r)
   # PLAT-56: and Build Output from its own.
   drawBuildPane(r)
   # PLAT-51: and the list panes' scrubbers from theirs.
@@ -3274,6 +3295,46 @@ proc drawLowLevelPane(r: GpuiRenderer) =
   if drawLowLevelCode(r, pane, vm, gLowLevel, lowLevelBody()):
     applyTextFaces(r, pane)
 
+proc verificationRoot(): string =
+  ## PLAT-63: the window's project — the folder of a folder tab or the Edit
+  ## window, a replay's working directory (Test Results' §8.2 root).
+  if gTestsRoot.len > 0: gTestsRoot else: getCurrentDir()
+
+proc installVerification() =
+  ## PLAT-63: the window's Verification host, reading the project's
+  ## declared Verno action.
+  if gVerification.isNil:
+    gVerification = newNativeVerificationHost()
+  if not gVerification.running:
+    gVerification.refresh(verificationRoot())
+
+proc verificationBody(): PxRect =
+  ## PLAT-63: the Verification pane's body in window pixels — revealed,
+  ## docked open, or the visible tab of a box — or a zero rectangle.
+  if gGestures.revealing and gGestures.reveal.pane == paneVerification:
+    return dockedBodyOf(gGeom.revealRectOf(gGestures.reveal.edge))
+  if not gGeom.openDock.isEmpty and gGeom.openDockPane == $paneVerification:
+    return dockedBodyOf(gGeom.openDock)
+  let i = gGeom.tabsNodeOfPane($paneVerification)
+  if i < 0:
+    return PxRect()
+  let n = gGeom.nodes[i]
+  if n.panes.len > 0 and n.active >= 0 and n.active < n.panes.len and
+     n.panes[n.active] != $paneVerification:
+    return PxRect()
+  n.body
+
+proc drawVerificationPane(r: GpuiRenderer) =
+  ## PLAT-63: draw Verification from the window's ViewModel, natively,
+  ## replacing whatever the leaf held.
+  let pane = gPanes.getOrDefault($paneVerification)
+  if pane.isNil:
+    return
+  installVerification()
+  if drawVerification(r, pane, gVerification.vm, gVerification.session,
+                      gVerificationPane, verificationBody()):
+    applyTextFaces(r, pane)
+
 proc drawProblemsPane(r: GpuiRenderer) =
   ## PLAT-55: draw Problems from the window's ViewModel, natively, replacing
   ## whatever the leaf held.
@@ -3431,6 +3492,9 @@ proc pressAgent(r: GpuiRenderer; x, y: int): bool
 proc runAgentPrompt(r: GpuiRenderer; text: string)
 proc pressProblems(r: GpuiRenderer; x, y: int): bool
 proc pressLowLevel(r: GpuiRenderer; x, y: int; right = false): bool
+proc pressVerification(r: GpuiRenderer; x, y: int; right = false): bool
+  ## PLAT-63: forward-declared; defined beside the Low Level Code host.
+proc verificationKey(r: GpuiRenderer; operation: string): bool
   ## PLAT-60: forward-declared; defined beside the Low Level Code host.
 proc lowLevelKey(r: GpuiRenderer; operation: string): bool
 proc lowLevelStep(r: GpuiRenderer; operation: string): bool
@@ -3891,6 +3955,9 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     # PLAT-60 (K62): a right press on an instruction opens its menu.
     if pressLowLevel(r, x, y, right = true):
       return
+    # PLAT-63 (K65): a right press on a Verification line opens its menu.
+    if pressVerification(r, x, y, right = true):
+      return
     # PLAT-50 (K42): a right-click on a docked pane's label opens the
     # desktop's strip menu (`ui/auto_hide`'s `onContextMenu`).
     let (si, sl) = gGeom.slotAt(x, y)
@@ -3921,6 +3988,12 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       if gFocusPane != $paneLowLevelCode:
         focusWindowPane(r, $paneLowLevelCode)
         discard drawArrangement(r)
+      return
+    # PLAT-63 (K64, K66): the Verification pane's presses (a finding goes to
+    # its source, an offer opens its counterexample, a step moves it, Run /
+    # Stop, the scrubber). A file opened focuses the editor, so the pane
+    # takes the focus only for the others (`pressVerification` says which).
+    if pressVerification(r, x, y):
       return
     # PLAT-56: Build Output's presses (a located line opens its file, the
     # header's controls, the history picker, the scrubbers).
@@ -4037,6 +4110,12 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
                                 dragging = true)
         drawLowLevelPane(r)
       return
+    if gVerificationPane.dragging:
+      if not gVerification.isNil:
+        gVerificationPane.scrubVerification(gVerification.vm,
+          gVerification.session, verificationBody(), y, dragging = true)
+        drawVerificationPane(r)
+      return
     if gTests.dragging:
       if not gTestsVM.isNil:
         gTests.scrubTests(gTestsVM, testsBody(), y, dragging = true)
@@ -4096,6 +4175,9 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     if gLowLevel.dragging:
       gLowLevel.dragging = false
       return
+    if gVerificationPane.dragging:
+      gVerificationPane.dragging = false
+      return
     if gAgent.dragging:
       gAgent.dragging = false
       return
@@ -4146,6 +4228,15 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       gBuildPane.scrollBy(gProblems.build, buildRect,
                           (if rows == 0: (if dy < 0: 1 else: -1) else: rows))
       drawBuildPane(r)
+      return
+    # PLAT-63: and the Verification list.
+    let verificationRect = verificationBody()
+    if verificationRect.w > 0 and verificationRect.contains(x, y) and
+       dy != 0.0 and not gVerification.isNil:
+      let rows = int(round(-dy / float(VerificationRowPx)))
+      gVerificationPane.scrollBy(gVerification.vm, gVerification.session,
+        verificationRect, (if rows == 0: (if dy < 0: 1 else: -1) else: rows))
+      drawVerificationPane(r)
       return
     # PLAT-60: and the Low Level Code listing.
     let lowLevelRect = lowLevelBody()
@@ -4501,6 +4592,8 @@ proc gpuiMenuRouteOf(action: string): GpuiMenuRoute =
   of "aScratchpad": GpuiMenuRoute(kind: gmrPane, pane: paneScratchpad)
   of "aPointList": GpuiMenuRoute(kind: gmrPane, pane: panePointList)
   of "aAgentActivity": GpuiMenuRoute(kind: gmrPane, pane: paneAgentActivity)
+  # PLAT-63: View › Verification — the window's project's Verno run.
+  of "aVerification": GpuiMenuRoute(kind: gmrPane, pane: paneVerification)
   # PLAT-60: Alt+1, the desktop's `aLowLevel1` — the Low Level Code pane
   # beside the source.
   of "aLowLevel1":
@@ -5797,6 +5890,7 @@ proc refreshReplayWindow(r: GpuiRenderer) =
   drawTestsPane(r)
   drawProblemsPane(r)
   drawLowLevelPane(r)
+  drawVerificationPane(r)
   drawBuildPane(r)
   drawRequestsPane(r)
   drawListScrubbers(r)
@@ -5812,6 +5906,8 @@ proc attachTests(leafSet: var GpuiLeafSet)
   ## PLAT-53: forward-declared for `showSession`; defined beside the ticks.
 proc attachProblems(leafSet: var GpuiLeafSet)
   ## PLAT-55: forward-declared for `showSession`; defined beside the ticks.
+proc attachVerification(leafSet: var GpuiLeafSet)
+  ## PLAT-63: forward-declared for `showSession`; defined beside the ticks.
 
 proc showSession(r: GpuiRenderer; id: HeadlessSessionId) =
   ## PLAT-49 part B: the window shows the session behind tab `id` — its
@@ -5830,6 +5926,7 @@ proc showSession(r: GpuiRenderer; id: HeadlessSessionId) =
   attachVcs(leafSet, getCurrentDir())
   attachTests(leafSet)
   attachProblems(leafSet)
+  attachVerification(leafSet)
   gLeafSet = leafSet
   traceGesture("session shown " & $id & " " & gSession.tracePath)
   # PLAT-69: the window is called after the recording it shows.
@@ -6256,6 +6353,7 @@ proc showFolderTab(r: GpuiRenderer; index: int): string =
   # PLAT-55: a `:build` runs in the folder now.
   gBuildRoot = tab.folder
   attachProblems(leafSet)
+  attachVerification(leafSet)
   gLeafSet = leafSet
   openArm = arm
   if editViewportRows <= 0:
@@ -6618,10 +6716,14 @@ proc showPaneFromMenu(r: GpuiRenderer; pane: PaneKind) =
   else:
     # PLAT-50: a pane the arrangement does not place is OPENED, as the
     # desktop's View menu opens its panel — a tab beside the event log, else
-    # at the root (the terminal's rule).
-    applyGestureCommand(r, cmdAddPane(pane,
-      after = (if layout.tree.contains(paneEventLog): some(paneEventLog)
-               else: none(PaneKind))))
+    # (PLAT-63: Edit mode) beside Tests or Build, else at the root (the
+    # terminal's rule).
+    var anchor = none(PaneKind)
+    for candidate in [paneEventLog, paneTestResults, paneBuildOutput]:
+      if layout.tree.contains(candidate):
+        anchor = some(candidate)
+        break
+    applyGestureCommand(r, cmdAddPane(pane, after = anchor))
   # A focus command gives the pane the input as well as bringing its tab
   # forward. The next key's scope comes from GPUI's element focus chain.
   if not revealOnly:
@@ -7392,7 +7494,8 @@ proc armHoverTick() =
     return
   # PLAT-51: a welcome tab's `ct record` is polled on the same tick, every
   # `RecordPollMs`, while it runs.
-  if due < 0 and ((not gRecordJob.isNil and not gRecordJob.done) or
+  if due < 0 and (gVerification.running or   # PLAT-63: a Verno run
+                  (not gRecordJob.isNil and not gRecordJob.done) or
                   (not gTestJob.isNil and not gTestJob.done) or
                   # PLAT-53: a Test Results run, polled on the same tick.
                   gTestsHost.running or
@@ -8696,6 +8799,153 @@ proc lowLevelStep(r: GpuiRenderer; operation: string): bool =
   afterMove(r)
   true
 
+# ---------------------------------------------------------------------------
+# PLAT-63: the Verification pane's host (K64 - K66)
+# ---------------------------------------------------------------------------
+
+proc verificationSay(what: string) =
+  ## What the Verification pane has to say, on the trace.
+  if what.len > 0:
+    traceGesture("verification: " & what)
+
+proc verificationGoTo(r: GpuiRenderer; activation: VerificationActivation):
+    bool =
+  ## A press's source location, opened in the editor (the Problems pane's
+  ## opener) — or why not. Whether a file opened.
+  if activation.kind != vakSource:
+    verificationSay(activation.note)
+    return false
+  let found = gVerification.resolveSource(activation)
+  if not found.ok:
+    verificationSay(found.why)
+    return false
+  let why = openProblemFile(r, found.path, activation.line, activation.column)
+  if why.len > 0:
+    verificationSay(why)
+    return false
+  verificationSay("opened " & activation.note)
+  true
+
+proc verificationShown(r: GpuiRenderer) =
+  ## The cursor moved: kept in view, and the pane drawn again.
+  if gVerification.isNil:
+    return
+  gVerificationPane.revealKey(gVerification.vm, gVerification.session,
+                              verificationBody(),
+                              gVerification.vm.selectedKey.val)
+  drawVerificationPane(r)
+
+proc pollGpuiVerification(r: GpuiRenderer): bool =
+  ## PLAT-63: the Verno run in flight advanced; its verdict, when it ends,
+  ## on the trace.
+  if gVerification.isNil or not gVerification.running:
+    return false
+  discard gVerification.pump()
+  if not gVerification.running:
+    verificationSay(gVerification.vm.statusText.val)
+    for line in gVerification.vm.panelModel(gVerification.session).lines:
+      if line.kind == vlGroup:
+        verificationSay("group " & line.text)
+  drawVerificationPane(r)
+  true
+
+proc runGpuiVerification(r: GpuiRenderer) =
+  ## The Run control: the project's declared Verno action, polled on the
+  ## record tick while it runs.
+  installVerification()
+  gVerification.refresh(verificationRoot())
+  verificationSay(gVerification.runVerification())
+  drawVerificationPane(r)
+  armRecordTick()
+
+proc pressVerification(r: GpuiRenderer; x, y: int; right = false): bool =
+  ## A press on the Verification pane: a finding goes to its source (or says
+  ## why not), an offer opens its counterexample, a step moves it (and to
+  ## its source when recorded); a right press opens the line's menu; Run and
+  ## Stop act on the project's run; the scrubber moves the view. Every press
+  ## on the pane is the pane's; it takes the focus unless a file opened.
+  let body = verificationBody()
+  if gVerification.isNil or body.w <= 0 or not body.contains(x, y):
+    return false
+  let vm = gVerification.vm
+  let session = gVerification.session
+  let hit = verificationHitAt(vm, session, gVerificationPane, body, x, y)
+  var opened = false
+  if right:
+    if hit.kind == gvLine and hit.key.len > 0:
+      vm.selectLine(hit.key)
+      verificationShown(r)
+      openContextMenuAt(r, verificationRowContextMenuOf(vm, session, hit.key),
+                        x, y)
+    return true
+  case hit.kind
+  of gvLine:
+    if hit.key.len > 0:
+      traceGesture("verification: press " & hit.key)
+      opened = verificationGoTo(r, vm.activateLine(session, hit.key))
+      verificationShown(r)
+  of gvRun:
+    runGpuiVerification(r)
+  of gvStop:
+    verificationSay(gVerification.stopVerification())
+    drawVerificationPane(r)
+  of gvTrack, gvThumb:
+    let lay = verificationLayout(vm, session, body)
+    gVerificationPane.dragging = hit.kind == gvThumb
+    if gVerificationPane.dragging:
+      gVerificationPane.scrubberOf(lay.lines.len, lay.rows).beginBarGrab(
+        hit.fraction)
+    gVerificationPane.scrubVerification(vm, session, body, y,
+                                        dragging = gVerificationPane.dragging)
+    drawVerificationPane(r)
+  of gvHeader, gvNone: discard
+  if not opened:
+    gFocusShown = true
+    if gFocusPane != $paneVerification:
+      focusWindowPane(r, $paneVerification)
+      discard drawArrangement(r)
+  true
+
+proc verificationKey(r: GpuiRenderer; operation: string): bool =
+  ## PLAT-63 from the keyboard, the pane focused: the `list.*` moves put the
+  ## cursor on a line, `list.activate` is the press on it. Whether it was
+  ## the pane's.
+  if gVerification.isNil or gFocusPane != $paneVerification:
+    return false
+  let vm = gVerification.vm
+  let session = gVerification.session
+  if operation in ["list.activate", "list.activate-redirected"]:
+    if vm.selectedKey.val.len == 0:
+      verificationSay("no line of the Verification pane is selected")
+    else:
+      discard verificationGoTo(r, vm.activateLine(session, vm.selectedKey.val))
+      verificationShown(r)
+    return true
+  let lay = verificationLayout(vm, session, verificationBody())
+  let page = max(1, lay.rows - 1)
+  let key =
+    case operation
+    of "list.focus-first": vm.moveSelection(session, -1, toEnd = true)
+    of "list.focus-last": vm.moveSelection(session, 1, toEnd = true)
+    of "list.focus-page-down": vm.moveSelection(session, page)
+    of "list.focus-page-up": vm.moveSelection(session, -page)
+    of "list.focus-previous": vm.moveSelection(session, -1)
+    of "list.focus-next": vm.moveSelection(session, 1)
+    else: return false
+  if key.len == 0:
+    verificationSay("the Verification pane lists nothing to select")
+  verificationShown(r)
+  true
+
+proc attachVerification(leafSet: var GpuiLeafSet) =
+  ## Hand the Verification leaf, when the arrangement places one, the
+  ## window's ViewModel — the headless replay session owns none
+  ## (`headless_app.paneViewModel`).
+  installVerification()
+  for leaf in leafSet.leaves.mitems:
+    if leaf.kind == glkBuiltin and leaf.builtin == paneVerification:
+      leaf.vm = ViewModel(gVerification.vm)
+
 proc pollCertificateIndicator(r: GpuiRenderer) =
   ## Only whole current answers cross the worker's channel. drawTopBar
   ## replaces the footer's old elements as well as drawing its new label.
@@ -8875,6 +9125,7 @@ proc recordTick() {.cdecl.} =
   discard pollTestRun(r)
   discard pollTestsHost(r)
   discard pollGpuiBuild(r)
+  discard pollGpuiVerification(r)
   pollCertificateIndicator(r)
   armHoverTick()
 
@@ -9561,7 +9812,12 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
   if gSession.isNil and
      action notin {caFileCreate, caFileRename, caFileDelete, caFileEdit,
                    caAgentAttachUpload, caAgentAttachFilesFolders,
-                   caAgentAttachEditorSelection, caAgentAttachRecording}:
+                   caAgentAttachEditorSelection, caAgentAttachRecording,
+                   # PLAT-63: the Verification pane is the window's
+                   # project's, not a replay's.
+                   caVerificationGoToSource, caVerificationOpenCounterexample,
+                   caVerificationCopyMessage, caVerificationCopyLocation,
+                   caVerificationCloseCounterexample}:
     return
   case action
   of caNone: discard
@@ -9587,6 +9843,22 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
     copyToClipboard(target.text & "\n", "line " & $target.line)
   of caFind:
     openOmnibar(r)
+  of caVerificationGoToSource, caVerificationOpenCounterexample,
+     caVerificationCopyMessage, caVerificationCopyLocation,
+     caVerificationCloseCounterexample:
+    # PLAT-63 (K65): a line's entry, as the shared Verification model
+    # decides it now; a source location opens as a press's does.
+    if gVerification.isNil:
+      return
+    let outcome = runVerificationMenu(gVerification.vm,
+                                      gVerification.session, action, target)
+    if outcome.copied.len > 0:
+      copyToClipboard(outcome.copied, "the line")
+    if outcome.activation.kind == vakSource:
+      discard verificationGoTo(r, outcome.activation)
+    else:
+      verificationSay(outcome.note)
+    verificationShown(r)
   of caLowLevelGoToSourceLine, caLowLevelShowSourceLine,
      caLowLevelCopyInstruction, caLowLevelCopySourceLocation:
     # PLAT-60 (K62): an instruction's entry, as the shared listing model
@@ -10560,6 +10832,9 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
       return
     # PLAT-60: and the focused Low Level Code listing's.
     if lowLevelKey(r, res.operation):
+      return
+    # PLAT-63: and the focused Verification pane's.
+    if verificationKey(r, res.operation):
       return
     if calltraceKey(r, res.operation):
       return
@@ -11684,6 +11959,81 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
           windowPointer(r, gekWheel, cx, cy, -float(at(2) * LowLevelRowPx))
         else:
           return "unknown lowlevel event '" & parts[1] & "'"
+    of "verify":
+      # PLAT-63: Verification, aimed from the geometry it was drawn with
+      # (`verification_leaf.verificationLayout`).
+      case parts[1]
+      of "show":
+        # View › Verification, through the window's menu route.
+        runGpuiMenuAction(r, "aVerification")
+      of "run":
+        runGpuiVerification(r)
+      of "stop":
+        installVerification()
+        verificationSay(gVerification.stopVerification())
+        drawVerificationPane(r)
+      of "wait":
+        let budget = if parts.len > 2: at(2) else: 300_000
+        let deadline = epochTime() + float(budget) / 1000.0
+        while gVerification.running and epochTime() < deadline:
+          sleep(20)
+          discard pollGpuiVerification(r)
+        discard pollGpuiVerification(r)
+        if gVerification.running:
+          return "the verification run did not settle within " & $budget &
+                 " ms"
+      of "key":
+        gFocusPane = $paneVerification
+        if not verificationKey(r, parts[2]):
+          return "the Verification pane does not take '" & parts[2] & "'"
+      of "choose":
+        let label = parts[2 .. ^1].join(":")
+        if not gCtxMenu.open:
+          return "no menu is open"
+        let i = gCtxMenu.menu.labels.find(label)
+        if i < 0:
+          return "the menu has no '" & label & "'"
+        let chosen = gCtxMenu.choose(i)
+        drawTopBar(r)
+        if chosen.chosen:
+          runContextAction(r, chosen.action, chosen.target)
+      else:
+        let body = verificationBody()
+        if gVerification.isNil or body.w <= 0:
+          return "the Verification pane is not drawn"
+        let vm = gVerification.vm
+        let session = gVerification.session
+        case parts[1]
+        of "line", "menu":
+          let line = at(2)
+          var lay = verificationLayout(vm, session, body)
+          if line < 0 or line >= lay.lines.len:
+            return "line " & $line & " is not listed"
+          let top = gVerificationPane.visibleTop(lay.lines.len, lay.rows)
+          if line < top or line >= top + lay.rows:
+            gVerificationPane.scrollTop = line
+            drawVerificationPane(r)
+            lay = verificationLayout(vm, session, body)
+          let c = lay.lineCentre(gVerificationPane, line)
+          if not c.ok:
+            return "line " & $line & " is not drawn"
+          if parts[1] == "menu":
+            windowPointer(r, gekContextMenu, c.x, c.y)
+          else:
+            pressAt(c.x, c.y)
+        of "control":
+          let lay = verificationLayout(vm, session, body)
+          let rect = if parts[2] == "stop": lay.stop else: lay.run
+          if rect.w <= 0:
+            return "the " & parts[2] & " control is not drawn"
+          let (x, y) = centreOf(rect)
+          pressAt(x, y)
+        of "wheel":
+          let (cx, cy) = centreOf(body)
+          windowPointer(r, gekWheel, cx, cy,
+                        -float(at(2) * VerificationRowPx))
+        else:
+          return "unknown verify event '" & parts[1] & "'"
     of "problems":
       # PLAT-55: Problems, aimed from the geometry it was drawn with
       # (`problems_leaf.problemsLayout`):
@@ -12910,6 +13260,7 @@ proc runEdit(cmd: GpuiCommand): int =
   defer: stopTestsHost()
   # PLAT-55: and a `:build` still going.
   defer: stopGpuiBuild()
+  defer: gVerification.finishWait()   # PLAT-63: a Verno run still going
   var shell = newGpuiShell(DockViewport(width: cmd.width, height: cmd.height,
                                         dockExtent: DefaultGpuiViewport.dockExtent))
   let surface = editSurfaceFor(cmd,
@@ -12952,6 +13303,7 @@ proc runEdit(cmd: GpuiCommand): int =
   # project).
   installProblems(cmd.traceFolder)
   attachProblems(leafSet)
+  attachVerification(leafSet)
   # The omnibox, for Find in Files' `:grep` line (`Ctrl+Shift+F` opens it;
   # Find-And-Incremental-Search.md §5.2): its command index is the menu's.
   if gMenu.isNil:
@@ -13048,6 +13400,7 @@ proc runOpen(cmd: GpuiCommand): int =
   defer: stopTestsHost()
   # PLAT-55: and a `:build` still going.
   defer: stopGpuiBuild()
+  defer: gVerification.finishWait()   # PLAT-63: a Verno run still going
   # The shipped product default for the flow overlay — the same constant the
   # terminal host applies, pinned against `default_config.yaml` by a test.
   if not session.session.editorVM.isNil:
@@ -13354,6 +13707,7 @@ proc runOpen(cmd: GpuiCommand): int =
   # PLAT-55: Problems over the window's builds, run in the same directory.
   installProblems(getCurrentDir())
   attachProblems(leafSet)
+  attachVerification(leafSet)
   # `PLAT35-F3`: the editor pane's inner width, from the geometry this
   # window is about to be laid out at — the same reading `editorRowsFor`
   # takes for the row count, over the same layout.

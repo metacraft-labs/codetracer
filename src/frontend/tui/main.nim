@@ -95,6 +95,7 @@ import ./host/tui_session
 import ./host/vcs_source
 import ./host/test_results_source   # PLAT-53
 import ./host/problems_source       # PLAT-55
+import ./host/verification_source   # PLAT-63
 import ./host/edit_search           # Find in Files over the project in Edit mode
 from ../viewmodel/viewmodels/test_results_vm import TraceOpenPolicy,
   TestTabPlacement, TestTabPlacementKind, placeTestRecording, testTabOf,
@@ -1292,6 +1293,17 @@ proc interactive(command: TuiCommand): int =
       else:
         session.showFileAt(rt, path, line, col))
   defer: problems.close()
+  # PLAT-63: the Verification pane — the window's project's declared Verno
+  # run (`app.projectRoot`), one per window as the desktop's; a finding
+  # opens in Edit mode's editor, or, in Debug mode, from the recording.
+  let verification = newVerificationSource(rt,
+    proc(): string = app.projectRoot,
+    proc(path: string; line, col: int): string =
+      if rt.app.modes.product == pmEdit:
+        rt.openWorkingFileAt(path, line, col)
+      else:
+        session.showFileAt(rt, path, line, col))
+  defer: verification.close()
   # PLAT-56: the Build Output pane over the same reader — the window's
   # `BuildVM`, the desktop BUILD panel's ViewModel; a located line opens as a
   # Problems row does, and Run builds the shown command again.
@@ -1513,6 +1525,8 @@ proc interactive(command: TuiCommand): int =
       # PLAT-55: the build's diagnostics, as they arrive.
       let problemsTicked = problems.tick(rt, nowMonoMs())
       let problemsChanged = buildOut.tick(rt) or problemsTicked
+      # PLAT-63: the verification run in flight, polled.
+      let verified = verification.tick(rt)
       # PLAT-57: the search in flight, a bounded step per tick.
       let searched = session.pumpFindInFiles(rt)
       # PLAT-54: what a live agent sent since the last tick.
@@ -1537,7 +1551,7 @@ proc interactive(command: TuiCommand): int =
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
          hoverChanged or frameOwed or recorded or keysChanged or searched or
          barsChanged or testsChanged or agentChanged or problemsChanged or
-         requestsChanged:
+         requestsChanged or verified:
         paint(driver, rt)
         frameOwed = false
     of dekResize:
@@ -1877,6 +1891,13 @@ proc editInteractive(command: TuiCommand): int =
     proc(path: string; line, col: int): string =
       rt.openWorkingFileAt(path, line, col))
   defer: problems.close()
+  # PLAT-63: the Verification pane over the project's declared Verno run; a
+  # finding opens in the editor.
+  let verification = newVerificationSource(rt,
+    proc(): string = app.projectRoot,
+    proc(path: string; line, col: int): string =
+      rt.openWorkingFileAt(path, line, col))
+  defer: verification.close()
 
   # PLAT-56: the Build Output pane over the same reader — the window's
   # `BuildVM`, the desktop BUILD panel's ViewModel; a located line opens as a
@@ -1917,6 +1938,7 @@ proc editInteractive(command: TuiCommand): int =
       let testsChanged = tests.tick(rt)
       let problemsTicked = problems.tick(rt, nowMonoMs())
       let problemsChanged = buildOut.tick(rt) or problemsTicked
+      let verified = verification.tick(rt)
       let hoverChanged = rt.tickAutoHide(nowMs()) or
                          rt.tickCellHover(nowMs()) or
                          rt.tickPendingPrefix(nowMs())
@@ -1924,7 +1946,7 @@ proc editInteractive(command: TuiCommand): int =
       let keysChanged = rt.pollKeybindings(keybindings)
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
          hoverChanged or keysChanged or barsChanged or testsChanged or
-         problemsChanged or searched:
+         problemsChanged or searched or verified:
         paint(driver, rt)
     of dekResize:
       size = ev.size

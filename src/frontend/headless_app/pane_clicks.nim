@@ -142,6 +142,14 @@ type
     caLowLevelShowSourceLine = "low-level-show-source-line"
     caLowLevelCopyInstruction = "low-level-copy-instruction"
     caLowLevelCopySourceLocation = "low-level-copy-source-location"
+    caVerificationGoToSource = "verification-go-to-source"
+      ## PLAT-63: a line's menu in the Verification pane, the entries
+      ## `VerificationVM.rowMenu` decides, in its order; the line is
+      ## `ContextTarget.text` (its key).
+    caVerificationOpenCounterexample = "verification-open-counterexample"
+    caVerificationCopyMessage = "verification-copy-message"
+    caVerificationCopyLocation = "verification-copy-location"
+    caVerificationCloseCounterexample = "verification-close-counterexample"
 
   ContextMenuKind* = enum
     cmkTab = "tab"
@@ -166,6 +174,9 @@ type
       ## dropdown (K60): one entry per option, the current one hinted.
     cmkLowLevelRow = "low-level-row"
       ## PLAT-60: an instruction of the Low Level Code pane (K62).
+    cmkVerificationRow = "verification-row"
+      ## PLAT-63: a finding, an offer or a step of the Verification pane
+      ## (K65).
 
   ContextMenuEntry* = object
     label*: string
@@ -516,6 +527,25 @@ func lowLevelRowContextMenu*(index, offset: int;
                              hint = (if d.enabled: "" else: d.reason),
                              enabled = d.enabled, reason = d.reason)
 
+func verificationRowContextMenu*(key: string;
+                                 decided: openArray[tuple[label: string;
+                                                          action: ContextAction;
+                                                          enabled: bool;
+                                                          reason: string]]):
+    ContextMenuModel =
+  ## PLAT-63: a line's menu in the Verification pane, from the entries the
+  ## shared model decided (`headless_app/verification_menu.
+  ## verificationRowContextMenuOf` reads them off `VerificationVM.rowMenu`).
+  ## The target carries the line's key, so a choice made after a new run
+  ## replaced the list finds no line rather than another one.
+  result = ContextMenuModel(kind: cmkVerificationRow,
+                            target: ContextTarget(pane: paneVerification,
+                                                  text: key, index: -1))
+  for d in decided:
+    result.entries.add entry(d.label, d.action,
+                             hint = (if d.enabled: "" else: d.reason),
+                             enabled = d.enabled, reason = d.reason)
+
 func variablesContextMenu*(path: string): ContextMenuModel =
   ## A Variables row's right-click menu — the State pane's
   ## `buildVariableRowContextMenu`: value history and value origin.
@@ -668,7 +698,7 @@ func k(id, target: string; gestures: set[ClickGesture];
                  desktop: desktop, sharedOp: sharedOp, terminal: terminal,
                  gpui: gpui, note: note)
 
-const ClickInventory*: array[63, ClickBehaviour] = [
+const ClickInventory*: array[66, ClickBehaviour] = [
   k("K1", "Top bar: menu button / item", {cgClick},
     "open the menu; run the item / enter the folder", "MenuVM",
     nsExisting, nsExisting, "PLAT-48/49"),
@@ -868,7 +898,23 @@ const ClickInventory*: array[63, ClickBehaviour] = [
   k("K63", "Low Level Code: sync toggle", {cgClick},
     "keep the listing in step with the source, or stop",
     "LowLevelCodeVM.setSyncEnabled", nsDone, nsDone,
-    "PLAT-60: the header's `sync on` / `sync off`")]
+    "PLAT-60: the header's `sync on` / `sync off`"),
+  k("K64", "Verification: finding, counterexample offer, step", {cgClick},
+    "go to the finding's source location; open the counterexample; move " &
+      "the counterexample to the step (and its source, when recorded)",
+    "VerificationVM.activateLine", nsDone, nsDone,
+    "PLAT-63: the pane is drawn natively; the keys move the cursor and " &
+      "Enter is the press"),
+  k("K65", "Verification: finding, counterexample offer, step",
+    {cgRightClick},
+    "menu: Go to Source, Step Through the Counterexample, Copy Message, " &
+      "Copy Location, Close the Counterexample", "VerificationVM.rowMenu",
+    nsDone, nsDone, "PLAT-63 added the menu on all three front-ends"),
+  k("K66", "Verification: Run / Stop", {cgClick},
+    "run the project's declared Verno action / stop the run",
+    "verification_source.runVerification / stopVerification", nsDone,
+    nsDone, "PLAT-63: drawn where the host runs the project's verifier; " &
+      "the desktop's pane has no runner and draws neither")]
 
 func behaviour*(id: string): ClickBehaviour =
   ## The inventory row named `id` (`K1` …); an empty value for an unknown id.
