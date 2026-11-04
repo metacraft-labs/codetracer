@@ -50,7 +50,7 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 56
+  ExpectedAssertions = when defined(posix): 57 else: 56
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1600
   H = 1000
@@ -78,6 +78,12 @@ proc typed(text: string): string =
   ## `--window-ops` keys typing `text`.
   for ch in text:
     result.add(if ch == ' ': ",key:space" else: ",key:" & $ch)
+
+proc resolvedProjectPath(project: string): string =
+  ## The window reports the resolved working directory. Keep every assertion
+  ## about that value on the same canonical spelling, including when the
+  ## project's lexical path crosses a symlink.
+  project.expandFilename.strip(leading = false, chars = {'/'})
 
 proc calc(): string =
   let resolved = resolveFixture(FixtureSpec(
@@ -371,7 +377,7 @@ suite "PLAT-53: the Test Results pane in the GPUI window":
     # The window reports its resolved working directory, and macOS's
     # temporary directory is under a symbolic link (`/var` -> `/private/var`).
     ck tr.contains("tests: test recordings open in the current tab in " &
-                   project.expandFilename.strip(leading = false, chars = {'/'}))
+                   resolvedProjectPath(project))
     removeDir(project)
 
   test "Edit-Mode-Toolbar §9.4: the omnibox's Project: Run pair":
@@ -380,15 +386,32 @@ suite "PLAT-53: the Test Results pane in the GPUI window":
     # opens it IN THIS TAB (the replay the window opened with, replaced in
     # place); **Project: Run** then reuses the run's own tab (rule 4) —
     # two sessions opened, both replacements, and no test recorded.
-    let project = writePlat53RunProject("ct-plat53-gpui-")
+    let projectDir = writePlat53RunProject("ct-plat53-gpui-")
+    let project =
+      when defined(posix):
+        # Do not depend on the host's temporary-directory spelling. The window
+        # must resolve this alias, while the harness keeps the lexical path.
+        projectDir & "-link"
+      else:
+        projectDir
+    defer:
+      when defined(posix):
+        if symlinkExists(project): removeFile(project)
+      removeDir(projectDir)
+    when defined(posix):
+      createSymlink(projectDir, project)
     let (plan, tr) = windowPlan(project,
       "tests:show,key:p:control,key:colon" & typed("Project") &
       ",key:colon" & typed(" Run in Current Tab") & ",key:enter,tests:wait," &
       "key:p:control,key:colon" & typed("Project") & ",key:colon" &
       typed(" Run") & ",key:enter,tests:wait")
     checkpoint(tr)
-    ck tr.contains("status: recording " & project & "; it opens in this tab")
-    ck tr.contains("status: recording " & project &
+    let reportedProject = resolvedProjectPath(project)
+    when defined(posix):
+      ck project != reportedProject
+    ck tr.contains("status: recording " & reportedProject &
+                   "; it opens in this tab")
+    ck tr.contains("status: recording " & reportedProject &
                    "; it opens in the tab it already has")
     var recordings: seq[string] = @[]
     for line in tr.splitLines():
@@ -406,7 +429,6 @@ suite "PLAT-53: the Test Results pane in the GPUI window":
     let rows = plan.rowsOf()
     ck rows.len == 2 and rows[0].attr("data-ct-recording-id") == "" and
        rows[1].attr("data-ct-recording-id") == ""
-    removeDir(project)
 
   test "a press selects a row; the window's keys move the selection":
     let project = writePlat53Project("ct-plat53-gpui-")
