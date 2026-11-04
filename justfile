@@ -849,7 +849,27 @@ capture-agent-harbor-fixtures *args:
 check-agent-harbor-fixtures *args:
   bash scripts/capture-agent-harbor-fixtures.sh check "$@"
 
-build-storybook-components:
+# Write StoryBook's story files from the one story declaration,
+# `src/frontend/stories/codetracer_stories.nim`, into the git-ignored
+# `storybook/stories/generated/` (one CSF file per section, plus
+# `stories.json`, the StoryBook id of every story). The IsoNim Editor instance
+# (`just isonim-editor-codetracer`) reads the same declaration, so the two
+# review surfaces cannot show different stories.
+storybook-stories:
+  nim r --hints:off tools/stories/emit_storybook_stories.nim
+
+# The IsoNim Editor instance over CodeTracer's stories (the same declaration
+# StoryBook's are generated from), with design review and agent sessions in
+# this checkout. Serves on 0.0.0.0:6106 until stopped (`--port N`, `--bind
+# ADDR`), with agent sessions disabled unless bound to loopback (the editor's
+# agent routes are unauthenticated); `--smoke` builds it, serves it on a free loopback port with a
+# deterministic test agent, checks it in a headless browser and exits 0/1.
+# See scripts/isonim-editor-codetracer.sh.
+[positional-arguments]
+isonim-editor-codetracer *args:
+  bash scripts/isonim-editor-codetracer.sh "$@"
+
+build-storybook-components: storybook-stories
   mkdir -p storybook/dist
   nim \
     -d:chronicles_enabled=off \

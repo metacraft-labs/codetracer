@@ -748,3 +748,7 @@ src/common/**/test_*
 # of the harnesses above, and one lock would serialise runs that do not collide
 # while telling a reader they do.
 src/frontend/viewmodel/tests/unit/.wd7-session-allocation-mutation.lock
+
+# StoryBook story files written from src/frontend/stories/codetracer_stories.nim
+# by `just storybook-stories` (tools/stories/emit_storybook_stories.nim).
+/storybook/stories/generated/

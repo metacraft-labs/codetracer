@@ -1,5 +1,11 @@
 ## Storybook-compatible exports for CodeTracer IsoNim surfaces.
 ##
+## `mountCodeTracerStory` mounts one story: the viewmodel its fixture names,
+## under the production IsoNim view. Which stories exist is declared once, in
+## `stories/codetracer_stories.nim`; StoryBook (its generated story files) and
+## the IsoNim Editor instance (`isonim_editor_codetracer.nim`, which compiles
+## this module into its bundle) both mount through this proc.
+##
 ## Compiled with:
 ##   nim js -o:storybook/dist/components.js src/frontend/storybook_components.nim
 
@@ -97,6 +103,7 @@ import viewmodel/app/isonim_app_shell
 # Agent Harbor front-end prototypes: the viewmodels and their fixture data
 # source come from nim-agents-isonim-viewmodels; only the views are here.
 import nim_agents_isonim_viewmodels/agent_harbor/[fixture_source, fleet_vm]
+import stories/agent_harbor_stories
 import viewmodel/views/isonim_agent_harbor_fleet_view
 import ../ct_test/contracts as ct_test_contracts
 
@@ -1366,44 +1373,15 @@ proc mountTerminalOutput(container: isonim_dom.Element; fixture: string): Dispos
 # Agent Harbor
 # ---------------------------------------------------------------------------
 
-proc agentHarborFleetSource(fixture: string): AgentHarborDataSource =
-  ## The data source a fleet story reads. Every populated state is the
-  ## captured fleet snapshot; the states no capture shows come from the
-  ## data-source seam's state sources, so the view is exercised through the
-  ## same seam a live source will use.
-  case fixture
-  of "loading":
-    newPendingDataSource("waiting for the Agent Harbor server")
-  of "error":
-    newFailingDataSource(
-      "GET /api/v1/sessions failed: connection refused (the server is not " &
-      "running, or its address is wrong)", "unreachable server")
-  of "empty":
-    newSnapshotDataSource(FleetSnapshot(sourceLabel: "empty server"),
-                          "empty server")
-  else:
-    newFixtureDataSource()
-
 proc mountAgentHarborFleet(container: isonim_dom.Element;
                            fixture: string): DisposeProc =
-  ## Fixtures: `snapshot` (the captured fleet), `needs-input` and `failed`
-  ## (the snapshot under that filter), `selected` (its first captured
-  ## session selected), `loading`, `error`, `empty`.
+  ## The fleet panel over the viewmodel `createFleetStoryVM` builds for the
+  ## story's fixture (`stories/agent_harbor_stories.nim` names them).
   var rootDisposer: proc()
   var vm: FleetSnapshotVM
   createRoot proc(dispose: proc()) =
     rootDisposer = dispose
-    let source = agentHarborFleetSource(fixture)
-    vm = newFleetSnapshotVM(source)
-    vm.load()
-    case fixture
-    of "needs-input": vm.setFilter(ffNeedsInput)
-    of "failed": vm.setFilter(ffFailed)
-    of "selected":
-      if source of FixtureDataSource:
-        let rows = vm.rows
-        if rows.len > 0: vm.select(rows[0].id)
-    else: discard
+    vm = createFleetStoryVM(fixture)
     mountAgentHarborFleetPanel(container, vm)
   return proc() =
     if vm != nil: vm.dispose()
@@ -1658,7 +1636,7 @@ proc ctAttachDebugControlMarks*(container: isonim_dom.Element): int
   ## Put the debugger strip's marks on a toolbar that some OTHER producer
   ## built, and answer how many were placed.
   ##
-  ## `CodeTracerSurfaces.stories.js` hand-builds a reference shell whose
+  ## `storybook/stories/lib/surfaces.js` hand-builds a reference shell whose
   ## header is a row of empty `#{action}-image` buttons. It used to be filled
   ## in by `button.styl`'s `background-image` rules, and when those went away
   ## — the marks are inline SVG now, so that a theme can colour them — that

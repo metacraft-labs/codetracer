@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -54,7 +54,22 @@ for (const cssName of appStyles) {
   }
 }
 
-for (const file of readdirSync(storiesDir).filter((name) => name.endsWith(".stories.js"))) {
+// The story files are generated (`stories/generated/`) and the harness that
+// frames every story lives in `stories/lib/`; check them all, so moving the
+// frame code out of a `*.stories.js` file cannot take it out of this check.
+const storySources = [];
+for (const sub of ["", "lib", "generated"]) {
+  const dir = join(storiesDir, sub);
+  if (!existsSync(dir)) continue;
+  for (const name of readdirSync(dir).filter((n) => n.endsWith(".js")).sort()) {
+    storySources.push(sub ? `${sub}/${name}` : name);
+  }
+}
+if (!storySources.includes("lib/surfaces.js")) {
+  failures.push("storybook/stories/lib/surfaces.js (the story frame harness) is missing");
+}
+
+for (const file of storySources) {
   const path = join(storiesDir, file);
   const source = readFileSync(path, "utf8");
   const styleBlocks = source.matchAll(/style\.textContent\s*=\s*`([\s\S]*?)`/g);

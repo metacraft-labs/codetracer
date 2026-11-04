@@ -9,12 +9,16 @@ const staticIframe = path.join(staticRoot, "iframe.html");
 const storybookComponentsBundle = path.join(repoRoot, "storybook", "dist", "components.js");
 const componentFreshnessInputs = [
   path.join(repoRoot, "src", "frontend", "storybook_components.nim"),
+  path.join(repoRoot, "src", "frontend", "stories"),
   path.join(repoRoot, "src", "frontend", "viewmodel", "views", "isonim_debug_controls_view.nim"),
   path.join(repoRoot, "src", "frontend", "viewmodel", "viewmodels", "debug_controls_vm.nim"),
 ];
 const staticFreshnessInputs = [
   path.join(repoRoot, "storybook", ".storybook"),
-  path.join(repoRoot, "storybook", "stories", "CodeTracerSurfaces.stories.js"),
+  // The story frame harness and the generated story files (written from
+  // src/frontend/stories/codetracer_stories.nim by `just storybook-stories`).
+  path.join(repoRoot, "storybook", "stories", "lib"),
+  path.join(repoRoot, "storybook", "stories", "generated"),
   storybookComponentsBundle,
 ];
 
