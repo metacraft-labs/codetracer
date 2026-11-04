@@ -113,6 +113,21 @@ fi
 # dropped. Failures must propagate — the uncatchable staticRead otherwise
 # resurfaces as an opaque Nim compile error several minutes later.
 
+# The tree-sitter-nim parser, generated from its grammar: `src/parser.c` is
+# not tracked, and src/db-backend compiles it through the tree-sitter-nim path
+# dependency. The dev shell's hook generates it on entry, but a build that
+# never entered that shell -- `repro exec`, a fresh worktree, CI steps that
+# run a captured environment -- reached cargo without it and failed on
+# "parser.c: No such file or directory". The build generates it itself, with
+# the dev shell's `tree-sitter`, the way non-nix-build/build_db_backend.sh
+# does; when the file is current this only checks its age. It needs no
+# sibling, so it runs before the sibling check, which reports the file as
+# missing otherwise. (A stripped-down tree with neither the generator nor the
+# grammar -- the build-once contract tests' fixtures -- has nothing to do.)
+if [ -f "$CT_ROOT/non-nix-build/ensure_tree_sitter_nim_parser.sh" ]; then
+	ROOT_DIR="$CT_ROOT" "${BASH:-bash}" "$CT_ROOT/non-nix-build/ensure_tree_sitter_nim_parser.sh"
+fi
+
 # Sibling repos first -- before ANY build step, including build-tailwind.sh,
 # which itself drives an extract over ../isonim's sources. Every consumer of a
 # missing sibling degrades badly (nim silently ignores a nonexistent --path;
