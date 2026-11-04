@@ -2570,8 +2570,9 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     # panels have no instance and need no work here.
     discard renderer.redrawLegacyRendererInstance(label)
 
-  autoHideState.onChanged = proc() =
-    # Re-render the side strip tabs whenever the auto-hide state changes.
+  auto_hide.autoHideRenderStrips = proc() =
+    # Re-render the side strip tabs whenever the auto-hide state changes,
+    # and when a session tab switch swaps in another tab's strips.
     # Left and right strip hosts are static DOM nodes in the layout row; their
     # contents and sizing classes are now refreshed through IsoNim directly.
     requestAutoHideSideStripRender(
@@ -2593,6 +2594,9 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     # Each edge owns its footer directory; status-shell rebuilds remount both.
     requestCollapsedIconZoneRender(cstring"auto-hide-collapsed-icon-zone")
     requestCollapsedIconZoneRender(cstring"auto-hide-collapsed-icon-zone-right", AutoHideEdge.Right)
+
+  autoHideState.onChanged = proc() =
+    auto_hide.autoHideRenderStrips()
     # Persist here rather than only from the `stateChanged` handler below.
     # Pinning is a REPARENT, and `itemDestroyed` deliberately returns early
     # while `data.ui.isReparenting` is set, so a pin can complete without

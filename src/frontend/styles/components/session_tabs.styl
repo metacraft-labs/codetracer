@@ -42,6 +42,17 @@
     .session-tab-overflow-menu
       display flex
 
+    // Open: the chevron points up and the circle is the hover fill at 35%
+    // (Nikolay, 2026-11-03; D-33).
+    .session-tab-overflow
+      background-color rgba(colors-ui-surface-primary-tertiary-hover, 0.35)
+
+      &::before
+        transform rotate(180deg)
+
+      &:hover
+        background-color colors-ui-surface-primary-tertiary-hover
+
 .session-tab
   display flex
   align-items center
@@ -57,12 +68,18 @@
   // tab bar.
   color by-mode(#b0b0b0, colors-ui-text-primary-caption)
   opacity 0.7
+  // The hover colour (`surface/primary/tertiary-hover`) at 25% on screen
+  // (D-33). Written as 0.25 / 0.7 because the tab's 0.7 opacity above dims its
+  // fill too; change both together (Nikolay, 2026-11-03).
+  background-color rgba(colors-ui-surface-primary-tertiary-hover, (0.25 / 0.7))
   // The design system's control radius (`border/radius/control`, 6px) — the
   // same corners as the command prompt beside these tabs (command-palette.styl,
   // 0.375rem).  Was 0.25em (4px).  The token is unitless px, hence the rem
   // conversion against the 16px root.
   border-radius unit(border-border-radius-control / 16, 'rem')
-  margin-right 0.25em
+  // 6px to the next tab, the overflow button or the "+", as between any two
+  // controls (CONTROL_GAP, D-32).  Was 0.25em (4px) (Nikolay, 2026-11-03).
+  margin-right CONTROL_GAP
   white-space nowrap
   user-select none
   transition background-color 150ms ease, color 150ms ease, opacity 150ms ease
@@ -192,22 +209,58 @@
   display none
   align-items center
   justify-content center
-  flex 0 0 1.625em
-  width 1.625em
-  height 1.625em
-  margin-right 0.125em
+  // Looks and behaves like the "+" beside it (`#menu .session-tab-add`): a
+  // 26px circle (CONTROL_HEIGHT_MD) with the same fill, mark colour and 70%
+  // mark at rest, and the same hover and press (Nikolay, 2026-11-03; D-33).
+  flex 0 0 CONTROL_HEIGHT_MD
+  width CONTROL_HEIGHT_MD
+  height CONTROL_HEIGHT_MD
+  // 6px to the "+", as between any two controls (D-32).
+  margin-right CONTROL_GAP
   cursor pointer
-  // Caption text in the light theme, as the tabs (`.session-tab`).
-  color by-mode(#b0b0b0, colors-ui-text-primary-caption)
-  font-size 1.25em
-  line-height 1
+  background-color colors-ui-surface-primary-tertiary
+  color by-mode(#b0b0b0, colors-ui-text-primary-label)
   user-select none
-  border-radius 0.25em
+  border-radius 50%
   -webkit-app-region no-drag
-  transition color 150ms ease, background-color 150ms ease
+  transition BUTTON_TRANSITION
+
+  // The Design System's chevron-down (Figma `icons-lg=chevron-down`),
+  // painted in currentColor so it follows the caption/hover colours. It
+  // replaced a typed "⌄" character (Nikolay, 2026-11-03; D-33).
+  &::before
+    content ""
+    // 18px (Nikolay, 2026-11-03).
+    width 1.125rem
+    height 1.125rem
+    background-color currentColor
+    -webkit-mask-image url('../../public/resources/shared/build_chevron_down.svg')
+    mask-image url('../../public/resources/shared/build_chevron_down.svg')
+    -webkit-mask-repeat no-repeat
+    mask-repeat no-repeat
+    -webkit-mask-position center
+    mask-position center
+    -webkit-mask-size contain
+    mask-size contain
+    opacity 0.7
+    transition opacity BUTTON_TRANSITION_TIMING, transform 150ms ease
+
+    @media (prefers-reduced-motion: reduce)
+      transition opacity BUTTON_TRANSITION_TIMING
+
   &:hover
+    background-color colors-ui-surface-primary-tertiary-hover
     color colors-ui-text-primary-body
-    background-color colors-ui-surface-primary-secondary-hover
+
+    &::before
+      opacity 1
+
+  &:active
+    background-color by-mode(#3c3c3c, colors-ui-surface-primary-tertiary)
+    color by-mode(#ffffff, colors-ui-text-primary-body)
+
+    &::before
+      opacity 1
 
 .session-tab-overflow-menu
   display none

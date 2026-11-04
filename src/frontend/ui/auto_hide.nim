@@ -482,6 +482,19 @@ proc pinPanel*(
     containerElement: containerEl,
     isUnpinning: false
   )
+  # ONE STRIP TAB PER PANEL (Nikolay, 2026-11-03).  A panel already on a
+  # strip under the same `panelKey` is replaced, not joined: two entries
+  # with one key drew a second, broken tab (a stray close mark, no content),
+  # and every lookup by key found only the first.  The tab just pinned
+  # carries the live pane, so it is the one kept.
+  for old in autoHideState.panels:
+    if old.content == content and old.componentId == componentId:
+      if autoHideState.activeOverlay == old:
+        hideOverlay(slideOut = false)
+      if autoHideState.dockedPanel == old:
+        hideDockedPanel()
+  autoHideState.panels = autoHideState.panels.filterIt(
+    not (it.content == content and it.componentId == componentId))
   autoHideState.panels.add(panel)
 
   cdebug fmt"auto_hide: pinned panel '{title}' to edge {edge}"
@@ -2352,6 +2365,59 @@ proc restoreAutoHideState*(saved: JsObject) =
     autoHideState.panels.add(panel)
 
   cdebug fmt"auto_hide: restored {autoHideState.panels.len} pinned panels"
+
+# ---------------------------------------------------------------------------
+# One set of strips per session tab
+# ---------------------------------------------------------------------------
+
+var autoHideRenderStrips*: proc() = nil
+  ## Redraw every strip from `autoHideState`, without persisting it.  Set by
+  ## `ui/layout.nim`'s `initLayout`, which owns the strip hosts.
+
+var parkedSessionStrips: seq[tuple[sessionId: int, state: AutoHideState,
+                                   layout: GoldenLayout]] = @[]
+  ## The strips of every session tab that is not shown, by session id.
+
+proc switchAutoHideSession*(fromSessionId, toSessionId: int) =
+  ## Swap the strips over to another session tab.  Call as the tab changes,
+  ## before the target's layout is first built.
+  ##
+  ## Each session tab has its own GoldenLayout, so its pinned panels are its
+  ## own too.  With one set of strips for the whole window a panel pinned in
+  ## one tab showed in the other, could be pinned again from that tab's
+  ## layout (two tabs of one panel), and Unpin sent it into whichever tab was
+  ## shown (Nikolay, 2026-11-03).  `autoHideState` and `autoHideLayout` are
+  ## always the shown tab's; the rest wait here.
+  ##
+  ## A tab seen for the first time starts with the window's standalone panes
+  ## only — BUILD, PROBLEMS, FIND IN FILES, REQUESTS.  Those four are built
+  ## once per window (their element ids carry no tab), so a later tab's
+  ## `initLayout` finds them already there and registers nothing; without
+  ## them here its footer came up empty.
+  if not autoHideState.isNil:
+    hideOverlay(slideOut = false)
+    hideDockedPanel()
+  var target: tuple[state: AutoHideState, layout: GoldenLayout]
+  for parked in parkedSessionStrips:
+    if parked.sessionId == toSessionId:
+      target = (state: parked.state, layout: parked.layout)
+  if target.state.isNil and not autoHideState.isNil:
+    target.state = AutoHideState(
+      panels: autoHideState.panels.filterIt(it.standalone),
+      leftMinimal: autoHideState.leftMinimal,
+      rightMinimal: autoHideState.rightMinimal)
+  parkedSessionStrips = parkedSessionStrips.filterIt(
+    it.sessionId != fromSessionId and it.sessionId != toSessionId) &
+    @[(sessionId: fromSessionId, state: autoHideState, layout: autoHideLayout)]
+  autoHideState = target.state
+  autoHideLayout = target.layout
+  if not autoHideRenderStrips.isNil:
+    autoHideRenderStrips()
+  deferredUpdateGLSize()
+
+proc forgetAutoHideSession*(sessionId: int) =
+  ## Drop a closed session tab's strips.
+  parkedSessionStrips = parkedSessionStrips.filterIt(it.sessionId != sessionId)
 
 # ---------------------------------------------------------------------------
 # Keyboard / backdrop dismissal

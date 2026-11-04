@@ -18,7 +18,8 @@
 .request-panel-filters
   display: flex
   align-items: center
-  gap: 0.667em
+  // The control gap (CONTROL_GAP, 6px, button.styl); 0.667em came to 8.004px.
+  gap: CONTROL_GAP
   // The panel inset (PANEL_INSET, 8px, button.styl) at the sides; no top of
   // its own — the dock's 8px (auto_hide.styl) is the whole gap above it.
   padding: 0 PANEL_INSET 0.5em
@@ -54,7 +55,9 @@
 .request-table-header
   display: flex
   align-items: center
-  padding: 0.4167em PANEL_INSET
+  // 5px above and below, a whole pixel: 0.4167em came to 4.58px, which put the
+  // column titles 11.6px below the search field.  Now 12px.
+  padding: 0.3125rem PANEL_INSET
   font-size: 0.9167em
   font-weight: 500
   letter-spacing: 0.06em

@@ -1,9 +1,11 @@
 // Every control in the prompt toolbar — icon buttons, the branch and model
 // buttons, send — is this tall, with these corners (see "Prompt toolbar: one
 // size, one corner" at the end of this file); the menus, the message field and
-// the prompt area share the corners.  28px, 6px (Nikolay, 2026-10-11: 8px → 6px,
-// the app's control radius, CONTROL_RADIUS in button.styl).
-AGENT_TOOLBAR_CONTROL_SIZE = 1.75rem
+// the prompt area share the corners.  26px, 6px: the medium control size every
+// panel control uses, CONTROL_HEIGHT_MD in button.styl (Nikolay, 2026-11-03:
+// 28px → 26px, the same size as the Event Log's filter button), and the app's
+// control radius, CONTROL_RADIUS (Nikolay, 2026-10-11: 8px → 6px).
+AGENT_TOOLBAR_CONTROL_SIZE = CONTROL_HEIGHT_MD
 AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
 
 .log-item
@@ -223,6 +225,9 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
     //   border: 0.125em solid colors-ui-surface-base-panel !important
 
   .agent-command-input
+    // A block, not the textarea's default inline-block, so no baseline space
+    // hangs under it (see `.agent-buttons-container` below).
+    display: block
     color: transparent !important
     caret-color: colors-ui-text-primary-caption !important
 
@@ -1351,12 +1356,13 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
 .agent-idle-subtitle
   font-size: 0.9em
   color: colors-ui-text-primary-caption
-  line-height: 1.5
+  // 22px lines, a whole pixel (1.5 came to 21.6px).
+  line-height: 1.375rem
 
 .agent-idle-suggestions
   display: flex
   flex-wrap: wrap
-  gap: 0.5em
+  gap: CONTROL_GAP
   justify-content: center
 
 .agent-idle-chip
@@ -1366,11 +1372,17 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
   color: colors-ui-text-primary-body
   font-size: 0.8em
   font-family: inherit
-  padding: 0.4em 1em
+  // 30px tall with 1px borders, whole pixels: em padding, line-height and
+  // border came to 30.43px, so the chips and the rows under them sat on part
+  // pixels.
+  box-sizing: border-box
+  height: 1.875rem
+  border-width: 0.0625rem
+  padding: 0 1rem
   cursor: pointer
   transition: background-color 0.15s ease, border-color 0.15s ease
   white-space: nowrap
-  line-height: 1.5
+  line-height: 1.75rem
 
   &:hover
     background: colors-ui-surface-primary-secondary
@@ -1878,14 +1890,14 @@ agent-status-pill()
 // Squeezed, the two buttons cut their names down to a letter or two and then to
 // nothing, leaving a chevron no one can read (Nikolay, 2026-10-11).  Below the
 // width where each name still shows about eight characters, they drop the name
-// and the chevron and become 28px squares like the toolbar's other icon
+// and the chevron and become 26px squares like the toolbar's other icon
 // buttons (`.agent-add-context-button`, `.agent-settings-button`).  The full
 // name stays on hover (`title`), and the dropdowns open as before.
 //
 // 23rem (368px) is the toolbar width that gives each button 8px padding, the
 // 16px icon, a 6px gap, ~64px of name (≈8 characters, the "…" included), the
-// 24px chevron and 8px padding (128px), beside the three 28px icon buttons and
-// four 6px gaps (108px): 128 + 128 + 108 = 364, rounded up.  At ~48px of name
+// 24px chevron and 8px padding (128px), beside the three 26px icon buttons and
+// four 6px gaps (102px): 128 + 128 + 102 = 358, rounded up.  At ~48px of name
 // (tried first) the "…" left "ui-de…" and "Cod…" — too little to recognise.
 // ---------------------------------------------------------------------------
 // Above that width, neither button is squeezed below those 128px, so a name
@@ -1947,19 +1959,22 @@ agent-status-pill()
 // elsewhere in the app keep the shared `dropdown-surface-chrome()` look.
 // ---------------------------------------------------------------------------
 
-// 8px between the field and the toolbar; they touched.
+// 14px between the field and the toolbar (Nikolay, 2026-11-03).  The field
+// used to sit on the text baseline, which hung 6.5px of descender space under
+// it, so the 8px margin came to 14.5px; the field is now a block (below) and
+// this margin is the whole gap.
 .agent-interaction .agent-buttons-container
-  margin-top: 0.5rem
+  margin-top: 0.875rem
 
-// Every control 28px tall with 6px corners.  The icon buttons are 28px squares.
+// Every control 26px tall with 6px corners.  The icon buttons are 26px squares.
 // The send button stays a circle — its shape is what marks it as the action —
-// but at the same 28px.
+// but at the same 26px.
 .agent-buttons-container
   .agent-button,
   [class*="ct-button-image-"][class*="ct-button-image-"]
     height: AGENT_TOOLBAR_CONTROL_SIZE !important
-    // The md icon-button size also caps the height (`max-height: 1.625rem`,
-    // button.styl), which would hold the icon buttons at 26px.
+    // Set here as well as by the md icon-button size (button.styl), so the
+    // branch and model buttons, which are not icon buttons, match them.
     max-height: AGENT_TOOLBAR_CONTROL_SIZE !important
     border-radius: AGENT_TOOLBAR_CONTROL_RADIUS !important
 
