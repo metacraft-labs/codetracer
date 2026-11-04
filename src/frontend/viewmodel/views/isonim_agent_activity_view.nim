@@ -18,6 +18,7 @@ import isonim/dsl/[ui, components]
 import isonim/testing/mock_dom
 
 when defined(js):
+  import ./keyboard_focus
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
   import jsffi
@@ -545,7 +546,7 @@ proc renderMessage[R](r: R; componentId: int;
               if message.canceled:
                 span: text " " & AgentCanceledText
           tdiv(class = "msg-controls"):
-            tdiv(class = "agent-user-copy-button",
+            tdiv(class = "agent-user-copy-button", title = "Copy message",
                  onclick = proc() =
                    when defined(js):
                      let content = message.content
@@ -763,7 +764,8 @@ proc renderMessage[R](r: R; componentId: int;
                         let rowClass = if initExpanded: "agent-tc-row agent-tc-row-expanded" else: "agent-tc-row"
                         let histClickHandler = makeToolRowClickHandler(stableId)
                         tdiv(class = rowClass, id = stableId):
-                          span(class = "agent-tc-icon", onclick = histClickHandler)
+                          span(class = "agent-tc-icon", title = "Show or hide this tool call",
+                               onclick = histClickHandler)
                           span(class = "agent-tc-name"): text tc.toolName
                           span(class = dotClass)
                     tdiv(class = "agent-tc-toggle",
@@ -780,7 +782,8 @@ proc renderMessage[R](r: R; componentId: int;
                       "agent-tc-row agent-tc-row-current"
                   let currentClickHandler = makeToolRowClickHandler(currentStableId)
                   tdiv(class = currentRowClass, id = currentStableId):
-                    span(class = "agent-tc-icon", onclick = currentClickHandler)
+                    span(class = "agent-tc-icon", title = "Show or hide this tool call",
+                         onclick = currentClickHandler)
                     span(class = "agent-tc-name"): text currentTc.toolName
                     span(class = currentDotClass)
           else:
@@ -1086,7 +1089,7 @@ proc renderTerminal[R](r: R; terminal: AgentActivityTerminalEntry;
           text terminalTitle(terminal.id)
         tdiv(class = "msg-controls"):
           button(class = "ct-button-image-sm-secondary command-palette-copy-button terminal-copy-button",
-                 `type` = "button")
+                 `type` = "button", title = "Copy")
           tdiv(class = "agent-model-img")
       tdiv(id = shellContainerId(terminal.shellId, commandInputId),
            class = "shell-container")
@@ -1161,7 +1164,8 @@ proc renderAddContextMenuItem[R](r: R; icon: string; label: string;
   let cls = "agent-add-context-menu-item ct-menu-item" &
     (if disabled: " ct-menu-item--disabled" else: "")
   let item = ui(r):
-    tdiv(class = cls, `aria-disabled` = (if disabled: "true" else: "false"),
+    tdiv(class = cls, role = "button", tabindex = "-1",
+         `aria-disabled` = (if disabled: "true" else: "false"),
          title = disabledReason,
          onclick = proc() =
            if not disabled: action()):
@@ -1185,11 +1189,11 @@ proc renderAddFilesButton[R](r: R; vm: AgentActivityVM;
   let panel = ui(r):
     tdiv(ref = wrapperRef, class = "agent-add-context-wrapper"):
       button(class = "ct-button-image-md-tertiary agent-button agent-add-context-button",
-             `type` = "button",
+             `type` = "button", title = "Add context",
              onclick = proc() =
                vm.addContextDropdownOpen.val = not vm.addContextDropdownOpen.val)
       if isOpen:
-        tdiv(ref = menuRef, class = "agent-add-context-dropdown")
+        tdiv(ref = menuRef, class = "agent-add-context-dropdown", tabindex = "-1")
   if isOpen:
     let editorReason =
       if callbacks.editorSelectionUnavailableReason.isNil: ""
@@ -1499,7 +1503,7 @@ proc renderSettingsPanel[R](r: R; vm: AgentActivityVM;
 proc renderSettingsButton[R](r: R; callbacks: AgentActivityCallbacks): auto =
   ui(r):
     button(class = "ct-button-image-md-tertiary agent-button agent-settings-button",
-           `type` = "button",
+           `type` = "button", title = "Agent settings",
            onclick = proc() = callbacks.invokeSettingsSelect())
 
 proc renderSessionNotice[R](r: R; notice: string): auto =
@@ -1516,7 +1520,7 @@ proc renderSubmitButton[R](r: R; vm: AgentActivityVM;
                            callbacks: AgentActivityCallbacks): auto =
   ui(r):
     button(class = "ct-button-image-md-primary agent-submit-button agent-start-button",
-           `type` = "button",
+           `type` = "button", title = "Send",
            onclick = proc() =
              callbacks.invokeSubmit()
              vm.setInputValue(""))
@@ -1524,7 +1528,7 @@ proc renderSubmitButton[R](r: R; vm: AgentActivityVM;
 proc renderStopButton[R](r: R; callbacks: AgentActivityCallbacks): auto =
   ui(r):
     button(class = "ct-button-image-md-secondary agent-submit-button agent-stop-button",
-           `type` = "button",
+           `type` = "button", title = "Stop",
            onclick = proc() = callbacks.invokeStop())
 
 proc renderBranchOption[R](r: R; vm: AgentActivityVM;
@@ -1700,7 +1704,7 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
         let thumb = ui(r):
           tdiv(class = "agent-paste-thumb agent-paste-thumb--loading"):
             tdiv(class = "agent-paste-shimmer")
-            tdiv(class = "agent-paste-remove",
+            tdiv(class = "agent-paste-remove", title = "Remove",
                  onclick = removePastedImageHandler(vm, idx)):
               text "×"
         r.appendRenderedChild(imagesStrip, thumb)
@@ -1711,7 +1715,7 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
           tdiv(class = "agent-paste-thumb"):
             img(ref = imgEl, class = "agent-paste-img", alt = "attachment",
                 onclick = imageLightboxHandler(capturedSrc))
-            tdiv(class = "agent-paste-remove",
+            tdiv(class = "agent-paste-remove", title = "Remove",
                  onclick = removePastedImageHandler(vm, idx)):
               text "×"
         r.setAttribute(imgEl, "src", imgData)
@@ -1723,7 +1727,7 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
         tdiv(class = "agent-context-path-chip"):
           span(class = "agent-context-path-chip__label"):
             text capturedPath
-          tdiv(class = "agent-paste-remove",
+          tdiv(class = "agent-paste-remove", title = "Remove",
                onclick = removeContextPathHandler(vm, pathIdx)):
             text "×"
       r.appendRenderedChild(imagesStrip, chip)

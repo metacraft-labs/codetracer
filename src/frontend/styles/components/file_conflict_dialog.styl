@@ -8,40 +8,37 @@
   background rgba(0, 0, 0, 0.42)
 
 .file-conflict-dialog
-  width 560px
-  max-width calc(100vw - 48px)
-  padding 18px
-  border 1px solid var(--border-color)
-  border-radius 6px
-  background var(--panel-background)
-  color var(--text-color)
-  box-shadow 0 12px 32px rgba(0, 0, 0, 0.35)
+  width 35rem
+  max-width calc(100vw - 3rem)
+  padding 1.125rem
+  border 0.0625rem solid colors-ui-border-secondary
+  border-radius 0.375rem
+  background colors-ui-surface-base-panel
+  color colors-ui-text-primary-body
+  box-shadow 0 0.75rem 2rem rgba(0, 0, 0, 0.35)
 
 .file-conflict-dialog h2
-  margin 0 0 10px
-  font-size 18px
+  margin 0 0 0.625rem
+  font-size 1.125rem
   font-weight 600
 
 .file-conflict-dialog p
-  margin 0 0 16px
-  font-size 13px
+  margin 0 0 1rem
+  font-size 0.8125rem
   line-height 1.4
   overflow-wrap anywhere
 
 .file-conflict-dialog-actions
   display flex
   flex-wrap wrap
-  gap 8px
+  gap 0.5rem
   justify-content flex-end
 
 .file-conflict-dialog-actions button
-  min-height 30px
-  padding 5px 10px
-  border 1px solid var(--border-color)
-  border-radius 4px
-  background var(--button-background)
-  color var(--text-color)
-  cursor pointer
+  min-height 1.875rem
+  padding 0.3125rem 0.625rem
+  border-radius 0.25rem
+  control-button()
 
 .file-conflict-dialog-actions button:hover
-  background var(--button-hover-background)
+  control-button-hover()

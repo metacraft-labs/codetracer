@@ -2,7 +2,8 @@
 #
 # The bytes every arm restores to and every verdict was taken against: the
 # five mutation subjects, the three suites the arms are graded by, and the
-# shared script whose expectations two of those suites replay (§16c).
+# shared script whose expectations two of those suites replay (§16c), and
+# the browser driver that executes the compiled Chromium suite.
 # Refreshed with --record-control-hashes, which the needle scan GATES (§16).
 e80fb4cb6a80fc7d1c945783ed50427bf0deedd9fa68fca55bf3c240b0211c50  src/frontend/view_vocabulary/terminal_binding.nim
 7ef6f088197c2618973d4378acc11c1a1441b94a83b0b0efc281ce25f20671da  src/frontend/view_vocabulary/web_binding.nim
@@ -13,3 +14,4 @@ e987a7493e4e98fd6aea560fab68eae8a7e922c55f32a8b276707f6d3d5d1162  src/common/vie
 dfc4ac1d3b3b3fa7ee9bc458caea1266ac5b6f5c9b14551b7dab469dbad9b06b  src/common/view_vocabulary_test.nim
 0bfac7b7a46a8fa39691f0a80c2263a92e381688df9e9da45c71f494645d7d1d  src/frontend/tests/view_vocabulary_chromium_test.nim
 7e93ebdaf367c8ad0bbd03be1b95d25938ded8de68192e2dd2602c48b6de358e  src/frontend/view_vocabulary/cross_medium_script.nim
+6299177a04d6663a452f56ebf7bab300bca55ae72584d2fcc9451c7af1d8f299  src/frontend/tests/chromium-run.mjs

@@ -176,8 +176,8 @@ VCS_BRANCH_PICKER_INSET = 0.25em
 // header bar height.
 
 .deepreview-stats
-  font-size: 12px
-  color: var(--text-secondary, #8e8f92)
+  font-size: 0.75rem
+  color: colors-ui-text-primary-label-subtle
 
 .deepreview-trace-selector
   display: flex
@@ -188,13 +188,13 @@ VCS_BRANCH_PICKER_INSET = 0.25em
 // (`by-mode`, defaults.styl, keeps the dark theme's colours exactly).
 .deepreview-trace-select
   font-family: "SpaceGrotesk"
-  font-size: 12px
+  font-size: 0.875rem
   color: by-mode(#cccccc, colors-ui-text-primary-body)
   background-color: by-mode(#3c3c3c, colors-ui-surface-input-default)
-  border: 1px solid var(--border-color, #3a3b44)
-  border-radius: 3px
-  padding: 2px 8px
-  height: 24px
+  border: 0.0625rem solid colors-ui-border-secondary
+  border-radius: 0.1875rem
+  padding: 0.125rem 0.5rem
+  height: 1.5rem
   cursor: pointer
   outline: none
   appearance: auto
@@ -217,7 +217,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   letter-spacing: 0.03125em
   color: colors-ui-text-primary-body
   background: colors-ui-surface-base-panel
-  border-bottom: 1px solid colors-ui-border-secondary
+  border-bottom: 0.0625rem solid colors-ui-border-secondary
   flex-shrink: 0
   user-select: none
 
@@ -239,7 +239,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   align-items: center
   gap: 0.375em
   padding: 0.375em 0.5em
-  border-bottom: 1px solid colors-ui-border-secondary
+  border-bottom: 0.0625rem solid colors-ui-border-secondary
   background: colors-ui-surface-base-panel
 
 .vcs-toggle-button
@@ -248,28 +248,34 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   display: inline-flex
   align-items: center
   padding: 0 0.625em
-  border-radius: 0.25em
-  cursor: pointer
-  color: colors-ui-text-primary-body
-  background: colors-ui-surface-primary-secondary
+  // 6px, the button corners (CONTROL_RADIUS, button.styl).
+  border-radius: CONTROL_RADIUS
+  // The button look (button.styl); "on" is its active state.
+  control-button()
   user-select: none
   font-size: 0.75em
 
   &:hover
-    background: colors-ui-surface-primary-secondary-hover
-    color: colors-ui-text-primary-body
+    control-button-hover()
 
   &.vcs-toggle-active
-    background: colors-ui-surface-primary-secondary-hover
-    color: colors-ui-text-primary-body
+    control-button-active()
 
 // The refresh action shares the toggle row and is pushed to its right edge.
-// It overrides the standalone `.vcs-refresh` bottom-bar presentation below.
+// It overrides the standalone `.vcs-refresh` bottom-bar presentation below,
+// and is a button like the toggle beside it: same size, same look.
 .vcs-diff-toggle .vcs-refresh
   margin-left: auto
-  padding: 0 0.5em
-  border-top: none
-  text-align: right
+  height: CONTROL_HEIGHT_SM
+  display: inline-flex
+  align-items: center
+  box-sizing: border-box
+  padding: 0 0.625em
+  border-radius: CONTROL_RADIUS
+  control-button()
+
+  &:hover
+    control-button-hover()
 
 // ---------------------------------------------------------------------------
 // Commit graph + accordion history
@@ -681,7 +687,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   flex-direction: column
   padding: 0.25em 0.5em
   cursor: pointer
-  border-bottom: 1px solid colors-ui-border-secondary
+  border-bottom: 0.0625rem solid colors-ui-border-secondary
   gap: 0.0625em
 
   &:hover
@@ -814,7 +820,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   font-size: 0.75rem
   color: colors-ui-text-primary-body
   background: colors-ui-surface-base-panel
-  border-top: 1px solid colors-ui-border-secondary
+  border-top: 0.0625rem solid colors-ui-border-secondary
   user-select: none
 
   &:hover
@@ -856,7 +862,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   justify-content: space-between
   padding: 0.25em 0.625em
   background: colors-ui-surface-base-panel
-  border: 1px solid colors-ui-border-secondary
+  border: 0.0625rem solid colors-ui-border-secondary
   border-radius: 0.25em
   margin: 0.25em 0 0.375em 0
   box-shadow: 0 0.125em 0.5em rgba(0, 0, 0, 0.3)
@@ -870,27 +876,29 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   display: flex
   gap: 0.375em
 
+// The hunk toolbar's main action is a primary button (the shared action
+// fill, button.styl — it was a hard-coded #0e639c); the subtle one is the
+// button look, like every other secondary button.
 .hunk-toolbar-button
   padding: 0.125em 0.625em
-  border-radius: 0.1875em
+  border: BUTTON_BORDER_WIDTH solid transparent
+  border-radius: CONTROL_RADIUS
   cursor: pointer
-  background: #0e639c
-  color: #fff
+  background: colors-ui-surface-action-primary
+  color: colors-ui-text-on-action-primary
+  transition: BUTTON_TRANSITION
   font-size: 0.6875em
   white-space: nowrap
   user-select: none
 
   &:hover
-    background: #1177bb
+    background: colors-ui-surface-action-primary-hover
 
 .hunk-toolbar-button-subtle
-  background: transparent
-  color: colors-ui-text-primary-body
-  border: 1px solid colors-ui-border-secondary
+  control-button()
 
   &:hover
-    background: colors-ui-surface-primary-secondary-hover
-    color: colors-ui-text-primary-body
+    control-button-hover()
 
 // File hover diff button styling
 .vcs-file-diff-btn
@@ -911,10 +919,6 @@ VCS_BRANCH_PICKER_INSET = 0.25em
     right: 0
     left: unset
     z-index: 200
-
-    &:after
-      left: unset
-      right: 0.25em
 
 .vcs-file-item:hover .vcs-file-diff-btn
   display: block

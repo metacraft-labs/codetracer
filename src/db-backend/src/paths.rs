@@ -96,6 +96,9 @@ pub fn gc_stale_run_dirs(tmp_path: &Path, current_pid: u32) -> usize {
         // returns the validation error instead of writing into an unsafe base.
         return 0;
     };
+    // Only the `cfg(unix)` block below adds to it, so on Windows the `mut`
+    // is unused and `clippy -D warnings` refuses it.
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut removed = gc_stale_run_dirs_in(&base, current_pid, &PosixKillProbe);
     // The short directory replay workers move to when their socket would
     // not fit under `base` (`worker_runtime_base_dir`) collects run

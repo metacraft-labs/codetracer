@@ -811,6 +811,15 @@ proc jumpLocation*(location: types.Location) {.async.} =
   highlightLine(location.path, location.line)
 
 ## MOVE
+var listingStepsByInstruction*: proc(action: CtEventKind): bool = nil
+  ## Whether a step `action` goes by one machine instruction: set by the
+  ## window (`ui_js.nim`), which knows the tab's Low Level Code listing. True
+  ## while that listing has the keyboard focus and its engine steps by
+  ## instruction (`LowLevelCodeVM.instructionStepRequest`) — then the step
+  ## carries DAP's `granularity: "instruction"`, as the terminal's and the
+  ## GPUI window's do. A hook rather than an import: `ui/` modules import
+  ## this one, not the other way round.
+
 proc step*(
     data: Data,
     action: CtEventKind,
@@ -846,7 +855,10 @@ proc step*(
 
   # eventually always sending a different custom ct/step with more args?
   data.viewsApi.receive(InternalNewOperation, NewOperation(name: ($action).cstring, stableBusy: true).toJs, data.viewsApi.asSubscriber)
-  data.dapApi.sendCtRequest(action, DapStepArguments(threadId: 1).toJs) # TODO: For now hardcode the threadId
+  let stepArgs = DapStepArguments(threadId: 1).toJs # TODO: For now hardcode the threadId
+  if not listingStepsByInstruction.isNil and listingStepsByInstruction(action):
+    stepArgs["granularity"] = cstring"instruction"
+  data.dapApi.sendCtRequest(action, stepArgs)
 
 template forwardContinue*(fromShortcut: bool) =
   data.step DapContinue, fromShortcutArg=fromShortcut

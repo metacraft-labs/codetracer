@@ -12,9 +12,9 @@
 
 @keyframes fif-shimmer
   0%
-    background-position: -400px 0
+    background-position: -25rem 0
   100%
-    background-position: 400px 0
+    background-position: 25rem 0
 
 // ---------------------------------------------------------------------------
 // Panel root
@@ -26,7 +26,7 @@
   height: 100%
   background-color: colors-ui-surface-base-panel
   color: colors-ui-text-primary-body
-  font-size: 13px
+  font-size: 0.8125rem
   overflow: hidden
 
 // ---------------------------------------------------------------------------
@@ -37,12 +37,12 @@
   display: flex
   align-items: center
   justify-content: space-between
-  padding: 8px PANEL_INSET 6px
+  padding: 0.5rem PANEL_INSET 0.375rem
   flex-shrink: 0
-  border-bottom: 1px solid colors-ui-border-secondary
+  border-bottom: 0.0625rem solid colors-ui-border-secondary
 
 .fif-title
-  font-size: 11px
+  font-size: 0.6875rem
   font-weight: 700
   letter-spacing: 0.08em
   text-transform: uppercase
@@ -52,18 +52,18 @@
 .fif-header-actions
   display: flex
   align-items: center
-  gap: 4px
+  gap: 0.25rem
 
 .fif-icon-btn
   display: flex
   align-items: center
   justify-content: center
-  width: 22px
-  height: 22px
-  border-radius: 4px
+  width: 1.375rem
+  height: 1.375rem
+  border-radius: 0.25rem
   cursor: pointer
   color: colors-ui-text-primary-body-subtle
-  font-size: 14px
+  font-size: 0.875rem
   line-height: 1
 
   &:hover
@@ -71,7 +71,7 @@
     color: colors-ui-text-primary-body
 
 .fif-close
-  font-size: 16px
+  font-size: 1rem
 
 // ---------------------------------------------------------------------------
 // Search bar: badge + input + clear button
@@ -90,7 +90,7 @@
   position: relative
   // The panel inset (PANEL_INSET, 8px, button.styl) at the sides; no top of
   // its own — the dock's 8px (auto_hide.styl) is the whole gap above it.
-  margin: 0 PANEL_INSET 8px
+  margin: 0 PANEL_INSET 0.5rem
   flex-shrink: 0
 
 // "Find in Files" badge — compact pill between the search icon and the
@@ -196,7 +196,7 @@ FIF_BADGE_GAP = 0.5rem
   color: colors-ui-text-primary-body-subtle
   cursor: pointer
   user-select: none
-  border: 1px solid transparent
+  border: 0.0625rem solid transparent
 
   &:hover
     background-color: colors-ui-surface-primary-secondary-hover
@@ -232,41 +232,41 @@ FIF_BADGE_GAP = 0.5rem
 .fif-empty
   // No side padding: the recent searches inside are rows that run edge to
   // edge, with their text at PANEL_INSET.
-  padding: 12px 0
+  padding: 0.75rem 0
   display: flex
   flex-direction: column
-  gap: 2px
+  gap: 0.125rem
 
 // Face, size, strength and colour come from the shared empty-state treatment
 // (components/empty_states.styl); the colour is inherited from `.fif-panel`,
 // as every other panel's message inherits its panel's body text.
 .fif-empty-prompt
   text-align: center
-  padding: 24px 0
+  padding: 1.5rem 0
 
 .fif-recent-label
-  font-size: 11px
+  font-size: 0.6875rem
   font-weight: 600
   letter-spacing: 0.05em
   text-transform: uppercase
   color: colors-ui-text-primary-body-subtle
-  padding: 4px PANEL_INSET 8px
+  padding: 0.25rem PANEL_INSET 0.5rem
   opacity: 0.7
 
 .fif-recent-item
   display: flex
   align-items: center
   justify-content: space-between
-  padding: 5px PANEL_INSET
+  padding: 0.3125rem PANEL_INSET
   cursor: pointer
-  gap: 8px
+  gap: 0.5rem
 
   // The list hover (LIST_HOVER_BG, button.styl): square, across the row.
   &:hover
     background-color: LIST_HOVER_BG
 
 .fif-recent-query
-  font-size: 12px
+  font-size: 0.75rem
   color: colors-ui-text-primary-body
   overflow: hidden
   text-overflow: ellipsis
@@ -274,7 +274,7 @@ FIF_BADGE_GAP = 0.5rem
   flex: 1
 
 .fif-recent-count
-  font-size: 11px
+  font-size: 0.6875rem
   color: colors-ui-text-primary-body-subtle
   white-space: nowrap
   flex-shrink: 0
@@ -284,16 +284,16 @@ FIF_BADGE_GAP = 0.5rem
 // ---------------------------------------------------------------------------
 
 .fif-shimmer-block
-  height: 28px
-  margin: 3px 10px
-  border-radius: 4px
+  height: 1.75rem
+  margin: 0.1875rem 0.625rem
+  border-radius: 0.25rem
   background: linear-gradient(
     90deg,
     colors-ui-surface-primary-tertiary 25%,
     colors-ui-surface-primary-secondary-hover 50%,
     colors-ui-surface-primary-tertiary 75%
   )
-  background-size: 800px 100%
+  background-size: 50rem 100%
   animation: fif-shimmer 1.4s infinite linear
 
 // ---------------------------------------------------------------------------
@@ -301,21 +301,21 @@ FIF_BADGE_GAP = 0.5rem
 // ---------------------------------------------------------------------------
 
 .fif-file-group
-  margin-bottom: 1px
+  margin-bottom: 0.0625rem
 
 .fif-file-header
   display: flex
   align-items: center
   justify-content: space-between
-  padding: 4px PANEL_INSET
+  padding: 0.25rem PANEL_INSET
   background-color: colors-ui-surface-primary-tertiary
   position: sticky
   top: 0
   z-index: 1
-  gap: 8px
+  gap: 0.5rem
 
 .fif-file-path
-  font-size: 12px
+  font-size: 0.75rem
   font-weight: 600
   color: colors-ui-text-primary-body
   overflow: hidden
@@ -324,7 +324,7 @@ FIF_BADGE_GAP = 0.5rem
   flex: 1
 
 .fif-file-count
-  font-size: 11px
+  font-size: 0.6875rem
   color: colors-ui-text-primary-body-subtle
   white-space: nowrap
   flex-shrink: 0
@@ -337,12 +337,12 @@ FIF_BADGE_GAP = 0.5rem
   display: flex
   align-items: baseline
   // Indented 10px past the file header's PANEL_INSET: 8px + 10px.
-  padding: 3px PANEL_INSET 3px 1.125rem
+  padding: 0.1875rem PANEL_INSET 0.1875rem 1.125rem
   cursor: pointer
   font-family: monospace
-  font-size: 12px
+  font-size: 0.75rem
   line-height: 1.6
-  gap: 6px
+  gap: 0.375rem
 
   &:hover
     background-color: colors-ui-surface-primary-secondary-hover
@@ -352,10 +352,10 @@ FIF_BADGE_GAP = 0.5rem
   background-color: colors-ui-surface-primary-secondary-hover
 
 .fif-line-number
-  min-width: 36px
+  min-width: 2.25rem
   text-align: right
   color: colors-ui-text-primary-body-subtle
-  font-size: 11px
+  font-size: 0.6875rem
   flex-shrink: 0
   user-select: none
 
@@ -373,12 +373,12 @@ FIF_BADGE_GAP = 0.5rem
 .fif-highlight
   background-color: rgba(251, 146, 60, 0.30)
   color: inherit
-  border-radius: 2px
-  padding: 0 1px
+  border-radius: 0.125rem
+  padding: 0 0.0625rem
 
 // Keep legacy selector working (Playwright + existing E2E tests).
 .search-results-highlight
   background-color: rgba(251, 146, 60, 0.30)
   color: inherit
-  border-radius: 2px
-  padding: 0 1px
+  border-radius: 0.125rem
+  padding: 0 0.0625rem

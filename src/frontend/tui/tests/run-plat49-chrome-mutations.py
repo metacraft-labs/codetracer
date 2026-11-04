@@ -57,7 +57,7 @@ ONE ARM PER CLAIM, each naming the case (or the gate) that must die:
   | review: ground bands | RB1 (half GoldenLayout's band), RB2 (no terminal band), RB3 (a header loses to the band), RB4 (a same-axis root wrapped), RB5 (a whole share, not half), RB6 (no GPUI band), RB7 (right band puts it left), RB8 (the wrapped root keeps three shares), RB9 (the terminal's band three times too deep) |
   | review: current call ground | CG1 (on the pane's ground), CG2 (the active-row ground is the panel's), CG3 (GPUI's muted toggle on the ground) |
   | review: the strip's + | NT1 (terminal no +), NT2 (+ opens the plain omnibar), NT3 (the choice never reaches the host), NT4 (a typed path not offered), NT5 (a tab click does not switch the panes), NT6 (a closed tab's engine keeps running), NT7 (GPUI's tab click does not switch the window), NT8 (GPUI no +), NT9 (no recording listed), NT10 (GPUI's leaves keep the first session's ViewModels) |
-  | review: desktop column menu | EM1 (the menu changes the ViewModel, not the table), EM2 (move-left moves right) |
+  | review: desktop column menu | EM1 (the menu changes the ViewModel, not the table) |
 
 THREE VERDICTS (Verification-Harness-Traps §1): `killed` (the named case
 reported [FAILED], or the named gate failed), `SURVIVED` (the case [OK] / the
@@ -1186,13 +1186,8 @@ ARMS = [
               (DESKEVLOGVIEW,
                "import isonim/core/[signals, computation]\n",
                "import isonim/core/[signals, computation, batch]\n"))),
-    # EM2 RE-AIMED 2026-10-23: the menu's buttons take their handlers from
-    # `onMoveColumn` (`1c18341dd`).
-    Arm("EM2", DESKEVLOGVIEW,
-        "                 onclick = onMoveColumn(vm, item(), -1)):\n",
-        "                 onclick = onMoveColumn(vm, item(), 1)):\n",
-        D_DESKTOP_B,
-        "the desktop menu's move-left moves right"),
+    # EM2 retired: the desktop menu's move arrows it mutated were replaced by
+    # dragging a row (`placeColumn`; docs/UI-Design-Decisions.md, D-07).
 ]
 
 DECLARED_SURVIVORS: list = []

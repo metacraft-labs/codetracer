@@ -8689,8 +8689,7 @@ proc lowLevelStep(r: GpuiRenderer; operation: string): bool =
   if not request.offered:
     return false
   try:
-    discard gSession.sendRawDapRequest(request.command, request.args)
-    discard gSession.drainEvents()
+    gSession.stepByInstruction(request.command, request.args)
   except CatchableError as e:
     traceGesture("low-level: the step by instruction failed: " & e.msg)
     return true

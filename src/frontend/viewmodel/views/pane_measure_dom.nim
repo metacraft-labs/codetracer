@@ -35,10 +35,11 @@ import ../viewport
 from ../viewmodels/calltrace_vm import setViewport, setRowHeightPx
 from ../viewmodels/state_vm import setViewport
 from ../viewmodels/request_panel_vm import setViewport
-from ../viewmodels/event_log_vm import reportMeasure
+from ../viewmodels/event_log_vm import reportMeasure, listTotal
 from ../viewmodels/terminal_output_vm import nil
 from ../viewmodels/trace_log_vm import setViewport
 from ./isonim_calltrace_view import CallDepthIndentPx
+from ./isonim_event_log_view import projectEventLogScrollExtent
 
 const
   RequestRowFallbackPx = 24.0
@@ -77,6 +78,8 @@ type
       ## defaults, rather than keeping the last size it was told.
     fallbackRowPx: proc(): float
     report: proc(v: Viewport; rowPx: float)
+    project: proc(scroller: dom_api.Element)
+      ## Optional DOM geometry projection after the measured row pitch lands.
     changed: proc()
       ## Read inside an effect: the pane's rows changed, measure again.
 
@@ -93,9 +96,34 @@ proc rowPitchIn(el: dom_api.Element; sel: cstring): float {.importjs:
   ## The rows' ADVANCE, top to top, averaged over the rendered rows: what
   ## positions them (a sub-pixel advance is recovered exactly), not a row box.
 proc watchPane(el: dom_api.Element; onChange: proc()): StopMeasuring {.importjs:
-  "((el, cb) => { var frame = 0; var ro = (typeof ResizeObserver !== 'undefined') ? new ResizeObserver(() => { if (frame) return; frame = requestAnimationFrame(() => { frame = 0; cb(); }); }) : null; if (ro) ro.observe(el); el.addEventListener('scroll', cb, {passive: true}); return () => { if (frame) { cancelAnimationFrame(frame); frame = 0; } if (ro) ro.disconnect(); el.removeEventListener('scroll', cb); }; })(#, #)".}
+  """((el, cb) => {
+    var frame = 0;
+    var ro = (typeof ResizeObserver !== 'undefined') ? new ResizeObserver(() => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => { frame = 0; cb(); });
+    }) : null;
+    if (ro) ro.observe(el);
+    el.addEventListener('scroll', cb, {passive: true});
+    var resolution = null;
+    function watchResolution() {
+      if (resolution) resolution.removeEventListener('change', resolutionChanged);
+      resolution = window.matchMedia ? window.matchMedia('(resolution: ' + (window.devicePixelRatio || 1) + 'dppx)') : null;
+      if (resolution) resolution.addEventListener('change', resolutionChanged);
+    }
+    function resolutionChanged() { watchResolution(); cb(); }
+    watchResolution();
+    return () => {
+      if (frame) { cancelAnimationFrame(frame); frame = 0; }
+      if (ro) ro.disconnect();
+      el.removeEventListener('scroll', cb);
+      if (resolution) resolution.removeEventListener('change', resolutionChanged);
+    };
+  })(#, #)""".}
   ## Call `onChange` on every scroll of `el`, and once in the frame after any
   ## resize of it; the result stops both and drops a report still scheduled.
+  ## A device-scale change also reprojects physical extents, even when the
+  ## pane retains the same CSS dimensions. Its resolution listener is rearmed
+  ## for the new display and disposed with the same host measurement.
   ##
   ## A resize is not reported from inside the observer's callback. The report
   ## reaches the ViewModel synchronously, and for the State pane it can change
@@ -183,7 +211,12 @@ proc measureOf(pane: MeasuredPane; session: SessionViewModel): PaneMeasure =
       reportHidden: true,
       fallbackRowPx: proc(): float = EventRowFallbackPx,
       report: proc(v: Viewport; rowPx: float) = vm.reportMeasure(v, rowPx),
-      changed: proc() = discard vm.eventRows.val)
+      project: proc(scroller: dom_api.Element) =
+        vm.projectEventLogScrollExtent(scroller),
+      changed: proc() =
+        discard vm.eventRows.val
+        discard vm.listTotal
+        discard vm.rowHeightPx.val)
   of mpRequestPanel:
     # The rows the table body shows (Viewport-Driven-Loading V2): a partly
     # visible row counts; the window held is padded by the view.
@@ -224,6 +257,8 @@ proc startMeasuringPane*(host: dom_api.Element; pane: MeasuredPane;
                               countPartialRow = spec.countPartialRow)
     if v.measured or spec.reportHidden:
       spec.report(v, rowPx)
+    if not spec.project.isNil:
+      spec.project(scroller)
   result = watchPane(scroller, measure)
   createEffect proc() =
     spec.changed()

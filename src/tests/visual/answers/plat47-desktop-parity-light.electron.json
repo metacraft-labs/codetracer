@@ -1935,7 +1935,7 @@
   "ticks": 1,
   "focus": {
     "outlineCount": 1,
-    "outline": "#6366f1",
+    "outline": "#aca494",
     "outlineWidth": "1px",
     "unfocusedEdge": "#f8f6f2",
     "panel": "#e6e2db"

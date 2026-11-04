@@ -43,6 +43,10 @@
 ## so a locals request stays in flight across a frame as it does over the real
 ## transport. The session, `StateVM`, `StopLoader`, the rendered panel,
 ## `startMeasuringPane`, the observer and the layout are all real.
+## The Event Log cases publish recorded rows through the real store while the
+## mock transport holds window requests. Device-scale changes use the runner's
+## real CDP emulation. Listener accounting forwards every call to Chromium's
+## actual MediaQueryList; it neither fabricates resolution events nor observers.
 ##
 ## ## COUNTED ASSERTIONS (Verification-Harness-Traps §4c)
 ##
@@ -61,9 +65,12 @@ import ../viewmodel/backend/mock_backend
 import ../viewmodel/pane_viewport
 import ../viewmodel/session_vm
 import ../viewmodel/store/replay_data_store
+import ../viewmodel/store/types
 import ../viewmodel/sdk/stop_loader
 import ../viewmodel/viewmodels/state_vm
+import ../viewmodel/viewmodels/event_log_vm
 import ../viewmodel/views/isonim_state_view
+import ../viewmodel/views/isonim_event_log_view
 import ../viewmodel/views/pane_measure_dom
 
 # ---------------------------------------------------------------------------
@@ -86,6 +93,50 @@ proc addStyle(css: cstring) {.importjs:
   "((c) => { const s = document.createElement('style'); s.textContent = c; document.head.appendChild(s); })(#)".}
 proc nextFrame(): Future[void] {.importjs:
   "(new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))))".}
+proc ctDeviceScale(scale: float): Future[void] {.importjs: "window.ctDeviceScale(#)".}
+proc deviceScale(): float {.importjs: "(window.devicePixelRatio)".}
+proc cssViewport(): cstring {.importjs: "(innerWidth + 'x' + innerHeight)".}
+proc extentOf(el: Element): float {.importjs:
+  "parseFloat(#.parentElement.style.getPropertyValue('--ct-event-log-scroll-height'))".}
+proc showHost(el: Element; shown: bool) {.importjs:
+  "#.style.display = (# ? 'block' : 'none')".}
+proc scrollToEnd(el: Element) {.importjs: "((el) => { el.scrollTop = el.scrollHeight; })(#)".}
+proc lastRowVisible(el: Element): bool {.importjs: """
+  ((el) => { const rows = el.querySelectorAll('tbody tr');
+    if (!rows.length) return false;
+    const row = rows[rows.length - 1].getBoundingClientRect();
+    const body = el.getBoundingClientRect();
+    return row.top >= body.top && row.bottom <= body.bottom;
+  })(#)""".}
+proc noPhysicalOverflow(el: Element): bool {.importjs: "((el) => el.scrollHeight <= el.clientHeight)(#)".}
+proc accountResolutionListeners() {.importjs: """
+  (() => {
+    const proto = MediaQueryList.prototype;
+    const add = proto.addEventListener, remove = proto.removeEventListener;
+    const active = new Map();
+    window.ctResolutionAdds = 0;
+    window.ctResolutionRemoves = 0;
+    window.ctResolutionActive = () => [...active.values()].reduce((n, listeners) => n + listeners.size, 0);
+    proto.addEventListener = function(type, listener, options) {
+      const result = Reflect.apply(add, this, [type, listener, options]);
+      if (type === 'change' && this.media.includes('resolution')) {
+        if (!active.has(this)) active.set(this, new Set());
+        active.get(this).add(listener); window.ctResolutionAdds++;
+      }
+      return result;
+    };
+    proto.removeEventListener = function(type, listener, options) {
+      const result = Reflect.apply(remove, this, [type, listener, options]);
+      if (type === 'change' && this.media.includes('resolution')) {
+        active.get(this)?.delete(listener); window.ctResolutionRemoves++;
+      }
+      return result;
+    };
+  })()
+""".}
+proc resolutionActive(): int {.importjs: "window.ctResolutionActive()".}
+proc resolutionAdds(): int {.importjs: "(window.ctResolutionAdds)".}
+proc resolutionRemoves(): int {.importjs: "(window.ctResolutionRemoves)".}
 
 proc installLoopErrorCounter() {.importjs: """
   (() => {
@@ -158,7 +209,7 @@ proc endCase(name: string) =
     inc passedCases
     echo "  [OK] " & name
 
-const ExpectedChecks = 16
+const ExpectedChecks = 47
   ## Written from a run. See the end of `main`.
 
 # ---------------------------------------------------------------------------
@@ -187,6 +238,16 @@ const
 .pane-host #gdb-evaluate { flex: none; height: 0; overflow: hidden; }
 .pane-host .loading-indicator { flex: none; height: 24px; overflow: hidden; }
 .pane-host .value-components-container { flex: 1; min-height: 0; overflow: auto; }
+.event-host { position: absolute; top: 0; left: 450px; width: 400px; }
+.event-host .eventLog { height: 100%; }
+.event-host .eventLog > :not(.eventLog-dense-table) { display: none !important; }
+.event-host .eventLog-dense-table { height: 100%; position: relative; }
+.event-host .eventLog-column-header { display: none; }
+.event-host .eventLog-scroll-body { height: 100%; overflow-y: auto; }
+.event-host .eventLog-scroll-space { position: relative; min-height: 100%; }
+.event-host .eventLog-rows { position: absolute; top: 0; border-collapse: collapse; }
+.event-host .eventLog-row { height: 26px; }
+.event-host td { height: 26px; line-height: 26px; padding: 0; border: 0; }
 """
 
 type
@@ -246,6 +307,117 @@ proc unmount(p: Pane) =
     p.stop()
   p.dispose()
   p.host.removeEl()
+
+proc eventRows(count: int): seq[EventLogRow] =
+  for i in 0 ..< count:
+    result.add EventLogRow(eventId: uint64(i + 1), kind: "event", line: i + 1,
+      value: "Damage " & $i, rrTicks: uint64(i + 1), file: "/src/main.py")
+
+proc settleGeometry() {.async.} =
+  for _ in 0 ..< 5:
+    await nextFrame()
+
+proc mountEventPane(): Future[Pane] {.async.} =
+  let p = Pane(mock: newMockBackendService(autoRespond = false))
+  p.session = createSessionVM(p.mock.toBackendService())
+  p.session.initializePanelViewModels()
+  p.session.store.applyEventLogRows(eventRows(70), 0, recordsTotal = 70)
+  p.host = newDiv()
+  p.host.setClass(cstring"event-host")
+  p.host.setHostHeight(526)
+  body().appendEl(p.host)
+  let pane = p
+  createRoot proc(dispose: proc()) =
+    pane.dispose = dispose
+    let panel = renderEventLogPanel[WebRenderer, Element](WebRenderer(), pane.session.eventLogVM)
+    pane.host.appendEl(panel)
+    pane.stop = startMeasuringPane(pane.host, mpEventLog, pane.session)
+  p.scroller = p.host.qsIn(cstring".eventLog-scroll-body")
+  await settleGeometry()
+  result = p
+
+proc caseDeviceScaleRearmsWithoutCssResize() {.async.} =
+  beginCase()
+  await ctDeviceScale(1.0)
+  accountResolutionListeners()
+  let p = await mountEventPane()
+  let height = p.scroller.clientHeightOf
+  let viewport = cssViewport()
+  let first = p.scroller.extentOf
+  ck height == 526
+  ck first > float(height)
+  ck resolutionActive() == 1
+  let adds = resolutionAdds()
+  await ctDeviceScale(67.0 / 64.0)
+  await settleGeometry()
+  ck deviceScale() == 67.0 / 64.0
+  ck cssViewport() == viewport, "DPR changed the CSS viewport"
+  ck p.scroller.clientHeightOf == height, "only DPR must change"
+  let second = p.scroller.extentOf
+  ck second > first, "the real resolution change never reached the owner"
+  ck resolutionAdds() > adds, "the next resolution must be armed"
+  ck resolutionActive() == 1, "rearming retained an old listener"
+  p.scroller.scrollToEnd()
+  await settleGeometry()
+  ck p.scroller.lastRowVisible
+  let addsAgain = resolutionAdds()
+  await ctDeviceScale(1.25)
+  await settleGeometry()
+  ck deviceScale() == 1.25
+  ck cssViewport() == viewport, "the second DPR change resized the CSS viewport"
+  ck p.scroller.clientHeightOf == height
+  ck p.scroller.extentOf != second, "the second DPR change was missed"
+  ck resolutionAdds() > addsAgain
+  ck resolutionActive() == 1
+  p.scroller.scrollToEnd()
+  await settleGeometry()
+  ck p.scroller.lastRowVisible
+  let stoppedExtent = p.scroller.extentOf
+  let removes = resolutionRemoves()
+  p.stop()
+  p.stop = nil
+  ck resolutionActive() == 0
+  ck resolutionRemoves() > removes
+  await ctDeviceScale(1.5)
+  await settleGeometry()
+  ck p.scroller.extentOf == stoppedExtent, "a stopped pane still projected DPR"
+  p.unmount()
+  ck resolutionActive() == 0
+  endCase("DPR-only changes rearm twice and stopping removes the real listener")
+
+proc caseHiddenAndFilteredExtent() {.async.} =
+  beginCase()
+  await ctDeviceScale(67.0 / 64.0)
+  let p = await mountEventPane()
+  ck resolutionActive() == 1
+  p.host.showHost(false)
+  await settleGeometry()
+  ck p.scroller.clientHeightOf == 0
+  await ctDeviceScale(1.25)
+  await settleGeometry()
+  p.host.showHost(true)
+  await settleGeometry()
+  ck p.scroller.clientHeightOf == 526
+  p.scroller.scrollToEnd()
+  await settleGeometry()
+  ck p.scroller.lastRowVisible, "showing the pane must reproject its actual viewport"
+  let overflowingExtent = p.scroller.extentOf
+  p.session.eventLogVM.setSearchQuery("Damage")
+  p.session.store.applyEventLogRows(eventRows(16), 0, recordsTotal = 16)
+  await settleGeometry()
+  ck p.scroller.extentOf < overflowingExtent, "filtered population retained old physical extent"
+  ck p.scroller.noPhysicalOverflow, "a true fit must not keep a phantom scroll range"
+  ck p.scroller.lastRowVisible
+  p.session.eventLogVM.setSearchQuery("")
+  p.session.store.applyEventLogRows(eventRows(70), 0, recordsTotal = 70)
+  await settleGeometry()
+  ck p.scroller.extentOf > 526.0
+  p.scroller.scrollToEnd()
+  await settleGeometry()
+  ck p.scroller.lastRowVisible
+  p.unmount()
+  ck resolutionActive() == 0
+  endCase("hidden then shown and filtered true-fit panes retain only their own extent")
 
 # ---------------------------------------------------------------------------
 # Cases
@@ -362,6 +534,8 @@ proc main() {.async.} =
   await caseTheLoadsComeToRest()
   await caseAResizeBurstCoalesces()
   await caseStoppingCancelsAPendingReport()
+  await caseDeviceScaleRearmsWithoutCssResize()
+  await caseHiddenAndFilteredExtent()
   beginCase()
   # THE TALLY. Compared with a number written from a run, so a case that
   # returned early is a count mismatch rather than a silent pass. `CHECKS:`

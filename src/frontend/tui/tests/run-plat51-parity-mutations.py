@@ -129,6 +129,7 @@ GLIST = "src/frontend/gpui/list_scrubber.nim"
 # The desktop Event Log is one view over its ViewModel since 2026-10-23; its
 # track uses the shared DOM movement directly; pin its view caller too.
 DEVLOG = "src/frontend/viewmodel/views/isonim_event_log_view.nim"
+DMEASURE = "src/frontend/viewmodel/views/pane_measure_dom.nim"
 DOMSCRUB = "src/frontend/viewmodel/views/list_scrubber_dom.nim"
 DCONFIG = "src/frontend/index/config.nim"
 DSTATE = "src/frontend/viewmodel/views/isonim_state_view.nim"
@@ -191,7 +192,7 @@ DE_CHANGED = CAPTURE + "#carries..value-changed.in.the.accent"
 SUBJECTS = [LAYOUT, PMENU, SCRUB, VCH, NAVIGATION, RUNTIME, TSESSION, TEVENT,
             TCALL, TTRACK, TTREE, TGLYPHS, TTOPBAR, TCTX, TFRAME,
             TDRIVER,
-            READER, GMAIN, GLEAVES, GLIST, DOMSCRUB, DCONFIG, DSTATE, ENGINE,
+            READER, GMAIN, GLEAVES, GLIST, DOMSCRUB, DEVLOG, DCONFIG, DSTATE, ENGINE,
             GLHITS, LINTER, TBINDING, TSHELL, TROLES, TPALETTE, TCAPS, TPROBE,
             TOUTPANE, TMAIN, LSETTINGS, WELCOMEVM, GCHROME, LPREFS, TMOUSE,
             TVARS, TFILES, TVCS, TVCSSRC]
@@ -208,7 +209,7 @@ def suite_file(path: str) -> str:
 
 # The Event Log view selects the shared defaults; pin that caller too.
 TOUCHED = list(dict.fromkeys(SUBJECTS + [suite_file(p) for p in SUITES] +
-                             [SPEC, DEVLOG]))
+                             [SPEC, DMEASURE]))
 
 # How each suite is run: (backend, lane whose `--path`s it needs / the grep).
 # A desktop gate's grep is a REGEX WITHOUT SPACES OR QUOTES: `just test-e2e`
@@ -576,6 +577,12 @@ ARMS = [
         "    if m.totalKnown and m.total > 0 and m.visible >= m.total and\n",
         "    if false and m.totalKnown and m.total > 0 and m.visible >= m.total and\n",
         D_NEARFIT, "the desktop hides physical overflow behind rounded row capacity"),
+    # The host's range projection makes the earlier clamp-only ablation
+    # redundant. Drop the final owner's outward rounding instead.
+    Arm("D5", DEVLOG,
+        "    viewport + ceil((content - viewport) * deviceScale) / deviceScale\n",
+        "    content\n",
+        D_EVENTLOG, "the desktop clips its final event at a fractional device scale"),
     Arm("D2", DCONFIG,
         "  sanitizeLayoutConfig(config, -1, retiredContentIds())\n",
         "  sanitizeLayoutConfig(config, -1, @[])\n",

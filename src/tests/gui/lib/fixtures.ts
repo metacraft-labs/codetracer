@@ -358,6 +358,12 @@ interface CodetracerOptions {
   deepreviewJsonPath: string;
   /** Mark the recorded trace as visual-capable before launching replay. */
   visualReplayTrace: boolean;
+  /**
+   * The native backend `ct record` records a native program with (`--backend`);
+   * "" for the product's default (MCR). A spec that needs a replay only one
+   * backend gives — rr's instruction stepping — names it.
+   */
+  recordBackend: "" | "rr" | "mcr";
   /** Existing .ct or trace folder to import via ct host --trace-path. */
   visualReplayTracePath: string;
   /**
@@ -1451,6 +1457,7 @@ async function launchTraceElectron(
   sourcePath: string,
   recordingLimit = LIMIT_SMALL_RECORDING_MS,
   visualReplayTrace = false,
+  recordBackend: "" | "rr" | "mcr" = "",
 ): Promise<LaunchResult> {
   setupLdLibraryPath();
   clearElectronSingletonLocks();
@@ -1464,7 +1471,7 @@ async function launchTraceElectron(
   const { result: traceId, durationMs: recordMs } = await timed(
     "record",
     recordingLimit,
-    async () => recordTestProgram(fullSourcePath),
+    async () => recordTestProgram(fullSourcePath, recordBackend || undefined),
   );
   if (visualReplayTrace) markTraceVisualReplayCapable(traceId);
 
@@ -2122,6 +2129,7 @@ export const test = base.extend<
   editWorkingDirectory: [codetracerInstallDir, { option: true }],
   deepreviewJsonPath: ["", { option: true }],
   visualReplayTrace: [false, { option: true }],
+  recordBackend: ["" as "" | "rr" | "mcr", { option: true }],
   visualReplayTracePath: ["", { option: true }],
   preserveAutoHideState: [false, { option: true }],
   editLayoutPath: ["", { option: true }],
@@ -2208,6 +2216,7 @@ export const test = base.extend<
         editWorkingDirectory,
         deepreviewJsonPath,
         visualReplayTrace,
+        recordBackend,
         visualReplayTracePath,
         newTracePolicy,
         testOpenFolderDialogPath,
@@ -2313,7 +2322,7 @@ export const test = base.extend<
           if (deploymentMode === "web") {
             result = await launchTraceWeb(sourcePath, recordingLimit, visualReplayTrace);
           } else {
-            result = await launchTraceElectron(sourcePath, recordingLimit, visualReplayTrace);
+            result = await launchTraceElectron(sourcePath, recordingLimit, visualReplayTrace, recordBackend);
           }
           break;
         }

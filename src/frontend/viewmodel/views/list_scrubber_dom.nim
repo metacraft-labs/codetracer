@@ -219,7 +219,13 @@ when defined(js):
     ## scroll handling turns into a window fetch.
     countJump()
     if physical:
-      s.container.setScrollTop(float(firstRow))
+      # CSSOM sizes are rounded, while the browser's scroll range can retain
+      # fractional pixels. Let the browser clamp an endpoint request so the
+      # last row is fully visible; interior positions keep their pixel offset.
+      if firstRow > 0 and firstRow >= s.projection(s.model()).model.maxFirstVisible:
+        s.container.setScrollTop(s.container.scrollHeightOf())
+      else:
+        s.container.setScrollTop(float(firstRow))
     elif s.jumpTo.isNil:
       # THE END IS THE END of the scroll range, not `firstRow` rows down. A
       # view that is not a whole number of rows tall counts as the ROUNDED

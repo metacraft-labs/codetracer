@@ -17,7 +17,7 @@
   font-weight: 400 !important
   overflow: auto
   //border: 1px solid silver
-  min-height: 100px
+  min-height: 6.25rem
   height: -moz-available
   height: -webkit-fill-available
   height: stretch
@@ -27,14 +27,18 @@
   // margin-left: 2px
 
   &:focus
-    outline: 0px
+    outline: 0
 
-// The panel inset (PANEL_INSET, 8px, button.styl) on the left: the top level's
-// expand arrows start 8px from the panel edge.  jstree already sets them 4px
-// in, so the list takes the other 4px.  The `.jstree-wholerow` hover strips are
-// positioned against the tree, not this list, so they still run edge to edge.
+// The top level's expand arrows line up with the panel title, 8px from the panel
+// edge (PANEL_INSET, button.styl).  Each arrow is 8px wide, centred in a 24px box
+// that jstree moves 4px right, so its box has to start at the panel edge: the top
+// level's rows move 4px left of the list.  The `.jstree-wholerow` hover strips are
+// positioned against the list, not its rows, so they still run edge to edge.
 .filesystem .jstree-container-ul
-  padding-left: 0.25rem
+  padding-left: 0
+
+.filesystem.jstree-default > .jstree-container-ul > .jstree-node
+  margin-left: -0.25rem
 
 .filesystem-tree
   min-width: max-content
@@ -126,19 +130,19 @@
   height: auto
   display: flex
   flex-direction: column
-  border-top: 4px solid colors-ui-surface-primary-tertiary
+  border-top: 0.25rem solid colors-ui-surface-primary-tertiary
   overflow-y: auto
   overflow-x: hidden
-  margin-left: 2px
+  margin-left: 0.125rem
   background-color: colors-ui-surface-primary-tertiary
 
   &::-webkit-scrollbar-thumb
     border-color: colors-ui-surface-primary-tertiary
-    margin-right: 2px
+    margin-right: 0.125rem
 
 .diff-file-path
   cursor: pointer
-  padding-left: 8px
+  padding-left: 0.5rem
 
 .path-odd
   background: colors-ui-surface-primary-secondary
@@ -171,7 +175,7 @@
   font: inherit
   color: colors-ui-text-primary-label
   background-color: colors-ui-surface-primary-secondary
-  border: 1px solid colors-ui-border-primary
+  border: 0.0625rem solid colors-ui-border-primary
   padding: 0 0.25em
   min-width: 8em
 

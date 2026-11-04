@@ -57,6 +57,10 @@
 //! activations at the backend. The search regressions below also discover
 //! calls whose stack rows have never been loaded, and activate their results.
 //!
+//! The Rust indentation case also checks that hidden startup frames do not
+//! indent the visible root. Display depths start at zero, while the original
+//! `location.callstackDepth` still identifies each frame when it is activated.
+//!
 //! Why rows come from an earlier stop: on a native recording the call trace
 //! the backend serves is the call stack of the current position
 //! (`Handler::load_calltrace_section`'s recreator branch), so a row for a call
@@ -138,6 +142,63 @@ const SIBLING_CALLS_LINES: &[(usize, &str)] = &[
 enum Recorder {
     Mcr,
     Rr,
+}
+
+#[test]
+fn rust_rr_calltrace_indents_from_the_visible_root_and_keeps_frame_identity() {
+    let name = "rust_rr_calltrace_indents_from_the_visible_root_and_keeps_frame_identity";
+    let Some(mut session) = open_session_for(
+        name,
+        Recorder::Rr,
+        Language::Rust,
+        "rust/rust_for_loop_controls.rs",
+        &[],
+    ) else {
+        return;
+    };
+    let file = session.file.clone();
+    let source = std::path::Path::new(&file);
+    let body_line = test_harness::find_line_containing(source, "total = local2;");
+    let main_line = test_harness::find_line_containing(source, "fn main()");
+    let client = session.runner.client();
+    let entry_rows = load_calltrace_rows(client);
+    assert_eq!(entry_rows.len(), 1, "only main is visible at entry: {entry_rows:?}");
+    assert_eq!(
+        entry_rows[0]["depth"].as_u64(),
+        Some(0),
+        "a lone root starts at the left inset"
+    );
+    continue_to_line(client, &file, body_line);
+    let rows = load_calltrace_rows(client);
+    assert_eq!(
+        rows.len(),
+        2,
+        "the visible stack contains main and accumulate: {rows:?}"
+    );
+    let root = &rows[0];
+    let root_name = row_name(root);
+    assert!(root_name.ends_with("::main"), "visible root is main: {root_name}");
+    let root_frame_depth = root["content"]["call"]["location"]["callstackDepth"]
+        .as_u64()
+        .expect("the root carries its frame depth");
+    assert!(root_frame_depth > 0, "the fixture must hide Rust startup frames");
+    for (depth, row) in rows.iter().enumerate() {
+        assert_eq!(row["depth"].as_u64(), Some(depth as u64), "visible indentation: {row}");
+        assert_eq!(
+            row["content"]["call"]["location"]["callstackDepth"].as_u64(),
+            Some(root_frame_depth + depth as u64),
+            "frame identity must retain hidden startup frames: {row}"
+        );
+    }
+    let moved = activate_row(client, root);
+    assert_in_function(
+        "activating the unindented root",
+        client,
+        &moved,
+        &root_name,
+        &(main_line as i64..=main_line as i64 + 2),
+    );
+    session.runner.finish().expect("disconnect failed");
 }
 
 /// A recording of a test program and a DAP session on it.

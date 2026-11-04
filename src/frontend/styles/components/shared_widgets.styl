@@ -53,13 +53,13 @@ if IS_EXTENSION
 
   .sidebar-menu-header
     font-weight: 700 !important
-    margin: 8px
-    padding-left: 12px
+    margin: 0.5rem
+    padding-left: 0.75rem
     background: var(--vscode-sideBar-background)
 
   .sidebar-menu-items
     font-weight: 400 !important
-    margin-top: 8px !important
+    margin-top: 0.5rem !important
     cursor: pointer
 
     div
@@ -67,11 +67,11 @@ if IS_EXTENSION
         background: var(--vscode-button-secondaryBackground)
 
     .sidebar-menu-item
-      padding-left: 20px
-      padding-right: 16px
-      padding-top: 8px
-      padding-bottom: 8px
-      border-bottom: 1px solid var(--vscode-editorWidget-border)
+      padding-left: 1.25rem
+      padding-right: 1rem
+      padding-top: 0.5rem
+      padding-bottom: 0.5rem
+      border-bottom: 0.0625rem solid var(--vscode-editorWidget-border)
 
 input::-webkit-input-placeholder
   color: colors-ui-text-primary-label;
@@ -297,28 +297,17 @@ dropdown-surface()
     animation: none
 
 // One row inside that surface.  The row's colour, height and hover come from
-// the `ct-menu-item` component; this is only the hairline between rows and the
-// corner rounding that lets the ends sit inside the container's radius.
+// the `ct-menu-item` component; this is only the corner rounding that lets the
+// ends sit inside the container's radius.  No line between rows, on any dropdown
+// (Nikolay, 2026-11-02; docs/UI-Design-Decisions.md, D-29).
 dropdown-surface-row()
   // Row height comes from the `ct-menu-item` component itself (2.25rem), which
   // every dropdown row carries — see components/menu_item.styl.
   font-size: 0.875rem
-  border-top: 0.0625rem solid colors-ui-border-tertiary
   padding-left: 0.5em
   padding-right: 0.5em
 
-  // Rows differ in how they carry their text: the layout menu puts it straight
-  // in the row, the command prompt wraps it in `ct-menu-item-label`.  That
-  // label is sized `0.875em` for the application menu, which here multiplies
-  // against the row's own 0.875rem and lands two steps down — the same list
-  // rendered visibly smaller than its neighbour.  In a dropdown the row owns
-  // the size; the label just carries the text.
-  .ct-menu-item-label,
-  .ct-menu-item-sublabel
-    font-size: inherit
-
   &:first-child
-    border-top: none
     border-radius: DROPDOWN_RADIUS DROPDOWN_RADIUS 0 0
 
   &:last-child
@@ -350,7 +339,7 @@ EMPTY_OVERLAY_SIDE_GAP = 2.5rem
 .chartjs-render-monitor
   width: 100% !important
   height: 100% !important
-  min-height: 170px
+  min-height: 10.625rem
 
 // Replace Electron/OS default accent color (orange on macOS) with our blue.
 :root
@@ -368,6 +357,29 @@ EMPTY_OVERLAY_SIDE_GAP = 2.5rem
 [data-focus-mode="mouse"] *:focus
   outline: none !important
   box-shadow: none !important
+
+// key-focus on everything the keyboard can select (D-16; the look is in
+// button.styl).  A focusable panel or editor surface is not a control: focus
+// lands there from code as well, and a ring round a whole panel would read as
+// the selected panel outline.  This long selector outranks the "no ring on a
+// mouse click" rule above, so it leaves out mouse mode itself.  Keep it free of
+// commas and `:where`: Stylus splits those, and `*` then matches every element.
+// A strip tab traced by its panel's outline shows it on that outline (D-22).
+// A Columns menu checkbox shows it on its whole row (D-23, event_log.styl).
+html:not([data-focus-mode="mouse"]) *:focus-visible:not(input):not(textarea):not(select):not([contenteditable="true"]):not(body):not([data-scope-kind]):not(.monaco-editor *):not(.xterm *):not(.filesystem):not(.component-container):not(.constraints):not(.code-editor):not(#navigation-menu):not(.context-menu):not(.ct-key-focus-traced):not(.eventLog-column-check)
+  key-focus()
+
+// A text field always matches :focus-visible, so it takes key-focus only when
+// it was reached with Tab.  Hidden inputs show it on their visible box, and a
+// field inside a wider control leaves it to that control.  The palette's field
+// is the keyboard's place whenever no row has taken it, however the palette was
+// opened, so it does not wait for Tab; only a click on it holds the line back
+// (D-28).
+[data-focus-mode="keyboard"] input:focus:not(.ct-checkmark-input):not(.ct-toggle *):not(.command-input-row *):not(.agent-interaction *),
+[data-focus-mode="keyboard"] textarea:focus:not(.monaco-editor *):not(.xterm *):not(.agent-interaction *),
+[data-focus-mode="keyboard"] select:focus,
+.command-view:not(:has(.ct-menu-item--active)) .command-input-row:focus-within:not(.ct-palette-clicked)
+  key-focus()
 
 html, body
   padding: 0
@@ -416,7 +428,7 @@ body
   padding: 0.3125em 0.5625em
 
 .separate-bar
-  width: 0px
+  width: 0
   height: 1em
   border-left: 0.031em solid colors-ui-divider-primary
 
@@ -523,7 +535,7 @@ CAPTION_BAR_HEIGHT = unquote("var(--caption-bar-height)")
   padding-left: 0.25em
 
 #main
-  font-size: 20px
+  font-size: 1.25rem
   display: flex
   flex-wrap: wrap
   flex-direction: row
@@ -572,15 +584,15 @@ CAPTION_BAR_HEIGHT = unquote("var(--caption-bar-height)")
   //   box-shadow: inset 2px 0px 0px 0px colors-ui-border-primary
 
   &:focus
-    outline: 0px
+    outline: 0
 
 .hovered
   opacity: 0.6
 
 .panel
-  font-size: 18px
+  font-size: 1.125rem
   border-color: colors-ui-text-primary-body
-  border-width: 1px
+  border-width: 0.0625rem
   border-style: solid
   overflow: hidden
   display: flex
@@ -607,8 +619,8 @@ CAPTION_BAR_HEIGHT = unquote("var(--caption-bar-height)")
 .unselectable
   user-select: none
   #trace-query
-    height: 18px
-    font-size: 16px
+    height: 1.125rem
+    font-size: 1rem
 
 .dataTables_filter
   display: none
@@ -620,14 +632,14 @@ CAPTION_BAR_HEIGHT = unquote("var(--caption-bar-height)")
   background-color: SEARCHED_TOKEN_COLOR
 
 .indeterminate-checkmark
-  border: 1px solid colors-ui-border-secondary
-  border-radius: 2.5px
+  border: 0.0625rem solid colors-ui-border-secondary
+  border-radius: 0.15625rem
   display: flex
   position: absolute
-  top: 5px
+  top: 0.3125rem
   left: 0
-  width: 15px
-  height: 15px
+  width: 0.9375rem
+  height: 0.9375rem
   background-color: colors-ui-surface-primary-tertiary
 
 .indeterminate-checkmark::after
@@ -635,11 +647,11 @@ CAPTION_BAR_HEIGHT = unquote("var(--caption-bar-height)")
   display: flex
   position: relative
   align-items: center
-  transform: translateX(4px)
+  transform: translateX(0.25rem)
 
 .checkbox
   display:none
-  width: 20px !important
+  width: 1.25rem !important
   margin-left: 0 !important
   margin-right: 5
 
@@ -659,13 +671,13 @@ input:checked ~ .checkmark:after
 
 .code-tooltip
   display: block
-  padding-left: 4px
-  padding-right: 4px
+  padding-left: 0.25rem
+  padding-right: 0.25rem
   width: fit-content
-  font-size: 14px
-  line-height: 24px
+  font-size: 0.875rem
+  line-height: 1.5rem
   overflow-wrap: normal
-  max-width: calc(100% - 8px)
+  max-width: calc(100% - 0.5rem)
   position: absolute
   background-color: colors-ui-surface-primary-tertiary
   z-index: 3
@@ -677,41 +689,41 @@ input:checked ~ .checkmark:after
   transition: opacity 0.3s ease-in-out
   white-space: normal
   pointer-events: none
-  border-radius: 6px
+  border-radius: 0.375rem
 
   .active-line
     .excerpt-code
       color: colors-ui-text-primary-body !important
     background: colors-ui-surface-base-canvas
-    border-radius: 4px
+    border-radius: 0.25rem
     width: fit-content
-    padding-right: 4px
+    padding-right: 0.25rem
 
   li
-    padding-left: 4px
+    padding-left: 0.25rem
 
 .checkmark
-  border: 0.5px solid colors-ui-border-primary
-  border-radius: 2.5px
+  border: 0.03125rem solid colors-ui-border-primary
+  border-radius: 0.15625rem
   display:block
   position: absolute
-  top: 6px
+  top: 0.375rem
   left: 0
-  width: 14px
-  height: 14px
+  width: 0.875rem
+  height: 0.875rem
   background-color: colors-ui-surface-primary-tertiary
 
   &::after
-    left: 3.6px;
+    left: 0.225rem;
     if IS_EXTENSION
-      top: 0px;
+      top: 0;
     else
-      top: 1.6px;
-    width: 6px;
-    height: 8px;
+      top: 0.1rem;
+    width: 0.375rem;
+    height: 0.5rem;
     border: solid colors-ui-text-success-primary;
-    border-width: 0 2px 2px 0;
-    border-radius: 2px
+    border-width: 0 0.125rem 0.125rem 0;
+    border-radius: 0.125rem
     -webkit-transform: rotate(45deg);
     -ms-transform: rotate(45deg);
     transform: rotate(45deg);
@@ -765,10 +777,7 @@ input:checked ~ .checkmark:after
 
 .run-trace-button
   .custom-tooltip
-    right: 0px
-
-    &:after
-      left: 90%
+    right: 0
 
 .eventLog-medium-control-button
   .custom-tooltip
@@ -850,21 +859,19 @@ input:checked ~ .checkmark:after
   gap: 0.375em
   user-select: none
   border-radius: 0.5em
-  border: 0.03125em solid colors-ui-border-primary
-  background: colors-ui-surface-primary-default
+  // The button look (button.styl) — these pickers are where it was taken from,
+  // and every other button now follows them.
+  control-button()
   font-family: "SpaceGrotesk"
   font-size: 0.75rem
-  color: colors-ui-text-primary-body-subtle
   white-space: nowrap
   min-width: 7.5em
 
   &:hover
-    background: colors-ui-surface-primary-default-hover
-    color: colors-ui-text-primary-body
+    control-button-hover()
 
   &.ct-picker-trigger--open
-    border-color: colors-ui-border-action
-    color: colors-ui-text-primary-body
+    control-button-active()
 
 .ct-picker-chevron
   display: flex

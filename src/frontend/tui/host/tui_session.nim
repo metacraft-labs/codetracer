@@ -1037,8 +1037,7 @@ proc lowLevelAct*(s: TuiSession; rt: TuiRuntime;
     let request = vm.instructionStepRequest(act.operation)
     if request.offered:
       try:
-        discard s.session.sendRawDapRequest(request.command, request.args)
-        discard s.session.drainEvents()
+        s.session.stepByInstruction(request.command, request.args)
         result.handled = true
         result.moved = true
       except CatchableError as e:

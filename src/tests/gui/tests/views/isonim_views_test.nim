@@ -199,7 +199,7 @@ suite "IsoNim Editor Panel - structure":
       check panel.attributes["id"] == "editorComponent-7"
       check panel.attributes["class"] == "editor code-editor tab"
       check panel.attributes["data-label"] == "src/main.nim"
-      check panel.attributes["tabindex"] == "2"
+      check panel.attributes["tabindex"] == "-1"
 
       dispose()
 
@@ -253,7 +253,7 @@ suite "IsoNim Editor Panel - structure":
       check panel.attributes["id"] == "expanded-42"
       check panel.attributes["class"] == "editor code-editor tab expansion expansion-2"
       check panel.attributes["data-label"] == "expanded-42"
-      check panel.attributes["tabindex"] == "2"
+      check panel.attributes["tabindex"] == "-1"
 
       dispose()
 
@@ -433,6 +433,54 @@ suite "IsoNim Auto-hide Bottom Strip — structure":
     # collapsed instead of reserving space for nothing.
     check panel.attributes["class"] == ""
     check panel.children.len == 0
+
+  # docs/UI-Design-Decisions.md, D-01 and D-02: part 6's × had no test, so its
+  # removal changed no result.
+  test "the × shows on the active bottom tab only when a click opened it":
+    let r = MockRenderer()
+    var hidden: seq[int]
+    let callbacks = AutoHideBottomStripCallbacks(
+      onHide: proc(index: int) = hidden.add index)
+    let panel = renderAutoHideBottomStripPanel[MockRenderer, MockNode](
+      r,
+      tabs = @[
+        AutoHideBottomStripRecord(title: "BUILD", key: "Build:0", active: true,
+          pinned: true),
+        AutoHideBottomStripRecord(title: "PROBLEMS", key: "BuildErrors:0",
+          active: true, pinned: false),
+        AutoHideBottomStripRecord(title: "REQUESTS", key: "RequestPanel:0",
+          active: false, pinned: true)
+      ],
+      callbacks)
+    check findAllByClass(panel.children[0], AutoHideBottomStripTabHideClass).len == 1
+    check findAllByClass(panel.children[1], AutoHideBottomStripTabHideClass).len == 0
+    check findAllByClass(panel.children[2], AutoHideBottomStripTabHideClass).len == 0
+    check panel.children[0].attributes["data-ct-panel-key"] == "Build:0"
+    fireEvent(findByClass(panel.children[0], AutoHideBottomStripTabHideClass), "click")
+    check hidden == @[0]
+
+  test "the × shows on the active side tab only when a click opened it":
+    let r = MockRenderer()
+    var hidden: seq[int]
+    let callbacks = AutoHideSideStripCallbacks(
+      onHide: proc(index: int) = hidden.add index)
+    let panel = renderAutoHideSideStripPanel[MockRenderer, MockNode](
+      r,
+      tabs = @[
+        AutoHideSideStripRecord(title: "FILES", key: "Filesystem:0", active: true,
+          pinned: true),
+        AutoHideSideStripRecord(title: "STATE", key: "State:0", active: true,
+          pinned: false)
+      ],
+      collapsed = false,
+      callbacks = callbacks)
+    let tabs = findAllByClass(panel, "auto-hide-strip-tab")
+    check tabs.len == 2
+    check findAllByClass(tabs[0], AutoHideSideStripTabHideClass).len == 1
+    check findAllByClass(tabs[1], AutoHideSideStripTabHideClass).len == 0
+    check tabs[0].attributes["data-ct-panel-key"] == "Filesystem:0"
+    fireEvent(findByClass(tabs[0], AutoHideSideStripTabHideClass), "click")
+    check hidden == @[0]
 
   test "bottom tabs render strip-tab selector contract and titles":
     let r = MockRenderer()
@@ -10435,6 +10483,15 @@ suite "IsoNim Command Palette Panel — row rendering":
       check "command-selected" notin rows[1].attributes["class"]
       check "command-selected" in rows[2].attributes["class"]
 
+      # docs/UI-Design-Decisions.md, D-28: the selected row shows key-focus only
+      # once the arrow keys have moved onto the rows.
+      check "ct-menu-item--chosen" in rows[2].attributes["class"]
+      check "ct-menu-item--active" notin rows[2].attributes["class"]
+      vm.setKeyNavigation(true)
+      rows = findAllByClass(panel, "command-result")
+      check "ct-menu-item--active" in rows[2].attributes["class"]
+      check "ct-menu-item--chosen" notin rows[2].attributes["class"]
+
       dispose()
 
   test "zebra modifiers alternate between rows":
@@ -11735,7 +11792,7 @@ suite "IsoNim VCS Panel — structure":
       let options = findAllByClass(dropdown, "ct-menu-item")
       check options.len == 3
       # The checked-out branch is marked so the picker shows where you are.
-      check options[0].attributes["class"].contains("ct-menu-item--active")
+      check options[0].attributes["class"].contains("ct-menu-item--chosen")
       check options[0].textContent.contains("main")
       check options[1].textContent.contains("feature-1")
       check options[2].textContent.contains("feature-2")
@@ -12167,10 +12224,27 @@ suite "Handlers built in a loop act on their own item (codetracer#860 sweep)":
       findByClass(panel, "ct-picker-trigger").fireEvent("click")
       let options = findAllByClass(findByClass(panel, "ct-picker-dropdown"),
                                    "ct-menu-item")
-      check options.len == MethodPickerOptions.len
-      if options.len == MethodPickerOptions.len:
-        options[1].fireEvent("click")
+      # docs/UI-Design-Decisions.md, D-19: no "Method: All" row.
+      check options.len == MethodPickerOptions.len - 1
+      # docs/UI-Design-Decisions.md, D-18: reachable from the keyboard, and the
+      # chosen option is not marked as the keyboard's place.
+      check findByClass(panel, "ct-picker-trigger").attributes["tabindex"] == "0"
+      for option in options:
+        check option.attributes["tabindex"] == "-1"
+        check option.attributes["role"] == "button"
+      check findAllByClass(panel, "ct-menu-item--active").len == 0
+      check findAllByClass(panel, "ct-menu-item--chosen").len == 0
+      if options.len == MethodPickerOptions.len - 1:
+        options[0].fireEvent("click")
         check vm.filterMethod.val == MethodPickerOptions[1][0]
+
+        # D-19: the chosen row, picked again, turns the filter off.
+        findByClass(panel, "ct-picker-trigger").fireEvent("click")
+        let chosen = findAllByClass(panel, "ct-menu-item--chosen")
+        check chosen.len == 1
+        if chosen.len == 1:
+          chosen[0].fireEvent("click")
+          check vm.filterMethod.val == ""
 
       dispose()
 

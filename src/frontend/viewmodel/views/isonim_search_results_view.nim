@@ -249,7 +249,7 @@ proc renderSearchResultsPanel*[R, N](r: R; vm: SearchResultsVM): N =
               placeholder = "Search in files...")
         span(ref = optionsEl, class = "fif-options"): discard
         span(class = "fif-badge"): text "Find in Files"
-        span(ref = clearBtnEl, class = "fif-clear-btn",
+        span(ref = clearBtnEl, class = "fif-clear-btn", title = "Clear the search",
              onclick = clearSearchHandler(vm)):
           text "×"
       tdiv(ref = bodyContainer, class = "fif-body"):

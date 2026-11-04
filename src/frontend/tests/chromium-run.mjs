@@ -26,6 +26,9 @@
 //   window.ctFinish(exitCode)
 //       The suite is done. The runner exits with the larger of this code and
 //       its own verdict (a page error, or a `[FAILED]` line, is a failure).
+//   window.ctDeviceScale(scale) -> Promise
+//       Change Chromium's real device scale through CDP while retaining the
+//       CSS viewport. Resolution media queries and layout remain browser-owned.
 //
 // The suite's `echo` output arrives as console messages and is printed
 // verbatim, so the lane runner counts `[OK]` / `[FAILED]` / `CHECKS:` lines
@@ -96,6 +99,28 @@ try {
   // the character as both `key` and `text`, so Chromium still receives a
   // trusted key event through its input pipeline.
   const cdp = await page.context().newCDPSession(page);
+  await page.exposeFunction('ctDeviceScale', async (deviceScaleFactor) => {
+    const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+    const reducedMotion = await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches);
+    await cdp.send('Emulation.setDeviceMetricsOverride', {
+      ...viewport, deviceScaleFactor, mobile: false,
+    });
+    // A DPR-only metrics override changes devicePixelRatio and resolution
+    // matches, but this Chromium does not deliver their change events until
+    // a media invalidation. Toggle a genuine browser media feature and restore
+    // its prior value: Chromium reevaluates and delivers the real resolution
+    // notifications without any CSS resize or synthetic event.
+    try {
+      await cdp.send('Emulation.setEmulatedMedia', { features: [{
+        name: 'prefers-reduced-motion', value: reducedMotion ? 'no-preference' : 'reduce',
+      }] });
+    } finally {
+      await cdp.send('Emulation.setEmulatedMedia', { features: [{
+        name: 'prefers-reduced-motion', value: reducedMotion ? 'reduce' : 'no-preference',
+      }] });
+    }
+    await page.waitForFunction((scale) => devicePixelRatio === scale, deviceScaleFactor);
+  });
   await page.exposeFunction('ctPress', async (selector, key) => {
     if (selector) {
       await page.evaluate((sel) => {

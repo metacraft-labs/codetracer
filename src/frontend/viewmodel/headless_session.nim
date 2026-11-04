@@ -336,6 +336,26 @@ proc stepForward*(s: HeadlessDebugSession) =
   discard s.backend.waitForEvent("stopped")
   s.consumeCompleteMoveEvent()
 
+proc stepByInstruction*(s: HeadlessDebugSession; command: string;
+                        args: JsonNode) =
+  ## A step by one machine instruction — `command` (`next`, `stepIn`,
+  ## `stepBack`, `ct/reverseStepIn`) with DAP's `granularity:
+  ## "instruction"` in `args`, as `LowLevelCodeVM.instructionStepRequest`
+  ## builds it for an engine that offers it. Blocks until the move is
+  ## reported and applies it, as the line steps do: the stop's instruction
+  ## (`StopLocation.frameOffset`, the pc) is what the Low Level Code
+  ## listing's execution pointer follows. `sendDapRequest` alone leaves the
+  ## move unapplied.
+  var dbg = s.session.store.debugger.val
+  dbg.status = dsStepping
+  s.session.store.debugger.val = dbg
+  let response = s.backend.sendDapRequest(command, args)
+  if not response.getOrDefault("success").getBool(false):
+    raise newException(IOError, "the engine refused " & command & " by " &
+      "instruction: " & response{"message"}.getStr("no reason given"))
+  discard s.backend.waitForEvent("stopped")
+  s.consumeCompleteMoveEvent()
+
 proc stepOverStatement*(s: HeadlessDebugSession) =
   ## M2 — Column-Aware Replay Navigation §M2: step forward by one
   ## /statement/ rather than by one source line.  Sends the DAP

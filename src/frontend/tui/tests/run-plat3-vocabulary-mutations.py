@@ -60,9 +60,11 @@ CHROME = "src/frontend/tests/view_vocabulary_chromium_test.nim"
 # The shared script is not mutated and is in TOUCHED anyway: a change to the
 # expectations invalidates every arm graded against them (§16c).
 SCRIPT = "src/frontend/view_vocabulary/cross_medium_script.nim"
+# Browser verdicts also depend on the process that runs the compiled suite.
+DRIVER = "src/frontend/tests/chromium-run.mjs"
 
 TOUCHED = [TERMINAL, WEB, MARKDOWN, BEHAVIOUR, MAPPINGS, CROSS, VOCAB, CHROME,
-           SCRIPT]
+           SCRIPT, DRIVER]
 
 CONTROL_HASHES = HARNESS_DIR / "plat3-vocabulary-mutation-control.sha256"
 BECAUSE_FILE = HARNESS_DIR / "plat3-vocabulary-mutation-because.json"
@@ -371,7 +373,8 @@ CONTROL_HEADER = """\
 #
 # The bytes every arm restores to and every verdict was taken against: the
 # five mutation subjects, the three suites the arms are graded by, and the
-# shared script whose expectations two of those suites replay (§16c).
+# shared script whose expectations two of those suites replay (§16c), and
+# the browser driver that executes the compiled Chromium suite.
 # Refreshed with --record-control-hashes, which the needle scan GATES (§16).
 """
 
@@ -395,7 +398,7 @@ def run_suite(suite: str) -> tuple[int, str]:
                            timeout=3600)
         if c.returncode != 0:
             return c.returncode, c.stdout + c.stderr
-        p = subprocess.run(["node", "src/frontend/tests/chromium-run.mjs", js],
+        p = subprocess.run(["node", DRIVER, js],
                            cwd=REPO, capture_output=True, text=True,
                            timeout=1800)
         return p.returncode, c.stdout + c.stderr + p.stdout + p.stderr

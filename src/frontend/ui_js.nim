@@ -290,6 +290,7 @@ import dap_backend
 import viewmodel/collab/[front_end_adapter, invite_bootstrap, join_session,
   reducer, session_core, types]
 import viewmodel/app/isonim_app
+import viewmodel/views/tooltips
 import viewmodel/viewmodels/visual_replay_layout
 import viewmodel/viewmodels/deepreview_layout
 from viewmodel/viewmodels/product_menu import productMenuTree, MenuItem, mikFolder
@@ -299,6 +300,7 @@ from viewmodel/store/types import liveMcr
 from ui/process_tree import
   consumeListProcessesEvent, mountProcessTree
 import viewmodel/viewmodels/state_vm
+from viewmodel/viewmodels/low_level_code_vm import instructionStepRequest
 import viewmodel/viewmodels/origin_chain_types
 from viewmodel/viewmodels/origin_chain_vm import OriginChainVM,
   applyChainResponse, applyChainAnswer,
@@ -319,6 +321,28 @@ template shownSessionVM(): SessionViewModel =
   ## instead (`sessionVMOf(data.sessionOwning(dapApi))`, or the session it
   ## was wired for).
   data.activeSessionVM()
+
+proc lowLevelListingHasFocus(): bool {.importjs:
+  "(function(){ var e = document.activeElement; return !!(e && e.closest && e.closest('.low-level-code')); })()".}
+  ## Whether the keyboard focus is in a Low Level Code listing (its rows are
+  ## focusable buttons).
+
+# A step pressed while the tab's Low Level Code listing has the focus goes by
+# instruction when the tab's engine says it can (`renderer.step`,
+# `debug_toolbar.dapStep`), as on the terminal and in the GPUI window.
+listingStepsByInstruction = proc(action: CtEventKind): bool =
+  let operation = case action
+    of DapNext: "debugger.step-over"
+    of DapStepIn: "debugger.step-into"
+    of DapStepBack: "debugger.reverse-step-over"
+    of CtReverseStepIn: "debugger.reverse-step-into"
+    else: ""
+  if operation.len == 0 or not lowLevelListingHasFocus():
+    return false
+  let vm = shownSessionVM()
+  not vm.isNil and not vm.lowLevelCodeVM.isNil and
+    vm.lowLevelCodeVM.instructionStepRequest(operation).offered
+
 var pageSocket: JsObject
   ## The socket to the page's server, when it has one; every replay tab's
   ## mirror channel rides on it (`socket_transport.sessionSyncEventFor`).
