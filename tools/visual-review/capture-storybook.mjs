@@ -388,6 +388,19 @@ async function main() {
             used.add(getComputedStyle(el).fontFamily.split(",")[0].replace(/["']/g, "").trim());
           }
           const usedFamilies = [...used];
+          // `fonts.ready` only covers loads the page has STARTED; on a busy
+          // host the story's text can lay out after it resolved. Ask for each
+          // design face the text names, so the verdict is about the face
+          // itself: a face whose files 404 still ends up not loaded.
+          for (const f of usedFamilies.filter((f) => designFaces.includes(f))) {
+            try {
+              for (const face of await document.fonts.load(`16px "${f}"`)) {
+                if (face.status === "loaded" && !loaded.includes(f)) loaded.push(f);
+              }
+            } catch {
+              // a failed load leaves the face unloaded, which is the finding
+            }
+          }
           const unloaded = usedFamilies.filter((f) => designFaces.includes(f) && !loaded.includes(f));
           const serif = usedFamilies.filter((f) => f === "" || /^(serif|times|times new roman)$/i.test(f));
           return { loaded, usedFamilies, unloaded, serif };

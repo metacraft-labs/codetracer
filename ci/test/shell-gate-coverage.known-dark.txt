@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 48
+# RECORDED-DARK-CEILING: 49
 #
 # TWO KINDS OF DARK, AND ONLY ONE OF THEM MAY BE ADDED HERE.
 #
@@ -190,6 +190,15 @@ scripts/test-codetracer-agentic-headless.sh
 # `just test-e2e-agentic-worktree` — the GUI E2E tests for the worktree-isolated
 # agentic workflow. Same sibling dependency, same absence from any lane.
 scripts/test-agentic-worktree-gui.sh
+
+# BLOCKED. `just capture-agent-harbor-fixtures` / `just check-agent-harbor-fixtures`.
+# The capture half reads an Agent Harbor server and writes captured data outside
+# every repository, so it is a workstation tool by design. The check half needs
+# the synthetic fixture set in the `nim-agents-isonim-viewmodels` sibling, which
+# no CI job clones: it is not declared in repro.nim, so the lock-provisioned
+# siblings do not include it. Wire the check half into a lane once that sibling
+# is declared and locked.
+scripts/capture-agent-harbor-fixtures.sh
 
 # =============================================================================
 # DARK BEFORE THE REMEASUREMENT, AND STILL DARK
