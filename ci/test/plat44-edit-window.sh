@@ -78,8 +78,10 @@ select_windowed_shim() {
 	local src="${SHIM_DIR}/libgpui_nim_shim.windowed.so"
 	[ -f "${src}" ] || fail "the WINDOWED shim is not at ${src}.
       Build it: cd ${ISONIM_GPUI} && nix develop --command just plat37-shims"
+	# Drain the listing so finding the symbol cannot SIGPIPE nm and turn
+	# a successful match into a scheduler-dependent pipefail rejection.
 	nm -D --defined-only "${src}" 2>/dev/null |
-		grep -q 'gpui_dispatch_key_to_focus' ||
+		grep 'gpui_dispatch_key_to_focus' >/dev/null ||
 		fail "${src} predates PLAT-38's key ABI. Rebuild it."
 	# Moved aside and never copied over: `ci/lib/gpui-shim-stage.sh` says why.
 	gpui_shim_stage "${LIVE_SHIM}" "${src}" ||
