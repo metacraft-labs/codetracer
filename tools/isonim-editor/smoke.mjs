@@ -357,11 +357,22 @@ async function main() {
     const input = page.locator("textarea[aria-label='Agent prompt']");
     await input.waitFor({ state: "visible", timeout: 30000 });
     await input.fill(promptText);
-    const delivered = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/agent/prompts" &&
-      r.request().method() === "POST", { timeout: 120000 });
+    // The prompt goes to /api/agent/prompts once a session exists; a refused
+    // session (/api/agent/sessions answering an error) means it never does,
+    // so either answer ends the wait and the check names which one it was.
+    const delivered = page.waitForResponse((r) => {
+      const path = new URL(r.url()).pathname;
+      return r.request().method() === "POST" &&
+        (path === "/api/agent/prompts" || (path === "/api/agent/sessions" && r.status() >= 400));
+    }, { timeout: 120000 });
     await page.locator("[aria-label='Send agent prompt']").click();
     const response = await delivered;
-    check("the prompt is admitted by the editor's agent route", response.status() === 200, `HTTP ${response.status()}`);
+    const route = new URL(response.url()).pathname;
+    let refusal = "";
+    if (route !== "/api/agent/prompts") refusal = await response.text().catch(() => "");
+    check("the prompt is admitted by the editor's agent route",
+      route === "/api/agent/prompts" && response.status() === 200,
+      `${route} HTTP ${response.status()}${refusal ? ` ${refusal.slice(0, 200)}` : ""}`);
     const replied = await page.waitForFunction(() => document.body.innerText.includes("CODETRACER_EDITOR_SMOKE_REPLY"),
       null, { timeout: 120000 }).then(() => true, () => false);
     check("the agent session answers in the AI panel", replied);
