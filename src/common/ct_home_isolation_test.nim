@@ -30,7 +30,9 @@
 ##           recipes, the db-backend harness, the GUI fixtures, the JS recipe)
 ##           still sets it — remove one and this fails by name;
 ##        C. no product source resolves a per-user location from an OS
-##           variable without also going through `ct_home`.
+##           variable without also going through `ct_home`;
+##        C2. no CI script, `just` recipe or tool does either: the same rule
+##           over `ci/`, `scripts/`, `tools/` and the `justfile`.
 ##
 ## The behavioural "the child lands in its scratch dir" pin for a SPAWNED
 ## process is `trace_index_test`'s "resolves its trace index INSIDE its scratch
@@ -145,6 +147,48 @@ const ResolutionNeedles = [
   # one of these writes sockets and run dirs into the real profile.
   "temp_dir().join(\"codetracer", "getTempDir() / \"codetracer\"",
   "\"TEMPDIR\""]
+
+const ScriptNeedles = [
+  # A home-relative per-user directory spelt in shell or Python. `$HOME/.cache`
+  # in any spelling (not only CodeTracer's own subdirectory): a CI script has
+  # no business caching in the user's profile at all.
+  "$HOME/.cache", "${HOME}/.cache", "~/.cache",
+  ".cache/codetracer", ".config/codetracer", ".local/share/codetracer",
+  ".local/state/codetracer",
+  # The XDG fallback idiom, which is how every one of these was written.
+  "XDG_CACHE_HOME:-", "XDG_CONFIG_HOME:-", "XDG_DATA_HOME:-",
+  "XDG_STATE_HOME:-",
+  "Path.home()", "expanduser("]
+
+type ScriptUnit = object
+  rel, name: string   ## `name` is the recipe for the justfile, "" otherwise
+  code: seq[string]
+
+proc justRecipe(line: string): string =
+  ## The recipe a justfile line at column 0 opens (`name args...:`, with an
+  ## optional `@`), or "" for anything else (`x := …`, `set …`, `[attr]`).
+  if line.len == 0 or line[0] notin {'A'..'Z', 'a'..'z', '0'..'9', '_', '@'}:
+    return ""
+  let colon = line.find(':')
+  if colon <= 0 or (colon + 1 < line.len and line[colon + 1] == '='):
+    return ""
+  let head = line[0 ..< colon].strip
+  if '=' in head and not head.contains(' '):
+    return ""
+  result = head.split(' ')[0].strip(chars = {'@'})
+
+proc scriptUnits(rel, text: string): seq[ScriptUnit] =
+  ## A file is one unit; the justfile is one unit per recipe (and one for its
+  ## top level), so an intentional recipe exempts itself and nothing else.
+  let lines = codeLines(text, rel)
+  if not rel.endsWith("justfile"):
+    return @[ScriptUnit(rel: rel, code: lines)]
+  result = @[ScriptUnit(rel: rel)]
+  for line in lines:
+    let r = justRecipe(line)
+    if r.len > 0:
+      result.add ScriptUnit(rel: rel, name: r)
+    result[^1].code.add line
 
 proc generated(rel: string): bool =
   for part in rel.split({'/', '\\'}):
@@ -384,3 +428,78 @@ suite "CODETRACER_HOME — the sweeps":
     checkpoint("scanned " & $scanned & " product sources, " & $resolving & " resolve")
     check scanned > 200
     check resolving >= 8
+
+  test "C2: no CI script, recipe or tool resolves a per-user location around CODETRACER_HOME":
+    ## Sweep C's rule for what is not product code: a shell or Python file
+    ## under `ci/`, `scripts/` or `tools/`, or a recipe in the `justfile`, that
+    ## spells a per-user directory in CODE (`$HOME/.cache`,
+    ## `.config/codetracer`, the `${XDG_*_HOME:-…}` idiom, …) must name
+    ## `CODETRACER_HOME` in its own code, i.e. honour it first.
+    ##
+    ## WHY. On 2026-11-02 `ci/test/cua-keymap-extractor.sh`, run by the
+    ## `lint-nim` stage, fetched the VS Code sources into
+    ## `${XDG_CACHE_HOME:-$HOME/.cache}/codetracer/vscode-484fdf69` — the
+    ## developer's real cache — and sweep C did not look outside `src/`.
+    ##
+    ## INTENTIONAL SITES are listed with their reason: the ones the spec says
+    ## act on the default locations on purpose (Per-User-State-Locations.md
+    ## §3.1: the developer reset recipes and the request-panel demos), and text
+    ## a user reads. An entry that no longer matches fails: a stale exemption
+    ## would excuse the next file or recipe to take its name.
+    const intentional = [
+      ("justfile", "reset-db", "§3.1: a developer reset of the REAL profile's " &
+       "trace index; it acts on the default location on purpose"),
+      ("justfile", "clear-local-traces", "§3.1: a developer reset of the " &
+       "real profile's recordings"),
+      ("justfile", "reset-config", "§3.1: a developer reset of the real " &
+       "profile's config"),
+      ("justfile", "reset-layout", "§3.1: a developer reset of the real " &
+       "profile's layouts"),
+      ("justfile", "demo-request-panel", "§3.1: the request-panel demos " &
+       "write where the developer opens them; CODETRACER_DEMO_DIR overrides"),
+      ("justfile", "demo-request-panel-live", "§3.1: as demo-request-panel"),
+      ("scripts/require-runtime-assets.sh", "", "a message naming where `ct` " &
+       "copies its default config on first run; nothing is resolved")]
+    var scanned, resolving = 0
+    var used: seq[string] = @[]
+    var files: seq[string] = @[repoRoot / "justfile"]
+    for dir in ["ci", "scripts", "tools"]:
+      for path in walkDirRec(repoRoot / dir):
+        let rel = path.relativePath(repoRoot).replace('\\', '/')
+        if generated(rel):
+          continue
+        if path.splitFile.ext in [".sh", ".bash", ".py"]:
+          files.add path
+    for path in files:
+      let rel = path.relativePath(repoRoot).replace('\\', '/')
+      for u in scriptUnits(rel, readFile(path)):
+        inc scanned
+        let code = u.code.join("\n")
+        let named = ScriptNeedles.filterIt(it in code)
+        if named.len == 0:
+          continue
+        inc resolving
+        let unitName = rel & (if u.name.len > 0: " recipe `" & u.name & "`" else: "")
+        if intentional.anyIt(it[0] == rel and it[1] == u.name):
+          used.add rel & ":" & u.name
+          continue
+        let ok = "CODETRACER_HOME" in code
+        if not ok:
+          checkpoint(unitName & " spells a per-user directory (" &
+            named.join(", ") & ") and never names CODETRACER_HOME, so a " &
+            "test lane that sets it still writes the developer's real " &
+            "profile. Resolve `$CODETRACER_HOME/<area>` first (see " &
+            "ci/test/cua-keymap-extractor.sh), or, if the spec says the site " &
+            "acts on the default location on purpose, list it here with the " &
+            "reason.")
+        check ok
+    for (rel, name, reason) in intentional:
+      let key = rel & ":" & name
+      if key notin used:
+        checkpoint("stale exemption " & key & " (" & reason & "): it no " &
+          "longer spells a per-user directory; remove the entry.")
+      check key in used
+    checkpoint("scanned " & $scanned & " scripts and recipes, " & $resolving &
+      " spell a per-user directory")
+    check scanned > 500
+    check resolving >= intentional.len + 2
