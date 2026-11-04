@@ -187,7 +187,9 @@ proc renderOverflowButton[R, N](
   ui(r):
     tdiv(class = SessionTabOverflowClass, title = "Show all tabs",
          onclick = proc() = callbacks.invokeToggleOverflow()):
-      text "⌄"
+      # Empty: the Design System's chevron-down is painted by the stylesheet
+      # (`.session-tab-overflow::before`), not typed as a character.
+      discard
 
 proc renderSessionTabsPanel*[R, N](
     r: R;

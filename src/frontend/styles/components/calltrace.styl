@@ -186,8 +186,10 @@
 
   .calltrace-row
     padding-left: 0.3125em
-    min-height: 1.55em
-    line-height: 1.55em
+    // 25px, a whole pixel: 1.55em came to 24.8px, so every row after the
+    // first started a fraction of a pixel off.
+    min-height: 1.5625rem
+    line-height: 1.5625rem
 
   .calltrace-row
   .call-name

@@ -31,6 +31,7 @@ import
   search_results,
   session_viewmodels,
   panel_host,
+  auto_hide,
   ../utils,
   ../lib/[logging, jslib]
 
@@ -436,6 +437,7 @@ proc closeSession*(data: Data, targetIndex: int) =
   if not pluginTabClosed.isNil and not closingSession.dapApi.isNil:
     pluginTabClosed(closingSession.dapApi.sessionId)
   disposeViewModels(closingSession)
+  forgetAutoHideSession(int(closingSession.id))
 
   # Remove the session from the list.
   data.sessions.delete(targetIndex)
@@ -492,11 +494,12 @@ proc switchSession*(data: Data, targetIndex: int) =
   #    resolve to the target session's fields — and point the window's pane
   #    bridges at the target's ViewModels. The tab being left keeps what it
   #    showed in its own ViewModels; there is nothing to save or restore.
+  let fromSessionId = int(data.activeSession.id)
   data.activeSessionIndex = targetIndex
   bindWindowTo(data.activeSession)
-  # The palette's and the status bar's plugin entries are the new tab's
-  # (Extensibility-Model.md §11, `ui/plugin_panes`).
-  if not pluginTabSwitched.isNil: pluginTabSwitched()
+  # The edge strips are the tab's too: swap them before the target's layout
+  # is first built below, so its `initLayout` fills the target's own.
+  switchAutoHideSession(fromSessionId, int(data.activeSession.id))
 
   # 3. Show (or create) the target session's container.
   var targetContainer = getSessionContainer(targetIndex)
