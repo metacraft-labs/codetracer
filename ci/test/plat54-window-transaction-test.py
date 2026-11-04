@@ -1,10 +1,13 @@
 """Exercise the capture transaction with real files and child processes.
 
-Capture cases substitute only the reader: its compiler/rendering is outside
-this file lifecycle contract, and it observes actual child-written bytes. The
-main-ordering case uses a bounded fixture arm catalog, bypasses its needle scan,
-and observes that grading is never called; control parsing and file hashes are
-real. Full PLAT54 window arms still use the real capture and reader.
+Temporary REPO/NIMCACHE roots isolate real filesystem writes from product
+inputs. Capture cases replace the Nim reader to bound this file-lifecycle
+contract; full G10/G11 grading still uses the real capture and reader. One
+case injects a deterministic single Path.read_bytes OSError after the substitute
+reader reads the real captured bytes: portable filesystem permissions cannot
+reliably produce that precise failure. The main-ordering case uses a bounded
+fixture arm catalog, bypasses its needle scan, and spies on grading; control
+parsing and file hashes remain real.
 """
 import hashlib
 import contextlib
