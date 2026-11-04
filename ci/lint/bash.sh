@@ -682,9 +682,11 @@ lint_step "contract suite: lane not-provided lists name real tests and the lane 
 	bash ci/test/lane-not-provided-test.sh
 
 # A Nim test lane gives every file its own CODETRACER_HOME and XDG roots and
-# fails, naming the file, when one touched the user's own CodeTracer state.
-# The suite runs the real runner over fixture files that leak the way a child
-# ignoring the overrides would, in a scratch HOME. Pure bash, a `nim` stub.
+# fails, naming the file, when one touched the user's own CodeTracer state
+# (its cache included); every other entry point that exports a scratch
+# CODETRACER_HOME fails the same way from its EXIT trap. The suite runs the
+# real runner over fixture files that leak the way a child ignoring the
+# overrides would, in a scratch HOME. Pure bash, a `nim` stub.
 lint_step "contract suite: a test lane's user-state guard names the file that touched real state" \
 	bash ci/test/lane-user-state-guard-test.sh
 

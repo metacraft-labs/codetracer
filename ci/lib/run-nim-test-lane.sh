@@ -214,47 +214,26 @@ else
 fi
 trap 'rm -rf ${_ct_lane_state:+"${_ct_lane_state}"} ${_ct_lane_home_owned:+"${_ct_lane_home_owned}"}' EXIT
 
-# THE GUARD: the user's own state directory is READ before the lane and after
-# it — every file's path and checksum, never written — and the lane FAILS if
-# anything there changed: a file that APPEARED, whose bytes CHANGED, or that
-# DISAPPEARED. A deletion is damage too (a suite that "cleans up" the layout
-# file at the user's path destroys the arrangement the user left), so it is
-# not excused. Only files are compared — listings and directory times are not,
-# because they move without any file changing. The per-test side of the same
-# property is `tests/real_terminal/test_state_isolation.nim`, which runs the
-# shipped binary against a throwaway HOME and fails on any change there.
-# Someone else changing CodeTracer state on this machine while a lane runs
-# (using CodeTracer, or clearing stale state by hand) trips it as well; the
-# message names that possibility, and the fix is to rerun on a quiet host.
-#
-# The same guard covers the user's CONFIG directory and their trace index and
-# recordings (`~/.local/share/codetracer`), which `CODETRACER_HOME` now keeps
-# every suite out of. Recordings are compared by NAME only — one can be
-# gigabytes, and a new or vanished recording is the damage that matters; the
-# trace index itself is compared by checksum.
-_ct_user_state="${HOME:-/nonexistent}/.local/state/codetracer"
-_ct_user_config="${HOME:-/nonexistent}/.config/codetracer"
-_ct_user_data="${HOME:-/nonexistent}/.local/share/codetracer"
-_ct_user_state_snapshot() {
-	# One line per file: `<cksum> <size> <path>`, sorted by path. `cksum`
-	# rather than a GNU-only tool: this runner also runs on macOS.
-	local _dir
-	for _dir in "${_ct_user_state}" "${_ct_user_config}"; do
-		if [ -d "${_dir}" ]; then
-			find "${_dir}" -type f -print0 2>/dev/null | sort -z |
-				xargs -0 -r cksum 2>/dev/null
-		fi
-	done
-	if [ -d "${_ct_user_data}" ]; then
-		find "${_ct_user_data}" -maxdepth 1 -type f -name 'trace_index.db*' \
-			-print0 2>/dev/null | sort -z | xargs -0 -r cksum 2>/dev/null
-		# `- - <path>`: the same three columns, so the removal check below can
-		# read the path from field 3.
-		find "${_ct_user_data}" -mindepth 1 -maxdepth 1 ! -name 'trace_index.db*' \
-			-print 2>/dev/null | sort | sed 's/^/- - /'
-	fi
-}
-_ct_user_state_before="$(_ct_user_state_snapshot)"
+# THE GUARD: the user's own state is READ before the lane and after it — and
+# around every file below — never written, and the lane FAILS if anything there
+# changed: a file that APPEARED, whose bytes CHANGED, or that DISAPPEARED. A
+# deletion is damage too (a suite that "cleans up" the layout file at the
+# user's path destroys the arrangement the user left), so it is not excused.
+# The directories (state, config, the trace index and recordings, and the
+# cache) and what is compared in each are `ct_user_state_snapshot`'s, in
+# ci/lib/codetracer-home.sh, so this runner and every other entry point that
+# exports a scratch `CODETRACER_HOME` guard the same thing. The per-test side
+# of the same property is `tests/real_terminal/test_state_isolation.nim`,
+# which runs the shipped binary against a throwaway HOME and fails on any
+# change there. Someone else changing CodeTracer state on this machine while a
+# lane runs (using CodeTracer, or clearing stale state by hand) trips it as
+# well; the message names that possibility, and the fix is to rerun on a quiet
+# host.
+# shellcheck source=ci/lib/codetracer-home.sh
+# shellcheck disable=SC1091 # resolved at runtime from $repo_root
+source "${repo_root}/ci/lib/codetracer-home.sh"
+ct_user_state_guard_start
+_ct_user_state_where="$(ct_user_state_guard_dirs_text)"
 backend="$(test_lane_backend "${lane}")"
 read -r -a extra_flags <<<"$(test_lane_extra_flags "${lane}")"
 lane_run_libs="$(test_lane_run_library_path "${lane}")"
@@ -491,7 +470,7 @@ while read -r f; do
 	# lane"). The file fails. A writer elsewhere on the host at the same moment
 	# (CodeTracer in use, another checkout's tests) is the other possible
 	# cause, and the message says so; run the file again on a quiet host.
-	_ct_file_before="$(_ct_user_state_snapshot)"
+	_ct_file_before="$(ct_user_state_snapshot)"
 
 	ct_libs="${CT_LD_LIBRARY_PATH:-${CODETRACER_LD_LIBRARY_PATH:-}}"
 	# The lane's own run-time libraries (`test_lane_run_library_path`), in
@@ -537,14 +516,14 @@ while read -r f; do
 			timeout "${lane_timeout}" "${artifact}" 2>&1)" && rc=0 || rc=$?
 	fi
 
-	_ct_file_after="$(_ct_user_state_snapshot)"
+	_ct_file_after="$(ct_user_state_snapshot)"
 	if [ "${_ct_file_after}" != "${_ct_file_before}" ]; then
 		echo "TOUCHED THE USER'S STATE"
 		{
 			echo "      ${f} changed the user's own CodeTracer state while it ran" \
-				"(a file created, rewritten or removed under ${_ct_user_state}," \
-				"${_ct_user_config} or ${_ct_user_data}). If CodeTracer was in use" \
-				"on this machine at the same moment, that is the other possible cause:"
+				"(a file created, rewritten or removed under ${_ct_user_state_where})." \
+				"If CodeTracer was in use on this machine at the same moment, that is" \
+				"the other possible cause:"
 			diff <(printf '%s\n' "${_ct_file_before}") \
 				<(printf '%s\n' "${_ct_file_after}") | grep '^[<>]' |
 				sed 's/^</        before:/; s/^>/        after: /'
@@ -786,37 +765,8 @@ if [ "${compile_only}" -eq 0 ]; then
 	fi
 fi
 
-_ct_user_state_after="$(_ct_user_state_snapshot)"
-if [ "${_ct_user_state_after}" != "${_ct_user_state_before}" ]; then
-	# Lines only AFTER has: files created, or rewritten (new checksum).
-	_ct_written="$(comm -13 <(printf '%s\n' "${_ct_user_state_before}" | sort) \
-		<(printf '%s\n' "${_ct_user_state_after}" | sort) | sed '/^$/d')"
-	# Paths BEFORE had and AFTER does not: files removed.
-	_ct_removed="$(comm -23 \
-		<(printf '%s\n' "${_ct_user_state_before}" | awk 'NF {print $3}' | sort) \
-		<(printf '%s\n' "${_ct_user_state_after}" | awk 'NF {print $3}' | sort) |
-		sed '/^$/d')"
-	if [ -n "${_ct_removed}" ]; then
-		echo "ERROR: lane '${lane}': these files LEFT the user's own CodeTracer" \
-			"state (${_ct_user_state}, ${_ct_user_config}, ${_ct_user_data}) during the run — a test (or a binary" \
-			"it spawned) deleted real per-user state. (If CodeTracer state was" \
-			"cleared on this machine during the run, that is the other possible" \
-			"cause.)" >&2
-		# One line per path, indented. Unquoted word splitting did this until
-		# 2026-09-30 and would have split a filename containing a space into two
-		# nonexistent ones, in the middle of a message about lost user state.
-		printf '%s\n' "${_ct_removed}" | sed 's/^/    /' >&2
-	fi
-	if [ -n "${_ct_written}" ]; then
-		echo "ERROR: lane '${lane}' WROTE the user's own CodeTracer state" \
-			"(${_ct_user_state}, ${_ct_user_config}, ${_ct_user_data}) — a test (or a binary it spawned) created or" \
-			"rewrote real per-user state. (If CodeTracer was used on this" \
-			"machine during the run, that is the other possible cause.)" >&2
-		printf '    %s\n' "${_ct_written}" >&2
-	fi
-	if [ -n "${_ct_written}" ] || [ -n "${_ct_removed}" ]; then
-		exit 1
-	fi
-fi
+# The lane as a whole, once more: a write between files (or by a process a
+# file left running) is reported against the lane.
+ct_user_state_guard_check "lane '${lane}'" || exit 1
 
 [ "${failed}" -eq 0 ]
