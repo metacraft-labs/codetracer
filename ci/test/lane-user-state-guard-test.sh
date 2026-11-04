@@ -370,7 +370,9 @@ while IFS= read -r f; do entry_files+=("$f"); done < <(
 units=0
 unchecked=""
 for f in "${entry_files[@]+"${entry_files[@]}"}"; do
-	u="$(cd "${repo_root}" && awk '/^[^#]*ct_export_scratch_codetracer_home[ \t]+[a-z]/' "$f" | grep -c . || true)"
+	# `grep -c` prints 0 and exits 1 when nothing matches; the braces keep that
+	# `|| true` from also covering a failed `cd` (SC2015).
+	u="$(cd "${repo_root}" && { awk '/^[^#]*ct_export_scratch_codetracer_home[ \t]+[a-z]/' "$f" | grep -c . || true; })"
 	units=$((units + u))
 	unchecked="${unchecked}$(cd "${repo_root}" && entry_points_unchecked "$f")"
 done
