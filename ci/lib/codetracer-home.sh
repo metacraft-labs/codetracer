@@ -131,6 +131,10 @@ ct_user_state_snapshot() {
 	# One line per file: `<cksum> <size> <path>`, or `- - <path>` for a file
 	# compared by name only; sorted by path within each directory. `cksum`
 	# rather than a GNU-only tool: this also runs on macOS.
+	#
+	# A directory the per-run sandbox below covers is left out: no test can
+	# write it, and reading it would only report the OTHER processes on the
+	# host that wrote it meanwhile.
 	local state config data cache
 	{
 		read -r state
@@ -138,22 +142,221 @@ ct_user_state_snapshot() {
 		read -r data
 		read -r cache
 	} < <(ct_user_state_guard_dirs)
+	ct_user_state_sandbox_covers "${state}" && state=""
+	ct_user_state_sandbox_covers "${config}" && config=""
+	ct_user_state_sandbox_covers "${data}" && data=""
+	ct_user_state_sandbox_covers "${cache}" && cache=""
 	local _dir
 	for _dir in "${state}" "${config}"; do
-		if [ -d "${_dir}" ]; then
+		if [ -n "${_dir}" ] && [ -d "${_dir}" ]; then
 			find "${_dir}" -type f -print0 2>/dev/null | sort -z |
 				xargs -0 -r cksum 2>/dev/null
 		fi
 	done
-	if [ -d "${data}" ]; then
+	if [ -n "${data}" ] && [ -d "${data}" ]; then
 		find "${data}" -maxdepth 1 -type f -name 'trace_index.db*' \
 			-print0 2>/dev/null | sort -z | xargs -0 -r cksum 2>/dev/null
 		find "${data}" -mindepth 1 -maxdepth 1 ! -name 'trace_index.db*' \
 			-print 2>/dev/null | sort | sed 's/^/- - /'
 	fi
-	if [ -d "${cache}" ]; then
+	if [ -n "${cache}" ] && [ -d "${cache}" ]; then
 		find "${cache}" -type f -print 2>/dev/null | sort | sed 's/^/- - /'
 	fi
+}
+
+# THE PER-RUN SANDBOX (Linux): run a test where it can READ the user's state
+# but every write lands in a private copy-on-write layer.
+#
+# The snapshot comparison above reads directories every process on the host
+# shares. A test file is blamed for whatever changed there while it ran, so a
+# `ct-mcr record` started by another checkout's tests (or by hand) on the same
+# host failed whichever file happened to be running: on 2026-11-04 two GPUI
+# suites that never start a recorder were reported for library-family lists
+# another process wrote to `~/.cache/codetracer/sync-families`. CI runs lanes
+# side by side on one runner too, so the comparison could not say which lane
+# wrote.
+#
+# So each run gets its own mount namespace with an overlay on every guarded
+# directory: the real directory is the read-only lower layer, a scratch
+# directory is the upper one. The test sees the user's real files; what it
+# creates, rewrites or deletes lands in ITS upper layer and never reaches the
+# real directory; and the finding is read from that layer, which no other
+# process can touch. The run keeps the user's uid (a second user namespace
+# maps it back), so the nix daemon, rr and file ownership behave as outside.
+#
+# A guarded directory that does not exist yet is covered through its parent
+# (an overlay needs an existing mount point), and only its `codetracer`
+# entry is read back. One with no parent either, and every directory on a
+# host without unprivileged user namespaces or overlayfs (macOS; a kernel or
+# AppArmor policy that refuses them), stays with the snapshot comparison.
+# `ct_user_state_sandbox_enable` proves the mechanism on a scratch tree before
+# it is trusted, so a host where it silently does nothing is never taken for
+# one where it works.
+
+_ct_uss_enabled=""
+_ct_uss_guarded=()
+_ct_uss_mounts=()
+_ct_uss_subs=()
+_ct_uss_layer=()
+
+ct_user_state_sandbox_covers() {
+	# 0 when the sandbox covers guarded directory `$1`.
+	local d
+	[ -n "${_ct_uss_enabled}" ] || return 1
+	for d in "${_ct_uss_guarded[@]}"; do
+		[ "${d}" = "$1" ] && return 0
+	done
+	return 1
+}
+
+# The namespace entry, as one `bash -c` program: mount each overlay given as
+# `<lower> <upper> <work>` triples up to `--`, then re-enter as the caller's
+# own uid and gid and exec the command.
+# shellcheck disable=SC2016 # expanded by the inner shell, not here
+_ct_uss_entry='set -e
+while [ "$1" != -- ]; do
+	mount -t overlay overlay -o "lowerdir=$1,upperdir=$2,workdir=$3" "$1"
+	shift 3
+done
+shift
+exec unshare --user --map-user="${CT_USS_UID}" --map-group="${CT_USS_GID}" -- "$@"'
+
+ct_user_state_sandbox_enable() {
+	# Decide, once per lane, whether runs are sandboxed. Opt out with
+	# CT_USER_STATE_SANDBOX=0. Returns 0 when the sandbox is on.
+	_ct_uss_enabled=""
+	_ct_uss_guarded=()
+	_ct_uss_mounts=()
+	_ct_uss_subs=()
+	[ "${CT_USER_STATE_SANDBOX:-1}" != 0 ] || return 1
+	[ "$(uname -s)" = Linux ] || return 1
+	command -v unshare >/dev/null 2>&1 || return 1
+	local probe
+	probe="$(mktemp -d "${TMPDIR:-/tmp}/ct-uss-probe.XXXXXX")" || return 1
+	mkdir -p "${probe}/lower" "${probe}/up/0" "${probe}/work/0"
+	echo user >"${probe}/lower/kept"
+	local uid gid
+	uid="$(id -u)"
+	gid="$(id -g)"
+	# The probe is the real thing: read a file through the overlay, write
+	# one, and report the uid it ran as. It works only when the write reached
+	# the upper layer, not the lower one, and the uid is the caller's.
+	local seen
+	# shellcheck disable=SC2016 # $1 is the probe program's own argument
+	seen="$(CT_USS_UID="${uid}" CT_USS_GID="${gid}" unshare --user \
+		--map-root-user --mount bash -c "${_ct_uss_entry}" ct-user-state-sandbox \
+		"${probe}/lower" "${probe}/up/0" "${probe}/work/0" -- \
+		sh -c 'cat "$1/kept" && echo x >"$1/new" && id -u' sh "${probe}/lower" \
+		2>/dev/null)" || seen=""
+	local ok=""
+	if [ "${seen}" = "user
+${uid}" ] && [ -f "${probe}/up/0/new" ] && [ ! -e "${probe}/lower/new" ]; then
+		ok=1
+	fi
+	chmod -R u+rwx "${probe}" 2>/dev/null
+	rm -rf "${probe}"
+	[ -n "${ok}" ] || return 1
+	local d parent
+	while IFS= read -r d; do
+		parent="$(dirname "${d}")"
+		if [ -d "${d}" ]; then
+			_ct_uss_guarded+=("${d}")
+			_ct_uss_mounts+=("${d}")
+			_ct_uss_subs+=("")
+		elif [ -d "${parent}" ]; then
+			_ct_uss_guarded+=("${d}")
+			_ct_uss_mounts+=("${parent}")
+			_ct_uss_subs+=("$(basename "${d}")")
+		fi
+	done < <(ct_user_state_guard_dirs)
+	export CT_USS_UID="${uid}" CT_USS_GID="${gid}"
+	_ct_uss_enabled=1
+}
+
+ct_user_state_sandbox_prefix() {
+	# Set `ct_uss_cmd` to the command prefix that runs a program in a fresh
+	# sandbox whose layers live under directory `$1`; empty when the sandbox
+	# is off, so `${ct_uss_cmd[@]+"${ct_uss_cmd[@]}"} prog` degrades to
+	# running `prog`. Two guarded directories under one parent share that
+	# parent's overlay (`_ct_uss_layer` maps each to its layer).
+	ct_uss_cmd=()
+	_ct_uss_layer=()
+	[ -n "${_ct_uss_enabled}" ] || return 0
+	local root="$1" i k found args=() layers=()
+	for i in "${!_ct_uss_mounts[@]}"; do
+		found=""
+		for k in "${!layers[@]}"; do
+			if [ "${layers[$k]}" = "${_ct_uss_mounts[$i]}" ]; then
+				found="${k}"
+				break
+			fi
+		done
+		if [ -z "${found}" ]; then
+			found="${#layers[@]}"
+			layers+=("${_ct_uss_mounts[$i]}")
+			mkdir -p "${root}/up/${found}" "${root}/work/${found}"
+			args+=("${_ct_uss_mounts[$i]}" "${root}/up/${found}" "${root}/work/${found}")
+		fi
+		_ct_uss_layer+=("${found}")
+	done
+	ct_uss_cmd=(unshare --user --map-root-user --mount bash -c "${_ct_uss_entry}"
+		ct-user-state-sandbox ${args[@]+"${args[@]}"} --)
+}
+
+ct_user_state_sandbox_findings() {
+	# Print what a run left in the upper layers under `$1` as the real paths
+	# it would have changed, one `wrote <path>` or `removed <path>` per line,
+	# compared the way the snapshot compares each directory: state and config
+	# by content, the trace index by content and share's other entries by
+	# top-level name, the cache by name. Then remove the layers.
+	local root="$1" i dir upper rel real top
+	[ -n "${_ct_uss_enabled}" ] || return 0
+	for i in "${!_ct_uss_guarded[@]}"; do
+		dir="${_ct_uss_guarded[$i]}"
+		upper="${root}/up/${_ct_uss_layer[$i]}"
+		[ -n "${_ct_uss_subs[$i]}" ] && upper="${upper}/${_ct_uss_subs[$i]}"
+		[ -d "${upper}" ] || continue
+		while IFS= read -r -d '' rel; do
+			rel="${rel#"${upper}"}"
+			real="${dir}${rel}"
+			top="${rel#/}"
+			top="${top%%/*}"
+			case "${dir}" in
+			*/.local/share/codetracer)
+				case "${top}" in
+				trace_index.db*) ;;
+				*)
+					# By top-level name: a new or deleted recording, not
+					# what changed inside an existing one.
+					if [ -c "${upper}${rel}" ] && [ "/${top}" = "${rel}" ]; then
+						echo "removed ${real}"
+					elif [ ! -e "${dir}/${top}" ]; then
+						echo "wrote ${dir}/${top}"
+					fi
+					continue
+					;;
+				esac
+				;;
+			*/.cache/codetracer)
+				# By name: an entry rewritten in place is not a finding.
+				if [ -f "${upper}${rel}" ] && [ -e "${real}" ]; then
+					continue
+				fi
+				;;
+			esac
+			if [ -c "${upper}${rel}" ]; then
+				# An overlay whiteout: the run deleted the real entry.
+				echo "removed ${real}"
+			elif [ -f "${real}" ] && cmp -s "${real}" "${upper}${rel}"; then
+				# A copy-up of a file opened for writing and left unchanged.
+				continue
+			else
+				echo "wrote ${real}"
+			fi
+		done < <(find "${upper}" -mindepth 1 \( -type f -o -type c \) -print0 2>/dev/null | sort -z)
+	done | sort -u
+	chmod -R u+rwx "${root}" 2>/dev/null
+	rm -rf "${root}"
 }
 
 ct_user_state_guard_start() {

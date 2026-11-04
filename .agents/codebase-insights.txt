@@ -8223,3 +8223,25 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   workspace manifest's path — or a snapshot of its `origin/<branch>` when the
   checkout lacks `spec/` — then codetracer-specs) and exports CT_SPECS_DIR,
   failing before any compile when a spec-reading lane finds nothing.
+||||||| parent of 32feb7b5f4c (test(ci): run each lane file in a sandbox over the user's state)
+||||||| parent of 3d8f0cd2088 (test(ci): run each lane file in a sandbox over the user's state)
+- On Linux, `ci/lib/run-nim-test-lane.sh` runs every file inside
+  `ct_user_state_sandbox_*` (ci/lib/codetracer-home.sh): an overlay over
+  ~/.local/state|share/codetracer, ~/.config/codetracer, ~/.cache/codetracer in
+  a nested user namespace that keeps the real uid. A "TOUCHED THE USER'S STATE"
+  that says "It ran in a sandbox" is the file's own write; other processes on
+  the host can no longer redden a file. `CT_USER_STATE_SANDBOX=0` restores the
+  plain before/after comparison (the only mode on macOS).
+- `ct-mcr record` files library-family lists under
+  `<cache>/sync-families`; recorder builds before 4ee3b61f ignored
+  `CODETRACER_HOME` and wrote ~/.cache/codetracer (XDG_CACHE_HOME/HOME) even
+  under a scratch home. Any hand-run `ct_cli record` without a scratch
+  CODETRACER_HOME still writes the real cache.
+- The gpui-shell lane needs isonim-gpui's shim built with
+  `--features gpui-backend` at rust/target/debug of the isonim-gpui tree the
+  suites COMPILE against (bindings.nim bakes the path at compile time and falls
+  back to a bare soname, i.e. "could not load: libgpui_nim_shim.so"), plus the
+  dev shell's CODETRACER_GPUI_RUNTIME_LIB_PATH.
+- Suites that read specs resolve `../codetracer-pm/spec`; the workspace checkout
+  is still named `codetracer-specs`, so set CT_SPECS_DIR to a pm checkout
+  (test_cross_renderer_visual_alignment exits before its first case otherwise).
