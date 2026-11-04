@@ -1592,6 +1592,14 @@ jobs:
       # shell missing a tool says which one BY NAME instead of dying obscurely
       # inside a contract suite.
       - run: "nix develop .#devShells.x86_64-linux.lint -c ./ci/lint/nim.sh"
+        env:
+          # ci/lint/nim.sh runs under a scratch CODETRACER_HOME that it removes
+          # on exit, so without this the CUA keymap gate would download the
+          # VS Code source archive again on every run. The extractor's own
+          # override keeps one copy per runner, beside the workspace (as
+          # ct-test-certificates' nimcache does), and outside the runner
+          # account's CodeTracer state.
+          CT_VSCODE_SRC_CACHE: ${{ github.workspace }}/../ct-vscode-src-cache
 
   wasm-recordings:
     name: WebAssembly boundary recording fixtures
