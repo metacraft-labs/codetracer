@@ -91,7 +91,8 @@
 #   6. The CREDENTIAL half of the same contract: which token those sibling
 #      clones authenticate with, and how many of them a job mints. See the
 #      section header further down for the full rationale -- in brief, one
-#      installation token per job, minted from the per-repo SECRET, org-scoped
+#      installation token per job, minted with the per-repo app-id and
+#      private-key secrets (or inputs.private-key inside a composite), org-scoped
 #      by `owner:` and never narrowed by `repositories:`, and every consuming
 #      step naming a mint step that exists in its own job.
 #   6b. A checkout that pulls `submodules:` passes a `token:`. A submodule
@@ -102,9 +103,9 @@
 #
 # # No mocks
 #
-# The workflow files themselves are the input. Nothing is stubbed, generated or
-# reconstructed: the parse runs over `.github/workflows/*.yml` as committed,
-# which is the artefact GitHub executes.
+# The workflow files themselves are the input. The private-key controls mutate
+# isolated copies of real inputs and call the same scanner; no action or service
+# is mocked. The main parse runs over the committed files GitHub executes.
 #
 # Run: bash ci/test/sibling-provisioning-test.sh
 # Lane: a step of the `ci-contract-suites` job in codetracer.yml (stock
@@ -1845,6 +1846,8 @@ fi
 # ---------------------------------------------------------------------------
 # 4. CREDENTIAL CONTRACT: one installation token per job, minted from the
 #    per-repo secret, org-scoped, and named explicitly by every consumer.
+#    Every mint must supply private-key from secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY
+#    in a workflow, or inputs.private-key in a composite action.
 #
 # The three sections above check WHICH siblings a job provisions and at WHAT
 # ref. This one checks WITH WHAT CREDENTIAL, because the same clone fails just
@@ -1936,6 +1939,7 @@ readonly ABANDONED_MINT_REF='v1'
 mint_steps=0
 mint_refs=""
 mint_bad_app_id=()
+mint_bad_private_key=()
 mint_bad_scope=()
 write_mint_steps=0
 mint_duplicate=()
@@ -1967,6 +1971,9 @@ flush_mint_step() {
 
 	if [ "$mint_app_id_forbidden" -eq 1 ]; then
 		mint_bad_app_id+=("$wf_name:$mint_line: job '$scope' mints with $FORBIDDEN_APP_ID_EXPR")
+	fi
+	if [ "$mint_private_key" -eq 0 ] || [ "$mint_private_key_invalid" -eq 1 ]; then
+		mint_bad_private_key+=("$wf_name:$mint_line: job '$scope' must mint with '$expected_private_key'")
 	fi
 	if [ "$mint_owner" -eq 0 ]; then
 		mint_bad_scope+=("$wf_name:$mint_line: job '$scope' mints without 'owner: metacraft-labs'")
@@ -2019,7 +2026,9 @@ flush_checkout_step() {
 	untokened_submodule_checkouts+=("$wf_name:$checkout_line: job '$scope' checks out 'submodules: $checkout_submodules' with no token:")
 }
 
-for wf in "${SIBLING_SOURCE_FILES[@]}"; do
+scan_credential_file() {
+	local wf="$1"
+	local expected_private_key="$CALLER_PRIVATE_KEY" key_line
 	wf_name="${wf##*/}"
 	# Every composite action is called `action.yml`, so the basename alone
 	# would make all of them one file: a mint in one composite would count as
@@ -2027,6 +2036,7 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 	# another's mint step. Name a composite by its directory as well.
 	case "$wf_name" in
 	action.yml | action.yaml)
+		expected_private_key="$LOCK_ACTION_PRIVATE_KEY"
 		wf_dir="${wf%/*}"
 		wf_name="${wf_dir##*/}/$wf_name"
 		;;
@@ -2039,6 +2049,9 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 	mint_step_id=""
 	mint_line=0
 	mint_app_id_forbidden=0
+	mint_private_key=0
+	mint_private_key_invalid=0
+	mint_with_indent=-1
 	mint_owner=0
 	mint_repositories=0
 	mint_write=0
@@ -2126,6 +2139,9 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 			mint_ref="${stripped##*"$MINT_ACTION"}"
 			mint_step_id="$cur_step_id"
 			mint_app_id_forbidden=0
+			mint_private_key=0
+			mint_private_key_invalid=0
+			mint_with_indent=-1
 			mint_owner=0
 			mint_repositories=0
 			mint_write=0
@@ -2134,7 +2150,32 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 		esac
 
 		if [ "$in_mint" -eq 1 ]; then
+			indent=$((${#line} - ${#stripped}))
+			if [ -n "$stripped" ] && [ "$indent" -le "$mint_with_indent" ]; then
+				mint_with_indent=-1
+			fi
 			case "$stripped" in
+			'with:') mint_with_indent=$indent ;;
+			'private-key:'*)
+				# Only action inputs count; env/run text cannot provide a key.
+				[ "$mint_with_indent" -ge 0 ] || continue
+				# Compare the entire input, not a substring: a different key or
+				# a literal containing the right expression is still not the
+				# per-repo credential. Comments do not supply an input.
+				key_line="${stripped#private-key:}"
+				key_line="${key_line%%#*}"
+				key_line="${key_line#"${key_line%%[![:space:]]*}"}"
+				key_line="${key_line%"${key_line##*[![:space:]]}"}"
+				# YAML permits the expression to be quoted or unquoted.
+				case "$key_line" in
+				"'"*"'" | '"'*'"') key_line="${key_line:1:${#key_line}-2}" ;;
+				esac
+				if [ "$key_line" = "${expected_private_key#private-key: }" ]; then
+					mint_private_key=1
+				else
+					mint_private_key_invalid=1
+				fi
+				;;
 			'app-id:'*)
 				case "$stripped" in
 				*"$FORBIDDEN_APP_ID_EXPR"*) mint_app_id_forbidden=1 ;;
@@ -2190,6 +2231,10 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 	done <"$wf"
 	flush_mint_step
 	flush_checkout_step
+}
+
+for wf in "${SIBLING_SOURCE_FILES[@]}"; do
+	scan_credential_file "$wf"
 done
 
 for record in ${CONSUMER_RECORDS+"${CONSUMER_RECORDS[@]}"}; do
@@ -2212,6 +2257,13 @@ else
 	fail "the workflows still mint installation tokens" \
 		"no '$MINT_ACTION' step was found -- either cross-repo auth was reworked or" \
 		"this scanner no longer matches it, and every check below is vacuous"
+fi
+
+if [ "${#mint_bad_private_key[@]}" -eq 0 ]; then
+	ok "every mint step reads the private key from the per-repo secret or composite input"
+else
+	fail "every mint step reads the private key from the per-repo secret or composite input" \
+		"${mint_bad_private_key[@]}"
 fi
 
 if [ "${#mint_bad_app_id[@]}" -eq 0 ]; then
@@ -2303,6 +2355,116 @@ else
 		"back to the workflow's own credentials, which work for this public repo and" \
 		"fail for every private sibling" \
 		"${unresolved_consumers[@]}"
+fi
+
+# The controls mutate copies of the shipped inputs, then call the SAME scanner
+# as the contract above. Exact, unique anchors make source drift fail loudly.
+private_key_control() (
+	local source="$1" prefix="$2" original="$3" replacement="$4" want="$5"
+	local text needle rest fixture
+	text="$(<"$source")"
+	needle="$prefix$original"
+	rest="${text#*"$needle"}"
+	if [ "$rest" = "$text" ] || [[ $rest == *"$needle"* ]]; then
+		printf 'mutation anchor is absent or ambiguous: %s\n' "$source"
+		return 1
+	fi
+	fixture="$(mktemp -d)" || return 1
+	trap 'rm -rf "$fixture"' EXIT
+	# Preserve action.yml: that filename identifies a composite to the scanner.
+	if [ "${6:-0}" -eq 1 ]; then
+		# No step boundary follows: the scanner must also flush at EOF.
+		text="${text%%"$needle"*}$prefix$replacement"
+	else
+		text="${text/"$needle"/"$prefix$replacement"}"
+	fi
+	printf '%s\n' "$text" >"$fixture/${source##*/}"
+	mint_bad_private_key=()
+	scan_credential_file "$fixture/${source##*/}"
+	if [ "${#mint_bad_private_key[@]}" -ne "$want" ]; then
+		printf 'expected %s private-key defect(s), got %s\n' "$want" "${#mint_bad_private_key[@]}"
+		printf '%s\n' "${mint_bad_private_key[@]}"
+		return 1
+	fi
+)
+
+# Include the real mint's id and input block: neighbouring caller inputs must
+# neither supply a mutation anchor nor satisfy a missing key on the mint.
+# shellcheck disable=SC2016
+workflow_key_prefix=$'id: ci_token\n        uses: actions/create-github-app-token@v2\n        with:\n          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}\n          '
+# shellcheck disable=SC2016
+write_key_prefix=$'id: packages_token\n        uses: actions/create-github-app-token@v2\n        with:\n          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}\n          '
+# shellcheck disable=SC2016
+action_key_prefix=$'id: token\n      uses: actions/create-github-app-token@v2\n      with:\n        app-id: ${{ inputs.app-id }}\n        '
+key_control_defects=()
+for kind in workflow composite later-mint; do
+	case "$kind" in
+	workflow)
+		source="$WORKFLOW_DIR/release.yml"
+		prefix="$workflow_key_prefix"
+		original="$CALLER_PRIVATE_KEY"
+		;;
+	later-mint)
+		source="$WORKFLOW_DIR/release.yml"
+		prefix="$write_key_prefix"
+		original="$CALLER_PRIVATE_KEY"
+		;;
+	composite)
+		source="$ACTIONS_DIR/refresh-github-token/action.yml"
+		prefix="$action_key_prefix"
+		original="$LOCK_ACTION_PRIVATE_KEY"
+		;;
+	esac
+	for mutation in valid quoted valid-eof missing missing-eof commented vars literal wrong-context empty suffix misplaced; do
+		want=1
+		at_eof=0
+		# GitHub expressions are literal YAML input, not shell substitutions.
+		# shellcheck disable=SC2016
+		case "$mutation" in
+		valid)
+			replacement="$original"
+			want=0
+			;;
+		quoted)
+			replacement="private-key: \"${original#private-key: }\" # YAML comment"
+			want=0
+			;;
+		valid-eof)
+			replacement="$original"
+			want=0
+			at_eof=1
+			;;
+		missing | missing-eof)
+			replacement=''
+			[ "$mutation" = missing-eof ] && at_eof=1
+			;;
+		commented) replacement="# $original" ;;
+		vars) replacement='private-key: ${{ vars.CI_TOKEN_PROVIDER_PRIVATE_KEY }}' ;;
+		literal) replacement='private-key: unavailable' ;;
+		empty) replacement='private-key:' ;;
+		suffix) replacement="$original-suffix" ;;
+		misplaced)
+			case "$kind" in
+			composite) replacement=$'owner: metacraft-labs\n      env:\n        '"$original" ;;
+			*) replacement=$'owner: metacraft-labs\n        env:\n          '"$original" ;;
+			esac
+			;;
+		wrong-context)
+			case "$kind" in
+			composite) replacement="$CALLER_PRIVATE_KEY" ;;
+			*) replacement="$LOCK_ACTION_PRIVATE_KEY" ;;
+			esac
+			;;
+		esac
+		if ! detail="$(private_key_control "$source" "$prefix" "$original" "$replacement" "$want" "$at_eof")"; then
+			key_control_defects+=("$kind/$mutation: $detail")
+		fi
+	done
+done
+if [ "${#key_control_defects[@]}" -eq 0 ]; then
+	ok "the private-key scanner accepts real workflows and composites and rejects missing or wrong-source keys in each mint"
+else
+	fail "the private-key scanner accepts real workflows and composites and rejects missing or wrong-source keys in each mint" "${key_control_defects[@]}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -2641,7 +2803,9 @@ echo
 # new check orders the steps so that the dev shell is realised before the mint
 # and the clone follows it directly. The release build's caller-minted token
 # expired inside a cold realisation of that shell.
-readonly EXPECTED_ASSERTIONS=40
+# 40 -> 42: every mint supplies the private key from its owning context, and
+# mutation controls prove that missing or wrong-source inputs are rejected.
+readonly EXPECTED_ASSERTIONS=42
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))
