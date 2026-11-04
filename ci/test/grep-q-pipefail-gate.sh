@@ -202,7 +202,10 @@ echo
 # ---------------------------------------------------------------------------
 echo "Step 1: there is something to scan"
 
-subjects="$(git ls-files -- '*.sh' 'justfile' '.github/workflows/*.yml' '.github/workflows/*.yaml' 2>/dev/null)"
+# `*.nix` too: a derivation's phases are bash run by stdenv's setup, which
+# sets `pipefail`. backend-manager's checkPhase guards took EPIPE this way
+# on its ~50 KB test output and failed the package build at random.
+subjects="$(git ls-files -- '*.sh' '*.nix' 'justfile' '.github/workflows/*.yml' '.github/workflows/*.yaml' 2>/dev/null)"
 subject_count="$(grep -c . <<<"${subjects}" || true)"
 
 if [ "${subject_count}" -lt 100 ]; then

@@ -22,8 +22,9 @@ pkgs.runCommand "backend-manager-package-inputs-test"
     # theirs declare in turn, must be in the package source: a dependency
     # added to Cargo.toml but not copied there breaks only the Nix build.
     # Read from the manifests rather than listed here, so a new one cannot
-    # be forgotten in both places at once.
-    python3 -I -B - "${backend.src}/codetracer/src/backend-manager" <<'PY'
+    # be forgotten in both places at once. The same holds for db-backend,
+    # whose real crate replay_server_and_daemon_socket_checks_test scans.
+    python3 -I -B - "${backend.src}/codetracer/src/backend-manager" "${backend.src}/codetracer/src/db-backend" <<'PY'
     import pathlib, sys, tomllib
 
     def path_deps(manifest):
@@ -35,8 +36,13 @@ pkgs.runCommand "backend-manager-package-inputs-test"
                     if isinstance(spec, dict) and "path" in spec:
                         yield name, spec["path"]
 
-    root = pathlib.Path(sys.argv[1])
-    seen, missing, todo = set(), [], [root]
+    roots = [pathlib.Path(arg) for arg in sys.argv[1:]]
+    seen, missing, todo = set(), [], []
+    for root in roots:
+        if (root / "Cargo.toml").is_file():
+            todo.append(root)
+        else:
+            missing.append(f"{root.name} (the crate itself)")
     while todo:
         crate = todo.pop()
         manifest = tomllib.loads((crate / "Cargo.toml").read_text())
@@ -53,6 +59,12 @@ pkgs.runCommand "backend-manager-package-inputs-test"
         sys.exit("backend-manager source is missing path dependencies: " + "; ".join(missing))
     print(f"backend-manager source holds all {len(seen)} path dependencies")
     PY
+    # tree-sitter-nim commits no parser.c: the package source generates it,
+    # and the db-backend scan test resolves it.
+    if [ ! -f "${backend.src}/codetracer/libs/tree-sitter-nim/src/parser.c" ]; then
+      echo "backend-manager source has no generated tree-sitter-nim parser.c" >&2
+      exit 1
+    fi
     # The script executor security tests copy and import the real API, rather
     # than a stand-in, from this layout relative to CARGO_MANIFEST_DIR.
     python3 -I -B - ${backend.src}/codetracer/python-api <<'PY'
