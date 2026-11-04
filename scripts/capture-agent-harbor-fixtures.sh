@@ -19,10 +19,13 @@
 # 3. scrub-check.mjs fails if a fixture carries a credential, a prompt or an
 #    infrastructure identifier (comparing against the raw prompt strings the
 #    capture kept OUTSIDE every repository), or if any public repository's
-#    tree carries a private fixture, a private design document or a session id
-#    of the private snapshot.
-# 4. scrub-check.mjs --self-test plants a credential, a prompt and private
-#    fixtures and requires the check to fail on each: its vacuity guard.
+#    tree carries a credential, a private fixture, a private design document,
+#    a session id of the private snapshot, or an excerpt of a private fixture
+#    (edited, reflowed or reindented ones too). Without the private set the
+#    excerpt part is skipped, and the check says so loudly.
+# 4. scrub-check.mjs --self-test plants a credential, a prompt, private
+#    fixtures and edited excerpts of them, and requires the check to fail on
+#    each: its vacuity guard.
 #
 # Prerequisites for a capture: `ct` built in this checkout (`just build-once`)
 # and the Agent Harbor mock server and mock agent built in their checkout's

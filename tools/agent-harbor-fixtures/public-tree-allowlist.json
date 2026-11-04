@@ -1,0 +1,167 @@
+{
+  "//": "Documented false positives of the public-tree rules of scrub-check.mjs (see loadAllowlist there). A credential entry covers one matched text by its sha256. A near-copy entry lets one public file share text only with the private diff sections its sources name (diffs/<fixture>#<changed path>; * matches anything but #), so any other private text pasted into that file is still a finding. Every entry states why it is not a leak; an entry nothing matches any more fails the check.",
+  "credentials": [
+    {
+      "file": "codetracer/ci/test/stale-artefact-guards-test.sh",
+      "rule": "url-credentials",
+      "sha256": "5e9236be0067dff83f5d940a8598a58d39f64e0c1843eac496ebb339153a5cc2",
+      "reason": "A test's git insteadOf rewrite: the URL's userinfo is the literal placeholder 'fixture-token', so a clone in the test resolves to a local file:// upstream and no credential is involved."
+    },
+    {
+      "file": "codetracer/src/backend-manager/src/observability_fetch.rs",
+      "rule": "assigned-secret",
+      "sha256": "048b7fa0c38216fb49a3335906550717cbf6f3d3543845089ef0575589138713",
+      "reason": "Unit test no_error_quotes_a_credential: 'S3cretTokenValue' is an invented value the test plants in URLs to assert no error message quotes it."
+    },
+    {
+      "file": "codetracer/src/common/trace_index.nim",
+      "rule": "assigned-secret",
+      "sha256": "740a86e0a0dedc68411a715b4cf0fb5475e4256b52dc2d8b9b06bb5d5dc2ca7b",
+      "reason": "Source code: a variable takes the result of the call langV2TokenForV1Name(name); the digits are the V2/V1 in the function's name."
+    },
+    {
+      "file": "codetracer/src/ct_test/certificate_store_test.nim",
+      "rule": "private-key",
+      "sha256": "03d104c669e3c7b6be7f989db8b12c8b910d3be8c1e2a73c9369d3cc0ba803b5",
+      "reason": "Test writes a stand-in signing-key file whose body is the PEM header followed by the word 'secret'; it holds no key material."
+    },
+    {
+      "file": "codetracer/src/db-backend/tests/origin_dap_test.rs",
+      "rule": "assigned-secret",
+      "sha256": "fb81ea651b008f312cce52fec2491cff9a45ba4a5efcf0f8708b0346bab88cc2",
+      "reason": "Source code: a variable takes the field continuation_token of the response chain1; the digit is the variable name chain1."
+    },
+    {
+      "file": "codetracer/src/tests/cli/trace_index_migration_test.nim",
+      "rule": "assigned-secret",
+      "sha256": "740a86e0a0dedc68411a715b4cf0fb5475e4256b52dc2d8b9b06bb5d5dc2ca7b",
+      "reason": "Source code: a variable takes the result of the call langV2TokenForV1Name(...); the digits are the V2/V1 in the function's name."
+    },
+    {
+      "file": "isonim/tests/test_record_history_owner.mjs",
+      "rule": "jwt",
+      "sha256": "1fecde2176fd40faceba063b61781ce4c53e41008bfba15f4bcef2f764741b45",
+      "reason": "Test credential: a JWT whose header and payload are the jwt.io example ({\"alg\":\"HS256\"}, {\"sub\":\"1234567890\"}) and whose signature is the alphabet and digits; the test asserts it never reaches history."
+    },
+    {
+      "file": "isonim/tests/test_record_history_owner.mjs",
+      "rule": "assigned-secret",
+      "sha256": "df5b298afc9a48287cdc102a305925a55d41156d14ce3914b81e360a5163b911",
+      "reason": "Test credential: a JWT whose header and payload are the jwt.io example ({\"alg\":\"HS256\"}, {\"sub\":\"1234567890\"}) and whose signature is the alphabet and digits; the test asserts it never reaches history."
+    }
+  ],
+  "nearCopy": [
+    {
+      "file": "codetracer/config.nims",
+      "sources": [
+        "diffs/*#config.nims"
+      ],
+      "reason": "The workspace's shared Nim configuration, the same file in every Nim repository; a captured branch diff of another public repository changes that repository's copy of it."
+    },
+    {
+      "file": "codetracer/locks/arm64-macosx.lock",
+      "sources": [
+        "diffs/*#repro.lock"
+      ],
+      "reason": "A reprobuild lock file whose header and sibling pins have the same layout in every repository; a captured branch diff of another public repository changes that repository's lock."
+    },
+    {
+      "file": "codetracer/repro.lock",
+      "sources": [
+        "diffs/*#repro.lock"
+      ],
+      "reason": "A reprobuild lock file whose header and sibling pins have the same layout in every repository; a captured branch diff of another public repository changes that repository's lock."
+    },
+    {
+      "file": "codetracer/src/common/nimcache_is_worktree_local_test.nim",
+      "sources": [
+        "diffs/*#tests/tnimcache_is_worktree_local.nim"
+      ],
+      "reason": "The workspace's shared nimcache-location test, the same file in every Nim repository; a captured branch diff of another public repository adds that repository's copy of it."
+    },
+    {
+      "file": "nim-agents-isonim-viewmodels/config.nims",
+      "sources": [
+        "diffs/*#config.nims"
+      ],
+      "reason": "The workspace's shared Nim configuration, the same file in every Nim repository; a captured branch diff of another public repository changes that repository's copy of it."
+    },
+    {
+      "file": "nim-agents-isonim-viewmodels/tests/test_nimcache_is_worktree_local.nim",
+      "sources": [
+        "diffs/*#tests/tnimcache_is_worktree_local.nim"
+      ],
+      "reason": "The workspace's shared nimcache-location test, the same file in every Nim repository; a captured branch diff of another public repository adds that repository's copy of it."
+    },
+    {
+      "file": "nim-agents/.pre-commit-config.yaml",
+      "sources": [
+        "diffs/*#.pre-commit-config.yaml"
+      ],
+      "reason": "The workspace's shared pre-commit configuration, the same hooks in every repository; a captured branch diff of another public repository changes that repository's copy of it."
+    },
+    {
+      "file": "nim-agents/config.nims",
+      "sources": [
+        "diffs/*#config.nims"
+      ],
+      "reason": "The workspace's shared Nim configuration, the same file in every Nim repository; a captured branch diff of another public repository changes that repository's copy of it."
+    },
+    {
+      "file": "nim-agents/tests/test_nimcache_is_worktree_local.nim",
+      "sources": [
+        "diffs/*#tests/tnimcache_is_worktree_local.nim"
+      ],
+      "reason": "The workspace's shared nimcache-location test, the same file in every Nim repository; a captured branch diff of another public repository adds that repository's copy of it."
+    },
+    {
+      "file": "nim-agent-harbor/.pre-commit-config.yaml",
+      "sources": [
+        "diffs/*#.pre-commit-config.yaml"
+      ],
+      "reason": "The workspace's shared pre-commit configuration, the same hooks in every repository; a captured branch diff of another public repository changes that repository's copy of it."
+    },
+    {
+      "file": "nim-agent-harbor/config.nims",
+      "sources": [
+        "diffs/*#config.nims"
+      ],
+      "reason": "The workspace's shared Nim configuration, the same file in every Nim repository; a captured branch diff of another public repository changes that repository's copy of it."
+    },
+    {
+      "file": "nim-agent-harbor/tests/test_nimcache_is_worktree_local.nim",
+      "sources": [
+        "diffs/*#tests/tnimcache_is_worktree_local.nim"
+      ],
+      "reason": "The workspace's shared nimcache-location test, the same file in every Nim repository; a captured branch diff of another public repository adds that repository's copy of it."
+    },
+    {
+      "file": "isonim/.pre-commit-config.yaml",
+      "sources": [
+        "diffs/*#.pre-commit-config.yaml"
+      ],
+      "reason": "The workspace's shared pre-commit configuration, the same hooks in every repository; a captured branch diff of another public repository changes that repository's copy of it."
+    },
+    {
+      "file": "isonim/config.nims",
+      "sources": [
+        "diffs/*#config.nims"
+      ],
+      "reason": "The workspace's shared Nim configuration, the same file in every Nim repository; a captured branch diff of another public repository changes that repository's copy of it."
+    },
+    {
+      "file": "isonim/repro.lock",
+      "sources": [
+        "diffs/*#repro.lock"
+      ],
+      "reason": "A reprobuild lock file whose header and sibling pins have the same layout in every repository; a captured branch diff of another public repository changes that repository's lock."
+    },
+    {
+      "file": "isonim/tests/test_nimcache_is_worktree_local.nim",
+      "sources": [
+        "diffs/*#tests/tnimcache_is_worktree_local.nim"
+      ],
+      "reason": "The workspace's shared nimcache-location test, the same file in every Nim repository; a captured branch diff of another public repository adds that repository's copy of it."
+    }
+  ]
+}
