@@ -1006,11 +1006,15 @@
 
           # script_executor tests start a real isolated Python interpreter;
           # the MCP source-confinement test starts the real replay server.
+          # script_confinement's a_mount_over_the_root_is_refused re-runs the
+          # test binary under unshare(1) in a new user and mount namespace,
+          # and fails rather than skips without it.
           nativeCheckInputs = [
             pkgs.python3
             db-backend
             backend-manager-test-recorder
-          ];
+          ]
+          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.util-linux ];
           CODETRACER_REPLAY_SERVER_CMD = "${db-backend}/bin/replay-server";
           CODETRACER_CT_MCR_CMD = "${backend-manager-test-recorder}/bin/ct-mcr";
 

@@ -77,5 +77,22 @@ pkgs.runCommand "backend-manager-package-inputs-test"
       exit 1
     fi
     "$recorder" --help >/dev/null
+    ${pkgs.lib.optionalString pkgs.stdenv.isLinux ''
+      # script_confinement's a_mount_over_the_root_is_refused re-runs the
+      # test binary under ``unshare --user --map-root-user --mount`` and
+      # mounts over a scratch root there. It fails rather than skips when it
+      # cannot, so the package's check inputs must provide unshare(1) and the
+      # sandbox must allow a nested user and mount namespace. Do both here,
+      # with the same mounts the test makes, before the Rust build.
+      if ! command -v unshare >/dev/null; then
+        echo "backend-manager checks require unshare(1): add util-linux to nativeCheckInputs" >&2
+        exit 1
+      fi
+      mkdir -p userns-probe/root userns-probe/bound
+      unshare --user --map-root-user --mount sh -euc '
+        mount -t tmpfs none userns-probe/root
+        mount --bind userns-probe/root userns-probe/bound
+      '
+    ''}
     touch "$out"
   ''
