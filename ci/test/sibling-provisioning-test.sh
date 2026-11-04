@@ -91,7 +91,8 @@
 #   6. The CREDENTIAL half of the same contract: which token those sibling
 #      clones authenticate with, and how many of them a job mints. See the
 #      section header further down for the full rationale -- in brief, one
-#      installation token per job, minted from the per-repo SECRET, org-scoped
+#      installation token per job, minted with the per-repo app-id and
+#      private-key secrets (or inputs.private-key inside a composite), org-scoped
 #      by `owner:` and never narrowed by `repositories:`, and every consuming
 #      step naming a mint step that exists in its own job.
 #   6b. A checkout that pulls `submodules:` passes a `token:`. A submodule
@@ -102,9 +103,9 @@
 #
 # # No mocks
 #
-# The workflow files themselves are the input. Nothing is stubbed, generated or
-# reconstructed: the parse runs over `.github/workflows/*.yml` as committed,
-# which is the artefact GitHub executes.
+# The workflow files themselves are the input. The private-key controls mutate
+# isolated copies of real inputs and call the same scanner; no action or service
+# is mocked. The main parse runs over the committed files GitHub executes.
 #
 # Run: bash ci/test/sibling-provisioning-test.sh
 # Lane: a step of the `ci-contract-suites` job in codetracer.yml (stock
@@ -665,14 +666,14 @@ else
 		"actual (default lock): $minimal_path_default"
 fi
 
-# The clone is given the job's credential, through the channel reprobuild
-# reads. `codetracer-image-diff` is a private build input (`repro.nim` uses
-# it), and the action used to clone with no credential at all, on the
-# premise that every build input was public. That premise was "checked" by
-# reading each input's `visibility` from repro.lock -- a field that names a
-# reprobuild configuration TIER, not whether GitHub serves the repository
-# anonymously, and that says "public" for every entry in this lock, private
-# ones included. The clone then died in CI with
+# The clone is given a LIVE credential, through the channel reprobuild reads.
+# `codetracer-image-diff` is a private build input (`repro.nim` uses it), and
+# most of the others are private too. The action used to clone with no
+# credential at all, on the premise that every build input was public. That
+# premise was "checked" by reading each input's `visibility` from repro.lock
+# -- a field that names a reprobuild configuration TIER, not whether GitHub
+# serves the repository anonymously, and that says "public" for every entry in
+# this lock, private ones included. The clone then died in CI with
 #
 #   fatal: could not read Username for 'https://github.com': terminal prompts disabled
 #
@@ -687,74 +688,96 @@ fi
 # `repro develop` never sees it. The supported channel is a GIT_CONFIG_GLOBAL
 # file, which `metacraft-github-actions/git-auth` writes privately for the
 # duration of one command. Copying that logic into this repo is forbidden by
-# policy, so the three checks below hold the shape:
+# policy.
 #
-#   * the action declares a required `gh-token` input;
-#   * its `repro develop` runs inside a step that `uses:` the shared git-auth
-#     action, pinned to a 40-hex commit (it handles the job's credential, so
-#     it changes only by an edit here), with that input passed to it, and
+# And the token has to still be VALID when git uses it. An installation token
+# expires one hour after it is minted, whoever holds it. The first fix handed
+# the action the job's `ci_token`, minted in the job's first step, and ran the
+# clone as `nix develop .#ci --command repro develop ...` inside git-auth -- so
+# the dev shell was realised INSIDE the credential window, after the token had
+# already been ticking for the whole of the job's setup. The release build
+# realises that shell cold: in job 126333283602 the token was minted at
+# 01:53:17, the shell was realised from 01:57 to 02:43, and at 02:56:33 the
+# step reported that every clone and every reset of an already-cloned sibling
+# had failed with the same "could not read Username" line, because GitHub
+# answers an expired token as if there were none. lint-nim in the same run minted at 02:14, finished at 02:34, and
+# passed (codetracer-pm issues/2026-11-04-release-build-provisioning-clones-
+# private-siblings-without-a-credential.md). Nothing about the step said that
+# the credential had expired rather than been missing.
+#
+# So the action now orders its own steps so that no unbounded work can sit
+# between a token's mint and its use, whatever the caller did before:
+#
+#   * it declares required `app-id` and `private-key` inputs and NO `gh-token`
+#     input -- a caller-minted token is exactly the stale one;
+#   * it realises the `.#ci` dev shell in a step of its own, BEFORE it mints;
+#   * it mints the clone's token with `actions/create-github-app-token`,
+#     org-scoped, and the very next step is the clone;
+#   * that clone runs inside a step that `uses:` the shared git-auth action,
+#     pinned to a 40-hex commit (it handles the job's credential, so it
+#     changes only by an edit here), given the action's own mint output, and
 #     nothing in the action falls back to numbered git configuration;
-#   * every workflow step that uses the action passes `gh-token:` naming a
-#     `steps.<id>.outputs.token`. That the id names a mint step in the same
-#     job is section 4's "every token reference names a mint step" check.
+#   * every workflow step that uses the action passes the per-repo App
+#     secrets and no `gh-token:`.
 #
-# All three fail on the tree that had the defect: the action had no input,
-# ran the clone in a raw `run:` step, and no caller passed anything.
+# The ordering check fails on the tree that had the defect: the action took
+# `gh-token`, minted nothing, and realised the shell inside git-auth.
 readonly GIT_AUTH_ACTION_RE='^metacraft-labs/metacraft-github-actions/git-auth@[0-9a-f]{40}$'
+# shellcheck disable=SC2016
+readonly LOCK_ACTION_APP_ID='app-id: ${{ inputs.app-id }}'
+# shellcheck disable=SC2016
+readonly LOCK_ACTION_PRIVATE_KEY='private-key: ${{ inputs.private-key }}'
+# shellcheck disable=SC2016
+readonly CALLER_APP_ID='app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}'
+# shellcheck disable=SC2016
+readonly CALLER_PRIVATE_KEY='private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}'
 
 lock_action_input_defects=()
 if [ -f "$LOCK_ACTION" ]; then
 	# The inputs block: from `inputs:` to the next top-level key.
 	lock_action_inputs="$(sed -n '/^inputs:/,/^[a-z]/p' "$LOCK_ACTION")"
-	gh_token_decl="$(sed -n '/^  gh-token:/,/^  [a-z]/p' <<<"$lock_action_inputs")"
-	if [ -z "$gh_token_decl" ]; then
-		lock_action_input_defects+=("it declares no 'gh-token' input")
-	elif ! grep -Eq '^    required: true[[:space:]]*$' <<<"$gh_token_decl"; then
-		lock_action_input_defects+=("its 'gh-token' input is not 'required: true'")
+	for input in app-id private-key; do
+		decl="$(sed -n "/^  $input:/,/^  [a-z]/p" <<<"$lock_action_inputs")"
+		if [ -z "$decl" ]; then
+			lock_action_input_defects+=("it declares no '$input' input")
+		elif ! grep -Eq '^    required: true[[:space:]]*$' <<<"$decl"; then
+			lock_action_input_defects+=("its '$input' input is not 'required: true'")
+		fi
+	done
+	if grep -Eq '^  gh-token:' <<<"$lock_action_inputs"; then
+		lock_action_input_defects+=("it declares a 'gh-token' input: a token the caller minted has already aged by the caller's setup, and expires inside a cold dev-shell realisation")
 	fi
 else
 	lock_action_input_defects+=("$LOCK_ACTION does not exist")
 fi
 if [ "${#lock_action_input_defects[@]}" -eq 0 ]; then
-	ok "provision-repro-lock-siblings declares a required gh-token input"
+	ok "provision-repro-lock-siblings takes required app-id and private-key inputs and no gh-token"
 else
-	fail "provision-repro-lock-siblings declares a required gh-token input" \
-		"codetracer-image-diff is a private build input, so the clone needs the" \
-		"job's token, and a caller can only hand it one through an input" \
+	fail "provision-repro-lock-siblings takes required app-id and private-key inputs and no gh-token" \
+		"the action mints the clone's token itself, after the dev shell is" \
+		"realised, so a caller can only hand it the App's credentials" \
 		"${lock_action_input_defects[@]}"
 fi
 
 # Walk the runs: section step by step. A step starts at `    - ` (four spaces,
-# the composite's step indent); its `uses:` and `with:` keys sit at six.
-lock_action_auth_defects=()
-# Every distinct git-auth pin a `repro develop` step uses; checked below
-# against the metacraft-github-actions sibling.
-git_auth_pins=()
+# the composite's step indent); its keys sit at six and its `with:` keys at
+# eight. Each step is recorded by its position, so the ordering checks below
+# compare indices rather than line numbers.
+declare -a ls_uses=() ls_id=() ls_token=() ls_develops=() ls_realises=() ls_mint_ok=()
+numbered_lines=()
 if [ -f "$LOCK_ACTION" ]; then
-	step_uses=""
-	step_token=""
-	step_develops=0
-	authed_develops=0
-	raw_develops=0
-	numbered_lines=()
-	flush_lock_step() {
-		[ "$step_develops" -gt 0 ] || return 0
-		if [[ $step_uses =~ $GIT_AUTH_ACTION_RE ]] && [ "$step_token" = 1 ]; then
-			authed_develops=$((authed_develops + step_develops))
-			git_auth_pins+=("${step_uses##*@}")
-		else
-			raw_develops=$((raw_develops + step_develops))
-			if [ -z "$step_uses" ]; then
-				lock_action_auth_defects+=("'repro develop' runs in a raw run: step, not through metacraft-github-actions/git-auth")
-			elif ! [[ $step_uses =~ $GIT_AUTH_ACTION_RE ]]; then
-				lock_action_auth_defects+=("'repro develop' runs through '$step_uses', not metacraft-github-actions/git-auth pinned to a 40-hex commit")
-			else
-				lock_action_auth_defects+=("the git-auth step that runs 'repro develop' is not given 'gh-token: \${{ inputs.gh-token }}'")
-			fi
-		fi
-	}
 	in_runs=0
 	lock_line_no=0
+	cur=-1
+	mint_app_id=0
+	mint_private_key=0
+	mint_owner=0
+	close_lock_step() {
+		[ "$cur" -ge 0 ] || return 0
+		if [ "$mint_app_id" = 1 ] && [ "$mint_private_key" = 1 ] && [ "$mint_owner" = 1 ]; then
+			ls_mint_ok[cur]=1
+		fi
+	}
 	while IFS= read -r line || [ -n "$line" ]; do
 		lock_line_no=$((lock_line_no + 1))
 		case "$line" in
@@ -767,24 +790,34 @@ if [ -f "$LOCK_ACTION" ]; then
 		esac
 		case "$line" in
 		'    - '*)
-			flush_lock_step
-			step_uses=""
-			step_token=""
-			step_develops=0
+			close_lock_step
+			cur=$((cur + 1))
+			ls_uses[cur]=""
+			ls_id[cur]=""
+			ls_token[cur]=""
+			ls_develops[cur]=0
+			ls_realises[cur]=0
+			ls_mint_ok[cur]=0
+			mint_app_id=0
+			mint_private_key=0
+			mint_owner=0
 			;;
 		esac
+		[ "$cur" -ge 0 ] || continue
+		stripped="${stripped#- }"
 		case "$stripped" in
-		'uses: '* | '- uses: '*)
-			step_uses="${stripped#- }"
-			step_uses="${step_uses#uses: }"
-			;;
+		'uses: '*) ls_uses[cur]="${stripped#uses: }" ;;
+		'id: '*) ls_id[cur]="${stripped#id: }" ;;
+		'gh-token: '*) ls_token[cur]="${stripped#gh-token: }" ;;
+		"$LOCK_ACTION_APP_ID") mint_app_id=1 ;;
+		"$LOCK_ACTION_PRIVATE_KEY") mint_private_key=1 ;;
+		'owner: metacraft-labs') mint_owner=1 ;;
 		esac
-		# shellcheck disable=SC2016
 		case "$stripped" in
-		'gh-token: ${{ inputs.gh-token }}') step_token=1 ;;
+		*'repro develop --all'*) ls_develops[cur]=$((ls_develops[cur] + 1)) ;;
 		esac
 		case "$stripped" in
-		*'repro develop --all'*) step_develops=$((step_develops + 1)) ;;
+		*'nix develop .#ci --command true'*) ls_realises[cur]=1 ;;
 		esac
 		case "$stripped" in
 		*GIT_CONFIG_COUNT* | *GIT_CONFIG_KEY_* | *GIT_CONFIG_VALUE_* | *GIT_CONFIG_PARAMETERS*)
@@ -792,25 +825,99 @@ if [ -f "$LOCK_ACTION" ]; then
 			;;
 		esac
 	done <"$LOCK_ACTION"
-	flush_lock_step
-	unset -f flush_lock_step
-	if [ "$authed_develops" -eq 0 ] && [ "$raw_develops" -eq 0 ]; then
-		lock_action_auth_defects+=("no step runs 'repro develop --all', so there is nothing to check")
-	fi
-	for numbered in ${numbered_lines[@]+"${numbered_lines[@]}"}; do
-		lock_action_auth_defects+=("it handles numbered git configuration, which reprobuild scrubs: $numbered")
-	done
-else
-	lock_action_auth_defects+=("$LOCK_ACTION does not exist")
+	close_lock_step
+	unset -f close_lock_step
 fi
-if [ "${#lock_action_auth_defects[@]}" -eq 0 ]; then
-	ok "its clone runs through the pinned metacraft-github-actions/git-auth action with the token passed to it"
+lock_step_count=${#ls_uses[@]}
+
+# Locate the three steps the ordering is about. More than one of any of them
+# is itself a defect: a second clone or mint would have its own window.
+develop_step=-1 mint_step=-1 realise_step=-1
+lock_order_defects=()
+for ((i = 0; i < lock_step_count; i++)); do
+	if [ "${ls_develops[i]}" -gt 0 ]; then
+		[ "$develop_step" -lt 0 ] || lock_order_defects+=("more than one step runs 'repro develop --all' (steps $develop_step and $i)")
+		develop_step=$i
+	fi
+	case "${ls_uses[i]}" in
+	actions/create-github-app-token@*)
+		[ "$mint_step" -lt 0 ] || lock_order_defects+=("more than one step mints a token (steps $mint_step and $i)")
+		mint_step=$i
+		;;
+	esac
+	if [ "${ls_realises[i]}" = 1 ] && [ -z "${ls_uses[i]}" ]; then
+		[ "$realise_step" -ge 0 ] || realise_step=$i
+	fi
+done
+
+# The clone's credential: the shared git-auth action, given the action's own
+# mint output.
+lock_action_auth_defects=()
+# Every distinct git-auth pin a `repro develop` step uses; checked below
+# against the metacraft-github-actions sibling.
+git_auth_pins=()
+if [ ! -f "$LOCK_ACTION" ]; then
+	lock_action_auth_defects+=("$LOCK_ACTION does not exist")
+elif [ "$develop_step" -lt 0 ]; then
+	lock_action_auth_defects+=("no step runs 'repro develop --all', so there is nothing to check")
 else
-	fail "its clone runs through the pinned metacraft-github-actions/git-auth action with the token passed to it" \
+	develop_uses="${ls_uses[develop_step]}"
+	if [ -z "$develop_uses" ]; then
+		lock_action_auth_defects+=("'repro develop' runs in a raw run: step, not through metacraft-github-actions/git-auth")
+	elif ! [[ $develop_uses =~ $GIT_AUTH_ACTION_RE ]]; then
+		lock_action_auth_defects+=("'repro develop' runs through '$develop_uses', not metacraft-github-actions/git-auth pinned to a 40-hex commit")
+	else
+		git_auth_pins+=("${develop_uses##*@}")
+	fi
+	if [ "$mint_step" -lt 0 ]; then
+		lock_action_auth_defects+=("the action mints no token of its own; the clone is given '${ls_token[develop_step]:-nothing}'")
+	elif [ -z "${ls_id[mint_step]}" ]; then
+		lock_action_auth_defects+=("the action's mint step has no id:, so nothing can name its token")
+	else
+		# shellcheck disable=SC2016
+		expected_token='${{ steps.'"${ls_id[mint_step]}"'.outputs.token }}'
+		[ "${ls_token[develop_step]}" = "$expected_token" ] ||
+			lock_action_auth_defects+=("the git-auth step is given 'gh-token: ${ls_token[develop_step]:-<none>}', not the action's own '$expected_token'")
+		[ "${ls_mint_ok[mint_step]}" = 1 ] ||
+			lock_action_auth_defects+=("the mint step does not mint from '$LOCK_ACTION_APP_ID' and '$LOCK_ACTION_PRIVATE_KEY' with 'owner: metacraft-labs'")
+	fi
+fi
+for numbered in ${numbered_lines[@]+"${numbered_lines[@]}"}; do
+	lock_action_auth_defects+=("it handles numbered git configuration, which reprobuild scrubs: $numbered")
+done
+lock_action_auth_defects+=(${lock_order_defects[@]+"${lock_order_defects[@]}"})
+if [ "${#lock_action_auth_defects[@]}" -eq 0 ]; then
+	ok "its clone runs through the pinned metacraft-github-actions/git-auth action with the token it mints"
+else
+	fail "its clone runs through the pinned metacraft-github-actions/git-auth action with the token it mints" \
 		"reprobuild scrubs the job's numbered GIT_CONFIG_* credential, so a" \
 		"private build input clones only when the token reaches it as a private" \
 		"GIT_CONFIG_GLOBAL file, which the shared git-auth action writes" \
 		"${lock_action_auth_defects[@]}"
+fi
+
+# The token is still valid when git uses it: the dev shell is realised before
+# the mint, and the clone is the very next step after it. `nix develop .#ci`
+# inside the clone step then only enters a shell that already exists.
+lock_window_defects=()
+if [ "$develop_step" -lt 0 ] || [ "$mint_step" -lt 0 ]; then
+	lock_window_defects+=("the action has no mint step and clone step to order (mint: step $mint_step, clone: step $develop_step); a token handed in by the caller was minted before this action realised the dev shell, and a cold realisation outlives its one-hour lifetime")
+else
+	if [ "$realise_step" -lt 0 ]; then
+		lock_window_defects+=("no raw step realises the dev shell ('nix develop .#ci --command true'), so the clone step realises it inside the credential window")
+	elif [ "$realise_step" -gt "$mint_step" ]; then
+		lock_window_defects+=("the dev shell is realised in step $realise_step, after the mint in step $mint_step")
+	fi
+	[ "$develop_step" -eq $((mint_step + 1)) ] ||
+		lock_window_defects+=("the clone (step $develop_step) does not immediately follow the mint (step $mint_step)")
+fi
+if [ "${#lock_window_defects[@]}" -eq 0 ]; then
+	ok "nothing that can outlast the token runs between its mint and the clone"
+else
+	fail "nothing that can outlast the token runs between its mint and the clone" \
+		"an installation token expires an hour after its mint, and GitHub answers" \
+		"an expired one exactly as it answers none: 'could not read Username'" \
+		"${lock_window_defects[@]}"
 fi
 
 # A 40-hex pin is only well formed. A placeholder (the implementation of this
@@ -845,17 +952,26 @@ else
 		"${git_auth_pin_defects[@]}"
 fi
 
-# Every caller hands the action a minted token. Callers are workflow steps
-# with `uses: ./.github/actions/provision-repro-lock-siblings`; the step ends
-# at the next line indented no deeper than its `- ` marker.
+# Every caller hands the action the App's credentials and no token of its own.
+# Callers are workflow steps with `uses:
+# ./.github/actions/provision-repro-lock-siblings`; the step ends at the next
+# line indented no deeper than its `- ` marker.
 lock_callers=0
-lock_untokened_callers=()
+lock_bad_callers=()
+record_lock_caller() {
+	[ "$caller_app_id" -eq 1 ] && [ "$caller_private_key" -eq 1 ] ||
+		lock_bad_callers+=("$wf_name:$caller_line: does not pass '$CALLER_APP_ID' and '$CALLER_PRIVATE_KEY'")
+	[ "$caller_gh_token" -eq 0 ] ||
+		lock_bad_callers+=("$wf_name:$caller_line: still passes 'gh-token:', which the action no longer takes")
+}
 for wf in "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml; do
 	[ -f "$wf" ] || continue
 	wf_name="${wf##*/}"
 	in_caller=0
 	caller_line=0
-	caller_token=0
+	caller_app_id=0
+	caller_private_key=0
+	caller_gh_token=0
 	caller_indent=0
 	line_no=0
 	while IFS= read -r line || [ -n "$line" ]; do
@@ -868,24 +984,27 @@ for wf in "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml; do
 			*)
 				if [ "$indent" -lt "$caller_indent" ] ||
 					{ [ "$indent" -eq $((caller_indent - 2)) ] && [ "${stripped:0:2}" = '- ' ]; }; then
-					[ "$caller_token" -eq 1 ] ||
-						lock_untokened_callers+=("$wf_name:$caller_line: passes no 'gh-token: \${{ steps.<id>.outputs.token }}'")
+					record_lock_caller
 					in_caller=0
 				fi
 				;;
 			esac
 		fi
 		if [ "$in_caller" -eq 1 ]; then
-			if [[ $stripped =~ ^gh-token:\ \$\{\{\ steps\.[A-Za-z0-9_-]+\.outputs\.token\ \}\}$ ]]; then
-				caller_token=1
-			fi
+			case "$stripped" in
+			"$CALLER_APP_ID") caller_app_id=1 ;;
+			"$CALLER_PRIVATE_KEY") caller_private_key=1 ;;
+			'gh-token:'*) caller_gh_token=1 ;;
+			esac
 		fi
 		case "$stripped" in
 		'uses: ./.github/actions/provision-repro-lock-siblings' | '- uses: ./.github/actions/provision-repro-lock-siblings')
 			lock_callers=$((lock_callers + 1))
 			in_caller=1
 			caller_line="$line_no"
-			caller_token=0
+			caller_app_id=0
+			caller_private_key=0
+			caller_gh_token=0
 			# The step's keys sit where `uses:` does, even when it is the
 			# step's first key and carries the `- ` marker.
 			caller_indent="$indent"
@@ -893,19 +1012,17 @@ for wf in "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml; do
 			;;
 		esac
 	done <"$wf"
-	if [ "$in_caller" -eq 1 ] && [ "$caller_token" -eq 0 ]; then
-		lock_untokened_callers+=("$wf_name:$caller_line: passes no 'gh-token: \${{ steps.<id>.outputs.token }}'")
-	fi
+	[ "$in_caller" -eq 0 ] || record_lock_caller
 done
-if [ "$lock_callers" -gt 0 ] && [ "${#lock_untokened_callers[@]}" -eq 0 ]; then
-	ok "all $lock_callers callers of provision-repro-lock-siblings pass a minted gh-token"
+unset -f record_lock_caller
+if [ "$lock_callers" -gt 0 ] && [ "${#lock_bad_callers[@]}" -eq 0 ]; then
+	ok "all $lock_callers callers of provision-repro-lock-siblings pass the App's credentials"
 else
-	fail "every caller of provision-repro-lock-siblings passes a minted gh-token" \
-		"a caller that passes nothing hands the action an empty token, and" \
-		"git-auth fails the step rather than clone the private build input" \
-		"anonymously" \
+	fail "every caller of provision-repro-lock-siblings passes the App's credentials" \
+		"a composite action cannot read secrets, so the App id and key reach the" \
+		"action's own mint step only as inputs; an empty one fails that mint" \
 		"found $lock_callers caller(s)" \
-		"${lock_untokened_callers[@]+"${lock_untokened_callers[@]}"}"
+		"${lock_bad_callers[@]+"${lock_bad_callers[@]}"}"
 fi
 
 # ... and each of them at an IMMUTABLE revision. A branch name here would be
@@ -1729,6 +1846,8 @@ fi
 # ---------------------------------------------------------------------------
 # 4. CREDENTIAL CONTRACT: one installation token per job, minted from the
 #    per-repo secret, org-scoped, and named explicitly by every consumer.
+#    Every mint must supply private-key from secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY
+#    in a workflow, or inputs.private-key in a composite action.
 #
 # The three sections above check WHICH siblings a job provisions and at WHAT
 # ref. This one checks WITH WHAT CREDENTIAL, because the same clone fails just
@@ -1820,6 +1939,7 @@ readonly ABANDONED_MINT_REF='v1'
 mint_steps=0
 mint_refs=""
 mint_bad_app_id=()
+mint_bad_private_key=()
 mint_bad_scope=()
 write_mint_steps=0
 mint_duplicate=()
@@ -1851,6 +1971,9 @@ flush_mint_step() {
 
 	if [ "$mint_app_id_forbidden" -eq 1 ]; then
 		mint_bad_app_id+=("$wf_name:$mint_line: job '$scope' mints with $FORBIDDEN_APP_ID_EXPR")
+	fi
+	if [ "$mint_private_key" -eq 0 ] || [ "$mint_private_key_invalid" -eq 1 ]; then
+		mint_bad_private_key+=("$wf_name:$mint_line: job '$scope' must mint with '$expected_private_key'")
 	fi
 	if [ "$mint_owner" -eq 0 ]; then
 		mint_bad_scope+=("$wf_name:$mint_line: job '$scope' mints without 'owner: metacraft-labs'")
@@ -1903,8 +2026,21 @@ flush_checkout_step() {
 	untokened_submodule_checkouts+=("$wf_name:$checkout_line: job '$scope' checks out 'submodules: $checkout_submodules' with no token:")
 }
 
-for wf in "${SIBLING_SOURCE_FILES[@]}"; do
+scan_credential_file() {
+	local wf="$1"
+	local expected_private_key="$CALLER_PRIVATE_KEY" key_line
 	wf_name="${wf##*/}"
+	# Every composite action is called `action.yml`, so the basename alone
+	# would make all of them one file: a mint in one composite would count as
+	# a second mint of another, and a consumer in one would resolve against
+	# another's mint step. Name a composite by its directory as well.
+	case "$wf_name" in
+	action.yml | action.yaml)
+		expected_private_key="$LOCK_ACTION_PRIVATE_KEY"
+		wf_dir="${wf%/*}"
+		wf_name="${wf_dir##*/}/$wf_name"
+		;;
+	esac
 	scope="(file scope)"
 	seen_jobs_key=0
 	line_no=0
@@ -1913,6 +2049,9 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 	mint_step_id=""
 	mint_line=0
 	mint_app_id_forbidden=0
+	mint_private_key=0
+	mint_private_key_invalid=0
+	mint_with_indent=-1
 	mint_owner=0
 	mint_repositories=0
 	mint_write=0
@@ -2000,6 +2139,9 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 			mint_ref="${stripped##*"$MINT_ACTION"}"
 			mint_step_id="$cur_step_id"
 			mint_app_id_forbidden=0
+			mint_private_key=0
+			mint_private_key_invalid=0
+			mint_with_indent=-1
 			mint_owner=0
 			mint_repositories=0
 			mint_write=0
@@ -2008,7 +2150,32 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 		esac
 
 		if [ "$in_mint" -eq 1 ]; then
+			indent=$((${#line} - ${#stripped}))
+			if [ -n "$stripped" ] && [ "$indent" -le "$mint_with_indent" ]; then
+				mint_with_indent=-1
+			fi
 			case "$stripped" in
+			'with:') mint_with_indent=$indent ;;
+			'private-key:'*)
+				# Only action inputs count; env/run text cannot provide a key.
+				[ "$mint_with_indent" -ge 0 ] || continue
+				# Compare the entire input, not a substring: a different key or
+				# a literal containing the right expression is still not the
+				# per-repo credential. Comments do not supply an input.
+				key_line="${stripped#private-key:}"
+				key_line="${key_line%%#*}"
+				key_line="${key_line#"${key_line%%[![:space:]]*}"}"
+				key_line="${key_line%"${key_line##*[![:space:]]}"}"
+				# YAML permits the expression to be quoted or unquoted.
+				case "$key_line" in
+				"'"*"'" | '"'*'"') key_line="${key_line:1:${#key_line}-2}" ;;
+				esac
+				if [ "$key_line" = "${expected_private_key#private-key: }" ]; then
+					mint_private_key=1
+				else
+					mint_private_key_invalid=1
+				fi
+				;;
 			'app-id:'*)
 				case "$stripped" in
 				*"$FORBIDDEN_APP_ID_EXPR"*) mint_app_id_forbidden=1 ;;
@@ -2064,6 +2231,10 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 	done <"$wf"
 	flush_mint_step
 	flush_checkout_step
+}
+
+for wf in "${SIBLING_SOURCE_FILES[@]}"; do
+	scan_credential_file "$wf"
 done
 
 for record in ${CONSUMER_RECORDS+"${CONSUMER_RECORDS[@]}"}; do
@@ -2086,6 +2257,13 @@ else
 	fail "the workflows still mint installation tokens" \
 		"no '$MINT_ACTION' step was found -- either cross-repo auth was reworked or" \
 		"this scanner no longer matches it, and every check below is vacuous"
+fi
+
+if [ "${#mint_bad_private_key[@]}" -eq 0 ]; then
+	ok "every mint step reads the private key from the per-repo secret or composite input"
+else
+	fail "every mint step reads the private key from the per-repo secret or composite input" \
+		"${mint_bad_private_key[@]}"
 fi
 
 if [ "${#mint_bad_app_id[@]}" -eq 0 ]; then
@@ -2177,6 +2355,116 @@ else
 		"back to the workflow's own credentials, which work for this public repo and" \
 		"fail for every private sibling" \
 		"${unresolved_consumers[@]}"
+fi
+
+# The controls mutate copies of the shipped inputs, then call the SAME scanner
+# as the contract above. Exact, unique anchors make source drift fail loudly.
+private_key_control() (
+	local source="$1" prefix="$2" original="$3" replacement="$4" want="$5"
+	local text needle rest fixture
+	text="$(<"$source")"
+	needle="$prefix$original"
+	rest="${text#*"$needle"}"
+	if [ "$rest" = "$text" ] || [[ $rest == *"$needle"* ]]; then
+		printf 'mutation anchor is absent or ambiguous: %s\n' "$source"
+		return 1
+	fi
+	fixture="$(mktemp -d)" || return 1
+	trap 'rm -rf "$fixture"' EXIT
+	# Preserve action.yml: that filename identifies a composite to the scanner.
+	if [ "${6:-0}" -eq 1 ]; then
+		# No step boundary follows: the scanner must also flush at EOF.
+		text="${text%%"$needle"*}$prefix$replacement"
+	else
+		text="${text/"$needle"/"$prefix$replacement"}"
+	fi
+	printf '%s\n' "$text" >"$fixture/${source##*/}"
+	mint_bad_private_key=()
+	scan_credential_file "$fixture/${source##*/}"
+	if [ "${#mint_bad_private_key[@]}" -ne "$want" ]; then
+		printf 'expected %s private-key defect(s), got %s\n' "$want" "${#mint_bad_private_key[@]}"
+		printf '%s\n' "${mint_bad_private_key[@]}"
+		return 1
+	fi
+)
+
+# Include the real mint's id and input block: neighbouring caller inputs must
+# neither supply a mutation anchor nor satisfy a missing key on the mint.
+# shellcheck disable=SC2016
+workflow_key_prefix=$'id: ci_token\n        uses: actions/create-github-app-token@v2\n        with:\n          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}\n          '
+# shellcheck disable=SC2016
+write_key_prefix=$'id: packages_token\n        uses: actions/create-github-app-token@v2\n        with:\n          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}\n          '
+# shellcheck disable=SC2016
+action_key_prefix=$'id: token\n      uses: actions/create-github-app-token@v2\n      with:\n        app-id: ${{ inputs.app-id }}\n        '
+key_control_defects=()
+for kind in workflow composite later-mint; do
+	case "$kind" in
+	workflow)
+		source="$WORKFLOW_DIR/release.yml"
+		prefix="$workflow_key_prefix"
+		original="$CALLER_PRIVATE_KEY"
+		;;
+	later-mint)
+		source="$WORKFLOW_DIR/release.yml"
+		prefix="$write_key_prefix"
+		original="$CALLER_PRIVATE_KEY"
+		;;
+	composite)
+		source="$ACTIONS_DIR/refresh-github-token/action.yml"
+		prefix="$action_key_prefix"
+		original="$LOCK_ACTION_PRIVATE_KEY"
+		;;
+	esac
+	for mutation in valid quoted valid-eof missing missing-eof commented vars literal wrong-context empty suffix misplaced; do
+		want=1
+		at_eof=0
+		# GitHub expressions are literal YAML input, not shell substitutions.
+		# shellcheck disable=SC2016
+		case "$mutation" in
+		valid)
+			replacement="$original"
+			want=0
+			;;
+		quoted)
+			replacement="private-key: \"${original#private-key: }\" # YAML comment"
+			want=0
+			;;
+		valid-eof)
+			replacement="$original"
+			want=0
+			at_eof=1
+			;;
+		missing | missing-eof)
+			replacement=''
+			[ "$mutation" = missing-eof ] && at_eof=1
+			;;
+		commented) replacement="# $original" ;;
+		vars) replacement='private-key: ${{ vars.CI_TOKEN_PROVIDER_PRIVATE_KEY }}' ;;
+		literal) replacement='private-key: unavailable' ;;
+		empty) replacement='private-key:' ;;
+		suffix) replacement="$original-suffix" ;;
+		misplaced)
+			case "$kind" in
+			composite) replacement=$'owner: metacraft-labs\n      env:\n        '"$original" ;;
+			*) replacement=$'owner: metacraft-labs\n        env:\n          '"$original" ;;
+			esac
+			;;
+		wrong-context)
+			case "$kind" in
+			composite) replacement="$CALLER_PRIVATE_KEY" ;;
+			*) replacement="$LOCK_ACTION_PRIVATE_KEY" ;;
+			esac
+			;;
+		esac
+		if ! detail="$(private_key_control "$source" "$prefix" "$original" "$replacement" "$want" "$at_eof")"; then
+			key_control_defects+=("$kind/$mutation: $detail")
+		fi
+	done
+done
+if [ "${#key_control_defects[@]}" -eq 0 ]; then
+	ok "the private-key scanner accepts real workflows and composites and rejects missing or wrong-source keys in each mint"
+else
+	fail "the private-key scanner accepts real workflows and composites and rejects missing or wrong-source keys in each mint" "${key_control_defects[@]}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -2509,7 +2797,15 @@ echo
 # gh-token input, its clone runs through the pinned shared git-auth action with
 # that token, and every caller passes a minted token.
 # 38 -> 39: the git-auth pin names a sibling commit that carries the action.
-readonly EXPECTED_ASSERTIONS=39
+# 39 -> 40 (2026-11-04): the action mints the clone's token itself. "declares
+# a required gh-token input" became "takes app-id and private-key and no
+# gh-token", the git-auth check now wants the action's own mint output, and a
+# new check orders the steps so that the dev shell is realised before the mint
+# and the clone follows it directly. The release build's caller-minted token
+# expired inside a cold realisation of that shell.
+# 40 -> 42: every mint supplies the private key from its owning context, and
+# mutation controls prove that missing or wrong-source inputs are rejected.
+readonly EXPECTED_ASSERTIONS=42
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))

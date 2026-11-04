@@ -51,7 +51,8 @@
 #         CT_AVM_TRANSPILER_WASM path to avm_transpiler_wasm.wasm  (optional)
 #         CT_NOIR_WASM_REF       the `noir` rev the first two came from
 #         CT_AVM_TRANSPILER_REF  the rev the transpiler came from
-#         CT_WEB_BUNDLE_DIR      output dir (default src/build-debug/web)
+#         CT_WEB_BUNDLE_DIR      output dir (default build/web,
+#                                ci/lib/web-bundle-dir.sh)
 #         ISONIM_SRC             isonim source tree
 
 set -uo pipefail
@@ -60,9 +61,14 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=ci/lib/nim-cache-root.sh
 # shellcheck disable=SC1091 # resolved at runtime from the checkout root
 source "${repo_root}/ci/lib/nim-cache-root.sh"
+# shellcheck source=ci/lib/web-bundle-dir.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${repo_root}/ci/lib/web-bundle-dir.sh"
 cd "${repo_root}" || exit 2
 
-out_dir="${CT_WEB_BUNDLE_DIR:-${repo_root}/src/build-debug/web}"
+# Never inside tup's variant directory `src/build-debug/` (ci/lib/web-bundle-dir.sh
+# says why): one default for this script and its sibling.
+out_dir="${CT_WEB_BUNDLE_DIR:-$(ct_web_bundle_default_dir "${repo_root}")}"
 cache="$(ct_nim_cache_root "${repo_root}")/web-bundle-assets"
 
 checks=0

@@ -17,6 +17,12 @@ export CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false
 # shellcheck source=ci/lib/codetracer-home.sh
 source "$REPO_ROOT/ci/lib/codetracer-home.sh"
 ct_export_scratch_codetracer_home windows-headless
+# Fail the run if anything it ran wrote the developer's real CodeTracer
+# state (ci/lib/codetracer-home.sh, the guard). The scratch home is left in
+# place, as it always was here: a Windows process still holding a file in it
+# would make its removal fail the run for a reason that is not a test's.
+# shellcheck disable=SC2154 # _ct_rc is assigned by the trap itself, first
+trap '_ct_rc=$?; ct_user_state_guard_exit windows-headless "$_ct_rc"' EXIT
 filter="$(bash "$REPO_ROOT/ci/lib/not-provided-filter.sh" "$REPO_ROOT/ci/test/headless-not-provided.windows.txt" "$REPO_ROOT/src/db-backend/tests")"
 
 cd "$REPO_ROOT/src/db-backend"

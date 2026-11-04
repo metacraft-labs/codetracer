@@ -2257,9 +2257,9 @@ package codeTracer:
       actionIdValue = "codetracer.gate.build-platform-lock",
       commandValue = "bash scripts/test-build-once-platform-lock.sh",
       extraInputsValue = @["scripts/test-build-once-platform-lock.sh",
-        "scripts/build-once.sh", "ci/lib/build-freshness.sh",
-        "ci/lib/sha256.sh", "repro.lock", "locks/arm64-macosx.lock",
-        "flake.lock"],
+        "scripts/build-once.sh", "scripts/check-platform-lock-pins.sh",
+        "ci/lib/build-freshness.sh", "ci/lib/sha256.sh", "repro.lock",
+        "locks/arm64-macosx.lock", "flake.lock"],
       cacheableValue = true,
       extraEnvValue = GateEnv)
     target("gate-build-platform-lock", gateBuildPlatformLock)

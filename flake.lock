@@ -7532,11 +7532,11 @@
     "isonim": {
       "flake": false,
       "locked": {
-        "lastModified": 1793728923,
-        "narHash": "sha256-EbL5y373XbRlIe1sE6uZbdQOpyG/rKgkZdHNp+g540g=",
+        "lastModified": 1793778491,
+        "narHash": "sha256-ZfULmZ01kIq1wmlg2mbG+gEKGKXJ4FwCYa1rhWJRV08=",
         "owner": "metacraft-labs",
         "repo": "isonim",
-        "rev": "239e39febd3a5a2b9810cabb5915ce6c6b8ee291",
+        "rev": "15f6d922f9838c0f225cb17a9139b34a96be9760",
         "type": "github"
       },
       "original": {

@@ -79,6 +79,9 @@
 #   (q) every selected lane parses with the host's system Bash. On Darwin this
 #       deliberately means `/bin/bash`, the 3.2 interpreter macOS supplies, and
 #       not the newer Bash from the development shell that runs this test.
+#   (r) an ABI symbol found early in a streamed `nm` listing is accepted even
+#       while the producer still has output to write. Missing symbols and an
+#       `nm` error after printing the symbol must both stop before staging.
 #
 # REAL: bash, python3, the lane scripts themselves, run end to end from a copy
 # in a sandbox workspace against `src/tests/visual/scenarios.json`, and a real
@@ -94,6 +97,8 @@
 #   - `nm` and `ldd` on PATH, on both platforms, because a text shim has no
 #     symbol table and because `nm -D` and `ldd` are ELF tools that do not behave
 #     the same on Mach-O. `nm` answers with the two ABI symbols the lanes grep.
+#     Case (r) adds more than a pipe buffer of symbols after the match, forcing
+#     the producer/early-reader ordering without sleeps or host-load guesses.
 #   - `sway`, `grim`, `wayland-info`, `wtype` and `cargo` on PATH, as no-ops. The
 #     lanes only ask whether they exist; macOS has no compositor to provide them.
 #   - `xvfb-run` on PATH, as a no-op, because the real one holds the plat37 lane
@@ -245,10 +250,24 @@ for tool in sway grim wayland-info wtype cargo xvfb-run; do
 	printf '#!/bin/sh\nexit 0\n' >"${stand_ins}/${tool}"
 done
 cat >"${stand_ins}/nm" <<'SH'
-#!/bin/sh
-# Stand-in: see the test's header. One write, because the lanes pipe this into
-# `grep -q` under pipefail.
-printf '0 T gpui_dispatch_key_to_focus\n0 T gpui_frame_count\n'
+#!/usr/bin/env python3
+# Stand-in: see the test's header. Use real pipe writes and SIGPIPE, so an
+# early-exiting consumer cannot be hidden by Python's buffered stdout.
+import os
+import signal
+
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+mode = os.environ.get("STAGING_NM_MODE", "ordinary")
+if mode != "missing":
+    os.write(1, b"0 T gpui_dispatch_key_to_focus\n0 T gpui_frame_count\n")
+if mode != "ordinary":
+    # Many writes exceed the pipe capacity even if the reader starts late.
+    for _ in range(1024):
+        os.write(1, b"0 T unrelated_symbol\n" * 256)
+    with open(os.environ["STAGING_NM_DONE"], "w") as done:
+        done.write(mode)
+if mode == "error":
+    raise SystemExit(23)
 SH
 printf '#!/bin/sh\necho "stand-in => none"\n' >"${stand_ins}/ldd"
 # The steps are spelled `mv -f <from> <to>`, `cp -f <from> <to>` and `rm -f
@@ -359,7 +378,8 @@ build_fixture() {
 
 # Runs the fixture's lane, and sets `rc`. `$1` is the step to refuse, if any, `$2`
 # the signal the observer sends the lane at its first observation, if any, and
-# `$3` is 1 for a run whose binary pins its own shim.
+# `$3` is 1 for a run whose binary pins its own shim, and `$4` selects the nm
+# listing used by the ABI probe in (r).
 #
 # The variables below select another binary, shim or trace, or a pinned binary
 # that leaves the shared shim alone, and any of them would bypass staging. So the
@@ -377,6 +397,7 @@ run_lane() {
 			STAGING_LEDGER="${ledger}" STAGING_HELD="${held}" STAGING_LIVE="${live}" \
 			STAGING_DEPS="${deps}" STAGING_PLAT37_OUT="${sandbox}/build/plat37" \
 			STAGING_REFUSE="${1:-}" STAGING_SIGNAL="${2:-}" STAGING_PID_FILE="${ledger}.pid" \
+			STAGING_NM_MODE="${4:-ordinary}" STAGING_NM_DONE="${ledger}.nm-done" \
 			bash "${lane_wrapper}" "${sandbox_lane}" >"${output}" 2>&1 || rc=$?
 	} 2>/dev/null
 }
@@ -741,6 +762,39 @@ check_pinned() {
 	verdict "${name}: (o) a run after the pinned run recovers" "${before}"
 }
 
+# ABI checks must consume the producer without ignoring a real producer error.
+# These lanes share the key-ABI prerequisite; the other lanes probe differently.
+check_symbol_stream() {
+	local name="$1" lane="$2" before rc mode
+	local sandbox sandbox_lane isonim target live deps trace ledger held
+	case "${name}" in
+	plat38-keystroke | plat44-edit-window) ;;
+	*) return 0 ;;
+	esac
+	build_fixture "${name}" "${lane}" "${work}/${name}.symbol-stream" || return 0
+	for mode in stream missing error; do
+		before="${failures}"
+		: >"${ledger}"
+		rm -f "${ledger}.nm-done"
+		run_lane "" "" 0 "${mode}"
+		[ "$(read_bytes "${ledger}.nm-done")" = "${mode}" ] ||
+			report "${name}: (r) ${mode}: nm did not finish its listing (an early reader can cause SIGPIPE)"
+		if [ "${mode}" = stream ]; then
+			[ "${rc}" -eq 0 ] || report "${name}: (r) a present ABI symbol was refused: rc ${rc}"
+			assert_recovered "${name}" r "$(lane_arms "${name}")"
+		else
+			[ "${rc}" -ne 0 ] || report "${name}: (r) ${mode}: the ABI check accepted invalid nm output"
+			grep 'libgpui_nim_shim.windowed.so' "${output}" >/dev/null ||
+				report "${name}: (r) ${mode}: refusal did not name the windowed shim"
+			[ ! -s "${ledger}" ] || report "${name}: (r) ${mode}: the lane ran the app"
+			[ "${live}" -ef "${deps}" ] && [ "$(cat "${deps}")" = "${cargo_bytes}" ] ||
+				report "${name}: (r) ${mode}: the ABI refusal changed cargo's shim"
+			[ -z "$(leftovers)" ] || report "${name}: (r) ${mode}: the ABI refusal staged a shim"
+		fi
+		verdict "${name}: (r) streamed ABI listing: ${mode}" "${before}"
+	done
+}
+
 # The library on its own: (n) --------------------------------------------------
 # In subshells, because its state and its traps belong to one run. What a subshell
 # exports is meant to stay in it.
@@ -874,6 +928,7 @@ check_library
 i=0
 while [ "${i}" -lt "${#chosen_names[@]}" ]; do
 	check_system_bash_parse "${chosen_names[${i}]}" "${chosen_paths[${i}]}"
+	check_symbol_stream "${chosen_names[${i}]}" "${chosen_paths[${i}]}"
 	check_lane "${chosen_names[${i}]}" "${chosen_paths[${i}]}"
 	check_refusal "${chosen_names[${i}]}" "${chosen_paths[${i}]}" mv e "the move aside"
 	check_refusal "${chosen_names[${i}]}" "${chosen_paths[${i}]}" cp f "staging"

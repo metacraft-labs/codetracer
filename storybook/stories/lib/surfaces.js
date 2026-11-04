@@ -1,4 +1,15 @@
-import { expect } from "@storybook/test";
+// How a CodeTracer story is framed and mounted, for every surface that shows
+// one: StoryBook's generated stories (`./csf.js`) and the IsoNim Editor
+// instance (`src/frontend/isonim_editor_codetracer.nim`, which loads this
+// module into its page and calls `renderSurface` from its preview mount).
+//
+// Nothing here declares a story. The stories are declared once, in
+// `src/frontend/stories/codetracer_stories.nim`; this module only builds the
+// app frame a story's kind needs (a golden-layout panel host, the app shell,
+// the default debugging layout's reference shell) and hands the frame to the
+// real Nim mount, `mountCodeTracerStory` (`src/frontend/storybook_components.nim`).
+//
+// It must not import StoryBook: the editor loads it as a plain ES module.
 
 declareMount();
 
@@ -10,7 +21,7 @@ function declareMount() {
   }
 }
 
-function ensureComponentsLoaded() {
+export function ensureComponentsLoaded() {
   if (typeof mountCodeTracerStory !== "undefined") {
     return Promise.resolve();
   }
@@ -36,7 +47,7 @@ function ensureComponentsLoaded() {
   return loadPromise;
 }
 
-function tick() {
+export function tick() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
@@ -1345,7 +1356,7 @@ function renderDefaultDebugLayout(container, fixture) {
   });
 }
 
-function renderSurface(kind, name, fixture = "populated", displayTitle = null) {
+export function renderSurface(kind, name, fixture = "populated", displayTitle = null) {
   const container = document.createElement("div");
   container.className = "ct-storybook-surface";
   container.dataset.kind = kind;
@@ -1366,86 +1377,3 @@ function renderSurface(kind, name, fixture = "populated", displayTitle = null) {
 
   return container;
 }
-
-export function story(kind, name, fixture = "populated", storyName = null) {
-  return {
-    name: storyName ?? titleize(name),
-    render: () => renderSurface(kind, name, fixture, storyName),
-    play: async ({ canvasElement }) => {
-      await ensureComponentsLoaded();
-      await tick();
-      const surface = canvasElement.querySelector(".lm_goldenlayout, .ct-storybook-frame > *");
-      expect(surface).toBeTruthy();
-    },
-  };
-}
-
-export function frameViewerStory() {
-  return {
-    name: "Frame Viewer",
-    render: () => renderSurface("panel", "frame-viewer", "populated", "Frame Viewer"),
-    play: async ({ canvasElement }) => {
-      await ensureComponentsLoaded();
-      await tick();
-
-      const image = canvasElement.querySelector(".frame-viewer-image");
-      await expect(image).toBeTruthy();
-      await expect(image).toHaveAttribute("src", /data:image\/svg\+xml/);
-      await expect(canvasElement.querySelector(".frame-viewer-draw-call")).toBeTruthy();
-
-      const firstSrc = image.getAttribute("src");
-      const next = canvasElement.querySelector(".frame-viewer-next-frame");
-      next.click();
-      await tick();
-      await expect(image.getAttribute("src")).not.toBe(firstSrc);
-    },
-  };
-}
-
-const meta = {
-  title: "CodeTracer/Panels",
-  includeStories: /^[A-Z]/,
-  parameters: {
-    layout: "fullscreen",
-  },
-};
-
-export default meta;
-
-export const AgentActivity = story("panel", "agent-activity", "populated", "Agent Activity");
-export const AgentWorkspace = story("panel", "agent-workspace", "populated", "Agent Workspace");
-export const Build = story("panel", "build", "populated", "Build");
-export const Calltrace = story("panel", "calltrace", "populated", "Calltrace");
-export const CalltraceEditor = story("panel", "calltrace-editor", "populated", "Calltrace Editor");
-export const CommandPalette = story("panel", "command-palette", "populated", "Command Palette");
-export const DebugControls = story("panel", "debug-controls", "populated", "Debug Controls");
-export const LiveMcrDebugControls = story(
-  "panel",
-  "debug-controls",
-  "live-mcr",
-  "Live MCR Debug Controls",
-);
-export const DeepReview = story("panel", "deepreview", "populated", "Deep Review");
-export const Editor = story("panel", "editor", "populated", "Editor");
-export const Errors = story("panel", "errors", "populated", "Errors");
-export const EventLog = story("panel", "event-log", "populated", "Event Log");
-export const Filesystem = story("panel", "filesystem", "populated", "Filesystem");
-export const Flow = story("panel", "flow", "populated", "Flow");
-export const FrameViewer = frameViewerStory();
-export const PixelHistory = story("panel", "pixel-history", "populated", "Pixel History");
-export const ShaderDebug = story("panel", "shader-debug", "populated", "Shader Debugger");
-export const LowLevelCode = story("panel", "low-level-code", "populated", "Low Level Code");
-export const NoSource = story("panel", "no-source", "populated", "No Source");
-export const PointList = story("panel", "point-list", "populated", "Point List");
-export const Repl = story("panel", "repl", "populated", "Repl");
-export const RequestPanel = story("panel", "request-panel", "populated", "Request Panel");
-export const Scratchpad = story("panel", "scratchpad", "populated", "Scratchpad");
-export const Search = story("panel", "search", "populated", "Search");
-export const SearchResults = story("panel", "search-results", "populated", "Search Results");
-export const Shell = story("panel", "shell", "populated", "Shell");
-export const State = story("panel", "state", "populated", "State");
-export const StepList = story("panel", "step-list", "populated", "Step List");
-export const TerminalOutput = story("panel", "terminal-output", "populated", "Terminal Output");
-export const TraceLog = story("panel", "trace-log", "populated", "Trace Log");
-export const Vcs = story("panel", "vcs", "populated", "VCS");
-export const WelcomeScreen = story("panel", "welcome-screen", "populated", "Welcome Screen");

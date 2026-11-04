@@ -12,6 +12,23 @@ just storybook
 just storybook-build
 ```
 
+## Where stories are declared
+
+Every story is declared once, in Nim:
+`src/frontend/stories/codetracer_stories.nim` (sections, export names, the
+surface and fixture each story mounts, and an optional named play check).
+`just storybook-stories` (run by every StoryBook recipe) writes the CSF files
+from it into the git-ignored `stories/generated/`, with `stories.json` listing
+every story's id. Do not add a story in a `*.stories.js` file: add it to the
+declaration. The same declaration is the user project of CodeTracer's IsoNim
+Editor instance (`just isonim-editor-codetracer`, served on port 6106; `--smoke`
+checks it), so both review surfaces always show the same stories.
+
+`stories/lib/` holds the harness both surfaces use: `surfaces.js` frames a
+story by its kind and calls the Nim mount (the editor loads it into its
+preview frame as a plain ES module, so it must not import StoryBook);
+`csf.js` makes the CSF story objects; `plays.js` holds the named play checks.
+
 The Nim bundle exports Storybook mount functions from
 `src/frontend/storybook_components.nim` into `storybook/dist/components.js`.
 Stories load that bundle and mount real ViewModels through the production

@@ -1,5 +1,11 @@
 ## Storybook-compatible exports for CodeTracer IsoNim surfaces.
 ##
+## `mountCodeTracerStory` mounts one story: the viewmodel its fixture names,
+## under the production IsoNim view. Which stories exist is declared once, in
+## `stories/codetracer_stories.nim`; StoryBook (its generated story files) and
+## the IsoNim Editor instance (`isonim_editor_codetracer.nim`, which compiles
+## this module into its bundle) both mount through this proc.
+##
 ## Compiled with:
 ##   nim js -o:storybook/dist/components.js src/frontend/storybook_components.nim
 
@@ -45,6 +51,7 @@ import viewmodel/viewmodels/[
   state_vm,
   step_list_vm,
   terminal_output_vm,
+  test_results_vm,
   trace_log_vm,
   visual_replay_client,
   vcs_vm,
@@ -87,11 +94,18 @@ import viewmodel/views/[
   isonim_status_view,
   isonim_step_list_view,
   isonim_terminal_output_view,
+  isonim_test_results_view,
   isonim_trace_log_view,
   isonim_vcs_view,
   isonim_welcome_screen_view,
 ]
 import viewmodel/app/isonim_app_shell
+# Agent Harbor front-end prototypes: the viewmodels and their fixture data
+# source come from nim-agents-isonim-viewmodels; only the views are here.
+import nim_agents_isonim_viewmodels/agent_harbor/[fixture_source, fleet_vm]
+import stories/agent_harbor_stories
+import viewmodel/views/isonim_agent_harbor_fleet_view
+import ../ct_test/contracts as ct_test_contracts
 
 type
   DisposeProc = proc()
@@ -1355,6 +1369,54 @@ proc mountTerminalOutput(container: isonim_dom.Element; fixture: string): Dispos
     mountIsoNimTerminalOutput(container, vm)
     return proc() = vm.dispose())
 
+# ---------------------------------------------------------------------------
+# Agent Harbor
+# ---------------------------------------------------------------------------
+
+proc mountAgentHarborFleet(container: isonim_dom.Element;
+                           fixture: string): DisposeProc =
+  ## The fleet panel over the viewmodel `createFleetStoryVM` builds for the
+  ## story's fixture (`stories/agent_harbor_stories.nim` names them).
+  var rootDisposer: proc()
+  var vm: FleetSnapshotVM
+  createRoot proc(dispose: proc()) =
+    rootDisposer = dispose
+    vm = createFleetStoryVM(fixture)
+    mountAgentHarborFleetPanel(container, vm)
+  return proc() =
+    if vm != nil: vm.dispose()
+    if rootDisposer != nil: rootDisposer()
+    container.innerHTML = ""
+
+proc mountTestResults(container: isonim_dom.Element; fixture: string): DisposeProc =
+  ## The Test Results pane over a real `ct test run --events` capture (the
+  ## Agent Harbor fixture set's first test run), folded through the pane's
+  ## own `ingestEvent`, as the desktop host folds a finished suite run.
+  var rootDisposer: proc()
+  var vm: TestResultsVM
+  createRoot proc(dispose: proc()) =
+    rootDisposer = dispose
+    vm = createTestResultsVM()
+    if fixture != "empty":
+      var runs: DataResult[seq[TestRunCapture]]
+      newFixtureDataSource().loadTestRuns(
+        proc(answer: DataResult[seq[TestRunCapture]]) = runs = answer)
+      if runs.ok and runs.value.len > 0:
+        vm.beginRun()
+        for line in runs.value[0].runnerEventsJsonl.splitLines:
+          if line.strip.len == 0: continue
+          try:
+            vm.ingestEvent(ct_test_contracts.eventFromJsonLine(line))
+          except CatchableError:
+            discard
+        vm.endRun()
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderTestResultsPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
+  return proc() =
+    if vm != nil: vm.dispose()
+    if rootDisposer != nil: rootDisposer()
+    container.innerHTML = ""
+
 proc appendRendered(container: isonim_dom.Element; node: isonim_dom.Element) =
   discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(node))
 
@@ -1532,6 +1594,8 @@ proc mountCodeTracerStory*(container: isonim_dom.Element;
     case n
     of "agent-activity": mountAgentActivity(container, f)
     of "agent-workspace": mountAgentWorkspace(container, f)
+    of "agent-harbor-fleet": mountAgentHarborFleet(container, f)
+    of "test-results": mountTestResults(container, f)
     of "build": mountBuild(container, f)
     of "calltrace": mountCalltrace(container, f)
     of "calltrace-editor": mountCalltraceEditor(container, f)
@@ -1572,7 +1636,7 @@ proc ctAttachDebugControlMarks*(container: isonim_dom.Element): int
   ## Put the debugger strip's marks on a toolbar that some OTHER producer
   ## built, and answer how many were placed.
   ##
-  ## `CodeTracerSurfaces.stories.js` hand-builds a reference shell whose
+  ## `storybook/stories/lib/surfaces.js` hand-builds a reference shell whose
   ## header is a row of empty `#{action}-image` buttons. It used to be filled
   ## in by `button.styl`'s `background-image` rules, and when those went away
   ## — the marks are inline SVG now, so that a theme can colour them — that

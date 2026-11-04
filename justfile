@@ -828,7 +828,48 @@ test-hmr-e2e:
       ;;
   esac
 
-build-storybook-components:
+# Refresh the Agent Harbor fixtures the front-end prototypes are built over.
+# The captured set is private and is written beside this checkout, never into
+# a public repository: a READ-ONLY snapshot of the Agent Harbor server `ah` is
+# configured with, campaign plans, branch diffs, `ct test` runs with a trace,
+# and agents driven by scenario files on Agent Harbor's mock server and mock
+# agent. The synthetic set public builds use
+# (../nim-agents-isonim-viewmodels/fixtures/agent-harbor) is regenerated too.
+# Then the scrub check (no credential, prompt or infrastructure identifier in a
+# fixture; no private fixture in a public repository) and its self-test, which
+# plants a credential, a prompt and private fixtures and must see the check
+# fail on each. See scripts/capture-agent-harbor-fixtures.sh for the
+# prerequisites.
+[positional-arguments]
+capture-agent-harbor-fixtures *args:
+  bash scripts/capture-agent-harbor-fixtures.sh capture "$@"
+
+# The scrub check and its self-test alone, over the fixture sets as they are.
+[positional-arguments]
+check-agent-harbor-fixtures *args:
+  bash scripts/capture-agent-harbor-fixtures.sh check "$@"
+
+# Write StoryBook's story files from the one story declaration,
+# `src/frontend/stories/codetracer_stories.nim`, into the git-ignored
+# `storybook/stories/generated/` (one CSF file per section, plus
+# `stories.json`, the StoryBook id of every story). The IsoNim Editor instance
+# (`just isonim-editor-codetracer`) reads the same declaration, so the two
+# review surfaces cannot show different stories.
+storybook-stories:
+  nim r --hints:off tools/stories/emit_storybook_stories.nim
+
+# The IsoNim Editor instance over CodeTracer's stories (the same declaration
+# StoryBook's are generated from), with design review and agent sessions in
+# this checkout. Serves on 0.0.0.0:6106 until stopped (`--port N`, `--bind
+# ADDR`), with agent sessions disabled unless bound to loopback (the editor's
+# agent routes are unauthenticated); `--smoke` builds it, serves it on a free loopback port with a
+# deterministic test agent, checks it in a headless browser and exits 0/1.
+# See scripts/isonim-editor-codetracer.sh.
+[positional-arguments]
+isonim-editor-codetracer *args:
+  bash scripts/isonim-editor-codetracer.sh "$@"
+
+build-storybook-components: storybook-stories
   mkdir -p storybook/dist
   nim \
     -d:chronicles_enabled=off \
@@ -998,7 +1039,7 @@ test-rust:
   # developer's own `cargo run` too.
   source ci/lib/codetracer-home.sh
   ct_export_scratch_codetracer_home rust-tests
-  trap 'report_skips; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
+  trap '_ct_rc=$?; report_skips; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}; ct_user_state_guard_exit rust-tests "$_ct_rc"' EXIT
   # The resolver itself (both sides of the CODETRACER_HOME contract).
   ( cd libs/ct-home && cargo test )
   # `libs/ct-dap-client` is a plain path dev-dependency of src/db-backend, so
@@ -1164,7 +1205,7 @@ test-python-api:
   set -euo pipefail
   source ci/lib/codetracer-home.sh
   ct_export_scratch_codetracer_home python-api
-  trap 'rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
+  trap '_ct_rc=$?; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}; ct_user_state_guard_exit python-api "$_ct_rc"' EXIT
   cd python-api
   python3 -m pytest -q tests
 
@@ -1900,7 +1941,7 @@ test-acp-notifications:
   notification_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-acp-notifications.XXXXXX.js")"
   sessions_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-acp-sessions.XXXXXX.js")"
   git_changes_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-acp-git-changes.XXXXXX.js")"
-  trap 'rm -f "$notification_test" "$sessions_test" "$git_changes_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
+  trap '_ct_rc=$?; rm -f "$notification_test" "$sessions_test" "$git_changes_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}; ct_user_state_guard_exit acp-notifications "$_ct_rc"' EXIT
   nim js -d:nodejs -d:server -d:chronicles_enabled=off \
     --out:"$notification_test" src/frontend/tests/acp_notification_test.nim
   node "$notification_test"
@@ -1940,7 +1981,7 @@ test-frontend-js:
   run_to_cursor_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-run-to-cursor-test.XXXXXX.js")"
   html_sinks_probe="$(mktemp "${TMPDIR:-/tmp}/codetracer-html-sinks-probe.XXXXXX.js")"
   dap_refusal_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-dap-refusal-test.XXXXXX.js")"
-  trap 'rm -f "$nim_sourcemap_test" "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$monaco_operations_test" "$desktop_list_operations_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$component_ids_across_sessions_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe" "$dap_refusal_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
+  trap '_ct_rc=$?; rm -f "$nim_sourcemap_test" "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$monaco_operations_test" "$desktop_list_operations_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$component_ids_across_sessions_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe" "$dap_refusal_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}; ct_user_state_guard_exit frontend-js "$_ct_rc"' EXIT
   echo "Running Nim Source Map V3 frontend tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctIndex -d:server \
     --out:"$nim_sourcemap_test" js src/frontend/tests/nim_sourcemap_test.nim

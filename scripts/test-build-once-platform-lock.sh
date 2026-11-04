@@ -135,18 +135,34 @@ printf 'changed Linux solve\n' >>"$work/repro.lock"
 }
 echo 'PASS: both committed solves participate in Electron freshness'
 
+# The two committed solves must name the same source (codetracer-pm
+# spec/Architecture/Build-Outputs-And-Path-Resolution.md section 4.6): a
+# dependency revision is a source fact, not a platform fact. Unlike relating a
+# lock to flake.lock, this question has the same answer on every host, so it
+# runs unconditionally -- it is what makes Linux CI's `just test` refuse a
+# commit that moves a pin in repro.lock and leaves the native file behind
+# (codetracer-pm
+# issues/2026-11-03-six-native-lock-sibling-pins-diverged-unchecked-and-the-seventh-is-caught-only-on-a-mac.md).
+# The escape hatch is for a deliberate local build, never for this test, so it
+# is cleared here.
+if ! env -u CODETRACER_ALLOW_PLATFORM_LOCK_PIN_DRIFT "${BASH:-bash}" \
+	"$root/scripts/check-platform-lock-pins.sh" \
+	"$root/locks/arm64-macosx.lock" "$root/repro.lock"; then
+	echo 'FAIL: the committed solves pin different source revisions' >&2
+	exit 1
+fi
+echo 'PASS: both committed solves pin the same source revisions'
+
 # Verify the committed solves too. This complements the driver boundary test:
 # recording correct argv cannot establish that its native file is a native
 # solve, or that the build and dev shell pin the same package catalog.
 python3 - "$root" <<'PY'
 import json
 import pathlib
-import platform as platform_mod
 import re
 import sys
 
 root = pathlib.Path(sys.argv[1])
-host_platform = "arm64-macosx" if (platform_mod.system(), platform_mod.machine()) == ("Darwin", "arm64") else ""
 flake = json.loads((root / "flake.lock").read_text())
 edge = flake["nodes"][flake["root"]]["inputs"]["reprobuild-packages"]
 catalog = flake["nodes"][edge]["locked"]["rev"]
@@ -163,15 +179,15 @@ for path, platform in (("repro.lock", "amd64-linux"),
         fields = dict(re.findall(r'(\w+)\s*=\s*"([^"\\]*)"', entry))
         deps[fields["name"]] = fields.get("revision", "")
     assert deps.get("reprobuild-packages") == catalog, path + " catalog disagrees with flake.lock"
-    # Only a host of the lock's platform can refresh a file named with --lock,
-    # so a pin moved on Linux is reconciled by the next Apple arm host.
-    if platform == host_platform or path == "repro.lock":
-        # Never --platform=amd64-linux for repro.lock: on a Mac that writes this
-        # host's solve under the Linux label, and every check here would pass it.
-        remedy = ("repro lock update reprobuild" if path == "repro.lock" else
-                  "repro lock refresh . --lock " + path + " --platform=" + platform)
-        assert deps.get("reprobuild") == engine_revision, (path + " Reprobuild pin disagrees with flake.lock; run: " + remedy)
-    else:
-        print("NOTE: " + path + " Reprobuild pin is checked on " + platform + " only")
+    # Checked on every host. Only an Apple arm host can refresh the native
+    # file, but the native file's pins must equal repro.lock's (checked above),
+    # so a native pin that disagrees with flake.lock is a failure everywhere,
+    # not only where somebody happens to build on a Mac.
+    # Never --platform=amd64-linux for repro.lock: on a Mac that writes this
+    # host's solve under the Linux label, and every check here would pass it.
+    remedy = ("repro lock update reprobuild" if path == "repro.lock" else
+              "repro lock refresh . --lock " + path + " --platform=" + platform +
+              " (on an " + platform + " host)")
+    assert deps.get("reprobuild") == engine_revision, (path + " Reprobuild pin disagrees with flake.lock; run: " + remedy)
     print("PASS: " + path + " platform and catalog pin")
 PY

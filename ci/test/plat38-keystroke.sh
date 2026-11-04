@@ -181,8 +181,10 @@ select_windowed_shim() {
 	# dies at load with `could not import: gpui_focus_element` and the row
 	# would read as a capture problem. Checked here, by name.
 	if command -v nm >/dev/null 2>&1; then
+		# Drain the listing: an early grep exit can SIGPIPE nm, so pipefail
+		# would reject a symbol it found whenever the producer runs later.
 		nm -D --defined-only "${src}" 2>/dev/null |
-			grep -q 'gpui_dispatch_key_to_focus' ||
+			grep 'gpui_dispatch_key_to_focus' >/dev/null ||
 			fail "${src} does not export gpui_dispatch_key_to_focus.
       It was built before PLAT-38 widened the shim's ABI. Rebuild it."
 	fi

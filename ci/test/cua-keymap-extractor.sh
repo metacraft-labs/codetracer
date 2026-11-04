@@ -12,7 +12,9 @@
 #     package this repository already bundles, or `$CT_MONACO_DIR`;
 #   * the VS Code sources at 484fdf69 (1.105.0) — fetched once as GitHub's
 #     source archive for that commit into `$CT_VSCODE_SRC_CACHE` (default
-#     `$XDG_CACHE_HOME/codetracer/vscode-484fdf69`), `src/vs/**/*.ts` only, or
+#     `$CODETRACER_HOME/cache/vscode-484fdf69` when `CODETRACER_HOME` is set,
+#     else `$XDG_CACHE_HOME/codetracer/vscode-484fdf69`), `src/vs/**/*.ts`
+#     only, or
 #     `$CT_VSCODE_DIR` when a checkout is already at hand;
 #   * CUA-Keymap.md from the specification checkout
 #     (`$CT_SPECS_DIR`, else the workspace sibling `../codetracer-pm`, the
@@ -48,7 +50,21 @@ fi
 
 vscode="${CT_VSCODE_DIR:-}"
 if [ -z "$vscode" ]; then
-	cache="${CT_VSCODE_SRC_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/codetracer/vscode-${COMMIT:0:8}}"
+	# The cache is a per-user location (codetracer-pm
+	# spec/Architecture/Per-User-State-Locations.md): `$CT_VSCODE_SRC_CACHE`
+	# names it outright, else it is in CodeTracer's cache area —
+	# `$CODETRACER_HOME/cache` when that is set (every test lane sets it, so a
+	# lane never writes the developer's real cache), else
+	# `$XDG_CACHE_HOME/codetracer`, else `~/.cache/codetracer`. On 2026-11-02
+	# the `lint-nim` lane, which runs this script, left the 1.105.0 sources in
+	# a developer's real `~/.cache/codetracer/vscode-484fdf69`.
+	if [ -n "${CT_VSCODE_SRC_CACHE:-}" ]; then
+		cache="${CT_VSCODE_SRC_CACHE}"
+	elif [ -n "${CODETRACER_HOME:-}" ]; then
+		cache="${CODETRACER_HOME}/cache/vscode-${COMMIT:0:8}"
+	else
+		cache="${XDG_CACHE_HOME:-$HOME/.cache}/codetracer/vscode-${COMMIT:0:8}"
+	fi
 	vscode="$cache/vscode-$COMMIT"
 	if [ ! -f "$vscode/package.json" ]; then
 		mkdir -p "$cache"

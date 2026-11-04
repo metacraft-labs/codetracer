@@ -450,3 +450,26 @@ You can consult this file before starting your coding tasks.
 - You MUST use multiline git commit messages.
 - Use the conventional commits style for the first line of the commit message.
 - Use the summary section of your final response as the remaining lines in the commit message.
+
+# Stories, StoryBook and the IsoNim Editor instance
+
+<!-- Keep this section last: the editor's agent sessions are given only the
+first and last 2 KB of this file as project context. -->
+
+Every StoryBook story is declared once, in
+`src/frontend/stories/codetracer_stories.nim`. `just storybook-stories` writes
+StoryBook's story files from it into the git-ignored
+`storybook/stories/generated/` (the StoryBook recipes run it), and the IsoNim
+Editor instance (`just isonim-editor-codetracer`, port 6106; `--smoke` checks
+it) shows the same stories. Add, rename or remove a story there, never in a
+`*.stories.js` file.
+
+When you are an agent session of the editor instance and the operator asks you
+to act on review comments: the comments arrive in the editor context
+(`reviewAnnotations`, with the selected story). Record each one in the design
+brief that covers the story, under a heading for the operator's review
+comments, then act on them, then re-check the story. The Agent Harbor stories'
+brief is private: its path is in the environment variable
+`CODETRACER_AGENT_HARBOR_BRIEF` (set only where the private design directory
+is checked out). Write those comments there and nowhere in this repository,
+and never copy that brief, or anything from beside it, into this repository.
