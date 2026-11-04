@@ -688,6 +688,14 @@ lint_step "contract suite: lane not-provided lists name real tests and the lane 
 lint_step "contract suite: a test lane's user-state guard names the file that touched real state" \
 	bash ci/test/lane-user-state-guard-test.sh
 
+# The VS Code sources ci/test/cua-keymap-extractor.sh caches go under
+# $CODETRACER_HOME/cache when that is set, and exactly where they always went
+# when it is not; on 2026-11-02 the lint-nim stage left them in a developer's
+# real ~/.cache/codetracer. Runs the real script with a failing `curl` stub,
+# in a scratch HOME. Pure bash.
+lint_step "contract suite: the CUA keymap extractor caches under CODETRACER_HOME" \
+	bash ci/test/cua-keymap-extractor-cache-test.sh
+
 # The same lists name two crates' tests, and nextest refuses a filterset that
 # names a binary its crate does not have; the lane that runs an entry selects
 # it from the same line. not-provided-filter.sh is the one place a list becomes
