@@ -1880,8 +1880,13 @@ impl CTFSTraceReader {
                         .and_then(Value::as_str)
                         .unwrap_or("")
                         .to_string();
+                    // A message between processes is a logged trace event, as
+                    // the recorder writes it into the container: it is not
+                    // program output, even when it is the io request that
+                    // carries output to the group leader. Labelling it
+                    // `Write` made every message a terminal line.
                     db.events.push(DbRecordEvent {
-                        kind: EventLogKind::Write,
+                        kind: EventLogKind::TraceLogEvent,
                         content,
                         step_id: StepId(db.steps.len().saturating_sub(1) as i64),
                         metadata: event.to_string(),
@@ -1890,6 +1895,8 @@ impl CTFSTraceReader {
                 _ => {}
             }
         }
+
+        Self::load_beam_terminal_output(ctfs, &mut db)?;
 
         db.end_of_program = EndOfProgram::Normal;
         // Elixir sidecar traces don't carry meta.dat capability bits
@@ -1924,6 +1931,35 @@ impl CTFSTraceReader {
             nim_reader: None,
             call_ranges: Vec::new(),
         }))
+    }
+
+    /// Add the program's terminal output to a BEAM sidecar `Db`.
+    ///
+    /// `runtime_session.jsonl` carries the run's steps, bindings and
+    /// messages, but not what the program printed: the recorder captures the
+    /// BEAM's stdout and stderr itself and writes each line into the
+    /// container's `events.dat` as `Write` / `WriteStderr`
+    /// (trace-events.md §"EventLogKind (u8 enum)"). Only those two kinds are
+    /// taken from it; the container's other events restate the sidecar,
+    /// which the caller has already read.
+    ///
+    /// A line's step is the recorder's; one past the sidecar's last step is
+    /// pinned to the last step, so a jump to the line lands inside the
+    /// recording. The events are then ordered by step, keeping the order
+    /// within a step.
+    fn load_beam_terminal_output(ctfs: &mut CtfsReader, db: &mut Db) -> Result<(), Box<dyn Error>> {
+        let Some(stream) = event_stream_source::SeekableEventStream::open_from_ctfs(ctfs)? else {
+            return Ok(());
+        };
+        let last_step = db.steps.len().saturating_sub(1) as i64;
+        for mut event in stream.all_events() {
+            if matches!(event.kind, EventLogKind::Write | EventLogKind::WriteStderr) {
+                event.step_id = StepId(event.step_id.0.clamp(0, last_step));
+                db.events.push(event);
+            }
+        }
+        db.events.sort_by_key(|event| event.step_id.0);
+        Ok(())
     }
 
     fn ensure_db_path(db: &mut Db, path: &Path) -> PathId {
