@@ -489,9 +489,14 @@ test.describe("the desktop Test Results pane runs the suite through ct test run"
     await showEditTab(ctPage);
     await expect(run).not.toHaveAttribute("disabled", /.*/, { timeout: 60_000 });
     await run.click();
+    let secondRecordingId = "";
     await expect
-      .poll(async () => await loadedRecordingId(ctPage), { timeout: 300_000, intervals: [1_000] })
-      .not.toBe(first.slice("recording:".length));
+      .poll(async () => {
+        secondRecordingId = await loadedRecordingId(ctPage);
+        return secondRecordingId !== "" && secondRecordingId !== first.slice("recording:".length);
+      }, { timeout: 300_000, intervals: [1_000] })
+      .toBe(true);
+    test.info().annotations.push({ type: "second toolbar Run recording", description: secondRecordingId });
     // The recording is opened from its id as soon as `ct record` reports it;
     // its container lands in the store as the recorder finishes writing.
     await expect.poll(() => recordedContainers(), { timeout: 60_000 }).toBe(containersBefore + 2);

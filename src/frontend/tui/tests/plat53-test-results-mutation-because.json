@@ -12,7 +12,7 @@
   "E11": "not buf.isDirty",
   "E12": "src.host.running",
   "E13": "runProgramCommandTarget(topNewTab) in targets",
-  "E14": "tr.contains(\"status: recording \" & project & \"; it opens in this tab\")",
+  "E14": "tr.contains(\"status: recording \" & reportedProject & \"; it opens in this tab\")",
   "E15": "recordings.len == 2 and recordings[0].endsWith(\" in this tab\")",
   "E16": "runProgramCommandLabel(topNewTab) == \"Project: Run\"",
   "E17": "Error: expect(locator).not.toHaveAttribute(expected) failed",

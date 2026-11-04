@@ -157,4 +157,3 @@ proc running*(s: VerificationSource): bool =
 proc close*(s: VerificationSource) =
   if not s.isNil:
     s.host.finishWait()
-
