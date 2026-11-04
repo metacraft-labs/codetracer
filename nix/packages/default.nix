@@ -988,15 +988,59 @@
           # from ``../../python-api``. Include that fixture without pulling in
           # the rest of the checkout: no ``scripts/``, browser or network --
           # see ``checkPhase`` below.
-          src = pkgs.runCommand "backend-manager-src" { } ''
-            mkdir -p $out/codetracer/src $out/codetracer/libs
-            cp -r ${../../src/backend-manager} $out/codetracer/src/backend-manager
-            cp -r ${../../libs/ct-home} $out/codetracer/libs/ct-home
-            cp -r ${../../libs/ct-data-breakpoints} $out/codetracer/libs/ct-data-breakpoints
-            cp -r ${../../libs/ct-open-beneath} $out/codetracer/libs/ct-open-beneath
-            cp -r ${../../python-api} $out/codetracer/python-api
-            cp -r ${inputs.codetracer-trace-format} $out/codetracer-trace-format
-          '';
+          #
+          # ``replay_server_and_daemon_socket_checks_test`` reads the real
+          # db-backend crate at ``../db-backend``: its manifest, and a scan
+          # of every path dependency it builds down to the grammars' C
+          # sources. So db-backend and its path dependencies are included
+          # too (the inputs test checks the list against its manifests), and
+          # tree-sitter-nim's ``parser.c``, which the grammar does not
+          # commit, is generated as the db-backend derivation does.
+          src =
+            let
+              dbBackendLibs = [
+                "ct-dap-client"
+                "ct-lang"
+                "jsbound"
+                "origin-classifier"
+                "tree-sitter-aiken"
+                "tree-sitter-cadence"
+                "tree-sitter-cairo"
+                "tree-sitter-circom"
+                "tree-sitter-leo"
+                "tree-sitter-masm"
+                "tree-sitter-move-on-aptos"
+                "tree-sitter-nim"
+                "tree-sitter-sway"
+                "tree-sitter-tolk"
+              ];
+            in
+            pkgs.runCommand "backend-manager-src"
+              {
+                # ``tree-sitter generate`` evaluates grammar.js with node,
+                # as in the db-backend environment.
+                nativeBuildInputs = [
+                  pkgs.tree-sitter
+                  pkgs.nodejs_20
+                ];
+              }
+              ''
+                mkdir -p $out/codetracer/src $out/codetracer/libs
+                cp -r ${../../src/backend-manager} $out/codetracer/src/backend-manager
+                cp -r ${../../src/db-backend} $out/codetracer/src/db-backend
+                cp -r ${../../libs/ct-home} $out/codetracer/libs/ct-home
+                cp -r ${../../libs/ct-data-breakpoints} $out/codetracer/libs/ct-data-breakpoints
+                cp -r ${../../libs/ct-open-beneath} $out/codetracer/libs/ct-open-beneath
+                ${pkgs.lib.concatMapStrings (lib: ''
+                  cp -r ${../../libs + "/${lib}"} $out/codetracer/libs/${lib}
+                '') dbBackendLibs}
+                cp -r ${../../python-api} $out/codetracer/python-api
+                cp -r ${inputs.codetracer-trace-format} $out/codetracer-trace-format
+                chmod -R u+w $out/codetracer/libs/tree-sitter-nim
+                if [ ! -f $out/codetracer/libs/tree-sitter-nim/src/parser.c ]; then
+                  (cd $out/codetracer/libs/tree-sitter-nim && tree-sitter generate)
+                fi
+              '';
           sourceRoot = "backend-manager-src/codetracer/src/backend-manager";
 
           # ``codetracer_trace_format_capnp`` (a dependency of the CTFS trace
@@ -1199,7 +1243,10 @@
             listed=$(printf '%s\n' "$listing" | grep -c ': test$')
 
             excluded=browser_stream_host::tests::a_real_browser_recording_is_a_ct_with_a_complete_boundary_log
-            if ! printf '%s\n' "$listing" | grep -qx "$excluded: test"; then
+            # Here-strings, not ``printf | grep -q``: setup runs this phase
+            # under pipefail, and on output this size the early grep exit
+            # breaks printf's pipe (ci/test/grep-q-pipefail-gate.sh).
+            if ! grep -qx "$excluded: test" <<<"$listing"; then
               echo "ERROR: $excluded is not in this crate's test list." >&2
               echo "The exclusion below would silently filter nothing. If the test was" >&2
               echo "renamed, rename it here; if it was deleted, delete this phase." >&2
@@ -1220,7 +1267,7 @@
             # in this lane and the accounting guard below would not notice --
             # it counts only targets that reported ``test result: ok.``, and a
             # panicking target reports FAILED.
-            if printf '%s\n' "$output" | grep -q "Running tests/$excludedTarget.rs"; then
+            if grep -q "Running tests/$excludedTarget.rs" <<<"$output"; then
               echo "ERROR: tests/$excludedTarget.rs ran in this lane after all." >&2
               echo "It cannot pass in a build sandbox; see the comment above." >&2
               exit 1
@@ -1249,7 +1296,7 @@
               echo "lane must not shrink quietly." >&2
               exit 1
             fi
-            if ! printf '%s\n' "$output" | grep -q 'Running unittests'; then
+            if ! grep -q 'Running unittests' <<<"$output"; then
               echo "ERROR: the crate's own unit tests did not run." >&2
               echo "'--bins' dropped out of the target selection. Coverage in this" >&2
               echo "lane must not shrink quietly." >&2

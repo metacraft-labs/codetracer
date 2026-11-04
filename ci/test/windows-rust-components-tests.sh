@@ -23,6 +23,12 @@ export CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false
 # shellcheck source=ci/lib/codetracer-home.sh
 source "$REPO_ROOT/ci/lib/codetracer-home.sh"
 ct_export_scratch_codetracer_home windows-rust-components
+# Fail the run if anything it ran wrote the developer's real CodeTracer
+# state (ci/lib/codetracer-home.sh, the guard). The scratch home is left in
+# place, as it always was here: a Windows process still holding a file in it
+# would make its removal fail the run for a reason that is not a test's.
+# shellcheck disable=SC2154 # _ct_rc is assigned by the trap itself, first
+trap '_ct_rc=$?; ct_user_state_guard_exit windows-rust-components "$_ct_rc"' EXIT
 if [ -z "${CT_NATIVE_REPLAY_PATH:-}" ]; then
 	replay="$WORKSPACE_ROOT/codetracer-native-backend/target/debug/ct-native-replay.exe"
 	if [ -f "$replay" ]; then

@@ -1706,10 +1706,15 @@ PY
 # SHA, or that is a flake input whose SHA differs from flake.lock; exit 0 iff
 # none AND every name in CORE_FLAKE_PINNED_FLOOR was compared.
 core_ref_violations() {
-	local file="$1" entries e name ref revs compared="" want rc=0 lock_rev
+	sibling_ref_violations "$(core_sibling_entries "$1")" "$CORE_FLAKE_PINNED_FLOOR"
+}
+
+# Keep the comparison shared by the core block and the other workflow's
+# explicit SHA pins, so the mutation controls exercise the production rule.
+sibling_ref_violations() {
+	local entries="$1" floor="$2" e name ref revs compared="" want rc=0 lock_rev
 	local -a pinned_names=()
-	entries="$(core_sibling_entries "$file")"
-	mapfile -t pinned_names < <(printf '%s\n' "$entries" | grep '=' | sed 's/=.*//')
+	mapfile -t pinned_names < <(printf '%s\n' "$entries" | grep '=' | sed 's/=.*//' | sort -u)
 	revs="$(flake_lock_revs ${pinned_names[@]+"${pinned_names[@]}"})" || {
 		echo "could not run python3 over $FLAKE_LOCK -- a tooling failure, not a statement about any pin"
 		return 1
@@ -1735,7 +1740,7 @@ core_ref_violations() {
 			rc=1
 		fi
 	done <<<"$entries"
-	for want in $CORE_FLAKE_PINNED_FLOOR; do
+	for want in $floor; do
 		case " $compared " in
 		*" $want "*) ;;
 		*)
@@ -1823,6 +1828,64 @@ if [ -z "$cr_mut" ]; then
 	ok "a block pinning a flake input away from flake.lock, or any entry to a branch, is rejected"
 else
 	fail "a block pinning a flake input away from flake.lock, or any entry to a branch, is rejected" "$cr_mut"
+fi
+
+# The visual replay and ct-test-provider jobs carry the same SHM pins. Check
+# every explicit SHA sibling in codetracer.yml, preserving its deliberate
+# branch-ref entries. The floor prevents an empty or broken scan from passing.
+workflow_sha_sibling_entries() {
+	strip_cr "$1" | awk '
+		/^[ ]*siblings: [|]/ { in_block = 1; match($0, /[^ ]/); indent = RSTART; next }
+		in_block && /[^ ]/ {
+			match($0, /[^ ]/)
+			if (RSTART <= indent) in_block = 0
+			if (!in_block) next
+			line = $0; sub(/#.*/, "", line)
+			n = split(line, tokens, /[ \t]+/)
+			for (i = 1; i <= n; i++) {
+				split(tokens[i], entry, "=")
+				if (entry[1] != "" && entry[2] ~ /^[0-9a-f]+$/ && length(entry[2]) == 40)
+					print tokens[i]
+			}
+		}
+	'
+}
+
+workflow_sha_ref_violations() {
+	sibling_ref_violations "$(workflow_sha_sibling_entries "$1")" "nim-shm-queue nim-shm-gset"
+}
+
+readonly DESKTOP_WORKFLOW="$REPO_ROOT/.github/workflows/codetracer.yml"
+if cr_out="$(workflow_sha_ref_violations "$DESKTOP_WORKFLOW")"; then
+	ok "codetracer.yml's explicit SHA siblings equal flake.lock's revisions"
+else
+	mapfile -t cr_lines <<<"$cr_out"
+	fail "codetracer.yml's explicit SHA siblings equal flake.lock's revisions" "${cr_lines[@]}"
+fi
+
+# Change each SHM pin independently, including the second occurrence: checking
+# only the first matching name would miss the ct-test-provider block's drift.
+cr_mut=""
+cr_tried=0
+while IFS=: read -r line entry; do
+	[ -n "$line" ] || continue
+	name="${entry%%=*}"
+	name="${name//[[:space:]]/}"
+	awk -v line="$line" -v name="$name" '
+		NR == line { print "            " name "=0000000000000000000000000000000000000001"; next }
+		{ print }
+	' "$DESKTOP_WORKFLOW" >"$CORE_MUT"
+	if cmp -s "$DESKTOP_WORKFLOW" "$CORE_MUT"; then
+		cr_mut="${cr_mut}mutation at line $line changed nothing; "
+	elif m_out="$(workflow_sha_ref_violations "$CORE_MUT")" || ! grep -qF "'$name' is pinned to" <<<"$m_out"; then
+		cr_mut="${cr_mut}SURVIVED: $name at line $line (got: ${m_out:-<nothing>}); "
+	fi
+	cr_tried=$((cr_tried + 1))
+done < <(grep -nE '^[[:space:]]+nim-shm-(queue|gset)=[0-9a-f]{40}$' "$DESKTOP_WORKFLOW")
+if [ "$cr_tried" -ge 4 ] && [ -z "$cr_mut" ]; then
+	ok "each of the $cr_tried SHM pins in codetracer.yml independently rejects drift"
+else
+	fail "each SHM pin in codetracer.yml independently rejects drift" "${cr_mut:-only $cr_tried mutations applied; expected at least four}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -2139,7 +2202,7 @@ fi
 # reporting success on fewer checks than it claims.
 # ---------------------------------------------------------------------------
 echo
-readonly EXPECTED_ASSERTIONS=41
+readonly EXPECTED_ASSERTIONS=43
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))

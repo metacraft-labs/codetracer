@@ -1540,7 +1540,8 @@ jobs:
       - name: Provision dependency siblings from repro.lock
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Clone codetracer-pm sibling
         # `ci/test/cua-keymap-extractor.sh` (PLAT-68's CUA keymap step in
@@ -1592,6 +1593,14 @@ jobs:
       # shell missing a tool says which one BY NAME instead of dying obscurely
       # inside a contract suite.
       - run: "nix develop .#devShells.x86_64-linux.lint -c ./ci/lint/nim.sh"
+        env:
+          # ci/lint/nim.sh runs under a scratch CODETRACER_HOME that it removes
+          # on exit, so without this the CUA keymap gate would download the
+          # VS Code source archive again on every run. The extractor's own
+          # override keeps one copy per runner, beside the workspace (as
+          # ct-test-certificates' nimcache does), and outside the runner
+          # account's CodeTracer state.
+          CT_VSCODE_SRC_CACHE: ${{ github.workspace }}/../ct-vscode-src-cache
 
   wasm-recordings:
     name: WebAssembly boundary recording fixtures
@@ -2356,7 +2365,8 @@ jobs:
         # action reaches `repro` through this repo's own dev shell.
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       # The envelope records the three-tier demo from this tree, and
       # scripts/materialize-recording.sh refuses without `ct-instrument` and a
@@ -2621,7 +2631,8 @@ jobs:
         # shell, which is also where the suites below run.
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Assert the JS ViewModel lane can observe its own failures (full suite)
         # The same contract suite `ci-verdict` runs, but here it runs INSIDE the
@@ -3799,7 +3810,8 @@ jobs:
         # codetracer-image-diff, is private.
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Build ct and replay-server
         # `test_fixture_corpus.nim` (Tier 1) opens real recorded traces through
@@ -3944,7 +3956,8 @@ jobs:
       - name: Provision dependency siblings from repro.lock
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Build ct and replay-server
         # `ct record` records the `calc` and `call_pages` fixtures the
@@ -4164,7 +4177,8 @@ jobs:
         # repo's dev shell, which the build step below uses anyway.
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Allow direnv in cloned codetracer-native-recorder
         # ci/build/dev.sh builds src/db-backend, whose build.rs invokes
@@ -4301,7 +4315,8 @@ jobs:
         # repo's dev shell.
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Allow direnv in cloned codetracer-native-recorder
         # db-backend's build.rs invokes ``direnv exec <recorder-root> bash
@@ -5416,7 +5431,8 @@ jobs:
         # requires to reach ``repro``.
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       # --- macOS setup ---
       # No open-coded just / Python / Rust / cargo-nextest toolchain steps and
@@ -6038,7 +6054,8 @@ jobs:
         # what answers for it, which is exactly what this action reads.
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       # NOTE: codetracer-trace-format, codetracer-trace-format-nim,
       # codetracer-native-recorder, codetracer-visual-replay and
@@ -6853,8 +6870,8 @@ jobs:
             codetracer-trace-format=8794892b43516f033360adaa702219d0d7974449
             codetracer-trace-format-nim=4ca78ed1ce0e556e639c8389f85f2c7d56313cb7
             io-mon=3d47bb105fec11d74078ae35a5278b4df14e05c8
-            nim-shm-queue=91451f2250beb89d1d221f0a77be0841c19b182e
-            nim-shm-gset=fb981c7f186a9507c974b7de8871fc74d6308eae
+            nim-shm-queue=84fd76b174d4868e703ba3d599668ee340e0b6ea
+            nim-shm-gset=6333cc915689559b00f81371734783c2e894ca45
             nim-stackable-hooks=dev
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
@@ -7067,7 +7084,8 @@ jobs:
         # because the action reaches ``repro`` through this repo's dev shell.
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Run the M16 ct-test release gate
         # The ct_test sources import runquota_process; the dev shell exports
@@ -7164,8 +7182,8 @@ jobs:
             codetracer-trace-format=8794892b43516f033360adaa702219d0d7974449
             codetracer-trace-format-nim=4ca78ed1ce0e556e639c8389f85f2c7d56313cb7
             io-mon=3d47bb105fec11d74078ae35a5278b4df14e05c8
-            nim-shm-queue=91451f2250beb89d1d221f0a77be0841c19b182e
-            nim-shm-gset=fb981c7f186a9507c974b7de8871fc74d6308eae
+            nim-shm-queue=84fd76b174d4868e703ba3d599668ee340e0b6ea
+            nim-shm-gset=6333cc915689559b00f81371734783c2e894ca45
             nim-stackable-hooks=dev
             codetracer-native-recorder=9df28b83e89031961621ad31705bf393c1186050
             codetracer-js-recorder=dev
@@ -7315,7 +7333,8 @@ jobs:
         # Without them the suite fails by name; it never skips.
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Run the ct-test-certificates lane
         # No CT_TEST_CERTIFICATE_VECTORS: setting it would walk an exported
@@ -8390,6 +8409,18 @@ jobs:
         # contracts are checked on every run from a stock runner, regardless of
         # the state of the dev-shell lanes.
         run: bash tools/visual-review/deepreview-harness-test.sh
+
+      - name: Assert no web bundle is assembled inside a tup variant directory
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        # `just test-web-bundle` defaulted its output to `src/build-debug/web`,
+        # inside tup's variant directory, and the ViewModel job runs it before
+        # `build-once`: tup then refuses the variant ("Variant directory must
+        # only contain a tup.config file. Found extra files: web"), so the
+        # build step could not pass once the smoke had. Both web-bundle
+        # scripts now default to ci/lib/web-bundle-dir.sh's `build/web`; this
+        # fails when that default, or a literal one in any script, lies inside
+        # a directory holding a tracked `tup.config`. Pure bash and git.
+        run: bash ci/test/web-bundle-default-dir-test.sh
 
   ci-verdict:
     # Final gate: assert that CI actually RAN the jobs it gates on.

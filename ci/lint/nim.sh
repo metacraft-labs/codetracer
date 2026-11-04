@@ -24,6 +24,18 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 # shellcheck source=ci/lib/lint-steps.sh disable=SC1091
 source ci/lib/lint-steps.sh
 
+# A scratch CODETRACER_HOME for every step below and everything it starts
+# (codetracer-pm spec/Architecture/Per-User-State-Locations.md), and the guard
+# that the stage left the developer's own CodeTracer state as it found it
+# (the last step). On 2026-11-02 this stage ran with neither, and
+# ci/test/cua-keymap-extractor.sh left the VS Code 1.105.0 sources in a
+# developer's real ~/.cache/codetracer/vscode-484fdf69.
+# shellcheck source=ci/lib/codetracer-home.sh disable=SC1091
+source ci/lib/codetracer-home.sh
+ct_export_scratch_codetracer_home lint-nim
+# shellcheck disable=SC2154 # set by ct_export_scratch_codetracer_home
+trap 'rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
+
 # See the note in ci/lint/bash.sh: the stage names its tools before it runs, so
 # a shell missing one says so by name instead of failing obscurely inside a
 # contract suite. `nimsuggest` is here for ci/test/nimsuggest-check.sh, python3
@@ -1051,5 +1063,11 @@ lint_step "nimsuggest starts on src/lsp.nim" \
 	bash ci/test/nimsuggest-check.sh
 
 # TODO: nim check
+
+# Last, so it covers every step above: nothing this stage ran wrote, rewrote or
+# removed a file in the developer's own CodeTracer state
+# (ci/lib/codetracer-home.sh, `ct_user_state_snapshot`).
+lint_step "the stage left the developer's own CodeTracer state untouched" \
+	ct_user_state_guard_check lint-nim
 
 lint_summary
