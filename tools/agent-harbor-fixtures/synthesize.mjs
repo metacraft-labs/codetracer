@@ -321,14 +321,18 @@ const planText = (title, ids) =>
   ].join("\n");
 
 const plans = [
-  { name: "Telemetry-Retry.milestones.org", campaign: "Telemetry upload retries", ids: ["TR-1", "TR-2", "TR-3"] },
-  { name: "Route-Cache.milestones.org", campaign: "Route cache on the new storage layer", ids: ["RC-1", "RC-2", "RC-3"] },
+  { name: "Telemetry-Retry.milestones.org", campaign: "Telemetry upload retries", ids: ["TR-M1", "TR-M2", "TR-M3"],
+    initiative: { id: "telemetry-retry", repository: "orbit-labs/telemetry", manager: "tr-manager" } },
+  { name: "Route-Cache.milestones.org", campaign: "Route cache on the new storage layer", ids: ["RC-M1", "RC-M2", "RC-M3"],
+    initiative: { id: "route-cache", repository: "orbit-labs/flight-planner", manager: "" } },
 ].map((p) => ({
   name: p.name,
   campaign: p.campaign,
   visibility: "synthetic",
   revision: "",
   file: writeOut(`plans/${p.name}`, planText(p.campaign, p.ids)),
+  // The initiative a server would list for the plan (a proposed shape).
+  initiative: p.initiative,
 }));
 
 const diffOf = (files) =>
@@ -546,7 +550,38 @@ const scenarioRuns = [
     { type: "log", level: "info", message: "assistant: deleted 3 generated files" },
     { type: "status", status: "completed" },
   ]),
+  scenarioRun("storage-choice", "Move the route cache to the new storage layer; ask me which backend if unsure", [
+    { type: "status", status: "queued" },
+    { type: "status", status: "running" },
+    { type: "user_input", input_type: "text", content: "Move the route cache to the new storage layer; ask me which backend if unsure" },
+    { type: "log", level: "info", message: "agent question (Claude Code): tool=AskUserQuestion" },
+    { type: "log", level: "info", message: "assistant: Using the embedded key-value store, as chosen." },
+    { type: "tool_use", status: "started", tool_name: "runCmd", tool_execution_id: "tool-1", tool_args: { command: "make test-cache" } },
+    { type: "tool_result", status: "completed", tool_name: "runCmd", tool_execution_id: "tool-1" },
+    { type: "status", status: "completed" },
+  ]),
 ];
+
+// The sessions an operator works with, as a front-end's tabs show them, and
+// what the proposed shapes would say of each: the front-end it was started
+// from and the plan it was launched for (the captured set's
+// capture-sources.json states the same for real sessions).
+const firstOf = (category) => sessions.find((s) => s.status === category)?.id;
+const stated = (entries) => entries.map((entry) => ({ ...entry, stated: "invented, like every value of this set" }));
+// Coherent sets, as in the captured set: the scenario runs with the plans
+// they are launched for, and the fleet's sessions on their own.
+const workingSets = {
+  scenario: stated([
+    { from: "scenario", scenarioRun: "storage-choice", at: "question", origin: "webui", plan: plans[1].name },
+    { from: "scenario", scenarioRun: "edit-and-test", at: 4, origin: "codetracer", plan: plans[0].name },
+    { from: "scenario", scenarioRun: "permission-granted", at: "end", origin: "tui", plan: plans[0].name },
+  ]),
+  real: stated([
+    { from: "fleet", sessionId: firstOf("running"), origin: "cli", plan: plans[1].name },
+    { from: "fleet", sessionId: firstOf("failed"), origin: "ah-lite", plan: "" },
+  ]),
+};
+
 
 const manifest = {
   schema: 1,
@@ -558,6 +593,7 @@ const manifest = {
   diffs,
   testRuns,
   scenarioRuns,
+  workingSets,
   files: Object.fromEntries([...written.entries()].sort(([a], [b]) => a.localeCompare(b))),
 };
 writeFileSync(join(outDir, "manifest.json"), json(manifest));

@@ -69,12 +69,75 @@ const agentHarborViews = {
   "agent-harbor-fleet-loading": "codetracer-agent-harbor--fleet-loading",
   "agent-harbor-fleet-error": "codetracer-agent-harbor--fleet-error",
   "agent-harbor-fleet-empty": "codetracer-agent-harbor--fleet-empty",
+  "agent-harbor-fleet-expanded": "codetracer-agent-harbor--fleet-expanded",
+  "agent-harbor-fleet-filtered-empty": "codetracer-agent-harbor--fleet-filtered-empty",
   "agent-harbor-ref-agent-activity": "codetracer-panels--agent-activity",
   "agent-harbor-ref-test-results": "codetracer-panels--test-results",
   "agent-harbor-ref-vcs": "codetracer-panels--vcs",
   "agent-harbor-ref-session-tabs": "codetracer-views--session-tabs",
   "agent-harbor-ref-status-shell": "codetracer-views--status-shell",
 };
+// The sessions as tabs (in the caption bar, as a sidebar, docked), the
+// Initiatives and Initiative Progress panels: one view per story of the Agent
+// Harbor section, named after its export (`SessionTabsSingleLine` ->
+// `agent-harbor-session-tabs-single-line`), all in the family
+// `agent-harbor-session-tabs`.
+const kebab = (name) => name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
+const sessionTabsExports = [
+  "InitiativeTabs",
+  "InitiativeTabsPopup",
+  "InitiativeTabsElsewhere",
+  "InitiativeTabsNext",
+  "InitiativeTabsAutoSwitch",
+  "InitiativeTabsRecordingsMany",
+  "InitiativeTabsOverflow",
+  "InitiativeTabsLongNames",
+  "InitiativeTabsRealPlans",
+  "InitiativeTabsEmpty",
+  "InitiativeTabsLoading",
+  "InitiativeTabsError",
+  "SessionListSidebarTreeFolded",
+  "SessionTabsSingleLine",
+  "SessionTabsActiveOverflowed",
+  "SessionTabsMultiLine",
+  "SessionTabsSingleLineOverflow",
+  "SessionTabsMultiLineOverflow",
+  "SessionTabsLongNames",
+  "SessionTabsNeedsInputWins",
+  "SessionTabsFocusedInitiative",
+  "SessionTabsEmpty",
+  "SessionTabsLoading",
+  "SessionTabsError",
+  "SessionListSidebar",
+  "SessionListSidebarUngrouped",
+  "SessionListSidebarCollapsed",
+  "SessionListSidebarOverflow",
+  "SessionListDocked",
+  "SessionListDockedOverflow",
+  "SessionListEmpty",
+  "SessionListLoading",
+  "SessionListError",
+  "Initiatives",
+  "InitiativesSelected",
+  "InitiativesOverflow",
+  "InitiativesLongNames",
+  "InitiativesRealPlans",
+  "InitiativesEmpty",
+  "InitiativesLoading",
+  "InitiativesError",
+  "InitiativeProgress",
+  "InitiativeProgressBlocked",
+  "InitiativeProgressEvent",
+  "InitiativeProgressLongNames",
+  "InitiativeProgressNoSummary",
+  "InitiativeProgressRealPlan",
+  "InitiativeProgressUnknown",
+  "InitiativeProgressLoading",
+  "InitiativeProgressError",
+];
+for (const name of sessionTabsExports) {
+  agentHarborViews[`agent-harbor-${kebab(name)}`] = `codetracer-agent-harbor--${kebab(name)}`;
+}
 for (const [name, storyId] of Object.entries(agentHarborViews)) {
   views[name] = { storyId, brief: agentHarborBrief, sizes: agentHarborSizes, themes: agentHarborThemes };
 }
@@ -85,6 +148,7 @@ const viewFamilies = {
   "agent-harbor": Object.keys(agentHarborViews),
   "agent-harbor-fleet": Object.keys(agentHarborViews).filter((v) => v.startsWith("agent-harbor-fleet-")),
   "agent-harbor-ref": Object.keys(agentHarborViews).filter((v) => v.startsWith("agent-harbor-ref-")),
+  "agent-harbor-session-tabs": sessionTabsExports.map((name) => `agent-harbor-${kebab(name)}`),
 };
 
 // The colour themes, as the StoryBook `theme` global (.storybook/preview.js)
@@ -363,6 +427,27 @@ async function main() {
           await page.waitForLoadState("networkidle", { timeout: 10000 });
         } catch (error) {
           navigationWarnings.push(`networkidle timeout: ${error.message}`);
+        }
+        // The story must have rendered: on a loaded host StoryBook can still
+        // be mounting it after the network goes idle, and a screenshot taken
+        // then is the bare theme background -- a blank capture that a review
+        // reads as a missing view. The story's frame appears before the
+        // component bundle has mounted into it, so wait for visible TEXT in
+        // the story root (every story draws some: a title, a notice, a
+        // label), and refuse the capture when it never appears.
+        try {
+          await page.waitForFunction(() => {
+            const root = document.querySelector("#storybook-root");
+            if (!root) return false;
+            for (const el of root.querySelectorAll("*")) {
+              if (el.childElementCount !== 0 || !el.textContent.trim()) continue;
+              const box = el.getBoundingClientRect();
+              if (box.width > 0 && box.height > 0) return true;
+            }
+            return false;
+          }, null, { timeout: 30000 });
+        } catch (error) {
+          throw new Error(`${viewName} at ${sizeName} (${theme}): the story did not render within 30 s (${error.message})`);
         }
         await page.waitForTimeout(750);
 

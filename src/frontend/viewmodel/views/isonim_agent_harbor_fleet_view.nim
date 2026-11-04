@@ -12,9 +12,15 @@
 ##   prompt; when the server withholds it, what a person calls the session --
 ##   its name, branch or workspace -- and only failing those its short id), a
 ##   meta line (the effective status, agent · repository · workspace ·
-##   initiative · host · short id · duration, a "prompt withheld" note, a
-##   failure reason) and up to three recent activity lines, with the age of its last
-##   activity on the right, like a commit row's timestamp.
+##   initiative · host · short id · duration), a failure reason, and ONE
+##   activity line -- the most informative recent event, repeats collapsed --
+##   with a "+N" control that unfolds the rest; the age of its last activity
+##   sits on the right, like a commit row's timestamp. When the server
+##   withholds prompts, the header says so once; rows do not repeat it.
+##   Given a laptop's width, agent, host, initiative and duration leave the
+##   meta line for columns of their own (a container query in
+##   `agent_harbor.styl`), so the row uses the width instead of leaving an
+##   empty middle.
 ##
 ## The loading, error and empty states use the shared empty-state overlay
 ## every CodeTracer panel uses. The view only renders: what a row says, and in
@@ -32,6 +38,8 @@ import isonim/dsl/[ui, components]
 when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
+
+  proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
 
 import nim_agents_isonim_viewmodels/agent_harbor/fleet_vm
 
@@ -76,6 +84,14 @@ proc rowClass*(row: FleetRow): string =
   result = "ah-fleet-row " & categoryClass(row.category)
   if row.selected: result.add(" ah-fleet-row-selected")
 
+proc metaPartsShort*(row: FleetRow): seq[string] =
+  ## The meta line when agent, host, initiative and duration have columns.
+  if row.repository.len > 0:
+    result.add(if row.branch.len > 0: row.repository & " \xC2\xB7 " & row.branch
+               else: row.repository)
+  if row.workspace.len > 0: result.add(row.workspace)
+  if row.titleSource != "id": result.add(row.shortId)
+
 proc metaParts*(row: FleetRow): seq[string] =
   ## The meta line, in reading order; empty parts are left out.
   if row.agentLabel.len > 0:
@@ -89,6 +105,16 @@ proc metaParts*(row: FleetRow): seq[string] =
   if row.host.len > 0: result.add(row.host)
   if row.titleSource != "id": result.add(row.shortId)
   if row.durationLabel.len > 0: result.add(row.durationLabel)
+
+proc withheldNote*(vm: FleetSnapshotVM): string =
+  ## Said once, in the header, after the session count: the server withheld
+  ## the prompts, so rows are titled by what else names them.
+  let counts = vm.counts
+  if counts.withheldPrompts == 0: ""
+  elif counts.withheldPrompts >= counts.listed:
+    "prompts withheld by the server"
+  else:
+    "prompts of " & $counts.withheldPrompts & " withheld by the server"
 
 proc headerSummary*(vm: FleetSnapshotVM): string =
   let counts = vm.counts
@@ -144,6 +170,29 @@ proc renderHeader[R](r: R; vm: FleetSnapshotVM;
         span(class = "ah-fleet-source", title = vm.sourceLabel):
           text vm.sourceLabel
       tdiv(ref = filters, class = "ah-fleet-filters")
+      # The columns' names, shown only when the rows have columns (a laptop's
+      # width; agent_harbor.styl).
+      tdiv(class = "ah-fleet-columns"):
+        span(class = "ah-fleet-columns-session"):
+          text "Session"
+        span(class = "ah-fleet-columns-cell"):
+          text "Agent"
+        span(class = "ah-fleet-columns-cell"):
+          text "Host"
+        span(class = "ah-fleet-columns-cell ah-fleet-columns-initiative"):
+          text "Initiative"
+        span(class = "ah-fleet-columns-right"):
+          text "Duration"
+        span(class = "ah-fleet-columns-right"):
+          text "Active"
+  if vm.state.val == asReady:
+    let note = vm.withheldNote
+    if note.len > 0:
+      let caveat = ui(r):
+        span(class = "ah-fleet-caveat",
+             title = "Rows are titled by the session's name, branch or workspace, or its id"):
+          text note
+      r.appendRendered(section, caveat)
   if vm.state.val == asReady:
     let counts = vm.counts
     let current = vm.filter.val
@@ -159,6 +208,24 @@ proc renderHeader[R](r: R; vm: FleetSnapshotVM;
     r.appendRendered(section, summary)
   header
 
+proc renderActivityToggle[R](r: R; vm: FleetSnapshotVM; row: FleetRow): auto =
+  ## "+N" unfolds a row's other activity lines; "less" folds them.
+  let sessionId = row.id
+  let hidden = row.activity.len - 1 + row.activityMore
+  let label = if row.expanded: "less" else: "+" & $hidden
+  var button: typeof(r.createElement("button"))
+  let node = ui(r):
+    button(ref = button, class = "ah-fleet-activity-more",
+           title = (if row.expanded: "Show one activity line" else: "Show " & $hidden & " more activity lines"),
+           onclick = proc() = vm.toggleExpanded(sessionId)):
+      text label
+  when defined(js):
+    when typeof(button) is isonim_dom.Element:
+      # The row's own click selects it; this one only unfolds.
+      isonim_dom.addEventListener(isonim_dom.Node(button), cstring"click",
+        proc(ev: isonim_dom.Event) = ev.stopPropagation())
+  node
+
 proc renderRow[R](r: R; vm: FleetSnapshotVM;
                   callbacks: AgentHarborFleetCallbacks; row: FleetRow): auto =
   let sessionId = row.id
@@ -170,16 +237,12 @@ proc renderRow[R](r: R; vm: FleetSnapshotVM;
       span(class = "ah-fleet-dot", title = row.statusLabel):
         discard
       tdiv(class = "ah-fleet-row-main"):
-        tdiv(class = "ah-fleet-row-title" &
-                     (if row.titleIsPlaceholder: " ah-fleet-row-title-placeholder" else: ""),
+        # The title plainly, whatever named it: the header says once that the
+        # server withholds prompts.
+        tdiv(class = "ah-fleet-row-title",
              title = (if row.labelTooltip.len > 0: row.title & " (" & row.labelTooltip & ")"
                       else: row.title)):
           text row.title
-          if row.promptNote.len > 0:
-            # On the title line, where an ellipsis may take it, not on the
-            # meta line whose host and id matter more at narrow widths.
-            span(class = "ah-fleet-prompt-note"):
-              text row.promptNote
         tdiv(class = "ah-fleet-row-meta"):
           # The effective status (FleetRow.statusLabel): "needs input" wins
           # over the wire status, so no separate badge repeats it.
@@ -188,21 +251,42 @@ proc renderRow[R](r: R; vm: FleetSnapshotVM;
                           "waiting for: " & row.inputSource
                         else: row.statusLabel)):
             text row.statusLabel
-          span(class = "ah-fleet-meta-text"):
+          span(class = "ah-fleet-meta-text ah-fleet-meta-full"):
             text row.metaParts.join(" \xC2\xB7 ")
+          span(class = "ah-fleet-meta-text ah-fleet-meta-short"):
+            text row.metaPartsShort.join(" \xC2\xB7 ")
         if row.failureText.len > 0:
           tdiv(class = "ah-fleet-row-failure", title = row.failureText):
             text row.failureText
         tdiv(ref = activity, class = "ah-fleet-row-activity")
+      # Columns of their own at a laptop's width (hidden in a narrow panel,
+      # where the meta line carries the same facts).
+      span(class = "ah-fleet-col ah-fleet-col-agent", title = row.agentLabel):
+        text (if row.agentCount > 1: row.agentLabel & " \xC3\x97" & $row.agentCount else: row.agentLabel)
+      span(class = "ah-fleet-col ah-fleet-col-host", title = row.host):
+        text row.host
+      span(class = "ah-fleet-col ah-fleet-col-initiative", title = row.initiative):
+        text row.initiative
+      span(class = "ah-fleet-col ah-fleet-col-duration"):
+        text row.durationLabel
       span(class = "ah-fleet-row-age"):
         text row.ageLabel
-  for i, line in row.activity:
+  let shown = if row.expanded: row.activity.len else: min(1, row.activity.len)
+  let allLines = row.activity.join("\n")
+  for i in 0 ..< shown:
+    let line = row.activity[i]
     let level = if i < row.activityLevels.len: row.activityLevels[i] else: ""
+    var lineHost: typeof(r.createElement("div"))
     let lineNode = ui(r):
-      tdiv(class = "ah-fleet-activity-line" &
-                   (if level == "error": " ah-fleet-activity-error" else: ""),
-           title = line):
-        text line
+      tdiv(ref = lineHost, class = "ah-fleet-activity-row"):
+        tdiv(class = "ah-fleet-activity-line" &
+                     (if level == "error": " ah-fleet-activity-error" else: ""),
+             title = allLines):
+          text line
+    # The unfold control rides on the first line, so a folded row stays one
+    # line of activity.
+    if i == 0 and row.activity.len + row.activityMore > 1:
+      r.appendRendered(lineHost, renderActivityToggle(r, vm, row))
     r.appendRendered(activity, lineNode)
   node
 
@@ -228,7 +312,7 @@ proc renderAgentHarborFleetPanel*[R, N](
     callbacks: AgentHarborFleetCallbacks = AgentHarborFleetCallbacks()): N =
   ## The fleet panel, for every renderer. The body is rebuilt when the
   ## viewmodel's state, rows or counts move.
-  mixin clearChildren
+  mixin clearChildren, setAttribute
   var body: N
   let panel = ui(r):
     tdiv(class = AgentHarborFleetClass):
@@ -236,6 +320,14 @@ proc renderAgentHarborFleetPanel*[R, N](
 
   createRenderEffect proc() =
     r.clearChildren(body)
+    # No session names an initiative (the real snapshot): its column, and
+    # the column's name, are left out.
+    var anyInitiative = false
+    if vm.state.val == asReady:
+      for row in vm.rows:
+        if row.initiative.len > 0: anyInitiative = true
+    r.setAttribute(body, "class", "ah-fleet-body" &
+      (if anyInitiative: "" else: " ah-fleet-no-initiative"))
     r.appendRendered(body, renderHeader(r, vm, callbacks))
     case vm.state.val
     of asIdle, asLoading:

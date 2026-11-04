@@ -205,6 +205,17 @@ export function injectSurfaceStyles(container) {
       min-height: 0;
     }
 
+    /* The tab header keeps its height: as a shrinkable flex item it gave way
+       to a panel whose content is taller than the frame (a long list), so
+       such a story drew its tab cut or not at all. */
+    .ct-storybook-golden-panel .lm_header {
+      flex: 0 0 auto;
+      /* The app's GoldenLayout header height (dimensions.headerHeight in
+         ui_js.nim), which GoldenLayout sets inline; without it the tab was as
+         tall as its text and cut the descenders of its title. */
+      height: 2rem;
+    }
+
     .ct-storybook-golden-panel .lm_items {
       box-sizing: border-box;
       display: flex;
@@ -257,6 +268,18 @@ export function injectSurfaceStyles(container) {
       width: 100%;
       min-width: 0;
       min-height: 100vh;
+    }
+
+    /* A sessions sidebar fills the window's height and scrolls inside it,
+       as it does beside CodeTracer's layout; collapsed, it is a rail. */
+    .ct-storybook-frame > .component-container.ah-session-list {
+      height: 100vh;
+      min-height: 0;
+    }
+
+    .ct-storybook-frame > .component-container.ah-session-list-collapsed {
+      flex: 0 0 auto;
+      width: 2.5rem;
     }
 
     .ct-storybook-command-overlay {
