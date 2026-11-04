@@ -54,6 +54,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[4]
@@ -396,7 +397,7 @@ ARMS += [
     ("K2", [(WORKFLOW, "            env CT_SIBLING_CARGO_LOCKS_STRICT=1 just test-sibling-cargo-locks",
              "            just test-sibling-cargo-locks")],
      [(WF_SUITE, None)],
-     "the guard's SKIP passes CI on agents"),
+     "the permitted CI guard runs without the required STRICT setting"),
     # [Open recording] replaces the current tab natively (§2.2.4).
     ("R1", [(HOST, "  elif currentReplaceable: arpThisTab", "  elif false: arpThisTab")],
      [(TBL, TBL_RUN), (PTY, PTY_REPLACE), (PLAN, PLAN_RUN)],
@@ -632,15 +633,38 @@ def run_window(suite, test_filter):
     if not cmd:
         print("PLAT54_WINDOW_CAPTURE is not set: no window to capture")
         return "DID-NOT-COMPILE", []
+    report = path_of(RECORD47)
+    entry = report.read_bytes() if report.exists() else None
     try:
-        p = subprocess.run(["bash", "-c", cmd], cwd=REPO, capture_output=True,
-                           text=True, timeout=TIMEOUT)
-    except subprocess.TimeoutExpired:
-        return "HUNG", []
-    if p.returncode != 0:
-        print((p.stdout + p.stderr)[-2000:])
-        return "DID-NOT-COMPILE", []
-    return run_suite(suite.split(":", 1)[1], test_filter)
+        try:
+            p = subprocess.run(["bash", "-c", cmd], cwd=REPO, capture_output=True,
+                               text=True, timeout=TIMEOUT)
+        except subprocess.TimeoutExpired:
+            return "HUNG", []
+        if p.returncode != 0:
+            print((p.stdout + p.stderr)[-2000:])
+            return "DID-NOT-COMPILE", []
+        return run_suite(suite.split(":", 1)[1], test_filter)
+    finally:
+        try:
+            if report.exists():
+                live = report.read_bytes()
+                NIMCACHE.mkdir(parents=True, exist_ok=True)
+                archive = Path(tempfile.mkdtemp(prefix="window-report-", dir=NIMCACHE))
+                (archive / "report.json").write_bytes(live)
+                (archive / "manifest.json").write_text(json.dumps({
+                    "suite": suite, "filter": test_filter,
+                    "sha256": hashlib.sha256(live).hexdigest(), "bytes": len(live),
+                }, indent=2) + "\n")
+                print(f"live window report: {archive} ({hashlib.sha256(live).hexdigest()})")
+        finally:
+            if entry is None:
+                report.unlink(missing_ok=True)
+            else:
+                report.write_bytes(entry)
+            restored = report.read_bytes() if report.exists() else None
+            if restored != entry:
+                raise RuntimeError("window capture did not restore its entry report")
 
 
 def run_suite(suite, test_filter):
@@ -727,6 +751,7 @@ def main():
     if not needle_scan() or not controls_match():
         print("the tree is not at the control bytes; nothing was mutated.")
         return 3
+    control_snapshot = {rel: sha(rel) for rel in SUBJECTS + SUITES}
     only = set(filter(None, a.only.split(",")))
     selected = [arm for arm in ARMS if not only or arm[0] in only]
     needs_binary = any(s in PTY_SUITES for arm in selected for s, _ in arm[2])
@@ -756,12 +781,16 @@ def main():
                     key=lambda t: (t[0], t[1] or ""))
     for s, flt in graded:
         v, f = run_suite(s, flt)
+        moved = [rel for rel, digest in control_snapshot.items() if sha(rel) != digest]
+        if moved:
+            print(f"ABORT: baseline changed controlled inputs: {moved}")
+            return 1
         if v != "GREEN":
             print(f"ABORT: the baseline of {s} is {v}: {f[:1]}")
             return 1
     print(f"baseline GREEN ({len(graded)} suite run(s))")
     because = json.loads(BECAUSE.read_text()) if BECAUSE.exists() else {}
-    digests = {rel: sha(rel) for rel in SUBJECTS}
+    digests = {rel: control_snapshot[rel] for rel in SUBJECTS}
     derived, bad = {}, []
     for arm_id, edits, suites, what in selected:
         files = sorted({rel for rel, _, _ in edits} |

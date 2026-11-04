@@ -1359,11 +1359,11 @@
         "pre-commit-hooks": "pre-commit-hooks_5"
       },
       "locked": {
-        "lastModified": 1793438471,
-        "narHash": "sha256-dPs4j78ieNhl2eKBFkOJ3qoa2N1falM63uYOCXDSJPo=",
+        "lastModified": 1793794435,
+        "narHash": "sha256-RZnb40nIZzBCOudG5JZJJA5qSycWOyuAGw0u6ODUMKQ=",
         "owner": "metacraft-labs",
         "repo": "codetracer-python-recorder",
-        "rev": "a80753e1ab3dd154e2b6547ec51cdde97928605a",
+        "rev": "f44880f3ad12d6f4b9b914f1a204f323b15ee61b",
         "type": "github"
       },
       "original": {
@@ -1556,11 +1556,11 @@
     "codetracer-trace-format": {
       "flake": false,
       "locked": {
-        "lastModified": 1793322961,
-        "narHash": "sha256-2WvQ8z9hB6eyKnRPyo5yLauRdh5T0siORhI50pBf5x4=",
+        "lastModified": 1793578493,
+        "narHash": "sha256-8lQpkI2rsjJxtMBKRae35ExPdonVYV+/nj2NPs7YMlw=",
         "owner": "metacraft-labs",
         "repo": "codetracer-trace-format",
-        "rev": "f52b20cced5f016d95c99ebcfd15264dffff8079",
+        "rev": "8794892b43516f033360adaa702219d0d7974449",
         "type": "github"
       },
       "original": {
@@ -1584,14 +1584,15 @@
           "codetracer-toolchains",
           "nixpkgs"
         ],
-        "pre-commit-hooks": "pre-commit-hooks_4"
+        "pre-commit-hooks": "pre-commit-hooks_4",
+        "standard-hooks-src": "standard-hooks-src"
       },
       "locked": {
-        "lastModified": 1793313447,
-        "narHash": "sha256-TlLqryzL8tpnb7+CIIPJmBWx4Igw1FJzeL5CwVEq5OU=",
+        "lastModified": 1793794306,
+        "narHash": "sha256-LsZWgRN1NmzDuh+n+ALtSDOw4uHGANHb/lzLAxlLA68=",
         "owner": "metacraft-labs",
         "repo": "codetracer-trace-format-nim",
-        "rev": "d655392565ee57e398bd29e755472bf14f35d871",
+        "rev": "5802203c356fa865070daf7599dcb0fc164ed47e",
         "type": "github"
       },
       "original": {
@@ -14735,6 +14736,23 @@
         "owner": "metacraft-labs",
         "repo": "stackable-hooks-macos-tools",
         "rev": "1ad378d58776ec9b6cc73e1c27b8e53c15676f03",
+        "type": "github"
+      }
+    },
+    "standard-hooks-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1791010525,
+        "narHash": "sha256-wTBTyTJwShLWCUShUsFS35ck5VygVJbVvJtRoyV+hIc=",
+        "owner": "metacraft-labs",
+        "repo": "devops-modules",
+        "rev": "c8ef41d446e211892fe9775182b43d5d517554ac",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "repo": "devops-modules",
+        "rev": "c8ef41d446e211892fe9775182b43d5d517554ac",
         "type": "github"
       }
     },

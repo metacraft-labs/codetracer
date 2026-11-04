@@ -54,6 +54,12 @@ python3 ci/test/plat3-vocabulary-because-test.py || {
 	exit 1
 }
 
+# Live window evidence must not replace the controlled entry record.
+python3 ci/test/plat54-window-transaction-test.py || {
+	echo "FAIL: PLAT-54 window capture does not restore its controlled input" >&2
+	exit 1
+}
+
 # THE DISCOVERY IS GENERAL, AND ANY EXEMPTION IS NAMED, COUNTED AND FROZEN.
 #
 # It was `run-plat*mutations*.py` alone, which was a statement about the only
