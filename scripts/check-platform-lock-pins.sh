@@ -35,15 +35,17 @@
 # The Electron freshness digest hashes both files, so it notices a change to
 # either and cannot notice a disagreement between them.
 #
-# Two pins are an exception: `test-build-once-platform-lock.sh` already relates
-# each lock's `reprobuild` and `reprobuild-packages` entries to `flake.lock`,
-# and for the native lock that assertion is gated to an Apple-arm host, because
-# relating a solve to `flake.lock` is a question only the lock's own platform
-# can answer.
+# Two pins are an exception: `test-build-once-platform-lock.sh` also relates
+# each lock's `reprobuild` and `reprobuild-packages` entries to `flake.lock`.
+# That assertion used to be gated to an Apple-arm host for the native lock, and
+# the drift above is what that gate let through; it now runs everywhere, because
+# once this check holds the native pins equal to `repro.lock`'s, a native pin
+# that disagrees with `flake.lock` is wrong on every host.
 #
 # Relating the two locks TO EACH OTHER asks whether they name the same source,
-# which is the same question on every host, so this check is the half that can
-# run in CI. It is also the half that reaches a dependency `flake.lock` does
+# which is the same question on every host, so the committed-lock test runs this
+# check in CI's `just test` as well as `build-once.sh` running it before a
+# native build. It is also the half that reaches a dependency `flake.lock` does
 # not name: of the seven that had drifted, six were flake inputs -- and
 # `flake.lock` agreed with `repro.lock` on all six, which is what settled that
 # the native file was the one in the wrong -- while `isonim-freya` is not an
