@@ -47,7 +47,7 @@ AH_ROW_DOT = 0.5rem
   align-items: baseline
   gap: 0.5rem
   padding: 0.25rem PANEL_INSET
-  border-bottom: 1px solid colors-ui-border-secondary
+  border-bottom: 0.0625rem solid colors-ui-border-secondary
   user-select: none
   min-width: 0
 
@@ -79,7 +79,7 @@ AH_ROW_DOT = 0.5rem
   align-items: center
   gap: 0.25rem
   padding: 0.375rem PANEL_INSET
-  border-bottom: 1px solid colors-ui-border-secondary
+  border-bottom: 0.0625rem solid colors-ui-border-secondary
 
 // No toggles before the fleet has loaded: no empty band between two rules.
 .ah-fleet-filters:empty
@@ -92,7 +92,7 @@ AH_ROW_DOT = 0.5rem
   align-items: center
   gap: 0.375rem
   padding: 0 0.5rem
-  border: 1px solid transparent
+  border: 0.0625rem solid transparent
   border-radius: ah-rem(border-border-radius-control)
   cursor: pointer
   font-family: inherit
@@ -152,7 +152,7 @@ AH_ROW_DOT = 0.5rem
   padding: 0.375rem PANEL_INSET
   // The hairline the VCS panel draws between its sections; the divider
   // roles' Dark values sit too close to the panel surface to be seen.
-  border-bottom: 1px solid colors-ui-border-secondary
+  border-bottom: 0.0625rem solid colors-ui-border-secondary
   cursor: pointer
   user-select: none
 
@@ -160,8 +160,8 @@ AH_ROW_DOT = 0.5rem
     background: colors-ui-surface-primary-secondary-hover
 
   &:focus-visible
-    outline: 1px solid colors-ui-border-focus
-    outline-offset: -1px
+    outline: 0.0625rem solid colors-ui-border-focus
+    outline-offset: -0.0625rem
 
 .ah-fleet-row-selected
   background: colors-ui-surface-action-primary
@@ -340,7 +340,7 @@ AH_ROW_DOT = 0.5rem
   align-items: center
   line-height: 1
   padding: 0 0.75rem
-  border: 1px solid colors-ui-border-primary
+  border: 0.0625rem solid colors-ui-border-primary
   border-radius: ah-rem(border-border-radius-control)
   font-family: inherit
   font-size: ah-rem(type-ui-size-label-md)
