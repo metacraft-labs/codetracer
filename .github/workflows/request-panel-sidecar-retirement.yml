@@ -98,7 +98,8 @@ jobs:
         # dev shell.
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       # The six recorder siblings, cloned into the workspace-sibling layout
       # `workspaceRoot() / lang.recorderRepo` resolves (see
