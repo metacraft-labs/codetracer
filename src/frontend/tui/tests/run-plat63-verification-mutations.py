@@ -66,16 +66,21 @@ SOURCE = "src/frontend/tui/host/verification_source.nim"
 GPUI_LEAF = "src/frontend/gpui/verification_leaf.nim"
 GPUI_MAIN = "src/frontend/gpui/main.nim"
 VOCAB = "src/frontend/view_vocabulary/pane_views.nim"
+DESKTOP_HOST = "src/frontend/ui/verification.nim"
+DESKTOP_RUNNER = "src/frontend/index/verification_runner.nim"
+DESKTOP_IPC = "src/frontend/ui_js.nim"
 
 # Suites.
 VMU = "src/frontend/viewmodel/tests/unit/test_plat63_verification_vm.nim"
 TBL = "src/frontend/tui/tests/test_plat63_verification.nim"
 PTY = "src/frontend/tui/tests/real_terminal/test_plat63_verification_pty.nim"
 PLAN = "src/frontend/gpui/tests/test_plat63_gpui_verification.nim"
+SPEC = "src/tests/gui/tests/verification-pane/desktop_verno_run.spec.ts"
 
 SUBJECTS = [VM, VIEW, HOSTVM, LAYOUT, DESKTOP_PANES, CLICKS, TUI_PANE,
-            RUNTIME, SOURCE, GPUI_LEAF, GPUI_MAIN, VOCAB]
-SUITES = [VMU, TBL, PTY, PLAN]
+            RUNTIME, SOURCE, GPUI_LEAF, GPUI_MAIN, VOCAB, DESKTOP_HOST,
+            DESKTOP_RUNNER, DESKTOP_IPC]
+SUITES = [VMU, TBL, PTY, PLAN, SPEC]
 
 TBL_PAINT = "*::every width: the header, the lines, the tones and the hit-tests"
 TBL_WORDS = "*::the words, as the shared model has them"
@@ -267,6 +272,57 @@ ARMS = [
              "      discard row")],
      [(TBL, TBL_RUN)],
      "the vocabulary's Verification view lists no finding"),
+    # ---- the desktop's host and runner (the Electron app, one spec) --------
+    ("W1", [(DESKTOP_HOST, "    vm.offerRun(actions[0].label)", "    discard")],
+     [(SPEC, None)],
+     "the desktop never offers the project's Verno action"),
+    ("W2", [(DESKTOP_HOST, "  let cwd = actionWorkingDirectory(action, desktopProjectRoot)",
+             "  let cwd = \"/\"")],
+     [(SPEC, None)],
+     "the desktop runs the action outside the project, and its report is not found"),
+    ("W3", [(DESKTOP_HOST, "      verificationVMInstance.noteOutput(line)", "      discard line")],
+     [(SPEC, None)],
+     "a live run shows none of the verifier's output"),
+    ("W4", [(DESKTOP_HOST, "        cstring(directory)), cstring(PayloadFileName)))",
+             "        cstring(directory)), cstring(\"absent.json\")))")],
+     [(SPEC, None)],
+     "the run's report is never read"),
+    ("W5", [(DESKTOP_HOST, "              runStartedAtUnixMs = run.startedAtUnixMs)",
+             "              runStartedAtUnixMs = 0)")],
+     [(SPEC, None)],
+     "the desktop gives the report no start time, so this run's report reads as stale"),
+    ("W6", [(DESKTOP_HOST, "  data.ipc.send cstring\"CODETRACER::verification-cancel\", js{}",
+             "  discard")],
+     [(SPEC, None)],
+     "Stop never reaches the process"),
+    ("W7", [(DESKTOP_RUNNER, "        if (process.platform !== 'win32') process.kill(-child.pid, name);",
+             "        if (process.platform !== 'win32') process.kill(child.pid, name);")],
+     [(SPEC, None)],
+     "Stop leaves what the verifier started running"),
+    ("W8", [(DESKTOP_RUNNER, "           {code: (typeof code === 'number') ? code : null,",
+             "           {code: null,")],
+     [(SPEC, None)],
+     "the run's exit code never reaches the classifier"),
+    ("W9", [(DESKTOP_HOST, "    if nodeFileExists(cstring(path)):", "    if true:")],
+     [(SPEC, None)],
+     "a finding's file is taken without looking for it"),
+    ("W10", [(VIEW, "        verificationRunRequest(),", "        discard,")],
+     [(SPEC, None)],
+     "the desktop's Run control runs nothing"),
+    ("W11", [(DESKTOP_HOST, "    refreshDesktopVerification()", "    discard")],
+     [(SPEC, None)],
+     "the pane does not read the project's task files when it opens"),
+    ("W12", [(DESKTOP_HOST, "    vm.offerRun(\"\", NoVernoActionReason)",
+              "    vm.offerRun(\"Verify with Verno\")")],
+     [(SPEC, None)],
+     "a project that declares no Verno action is offered a run"),
+    ("W13", [(DESKTOP_HOST, "      vm.noteElapsed(elapsedNow()), 1000)", "      discard, 1000)")],
+     [(SPEC, None)],
+     "a live run's clock stands still"),
+    ("W14", [(DESKTOP_IPC, "    cancelled = not response[\"cancelled\"].isUndefined and",
+              "    cancelled = true or not response[\"cancelled\"].isUndefined and")],
+     [(SPEC, None)],
+     "every run's exit reads as a Stop"),
     # ---- the declared survivor ---------------------------------------------
     ("Z1", [(GPUI_LEAF, "  VerificationGapPx = 12", "  VerificationGapPx = 13")],
      [(PLAN, PLAN_RUN)],
@@ -279,10 +335,10 @@ IN_BINARY = {VM, VIEW, HOSTVM, LAYOUT, DESKTOP_PANES, CLICKS, TUI_PANE,
              RUNTIME, SOURCE, VOCAB}
 IN_GPUI = {VM, HOSTVM, LAYOUT, DESKTOP_PANES, CLICKS, GPUI_LEAF, GPUI_MAIN,
            VOCAB}
-IN_DESKTOP = set()
+IN_DESKTOP = {VM, VIEW, DESKTOP_HOST, DESKTOP_RUNNER, DESKTOP_IPC}
 PTY_SUITES = {PTY}
 GPUI_SUITES = {PLAN}
-DESKTOP_SUITES = set()
+DESKTOP_SUITES = {SPEC}
 RUST_SUITES = set()
 
 

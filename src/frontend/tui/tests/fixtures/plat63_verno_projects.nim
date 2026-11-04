@@ -126,6 +126,9 @@ proc writeStandIn(bin, output, payload: string; exitCode: int) =
     "sed -E \"s/\\\"(started|finished)_at_unix_ms\\\": *[0-9]+/\\\"\\1_at_unix_ms\\\": $now/\" " &
     "\"$here/recorded-payload.json\" > target/verno-report.json\n" &
     "cat \"$here/recorded-output.txt\"\n" &
+    "# A suite that needs a run still in flight (to watch it live, to Stop\n" &
+    "# it) leaves a `hold` file beside this script; the run then waits.\n" &
+    "if [ -e \"$here/hold\" ]; then sleep 60; fi\n" &
     "exit " & $exitCode & "\n")
   setFilePermissions(script, {fpUserRead, fpUserWrite, fpUserExec,
                               fpGroupRead, fpGroupExec, fpOthersRead,
@@ -174,3 +177,15 @@ proc lineOf*(source: string; line: int): string =
   ## Line `line` (1-based) of `source`.
   let lines = source.splitLines
   if line >= 1 and line <= lines.len: lines[line - 1] else: ""
+
+when isMainModule:
+  # The desktop's suite (`src/tests/gui/tests/verification-pane/
+  # desktop_verno_run.spec.ts`) writes its package and its replaying `verno`
+  # through this same code, so every front-end runs the same recorded run:
+  # `plat63_verno_projects typeerr|cx` prints the package root and the
+  # replay's directory, one per line.
+  let run =
+    if paramCount() >= 1 and paramStr(1) == "cx": writeCounterexampleRun()
+    else: writeTypeErrRun()
+  echo run.root
+  echo run.bin

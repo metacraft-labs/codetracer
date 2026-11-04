@@ -528,6 +528,9 @@ type
     running*: bool
     cancellable*: bool
     hasReport*: bool
+    payloadStatus*: PayloadStatus
+      ## Whether the run's structured report was found and attached
+      ## (`attachPayload`): drawn as the panel's `data-ct-verification-payload`.
     answersCorrectness*: bool
       ## Whether the run said anything about the program at all. False for
       ## four of the six outcomes, and the view says so in words when it is.
@@ -791,6 +794,7 @@ proc panelModel*(vm: VerificationVM;
     running: vm.isRunning.val,
     cancellable: vm.isCancellable.val,
     hasReport: vm.hasReport.val,
+    payloadStatus: vm.payloadStatus.val,
     counterexampleOffers: counterexampleOffers(vm),
     modelAbsentReason:
       if vm.payloadStatus.val == psAttached and vm.payload.val.isSome:
@@ -1068,6 +1072,15 @@ proc runRowMenu*(vm: VerificationVM; session: CounterexampleSessionVM;
 # ---------------------------------------------------------------------------
 # The run a host offers
 # ---------------------------------------------------------------------------
+
+const
+  NoVernoActionReason* =
+    "this project declares no Verno action (.vscode/tasks.json or " &
+    "package.json)"
+  NoProjectReason* = "this window has no project to verify"
+    ## Why a host offers no run, in the words every front-end shows: the
+    ## native host (`host/native_verification_host`) and the desktop's
+    ## (`ui/verification`) both say these.
 
 proc offerRun*(vm: VerificationVM; label: string; unavailableReason = "") =
   ## A host that can run the project's verifier says so: `label` is the

@@ -91,6 +91,14 @@ var verificationSourceOpener*: proc(activation: VerificationActivation;
   ## `ui/verification.nim` installs `openLocation`). Nil in a headless render,
   ## where a press still selects and opens counterexamples.
 
+var verificationRunRequest*: proc()
+  ## How the HOST runs the project's declared Verno action when the pane's
+  ## Run is pressed (the desktop's `ui/verification.nim` installs it; the
+  ## native front-ends draw their own pane and call their host directly).
+  ## Nil in a headless render, where Run does nothing.
+var verificationStopRequest*: proc()
+  ## How the HOST stops the run in flight (Stop). Nil in a headless render.
+
 proc verificationHandlersFor*(vm: VerificationVM;
                               session: CounterexampleSessionVM):
                               VerificationPanelHandlers =
@@ -103,7 +111,13 @@ proc verificationHandlersFor*(vm: VerificationVM;
     onActivate: proc(key: string) =
       let done = vm.activateLine(session, key)
       if done.kind == vakSource and not verificationSourceOpener.isNil:
-        verificationSourceOpener(done, vm.sourceCandidates(done.file)))
+        verificationSourceOpener(done, vm.sourceCandidates(done.file)),
+    onRun: proc() =
+      if not verificationRunRequest.isNil:
+        verificationRunRequest(),
+    onStop: proc() =
+      if not verificationStopRequest.isNil:
+        verificationStopRequest())
 
 when defined(js):
   import isonim/web/dom_api as isonim_dom
@@ -186,6 +200,7 @@ proc renderVerificationPanelTree[R, N](r: R; mdl: VerificationPanelModel;
          `data-ct-verification-running` = $mdl.running,
          `data-ct-verification-outcome` = mdl.outcomeText,
          `data-ct-verification-tier` = "text-fallback",
+         `data-ct-verification-payload` = $mdl.payloadStatus,
          `data-ct-verification-answers-correctness` = $mdl.answersCorrectness):
       tdiv(class = "ct-verification-status",
            `data-ct-verification-status` = "true",
@@ -196,7 +211,7 @@ proc renderVerificationPanelTree[R, N](r: R; mdl: VerificationPanelModel;
            title = mdl.commandLine):
         text mdl.commandLine
       # PLAT-63: a host that runs the project's verifier offers it here; one
-      # that runs nothing (the desktop today) draws no control at all.
+      # that runs nothing (a browser tab, a headless render) draws none.
       if mdl.canRun:
         button(class = "ct-verification-run",
                `data-ct-verification-action` = "run",

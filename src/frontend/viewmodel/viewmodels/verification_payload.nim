@@ -98,6 +98,22 @@ const PayloadFileName* = "verno-report.json"
   ## verbatim and cannot append `--report-json` to it. The producer writes the
   ## file without being asked, or there is no payload and the text tier stands.
 
+const PayloadDirectoryNames* = ["target"]
+  ## Where a verifier is expected to have left its structured report, relative
+  ## to the project root.
+  ##
+  ## A **convention**, and that is the point rather than a shortcut.
+  ## Noir-Studio.md §9.3 has CodeTracer surface the actions a project declares
+  ## and "invent no manifest of our own", so we launch the project's own
+  ## `tasks.json` command verbatim — we cannot append `--report-json <path>` to
+  ## it and we cannot ask the project to add one. The producer writes the file
+  ## where the consumer will look, or there is no payload and VN-M3's text tier
+  ## stands, which is a supported outcome rather than a failure.
+  ##
+  ## A list rather than a single name because a second producer will want its
+  ## own build directory, and a list of *stated* places is honest where a
+  ## search of the tree would not be.
+
 const StalePayloadToleranceMs* = 2_000
   ## How far before the run's own start a payload's timestamp may sit before it
   ## is called stale. The producer records its start *after* the process is

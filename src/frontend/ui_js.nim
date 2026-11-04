@@ -41,7 +41,8 @@ import
   # so) precisely so a non-Electron caller can use it; `onNoTrace` reads the
   # editor's declared width out of the layout config with it.
   index/[layout_config_repair, editor_working_set],
-  ui/[test_results, constraints, generated_code, point_list, editor_points],
+  ui/[test_results, constraints, generated_code, point_list, editor_points,
+      verification],
   # ONE LAYOUT PER MODE. `applyModeLayout` below is this module's only caller;
   # everything about where a mode's arrangement lives is in there.
   ui/mode_layouts,
@@ -4693,6 +4694,32 @@ proc onProgramRunSettled(sender: js,
     errorMessage = (if response.errorMessage.isNil: ""
                     else: $response.errorMessage))
 
+# THE VERIFICATION PANE'S RUN (`ui/verification`'s host,
+# `index/verification_runner`, Verification-Payload-Contract-v1.md §11): the
+# main process runs the project's declared Verno action and answers with these
+# four; the pane's VM is the window's, so none of them is routed to a tab.
+
+proc onVerificationRunning(sender: js, response: js) =
+  verification.noteDesktopVerificationRunning()
+
+proc onVerificationOutput(sender: js,
+                          response: jsobject(stream=cstring, data=cstring)) =
+  verification.noteDesktopVerificationOutput(
+    if response.stream.isNil: "stdout" else: $response.stream,
+    if response.data.isNil: "" else: $response.data)
+
+proc onVerificationExit(sender: js, response: js) =
+  let code = response["code"]
+  verification.settleDesktopVerification(
+    if code.isNull or code.isUndefined: none(int) else: some(code.to(int)),
+    cancelled = not response["cancelled"].isUndefined and
+                response["cancelled"].to(bool))
+
+proc onVerificationFailedToStart(sender: js,
+                                 response: jsobject(reason=cstring)) =
+  verification.failDesktopVerification(
+    if response.reason.isNil: "could not start" else: $response.reason)
+
 proc onReplayOpenIn(sender: js,
                     response: jsobject(workspace=cstring, policy=cstring,
                                        error=cstring)) =
@@ -5195,6 +5222,11 @@ proc configureIPC(data: Data) =
     # AND WHAT SETTLES THE PROJECT'S RUN (Edit-Mode-Toolbar.md §9.4). See
     # `onProgramRunSettled`.
     "program-run-settled"
+    # The Verification pane's run (`index/verification_runner`).
+    "verification-running"
+    "verification-output"
+    "verification-exit"
+    "verification-failed-to-start"
     # Test-Results-Pane.md §9.3: a workspace's `replay-open-in` written. See
     # `onReplayOpenIn`.
     "replay-open-in"

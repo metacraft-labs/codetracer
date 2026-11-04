@@ -6,6 +6,7 @@ import
   shell_sessions,
   hcr_launch,
   build_runner,
+  verification_runner,
   file_tree_operations,
   tab_answers,
   ipc_subsystems/[ dap, socket, acp_ipc ],
@@ -391,6 +392,11 @@ proc configureIpcMain* =
     # process, and stopped (`index/build_runner`, Build-Output-Pane.md §4.2).
     "build-start"
     "build-cancel"
+    # The Verification pane's Run / Stop: the project's declared Verno action
+    # run by the main process (`index/verification_runner`,
+    # Verification-Payload-Contract-v1.md §11).
+    "verification-start"
+    "verification-cancel"
     # The edit-mode toolbar's Run and the palette's **Project: Run** pair:
     # `ct record <project folder>`, answered with
     # `CODETRACER::program-run-settled` (`index/traces.onRunProgram`,
