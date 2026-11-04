@@ -148,3 +148,48 @@ fn e2e_codetracer_erlang_flow_dap() {
         .expect("Erlang flow DAP test failed");
     runner.finish().expect("disconnect failed");
 }
+
+/// `canonical_flow:main/0` prints `94` with `io:format("~p~n", [Result])`.
+/// What the program wrote to stdout is the replay's terminal output, as it
+/// is for every other recorder, so `ct/load-terminal` answers exactly one
+/// `Write` carrying `94`. The BEAM sidecar reader used to answer the
+/// `io_request`/`io_reply` messages instead, labelled `Write`, and not the
+/// line itself, which only the container's `events.dat` holds.
+#[test]
+fn e2e_codetracer_erlang_terminal_output_dap() {
+    assert!(
+        find_beam_recorder().is_some(),
+        "codetracer-beam-recorder binary not found; run `just test-beam-flow` or set CODETRACER_BEAM_RECORDER_BIN"
+    );
+
+    let project_path = find_erlang_flow_test()
+        .expect("canonical Erlang fixture not found; set CODETRACER_BEAM_RECORDER_PATH or CODETRACER_ERLANG_FLOW_TEST");
+    let recording =
+        TestRecording::create_db_trace_with_format(&project_path, Language::Erlang, "erlang-terminal", "ctfs")
+            .expect("Erlang recording failed");
+
+    let mut client = DapStdioClient::spawn(&find_db_backend()).expect("DAP spawn failed");
+    client.initialize().expect("initialize failed");
+    client
+        .launch(LaunchRequestArguments {
+            trace_folder: Some(recording.trace_dir.clone()),
+            ..Default::default()
+        })
+        .expect("launch failed");
+    client.configuration_done().expect("configurationDone failed");
+    client
+        .wait_for_stopped(Duration::from_secs(60))
+        .expect("stopped event after run-to-entry");
+
+    let terminal = client.load_terminal().expect("ct/load-terminal");
+    let lines = terminal
+        .iter()
+        .map(|event| (format!("{:?}", event.kind), event.content.trim_end().to_string()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        lines,
+        vec![("Write".to_string(), "94".to_string())],
+        "the Erlang program's io:format output is its terminal output"
+    );
+    client.disconnect().expect("disconnect failed");
+}

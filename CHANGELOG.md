@@ -17,6 +17,13 @@ All notable changes to this project will be documented in this file.
   configuration that still has `baseUrl`, `downloadApi`, `deleteApi` or
   `getUploadUrlApi` still loads.
 
+### Elixir and Erlang recordings
+
+- **The terminal shows what the program printed.** It used to show the
+  messages the program's processes exchanged, including the io requests that
+  carried the output, and not the output itself. Those messages now appear in
+  the event log as trace log events.
+
 ## 26.10.1 - 2026-10-01
 
 This is the first published release since 25.11.1 (26.08.1 was tagged but never
