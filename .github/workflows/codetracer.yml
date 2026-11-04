@@ -1540,7 +1540,8 @@ jobs:
       - name: Provision dependency siblings from repro.lock
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Clone codetracer-pm sibling
         # `ci/test/cua-keymap-extractor.sh` (PLAT-68's CUA keymap step in
@@ -2364,7 +2365,8 @@ jobs:
         # action reaches `repro` through this repo's own dev shell.
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       # The envelope records the three-tier demo from this tree, and
       # scripts/materialize-recording.sh refuses without `ct-instrument` and a
@@ -2629,7 +2631,8 @@ jobs:
         # shell, which is also where the suites below run.
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Assert the JS ViewModel lane can observe its own failures (full suite)
         # The same contract suite `ci-verdict` runs, but here it runs INSIDE the
@@ -3807,7 +3810,8 @@ jobs:
         # codetracer-image-diff, is private.
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Build ct and replay-server
         # `test_fixture_corpus.nim` (Tier 1) opens real recorded traces through
@@ -3952,7 +3956,8 @@ jobs:
       - name: Provision dependency siblings from repro.lock
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Build ct and replay-server
         # `ct record` records the `calc` and `call_pages` fixtures the
@@ -4172,7 +4177,8 @@ jobs:
         # repo's dev shell, which the build step below uses anyway.
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Allow direnv in cloned codetracer-native-recorder
         # ci/build/dev.sh builds src/db-backend, whose build.rs invokes
@@ -4309,7 +4315,8 @@ jobs:
         # repo's dev shell.
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Allow direnv in cloned codetracer-native-recorder
         # db-backend's build.rs invokes ``direnv exec <recorder-root> bash
@@ -5424,7 +5431,8 @@ jobs:
         # requires to reach ``repro``.
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       # --- macOS setup ---
       # No open-coded just / Python / Rust / cargo-nextest toolchain steps and
@@ -6046,7 +6054,8 @@ jobs:
         # what answers for it, which is exactly what this action reads.
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       # NOTE: codetracer-trace-format, codetracer-trace-format-nim,
       # codetracer-native-recorder, codetracer-visual-replay and
@@ -7075,7 +7084,8 @@ jobs:
         # because the action reaches ``repro`` through this repo's dev shell.
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Run the M16 ct-test release gate
         # The ct_test sources import runquota_process; the dev shell exports
@@ -7323,7 +7333,8 @@ jobs:
         # Without them the suite fails by name; it never skips.
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Run the ct-test-certificates lane
         # No CT_TEST_CERTIFICATE_VECTORS: setting it would walk an exported
