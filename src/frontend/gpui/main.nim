@@ -11964,7 +11964,8 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       # (`verification_leaf.verificationLayout`).
       case parts[1]
       of "show":
-        showPaneFromMenu(r, paneVerification)
+        # View › Verification, through the window's menu route.
+        runGpuiMenuAction(r, "aVerification")
       of "run":
         runGpuiVerification(r)
       of "stop":
