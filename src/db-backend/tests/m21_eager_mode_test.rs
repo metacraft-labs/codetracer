@@ -211,6 +211,28 @@ fn make_request(seq: i64, command: &str, args: JsonValue) -> Request {
     }
 }
 
+/// The flow a `ct/load-flow` delivered: the body of its `ct/updated-flow`
+/// event. The request's own response is an acknowledgement sent after the
+/// event (CodeTracer-DAP-Extensions.md, `ct/load-flow`); it must succeed.
+fn take_flow_event_body(rx: &mpsc::Receiver<DapMessage>) -> JsonValue {
+    let mut flow = None;
+    while let Ok(msg) = rx.try_recv() {
+        match msg {
+            DapMessage::Event(event) if event.event == "ct/updated-flow" => flow = Some(event.body),
+            DapMessage::Response(resp) if resp.command == "ct/load-flow" => {
+                assert!(
+                    resp.success,
+                    "expected `ct/load-flow` response to succeed, got message={:?} body={:?}",
+                    resp.message, resp.body
+                );
+                return flow.expect("`ct/load-flow` responded without a `ct/updated-flow` event before it");
+            }
+            _ => {}
+        }
+    }
+    panic!("no `ct/load-flow` response on the channel");
+}
+
 fn take_response_body(rx: &mpsc::Receiver<DapMessage>, command: &str) -> JsonValue {
     while let Ok(msg) = rx.try_recv() {
         if let DapMessage::Response(resp) = msg
@@ -430,7 +452,7 @@ fn test_eager_mode_flips_omniscience_flow_to_eager_when_mode3_present() {
         std::env::remove_var("CODETRACER_DISABLE_TREESITTER");
     }
 
-    let body = take_response_body(&rx, "ct/load-flow");
+    let body = take_flow_event_body(&rx);
     let views = body
         .get("viewUpdates")
         .and_then(JsonValue::as_array)

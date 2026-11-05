@@ -18,7 +18,7 @@
 ## | `spLocals`            | `ct/load-locals`, the GUI's budgets (`localsLoadArgs`) and the state pane's watch list | `ReplayDataStore.applyLocalsResponse`, against the stop it was SENT at (PLAT-29), and `StateVM.updateOriginSummaries` |
 ## | `spCallStackFallback` | `stackTrace`, only when the recording has no call trace | `CalltraceVM.fallbackStack` (PLAT-47) |
 ## | `spFlow`              | `ct/load-flow` with the `call` query at the stop, once per stop and view granularity (`FlowVM.flowMode`) | `FlowVM.applyFlowUpdate` (`FlowVM.requestWindow`) |
-## | `spDiffFlow`          | `ct/load-flow` with `flowMode: diff`, ONCE per session, when the session has a diff (`FlowVM.diffSession`) | `FlowVM.applyDiffFlowUpdate` |
+## | `spDiffFlow`          | `ct/load-flow` with `flowMode: diff`, ONCE per session, when the session has a diff (`FlowVM.diffSession`) | `FlowVM.applyDiffFlowUpdate` (`FlowVM.requestDiffFlow`) |
 ## | `spLowLevelCode`      | `ct/load-asm-function` for the function the stop is in (`ReplayDataStore.asmFunction`, from `stop`: the C-level location for Nim), while a front-end shows the pane (`LowLevelCodeVM.shown`) | `LowLevelCodeVM.applyAsmAnswer` |
 ##
 ## The locals are the Electron GUI's behaviour, which is the reference
@@ -54,7 +54,6 @@ import ../collab/runtime_role
 import ../session_vm
 import ../store/[replay_data_store, types, stop_timeline, locals_answer]
 import ../viewmodels/[state_vm, calltrace_vm, flow_vm, low_level_code_vm]
-import ../../../common/flow_mode_wire   # `FlowModeWireDiff`
 
 type
   StopPane* = enum
@@ -283,30 +282,11 @@ proc loadFlow(l: StopLoader; key: string) =
     loader.settle(spFlow, key, if applied: plsApplied else: plsFailed))
 
 proc loadDiffFlow(l: StopLoader; key: string) =
-  ## The trace diff's flow: `ct/load-flow` with the `diff` query. The engine
-  ## serves it from the diff index written at record time, so it names no
-  ## position; `CtLoadFlowArguments` still requires a `location`, and an
-  ## empty one is what the desktop's editor sent. The answer also arrives as
-  ## a `ct/updated-flow` event, which `FlowVM`'s handler routes by its `mode`
-  ## to the same applier.
-  let vm = l.session.flowVM
+  ## The trace diff's flow (`FlowVM.requestDiffFlow`): `ct/load-flow` with the
+  ## `diff` query, answered on the `ct/updated-flow` event.
   let loader = l
-  vm.diffLoadingState.val = lsLoading
-  onComplete(l.session.store.backend.send("ct/load-flow", %*{
-      "flowMode": FlowModeWireDiff,
-      "location": {"path": "", "line": 0, "rrTicks": 0, "callstackDepth": 0}}),
-    onSuccess = proc(resp: JsonNode) =
-      let body = responseBody(resp)
-      if not responseSucceeded(resp) or not isDiffFlowUpdate(body):
-        vm.diffLoadingState.val = lsError
-        loader.settle(spDiffFlow, key, plsFailed)
-        return
-      vm.applyDiffFlowUpdate(body)
-      loader.settle(spDiffFlow, key,
-        if vm.diffLoadingState.val == lsIdle: plsApplied else: plsFailed),
-    onError = proc(message: string) =
-      vm.diffLoadingState.val = lsError
-      loader.settle(spDiffFlow, key, plsFailed))
+  l.session.flowVM.requestDiffFlow(proc(applied: bool) =
+    loader.settle(spDiffFlow, key, if applied: plsApplied else: plsFailed))
 
 proc loadLowLevelCode(l: StopLoader; key: string) =
   ## The listing of the function the debugger is in. A refusal is shown in

@@ -213,6 +213,143 @@ suite "HSF-D5: the stop loader loads the flow window":
   test "the flow window is a default pane":
     check spFlow in DefaultStopPanes
 
+proc flowEvent(update: JsonNode): JsonNode =
+  ## A `ct/updated-flow` event as the transports hand it to the handlers.
+  %*{"kind": UpdatedFlowCommandName, "data": update}
+
+proc flowAcknowledgement(): JsonNode =
+  ## The `ct/load-flow` reply: an acknowledgement, naming the event, sent
+  ## after the `ct/updated-flow` event that carries the flow
+  ## (CodeTracer-DAP-Extensions.md, `ct/load-flow`).
+  %*{"success": true, "body": {"event": UpdatedFlowCommandName}}
+
+proc answeringFlowOnTheEvent(mock: MockBackendService): BackendService =
+  ## The mock's transport, except that a `ct/load-flow` is answered the way
+  ## the engine answers it on a synchronous transport: the `ct/updated-flow`
+  ## event first, then the acknowledgement.
+  result = mock.toBackendService()
+  let inner = result.sendProc
+  result.sendProc = proc(command: string;
+                         args: JsonNode): BackendFuture[JsonNode] =
+    let viaMock = inner(command, args)
+    if command != "ct/load-flow":
+      return viaMock
+    let ticks = args{"location"}{"rrTicks"}.getInt(0)
+    let line = args{"location"}{"line"}.getInt(0)
+    mock.emitEvent(flowEvent(flowWindowAnswer(ticks, line)))
+    newCompletedFuture[JsonNode](flowAcknowledgement())
+
+suite "2026-11-04: the flow window is delivered once, on the event":
+  # codetracer-pm issue
+  # `2026-11-04-python-first-stop-load-flow-returns-14-mb-twice-and-stalls-the-vscode-extension-host`:
+  # the engine sent the flow on the event AND in the reply. It now sends it
+  # on the event only, and the reply is an acknowledgement — which, adopted
+  # as a window, flipped the pane to an error.
+
+  test "the acknowledgement first, then the event: the window is adopted":
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    session.store.moveTo(40, 3)
+    mock.deferResponses = true                   # an asynchronous transport
+    let loader = createStopLoader(session, {spFlow})
+    loader.loadStop()
+    check mock.pendingDeferredCount == 1
+    mock.settleDeferred(flowAcknowledgement())
+    check session.flowVM.loadingState.val == lsLoading
+    check loader.status[spFlow].val == plsInFlight
+    mock.emitEvent(flowEvent(flowWindowAnswer(40, 3)))
+    check loader.status[spFlow].val == plsApplied
+    check session.flowVM.loadingState.val == lsIdle
+    let windows = session.flowVM.layoutWindows.val
+    check windows.len == 1
+    check windows[0].rrTicks == 40
+
+  test "the event first, then the acknowledgement: the window is kept":
+    let mock = newMockBackendService(autoRespond = true)
+    let session = createSessionVM(mock.answeringFlowOnTheEvent())
+    session.store.claimLocalsLoading()
+    session.initializePanelViewModels()
+    session.store.moveTo(40, 3)
+    let loader = createStopLoader(session, {spFlow})
+    loader.loadStop()
+    drainPlatformCallbacks()
+    check loader.status[spFlow].val == plsApplied
+    check session.flowVM.loadingState.val == lsIdle
+    check session.flowVM.layoutWindows.val.len == 1
+
+  test "an error update on the event after the acknowledgement fails the pane":
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    session.store.moveTo(40, 3)
+    mock.deferResponses = true
+    let loader = createStopLoader(session, {spFlow})
+    loader.loadStop()
+    mock.settleDeferred(flowAcknowledgement())
+    mock.emitEvent(flowEvent(%*{"viewUpdates": [], "error": true,
+                                "errorMessage": "no flow here",
+                                "finished": true}))
+    check loader.status[spFlow].val == plsFailed
+    check session.flowVM.loadingState.val == lsError
+
+  test "the diff flow: the acknowledgement first, then the event":
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    session.flowVM.diffSession.val = true
+    session.store.moveTo(1, 1)
+    mock.deferResponses = true
+    let loader = createStopLoader(session, {spDiffFlow})
+    loader.loadStop()
+    check mock.pendingDeferredCount == 1
+    mock.settleDeferred(flowAcknowledgement())
+    check session.flowVM.diffLoadingState.val == lsLoading
+    check loader.status[spDiffFlow].val == plsInFlight
+    let diff = flowWindowAnswer(1, 4)
+    diff["mode"] = %"diff"
+    mock.emitEvent(flowEvent(diff))
+    check loader.status[spDiffFlow].val == plsApplied
+    check session.flowVM.diffLoadingState.val == lsIdle
+    check session.flowVM.diffSteps.val.len == 1
+    check session.flowVM.layoutWindows.val.len == 0   # not the call window
+
+  test "the acknowledgement as a bare body (the VS Code host), then the event":
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    session.store.moveTo(40, 3)
+    mock.deferResponses = true
+    let loader = createStopLoader(session, {spFlow})
+    loader.loadStop()
+    mock.settleDeferred(flowAcknowledgement()["body"])
+    check loader.status[spFlow].val == plsInFlight
+    mock.emitEvent(flowEvent(flowWindowAnswer(40, 3)))
+    check loader.status[spFlow].val == plsApplied
+    check session.flowVM.loadingState.val == lsIdle
+
+  test "a refusal on the body-only transport fails the pane":
+    # The desktop's `DapApi` resolves a refused or timed-out request with an
+    # empty body (`dap.asyncSendCtRequest`), so an empty body is not the
+    # acknowledgement: no event will follow it.
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    session.store.moveTo(40, 3)
+    mock.deferResponses = true
+    let loader = createStopLoader(session, {spFlow})
+    loader.loadStop()
+    mock.settleDeferred(newJObject())
+    check loader.status[spFlow].val == plsFailed
+    check session.flowVM.loadingState.val == lsError
+
+  test "a refusal of the diff flow on the body-only transport fails the pane":
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    session.flowVM.diffSession.val = true
+    session.store.moveTo(1, 1)
+    mock.deferResponses = true
+    let loader = createStopLoader(session, {spDiffFlow})
+    loader.loadStop()
+    mock.settleDeferred(newJObject())
+    check loader.status[spDiffFlow].val == plsFailed
+    check session.flowVM.diffLoadingState.val == lsError
+
 suite "HSF-S1: an answer is applied to the stop it was asked at":
 
   test "an answer that lands after the debugger moved is dropped":
