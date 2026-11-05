@@ -438,7 +438,7 @@ jobs:
             # isonim and isonim-tui refreshed again 2026-11-01.
             isonim=6a72640a17341b9d8cd64c5d58093516707a7ae9
             isonim-tui=ff295f7be6d7efc095ef4d249b1df0577d969c89
-            isonim-gpui=65e7c654802f1641ef64aa1eb759c7f46f70f1bc
+            isonim-gpui=9248fc0109a4be41b97d16140b4480fb05599558
             nim-everywhere=1ef439320e7c11cad9a11a13960e94d37afe8482
             nim-termctl=16a81f4d2fc90598a4c61b72aaf93b51162bed3e
             nim-pty=2845abd58dd2073475177301590c8b51aa5c9094
