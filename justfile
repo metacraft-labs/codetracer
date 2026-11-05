@@ -86,6 +86,13 @@ test-dev-shell-pythonpath:
 test-dev-shell-python-recorder-ffi-pair:
   bash ci/test/dev-shell-python-recorder-ffi-pair-test.sh
 
+# Assert that the `codex-acp` the default dev shell puts on PATH starts and
+# answers an ACP `initialize`, i.e. that it finds its libssl/libcrypto. Runs
+# `nix develop`, so it is slow and not part of the in-shell suites. See the
+# header of ci/test/dev-shell-codex-acp-test.sh.
+test-dev-shell-codex-acp:
+  bash ci/test/dev-shell-codex-acp-test.sh
+
 # Assert that build-once.sh sources the cached dev-shell profile (and so runs
 # its shellHook) inside this repository, not in the directory it is invoked
 # from. Runs the real script against a stub profile; no toolchain, a second.
