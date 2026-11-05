@@ -96,6 +96,7 @@ import ./host/vcs_source
 import ./host/test_results_source   # PLAT-53
 import ./host/problems_source       # PLAT-55
 import ./host/verification_source   # PLAT-63
+import ./host/constraints_source    # PLAT-62
 import ./host/edit_search           # Find in Files over the project in Edit mode
 from ../viewmodel/viewmodels/test_results_vm import TraceOpenPolicy,
   TestTabPlacement, TestTabPlacementKind, placeTestRecording, testTabOf,
@@ -103,6 +104,7 @@ from ../viewmodel/viewmodels/test_results_vm import TraceOpenPolicy,
 import ./host/build_output_source   # PLAT-56
 from ../viewmodel/host/native_requests_host import wireRequests   # PLAT-58
 import ./app/views/requests_pane   # PLAT-58: `RequestsAct`
+import ./app/views/shell_session_pane   # PLAT-61: `ShellAct`
 # PLAT-49 part B: the session strip's sessions — opened, adopted, closed here.
 import headless_app/headless_app
 import headless_app/session_tabs
@@ -973,6 +975,10 @@ proc interactive(command: TuiCommand): int =
     wireRequests(session.session, proc(path: string): string =
       if app.recordingOpener.isNil: "this terminal cannot open " & path
       else: app.recordingOpener(path))
+    # PLAT-61: a recorded command's recording opens in a new session tab.
+    session.wireShell(proc(path: string): string =
+      if app.recordingOpener.isNil: "this terminal cannot open " & path
+      else: app.recordingOpener(path))
     session.refresh(rt)
   except DapStalledError as e:
     driver.stop()
@@ -1076,6 +1082,9 @@ proc interactive(command: TuiCommand): int =
     wireRequests(opened.session, proc(path: string): string =
       if app.recordingOpener.isNil: "this terminal cannot open " & path
       else: app.recordingOpener(path))
+    opened.wireShell(proc(path: string): string =
+      if app.recordingOpener.isNil: "this terminal cannot open " & path
+      else: app.recordingOpener(path))
     sessions[int(slot.id)] = opened
     # M76: OPENED FROM A TAB WHOSE SESSION *STOP* ENDED — *File › Open
     # Trace…* (or *Record New Trace…*) chosen there, whose welcome tab
@@ -1174,6 +1183,11 @@ proc interactive(command: TuiCommand): int =
   # `LowLevelCodeVM`.
   app.lowLevelAct = proc(act: LowLevelAct): LowLevelActResult =
     session.lowLevelAct(rt, act)
+  # PLAT-61: the Shell pane — a key, a press on a recorded command, the
+  # scrollback — done through the shown session's `ShellVM`; its shell is
+  # pumped on the idle tick below.
+  app.shellAct = proc(act: ShellAct): ShellActResult =
+    session.shellAct(rt, act)
 
   # PLAT-47 deliverable 4: the VCS pane reads the directory the desktop's VCS
   # panel reads for a replay — the process's own working directory.
@@ -1304,6 +1318,18 @@ proc interactive(command: TuiCommand): int =
       else:
         session.showFileAt(rt, path, line, col))
   defer: verification.close()
+  # PLAT-62: the Constraints pane — the window's project (`app.projectRoot`)
+  # measured by `nargo info` the first time the pane is on screen; a row opens
+  # its function's line in Edit mode's editor, or, in Debug mode, from the
+  # recording.
+  let constraints = newConstraintsSource(rt,
+    proc(): string = app.projectRoot,
+    proc(path: string; line, col: int): string =
+      if rt.app.modes.product == pmEdit:
+        rt.openWorkingFileAt(path, line, col)
+      else:
+        session.showFileAt(rt, path, line, col))
+  defer: constraints.close()
   # PLAT-56: the Build Output pane over the same reader — the window's
   # `BuildVM`, the desktop BUILD panel's ViewModel; a located line opens as a
   # Problems row does, and Run builds the shown command again.
@@ -1527,6 +1553,8 @@ proc interactive(command: TuiCommand): int =
       let problemsChanged = buildOut.tick(rt) or problemsTicked
       # PLAT-63: the verification run in flight, polled.
       let verified = verification.tick(rt)
+      # PLAT-62: the circuit's measurement, as it lands.
+      let constraintsChanged = constraints.tick(rt)
       # PLAT-57: the search in flight, a bounded step per tick.
       let searched = session.pumpFindInFiles(rt)
       # PLAT-54: what a live agent sent since the last tick.
@@ -1534,6 +1562,8 @@ proc interactive(command: TuiCommand): int =
       # PLAT-58: the Requests pane's tail (a live session's), and its reveal
       # once the recording's requests are known.
       let requestsChanged = session.pumpRequests(rt, nowMs())
+      # PLAT-61: what the Shell pane's shell wrote and reported.
+      let shellChanged = session.pumpShell(rt)
       # PLAT-51: a welcome tab's recording, when it finishes.
       let recorded = pollRecording()
       # PLAT-49 part B: the auto-hide hover's clock — a preview due after
@@ -1551,7 +1581,7 @@ proc interactive(command: TuiCommand): int =
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
          hoverChanged or frameOwed or recorded or keysChanged or searched or
          barsChanged or testsChanged or agentChanged or problemsChanged or
-         requestsChanged or verified:
+         requestsChanged or verified or constraintsChanged or shellChanged:
         paint(driver, rt)
         frameOwed = false
     of dekResize:
@@ -1906,6 +1936,13 @@ proc editInteractive(command: TuiCommand): int =
     proc(path: string; line, col: int): string =
       rt.openWorkingFileAt(path, line, col))
   defer: verification.close()
+  # PLAT-62: the Constraints pane over this window's project; a row opens in
+  # the editor.
+  let constraints = newConstraintsSource(rt,
+    proc(): string = app.projectRoot,
+    proc(path: string; line, col: int): string =
+      rt.openWorkingFileAt(path, line, col))
+  defer: constraints.close()
 
   # PLAT-56: the Build Output pane over the same reader — the window's
   # `BuildVM`, the desktop BUILD panel's ViewModel; a located line opens as a
@@ -1947,6 +1984,7 @@ proc editInteractive(command: TuiCommand): int =
       let problemsTicked = problems.tick(rt, nowMonoMs())
       let problemsChanged = buildOut.tick(rt) or problemsTicked
       let verified = verification.tick(rt)
+      let constraintsChanged = constraints.tick(rt)
       let hoverChanged = rt.tickAutoHide(nowMs()) or
                          rt.tickCellHover(nowMs()) or
                          rt.tickPendingPrefix(nowMs())
@@ -1954,7 +1992,7 @@ proc editInteractive(command: TuiCommand): int =
       let keysChanged = rt.pollKeybindings(keybindings)
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
          hoverChanged or keysChanged or barsChanged or testsChanged or
-         problemsChanged or searched or verified:
+         problemsChanged or searched or verified or constraintsChanged:
         paint(driver, rt)
     of dekResize:
       size = ev.size

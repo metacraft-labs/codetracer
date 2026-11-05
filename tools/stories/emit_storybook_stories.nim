@@ -71,7 +71,8 @@ proc csfModule(section: CodeTracerStorySection): string =
     result.add "export const " & story.exportName & " = story(" &
       jsString(story.kind) & ", " & jsString(story.surface) & ", " &
       jsString(story.fixture) & ", " & jsString(story.name) &
-      (if story.check.len > 0: ", " & jsString(story.check) else: "") & ");\n"
+      (if story.check.len > 0 or story.frameTitle.len > 0: ", " & jsString(story.check) else: "") &
+      (if story.frameTitle.len > 0: ", " & jsString(story.frameTitle) else: "") & ");\n"
 
 proc storyIndex(sections: seq[CodeTracerStorySection]): string =
   var stories = newJArray()

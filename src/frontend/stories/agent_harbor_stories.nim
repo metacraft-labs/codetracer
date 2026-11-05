@@ -13,7 +13,7 @@
 ## view state each fixture names.
 
 import nim_agents_isonim_viewmodels/agent_harbor/[data_source, fixture_source,
-                                                   fleet_vm, records]
+                                                   fleet_vm, records, synthetic_fleet]
 
 const fleetFixtures* = ["snapshot", "needs-input", "failed", "selected",
                         "expanded", "filtered-empty", "loading", "error", "empty"]
@@ -35,9 +35,10 @@ proc fleetStorySource*(fixture: string): AgentHarborDataSource =
     newSnapshotDataSource(FleetSnapshot(sourceLabel: "empty server"),
                           "empty server")
   of "filtered-empty":
-    # The scenario working set: no session of it is queued, so the Queued
-    # filter leaves nothing (the snapshot has queued sessions in some sets).
-    newWorkingSetDataSource(wsScenario)
+    # A small invented set with no queued session, so the Queued filter
+    # leaves nothing (the snapshot has queued sessions in some captures).
+    let (snapshot, plans) = syntheticWorkingSet(3, 2, newFixtureDataSource().capturedAtMs)
+    newSnapshotDataSource(snapshot, "invented working set: 3 sessions over 2 initiatives", plans)
   else:
     newFixtureDataSource()
 
@@ -73,22 +74,24 @@ proc createFleetStoryVM*(fixture: string): FleetSnapshotVM =
 # Sessions as tabs, initiatives, initiative progress
 # ---------------------------------------------------------------------------
 #
-# Populated stories run over ONE coherent working set of the fixture set
-# (never real and invented data in one story). The default
-# is the scenario set: captured runs of Agent Harbor's scenario files on its
-# mock server and mock agent, launched for invented plans, with the
-# front-end of origin each states. The `real` stories use the real set:
-# sessions of the real fleet snapshot and the real running plans; Agent
-# Harbor reports no session's plan yet, so only the association known for
-# real (the capturing host's own session runs the CodeTracer plan) is made,
-# and the other plans show no session. The states no capture shows come from the seam's state
+# Populated stories run over ONE coherent working set (never real and
+# invented data in one story, and a session shown under an initiative works
+# on that initiative). The default is the invented working set
+# (`defaultWorkingSet`): fourteen sessions over four invented initiatives,
+# each session's title one of its initiative's, with the front-end of origin
+# each states. The `real` stories use the captured real set: sessions of the
+# real fleet snapshot and the real running plans; Agent Harbor reports no
+# session's plan yet, so only the association known for real (the capturing
+# host's own session runs the CodeTracer plan) is made, and the other plans
+# show no session. Captured scenario runs are never attached to an invented
+# initiative here. The states no capture shows come from the seam's state
 # sources: an invented working set of forty sessions over five initiatives
 # (overflow), one with very long names, an empty server, a server that has
 # not answered, one that cannot be reached.
 
 import std/[strutils, times]
 import nim_agents_isonim_viewmodels/agent_harbor/[session_tabs_vm, initiatives_vm,
-  initiative_progress_vm, synthetic_fleet]
+  initiative_progress_vm]
 
 export session_tabs_vm, initiatives_vm, initiative_progress_vm
 
@@ -120,12 +123,15 @@ proc invented(sessions, initiatives: int; longNames = false): SnapshotDataSource
 
 proc sessionsStorySource*(fixture: string;
                           endpoint = "/api/v1/sessions"): AgentHarborDataSource =
-  ## The source a sessions, initiatives or progress story reads; `endpoint`
-  ## is the read an error story names.
+  ## The source a sessions, initiatives or progress story reads. `endpoint`
+  ## is the read an error story names; "" for a read Agent Harbor's API has
+  ## no route for yet (the initiatives), whose error names no route.
   case fixture
   of "loading": newPendingDataSource("waiting for the Agent Harbor server")
   of "error":
-    newFailingDataSource("GET " & endpoint & " failed: connection refused " &
+    let failed = if endpoint.len > 0: "GET " & endpoint & " failed"
+                 else: "The Agent Harbor server did not answer"
+    newFailingDataSource(failed & ": connection refused " &
                          "(the server is not running, or its address is wrong)",
                          "unreachable server")
   of "empty", "unknown": newSnapshotDataSource(FleetSnapshot(sourceLabel: "empty server"),
@@ -136,7 +142,7 @@ proc sessionsStorySource*(fixture: string;
     # Four sessions over five initiatives: the last initiative has none.
     invented(4, 5, longNames = true)
   of "real", "real-plan", "blocked": newWorkingSetDataSource(wsReal)
-  else: newWorkingSetDataSource(wsScenario)
+  else: invented(DefaultSessions, DefaultInitiatives)
 
 proc busiestInitiative(source: AgentHarborDataSource): string =
   ## The initiative with the most sessions (the first on a tie).
@@ -203,7 +209,7 @@ proc createSessionListStoryVM*(fixture: string): SessionTabStripVM =
 proc createInitiativesStoryVM*(fixture: string): InitiativesVM =
   if fixture notin initiativesFixtures:
     raise newException(ValueError, "no initiatives story fixture named " & fixture)
-  let source = sessionsStorySource(fixture, "/api/v1/initiatives")
+  let source = sessionsStorySource(fixture, endpoint = "")
   result = newInitiativesVM(source)
   result.load()
   if fixture == "selected": result.select(busiestInitiative(source))
@@ -215,7 +221,7 @@ proc createProgressStoryVM*(fixture: string): InitiativeProgressVM =
   ## summary, an initiative the server does not know.
   if fixture notin progressFixtures:
     raise newException(ValueError, "no initiative progress story fixture named " & fixture)
-  var source = sessionsStorySource(fixture, "/api/v1/initiatives")
+  var source = sessionsStorySource(fixture, endpoint = "")
   var initiativeId = ""
   case fixture
   of "current", "progress-event", "real-plan": initiativeId = busiestInitiative(source)
@@ -281,7 +287,7 @@ proc createInitiativeTabsStoryVM*(fixture: string): InitiativeTabStripVM =
   ## invented `overflow-40`, `long-names`, and `empty`, `loading`, `error`.
   if fixture notin initiativeTabsFixtures:
     raise newException(ValueError, "no initiative tab bar story fixture named " & fixture)
-  let source = sessionsStorySource(fixture, "/api/v1/initiatives")
+  let source = sessionsStorySource(fixture, endpoint = "")
   result = newInitiativeTabStripVM(source)
   result.load()
   let tabs = result.tabs
@@ -289,7 +295,7 @@ proc createInitiativeTabsStoryVM*(fixture: string): InitiativeTabStripVM =
   let first = tabs[0].id
   # The recordings a front-end has loaded for an initiative are its own
   # state, and no capture associates a recording with a plan: the
-  # scenario-set and invented stories get invented recordings (one ready,
+  # invented working sets get invented recordings (one ready,
   # one loading, one that failed, one missing); the real set's initiatives
   # none.
   case fixture

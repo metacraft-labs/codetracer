@@ -1,3 +1,8 @@
+// The Shell pane (CodeTracer-Shell.md §7.7): the shared model's rows and
+// gutter (`viewmodel/views/isonim_shell_view.nim`). The tones are the ones the
+// terminal (`srChromeSuccess` / `-Error` / `-Notification`) and the GPUI
+// window (`shell_leaf.ShellToneColours`) draw: the design system's success,
+// error and warning text.
 .shell-component
   display: flex
   flex-direction: column
@@ -7,51 +12,31 @@
   box-sizing: border-box
   background-color: colors-ui-surface-base-panel
   color: colors-ui-text-primary-body
-  font-family: "SpaceGrotesk"
   font-size: 0.8125rem
   overflow: hidden
 
-  .shell-output
-    flex: 1 1 auto
-    min-height: 0
-    overflow: auto
-    padding: 0 0.5em 0.5em
-
-  .shell-input-row
-    flex: 0 0 auto
-    display: flex
-    align-items: center
-    gap: 0
-    min-height: 1rem
-    padding: 0.5rem
-    border-top: 0
-
-  .shell-prompt,
-  .shell-history-indicator,
-  .shell-scroll-indicator
+  .shell-status
+    font-family: "SpaceGrotesk"
     color: colors-ui-text-primary-body
 
-  .shell-input
-    flex: 1 1 auto
-    min-width: 0
-    height: 1rem
-    border: 0
-    border-radius: 0
-    background-color: transparent
-    color: colors-ui-text-primary-body
-    font: inherit
-    padding: 0
-    outline: 0
+  .shell-rows
+    font-family: "SpaceMono", monospace
 
-    &:focus
-      border-color: transparent
+  .shell-gutter
+    user-select: none
 
-    &::placeholder
-      color: transparent
+  .shell-row[data-tone="ok"] .shell-gutter
+    color: colors-ui-text-success-primary
 
-  .shell-history-indicator
-    flex: 0 0 auto
-    padding: 0 0.5em 0.35em
+  .shell-row[data-tone="error"] .shell-gutter
+    color: colors-ui-text-error-primary
+
+  .shell-row[data-tone="working"] .shell-gutter
+    color: colors-ui-text-warning-primary
+
+  .shell-cursor
+    background-color: colors-ui-text-primary-body
+    color: colors-ui-surface-base-panel
 
 .shell-container
   // background-color: colors-ui-surface-base-panel

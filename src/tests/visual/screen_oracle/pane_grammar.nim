@@ -571,8 +571,7 @@ const
   QuietMessages* = [
     "no search results",
     "no values have been pinned to the scratchpad",
-    "the shell ViewModel carries input and history and no output; this pane " &
-      "shows what exists",
+    "the shell starts when the pane is shown",
     "the build output has no ViewModel; no host attached one"]
     ## The products' own empty messages, as whole sentences — the `srEmpty`
     ## warrant, as PLAT-39's state reader takes "No local variables are

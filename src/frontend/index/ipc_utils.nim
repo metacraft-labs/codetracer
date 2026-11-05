@@ -3,6 +3,7 @@ import
   electron_vars, traces, files, startup, install, menu, online_sharing, window, logging, config, debugger, server_config, host_clients, base_handlers, bootstrap_cache, lsp_bridge,
   review_dataset, keybindings, table_columns, replay_open_in,
   ns9_panes,
+  shell_sessions,
   hcr_launch,
   build_runner,
   file_tree_operations,
@@ -423,6 +424,13 @@ proc configureIpcMain* =
     # here by `index/ns9_panes.onNs9Panes`, and in a browser by
     # `ui/web_entry_surface.installTemplatePaneHost`.
     "ns9-panes"
+
+    # The Shell pane's session (CodeTracer-Shell.md §7.2, §7.7): one
+    # `ct shell-session` per pane, relayed by `index/shell_sessions`.
+    "shell-session-start"
+    "shell-session-input"
+    "shell-session-resize"
+    "shell-session-stop"
 
     "tab-load"
     "load-low-level-tab"

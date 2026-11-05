@@ -661,8 +661,6 @@ proc main*(): Trace =
     ## `--noir-test-name <name>`: trace that Noir test function instead of
     ## `main` (`ct record-test` on a `.nr` file; see `recordTest`).
 
-  echo args
-
   # for i, arg in args:
   var i = 0
   while i < args.len:
@@ -799,7 +797,9 @@ proc main*(): Trace =
   #       traceID=traceID, test=false)
 
 
-  let command = args.join(" ")
+  # What a shell session's events name the command by: the program and its
+  # arguments, not this recorder's own options (CodeTracer-Shell.md §7.3).
+  let command = (@[program] & recordArgs).join(" ")
   putEnv("CODETRACER_RECORDING", "1")
   let sessionId = loadSessionId()
   let sessionLogPath = scriptSessionLogPath(sessionId)
@@ -810,7 +810,10 @@ proc main*(): Trace =
   let shellSocket = getEnv("CODETRACER_SHELL_SOCKET", "")
   let shellAddress = getEnv("CODETRACER_SHELL_ADDRESS", "")
 
-  let actionId = -1 # TODO? newActionId(sessionId, test=false)
+  # One recording is one action of a shell session (CodeTracer-Shell.md
+  # §2.3, §7.3): this process's id names it, so its working event and its
+  # settled one pair up on the session's report file.
+  let actionId = getCurrentProcessId()
   let firstLine = loadLine(sessionId, sessionLogPath)
 
   if shellCleanupOutputFolder:
@@ -845,20 +848,24 @@ proc main*(): Trace =
   if address.len == 0:
     address = shellAddress
 
-  let shouldSendEvents = sessionId != -1 or socketPath.len > 0 and address.len > 0
+  let shouldSendEvents = sessionId != -1 or reportFile.len > 0 or
+    socketPath.len > 0 and address.len > 0
 
   # echo "socketPath ", socketPath
   # echo "address ", address
   # echo "shouldSendEvents ", shouldSendEvents
 
-  # enable, if we need before-record events
-  let sendAdditionalEvents = false
+  # A shell session's report file takes the recording's whole story — its
+  # working event before, its settled one after — so the Shell pane marks
+  # the command while it runs (CodeTracer-Shell.md §7.3).
+  let sendAdditionalEvents = reportFile.len > 0
   var traceZipFullPath = ""
 
   if shouldSendEvents:
     if sendAdditionalEvents:
+      markShellTerminal(actionId, "working")
       registerRecordingCommand(
-        reportFile, socketPath, address,
+        reportFile, "", "",
         sessionId, actionId, NO_PID, "",
         command, WorkingStatus,
         errorMessage="", firstLine=firstLine, lastLine=firstLine)
@@ -889,11 +896,18 @@ proc main*(): Trace =
 
     if shouldSendEvents:
       let lastLine = loadLine(sessionId, sessionLogPath)
-      registerRecordingCommandForCI(
-        socketPath, address,
-        trace.rrPid, traceZipFullPath, toCLang(trace.lang))
-      # in the past it was `registerRecordingCommand().. with more args
-      #   for `ct shell` mode; if needed, this can be restored
+      if reportFile.len > 0:
+        markShellTerminal(actionId, "ok")
+        registerRecordingCommand(
+          reportFile, "", "",
+          sessionId, actionId, trace.rrPid, traceZipFullPath,
+          command, OkStatus,
+          errorMessage="", firstLine=firstLine, lastLine=lastLine,
+          trace=trace)
+      if socketPath.len > 0:
+        registerRecordingCommandForCI(
+          socketPath, address,
+          trace.rrPid, traceZipFullPath, toCLang(trace.lang))
 
     putEnv("CODETRACER_RECORDING", "")
 
@@ -918,8 +932,9 @@ proc main*(): Trace =
   except CatchableError as e:
     if shouldSendEvents and sendAdditionalEvents:
       let lastLine = loadLine(sessionId, sessionLogPath)
+      markShellTerminal(actionId, "error")
       registerRecordingCommand(
-        reportFile, socketPath, address,
+        reportFile, "", "",
         sessionId, actionId, NO_PID, "",
         command, ErrorStatus,
         errorMessage=e.msg, firstLine=firstLine, lastLine=lastLine)

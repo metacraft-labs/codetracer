@@ -5,8 +5,6 @@
 ## Built from CodeTracer's own session tab strip (`session_tabs.styl`), in the
 ## caption bar, left to right:
 ##
-## - Previous / Next session (`‹ 2 of 5 ›`) and the auto-switch toggle: they
-##   walk the sessions waiting for the operator, switching tabs;
 ## - one tab per active initiative: its state mark (needs input, working,
 ##   blocked, idle, ended), its name and `n/m` milestones; the active one
 ##   carries the recording switcher's numbered buttons for the replays loaded
@@ -14,9 +12,13 @@
 ##   progress popup (executive summary, milestones by status, current
 ##   milestone, its sessions);
 ## - a tab per open session launched for no initiative;
-## - `[N agent harbor sessions]`: the sessions started elsewhere, a menu from
-##   which one is opened as a tab;
-## - "+".
+## - the `+N` overflow chip, and "+" right after the last tab;
+## - at the bar's end, as ghost controls (no fill until hovered): the
+##   sessions started elsewhere, a count badge and `agent harbor sessions`
+##   (on a compact bar the badge alone, its label in the tooltip), a menu
+##   listing each with its initiative and state, from which one is brought
+##   into view; then Previous / Next session (`← 2 of 5 →`) and the
+##   auto-switch toggle, which walk the sessions waiting for the operator.
 ##
 ## What a tab says is the viewmodel's; the view draws it.
 
@@ -166,6 +168,13 @@ proc renderElsewhereItem[R](r: R; vm: InitiativeTabStripVM; entry: ElsewhereSess
         discard
       span(class = "ah-tab-overflow-title"):
         text entry.item.title
+      # Its initiative beside its state: where it opens (inside that
+      # initiative's tab, or as a tab of its own).
+      span(class = "ah-elsewhere-initiative" &
+                   (if entry.initiativeTitle.len == 0: " ah-elsewhere-no-initiative" else: ""),
+           title = (if entry.initiativeTitle.len > 0: "initiative: " & entry.initiativeTitle
+                    else: "launched for no initiative")):
+        text (if entry.initiativeTitle.len > 0: entry.initiativeTitle else: "no initiative")
       span(class = "ah-elsewhere-status"):
         text entry.item.statusLabel
       if entry.item.originShort.len > 0:
@@ -202,6 +211,36 @@ proc renderInbox[R](r: R; vm: InitiativeTabStripVM): auto =
              onclick = proc() = target.autoSwitch.val = not target.autoSwitch.val):
         text autoLabel
 
+proc renderElsewhere[R, N](r: R; vm: InitiativeTabStripVM; anchor: N) =
+  ## The sessions started elsewhere: a count badge and its label (a compact
+  ## bar keeps the badge and moves the label into the tooltip), and the
+  ## menu that drops from it.
+  mixin setAttribute
+  let target = vm
+  let compact = vm.compact
+  let tooltip = vm.elsewhereTooltip
+  var item: N
+  let itemNode = ui(r):
+    tdiv(ref = item, class = "ah-elsewhere" &
+                             (if vm.elsewhereOpen.val: " ah-elsewhere-open" else: "") &
+                             (if compact: " ah-elsewhere-compact" else: ""),
+         role = "button", tabindex = "0", title = tooltip,
+         onclick = proc() = target.elsewhereOpen.val = not target.elsewhereOpen.val):
+      span(class = "ah-elsewhere-count"):
+        text $vm.elsewhereCount
+      if not compact:
+        span(class = "ah-elsewhere-label"):
+          text vm.elsewhereLabel
+  r.setAttribute(item, "aria-label", tooltip)
+  r.appendRendered(anchor, itemNode)
+  if vm.elsewhereOpen.val:
+    var menu: N
+    let menuNode = ui(r):
+      tdiv(ref = menu, class = SessionTabOverflowMenuClass & " ah-elsewhere-menu")
+    for entry in vm.elsewhere:
+      r.appendRendered(menu, renderElsewhereItem(r, vm, entry))
+    r.appendRendered(anchor, menuNode)
+
 proc renderAgentHarborInitiativeTabBar*[R, N](r: R; vm: InitiativeTabStripVM): N =
   mixin clearChildren, setAttribute
   var bar, controls: N
@@ -210,9 +249,11 @@ proc renderAgentHarborInitiativeTabBar*[R, N](r: R; vm: InitiativeTabStripVM): N
       tdiv(ref = bar, id = SessionTabBarId, class = InitiativeTabBarClass)
   createRenderEffect proc() =
     r.clearChildren(bar)
-    # The right-hand group -- the sessions started elsewhere, Previous/Next
-    # with auto-switch, and "+" -- is one unit that never shrinks, so "+"
-    # stays in view; a stacked bar puts it on a line of its own.
+    # Left to right, as CodeTracer's own strip: the tabs, the overflow chip
+    # and "+" right after the last tab; then, at the bar's end, the
+    # right-hand group -- the sessions started elsewhere and Previous/Next
+    # with auto-switch -- as ghost controls, one unit that never shrinks. A
+    # stacked bar puts the group on a line of its own.
     let controlsNode = ui(r):
       tdiv(ref = controls, class = "ah-bar-controls")
     case vm.state.val
@@ -272,42 +313,26 @@ proc renderAgentHarborInitiativeTabBar*[R, N](r: R; vm: InitiativeTabStripVM): N
           for i in line.overflow:
             r.appendRendered(menu, renderOverflowTab(r, vm, tabs[i]))
           r.appendRendered(bar, menuNode)
-      let fullLabel = vm.elsewhereLabel
-      # A compact bar names the count only; the tooltip says the rest.
-      let label = if vm.compact and fullLabel.len > 0: "[" & $vm.elsewhere.len & "]" else: fullLabel
-      if label.len > 0:
-        let target = vm
-        var item, anchor: N
-        # The chip and its menu share an anchor, so the menu drops from the
-        # chip; the anchor starts the bar's right-hand group.
+      if vm.elsewhereCount > 0:
+        # The badge and its menu share an anchor, so the menu drops from the
+        # badge; the anchor starts the right-hand group.
+        var anchor: N
         let anchorNode = ui(r):
           tdiv(ref = anchor, class = "ah-elsewhere-anchor")
-        let itemNode = ui(r):
-          tdiv(ref = item, class = "ah-elsewhere" &
-                                   (if vm.elsewhereOpen.val: " ah-elsewhere-open" else: ""),
-               role = "button", tabindex = "0",
-               title = fullLabel & ": sessions started elsewhere; choose one to open it as a tab",
-               onclick = proc() = target.elsewhereOpen.val = not target.elsewhereOpen.val):
-            text label
-        r.appendRendered(anchor, itemNode)
-        if vm.elsewhereOpen.val:
-          var menu: N
-          let menuNode = ui(r):
-            tdiv(ref = menu, class = SessionTabOverflowMenuClass & " ah-elsewhere-menu")
-          for entry in vm.elsewhere:
-            r.appendRendered(menu, renderElsewhereItem(r, vm, entry))
-          r.appendRendered(anchor, menuNode)
+        renderElsewhere(r, vm, anchor)
         r.appendRendered(controls, anchorNode)
+    # "+" directly after the last tab (or the notice), as in CodeTracer's
+    # strip.
+    let add = ui(r):
+      button(class = "ct-button-image-sm-secondary ct-button-no-border session-tab-add",
+             title = SessionTabAddTitle):
+        discard
+    r.appendRendered(bar, add)
     # Previous / Next and auto-switch at the right, beside the sessions
     # started elsewhere, so the initiative tabs start at the left edge as
     # CodeTracer's tabs do.
     if vm.state.val in {asReady, asError}:
       r.appendRendered(controls, renderInbox(r, vm))
-    let add = ui(r):
-      button(class = "ct-button-image-sm-secondary ct-button-no-border session-tab-add",
-             title = SessionTabAddTitle):
-        discard
-    r.appendRendered(controls, add)
     r.appendRendered(bar, controlsNode)
     let overflowing = vm.state.val == asReady and vm.singleLine.overflow.len > 0
     r.setAttribute(bar, "class", InitiativeTabBarClass &

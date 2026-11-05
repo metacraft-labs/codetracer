@@ -117,7 +117,17 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 2013
+const ExpectedAssertions = 2037
+  ## *2034 -> 2037 on 2026-11-05: `host/native_shell_host.nim` (the Shell
+  ## pane's native host) x three assertions. It calls no `rebase(` and spells
+  ## no `mapOver`.*
+  ## *-> 2034 on 2026-11-05, measured: `host/native_constraints_host.nim` (the
+  ## native Constraints pane's measurement) x three assertions, over the
+  ## production modules added upstream since the last count. None calls
+  ## `rebase(` or spells `mapOver`.*
+  ## *2013 -> 2016 on 2026-11-04: `host/native_constraints_host.nim` (the
+  ## native Constraints pane's measurement) x three assertions. It neither
+  ## calls `rebase(` nor spells `mapOver`.*
   ## 2001 -> 2013, measured: agents db71c1840d2 already counts 2010 (three
   ## production modules added since 2001 was written), and
   ## `host/native_verification_host.nim` adds three more facts.

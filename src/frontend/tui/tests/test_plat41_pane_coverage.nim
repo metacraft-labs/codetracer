@@ -108,9 +108,11 @@ suite "PLAT-41 LAW-P1 — the three sets COVER PaneKind":
     # PLAT-58 moved `paneRequests` into the vocabulary: it draws the
     # session's `RequestPanelVM`.
     # PLAT-63's Verification is in the vocabulary from its first day.
-    ck card(PaneVocabularyPanes) == 19
+    # PLAT-62 moved `paneConstraints`, the last accepted exception, into the
+    # vocabulary: it draws the window's `ConstraintsVM`.
+    ck card(PaneVocabularyPanes) == 20
     ck card(PaneNativePanes) == 1
-    ck card(PaneAcceptedExceptions) == 1
+    ck card(PaneAcceptedExceptions) == 0
     ck paneFileTree in PaneVocabularyPanes
     ck paneVcs in PaneVocabularyPanes
     ck paneTerminalOutput in PaneVocabularyPanes
@@ -119,7 +121,8 @@ suite "PLAT-41 LAW-P1 — the three sets COVER PaneKind":
     ck paneProblems in PaneVocabularyPanes
     ck paneBuildOutput in PaneVocabularyPanes
     ck paneRequests in PaneVocabularyPanes
-    ck PaneAcceptedExceptions == {paneConstraints}
+    ck paneConstraints in PaneVocabularyPanes
+    ck PaneAcceptedExceptions == {}
     ck card(PaneVocabularyPanes) + card(PaneNativePanes) +
        card(PaneAcceptedExceptions) == card(allPanes())
 
@@ -289,17 +292,18 @@ suite "PLAT-41 — the five panes DRAW DATA, not only reports":
       ck pv.root.rows.len == 1
       dispose()
 
-  test "shell renders an Input carrying what was typed":
+  test "shell renders a Table of the lines its shell wrote":
     createRoot proc(dispose: proc()) =
+      # PLAT-61: the shell's model carries the OUTPUT now (the session's
+      # bytes, fed through its own entry point); a shell that has not started
+      # still says so.
       let vm = createShellVM(freshStore())
-      vm.setInput("print(checksum)")
+      let idle = paneView(paneShell, ViewModel(vm), GpuiPanelBudget, "gpui")
+      ck idle.report == "the shell starts when the pane is shown"
+      vm.receiveOutput("$ print checksum\r\n73\r\n$ ")
       let pv = paneView(paneShell, ViewModel(vm), GpuiPanelBudget, "gpui")
-      ck pkInput in pv.entries
-      # The shell's report is NON-empty by design and says why: its ViewModel
-      # carries input and history and no output. That is the one pane here
-      # whose report survives having data, and it is recorded rather than
-      # asserted away.
-      ck pv.report.contains("no output")
+      ck pkTable in pv.entries
+      ck pv.report == ""
       dispose()
 
   test "fileTree renders the RECORDING'S OWN source tree, from its paths.json":

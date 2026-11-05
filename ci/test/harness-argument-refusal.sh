@@ -73,6 +73,12 @@ python3 ci/test/plat56-required-causes-test.py || {
 	exit 1
 }
 
+# The real Shell launcher must retain command failures and sealed inputs.
+python3 ci/test/plat61-shell-harness-test.py || {
+	echo "FAIL: PLAT-61 launch status or mutation input guards are unsound" >&2
+	exit 1
+}
+
 # THE DISCOVERY IS GENERAL, AND ANY EXEMPTION IS NAMED, COUNTED AND FROZEN.
 #
 # It was `run-plat*mutations*.py` alone, which was a statement about the only

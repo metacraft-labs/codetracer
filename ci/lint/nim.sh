@@ -32,6 +32,12 @@ source ci/lib/lint-steps.sh
 # developer's real ~/.cache/codetracer/vscode-484fdf69.
 # shellcheck source=ci/lib/codetracer-home.sh disable=SC1091
 source ci/lib/codetracer-home.sh
+# On Linux the whole stage runs again inside one sandbox over those
+# directories, so only this stage's own writes can fail it: a recorder test in
+# another checkout on the same host writing ~/.cache/codetracer is not this
+# stage's doing (`ct_user_state_stage_sandbox`). It returns only when there is
+# no sandbox here, or in the sandboxed run itself.
+ct_user_state_stage_sandbox lint-nim bash ci/lint/nim.sh "$@"
 ct_export_scratch_codetracer_home lint-nim
 # shellcheck disable=SC2154 # set by ct_export_scratch_codetracer_home
 trap 'rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT

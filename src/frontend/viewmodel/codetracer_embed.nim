@@ -275,6 +275,14 @@ export constraints_vm
 import viewmodels/terminal_output_vm
 export terminal_output_vm
 
+# PLAT-61: the Shell pane's model (CodeTracer-Shell.md §7) — its rows, its
+# actions' words and glyphs, its keys. The terminal and GPUI front-ends draw
+# from it, so it is behind this one door. Adds nothing to the import graph:
+# `session_vm` already imports it, and it imports only `std/*`,
+# `isonim/core/*`, `isonim/viewmodel`, `store/*` and `terminal_output_model`.
+import viewmodels/shell_vm
+export shell_vm
+
 import viewmodels/scrollbar_scrubber
 export scrollbar_scrubber
 

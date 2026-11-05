@@ -117,11 +117,16 @@ proc withheldNote*(vm: FleetSnapshotVM): string =
     "prompts of " & $counts.withheldPrompts & " withheld by the server"
 
 proc headerSummary*(vm: FleetSnapshotVM): string =
+  ## `471 sessions`; `13 of 471 sessions` while a filter shows some of them
+  ## (or while the server reports more than it listed).
   let counts = vm.counts
-  if counts.total > counts.listed:
-    $counts.listed & " of " & $counts.total & " sessions"
+  let filtered = vm.filter.val != ffAll
+  let shown = if filtered: vm.rows.len else: counts.listed
+  let outOf = if filtered: counts.listed else: counts.total
+  if outOf > shown or filtered:
+    $shown & " of " & $outOf & " sessions"
   else:
-    $counts.listed & (if counts.listed == 1: " session" else: " sessions")
+    $shown & (if shown == 1: " session" else: " sessions")
 
 proc appendRendered[R, N](r: R; host, child: N) =
   # Bound where instantiated: on JS this module also sees WebRenderer's.
@@ -320,12 +325,10 @@ proc renderAgentHarborFleetPanel*[R, N](
 
   createRenderEffect proc() =
     r.clearChildren(body)
-    # No session names an initiative (the real snapshot): its column, and
-    # the column's name, are left out.
-    var anyInitiative = false
-    if vm.state.val == asReady:
-      for row in vm.rows:
-        if row.initiative.len > 0: anyInitiative = true
+    # No session of the snapshot names an initiative (the real snapshot):
+    # its column, and the column's name, are left out. Decided over the
+    # whole snapshot, so a filter does not change the columns.
+    let anyInitiative = vm.state.val == asReady and vm.anyInitiative
     r.setAttribute(body, "class", "ah-fleet-body" &
       (if anyInitiative: "" else: " ah-fleet-no-initiative"))
     r.appendRendered(body, renderHeader(r, vm, callbacks))

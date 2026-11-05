@@ -73,6 +73,8 @@ import ../app/runtime
 import ../app/views/search_results_pane   # PLAT-57
 import ../app/views/agent_activity_pane   # PLAT-54
 import ../app/views/requests_pane   # PLAT-58
+import ../app/views/shell_session_pane   # PLAT-61
+import ../../viewmodel/host/native_shell_host   # PLAT-61: the Shell pane's session
 import ../../viewmodel/host/native_requests_host   # PLAT-58: the Requests pane's host
 from isonim/core/async_compat import drainPlatformCallbacks
 import ../app/views/low_level_code_pane   # PLAT-60
@@ -170,6 +172,9 @@ type
     closed: bool
       ## `close` has run; a second call is a no-op.
     agent*: NativeAgentHost
+    shell*: NativeShell
+      ## PLAT-61: the Shell pane's process side (`wireShell`): the session's
+      ## `ShellVM` with its shell on a pty, nil until wired.
       ## PLAT-54: Agent Activity's host — the desktop's `AgentActivityVM`
       ## over this session's store (so a live agent's session is the one
       ## this session's tab reports), a recorded session it was handed, and
@@ -261,6 +266,7 @@ proc close*(s: TuiSession) =
     return
   s.closed = true
   s.agent.close()
+  s.shell.closeNativeShell()
   s.source.dispose()
   s.session.close()
 
@@ -1059,6 +1065,103 @@ proc lowLevelAct*(s: TuiSession; rt: TuiRuntime;
     rt.app.notification = result.note & " — " & rt.app.notification
 
 # ---------------------------------------------------------------------------
+# PLAT-61: the Shell pane (CodeTracer-Shell.md §7)
+# ---------------------------------------------------------------------------
+
+proc shellVM*(s: TuiSession): ShellVM =
+  if s.isNil or s.session.isNil or s.session.session.isNil: nil
+  else: s.session.session.shellVM
+
+proc wireShell*(s: TuiSession; openFolder: proc(path: string): string) =
+  ## Give the session's `ShellVM` its shell (`native_shell_host`): started the
+  ## first time the pane is on screen, at its size; a press on a recorded
+  ## command opens the recording through `openFolder` (a new session tab).
+  let vm = s.shellVM
+  if vm.isNil or not s.shell.isNil:
+    return
+  s.shell = wireNativeShell(vm, openFolder)
+
+proc shellModelOf*(vm: ShellVM; height: int): ShellPaneModel =
+  ## The session's `ShellVM` as the pane's value: its words, and the rows a
+  ## `height`-row view shows — every cell and mark the model's.
+  if vm.isNil:
+    return
+  result = ShellPaneModel(loaded: true, state: vm.state.val,
+                          words: vm.statusWords, note: vm.note.val,
+                          lineCount: vm.lineCount,
+                          top: vm.visibleTop(max(1, height)),
+                          cols: vm.screen.cols, height: vm.screen.rows)
+  for a in vm.actions:
+    result.summaries.add a.actionSummary
+  for r in vm.shellRows(max(1, height)):
+    result.rows.add ShellPaneRow(line: r.line, mark: r.mark, tone: r.tone,
+                                 action: (if r.mark == srmNone: -1
+                                          else: r.action),
+                                 runs: r.runs, cursorCol: r.cursorCol,
+                                 text: r.text)
+
+proc refreshShell*(s: TuiSession; rt: TuiRuntime) =
+  ## The pane's value now — and the shell started, or resized, to the pane's
+  ## text area when the pane is on screen (§7.2: it runs at the pane's size).
+  let vm = s.shellVM
+  if s.ended or vm.isNil:
+    rt.app.shellPane = ShellPaneModel()
+    return
+  let area = rt.shellPaneArea()
+  if area.width > 0 and area.height > 1:
+    let (cols, rows) = shellPaneSize(area)
+    if vm.state.val == sssIdle:
+      vm.startShell(cols, rows)
+    elif vm.state.val == sssRunning:
+      vm.resizeShell(cols, rows)
+  rt.app.shellPane = shellModelOf(vm, vm.screen.rows)
+
+proc pumpShell*(s: TuiSession; rt: TuiRuntime): bool =
+  ## The idle tick: what the shell wrote and the commands it reported since
+  ## the last tick, into the model; whether the pane changed.
+  if s.ended or s.shell.isNil:
+    return false
+  let before = s.shellVM.revision.val
+  discard s.shell.pumpShell(0)
+  if s.shellVM.revision.val != before:
+    s.refreshShell(rt)
+    return true
+  # The pane may have come on screen (or moved) since the last tick.
+  let area = rt.shellPaneArea()
+  if area.width > 0 and s.shellVM.state.val == sssIdle:
+    s.refreshShell(rt)
+    return true
+  false
+
+proc shellAct*(s: TuiSession; rt: TuiRuntime; act: ShellAct): ShellActResult =
+  ## The pane's act done through the session's `ShellVM`, the pane refreshed.
+  if s.ended:
+    return ShellActResult(note: EndedSessionNote)
+  let vm = s.shellVM
+  if vm.isNil:
+    return ShellActResult(note: "this session has no shell")
+  case act.kind
+  of shaKey:
+    let route = vm.pressKey(shellKeyOfChord(act.chord))
+    result.toApp = route.kind == skrApp
+    if route.kind == skrConsumed:
+      result.note = vm.note.val
+  of shaText:
+    vm.sendInput(act.text)
+  of shaPress:
+    result.note = vm.activateAction(act.action)
+  of shaScroll:
+    vm.scrollShell(act.delta, vm.screen.rows)
+  of shaScrollTo:
+    vm.scrollShellTo(act.top, vm.screen.rows)
+  of shaFit:
+    if vm.state.val == sssIdle: vm.startShell(act.cols, act.rows)
+    else: vm.resizeShell(act.cols, act.rows)
+  # The shell's echo of a key arrives a moment later; take what is there.
+  discard s.shell.pumpShell(0)
+  s.refreshShell(rt)
+
+# ---------------------------------------------------------------------------
 # PLAT-54: Agent Activity
 # ---------------------------------------------------------------------------
 
@@ -1391,6 +1494,8 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   s.refreshRequests(rt)
   # PLAT-60: the Low Level Code pane, this session's.
   s.refreshLowLevel(rt)
+  # PLAT-61: the Shell pane, this session's.
+  s.refreshShell(rt)
 
   let locals = s.session.getLocals()
   s.valueTimeline.observeStop(tick, locals)

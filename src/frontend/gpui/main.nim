@@ -81,7 +81,8 @@ when defined(js):
 
 import ./design_fonts
 import std/[cpuinfo, json, math, options, os, sequtils, sets, strutils, tables,
-            times]
+            times, exitprocs]
+from std/unicode import runeLen   # PLAT-61: a typed character
 when defined(posix):
   import std/posix   # PLAT-53: `tests:kill`
 
@@ -168,6 +169,12 @@ import ../tui/host/build_runner
 import ../tui/host/build_problems
 import ./requests_leaf         # PLAT-58: the Requests pane, drawn natively
 import ../viewmodel/host/native_requests_host   # PLAT-58: its host
+import ./constraints_leaf      # PLAT-62: the Constraints pane, drawn natively
+import ../viewmodel/host/native_constraints_host   # PLAT-62: its host
+import ../viewmodel/viewmodels/constraints_vm
+import headless_app/constraint_menu   # PLAT-62: its row menu (K68)
+import ./shell_leaf            # PLAT-61: the Shell pane, drawn natively
+import ../viewmodel/host/native_shell_host   # PLAT-61: its shell's process
 from isonim/core/async_compat import drainPlatformCallbacks
 import ../viewmodel/host/native_test_host   # PLAT-53: the desktop's host, native producers
 import ./agent_activity_leaf   # PLAT-54: Agent Activity, drawn natively
@@ -303,6 +310,16 @@ OPTIONS:
                       verify:stop  verify:wait[:<ms>]  verify:line:<line>
                       verify:menu:<line>  verify:choose:<label>
                       verify:key:<operation>  verify:wheel:<rows>
+                    and (PLAT-62) the Constraints pane (`<row>` a row's
+                    index in the pane's rows):
+                      constraints:show  constraints:wait[:<ms>]
+                      constraints:row:<row>  constraints:menu:<row>
+                      constraints:key:<operation>
+                      constraints:wheel:<rows>  constraints:track:<permille>
+                    and (PLAT-61) the Shell pane (`type:` and `key:` reach
+                    its shell while it has the focus):
+                      shell:show  shell:wait:<text>[:<ms>]
+                      shell:gutter:<action>  shell:wheel:<rows>
                     and (PLAT-69) what an open window's renderer reports:
                       resize:<width>:<height> (the content area resized)
                       chrome:<spec> (its frame changed; `--window-chrome`'s
@@ -693,6 +710,10 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
                        "lowlevel",
                        # PLAT-63: the Verification pane.
                        "verify",
+                       # PLAT-62: the Constraints pane's rows and menu.
+                       "constraints",
+                       # PLAT-61: the Shell pane's shell and gutter.
+                       "shell",
                        # PLAT-69: the window resized, its frame changed.
                        "resize", "chrome",
                        # Build-Output-Pane.md §3.8, §3.9: a pane docked to
@@ -1167,6 +1188,9 @@ proc syncTestsTabs()
 
 proc drawTestsPane(r: GpuiRenderer)
 proc drawRequestsPane(r: GpuiRenderer)
+proc drawConstraintsPane(r: GpuiRenderer)
+  ## PLAT-62: forward-declared; defined beside the Requests pane's drawing.
+proc drawShellPane(r: GpuiRenderer)   # PLAT-61
   ## PLAT-58: forward-declared; defined beside Test Results' drawing.
   ## PLAT-53: forward-declared; defined beside Find in Files' drawing.
 proc drawAgentPane(r: GpuiRenderer)
@@ -1327,7 +1351,22 @@ var
   gSearch = initGSearchPane()
   gTests = initGTestsPane()
   gRequests = initGRequestsPane()
+  gConstraintsPane = initGConstraintsPane()
+    ## PLAT-62: the Constraints pane's reading position and a held thumb.
+  gConstraintsVM: ConstraintsVM = nil
+    ## PLAT-62: the WINDOW's Constraints ViewModel, shared by every tab: the
+    ## circuit is the project's (as Test Results' is).
+  gConstraintsHost: NativeConstraintsHost = nil
+    ## PLAT-62: the host that measures the project with `nargo info`.
+  gConstraintsRoot = ""
+    ## PLAT-62: the window's project — its working directory for a replay,
+    ## the Edit window's folder, a folder tab's folder.
+  gConstraintsStarted = false
+    ## PLAT-62: the project has been measured once (the pane was on screen).
     ## PLAT-58: the Requests pane's reading position and a held thumb.
+  gShells: seq[NativeShell] = @[]
+    ## PLAT-61: every session's Shell pane process side (`wireShellOf`), so
+    ## each is pumped and closed with the window.
     ## PLAT-53: the Test Results pane's reading position and selection.
   gTestsVM: TestResultsVM = nil
     ## PLAT-53: the WINDOW's Test Results ViewModel — its project's tests
@@ -2341,6 +2380,10 @@ proc drawArrangement(r: GpuiRenderer): bool =
   drawTestsPane(r)
   # PLAT-58: and the Requests pane from the session's.
   drawRequestsPane(r)
+  # PLAT-62: and the Constraints pane from the window's.
+  drawConstraintsPane(r)
+  # PLAT-61: and the Shell pane from the session's.
+  drawShellPane(r)
   # PLAT-54: and Agent Activity from its own.
   drawAgentPane(r)
   # PLAT-55: and Problems from its own.
@@ -3368,6 +3411,46 @@ proc requestsBody(): PxRect =
     return PxRect()
   n.body
 
+proc armRecordTick()
+  ## Forward-declared; defined with the shim's tick below.
+
+proc constraintsBody(): PxRect =
+  ## PLAT-62: the Constraints pane's body in window pixels — revealed, docked
+  ## open, or the visible tab of a box — or a zero rectangle.
+  if gGestures.revealing and gGestures.reveal.pane == paneConstraints:
+    return dockedBodyOf(gGeom.revealRectOf(gGestures.reveal.edge))
+  if not gGeom.openDock.isEmpty and gGeom.openDockPane == $paneConstraints:
+    return dockedBodyOf(gGeom.openDock)
+  let i = gGeom.tabsNodeOfPane($paneConstraints)
+  if i < 0:
+    return PxRect()
+  let n = gGeom.nodes[i]
+  if n.panes.len > 0 and n.active >= 0 and n.active < n.panes.len and
+     n.panes[n.active] != $paneConstraints:
+    return PxRect()
+  n.body
+
+proc drawConstraintsPane(r: GpuiRenderer) =
+  ## PLAT-62: draw the Constraints pane from the window's ViewModel,
+  ## natively, replacing whatever the leaf held. The project is measured the
+  ## first time the pane is on screen (Debug mode places it nowhere by
+  ## default), and again when it is re-rooted or a source is saved.
+  let pane = gPanes.getOrDefault($paneConstraints)
+  if pane.isNil or gConstraintsVM.isNil:
+    return
+  let body = constraintsBody()
+  if body.w > 0 and not gConstraintsHost.isNil:
+    if not gConstraintsStarted:
+      gConstraintsStarted = true
+      if gConstraintsHost.refresh(force = true):
+        traceGesture("constraints: measuring " & gConstraintsRoot)
+      armRecordTick()
+    elif gConstraintsHost.watch():
+      traceGesture("constraints: measuring again")
+      armRecordTick()
+  if drawConstraints(r, pane, gConstraintsVM, gConstraintsPane, body):
+    applyTextFaces(r, pane)
+
 proc drawRequestsPane(r: GpuiRenderer) =
   ## PLAT-58: draw the Requests pane from the session's ViewModel, natively,
   ## replacing whatever the leaf held — after reporting the rows it shows, so
@@ -3389,6 +3472,89 @@ proc drawRequestsPane(r: GpuiRenderer) =
       gSession.showRequestWindow(rows, top)
   if drawRequests(r, pane, vm, gRequests, body):
     applyTextFaces(r, pane)
+
+proc shellVM(): ShellVM =
+  ## PLAT-61: the shown session's `ShellVM`.
+  if gSession.isNil or gSession.session.isNil: nil
+  else: gSession.session.shellVM
+
+proc shellBody(): PxRect =
+  ## PLAT-61: the Shell pane's body in window pixels — revealed, docked open,
+  ## or the visible tab of a box — or a zero rectangle.
+  if gGestures.revealing and gGestures.reveal.pane == paneShell:
+    return dockedBodyOf(gGeom.revealRectOf(gGestures.reveal.edge))
+  if not gGeom.openDock.isEmpty and gGeom.openDockPane == $paneShell:
+    return dockedBodyOf(gGeom.openDock)
+  let i = gGeom.tabsNodeOfPane($paneShell)
+  if i < 0:
+    return PxRect()
+  let n = gGeom.nodes[i]
+  if n.panes.len > 0 and n.active >= 0 and n.active < n.panes.len and
+     n.panes[n.active] != $paneShell:
+    return PxRect()
+  n.body
+
+proc drawShellPane(r: GpuiRenderer) =
+  ## PLAT-61: draw the Shell pane from the session's ViewModel, natively —
+  ## after starting its shell at the pane's size, or resizing it to the pane
+  ## (CodeTracer-Shell.md §7.2: it runs at the size the pane shows).
+  let pane = gPanes.getOrDefault($paneShell)
+  let vm = shellVM()
+  if pane.isNil or vm.isNil:
+    return
+  let body = shellBody()
+  if body.w > 0 and body.h > 0:
+    let lay = shellLayout(body)
+    if vm.state.val == sssIdle:
+      vm.startShell(lay.cols, lay.rows)
+      traceGesture("shell: started " & $lay.cols & "x" & $lay.rows & " " &
+                   vm.statusWords)
+    elif vm.state.val == sssRunning:
+      vm.resizeShell(lay.cols, lay.rows)
+  if drawShell(r, pane, vm, body):
+    applyTextFaces(r, pane)
+
+proc pumpShellWindow(r: GpuiRenderer; timeoutMs = 0): bool =
+  ## PLAT-61: what every session's shell wrote and reported since the last
+  ## pump, into its model; the shown one drawn again when it changed.
+  for n in gShells:
+    if n.pumpShell(timeoutMs) and not n.vm.isNil and n.vm == shellVM():
+      result = true
+  if result:
+    drawShellPane(r)
+
+proc shellLive(): bool =
+  ## A shell is running in some session: its output is pumped on the tick.
+  for n in gShells:
+    if not n.vm.isNil and n.vm.state.val == sssRunning:
+      return true
+  false
+
+proc shellKey(r: GpuiRenderer; key: string; mods: seq[string]): bool =
+  ## PLAT-61 (CodeTracer-Shell.md §7.5): a key while the Shell pane has the
+  ## focus and its shell runs — to the shell, as the model encodes it; the
+  ## prefix arms; after it the key is CodeTracer's (false: the router runs
+  ## it). Text with no key name (a character no keymap spells) is typed as
+  ## it is.
+  let vm = shellVM()
+  if vm.isNil or gFocusPane != $paneShell or vm.state.val != sssRunning:
+    return false
+  let name = canonicalKeyOfGpui(key, mods)
+  if name.len == 0:
+    if key.runeLen == 1 and "ctrl" notin mods and "alt" notin mods:
+      vm.sendInput(key)
+    else:
+      return false
+  else:
+    let route = vm.pressKey(shellKeyOfChord(name))
+    if route.kind == skrApp:
+      traceGesture("shell: " & name & " to CodeTracer")
+      return false
+    if route.kind == skrConsumed:
+      traceGesture("shell: prefix armed")
+  discard pumpShellWindow(r, 0)
+  drawShellPane(r)
+  true
 
 proc drawTestsPane(r: GpuiRenderer) =
   ## PLAT-53: draw Test Results from the window's ViewModel, natively,
@@ -3490,6 +3656,8 @@ proc agentLive(): bool =
 proc pressSearch(r: GpuiRenderer; x, y: int): bool
 proc pressTests(r: GpuiRenderer; x, y: int): bool
 proc pressRequests(r: GpuiRenderer; x, y: int; right = false): bool
+proc pressConstraints(r: GpuiRenderer; x, y: int; right = false): bool
+  ## PLAT-62: forward-declared; defined beside the Constraints pane's host.
   ## PLAT-58: forward-declared; defined beside the Requests pane's host.
   ## PLAT-53: forward-declared; defined beside the Test Results host.
 proc pressAgent(r: GpuiRenderer; x, y: int): bool
@@ -3518,6 +3686,9 @@ proc stepSearchResult(r: GpuiRenderer; delta: int)
 proc wireSearch(s: HeadlessDebugSession)
 proc wireRequestsOf(s: HeadlessDebugSession)
 proc pumpRequestsWindow(r: GpuiRenderer): bool
+proc wireShellOf(s: HeadlessDebugSession)
+proc pressShell(r: GpuiRenderer; x, y: int): bool
+  ## PLAT-61: forward-declared; defined beside the Shell pane's host.
   ## PLAT-57: forward-declared; defined beside the editor's caret, which
   ## opening a result places.
 
@@ -3962,6 +4133,9 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     # PLAT-63 (K65): a right press on a Verification line opens its menu.
     if pressVerification(r, x, y, right = true):
       return
+    # PLAT-62 (K68): a right press on a Constraints row opens its menu.
+    if pressConstraints(r, x, y, right = true):
+      return
     # PLAT-50 (K42): a right-click on a docked pane's label opens the
     # desktop's strip menu (`ui/auto_hide`'s `onContextMenu`).
     let (si, sl) = gGeom.slotAt(x, y)
@@ -4020,6 +4194,25 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       gFocusShown = true
       if gFocusPane != $paneRequests:
         focusWindowPane(r, $paneRequests)
+        discard drawArrangement(r)
+      return
+    # PLAT-62 (K67): the Constraints pane's presses (a row opens its source,
+    # the scrubber). An opened row gives the editor the keys, so the pane
+    # takes the focus only for the others.
+    if pressConstraints(r, x, y):
+      gFocusShown = true
+      if gFocusPane != $paneConstraints and
+         not (gConstraintsVM.selected.val >= 0 and
+              gConstraintsVM.rows.val[gConstraintsVM.selected.val].source.linked):
+        focusWindowPane(r, $paneConstraints)
+        discard drawArrangement(r)
+      return
+    # PLAT-61: the Shell pane's presses (a recorded command's gutter, the
+    # scrubber, the output — which focuses it, so the keys go to its shell).
+    if pressShell(r, x, y):
+      gFocusShown = true
+      if gFocusPane != $paneShell:
+        focusWindowPane(r, $paneShell)
         discard drawArrangement(r)
       return
     # PLAT-54: Agent Activity's presses, on the same rule.
@@ -4131,6 +4324,12 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
         gRequests.scrubRequests(vm, requestsBody(), y, dragging = true)
         drawRequestsPane(r)
       return
+    if gConstraintsPane.dragging:
+      if not gConstraintsVM.isNil:
+        gConstraintsPane.scrubConstraints(gConstraintsVM, constraintsBody(),
+                                          y, dragging = true)
+        drawConstraintsPane(r)
+      return
     if gAgent.dragging:
       let h = agentHost()
       if not h.isNil:
@@ -4181,6 +4380,9 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       return
     if gVerificationPane.dragging:
       gVerificationPane.dragging = false
+      return
+    if gConstraintsPane.dragging:
+      gConstraintsPane.dragging = false
       return
     if gAgent.dragging:
       gAgent.dragging = false
@@ -4268,6 +4470,25 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       gTests.scrollBy(gTestsVM, tests, (if rows == 0: (if dy < 0: 1 else: -1)
                                         else: rows))
       drawTestsPane(r)
+      return
+    # PLAT-62: and the Constraints pane's list.
+    let constraintsRect = constraintsBody()
+    if constraintsRect.w > 0 and constraintsRect.contains(x, y) and
+       dy != 0.0 and not gConstraintsVM.isNil:
+      let rows = int(round(-dy / float(ConstraintsRowPx)))
+      gConstraintsPane.scrollBy(gConstraintsVM, constraintsRect,
+                                (if rows == 0: (if dy < 0: 1 else: -1)
+                                 else: rows))
+      drawConstraintsPane(r)
+      return
+    # PLAT-61: and the Shell pane's scrollback.
+    let shellAt = shellBody()
+    if shellAt.w > 0 and shellAt.contains(x, y) and dy != 0.0 and
+       not shellVM().isNil:
+      let rows = int(round(-dy / float(ShellRowPx)))
+      shellVM().scrollShell((if rows == 0: (if dy < 0: 1 else: -1) else: rows),
+                            shellVM().screen.rows)
+      drawShellPane(r)
       return
     # PLAT-58: and the Requests pane's list.
     let requests = requestsBody()
@@ -4416,6 +4637,10 @@ proc windowKey(key: string; mods: seq[string]) =
     return
   if folderShown() and not openArm.isNil:
     editKey(key, mods)
+    return
+  # PLAT-61: the focused, running Shell pane takes every key for its shell
+  # (CodeTracer-Shell.md §7.5) — except after its prefix.
+  if shellKey(r, key, mods):
     return
   # PLAT-52: the Terminal Output pane's own keys, while it has focus.
   if mods.len == 0 and terminalKey(r, key):
@@ -4604,6 +4829,7 @@ proc gpuiMenuRouteOf(action: string): GpuiMenuRoute =
     GpuiMenuRoute(kind: gmrPane, pane: paneLowLevelCode,
                   reason: (if gSession.isNil: "the low-level code is a " &
                              "recording's: open one to see it" else: ""))
+  of "aShell": GpuiMenuRoute(kind: gmrPane, pane: paneShell)   # PLAT-61
   of "aExit": GpuiMenuRoute(kind: gmrExit)
   # File: the Welcome Screen's own flows (Multi-Window-Tab-Management.md rule
   # 3, Welcome-Screen.md § The native front-ends), as in the terminal.
@@ -5897,6 +6123,8 @@ proc refreshReplayWindow(r: GpuiRenderer) =
   drawVerificationPane(r)
   drawBuildPane(r)
   drawRequestsPane(r)
+  drawConstraintsPane(r)
+  drawShellPane(r)
   drawListScrubbers(r)
   gOmnibar.setIndex(omnibarIndexOf(gSession.session.fileTreeVM,
                                    gSession.session.store, gMenu,
@@ -5912,6 +6140,10 @@ proc attachProblems(leafSet: var GpuiLeafSet)
   ## PLAT-55: forward-declared for `showSession`; defined beside the ticks.
 proc attachVerification(leafSet: var GpuiLeafSet)
   ## PLAT-63: forward-declared for `showSession`; defined beside the ticks.
+proc installConstraints(root: string)
+proc attachConstraints(leafSet: var GpuiLeafSet)
+  ## PLAT-62: forward-declared for `showSession`; defined beside the
+  ## Requests pane's host.
 
 proc showSession(r: GpuiRenderer; id: HeadlessSessionId) =
   ## PLAT-49 part B: the window shows the session behind tab `id` — its
@@ -5931,6 +6163,7 @@ proc showSession(r: GpuiRenderer; id: HeadlessSessionId) =
   attachTests(leafSet)
   attachProblems(leafSet)
   attachVerification(leafSet)
+  attachConstraints(leafSet)
   gLeafSet = leafSet
   traceGesture("session shown " & $id & " " & gSession.tracePath)
   # PLAT-69: the window is called after the recording it shows.
@@ -5978,6 +6211,7 @@ proc openRecordingInTab(r: GpuiRenderer; path: string) =
     layout = layout, adopt = opened.sdk)
   wireSearch(opened)
   wireRequestsOf(opened)
+  wireShellOf(opened)
   gSessionsOpened[int(slot.id)] = opened
   traceGesture("opened " & path & " as tab " & $slot.id)
   showSession(r, slot.id)
@@ -6160,9 +6394,6 @@ proc drawWelcome(r: GpuiRenderer): GpuiElement =
        not rows[w.focus].enabled:
     discard place(lay.line, rows[w.focus].detail,
                   chromeOf(crTabInactiveForeground))
-
-proc armRecordTick()
-  ## Forward-declared; defined with the shim's tick below.
 
 proc runWelcomeIntent(r: GpuiRenderer; index: int)
 
@@ -6358,6 +6589,9 @@ proc showFolderTab(r: GpuiRenderer; index: int): string =
   gBuildRoot = tab.folder
   attachProblems(leafSet)
   attachVerification(leafSet)
+  # PLAT-62: the circuit measured is the folder's now.
+  installConstraints(tab.folder)
+  attachConstraints(leafSet)
   gLeafSet = leafSet
   openArm = arm
   if editViewportRows <= 0:
@@ -7060,6 +7294,16 @@ proc acceptOmnibar(r: GpuiRenderer) =
   # PLAT-58 (Request-Panel.md § N.4): `:requests <text>` is the Requests
   # pane's URL search; `:requests` alone keeps the field open; `:requests `
   # with nothing after the verb clears it.
+  # PLAT-62: `:constraints` shows the Constraints pane (opened beside the
+  # event log when the arrangement places it nowhere; a user who opens it
+  # keeps it).
+  if mode == omCommand and needle == ConstraintsCommandVerb:
+    gOmnibar.close()
+    drawTopBar(r)
+    showPaneFromMenu(r, paneConstraints)
+    focusWindowPane(r, $paneConstraints)
+    traceGesture("constraints: shown")
+    return
   let requests = requestsCommandOf(gOmnibar.query)
   if requests.isRequests:
     # `:requests` alone with a search on clears it (the field opens holding
@@ -7442,6 +7686,10 @@ proc recordTick() {.cdecl.}
 proc searchTick() {.cdecl.}
 proc requestsTick() {.cdecl.}
 proc requestsLive(): bool
+proc shellTick() {.cdecl.}
+const ShellPollMs = 30
+  ## PLAT-61: how often a running shell's output is pumped (and every other
+  ## tick pumps it too).
 proc agentTick() {.cdecl.}
 proc certificateTick() {.cdecl.}
 const CertificatePollMs = 25
@@ -7496,6 +7744,16 @@ proc armHoverTick() =
     gArmedTick = (due: -6'i64, vcs: false)
     gpui_set_tick(uint32(RequestSpanPollIntervalMs), requestsTick)
     return
+  # PLAT-61: a running shell, every `ShellPollMs` — below the activities
+  # above, whose ticks pump it too (`pumpShellWindow`).
+  if due < 0 and shellLive() and gRecordJob.isNil and gTestJob.isNil and
+     not gTestsHost.running and (gBuild.isNil or
+                                 gBuild.session.verdict != bvRunning):
+    let want = (due: -7'i64, vcs: false)
+    if gArmedTick != want:
+      gArmedTick = want
+      gpui_set_tick(uint32(ShellPollMs), shellTick)
+    return
   # PLAT-51: a welcome tab's `ct record` is polled on the same tick, every
   # `RecordPollMs`, while it runs.
   if due < 0 and (gVerification.running or   # PLAT-63: a Verno run
@@ -7503,6 +7761,8 @@ proc armHoverTick() =
                   (not gTestJob.isNil and not gTestJob.done) or
                   # PLAT-53: a Test Results run, polled on the same tick.
                   gTestsHost.running or
+                  # PLAT-62: the project's `nargo info`, on the same tick.
+                  gConstraintsHost.running or
                   # PLAT-55: a `:build`, polled on the same tick.
                   (not gBuild.isNil and gBuild.session.verdict == bvRunning) or
                   # §3.8: a clean success's pane waiting to be put away.
@@ -8958,6 +9218,7 @@ proc pollCertificateIndicator(r: GpuiRenderer) =
 
 proc certificateTick() {.cdecl.} =
   var r: GpuiRenderer
+  discard pumpShellWindow(r)   # PLAT-61: a running shell rides every tick
   gArmedTick = (due: -2'i64, vcs: false)
   pollCertificateIndicator(r)
   armHoverTick()
@@ -9113,21 +9374,169 @@ proc pumpRequestsWindow(r: GpuiRenderer): bool =
   if result:
     drawRequestsPane(r)
 
+# ---------------------------------------------------------------------------
+# PLAT-62: the Constraints pane's host
+# ---------------------------------------------------------------------------
+
+proc installConstraints(root: string) =
+  ## The window's Constraints ViewModel and the host that measures the
+  ## project at `root` with `nargo info`. Nothing runs until the pane is on
+  ## screen (`drawConstraintsPane`).
+  gConstraintsRoot = root
+  if not gConstraintsVM.isNil:
+    return
+  gConstraintsVM = createConstraintsVM()
+  gConstraintsHost = newNativeConstraintsHost(gConstraintsVM,
+    proc(): string = gConstraintsRoot)
+  gConstraintsVM.onOpenSource = proc(path: string; line, column: int) =
+    var rr: GpuiRenderer
+    let full = if gConstraintsRoot.len > 0: gConstraintsRoot / path else: path
+    let why = openProblemFile(rr, full, line, max(1, column))
+    traceGesture("constraints: " &
+                 (if why.len > 0: why else: "opened " & path & ":" & $line))
+
+proc attachConstraints(leafSet: var GpuiLeafSet) =
+  ## Hand the Constraints leaf, when the arrangement places one, the window's
+  ## ViewModel — the headless replay session owns none
+  ## (`headless_app.paneViewModel`).
+  if gConstraintsVM.isNil:
+    return
+  for leaf in leafSet.leaves.mitems:
+    if leaf.kind == glkBuiltin and leaf.builtin == paneConstraints:
+      leaf.vm = ViewModel(gConstraintsVM)
+
+proc pollConstraintsHost(r: GpuiRenderer): bool =
+  ## The project's `nargo info` that ended, settled into the pane.
+  if gConstraintsHost.isNil or not gConstraintsHost.poll():
+    return false
+  traceGesture("constraints settled: " & gConstraintsVM.headline.val)
+  drawConstraintsPane(r)
+  true
+
+proc keepConstraintShown() =
+  ## The selected row kept in view.
+  gConstraintsPane.revealIndex(gConstraintsVM, constraintsBody(),
+                               gConstraintsVM.selected.val)
+
+proc constraintsSay(r: GpuiRenderer; outcome: ConstraintMenuOutcome) =
+  ## What a menu entry did: a name or location copied, a source opened (the
+  ## host traced it), or why nothing ran.
+  if not outcome.done:
+    traceGesture("constraints: that row has changed since the menu opened")
+  elif outcome.copied.len > 0:
+    copyToClipboard(outcome.copied, "the row")
+  elif not outcome.activation.opened:
+    traceGesture("constraints: " & outcome.activation.reason)
+  drawConstraintsPane(r)
+
+proc runConstraintsMenu(r: GpuiRenderer; action: ContextAction;
+                        target: ContextTarget) =
+  ## A Constraints row's menu entry, as the shared model decides it now.
+  if gConstraintsVM.isNil:
+    return
+  constraintsSay(r, runConstraintMenuAction(gConstraintsVM, action, target))
+
+proc activateConstraintRow(r: GpuiRenderer; index: int) =
+  ## A press or Enter: the row selected and its source opened, or why not.
+  let done = gConstraintsVM.activateRow(index)
+  if not done.opened:
+    traceGesture("constraints: " & done.reason)
+  drawConstraintsPane(r)
+
+proc pressConstraints(r: GpuiRenderer; x, y: int; right = false): bool =
+  ## A press on the Constraints pane: a row is selected and its source opened
+  ## (K67), a right press opens its menu (K68), the scrubber moves the view.
+  ## Every press on the pane is the pane's.
+  let body = constraintsBody()
+  if gConstraintsVM.isNil or body.w <= 0 or not body.contains(x, y):
+    return false
+  let hit = constraintsHitAt(gConstraintsVM, gConstraintsPane, body, x, y)
+  if right:
+    if hit.kind == gcRow:
+      gConstraintsVM.selectRow(hit.index)
+      drawConstraintsPane(r)
+      openContextMenuAt(r, constraintRowContextMenuOf(gConstraintsVM,
+                                                      hit.index), x, y)
+    return true
+  case hit.kind
+  of gcNone, gcText: discard
+  of gcRow:
+    traceGesture("constraints: press row " & $hit.index)
+    activateConstraintRow(r, hit.index)
+  of gcTrack, gcThumb:
+    gConstraintsPane.dragging = hit.kind == gcThumb
+    if gConstraintsPane.dragging:
+      let lay = constraintsLayout(gConstraintsVM, body)
+      gConstraintsPane.scrubberOf(lay.total, lay.rows).beginBarGrab(
+        hit.fraction)
+    gConstraintsPane.scrubConstraints(gConstraintsVM, body, y,
+                                      dragging = gConstraintsPane.dragging)
+    drawConstraintsPane(r)
+  true
+
+proc constraintsKey(r: GpuiRenderer; operation: string): bool =
+  ## PLAT-62 from the keyboard, the pane focused: the `list.*` moves select a
+  ## row, `list.activate` opens its source, `list.copy` copies its name.
+  ## Whether it was the pane's.
+  if gConstraintsVM.isNil or gFocusPane != $paneConstraints:
+    return false
+  case operation
+  of "list.focus-next", "list.focus-previous", "list.focus-first",
+     "list.focus-last", "list.focus-page-down", "list.focus-page-up":
+    if gConstraintsVM.rows.val.len == 0:
+      traceGesture("constraints: the Constraints pane lists no row")
+    else:
+      let lay = constraintsLayout(gConstraintsVM, constraintsBody())
+      discard gConstraintsVM.moveSelection(operation, max(1, lay.rows - 1))
+      keepConstraintShown()
+    drawConstraintsPane(r)
+  of "list.activate":
+    let i = gConstraintsVM.selected.val
+    if i < 0:
+      traceGesture("constraints: no row is selected")
+    else:
+      activateConstraintRow(r, i)
+  of "list.copy":
+    let i = gConstraintsVM.selected.val
+    if i < 0:
+      traceGesture("constraints: no row is selected")
+    else:
+      copyToClipboard(rowText(gConstraintsVM.rows.val[i]), "the row")
+  else:
+    return false
+  true
+
+proc stopConstraintsHost() =
+  ## The window ends: a measurement still going ends with it.
+  if not gConstraintsHost.isNil:
+    gConstraintsHost.stop()
+
 proc requestsTick() {.cdecl.} =
   ## A live session's tail, every `RequestSpanPollIntervalMs`.
   var r: GpuiRenderer
   gArmedTick = (due: -2'i64, vcs: false)
   discard pumpRequestsWindow(r)
+  discard pumpShellWindow(r)
+
+proc shellTick() {.cdecl.} =
+  ## PLAT-61: a running shell's output and reports, every `ShellPollMs`.
+  var r: GpuiRenderer
+  gArmedTick = (due: -2'i64, vcs: false)
+  discard pumpShellWindow(r)
+  pollCertificateIndicator(r)
+  armHoverTick()
   armHoverTick()
 
 proc recordTick() {.cdecl.} =
   ## PLAT-51: the welcome tab's recording, polled; when it finishes its
   ## recording opens in the tab that asked (`pollWelcomeRecording`).
   var r: GpuiRenderer
+  discard pumpShellWindow(r)   # PLAT-61: a running shell rides every tick
   gArmedTick = (due: -2'i64, vcs: false)
   discard pollWelcomeRecording(r)
   discard pollTestRun(r)
   discard pollTestsHost(r)
+  discard pollConstraintsHost(r)
   discard pollGpuiBuild(r)
   discard pollGpuiVerification(r)
   pollCertificateIndicator(r)
@@ -9138,6 +9547,7 @@ proc agentTick() {.cdecl.} =
   ## pane (and the session tabs' indicator) drawn again; re-armed while it
   ## works.
   var r: GpuiRenderer
+  discard pumpShellWindow(r)   # PLAT-61: a running shell rides every tick
   gArmedTick = (due: -2'i64, vcs: false)
   var changed = false
   for h in gAgentHosts.values:
@@ -9153,6 +9563,7 @@ proc searchTick() {.cdecl.} =
   ## PLAT-57: the search in flight advanced a bounded step, and the pane
   ## drawn again when what it shows moved; re-armed while it runs.
   var r: GpuiRenderer
+  discard pumpShellWindow(r)   # PLAT-61: a running shell rides every tick
   gArmedTick = (due: -2'i64, vcs: false)
   let vm = searchVM()
   let before = if vm.isNil: (-1, false) else: (vm.results.val.len,
@@ -9168,6 +9579,7 @@ proc hoverTick() {.cdecl.} =
   ## re-arm for what is due next — and the VCS refresh it shares the tick
   ## with keeps its own pace.
   var r: GpuiRenderer
+  discard pumpShellWindow(r)   # PLAT-61: a running shell rides every tick
   # The arming this tick answered is spent: whatever is due next is armed.
   gArmedTick = (due: -2'i64, vcs: false)
   applyHoverReply(r, gAutoHide.tick(hoverNowMs()))
@@ -10000,7 +10412,10 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
                    # project's, not a replay's.
                    caVerificationGoToSource, caVerificationOpenCounterexample,
                    caVerificationCopyMessage, caVerificationCopyLocation,
-                   caVerificationCloseCounterexample}:
+                   caVerificationCloseCounterexample,
+                   # PLAT-62: the Constraints pane is the window's project's.
+                   caConstraintGoToSource, caConstraintCopyName,
+                   caConstraintCopySourceLocation}:
     return
   case action
   of caNone: discard
@@ -10126,6 +10541,11 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
   of caJumpToValue:
     traceGesture(target.expression & " = " & target.text &
                  " is the value at this step")
+  of caConstraintGoToSource, caConstraintCopyName,
+     caConstraintCopySourceLocation:
+    # PLAT-62 (K68): a Constraints row's entry, as the shared model decides
+    # it now.
+    runConstraintsMenu(r, action, target)
   of caRequestGoToHandler, caRequestCopyUrl, caRequestFilterMethod,
      caRequestFilterStatus, caRequestClearFilters:
     # PLAT-58 (K59, K60): a Requests row's entry or a picker's option, as
@@ -10195,6 +10615,54 @@ proc wireRequestsOf(s: HeadlessDebugSession) =
     var r: GpuiRenderer
     openRecordingInTab(r, path)
     "")
+
+proc wireShellOf(s: HeadlessDebugSession) =
+  ## PLAT-61: the session's Shell pane gets its shell (`native_shell_host`);
+  ## a recorded command's recording opens in a new session tab
+  ## (`openRecordingInTab`).
+  if s.isNil or s.session.isNil or s.session.shellVM.isNil:
+    return
+  for n in gShells:
+    if n.vm == s.session.shellVM:
+      return
+  if gShells.len == 0:
+    # The window's shells end with it (SIGHUP, as a closed terminal's do),
+    # and their session directories go.
+    addExitProc(proc() =
+      for n in gShells: n.closeNativeShell())
+  gShells.add wireNativeShell(s.session.shellVM, proc(path: string): string =
+    var r: GpuiRenderer
+    traceGesture("shell: open " & path)
+    openRecordingInTab(r, path)
+    "")
+
+proc pressShell(r: GpuiRenderer; x, y: int): bool =
+  ## PLAT-61 (§7.6): a press on the Shell pane — a recorded command's gutter
+  ## opens its recording (or says why not), the scrubber moves the view, the
+  ## output takes the focus. Whether the press was the pane's.
+  let vm = shellVM()
+  let body = shellBody()
+  if vm.isNil or body.w <= 0 or not body.contains(x, y):
+    return false
+  let hit = vm.shellHitAt(body, x, y)
+  case hit.kind
+  of gshGutter:
+    let note = vm.activateAction(hit.action)
+    traceGesture("shell: " & note)
+    if note.len > 0:
+      gStatusNote = note
+      drawTopBar(r)
+  of gshTrack:
+    let sm = scrubberModel(vm.lineCount, vm.visibleTop(vm.screen.rows),
+                           vm.screen.rows)
+    vm.scrollShellTo(sm.scrubTop(hit.fraction, dragging = false),
+                     vm.screen.rows)
+  of gshText, gshHeader:
+    discard
+  of gshNone:
+    return false
+  drawShellPane(r)
+  true
 
 proc wireSearch(s: HeadlessDebugSession) =
   ## PLAT-57: the session's Find in Files searches go to the shared runner,
@@ -10997,6 +11465,9 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
     return
   # PLAT-58: the focused Requests pane takes its list operations first.
   if res.operation.startsWith("list.") and requestsKey(r, res.operation):
+    return
+  # PLAT-62: and the focused Constraints pane.
+  if res.operation.startsWith("list.") and constraintsKey(r, res.operation):
     return
   case res.operation
   of "editor.toggle-read-only":
@@ -12538,6 +13009,64 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
           at += w
       pressAt(x, y)
       return ""
+    of "constraints":
+      # PLAT-62: the Constraints pane, aimed from the geometry it was drawn
+      # with (`constraints_leaf.constraintsLayout`); a row by its index in
+      # the pane's rows, scrolled into view first.
+      if parts[1] == "show":
+        showPaneFromMenu(r, paneConstraints)
+        drawConstraintsPane(r)
+        return ""
+      if parts[1] == "wait":
+        # Let the project's `nargo info` settle, polled as the tick polls it.
+        let budget = if parts.len > 2: at(2) else: 120_000
+        let deadline = epochTime() + float(budget) / 1000.0
+        drawConstraintsPane(r)
+        while not gConstraintsHost.isNil and gConstraintsHost.running and
+              epochTime() < deadline:
+          sleep(20)
+          discard pollConstraintsHost(r)
+        discard pollConstraintsHost(r)
+        if not gConstraintsHost.isNil and gConstraintsHost.running:
+          return "the measurement did not settle within " & $budget & " ms"
+        return ""
+      if parts[1] == "key":
+        gFocusPane = $paneConstraints
+        if not constraintsKey(r, parts[2]):
+          return "the Constraints pane does not take '" & parts[2] & "'"
+        return ""
+      let body = constraintsBody()
+      if gConstraintsVM.isNil or body.w <= 0:
+        return "the Constraints pane is not drawn"
+      let lay = constraintsLayout(gConstraintsVM, body)
+      case parts[1]
+      of "row", "menu":
+        let index = at(2)
+        if index < 0 or index >= lay.total:
+          return "no row " & parts[2] & " is listed"
+        gConstraintsPane.revealIndex(gConstraintsVM, body, index)
+        drawConstraintsPane(r)
+        let (ok, x, y) = constraintsLayout(gConstraintsVM, body).rowCentre(
+          gConstraintsPane, index)
+        if not ok:
+          return "row " & parts[2] & " is not in view"
+        if parts[1] == "menu":
+          windowPointer(r, gekContextMenu, x, y)
+        else:
+          pressAt(x, y)
+      of "wheel":
+        let (cx, cy) = centreOf(lay.list)
+        windowPointer(r, gekWheel, cx, cy, -float(at(2) * ConstraintsRowPx))
+      of "track":
+        if not lay.overflow:
+          return "the list does not overflow"
+        let track = listTrackRect(PxRect(x: body.x,
+          y: lay.list.y - ChromePaddingPx, w: body.w,
+          h: lay.list.h + 2 * ChromePaddingPx))
+        pressAt(track.x + ListTrackPx div 2,
+                track.y + min(track.h - 1, track.h * at(2) div 1000))
+      else:
+        return "unknown constraints event '" & parts[1] & "'"
     of "requests":
       # PLAT-58: the Requests pane, aimed from the geometry it was drawn
       # with (`requests_leaf.requestsLayout`); a row by its request's id,
@@ -12602,6 +13131,58 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
                 track.y + min(track.h - 1, track.h * at(2) div 1000))
       else:
         return "unknown requests event '" & parts[1] & "'"
+    of "shell":
+      # PLAT-61: the Shell pane. `type:` and `key:` reach its shell through
+      # `windowKey` while it has the focus (`shell:show` gives it the focus).
+      #   shell:show                 show the pane, focused, its shell started
+      #   shell:wait:<text>[:<ms>]   pump the shell until a line shows <text>
+      #   shell:gutter:<action>      press action <action>'s gutter
+      #   shell:wheel:<rows>         the wheel over the output
+      if parts[1] == "show":
+        showPaneFromMenu(r, paneShell)
+        focusWindowPane(r, $paneShell)
+        drawShellPane(r)
+        return ""
+      let vm = shellVM()
+      let body = shellBody()
+      if vm.isNil or body.w <= 0:
+        return "the Shell pane is not drawn"
+      case parts[1]
+      of "wait":
+        let text = parts[2]
+        let limit = if parts.len > 3: at(3) else: 60_000
+        let started = epochTime()
+        proc shows(): bool =
+          for line in vm.firstKeptLine .. vm.lastLine:
+            if text in vm.lineText(line): return true
+          false
+        while not shows():
+          if (epochTime() - started) * 1000.0 > float(limit):
+            return "the shell did not show '" & text & "' in " & $limit & " ms"
+          discard pumpShellWindow(r, 50)
+        # Once more: an event a writer reported BEFORE printing <text> may
+        # have reached the report file after the last poll read it (§7.2).
+        discard pumpShellWindow(r, 0)
+        drawShellPane(r)
+      of "gutter":
+        let action = at(2)
+        if action < 0 or action >= vm.actions.len:
+          return "no shell action " & $action
+        let lay = shellLayout(body)
+        var y = -1
+        for i, row in vm.shellRows(vm.screen.rows):
+          if row.action == action and row.mark == srmStart:
+            y = lay.output.y + i * ShellRowPx + ShellRowPx div 2
+        if y < 0:
+          return "shell action " & $action & " is not in view"
+        pressAt(lay.output.x + 2, y)
+      of "wheel":
+        let lay = shellLayout(body)
+        windowPointer(r, gekWheel, lay.output.x + lay.output.w div 2,
+                      lay.output.y + lay.output.h div 2,
+                      -float(at(2) * ShellRowPx))
+      else:
+        return "unknown shell event '" & parts[1] & "'"
     of "search":
       # PLAT-57: Find in Files, aimed from the geometry it was drawn with
       # (`search_results_leaf.searchLayout`):
@@ -13492,6 +14073,8 @@ proc runEdit(cmd: GpuiCommand): int =
   # PLAT-55: and a `:build` still going.
   defer: stopGpuiBuild()
   defer: gVerification.finishWait()   # PLAT-63: a Verno run still going
+  # PLAT-62: and the project's `nargo info`.
+  defer: stopConstraintsHost()
   var shell = newGpuiShell(DockViewport(width: cmd.width, height: cmd.height,
                                         dockExtent: DefaultGpuiViewport.dockExtent))
   let surface = editSurfaceFor(cmd,
@@ -13535,6 +14118,9 @@ proc runEdit(cmd: GpuiCommand): int =
   installProblems(cmd.traceFolder)
   attachProblems(leafSet)
   attachVerification(leafSet)
+  # PLAT-62: Constraints over the project, measured when the pane is shown.
+  installConstraints(cmd.traceFolder)
+  attachConstraints(leafSet)
   # The omnibox, for Find in Files' `:grep` line (`Ctrl+Shift+F` opens it;
   # Find-And-Incremental-Search.md §5.2): its command index is the menu's.
   if gMenu.isNil:
@@ -13642,6 +14228,8 @@ proc runOpen(cmd: GpuiCommand): int =
   # PLAT-55: and a `:build` still going.
   defer: stopGpuiBuild()
   defer: gVerification.finishWait()   # PLAT-63: a Verno run still going
+  # PLAT-62: and the project's `nargo info`.
+  defer: stopConstraintsHost()
   # The shipped product default for the flow overlay — the same constant the
   # terminal host applies, pinned against `default_config.yaml` by a test.
   if not session.session.editorVM.isNil:
@@ -13949,6 +14537,9 @@ proc runOpen(cmd: GpuiCommand): int =
   installProblems(getCurrentDir())
   attachProblems(leafSet)
   attachVerification(leafSet)
+  # PLAT-62: Constraints over the same directory, the window's project.
+  installConstraints(getCurrentDir())
+  attachConstraints(leafSet)
   # `PLAT35-F3`: the editor pane's inner width, from the geometry this
   # window is about to be laid out at — the same reading `editorRowsFor`
   # takes for the row count, over the same layout.
@@ -14016,6 +14607,7 @@ proc runOpen(cmd: GpuiCommand): int =
   applyRememberedColumnWidths()
   wireSearch(session)
   wireRequestsOf(session)
+  wireShellOf(session)
   # PLAT-48: the top bar's shared ViewModels. The menu is the product's tree
   # with what this window performs enabled, its chords none (the window has
   # no keymap of its own for the debugger yet); the omnibar searches the

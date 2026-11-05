@@ -64,7 +64,8 @@ const
                      Content.Scratchpad, Content.Repl, Content.Filesystem,
                      Content.TestResults, Content.Constraints,
                      Content.CommandPalette, Content.Verification,
-                     Content.UnifiedDiff, Content.VCS, Content.EventLog}
+                     Content.UnifiedDiff, Content.VCS, Content.EventLog,
+                     Content.Shell}
     ## The panes `mountPanel` renders.
 
 type
