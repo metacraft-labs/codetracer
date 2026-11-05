@@ -135,6 +135,20 @@ proc jsMissing(value: JsObject): bool {.
 
 proc stringifyJsObject(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
 
+proc wireSafe(response: js): js {.importjs: """
+  (function(value) {
+    if (value === undefined || value === null) return value;
+    return JSON.parse(JSON.stringify(value, (_, v) =>
+      typeof v === "bigint"
+        ? (Number.isSafeInteger(Number(v)) ? Number(v) : v.toString())
+        : v));
+  })(#)""".}
+  ## What socket.io can send. A Nim `int64` is a JS BigInt, which Electron's
+  ## structured clone carries and `JSON.stringify` refuses by throwing, so in web
+  ## mode a message with one (`tab-load`'s location) never left and the editor
+  ## opened with no tab. A number too large for a double keeps its digits as a
+  ## string, the form the host's JSON readers already take for a large tick.
+
 proc parseJsonFromJsObject(o: JsObject): JsonNode =
   ## Convert a raw DAP payload into a stdlib `JsonNode`.
   ##
@@ -8035,7 +8049,7 @@ when not defined(ctWeb):
             if not data.connection.connected:
               showDisconnectedWarning(data, data.connection.reason, data.connection.detail)
             console.log cstring"=> ", id, response
-            socket.emit(id, response),
+            socket.emit(id, wireSafe(response)),
           on: proc(id: cstring, code: js) = socket.on(id, proc(response: cstring) =
             console.log cstring"<= ", id, response
             code.call(code, undefined, JSON.parse(response))
