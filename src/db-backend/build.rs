@@ -625,6 +625,17 @@ fn build_native(private_build: &PrivateEmulatorBuild, target_arch: &str) {
     let parent = so_path.parent().expect("so has parent");
     println!("cargo:rustc-link-search=native={}", parent.display());
     println!("cargo:rustc-link-lib=dylib={}", private_build.link_name);
+    if cfg!(target_os = "linux") {
+        // The binary's own directory first, then the build's. A binary that
+        // finds the library only through OUT_DIR depends on a directory other
+        // checkouts' builds rewrite: the default cargo target is machine-wide,
+        // and on 2026-11-05 a running test's `replay-server` failed to start
+        // with "libmcr_emulator.so: file too short" while another checkout
+        // relinked it. Worse, a completed rewrite would have been loaded
+        // silently, as that checkout's emulator under this checkout's server.
+        println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN");
+        deploy_shared_to_profile_dir(&so_path);
+    }
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", parent.display());
 
     println!(
@@ -675,6 +686,25 @@ fn compile_c_to_obj_native(
 
 /// Link the previously-compiled object files into a shared library and
 /// return the path to the resulting `lib<name>.so` (or `.dylib`).
+/// Linux: copy the emulator next to the final executable, as `build_windows`
+/// does for its DLL, so that whatever copies `replay-server` out of the target
+/// can copy the library with it. By rename, so that a reader sees the old file
+/// or the new one and never a partial one. OUT_DIR is laid out as
+/// `<target>/<profile>/build/<pkg>-<hash>/out`.
+fn deploy_shared_to_profile_dir(so_path: &Path) {
+    let out = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
+    let profile_dir = out
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.parent())
+        .expect("OUT_DIR has at least three parents (.../target/<profile>/build/<pkg>/out)");
+    let file_name = so_path.file_name().expect("library has a file name");
+    let dest = profile_dir.join(file_name);
+    let partial = out.join(format!("{}.deploy", file_name.to_string_lossy()));
+    std::fs::copy(so_path, &partial).expect("copy emulator library to profile dir");
+    std::fs::rename(&partial, &dest).expect("move emulator library into profile dir");
+}
+
 fn link_shared(
     objects: &[PathBuf],
     out_dir: &Path,
