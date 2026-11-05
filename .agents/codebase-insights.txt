@@ -8324,3 +8324,30 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   ~/.cache/codetracer can fail it. The `|| :` matters under `set -e`: the call
   returns 1 inside the sandboxed re-run and on hosts without user namespaces.
   `lane-user-state-guard-test.sh` case 12 flags an entry point without it.
+||||||| parent of 7c23a507647 (wip: visual replay panes)
+- Visual Replay (PLAT-59): the three panes (Video Player, Pixel History,
+  Shader Debug) are ONE model, `viewmodels/visual_replay_panes_vm.VisualReplayPanesVM`
+  (frame + player + history + shader over one client; `setClient` sets all
+  four — the desktop used to leave history/shader on an inactive client unless
+  the old frame-viewer component was mounted). Native producer:
+  `viewmodel/host/native_visual_replay_host` (finds/extracts the gfx stream,
+  starts `ct_gfx_player`, HTTP on a worker thread; hosts call `pump` /
+  `settleAll`, then drain platform callbacks). The session holds it at
+  `SessionViewModel.visualReplay`.
+- ct_gfx_player's `/frame` rows are BOTTOM-UP for GL traces (glReadPixels);
+  the player now says so (`X-Row-Order: bottom-up`) and clients flip (desktop
+  factory, native host). `/pixel-history`'s `y` counts from the TOP (it flips
+  internally), and it takes `frame` (scoped to that frame's draws). `X-Draw`
+  is a whole-recording draw index; `X-Frame-Draw-Start` / `-Count` give the
+  frame's range; `?frame=F&draw=K` is K within frame F. `/shader-debug`
+  ignores its request (always the last draw) — an open player defect.
+- Scrubbing: `VideoPlayerVM.beginScrub/dragScrub/pumpScrub/releaseScrub`
+  (coalesce 60 ms, release asks unless already asked, a drag while playing
+  pauses and the release resumes). Hosts must call `pumpScrub` on their idle
+  tick or a drag that stops inside the window never lands.
+- A TUI pane that needs its own keys while focused: a `*OwnsToken` predicate
+  checked before the router in `handleToken` (terminal output, video player).
+- The pinned native recorder (ct_cli) resolves `../../../codetracer-trace-format-nim`
+  and `../../../codetracer-visual-replay` from its REAL path; building it
+  against pinned siblings needs a copy beside symlinks to the pinned worktrees
+  (nim `--path` on the command line does not override config.nims there).

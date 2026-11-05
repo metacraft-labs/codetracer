@@ -7128,6 +7128,17 @@ jobs:
 
           nix develop .#devShells.x86_64-linux.default --command just test-visual-replay-gate
 
+      - name: The desktop's Visual Replay panes are the reference
+        if: ${{ !cancelled() }}
+        # The desktop column of the Visual Replay panes: the Video Player's
+        # frame at three positions on a real `gl_scene` recording, a draw
+        # call, a picked pixel's history, the Shader Debug pane and a history
+        # row's click — read from the REAL Electron app with this checkout's
+        # desktop JavaScript. Here, after the gate, because the gate builds
+        # the recorder and the player the recording and the desktop need; the
+        # recipe records the recording and starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat59-capture-electron
+
       - name: Stage sibling artifacts into workspace
         # actions/upload-artifact@v5 forbids paths containing ``..``
         # and absolute paths outside the workspace, so the previous

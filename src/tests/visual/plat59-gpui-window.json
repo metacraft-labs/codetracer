@@ -1,0 +1,54 @@
+{
+ "_comment": [
+  "The Video Player's frames, read from a real GPUI window's pixels on a headless sway.",
+  "Produced by ci/test/plat59-gpui-window.sh and ci/test/plat59_gpui_window.py.",
+  "imageQuads: the centres of the image's quarters: top left, top right, bottom left, bottom right."
+ ],
+ "frames": [
+  {
+   "frame": 0,
+   "box": [
+    499,
+    409,
+    256,
+    256
+   ],
+   "imageQuads": [
+    "#c2c4fb",
+    "#f10d6c",
+    "#643219",
+    "#937b8a"
+   ]
+  },
+  {
+   "frame": 30,
+   "box": [
+    499,
+    409,
+    256,
+    256
+   ],
+   "imageQuads": [
+    "#cafcf3",
+    "#f94564",
+    "#6c6a11",
+    "#9bb382"
+   ]
+  },
+  {
+   "frame": 59,
+   "box": [
+    499,
+    409,
+    256,
+    256
+   ],
+   "imageQuads": [
+    "#cafcf3",
+    "#f94564",
+    "#6c6a11",
+    "#9bb382"
+   ]
+  }
+ ]
+}
