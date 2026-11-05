@@ -83,7 +83,11 @@ import ../layout/profile
 import ../theme/image_capability
 import ./styled_row
 import ./scrubber_track
-from codetracer_embed import ThumbSpan
+from codetracer_embed import ThumbSpan, VideoPlayerAction, VpaTogglePlay,
+  VpaRewind, VpaFastForward, VpaStepFrameBack, VpaStepFrameForward,
+  VpaStepDrawBack, VpaStepDrawForward, VpaJumpStart, VpaJumpEnd,
+  VpaTogglePicker, VpaCancelPicker, VideoTransportOrder,
+  videoTransportLabel, videoTransportStatus
 
 export styled_row, terminal_graphics, image_capability, profile
 
@@ -172,6 +176,9 @@ type
       ## are: an `RgbaImage` cannot be empty (`initRgbaImage` refuses a
       ## zero extent), so a default-constructed one is 0x0 and unusable.
     hasRaster*: bool
+    rasterKey*: string
+      ## PLAT-59: which frame `raster` was made from, so a repaint of the same
+      ## frame does not convert its pixels again.
     encodedBytes*: int
       ## The encoded payload's length in **BYTES**, for a tier-0 emission and
       ## for the link-budget decision. Zero when the frame arrived as a raster.
@@ -206,6 +213,42 @@ type
     scrubbing*: bool
       ## PLAT-51: the pane's scrubber is held — `frameIndex` is the frame
       ## under the pointer.
+    pane*: bool
+      ## PLAT-59: drawn as the Video Player PANE (Visual-Replay.md § Video
+      ## Player Pane): with the transport row and, under the frame scrubber,
+      ## the nested draw-call scrubber; the pixel history is a pane of its
+      ## own. False for the overlay PLAT-15 drew, which keeps its shape.
+    transport*: VideoTransport
+    drawCount*: int
+      ## The shown frame's draw calls (`FrameViewerVM.frameDrawCount`); 0
+      ## when the player did not say, and the draw-call scrubber is then not
+      ## drawn.
+    drawInFrame*: int
+      ## Which of them is shown, -1 when unknown; under the pointer while the
+      ## draw-call scrubber is held.
+    drawScrubbing*: bool
+    frameWords*, drawWords*: string
+      ## PLAT-59: the shared labels (`video_player_vm.frameLabel` /
+      ## `drawLabel`): `Frame 30 / 59`, `Draw 1 / 3` — the pane's title
+      ## says them as the desktop's Video Player does.
+
+  VideoTransport* = object
+    ## The transport row's state (Visual-Replay.md § Transport Controls,
+    ## § Status Indicators), read from `VideoPlayerVM`.
+    playing*: bool
+    reverse*: bool
+    rate*: int
+      ## 1, 2, 4 or 8.
+    buffering*: bool
+    picker*: bool
+    loading*: bool
+    error*: string
+      ## The player's error ("" for none): the controls are disabled.
+
+  TransportButton* = object
+    ## One control on the transport row, where it was painted.
+    action*: VideoPlayerAction
+    col*, width*: int
 
   FrameViewerScreen* = object
     ## One painted overlay, plus the counts a test asserts on.
@@ -231,6 +274,22 @@ type
       ## The cell the thumb (the frame shown) is painted on.
     sceneMarkCols*: seq[int]
       ## The cells a scene-boundary mark is painted on.
+    transportRow*: int
+      ## PLAT-59: the transport row, -1 when the pane draws none.
+    transportButtons*: seq[TransportButton]
+    drawScrubberRow*: int
+      ## PLAT-59: the nested draw-call scrubber's row (the pane's bottom),
+      ## -1 when it draws none.
+    drawScrubberCol*, drawScrubberWidth*: int
+    drawScrubberThumbCol*: int
+    pictureTop*: int
+      ## PLAT-59: the first row of the picture, -1 when none was painted —
+      ## where a press on the frame is read back from.
+    protocolRect*: CellArea
+      ## PLAT-59: the cells reserved for a TIER-0 picture — blank here, the
+      ## frame TRANSMITTED over them by the host after the frame
+      ## (`host/frame_image.frameImageBytes`); empty when the picture is
+      ## cells.
     candidatesEvaluated*: int
       ## The only WORK quantity this pane claims: candidate masks the per-cell
       ## argmin evaluated, summed over the picture. An EQUALITY against
@@ -291,6 +350,13 @@ func isEmpty*(model: FrameViewerModel): bool =
   ## Whether the shell should leave the body alone. Closed IS empty.
   not model.open
 
+func transmitsProtocol*(model: FrameViewerModel): bool =
+  ## PLAT-59: whether a tier-0 frame is transmitted for this pane: the Video
+  ## Player pane, holding the frame's pixels, on a terminal whose protocol
+  ## this build emits (Kitty's `f=32` raw pixels, iTerm2's inline PNG).
+  model.pane and model.hasRaster and
+    model.capability.protocol in {ImageProtocol.ipKitty, ImageProtocol.ipITerm2}
+
 func drawableTierFor*(model: FrameViewerModel): ImageTier =
   ## The tier the PICTURE is drawn at, which is not always the tier the
   ## capability resolved to: §5's overlay renders at a cell tier even on a
@@ -315,6 +381,14 @@ func resolveGap*(model: FrameViewerModel; pictureCols, pictureRows: int):
   if not model.hasRaster and model.encodedBytes == 0:
     return fdgPlayerAbsent
   let tier = model.drawableTierFor()
+  if tier == itProtocol and model.transmitsProtocol:
+    # PLAT-59: THE PANE HAS A PRODUCER NOW. The Video Player holds the
+    # frame's pixels, and the host transmits them over the cells this pane
+    # reserves (`protocolRect`) — the picture is the terminal's own decoding,
+    # at the tier the title names.
+    if pictureCols <= 0 or pictureRows <= 0:
+      return fdgNoRoomForPicture
+    return fdgNone
   if tier notin CellRenderableTiers:
     # THE SET THE RENDERER ITSELF GATES ON, and not `DrawableTiers` — which
     # contains `itProtocol`, the one tier `cell_render.renderCells` refuses, so
@@ -381,7 +455,11 @@ proc titleText*(model: FrameViewerModel): string =
   ## pane title with a `--image-tier` refusal is reading one sentence and not
   ## two renderings of it.
   result = FrameViewerTitle
-  if model.frameCount > 0:
+  if model.pane and model.frameWords.len > 0:
+    result.add "  " & model.frameWords
+    if model.drawWords.len > 0:
+      result.add "  " & model.drawWords
+  elif model.frameCount > 0:
     result.add "  frame " & $model.frameIndex & "/" & $model.frameCount
   else:
     result.add "  frame " & $model.frameIndex
@@ -487,8 +565,54 @@ func hasFrameScrubber*(model: FrameViewerModel; area: CellArea): bool =
   ## and the track.
   model.frameCount > 1 and area.width >= 2 and area.height >= 3
 
+func hasDrawScrubber*(model: FrameViewerModel; area: CellArea): bool =
+  ## PLAT-59 (CodeTracer-TUI-Graphics.md §4): "Draw-call granularity … is a
+  ## second axis, and it is a nested scrubber INSIDE this pane (under the
+  ## frame scrubber)" — the pane's bottom row, over the shown frame's draw
+  ## calls, when it has more than one and there is room for the title, a
+  ## picture row, the transport and both tracks.
+  model.pane and model.drawCount > 1 and area.width >= 2 and area.height >= 5
+
+func hasTransport*(model: FrameViewerModel; area: CellArea): bool =
+  ## PLAT-59: the transport row (Visual-Replay.md § Transport Controls).
+  model.pane and area.width >= 2 and area.height >= 3
+
 func frameScrubberRow*(model: FrameViewerModel; area: CellArea): int =
-  if model.hasFrameScrubber(area): area.row + area.height - 1 else: -1
+  if model.hasFrameScrubber(area):
+    area.row + area.height - 1 - (if model.hasDrawScrubber(area): 1 else: 0)
+  else: -1
+
+func drawScrubberRow*(model: FrameViewerModel; area: CellArea): int =
+  if model.hasDrawScrubber(area): area.row + area.height - 1 else: -1
+
+func transportRowOf*(model: FrameViewerModel; area: CellArea): int =
+  ## Above the scrubbers.
+  if not model.hasTransport(area):
+    return -1
+  area.row + area.height - 1 -
+    (if model.hasFrameScrubber(area): 1 else: 0) -
+    (if model.hasDrawScrubber(area): 1 else: 0)
+
+func drawAtColumn*(model: FrameViewerModel; area: CellArea; col: int): int =
+  ## The draw call (within the shown frame) a press at screen column `col`
+  ## on the draw-call scrubber names; -1 when the pane has none.
+  if not model.hasDrawScrubber(area):
+    return -1
+  let local = max(0, min(col - area.col, area.width - 1))
+  if area.width <= 1: 0
+  else: int(round(float(local) / float(area.width - 1) *
+                  float(model.drawCount - 1)))
+
+const
+  ActiveControlStyle* = CellStyle(role: srChromeText,
+                                  surface: srSurfaceSelection, bold: true)
+
+func transportLabel*(t: VideoTransport; action: VideoPlayerAction): string =
+  videoTransportLabel(action, t.playing)
+
+func transportStatus*(t: VideoTransport): string =
+  videoTransportStatus(t.playing, t.reverse, t.rate, t.buffering, t.loading,
+                       t.error)
 
 func frameColumn*(frameCount, frame, width: int): int =
   ## The cell of the track `frame` is at: the first frame at the first cell,
@@ -507,6 +631,57 @@ func frameAtColumn*(model: FrameViewerModel; area: CellArea; col: int): int =
   if area.width <= 1: 0
   else: int(round(float(local) / float(area.width - 1) *
                   float(model.frameCount - 1)))
+
+proc paintTransport(g: var StyledGrid; area: CellArea;
+                    model: FrameViewerModel;
+                    screen: var FrameViewerScreen) =
+  ## The transport row: the desktop's controls as `[label]` buttons, the
+  ## picker's pressed while it is on, then the state.
+  let row = model.transportRowOf(area)
+  if row < 0:
+    return
+  screen.transportRow = row
+  var col = area.col
+  let right = area.col + area.width
+  let disabled = model.transport.error.len > 0
+  for action in VideoTransportOrder:
+    let label = "[" & model.transport.transportLabel(action) & "]"
+    let w = cellWidthOf(label)
+    if col + w > right:
+      break
+    let style =
+      if disabled: MutedStyle
+      elif action == VpaTogglePicker and model.transport.picker:
+        ActiveControlStyle
+      else: DefaultCellStyle
+    g.paint(row, col, label, style)
+    screen.transportButtons.add TransportButton(action: action, col: col,
+                                                width: w)
+    col += w
+  let status = "  " & model.transport.transportStatus()
+  if col < right:
+    let style = if disabled: DegradedStyle else: MutedStyle
+    g.paint(row, col, truncateToCells(status, right - col), style)
+
+proc paintDrawScrubber(g: var StyledGrid; area: CellArea;
+                       model: FrameViewerModel;
+                       screen: var FrameViewerScreen) =
+  ## The nested draw-call scrubber, over the shown frame's draw calls.
+  let row = model.drawScrubberRow(area)
+  if row < 0:
+    return
+  let w = area.width
+  let at = frameColumn(model.drawCount, max(0, model.drawInFrame), w)
+  let cells = thumbCells(ThumbSpan(start: at * 8, length: 8), w,
+                         vertical = false,
+                         modern = g.scrollbars.options.modernUnicode,
+                         glyphs = g.glyphs)
+  for i, cell in cells:
+    g.paint(row, area.col + i, cell.glyph, styleOf(cell.kind))
+  screen.drawScrubberRow = row
+  screen.drawScrubberCol = area.col
+  screen.drawScrubberWidth = w
+  screen.drawScrubberThumbCol = area.col + at
 
 proc paintFrameScrubber(g: var StyledGrid; area: CellArea;
                         model: FrameViewerModel;
@@ -550,7 +725,10 @@ proc paintFrameViewer*(g: var StyledGrid; area: CellArea;
                              tierDrawn: model.drawableTierFor(),
                              candidatesEvaluated: 0, scrubberRow: -1,
                              scrubberCol: -1, scrubberWidth: 0,
-                             scrubberThumbCol: -1)
+                             scrubberThumbCol: -1, transportRow: -1,
+                             drawScrubberRow: -1, drawScrubberCol: -1,
+                             drawScrubberThumbCol: -1, pictureTop: -1,
+                             protocolRect: CellArea())
   if area.width <= 0 or area.height <= 0:
     return
 
@@ -569,7 +747,9 @@ proc paintFrameViewer*(g: var StyledGrid; area: CellArea;
   # pane would leave no picture to pick a pixel WITH, which is the one thing
   # the terminal front-end cannot do without.
   # PLAT-51: the pane's own frame scrubber takes the bottom row.
-  let scrubberRows = if model.hasFrameScrubber(area): 1 else: 0
+  let scrubberRows = (if model.hasFrameScrubber(area): 1 else: 0) +
+                     (if model.hasDrawScrubber(area): 1 else: 0) +
+                     (if model.hasTransport(area): 1 else: 0)
   let body = area.height - 1 - scrubberRows
   let magnifierLine = if model.magnified: 1 else: 0
   let wantHistory =
@@ -581,7 +761,23 @@ proc paintFrameViewer*(g: var StyledGrid; area: CellArea;
 
   var atRow = area.row + 1
 
-  if gap == fdgNone:
+  if gap == fdgNone and model.drawableTierFor() == itProtocol:
+    # PLAT-59: TIER 0 — the cells the frame is transmitted over, reserved
+    # blank at the fit's extent (the aspect corrected, never enlarged past the
+    # rectangle); the host places the picture there after the frame.
+    let fit = fitToCells(model.sourceWidth, model.sourceHeight,
+                         DefaultCellAspect, area.width, pictureHeight)
+    let cols = max(1, min(fit.cols, area.width))
+    let rows = max(1, min(fit.rows, pictureHeight))
+    for r in 0 ..< rows:
+      g.paint(atRow + r, area.col, spaces(cols))
+    result.protocolRect = CellArea(col: area.col, row: atRow, width: cols,
+                                   height: rows)
+    result.pictureTop = atRow
+    result.pictureCols = cols
+    result.pictureRows = rows
+    atRow += rows
+  elif gap == fdgNone:
     let tier = model.drawableTierFor()
     let grid =
       if model.magnified:
@@ -596,6 +792,7 @@ proc paintFrameViewer*(g: var StyledGrid; area: CellArea;
                                DefaultCellAspect, area.width, pictureHeight))
     result.candidatesEvaluated = grid.candidatesEvaluated
     result.pictureCols = min(grid.cols, area.width)
+    result.pictureTop = atRow
     var cursorCol = -1
     var cursorRow = -1
     var cursorCols = 0
@@ -659,7 +856,9 @@ proc paintFrameViewer*(g: var StyledGrid; area: CellArea;
       inc shown
       inc result.historyRows
 
+  paintTransport(g, area, model, result)
   paintFrameScrubber(g, area, model, result)
+  paintDrawScrubber(g, area, model, result)
 
   for r in area.row ..< area.row + area.height:
     result.rows.add g.rowSpansIn(r, area.col, area.width)
@@ -711,16 +910,22 @@ proc emitFrameViewerPicture*(model: FrameViewerModel;
   ## fact in `remedyFor`'s one string. A guard no case can reach is a row that
   ## looks like coverage (Verification-Harness-Traps §32a), so it is gone rather
   ## than kept as defence in depth over a condition that cannot occur.
-  let scrubberRows =
-    if model.hasFrameScrubber(CellArea(col: 0, row: 0, width: width,
-                                       height: height)): 1
-    else: 0
+  let whole = CellArea(col: 0, row: 0, width: width, height: height)
+  let scrubberRows = (if model.hasFrameScrubber(whole): 1 else: 0) +
+                     (if model.hasDrawScrubber(whole): 1 else: 0) +
+                     (if model.hasTransport(whole): 1 else: 0)
   let pictureHeight = max(0, height - 1 - scrubberRows)
   let gap = model.resolveGap(width, pictureHeight)
   if gap != fdgNone:
     raise newException(EmitError,
       "this frame viewer cannot draw (" & $gap & "): " & remedyFor(gap))
   let tier = model.drawableTierFor()
+  if tier == itProtocol:
+    # PLAT-59: a tier-0 frame is TRANSMITTED by the host over the cells the
+    # pane reserves (`host/frame_image.frameImageBytes`), not emitted as cells.
+    raise newException(EmitError,
+      "a tier-0 frame is transmitted by the host (host/frame_image), not " &
+      "emitted as cells")
   let grid =
     if model.magnified:
       renderMagnifier(model.raster, model.magnifier, model.capability.tier)

@@ -1,0 +1,9 @@
+{
+  "C1": "p.posts.len == 2",
+  "V1": "s.request == -1",
+  "V2": "p.frameUrls[^1] == \"http://player/frame?frame=4\"",
+  "V4": "vm.player.pumpScrub(70.0)",
+  "V5": "vm.player.scrubPosition(scrubDraw) == 3",
+  "V6": "p.frameUrls[^1] == \"http://player/frame?frame=3&draw=0\"",
+  "V7": "vm.history.client == other"
+}

@@ -76,6 +76,7 @@ import ../app/views/requests_pane   # PLAT-58
 import ../app/views/shell_session_pane   # PLAT-61
 import ../../viewmodel/host/native_shell_host   # PLAT-61: the Shell pane's session
 import ../../viewmodel/host/native_requests_host   # PLAT-58: the Requests pane's host
+import ../../viewmodel/host/native_visual_replay_host   # PLAT-59: the Visual Replay producer
 from isonim/core/async_compat import drainPlatformCallbacks
 import ../app/views/low_level_code_pane   # PLAT-60
 import headless_app/low_level_menu   # PLAT-60: the row menu (K62)
@@ -114,9 +115,14 @@ type
     controls*: DebugControlsVM
     origin*: OriginChainVM
     frames*: FrameViewerVM
-      ## PLAT-51: the frame viewer's ViewModel, when a producer opened one
-      ## (PLAT-59 wires the producer; nil until then). The pane's own
-      ## scrubber asks it for frames (`pcFrameSeek`).
+      ## PLAT-51: the frame viewer's ViewModel, when a producer opened one —
+      ## the Visual Replay panes' (`visual`), nil for a recording that
+      ## carries no graphics. The overlay's scrubber asks it for frames
+      ## (`pcFrameSeek`).
+    visual*: NativeVisualReplay
+      ## PLAT-59: the recording's player and the client the Visual Replay
+      ## panes ask through (`viewmodel/host/native_visual_replay_host`); nil
+      ## when the recording carries no graphics.
     provider*: SourceProvider
     valueTimeline*: ValueTimeline
       ## CTUI-7's step-to-step diff. Carried across stops, because a diff is by
@@ -179,6 +185,13 @@ type
       ## over this session's store (so a live agent's session is the one
       ## this session's tab reports), a recorded session it was handed, and
       ## the files and recordings its cards open.
+
+proc refused*(s: TuiSession): bool =
+  ## The engine refused this session's recording, and it opened for its
+  ## graphics (`native_host.openLocalTrace`). Nothing can write to its replay,
+  ## so it is also `ended`; but no *Stop* ended it, and it stays a replay's tab:
+  ## Debug mode, the Visual Replay panes alive.
+  not s.isNil and not s.session.isNil and s.session.engineRefusal.len > 0
 
 proc ended*(s: TuiSession): bool =
   ## M76: whether the session's replay has ended — by this host's *Stop*
@@ -267,6 +280,10 @@ proc close*(s: TuiSession) =
   s.closed = true
   s.agent.close()
   s.shell.closeNativeShell()
+  # PLAT-59: the player and its worker.
+  if not s.visual.isNil:
+    s.visual.close()
+    s.visual = nil
   s.source.dispose()
   s.session.close()
 
@@ -929,6 +946,164 @@ proc requestsAct*(s: TuiSession; rt: TuiRuntime;
 # ---------------------------------------------------------------------------
 # PLAT-60: the Low Level Code pane
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# PLAT-59: the Visual Replay panes — the producer and the panes' acts
+# ---------------------------------------------------------------------------
+
+proc visualPanes*(s: TuiSession): VisualReplayPanesVM =
+  if s.isNil or s.session.isNil or s.session.session.isNil: nil
+  else: s.session.session.visualReplay
+
+proc refreshVisual*(s: TuiSession; rt: TuiRuntime) =
+  ## The three panes' values at this moment, from the session's
+  ## `VisualReplayPanesVM`; and whether the panes have work due soon.
+  let panes = s.visualPanes
+  if panes.isNil:
+    rt.visualBusy = false
+    return
+  let (cols, rows) = rt.videoPictureSize()
+  rt.app.frameViewer = videoPlayerModelFor(panes, rt.app.frameViewer,
+    rt.imageCapability, initDegradedStateSnapshot(), cols, rows)
+  rt.app.pixelHistory = pixelHistoryPaneModelFor(panes, rt.app.pixelHistory)
+  rt.app.shaderDebug = shaderDebugPaneModelFor(panes)
+  rt.visualBusy = panes.player.playState.val == Playing or
+                  panes.player.frameScrub.held or
+                  panes.player.drawScrub.held or s.visual.busy
+
+proc refreshVisualIfShown*(s: TuiSession; rt: TuiRuntime): bool =
+  ## Refresh the Visual Replay panes when the session has them. Whether it
+  ## did.
+  if s.isNil or s.visualPanes.isNil:
+    return false
+  s.refreshVisual(rt)
+  true
+
+proc attachVisualReplay*(s: TuiSession; rt: TuiRuntime; folder: string;
+                         wakeWrite: cint = -1) =
+  ## THE PRODUCER (Visual-Replay.md § Activation): a recording that carries
+  ## graphics gets its player, the Visual Replay panes over it — the
+  ## session's `VisualReplayPanesVM`, the one GPUI and the desktop draw too —
+  ## and the three panes added to the layout as the desktop adds them; one
+  ## that carries none has them removed. A player that cannot start still
+  ## gets the panes, which say why.
+  # A session the engine refused is `ended` from the start, and its graphics
+  # are exactly what it still has to show.
+  let refusal = s.session.engineRefusal
+  if s.ended and not s.refused:
+    return
+  if refusal.len > 0:
+    rt.noteEngineRefusal(sessionRefusedWords(refusal))
+  let h = startVisualReplay(folder, wakeWrite)
+  if h.isNil:
+    return
+  s.visual = h
+  let panes = h.panesFor(s.session.session.store)
+  # The terminal draws the framebuffer's own pixels: cells down-sample it
+  # and §5's magnifier addresses its pixels 1:1.
+  panes.frame.setFrameSize(0, 0)
+  s.session.session.visualReplay = panes
+  s.frames = panes.frame
+
+proc syncVisualLayout*(s: TuiSession; rt: TuiRuntime) =
+  ## The Visual Replay panes in the layout exactly when the shown session's
+  ## recording carries graphics (Visual-Replay.md § Activation, steps 3 and
+  ## 4), and their values read.
+  discard rt.setVisualReplayPanes(not s.visualPanes.isNil)
+  if s.visualPanes.isNil:
+    rt.app.frameViewer = initFrameViewerModel()
+    rt.app.pixelHistory = PixelHistoryPaneModel()
+    rt.app.shaderDebug = ShaderDebugPaneModel()
+    rt.visualBusy = false
+  else:
+    s.refreshVisual(rt)
+
+proc pumpVisual*(s: TuiSession; rt: TuiRuntime; nowMs: int64): bool =
+  ## The idle tick: the player's answers applied, a held scrubber's
+  ## coalesced frame asked for, playback advanced. Whether a pane changed.
+  let panes = s.visualPanes
+  if panes.isNil or (s.ended and not s.refused):
+    return false
+  var changed = s.visual.pump()
+  if panes.player.pumpScrub(float(nowMs)):
+    changed = true
+  if panes.player.playState.val == Playing:
+    panes.player.tickPlayback(float(nowMs))
+    changed = true
+  drainPlatformCallbacks()
+  if changed or rt.visualBusy:
+    s.refreshVisual(rt)
+  changed
+
+proc visualMoved(s: TuiSession; rt: TuiRuntime): bool =
+  ## A history row's navigation sent `ct/seek-to-geid`: when the engine
+  ## answered with a move, every pane reads the new position.
+  var stopped = false
+  for e in s.session.backend.eventQueue:
+    if e{"event"}.getStr("") == "stopped":
+      stopped = true
+  if not stopped:
+    return false
+  try:
+    s.session.settleAfterSeek()
+  except CatchableError:
+    return false
+  true
+
+proc visualAct*(s: TuiSession; rt: TuiRuntime;
+                act: VisualAct): VisualActResult =
+  ## A Visual Replay pane's act, done through the session's
+  ## `VisualReplayPanesVM`; the panes refreshed.
+  let panes = s.visualPanes
+  if panes.isNil:
+    return VisualActResult(note: "this recording carries no graphics")
+  result.changed = true
+  case act.kind
+  of vaPlayer:
+    discard panes.player.dispatchVideoPlayerAction(act.action)
+  of vaScrubBegin:
+    panes.player.beginScrub(act.axis, act.position, act.nowMs)
+  of vaScrubDrag:
+    discard panes.player.dragScrub(act.axis, act.position, act.nowMs)
+  of vaScrubRelease:
+    panes.player.releaseScrub(act.axis, act.position, act.nowMs)
+  of vaPickPixel:
+    panes.player.exitPickerMode()
+    panes.frame.selectPixel(act.x, act.y)
+    rt.showVisualPane(panePixelHistory)
+    result.note = "pixel " & $act.x & ", " & $act.y & " of frame " &
+      $panes.frame.currentFrame.val & ": its history and its shader"
+  of vaPickerState:
+    if act.on:
+      if panes.player.pickerState.val != PickerActive:
+        panes.player.enterPickerMode()
+    else:
+      panes.player.cancelPicker()
+  of vaHistorySelect:
+    panes.selectHistoryEntry(act.index)
+  of vaHistoryActivate:
+    if not panes.activateHistoryEntry(act.index):
+      result.note = "that draw call is no longer listed"
+    else:
+      let e = panes.history.entries.val[act.index]
+      result.note = drawText(e) & " (" & geidText(e) & ")"
+      if s.visualMoved(rt):
+        result.moved = true
+  of vaShaderStep:
+    case act.button
+    of sbFirst: panes.shader.stepFirst()
+    of sbBack: panes.shader.stepBackward()
+    of sbStep: panes.shader.stepForward()
+    of sbLast: panes.shader.stepLast()
+  of vaTick:
+    discard
+  drainPlatformCallbacks()
+  if not s.visual.isNil:
+    discard s.visual.pump()
+  if result.moved:
+    s.moved(rt)
+  s.refreshVisual(rt)
 
 proc lowLevelModelOf*(vm: LowLevelCodeVM;
                       prior: LowLevelPaneModel): LowLevelPaneModel =
