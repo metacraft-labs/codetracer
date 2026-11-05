@@ -16,6 +16,10 @@ export CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false
 # (libs/ct-home): nothing lands in the runner's or a developer's profile.
 # shellcheck source=ci/lib/codetracer-home.sh
 source "$REPO_ROOT/ci/lib/codetracer-home.sh"
+# On Linux the run happens again inside a sandbox over the user's state, so
+# only its own writes can fail it (ci/lib/codetracer-home.sh). Elsewhere the
+# call returns and the comparison in the EXIT trap is the guard.
+ct_user_state_stage_sandbox windows-headless bash "$0" "$@" || :
 ct_export_scratch_codetracer_home windows-headless
 # Fail the run if anything it ran wrote the developer's real CodeTracer
 # state (ci/lib/codetracer-home.sh, the guard). The scratch home is left in

@@ -8317,3 +8317,10 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   `type:`/`key:` reach the shell while it has the focus. Gutter clicks on the
   desktop are dispatched to the element in the capture spec (Playwright's
   aim at a 2ch inline cell was intercepted by the pane's last row).
+- User-state guard (ci/lib/codetracer-home.sh): every entry point that exports a
+  scratch CODETRACER_HOME also re-runs itself through
+  `ct_user_state_stage_sandbox <label> bash "$0" "$@" || :` before the export,
+  so on Linux only its own writes to ~/.local/state|share, ~/.config and
+  ~/.cache/codetracer can fail it. The `|| :` matters under `set -e`: the call
+  returns 1 inside the sandboxed re-run and on hosts without user namespaces.
+  `lane-user-state-guard-test.sh` case 12 flags an entry point without it.

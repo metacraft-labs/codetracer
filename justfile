@@ -1050,6 +1050,9 @@ test-rust:
   # developer's profile. Not a `.cargo/config.toml` [env]: that would move a
   # developer's own `cargo run` too.
   source ci/lib/codetracer-home.sh
+  # On Linux the recipe runs again inside a sandbox over the user's state, so
+  # only its own writes can fail it (ci/lib/codetracer-home.sh).
+  ct_user_state_stage_sandbox rust-tests bash "$0" || :
   ct_export_scratch_codetracer_home rust-tests
   trap '_ct_rc=$?; report_skips; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}; ct_user_state_guard_exit rust-tests "$_ct_rc"' EXIT
   # The resolver itself (both sides of the CODETRACER_HOME contract).
@@ -1216,6 +1219,9 @@ test-python-api:
   #!/usr/bin/env bash
   set -euo pipefail
   source ci/lib/codetracer-home.sh
+  # On Linux the recipe runs again inside a sandbox over the user's state, so
+  # only its own writes can fail it (ci/lib/codetracer-home.sh).
+  ct_user_state_stage_sandbox python-api bash "$0" || :
   ct_export_scratch_codetracer_home python-api
   trap '_ct_rc=$?; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}; ct_user_state_guard_exit python-api "$_ct_rc"' EXIT
   cd python-api
@@ -1949,6 +1955,9 @@ test-acp-notifications:
   #!/usr/bin/env bash
   set -euo pipefail
   source ci/lib/codetracer-home.sh
+  # On Linux the recipe runs again inside a sandbox over the user's state, so
+  # only its own writes can fail it (ci/lib/codetracer-home.sh).
+  ct_user_state_stage_sandbox acp-notifications bash "$0" || :
   ct_export_scratch_codetracer_home acp-notifications
   notification_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-acp-notifications.XXXXXX.js")"
   sessions_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-acp-sessions.XXXXXX.js")"
@@ -1976,6 +1985,9 @@ test-frontend-js:
   # trace index or recordings. The JS backend has no force-imported isolation
   # module, so this recipe is where the variable comes from.
   source ci/lib/codetracer-home.sh
+  # On Linux the recipe runs again inside a sandbox over the user's state, so
+  # only its own writes can fail it (ci/lib/codetracer-home.sh).
+  ct_user_state_stage_sandbox frontend-js bash "$0" || :
   ct_export_scratch_codetracer_home frontend-js
   nim_sourcemap_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-nim-sourcemap-test.XXXXXX.js")"
   frontend_lang_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-frontend-lang-test.XXXXXX.js")"
