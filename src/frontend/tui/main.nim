@@ -81,6 +81,7 @@ import ./host/key_journal
 import ./host/layout_store
 import ./host/native_host
 import ./app/views/low_level_code_pane   # PLAT-60: `LowLevelAct`
+import ./app/views/visual_replay_panes   # PLAT-59: `VisualAct`
 import ./host/pane_server
 from ../viewmodel/host/find_in_files import running   # PLAT-57
 from ../viewmodel/host/native_file_tree import wireNativeFileOperations,
@@ -118,6 +119,7 @@ from backend/stdio_backend import toBackendService
 from ./app/views/file_tree import FileTreeModel
 import ./host/control_icons
 import ./host/image_probe
+import ./host/frame_image   # PLAT-59: the Video Player's frame at tier 0
 import ./app/theme/palette
 import ../viewmodel/host/keymap_preference
 import ../viewmodel/host/keybindings_file
@@ -153,6 +155,10 @@ proc idleWaitMs(rt: TuiRuntime): int =
   ## a search streams (PLAT-57), or while a scrollbar fades (PLAT-70 Part H).
   if nativeFindInFiles.running:
     return SearchPollMs
+  # PLAT-59: the Visual Replay panes' clock (playback, a held scrubber, a
+  # frame on its way).
+  if rt.visualBusy:
+    return VisualTickMs
   # PLAT-70 Part B: a truncated cell's tooltip is due too (500 ms of rest).
   var due = rt.autoHideDueMs()
   let hover = rt.cellHoverDueMs()
@@ -397,6 +403,8 @@ proc adoptMouseMetrics(driver: TerminalDriver; n: StartupNegotiation) =
     driver.enablePixelMouse()
 
 var gIconState: ControlIconState
+var gFrameImage: FrameImageState
+  ## PLAT-59: what the terminal holds of the Video Player's tier-0 frame.
   ## What the terminal already holds of the controls' pictures (one terminal
   ## per process).
 
@@ -500,6 +508,12 @@ proc paint(driver: TerminalDriver; rt: TuiRuntime) =
                                 rt.app.controlsEnabledOf(),
                                 RoleColourTable[mode][srChromeText].fgRgb,
                                 RoleColourTable[mode][srChromeMuted].fgRgb)
+  # PLAT-59: the Video Player's frame at tier 0, transmitted over the cells
+  # the pane reserved (taken down when they go).
+  let frameRect =
+    if rt.app.frameViewer.transmitsProtocol: rt.videoPlayerScreen().screen.protocolRect
+    else: CellArea()
+  epilogue.add frameImageBytes(gFrameImage, frameRect, rt.app.frameViewer)
   let (prompting, row, col) = rt.promptCursor()
   if prompting:
     epilogue.add "\x1b[" & $(row + 1) & ";" & $(col + 1) & "H" &
@@ -980,6 +994,12 @@ proc interactive(command: TuiCommand): int =
       if app.recordingOpener.isNil: "this terminal cannot open " & path
       else: app.recordingOpener(path))
     session.refresh(rt)
+    # PLAT-59: the image decision the Video Player draws at, and the
+    # recording's graphics — its player and the Visual Replay panes.
+    rt.imageCapability = resolveImageCapability(readTerminalEnv(),
+      readImageEnv(), rt.caps, command.flags)
+    session.attachVisualReplay(rt, folder, highlights.wakeWriteFd)
+    session.syncVisualLayout(rt)
   except DapStalledError as e:
     driver.stop()
     for line in stalledAfterOpenReport(TuiProgramName, folder, e.msg):
@@ -1010,7 +1030,7 @@ proc interactive(command: TuiCommand): int =
     ## the desktop's new tab starts from the current one.
     if not sessions.hasKey(int(id)):
       return
-    let fromEnded = not session.isNil and session.ended
+    let fromEnded = not session.isNil and session.ended and not session.refused
     session = sessions[int(id)]
     shownId = id
     let slot = app.shell.activeSlot()
@@ -1018,7 +1038,7 @@ proc interactive(command: TuiCommand): int =
       # The DEBUG arrangement, even when the tab is left in Edit mode: a
       # slot holds a replay arrangement (`runtime.debugArrangementOf`).
       slot.layout = rt.debugArrangementOf().clone()
-    if session.ended:
+    if session.ended and not session.refused:
       # M76: a tab whose session *Stop* ended is an edit tab: nothing of a
       # replay is shown in it, and its workspace is Edit mode.
       rt.forgetSession()
@@ -1035,6 +1055,7 @@ proc interactive(command: TuiCommand): int =
     app.fileTree = FileTreeModel()      # this session's files (`refresh`)
     session.setViewportHeight(rt.sourcePaneRows())
     session.refresh(rt)
+    session.syncVisualLayout(rt)        # PLAT-59: this recording's graphics
     app.refreshOmnibarIndex()
     app.notification = describe(session)
 
@@ -1085,6 +1106,9 @@ proc interactive(command: TuiCommand): int =
     opened.wireShell(proc(path: string): string =
       if app.recordingOpener.isNil: "this terminal cannot open " & path
       else: app.recordingOpener(path))
+    # PLAT-59: this recording's graphics (its panes are placed when its tab
+    # is shown, `showSession`).
+    opened.attachVisualReplay(rt, path, highlights.wakeWriteFd)
     sessions[int(slot.id)] = opened
     # M76: OPENED FROM A TAB WHOSE SESSION *STOP* ENDED — *File › Open
     # Trace…* (or *Record New Trace…*) chosen there, whose welcome tab
@@ -1188,6 +1212,12 @@ proc interactive(command: TuiCommand): int =
   # pumped on the idle tick below.
   app.shellAct = proc(act: ShellAct): ShellActResult =
     session.shellAct(rt, act)
+  # PLAT-59: the Visual Replay panes — the transport, the scrubbers, the
+  # picker, a history row, a shader step — done through the shown session's
+  # `VisualReplayPanesVM`; its answers, playback and a held scrubber's
+  # coalesced frame are pumped on the idle tick below.
+  app.visualAct = proc(act: VisualAct): VisualActResult =
+    session.visualAct(rt, act)
 
   # PLAT-47 deliverable 4: the VCS pane reads the directory the desktop's VCS
   # panel reads for a replay — the process's own working directory.
@@ -1532,6 +1562,12 @@ proc interactive(command: TuiCommand): int =
       if graphicsProbe.open and nowMs() > graphicsProbe.deadlineMs:
         # No answer: the terminal draws no pictures. The default stays.
         graphicsProbe.open = false
+        # PLAT-59: and the Video Player draws its frame as cells.
+        rt.imageCapability = resolveImageCapability(readTerminalEnv(),
+          readImageEnv(), rt.caps, command.flags,
+          GraphicsProbe(attempted: true, answered: true, kitty: false))
+        if session.refreshVisualIfShown(rt):
+          paint(driver, rt)
       discard rt.clipboardReadDue(driver)
       if not graphicsProbe.open and not rt.clipboardRead.open:
         negotiation.closeReplyWindow(driver)
@@ -1564,6 +1600,8 @@ proc interactive(command: TuiCommand): int =
       let requestsChanged = session.pumpRequests(rt, nowMs())
       # PLAT-61: what the Shell pane's shell wrote and reported.
       let shellChanged = session.pumpShell(rt)
+      # PLAT-59: the player's answers, playback, a held scrubber's frame.
+      let visualChanged = session.pumpVisual(rt, nowMs())
       # PLAT-51: a welcome tab's recording, when it finishes.
       let recorded = pollRecording()
       # PLAT-49 part B: the auto-hide hover's clock — a preview due after
@@ -1581,7 +1619,7 @@ proc interactive(command: TuiCommand): int =
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
          hoverChanged or frameOwed or recorded or keysChanged or searched or
          barsChanged or testsChanged or agentChanged or problemsChanged or
-         requestsChanged or verified or constraintsChanged or shellChanged:
+         requestsChanged or verified or constraintsChanged or shellChanged or visualChanged:
         paint(driver, rt)
         frameOwed = false
     of dekResize:
@@ -1616,6 +1654,13 @@ proc interactive(command: TuiCommand): int =
       # the user chose otherwise. Never a key, never journalled.
       if isGraphicsProbeReply(ev.token):
         graphicsProbe.open = false
+        # PLAT-59: the path MEASURED: the Video Player's frame goes at tier 0
+        # only where the Kitty query came back.
+        rt.imageCapability = resolveImageCapability(readTerminalEnv(),
+          readImageEnv(), rt.caps, command.flags,
+          GraphicsProbe(attempted: true, answered: true,
+                        kitty: ev.token.contains(";OK")))
+        session.refreshVisual(rt)
         if ev.token.contains(";OK"):
           rt.app.graphicsDrawn = true
           if not rt.app.iconsChosen:

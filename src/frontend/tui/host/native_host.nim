@@ -58,6 +58,7 @@ from viewmodels/omnibar_vm import OmnibarEntry, OmnibarMode   # `recordingsBesid
 import ../../../common/trace_source_paths   # the shared source-folder rule
 import ../../../common/replay_server_path   # the one replay-server search order
 import ../../viewmodel/host/find_in_files   # PLAT-57: the one search runner
+from ../../viewmodel/host/native_visual_replay_host import recordingHasGraphics
 from viewmodels/search_results_vm import SearchResultsVM, acceptBatch
 import ../../../ct/trace/trace_kind   # the shared test-oracle refusal
 import ../../../ct/trace/recorder_output   # `ct record-test`'s recording id
@@ -568,7 +569,18 @@ proc openLocalTrace*(traceFolder: string;
   let bin = findReplayServer()
   if bin.len == 0:
     raiseHost(replayServerRemedy())
-  result = newHeadlessDebugSession(resolved, bin, handshake = bound)
+  try:
+    result = newHeadlessDebugSession(resolved, bin, handshake = bound)
+  except DapLaunchRefusedError as e:
+    # A RECORDING THAT CARRIES GRAPHICS STILL OPENS. The graphics do not need
+    # this engine, and the desktop shows the Visual Replay panes of a recording
+    # whose debugging session is refused (a Linux `--attach=premain` recording:
+    # the debug server has no stage0 boundary to replay from, and it is the only
+    # attach that captures GL). Without graphics there is nothing to show and
+    # the refusal stays what ends the open.
+    if not recordingHasGraphics(resolved):
+      raise
+    result = newRefusedDebugSession(resolved, bin, e.msg)
   result.installNativeStop()
 
 # ---------------------------------------------------------------------------

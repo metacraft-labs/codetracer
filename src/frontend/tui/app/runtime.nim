@@ -36,7 +36,7 @@
 ## wrong and recorded it: with nothing pumping the event, a step is sent, the
 ## engine moves, and every pane keeps reporting the old position forever.
 
-import std/[options, os, strutils, tables]
+import std/[monotimes, options, os, strutils, tables]
 
 import codetracer_embed   # PLAT-43: `BaseKeymap`, `selectKeymap`
 import headless_app/auto_hide_hover
@@ -70,6 +70,7 @@ import ./views/low_level_code_pane   # PLAT-60
 import ./views/verification_pane     # PLAT-63
 import ./views/constraints_pane   # PLAT-62
 import ./views/shell_session_pane   # PLAT-61
+import ./frame_viewer_binding   # PLAT-59: the Visual Replay panes
 
 export interpreter, keymap, motions, command_line, tui_app, degradation
 export persistence
@@ -444,6 +445,14 @@ type
   TuiRuntime* = ref object
     ## The running front-end's state, minus the terminal and minus the process.
     app*: TuiApp
+    imageCapability*: ImageCapability
+      ## PLAT-59: the image decision for this terminal
+      ## (`image_capability.resolveImageCapability`), resolved by the host —
+      ## the tier the Video Player draws its frame at.
+    visualBusy*: bool
+      ## PLAT-59: the Visual Replay panes have work due soon — playback
+      ## running, a held scrubber's coalesced frame, a request in flight —
+      ## so the loop wakes on the panes' clock (`VisualTickMs`).
     lowLevelCursor*: (string, int)
       ## PLAT-60: the editor caret's line last told to the Low Level Code
       ## listing (`syncLowLevelCursor`), so it is told once per move.
@@ -3297,6 +3306,425 @@ proc runVerificationKeyOperation(rt: TuiRuntime; operation: string;
     true
   else: false
 
+
+# ---------------------------------------------------------------------------
+# PLAT-59: the Visual Replay panes
+# ---------------------------------------------------------------------------
+
+proc nowMonoMs(): int64 =
+  ## The Visual Replay scrubbers' clock (the coalescing window): monotonic.
+  getMonoTime().ticks div 1_000_000
+
+const
+  VisualTickMs* = 16
+    ## How soon the loop wakes while the Visual Replay panes have work due
+    ## (`visualBusy`): playback's pace and a held scrubber's coalesced frame.
+  VisualPanes* = {paneVideoPlayer, panePixelHistory, paneShaderDebug}
+
+proc visualContentArea(rt: TuiRuntime; kind: PaneKind): CellArea =
+  ## A Visual Replay pane's content, below its strip; empty when off screen.
+  let under = rt.paneAreaOf(kind)
+  if under.width <= 0 or under.height <= 1:
+    return CellArea()
+  CellArea(col: under.col, row: under.row + 1, width: under.width,
+           height: under.height - 1)
+
+proc videoPlayerScreen*(rt: TuiRuntime): tuple[area: CellArea,
+                                               screen: FrameViewerScreen] =
+  ## The Video Player pane below its strip, and where the painter put its
+  ## parts — the arithmetic a press is read back with.
+  result.area = rt.visualContentArea(paneVideoPlayer)
+  if result.area.width <= 0:
+    return
+  var g = newStyledGrid(result.area.col + result.area.width,
+                        result.area.row + result.area.height)
+  result.screen = paintFrameViewer(g, result.area, rt.app.frameViewer)
+
+proc videoPictureSize*(rt: TuiRuntime): tuple[cols, rows: int] =
+  ## The cells the picture may take in the Video Player pane: what the host
+  ## fits the frame to.
+  let area = rt.visualContentArea(paneVideoPlayer)
+  if area.width <= 0:
+    return (0, 0)
+  var m = rt.app.frameViewer
+  m.pane = true
+  let reserved = 1 + (if m.hasTransport(area): 1 else: 0) +
+                 (if m.hasFrameScrubber(area): 1 else: 0) +
+                 (if m.hasDrawScrubber(area): 1 else: 0) +
+                 (if m.magnified: 1 else: 0)
+  (area.width, max(0, area.height - reserved))
+
+proc pixelHistoryScreen*(rt: TuiRuntime): tuple[area: CellArea,
+                                                screen: PixelHistoryPaneScreen] =
+  result.area = rt.visualContentArea(panePixelHistory)
+  if result.area.width <= 0:
+    return
+  var g = newStyledGrid(result.area.col + result.area.width,
+                        result.area.row + result.area.height)
+  result.screen = paintPixelHistory(g, result.area, rt.app.pixelHistory)
+
+proc shaderDebugScreen*(rt: TuiRuntime): tuple[area: CellArea,
+                                               screen: ShaderDebugPaneScreen] =
+  result.area = rt.visualContentArea(paneShaderDebug)
+  if result.area.width <= 0:
+    return
+  var g = newStyledGrid(result.area.col + result.area.width,
+                        result.area.row + result.area.height)
+  result.screen = paintShaderDebug(g, result.area, rt.app.shaderDebug)
+
+proc actOnVisual*(rt: TuiRuntime; act: VisualAct;
+                  outcome: var RuntimeOutcome): VisualActResult =
+  ## Hand `act` to the host (`TuiApp.visualAct`), which does it over the
+  ## session's `VisualReplayPanesVM` and refreshes the three panes; its words
+  ## go to the status line.
+  outcome.repaint = true
+  if rt.app.visualAct.isNil:
+    rt.note("this recording carries no graphics")
+    return
+  result = rt.app.visualAct(act)
+  if result.note.len > 0:
+    rt.note(result.note)
+
+proc closeMagnifier(rt: TuiRuntime) =
+  rt.app.frameViewer.magnified = false
+
+proc openMagnifierAtCell(rt: TuiRuntime; col, row: int;
+                         outcome: var RuntimeOutcome): bool =
+  ## §5's FIRST stage: the cell under a press (or the frame's centre for the
+  ## keyboard's `p`) opened into a magnifier over the source pixels it
+  ## shows; the picker is on until a pixel is committed or it is cancelled.
+  let (area, screen) = rt.videoPlayerScreen()
+  let m = rt.app.frameViewer
+  if not m.hasRaster or screen.pictureTop < 0 or screen.pictureRows <= 0:
+    rt.note("there is no frame to pick a pixel from")
+    outcome.repaint = true
+    return false
+  let localCol = max(0, min(col - area.col, max(0, screen.pictureCols - 1)))
+  let localRow = max(0, min(row - screen.pictureTop,
+                            max(0, screen.pictureRows - 1)))
+  let (cols, rows) = rt.videoPictureSize()
+  try:
+    rt.app.frameViewer = openMagnifierAt(m, localCol, localRow, cols,
+                                         max(1, rows))
+  except CatchableError as e:
+    rt.note(e.msg)
+    outcome.repaint = true
+    return false
+  discard rt.actOnVisual(VisualAct(kind: vaPickerState, on: true), outcome)
+  rt.note(describeMagnifier(rt.app.frameViewer.magnifier) &
+          " — arrows move, Enter picks, Esc cancels")
+  true
+
+proc commitMagnifier(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  ## §5's SECOND stage committed: the magnifier's pixel goes to the pixel
+  ## history and the shader debugger (`selectPixel`), and the picker closes.
+  if not rt.app.frameViewer.magnified:
+    return
+  let (x, y) = rt.app.frameViewer.magnifier.pickedPixel()
+  rt.closeMagnifier()
+  discard rt.actOnVisual(VisualAct(kind: vaPickPixel, x: x, y: y), outcome)
+
+proc cancelPicker(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  rt.closeMagnifier()
+  discard rt.actOnVisual(VisualAct(kind: vaPickerState, on: false), outcome)
+
+proc videoPlayerOwnsToken*(rt: TuiRuntime; token: string): bool =
+  ## The Video Player's keys while it has the focus (Visual-Replay.md §
+  ## Keyboard Shortcuts: "scoped to the Video Player component when it has
+  ## focus"): Space / K play-pause, J rewind, L fast forward, Left / Right a
+  ## frame, Shift+Left / Shift+Right a draw call, Home / End, P the picker —
+  ## and, while the magnifier is open, the arrows move its pixel, Enter
+  ## picks, Esc cancels.
+  let (had, focused) = rt.focus.focusedPane()
+  if not had or focused != paneVideoPlayer or not rt.app.frameViewer.pane:
+    return false
+  let key = rt.keyOf(token)
+  if rt.app.frameViewer.magnified:
+    return key in ["Left", "Right", "Up", "Down", "Shift+Left", "Shift+Right",
+                   "Shift+Up", "Shift+Down", "Enter", "Escape", "Esc", "p",
+                   "P"]
+  key in ["Space", "k", "K", "j", "J", "l", "L", "Left", "Right",
+          "Shift+Left", "Shift+Right", "Home", "End", "p", "P"] or
+    (key in ["Escape", "Esc"] and rt.app.frameViewer.transport.picker)
+
+proc playerAction(rt: TuiRuntime; action: VideoPlayerAction;
+                  outcome: var RuntimeOutcome) =
+  discard rt.actOnVisual(VisualAct(kind: vaPlayer, action: action), outcome)
+
+proc routeTokenToVideoPlayer(rt: TuiRuntime; token: string;
+                             outcome: var RuntimeOutcome) =
+  let key = rt.keyOf(token)
+  outcome.repaint = true
+  if rt.app.frameViewer.magnified:
+    let step = if key.startsWith("Shift+"): 8 else: 1
+    case key
+    of "Left", "Shift+Left":
+      rt.app.frameViewer = rt.app.frameViewer.moveCursorBy(-step, 0)
+    of "Right", "Shift+Right":
+      rt.app.frameViewer = rt.app.frameViewer.moveCursorBy(step, 0)
+    of "Up", "Shift+Up":
+      rt.app.frameViewer = rt.app.frameViewer.moveCursorBy(0, -step)
+    of "Down", "Shift+Down":
+      rt.app.frameViewer = rt.app.frameViewer.moveCursorBy(0, step)
+    of "Enter":
+      rt.commitMagnifier(outcome)
+      return
+    of "Escape", "Esc", "p", "P":
+      rt.cancelPicker(outcome)
+      return
+    else: discard
+    rt.note(describeMagnifier(rt.app.frameViewer.magnifier))
+    return
+  case key
+  of "Space", "k", "K": rt.playerAction(VpaTogglePlay, outcome)
+  of "j", "J": rt.playerAction(VpaRewind, outcome)
+  of "l", "L": rt.playerAction(VpaFastForward, outcome)
+  of "Left": rt.playerAction(VpaStepFrameBack, outcome)
+  of "Right": rt.playerAction(VpaStepFrameForward, outcome)
+  of "Shift+Left": rt.playerAction(VpaStepDrawBack, outcome)
+  of "Shift+Right": rt.playerAction(VpaStepDrawForward, outcome)
+  of "Home": rt.playerAction(VpaJumpStart, outcome)
+  of "End": rt.playerAction(VpaJumpEnd, outcome)
+  of "p", "P":
+    # The picker on: §5's first stage at the frame's centre, by keyboard.
+    let (area, screen) = rt.videoPlayerScreen()
+    if screen.pictureTop >= 0:
+      discard rt.openMagnifierAtCell(area.col + screen.pictureCols div 2,
+        screen.pictureTop + screen.pictureRows div 2, outcome)
+    else:
+      rt.playerAction(VpaTogglePicker, outcome)
+  of "Escape", "Esc": rt.cancelPicker(outcome)
+  else: discard
+
+proc routeVideoPlayerDrag*(rt: TuiRuntime; event: MouseEvent;
+                           outcome: var RuntimeOutcome): bool =
+  ## A press held on one of the Video Player's scrubbers: motion follows the
+  ## pointer (the frame under it shown at once, the player asked at most every
+  ## `ScrubCoalesceMs`), the release settles where it is.
+  let m = rt.app.frameViewer
+  if not m.pane or not (m.scrubbing or m.drawScrubbing):
+    return false
+  let axis = if m.scrubbing: scrubFrame else: scrubDraw
+  let (area, _) = rt.videoPlayerScreen()
+  let at =
+    if axis == scrubFrame: m.frameAtColumn(area, event.col)
+    else: m.drawAtColumn(area, event.col)
+  case event.kind
+  of mekMotion:
+    if at >= 0:
+      discard rt.actOnVisual(VisualAct(kind: vaScrubDrag, axis: axis,
+                                       position: at,
+                                       nowMs: float(nowMonoMs())), outcome)
+  of mekRelease:
+    discard rt.actOnVisual(VisualAct(kind: vaScrubRelease, axis: axis,
+                                     position: max(0, at),
+                                     nowMs: float(nowMonoMs())), outcome)
+  else:
+    discard rt.actOnVisual(VisualAct(kind: vaScrubRelease, axis: axis,
+                                     position: max(0, at),
+                                     nowMs: float(nowMonoMs())), outcome)
+    return false
+  true
+
+proc pressVideoPlayer(rt: TuiRuntime; event: MouseEvent;
+                      outcome: var RuntimeOutcome): bool =
+  ## A press in the Video Player: a transport control, a scrubber (held), the
+  ## picture (§5's stages), or nothing.
+  if event.button != mbLeft or not rt.app.frameViewer.pane:
+    return false
+  rt.app.layoutBinding.focus = paneVideoPlayer
+  discard rt.focus.focusPaneKind(paneVideoPlayer)
+  let (area, screen) = rt.videoPlayerScreen()
+  let m = rt.app.frameViewer
+  if event.row == screen.transportRow:
+    for b in screen.transportButtons:
+      if event.col >= b.col and event.col < b.col + b.width:
+        if b.action == VpaTogglePicker:
+          if m.magnified or m.transport.picker:
+            rt.cancelPicker(outcome)
+          else:
+            rt.routeTokenToVideoPlayer("p", outcome)
+        else:
+          rt.playerAction(b.action, outcome)
+        return true
+    return true
+  if event.row == screen.scrubberRow and screen.scrubberRow >= 0:
+    let f = m.frameAtColumn(area, event.col)
+    if f >= 0:
+      discard rt.actOnVisual(VisualAct(kind: vaScrubBegin, axis: scrubFrame,
+                                       position: f,
+                                       nowMs: float(nowMonoMs())), outcome)
+    return true
+  if event.row == screen.drawScrubberRow and screen.drawScrubberRow >= 0:
+    let d = m.drawAtColumn(area, event.col)
+    if d >= 0:
+      discard rt.actOnVisual(VisualAct(kind: vaScrubBegin, axis: scrubDraw,
+                                       position: d,
+                                       nowMs: float(nowMonoMs())), outcome)
+    return true
+  if screen.pictureTop >= 0 and event.row >= screen.pictureTop and
+     event.row < screen.pictureTop + screen.pictureRows and
+     event.col >= area.col and event.col < area.col + screen.pictureCols:
+    if m.magnified:
+      # The second stage by pointer: the pixel under the press, committed.
+      let (cc, cr) = m.magnifier.cursorCell()
+      let dx = (event.col - area.col - cc) div max(1, m.magnifier.zoomCols)
+      let dy = (event.row - screen.pictureTop - cr) div
+               max(1, m.magnifier.zoomRows)
+      rt.app.frameViewer = m.moveCursorBy(dx, dy)
+      rt.commitMagnifier(outcome)
+    else:
+      discard rt.openMagnifierAtCell(event.col, event.row, outcome)
+    return true
+  false
+
+proc pressPixelHistory(rt: TuiRuntime; event: MouseEvent;
+                       outcome: var RuntimeOutcome): bool =
+  ## A press on a history row navigates (the desktop's click).
+  if event.button != mbLeft or not rt.app.pixelHistory.loaded:
+    return false
+  rt.app.layoutBinding.focus = panePixelHistory
+  discard rt.focus.focusPaneKind(panePixelHistory)
+  let (_, screen) = rt.pixelHistoryScreen()
+  let t = screen.historyTargetAt(rt.app.pixelHistory, event.row)
+  if t.kind != vtHistoryRow:
+    return true
+  discard rt.actOnVisual(VisualAct(kind: vaHistoryActivate, index: t.index),
+                         outcome)
+  true
+
+proc pressShaderDebug(rt: TuiRuntime; event: MouseEvent;
+                      outcome: var RuntimeOutcome): bool =
+  if event.button != mbLeft or not rt.app.shaderDebug.loaded:
+    return false
+  rt.app.layoutBinding.focus = paneShaderDebug
+  discard rt.focus.focusPaneKind(paneShaderDebug)
+  let (_, screen) = rt.shaderDebugScreen()
+  let t = screen.shaderTargetAt(event.row, event.col)
+  if t.kind == vtShaderButton:
+    discard rt.actOnVisual(VisualAct(kind: vaShaderStep, button: t.button),
+                           outcome)
+  true
+
+proc revealHistory(rt: TuiRuntime; row: int) =
+  let (_, screen) = rt.pixelHistoryScreen()
+  rt.app.pixelHistory.scrollTop =
+    rt.app.pixelHistory.revealHistoryRow(screen.listRows, row)
+
+proc scrollPixelHistory(rt: TuiRuntime; delta: int;
+                        outcome: var RuntimeOutcome) =
+  let (_, screen) = rt.pixelHistoryScreen()
+  rt.app.pixelHistory.scrollTop = clampHistoryTop(
+    rt.app.pixelHistory.rows.len, rt.app.pixelHistory.scrollTop + delta,
+    screen.listRows)
+  outcome.repaint = true
+
+proc runVisualKeyOperation(rt: TuiRuntime; pane: PaneKind; operation: string;
+                           outcome: var RuntimeOutcome): bool =
+  ## The list keys in the Pixel History (a row's cursor; `list.activate`
+  ## navigates) and the Shader Debug pane (the step: next / previous, first /
+  ## last). Answers whether `operation` was the pane's.
+  case pane
+  of panePixelHistory:
+    let m = rt.app.pixelHistory
+    if m.rows.len == 0:
+      return false
+    let (_, screen) = rt.pixelHistoryScreen()
+    let page = max(1, screen.listRows - 1)
+    let at = m.selected
+    let target =
+      case operation
+      of "list.focus-next": (if at < 0: 0 else: min(at + 1, m.rows.len - 1))
+      of "list.focus-previous": (if at < 0: 0 else: max(at - 1, 0))
+      of "list.focus-first": 0
+      of "list.focus-last": m.rows.len - 1
+      of "list.focus-page-down": min(max(at, 0) + page, m.rows.len - 1)
+      of "list.focus-page-up": max(max(at, 0) - page, 0)
+      of "list.activate": -2
+      else: -3
+    if target == -3:
+      return false
+    if target == -2:
+      if at >= 0:
+        discard rt.actOnVisual(VisualAct(kind: vaHistoryActivate, index: at),
+                               outcome)
+      return true
+    discard rt.actOnVisual(VisualAct(kind: vaHistorySelect, index: target),
+                           outcome)
+    rt.revealHistory(target)
+    true
+  of paneShaderDebug:
+    let button =
+      case operation
+      of "list.focus-next": sbStep
+      of "list.focus-previous": sbBack
+      of "list.focus-first": sbFirst
+      of "list.focus-last": sbLast
+      else: return false
+    discard rt.actOnVisual(VisualAct(kind: vaShaderStep, button: button),
+                           outcome)
+    true
+  else: false
+
+proc noteEngineRefusal*(rt: TuiRuntime; words: string) =
+  ## The engine refused this recording and its graphics opened anyway: said on
+  ## the status row, where the terminal says everything else that happened.
+  rt.note(words)
+
+proc setVisualReplayPanes*(rt: TuiRuntime; on: bool): bool =
+  ## Visual-Replay.md § Activation, on the terminal: the Video Player added
+  ## as a tab beside the editor and Pixel History and Shader Debug as tabs
+  ## beside the state pane when the recording carries graphics — ADDITIVE,
+  ## the user's arrangement otherwise untouched and the tabs they had kept
+  ## active — and removed again for one that does not. Whether the layout
+  ## changed.
+  if not rt.layoutBindingEnabled():
+    return false
+  let b = rt.app.layoutBinding
+  var changed = false
+  if on:
+    let editorActive = b.layout.tree.contains(paneEditor)
+    for (pane, beside) in [(paneVideoPlayer, paneEditor),
+                           (panePixelHistory, paneState),
+                           (paneShaderDebug, panePixelHistory)]:
+      if b.layout.tree.contains(pane):
+        continue
+      var acted: LayoutAction
+      if b.layout.tree.contains(beside):
+        acted = b.dispatch(cmdAddPane(pane, after = some(beside)))
+        if acted.status == lasApplied:
+          # A bare leaf (the editor) gets the tab as a stack of two; one in a
+          # stack already took it there.
+          discard b.dispatch(cmdMergeIntoStack(pane, beside))
+      else:
+        acted = b.dispatch(cmdAddPane(pane))
+      if acted.status == lasApplied:
+        changed = true
+    # The user's tabs stay the ones shown (additive placement).
+    if editorActive and b.layout.tree.contains(paneEditor):
+      discard b.dispatch(cmdActivateTab(paneEditor))
+    if b.layout.tree.contains(paneState):
+      discard b.dispatch(cmdActivateTab(paneState))
+  else:
+    for pane in [paneShaderDebug, panePixelHistory, paneVideoPlayer]:
+      if b.layout.tree.contains(pane):
+        if b.dispatch(cmdRemovePane(pane)).status == lasApplied:
+          changed = true
+  if changed:
+    rt.afterLayoutCommit()
+    rt.rebuildFocus()
+  changed
+
+proc showVisualPane*(rt: TuiRuntime; pane: PaneKind) =
+  ## Bring a Visual Replay pane's tab forward (a picked pixel shows its
+  ## history), keeping the focus where it is.
+  if not rt.layoutBindingEnabled():
+    return
+  let b = rt.app.layoutBinding
+  if b.layout.tree.contains(pane) and
+     b.dispatch(cmdActivateTab(pane)).status == lasApplied:
+    rt.afterLayoutCommit()
+
 proc openWorkingFileAt*(rt: TuiRuntime; path: string; line, col: int): string =
   ## PLAT-55 (K35): a working-tree file opened in Edit mode's editor — the
   ## `:e` route (`editServices.readFile`, `EditSession.openFile`) — with the
@@ -4557,6 +4985,15 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
   if not under.contains(event.row, event.col):
     return false   # the divider
   case region.pane
+  of paneVideoPlayer:
+    # PLAT-59: the transport, the scrubbers (held), the picture's picker.
+    return rt.pressVideoPlayer(event, outcome)
+  of panePixelHistory:
+    # PLAT-59: a history row navigates.
+    return rt.pressPixelHistory(event, outcome)
+  of paneShaderDebug:
+    # PLAT-59: the step buttons.
+    return rt.pressShaderDebug(event, outcome)
   of paneFileTree:
     # K17 / K18, and K19: a right-click opens the Files pane's menu.
     if event.button notin {mbLeft, mbRight}:
@@ -5391,6 +5828,13 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
     if at.found and at.region.pane == paneVerification and
        rt.app.verification.loaded:
       rt.scrollVerification(
+        (if event.button == mbWheelDown: CallTraceWheelRows
+         else: -CallTraceWheelRows), outcome)
+      return
+    # PLAT-59: the wheel scrolls the Pixel History's rows.
+    if at.found and at.region.pane == panePixelHistory and
+       rt.app.pixelHistory.loaded:
+      rt.scrollPixelHistory(
         (if event.button == mbWheelDown: CallTraceWheelRows
          else: -CallTraceWheelRows), outcome)
       return
@@ -8134,6 +8578,9 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
     if had and focused == paneConstraints and rt.app.constraints.loaded and
        rt.runConstraintsKeyOperation(res.operation, outcome):
       return
+    if had and focused in {panePixelHistory, paneShaderDebug} and
+       rt.runVisualKeyOperation(focused, res.operation, outcome):
+      return
   # PLAT-55: the docked Problems pane, pressed while shown, takes the list
   # keys too (`dockKeys`).
   if not rt.prompt.open and rt.hasDockKeys and rt.dockKeys == paneProblems and
@@ -8524,6 +8971,9 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
       # PLAT-51: the open frame viewer's own scrubber (it is over the panes).
       if rt.routeFrameViewerMouse(event, result):
         return
+      # PLAT-59: a press held on one of the Video Player's scrubbers.
+      if rt.routeVideoPlayerDrag(event, result):
+        return
       # PLAT-70 Part H: every pane's scrollbars — a held thumb or paging
       # press, a press on a bar, and the hover states and fade wakes of any
       # motion (Scrollbar-Scrubbers.md §7.4).
@@ -8599,6 +9049,12 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   # previous / next write and the view toggle, keys no global binding uses.
   if rt.terminalOutputOwnsToken(token):
     rt.routeTokenToTerminalOutput(token, result)
+    return
+
+  # PLAT-59: THE VIDEO PLAYER'S OWN KEYS while it is focused — the
+  # desktop's, scoped to the pane (Visual-Replay.md § Keyboard Shortcuts).
+  if rt.videoPlayerOwnsToken(token):
+    rt.routeTokenToVideoPlayer(token, result)
     return
 
   # PLAT-68: `:keys check` — every key is reported, none is run, until Esc.

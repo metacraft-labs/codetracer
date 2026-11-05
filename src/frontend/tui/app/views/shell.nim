@@ -74,6 +74,7 @@ import ./low_level_code_pane
 import ./verification_pane   # PLAT-63
 import ./constraints_pane
 import ./shell_session_pane   # PLAT-61
+import ./visual_replay_panes
 import ./frame_overlay
 import ./variables
 import ./context_menu
@@ -222,6 +223,11 @@ type
       ## PLAT-62. CONSTRAINTS, as a value: the window's `ConstraintsVM` the
       ## desktop's panel draws too, read by `constraints_source.paneModelOf`.
       ## Not loaded by default.
+    pixelHistory*: PixelHistoryPaneModel
+    shaderDebug*: ShaderDebugPaneModel
+      ## PLAT-59. PIXEL HISTORY and SHADER DEBUG, as values: the session's
+      ## `VisualReplayPanesVM` the desktop's panes draw too. Not loaded by
+      ## default. The Video Player pane is `frameViewer` with `pane` set.
     vcs*: VcsPaneModel
       ## PLAT-47 deliverable 4. The VCS pane, as a value: the shared `VCSVM`
       ## the desktop's VCS panel draws, read by `host/vcs_source.nim`. Not
@@ -641,6 +647,10 @@ proc activeLayout*(reg: ModeRegister): LayoutNode =
 # with it.) This module re-exports it (see the `export` above), so `paintPane`'s
 # three call sites below are the same call they were.
 
+const
+  NoGraphicsText* = "this recording carries no graphics"
+    ## PLAT-59: a Visual Replay pane in a layout whose recording drew nothing.
+
 proc frameViewerOverlayArea*(body: CellArea): CellArea =
   ## The rectangle PLAT-15's frame viewer occupies: centred in the body, at
   ## most `FrameViewerOverlayWidth` x `FrameViewerOverlayHeight`, never larger
@@ -954,6 +964,24 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   elif region.pane == paneConstraints and model.constraints.loaded:
     belowStrip:
       discard paintConstraints(g, content, model.constraints)
+  # PLAT-59. THE VISUAL REPLAY PANES — the frame with its transport and its
+  # two scrubbers, the pixel history, the shader debugger; below the strip.
+  elif region.pane == paneVideoPlayer and model.frameViewer.pane:
+    belowStrip:
+      discard paintFrameViewer(g, content, model.frameViewer)
+  elif region.pane == panePixelHistory and model.pixelHistory.loaded:
+    belowStrip:
+      discard paintPixelHistory(g, content, model.pixelHistory)
+  elif region.pane == paneShaderDebug and model.shaderDebug.loaded:
+    belowStrip:
+      discard paintShaderDebug(g, content, model.shaderDebug)
+  elif region.pane in {paneVideoPlayer, panePixelHistory, paneShaderDebug}:
+    # A remembered layout can hold them for a recording that draws nothing:
+    # the slot says so (PLAT-41's data-or-report rule).
+    belowStrip:
+      g.paint(content.row, content.col,
+              fitCells(NoGraphicsText, content.width),
+              CellStyle(role: srChromeMuted))
   elif region.pane == paneBuildOutput:
     # NO EMPTINESS GUARD: an idle BUILD pane is a statement — `[idle] build:
     # not started` — and a user who has just pressed `:build` needs to see the

@@ -104,13 +104,15 @@ suite "PLAT-41 LAW-P1 — the three sets COVER PaneKind":
     # session's `LowLevelCodeVM`.
     # PLAT-63 added `paneVerification`, drawn in the vocabulary from the
     # window's `VerificationVM`.
-    ck card(allPanes()) == 21
+    # PLAT-59 added the three Visual Replay panes, drawn in the vocabulary from
+    # the session's `VisualReplayPanesVM`.
+    ck card(allPanes()) == 24
     # PLAT-58 moved `paneRequests` into the vocabulary: it draws the
     # session's `RequestPanelVM`.
     # PLAT-63's Verification is in the vocabulary from its first day.
     # PLAT-62 moved `paneConstraints`, the last accepted exception, into the
     # vocabulary: it draws the window's `ConstraintsVM`.
-    ck card(PaneVocabularyPanes) == 20
+    ck card(PaneVocabularyPanes) == 23
     ck card(PaneNativePanes) == 1
     ck card(PaneAcceptedExceptions) == 0
     ck paneFileTree in PaneVocabularyPanes

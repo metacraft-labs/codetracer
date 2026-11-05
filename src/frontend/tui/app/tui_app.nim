@@ -71,6 +71,7 @@ import ./views/low_level_code_pane
 import ./views/verification_pane   # PLAT-63
 import ./views/constraints_pane
 import ./views/shell_session_pane   # PLAT-61
+import ./views/visual_replay_panes
 import ./views/point_list
 
 export headless_app
@@ -306,6 +307,12 @@ type
       ## `AgentActivityVM` through the shared feed; its `scroll` is the
       ## pane's own reading position.
     lowLevel*: LowLevelPaneModel
+    pixelHistory*: PixelHistoryPaneModel
+    shaderDebug*: ShaderDebugPaneModel
+      ## PLAT-59: the Pixel History and Shader Debug panes, as values
+      ## (`frame_viewer_binding.pixelHistoryPaneModelFor` /
+      ## `shaderDebugPaneModelFor`). Unloaded until a session whose recording
+      ## carries graphics fills them; the Video Player is `frameViewer`.
       ## PLAT-60. THE LOW LEVEL CODE pane's model, as a value, filled by the
       ## host (`host/tui_session.lowLevelModelOf`) from the session's
       ## `LowLevelCodeVM`; its `scrollTop` is the pane's own reading position.
@@ -400,6 +407,11 @@ type
       ## PLAT-57: the HOST's Find in Files toggle, by its operation
       ## (`search.toggle-case` / `-whole-word` / `-regex`): flipped, and a
       ## search that ran run again. The words the status line shows.
+    visualAct*: proc(act: VisualAct): VisualActResult {.closure.}
+      ## PLAT-59: the Visual Replay panes' acts (`VisualAct`), done by the
+      ## host over the session's `VisualReplayPanesVM`
+      ## (`tui_session.visualAct`), which refreshes the three panes. nil when
+      ## the session has no graphics.
     lowLevelAct*: proc(act: LowLevelAct): LowLevelActResult {.closure.}
       ## PLAT-60: the HOST's answer to an act on the Low Level Code pane — a
       ## press, a menu built or chosen, a key, the sync toggle, a step —
@@ -786,6 +798,8 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     verification: app.verification,
     constraints: app.constraints,
     shellPane: app.shellPane,
+    pixelHistory: app.pixelHistory,
+    shaderDebug: app.shaderDebug,
     build: build,
     product: app.modes.product,
     edit: app.editPaneModel())
