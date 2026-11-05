@@ -207,7 +207,11 @@ ARMS = [
              '    if false:')],
      [(TBL, None), (PTY, None)],
      "`:constraints` does not open the pane"),
-    ("T7", [(PROFILE, '     paneConstraints},', '     },'),
+    ("T7", [(PROFILE, '     paneConstraints,\n'
+                      '     # PLAT-61: the interactive shell (`views/shell_session_pane.nim`).\n'
+                      '     paneShell},',
+             '     # PLAT-61: the interactive shell (`views/shell_session_pane.nim`).\n'
+             '     paneShell},'),
             (SHELL, '  elif region.pane == paneConstraints and model.constraints.loaded:',
              '  elif false:')],
      [(PTY, None)],

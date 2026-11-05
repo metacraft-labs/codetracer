@@ -56,6 +56,17 @@
 # GPUI host calling it, the desktop listing hook): these harnesses owe a re-grade
 # of the arms whose needles sit in those subjects.
 
+# 2026-11-05, the PLAT-62 landing's re-grade (codetracer-pm issue
+# 2026-11-05-plat62-landing-owes-harness-re-grades). run-plat62-constraints-
+# mutations.py was re-graded at the landed bytes, control digest file
+# sha256 ff1cdb37ae2e2160674ff27cbe038499ef8d84d8c5f983f44ecd95efd4e7e4f5:
+# 38 of 38 arms KILLED, baseline GREEN (5 suite runs), under xvfb-run, at
+# agents 93c560eba plus the working tree. Agents 85c809905 moved no digested
+# subject or suite of this harness, and its digests still match the tree.
+# Its six ledger lines are cleared.
+# Arm T7's needle was repaired (the Shell pane's paneShell line followed
+# paneConstraints) before the grade; the repair is in the same commit.
+
 # 2026-11-04, merging dev into agents (codetracer PRs #900, #901, #902 were
 # merged straight into dev). The UI design work of parts 7 and 8 (key-focus,
 # dropdown focus, one tooltip, rem units) and the native flow call-entry and
@@ -371,8 +382,6 @@ src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/fronten
 src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/tui/host/tui_session.nim	e5aa91c629479e9f4d0b345ecdc4b194316c9e57a2c07b4cc786c62682074b8b	23c4fc83a7922ffe45fa30b35810da8346df14163f3f7977f3f2d56448d47c09
 src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/gpui/main.nim	d9e0bdbff78a54ce793d130cd3aa8f0fe8484a8c422ae663c18bc69b612f9f9e	e8c9a5957a025f648efc1672ccf02a66940918b8dc647745009edc689a5e2ce9
 src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/view_vocabulary/pane_views.nim	5abf1ef7cea6de82aad911e2cb43109c7ffa59028ec3bcae5b5c561ef3aec0f0	e7a95d1e32d1a6b55c7abb575bb6e590c8b34f0fef6e1cda69ec0986ad5cbd43
-src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/tui/main.nim	0ff48cf6e6ab13b80860e8ac23580021ea0b3fcc56e2b52ee26064528bad1d86	07364b7c12c73e611155e24729dfff89445392cbfd993b8abd6b79da25863208
-src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/gpui/main.nim	4fe0e3c5c1e2166aa7d393c1f008392668a7413f903bbe8f8c4c2bdcfbdb647f	e8c9a5957a025f648efc1672ccf02a66940918b8dc647745009edc689a5e2ce9
 src/frontend/tui/tests/plat63-verification-mutation-control.sha256	src/frontend/tui/app/runtime.nim	1ac9781a0f9572b91a8a41663e0b4dd432d0c7b920cd06b68770e5004184dae9	9790f43a9c1dbe167a6a61dab86ae25825e026e341d540d5df0803f7a008429b
 src/frontend/tui/tests/plat63-verification-mutation-control.sha256	src/frontend/gpui/main.nim	2b9957c155dd5db2ca2207c593a4d4cf93f403c567fe31e477380f6877383dac	e8c9a5957a025f648efc1672ccf02a66940918b8dc647745009edc689a5e2ce9
 src/frontend/tui/tests/plat63-verification-mutation-control.sha256	src/frontend/view_vocabulary/pane_views.nim	db93a41f319070d0a48e76f27414fd137c15dbd2c963cbe17c18f36af08c5a1a	e7a95d1e32d1a6b55c7abb575bb6e590c8b34f0fef6e1cda69ec0986ad5cbd43
@@ -419,10 +428,6 @@ src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/gpui/ma
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/view_vocabulary/pane_views.nim	0c21833cb38850cadf8a8aad92dddf19b2615fd25cbabc053ddbeb1b8665f13a	e7a95d1e32d1a6b55c7abb575bb6e590c8b34f0fef6e1cda69ec0986ad5cbd43
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/ui/key_router.nim	4d0d5287df6c94951b5ea395b8b4d338028f85057b27383fdd111eb8345531a8	7c8a1763b4b77623183664ae973773d398fd50fd9ccbbecc36bf37ed39a499b5
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/tui/tests/test_plat41_pane_coverage.nim	1fd5a3d07597d52b5df2d817d49b39e54cd972c1cbce201be7b9e1c85eef4dd6	7d43b8f374d7e76e6dae6c734f12659fff863e992a0cdb9917f483c0823a6ccf
-src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/tui/app/runtime.nim	f8a0b40546f34bd6b9667f45c3cc92a31efe2b0690288722bf991ea41754953c	9790f43a9c1dbe167a6a61dab86ae25825e026e341d540d5df0803f7a008429b
-src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/tui/app/views/shell.nim	bc2a43bf55ef11a8706fb49be7db0c5bf9d63d03571134f411194ce087405e3a	f1f5b7c029a51bdccf8516f7cdd4cbbc0ee7f5464599ce9e10cc0adefd3bc077
-src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/tui/app/layout/profile.nim	c5495adfe48153cfc77ad4dc57a6b4dd198e9a0fedac34f7e035eefd2ed253a8	964fc26c90774742dfd689a5a19e979a1630793ed73c1aebe4cfeb53cc34e27a
-src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/view_vocabulary/pane_views.nim	97abf5d5c4d9e1c68279aee656742b087c1cf7a006c075344562e094548bc222	e7a95d1e32d1a6b55c7abb575bb6e590c8b34f0fef6e1cda69ec0986ad5cbd43
 src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/tui/host/tui_session.nim	efe3ee1560ee74cacbcba811b4ce7d42b07fc838569da68e6d719aa54c7f414c	23c4fc83a7922ffe45fa30b35810da8346df14163f3f7977f3f2d56448d47c09
 src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/ui/key_router.nim	e7bbdd98f457fc0f5ee0c1e06f5c7bc30031a63569fb7b3afc51e64ce7f273f4	7c8a1763b4b77623183664ae973773d398fd50fd9ccbbecc36bf37ed39a499b5
 
