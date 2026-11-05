@@ -83,6 +83,8 @@ test.describe("MCR visual replay — source jump from draw call", () => {
     // handler's ``image.getBoundingClientRect`` math lands on the
     // intended source pixel.
     const image = ctPage.locator(".video-player-image");
+    // The answer is in; the image shows once it is decoded.
+    await expect(image).toBeVisible();
     const imageBox = await image.boundingBox();
     expect(imageBox).not.toBeNull();
 

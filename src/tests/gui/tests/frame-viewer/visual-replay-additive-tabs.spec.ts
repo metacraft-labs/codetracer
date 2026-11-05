@@ -59,34 +59,24 @@ test.describe("MCR visual replay additive tab placement", () => {
     // The Frame Viewer pane was retired — its tab must not exist anymore.
     await expect(ctPage.locator(".lm_tab", { hasText: "FRAME VIEWER" })).toHaveCount(0);
 
-    // The additive insertion must place Video Player in a stack that
-    // contains an "editor-ish" host pane.  The walker's editor-stack
-    // predicate matches stacks containing ``Content.EditorView`` (2),
-    // ``Content.LowLevelCode`` (18), or the dedicated
-    // ``editorComponent`` type — see ``visual_replay_layout.nim
-    // §stackContainsEditorContent``.  The bundled default layout that
-    // ships with CodeTracer has no editor entry in it (editor tabs
-    // appear dynamically when the user opens a file), so the walker
-    // falls back to the state-view stack — the same one that hosts
-    // Filesystem / State / VCS — for Video Player.  This is the
-    // documented fallback path
-    // (``visual_replay_layout.nim §addVisualReplayTabs`` "editorStack
-    // is nil and not stateStack.isNil").  We therefore assert
-    // structurally that VIDEO PLAYER shares the FILES stack — the
-    // first stack containing a Filesystem (id 9) entry — and that
-    // Pixel History + Shader Debug landed in the same stack, which
-    // is the equivalent guarantee at additive-walker time.
-    const filesStack = ctPage.locator(".lm_stack", {
-      has: ctPage.locator(".lm_tab", { hasText: "FILES" }),
+    // The additive insertion places Video Player in a stack that contains an
+    // "editor-ish" host pane (``visual_replay_layout.nim
+    // §stackContainsEditorContent``). The bundled default layout has no editor
+    // entry when the walker runs (editor tabs appear when a file opens), so
+    // Video Player takes the documented fallback: the stack Pixel History and
+    // Shader Debug go to, which is the State stack in preference to the sidebar
+    // (``§addVisualReplayTabs``). All three therefore share the VARIABLES stack.
+    const stateStack = ctPage.locator(".lm_stack", {
+      has: ctPage.locator(".lm_tab", { hasText: "VARIABLES" }),
     });
     await expect(
-      filesStack.locator(".lm_tab", { hasText: "VIDEO PLAYER" }),
+      stateStack.locator(".lm_tab", { hasText: "VIDEO PLAYER" }),
     ).toHaveCount(1);
     await expect(
-      filesStack.locator(".lm_tab", { hasText: "PIXEL HISTORY" }),
+      stateStack.locator(".lm_tab", { hasText: "PIXEL HISTORY" }),
     ).toHaveCount(1);
     await expect(
-      filesStack.locator(".lm_tab", { hasText: "SHADER DEBUG" }),
+      stateStack.locator(".lm_tab", { hasText: "SHADER DEBUG" }),
     ).toHaveCount(1);
 
     // The Video Player tab still exists exactly once in the layout —

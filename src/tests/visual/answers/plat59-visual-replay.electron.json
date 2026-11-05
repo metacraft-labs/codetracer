@@ -1,0 +1,89 @@
+{
+ "_comment": [
+  "PLAT-59 — the desktop's Visual Replay panes on the gl_scene recording, read from the real Electron app.",
+  "Produced by src/tests/gui/tests/frame-viewer/plat59-visual-replay-capture.spec.ts",
+  "(`just plat59-capture-electron`)."
+ ],
+ "frames": [
+  {
+   "frame": 0,
+   "label": "Frame 0 / 59",
+   "quadColours": [
+    "#643219",
+    "#937b8a",
+    "#c2c4fb",
+    "#f10d6c"
+   ]
+  },
+  {
+   "frame": 30,
+   "label": "Frame 30 / 59",
+   "quadColours": [
+    "#6c6a11",
+    "#9bb382",
+    "#cafcf3",
+    "#f94564"
+   ]
+  },
+  {
+   "frame": 59,
+   "label": "Frame 59 / 59",
+   "quadColours": [
+    "#b87e45",
+    "#e7c7b6",
+    "#161027",
+    "#455998"
+   ]
+  }
+ ],
+ "draw": {
+  "frame": 0,
+  "label": "Draw 1 / 3",
+  "quadColours": [
+   "#643219",
+   "#937b8a",
+   "#000000",
+   "#000000"
+  ]
+ },
+ "history": {
+  "pixel": {
+   "x": 40,
+   "y": 50,
+   "frame": 59
+  },
+  "header": "Pixel 40, 50 frame 59",
+  "entries": [
+   {
+    "drawCallIndex": 236,
+    "geid": 161138,
+    "pass": "Passed",
+    "post": "rgb(0, 0, 0)"
+   },
+   {
+    "drawCallIndex": 238,
+    "geid": 161155,
+    "pass": "Passed",
+    "post": "rgb(22, 16, 39)"
+   }
+  ]
+ },
+ "shader": {
+  "context": "Pixel 40, 50 frame 59",
+  "lines": [
+   "#version 300 es",
+   "precision mediump float;",
+   "uniform vec3 u_color;",
+   "out vec4 fragColor;",
+   "void main() {",
+   "fragColor = vec4(u_color, 1.0);",
+   "}",
+   ""
+  ]
+ },
+ "navigation": {
+  "clickedDraw": 238,
+  "drawLabel": "Draw 2 / 3"
+ },
+ "pageErrors": []
+}

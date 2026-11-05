@@ -5884,6 +5884,19 @@ plat56-capture-electron *args:
 build-tasks-electron *args:
   bash scripts/build-tasks-electron.sh "$@"
 
+# PLAT-59: the desktop's Visual Replay panes on the `gl_scene` visual
+# recording — the reference the terminal's and GPUI's Video Player, Pixel
+# History and Shader Debug panes are measured against
+# (`src/tests/visual/answers/plat59-visual-replay.electron.json`).
+plat59-capture-electron *args:
+  bash scripts/plat59-capture-electron.sh "$@"
+
+# PLAT-59: the `gl_scene` visual recording the Visual Replay suites open
+# (`test-logs/tui-fixtures/visual-gl-scene`): recorded by `ct-mcr`, its gfx
+# stream extracted.
+record-visual-replay-fixture *args:
+  bash scripts/record-visual-replay-fixture.sh "$@"
+
 # PLAT-60: the desktop's Low Level Code view on the `noir_space_ship`
 # recording — the reference the terminal's and GPUI's panes are measured
 # against (`src/tests/visual/answers/plat60-low-level-code.electron.json`).

@@ -2,8 +2,8 @@
 # gpui-window-captures.sh — RE-TAKE the GPUI window's measurements on a real
 # compositor and assert them, end to end, from nothing but a checkout.
 #
-#   bash ci/test/gpui-window-captures.sh [plat45] [plat47] [plat48] [plat68] [plat69] [plat70a] [plat70b] [m71]
-#   just gpui-window-captures                 # all eight
+#   bash ci/test/gpui-window-captures.sh [plat45] [plat47] [plat48] [plat68] [plat69] [plat59] [plat70a] [plat70b] [m71]
+#   just gpui-window-captures                 # all nine
 #
 # The GPUI window suites (`test_plat45_three_media.nim`,
 # `test_plat47_gpui_window.nim`, `test_plat48_gpui_window.nim`,
@@ -17,7 +17,7 @@
 # run the committed record is REPLACED by a fresh measurement of this commit's
 # window and the suite asserts that, not the file a person last committed.
 #
-# For each capture named (default: all three):
+# For each capture named (default: all of them):
 #   1. isonim-gpui's WINDOWED shim (`--features gpui-backend`) and its
 #      `build/virtual-pointer`, built in isonim-gpui's own dev shell — the
 #      shell that declares the X/Wayland link libraries and the compositor
@@ -62,11 +62,11 @@ fail() {
 }
 
 which=("$@")
-[ "${#which[@]}" -gt 0 ] || which=(plat45 plat47 plat48 plat68 plat69 plat70a plat70b m71)
+[ "${#which[@]}" -gt 0 ] || which=(plat45 plat47 plat48 plat59 plat68 plat69 plat70a plat70b m71)
 for w in "${which[@]}"; do
 	case "${w}" in
-	plat45 | plat47 | plat48 | plat68 | plat69 | plat70a | plat70b | m71) ;;
-	*) fail "unknown capture '${w}' (plat45, plat47, plat48, plat68, plat69, plat70a, plat70b, m71)" ;;
+	plat45 | plat47 | plat48 | plat59 | plat68 | plat69 | plat70a | plat70b | m71) ;;
+	*) fail "unknown capture '${w}' (plat45, plat47, plat48, plat59, plat68, plat69, plat70a, plat70b, m71)" ;;
 	esac
 done
 
@@ -208,6 +208,32 @@ for w in "${which[@]}"; do
 		in_compositor_shell "CODETRACER_PLAT68_ISONIM_GPUI='${ISONIM_GPUI}' bash ci/test/plat68-cua-window.sh" &&
 			bash ci/test/plat68-cua-window.sh --record &&
 			suite gpui-shell src/frontend/gpui/tests/test_plat68_cua_window.nim ||
+			failed+=("${w}")
+		;;
+	plat59)
+		# The Video Player's frames on the `gl_scene` visual recording: its
+		# tab pressed by the virtual pointer, frame 30 and the last frame by
+		# real keys. Linux has no off-screen GPUI renderer, so these are the
+		# window's pixels. Needs what the desktop's Visual Replay needs: ct-mcr
+		# and ct_gfx_player.
+		# shellcheck disable=SC1090 # written by the script just run
+		bash ci/test/visual-replay-tools.sh build/plat59-tools.env &&
+			. build/plat59-tools.env ||
+			{
+				failed+=("${w}")
+				continue
+			}
+		[ -f "${CODETRACER_VISUAL_REPLAY_FIXTURE:-test-logs/tui-fixtures/visual-gl-scene}/gfx_stream/gfx_frames.idx" ] ||
+			(cd "${WS}/codetracer-visual-replay" && nix develop --command bash \
+				"${root}/scripts/record-visual-replay-fixture.sh" \
+				"${CODETRACER_VISUAL_REPLAY_FIXTURE:-${root}/test-logs/tui-fixtures/visual-gl-scene}") ||
+			{
+				failed+=("${w}")
+				continue
+			}
+		in_compositor_shell "bash ci/test/plat59-gpui-window.sh" &&
+			python3 ci/test/plat59_gpui_window.py record &&
+			suite gpui-shell src/frontend/gpui/tests/test_plat59_gpui_window.nim ||
 			failed+=("${w}")
 		;;
 	plat70a)
