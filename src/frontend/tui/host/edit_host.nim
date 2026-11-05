@@ -54,6 +54,34 @@ const
     ## terminal that stops responding with the alternate screen claimed. Refused
     ## by name instead, which is a thing the user can act on.
 
+type
+  EditLaunchTarget* = object
+    ## What `ct edit <path>` opens: the project folder, and the file to show
+    ## first in the editor ("" when the path named the folder).
+    root*: string
+    file*: string
+      ## Relative to `root`.
+
+proc editLaunchTarget*(path: string): EditLaunchTarget =
+  ## `ct edit <path>` resolved (Edit-Mode-Toolbar.md EMT-D34): a FOLDER is the
+  ## project; a lone FILE opens its folder as the project, with the file on
+  ## screen — the desktop's `ct edit <file>` (`index/args`), which the native
+  ## front-ends follow (Native-Front-End-Parity.md: where the desktop has a
+  ## behaviour, the native front-ends have it too). Build and Run are then the
+  ## folder's (§7): a file is not a project marker, and no compile or record
+  ## command is invented for it. Any other path is returned as it is, for
+  ## `editProjectProblem` to name.
+  ##
+  ## This replaces CodeTracer-TUI-Edit-Mode.md §8 open decision 1's
+  ## recommendation (refuse a bare file): the editor of a lone file CAN build
+  ## — whatever its folder declares — so the reason given for refusing it
+  ## does not hold, and a refusal the desktop does not make is a parity gap.
+  if path.len > 0 and fileExists(path):
+    let full = absolutePath(path)
+    EditLaunchTarget(root: full.parentDir, file: full.extractFilename)
+  else:
+    EditLaunchTarget(root: path, file: "")
+
 proc editProjectProblem*(path: string): string =
   ## Why `path` cannot be opened in Edit mode, or "" when it can.
   ##
@@ -62,15 +90,14 @@ proc editProjectProblem*(path: string): string =
   ## that one: a diagnosis printed onto a claimed alternate screen is a
   ## diagnosis nobody reads.
   ##
-  ## A FILE IS REFUSED, and that is CodeTracer-TUI-Edit-Mode.md §8 open decision
-  ## 1 applied: *"require a project, and refuse a bare file with a message — an
-  ## editor that cannot build is not this product."* The message names the
-  ## remedy rather than only the rule.
+  ## A FILE IS REFUSED HERE, as a PROJECT: the command line resolves one to
+  ## its folder first (`editLaunchTarget`, EMT-D34), so what reaches this is
+  ## a folder the user named — the welcome screen's Open Folder among them.
+  ## The message names the remedy rather than only the rule.
   if path.len == 0:
     return "no project folder was given"
   if fileExists(path):
-    return "is a file; edit mode opens a PROJECT, so name its folder" &
-      " (an editor that cannot build is not this product)"
+    return "is a file; edit mode opens a PROJECT, so name its folder"
   if not dirExists(path):
     return "no such folder"
   result = ""

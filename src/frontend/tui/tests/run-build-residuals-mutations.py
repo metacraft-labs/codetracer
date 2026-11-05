@@ -3,7 +3,10 @@
 commands, the Build Output pane's reveal and dismissal, a build's
 diagnostics in the editor, and the desktop's build runner and Stop
 (codetracer-pm `spec/Planned-Features/Build-Output-Pane.md` §3.2, §3.6,
-§3.8, §3.9, §3.11, §3.12, §4.2, §5.2) on every front-end: the shared model
+§3.8, §3.9, §3.11, §3.12, §4.2, §5.2), the BUILD panel's Run build writing
+the modified editors first, and what Build and Run do for a lone file and
+for a session with no project folder (`Edit-Mode-Toolbar.md` EMT-D30's
+2026-10-29 amendment, EMT-D34) on every front-end: the shared model
 (`build_tasks`, `build_auto_reveal`, `editor_diagnostics`, the omnibox's
 task mode, `BuildVM`'s matcher), the terminal's runtime, host source, Edit
 pane and runner wiring, the GPUI window and its editor rows, and the
@@ -68,6 +71,8 @@ RUNNER = "src/frontend/index/build_runner.nim"
 DESKTOP_BUILD = "src/frontend/ui/build.nim"
 DESKTOP_PALETTE = "src/frontend/ui/command.nim"
 DESKTOP_UI = "src/frontend/ui_js.nim"
+EDIT_HOST = "src/frontend/tui/host/edit_host.nim"
+TUI_MAIN = "src/frontend/tui/main.nim"
 
 # Suites.
 VMU = "src/frontend/viewmodel/tests/unit/test_build_tasks_reveal_diagnostics.nim"
@@ -75,17 +80,20 @@ TBL = "src/frontend/tui/tests/test_build_tasks_tui.nim"
 PTY = "src/frontend/tui/tests/real_terminal/test_build_tasks_pty.nim"
 PLAN = "src/frontend/gpui/tests/test_build_tasks_gpui_plan.nim"
 SPEC = "src/tests/gui/tests/build/build-tasks.spec.ts"
+LONE = "src/tests/gui/tests/build/run-build-lone-file.spec.ts"
 FIXTURE = "src/frontend/viewmodel/tests/unit/build_fixtures/plat56_c_build.nim"
 
 SUBJECTS = [TASKS, REVEAL, DIAG, VM, OMNI, RUNTIME, SOURCE, READER, EDIT_PANE,
             GPUI_MAIN, GPUI_LEAVES, RUNNER, DESKTOP_BUILD, DESKTOP_PALETTE,
-            DESKTOP_UI]
-SUITES = [VMU, TBL, PTY, PLAN, SPEC, FIXTURE]
+            DESKTOP_UI, EDIT_HOST, TUI_MAIN]
+SUITES = [VMU, TBL, PTY, PLAN, SPEC, FIXTURE, LONE]
 
 TBL_PICKER = "*::Ctrl+Shift+B: the picker, the default first; Enter builds it"
 TBL_CMDS = "*::the omnibox commands: a task, the default, unknown, none, stop, history, clear"
 TBL_REVEAL = "*::the reveal: docked Build Output shown by a build, put away after a clean one"
 TBL_EDIT = "*::the Edit pane: underlined spans, gutter icons, the hover; cleared by a new build"
+PTY_LONE = "*::EMT-D34: `--edit <file>` opens its folder; the folder's tasks build it"
+PLAN_LONE = "*::EMT-D34: `--edit <file>` opens its folder; the folder's tasks build it"
 
 # (id, [(subject, find, replace), ...], [(suite, filter), ...], what it breaks)
 ARMS = [
@@ -241,6 +249,40 @@ ARMS = [
              "        discard")],
      [(SPEC, None)],
      "§3.2: the BUILD panel's ■ reaches no runner"),
+    # ---- Run build saves first; a lone file; no project folder (EMT-D34) ----
+    ("A14", [(TASKS, "  if verb.kind in {bvkRunDefault, bvkRunCommand, bvkRunTask} and",
+              "  if false and")],
+     [(VMU, None), (LONE, None)],
+     "EMT-D34: a session with no project folder runs `:build <command>` in the app's own directory"),
+    ("D9", [(DESKTOP_UI, "          # (EMT-D17) — a build compiles the files on disk.\n          data.saveFiles()",
+             "          # (EMT-D17) — a build compiles the files on disk.\n          discard")],
+     [(LONE, None)],
+     "EMT-D30: the BUILD panel's Run build builds without writing the modified editors"),
+    # NOT AN ARM: `index/build_runner`'s wait for `savesInFlight`. Removing it
+    # survived the spec on 2026-11-05: a small file's write finishes before
+    # the build's process reads it, so the race it closes is not observable
+    # from a real save. D9 grades that the write is asked for at all.
+    ("D11", [(DESKTOP_UI, "          if not build.desktopBuildTaskHost().hasProjectFolder:",
+              "          if false:")],
+     [(LONE, None)],
+     "EMT-D34: Run build with no project folder asks for a save before it refuses (#837)"),
+    ("D13", [(DESKTOP_UI, "      data.startOptions.name != response.path):", "      true):")],
+     [(LONE, None)],
+     "EMT-D34: `ct edit <file>` makes the FILE the desktop's project folder"),
+    ("D12", [(DESKTOP_BUILD, "    data.viewsApi.warnMessage(cstring(said))", "    discard")],
+     [(LONE, None)],
+     "EMT-D14/EMT-D34: a desktop build that cannot run says so only to the log"),
+    ("L1", [(EDIT_HOST, "  if path.len > 0 and fileExists(path):", "  if false:")],
+     [(PTY, PTY_LONE), (PLAN, PLAN_LONE)],
+     "EMT-D34: the native front-ends refuse `ct edit <file>`"),
+    ("L2", [(TUI_MAIN, "    let why = rt.openWorkingFileAt(root / target.file, 1, 0)",
+             '    let why = ""')],
+     [(PTY, PTY_LONE)],
+     "EMT-D34: the terminal shows the listing's first file, not the one named"),
+    ("L3", [(GPUI_MAIN, "  let relative = if cmd.editFile.len > 0: cmd.editFile else: listing.files[0]",
+             "  let relative = listing.files[0]")],
+     [(PLAN, PLAN_LONE)],
+     "EMT-D34: the GPUI window shows the listing's first file, not the one named"),
     # ---- the declared survivor ----------------------------------------------
     ("Z1", [(TASKS, "## Pure Nim: no filesystem, no process. C and JavaScript backends.",
              "## Pure Nim: no filesystem, no process. C and JavaScript backends. ")],
@@ -250,13 +292,15 @@ ARMS = [
 
 DECLARED_SURVIVORS = {"Z1"}
 
-IN_BINARY = {TASKS, REVEAL, DIAG, VM, OMNI, RUNTIME, SOURCE, READER, EDIT_PANE}
-IN_GPUI = {TASKS, REVEAL, DIAG, VM, OMNI, READER, GPUI_MAIN, GPUI_LEAVES}
+IN_BINARY = {TASKS, REVEAL, DIAG, VM, OMNI, RUNTIME, SOURCE, READER, EDIT_PANE,
+             EDIT_HOST, TUI_MAIN}
+IN_GPUI = {TASKS, REVEAL, DIAG, VM, OMNI, READER, GPUI_MAIN, GPUI_LEAVES,
+           EDIT_HOST}
 IN_DESKTOP = {TASKS, REVEAL, DIAG, VM, OMNI, RUNNER, DESKTOP_BUILD,
               DESKTOP_PALETTE, DESKTOP_UI}
 PTY_SUITES = {PTY}
 GPUI_SUITES = {PLAN}
-DESKTOP_SUITES = {SPEC}
+DESKTOP_SUITES = {SPEC, LONE}
 
 
 def path_of(rel):

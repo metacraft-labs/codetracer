@@ -509,6 +509,10 @@ type
       ## the field is shared deliberately: `ct` passes one positional and the
       ## mode is what says which it is, exactly as `codetracer-tui` parses
       ## `--edit` into `tckEditProject`.
+    editFile: string
+      ## `pmEdit` only: the file `ct edit <file>` named, relative to the
+      ## project root its folder became (`edit_host.editLaunchTarget`,
+      ## Edit-Mode-Toolbar.md EMT-D34) — shown first. "" for a folder.
     product: ProductMode
       ## **PLAT-16's dimension, carried into a second front-end.**
       ##
@@ -13460,7 +13464,8 @@ proc editSurfaceFor(cmd: GpuiCommand; rows: int): EditorSurface =
     return EditorSurface(medium: GpuiMedium, productMode: pmEdit,
                          report: "no source files under " & cmd.traceFolder &
                                  " (" & $listing.scanned & " entries scanned)")
-  let relative = listing.files[0]
+  # EMT-D34: the file `ct edit <file>` named, else the listing's first.
+  let relative = if cmd.editFile.len > 0: cmd.editFile else: listing.files[0]
   # THE DOCUMENT IS OPENED, NOT THE TEXT PASSED ON. One `EditingDocument`,
   # which is the same value the terminal's `EditBuffer` holds, and the surface
   # is a derivation of it.
@@ -13537,6 +13542,11 @@ proc runEdit(cmd: GpuiCommand): int =
     refreshGpuiMenuAvailability()
   if gOmnibar.isNil:
     gOmnibar = newOmnibarVM()
+  # Edit-Mode-Toolbar.md §9.4 (EMT-D33): this window's Run is the palette
+  # pair, so the omnibox lists **Project: Run** and **Project: Run in Current
+  # Tab** (with the Tests commands beside them) — a project with no Run says
+  # why there, as a lone file's folder does (EMT-D34).
+  gOmnibar.setIndex(replayOpenCommands())
   # `PLAT35-F3`: the editor pane's inner width, from the geometry this
   # window is about to be laid out at.
   gEditorSurface = surface
@@ -13608,7 +13618,12 @@ proc runEdit(cmd: GpuiCommand): int =
 proc runOpen(cmd: GpuiCommand): int =
   ## Open the recording, build the shell, draw the leaves.
   if cmd.product == pmEdit:
-    return runEdit(cmd)
+    # EMT-D34: a lone file opens its folder as the project, the file shown.
+    var edit = cmd
+    let target = editLaunchTarget(cmd.traceFolder)
+    edit.traceFolder = target.root
+    edit.editFile = target.file
+    return runEdit(edit)
   defer:
     if not gCertVm.isNil:
       gCertVm.close()

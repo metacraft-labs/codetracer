@@ -1757,7 +1757,10 @@ proc editInteractive(command: TuiCommand): int =
   # BEFORE THE TERMINAL IS CLAIMED, on exactly `interactive`'s rule and for the
   # reason recorded there: a diagnosis printed onto a claimed alternate screen
   # is a diagnosis nobody reads.
-  let root = absolutePath(command.projectPath)
+  # EMT-D34: a lone file opens its folder as the project, the file on
+  # screen (`editLaunchTarget`).
+  let target = editLaunchTarget(absolutePath(command.projectPath))
+  let root = target.root
   let problem = editProjectProblem(root)
   if problem.len > 0:
     stderr.writeLine(TuiProgramName & ": " & root & ": " & problem)
@@ -1865,6 +1868,11 @@ proc editInteractive(command: TuiCommand): int =
   let furnished = rt.ensureEditWorkspace()
   if furnished.len > 0:
     app.notification = furnished
+  # EMT-D34: `ct edit <file>` shows that file, in its folder's project.
+  if target.file.len > 0:
+    let why = rt.openWorkingFileAt(root / target.file, 1, 0)
+    if why.len > 0:
+      app.notification = why
   discard rt.focus.focusPaneKind(paneEditor)
   # PLAT-47 deliverable 4: in Edit mode the VCS pane reads the project, the
   # folder the desktop's edit mode hands its VCS panel.

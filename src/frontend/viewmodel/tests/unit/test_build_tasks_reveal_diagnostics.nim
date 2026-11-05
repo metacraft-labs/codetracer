@@ -21,6 +21,9 @@
 ##     native backend the host RUNS THE COMMAND with the real `gcc` on the
 ##     PLAT-56 project (`build_fixtures/plat56_c_build`), in the task's
 ##     working directory, into a real `BuildVM`;
+##   * a session with no project folder (the New File session) starts no
+##     build, whatever the verb, and says why — the picker too
+##     (Edit-Mode-Toolbar.md EMT-D34);
 ##   * `problemMatcher: none` makes no Problems row;
 ##   * THE REVEAL RULE (`build_auto_reveal`) over a real `BuildVM` fed a real
 ##     failing, warning and clean build: reveal on start, reveal Problems on
@@ -64,7 +67,7 @@ template ck(condition: untyped) =
   inc asserted
   check condition
 
-const ExpectedAssertions = when defined(js): 140 else: 142
+const ExpectedAssertions = when defined(js): 153 else: 155
 
 const SpecExample = """# In project config or .codetracer/build.yaml
 tasks:
@@ -356,6 +359,37 @@ suite "acting":
       ck log[^1] == "picker"
       ck runBuildVerb(host, BuildTaskConfig(), parseBuildVerb(":build")) ==
         NoBuildTasksText
+      dispose()
+
+  test "EMT-D34: a session with no project folder builds nothing, and says so":
+    # The desktop's New File session: no folder for a task file to be read
+    # from, none for a command to run in. Every verb that would start a
+    # build is refused before the host is asked to start anything; the
+    # pane's own words still act.
+    createRoot proc(dispose: proc()) =
+      let vm = createBuildVM(nil)
+      let errs = createErrorsVM(nil)
+      let log = new seq[string]
+      var host = newHostFor(vm, errs, log)
+      host.projectDir = ""
+      ck not host.hasProjectFolder
+      let c = inferredBuildTasks(Plat56PassCommand)
+      for line in [":build", ":build " & Plat56PassCommand, ":build: default"]:
+        ck runBuildVerb(host, c, parseBuildVerb(line)) == NoProjectFolderBuildText
+      ck runBuildChoice(host, c, buildTaskEntries(c)[0]) ==
+        NoProjectFolderBuildText
+      ck log[].len == 0
+      ck vm.status.val == bsIdle
+      ck NoProjectFolderBuildText.startsWith("No project folder is open.")
+      ck runBuildVerb(host, c, parseBuildVerb(":build: history")) == ""
+      ck log[] == @["history"]
+      # The picker says it too, ahead of "add a task file".
+      ck pickerNote(BuildTaskConfig(), hasProjectFolder = false) ==
+        NoProjectFolderBuildText
+      ck pickerNote(BuildTaskConfig()) == NoBuildTasksText
+      # A folder of whitespace is no folder.
+      host.projectDir = "  "
+      ck runBuildVerb(host, c, parseBuildVerb(":build")) == NoProjectFolderBuildText
       dispose()
 
   when not defined(js):
