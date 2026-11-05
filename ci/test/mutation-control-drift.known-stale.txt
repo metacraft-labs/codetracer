@@ -437,3 +437,5 @@ src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/ui/ke
 # for seven other subjects (lines above). No mutation grade is claimed and no
 # control file was re-recorded.
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/viewmodel/viewmodels/shell_vm.nim	1ca7b819e73ea6258e63cf3e2124639b9511dac95728de1493c54523c890f83d	812073c0eba21235c4ecf69bdea75a7c6d5afa112bb86b344c233df9ab2a5f54
+ci/test/plat70c-find-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_plat70c_find_pty.nim	616f17e76c0187517d8eeb5c431f9f02b70a7203f153843c681d2abe3cdfaaaa	f1c336108c3ae4c2e092bd02f9c953b9ed55afd1fd7311601495619e85952561
+src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_plat50_clicks.nim	1f72fded7304dddb6801840035fc281af93ae0240a74aa830ef5b36a39788d12	001575d46e059f2d32a135326a546bc19381585210f235edc977f3db3c7036d9

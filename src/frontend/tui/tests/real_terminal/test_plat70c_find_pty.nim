@@ -325,10 +325,12 @@ suite "PLAT-70 Part C on a real terminal: CUA in the read-only Debug editor":
     for _ in 0 .. total:
       let before = sess.snap().status
       sess.key(F3)
-      # Each step's status is read once its frame is drawn.
+      # Each step's status is read once its frame is drawn. The bound is only
+      # for a step that never draws: at 2 s a late frame on a loaded host was
+      # read as this step's, and the walk ran out of steps before it wrapped.
       let after = block:
         var last = sess.snap().status
-        let until = getMonoTime() + initDuration(milliseconds = 2000)
+        let until = getMonoTime() + initDuration(seconds = 30)
         while last == before and getMonoTime() < until:
           sleep(50)
           last = sess.snap().status

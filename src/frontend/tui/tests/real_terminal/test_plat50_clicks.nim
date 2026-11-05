@@ -839,8 +839,14 @@ suite "PLAT-50 on a real terminal: the Points pane from the View menu (K31)":
     let (rp, cp) = sess.waitFor("breakpoint main.py:36")
     ck sess.snap().findRow("breakpoint main.py:31")[0] == rp - 1
     sess.press(rp, cp + 2)
-    sleep(400)
-    let s = sess.snap()
+    # Waits for the selection's frame rather than a fixed time: on a loaded host
+    # the click had not been drawn after 400 ms. A click that selects nothing
+    # still fails the check below, after the deadline.
+    var s = sess.snap()
+    let selectedBy = getMonoTime() + initDuration(seconds = 30)
+    while s[rp][cp].bg == s[rp - 1][cp].bg and getMonoTime() < selectedBy:
+      sleep(50)
+      s = sess.snap()
     ck s[rp][cp].bg != s[rp - 1][cp].bg      # the selection's ground
     sess.quit()
 
