@@ -7230,11 +7230,15 @@ jobs:
 
   ct-test-certificates:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job
-    # NO GREEN SAMPLE: the job is new. The lane itself compiles and runs six
-    # small Nim suites (about 12 s warm, a few minutes cold); the bound is
-    # dominated by Nix setup, the same setup `viewmodel-tests` does. 30m is
-    # chosen structurally. Revisit once it has run green.
-    timeout-minutes: 30
+    # The bound is dominated by Nix setup and sibling provisioning, the same
+    # setup `viewmodel-tests` does; the lane itself compiles and runs six small
+    # Nim suites. Measured: the green run on dev 3266ab28aa (job 125610740352)
+    # took 26 minutes, 12.5 provisioning and 11 in the lane. Runs on colder
+    # runners spent 15.5 and 22 minutes provisioning (jobs 126332982114 and
+    # the second run of PR #903) and were cancelled at the old 30m in the lane,
+    # as dev's own run on ef129742ac was. 45m covers the slowest provisioning
+    # seen plus the lane, with a margin.
+    timeout-minutes: 45
     name: ct-test certificates and conformance vectors
     env:
       # A fixed nimcache root so the step after the lane can find the
