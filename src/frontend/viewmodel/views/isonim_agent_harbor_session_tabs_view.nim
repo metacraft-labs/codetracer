@@ -309,7 +309,11 @@ proc renderAgentHarborSessionList*[R, N](r: R; vm: SessionTabStripVM;
     tdiv(ref = root, class = AgentHarborSessionListClass):
       tdiv(ref = body, class = "ah-session-list-body")
   createRenderEffect proc() =
-    let collapsed = vm.collapsed.val and vm.mode.val == tsmSidebar
+    # Signals are read here, in the effect, and not inside the `ui` blocks
+    # below: a `ui` block's `if` runs once when the block builds, so it is
+    # this effect re-running that makes the head follow `vm.mode`.
+    let sidebar = vm.mode.val == tsmSidebar
+    let collapsed = vm.collapsed.val and sidebar
     r.setAttribute(root, "class", AgentHarborSessionListClass & " ah-session-list-" &
       $vm.mode.val & (if collapsed: " ah-session-list-collapsed" else: ""))
     r.clearChildren(body)
@@ -326,7 +330,7 @@ proc renderAgentHarborSessionList*[R, N](r: R; vm: SessionTabStripVM;
             text "Sessions"
           span(class = "ah-session-list-summary", title = vm.sourceLabel):
             text headerSummary
-        if vm.mode.val == tsmSidebar:
+        if sidebar:
           button(class = "ah-session-list-collapse",
                  title = collapseTitle,
                  onclick = proc() = target.collapsed.val = not target.collapsed.val):

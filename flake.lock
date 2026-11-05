@@ -1335,11 +1335,11 @@
     "codetracer-native-recorder": {
       "flake": false,
       "locked": {
-        "lastModified": 1793883380,
-        "narHash": "sha256-6TDqIm3VvXK8qQ+4sCqz1PoUKvm/TFFVfLl7+pdooO0=",
+        "lastModified": 1793907554,
+        "narHash": "sha256-VI2WFx8W1nd1kUTHFNo/QQQxxU/XsKWRGFwstdJF92k=",
         "owner": "metacraft-labs",
         "repo": "codetracer-native-recorder",
-        "rev": "d49a9c57e60c9b3b4cd6143bf9ca2fe3ccab83d8",
+        "rev": "d2bed0bbc2b3ece9d0715ad4b63df696e73f330c",
         "type": "github"
       },
       "original": {
@@ -7533,11 +7533,11 @@
     "isonim": {
       "flake": false,
       "locked": {
-        "lastModified": 1793866572,
-        "narHash": "sha256-MOZoiVq7/HkKpJMib9RbN/NfS8h7HsAfUQzx8K0zDSE=",
+        "lastModified": 1793897532,
+        "narHash": "sha256-hm8A69fKujrLmkMwLJXT/ModiHZsvjqRqv4c8E3NyUU=",
         "owner": "metacraft-labs",
         "repo": "isonim",
-        "rev": "9e1467f85e878b4d855d081185981403707885b3",
+        "rev": "b338890f6f44876384af64294831cf3cbf942931",
         "type": "github"
       },
       "original": {
@@ -7923,11 +7923,11 @@
     "nim-agent-harbor": {
       "flake": false,
       "locked": {
-        "lastModified": 1793765032,
-        "narHash": "sha256-rETcZVBf0lq1lYuZsIfbXsW7ZBUVh6T033te/821yeg=",
+        "lastModified": 1793894129,
+        "narHash": "sha256-ZjKgKLNEJQKXhRmulsaLeT9ql6v4DDR4EPHziLXfEU0=",
         "owner": "metacraft-labs",
         "repo": "nim-agent-harbor",
-        "rev": "4e9b8208b312a949a15dfcf1f3eb9491da78ad64",
+        "rev": "f083d1826839072805eaa315c49a7cdbe495cbfc",
         "type": "github"
       },
       "original": {
@@ -7940,11 +7940,11 @@
     "nim-agents": {
       "flake": false,
       "locked": {
-        "lastModified": 1793827051,
-        "narHash": "sha256-nFZ3dQzqbe/bamS3WQWVe+mKSS6VeZTsiULkmRv+a24=",
+        "lastModified": 1793894147,
+        "narHash": "sha256-2cr/avQSlu8dWKxq14n3aXwbDRe1YpRWD97wE/QUFKk=",
         "owner": "metacraft-labs",
         "repo": "nim-agents",
-        "rev": "35f30a9543375ac9af873d69ced375295a92b3d0",
+        "rev": "25c3bf7dd9ad060744452824fc44c62db08287eb",
         "type": "github"
       },
       "original": {
@@ -13916,11 +13916,11 @@
         "test-certificates-tools-src": "test-certificates-tools-src"
       },
       "locked": {
-        "lastModified": 1793884482,
-        "narHash": "sha256-1p/GX+A+up35Ikk2RHybG39sf6ugnu29SMUcybhIbHo=",
+        "lastModified": 1793907118,
+        "narHash": "sha256-hnspHWhtvbvfwtxeA73WBlG/kBJy/4L1aCTKMUeFtM8=",
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "98733a443fe9648e2769fe81c0073c495a643f9a",
+        "rev": "6e5925aa48559b9fe2737f30a75c2e4f3ce2d2a7",
         "type": "github"
       },
       "original": {
