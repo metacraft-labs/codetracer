@@ -137,6 +137,14 @@ var notificationsDelivered* = 0
 proc onNotification*(self: StatusComponent, notification: Notification) =
   inc notificationsDelivered
 
+  # The same words already showing are one notification. A replay that retries
+  # its start reports each attempt in the same sentence, and the copies stacked
+  # into a pile that covered the panes' tabs.
+  for shown in self.notifications:
+    if shown.active and shown.kind == notification.kind and
+       shown.text == notification.text:
+      return
+
   if self.notifications.len == self.maxNotificationsCount:
     self.notifications.delete(0)
 

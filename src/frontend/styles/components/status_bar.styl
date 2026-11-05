@@ -425,6 +425,10 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
   gap: NOTIFICATION_STACK_GAP
   position: fixed
   z-index: 100
+  // The whole stack scrolls past this height, so toasts carrying long messages
+  // cannot climb over the panes' tab strips and take their clicks.
+  max-height: 60vh
+  overflow-y: auto
   // HORIZONTALLY CENTRED, and this replaces `right: 8px`.
   //
   // THE DEFECT, MEASURED rather than described. On the live deployment at
