@@ -1335,11 +1335,11 @@
     "codetracer-native-recorder": {
       "flake": false,
       "locked": {
-        "lastModified": 1793798380,
-        "narHash": "sha256-kv8wYHMYLvIQYQ/qaWcgt5ou3BxMVsaF6hT08hIH2B8=",
+        "lastModified": 1793821347,
+        "narHash": "sha256-KcqSKSUvQNP7JyCWwt49PGz5Ibep6D1WeymdZjMVPaA=",
         "owner": "metacraft-labs",
         "repo": "codetracer-native-recorder",
-        "rev": "af21fcfc26f0d59734d011894eae45992d9bf3f2",
+        "rev": "7d1bdf2fba34c5b3bab1a51a4b29c1bca9294af2",
         "type": "github"
       },
       "original": {
@@ -1605,11 +1605,11 @@
     "codetracer-trace-format-nim_2": {
       "flake": false,
       "locked": {
-        "lastModified": 1793798548,
-        "narHash": "sha256-U/W7f63CEPjrAz4YwHDHrt5MI6+Opse5v+0bmqXbqA8=",
+        "lastModified": 1793827331,
+        "narHash": "sha256-tzs7aZmBL/T/naM0V8ztCMMxhJgeoQsWP6IxaGOkyH0=",
         "owner": "metacraft-labs",
         "repo": "codetracer-trace-format-nim",
-        "rev": "c0e216ca7bc102e2b0262ef5073e716ba7519cd4",
+        "rev": "99a84275e4b040895b4bcceebac0daa62e89d024",
         "type": "github"
       },
       "original": {
@@ -7482,11 +7482,11 @@
     "io-mon": {
       "flake": false,
       "locked": {
-        "lastModified": 1793751566,
-        "narHash": "sha256-orKoMkWZdF+seEHgrmuWjarHISclxYXNPLigHTczZ4s=",
+        "lastModified": 1793828148,
+        "narHash": "sha256-FGSHSPxX21icRsZI7p/WOgpPxz2HLelNtPfvHcqYZ2E=",
         "owner": "metacraft-labs",
         "repo": "io-mon",
-        "rev": "b60947c1fa1477e530e959eb4806696227ecd2a9",
+        "rev": "3f50a3d7e8526f8d157c599b62b5dce264bd2a42",
         "type": "github"
       },
       "original": {
@@ -7533,11 +7533,11 @@
     "isonim": {
       "flake": false,
       "locked": {
-        "lastModified": 1793804906,
-        "narHash": "sha256-qTAaLjTEJ7ACQALN0LqxbGRu38idixNfGuFx1a/qaQE=",
+        "lastModified": 1793825227,
+        "narHash": "sha256-So9R62el0zYRyAtenQUPDP6JA2RafZsgoo/s2UIaSk4=",
         "owner": "metacraft-labs",
         "repo": "isonim",
-        "rev": "f03b5ac1a9d9ac25a99a3051c46a4780d6b376be",
+        "rev": "5f15def6e008924f7376fab117eba70c138345a2",
         "type": "github"
       },
       "original": {
