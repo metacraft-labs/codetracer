@@ -64,6 +64,10 @@
     line-height: 1.5
     white-space: pre-wrap
     overflow-wrap: anywhere
+    // A message can carry a tool's whole stderr: it scrolls within the toast, so
+    // the toast cannot grow over the panes' tabs and take their clicks.
+    max-height: 30vh
+    overflow-y: auto
 
   .notification-button
     flex: 0 0 auto
