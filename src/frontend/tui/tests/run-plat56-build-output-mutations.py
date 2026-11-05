@@ -43,6 +43,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[4]
@@ -84,6 +85,10 @@ PLAN = "src/frontend/gpui/tests/test_plat56_gpui_plan.nim"
 PLAN55 = "src/frontend/gpui/tests/test_plat55_gpui_plan.nim"
 SPEC = "src/tests/gui/tests/build/plat56-build-output-capture.spec.ts"
 SPEC55 = "src/tests/gui/tests/problems-pane/plat55-problems-capture.spec.ts"
+DESKTOP_ANSWERS = {
+    SPEC: "src/tests/visual/answers/plat56-build-output.electron.json",
+    SPEC55: "src/tests/visual/answers/plat55-problems.electron.json",
+}
 FIXTURE = "src/frontend/viewmodel/tests/unit/build_fixtures/plat56_c_build.nim"
 
 SUBJECTS = [MODEL, VM, ERRORS, READER, RUNNER, SOURCE, TUI_PANE, STATUS,
@@ -146,7 +151,7 @@ ARMS = [
     ("V4", [(VM, "      elif output.val.len == 0 and command.val.len == 0:",
              "      elif output.val.len == 0:")],
      [(VMU, None)],
-     "a build that failed in silence is shown as idle"),
+     "quiet succeeded, failed or cancelled builds are shown as idle"),
     ("V5", [(VM, "    rows.add result.fed.row", "    discard")],
      [(VMU, None)],
      "§3.10: the build's diagnostics are not counted"),
@@ -336,12 +341,12 @@ def record_controls():
         return 1
     with open(CONTROL, "w") as f:
         f.write("# Control digests for run-plat56-build-output-mutations.py —\n"
-                "# the subjects AND the suites the arms are graded by (§16c).\n"
+                "# subjects, suites and desktop reference answers (§16c).\n"
                 "# Refreshed with --record-control-hashes, gated by the\n"
                 "# needle scan (§39a).\n")
-        for rel in SUBJECTS + SUITES:
+        for rel in SUBJECTS + SUITES + list(DESKTOP_ANSWERS.values()):
             f.write(f"{sha(rel)}  {rel}\n")
-    print(f"recorded {len(SUBJECTS) + len(SUITES)} control digests")
+    print(f"recorded {len(SUBJECTS) + len(SUITES) + len(DESKTOP_ANSWERS)} control digests")
     return 0
 
 
@@ -350,13 +355,18 @@ def controls_match():
         print("NO CONTROL DIGESTS — run --record-control-hashes first.")
         return False
     ok = True
+    recorded = {}
     for line in CONTROL.read_text().splitlines():
         if not line or line.startswith("#"):
             continue
         digest, rel = line.split("  ", 1)
+        recorded[rel] = digest
         if sha(rel) != digest:
             print(f"CONTROL DIGEST MOVED: {rel}")
             ok = False
+    for rel in set(SUBJECTS + SUITES + list(DESKTOP_ANSWERS.values())) - recorded.keys():
+        print(f"CONTROL DIGEST ABSENT: {rel}")
+        ok = False
     return ok
 
 
@@ -396,6 +406,36 @@ def portable_cause(line):
 
 
 def run_spec(suite):
+    """Read the live Electron verdict, retaining its output outside the inputs."""
+    saved = {rel: path_of(rel).read_bytes() if path_of(rel).exists() else None
+             for rel in DESKTOP_ANSWERS.values()}
+    try:
+        return run_spec_capture(suite)
+    finally:
+        try:
+            for rel in saved:
+                path = path_of(rel)
+                if path.exists():
+                    live = path.read_bytes()
+                    NIMCACHE.mkdir(parents=True, exist_ok=True)
+                    archive = Path(tempfile.mkdtemp(prefix="desktop-answer-", dir=NIMCACHE))
+                    (archive / "answer.json").write_bytes(live)
+                    (archive / "manifest.json").write_text(json.dumps({
+                        "suite": suite, "path": rel,
+                        "sha256": hashlib.sha256(live).hexdigest(),
+                    }, indent=2) + "\n")
+        finally:
+            for rel, entry in saved.items():
+                path = path_of(rel)
+                if entry is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    path.write_bytes(entry)
+                if (path.read_bytes() if path.exists() else None) != entry:
+                    raise RuntimeError(f"desktop capture did not restore {rel}")
+
+
+def run_spec_capture(suite):
     """The Electron spec: GREEN on rc 0, else RED on its first expectation."""
     cmd = os.environ.get("PLAT56_DESKTOP_TEST")
     spec = suite.split("src/tests/gui/", 1)[1]
@@ -412,8 +452,20 @@ def run_spec(suite):
         return ("GREEN", []) if " passed" in out else ("RAN-NOTHING", [])
     plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
     first = [ln.strip() for ln in plain.splitlines()
-             if ln.strip().startswith("Error:")][:1]
+             if ln.strip().startswith(("Error:", "TimeoutError:"))][:1]
     return "RED", first
+
+
+def output_order_failures(out):
+    """Concrete check and exception failures in their actual printed order."""
+    markers = ("Check failed: ", "Unhandled exception: ")
+    failures = []
+    for line in out.splitlines():
+        hits = [(line.find(marker), marker) for marker in markers if marker in line]
+        if hits:
+            at, marker = min(hits)
+            failures.append(portable_cause(line[at + len(marker):].strip()))
+    return failures
 
 
 def run_suite(suite, test_filter):
@@ -429,15 +481,15 @@ def run_suite(suite, test_filter):
     if test_filter:
         cmd.append(test_filter)
     try:
-        p = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True,
+        p = subprocess.run(cmd, cwd=REPO, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, text=True,
                            timeout=TIMEOUT, env=env)
     except subprocess.TimeoutExpired:
         return "HUNG", []
-    out = (p.stdout or "") + (p.stderr or "")
+    out = p.stdout or ""
     if p.returncode == 124:
         return "HUNG", []
-    failures = [portable_cause(ln.strip().split("Check failed: ", 1)[1])
-                for ln in out.splitlines() if "Check failed: " in ln]
+    failures = output_order_failures(out)
     if p.returncode == 0:
         ran = out.count("[OK]")
         return ("GREEN", failures) if ran > 0 else ("RAN-NOTHING", [])
@@ -488,6 +540,19 @@ def main():
         return 3
     only = set(filter(None, a.only.split(",")))
     selected = [arm for arm in ARMS if not only or arm[0] in only]
+    try:
+        because = json.loads(BECAUSE.read_text()) if BECAUSE.exists() else {}
+    except (OSError, ValueError) as error:
+        print(f"CAUSE MAP INVALID: {error}")
+        return 3
+    if not isinstance(because, dict):
+        print("CAUSE MAP INVALID: expected an object of measured failure strings")
+        return 3
+    missing = [arm[0] for arm in selected if arm[0] not in DECLARED_SURVIVORS and
+               (not isinstance(because.get(arm[0]), str) or not because[arm[0]].strip())]
+    if missing and not a.derive:
+        print(f"CAUSE PINS MISSING OR INVALID: {', '.join(missing)}; derive real failures first")
+        return 3
     needs_binary = any(s in PTY_SUITES for arm in selected for s, _ in arm[2])
     needs_gpui = any(s in GPUI_SUITES for arm in selected for s, _ in arm[2])
     needs_desktop = any(s in DESKTOP_SUITES for arm in selected
@@ -509,11 +574,13 @@ def main():
     graded = sorted({(s, flt or "") for arm in selected for s, flt in arm[2]})
     for s, flt in graded:
         v, f = run_suite(s, flt or None)
+        if not controls_match():
+            print("ABORT: the baseline changed controlled inputs; nothing was mutated.")
+            return 1
         if v != "GREEN":
             print(f"ABORT: the baseline of {s} is {v}: {f[:1]}")
             return 1
     print(f"baseline GREEN ({len(graded)} suite run(s))")
-    because = json.loads(BECAUSE.read_text()) if BECAUSE.exists() else {}
     digests = {rel: sha(rel) for rel in SUBJECTS}
     derived, bad = {}, []
     for arm_id, edits, suites, what in selected:
@@ -550,8 +617,9 @@ def main():
             mark = "SURVIVED (declared)" if ok else f"MISDIRECTED ({verdict})"
         elif verdict == "RED":
             want = because.get(arm_id)
-            ok = a.derive or want is None or want == first
-            mark = "KILLED" if ok else f"KILLED BY THE WRONG CHECK: {first!r}"
+            ok = bool(first) and (a.derive or want == first)
+            mark = "KILLED" if ok else ("NO CONCRETE FAILURE CAUSE" if not first else
+                                       f"KILLED BY THE WRONG CHECK: {first!r}")
         else:
             ok = False
             mark = verdict if verdict != "GREEN" else "SURVIVED — NOT ENFORCED"
@@ -560,12 +628,14 @@ def main():
             print(f"       because: {first!r}")
         if not ok:
             bad.append(arm_id)
-    if a.derive:
+    if a.derive and not bad:
         merged = dict(because)
         merged.update({k: v for k, v in derived.items()
                        if k not in DECLARED_SURVIVORS})
         BECAUSE.write_text(json.dumps(merged, indent=2, sort_keys=True) + "\n")
-        print(f"derived {len(derived)} because line(s)")
+        print(f"derived {sum(k not in DECLARED_SURVIVORS for k in derived)} because line(s)")
+    elif a.derive:
+        print("REFUSED: incomplete derivation did not replace measured causes")
     if binary_digest is not None:
         if not build_binary() or sha_path(BIN) != binary_digest:
             print("FAIL: the binary rebuilt from the restored tree differs "

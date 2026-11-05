@@ -328,6 +328,29 @@ def portable_cause(line):
     return head + (tail.group(0) if tail else "")
 
 
+FAILURE_MARKERS = ("Check failed: ", "Unhandled exception: ")
+
+
+def output_order_failures(out):
+    """Every failure the suite printed, in the order it printed them.
+
+    A failed `check` prints `Check failed: <expr>`; a `waitFor` that never
+    sees its needle raises, and unittest prints `Unhandled exception: <msg>`.
+    Both are failures, so both are collected, and the FIRST in output order
+    is the cause. Collecting `Check failed:` lines before exceptions would
+    let the end-of-test `countedAssertions == ExpectedAssertions` check (which
+    fails as a consequence of any earlier raise) mask the behavioural wait
+    that actually failed first."""
+    failures = []
+    for ln in out.splitlines():
+        hits = [(ln.find(m), m) for m in FAILURE_MARKERS if m in ln]
+        if not hits:
+            continue
+        at, marker = min(hits)
+        failures.append(portable_cause(ln[at + len(marker):].strip()))
+    return failures
+
+
 def run_spec(suite):
     """The Electron spec: GREEN on rc 0, else RED on its first expectation."""
     cmd = os.environ.get("PLAT55_DESKTOP_TEST")
@@ -362,15 +385,17 @@ def run_suite(suite, test_filter):
     if test_filter:
         cmd.append(test_filter)
     try:
-        p = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True,
+        p = subprocess.run(cmd, cwd=REPO, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, text=True,
                            timeout=TIMEOUT, env=env)
     except subprocess.TimeoutExpired:
         return "HUNG", []
-    out = (p.stdout or "") + (p.stderr or "")
+    # Merge at the pipe so a stderr exception cannot be reordered behind a
+    # later stdout count check when selecting the first behavioural cause.
+    out = p.stdout or ""
     if p.returncode == 124:
         return "HUNG", []
-    failures = [portable_cause(ln.strip().split("Check failed: ", 1)[1])
-                for ln in out.splitlines() if "Check failed: " in ln]
+    failures = output_order_failures(out)
     if p.returncode == 0:
         ran = out.count("[OK]")
         return ("GREEN", failures) if ran > 0 else ("RAN-NOTHING", [])

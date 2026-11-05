@@ -105,6 +105,50 @@ function cells(page: any) {
   );
 }
 
+/** Passive test-owned counters: no event is prevented, stopped or dispatched.
+ * Document capture installs the actual row listener before propagation descends,
+ * so a pane capture barrier must stop a native ellipsis click before that row.
+ * The ordinary native click at the end proves the same observer is reachable. */
+async function installRowClickProbe(page: any, cell: string, name: string) {
+  await page.evaluate(({ cell, name }: { cell: string; name: string }) => {
+    const probes = ((globalThis as any).__ct70bRowProbes ??= {});
+    const counts = { captured: 0, rowTargets: 0, rowClicks: 0 };
+    const rows = new Set<Element>();
+    const matches = (event: Event) =>
+      (event.target as Element | null)?.closest("[data-ct-cell]")?.getAttribute("data-ct-cell") === cell;
+    const onRow = (event: Event) => { if (matches(event)) counts.rowClicks++; };
+    const onDocument = (event: Event) => {
+      if (!matches(event)) return;
+      counts.captured++;
+      const row = (event.target as Element).closest("tr");
+      if (row) {
+        counts.rowTargets++;
+        if (!rows.has(row)) {
+          rows.add(row);
+          row.addEventListener("click", onRow, true);
+        }
+      }
+    };
+    document.addEventListener("click", onDocument, true);
+    probes[name] = { counts, dispose: () => {
+      document.removeEventListener("click", onDocument, true);
+      for (const row of rows) row.removeEventListener("click", onRow, true);
+    } };
+  }, { cell, name });
+}
+
+async function rowClickCounts(page: any, name: string) {
+  return await page.evaluate((key: string) => ({ ...(globalThis as any).__ct70bRowProbes[key].counts }), name);
+}
+
+async function disposeRowClickProbe(page: any, name: string) {
+  await page.evaluate((key: string) => {
+    const probes = (globalThis as any).__ct70bRowProbes;
+    probes[key].dispose();
+    delete probes[key];
+  }, name);
+}
+
 async function stepTo(page: any, ticksAtLeast: number) {
   for (let i = 0; i < 12; i++) {
     const at = await where(page);
@@ -216,18 +260,25 @@ test.describe("PLAT-70 Part B: the desktop's table panes truncate, resize and re
 
     // ---- The `…` press opens the detail under the row; the debugger stays --
     const before = await where(page);
-    await page.mouse.click(cut.x + cut.w - 3, cut.y + cut.h / 2);
-    const detail = page.locator(".ct-table-detail");
-    await expect(detail).toHaveCount(1);
-    const lines = await detail.locator(".ct-table-detail-line").allTextContents();
-    expect(lines.length).toBeGreaterThan(0);
-    expect(lines.length).toBeLessThanOrEqual(DETAIL_CAP);
-    expect(lines.join("").replace(/\s+/g, "")).toContain(
-      cut.full.replace(/\s+/g, "").slice(0, 60));
-    expect(await where(page)).toEqual(before);
-    // Again closes it.
-    await page.mouse.click(cut.x + cut.w - 3, cut.y + cut.h / 2);
-    await expect(detail).toHaveCount(0);
+    await installRowClickProbe(page, cut.cell, "ellipsis");
+    try {
+      await page.mouse.click(cut.x + cut.w - 3, cut.y + cut.h / 2);
+      expect(await rowClickCounts(page, "ellipsis"), "an ellipsis click must not reach its row").toEqual({ captured: 1, rowTargets: 1, rowClicks: 0 });
+      const detail = page.locator(".ct-table-detail");
+      await expect(detail).toHaveCount(1);
+      const lines = await detail.locator(".ct-table-detail-line").allTextContents();
+      expect(lines.length).toBeGreaterThan(0);
+      expect(lines.length).toBeLessThanOrEqual(DETAIL_CAP);
+      expect(lines.join("").replace(/\s+/g, "")).toContain(
+        cut.full.replace(/\s+/g, "").slice(0, 60));
+      expect(await where(page)).toEqual(before);
+      // Again closes it.
+      await page.mouse.click(cut.x + cut.w - 3, cut.y + cut.h / 2);
+      await expect(detail).toHaveCount(0);
+      expect(await rowClickCounts(page, "ellipsis"), "closing detail must not reach its row").toEqual({ captured: 2, rowTargets: 2, rowClicks: 0 });
+    } finally {
+      await disposeRowClickProbe(page, "ellipsis");
+    }
 
     // ---- Ctrl+K Ctrl+I and Ctrl+C on the focused (pressed) variable --------
     const varCut = (await cells(page)).find((c: any) => c.cell.startsWith("variables|") && c.cut)!;
@@ -274,5 +325,17 @@ test.describe("PLAT-70 Part B: the desktop's table panes truncate, resize and re
     await page.waitForTimeout(800);
     expect(Math.round((await indexHeader.boundingBox())!.width)).toBe(3 * 8);
     expect(fs.readFileSync(columnsFile, "utf8")).toContain("event-log.#=3");
+
+    // A separate ordinary click comes after every old invariant. Fresh geometry
+    // avoids reusing boxes from before width changes, and no reset is needed.
+    const ordinary = (await cells(page)).find((c: any) => c.cell === cut.cell)!;
+    expect(ordinary).toBeDefined();
+    await installRowClickProbe(page, ordinary.cell, "ordinary");
+    try {
+      await page.mouse.click(ordinary.x + 4, ordinary.y + ordinary.h / 2);
+      expect(await rowClickCounts(page, "ordinary"), "ordinary row clicks reach the passive observer").toEqual({ captured: 1, rowTargets: 1, rowClicks: 1 });
+    } finally {
+      await disposeRowClickProbe(page, "ordinary");
+    }
   });
 });

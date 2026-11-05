@@ -1,7 +1,7 @@
 {
   "B1": "whole.contains(long)",
   "D1": "Error: variables|__cached__|value: cut iff drawn cut",
-  "D2": "Error: expect(received).toEqual(expected) // deep equality",
+  "D2": "Error: an ellipsis click must not reach its row",
   "D3": "Error: expect(received).toBeGreaterThan(expected)",
   "G1": "\"pane click event left to the table gesture\" in opened.trace",
   "G2": "hashWidth == $pxOfCells(20) & \"px\"",

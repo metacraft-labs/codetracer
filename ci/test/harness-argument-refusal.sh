@@ -60,6 +60,19 @@ python3 ci/test/plat54-window-transaction-test.py || {
 	exit 1
 }
 
+# A terminal wait failure must retain priority over its consequential count
+# mismatch, in the same order the suite printed both failures.
+python3 ci/test/plat55-problems-because-test.py || {
+	echo "FAIL: PLAT-55 failure attribution loses the first behavioural cause" >&2
+	exit 1
+}
+
+# A fresh default grade may not silently accept an unrecorded failure cause.
+python3 ci/test/plat56-required-causes-test.py || {
+	echo "FAIL: PLAT-56 accepts missing or invalid measured causes" >&2
+	exit 1
+}
+
 # THE DISCOVERY IS GENERAL, AND ANY EXEMPTION IS NAMED, COUNTED AND FROZEN.
 #
 # It was `run-plat*mutations*.py` alone, which was a statement about the only
