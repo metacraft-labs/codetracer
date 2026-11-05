@@ -1777,9 +1777,13 @@ jobs:
 
   lint-rust:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
-    # 200-run window: 40 green, median 8.5m, max 10.7m. 30m is ~2.8x the slowest
-    # green; clippy over the whole workspace is the longest of the four lints.
-    timeout-minutes: 30
+    # 200-run window: 40 green, median 8.5m, max 10.7m, on warm runners;
+    # clippy over the whole workspace is the longest of the four lints. A cold
+    # runner first builds the dev shell for the direnv step and resolves the
+    # ct_emulator nimble dependencies: 24m of setup on PR #903 (14m and 10m),
+    # which left the old 30m bound too little for the lints themselves. 50m
+    # covers that setup plus the slowest green.
+    timeout-minutes: 50
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
