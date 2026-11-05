@@ -108,6 +108,7 @@ fi
 VISUAL_CAPTURE="${SUITE_ROOT}/scripts/docs/capture-visual-recording-screenshots.sh"
 STORYBOOK_FRESHNESS="${SUITE_ROOT}/tools/visual-review/storybook-freshness.mjs"
 STORYBOOK_DEPS="${SUITE_ROOT}/scripts/storybook-deps.sh"
+BUILD_COMPONENTS="${SUITE_ROOT}/scripts/build-storybook-components.sh"
 RR_SETUP="${SUITE_ROOT}/ci/setup-rr-backend.sh"
 SETUP_CERTS="${SUITE_ROOT}/browser-replay/setup-certs.sh"
 WEBP="${SUITE_ROOT}/scripts/docs/generate-webp-animations.sh"
@@ -123,7 +124,7 @@ BUILD_SIBLINGS="${SUITE_ROOT}/scripts/build-siblings.sh"
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=123
+EXPECTED_ASSERTIONS=133
 
 ASSERTIONS=0
 FAILURES=0
@@ -185,7 +186,7 @@ run_expect_failure() {
 	assert_contains "${out}" "${fragment}" "${desc}"
 }
 
-for required in "${VISUAL_CAPTURE}" "${STORYBOOK_FRESHNESS}" "${STORYBOOK_DEPS}" \
+for required in "${VISUAL_CAPTURE}" "${STORYBOOK_FRESHNESS}" "${STORYBOOK_DEPS}" "${BUILD_COMPONENTS}" \
 	"${RR_SETUP}" "${SETUP_CERTS}" "${WEBP}" "${CAPTURE_LIB}" \
 	"${DESKTOP_COMPONENT}" "${DEVELOPER_SETUP}" "${DEPLOY_WASM}" \
 	"${CROSS_REPO}" "${DESKTOP_CAPS}" "${VERSION_NIM}" "${BUILD_SIBLINGS}"; do
@@ -194,7 +195,7 @@ for required in "${VISUAL_CAPTURE}" "${STORYBOOK_FRESHNESS}" "${STORYBOOK_DEPS}"
 		exit 3
 	fi
 done
-for tool in git node openssl sha256sum; do
+for tool in git just node openssl sha256sum; do
 	command -v "${tool}" >/dev/null 2>&1 || {
 		echo "stale-artefact-guards-test: missing '${tool}'" >&2
 		exit 3
@@ -493,6 +494,129 @@ assert_contains "$(check_storybook)" "FRESH" \
 rm -f "${SB}/storybook/storybook-static/index.html"
 run_expect_failure "an absent corpus is still refused, with the remedy" \
 	"just storybook-build" -- check_storybook
+
+# ---------------------------------------------------------------------------
+section "A components build that Nim left unchanged is still a fresh build"
+# ---------------------------------------------------------------------------
+#
+# codetracer-pm issues/2026-11-04-capture-storybook-refuses-a-fresh-build-as-stale.md.
+# Nim does not rewrite an output whose bytes would not change, so after a
+# SUCCESSFUL compile the bundle kept its old mtime, and the guard refused every
+# capture that followed it, naming a rebuild that changed nothing. This section
+# runs the recipe itself (`just --no-deps` skips the story generation it depends
+# on) with a stub `nim` on PATH that does what Nim does on an unchanged output:
+# exit 0 and write nothing. Nothing else is stubbed.
+
+CB="${TEST_ROOT}/components-repo"
+CB_BIN="${TEST_ROOT}/components-bin"
+CB_NIM_CALLS="${TEST_ROOT}/components-nim-calls.log"
+CB_REF="${TEST_ROOT}/components-ref"
+mkdir -p "${CB}/storybook/.storybook" "${CB}/storybook/stories" "${CB}/storybook/scripts" \
+	"${CB}/storybook/dist" "${CB}/storybook/storybook-static" \
+	"${CB}/src/frontend" "${CB}/src/build-debug/frontend" "${CB}/src/build-debug/public" \
+	"${CB}/scripts" "${CB_BIN}"
+cp "${SUITE_ROOT}/justfile" "${CB}/justfile"
+cp "${BUILD_COMPONENTS}" "${CB}/scripts/"
+printf 'x\n' >"${CB}/storybook/.storybook/main.ts"
+printf 'x\n' >"${CB}/storybook/stories/One.stories.js"
+printf 'x\n' >"${CB}/storybook/scripts/check.mjs"
+printf '{}\n' >"${CB}/storybook/package.json"
+printf '{}\n' >"${CB}/storybook/package-lock.json"
+printf 'x\n' >"${CB}/src/frontend/index.html"
+printf 'x\n' >"${CB}/src/frontend/ui.nim"
+printf 'x\n' >"${CB}/src/frontend/storybook_components.nim"
+printf 'x\n' >"${CB}/src/build-debug/frontend/ui.js"
+printf 'x\n' >"${CB}/src/build-debug/public/index.css"
+printf 'x\n' >"${CB}/storybook/dist/components.js"
+printf 'x\n' >"${CB}/storybook/storybook-static/index.html"
+
+# The stub records its argv, then fails when NIM_FAIL is set. On success it
+# leaves the output alone, which is what an unchanged compile looks like.
+cat >"${CB_BIN}/nim" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >>"${CB_NIM_CALLS}"
+[[ -z "\${NIM_FAIL:-}" ]]
+STUB
+chmod +x "${CB_BIN}/nim"
+
+# Stated mtimes: the bundle is an old build, and the Nim source is newer than it,
+# so the guard must refuse until the recipe rebuilds the bundle.
+touch -t 202001010000 "${CB}/storybook/.storybook/main.ts" "${CB}/storybook/stories/One.stories.js" \
+	"${CB}/storybook/scripts/check.mjs" "${CB}/storybook/package.json" \
+	"${CB}/storybook/package-lock.json" "${CB}/src/frontend/index.html" \
+	"${CB}/src/frontend/storybook_components.nim" "${CB}/src/build-debug/frontend/ui.js" \
+	"${CB}/src/build-debug/public/index.css"
+touch -t 202001020000 "${CB}/storybook/dist/components.js"
+touch -t 202001030000 "${CB}/src/frontend/ui.nim"
+touch -t 202001060000 "${CB}/storybook/storybook-static/index.html"
+
+cat >"${TEST_ROOT}/check-components.mjs" <<MJS
+import { requireFreshStorybookStatic } from "${STORYBOOK_FRESHNESS}";
+try {
+  requireFreshStorybookStatic(process.argv[2]);
+  console.log("FRESH");
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
+MJS
+
+check_components() { node "${TEST_ROOT}/check-components.mjs" "${CB}" 2>&1; }
+build_components() { (cd "${CB}" && PATH="${CB_BIN}:${PATH}" just --no-deps build-storybook-components 2>&1); }
+
+# The recipe's compile, as a developer runs it. `storybook-build` writes the
+# corpus after the bundle, so the corpus is touched next, as it would be.
+build_out="$(build_components)"
+build_status=$?
+if [[ ${build_status} -eq 0 ]]; then
+	ok "the components recipe succeeds when nim does"
+else
+	bad "the components recipe succeeds when nim does" "output: ${build_out:0:600}"
+fi
+assert_contains "$(cat "${CB_NIM_CALLS}")" "js src/frontend/storybook_components.nim" \
+	"the recipe compiles the components entry point"
+touch "${CB}/storybook/storybook-static/index.html"
+assert_contains "$(check_components)" "FRESH" \
+	"a bundle the recipe has just built is fresh, though nim left it unchanged"
+
+# A Nim source edited after that build is still refused. The sleep makes the
+# edit strictly newer than the stamp on a filesystem with one-second mtimes.
+sleep 1
+touch "${CB}/src/frontend/ui.nim"
+run_expect_failure "a Nim source edited after that build is still refused" \
+	"Stale storybook components" -- check_components
+assert_contains "$(check_components)" "ui.nim" \
+	"the refusal names the Nim source that was edited"
+
+# A compile that fails must not stamp the bundle: the guard keeps refusing.
+touch -r "${CB}/storybook/dist/components.js" "${CB_REF}"
+fail_out="$(NIM_FAIL=1 build_components)"
+fail_status=$?
+if [[ ${fail_status} -ne 0 ]]; then
+	ok "a failed compile fails the recipe"
+else
+	bad "a failed compile fails the recipe" "output: ${fail_out:0:600}"
+fi
+bundle="${CB}/storybook/dist/components.js"
+if [[ ! ${bundle} -nt ${CB_REF} && ! ${CB_REF} -nt ${bundle} ]]; then
+	ok "a failed compile does not restamp the bundle"
+else
+	bad "a failed compile does not restamp the bundle" "the bundle's mtime changed"
+fi
+run_expect_failure "a failed compile leaves the bundle refused" \
+	"Stale storybook components" -- check_components
+
+# A successful rebuild after the edit is fresh again.
+build_out="$(build_components)"
+build_status=$?
+if [[ ${build_status} -eq 0 ]]; then
+	ok "a successful rebuild after the edit succeeds"
+else
+	bad "a successful rebuild after the edit succeeds" "output: ${build_out:0:600}"
+fi
+touch "${CB}/storybook/storybook-static/index.html"
+assert_contains "$(check_components)" "FRESH" \
+	"a successful rebuild after the edit makes it fresh again"
 
 # ---------------------------------------------------------------------------
 section "CI's rr-backend setup refuses a checkout that is not the locked one"

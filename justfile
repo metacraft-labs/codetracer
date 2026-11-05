@@ -884,15 +884,12 @@ storybook-stories:
 isonim-editor-codetracer *args:
   bash scripts/isonim-editor-codetracer.sh "$@"
 
+# The compile is a script, not a recipe body, so `ci/test/stale-artefact-guards-test.sh`
+# can run the stamp against a stub `nim`. The stamp is what lets the bundle read as
+# fresh when nim wrote the same bytes and left its mtime alone; see the header of
+# scripts/build-storybook-components.sh.
 build-storybook-components: storybook-stories
-  mkdir -p storybook/dist
-  nim \
-    -d:chronicles_enabled=off \
-    -d:ctRenderer \
-    --path:../nim-everywhere/src \
-    --hints:off \
-    --out:storybook/dist/components.js \
-    js src/frontend/storybook_components.nim
+  bash scripts/build-storybook-components.sh
 
 # Install `storybook/node_modules` from the committed lockfile.
 #

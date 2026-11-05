@@ -105,7 +105,10 @@ export function requireFreshStorybookStatic(repoRoot) {
   // The components bundle is the other end of the same chain: `storybook-build`
   // depends on `build-storybook-components`, so `--no-build` skips BOTH, and a
   // `dist/components.js` compiled from Nim sources that have since changed is
-  // stale even when the static tree faithfully copied it.
+  // stale even when the static tree faithfully copied it. The bundle's own mtime is
+  // the stamp, and `scripts/build-storybook-components.sh` sets it to the start of
+  // each successful compile: Nim leaves an output whose bytes did not change with its
+  // old mtime, so without that step a bundle the recipe has just built would be refused.
   const components = join(storybookDir, "dist", "components.js");
   if (existsSync(components)) {
     const componentsAt = statSync(components).mtimeMs;
