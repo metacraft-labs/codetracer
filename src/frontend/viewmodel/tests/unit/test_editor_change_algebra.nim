@@ -117,7 +117,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 2031
+const ExpectedAssertions = 2040
   ## *2037 -> 2031 on 2026-11-06, measured on a clean checkout of agents
   ## 7139dbc901 (the tree this scan walks holds the 644 tracked `.nim` files and
   ## nothing else) and again on its merge with dev f288cfadc3: both count 2031.

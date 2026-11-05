@@ -66,21 +66,12 @@ proc bufferingDisplay(vm: VideoPlayerVM): string =
   displayIf(vm.bufferingDegraded.val and vm.playState.val == Playing)
 
 proc currentFrameLabel(vm: VideoPlayerVM): string =
-  let total = vm.frameVm.frameCount.val
-  if total > 0:
-    "Frame " & $vm.frameVm.currentFrame.val & " / " & $(total - 1)
-  else:
-    "Frame " & $vm.frameVm.currentFrame.val
+  ## The shared words (`video_player_vm.frameLabel`), which the terminal's
+  ## and GPUI's Video Player print too.
+  vm.frameLabel()
 
 proc currentDrawLabel(vm: VideoPlayerVM): string =
-  let calls = vm.frameVm.drawCalls.val
-  if vm.frameVm.selectedDrawCall.val.isSome:
-    "Draw " & $vm.frameVm.selectedDrawCall.val.get & " / " &
-      (if calls.len > 0: $(calls.len - 1) else: "?")
-  elif calls.len > 0:
-    "Draw 0 / " & $(calls.len - 1)
-  else:
-    ""
+  vm.drawLabel()
 
 proc frameImageDisplay(vm: VideoPlayerVM): string =
   displayIf(vm.frameVm.frameImageSrc.val.len > 0 and not vm.frameVm.loading.val)
@@ -448,14 +439,27 @@ when defined(js):
   # otherwise dead-code-strips ``scrubTo`` because the raw JS body is
   # opaque to the compiler, leaving ``vm.scrubTo is not a function`` at
   # runtime.
+  ## THE SLIDER'S DRAG, IN THREE PHASES (Visual-Replay.md § Scrub Slider):
+  ## a press (0) begins it, each "input" (1) moves it, the "change" (2) a
+  ## release fires settles it — the shared gesture
+  ## (`VideoPlayerVM.beginScrub` / `dragScrub` / `releaseScrub`), so the
+  ## desktop's slider coalesces its requests and resumes playback as the
+  ## terminal's and GPUI's scrubbers do.
   proc setScrubRangeHandler(input: isonim_dom.Element;
-                            onSeek: proc(frame: int)) {.importjs: """
-    (function(el, onSeek) {
-      const handler = function(event) {
-        onSeek(Number((event.target && event.target.value) || 0));
+                            onScrub: proc(frame, phase: int)) {.importjs: """
+    (function(el, onScrub) {
+      const valueOf = function(event) {
+        return Number((event.target && event.target.value) || 0);
       };
-      el.addEventListener("input", handler);
-      el.addEventListener("change", handler);
+      el.addEventListener("pointerdown", function(event) {
+        onScrub(valueOf(event), 0);
+      });
+      el.addEventListener("input", function(event) {
+        onScrub(valueOf(event), 1);
+      });
+      el.addEventListener("change", function(event) {
+        onScrub(valueOf(event), 2);
+      });
     })(#, #);
   """.}
 
@@ -733,8 +737,22 @@ when defined(js):
     let scrub = querySelector(panel, cstring".video-player-scrub-range")
     if not isNilElement(scrub):
       let capturedVm = vm
-      setScrubRangeHandler(scrub, proc(frame: int) =
-        capturedVm.scrubTo(frame))
+      setScrubRangeHandler(scrub, proc(frame, phase: int) =
+        let now = nowMs()
+        case phase
+        of 0:
+          capturedVm.beginScrub(scrubFrame, frame, now)
+        of 1:
+          if not capturedVm.frameScrub.held:
+            capturedVm.beginScrub(scrubFrame, frame, now)
+          else:
+            discard capturedVm.dragScrub(scrubFrame, frame, now)
+        else:
+          # A keyboard change (or a programmatic one) arrives with no press:
+          # it is a whole drag of its own.
+          if not capturedVm.frameScrub.held:
+            capturedVm.beginScrub(scrubFrame, frame, now)
+          capturedVm.releaseScrub(scrubFrame, frame, now))
 
     ## Loupe pixel-grid rendering. The JS side owns the mirror canvas and
     ## the per-frame blit; the Nim side drives it from a reactive effect
@@ -785,6 +803,8 @@ when defined(js):
     ## then miss them.
     installPlaybackTickLoop(panel,
       proc(nowMs: float) =
+        # A held drag's coalesced frame, once its window passed.
+        discard vm.pumpScrub(nowMs)
         if not isInTest():
           vm.tickPlayback(nowMs))
 

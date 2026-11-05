@@ -488,7 +488,14 @@ when defined(js):
       const tracePathString = String(#);
       const backendName = String(# || "");
       const portNumber = Number(#);
-      const gfxStreamDir = fs.mkdtempSync(
+      // A recording whose folder already holds the extracted stream
+      // (`gfx_stream/` beside the container, as `ct-mcr extract-gfx` writes
+      // it) is served as it is — the native hosts' rule (PLAT-59) — instead
+      // of extracting it again into a temporary directory.
+      const existingStream = path.join(path.dirname(tracePathString), "gfx_stream");
+      const reuseStream = fs.existsSync(path.join(existingStream, "gfx_frames.idx")) &&
+        fs.existsSync(path.join(existingStream, "gfx_commands.dat"));
+      const gfxStreamDir = reuseStream ? existingStream : fs.mkdtempSync(
         path.join(os.tmpdir(), "codetracer-visual-replay-")
       );
       let extractor = null;
@@ -497,6 +504,7 @@ when defined(js):
       let settled = false;
 
       function cleanupDir() {
+        if (reuseStream) return;
         try { fs.rmSync(gfxStreamDir, { recursive: true, force: true }); } catch (_) {}
       }
 
@@ -517,11 +525,20 @@ when defined(js):
       }
 
       try {
+        if (reuseStream) {
+          // Nothing to extract: an extractor that has already succeeded.
+          const EventEmitter = require("events");
+          extractor = new EventEmitter();
+          extractor.kill = function() {};
+          extractor.stderr = null;
+          setImmediate(() => extractor.emit("exit", 0));
+        } else {
         extractor = childProcess.spawn(
           ctMcrPath,
           ["extract-gfx", "--ctfs-visual-streams", "-o", gfxStreamDir, tracePathString],
           { stdio: ["ignore", "ignore", "pipe"], windowsHide: true }
         );
+        }
       } catch (error) {
         fail(
           "could not spawn extractor " + ctMcrPath +

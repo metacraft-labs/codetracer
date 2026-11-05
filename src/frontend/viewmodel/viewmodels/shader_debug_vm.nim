@@ -1,6 +1,6 @@
 ## ShaderDebugVM — ViewModel for visual replay shader interpreter traces.
 
-import std/options
+import std/[options, strformat]
 
 import isonim/core/[async_compat, signals]
 import isonim/viewmodel
@@ -49,6 +49,61 @@ proc currentSourceLine*(vm: ShaderDebugVM): int =
     step.get.sourceLine
   else:
     0
+
+const
+  ShaderDebugHeading* = "Shader Debugger"
+  ShaderDebugLoadingText* = "Loading shader trace..."
+  ShaderDebugEmptyText* = "Select a frame pixel or pixel history entry"
+    ## The pane's words, every front-end's (Visual-Replay.md § Shader Debug
+    ## Tab).
+
+proc contextText*(vm: ShaderDebugVM): string =
+  ## Which fragment: `Pixel 12, 34 frame 2 draw 5 GEID 501`.
+  if vm.selectedContext.val.isNone:
+    return "No shader context"
+  let context = vm.selectedContext.val.get
+  result = "Pixel " & $context.x & ", " & $context.y
+  if context.frame.isSome:
+    result.add " frame " & $context.frame.get
+  if context.drawCallIndex.isSome:
+    result.add " draw " & $context.drawCallIndex.get
+  if context.geid.isSome:
+    result.add " GEID " & $context.geid.get
+
+proc stepText*(vm: ShaderDebugVM): string =
+  if vm.debugInfo.val.isNone or vm.debugInfo.val.get.steps.len == 0:
+    return "Step 0 / 0"
+  "Step " & $(vm.currentStepIndex.val + 1) & " / " &
+    $vm.debugInfo.val.get.steps.len
+
+proc stageText*(vm: ShaderDebugVM): string =
+  if vm.debugInfo.val.isSome:
+    vm.debugInfo.val.get.shaderStage & " / " & vm.debugInfo.val.get.entryPoint
+  else: ""
+
+proc sourceLinesOf*(vm: ShaderDebugVM): seq[string] =
+  if vm.debugInfo.val.isSome: vm.debugInfo.val.get.sourceLines else: @[]
+
+proc lineNumberText*(lineNumber: int): string =
+  &"{lineNumber:>3}"
+
+proc showsEmptyHint*(vm: ShaderDebugVM): bool =
+  vm.debugInfo.val.isNone and not vm.loading.val and vm.error.val.len == 0
+
+proc instructionText*(vm: ShaderDebugVM): string =
+  let step = vm.currentStep()
+  if step.isSome: step.get.instruction else: ""
+
+proc variablesOf*(vm: ShaderDebugVM): seq[VisualReplayShaderValue] =
+  let step = vm.currentStep()
+  if step.isSome: step.get.variables else: @[]
+
+proc registersOf*(vm: ShaderDebugVM): seq[VisualReplayShaderValue] =
+  let step = vm.currentStep()
+  if step.isSome: step.get.registers else: @[]
+
+proc stepCount*(vm: ShaderDebugVM): int =
+  if vm.debugInfo.val.isSome: vm.debugInfo.val.get.steps.len else: 0
 
 proc loadShaderDebug*(vm: ShaderDebugVM;
                       request: VisualReplayShaderDebugRequest) =

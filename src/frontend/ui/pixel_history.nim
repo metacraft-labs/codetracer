@@ -15,9 +15,17 @@ import ./panel_host
 from ../viewmodel/session_vm import SessionViewModel
 
 var pixelHistoryVMInstance: PixelHistoryVM
+var pixelHistoryVMProvider*: proc(): PixelHistoryVM
+  ## The Visual Replay panes' model's Pixel History (`ui/video_player`): a
+  ## row's click there shows the draw call in the Video Player and loads its
+  ## shader (`VisualReplayPanesVM`).
 
 proc initPixelHistoryVM(store: ReplayDataStore = nil) =
   if not pixelHistoryVMInstance.isNil:
+    pixelHistoryVMInstance.bindReplayStore(store)
+    return
+  if not pixelHistoryVMProvider.isNil:
+    pixelHistoryVMInstance = pixelHistoryVMProvider()
     pixelHistoryVMInstance.bindReplayStore(store)
     return
   pixelHistoryVMInstance = createPixelHistoryVM(

@@ -726,7 +726,7 @@ func k(id, target: string; gestures: set[ClickGesture];
                  desktop: desktop, sharedOp: sharedOp, terminal: terminal,
                  gpui: gpui, note: note)
 
-const ClickInventory*: array[68, ClickBehaviour] = [
+const ClickInventory*: array[74, ClickBehaviour] = [
   k("K1", "Top bar: menu button / item", {cgClick},
     "open the menu; run the item / enter the folder", "MenuVM",
     nsExisting, nsExisting, "PLAT-48/49"),
@@ -960,7 +960,37 @@ const ClickInventory*: array[68, ClickBehaviour] = [
   k("K68", "Constraints: row", {cgRightClick},
     "menu: Go to Source, Copy Name, Copy Source Location",
     "ConstraintsVM.rowMenu", nsDone, nsDone,
-    "PLAT-62 added the menu on all three front-ends")]
+    "PLAT-62 added the menu on all three front-ends"),
+  k("K69", "Video Player: transport control", {cgClick},
+    "Jump to Start, Rewind, Play / Pause, Fast Forward, Jump to End, the " &
+      "draw-call and frame steps, the Pixel Picker",
+    "VideoPlayerVM.dispatchVideoPlayerAction", nsDone, nsDone,
+    "PLAT-59: the transport row; the terminal's controls are `[|<]` …"),
+  k("K70", "Video Player: frame scrubber", {cgClick, cgDrag},
+    "seek to the frame under the pointer; a drag coalesces its requests " &
+      "and settles on the release",
+    "VideoPlayerVM.beginScrub / dragScrub / releaseScrub", nsDone, nsDone,
+    "PLAT-59: the desktop's Scrub Slider, the pane's bottom track natively"),
+  k("K71", "Video Player: draw-call scrubber", {cgClick, cgDrag},
+    "show the framebuffer after that draw call of the frame (the desktop " &
+      "steps draw calls with its buttons)",
+    "VideoPlayerVM.beginScrub(scrubDraw)", nsDone, nsDone,
+    "PLAT-59: the nested track under the frame scrubber, native only"),
+  k("K72", "Video Player: frame", {cgClick},
+    "the picker's commit: the pixel's history and shader (without the " &
+      "picker, the pixel is selected)",
+    "FrameViewerVM.selectPixel", nsDone, nsDone,
+    "PLAT-59: the terminal's press opens §5's magnifier first; a press " &
+      "on a magnified pixel commits it"),
+  k("K73", "Pixel History: row", {cgClick},
+    "go to the draw call's event; the Video Player shows that draw call; " &
+      "the Shader Debug pane loads its fragment",
+    "VisualReplayPanesVM.activateHistoryEntry", nsDone, nsDone,
+    "PLAT-59: the desktop's click shows the draw call too now"),
+  k("K74", "Shader Debug: step button", {cgClick},
+    "First / Back / Step / Last",
+    "ShaderDebugVM.stepFirst / stepBackward / stepForward / stepLast",
+    nsDone, nsDone, "PLAT-59")]
 
 func behaviour*(id: string): ClickBehaviour =
   ## The inventory row named `id` (`K1` …); an empty value for an unknown id.

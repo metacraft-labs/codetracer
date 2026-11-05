@@ -319,6 +319,35 @@ proc newHeadlessDebugSession*(
       raise newException(EngineStalledAfterOpenError, e.msg, e)
     raise
 
+proc newRefusedDebugSession*(tracePath, replayServerBin,
+                             refusal: string): HeadlessDebugSession =
+  ## The session of a recording the engine refused to replay: the ViewModel
+  ## graph, built as `newHeadlessDebugSession` builds it, over a channel that
+  ## is closed from the start (`newRefusedBackend`) — no child, no stop, no
+  ## position. What the session can still show is what does not need an
+  ## engine, and `engineRefusal` says why the rest is empty.
+  let backend = newRefusedBackend(refusal)
+  let sdkSession = newDebuggerSession(backend.toBackendService(),
+                                      stopLoading = slmHostDriven)
+  let store = sdkSession.session.store
+  store.sourceLanguageOf = proc(file: string): string =
+    langWireName(toLangFromFilename(file))
+  sdkSession.attach(localFolderTrace(tracePath))
+  backend.close()
+  result = HeadlessDebugSession(
+    backend: backend,
+    sdk: sdkSession,
+    app: sdkSession.app,
+    session: sdkSession.session,
+    tracePath: tracePath,
+    replayServerBin: replayServerBin,
+  )
+
+proc engineRefusal*(s: HeadlessDebugSession): string =
+  ## The engine's sentence when it refused this session's recording; "" for a
+  ## session it opened.
+  if s.isNil or s.backend.isNil: "" else: s.backend.refusal
+
 # ---------------------------------------------------------------------------
 # Stepping actions
 # ---------------------------------------------------------------------------

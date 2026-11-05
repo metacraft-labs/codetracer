@@ -36,6 +36,20 @@ type
       ## The framebuffer's size (`X-Source-Width` / `X-Source-Height`), the
       ## space pixel coordinates are in; 0 when the player did not say (the
       ## image is then the framebuffer).
+    drawIndex*: int
+      ## The draw call the image shows the framebuffer after, counted over
+      ## the whole recording (`X-Draw`); -1 when the player did not say.
+    frameDrawStart*: int
+    frameDrawCount*: int
+      ## The shown frame's draw calls: the first one's whole-recording index
+      ## and how many there are (`X-Frame-Draw-Start` / `X-Frame-Draw-Count`).
+      ## `frameDrawCount` is 0 when the player did not say, and the
+      ## draw-call scrubber then has no range to offer.
+    pixels*: string
+      ## THE IMAGE'S RGBA8888 BYTES, `width * height * 4`, for a native
+      ## front-end that draws pixels rather than an `<img>` (the terminal's
+      ## cell tiers, the GPUI window). Empty on the desktop, whose frames
+      ## arrive as `imageSrc`.
 
   VisualReplayDrawCall* = object
     index*: int
@@ -109,6 +123,12 @@ type
     getFrameByGeidProc*: proc(geid: uint64): VisualReplayFuture[VisualReplayFrame]
     getFrameByFrameProc*: proc(frame: int): VisualReplayFuture[VisualReplayFrame]
     getFrameByDrawProc*: proc(draw: int): VisualReplayFuture[VisualReplayFrame]
+    getFrameByFrameDrawProc*: proc(frame, draw: int):
+      VisualReplayFuture[VisualReplayFrame]
+      ## Draw call `draw` of frame `frame`, counted within that frame
+      ## (`/frame?frame=F&draw=K`): the nested draw-call scrubber's request.
+      ## nil for a client that cannot ask it (`getFrameInFrame` then falls
+      ## back to the whole-recording index).
     getDrawCallsProc*: proc(frame: int): VisualReplayFuture[seq[VisualReplayDrawCall]]
     getPixelHistoryProc*: proc(x, y, frame: int):
       VisualReplayFuture[seq[VisualReplayPixelHistoryEntry]]
@@ -131,6 +151,11 @@ proc frameByFrameUrl*(playerUrl: string; frame: int): string =
 
 proc frameByDrawUrl*(playerUrl: string; draw: int): string =
   normalizedPlayerUrl(playerUrl) & "/frame?draw=" & $draw
+
+proc frameByFrameDrawUrl*(playerUrl: string; frame, draw: int): string =
+  ## Draw call `draw` WITHIN frame `frame` (MCR-Visual-Replay.md, `GET
+  ## /frame?frame=<F>&draw=<K>`).
+  normalizedPlayerUrl(playerUrl) & "/frame?frame=" & $frame & "&draw=" & $draw
 
 proc fittedFrameSize*(sourceWidth, sourceHeight,
                       maxWidth, maxHeight: int): tuple[width, height: int] =
@@ -298,6 +323,9 @@ proc frameFromJson*(node: JsonNode): VisualReplayFrame =
     height: node{"height"}.getInt(0),
     sourceWidth: node{"sourceWidth"}.getInt(0),
     sourceHeight: node{"sourceHeight"}.getInt(0),
+    drawIndex: node{"drawIndex"}.getInt(-1),
+    frameDrawStart: node{"frameDrawStart"}.getInt(-1),
+    frameDrawCount: node{"frameDrawCount"}.getInt(0),
   )
   if node.hasKey("geid"):
     result.geid = some(uint64(node["geid"].getBiggestInt))
@@ -418,6 +446,19 @@ proc getFrameByDraw*(client: VisualReplayClient;
     "VisualReplayClient.getFrameByDrawProc is not set"
   client.getFrameByDrawProc(draw)
 
+proc getFrameInFrame*(client: VisualReplayClient; frame, draw,
+                      frameDrawStart: int): VisualReplayFuture[VisualReplayFrame] =
+  ## Draw call `draw` of frame `frame`, counted within the frame. A client
+  ## without the frame-scoped request asks for the whole-recording index
+  ## `frameDrawStart + draw`, which names the same draw call — or, with the
+  ## frame's start unknown too, for the frame itself (its last draw).
+  if client.getFrameByFrameDrawProc != nil:
+    client.getFrameByFrameDrawProc(frame, draw)
+  elif frameDrawStart >= 0:
+    client.getFrameByDraw(frameDrawStart + draw)
+  else:
+    client.getFrameByFrame(frame)
+
 proc getDrawCalls*(client: VisualReplayClient; frame: int):
     VisualReplayFuture[seq[VisualReplayDrawCall]] =
   assert client.getDrawCallsProc != nil,
@@ -507,6 +548,23 @@ proc createJsonVisualReplayClient*(
           onSuccess = proc(node: JsonNode) = outFuture.complete(frameFromJson(node)),
           onError = proc(msg: string) =
             outFuture.fail(newException(CatchableError, msg)))
+  client.getFrameByFrameDrawProc = proc(frame, draw: int):
+      VisualReplayFuture[VisualReplayFrame] =
+      let fut = getJson(client.sizedFrameUrl(
+        frameByFrameDrawUrl(baseUrl, frame, draw)))
+      when defined(js):
+        result = newPromise proc(resolve: proc(value: VisualReplayFrame)) =
+          async_compat.onComplete(fut,
+            onSuccess = proc(node: JsonNode) = resolve(frameFromJson(node)),
+            onError = proc(msg: string) =
+              raise newException(CatchableError, msg))
+      else:
+        result = newFuture[VisualReplayFrame]("visual replay frame in frame")
+        let outFuture = result
+        async_compat.onComplete(fut,
+          onSuccess = proc(node: JsonNode) = outFuture.complete(frameFromJson(node)),
+          onError = proc(msg: string) =
+            outFuture.fail(newException(CatchableError, msg)))
   client.getDrawCallsProc = proc(frame: int): VisualReplayFuture[seq[VisualReplayDrawCall]] =
       let fut = getJson(drawCallsUrl(baseUrl, frame))
       when defined(js):
@@ -532,7 +590,13 @@ proc createJsonVisualReplayClient*(
             outFuture.fail(newException(CatchableError, msg)))
   client.getPixelHistoryProc = proc(x, y, frame: int):
         VisualReplayFuture[seq[VisualReplayPixelHistoryEntry]] =
-      let fut = getJson(pixelHistoryUrl(baseUrl, x, y, frame))
+      # The player takes a pixel history as a POST (MCR-Visual-Replay.md,
+      # `POST /pixel-history`), as the desktop's HTTP client sends it; a
+      # transport with no POST asks with a GET.
+      let fut =
+        if postJson.isNil: getJson(pixelHistoryUrl(baseUrl, x, y, frame))
+        else: postJson(pixelHistoryUrl(baseUrl, x, y, frame),
+                       pixelHistoryRequestToJson(x, y, frame))
       when defined(js):
         result = newPromise proc(resolve: proc(value: seq[VisualReplayPixelHistoryEntry])) =
           async_compat.onComplete(fut,

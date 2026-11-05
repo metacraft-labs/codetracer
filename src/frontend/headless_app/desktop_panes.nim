@@ -133,7 +133,19 @@ const
     # no default.
     paneVerification: DesktopPane(placement: dpLayout,
                                   content: Content.Verification,
-                                  label: "verificationComponent-0")]
+                                  label: "verificationComponent-0"),
+    # PLAT-59: the Visual Replay panes, which the desktop adds when a
+    # recording carries graphics (`visual_replay_layout.addVisualReplayTabs`)
+    # and no default places.
+    paneVideoPlayer: DesktopPane(placement: dpLayout,
+                                 content: Content.VideoPlayer,
+                                 label: "videoPlayerComponent-0"),
+    panePixelHistory: DesktopPane(placement: dpLayout,
+                                  content: Content.PixelHistory,
+                                  label: "pixelHistoryComponent-0"),
+    paneShaderDebug: DesktopPane(placement: dpLayout,
+                                 content: Content.ShaderDebug,
+                                 label: "shaderDebugComponent-0")]
     ## **THE TABLE.** Indexed by `PaneKind`, so a `PaneKind` added without a
     ## row does not compile. One-to-one on the rows that have a `Content`
     ## (`dpNone` is the one row without), asserted by the suite.

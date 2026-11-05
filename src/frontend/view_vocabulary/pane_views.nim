@@ -103,6 +103,7 @@ import viewmodels/build_vm
 # PLAT-60 — the Low Level Code pane's ViewModel.
 import viewmodels/low_level_code_vm
 import viewmodels/verification_vm   # PLAT-63: the Verification pane
+import viewmodels/visual_replay_panes_vm   # PLAT-59: the Visual Replay panes
 
 import headless_app/layout_model
 
@@ -176,7 +177,12 @@ const
                                          paneVerification,
                                          # PLAT-62: the project's circuit,
                                          # from the window's `ConstraintsVM`.
-                                         paneConstraints}
+                                         paneConstraints,
+                                         # PLAT-59: the Visual Replay panes,
+                                         # from the session's
+                                         # `VisualReplayPanesVM`.
+                                         paneVideoPlayer, panePixelHistory,
+                                         paneShaderDebug}
     ## The panes expressed in the vocabulary. A CLOSED SET a test asserts, not
     ## a list a reader infers from which procs exist.
 
@@ -887,6 +893,113 @@ proc verificationPaneView*(vm: VerificationVM): PaneView =
                              expanded = true)
   result.entries = entriesOf(result.root)
 
+proc videoPlayerPaneView*(vm: VideoPlayerVM): PaneView =
+  ## PLAT-59. THE VIDEO PLAYER (Visual-Replay.md § Video Player Pane): the
+  ## frame shown and its draw call, the transport's controls and state in the
+  ## shared words (`videoTransportLabel` / `videoTransportStatus`), the
+  ## frame scrubber's position and scene marks. The frame itself is pixels,
+  ## which no vocabulary node carries; the front-end draws them.
+  result.pane = paneVideoPlayer
+  if vm.isNil:
+    result.report = "the video player has no ViewModel; this recording " &
+                    "carries no graphics"
+    result.root = viewText("videoPlayer.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  let f = vm.frameVm
+  var children: seq[ViewNode] = @[]
+  var title = vm.frameLabel()
+  if vm.drawLabel().len > 0:
+    title.add "  " & vm.drawLabel()
+  children.add viewText("videoPlayer.frame", title)
+  let playing = vm.playState.val == Playing
+  var controls: seq[string] = @[]
+  for action in VideoTransportOrder:
+    controls.add videoTransportLabel(action, playing)
+  children.add viewText("videoPlayer.controls", controls.join(" "))
+  children.add viewText("videoPlayer.status", videoTransportStatus(playing,
+    vm.direction.val == Reverse, vm.rate.val.rateNumber,
+    vm.bufferingDegraded.val, f.loading.val, f.error.val))
+  if f.clearFrames.val.len > 0:
+    var marks: seq[string] = @[]
+    for m in f.clearFrames.val: marks.add $m
+    children.add viewText("videoPlayer.sceneMarks", marks.join(" "))
+  result.root = viewTreeNode("videoPlayer", "Video Player", children,
+                             expanded = true)
+  result.entries = entriesOf(result.root)
+
+proc pixelHistoryPaneView*(vm: PixelHistoryVM): PaneView =
+  ## PLAT-59. THE PIXEL HISTORY (Visual-Replay.md § Pixel History Tab): the
+  ## picked pixel, then a `Table` of the draw calls that wrote it in the
+  ## desktop's words — draw, GEID, pass, the three colours, the four tests.
+  result.pane = panePixelHistory
+  if vm.isNil:
+    result.report = "the pixel history has no ViewModel; this recording " &
+                    "carries no graphics"
+    result.root = viewText("pixelHistory.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  var children = @[viewText("pixelHistory.pixel", vm.pixelText())]
+  if vm.loading.val:
+    children.add viewText("pixelHistory.loading", PixelHistoryLoadingText)
+  if vm.error.val.len > 0:
+    children.add viewText("pixelHistory.error", vm.error.val)
+  if vm.entries.val.len > 0:
+    var cells: seq[seq[string]] = @[]
+    for e in vm.entries.val:
+      cells.add @[drawText(e), geidText(e), passText(e),
+                  colorText(e.preColor), colorText(e.shaderOutput),
+                  colorText(e.postColor), testsText(e)]
+    children.add viewTable("pixelHistory.rows", @["Draw", "GEID", "Result",
+      "Pre", "Shader", "Post", "Tests"], cells)
+  elif vm.showsEmptyHint():
+    children.add viewText("pixelHistory.empty", PixelHistoryEmptyText)
+    result.report = "no pixel picked"
+  result.root = viewTreeNode("pixelHistory", PixelHistoryHeading, children,
+                             expanded = true)
+  result.entries = entriesOf(result.root)
+
+proc shaderDebugPaneView*(vm: ShaderDebugVM): PaneView =
+  ## PLAT-59. THE SHADER DEBUG PANE (Visual-Replay.md § Shader Debug Tab):
+  ## the fragment, the stage and step, the source with the step's line, the
+  ## instruction, the variables and the registers.
+  result.pane = paneShaderDebug
+  if vm.isNil:
+    result.report = "the shader debugger has no ViewModel; this recording " &
+                    "carries no graphics"
+    result.root = viewText("shaderDebug.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  var children = @[viewText("shaderDebug.context", vm.contextText())]
+  if vm.loading.val:
+    children.add viewText("shaderDebug.loading", ShaderDebugLoadingText)
+  if vm.error.val.len > 0:
+    children.add viewText("shaderDebug.error", vm.error.val)
+  if vm.debugInfo.val.isSome:
+    children.add viewText("shaderDebug.step",
+                          vm.stageText() & "  " & vm.stepText())
+    var lines: seq[seq[string]] = @[]
+    let current = vm.currentSourceLine()
+    for i, l in vm.sourceLinesOf():
+      lines.add @[(if i + 1 == current: ">" else: ""), lineNumberText(i + 1),
+                  l]
+    children.add viewTable("shaderDebug.source", @["", "Line", "Source"],
+                           lines)
+    children.add viewText("shaderDebug.instruction", vm.instructionText())
+    var values: seq[seq[string]] = @[]
+    for v in vm.variablesOf():
+      values.add @["variable", v.name, v.valueType, v.value]
+    for v in vm.registersOf():
+      values.add @["register", v.name, v.valueType, v.value]
+    children.add viewTable("shaderDebug.values",
+                           @["Kind", "Name", "Type", "Value"], values)
+  elif vm.showsEmptyHint():
+    children.add viewText("shaderDebug.empty", ShaderDebugEmptyText)
+    result.report = "no shader context"
+  result.root = viewTreeNode("shaderDebug", ShaderDebugHeading, children,
+                             expanded = true)
+  result.entries = entriesOf(result.root)
+
 proc problemsPaneView*(vm: ErrorsVM): PaneView =
   ## PLAT-55. THE PROBLEMS PANE (`Build-Output-Pane.md` §3.3): the header's
   ## counts (and what navigation last announced), then a `Table` of the
@@ -1242,3 +1355,7 @@ proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
   # PLAT-62 drew the last of PLAT-45's desktop panes, whose report arm
   # (an accepted exception: placed, and said not drawn) stood here.
   of paneConstraints: constraintsPaneView(ConstraintsVM(vm))
+  # PLAT-59.
+  of paneVideoPlayer: videoPlayerPaneView(VideoPlayerVM(vm))
+  of panePixelHistory: pixelHistoryPaneView(PixelHistoryVM(vm))
+  of paneShaderDebug: shaderDebugPaneView(ShaderDebugVM(vm))

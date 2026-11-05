@@ -217,6 +217,10 @@ type
     closed: bool
       ## `close` has run: a second call (a host that closes the session it
       ## also handed to an SDK that disconnects it) does nothing.
+    refusal*: string
+      ## The engine's own sentence when this channel stands for a recording it
+      ## refused (`newRefusedBackend`): there was never a child to talk to.
+      ## Empty on every channel that has one.
     eventQueue*: seq[JsonNode]
       ## Buffer of DAP events received while waiting for a response.
       ## Tests can inspect or drain this queue after each action.
@@ -553,6 +557,8 @@ proc readDapMessage*(backend: DapStdioBackend;
   ## design until it finishes (see ``DapReadBound.untimedOperations``). It is
   ## untimed when the bound says so; when it is timed and runs out, the channel
   ## is declared dead (``abandonedOperation``).
+  if backend.refusal.len > 0:
+    raise newException(IOError, backend.refusal)
   if backend.broken:
     raise newException(DapStalledError,
       "DapStdioBackend: this channel was abandoned part way through a" &
@@ -597,6 +603,8 @@ proc writeDapMessage*(backend: DapStdioBackend; msg: JsonNode) =
   ## session while a host may still hold it): the child's stdin is released
   ## then, and writing to it would be a write through a freed stream, not an
   ## error a caller can handle.
+  if backend.refusal.len > 0:
+    raise newException(IOError, backend.refusal)
   if backend.closed:
     raise newException(IOError,
       "DapStdioBackend: the replay channel is closed (the session ended)")
@@ -920,6 +928,17 @@ proc startReplayServer*(replayServerBin: string;
     process.close()
     raise
 
+proc newRefusedBackend*(refusal: string): DapStdioBackend =
+  ## The channel of a recording the engine refused: already closed, with no
+  ## child behind it, so a session built over it is a session whose replay has
+  ## ended (`TuiSession.ended`) and no entry point writes to it. Whatever still
+  ## asks is told the engine's own sentence, not that "the session ended".
+  ##
+  ## The native front-ends open a recording that carries graphics over one of
+  ## these when the engine refuses it, as the desktop shows that recording's
+  ## Visual Replay panes (Visual-Replay.md § The terminal and the GPUI window).
+  DapStdioBackend(closed: true, refusal: refusal)
+
 proc isClosed*(backend: DapStdioBackend): bool =
   ## Whether `close` has run: the child was ended and its handles released.
   ## Every request after it fails, so a host asks this first.
@@ -973,6 +992,15 @@ proc toBackendService*(backend: DapStdioBackend): BackendService =
 
   let sendProc = proc(command: string;
                       args: JsonNode): BackendFuture[JsonNode] =
+    # A refused recording answers what the session's own construction asks
+    # with a failed response carrying the engine's sentence: the ViewModels
+    # already read a failed response, and building them is what shows the
+    # recording's graphics.
+    if b.refusal.len > 0:
+      var refused = newFuture[JsonNode]("DapStdioBackend.send")
+      refused.complete(%*{"type": "response", "command": command,
+                          "success": false, "message": b.refusal})
+      return refused
     # The BackendService interface uses CT-prefixed command names.
     # We forward them as-is; replay-server recognises both DAP standard
     # commands and ct/* custom commands.

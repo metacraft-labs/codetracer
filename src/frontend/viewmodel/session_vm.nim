@@ -41,6 +41,7 @@ import isonim/viewmodel  # for ViewModel.dispose
 import backend/backend_service
 import collab/[projection, runtime_role, session_core]
 import store/replay_data_store
+import viewmodels/visual_replay_panes_vm
 import viewmodels/[
   state_vm,
   calltrace_vm,
@@ -144,6 +145,12 @@ type
     stepListVM*: StepListVM
     replVM*: ReplVM
     lowLevelCodeVM*: LowLevelCodeVM
+    visualReplay*: VisualReplayPanesVM
+      ## PLAT-59: the Visual Replay panes (Video Player, Pixel History, Shader
+      ## Debug) over their player — nil until a native host's producer
+      ## (`host/native_visual_replay_host`) finds graphics in the recording
+      ## and attaches them. Not built by `initializePanelViewModels`: the
+      ## panes' client is the player's, not the session's store.
     requestPanelVM*: RequestPanelVM
     traceLogVM*: TraceLogVM
     commandPaletteVM*: CommandPaletteVM

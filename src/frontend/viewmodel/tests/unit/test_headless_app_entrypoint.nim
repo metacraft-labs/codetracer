@@ -222,6 +222,10 @@ suite "Headless app — launch":
         # show a replay session's data under an editor's title.
         check slot.paneViewModel(p).isNil
         check not slot.paneIsLive(p)
+      elif p in {paneVideoPlayer, panePixelHistory, paneShaderDebug}:
+        # A recording's graphics, which this one has none of: the session
+        # holds their ViewModels only for a recording that does.
+        check slot.paneViewModel(p).isNil
       else:
         inc replayPanes
         check not slot.paneViewModel(p).isNil

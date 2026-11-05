@@ -12,25 +12,15 @@ import ../viewmodels/visual_replay_client
 # The generic procs expand the DSL at their instantiation site.
 export signals, computation, components
 
-proc pixelText(vm: PixelHistoryVM): string =
-  if vm.selectedPixel.val.isSome:
-    let pixel = vm.selectedPixel.val.get
-    "Pixel " & $pixel.x & ", " & $pixel.y & " frame " & $pixel.frame
-  else:
-    "No pixel selected"
-
 proc displayIf(cond: bool): string =
   if cond: "block" else: "none"
 
 proc colorCss(color: VisualReplayPixelColor): string =
-  let r = int(round(max(0.0, min(color.r, 1.0)) * 255.0))
-  let g = int(round(max(0.0, min(color.g, 1.0)) * 255.0))
-  let b = int(round(max(0.0, min(color.b, 1.0)) * 255.0))
+  let r = colorByte(color.r)
+  let g = colorByte(color.g)
+  let b = colorByte(color.b)
   let a = max(0.0, min(color.a, 1.0))
   &"rgba({r}, {g}, {b}, {a:.3f})"
-
-proc colorText(color: VisualReplayPixelColor): string =
-  &"{color.r:.2f}, {color.g:.2f}, {color.b:.2f}, {color.a:.2f}"
 
 proc entryClass(vm: PixelHistoryVM; index: int): string =
   if vm.selectedEntry.val.isSome and vm.selectedEntry.val.get == index:
@@ -38,26 +28,9 @@ proc entryClass(vm: PixelHistoryVM; index: int): string =
   else:
     "pixel-history-entry"
 
-proc passText(entry: VisualReplayPixelHistoryEntry): string =
-  if entry.passed:
-    "Passed"
-  elif entry.failureReason.len > 0:
-    "Failed: " & entry.failureReason
-  else:
-    "Failed"
-
-proc testsText(entry: VisualReplayPixelHistoryEntry): string =
-  "Depth " & entry.testStatus.depth &
-    "  Stencil " & entry.testStatus.stencil &
-    "  Blend " & entry.testStatus.blend &
-    "  Cull " & entry.testStatus.cull
-
 proc onEntryClick(vm: PixelHistoryVM; index: int): proc() =
   let captured = index
   result = proc() = vm.selectEntry(captured)
-
-proc showsEmptyHint(vm: PixelHistoryVM): bool =
-  vm.entries.val.len == 0 and not vm.loading.val and vm.error.val.len == 0
 
 proc renderPixelHistoryEntry[R, N](r: R; vm: PixelHistoryVM;
                                    entry: proc(): VisualReplayPixelHistoryEntry;
@@ -77,9 +50,9 @@ proc renderPixelHistoryEntry[R, N](r: R; vm: PixelHistoryVM;
            onclick = onEntryClick(vm, index)):
       tdiv(class = "pixel-history-entry-main"):
         span(class = "pixel-history-draw"):
-          text "Draw " & $entry().drawCallIndex
+          text drawText(entry())
         span(class = "pixel-history-geid"):
-          text "GEID " & $entry().geid
+          text geidText(entry())
         span(class = "pixel-history-pass"):
           text passText(entry())
       tdiv(class = "pixel-history-colors"):
@@ -113,11 +86,11 @@ proc renderPixelHistoryPanel*[R, N](r: R; vm: PixelHistoryVM): N =
     tdiv(class = "pixel-history-component isonim-pixel-history"):
       tdiv(class = "pixel-history-header"):
         span(class = "pixel-history-title"):
-          text "Pixel History"
+          text PixelHistoryHeading
         span(class = "pixel-history-pixel"):
           text pixelText(vm)
       tdiv(class = "pixel-history-loading", display = displayIf(vm.loading.val)):
-        text "Loading pixel history..."
+        text PixelHistoryLoadingText
       tdiv(class = "pixel-history-error", display = displayIf(vm.error.val.len > 0)):
         text vm.error.val
       tdiv(ref = emptySlot):
@@ -129,7 +102,7 @@ proc renderPixelHistoryPanel*[R, N](r: R; vm: PixelHistoryVM): N =
     proc(): N =
       ui(r):
         tdiv(class = "pixel-history-empty"):
-          text "Click a frame pixel")
+          text PixelHistoryEmptyText)
   indexEach[VisualReplayPixelHistoryEntry, R, N](r, list,
     proc(): seq[VisualReplayPixelHistoryEntry] = vm.entries.val,
     proc(entry: proc(): VisualReplayPixelHistoryEntry; index: int): N =
