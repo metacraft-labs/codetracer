@@ -214,6 +214,18 @@ suite "PLAT-47 deliverable 4: one working tree for every VCS pane":
     int64(getFileInfo(repo / ".git" / "index").id.file)
 
   proc leavesTheIndexAlone(label: string; read: proc(repo: string)) =
+    # NOT INHERITED: `GIT_OPTIONAL_LOCKS=0` in the environment
+    # (https://git-scm.com/docs/git#Documentation/git.txt-codeGITOPTIONALLOCKScode)
+    # turns the cache refresh off for EVERY git this process starts. Agent
+    # harnesses export it, and under it the control below finds an index git
+    # never rewrote, while the reads would pass whether or not they pass
+    # `--no-optional-locks` themselves. So the case runs without it, and puts
+    # it back for the cases after it.
+    let inherited = existsEnv("GIT_OPTIONAL_LOCKS")
+    let inheritedValue = getEnv("GIT_OPTIONAL_LOCKS")
+    delEnv("GIT_OPTIONAL_LOCKS")
+    defer:
+      if inherited: putEnv("GIT_OPTIONAL_LOCKS", inheritedValue)
     let repo = staleStatRepo()
     let before = indexInode(repo)
     read(repo)

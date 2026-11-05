@@ -2976,7 +2976,12 @@ const
     ## PLAT-51: on a value-history row under its variable — `<ticks>`; a
     ## click goes to that moment.
   StateOriginHopAttribute* = "data-ct-origin-hop"
-    ## PLAT-51: on a value-origin hop under its variable.
+    ## PLAT-51: on a value-origin hop under its variable — the hop's index.
+  StateOriginTickAttribute* = "data-ct-origin-tick"
+    ## PLAT-70 Part E: on a hop — the tick `Enter` on it seeks to.
+  StateOriginOperandAttribute* = "data-ct-origin-operand"
+    ## PLAT-70 Part E: on an operand snapshot shown under its hop (`→`) —
+    ## `<hop>:<operand>`.
   StateAddWatchAttribute* = "data-ct-add-watch"
     ## PLAT-51: the Watches tab's "Add watch expression…" row.
   StateNameColumn* = "name"
@@ -3558,8 +3563,11 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
     let el = r.createElement("div")
     r.setAttribute(el, StateRowAttribute, $i)
     r.setAttribute(el, StateDepthAttribute, $row.depth)
+    # PLAT-70 Part E: with the keyboard cursor on a hop of the row's chain,
+    # the hop is the selected row, not the variable.
     r.setAttribute(el, StateSelectedAttribute,
-                   (if row.selected: "true" else: "false"))
+                   (if row.selected and vm.selectedHop.val < 0: "true"
+                    else: "false"))
     r.setAttribute(el, ViewKindAttribute, vocabularyName(pkTree))
     r.setAttribute(el, ViewIdAttribute, row.path)
     r.setStyle(el, "display", "flex")
@@ -3655,7 +3663,7 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
     if row.typeName.len > 0:
       r.appendChild(el, stateText(r, row.typeName, StateTypeColour))
     let historyOpen = row.path in vm.expandedHistories.val
-    let originOpen = row.path in vm.originLines.val
+    let originOpen = row.path in vm.originHops.val
     r.appendChild(el, stateIconButton(r, "history:" & row.path, "history",
                                       HistoryToggleSvg, historyOpen))
     let summary = vm.originSummaryFor(row.name)
@@ -3700,15 +3708,35 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
         r.appendChild(scroller, h)
         inc slot
     if originOpen:
-      for i, hop in vm.originLines.val.getOrDefault(row.path):
+      for i, hop in vm.originHops.val.getOrDefault(row.path):
         let o = r.createElement("div")
         r.setAttribute(o, StateOriginHopAttribute, $i)
+        r.setAttribute(o, StateOriginTickAttribute, $hop.tick)
+        # PLAT-70 Part E: a hop is a row the keyboard cursor stops on
+        # (Value-Origin-Tracking.md §13.0), drawn on the selected row's
+        # ground while it is there.
+        let onHop = row.selected and vm.selectedHop.val == i
+        r.setAttribute(o, StateSelectedAttribute,
+                       (if onHop: "true" else: "false"))
+        if onHop:
+          r.setStyle(o, "background", CallSelectedBackground)
         r.setStyle(o, "flex-shrink", "0")
         r.setStyle(o, "height", $StateValueRowPx & "px")
         r.setStyle(o, "padding-left", $((row.depth + 1) * StateRowIndentPx) & "px")
-        r.appendChild(o, stateText(r, "⇠ " & hop, StateEmptyColour))
+        r.appendChild(o, stateText(r, "⇠ " & hop.text, StateEmptyColour))
         r.appendChild(scroller, o)
         inc slot
+        if operandKey(row.path, i) in vm.openOperands.val:
+          for k, operand in hop.operands:
+            let p = r.createElement("div")
+            r.setAttribute(p, StateOriginOperandAttribute, $i & ":" & $k)
+            r.setStyle(p, "flex-shrink", "0")
+            r.setStyle(p, "height", $StateValueRowPx & "px")
+            r.setStyle(p, "padding-left",
+                       $((row.depth + 2) * StateRowIndentPx) & "px")
+            r.appendChild(p, stateText(r, operand, StateValueColour))
+            r.appendChild(scroller, p)
+            inc slot
   if childCount(scroller) > 0:
     r.appendChild(table, scroller)
   r.appendChild(body, table)

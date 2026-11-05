@@ -61,6 +61,23 @@ let
     # upstream Nim 2.2 (see `nim-results` in `flake.nix`).
     CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL = "1";
     CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS = "${inputs.nim-results}:${inputs.nim-stew}";
+
+    # The recorder's own package links a PREBUILT Nim writer archive
+    # (`CODETRACER_TRACE_WRITER_NIM_PREBUILT`), built from the recorder flake's
+    # OWN `codetracer-trace-format-nim` input. This override compiles the Rust
+    # from OUR trace-format pair (`pythonRecorderSource`), so that archive is
+    # the other half of a different pair: when our lock moved past it, the
+    # Rust called `trace_writer_mark_current_call_as_entry` and the archive did
+    # not define it, and the dev shell did not build (codetracer-pm
+    # issues/2026-11-05-codetracer-dev-shell-links-the-python-recorder-
+    # against-an-older-trace-writer-ffi.md). Unset, `build.rs` compiles the
+    # writer from the layout's `codetracer-trace-format-nim` with the Nim and
+    # paths supplied above, so both halves come from our lock. It is unset in
+    # the build rather than set to null here: a null attribute is exported as
+    # an empty string, which `build.rs` reads as set.
+    postPatch = (old.postPatch or "") + ''
+      unset CODETRACER_TRACE_WRITER_NIM_PREBUILT
+    '';
   });
   pythonWithRecorder = pythonEnv.package.withPackages (ps: [
     ps.black

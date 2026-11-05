@@ -252,9 +252,9 @@ test.describe("The desktop toolbar's Build", () => {
     const button = ctPage.locator("#build-image");
     await expect(button).toBeVisible({ timeout: 60_000 });
     await expect(button).toBeEnabled({ timeout: 30_000 });
-    // Run stays refused, and says why (EMT-D30).
-    await expect(ctPage.locator("#run-image")).toBeDisabled();
-    await expect(ctPage.locator("#run-image")).toHaveAttribute("title", /record, then debug/);
+    // Run has its own route beside it (EMT-D33): enabled, naming the recorder.
+    await expect(ctPage.locator("#run-image")).toBeEnabled();
+    await expect(ctPage.locator("#run-image")).toHaveAttribute("title", /nargo trace/);
     await button.click();
     // The status bar first: it is always on screen, while the failure moves the
     // strip's overlay from the BUILD panel to Problems (§3.8).

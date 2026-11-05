@@ -242,6 +242,10 @@ export origin_chain_types
 import viewmodels/origin_chain_vm
 export origin_chain_vm
 
+# PLAT-70 Part E: `o` / `O` as a value, shared by the terminal and GPUI.
+import viewmodels/origin_walk
+export origin_walk
+
 import viewmodels/editor_vm
 export editor_vm
 

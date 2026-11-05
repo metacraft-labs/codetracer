@@ -292,6 +292,8 @@ const
        "Toggle Hex / Dec"),
     op("variables.view-memory-dump", PaneTablePrefix & "state",
        "View Memory Dump"),
+    op("variables.show-value-origin", PaneTablePrefix & "state",
+       "Show Value Origin"),
 
     # --- The terminal's modal machine, under the Vim and Kakoune bases ----
     # (§5.5 / CodeTracer-TUI.md §4.1: its mode is state; these are the

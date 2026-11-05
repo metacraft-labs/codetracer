@@ -5,6 +5,8 @@
 //! the on-disk fixture. Invoked explicitly by
 //! `tests/fixtures/regenerate-stylus-fixture.sh` (or the per-fixture
 //! `tests/fixtures/stylus-fund-trace/regenerate-stylus-fixture.sh`).
+//! Set `STYLUS_FIXTURE_OUTPUT_DIR` to repack into a consumer's generated
+//! directory without changing the committed fixture or its source inputs.
 //!
 //! M28 note: this harness is the **M27-aware** repacker. The
 //! `vm_hooks` import surface it implicitly assumes is defined in
@@ -58,6 +60,10 @@ fn stylus_source_path() -> String {
 #[ignore = "regeneration helper, invoked by tests/fixtures/regenerate-stylus-fixture.sh"]
 fn rebuild_stylus_ctfs_fixture() {
     let dir = fixture_dir();
+    let output_dir = std::env::var_os("STYLUS_FIXTURE_OUTPUT_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| dir.clone());
+    std::fs::create_dir_all(&output_dir).expect("create Stylus fixture output directory");
     let source_path = stylus_source_path();
 
     // 1. Load the committed recorded event stream.
@@ -89,14 +95,14 @@ fn rebuild_stylus_ctfs_fixture() {
     let mut writer = CtfsTraceWriter::new(&legacy.program, &legacy.args);
     writer.set_recording_id("01949fcc-7d92-7e9c-aaaa-5747591d0001");
     TraceWriter::set_workdir(&mut writer, Path::new(env!("CARGO_MANIFEST_DIR")));
-    TraceWriter::begin_writing_trace_events(&mut writer, &dir.join("stylus_fund_tracking_demo"))
+    TraceWriter::begin_writing_trace_events(&mut writer, &output_dir.join("stylus_fund_tracking_demo"))
         .expect("open the stylus .ct fixture for writing");
     let event_count = events.len();
     for event in events {
         TraceWriter::add_event(&mut writer, event);
     }
     TraceWriter::finish_writing_trace_events(&mut writer).expect("write stylus .ct fixture");
-    let ct_path = dir.join("stylus_fund_tracking_demo.ct");
+    let ct_path = output_dir.join("stylus_fund_tracking_demo.ct");
 
     let size = std::fs::metadata(&ct_path).expect("stat .ct fixture").len();
     eprintln!("wrote {} ({} bytes, {} events)", ct_path.display(), size, event_count);

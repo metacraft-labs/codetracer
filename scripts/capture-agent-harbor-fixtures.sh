@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Refresh the Agent Harbor fixture sets and prove they are where they belong.
 #
-#   just capture-agent-harbor-fixtures [--only fleet,plans,diffs,tests,scenarios]
+#   just capture-agent-harbor-fixtures [--only fleet,plans,diffs,tests,scenarios,working-set]
 #                                      [--out <dir>] [--sources <file>]
 #                                      [--workspace <dir>]
 #   just check-agent-harbor-fixtures   [--fixtures <dir>]... [--public-root <dir>]...

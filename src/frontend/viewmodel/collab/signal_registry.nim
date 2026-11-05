@@ -271,12 +271,23 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   # PLAT-51's two additions to this pane, both backend-authoritative, and the
   # second for a less obvious reason than the first.
   #
-  # `originLines` holds the origin CHAIN TEXT for the rows whose chain is
+  # `originHops` holds the origin CHAIN's hops for the rows whose chain is
   # open, filled by a host through `loadValueOrigin`. WHICH rows are open is
   # `expandedOrigins`, already classified shared above; this is the fetched
   # content for them, exactly as `originSummaries` is.
-  entries.addEntry("StateVM", "originLines", vscBackendAuthoritative,
+  entries.addEntry("StateVM", "originHops", vscBackendAuthoritative,
     "Origin-chain hops for the rows whose chain is open, filled by the host's `loadValueOrigin`; the open set is `expandedOrigins`, this is its fetched content.")
+  # PLAT-70 Part E: the keyboard cursor on a hop and the hops whose operands
+  # are shown are the same kind of view state as `selectedPath` and the
+  # expansion sets beside it.
+  entries.addEntry("StateVM", "selectedHop", vscSharedSessionViewState,
+    "The hop of the selected variable's open origin chain under the keyboard cursor is part of the selection, as `selectedPath` is.",
+    requiresStableId = true,
+    stableIdNote = "Paired with `selectedPath`, whose string path is not a durable variable identity.")
+  entries.addEntry("StateVM", "openOperands", vscSharedSessionViewState,
+    "Which origin hops show their operand snapshots is expansion intent, like `expandedOrigins`.",
+    requiresStableId = true,
+    stableIdNote = "Keyed by the variable path and the hop index, which can drift when variable identity/order changes.")
   # `valueChanges` is COMPUTED rather than fetched — `value_changes.diffAt`
   # over `changeTimeline`, the locals this session happened to observe — so
   # the instinct is to call it local. It is not, because the question is

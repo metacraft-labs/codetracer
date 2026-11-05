@@ -812,12 +812,22 @@ const ClickInventory*: array[66, ClickBehaviour] = [
     "filter the log by event kind", "-", nsNotApplicable, nsNotApplicable,
     "the native event logs draw no filter control"),
   k("K40", "Variables: history button", {cgClick},
-    "toggle the value's history", "loadValueHistory", nsNotApplicable,
-    nsNotApplicable,
-    "the native rows draw no history button; the row's menu has it (K28)"),
+    "toggle the value's history", "loadValueHistory", nsExisting,
+    nsExisting,
+    "PLAT-51 drew the row's history control on both native front-ends " &
+      "(the terminal's history glyph, `vcHistory`; GPUI's `history:` " &
+      "button): it opens the history under the row. Corrected by " &
+      "PLAT-70 Part E, which measured it; it read \"the native rows draw " &
+      "no history button\""),
   k("K41", "Variables: origin badge", {cgClick},
-    "show the origin chain in the row", "-", nsNotApplicable,
-    nsNotApplicable, "the native rows draw no origin badge"),
+    "show the origin chain in the row", "loadValueOrigin", nsExisting,
+    nsExisting,
+    "PLAT-51 drew the row's origin control on both native front-ends " &
+      "(the terminal's `⇠`, `vcOrigin` → `pcValueOrigin`; GPUI's " &
+      "`origin:` button → `showValueOrigin`): the chain opens under the " &
+      "row. PLAT-70 Part E measured it (the entry read \"the native rows " &
+      "draw no origin badge\") and added the keyboard: " &
+      "`variables.show-value-origin` and the hops as rows"),
   k("K42", "Auto-hide label", {cgRightClick},
     "menu: Pin to the other edges, Unpin, Close", "dockLabelContextMenu",
     nsDone, nsDone),

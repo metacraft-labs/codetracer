@@ -21,7 +21,10 @@
 ##   * the editor after the failing build, `src/main.c` open: a squiggle per
 ##     diagnostic at its span in its severity's colour, the gutter's icon on
 ##     each line, the messages on the pointer's hover; a passing build clears
-##     them.
+##     them;
+##   * `--edit <file>` (Edit-Mode-Toolbar.md EMT-D34): the named file in its
+##     folder's project; `:build` and Project: Run say what the folder lacks;
+##     a task the folder declares builds.
 ##
 ## No mocks: the real binary, the real `gcc` on a real project.
 
@@ -29,6 +32,7 @@ import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
 
 import ../../viewmodel/tests/unit/build_fixtures/plat56_c_build
 import ../../viewmodel/tests/unit/build_fixtures/plat56_gcc_quotes
+from ../../viewmodel/viewmodels/build_tasks import NoBuildTasksText
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -36,7 +40,7 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 30
+  ExpectedAssertions = 36
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1600
   H = 1000
@@ -60,9 +64,11 @@ proc newProject(): string =
   createDir(result / ".codetracer")
   writeFile(result / ".codetracer" / "build.yaml", taskFile())
 
-proc windowPlan(project, ops: string): tuple[plan: JsonNode, trace: string] =
+proc windowPlan(project, ops: string;
+                editTarget = ""): tuple[plan: JsonNode, trace: string] =
   ## The Edit window over `project` after `ops`: its root, and its gesture
-  ## trace — the binary run in `project`, its own scratch homes.
+  ## trace — the binary run in `project`, its own scratch homes. `editTarget`
+  ## is what `--edit` names, when not `project` itself (a lone file).
   if not fileExists(bin):
     raise newException(IOError, "prerequisite missing: " & bin &
                        " (just build-gpui)")
@@ -80,7 +86,8 @@ proc windowPlan(project, ops: string): tuple[plan: JsonNode, trace: string] =
   writeFile(state / "ct-home" / ".codetracer-test-home", "")
   let errFile = genTempPath("build-tasks-gpui-", ".err")
   let args = @["--report-window-plan", "--width=" & $W, "--height=" & $H,
-               "--window-ops=" & ops, "--edit", project]
+               "--window-ops=" & ops, "--edit",
+               (if editTarget.len > 0: editTarget else: project)]
   let p = startProcess("/bin/sh",
     args = @["-c", "exec \"$0\" \"$@\" 2>" & quoteShell(errFile), bin] & args,
     workingDir = project, env = env, options = {})
@@ -224,6 +231,33 @@ suite "build tasks in the GPUI window":
                             ",problems:wait")
     ck plan.nodesWith("data-ct-diagnostic").len == 0
     removeDir(project)
+
+  test "EMT-D34: `--edit <file>` opens its folder; the folder's tasks build it":
+    # A lone file in a folder that is no project: the window edits the file,
+    # in its folder's project. Nothing is invented for the file — `:build`
+    # says the folder has no task, the omnibox's Project: Run that the folder
+    # is not a project — and a task the folder declares builds it.
+    let folder = createTempDir("ct-lone-file-gpui-", "")
+    writeFile(folder / "a_first.c", "int first = 1;\n")
+    writeFile(folder / "lone.c", "int lone_marker = 1;\n")
+    var (plan, tr) = windowPlan(folder, omnibox(":build"), folder / "lone.c")
+    checkpoint(tr)
+    # The NAMED file, not the listing's first.
+    ck textOf(plan).contains("int lone_marker = 1;")
+    ck not textOf(plan).contains("int first = 1;")
+    ck tr.contains(NoBuildTasksText)
+    (plan, tr) = windowPlan(folder, omnibox(":Project: Run"), folder / "lone.c")
+    checkpoint(tr)
+    ck tr.contains("does not recognise this folder as a project")
+    createDir(folder / ".codetracer")
+    writeFile(folder / ".codetracer" / "build.yaml",
+              "tasks:\n  check:\n    command: \"grep -c lone_marker lone.c\"\n")
+    (plan, tr) = windowPlan(folder, omnibox(":build") &
+                            ",problems:wait,build:show", folder / "lone.c")
+    checkpoint(tr)
+    ck tr.contains("running task check: grep -c lone_marker lone.c")
+    ck plan.paneOf().attr("data-ct-build") == "build succeeded"
+    removeDir(folder)
 
   test "the assertion count":
     check CHECKS == ExpectedAssertions

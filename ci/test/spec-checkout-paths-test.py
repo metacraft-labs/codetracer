@@ -191,5 +191,129 @@ print(json.dumps({'path': str(path.resolve()), 'digest': digest}))
         self.assertIn("ci/lint/nim.sh", run)
 
 
+class LaneSpecCheckoutResolution(unittest.TestCase):
+    """`ci/lib/spec-checkout.sh`, the lane runner's resolver, and the runner's
+    refusal, in scratch workspaces: real git repositories, real files, the
+    unmodified scripts. Nothing is mocked."""
+
+    RESOLVER = REPO / "ci/lib/spec-checkout.sh"
+
+    def setUp(self):
+        self.scratch = tempfile.TemporaryDirectory(prefix="lane-spec-checkout-")
+        self.addCleanup(self.scratch.cleanup)
+        self.ws = Path(self.scratch.name) / "ws"
+        self.repo = self.ws / "codetracer"
+        self.repo.mkdir(parents=True)
+        self.git(self.repo, "init", "-q")
+        self.env = dict(os.environ)
+        self.env.pop("CT_SPECS_DIR", None)
+        self.env["TMPDIR"] = str(Path(self.scratch.name) / "tmp")
+        Path(self.env["TMPDIR"]).mkdir()
+
+    def git(self, cwd, *args):
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t",
+                        *args], cwd=cwd, check=True, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL)
+
+    def specs_at(self, path, marker):
+        (path / "spec").mkdir(parents=True)
+        (path / "spec" / "marker").write_text(marker)
+        return path
+
+    def resolve(self):
+        return subprocess.run(
+            ["bash", "-c", 'source "$1"; ct_resolve_specs_dir "$2"', "_",
+             str(self.RESOLVER), str(self.repo)],
+            env=self.env, text=True, capture_output=True, check=False)
+
+    def manifest(self, path, branch="latest"):
+        (self.ws / "repos").mkdir(exist_ok=True)
+        (self.ws / "repos" / "codetracer-specs.toml").write_text(
+            '[repo]\nname = "codetracer-specs"\npath = "%s"\nbranch = "%s"\n'
+            % (path, branch))
+
+    def test_override_is_used_and_never_fallen_through(self):
+        self.specs_at(self.ws / "codetracer-pm", "sibling")
+        override = self.specs_at(Path(self.scratch.name) / "my specs", "override")
+        self.env["CT_SPECS_DIR"] = str(override)
+        result = self.resolve()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), str(override))
+        self.env["CT_SPECS_DIR"] = str(Path(self.scratch.name) / "absent")
+        result = self.resolve()
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("absent", result.stderr)
+
+    def test_published_sibling_wins_over_manifest_and_retired_name(self):
+        self.specs_at(self.ws / "codetracer-specs", "retired")
+        self.manifest("codetracer-specs")
+        pm = self.specs_at(self.ws / "codetracer-pm", "published")
+        result = self.resolve()
+        self.assertEqual(result.stdout.strip(), str(pm))
+
+    def test_manifest_path_is_followed(self):
+        declared = self.specs_at(self.ws / "elsewhere" / "pm", "declared")
+        self.manifest("elsewhere/pm")
+        result = self.resolve()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), str(declared))
+
+    def test_manifest_checkout_on_an_old_branch_reads_the_declared_branch(self):
+        upstream = self.ws / "upstream"
+        self.specs_at(upstream, "latest's oracle")
+        self.git(upstream, "init", "-q", "-b", "latest")
+        self.git(upstream, "add", "-A")
+        self.git(upstream, "commit", "-q", "-m", "pm layout")
+        shared = self.ws / "codetracer-specs"
+        self.git(self.ws, "clone", "-q", str(upstream), str(shared))
+        self.git(shared, "checkout", "-q", "-b", "working")
+        self.git(shared, "rm", "-q", "-r", "spec")
+        (shared / "Architecture").mkdir()
+        (shared / "Architecture" / "old.md").write_text("old layout\n")
+        self.git(shared, "add", "-A")
+        self.git(shared, "commit", "-q", "-m", "old layout")
+        self.manifest("codetracer-specs")
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=shared,
+                              text=True, capture_output=True).stdout
+        result = self.resolve()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        snap = Path(result.stdout.strip())
+        self.assertEqual((snap / "spec" / "marker").read_text(),
+                         "latest's oracle")
+        self.assertIn("origin/latest", result.stderr)
+        # The shared checkout was not moved.
+        self.assertEqual(subprocess.run(["git", "rev-parse", "HEAD"], cwd=shared,
+                                        text=True, capture_output=True).stdout,
+                         head)
+        self.assertFalse((shared / "spec").exists())
+
+    def test_nothing_found_names_every_place_tried(self):
+        self.manifest("codetracer-specs")
+        result = self.resolve()
+        self.assertEqual(result.returncode, 1)
+        for name in ("codetracer-pm", "codetracer-specs"):
+            self.assertIn(str(self.ws / name), result.stderr)
+
+    def test_lane_with_spec_readers_stops_before_compiling(self):
+        for rel in ("ci/lib/run-nim-test-lane.sh", "ci/lib/test-lane-files.sh",
+                    "ci/lib/test-lane-report.sh", "ci/lib/spec-checkout.sh"):
+            target = self.repo / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(REPO / rel, target)
+        reader = UNIT / "test_plat68_cua_oracle.nim"
+        self.assertIn("spec_documents", (REPO / reader).read_text())
+        (self.repo / reader).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(REPO / reader, self.repo / reader)
+        result = subprocess.run(
+            ["bash", "ci/lib/run-nim-test-lane.sh", "vm-unit"], cwd=self.repo,
+            env=self.env, text=True, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, check=False)
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("suite: " + str(reader), result.stdout)
+        self.assertIn("tried: " + str(self.ws / "codetracer-pm"), result.stdout)
+        self.assertNotIn("=== vm-unit", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

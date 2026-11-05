@@ -43,6 +43,14 @@
 # wrapped only the Nim lanes, so neither was reported. Cases 6-12 pin both: the
 # cache is guarded (by name), the helper's own check and exit-trap form behave,
 # and every entry point that exports a scratch home also checks the guard.
+#
+# THE SANDBOX (2026-11-04). On Linux the runner now runs each file over an
+# overlay of the guarded directories and reads the finding from the file's
+# own layer, so another process writing the user's state at the same moment
+# is not blamed on the file. Cases 13-14 pin both halves: a file's own write
+# is still caught (and never reaches the real directory), and a concurrent
+# writer outside the lane fails nothing, while the same overlap with the
+# sandbox switched off is shown to fail the file.
 
 set -uo pipefail
 
@@ -72,7 +80,7 @@ cp "${repo_root}/ci/lib/run-nim-test-lane.sh" \
 : >"${fake}/ci/lib/known-test-failures.tsv"
 
 cat >"${fake}/ci/lib/test-lane-files.sh" <<'LANES'
-test_lane_ids() { printf '%s\n' guard-clean guard-state guard-index guard-removal guard-mixed guard-cache guard-cache-rewrite; }
+test_lane_ids() { printf '%s\n' guard-clean guard-state guard-index guard-removal guard-mixed guard-cache guard-cache-rewrite guard-foreign; }
 test_lane_recipe() { echo ""; }
 test_lane_file_skip_reason() { :; }
 test_lane_backend() { echo "c"; }
@@ -88,6 +96,7 @@ test_lane_files() {
 	guard-removal) echo tests/test_removes_layout.nim ;;
 	guard-cache) echo tests/test_writes_cache.nim ;;
 	guard-cache-rewrite) echo tests/test_rewrites_cache.nim ;;
+	guard-foreign) echo tests/test_waits_for_foreign.nim ;;
 	guard-mixed)
 		echo tests/test_clean_a.nim
 		echo tests/test_writes_state.nim
@@ -169,6 +178,18 @@ cat >"${fake}/tests/test_rewrites_cache.nim" <<'FIX'
 #!/usr/bin/env bash
 echo rewritten >"$HOME/.cache/codetracer/vscode-484fdf69/package.json"
 echo "[OK] its own roots"
+FIX
+
+# A clean file that stays running until a process OUTSIDE the lane has written
+# the user's cache (case 14): it says it started, then waits for the writer.
+cat >"${fake}/tests/test_waits_for_foreign.nim" <<'FIX'
+#!/usr/bin/env bash
+: >"$TMPDIR/fixture-started"
+for _ in $(seq 1 200); do
+	[ -e "$TMPDIR/foreign-done" ] && break
+	sleep 0.05
+done
+if [ -e "$TMPDIR/foreign-done" ]; then echo "[OK] ran while another process wrote"; else echo "[FAILED] the foreign writer never ran"; exit 1; fi
 FIX
 
 # --- the scratch home, with the user's state in it --------------------------
@@ -382,5 +403,82 @@ else
 	t_fail "every entry point that exports a scratch CODETRACER_HOME checks the guard: unchecked='${unchecked}' units=${units} control='${control}'"
 fi
 
+# 13-14. THE SANDBOX (Linux): a file's own write to the user's state is still
+#    caught, and kept out of the real directory; a write by a process outside
+#    the lane, while a file runs, is not blamed on that file.
+#
+#    The second is what the comparison alone could not do: on 2026-11-04 two
+#    GPUI suites that never start a recorder failed because `ct-mcr record`
+#    runs elsewhere on the host wrote `~/.cache/codetracer/sync-families`.
+#    Both cases need the sandbox; on a host without it (macOS, user
+#    namespaces refused) they are reported as not applicable and the expected
+#    total says so.
+sandbox_cases=0
+rc="$(run_lane guard-cache)"
+if ! grep -q "each file runs in a sandbox" "${scratch}/out"; then
+	echo "  n/a  the sandbox cases: no sandbox on this host ($(grep -o 'no sandbox[^)]*' "${scratch}/out" | head -1))"
+else
+	sandbox_cases=2
+	# 13. Positive control: the leaking file fails, the finding says the
+	#     sandbox caught it, and the real directory never received the file.
+	if [ "${rc}" != 0 ] &&
+		grep -q "tests/test_writes_cache.nim changed the user's own CodeTracer state" "${scratch}/out" &&
+		grep -q "It ran in a sandbox" "${scratch}/out" &&
+		grep -q "wrote ${scratch}/home/.cache/codetracer/sync-families/0123-4567.rec" "${scratch}/out" &&
+		[ ! -e "${scratch}/home/.cache/codetracer/sync-families/0123-4567.rec" ]; then
+		t_pass "sandbox: a file's own write to the user's cache fails it, is named, and never reaches the real directory"
+	else
+		t_fail "sandbox: a file's own write to the user's cache fails it and never reaches the real directory (rc=${rc})"
+		sed 's/^/       /' "${scratch}/out" >&2
+	fi
+	# 14. Negative control: a writer outside the lane writes the user's cache
+	#     and state while a clean file runs. The write really lands (checked
+	#     after), and neither the file nor the lane is failed for it.
+	# `$1` is CT_USER_STATE_SANDBOX for the run; sets `rc`.
+	run_with_foreign_writer() {
+		reset_home
+		rm -f "${scratch}/tmp/fixture-started" "${scratch}/tmp/foreign-done"
+		(
+			for _ in $(seq 1 200); do
+				[ -e "${scratch}/tmp/fixture-started" ] && break
+				sleep 0.05
+			done
+			mkdir -p "${scratch}/home/.cache/codetracer/sync-families"
+			echo foreign >"${scratch}/home/.cache/codetracer/sync-families/foreign.rec"
+			echo foreign >"${scratch}/home/.local/state/codetracer/foreign.json"
+			: >"${scratch}/tmp/foreign-done"
+		) &
+		local writer=$!
+		(
+			cd "${fake}" || exit 2
+			env -u CODETRACER_HOME -u CODETRACER_TUI_LAYOUT_DIR -u XDG_STATE_HOME \
+				-u XDG_DATA_HOME -u XDG_CONFIG_HOME CT_USER_STATE_SANDBOX="$1" \
+				HOME="${scratch}/home" TMPDIR="${scratch}/tmp" \
+				PATH="${scratch}/bin:${PATH}" CT_NIM_CACHE_ROOT="${scratch}/cache" \
+				bash ci/lib/run-nim-test-lane.sh guard-foreign
+		) >"${scratch}/out" 2>&1
+		rc=$?
+		wait "${writer}"
+	}
+	# The control's control first: with the sandbox switched off the same
+	# overlap DOES fail the file, so the arm below can tell the two apart.
+	run_with_foreign_writer 0
+	unsandboxed_rc="${rc}"
+	unsandboxed_blamed=0
+	if grep -q "tests/test_waits_for_foreign.nim changed the user's own CodeTracer state" "${scratch}/out"; then
+		unsandboxed_blamed=1
+	fi
+	run_with_foreign_writer 1
+	if [ "${unsandboxed_rc}" != 0 ] && [ "${unsandboxed_blamed}" = 1 ] &&
+		[ "${rc}" = 0 ] && grep -q 'guard-foreign: 1 file(s) passed, 0 failed' "${scratch}/out" &&
+		[ -e "${scratch}/home/.cache/codetracer/sync-families/foreign.rec" ] &&
+		[ -e "${scratch}/home/.local/state/codetracer/foreign.json" ]; then
+		t_pass "sandbox: another process writing the user's cache and state while a file runs does not fail the file or the lane"
+	else
+		t_fail "sandbox: another process's write does not fail the file or the lane (sandboxed rc=${rc}; unsandboxed rc=${unsandboxed_rc}, blamed=${unsandboxed_blamed})"
+		sed 's/^/       /' "${scratch}/out" >&2
+	fi
+fi
+
 echo "lane-user-state-guard-test: ${passes} passed, ${failures} failed"
-[ "${failures}" -eq 0 ] && [ "${passes}" -eq 13 ]
+[ "${failures}" -eq 0 ] && [ "${passes}" -eq $((13 + sandbox_cases)) ]

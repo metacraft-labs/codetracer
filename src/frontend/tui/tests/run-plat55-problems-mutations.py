@@ -42,6 +42,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[4]
@@ -81,6 +82,7 @@ SPEC = "src/tests/gui/tests/problems-pane/plat55-problems-capture.spec.ts"
 SUBJECTS = [VM, RULE, READER, SOURCE, TUI_PANE, RUNTIME, SHELL, PROFILE,
             LAYOUT, TUI_MAIN, GPUI_LEAF, GPUI_MAIN, VOCAB, DESKTOP_BUILD]
 SUITES = [VMU, TBL, PTY, PLAN, SPEC]
+DESKTOP_ANSWERS = {SPEC: "src/tests/visual/answers/plat55-problems.electron.json"}
 
 TBL_BUILD = "*::a real failing build: rows, highlight, F8, a press, buttons, keys"
 PLAN_ROWS = "*::a real failing build: the desktop's rows, counts and buttons"
@@ -268,13 +270,13 @@ def record_controls():
         print("REFUSED: re-recording now would certify an unaimed arm (§39a).")
         return 1
     with open(CONTROL, "w") as f:
-        f.write("# Control digests for run-plat55-test-results-mutations.py —\n"
+        f.write("# Control digests for run-plat55-problems-mutations.py —\n"
                 "# the subjects AND the suites the arms are graded by (§16c).\n"
                 "# Refreshed with --record-control-hashes, gated by the\n"
                 "# needle scan (§39a).\n")
-        for rel in SUBJECTS + SUITES:
+        for rel in SUBJECTS + SUITES + list(DESKTOP_ANSWERS.values()):
             f.write(f"{sha(rel)}  {rel}\n")
-    print(f"recorded {len(SUBJECTS) + len(SUITES)} control digests")
+    print(f"recorded {len(SUBJECTS) + len(SUITES) + len(DESKTOP_ANSWERS)} control digests")
     return 0
 
 
@@ -283,13 +285,18 @@ def controls_match():
         print("NO CONTROL DIGESTS — run --record-control-hashes first.")
         return False
     ok = True
+    recorded = set()
     for line in CONTROL.read_text().splitlines():
         if not line or line.startswith("#"):
             continue
         digest, rel = line.split("  ", 1)
+        recorded.add(rel)
         if sha(rel) != digest:
             print(f"CONTROL DIGEST MOVED: {rel}")
             ok = False
+    for rel in set(SUBJECTS + SUITES + list(DESKTOP_ANSWERS.values())) - recorded:
+        print(f"CONTROL DIGEST ABSENT: {rel}")
+        ok = False
     return ok
 
 
@@ -352,6 +359,36 @@ def output_order_failures(out):
 
 
 def run_spec(suite):
+    """Read the live Electron verdict, retaining its output outside the inputs."""
+    saved = {rel: path_of(rel).read_bytes() if path_of(rel).exists() else None
+             for rel in DESKTOP_ANSWERS.values()}
+    try:
+        return run_spec_capture(suite)
+    finally:
+        try:
+            for rel in saved:
+                path = path_of(rel)
+                if path.exists():
+                    live = path.read_bytes()
+                    NIMCACHE.mkdir(parents=True, exist_ok=True)
+                    archive = Path(tempfile.mkdtemp(prefix="desktop-answer-", dir=NIMCACHE))
+                    (archive / "answer.json").write_bytes(live)
+                    (archive / "manifest.json").write_text(json.dumps({
+                        "suite": suite, "path": rel,
+                        "sha256": hashlib.sha256(live).hexdigest(),
+                    }, indent=2) + "\n")
+        finally:
+            for rel, entry in saved.items():
+                path = path_of(rel)
+                if entry is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    path.write_bytes(entry)
+                if (path.read_bytes() if path.exists() else None) != entry:
+                    raise RuntimeError(f"desktop capture did not restore {rel}")
+
+
+def run_spec_capture(suite):
     """The Electron spec: GREEN on rc 0, else RED on its first expectation."""
     cmd = os.environ.get("PLAT55_DESKTOP_TEST")
     argv = ["bash", "-c", cmd] if cmd else \
@@ -469,6 +506,9 @@ def main():
         v, f = run_suite(s, flt or None)
         if v != "GREEN":
             print(f"ABORT: the baseline of {s} is {v}: {f[:1]}")
+            return 1
+        if not controls_match():
+            print("ABORT: baseline changed controlled inputs; nothing was mutated.")
             return 1
     print(f"baseline GREEN ({len(graded)} suite run(s))")
     because = json.loads(BECAUSE.read_text()) if BECAUSE.exists() else {}

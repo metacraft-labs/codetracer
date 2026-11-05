@@ -111,6 +111,30 @@ const prompts = [
   "Document every public function of the units library",
   "Add keyboard navigation to the mission timeline",
   "Teach the importer to accept gzip-compressed telemetry archives",
+  "Cache the ephemeris tables between propagator runs",
+  "Show the upload queue's depth on the status page",
+  "Reject route plans whose waypoints leave the mission corridor",
+  "Rename the legacy config keys and keep the old names as aliases",
+  "Give the latency chart a percentile selector",
+  "Shrink the parser's fuzz corpus without losing coverage",
+  "Move the scheduler's clock behind an injectable interface",
+  "Stream large telemetry exports instead of buffering them",
+  "Fix the paperboat renderer's flicker on window resize",
+  "Generate the units library's reference pages from its doc comments",
+  "Let the mission timeline zoom to a selected range",
+  "Validate archive checksums before the importer unpacks them",
+  "Parallelise the orbit propagator's batch mode",
+  "Retry failed uploads after a network change, not only on a timer",
+  "Store route cache entries with their expiry time",
+  "Add a dry-run flag to the configuration migrator",
+  "Draw the latency chart's gridlines from the theme tokens",
+  "Bisect the commit that made the fuzz job slow",
+  "Document the scheduler's three new modules",
+  "Benchmark the shared serializer against the hand-rolled writer",
+  "Batch the paperboat renderer's draw calls per layer",
+  "Mark the units library's deprecated functions in its index",
+  "Show conflicting events on the mission timeline",
+  "Log which telemetry archives the importer skipped, and why",
 ];
 const branches = [
   "fix/propagator-step-count",
@@ -196,6 +220,7 @@ const histories = {};
 const infos = {};
 const lifecycle = [];
 let seq = 0;
+let promptedSessions = 0;
 const epoch = "5e7a1c0de0f1a2b3";
 plan.forEach((spec, index) => {
   const id = syntheticId(`session-${index}`);
@@ -211,7 +236,12 @@ plan.forEach((spec, index) => {
   const session = {
     id,
     org_id: "00000000-0000-0000-0000-000000000000",
-    task: { prompt: withheld ? "" : prompts[index % prompts.length] },
+    // Each session that shows a prompt shows its own, as in a real fleet: a
+    // fleet panel is how a person tells sessions apart. Drawn in order, not as
+    // `prompts[index % n]`: with every fourth session withheld, an index that
+    // shares a factor with 4 skips some prompts and repeats the rest (12
+    // prompts gave 48 rows only 21 distinct titles).
+    task: { prompt: withheld ? "" : prompts[promptedSessions++ % prompts.length] },
     agent: { agent, model: index % 5 === 0 ? "large" : "", count: index % 11 === 0 ? 2 : 1 },
     runtime: { type: index % 7 === 0 ? "devcontainer" : "local" },
     workspace: { snapshotProvider: "git", mountPath: "", host },
@@ -321,14 +351,18 @@ const planText = (title, ids) =>
   ].join("\n");
 
 const plans = [
-  { name: "Telemetry-Retry.milestones.org", campaign: "Telemetry upload retries", ids: ["TR-1", "TR-2", "TR-3"] },
-  { name: "Route-Cache.milestones.org", campaign: "Route cache on the new storage layer", ids: ["RC-1", "RC-2", "RC-3"] },
+  { name: "Telemetry-Retry.milestones.org", campaign: "Telemetry upload retries", ids: ["TR-M1", "TR-M2", "TR-M3"],
+    initiative: { id: "telemetry-retry", repository: "orbit-labs/telemetry", manager: "tr-manager" } },
+  { name: "Route-Cache.milestones.org", campaign: "Route cache on the new storage layer", ids: ["RC-M1", "RC-M2", "RC-M3"],
+    initiative: { id: "route-cache", repository: "orbit-labs/flight-planner", manager: "" } },
 ].map((p) => ({
   name: p.name,
   campaign: p.campaign,
   visibility: "synthetic",
   revision: "",
   file: writeOut(`plans/${p.name}`, planText(p.campaign, p.ids)),
+  // The initiative a server would list for the plan (a proposed shape).
+  initiative: p.initiative,
 }));
 
 const diffOf = (files) =>
@@ -546,7 +580,38 @@ const scenarioRuns = [
     { type: "log", level: "info", message: "assistant: deleted 3 generated files" },
     { type: "status", status: "completed" },
   ]),
+  scenarioRun("storage-choice", "Move the route cache to the new storage layer; ask me which backend if unsure", [
+    { type: "status", status: "queued" },
+    { type: "status", status: "running" },
+    { type: "user_input", input_type: "text", content: "Move the route cache to the new storage layer; ask me which backend if unsure" },
+    { type: "log", level: "info", message: "agent question (Claude Code): tool=AskUserQuestion" },
+    { type: "log", level: "info", message: "assistant: Using the embedded key-value store, as chosen." },
+    { type: "tool_use", status: "started", tool_name: "runCmd", tool_execution_id: "tool-1", tool_args: { command: "make test-cache" } },
+    { type: "tool_result", status: "completed", tool_name: "runCmd", tool_execution_id: "tool-1" },
+    { type: "status", status: "completed" },
+  ]),
 ];
+
+// The sessions an operator works with, as a front-end's tabs show them, and
+// what the proposed shapes would say of each: the front-end it was started
+// from and the plan it was launched for (the captured set's
+// capture-sources.json states the same for real sessions).
+const firstOf = (category) => sessions.find((s) => s.status === category)?.id;
+const stated = (entries) => entries.map((entry) => ({ ...entry, stated: "invented, like every value of this set" }));
+// Coherent sets, as in the captured set: the scenario runs with the plans
+// they are launched for, and the fleet's sessions on their own.
+const workingSets = {
+  scenario: stated([
+    { from: "scenario", scenarioRun: "storage-choice", at: "question", origin: "webui", plan: plans[1].name },
+    { from: "scenario", scenarioRun: "edit-and-test", at: 4, origin: "codetracer", plan: plans[0].name },
+    { from: "scenario", scenarioRun: "permission-granted", at: "end", origin: "tui", plan: plans[0].name },
+  ]),
+  real: stated([
+    { from: "fleet", sessionId: firstOf("running"), origin: "cli", plan: plans[1].name },
+    { from: "fleet", sessionId: firstOf("failed"), origin: "ah-lite", plan: "" },
+  ]),
+};
+
 
 const manifest = {
   schema: 1,
@@ -558,6 +623,7 @@ const manifest = {
   diffs,
   testRuns,
   scenarioRuns,
+  workingSets,
   files: Object.fromEntries([...written.entries()].sort(([a], [b]) => a.localeCompare(b))),
 };
 writeFileSync(join(outDir, "manifest.json"), json(manifest));

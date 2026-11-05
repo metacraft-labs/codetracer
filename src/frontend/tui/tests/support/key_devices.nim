@@ -101,7 +101,8 @@ const
   Ss3Letter = {"F1": 'P', "F2": 'Q', "F3": 'R', "F4": 'S'}.toTable
   TildeCode = {"Insert": 2, "Delete": 3, "PageUp": 5, "PageDown": 6,
                "F5": 15, "F6": 17, "F7": 18, "F8": 19, "F9": 20, "F10": 21,
-               "F11": 23, "F12": 24}.toTable
+               "F11": 23, "F12": 24, "Menu": 29}.toTable
+    ## `Menu`: xterm's application key, `CSI 29 ~` (PLAT-70 Part E).
   CodepointOf = {"Enter": 13, "Tab": 9, "Esc": 27, "Backspace": 127,
                  "Space": 32}.toTable
 
@@ -161,7 +162,7 @@ func legacyCandidates(): seq[string] =
   for f in "ABCDHFPQRSZ":
     for m in mods: result.add "\e[" & m & $f
   for code in [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 17, 18, 19, 20,
-               21, 23, 24]:
+               21, 23, 24, 29]:
     result.add "\e[" & $code & "~"
     for m in 2 .. 16: result.add "\e[" & $code & ";" & $m & "~"
 
@@ -185,7 +186,8 @@ const
                  "Tab": "tab", "Space": "space", "Delete": "delete",
                  "Home": "home", "End": "end", "PageUp": "pageup",
                  "PageDown": "pagedown", "Insert": "insert", "Up": "up",
-                 "Down": "down", "Left": "left", "Right": "right"}.toTable
+                 "Down": "down", "Left": "left", "Right": "right",
+                 "Menu": "menu"}.toTable
 
 func gpuiKeystroke*(name: string): GpuiKeystroke =
   ## GPUI's keystroke for `name`: the key as `keystroke.key` spells it and
@@ -210,7 +212,8 @@ const
                 "PageDown": ("PageDown", "PageDown"), "Up": ("ArrowUp", "ArrowUp"),
                 "Down": ("ArrowDown", "ArrowDown"),
                 "Left": ("ArrowLeft", "ArrowLeft"),
-                "Right": ("ArrowRight", "ArrowRight")}.toTable
+                "Right": ("ArrowRight", "ArrowRight"),
+                "Menu": ("ContextMenu", "ContextMenu")}.toTable
   DomCodeOfSymbol = {'-': "Minus", '=': "Equal", '[': "BracketLeft",
                      ']': "BracketRight", '\\': "Backslash", ';': "Semicolon",
                      '\'': "Quote", ',': "Comma", '.': "Period", '/': "Slash",

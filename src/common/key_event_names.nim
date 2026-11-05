@@ -30,7 +30,8 @@ const
     "Backspace": "Backspace", "Delete": "Delete", "Insert": "Insert",
     "Space": "Space", "Home": "Home", "End": "End", "PageUp": "PageUp",
     "PageDown": "PageDown", "ArrowUp": "Up", "ArrowDown": "Down",
-    "ArrowLeft": "Left", "ArrowRight": "Right"}.toTable
+    "ArrowLeft": "Left", "ArrowRight": "Right",
+    "ContextMenu": "Menu"}.toTable
     ## `KeyboardEvent.code` values of the non-character keys this product
     ## names (F1–F12 are spelled the same in both vocabularies).
 

@@ -62,14 +62,21 @@ function aliasLetters(index) {
  * A scrubber. `secrets` are literal strings (API keys the capture used) that
  * must never survive; `hostnames` are names to alias even where no pattern
  * would recognise them (a bare short host name such as `build-01` looks like any other word).
+ * `hostAliasSeed` maps host names to the aliases an earlier capture gave
+ * them, so a part captured later aliases each host as the kept fleet
+ * snapshot does; new hosts get aliases no seed uses.
  */
 export function createScrubber({
   secrets = [],
   hostnames = [],
   privateStrings = [],
   accountNames = defaultAccountNames(),
+  hostAliasSeed = {},
 } = {}) {
   const hostAliases = new Map();
+  for (const [name, alias] of Object.entries(hostAliasSeed)) {
+    hostAliases.set(String(name).toLowerCase().replace(/\.(home\.arpa|local|lan|internal)$/, ""), alias);
+  }
   const executorAliases = new Map();
   const addressAliases = new Map();
   const stats = {
@@ -102,7 +109,10 @@ export function createScrubber({
   function hostAlias(name) {
     const key = String(name).toLowerCase().replace(/\.(home\.arpa|local|lan|internal)$/, "");
     if (!hostAliases.has(key)) {
-      hostAliases.set(key, `host-${aliasLetters(hostAliases.size)}`);
+      const used = new Set(hostAliases.values());
+      let i = hostAliases.size;
+      while (used.has(`host-${aliasLetters(i)}`)) i++;
+      hostAliases.set(key, `host-${aliasLetters(i)}`);
     }
     return hostAliases.get(key);
   }

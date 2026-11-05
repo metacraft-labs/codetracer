@@ -7558,6 +7558,84 @@ proc filesPaneArea(rt: TuiRuntime): CellArea =
       return paneUnderStrip(geometry, i)
   CellArea()
 
+proc runVariablesKeyOperation(rt: TuiRuntime; operation: string;
+                              outcome: var RuntimeOutcome): bool =
+  ## PLAT-70 Part E (Variable-State-Pane.md § Value origin from the keyboard)
+  ## FROM THE KEYBOARD, while the Variables pane has the focus: the `list.*`
+  ## moves walk the variables AND the hops of their open origin chains, `→` /
+  ## `←` open and close a variable or a hop's operands, `Enter` on a hop
+  ## seeks to it, `Escape` on a hop closes the chain and returns to the
+  ## variable, `variables.show-value-origin` opens or closes the focused
+  ## variable's chain, and `context-menu.open` opens its row menu. What each
+  ## does to the cursor is the shared rule's (`state_pane_keys.stateKey`);
+  ## this applies it. Answers whether `operation` was the pane's.
+  let op =
+    case operation
+    # The modal bases' `j` / `k` / `Down` / `Up` and half-pages, as the Files
+    # pane takes them.
+    of "editor.scroll-line-down": "list.focus-next"
+    of "editor.scroll-line-up": "list.focus-previous"
+    of "editor.scroll-half-page-down": "list.focus-page-down"
+    of "editor.scroll-half-page-up": "list.focus-page-up"
+    # Vim's and Kakoune's `Escape` in NORMAL; it closes a chain only from
+    # one of its hops (below), and is the machine's otherwise.
+    of "modal.return-to-normal": "list.clear-selection"
+    else: operation
+  let model = rt.app.variables
+  let rows = model.paneRows()
+  if op == "context-menu.open":
+    let path = model.selected
+    if path.len == 0:
+      rt.note("no variable is selected in the Variables pane")
+      outcome.repaint = true
+      return true
+    let under = rt.paneAreaOf(paneState)
+    var g = newStyledGrid(under.col + under.width, under.row + under.height)
+    let screen = paintVariables(g, under, model)
+    var row = screen.bodyRowForPath(path)
+    if row < 0: row = under.row + 1
+    rt.openContextMenu(variablesContextMenu(path), row, under.col + 2,
+                       outcome)
+    return true
+  let body = max(1, rt.paneBodyRows(paneState) - 1)
+  let effect = stateKey(model.stateKeyRows(rows), model.cursorOf, op,
+                        page = body)
+  case effect.kind
+  of skeUnhandled:
+    return false
+  of skeNone:
+    if op == ShowValueOriginOperation:
+      rt.note("select a variable to show where its value came from")
+  of skeMoved:
+    rt.app.variables.selected = effect.cursor.path
+    rt.app.variables.focused = effect.cursor.path
+    rt.app.variables.selectedHop = effect.cursor.hop
+    # `o` acts on the selected variable (`CommandContext.selectedVariable`).
+    rt.context.selectedVariable = variablePathOf(effect.cursor.path)
+    # Keep the cursor's row in view.
+    let at = rt.app.variables.stateKeyRows(rows).cursorIndex(effect.cursor)
+    if at >= 0:
+      var top = clamp(rt.app.variables.scrollTop, 0, max(0, rows.len - body))
+      if at < top: top = at
+      elif at >= top + body: top = at - body + 1
+      rt.app.variables.scrollTop = top
+  of skeExpand, skeCollapse:
+    discard rt.app.variables.toggleNode(effect.path)
+  of skeToggleOperands:
+    let key = operandKey(effect.path, effect.hop)
+    let i = rt.app.variables.openOperands.find(key)
+    if i >= 0: rt.app.variables.openOperands.delete(i)
+    else: rt.app.variables.openOperands.add key
+  of skeSeek:
+    outcome.requestClick(PaneClickRequest(kind: pcSeek, tick: effect.tick))
+  of skeCloseChain, skeToggleChain:
+    rt.app.variables.selectedHop = effect.cursor.hop
+    rt.context.selectedVariable = variablePathOf(effect.path)
+    outcome.requestClick(PaneClickRequest(kind: pcValueOrigin,
+                                          path: effect.path))
+  outcome.repaint = true
+  true
+
 proc runFilesKeyOperation(rt: TuiRuntime; operation: string;
                           outcome: var RuntimeOutcome): bool =
   ## K17 / K18 / K19 FROM THE KEYBOARD, while the Files pane has the focus:
@@ -7803,6 +7881,10 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
     if had and focused == paneFileTree and
        rt.runFilesKeyOperation(res.operation, outcome):
       return
+    # PLAT-70 Part E: the Variables pane, its origin chains' hops included.
+    if had and focused == paneState and not rt.app.variables.isEmpty and
+       rt.runVariablesKeyOperation(res.operation, outcome):
+      return
     if had and focused == paneTestResults and rt.app.tests.loaded and
        rt.runTestsKeyOperation(res.operation, outcome):
       return
@@ -7909,6 +7991,13 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
   of "list.show-detail":
     # PLAT-70 Part B (Horizontal-Overflow.md §5.3).
     rt.showDetail(outcome)
+    return
+  of ShowValueOriginOperation:
+    # PLAT-70 Part E: the focused Variables pane takes it above; from
+    # anywhere else (the palette) it says where it works.
+    rt.note("Show Value Origin works on the variable selected in the " &
+            "Variables pane")
+    outcome.repaint = true
     return
   of "table.resize-column":
     # PLAT-70 Part B (§5.2): the Event Log is the table whose columns resize.

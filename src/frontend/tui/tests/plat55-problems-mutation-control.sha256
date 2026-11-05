@@ -1,4 +1,4 @@
-# Control digests for run-plat55-test-results-mutations.py —
+# Control digests for run-plat55-problems-mutations.py —
 # the subjects AND the suites the arms are graded by (§16c).
 # Refreshed with --record-control-hashes, gated by the
 # needle scan (§39a).
@@ -7,17 +7,18 @@ e476eb410d61905d23bdb2aea4a25553d88e595b9969725628c69b81dfa56eca  src/frontend/v
 f07d44b9221f998dd8a7e8adaa6ba9684368e9a949b86ab19a5a79eca8bd5cbe  src/frontend/tui/host/build_problems.nim
 4e7b596a4242572e5cf79d8b902569dc708a18dc6f6108903839dcc665591467  src/frontend/tui/host/problems_source.nim
 97e9140ffe8c624556c6f35bcafdfd28666f0e42a8ebaa237a4a2a0d4e74a8e2  src/frontend/tui/app/views/problems_pane.nim
-1ac9781a0f9572b91a8a41663e0b4dd432d0c7b920cd06b68770e5004184dae9  src/frontend/tui/app/runtime.nim
+10d0991b5fc8a82cb47b832dab77039f71c02335ba2e0067c26307f36e9442dd  src/frontend/tui/app/runtime.nim
 4b44b9381e6be839c85dfd0ea3903ab044f03fca6461e0cca6ad2bbf1ae9721b  src/frontend/tui/app/views/shell.nim
 04fe621217b5eb969569b6d5ce70014e72aa77ba8e95d66ce6b47266337bb890  src/frontend/tui/app/layout/profile.nim
 f71d0f67a9c5364edb1114585d4df08ed6ad308a5248a748073525866f308852  src/frontend/headless_app/layout_model.nim
-9d2b18e4ea385c1a69d4e1481ddacb3aeabd0767d808a5fbf040949146c663d9  src/frontend/tui/main.nim
+e88527125d92967300a2edacf4fef93160e08f58d86fb6aa5f5450ddb1acb474  src/frontend/tui/main.nim
 63df4fd827e82c468a118b433e5ad086b10a5fa41e7165b02e340b46bafe4d21  src/frontend/gpui/problems_leaf.nim
-2b9957c155dd5db2ca2207c593a4d4cf93f403c567fe31e477380f6877383dac  src/frontend/gpui/main.nim
+ec07d2181417603aeab7e7fd2598dc0c81f03dc0931b95604413f5f773cbfcce  src/frontend/gpui/main.nim
 db93a41f319070d0a48e76f27414fd137c15dbd2c963cbe17c18f36af08c5a1a  src/frontend/view_vocabulary/pane_views.nim
-f5d0b8943e4aeab9109e90abbdf4891c8f0567655fd395a73b9d5ab501ac1070  src/frontend/ui/build.nim
+827fabdc50fc8c1273081bb94b532097e6ceafa1f4b239875a068d5d1a965275  src/frontend/ui/build.nim
 219574976898441d35ab98c7689b00a353d01206b2ca3a4cbce01d9461259866  src/frontend/viewmodel/tests/unit/test_plat55_problems.nim
 ee3589724d9613df485a7a484b249c808f9cc9ae1938caafe918f1396984ccae  src/frontend/tui/tests/test_plat55_problems.nim
 f4807d37055485ad6d5311ef1f400bc516613b403abddce897d9fa98733dc5b3  src/frontend/tui/tests/real_terminal/test_plat55_problems_pty.nim
 04a2f286c16492bd51d862b795e9bda81fbe683f8fd064e2f08a2d1ba2bab2db  src/frontend/gpui/tests/test_plat55_gpui_plan.nim
 a769bb39b3657c029704a53ac621328ffd5ddb9e8a57d4890626975c96d97d6d  src/tests/gui/tests/problems-pane/plat55-problems-capture.spec.ts
+23cae1d9a654c3ee2395ef397a6bf91d235ceac2bce7896337b5bbafccda0210  src/tests/visual/answers/plat55-problems.electron.json

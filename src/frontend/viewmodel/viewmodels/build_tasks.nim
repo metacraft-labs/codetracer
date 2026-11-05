@@ -47,11 +47,23 @@
 ## names (a misspelt one is a configuration error) and shown in the picker;
 ## `none` turns the task's diagnostics off.
 ##
+## ## A session with no project folder
+##
+## The desktop's and the web's New File session has no folder
+## (`no_project_folder`), so there is nowhere for a task file to be read from
+## and nowhere for a command to run: `:build`, `:build <command>`,
+## `:build: <task>` and the BUILD panel's Run build are refused, saying so
+## (Edit-Mode-Toolbar.md EMT-D34). A command is never run in the app's own
+## working directory instead — the rule `git_cli.gitWorkingDirectory` keeps
+## for VCS. A lone file opened by name is NOT this case: its folder is the
+## project (EMT-D34), and the folder's tasks apply.
+##
 ## Pure Nim: no filesystem, no process. C and JavaScript backends.
 
 import std/strutils
 
 import ./omnibar_vm
+from ./no_project_folder import NoProjectFolderText
 
 type
   BuildTaskGroup* = enum
@@ -135,6 +147,10 @@ const
   NoBuildTasksText* = "No build tasks: add " & BuildTasksFile &
                       " to the project (Build-Output-Pane.md §5.2)"
   BuildAlreadyRunningText* = "a build is already running; :build: stop it first"
+  NoProjectFolderBuildText* = NoProjectFolderText &
+    " There is nothing to build: open the project's folder to build it."
+    ## EMT-D34: what a build asked for in a session with no project folder
+    ## says. It names the remedy, as `NoBuildTasksText` does.
   DefaultTaskName* = "default"
 
 # ---------------------------------------------------------------------------
@@ -475,9 +491,18 @@ proc startTask*(host: BuildTaskHost; t: BuildTask): string =
                        t.name, t.problemMatcher)
   if why.len > 0: why else: "running task " & t.name & ": " & t.command
 
+proc hasProjectFolder*(host: BuildTaskHost): bool =
+  ## Whether the session has a folder for a build to run in (EMT-D34).
+  host.projectDir.strip.len > 0
+
 proc runBuildVerb*(host: BuildTaskHost; c: BuildTaskConfig;
                    verb: BuildVerb): string =
   ## A `:build` line, carried out through the host. What to say.
+  if verb.kind in {bvkRunDefault, bvkRunCommand, bvkRunTask} and
+     not host.hasProjectFolder:
+    # EMT-D34: no folder, nothing to build — and no command run in whatever
+    # directory the app was started from.
+    return NoProjectFolderBuildText
   case verb.kind
   of bvkNone:
     ""
@@ -531,10 +556,13 @@ proc runBuildChoice*(host: BuildTaskHost; c: BuildTaskConfig;
   else:
     runBuildVerb(host, c, parseBuildVerb(":build: " & entry.target))
 
-proc pickerNote*(c: BuildTaskConfig): string =
-  ## What a front-end says when the picker opens: the file's problems, or that
-  ## there is no task, or nothing.
-  if c.problems.len > 0:
+proc pickerNote*(c: BuildTaskConfig; hasProjectFolder = true): string =
+  ## What a front-end says when the picker opens: that the session has no
+  ## project folder (EMT-D34), the file's problems, or that there is no task,
+  ## or nothing.
+  if not hasProjectFolder:
+    NoProjectFolderBuildText
+  elif c.problems.len > 0:
     c.problems[0] & (if c.problems.len > 1: " (and " & $(c.problems.len - 1) &
                      " more)" else: "")
   elif c.tasks.len == 0: NoBuildTasksText

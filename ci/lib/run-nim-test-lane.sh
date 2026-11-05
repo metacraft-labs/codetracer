@@ -116,6 +116,44 @@ if [ -n "${_ct_lane_recipes}" ]; then
 	exit 2
 fi
 
+# THE SPECIFICATION CHECKOUT, FOR THE SUITES THAT READ THEIR ORACLE FROM IT.
+#
+# `test_support/spec_documents.nim` reads `$CT_SPECS_DIR`, else the sibling
+# `../codetracer-pm`, and never searches; in a workspace the repository is
+# checked out under its manifest path (`codetracer-specs`), so without this
+# every suite that imports it failed to COMPILE, on every tree, in a way that
+# read as a product defect. The lane resolves the checkout once
+# (ci/lib/spec-checkout.sh: the override, the workspace manifest, the sibling
+# names) and exports it. When the lane holds such a suite and nothing
+# resolves, the lane stops HERE, before compiling anything, naming the suites
+# and every place it looked — a missing oracle is a hard red, never a skip.
+# shellcheck source=ci/lib/spec-checkout.sh
+# shellcheck disable=SC1091 # resolved at runtime from $repo_root
+source "${repo_root}/ci/lib/spec-checkout.sh"
+_ct_spec_readers="$(test_lane_files "${lane}" | while read -r _ct_f; do
+	[ -n "${_ct_f}" ] && grep -l 'spec_documents' "${_ct_f}" 2>/dev/null
+done)"
+if _ct_specs_found="$(ct_resolve_specs_dir "${repo_root}" 2>"${TMPDIR:-/tmp}/ct-specs-tried.$$")"; then
+	export CT_SPECS_DIR="${_ct_specs_found}"
+	if [ -n "${_ct_spec_readers}" ]; then
+		echo "    (specifications read from ${CT_SPECS_DIR})"
+		sed 's/^/    /' "${TMPDIR:-/tmp}/ct-specs-tried.$$"
+	fi
+elif [ -n "${_ct_spec_readers}" ]; then
+	{
+		echo "ERROR: lane '${lane}' has suites that read the CodeTracer specification"
+		echo "       checkout (codetracer-pm, checked out as codetracer-specs in a workspace),"
+		echo "       and no checkout was found:"
+		printf '%s\n' "${_ct_spec_readers}" | sed 's/^/         suite: /'
+		sed 's/^/         tried: /' "${TMPDIR:-/tmp}/ct-specs-tried.$$"
+		echo "       Check the repository out beside this one (repro ws enable codetracer)"
+		echo "       or set CT_SPECS_DIR to a checkout holding spec/."
+	} >&2
+	rm -f "${TMPDIR:-/tmp}/ct-specs-tried.$$"
+	exit 2
+fi
+rm -f "${TMPDIR:-/tmp}/ct-specs-tried.$$"
+
 # THE CACHE ROOT IS PER-CHECKOUT, AND THAT IS THE WHOLE POINT.
 #
 # The default used to be a bare `/tmp/ct-nim-cache`, and the per-suite directory
@@ -229,9 +267,22 @@ trap 'rm -rf ${_ct_lane_state:+"${_ct_lane_state}"} ${_ct_lane_home_owned:+"${_c
 # lane runs (using CodeTracer, or clearing stale state by hand) trips it as
 # well; the message names that possibility, and the fix is to rerun on a quiet
 # host.
+#
+# ON LINUX EACH FILE RUNS IN A SANDBOX instead, and then nobody else can trip
+# it: the run reads the user's real directories through an overlay whose
+# writes land in the run's own layer, and the finding is read from that layer
+# (`ct_user_state_sandbox_enable` in ci/lib/codetracer-home.sh). The snapshot
+# comparison is then kept only for a directory the sandbox cannot cover. It
+# was the comparison alone until 2026-11-04, when another process's
+# `ct-mcr record` failed two GPUI suites that never start a recorder.
 # shellcheck source=ci/lib/codetracer-home.sh
 # shellcheck disable=SC1091 # resolved at runtime from $repo_root
 source "${repo_root}/ci/lib/codetracer-home.sh"
+if ct_user_state_sandbox_enable; then
+	_ct_uss_note="each file runs in a sandbox over the user's state"
+else
+	_ct_uss_note="no sandbox on this host; the user's state is compared around each file"
+fi
 ct_user_state_guard_start
 _ct_user_state_where="$(ct_user_state_guard_dirs_text)"
 backend="$(test_lane_backend "${lane}")"
@@ -292,6 +343,7 @@ fi
 mkdir -p test-logs "${cache_root}"
 
 echo "=== ${lane}: $(test_lane_description "${lane}") ==="
+echo "    (${_ct_uss_note})"
 if [ "${compile_only}" -eq 1 ]; then
 	echo "    (compile-only: these files are never executed — see"
 	echo "     ci/lib/test-lane-files.sh for why)"
@@ -471,6 +523,9 @@ while read -r f; do
 	# (CodeTracer in use, another checkout's tests) is the other possible
 	# cause, and the message says so; run the file again on a quiet host.
 	_ct_file_before="$(ct_user_state_snapshot)"
+	# The file's own sandbox layers (empty prefix when there is no sandbox).
+	_ct_uss_root="${_ct_lane_home}/${name}.user-state-layers"
+	ct_user_state_sandbox_prefix "${_ct_uss_root}"
 
 	ct_libs="${CT_LD_LIBRARY_PATH:-${CODETRACER_LD_LIBRARY_PATH:-}}"
 	# The lane's own run-time libraries (`test_lane_run_library_path`), in
@@ -480,17 +535,17 @@ while read -r f; do
 		ct_libs="${lane_run_libs}${ct_libs:+:${ct_libs}}"
 	fi
 	if [ "${backend}" = "js" ]; then
-		output="$(timeout "${lane_timeout}" node "${artifact}" 2>&1)" && rc=0 || rc=$?
+		output="$(timeout "${lane_timeout}" ${ct_uss_cmd[@]+"${ct_uss_cmd[@]}"} node "${artifact}" 2>&1)" && rc=0 || rc=$?
 	elif [ "${backend}" = "js-dom" ]; then
 		# A browser-target module, run over jsdom's DOM. The runner fails
 		# (exit 2) when `node_modules/jsdom` is absent rather than skipping.
-		output="$(timeout "${lane_timeout}" node src/frontend/tests/jsdom-run.mjs "${artifact}" 2>&1)" && rc=0 || rc=$?
+		output="$(timeout "${lane_timeout}" ${ct_uss_cmd[@]+"${ct_uss_cmd[@]}"} node src/frontend/tests/jsdom-run.mjs "${artifact}" 2>&1)" && rc=0 || rc=$?
 	elif [ "${backend}" = "js-chromium" ]; then
 		# A browser-target module, run in a real page in headless Chromium.
 		# The runner fails (exit 2) when Playwright or its Chromium is absent
 		# rather than skipping, and fails (exit 1) on a `[FAILED]` line, an
 		# uncaught page error, or a suite that never reports it finished.
-		output="$(timeout "${lane_timeout}" node src/frontend/tests/chromium-run.mjs "${artifact}" 2>&1)" && rc=0 || rc=$?
+		output="$(timeout "${lane_timeout}" ${ct_uss_cmd[@]+"${ct_uss_cmd[@]}"} node src/frontend/tests/chromium-run.mjs "${artifact}" 2>&1)" && rc=0 || rc=$?
 	elif [ "${backend}" = "wasm" ]; then
 		# `emcc -o <name>.js` emits a JS loader beside the `.wasm`; node runs
 		# the loader, which instantiates the module and calls `main`.
@@ -506,16 +561,31 @@ while read -r f; do
 		# are the lines that say a suite reached for something the shipping
 		# host has not got. Discarding them would leave the lane green over
 		# a module that only works by emulation.
-		output="$(timeout "${lane_timeout}" node "${artifact}" 2>&1)" && rc=0 || rc=$?
+		output="$(timeout "${lane_timeout}" ${ct_uss_cmd[@]+"${ct_uss_cmd[@]}"} node "${artifact}" 2>&1)" && rc=0 || rc=$?
 	else
 		run_lib_path="${ct_libs}"
 		if [ -n "${LD_LIBRARY_PATH:-}" ]; then
 			run_lib_path="${run_lib_path:+${run_lib_path}:}${LD_LIBRARY_PATH}"
 		fi
 		output="$(LD_LIBRARY_PATH="${run_lib_path}" \
-			timeout "${lane_timeout}" "${artifact}" 2>&1)" && rc=0 || rc=$?
+			timeout "${lane_timeout}" ${ct_uss_cmd[@]+"${ct_uss_cmd[@]}"} "${artifact}" 2>&1)" && rc=0 || rc=$?
 	fi
 
+	# What the file's own sandbox caught first: those writes were this
+	# file's (or a binary it spawned), and nobody else's.
+	_ct_uss_found="$(ct_user_state_sandbox_findings "${_ct_uss_root}")"
+	if [ -n "${_ct_uss_found}" ]; then
+		echo "TOUCHED THE USER'S STATE"
+		{
+			echo "      ${f} changed the user's own CodeTracer state while it ran" \
+				"(a file created, rewritten or removed under ${_ct_user_state_where})." \
+				"It ran in a sandbox, so these changes were this file's and were" \
+				"kept out of the real directories:"
+			printf '%s\n' "${_ct_uss_found}" | sed 's/^/        /'
+		} >&2
+		failed=$((failed + 1))
+		continue
+	fi
 	_ct_file_after="$(ct_user_state_snapshot)"
 	if [ "${_ct_file_after}" != "${_ct_file_before}" ]; then
 		echo "TOUCHED THE USER'S STATE"

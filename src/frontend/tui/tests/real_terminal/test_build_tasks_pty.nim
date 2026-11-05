@@ -14,7 +14,10 @@
 ##     in the warning colour, its line's gutter shows `⚠`, the error line's
 ##     `●`;
 ##   * the pointer resting on `undefined_name` shows the compiler's messages;
-##   * `:build: pass` builds the passing task, and the marks are gone.
+##   * `:build: pass` builds the passing task, and the marks are gone;
+##   * `--edit <file>` (Edit-Mode-Toolbar.md EMT-D34): the file on screen in
+##     its folder's project; `:build` and the palette's Project: Run say what
+##     the folder lacks; a task the folder declares then builds.
 ##
 ## No mocks: the binary, the real `gcc`, a real project, a real pty.
 
@@ -29,7 +32,7 @@ import ./lifecycle_support
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 9
+const ExpectedAssertions = 14
 
 var countedAssertions = 0
 
@@ -159,6 +162,63 @@ suite "build tasks and the editor's marks on a real terminal":
     sess.close()
     removeDir(state)
     removeDir(project)
+
+  test "EMT-D34: `--edit <file>` opens its folder; the folder's tasks build it":
+    # A lone file in a folder that is no project: the file on screen, in
+    # its folder's project. Nothing is invented for the file — `:build` says
+    # the folder has no task and how to add one, the palette's Project: Run
+    # that the folder is not a project — and a task the folder then declares
+    # builds it.
+    let folder = getTempDir() / ("ct-lone-file-pty-" & $getCurrentProcessId())
+    removeDir(folder)
+    createDir(folder)
+    # A file that sorts first, so the editor showing `lone.c` is the named
+    # file and not the listing's first.
+    writeFile(folder / "a_first.c", "int first = 1;\n")
+    writeFile(folder / "lone.c", "int lone_marker = 1;\n")
+    let state = getTempDir() / ("lone-file-pty-" & $getCurrentProcessId())
+    removeDir(state)
+    createDir(state)
+    var sess = newTuiTest(tuiBinary(), @["--theme=dark", "--edit",
+                                         folder / "lone.c"])
+      .width(Cols).height(Rows).transcript()
+      .workDir(state)
+      .envRemove("TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE", "TMUX",
+                 "STY", "NERD_FONT", "NERDFONT", "COLORFGBG")
+      .envSet("TERM", "xterm-256color").envSet("LANG", "en_US.UTF-8")
+      .envSet("COLORTERM", "truecolor")
+      .envSet("XDG_STATE_HOME", state)
+      .envSet("CODETRACER_HOME", state / "ct-home")
+      .envSet("CODETRACER_TUI_LAYOUT_DIR", state / "layout")
+      .carryRunMark()
+      .spawn()
+    discard sess.waitFor("[EDIT]")
+    let (fr, _) = sess.waitFor("int lone_marker = 1;")
+    ck fr >= 0
+    ck sess.snap().findRow("int first = 1;")[0] < 0
+    sess.omnibox(":build")
+    let (nr, _) = sess.waitFor("No build tasks: add .codetracer/build.yaml")
+    ck nr >= 0
+    sess.send("\x1b")
+    sleep(400)
+    sess.omnibox(":Project: Run")
+    let (rr, _) = sess.waitFor("does not recognise this folder as a project")
+    ck rr >= 0
+    # The folder declares a task: `:build` runs it, in the folder.
+    createDir(folder / ".codetracer")
+    writeFile(folder / ".codetracer" / "build.yaml",
+              "tasks:\n  check:\n    command: \"grep -c lone_marker lone.c\"\n")
+    sess.send("\x1b")
+    sleep(400)
+    sess.omnibox(":build")
+    let (br, _) = sess.waitFor("build succeeded", BuildBudgetMs)
+    ck br >= 0
+    sess.send("\x11")  # Ctrl+Q
+    discard sess.waitExit(initDuration(seconds = 10))
+    sess.terminate()
+    sess.close()
+    removeDir(state)
+    removeDir(folder)
 
   test "the assertion count":
     check countedAssertions == ExpectedAssertions

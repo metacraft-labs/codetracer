@@ -1,4 +1,4 @@
-import ui_imports, ../[types, communication], build_location_parser, auto_hide, errors
+import ui_imports, ../[types, communication, event_helpers], build_location_parser, auto_hide, errors
 import session_viewmodels
 from ../viewmodel/viewmodels/errors_vm import ErrorsVM
 
@@ -560,6 +560,25 @@ proc desktopBuildTasks*(): BuildTaskConfig =
 proc desktopBuildRunning(): bool =
   not buildVMInstance.isNil and buildVMInstance.running.val
 
+var desktopBuildsRequested* = 0
+  ## Builds `startDesktopBuild` has asked the main process for. A `:build`
+  ## line's answer is a sentence either way ("running task …" or why
+  ## nothing ran); whether this count moved is what tells the two apart
+  ## (`sayDesktopBuild`).
+
+proc sayDesktopBuild*(said: string; requestedBefore: int) =
+  ## What a build request answered, said to the user when nothing was
+  ## started (EMT-D14/EMT-D34: a refusal the user cannot see is a button that
+  ## does nothing); a build that started speaks through the BUILD panel, so
+  ## its sentence only reaches the log.
+  if said.len == 0:
+    return
+  if desktopBuildsRequested == requestedBefore and not data.isNil and
+     not data.viewsApi.isNil:
+    data.viewsApi.warnMessage(cstring(said))
+  else:
+    cwarn "build: " & said
+
 proc startDesktopBuild*(command, dir, task, matcher: string): string =
   ## A build run by the main process (`index/build_runner`): its command in
   ## `dir`, its output into the BUILD panel of the tab on screen. "" when it
@@ -571,6 +590,7 @@ proc startDesktopBuild*(command, dir, task, matcher: string): string =
   if not onDesktopBuildRequested.isNil:
     onDesktopBuildRequested()
   pendingBuildTask = (task, matcher, dir)
+  inc desktopBuildsRequested
   data.ipc.send cstring"CODETRACER::build-start",
     js{command: cstring(command), cwd: cstring(dir)}
   ""

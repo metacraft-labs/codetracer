@@ -148,6 +148,8 @@ var
     ## `ui_js` likewise.
 
 proc activeElementJs(): JsObject {.importjs: "(document.activeElement)@".}
+proc newMouseEventJs(kind: cstring; x, y: float): JsObject {.importjs:
+  "new MouseEvent(#, {bubbles: true, cancelable: true, view: window, button: 2, clientX: #, clientY: #})".}
 
 proc focusedEditorView(): EditorViewComponent =
   ## The editor view that holds the focus — its `.code-editor` element (the
@@ -327,6 +329,8 @@ proc runMonaco(operation: string): bool =
                       js{})
   true
 
+proc sendValueOrigin(expression: cstring)
+
 proc dispatchShowValueOrigin*() =
   ## `editor.jump-to-value-origin` on the desktop — `Ctrl+Shift+O`, and `o`
   ## in the read-only editor: the focused editor's selection (or the word at
@@ -355,6 +359,13 @@ proc dispatchShowValueOrigin*() =
   if expression.len == 0:
     cwarn "shortcuts: Show Value Origin — no editor selection or word under " &
           "the cursor; ignoring"
+    return
+  sendValueOrigin(expression)
+
+proc sendValueOrigin(expression: cstring) =
+  ## `ct/originChain` for `expression` at the current step — the row menu's
+  ## "Show value origin" (`ui/value.nim`), which the side panel answers.
+  if data.isNil or data.activeSessionIndex < 0:
     return
   let args = js{
     variableName: expression,
@@ -564,6 +575,48 @@ proc runPaletteOperation*(operation, argument: string) =
                                               operation: operation,
                                               argument: argument))
 
+proc focusedStateRow(): JsObject =
+  ## PLAT-70 Part E: the Variables row the keys act on — the row of the
+  ## state pane's focused (last pressed) cell, as `list.show-detail` reads it.
+  let cell = focusedRowCell(StateDetailPane, cstring"")
+  if cell.isNil: return nil
+  let row = cell.closest(cstring"[data-variable-name]")
+  if row.isNil or row.isUndefined: nil else: row
+
+proc showValueOriginOfFocusedRow(): bool =
+  ## PLAT-70 Part E: `variables.show-value-origin` (`Ctrl+Shift+O` in the
+  ## Variables pane) on the focused row — what the row's menu entry "Show
+  ## value origin" (K28) and its origin badge (K41) both do: the chain
+  ## expands IN PLACE under the row, loaded when needed; the side panel is
+  ## one press away, the chain's own "Show in side panel". The badge's own
+  ## handler runs it (`isonim_state_view.onToggleOriginBadge`), drawn or not.
+  let row = focusedStateRow()
+  if row.isNil: return false
+  let badge = row.querySelector(cstring"button.ct-origin-badge")
+  if badge.isNil or badge.isUndefined: return false
+  discard badge.click()
+  true
+
+proc openContextMenuOfFocus(): bool =
+  ## PLAT-70 Part E: `context-menu.open` (`Menu`, CUA's `Shift+F10` in Edit
+  ## mode and `Ctrl+K Shift+F10` in Debug mode) — the focused element's own
+  ## menu: a `contextmenu` event on it, at its top left, as the platform's
+  ## context-menu key raises one. In the Variables pane the element is the
+  ## focused row.
+  var target = activeElementJs()
+  for e in desktopScopePath():
+    if e.paneKind == "state":
+      let row = focusedStateRow()
+      if not row.isNil: target = row
+      break
+  if target.isNil or target.isUndefined: return false
+  let rect = target.getBoundingClientRect()
+  let x = rect.left.to(float) + 8.0
+  let y = rect.top.to(float) + 8.0
+  let ev = newMouseEventJs(cstring"contextmenu", x, y)
+  discard target.dispatchEvent(ev)
+  true
+
 proc runDesktopOperation(res: EditingResolution): NativeKind =
   ## **THE DESKTOP'S DISPATCH** of a resolved operation.
   let op = if res.argument.len > 0: res.operation & "(" & res.argument & ")"
@@ -589,6 +642,12 @@ proc runDesktopOperation(res: EditingResolution): NativeKind =
     return nkHandled
   if res.operation in HostIntents:
     if not data.functions.update.isNil: data.functions.update(data, false)
+    return nkHandled
+  if res.operation == "variables.show-value-origin":
+    if not showValueOriginOfFocusedRow():
+      cwarn "keys: Show Value Origin works on a variable of the Variables pane"
+    return nkHandled
+  if res.operation == "context-menu.open" and openContextMenuOfFocus():
     return nkHandled
   if runTableOperation(res):
     return nkHandled

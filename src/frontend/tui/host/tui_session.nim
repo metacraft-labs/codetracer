@@ -42,7 +42,7 @@
 when defined(js):
   {.error: "src/frontend/tui/host is native-only: it spawns replay-server.".}
 
-import std/[json, os, strutils, tables]
+import std/[json, os, sets, strutils, tables]
 
 import codetracer_embed
 import headless_session
@@ -1255,14 +1255,21 @@ proc stepSearchResult*(s: TuiSession; rt: TuiRuntime; delta: int): string =
 proc refreshOrigins(s: TuiSession; rt: TuiRuntime) =
   ## PLAT-51: the origin chains open in the Variables pane, read at THIS stop
   ## (an origin is the current value's), one line per hop.
-  var origins = initTable[string, seq[string]]()
+  var origins = initTable[string, seq[OriginHopRow]]()
   for path in rt.app.openOrigins:
     let name = variablePathOf(path)
     try:
-      origins[path] = s.session.loadValueOrigin(name).originHopLines
+      origins[path] = s.session.loadValueOrigin(name).originHopRows
     except CatchableError:
       origins[path] = @[]
   rt.app.variables.origins = origins
+  # PLAT-70 Part E: a cursor on a hop the chain read at THIS stop no longer
+  # has (a closed chain, a shorter one) goes to the last hop, or to the
+  # variable.
+  let v = rt.app.variables
+  if v.selectedHop >= 0:
+    let hops = origins.getOrDefault(v.selected).len
+    rt.app.variables.selectedHop = min(v.selectedHop, hops - 1)
 
 proc refresh*(s: TuiSession; rt: TuiRuntime)
 
@@ -1397,9 +1404,21 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
     s.state.setViewport(cellPaneViewport(
       rt.paneBodyRows(paneState), rt.paneBodyCols(paneState),
       rt.app.variables.scrollTop))
+  # PLAT-70 Part E: THE CURSOR IS THE READER'S TOO — a seek from a hop
+  # (`Enter`) is a stop, and the cursor must still be on that hop after it,
+  # so `Escape` closes the chain it is in. The pane's cursor and the shown
+  # operands go into the shared StateVM, which the model below is read from.
+  if not s.state.isNil:
+    publishSelection(s.state, rt.app.variables)
+    s.state.selectedHop.val = rt.app.variables.selectedHop
+    s.state.openOperands.val = rt.app.variables.openOperands.toHashSet
   rt.app.variables = variablesModelFor(s.state, s.valueTimeline, tick,
                                        tickLabel = "tick " & $tick,
                                        scrollTop = rt.app.variables.scrollTop)
+  if not s.state.isNil:
+    rt.app.variables.selectedHop =
+      if rt.app.variables.selected.len > 0: s.state.selectedHop.val else: -1
+    for key in s.state.openOperands.val: rt.app.variables.openOperands.add key
   # PLAT-51: the pane's open histories and origins, its watches and the
   # name column's width — the user's, carried across stops.
   rt.app.variables.histories = rt.app.openHistories
@@ -1696,6 +1715,9 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
     let at = rt.app.openOrigins.find(c.path)
     if at >= 0:
       rt.app.openOrigins.delete(at)
+      # PLAT-70 Part E: a closed chain takes the cursor off its hops.
+      if rt.app.variables.selected == c.path:
+        rt.app.variables.selectedHop = -1
     else:
       rt.app.openOrigins.add c.path
     s.refreshOrigins(rt)

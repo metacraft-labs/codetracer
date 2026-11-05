@@ -105,6 +105,9 @@ import viewmodel/app/isonim_app_shell
 import nim_agents_isonim_viewmodels/agent_harbor/[fixture_source, fleet_vm]
 import stories/agent_harbor_stories
 import viewmodel/views/isonim_agent_harbor_fleet_view
+import viewmodel/views/[isonim_agent_harbor_session_tabs_view,
+                        isonim_agent_harbor_initiatives_view,
+                        isonim_agent_harbor_initiative_tabs_view]
 import ../ct_test/contracts as ct_test_contracts
 
 type
@@ -1388,6 +1391,70 @@ proc mountAgentHarborFleet(container: isonim_dom.Element;
     if rootDisposer != nil: rootDisposer()
     container.innerHTML = ""
 
+proc mountAgentHarborVM[T](container: isonim_dom.Element;
+                           build: proc(): T;
+                           mount: proc(container: isonim_dom.Element; vm: T)): DisposeProc =
+  ## Builds a story's viewmodel in a reactive root and mounts its view; the
+  ## dispose proc tears both down.
+  var rootDisposer: proc()
+  var vm: T
+  createRoot proc(dispose: proc()) =
+    rootDisposer = dispose
+    vm = build()
+    mount(container, vm)
+  return proc() =
+    if vm != nil: vm.dispose()
+    if rootDisposer != nil: rootDisposer()
+    container.innerHTML = ""
+
+proc mountAgentHarborSessionTabs(container: isonim_dom.Element;
+                                 fixture: string): DisposeProc =
+  ## The strip as CodeTracer draws it: in the caption bar (`#menu`), above an
+  ## empty working area. Several lines let the bar grow.
+  let caption = isonim_dom.createElement(isonim_dom.document, cstring"div")
+  isonim_dom.setAttribute(caption, cstring"id", cstring"menu")
+  isonim_dom.setAttribute(caption, cstring"class", cstring(
+    "ah-tab-caption" & (if fixture.startsWith("multi-line") or fixture == "focused-initiative":
+                          " ah-tab-caption-multiline" else: "")))
+  discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(caption))
+  mountAgentHarborVM(caption,
+    proc(): SessionTabStripVM = createSessionTabsStoryVM(fixture),
+    proc(host: isonim_dom.Element; vm: SessionTabStripVM) =
+      mountAgentHarborTabStrip(host, vm))
+
+proc mountAgentHarborInitiativeTabs(container: isonim_dom.Element;
+                                    fixture: string): DisposeProc =
+  ## The tab bar with initiatives as tabs, in the caption bar.
+  let caption = isonim_dom.createElement(isonim_dom.document, cstring"div")
+  isonim_dom.setAttribute(caption, cstring"id", cstring"menu")
+  isonim_dom.setAttribute(caption, cstring"class", cstring"ah-tab-caption")
+  discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(caption))
+  mountAgentHarborVM(caption,
+    proc(): InitiativeTabStripVM = createInitiativeTabsStoryVM(fixture),
+    proc(host: isonim_dom.Element; vm: InitiativeTabStripVM) =
+      mountAgentHarborInitiativeTabBar(host, vm))
+
+proc mountAgentHarborSessionList(container: isonim_dom.Element;
+                                 fixture: string): DisposeProc =
+  mountAgentHarborVM(container,
+    proc(): SessionTabStripVM = createSessionListStoryVM(fixture),
+    proc(host: isonim_dom.Element; vm: SessionTabStripVM) =
+      mountAgentHarborSessionList(host, vm))
+
+proc mountAgentHarborInitiatives(container: isonim_dom.Element;
+                                 fixture: string): DisposeProc =
+  mountAgentHarborVM(container,
+    proc(): InitiativesVM = createInitiativesStoryVM(fixture),
+    proc(host: isonim_dom.Element; vm: InitiativesVM) =
+      mountAgentHarborInitiativesPanel(host, vm))
+
+proc mountAgentHarborProgress(container: isonim_dom.Element;
+                              fixture: string): DisposeProc =
+  mountAgentHarborVM(container,
+    proc(): InitiativeProgressVM = createProgressStoryVM(fixture),
+    proc(host: isonim_dom.Element; vm: InitiativeProgressVM) =
+      mountAgentHarborProgressPanel(host, vm))
+
 proc mountTestResults(container: isonim_dom.Element; fixture: string): DisposeProc =
   ## The Test Results pane over a real `ct test run --events` capture (the
   ## Agent Harbor fixture set's first test run), folded through the pane's
@@ -1429,7 +1496,11 @@ proc mountStructure(container: isonim_dom.Element; name, fixture: string): Dispo
   let r = WebRenderer()
   case name
   of "session-tabs":
-    appendRendered(container, renderSessionTabsPanel[WebRenderer, isonim_dom.Element](r, @[
+    # In the caption bar (`#menu`), where the application draws it: the
+    # "+" takes its filled-disc treatment only there (session_tabs.styl
+    # `#menu .session-tab-add`), and outside it drew as an outlined square.
+    let captionHost = createHost(container, "div", "menu")
+    appendRendered(captionHost, renderSessionTabsPanel[WebRenderer, isonim_dom.Element](r, @[
       SessionTabRecord(label: "noir-space-ship"),
       SessionTabRecord(label: "sudoku"),
     ], 0))
@@ -1589,12 +1660,19 @@ proc mountCodeTracerStory*(container: isonim_dom.Element;
   of "layout":
     mountLayout(container, n, f)
   of "view", "component":
-    mountStructure(container, n, f)
+    case n
+    of "agent-harbor-session-tabs": mountAgentHarborSessionTabs(container, f)
+    of "agent-harbor-initiative-tabs": mountAgentHarborInitiativeTabs(container, f)
+    of "agent-harbor-session-list": mountAgentHarborSessionList(container, f)
+    else: mountStructure(container, n, f)
   else:
     case n
     of "agent-activity": mountAgentActivity(container, f)
     of "agent-workspace": mountAgentWorkspace(container, f)
     of "agent-harbor-fleet": mountAgentHarborFleet(container, f)
+    of "agent-harbor-session-list": mountAgentHarborSessionList(container, f)
+    of "agent-harbor-initiatives": mountAgentHarborInitiatives(container, f)
+    of "agent-harbor-initiative-progress": mountAgentHarborProgress(container, f)
     of "test-results": mountTestResults(container, f)
     of "build": mountBuild(container, f)
     of "calltrace": mountCalltrace(container, f)

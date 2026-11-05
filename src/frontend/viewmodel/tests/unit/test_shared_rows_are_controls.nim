@@ -8,7 +8,10 @@
 ## element carries `role="button"` and `tabindex="0"`, so a screen reader
 ## announces it and the keyboard reaches it
 ## (https://www.w3.org/WAI/ARIA/apg/patterns/button/). Enter and Space on it
-## are its click (`views/isonim_activation`); that half needs a browser's key
+## are its click (`views/isonim_activation`). A dropdown's row (the Event
+## Log's Columns menu) is a button too, but not a Tab stop: the arrow keys move
+## inside the menu, which is one Tab stop (docs/UI-Design-Decisions.md, D-18),
+## so it carries `tabindex="-1"`. The key half needs a browser's key
 ## events and is `src/frontend/tests/shared_rows_keyboard_dom_test.nim`'s.
 ## Recorded as codetracer-pm
 ## issues/2026-10-24-shared-pane-rows-are-clickable-without-a-role-a-keyboard-path-or-a-link.md.
@@ -65,6 +68,15 @@ proc attr(node: MockNode; name: string): string =
 
 proc isControl(node: MockNode): bool =
   node.attr("role") == "button" and node.attr("tabindex") == "0"
+
+proc isDropdownRowControl(node: MockNode): bool =
+  ## A row of a dropdown — the Event Log's Columns menu among them — is a
+  ## button the keyboard reaches with the arrow keys, not with Tab: the menu
+  ## is ONE Tab stop (docs/UI-Design-Decisions.md, D-18 and focus rule 6;
+  ## `views/keyboard_focus`). So it is focusable from code (`tabindex="-1"`),
+  ## and a `tabindex="0"` on it is a regression: Tab would visit every row
+  ## (https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/).
+  node.attr("role") == "button" and node.attr("tabindex") == "-1"
 
 proc callLine(index: int; name: string; children = false;
               expanded = false): CallLine =
@@ -134,7 +146,7 @@ suite "the shared views' clickable rows are controls":
       let checksShown = panel.allByClass(EventLogColumnCheckClass)
       ck checksShown.len > 0
       for c in checksShown:
-        ck c.isControl
+        ck c.isDropdownRowControl
         ck c.attr("aria-pressed") in ["true", "false"]
       mock.clearReceivedCommands()
       if shown.len == 3:

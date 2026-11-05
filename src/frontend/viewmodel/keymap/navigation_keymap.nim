@@ -113,6 +113,13 @@ const
     BaseRow(chords: "Backspace", operation: "list.collapse", table: G, navModes: N),
     BaseRow(chords: "x", operation: "variables.toggle-hex-dec", table: G, navModes: N),
     BaseRow(chords: "m", operation: "variables.view-memory-dump", table: G, navModes: N),
+    # PLAT-70 Part E (Variable-State-Pane.md § Value origin from the keyboard):
+    # `g o` shows the focused variable's origin chain under its row, in the
+    # Variables pane's scope only, so Vim's editor `go` is untouched; `o` /
+    # `Shift+O` keep walking; the application key opens the row menu.
+    BaseRow(chords: "g o", operation: "variables.show-value-origin", table: G, navModes: N,
+            whenText: "listFocus && paneKind == state"),
+    BaseRow(chords: "Menu", operation: "context-menu.open", table: G, navModes: N),
     # PLAT-70 Part B (Horizontal-Overflow.md §5.3): Vim's `K` — the focused
     # table row's full text under it.
     BaseRow(chords: "Shift+K", operation: "list.show-detail", table: G, navModes: N,
@@ -157,6 +164,13 @@ const
     BaseRow(chords: "Backspace", operation: "list.collapse", table: G, navModes: I),
     BaseRow(chords: "x", operation: "variables.toggle-hex-dec", table: G, navModes: I),
     BaseRow(chords: "m", operation: "variables.view-memory-dump", table: G, navModes: I),
+    # PLAT-70 Part E (Variable-State-Pane.md § Value origin from the keyboard):
+    # `g o` shows the focused variable's origin chain under its row, in the
+    # Variables pane's scope only, so Vim's editor `go` is untouched; `o` /
+    # `Shift+O` keep walking; the application key opens the row menu.
+    BaseRow(chords: "g o", operation: "variables.show-value-origin", table: G, navModes: I,
+            whenText: "listFocus && paneKind == state"),
+    BaseRow(chords: "Menu", operation: "context-menu.open", table: G, navModes: I),
     BaseRow(chords: "Shift+K", operation: "list.show-detail", table: G, navModes: I,
             whenText: "listFocus"),
     BaseRow(chords: "o", operation: "editor.jump-to-value-origin", table: G, navModes: I),

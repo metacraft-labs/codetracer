@@ -5,7 +5,7 @@
 // through it, CodeTracer's StoryBook).
 //
 //   node tools/agent-harbor-fixtures/capture.mjs [--out <dir>] [--raw <dir>]
-//        [--sources <file>] [--only fleet,plans,diffs,tests,scenarios]
+//        [--sources <file>] [--only fleet,plans,diffs,tests,scenarios,working-set]
 //        [--workspace <dir>]
 //
 // Captured data is never written into a public repository. The default
@@ -39,6 +39,16 @@
 //              reads over REST), and the same scenario run by the mock ACP
 //              agent (what the agent itself emits). Both are local processes
 //              this capture starts and stops.
+//   working-set  no capture of its own: the named working sets -- the
+//              sessions an operator works with (a front-end's tabs) -- with
+//              the moment of each scenario run to show it at, the front-end
+//              each was started from and the plan it was launched for. Agent
+//              Harbor serves neither of the last two yet (they are the
+//              proposed `origin_front_end` and plan association), so the
+//              sources file states them and the manifest records them as
+//              stated, never as captured. A set is coherent or refused: all
+//              scenario runs with invented plans, or all fleet sessions with
+//              real plans. Needs the parts it names.
 //
 // Everything the fleet part reads is scrubbed (lib/scrub.mjs) before it is
 // written. The raw prompt strings are kept in the raw directory, OUTSIDE the
@@ -80,7 +90,7 @@ const rawDir = resolve(
   argValue("--raw") ??
     join(process.env.XDG_RUNTIME_DIR || tmpdir(), `codetracer-agent-harbor-capture-${process.getuid?.() ?? "user"}`),
 );
-const allParts = ["fleet", "plans", "diffs", "tests", "scenarios"];
+const allParts = ["fleet", "plans", "diffs", "tests", "scenarios", "working-set"];
 const parts = (argValue("--only") ?? allParts.join(","))
   .split(",")
   .map((p) => p.trim())
@@ -98,7 +108,95 @@ const sources = JSON.parse(readFileSync(sourcesPath, "utf8"));
 // executor gets the same alias in every fixture (a plan naming a host the
 // fleet lists says `host-a` where the fleet does).
 let sharedScrub = null;
-const scrubber = () => sharedScrub ?? createScrubber();
+const scrubber = () => {
+  if (!sharedScrub) throw new Error("internal: a part needs the scrubber before it was prepared");
+  return sharedScrub;
+};
+
+/**
+ * The scrubber for a capture that does not re-read the fleet (`--only`
+ * without `fleet`). Plans and scenario runs name hosts too, and no pattern
+ * recognises a bare host name, so they are scrubbed with the host names of
+ * the fleet -- and with the aliases the KEPT snapshot gave them, so a host
+ * is called the same in every part. The pairing is read, GET only, from the
+ * configured server: each session the kept snapshot lists is matched by id,
+ * its real host to its alias. A capture that cannot make the pairing stops
+ * rather than write plans whose host names nothing scrubbed.
+ */
+async function scrubberForKeptFleet(manifest) {
+  const keptPath = manifest.fleet?.sessions ? join(outDir, manifest.fleet.sessions) : null;
+  if (!keptPath || !existsSync(keptPath)) {
+    throw new Error("no fleet snapshot is kept beside these parts; capture the fleet part too (--only fleet,…)");
+  }
+  const kept = new Map();
+  for (const s of JSON.parse(readFileSync(keptPath, "utf8")).items ?? []) {
+    if (s.workspace?.host) kept.set(s.id, s.workspace.host);
+  }
+  const server = captureServer();
+  const hubGet = makeHubGet(server);
+  const seed = {};
+  const hostnames = new Set();
+  let next = `/api/v1/sessions?perPage=${sources.fleet.pageSize}`;
+  for (let page = 0; next && page < 50; page++) {
+    const body = await hubGet(next);
+    for (const item of body.items ?? []) {
+      const host = item.workspace?.host;
+      if (!host) continue;
+      hostnames.add(host);
+      if (kept.has(item.id)) seed[host] = kept.get(item.id);
+    }
+    next = body.nextPage ? (body.nextPage.startsWith("/api/") ? body.nextPage : `/api/v1/${body.nextPage.replace(/^\/+/, "")}`) : null;
+  }
+  // The fleet's leader and followers are named only by each session's info;
+  // pair them through the infos the kept snapshot holds, position by position.
+  for (const [id, path] of Object.entries(manifest.fleet?.info ?? {})) {
+    const keptInfo = JSON.parse(readFileSync(join(outDir, path), "utf8"));
+    if (!keptInfo?.fleet) continue;
+    let info;
+    try {
+      info = await hubGet(`/api/v1/sessions/${encodeURIComponent(id)}/info`);
+    } catch {
+      continue; // a session the server no longer knows
+    }
+    const pairs = [[info?.fleet?.leader, keptInfo.fleet.leader]];
+    (info?.fleet?.followers ?? []).forEach((name, i) => pairs.push([name, keptInfo.fleet.followers?.[i]]));
+    for (const [name, alias] of pairs) {
+      if (!name || !alias) continue;
+      hostnames.add(name);
+      seed[name] = alias;
+    }
+  }
+  try {
+    // The server's own host: the kept snapshot names it where a log line
+    // quotes the server's address (`http://host-q:<port>`).
+    const url = new URL(server.url);
+    hostnames.add(url.hostname);
+    hostnames.add(url.hostname.split(".")[0]);
+    if (url.port) {
+      const pattern = new RegExp(`//(host-[a-z]+):${url.port}\\b`);
+      for (const path of Object.values(manifest.fleet?.events ?? {})) {
+        const found = pattern.exec(readFileSync(join(outDir, path), "utf8"));
+        if (found) {
+          seed[url.hostname] = found[1];
+          break;
+        }
+      }
+    }
+  } catch {
+    // the patterns still catch LAN names
+  }
+  const aliased = new Set(Object.values(seed));
+  const unpaired = [...new Set(kept.values())].filter((alias) => !aliased.has(alias));
+  log(`scrubbing with the kept snapshot's host aliases: ${aliased.size} paired${unpaired.length ? `, ${unpaired.length} kept alias(es) whose sessions the server no longer lists (${unpaired.join(", ")}) stay reserved` : ""}`);
+  const rawStrings = join(rawDir, "private-strings.json");
+  const reserved = Object.fromEntries(unpaired.map((alias) => [`reserved:${alias}`, alias]));
+  return createScrubber({
+    secrets: server.apiKey ? [server.apiKey] : [],
+    hostnames: [...hostnames],
+    privateStrings: existsSync(rawStrings) ? JSON.parse(readFileSync(rawStrings, "utf8")) : [],
+    hostAliasSeed: { ...reserved, ...seed },
+  });
+}
 
 function log(message) {
   console.log(`capture-agent-harbor-fixtures: ${message}`);
@@ -368,6 +466,11 @@ function capturePlans(manifest) {
       visibility: plan.visibility,
       revision: gitRevisionOf(path),
       file: writeOut(`plans/${plan.name}`, scrubber().text(text)),
+      // The initiative a server would list for the plan (the proposed
+      // initiatives read model): its id, the repository it lives in and the
+      // alias of the manager session running it. Stated in the sources file;
+      // no server serves it yet.
+      ...(plan.initiative ? { initiative: plan.initiative } : {}),
     });
   }
   log(`plans: ${manifest.plans.length}`);
@@ -847,6 +950,63 @@ async function captureScenarios(manifest) {
 }
 
 // ---------------------------------------------------------------------------
+// working set: the captured sessions an operator works with
+// ---------------------------------------------------------------------------
+
+function workingSetEntries(name, entries, manifest) {
+  // Each entry names a captured session -- `scenario:<run name>` or
+  // `fleet:<session id>` -- and states what no endpoint serves yet: `origin`
+  // (the front-end it was started from), `plan` (the name of a captured plan
+  // it was launched for) and, for a scenario run, `at`: the moment to show it
+  // at (`end`, `question` -- right after the agent's first question, while
+  // it waits for the answer -- or a number of events).
+  const runs = new Map((manifest.scenarioRuns ?? []).map((r) => [r.name, r]));
+  const plans = new Map((manifest.plans ?? []).map((p) => [p.name, p]));
+  const fleetIds = new Set();
+  if (manifest.fleet?.sessions && existsSync(join(outDir, manifest.fleet.sessions))) {
+    for (const s of JSON.parse(readFileSync(join(outDir, manifest.fleet.sessions), "utf8")).items ?? []) fleetIds.add(s.id);
+  }
+  const kinds = new Set();
+  const out = entries.map((entry, i) => {
+    const [from, ref] = String(entry.session ?? "").split(/:(.*)/s);
+    const where = `working set ${name}, entry ${i} (${entry.session})`;
+    if (from === "scenario" && !runs.has(ref)) throw new Error(`${where}: no captured scenario run of that name`);
+    if (from === "fleet" && !fleetIds.has(ref)) throw new Error(`${where}: no session of that id in the fleet snapshot`);
+    if (from !== "scenario" && from !== "fleet") throw new Error(`${where}: name a session as scenario:<run> or fleet:<id>`);
+    kinds.add(from);
+    if (entry.plan) {
+      const plan = plans.get(entry.plan);
+      if (!plan) throw new Error(`${where}: no captured plan named ${entry.plan}`);
+      // Never mix: a scenario run belongs to an invented plan, a real
+      // session to a real one.
+      const invented = plan.visibility === "invented";
+      if (invented !== (from === "scenario")) {
+        throw new Error(`${where}: a ${from} session cannot be launched for the ${invented ? "invented" : "real"} plan ${entry.plan}`);
+      }
+    }
+    return {
+      from,
+      ...(from === "scenario" ? { scenarioRun: ref, at: entry.at ?? "end" } : { sessionId: ref }),
+      origin: entry.origin ?? "",
+      plan: entry.plan ?? "",
+      stated: "origin and plan are stated in capture-sources.json; no server serves them yet",
+    };
+  });
+  if (kinds.size > 1) throw new Error(`working set ${name} mixes scenario runs and fleet sessions`);
+  return out;
+}
+
+function captureWorkingSet(manifest) {
+  const sets = sources.workingSets ?? {};
+  manifest.workingSets = {};
+  for (const [name, entries] of Object.entries(sets)) {
+    manifest.workingSets[name] = workingSetEntries(name, entries, manifest);
+    log(`working-set ${name}: ${manifest.workingSets[name].length} sessions`);
+  }
+  delete manifest.workingSet;
+}
+
+// ---------------------------------------------------------------------------
 // manifest
 // ---------------------------------------------------------------------------
 
@@ -900,6 +1060,7 @@ async function main() {
     { part: "diffs", run: captureDiffs, dir: "diffs", keys: ["diffs"] },
     { part: "tests", run: captureTests, dir: "tests", keys: ["testRuns"] },
     { part: "scenarios", run: captureScenarios, dir: "scenarios", keys: ["scenarioRuns"] },
+    { part: "working-set", run: captureWorkingSet, dir: null, keys: ["workingSets"] },
   ];
   const writeManifest = () => {
     const files = referencedFiles(manifest);
@@ -911,13 +1072,16 @@ async function main() {
     writeFileSync(manifestPath, json(manifest));
     return files.length;
   };
+  if (!parts.includes("fleet") && parts.some((p) => p !== "working-set")) {
+    sharedScrub = await scrubberForKeptFleet(manifest);
+  }
   for (const step of steps) {
     if (!parts.includes(step.part)) continue;
     try {
       await step.run(manifest);
     } catch (error) {
       for (const key of step.keys) delete manifest[key];
-      rmSync(join(outDir, step.dir), { recursive: true, force: true });
+      if (step.dir) rmSync(join(outDir, step.dir), { recursive: true, force: true });
       writeManifest();
       log(`${step.part}: FAILED; removed it from the set, which keeps the parts captured before`);
       throw error;

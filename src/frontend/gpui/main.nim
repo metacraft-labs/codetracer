@@ -509,6 +509,10 @@ type
       ## the field is shared deliberately: `ct` passes one positional and the
       ## mode is what says which it is, exactly as `codetracer-tui` parses
       ## `--edit` into `tckEditProject`.
+    editFile: string
+      ## `pmEdit` only: the file `ct edit <file>` named, relative to the
+      ## project root its folder became (`edit_host.editLaunchTarget`,
+      ## Edit-Mode-Toolbar.md EMT-D34) — shown first. "" for a folder.
     product: ProductMode
       ## **PLAT-16's dimension, carried into a second front-end.**
       ##
@@ -9735,23 +9739,202 @@ proc showValueHistory(r: GpuiRenderer; path: string) =
 proc showValueOrigin(r: GpuiRenderer; path: string) =
   ## K28 / K41: "Show value origin" and the row's origin badge — the chain
   ## OPENS IN THE PANE under the row (PLAT-51; the desktop's in-row chain),
-  ## nearest cause first; a second toggle closes it.
+  ## nearest cause first; a second toggle closes it. PLAT-70 Part E: the
+  ## hops are rows (`state_pane_keys.originHopRows`), each with the tick
+  ## `Enter` on it seeks to; a chain that closes takes the keyboard cursor
+  ## off its hops.
   let vm = gSession.session.stateVM
   if vm.isNil:
     return
-  var lines = vm.originLines.val
-  if lines.hasKey(path):
-    lines.del path
+  var hops = vm.originHops.val
+  if hops.hasKey(path):
+    hops.del path
+    if vm.selectedPath.val == path:
+      vm.selectedHop.val = -1
   else:
     try:
-      lines[path] = gSession.loadValueOrigin(path).originHopLines
+      hops[path] = gSession.loadValueOrigin(path).originHopRows
     except CatchableError as e:
       traceGesture("no origin for " & path & ": " & e.msg)
-      lines[path] = @[]
-  vm.originLines.val = lines
-  traceGesture("origin " & path & " " & $lines.getOrDefault(path).len &
+      hops[path] = @[]
+  vm.originHops.val = hops
+  traceGesture("origin " & path & " " & $hops.getOrDefault(path).len &
                " hop(s)")
   redrawPaneOf(r, paneState)
+
+# ---------------------------------------------------------------------------
+# PLAT-70 Part E: THE VARIABLES PANE FROM THE KEYBOARD (Variable-State-Pane.md
+# § Value origin from the keyboard; Value-Origin-Tracking.md §13.0). The
+# cursor is `StateVM.selectedPath` + `selectedHop`; what each operation does
+# to it is the shared rule (`state_pane_keys.stateKey`), which the terminal
+# applies too. This section lists the pane's rows as the drawer draws them
+# and applies the rule's effect.
+# ---------------------------------------------------------------------------
+
+var gOriginNav = initOriginNavigator()
+  ## `o` / `O`: the chain in hand and the ticks `O` returns through
+  ## (`origin_walk`, the terminal's navigator).
+
+proc stateKeyRowsOf(vm: StateVM): seq[StateKeyRow] =
+  ## The pane's rows in the order `leaves.renderStatePane` draws them: each
+  ## variable, then its open history entries, then its chain's hops (each
+  ## followed by its shown operands).
+  let hops = vm.originHops.val
+  let expanded = vm.expandedPaths.val
+  for row in stateRows(vm, gpuiRowBudget()):
+    result.add StateKeyRow(kind: srkVariable, path: row.path, hop: -1,
+                           expandable: row.hasChildren,
+                           expanded: row.path in expanded,
+                           chainOpen: hops.hasKey(row.path))
+    if row.path in vm.expandedHistories.val:
+      for e in vm.valueHistory.val.getOrDefault(row.path):
+        result.add StateKeyRow(kind: srkOther, path: row.path, hop: -1)
+    for i, h in hops.getOrDefault(row.path):
+      let open = operandKey(row.path, i) in vm.openOperands.val
+      result.add StateKeyRow(kind: srkHop, path: row.path, hop: i,
+                             tick: h.tick, hasOperands: h.operands.len > 0,
+                             operandsOpen: open)
+      if open:
+        for _ in h.operands:
+          result.add StateKeyRow(kind: srkOther, path: row.path, hop: -1)
+
+proc stateCursor(vm: StateVM): StateCursor =
+  StateCursor(path: vm.selectedPath.val, hop: vm.selectedHop.val)
+
+proc revealStateRow(at: int) =
+  ## Keep row `at` (in `stateKeyRowsOf`'s order) inside the scroll box.
+  let rowsPx = max(StateValueRowPx, statePaneSizePx.h - StateRowsTopPx)
+  let y = at * StateValueRowPx
+  var top = stateScroll.top
+  if y < top: top = y
+  elif y + StateValueRowPx > top + rowsPx: top = y + StateValueRowPx - rowsPx
+  stateScroll.top = clamp(top, 0, max(top, stateScrollMax.top))
+
+proc openStateRowMenu(r: GpuiRenderer) =
+  ## `context-menu.open` on the Variables pane: the selected variable's row
+  ## menu (K28), beside its row.
+  let vm = gSession.session.stateVM
+  let path = vm.selectedPath.val
+  if path.len == 0:
+    traceGesture("no variable is selected in the Variables pane")
+    return
+  let i = gGeom.tabsNodeOfPane($paneState)
+  var x, y = 0
+  if i >= 0:
+    let body = gGeom.nodes[i].body
+    let at = max(0, stateKeyRowsOf(vm).cursorIndex(variableCursor(path)))
+    x = body.x + StateInsetPx + 24
+    y = body.y + StateRowsTopPx + at * StateValueRowPx - stateScroll.top +
+        StateValueRowPx
+  openContextMenuAt(r, variablesContextMenu(path), x, y)
+
+proc runStateKey(r: GpuiRenderer; operation: string): bool =
+  ## An operation on the focused Variables pane, through the shared rule.
+  ## Answers whether it was the pane's.
+  if gSession.isNil or gSession.session.stateVM.isNil:
+    return false
+  let vm = gSession.session.stateVM
+  if operation == "context-menu.open":
+    openStateRowMenu(r)
+    return true
+  let op =
+    case operation
+    of "editor.scroll-line-down": "list.focus-next"
+    of "editor.scroll-line-up": "list.focus-previous"
+    of "editor.scroll-half-page-down": "list.focus-page-down"
+    of "editor.scroll-half-page-up": "list.focus-page-up"
+    of "modal.return-to-normal": "list.clear-selection"
+    else: operation
+  let rows = stateKeyRowsOf(vm)
+  let page = max(1, (statePaneSizePx.h - StateRowsTopPx) div StateValueRowPx)
+  let effect = stateKey(rows, stateCursor(vm), op, page = page)
+  case effect.kind
+  of skeUnhandled:
+    return false
+  of skeNone:
+    if op == ShowValueOriginOperation:
+      traceGesture("select a variable to show where its value came from")
+    return true
+  of skeMoved:
+    vm.selectPath(effect.cursor.path)
+    vm.selectedHop.val = effect.cursor.hop
+    revealStateRow(rows.cursorIndex(effect.cursor))
+    traceGesture("state cursor " & effect.cursor.path &
+                 (if effect.cursor.hop >= 0: " hop " & $effect.cursor.hop
+                  else: ""))
+  of skeExpand, skeCollapse:
+    vm.toggleExpand(effect.path)
+  of skeToggleOperands:
+    var open = vm.openOperands.val
+    let key = operandKey(effect.path, effect.hop)
+    if key in open: open.excl key else: open.incl key
+    vm.openOperands.val = open
+    traceGesture("operands of hop " & $effect.hop & " " &
+                 (if key in open: "shown" else: "hidden"))
+  of skeSeek:
+    try:
+      gSession.gotoTick(effect.tick)
+    except CatchableError as e:
+      traceGesture("origin hop jump failed: " & e.msg)
+      return true
+    traceGesture("origin hop at tick " & $effect.tick)
+    afterMove(r)
+    return true
+  of skeCloseChain, skeToggleChain:
+    vm.selectPath(effect.path)
+    vm.selectedHop.val = -1
+    showValueOrigin(r, effect.path)
+    return true
+  redrawPaneOf(r, paneState)
+  true
+
+proc originVariable(): string =
+  ## What `o` / `Ctrl+Shift+O` in the editor ask about: the variable
+  ## selected in the Variables pane.
+  if gSession.isNil or gSession.session.stateVM.isNil: ""
+  else: gSession.session.stateVM.selectedPath.val
+
+proc walkValueOrigin(r: GpuiRenderer; reverse: bool) =
+  ## `editor.jump-to-value-origin` (`o`) and `debugger.reverse-origin`
+  ## (`Shift+O`), by the terminal's rule (`origin_walk`): `o` walks one hop
+  ## deeper into the selected variable's chain and seeks there, `O` returns
+  ## the way `o` came.
+  if gSession.isNil:
+    return
+  if reverse:
+    let (moved, tick) = gOriginNav.retreat()
+    if not moved:
+      traceGesture(OriginAtQueryText)
+      return
+    try: gSession.gotoTick(tick)
+    except CatchableError as e:
+      traceGesture("origin jump failed: " & e.msg)
+      return
+    traceGesture(originNotification(gOriginNav, oqReady))
+    afterMove(r)
+    return
+  let variable = originVariable()
+  if variable.len == 0:
+    traceGesture("no variable selected — `o` acts on the variable selected " &
+                 "in the Variables pane")
+    return
+  let tick = gSession.getCurrentRRTicks()
+  if not gOriginNav.answersFor(variable, tick):
+    try:
+      gOriginNav.adopt(gSession.loadValueOrigin(variable), variable, tick)
+    except CatchableError as e:
+      traceGesture("no origin for " & variable & ": " & e.msg)
+      return
+  let (moved, step) = gOriginNav.advance()
+  if not moved:
+    traceGesture(exhaustedNotification(gOriginNav))
+    return
+  try: gSession.gotoTick(step.tick)
+  except CatchableError as e:
+    traceGesture("origin jump failed: " & e.msg)
+    return
+  traceGesture(originNotification(gOriginNav, oqReady))
+  afterMove(r)
 
 proc runWatchCommand(r: GpuiRenderer; query: string): bool =
   ## PLAT-51: `:watch EXPR`, `:unwatch EXPR`, `:watch-edit OLD -> NEW` — the
@@ -10300,6 +10483,29 @@ proc focusWindowPane(r: GpuiRenderer; pane: string) =
     setFocusable(el)
     discard focusElement(el)
 
+proc focusPaneByKeys(r: GpuiRenderer; pane: string) =
+  ## PLAT-70 Part E: a pane focused from the keyboard (`F6` / `Shift+F6`,
+  ## `layout.focus-pane(...)`), as a press on it focuses it: the element
+  ## focus, the outline shown, the arrangement redrawn.
+  gFocusShown = true
+  focusWindowPane(r, pane)
+  traceGesture("focus " & pane)
+  discard drawArrangement(r)
+
+proc cycleFocus(r: GpuiRenderer; step: int) =
+  ## `layout.focus-next-pane` / `layout.focus-previous-pane` (`F6` /
+  ## `Shift+F6`): the next pane shown in the arrangement, in its order, as
+  ## the terminal cycles its panes.
+  var shown: seq[string]
+  for n in gGeom.nodes:
+    if n.kind == gnTabs and n.panes.len > 0:
+      shown.add n.panes[n.active]
+  if shown.len == 0:
+    return
+  let at = shown.find(gFocusPane)
+  let next = if at < 0: 0 else: (at + step + shown.len) mod shown.len
+  focusPaneByKeys(r, shown[next])
+
 proc editorFocused(): bool =
   gFocusPane == $paneEditor
 
@@ -10754,6 +10960,21 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
     # PLAT-70 Part C: the find widget's field.
     findFieldOperation(r, res.operation)
     return
+  # PLAT-70 Part E: the focused Variables pane's keys — its cursor over the
+  # variables and their origin chains' hops, the row menu — by the shared
+  # rule (`runStateKey`).
+  if gFocusPane == $paneState and not gCtxMenu.open and not gOmnibar.isOpen and
+     runStateKey(r, res.operation):
+    return
+  case res.operation
+  of "editor.jump-to-value-origin", "debugger.reverse-origin":
+    walkValueOrigin(r, reverse = res.operation == "debugger.reverse-origin")
+    return
+  of ShowValueOriginOperation:
+    traceGesture("Show Value Origin works on the variable selected in the " &
+                 "Variables pane")
+    return
+  else: discard
   if res.operation.startsWith("context-menu.") and gCtxMenu.open:
     case res.operation
     of "context-menu.focus-previous": gCtxMenu.move(-1)
@@ -10819,6 +11040,10 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
       if gShell.app.stepTab(step):
         traceGesture("session tab " & $gShell.app.activeTabIndex())
     drawTopBar(r)
+    return
+  of "layout.focus-next-pane", "layout.focus-previous-pane":
+    # PLAT-70 Part E: `F6` / `Shift+F6` — the keyboard's way to a pane.
+    cycleFocus(r, (if res.operation == "layout.focus-next-pane": 1 else: -1))
     return
   of "list.focus-next", "list.focus-previous", "list.focus-first",
      "list.focus-last", "list.focus-page-down", "list.focus-page-up",
@@ -11076,17 +11301,22 @@ proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string]) =
 
 proc refreshStateOrigins() =
   ## PLAT-51: the value-origin chains open in the Variables pane, read at
-  ## THIS stop (an origin is the current value's), one line per hop.
+  ## THIS stop (an origin is the current value's), one row per hop. PLAT-70
+  ## Part E: a cursor on a hop the chain no longer has goes to its last hop,
+  ## or to the variable.
   if gSession.isNil or gSession.session.stateVM.isNil:
     return
   let vm = gSession.session.stateVM
-  var lines = initTable[string, seq[string]]()
-  for path in vm.originLines.val.keys:
+  var hops = initTable[string, seq[OriginHopRow]]()
+  for path in vm.originHops.val.keys:
     try:
-      lines[path] = gSession.loadValueOrigin(path).originHopLines
+      hops[path] = gSession.loadValueOrigin(path).originHopRows
     except CatchableError:
-      lines[path] = @[]
-  vm.originLines.val = lines
+      hops[path] = @[]
+  vm.originHops.val = hops
+  if vm.selectedHop.val >= 0:
+    vm.selectedHop.val = min(vm.selectedHop.val,
+                             hops.getOrDefault(vm.selectedPath.val).len - 1)
 
 proc historyPathAt(ticks: uint64): string =
   ## The variable whose open history holds an entry at `ticks`.
@@ -13234,7 +13464,8 @@ proc editSurfaceFor(cmd: GpuiCommand; rows: int): EditorSurface =
     return EditorSurface(medium: GpuiMedium, productMode: pmEdit,
                          report: "no source files under " & cmd.traceFolder &
                                  " (" & $listing.scanned & " entries scanned)")
-  let relative = listing.files[0]
+  # EMT-D34: the file `ct edit <file>` named, else the listing's first.
+  let relative = if cmd.editFile.len > 0: cmd.editFile else: listing.files[0]
   # THE DOCUMENT IS OPENED, NOT THE TEXT PASSED ON. One `EditingDocument`,
   # which is the same value the terminal's `EditBuffer` holds, and the surface
   # is a derivation of it.
@@ -13311,6 +13542,11 @@ proc runEdit(cmd: GpuiCommand): int =
     refreshGpuiMenuAvailability()
   if gOmnibar.isNil:
     gOmnibar = newOmnibarVM()
+  # Edit-Mode-Toolbar.md §9.4 (EMT-D33): this window's Run is the palette
+  # pair, so the omnibox lists **Project: Run** and **Project: Run in Current
+  # Tab** (with the Tests commands beside them) — a project with no Run says
+  # why there, as a lone file's folder does (EMT-D34).
+  gOmnibar.setIndex(replayOpenCommands())
   # `PLAT35-F3`: the editor pane's inner width, from the geometry this
   # window is about to be laid out at.
   gEditorSurface = surface
@@ -13382,7 +13618,12 @@ proc runEdit(cmd: GpuiCommand): int =
 proc runOpen(cmd: GpuiCommand): int =
   ## Open the recording, build the shell, draw the leaves.
   if cmd.product == pmEdit:
-    return runEdit(cmd)
+    # EMT-D34: a lone file opens its folder as the project, the file shown.
+    var edit = cmd
+    let target = editLaunchTarget(cmd.traceFolder)
+    edit.traceFolder = target.root
+    edit.editFile = target.file
+    return runEdit(edit)
   defer:
     if not gCertVm.isNil:
       gCertVm.close()
