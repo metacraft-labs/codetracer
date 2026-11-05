@@ -1881,11 +1881,6 @@ type
     editorCursorLine*: int  ## 1-indexed cursor line in the active Monaco editor; 0 = unknown
     editorCursorCol*: int   ## 1-indexed cursor column; 0 = unknown
 
-  CalltraceEditorComponent* = ref object of Component
-    loading*:   JsAssoc[cstring, bool]
-    service*:   EditorService
-    calltrace*: CalltraceService
-
   TerminalEvent* = ref object
     text*: cstring
     eventIndex*: int

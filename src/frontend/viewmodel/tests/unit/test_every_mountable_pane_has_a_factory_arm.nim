@@ -70,7 +70,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 32
+const ExpectedAssertions = 36
   ## HSF-D6: 31 -> 32. The Event Log joined the panel host: its mount-proc
   ## check became "it is a panel host kind", and its poll's absence is
   ## asserted with the others' (+1).
@@ -294,6 +294,21 @@ suite "the factory mounts every mountable pane":
     # and not in the direct-mount set.
     counted "RetiredTimelinePanel" notin arms and
             "RetiredTimelinePanel" notin directMountContents(layoutSource())
+
+  test "the Calltrace Editor is retired: no arm, no factory, still sanitised on load":
+    # Nothing ever opened it and its view drew an empty container, so the
+    # pane is removed. Ordinal 23 stays a `Content` member and is listed in
+    # `retiredContentIds`, so a saved layout naming it loses the tab instead
+    # of showing an empty pane.
+    let arms = layoutSource().dispatchArms()
+    counted "CalltraceEditor" notin arms and
+            "CalltraceEditor" notin directMountContents(layoutSource()) and
+            "CalltraceEditor" notin panelHostKinds()
+    counted not readFile("src/frontend/utils.nim").contains("CalltraceEditor")
+    let contentSource = readFile(
+      "src/common/common_types/codetracer_features/frontend.nim")
+    counted contentSource.contains("RetiredCalltraceEditorPanel = 23,")
+    counted contentSource.contains("ord(Content.RetiredCalltraceEditorPanel)]")
 
   test "the two panes of the same shape are dispatched too":
     let arms = layoutSource().dispatchArms()

@@ -27,7 +27,6 @@ import viewmodel/viewmodels/[
   agent_activity_vm,
   agent_workspace_vm,
   build_vm,
-  calltrace_editor_vm,
   calltrace_vm,
   command_palette_vm,
   debug_controls_vm,
@@ -65,7 +64,6 @@ import viewmodel/views/[
   isonim_auto_hide_overlay_tabs_view,
   isonim_auto_hide_side_strip_view,
   isonim_build_view,
-  isonim_calltrace_editor_view,
   isonim_calltrace_view,
   isonim_command_palette_view,
   isonim_debug_controls_view,
@@ -1357,13 +1355,6 @@ proc mountShell(container: isonim_dom.Element; fixture: string): DisposeProc =
     mountIsoNimShell(container, vm)
     return proc() = vm.dispose())
 
-proc mountCalltraceEditor(container: isonim_dom.Element; fixture: string): DisposeProc =
-  mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
-    let vm = createCalltraceEditorVM(store)
-    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
-      renderCalltraceEditorPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
-    return proc() = vm.dispose())
-
 proc mountTerminalOutput(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createTerminalOutputVM(store)
@@ -1687,7 +1678,6 @@ proc mountCodeTracerStory*(container: isonim_dom.Element;
     of "test-results": mountTestResults(container, f)
     of "build": mountBuild(container, f)
     of "calltrace": mountCalltrace(container, f)
-    of "calltrace-editor": mountCalltraceEditor(container, f)
     of "command-palette": mountCommandPalette(container, f)
     of "debug-controls": mountDebugControls(container, f)
     of "editor": mountEditor(container, f)

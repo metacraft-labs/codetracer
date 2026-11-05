@@ -279,28 +279,6 @@ proc currentLine*(data: Data): int =
   data.services.debugger.location.line
 
 
-proc openCallViewer*(panel: GoldenContentItem, path: cstring, name: cstring, editorView: EditorView, lang: Lang) =
-  let tab = GoldenLayoutConfig(
-    `type`: cstring"component",
-    componentName: cstring"genericUiComponent",
-    componentState: GoldenItemState(
-      id: 0,
-      label: cstring"calls",
-      content: Content.CalltraceEditor,
-      fullPath: cstring"",
-      name: cstring"calls",
-      editorView: editorView,
-      lang: lang,
-      isEditor: false
-    ) # calltrace of editors, not editor
-  )
-
-  let resolvedConfig = data.ui.contentItemConfig.resolve(tab)
-
-  let contentItem = data.ui.layout.createAndInitContentItem(resolvedConfig, panel)
-  discard panel.addChild(contentItem)
-
-
 func isReviewDatasetSession*(data: Data): bool =
   ## Is this window a review opened from an exported dataset?
   ##

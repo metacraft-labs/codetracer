@@ -133,7 +133,7 @@ kind_for() {
 	Debug | Build | BuildErrors | Status | SearchResults | Menu) echo "both" ;;
 	WelcomeScreen | CommandPalette | NoInfo | EditorView) echo "both" ;;
 	EventLog | State | Calltrace | Filesystem) echo "both" ;;
-	Scratchpad | Repl | TraceLog | CalltraceEditor) echo "both" ;;
+	Scratchpad | Repl | TraceLog) echo "both" ;;
 	TerminalOutput | Shell | StepList | LowLevelCode) echo "both" ;;
 	AgentActivity | AgentWorkspace | CaptionBarProgress) echo "both" ;;
 	PixelHistory | ShaderDebug | VideoPlayer) echo "both" ;;
@@ -378,7 +378,7 @@ done
 stale=0
 for pane in Debug Build BuildErrors Status SearchResults Menu WelcomeScreen \
 	CommandPalette NoInfo EditorView EventLog State Calltrace \
-	Filesystem Scratchpad Repl TraceLog CalltraceEditor TerminalOutput Shell \
+	Filesystem Scratchpad Repl TraceLog TerminalOutput Shell \
 	StepList LowLevelCode AgentActivity AgentWorkspace CaptionBarProgress \
 	PixelHistory ShaderDebug VideoPlayer AgentActivityDeepReview RequestPanel \
 	VCS UnifiedDiff Constraints TestResults Verification PointList; do

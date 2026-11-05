@@ -133,7 +133,7 @@ when defined(js):
     ContentCalltrace = 6
     ContentFilesystem = 9
     ContentTraceLog = 22
-    ContentCalltraceEditor = 23
+    ContentRetiredCalltraceEditorPanel = 23
     ContentTerminalOutput = 24
     ContentNoInfo = 34
     ContentAgentActivity = 35
@@ -143,7 +143,7 @@ when defined(js):
       ContentState,
       ContentCalltrace,
       ContentTraceLog,
-      ContentCalltraceEditor,
+      ContentRetiredCalltraceEditorPanel,
       ContentTerminalOutput,
       ContentAgentActivity
     ]
@@ -180,7 +180,7 @@ when defined(js):
     var replayOnly: seq[js] = @[]
     for hiddenContent in EditModeHiddenContents:
       if hiddenContent != ContentState and
-          hiddenContent != ContentCalltraceEditor and
+          hiddenContent != ContentRetiredCalltraceEditorPanel and
           hiddenContent != ContentTerminalOutput:
         replayOnly.add genericTab(hiddenContent, cstring"REPLAY PANEL")
     js{
@@ -192,7 +192,7 @@ when defined(js):
             genericTab(ContentState, cstring"STATE")]),
           stackOf(2, @[
             editorTab(cstring"main.rb"),
-            genericTab(ContentCalltraceEditor, cstring"CALLS"),
+            genericTab(ContentRetiredCalltraceEditorPanel, cstring"CALLS"),
             genericTab(ContentNoInfo, cstring"NO SOURCE"),
             genericTab(ContentTerminalOutput, cstring"OUTPUT")]),
           stackOf(0, replayOnly)
@@ -476,7 +476,7 @@ else:
         "Content.Trace",
         "Content.State",
         "Content.Calltrace",
-        "Content.CalltraceEditor",
+        "Content.RetiredCalltraceEditorPanel",
         "Content.TraceLog",
         "Content.AgentActivity",
         "Content.TerminalOutput"

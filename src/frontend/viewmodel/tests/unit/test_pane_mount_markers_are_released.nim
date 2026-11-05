@@ -83,9 +83,9 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 35
+const ExpectedAssertions = 33
   ## The directory guard, the empty-scan assertion, three predicate controls,
-  ## and two per panel-host pane (15 x 2).
+  ## and two per panel-host pane (14 x 2).
 
 const UiDir = "src/frontend/ui"
 
@@ -94,7 +94,6 @@ const PanelHostPanes = [
   ## one before; a marker reappearing in one is the defect coming back.
   "agent_activity",
   "agent_workspace",
-  "calltrace_editor",
   "command",
   "constraints",
   "filesystem",

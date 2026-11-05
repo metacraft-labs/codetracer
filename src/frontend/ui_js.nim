@@ -33,7 +33,7 @@ import
       state, calltrace, menu, status,
       debug_toolbar, flow, filesystem, vcs, value, repl,
       build, errors, search_results, welcome_screen, scratchpad,
-      trace_log, calltrace_editor, terminal_output, shell,
+      trace_log, terminal_output, shell,
       no_source, ui_imports, shortcuts, chord_display, step_list,
       request_panel, session_switch, tab_answer_routing, session_tabs, command, frame_viewer,
       pixel_history, shader_debug, video_player, agentic_session_launcher],

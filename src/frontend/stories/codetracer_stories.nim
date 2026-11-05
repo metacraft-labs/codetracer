@@ -278,7 +278,6 @@ func panelsSection(): CodeTracerStorySection =
       panel("AgentWorkspace", "Agent Workspace", "agent-workspace"),
       panel("Build", "Build", "build"),
       panel("Calltrace", "Calltrace", "calltrace"),
-      panel("CalltraceEditor", "Calltrace Editor", "calltrace-editor"),
       panel("CommandPalette", "Command Palette", "command-palette"),
       panel("DebugControls", "Debug Controls", "debug-controls"),
       panel("LiveMcrDebugControls", "Live MCR Debug Controls",

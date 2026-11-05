@@ -884,15 +884,6 @@ proc makeReplComponent*(data: Data, id: int): ReplComponent =
   when defined(ctRenderer):
     data.registerComponent(result, Content.Repl)
 
-proc makeCalltraceEditorComponent*(data: Data, id: int): CalltraceEditorComponent =
-  result = CalltraceEditorComponent(
-    id: id,
-    loading: JsAssoc[cstring, bool]{},
-    service: data.services.editor,
-    calltrace: data.services.calltrace)
-  when defined(ctRenderer):
-    data.registerComponent(result, Content.CalltraceEditor)
-
 proc makeTerminalOutputComponent*(data: Data, id: int): TerminalOutputComponent =
   result = TerminalOutputComponent(
     id: id,
@@ -1095,7 +1086,6 @@ proc makeComponent*(data: Data, content: Content, id: int, path: cstring = "", n
   of Content.TraceLog:        data.makeTraceLogComponent(id)
   of Content.TestResults:     data.makeTestResultsComponent(id)
   of Content.Constraints:     data.makeConstraintsComponent(id)
-  of Content.CalltraceEditor: data.makeCalltraceEditorComponent(id)
   of Content.TerminalOutput:  data.makeTerminalOutputComponent(id)
   of Content.Shell:           data.makeShellComponent(id)
   of Content.StepList:        data.makeStepListComponent(id)

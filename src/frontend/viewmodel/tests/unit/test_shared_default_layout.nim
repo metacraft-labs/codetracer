@@ -183,6 +183,16 @@ suite "PLAT-45 deliverable 1 — the vocabulary covers the desktop's default":
         ck paneOfContent(c).isSome
     ck retired == 1
 
+  test "the retired Calltrace Editor (23) is no pane and is sanitised from a saved layout":
+    # The pane was removed (nothing opened it and it drew an empty
+    # container). A saved GoldenLayout config naming ordinal 23 must lose
+    # the tab on load: `index/config.dropRetiredPanels` drops exactly
+    # `retiredContentIds()`.
+    ck ord(Content.RetiredCalltraceEditorPanel) == 23
+    ck 23 in retiredContentIds()
+    ck paneOfContent(23).isNone
+    ck ord(Content.RetiredTimelinePanel) in retiredContentIds()
+
   test "the table is one-to-one onto Content ordinals, and inverts":
     var seen = initHashSet[int]()
     var rows = 0
