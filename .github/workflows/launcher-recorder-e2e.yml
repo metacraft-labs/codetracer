@@ -701,23 +701,23 @@ jobs:
             # src/io_mon/depfile.nim).
             # runquota is locked as a `follows` of reprobuild's `runquota-src`;
             # the pin below is that node's rev.
-            io-mon=3d47bb105fec11d74078ae35a5278b4df14e05c8
+            io-mon=e66e05c9471ce184e9a3b0d793b2db62ca5557b9
             nim-shm-queue=84fd76b174d4868e703ba3d599668ee340e0b6ea
-            nim-shm-gset=6333cc915689559b00f81371734783c2e894ca45
+            nim-shm-gset=953bd231a022243fcee96092234d7cf80f7042b0
             nim-stackable-hooks=d715806424e8373708494913e59a48237978cc2a
             # Pinned to flake.lock's revs. See "THE FLAKE-INPUT THREE" above
             # before changing any of these. isonim-tui is in codetracer's
             # repro.lock since 6850efc5e, and took the SHA shape because the
             # recorder repos' lock records these edges also resolve did not
             # carry it. They do now; going bare is a separate change.
-            isonim=239e39febd3a5a2b9810cabb5915ce6c6b8ee291
+            isonim=6a72640a17341b9d8cd64c5d58093516707a7ae9
             isonim-tui=ff295f7be6d7efc095ef4d249b1df0577d969c89
             runquota=9818dc0c90be8ba7993424a7bbfbb6e009ffa965
             # Required by scripts/require-siblings.sh (`ct` links its reference
             # library). SHA, not bare: this workflow is also called from recorder
             # repos, whose repro.lock need not pin it. It is a flake input, so the
             # SHA is the one flake.lock pins.
-            test-certificates-tools=9864082065c8acb1db315e65a6a4157a3ab77117
+            test-certificates-tools=4b395de551d86c745d6eb8ebf7c7228df25298f5
 
       - name: Check the workspace has the shape the driver expects
         # Cheap, and it turns the one class of failure a local rehearsal cannot
