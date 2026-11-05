@@ -78,6 +78,21 @@ test-dev-shell-rust-unwinds:
 test-dev-shell-pythonpath:
   bash ci/test/dev-shell-pythonpath-test.sh
 
+# Assert that the default dev shell builds with the Python recorder flake's own
+# trace-format-nim pinned before the writer FFI the root pair's Rust calls, so
+# the recorder links a writer from the same pair as its Rust. Runs `nix build`
+# of the shell, so it is slow and not part of the in-shell suites. See the
+# header of ci/test/dev-shell-python-recorder-ffi-pair-test.sh.
+test-dev-shell-python-recorder-ffi-pair:
+  bash ci/test/dev-shell-python-recorder-ffi-pair-test.sh
+
+# Assert that the `codex-acp` the default dev shell puts on PATH starts and
+# answers an ACP `initialize`, i.e. that it finds its libssl/libcrypto. Runs
+# `nix develop`, so it is slow and not part of the in-shell suites. See the
+# header of ci/test/dev-shell-codex-acp-test.sh.
+test-dev-shell-codex-acp:
+  bash ci/test/dev-shell-codex-acp-test.sh
+
 # Assert that build-once.sh sources the cached dev-shell profile (and so runs
 # its shellHook) inside this repository, not in the directory it is invoked
 # from. Runs the real script against a stub profile; no toolchain, a second.
@@ -869,15 +884,12 @@ storybook-stories:
 isonim-editor-codetracer *args:
   bash scripts/isonim-editor-codetracer.sh "$@"
 
+# The compile is a script, not a recipe body, so `ci/test/stale-artefact-guards-test.sh`
+# can run the stamp against a stub `nim`. The stamp is what lets the bundle read as
+# fresh when nim wrote the same bytes and left its mtime alone; see the header of
+# scripts/build-storybook-components.sh.
 build-storybook-components: storybook-stories
-  mkdir -p storybook/dist
-  nim \
-    -d:chronicles_enabled=off \
-    -d:ctRenderer \
-    --path:../nim-everywhere/src \
-    --hints:off \
-    --out:storybook/dist/components.js \
-    js src/frontend/storybook_components.nim
+  bash scripts/build-storybook-components.sh
 
 # Install `storybook/node_modules` from the committed lockfile.
 #
@@ -1038,6 +1050,9 @@ test-rust:
   # developer's profile. Not a `.cargo/config.toml` [env]: that would move a
   # developer's own `cargo run` too.
   source ci/lib/codetracer-home.sh
+  # On Linux the recipe runs again inside a sandbox over the user's state, so
+  # only its own writes can fail it (ci/lib/codetracer-home.sh).
+  ct_user_state_stage_sandbox rust-tests bash "$0" || :
   ct_export_scratch_codetracer_home rust-tests
   trap '_ct_rc=$?; report_skips; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}; ct_user_state_guard_exit rust-tests "$_ct_rc"' EXIT
   # The resolver itself (both sides of the CODETRACER_HOME contract).
@@ -1204,6 +1219,9 @@ test-python-api:
   #!/usr/bin/env bash
   set -euo pipefail
   source ci/lib/codetracer-home.sh
+  # On Linux the recipe runs again inside a sandbox over the user's state, so
+  # only its own writes can fail it (ci/lib/codetracer-home.sh).
+  ct_user_state_stage_sandbox python-api bash "$0" || :
   ct_export_scratch_codetracer_home python-api
   trap '_ct_rc=$?; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}; ct_user_state_guard_exit python-api "$_ct_rc"' EXIT
   cd python-api
@@ -1937,6 +1955,9 @@ test-acp-notifications:
   #!/usr/bin/env bash
   set -euo pipefail
   source ci/lib/codetracer-home.sh
+  # On Linux the recipe runs again inside a sandbox over the user's state, so
+  # only its own writes can fail it (ci/lib/codetracer-home.sh).
+  ct_user_state_stage_sandbox acp-notifications bash "$0" || :
   ct_export_scratch_codetracer_home acp-notifications
   notification_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-acp-notifications.XXXXXX.js")"
   sessions_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-acp-sessions.XXXXXX.js")"
@@ -1964,6 +1985,9 @@ test-frontend-js:
   # trace index or recordings. The JS backend has no force-imported isolation
   # module, so this recipe is where the variable comes from.
   source ci/lib/codetracer-home.sh
+  # On Linux the recipe runs again inside a sandbox over the user's state, so
+  # only its own writes can fail it (ci/lib/codetracer-home.sh).
+  ct_user_state_stage_sandbox frontend-js bash "$0" || :
   ct_export_scratch_codetracer_home frontend-js
   nim_sourcemap_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-nim-sourcemap-test.XXXXXX.js")"
   frontend_lang_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-frontend-lang-test.XXXXXX.js")"

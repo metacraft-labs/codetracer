@@ -8,7 +8,7 @@
 ##    the per-trace editor tabs from every stack on **every replay-mode save**
 ##    but never remaps the enclosing stack's ``activeItemIndex``.  Mixed
 ##    stacks are the normal case — "NO SOURCE" (``Content.NoInfo``) and
-##    "CALLS" (``Content.CalltraceEditor``) both live in the editor stack — so
+##    "CALLS" (ordinal 23, the retired ``Content.RetiredCalltraceEditorPanel``) both live in the editor stack — so
 ##    the written file routinely holds an index past the end of the surviving
 ##    tabs.  GoldenLayout validates it in ``Stack.init``
 ##    (``golden-layout/src/ts/items/stack.ts:169-171``) and throws
@@ -61,7 +61,7 @@ when defined(js):
     ContentEventLog = 8
     ContentFilesystem = 9
     ContentState = 4
-    ContentCalltraceEditor = 23
+    ContentRetiredCalltraceEditorPanel = 23
     ContentNoInfo = 34
 
   proc jsonParse(raw: cstring): js {.importjs: "JSON.parse(#)".}
@@ -116,8 +116,8 @@ when defined(js):
     js{"root": js{"type": cstring"row", "content": children}}
 
   ## The layout an ordinary replay session produces: the editor stack holds
-  ## two source tabs plus the "CALLS" tab (``openCallViewer`` adds
-  ## ``Content.CalltraceEditor`` into ``editorPanels[ViewSource]``), and the
+  ## two source tabs plus the "CALLS" tab (a pre-removal layout carries
+  ## ordinal 23 in the editor stack), and the
   ## user left an editor tab active.  Alongside it sit the Filesystem and
   ## event-log stacks.
   proc mixedEditorStackLayout(activeItemIndex: int): js =
@@ -126,7 +126,7 @@ when defined(js):
       stackOf(activeItemIndex, @[
         editorTab(cstring"a.nim"),
         editorTab(cstring"b.nim"),
-        genericTab(ContentCalltraceEditor, cstring"CALLS")]),
+        genericTab(ContentRetiredCalltraceEditorPanel, cstring"CALLS")]),
       stackOf(0, @[genericTab(ContentEventLog, cstring"EVENTS")])
     ])
 
@@ -145,7 +145,7 @@ when defined(js):
         mixedEditorStackLayout(2), ContentEditorView, @[])
       let stack = firstStack(saved["root"]["content"][1])
 
-      check contentIds(stack) == @[ContentCalltraceEditor]
+      check contentIds(stack) == @[ContentRetiredCalltraceEditorPanel]
       check stack["activeItemIndex"].to(int) < jsLen(stack["content"])
       # It must point AT the surviving CALLS tab, not merely be in range.
       check stack["activeItemIndex"].to(int) == 0
@@ -166,13 +166,13 @@ when defined(js):
       ## survivors are kept, so the active tab must still be NO SOURCE — at
       ## its new index 1.
       let layout = rowOf(@[stackOf(2, @[
-        genericTab(ContentCalltraceEditor, cstring"CALLS"),
+        genericTab(ContentRetiredCalltraceEditorPanel, cstring"CALLS"),
         editorTab(cstring"a.nim"),
         genericTab(ContentNoInfo, cstring"NO SOURCE")])])
       let saved = sanitizeLayoutConfig(layout, ContentEditorView, @[])
       let stack = firstStack(saved)
 
-      check contentIds(stack) == @[ContentCalltraceEditor, ContentNoInfo]
+      check contentIds(stack) == @[ContentRetiredCalltraceEditorPanel, ContentNoInfo]
       check stack["activeItemIndex"].to(int) == 1
       check contentIds(stack)[stack["activeItemIndex"].to(int)] ==
         ContentNoInfo
@@ -182,13 +182,13 @@ when defined(js):
       ## removed, so the selection moves to the nearest survivor on its
       ## right, the way a tab strip behaves when you close the active tab.
       let layout = rowOf(@[stackOf(1, @[
-        genericTab(ContentCalltraceEditor, cstring"CALLS"),
+        genericTab(ContentRetiredCalltraceEditorPanel, cstring"CALLS"),
         editorTab(cstring"a.nim"),
         genericTab(ContentNoInfo, cstring"NO SOURCE")])])
       let saved = sanitizeLayoutConfig(layout, ContentEditorView, @[])
       let stack = firstStack(saved)
 
-      check contentIds(stack) == @[ContentCalltraceEditor, ContentNoInfo]
+      check contentIds(stack) == @[ContentRetiredCalltraceEditorPanel, ContentNoInfo]
       check stack["activeItemIndex"].to(int) == 1
       check contentIds(stack)[stack["activeItemIndex"].to(int)] ==
         ContentNoInfo
@@ -198,7 +198,7 @@ when defined(js):
       ## of the active tab, so the index must be clamped rather than left
       ## pointing past the end.
       let layout = rowOf(@[stackOf(2, @[
-        genericTab(ContentCalltraceEditor, cstring"CALLS"),
+        genericTab(ContentRetiredCalltraceEditorPanel, cstring"CALLS"),
         editorTab(cstring"a.nim"),
         editorTab(cstring"b.nim")])])
       let saved = sanitizeLayoutConfig(layout, ContentEditorView, @[])
@@ -213,7 +213,7 @@ when defined(js):
       ## would grow every saved layout for no benefit.
       let layout = rowOf(@[stackOf(-1, @[
         editorTab(cstring"a.nim"),
-        genericTab(ContentCalltraceEditor, cstring"CALLS")])])
+        genericTab(ContentRetiredCalltraceEditorPanel, cstring"CALLS")])])
       let saved = sanitizeLayoutConfig(layout, ContentEditorView, @[])
       let stack = firstStack(saved)
 
@@ -391,7 +391,7 @@ when defined(js):
       let good = rowOf(@[
         stackOf(0, @[genericTab(ContentFilesystem, cstring"FILES")]),
         stackOf(1, @[
-          genericTab(ContentCalltraceEditor, cstring"CALLS"),
+          genericTab(ContentRetiredCalltraceEditorPanel, cstring"CALLS"),
           genericTab(ContentEventLog, cstring"EVENTS")])])
       let before = $jsonStringify(good)
       let repaired = repairLayoutConfig(clone(good))

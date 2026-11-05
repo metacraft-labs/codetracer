@@ -68,6 +68,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # shellcheck source=ci/lib/codetracer-home.sh
 # shellcheck disable=SC1091 # resolved at runtime from $REPO_ROOT
 source "$REPO_ROOT/ci/lib/codetracer-home.sh"
+# On Linux the run happens again inside a sandbox over the user's state, so
+# only its own writes can fail it (ci/lib/codetracer-home.sh). Elsewhere the
+# call returns and the comparison in the EXIT trap is the guard.
+ct_user_state_stage_sandbox cross-repo bash "$0" "$@" || :
 ct_export_scratch_codetracer_home cross-repo
 # Remove the home this run made, and only that (`ct_scratch_home_created` is
 # empty when an inherited scratch home was kept), however the run ends: the

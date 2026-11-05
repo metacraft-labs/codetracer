@@ -5,7 +5,7 @@ import
   # Panes the component factory below creates; their views are mounted by
   # the panel host (`ui/panel_host`).
   trace, event_log, terminal_output,
-  calltrace_editor, repl, request_panel, trace_log, scratchpad, filesystem,
+  repl, request_panel, trace_log, scratchpad, filesystem,
   test_results, constraints,
   frame_viewer, pixel_history, shader_debug, video_player,
   vcs, unified_diff, verification,
@@ -1887,7 +1887,6 @@ proc mountPaneForState(state: GoldenItemState; host: Element = nil) =
       Content.CaptionBarProgress,
       Content.TerminalOutput,
       Content.StepList,
-      Content.CalltraceEditor,
       Content.Repl,
       Content.LowLevelCode,
       Content.RequestPanel,

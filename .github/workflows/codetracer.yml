@@ -1704,6 +1704,17 @@ jobs:
       - name: The dev shells' PYTHONPATH carries the declared Python only
         run: nix develop .#devShells.x86_64-linux.default --command just test-dev-shell-pythonpath
 
+      # The dev shell's Python recorder links a trace writer from the same
+      # trace-format pair as its Rust, whatever the recorder flake pins: the
+      # header of ci/test/dev-shell-python-recorder-ffi-pair-test.sh.
+      - name: The dev shell's Python recorder links its own trace-format pair
+        run: nix develop .#devShells.x86_64-linux.default --command just test-dev-shell-python-recorder-ffi-pair
+
+      # The dev shell's codex-acp starts and answers an ACP initialize: the
+      # header of ci/test/dev-shell-codex-acp-test.sh.
+      - name: The dev shell's codex-acp starts and answers initialize
+        run: nix develop .#devShells.x86_64-linux.default --command just test-dev-shell-codex-acp
+
       # build-once.sh sources the cached dev-shell profile with THIS repository
       # as its working directory: scripts/test-build-once-profile-cwd.sh.
       - name: build-once prepares this checkout, whatever directory it runs from

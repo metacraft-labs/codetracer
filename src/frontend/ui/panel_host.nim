@@ -43,7 +43,7 @@ from ../viewmodel/store/replay_data_store import nil
 import ../viewmodel/views/[isonim_calltrace_view, isonim_state_view,
                             isonim_low_level_code_view,
                             isonim_point_list_view, isonim_step_list_view,
-                            isonim_calltrace_editor_view, isonim_build_view,
+                            isonim_build_view,
                             isonim_errors_view, isonim_scratchpad_view,
                             isonim_repl_view, isonim_filesystem_view,
                             isonim_command_palette_view]
@@ -56,7 +56,7 @@ const
   PanelHostKinds* = {Content.Calltrace, Content.State, Content.LowLevelCode,
                      Content.PixelHistory, Content.ShaderDebug,
                      Content.VideoPlayer, Content.PointList,
-                     Content.StepList, Content.CalltraceEditor,
+                     Content.StepList,
                      Content.Build, Content.BuildErrors,
                      Content.SearchResults, Content.TraceLog,
                      Content.TerminalOutput, Content.AgentWorkspace,
@@ -180,10 +180,6 @@ proc render(m: PanelMount; session: SessionViewModel) =
     of Content.StepList:
       let panel = renderStepListPanel[WebRenderer, dom_api.Element](
         r, session.stepListVM)
-      dom_api.appendChild(node, dom_api.Node(panel))
-    of Content.CalltraceEditor:
-      let panel = renderCalltraceEditorPanel[WebRenderer, dom_api.Element](
-        r, session.calltraceEditorVM)
       dom_api.appendChild(node, dom_api.Node(panel))
     of Content.Build:
       let panel = renderBuildPanel[WebRenderer, dom_api.Element](

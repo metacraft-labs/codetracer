@@ -395,7 +395,8 @@ proc record(
     traceKind: string = "db", rrSupportPath: string = "",
     pythonInterpreter: string = "", pythonActivationPath: string = "", pythonWithDiff: bool = false,
     pythonTestFramework: string = "", pythonTestArgs: seq[string] = @[],
-    server: bool = false, noirTestName: string = ""): Trace =
+    server: bool = false, noirTestName: string = "",
+    recognizedLang: Option[Lang] = none(Lang)): Trace =
   var traceID: string
   if traceIDRecord == NO_RECORDING_ID:
     traceID = trace_index.newID(test)
@@ -437,8 +438,15 @@ proc record(
       else:
         executable = foundExe
 
-  # For test framework mode, use the explicitly set langArg
-  let lang = if pythonTestFramework.len > 0: langArg else: detectLang(executable, langArg)
+  # For test framework mode, use the explicitly set langArg.  `ct record`
+  # already recognized the target when it passes `--recognized-lang`
+  # (`trace/record_lang_forwarding.nim`): use that answer, `LangUnknown`
+  # included, instead of recognizing the same file again.  It is not an
+  # explicit language: `languageWasExplicit` below still reads `langArg` only.
+  let lang =
+    if pythonTestFramework.len > 0: langArg
+    elif langArg == LangUnknown and recognizedLang.isSome: recognizedLang.get
+    else: detectLang(executable, langArg)
   # echo "in db ", lang, " ", executable
   # LRS-5: an ISA the user stated is enough on its own.  A PolkaVM blob and a
   # Solana program have NO source language to detect -- no extension in
@@ -640,6 +648,7 @@ proc main*(): Trace =
   # Empty means "to be assigned" (newID() is called below).
   var traceID: string = ""
   var lang: Lang = LangUnknown
+  var recognizedLang = none(Lang)
 
   var isExported = false
   var cleanupOutputFolder = false
@@ -705,6 +714,20 @@ proc main*(): Trace =
         quit(1)
       lang = toLang(args[i + 1])
       isaOverride = targetIsaSpelling(args[i + 1])
+      i += 2
+    elif arg == "--recognized-lang":
+      # Internal: `ct record` ran recognition and passes its answer, a
+      # `--lang` spelling or `unknown` (`trace/record_lang_forwarding.nim`).
+      if args.len < i + 2:
+        displayHelp()
+        return
+      if args[i + 1] == "unknown":
+        recognizedLang = some(LangUnknown)
+      elif isKnownLangSpelling(args[i + 1]) and toLang(args[i + 1]) != LangUnknown:
+        recognizedLang = some(toLang(args[i + 1]))
+      else:
+        stderr.writeLine("db-backend-record: --recognized-lang names no language: " & args[i + 1])
+        quit(1)
       i += 2
     elif arg == "--backend":
       if args.len() < i + 2:
@@ -879,7 +902,8 @@ proc main*(): Trace =
       pythonTestFramework=pythonTestFramework,
       pythonTestArgs=pythonTestArgs,
       server=server,
-      noirTestName=noirTestName)
+      noirTestName=noirTestName,
+      recognizedLang=recognizedLang)
     traceId = trace.recordingId
     outputFolder = trace.outputFolder
 

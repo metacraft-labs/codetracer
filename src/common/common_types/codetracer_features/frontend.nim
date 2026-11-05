@@ -444,7 +444,14 @@ type
     SearchResults = 20,
     BuildErrors = 21,
     TraceLog = 22,
-    CalltraceEditor = 23,
+    ## Ordinal 23 was `CalltraceEditor`, a pane meant to frame nested per-call
+    ## editors. Nothing ever opened it (`openCallViewer` had no caller) and its
+    ## view drew an empty container, so it is REMOVED. Retired like
+    ## `RetiredTimelinePanel` (19): the member stays so `Content` remains
+    ## contiguous, it has no `makeComponent` arm, and a saved GoldenLayout
+    ## config naming it is sanitised on load (`retiredContentIds`). Do not
+    ## reuse the ordinal.
+    RetiredCalltraceEditorPanel = 23,
     TerminalOutput = 24,
     Shell = 25,
     WelcomeScreen = 26,
@@ -649,7 +656,8 @@ proc retiredContentIds*(): seq[int] =
   ## stack's active tab kept in range, a stack left empty removed), so a
   ## user's remembered layout opens WITHOUT the panel rather than with an
   ## empty tab (Layout-System.md, "The Timeline panel is removed").
-  @[ord(Content.RetiredTimelinePanel), ord(Content.RetiredDeepReviewPanel)]
+  @[ord(Content.RetiredTimelinePanel), ord(Content.RetiredDeepReviewPanel),
+    ord(Content.RetiredCalltraceEditorPanel)]
 
 proc editModeHiddenContentIds*(): seq[int] =
   ## The replay-only panes an EDITING session does not show.
@@ -679,7 +687,7 @@ proc editModeHiddenContentIds*(): seq[int] =
     ord(Content.TerminalOutput),
     ord(Content.StepList),
     ord(Content.Calltrace),
-    ord(Content.CalltraceEditor),
+    ord(Content.RetiredCalltraceEditorPanel),
     ord(Content.TraceLog),
     ord(Content.AgentActivity),
     ord(Content.AgentActivityDeepReview),

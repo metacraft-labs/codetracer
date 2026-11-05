@@ -597,7 +597,17 @@ ifeq (@(TUP_PLATFORM),win32)
     cargo build --locked $(RUST_WINDOWS_LINKER_CONFIG) $(DB_BACKEND_CARGO_FEATURES) --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \
     cp $(CARGO_TARGET_BASE)/db_backend_target/debug/replay-server$(EXE_SUFFIX) %1o && \
     cp $(CARGO_TARGET_BASE)/db_backend_target/debug/mcr_emulator.dll %2o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
-else
+endif
+ifeq (@(TUP_PLATFORM),linux)
+# The emulator library travels with the binary, which searches its own directory
+# first (src/db-backend/build.rs): the target directory is machine-wide, and
+# another checkout's build rewrites the copy in it.
+!debug_rust_cargo_db_backend = |> \
+    cargo build --locked $(RUST_WINDOWS_LINKER_CONFIG) $(DB_BACKEND_CARGO_FEATURES) --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \
+    cp $(CARGO_TARGET_BASE)/db_backend_target/debug/replay-server$(EXE_SUFFIX) %1o && \
+    cp $(CARGO_TARGET_BASE)/db_backend_target/debug/libmcr_emulator.so %2o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
+endif
+ifeq (@(TUP_PLATFORM),macosx)
 !debug_rust_cargo_db_backend = |> \
     cargo build --locked $(RUST_WINDOWS_LINKER_CONFIG) $(DB_BACKEND_CARGO_FEATURES) --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \
     cp $(CARGO_TARGET_BASE)/db_backend_target/debug/replay-server$(EXE_SUFFIX) %o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)

@@ -531,14 +531,12 @@ proc detectTarget*(program: string,
     # parse.  Recognition falling through to `LangUnknown` is then the caller's
     # existing, actionable error path rather than an invisible downgrade.
     #
-    # ⚠ Only THIS process's copy lands on stderr.  Q7's measured double spawn
-    # means `db-backend-record` recognizes again in its own process, and
-    # `recordInternal` starts it with `poStdErrToStdOut` and relays every line
-    # to `ct`'s STDOUT (`../trace/record.nim`), so a user sees the same warning
-    # once per stream.  Nothing breaks — the marker parser scans every line for
-    # the `recordingId:` prefix rather than reading the last one — but stdout is
-    # TOLERATED, not clean, and it stops being so only when the recognition
-    # result is passed across the process boundary instead of recomputed.
+    # Only THIS process recognizes a native target: `ct record` passes its
+    # answer, `unknown` included, to `db-backend-record` as
+    # `--recognized-lang` (`../trace/record_lang_forwarding.nim`), which then
+    # does not recognize again. Before that, `db-backend-record` recognized in
+    # its own process too, and `recordInternal` relays its stderr to `ct`'s
+    # STDOUT (`poStdErrToStdOut`), so a user saw this warning once per stream.
     for line in decision.lines:
       stderr.writeLine(line)
   of rdLanguage, rdNoLanguage:

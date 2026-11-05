@@ -38,7 +38,10 @@ proc fixtureGit(root: string; args: varargs[string]): string =
     raise newException(IOError, "fixture git " & args.join(" ") &
       " exited " & $code & ": " & result)
 
-const ExpectedAssertions = when defined(windows): 13 else: 15
+const ExpectedAssertions =
+  when defined(windows): 13
+  elif defined(linux): 17
+  else: 15
 var checks = 0
 template ck(condition: untyped) =
   inc checks
@@ -128,6 +131,25 @@ suite "replay-server prerequisite revision":
     discard fixtureGit(other, "add", ".")
     ck replaySourceFingerprint(other).len > 0
     ck "stale replay-server" in replayServerRevisionProblem(real, other)
+
+when defined(linux):
+  suite "the replay-server's emulator library":
+    test "it loads the copy beside the binary, not the shared build directory's":
+      # The default cargo target is machine-wide, so the copy in it belongs to
+      # whichever checkout built last. A server that resolves its emulator
+      # there can fail to start while another checkout relinks the library,
+      # or load that checkout's emulator without a word.
+      let real = findReplayServerIn(codetracerCheckoutRoot())
+      if real.len == 0:
+        raise newException(IOError, "prerequisite missing: " & missingReplayServerMessage())
+      let (listing, code) = execCmdEx("ldd " & quoteShell(real))
+      checkpoint(listing)
+      var resolved = ""
+      for line in listing.splitLines():
+        if "libmcr_emulator.so =>" in line:
+          resolved = line.split("=>")[1].strip().split(" ")[0]
+      ck code == 0
+      ck resolved.parentDir == real.expandFilename.parentDir
 
 suite "assertion tally":
   test "every assertion ran":

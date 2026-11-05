@@ -21,6 +21,14 @@
 ## A session on the recording replays it through `ct-native-replay`, which
 ## `replay-server` finds through `CODETRACER_CT_NATIVE_REPLAY_CMD`: resolving
 ## the recording sets it for this process and its children.
+##
+## On a hybrid Intel CPU it also confines this process and its children to the
+## performance cores, because rr counts branches on the core PMU only: a stock
+## rr that lands on an efficiency core dies with "Got 0 branch events, expected
+## at least 500". Measured 2026-11-05 on an i9-12900K with rr 5.9.0, ten runs
+## each: unconfined 5 passed and 5 failed, performance cores 10 of 10, efficiency
+## cores 0 of 10. So the fixture failed at random, by which core rr chose, on a
+## host whose counters work.
 
 import std/[hashes, os, osproc, strutils, times]
 
@@ -61,9 +69,33 @@ proc rrAvailable(): bool =
   except OSError:
     false
 
+when defined(linux):
+  type CpuMask = array[128, uint64]
+
+  proc schedSetAffinity(pid: cint; size: csize_t; mask: ptr CpuMask): cint
+    {.importc: "sched_setaffinity", cdecl.}
+
+proc preferPerformanceCores() =
+  ## Nothing on a CPU with one kind of core: the kernel publishes `cpu_core`
+  ## only on a hybrid one. Children inherit the mask, and the rr that replays
+  ## runs below `replay-server` below this process, so this covers record and
+  ## replay alike.
+  when defined(linux):
+    const CoreList = "/sys/devices/cpu_core/cpus"
+    if not fileExists(CoreList): return
+    var mask: CpuMask
+    for part in readFile(CoreList).strip().split(','):
+      let bounds = part.split('-')
+      let first = parseInt(bounds[0])
+      for cpu in first .. parseInt(bounds[^1]):
+        mask[cpu div 64] = mask[cpu div 64] or (1'u64 shl (cpu mod 64))
+    if schedSetAffinity(0, csize_t(sizeof(mask)), addr mask) != 0:
+      raise newOSError(osLastError(), "confining the rr fixture to " & CoreList)
+
 proc nativeRecording*(): NativeRecording =
   ## The rr recording of the sudoku solver, recorded now unless this
   ## checkout's cache holds one for the same program and recorder.
+  preferPerformanceCores()
   let source = nativeTestPrograms() / "c" / "sudoku_solver" / "main.c"
   result.sourcePath = source
   if not fileExists(source):
@@ -77,7 +109,7 @@ proc nativeRecording*(): NativeRecording =
       "ensure-ct-native-replay`, or set CT_NATIVE_REPLAY_PATH)"
     return
   if not rrAvailable():
-    result.detail = "rr is not on PATH (the codetracer dev shell provides it)"
+    result.detail = "rr is not on PATH"
     return
   putEnv("CODETRACER_CT_NATIVE_REPLAY_CMD", replay)
   # The replay worker counts its starts against the free tier's daily quota
@@ -89,7 +121,10 @@ proc nativeRecording*(): NativeRecording =
   let dir = repoRoot() / "test-logs" / "tui-fixtures" /
             NativeFixtureName & "-" & key
   let trace = dir / "trace"
-  if dirExists(trace / "rr"):
+  # rr keeps an `incomplete` marker in the trace until it finishes. A recording
+  # that died leaves its directory behind, and reusing that one failed every
+  # later run in the checkout: "Failed to determine RR port from output".
+  if dirExists(trace / "rr") and not fileExists(trace / "rr" / "incomplete"):
     result.ok = true
     result.tracePath = trace
     return
@@ -104,6 +139,9 @@ proc nativeRecording*(): NativeRecording =
   if not dirExists(trace / "rr"):
     raise newException(IOError, "ct-native-replay record left no rr/ in " &
       trace)
+  if fileExists(trace / "rr" / "incomplete"):
+    raise newException(IOError, "ct-native-replay record exited 0 and left an " &
+      "incomplete rr trace in " & trace)
   result.ok = true
   result.tracePath = trace
 

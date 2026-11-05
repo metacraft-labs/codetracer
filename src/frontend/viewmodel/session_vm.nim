@@ -62,7 +62,6 @@ import viewmodels/[
   errors_vm,
   no_source_vm,
   step_list_vm,
-  calltrace_editor_vm,
   repl_vm,
   low_level_code_vm,
   request_panel_vm,
@@ -143,7 +142,6 @@ type
     errorsVM*: ErrorsVM
     noSourceVM*: NoSourceVM
     stepListVM*: StepListVM
-    calltraceEditorVM*: CalltraceEditorVM
     replVM*: ReplVM
     lowLevelCodeVM*: LowLevelCodeVM
     requestPanelVM*: RequestPanelVM
@@ -299,8 +297,6 @@ proc initializePanelViewModels*(session: SessionViewModel) =
     session.noSourceVM = createNoSourceVM(session.store)
   if session.stepListVM.isNil:
     session.stepListVM = createStepListVM(session.store)
-  if session.calltraceEditorVM.isNil:
-    session.calltraceEditorVM = createCalltraceEditorVM(session.store)
   if session.replVM.isNil:
     session.replVM = createReplVM(session.store)
   if session.lowLevelCodeVM.isNil:
@@ -578,8 +574,6 @@ proc dispose*(session: SessionViewModel; disconnectBackend: bool = true) =
     session.noSourceVM.dispose()
   if not session.stepListVM.isNil:
     session.stepListVM.dispose()
-  if not session.calltraceEditorVM.isNil:
-    session.calltraceEditorVM.dispose()
   if not session.replVM.isNil:
     session.replVM.dispose()
   if not session.lowLevelCodeVM.isNil:

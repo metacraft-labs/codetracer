@@ -61,7 +61,7 @@ const
   ContentScratchpad = 17
   ContentTimeline = 19
   ContentTraceLog = 22
-  ContentCalltraceEditor = 23
+  ContentRetiredCalltraceEditorPanel = 23
   ContentTerminalOutput = 24
   ContentStepList = 33
   ContentAgentActivity = 35
@@ -82,7 +82,7 @@ const
     ContentTerminalOutput,
     ContentStepList,
     ContentCalltrace,
-    ContentCalltraceEditor,
+    ContentRetiredCalltraceEditorPanel,
     ContentTraceLog,
     ContentAgentActivity,
     ContentAgentActivityDeepReview,

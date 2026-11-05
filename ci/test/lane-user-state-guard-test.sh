@@ -359,18 +359,27 @@ else
 	t_fail "a guard checked without being started refuses (rc=${rc}): ${out}"
 fi
 
-# 12. EVERY entry point that exports a scratch CODETRACER_HOME checks the guard.
-#     The unit is the file, or for the justfile the recipe. A positive control
-#     first: the scanner must flag a recipe that exports and never checks.
+# 12. EVERY entry point that exports a scratch CODETRACER_HOME checks the guard,
+#     and runs itself in the stage sandbox first, so that on Linux only its
+#     own writes can fail it (2026-11-05: `ci/lint/nim.sh` had the sandbox,
+#     while `just test-rust`, the other recipes and the cross-repo script
+#     still compared the host-global directories). The unit is the file, or
+#     for the justfile the recipe. Positive controls first: the scanner must
+#     flag a recipe that exports and never checks, and one that checks but
+#     never enters the sandbox.
 entry_points_unchecked() {
 	# Prints "<file>[:<recipe>]" for every unit that exports a scratch home in
-	# code and never calls ct_user_state_guard_exit / _check in code.
+	# code and never calls ct_user_state_guard_exit / _check in code, and
+	# "<file>[:<recipe>] (no sandbox)" for one that never calls
+	# ct_user_state_stage_sandbox before it exports.
 	awk -v file="$1" '
 	function flush() {
-		if (exports && !checks) print file (recipe != "" ? ":" recipe : "")
-		exports = 0; checks = 0
+		unit = file (recipe != "" ? ":" recipe : "")
+		if (exports && !checks) print unit
+		if (exports && !sandboxed) print unit " (no sandbox)"
+		exports = 0; checks = 0; sandboxed = 0
 	}
-	BEGIN { recipe = ""; exports = 0; checks = 0; isjust = (file ~ /justfile$/) }
+	BEGIN { recipe = ""; exports = 0; checks = 0; sandboxed = 0; isjust = (file ~ /justfile$/) }
 	{
 		line = $0
 		if (isjust && line ~ /^[A-Za-z0-9_@-][A-Za-z0-9_-]*([ \t][^:=]*)?:([^=]|$)/) {
@@ -378,13 +387,31 @@ entry_points_unchecked() {
 		}
 		code = line; sub(/^[ \t]+/, "", code)
 		if (code ~ /^#/) next
+		if (code ~ /(^|[^_[:alnum:]])ct_user_state_stage_sandbox[ \t]+[a-z]/ && !exports) sandboxed = 1
 		if (code ~ /(^|[^_[:alnum:]])ct_export_scratch_codetracer_home[ \t]+[a-z]/) exports = 1
 		if (code ~ /ct_user_state_guard_(exit|check)[ \t]/) checks = 1
 	}
 	END { flush() }' "$1"
 }
 mkdir -p "${scratch}/control"
-printf 'ok-recipe:\n  source ci/lib/codetracer-home.sh\n  ct_export_scratch_codetracer_home a\n  trap '"'"'ct_user_state_guard_exit a "$?"'"'"' EXIT\n\nbad-recipe:\n  source ci/lib/codetracer-home.sh\n  ct_export_scratch_codetracer_home b\n  trap '"'"'rm -rf x'"'"' EXIT\n' >"${scratch}/control/justfile"
+cat >"${scratch}/control/justfile" <<'LANE_CONTROL_JUSTFILE'
+ok-recipe:
+  source ci/lib/codetracer-home.sh
+  ct_user_state_stage_sandbox a bash "$0" || :
+  ct_export_scratch_codetracer_home a
+  trap 'ct_user_state_guard_exit a "$?"' EXIT
+
+bad-recipe:
+  source ci/lib/codetracer-home.sh
+  ct_user_state_stage_sandbox b bash "$0" || :
+  ct_export_scratch_codetracer_home b
+  trap 'rm -rf x' EXIT
+
+open-recipe:
+  source ci/lib/codetracer-home.sh
+  ct_export_scratch_codetracer_home c
+  trap 'ct_user_state_guard_exit c "$?"' EXIT
+LANE_CONTROL_JUSTFILE
 control="$(entry_points_unchecked "${scratch}/control/justfile")"
 entry_files=()
 while IFS= read -r f; do entry_files+=("$f"); done < <(
@@ -401,10 +428,12 @@ for f in "${entry_files[@]+"${entry_files[@]}"}"; do
 	units=$((units + u))
 	unchecked="${unchecked}$(cd "${repo_root}" && entry_points_unchecked "$f")"
 done
-if [ "${control}" = "${scratch}/control/justfile:bad-recipe" ] && [ -z "${unchecked}" ] && [ "${units}" -ge 8 ]; then
-	t_pass "all ${units} entry points that export a scratch CODETRACER_HOME check the guard (control flagged)"
+expected_control="${scratch}/control/justfile:bad-recipe
+${scratch}/control/justfile:open-recipe (no sandbox)"
+if [ "${control}" = "${expected_control}" ] && [ -z "${unchecked}" ] && [ "${units}" -ge 8 ]; then
+	t_pass "all ${units} entry points that export a scratch CODETRACER_HOME enter the sandbox and check the guard (controls flagged)"
 else
-	t_fail "every entry point that exports a scratch CODETRACER_HOME checks the guard: unchecked='${unchecked}' units=${units} control='${control}'"
+	t_fail "every entry point that exports a scratch CODETRACER_HOME enters the sandbox and checks the guard: unchecked='${unchecked}' units=${units} control='${control}'"
 fi
 
 # 13-14. THE SANDBOX (Linux): a file's own write to the user's state is still

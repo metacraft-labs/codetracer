@@ -430,7 +430,7 @@ test.describe("Recovery from an out-of-range activeItemIndex", () => {
         {
           type: "component",
           componentType: "genericUiComponent",
-          // Content.CalltraceEditor == 23 ("CALLS"), the non-editor tab that
+          // Content.RetiredCalltraceEditorPanel == 23 ("CALLS"), the non-editor tab that
           // shares the editor stack in a real replay session.
           componentState: { id: 0, label: "calltraceEditorComponent-0", content: 23 },
           title: "CALLS",

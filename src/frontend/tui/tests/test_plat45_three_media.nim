@@ -241,8 +241,7 @@ proc desktopPaneName(content: int): string =
   ## A desktop tab's `Content` ordinal, through THE table. Every document the
   ## editor opens — source, the "NO SOURCE" placeholder, the CALLS view — is
   ## the editor pane.
-  if content in [ord(Content.EditorView), ord(Content.NoInfo),
-                 ord(Content.CalltraceEditor)]:
+  if content in [ord(Content.EditorView), ord(Content.NoInfo)]:
     return $paneEditor
   let p = paneOfContent(content)
   if p.isSome: $p.get else: "content#" & $content

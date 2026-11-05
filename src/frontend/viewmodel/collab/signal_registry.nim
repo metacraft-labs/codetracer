@@ -707,9 +707,6 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     vscBackendAuthoritative,
     "No-source diagnostic data is derived from backend/debugger state.")
 
-  entries.addEntry("CalltraceEditorVM", "mounted", vscRendererLocal,
-    "Mount lifecycle is renderer-local.")
-
   entries.addMany("BuildVM",
     ["output", "errors", "problems", "command", "running", "code",
      "buildStartTime"],

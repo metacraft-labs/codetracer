@@ -2,7 +2,7 @@ import std/[os, osproc, streams, strutils, sequtils, strtabs, strformat, json, o
   multitrace,
   native_backend_selection,
   record_assessment, recorder_dispatch, portable_route, recorder_env,
-  recorder_output,
+  recorder_output, record_lang_forwarding,
   ../../common/[ lang, paths, types, trace_index, config, ct_logging,
                  ct_state_dir ],
   ../utilities/[language_detection ],
@@ -464,9 +464,11 @@ proc record*(lang: string,
   var programToRecord = program
   var nimcachePath = ""
   var pargs: seq[string] = @[]
-  if lang != "":
-    pargs.add("--lang")
-    pargs.add(lang)
+  # The user's `--lang`, or what `detectTarget` recognized above as
+  # `--recognized-lang`, so `db-backend-record` does not recognize the same
+  # file again in its own process (`record_lang_forwarding.nim`; NTR §9 Q7 as
+  # revised 2026-11-05).
+  pargs.add(forwardedLangArgs(lang, recognized.recognitionRan, detectedLang))
   if outputFolderValue != "" and outputFolderValue != ".":
     # `ct record -o .ct/runs/<run>` is the documented DeepReview workflow:
     # `.ct/` must be git-ignored before the recorder writes into it (see
