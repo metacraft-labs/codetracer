@@ -200,8 +200,15 @@ _ct_uss_subs=()
 _ct_uss_layer=()
 
 ct_user_state_sandbox_covers() {
-	# 0 when the sandbox covers guarded directory `$1`.
+	# 0 when the sandbox covers guarded directory `$1`: this shell's own, or
+	# the stage sandbox this shell runs inside (`ct_user_state_stage_sandbox`,
+	# which names its directories in CT_USS_STAGE_COVERED, one per line).
 	local d
+	if [ -n "${CT_USS_STAGE_COVERED:-}" ]; then
+		while IFS= read -r d; do
+			[ "${d}" = "$1" ] && return 0
+		done <<<"${CT_USS_STAGE_COVERED}"
+	fi
 	[ -n "${_ct_uss_enabled}" ] || return 1
 	for d in "${_ct_uss_guarded[@]}"; do
 		[ "${d}" = "$1" ] && return 0
@@ -357,6 +364,52 @@ ct_user_state_sandbox_findings() {
 	done | sort -u
 	chmod -R u+rwx "${root}" 2>/dev/null
 	rm -rf "${root}"
+}
+
+# THE STAGE SANDBOX: the same overlay around a whole entry point instead of one
+# test file.
+#
+# A lint stage is not split into files the way a lane is, so it compared the
+# user's directories once, around everything it ran, and a writer elsewhere on
+# the host failed it: on 2026-11-05 `ci/lint/nim.sh` on nixos-ci-bare-003
+# reported ten `~/.cache/codetracer/{sync-families,go-sync-families}` entries
+# while an strace of every process the stage started showed none of them
+# writing there. Another checkout's `ct-mcr record` tests had.
+#
+# Called near the top of an entry point as
+#   ct_user_state_stage_sandbox <label> bash "$0" "$@"
+# it runs that command (the entry point again) in one sandbox and exits with
+# its status, or with 1 when the sandbox caught a write to the user's state,
+# named. The inner run sees CT_USS_STAGE set, so the call returns 1 there and
+# the entry point goes on as before; CT_USS_STAGE_COVERED tells its snapshot
+# guard which directories the sandbox covers, so that guard still checks only
+# what the sandbox cannot. It returns 1 without running anything on a host
+# with no sandbox, and there the entry point's own comparison is the guard.
+ct_user_state_stage_sandbox() {
+	local label="$1"
+	shift
+	[ -z "${CT_USS_STAGE:-}" ] || return 1
+	ct_user_state_sandbox_enable || return 1
+	local root rc found covered
+	root="$(mktemp -d "${TMPDIR:-/tmp}/ct-uss-${label}.XXXXXX")" || return 1
+	ct_user_state_sandbox_prefix "${root}"
+	covered="$(printf '%s\n' "${_ct_uss_guarded[@]}")"
+	echo "${label}: running in a sandbox over the user's CodeTracer state ($(ct_user_state_guard_dirs_text))"
+	CT_USS_STAGE="${label}" CT_USS_STAGE_COVERED="${covered}" \
+		"${ct_uss_cmd[@]}" "$@" && rc=0 || rc=$?
+	found="$(ct_user_state_sandbox_findings "${root}")"
+	if [ -n "${found}" ]; then
+		{
+			echo "ERROR: ${label} WROTE the user's own CodeTracer state" \
+				"($(ct_user_state_guard_dirs_text)). It ran in a sandbox, so these" \
+				"changes were this stage's own (or a binary it spawned) and were" \
+				"kept out of the real directories:"
+			printf '%s\n' "${found}" | sed 's/^/    /'
+		} >&2
+		exit 1
+	fi
+	echo "${label}: the sandbox caught no write to the user's CodeTracer state"
+	exit "${rc}"
 }
 
 ct_user_state_guard_start() {
