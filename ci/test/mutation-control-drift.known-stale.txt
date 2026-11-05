@@ -449,3 +449,10 @@ src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/t
 src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/view_vocabulary/pane_views.nim	97abf5d5c4d9e1c68279aee656742b087c1cf7a006c075344562e094548bc222	e7a95d1e32d1a6b55c7abb575bb6e590c8b34f0fef6e1cda69ec0986ad5cbd43
 src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/tui/host/tui_session.nim	efe3ee1560ee74cacbcba811b4ce7d42b07fc838569da68e6d719aa54c7f414c	23c4fc83a7922ffe45fa30b35810da8346df14163f3f7977f3f2d56448d47c09
 src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/ui/key_router.nim	e7bbdd98f457fc0f5ee0c1e06f5c7bc30031a63569fb7b3afc51e64ce7f273f4	7c8a1763b4b77623183664ae973773d398fd50fd9ccbbecc36bf37ed39a499b5
+
+# 2026-11-05, the Shell pane's F1-F4 bytes go through `cursorKey`'s SS3 branch
+# (byte-identical output) so that only key_names spells terminal key bytes
+# (ci/test/keymap-clean-code.sh [2c]). PLAT-61's harness already owed a re-grade
+# for seven other subjects (lines above). No mutation grade is claimed and no
+# control file was re-recorded.
+src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/viewmodel/viewmodels/shell_vm.nim	1ca7b819e73ea6258e63cf3e2124639b9511dac95728de1493c54523c890f83d	812073c0eba21235c4ecf69bdea75a7c6d5afa112bb86b344c233df9ab2a5f54

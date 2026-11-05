@@ -640,10 +640,12 @@ proc keyBytes*(k: ShellKey; appCursor = false): string =
   of "Delete": result = tildeKey(3, mods)
   of "PageUp": result = tildeKey(5, mods)
   of "PageDown": result = tildeKey(6, mods)
-  of "F1": result = (if mods > 1: "\e[1;" & $mods & "P" else: "\eOP")
-  of "F2": result = (if mods > 1: "\e[1;" & $mods & "Q" else: "\eOQ")
-  of "F3": result = (if mods > 1: "\e[1;" & $mods & "R" else: "\eOR")
-  of "F4": result = (if mods > 1: "\e[1;" & $mods & "S" else: "\eOS")
+  # F1-F4 are SS3 keys (`ESC O P`..`ESC O S`) in either cursor mode, with
+  # xterm's `CSI 1 ; <mods> P` form when modified: `cursorKey`'s app branch.
+  of "F1": result = cursorKey('P', true, mods)
+  of "F2": result = cursorKey('Q', true, mods)
+  of "F3": result = cursorKey('R', true, mods)
+  of "F4": result = cursorKey('S', true, mods)
   of "F5": result = tildeKey(15, mods)
   of "F6": result = tildeKey(17, mods)
   of "F7": result = tildeKey(18, mods)
