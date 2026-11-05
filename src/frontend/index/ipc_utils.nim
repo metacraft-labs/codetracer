@@ -714,11 +714,21 @@ proc ready*(): Future[void] {.async.} =
       debugSend(mainWindow.webContents, internalSend, id, data)
 
   else:
+    proc wireValue(value: js): js {.importjs: """
+      (function(v) {
+        if (typeof v !== "bigint") return v;
+        return Number.isSafeInteger(Number(v)) ? Number(v) : v.toString();
+      })(#)""".}
+      ## A Nim `int64` is a JS BigInt, and `JSON.stringify` throws on one. This
+      ## send runs inside async handlers, so the throw was a rejection nobody
+      ## read: `tab-load` was answered with nothing and a browser's editor
+      ## never opened. The page's half is `ui_js.wireSafe`, with the same rule.
+
     proc replacer(key: cstring, value: js): js =
       if key == cstring"m_type":
         undefined
       else:
-        value
+        wireValue(value)
 
     proc dapReceiveEventKey(response: js): cstring =
       ## Extract the inner DAP event name from a ``dap-receive-event``
