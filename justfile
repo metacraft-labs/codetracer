@@ -78,6 +78,14 @@ test-dev-shell-rust-unwinds:
 test-dev-shell-pythonpath:
   bash ci/test/dev-shell-pythonpath-test.sh
 
+# Assert that the default dev shell builds with the Python recorder flake's own
+# trace-format-nim pinned before the writer FFI the root pair's Rust calls, so
+# the recorder links a writer from the same pair as its Rust. Runs `nix build`
+# of the shell, so it is slow and not part of the in-shell suites. See the
+# header of ci/test/dev-shell-python-recorder-ffi-pair-test.sh.
+test-dev-shell-python-recorder-ffi-pair:
+  bash ci/test/dev-shell-python-recorder-ffi-pair-test.sh
+
 # Assert that build-once.sh sources the cached dev-shell profile (and so runs
 # its shellHook) inside this repository, not in the directory it is invoked
 # from. Runs the real script against a stub profile; no toolchain, a second.
