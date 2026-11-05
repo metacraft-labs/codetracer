@@ -2003,9 +2003,12 @@ jobs:
 
   reprobuild-linux-smoke:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
-    # 200-run window: 48 green, median 1.8m, max 5.1m. 15m is ~3x the slowest
-    # green.
-    timeout-minutes: 15
+    # 200-run window: 48 green, median 1.8m, max 5.1m -- measured before the
+    # smoke's `nix develop .` had to build the dev shell on cold runners. Since:
+    # green in 7.7m (dev 3266ab28aa) and 12.6m (PR #903's first run), and
+    # cancelled at the old 15m on dev ef129742ac and twice on PR #903, each
+    # time still in that build. 30m covers the slowest green with margin.
+    timeout-minutes: 30
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -7040,9 +7043,14 @@ jobs:
     # 103.4 vs 122.2. Lands next to ct-test-providers, which it shares a closure
     # with, so the move is locality-positive as well as arithmetic.
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
-    # 200-run window: 48 green, median 5.5m, max 8.6m. 25m is ~2.9x the slowest
-    # green.
-    timeout-minutes: 25
+    # 200-run window: 48 green, median 5.5m, max 8.6m -- measured before the
+    # job provisioned its siblings through provision-repro-lock-siblings, which
+    # realises the dev shell first. Since: the green run on dev 3266ab28aa took
+    # 24.3m of the old 25m (11.7m provisioning, 10.9m in the gate), and PR
+    # #903's runs, provisioning in up to 15.3m, were cancelled mid-gate, as
+    # dev ef129742ac was. 45m covers the slowest provisioning seen plus the
+    # gate, with margin.
+    timeout-minutes: 45
     name: ct-test release gate (M16 provider matrix)
     steps:
       - name: Mint installation token for cross-repo sibling access
