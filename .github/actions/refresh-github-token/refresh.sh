@@ -14,6 +14,28 @@ if [ -f "$conf" ] && grep -q '^ *access-tokens *=' "$conf"; then
 	echo "refreshed access-tokens in $conf"
 fi
 
+# NIX_CONFIG: setup-nix also exports the job's Nix settings, access-tokens
+# included, through GITHUB_ENV, and Nix applies NIX_CONFIG after nix.conf, so
+# a stale token there wins over the one refreshed above. TUI job 127318265290
+# failed that way: `nix develop` 80 minutes into the job got "401 Bad
+# credentials" fetching a github: flake input. The new value goes back through
+# GITHUB_ENV, with a random heredoc delimiter because the value is multiline
+# (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands#multiline-strings).
+if [ -n "${NIX_CONFIG:-}" ] && [ -n "${GITHUB_ENV:-}" ] &&
+	grep -q '^ *access-tokens *=' <<<"$NIX_CONFIG"; then
+	# A per-line anchored match, the same as nix.conf's above; ${var//}
+	# cannot anchor to the start of a line inside a multiline value.
+	# shellcheck disable=SC2001
+	new_nix_config="$(sed"s|^\( *access-tokens *= *\).*|\1github.com=$NEW_TOKEN|" <<<"$NIX_CONFIG")"
+	delimiter="NIX_CONFIG_$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+	{
+		echo "NIX_CONFIG<<$delimiter"
+		printf '%s\n' "$new_nix_config"
+		echo "$delimiter"
+	} >>"$GITHUB_ENV"
+	echo "refreshed access-tokens in NIX_CONFIG for later steps"
+fi
+
 # The Nix netrc: git+https inputs, which Nix fetches by running git.
 netrc="$HOME/.config/nix/netrc"
 if [ -f "$netrc" ] && grep -q 'machine github.com' "$netrc"; then
