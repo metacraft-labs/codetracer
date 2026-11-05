@@ -722,15 +722,21 @@ proc installTemplatePaneHost*() =
   ## about, and it says so on the pane rather than only here.
   data.ipc.respond(cstring"CODETRACER::ns9-panes",
     proc(sender: js, payload: JsObject) =
-      data.ipc.deliver(cstring"CODETRACER::ns9-panes-catalog", js{
-        catalog: cstring(pretty(templateTestCatalog(currentProject()).toJson())),
-        # ASKED, NOT ASSERTED. "" on a deployment that placed the Noir
-        # compiler module, and `degradedBehaviour`'s own sentence on one that
-        # did not — see `noirTestRunAbsence`.
-        absence: cstring(noirTestRunAbsence()),
-        # The asking tab, echoed (`ui_js.ns9PanesTarget`).
-        tab: (if payload.isNil: jsUndefined else: payload["tab"])
-      })
+      # A tab holding a recording asks about the circuit alone
+      # (`index/ns9_panes.onNs9Panes`).
+      let onlyConstraints =
+        not payload.isNil and not payload["only"].isUndefined and
+        not payload["only"].isNull
+      if not onlyConstraints:
+        data.ipc.deliver(cstring"CODETRACER::ns9-panes-catalog", js{
+          catalog: cstring(pretty(templateTestCatalog(currentProject()).toJson())),
+          # ASKED, NOT ASSERTED. "" on a deployment that placed the Noir
+          # compiler module, and `degradedBehaviour`'s own sentence on one that
+          # did not — see `noirTestRunAbsence`.
+          absence: cstring(noirTestRunAbsence()),
+          # The asking tab, echoed (`ui_js.ns9PanesTarget`).
+          tab: (if payload.isNil: jsUndefined else: payload["tab"])
+        })
       # ALL THREE FIELDS NOW COME FROM ONE PROJECT. Two of them used to be
       # module constants while `absence` was derived from `currentProject()`,
       # so a template without counts produced an absence string sitting beside

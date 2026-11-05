@@ -4944,6 +4944,7 @@ proc gpuiMenuRouteOf(action: string): GpuiMenuRoute =
   of "aAgentActivity": GpuiMenuRoute(kind: gmrPane, pane: paneAgentActivity)
   # PLAT-63: View › Verification — the window's project's Verno run.
   of "aVerification": GpuiMenuRoute(kind: gmrPane, pane: paneVerification)
+  of "aConstraints": GpuiMenuRoute(kind: gmrPane, pane: paneConstraints)
   # PLAT-60: Alt+1, the desktop's `aLowLevel1` — the Low Level Code pane
   # beside the source.
   of "aLowLevel1":
@@ -13767,7 +13768,8 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       # with (`constraints_leaf.constraintsLayout`); a row by its index in
       # the pane's rows, scrolled into view first.
       if parts[1] == "show":
-        showPaneFromMenu(r, paneConstraints)
+        # View › Constraints, through the window's menu route.
+        runGpuiMenuAction(r, "aConstraints")
         drawConstraintsPane(r)
         return ""
       if parts[1] == "wait":

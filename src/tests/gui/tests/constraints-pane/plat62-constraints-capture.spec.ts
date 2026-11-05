@@ -6,10 +6,13 @@
  * Spec: codetracer-pm `spec/Planned-Features/Noir-Studio.md` § "The
  * Constraints pane on the terminal and the GPUI window (PLAT-62)".
  *
- * The real Electron front-end in edit mode over the PLAT-62 crate (the same
+ * The real Electron front-end over the PLAT-62 crate, in edit mode and then in
+ * its Debug mode: the crate's test recorded and opened in a new tab, the pane
+ * opened with View › Constraints and measured there (the same
  * bytes the native suites write: `src/frontend/tui/tests/fixtures/
  * plat62_noir_circuit.nim`), its CONSTRAINTS pane read from the DOM after the
- * main process measured the crate with the real `nargo info --json`:
+ * main process measured the crate with the real
+ * `nargo info --json --print-acir`:
  *
  *   * the headline, the notice, the provenance and the absence;
  *   * per row, in order: its index (`data-ct-row`), name, kind, count, where
@@ -18,7 +21,10 @@
  *   * what a right-click on a placed row and on a row placed nowhere opens —
  *     the entries, and which are disabled with what reason;
  *   * what a press on a placed row does: the editor's active file and caret
- *     line; and that a press on a row placed nowhere opens nothing.
+ *     line, for a function and for an opcode; and that a press on a row placed
+ *     nowhere opens nothing;
+ *   * in the recording's tab, the same pane again (`debug`), and where a press
+ *     on `main` goes there.
  *
  * Written to `src/tests/visual/answers/plat62-constraints.electron.json`,
  * which `src/frontend/tui/tests/test_plat62_constraints.nim`,
@@ -79,7 +85,10 @@ const certificates = fs.mkdtempSync(path.join(os.tmpdir(), "ct-plat62-certs-"));
 /** The pane as a reader of the DOM sees it. */
 async function readPane(ctPage: any) {
   return await ctPage.evaluate(() => {
-    const pane = document.querySelector(".constraints") as HTMLElement;
+    // Each tab keeps its own pane: the one on screen.
+    const pane = Array.from(document.querySelectorAll(".constraints")).find(
+      (n) => (n as HTMLElement).offsetParent !== null,
+    ) as HTMLElement;
     const text = (n: Element | null) => (n ? (n.textContent || "").trim() : "");
     const shown = (sel: string) => {
       const n = pane.querySelector(sel) as HTMLElement | null;
@@ -90,9 +99,15 @@ async function readPane(ctPage: any) {
       return {
         index: Number(row.getAttribute("data-ct-row")),
         opcode: /\bconstraints-opcode\b/.test(cls),
-        name: text(row.querySelector(".constraints-name")),
+        name: text(
+          row.querySelector(".constraints-name") ??
+            row.querySelector(".low-level-code-instruction-name"),
+        ),
         kind: text(row.querySelector(".constraints-kind")),
-        count: text(row.querySelector(".constraints-count")),
+        count: text(
+          row.querySelector(".constraints-count") ??
+            row.querySelector(".low-level-code-instruction-offset"),
+        ),
         where: text(row.querySelector(".constraints-where")),
         title: row.getAttribute("title") || "",
         linked: /\blinked\b/.test(cls),
@@ -146,6 +161,14 @@ async function activeEditor(ctPage: any) {
   };
 }
 
+// Where each kind of row is, by `plat62_noir_circuit.nim`'s count: `main`'s 18
+// opcodes, then `halve`'s 16, then the directives'.
+const HalveRow = 19;
+const InvertRow = 36;
+const QuotientRow = 46;
+const RangeOpcodeRow = 5;
+const RowTotal = 55;
+
 test.describe("PLAT-62: the desktop's Constraints pane, captured", () => {
   test.use({
     launchMode: "edit",
@@ -176,25 +199,79 @@ test.describe("PLAT-62: the desktop's Constraints pane, captured", () => {
     const rows = ctPage.locator(".constraints [data-ct-row]");
     await rows.nth(0).click({ button: "right" });
     const placedMenu = await contextMenu(ctPage);
-    await rows.nth(2).click({ button: "right" });
+    await rows.nth(InvertRow).click({ button: "right" });
     const nowhereMenu = await contextMenu(ctPage);
 
     // A PRESS on `halve`: its declaring line in the editor.
-    await rows.nth(1).click();
+    await rows.nth(HalveRow).click();
     await expect
       .poll(async () => (await activeEditor(ctPage)).line, { timeout: 30_000 })
       .toBe(11);
     const pressedPlaced = await activeEditor(ctPage);
     const afterPress = await readPane(ctPage);
 
+    // A PRESS ON AN OPCODE: the line its debug symbols name, in the file
+    // `checks::in_range` was inlined from.
+    await rows.nth(RangeOpcodeRow).click();
+    await expect
+      .poll(async () => (await activeEditor(ctPage)).path, { timeout: 30_000 })
+      .toBe("src/checks.nr");
+    const pressedOpcode = await activeEditor(ctPage);
+
     // A PRESS on a directive: nothing opens.
     await rows.nth(0).click();
     await expect
       .poll(async () => (await activeEditor(ctPage)).line, { timeout: 30_000 })
       .toBe(3);
-    await rows.nth(3).click();
+    await rows.nth(QuotientRow).click();
     await ctPage.waitForTimeout(800);
     const pressedNowhere = await activeEditor(ctPage);
+
+    // ITS RECORDING, IN DEBUG MODE: the crate's test recorded and opened in a new
+    // tab from Test Results, where the Debug default places no Constraints pane.
+    await ctPage.locator(".lm_tab", { hasText: "TESTS" }).first().click();
+    const testRow = ctPage
+      .locator('.test-results-row[data-ct-test-id$="::test_main"]')
+      .first();
+    await expect(testRow).toBeVisible({ timeout: 60_000 });
+    const open = testRow.locator(".test-results-open-btn");
+    await expect(open).not.toHaveClass(/disabled/, { timeout: 30_000 });
+    await open.click();
+    await expect
+      .poll(
+        async () =>
+          await ctPage.evaluate(() => {
+            const d = (window as any).__CODETRACER_DATA__;
+            return d && d.trace && d.trace.recordingId ? String(d.trace.recordingId) : "";
+          }),
+        { timeout: 300_000 },
+      )
+      .not.toBe("");
+    await expect(ctPage.locator(".lm_goldenlayout:visible")).toBeVisible({ timeout: 120_000 });
+    await expect(ctPage.locator(".constraints:visible")).toHaveCount(0);
+
+    // View › Constraints, as a user opens it.
+    await ctPage.locator("#menu-root").click();
+    await ctPage.locator("#menu-elements").waitFor({ timeout: 30_000 });
+    await ctPage
+      .locator("#menu-elements > .menu-node-container", { hasText: "View" })
+      .first()
+      .hover();
+    await ctPage
+      .locator(".menu-nested-elements .ct-menu-item-label", { hasText: /^Constraints$/ })
+      .first()
+      .click();
+    const debugRows = ctPage.locator(".constraints:visible [data-ct-row]");
+    await expect(debugRows.first()).toBeVisible({ timeout: 120_000 });
+    await expect(ctPage.locator(".constraints:visible [data-ct-row].linked").first()).toBeVisible({
+      timeout: 30_000,
+    });
+    const debug = await readPane(ctPage);
+    await debugRows.nth(0).click();
+    await expect
+      .poll(async () => (await activeEditor(ctPage)).line, { timeout: 60_000 })
+      .toBe(3);
+    const debugPressed = await activeEditor(ctPage);
 
     const out = {
       _comment: [
@@ -207,21 +284,32 @@ test.describe("PLAT-62: the desktop's Constraints pane, captured", () => {
       placedMenu,
       nowhereMenu,
       pressedPlaced,
+      pressedOpcode,
       selectedAfterPress: afterPress.rows.filter((r: any) => r.selected).map((r: any) => r.index),
       pressedNowhere,
+      debug,
+      debugPressed,
     };
     fs.mkdirSync(answersDir, { recursive: true });
     fs.writeFileSync(answersFile, JSON.stringify(out, null, 1) + "\n");
 
     // The capture is only a reference if it is the run it says it is.
     expect(before.headline).toBe("18 ACIR opcodes, 33 unconstrained");
-    expect(before.rows.map((r: any) => r.name)).toEqual([
-      "main",
-      "halve",
-      "directive_invert",
-      "directive_integer_quotient",
-    ]);
+    expect(before.rows.length).toBe(RowTotal);
+    expect(before.notice).toBe("");
+    expect(
+      before.rows.filter((r: any) => !r.opcode).map((r: any) => r.name),
+    ).toEqual(["main", "halve", "directive_invert", "directive_integer_quotient"]);
+    expect(before.rows[RangeOpcodeRow].where).toBe("src/checks.nr:2");
     expect(pressedPlaced.path).toBe("src/main.nr");
+    expect(pressedOpcode.line).toBe(2);
+    expect(pressedNowhere.path).toBe("src/main.nr");
     expect(pressedNowhere.line).toBe(3);
+    // The two modes' rows are one answer: Debug mode measured the same project.
+    expect(debug.headline).toBe(before.headline);
+    expect(debug.rows.map((r: any) => ({ ...r, selected: false }))).toEqual(
+      before.rows.map((r: any) => ({ ...r, selected: false })),
+    );
+    expect(debugPressed.path).toBe("src/main.nr");
   });
 });

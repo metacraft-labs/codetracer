@@ -102,6 +102,7 @@ proc productMenuTree*(program: string; shellUi = false): MenuItem =
       item("Breakpoints & Tracepoints", "aPointList"),
       item("Agent Activity", "aAgentActivity"),
       item("Verification", "aVerification"),
+      item("Constraints", "aConstraints"),
       item("Start Agent Worktree Session", "aStartAgenticWorktreeSession"),
       item("Notifications", "aNotifications"),
       item("Reset Layout", "aResetLayout"),

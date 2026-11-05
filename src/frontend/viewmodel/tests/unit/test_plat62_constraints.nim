@@ -48,10 +48,12 @@
 ##     browser; the browser half is the Electron capture
 ##     (`just plat62-capture-electron`).
 
-import std/[strutils, tables, unittest]
+import std/[base64, json, strutils, tables, unittest]
 
 import isonim/core/[owner, signals, computation]
 import isonim/testing/mock_dom
+
+import ../../../../common/raw_inflate
 
 import ../../viewmodels/constraints_vm
 import ../../viewmodels/constraints_answer
@@ -67,7 +69,7 @@ template ck(condition: untyped) =
   inc asserted
   check condition
 
-const ExpectedAssertions = 114
+const ExpectedAssertions = 157
   ## Measured: every `ck` below, counted, so a case that silently stops
   ## asserting is caught.
 
@@ -281,6 +283,104 @@ suite "PLAT-62: the Constraints pane's shared model":
       ck vm.runRowMenu(3, cmCopyName).copied == "directive_integer_quotient"
       ck vm.selected.val == 3
       dispose()
+
+  test "a real listing joins the totals, and each opcode leads to its source":
+    createRoot proc(dispose: proc()) =
+      let vm = createConstraintsVM()
+      let answer = constraintsAnswer("/p", true, NargoInfoRun(started: true,
+                                     output: Plat62InfoOutput))
+      ck answer.hasReport and answer.infoJson == Plat62NargoInfoJson
+      ck answer.listing == Plat62PrintedListing
+      let placed = placeOpcodes(answer.report, plat62Artefact(), crateSources())
+      vm.setSources(crateSources())
+      vm.setReport(placed)
+      let rows = vm.rows.val
+      ck rows.len == Plat62RowTotal
+      ck vm.headline.val == Plat62Headline
+      ck listingNoticeFor(placed) == ""
+      # The names are `nargo info`'s and the rows hang under them.
+      ck rows[0].name == "main" and rows[0].kind == crkFunction
+      ck rows[Plat62HalveRow].name == "halve"
+      ck rows[Plat62InvertRow].name == "directive_invert"
+      ck rows[Plat62QuotientRow].name == "directive_integer_quotient"
+      ck rows[1].name == "BRILLIG" and rows[1].count == "0"
+      ck rows[Plat62HalveRow + 13].count == "12"
+      var bad = 0
+      for (row, where) in Plat62OpcodePlaces:
+        if whereText(rows[row].source) != where or rows[row].kind != crkOpcode:
+          inc bad
+          checkpoint($row & ": " & whereText(rows[row].source) & " vs " & where)
+      ck bad == 0
+      # A row placed by the debug symbols opens as a function's does: the
+      # innermost frame, with its column.
+      var asked: seq[string] = @[]
+      vm.onOpenSource = proc(path: string; line, column: int) =
+        asked.add path & ":" & $line & ":" & $column
+      ck vm.activateRow(Plat62RangeOpcodeRow).opened
+      ck asked == @["src/checks.nr:" & $Plat62RangeLine & ":12"]
+      ck rowTitle(rows[Plat62RangeOpcodeRow]) ==
+         "Go to src/checks.nr:" & $Plat62RangeLine
+      ck vm.rowMenu(Plat62RangeOpcodeRow)[0].enabled
+      ck vm.runRowMenu(Plat62RangeOpcodeRow, cmCopySourceLocation).copied ==
+         "src/checks.nr:2"
+      # An opcode the compiler left without a position says so.
+      let bare = rows[Plat62UnlocatedOpcodeRow]
+      ck not bare.source.linked and bare.source.reason == OpcodeHasNoSourceReason
+      ck not vm.activateRow(Plat62UnlocatedOpcodeRow).opened
+      ck not vm.rowMenu(Plat62UnlocatedOpcodeRow)[0].enabled
+      dispose()
+
+  test "what refuses a listing or a place, each with its reason":
+    let report = measured()
+    # A listing that does not add up to the totals: only the totals stand.
+    let short = report.attachListing(
+      Plat62PrintedListing.replace("ASSERT w10 = 0\n", ""))
+    ck not short.hasListing() and short.listingAbsence == ListingDisagreesText
+    ck headlineFor(short) == Plat62Headline
+    let renamed = report.attachListing(
+      Plat62PrintedListing.replace(": halve", ": other"))
+    ck renamed.listingAbsence == ListingDisagreesText
+    # A workspace prints one listing per package; the report reads the first.
+    let workspace = report.attachListing(Plat62PrintedListing &
+                                         Plat62PrintedListing)
+    ck not workspace.hasListing() and
+       workspace.listingAbsence == ListingOfWorkspaceText
+    ck report.attachListing("").listingAbsence == NoListingText
+    let listed = report.attachListing(Plat62PrintedListing)
+    # No artefact, an unreadable one, debug symbols that do not inflate.
+    for artefact in ["", "not json", "{\"debug_symbols\":\"AAAA\",\"file_map\":{}}"]:
+      let unread = placeOpcodes(listed, artefact, crateSources())
+      ck unread.functions[0].rows[0].place.reason == OpcodeNoDebugSymbolsReason
+      ck not unread.functions[0].rows[0].place.placed
+    # The text on disk moved on from the compile: nothing is placed on it.
+    var edited = crateSources()
+    edited[0].content = edited[0].content & "\n"
+    let moved = placeOpcodes(listed, plat62Artefact(), edited)
+    ck moved.functions[0].rows[0].place.reason == OpcodeOutsideProjectReason
+    # A dependency's file with the same relative path is not the project's.
+    let foreign = placeOpcodes(listed,
+      plat62Artefact(mainPath = "/elsewhere/src/other.nr"), crateSources())
+    ck foreign.functions[0].rows[0].place.reason == OpcodeOutsideProjectReason
+    # A frame in the project behind one outside it is the one opcode leads to.
+    let inner = placeOpcodes(listed,
+      plat62Artefact(checksPath = "std/checks.nr"), crateSources())
+    ck whereText(linkOpcode(inner.functions[0].rows[4].place)) == "src/main.nr:8"
+
+  test "raw deflate: stored, fixed and dynamic blocks; a refusal is a reason":
+    # Each block type: stored and fixed are small samples zlib produced, and
+    # the debug symbols are a dynamic block.
+    ck inflateRaw("\x01\x05\x00\xfa\xffhello").bytes == "hello"
+    ck inflateRaw("\xcb\x48\xcd\xc9\xc9\x57\xc8\x40\x90\x5c\x00").bytes ==
+       "hello hello hello\n"
+    let dynamic = decode(Plat62DebugSymbols)
+    let inflated = inflateRaw(dynamic)
+    ck inflated.ok and inflated.bytes.startsWith("{\"debug_infos\":")
+    ck parseJson(inflated.bytes)["debug_infos"].len == 1
+    ck not inflateRaw("").ok
+    ck not inflateRaw("\x07").ok                        # the reserved block type
+    ck not inflateRaw("\x01\x05\x00\x00\x00hello").ok  # a bad complement
+    ck not inflateRaw(dynamic[0 ..< dynamic.len div 2]).ok   # truncated
+    ck not inflateRaw(dynamic, limit = 16).ok            # past the limit
 
   test "the measurement rule, arm by arm":
     ck constraintsAnswer("", false, NargoInfoRun()).absence ==

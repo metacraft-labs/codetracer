@@ -57,7 +57,7 @@ from ../../view_vocabulary/pane_views import constraintsPaneView,
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 73
+const ExpectedAssertions = 83
 
 var countedAssertions = 0
 
@@ -256,7 +256,18 @@ proc omnibox(s: Session; line: string) =
   discard s.rt.handleToken("\r", 0)
 
 proc rowAt(s: Session; index: int): (int, int) =
-  ## Where row `index` is drawn.
+  ## Where row `index` is drawn, wheeled into view as a user would.
+  for _ in 0 .. Plat62RowTotal:
+    let (area, screen) = s.rt.constraintsPaneScreen()
+    let top = clampConstraintsTop(s.rt.app.constraints.rows.len,
+                                  s.rt.app.constraints.scrollTop,
+                                  screen.listRows)
+    let line = s.rt.app.constraints.lineOfIndex(index)
+    if line >= top and line < top + screen.listRows:
+      break
+    discard s.rt.handleToken(sgr(if line < top: 64 else: 65, screen.listTop,
+                                 area.col + 1, true), 0)
+    discard s.src.tick(s.rt)
   let (area, screen) = s.rt.constraintsPaneScreen()
   let at = s.rt.app.constraints.lineOfIndex(index) -
            clampConstraintsTop(s.rt.app.constraints.rows.len,
@@ -294,8 +305,11 @@ suite "PLAT-62: the terminal's Constraints pane over a real measurement":
   test "Edit mode: the desktop's rows, a press, the menu, the keys, staleness":
     let project = writeCrate()
     # `nargo` still prints the fixture's numbers for the crate.
-    let (direct, rc) = execCmdEx("nargo info --json", workingDir = project)
-    ck rc == 0 and direct.strip() == Plat62NargoInfoJson
+    let (direct, rc) = execCmdEx("nargo " & NargoInfoArgs.join(" ") &
+                                 " 2>/dev/null", workingDir = project)
+    ck rc == 0 and direct.strip() == Plat62InfoOutput
+    let artefact = parseFile(project / "target" / Plat62PackageName & ".json")
+    ck artefact["debug_symbols"].getStr == Plat62DebugSymbols
     var s = open(project)
     # The Edit default places the pane; it is measured the first time it is
     # on screen.
@@ -318,33 +332,46 @@ suite "PLAT-62: the terminal's Constraints pane over a real measurement":
         inc same
       else:
         checkpoint("row " & $i & ": " & $want & " vs " & r.name & " " & r.where)
-    ck same == 4 and m.rows.len == before["rows"].len
+    ck same == Plat62RowTotal and m.rows.len == before["rows"].len
     # THE VOCABULARY'S VIEW: a `Table` of the same cells.
     var table: ViewNode = nil
     for n in walk(constraintsPaneView(s.src.vm).root):
       if n.kind == pkTable: table = n
     ck not table.isNil and table.columns == ConstraintsColumns
-    ck not table.isNil and table.rows.len == 4 and
-       table.rows[1] == @["halve", "unconstrained", "16", "src/main.nr:11"]
+    ck not table.isNil and table.rows.len == Plat62RowTotal and
+       table.rows[Plat62HalveRow] ==
+         @["halve", "unconstrained", "16", "src/main.nr:11"]
+    ck not table.isNil and table.rows[Plat62RangeOpcodeRow][3] ==
+       "src/checks.nr:" & $Plat62RangeLine
     ck paneConstraints in PaneVocabularyPanes
     ck paneConstraints notin PaneAcceptedExceptions
     # A PRESS ON `halve` (K67): its line in the editor, the line the desktop's
     # press opened; the editor focused.
-    let (hr, hc) = s.rowAt(1)
+    let (hr, hc) = s.rowAt(Plat62HalveRow)
     discard s.rt.press(hr, hc)
-    ck s.rt.app.constraints.selected == 1
+    ck s.rt.app.constraints.selected == Plat62HalveRow
     ck s.activeEditor() == ("src/main.nr", Plat62HalveLine, 15)
     ck s.activeEditor().path == answers["pressedPlaced"]["path"].getStr
     ck s.activeEditor().line == answers["pressedPlaced"]["line"].getInt
     ck answers["selectedAfterPress"].getElems.len == 1 and
-       answers["selectedAfterPress"][0].getInt == 1
+       answers["selectedAfterPress"][0].getInt == Plat62HalveRow
     ck s.rt.focus.focusedPane()[1] == paneEditor
     ck s.rt.app.editSession.activeBuffer().text.splitLines()[Plat62HalveLine - 1] ==
        "unconstrained fn halve(v: Field) -> Field {"
+    # A PRESS ON AN OPCODE: the line the debug symbols name for it, inlined
+    # code's own line rather than its call.
+    let (or0, oc) = s.rowAt(Plat62RangeOpcodeRow)
+    discard s.rt.press(or0, oc)
+    ck s.activeEditor().path == "src/checks.nr"
+    ck s.activeEditor().line == Plat62RangeLine
+    ck answers["pressedOpcode"]["path"].getStr == "src/checks.nr"
+    ck answers["pressedOpcode"]["line"].getInt == Plat62RangeLine
+    let (kr, kc) = s.rowAt(Plat62HalveRow)
+    discard s.rt.press(kr, kc)
     # A PRESS ON A DIRECTIVE opens nothing and says why.
-    let (dr, dc) = s.rowAt(3)
+    let (dr, dc) = s.rowAt(Plat62QuotientRow)
     discard s.rt.press(dr, dc)
-    ck s.rt.app.constraints.selected == 3
+    ck s.rt.app.constraints.selected == Plat62QuotientRow
     ck s.rt.app.notification == DirectiveReason
     ck s.activeEditor().line == Plat62HalveLine
     # THE RIGHT PRESS'S MENU (K68): the desktop's, on a placed row …
@@ -367,7 +394,7 @@ suite "PLAT-62: the terminal's Constraints pane over a real measurement":
     ck s.activeEditor() == ("src/main.nr", Plat62MainLine, 1)
     # … and on a row placed nowhere: Go to Source and Copy Source Location
     # disabled with the row's reason, as the desktop's.
-    let (nr, nc) = s.rowAt(2)
+    let (nr, nc) = s.rowAt(Plat62InvertRow)
     discard s.rt.press(nr, nc, button = 2)
     entries = @[]
     for e in s.rt.app.contextMenu.menu.entries:
@@ -389,8 +416,8 @@ suite "PLAT-62: the terminal's Constraints pane over a real measurement":
     ck s.rt.app.constraints.selected == 0
     discard s.rt.handleToken("\x1b[B", 0)    # Down
     ck s.rt.app.constraints.selected == 1
-    discard s.rt.handleToken("\r", 0)        # Enter opens it
-    ck s.activeEditor() == ("src/main.nr", Plat62HalveLine, 15)
+    discard s.rt.handleToken("\r", 0)        # Enter opens it: main's first opcode
+    ck s.activeEditor().path == "src/main.nr" and s.activeEditor().line == 4
     # AN UNSAVED EDIT marks the counts stale; `:w` re-measures them.
     discard s.rt.handleToken("X", 0)
     ck s.rt.app.editSession.activeBuffer().isDirty
@@ -422,14 +449,28 @@ suite "PLAT-62: the terminal's Constraints pane over a real measurement":
     s.settle()
     ck s.src.host.runs == 1
     ck s.rt.app.constraints.headline == Plat62Headline
-    ck s.rt.app.constraints.rows.len == 4
+    ck s.rt.app.constraints.rows.len == Plat62RowTotal
     ck s.rt.app.constraints.rows[0].where == "src/main.nr:3"
+    ck s.rt.app.constraints.rows[Plat62RangeOpcodeRow].where ==
+       "src/checks.nr:" & $Plat62RangeLine
     # Shown again, it is focused, not opened twice.
     s.omnibox(":constraints")
     var count = 0
     for leaf in allPanes(b.layout.tree):
       if leaf == paneConstraints: inc count
     ck count == 1
+    s.src.close()
+    removeDir(project)
+
+  test "Debug mode: View › Constraints opens it too":
+    let project = writeCrate()
+    var s = open(project, pmDebug)
+    ck s.rt.paneAreaOf(paneConstraints).width == 0
+    var outcome: RuntimeOutcome
+    s.rt.runMenuAction("aConstraints", outcome)
+    ck s.rt.paneAreaOf(paneConstraints).width > 0
+    s.settle()
+    ck s.rt.app.constraints.rows.len == Plat62RowTotal
     s.src.close()
     removeDir(project)
 

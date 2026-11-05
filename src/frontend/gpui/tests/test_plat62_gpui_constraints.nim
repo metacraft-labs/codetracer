@@ -43,10 +43,12 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 27
+  ExpectedAssertions = 28
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1600
   H = 1000
+  TallH = 3200
+    ## Tall enough that every one of the crate's rows is drawn in one plan.
   AnswersFile = "src/tests/visual/answers/plat62-constraints.electron.json"
   DirectiveReasonText =
     "the compiler generated this function (a directive); no source in the " &
@@ -79,8 +81,8 @@ proc writeCrate(): string =
   for (path, content) in Plat62Files:
     writeFile(result / path, content)
 
-proc windowPlan(project, ops: string; edit = false; trace = ""):
-    tuple[plan: JsonNode, trace: string] =
+proc windowPlan(project, ops: string; edit = false; trace = "";
+                height = H): tuple[plan: JsonNode, trace: string] =
   ## The window's root after `ops`, and its gesture trace — the binary run in
   ## `project`, its own scratch homes.
   if not fileExists(bin):
@@ -101,7 +103,7 @@ proc windowPlan(project, ops: string; edit = false; trace = ""):
   createDir(state / "ct-home")
   writeFile(state / "ct-home" / ".codetracer-test-home", "")
   let errFile = genTempPath("plat62-gpui-plan-", ".err")
-  var args = @["--report-window-plan", "--width=" & $W, "--height=" & $H,
+  var args = @["--report-window-plan", "--width=" & $W, "--height=" & $height,
                "--window-ops=" & ops]
   if edit:
     args.add @["--edit", project]
@@ -148,6 +150,34 @@ proc partOf(row: JsonNode; part: string): string =
       return t.strip()
   ""
 
+proc matchesDesktop(r, want: JsonNode): bool =
+  ## Whether the window drew row `want` of the desktop's capture: every part it
+  ## shows, and where a press goes.
+  let parts =
+    if want["opcode"].getBool:
+      r.attr("data-ct-constraint-text").startsWith(want["count"].getStr & " " &
+                                                   want["name"].getStr)
+    else:
+      (r.partOf("name") == want["name"].getStr or
+       (r.partOf("name").endsWith("…") and
+        want["name"].getStr.startsWith(r.partOf("name")[0 ..< ^"…".len]))) and
+      r.partOf("kind") == want["kind"].getStr and
+      r.partOf("count") == want["count"].getStr
+  parts and r.attr("data-ct-constraint-row") == $want["index"].getInt and
+    r.attr("data-ct-constraint-name") == want["name"].getStr and
+    r.attr("data-ct-constraint-where") == want["where"].getStr and
+    r.attr("data-ct-constraint-title") == want["title"].getStr and
+    r.attr("data-ct-constraint-linked") == $want["linked"].getBool
+
+proc rowsEqualToDesktop(rows, wants: seq[JsonNode]): int =
+  ## How many of the desktop's rows the window drew, in its order.
+  for i, want in wants:
+    if i >= rows.len: break
+    if rows[i].matchesDesktop(want):
+      inc result
+    else:
+      checkpoint("row " & $i & ": " & $rows[i] & " vs " & $want)
+
 proc menuOf(answer: JsonNode): string =
   ## The desktop's menu as the window's trace says it: `labels|…`.
   var labels: seq[string] = @[]
@@ -160,7 +190,7 @@ suite "PLAT-62: the GPUI window's Constraints pane":
   test "Edit mode: the desktop's rows, measured the first time it is shown":
     let project = writeCrate()
     let (plan, tr) = windowPlan(project, "constraints:show,constraints:wait",
-                                edit = true)
+                                edit = true, height = TallH)
     checkpoint(tr)
     ck tr.contains("constraints: measuring " & project)
     let before = answers["before"]
@@ -173,34 +203,17 @@ suite "PLAT-62: the GPUI window's Constraints pane":
     ck plan.nodesWith("data-ct-constraints-notice").len ==
        (if before["notice"].getStr.len > 0: 1 else: 0)
     let rows = plan.nodesWith("data-ct-constraint-row")
-    ck rows.len == before["rows"].len
-    var same = 0
-    for i, want in before["rows"].getElems:
-      if i >= rows.len: break
-      let r = rows[i]
-      if r.attr("data-ct-constraint-row") == $want["index"].getInt and
-         r.attr("data-ct-constraint-name") == want["name"].getStr and
-         (r.partOf("name") == want["name"].getStr or
-          (r.partOf("name").endsWith("…") and
-           want["name"].getStr.startsWith(r.partOf("name")[0 ..< ^"…".len]))) and
-         r.partOf("kind") == want["kind"].getStr and
-         r.partOf("count") == want["count"].getStr and
-         r.attr("data-ct-constraint-where") == want["where"].getStr and
-         r.attr("data-ct-constraint-title") == want["title"].getStr and
-         r.attr("data-ct-constraint-linked") == $want["linked"].getBool:
-        inc same
-      else:
-        checkpoint("row " & $i & ": " & $r & " vs " & $want)
-    ck same == 4
+    ck rows.len == Plat62RowTotal and before["rows"].len == Plat62RowTotal
+    ck rowsEqualToDesktop(rows, before["rows"].getElems) == Plat62RowTotal
     removeDir(project)
 
   test "a press opens the declaring line; a directive's says why":
     let project = writeCrate()
     let (plan, tr) = windowPlan(project,
-      "constraints:show,constraints:wait,constraints:row:1",
+      "constraints:show,constraints:wait,constraints:row:" & $Plat62HalveRow,
       edit = true)
     checkpoint(tr)
-    ck tr.contains("constraints: press row 1")
+    ck tr.contains("constraints: press row " & $Plat62HalveRow)
     ck tr.contains("caret " & $Plat62HalveLine & ":15")
     ck answers["pressedPlaced"]["line"].getInt == Plat62HalveLine
     ck tr.contains("constraints: opened src/main.nr:" & $Plat62HalveLine)
@@ -208,22 +221,34 @@ suite "PLAT-62: the GPUI window's Constraints pane":
     for n in plan.nodesWith("data-ct-selected"):
       if n.has("data-ct-constraint-row"):
         selected.add n.attr("data-ct-constraint-row")
-    ck selected == @["1"]
+    ck selected == @[$Plat62HalveRow]
     let (_, tr2) = windowPlan(project,
-      "constraints:show,constraints:wait,constraints:row:2", edit = true)
+      "constraints:show,constraints:wait,constraints:row:" & $Plat62InvertRow,
+      edit = true)
     ck tr2.contains("constraints: " & DirectiveReasonText)
     ck not tr2.contains("constraints: opened")
+    # An opcode leads to the line its debug symbols name, inlined code's own.
+    let (_, tr3) = windowPlan(project,
+      "constraints:show,constraints:wait,constraints:row:" &
+      $Plat62RangeOpcodeRow, edit = true)
+    ck tr3.contains("constraints: opened src/checks.nr:" & $Plat62RangeLine)
+    ck answers["pressedOpcode"]["line"].getInt == Plat62RangeLine
     removeDir(project)
 
   test "the row's menu: the desktop's entries; Copy Source Location":
     let project = writeCrate()
+    # The right press alone first: a window whose press opens no menu has no
+    # entry to choose below, and that run could only fail as a whole.
+    let (_, opened) = windowPlan(project,
+      "constraints:show,constraints:wait,constraints:menu:0", edit = true)
+    checkpoint(opened)
+    ck opened.contains("context menu constraint-row " &
+                       answers["placedMenu"].menuOf)
     let (_, tr) = windowPlan(project,
       "constraints:show,constraints:wait," &
       "constraints:menu:0,ctx:Copy Source Location," &
-      "constraints:menu:3,ctx:Copy Name", edit = true)
+      "constraints:menu:" & $Plat62QuotientRow & ",ctx:Copy Name", edit = true)
     checkpoint(tr)
-    ck tr.contains("context menu constraint-row " &
-                   answers["placedMenu"].menuOf)
     ck tr.contains("copied the row: src/main.nr:3")
     ck tr.contains("context menu constraint-row " &
                    answers["nowhereMenu"].menuOf)
@@ -239,7 +264,8 @@ suite "PLAT-62: the GPUI window's Constraints pane":
       "constraints:key:list.focus-next,constraints:key:list.activate",
       edit = true)
     checkpoint(tr)
-    ck tr.contains("constraints: opened src/main.nr:" & $Plat62HalveLine)
+    # `main`'s first opcode, the row after `main`.
+    ck tr.contains("constraints: opened src/main.nr:4")
     removeDir(project)
 
   test "its recording: `:constraints` in the recording's tab":
@@ -247,7 +273,8 @@ suite "PLAT-62: the GPUI window's Constraints pane":
     let trace = calc()
     let (plan, tr) = windowPlan(project,
       "tests:show,tests:open:test_main,tests:wait," &
-      "constraints:show,constraints:wait,constraints:row:0", trace = trace)
+      "constraints:show,constraints:wait,constraints:row:0", trace = trace,
+      height = TallH)
     checkpoint(tr)
     # The recording of the crate's test opened in a new session tab …
     ck tr.contains("tests: opened the recording ")
@@ -255,10 +282,10 @@ suite "PLAT-62: the GPUI window's Constraints pane":
     # … where the Constraints pane was opened, measured and drawn.
     ck tr.contains("constraints: measuring " & project)
     let rows = plan.nodesWith("data-ct-constraint-row")
-    ck rows.len == 4
-    if rows.len == 4:
-      ck rows[0].attr("data-ct-constraint-where") == "src/main.nr:3"
-      ck rows[3].attr("data-ct-constraint-name") == "directive_integer_quotient"
+    # THE DESKTOP'S ROWS IN ITS OWN DEBUG MODE: its recording's tab, measured.
+    let debug = answers["debug"]["rows"].getElems
+    ck rows.len == debug.len
+    ck rowsEqualToDesktop(rows, debug) == Plat62RowTotal
     # A press on `main` opens its line from the recording.
     ck tr.contains("constraints: opened src/main.nr:" & $Plat62MainLine)
     removeDir(project)

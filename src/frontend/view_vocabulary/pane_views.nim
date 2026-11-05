@@ -1067,7 +1067,7 @@ proc constraintsPaneView*(vm: ConstraintsVM): PaneView =
       of crkFunction:
         cells.add @[row.name, row.kindLabel, row.count, whereText(row.source)]
       of crkOpcode:
-        cells.add @[rowText(row), "", row.count, ""]
+        cells.add @[rowText(row), "", row.count, whereText(row.source)]
     children.add viewTable("constraints.rows", ConstraintsColumns, cells)
     if report.provenance.len > 0:
       children.add viewText("constraints.provenance", report.provenance)

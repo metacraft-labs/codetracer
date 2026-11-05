@@ -6537,6 +6537,7 @@ proc menuPaneOf*(action: string): (bool, PaneKind) =
   of "aAgentActivity": (true, paneAgentActivity)
   # PLAT-63: View › Verification.
   of "aVerification": (true, paneVerification)
+  of "aConstraints": (true, paneConstraints)
   of "aShell": (true, paneShell)   # PLAT-61
   else: (false, paneEditor)
 

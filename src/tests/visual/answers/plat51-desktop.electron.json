@@ -341,6 +341,7 @@
    "Breakpoints & Tracepoints",
    "Agent Activity",
    "Verification",
+   "Constraints",
    "Start Agent Worktree Session",
    "Notifications",
    "Reset Layout",

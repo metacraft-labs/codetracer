@@ -13,15 +13,15 @@
 ##   * EDIT MODE over the PLAT-62 crate (`--edit`): the pane the Edit default
 ##     places, measured by the real `nargo info --json`; the headline, and per
 ##     row the name, the count and where the function is declared, equal to
-##     the desktop's, in its order; a press on `halve` opens its declaring line
-##     in the editor; a right press opens the desktop's menu; a press on a
+##     the desktop's, in its order; a press on an opcode opens the line its debug
+##     symbols name; a press on `halve` opens its declaring line in the editor; a right press opens the desktop's menu; a press on a
 ##     directive says why nothing opens;
 ##   * ITS RECORDING: the terminal started on a recording in the crate's
 ##     directory, the crate's test recorded and opened in a new session tab
 ##     from Test Results (the real `ct record-test`); there, where the Debug
 ##     default places no Constraints pane, `:constraints` opens it with the
-##     desktop's rows, and a press on `main` opens its line from the
-##     recording.
+##     rows of the desktop's own recording tab (View › Constraints, in its
+##     Debug mode), and a press on `main` opens its line from the recording.
 ##
 ## No mocks: the real binary, the real `nargo`, `ct`, `ct-test` and
 ## `replay-server` on a real crate, a real pty (TermAssert + libvterm), the
@@ -39,7 +39,7 @@ import ./lifecycle_support
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 12
+const ExpectedAssertions = 16
 
 var countedAssertions = 0
 
@@ -116,24 +116,70 @@ proc writeCrate(): string =
   for (path, content) in Plat62Files:
     writeFile(result / path, content)
 
-proc rowsMatch(sess: var TuiTestSession; headRow: int; answers: JsonNode): int =
-  ## How many of the desktop's rows the screen shows, in its order, under the
-  ## headline: each line holds the row's name, count and place.
-  let s = sess.snap()
+proc sees(sess: var TuiTestSession; needle: string; timeoutMs = 60000): bool =
+  ## Whether `needle` appears within the budget, as a check can read it: a case
+  ## that failed here names this behaviour, where `waitFor`'s exception would
+  ## leave only the suite's count to say something went wrong.
+  try:
+    discard sess.waitFor(needle, timeoutMs)
+    true
+  except AssertionFailedError as e:
+    checkpoint(e.msg)
+    false
+
+proc wheel(sess: var TuiTestSession; row, col: int; up = false) =
+  sess.send("\x1b[<" & $(if up: 64 else: 65) & ";" & $(col + 1) & ";" &
+            $(row + 1) & "M")
+  sleep(120)
+
+proc rowShows(line: string; want: JsonNode): bool =
+  ## Whether a list line shows the desktop's row: a function's name and count,
+  ## an opcode's index and name, and where each is placed.
+  let what =
+    if want["opcode"].getBool:
+      line.contains(want["count"].getStr & " " & want["name"].getStr)
+    else:
+      line.contains(want["name"].getStr) and
+        line.contains(" " & want["count"].getStr & " ")
+  what and (want["where"].getStr.len == 0 or line.contains(want["where"].getStr))
+
+proc rowsMatch(sess: var TuiTestSession; headRow, col: int;
+               wants: JsonNode): int =
+  ## How many of the desktop's rows the screen shows, in its order, read under
+  ## the headline as a user reads them: wheeling on when the next is not in view.
+  var s = sess.snap()
   var r = headRow + 1
-  for want in answers["before"]["rows"]:
-    while r < Rows and s.text(r).cellFind(want["name"].getStr) < 0 and
-          r < headRow + 6:
-      inc r
-    let line = s.text(r)
-    if line.contains(want["name"].getStr) and
-       line.contains(" " & want["count"].getStr & " ") and
-       (want["where"].getStr.len == 0 or line.contains(want["where"].getStr)):
+  for want in wants:
+    var found = false
+    for _ in 0 .. 60:
+      var at = r
+      while at < Rows and not s.text(at).rowShows(want):
+        inc at
+      if at < Rows:
+        r = at + 1
+        found = true
+        break
+      sess.wheel(headRow + 1, col)
+      s = sess.snap()
+      r = headRow + 1
+    if found:
       inc result
     else:
-      checkpoint("row '" & want["name"].getStr & "' at " & $r & ": '" &
-                 line & "'")
-    inc r
+      checkpoint("row '" & want["name"].getStr & "' " & want["count"].getStr &
+                 " never showed:\n" & s.screenText())
+  # Back to the top for what the case does next.
+  for _ in 0 .. 60:
+    sess.wheel(headRow + 1, col, up = true)
+
+proc showRow(sess: var TuiTestSession; headRow, col: int;
+             needle: string): (int, int) =
+  ## Where the row showing `needle` is, wheeled into view from the top.
+  for _ in 0 .. 60:
+    let at = sess.snap().findRow(needle)
+    if at[0] > headRow:
+      return at
+    sess.wheel(headRow + 1, col)
+  (-1, -1)
 
 proc widenLeftOf(sess: var TuiTestSession; row: int; cols = 70) =
   ## Drag the divider left of the pane on `row` (the last `▏` before the
@@ -182,20 +228,32 @@ suite "PLAT-62: the Constraints pane on a real terminal":
     createDir(state)
     var sess = spawnIn(project, state, @["--edit", project])
     let headline = answers["before"]["headline"].getStr
-    var (hr, _) = sess.waitFor(headline, MeasureBudgetMs)
+    # A pane the terminal draws as the old report leaf never shows the headline.
+    ck sess.sees(headline, MeasureBudgetMs)
+    var (hr, hc) = sess.waitFor(headline)
     sess.widenLeftOf(hr + 3)
-    hr = sess.waitFor(headline)[0]
+    (hr, hc) = sess.waitFor(headline)
     ck hr >= 0
-    ck sess.rowsMatch(hr, answers) == answers["before"]["rows"].len
+    ck sess.rowsMatch(hr, hc, answers["before"]["rows"]) == Plat62RowTotal
+    # A PRESS ON AN OPCODE: the line its debug symbols name, in the file it was
+    # inlined from.
+    let (opcodeRow, opcodeCol) = sess.showRow(hr, hc,
+      answers["before"]["rows"][Plat62RangeOpcodeRow]["count"].getStr & " " &
+      answers["before"]["rows"][Plat62RangeOpcodeRow]["name"].getStr)
+    ck opcodeRow > hr
+    sess.press(opcodeRow, opcodeCol)
+    # The shipped window opens what a row names: a refusal shows no such line.
+    ck sess.sees("opened src/checks.nr:" & $Plat62RangeLine)
     # A PRESS ON `halve`: its declaring line in the editor.
-    var s = sess.snap()
-    let (halveRow, halveCol) = s.findRow("halve ")
+    let (halveRow, halveCol) = sess.showRow(hr, hc, "halve ")
     ck halveRow > hr
     sess.press(halveRow, halveCol)
-    discard sess.waitFor("opened src/main.nr:" & $Plat62HalveLine)
+    ck sess.sees("opened src/main.nr:" & $Plat62HalveLine)
     ck sess.snap().findRow("unconstrained fn halve(v: Field)")[0] >= 0
     # A RIGHT PRESS on `main`: the desktop's menu.
-    s = sess.snap()
+    for _ in 0 .. 60:
+      sess.wheel(hr + 1, hc, up = true)
+    var s = sess.snap()
     var mr = -1
     var mc = -1
     for r in hr + 1 .. min(Rows - 1, hr + 5):
@@ -213,8 +271,7 @@ suite "PLAT-62: the Constraints pane on a real terminal":
     sess.send("\x1b")
     sleep(300)
     # A PRESS ON A DIRECTIVE: nothing opens, and the status line says why.
-    s = sess.snap()
-    let (dr, dc) = s.findRow("directive_integer_quotient")
+    let (dr, dc) = sess.showRow(hr, hc, "directive_integer_quotient")
     ck dr > hr
     sess.press(dr, dc)
     discard sess.waitFor("the compiler generated this function")
@@ -260,9 +317,10 @@ suite "PLAT-62: the Constraints pane on a real terminal":
     # Debug mode places no Constraints pane; `:constraints` opens it.
     ck sess.snap().findRow(answers["before"]["headline"].getStr)[0] < 0
     sess.omnibox(":constraints")
-    let (hr, _) = sess.waitFor(answers["before"]["headline"].getStr,
-                               MeasureBudgetMs)
-    ck sess.rowsMatch(hr, answers) == answers["before"]["rows"].len
+    let (hr, hc) = sess.waitFor(answers["debug"]["headline"].getStr,
+                                MeasureBudgetMs)
+    # THE DESKTOP'S ROWS IN ITS OWN DEBUG MODE: its recording's tab, measured.
+    ck sess.rowsMatch(hr, hc, answers["debug"]["rows"]) == Plat62RowTotal
     # A press on `main` opens its line from the recording.
     s = sess.snap()
     var mr, mc = -1

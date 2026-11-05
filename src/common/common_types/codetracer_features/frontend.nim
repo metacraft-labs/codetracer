@@ -354,7 +354,10 @@ type
     # the end, for the reason every note above gives.
     aRunProgram,                  # palette: Project: Run
     aRunProgramInCurrentTab,      # palette: Project: Run in Current Tab
-    aInlineBreakpoint             # Shift+F9: a column breakpoint at the caret
+    aInlineBreakpoint,            # Shift+F9: a column breakpoint at the caret
+    # View › Constraints: how a desktop user opens the pane where the layout
+    # does not place it (Debug mode). Appended, for the same reason.
+    aConstraints                  # menu: View › Constraints
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

@@ -18,6 +18,7 @@
 ##             span.low-level-code-instruction-offset  "0"
 ##             span.low-level-code-instruction-name    "BRILLIG"
 ##             span.low-level-code-instruction-args    "CALL func: 0, ..."
+##             span.constraints-where                  "src/main.nr:4"
 ##     div.constraints-provenance  text how the counts were obtained
 ##     div.constraints-absence[.hidden]
 ##       text  why there are no counts
@@ -227,6 +228,7 @@ proc renderOpcode[R, N](r: R; vm: ConstraintsVM; row: ConstraintRow;
                         index: int; selected: bool): N =
   let name = row.name
   let args = row.args
+  let where = whereText(row.source)
   result = ui(r):
     tdiv(class = rowElementClass(row, selected), `data-ct-row` = $index,
          title = rowTitle(row), onclick = onRowPress(vm, index)):
@@ -236,6 +238,8 @@ proc renderOpcode[R, N](r: R; vm: ConstraintsVM; row: ConstraintRow;
         text name
       span(class = "low-level-code-instruction-args"):
         text args
+      span(class = "constraints-where"):
+        text where
   when defined(js):
     when N is isonim_dom.Element:
       wireRowMenu(result, vm, index)

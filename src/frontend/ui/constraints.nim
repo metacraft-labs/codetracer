@@ -25,11 +25,14 @@ import
 # where the rule about which edits count can be driven by a headless lane.
 from ../viewmodel/viewmodels/constraints_vm import
   ConstraintsVM, createConstraintsVM, setReport, setAbsence, noteSourceEdited,
-  NoirSourceFile
+  NoirSourceFile, ConstraintReport
+from ../viewmodel/viewmodels/constraints_answer import ConstraintsOnlyAsk,
+  attachListing, placeOpcodes
 from ../viewmodel/viewmodels/build_diagnostics import resolvedPath
 import std/json
 from isonim/web/dom_api import nil
 from ./pane_host_lookup import tabOfPaneHost
+import isonim/core/signals
 import isonim/web/web_renderer
 import ./panel_host
 from ../viewmodel/session_vm import SessionViewModel
@@ -41,6 +44,46 @@ var constraintsVMInstance*: ConstraintsVM
   ## names the one the window's hosts write into now, moved by
   ## `bindConstraintsVM` on every tab switch. Each tab's pane renders its own
   ## tab's (`constraintsVMForHost`).
+
+var recordingTabsAsked: seq[int]
+  ## `ReplaySession.id` of each tab holding a recording that has asked for the
+  ## circuit (`askToMeasure`): its pane has been on screen, so it follows the
+  ## project from then on. A tab with no recording asks at start-up instead
+  ## (`ui_js.onNoTrace`).
+
+proc setMeasuredReport*(vm: ConstraintsVM; totals: ConstraintReport;
+                        listing, artefact: string) =
+  ## The desktop host's answer joined by the procs the native hosts use, placed
+  ## against the sources that came with it.
+  vm.setReport(placeOpcodes(attachListing(totals, listing), artefact,
+                            vm.sources.val))
+
+proc sendMeasureAsk(session: ReplaySession) =
+  # A tab holding a recording has the window's start options, so its folder is
+  # the project the window opened: every tab of a window shares its project, as
+  # a native window's do.
+  data.ipc.send "CODETRACER::ns9-panes",
+    js{ folder: session.startOptions.folder,
+        tab: int(session.id), only: cstring(ConstraintsOnlyAsk) }
+
+proc askToMeasure*(session: ReplaySession) =
+  ## `session`'s pane is on screen: measure its project the first time, as a
+  ## native window does (`native_constraints_host`). Never for a tab that does
+  ## not show the pane, because `nargo` compiles the project.
+  if session.isNil or session.trace.isNil or
+     int(session.id) in recordingTabsAsked:
+    return
+  recordingTabsAsked.add int(session.id)
+  sendMeasureAsk(session)
+
+proc remeasureRecordingTabs*() =
+  ## A source was saved: the recordings' tabs that show the pane measure again.
+  ## The tab on screen has already asked, when its start options say Edit
+  ## (`ui_js`, on a save).
+  for session in data.sessions:
+    if not session.isNil and int(session.id) in recordingTabsAsked and
+       not (session == data.activeSession and data.startOptions.edit):
+      sendMeasureAsk(session)
 
 proc sourcesFromJson*(text: string): seq[NoirSourceFile] =
   ## The `[{path, content}]` the main process sends beside a report
@@ -102,9 +145,14 @@ proc constraintsVMForHost(host: dom_api.Element): ConstraintsVM =
   let tab = tabOfPaneHost(host)
   if tab >= 0 and tab < data.sessions.len:
     result = constraintsVMOf(data.sessions[tab])
+    askToMeasure(data.sessions[tab])
   else:
+    # Also a host GoldenLayout has not attached to its tab's container yet,
+    # which is every pane a View item opens: the tab on screen is its tab.
     initConstraintsVM()
     result = constraintsVMInstance
+    if data.sessions.len > 0:
+      askToMeasure(data.activeSession)
   installConstraintsCallbacks(result)
 
 # The panel host mounts the pane into the container GoldenLayout creates.
@@ -129,9 +177,12 @@ proc noteEditorSourceChanged*(path: cstring) =
   ## Silent when there is no VM. The pane is created lazily by
   ## `initConstraintsVM`, and it is not this hook's business to force it into
   ## existence: a project with no constraint report has no count to invalidate.
-  if constraintsVMInstance.isNil:
-    return
-  constraintsVMInstance.noteSourceEdited($path)
+  if not constraintsVMInstance.isNil:
+    constraintsVMInstance.noteSourceEdited($path)
+  # The recordings' tabs that show the pane describe the same project.
+  for session in data.sessions:
+    if not session.isNil and int(session.id) in recordingTabsAsked:
+      constraintsVMOf(session).noteSourceEdited($path)
 
 method register*(self: ConstraintsComponent, api: MediatorWithSubscribers) =
   self.api = api

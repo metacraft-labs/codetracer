@@ -4347,6 +4347,9 @@ proc onSavedFile(sender: js, response: jsobject(name=cstring)) =
     # every install and after every save" and it had one call site, in a
     # one-shot startup block.
     debug_toolbar.refreshEditToolbar()
+  # THE RECORDINGS' TABS THAT SHOW THE PANE describe the same project, so they
+  # measure again too, as a native window does on a save.
+  constraints.remeasureRecordingTabs()
 
   data.redraw()
 
@@ -4601,8 +4604,15 @@ proc onNs9PanesConstraints(
   if not rawSources.isUndefined and not rawSources.isNull:
     constraintsVM.setSources(
       constraints.sourcesFromJson($rawSources.to(cstring)))
-  constraintsVM.setReport(
-    parseNargoInfoJson($response.info, $response.provenance))
+  let totals = parseNargoInfoJson($response.info, $response.provenance)
+  # The browser's host answers with the bundled counts alone: it has no listing
+  # to say anything about, and the pane says totals are what it holds.
+  let listing = response.toJs[cstring"listing"]
+  if listing.isUndefined or listing.isNull:
+    constraintsVM.setReport(totals)
+  else:
+    constraints.setMeasuredReport(constraintsVM, totals,
+      $listing.to(cstring), $response.toJs[cstring"artefact"].to(cstring))
 
 # ---------------------------------------------------------------------------
 # THE DESKTOP TEST-RUNNER HOST
@@ -6424,6 +6434,8 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   aRunProgramInCurrentTab: proc(actionData: JsObject) = # aRunProgramInCurrentTab
     runProgramIn(data, topCurrentTab),
   aInlineBreakpoint: proc(actionData: JsObject) = data.toggleInlineBreakpointAtCaret(),
+  aConstraints: proc(actionData: JsObject) = # aConstraints
+    data.openLayoutTab(Content.Constraints),
 ]
 
 data.actions = actions
