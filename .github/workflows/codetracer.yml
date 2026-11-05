@@ -8120,6 +8120,18 @@ jobs:
           persist-credentials: false
           submodules: false
 
+      # sibling-provisioning-test.sh checks that the git-auth pin in
+      # provision-repro-lock-siblings names a commit of metacraft-github-actions
+      # that carries the action, against a checkout beside this one, and fails
+      # when there is none. The repository is public, so a plain clone needs no
+      # credential; actions/checkout cannot write outside the workspace. A full
+      # clone, because the pin need not be on the default branch.
+      - name: Clone metacraft-github-actions beside the checkout
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: |
+          rm -rf ../metacraft-github-actions
+          git clone --quiet https://github.com/metacraft-labs/metacraft-github-actions ../metacraft-github-actions
+
       - name: Assert the Windows lane provisions its own git and bash
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # The eph-win-x64 image ships neither; five of the six Windows jobs
