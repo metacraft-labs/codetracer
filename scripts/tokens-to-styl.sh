@@ -123,6 +123,9 @@ def path_to_var(path_parts):
     return "-".join(sanitize_part(p) for p in path_parts)
 
 REF_RE = re.compile(r"^\{([^{}]+)\}$")
+# A zero length in a unit where zero means zero whatever the unit (not `%`,
+# `vh` or `vw`, which the token set uses for relative sizes).
+ZERO_LENGTH_RE = re.compile(r"-?0+(?:\.0+)?(?:px|rem|em)")
 
 def ref_to_var(ref_text: str) -> str:
     inner = ref_text.strip()[1:-1].strip()
@@ -152,6 +155,12 @@ def stylus_scalar(value):
         if is_hex_color(value):
             return value
         if is_css_dimension(value):
+            # A zero length needs no unit, and the stylesheets size nothing
+            # in px (docs/UI-Design-Decisions.md, enforced by
+            # ci/test/ui-design-decisions.py), so the design system's `0px`
+            # is written as a bare `0`.
+            if ZERO_LENGTH_RE.fullmatch(value):
+                return "0"
             return value
         return quote_string(value)
     return None

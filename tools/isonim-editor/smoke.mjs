@@ -387,18 +387,36 @@ async function main() {
       last.includes("PROJECT CONTEXT:") && last.includes("CODETRACER_AGENT_HARBOR_BRIEF"));
     if (privateBrief) {
       // The agent's own environment, read from the running peer process.
-      let env = "";
+      // The host may be running other smokes' agents at the same time, so
+      // this run's agent is recognised by the content log this run handed
+      // it (FAKE_ACP_CONTENT_LOG is --agent-log, inherited through the
+      // editor server). A process whose environment cannot be read (it
+      // exited after `ps` listed it, or belongs to another user) is not
+      // this run's agent and is skipped rather than failing the check.
+      const marker = `FAKE_ACP_CONTENT_LOG=${agentLog}`;
+      const agentEnvs = [];
+      let detail = "";
       try {
         const ps = execFileSync("ps", ["-eo", "pid=,args="], { encoding: "utf8" });
         for (const line of ps.split("\n")) {
           const m = line.match(/^\s*(\d+)\s+(\S*fake-acp-agent)(\s|$)/);
-          if (m) env += readFileSync(`/proc/${m[1]}/environ`, "utf8");
+          if (!m) continue;
+          let vars;
+          try {
+            vars = readFileSync(`/proc/${m[1]}/environ`, "utf8").split("\0");
+          } catch {
+            continue;
+          }
+          if (vars.includes(marker)) agentEnvs.push(vars);
         }
+        if (agentEnvs.length === 0) detail = `no running fake-acp-agent carries ${marker}`;
       } catch (error) {
-        env = `unreadable: ${error.message}`;
+        detail = `ps failed: ${error.message}`;
       }
       check("the agent's environment names the private brief",
-        env.split("\0").includes(`CODETRACER_AGENT_HARBOR_BRIEF=${privateBrief}`));
+        agentEnvs.length > 0 &&
+          agentEnvs.every((vars) => vars.includes(`CODETRACER_AGENT_HARBOR_BRIEF=${privateBrief}`)),
+        detail);
     }
   } catch (error) {
     check("smoke run completed", false, error.stack ?? String(error));

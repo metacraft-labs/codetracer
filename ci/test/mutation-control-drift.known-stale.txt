@@ -401,3 +401,11 @@ src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	src/f
 src/frontend/viewmodel/tests/unit/plat36-vim-import-mutation-control.sha256	src/frontend/tui/host/edit_host.nim	d3ace54a132483c9eb033748222b4f2c7746d58c59d3354db8b60c75c9b765db	f92742bc7fd15a87ad1b10cece52effdc0158a86a0214544f32468158b5cc1fa
 src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/tui/main.nim	11eb1011439b77b4b1958f0a60b147efc9d9d08577141b40cd8113f00a99e1ef	e88527125d92967300a2edacf4fef93160e08f58d86fb6aa5f5450ddb1acb474
 src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/gpui/main.nim	f64f4c635c24e4e26d22186270241dd71dccefe8066c9dbb225eea34cb786f88	ec07d2181417603aeab7e7fd2598dc0c81f03dc0931b95604413f5f773cbfcce
+
+# 2026-11-05, scripts/tokens-to-styl.sh writes a zero length as a bare `0`, so
+# the generated brand.styl is again what the generator writes and
+# design-tokens-fresh.sh and ui-design-decisions.py agree. Both harnesses
+# already owed re-grades before this edit (their other stale lines above).
+# No mutation grade is claimed and no control file was re-recorded.
+src/frontend/tui/tests/plat46-design-mutation-control.sha256	scripts/tokens-to-styl.sh	9e47e62300101d3cf4a629c0dac0480a0f52eae13d3696da21cc728e834d7d04	92b76397e164fec56e5091a5e2d4ab7a314035095ced745b52d29713be5a8fbf
+src/frontend/tui/tests/plat47-parity-mutation-control.sha256	scripts/tokens-to-styl.sh	9e47e62300101d3cf4a629c0dac0480a0f52eae13d3696da21cc728e834d7d04	92b76397e164fec56e5091a5e2d4ab7a314035095ced745b52d29713be5a8fbf
