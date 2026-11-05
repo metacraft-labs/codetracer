@@ -1335,11 +1335,11 @@
     "codetracer-native-recorder": {
       "flake": false,
       "locked": {
-        "lastModified": 1793844142,
-        "narHash": "sha256-05sTE9iaRMW14yeJxcs6c3RPGoFCYzpZv2osNtS2i5U=",
+        "lastModified": 1793849743,
+        "narHash": "sha256-guejblRQKUGF2Fegch9I5+/dAlRksPqmw/TlSyR6R0A=",
         "owner": "metacraft-labs",
         "repo": "codetracer-native-recorder",
-        "rev": "7df23cbbaf46dc841ae18c0d3a93096fae160830",
+        "rev": "e57bbd7cc6450cf3ded247c6e9bed72a9d53d9cf",
         "type": "github"
       },
       "original": {

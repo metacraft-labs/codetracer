@@ -802,6 +802,14 @@ nim_flag_divergence_actual() {
 # ORC build that links none of CodeTracer's native libraries, so neither its
 # Nix invocation nor its tup rule (`!ct_test_orc` in src/Tuprules.tup) carries
 # NIM_COMMON_FLAGS — `--mm:refc` least of all.
+#
+# The `codetracer-tui` entries are by design too: no Tup rule builds
+# `src/frontend/tui/main.nim`. The binary is an ORC release build whose
+# developer lane is the `build-tui` just recipe. Of NIM_COMMON_FLAGS that recipe
+# passes only `--hints:off`, and the derivation adds `--warnings:off`; the other
+# fifteen are these lines, recorded at b52c0f719. They say only that it is not
+# a Tup target; the drift that matters for it, the derivation against the
+# recipe, is check (I''') below.
 nim_flag_divergence_recorded() {
 	cat <<'RECORDED'
 ./index.js -d:asyncBackend=asyncdispatch
@@ -909,6 +917,21 @@ ct-test --hint[Pattern]:off
 ct-test --hint[XDeclaredButNotUsed]:off
 ct-test --hint[XCannotRaiseY]:off
 ct-test --warning[CaseTransition]:off
+codetracer-tui -d:asyncBackend=asyncdispatch
+codetracer-tui -d:chronicles_sinks=json
+codetracer-tui -d:chronicles_line_numbers=true
+codetracer-tui -d:chronicles_timestamps=UnixTime
+codetracer-tui -d:ssl
+codetracer-tui --mm:refc
+codetracer-tui -d:nimNoLentIterators
+codetracer-tui -d:nimOldCaseObjects
+codetracer-tui --hint[Processing]:off
+codetracer-tui --hint[Conf]:off
+codetracer-tui --hint[CC]:off
+codetracer-tui --hint[Pattern]:off
+codetracer-tui --hint[XDeclaredButNotUsed]:off
+codetracer-tui --hint[XCannotRaiseY]:off
+codetracer-tui --warning[CaseTransition]:off
 RECORDED
 }
 
@@ -962,6 +985,108 @@ run_nim_flag_alignment_check() {
 			"-d:nimNoLentIterators is still absent from every nix Nim invocation (blocker (2))"
 		;;
 	esac
+}
+
+# ---------------------------------------------------------------------------
+# (I''') The Nix `codetracer-tui` build vs the `build-tui` recipe it mirrors.
+#
+# `codetracer-tui` has no Tup rule: nothing under `src/` compiles
+# `src/frontend/tui/main.nim`, and the developer build is the `build-tui` just
+# recipe. Its NIM_COMMON_FLAGS lines in the baseline above therefore say only
+# that it is an ORC build; they cannot catch the drift that matters for this
+# binary, which is the derivation and the recipe disagreeing. This compares
+# exactly those two invocations, on the same footing as (I''): every flag one
+# carries and the other does not is a line, and the lines must equal a
+# recorded baseline.
+#
+# Three kinds of token are not flags of the compile and are left out: where
+# the output and the nimcache go (`--out:`/`-o:`, `--nimcache:`), and anything
+# that is not a literal option -- the `${isonimNimPaths}` interpolation, the
+# `ts_flags` array, the source file. Quotes are stripped and `${PWD}` is read
+# as `$PWD`, so the grammar-archive define compares as the same flag in both.
+# ---------------------------------------------------------------------------
+
+# Every `nim c` invocation of the `build-tui` recipe, one flattened line each.
+# The check wants exactly one; printing them all is what lets it say so.
+build_tui_recipe_invocations() {
+	awk '
+		function cont(s) { return substr(s, length(s), 1) == "\\" }
+		/^build-tui:/ { inrecipe = 1; next }
+		inrecipe && /^[^ \t#]/ { exit }
+		inrecipe && !inblock && $1 == "nim" && $2 == "c" { inblock = 1; buf = "" }
+		inblock {
+			line = $0
+			c = cont(line)
+			if (c) { line = substr(line, 1, length(line) - 1) }
+			gsub(/^[ \t]+|[ \t]+$/, "", line)
+			buf = buf " " line
+			if (!c) { print buf; inblock = 0 }
+		}
+	' "$REPO_ROOT/justfile"
+}
+
+# The compile flags of one flattened invocation, one per line, sorted.
+tui_compile_flags() {
+	local tok
+	local -a toks
+	read -r -a toks <<<"$1"
+	for tok in "${toks[@]}"; do
+		tok="${tok//\"/}"
+		tok="${tok//\$\{PWD\}/\$PWD}"
+		case "$tok" in
+		--out:* | -o:* | --nimcache:*) ;;
+		-*) printf '%s\n' "$tok" ;;
+		esac
+	done | LC_ALL=C sort -u
+}
+
+# `nix-only <flag>` / `recipe-only <flag>`, given the Nix and the recipe
+# invocation.
+tui_flag_divergence_actual() {
+	LC_ALL=C comm -3 \
+		<(tui_compile_flags "$1") \
+		<(tui_compile_flags "$2") |
+		sed 's/^\t/recipe-only /; t; s/^/nix-only /'
+}
+
+# Diagnostics only: the derivation also silences warnings, the recipe does not.
+tui_flag_divergence_recorded() {
+	cat <<'RECORDED'
+nix-only --warnings:off
+RECORDED
+}
+
+run_tui_flag_alignment_check() {
+	printf '\n  scenario: tui-flag-alignment (nix codetracer-tui vs the build-tui just recipe)\n'
+
+	# Exactly one of each: with two, comparing either one alone would let the
+	# other drift unseen.
+	local nix_invocation recipe_invocation nix_count recipe_count
+	nix_invocation="$(nix_nim_invocations | grep -F -- '--out:codetracer-tui ')"
+	recipe_invocation="$(build_tui_recipe_invocations)"
+	nix_count="$(printf '%s' "$nix_invocation" | grep -c '')"
+	recipe_count="$(printf '%s' "$recipe_invocation" | grep -c '')"
+	if [ "$nix_count" != 1 ] || [ "$recipe_count" != 1 ]; then
+		fail "(I''') exactly one codetracer-tui invocation each in nix/packages/default.nix and the build-tui recipe" \
+			"nix ($nix_count): ${nix_invocation:-<none>}; build-tui ($recipe_count): ${recipe_invocation:-<none>}"
+		return 0
+	fi
+	pass "(I''') exactly one codetracer-tui invocation each in nix/packages/default.nix and the build-tui recipe"
+
+	local actual recorded delta
+	actual="$(tui_flag_divergence_actual "$nix_invocation" "$recipe_invocation" | LC_ALL=C sort)"
+	recorded="$(tui_flag_divergence_recorded | LC_ALL=C sort)"
+	if [ "$actual" = "$recorded" ]; then
+		pass "(I''') nix/build-tui codetracer-tui flag divergence matches the recorded baseline"
+	else
+		# Blank lines dropped: unlike (I''), either side can be empty here --
+		# the recipe and the derivation may agree completely one day -- and an
+		# empty side would otherwise diff as one blank flag.
+		delta="$(diff <(printf '%s\n' "$recorded" | sed '/^$/d') \
+			<(printf '%s\n' "$actual" | sed '/^$/d') |
+			sed -n 's/^< /  no longer diverging (fix the baseline): /p;s/^> /  NEW divergence: /p')"
+		fail "(I''') nix/build-tui codetracer-tui flag divergence matches the recorded baseline" "$delta"
+	fi
 }
 
 # ---------------------------------------------------------------------------
@@ -1126,6 +1251,7 @@ run_scenario darwin Darwin repro src/build-debug-repro
 run_scenario windows MINGW64_NT-10.0-22631 repro src/build-debug-repro
 run_port_busy_scenario
 run_nim_flag_alignment_check
+run_tui_flag_alignment_check
 run_sibling_probe_alignment_check
 run_advisory_sibling_importer_check
 
