@@ -451,15 +451,24 @@ fn test_m2_contract_load_flow_emits_per_value_origin_summaries_for_view_model() 
         serde_json::from_value(req.arguments.clone()).expect("CtLoadFlowArguments");
     // load_flow may legitimately return no annotated values for the
     // toy fixture (and any errors are translated to logged warnings).
-    // The assertion here is that the response, when present, carries
-    // the `originSummaries` keyed by variable name per spec §3.2.3.
+    // The assertion here is that the flow, when present, carries the
+    // `originSummaries` keyed by variable name per spec §3.2.3. The flow
+    // arrives on the `ct/updated-flow` event; the `ct/load-flow` response
+    // after it is an acknowledgement.
     let _ = handler.load_flow(req, args, tx);
     while let Ok(msg) = rx.try_recv() {
-        if let DapMessage::Response(resp) = msg
-            && resp.command == "ct/load-flow"
+        if let DapMessage::Event(event) = msg
+            && event.event == "ct/updated-flow"
         {
-            if let Some(summaries) = resp.body.get("originSummaries") {
-                assert!(summaries.is_object(), "originSummaries must be a JSON object");
+            let steps = event.body["viewUpdates"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .flat_map(|view| view["steps"].as_array().cloned().unwrap_or_default());
+            for step in steps {
+                if let Some(summaries) = step.get("originSummaries") {
+                    assert!(summaries.is_object(), "originSummaries must be a JSON object");
+                }
             }
             return;
         }

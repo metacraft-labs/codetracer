@@ -300,9 +300,11 @@ Measured against the native `replay-server` while capturing
 `tests/fixtures/flow/zk_shields_flow_window.json` beside this file
 (`capture_zk_shields_flow.nim`), and it is the half a client gets wrong:
 
-* The **response** to `ct/load-flow` carries a placeholder window, not the
-  loaded one. A client that reads the response and stops has an empty flow pane
-  and no error to explain it.
+* The **response** to `ct/load-flow` carries no window. It was measured
+  carrying a placeholder window here, and later a second copy of the event's
+  window; it is now an acknowledgement, `{"event": "ct/updated-flow"}`, sent
+  after the event (`FlowVM.isFlowAcknowledgement`). A client that reads the
+  response and stops has an empty flow pane and no error to explain it.
 * The real window is `ct/updated-flow`'s `body.viewUpdates[0]`.
 * Events **queue**. `ct/load-flow` is sent after a `continue`/breakpoint
   sequence that has already produced `ct/updated-flow` events for earlier

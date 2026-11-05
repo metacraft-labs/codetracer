@@ -16,15 +16,19 @@
 ## inline flow in Monaco, the terminal's and GPUI's overlays, the flow pane,
 ## the VS Code host (Shared-DOM-Front-Ends D7.4 (b)). The window is asked for
 ## once per stop by the session's stop loader (`sdk/stop_loader`, pane
-## `spFlow`, through `requestWindow`) **and the response is consumed**: the
+## `spFlow`, through `requestWindow`) **and the answer is consumed**: the
 ## loop shape of the returned window and the trace tick the window was
 ## computed for are stored, and the selected iteration is re-derived from
-## them.
+## them. The engine answers on the `ct/updated-flow` event; the `ct/load-flow`
+## reply that follows it is an acknowledgement naming that event
+## (`isFlowAcknowledgement`, CodeTracer-DAP-Extensions.md, `ct/load-flow`), so
+## a request is settled by whichever of the two delivers the window — never
+## by both.
 ##
 ## That last part is the whole point (#593/#595). The Omniscience loop
 ## counter is not a free-standing widget: it must show which iteration the
 ## debugger is *currently inside*, and the debugger's position and the loop
-## window arrive together, in this response. A ViewModel that fires
+## window arrive together, in this answer. A ViewModel that fires
 ## `ct/load-flow` and ignores the reply cannot express the bug at all —
 ## which is exactly how the previous "loop iteration display" tests here
 ## passed while the panel was broken: they wrote `iterationCount`
@@ -193,9 +197,23 @@ type
       ## The function the window is on.
     appliedWindows*: int
       ## How many windows `applyFlowUpdate` has adopted. Not a signal: nothing
-      ## renders it. The load effect compares it across a request to learn
-      ## whether the `ct/updated-flow` EVENT already delivered this request's
-      ## window, in which case the reply must not overwrite it.
+      ## renders it. `requestWindow` compares it across a request to tell
+      ## whether that request's answer was a window.
+    answeredCallFlows*: int
+      ## How many call-flow updates the `ct/updated-flow` event has delivered,
+      ## a window or an error update alike. `requestWindow` compares it across
+      ## a request to learn whether the event already answered it — on a
+      ## synchronous transport (the native hosts' stdio adapter, the VS Code
+      ## debug-adapter tracker) the event is delivered before the reply.
+    answeredDiffFlows*: int
+      ## The same, for the `diff` query (`requestDiffFlow`).
+    awaitingWindow: seq[proc(applied: bool) {.closure.}]
+      ## Call-flow requests whose reply (the acknowledgement) arrived before
+      ## the event that answers them, oldest first. The engine answers its
+      ## flow requests in order, so the next call-flow event settles the
+      ## oldest one.
+    awaitingDiff: seq[proc(applied: bool) {.closure.}]
+      ## The same, for the `diff` query.
     styledLines*: Signal[seq[FlowStyledLine]]
       ## PLAT-42 — what the flow can say about each SOURCE line of the window:
       ## `flskHit` (the line ran in this window) or `flskSkip` (it lies inside
@@ -270,6 +288,17 @@ proc isDiffFlowUpdate*(update: JsonNode): bool =
   ## that path.
   not update.isNil and update.kind == JObject and
     update{"mode"}.getStr(FlowModeWireCall) == FlowModeWireDiff
+
+proc isFlowAcknowledgement*(response: JsonNode): bool =
+  ## Whether a `ct/load-flow` reply, as any transport resolves it, is the
+  ## engine's acknowledgement: success, with a body naming the event that
+  ## carries the answer (`{"event": "ct/updated-flow"}`,
+  ## CodeTracer-DAP-Extensions.md, `ct/load-flow`). It is not an empty body
+  ## because the desktop's body-only transport (`dap.asyncSendCtRequest`)
+  ## resolves a refused or timed-out request with an empty body, and a
+  ## request that waited for an event after one would wait for ever.
+  responseSucceeded(response) and
+    responseBody(response){"event"}.getStr("") == UpdatedFlowCommandName
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -871,34 +900,46 @@ proc requestWindow*(vm: FlowVM;
     },
   }
   vm.loadingState.val = lsLoading
-  # Consume the response. Firing the request and dropping the reply is what
-  # made every loop-iteration assertion at this layer vacuous; see the module
-  # header.
+  # Consume the answer. Firing the request and dropping it is what made every
+  # loop-iteration assertion at this layer vacuous; see the module header.
   let appliedBefore = vm.appliedWindows
+  let answeredBefore = vm.answeredCallFlows
   let vmRef = vm
+  let done = proc(applied: bool) =
+    if not onDone.isNil: onDone(applied)
   onComplete(store.backend.send("ct/load-flow", args),
     proc(response: JsonNode) =
-      # The reply is only *sometimes* the window. `ct/load-flow`'s real answer
-      # is the queued `ct/updated-flow` event (dap.rs:329); the backend-manager
-      # converts that event into a response for some deployments
-      # (backend_manager.rs:1001), so both paths feed the same applier.
-      #
-      # BUT NOT BOTH FOR ONE REQUEST. A synchronous transport (the native
-      # hosts' stdio adapter) delivers the event before the reply completes,
-      # and a reply adopted after it would replace the real window with
-      # whatever the reply carries — or, when the reply is a bare DAP
-      # envelope, flip a loaded panel to `lsError`.
-      if vmRef.appliedWindows != appliedBefore:
-        if not onDone.isNil: onDone(true)
+      # The window arrives on the queued `ct/updated-flow` event, and the reply
+      # after it is an acknowledgement. On a synchronous transport the
+      # event has already been applied here; a reply adopted on top of it
+      # would replace the window with nothing and flip the panel to `lsError`.
+      if vmRef.answeredCallFlows != answeredBefore:
+        done(vmRef.appliedWindows != appliedBefore)
         return
-      # A DAP envelope carries the window under `body`.
+      # A DAP envelope carries anything it has under `body`.
       let window =
         if not response.isNil and response.kind == JObject and
            response{"viewUpdates"}.isNil and
            not response{"body"}.isNil: response["body"]
         else: response
-      vmRef.applyFlowUpdate(window)
-      if not onDone.isNil: onDone(vmRef.appliedWindows != appliedBefore),
+      if not window.isNil and window.kind == JObject and
+         not window{"viewUpdates"}.isNil:
+        # A reply that carries the window: an engine that predates the
+        # acknowledgement, or a backend-manager that turns the event into
+        # the reply.
+        vmRef.applyFlowUpdate(window)
+        done(vmRef.appliedWindows != appliedBefore)
+        return
+      if isFlowAcknowledgement(response):
+        # The acknowledgement, ahead of the event (an asynchronous
+        # transport): the event that follows settles the request.
+        vmRef.awaitingWindow.add(done)
+        return
+      # A refusal, or a reply that is neither the window nor the
+      # acknowledgement — which is how a body-only transport presents a
+      # refusal or a timeout. No event will follow it.
+      vmRef.loadingState.val = lsError
+      done(false),
     proc(message: string) =
       # A failed flow load must not leave the panel claiming to still be
       # loading forever, and must not leave a stale window's loop shape in
@@ -907,7 +948,45 @@ proc requestWindow*(vm: FlowVM;
       vmRef.focusedLoop.val = -1
       vmRef.iterationCount.val = 0
       vmRef.loadingState.val = lsError
-      if not onDone.isNil: onDone(false))
+      done(false))
+
+proc requestDiffFlow*(vm: FlowVM;
+                      onDone: proc(applied: bool) {.closure.} = nil) =
+  ## Ask the engine for the trace diff's flow (`ct/load-flow` with the `diff`
+  ## query) and adopt it into the diff signals. `onDone` is told whether it
+  ## was adopted. The engine serves it from the diff index written at record
+  ## time, so it names no position; `CtLoadFlowArguments` still requires a
+  ## `location`, and an empty one is what the desktop's editor sent. Like the
+  ## call flow, it is answered on the `ct/updated-flow` event (routed by its
+  ## `mode`), and the reply is an acknowledgement (`isFlowAcknowledgement`).
+  let vmRef = vm
+  let answeredBefore = vm.answeredDiffFlows
+  let done = proc(applied: bool) =
+    if not onDone.isNil: onDone(applied)
+  let settled = proc() = done(vmRef.diffLoadingState.val == lsIdle)
+  vm.diffLoadingState.val = lsLoading
+  onComplete(vm.store.backend.send("ct/load-flow", %*{
+      "flowMode": FlowModeWireDiff,
+      "location": {"path": "", "line": 0, "rrTicks": 0, "callstackDepth": 0}}),
+    proc(response: JsonNode) =
+      if vmRef.answeredDiffFlows != answeredBefore:
+        settled()
+        return
+      let body = responseBody(response)
+      if responseSucceeded(response) and isDiffFlowUpdate(body):
+        # An engine that answered on the reply.
+        vmRef.applyDiffFlowUpdate(body)
+        settled()
+        return
+      if isFlowAcknowledgement(response):
+        vmRef.awaitingDiff.add(done)
+        return
+      # A refusal, as either transport presents one (see `requestWindow`).
+      vmRef.diffLoadingState.val = lsError
+      done(false),
+    proc(message: string) =
+      vmRef.diffLoadingState.val = lsError
+      done(false))
 
 proc createFlowVM*(store: ReplayDataStore): FlowVM =
   ## Create a FlowVM inside a reactive root owned by `withViewModel`.
@@ -976,7 +1055,7 @@ proc createFlowVM*(store: ReplayDataStore): FlowVM =
     )
 
     # `ct/load-flow` answers with a queued `ct/updated-flow` EVENT
-    # (`src/db-backend/src/dap.rs:329`), not with its reply. A panel that
+    # (`src/db-backend/src/dap.rs`); its reply is an acknowledgement. A panel that
     # consumed only the reply would stay empty forever against the real
     # engine while every mock-driven test passed — the same event-path
     # hazard the transport adapter hit. Subscribe here, using the same
@@ -993,7 +1072,21 @@ proc createFlowVM*(store: ReplayDataStore): FlowVM =
         let payload =
           if event.hasKey("data"): event["data"]
           else: event
+        let appliedBefore = vmRef.appliedWindows
         vmRef.applyFlowUpdate(payload)
+        # Settle the oldest request whose acknowledgement came first.
+        if isDiffFlowUpdate(payload):
+          inc vmRef.answeredDiffFlows
+          if vmRef.awaitingDiff.len > 0:
+            let done = vmRef.awaitingDiff[0]
+            vmRef.awaitingDiff.delete(0)
+            done(vmRef.diffLoadingState.val == lsIdle)
+        else:
+          inc vmRef.answeredCallFlows
+          if vmRef.awaitingWindow.len > 0:
+            let done = vmRef.awaitingWindow[0]
+            vmRef.awaitingWindow.delete(0)
+            done(vmRef.appliedWindows != appliedBefore)
 
     # The window is loaded per stop by the session's stop loader
     # (`sdk/stop_loader`, pane `spFlow`), which calls `requestWindow`; this VM

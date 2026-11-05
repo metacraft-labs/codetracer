@@ -32,6 +32,23 @@ pub struct NodeNames {
     comments: Vec<String>,
 }
 
+/// Languages whose name extractor names every variable a line uses, so a
+/// line of an analysed file with no names has none: the flow shows nothing
+/// for it rather than falling back to the recorded frame's locals
+/// ([`ExprLoader::get_expr_list`]).
+///
+/// - Solidity: an EVM recording's frame also carries the contract's storage
+///   (state variables), which are not locals of the function.
+/// - Python: a module frame's locals are its globals — every import, every
+///   function, and `__builtins__`, the whole builtins module. The fallback
+///   copied them, at full depth, into each name-less module-level step: the
+///   first-stop flow of `py_sudoku_solver` was 16.7 MB, 15.2 MB of it
+///   `__builtins__` (codetracer-pm issue
+///   `2026-11-04-python-first-stop-load-flow-returns-14-mb-twice-and-stalls-the-vscode-extension-host`).
+///   Inside a function the fallback showed every local on a line such as
+///   `pass` or `print("…")`, which mentions none of them.
+const LINE_NAMES_ARE_AUTHORITATIVE: &[Lang] = &[Lang::Solidity, Lang::PythonDb];
+
 #[cfg(feature = "syntax-highlight")]
 static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
     let mut m = HashMap::new();
@@ -2829,15 +2846,19 @@ impl ExprLoader {
     /// The expressions a flow shows for `line`, or `None` when the flow
     /// should show the recorded frame's locals instead.
     ///
-    /// For Solidity an analysed file's list is authoritative even when it is
-    /// empty: an EVM recording's frame also carries the contract's storage
-    /// (state variables), which are not locals of the function.
+    /// `None` sends the flow walker to its fallback
+    /// (`CallFlowPreloader::log_expressions`), which loads EVERY local of the
+    /// frame with no depth limit. That fallback exists for grammars whose
+    /// extractor yields no names. For a language in
+    /// [`LINE_NAMES_ARE_AUTHORITATIVE`] an analysed file's list is
+    /// authoritative even when it is empty — see that constant for why each
+    /// language is there.
     pub fn get_expr_list(&self, line: Position, location: &Location) -> Option<Vec<String>> {
         let path = PathBuf::from(&location.path);
         let file = self.processed_files.get(&path)?;
         match file.variables.get(&line) {
             Some(names) => Some(names.clone()),
-            None if self.get_current_language(&path) == Lang::Solidity => Some(vec![]),
+            None if LINE_NAMES_ARE_AUTHORITATIVE.contains(&self.get_current_language(&path)) => Some(vec![]),
             None => None,
         }
     }
@@ -4325,6 +4346,34 @@ mod flow_fixture_extraction_tests {
             loader.get_expr_list(Position(39), &location),
             Some(vec!["final_result".to_string(), "doubled".to_string()])
         );
+    }
+
+    #[test]
+    fn a_python_line_without_names_shows_none_rather_than_the_recorded_frame() {
+        // A module frame's locals are its globals, `__builtins__` included; a
+        // line the analysis found no names on must not fall back to them.
+        let path = std::env::temp_dir().join(format!("ct_py_nameless_{}.py", std::process::id()));
+        fs::write(
+            &path,
+            "\"\"\"A module.\"\"\"\n\
+             import os\n\
+             total = 1\n\
+             print(\"done\")\n",
+        )
+        .unwrap();
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&path).unwrap();
+        let location = Location {
+            path: path.to_string_lossy().to_string(),
+            ..Location::default()
+        };
+        let docstring = loader.get_expr_list(Position(1), &location);
+        let assignment = loader.get_expr_list(Position(3), &location);
+        let call = loader.get_expr_list(Position(4), &location);
+        fs::remove_file(&path).unwrap();
+        assert_eq!(docstring, Some(vec![]), "a docstring names no variable");
+        assert_eq!(call, Some(vec![]), "`print(\"done\")` names no variable");
+        assert_eq!(assignment, Some(vec!["total".to_string()]));
     }
 
     #[test]

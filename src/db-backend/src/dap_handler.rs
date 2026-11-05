@@ -1794,11 +1794,22 @@ impl Handler {
                 }
             }
         }
-        let raw_event = self.dap_client.updated_flow_event(flow_update.clone())?;
+        // The flow is delivered ONCE, on the `ct/updated-flow` event, and the
+        // response that follows it is an acknowledgement naming that event
+        // (CodeTracer-DAP-Extensions.md, `ct/load-flow`). The response used to
+        // carry the same `FlowUpdate` for `customRequest()` callers, so every
+        // client received the window twice: at the first stop of a Python
+        // program that was two 14.7 MB copies, and the VS Code extension host
+        // decoded both (codetracer-pm issue
+        // `2026-11-04-python-first-stop-load-flow-returns-14-mb-twice-and-stalls-the-vscode-extension-host`).
+        //
+        // The acknowledgement is not an empty body because a body-only
+        // transport (the desktop's `DapApi.asyncSendCtRequest`) resolves a
+        // refused or timed-out request with an empty body too; a client told
+        // "wait for the event" by `{}` would wait for ever on a refusal.
+        let raw_event = self.dap_client.updated_flow_event(flow_update)?;
         sender.send(raw_event)?;
-
-        // Include flow data in the response body for customRequest().
-        self.respond_dap(req, &flow_update, sender)?;
+        self.respond_dap(req, serde_json::json!({ "event": "ct/updated-flow" }), sender)?;
         Ok(())
     }
 

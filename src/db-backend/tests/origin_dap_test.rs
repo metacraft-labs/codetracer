@@ -1396,6 +1396,28 @@ fn make_request(seq: i64, command: &str, args: JsonValue) -> Request {
     }
 }
 
+/// The flow a `ct/load-flow` delivered: the body of its `ct/updated-flow`
+/// event. The request's own response is an acknowledgement sent after the
+/// event (CodeTracer-DAP-Extensions.md, `ct/load-flow`); it must succeed.
+fn take_flow_event_body(rx: &mpsc::Receiver<DapMessage>) -> JsonValue {
+    let mut flow = None;
+    while let Ok(msg) = rx.try_recv() {
+        match msg {
+            DapMessage::Event(event) if event.event == "ct/updated-flow" => flow = Some(event.body),
+            DapMessage::Response(resp) if resp.command == "ct/load-flow" => {
+                assert!(
+                    resp.success,
+                    "expected `ct/load-flow` response to succeed, got message={:?} body={:?}",
+                    resp.message, resp.body
+                );
+                return flow.expect("`ct/load-flow` responded without a `ct/updated-flow` event before it");
+            }
+            _ => {}
+        }
+    }
+    panic!("no `ct/load-flow` response on the channel");
+}
+
 /// Pull the **response body** for the just-issued request from the
 /// channel. Skips any non-Response messages (events, notifications) the
 /// handler may emit alongside the response.
@@ -1736,7 +1758,7 @@ fn test_load_flow_origin_summary_per_annotated_value() {
         std::env::remove_var("CODETRACER_DISABLE_TREESITTER");
     }
 
-    let body = take_response_body(&rx, "ct/load-flow");
+    let body = take_flow_event_body(&rx);
     let views = body
         .get("viewUpdates")
         .and_then(JsonValue::as_array)
@@ -1889,7 +1911,7 @@ fn test_origin_summary_eager_vs_placeholder_per_surface() {
     unsafe {
         std::env::remove_var("CODETRACER_DISABLE_TREESITTER");
     }
-    let body = take_response_body(&rx, "ct/load-flow");
+    let body = take_flow_event_body(&rx);
     let mut saw_flow_summary = false;
     for view in body.get("viewUpdates").and_then(JsonValue::as_array).unwrap() {
         for step in view.get("steps").and_then(JsonValue::as_array).unwrap() {
