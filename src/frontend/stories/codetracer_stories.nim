@@ -31,8 +31,13 @@ type
       ## sidebar name from it (`FleetSnapshot` -> `...--fleet-snapshot`,
       ## "Fleet Snapshot"), so changing it changes the story's URL.
     name*: string
-      ## The title the story's frame shows (the golden-layout tab of a panel
-      ## story) and the story's name in the editor.
+      ## The story's name in StoryBook and the editor, and the title its frame
+      ## shows (the golden-layout tab of a panel story) unless `frameTitle`
+      ## names the panel.
+    frameTitle*: string
+      ## The panel's own name for its golden-layout tab (`Initiatives`),
+      ## where the story's name says which state it shows (`Initiatives:
+      ## Error`); empty: the story's name (`frameTitleOf`).
     kind*: string
       ## `panel`, `view`, `component` or `layout`: how the surface is framed
       ## (`storybook/stories/lib/surfaces.js` `renderSurface`).
@@ -411,11 +416,27 @@ func terminalOutputSection(): CodeTracerStorySection =
             "terminal-output-loading"),
     ])
 
+const agentHarborPanelNames = [
+  ("agent-harbor-fleet", "Fleet Snapshot"),
+  ("agent-harbor-session-list", "Sessions"),
+  ("agent-harbor-initiatives", "Initiatives"),
+  ("agent-harbor-initiative-progress", "Initiative Progress"),
+]
+  ## Each Agent Harbor panel's own name: what its golden-layout tab says in
+  ## every story of it, whichever state the story shows.
+
+func withAgentHarborPanelNames(section: CodeTracerStorySection): CodeTracerStorySection =
+  result = section
+  for story in result.stories.mitems:
+    if story.kind == "panel":
+      for (surface, title) in agentHarborPanelNames:
+        if story.surface == surface: story.frameTitle = title
+
 func codeTracerStorySections*(): seq[CodeTracerStorySection] =
   ## Every story, by section, in the order the editor lists them: the Agent
   ## Harbor prototypes first, then CodeTracer's existing surfaces.
   @[
-    agentHarborSection(),
+    agentHarborSection().withAgentHarborPanelNames(),
     panelsSection(),
     componentsSection(),
     viewsSection(),
@@ -423,6 +444,11 @@ func codeTracerStorySections*(): seq[CodeTracerStorySection] =
     layoutsSection(),
     terminalOutputSection(),
   ]
+
+func frameTitleOf*(story: CodeTracerStory): string =
+  ## The title the story's frame shows: the panel's own name where the
+  ## story names one, else the story's name.
+  if story.frameTitle.len > 0: story.frameTitle else: story.name
 
 func describe*(story: CodeTracerStory): string =
   ## The story's description, or one naming what it mounts.

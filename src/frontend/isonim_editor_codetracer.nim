@@ -163,7 +163,7 @@ proc mountInFrame(host: PreviewMountHost; story: CodeTracerStory) =
   let kind = story.kind.cstring
   let surface = story.surface.cstring
   let fixture = story.fixture.cstring
-  let name = story.name.cstring
+  let name = frameTitleOf(story).cstring
   var container: RootRef
   {.emit: ["""
     (function () {
