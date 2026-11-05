@@ -129,12 +129,13 @@ proc terminalCapability*(): PaneCapability =
      # PLAT-60: Low Level Code (`views/low_level_code_pane.nim`).
      paneLowLevelCode,
      # PLAT-63: Verification (`views/verification_pane.nim`).
-     paneVerification},
+     paneVerification,
+     # PLAT-62: Constraints (`views/constraints_pane.nim`).
+     paneConstraints},
     [(paneDebugControls, "the terminal draws the debugger controls in its " &
                          "top bar, not as a pane"),
      (paneFlow, "the terminal draws flow inside the source pane"),
-     (paneShell, "the terminal has no embedded shell view yet"),
-     (paneConstraints, "the terminal has no constraints view yet")])
+     (paneShell, "the terminal has no embedded shell view yet")])
 
 # ---------------------------------------------------------------------------
 # PLAT-45 deliverable 5 — the fold depth this terminal needs

@@ -72,6 +72,7 @@ import ./problems_pane
 import ./requests_pane
 import ./low_level_code_pane
 import ./verification_pane   # PLAT-63
+import ./constraints_pane
 import ./frame_overlay
 import ./variables
 import ./context_menu
@@ -212,6 +213,10 @@ type
     verification*: VerificationPaneModel
       ## PLAT-63. VERIFICATION, as a value: the window's `VerificationVM`,
       ## read by `verification_source.paneModelOf`. Not loaded by default.
+    constraints*: ConstraintsPaneModel
+      ## PLAT-62. CONSTRAINTS, as a value: the window's `ConstraintsVM` the
+      ## desktop's panel draws too, read by `constraints_source.paneModelOf`.
+      ## Not loaded by default.
     vcs*: VcsPaneModel
       ## PLAT-47 deliverable 4. The VCS pane, as a value: the shared `VCSVM`
       ## the desktop's VCS panel draws, read by `host/vcs_source.nim`. Not
@@ -936,6 +941,10 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   elif region.pane == paneVerification and model.verification.loaded:
     belowStrip:
       discard paintVerification(g, content, model.verification)
+  # PLAT-62. CONSTRAINTS — its headline is content, so below the strip.
+  elif region.pane == paneConstraints and model.constraints.loaded:
+    belowStrip:
+      discard paintConstraints(g, content, model.constraints)
   elif region.pane == paneBuildOutput:
     # NO EMPTINESS GUARD: an idle BUILD pane is a statement — `[idle] build:
     # not started` — and a user who has just pressed `:build` needs to see the

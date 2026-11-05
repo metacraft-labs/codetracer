@@ -96,6 +96,7 @@ import ./host/vcs_source
 import ./host/test_results_source   # PLAT-53
 import ./host/problems_source       # PLAT-55
 import ./host/verification_source   # PLAT-63
+import ./host/constraints_source    # PLAT-62
 import ./host/edit_search           # Find in Files over the project in Edit mode
 from ../viewmodel/viewmodels/test_results_vm import TraceOpenPolicy,
   TestTabPlacement, TestTabPlacementKind, placeTestRecording, testTabOf,
@@ -1304,6 +1305,18 @@ proc interactive(command: TuiCommand): int =
       else:
         session.showFileAt(rt, path, line, col))
   defer: verification.close()
+  # PLAT-62: the Constraints pane — the window's project (`app.projectRoot`)
+  # measured by `nargo info` the first time the pane is on screen; a row opens
+  # its function's line in Edit mode's editor, or, in Debug mode, from the
+  # recording.
+  let constraints = newConstraintsSource(rt,
+    proc(): string = app.projectRoot,
+    proc(path: string; line, col: int): string =
+      if rt.app.modes.product == pmEdit:
+        rt.openWorkingFileAt(path, line, col)
+      else:
+        session.showFileAt(rt, path, line, col))
+  defer: constraints.close()
   # PLAT-56: the Build Output pane over the same reader — the window's
   # `BuildVM`, the desktop BUILD panel's ViewModel; a located line opens as a
   # Problems row does, and Run builds the shown command again.
@@ -1527,6 +1540,8 @@ proc interactive(command: TuiCommand): int =
       let problemsChanged = buildOut.tick(rt) or problemsTicked
       # PLAT-63: the verification run in flight, polled.
       let verified = verification.tick(rt)
+      # PLAT-62: the circuit's measurement, as it lands.
+      let constraintsChanged = constraints.tick(rt)
       # PLAT-57: the search in flight, a bounded step per tick.
       let searched = session.pumpFindInFiles(rt)
       # PLAT-54: what a live agent sent since the last tick.
@@ -1551,7 +1566,7 @@ proc interactive(command: TuiCommand): int =
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
          hoverChanged or frameOwed or recorded or keysChanged or searched or
          barsChanged or testsChanged or agentChanged or problemsChanged or
-         requestsChanged or verified:
+         requestsChanged or verified or constraintsChanged:
         paint(driver, rt)
         frameOwed = false
     of dekResize:
@@ -1906,6 +1921,13 @@ proc editInteractive(command: TuiCommand): int =
     proc(path: string; line, col: int): string =
       rt.openWorkingFileAt(path, line, col))
   defer: verification.close()
+  # PLAT-62: the Constraints pane over this window's project; a row opens in
+  # the editor.
+  let constraints = newConstraintsSource(rt,
+    proc(): string = app.projectRoot,
+    proc(path: string; line, col: int): string =
+      rt.openWorkingFileAt(path, line, col))
+  defer: constraints.close()
 
   # PLAT-56: the Build Output pane over the same reader — the window's
   # `BuildVM`, the desktop BUILD panel's ViewModel; a located line opens as a
@@ -1947,6 +1969,7 @@ proc editInteractive(command: TuiCommand): int =
       let problemsTicked = problems.tick(rt, nowMonoMs())
       let problemsChanged = buildOut.tick(rt) or problemsTicked
       let verified = verification.tick(rt)
+      let constraintsChanged = constraints.tick(rt)
       let hoverChanged = rt.tickAutoHide(nowMs()) or
                          rt.tickCellHover(nowMs()) or
                          rt.tickPendingPrefix(nowMs())
@@ -1954,7 +1977,7 @@ proc editInteractive(command: TuiCommand): int =
       let keysChanged = rt.pollKeybindings(keybindings)
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
          hoverChanged or keysChanged or barsChanged or testsChanged or
-         problemsChanged or searched or verified:
+         problemsChanged or searched or verified or constraintsChanged:
         paint(driver, rt)
     of dekResize:
       size = ev.size

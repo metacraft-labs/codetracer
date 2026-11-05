@@ -150,6 +150,13 @@ type
     caVerificationCopyMessage = "verification-copy-message"
     caVerificationCopyLocation = "verification-copy-location"
     caVerificationCloseCounterexample = "verification-close-counterexample"
+    caConstraintGoToSource = "constraint-go-to-source"
+      ## PLAT-62: a Constraints row's menu, the entries
+      ## `ConstraintsVM.rowMenu` decides, in its order; the row is
+      ## `ContextTarget.index` (its index in the ViewModel's rows) and its
+      ## name `ContextTarget.text`.
+    caConstraintCopyName = "constraint-copy-name"
+    caConstraintCopySourceLocation = "constraint-copy-source-location"
 
   ContextMenuKind* = enum
     cmkTab = "tab"
@@ -177,6 +184,8 @@ type
     cmkVerificationRow = "verification-row"
       ## PLAT-63: a finding, an offer or a step of the Verification pane
       ## (K65).
+    cmkConstraintRow = "constraint-row"
+      ## PLAT-62: a row of the Constraints pane (K68).
 
   ContextMenuEntry* = object
     label*: string
@@ -546,6 +555,25 @@ func verificationRowContextMenu*(key: string;
                              hint = (if d.enabled: "" else: d.reason),
                              enabled = d.enabled, reason = d.reason)
 
+func constraintRowContextMenu*(index: int; name: string;
+                               decided: openArray[tuple[label: string;
+                                                        action: ContextAction;
+                                                        enabled: bool;
+                                                        reason: string]]):
+    ContextMenuModel =
+  ## PLAT-62 (K68): a Constraints row's menu, from the entries the shared
+  ## model decided (`headless_app/constraint_menu.constraintRowContextMenuOf`
+  ## reads them off `ConstraintsVM.rowMenu`). A disabled entry's reason is its
+  ## hint too, as the Requests row's is.
+  result = ContextMenuModel(kind: cmkConstraintRow,
+                            target: ContextTarget(pane: paneConstraints,
+                                                  index: int64(index),
+                                                  text: name))
+  for d in decided:
+    result.entries.add entry(d.label, d.action,
+                             hint = (if d.enabled: "" else: d.reason),
+                             enabled = d.enabled, reason = d.reason)
+
 func variablesContextMenu*(path: string): ContextMenuModel =
   ## A Variables row's right-click menu — the State pane's
   ## `buildVariableRowContextMenu`: value history and value origin.
@@ -698,7 +726,7 @@ func k(id, target: string; gestures: set[ClickGesture];
                  desktop: desktop, sharedOp: sharedOp, terminal: terminal,
                  gpui: gpui, note: note)
 
-const ClickInventory*: array[66, ClickBehaviour] = [
+const ClickInventory*: array[68, ClickBehaviour] = [
   k("K1", "Top bar: menu button / item", {cgClick},
     "open the menu; run the item / enter the folder", "MenuVM",
     nsExisting, nsExisting, "PLAT-48/49"),
@@ -924,7 +952,15 @@ const ClickInventory*: array[66, ClickBehaviour] = [
     "run the project's declared Verno action / stop the run",
     "verification_source.runVerification / stopVerification", nsDone,
     nsDone, "PLAT-63: drawn where the host runs the project's verifier; " &
-      "the desktop's pane has no runner and draws neither")]
+      "the desktop's pane has no runner and draws neither"),
+  k("K67", "Constraints: row", {cgClick},
+    "select it / open the line that declares its function",
+    "ConstraintsVM.activateRow", nsDone, nsDone,
+    "PLAT-62: a row no source declares opens nothing and says why"),
+  k("K68", "Constraints: row", {cgRightClick},
+    "menu: Go to Source, Copy Name, Copy Source Location",
+    "ConstraintsVM.rowMenu", nsDone, nsDone,
+    "PLAT-62 added the menu on all three front-ends")]
 
 func behaviour*(id: string): ClickBehaviour =
   ## The inventory row named `id` (`K1` …); an empty value for an unknown id.
