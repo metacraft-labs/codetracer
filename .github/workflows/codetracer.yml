@@ -6118,7 +6118,7 @@ jobs:
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
-            codetracer-visual-replay=d1a374379039d0214ef6a896380abe5cc2650c3b
+            codetracer-visual-replay=eda49343b12bc2b699ac8337a244ca8b30aef837
             codetracer-native-backend=c1a0eb91ab307fae913c28f3e7bffdb6f0411d35
             runquota=dev
 
@@ -7044,7 +7044,7 @@ jobs:
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
-            codetracer-visual-replay=d1a374379039d0214ef6a896380abe5cc2650c3b
+            codetracer-visual-replay=eda49343b12bc2b699ac8337a244ca8b30aef837
             codetracer-native-backend=c1a0eb91ab307fae913c28f3e7bffdb6f0411d35
             codetracer-native-recorder=e57bbd7cc6450cf3ded247c6e9bed72a9d53d9cf
             codetracer-native-test-programs=dev
@@ -7376,7 +7376,7 @@ jobs:
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
             codetracer-native-backend=c1a0eb91ab307fae913c28f3e7bffdb6f0411d35
-            codetracer-visual-replay=d1a374379039d0214ef6a896380abe5cc2650c3b
+            codetracer-visual-replay=eda49343b12bc2b699ac8337a244ca8b30aef837
 
       - name: Allow direnv in the cloned recorder siblings
         # scripts/build-siblings.sh runs every sibling build as
