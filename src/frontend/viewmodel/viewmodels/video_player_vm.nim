@@ -83,8 +83,42 @@ type
     VpaTogglePicker,
     VpaCancelPicker
 
+  ScrubAxis* = enum
+    ## The pane's two scrubbers (CodeTracer-TUI-Graphics.md §4): the frame
+    ## scrubber over the recording's frames, and the nested draw-call
+    ## scrubber over the shown frame's draw calls.
+    scrubFrame
+    scrubDraw
+
+  ScrubGesture* = object
+    ## One scrubber's drag (Visual-Replay.md § Scrub Slider), as a value: the
+    ## pane shows `position` at once; the player is asked for it at most
+    ## every `ScrubCoalesceMs` while held (`requested` is what it was last
+    ## asked for), and once more where it is released.
+    held*: bool
+    position*: int
+    requested*: int
+      ## -1 before the first request of this drag.
+    lastRequestMs*: float
+    resumePlaying*: bool
+      ## Playback was running when the drag began: the release resumes it at
+      ## the previous rate and direction ("Dragging while playing implicitly
+      ## pauses; releasing resumes at the previous rate").
+
   VideoPlayerVM* = ref object of ViewModel
     frameVm*: FrameViewerVM
+    scrubRevision*: Signal[int]
+      ## Bumped by every change to the two gestures, and read by every read of
+      ## where a scrubber is (`scrubPosition`). The gestures are plain fields;
+      ## without this a reactive label followed no drag and, having returned
+      ## the gesture's position without reading the frame while held, lost its
+      ## dependency on the frame and froze on the pressed one for good.
+    frameScrub*: ScrubGesture
+    drawScrub*: ScrubGesture
+      ## The two scrubbers' drags (`beginScrub` / `dragScrub` / `pumpScrub` /
+      ## `releaseScrub`). Shared by every front-end, so the desktop's slider,
+      ## the terminal's bottom row and the GPUI track coalesce and release
+      ## alike.
     stageWidth, stageHeight: int
       ## The frame stage's size in device pixels (`setStageSize`).
     reactiveOwner: OwnerBase
@@ -411,6 +445,96 @@ proc layoutScrubTicks*(clearFrames: openArray[int]; frameCount: int):
     let pct = float(f) / float(lastFrame) * 100.0
     result.add(ScrubTick(frame: f, leftPercent: pct))
 
+const
+  ScrubCoalesceMs* = 60.0
+    ## Visual-Replay.md § Scrub Slider: "Continuous dragging issues
+    ## getFrameByFrame requests at most every 60 ms".
+
+type
+  ScrubStep* = object
+    ## What one scrub event does: the gesture after it, and the position the
+    ## player is asked for now (-1 for none).
+    gesture*: ScrubGesture
+    request*: int
+
+proc scrubStep*(g: ScrubGesture; position: int; nowMs: float;
+                release: bool): ScrubStep =
+  ## THE COALESCING RULE, pure. A drag event asks for its position when no
+  ## request of this drag has gone yet or `ScrubCoalesceMs` passed since the
+  ## last one, and the position differs from what was last asked; a release
+  ## asks for its position unless that is exactly what was last asked (the
+  ## frame it settles on is then already on its way).
+  result.gesture = g
+  result.gesture.position = position
+  result.request = -1
+  let due = g.requested < 0 or nowMs - g.lastRequestMs >= ScrubCoalesceMs
+  if position != g.requested and (release or due):
+    result.request = position
+    result.gesture.requested = position
+    result.gesture.lastRequestMs = nowMs
+  if release:
+    result.gesture.held = false
+
+proc scrubPending*(g: ScrubGesture; nowMs: float): bool =
+  ## A held drag whose last position was not asked for because it came
+  ## inside the coalescing window, and the window has passed: the idle tick
+  ## asks for it now (`pumpScrub`), so a drag that stops moving still lands
+  ## on the frame under the pointer.
+  g.held and g.position != g.requested and
+    nowMs - g.lastRequestMs >= ScrubCoalesceMs
+
+const
+  VideoTransportOrder* = [VpaJumpStart, VpaRewind, VpaTogglePlay,
+                          VpaFastForward, VpaJumpEnd, VpaStepDrawBack,
+                          VpaStepDrawForward, VpaStepFrameBack,
+                          VpaStepFrameForward, VpaTogglePicker]
+    ## The transport's controls, left to right (Visual-Replay.md § Video
+    ## Player Pane's layout): every front-end draws them in this order.
+  VideoTransportLabels*: array[VideoPlayerAction, string] = [
+    VpaTogglePlay: ">",
+    VpaRewind: "<<",
+    VpaFastForward: ">>",
+    VpaStepFrameBack: "f<",
+    VpaStepFrameForward: "f>",
+    VpaStepDrawBack: "d<",
+    VpaStepDrawForward: "d>",
+    VpaJumpStart: "|<",
+    VpaJumpEnd: ">|",
+    VpaTogglePicker: "pick",
+    VpaCancelPicker: ""]
+    ## The native front-ends' spelling of the transport's icons (§ Transport
+    ## Controls): `|<` Jump to Start, `<<` Rewind, `>` / `||` Play / Pause,
+    ## `>>` Fast Forward, `>|` Jump to End, `d<` `d>` the draw-call step,
+    ## `f<` `f>` the frame step, `pick` the Pixel Picker — ASCII, so the
+    ## terminal's every tier and any GPUI font draws them.
+
+func videoTransportLabel*(action: VideoPlayerAction; playing: bool): string =
+  if action == VpaTogglePlay and playing: "||" else: VideoTransportLabels[action]
+
+func videoTransportStatus*(playing, reverse: bool; rate: int; buffering,
+                           loading: bool; error: string): string =
+  ## Right of the controls (§ Status Indicators): the rate badge while
+  ## playing (`2x >`, `1x <` reversed) with `buffering` beside it when
+  ## degraded, `paused` otherwise, `loading` while a frame is on its way, the
+  ## player's error instead of all of it.
+  if error.len > 0:
+    return error
+  if playing:
+    result = $rate & "x " & (if reverse: "<" else: ">")
+    if buffering:
+      result.add " buffering"
+  else:
+    result = "paused"
+  if loading:
+    result.add "  loading"
+
+proc rateNumber*(rate: VideoPlayerRate): int =
+  case rate
+  of Rate1x: 1
+  of Rate2x: 2
+  of Rate4x: 4
+  of Rate8x: 8
+
 proc stepFrameDelta*(direction: int; currentFrame, frameCount: int): int =
   ## Compute the target frame for a Step-Frame press. direction is ±1.
   ## Clamps at [0, frameCount-1] when frameCount > 0; otherwise allows any
@@ -561,9 +685,30 @@ proc stepFrame*(vm: VideoPlayerVM; delta: int) =
   vm.frameVm.loadFrameByIndex(target)
 
 proc stepDrawCall*(vm: VideoPlayerVM; delta: int) =
-  ## Step by a single draw call. Delegates to /frame?draw=N which auto-rolls
-  ## across frame boundaries on the server side.
+  ## Step by a single draw call (Visual-Replay.md § Transport Controls):
+  ## within the shown frame when the player said what its draw calls are —
+  ## "underflow rolls into the previous frame at its last draw", "overflow
+  ## rolls into the next frame at draw 0" — and otherwise over the
+  ## recording's draw-call list through /frame?draw=N.
   if vm.playState.val == Playing: return
+  let count = vm.frameVm.frameDrawCount.val
+  if count > 0:
+    let frame = vm.frameVm.currentFrame.val
+    let shown =
+      if vm.frameVm.drawInFrame.val >= 0: vm.frameVm.drawInFrame.val
+      else: count - 1
+    let target = shown + delta
+    if target >= 0 and target < count:
+      vm.frameVm.loadDrawInFrame(target)
+    elif target < 0:
+      if frame > 0:
+        # A frame request shows that frame's last draw.
+        vm.frameVm.loadFrameByIndex(frame - 1)
+    else:
+      let frames = vm.frameVm.frameCount.val
+      if frames <= 0 or frame + 1 < frames:
+        vm.frameVm.loadDrawInFrame(0, frame + 1)
+    return
   let calls = vm.frameVm.drawCalls.val
   let currentIdx =
     if vm.frameVm.selectedDrawCall.val.isSome:
@@ -596,6 +741,122 @@ proc scrubTo*(vm: VideoPlayerVM; frame: int) =
 # ---------------------------------------------------------------------------
 # Picker mode and magnifier.
 # ---------------------------------------------------------------------------
+
+proc gestureOf(vm: VideoPlayerVM; axis: ScrubAxis): ScrubGesture =
+  case axis
+  of scrubFrame: vm.frameScrub
+  of scrubDraw: vm.drawScrub
+
+proc setGesture(vm: VideoPlayerVM; axis: ScrubAxis; g: ScrubGesture) =
+  case axis
+  of scrubFrame: vm.frameScrub = g
+  of scrubDraw: vm.drawScrub = g
+  vm.scrubRevision.val = vm.scrubRevision.val + 1
+
+proc askScrub(vm: VideoPlayerVM; axis: ScrubAxis; position: int) =
+  case axis
+  of scrubFrame: vm.frameVm.loadFrameByIndex(position)
+  of scrubDraw: vm.frameVm.loadDrawInFrame(position)
+
+proc clampScrub(vm: VideoPlayerVM; axis: ScrubAxis; position: int): int =
+  let count =
+    case axis
+    of scrubFrame: vm.frameVm.frameCount.val
+    of scrubDraw: vm.frameVm.frameDrawCount.val
+  if count > 0: max(0, min(position, count - 1)) else: max(0, position)
+
+proc beginScrub*(vm: VideoPlayerVM; axis: ScrubAxis; position: int;
+                 nowMs: float) =
+  ## A press on a scrubber: the drag holds it, playback pauses (and is
+  ## resumed on the release), and the pressed position is asked for.
+  var g = ScrubGesture(held: true, position: -1, requested: -1,
+                       lastRequestMs: 0.0,
+                       resumePlaying: vm.playState.val == Playing)
+  if g.resumePlaying:
+    vm.pause()
+  let p = vm.clampScrub(axis, position)
+  let step = scrubStep(g, p, nowMs, release = false)
+  vm.setGesture(axis, step.gesture)
+  if step.request >= 0:
+    vm.askScrub(axis, step.request)
+
+proc dragScrub*(vm: VideoPlayerVM; axis: ScrubAxis; position: int;
+                nowMs: float): bool =
+  ## The pointer moved while the scrubber is held: the pane shows
+  ## `position` at once; the player is asked for it only outside the
+  ## coalescing window. Whether a request went.
+  if not vm.gestureOf(axis).held:
+    return false
+  let step = scrubStep(vm.gestureOf(axis), vm.clampScrub(axis, position),
+                       nowMs, release = false)
+  vm.setGesture(axis, step.gesture)
+  if step.request >= 0:
+    vm.askScrub(axis, step.request)
+  step.request >= 0
+
+proc pumpScrub*(vm: VideoPlayerVM; nowMs: float): bool =
+  ## The idle tick: a held drag's coalesced position asked for once its
+  ## window has passed. Whether a request went.
+  for axis in ScrubAxis:
+    let g = vm.gestureOf(axis)
+    if scrubPending(g, nowMs):
+      var next = g
+      next.requested = g.position
+      next.lastRequestMs = nowMs
+      vm.setGesture(axis, next)
+      vm.askScrub(axis, g.position)
+      result = true
+
+proc releaseScrub*(vm: VideoPlayerVM; axis: ScrubAxis; position: int;
+                   nowMs: float) =
+  ## The release settles on `position` (asked for unless it already was)
+  ## and resumes playback when the drag paused it.
+  let before = vm.gestureOf(axis)
+  if not before.held:
+    return
+  let step = scrubStep(before, vm.clampScrub(axis, position), nowMs,
+                       release = true)
+  vm.setGesture(axis, step.gesture)
+  if step.request >= 0:
+    vm.askScrub(axis, step.request)
+  if before.resumePlaying:
+    vm.applyPlayState(Playing, vm.resumeDirection, vm.resumeRate)
+
+proc scrubPosition*(vm: VideoPlayerVM; axis: ScrubAxis): int =
+  ## Where a scrubber's thumb is: under the pointer while held, else the
+  ## frame (or the draw call within it) shown.
+  discard vm.scrubRevision.val
+  let g = vm.gestureOf(axis)
+  if g.held: return g.position
+  case axis
+  of scrubFrame: vm.frameVm.currentFrame.val
+  of scrubDraw: vm.frameVm.drawInFrame.val
+
+proc frameLabel*(vm: VideoPlayerVM): string =
+  ## The frame shown, over the last frame's index (the desktop's label,
+  ## Visual-Replay.md § Video Player Pane): `Frame 30 / 59`; the thumb's
+  ## frame while the scrubber is held.
+  let total = vm.frameVm.frameCount.val
+  let at = vm.scrubPosition(scrubFrame)
+  if total > 0: "Frame " & $at & " / " & $(total - 1)
+  else: "Frame " & $at
+
+proc drawLabel*(vm: VideoPlayerVM): string =
+  ## The draw call shown within its frame, over the frame's last draw call's
+  ## index: `Draw 1 / 3` — or, when the player did not say what the frame's
+  ## draw calls are, over the recording's draw-call list.
+  let count = vm.frameVm.frameDrawCount.val
+  if count > 0:
+    let at = vm.scrubPosition(scrubDraw)
+    return "Draw " & $(if at >= 0: at else: count - 1) & " / " & $(count - 1)
+  let calls = vm.frameVm.drawCalls.val
+  if vm.frameVm.selectedDrawCall.val.isSome:
+    "Draw " & $vm.frameVm.selectedDrawCall.val.get & " / " &
+      (if calls.len > 0: $(calls.len - 1) else: "?")
+  elif calls.len > 0:
+    "Draw 0 / " & $(calls.len - 1)
+  else:
+    ""
 
 proc applyFrameSize(vm: VideoPlayerVM) =
   ## Frames at the stage's size (Viewport-Driven-Loading, Decided Q5) — and
@@ -778,6 +1039,9 @@ proc createVideoPlayerVM*(frameVm: FrameViewerVM): VideoPlayerVM =
       bufferingLastUnderMs: -1.0,
       lastTickMs: -1.0,
       frameAccumulator: 0.0,
+      scrubRevision: createSignal(0),
+      frameScrub: ScrubGesture(requested: -1, position: -1),
+      drawScrub: ScrubGesture(requested: -1, position: -1),
       disposeProc: dispose,
     )
     vm

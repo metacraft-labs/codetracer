@@ -149,6 +149,22 @@ type
       ## counterexample a failed obligation opens. In NO default layout: View
       ## › Verification opens it. Schema version 8; LAST, for the ordinal
       ## reason the PLAT-16 values give.
+    paneVideoPlayer = "videoPlayer"
+      ## PLAT-59. The desktop's Video Player (`Content.VideoPlayer`): the
+      ## frame a visual recording drew at the current position, with its own
+      ## transport and scrubbers (Visual-Replay.md). In NO default layout: it
+      ## is added beside the editor when the opened recording carries
+      ## graphics, and removed again for one that does not
+      ## (`visual_replay_layout`). Schema version 9; LAST, for the ordinal
+      ## reason the PLAT-16 values give.
+    panePixelHistory = "pixelHistory"
+      ## PLAT-59. The desktop's Pixel History (`Content.PixelHistory`): the
+      ## draw calls that touched the picked pixel. Added beside the state
+      ## pane with the Video Player.
+    paneShaderDebug = "shaderDebug"
+      ## PLAT-59. The desktop's Shader Debug (`Content.ShaderDebug`): the
+      ## fragment shader's steps for the picked pixel. Added beside the state
+      ## pane with the Video Player.
 
   PaneRefKind* = enum
     ## PLAT-9 / Extensibility-Model.md §6.1. WHAT KIND OF PANE A SLOT HOLDS.
@@ -709,7 +725,7 @@ type
     detail*: string
 
 const
-  LayoutSchemaVersion* = 8
+  LayoutSchemaVersion* = 9
     ## Bumped when the serialised shape changes incompatibly. A decoder that
     ## meets a version it does not know raises `ldeUnknownVersion` rather than
     ## guessing — the failure mode `savedLayoutConfig` has no way to express,
@@ -769,6 +785,10 @@ const
     ## | 8 | `PaneKind` gains `verification` (PLAT-63) — the desktop's View ›
     ##       Verification pane, which no default places. Shape unchanged;
     ##       `migrateV7toV8` re-stamps the version. |
+    ## | 9 | `PaneKind` gains `videoPlayer`, `pixelHistory` and
+    ##       `shaderDebug` (PLAT-59) — the desktop's Visual Replay panes, added
+    ##       when a recording carries graphics. Shape unchanged;
+    ##       `migrateV8toV9` re-stamps the version. |
     ##
     ## ### The v2→v3 migration changes nothing, and that is not a reason to
     ## ### have skipped the bump
@@ -2700,6 +2720,13 @@ proc migrateV7toV8(doc: JsonNode): JsonNode =
   result = copy(doc)
   result["version"] = %8
 
+proc migrateV8toV9(doc: JsonNode): JsonNode =
+  ## PLAT-59. `PaneKind` gained `videoPlayer`, `pixelHistory` and
+  ## `shaderDebug`. Shape unchanged: re-stamps the version, for the v3→v4
+  ## reason.
+  result = copy(doc)
+  result["version"] = %9
+
 proc migrateDocument(doc: JsonNode): JsonNode =
   ## Walk a document forward, ONE VERSION AT A TIME, to this build's schema
   ## version (§6).
@@ -2730,6 +2757,8 @@ proc migrateDocument(doc: JsonNode): JsonNode =
       result = migrateV6toV7(result)
     of 7:
       result = migrateV7toV8(result)
+    of 8:
+      result = migrateV8toV9(result)
     else:
       # Unreachable while the chain is complete, and this is what makes
       # "complete" checkable: a bump that forgets its migration lands here
@@ -2997,7 +3026,8 @@ type
 const
   EditModeHiddenPanes*: set[PaneKind] = {
     paneState, paneScratchpad, paneEventLog, paneTerminalOutput,
-    paneCalltrace, paneAgentActivity}
+    paneCalltrace, paneAgentActivity, paneVideoPlayer, panePixelHistory,
+    paneShaderDebug}
     ## The replay-only panes an EDITING session does not show — the
     ## `PaneKind` image of the desktop's
     ## `frontend.editModeHiddenContentIds()` through the one table where the

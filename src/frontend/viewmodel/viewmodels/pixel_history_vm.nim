@@ -1,6 +1,6 @@
 ## PixelHistoryVM — ViewModel for RenderDoc-style pixel history entries.
 
-import std/options
+import std/[math, options, strformat]
 
 import isonim/core/[async_compat, signals]
 import isonim/viewmodel
@@ -25,7 +25,58 @@ type
     error*: Signal[string]
     selectedEntry*: Signal[Option[int]]
     onEntrySelected*: proc(entry: VisualReplayPixelHistoryEntry)
+    onEntryActivated*: proc(entry: VisualReplayPixelHistoryEntry)
+      ## A row NAVIGATED to (`selectEntry` with `seekSource`, a click): the
+      ## Video Player shows that draw call (Visual-Replay.md § Pixel History
+      ## Tab, "Click an entry to seek the Video Player to that draw call").
+      ## Set by `VisualReplayPanesVM`, which owns the player.
     onHistoryLoaded*: proc(entryCount: int; error: string; loading: bool)
+
+const
+  PixelHistoryHeading* = "Pixel History"
+  PixelHistoryLoadingText* = "Loading pixel history..."
+  PixelHistoryEmptyText* = "Click a frame pixel"
+    ## The pane's words, every front-end's (Visual-Replay.md § Pixel History
+    ## Tab): the desktop's view and the terminal's and GPUI's panes print
+    ## these, so the three cannot come to say different things.
+
+proc pixelText*(vm: PixelHistoryVM): string =
+  ## The header's pixel: `Pixel 12, 34 frame 2`, or that none is picked.
+  if vm.selectedPixel.val.isSome:
+    let pixel = vm.selectedPixel.val.get
+    "Pixel " & $pixel.x & ", " & $pixel.y & " frame " & $pixel.frame
+  else:
+    "No pixel selected"
+
+proc colorByte*(channel: float): int =
+  ## A 0..1 channel as the 0..255 byte the swatch is painted with.
+  int(round(max(0.0, min(channel, 1.0)) * 255.0))
+
+proc colorText*(color: VisualReplayPixelColor): string =
+  &"{color.r:.2f}, {color.g:.2f}, {color.b:.2f}, {color.a:.2f}"
+
+proc passText*(entry: VisualReplayPixelHistoryEntry): string =
+  if entry.passed:
+    "Passed"
+  elif entry.failureReason.len > 0:
+    "Failed: " & entry.failureReason
+  else:
+    "Failed"
+
+proc testsText*(entry: VisualReplayPixelHistoryEntry): string =
+  "Depth " & entry.testStatus.depth &
+    "  Stencil " & entry.testStatus.stencil &
+    "  Blend " & entry.testStatus.blend &
+    "  Cull " & entry.testStatus.cull
+
+proc drawText*(entry: VisualReplayPixelHistoryEntry): string =
+  "Draw " & $entry.drawCallIndex
+
+proc geidText*(entry: VisualReplayPixelHistoryEntry): string =
+  "GEID " & $entry.geid
+
+proc showsEmptyHint*(vm: PixelHistoryVM): bool =
+  vm.entries.val.len == 0 and not vm.loading.val and vm.error.val.len == 0
 
 proc beginLoad(vm: PixelHistoryVM): int =
   inc vm.requestSerial
@@ -96,6 +147,8 @@ proc selectEntry*(vm: PixelHistoryVM; index: int; seekSource = true) =
     # icon — can call ``jumpToSourceForEntry`` directly without first
     # toggling the selection signal.
     discard vm.jumpToSourceForEntry(index)
+    if not vm.onEntryActivated.isNil:
+      vm.onEntryActivated(vm.entries.val[index])
   if not vm.onEntrySelected.isNil:
     vm.onEntrySelected(vm.entries.val[index])
 

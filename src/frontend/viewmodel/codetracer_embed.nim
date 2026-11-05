@@ -370,6 +370,20 @@ export frame_viewer_vm
 import viewmodels/pixel_history_vm
 export pixel_history_vm
 
+# PLAT-59: the Visual Replay panes as one model — the transport and its two
+# scrubbers (`video_player_vm`), the shader debugger, and the four joined over
+# one player (`visual_replay_panes_vm`) — which the terminal's and GPUI's
+# Video Player, Pixel History and Shader Debug panes draw. Like the three
+# above, they import only `std/*`, `isonim/*` and `store/replay_data_store`.
+import viewmodels/video_player_vm
+export video_player_vm
+
+import viewmodels/shader_debug_vm
+export shader_debug_vm
+
+import viewmodels/visual_replay_panes_vm
+export visual_replay_panes_vm
+
 # ---------------------------------------------------------------------------
 # Source access (CTUI-4)
 #

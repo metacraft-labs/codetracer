@@ -15,31 +15,11 @@ export signals, computation, components
 proc displayIf(cond: bool): string =
   if cond: "block" else: "none"
 
-proc contextText(vm: ShaderDebugVM): string =
-  if vm.selectedContext.val.isNone:
-    return "No shader context"
-  let context = vm.selectedContext.val.get
-  result = "Pixel " & $context.x & ", " & $context.y
-  if context.frame.isSome:
-    result.add " frame " & $context.frame.get
-  if context.drawCallIndex.isSome:
-    result.add " draw " & $context.drawCallIndex.get
-  if context.geid.isSome:
-    result.add " GEID " & $context.geid.get
-
-proc stepText(vm: ShaderDebugVM): string =
-  if vm.debugInfo.val.isNone or vm.debugInfo.val.get.steps.len == 0:
-    return "Step 0 / 0"
-  "Step " & $(vm.currentStepIndex.val + 1) & " / " & $vm.debugInfo.val.get.steps.len
-
 proc sourceLineClass(vm: ShaderDebugVM; lineNumber: int): string =
   if vm.currentSourceLine() == lineNumber:
     "shader-debug-source-line current"
   else:
     "shader-debug-source-line"
-
-proc lineNumberText(lineNumber: int): string =
-  &"{lineNumber:>3}"
 
 proc onStepBack(vm: ShaderDebugVM): proc() =
   result = proc() = vm.stepBackward()
@@ -52,29 +32,6 @@ proc onStepFirst(vm: ShaderDebugVM): proc() =
 
 proc onStepLast(vm: ShaderDebugVM): proc() =
   result = proc() = vm.stepLast()
-
-proc showsEmptyHint(vm: ShaderDebugVM): bool =
-  vm.debugInfo.val.isNone and not vm.loading.val and vm.error.val.len == 0
-
-proc stageText(vm: ShaderDebugVM): string =
-  if vm.debugInfo.val.isSome:
-    vm.debugInfo.val.get.shaderStage & " / " & vm.debugInfo.val.get.entryPoint
-  else: ""
-
-proc sourceLinesOf(vm: ShaderDebugVM): seq[string] =
-  if vm.debugInfo.val.isSome: vm.debugInfo.val.get.sourceLines else: @[]
-
-proc instructionText(vm: ShaderDebugVM): string =
-  let step = vm.currentStep()
-  if step.isSome: step.get.instruction else: ""
-
-proc variablesOf(vm: ShaderDebugVM): seq[VisualReplayShaderValue] =
-  let step = vm.currentStep()
-  if step.isSome: step.get.variables else: @[]
-
-proc registersOf(vm: ShaderDebugVM): seq[VisualReplayShaderValue] =
-  let step = vm.currentStep()
-  if step.isSome: step.get.registers else: @[]
 
 proc renderShaderValueRow[R, N](r: R; value: proc(): VisualReplayShaderValue): N =
   ui(r):
@@ -182,11 +139,11 @@ proc renderShaderDebugPanel*[R, N](r: R; vm: ShaderDebugVM): N =
     tdiv(class = "shader-debug-component isonim-shader-debug"):
       tdiv(class = "shader-debug-header"):
         span(class = "shader-debug-title"):
-          text "Shader Debugger"
+          text ShaderDebugHeading
         span(class = "shader-debug-context"):
           text contextText(vm)
       tdiv(class = "shader-debug-loading", display = displayIf(vm.loading.val)):
-        text "Loading shader trace..."
+        text ShaderDebugLoadingText
       tdiv(class = "shader-debug-error", display = displayIf(vm.error.val.len > 0)):
         text vm.error.val
       tdiv(ref = emptySlot):
@@ -198,7 +155,7 @@ proc renderShaderDebugPanel*[R, N](r: R; vm: ShaderDebugVM): N =
     proc(): N =
       ui(r):
         tdiv(class = "shader-debug-empty"):
-          text "Select a frame pixel or pixel history entry")
+          text ShaderDebugEmptyText)
   show(r, bodySlot,
     proc(): bool = vm.debugInfo.val.isSome,
     proc(): N = renderShaderDebugBody[R, N](r, vm))
