@@ -428,7 +428,7 @@
       flake = false;
     };
     nim-shm-gset = {
-      url = "github:metacraft-labs/nim-shm-gset/6333cc915689559b00f81371734783c2e894ca45";
+      url = "github:metacraft-labs/nim-shm-gset/953bd231a022243fcee96092234d7cf80f7042b0";
       flake = false;
     };
 
@@ -441,10 +441,11 @@
     # framing. config.nims reads TEST_CERTIFICATES_TOOLS_SRC after the
     # `../test-certificates-tools` sibling; the sandboxed package build and
     # the dev shell have no sibling, so they seed it from here. Pinned at the
-    # same revision reprobuild links (reprobuild `agents` 1e70a388c) until the
+    # same revision reprobuild links (its `test-certificates-tools-src` input at
+    # reprobuild `agents` e7225d709, the revision flake.lock pins) until the
     # v0.1.0 tag carries it.
     test-certificates-tools = {
-      url = "github:metacraft-labs/test-certificates-tools/9864082065c8acb1db315e65a6a4157a3ab77117";
+      url = "github:metacraft-labs/test-certificates-tools/4b395de551d86c745d6eb8ebf7c7228df25298f5";
       flake = false;
     };
 
@@ -482,21 +483,30 @@
     # workspace producer, and when this revision and repro.lock's
     # `reprobuild-packages` revision differ. Move both together.
     #
-    # PINNED BY REVISION, NOT BY BRANCH, and the revision is the one
-    # reprobuild's own lock declares (`runquota-package-catalog`). Tracking
-    # `dev` is what broke this shell: `shellcheck`, `shfmt` and `prek` left
+    # PINNED BY REVISION, NOT BY BRANCH, at the catalog's `agents` tip: the
+    # revision a full `repro lock refresh` records. The workspace shell points
+    # REPROBUILD_PACKAGES_ROOT at the `../reprobuild-packages` checkout, which
+    # sits on `agents`, and the refresh writes that checkout's HEAD into
+    # repro.lock; a flake pin at any other revision then differs from repro.lock
+    # and fails the check above. Move it with `repro lock update
+    # reprobuild-packages --to <rev>`, which moves both. When the catalog's
+    # `agents` moves, the next refresh moves repro.lock and this pin follows.
+    #
+    # reprobuild's own `repro.lock` records this catalog the same way, so it
+    # names the catalog tip of its own refresh, which can trail this pin; it is
+    # not a revision this repo inherits. The `runquota-package-catalog` node in
+    # flake.lock (4e2fd1dcabf8) is no statement about this pin either: it is
+    # runquota's input, and that revision lacks the `rustup` and `tree-sitter`
+    # contributions `repro.nim` imports.
+    #
+    # `dev` cannot supply this pin: `shellcheck`, `shfmt` and `prek` left
     # reprobuild's stdlib, so a recipe that `uses:` them needs their
-    # `packages/interfaces/<pkg>/repro.nim` from this catalog — and those
+    # `packages/interfaces/<pkg>/repro.nim` from this catalog, and those
     # interfaces were added on the catalog's `agents` branch (5cb3f71026c5,
     # 2026-09-30) and have never been promoted to `dev`, whose tip has not
-    # moved since 2026-09-29. So re-resolving `dev` cannot fix it: the content
-    # is not on that branch to be resolved to. Re-pinning the PARENT
-    # (reprobuild) forward while this child stayed on a branch that never
-    # received the matching recipes is the same stale-child class as
-    # `io-mon-src` (f79853ec2); the fix is the same single-node graft onto the
-    # revision reprobuild itself declares.
+    # moved since 2026-09-29.
     reprobuild-packages = {
-      url = "github:metacraft-labs/reprobuild-packages/7cbfee303fa2ae433b46c2a6151abd6f50ca7c29";
+      url = "github:metacraft-labs/reprobuild-packages/2c58192ab2e936da98440be5986a999339108cf6";
       flake = false;
     };
 

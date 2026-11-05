@@ -6991,7 +6991,7 @@ jobs:
             codetracer-trace-format-nim=4c74973690e13eddb886f3376827e0934b8a4deb
             io-mon=e66e05c9471ce184e9a3b0d793b2db62ca5557b9
             nim-shm-queue=84fd76b174d4868e703ba3d599668ee340e0b6ea
-            nim-shm-gset=6333cc915689559b00f81371734783c2e894ca45
+            nim-shm-gset=953bd231a022243fcee96092234d7cf80f7042b0
             nim-stackable-hooks=dev
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
@@ -7303,7 +7303,7 @@ jobs:
             codetracer-trace-format-nim=4c74973690e13eddb886f3376827e0934b8a4deb
             io-mon=e66e05c9471ce184e9a3b0d793b2db62ca5557b9
             nim-shm-queue=84fd76b174d4868e703ba3d599668ee340e0b6ea
-            nim-shm-gset=6333cc915689559b00f81371734783c2e894ca45
+            nim-shm-gset=953bd231a022243fcee96092234d7cf80f7042b0
             nim-stackable-hooks=dev
             codetracer-native-recorder=e57bbd7cc6450cf3ded247c6e9bed72a9d53d9cf
             codetracer-js-recorder=dev
