@@ -158,6 +158,8 @@ import ./problems_leaf         # PLAT-55: Problems, drawn natively
 import ./verification_leaf     # PLAT-63: Verification, drawn natively
 import ../viewmodel/host/native_verification_host   # PLAT-63: its host
 import ./low_level_code_leaf   # PLAT-60: Low Level Code, drawn natively
+import ./visual_replay_leaf   # PLAT-59: the Visual Replay panes, drawn natively
+import ../viewmodel/host/native_visual_replay_host   # PLAT-59: their producer
 import headless_app/low_level_menu   # PLAT-60: its row menu (K59)
 import headless_app/verification_menu   # PLAT-63: its row menu (K65)
 import ./build_output_leaf     # PLAT-56: Build Output, drawn natively
@@ -706,6 +708,8 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
                        "build",
                        # PLAT-58: the Requests pane's rows, menus, field.
                        "requests",
+                       # PLAT-59: the Visual Replay panes.
+                       "visual",
                        # PLAT-60: the Low Level Code listing.
                        "lowlevel",
                        # PLAT-63: the Verification pane.
@@ -1389,6 +1393,11 @@ var
     ## tab: a build is of the working tree.
   gProblemsPane = initGProblemsPane()
   gLowLevel = initGLowLevelPane()
+  gVisual = GVisualPanes()
+    ## PLAT-59: the Visual Replay panes' held scrubber, the history's
+    ## reading position, the loupe's cursor.
+  gVisualHosts = initTable[int, NativeVisualReplay]()
+    ## PLAT-59: each session's player and client, by the session's address.
     ## PLAT-60: the Low Level Code listing's reading position and a held thumb.
   gVerification: NativeVerificationHost = nil
     ## PLAT-63: the WINDOW's Verification ViewModels and the project's Verno
@@ -2332,6 +2341,19 @@ proc followListViewports(r: GpuiRenderer)
 proc syncEditorViewport(r: GpuiRenderer)
 proc refitEditorRows(r: GpuiRenderer)
 
+const VisualTickMs = 16
+  ## How soon the window's tick comes back while the Visual Replay panes have
+  ## work due (`visualBusy`).
+
+proc pressVisual(r: GpuiRenderer; x, y: int): bool
+  ## PLAT-59: forward-declared; defined beside the Visual Replay host.
+proc moveVisual(r: GpuiRenderer; x, y: int): bool
+proc releaseVisual(r: GpuiRenderer; x, y: int): bool
+proc visualKey(r: GpuiRenderer; key: string; mods: seq[string]): bool
+proc drawVisualPanes(r: GpuiRenderer)
+proc visualBusy(): bool
+proc visualTick() {.cdecl.}
+
 proc drawArrangement(r: GpuiRenderer): bool =
   ## Lay the window out from the layout it should show NOW — the committed
   ## one, or, while a divider is dragged, the committed one with the pending
@@ -2388,6 +2410,8 @@ proc drawArrangement(r: GpuiRenderer): bool =
   drawAgentPane(r)
   # PLAT-55: and Problems from its own.
   drawProblemsPane(r)
+  # PLAT-59: and the Visual Replay panes from the session's.
+  drawVisualPanes(r)
   # PLAT-60: and Low Level Code from the session's.
   drawLowLevelPane(r)
   # PLAT-63: and Verification from the window's.
@@ -3689,6 +3713,12 @@ proc pumpRequestsWindow(r: GpuiRenderer): bool
 proc wireShellOf(s: HeadlessDebugSession)
 proc pressShell(r: GpuiRenderer; x, y: int): bool
   ## PLAT-61: forward-declared; defined beside the Shell pane's host.
+proc visualVM(): VisualReplayPanesVM
+proc attachVisualOf(s: HeadlessDebugSession)
+proc syncVisualLayout(r: GpuiRenderer)
+proc closeVisualOf(s: HeadlessDebugSession)
+proc closeAllVisual()
+  ## PLAT-59: forward-declared; defined with the Visual Replay panes' host.
   ## PLAT-57: forward-declared; defined beside the editor's caret, which
   ## opening a result places.
 
@@ -4159,6 +4189,11 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     # (EMT-D21), so the pane takes the focus only for the others.
     if pressProblems(r, x, y):
       return
+    # PLAT-59: the Visual Replay panes' presses (the transport, the
+    # scrubbers, the picker; a history row; a shader step); the pane takes
+    # the focus.
+    if pressVisual(r, x, y):
+      return
     # PLAT-60: the Low Level Code pane's presses (an instruction goes to its
     # source line, the sync toggle, the scrubber); the pane takes the focus.
     if pressLowLevel(r, x, y):
@@ -4313,6 +4348,10 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
           gVerification.session, verificationBody(), y, dragging = true)
         drawVerificationPane(r)
       return
+    # PLAT-59: a held Video Player scrubber follows the pointer; the
+    # picker's loupe follows it over the frame.
+    if moveVisual(r, x, y):
+      return
     if gTests.dragging:
       if not gTestsVM.isNil:
         gTests.scrubTests(gTestsVM, testsBody(), y, dragging = true)
@@ -4383,6 +4422,8 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       return
     if gConstraintsPane.dragging:
       gConstraintsPane.dragging = false
+      return
+    if releaseVisual(r, x, y):
       return
     if gAgent.dragging:
       gAgent.dragging = false
@@ -4625,6 +4666,7 @@ proc windowKey(key: string; mods: seq[string]) =
   ## editor's caret and selection, the palette's and the right-click menu's
   ## keys (their pushed layers), `Esc` ending a layout gesture.
   var r: GpuiRenderer
+  traceGesture("window key " & key & (if mods.len > 0: " " & $mods else: ""))
   # Any key between Alt's press and release makes it a chord, not a tap.
   if key != "alt":
     gAltTap.interrupted()
@@ -4644,6 +4686,10 @@ proc windowKey(key: string; mods: seq[string]) =
     return
   # PLAT-52: the Terminal Output pane's own keys, while it has focus.
   if mods.len == 0 and terminalKey(r, key):
+    return
+  # PLAT-59: the Video Player's own keys while it has the focus (the
+  # desktop's, scoped to the pane).
+  if visualKey(r, key, mods):
     return
   routeWindowKey(r, key, mods)
 
@@ -4669,9 +4715,17 @@ proc modifiersHandler(el: GpuiElement): GpuiEventHandler =
     if el.lastEventKind() != gekModifiers: return
     windowModifiers(modifierNamesOf(el.lastEventModifiers()))
 
+var gPanesArmed: seq[GpuiElement]
+  ## The panes `armPaneKeys` has armed: a second listener would run every key
+  ## twice, and a pane a layout command adds before the first frame's loop is
+  ## reached by both (`adoptNewLeaves` and that loop).
+
 proc armPaneKeys(r: GpuiRenderer; pane: GpuiElement) =
   ## A replay window's pane: focusable, its keys to `windowKey`, its modifier
-  ## changes to `windowModifiers`.
+  ## changes to `windowModifiers`. Once per pane.
+  if pane in gPanesArmed:
+    return
+  gPanesArmed.add pane
   setFocusable(pane)
   r.addEventListener(pane, "keydown", gestureKeyHandler(pane))
   r.addEventListener(pane, "modifierschange", modifiersHandler(pane))
@@ -6172,6 +6226,10 @@ proc showSession(r: GpuiRenderer; id: HeadlessSessionId) =
   # PLAT-58: the session's requests counted, and the pane revealed once
   # when it serves any.
   discard pumpRequestsWindow(r)
+  # PLAT-59: the Visual Replay panes in the arrangement exactly when this
+  # session's recording carries graphics.
+  attachVisualOf(gSession)
+  syncVisualLayout(r)
   discard drawArrangement(r)
 
 proc openRecordingInTab(r: GpuiRenderer; path: string) =
@@ -6233,6 +6291,7 @@ proc closeSessionTab(r: GpuiRenderer; index: int) =
     if gAgentHosts.hasKey(key):
       gAgentHosts[key].close()
       gAgentHosts.del(key)
+    closeVisualOf(gSessionsOpened[int(id)])
     gSessionsOpened[int(id)].close()
     gSessionsOpened.del(int(id))
   if not gTestsVM.isNil:
@@ -7738,6 +7797,14 @@ proc armHoverTick() =
       gArmedTick = want
       gpui_set_tick(uint32(AgentPollMs), agentTick)
     return
+  # PLAT-59: the Visual Replay panes' clock — playback, a held scrubber's
+  # coalesced frame, a frame on its way — every `VisualTickMs`.
+  if due < 0 and visualBusy():
+    let want = (due: -7'i64, vcs: false)
+    if gArmedTick != want:
+      gArmedTick = want
+      gpui_set_tick(uint32(VisualTickMs), visualTick)
+    return
   # PLAT-58: a live session's request tail, every
   # `RequestSpanPollIntervalMs`.
   if due < 0 and requestsLive():
@@ -9209,6 +9276,369 @@ proc attachVerification(leafSet: var GpuiLeafSet) =
   for leaf in leafSet.leaves.mitems:
     if leaf.kind == glkBuiltin and leaf.builtin == paneVerification:
       leaf.vm = ViewModel(gVerification.vm)
+
+# ---------------------------------------------------------------------------
+# PLAT-59: the Visual Replay panes' host (Visual-Replay.md)
+# ---------------------------------------------------------------------------
+
+proc visualVM(): VisualReplayPanesVM =
+  ## The shown session's Visual Replay panes; nil for a recording that
+  ## carries no graphics.
+  if gSession.isNil or gSession.session.isNil: nil
+  else: gSession.session.visualReplay
+
+proc visualHost(): NativeVisualReplay =
+  if gSession.isNil: nil
+  else: gVisualHosts.getOrDefault(cast[int](gSession))
+
+proc visualBodyOf(kind: PaneKind): PxRect =
+  ## A Visual Replay pane's body in window pixels — the visible tab of a box
+  ## — or a zero rectangle.
+  let i = gGeom.tabsNodeOfPane($kind)
+  if i < 0:
+    return PxRect()
+  let n = gGeom.nodes[i]
+  if n.panes.len > 0 and n.active >= 0 and n.active < n.panes.len and
+     n.panes[n.active] != $kind:
+    return PxRect()
+  n.body
+
+proc attachVisualOf(s: HeadlessDebugSession) =
+  ## THE PRODUCER (Visual-Replay.md § Activation): a recording that carries
+  ## graphics gets its player and the Visual Replay panes over it — the
+  ## session's `VisualReplayPanesVM`, the one the terminal and the desktop
+  ## draw. A player that cannot start still gets the panes, which say why.
+  if s.isNil or s.session.isNil or gVisualHosts.hasKey(cast[int](s)):
+    return
+  let h = startVisualReplay(s.tracePath)
+  if h.isNil:
+    return
+  gVisualHosts[cast[int](s)] = h
+  # The engine refused this recording and its graphics opened anyway: said in
+  # the footer, the one line this window has for what just happened.
+  if s.engineRefusal.len > 0:
+    gStatusNote = sessionRefusedWords(s.engineRefusal)
+  let panes = h.panesFor(s.session.store)
+  # The window draws the framebuffer's own pixels, scaled by the stage;
+  # the loupe samples them 1:1.
+  panes.frame.setFrameSize(0, 0)
+  s.session.visualReplay = panes
+  traceGesture("visual replay: " &
+    (if h.error.len > 0: h.error else: "player at " & h.url))
+
+proc closeVisualOf(s: HeadlessDebugSession) =
+  ## This session's player stopped: a closed tab or window leaves none behind.
+  let key = cast[int](s)
+  if gVisualHosts.hasKey(key):
+    gVisualHosts[key].close()
+    gVisualHosts.del(key)
+
+proc closeAllVisual() =
+  ## Every session's player stopped, as the window ends. Without this one
+  ## outlived the window, holding the pipes it inherited from whoever ran it.
+  for h in gVisualHosts.values:
+    h.close()
+  gVisualHosts.clear()
+
+proc syncVisualLayout(r: GpuiRenderer) =
+  ## The Visual Replay panes in the arrangement exactly when the shown
+  ## session's recording carries graphics — ADDITIVE: the Video Player a tab
+  ## beside the editor, Pixel History and Shader Debug tabs beside the
+  ## state pane, the user's tabs kept the ones shown — and removed for one
+  ## that carries none (§ Activation, steps 3 and 4).
+  if gShell.isNil:
+    return
+  let want = not visualVM().isNil
+  var layout = committedLayout()
+  if want:
+    for (pane, beside) in [(paneVideoPlayer, paneEditor),
+                           (panePixelHistory, paneState),
+                           (paneShaderDebug, panePixelHistory)]:
+      layout = committedLayout()
+      if layout.tree.contains(pane):
+        continue
+      if layout.tree.contains(beside):
+        applyGestureCommand(r, cmdAddPane(pane, after = some(beside)))
+        if committedLayout().tree.contains(pane):
+          applyGestureCommand(r, cmdMergeIntoStack(pane, beside))
+      else:
+        applyGestureCommand(r, cmdAddPane(pane))
+    layout = committedLayout()
+    if layout.tree.contains(paneEditor):
+      applyGestureCommand(r, cmdActivateTab(paneEditor))
+    if layout.tree.contains(paneState):
+      applyGestureCommand(r, cmdActivateTab(paneState))
+  else:
+    for pane in [paneShaderDebug, panePixelHistory, paneVideoPlayer]:
+      if committedLayout().tree.contains(pane):
+        applyGestureCommand(r, cmdRemovePane(pane))
+
+proc drawVisualPanes(r: GpuiRenderer) =
+  ## PLAT-59: draw the three panes from the session's model, natively,
+  ## replacing whatever their leaves held.
+  let panes = visualVM()
+  if panes.isNil:
+    return
+  let video = gPanes.getOrDefault($paneVideoPlayer)
+  let videoBody = visualBodyOf(paneVideoPlayer)
+  if drawVideoPlayer(r, video, panes, gVisual, videoBody):
+    applyTextFaces(r, video)
+    let lay = videoLayout(panes, videoBody)
+    let img = lay.image
+    if img.w > 0:
+      traceGesture("visual: image " & $img.x & "," & $img.y & "," & $img.w &
+                   "," & $img.h)
+    let track = lay.frameTrack
+    if track.w > 0:
+      traceGesture("visual: track " & $track.x & "," & $track.y & "," &
+                   $track.w & "," & $track.h)
+  let history = gPanes.getOrDefault($panePixelHistory)
+  if drawPixelHistory(r, history, panes, gVisual,
+                      visualBodyOf(panePixelHistory)):
+    applyTextFaces(r, history)
+  let shader = gPanes.getOrDefault($paneShaderDebug)
+  if drawShaderDebug(r, shader, panes, visualBodyOf(paneShaderDebug)):
+    applyTextFaces(r, shader)
+
+proc visualBusy(): bool =
+  let panes = visualVM()
+  if panes.isNil:
+    return false
+  panes.player.playState.val == Playing or panes.player.frameScrub.held or
+    panes.player.drawScrub.held or visualHost().busy
+
+proc pumpVisualWindow(r: GpuiRenderer): bool =
+  ## The player's answers applied, a held scrubber's coalesced frame asked
+  ## for, playback advanced; the panes drawn again when anything moved.
+  let panes = visualVM()
+  if panes.isNil:
+    return false
+  let now = float(nowMonoMs())
+  result = visualHost().pump()
+  if panes.player.pumpScrub(now):
+    result = true
+  if panes.player.playState.val == Playing:
+    panes.player.tickPlayback(now)
+    result = true
+  drainPlatformCallbacks()
+  if result:
+    drawVisualPanes(r)
+
+proc visualTick() {.cdecl.} =
+  var r: GpuiRenderer
+  gArmedTick = (due: -2'i64, vcs: false)
+  discard pumpVisualWindow(r)
+  armHoverTick()
+
+proc settleVisual(r: GpuiRenderer; timeoutMs = 120_000) =
+  ## Wait until every request the panes asked is answered and applied (a
+  ## scripted run has no loop to wait in), then draw them.
+  let h = visualHost()
+  if h.isNil:
+    return
+  discard h.settleAll(timeoutMs)
+  discard pumpVisualWindow(r)
+  drawVisualPanes(r)
+
+proc visualAfterAct(r: GpuiRenderer) =
+  drainPlatformCallbacks()
+  discard visualHost().pump()
+  drawVisualPanes(r)
+  armHoverTick()
+
+proc commitPick(r: GpuiRenderer; x, y: int) =
+  ## The picker's commit: the source pixel's history and shader asked for,
+  ## the picker off, Pixel History brought forward.
+  let panes = visualVM()
+  panes.player.exitPickerMode()
+  gVisual.loupe = none(tuple[x, y: int])
+  panes.frame.selectPixel(x, y)
+  traceGesture("visual: picked " & $x & "," & $y & " of frame " &
+               $panes.frame.currentFrame.val)
+  if committedLayout().tree.contains(panePixelHistory):
+    applyGestureCommand(r, cmdActivateTab(panePixelHistory))
+    discard drawArrangement(r)
+  visualAfterAct(r)
+
+proc pressVisual(r: GpuiRenderer; x, y: int): bool =
+  ## A press on one of the Visual Replay panes. Every press on them is
+  ## theirs.
+  let panes = visualVM()
+  if panes.isNil:
+    return false
+  let now = float(nowMonoMs())
+  let video = visualBodyOf(paneVideoPlayer)
+  if video.contains(x, y):
+    if gFocusPane != $paneVideoPlayer:
+      focusWindowPane(r, $paneVideoPlayer)
+    let hit = videoHitAt(panes, video, x, y)
+    case hit.kind
+    of gvButton:
+      if hit.action == VpaTogglePicker:
+        panes.player.togglePicker()
+        gVisual.loupe = none(tuple[x, y: int])
+      else:
+        discard panes.player.dispatchVideoPlayerAction(hit.action)
+      traceGesture("visual: " & $hit.action)
+    of gvFrameTrack, gvDrawTrack:
+      gVisual.scrubbing = true
+      gVisual.scrubAxis = if hit.kind == gvFrameTrack: scrubFrame
+                          else: scrubDraw
+      panes.player.beginScrub(gVisual.scrubAxis, hit.position, now)
+      traceGesture("visual: scrub " & $gVisual.scrubAxis & " " &
+                   $hit.position)
+    of gvImage:
+      if panes.player.pickerState.val == PickerActive:
+        commitPick(r, hit.x, hit.y)
+        return true
+      # Visual-Replay.md § Selection Result's fallback: a click outside the
+      # picker still selects the pixel under it.
+      panes.frame.selectPixel(hit.x, hit.y)
+      traceGesture("visual: selected " & $hit.x & "," & $hit.y)
+    else: discard
+    visualAfterAct(r)
+    return true
+  let history = visualBodyOf(panePixelHistory)
+  if history.contains(x, y):
+    if gFocusPane != $panePixelHistory:
+      focusWindowPane(r, $panePixelHistory)
+    let hit = historyHitAt(panes, gVisual, history, x, y)
+    if hit.kind == gvHistoryRow:
+      discard panes.activateHistoryEntry(hit.index)
+      traceGesture("visual: history row " & $hit.index)
+      # A navigation moved the recording: every pane follows the move.
+      var moved = false
+      for e in gSession.backend.eventQueue:
+        if e{"event"}.getStr("") == "stopped":
+          moved = true
+      if moved:
+        try:
+          gSession.settleAfterSeek()
+          afterMove(r)
+        except CatchableError as e:
+          traceGesture("visual: the move failed: " & e.msg)
+    visualAfterAct(r)
+    return true
+  let shader = visualBodyOf(paneShaderDebug)
+  if shader.contains(x, y):
+    if gFocusPane != $paneShaderDebug:
+      focusWindowPane(r, $paneShaderDebug)
+    let hit = shaderHitAt(panes, shader, x, y)
+    if hit.kind == gvShaderButton:
+      case hit.button
+      of "First": panes.shader.stepFirst()
+      of "Back": panes.shader.stepBackward()
+      of "Step": panes.shader.stepForward()
+      of "Last": panes.shader.stepLast()
+      else: discard
+    visualAfterAct(r)
+    return true
+  false
+
+proc moveVisual(r: GpuiRenderer; x, y: int): bool =
+  ## The pointer moved: a held scrubber follows it (the frame under it shown
+  ## at once, the player asked at most every 60 ms); with the picker on, the
+  ## loupe follows it over the frame.
+  let panes = visualVM()
+  if panes.isNil:
+    return false
+  let video = visualBodyOf(paneVideoPlayer)
+  if gVisual.scrubbing:
+    discard panes.player.dragScrub(gVisual.scrubAxis,
+      scrubAt(panes, video, gVisual.scrubAxis, x), float(nowMonoMs()))
+    drawVisualPanes(r)
+    armHoverTick()
+    return true
+  if panes.player.pickerState.val == PickerActive and video.contains(x, y):
+    let hit = videoHitAt(panes, video, x, y)
+    let next = if hit.kind == gvImage: some((x: hit.x, y: hit.y))
+               else: none(tuple[x, y: int])
+    if next != gVisual.loupe:
+      gVisual.loupe = next
+      drawVisualPanes(r)
+  false
+
+proc releaseVisual(r: GpuiRenderer; x, y: int): bool =
+  if not gVisual.scrubbing:
+    return false
+  gVisual.scrubbing = false
+  let panes = visualVM()
+  if panes.isNil:
+    return true
+  panes.player.releaseScrub(gVisual.scrubAxis,
+    scrubAt(panes, visualBodyOf(paneVideoPlayer), gVisual.scrubAxis, x),
+    float(nowMonoMs()))
+  traceGesture("visual: released " & $gVisual.scrubAxis)
+  visualAfterAct(r)
+  true
+
+proc visualKey(r: GpuiRenderer; key: string; mods: seq[string]): bool =
+  ## The Video Player's keys while it has the focus (Visual-Replay.md §
+  ## Keyboard Shortcuts): Space / K play-pause, J rewind, L fast forward,
+  ## Left / Right a frame, Shift+Left / Shift+Right a draw call, Home / End,
+  ## P the picker, Esc cancels it. The Pixel History's and Shader Debug's
+  ## arrows move the selection and the step.
+  let panes = visualVM()
+  if panes.isNil:
+    return false
+  let k = key.toLowerAscii
+  let shift = mods == @["shift"]
+  if gFocusPane == $paneVideoPlayer:
+    var action = none(VideoPlayerAction)
+    if mods.len == 0:
+      case k
+      of " ", "space", "k": action = some(VpaTogglePlay)
+      of "j": action = some(VpaRewind)
+      of "l": action = some(VpaFastForward)
+      of "left", "arrowleft": action = some(VpaStepFrameBack)
+      of "right", "arrowright": action = some(VpaStepFrameForward)
+      of "home": action = some(VpaJumpStart)
+      of "end": action = some(VpaJumpEnd)
+      of "p": action = some(VpaTogglePicker)
+      of "escape": action = some(VpaCancelPicker)
+      else: discard
+    elif shift:
+      case k
+      of "left", "arrowleft": action = some(VpaStepDrawBack)
+      of "right", "arrowright": action = some(VpaStepDrawForward)
+      else: discard
+    if action.isNone:
+      return false
+    if not panes.player.dispatchVideoPlayerAction(action.get):
+      return false   # Esc with the picker off: someone else's
+    if action.get in {VpaTogglePicker, VpaCancelPicker}:
+      gVisual.loupe = none(tuple[x, y: int])
+    traceGesture("visual: key " & $action.get)
+    visualAfterAct(r)
+    return true
+  if gFocusPane == $panePixelHistory and mods.len == 0:
+    let n = panes.history.entries.val.len
+    if n == 0:
+      return false
+    let at = if panes.history.selectedEntry.val.isSome:
+               panes.history.selectedEntry.val.get else: -1
+    case k
+    of "down", "arrowdown": panes.selectHistoryEntry(min(n - 1, at + 1))
+    of "up", "arrowup": panes.selectHistoryEntry(max(0, at - 1))
+    of "enter":
+      if at < 0: return false
+      discard panes.activateHistoryEntry(at)
+    else: return false
+    gVisual.revealHistory(panes, visualBodyOf(panePixelHistory),
+      (if panes.history.selectedEntry.val.isSome:
+         panes.history.selectedEntry.val.get else: 0))
+    visualAfterAct(r)
+    return true
+  if gFocusPane == $paneShaderDebug and mods.len == 0:
+    case k
+    of "down", "arrowdown": panes.shader.stepForward()
+    of "up", "arrowup": panes.shader.stepBackward()
+    of "home": panes.shader.stepFirst()
+    of "end": panes.shader.stepLast()
+    else: return false
+    visualAfterAct(r)
+    return true
+  false
 
 proc pollCertificateIndicator(r: GpuiRenderer) =
   ## Only whole current answers cross the worker's channel. drawTopBar
@@ -12323,6 +12753,11 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
       # PLAT-58: the first session's requests counted, and the docked
       # REQUESTS pane opened when the recording serves any (RS-M4: once).
       discard pumpRequestsWindow(r)
+      # PLAT-59: the Visual Replay panes added when the recording carries
+      # graphics (its player started with the session, in `launch`).
+      if not visualVM().isNil:
+        syncVisualLayout(r)
+        discard drawArrangement(r)
   if not laidOut:
     # No document to follow (a refused projection draws its refusal as its
     # one leaf): the leaves tile one row, as they always have.
@@ -12604,6 +13039,106 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
         windowPointer(r, gekWheel, cx, cy, -float(at(2) * TerminalRowPx))
       else:
         return "unknown terminal event '" & parts[1] & "'"
+    of "visual":
+      # PLAT-59: the Visual Replay panes, aimed from the geometry they were
+      # drawn with (`visual_replay_leaf.videoLayout` / `historyLayout` /
+      # `shaderLayout`); `visual:wait` lets the player answer what they
+      # asked (a scripted run has no loop to wait in).
+      let panes = visualVM()
+      if panes.isNil:
+        return "this recording carries no graphics"
+      let video = visualBodyOf(paneVideoPlayer)
+      case parts[1]
+      of "wait":
+        settleVisual(r)
+      of "deliver":
+        # A key the way a window delivers one: through the pane's own keydown
+        # listeners, where the other ops call the handler. How many listeners
+        # the pane has is what a key's effect then shows.
+        discard gPanes.getOrDefault($paneVideoPlayer).fireEvent("keydown",
+          GpuiEvent(kind: gekKeyDown, key: parts[2]))
+      of "show":
+        let pane = case parts[2]
+                   of "history": panePixelHistory
+                   of "shader": paneShaderDebug
+                   else: paneVideoPlayer
+        applyGestureCommand(r, cmdActivateTab(pane))
+        discard drawArrangement(r)
+        focusWindowPane(r, $pane)
+      of "key":
+        let pane = case parts[2]
+                   of "history": panePixelHistory
+                   of "shader": paneShaderDebug
+                   else: paneVideoPlayer
+        gFocusPane = $pane
+        let mods = if parts.len > 4: parts[4].split('+') else: @[]
+        if not visualKey(r, parts[3], mods):
+          return "the " & $pane & " pane does not take '" & parts[3] & "'"
+      of "control":
+        if video.w <= 0:
+          return "the Video Player is not drawn"
+        for (action, rect) in videoLayout(panes, video).buttons:
+          if $action == parts[2]:
+            let (x, y) = centreOf(rect)
+            pressAt(x, y)
+            return ""
+        return "the Video Player has no control '" & parts[2] & "'"
+      of "scrub":
+        # `scrub:<frame|draw>:<from>:<to>` — a press on the track at
+        # position `from`, a drag to `to`, the release there.
+        if video.w <= 0:
+          return "the Video Player is not drawn"
+        let lay = videoLayout(panes, video)
+        let track = if parts[2] == "draw": lay.drawTrack else: lay.frameTrack
+        let count = if parts[2] == "draw": panes.frame.frameDrawCount.val
+                    else: panes.frame.frameCount.val
+        if track.w <= 0 or count <= 0:
+          return "the Video Player draws no " & parts[2] & " scrubber"
+        proc xOf(p: int): int =
+          if count <= 1: track.x
+          else: track.x + int(round(float(p) / float(count - 1) *
+                                    float(track.w - 1)))
+        let y = track.y + track.h div 2
+        windowPointer(r, gekPointerDown, xOf(at(3)), y)
+        windowPointer(r, gekPointerMove, xOf(at(4)), y)
+        windowPointer(r, gekPointerUp, xOf(at(4)), y)
+      of "pixel":
+        # `pixel:<x>:<y>` — the pointer on source pixel (x, y) of the frame,
+        # and a press there (the picker's commit when it is on).
+        if video.w <= 0:
+          return "the Video Player is not drawn"
+        let img = videoLayout(panes, video).image
+        let pic = panes.frame.picture.val
+        if img.w <= 0 or pic.width <= 0:
+          return "the Video Player shows no frame"
+        let x = img.x + (at(2) * img.w + img.w div 2) div pic.width
+        let y = img.y + (at(3) * img.h + img.h div 2) div pic.height
+        windowPointer(r, gekPointerMove, x, y)
+        if parts.len <= 4 or parts[4] != "hover":
+          pressAt(x, y)
+      of "history":
+        let body = visualBodyOf(panePixelHistory)
+        if body.w <= 0:
+          return "the Pixel History is not drawn"
+        let lay = historyLayout(panes, body)
+        let i = at(2)
+        gVisual.revealHistory(panes, body, i)
+        let top = gVisual.visibleHistoryTop(panes.history.entries.val.len,
+                                            lay.rows)
+        if i < top or i >= top + lay.rows:
+          return "history row " & $i & " is not listed"
+        pressAt(lay.list.x + 8, lay.list.y + (i - top) * VisualRowPx +
+                                VisualRowPx div 2)
+      of "step":
+        let body = visualBodyOf(paneShaderDebug)
+        for (b, rect) in shaderLayout(panes, body).buttons:
+          if b == parts[2]:
+            let (x, y) = centreOf(rect)
+            pressAt(x, y)
+            return ""
+        return "the Shader Debug pane has no button '" & parts[2] & "'"
+      else:
+        return "unknown visual event '" & parts[1] & "'"
     of "lowlevel":
       # PLAT-60: Low Level Code, aimed from the geometry it was drawn with
       # (`low_level_code_leaf.lowLevelLayout`).
@@ -13646,6 +14181,8 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       discard tickCellHover(r)
       # Build-Output-Pane.md §3.8: and a clean success's pane put away.
       discard tickGpuiBuildReveal(r)
+      # PLAT-59: and the Visual Replay panes' answers, waited for.
+      settleVisual(r)
       # PLAT-51: and a welcome tab's running `ct record` — REALLY waited
       # for, up to `ms`, polled as the window's tick polls it.
       if not gRecordJob.isNil and not gRecordJob.done:
@@ -13809,6 +14346,16 @@ proc capturePixels(cmd: GpuiCommand): int =
     stderr.writeLine("codetracer-gpui: --pixels-out: the root builder ran " &
                      $builderCalls & " times, expected exactly 1")
     return 1
+  # PLAT-59: `--window-ops` before the frame is taken, through the window's
+  # own handlers as `--report-window-plan` applies them — so a capture can be
+  # of a state a user reaches (a frame scrubbed to, a pixel picked).
+  block:
+    var r: GpuiRenderer
+    for op in cmd.windowOps:
+      let failure = runWindowOp(r, op)
+      if failure.len > 0:
+        stderr.writeLine("codetracer-gpui: --window-ops: " & failure)
+        return 1
   let shot = renderRootToPixels(root, cmd.width, cmd.height)
   # The marks' SVG files GO, as they do when the window closes
   # (`launchWindow`), and UNLIKE `--report-window-plan`, which leaves them
@@ -14608,6 +15155,10 @@ proc runOpen(cmd: GpuiCommand): int =
   wireSearch(session)
   wireRequestsOf(session)
   wireShellOf(session)
+  # PLAT-59: a recording that carries graphics gets its player and the
+  # Visual Replay panes' model before the first frame.
+  attachVisualOf(session)
+  defer: closeAllVisual()
   # PLAT-48: the top bar's shared ViewModels. The menu is the product's tree
   # with what this window performs enabled, its chords none (the window has
   # no keymap of its own for the debugger yet); the omnibar searches the
