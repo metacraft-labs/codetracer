@@ -67,6 +67,46 @@
   symbol is absent, not skewed. No pairing of revisions fixes it; the export has
   to be written. A wrong cause in an insights entry is worse than no entry,
   because it is the thing the next reader acts on.
+- 2026-11-05: **A local sibling checkout SILENTLY SHADOWS the revision
+  `flake.lock` pins, and the only symptom is `undeclared routine` minutes into a
+  compile.** `.envrc`'s flake-overrides plugin passed `--override-input isonim
+  path:/home/zahary/m/prox-fixes/isonim` (26 inputs overridden that way in one
+  measured `just test-vm-native` invocation, 2026-11-03 16:26). That checkout
+  was at `6286efa660` on `agents`, **253 commits behind** the pin
+  `196dfe18a3`, and the three renderer methods codetracer's generic views call
+  — `firstElementChild`, `nextElementSibling`, `setChecked` — exist at the pin
+  (`src/isonim/web/web_renderer.nim`, `src/isonim/testing/mock_dom.nim`) and
+  not at the local tip. Two of the lane's three failures were exactly that:
+  `isonim_menu_shell_view.nim(470, 13)` and
+  `isonim_welcome_screen_view.nim(537, 6)` `Error: attempting to call
+  undeclared routine`. Nothing warns: the plugin does warn about uninitialised
+  submodules, but not about revision skew, so a stale sibling reads as a
+  codetracer bug. AGENTS.md states this requirement for `../isonim-tui` and
+  `../isonim-gpui`; it holds for EVERY overridden input, `isonim` included.
+  Check before believing a compile failure in a generic view:
+  `git -C ../isonim rev-list --count HEAD..$(jq -r '.nodes.isonim.locked.rev'
+  flake.lock)` — and note `git branch --contains <pin>` answers "no branch"
+  when the sibling's remote refs are themselves stale (here `origin/agents`
+  was 147 commits behind the pin, last fetched 2026-10-15), which looks like
+  an unreachable pin and is not.
+- 2026-11-05: **The direnv profile can be newer than its own CONTENT, and a
+  missing `*_SRC` seeding looks exactly like a missing module.** The 2026-05-04
+  entry below says the profile can go stale; this is how to prove it and what
+  it costs. `nix/shells/main.nix` seeds four sibling source paths; the realised
+  `nix-shell-env` behind `.direnv/flake-profile-*` (mtime 2026-11-05 16:08, so
+  it LOOKS current) carried three of them and ended the block at
+  `NIM_STACKABLE_HOOKS_SRC`, with no `TEST_CERTIFICATES_TOOLS_SRC` — the line
+  that landed in `c43f466be2` (2026-10-30), 157 commits before the `8e96f7d537`
+  the checkout was on. `config.nims` resolves it with `addPathIfDir`, which
+  adds nothing and says nothing when the variable is unset, so the only symptom
+  was `src/ct_test/certificate_store_roots_native.nim(21, 30) Error: cannot
+  open file: test_certificates/roots` in `just test-vm-native` — and
+  `roots.nim` is present at the pinned `test-certificates-tools` revision
+  `9864082065`, so the error names the one thing that was not wrong. Read the
+  realised environment, not the recipe: the profile target is JSON, so
+  `python3 -c` over `json.load(...)["variables"]["shellHook"]["value"]` on
+  `readlink -f .direnv/flake-profile-*` shows what the shell will ACTUALLY
+  export. `direnv reload` is the remedy.
 - 2026-05-04: `nix develop` and direnv can disagree when `.direnv/flake-profile-*`
   is stale. The current dev shell includes `ourPkgs.sui`; an older cached
   direnv profile may still enter successfully because it references forc/miden/

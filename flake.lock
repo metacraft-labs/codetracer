@@ -13916,11 +13916,11 @@
         "test-certificates-tools-src": "test-certificates-tools-src"
       },
       "locked": {
-        "lastModified": 1793884482,
-        "narHash": "sha256-1p/GX+A+up35Ikk2RHybG39sf6ugnu29SMUcybhIbHo=",
+        "lastModified": 1793894183,
+        "narHash": "sha256-xLApq1sGn1+fk2Hwz8OpsJliVvIblaiwsMq3Rxu6MEc=",
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "98733a443fe9648e2769fe81c0073c495a643f9a",
+        "rev": "5c7c9e89e840477d7362b01f526ff0a0cd552d10",
         "type": "github"
       },
       "original": {
