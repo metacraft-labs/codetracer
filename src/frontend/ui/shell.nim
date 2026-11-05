@@ -2,6 +2,169 @@ import
   kdom,
   ui_imports
 
+import std/json
+import isonim/web/web_renderer
+from isonim/core/owner import onCleanup
+from isonim/web/dom_api import nil
+import ./panel_host
+import ./key_router
+from ../viewmodel/session_vm import SessionViewModel
+import ../viewmodel/viewmodels/shell_vm
+import ../viewmodel/views/isonim_shell_view
+
+# ---------------------------------------------------------------------------
+# THE SHELL PANE (CodeTracer-Shell.md §7.7): the shared model, drawn by the
+# shared view, its shell behind the main process.
+#
+# The pane is the panel host's (`PanelHostKinds`): GoldenLayout's factory
+# mounts `renderShellPanel` over the tab session's `shellVM`. This module
+# gives that model its process side — `CODETRACER::shell-session-*` to the
+# main process, which runs `ct shell-session` (`index/shell_sessions`) — and
+# the browser behaviour around the view: the pane's size in cells, the focus.
+# The xterm.js terminal below stays for the agents' embedded terminals
+# (`agent_activity.addTerminal`), which write into it and run nothing.
+# ---------------------------------------------------------------------------
+
+var shellPaneIds: seq[(ShellVM, cstring)]
+var shellPaneCounter = 0
+
+proc shellPaneId(vm: ShellVM): cstring =
+  for (v, id) in shellPaneIds:
+    if v == vm: return id
+  inc shellPaneCounter
+  result = cstring("shell-pane-" & $shellPaneCounter)
+  shellPaneIds.add((vm, result))
+
+proc wireShellHost(vm: ShellVM) =
+  ## The model's process side on the desktop: the main process's session.
+  if not vm.host.start.isNil:
+    return
+  let id = shellPaneId(vm)
+  vm.host.start = proc(cols, rows: int): string =
+    data.ipc.send "CODETRACER::shell-session-start",
+      js{id: id, cols: cols, rows: rows, cwd: cstring""}
+    ""
+  vm.host.input = proc(bytes: string) =
+    let text = cstring(bytes)
+    data.ipc.send "CODETRACER::shell-session-input", js{id: id, data: text}
+  vm.host.resize = proc(cols, rows: int) =
+    data.ipc.send "CODETRACER::shell-session-resize",
+      js{id: id, cols: cols, rows: rows}
+  vm.host.stop = proc() =
+    data.ipc.send "CODETRACER::shell-session-stop", js{id: id}
+  vm.openRecording = proc(a: ShellAction): string =
+    # The desktop opens a recording by its index id, in a new tab of this
+    # window (the "tab" newTracePolicy, `index/traces.onOpenTraceInTab`).
+    if a.recordingId.len == 0:
+      return "the recording reported no id"
+    let traceId = cstring(a.recordingId)
+    data.ipc.send "CODETRACER::open-trace-in-tab", js{traceId: traceId}
+    ""
+
+proc onShellSessionMessage*(sender: js; response: JsObject) =
+  ## One line of a pane's session (`index/shell_sessions`), into its model.
+  let id = response["id"].to(cstring)
+  for (vm, vid) in shellPaneIds:
+    if vid == id:
+      try:
+        vm.receiveUpdate(parseJson($response["message"].to(cstring)))
+      except CatchableError:
+        cwarn "shell: unreadable session message: " & getCurrentExceptionMsg()
+      return
+
+proc cellMetrics(panel: dom_api.Element): JsObject {.importjs: """
+  (function (panel) {
+    var rows = panel.querySelector('.shell-rows');
+    if (!rows) return {cols: 0, rows: 0};
+    var probe = document.createElement('span');
+    probe.textContent = 'MMMMMMMMMM';
+    probe.style.position = 'absolute';
+    probe.style.visibility = 'hidden';
+    rows.appendChild(probe);
+    var w = probe.getBoundingClientRect().width / 10;
+    var h = probe.getBoundingClientRect().height;
+    rows.removeChild(probe);
+    var row = rows.querySelector('.shell-row');
+    if (row) h = row.getBoundingClientRect().height || h;
+    if (!w || !h) return {cols: 0, rows: 0};
+    return {cols: Math.max(1, Math.floor(rows.clientWidth / w) - 2),
+            rows: Math.max(1, Math.floor(rows.clientHeight / h))};
+  })(#)""".}
+  ## The pane's text area in cells: its width less the two-cell gutter.
+
+proc observeSize(panel: dom_api.Element; cb: proc()): JsObject {.importjs: """
+  (function (panel, cb) {
+    if (typeof ResizeObserver === 'undefined') return null;
+    var ro = new ResizeObserver(function () { cb(); });
+    ro.observe(panel);
+    return ro;
+  })(#, #)""".}
+
+proc disconnectObserver(ro: JsObject) {.importjs:
+  "(function (o) { if (o) { o.disconnect(); } })(#)".}
+proc shellPanelIn(host: dom_api.Element): dom_api.Element {.importjs:
+  "#.querySelector('.isonim-shell')".}
+proc later(cb: proc()) {.importjs: "setTimeout(#, 0)".}
+proc setPaneId(panel: dom_api.Element; id: cstring) {.importjs:
+  "#.setAttribute('data-shell-pane', #)".}
+
+proc fitShell(panel: dom_api.Element; vm: ShellVM) =
+  let m = cellMetrics(panel)
+  let cols = m["cols"].to(int)
+  let rows = m["rows"].to(int)
+  if cols <= 0 or rows <= 0:
+    return
+  if vm.state.val == sssIdle:
+    vm.startShell(cols, rows)
+  else:
+    vm.resizeShell(cols, rows)
+
+proc focusedShellPaneId(): cstring {.importjs: """
+  (function () {
+    var a = document.activeElement;
+    var p = a && a.closest ? a.closest('.isonim-shell') : null;
+    return p ? (p.getAttribute('data-shell-pane') || '') : '';
+  })()""".}
+proc markEventForApp(ev: JsObject) {.importjs: "(#.__ctShellSkip = true)".}
+
+key_router.paneKeyOwner = proc(ev: JsObject): bool =
+  ## The focused Shell pane owns every key while its shell runs (§7.5) —
+  ## except the one after its prefix, which goes to the router (and is marked
+  ## so the pane's own listener leaves it alone).
+  let id = focusedShellPaneId()
+  if id.len == 0:
+    return false
+  for (vm, vid) in shellPaneIds:
+    if vid == id:
+      if vm.state.val != sssRunning:
+        return false
+      if vm.prefixArmed:
+        vm.prefixArmed = false
+        vm.note.val = ""
+        markEventForApp(ev)
+        return false
+      return true
+  false
+
+setPanelRenderer(Content.Shell,
+  proc(r: WebRenderer; host: dom_api.Element;
+       session: SessionViewModel): dom_api.Element =
+    renderShellPanel[WebRenderer, dom_api.Element](r, session.shellVM))
+
+setPanelDecorator(Content.Shell,
+  proc(host: dom_api.Element; session: SessionViewModel) =
+    let vm = session.shellVM
+    wireShellHost(vm)
+    let panel = shellPanelIn(host)
+    if panel.isNil:
+      return
+    setPaneId(panel, shellPaneId(vm))
+    # Sized once laid out, and again whenever the pane is: the shell starts
+    # at the pane's size and follows it (§7.2).
+    let ro = observeSize(panel, proc() = fitShell(panel, vm))
+    later(proc() = fitShell(panel, vm))
+    onCleanup(proc() = disconnectObserver(ro)))
+
 var
   xtermLib {.importc.}: XtermJsLib
   fitAddonLib {.importc.}: XtermFitAddonLib
@@ -228,16 +391,9 @@ proc createShell*(self: ShellComponent; host: Element = nil): Terminal =
     #   self.send(cstring(raw))
 
 proc openShellTab*(data: Data) =
+  ## View > Shell: the pane, which the panel host mounts over the tab's
+  ## `shellVM` (its decorator starts the shell at the pane's size).
   data.openLayoutTab(Content.Shell)
-
-  let componentId = data.ui.openComponentIds[Content.Shell][^1]
-  let shellComponent =
-    cast[ShellComponent](
-      data.ui.componentMapping[Content.Shell][componentId])
-
-  # GoldenLayout's factory has normally opened the terminal in the new pane.
-  if shellComponent.shell.isNil:
-    discard shellComponent.createShell()
 
 proc eventSummary(event: SessionEvent): string =
   let explanation = case event.kind:

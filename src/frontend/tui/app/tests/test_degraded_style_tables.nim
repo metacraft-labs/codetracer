@@ -65,7 +65,9 @@ import ../views/styled_row
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 3733
+const ExpectedAssertions = 3735
+  ## +2 on 2026-10-29 (PLAT-61): the Shell pane's four gutter roles, of which
+  ## one glyph (`◌`) is new to the ASCII table, swept per tier.
   ## +32 on 2026-10-25 (PLAT-70 Part C): two more roles, swept per tier.
   ## PLAT-51: 3387 -> 3389, measured: the ASCII fallback table grew by the
   ## current-line and inspection triangles, the role table traded the `[MOD]`
@@ -580,7 +582,8 @@ suite "CTUI-11 Tier 1: degraded style tables":
       if tee notin expected: expected.add tee
     checkpoint("chrome glyphs from the role table: " & $expected.len)
     ck expected.len <= mapped
-    ck mapped == 82
+    # PLAT-61: the Shell pane's working mark `◌` (`~`) (83).
+    ck mapped == 83
     # A rune that is NOT chrome passes through unchanged, in both modes — the
     # rule that keeps a Python identifier or a recorded path out of the
     # substitution table.

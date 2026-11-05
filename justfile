@@ -5739,6 +5739,13 @@ plat54-capture-electron *args:
 plat58-capture-electron *args:
   bash scripts/plat58-capture-electron.sh "$@"
 
+# PLAT-61: the desktop's Shell pane running a recorded build, as the
+# terminal's and GPUI's Shell panes are measured against it — written to
+# `src/tests/visual/answers/plat61-shell.electron.json`.
+[positional-arguments]
+plat61-capture-electron *args:
+  bash scripts/plat61-capture-electron.sh "$@"
+
 # The desktop's caption bar, strips, menu surface, right-click menus and click
 # behaviours, as the terminal's and GPUI's are measured against them —
 # written to `src/tests/visual/answers/plat50-desktop.electron.json`.

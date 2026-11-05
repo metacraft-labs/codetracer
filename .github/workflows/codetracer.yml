@@ -3677,6 +3677,15 @@ jobs:
         # starts its own Xvfb.
         run: nix develop .#devShells.x86_64-linux.default --command just plat60-capture-electron
 
+      - name: The desktop's Shell pane is the reference
+        if: ${{ !cancelled() }}
+        # The desktop column of the Shell pane: a recorded build run in the
+        # pane's shell, its output and the recording's marked lines, and a
+        # click opening the recording in a new tab — read from the REAL
+        # Electron app with this checkout's desktop JavaScript. The recipe
+        # starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat61-capture-electron
+
       - name: The desktop's Timeline removal, list scrubbers and changed values are the reference
         if: ${{ !cancelled() }}
         # The desktop column of the 2026-10-05 decisions: no Timeline (and a

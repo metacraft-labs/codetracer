@@ -94,6 +94,7 @@ import viewmodels/test_results_vm
 # PLAT-54 — the Agent Activity pane's ViewModel and its shared feed.
 import viewmodels/agent_activity_vm
 import viewmodels/request_panel_vm   # PLAT-58: the Requests pane
+import viewmodels/constraints_vm   # PLAT-62: the Constraints pane
 import viewmodels/agent_activity_feed
 # PLAT-55 — the Problems pane's ViewModel.
 import viewmodels/errors_vm
@@ -172,7 +173,10 @@ const
                                          # PLAT-63: a Verno run's findings
                                          # by kind, from the window's
                                          # `VerificationVM`.
-                                         paneVerification}
+                                         paneVerification,
+                                         # PLAT-62: the project's circuit,
+                                         # from the window's `ConstraintsVM`.
+                                         paneConstraints}
     ## The panes expressed in the vocabulary. A CLOSED SET a test asserts, not
     ## a list a reader infers from which procs exist.
 
@@ -185,14 +189,15 @@ const
     ## the scrubbers that remain — Visual Replay's, the terminal screen's —
     ## are parts of their panes, not panes.)
 
-  PaneAcceptedExceptions*: set[PaneKind] = {
+  PaneAcceptedExceptions*: set[PaneKind] = {}
                                             # PLAT-45 — the desktop's panes
-                                            # (PLAT-47 drew `paneVcs`,
-                                            # PLAT-52 `paneTerminalOutput`,
-                                            # PLAT-53 `paneTestResults`,
-                                            # PLAT-54 `paneAgentActivity`;
-                                            # PLAT-56 `paneBuildOutput`).
-                                            paneConstraints}
+                                            # were here until each was drawn
+                                            # (PLAT-47 `paneVcs`, PLAT-52
+                                            # `paneTerminalOutput`, PLAT-53
+                                            # `paneTestResults`, PLAT-54
+                                            # `paneAgentActivity`, PLAT-56
+                                            # `paneBuildOutput`, PLAT-62
+                                            # `paneConstraints`).
                                             # PLAT-48 — the desktop's footer
                                             # panels the shared default docks
                                             # were here until PLAT-55 drew
@@ -915,6 +920,48 @@ proc problemsPaneView*(vm: ErrorsVM): PaneView =
                              expanded = true)
   result.entries = entriesOf(result.root)
 
+const ConstraintsColumns* = @["name", "kind", "count", "where"]
+  ## PLAT-62: the Constraints table's columns — the desktop row's name, kind,
+  ## count and the line that declares the function.
+
+proc constraintsPaneView*(vm: ConstraintsVM): PaneView =
+  ## PLAT-62. THE CONSTRAINTS PANE: the headline (the circuit's opcode
+  ## counts, `(stale)` when the sources changed since), the notice when the
+  ## report has counts and no printed rows, then a `Table` of the rows —
+  ## name, kind, count, where it is declared, every cell the ViewModel's
+  ## (`ConstraintsVM.rows`) — and the provenance; with no report, why there
+  ## is none as `Text`. The headless replay session owns no `ConstraintsVM`
+  ## (the circuit is the window's project's), so a front-end attaches the
+  ## window's, as it attaches Test Results'.
+  result.pane = paneConstraints
+  if vm.isNil:
+    result.report = "constraints have no ViewModel; no host attached one"
+    result.root = viewText("constraints.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  let report = vm.report.val
+  var children = @[viewText("constraints.headline", vm.headline.val)]
+  if report.absence.len > 0:
+    children.add viewText("constraints.absence", report.absence)
+    result.report = "no report"
+  else:
+    let notice = listingNoticeFor(report)
+    if notice.len > 0:
+      children.add viewText("constraints.notice", notice)
+    var cells: seq[seq[string]] = @[]
+    for row in vm.rows.val:
+      case row.kind
+      of crkFunction:
+        cells.add @[row.name, row.kindLabel, row.count, whereText(row.source)]
+      of crkOpcode:
+        cells.add @[rowText(row), "", row.count, ""]
+    children.add viewTable("constraints.rows", ConstraintsColumns, cells)
+    if report.provenance.len > 0:
+      children.add viewText("constraints.provenance", report.provenance)
+  result.root = viewTreeNode("constraints", "Constraints", children,
+                             expanded = true)
+  result.entries = entriesOf(result.root)
+
 proc buildOutputPaneView*(vm: BuildVM): PaneView =
   ## PLAT-56. THE BUILD OUTPUT PANE (`Build-Output-Pane.md` §3.13): the shown
   ## build's verdict and duration, the history picker's entries when there is
@@ -987,34 +1034,33 @@ proc requestsPaneView*(vm: RequestPanelVM): PaneView =
   result.entries = entriesOf(result.root)
 
 proc shellPaneView*(vm: ShellVM): PaneView =
-  ## The shell: a `Tree` of the input `Input` and a `List` of history.
-  ##
-  ## **IT IS HISTORY AND NOT A TRANSCRIPT, BECAUSE THAT IS WHAT THE VIEWMODEL
-  ## HAS.** `ShellVM` carries `inputBuffer`, `inputHistory`, `historyIndex` and
-  ## `scrollPosition` — and no output. A view that drew an output pane would be
-  ## drawing a field nothing fills, which is the well-formed apology this
-  ## milestone exists to delete, one level further in. The absence is recorded
-  ## in `result.report` rather than papered over with an empty box.
+  ## PLAT-61. THE SHELL (CodeTracer-Shell.md §7.5): the session's state words
+  ## and the lines the pane shows, each its gutter (the action's glyph, a bar,
+  ## or a blank) and its text — the rows `shellRows` gives every front-end.
+  ## A session whose shell has not started is a report, not a blank.
   result.pane = paneShell
   if vm.isNil:
     result.report = "the shell has no ViewModel; the session has not launched"
     result.root = viewText("shell.report", result.report)
     result.entries = entriesOf(result.root)
     return
-  var children: seq[ViewNode] = @[]
-  children.add viewInput("shell.input", vm.inputBuffer.val)
-  var options: seq[ViewOption] = @[]
-  for i, h in vm.inputHistory.val:
-    options.add ViewOption(id: "shell.history." & $i, label: h)
-  let list = viewList("shell.history", options)
-  let idx = vm.historyIndex.val
-  if idx >= 0 and idx < options.len:
-    list.cursor = idx
-  children.add list
-  result.root = viewTreeNode("shell", "Shell", children)
+  var children = @[viewText("shell.status", vm.statusWords)]
+  if vm.note.val.len > 0:
+    children.add viewText("shell.note", vm.note.val)
+  var cells: seq[seq[string]] = @[]
+  for row in vm.shellRows(vm.screen.rows):
+    let gutter =
+      case row.mark
+      of srmNone: ""
+      of srmStart: vm.actions[row.action].actionGlyph
+      of srmRange: actionBar()
+    cells.add @[gutter, row.text]
+  children.add viewTable("shell.rows", @["", "Output"], cells)
+  if vm.state.val == sssIdle and vm.revision.val == 0:
+    # Nothing started and nothing written: said, never a blank box.
+    result.report = "the shell starts when the pane is shown"
+  result.root = viewTreeNode("shell", "Shell", children, expanded = true)
   result.entries = entriesOf(result.root)
-  result.report = "the shell ViewModel carries input and history and no " &
-                  "output; this pane shows what exists"
 
 # ---------------------------------------------------------------------------
 # Source — the sanctioned native escape
@@ -1193,23 +1239,6 @@ proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
   of paneLowLevelCode: lowLevelCodePaneView(LowLevelCodeVM(vm))
   # PLAT-63.
   of paneVerification: verificationPaneView(VerificationVM(vm))
-  of paneConstraints:
-    # **PLAT-45: THE DESKTOP'S PANES, PLACED AND REPORTED — NOT OMITTED.**
-    # (PLAT-48 adds the desktop's PROBLEMS and REQUESTS footer panels, which
-    # the shared default DOCKS: revealed, each says what it is and why it is
-    # not drawn here, on this rule. PLAT-58 drew REQUESTS, above.)
-    #
-    # The shared default (`layout_model.sharedDefaultLayout`) places these four (five until PLAT-47 drew the VCS pane)
-    # because the desktop's default did, and "every product opens with the
-    # same panes" is only literally true if a front-end without a view still
-    # puts the pane where it goes. Their ViewModels are the desktop's; the
-    # headless replay session owns none (`headless_app.paneViewModel` answers
-    # nil for each). So this is a REPORT that names the pane and why — the
-    # same rule the GPUI capability (`gpui/app/capability.nim`) states.
-    PaneView(
-      pane: kind,
-      root: viewText($kind & ".report",
-        "the " & $kind & " pane is drawn by the desktop front-end; this " &
-        "front-end has no view for it yet"),
-      entries: {pkText},
-      report: "accepted exception: desktop pane, no native view")
+  # PLAT-62 drew the last of PLAT-45's desktop panes, whose report arm
+  # (an accepted exception: placed, and said not drawn) stood here.
+  of paneConstraints: constraintsPaneView(ConstraintsVM(vm))

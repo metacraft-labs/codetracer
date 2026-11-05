@@ -68,6 +68,8 @@ import ./views/problems_pane
 import ./views/requests_pane   # PLAT-58
 import ./views/low_level_code_pane   # PLAT-60
 import ./views/verification_pane     # PLAT-63
+import ./views/constraints_pane   # PLAT-62
+import ./views/shell_session_pane   # PLAT-61
 
 export interpreter, keymap, motions, command_line, tui_app, degradation
 export persistence
@@ -1669,6 +1671,20 @@ proc runCommandLine(rt: TuiRuntime; line: string; outcome: var RuntimeOutcome;
         rt.note(":verify takes `run` or `stop`, not '" & words[1] & "'")
       outcome.detail = rt.app.notification
       return
+    # PLAT-62: `:constraints` shows the Constraints pane — revealed when it is
+    # docked, its tab brought forward when the arrangement places it, opened
+    # beside the event log when it does not (Debug mode's default places it
+    # nowhere; a user who opens it keeps it).
+    if words.len == 1 and words[0] == "constraints":
+      rt.showPane(paneConstraints, outcome)
+      outcome.detail = rt.app.notification
+      return
+    # PLAT-61 (CodeTracer-Shell.md §7.5): `:shell` shows the Shell pane,
+    # focused — its keys go to its shell from here on.
+    if words.len == 1 and words[0] == "shell":
+      rt.showPane(paneShell, outcome)
+      outcome.detail = rt.app.notification
+      return
     if words.len == 1 and words[0] in ["cnext", "cn", "cprev", "cp"]:
       rt.stepFindInFiles((if words[0] in ["cnext", "cn"]: 1 else: -1),
                          outcome)
@@ -2465,7 +2481,7 @@ proc paneAt(geometry: LayoutGeometry; row, col: int):
                              area: geometry.openDock, activeTab: -1),
             geometry.openDock)
 
-proc paneAreaOf(rt: TuiRuntime; kind: PaneKind): CellArea =
+proc paneAreaOf*(rt: TuiRuntime; kind: PaneKind): CellArea =
   ## The rectangle pane `kind` is painted into (its strip row first), or an
   ## empty one when it is not on the screen — PLAT-57: a docked pane shown
   ## open or revealed included; a maximized pane's (`paintedGeometry`).
@@ -3312,6 +3328,57 @@ proc openWorkingFileAt*(rt: TuiRuntime; path: string; line, col: int): string =
   discard rt.focus.focusPaneKind(paneEditor)
   ""
 
+proc constraintsPaneScreen*(rt: TuiRuntime): tuple[area: CellArea,
+                                                  screen: ConstraintsPaneScreen] =
+  ## PLAT-62: the Constraints pane below its strip, and where the painter put
+  ## its parts — the arithmetic a press is read back with.
+  let under = rt.paneAreaOf(paneConstraints)
+  result.area = CellArea(col: under.col, row: under.row + 1,
+                         width: under.width, height: max(0, under.height - 1))
+  if result.area.width <= 0:
+    return
+  var g = newStyledGrid(result.area.col + result.area.width,
+                        result.area.row + result.area.height)
+  result.screen = paintConstraints(g, result.area, rt.app.constraints)
+
+proc actOnConstraints*(rt: TuiRuntime; act: ConstraintsAct;
+                       outcome: var RuntimeOutcome): ConstraintsActResult =
+  ## PLAT-62: hand `act` to the host (`TuiApp.constraintsAct`), which does it
+  ## through the window's `ConstraintsVM` and refreshes the pane; its words go
+  ## to the status line and a copied name or location to the clipboard. An
+  ## opened source gives the editor the keys.
+  outcome.repaint = true
+  if rt.app.constraintsAct.isNil:
+    rt.note("this window has no Constraints pane host")
+    return
+  result = rt.app.constraintsAct(act)
+  if result.copied.len > 0:
+    rt.copyToClipboard(result.copied, "the row")
+  if result.note.len > 0:
+    rt.note(result.note)
+  if result.opened:
+    # The editor has the keys now (the line it opened is where the reader
+    # goes next), as a Problems row's open gives them to it.
+    rt.hasDockKeys = false
+    if rt.layoutBindingEnabled():
+      rt.app.layoutBinding.focus = paneEditor
+    discard rt.focus.focusPaneKind(paneEditor)
+
+proc keepConstraintSelected(rt: TuiRuntime) =
+  ## PLAT-62: the selected row kept in view.
+  let (_, screen) = rt.constraintsPaneScreen()
+  let m = rt.app.constraints
+  rt.app.constraints.scrollTop = m.revealIndex(screen.listRows, m.selected)
+
+proc scrollConstraints(rt: TuiRuntime; delta: int;
+                       outcome: var RuntimeOutcome) =
+  ## PLAT-62: the wheel over the Constraints pane scrolls its list.
+  let (_, screen) = rt.constraintsPaneScreen()
+  rt.app.constraints.scrollTop = clampConstraintsTop(
+    rt.app.constraints.rows.len, rt.app.constraints.scrollTop + delta,
+    screen.listRows)
+  outcome.repaint = true
+
 proc requestsPaneScreen*(rt: TuiRuntime): tuple[area: CellArea,
                                                screen: RequestsPaneScreen] =
   ## PLAT-58: the Requests pane's rows below its strip, and where the painter
@@ -3397,6 +3464,71 @@ proc openRequestsField(rt: TuiRuntime; outcome: var RuntimeOutcome) =
   rt.showPane(paneRequests, outcome)
   rt.openOmnibar(":requests " & rt.app.requests.search)
   outcome.repaint = true
+
+# ---------------------------------------------------------------------------
+# PLAT-61: the Shell pane (CodeTracer-Shell.md §7.5). The pane paints a value
+# (`views/shell_session_pane`); every act goes to the host's `ShellVM`
+# (`TuiApp.shellAct`), which owns the session.
+# ---------------------------------------------------------------------------
+
+proc shellPaneArea*(rt: TuiRuntime): CellArea =
+  ## The Shell pane's rows below its strip — its header, then the output — or
+  ## an empty area when it is not on screen.
+  let under = rt.paneAreaOf(paneShell)
+  if under.width <= 0 or under.height <= 1:
+    return CellArea()
+  CellArea(col: under.col, row: under.row + 1, width: under.width,
+           height: under.height - 1)
+
+proc shellPanePainted*(rt: TuiRuntime): seq[string] =
+  ## The Shell pane's output rows as the painter draws them now, the gutter
+  ## first (`paintShellPane`) — what a test reads back.
+  let area = rt.shellPaneArea()
+  if area.width <= 0:
+    return
+  var g = newStyledGrid(area.col + area.width, area.row + area.height)
+  paintShellPane(g, area, rt.app.shellPane)
+
+proc actOnShell*(rt: TuiRuntime; act: ShellAct;
+                 outcome: var RuntimeOutcome): ShellActResult =
+  ## Hand `act` to the host (`TuiApp.shellAct`), which does it through the
+  ## session's `ShellVM` and refreshes the pane; its words go to the status
+  ## line.
+  outcome.repaint = true
+  if rt.app.shellAct.isNil:
+    rt.note("this session has no shell")
+    return
+  result = rt.app.shellAct(act)
+  if result.note.len > 0:
+    rt.note(result.note)
+
+proc shellOwnsToken*(rt: TuiRuntime; token: string): bool =
+  ## The focused, running Shell pane takes every key (§7.5) — before the
+  ## keymap, so `Tab`, `Ctrl+C` and the arrows are the shell's — unless a
+  ## menu, the omnibox, a prompt or an overlay is open over it.
+  if rt.app.menu.isOpen or rt.app.omnibar.isOpen or rt.prompt.open or
+     rt.app.content.open or rt.terminalInfo.open:
+    return false
+  let (had, focused) = rt.focus.focusedPane()
+  had and focused == paneShell and rt.app.shellPane.loaded and
+    rt.app.shellPane.state == sssRunning
+
+proc routeTokenToShell*(rt: TuiRuntime; token: string;
+                        outcome: var RuntimeOutcome): bool =
+  ## One token to the shell: a named key through the model's key table
+  ## (`keyBytes`, the prefix), text with no key name (`é`, a paste) as it
+  ## came. False when the key is CodeTracer's after all (the prefix was
+  ## armed) or the token is no key.
+  let (isMouse, _) = decodeMouse(token)
+  if isMouse or token.len == 0:
+    return false
+  let name = rt.keyOf(token)
+  var act = ShellAct(kind: shaKey, chord: name)
+  if name.len == 0:
+    if token[0] < ' ' or token[0] == '\x7f':
+      return false             # a terminal's reply, not a key
+    act = ShellAct(kind: shaText, text: token)
+  not rt.actOnShell(act, outcome).toApp
 
 # ---------------------------------------------------------------------------
 # M71 (#838): the panes whose whole content is in hand — State, Files, VCS —
@@ -3934,6 +4066,8 @@ proc applyBarTop(rt: TuiRuntime; bar: BarSpot; top: int;
     of paneVerification:
       # PLAT-63: the list's view moves.
       rt.app.verification.scrollTop = top
+    of paneConstraints:
+      rt.app.constraints.scrollTop = top
     of paneBuildOutput:
       rt.app.buildPane.scrollTop = top
     of paneEditor:
@@ -3944,6 +4078,9 @@ proc applyBarTop(rt: TuiRuntime; bar: BarSpot; top: int;
       rt.app.terminalOutput.scrollTop = top
       rt.app.terminalOutput.follow = false
       rt.app.terminalOutput.ensureShown(rows)
+    of paneShell:
+      # PLAT-61: the scrollback's view moves; the shell does not.
+      discard rt.actOnShell(ShellAct(kind: shaScrollTo, top: top), outcome)
     else: discard
   of axHorizontal:
     discard rt.scrollPaneView(bar.pane, proc(v: var HorizontalView): bool =
@@ -4784,6 +4921,21 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
       return true
     of tpText, tpNone:
       return false
+  of paneShell:
+    # PLAT-61 (CodeTracer-Shell.md §7.6): a press focuses the pane, so the
+    # keys go to its shell; a press on a recorded command's gutter opens its
+    # recording (or says why it cannot); the scrollbar is the scrollbars'.
+    if event.button != mbLeft or not rt.app.shellPane.loaded:
+      return false
+    rt.app.layoutBinding.focus = paneShell
+    discard rt.focus.focusPaneKind(paneShell)
+    let hit = rt.app.shellPane.shellHitAt(rt.shellPaneArea(), event.row,
+                                          event.col)
+    if hit.kind == shGutter:
+      discard rt.actOnShell(ShellAct(kind: shaPress, action: hit.action),
+                            outcome)
+    outcome.repaint = true
+    return hit.kind != shNone
   of paneRequests:
     # PLAT-58 (K58 – K60): a press selects a request and a double press goes
     # to its handler (the ViewModel counts it); a right press opens the row's
@@ -4828,6 +4980,31 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
     of rqTrack, rqHeader, rqDetail, rqMessage:
       return true
     of rqNone:
+      return false
+  of paneConstraints:
+    # PLAT-62 (K67, K68): a press selects a row and opens the line that
+    # declares its function (a row no source declares says why); a right
+    # press opens the row's menu; the scrollbar is the scrollbars'
+    # (`routeScrollbars`).
+    if event.button notin {mbLeft, mbRight} or not rt.app.constraints.loaded:
+      return false
+    let (area, screen) = rt.constraintsPaneScreen()
+    let t = rt.app.constraints.constraintsTargetAt(screen, area, event.row,
+                                                   event.col)
+    case t.kind
+    of cgRow:
+      if event.button == mbRight:
+        let r = rt.actOnConstraints(ConstraintsAct(kind: cakRowMenu,
+                                                   index: t.index), outcome)
+        if r.menu.entries.len > 0:
+          rt.openContextMenu(r.menu, event.row, event.col, outcome)
+      else:
+        discard rt.actOnConstraints(ConstraintsAct(kind: cakOpen,
+                                                   index: t.index), outcome)
+      return true
+    of cgTrack, cgText:
+      return true
+    of cgNone:
       return false
   of paneVcs:
     # K34 / K53: a changed file opens its diff; a commit opens (lists the
@@ -4975,6 +5152,13 @@ proc runContextAction(rt: TuiRuntime; action: ContextAction;
     # decides it now.
     discard rt.actOnVerification(VerificationAct(kind: vrMenuChoice,
       action: action, target: target), outcome)
+  of caConstraintGoToSource, caConstraintCopyName,
+     caConstraintCopySourceLocation:
+    # PLAT-62 (K68): a Constraints row's entry, as the shared model decides
+    # it now.
+    discard rt.actOnConstraints(ConstraintsAct(kind: cakMenuChoice,
+                                               action: action,
+                                               target: target), outcome)
 
 proc routeOverlayMouse(rt: TuiRuntime; event: MouseEvent;
                        outcome: var RuntimeOutcome): bool =
@@ -5222,6 +5406,19 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
       rt.scrollProblems(
         (if event.button == mbWheelDown: CallTraceWheelRows
          else: -CallTraceWheelRows), outcome)
+      return
+    # PLAT-62: the wheel scrolls the Constraints pane's list.
+    if at.found and at.region.pane == paneConstraints and
+       rt.app.constraints.loaded:
+      rt.scrollConstraints(
+        (if event.button == mbWheelDown: CallTraceWheelRows
+         else: -CallTraceWheelRows), outcome)
+      return
+    # PLAT-61: the wheel scrolls the Shell pane's scrollback.
+    if at.found and at.region.pane == paneShell and rt.app.shellPane.loaded:
+      discard rt.actOnShell(ShellAct(kind: shaScroll,
+        delta: (if event.button == mbWheelDown: CallTraceWheelRows
+                else: -CallTraceWheelRows)), outcome)
       return
     # PLAT-58: the wheel scrolls the Requests pane's list.
     if at.found and at.region.pane == paneRequests and
@@ -5705,6 +5902,7 @@ proc menuPaneOf*(action: string): (bool, PaneKind) =
   of "aAgentActivity": (true, paneAgentActivity)
   # PLAT-63: View › Verification.
   of "aVerification": (true, paneVerification)
+  of "aShell": (true, paneShell)   # PLAT-61
   else: (false, paneEditor)
 
 proc menuPromptLine*(action: string): string =
@@ -7728,6 +7926,38 @@ proc runRequestsKeyOperation(rt: TuiRuntime; operation: string;
     true
   else: false
 
+proc runConstraintsKeyOperation(rt: TuiRuntime; operation: string;
+                                outcome: var RuntimeOutcome): bool =
+  ## PLAT-62 FROM THE KEYBOARD, while the Constraints pane has the focus: the
+  ## `list.*` moves select a row (kept in view), `list.activate` opens its
+  ## source, `list.copy` copies its name. Answers whether `operation` was the
+  ## pane's.
+  case operation
+  of "list.focus-next", "list.focus-previous", "list.focus-first",
+     "list.focus-last", "list.focus-page-down", "list.focus-page-up",
+     "editor.scroll-line-down", "editor.scroll-line-up":
+    let op = case operation
+             of "editor.scroll-line-down": "list.focus-next"
+             of "editor.scroll-line-up": "list.focus-previous"
+             else: operation
+    discard rt.actOnConstraints(ConstraintsAct(kind: cakKey, operation: op,
+      page: max(1, rt.paneBodyRows(paneConstraints) - 3)), outcome)
+    rt.keepConstraintSelected()
+    true
+  of "list.activate":
+    let at = rt.app.constraints.selected
+    if at < 0:
+      rt.note("no row of the Constraints pane is selected")
+      outcome.repaint = true
+    else:
+      discard rt.actOnConstraints(ConstraintsAct(kind: cakOpen, index: at),
+                                  outcome)
+    true
+  of "list.copy":
+    discard rt.actOnConstraints(ConstraintsAct(kind: cakCopy), outcome)
+    true
+  else: false
+
 proc runTestsKeyOperation(rt: TuiRuntime; operation: string;
                           outcome: var RuntimeOutcome): bool =
   ## PLAT-53 FROM THE KEYBOARD, while Test Results has the focus (§8.4): Up /
@@ -7900,6 +8130,9 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
     if had and focused == paneVerification and
        rt.app.verification.loaded and
        rt.runVerificationKeyOperation(res.operation, outcome):
+      return
+    if had and focused == paneConstraints and rt.app.constraints.loaded and
+       rt.runConstraintsKeyOperation(res.operation, outcome):
       return
   # PLAT-55: the docked Problems pane, pressed while shown, takes the list
   # keys too (`dockKeys`).
@@ -8210,6 +8443,12 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
                           action: kaNone, detail: "")
   rt.lastToken = token
   rt.lastKey = rt.keyOf(token)
+  # PLAT-61: THE FOCUSED SHELL TAKES EVERY KEY (CodeTracer-Shell.md §7.5),
+  # Alt chords whole, ahead of everything that would read the key as
+  # CodeTracer's — except after its prefix (`Ctrl+]`), whose next key falls
+  # through to the rest of this proc.
+  if rt.shellOwnsToken(token) and rt.routeTokenToShell(token, result):
+    return
   # PLAT-51: ALT + A KEY arrives as ONE `ESC <byte>` token (the framer,
   # `host/terminal_driver.feed`). An Alt chord the router resolves to
   # something here (the desktop's `Alt+T`, Emacs's `M-f`, CUA's `Alt+Up`, a

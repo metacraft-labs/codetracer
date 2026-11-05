@@ -815,8 +815,19 @@ proc applySearch(vm: SearchVM) =
   vm.selectResult(some(0))
 
 proc applyShell(vm: ShellVM) =
-  vm.inputHistory.val = @["print(remaining_shield)", "continue"]
-  vm.setInput("")
+  ## A session as the pane shows one: a build's output and the recording it
+  ## made, fed through the model's own entry points (the story has no shell
+  ## process behind it).
+  vm.screen = newShellScreen(60, 8)
+  vm.receiveOutput("$ ./build.sh\r\ncompiling space_ship...\r\n")
+  vm.receiveEvent(%*{"kind": "RecordingCommand", "status": "WorkingStatus",
+                     "actionId": 1, "command": "python3 space_ship.py"})
+  vm.receiveOutput("\e[32mshield ok\e[0m 42\r\n")
+  vm.receiveEvent(%*{"kind": "RecordingCommand", "status": "OkStatus",
+                     "actionId": 1, "command": "python3 space_ship.py",
+                     "trace": {"recordingId": "0191abcd-0000-7000-8000-000000000001",
+                               "outputFolder": "/tmp/space_ship"}})
+  vm.receiveOutput("$ ")
 
 proc mountBuild(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =

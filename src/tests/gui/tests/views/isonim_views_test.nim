@@ -4448,128 +4448,95 @@ suite "IsoNim Scratchpad Panel — vm":
 # Shell structure tests
 # ---------------------------------------------------------------------------
 
+# CodeTracer-Shell.md §7.7: the desktop's Shell pane draws the shared model's
+# rows, gutter and words. The model is fed through its own entry points (the
+# bytes and the report line a pty and `ct record` carry); the real session is
+# the `test_plat61_shell*` suites'.
+
+proc fedShell(): ShellVM =
+  result = createShellVM()
+  result.screen = newShellScreen(30, 4)
+  result.receiveOutput("$ ./build.sh\r\n")
+  result.receiveEvent(%*{"kind": "RecordingCommand", "status": "WorkingStatus",
+                         "actionId": 5, "command": "prog.py"})
+  result.receiveOutput("\e[31mred\e[0m out\r\nmore\r\n")
+  result.receiveEvent(%*{"kind": "RecordingCommand", "status": "OkStatus",
+                         "actionId": 5, "command": "prog.py",
+                         "trace": {"recordingId": "0191abcd-0000-7000-8000-000000000005",
+                                   "outputFolder": "/tmp/rec5"}})
+  result.receiveOutput("$ ")
+
 suite "IsoNim Shell Panel — structure":
-
-  test "renders root with shell-component class":
+  test "renders the status, one row per line and the gutter":
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createShellVM(store)
+      let vm = fedShell()
       let r = MockRenderer()
-
       let panel = renderShellPanel[MockRenderer, MockNode](r, vm)
-
-      check panel.kind == mnkElement
       check panel.tag == "div"
-      check panel.attributes["class"] == "shell-component isonim-shell"
-
+      check "isonim-shell" in panel.attributes["class"]
+      check panel.attributes["data-state"] == "idle"
+      check findByClass(panel, "shell-status").textContent == "Shell — not started"
+      let rows = findAllByClass(panel, "shell-row")
+      check rows.len == 4
+      check rows[0].attributes["data-line"] == "0"
+      check rows[1].attributes["data-mark"] == "start"
+      check rows[1].attributes["data-tone"] == "ok"
+      check rows[2].attributes["data-mark"] == "range"
+      check rows[3].attributes["data-mark"] == "none"
+      let gutters = findAllByClass(panel, "shell-gutter")
+      check gutters[1].textContent == "●"
+      check gutters[2].textContent == "│"
+      check gutters[1].attributes["title"] ==
+        "recorded command: prog.py — recording 0191abcd — open the recording"
+      check findAllByClass(rows[1], "shell-text")[0].textContent == "red out" & " ".repeat(23)
+      check vm.shellRowsText() == @["  $ ./build.sh", "● red out", "│ more", "  $"]
       dispose()
-
-  test "renders output area":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createShellVM(store)
-      let r = MockRenderer()
-
-      let panel = renderShellPanel[MockRenderer, MockNode](r, vm)
-
-      let output = findByClass(panel, "shell-output")
-      check output != nil
-
-      dispose()
-
-  test "renders input with prompt":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createShellVM(store)
-      let r = MockRenderer()
-
-      let panel = renderShellPanel[MockRenderer, MockNode](r, vm)
-
-      let prompt = findByClass(panel, "shell-prompt")
-      check prompt != nil
-      check prompt.textContent == "$ "
-
-      let input = findByClass(panel, "shell-input")
-      check input != nil
-      check input.attributes["placeholder"] == "Enter command..."
-
-      dispose()
-
-  test "history indicator hidden by default":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createShellVM(store)
-      let r = MockRenderer()
-
-      let panel = renderShellPanel[MockRenderer, MockNode](r, vm)
-
-      let indicator = findByClass(panel, "shell-history-indicator")
-      check indicator != nil
-      check indicator.styles.getOrDefault("display", "none") == "none"
-
-      dispose()
-
-# ---------------------------------------------------------------------------
-# Shell interaction tests
-# ---------------------------------------------------------------------------
 
 suite "IsoNim Shell Panel — interactions":
-
-  test "input buffer reflects in input field":
+  test "a press on a recording's gutter opens it; the rows follow new output":
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createShellVM(store)
+      let vm = fedShell()
+      var opened: seq[string]
+      vm.openRecording = proc(a: ShellAction): string =
+        opened.add a.traceFolder
+        ""
       let r = MockRenderer()
-
       let panel = renderShellPanel[MockRenderer, MockNode](r, vm)
-
-      let input = findByClass(panel, "shell-input")
-
-      vm.setInput("print(x)")
-
-      check input.attributes["value"] == "print(x)"
-
+      let gutters = findAllByClass(panel, "shell-gutter")
+      fireEvent(gutters[1], "click")
+      check opened == @["/tmp/rec5"]
+      check findByClass(panel, "shell-status").textContent ==
+        "Shell — not started · opened recording 0191abcd"
+      vm.receiveOutput("ls\r\nfile\r\n")
+      let rows = findAllByClass(panel, "shell-row")
+      check rows.len == 4
+      check rows[^1].attributes["data-line"] == "5"
       dispose()
 
-  test "history indicator shown when navigating":
+  test "keys go to the model: the shell's taken, the prefix's next one passed on":
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createShellVM(store)
+      let vm = createShellVM()
+      var typed = ""
+      vm.host.start = proc(c, r: int): string = ""
+      vm.host.input = proc(d: string) = typed.add d
+      vm.startShell(20, 3)
       let r = MockRenderer()
-
-      # Submit some history entries
-      vm.setInput("cmd1")
-      vm.submitInput()
-      vm.setInput("cmd2")
-      vm.submitInput()
-
       let panel = renderShellPanel[MockRenderer, MockNode](r, vm)
-
-      let indicator = findByClass(panel, "shell-history-indicator")
-      check indicator.styles["display"] == "none"
-
-      vm.historyUp()
-
-      check indicator.styles["display"] == "inline"
-      check "2" in indicator.textContent
-
+      check panel.attributes["data-state"] == "running"
+      let enter = MockEvent(key: "Enter")
+      fireEventWith(panel, "keydown", enter)
+      check typed == "\r"
+      check enter.defaultPrevented
+      vm.prefixArmed = true
+      let passed = MockEvent(key: "Tab")
+      fireEventWith(panel, "keydown", passed)
+      check not passed.defaultPrevented        # CodeTracer's key now
+      check typed == "\r"
+      check shellKeyOfDom("ArrowUp", false, false, false).key == "Up"
+      check shellKeyOfDom("a", true, false, false) ==
+        ShellKey(key: "a", text: "a", ctrl: true)
+      check shellKeyOfDom(" ", false, false, false).key == "Space"
       dispose()
-
-  test "scroll indicator shown when scrolled":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createShellVM(store)
-      let r = MockRenderer()
-
-      let panel = renderShellPanel[MockRenderer, MockNode](r, vm)
-
-      let scrollInd = findByClass(panel, "shell-scroll-indicator")
-      check scrollInd.styles["display"] == "none"
-
-      vm.scroll(10)
-
-      check scrollInd.styles["display"] == "inline"
-      check "10" in scrollInd.textContent
 
 # ===========================================================================
 # Terminal Output panel tests

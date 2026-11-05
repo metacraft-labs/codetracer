@@ -2282,3 +2282,210 @@ AH_MARK = 0.5rem
     min-width: 0
     flex-wrap: wrap
     justify-content: flex-start
+
+// ---------------------------------------------------------------------------
+// The tab bars' controls beside the tabs: ghost controls, as CodeTracer's own
+// overflow control (`.session-tab-overflow`, session_tabs.styl) and its
+// inactive tabs -- no fill and no outline at rest, the tabs' hover surface
+// under the pointer, the active tab's fill while a control's menu is open.
+// Only the active tab and "+" carry a fill at rest, as in CodeTracer's strip.
+// ---------------------------------------------------------------------------
+.ah-tab-strip .ah-tab-overflow-count,
+.ah-elsewhere,
+.ah-initiative-tab-bar .ah-inbox-step,
+.ah-initiative-tab-bar .ah-inbox-auto
+  background-color: transparent !important
+  box-shadow: none !important
+  border-width: 0 !important
+  color: colors-ui-text-primary-label
+  transition: BUTTON_TRANSITION
+
+  &:hover
+    background-color: colors-ui-surface-primary-secondary-hover !important
+    color: colors-ui-text-primary-body
+
+.ah-tab-strip.overflow-open .ah-tab-overflow-count,
+.ah-elsewhere.ah-elsewhere-open
+  background-color: colors-ui-surface-primary-tertiary !important
+  box-shadow: none !important
+  color: colors-ui-text-primary-body
+
+// Auto-switch on: the label in the body colour after an "on" dot in the
+// action colour; off: the ghost's quieter label.
+.ah-initiative-tab-bar .ah-inbox-auto
+  gap: 0.375rem
+
+.ah-initiative-tab-bar .ah-inbox-auto.ah-inbox-auto-on
+  box-shadow: none !important
+  color: colors-ui-text-primary-body
+
+  &::before
+    content: ""
+    width: AH_MARK
+    height: AH_MARK
+    border-radius: 50%
+    background: colors-ui-border-action
+
+// The sessions started elsewhere: a count badge (a filled pill, the "+"
+// disc's fill) and its label. A badge, not the `+N` chip's bare `+3`: the
+// two never read alike, at any width.
+.ah-elsewhere
+  gap: 0.375rem
+  padding: 0 0.375rem
+
+.ah-elsewhere-count
+  display: inline-flex
+  align-items: center
+  justify-content: center
+  box-sizing: border-box
+  min-width: 1.125rem
+  height: 1.125rem
+  padding: 0 0.3125rem
+  border-radius: 0.5625rem
+  background: colors-ui-surface-primary-tertiary
+  color: colors-ui-text-primary-body
+  font-size: ah-rem(type-ui-size-caption-md)
+  font-weight: 600
+  font-variant-numeric: tabular-nums
+  line-height: 1
+
+.ah-elsewhere:hover .ah-elsewhere-count,
+.ah-elsewhere.ah-elsewhere-open .ah-elsewhere-count
+  background: colors-ui-surface-primary-tertiary-hover
+
+.ah-elsewhere-label
+  white-space: nowrap
+
+// The menu drops from the badge's right edge, leftwards, so it stays in the
+// window; on a stacked bar (the group at the left) from its left edge.
+.ah-initiative-tab-bar .ah-elsewhere-anchor .ah-elsewhere-menu
+  left: auto
+  right: 0
+  min-width: 0
+  width: 38rem
+  max-width: calc(100vw - 1rem)
+
+.ah-initiative-tab-bar.ah-bar-stacked .ah-elsewhere-anchor .ah-elsewhere-menu
+  left: 0
+  right: auto
+  min-width: 0
+  width: calc(100vw - 1rem)
+
+// Each session's initiative beside its state, in the caption role; a session
+// of no initiative says so, quieter.
+.ah-elsewhere-initiative
+  flex: 0 1 auto
+  max-width: 12rem
+  min-width: 0
+  overflow: hidden
+  text-overflow: ellipsis
+  white-space: nowrap
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-label
+
+.ah-elsewhere-initiative.ah-elsewhere-no-initiative
+  color: colors-ui-text-primary-caption
+
+// The menu's rows are a table: the title, then the initiative, the state
+// and the front-end of origin in columns of their own, so every row's
+// initiative and state start at one x.
+.ah-initiative-tab-bar .ah-elsewhere-menu .ah-tab-overflow-item
+  display: grid
+  grid-template-columns: AH_MARK minmax(0, 1fr) minmax(0, 9rem) 5.5rem 1.75rem
+  column-gap: 0.625rem
+  align-items: center
+
+  .ah-elsewhere-initiative
+    max-width: none
+
+  .ah-tab-origin
+    justify-self: end
+
+// On a stacked (narrow) bar each row takes two lines: the title and its
+// origin, then the initiative and the state under the title.
+.ah-initiative-tab-bar.ah-bar-stacked .ah-elsewhere-menu .ah-tab-overflow-item
+  grid-template-columns: AH_MARK minmax(0, 1fr) auto
+  row-gap: 0.125rem
+  height: auto
+  min-height: 2.75rem
+  padding-top: 0.25rem
+  padding-bottom: 0.25rem
+
+  .ah-tab-mark
+    grid-row: 1
+    grid-column: 1
+
+  .ah-tab-overflow-title
+    grid-row: 1
+    grid-column: 2
+
+  .ah-tab-origin
+    grid-row: 1
+    grid-column: 3
+
+  .ah-elsewhere-initiative
+    grid-row: 2
+    grid-column: 2
+
+  .ah-elsewhere-status
+    grid-row: 2
+    grid-column: 3
+    justify-self: end
+
+// "+" sits right after the last tab, with a tab's gap; the right-hand group
+// takes the rest of the bar.
+.ah-initiative-tab-bar .session-tab-add
+  margin-left: 0.125rem
+
+// A wide fleet list uses the panel's whole width, as CodeTracer's own tables
+// do (Test Results, VCS): the columns share what the window has beyond the
+// fixed duration and age (the session two parts, agent, host and initiative
+// one each), the age column ends at the panel's right inset, and the header, the filter strip and the rows
+// end together there. (It used to stop at a 74rem reading width, which left
+// a third of a laptop window empty at the right.)
+@container ah-fleet (min-width: 60rem)
+  .ah-fleet-row,
+  .ah-fleet-columns
+    grid-template-columns: 0.5rem minmax(16rem, 2fr) minmax(9rem, 1fr) minmax(7rem, 1fr) minmax(8rem, 1fr) 5rem 4rem
+    max-width: none
+
+  .ah-fleet-no-initiative .ah-fleet-row,
+  .ah-fleet-no-initiative .ah-fleet-columns
+    grid-template-columns: 0.5rem minmax(16rem, 2fr) minmax(9rem, 1fr) minmax(7rem, 1fr) 5rem 4rem
+    max-width: none
+
+  .ah-fleet-head,
+  .ah-fleet-no-initiative .ah-fleet-head
+    max-width: none
+
+// A stacked bar keeps the active tab, the `+N` chip and "+" on its first
+// line: the tab gives way (it shrinks before anything wraps).
+.ah-initiative-tab-bar.ah-bar-stacked .session-tab.ah-initiative-tab.active
+  max-width: calc(100% - 5.5rem)
+  min-width: 0
+
+// The docked session list uses the panel's whole width too, as the fleet
+// list does: the title and the status with its meta an equal part each, so
+// the meta stays near its title; the age at the panel's right inset; the
+// header and node headers ending there with the rows.
+@container ah-session-list (min-width: 48rem)
+  .ah-session-list-docked .ah-session-row
+    grid-template-columns: AH_MARK minmax(16rem, 1fr) minmax(0, 1fr) 4rem
+    max-width: none
+
+  .ah-session-list-docked .ah-session-group-header,
+  .ah-session-list-docked .ah-session-list-head,
+  .ah-session-list-docked .ah-session-list-source
+    max-width: none
+
+// A stacked initiative bar keeps a notice (loading, error, empty) and "+" on
+// the first line: the notice gives way first.
+.ah-initiative-tab-bar.ah-bar-stacked .ah-tab-notice
+  flex: 0 1 auto
+  min-width: 0
+  max-width: calc(100% - 2.5rem)
+
+// An overflow menu never runs past the window's edges, however narrow.
+.ah-tab-strip .session-tab-overflow-menu
+  max-width: calc(100vw - 0.75rem)
+  box-sizing: border-box

@@ -1,0 +1,39 @@
+{
+  "rows": [
+    {
+      "mark": "none",
+      "tone": "",
+      "gutter": "",
+      "gutterColor": "",
+      "text": "building prog.py"
+    },
+    {
+      "mark": "start",
+      "tone": "ok",
+      "gutter": "●",
+      "gutterColor": "rgb(187, 247, 208)",
+      "text": "sum 5"
+    },
+    {
+      "mark": "range",
+      "tone": "ok",
+      "gutter": "│",
+      "gutterColor": "rgb(187, 247, 208)",
+      "text": "done"
+    },
+    {
+      "mark": "none",
+      "tone": "",
+      "gutter": "",
+      "gutterColor": "",
+      "text": "recordingId:<id>"
+    }
+  ],
+  "status": "running — 1 recording",
+  "shownRows": 12,
+  "opened": {
+    "tabsBefore": 1,
+    "tabsAfter": 2,
+    "note": "running — 1 recording · opened recording <id>"
+  }
+}

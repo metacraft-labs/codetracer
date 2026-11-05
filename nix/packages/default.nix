@@ -480,8 +480,19 @@
 
             cargoHash = "sha256-Cojr5+ZZTpnOYA0QJ622UFlMhiEbdkkxvnVQqkFxBEI=";
 
-            nativeBuildInputs = [ pkgs.pkg-config ];
+            nativeBuildInputs = [
+              pkgs.pkg-config
+              pkgs.patchelf
+            ];
             buildInputs = [ pkgs.openssl ];
+
+            # The binary links libssl.so.3 and libcrypto.so.3 but was linked
+            # without a RUNPATH that names openssl, so the loader cannot find
+            # them. Record the openssl library directory explicitly. ELF only:
+            # patchelf cannot rewrite the Mach-O binary on darwin.
+            postFixup = pkgs.lib.optionalString stdenv.isLinux ''
+              patchelf --add-rpath ${pkgs.lib.makeLibraryPath [ pkgs.openssl ]} $out/bin/codex-acp
+            '';
 
             doCheck = false;
 

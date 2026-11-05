@@ -8223,31 +8223,57 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   workspace manifest's path — or a snapshot of its `origin/<branch>` when the
   checkout lacks `spec/` — then codetracer-specs) and exports CT_SPECS_DIR,
   failing before any compile when a spec-reading lane finds nothing.
-||||||| parent of 32feb7b5f4c (test(ci): run each lane file in a sandbox over the user's state)
-||||||| parent of 3d8f0cd2088 (test(ci): run each lane file in a sandbox over the user's state)
-- On Linux, `ci/lib/run-nim-test-lane.sh` runs every file inside
-  `ct_user_state_sandbox_*` (ci/lib/codetracer-home.sh): an overlay over
-  ~/.local/state|share/codetracer, ~/.config/codetracer, ~/.cache/codetracer in
-  a nested user namespace that keeps the real uid. A "TOUCHED THE USER'S STATE"
-  that says "It ran in a sandbox" is the file's own write; other processes on
-  the host can no longer redden a file. `CT_USER_STATE_SANDBOX=0` restores the
-  plain before/after comparison (the only mode on macOS).
-- `ct-mcr record` files library-family lists under
-  `<cache>/sync-families`; recorder builds before 4ee3b61f ignored
-  `CODETRACER_HOME` and wrote ~/.cache/codetracer (XDG_CACHE_HOME/HOME) even
-  under a scratch home. Any hand-run `ct_cli record` without a scratch
-  CODETRACER_HOME still writes the real cache.
-- The gpui-shell lane needs isonim-gpui's shim built with
-  `--features gpui-backend` at rust/target/debug of the isonim-gpui tree the
-  suites COMPILE against (bindings.nim bakes the path at compile time and falls
-  back to a bare soname, i.e. "could not load: libgpui_nim_shim.so"), plus the
-  dev shell's CODETRACER_GPUI_RUNTIME_LIB_PATH.
-- Suites that read specs resolve `../codetracer-pm/spec`; the workspace checkout
-  is still named `codetracer-specs`, so set CT_SPECS_DIR to a pm checkout
-  (test_cross_renderer_visual_alignment exits before its first case otherwise).
-||||||| parent of 7dc2ad57d0b (feat(edit): open a lone file in its folder's project on every front-end; build nothing without a folder)
-||||||| parent of 8cd123448ae (feat(edit): open a lone file in its folder's project on every front-end; build nothing without a folder)
-||||||| parent of 43cb16302fa (feat(edit): open a lone file in its folder's project on every front-end; build nothing without a folder)
-- `ct edit <file>` (Edit-Mode-Toolbar.md EMT-D34): every front-end opens the file's FOLDER as the project with the file shown — desktop in `index/args` (folder = dirname, `startOptions.name` = the file), natives via `edit_host.editLaunchTarget` (TUI `main.editInteractive`, GPUI `runOpen` → `cmd.editFile`). `editProjectProblem` still refuses a file: the welcome screen's Open Folder passes a path straight to it.
-- A desktop `:build` line answers a sentence whether or not it started anything; `ui/build.desktopBuildsRequested` (bumped by `startDesktopBuild`) is what tells a refusal (shown as a warning by `sayDesktopBuild`) from a start (log only). Folderless sessions (New File, `startOptions.folder` "") are refused in the shared `build_tasks.runBuildVerb` (`hasProjectFolder`), and the BUILD panel's Run build refuses before `data.saveFiles()` so no untitled Save dialog opens.
-- `ui_js.onNoTrace` copies the no-trace message's `path` into `startOptions.folder` (the welcome screen's Open Folder hands the folder over that way). A `ct edit <file>` launch sends the FILE as `path` (= `startOptions.name`), so the copy is skipped when `path` is the named file — otherwise the window's project folder becomes the file and build tasks, Test Results and Run look beside nothing.
+- Constraints pane (PLAT-62): `nargo info --json` names functions as their SOURCE does (`main`, fold fns, user `unconstrained fn` names; `directive_*` are compiler-generated), so `constraints_vm.linkFunction` places a row by looking the name up in `noir_test_syntax.noirFunctionDeclarations` — no debug-symbol inflate needed. The listing's `func N` names a circuit by number and is never placed. `nargo info` also writes `target/<pkg>.json`, but its `debug_symbols` are raw-deflate base64 and native Nim has no inflate in the closure.
+- The native ConstraintsVM is the WINDOW's (TUI `host/constraints_source`, GPUI `gConstraintsVM`), filled by `viewmodel/host/native_constraints_host` running `nargo info --json` in the background; it is measured only the first time the pane is on screen (Debug mode places it nowhere) and again on a saved source (`watch`, a fingerprint of `src/**/*.nr` + Nargo.toml mtimes, at most every 750 ms). The desktop VM is per tab and is filled only in EDIT sessions (`ns9-panes`), now with the sources sent beside the report.
+- `pane_views.PaneAcceptedExceptions` is EMPTY since PLAT-62; the GPUI capability and `leaves.nim` still iterate it, harmlessly.
+- Running Nim suites with ROOT=<worktree> uses the workspace's UNPINNED siblings (e.g. nim-everywhere lacking `raw_nondet`, so every JS compile fails); run them in a mirror whose siblings are the repro.lock pins.
+
+
+
+
+
+## PLAT-61 — the Shell pane (codetracer-pm CodeTracer-Shell.md §7)
+- One model, `viewmodels/shell_vm.nim` (`ShellVM`, the session's `shellVM`):
+  the live `TermScreen` (PLAT-52's emulator with `onlcr` off and
+  `scrollbackLimit` 5000 — ABSOLUTE line = `scrolledOff + row`, read kept
+  lines only through `keptLines`/`keptLine`: the seq is trimmed in batches and
+  may hold up to twice the limit), the actions, the keys and the press. Each
+  front-end gives it a `ShellHost` (start/input/resize/stop) and an
+  `openRecording` hook.
+- The process side is `common/shell_session.nim`: in-process on the terminal
+  and in GPUI (`viewmodel/host/native_shell_host.nim`, pumped on the idle
+  tick / GPUI's ticks — every GPUI tick proc calls `pumpShellWindow`), and
+  `ct shell-session` behind the desktop's main process
+  (`index/shell_sessions.nim`, JSON lines; dispatched in `codetracer.nim`
+  before confutils, so it is not in `ct --help`).
+- Action LINES come from OSC marks `ESC ] 6973;action=<pid>;status=… BEL`
+  that `ct record` writes to /dev/tty just before each report line
+  (`trace/shell.markShellTerminal`); the scanner surfaces OSC strings as an
+  `atEsc` token with `ch = ']'` and the payload in `text`
+  (`TermScreen.oscSeen`). Without the marks, lines were stamped when the
+  event ARRIVED and the next prompt (and `recordingId:` line) raced into the
+  range. The report line itself (`trace_index.sessionEventJson`) carries
+  kind/status by NAME and only the trace's id, folder and program.
+- `ct record` used to print `echo args` (a debug line from a year-old WIP) on
+  every recording; removed — it showed in every Shell pane.
+- Prompt in tests: `PS1` in the environment does NOT survive the GPUI tests'
+  `/bin/sh -c exec …`; the suites give bash `--rcfile` with `PS1='$ '` via
+  `CODETRACER_SHELL_COMMAND`. The session drops `CODETRACER_IN_UI_TEST` from
+  the shell's environment (otherwise `ct record` prints a UI-test line).
+- Desktop keys: the window's capture-phase router (`ui/key_router`) steps
+  aside for a focused running Shell pane via `paneKeyOwner`; after the
+  `Ctrl+]` prefix the hook disarms and marks the event `__ctShellSkip` so the
+  pane's own listener ignores the key the router runs.
+- Ordering (§7.2): `shell_session.poll` reads the report file's new lines
+  FIRST and drains the pty AFTER, so output printed before an event goes out
+  ahead of it; draining first lets output printed between the drain and the
+  read trail the event.
+- `scripts/plat61-capture-electron.sh` runs with a scratch `CODETRACER_HOME`:
+  the pane's `ct record` otherwise adds rows to the user's trace index.
+- Desktop e2e in a mirror: `devenv.sh` derives `CODETRACER_BUILD_DIR` from the
+  CWD's git toplevel at SOURCE time — source it after `cd` into the tree (or
+  export it), or Playwright launches another tree's `ct`.
+- GPUI `--window-ops`: `shell:show|wait:<text>[:<ms>]|gutter:<n>|wheel:<rows>`;
+  `type:`/`key:` reach the shell while it has the focus. Gutter clicks on the
+  desktop are dispatched to the element in the capture spec (Playwright's
+  aim at a 2ch inline cell was intercepted by the pane's last row).

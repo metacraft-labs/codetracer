@@ -72,6 +72,8 @@ import ./problems_pane
 import ./requests_pane
 import ./low_level_code_pane
 import ./verification_pane   # PLAT-63
+import ./constraints_pane
+import ./shell_session_pane   # PLAT-61
 import ./frame_overlay
 import ./variables
 import ./context_menu
@@ -202,6 +204,10 @@ type
       ## PLAT-55. PROBLEMS, as a value: the window's `ErrorsVM`, read by
       ## `problems_source.paneModelOf`. Not loaded by default.
     requests*: RequestsPaneModel
+    shellPane*: ShellPaneModel
+      ## PLAT-61. SHELL, as a value: the session's `ShellVM` the desktop's
+      ## Shell pane draws too, read by `tui_session.shellModelOf`. Not loaded
+      ## by default.
       ## PLAT-58. REQUESTS, as a value: the session's `RequestPanelVM` the
       ## desktop's panel draws too, read by `tui_session.requestsModelOf`.
       ## Not loaded by default.
@@ -212,6 +218,10 @@ type
     verification*: VerificationPaneModel
       ## PLAT-63. VERIFICATION, as a value: the window's `VerificationVM`,
       ## read by `verification_source.paneModelOf`. Not loaded by default.
+    constraints*: ConstraintsPaneModel
+      ## PLAT-62. CONSTRAINTS, as a value: the window's `ConstraintsVM` the
+      ## desktop's panel draws too, read by `constraints_source.paneModelOf`.
+      ## Not loaded by default.
     vcs*: VcsPaneModel
       ## PLAT-47 deliverable 4. The VCS pane, as a value: the shared `VCSVM`
       ## the desktop's VCS panel draws, read by `host/vcs_source.nim`. Not
@@ -923,6 +933,10 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   elif region.pane == paneProblems and model.problems.loaded:
     belowStrip:
       discard paintProblems(g, content, model.problems)
+  # PLAT-61. SHELL — its header row is content, so below the strip.
+  elif region.pane == paneShell and model.shellPane.loaded:
+    belowStrip:
+      discard paintShellPane(g, content, model.shellPane)
   # PLAT-58. REQUESTS — its filter bar is content, so below the strip.
   elif region.pane == paneRequests and model.requests.loaded:
     belowStrip:
@@ -936,6 +950,10 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   elif region.pane == paneVerification and model.verification.loaded:
     belowStrip:
       discard paintVerification(g, content, model.verification)
+  # PLAT-62. CONSTRAINTS — its headline is content, so below the strip.
+  elif region.pane == paneConstraints and model.constraints.loaded:
+    belowStrip:
+      discard paintConstraints(g, content, model.constraints)
   elif region.pane == paneBuildOutput:
     # NO EMPTINESS GUARD: an idle BUILD pane is a statement — `[idle] build:
     # not started` — and a user who has just pressed `:build` needs to see the

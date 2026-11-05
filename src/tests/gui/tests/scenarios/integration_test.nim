@@ -651,7 +651,7 @@ suite "Integration: all ViewModel commands are valid DAP commands":
 
   test "user actions send only valid DAP commands":
     ## Exercise user actions across VMs (doubleClickRow, clickStep,
-    ## seek, submitInput) and verify all commands are valid.
+    ## seek, a Shell key) and verify all commands are valid.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
       let app = createAppViewModel(mock.toBackendService())
@@ -677,12 +677,13 @@ suite "Integration: all ViewModel commands are valid DAP commands":
       session.timelineVM.seek(200'u64)
       drain()
 
-      # ShellVM: submit a command.
-      session.shellVM.setInput("print(x)")
-      session.shellVM.submitInput()
+      # ShellVM: a key typed into the Shell pane goes to the pane's own shell
+      # session (CodeTracer-Shell.md §7.2), never to the engine — so it adds
+      # no command here, valid or not.
+      discard session.shellVM.pressKey(ShellKey(key: "x", text: "x"))
       drain()
 
-      check mock.receivedCommands.len >= 4
+      check mock.receivedCommands.len >= 3
       for cmd in mock.receivedCommands:
         check cmd.command.isValidDapCommand
 

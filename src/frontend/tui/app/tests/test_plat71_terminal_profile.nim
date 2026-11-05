@@ -54,7 +54,9 @@ import codetracer_embed
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 529
+const ExpectedAssertions = 541
+  ## 529 -> 541, measured: the glyph table's four Shell gutter roles
+  ## (`grShellWorking`, `-Ok`, `-Error`, `-Range`), three per-role checks each.
   ## 523 -> 529, measured: the glyph table's `grDropdown` and
   ## `grCurrentEntry` roles (the Build Output pane's history arrow and mark),
   ## three per-role checks each.

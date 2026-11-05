@@ -51,6 +51,10 @@
 # is still caught (and never reaches the real directory), and a concurrent
 # writer outside the lane fails nothing, while the same overlap with the
 # sandbox switched off is shown to fail the file.
+#
+# THE STAGE SANDBOX (2026-11-05). A stage that is not a lane of files
+# (`ci/lint/nim.sh`) runs itself once inside the same sandbox
+# (`ct_user_state_stage_sandbox`). Cases 15-16 pin the same two halves for it.
 
 set -uo pipefail
 
@@ -476,6 +480,88 @@ else
 		t_pass "sandbox: another process writing the user's cache and state while a file runs does not fail the file or the lane"
 	else
 		t_fail "sandbox: another process's write does not fail the file or the lane (sandboxed rc=${rc}; unsandboxed rc=${unsandboxed_rc}, blamed=${unsandboxed_blamed})"
+		sed 's/^/       /' "${scratch}/out" >&2
+	fi
+
+	# 15-16. THE STAGE SANDBOX: the same two halves for an entry point that
+	#    is one stage rather than a lane of files (`ci/lint/nim.sh`, through
+	#    `ct_user_state_stage_sandbox`). On 2026-11-05 that stage failed on a
+	#    shared host for ten ~/.cache/codetracer entries no process of the
+	#    stage wrote (an strace of the whole stage showed none).
+	#
+	#    A stage-shaped script: re-run itself in the sandbox, export a scratch
+	#    home, do `$1`, wait for the foreign writer when `$2` is 1, exit 3, and
+	#    check the snapshot guard from its EXIT trap, as nim.sh's last step
+	#    does. No `set -e`, like nim.sh: the call returns 1 in the inner run.
+	#    `$3` is CT_USER_STATE_SANDBOX; sets `rc`.
+	run_stage() {
+		reset_home
+		rm -f "${scratch}/tmp/stage-started" "${scratch}/tmp/foreign-done"
+		cat >"${scratch}/stage.sh" <<STAGE
+set -uo pipefail
+source "${repo_root}/ci/lib/codetracer-home.sh"
+ct_user_state_stage_sandbox probe-stage bash "${scratch}/stage.sh"
+ct_export_scratch_codetracer_home probe-stage
+trap '_ct_rc=\$?; rm -rf \${ct_scratch_home_created:+"\$ct_scratch_home_created"}; ct_user_state_guard_exit probe-stage "\$_ct_rc"' EXIT
+$1
+if [ "$2" = 1 ]; then
+	: >"\${TMPDIR}/stage-started"
+	for _ in \$(seq 1 200); do
+		[ -e "\${TMPDIR}/foreign-done" ] && break
+		sleep 0.05
+	done
+fi
+exit 3
+STAGE
+		local writer=""
+		if [ "$2" = 1 ]; then
+			(
+				for _ in $(seq 1 200); do
+					[ -e "${scratch}/tmp/stage-started" ] && break
+					sleep 0.05
+				done
+				mkdir -p "${scratch}/home/.cache/codetracer/sync-families"
+				echo foreign >"${scratch}/home/.cache/codetracer/sync-families/foreign.rec"
+				echo foreign >"${scratch}/home/.local/state/codetracer/foreign.json"
+				: >"${scratch}/tmp/foreign-done"
+			) &
+			writer=$!
+		fi
+		env -u CODETRACER_HOME -u CT_USS_STAGE -u CT_USS_STAGE_COVERED \
+			CT_USER_STATE_SANDBOX="$3" HOME="${scratch}/home" TMPDIR="${scratch}/tmp" \
+			bash "${scratch}/stage.sh" >"${scratch}/out" 2>&1
+		rc=$?
+		[ -z "${writer}" ] || wait "${writer}"
+	}
+	sandbox_cases=4
+	# 15. Positive control: the stage's own write to the user's cache fails
+	#     it (exit 1, not its own 3), is named as caught by the sandbox, and
+	#     never reaches the real directory.
+	# shellcheck disable=SC2016 # expanded by the stage, not here
+	run_stage 'mkdir -p "$HOME/.cache/codetracer/sync-families" && echo x >"$HOME/.cache/codetracer/sync-families/stage-leak.rec"' 0 1
+	if [ "${rc}" = 1 ] && grep -q "probe-stage WROTE the user's own CodeTracer state" "${scratch}/out" &&
+		grep -q "It ran in a sandbox" "${scratch}/out" &&
+		grep -q "wrote ${scratch}/home/.cache/codetracer/sync-families/stage-leak.rec" "${scratch}/out" &&
+		[ ! -e "${scratch}/home/.cache/codetracer/sync-families/stage-leak.rec" ]; then
+		t_pass "stage sandbox: a stage's own write to the user's cache fails it, is named, and never reaches the real directory"
+	else
+		t_fail "stage sandbox: a stage's own write to the user's cache fails it and never reaches the real directory (rc=${rc})"
+		sed 's/^/       /' "${scratch}/out" >&2
+	fi
+	# 16. Negative control: another process writes the user's cache and state
+	#     while a clean stage runs. The writes really land, and the stage
+	#     keeps its own status (3). With the sandbox switched off the same
+	#     overlap fails it (1), so the arm can tell the two apart.
+	run_stage ':' 1 0
+	unsandboxed_rc="${rc}"
+	run_stage ':' 1 1
+	if [ "${unsandboxed_rc}" = 1 ] && [ "${rc}" = 3 ] &&
+		grep -q "probe-stage: the sandbox caught no write" "${scratch}/out" &&
+		[ -e "${scratch}/home/.cache/codetracer/sync-families/foreign.rec" ] &&
+		[ -e "${scratch}/home/.local/state/codetracer/foreign.json" ]; then
+		t_pass "stage sandbox: another process writing the user's cache and state during a stage does not fail it"
+	else
+		t_fail "stage sandbox: another process's write does not fail the stage (sandboxed rc=${rc}; unsandboxed rc=${unsandboxed_rc})"
 		sed 's/^/       /' "${scratch}/out" >&2
 	fi
 fi

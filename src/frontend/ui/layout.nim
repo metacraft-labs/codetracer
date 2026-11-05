@@ -1952,11 +1952,6 @@ proc mountPaneForState(state: GoldenItemState; host: Element = nil) =
         if state.content in PanelHostKinds:
           ensurePanelMounted(cast[dom_api.Element](paneHost), state.content)
 
-        if state.content == Content.Shell:
-          let shellComponent = ShellComponent(component)
-          if shellComponent.shell.isNil:
-            discard shellComponent.createShell(paneHost)
-
         # CaptionBarProgress: rendered by its IsoNim view directly into the
         # container. Progress and hover mutation paths refresh it explicitly.
         if state.content == Content.CaptionBarProgress:
@@ -2352,8 +2347,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         discard mountPanel(cast[dom_api.Element](element.firstChild),
                            state.content)
       else:
-        # The panes the panel host does not render (the shell's terminal, the
-        # caption bar progress), mounted now into the same container.
+        # The panes the panel host does not render (the caption bar
+        # progress), mounted now into the same container.
         mountPaneForState(state, cast[Element](element.firstChild))
 
     # Whatever pane is still inside this container when GoldenLayout destroys

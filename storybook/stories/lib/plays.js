@@ -178,8 +178,19 @@ export const plays = {
   }),
   "agent-harbor-initiative-tabs-elsewhere": initiativeTabsCheck(async (el) => {
     await waitFor(el, ".ah-elsewhere-menu");
-    expect(el.querySelector(".ah-elsewhere")?.textContent).toMatch(/^\[\d+ agent harbor sessions?\]$/);
-    expect(el.querySelectorAll(".ah-elsewhere-menu .session-tab-overflow-item").length).toBeGreaterThan(0);
+    // A count badge and its label, never bracketed; a compact bar keeps the
+    // badge and puts the label in the tooltip.
+    const item = el.querySelector(".ah-elsewhere");
+    expect(item.querySelector(".ah-elsewhere-count")?.textContent).toMatch(/^\d+$/);
+    expect(item.textContent).not.toMatch(/[\[\]]/);
+    expect(item.getAttribute("title")).toMatch(/^\d+ agent harbor sessions? started elsewhere/);
+    const rows = el.querySelectorAll(".ah-elsewhere-menu .session-tab-overflow-item");
+    expect(rows.length).toBeGreaterThan(0);
+    // Each session's initiative beside its state.
+    for (const row of rows) {
+      expect(row.querySelector(".ah-elsewhere-initiative")?.textContent.length).toBeGreaterThan(0);
+      expect(row.querySelector(".ah-elsewhere-status")?.textContent.length).toBeGreaterThan(0);
+    }
     // Drawn, not only in the DOM: the bar clips what overflows it unless a
     // menu is open.
     const menu = el.querySelector(".ah-elsewhere-menu");
@@ -188,15 +199,25 @@ export const plays = {
   }),
   "agent-harbor-initiative-tabs-inbox": initiativeTabsCheck(async (el) => {
     await waitFor(el, ".ah-inbox");
-    expect(el.querySelector(".ah-inbox-position")?.textContent).toMatch(/of \d+|waiting|empty/);
+    // The position is on the bar, or (compact bar) in the Next button's tooltip.
+    const steps = el.querySelectorAll(".ah-inbox-step");
+    const position = el.querySelector(".ah-inbox-position")?.textContent ?? steps[steps.length - 1]?.getAttribute("title");
+    expect(position).toMatch(/of \d+|waiting|empty/);
   }),
   "agent-harbor-initiative-tabs-recordings": initiativeTabsCheck(async (el) => {
     await waitFor(el, ".ah-rec-button");
-    expect(el.querySelectorAll(".ah-rec-button").length).toBe(9);
-    expect(el.querySelector(".ah-rec-more")?.textContent).toBe("+3");
-    expect(el.querySelector(".ah-rec-loading")).toBeTruthy();
-    expect(el.querySelector(".ah-rec-failed")?.textContent).toMatch(/✕$/);
-    expect(el.querySelector(".ah-rec-missing")?.textContent).toMatch(/\?$/);
+    // Twelve recordings: five buttons on a wide bar, the active one alone on
+    // a compact one (the viewmodel's `RecordingSlots`), the rest behind `+N`.
+    const compact = el.querySelector(".ah-initiative-tab-bar").classList.contains("ah-bar-compact");
+    const shown = compact ? 1 : 5;
+    expect(el.querySelectorAll(".ah-rec-button").length).toBe(shown);
+    expect(el.querySelector(".ah-rec-more")?.textContent).toBe(`+${12 - shown}`);
+    if (!compact) {
+      // The states, where the buttons that carry them are drawn.
+      expect(el.querySelector(".ah-rec-loading")).toBeTruthy();
+      expect(el.querySelector(".ah-rec-failed")?.textContent).toMatch(/✕$/);
+      expect(el.querySelector(".ah-rec-missing")?.textContent).toMatch(/\?$/);
+    }
   }),
   "agent-harbor-initiative-tabs-empty": initiativeTabsCheck(async (el) => {
     expect(el.querySelector(".ah-tab-empty")?.textContent).toContain("No initiative");

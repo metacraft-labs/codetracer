@@ -628,30 +628,42 @@ export function createGoldenPanelHost(frame, title) {
   const header = document.createElement("div");
   header.className = "lm_header";
 
-  const tabs = document.createElement("ul");
+  // GoldenLayout's own elements (as `createGoldenStack` builds them): a list
+  // here took the browser's 40px list indent, which pushed the tab right
+  // and cut its pin and close off at the panel's edge.
+  const tabs = document.createElement("section");
   tabs.className = "lm_tabs";
 
-  const tab = document.createElement("li");
+  const tab = document.createElement("div");
   tab.className = "lm_tab lm_active";
+  tab.title = title;
 
   const tabTitle = document.createElement("span");
   tabTitle.className = "lm_title";
   tabTitle.textContent = title;
   tab.appendChild(tabTitle);
 
+  // The tab's own controls, as the app draws them: the pin that docks the
+  // panel to an edge (`injectPinButton`, src/frontend/ui/layout.nim), then
+  // close.
+  const pinTab = document.createElement("div");
+  pinTab.className = "lm_pin_tab";
+  pinTab.title = "Pin to the sidebar";
+  tab.appendChild(pinTab);
+
   const closeTab = document.createElement("div");
   closeTab.className = "lm_close_tab";
+  closeTab.title = "Close panel";
   tab.appendChild(closeTab);
   tabs.appendChild(tab);
   header.appendChild(tabs);
 
+  // The control bar stays empty, as the app's `stackCreated` handler empties
+  // it: GoldenLayout's own maximise and close buttons are not part of
+  // CodeTracer's design (they drew as oversized boxes in Light and as dark
+  // marks on a dark box in Dark).
   const controls = document.createElement("div");
   controls.className = "lm_controls";
-  for (const controlClass of ["lm_maximise", "lm_close"]) {
-    const control = document.createElement("div");
-    control.className = controlClass;
-    controls.appendChild(control);
-  }
   header.appendChild(controls);
 
   const items = document.createElement("div");

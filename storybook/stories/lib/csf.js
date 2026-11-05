@@ -13,12 +13,14 @@ import { plays } from "./plays.js";
  * `check` names an extra play check in `./plays.js`, run after the default
  * one (the surface mounted). An unknown name fails the story, so a
  * declaration cannot point at a check that does not exist and pass anyway.
+ * `frameTitle` is the panel's own name for its golden-layout tab, where the
+ * story's name says which state it shows; null: the story's name.
  */
-export function story(kind, name, fixture = "populated", storyName = null, check = "") {
+export function story(kind, name, fixture = "populated", storyName = null, check = "", frameTitle = null) {
   const extra = check ? plays[check] : null;
   return {
     name: storyName ?? name,
-    render: () => renderSurface(kind, name, fixture, storyName),
+    render: () => renderSurface(kind, name, fixture, frameTitle ?? storyName),
     play: async (context) => {
       if (check && typeof extra !== "function") {
         throw new Error(`story ${storyName ?? name}: no play check named "${check}" in lib/plays.js`);

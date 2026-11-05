@@ -37,7 +37,7 @@ const
     "measured. Install the Noir toolchain to see constraint counts."
   NargoFailedStem* = "nargo info could not measure this project: "
   NargoInfoProvenance* = "nargo info --json, run just now"
-  NargoInfoArgs = ["info", "--json"]
+  NargoInfoArgs* = ["info", "--json"]
     ## The command every host runs, in the project's folder.
 
 type

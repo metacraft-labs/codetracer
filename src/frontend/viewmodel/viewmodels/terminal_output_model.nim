@@ -50,7 +50,8 @@ type
     atText      ## printable text (UTF-8)
     atControl   ## a C0 control byte (`ch`)
     atCsi       ## `ESC [ <private> <params> <inter> <final>`
-    atEsc       ## `ESC <inter> <final>`
+    atEsc       ## `ESC <inter> <final>`; an OSC string (`ESC ] … BEL` /
+                ## `ST`) as `ch` `]` with its payload in `text`
 
   AnsiToken* = object
     kind*: AnsiTokenKind
@@ -74,6 +75,12 @@ type
     hasCur: bool
     private: char
     inter: string
+    osc: string
+      ## The OSC string being read (bounded: `MaxOscBytes`).
+
+const MaxOscBytes = 4096
+  ## An OSC string longer than this is cut (a title, a hyperlink, the Shell
+  ## pane's action marks are far shorter); the rest is still consumed.
 
 proc flushParam(sc: var AnsiScanner; newGroup: bool) =
   if sc.groups.len == 0:
@@ -118,6 +125,7 @@ proc scanAnsi*(sc: var AnsiScanner; data: string): seq[AnsiToken] =
         sc.inter = ""
       of ']':
         sc.state = asOsc
+        sc.osc = ""
       of 'P', 'X', '^', '_':
         sc.state = asString
       of '(', ')', '*', '+', '-', '.', '/':
@@ -175,11 +183,18 @@ proc scanAnsi*(sc: var AnsiScanner; data: string): seq[AnsiToken] =
         sc.state = asGround
     of asOsc:
       if c == '\x07':
+        result.add AnsiToken(kind: atEsc, ch: ']', text: sc.osc)
         sc.state = asGround
       elif c == '\x1b':
         sc.state = asOscEsc
+      elif sc.osc.len < MaxOscBytes:
+        sc.osc.add c
     of asOscEsc:
-      sc.state = (if c == '\\': asGround else: asOsc)
+      if c == '\\':
+        result.add AnsiToken(kind: atEsc, ch: ']', text: sc.osc)
+        sc.state = asGround
+      else:
+        sc.state = asOsc
     of asString:
       if c == '\x1b':
         sc.state = asStringEsc
@@ -589,6 +604,11 @@ type
     attrs: TermAttrs
     valid: bool
 
+  OscSeen* = object
+    line*, col*: int
+      ## The cursor's absolute line (`scrolledOff + row`) and column.
+    payload*: string
+
   TermScreen* = object
     ## A terminal's state: both buffers, the cursor, the pen, the scroll
     ## region and the scanner — a value, so a snapshot is a copy.
@@ -606,6 +626,32 @@ type
     table*: AttrTable
     # What the last `feed` saw.
     sawClear*, sawAltEnter*, sawAltLeave*, sawScreenControl*: bool
+    # A LIVE terminal's extras (the Shell pane, CodeTracer-Shell.md §7.2). A
+    # recorded program's screen keeps none of them (`scrollbackLimit` 0,
+    # `onlcr` on), so the Terminal Output pane's reconstruction is unchanged.
+    onlcr*: bool
+      ## A line feed also returns the carriage: the terminal device's ONLCR,
+      ## which a RECORDED write never went through (`control`). A live pty
+      ## has already applied it, so a bare LF the shell's line editor or a
+      ## full-screen program writes is a line feed only.
+    scrollbackLimit*: int
+      ## How many lines that scrolled off the top of the main screen are
+      ## kept in `scrollback`; 0 keeps none.
+    scrollback*: seq[seq[TermCell]]
+      ## The lines that left, oldest first — each `cols` wide when it left.
+      ## Read through `keptLines` / `keptLine`: it may hold more than the
+      ## limit between trims.
+    appCursor*: bool
+      ## DECCKM (`CSI ? 1 h`): the cursor keys send `ESC O A`, not `ESC [ A`
+      ## — what a live terminal's KEYS must follow (`shell_vm.keyBytes`).
+    oscSeen*: seq[OscSeen]
+      ## The OSC strings the last `feed` read, where the cursor was — what a
+      ## live terminal's owner reads marks from (the Shell pane's action
+      ## marks, CodeTracer-Shell.md §7.4).
+    scrolledOff*: int
+      ## Every line that ever left the top of the main screen, kept or not:
+      ## row `r` of the main screen is ABSOLUTE line `scrolledOff + r`, and
+      ## `keptLine(i)` is line `scrolledOff - keptLines + i`.
 
 proc newAttrTable*(): AttrTable =
   result = AttrTable(items: @[TermAttrs()])
@@ -621,7 +667,7 @@ proc idOf(t: AttrTable; a: TermAttrs): int32 =
 proc newTermScreen*(cols = DefaultScreenCols; rows = DefaultScreenRows;
                     table: AttrTable = nil): TermScreen =
   result = TermScreen(cols: max(1, cols), rows: max(1, rows),
-                      autowrap: true, cursorVisible: true,
+                      autowrap: true, cursorVisible: true, onlcr: true,
                       table: (if table.isNil: newAttrTable() else: table))
   result.primary = newSeq[TermCell](result.cols * result.rows)
   result.alternate = newSeq[TermCell](result.cols * result.rows)
@@ -678,9 +724,38 @@ proc scrollDown(s: var TermScreen; top, bottom, n: int) =
       s.setCell(r, c, s.cellAt(r - n, c))
   s.eraseRect(top, 0, top + n - 1, s.cols)
 
+proc keepScrolledOff(s: var TermScreen; n: int) =
+  ## The main screen's top `n` rows are about to scroll off the top of the
+  ## whole screen: count them, and keep them when the screen keeps scrollback.
+  if s.altActive or s.top != 0 or n <= 0:
+    return
+  let n = min(n, s.bottom + 1)
+  s.scrolledOff += n
+  if s.scrollbackLimit <= 0:
+    return
+  for r in 0 ..< n:
+    s.scrollback.add s.primary[r * s.cols ..< (r + 1) * s.cols]
+  # Trimmed in batches, so a long stream costs O(1) per line: the seq may
+  # hold up to twice the limit, and `keptLines` / `keptLine` read only the
+  # newest `scrollbackLimit` of it.
+  if s.scrollback.len >= 2 * s.scrollbackLimit:
+    s.scrollback = s.scrollback[s.scrollback.len - s.scrollbackLimit .. ^1]
+
+func keptLines*(s: TermScreen): int =
+  ## How many lines above the screen are kept (at most `scrollbackLimit`).
+  min(s.scrollback.len, max(0, s.scrollbackLimit))
+
+func keptLine*(s: TermScreen; i: int): seq[TermCell] =
+  ## Kept line `i`, oldest first (`0 ..< keptLines`): absolute line
+  ## `scrolledOff - keptLines + i`.
+  let k = s.keptLines
+  if i < 0 or i >= k: return @[]
+  s.scrollback[s.scrollback.len - k + i]
+
 proc lineFeed(s: var TermScreen) =
   s.wrapPending = false
   if s.row == s.bottom:
+    s.keepScrolledOff(1)
     s.scrollUp(s.top, s.bottom, 1)
   elif s.row < s.rows - 1:
     inc s.row
@@ -772,8 +847,11 @@ proc setAlt(s: var TermScreen; on: bool) =
 proc fullReset(s: var TermScreen) =
   let table = s.table
   let scanner = s.scanner
+  let live = (s.onlcr, s.scrollbackLimit, s.scrollback, s.scrolledOff,
+              s.oscSeen)
   s = newTermScreen(s.cols, s.rows, table)
   s.scanner = scanner
+  (s.onlcr, s.scrollbackLimit, s.scrollback, s.scrolledOff, s.oscSeen) = live
   s.sawClear = true
 
 proc insertChars(s: var TermScreen; n: int) =
@@ -794,6 +872,7 @@ proc setMode(s: var TermScreen; t: AnsiToken; on: bool) =
   for g in t.params:
     if g.len == 0: continue
     case g[0]
+    of 1: s.appCursor = on
     of 7: s.autowrap = on
     of 25: s.cursorVisible = on
     of 47, 1047:
@@ -863,6 +942,10 @@ proc csi(s: var TermScreen; t: AnsiToken) =
     of 2:
       s.eraseRect(0, 0, s.rows - 1, s.cols)
       s.sawClear = true
+    of 3:
+      # xterm's "erase saved lines": the scrollback goes (`clear` writes it
+      # after `ED 2`); the screen stays.
+      s.scrollback.setLen(0)
     else: discard
     s.wrapPending = false
   of 'K':
@@ -893,7 +976,9 @@ proc csi(s: var TermScreen; t: AnsiToken) =
       s.col = 0
     s.wrapPending = false
   of 'S':
-    if t.private == '\0': s.scrollUp(s.top, s.bottom, n1)
+    if t.private == '\0':
+      s.keepScrolledOff(n1)
+      s.scrollUp(s.top, s.bottom, n1)
   of 'T':
     if t.private == '\0' and t.params.len <= 1:
       s.scrollDown(s.top, s.bottom, n1)
@@ -923,8 +1008,10 @@ proc control(s: var TermScreen; c: char) =
     # The terminal device's output processing (ONLCR, on in every terminal a
     # program writes to): a line feed the program wrote reaches the terminal
     # as CR LF. A program's `print` therefore starts its next line at the
-    # left edge, as the user saw it.
-    s.col = 0
+    # left edge, as the user saw it. A live pty has applied it already
+    # (`onlcr` off).
+    if s.onlcr:
+      s.col = 0
     s.lineFeed()
   of '\v', '\f': s.lineFeed()
   of '\r':
@@ -945,6 +1032,7 @@ proc feed*(s: var TermScreen; data: string) =
   s.sawAltEnter = false
   s.sawAltLeave = false
   s.sawScreenControl = false
+  s.oscSeen.setLen(0)
   for t in s.scanner.scanAnsi(data):
     case t.kind
     of atText:
@@ -967,7 +1055,47 @@ proc feed*(s: var TermScreen; data: string) =
       of 'c':
         s.fullReset()
         s.sawScreenControl = true
+      of ']':
+        s.oscSeen.add OscSeen(line: s.scrolledOff + s.row, col: s.col,
+                              payload: t.text)
       else: discard
+
+proc resize*(s: var TermScreen; cols, rows: int) =
+  ## The terminal took a new size (a live pty the pane resized). Rows keep
+  ## their columns from the left (no re-wrap); a shorter screen pushes the
+  ## rows above the cursor into the scrollback so the cursor stays on it, a
+  ## taller one adds blank rows below. The scroll region resets.
+  let cols = max(1, cols)
+  let rows = max(1, rows)
+  if cols == s.cols and rows == s.rows:
+    return
+  # Rows leaving at the top: as many as the cursor needs, on the main screen.
+  let drop = max(0, s.row - (rows - 1))
+  if drop > 0 and not s.altActive:
+    s.keepScrolledOff(drop)
+  proc remap(old: seq[TermCell]; oldCols, oldRows, skip: int): seq[TermCell] =
+    result = newSeq[TermCell](cols * rows)
+    for r in 0 ..< rows:
+      let src = r + skip
+      if src >= oldRows: break
+      for c in 0 ..< min(cols, oldCols):
+        result[r * cols + c] = old[src * oldCols + c]
+  let skipPrimary = (if s.altActive: 0 else: drop)
+  let skipAlt = (if s.altActive: drop else: 0)
+  s.primary = remap(s.primary, s.cols, s.rows, skipPrimary)
+  s.alternate = remap(s.alternate, s.cols, s.rows, skipAlt)
+  s.cols = cols
+  s.rows = rows
+  s.row -= drop
+  s.top = 0
+  s.bottom = rows - 1
+  s.clampCursor()
+
+func cellsText*(cells: openArray[TermCell]): string =
+  ## A row's characters, an erased cell as a space, a wide character once.
+  for cell in cells:
+    if cell.wide == -1: continue
+    result.add(if cell.ch == 0: " " else: $Rune(cell.ch))
 
 type
   ScreenRun* = object
@@ -984,11 +1112,11 @@ proc screenRowText*(s: TermScreen; row: int): string =
     if cell.wide == -1: continue
     result.add(if cell.ch == 0: " " else: $Rune(cell.ch))
 
-proc screenRowRuns*(s: TermScreen; row: int): seq[ScreenRun] =
-  ## A row as styled runs, left to right, covering every column.
+proc cellsRuns*(s: TermScreen; cells: openArray[TermCell]): seq[ScreenRun] =
+  ## Cells (a screen row, a scrollback line) as styled runs, left to right.
   var c = 0
-  while c < s.cols:
-    let cell = s.cellAt(row, c)
+  while c < cells.len:
+    let cell = cells[c]
     if cell.wide == -1:
       inc c
       continue
@@ -1001,6 +1129,13 @@ proc screenRowRuns*(s: TermScreen; row: int): seq[ScreenRun] =
     else:
       result.add ScreenRun(col: c, cells: w, text: txt, attrs: a)
     c += w
+
+proc screenRowRuns*(s: TermScreen; row: int): seq[ScreenRun] =
+  ## A row as styled runs, left to right, covering every column.
+  var cells = newSeq[TermCell](s.cols)
+  for c in 0 ..< s.cols:
+    cells[c] = s.cellAt(row, c)
+  s.cellsRuns(cells)
 
 # ---------------------------------------------------------------------------
 # 5. The screen over time, its snapshots, its scrubber

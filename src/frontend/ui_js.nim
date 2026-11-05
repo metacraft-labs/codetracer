@@ -5125,6 +5125,8 @@ proc stampAskingTab(data: Data) =
   ## * `open-trace-in-tab-ready`, `open-edit-folder-in-tab-ready`: they ask
   ##   the window for a NEW tab, and the load that follows answers it as the
   ##   tab on screen;
+  ## * `shell-session-message`: routed by the Shell pane's own id
+  ##   (`ui/shell.onShellSessionMessage`);
   ## * `dap-receive-*`, `acp-*`: routed by their own ids — the DAP session id
   ##   (`event_helpers.deliverDapEvent`) and the ACP session id
   ##   (`agent_activity.componentBySessionId`);
@@ -5170,6 +5172,9 @@ proc configureIPC(data: Data) =
     # Test-Results-Pane.md §9.3: a workspace's `replay-open-in` written. See
     # `onReplayOpenIn`.
     "replay-open-in"
+    # The Shell pane's session lines (CodeTracer-Shell.md §7.7), routed by
+    # the pane's own id (`ui/shell.onShellSessionMessage`).
+    "shell-session-message"
     "welcome-screen"
     # #568: the recent-traces / recent-folders push for startup paths whose own
     # startup message does not carry them (`index/recent_items.nim`).
