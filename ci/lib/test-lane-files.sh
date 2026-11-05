@@ -1979,7 +1979,11 @@ test_lane_files() {
 				'/request-panel/js_request_panel_vm_test\.nim$' \
 				'/request-panel/native_request_panel_vm_test\.nim$' \
 				'/request-panel/remote_request_panel_vm_test\.nim$' \
+				'/integration/recording_fixtures_test\.nim$' \
 				'/request-panel/request_span_conformance_test\.nim$'
+		# recording_fixtures_test exercises the real filesystem lookup of a
+		# published recording (`std/os`'s `fileExists` has no JS backend); it
+		# stays in `vm-native`, where the boundary it tests exists.
 		# agentic-coding/* import std/osproc, whose `quoteShell` does not exist
 		# on the JS target. `certificate_indicator_native_test.nim` (SB-1) is the
 		# same error for the same reason and one more besides: it drives the
