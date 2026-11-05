@@ -3856,6 +3856,110 @@ jobs:
           path: test-logs/
           retention-days: 30
 
+  isonim-editor-smoke:
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; same label as `viewmodel-tests` and `tui-tests`
+    # NEW, NO CI SAMPLE YET, so the bound is the sum of two measured parts with
+    # room for a cold runner. The smoke step took 840 s with nothing built yet
+    # (StoryBook, IsoNim's node modules, the `isonim-review` daemon) and 157 s
+    # warm, on nixos-ci-bare-003 at load ~180 (2026-11-05). `just build-once`,
+    # the rest of the body, is what `cross-process-linux` is bounded at 45m
+    # for. 45 + 15 is 60; 90 leaves half again for sibling provisioning and a
+    # cold Nix store. Tighten it from the first green runs.
+    timeout-minutes: 90
+    name: IsoNim Editor instance smoke
+    # WHY THIS JOB EXISTS. `scripts/isonim-editor-codetracer.sh --smoke` is a
+    # check: it builds StoryBook and the IsoNim Editor instance over the same
+    # story declaration and asserts, in a headless browser, that the declared
+    # stories and only they render, that the editor's preview equals
+    # StoryBook's render pixel for pixel, and that a review comment reaches an
+    # agent session. Until this job no workflow ran it, and
+    # `ci/test/shell-gate-coverage.sh` failed on it by name (codetracer-pm
+    # issues/2026-11-04-shell-gate-coverage-red-on-two-new-scripts.md).
+    #
+    # WHY ITS OWN JOB. It needs a `build-once` tree, a StoryBook build, IsoNim's
+    # node modules and its `isonim-review` daemon. `viewmodel-tests`, the
+    # other job that builds the tree, is already at its 75-minute bound with
+    # no green sample (see `tui-tests`).
+    steps:
+      - name: Generate CI token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      # Every authenticated clone is in this block, at the top of the job: the
+      # installation token minted above expires an hour after it is minted.
+      - name: Setup db-backend siblings and the editor daemon's siblings
+        # The db-backend siblings are what `just build-once` needs to build
+        # `replay-server` (see `gpui-window-captures`). The two extra ones are
+        # the `isonim-review` daemon's: IsoNim's `isonim-review-build` compiles
+        # it with `--path:../nim-faststreams` and `--path:../nim-stew`. Both are
+        # in this repo's committed `repro.lock`, so they are named BARE and
+        # clone at the revision that lock pins.
+        uses: ./.github/actions/setup-db-backend-siblings
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          extra-siblings: |
+            nim-faststreams
+            nim-stew
+
+      - name: Clone runquota sibling
+        # `just build-once` compiles `ct`, which imports `runquota_process`
+        # (see `cross-process-linux`).
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/runquota
+          ref: dev
+          path: ${{ github.workspace }}/../runquota
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Provision dependency siblings from repro.lock
+        # isonim (the editor framework, its server and its daemon's source),
+        # isonim-render-serve and nim-everywhere (on the editor bundle's and
+        # the daemon's paths), and nim-acp, nim-agents and nim-agent-harbor
+        # (the daemon's). After the step above, which installed Nix: this
+        # action reaches `repro` through the dev shell.
+        uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Build ct and the frontend stylesheets
+        # The editor's preview frames and StoryBook link the built stylesheets
+        # under `src/build-debug/frontend`; the script refuses to start
+        # without them.
+        env:
+          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+        run: nix develop .#devShells.x86_64-linux.default --command just build-once
+
+      - name: The IsoNim Editor instance shows exactly StoryBook's stories
+        # Builds StoryBook and the instance (IsoNim's node modules and its
+        # `isonim-review` daemon too, in the provisioned `../isonim`), serves
+        # it on a free loopback port with IsoNim's deterministic test agent,
+        # and checks it in headless Chromium. Screenshots and logs land in
+        # build/isonim-editor-codetracer-smoke/smoke/, uploaded below.
+        run: nix develop .#devShells.x86_64-linux.default --command just isonim-editor-codetracer --smoke
+
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: isonim-editor-smoke
+          path: build/isonim-editor-codetracer-smoke/smoke/
+          retention-days: 14
+          if-no-files-found: ignore
+
   gpui-window-captures:
     runs-on: [self-hosted, linux, x64]  # the label isonim-gpui's "GUI tests (headless sway)" job runs green on
     # NEW, NO SAMPLE YET. The work is two cargo builds of isonim-gpui's shim
@@ -6542,6 +6646,9 @@ jobs:
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=8794892b43516f033360adaa702219d0d7974449
             codetracer-trace-format-nim=4ca78ed1ce0e556e639c8389f85f2c7d56313cb7
+            # The native fixture the desktop's native Low Level Code capture
+            # records (`c/sudoku_solver`), at the revision repro.lock pins.
+            codetracer-native-test-programs=af5a77b20f5a4ae09c202902b3ee01e9edf5473f
 
       - name: Stage codetracer-trace-format into libs/
         # The flake override below points at ./libs/codetracer-trace-format;
@@ -6630,6 +6737,19 @@ jobs:
           CODETRACER_RR_TESTS_ONLY: "1"
           PLAYWRIGHT_GLOBAL_TIMEOUT: "10800000"
         run: "nix develop .#devShells.x86_64-linux.default --command just test-gui"
+
+      - name: The desktop's Low Level Code view on a native recording is the reference
+        if: ${{ !cancelled() }}
+        # The desktop column of the Low Level Code pane on an rr recording of
+        # `codetracer-native-test-programs/c/sudoku_solver`: the machine-code
+        # listing, the execution pointer, the header, and a step by
+        # instruction and back -- read from the REAL Electron app with this
+        # checkout's desktop JavaScript. Its non-native sibling
+        # (`plat60-capture-electron`) runs in `viewmodel-tests`; this one runs
+        # here because it needs rr and `ct-native-replay`, and `just test-gui`
+        # above builds both, along with the `build-once` tree the desktop prefix
+        # borrows from. The recipe starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat60-native-capture-electron
 
       - name: Upload test artifacts
         if: failure()
@@ -8508,6 +8628,7 @@ jobs:
       - ct-host-container-gate
       - viewmodel-tests
       - tui-tests
+      - isonim-editor-smoke
       - visual-replay-regression-gate
       - ct-test-release-gate
       - ct-test-providers

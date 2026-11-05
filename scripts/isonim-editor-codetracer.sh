@@ -145,8 +145,22 @@ for asset in tiptap.umd.js xterm.umd.js xterm.css; do
 	[ -f "$vendor/$asset" ] || die "the editor vendor bundle $vendor has no $asset"
 done
 node_modules="$isonim/node_modules"
-for asset in fabric/dist/index.min.js paper/dist/paper-core.min.js svgo/dist/svgo.browser.js; do
-	[ -f "$node_modules/$asset" ] || die "$node_modules/$asset is missing; install IsoNim's node modules (npm ci in $isonim)"
+editor_node_assets=(fabric/dist/index.min.js paper/dist/paper-core.min.js svgo/dist/svgo.browser.js)
+# IsoNim's node modules are installed here when they are absent, so a fresh
+# checkout (a CI lane's) needs nothing done by hand first. Yarn with the
+# frozen lockfile is IsoNim's canonical install (its Justfile's
+# `build-tailwind` runs the same command); its package-lock.json is stale and
+# `npm ci` fails on it.
+for asset in "${editor_node_assets[@]}"; do
+	if [ ! -f "$node_modules/$asset" ]; then
+		command -v yarn >/dev/null || die "$node_modules/$asset is missing and yarn is not on PATH to install IsoNim's node modules"
+		echo "    installing IsoNim's node modules (yarn install --frozen-lockfile in $isonim)"
+		(cd "$isonim" && yarn install --frozen-lockfile)
+		break
+	fi
+done
+for asset in "${editor_node_assets[@]}"; do
+	[ -f "$node_modules/$asset" ] || die "$node_modules/$asset is missing after installing IsoNim's node modules"
 done
 rm -rf "$www"
 mkdir -p "$www/vendor" "$www/codetracer-storybook" "$www/libs"

@@ -532,6 +532,14 @@ package codeTracer:
     "nim-everywhere >=0"
     "nim-agent-harbor >=0"
     "nim-agents >=0"
+    # The Agent Harbor viewmodels and their fixture data source, which the
+    # StoryBook components bundle (src/frontend/storybook_components.nim) and
+    # the IsoNim Editor instance compile against through `config.nims`. Until
+    # it was declared here no lane could provision it, and no lock recorded
+    # which revision StoryBook was built against (codetracer-pm
+    # issues/2026-11-05-codetracer-imports-nim-agents-isonim-viewmodels-
+    # without-declaring-it.md).
+    "nim-agents-isonim-viewmodels >=0"
     "nim-acp >=0"
     # The test-certificate standard's reference library (test-certificates-tools,
     # `library test_certificates`, stdlib only). `ct` links it in
