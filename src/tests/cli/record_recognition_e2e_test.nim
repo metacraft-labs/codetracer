@@ -295,24 +295,37 @@ suite "NTR-2 end to end: the shipped ct delegates recognition":
     let afterSecond = recognizeSpawns(box)
     checkpoint("spawns after two `ct record`s: " & $afterSecond)
 
-    # Stated as a RATIO rather than as the literal number 2, because one
-    # `ct record` legitimately spawns the recognizer more than once: `ct` and
-    # the `db-backend-record` process it starts each recognize in their own
-    # process, and Q7 permits carrying a result only within ONE invocation.
-    # What Q7 forbids is the second RECORDING reusing the first's answer, and
-    # that is exactly what this equality pins.
+    # Stated as a RATIO: what Q7 forbids is the second RECORDING reusing the
+    # first's answer, and that is exactly what this equality pins.
     check afterSecond == afterFirst * 2
 
     # The ratio is the right shape for Q7 and is, by construction, blind to a
-    # THIRD spawn appearing — 3 and 6 satisfy it as happily as 2 and 4.  The
+    # second spawn appearing — 2 and 4 satisfy it as happily as 1 and 2.  The
     # per-recording count is therefore pinned separately and as an ABSOLUTE:
-    # one `ct record` spawns `recognize` exactly TWICE, once in `record()` and
-    # once inside the `db-backend-record` process it starts
-    # (`src/ct/db_backend_record.nim:384`).  That is duplicated work, not a
-    # cache, and it is recorded rather than smoothed over — but a fourth caller
-    # appearing should be a deliberate decision, not a silent one, so it fails
-    # here first.
-    check afterFirst == 2
+    # one `ct record` spawns `recognize` exactly ONCE, in `record()`.  It used
+    # to be twice: `db-backend-record` recognized the same file again in its
+    # own process because `ct` forwarded no `--lang`, which on a 2.6 GB Rust
+    # binary cost ten minutes per recording.  `ct` now forwards the language it
+    # recognized (Q7 permits carrying a result within ONE invocation), so a
+    # second spawn appearing is a regression, and it fails here first.
+    check afterFirst == 1
+
+  # The case forwarding a `--lang` would have missed: the recognizer ran but
+  # answered with a language this build does not map, so `ct` has nothing to
+  # spell as `--lang`. It still passes the answer (`--recognized-lang
+  # unknown`), and `db-backend-record` must not walk the binary again.
+  test "Q7: an answer in a language this build does not map is not recomputed":
+    require fileExists(ct)
+    let box = newSandbox("unmapped-language")
+    writeStubRecognizer(box, answeringStub(
+      CDocument.replace("\"language\": \"c\"", "\"language\": \"klingon\"")))
+
+    let run = runCt(box, @["record", "-o", box.dir / "out", box.target])
+    checkpoint("ct output:\n" & run.output)
+    checkpoint("spawn log:\n" &
+      (if fileExists(box.spawnLog): readFile(box.spawnLog) else: "<absent>"))
+    check "refusing to run 'record'" in run.output
+    check recognizeSpawns(box) == 1
 
   test "Q8: --lang skips recognition entirely, and does not move the backend":
     require fileExists(ct)
