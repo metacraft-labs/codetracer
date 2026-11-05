@@ -4,9 +4,11 @@ in the GPUI window (codetracer-pm `spec/Planned-Features/Noir-Studio.md`
 § "The Constraints pane on the terminal and the GPUI window (PLAT-62)"): the
 shared ViewModel's rows, links to source, selection, activation and row menu
 (`constraints_vm`), the declaration scan (`noir_test_syntax`), the measurement
-rule (`constraints_answer`), the columns (`table_fit.constraintsFit`), the
-native host and the terminal's source, painter, runtime and loop, the GPUI
-leaf and window, the vocabulary view, the desktop's view and its host.
+rule (`constraints_answer`), the listing and each opcode's place
+(`constraints_listing`, `raw_inflate`), the columns (`table_fit.constraintsFit`),
+the native host and the terminal's source, painter, runtime and loop, the GPUI
+leaf and window, the vocabulary view, the desktop's view, its host and its
+recording tab.
 
 Each arm plants ONE defect; REBUILDS the shipped `codetracer-tui` /
 `codetracer-gpui` / desktop when the defect is compiled into a binary an arm
@@ -71,6 +73,10 @@ GPUI_MAIN = "src/frontend/gpui/main.nim"
 VOCAB = "src/frontend/view_vocabulary/pane_views.nim"
 DESKTOP_VIEW = "src/frontend/viewmodel/views/isonim_constraints_view.nim"
 DESKTOP_HOST = "src/frontend/index/ns9_panes.nim"
+LISTING = "src/frontend/viewmodel/viewmodels/constraints_listing.nim"
+INFLATE = "src/common/raw_inflate.nim"
+DESKTOP_TAB = "src/frontend/ui/constraints.nim"
+MENU = "src/frontend/viewmodel/viewmodels/product_menu.nim"
 
 # Suites.
 VMU = "src/frontend/viewmodel/tests/unit/test_plat62_constraints.nim"
@@ -85,7 +91,7 @@ DBL = "<no regression spec>"
 
 SUBJECTS = [VM, SYNTAX, ANSWER, FIT, HOST, SOURCE, TUI_PANE, RUNTIME, SHELL,
             PROFILE, TUI_MAIN, GPUI_LEAF, GPUI_MAIN, VOCAB, DESKTOP_VIEW,
-            DESKTOP_HOST]
+            DESKTOP_HOST, LISTING, INFLATE, DESKTOP_TAB, MENU]
 SUITES = [VMU, TBL, PTY, PLAN, SPEC, ANSWERS, FIXTURE]
 
 # (id, [(subject, find, replace), ...], [(suite, filter), ...], what it breaks)
@@ -127,7 +133,7 @@ ARMS = [
              '  of "list.focus-page-up": next = (if cur < 0: 0 else: cur - 1)')],
      [(VMU, None)],
      "the list's Page Up moves one row"),
-    ("V10", [(VM, '                               source: unlinked(OpcodeHasNoSourceReason))',
+    ("V10", [(VM, '                               source: linkOpcode(op.place))',
               '                               source: links[f])')],
      [(VMU, None)],
      "an opcode row claims its function's line"),
@@ -164,7 +170,7 @@ ARMS = [
      [(VMU, None)],
      "the name does not take the room the other columns leave"),
     # ---- the native host and the terminal ---------------------------------------
-    ("H1", [(HOST, '    h.vm.setSources(noirSourcesUnder(root))',
+    ("H1", [(HOST, '    h.vm.setSources(sources)',
              '    discard root')],
      [(TBL, None), (PLAN, None)],
      "the native hosts place no row (the sources are never read)"),
@@ -208,10 +214,8 @@ ARMS = [
      [(TBL, None), (PTY, None)],
      "`:constraints` does not open the pane"),
     ("T7", [(PROFILE, '     paneConstraints,\n'
-                      '     # PLAT-61: the interactive shell (`views/shell_session_pane.nim`).\n'
-                      '     paneShell},',
-             '     # PLAT-61: the interactive shell (`views/shell_session_pane.nim`).\n'
-             '     paneShell},'),
+                      '     # PLAT-61: the interactive shell (`views/shell_session_pane.nim`).',
+             '     # PLAT-61: the interactive shell (`views/shell_session_pane.nim`).'),
             (SHELL, '  elif region.pane == paneConstraints and model.constraints.loaded:',
              '  elif false:')],
      [(PTY, None)],
@@ -259,20 +263,93 @@ ARMS = [
              '    if false: sourcesJson(noirSourcesUnder(folder)) else: "[]"')],
      [(SPEC, None)],
      "the desktop's host sends no sources, so no desktop row is placed"),
+    ("D3", [(DESKTOP_TAB, '      askToMeasure(data.activeSession)',
+             '      discard data.activeSession')],
+     [(SPEC, None)],
+     "a recording's tab on the desktop never measures the circuit"),
+    ("D4", [(MENU, '      item("Constraints", "aConstraints"),\n      item("Start Agent Worktree Session", "aStartAgenticWorktreeSession"),',
+             '      item("Start Agent Worktree Session", "aStartAgenticWorktreeSession"),')],
+     [(SPEC, None)],
+     "a desktop user cannot open the pane in Debug mode"),
+    ("D5", [(DESKTOP_HOST, '    listing: cstring(measured.listing),',
+             '    listing: cstring(""),')],
+     [(SPEC, None)],
+     "the desktop's host sends no opcodes, so it shows totals alone"),
+    ("D6", [(DESKTOP_HOST, '    artefact: (if measured.hasReport:',
+             '    artefact: (if false:')],
+     [(SPEC, None)],
+     "the desktop's host sends no debug symbols, so no opcode is placed"),
+    # ---- the listing and where each opcode leads ------------------------------
+    ("L1", [(LISTING, '      if nextAcir >= acir.len or acir[nextAcir].opcodes != fn.opcodes:',
+             '      if nextAcir >= acir.len:')],
+     [(VMU, None)],
+     "a listing that does not add up to the totals is shown under them"),
+    ("L2", [(LISTING, '  if listing.count(AcirListingHeader) > 1:', '  if false:')],
+     [(VMU, None)],
+     "a workspace's listings are read as one package's"),
+    ("L3", [(LISTING, '  for i in countdown(frames.len - 1, 0):',
+             '  for i in 0 ..< frames.len:')],
+     [(VMU, None)],
+     "an inlined opcode leads to its call, not its own line"),
+    ("L4", [(LISTING, '         text == source.content:', '         true:')],
+     [(VMU, None)],
+     "an opcode is placed on a file that changed after the compile"),
+    ("L5", [(LISTING, '            op.place = placeOfStack(treeOf(info), located[key].getInt, files)\n            break',
+             '            break')],
+     [(VMU, None)],
+     "an unconstrained function's opcodes are never placed"),
+    ("L6", [(LISTING, '    # folder holds, so a malformed one is an expected input.\n    unread = true',
+             '    # folder holds, so a malformed one is an expected input.\n    discard')],
+     [(VMU, None)],
+     "an unreadable artefact reads as opcodes the compiler did not place"),
+    ("L7", [(LISTING, '  if at == 0 and not output.startsWith("{"):\n    return ("", output)\n  (output[0 ..< at], output[at .. ^1])',
+             '  ("", output)')],
+     [(VMU, None)],
+     "the printed opcodes are read as part of the JSON report"),
+    ("I1", [(INFLATE, '      var from0 = output.len - distance',
+             '      var from0 = output.len - distance + 1')],
+     [(VMU, None)],
+     "a deflate back-reference copies from the wrong place"),
+    ("I2", [(INFLATE, '      if output.len + length > limit:\n        fault("the stream expands past the limit")\n      # Byte by byte: a distance shorter than the length repeats what this very',
+             '      # Byte by byte: a distance shorter than the length repeats what this very')],
+     [(VMU, None)],
+     "a deflate stream can expand past its limit"),
+    ("N1", [(ANSWER, '  NargoInfoArgs* = ["info", "--json", "--print-acir"]',
+             '  NargoInfoArgs* = ["info", "--json"]')],
+     [(TBL, None)],
+     "the hosts do not ask for the opcodes"),
+    ("N2", [(HOST, '      readQuietly(artefactPathUnder(root, answer.report.package)), sources))',
+             '      "", sources))')],
+     [(TBL, None)],
+     "a native window reads no debug symbols, so no opcode is placed"),
+    ("N3", [(RUNTIME, '  of "aConstraints": (true, paneConstraints)',
+             '  of "aConstraintsX": (true, paneConstraints)')],
+     [(TBL, None)],
+     "View › Constraints does nothing on the terminal"),
+    ("N4", [(GPUI_MAIN, '  of "aConstraints": GpuiMenuRoute(kind: gmrPane, pane: paneConstraints)',
+             '  of "aConstraintsX": GpuiMenuRoute(kind: gmrPane, pane: paneConstraints)')],
+     [(PLAN, None)],
+     "View › Constraints does nothing in the GPUI window"),
+    ("N5", [(TUI_PANE, '      if placeCells > 0:',
+             '      if false:')],
+     [(PTY, None)],
+     "the terminal does not say where an opcode's row leads"),
 ]
 
 DECLARED_SURVIVORS = set()
 
 IN_BINARY = {VM, SYNTAX, ANSWER, FIT, HOST, SOURCE, TUI_PANE, RUNTIME, SHELL,
-             PROFILE, TUI_MAIN, VOCAB}
+             PROFILE, TUI_MAIN, VOCAB, LISTING, INFLATE, MENU}
   # Subjects compiled into `codetracer-tui`.
-IN_GPUI = {VM, SYNTAX, ANSWER, FIT, HOST, GPUI_LEAF, GPUI_MAIN, VOCAB}
+IN_GPUI = {VM, SYNTAX, ANSWER, FIT, HOST, GPUI_LEAF, GPUI_MAIN, VOCAB, LISTING,
+           INFLATE, MENU}
   # Subjects compiled into `codetracer-gpui`.
 PTY_SUITES = {PTY}
 GPUI_SUITES = {PLAN}
 RUST_SUITES = set()
 DESKTOP_SUITES = {SPEC}
-IN_DESKTOP = {VM, SYNTAX, ANSWER, DESKTOP_VIEW, DESKTOP_HOST}
+IN_DESKTOP = {VM, SYNTAX, ANSWER, DESKTOP_VIEW, DESKTOP_HOST, LISTING, INFLATE,
+              DESKTOP_TAB, MENU}
   # Subjects compiled into the desktop's bundle and its main process.
 
 
@@ -292,7 +369,8 @@ def lane_flags(lane):
     return subprocess.run(
         ["bash", "-c", ". ci/lib/test-lane-files.sh >/dev/null 2>&1 && "
                        f"test_lane_extra_flags {lane}"],
-        cwd=REPO, capture_output=True, text=True, check=True).stdout.split()
+        cwd=REPO, capture_output=True, text=True, errors="replace",
+        check=True).stdout.split()
 
 
 def suite_flags(suite):
@@ -357,7 +435,7 @@ def controls_match():
 def build_with(env_var, recipe):
     cmd = os.environ.get(env_var)
     argv = ["bash", "-c", cmd] if cmd else ["just", recipe]
-    p = subprocess.run(argv, cwd=REPO, capture_output=True, text=True,
+    p = subprocess.run(argv, cwd=REPO, capture_output=True, text=True, errors="replace",
                        timeout=TIMEOUT)
     if p.returncode != 0:
         print((p.stdout + p.stderr)[-2000:])
@@ -392,7 +470,7 @@ def run_rust(suite):
         ["cargo", "test", "--test", Path(suite).stem]
     cwd = REPO if cmd else REPO / "src/db-backend"
     try:
-        p = subprocess.run(argv, cwd=cwd, capture_output=True, text=True,
+        p = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, errors="replace",
                            timeout=TIMEOUT)
     except subprocess.TimeoutExpired:
         return "HUNG", []
@@ -421,7 +499,7 @@ def run_spec(suite):
         argv = ["just", "test-e2e", suite.split("src/tests/gui/", 1)[1]]
     saved = path_of(ANSWERS).read_bytes()
     try:
-        p = subprocess.run(argv, cwd=REPO, capture_output=True, text=True,
+        p = subprocess.run(argv, cwd=REPO, capture_output=True, text=True, errors="replace",
                            timeout=TIMEOUT)
     except subprocess.TimeoutExpired:
         return "HUNG", []
@@ -454,7 +532,7 @@ def run_suite(suite, test_filter):
     if test_filter:
         cmd.append(test_filter)
     try:
-        p = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True,
+        p = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, errors="replace",
                            timeout=TIMEOUT, env=env)
     except subprocess.TimeoutExpired:
         return "HUNG", []

@@ -69,7 +69,7 @@ template ck(condition: untyped) =
   inc asserted
   check condition
 
-const ExpectedAssertions = 157
+const ExpectedAssertions = 159
   ## Measured: every `ck` below, counted, so a case that silently stops
   ## asserting is caught.
 
@@ -381,6 +381,9 @@ suite "PLAT-62: the Constraints pane's shared model":
     ck not inflateRaw("\x01\x05\x00\x00\x00hello").ok  # a bad complement
     ck not inflateRaw(dynamic[0 ..< dynamic.len div 2]).ok   # truncated
     ck not inflateRaw(dynamic, limit = 16).ok            # past the limit
+    # A back-reference alone crossing the limit: "hello h" then a copy of ten.
+    ck inflateRaw("\xcb\x48\xcd\xc9\xc9\x57\xc8\x40\x90\x00").bytes == "hello hello hello"
+    ck not inflateRaw("\xcb\x48\xcd\xc9\xc9\x57\xc8\x40\x90\x00", limit = 10).ok
 
   test "the measurement rule, arm by arm":
     ck constraintsAnswer("", false, NargoInfoRun()).absence ==

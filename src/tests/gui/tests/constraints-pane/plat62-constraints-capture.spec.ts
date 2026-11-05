@@ -194,6 +194,10 @@ test.describe("PLAT-62: the desktop's Constraints pane, captured", () => {
       timeout: 30_000,
     });
     const before = await readPane(ctPage);
+    // Read first, so a pane missing its opcodes or their places fails naming that
+    // rather than as a press that had nothing to land on.
+    expect(before.rows.length).toBe(RowTotal);
+    expect(before.rows[RangeOpcodeRow].where).toBe("src/checks.nr:2");
 
     // A RIGHT-CLICK on a placed row (`main`) and on one placed nowhere.
     const rows = ctPage.locator(".constraints [data-ct-row]");
@@ -257,10 +261,11 @@ test.describe("PLAT-62: the desktop's Constraints pane, captured", () => {
       .locator("#menu-elements > .menu-node-container", { hasText: "View" })
       .first()
       .hover();
-    await ctPage
+    const viewConstraints = ctPage
       .locator(".menu-nested-elements .ct-menu-item-label", { hasText: /^Constraints$/ })
-      .first()
-      .click();
+      .first();
+    await expect(viewConstraints).toBeVisible({ timeout: 30_000 });
+    await viewConstraints.click();
     const debugRows = ctPage.locator(".constraints:visible [data-ct-row]");
     await expect(debugRows.first()).toBeVisible({ timeout: 120_000 });
     await expect(ctPage.locator(".constraints:visible [data-ct-row].linked").first()).toBeVisible({
@@ -295,12 +300,10 @@ test.describe("PLAT-62: the desktop's Constraints pane, captured", () => {
 
     // The capture is only a reference if it is the run it says it is.
     expect(before.headline).toBe("18 ACIR opcodes, 33 unconstrained");
-    expect(before.rows.length).toBe(RowTotal);
     expect(before.notice).toBe("");
     expect(
       before.rows.filter((r: any) => !r.opcode).map((r: any) => r.name),
     ).toEqual(["main", "halve", "directive_invert", "directive_integer_quotient"]);
-    expect(before.rows[RangeOpcodeRow].where).toBe("src/checks.nr:2");
     expect(pressedPlaced.path).toBe("src/main.nr");
     expect(pressedOpcode.line).toBe(2);
     expect(pressedNowhere.path).toBe("src/main.nr");

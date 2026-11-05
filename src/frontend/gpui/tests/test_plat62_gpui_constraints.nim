@@ -43,7 +43,7 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 28
+  ExpectedAssertions = 29
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1600
   H = 1000
@@ -186,6 +186,19 @@ proc menuOf(answer: JsonNode): string =
   labels.join("|")
 
 suite "PLAT-62: the GPUI window's Constraints pane":
+
+  test "View › Constraints opens the pane":
+    let project = writeCrate()
+    var shown = false
+    try:
+      let (_, tr) = windowPlan(project, "constraints:show,constraints:wait",
+                               edit = true)
+      checkpoint(tr)
+      shown = tr.contains("constraints: measuring " & project)
+    except IOError as e:
+      checkpoint(e.msg)
+    ck shown
+    removeDir(project)
 
   test "Edit mode: the desktop's rows, measured the first time it is shown":
     let project = writeCrate()

@@ -171,11 +171,22 @@ proc rowsMatch(sess: var TuiTestSession; headRow, col: int;
   for _ in 0 .. 60:
     sess.wheel(headRow + 1, col, up = true)
 
+proc settled(sess: var TuiTestSession): Snapshot =
+  ## The screen once it has stopped changing: a loaded host paints a wheel late,
+  ## and a press aimed at the last paint lands on whatever scrolled there.
+  result = sess.snap()
+  for _ in 0 .. 40:
+    sleep(150)
+    let next = sess.snap()
+    if next.screenText() == result.screenText():
+      return
+    result = next
+
 proc showRow(sess: var TuiTestSession; headRow, col: int;
              needle: string): (int, int) =
   ## Where the row showing `needle` is, wheeled into view from the top.
   for _ in 0 .. 60:
-    let at = sess.snap().findRow(needle)
+    let at = sess.settled().findRow(needle)
     if at[0] > headRow:
       return at
     sess.wheel(headRow + 1, col)
@@ -253,7 +264,7 @@ suite "PLAT-62: the Constraints pane on a real terminal":
     # A RIGHT PRESS on `main`: the desktop's menu.
     for _ in 0 .. 60:
       sess.wheel(hr + 1, hc, up = true)
-    var s = sess.snap()
+    var s = sess.settled()
     var mr = -1
     var mc = -1
     for r in hr + 1 .. min(Rows - 1, hr + 5):
