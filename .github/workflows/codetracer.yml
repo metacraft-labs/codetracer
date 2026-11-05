@@ -8297,6 +8297,14 @@ jobs:
         # silently becomes an empty token rather than an error.
         run: bash ci/test/sibling-provisioning-test.sh
 
+      - name: Assert every sibling on the Nim search path is pinned by repro.lock
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        # config.nims put nim-agents-isonim-viewmodels on the search path while
+        # repro.nim and repro.lock did not name it, so no lane provisioned it
+        # and the StoryBook bundle failed to compile in every fresh checkout.
+        # Static over the Nim config files and the lock.
+        run: bash ci/test/nim-config-siblings-pinned-test.sh
+
       - name: Assert the WebAssembly recording fixture lane stays required
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: bash ci/test/wasm-recordings-ci-test.sh

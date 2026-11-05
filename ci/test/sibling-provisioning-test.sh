@@ -510,12 +510,19 @@ readonly REPRO_LOCK="$REPO_ROOT/repro.lock"
 # isonim-platform's sessionctl through host-image-serves-in-incus-vm.sh.
 # Keep both in the full develop-set inventory without adding them to the
 # build-input subset cloned by provision-repro-lock-siblings.
-readonly LOCK_DECLARED_DEPS='isonim,isonim-tui,codetracer-trace-format-nim,nim-everywhere,nim-agent-harbor,nim-agents,nim-acp,test-certificates-tools,io-mon,nim-stackable-hooks,codetracer-image-diff,isonim-render-serve,nim-termctl,nim-pty,nim-shm-queue,isonim-gpui,isonim-freya,isonim-cocoa,reprobuild-packages,TermAssert,TermAssertClient,codetracer-beam-recorder,codetracer-ci,codetracer-evm-recorder,codetracer-js-recorder,codetracer-launcher,codetracer-native-backend,codetracer-native-recorder,codetracer-native-test-programs,codetracer-observability-cli,codetracer-observability-e2e,codetracer-observability-grafana,codetracer-observability-jaeger,codetracer-private-recordings,codetracer-python-recorder,codetracer-ruby-recorder,codetracer-test-mirror,codetracer-trace-format,codetracer-visual-replay,codetracer-vscode-extension,codetracer-wasm-instrumenter,codetracer-wasm-recorder,isonim-examples,metacraft-github-actions,ngx-isonim,nim-faststreams,nim-libvterm,nim-shm-gset,nim-stew,reprobuild,runquota,tree-sitter-aiken,tree-sitter-nim,infra,isonim-platform'
+#
+# 18 -> 19 (2026-11-05): nim-agents-isonim-viewmodels. The StoryBook components
+# bundle imports it, and config.nims put it on the search path while the lock
+# did not name it, so no lane provisioned it (codetracer-pm issue
+# 2026-11-05-codetracer-imports-nim-agents-isonim-viewmodels-without-declaring-it.md).
+# ci/test/nim-config-siblings-pinned-test.sh now fails a sibling the Nim
+# configs read and the lock does not pin.
+readonly LOCK_DECLARED_DEPS='isonim,isonim-tui,codetracer-trace-format-nim,nim-everywhere,nim-agent-harbor,nim-agents,nim-agents-isonim-viewmodels,nim-acp,test-certificates-tools,io-mon,nim-stackable-hooks,codetracer-image-diff,isonim-render-serve,nim-termctl,nim-pty,nim-shm-queue,isonim-gpui,isonim-freya,isonim-cocoa,reprobuild-packages,TermAssert,TermAssertClient,codetracer-beam-recorder,codetracer-ci,codetracer-evm-recorder,codetracer-js-recorder,codetracer-launcher,codetracer-native-backend,codetracer-native-recorder,codetracer-native-test-programs,codetracer-observability-cli,codetracer-observability-e2e,codetracer-observability-grafana,codetracer-observability-jaeger,codetracer-private-recordings,codetracer-python-recorder,codetracer-ruby-recorder,codetracer-test-mirror,codetracer-trace-format,codetracer-visual-replay,codetracer-vscode-extension,codetracer-wasm-instrumenter,codetracer-wasm-recorder,isonim-examples,metacraft-github-actions,ngx-isonim,nim-faststreams,nim-libvterm,nim-shm-gset,nim-stew,reprobuild,runquota,tree-sitter-aiken,tree-sitter-nim,infra,isonim-platform'
 # The build-input subset of that set (members that are also solved packages,
 # i.e. what `repro.nim` `uses` from source), as
 # `ci/repro-lock-build-input-siblings.sh` derives it from the lock. This is
 # what `provision-repro-lock-siblings` clones.
-readonly LOCK_BUILD_INPUT_SIBLINGS='isonim,isonim-tui,codetracer-trace-format-nim,nim-everywhere,nim-agent-harbor,nim-agents,nim-acp,test-certificates-tools,io-mon,nim-stackable-hooks,codetracer-image-diff,isonim-render-serve,nim-termctl,nim-pty,nim-shm-queue,isonim-gpui,isonim-freya,isonim-cocoa'
+readonly LOCK_BUILD_INPUT_SIBLINGS='isonim,isonim-tui,codetracer-trace-format-nim,nim-everywhere,nim-agent-harbor,nim-agents,nim-agents-isonim-viewmodels,nim-acp,test-certificates-tools,io-mon,nim-stackable-hooks,codetracer-image-diff,isonim-render-serve,nim-termctl,nim-pty,nim-shm-queue,isonim-gpui,isonim-freya,isonim-cocoa'
 readonly BUILD_INPUT_SELECTOR="$REPO_ROOT/ci/repro-lock-build-input-siblings.sh"
 
 # Anti-vacuity first: the action must exist and must still invoke the command
