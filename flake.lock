@@ -1318,11 +1318,11 @@
     "codetracer-native-backend": {
       "flake": false,
       "locked": {
-        "lastModified": 1793792736,
-        "narHash": "sha256-Dmsx9oV3cti0wRfnSJo45n/U+uyKl2fZ5WUGCB9gcf0=",
+        "lastModified": 1793853253,
+        "narHash": "sha256-7Xz7gdq1rbbD1fYhGLksU3IRUrC5ZE8CZg4jEAsqaGA=",
         "owner": "metacraft-labs",
         "repo": "codetracer-native-backend",
-        "rev": "c1a0eb91ab307fae913c28f3e7bffdb6f0411d35",
+        "rev": "ac68d49f00f31b8da0a9410b5d9f99fabfa4d674",
         "type": "github"
       },
       "original": {
