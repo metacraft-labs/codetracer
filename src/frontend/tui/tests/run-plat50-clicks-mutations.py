@@ -714,9 +714,11 @@ ARMS = [
         "  if false:\n    return true\n",
         E_CREATE, "the name field takes no keys (they type into the editor)"),
     Arm("GE8", GPUIMAIN,
-        "    drawPopovers(r)\n    for e in gTopEls:\n",
-        "    for e in gTopEls:\n",
-        E_MENU, "an Edit window draws no right-click menu"),
+        "  drawOmnibarResults(r)\n  drawPopovers(r)\n",
+        "  drawOmnibarResults(r)\n"
+        "  if openArm.isNil or gEditorSurface.productMode != pmEdit:\n"
+        "    drawPopovers(r)\n",
+        E_MENU, "an Edit file window draws no right-click menu"),
     Arm("GE9", GPUIMAIN,
         "    leaveFilesField(r)\n    let vm = windowFilesVM()\n",
         "    let vm = windowFilesVM()\n",
@@ -726,7 +728,9 @@ ARMS = [
         "  discard tab.folder\n",
         E_TAB, "a folder tab's Files leaf gets no model"),
     Arm("GE11", GPUIMAIN,
-        "     action notin {caFileCreate, caFileRename, caFileDelete, caFileEdit}:\n",
+        "     action notin {caFileCreate, caFileRename, caFileDelete, caFileEdit,\n"
+        "                   caAgentAttachUpload, caAgentAttachFilesFolders,\n"
+        "                   caAgentAttachEditorSelection, caAgentAttachRecording}:\n",
         "     true:\n",
         E_CREATE, "an Edit window runs no Files entry (no session)"),
     Arm("GE12", GPUIMAIN,
@@ -912,7 +916,9 @@ ARMS = [
         "      discard target\n",
         K_FILEMENU, "the menu's Edit opens nothing in a replay"),
     Arm("PC14", PANECLICKS,
+        "    result.entries.add entry(d.label, action,\n"
         "                             hint = (if d.enabled: \"\" else: d.reason),\n",
+        "    result.entries.add entry(d.label, action,\n"
         "                             hint = \"\",\n",
         K_FILEMENU, "a disabled Files entry's reason is not drawn"),
     Arm("TS7", TUISESSION,

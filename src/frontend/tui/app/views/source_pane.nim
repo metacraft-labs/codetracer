@@ -129,6 +129,10 @@ type
       ## never been.
     marks*: seq[(int, GutterMark)]
       ## Breakpoints and tracepoints on this file, by line.
+    crossRefLine*: int
+      ## PLAT-60: the line the Low Level Code listing's selected instruction
+      ## came from — the cross-reference from an instruction back to its
+      ## source — drawn on the hover ground across the code. 0: none.
     caretLine*: int
     caretColumn*: int
       ## PLAT-51 (CodeTracer-TUI.md §3.3.2, Editor-Pane.md "The caret in a
@@ -717,6 +721,15 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
       g.restyle(row, codeCol, codeW,
                 proc(s: CellStyle): CellStyle =
                   s.withBackground(ExecutionLineBackground))
+    # PLAT-60: THE CROSS-REFERENCE from the Low Level Code listing — the
+    # line its selected instruction came from, on the hover ground across the
+    # code (over the execution band, under the selection and the caret).
+    if line == model.crossRefLine and line > 0:
+      g.restyle(row, codeCol, codeW,
+                proc(s: CellStyle): CellStyle =
+                  var out2 = s
+                  out2.surface = srSurfaceActiveRow
+                  out2)
     # PLAT-68: THE SELECTION, on the design system's selection ground, under
     # the caret.
     for sel in model.selected:

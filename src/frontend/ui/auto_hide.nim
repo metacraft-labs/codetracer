@@ -1700,7 +1700,7 @@ proc revealOverlay*(panel: AutoHidePanel) =
 # Strip rendering (called from layout.nim or a dedicated Karax renderer)
 # ---------------------------------------------------------------------------
 
-proc isPanelPinnedOpen*(panel: AutoHidePanel): bool =
+proc isPanelPinnedOpen(panel: AutoHidePanel): bool =
   ## `panel` is open because it was clicked open — docked, or in the overlay
   ## pinned open — not shown as a hover preview.  A strip tab shows its × only
   ## then (Nikolay, 2026-10-17): a preview goes away by itself.

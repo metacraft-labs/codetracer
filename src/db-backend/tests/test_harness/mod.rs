@@ -1712,10 +1712,16 @@ pub fn find_line_containing(path: &Path, needle: &str) -> usize {
 /// Find the ct-native-replay binary.
 ///
 /// Search order:
-/// 1. `CT_NATIVE_REPLAY_PATH` env var (explicit override), falling back to
+/// 1. The first of the environment variables in
+///    `ct_dap_client::test_support::CT_NATIVE_REPLAY_OVERRIDE_VARS` that names a
+///    file. The DAP client's runners read the same list, so a test replays
+///    with the worker it recorded with: `CT_NATIVE_REPLAY_PATH` (the explicit
+///    override), then
 ///    `CT_RR_SUPPORT_PATH` — the spelling `codetracer-native-backend`'s
 ///    `scripts/run-cross-repo-tests.sh` still exports when it drives this
-///    suite, so it stays until that repo switches over.
+///    suite, so it stays until that repo switches over — then
+///    `CT_NATIVE_REPLAY_BIN` and `CODETRACER_CT_NATIVE_REPLAY_CMD`, the names
+///    the justfile and the DAP client's runner also use.
 /// 2. System PATH lookup (via `which`/`where`) for `ct-native-replay`, unless
 ///    the hit is the workspace sibling's own build (see step 3)
 /// 3. The workspace's `codetracer-native-backend` sibling, PROVISIONED: built
@@ -1735,7 +1741,7 @@ pub fn find_ct_native_replay() -> Option<PathBuf> {
 
     // Highest priority: explicit env var override.
     // Used by cross-repo test scripts to communicate the binary location.
-    for var_name in &["CT_NATIVE_REPLAY_PATH", "CT_RR_SUPPORT_PATH"] {
+    for var_name in ct_dap_client::test_support::CT_NATIVE_REPLAY_OVERRIDE_VARS {
         if let Ok(path) = env::var(var_name) {
             let p = PathBuf::from(&path);
             if p.exists() && p.is_file() {

@@ -61,7 +61,7 @@ from ../../../viewmodel/viewmodels/state_vm import VariableCategory,
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 573
+const ExpectedAssertions = 575
 
 var countedAssertions = 0
 
@@ -337,7 +337,22 @@ suite "PLAT-49 on a real terminal: panes, strips and dividers":
 
   test "no title rows; strips on their own ground; the selected tab its own bg and fg; dividers on the panes' ground":
     var sess = open()
-    let s = sess.snap()
+    let initial = sess.snap()
+    let initialEditorAt = initial.text(1).cellFind(EditorTabText) + 1
+    let initialFilesAt = initial.text(1).cellFind(" Files ") + 1
+    # A replay starts in its editor. Establish the Files focus this colour
+    # comparison needs through the tab the user can see and press.
+    ck initialEditorAt > 0 and initialFilesAt > 0 and
+       hexOfColor(initial[1][initialEditorAt + 1].bg) ==
+         dark(dtColorsUiSurfacePrimaryDefault)
+    sess.click(1, initialFilesAt + 1)
+    let s = sess.settle(20000, proc(frame: Snapshot): bool =
+      let at = frame.text(1).cellFind(" VCS ") + 1
+      at > 0 and hexOfColor(frame[1][at + 1].bg) ==
+        dark(dtColorsUiBorderSecondary))
+    let focusedVcsAt = s.text(1).cellFind(" VCS ") + 1
+    ck focusedVcsAt > 0 and hexOfColor(s[1][focusedVcsAt + 1].bg) ==
+       dark(dtColorsUiBorderSecondary)
     # 3. NO TITLE ROW anywhere in the body.
     for r in 1 ..< Rows - 2:
       let line = s.text(r)
@@ -351,8 +366,8 @@ suite "PLAT-49 on a real terminal: panes, strips and dividers":
     let activeBg = dark(dtColorsUiSurfacePrimaryTertiary)
     let activeFg = dark(dtColorsUiTextPrimaryHeadings)
     let panel = dark(dtColorsUiSurfaceBasePanel)
-    # PLAT-51 (Native-Front-End-Parity.md §2): the Files stack holds the
-    # focus at start, so ITS strip is on the focus colour (ui/border/
+    # PLAT-51 (Native-Front-End-Parity.md §2): the Files stack now holds the
+    # focus, so ITS strip is on the focus colour (ui/border/
     # secondary), the selected tab keeping its foreground and weight, the
     # others in the subdued body tier; every other strip keeps its own.
     let focusGround = dark(dtColorsUiBorderSecondary)

@@ -1685,8 +1685,11 @@ pub fn program_event_of_record(reader: &dyn TraceReader, event_record: &DbRecord
         metadata: event_record.metadata.to_string(),
         // `Write` is standard output and `WriteStderr` standard error
         // (`spec/Trace-Files/MCR-Event-Log-Stream.md` §2.3). A write to
-        // standard error is terminal output, but not standard output.
-        stdout: event_record.kind != EventLogKind::WriteStderr,
+        // standard error is terminal output, but not standard output, and an
+        // event that is not a write at all (an `Error`, a contract's
+        // `EvmEvent`, a file read) is neither: marking it `stdout` made every
+        // Event Log print it as `stdout: …`. Only `Write` is standard output.
+        stdout: event_record.kind == EventLogKind::Write,
         event_index: index,
         tracepoint_result_index: NO_INDEX,
         high_level_path: path,
@@ -2160,38 +2163,92 @@ impl MaterializedReplaySession {
     /// breakpoint whose condition fails to evaluate (parse error,
     /// unknown variable) is treated as a non-hit — the engine MUST
     /// NOT spuriously stop on a malformed condition.
+    ///
+    /// A recorder may emit several steps for one source statement, so
+    /// matching a step is not yet a stop: one visit to a line is one
+    /// stop, on its FIRST step.  See `breakpoint_slot_fires_at`.
     fn step_matches_any_breakpoint(&self, step: &DbStep) -> bool {
-        let path_idx = step.path_id.0;
-        if path_idx >= self.breakpoint_list.len() {
+        // Legacy line-only slot: fires on any recorded column.  The
+        // column-aware slot fires only when the step's recorded column is
+        // `Some(c)` and equals the breakpoint's column.  The condition
+        // layer applies after the column filter so users can write "stop
+        // at column 14 only when i > 100".
+        self.breakpoint_slot_fires_at(None, step)
+            || step
+                .column
+                .is_some_and(|column| self.breakpoint_slot_fires_at(Some(column.0), step))
+    }
+
+    /// Does the breakpoint in the `(step.line, column)` slot START a visit
+    /// at `step`?
+    ///
+    /// It does when it is live at `step` and was not already live on the
+    /// step this one continues (`step_continued_by`).  The test reads only
+    /// the recording around `step`, never the position Continue started
+    /// from, so forward and reverse Continue stop on one and the same set
+    /// of steps: the reverse walk retraces the forward walk stop for stop,
+    /// which is Debugger-Integration.md §10.8's "the last time execution
+    /// passed a breakpoint".
+    ///
+    /// Asking whether the SAME slot was live, rather than whether the line
+    /// is the same, keeps two independent cases right.  Two column-aware
+    /// breakpoints on one line are two stops, and a conditional breakpoint
+    /// whose condition turns true part way through a statement fires there.
+    fn breakpoint_slot_fires_at(&self, column: Option<i64>, step: &DbStep) -> bool {
+        if !self.breakpoint_slot_live_at(column, step) {
             return false;
         }
-        let line_key = step.line.0 as usize;
-        let table = &self.breakpoint_list[path_idx];
-
-        // Legacy line-only slot: stop on every step at this line, but
-        // honour the M9 condition layer when present.
-        if let Some(bp) = table.get(&(line_key, None))
-            && bp.enabled
-            && !self.breakpoint_suppressed(bp)
-            && self.condition_satisfied_at(bp, step.step_id)
-        {
-            return true;
+        match self.step_continued_by(step) {
+            Some(previous) if previous.path_id == step.path_id && previous.line == step.line => {
+                // A column slot spans only the steps at its own column.
+                (column.is_some() && previous.column != step.column) || !self.breakpoint_slot_live_at(column, previous)
+            }
+            _ => true,
         }
+    }
 
-        // Column-aware slot: only fire when the step's recorded column
-        // is `Some(c)` and equals the breakpoint's column.  The
-        // condition layer applies after the column filter so users
-        // can write "stop at column 14 only when i > 100".
-        if let Some(step_col) = step.column
-            && let Some(bp) = table.get(&(line_key, Some(step_col.0)))
-            && bp.enabled
-            && !self.breakpoint_suppressed(bp)
-            && self.condition_satisfied_at(bp, step.step_id)
-        {
-            return true;
+    /// Is the breakpoint in the `(step.line, column)` slot enabled, not
+    /// suppressed, and is its condition (if any) satisfied at `step`?
+    fn breakpoint_slot_live_at(&self, column: Option<i64>, step: &DbStep) -> bool {
+        self.breakpoint_list
+            .get(step.path_id.0)
+            .and_then(|table| table.get(&(step.line.0 as usize, column)))
+            .is_some_and(|bp| {
+                bp.enabled && !self.breakpoint_suppressed(bp) && self.condition_satisfied_at(bp, step.step_id)
+            })
+    }
+
+    /// The step `step` continues in its own frame: the one its frame last
+    /// executed.  `None` when `step` is the first its frame recorded.
+    ///
+    /// Calls made in between are skipped, because coming back from a call
+    /// resumes the statement that made it: `let r = f(x);` is one visit to
+    /// that line although the recording has steps there on both sides of
+    /// `f`.  Each skipped call is left through its own first step, so the
+    /// cost follows the call depth and not the length of the calls.
+    fn step_continued_by(&self, step: &DbStep) -> Option<&DbStep> {
+        let frame = step.call_key;
+        if self.reader.call(frame)?.step_id >= step.step_id {
+            return None;
         }
+        let mut previous = self.step_before(step.step_id)?;
+        while previous.call_key != frame {
+            let callee_entry = self.reader.call(previous.call_key)?.step_id;
+            // Step ids must fall each round; a corrupt call table ends the
+            // walk here instead of looping.
+            if callee_entry > previous.step_id {
+                return None;
+            }
+            previous = self.step_before(callee_entry)?;
+        }
+        Some(previous)
+    }
 
-        false
+    /// The source step before `step_id`, across reload annotations.
+    fn step_before(&self, step_id: StepId) -> Option<&DbStep> {
+        self.reader
+            .adjacent_step_id(step_id, false)
+            .and_then(|id| self.reader.step(id))
     }
 
     /// Whether `bp` is currently suppressed by an active run-to-line
@@ -3786,7 +3843,11 @@ impl MaterializedReplaySession {
                         current_step = StepId(binding_step.0 - 1);
                         continue;
                     }
+                    // Spec §6.1.6: a boundary terminator has no hop to
+                    // copy an expression from, so it names the variable
+                    // the scan reached; the badge shows it (§4.1).
                     terminator = Terminator::new(TerminatorKind::RecordingStart);
+                    terminator.expression = current_var_name.clone();
                     break;
                 }
                 BackwardScanOutcome::BudgetExhausted {
@@ -4109,6 +4170,11 @@ impl MaterializedReplaySession {
                         });
                     }
                     terminator = Terminator::new(kind);
+                    if kind == TerminatorKind::RecordingStart {
+                        // Same boundary descriptor as the scan-ran-off-
+                        // step-0 exit above (spec §6.1.6).
+                        terminator.expression = current_var_name.clone();
+                    }
                     terminator.source_line = Some(line_text);
                     break;
                 }
@@ -5479,11 +5545,34 @@ mod breakpoint_condition_tests {
     // still work after a jump" passes under BOTH spellings.
     // ---------------------------------------------------------------
 
-    /// Build a session over a synthetic trace with one step per line,
-    /// lines `1..=line_count`, all in `synthetic.src`.  Enough for the
-    /// breakpoint registry and the stop check; the value tables stay
-    /// empty because these tests never evaluate a condition.
-    fn session_with_lines(line_count: usize) -> MaterializedReplaySession {
+    /// One recorded step of a [`session_with_visits`] trace.
+    #[derive(Clone, Copy)]
+    struct Visit {
+        line: i64,
+        /// Index of the frame the step runs in; frame `n` is called from
+        /// frame `n - 1`.
+        frame: i64,
+        column: Option<i64>,
+        /// The value of the local `x` recorded at this step.
+        x: Option<i64>,
+    }
+
+    /// A step on `line` in the outermost frame.
+    fn on_line(line: i64) -> Visit {
+        Visit {
+            line,
+            frame: 0,
+            column: None,
+            x: None,
+        }
+    }
+
+    /// Build a session over a synthetic trace whose steps are exactly
+    /// `visits`, all in `synthetic.src`.  Repeated lines model the several
+    /// low-level steps one source statement can record.  Enough for the
+    /// breakpoint registry and the stop check; a value table is present only
+    /// for the local `x`, because the tests here evaluate nothing else.
+    fn session_with_visits(visits: &[Visit]) -> MaterializedReplaySession {
         let trace_dir = PathBuf::from("/tmp/breakpoint-bracket-tests");
         let mut db = Db::new(&trace_dir);
 
@@ -5493,49 +5582,87 @@ mod breakpoint_condition_tests {
         db.register_path_version("synthetic.src".to_string(), PathId(1));
 
         db.variable_names.push("<sentinel>".to_string());
+        db.variable_names.push("x".to_string());
         db.functions.push(FunctionRecord {
             path_id: PathId(1),
             line: Line(1),
             name: "<top-level>".to_string(),
         });
 
-        let call_key = CallKey(0);
-        db.calls.push(DbCall {
-            key: call_key,
-            function_id: FunctionId(0),
-            args: Vec::new(),
-            return_value: ValueRecord::None { type_id: TypeId(0) },
-            step_id: StepId(0),
-            depth: 0,
-            parent_key: CallKey(-1),
-            children_keys: Vec::new(),
-        });
+        // One call per frame, entered at the first step that frame records.
+        let frame_count = visits.iter().map(|visit| visit.frame + 1).max().unwrap_or(1);
+        for frame in 0..frame_count {
+            let entry = visits.iter().position(|visit| visit.frame == frame).unwrap_or(0);
+            db.calls.push(DbCall {
+                key: CallKey(frame),
+                function_id: FunctionId(0),
+                args: Vec::new(),
+                return_value: ValueRecord::None { type_id: TypeId(0) },
+                step_id: StepId(entry as i64),
+                depth: frame as usize,
+                parent_key: CallKey(frame - 1),
+                children_keys: Vec::new(),
+            });
+        }
 
         db.step_map.push(std::collections::HashMap::new()); // sentinel for PathId(0)
         let mut path1_map: std::collections::HashMap<usize, Vec<DbStep>> = std::collections::HashMap::new();
 
-        for idx in 0..line_count {
+        for (idx, visit) in visits.iter().enumerate() {
             let step = DbStep {
                 step_id: StepId(idx as i64),
                 path_id: PathId(1),
-                line: Line((idx + 1) as i64),
-                column: None,
-                call_key,
-                global_call_key: call_key,
+                line: Line(visit.line),
+                column: visit.column.map(Line),
+                call_key: CallKey(visit.frame),
+                global_call_key: CallKey(visit.frame),
             };
             db.steps.push(step);
-            db.variables.push(Vec::new());
+            db.variables.push(
+                visit
+                    .x
+                    .map(|x| FullValueRecord {
+                        variable_id: VariableId(1),
+                        value: int_value(x),
+                    })
+                    .into_iter()
+                    .collect(),
+            );
             db.instructions.push(Vec::new());
             db.compound.push(std::collections::HashMap::new());
             db.cells.push(std::collections::HashMap::new());
             db.variable_cells.push(std::collections::HashMap::new());
-            path1_map.insert(idx + 1, vec![step]);
+            path1_map.entry(visit.line as usize).or_default().push(step);
         }
         db.step_map.push(path1_map);
         db.end_of_program = EndOfProgram::Normal;
 
         let reader: Arc<dyn TraceReader> = Arc::new(InMemoryTraceReader::new(db));
         MaterializedReplaySession::new(reader)
+    }
+
+    /// Press Continue in each of `directions` (`true` is forward), and return
+    /// the step each press stopped on.  Every press must hit a breakpoint.
+    fn continue_walk(session: &mut MaterializedReplaySession, directions: &[bool]) -> Vec<i64> {
+        let mut stops = Vec::new();
+        for forward in directions.iter().copied() {
+            let hit = session
+                .step(crate::task::Action::Continue, forward)
+                .expect("Continue must not fail on a synthetic trace");
+            assert!(
+                hit,
+                "every move in this bounded walk must stop at a breakpoint; forward={forward}"
+            );
+            stops.push(session.step_id.0);
+        }
+        stops
+    }
+
+    /// Build the original one-step-per-line fixture used by the breakpoint
+    /// suppression tests below.
+    fn session_with_lines(line_count: usize) -> MaterializedReplaySession {
+        let visits = (1..=line_count as i64).map(on_line).collect::<Vec<_>>();
+        session_with_visits(&visits)
     }
 
     /// The step recorded at `line` in the synthetic trace.
@@ -5654,6 +5781,124 @@ mod breakpoint_condition_tests {
         assert!(
             session.step_matches_any_breakpoint(&step_at_line(1)),
             "the user breakpoint must fire again once the bracket closes"
+        );
+    }
+
+    /// Continue stops once per source-level breakpoint visit, rather than
+    /// once per low-level step recorded at that line.  Line 2 is visited in
+    /// two separate groups: coalescing each group is required, but globally
+    /// suppressing the breakpoint after its first hit would be equally wrong.
+    /// The reverse walk must retrace the forward stops, step for step: the
+    /// fixture's lines alone could not tell a stop on the first step of a
+    /// visit from one on its last.
+    #[test]
+    fn continue_stops_once_per_breakpoint_visit_in_both_directions() {
+        let lines = [1, 2, 2, 3, 3, 2, 2, 4, 4, 5];
+        let mut session = session_with_visits(&lines.map(on_line));
+        for line in [2, 3, 4] {
+            session.add_breakpoint("synthetic.src", line, None, None).unwrap();
+        }
+
+        let forward = continue_walk(&mut session, &[true, true, true, true]);
+        assert_eq!(
+            forward,
+            vec![1, 3, 5, 7],
+            "forward Continue must stop on the first step of each visit"
+        );
+        let reverse = continue_walk(&mut session, &[false, false, false]);
+        assert_eq!(
+            reverse,
+            vec![5, 3, 1],
+            "reverse Continue must retrace the forward stops"
+        );
+    }
+
+    /// Lines of several steps each, the shape of the BlockTracer demo recording.
+    /// Continue pressed in the middle of a visit does not stop on the rest of
+    /// it, and reverse Continue pressed there lands on the visit's first step.
+    #[test]
+    fn continue_from_inside_a_visit_leaves_it_forwards_and_rewinds_to_its_start() {
+        let lines = [12, 12, 13, 13, 13, 15];
+        let mut session = session_with_visits(&lines.map(on_line));
+        for line in [12, 13, 15] {
+            session.add_breakpoint("synthetic.src", line, None, None).unwrap();
+        }
+        session.step_id = StepId(3);
+
+        assert_eq!(continue_walk(&mut session, &[true]), vec![5]);
+        session.step_id = StepId(3);
+        assert_eq!(continue_walk(&mut session, &[false, false]), vec![2, 0]);
+    }
+
+    /// Coming back from a call resumes the statement that made it.  The line
+    /// has steps on both sides of the call and that is one visit, while a
+    /// breakpoint inside the call still stops between them.
+    #[test]
+    fn continue_treats_a_line_that_makes_a_call_as_one_visit() {
+        let callee = |line| Visit {
+            frame: 1,
+            ..on_line(line)
+        };
+        let mut session =
+            session_with_visits(&[on_line(1), on_line(2), callee(10), callee(11), on_line(2), on_line(3)]);
+        for line in [2, 3, 11] {
+            session.add_breakpoint("synthetic.src", line, None, None).unwrap();
+        }
+
+        assert_eq!(continue_walk(&mut session, &[true, true, true]), vec![1, 3, 5]);
+        assert_eq!(continue_walk(&mut session, &[false, false]), vec![3, 1]);
+    }
+
+    /// A recursive call on the breakpoint's line is a new visit, not a
+    /// continuation: only the frame's own previous step can continue it.
+    #[test]
+    fn continue_stops_at_the_same_line_in_a_deeper_frame() {
+        let in_frame = |frame| Visit { frame, ..on_line(5) };
+        let mut session = session_with_visits(&[on_line(1), in_frame(0), in_frame(1), in_frame(1), in_frame(0)]);
+        session.add_breakpoint("synthetic.src", 5, None, None).unwrap();
+
+        assert_eq!(continue_walk(&mut session, &[true, true]), vec![1, 2]);
+        assert_eq!(continue_walk(&mut session, &[false]), vec![1]);
+    }
+
+    /// A column-aware breakpoint spans only its own column, so two of them on
+    /// one line are two stops, and each is one stop however many steps its
+    /// column recorded.  A line-only breakpoint spans the line, columns and all.
+    #[test]
+    fn continue_coalesces_a_column_breakpoint_within_its_own_column_only() {
+        let at = |line, column| Visit {
+            column: Some(column),
+            ..on_line(line)
+        };
+        let visits = [at(1, 1), at(1, 14), at(1, 14), at(1, 28), at(2, 1), at(2, 9), at(3, 1)];
+
+        let mut session = session_with_visits(&visits);
+        for column in [14, 28] {
+            session.add_breakpoint("synthetic.src", 1, Some(column), None).unwrap();
+        }
+        session.add_breakpoint("synthetic.src", 2, None, None).unwrap();
+        assert_eq!(continue_walk(&mut session, &[true, true, true]), vec![1, 3, 4]);
+        assert_eq!(continue_walk(&mut session, &[false, false]), vec![3, 1]);
+    }
+
+    /// A condition that turns true part way through a statement fires where
+    /// it turned true: the steps before it were not stops, so nothing has
+    /// been coalesced yet.  Once it holds, the rest of the visit is one stop.
+    #[test]
+    fn continue_fires_a_condition_that_turns_true_inside_a_visit() {
+        let with_x = |x| Visit {
+            x: Some(x),
+            ..on_line(2)
+        };
+        let mut session = session_with_visits(&[on_line(1), with_x(0), with_x(1), with_x(1), on_line(3)]);
+        session
+            .add_breakpoint("synthetic.src", 2, None, Some("x > 0".to_string()))
+            .unwrap();
+
+        assert_eq!(continue_walk(&mut session, &[true]), vec![2]);
+        assert!(
+            !session.step(crate::task::Action::Continue, true).unwrap(),
+            "the rest of that visit must not stop again"
         );
     }
 }
@@ -5992,5 +6237,62 @@ mod classifier_lang_tests {
     fn an_unknown_extension_has_no_grammar() {
         assert_eq!(classifier_lang_for_path("/w/main.unknownext"), None);
         assert_eq!(classifier_lang_for_path("/w/Makefile"), None);
+    }
+}
+
+#[cfg(test)]
+mod event_stdout_tests {
+    //! Which events an Event Log row marks as standard output.
+    //!
+    //! `program_event_of_record` builds the rows of `ct/event-load` and of
+    //! `ct/load-terminal` alike, and a front-end prints a row whose `stdout`
+    //! is set as `stdout: <content>` (`event_log_vm.eventLogText`). It marked
+    //! every event that was not a `WriteStderr` that way, so a Starknet
+    //! contract's failed entry point read "stdout: Entry point … not found in
+    //! contract." in the Event Log. These tests pin both halves: the terminal's
+    //! own two kinds keep the flag they had, and no other kind claims it.
+    //!
+    //! No mock: the reader is the in-memory one the other tests here use, and
+    //! the record is built exactly as the CTFS loader builds one.
+    use std::path::PathBuf;
+
+    use codetracer_trace_types::{EventLogKind, StepId};
+
+    use super::{Db, DbRecordEvent, program_event_of_record};
+    use crate::in_memory_trace_reader::InMemoryTraceReader;
+
+    fn stdout_of(kind: EventLogKind) -> bool {
+        let reader = InMemoryTraceReader::new(Db::new(&PathBuf::from("/tmp/ct-event-stdout")));
+        let record = DbRecordEvent {
+            kind,
+            content: "Entry point EntryPointSelector(0xfe80f537) not found in contract.".to_string(),
+            step_id: StepId(0),
+            metadata: String::new(),
+        };
+        program_event_of_record(&reader, &record, 0).stdout
+    }
+
+    /// The terminal's input is unchanged: it takes `Write` and `WriteStderr`
+    /// only (`dap_handler::terminal_output_category`) and tells them apart by
+    /// this flag.
+    #[test]
+    fn terminal_writes_keep_their_stream() {
+        assert!(stdout_of(EventLogKind::Write), "a Write is standard output");
+        assert!(!stdout_of(EventLogKind::WriteStderr), "a WriteStderr is standard error");
+    }
+
+    #[test]
+    fn an_event_that_is_not_standard_output_is_not_marked_stdout() {
+        for kind in [
+            EventLogKind::Error,
+            EventLogKind::EvmEvent,
+            EventLogKind::TraceLogEvent,
+            EventLogKind::WriteFile,
+            EventLogKind::WriteOther,
+            EventLogKind::Read,
+            EventLogKind::Open,
+        ] {
+            assert!(!stdout_of(kind), "{kind:?} is not standard output");
+        }
     }
 }

@@ -285,9 +285,10 @@ ns9-row-padding = 0.125rem 0.5rem
 
 .constraints-row
   display: grid
-  // name | kind | count.  The count is right-aligned so a column of numbers
-  // reads as a column of numbers.
-  grid-template-columns: minmax(0, 1fr) auto 4em
+  // name | kind | count | where.  The count is right-aligned so a column of
+  // numbers reads as a column of numbers; `where` is the line that declares
+  // the function (PLAT-62), empty for one no source declares.
+  grid-template-columns: minmax(0, 1fr) auto 4em auto
   align-items: baseline
   column-gap: 0.375rem
   padding: ns9-row-padding
@@ -295,6 +296,22 @@ ns9-row-padding = 0.125rem 0.5rem
   // The list hover (LIST_HOVER_BG, button.styl).
   &:hover
     background-color: LIST_HOVER_BG
+
+// A row a press takes to its source line (PLAT-62).
+.constraints-row.linked,
+.constraints-opcode.linked
+  cursor: pointer
+
+// The selected row: the cursor a press, the list keys and the row menu share
+// — the Test Results row's selected ground.
+.constraints-row.selected,
+.constraints-opcode.selected
+  background-color: colors-ui-surface-primary-secondary-hover
+
+.constraints-where
+  opacity: 0.6
+  font-size: 0.85em
+  white-space: nowrap
 
 // COUNTS THAT NO LONGER DESCRIBE THE SOURCE ON SCREEN. The rows are dimmed
 // and the headline says `(stale)` beside them — both, not either. Dimming

@@ -93,8 +93,19 @@ proc rowPitchIn(el: dom_api.Element; sel: cstring): float {.importjs:
   ## The rows' ADVANCE, top to top, averaged over the rendered rows: what
   ## positions them (a sub-pixel advance is recovered exactly), not a row box.
 proc watchPane(el: dom_api.Element; onChange: proc()): StopMeasuring {.importjs:
-  "((el, cb) => { var ro = (typeof ResizeObserver !== 'undefined') ? new ResizeObserver(() => cb()) : null; if (ro) ro.observe(el); el.addEventListener('scroll', cb, {passive: true}); return () => { if (ro) ro.disconnect(); el.removeEventListener('scroll', cb); }; })(#, #)".}
-  ## Call `onChange` on every resize and scroll of `el`; the result stops it.
+  "((el, cb) => { var frame = 0; var ro = (typeof ResizeObserver !== 'undefined') ? new ResizeObserver(() => { if (frame) return; frame = requestAnimationFrame(() => { frame = 0; cb(); }); }) : null; if (ro) ro.observe(el); el.addEventListener('scroll', cb, {passive: true}); return () => { if (frame) { cancelAnimationFrame(frame); frame = 0; } if (ro) ro.disconnect(); el.removeEventListener('scroll', cb); }; })(#, #)".}
+  ## Call `onChange` on every scroll of `el`, and once in the frame after any
+  ## resize of it; the result stops both and drops a report still scheduled.
+  ##
+  ## A resize is not reported from inside the observer's callback. The report
+  ## reaches the ViewModel synchronously, and for the State pane it can change
+  ## the value budget, start a locals load and show `.loading-indicator`,
+  ## which makes `el` itself shorter. A callback that resizes what it observes
+  ## leaves a notification the browser may not deliver in that frame, and it
+  ## raises `ResizeObserver loop completed with undelivered notifications.` on
+  ## `window` with a null `error`:
+  ## https://drafts.csswg.org/resize-observer/#deliver-resize-loop-error
+  ## `table_fit_dom` defers its table fits to a frame for the same reason.
 proc paneSetTimeout(fn: proc(); ms: int) {.importjs: "setTimeout(#, #)".}
 
 proc measureOf(pane: MeasuredPane; session: SessionViewModel): PaneMeasure =
@@ -192,10 +203,11 @@ proc startMeasuringPane*(host: dom_api.Element; pane: MeasuredPane;
   ## Measure `pane`, rendered inside `host`, for `session`'s ViewModel:
   ## attach its one observer and one scroll listener, and report now (one
   ## tick later, so the view's elements are laid out) and whenever the pane
-  ## is resized or scrolled, or its rows change. Call it inside the reactive
-  ## root the pane was rendered in: the row-change effect is disposed with
-  ## it. The result disconnects the observer and the listener; nil when the
-  ## pane has nothing to measure (no ViewModel, or its scroller is absent).
+  ## is scrolled, or its rows change, or (one frame later, see `watchPane`) it
+  ## is resized. Call it inside the reactive root the pane was rendered in: the
+  ## row-change effect is disposed with it. The result disconnects the observer
+  ## and the listener; nil when the pane has nothing to measure (no ViewModel,
+  ## or its scroller is absent).
   let spec = measureOf(pane, session)
   if spec.report.isNil:
     return nil

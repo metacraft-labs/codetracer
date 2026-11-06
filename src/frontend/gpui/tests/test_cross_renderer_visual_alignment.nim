@@ -94,6 +94,7 @@
 ## return values and call `check` nowhere.
 
 import replay_prerequisite
+import ../../tui/tests/fixtures/fixture_provider
 import corpus_row_pins
 import std/[algorithm, json, options, os, sequtils, sets, strutils, tables,
             times, unittest]
@@ -151,7 +152,6 @@ const
   AnswerDir = "src/tests/visual/answers"
   BriefRel = "tools/visual-review-brief.md"
   Tier4Rel = "src/tests/visual/tier4-review.json"
-  CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
 
 proc requireFile(path, why: string): string =
   ## **A MISSING PREREQUISITE FAILS BY NAME. It does not skip.** The
@@ -309,11 +309,10 @@ proc runGpuiScenario(sc: Scenario): GpuiRun =
   ## **`gpui/main.nim`'s `runOpen`, minus `createWindow`.** Every call below is
   ## one the shipped binary makes, in the order it makes them; nothing here is
   ## a test affordance.
-  let trace = requireFile(CalcFixture,
-    "the `calc` recording is produced on demand by the tui lane's fixture " &
-    "provider through the product's own `ct record`; run `just test-tui` once. " &
-    "It is NOT skipped, because a green run over no recording is worth less " &
-    "than a red one.")
+  # Recorded on first use by the fixture provider; a recorder that is
+  # missing FAILS by name. It is NOT skipped, because a green run over no
+  # recording is worth less than a red one.
+  let trace = requireFixture(fixtureSpec("calc"))
   let session = openGpuiTrace(trace)
   defer: session.close()
 

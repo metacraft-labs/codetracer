@@ -143,6 +143,9 @@ var
     ## (`table.resize-column`), installed by `ui_js` likewise.
     ## `ui/editor.runEditorJump` (the caret's smart jump, run to cursor and
     ## call jump), installed by `ui_js` likewise.
+  toggleCallTraceRowHook*: proc() = nil
+    ## `ui/calltrace.toggleSelectedCall` (`list.toggle-expand`), installed by
+    ## `ui_js` likewise.
 
 proc activeElementJs(): JsObject {.importjs: "(document.activeElement)@".}
 
@@ -489,6 +492,25 @@ proc focusedTablePane(): tuple[pane: string; selected: cstring] =
     return (lastPressedTablePane, selectedRowSelectorOf(lastPressedTablePane))
   ("", cstring"")
 
+proc focusedElementIsRowControl(): bool {.importjs:
+  "(document.activeElement?.getAttribute('role') === 'button')".}
+  ## Whether the focus is on a `role="button"` control. Enter or Space on one
+  ## is its own click (`views/isonim_activation`, a later listener than the
+  ## router's, so a key the router stops never reaches it).
+
+proc spaceFoldsSelectedCall(): bool =
+  ## Whether `list.toggle-expand` belongs to the Call Trace's selected call:
+  ## the FOCUS is in that pane, on the pane rather than on one of a row's
+  ## controls. `focusedTablePane`'s last-pressed fallback does not count: the
+  ## Files tree has `treeFocus` too but is no table pane, so its key would
+  ## fold a call in a pane the user has left.
+  if focusedElementIsRowControl():
+    return false
+  for e in desktopScopePath():
+    if e.paneKind == "calltrace":
+      return true
+  false
+
 proc runTableOperation(res: EditingResolution): bool =
   ## PLAT-70 Part B: `list.show-detail` and `list.copy` on the focused table
   ## pane's row (its WHOLE text), `table.resize-column` on the Event Log.
@@ -501,6 +523,13 @@ proc runTableOperation(res: EditingResolution): bool =
     true
   of "list.copy":
     pane.len > 0 and copyRowOf(pane, selected)
+  of "list.toggle-expand":
+    # Space on the call trace; another tree pane's key keeps its own path.
+    if spaceFoldsSelectedCall() and not toggleCallTraceRowHook.isNil:
+      toggleCallTraceRowHook()
+      true
+    else:
+      false
   of "table.resize-column":
     if not resizeEventLogColumnHook.isNil:
       resizeEventLogColumnHook(res.argument)
@@ -551,6 +580,13 @@ proc runDesktopOperation(res: EditingResolution): NativeKind =
   # The DOM element's own operations stay its own.
   if res.isNativeBaseOperation:
     return nkLeaveToElement
+  # An operation the desktop answers rather than runs (`Ctrl+Enter` on a
+  # list, CUA-Keymap.md §3.6): said on the status bar, and the key stopped.
+  let answer = desktopAnswerOf(res.operation, desktopScopePath(),
+                               mac = deskRouter.delivery.platform == pkMac)
+  if answer.len > 0:
+    showInertNote(answer)
+    return nkHandled
   if res.operation in HostIntents:
     if not data.functions.update.isNil: data.functions.update(data, false)
     return nkHandled

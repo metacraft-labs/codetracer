@@ -26,6 +26,7 @@ import {
   expect,
   type Page,
   type ElectronApplication,
+  type BrowserContext,
 } from "@playwright/test";
 import { _electron, chromium } from "playwright";
 import { ctHostPageUrl, withCtHostSessionSecret } from "./ct-host-session";
@@ -473,6 +474,32 @@ interface CodetracerOptions {
    * have no Electron context and ignore it.
    */
   rendererInitScript: string;
+  /**
+   * Draw the test-only completed-move counter (`span.test-movement`) in the
+   * status bar. Off by default, and a reference capture never turns it on.
+   *
+   * Every launch here sets `CODETRACER_TEST=1` -- in the Electron app's
+   * environment and in the `ct host` a web launch starts, which runs the same
+   * index process and sends its `startOptions` to the browser -- and under
+   * the resulting `data.startOptions.inTest` the status bar emits the counter
+   * in front of `.status-right`. A production renderer never emits it. So
+   * while it was drawn, every Electron frame captured as the reference for
+   * the native front-end had a number in front of "No certificates" that no
+   * user ever sees and the native front-end correctly lacks. Every census of
+   * the bar's boxes also listed it as a status-bar part.
+   *
+   * With the option off, the counter is hidden with `display: none` from
+   * document start (see `HIDE_TEST_MOVEMENT_COUNTER_SCRIPT`). An element with
+   * `display: none` has no box, so the frame and every box census taken from
+   * it match the production bar. The element stays in the DOM and its text
+   * is still patched, so the renderer behaves exactly as before. No helper
+   * reads the counter. Turn it on to see the counter while debugging a run
+   * by eye.
+   *
+   * Both deployment modes: Electron launches install the hiding on the app's
+   * context, web launches on the browser context they create.
+   */
+  showTestMovementCounter: boolean;
 }
 
 /**
@@ -843,13 +870,53 @@ let activeLaunchEnv: Record<string, string> = {};
 /** The running test's `rendererInitScript` (see that option), or "". */
 let activeRendererInitScript = "";
 
+/** The running test's `showTestMovementCounter` (see that option). */
+let activeShowTestMovementCounter = false;
+
 /**
- * Register the running test's `rendererInitScript` on `app`'s browser
- * context, so it runs at document start in the editor window. Called first
- * thing in `getEditorWindow`, which every Electron launch reaches straight
- * after `_electron.launch` returns.
+ * Hides the test-only move counter (see the `showTestMovementCounter`
+ * option) in every renderer document.
+ *
+ * It runs at document start, when the document may have no `<head>` yet,
+ * so the `<style>` goes on `document.documentElement`, which always exists
+ * by then. A `<style>` outside `<head>` applies like any other. If even
+ * that is missing (a document that is not HTML), the script waits for
+ * `DOMContentLoaded`. The rule is a stylesheet, not a one-off removal, so it
+ * also holds when the status bar re-renders and emits a fresh element.
+ */
+const HIDE_TEST_MOVEMENT_COUNTER_SCRIPT = `(() => {
+  const install = () => {
+    const root = document.documentElement;
+    if (!root || document.getElementById("ct-test-hide-test-movement")) return !!root;
+    const style = document.createElement("style");
+    style.id = "ct-test-hide-test-movement";
+    style.textContent = ".test-movement { display: none !important; }";
+    root.appendChild(style);
+    return true;
+  };
+  if (!install()) document.addEventListener("DOMContentLoaded", install, { once: true });
+})();`;
+
+/**
+ * Register the counter hiding on `context` unless the running test asked to
+ * see the counter. Every launch calls it before its first document loads:
+ * Electron through `installRendererInitScript`, the web launches straight
+ * after `browser.newContext`.
+ */
+async function installTestMovementCounterHiding(context: BrowserContext): Promise<void> {
+  if (activeShowTestMovementCounter) return;
+  await context.addInitScript({ content: HIDE_TEST_MOVEMENT_COUNTER_SCRIPT });
+}
+
+/**
+ * Register the launch's init scripts on `app`'s browser context, so they run
+ * at document start in the editor window: the counter hiding (unless the
+ * test asked to see the counter), then the running test's own
+ * `rendererInitScript`. Called first thing in `getEditorWindow`, which every
+ * Electron launch reaches straight after `_electron.launch` returns.
  */
 async function installRendererInitScript(app: ElectronApplication): Promise<void> {
+  await installTestMovementCounterHiding(app.context());
   if (activeRendererInitScript.length === 0) return;
   await app.context().addInitScript({ content: activeRendererInitScript });
 }
@@ -1222,7 +1289,7 @@ function attachErrorCollectors(page: Page, bucket: string[]): void {
   pageConsoleErrors.set(page, bucket);
 
   const initScript = () => {
-    const handleErr = (error: any, type: string) => {
+    const handleErr = (error: any, type: string, origin?: string) => {
       const visited = new Set();
       function nimValueToString(v: any): string {
         if (v === null || v === undefined) return "";
@@ -1258,12 +1325,27 @@ function attachErrorCollectors(page: Page, bucket: string[]): void {
           console.error(`[BROWSER_ERROR_INSPECT][${type}] Failed to inspect: ${e}`);
         }
       } else {
-        console.error(`[BROWSER_ERROR_INSPECT][${type}] Non-object error: ${error}`);
+        // A non-object payload has no message and no stack of its own, so
+        // the event's source location is all that can attribute it.
+        console.error(
+          `[BROWSER_ERROR_INSPECT][${type}] Non-object error: ${error}` +
+            (origin ? ` (${origin})` : ""),
+        );
       }
     };
 
     window.addEventListener("error", (event) => {
-      handleErr(event.error, "error");
+      // `event.error` is null when the browser itself raised the event
+      // rather than a script: a `ResizeObserver` loop report, or a script
+      // whose origin hides the exception. `message` and the location are
+      // then the only record of what happened.
+      // https://html.spec.whatwg.org/multipage/webappapis.html#the-errorevent-interface
+      handleErr(
+        event.error,
+        "error",
+        `message=${JSON.stringify(event.message)} ` +
+          `at ${event.filename || "<no file>"}:${event.lineno}:${event.colno}`,
+      );
     });
     window.addEventListener("unhandledrejection", (event) => {
       handleErr(event.reason, "unhandledrejection");
@@ -1673,6 +1755,7 @@ async function launchTraceWeb(
       viewport: { width: 1920, height: 1080 },
     }),
   });
+  await installTestMovementCounterHiding(context);
 
   const consoleErrors: string[] = [];
   const page = await context.newPage();
@@ -1820,6 +1903,7 @@ async function launchTracePathWeb(tracePath: string): Promise<LaunchResult> {
       viewport: { width: 1920, height: 1080 },
     }),
   });
+  await installTestMovementCounterHiding(context);
 
   const consoleErrors: string[] = [];
   const page = await context.newPage();
@@ -2051,6 +2135,7 @@ export const test = base.extend<
   configTheme: ["", { option: true }],
   launchEnv: [{}, { option: true }],
   rendererInitScript: ["", { option: true }],
+  showTestMovementCounter: [false, { option: true }],
 
   // Fixtures
   _workerCleanup: [
@@ -2135,6 +2220,7 @@ export const test = base.extend<
         configTheme,
         launchEnv,
         rendererInitScript,
+        showTestMovementCounter,
       },
       use,
       testInfo,
@@ -2143,6 +2229,7 @@ export const test = base.extend<
       activePrefixOverride = codetracerPrefixOverride;
       activeLaunchEnv = launchEnv;
       activeRendererInitScript = rendererInitScript;
+      activeShowTestMovementCounter = showTestMovementCounter;
 
       // Ensure each test starts from a known saved layout in the worker-local
       // config directory.  Earlier tests in the same worker may have mutated

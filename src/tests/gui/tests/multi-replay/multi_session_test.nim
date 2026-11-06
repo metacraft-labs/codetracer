@@ -39,6 +39,7 @@
 import std/[json, os, unittest, strutils, osproc, sequtils]
 import isonim/core/[signals, computation]
 import headless_session
+import ../../../../frontend/test_support/recording_fixtures
 import ../../../../common/replay_server_path   # the one search order
 import store/[replay_data_store, types]
 import viewmodels/calltrace_vm
@@ -77,52 +78,6 @@ proc findTestTrace(): string =
     "Could not find test trace directory. Set TEST_TRACE_PATH or " &
     "ensure src/db-backend/trace/ exists. Tried: " & candidate)
 
-proc findCtFile(dir: string): string =
-  for kind, path in walkDir(dir):
-    if kind != pcFile:
-      continue
-    if path.endsWith(".ct"):
-      return path
-  return ""
-
-proc isUsableTraceDir(dir: string): bool =
-  if fileExists(dir / "trace.bin"):
-    return true
-  if dirExists(dir / "rr"):
-    return true
-  if findCtFile(dir).len > 0:
-    return true
-  return false
-
-proc traceDirForRecordingId(idStr: string): string =
-  let baseDir = getHomeDir() / ".local" / "share" / "codetracer"
-  let bareDir = baseDir / idStr
-  if dirExists(bareDir):
-    return bareDir
-  let legacyDir = baseDir / ("trace-" & idStr)
-  if dirExists(legacyDir):
-    return legacyDir
-  bareDir
-
-proc findExistingTrace(programPattern: string): string =
-  ## Search ``~/.local/share/codetracer/`` for a pre-recorded trace whose
-  ## metadata program field contains ``programPattern``.
-  let baseDir = getHomeDir() / ".local" / "share" / "codetracer"
-  if not dirExists(baseDir):
-    return ""
-  for kind, path in walkDir(baseDir):
-    if kind != pcDir:
-      continue
-    if not isUsableTraceDir(path):
-      continue
-    # M-REC-1.5: derive the program identifier from the folder name
-    # (legacy JSON sidecars retired).
-    let dirname = path.extractFilename()
-    let program = dirname
-    if programPattern in program:
-      return path
-  return ""
-
 const recordTimeoutMs = 120_000
 
 proc recordTraceToDefaultLocation(programPath: string; lang: string = ""): string =
@@ -142,16 +97,7 @@ proc recordTraceToDefaultLocation(programPath: string; lang: string = ""): strin
     raise newException(IOError,
       "ct record failed (exit " & $exitCode & "): " & output)
 
-  for line in output.splitLines():
-    # M-REC-6: stdout marker renamed to ``recordingId:``.
-    if line.startsWith("recordingId:"):
-      let idStr = line[("recordingId:").len..^1].strip()
-      let traceDir = traceDirForRecordingId(idStr)
-      if dirExists(traceDir):
-        return traceDir
-
-  raise newException(IOError,
-    "ct record succeeded but could not parse recordingId from output: " & output)
+  recordingDirFromOutput(output)
 
 proc findOrRecordTrace(testProgram: string; lang: string = "";
                        entryFile: string = "";
@@ -170,10 +116,6 @@ proc findOrRecordTrace(testProgram: string; lang: string = "";
   echo "  Recording trace for: ", programPath
   let traceDir = recordTraceToDefaultLocation(programPath, lang)
   echo "  Recorded trace to: ", traceDir
-
-  if not isUsableTraceDir(traceDir):
-    raise newException(IOError,
-      "Recorded trace at " & traceDir & " uses an unrecognized format.")
 
   return traceDir
 

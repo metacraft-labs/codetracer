@@ -43,7 +43,7 @@ import ./lifecycle_support
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 48
+const ExpectedAssertions = 52
 
 const
   FixtureName = "calc"
@@ -91,6 +91,25 @@ proc quit(sess: var TuiTestSession): Option[int] =
 
 proc freshStateDir(tag: string): string =
   createTempDir("plat45-" & tag & "-", "")
+
+proc filesTabCell(sess: var TuiTestSession; cols, rows: int):
+    Option[tuple[row, col: int]] =
+  ## Read the label from terminal cells: UTF-8 borders or wide glyphs before
+  ## it must not turn a byte offset into the wrong SGR pointer coordinate.
+  const Label = " Files "
+  for row in 1 ..< rows - 1:
+    for col in 0 .. cols - Label.len:
+      var matches = true
+      for offset, ch in Label:
+        let rune = int(sess.cellAt(row, col + offset).rune)
+        let shown = if rune == 0: ord(' ') else: rune
+        if shown != ord(ch):
+          matches = false
+          break
+      if matches:
+        # Inside the label, rather than its padding or the divider beside it.
+        return some((row: row, col: col + 2))
+  none(tuple[row, col: int])
 
 suite "PLAT-45 Tier 2: the shared default on a real terminal":
 
@@ -159,7 +178,21 @@ suite "PLAT-45 Tier 2: the shared default on a real terminal":
     # THE SHARED DEFAULT, with nothing remembered.
     ck first.screenContents().contains(" Files ")
     ck not fileExists(dir / TuiDocument)
-    # Focus the Files region (the first `Tab` stop) and dock it.
+    # Start from the editor through its real focus command, then press the
+    # Files tab where it was actually painted. The saved pane identity below
+    # verifies which pane received the following dock command.
+    first.send("\ev")
+    discard first.drainOutput(200)
+    let filesTab = filesTabCell(first, Cols, Rows)
+    ck filesTab.isSome
+    if filesTab.isNone:
+      raise newException(AssertionFailedError,
+        "the Files tab is absent from the terminal cells:\n" &
+        first.screenContents())
+    let at = filesTab.get
+    let press = "\e[<0;" & $(at.col + 1) & ";" & $(at.row + 1)
+    first.send(press & "M")
+    first.send(press & "m")
     first.send(":dock bottom\r")
     discard waitForScreen(first, "applied")
     # WRITTEN THROUGH: the file is there BEFORE the process exits.
@@ -171,6 +204,13 @@ suite "PLAT-45 Tier 2: the shared default on a real terminal":
     let saved = readFile(dir / TuiDocument)
     ck saved.contains("\"docked\"")
     ck saved.contains("\"edge\": \"bottom\"")
+    let document = parseJson(saved)
+    ck document["docked"].len == sharedDefaultDocked().len + 1
+    let savedPane = document["docked"][^1]["pane"].getStr
+    let savedEdge = document["docked"][^1]["edge"].getStr
+    checkpoint("saved dock: pane=" & savedPane & " edge=" & savedEdge)
+    ck savedPane == "fileTree"
+    ck savedEdge == "bottom"
 
     # THE SECOND PROCESS OPENS THE REMEMBERED ARRANGEMENT.
     var second = spawnTui(dir, Cols, Rows)

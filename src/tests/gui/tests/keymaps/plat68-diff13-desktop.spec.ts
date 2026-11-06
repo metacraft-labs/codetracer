@@ -207,4 +207,43 @@ test.describe("PLAT-68 DIFF-13: the desktop answers every key as the rule does",
     expect(failures).toEqual([]);
     expect(wrong).toBe(0);
   });
+
+  // The resolution above says Space is `list.toggle-expand` in these panes;
+  // this is what the desktop then RUNS, where only the focus decides it.
+  test("Space folds the selected call only where the focus is on the pane", async ({ ctPage }) => {
+    const toggle = "[role='button'].toggle-call";
+    const held = ctPage.locator(`.calltrace-call-line:has(${toggle})`);
+    await held.first().waitFor({ timeout: 120_000 });
+    // The call the program is stopped in is the selected one. Not a click: its
+    // jump re-marks the current call later, over a key pressed meanwhile.
+    const selected = ctPage.locator(`.calltrace-call-line.event-selected ${toggle}`);
+    await expect(selected).toHaveCount(1, { timeout: 20_000 });
+    const opposite = (v: string | null) => (v === "true" ? "false" : "true");
+    const start = await selected.getAttribute("aria-expanded");
+
+    await focusPane(ctPage, "calltrace");
+    await ctPage.keyboard.press("Space");
+    await expect(selected).toHaveAttribute("aria-expanded", opposite(start), { timeout: 20_000 });
+    await ctPage.keyboard.press("Space");
+    await expect(selected).toHaveAttribute("aria-expanded", start ?? "", { timeout: 20_000 });
+
+    // Another row's own toggle: Space is ITS click, not the selected call's.
+    // A later row, so that folding it cannot hide the selected one.
+    const other = ctPage.locator(`.calltrace-call-line.event-selected ~ .calltrace-call-line ${toggle}`).first();
+    const otherStart = await other.getAttribute("aria-expanded");
+    const otherKey = await other.evaluate((el: Element) =>
+      el.closest(".calltrace-call-line")!.getAttribute("data-call-key"));
+    await other.focus();
+    await ctPage.keyboard.press("Space");
+    await expect(ctPage.locator(`.calltrace-call-line[data-call-key='${otherKey}'] ${toggle}`))
+      .toHaveAttribute("aria-expanded", opposite(otherStart), { timeout: 20_000 });
+    await expect(selected).toHaveAttribute("aria-expanded", start ?? "");
+
+    // The Files tree is a tree pane too; the call trace was pressed last.
+    await held.first().dispatchEvent("mousedown");
+    await focusPane(ctPage, "fileTree");
+    await ctPage.keyboard.press("Space");
+    await ctPage.waitForTimeout(1_000);
+    await expect(selected).toHaveAttribute("aria-expanded", start ?? "");
+  });
 });

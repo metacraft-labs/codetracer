@@ -277,7 +277,7 @@ proc buildKakouneKeymap(): EditingKeymap =
   r.add eb(@["Backspace"], "delete-char-backward", {emInsert})
   r.add eb(@["Delete"], "delete-char-forward", {emInsert})
 
-  EditingKeymap(bindings: r)
+  newEditingKeymap(r)
 
 const
   KakouneUncoveredKeys*: seq[tuple[key, reason: string]] = @[

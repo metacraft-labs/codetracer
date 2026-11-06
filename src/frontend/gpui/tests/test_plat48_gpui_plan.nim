@@ -17,8 +17,8 @@
 ## on the real `calc` recording stepped by a real replay-server, without a
 ## window.
 ##
-## Run (needs `just build-gpui`, the `calc` recording under
-## `test-logs/tui-fixtures/`, `REPLAY_SERVER_BIN`, isonim-gpui's shim):
+## Run (needs `just build-gpui`, the Python recorder, which records the `calc`
+## fixture on first use, `REPLAY_SERVER_BIN`, isonim-gpui's shim):
 ##   nim c -r --path:src/frontend/viewmodel \
 ##     src/frontend/gpui/tests/test_plat48_gpui_plan.nim
 ##
@@ -26,6 +26,7 @@
 ## real recording. A missing prerequisite fails by name.
 
 import replay_prerequisite
+import ../../tui/tests/fixtures/fixture_provider
 import std/[json, os, osproc, streams, strtabs, strutils, tables, tempfiles,
             unicode, unittest]
 import ./gpui_child_env
@@ -79,7 +80,6 @@ const
     ## structural and is stated rather than bumped silently — this file
     ## carries a literal and the price of a literal is that every move has
     ## to be accounted for.
-  CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1920
   H = 1080
@@ -94,7 +94,7 @@ let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 let bin = repo / "build/bin/codetracer-gpui"
 let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                    repo.parentDir / "isonim-gpui/rust/target/debug")
-let calc = repo / CalcFixture
+let calc = requireFixture(fixtureSpec("calc"))
 
 var drawnFiles: Table[string, string]
   ## Every file a reported plan's `img src` names, read as soon as the plan
@@ -110,8 +110,6 @@ proc windowPlan(ops: string; pre: seq[string] = @[]; trace = false): JsonNode =
   if not fileExists(bin):
     raise newException(IOError, "prerequisite missing: " & bin &
                        " (just build-gpui)")
-  if not dirExists(calc):
-    raise newException(IOError, "prerequisite missing: " & calc)
   let state = createTempDir("plat48-gpui-plan-", "")
   var env = newStringTable()
   for k, v in envPairs():

@@ -32,6 +32,7 @@
 ## No mocks: the binary, the engine and the recordings are the product's.
 
 import replay_prerequisite
+import ../../tui/tests/fixtures/fixture_provider
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
 import ./gpui_child_env
 
@@ -68,20 +69,11 @@ let bin = repo / "build/bin/codetracer-gpui"
 let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                    repo.parentDir / "isonim-gpui/rust/target/debug")
 
-proc fixture(prefix: string): string =
-  for kind, path in walkDir(repo / "test-logs/tui-fixtures"):
-    if kind == pcDir and path.extractFilename.startsWith(prefix & "-"):
-      return path
-  ""
-
 proc windowPlan(ops: string; subject: string; pre: seq[string] = @[];
                 trace: var string): JsonNode =
   if not fileExists(bin):
     raise newException(IOError, "prerequisite missing: " & bin &
                        " (just build-gpui)")
-  if subject.len == 0:
-    raise newException(IOError, "prerequisite missing: a tui-fixtures " &
-      "recording (the tui lane records them on its first run)")
   let state = createTempDir("plat51-gpui-plan-", "")
   var env = newStringTable()
   for k, v in envPairs():
@@ -163,9 +155,9 @@ proc colourOfText(n: JsonNode): seq[string] =
   if c.len > 0: result.add c
   for ch in n{"children"}.getElems: result.add colourOfText(ch)
 
-let calc = fixture("calc")
-let noir = fixture("noir_space_ship")
-let calls = fixture("call_pages")
+let calc = requireFixture(fixtureSpec("calc"))
+let noir = requireFixture(fixtureSpec("noir_space_ship"))
+let calls = requireFixture(pythonScriptSpec("call_pages"))
 
 suite "PLAT-51 GPUI: the Timeline panel is removed":
 

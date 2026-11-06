@@ -125,7 +125,9 @@ proc terminalCapability*(): PaneCapability =
      # PLAT-55: Problems (`views/problems_pane.nim`).
      paneProblems,
      # PLAT-58: Requests (`views/requests_pane.nim`).
-     paneRequests},
+     paneRequests,
+     # PLAT-60: Low Level Code (`views/low_level_code_pane.nim`).
+     paneLowLevelCode},
     [(paneDebugControls, "the terminal draws the debugger controls in its " &
                          "top bar, not as a pane"),
      (paneFlow, "the terminal draws flow inside the source pane"),

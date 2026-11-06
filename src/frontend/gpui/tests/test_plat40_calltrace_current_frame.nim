@@ -86,6 +86,7 @@
 ## Every helper that calls `check` is a `template`. The `proc`s return values.
 
 import replay_prerequisite
+import ../../tui/tests/fixtures/fixture_provider
 import std/[json, options, os, osproc, streams, strtabs, strutils, tables,
             tempfiles, unittest]
 import ./gpui_child_env
@@ -107,8 +108,6 @@ const
     ## over the unmarked rows instead of once per row. Since the pane reports
     ## its viewport the window draws the rows it shows, not the whole trace,
     ## so a check per row tied this count to the pane's height. Measured.
-  CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
-  PagesFixture = "test-logs/tui-fixtures/call_pages-d6745afd1e2e"
     ## 603 calls: a trace the pane can be scrolled far from the current call.
   CalcSource = "test-programs/calc/main.py"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
@@ -140,8 +139,8 @@ let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 let bin = repo / "build/bin/codetracer-gpui"
 let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                      repo.parentDir / "isonim-gpui/rust/target/debug")
-let calc = repo / CalcFixture
-let pages = repo / PagesFixture
+let calc = requireFixture(fixtureSpec("calc"))
+let pages = requireFixture(pythonScriptSpec("call_pages"))
 
 # ---------------------------------------------------------------------------
 # The expectation, derived from the RECORDED PROGRAM rather than the product
@@ -204,9 +203,6 @@ proc windowPlan(width, height: int; ops: string; windowOps = "";
   if not fileExists(bin):
     raise newException(IOError, "prerequisite missing: " & bin &
                        " (just build-gpui)")
-  if not dirExists(subject):
-    raise newException(IOError, "prerequisite missing: " & subject &
-                       " (run 'just test-tui' once)")
   let state = createTempDir("plat40-calltrace-", "")
   var env = newStringTable()
   for k, v in envPairs():

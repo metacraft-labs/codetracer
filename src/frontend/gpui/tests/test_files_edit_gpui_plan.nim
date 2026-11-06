@@ -26,17 +26,20 @@
 ##   * Rename: the field holds the current name; the file is renamed on disk;
 ##   * Delete: the question drawn; Escape keeps the file; Enter moves it into
 ##     a freedesktop.org trash in a temporary directory (`XDG_DATA_HOME`),
-##     with its info file;
+##     with its info file, and on macOS, whose trash is `~/.Trash` and has no
+##     info files, into that directory under a temporary `HOME`;
 ##   * a press elsewhere (the editor) cancels an open field;
 ##   * a folder tab opened from a replay window's Welcome screen lists the
 ##     same tree, and its menu acts on the disk too.
 ##
 ## No mocks: the binary, the folder, the trash and (for the folder tab) the
-## engine and the recording are real. `XDG_DATA_HOME` points the trash at a
-## temporary directory so a run never touches the user's.
+## engine and the recording are real. `XDG_DATA_HOME` (and `HOME` on macOS)
+## points the trash at a temporary directory so a run never touches the
+## user's.
 
 import replay_prerequisite
-import std/[json, os, osproc, streams, strtabs, strutils, tempfiles,
+import ../../tui/tests/fixtures/fixture_provider
+import std/[json, os, osproc, sequtils, streams, strtabs, strutils, tempfiles,
             unittest]
 import ./gpui_child_env
 
@@ -53,7 +56,6 @@ template ck(condition: untyped) =
 const
   W = 1440
   H = 1000
-  CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   OpenedFolderRowReason = "The opened folder cannot be renamed or deleted " &
                           "from the tree"
 
@@ -76,6 +78,11 @@ proc run(args: seq[string]; dataHome: string; trace: var string): JsonNode =
   env["XDG_STATE_HOME"] = state
   env["XDG_CONFIG_HOME"] = state / "config"
   env["XDG_DATA_HOME"] = dataHome
+  # `Filesystem-Pane.md`: macOS's trash is `~/.Trash`, which `homeTrashDir`
+  # reads from `HOME`, not `XDG_DATA_HOME`. Without this a run moves its
+  # fixture into the developer's real Trash.
+  when defined(macosx):
+    env["HOME"] = dataHome
   env["CODETRACER_HOME"] = state / "ct-home"
   env["CODETRACER_KEYBINDINGS"] = state / "keybindings.json"
   env["CODETRACER_GPUI_GESTURE_TRACE"] = "1"
@@ -379,6 +386,9 @@ suite "GPUI Edit mode: the Files menu acts on the disk":
   test "Delete asks first: Escape keeps the file, Enter moves it to the trash":
     let project = newProject()
     let data = createTempDir("files-edit-gpui-data-", "")
+    # `trashEntry` refuses a missing trash, and a macOS home always has one.
+    when defined(macosx):
+      createDir(data / ".Trash")
     let plan0 = editWindow(project, data, "")
     let readme = plan0.rowId("README.md")
     let asked = editWindow(project, data, "click:file:" & readme &
@@ -391,12 +401,19 @@ suite "GPUI Edit mode: the Files menu acts on the disk":
                           ":right,ctx:Delete,key:y,key:escape")
     ck kept.nodesWith("data-ct-files-question").len == 0
     ck fileExists(project / "README.md")
-    ck not dirExists(data / "Trash")
+    when defined(macosx):
+      ck toSeq(walkDir(data / ".Trash")).len == 0
+    else:
+      ck not dirExists(data / "Trash")
     let gone = editWindow(project, data, "click:file:" & readme &
                           ":right,ctx:Delete,key:enter")
     ck not fileExists(project / "README.md")
-    ck readFile(data / "Trash" / "files" / "README.md") == "# readme\n"
-    ck fileExists(data / "Trash" / "info" / "README.md.trashinfo")
+    when defined(macosx):
+      ck readFile(data / ".Trash" / "README.md") == "# readme\n"
+      ck toSeq(walkDir(data / ".Trash")).len == 1
+    else:
+      ck readFile(data / "Trash" / "files" / "README.md") == "# readme\n"
+      ck fileExists(data / "Trash" / "info" / "README.md.trashinfo")
     ck gone.rowId("README.md") == ""
     ck gone.textOf.contains("moved README.md to the trash")
     removeDir(project)
@@ -423,10 +440,7 @@ suite "GPUI Edit mode: the Files menu acts on the disk":
 suite "GPUI Edit mode: a folder tab":
 
   test "a folder tab lists the folder, and its menu acts on the disk":
-    let calc = repo / CalcFixture
-    if not dirExists(calc):
-      raise newException(IOError, "prerequisite missing: " & calc &
-        " (the tui lane records it on its first run)")
+    let calc = requireFixture(fixtureSpec("calc"))
     let project = newProject()
     let data = createTempDir("files-edit-gpui-data-", "")
     # A new tab's Welcome screen; its focus starts on "Open folder".

@@ -1166,10 +1166,17 @@ impl Handler {
             active_crossing_span_id,
         };
 
+        // `initialize` precedes trace selection. Refresh at the stop so
+        // launches at an explicit position and switches between recordings
+        // expose the capability of the engine currently being shown.
+        let instruction_stepping = self.replay.supports_instruction_stepping();
+        sender.send(
+            self.dap_client
+                .instruction_stepping_capabilities_event(instruction_stepping),
+        )?;
         let stopped_event = self.prepare_stopped_event(is_main)?;
         let complete_move_event = self.prepare_complete_move_event(&move_state)?;
         let output_events = self.prepare_output_events()?;
-
         info!("send stopped_event {:?}", stopped_event);
         sender.send(stopped_event)?;
         info!("send complete move event {:?}", complete_move_event);
@@ -1578,14 +1585,7 @@ impl Handler {
 
             let start_call_line_index = GlobalCallLineIndex(0);
             let mut callstack_lines = self.replay.load_callstack()?;
-            // The native stack can omit startup frames above main. Indent
-            // from the shallowest visible frame, not those hidden callers.
-            // Keep each call's location.callstack_depth unchanged: navigation
-            // uses the physical frame depth, independently of the row's inset.
-            let root_depth = callstack_lines.iter().map(|line| line.depth).min().unwrap_or(0);
-            for line in &mut callstack_lines {
-                line.depth = line.depth.saturating_sub(root_depth);
-            }
+            indent_from_the_visible_root(&mut callstack_lines);
             let total_count = callstack_lines.len();
             let position = 0;
             CallArgsUpdateResults::finished_update_call_lines(
@@ -1896,6 +1896,8 @@ impl Handler {
     ///     advance one /statement/ at a time using `DbStep.column`.
     ///   * `Some("line")` / `Some("instruction")` / `None` →
     ///     [`Handler::next`] — the existing line-granularity runner.
+    ///     Native instruction requests are handled by the DAP dispatcher
+    ///     before reaching this source-level entry point.
     ///     Per the M2 contract any non-`statement` value (including
     ///     unrecognised future values) maps to legacy line-granularity
     ///     so an over-eager DAP client never breaks back-compat.
@@ -1931,7 +1933,8 @@ impl Handler {
     ///     column on the same line.
     ///   * `Some("line")` / `Some("instruction")` / `None` → legacy
     ///     line-granularity reverse runner ([`Handler::next`] with
-    ///     `forward = false`).  Mirrors the M2 forward back-compat
+    ///     `forward = false`). Native instruction requests are handled
+    ///     earlier by the DAP dispatcher. Mirrors the M2 forward back-compat
     ///     contract: any non-`statement` value (including unrecognised
     ///     future values) keeps the legacy behaviour intact, so an
     ///     over-eager client never breaks back-compat.
@@ -2558,6 +2561,10 @@ impl Handler {
         // let original_step = self.db.steps[original_step_id];
         // let original_depth = self.db.calls[original_step.call_key].depth;
         match arg.action {
+            Action::StepI | Action::NextI => {
+                self.replay.step(arg.action, !arg.reverse)?;
+                self.step_id = self.replay.current_step_id();
+            }
             Action::StepIn => self.step_in(!arg.reverse)?,
             Action::Next => self.next(!arg.reverse)?,
             Action::StepOut => self.step_out(!arg.reverse)?,
@@ -6593,12 +6600,29 @@ impl Handler {
             )
             .into());
         };
+        // The function's line range. The reader's location loads the file into
+        // the expression loader when a grammar can read it (so the answer
+        // does not depend on whether a flow was loaded for the file first)
+        // and otherwise takes the range from the trace's own steps of this
+        // call — the only range a language without a grammar here (Noir,
+        // Cairo, Circom …) has. Before, such a function listed no lines at
+        // all.
+        let enriched = self
+            .reader
+            .load_location(db_call.step_id, call_key, &mut self.flow_preloader.expr_loader);
         let location = self.load_location(db_call.step_id);
         let function_location = self
             .flow_preloader
             .expr_loader
             .find_function_location(&location, &function_step.line);
-        for line in function_location.function_first..function_location.function_last {
+        let (first_line, last_line) = if function_location.function_last > 0 {
+            (function_location.function_first, function_location.function_last)
+        } else {
+            (enriched.function_first, enriched.function_last)
+        };
+        // Both ends belong to the function: the last line is its last line,
+        // and for a trace-derived range the last line a step reached.
+        for line in first_line..=last_line {
             let Some(step_map) = self.reader.step_map_for_path(function_path_id) else {
                 return Err(format!(
                     "call {}'s function is in path {}, for which the trace has no step map",
@@ -6633,6 +6657,16 @@ impl Handler {
         args: FunctionLocation,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
+        // Native replay has no materialized call/step table. Its replay
+        // session owns the loaded executable and its source-mapped instructions.
+        if matches!(self.trace_kind, TraceKind::Recreator | TraceKind::Emulator) {
+            let instructions = self
+                .replay
+                .load_asm_function(&args)
+                .map_err(|error| format!("ct/load-asm-function: {error}"))?;
+            self.respond_dap(request, instructions, sender)?;
+            return Ok(());
+        }
         let mut instructions: Vec<Instruction> = vec![];
         match args.key.parse::<i64>() {
             Ok(number) => {
@@ -7928,6 +7962,29 @@ pub fn event_tick_index_of(events: &[ProgramEvent]) -> Vec<(i64, usize)> {
     by_tick
 }
 
+/// Make a native call trace's display depths count from its visible root.
+///
+/// The native replay worker serves the call stack of the current position,
+/// outermost first, and stops at the program's entry point (`main`, a test
+/// function), leaving out the runtime and libc frames that call it. Each row's
+/// `depth` is still that frame's physical depth, so the pane, which indents a
+/// row by its `depth`, drew `main` a dozen and more levels in (codetracer-pm
+/// `spec/GUI/Core-Panes/Call-Trace-Pane.md`, "Tree Structure" and "Visual
+/// Design": the visible root sits at the tree's base inset).
+///
+/// Only the row's presentation depth moves. The call's own identity,
+/// `content.call.depth` and `content.call.location.callstackDepth`, stays
+/// physical: activating the row addresses that frame
+/// (`spec/GUI/Layout-And-Navigation/Click-Navigation.md` §2.2).
+pub fn indent_from_the_visible_root(call_lines: &mut [CallLine]) {
+    let Some(root_depth) = call_lines.iter().map(|line| line.depth).min() else {
+        return;
+    };
+    for line in call_lines.iter_mut() {
+        line.depth -= root_depth;
+    }
+}
+
 /// The last event (in recorded order) at or before `at`, from
 /// `event_tick_index_of`'s index; `None` when every event is after it.
 pub fn last_event_at_or_before(index: &[(i64, usize)], at: i64) -> Option<usize> {
@@ -8337,6 +8394,44 @@ mod tests {
     use codetracer_trace_writer::trace_writer::TraceWriter;
 
     use task::{TaskKind, TraceSession, Tracepoint, TracepointMode};
+
+    /// A native call stack whose callers above `main` were left out: the rows'
+    /// display depths count from `main`, and each call keeps its physical
+    /// depth. An empty stack is left alone.
+    #[test]
+    fn native_callstack_rows_indent_from_the_visible_root() {
+        let frame = |name: &str, depth: usize| {
+            let mut call = Call {
+                raw_name: name.to_string(),
+                depth,
+                ..Call::default()
+            };
+            call.location.callstack_depth = depth;
+            CallLine::call(call, false, 1, depth)
+        };
+        let mut lines = vec![frame("main", 17), frame("accumulate", 18), frame("add", 19)];
+        indent_from_the_visible_root(&mut lines);
+        let shape: Vec<(&str, usize, usize, usize)> = lines
+            .iter()
+            .map(|line| {
+                let call = &line.content.call;
+                (
+                    call.raw_name.as_str(),
+                    line.depth,
+                    call.depth,
+                    call.location.callstack_depth,
+                )
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            vec![("main", 0, 17, 17), ("accumulate", 1, 18, 18), ("add", 2, 19, 19)]
+        );
+
+        let mut empty: Vec<CallLine> = vec![];
+        indent_from_the_visible_root(&mut empty);
+        assert!(empty.is_empty());
+    }
 
     /// The `(name, index)` that names a recreator session's worker socket.
     fn worker_identity_of(replay: &mut Box<dyn ReplaySession>) -> (String, usize) {
@@ -9834,6 +9929,37 @@ mod tests {
         Ok(())
     }
 
+    /// The low-level listing of a function whose source no grammar here can
+    /// read (`example.small`, which is not even on disk) still lists its
+    /// lines: the range is the trace's own — from the function's line (7) to
+    /// the last line a step of the call reached (8) — and its LAST line is in
+    /// it. Before, such a function — every Noir one among them — listed
+    /// nothing. Line 7 is the call site's step, which belongs to the caller,
+    /// so the call lists line 8 alone.
+    #[test]
+    fn test_asm_listing_lines_come_from_the_trace_without_a_grammar() -> Result<(), Box<dyn Error>> {
+        let db = setup_db_with_calls();
+        let mut handler: Handler = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(db));
+        let mut a_key = None;
+        for key in 0..8 {
+            if let Some(call) = handler.reader.call(CallKey(key))
+                && handler.reader.function(call.function_id).map(|f| f.name.as_str()) == Some("a")
+            {
+                a_key = Some(CallKey(key));
+            }
+        }
+        let a_key = a_key.ok_or("the trace has a call of `a`")?;
+        let lines = handler.load_steps_for_call(a_key)?;
+        let listed: Vec<i64> = lines.keys().copied().collect();
+        assert_eq!(listed, vec![8]);
+        for (line, step_id) in lines.iter() {
+            let step = handler.reader.step(*step_id).ok_or("a listed step is recorded")?;
+            assert_eq!(step.line.0, *line);
+            assert_eq!(step.call_key, a_key);
+        }
+        Ok(())
+    }
+
     #[test]
     fn test_local_calltrace() -> Result<(), Box<dyn Error>> {
         let db = setup_db_with_calls();
@@ -9914,6 +10040,66 @@ mod tests {
         }
         assert_eq!(updates.len(), 1, "one ct/updated-calltrace event");
         Ok(())
+    }
+
+    /// The `(function, depth)` of the `height` rows `ct/load-calltrace-section`
+    /// serves from `start` on, read from its response.
+    fn calltrace_section_rows(handler: &mut Handler, start: usize, height: usize) -> Vec<(String, i64)> {
+        let (sender, receiver) = mpsc::channel();
+        let args = CalltraceLoadArgs {
+            start_call_line_index: GlobalCallLineIndex(start),
+            height,
+            ..python_bridge_calltrace_args()
+        };
+        handler
+            .load_calltrace_section(dap::Request::default(), args, sender)
+            .expect("ct/load-calltrace-section");
+        let response = std::iter::from_fn(|| receiver.try_recv().ok())
+            .find_map(|message| match message {
+                DapMessage::Response(r) => Some(r),
+                _ => None,
+            })
+            .expect("a response");
+        response.body["callLines"]
+            .as_array()
+            .expect("callLines")
+            .iter()
+            .map(|row| {
+                (
+                    row["content"]["call"]["rawName"].as_str().unwrap_or("").to_string(),
+                    row["depth"].as_i64().expect("a row depth"),
+                )
+            })
+            .collect()
+    }
+
+    /// A materialized call trace is the whole call tree, and a row's depth is
+    /// its depth in that tree. A section that holds only rows below the root
+    /// keeps those depths: only the native call stack, whose callers above
+    /// `main` are left out, counts from its visible root
+    /// (`indent_from_the_visible_root`). The section is `a` and `b`, the two
+    /// calls `start` makes, and ends before the `<end of program>` row, whose
+    /// depth 0 would hide a section normalized to its shallowest row.
+    #[test]
+    fn materialized_calltrace_section_keeps_its_tree_depths() {
+        let db = setup_db_with_calls();
+        let mut handler: Handler = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(db));
+        let whole = calltrace_section_rows(&mut handler, 0, 20);
+        let a = whole
+            .iter()
+            .position(|(name, _)| name == "a")
+            .unwrap_or_else(|| panic!("no `a` row: {whole:?}"));
+        let callees = whole[a..].iter().take(2).cloned().collect::<Vec<_>>();
+        assert_eq!(
+            callees,
+            vec![("a".to_string(), 2), ("b".to_string(), 2)],
+            "`a` and `b` are called from `start`, two levels below the root: {whole:?}"
+        );
+        assert_eq!(
+            calltrace_section_rows(&mut handler, a, 2),
+            callees,
+            "a section of `a` and `b` keeps their tree depths"
+        );
     }
 
     /// On a trace that has steps, a current position that is not one of them

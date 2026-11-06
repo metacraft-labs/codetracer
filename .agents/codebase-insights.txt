@@ -2436,17 +2436,20 @@ runners exit 0 for an all-skipped suite:
   zero events read as "nothing executed" and would WITHHOLD a certificate that
   should have been issued.
 
-The remaining providers still derive a whole file's status from one subprocess
+The remaining providers still derive a run unit's status from one subprocess
 exit code (`cpp_common`, `native_m11_common`, `m12_fallback_common`,
 `smart_contract_common`, and `ruby_common`'s minitest branch), so a skip is
 indistinguishable from a pass there. All of them now at least report a FAILURE
 honestly — see "the counters read `tekTestFinished` ONLY" below — but the
-coarse granularity is unchanged either way: one event per file, not per test.
+coarse granularity remains for batch file/project scopes. rust-libtest also
+runs through `native_m11_common`, but `runRust` then requires a passed count in
+libtest's summary, anchored at line start, plus for a single test that test's
+own result line: exit 0 without them (a cfg-gated test) is `tsSkipped`.
 
 The rest of the registry -- jest, vitest,
-pytest, python-unittest, nim-unittest, rust-libtest -- has no `run` wired at
-all (`unsupportedRun` / a not-implemented stub), so it reports no finished
-test and can claim nothing; do not read it as a third category of gap.
+pytest, python-unittest and nim-unittest -- has no `run` wired at all
+(`unsupportedRun` / a not-implemented stub), so it reports no finished test
+and can claim nothing; do not read it as a third category of gap.
 
 Minitest shares `runRubyCommand` with rspec and deliberately does NOT get a
 JSON path: it has no equivalent reporter, so `buildRubyCommand` is handed an
@@ -2477,7 +2480,8 @@ counts; the `tekFailure` beside it only carries the reason.
 
 The same hole was open in three more places and is now closed in ONE:
 `cpp_common.runNativeCommand` (cpp-gtest, cpp-catch2, cpp-ctest),
-`native_m11_common.runCommand` (go-test, d-unittest, crystal-spec) and
+`native_m11_common.runCommand` (go-test, d-unittest, crystal-spec; now also
+rust-libtest) and
 `m12_fallback_common.runShellCommand` (pascal, fortran, ada, odin, v, lean,
 julia, assembly) each carried their own copy of the "emit the terminal events"
 tail, and all three failure branches were missing the `tekTestFinished`.
@@ -7700,8 +7704,12 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   host-supplied panes); it now takes the ViewModel a host attached to the
   same pane in `gLeafSet` (a folder tab's Files tree and VCS), which was
   otherwise drawn only from the leaf's next redraw.
-- Running `source /tmp/.../devenv.sh` from the zsh Bash tool half-works: the
-  TUI build then fails on `tree_sitter/api.h`. Source captured envs under bash.
+- Capture reusable dev environments with `just capture-dev-env /tmp/devenv.sh`,
+  then run `bash -c 'source "$1" && <command>' captured-env /tmp/devenv.sh`.
+  Raw `nix print-dev-env` output stops zsh at its read-only `LINENO` parameter,
+  before PATH and the shell hook. The recipe refuses non-Bash shells before
+  any Nix assignment; keep stderr visible and regenerate captures after input
+  or checkout changes. See AGENTS.md, "Capturing the development environment".
 - `ci/test/sdk-facade-boundary.sh` walks Nim imports WITHOUT evaluating `when`
   branches, so a JS-only import inside `isonim/core` (once
   `core/nondet.nim -> web/dom_api`) puts a renderer in the facade graph. IsoNim
@@ -8125,3 +8133,25 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   poll for good and the panel never revealed (fixed: latch only on an answer
   that carries `total`). Clicking a docked auto-hide panel's strip label TOGGLES
   it closed, so Electron specs must not click REQUESTS after the reveal.
+
+- Low Level Code (PLAT-60): the listing is `ct/load-asm-function`, loaded per
+  stop by the stop loader ONLY while `LowLevelCodeVM.shown` (the native hosts
+  set it from the pane's on-screen area before `loadStopPanes`). An
+  instruction's `offset` is the STEP it was reached at, and a materialized
+  recording's `rrTicks` IS the step id, so the execution pointer is the row
+  whose offset equals the tick (else the first row of the debugger's line).
+  The engine writes `highLevelPath` as the trace's path table holds it
+  (`src/main.nr` for Noir) while moves and the editor use the full path:
+  compare with `low_level_code_vm.sameSourcePath`, never `==`. Jumps must send
+  that path verbatim. The engine's function range for a language without a
+  tree-sitter grammar comes from `reader.load_location`'s trace fallback; the
+  range is inclusive. rr / MCR sessions have an EMPTY reader, so they answer
+  no listing (codetracer-pm issue 2026-10-29-native-recordings-…).
+- A pane added to `PaneKind` must also be added to
+  `viewmodel/keymap/scope_path.nim`'s `PaneKinds` (and `ListPaneKinds` for a
+  list pane) or a focused pane gets no `list.*` keys; and to the TUI
+  `cells.terminalPaneName`, GPUI `pane_names`, `desktop_panes.PaneContent`,
+  `headless_app.paneViewModel`, `pane_views.paneView`, and the schema version
+  (with a migration).
+- `cmdSplit(paneEditor, p, saRow, ssAfter)` is "beside the source"; `saColumn`
+  stacks it below.

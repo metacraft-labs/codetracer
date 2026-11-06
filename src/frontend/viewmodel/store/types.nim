@@ -138,6 +138,10 @@ type
     recordingHeadRRTicks*: uint64
     recordingHeadLoadingState*: LoadingState
     supportsStepBack*: bool
+    supportsSteppingGranularity*: bool
+      ## PLAT-60. The engine's DAP `supportsSteppingGranularity`: a step can
+      ## be asked for by instruction (`granularity: "instruction"`). What the
+      ## Low Level Code listing's steps do (`LowLevelCodeVM.steppingText`).
 
   ReplayDeploymentMode* = enum
     ## Where a replay session is hosted.
@@ -198,8 +202,9 @@ type
     cKey*: string
       ## The C-level function and call a Nim recording's stop is in — what
       ## its low-level code is loaded for (`ReplayDataStore.asmFunction`).
-    frameOffset*: int
-      ## The selected frame's instruction offset, -1 for none.
+    frameOffset*: int64
+      ## The selected frame's instruction offset/PC, -1 for none. Keep its
+      ## wire width on JS too: native addresses exceed JS backend `int`.
 
   DebuggerState* = object
     ## Snapshot of the debugger's position in the recording.
@@ -817,7 +822,9 @@ type
     name*: string
     args*: string
     other*: string
-    offset*: int
+    offset*: int64
+      ## A native PC or recorded step/generated-row offset. Row indices and
+      ## source lines stay `int`; this wire value must retain all address bits.
     highLevelPath*: string
     highLevelLine*: int
 
@@ -826,7 +833,7 @@ type
     ## function's load address (rendered as the panel's
     ## "Originating address" hex string); ``error`` carries any
     ## backend-side load failure that should replace the listing.
-    address*: int
+    address*: int64
     instructions*: seq[LowLevelInstruction]
     error*: string
 

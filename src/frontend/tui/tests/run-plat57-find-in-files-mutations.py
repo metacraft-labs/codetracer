@@ -661,32 +661,37 @@ def run_electron(path: str) -> RunResult:
     env.setdefault("CODETRACER_ELECTRON_ARGS",
                    "--no-sandbox --no-zygote --disable-gpu "
                    "--disable-gpu-compositing --disable-dev-shm-usage")
-    xvfb = None
+    spec = os.path.relpath(ROOT / suite_file(path), ROOT / "src/tests/gui")
+    cmd = ["npx", "playwright", "test", spec]
+    if not env.get("DISPLAY") and sys.platform.startswith("linux"):
+        # The Xvfb is started by the shared helper, which hands Playwright
+        # the display only once the server answers (a fixed sleep was
+        # outlasted on a loaded host: "Missing X server"), and stops it from
+        # the wrapper's EXIT trap (scripts/lib/own-xvfb.sh).
+        cmd = ["bash", "-c",
+               '. "$1" && shift && trap own_xvfb_stop EXIT && '
+               'own_xvfb_start -screen 0 2560x1440x24 -dpi 96 -nolisten tcp '
+               '&& "$@"',
+               "own-xvfb", str(ROOT / "scripts/lib/own-xvfb.sh"), *cmd]
+    # Its own process group, so a run that outlasts SUITE_TIMEOUT (or is
+    # interrupted) is killed whole: the wrapper, Playwright, Electron and the
+    # Xvfb, none of which may outlive the arm.
+    proc = subprocess.Popen(cmd, cwd=ROOT / "src/tests/gui",
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, encoding="utf-8", errors="replace",
+                            env=env, start_new_session=True)
     try:
-        if not env.get("DISPLAY") and sys.platform.startswith("linux"):
-            n = 99
-            while Path(f"/tmp/.X{n}-lock").exists():
-                n += 1
-            xvfb = subprocess.Popen(["Xvfb", f":{n}", "-screen", "0",
-                                     "2560x1440x24", "-dpi", "96",
-                                     "-nolisten", "tcp"],
-                                    stdout=subprocess.DEVNULL,
-                                    stderr=subprocess.DEVNULL)
-            import time
-            time.sleep(1)
-            env["DISPLAY"] = f":{n}"
-        spec = os.path.relpath(ROOT / suite_file(path), ROOT / "src/tests/gui")
-        proc = subprocess.run(["npx", "playwright", "test", spec],
-                              cwd=ROOT / "src/tests/gui", capture_output=True,
-                              text=True, timeout=SUITE_TIMEOUT,
-                              encoding="utf-8", errors="replace", env=env)
-    except subprocess.TimeoutExpired:
-        return RunResult(rc=1, ran=False, hung=True)
-    finally:
-        if xvfb is not None:
-            xvfb.kill()
-            xvfb.wait()
-    out = proc.stdout + proc.stderr
+        stdout, stderr = proc.communicate(timeout=SUITE_TIMEOUT)
+    except BaseException as e:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.communicate()
+        if isinstance(e, subprocess.TimeoutExpired):
+            return RunResult(rc=1, ran=False, hung=True)
+        raise
+    out = stdout + stderr
     res = RunResult(rc=proc.returncode, output=out)
     name = "gate:" + path
     if re.search(r"^\s*\d+ passed", out, re.M) and proc.returncode == 0:

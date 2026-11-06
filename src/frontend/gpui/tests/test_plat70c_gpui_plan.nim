@@ -20,6 +20,7 @@
 ## No mocks: the binary, the engine and the recording are the product's.
 
 import replay_prerequisite
+import ../../tui/tests/fixtures/fixture_provider
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unicode,
             unittest]
 
@@ -47,21 +48,12 @@ let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                    repo.parentDir / "isonim-gpui/rust/target/debug")
 let calcLines = readFile(repo / "test-programs/calc/main.py").splitLines
 
-proc fixture(prefix: string): string =
-  for kind, path in walkDir(repo / "test-logs/tui-fixtures"):
-    if kind == pcDir and path.extractFilename.startsWith(prefix & "-"):
-      return path
-  ""
-
-let calc = fixture("calc")
+let calc = requireFixture(fixtureSpec("calc"))
 
 proc windowPlan(ops: string; trace: var string; keymap = "cua"): JsonNode =
   if not fileExists(bin):
     raise newException(IOError, "prerequisite missing: " & bin &
                        " (just build-gpui)")
-  if calc.len == 0:
-    raise newException(IOError, "prerequisite missing: the calc tui-fixtures " &
-      "recording (the tui lane records it on its first run)")
   let state = createTempDir("plat70c-gpui-", "")
   var env = newStringTable()
   for k, v in envPairs():

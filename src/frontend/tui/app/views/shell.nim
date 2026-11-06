@@ -70,6 +70,7 @@ import ./test_results_pane
 import ./agent_activity_pane
 import ./problems_pane
 import ./requests_pane
+import ./low_level_code_pane
 import ./frame_overlay
 import ./variables
 import ./context_menu
@@ -202,6 +203,10 @@ type
     requests*: RequestsPaneModel
       ## PLAT-58. REQUESTS, as a value: the session's `RequestPanelVM` the
       ## desktop's panel draws too, read by `tui_session.requestsModelOf`.
+      ## Not loaded by default.
+    lowLevel*: LowLevelPaneModel
+      ## PLAT-60. LOW LEVEL CODE, as a value: the session's `LowLevelCodeVM`
+      ## the desktop's view draws too, read by `tui_session.lowLevelModelOf`.
       ## Not loaded by default.
     vcs*: VcsPaneModel
       ## PLAT-47 deliverable 4. The VCS pane, as a value: the shared `VCSVM`
@@ -918,6 +923,10 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   elif region.pane == paneRequests and model.requests.loaded:
     belowStrip:
       discard paintRequests(g, content, model.requests)
+  # PLAT-60. LOW LEVEL CODE — its controls row is content, so below the strip.
+  elif region.pane == paneLowLevelCode and model.lowLevel.loaded:
+    belowStrip:
+      discard paintLowLevelCode(g, content, model.lowLevel)
   elif region.pane == paneBuildOutput:
     # NO EMPTINESS GUARD: an idle BUILD pane is a statement — `[idle] build:
     # not started` — and a user who has just pressed `:build` needs to see the

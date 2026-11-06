@@ -50,6 +50,7 @@
 ## No mocks: the shipped binary, real recordings, a real `replay-server`.
 
 import replay_prerequisite
+import ../../tui/tests/fixtures/fixture_provider
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
 import ./gpui_child_env
 from std/unicode import runeLen
@@ -75,8 +76,6 @@ const
     ## the case asserted no menu (2).
     ## PLAT-51: 112 -> 108 — the Timeline's K30 case (3) removed with the
     ## pane, and the history / origin read in the pane, not over it (-1).
-  CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
-  MultiRootPrefix = "multi_root-"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1440
   H = 1400
@@ -85,13 +84,13 @@ let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 let bin = repo / "build/bin/codetracer-gpui"
 let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                    repo.parentDir / "isonim-gpui/rust/target/debug")
-let calc = repo / CalcFixture
+let calc = requireFixture(fixtureSpec("calc"))
 
 proc multiRoot(): string =
-  for kind, path in walkDir(repo / "test-logs/tui-fixtures"):
-    if kind == pcDir and path.extractFilename.startsWith(MultiRootPrefix):
-      return path
-  ""
+  ## The `multi_root` recording, recorded on first use by the fixture
+  ## provider (the spec the tui lane's file-tree suites resolve).
+  requireFixture(pythonScriptSpec("multi_root",
+                                  "test-programs/multi_root/app/main.py"))
 
 proc windowPlan(ops: string; subject = ""; pre: seq[string] = @[];
                 trace: var string; workDir = ""): JsonNode =

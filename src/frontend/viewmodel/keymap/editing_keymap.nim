@@ -66,13 +66,11 @@
 ## structural and needs no number; the performance argument would need one and
 ## does not have one, so it is not made.
 ##
-## **ONE TRIE PER SCOPE, BUILT FROM THE BINDINGS ADMISSIBLE IN IT.** The scope
-## (§4.3) is five dimensions and the product of their cardinalities is 84 tries;
-## building them all eagerly would be a cache, and a cache is a second thing to
-## invalidate. `trieFor(km, scope)` filters and builds, and a front-end calls it
-## when the scope changes. That also makes the conflict rule exact: *"no chord
-## bound twice IN A SCOPE"* is a property of the trie the scope produces, so the
-## detector is run per scope and has nothing to assume.
+## **ONE COMPILED TRIE PER SNAPSHOT AND SCOPE.** The cache includes the
+## complete scope, table and precedence policy. Keymap edits create a new
+## snapshot; they cannot leave an old scope trie attached to changed rows.
+## Trie storage is private and layers hold its reference, so JS resolution
+## neither rebuilds nor deep-copies the binding table on each key.
 ##
 ## =========================================================================
 ## MODAL STATE LIVES IN THE EDITOR (§3) AND THIS MODULE HOLDS NONE OF IT
@@ -125,7 +123,7 @@
 ## this module's body for a field assignment on the state and requires the set
 ## to be exactly the pending buffer.
 
-import std/[algorithm, strutils, tables]
+import std/[algorithm, hashes, strutils, tables]
 
 import ../editor/operations
 import ../viewmodels/product_mode
@@ -243,7 +241,15 @@ type
       ## thing a user is told and the thing the resolver matches are two facts.
 
   EditingKeymap* = object
-    bindings*: seq[EditingBinding]
+    ## Value semantics over an immutable binding snapshot. Mutation detaches;
+    ## repeated resolution shares only the snapshot's compiled trie cache.
+    snapshot: KeymapSnapshot
+
+  TrieCacheKey = tuple[scope: EditingScope, table: string, laterFirst: bool]
+
+  KeymapSnapshot = ref object
+    rows: seq[EditingBinding]
+    tries: Table[TrieCacheKey, EditingTrie]
 
   TrieNode* = object
     ## `children` maps a chord to a node index. `binding` is an index into the
@@ -252,16 +258,16 @@ type
     children*: Table[string, int]
     binding*: int
 
-  EditingTrie* = object
-    nodes*: seq[TrieNode]
+  EditingTrie* = ref object
+    nodeData: seq[TrieNode]
       ## Node 0 is the root and carries no chord.
-    bindings*: seq[EditingBinding]
+    bindingData: seq[EditingBinding]
       ## The rows admissible in the scope this trie was built for.
-    duplicates*: seq[string]
+    duplicateData: seq[string]
       ## Chord sequences claimed by two rows. Populated at BUILD time: the
       ## second row to reach a node that already carries a binding is the
       ## duplicate, and it is recorded rather than silently overwriting.
-    prefixed*: seq[string]
+    prefixData: seq[string]
       ## Chord sequences that are a proper prefix of another in the same scope.
       ## A node with a binding AND children.
 
@@ -446,6 +452,65 @@ const
     ## lines: a reason set whose members are not each demonstrated is a reason
     ## set with arms nobody has seen fire.
 
+# A binding contains a reference expression tree, so seq value semantics alone
+# do not isolate callers. Clone it at the snapshot's read/write boundaries.
+func cloneCondition(e: WhenExpr): WhenExpr =
+  if e.isNil: return nil
+  new result
+  result[] = e[]
+  case e.kind
+  of wkTrue, wkKey, wkEq, wkNe: discard
+  of wkNot: result.operand = cloneCondition(e.operand)
+  of wkAnd, wkOr:
+    result.left = cloneCondition(e.left)
+    result.right = cloneCondition(e.right)
+
+func copyBindings(rows: seq[EditingBinding]): seq[EditingBinding] =
+  result = rows
+  for row in result.mitems:
+    row.scope.cond = cloneCondition(row.scope.cond)
+
+func newEditingKeymap*(bindings: seq[EditingBinding] = @[]): EditingKeymap =
+  ## Load an isolated snapshot. Read access and later edits cannot mutate it.
+  EditingKeymap(snapshot: KeymapSnapshot(rows: copyBindings(bindings)))
+
+func bindings*(km: EditingKeymap): seq[EditingBinding] =
+  ## A detached value for inspection; resolution reads private storage directly.
+  if not km.snapshot.isNil: result = copyBindings(km.snapshot.rows)
+
+func bindingsFor*(km: EditingKeymap; operation: string;
+                  argument = ""): seq[EditingBinding] =
+  ## The rows naming `operation(argument)`, in table order, detached. A chord
+  ## lookup runs per menu item and per unbound key, so it copies only the
+  ## rows it matches rather than the whole snapshot.
+  if km.snapshot.isNil: return
+  for i in 0 ..< km.snapshot.rows.len:
+    # A template, not a `let`: on the JS backend a `let` deep-copies the row.
+    template b: untyped = km.snapshot.rows[i]
+    if b.operation == operation and b.argument == argument:
+      result.add b
+      result[^1].scope.cond = cloneCondition(b.scope.cond)
+
+func bindingCount*(km: EditingKeymap): int =
+  ## Constant-time emptiness/count query without copying the snapshot.
+  if not km.snapshot.isNil: result = km.snapshot.rows.len
+
+proc `bindings=`*(km: var EditingKeymap; rows: seq[EditingBinding]) =
+  ## Replacing bindings starts a new cache and leaves copied keymaps intact.
+  km = newEditingKeymap(rows)
+
+proc addBinding*(km: var EditingKeymap; row: EditingBinding) =
+  ## Construction/import helper; detach rather than invalidate a shared cache.
+  var rows = km.bindings
+  rows.add row
+  km = newEditingKeymap(rows)
+
+func nodes*(t: EditingTrie): seq[TrieNode] = t.nodeData
+func bindings*(t: EditingTrie): seq[EditingBinding] = copyBindings(t.bindingData)
+func duplicates*(t: EditingTrie): seq[string] = t.duplicateData
+func prefixed*(t: EditingTrie): seq[string] = t.prefixData
+func nodeCount*(t: EditingTrie): int = t.nodeData.len
+
 # ===========================================================================
 # THE SCOPE
 # ===========================================================================
@@ -481,9 +546,9 @@ func admits*(bs: BindingScope; scope: EditingScope): bool =
 # ===========================================================================
 
 proc newTrie(): EditingTrie =
-  EditingTrie(nodes: @[TrieNode(chord: "", children: initTable[string, int](),
+  EditingTrie(nodeData: @[TrieNode(chord: "", children: initTable[string, int](),
                                 binding: -1)],
-              bindings: @[], duplicates: @[], prefixed: @[])
+              bindingData: @[], duplicateData: @[], prefixData: @[])
 
 proc insert(t: var EditingTrie; index: int) =
   ## Walk the chords, creating nodes, and claim the terminal one.
@@ -492,27 +557,27 @@ proc insert(t: var EditingTrie; index: int) =
   ## that already carries a binding is recorded in `duplicates` and does NOT
   ## overwrite: a table that silently overwrote would resolve to whichever row
   ## was inserted last, which is §2.4's `move-line-up` defect one layer up.
-  let b = t.bindings[index]
+  let b = t.bindingData[index]
   var cur = 0
   for chord in b.chords:
-    if not t.nodes[cur].children.hasKey(chord):
-      t.nodes.add TrieNode(chord: chord, children: initTable[string, int](),
+    if not t.nodeData[cur].children.hasKey(chord):
+      t.nodeData.add TrieNode(chord: chord, children: initTable[string, int](),
                            binding: -1)
-      t.nodes[cur].children[chord] = t.nodes.len - 1
-    cur = t.nodes[cur].children[chord]
-  if t.nodes[cur].binding >= 0:
+      t.nodeData[cur].children[chord] = t.nodeData.len - 1
+    cur = t.nodeData[cur].children[chord]
+  if t.nodeData[cur].binding >= 0:
     let seqText = b.chords.join(" ")
-    if seqText notin t.duplicates: t.duplicates.add seqText
+    if seqText notin t.duplicateData: t.duplicateData.add seqText
   else:
-    t.nodes[cur].binding = index
+    t.nodeData[cur].binding = index
 
 proc findPrefixConflicts(t: var EditingTrie) =
   ## A node that carries a binding AND has children: the shorter sequence can
   ## never be typed, because the resolver is still waiting for the longer one.
-  for node in t.nodes:
+  for node in t.nodeData:
     if node.binding >= 0 and node.children.len > 0:
-      let seqText = t.bindings[node.binding].chords.join(" ")
-      if seqText notin t.prefixed: t.prefixed.add seqText
+      let seqText = t.bindingData[node.binding].chords.join(" ")
+      if seqText notin t.prefixData: t.prefixData.add seqText
 
 func tableOf*(b: EditingBinding): string =
   ## The row's table; "" is the editor's (see `EditingBinding.table`).
@@ -531,29 +596,34 @@ proc trieFor*(km: EditingKeymap; scope: EditingScope;
   ## sequence the LATER one carries the node — VS Code's last-wins rule for
   ## a user's `keybindings.json` (§5.1). A base never needs it: two base rows
   ## that can both hold are a conflict and the base does not load.
+  let cacheKey: TrieCacheKey = (scope, table, laterFirst)
+  if not km.snapshot.isNil and km.snapshot.tries.hasKey(cacheKey):
+    return km.snapshot.tries[cacheKey]
   result = newTrie()
+  if km.snapshot.isNil: return
   var order: seq[int] = @[]
-  for i, b in km.bindings:
+  for i, b in km.snapshot.rows:
     if b.model != scope.model: continue
     if tableOf(b) != table: continue
     if not b.scope.admits(scope): continue
     order.add i
   if laterFirst:
     for i in countdown(order.len - 1, 0):
-      result.bindings.add km.bindings[order[i]]
-      result.insert(result.bindings.len - 1)
+      result.bindingData.add km.snapshot.rows[order[i]]
+      result.insert(result.bindingData.len - 1)
   else:
     for i in order:
-      result.bindings.add km.bindings[i]
-      result.insert(result.bindings.len - 1)
+      result.bindingData.add km.snapshot.rows[i]
+      result.insert(result.bindingData.len - 1)
   result.findPrefixConflicts()
+  km.snapshot.tries[cacheKey] = result
 
 func nodeAfter(t: EditingTrie; chords: seq[string]): int =
   ## The node `chords` reaches, or -1.
   var cur = 0
   for c in chords:
-    if not t.nodes[cur].children.hasKey(c): return -1
-    cur = t.nodes[cur].children[c]
+    if not t.nodeData[cur].children.hasKey(c): return -1
+    cur = t.nodeData[cur].children[c]
   cur
 
 # ===========================================================================
@@ -565,7 +635,7 @@ proc conflictsIn*(km: EditingKeymap; scope: EditingScope): (seq[string], seq[str
   ## resolver walks, which is what makes a clean report a statement about
   ## resolution rather than about a second list.
   let t = trieFor(km, scope)
-  (t.duplicates, t.prefixed)
+  (t.duplicateData, t.prefixData)
 
 # ===========================================================================
 # THE RESOLVER — §4.1
@@ -582,9 +652,9 @@ func decided(layer: ResolutionLayer; node: int; candidate: seq[string];
              timedOut: bool): EditingResolution =
   ## What reaching `node` of `layer`'s trie means: its binding, or — a node
   ## with children only — a pending prefix.
-  let n = layer.trie.nodes[node]
+  let n = layer.trie.nodeData[node]
   if n.binding >= 0:
-    let b = layer.trie.bindings[n.binding]
+    let b = layer.trie.bindingData[n.binding]
     return EditingResolution(
       kind: erOperation, operation: b.operation, args: b.args,
       argument: b.argument, character: "", spelling: b.spelling,
@@ -605,9 +675,9 @@ func shadowDefeatedAt(layer: ResolutionLayer; node: int): bool =
   ## trie is built from admitted rows — so what is asked is whether the row
   ## HAS a condition: an unconditional row in a text field's own table is
   ## not a reason to stop typing.
-  let n = layer.trie.nodes[node]
+  let n = layer.trie.nodeData[node]
   n.binding >= 0 and
-    layer.trie.bindings[n.binding].scope.whenText.len > 0
+    layer.trie.bindingData[n.binding].scope.whenText.len > 0
 
 proc resolveLayers*(layers: openArray[ResolutionLayer]; pending: PendingChords;
                     timeoutMs: int64; textEntry: bool; key: string;
@@ -988,14 +1058,14 @@ proc argsFor(decl: Declaration; raw: string): (bool, OpArgs) =
     a.operator = raw
   (true, a)
 
-proc unbind(km: var EditingKeymap; model: BaseKeymap; modes: set[EditingMode];
+proc unbind(rows: var seq[EditingBinding]; model: BaseKeymap; modes: set[EditingMode];
             chords: seq[string]) =
   var kept: seq[EditingBinding] = @[]
-  for b in km.bindings:
+  for b in rows:
     if b.model == model and b.chords == chords and b.scope.modes == modes:
       continue
     kept.add b
-  km.bindings = kept
+  rows = kept
 
 proc loadEditingKeymap*(base: EditingKeymap; text: string): EditingKeymapLoad =
   ## Layer a configuration over `base`.
@@ -1005,6 +1075,7 @@ proc loadEditingKeymap*(base: EditingKeymap; text: string): EditingKeymapLoad =
   ## re-decided, and the five error kinds are each reachable from a line a user
   ## could plausibly write.
   result = EditingKeymapLoad(keymap: base, errors: @[])
+  var rows = base.bindings
   var lineNo = 0
   for rawLine in text.splitLines():
     inc lineNo
@@ -1055,7 +1126,7 @@ proc loadEditingKeymap*(base: EditingKeymap; text: string): EditingKeymapLoad =
 
     let chords = fields[1 .. ^1]
     if rhs == "-":
-      unbind(result.keymap, model, modes, chords)
+      unbind(rows, model, modes, chords)
       continue
 
     var name = rhs
@@ -1085,8 +1156,10 @@ proc loadEditingKeymap*(base: EditingKeymap; text: string): EditingKeymapLoad =
           "' and '" & rawArg & "' is not one")
       continue
 
-    unbind(result.keymap, model, modes, chords)
-    result.keymap.bindings.add EditingBinding(
+    unbind(rows, model, modes, chords)
+    rows.add EditingBinding(
       model: model, scope: BindingScope(modes: modes, products: {}, panes: {}),
       chords: chords, operation: name, args: args,
       spelling: chords.join(" "))
+
+  result.keymap = newEditingKeymap(rows)

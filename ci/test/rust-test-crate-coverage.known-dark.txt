@@ -17,8 +17,9 @@
 # Format: `<crate dir><TAB><reason>`. `#` comments and blank lines are ignored.
 #
 # ---------------------------------------------------------------------------
-# All five below were measured on 2026-09-08, at the commit that added this
-# gate. Together they hold 61 `#[test]`/`#[tokio::test]` functions that have
+# The entries below were measured on 2026-09-08, at the commit that added this
+# gate (five then; libs/ct-dap-client has since been wired into `just
+# test-rust`). Then they held 61 `#[test]`/`#[tokio::test]` functions that had
 # never executed in CI.
 #
 # The shared mechanism: none of these crates is a Cargo workspace member. Each
@@ -31,6 +32,5 @@
 
 libs/origin-classifier	20 tests, incl. tests/m1_verification.rs. Path dependency of src/db-backend (Cargo.toml:59), not a workspace member; no `cargo test` names it anywhere in justfile/ci/scripts/workflows.
 src/codetracer-bench	27 tests across five tests/*.rs. The justfile touches this crate four times (:4271,:4275,:4279,:4283) and every one is `cargo run --bin ct-bench`, never `cargo test`.
-libs/ct-dap-client	10 inline #[cfg(test)] tests. Same non-member path-dependency position as origin-classifier.
 libs/ct-lang	3 inline #[cfg(test)] tests. Same non-member path-dependency position as origin-classifier.
 src/db-backend/tree-sitter-trace	1 inline test in bindings/rust/lib.rs. An OPTIONAL path dependency (src/db-backend/Cargo.toml:176, behind the `dep:tree-sitter-tracepoint` feature at :299), so it is doubly out of reach: not a workspace member, and not even built unless that feature is on.

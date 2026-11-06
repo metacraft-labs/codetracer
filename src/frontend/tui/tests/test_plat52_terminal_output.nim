@@ -51,7 +51,7 @@ import ./fixtures/fixture_provider
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 130
+const ExpectedAssertions = 142
 
 var countedAssertions = 0
 
@@ -62,16 +62,6 @@ template ck(condition: untyped) =
 const
   Cols = 160
   Rows = 48
-
-proc pythonSpec(name: string): FixtureSpec =
-  FixtureSpec(
-    name: name, program: "test-programs/" & name & "/main.py",
-    recorder: "codetracer-python-recorder",
-    probe: FixtureProbe(kind: pkPythonRecorder),
-    buildHint: "Install codetracer_python_recorder into the interpreter " &
-               "`ct` will use (the repo's .python-recorder-venv, or " &
-               "$CODETRACER_PYTHON_INTERPRETER).",
-    blockedOn: "")
 
 proc newRuntime(): TuiRuntime =
   let caps = resolveCapabilities(
@@ -114,6 +104,18 @@ proc showTerminalOutput(s: TuiSession; rt: TuiRuntime): bool =
       return rt.shellScreenOf().geometry.projection.regions.len > 0
   false
 
+template goToEndFromEditor(s: TuiSession; rt: TuiRuntime) =
+  ## CUA's letter debugger commands belong to the read-only editor or a
+  ## Debug list, not the output pane. Reach that scope through Alt+V, then
+  ## return through the tab's real pointer path. Keep these checks at the
+  ## test call site so unittest records their failures on the current test.
+  block:
+    s.send(rt, "\ev")
+    ck rt.focus.focusedPane() == (true, paneEditor)
+    s.send(rt, "G")
+    ck s.showTerminalOutput(rt) and
+      rt.focus.focusedPane() == (true, paneTerminalOutput)
+
 proc terminalArea(rt: TuiRuntime): CellArea =
   let screen = rt.shellScreenOf()
   for region in screen.geometry.projection.regions:
@@ -147,8 +149,11 @@ proc styleAtText(rt: TuiRuntime; row: int; needle: string): CellStyle =
     c += w
   CellStyle()
 
-let colours = resolveFixture(pythonSpec("terminal_colours"))
-let screenRec = resolveFixture(pythonSpec("terminal_screen"))
+# The same specs `../../gpui/tests/test_plat52_gpui_plan.nim` resolves, from
+# the one constructor, so both lanes share (and either lane makes) the
+# recordings.
+let colours = resolveFixture(pythonScriptSpec("terminal_colours"))
+let screenRec = resolveFixture(pythonScriptSpec("terminal_screen"))
 
 suite "PLAT-52: the terminal draws the Terminal Output pane":
 
@@ -173,7 +178,7 @@ suite "PLAT-52: the terminal draws the Terminal Output pane":
       ck vm.heldLine(i).isSome
       lines[i] = vm.heldLine(i).get
     # The end of the output, where following the last write puts the view.
-    s.send(rt, "G")
+    goToEndFromEditor(s, rt)
     ck vm.heldLine(vm.lineCount - 1).isSome
     lines[^1] = vm.heldLine(vm.lineCount - 1).get
     ck lines[0].lineText == "red plain bold green"
@@ -225,7 +230,7 @@ suite "PLAT-52: the terminal draws the Terminal Output pane":
     ck not resolved.dim
     ck resolveRoles(futureRed, cdMonochrome, dmDark).dim
     # Go to the end: everything is past, drawn as written.
-    s.send(rt, "G")
+    goToEndFromEditor(s, rt)
     rt.app.terminalOutput.follow = false
     rt.app.terminalOutput.scrollTop = 0
     rt.app.terminalOutput.ensureShown(rt.terminalOutputRows())
@@ -302,7 +307,7 @@ suite "PLAT-52: the terminal draws the Terminal Output pane":
     ck geo.trackCol == a.col + a.width - 1
     # Away from the entry (where the first write's jump would land too), so
     # a scrub that moved the debugger anywhere is seen.
-    s.send(rt, "G")
+    goToEndFromEditor(s, rt)
     let tick = s.session.getCurrentRRTicks()
     # A press at the track's END shows the LAST line of the whole output.
     # (Following, the view is already there and the thumb is at the end: the
@@ -356,7 +361,7 @@ suite "PLAT-52: the terminal draws the Terminal Output pane":
     let (rt, s) = open(colours.tracePath)
     defer: s.close()
     ck s.showTerminalOutput(rt)
-    s.send(rt, "G")
+    goToEndFromEditor(s, rt)
     let a = rt.terminalArea()
     let m = rt.app.terminalOutput
     let geo = terminalPaneGeometry(m, a)
@@ -387,7 +392,7 @@ suite "PLAT-52: the terminal draws the Terminal Output pane":
     ck pv.root.options.len == vm.lines.val.len
     ck pv.root.options[0].label == "red plain bold green"
     ck pv.root.options[0].id.startsWith("line-0-")
-    s.send(rt, "G")
+    goToEndFromEditor(s, rt)
     pv = paneView(paneTerminalOutput, vm, Budget(name: "plat52", lines: 1, cells: 80), "terminal")
     ck pv.root.options[^1].label == "done"
     ck pv.root.options[^1].id.startsWith("line-128-")
@@ -411,7 +416,7 @@ suite "PLAT-52: a full-screen program's SCREEN, and its scrubber":
     ck vm.screen.marks.len >= 3
     ck rt.app.terminalOutput.screenShown
     # Seek to the end: the program has left the alternate screen.
-    s.send(rt, "G")
+    goToEndFromEditor(s, rt)
     var text = rt.paneRows().join("\n")
     ck text.contains("dashboard finished: 6 tasks, 30 frames")
     # Step back with Left (the pane is focused by the click): the write

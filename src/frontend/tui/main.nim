@@ -80,6 +80,7 @@ import ./host/file_worker
 import ./host/key_journal
 import ./host/layout_store
 import ./host/native_host
+import ./app/views/low_level_code_pane   # PLAT-60: `LowLevelAct`
 import ./host/pane_server
 from ../viewmodel/host/find_in_files import running   # PLAT-57
 from ../viewmodel/host/native_file_tree import wireNativeFileOperations,
@@ -808,6 +809,10 @@ proc interactive(command: TuiCommand): int =
   let projectRoot = getCurrentDir()
   app.projectRoot = projectRoot
   let rt = newTuiRuntime(app, negotiation.caps, size.cols, size.rows)
+  # Opening a replay gives its editor the keyboard. Seed this before the
+  # layout binding copies the focus; restoring a saved layout then keeps it
+  # only while the editor is visible. Empty shells keep projection order.
+  discard rt.focus.focusPaneKind(paneEditor)
   rt.eraseByte = driver.eraseByte()
   rt.themeService = themeSwitch(negotiation, driver, rt)
   wireTerminalService(rt, negotiation, driver)
@@ -1163,6 +1168,11 @@ proc interactive(command: TuiCommand): int =
   # the idle tick below.
   app.requestsAct = proc(act: RequestsAct): RequestsActResult =
     session.requestsAct(rt, act)
+  # PLAT-60: the Low Level Code pane — a press, a menu, a key, the sync
+  # toggle, the editor's caret, a step — done through the shown session's
+  # `LowLevelCodeVM`.
+  app.lowLevelAct = proc(act: LowLevelAct): LowLevelActResult =
+    session.lowLevelAct(rt, act)
 
   # PLAT-47 deliverable 4: the VCS pane reads the directory the desktop's VCS
   # panel reads for a replay — the process's own working directory.

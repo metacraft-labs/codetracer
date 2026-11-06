@@ -851,7 +851,7 @@ proc removeBindings(km: var EditingKeymap; modes: set[EditingMode];
       kept.add b
   km.bindings = kept
 
-proc importVimConfig*(text: string; base = EditingKeymap()): VimImport =
+proc importVimConfig*(text: string; base = newEditingKeymap()): VimImport =
   ## Read a `.vimrc` / `init.vim` and produce bindings plus the report.
   ##
   ## **EVERY LINE GETS AN OUTCOME.** A line this importer does not act on is

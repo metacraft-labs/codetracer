@@ -72,15 +72,11 @@ MINGW* | MSYS* | CYGWIN* | *_NT* | Darwin)
 	if [ -n "${DISPLAY:-}" ]; then
 		run_spec "$@"
 	else
-		display_num=99
-		while [ -e "/tmp/.X${display_num}-lock" ]; do
-			display_num=$((display_num + 1))
-		done
-		Xvfb ":${display_num}" -screen 0 2560x1440x24 -dpi 96 -nolisten tcp &
-		xvfb_pid=$!
-		trap 'kill $xvfb_pid 2>/dev/null || true; rm -rf "$work"' EXIT
-		sleep 1
-		export DISPLAY=":${display_num}"
+		# Started through the shared helper, which waits for the display to
+		# answer instead of sleeping (scripts/lib/own-xvfb.sh).
+		. "$repo/scripts/lib/own-xvfb.sh"
+		trap 'own_xvfb_stop; rm -rf "$work"' EXIT
+		own_xvfb_start -screen 0 2560x1440x24 -dpi 96 -nolisten tcp || exit 1
 		run_spec "$@"
 	fi
 	;;

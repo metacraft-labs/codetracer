@@ -44,7 +44,7 @@
   "H3": "rt.paneHas(\"You\")",
   "H4": "agreed",
   "H5": "sawRunning",
-  "K1": "FAIL - the live workflows run the guard on agents, STRICT, on the lock files (rc=1)",
+  "K1": "FAIL - the live workflow preserves strict coverage without agent CI (rc=1)",
   "K2": "FAIL - the live workflows run the guard on agents, STRICT, on the lock files (rc=1)",
   "R1": "opened[1].policy == topCurrentTab",
   "R2": "not s[0].contains(\" \u00d7 \")",

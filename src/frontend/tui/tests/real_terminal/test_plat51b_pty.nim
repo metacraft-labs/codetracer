@@ -49,7 +49,7 @@ const EditorTabText = " calc/main.py "
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 41
+const ExpectedAssertions = 43
 
 var countedAssertions = 0
 
@@ -306,16 +306,26 @@ suite "PLAT-51 part B on a real terminal: the focus highlight":
     var problems: seq[string] = @[]
     var checkedLeft, checkedRight, bodyRows = 0
     for step in 0 ..< 8:
+      # THE EDGES ARE READ OFF A SETTLED FRAME: the new focus ground, and the
+      # same ground on a second read 150 ms later. A frame read while the
+      # terminal is still drawing the move (the old pane's ground half
+      # cleared, the dividers not yet repainted) reported an edge problem
+      # under load that no settled screen has.
       var cells: seq[(int, int)] = @[]
+      var settled: Snapshot
       let deadline = getMonoTime() + initDuration(seconds = 10)
       while getMonoTime() < deadline:
         cells = sess.snap().focusCells()
-        if cells.len > 0 and cells notin seen: break
+        if cells.len > 0 and cells notin seen:
+          sleep(150)
+          settled = sess.snap()
+          if settled.focusCells() == cells: break
         sleep(50)
       if cells.len > 0 and cells notin seen:
+        if settled.len == 0: settled = sess.snap()
         seen.add cells
-        problems.add sess.snap().edgeProblems(cells, checkedLeft,
-                                               checkedRight, bodyRows)
+        problems.add settled.edgeProblems(cells, checkedLeft,
+                                          checkedRight, bodyRows)
       sess.send("\e[17~")              # F6, the next pane
     sess.quit()
     checkpoint("focus positions " & $seen.len & ", left edges " &
@@ -369,7 +379,21 @@ suite "PLAT-51 part B on a real terminal: live reflow while a divider is dragged
   test "with --live-resize=off a guide is drawn and nothing moves; Esc cancels":
     var sess = open(@["--live-resize=off"], freshDir("guide"))
     let row = 10
-    let s0 = sess.snap()
+    let initial = sess.snap()
+    let (filesRow, filesCol) = initial.findRow(" Files ")
+    let (vcsRow, vcsCol) = initial.findRow(" VCS ")
+    ck filesRow >= 0 and vcsRow >= 0
+    # Isolate guide cancellation from initial keyboard-focus chrome by
+    # selecting the visible Files tab before taking the comparison frame.
+    sess.click(filesRow, filesCol + 2)
+    var s0 = sess.snap()
+    let focusDeadline = getMonoTime() + initDuration(seconds = 20)
+    while getMonoTime() < focusDeadline:
+      if vcsRow >= 0 and s0[vcsRow][vcsCol + 1].bgHex == focusHex:
+        break
+      sleep(30)
+      s0 = sess.snap()
+    ck vcsRow >= 0 and s0[vcsRow][vcsCol + 1].bgHex == focusHex
     let divs = s0.dividerCols(row)
     let d = divs[0]
     sess.cellReport(0, row, d)

@@ -43,6 +43,11 @@
 # (no python3.13 needed to test the 3.13 case) and lets it seed versions that
 # do not exist on the host.
 #
+# One more covers the vacuous pass that lies in the shell rather than the tree:
+# `a dev shell that lost its exports is not a run outside the dev shell` runs
+# the guard with CT_DEV_SHELL set and the CODETRACER_PYTHON_* exports gone, and
+# asserts the failure that a run outside the shell, also covered, does not get.
+#
 # Pure bash. No network, no nix, no dev shell, no real Python, about a second.
 #
 # Run: bash ci/test/python-version-alignment-test.sh
@@ -780,6 +785,301 @@ RC=$?
 assert_rc "a different python3 ahead on PATH fails" "$RC" 1
 assert_contains "(C4) accuses the PATH search" "$OUT" "FAIL (C4) the first python3 on PATH is the declared interpreter"
 assert_contains "and explains how that produced the original defect" "$OUT" "propagating a different interpreter"
+
+echo
+echo "under the venv, python3 is the interpreter that carries the recorder"
+
+# make_interpreter <dir> <version> <importable>, where <importable> is
+#   yes         it carries the recorder
+#   no          it does not
+#   pythonpath  only through a non-empty PYTHONPATH, as the bare interpreter
+#               does in devShells.ci
+#   cwd         only from a directory other than /, as `python -c` does when
+#               the current directory holds the package
+make_interpreter() {
+	mkdir -p "$1"
+	cat >"$1/python3" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+*version_info*) echo "$2" ;;
+*codetracer_python_recorder*)
+	case "$3" in
+	yes) ;;
+	pythonpath) [ -n "\${PYTHONPATH:-}" ] || exit 1 ;;
+	cwd) [ "\$PWD" != / ] || exit 1 ;;
+	*) exit 1 ;;
+	esac
+	;;
+esac
+exit 0
+EOF
+	chmod +x "$1/python3"
+}
+
+# run_guard_in_shell <dir> <PATH prefix> [PYTHONPATH]: the exports of a real
+# shell, with CODETRACER_PYTHON_CMD the pinned env's interpreter. PYTHONPATH is
+# always set here, so the dev shell this suite runs in cannot decide a case.
+run_guard_in_shell() {
+	env CT_PYALIGN_ROOT="$1/repo" CT_PYALIGN_RECORDER="$1/recorder" \
+		CODETRACER_PYTHON_VERSION=3.12 CODETRACER_PYTHON_ABI_TAG=cpython-312 \
+		CODETRACER_PYTHON_CMD="$1/env/bin/python3" \
+		PYTHONPATH="${3:-}" \
+		PATH="$2:$PATH" \
+		bash "$GUARD" 2>&1
+}
+
+WS="$TMP/recorderfirst"
+make_tree "$WS" 12
+make_extension "$WS" 312
+make_venv "$WS" 3.12 yes
+make_interpreter "$WS/repo/.python-recorder-venv/bin" 3.12 yes
+make_interpreter "$WS/env/bin" 3.12 yes
+make_interpreter "$WS/bare/bin" 3.12 no
+VENV_BIN="$WS/repo/.python-recorder-venv/bin"
+OUT="$(run_guard_in_shell "$WS" "$VENV_BIN:$WS/env/bin:$WS/bare/bin")"
+RC=$?
+assert_rc "the env ahead of the bare interpreter passes" "$RC" 0
+assert_contains "(I1) confirms which interpreter it found" "$OUT" "ok   (I1) under the venv, the first python3 on PATH is \$CODETRACER_PYTHON_CMD ($WS/env/bin/python3)"
+assert_contains "(I2) ran the import" "$OUT" "ok   (I2)"
+assert_contains "(I3) ran it without PYTHONPATH" "$OUT" "ok   (I3)"
+
+# The defect as it was measured: the same minor version, so (C4) stays green,
+# and hidden by a venv that worked, so only the PATH underneath shows it.
+OUT="$(run_guard_in_shell "$WS" "$VENV_BIN:$WS/bare/bin:$WS/env/bin")"
+RC=$?
+assert_rc "a bare interpreter of the same version ahead of the env fails" "$RC" 1
+assert_contains "(I1) names the interpreter that won" "$OUT" "first is $WS/bare/bin/python3, expected $WS/env/bin/python3"
+assert_contains "(I2) reports the import that fails" "$OUT" "FAIL (I2)"
+assert_contains "(I3) reports it too" "$OUT" "FAIL (I3)"
+assert_absent "(C4) cannot see it, which is why (I) exists" "$OUT" "FAIL (C4)"
+
+OUT="$(run_guard_in_shell "$WS" "$VENV_BIN/:$WS/bare/bin:$WS/env/bin")"
+RC=$?
+assert_rc "a trailing slash does not let the venv hide the bare interpreter" "$RC" 1
+assert_contains "and the venv is not what (I1) found" "$OUT" "first is $WS/bare/bin/python3"
+
+WS="$TMP/recorderless"
+make_tree "$WS" 12
+make_extension "$WS" 312
+make_venv "$WS" 3.12 yes
+make_interpreter "$WS/env/bin" 3.12 no
+OUT="$(run_guard_in_shell "$WS" "$WS/env/bin")"
+RC=$?
+assert_rc "the pinned interpreter losing the recorder fails" "$RC" 1
+assert_contains "(I1) still finds the pinned interpreter" "$OUT" "ok   (I1)"
+assert_contains "(I2) is the one that fails" "$OUT" "FAIL (I2)"
+
+assert_contains "(I3) fails with it" "$OUT" "FAIL (I3)"
+
+# devShells.ci as measured: its PYTHONPATH names the env, so the bare
+# interpreter ahead of the env imports the recorder and (I2) cannot see it.
+WS="$TMP/masked"
+make_tree "$WS" 12
+make_extension "$WS" 312
+make_venv "$WS" 3.12 yes
+make_interpreter "$WS/env/bin" 3.12 yes
+make_interpreter "$WS/bare/bin" 3.12 pythonpath
+OUT="$(run_guard_in_shell "$WS" "$WS/bare/bin:$WS/env/bin" "$WS/env/site-packages")"
+RC=$?
+assert_rc "a bare interpreter rescued by PYTHONPATH fails" "$RC" 1
+assert_contains "(I2) is green, which is why it cannot stand alone" "$OUT" "ok   (I2)"
+assert_contains "(I3) sees through PYTHONPATH" "$OUT" "FAIL (I3)"
+
+# The right path, but the recorder only arrives from outside it: nothing but
+# (I3) can see this one.
+WS="$TMP/borrowed"
+make_tree "$WS" 12
+make_extension "$WS" 312
+make_venv "$WS" 3.12 yes
+make_interpreter "$WS/env/bin" 3.12 pythonpath
+OUT="$(run_guard_in_shell "$WS" "$WS/env/bin" "$WS/elsewhere")"
+RC=$?
+assert_rc "the pinned interpreter importing the recorder only through PYTHONPATH fails" "$RC" 1
+assert_contains "(I1) cannot see it" "$OUT" "ok   (I1)"
+assert_contains "(I2) cannot see it" "$OUT" "ok   (I2)"
+assert_contains "(I3) can" "$OUT" "FAIL (I3)"
+
+WS="$TMP/fromcwd"
+make_tree "$WS" 12
+make_extension "$WS" 312
+make_venv "$WS" 3.12 yes
+make_interpreter "$WS/env/bin" 3.12 cwd
+OUT="$(run_guard_in_shell "$WS" "$WS/env/bin")"
+RC=$?
+assert_rc "a recorder found only in the current directory fails" "$RC" 1
+assert_contains "(I2) does not count the current directory" "$OUT" "FAIL (I2)"
+assert_contains "(I3) does not count it either" "$OUT" "FAIL (I3)"
+
+# The two n/a arms. Neither may be how a dev shell gets past (I).
+WS="$TMP/recorderless"
+OUT="$(run_guard "$WS")"
+assert_contains "CT_PYALIGN_NO_ENV turns (I) into n/a rather than a pass" "$OUT" "n/a  (I) python3 under the venv -- suppressed"
+assert_absent "and runs none of it" "$OUT" "(I1)"
+
+WS="$TMP/cmdgone"
+make_tree "$WS" 12
+make_extension "$WS" 312
+make_venv "$WS" 3.12 yes
+OUT="$(run_guard_in_shell "$WS" "$WS/repo/.python-recorder-venv/bin")"
+RC=$?
+assert_rc "inside a dev shell, an unusable CODETRACER_PYTHON_CMD fails the run" "$RC" 1
+assert_contains "(C3) is the failure" "$OUT" "FAIL (C3)"
+assert_contains "and (I) says why it has nothing to check" "$OUT" "n/a  (I) python3 under the venv -- CODETRACER_PYTHON_CMD="
+
+echo
+echo "PYTHONPATH names no site-packages of another minor version"
+
+# devShells.default as measured: the 3.13 hook won, so every versioned entry
+# was 3.13 and none was the pin.
+WS="$TMP/foreignpath"
+make_tree "$WS" 12
+make_extension "$WS" 312
+make_venv "$WS" 3.12 yes
+make_interpreter "$WS/env/bin" 3.12 yes
+FOREIGN="/nix/store/x-python3.13-pytest-8.4.2/lib/python3.13/site-packages"
+OUT="$(run_guard_in_shell "$WS" "$WS/env/bin" "$FOREIGN:/nix/store/y-pre-commit-4.3.0/lib/python3.13/site-packages")"
+RC=$?
+assert_rc "a PYTHONPATH of another minor version fails" "$RC" 1
+assert_contains "(J1) is the failure" "$OUT" "FAIL (J1) PYTHONPATH names no site-packages of another minor version"
+assert_contains "and counts both entries against the pin" "$OUT" "2 entries built for another version than the declared 3.12 (0 for 3.12)"
+assert_contains "and names them" "$OUT" "$FOREIGN"
+assert_contains "and says where the fix goes" "$OUT" "binariesOnly"
+
+# One foreign entry among pinned ones is still the defect: it is searched
+# ahead of the interpreter's own site-packages wherever it sits.
+OUT="$(run_guard_in_shell "$WS" "$WS/env/bin" "/nix/store/z-python3-3.12.13-env/lib/python3.12/site-packages:$FOREIGN")"
+RC=$?
+assert_rc "one foreign entry among pinned ones fails" "$RC" 1
+assert_contains "(J1) counts it" "$OUT" "1 entry built for another version than the declared 3.12 (1 for 3.12)"
+
+# devShells.ci as measured, plus an unversioned source checkout, which is not
+# built for any interpreter.
+OUT="$(run_guard_in_shell "$WS" "$WS/env/bin" "/nix/store/z-python3-3.12.13-env/lib/python3.12/site-packages:/nix/store/w-python3.12-flake8-7.3.0/lib/python3.12/site-packages:$WS/recorder/src")"
+RC=$?
+assert_rc "a PYTHONPATH of the pinned version passes" "$RC" 0
+assert_contains "(J1) confirms it and counts the pinned entries" "$OUT" "ok   (J1) PYTHONPATH names no site-packages of another minor version (2 for 3.12)"
+
+# The verdict follows the declaration, not a literal: the same 3.13 path is
+# the pin's own once the recorder declares 3.13.
+WS="$TMP/foreignpath313"
+make_tree "$WS" 13
+make_extension "$WS" 313
+make_venv "$WS" 3.13 yes
+make_interpreter "$WS/env/bin" 3.13 yes
+OUT="$(env CT_PYALIGN_ROOT="$WS/repo" CT_PYALIGN_RECORDER="$WS/recorder" \
+	CODETRACER_PYTHON_VERSION=3.13 CODETRACER_PYTHON_ABI_TAG=cpython-313 \
+	CODETRACER_PYTHON_CMD="$WS/env/bin/python3" PYTHONPATH="$FOREIGN" \
+	PATH="$WS/env/bin:$PATH" bash "$GUARD" 2>&1)"
+assert_contains "(J1) passes the same entry when 3.13 is declared" "$OUT" "ok   (J1) PYTHONPATH names no site-packages of another minor version (1 for 3.13)"
+
+WS="$TMP/foreignpath"
+OUT="$(run_guard "$WS" PYTHONPATH="$FOREIGN")"
+assert_contains "CT_PYALIGN_NO_ENV turns (J) into n/a rather than a pass" "$OUT" "n/a  (J) PYTHONPATH -- suppressed"
+assert_absent "and runs none of it" "$OUT" "(J1)"
+
+echo
+echo "a dev shell that lost its exports is not a run outside the dev shell"
+
+# Every other case above sets CODETRACER_PYTHON_VERSION, or suppresses the
+# environment, so none of them can tell these two runs apart: with the exports
+# gone, (C) and (I) have nothing to read either way. What separates them is
+# CT_DEV_SHELL, which ci-base.nix's hook exports independently of those
+# variables.
+#
+# run_guard_in_marked_shell <dir> <PATH prefix> [assignments...]: starts from no
+# CODETRACER_PYTHON_* exports and no marker, whatever shell this suite runs in,
+# and applies only what the case names.
+run_guard_in_marked_shell() {
+	local ws="$1" path_prefix="$2"
+	shift 2
+	env -u CT_DEV_SHELL -u CT_PYALIGN_NO_ENV \
+		-u CODETRACER_PYTHON_VERSION -u CODETRACER_PYTHON_ABI_TAG \
+		-u CODETRACER_PYTHON_CMD -u CODETRACER_PYTHON_INTERPRETER \
+		CT_PYALIGN_ROOT="$ws/repo" CT_PYALIGN_RECORDER="$ws/recorder" \
+		PYTHONPATH="" PATH="$path_prefix:$PATH" \
+		"$@" bash "$GUARD" 2>&1
+}
+
+WS="$TMP/marked"
+make_tree "$WS" 12
+make_extension "$WS" 312
+make_venv "$WS" 3.12 yes
+make_interpreter "$WS/env/bin" 3.12 yes
+GOOD_CMD="CODETRACER_PYTHON_CMD=$WS/env/bin/python3"
+GOOD_VERSION="CODETRACER_PYTHON_VERSION=3.12"
+GOOD_ABI="CODETRACER_PYTHON_ABI_TAG=cpython-312"
+
+# The issue's case: everything below (A) still passes, so without (C1) and (C3)
+# this exits 0 exactly as a run outside the shell does.
+OUT="$(run_guard_in_marked_shell "$WS" "$WS/env/bin" CT_DEV_SHELL=1)"
+RC=$?
+assert_rc "a dev shell without its Python exports fails" "$RC" 1
+assert_contains "(C1) names the missing version export" "$OUT" "FAIL (C1)"
+assert_contains "and says which file exports it" "$OUT" "nix/shells/ci-base.nix"
+assert_contains "(C2) reports the missing ABI tag" "$OUT" "FAIL (C2)"
+assert_contains "(C3) reports the missing interpreter" "$OUT" "FAIL (C3)"
+assert_contains "(A1) falls back to the sibling declaration" "$OUT" "(A1) declared version comes from $WS/recorder/.python-version: 3.12"
+assert_absent "and does not claim the run is outside the dev shell" "$OUT" "not in the dev shell"
+assert_contains "(I) says why it has nothing to check" "$OUT" "n/a  (I) python3 under the venv -- CODETRACER_PYTHON_CMD=<unset>"
+
+OUT="$(run_guard_in_marked_shell "$WS" "$WS/env/bin" CT_DEV_SHELL=1 "$GOOD_CMD" "$GOOD_ABI")"
+RC=$?
+assert_rc "a dev shell without CODETRACER_PYTHON_VERSION alone fails" "$RC" 1
+assert_contains "(C1) is the failure" "$OUT" "FAIL (C1)"
+assert_absent "(C3) is not accused" "$OUT" "FAIL (C3)"
+assert_contains "and (I) still ran" "$OUT" "ok   (I3)"
+
+OUT="$(run_guard_in_marked_shell "$WS" "$WS/env/bin" CT_DEV_SHELL=1 "$GOOD_VERSION" "$GOOD_ABI")"
+RC=$?
+assert_rc "a dev shell without CODETRACER_PYTHON_CMD alone fails" "$RC" 1
+assert_contains "(C3) is the failure" "$OUT" "FAIL (C3)"
+assert_contains "(C1) is not accused" "$OUT" "ok   (C1)"
+
+OUT="$(run_guard_in_marked_shell "$WS" "$WS/env/bin" CT_DEV_SHELL=1 "$GOOD_VERSION" "$GOOD_ABI" "$GOOD_CMD")"
+RC=$?
+assert_rc "a dev shell with all of its exports passes" "$RC" 0
+assert_contains "(C1) confirms the export" "$OUT" "ok   (C1)"
+
+# The converse. IN_NIX_SHELL is in the environment of every Nix shell, .#lint
+# and .#pre-commit among them, and neither exports these variables; that this
+# stays green is why the guard does not identify the shell by it.
+OUT="$(run_guard_in_marked_shell "$WS" "$WS/env/bin" IN_NIX_SHELL=impure)"
+RC=$?
+assert_rc "another Nix shell is not mistaken for the dev shell" "$RC" 0
+assert_contains "(C) is n/a there" "$OUT" "n/a  (C) dev-shell exports -- not inside the dev shell"
+assert_contains "and so is (I)" "$OUT" "n/a  (I) python3 under the venv"
+assert_absent "and (C1) does not run" "$OUT" "(C1)"
+
+OUT="$(run_guard_in_marked_shell "$WS" "$WS/env/bin" CT_DEV_SHELL=1 CT_PYALIGN_NO_ENV=1)"
+RC=$?
+assert_rc "CT_PYALIGN_NO_ENV ignores the marker with the other exports" "$RC" 0
+assert_contains "(C) reports the suppression" "$OUT" "n/a  (C) dev-shell exports -- suppressed"
+
+# Everything above takes the marker as given, so this is what ties it to the
+# real shell. Without the export the dev shell would read as "outside", and
+# every case above would stay green while the guard went back to n/a. Top-level
+# indentation is the check that it sits in no conditional of the hook; before
+# the Python exports is the order the hook's top guarantees.
+CI_BASE_NIX="$REPO_ROOT/nix/shells/ci-base.nix"
+hook_line="$(grep -n -m1 -E '^  shellHook = ' "$CI_BASE_NIX" | cut -d: -f1)"
+marker_line="$(grep -n -m1 -E '^    export CT_DEV_SHELL=1$' "$CI_BASE_NIX" | cut -d: -f1)"
+python_line="$(grep -n -m1 -E '^    export CODETRACER_PYTHON_CMD=' "$CI_BASE_NIX" | cut -d: -f1)"
+if [ -n "$hook_line" ] && [ -n "$marker_line" ] && [ -n "$python_line" ] &&
+	[ "$hook_line" -lt "$marker_line" ] && [ "$marker_line" -lt "$python_line" ]; then
+	ok "ci-base.nix's hook exports CT_DEV_SHELL unconditionally, before the Python exports"
+else
+	bad "ci-base.nix's hook exports CT_DEV_SHELL unconditionally, before the Python exports" \
+		"shellHook line: ${hook_line:-<none>}; marker line: ${marker_line:-<none>}; python line: ${python_line:-<none>}"
+fi
+LINT_NIX="$REPO_ROOT/nix/shells/lint.nix"
+if [ ! -f "$LINT_NIX" ]; then
+	bad "the lint shell, which has no Python exports, does not claim to be the dev shell" \
+		"$LINT_NIX does not exist, so there is nothing to read"
+elif grep -qE '^[[:space:]]*export CT_DEV_SHELL' "$LINT_NIX"; then
+	bad "the lint shell, which has no Python exports, does not claim to be the dev shell"
+else
+	ok "the lint shell, which has no Python exports, does not claim to be the dev shell"
+fi
 
 echo
 if [ "$FAILED" -ne 0 ]; then

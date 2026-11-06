@@ -574,6 +574,35 @@ suite "the locals budget follows the state pane":
     check asked[0]["countBudget"].getInt ==
       (10 + LeadRows + TrailRows) * LocalsMinCountLimit
 
+  test "at one stop a shorter pane asks nothing, and a taller one asks more":
+    # The State pane's loading indicator takes a row from the pane while a
+    # load is in flight and gives it back with the answer. A budget that
+    # followed that would ask again on both edges, forever.
+    let mock = newMockBackendService(autoRespond = true)
+    let session = createSessionVM(mock.toBackendService())
+    session.store.claimLocalsLoading()
+    session.initializePanelViewModels()
+    session.stateVM.setViewport(Viewport(rows: 19))
+    session.store.updateDebuggerPosition(5'u64, "main.nim", 2)
+    let loader = createStopLoader(session)
+    loader.follow()
+    check mock.sent("ct/load-locals").len == 1
+    session.stateVM.setViewport(Viewport(rows: 18))
+    session.stateVM.setViewport(Viewport(rows: 19))
+    check mock.sent("ct/load-locals").len == 1
+    session.stateVM.setViewport(Viewport(rows: 25))
+    let grown = mock.sent("ct/load-locals")
+    check grown.len == 2
+    check grown[1]["countBudget"].getInt ==
+      (25 + LeadRows + TrailRows) * LocalsMinCountLimit
+    # The next stop holds nothing yet, so it goes by the pane again.
+    session.stateVM.setViewport(Viewport(rows: 18))
+    session.store.updateDebuggerPosition(6'u64, "main.nim", 3)
+    let next = mock.sent("ct/load-locals")
+    check next.len == 3
+    check next[2]["countBudget"].getInt ==
+      (18 + LeadRows + TrailRows) * LocalsMinCountLimit
+
 suite "the omnibar's symbols are the recording's functions":
 
   test "the engine's list, each going to its first call":
@@ -586,6 +615,45 @@ suite "the omnibar's symbols are the recording's functions":
     check found[0].label == "calc"
     check found[0].target == "40"
     check found[0].detail == "calc.rs:3"
+
+  test "an answer with no symbols list leaves them alone, and does not crash":
+    ## REGRESSION. `applySymbolsResponse` read `.kind` off the result of
+    ## `getOrDefault`, which is `nil` for a missing key. Its own docstring
+    ## promises that "an answer without a `symbols` list leaves them alone",
+    ## and instead it dereferenced nil. In the shipped `-d:release` build
+    ## there is no nil check, so this killed `codetracer-gpui` at startup
+    ## (`native_host.loadRecordingPanes` applies the real
+    ## `ct/load-symbols` answer) and blocked every macOS window capture
+    ## from 2026-10-20 to 2026-10-31.
+    ##
+    ## Each shape below reached the same line. They are separate cases
+    ## because they arrive by different routes: an enveloped response whose
+    ## body carries no symbols, a bare body, an empty object, and a `body`
+    ## that is not an object at all.
+    for answer in [
+        %*{"body": {"total": 0}},        # enveloped, no `symbols` key
+        %*{"total": 0},                  # bare body, no `symbols` key
+        %*{"body": {}},                  # enveloped, empty body
+        %*{},                            # empty object
+        %*{"body": 7},                   # `body` is not an object
+        %*{"body": {"symbols": 7}}]:     # `symbols` is not an array
+      let (store, _) = storeWithMock()
+      store.applySymbolsResponse(%*{"symbols": [
+        {"name": "calc", "path": "/src/calc.rs", "line": 3,
+         "firstCallTicks": 40}]})
+      check symbolsOf(store).len == 1
+      # The point of the test: this must neither raise nor fault, and must
+      # leave the symbols that were already there untouched.
+      store.applySymbolsResponse(answer)
+      check symbolsOf(store).len == 1
+      check symbolsOf(store)[0].label == "calc"
+
+  test "a nil payload, and a payload that is not an object, are ignored":
+    let (store, _) = storeWithMock()
+    store.applySymbolsResponse(nil)
+    check symbolsOf(store).len == 0
+    store.applySymbolsResponse(%*[1, 2])
+    check symbolsOf(store).len == 0
 
 suite "origin chains":
 

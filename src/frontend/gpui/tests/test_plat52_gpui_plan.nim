@@ -24,6 +24,7 @@
 import replay_prerequisite
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
 import ./gpui_child_env
+import ../../tui/tests/fixtures/fixture_provider
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
@@ -45,21 +46,24 @@ let bin = repo / "build/bin/codetracer-gpui"
 let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                    repo.parentDir / "isonim-gpui/rust/target/debug")
 
-proc fixture(prefix: string): string =
-  ## The recording the terminal lanes record (`test_plat52_terminal_output`
-  ## records both on its first run; the tui lane runs before this one).
-  for kind, path in walkDir(repo / "test-logs/tui-fixtures"):
-    if kind == pcDir and path.extractFilename.startsWith(prefix & "-"):
-      return path
-  ""
+proc fixture(name: string): FixtureResolution =
+  ## The recording of `test-programs/<name>/main.py`, recorded on first use
+  ## (`fixture_provider`), so this suite runs on its own — in the gpui-shell
+  ## lane, or as one file. The spec is the one `test_plat52_terminal_output`
+  ## resolves (`pythonScriptSpec`), so the two lanes share the recording
+  ## rather than this one waiting for the tui lane to make it.
+  resolveFixture(pythonScriptSpec(name))
 
-proc windowPlan(ops: string; subject: string; trace: var string): JsonNode =
+proc windowPlan(ops: string; subject: FixtureResolution;
+                trace: var string): JsonNode =
   if not fileExists(bin):
     raise newException(IOError, "prerequisite missing: " & bin &
                        " (just build-gpui)")
-  if subject.len == 0:
-    raise newException(IOError, "prerequisite missing: the recording " &
-      "(run the tui lane's test_plat52_terminal_output.nim once)")
+  if subject.outcome != foRecorded:
+    # The provider's own line: the fixture, its recorder, what exactly is
+    # missing and how to get it.
+    raise newException(IOError, "prerequisite missing: " &
+      missingPrereqMessage(subject.spec, subject.detail))
   let state = createTempDir("plat52-gpui-plan-", "")
   var env = newStringTable()
   for k, v in envPairs():
@@ -74,7 +78,7 @@ proc windowPlan(ops: string; subject: string; trace: var string): JsonNode =
   var args = @["--report-window-plan", "--width=" & $W, "--height=" & $H]
   if ops.len > 0:
     args.add "--window-ops=" & ops
-  args.add subject
+  args.add subject.tracePath
   let errFile = genTempPath("plat52-gpui-plan-", ".err")
   let p = startProcess("/bin/sh",
     args = @["-c", "exec timeout 120 \"$0\" \"$@\" 2>" & quoteShell(errFile),

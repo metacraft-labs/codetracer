@@ -20,6 +20,12 @@ proc paneVM(): CalltraceVM =
   let session = panelSession()
   if session.isNil: nil else: session.calltraceVM
 
+proc toggleSelectedCall*() =
+  ## `list.toggle-expand` on the pane, for the key router, which cannot import
+  ## this module.
+  let vm = paneVM()
+  if not vm.isNil: vm.toggleSelected()
+
 method register*(self: CalltraceComponent, api: MediatorWithSubscribers) =
   ## No subscriptions: the pane's data is the session's store.
   self.api = api

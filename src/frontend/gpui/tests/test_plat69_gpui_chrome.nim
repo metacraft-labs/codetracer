@@ -24,6 +24,7 @@
 ## real recording. A missing prerequisite fails by name.
 
 import replay_prerequisite
+import ../../tui/tests/fixtures/fixture_provider
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
 import ./gpui_child_env
 
@@ -46,7 +47,6 @@ const
     ## omnibar case now asserts its centring at a wide window AND that it
     ## clears the controls at 1440 (+8), and the empty reserve is the bar's
     ## padding (+1).
-  CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   W = 1440
   H = 900
   StripH = TopBarPx
@@ -59,7 +59,7 @@ let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 let bin = repo / "build/bin/codetracer-gpui"
 let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                    repo.parentDir / "isonim-gpui/rust/target/debug")
-let calc = repo / CalcFixture
+let calc = requireFixture(fixtureSpec("calc"))
 
 proc run(args: seq[string]; geometry = ""; state = ""): tuple[rc: int;
     output, err: string] =
@@ -67,8 +67,6 @@ proc run(args: seq[string]; geometry = ""; state = ""): tuple[rc: int;
   if not fileExists(bin):
     raise newException(IOError, "prerequisite missing: " & bin &
                        " (just build-gpui)")
-  if not dirExists(calc):
-    raise newException(IOError, "prerequisite missing: " & calc)
   let own = state.len == 0
   let dir = if own: createTempDir("plat69-gpui-", "") else: state
   var env = newStringTable()

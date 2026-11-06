@@ -78,7 +78,14 @@
 #
 #   CT_PYALIGN_ROOT         repo root to inspect       (default: this repo)
 #   CT_PYALIGN_RECORDER     recorder sibling to inspect (default: ../codetracer-python-recorder)
-#   CT_PYALIGN_NO_ENV=1     ignore the ambient CODETRACER_PYTHON_* exports
+#   CT_PYALIGN_NO_ENV=1     ignore the ambient CODETRACER_PYTHON_* exports and
+#                           CT_DEV_SHELL
+#
+# Read from the environment, not an override:
+#
+#   CT_DEV_SHELL            set by nix/shells/ci-base.nix's hook. It says this
+#                           run is inside the dev shell, so missing exports are
+#                           a failure; see (C).
 # =============================================================================
 set -uo pipefail
 
@@ -137,8 +144,10 @@ PYTHON_NIX="$REPO_ROOT/nix/python.nix"
 RECORDER_DECL="$RECORDER_DIR/.python-version"
 
 env_version=""
+in_dev_shell=""
 if [ -z "${CT_PYALIGN_NO_ENV:-}" ]; then
 	env_version="${CODETRACER_PYTHON_VERSION:-}"
+	in_dev_shell="${CT_DEV_SHELL:-}"
 fi
 
 file_version=""
@@ -163,7 +172,7 @@ elif [ -n "$env_version" ]; then
 	pass "(A1) declared version comes from the flake input: $env_version (no recorder sibling to cross-check)"
 	PIN_VERSION="$env_version"
 elif [ -n "$file_version" ]; then
-	pass "(A1) declared version comes from $RECORDER_DECL: $file_version (not in the dev shell, so no flake-input cross-check)"
+	pass "(A1) declared version comes from $RECORDER_DECL: $file_version (\$CODETRACER_PYTHON_VERSION unset, so no flake-input cross-check)"
 	PIN_VERSION="$file_version"
 else
 	# Deliberately a hard failure and not an `n/a`. Without the declaration
@@ -311,13 +320,30 @@ fi
 # against the sibling checkout's `.python-version`; what is left to check here
 # is that the DERIVED exports and the actual interpreters agree with it. Every
 # consumer that reads these variables is believing them.
+#
+# With the exports gone, this section and (I) have nothing to read, which is
+# also what a run outside the dev shell looks like. Those two runs must not get
+# the same verdict, so the shell is identified by CT_DEV_SHELL, which the same
+# hook exports independently of these variables: inside it a missing export
+# fails (C1), (C2) or (C3); outside it the section is n/a. A shell that exports
+# CODETRACER_PYTHON_VERSION without the marker, as the recorder's own dev shell
+# does, is checked too.
 # ---------------------------------------------------------------------------
 
 if [ -n "${CT_PYALIGN_NO_ENV:-}" ]; then
 	na "(C) dev-shell exports -- suppressed by CT_PYALIGN_NO_ENV"
-elif [ -z "${CODETRACER_PYTHON_VERSION:-}" ]; then
-	na "(C) dev-shell exports -- not inside the dev shell (CODETRACER_PYTHON_VERSION unset)"
+elif [ -z "$env_version" ] && [ -z "$in_dev_shell" ]; then
+	na "(C) dev-shell exports -- not inside the dev shell (CT_DEV_SHELL and CODETRACER_PYTHON_VERSION unset)"
 else
+	if [ -n "$env_version" ]; then
+		pass "(C1) \$CODETRACER_PYTHON_VERSION is exported ($env_version)"
+	else
+		# shellcheck disable=SC2016 # literal variable name in the check label
+		fail '(C1) $CODETRACER_PYTHON_VERSION is exported' \
+			"CT_DEV_SHELL says this is the dev shell, but it does not export
+CODETRACER_PYTHON_VERSION. nix/shells/ci-base.nix is what exports it."
+	fi
+
 	if [ "${CODETRACER_PYTHON_ABI_TAG:-}" = "$PIN_ABI_TAG" ]; then
 		pass "(C2) \$CODETRACER_PYTHON_ABI_TAG (${CODETRACER_PYTHON_ABI_TAG:-<unset>}) is derived from the declared $PIN_VERSION"
 	else
@@ -741,6 +767,135 @@ else
 the version everything is built against is one nothing tests."
 			;;
 		esac
+	fi
+fi
+
+# ---------------------------------------------------------------------------
+# (I) Under the venv, `python3` is the interpreter that carries the recorder
+#
+# (C4) compares VERSIONS, so it cannot see this one: flake8's propagated bare
+# interpreter is the SAME 3.12 as the pinned env, only without the recorder.
+# Sitting ahead of the env on PATH it passed (C4) and then failed every
+# `ct record x.py` the venv does not cover, because src/ct/trace/record.nim falls
+# back to `python3` from PATH when CODETRACER_PYTHON_INTERPRETER is unset:
+#
+#     cannot import codetracer_python_recorder: ModuleNotFoundError
+#
+# The venv is taken off PATH for this check because it hides the defect. main.nix
+# adds it only when it could be built, and devShells.ci never adds it, so what
+# is underneath is what those shells actually run.
+#
+# An import that succeeds does not by itself mean the interpreter carries the
+# recorder, because of PYTHONPATH. Every interpreter's nixpkgs setup hook defines
+# a function of the same name, `addPythonPath`, and the one sourced last replaces
+# the others. The dev shells hold only the pinned Python's hook (see (J)), so
+# every package's 3.12 site-packages, the env's included, lands on PYTHONPATH
+# and the bare interpreter imports the recorder through it. When
+# devShells.default still held the 3.13 that pre-commit brings, that hook won,
+# PYTHONPATH there was all 3.13 and the bare interpreter could not. Hence two
+# probes, both run from / because `python -c` also searches the current
+# directory:
+#
+#   (I2) with the ambient PYTHONPATH, which is what `ct record` passes on;
+#   (I3) without it, which is what the interpreter itself provides. (I2) alone
+#        stays green for the bare interpreter in devShells.ci, and for any
+#        shell whose PYTHONPATH happens to name a recorder.
+# ---------------------------------------------------------------------------
+
+if [ -n "${CT_PYALIGN_NO_ENV:-}" ]; then
+	na "(I) python3 under the venv -- suppressed by CT_PYALIGN_NO_ENV"
+elif [ ! -x "${CODETRACER_PYTHON_CMD:-}" ]; then
+	# Inside the dev shell a missing or non-executable value is already a (C3)
+	# failure, whether or not CODETRACER_PYTHON_VERSION is set.
+	na "(I) python3 under the venv -- CODETRACER_PYTHON_CMD=${CODETRACER_PYTHON_CMD:-<unset>} is not executable"
+else
+	path_without_venv=""
+	IFS=: read -r -a path_entries <<<"$PATH"
+	for path_entry in "${path_entries[@]}"; do
+		case "${path_entry%/}" in
+		"$RECORDER_VENV/bin") ;;
+		*) path_without_venv="${path_without_venv:+$path_without_venv:}$path_entry" ;;
+		esac
+	done
+	under_venv_py="$(
+		PATH="$path_without_venv"
+		command -v python3 2>/dev/null || true
+	)"
+	if [ "$under_venv_py" = "$CODETRACER_PYTHON_CMD" ]; then
+		pass "(I1) under the venv, the first python3 on PATH is \$CODETRACER_PYTHON_CMD ($under_venv_py)"
+	else
+		# shellcheck disable=SC2016 # literal variable name in the check label
+		fail '(I1) under the venv, the first python3 on PATH is $CODETRACER_PYTHON_CMD' \
+			"first is ${under_venv_py:-<none>}, expected $CODETRACER_PYTHON_CMD
+a package listed ahead of pythonWithRecorder in nix/shells/ci-base.nix is
+propagating an interpreter that wins the PATH search."
+	fi
+	if [ -n "$under_venv_py" ] && (cd / && "$under_venv_py" -c 'import codetracer_python_recorder') 2>/dev/null; then
+		pass "(I2) under the venv, the first python3 on PATH can import codetracer_python_recorder"
+	else
+		fail "(I2) under the venv, the first python3 on PATH can import codetracer_python_recorder" \
+			"${under_venv_py:-<none>} cannot, so 'ct record <file>.py' refuses to record
+wherever CODETRACER_PYTHON_INTERPRETER is unset."
+	fi
+	if [ -n "$under_venv_py" ] && (cd / && env -u PYTHONPATH "$under_venv_py" -c 'import codetracer_python_recorder') 2>/dev/null; then
+		pass "(I3) under the venv, the first python3 on PATH carries codetracer_python_recorder itself, without PYTHONPATH"
+	else
+		fail "(I3) under the venv, the first python3 on PATH carries codetracer_python_recorder itself, without PYTHONPATH" \
+			"${under_venv_py:-<none>} cannot import it once PYTHONPATH is removed, so it records
+only for as long as this shell's PYTHONPATH happens to name a recorder."
+	fi
+fi
+
+# ---------------------------------------------------------------------------
+# (J) PYTHONPATH names no site-packages of another minor version
+#
+# PYTHONPATH is searched ahead of the interpreter's own site-packages, so every
+# entry on it is imported by the pinned interpreter and by the venv built from
+# it. An entry built for another minor version is the ABI split again, one
+# import at a time: a pure-Python package happens to load, a compiled one fails
+# or misbehaves.
+#
+# devShells.default carried 25 entries for 3.13 and none for 3.12, and the
+# pinned interpreter's `import pytest` loaded the 3.13 copy. Each interpreter's
+# nixpkgs setup hook defines `addPythonPath`, the one sourced last replaces the
+# others, and that one adds `lib/python3.N/site-packages` of ITS version for
+# every input; pre-commit and the other 3.13 applications in that shell won the
+# race. ../nix/python.nix's `binariesOnly` is how the shells put such
+# applications on PATH without their hooks.
+#
+# Entries that name no `lib/python3.N` directory (a source checkout, the
+# recorder sibling) are not built for any version and are not judged here.
+# ---------------------------------------------------------------------------
+
+if [ -n "${CT_PYALIGN_NO_ENV:-}" ]; then
+	na "(J) PYTHONPATH -- suppressed by CT_PYALIGN_NO_ENV"
+elif [ -z "$env_version" ] && [ -z "$in_dev_shell" ]; then
+	na "(J) PYTHONPATH -- not inside the dev shell (CT_DEV_SHELL and CODETRACER_PYTHON_VERSION unset)"
+else
+	foreign_entries=""
+	foreign_count=0
+	pin_count=0
+	IFS=: read -r -a pythonpath_entries <<<"${PYTHONPATH:-}"
+	for pythonpath_entry in "${pythonpath_entries[@]}"; do
+		entry_version="$(printf '%s\n' "$pythonpath_entry" | sed -nE 's#.*/lib/python(3\.[0-9]+)/.*#\1#p; s#.*/lib/python(3\.[0-9]+)$#\1#p' | head -n 1)"
+		if [ -z "$entry_version" ]; then
+			continue
+		elif [ "$entry_version" = "$PIN_VERSION" ]; then
+			pin_count=$((pin_count + 1))
+		else
+			foreign_count=$((foreign_count + 1))
+			foreign_entries="$foreign_entries
+$pythonpath_entry"
+		fi
+	done
+	if [ "$foreign_count" -eq 0 ]; then
+		pass "(J1) PYTHONPATH names no site-packages of another minor version ($pin_count for $PIN_VERSION)"
+	else
+		fail "(J1) PYTHONPATH names no site-packages of another minor version" \
+			"$foreign_count entr$([ "$foreign_count" -eq 1 ] && echo y || echo ies) built for another version than the declared $PIN_VERSION ($pin_count for $PIN_VERSION):${foreign_entries}
+the pinned interpreter imports these ahead of its own site-packages. A package
+in the shell carries another interpreter's setup hook; put it on PATH with
+nix/python.nix's binariesOnly."
 	fi
 fi
 

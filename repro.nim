@@ -2153,11 +2153,17 @@ package codeTracer:
       extraEnvValue = GateEnv)
     target("gate-repro-lock-flake-lock-agreement", gateReproLockAgreement)
 
+    # The two nix files are inputs because the suite reads them: it asserts
+    # that the dev shell's hook exports CT_DEV_SHELL and that the lint shell
+    # does not. Without them, deleting that export would be served the cached
+    # pass of the tree that still had it.
     let gatePythonVersionAlignment = ctShell(
       actionIdValue = "codetracer.gate.python-version-alignment",
       commandValue = "bash ci/test/python-version-alignment-test.sh",
       extraInputsValue = @[
         "ci/test/python-version-alignment-test.sh",
+        "nix/shells/ci-base.nix",
+        "nix/shells/lint.nix",
         "scripts/test-python-version-alignment.sh"],
       cacheableValue = true,
       extraEnvValue = GateEnv)
@@ -2241,10 +2247,22 @@ package codeTracer:
     let gateBuildAlignment = ctShell(
       actionIdValue = "codetracer.gate.build-alignment",
       commandValue = "bash scripts/test-build-alignment.sh",
-      extraInputsValue = @["scripts/test-build-alignment.sh"],
+      extraInputsValue = @["scripts/test-build-alignment.sh", "repro.lock",
+        "locks/arm64-macosx.lock"],
       cacheableValue = true,
       extraEnvValue = GateEnv)
     target("gate-build-alignment", gateBuildAlignment)
+
+    let gateBuildPlatformLock = ctShell(
+      actionIdValue = "codetracer.gate.build-platform-lock",
+      commandValue = "bash scripts/test-build-once-platform-lock.sh",
+      extraInputsValue = @["scripts/test-build-once-platform-lock.sh",
+        "scripts/build-once.sh", "ci/lib/build-freshness.sh",
+        "ci/lib/sha256.sh", "repro.lock", "locks/arm64-macosx.lock",
+        "flake.lock"],
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
+    target("gate-build-platform-lock", gateBuildPlatformLock)
 
     let gateRustTestCrateCoverage = ctShell(
       actionIdValue = "codetracer.gate.rust-test-crate-coverage",
@@ -2336,6 +2354,7 @@ package codeTracer:
       gateKnownFailures]
     let ctGateLintActions = @[
       gateBuildAlignment,
+      gateBuildPlatformLock,
       gateRustTestCrateCoverage,
       gateTestLaneCoverage,
       gateSiblingProvisioning,

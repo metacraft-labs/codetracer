@@ -359,7 +359,7 @@ proc buildVimKeymap(): EditingKeymap =
   r.add eb(@["Ctrl+w"], "delete-group-backward", {emInsert})
   r.add eb(@["Ctrl+u"], "delete-to-line-start", {emInsert})
 
-  EditingKeymap(bindings: r)
+  newEditingKeymap(r)
 
 const
   VimFiled*: seq[FiledDeclaration] = @[

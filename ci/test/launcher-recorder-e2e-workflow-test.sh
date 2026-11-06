@@ -48,7 +48,7 @@
 #      edge report green about code that is not under test -- the one failure
 #      mode nobody would notice.  Assertion 4 below pins that line.
 #
-# # No mocks
+# # Test boundaries
 #
 # The workflow files as committed are the input, and the "Plan the workspace
 # layout" step's script is EXTRACTED FROM THE YAML and executed -- not
@@ -60,6 +60,11 @@
 # THROUGH THE FUNCTION THE REAL ASSERTION USES -- an inline re-implementation of
 # a rule tests the transcription, not the rule.  (LRC-6's review found three
 # such transcriptions here and replaced them; see M7-M9.)
+# The late ct-print branch controls substitute only the outer Nix build
+# command with an argv/status recorder, so they can distinguish a failed
+# provisioning command from a successful command that produces no artifact.
+# They do not qualify SDK provisioning: the shared prepare-repro-envs real-SDK
+# HTTP suite exercises that boundary with the actual compiler and fetcher.
 #
 # # What is asserted
 #
@@ -90,8 +95,10 @@
 #      `codetracer` itself, which is never its own sibling.
 #   9. Every `setup-dev-env` / `clone-siblings` call site in this repo passes an
 #      explicit `siblings:` input, so adding the clone-list changed no existing
-#      job.  The day one stops, this fails and the change is deliberate.
-#  10. THE CHECKER'S OWN MUTATION TEST: thirteen mutations of real files, each of
+#      job.  The day one stops, this fails and the change is deliberate.  A call
+#      site that forces `sibling-strategy: repro-lock` must also name every
+#      sibling source `repro.nim` imports by relative path.
+#  10. THE CHECKER'S OWN MUTATION TEST: fourteen mutations of real files, each of
 #      which must be REJECTED, plus a positive control on the unmutated copies
 #      so a checker that always fails cannot pass this section.
 #
@@ -848,9 +855,138 @@ if [ "${#sibless[@]}" -eq 0 ]; then
 	ok "all $n_call_sites setup-dev-env / clone-siblings call sites pass an explicit siblings: subset"
 else
 	fail "every setup-dev-env / clone-siblings call site passes an explicit siblings: subset" \
-		"these would silently fall back to .github/sibling-repos, cloning five repos and" \
+		"these would silently fall back to .github/sibling-repos, cloning every repo on it and" \
 		"requiring a workspace-lock entry for each -- make that switch deliberately:" \
 		"${sibless[@]}"
+fi
+
+# A call site that forces `sibling-strategy: repro-lock` leaves the siblings to
+# the lock, and its `siblings:` list shrinks to what the lock path will not
+# materialise.  `repro develop --all` skips a row a recipe pins, so a sibling
+# source that `repro.nim` imports by relative path has to be on that list:
+# setup-dev-env hands it to clone-siblings at the committed lock revision.  A
+# list that omits one passes the explicit-subset check above, and the job then
+# dies at recipe activation on a missing import.  So the names are DERIVED from
+# the recipe, never restated here, and finding none is a refusal rather than a
+# pass.
+readonly REPRO_RECIPE="$REPO_ROOT/repro.nim"
+
+# repro_nim_sibling_sources RECIPE -> the sibling names RECIPE imports by
+# relative path, one per line.  Anchored at the start of the line so a
+# commented-out import does not count.
+repro_nim_sibling_sources() {
+	strip_cr "$1" 2>/dev/null |
+		sed -nE 's/^[[:space:]]*import[[:space:]]+"?\.\.\/([^/"[:space:]]+)\/.*$/\1/p' |
+		sort -u
+}
+
+# repro_lock_call_sites FILE -> `<line of with:><TAB><declared names>` for each
+# `with:` block that forces repro-lock and declares `siblings:`.  An entry is
+# reduced to its bare repo name the way setup-dev-env's reconcile step reduces
+# it (`owner/name`, `name=ref`, `name!=ref`), and an inline value and a block
+# scalar read alike.  Keys are told from scalar lines by indentation alone.
+repro_lock_call_sites() {
+	strip_cr "$1" | awk '
+		function indent_of(s) { match(s, /^ */); return RLENGTH }
+		function add_entries(text,    parts, n, i, t) {
+			sub(/#.*/, "", text)
+			n = split(text, parts, /[ \t]+/)
+			for (i = 1; i <= n; i++) {
+				t = parts[i]
+				if (t == "") continue
+				sub(/=.*/, "", t)
+				sub(/!$/, "", t)
+				sub(/.*\//, "", t)
+				names = names " " t
+			}
+		}
+		function close_with() {
+			if (with_line && strategy == "repro-lock" && has_siblings)
+				print with_line "\t" names
+			with_line = 0
+		}
+		{
+			if (with_line) {
+				if ($0 ~ /^ *(#.*)?$/) next
+				ind = indent_of($0)
+				if (ind <= with_indent) {
+					close_with()
+				} else {
+					if (key_indent < 0) key_indent = ind
+					if (ind > key_indent) {
+						if (in_siblings) add_entries($0)
+						next
+					}
+					key = $0
+					sub(/^ */, "", key)
+					value = key
+					sub(/:.*$/, "", key)
+					sub(/^[^:]*:[ \t]*/, "", value)
+					sub(/(^|[ \t]+)#.*$/, "", value)
+					sub(/[ \t]+$/, "", value)
+					gsub(/["\047]/, "", value)
+					in_siblings = 0
+					if (key == "sibling-strategy") strategy = value
+					if (key == "siblings") {
+						has_siblings = 1
+						if (value ~ /^[|>][-+]?$/ || value == "") in_siblings = 1
+						else add_entries(value)
+					}
+					next
+				}
+			}
+			if ($0 ~ /^ *with:[ \t]*$/) {
+				with_line = NR
+				with_indent = indent_of($0)
+				key_indent = -1
+				strategy = ""
+				has_siblings = 0
+				in_siblings = 0
+				names = ""
+			}
+		}
+		END { close_with() }
+	'
+}
+
+# check_repro_lock_sources RECIPE FILE... -> prints one violation per line; exit
+# 1 when there is at least one, or when there was nothing to check.  Factored so
+# M14 can point it at mutated copies.
+check_repro_lock_sources() {
+	local recipe="$1" f sources src line names checked=0 bad=0
+	shift
+	sources="$(repro_nim_sibling_sources "$recipe")"
+	if [ -z "$sources" ]; then
+		echo "$recipe yielded no \`import \"../<name>/...\"\`, so this check proves nothing"
+		return 1
+	fi
+	for f in "$@"; do
+		while IFS=$'\t' read -r line names; do
+			[ -z "$line" ] && continue
+			checked=$((checked + 1))
+			for src in $sources; do
+				case " $names " in
+				*" $src "*) ;;
+				*)
+					echo "$f:$line forces repro-lock and its siblings: omits '$src', which repro.nim imports; bulk develop skips a recipe-pinned row, so the job fails at recipe activation"
+					bad=1
+					;;
+				esac
+			done
+		done < <(repro_lock_call_sites "$f")
+	done
+	if [ "$checked" -eq 0 ]; then
+		echo "no call site that forces sibling-strategy: repro-lock and declares siblings: was found, so this check proves nothing"
+		return 1
+	fi
+	return "$bad"
+}
+
+if rl_out="$(check_repro_lock_sources "$REPRO_RECIPE" "${CALL_SITE_FILES[@]}")"; then
+	ok "every repro-lock call site names the sibling sources repro.nim imports ($(repro_nim_sibling_sources "$REPRO_RECIPE" | tr '\n' ' ' | sed 's/ *$//'))"
+else
+	mapfile -t rl_lines <<<"$rl_out"
+	fail "every repro-lock call site names the sibling sources repro.nim imports" "${rl_lines[@]}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -1285,225 +1421,72 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 9b''. REPRO'S OWN TOOL-PROVISIONING NIXPKGS IS FETCHED FIRST, AT THE PIN.
-#
-# `repro exec` realizes catalog tools from `github:NixOS/nixpkgs/<rev>?narHash=`
-# with <rev> = reprobuild's CanonicalNixpkgsRev, and no dev shell evaluation
-# reaches that ref: launcher run 40412127662's beam arm got `401 Bad
-# credentials` on it ~2 h after the mint. The prefetch step reads the pin out
-# of codetracer's `reprobuild` flake input and fetches it. Pinned here,
-# EXECUTED with a stub nix against a planted flake.lock and pin file whose
-# revision is NOT the real one, so a step that restated the revision fails:
-#   a. it fetches exactly the planted ref, through the locked reprobuild input;
-#   b. it does so BEFORE the first dev-shell evaluation;
-#   c. a pin file that no longer reads is an error, and nothing is evaluated;
-#   d. a flake with no direct `reprobuild` input is skipped, not an error;
-#   e. a nixpkgs fetch that fails stops the step, naming the ref.
-# ---------------------------------------------------------------------------
+# 9b''. The owning action prepares the selected SDK/project environments.
+# Its real SDK/HTTP tests qualify activation and expiry; these assertions hold
+# this consumer's shell, project list and ordering, without copying SDK pins.
 echo
-echo "repro's tool-provisioning nixpkgs is fetched first, at the revision reprobuild pins"
+echo "selected Repro environments use shared preparation before the core build"
+prepare_block="$(step_block 'Prepare selected Repro toolchains before long running gates' "$REUSABLE")"
+# shellcheck disable=SC2016 # Match GitHub expressions as literal workflow data.
+if grep -qE 'uses: metacraft-labs/metacraft-github-actions/prepare-repro-envs@[0-9a-f]{40}$' <<<"$prepare_block" &&
+	grep -qF 'working-directory: ${{ steps.plan.outputs.ct-dir }}' <<<"$prepare_block" &&
+	grep -qF 'nix-shell: .?submodules=1#ci' <<<"$prepare_block" &&
+	grep -qF '${{ steps.plan.outputs.ct-dir }}/../codetracer-trace-format-nim' <<<"$prepare_block" &&
+	grep -qF '${{ steps.plan.outputs.ct-dir }}/../${{ inputs.recorder-repo }}' <<<"$prepare_block"; then
+	ok "shared preparation uses the later build's exact SDK shell and project roots"
+else
+	fail "shared preparation uses the later build's exact SDK shell and project roots" "$prepare_block"
+fi
+# The CT root must itself be a project entry, not merely the shell selector.
+prepare_projects="$(sed -n '/^          projects: |$/,$p' <<<"$prepare_block" | sed '1d' | sed -n 's/^            //p')"
+# shellcheck disable=SC2016 # Expected GitHub expressions must not expand in Bash.
+expected_prepare_projects='${{ steps.plan.outputs.ct-dir }}
+${{ steps.plan.outputs.ct-dir }}/../codetracer-trace-format-nim
+${{ steps.plan.outputs.ct-dir }}/../${{ inputs.recorder-repo }}'
+if [ "$prepare_projects" = "$expected_prepare_projects" ] &&
+	! grep -qE 'continue-on-error:|if:' <<<"$prepare_block"; then
+	ok "preparation covers exactly the three later environments and cannot be waived"
+else
+	fail "preparation covers exactly the three later environments and cannot be waived" "$prepare_block"
+fi
+prepare_line="$(grep -nF -- '- name: Prepare selected Repro toolchains before long running gates' "$REUSABLE" | cut -d: -f1)"
+core_line="$(grep -nF -- '- name: Build the codetracer-desktop core' "$REUSABLE" | cut -d: -f1)"
+if [ -n "$prepare_line" ] && [ -n "$core_line" ] && [ "$prepare_line" -lt "$core_line" ] &&
+	! grep -qE 'CanonicalNixpkgs|nixpkgs_pin[.]nim' "$REUSABLE"; then
+	ok "shared tool preparation precedes the core build without parsing SDK pins"
+else
+	fail "shared tool preparation precedes the core build without parsing SDK pins" "prepare=$prepare_line core=$core_line"
+fi
 
-RP="$TMP/repro-nixpkgs"
-mkdir -p "$RP/bin" "$RP/ws/codetracer" "$RP/ws/codetracer-trace-format-nim" \
-	"$RP/ws/codetracer-ruby-recorder" "$RP/rbsrc/libs/repro_dsl_stdlib/src/repro_dsl_stdlib"
-: >"$RP/ws/codetracer/flake.nix"
-readonly RP_RB_REV="1111111111111111111111111111111111111111"
-readonly RP_NP_REV="2222222222222222222222222222222222222222"
-printf '%s\n' \
-	'{"nodes": {"root": {"inputs": {"reprobuild": "reprobuild"}},' \
-	'  "reprobuild": {"locked": {"type": "github", "owner": "metacraft-labs",' \
-	"    \"repo\": \"reprobuild\", \"rev\": \"$RP_RB_REV\", \"narHash\": \"sha256-rb+rb/rb=\"}}}," \
-	' "root": "root", "version": 7}' >"$RP/with-reprobuild.lock"
-cp "$RP/with-reprobuild.lock" "$RP/ws/codetracer/flake.lock"
-readonly RP_PIN="$RP/rbsrc/libs/repro_dsl_stdlib/src/repro_dsl_stdlib/nixpkgs_pin.nim"
-printf '%s\n' \
-	'const' \
-	"  CanonicalNixpkgsRev* = \"$RP_NP_REV\"" \
-	'    ## The nixpkgs commit every nixpkgs# catalog entry resolves against.' \
-	'' \
-	'  CanonicalNixpkgsNarHash* = "sha256-np+np/np="' \
-	'    ## The NAR hash of the tree at CanonicalNixpkgsRev.' >"$RP/pin.good"
-cp "$RP/pin.good" "$RP_PIN"
-cat >"$RP/bin/nix" <<'STUB'
+# ---------------------------------------------------------------------------
+# Execute both late decoder branches. The Nix recorder isolates orchestration;
+# owning shared tests exercise the real SDK rather than transcribing it.
+CP="$TMP/ct-print-step"
+mkdir -p "$CP/bin" "$CP/ws/codetracer" "$CP/ws/codetracer-trace-format-nim"
+extract_step_script 'Build ct-print (the trace-validation oracle)' "$REUSABLE" >"$CP/step.sh"
+cat >"$CP/bin/nix" <<'STUB'
 #!/usr/bin/env bash
-printf '%s|%s\n' "$(pwd -P)" "$*" >>"$NIX_LOG"
-case "$*" in
-	*"--expr builtins.currentSystem"*) printf 'x86_64-linux'; exit 0 ;;
-	"flake prefetch --json "*) printf '{"storePath": "%s", "hash": "sha256-x"}\n' "$RB_SRC"; exit 0 ;;
-	"flake prefetch "*)
-		if [ -n "${NIX_FAIL_PREFETCH:-}" ]; then
-			echo "error: unable to download 'https://api.github.com/repos/NixOS/nixpkgs/tarball/0': HTTP error 401" >&2
-			exit 1
-		fi
-		exit 0 ;;
-esac
-printf '/nix/store/00000000000000000000000000000000-stub.drv'
+if [ -n "${CT_PRINT_PROVISION_FAIL:-}" ]; then
+	echo 'could not provision the C compiler: HTTP error 401' >&2
+	exit 37
+fi
+exit 0
 STUB
-chmod +x "$RP/bin/nix"
-RP_STEP="$RP/step.sh"
-extract_step_script "$PREFETCH_STEP" "$REUSABLE" >"$RP_STEP"
-
-# run_rp_step [FAIL] -> "<exit>|<combined output>"
-run_rp_step() {
-	local out rc
-	: >"$RP/nix.log"
-	out="$(PATH="$RP/bin:$PATH" NIX_LOG="$RP/nix.log" RB_SRC="$RP/rbsrc" \
-		NIX_FAIL_PREFETCH="${1:-}" CT_DIR="$RP/ws/codetracer" \
-		RECORDER_REPO=codetracer-ruby-recorder bash "$RP_STEP" 2>&1)"
-	rc=$?
-	printf '%s|%s' "$rc" "$out"
-}
-
-readonly RP_RB_REF="github:metacraft-labs/reprobuild/$RP_RB_REV?narHash=sha256-rb%2Brb%2Frb%3D"
-readonly RP_NP_REF="github:NixOS/nixpkgs/$RP_NP_REV?narHash=sha256-np%2Bnp%2Fnp%3D"
-rp_out="$(run_rp_step)"
-# A github ref names no checkout, so the directory these two run in is not
-# part of the contract; only the argv is compared.
-rp_argv="$(cut -d'|' -f2- "$RP/nix.log")"
-if [ "${rp_out%%|*}" = 0 ] &&
-	grep -qxF "flake prefetch --json $RP_RB_REF" <<<"$rp_argv" &&
-	grep -qxF "flake prefetch $RP_NP_REF" <<<"$rp_argv"; then
-	ok "the prefetch fetches the nixpkgs ref read from codetracer's locked reprobuild input"
+chmod +x "$CP/bin/nix"
+cp_out="$(PATH="$CP/bin:$PATH" CT_DIR="$CP/ws/codetracer" CT_PRINT_PROVISION_FAIL=1 bash "$CP/step.sh" 2>&1)"
+cp_status=$?
+if [ "$cp_status" = 37 ] && grep -qF 'HTTP error 401' <<<"$cp_out" &&
+	! grep -qF 'ct-print was not produced' <<<"$cp_out"; then
+	ok "a late provisioning refusal preserves its cause rather than a missing decoder verdict"
 else
-	fail "the prefetch fetches the nixpkgs ref read from codetracer's locked reprobuild input" \
-		"exit ${rp_out%%|*}; want '$RP_RB_REF' then '$RP_NP_REF'" "nix calls: $(tr '\n' ';' <"$RP/nix.log")" \
-		"output: ${rp_out#*|}"
+	fail "a late provisioning refusal preserves its cause rather than a missing decoder verdict" "$cp_status: $cp_out"
 fi
-rp_np_line="$(grep -nF "flake prefetch $RP_NP_REF" "$RP/nix.log" | head -n1 | cut -d: -f1)"
-rp_eval_line="$(grep -nF "eval --raw --no-write-lock-file" "$RP/nix.log" | head -n1 | cut -d: -f1)"
-if [ -n "$rp_np_line" ] && [ -n "$rp_eval_line" ] && [ "$rp_np_line" -lt "$rp_eval_line" ]; then
-	ok "the provisioning nixpkgs is fetched before the first dev-shell evaluation"
+cp_out="$(PATH="$CP/bin:$PATH" CT_DIR="$CP/ws/codetracer" bash "$CP/step.sh" 2>&1)"
+cp_status=$?
+if [ "$cp_status" = 1 ] && grep -qF 'ct-print was not produced' <<<"$cp_out"; then
+	ok "a successful build with no decoder retains the genuine missing artifact refusal"
 else
-	fail "the provisioning nixpkgs is fetched before the first dev-shell evaluation" \
-		"nixpkgs fetch at call ${rp_np_line:-none}, first eval at call ${rp_eval_line:-none}"
-fi
-
-printf 'const\n  SomethingElse* = "x"\n' >"$RP_PIN"
-rp_out="$(run_rp_step)"
-if [ "${rp_out%%|*}" != 0 ] && grep -q "::error::could not read CanonicalNixpkgsRev" <<<"$rp_out" &&
-	! grep -q "eval --raw" "$RP/nix.log"; then
-	ok "a pin file that no longer reads is an error naming it, before anything is evaluated"
-else
-	fail "a pin file that no longer reads is an error naming it, before anything is evaluated" "got: ${rp_out}"
-fi
-cp "$RP/pin.good" "$RP_PIN"
-
-printf '{"nodes": {"root": {"inputs": {}}}, "root": "root", "version": 7}\n' >"$RP/ws/codetracer/flake.lock"
-rp_out="$(run_rp_step)"
-if [ "${rp_out%%|*}" = 0 ] && grep -q "no direct reprobuild input" <<<"$rp_out" &&
-	! grep -q "flake prefetch" "$RP/nix.log"; then
-	ok "a codetracer flake with no direct reprobuild input is skipped, not an error"
-else
-	fail "a codetracer flake with no direct reprobuild input is skipped, not an error" "got: ${rp_out}"
-fi
-cp "$RP/with-reprobuild.lock" "$RP/ws/codetracer/flake.lock"
-
-rp_out="$(run_rp_step fail)"
-if [ "${rp_out%%|*}" != 0 ] && grep -qF "::error::could not fetch $RP_NP_REF" <<<"$rp_out" &&
-	grep -q "HTTP error 401" <<<"$rp_out"; then
-	ok "a failed provisioning-nixpkgs fetch stops the step, naming the ref"
-else
-	fail "a failed provisioning-nixpkgs fetch stops the step, naming the ref" "got: ${rp_out}"
-fi
-
-# ---------------------------------------------------------------------------
-# 9b'''. A PERSISTENT RUNNER'S LEFTOVERS ARE CLEARED BEFORE THE CHECKOUT.
-#
-# Two leftovers have failed `actions/checkout` on these hosts: a dead job's tup
-# FUSE mount (`EBUSY ... rmdir '.../src/.tup/mnt'`) and a 0555 directory
-# (`EACCES` on a file inside it). Pinned here:
-#   a. ORDER: both sweeps run before every checkout and every nix call;
-#   b. the FUSE sweep, EXECUTED against a planted mount table with a stub
-#      fusermount3 and a bash-only PATH, unmounts exactly the FUSE mounts
-#      strictly below $RUNNER_WORKSPACE (not one outside it, not a non-FUSE
-#      one inside it, not one in a directory that merely shares its prefix);
-#   c. a mount it cannot drop is a warning and exit 0, and an absent work
-#      directory is a clean no-op.
-# The read-only sweep's body is ci/runner/sweep-readonly-leftovers.sh's, and
-# ci/test/readonly-leftovers-sweep-test.sh holds this copy byte-identical.
-# ---------------------------------------------------------------------------
-echo
-echo "a persistent runner's leftovers are cleared before the checkout"
-
-readonly FUSE_STEP="Unmount stale FUSE mounts left in the persistent work directory"
-readonly RO_STEP="Sweep read-only leftovers from the persistent work directory"
-hy_names="$(step_names "$REUSABLE")"
-hy_bad=""
-for want in "$FUSE_STEP" "$RO_STEP"; do
-	grep -qxF "$want" <<<"$hy_names" || hy_bad="${hy_bad} missing:'${want}'"
-done
-hy_seen=0
-while IFS= read -r name; do
-	case "$name" in
-	"$FUSE_STEP" | "$RO_STEP")
-		hy_seen=$((hy_seen + 1))
-		continue
-		;;
-	esac
-	[ "$hy_seen" -eq 2 ] && break
-	if step_block "$name" "$REUSABLE" | grep -v '^[[:space:]]*#' |
-		grep -qE 'actions/checkout@|(^|[^A-Za-z0-9_-])nix( |$)'; then
-		hy_bad="${hy_bad} '${name}' checks out or runs nix before the sweeps"
-	fi
-done <<<"$hy_names"
-if [ -z "$hy_bad" ]; then
-	ok "both leftover sweeps run before any checkout or nix call"
-else
-	fail "both leftover sweeps run before any checkout or nix call" "$hy_bad"
-fi
-
-FS="$TMP/fuse-sweep"
-mkdir -p "$FS/bin" "$FS/work/codetracer/src/.tup/mnt" "$FS/workx/x" "$FS/home"
-FS_ROOT="$(cd "$FS/work" && pwd -P)"
-printf '%s\n' \
-	'proc /proc proc rw,nosuid 0 0' \
-	"tup $FS_ROOT/codetracer/src/.tup/mnt fuse.tup rw,nosuid,nodev 0 0" \
-	'sshfs /elsewhere/mnt fuse.sshfs rw 0 0' \
-	"tmpfs $FS_ROOT/codetracer/tmp tmpfs rw 0 0" \
-	"tup ${FS_ROOT}x/x fuse rw 0 0" >"$FS/mounts"
-# shellcheck disable=SC2016  # the stub's own text, expanded when it runs
-printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$*" >>"$FUSE_LOG"' >"$FS/fusermount3.stub"
-cp "$FS/fusermount3.stub" "$FS/bin/fusermount3"
-chmod +x "$FS/bin/fusermount3"
-FS_STEP="$FS/step.sh"
-extract_step_script "$FUSE_STEP" "$REUSABLE" >"$FS_STEP"
-FS_BASH="$(command -v bash)"
-
-# run_fuse_step ROOT PATH -> the step's combined output; exit status preserved.
-run_fuse_step() {
-	: >"$FS/fuse.log"
-	env -i PATH="$2" HOME="$FS/home" RUNNER_WORKSPACE="$1" RUNNER_NAME=fixture \
-		LRC_MOUNTS_FILE="$FS/mounts" FUSE_LOG="$FS/fuse.log" "$FS_BASH" -e "$FS_STEP" 2>&1
-}
-
-fs_out="$(run_fuse_step "$FS_ROOT" "$FS/bin:$(dirname "$FS_BASH")")"
-fs_rc=$?
-if [ "$fs_rc" = 0 ] && [ "$(cat "$FS/fuse.log")" = "-u -z $FS_ROOT/codetracer/src/.tup/mnt" ] &&
-	grep -qF "found 1 stale FUSE mount(s) under $FS_ROOT; 0 could not be unmounted" <<<"$fs_out"; then
-	ok "the FUSE sweep unmounts exactly the stale FUSE mount below the work directory"
-else
-	fail "the FUSE sweep unmounts exactly the stale FUSE mount below the work directory" \
-		"exit $fs_rc; fusermount calls: $(tr '\n' ';' <"$FS/fuse.log")" "output: ${fs_out}"
-fi
-
-rm -f "$FS/bin/fusermount3"
-fs_out="$(run_fuse_step "$FS_ROOT" "$FS/bin:$(dirname "$FS_BASH")")"
-fs_rc=$?
-if [ "$fs_rc" = 0 ] &&
-	grep -qF "::warning::fuse-sweep: could not unmount $FS_ROOT/codetracer/src/.tup/mnt" <<<"$fs_out" &&
-	grep -qF "1 could not be unmounted" <<<"$fs_out"; then
-	ok "a mount the sweep cannot drop is a warning naming it, and the step still exits 0"
-else
-	fail "a mount the sweep cannot drop is a warning naming it, and the step still exits 0" \
-		"exit $fs_rc; output: ${fs_out}"
-fi
-
-fs_out="$(run_fuse_step "$FS/absent" "$(dirname "$FS_BASH")")"
-fs_rc=$?
-if [ "$fs_rc" = 0 ] && grep -q "work dir absent" <<<"$fs_out"; then
-	ok "an absent work directory is a clean no-op"
-else
-	fail "an absent work directory is a clean no-op" "exit $fs_rc; output: ${fs_out}"
+	fail "a successful build with no decoder retains the genuine missing artifact refusal" "$cp_status: $cp_out"
 fi
 
 # ---------------------------------------------------------------------------
@@ -1869,6 +1852,21 @@ cp "$CLONE_LIST" "$MUT/sibling-repos"
 
 mut_bad=()
 
+# sed_in_place FILE SED_ARG... -> applies the edit to FILE.  Not `sed -i`: GNU
+# reads an optional suffix attached to that flag and BSD requires one as the next
+# argument, so one spelling cannot serve both, and BSD would take the script for
+# the suffix.  Writing to a sibling file and moving it back works on both.
+sed_in_place() {
+	local file="$1"
+	shift
+	sed "$@" "$file" >"$file.new" && mv "$file.new" "$file"
+}
+
+# A newline in a sed replacement, in the POSIX spelling.  `\n` is a GNU extension
+# that BSD sed turns into a literal `n`.
+# https://pubs.opengroup.org/onlinepubs/9799919799/utilities/sed.html
+readonly SED_NL=$'\\\n'
+
 # Positive control.
 if check_contract "$MUT/reusable.yml" "$MUT/caller.yml" "control" >/dev/null 2>&1 &&
 	check_clone_list "$MUT/sibling-repos" >/dev/null 2>&1 &&
@@ -1884,14 +1882,14 @@ fi
 
 # M1 -- an undeclared `with:` key.
 cp "$DESKTOP_EDGE" "$MUT/m1.yml"
-sed -i 's/^      recorder-lang: /      bogus-input: x\n      recorder-lang: /' "$MUT/m1.yml"
-grep -q 'bogus-input' "$MUT/m1.yml" || mut_bad+=("M1 was not applied (the sed matched nothing)")
+sed_in_place "$MUT/m1.yml" "s/^      recorder-lang: /      bogus-input: x${SED_NL}      recorder-lang: /"
+grep -q '^      bogus-input: x$' "$MUT/m1.yml" || mut_bad+=("M1 was not applied (the sed matched nothing)")
 check_contract "$MUT/reusable.yml" "$MUT/m1.yml" "M1" >/dev/null 2>&1 &&
 	mut_bad+=("M1 SURVIVED: an undeclared 'with:' key was accepted")
 
 # M2 -- a required input left unpassed.
 cp "$DESKTOP_EDGE" "$MUT/m2.yml"
-sed -i '/^      recorder-lang: /d' "$MUT/m2.yml"
+sed_in_place "$MUT/m2.yml" '/^      recorder-lang: /d'
 grep -q '^      recorder-lang:' "$MUT/m2.yml" && mut_bad+=("M2 was not applied")
 check_contract "$MUT/reusable.yml" "$MUT/m2.yml" "M2" >/dev/null 2>&1 &&
 	mut_bad+=("M2 SURVIVED: a required input was allowed to go unpassed")
@@ -1899,14 +1897,14 @@ check_contract "$MUT/reusable.yml" "$MUT/m2.yml" "M2" >/dev/null 2>&1 &&
 # M3 -- THE defect actionlint misses: a misspelling that is simultaneously an
 # unknown key and a required input left unpassed.
 cp "$DESKTOP_EDGE" "$MUT/m3.yml"
-sed -i 's/^      recorder-repo: /      recorder-repos: /' "$MUT/m3.yml"
+sed_in_place "$MUT/m3.yml" 's/^      recorder-repo: /      recorder-repos: /'
 grep -q '^      recorder-repos:' "$MUT/m3.yml" || mut_bad+=("M3 was not applied")
 check_contract "$MUT/reusable.yml" "$MUT/m3.yml" "M3" >/dev/null 2>&1 &&
 	mut_bad+=("M3 SURVIVED: a misspelled input key was accepted")
 
 # M4 -- `secrets: inherit` dropped.
 cp "$DESKTOP_EDGE" "$MUT/m4.yml"
-sed -i '/^    secrets: inherit$/d' "$MUT/m4.yml"
+sed_in_place "$MUT/m4.yml" '/^    secrets: inherit$/d'
 grep -q '^    secrets: inherit$' "$MUT/m4.yml" && mut_bad+=("M4 was not applied")
 check_contract "$MUT/reusable.yml" "$MUT/m4.yml" "M4" >/dev/null 2>&1 &&
 	mut_bad+=("M4 SURVIVED: a caller that inherits no secrets was accepted")
@@ -1925,10 +1923,12 @@ awk '
 	{ print }
 ' "$MUT/reusable.yml" >"$MUT/m5-reusable.yml"
 cp "$DESKTOP_EDGE" "$MUT/m5.yml"
-sed -i 's/^      recorder-lang: /      launcher-ref: dev\n      recorder-lang: /' "$MUT/m5.yml"
+sed_in_place "$MUT/m5.yml" "s/^      recorder-lang: /      launcher-ref: dev${SED_NL}      recorder-lang: /"
 if ! grep -q '^launcher-ref' <<<"$(wf_inputs "$MUT/m5-reusable.yml")"; then
 	mut_bad+=("M5 was not applied (the reintroduced input is not parsed as declared)")
 fi
+grep -q '^      launcher-ref: dev$' "$MUT/m5.yml" ||
+	mut_bad+=("M5 was not applied (the caller does not pass the reintroduced input)")
 check_contract "$MUT/m5-reusable.yml" "$MUT/m5.yml" "M5" >/dev/null 2>&1 &&
 	mut_bad+=("M5 SURVIVED: a re-introduced '*-ref' input was accepted")
 
@@ -2044,7 +2044,7 @@ else
 fi
 
 # M12 -- an unrelated call site stops passing `siblings:`, which would silently
-# switch it onto the whole five-repo clone-list.  Through check_call_sites.
+# switch it onto the whole clone-list.  Through check_call_sites.
 cp "$REPO_ROOT/.github/workflows/codetracer.yml" "$MUT/m12.yml" 2>/dev/null || true
 if [ -f "$MUT/m12.yml" ]; then
 	awk '
@@ -2087,10 +2087,51 @@ else
 		mut_bad+=("M13 SURVIVED: the planner emitted '<name>=<ref>' entries and the explicit-ref rule did not fire (got: ${m13_out:-<nothing>})")
 fi
 
-if [ "${#mut_bad[@]}" -eq 0 ]; then
-	ok "M1-M13: all thirteen mutations of real wiring are rejected"
+# M14 -- a repro-lock call site's `siblings:` list loses a source repro.nim
+# imports.  The entry is swapped for another name rather than deleted, so the
+# list stays explicit: check_call_sites must still accept the mutant, which is
+# the gap this rule closes, and check_repro_lock_sources must reject it by name.
+# The real files are the control; the victim comes from the recipe.  The last
+# three arms prove the rule is not vacuous: a recipe with no such import and a
+# file with no such call site are refused, and a further import in the recipe
+# is demanded, so the required set really is derived.
+cp "$REPO_ROOT/.github/workflows/codetracer.yml" "$MUT/m14.yml" 2>/dev/null || true
+m14_victim="$(repro_nim_sibling_sources "$REPRO_RECIPE" | head -n 1)"
+if [ ! -f "$MUT/m14.yml" ] || [ -z "$m14_victim" ]; then
+	mut_bad+=("M14 could not be built: no codetracer.yml copy, or repro.nim imports no sibling source")
+elif ! check_repro_lock_sources "$REPRO_RECIPE" "$MUT/m14.yml" >/dev/null 2>&1; then
+	mut_bad+=("M14 control failed: the unmutated codetracer.yml was rejected, so a rejection below proves nothing")
 else
-	fail "M1-M13: all thirteen mutations of real wiring are rejected" "${mut_bad[@]}"
+	sed "s/^\( *\)${m14_victim}\$/\1codetracer-launcher/" "$MUT/m14.yml" >"$MUT/m14-mut.yml"
+	if cmp -s "$MUT/m14.yml" "$MUT/m14-mut.yml"; then
+		mut_bad+=("M14 was not applied (no '$m14_victim' siblings: entry found to replace)")
+	else
+		check_call_sites "$MUT/m14-mut.yml" >/dev/null 2>&1 ||
+			mut_bad+=("M14 was not the intended defect: the explicit-subset check rejected the mutant too")
+		if m14_out="$(check_repro_lock_sources "$REPRO_RECIPE" "$MUT/m14-mut.yml" 2>&1)" ||
+			! grep -qF "omits '$m14_victim'" <<<"$m14_out"; then
+			mut_bad+=("M14 SURVIVED: a repro-lock list omitting '$m14_victim' was accepted (got: ${m14_out:-<nothing>})")
+		fi
+	fi
+	: >"$MUT/m14-no-imports.nim"
+	check_repro_lock_sources "$MUT/m14-no-imports.nim" "$MUT/m14.yml" >/dev/null 2>&1 &&
+		mut_bad+=("M14 SURVIVED: a recipe with no relative import passed vacuously")
+	check_repro_lock_sources "$REPRO_RECIPE" "$MUT/reusable.yml" >/dev/null 2>&1 &&
+		mut_bad+=("M14 SURVIVED: a file with no repro-lock call site passed vacuously")
+	{
+		strip_cr "$REPRO_RECIPE"
+		printf '  import "../m14-new-source/repro"\n'
+	} >"$MUT/m14-repro.nim"
+	if m14_out="$(check_repro_lock_sources "$MUT/m14-repro.nim" "$MUT/m14.yml" 2>&1)" ||
+		! grep -qF "omits 'm14-new-source'" <<<"$m14_out"; then
+		mut_bad+=("M14 SURVIVED: a new import in the recipe was not demanded of the call site (got: ${m14_out:-<nothing>})")
+	fi
+fi
+
+if [ "${#mut_bad[@]}" -eq 0 ]; then
+	ok "M1-M14: all fourteen mutations of real wiring are rejected"
+else
+	fail "M1-M14: all fourteen mutations of real wiring are rejected" "${mut_bad[@]}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -2098,7 +2139,7 @@ fi
 # reporting success on fewer checks than it claims.
 # ---------------------------------------------------------------------------
 echo
-readonly EXPECTED_ASSERTIONS=44
+readonly EXPECTED_ASSERTIONS=41
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))

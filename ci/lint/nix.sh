@@ -40,6 +40,10 @@ lint_step "backend-manager sandbox package inputs" \
 	nix build --impure --no-link --max-jobs 2 --cores 2 \
 	--expr 'import ./ci/test/backend-manager-package-inputs.nix { }'
 
+# Requires the host's Nix daemon and real local bare repositories, so this
+# belongs to the Nix lane rather than the lightweight shell-only lint lane.
+lint_step "Nix Git hooks in fresh worktrees" bash ci/test/nix-git-hooks-test.sh
+
 lint_step "nix flake check" flake_check
 
 lint_summary

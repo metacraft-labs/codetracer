@@ -133,7 +133,12 @@
 #
 # And the shim is checked in BOTH polarities for the literal that distinguishes
 # the font-kit build, because a lane that captured a textless window and
-# graded it green is exactly the failure this one exists to prevent.
+# graded it green is exactly the failure this one exists to prevent. That probe
+# is a fact about the shim alone, so it is not what says this binary can load
+# it. The shim's stamp and the import/export comparison do that, before any
+# control or scenario runs (see "The shim" below). A scenario that does not
+# capture quotes what the app itself wrote, because a refusal that guesses at
+# the cause sent a stale shim looking for a regression in the front-end.
 #
 # ===========================================================================
 
@@ -173,6 +178,15 @@ fail() {
 	echo "FAIL: $*" >&2
 	exit 1
 }
+
+# Teardown awaits this deadline, so disarming it would leave no normal quit.
+case "${WINDOW_MS}" in
+"" | *[!0-9]*) fail "CODETRACER_PLAT37_WINDOW_MS must be a positive integer" ;;
+esac
+# The app passes this value to a uint32 FFI; 2^32 would silently disarm it.
+[ "${#WINDOW_MS}" -le 10 ] && [ "${WINDOW_MS}" -gt 0 ] &&
+	[ "${WINDOW_MS}" -le 4294967295 ] ||
+	fail "CODETRACER_PLAT37_WINDOW_MS must be in 1..4294967295 (at most 10 digits)"
 
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -247,11 +261,11 @@ done
 # FAILURE MODE, stated rather than left to be discovered: this gate is
 # FALSE-RED-biased. It refuses after any edit inside the closure, including
 # one that cannot change the rendered frame (a comment, a log string). The
-# remedy — `just build-gpui` — always clears it, because the stamp is
+# remedy — `just build-gpui` in the same dev shell — clears it: the stamp is
 # rewritten from the current tree on every build whether or not the emitted
-# bytes changed. There is no state in which running the remedy leaves the
-# assertion still failing. That is the property mtime-based freshness cannot
-# offer, and the reason this is not an mtime check.
+# bytes changed. A different compiler on PATH is an environment refusal, with
+# a re-run-inside-the-dev-shell remedy. That is the property mtime-based
+# freshness cannot offer, and the reason this is not an mtime check.
 echo
 echo "=== the subject: is this binary of THIS tree? ==="
 # shellcheck source=ci/lib/build-freshness.sh
@@ -264,7 +278,7 @@ echo "=== the subject: is this binary of THIS tree? ==="
 # recompute it, and the closure costs ~10 s of real compiler time, so the gate
 # is driven through `bf_assert_fresh` directly with the digest in hand.
 GPUI_STAMP="${root}/${BF_GPUI_STAMP}"
-GPUI_INPUT_DIGEST="$(bf_gpui_input_digest "${root}")" ||
+GPUI_INPUT_DIGEST="$(bf_gpui_input_digest "${root}" "${GPUI_STAMP}")" ||
 	fail "the GPUI input closure could not be computed, so this lane cannot
       say what the binary it is about to photograph was built from. Refused
       rather than captured: an unknown subject is not a subject."
@@ -281,35 +295,6 @@ command -v timeout >/dev/null || fail "timeout(1) is not on PATH, and this
 command -v ffmpeg >/dev/null || fail "ffmpeg is not on PATH; it is what
       downscales each device-pixel capture to its point extent."
 
-mkdir -p "${OUT}"
-
-# ---------------------------------------------------------------------------
-# The two Nim halves, built here rather than assumed
-# ---------------------------------------------------------------------------
-build_nim() {
-	local src="$1" exe="$2" cache="$3"
-	echo "building ${exe##*/}"
-	nim c --hints:off --warnings:off --path:"${root}/../GuiAssert/src" \
-		--nimcache:"${root}/nimcache/${cache}" -o:"${exe}" "${src}" ||
-		fail "${src} did not compile"
-}
-build_nim "${root}/ci/test/plat37_macos_window_capture.nim" "${CAPTURE}" \
-	plat37macoscap
-build_nim "${root}/ci/test/plat37_macos_window_grade.nim" "${GRADE}" \
-	plat37macosgrade
-
-# ---------------------------------------------------------------------------
-# CONTROL 1 — the host, the grant and the display positive control
-# ---------------------------------------------------------------------------
-echo
-echo "=== control 1: the host, the grant, and a display still ==="
-timeout "${CAPTURE_TIMEOUT_S}" "${CAPTURE}" host \
-	--record="${OUT}/host.json" --timeout-ms=30000 ||
-	fail "the host control failed. Its record is at ${OUT}/host.json and
-      names which of the three it was: no still capture at all, no
-      ScreenCapture grant for the capture bundle (the record carries the
-      exact clickable remedy), or a display that could not be captured."
-
 # ---------------------------------------------------------------------------
 # The shim — SELECTED BY FILE SUBSTITUTION, for the measured reason
 # ---------------------------------------------------------------------------
@@ -323,19 +308,6 @@ timeout "${CAPTURE_TIMEOUT_S}" "${CAPTURE}" host \
 SHIM_DIR="${ISONIM_GPUI}/rust/target/plat37"
 LIVE_SHIM="${ISONIM_GPUI}/rust/target/debug/libgpui_nim_shim.dylib"
 WINDOWED_SHIM="${SHIM_DIR}/libgpui_nim_shim.windowed.dylib"
-SHIM_BACKUP=""
-
-restore_shim() {
-	if [ -n "${SHIM_BACKUP}" ] && [ -f "${SHIM_BACKUP}" ]; then
-		mv -f "${SHIM_BACKUP}" "${LIVE_SHIM}"
-		SHIM_BACKUP=""
-		echo "restored ${LIVE_SHIM}"
-	fi
-	pkill -f "${BIN}" 2>/dev/null
-	return 0
-}
-trap restore_shim EXIT
-
 [ -f "${WINDOWED_SHIM}" ] || fail "the windowed shim is not at
       ${WINDOWED_SHIM}. Build all three in the sibling's own dev shell,
       which is where the linker flags are declared:
@@ -376,6 +348,124 @@ echo "shim font-kit probe: font_kit=${has_fontkit} textless-refusal=${has_refusa
       textless text system's refusal message (\"no text will be rendered\"),
       so it was built WITHOUT \`gpui_platform/font-kit\`. Rebuild it from
       isonim-gpui b0ea5fc or later."
+
+# THE PAIR, AND THEN THE STAMP. The font-kit probe above tests a fact about the
+# shim alone. On 2026-10-31 it printed `font_kit=1 textless-refusal=0` for a
+# shim from 2026-10-18 that lacked a symbol the 2026-10-23 binary imports, and
+# all seven scenarios refused with a message about the front-end. The stamp
+# holds this shim to this tree, as THE FRESHNESS GATE holds the binary. The
+# comparison holds it to this binary. `ci/lib/build-freshness.sh` says why
+# neither replaces the other. Like that gate, they refuse: the remedy is one
+# command, and only a capture run that already failed would otherwise say so.
+# The pair goes first because a stale shim usually fails both, and only the
+# pair's refusal names the symbol that would have killed the front-end.
+SHIM_STAMP="${SHIM_DIR}/windowed.build-stamp"
+SHIM_REMEDY="  Rebuild the staged shims, which rewrites their stamps from this tree:
+      cd ${ISONIM_GPUI} && nix develop --command just plat37-shims"
+bf_gpui_shim_assert_compatible "${BIN}" "${WINDOWED_SHIM}" "${SHIM_REMEDY}" ||
+	fail "${BIN} cannot load ${WINDOWED_SHIM}, so no window could open.
+      Refused before staging anything."
+bf_gpui_shim_assert_fresh "${ISONIM_GPUI}" "${SHIM_STAMP}" "${WINDOWED_SHIM}" \
+	"${SHIM_REMEDY}" ||
+	fail "the windowed shim this lane would stage is not of this tree."
+SHIM_IMPORT_COUNT="$(bf_gpui_shim_imports "${BIN}" | wc -l | tr -d ' ')"
+SHIM_EXPORT_COUNT="$(bf_gpui_shim_exports "${WINDOWED_SHIM}" | wc -l | tr -d ' ')"
+
+mkdir -p "${OUT}"
+
+# ---------------------------------------------------------------------------
+# The two Nim halves, built here rather than assumed
+# ---------------------------------------------------------------------------
+build_nim() {
+	local src="$1" exe="$2" cache="$3"
+	echo "building ${exe##*/}"
+	nim c --hints:off --warnings:off --path:"${root}/../GuiAssert/src" \
+		--nimcache:"${root}/nimcache/${cache}" -o:"${exe}" "${src}" ||
+		fail "${src} did not compile"
+}
+build_nim "${root}/ci/test/plat37_macos_window_capture.nim" "${CAPTURE}" \
+	plat37macoscap
+build_nim "${root}/ci/test/plat37_macos_window_grade.nim" "${GRADE}" \
+	plat37macosgrade
+
+# ---------------------------------------------------------------------------
+# CONTROL 1 — the host, the grant and the display positive control
+# ---------------------------------------------------------------------------
+echo
+echo "=== control 1: the host, the grant, and a display still ==="
+timeout "${CAPTURE_TIMEOUT_S}" "${CAPTURE}" host \
+	--record="${OUT}/host.json" --timeout-ms=30000 ||
+	fail "the host control failed. Its record is at ${OUT}/host.json and
+      names which of the three it was: no still capture at all, no
+      ScreenCapture grant for the capture bundle (the record carries the
+      exact clickable remedy), or a display that could not be captured."
+
+# ---------------------------------------------------------------------------
+# The app and the staged shim: both belong to this lane until it exits
+# ---------------------------------------------------------------------------
+# Stages and restores the shim: `ci/lib/gpui-shim-stage.sh` says how, and why.
+# shellcheck source=ci/lib/gpui-shim-stage.sh
+# The pre-commit hook runs shellcheck WITHOUT `-x`: see `build-freshness.sh` above.
+# shellcheck disable=SC1091
+. "${root}/ci/lib/gpui-shim-stage.sh" || fail "ci/lib/gpui-shim-stage.sh could not be loaded"
+# Only this lane's outstanding child belongs to its cleanup. Never sweep by
+# executable name: another capture or an operator may be running the same app.
+gpid=""
+
+wait_capture_app() {
+	local app_rc=0
+	[ -n "${gpid}" ] || return 0
+	# --quit-after-ms requests the shim's normal stop_event_loop route. Waiting
+	# lets gpui_launch return and the process run its registered exit cleanup.
+	# Sending SIGTERM here bypasses that cleanup, even after a good capture.
+	wait "${gpid}" || app_rc=$?
+	gpid=""
+	if [ "${app_rc}" -ne 0 ]; then
+		echo "GPUI app exited unsuccessfully (status ${app_rc})" >&2
+	fi
+	return "${app_rc}"
+}
+
+# Print what the app itself wrote. This is a quotation and not a diagnosis, and
+# the capture path cannot supply one: from there, an app that died at load and
+# an app that closed its window look alike. `${view}.gpui.log` held the real
+# cause of the 2026-10-31 refusals the whole time.
+APP_LOG_QUOTE_LINES=20
+quote_app_log() {
+	local log="$1"
+	if [ ! -s "${log}" ]; then
+		echo "  the app wrote nothing to ${log}; no cause is established" >&2
+		return 0
+	fi
+	echo "  what the app wrote (last ${APP_LOG_QUOTE_LINES} of $(awk 'END {print NR}' "${log}") lines of ${log}):" >&2
+	tail -n "${APP_LOG_QUOTE_LINES}" "${log}" | sed 's/^/    | /' >&2
+}
+
+# `$1`, or else the status of the command before the call, is the lane's verdict.
+restore_shim() {
+	local lane_rc="${1:-$?}" app_rc=0
+	# A failed capture still owns a live app. Let its armed quit finish before
+	# replacing the library it loaded; preserve the lane's original exit code.
+	wait_capture_app || app_rc=$?
+	gpui_shim_restore || {
+		[ "${lane_rc}" -ne 0 ] || lane_rc=1
+	}
+	# Preserve a prior capture failure, while refusing a failed app even if
+	# the lane otherwise reached a successful exit.
+	[ "${lane_rc}" -ne 0 ] || lane_rc=${app_rc}
+	return "${lane_rc}"
+}
+# Further signals are ignored for the reason `gpui_shim_exit_trap` gives, and here
+# the window is seconds wide: the restore waits for the app's armed quit, and a
+# signal trap's `exit` inside this handler would abandon it.
+capture_exit_trap() {
+	local rc=$?
+	trap '' INT TERM
+	restore_shim "${rc}"
+	exit $?
+}
+trap capture_exit_trap EXIT
+gpui_shim_trap_signals
 
 # The recording. REFUSED rather than skipped when absent: a green run over no
 # recording is worth less than a red one.
@@ -512,11 +602,9 @@ PY
 # ---------------------------------------------------------------------------
 # Stage the windowed shim and drive the scenarios
 # ---------------------------------------------------------------------------
-if [ -z "${SHIM_BACKUP}" ] && [ -f "${LIVE_SHIM}" ]; then
-	SHIM_BACKUP="${LIVE_SHIM}.plat37macos-backup"
-	cp -f "${LIVE_SHIM}" "${SHIM_BACKUP}"
-fi
-cp -f "${WINDOWED_SHIM}" "${LIVE_SHIM}"
+# Moved aside and never copied over: `ci/lib/gpui-shim-stage.sh` says why.
+gpui_shim_stage "${LIVE_SHIM}" "${WINDOWED_SHIM}" ||
+	fail "the windowed shim could not be staged at ${LIVE_SHIM}"
 echo
 echo "shim in place: windowed ($(wc -c <"${LIVE_SHIM}" | tr -d ' ') bytes)"
 
@@ -569,8 +657,10 @@ while IFS=$'\t' read -r id view width height vpname ops; do
 		--requested-width="${width}" --requested-height="${height}" \
 		--timeout-ms=30000 --wait-ms="${WAIT_MS}" || cap_rc=$?
 
-	kill "${gpid}" 2>/dev/null
-	wait "${gpid}" 2>/dev/null
+	if ! wait_capture_app; then
+		quote_app_log "${log}"
+		fail "${view}: the captured app did not shut down cleanly"
+	fi
 
 	# THE RECORD IS THE VERDICT, not the exit code and not the file's size.
 	# The driver writes one on every path it reaches, INCLUDING a refusal, so
@@ -578,17 +668,21 @@ while IFS=$'\t' read -r id view width height vpname ops; do
 	# from "the capture did not run" (Verification-Harness-Traps §4).
 	if [ ! -f "${rec}" ]; then
 		echo "  no record written (rc ${cap_rc}) — the driver did not run" >&2
+		quote_app_log "${log}"
 		refused=$((refused + 1))
 		continue
 	fi
 	if [ "${cap_rc}" -ne 0 ]; then
 		echo "  refused (rc ${cap_rc}): $(python3 -c "
 import json,sys; print(json.load(open(sys.argv[1])).get('refusal','?'))" "${rec}")" >&2
+		quote_app_log "${log}"
 		refused=$((refused + 1))
 		python3 -c "
 import json,sys
 r=json.load(open(sys.argv[1])); r['graded']=False
-print(json.dumps(r))" "${rec}" >>"${RECORDS}"
+lines=open(sys.argv[2],errors='replace').read().splitlines()
+r['appLog']=lines[-int(sys.argv[3]):]
+print(json.dumps(r))" "${rec}" "${log}" "${APP_LOG_QUOTE_LINES}" >>"${RECORDS}"
 		continue
 	fi
 
@@ -671,17 +765,19 @@ print(json.loads(open(sys.argv[1]).read().strip().splitlines()[-1])['laneVerdict
 	fi
 done <"${SPEC}"
 
-restore_shim
+restore_shim || fail "restoring the capture shim failed"
 
 # ---------------------------------------------------------------------------
 # The manifest
 # ---------------------------------------------------------------------------
 python3 - "${SCENARIOS}" "${OUT}" "${ONLY}" "${BIN}" "${GPUI_STAMP}" \
 	"${GPUI_INPUT_DIGEST}" "${WINDOWED_SHIM}" "${root}" "${ISONIM_GPUI}" \
+	"${SHIM_STAMP}" "${SHIM_IMPORT_COUNT}" "${SHIM_EXPORT_COUNT}" \
 	<<'PY' || fail "the manifest did not assemble"
 import datetime, hashlib, json, os, subprocess, sys
 (scenarios_path, out, only, bin_path, stamp_path, input_digest,
- shim_path, root, isonim_gpui) = sys.argv[1:10]
+ shim_path, root, isonim_gpui, shim_stamp_path, shim_imports,
+ shim_exports) = sys.argv[1:13]
 doc = json.load(open(scenarios_path))
 
 
@@ -712,9 +808,9 @@ def git(repo, *args):
         return ""
 
 
-def stamp_field(name):
+def stamp_field(name, path=stamp_path):
     try:
-        for line in open(stamp_path):
+        for line in open(path):
             if line.startswith(name + "="):
                 return line.split("=", 1)[1].strip()
     except OSError:
@@ -820,6 +916,11 @@ manifest = {
             "path": shim_path,
             "sha256": sha256(shim_path),
             "mtimeUtc": mtime(shim_path),
+            "stampInputDigest": stamp_field("input_digest", shim_stamp_path),
+            "stampBuiltAt": stamp_field("built_at", shim_stamp_path),
+            "stampBuiltBy": stamp_field("built_by", shim_stamp_path),
+            "importedSymbols": int(shim_imports),
+            "exportedSymbols": int(shim_exports),
         },
         "repos": {
             name: {

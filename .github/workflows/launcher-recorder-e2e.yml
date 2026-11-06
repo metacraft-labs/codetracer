@@ -89,15 +89,18 @@
 #   the org-wide rule and not this gate's to re-decide.
 #
 #   THREE ENTRIES ARE THE STATED EXCEPTION, and they carry a 40-hex commit
-#   SHA: `isonim`, `isonim-tui` and `runquota` are not declared in codetracer's
-#   project manifest, so the lock HAS no revision for them and a bare entry
-#   fails `Setup dev env` outright.  A commit SHA is the other reproducible
-#   shape `clone-siblings` accepts -- unlike `=<branch>`, it names the same tree
-#   on every re-run.  All three are flake inputs, and each SHA is the one
-#   `flake.lock` pins (ci/test/launcher-recorder-e2e-workflow-test.sh fails when
-#   they drift apart).  The full reasoning, the measurement behind it and the
-#   condition for removing it are at the `siblings:` block itself; see "THE
-#   FLAKE-INPUT THREE" there.  (The io-mon family is SHA-pinned too, for a
+#   SHA: `isonim`, `isonim-tui` and `runquota` were not declared in codetracer's
+#   project manifest, so the lock had no revision for them and a bare entry
+#   failed `Setup dev env` outright.  (Measured 2026-11-01: the manifest declares
+#   all three now, and repro.lock pins them in codetracer, the launcher and the
+#   python, ruby, js, beam and native recorders, so that condition no longer
+#   holds; going bare is a separate change.)  A commit SHA is the other
+#   reproducible shape `clone-siblings` accepts -- unlike `=<branch>`, it names
+#   the same tree on every re-run.  All three are flake inputs, and each SHA is
+#   the one `flake.lock` pins (ci/test/launcher-recorder-e2e-workflow-test.sh
+#   fails when they drift apart).  The full reasoning, the measurement behind it
+#   and the condition for removing it are at the `siblings:` block itself; see
+#   "THE FLAKE-INPUT THREE" there.  (The io-mon family is SHA-pinned too, for a
 #   different reason, stated beside those entries.)
 #
 #   THE REPO UNDER TEST IS STILL PINNED TO `github.sha`, and gets there without
@@ -343,158 +346,6 @@ jobs:
     timeout-minutes: 180
 
     steps:
-      - name: Unmount stale FUSE mounts left in the persistent work directory
-        # PERSISTENT RUNNERS KEEP A DEAD JOB'S tup MOUNT.  `just build-once`
-        # runs tup, and tup tracks dependencies through a FUSE filesystem it
-        # mounts on `<checkout>/src/.tup/mnt`.  A job that is cancelled or
-        # times out while tup is running leaves that mount behind in this
-        # PERSISTENT work directory, and the next job's `actions/checkout`
-        # dies cleaning it: `EBUSY: resource busy or locked, rmdir
-        # '.../src/.tup/mnt'`.  Nothing a later step does can recover from
-        # that, so the mount is dropped here, before the checkout.
-        #
-        # Only FUSE mounts strictly BELOW this job's work directory
-        # ($RUNNER_WORKSPACE, which holds the triggering checkout and every
-        # sibling `clone-siblings` places beside it) are touched, and only
-        # with the unprivileged `fusermount -u -z` the runner user may run on
-        # a mount it made; nothing here needs or takes root.  A mount that
-        # cannot be dropped is a WARNING, not a failure: the checkout below
-        # then fails with the EBUSY that names it, which is no worse than
-        # without this step.  Bash builtins only (no grep/sed/awk), like the
-        # read-only sweep below.  ci/test/launcher-recorder-e2e-workflow-test.sh
-        # executes this block against a planted mount table.
-        shell: bash
-        run: |
-          set -uo pipefail
-          root="${RUNNER_WORKSPACE:-}"
-          mounts="${LRC_MOUNTS_FILE:-/proc/self/mounts}"
-          echo "fuse-sweep: runner=${RUNNER_NAME:-?} root=${root:-<unset>}"
-          if [ -z "${root}" ] || [ ! -d "${root}" ]; then
-            echo "fuse-sweep: found 0 stale FUSE mount(s) (work dir absent - fresh runner)"
-            exit 0
-          fi
-          if [ ! -r "${mounts}" ]; then
-            echo "::warning::fuse-sweep: ${mounts} is not readable, so stale FUSE mounts under ${root} cannot be listed; nothing was unmounted"
-            exit 0
-          fi
-          found=0
-          stuck=0
-          while read -r _dev mnt fstype _rest; do
-            case "${fstype}" in
-              fuse | fuse.* | fuseblk) ;;
-              *) continue ;;
-            esac
-            case "${mnt}" in
-              "${root}"/*) ;;
-              *) continue ;;
-            esac
-            found=$((found + 1))
-            echo "fuse-sweep: stale ${fstype} mount ${mnt}"
-            dropped=0
-            for tool in fusermount3 fusermount /run/wrappers/bin/fusermount3 /run/wrappers/bin/fusermount; do
-              if command -v "${tool}" >/dev/null 2>&1 && "${tool}" -u -z "${mnt}"; then
-                echo "fuse-sweep:   unmounted with ${tool}"
-                dropped=1
-                break
-              fi
-            done
-            if [ "${dropped}" -eq 0 ]; then
-              stuck=$((stuck + 1))
-              echo "::warning::fuse-sweep: could not unmount ${mnt} (no fusermount on PATH, or it refused); actions/checkout will fail with EBUSY on it"
-            fi
-          done <"${mounts}"
-          echo "fuse-sweep: found ${found} stale FUSE mount(s) under ${root}; ${stuck} could not be unmounted"
-
-      - name: Sweep read-only leftovers from the persistent work directory
-        # The second leftover a persistent runner hands the next job: a 0555
-        # directory (the desktop build stages trees out of the Nix store, e.g.
-        # `studio-bundle/.../goldenlayout-base.css`'s parent) that
-        # `actions/checkout`'s clean cannot unlink inside -- `EACCES` on the
-        # file it tried to remove.  This is codetracer.yml's pre-checkout
-        # sweep, byte-identical to ci/runner/sweep-readonly-leftovers.sh
-        # (ci/test/readonly-leftovers-sweep-test.sh enforces that for this
-        # copy too); see that script for the rationale and the measured runs.
-        shell: bash
-        run: |
-          set -uo pipefail
-          shopt -s dotglob nullglob
-          root="${RUNNER_WORKSPACE:-}"
-          echo "ro-sweep: runner=${RUNNER_NAME:-?} root=${root:-<unset>}"
-          if [ -z "$root" ] || [ ! -d "$root" ]; then
-            echo "ro-sweep: found 0 unwritable directory(ies) (work dir absent - fresh runner)"
-            echo "ro-sweep: NOTHING FOUND - this host was already clean, mode 3 did not apply here"
-            exit 0
-          fi
-          ro_count=0
-          ro_shown=0
-          ro_blind=0
-          # Directory-only recursion via a trailing-slash glob, so bash never has to test
-          # the tens of thousands of regular files one at a time. `"$d"/*/` also matches
-          # symlinks TO directories; those are skipped, because following them leaves the
-          # work directory (these checkouts link into /nix/store) and a store path is not
-          # ours to chmod.
-          scan() {
-            local d="$1" e p
-            for e in "$d"/*/; do
-              p="${e%/}"
-              # `[ -L "$p" ] && continue` would be shorter and WRONG: GitHub runs `run:`
-              # blocks under `bash -e`, where a bare `A && B` list that evaluates false is
-              # a fatal command. Every branch here is a condition, never a bare list.
-              if [ -L "$p" ]; then
-                continue
-              fi
-              if [ ! -r "$p" ] || [ ! -x "$p" ]; then
-                ro_blind=$((ro_blind + 1))
-                continue
-              fi
-              if [ ! -w "$p" ]; then
-                ro_count=$((ro_count + 1))
-                if [ "$ro_shown" -lt 10 ]; then
-                  ro_shown=$((ro_shown + 1))
-                  echo "ro-sweep:   unwritable $p"
-                fi
-              fi
-              scan "$p"
-            done
-            return 0
-          }
-          scan "$root"
-          before="$ro_count"
-          echo "ro-sweep: found $before unwritable directory(ies) under $root ($ro_blind unreadable)"
-          if [ "$before" -eq 0 ]; then
-            echo "ro-sweep: NOTHING FOUND - this host was already clean, mode 3 did not apply here"
-            exit 0
-          fi
-          # Prove the tool exists before claiming it worked: a `chmod` that is not on
-          # PATH exits 127, and a `|| true` would turn that into a silent pass.
-          chmod_bin="$(command -v chmod 2>/dev/null || true)"
-          if [ -z "$chmod_bin" ]; then
-            for candidate in /bin/chmod /usr/bin/chmod /run/current-system/sw/bin/chmod; do
-              if [ -x "$candidate" ]; then
-                chmod_bin="$candidate"
-                break
-              fi
-            done
-          fi
-          if [ -z "$chmod_bin" ]; then
-            echo "ro-sweep: FATAL no chmod on PATH and none at /bin/chmod;" \
-              "$before directory(ies) CANNOT be fixed" >&2
-            exit 1
-          fi
-          echo "ro-sweep: using $chmod_bin"
-          "$chmod_bin" -R u+w "$root" 2>/dev/null || true
-          ro_count=0
-          ro_shown=0
-          ro_blind=0
-          scan "$root"
-          after="$ro_count"
-          echo "ro-sweep: after chmod -R u+w: $after unwritable directory(ies) remain"
-          echo "ro-sweep: RESTORED owner-write on $((before - after)) directory(ies)"
-          if [ "$after" -ne 0 ]; then
-            echo "ro-sweep: WARNING $after directory(ies) are not owned by the runner user;" \
-              "checkout will still fail to clean them"
-          fi
-
       - name: Plan the workspace layout
         # See "WORKSPACE LAYOUT" in this file's header.  The triggering repo is
         # the primary checkout, because `clone-siblings` cannot clone a repo
@@ -710,11 +561,12 @@ jobs:
         # The repeat costs one extra clone of an already-pinned revision.
         #
         # THE FLAKE-INPUT THREE ARE PINNED BY COMMIT SHA, because the lock
-        # cannot answer for them.  `isonim` and `runquota` were the first two
+        # could not answer for them (it can now; see the 2026-11-01 measurement
+        # at the top of this file).  `isonim` and `runquota` were the first two
         # (below); `isonim-tui` joined them on 2026-09-24, see "ISONIM-TUI"
-        # after this block.  `isonim` and `runquota` are absent from the
+        # after this block.  `isonim` and `runquota` were absent from the
         # `codetracer` project in metacraft-labs/metacraft-manifests, so a BARE
-        # entry does not merely fail to help -- it fails this step outright with
+        # entry did not merely fail to help -- it failed this step outright with
         #
         #   The workspace lock for codetracer@<sha> pins no revision for these
         #   sibling(s): isonim runquota
@@ -757,8 +609,9 @@ jobs:
         # compile against the runquota revision this repo pinned, and the direnv
         # step below reported it as a missing direnv.  So when flake.lock's
         # `isonim` / `isonim-tui` / `runquota` inputs are bumped, bump these
-        # with them -- each is one pin spelled in two places, not two
-        # independent knobs.  That sentence was not enough on its own: by
+        # with them -- each is one pin spelled in several places (this block
+        # and, for `isonim` and `isonim-tui`, deploy-web-codetracer.yml), not
+        # several independent knobs.  That sentence was not enough on its own: by
         # 2026-09-24 `isonim` here still said 9936c544 and `runquota` f1ca742d
         # while flake.lock had moved `isonim` off 9936c544 on 2026-09-16
         # (b18a3ff8f; at 172ce7fb since 36c173693) and `runquota` off f1ca742d
@@ -826,40 +679,40 @@ jobs:
             # core build dies with `cannot open file: io_mon/depfile`, no
             # src/build-debug/bin/ct is emitted, and this gate fails in its
             # artifact check having never reached the launcher or a recorder.
-            # SHA-pinned, not lock-resolved. The nim-shm-* pins are the main
-            # CI lane's (.github/workflows/codetracer.yml); io-mon follows
-            # flake.lock (below). Not bare, because a published
+            # SHA-pinned, not lock-resolved. All four follow flake.lock (below),
+            # and the main CI lane (.github/workflows/codetracer.yml) carries the
+            # same io-mon and nim-shm-* revs. Not bare, because a published
             # workspace lock still carries an io-mon rev that predates
             # depfile.nim, so a bare `io-mon` here can silently resolve to a
             # revision that cannot build `ct`.
             # nim-stackable-hooks is SHA-pinned here (the main lane still says
             # `=dev`) because ci-contract-suites ratchets the number of mutable
             # branch-tip entries and that ceiling is only ever lowered.
-            # io-mon and nim-stackable-hooks are ALSO flake inputs, so their
-            # SHAs must equal flake.lock's for the same reason as the three
-            # below (ci/test/launcher-recorder-e2e-workflow-test.sh compares
-            # every entry whose name is a flake input).  nim-stackable-hooks was
-            # still the 2026-08-29 `dev` tip, d51b571a, long after flake.lock
-            # had moved on; it follows flake.lock now, and so does io-mon (the
-            # 2026-09-25 flake.lock roll moved it off 3b6196ef; its pin still
-            # carries src/io_mon/depfile.nim).  The two nim-shm-* repos are
-            # not flake inputs and keep the main lane's pins.
-            # Re-aligned to flake.lock on 2026-10-22 after the flake.lock roll in
-            # 0a422dd91 (io-mon's new pin still carries src/io_mon/depfile.nim).
+            # All four are ALSO flake inputs (flake.nix pins the two nim-shm-*
+            # repos by URL), so their SHAs must equal flake.lock's for the same
+            # reason as the three below
+            # (ci/test/launcher-recorder-e2e-workflow-test.sh compares every
+            # entry whose name is a flake input).  nim-stackable-hooks was still
+            # the 2026-08-29 `dev` tip, d51b571a, long after flake.lock had moved
+            # on; it follows flake.lock now, and so does io-mon (the 2026-09-25
+            # flake.lock roll moved it off 3b6196ef).
+            # Re-aligned to flake.lock on 2026-11-01 after the flake.lock rolls
+            # up to 5044c35b9 (io-mon's new pin still carries
+            # src/io_mon/depfile.nim).
             # runquota is locked as a `follows` of reprobuild's `runquota-src`;
             # the pin below is that node's rev.
-            io-mon=6fccd929cb09da0bfc0844b93ced9ffb1ac0f74f
-            nim-shm-queue=5a8e43b52fa202859658692c9f8432967f3971ea
-            nim-shm-gset=360bfc15cadab1ff583e6d1cbc20b389d5d6825f
-            nim-stackable-hooks=059c549306621e2f769adf75630b0b7f29018dca
-            # Not in the workspace lock -- pinned to flake.lock's revs. See
-            # "THE FLAKE-INPUT THREE" above before changing any of these.
-            # isonim-tui is in codetracer's repro.lock since 6850efc5e, but the
-            # recorder repos' lock records these edges also resolve do not
-            # carry it, so it keeps the SHA shape.
-            isonim=6927da97dfd0ff92b24662d54f6d261528811632
-            isonim-tui=1d123c35bd241a4af853b2df6b21c973fba9e6b7
-            runquota=35b9dfe4af6e18f3f2a2242ece7cff330eb581e2
+            io-mon=8e6b67b08b79c4029c3b188df102541d8412518c
+            nim-shm-queue=91451f2250beb89d1d221f0a77be0841c19b182e
+            nim-shm-gset=fb981c7f186a9507c974b7de8871fc74d6308eae
+            nim-stackable-hooks=d715806424e8373708494913e59a48237978cc2a
+            # Pinned to flake.lock's revs. See "THE FLAKE-INPUT THREE" above
+            # before changing any of these. isonim-tui is in codetracer's
+            # repro.lock since 6850efc5e, and took the SHA shape because the
+            # recorder repos' lock records these edges also resolve did not
+            # carry it. They do now; going bare is a separate change.
+            isonim=196dfe18a3a3480c80a54f8bd60f371f601940e0
+            isonim-tui=ff295f7be6d7efc095ef4d249b1df0577d969c89
+            runquota=9818dc0c90be8ba7993424a7bbfbb6e009ffa965
             # Required by scripts/require-siblings.sh (`ct` links its reference
             # library). SHA, not bare: this workflow is also called from recorder
             # repos, whose repro.lock need not pin it. It is a flake input, so the
@@ -997,31 +850,10 @@ jobs:
         # duplicated.  A sibling with no flake.nix has nothing for a later step
         # to evaluate and is skipped.
         #
-        # REPRO'S OWN TOOL PROVISIONING IS A FETCH NO DEV SHELL EVALUATES, so
-        # it is fetched here FIRST, explicitly.  `repro exec` (build-siblings'
-        # toolchain lookup, and every sibling build after it) realizes the
-        # tools a repo's `repro.nim` declares from reprobuild's package
-        # catalog, and every `nixpkgs#` entry there resolves against ONE
-        # nixpkgs revision, `CanonicalNixpkgsRev` in reprobuild's
-        # libs/repro_dsl_stdlib/src/repro_dsl_stdlib/nixpkgs_pin.nim.  repro
-        # fetches it itself, as `github:NixOS/nixpkgs/<rev>?narHash=<hash>`,
-        # and no flake evaluated below reaches that ref.  Launcher run
-        # 40412127662's beam arm died on exactly it, ~2 h after the mint, in
-        # `Build ct-print`'s toolchain lookup:
-        #
-        #   unable to download 'https://api.github.com/repos/NixOS/nixpkgs/
-        #   tarball/addf7cf5f383...': HTTP error 401 "Bad credentials"
-        #
-        # The revision is READ, never restated: the reprobuild that provides
-        # `repro` to this job is codetracer's `reprobuild` flake input
-        # (nix/shells/ci-base.nix: `inputs'.reprobuild.packages`, and
-        # REPROBUILD_SOURCE_ROOT for the stdlib the provider compiles
-        # against), so the pin file is read out of THAT input at the revision
-        # this checkout's flake.lock locks, and the exact ref repro will ask
-        # for is fetched.  A codetracer whose flake has no direct `reprobuild`
-        # input gets repro from elsewhere and is skipped; a pin file that no
-        # longer reads is an error naming it, because skipping it silently
-        # would reopen the 401 above.
+        # The shared preparation below activates the same SDK and projects as
+        # the later builds, including bootstrap tools no flake eval reaches.
+        # This input guard does not inspect SDK source constants or select
+        # package realizations on the SDK's behalf.
         #
         # NO CREDENTIAL IS HANDLED HERE.  nix reads the token from the
         # user-level nix.conf `setup-nix` wrote (mode 600); this step never
@@ -1032,47 +864,6 @@ jobs:
           RECORDER_REPO: ${{ inputs.recorder-repo }}
         run: |
           set -euo pipefail
-          PIN_FILE="libs/repro_dsl_stdlib/src/repro_dsl_stdlib/nixpkgs_pin.nim"
-          rb_node=""
-          if [ -f "${CT_DIR}/flake.lock" ]; then
-            rb_node="$(jq -r '.nodes.root.inputs.reprobuild // "" | if type == "string" then . else "" end' "${CT_DIR}/flake.lock")"
-          fi
-          if [ -z "${rb_node}" ]; then
-            echo "no direct reprobuild input in ${CT_DIR}/flake.lock (repro's tool-provisioning nixpkgs is not this flake's to name)"
-          else
-            rb_ref="$(jq -r --arg n "${rb_node}" '.nodes[$n].locked | if .type == "github" then "github:\(.owner)/\(.repo)/\(.rev)?narHash=\(.narHash | @uri)" else "" end' "${CT_DIR}/flake.lock")"
-            if [ -z "${rb_ref}" ]; then
-              echo "::error::codetracer's reprobuild flake input is not a locked github input, so this step cannot read the nixpkgs revision repro provisions tools from. Teach this step the input's type; skipping it would leave that fetch to after the token expires."
-              exit 1
-            fi
-            if ! rb_json="$(nix flake prefetch --json "${rb_ref}")"; then
-              echo "::error::could not fetch ${rb_ref} (codetracer's reprobuild input, which names the nixpkgs repro provisions tools from) while this job's GitHub token is still valid; nix's own diagnostic is above this line."
-              exit 1
-            fi
-            rb_src="$(jq -r '.storePath // ""' <<<"${rb_json}" 2>/dev/null || true)"
-            pin="${rb_src}/${PIN_FILE}"
-            np_rev=""
-            np_nar=""
-            if [ -n "${rb_src}" ] && [ -f "${pin}" ]; then
-              np_rev="$(sed -n -E 's|^[[:space:]]*CanonicalNixpkgsRev\*?[[:space:]]*=[[:space:]]*"([0-9a-f]{40})".*|\1|p' "${pin}")"
-              np_nar="$(sed -n -E 's|^[[:space:]]*CanonicalNixpkgsNarHash\*?[[:space:]]*=[[:space:]]*"(sha256-[A-Za-z0-9+/=]+)".*|\1|p' "${pin}")"
-            fi
-            if [ -z "${np_rev}" ] || [ -z "${np_nar}" ]; then
-              echo "::error::could not read CanonicalNixpkgsRev / CanonicalNixpkgsNarHash from ${PIN_FILE} in ${rb_ref}. That pair names the nixpkgs repro realizes every catalog tool from; this step must fetch it while the token is valid. If reprobuild moved or renamed it, update this step."
-              exit 1
-            fi
-            np_nar_q="${np_nar//+/%2B}"
-            np_nar_q="${np_nar_q//\//%2F}"
-            np_nar_q="${np_nar_q//=/%3D}"
-            np_ref="github:NixOS/nixpkgs/${np_rev}?narHash=${np_nar_q}"
-            started="${SECONDS}"
-            if ! nix flake prefetch "${np_ref}" >/dev/null; then
-              echo "::error::could not fetch ${np_ref} (the nixpkgs repro provisions tools from) while this job's GitHub token is still valid; nix's own diagnostic is above this line."
-              exit 1
-            fi
-            echo "fetched: ${np_ref} (repro tool provisioning; ${rb_ref}) ($((SECONDS - started))s)"
-          fi
-
           SYSTEM="$(nix eval --impure --raw --expr builtins.currentSystem)"
           PARENT="$(cd "${CT_DIR}/.." && pwd)"
           dirs=("${CT_DIR}" "${CT_DIR}" "${PARENT}/codetracer-trace-format-nim" "${PARENT}/${RECORDER_REPO}")
@@ -1091,6 +882,18 @@ jobs:
             fi
             echo "fetched: ${dir} #${attr} ($((SECONDS - started))s)"
           done
+
+      - name: Prepare selected Repro toolchains before long running gates
+        # Same SDK shell and roots as build-siblings.sh and the driver.
+        # Provisioning refusals are infrastructure, before any decoder verdict.
+        uses: metacraft-labs/metacraft-github-actions/prepare-repro-envs@80542fb7298e274fd739d06c6f626f227ace308a
+        with:
+          working-directory: ${{ steps.plan.outputs.ct-dir }}
+          nix-shell: .?submodules=1#ci
+          projects: |
+            ${{ steps.plan.outputs.ct-dir }}
+            ${{ steps.plan.outputs.ct-dir }}/../codetracer-trace-format-nim
+            ${{ steps.plan.outputs.ct-dir }}/../${{ inputs.recorder-repo }}
 
       - name: Provision the musl/zig toolchain for the launcher link
         # INHERITED LRC-3 DELIVERABLE (runner prerequisites).

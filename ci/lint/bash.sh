@@ -432,6 +432,12 @@ lint_step "contract suite: a job that runs nix installs Nix first" \
 lint_step "contract suite: a private substituter comes with a credential" \
 	bash ci/test/private-substituter-credential-test.sh
 
+# Release jobs use the shared scoped credential implementation rather than
+# persisting an installation token in global Git URL rewrites. Offline wiring
+# checks and mutation controls; the shared action owns the functional suite.
+lint_step "contract suite: release Git credentials stay scoped to the job and organization" \
+	python3 ci/test/release-git-auth-test.py
+
 # The guard for this whole shape: no ci/lint script may let one failing step
 # hide another. It drives every ci/lint/*.sh with a PATH in which every
 # external command fails, and asserts each still reports every step it declares.
@@ -576,20 +582,23 @@ lint_step "desktop bundle self-containment (static half)" \
 lint_step "contract suite: desktop bundle self-containment" \
 	bash ci/test/desktop-bundle-self-contained-test.sh
 
-# The pre-checkout sweep that keeps a persistent self-hosted runner cleanable.
-# It lives as an inline `run:` block in seven jobs — it has to run BEFORE
-# actions/checkout, so it cannot be a script the repository provides — and this
-# is the ONLY place it is ever executed outside CI. Registered here rather than
-# left to be discovered because an unrun check is the defect it exists to catch,
-# and because the failure this guards is precisely a cleanup that silently
-# no-ops: it asserts a NON-ZERO count on a poisoned fixture, not merely a zero
-# afterwards. Pure bash + git + python3 over mktemp fixtures; no nix, no
-# network.
-lint_step "contract suite: the read-only-leftovers sweep runs, finds, and fixes" \
-	bash ci/test/readonly-leftovers-sweep-test.sh
+# The prefix every desktop capture lane assembles takes the `ct` of the dev
+# shell's build output (`CODETRACER_BUILD_DIR`), and a missing one fails with a
+# message. It used to read `src/build-debug` alone and, under `set -e`, die
+# silently in `readlink -f` on any host that builds elsewhere. Pure bash +
+# python3 over mktemp checkouts carrying the real script, with a stub `nim`;
+# no nix, no build.
+lint_step "contract suite: the capture prefix finds the dev shell's ct" \
+	bash ci/test/plat45-desktop-prefix-test.sh
 
-# The dev shell's git-hooks guard. Registered here for the same reason as the
-# sweep above: the thing it protects is developer state on a shared checkout, so
+# Persistent-runner mounts and permissions are host lifecycle state. This
+# source-shape gate refuses any product-workflow copy of the pre-checkout
+# cleanup and mutation-tests the predicate that enforces the boundary.
+lint_step "contract suite: runner filesystem lifecycle remains host-owned" \
+	bash ci/test/runner-lifecycle-ownership-test.sh
+
+# The dev shell's git-hooks guard. Registered here rather than left to be
+# discovered: the thing it protects is developer state on a shared checkout, so
 # it is never exercised by any other job, and an unrun guard is exactly the
 # defect it exists to catch. The suite builds real `git worktree` fixtures under
 # mktemp -- the bug is entirely about what `git rev-parse` reports in a linked

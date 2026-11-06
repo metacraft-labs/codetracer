@@ -25,6 +25,12 @@ pub trait ReplaySession: std::fmt::Debug {
     fn load_events(&mut self) -> Result<Events, Box<dyn Error>>;
     fn step(&mut self, action: Action, forward: bool) -> Result<bool, Box<dyn Error>>;
 
+    /// Whether this engine implements native instruction into/over motions
+    /// in both directions. Source-only recordings retain their line fallback.
+    fn supports_instruction_stepping(&mut self) -> bool {
+        false
+    }
+
     /// M2 — statement-granularity step-over.
     ///
     /// Advance by exactly one /statement/ rather than by one source
@@ -99,6 +105,14 @@ pub trait ReplaySession: std::fmt::Debug {
 
     fn load_step_events(&mut self, step_id: StepId, exact: bool) -> Vec<DbRecordEvent>;
     fn load_callstack(&mut self) -> Result<Vec<CallLine>, Box<dyn Error>>;
+    /// Disassemble the requested native function without moving the replay cursor.
+    /// Materialized traces obtain their recorded instructions from the trace reader.
+    fn load_asm_function(
+        &mut self,
+        _function: &crate::task::FunctionLocation,
+    ) -> Result<crate::task::Instructions, Box<dyn Error>> {
+        Err("function disassembly is not supported by this replay".into())
+    }
     /// Search invocations without changing this replay's cursor or breakpoints.
     fn search_calls(
         &mut self,

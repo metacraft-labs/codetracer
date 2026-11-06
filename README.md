@@ -183,6 +183,19 @@ To enter the Nix development environment, perform the following steps:
 4) At the repository root, execute `nix develop` (or `direnv allow` for users of `direnv`).
 5) In the resulting shell, you can build all targets by running `just build-once` or `just build` if you intend to make continuous changes to the source code.
 
+The Apple Silicon `just build-once` build selects the committed
+`locks/arm64-macosx.lock`; other hosts keep `repro.lock`. To refresh the Apple
+Silicon solve on that platform, run
+`repro lock refresh . --lock locks/arm64-macosx.lock --platform=arm64-macosx`.
+This leaves the Linux solve in `repro.lock` intact. For direct build commands,
+pass `--lock locks/arm64-macosx.lock` explicitly. Reprobuild can refresh a file
+named with `--lock` only on that file's platform, so a pin moved on another host
+is reconciled by that command on the next Apple Silicon host; its gate checks the
+Reprobuild pin there and nowhere else. On macOS `just build-once` builds
+`.#macos-app`, as CI does. `just build-dmg` names `.#dmg` itself, which needs
+macOS system tools the hermetic build `PATH` omits; CI packages the image in a
+separate step.
+
 #### NixOS
 
 On NixOS, you can install our Nix package by running `just build-nix`.

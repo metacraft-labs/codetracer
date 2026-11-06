@@ -81,6 +81,20 @@ suite "the call trace from the keyboard":
     vm.selectFirstChild()
     check vm.selectedEntry.val == some(1'i64)
 
+  test "Space folds the selected call and ignores a leaf or no selection":
+    let (_, vm, mock) = setup()
+    mock.clearReceivedCommands()
+    vm.toggleSelected()
+    check mock.findCommand("ct/expand-calls").isNone
+    vm.selectIndex(2)
+    vm.toggleSelected()
+    check mock.findCommand("ct/expand-calls").isSome
+    mock.clearReceivedCommands()
+    vm.selectIndex(1)
+    vm.toggleSelected()
+    check mock.findCommand("ct/expand-calls").isNone
+    check vm.selectedEntry.val == some(1'i64)
+
   test "Enter goes to the selected call":
     let (_, vm, mock) = setup()
     vm.selectIndex(1)

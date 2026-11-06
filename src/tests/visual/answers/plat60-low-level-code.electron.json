@@ -1,0 +1,153 @@
+{
+ "_comment": [
+  "PLAT-60 — the desktop's Low Level Code view on noir_space_ship, read from the real Electron app.",
+  "Produced by src/tests/gui/tests/low-level-code/plat60-low-level-code-capture.spec.ts",
+  "(`just plat60-capture-electron`)."
+ ],
+ "start": {
+  "line": 13,
+  "ticks": 5
+ },
+ "listing": [
+  {
+   "kind": "source",
+   "line": 12,
+   "active": false
+  },
+  {
+   "kind": "instruction",
+   "offset": "StepId(1)",
+   "name": "<no instructions>",
+   "source": "src/main.nr:12",
+   "active": false,
+   "executing": false
+  },
+  {
+   "kind": "source",
+   "line": 13,
+   "active": true
+  },
+  {
+   "kind": "instruction",
+   "offset": "StepId(6)",
+   "name": "<no instructions>",
+   "source": "src/main.nr:13",
+   "active": true,
+   "executing": true
+  },
+  {
+   "kind": "source",
+   "line": 14,
+   "active": false
+  },
+  {
+   "kind": "instruction",
+   "offset": "<no step id>",
+   "name": "<no instructions>",
+   "source": "src/main.nr:14",
+   "active": false,
+   "executing": false
+  },
+  {
+   "kind": "source",
+   "line": 15,
+   "active": false
+  },
+  {
+   "kind": "instruction",
+   "offset": "StepId(670)",
+   "name": "<no instructions>",
+   "source": "src/main.nr:15",
+   "active": false,
+   "executing": false
+  }
+ ],
+ "header": {
+  "sync": "sync on",
+  "stepping": "steps by line"
+ },
+ "rowMenu": [
+  {
+   "label": "Go to Source Line",
+   "disabled": false
+  },
+  {
+   "label": "Show Source Line",
+   "disabled": false
+  },
+  {
+   "label": "Copy Instruction",
+   "disabled": false
+  },
+  {
+   "label": "Copy Source Location",
+   "disabled": false
+  }
+ ],
+ "click": {
+  "target": 3,
+  "targetLine": 15,
+  "after": {
+   "line": 15,
+   "ticks": 8
+  }
+ },
+ "listingAfter": [
+  {
+   "kind": "source",
+   "line": 12,
+   "active": false
+  },
+  {
+   "kind": "instruction",
+   "offset": "StepId(1)",
+   "name": "<no instructions>",
+   "source": "src/main.nr:12",
+   "active": false,
+   "executing": false
+  },
+  {
+   "kind": "source",
+   "line": 13,
+   "active": false
+  },
+  {
+   "kind": "instruction",
+   "offset": "StepId(5)",
+   "name": "<no instructions>",
+   "source": "src/main.nr:13",
+   "active": false,
+   "executing": false
+  },
+  {
+   "kind": "source",
+   "line": 14,
+   "active": false
+  },
+  {
+   "kind": "instruction",
+   "offset": "<no step id>",
+   "name": "<no instructions>",
+   "source": "src/main.nr:14",
+   "active": false,
+   "executing": false
+  },
+  {
+   "kind": "source",
+   "line": 15,
+   "active": true
+  },
+  {
+   "kind": "instruction",
+   "offset": "StepId(670)",
+   "name": "<no instructions>",
+   "source": "src/main.nr:15",
+   "active": true,
+   "executing": true
+  }
+ ],
+ "pageErrors": [
+  "",
+  ""
+ ]
+}

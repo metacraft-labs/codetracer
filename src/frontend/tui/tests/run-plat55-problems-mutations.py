@@ -164,7 +164,7 @@ ARMS = [
     ("L1", [(LAYOUT, "    if find(tree, d.pane).isNil:", "    if false:")],
      [(TBL, TBL_BUILD), (PTY, None), (PLAN, PLAN_ROWS)],
      "Edit mode docks no footer (the desktop's PROBLEMS is missing)"),
-    ("L2", [(PROFILE, "     paneProblems},", "     },"),
+    ("L2", [(PROFILE, "     paneProblems,", ""),
             (SHELL, "  elif region.pane == paneProblems and model.problems.loaded:",
              "  elif false:")],
      [(PTY, None)],

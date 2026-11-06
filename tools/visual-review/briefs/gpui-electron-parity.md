@@ -52,8 +52,6 @@ You may also be given crops of one region of both at 2x.
   product decision for the native front-end); on the capture lane's sway
   target that is close alone. Report a button only if its shape, size or
   position differs from Electron's equivalent button.
-- **A number before "No certificates"** in Electron's status bar (`4`, `14`,
-  `20`): Electron's test-movement counter, drawn only under its test harness.
 - **Module-level inline values left over in Electron's editor** after the
   debugger has moved into a function: chips naming `EXPRESSIONS`,
   `OPERATIONS` or `__builtins__` on module-level lines (90, 99 and 116 of

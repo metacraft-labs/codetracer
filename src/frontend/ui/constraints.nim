@@ -24,7 +24,10 @@ import
 # actually calls; `markStale` is reached through it, inside the viewmodel,
 # where the rule about which edits count can be driven by a headless lane.
 from ../viewmodel/viewmodels/constraints_vm import
-  ConstraintsVM, createConstraintsVM, setReport, setAbsence, noteSourceEdited
+  ConstraintsVM, createConstraintsVM, setReport, setAbsence, noteSourceEdited,
+  NoirSourceFile
+from ../viewmodel/viewmodels/build_diagnostics import resolvedPath
+import std/json
 from isonim/web/dom_api import nil
 from ./pane_host_lookup import tabOfPaneHost
 import isonim/web/web_renderer
@@ -39,9 +42,41 @@ var constraintsVMInstance*: ConstraintsVM
   ## `bindConstraintsVM` on every tab switch. Each tab's pane renders its own
   ## tab's (`constraintsVMForHost`).
 
+proc sourcesFromJson*(text: string): seq[NoirSourceFile] =
+  ## The `[{path, content}]` the main process sends beside a report
+  ## (`index/ns9_panes.sourcesJson`). An unreadable answer is no sources —
+  ## the rows then say they were not placed, rather than the pane failing.
+  try:
+    let node = parseJson(text)
+    if node.kind != JArray:
+      return @[]
+    for entry in node:
+      if entry.kind == JObject and entry.hasKey("path") and
+         entry.hasKey("content"):
+        result.add NoirSourceFile(path: entry["path"].getStr(),
+                                  content: entry["content"].getStr())
+  except:
+    # Bare: on the JS backend a malformed document raises a foreign
+    # `SyntaxError` (see `noir_constraints.parseNargoInfoJson`).
+    result = @[]
+
+proc openConstraintSource(path: string; line, column: int) =
+  ## PLAT-62: a row's Go to Source — the project-relative file opened at the
+  ## line in the editor, as the Problems pane opens a diagnostic.
+  let folder = if data.isNil or data.startOptions.folder.isNil: ""
+               else: $data.startOptions.folder
+  discard data.openLocation(cstring(resolvedPath(path, folder)), line,
+                            max(column, 1))
+
+proc installConstraintsCallbacks*(vm: ConstraintsVM) =
+  ## The host's half of a row's activation: opening its source.
+  if not vm.isNil and vm.onOpenSource.isNil:
+    vm.onOpenSource = openConstraintSource
+
 proc bindConstraintsVM*(vm: ConstraintsVM) =
   ## Make `vm` — the shown tab's — the one the window's hosts write into.
   if not vm.isNil:
+    installConstraintsCallbacks(vm)
     constraintsVMInstance = vm
 
 proc initConstraintsVM*() =
@@ -56,6 +91,7 @@ proc initConstraintsVM*() =
   if data.sessions.len == 0:
     if constraintsVMInstance.isNil:
       constraintsVMInstance = createConstraintsVM()
+      installConstraintsCallbacks(constraintsVMInstance)
       clog "ConstraintsVM: instance created"
     return
   bindConstraintsVM(constraintsVMOf(data.activeSession))
@@ -65,10 +101,11 @@ proc constraintsVMForHost(host: dom_api.Element): ConstraintsVM =
   ## every tab shows the shown tab's.
   let tab = tabOfPaneHost(host)
   if tab >= 0 and tab < data.sessions.len:
-    constraintsVMOf(data.sessions[tab])
+    result = constraintsVMOf(data.sessions[tab])
   else:
     initConstraintsVM()
-    constraintsVMInstance
+    result = constraintsVMInstance
+  installConstraintsCallbacks(result)
 
 # The panel host mounts the pane into the container GoldenLayout creates.
 setPanelRenderer(Content.Constraints,

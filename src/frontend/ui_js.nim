@@ -1709,6 +1709,8 @@ proc configure(data: Data) =
   # PLAT-70 Part B: `table.resize-column` on the Event Log.
   resizeEventLogColumnHook = proc(arg: string) =
     event_log.resizeEventLogColumn(arg)
+  # Space on the call trace.
+  toggleCallTraceRowHook = proc() = calltrace.toggleSelectedCall()
   # Find in Files' field toggles (`Alt+C` / `Alt+W` / `Alt+R` where the
   # field has the focus, `searchInputFocus`).
   proc registerSearchToggle(operation: string) =
@@ -2650,6 +2652,7 @@ proc buildSessionViewModels(session: ReplaySession; vms: SessionViewModels;
   # existed (its DAP `initialize` response can beat this assignment), so the
   # reverse-step toolbar buttons reflect the backend's real capability.
   store.setSupportsStepBack(vms.supportsStepBack)
+  store.setSupportsSteppingGranularity(vms.supportsSteppingGranularity)
   vms.collabAdapter = initWebUiCollabAdapter(
     sessionVM.collabCore.localPrincipalId,
     sessionVM.collabCore.localActorId
@@ -2717,6 +2720,26 @@ proc configureSessionMiddleware(session: ReplaySession; withDebugger = true;
 
   dapRef.ipc = data.ipc
 
+  dapRef.on(DapCapabilities, proc(kind: CtEventKind, body: JsObject) =
+    # The replay engine is selected at launch, after initialize. Remember
+    # its capability update even if the tab's ViewModels do not exist yet.
+    # DAP capability events are partial updates: omitted flags stay as-is.
+    if body.isNil or jsMissing(body["capabilities"]):
+      return
+    let capabilities = body["capabilities"]
+    if capabilities.isNil:
+      return
+    if not jsMissing(capabilities["supportsStepBack"]):
+      vms.supportsStepBack = capabilities["supportsStepBack"].to(bool)
+      if not vms.vm.isNil:
+        vms.vm.store.setSupportsStepBack(vms.supportsStepBack)
+    if not jsMissing(capabilities["supportsSteppingGranularity"]):
+      vms.supportsSteppingGranularity =
+        capabilities["supportsSteppingGranularity"].to(bool)
+      if not vms.vm.isNil:
+        vms.vm.store.setSupportsSteppingGranularity(vms.supportsSteppingGranularity)
+  )
+
   dapRef.on(DapInitializeResponse, proc(kind: CtEventKind, response: JsObject) =
     cdebug "[PIPELINE] DapInitializeResponse: received response"
     var supportsStepBack = false
@@ -2732,8 +2755,17 @@ proc configureSessionMiddleware(session: ReplaySession; withDebugger = true;
     # wrongly disabled on completed DB replays even though the backend
     # supports backward stepping.
     vms.supportsStepBack = supportsStepBack
+    # PLAT-60: whether a step can go by instruction, which the Low Level Code
+    # listing says (`LowLevelCodeVM.steppingText`).
+    var supportsSteppingGranularity = false
+    if not response.isNil and
+       not jsMissing(response["supportsSteppingGranularity"]):
+      supportsSteppingGranularity =
+        response["supportsSteppingGranularity"].to(bool)
+    vms.supportsSteppingGranularity = supportsSteppingGranularity
     if not vms.vm.isNil:
       vms.vm.store.setSupportsStepBack(supportsStepBack)
+      vms.vm.store.setSupportsSteppingGranularity(supportsSteppingGranularity)
   )
 
   # The window's first session says hello to its backend as the window
@@ -4483,7 +4515,8 @@ proc onNs9PanesConstraints(
     sender: js,
     response: jsobject(info=cstring, provenance=cstring, absence=cstring)) =
   ## `nargo info --json`, verbatim, or a stated reason there is none — into
-  ## the Constraints ViewModel of the tab that asked.
+  ## the Constraints ViewModel of the tab that asked, with the sources its
+  ## rows are placed against (PLAT-62).
   constraints.initConstraintsVM()
   let constraintsVM = constraintsVMOf(ns9PanesTarget(response.toJs))
   if constraintsVM.isNil:
@@ -4492,6 +4525,10 @@ proc onNs9PanesConstraints(
   if absence.len > 0:
     constraintsVM.setAbsence(absence)
     return
+  let rawSources = response.toJs[cstring"sources"]
+  if not rawSources.isUndefined and not rawSources.isNull:
+    constraintsVM.setSources(
+      constraints.sourcesFromJson($rawSources.to(cstring)))
   constraintsVM.setReport(
     parseNargoInfoJson($response.info, $response.provenance))
 

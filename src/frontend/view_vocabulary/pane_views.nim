@@ -99,6 +99,8 @@ import viewmodels/agent_activity_feed
 import viewmodels/errors_vm
 # PLAT-56 — the Build Output pane's ViewModel.
 import viewmodels/build_vm
+# PLAT-60 — the Low Level Code pane's ViewModel.
+import viewmodels/low_level_code_vm
 
 import headless_app/layout_model
 
@@ -160,7 +162,12 @@ const
                                          # PLAT-58: the recording's request
                                          # spans, from the session's
                                          # `RequestPanelVM`.
-                                         paneRequests}
+                                         paneRequests,
+                                         # PLAT-60: the function the debugger
+                                         # is in as instructions under their
+                                         # source lines, from the session's
+                                         # `LowLevelCodeVM`.
+                                         paneLowLevelCode}
     ## The panes expressed in the vocabulary. A CLOSED SET a test asserts, not
     ## a list a reader infers from which procs exist.
 
@@ -782,6 +789,55 @@ const ProblemsColumns* = @["", "path", "location", "message"]
   ## PLAT-55: the Problems table's columns — the desktop row's icon, path,
   ## location and message.
 
+const LowLevelCodeColumns* = @["", "offset", "instruction", "source"]
+  ## PLAT-60: the Low Level Code table's columns — the execution pointer's
+  ## mark, the offset (`StepId(…)` for Noir), the instruction and its source
+  ## line; a source line's own row carries its number and text.
+
+proc lowLevelCodePaneView*(vm: LowLevelCodeVM): PaneView =
+  ## PLAT-60. THE LOW LEVEL CODE PANE (Generated-Code-Listing.md §0): the
+  ## header's statements (an error, the load address, what a step does, why
+  ## the listing is not kept in step) over the listing's rows, each run of
+  ## instructions after the source line it came from — the ViewModel's
+  ## `displayRows`, every word its own.
+  result.pane = paneLowLevelCode
+  if vm.isNil:
+    result.report = "low-level code has no ViewModel; no host attached one"
+    result.root = viewText("lowLevelCode.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  var children: seq[ViewNode] = @[]
+  if vm.errorMessage.val.len > 0:
+    children.add viewText("lowLevelCode.error", vm.errorMessage.val)
+  if vm.address.val > 0:
+    children.add viewText("lowLevelCode.address", addressText(vm.address.val))
+  children.add viewText("lowLevelCode.stepping", vm.steppingText)
+  let notice = vm.mappingNotice
+  if notice.len > 0:
+    children.add viewText("lowLevelCode.notice", notice)
+  let rows = vm.displayRows()
+  if rows.len > 0:
+    var cells: seq[seq[string]] = @[]
+    for r in rows:
+      case r.kind
+      of lrkSource:
+        cells.add @["", $r.line, r.text, r.path & ":" & $r.line]
+      of lrkInstruction:
+        var instruction = r.name
+        if r.args.len > 0: instruction.add " " & r.args
+        if r.other.len > 0: instruction.add " " & r.other
+        cells.add @[(if r.executing: "▶" else: ""), r.offsetText,
+                    instruction, r.crossRef]
+    children.add viewTable("lowLevelCode.rows", LowLevelCodeColumns, cells)
+  else:
+    let empty = vm.emptyText
+    if empty.len > 0:
+      children.add viewText("lowLevelCode.empty", empty)
+    result.report = "no low-level code"
+  result.root = viewTreeNode("lowLevelCode", LowLevelCodeTitle, children,
+                             expanded = true)
+  result.entries = entriesOf(result.root)
+
 proc problemsPaneView*(vm: ErrorsVM): PaneView =
   ## PLAT-55. THE PROBLEMS PANE (`Build-Output-Pane.md` §3.3): the header's
   ## counts (and what navigation last announced), then a `Table` of the
@@ -1089,6 +1145,8 @@ proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
   of paneProblems: problemsPaneView(ErrorsVM(vm))
   # PLAT-58.
   of paneRequests: requestsPaneView(RequestPanelVM(vm))
+  # PLAT-60.
+  of paneLowLevelCode: lowLevelCodePaneView(LowLevelCodeVM(vm))
   of paneConstraints:
     # **PLAT-45: THE DESKTOP'S PANES, PLACED AND REPORTED — NOT OMITTED.**
     # (PLAT-48 adds the desktop's PROBLEMS and REQUESTS footer panels, which

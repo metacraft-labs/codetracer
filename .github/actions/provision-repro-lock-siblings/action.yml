@@ -54,9 +54,9 @@ description: |
   WHICH OF THEM THIS ACTION CLONES. The develop set also names the siblings
   the test lanes run against (recorders, the native backend, the trace
   format), which ``clone-siblings`` resolves by bare name from the same lock.
-  Several are private, and no Nim build compiles them. This action clones
-  only the BUILD INPUTS: the members of the develop set that are also solved
-  packages in the lock, i.e. what ``repro.nim`` ``uses`` from source --
+  No Nim build compiles them. This action clones only the BUILD INPUTS: the
+  members of the develop set that are also solved packages in the lock, i.e.
+  what ``repro.nim`` ``uses`` from source --
 
       isonim, isonim-tui, codetracer-trace-format-nim, nim-everywhere,
       nim-agent-harbor, nim-agents, nim-acp, test-certificates-tools, io-mon,
@@ -68,6 +68,39 @@ description: |
   and the step passes it as ``--only=``, so the lock stays the only answer
   (declare a from-source dependency in ``repro.nim``, relock, and it is
   cloned here with no list to edit).
+
+  THE CREDENTIAL. Not every build input is public: ``codetracer-image-diff``
+  is a private repository, and ``repro.nim`` uses it, so the clone needs a
+  token. The action mints that token itself, from the ``app-id`` and
+  ``private-key`` inputs (the per-repo App secrets), and only AFTER it has
+  realised the ``.#ci`` dev shell in a step of its own. An installation token
+  expires one hour after it is minted, and a cold realisation of that shell
+  can take most of one: the release build, which was handed the ``ci_token``
+  its first step minted, spent 45 minutes realising the shell inside the
+  credential window and reported its clones failed 63 minutes after the
+  mint, every clone and fetch answered with the same "could not read
+  Username" an absent credential gets (codetracer-pm
+  issues/2026-11-04-release-build-provisioning-clones-private-siblings-
+  without-a-credential.md). Minting here, right before the clone, keeps the
+  realisation and whatever the caller's job did first out of the token's
+  hour. The clone does not authenticate through the job-wide
+  numbered git configuration that ``setup-nix`` exports (``GIT_CONFIG_COUNT``
+  and ``GIT_CONFIG_KEY_n`` / ``GIT_CONFIG_VALUE_n``), because reprobuild
+  deliberately scrubs numbered configuration from the git commands it runs on
+  another repository's behalf. ``git ls-remote`` in the same job succeeds,
+  and ``repro develop`` dies with "could not read Username for
+  'https://github.com': terminal prompts disabled". The clone therefore runs
+  through ``metacraft-github-actions/git-auth``, which writes the same
+  owner-scoped header into a private ``GIT_CONFIG_GLOBAL`` file for the
+  duration of the command. That is the channel reprobuild documents for its
+  git calls, and the one ``setup-dev-env`` uses for ``repro develop --all``.
+
+  The lock cannot tell public from private. Each ``deps`` entry carries a
+  ``visibility`` field, but it names a reprobuild configuration TIER, not
+  whether GitHub lets an anonymous client read the repository: every entry
+  in this lock says ``public``, ``codetracer-image-diff`` included. So
+  ``ci/test/sibling-provisioning-test.sh`` asserts that a credential is
+  passed, not that the build inputs are public.
 
   ``repro develop --all`` is the documented consumer path for exactly this
   (see the header of ``metacraft-labs/reprobuild``'s
@@ -94,16 +127,13 @@ description: |
   selector lists them among the build inputs above and this action clones
   them at their locked revisions; that is the lock speaking, not a list
   written here, and the paragraph below is the history of why that is the
-  only acceptable route.) Nothing in this
-  repo compiles against them. ``scripts/require-siblings.sh`` puts all four
-  in its ADVISORY tier with the reason "src/Tuprules.tup puts it on the Nim
-  search path" and says so in as many words: "builds succeed without them".
-  No product target, no CI lane and no module reachable from isonim imports
-  ``isonim_tui``, ``isonim_gpui``, ``nim_termctl`` or ``nim_pty``; the only
-  importers are two files in the ``vm-collab-integration`` lane, which no
-  workflow runs. If one of them ever does become a real dependency, the fix
-  is to declare it in ``repro.nim``/``repro.lock`` so the lock pins it -- not
-  to clone it here off a branch tip.
+  only acceptable route.) Today the GPUI and TUI frontends import them
+  (``just build-gpui``, ``just build-tui``, ``just test-tui``) and the plat37
+  shim gate reads ``isonim-gpui/tools``; ``just build-once`` compiles none of
+  that, so ``scripts/require-siblings.sh`` keeps them ADVISORY. When this was
+  written nothing compiled against them. If a sibling ever does become a real
+  dependency, the fix is to declare it in ``repro.nim``/``repro.lock`` so the
+  lock pins it -- not to clone it here off a branch tip.
 
   WHY NOT ``env-flavor: reprobuild``. ``setup-dev-env`` has a reprobuild
   flavor, and it is not this. That flavor installs the ``repro`` CLI and a
@@ -134,30 +164,121 @@ description: |
   shape possible: no composite action in this repo may clone cross-repo
   siblings itself.
 
+inputs:
+  app-id:
+    description: >
+      The GitHub App id (the CI_TOKEN_PROVIDER_APP_ID secret). The action
+      mints the clone's installation token itself, after it has realised the
+      dev shell, so the token is fresh when git uses it (see "THE CREDENTIAL"
+      above). A composite action cannot read secrets, so it arrives as an
+      input. Required: codetracer-image-diff, a build input, is a private
+      repository, and an empty value fails the mint rather than clone
+      anonymously.
+    required: true
+  private-key:
+    description: >
+      The GitHub App private key (the CI_TOKEN_PROVIDER_PRIVATE_KEY secret).
+      See app-id.
+    required: true
+
 runs:
   using: composite
   steps:
-    # No ``gh-token`` input, and that is deliberate: every build-input sibling
-    # is public and clones anonymously, so this step needs no credential and
-    # is given none. Reprobuild's own CI runs the same command with
-    # `GIT_CONFIG_GLOBAL=/dev/null`. The develop set's private members are
-    # test-lane siblings, which `--only=` leaves to `clone-siblings`. A future
-    # private BUILD input is the moment to add a token, and it will be visible
-    # as a failing clone rather than as a silent widening of what this step can
-    # read.
-    - name: Clone the lock-pinned dependency siblings
+    # Realise the dev shell BEFORE the token is minted. On a cold runner this
+    # can take most of an hour (45 minutes in release job 126333283602), and
+    # an installation token lives exactly one. Done inside the credential window,
+    # it let the token expire before `repro develop` ran its first clone. The
+    # shell needs no git credential of its own here: Nix fetches the flake's
+    # private inputs with the job-wide `access-tokens` and netrc that
+    # setup-nix wrote, exactly as this step did before the clone took a token.
+    - name: Realise the CI dev shell
       shell: bash
+      working-directory: ${{ github.workspace }}
+      run: nix develop .#ci --command true
+
+    # The clone's own token, minted only now, so that its hour starts after
+    # the slow part. The caller's job token cannot be used: it was minted in
+    # the job's first step, before Nix was installed, and has been ageing
+    # through all of the setup since. The next step is the clone itself, and
+    # nothing may be put between the two
+    # (ci/test/sibling-provisioning-test.sh holds that order).
+    - name: Mint the clone's installation token
+      id: sibling_token
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: metacraft-labs
+
+    # The credential goes through `metacraft-github-actions/git-auth`, not
+    # through the job's numbered GIT_CONFIG_* configuration: reprobuild scrubs
+    # that from its clones, and codetracer-image-diff is a private build input
+    # (see "THE CREDENTIAL" in the description). The action reads a private
+    # GIT_CONFIG_GLOBAL file, writes it only for this command, and refuses an
+    # empty token instead of cloning anonymously. It is pinned to a commit:
+    # this is the job's credential, so its handling changes only by an edit
+    # here. `nix develop .#ci` below enters the shell the first step realised.
+    #
+    # The build-input list is computed inside the script rather than in an
+    # earlier step and handed over through this step's `env:`. Whether a
+    # `uses:` step's `env:` reaches a composite action's own steps is not
+    # something the workflow syntax reference states, and the script runs in
+    # the same working directory either way.
+    - name: Clone the lock-pinned dependency siblings
+      uses: metacraft-labs/metacraft-github-actions/git-auth@a190f3a8b37c5a239d88b8c964b6d13f64fbaa0d
+      with:
+        gh-token: ${{ steps.sibling_token.outputs.token }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          # The selector uses bash builtins only: it runs outside the dev
+          # shell, and a nix-darwin runner has no grep or sed on its PATH
+          # here.
+          build_inputs="$(ci/repro-lock-build-input-siblings.sh repro.lock)"
+          echo "Provisioning the lock's build-input siblings: ${build_inputs}"
+          siblings_root="$(cd .. && pwd)"
+          nix develop .#ci --command \
+            repro develop --all --only="${build_inputs}" --reset --into="${siblings_root}"
+
+    # Hand the clone's fresh token to the rest of the job. Every store the
+    # job's setup filled (nix.conf, NIX_CONFIG, the Nix netrc, the exported
+    # git extraHeader, the checkout's persisted credential) still holds the
+    # token minted in the job's first step, and after a cold dev shell that one
+    # has expired: TUI job 127318265290 realised the shell for 77 minutes,
+    # cloned fine, and its next step's `nix develop` got "401 Bad credentials".
+    # refresh.sh runs inside the dev shell because a nix-darwin runner has no
+    # grep or sed on its PATH outside it; the first step realised that shell.
+    - name: Give later steps the fresh token
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        NEW_TOKEN: ${{ steps.sibling_token.outputs.token }}
       run: |
-        set -euo pipefail
-        root="${GITHUB_WORKSPACE}"
-        siblings_root="$(cd "${root}/.." && pwd)"
-        cd "${root}"
-        # The selector uses bash builtins only: this step runs before the dev
-        # shell, and a nix-darwin runner has no grep or sed on its PATH here.
-        build_inputs="$(ci/repro-lock-build-input-siblings.sh repro.lock)"
-        echo "Provisioning the lock's build-input siblings: ${build_inputs}"
         nix develop .#ci --command \
-          repro develop --all --only="${build_inputs}" --reset --into="${siblings_root}"
+          bash "${GITHUB_WORKSPACE}/.github/actions/refresh-github-token/refresh.sh"
+
+    # And keep it fresh. The step after this one is often longer than the
+    # token's hour on a cold runner (the TUI job's `just build-once` ran 85
+    # minutes), and a build script inside it can still start Nix fetches late
+    # in the step: the release build got "401 Bad credentials" from
+    # db-backend's build.rs 49 minutes into its AppImage step. refresh-github-
+    # token's keep-refreshing.sh re-mints every 40 minutes and rewrites every
+    # store refresh.sh knows, the job's credential files included, which every
+    # new `nix` process reads. The runner ends it with the job. grep, sed and
+    # awk come from the shell below because a nix-darwin runner has none on
+    # its PATH outside the dev shell.
+    - name: Keep the token fresh for the rest of the job
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        APP_ID: ${{ inputs.app-id }}
+        APP_PRIVATE_KEY: ${{ inputs.private-key }}
+      run: |
+        log="$RUNNER_TEMP/keep-refreshing-github-token.log"
+        nohup nix shell nixpkgs#openssl nixpkgs#curl nixpkgs#jq \
+          nixpkgs#gnugrep nixpkgs#gnused nixpkgs#gawk nixpkgs#coreutils -c \
+          bash "${GITHUB_WORKSPACE}/.github/actions/refresh-github-token/keep-refreshing.sh" \
+          >"$log" 2>&1 &
+        echo "token refresher started (pid $!); log: $log"
 
     - name: Seed isonim tailwind-styles.json placeholder
       # Still required after the switch. `scripts/build-tailwind.sh` PRODUCES

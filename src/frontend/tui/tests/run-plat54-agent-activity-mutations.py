@@ -388,11 +388,11 @@ ARMS += [
              "import ../../viewmodel/viewmodels/editor_gutter_lanes\nimport ../devicon_marks")],
      [(BOUNDARY, BOUNDARY_REPO)],
      "the GPUI leaves reach the gutter bands past the SDK facade"),
-    # CI runs the sibling Cargo.lock guard on `agents`.
-    ("K1", [(WORKFLOW, "    branches: [main, dev, stable, agents]",
-             "    branches: [main, dev, stable]")],
+    # Agent branches use local gates; the published branch policy forbids CI.
+    ("K1", [(WORKFLOW, "    branches: [main, dev, stable]",
+             "    branches: [main, dev, stable, agents]")],
      [(WF_SUITE, None)],
-     "a push to agents does not run the sibling Cargo.lock guard"),
+     "a push to agents wrongly runs the sibling Cargo.lock CI guard"),
     ("K2", [(WORKFLOW, "            env CT_SIBLING_CARGO_LOCKS_STRICT=1 just test-sibling-cargo-locks",
              "            just test-sibling-cargo-locks")],
      [(WF_SUITE, None)],

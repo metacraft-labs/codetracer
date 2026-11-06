@@ -143,8 +143,9 @@ ARMS = [
              "      discard")],
      [(TUI, EDITOR)],
      "SB-4: a held paging press does not repeat"),
-    ("W1", [(RUNTIME, "      rt.scrollbars.fades[b.pane].wake(rt.scrollbars.clockMs)",
-             "      discard")],
+    ("W1", [(RUNTIME, "    if shown >= 0 and shown != top:\n"
+             "      rt.scrollbars.fades[b.pane].wake(rt.scrollbars.clockMs)",
+             "    if shown >= 0 and shown != top:\n      discard")],
      [(TUI, FADE)],
      "§7.5: a scroll does not wake its pane's faded bars"),
     # ---- GPUI -------------------------------------------------------------------

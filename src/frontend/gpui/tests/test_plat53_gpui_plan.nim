@@ -57,6 +57,12 @@ const
     "recording is not opened here; it is at "
     ## `gpui/main.NoSessionTabsInEditText`, spelled again: the suite asserts
     ## the window's words, not the constant's.
+  RedirectKey = when defined(macosx): "Cmd" else: "Ctrl"
+    ## Test-Results-Pane.md §9.4: "On macOS the desktop and the GPUI window
+    ## say `Cmd`." The same title's other half is the desktop's, which was
+    ## recorded on Linux; this one is the window's on this host.
+  OpensInNewTabSentence =
+    "Opens in a new tab; " & RedirectKey & "+click opens it in this tab."
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 let bin = repo / "build/bin/codetracer-gpui"
@@ -216,8 +222,7 @@ proc compareRows(plan: JsonNode; want: JsonNode; ran: bool): int =
     let open = r.control("open")
     if open.textOf != w["open"]["label"].getStr or
        open.attr("data-ct-title").actionOf != w["open"]["title"].getStr.actionOf or
-       not open.attr("data-ct-title").endsWith(
-         "Opens in a new tab; Ctrl+click opens it in this tab.") or
+       not open.attr("data-ct-title").endsWith(OpensInNewTabSentence) or
        open.attr("data-ct-open-mode") != w["open"]["mode"].getStr or
        open.attr("data-ct-disabled") != $w["open"]["disabled"].getBool:
       diffs.add "open '" & open.attr("data-ct-title") & "'"
@@ -321,7 +326,7 @@ suite "PLAT-53: the Test Results pane in the GPUI window":
        hover[0].attr("data-ct-hover-label") == title
     # The title says where it opens: test_fails has no tab of its own any
     # more (its tab now holds test_passes), and the current tab is a replay.
-    ck title.endsWith("Opens in a new tab; Ctrl+click opens it in this tab.")
+    ck title.endsWith(OpensInNewTabSentence)
     removeDir(project)
 
   test "§9.3: Ctrl+Enter on the selected row; the palette's Tests: Run":
@@ -360,8 +365,10 @@ suite "PLAT-53: the Test Results pane in the GPUI window":
       "tests:show,key:p:control,key:colon" & typed("Tests") & ",key:colon" &
       typed(" Open Recordings in the Current") & ",key:enter")
     checkpoint(tr)
+    # The window reports its resolved working directory, and macOS's
+    # temporary directory is under a symbolic link (`/var` -> `/private/var`).
     ck tr.contains("tests: test recordings open in the current tab in " &
-                   project.strip(leading = false, chars = {'/'}))
+                   project.expandFilename.strip(leading = false, chars = {'/'}))
     removeDir(project)
 
   test "a press selects a row; the window's keys move the selection":

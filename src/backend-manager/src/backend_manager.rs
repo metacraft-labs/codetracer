@@ -1,3 +1,7 @@
+#[cfg(all(test, unix))]
+#[path = "../tests/support/mcp_harness.rs"]
+mod request_cleanup_harness;
+
 #[cfg(windows)]
 #[allow(unused_imports)]
 use std::os::windows::process::CommandExt;
@@ -2376,32 +2380,79 @@ impl BackendManager {
             ds.request_client_map.insert(seq, client_id);
         }
 
-        let outcome = std::panic::AssertUnwindSafe(self.dispatch_message(message))
-            .catch_unwind()
-            .await;
-        match outcome {
-            Ok(Ok(())) => {}
-            Ok(Err(err)) => {
-                error!("Daemon: dispatch error for client {client_id}: {err}");
+        // The dispatch loop holds the manager lock, so these are precisely
+        // the resources this request can create. Keep existing sessions and
+        // bridge state when a cached session's request fails.
+        let first_backend = self.children.len();
+        let previous_selection = self.selected;
+        let (sessions, bridge_keys, bridge_seq) = self
+            .daemon_state
+            .as_ref()
+            .map(|ds| {
+                (
+                    ds.session_manager.session_keys(),
+                    ds.py_bridge
+                        .breakpoint_states
+                        .keys()
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                    ds.py_bridge.next_seq,
+                )
+            })
+            .unwrap_or_default();
+        let mut failure = {
+            let outcome = std::panic::AssertUnwindSafe(self.dispatch_message(message))
+                .catch_unwind()
+                .await;
+            match outcome {
+                Ok(Ok(())) => return,
+                Ok(Err(err)) => err.to_string(),
+                Err(payload) => panic_text(payload.as_ref()),
             }
-            Err(payload) => {
-                let text = panic_text(payload.as_ref());
-                error!("Daemon: handling `{command}` for client {client_id} panicked: {text}");
-                if let Some(seq) = seq {
-                    self.send_to_client(
-                        client_id,
-                        json!({
-                            "type": "response",
-                            "request_seq": seq,
-                            "success": false,
-                            "command": command,
-                            "message": format!(
-                                "the session manager failed handling `{command}`: {text}"
-                            ),
-                        }),
-                    );
+        };
+        // Reap before answering: a failed request must never publish a
+        // failure while a backend it started still runs without an owner.
+        for id in first_backend..self.children.len() {
+            if let Err(err) = self.cleanup_replay_slot(id).await {
+                failure.push_str(&format!("; cleanup of backend {id} failed: {err}"));
+            }
+        }
+        self.selected = previous_selection;
+        if let Some(ds) = self.daemon_state.as_mut() {
+            for session in ds.session_manager.list_sessions() {
+                if !sessions.contains(&session.key)
+                    && self
+                        .children
+                        .get(session.backend_id)
+                        .is_none_or(|child| child.is_none())
+                {
+                    ds.session_manager.remove_session(&session.key);
                 }
             }
+            let retained_sessions = ds.session_manager.session_keys();
+            ds.py_bridge.breakpoint_states.retain(|key, _| {
+                bridge_keys.contains(key)
+                    || (!sessions.contains(key) && retained_sessions.contains(key))
+            });
+            ds.py_bridge
+                .pending_requests
+                .retain(|request| request.backend_seq < bridge_seq);
+            ds.py_bridge
+                .pending_navigations
+                .retain(|request| Some(request.original_seq) != seq);
+            if let Some(seq) = seq {
+                ds.request_client_map.remove(&seq);
+            }
+        }
+        error!("Daemon: handling `{command}` for client {client_id} failed: {failure}");
+        if let Some(seq) = seq {
+            self.send_to_client(client_id, json!({
+                "type": "response",
+                "request_seq": seq,
+                "success": false,
+                "command": command,
+                "message": format!("the session manager failed handling `{command}`: {failure}"),
+            }));
         }
     }
 
@@ -2509,8 +2560,26 @@ impl BackendManager {
     /// make the channels available for the daemon's response router.
     ///
     /// Returns `(backend_id, sender_to_child, receiver_from_child)`.
-    #[cfg(unix)]
     pub async fn start_replay_raw(
+        &mut self,
+        cmd: &str,
+        args: &[&str],
+    ) -> Result<(usize, UnboundedSender<Value>, UnboundedReceiver<Value>), Box<dyn Error>> {
+        let first_backend = self.children.len();
+        let result = self
+            .start_replay_raw_inner(cmd, args)
+            .await
+            .map_err(|err| err.to_string());
+        if result.is_err() {
+            for id in first_backend..self.children.len() {
+                self.cleanup_replay_slot(id).await?;
+            }
+        }
+        result.map_err(Into::into)
+    }
+
+    #[cfg(unix)]
+    async fn start_replay_raw_inner(
         &mut self,
         cmd: &str,
         args: &[&str],
@@ -2561,8 +2630,9 @@ impl BackendManager {
         #[cfg(windows)]
         cmd.creation_flags(CREATE_NO_WINDOW);
 
+        cmd.kill_on_drop(true);
         let child = cmd.spawn();
-        let mut child = match child {
+        let child = match child {
             Ok(c) => c,
             Err(err) => {
                 error!("Can't start replay: {err}");
@@ -2570,6 +2640,7 @@ impl BackendManager {
             }
         };
 
+        self.children[id] = Some(child);
         info!("Starting replay with id {id}. Command: {cmd:?}",);
 
         let socket_read;
@@ -2578,13 +2649,12 @@ impl BackendManager {
         info!("Awaiting connection!");
 
         let accepted = accept_unless_exited(
-            &mut child,
+            self.children[id].as_mut().expect("just registered child"),
             listener.accept(),
             cmd_text,
             &socket_path.display(),
         )
         .await?;
-        self.children[id] = Some(child);
         match accepted {
             Ok((socket, _addr)) => (socket_read, socket_write) = tokio::io::split(socket),
             Err(err) => return Err(Box::new(err)),
@@ -2665,7 +2735,7 @@ impl BackendManager {
     /// Unix where the socket path is the last argument), then waits for the
     /// child to connect back.
     #[cfg(windows)]
-    pub async fn start_replay_raw(
+    async fn start_replay_raw_inner(
         &mut self,
         cmd: &str,
         args: &[&str],
@@ -2701,8 +2771,9 @@ impl BackendManager {
         #[cfg(windows)]
         cmd.creation_flags(CREATE_NO_WINDOW);
 
+        cmd.kill_on_drop(true);
         let child = cmd.spawn();
-        let mut child = match child {
+        let child = match child {
             Ok(c) => c,
             Err(err) => {
                 error!("Can't start replay: {err}");
@@ -2710,6 +2781,7 @@ impl BackendManager {
             }
         };
 
+        self.children[id] = Some(child);
         info!("Starting replay with id {id}. Listening on {addr_str}");
 
         let socket_read;
@@ -2717,9 +2789,13 @@ impl BackendManager {
 
         info!("Awaiting connection!");
 
-        let accepted =
-            accept_unless_exited(&mut child, listener.accept(), cmd_text, &addr_str).await?;
-        self.children[id] = Some(child);
+        let accepted = accept_unless_exited(
+            self.children[id].as_mut().expect("just registered child"),
+            listener.accept(),
+            cmd_text,
+            &addr_str,
+        )
+        .await?;
         match accepted {
             Ok((socket, _addr)) => (socket_read, socket_write) = tokio::io::split(socket),
             Err(err) => return Err(Box::new(err)),
@@ -2830,15 +2906,24 @@ impl BackendManager {
         info!("Stopping replay with id {id}");
 
         self.check_id(id)?;
+        self.cleanup_replay_slot(id).await
+    }
 
+    /// Teardown also accepts a reserved slot whose spawn failed: its bound
+    /// socket and channels still belong to the failed request.
+    async fn cleanup_replay_slot(&mut self, id: usize) -> Result<(), Box<dyn Error>> {
+        let mut failures = Vec::new();
         if let Some(child_opt) = self.children.get_mut(id) {
-            if let Some(subprocess) = child_opt.as_mut() {
-                let _ = subprocess.kill().await.map_err(|e| {
-                    warn!("can't stop subprocess: {e:?}");
-                    e
-                });
+            if let Some(subprocess) = child_opt.as_mut()
+                && let Err(err) = subprocess.kill().await
+            {
+                failures.push(format!("cannot reap replay {id}: {err}"));
             }
-            *child_opt = None;
+            // Keep the owner handle when the OS refuses termination. The
+            // session stays registered, and the failure names cleanup too.
+            if failures.is_empty() {
+                *child_opt = None;
+            }
         }
 
         if let Some(rx_opt) = self.children_receivers.get_mut(id) {
@@ -2851,11 +2936,30 @@ impl BackendManager {
         if let Some(tx_opt) = self.parent_senders.get_mut(id) {
             *tx_opt = None;
         }
-        self.selected = usize::MAX;
+        #[cfg(unix)]
+        {
+            let socket = CODETRACER_PATHS
+                .lock()?
+                .tmp_path
+                .join("session-manager")
+                .join(std::process::id().to_string())
+                .join(format!("{id}.sock"));
+            match remove_file(socket).await {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => failures.push(format!("cannot remove replay {id} socket: {err}")),
+            }
+        }
+        if self.selected == id && failures.is_empty() {
+            self.selected = usize::MAX;
+        }
 
-        info!("Stopped replay {id}");
-
-        Ok(())
+        if failures.is_empty() {
+            info!("Stopped replay {id}");
+            Ok(())
+        } else {
+            Err(failures.join("; ").into())
+        }
     }
 
     pub fn select_replay(&mut self, id: usize) -> Result<(), Box<dyn Error>> {
@@ -2900,6 +3004,10 @@ impl BackendManager {
                     // compiled into test builds only.
                     #[cfg(test)]
                     "ct/test-panic" => panic!("a test handler panicked"),
+                    // Routing tests need a genuinely deferred answer. Sending
+                    // to a missing backend is an error and must be answered.
+                    #[cfg(test)]
+                    "ct/test-deferred-answer" => Ok(()),
                     "ct/start-replay" => {
                         if let Some(Value::Array(arr)) = args
                             && let Some(Value::String(command)) = arr.first()
@@ -6821,6 +6929,14 @@ impl BackendManager {
             // Clear accumulated breakpoint/watchpoint state from previous
             // script runs so the new script starts with a clean slate.
             ds.py_bridge.breakpoint_state_mut(&session).clear_all();
+            #[cfg(test)]
+            if args
+                .and_then(|a| a.get("testPanicStage"))
+                .and_then(Value::as_str)
+                == Some("cached")
+            {
+                panic!("test failure after creating cached-session bridge state");
+            }
 
             if let Some(info) = ds.session_manager.get_session(&session) {
                 let backend_id = info.backend_id;
@@ -6936,6 +7052,15 @@ impl BackendManager {
             .or_else(|_| std::env::var("CODETRACER_DB_BACKEND_CMD"))
             .unwrap_or_else(|_| "replay-server".to_string());
 
+        // Unit dispatch tests use the real sibling backend without changing
+        // the process-wide environment shared by other tests.
+        #[cfg(test)]
+        let backend_cmd = args
+            .and_then(|a| a.get("testReplayServerCommand"))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .unwrap_or(backend_cmd);
+
         // The subcommand: `dap-server`, or the mock's when the explicit test
         // flag asks for it.  Never inferred from `backend_cmd`: that path is
         // wherever the user, the workspace or the CI runner put the build,
@@ -6974,6 +7099,9 @@ impl BackendManager {
                     return Ok(());
                 }
             };
+
+        #[cfg(test)]
+        self.inject_open_trace_failure(args, "after-start", &session, backend_id)?;
 
         // Build DAP launch options.  If the trace directory contains an `rr/`
         // subdirectory (Linux RR traces) or `.run` files (Windows TTD traces),
@@ -7152,6 +7280,9 @@ impl BackendManager {
             warn!("Failed to register session for {session}: {e}");
         }
 
+        #[cfg(test)]
+        self.inject_open_trace_failure(args, "after-register", &session, backend_id)?;
+
         let response = json!({
             "type": "response",
             "request_seq": seq,
@@ -7178,6 +7309,44 @@ impl BackendManager {
         });
         self.send_response_for_seq(seq, response);
         Ok(())
+    }
+
+    /// Fault injection belongs to the real handler, so its unwind crosses
+    /// exactly the ownership and registration steps used in production.
+    #[cfg(test)]
+    fn inject_open_trace_failure(
+        &mut self,
+        args: Option<&Value>,
+        stage: &str,
+        session: &SessionKey,
+        backend_id: usize,
+    ) -> Result<(), Box<dyn Error>> {
+        if args
+            .and_then(|a| a.get("testPanicStage"))
+            .and_then(Value::as_str)
+            != Some(stage)
+        {
+            return Ok(());
+        }
+        if stage == "after-register" {
+            // Make bridge cleanup observable: the same lazy state allocation
+            // as a breakpoint handler, before this request unwinds.
+            self.daemon_state
+                .as_mut()
+                .unwrap()
+                .py_bridge
+                .breakpoint_state_mut(session);
+        }
+        let pid = self.children[backend_id].as_ref().unwrap().id().unwrap();
+        let message = format!("test failure {stage} pid={pid}");
+        if args
+            .and_then(|a| a.get("testFailureKind"))
+            .and_then(Value::as_str)
+            == Some("error")
+        {
+            return Err(message.into());
+        }
+        panic!("{message}");
     }
 
     /// Handles `ct/trace-info` requests.
@@ -7991,6 +8160,10 @@ mod py_run_tracepoints_answer_tests {
 mod dispatch_step_tests {
     use super::*;
 
+    // Managers in one process derive their socket names from PID and slot.
+    #[cfg(unix)]
+    static REPLAY_TEST_LOCK: Mutex<()> = Mutex::const_new(());
+
     fn daemon(
         clients: Vec<(u64, Option<ScriptGrant>)>,
     ) -> (BackendManager, Vec<UnboundedReceiver<Value>>) {
@@ -8044,6 +8217,309 @@ mod dispatch_step_tests {
         out
     }
 
+    // No mock backend: the production CTFS writer produces the recording and
+    // the real replay-server accepts and initializes it. The only fault seam
+    // is a panic in open-trace, after spawn or after session registration.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn t_a_panicking_daemon_handler_leaves_nothing_behind() {
+        let _serial = REPLAY_TEST_LOCK.lock().await;
+        use super::request_cleanup_harness as harness;
+        // A red baseline run must clean up even when an assertion unwinds.
+        struct Cleanup(BackendManager);
+        impl std::ops::Deref for Cleanup {
+            type Target = BackendManager;
+            fn deref(&self) -> &BackendManager {
+                &self.0
+            }
+        }
+        impl std::ops::DerefMut for Cleanup {
+            fn deref_mut(&mut self) -> &mut BackendManager {
+                &mut self.0
+            }
+        }
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                for (id, child) in self.0.children.iter_mut().enumerate() {
+                    if let Some(child) = child {
+                        let pid = child.id();
+                        let _ = child.start_kill();
+                        if let Some(pid) = pid {
+                            // SAFETY: this is our own child; a concurrent Tokio
+                            // reap is harmless (waitpid then returns ECHILD).
+                            unsafe {
+                                libc::waitpid(pid as i32, std::ptr::null_mut(), 0);
+                            }
+                        }
+                    }
+                    let socket = CODETRACER_PATHS
+                        .lock()
+                        .unwrap()
+                        .tmp_path
+                        .join("session-manager")
+                        .join(std::process::id().to_string())
+                        .join(format!("{id}.sock"));
+                    let _ = std::fs::remove_file(socket);
+                }
+            }
+        }
+        let replay = harness::replay_server();
+        let (_root_guard, root) = harness::short_root("ct-panic-");
+        let source = root.join("app.py");
+        std::fs::write(&source, "def main():\n    total = 0\n    for i in range(3):\n        total += i\n    return total\n").unwrap();
+        let trace = root.join("trace");
+        std::fs::create_dir(&trace).unwrap();
+        harness::write_recording(&trace, &root, &source, &[]);
+        let (manager, mut rx) = daemon(vec![(7, None), (8, None)]);
+        let mut manager = Cleanup(manager);
+        let existing_trace = root.join("existing");
+        std::fs::create_dir(&existing_trace).unwrap();
+        harness::write_recording(&existing_trace, &root, &source, &[]);
+        manager
+            .dispatch_client_message(
+                7,
+                request(
+                    "ct/open-trace",
+                    9,
+                    json!({"tracePath": existing_trace, "testReplayServerCommand": replay}),
+                ),
+            )
+            .await;
+        let control = drain(&mut rx[0]);
+        assert_eq!(control.len(), 1, "{control:?}");
+        assert_eq!(control[0]["success"], true, "{control:?}");
+        assert_eq!(
+            manager
+                .daemon_state
+                .as_ref()
+                .unwrap()
+                .session_manager
+                .session_count(),
+            1
+        );
+        assert_eq!(
+            manager
+                .children
+                .iter()
+                .filter(|child| child.is_some())
+                .count(),
+            1
+        );
+        let existing_key = SessionKey::for_request(existing_trace.to_str().unwrap(), None);
+        manager
+            .daemon_state
+            .as_mut()
+            .unwrap()
+            .py_bridge
+            .breakpoint_state_mut(&existing_key);
+        manager.select_replay(0).unwrap();
+        for (stage, kind) in [
+            ("after-start", "panic"),
+            ("after-register", "panic"),
+            ("after-start", "error"),
+            ("after-register", "error"),
+        ] {
+            let backend_id = manager.children.len();
+            manager
+                .dispatch_client_message(
+                    7,
+                    request(
+                        "ct/open-trace",
+                        10,
+                        json!({"tracePath": trace, "testPanicStage": stage,
+                       "testFailureKind": kind, "testReplayServerCommand": replay}),
+                    ),
+                )
+                .await;
+            let answers = drain(&mut rx[0]);
+            assert_eq!(answers.len(), 1, "{answers:?}");
+            assert_eq!(answers[0]["success"], false, "{answers:?}");
+            let message = answers[0]["message"].as_str().unwrap();
+            let pid: i32 = message
+                .split("pid=")
+                .nth(1)
+                .unwrap_or_else(|| panic!("did not reach injected panic: {message}"))
+                .parse()
+                .unwrap();
+            let child_gone = unsafe { libc::kill(pid, 0) } == -1
+                && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH);
+            let socket = CODETRACER_PATHS
+                .lock()
+                .unwrap()
+                .tmp_path
+                .join("session-manager")
+                .join(std::process::id().to_string())
+                .join(format!("{backend_id}.sock"));
+            let socket_gone = !socket.exists();
+            let sessions_gone = manager
+                .daemon_state
+                .as_ref()
+                .unwrap()
+                .session_manager
+                .session_count()
+                == 1;
+            let preserved = manager
+                .daemon_state
+                .as_ref()
+                .unwrap()
+                .session_manager
+                .has_session(&existing_key)
+                && manager.children[0]
+                    .as_ref()
+                    .and_then(|child| child.id())
+                    .is_some_and(|pid| unsafe { libc::kill(pid as i32, 0) } == 0);
+            let selection_preserved = manager.selected == 0;
+            let bridge_gone = manager
+                .daemon_state
+                .as_ref()
+                .unwrap()
+                .py_bridge
+                .breakpoint_states
+                .len()
+                == 1
+                && manager
+                    .daemon_state
+                    .as_ref()
+                    .unwrap()
+                    .py_bridge
+                    .breakpoint_states
+                    .contains_key(&existing_key);
+            // Even the deliberately failing baseline run reaps its own child
+            // and removes its socket before reporting the regression.
+            let _ = manager.stop_replay(backend_id).await;
+            let _ = std::fs::remove_file(&socket);
+            if let Some(ds) = manager.daemon_state.as_mut() {
+                for session in ds.session_manager.list_sessions() {
+                    if session.backend_id >= backend_id {
+                        ds.session_manager.remove_session(&session.key);
+                        ds.py_bridge.breakpoint_states.remove(&session.key);
+                    }
+                }
+            }
+            assert!(preserved, "{stage}: pre-existing session was removed");
+            assert!(
+                selection_preserved,
+                "{stage}: pre-existing backend was deselected"
+            );
+            assert!(
+                child_gone,
+                "{stage}: replay-server {pid} survives the failure answer"
+            );
+            assert!(socket_gone, "{stage}: {} survives", socket.display());
+            assert!(sessions_gone, "{stage}: session survives");
+            assert!(bridge_gone, "{stage}: Python bridge state survives");
+            manager.select_replay(0).unwrap();
+            manager
+                .dispatch_client_message(8, request("ct/ping", 11, json!({})))
+                .await;
+            assert_eq!(drain(&mut rx[1])[0]["success"], true);
+        }
+        manager
+            .dispatch_client_message(
+                7,
+                request(
+                    "ct/open-trace",
+                    12,
+                    json!({"tracePath": trace, "testReplayServerCommand": replay}),
+                ),
+            )
+            .await;
+        let answers = drain(&mut rx[0]);
+        let success = answers.len() == 1 && answers[0]["success"] == true;
+        let sessions = manager
+            .daemon_state
+            .as_ref()
+            .unwrap()
+            .session_manager
+            .session_count();
+        let children = manager
+            .children
+            .iter()
+            .filter(|child| child.is_some())
+            .count();
+        let id = manager.children.len() - 1;
+        let _ = manager.stop_replay(id).await;
+        assert!(success, "control did not open the recording: {answers:?}");
+        // Cached-session requests can allocate bridge state too: that new
+        // entry must roll back even though its older session survives.
+        manager
+            .daemon_state
+            .as_mut()
+            .unwrap()
+            .py_bridge
+            .breakpoint_states
+            .remove(&existing_key);
+        manager
+            .dispatch_client_message(
+                7,
+                request(
+                    "ct/open-trace",
+                    13,
+                    json!({"tracePath": existing_trace, "testPanicStage": "cached",
+                   "testReplayServerCommand": replay}),
+                ),
+            )
+            .await;
+        let cached_failure = drain(&mut rx[0]);
+        let cached_bridge_removed = !manager
+            .daemon_state
+            .as_ref()
+            .unwrap()
+            .py_bridge
+            .breakpoint_states
+            .contains_key(&existing_key);
+        let existing_session_kept = manager
+            .daemon_state
+            .as_ref()
+            .unwrap()
+            .session_manager
+            .has_session(&existing_key);
+        let _ = manager.stop_replay(0).await;
+        assert_eq!(cached_failure.len(), 1, "{cached_failure:?}");
+        assert_eq!(cached_failure[0]["success"], false, "{cached_failure:?}");
+        assert!(
+            cached_bridge_removed,
+            "cached request kept its new bridge entry"
+        );
+        assert!(
+            existing_session_kept,
+            "cached request removed its existing session"
+        );
+        assert_eq!(sessions, 2, "the control must add exactly one session");
+        assert_eq!(children, 2, "the control must add exactly one backend");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failed_backend_spawn_leaves_no_socket() {
+        let _serial = REPLAY_TEST_LOCK.lock().await;
+        let (mut manager, _rx) = daemon(vec![(7, None)]);
+        for raw in [true, false] {
+            let id = manager.children.len();
+            let result = if raw {
+                manager
+                    .start_replay_raw("/nonexistent/ct-request-cleanup/replay-server", &[])
+                    .await
+                    .map(|(id, _, _)| id)
+            } else {
+                manager
+                    .start_replay("/nonexistent/ct-request-cleanup/replay-server", &[])
+                    .await
+            };
+            assert!(result.is_err(), "the nonexistent executable must fail");
+            let socket = CODETRACER_PATHS
+                .lock()
+                .unwrap()
+                .tmp_path
+                .join("session-manager")
+                .join(std::process::id().to_string())
+                .join(format!("{id}.sock"));
+            let absent = !socket.exists();
+            let _ = std::fs::remove_file(&socket);
+            assert!(absent, "a failed spawn leaves {}", socket.display());
+        }
+    }
+
     #[tokio::test]
     async fn a_panicking_handler_fails_its_own_request_only() {
         let (mut manager, mut rx) = daemon(vec![(7, None), (8, None)]);
@@ -8080,11 +8556,12 @@ mod dispatch_step_tests {
     #[tokio::test]
     async fn two_clients_with_the_same_seq_each_get_their_own_answer() {
         let (mut manager, mut rx) = daemon(vec![(1, None), (2, None)]);
-        // A request with no backend to answer it: it stays pending, as one
-        // a backend answers later does.
+        // A test-only deferred handler leaves each route pending, as a
+        // backend that answers asynchronously does. A missing backend would
+        // instead fail and consume the route immediately.
         for client in [1u64, 2] {
             manager
-                .dispatch_client_message(client, request("next", 5, json!({"threadId": 1})))
+                .dispatch_client_message(client, request("ct/test-deferred-answer", 5, json!({})))
                 .await;
         }
         let map = &manager.daemon_state.as_ref().unwrap().request_client_map;

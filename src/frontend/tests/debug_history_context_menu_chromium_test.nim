@@ -4,6 +4,7 @@
 ## can seed visited positions and inspect exact history-jump requests without
 ## recording a program. The view, VM, document events and compiled theme are real.
 ## Run in the renderer-chromium lane; build the theme before compiling this file.
+## `CODETRACER_BUILD_DIR` names the build output it is read from.
 
 import std/[asyncjs, json, os, strutils]
 import isonim/core/owner
@@ -13,8 +14,12 @@ import ../viewmodel/store/[replay_data_store, types]
 import ../viewmodel/viewmodels/debug_controls_vm
 import ../viewmodel/views/isonim_debug_controls_view
 
-const ThemeCss = staticRead(currentSourcePath().parentDir /
-  "../../build-debug/frontend/styles/default_dark_theme_electron.css")
+# The build output differs per platform and the dev shell names it, the same
+# rule as `src/tests/gui/lib/fixtures.ts`. `ci/test/chromium-theme-build-dir-test.sh`
+# holds this to account on any host.
+const ThemeCss = staticRead(getEnv("CODETRACER_BUILD_DIR",
+  currentSourcePath().parentDir / "../../build-debug") /
+  "frontend/styles/default_dark_theme_electron.css")
 
 proc ctClick(selector: cstring; button: cstring = cstring"left"): Future[void]
   {.importjs: "window.ctClick(#, #)".}

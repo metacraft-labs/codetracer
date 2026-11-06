@@ -84,18 +84,42 @@
 # file green. See the inventory's header for why it is an equality and not a
 # ceiling with slack.
 #
+# AND A QUESTION THIS WALK ANSWERS THAT ITS VERDICT DOES NOT ASK
+# ----------------------------------------------------------------
+# Step 2 computes which `just` recipes a CI lane reaches, prints the count, and
+# then uses the set only to reach SCRIPTS. Recipes are not this guard's subject,
+# so a recipe no lane calls never fails it: `test-tui` and
+# `test-tui-real-terminal` -- the only routes to the `tui` and
+# `tui-real-terminal` Nim lanes -- went unreached and nothing failed
+# (codetracer-pm issues/2026-11-01-no-ci-lane-calls-the-test-tui-recipes.md).
+#
+# `--print-reached-recipes` hands that set to a caller that DOES have recipes as
+# its subject, one name per line on stdout, sorted, and exits after Step 2. It
+# is the same walk, not a second implementation of it: a recipe is reached by
+# exactly the rule a gate is, so a remedy string that names a recipe confers
+# nothing here either (Verification-Harness-Traps.md §4f). The report the walk
+# prints on the way goes to stderr in this mode, so stdout is only the list.
+# Without the flag nothing about this guard's output or verdict changes.
+# `ci/test/ci-reached-recipes-test.sh` is that caller.
+#
 # Usage:
 #   ci/test/shell-gate-coverage.sh
 #   ci/test/shell-gate-coverage.sh --root DIR      (for the self-test)
+#   ci/test/shell-gate-coverage.sh --print-reached-recipes [--root DIR]
 
 set -uo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+print_reached_recipes=0
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--root)
 		root="$(cd "$2" && pwd)"
 		shift 2
+		;;
+	--print-reached-recipes)
+		print_reached_recipes=1
+		shift
 		;;
 	*)
 		echo "unknown argument: $1" >&2
@@ -104,6 +128,13 @@ while [ $# -gt 0 ]; do
 	esac
 done
 cd "${root}" || exit 2
+
+# In `--print-reached-recipes` mode stdout carries the list and nothing else:
+# fd 3 keeps the real stdout for it, and every line the report below prints
+# goes to stderr, where a failure in Steps 0-2 is still read.
+if [ "${print_reached_recipes}" -eq 1 ]; then
+	exec 3>&1 1>&2
+fi
 
 MARKER_SCAN_LINES=40
 MARKER='NOT-A-CI-GATE:'
@@ -372,8 +403,9 @@ echo
 #     `exec`, `env`, `timeout 60`).
 #   * INTERPRETER ARGUMENT — the first non-flag word after `bash`, `sh`,
 #     `source`, `.`, `node`, `python3` and their relatives, WHEREVER that word
-#     stands. This one clause is what makes the wrappers work without a list of
-#     wrappers: `lint_step "name" bash ci/x.sh`, `nix develop -c ./ci/x.sh`,
+#     stands on the line, short of inside a quoted string. This one clause is
+#     what makes the wrappers work without a list of wrappers:
+#     `lint_step "name" bash ci/x.sh`, `nix develop -c ./ci/x.sh`,
 #     `timeout 900 bash ci/x.sh` and `xargs bash ci/x.sh` are all just `bash`
 #     followed by a path.
 #
@@ -381,6 +413,44 @@ echo
 # needs no special case any more: `shellcheck` takes command position and `x.sh`
 # is its argument. The blacklist is GONE, and eleven shellchecked-never-run
 # scripts stay dark for a reason that is now stated once instead of enumerated.
+#
+# A QUOTED STRING IS ONE SHELL WORD, AT THE POSITION IT STANDS IN. That is part
+# of the rule, because it is what the shell does, and a word inside a string is
+# therefore in neither of the two positions above. The walk split every line on
+# whitespace and stripped quotes from the pieces, so it read words out of strings
+# in both directions:
+#
+#     lint_step "guard: ... (quadratic under node)" \
+#         bash ci/test/js-const-iteration-test.sh
+#
+# gave the word `node`, an interpreter, which took `bash` as the file it runs and
+# left the real gate a plain argument, so a gate `ci/lint/nim.sh` runs was reported
+# dark until somebody reworded the label. And `echo "bash ci/x.sh"` was a wire,
+# the mention this section exists to stop, for no better reason than the opening
+# quote. A string of one word is no different: the label `"node"` names no
+# interpreter, although only its quotes say so. So nothing is taken from inside a
+# string, with exactly the exceptions the shell has:
+#
+#   * A `$(...)` INSIDE DOUBLE QUOTES IS LIVE. `echo "x $(bash ci/y.sh) z"` runs it,
+#     and it stands in command position like any other. Inside single quotes it
+#     is text.
+#   * A STRING THAT IS A PROGRAM IS WALKED AS ONE: after `-c` and its relatives,
+#     `eval`, `trap`, a workflow `run:`, and in an argument a local function evals
+#     or joins with `$*`. What it finds there stays there, so
+#     `grep -c "under node" x.sh` leaves `x.sh` an argument.
+#   * A STRING HELD IN A VARIABLE is a value until the variable stands in command
+#     position: `CMD="bash ci/x.sh"` confers nothing until `eval "$CMD"` does.
+#
+# ONE LIMIT, STATED AT `maskquotes`: a line whose quotes do not balance is read as
+# it always was, because quote state cannot be carried across lines in an extractor
+# that reads four languages. That is an apostrophe in prose, and the first and
+# last lines of a multi-line `bash -c` program.
+#
+# AND A STRING THAT ONLY SOMETHING OUTSIDE THIS FILE TURNS INTO A COMMAND IS A
+# VALUE: `ssh host "bash ci/x.sh"`, a YAML `env:` or `matrix:` value a later step
+# expands, a string handed to a function another file defines, and a string that
+# a wrapper copies to a second variable before it runs it. A gate reached only
+# that way is reported dark by name, which is the direction that gets looked at.
 #
 # AND THE ONE THING A POSITION RULE ALONE GETS WRONG: `bash "${GUARD}"`.
 #
@@ -442,7 +512,8 @@ refs_in() {
 # AND NO APOSTROPHE ANYWHERE IN THIS PROGRAM, comments included: it is
 # single-quoted from bash, and one apostrophe closes it — producing a bash
 # syntax error a hundred lines further down, in code that is not wrong. Where
-# the character itself is needed it is built with `sprintf("%c", 39)`.
+# the character itself is needed it is built with `sprintf("%c", 39)`, which is
+# `SQ`. It has to run on macOS awk 20200816, gawk and mawk alike.
 #
 # THE WHOLE FILE IS BUFFERED because the rule needs two passes: pass 1 records
 # variable assignments, pass 2 resolves them in invoking positions. See the
@@ -458,7 +529,7 @@ refs_of_text() {
 		# Words that KEEP command position rather than consuming it: shell
 		# keywords, transparent prefixes, the justfile line prefixes, and the
 		# workflow `run:` key whose value is a shell script.
-		OPEN = " if while until then else elif do done fi ! exec command sudo nohup env eval builtin nice ionice stdbuf setsid time timeout xargs run: - @ @- -@ { } "
+		OPEN = " if while until then else elif do done fi ! exec command sudo nohup env eval trap builtin nice ionice stdbuf setsid time timeout xargs run: - @ @- -@ { } "
 		# Flags whose VALUE is a command line: `nix develop -c ./ci/lint/bash.sh`.
 		CMDARG = " -c --command --run --exec -exec "
 		# Declaration keywords: what follows is an assignment, not a command.
@@ -468,6 +539,33 @@ refs_of_text() {
 		# `bash x.sh`, and `ci/test/noir-wasm-worker/compare.mjs` reaches
 		# `worker.mjs` through nothing else.
 		JSEXEC = "(^|[^A-Za-z0-9_$.])(new[ \t]+Worker|require|import)[ \t]*\\("
+		# A `NAME=` word, and a word that is nothing but one variable or one
+		# numbered parameter: the two shapes that hold a command rather than
+		# being one.
+		ASSIGN = "^[A-Za-z_][A-Za-z0-9_]*="
+		BAREASSIGN = "^[(]*[A-Za-z_][A-Za-z0-9_]*="
+		WHOLEVAR = "^\\$\\{?[A-Za-z_][A-Za-z0-9_]*\\}?$"
+		WHOLEPOS = "^\\$\\{?[0-9]+\\}?$"
+		ALLSTAR = "^\\$\\{?\\*\\}?$"
+		ALLAT = "^\\$\\{?@\\}?$"
+		# A word that is one quoted literal and nothing else: the shape of a
+		# label too short to hold anything `maskquotes` would mask.
+		QWORD = "^(\"[^\"$]*\"|" SQ "[^" SQ "]*" SQ ")$"
+		# What `maskquotes` swaps for what, as control characters a source file
+		# does not contain. The class is spelled out one character at a time so
+		# that no range in it depends on the locale of the host awk.
+		MSK[" "] = sprintf("%c", 1)
+		MSK["\t"] = sprintf("%c", 2)
+		MSK[";"] = sprintf("%c", 3)
+		MSK["|"] = sprintf("%c", 4)
+		MSK["&"] = sprintf("%c", 5)
+		MSK["("] = sprintf("%c", 6)
+		# A string cut in two by a live `$(`: CUT ends the part before it, TAIL
+		# opens the part after it. See `maskquotes` and the TAIL case in `walk`.
+		CUT = sprintf("%c", 7)
+		TAIL = sprintf("%c", 8)
+		OPAQUE = "[" MSK[" "] MSK["\t"] MSK[";"] MSK["|"] MSK["&"] MSK["("] CUT TAIL "]"
+		ANYQUOTE = "[\"" SQ "]"
 		nl = 0
 	}
 	{
@@ -477,6 +575,9 @@ refs_of_text() {
 	}
 	END {
 		if (cur != "") lines[++nl] = cur
+		# ONCE PER LINE, NOT ONCE PER SCAN: the three scans below would otherwise
+		# run this character loop three times over the same text.
+		for (k = 1; k <= nl; k++) if (!dropped(lines[k])) masked[k] = maskquotes(lines[k])
 		# PASS 1 RUNS TWICE, and the second time is not superstition. It learns
 		# which parameter of each local function is EXECUTED rather than read
 		# (see `runsarg`), and functions call each other: `expect_leak` hands its
@@ -486,10 +587,147 @@ refs_of_text() {
 		# which is the whole of the nesting this tree actually has.
 		for (pass = 1; pass <= 2; pass++) {
 			curfn = ""
-			for (k = 1; k <= nl; k++) scan(lines[k], 1)
+			for (k = 1; k <= nl; k++) scan(lines[k], masked[k], 1)
 		}
 		curfn = ""
-		for (k = 1; k <= nl; k++) scan(lines[k], 2)
+		for (k = 1; k <= nl; k++) scan(lines[k], masked[k], 2)
+	}
+
+	# A QUOTED STRING IS ONE SHELL WORD. This makes it one for the splitter below,
+	# which knows nothing about quotes: inside a quoted region every whitespace
+	# and every command separator becomes a control character, so the region
+	# survives `split` whole and the separator rewrite in `seps` cannot fire in
+	# it. `unmask` is the exact inverse. The header says why; this is the how.
+	#
+	# A STACK OF MODES, because the regions nest. `s` is a single-quoted region,
+	# `d` a double-quoted one, `c` a `$(` substitution and `p` a plain paren
+	# inside one, which is only there so that its `)` does not close the `$(`.
+	# Nothing is live in `s`. In `d` a backslash escapes the next character and
+	# `$(` is LIVE: `echo "x $(bash ci/y.sh) z"` really runs that command, so the
+	# string is cut open around the substitution rather than masked over it, and
+	# the walk sees the command in the position it really has. Inside the `$(`
+	# quoting starts afresh, as it does in the shell. The two parts of a cut string
+	# are branded with CUT and TAIL, so that neither reads as a whole word.
+	#
+	# WHAT THIS CANNOT SEE, AND IT IS DELIBERATE: a line whose quotes do not
+	# balance comes back UNCHANGED, and reads the way every line read before this
+	# function existed. That is an apostrophe in YAML, Python or heredoc prose, and
+	# the first and last lines of a multi-line `bash -c` program. Carrying quote
+	# state across lines would need to know which language the line is in, and this
+	# one extractor reads shell, YAML, Python and JavaScript. So a multi-line
+	# program is read line by line as before, an apostrophe costs that one line the
+	# rule, and a stack left holding only `c` or `p` is fine: that is an ordinary
+	# `$(` continued on the next line, with every quote on this one closed.
+	#
+	# A LINE ALREADY CARRYING ONE OF THE CONTROL CHARACTERS comes back unchanged
+	# for the same reason, since `unmask` could not tell them from its own.
+	function maskquotes(line,   n, i, c, nx, out, stack, top) {
+		if (line !~ ANYQUOTE || line ~ OPAQUE) return line
+		n = length(line)
+		out = ""
+		stack = ""
+		top = ""
+		for (i = 1; i <= n; i++) {
+			c = substr(line, i, 1)
+			if (top == "s") {
+				if (c == SQ) {
+					stack = substr(stack, 1, length(stack) - 1)
+					top = substr(stack, length(stack), 1)
+				}
+				out = out ((c in MSK) ? MSK[c] : c)
+				continue
+			}
+			if (c == "\\") {
+				i++
+				nx = substr(line, i, 1)
+				out = out c ((top == "d" && (nx in MSK)) ? MSK[nx] : nx)
+				continue
+			}
+			if (c == "$" && substr(line, i + 1, 1) == "(") {
+				i++
+				out = out ((top == "d") ? CUT : "") "$("
+				stack = stack "c"
+				top = "c"
+				continue
+			}
+			if (top == "d") {
+				if (c == "\"") {
+					stack = substr(stack, 1, length(stack) - 1)
+					top = substr(stack, length(stack), 1)
+				}
+				out = out ((c in MSK) ? MSK[c] : c)
+				continue
+			}
+			if (c == SQ) {
+				stack = stack "s"
+				top = "s"
+			} else if (c == "\"") {
+				stack = stack "d"
+				top = "d"
+			} else if (c == "(" && (top == "c" || top == "p")) {
+				stack = stack "p"
+				top = "p"
+			} else if (c == ")" && (top == "c" || top == "p")) {
+				stack = substr(stack, 1, length(stack) - 1)
+				top = substr(stack, length(stack), 1)
+				if (top == "d") c = ") " TAIL
+			}
+			out = out c
+		}
+		return (stack ~ /[sd]/) ? line : out
+	}
+
+	function unmask(s,   c) {
+		for (c in MSK)
+			if (index(s, MSK[c]) > 0) gsub(MSK[c], (c == "&") ? "\\&" : c, s)
+		gsub(CUT, "", s)
+		gsub(TAIL, "", s)
+		return s
+	}
+
+	# What the shell does to a double-quoted string when it hands the text on: a
+	# backslash goes only where it was escaping one of these four characters.
+	# https://www.gnu.org/software/bash/manual/bash.html#Double-Quotes
+	function unescape(s,   out, p, nx) {
+		out = ""
+		while ((p = index(s, "\\")) > 0) {
+			nx = substr(s, p + 1, 1)
+			if (nx == "\"" || nx == "\\" || nx == "$" || nx == "`")
+				out = out substr(s, 1, p - 1) nx
+			else
+				out = out substr(s, 1, p + 1)
+			s = substr(s, p + 2)
+		}
+		return out s
+	}
+
+	# The quoted word W as the PROGRAM it holds: outer quotes off, one level of
+	# escaping off, and masked again, so that a string nested in it is one word in
+	# its turn. `bash -c "lint_step \"x under node\" bash ci/y.sh"` needs exactly
+	# that.
+	#
+	# The closing quote is found rather than assumed to be the last character,
+	# since what follows it belongs to the outer line: the `)` of a subshell or a
+	# substitution, a redirection. A string cut open by a `$(` arrives in parts,
+	# so a head has no closing quote and a tail no opening one. A word that does
+	# not open with a quote is read as it stands. It then comes back from
+	# `maskquotes` as one opaque word, which is the safe answer, and the walk
+	# always ends, since W is a strict part of the text that held it.
+	function program(w, phase,   u, q, e) {
+		u = unmask(w)
+		q = "\""
+		if (index(w, TAIL) == 0) {
+			q = substr(u, 1, 1)
+			if (q == SQ || q == "\"") u = substr(u, 2)
+			else q = ""
+		}
+		if (q != "" && index(w, CUT) == 0) {
+			e = length(u)
+			while (e > 0 && substr(u, e, 1) != q) e--
+			if (e > 0) u = substr(u, 1, e - 1)
+		}
+		if (q == "\"") u = unescape(u)
+		if (u != "") walk(maskquotes(u), phase)
 	}
 
 	# A line that carries no wire at all, whatever it names.
@@ -604,7 +842,13 @@ refs_of_text() {
 	# of `sh`, reads as an interpreter, and credits whatever `shellcheck` was
 	# handed next on the same line — which put `capture-deep-review-screenshots.sh`
 	# back on the reachable list while it declares NOT-A-CI-GATE in its own header.
+	#
+	# AND A MASKED WORD IS NEVER ONE, which is the guard that makes `maskquotes`
+	# worth anything: the last-word test below turns the sentinels into spaces like
+	# any other punctuation, and would read `(quadratic under node)` as `node`
+	# again.
 	function isinterp(s,   b, nb, ba, q, last) {
+		if (s ~ OPAQUE) return 0
 		if (haspath(s)) return 0
 		if (index(INTERP, " " s " ") > 0) return 1
 		b = s
@@ -618,9 +862,20 @@ refs_of_text() {
 		return 0
 	}
 
-	function scan(line, phase,   work, n, arr, i, t, core, cmdpos, want, infn, argn) {
+	# The separators that END one command and start the next, as free-standing
+	# tokens. See the note in `walk`.
+	function seps(s) {
+		gsub(/\$\(/, " @@CMD@@ ", s)
+		gsub(/\|\|/, " @@CMD@@ ", s)
+		gsub(/&&/, " @@CMD@@ ", s)
+		gsub(/\|/, " @@CMD@@ ", s)
+		gsub(/;/, " @@CMD@@ ", s)
+		gsub(/&/, " @@CMD@@ ", s)
+		return s
+	}
+
+	function scan(line, masked, phase,   n, arr, i, t, core) {
 		if (dropped(line)) return
-		if (phase == 2) justrefs(line)
 
 		# FUNCTION BOUNDARIES, tracked so that `$1` can be attributed to the
 		# function whose parameter it is. Closing brace at column 0 is how every
@@ -635,8 +890,59 @@ refs_of_text() {
 			curfn = ""
 		}
 
-		# The operators that END one command and start the next. Turned into
-		# free-standing tokens so the walk below needs no separate lexer.
+		posmode = 0
+		walk(masked, phase)
+
+		# A POSITIONAL PARAMETER STOOD WHERE A COMMAND GOES, and the program it
+		# stood in is a quoted string:
+		#
+		#     bash -c PROGRAM _ "${NEWEST_LIB}"
+		#
+		# with PROGRAM a single-quoted `source "$1"; newest_executable "$@"`.
+		# `ci/lib/newest-build.sh` is reached by that line and by nothing else in
+		# ci/ or scripts/. `walk` does go inside the program, and finds that it
+		# sources `$1`; but what `$1` IS stands outside the program, as an ordinary
+		# argument, and rather than bind the arguments of an embedded program, the
+		# line that proves it runs one is credited whole. Deliberately the widening
+		# direction: it over-credits a line that already declared it executes an
+		# argument, and it fires on nothing that does not.
+		#
+		# OVER THE RAW LINE, NOT THE MASKED ONE. "Credited whole" means the whole
+		# text, and that is what this clause has always read.
+		if (posmode && phase == 2) {
+			n = split(seps(line), arr, /[ \t]+/)
+			for (i = 1; i <= n; i++) {
+				core = arr[i]
+				gsub(STRIP, "", core)
+				if (core == "") continue
+				if (core ~ ASSIGN) continue
+				if (haspath(core)) { putpaths(core); continue }
+				t = varname(core)
+				if (t != "" && (t in assigned)) putpaths(assigned[t])
+			}
+		}
+
+		# THE JAVASCRIPT MODULE-EXECUTION POSITIONS, which have no command
+		# position to stand in. See JSEXEC. Over the raw line too: in JavaScript
+		# the path being loaded IS a quoted string.
+		if (phase == 2 && line ~ JSEXEC) putpaths(line)
+	}
+
+	# Does function FN execute its argument K as a command line? It does if its
+	# body ran that `$K`, or joined all of them with `$*`.
+	function execarg(fn, k) { return (((fn, k) in runsarg) || (fn in joinsargs)) }
+
+	# THE WALK OVER ONE PROGRAM. `s` is masked text, either a line or, through
+	# `program`, a quoted string that holds one, which is why all of the position
+	# state below is local: what a string does to it stays in that string.
+	# `grep -c "under node" x.sh` walks `under node`, finds an interpreter with no
+	# file, and leaves `x.sh` the plain argument it is.
+	#
+	# The operators that END one command and start the next are turned into
+	# free-standing tokens by `seps` so the walk needs no separate lexer.
+	function walk(s, phase,   work, n, arr, i, t, core, cmdpos, want, infn, argn, prog, opaque, cuts, role, pend, text, closing, keptfn, keptarg) {
+		if (phase == 2) justrefs(s)
+
 		# NOT SPLIT ON: `{`, because `${VAR}` would then put the rest of the
 		# path in command position and credit every `X="${ROOT}/ci/y.sh"` line
 		# this rule exists to stop.
@@ -655,56 +961,168 @@ refs_of_text() {
 		# and SC2006 flags legacy backtick substitution, of which this tree has
 		# exactly zero. So the token rule below can treat a leading backtick as
 		# prose outright.
-		work = line
-		gsub(/\$\(/, " @@CMD@@ ", work)
-		gsub(/\|\|/, " @@CMD@@ ", work)
-		gsub(/&&/, " @@CMD@@ ", work)
-		gsub(/\|/, " @@CMD@@ ", work)
-		gsub(/;/, " @@CMD@@ ", work)
-		gsub(/&/, " @@CMD@@ ", work)
-
-		posmode = 0
+		#
+		# A QUOTED STRING IS NOT SPLIT AT ALL, and that is `maskquotes`. The word
+		# it makes is OPAQUE: it holds whatever it holds, and nothing in it stands
+		# in any position, so below it is never an interpreter, never a path in
+		# command position and never an OPEN word. The one thing that can open it
+		# is the walk knowing that the string in this position IS a program, and
+		# only the walk can know that, which is why the lexer does not try:
+		# `prog` is set by `-c` and its relatives, `eval`, `trap` and `run:`, and an
+		# opaque word that arrives under it goes to `program`.
+		work = seps(s)
 		n = split(work, arr, /[ \t]+/)
 		cmdpos = 1
 		want = 0
 		infn = ""
 		argn = 0
+		prog = 0
+		cuts = ""
+		pend = ""
+		closing = 0
 		for (i = 1; i <= n; i++) {
 			t = arr[i]
 			if (t == "") continue
-			if (t == "@@CMD@@") { cmdpos = 1; want = 0; infn = ""; continue }
+			if (t == "@@CMD@@") { cmdpos = 1; want = 0; infn = ""; prog = 0; closing = 0; continue }
 			# A backtick-quoted word is prose. See the note above the splitter.
 			if (t ~ /^`/) { cmdpos = 0; want = 0; continue }
+
+			# THE REST OF A STRING A LIVE `$(` CUT OPEN. The substitution has been
+			# walked as what it is, and the state is whatever the word before it
+			# left, so this word changes none of it; it only finishes what that
+			# word started, which `cuts` kept. One letter per open cut, because
+			# they nest: `G="$(cd "$(dirname "$0")" && pwd)/ci/y.sh"`. The exception
+			# is a local function: the `$(` ended its command as far as the walk
+			# can tell, so `keptfn` hands its remaining arguments back to it, and
+			# `check "$(date)" "bash ci/y.sh"` still reaches its second one. Only a
+			# quoted substitution has an end this can see: SC2046 flags the other.
+			#
+			#     a  the string was the value of `pend`:  G="$(pwd)/ci/y.sh"
+			#     i  the string was what runs:            bash "$(pwd)/ci/y.sh"
+			#     p  the string was a program:            bash -c "cd $(pwd) && x"
+			#
+			# Without the first two, a path after a substitution stands in no
+			# position at all. It used to be credited anyway, by the accident of
+			# being glued to the last word of the substitution.
+			if (index(t, TAIL) > 0) {
+				role = substr(cuts, length(cuts), 1)
+				cuts = substr(cuts, 1, length(cuts) - 1)
+				text = unmask(t)
+				gsub(STRIP, "", text)
+				sub(/^\//, "", text)
+				if (role == "a" && phase == 1) record(pend "=" text)
+				if (role == "i" && text !~ /[ \t]/) invoke(text, phase)
+				if (role == "p") program(t, phase)
+				if (index(t, CUT) > 0) cuts = cuts role
+				else if (cuts == "" && keptfn != "") {
+					infn = keptfn
+					argn = keptarg
+					keptfn = ""
+				}
+				continue
+			}
+
 			core = t
 			gsub(STRIP, "", core)
-			if (core == "") continue
+			# `""` is an empty argument, and a wrapper counts it like any other.
+			if (core == "") {
+				if (infn != "" && (t == "\"\"" || t == SQ SQ)) argn++
+				if (t == "\"" || t == SQ) closing = 1
+				continue
+			}
+			opaque = (core ~ OPAQUE)
 
 			# `VAR=value`. The path in it is a NAME. Command position survives,
-			# because `FOO=1 bash x.sh` is an environment prefix.
-			if (core ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
-				if (phase == 1) record(core)
+			# because `FOO=1 bash x.sh` is an environment prefix. The name must
+			# stand outside the quotes: `grep -oE "MAX=[0-9]+" "${FILE}"` hands
+			# grep a pattern, and it left the next word in command position.
+			if (core ~ ASSIGN && t ~ BAREASSIGN) {
+				if (phase == 1) record(opaque ? unmask(core) : core)
+				if (index(t, CUT) > 0) {
+					pend = substr(core, 1, index(core, "=") - 1)
+					cuts = cuts "a"
+				}
 				cmdpos = 1; want = 0; continue
+			}
+			if (index(t, CUT) > 0) {
+				if (cuts == "" && !cmdpos && !want) {
+					keptfn = infn
+					keptarg = argn + 1
+				}
+				if (prog || (!cmdpos && !want && infn != "" && execarg(infn, argn + 1))) cuts = cuts "p"
+				else cuts = cuts ((cmdpos || want) ? "i" : "n")
 			}
 			if (index(DECL, " " core " ") > 0) { cmdpos = 1; want = 0; continue }
 
 			if (want) {
+				# The shape of `python3 - path`: a lone `-` says the PROGRAM
+				# comes from stdin (a heredoc), so the words after it are the
+				# ARGUMENTS of that program — data it may read, not a script the
+				# interpreter runs. `ci/test/plat37-gpui-shutdown-test.sh` hands
+				# the macOS capture script to a Python check as text, and the
+				# walk had credited the capture (and everything it names) as run.
+				if (core == "-") { want = 0; cmdpos = 0; continue }
 				if (core ~ /^-/) {
 					# `bash -lc PROGRAM` / `python3 -c PROGRAM`: what follows is
 					# not a path but a SCRIPT, so the walk restarts in command
 					# position inside it rather than eating the next word.
 					if (core ~ /^-[A-Za-z]*c$/ || index(CMDARG, " " core " ") > 0) {
-						want = 0; cmdpos = 1
+						want = 0; cmdpos = 1; prog = 1
 					}
 					continue
 				}
-				invoke(core, phase)
+				if (!opaque) invoke(core, phase)
 				want = 0; cmdpos = 0; continue
 			}
 			if (cmdpos) {
-				if (index(OPEN, " " core " ") > 0) continue
+				if (opaque) {
+					if (prog) program(t, phase)
+					prog = 0; cmdpos = 0; continue
+				}
+				if (index(OPEN, " " core " ") > 0) {
+					prog = (core == "eval" || core == "trap" || core == "run:")
+					continue
+				}
+				# A VARIABLE OR A PARAMETER IN COMMAND POSITION RUNS WHAT IT HOLDS.
+				# `eval "$CMD"` and a bare `$CMD` keep the OPEN position, so they
+				# stand here. Before strings were one word this did not matter, since
+				# `CMD="bash ci/x.sh"` was credited on its own assignment, as `bash`
+				# and a path. That was a mention, and it hid this hole.
+				#
+				# `$*` joins the arguments into one command line, so every string
+				# handed to the function is a program, whichever index `shift` has
+				# left it at. `gpui-window-captures.sh` runs its captures that way:
+				#
+				#     in_compositor_shell "bash ci/test/m71-gpui-window.sh"
+				#
+				# through `bash -c "...; cd x && $*"`. `eval "$@"` joins them too.
+				# A plain `"$@"` does not: it runs the arguments as separate words,
+				# where a string is one word and the interpreter clause already
+				# finds `lint_step "label" bash ci/x.sh` without any learning, so
+				# treating it the same would walk every label as a program.
+				#
+				# NONE OF THIS HOLDS ON `closing`, THE LAST LINE OF A MULTI-LINE
+				# STRING, which reads as a fresh line and whose first word only
+				# looks like a command:
+				#
+				#     out="$(awk PROGRAM-OVER-SEVERAL-LINES
+				#     QUOTE "${FILE}")"
+				if (!closing && (core ~ ALLSTAR || (prog && core ~ ALLAT))) {
+					if (phase == 1 && curfn != "") joinsargs[curfn] = 1
+					prog = 0; cmdpos = 0; continue
+				}
+				prog = 0
+				if (!closing && core ~ WHOLEPOS) {
+					if (phase == 1 && curfn != "") runsarg[curfn, posref(core)] = 1
+					cmdpos = 0; continue
+				}
 				# `timeout 900 bash x.sh`, `sleep 5` — a bare duration.
 				if (core ~ /^[0-9]+[smhd]?$/) continue
 				if (haspath(core)) { invoke(core, phase); cmdpos = 0; continue }
+				if (!closing && core ~ WHOLEVAR &&
+					((varname(core) in assigned) || !isinterp(core))) {
+					invoke(core, phase); cmdpos = 0; continue
+				}
 				if (isinterp(core)) { want = 1; cmdpos = 0; continue }
 				# A LOCALLY DEFINED FUNCTION. Its arguments are invoking
 				# positions exactly where its body executes the matching `$N`.
@@ -715,40 +1133,35 @@ refs_of_text() {
 			# each of which is still "something executes this".
 			if (infn != "") {
 				argn++
-				if ((infn, argn) in runsarg) { invoke(core, phase); continue }
+				# A string in an executed position is the program that wrapper
+				# runs: `check "desc" "bash ci/x.sh"`, where `check` evals `$2`. An
+				# interpreter here still takes the next word as its file, since
+				# `wrap desc bash ci/x.sh` running `"$2" "$3"` is that same shape.
+				if (opaque && execarg(infn, argn)) { program(t, phase); continue }
+				if ((infn, argn) in runsarg) {
+					invoke(core, phase)
+					if (isinterp(core)) want = 1
+					continue
+				}
 			}
-			if (index(CMDARG, " " core " ") > 0) { cmdpos = 1; continue }
+			# THE ONE-WORD LABEL. `lint_step "node" bash ci/x.sh`: past this line a
+			# word stands anywhere on the command, and the quotes are all that say
+			# this one is a value. In command position, above, `"bash" x.sh` really
+			# does run bash, so that test stays there.
+			if (t ~ QWORD) continue
+			if (index(CMDARG, " " core " ") > 0) { cmdpos = 1; prog = 1; continue }
 			if (isinterp(core)) { want = 1; continue }
 		}
-
-		# A POSITIONAL PARAMETER STOOD WHERE A COMMAND GOES, and the program it
-		# stood in is a quoted string this walk cannot see inside:
-		#
-		#     bash -c "source \"$1\"; newest_executable \"$@\"" _ "${NEWEST_LIB}"
-		#
-		# `ci/lib/newest-build.sh` is reached by that line and by nothing else in
-		# ci/ or scripts/. Rather than parse an embedded shell program, the line
-		# that proves it runs one is credited whole. Deliberately the widening
-		# direction: it over-credits a line that already declared it executes an
-		# argument, and it fires on nothing that does not.
-		if (posmode && phase == 2)
-			for (i = 1; i <= n; i++) {
-				core = arr[i]
-				gsub(STRIP, "", core)
-				if (core == "") continue
-				if (core ~ /^[A-Za-z_][A-Za-z0-9_]*=/) continue
-				if (haspath(core)) { putpaths(core); continue }
-				t = varname(core)
-				if (t != "" && (t in assigned)) putpaths(assigned[t])
-			}
-
-		# THE JAVASCRIPT MODULE-EXECUTION POSITIONS, which have no command
-		# position to stand in. See JSEXEC.
-		if (phase == 2 && line ~ JSEXEC) putpaths(line)
 	}
 
-	# `just <recipe>`, unchanged: a recipe name is not a path and the position
-	# rule above does not apply to it.
+	# `just <recipe>`. A recipe name is not a path and the position rule above
+	# does not apply to it, with one exception: `just` is a command word like any
+	# other, so a `just` inside a quoted string is in no position either.
+	# `echo "run just foo"` calls nothing. `bash -c "just foo"`, `run: "just foo"`
+	# and `"$(just foo)"` do, and they arrive here because `walk` calls this for
+	# every program it opens. Hence the masked text and the opaque test, and
+	# hence the rewrite below, without which a substitution glued to the word
+	# before it (`x="$(just foo)"`) hides the `just`.
 	#
 	# AND ONE DISPATCHER, for the same reason the positional-parameter clause
 	# above exists. `ci/lib/run-just-lanes.sh <aggregate> <lane>...` runs each
@@ -771,10 +1184,12 @@ refs_of_text() {
 	# lane names invisible and record two live gates as dark, which would have
 	# been false in a file that fails in both directions.
 	function justrefs(line,   n, i, j, t, u, arr, dispatch) {
+		gsub(/\$\(/, " $(", line)
 		n = split(line, arr, /[ \t]+/)
 		dispatch = 0
 		for (i = 1; i <= n; i++) {
 			t = arr[i]
+			if (t ~ OPAQUE) continue
 			gsub(/^[^A-Za-z0-9_.\/-]+/, "", t)
 			gsub(/[^A-Za-z0-9_.\/-]+$/, "", t)
 			# Every name-shaped token after the dispatcher is a recipe it runs.
@@ -787,7 +1202,14 @@ refs_of_text() {
 				continue
 			}
 			if (t ~ /run-just-lanes\.sh$/) { dispatch = 1; continue }
-			if (t != "just") continue
+			if (t != "just" || arr[i] ~ QWORD) continue
+			# A BACKTICK-QUOTED `just` IS PROSE, by the rule `walk` states above
+			# its splitter: SC2006 keeps backtick substitution out of this tree,
+			# so a backtick before the word is a quotation mark. Without this a
+			# YAML `description:` block that wrote (``just test-tui``) in a
+			# composite action credited that recipe as called by CI, and no
+			# workflow called it.
+			if (arr[i] ~ /^[^A-Za-z0-9_.\/-]*`/) continue
 			# Skip flags, and the VALUE of a flag that takes one — otherwise
 			# `just --justfile X recipe` reports the recipe as `--justfile`.
 			j = i + 1
@@ -990,6 +1412,18 @@ reached_recipes="$(sort -u "${tmp}/rreached" | grep -c . || true)"
 note "a CI lane reaches ${reached_recipes} of ${recipe_count} recipe(s)"
 note "reachable after the transitive walk: ${reachable_count} of ${gate_count}"
 echo
+
+# The recipe set is complete here. A caller that asked for it gets it now, and
+# only if the walk it came from was sound: a Step 0-2 failure is a non-zero exit
+# with no list, never a partial list a caller could read as an answer.
+if [ "${print_reached_recipes}" -eq 1 ]; then
+	if [ "${failures}" -gt 0 ]; then
+		echo "RESULT: FAILED — the walk is unsound, so no recipe list is printed"
+		exit 1
+	fi
+	sort -u "${tmp}/rreached" >&3
+	exit 0
+fi
 
 # ---------------------------------------------------------------------------
 echo "Step 3: every gate is reachable, or declares why it is not"

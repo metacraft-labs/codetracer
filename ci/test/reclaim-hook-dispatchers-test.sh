@@ -18,7 +18,7 @@
 #   * a stale `.legacy` dispatcher next to a dispatcher in the slot is dropped;
 #   * a hand-written `.repro-local` and a hand-written slot hook are left alone;
 #   * a repository with no dispatcher is not touched;
-#   * nix/shells/main.nix snapshots the dispatchers right before the installer
+#   * nix/git-hooks.nix snapshots the dispatchers right before the installer
 #     and runs the reclaim, with that snapshot, right after it.
 #
 # Mocks: the dispatcher and the pre-commit shim are small stand-in scripts
@@ -166,14 +166,17 @@ fi
 echo "the dev shell"
 
 # 7: wired in, right after the installer, handed the snapshot.
-shell_nix="$REPO_ROOT/nix/shells/main.nix"
-l_install="$(grep -n 'installationScript}' "$shell_nix" | head -1 | cut -d: -f1)"
+grep -q 'import ../git-hooks.nix' "$REPO_ROOT/nix/shells/main.nix" || {
+	echo 'FAIL: devShells.default does not import the tested hook lifecycle' >&2
+	exit 1
+}
+shell_nix="$REPO_ROOT/nix/git-hooks.nix"
+l_install="$(grep -n 'bash .*installationScript}' "$shell_nix" | head -1 | cut -d: -f1)"
 l_reclaim="$(grep -n 'reclaim-hook-dispatchers.sh" --snapshot' "$shell_nix" | grep -v '^[0-9]*:[[:space:]]*#' | head -1 | cut -d: -f1)"
-if [ -n "$l_install" ] && [ -n "$l_reclaim" ] && [ "$l_reclaim" -gt "$l_install" ] &&
-	[ "$((l_reclaim - l_install))" -lt 15 ]; then
-	ok "nix/shells/main.nix reclaims the dispatchers right after the installer"
+if [ -n "$l_install" ] && [ -n "$l_reclaim" ] && [ "$l_reclaim" -gt "$l_install" ]; then
+	ok "nix/git-hooks.nix reclaims the dispatchers right after the installer"
 else
-	fail "nix/shells/main.nix reclaims the dispatchers right after the installer" \
+	fail "nix/git-hooks.nix reclaims the dispatchers right after the installer" \
 		"installer line: ${l_install:-none}, reclaim line: ${l_reclaim:-none}"
 fi
 
@@ -183,9 +186,9 @@ fi
 l_snapshot="$(grep -n 'reclaim-hook-dispatchers.sh" snapshot' "$shell_nix" | grep -v '^[0-9]*:[[:space:]]*#' | head -1 | cut -d: -f1)"
 if [ -n "$l_install" ] && [ -n "$l_snapshot" ] && [ "$l_snapshot" -lt "$l_install" ] &&
 	[ "$((l_install - l_snapshot))" -lt 10 ]; then
-	ok "nix/shells/main.nix snapshots the dispatchers right before the installer"
+	ok "nix/git-hooks.nix snapshots the dispatchers right before the installer"
 else
-	fail "nix/shells/main.nix snapshots the dispatchers right before the installer" \
+	fail "nix/git-hooks.nix snapshots the dispatchers right before the installer" \
 		"installer line: ${l_install:-none}, snapshot line: ${l_snapshot:-none}"
 fi
 

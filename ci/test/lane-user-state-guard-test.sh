@@ -62,6 +62,7 @@ cp "${repo_root}/ci/lib/run-nim-test-lane.sh" \
 cat >"${fake}/ci/lib/test-lane-files.sh" <<'LANES'
 test_lane_ids() { printf '%s\n' guard-clean guard-state guard-index guard-removal guard-mixed; }
 test_lane_recipe() { echo ""; }
+test_lane_file_skip_reason() { :; }
 test_lane_backend() { echo "c"; }
 test_lane_extra_flags() { echo ""; }
 test_lane_run_library_path() { echo ""; }

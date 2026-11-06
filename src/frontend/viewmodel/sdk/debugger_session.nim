@@ -39,6 +39,7 @@ import ../backend/backend_service
 import ../app/app_vm
 import ../session_vm
 import ../store/[replay_data_store, types]
+import ../viewmodels/calltrace_vm   # `followDebuggerCall`
 import trace_source, stop_loader
 export stop_loader
 
@@ -327,6 +328,12 @@ proc markReady(s: DebuggerSession; trace: TraceSource) =
   # first run unless they are claimed.
   s.app.session.store.claimLocalsLoading()
   s.app.session.initializePanelViewModels()
+  # The call trace marks the call the debugger is in after every move, as
+  # the desktop and the web do (`ui/panel_host.prepare`): an embedder mounts
+  # the same shared view and gets the same behaviour, without which a jump
+  # left the landing's frame marked for the rest of the session.
+  if not s.app.session.calltraceVM.isNil:
+    s.app.session.calltraceVM.followDebuggerCall()
   if s.stops.isNil:
     s.stops = createStopLoader(s.app.session)
   if s.stopLoading == slmFollow:
