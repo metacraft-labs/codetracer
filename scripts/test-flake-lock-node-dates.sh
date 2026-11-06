@@ -416,6 +416,14 @@ if [ "$MISMATCHED" -gt 0 ]; then
 	exit 1
 fi
 
+# The codetracer-python-recorder input follows the root trace-format pair, so
+# the recorder never builds against its own nested pins. It reads the lock and
+# flake.nix only, so it belongs with the lock checks above; the header of
+# ci/test/python-recorder-follows-trace-format-pair-test.sh says why. It runs
+# before the empty-comparison guard below, so a host with no sibling checkout
+# still checks it.
+bash "$REPO_ROOT/ci/test/python-recorder-follows-trace-format-pair-test.sh"
+
 # A run that compared nothing is not a pass. It is the shape of rot this whole
 # family of guards exists to refuse: an empty comparison reported as a green
 # tick.

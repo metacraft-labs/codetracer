@@ -123,8 +123,17 @@
       # `/agents` while the 2026-10 trace format is integrated there: the
       # recorder that writes it (filter provenance before the first record) is
       # on `agents` and reaches `dev` with the next promotion, like `wazero`.
+      #
+      # The trace-format pair follows this flake's root inputs, as the ruby and
+      # js recorder inputs do. Without it the recorder built here carries its
+      # own nested pins, which can predate the trace-writer FFI the root pair's
+      # Rust calls, so the recorder would link a Rust crate and a Nim archive
+      # from different revisions. ci/test/python-recorder-follows-trace-format-pair-test.sh
+      # keeps the follows in place.
       url = "github:metacraft-labs/codetracer-python-recorder/agents";
       inputs.nixpkgs.follows = "nixpkgs";
+      inputs.codetracer-trace-format.follows = "codetracer-trace-format";
+      inputs.codetracer-trace-format-nim.follows = "codetracer-trace-format-nim";
       flake = true;
     };
 
