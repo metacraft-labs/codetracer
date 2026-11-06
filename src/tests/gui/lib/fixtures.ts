@@ -55,7 +55,37 @@ import {
   timed,
 } from "./performance-limits";
 import { deploymentModeFromEnv, type DeploymentMode } from "./deployment-mode";
+import { ensureCtMcr, recordingNeedsCtMcr } from "./sibling-provisioning";
 import { assertHomeFitsSocketBound, scratchBase } from "./socket-path-bound";
+
+/**
+ * The extra time a test gets when it has to build `ct-mcr` itself. A cold build
+ * compiles the recorder's Rust and Nim dependencies, which can outlast the test's
+ * own budget, so it is charged to the test once, here, and not to a later spec.
+ */
+const CT_MCR_BUILD_BUDGET_MS = 60 * 60_000;
+
+/**
+ * Provision the sibling recorder a recording needs, before the timed record step.
+ *
+ * `ct record` of a compiled `.nim` runs `ct-mcr` from the codetracer-native-recorder
+ * sibling. The dev shell does not build it, so on a fresh checkout `ct record` fails
+ * with "ct-mcr was not found". This runs the same provisioning as the Rust harnesses
+ * (`lib/sibling-provisioning.ts`), and it runs outside `timed()`: a cold build is not
+ * a recording, and its duration must not be graded against the recording's limit.
+ */
+async function provisionRecorderForRecording(sourcePath: string, backend?: string): Promise<void> {
+  // A recording already made in this worker is reused without `ct record`, so it
+  // needs no recorder. The key is the one `recordTestProgram` caches under.
+  const cached = recordingCache.has(JSON.stringify([sourcePath, backend ?? null]));
+  if (cached || !recordingNeedsCtMcr(sourcePath, backend)) {
+    return;
+  }
+  await ensureCtMcr(codetracerInstallDir, () => {
+    const info = base.info();
+    info.setTimeout(info.timeout + CT_MCR_BUILD_BUDGET_MS);
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Platform detection
@@ -1468,6 +1498,7 @@ async function launchTraceElectron(
   const fullSourcePath = path.isAbsolute(sourcePath)
     ? sourcePath
     : path.join(testProgramsPath, sourcePath);
+  await provisionRecorderForRecording(fullSourcePath, recordBackend || undefined);
   const { result: traceId, durationMs: recordMs } = await timed(
     "record",
     recordingLimit,
@@ -1703,6 +1734,7 @@ async function launchTraceWeb(
   const fullSourcePath = path.isAbsolute(sourcePath)
     ? sourcePath
     : path.join(testProgramsPath, sourcePath);
+  await provisionRecorderForRecording(fullSourcePath);
   const { result: traceId, durationMs: recordMs } = await timed(
     "record",
     recordingLimit,

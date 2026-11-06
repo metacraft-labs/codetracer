@@ -205,7 +205,13 @@ through the same `tests/test_harness/sibling_provisioning.rs`) runs
 `scripts/provision-cross-process-recording.sh`) once per test binary, under
 a file lock shared by concurrent test binaries, and uses what it built. A
 current build costs a stamp check; the first run of a fresh workspace spends
-minutes building, with the progress on stderr.
+minutes building, with the progress on stderr. The Playwright fixtures
+(`src/tests/gui/lib/fixtures.ts`) provision `ct-mcr` through
+`src/tests/gui/lib/sibling-provisioning.ts` before `ct record` of a `.nim`
+program, under the same override, failure and stamp rules. Their lock is a
+separate file (`.tools/gui-test-provisioning.lock`) from the Rust harnesses'
+`flock` (`.tools/test-harness-provisioning.lock`), so a Rust test and a
+Playwright worker can run `build-siblings.sh` for the same key at once.
 
 - A sibling that is not checked out, or does not build, FAILS the test with
   the remedy. It never skips: the prerequisite is supplied, not waived.
