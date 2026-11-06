@@ -256,6 +256,30 @@ runs:
         nix develop .#ci --command \
           bash "${GITHUB_WORKSPACE}/.github/actions/refresh-github-token/refresh.sh"
 
+    # And keep it fresh. The step after this one is often longer than the
+    # token's hour on a cold runner (the TUI job's `just build-once` ran 85
+    # minutes), and a build script inside it can still start Nix fetches late
+    # in the step: the release build got "401 Bad credentials" from
+    # db-backend's build.rs 49 minutes into its AppImage step. refresh-github-
+    # token's keep-refreshing.sh re-mints every 40 minutes and rewrites every
+    # store refresh.sh knows, the job's credential files included, which every
+    # new `nix` process reads. The runner ends it with the job. grep, sed and
+    # awk come from the shell below because a nix-darwin runner has none on
+    # its PATH outside the dev shell.
+    - name: Keep the token fresh for the rest of the job
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        APP_ID: ${{ inputs.app-id }}
+        APP_PRIVATE_KEY: ${{ inputs.private-key }}
+      run: |
+        log="$RUNNER_TEMP/keep-refreshing-github-token.log"
+        nohup nix shell nixpkgs#openssl nixpkgs#curl nixpkgs#jq \
+          nixpkgs#gnugrep nixpkgs#gnused nixpkgs#gawk nixpkgs#coreutils -c \
+          bash "${GITHUB_WORKSPACE}/.github/actions/refresh-github-token/keep-refreshing.sh" \
+          >"$log" 2>&1 &
+        echo "token refresher started (pid $!); log: $log"
+
     - name: Seed isonim tailwind-styles.json placeholder
       # Still required after the switch. `scripts/build-tailwind.sh` PRODUCES
       # this file (isonim's tailwind-extract.mjs writes it), and
