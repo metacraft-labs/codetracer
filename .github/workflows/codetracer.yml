@@ -1796,9 +1796,13 @@ jobs:
 
   lint-rust:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
-    # 200-run window: 40 green, median 8.5m, max 10.7m. 30m is ~2.8x the slowest
-    # green; clippy over the whole workspace is the longest of the four lints.
-    timeout-minutes: 30
+    # 200-run window: 40 green, median 8.5m, max 10.7m, on warm runners;
+    # clippy over the whole workspace is the longest of the four lints. A cold
+    # runner first builds the dev shell for the direnv step and resolves the
+    # ct_emulator nimble dependencies: 24m of setup on PR #903 (14m and 10m),
+    # which left the old 30m bound too little for the lints themselves. 50m
+    # covers that setup plus the slowest green.
+    timeout-minutes: 50
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -2022,9 +2026,12 @@ jobs:
 
   reprobuild-linux-smoke:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
-    # 200-run window: 48 green, median 1.8m, max 5.1m. 15m is ~3x the slowest
-    # green.
-    timeout-minutes: 15
+    # 200-run window: 48 green, median 1.8m, max 5.1m -- measured before the
+    # smoke's `nix develop .` had to build the dev shell on cold runners. Since:
+    # green in 7.7m (dev 3266ab28aa) and 12.6m (PR #903's first run), and
+    # cancelled at the old 15m on dev ef129742ac and twice on PR #903, each
+    # time still in that build. 30m covers the slowest green with margin.
+    timeout-minutes: 30
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -3756,7 +3763,17 @@ jobs:
     # compile-and-run of a program importing isonim-tui (an estimate, not a
     # measurement), 65-100m on its own. 180m clears the sum of those upper ends by about a third and stays
     # half of GitHub's 360m default. Tighten it from the first green runs.
-    timeout-minutes: 180
+    #
+    # MEASURED since, on cold GARM runners (PR #903): provisioning, which first
+    # realises the dev shell, took 77 to 104 minutes, and `just build-once`
+    # ran 85 minutes in one run and to completion in 218 in another (job
+    # 127706075383, on a host at load ~100). That is most of the old 180m
+    # before a single TUI test. Setup plus the estimate above comes to about
+    # 430m on such a host, more than ci/verdict/job-timeouts.py allows (a
+    # bound must be tighter than GitHub's 360m default), so this is that
+    # ceiling: 355m. It fits a host at ordinary load; tighten it once the job
+    # has run on a warm cache.
+    timeout-minutes: 355
     name: TUI tests (Tier 1 + Tier 2)
     # WHY THIS JOB EXISTS. `just test-tui` and `just test-tui-real-terminal` are
     # the only routes to the `tui` and `tui-real-terminal` lanes of
@@ -3839,9 +3856,19 @@ jobs:
         # records them with `ct`. A missing `replay-server` fails that file by
         # design and an all-skipped corpus fails it too (see the comment above
         # `test-tui` in the justfile), so both are built first.
+        #
+        # The trace writer's Nim archive needs the same paths. build-once.sh
+        # derives CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS only when
+        # CT_EMULATOR_EXTRA_NIM_PATHS is unset, and it turns off the writer's
+        # `nimble install`, so with only the emulator's variable given here the
+        # writer's `nim c` got no path to `results`. On a persistent runner a
+        # leftover nimble store hid that; on a fresh one the build failed with
+        # "cannot open file: results" (TUI job 127420337626). `libs/nim-result`
+        # stays last, as build-once.sh explains.
         env:
           CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
         run: nix develop .#devShells.x86_64-linux.default --command just build-once
 
       - name: Build the GPUI front-end the cross-front-end suites drive
@@ -7178,9 +7205,14 @@ jobs:
     # 103.4 vs 122.2. Lands next to ct-test-providers, which it shares a closure
     # with, so the move is locality-positive as well as arithmetic.
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
-    # 200-run window: 48 green, median 5.5m, max 8.6m. 25m is ~2.9x the slowest
-    # green.
-    timeout-minutes: 25
+    # 200-run window: 48 green, median 5.5m, max 8.6m -- measured before the
+    # job provisioned its siblings through provision-repro-lock-siblings, which
+    # realises the dev shell first. Since: the green run on dev 3266ab28aa took
+    # 24.3m of the old 25m (11.7m provisioning, 10.9m in the gate), and PR
+    # #903's runs, provisioning in up to 15.3m, were cancelled mid-gate, as
+    # dev ef129742ac was. 45m covers the slowest provisioning seen plus the
+    # gate, with margin.
+    timeout-minutes: 45
     name: ct-test release gate (M16 provider matrix)
     steps:
       - name: Mint installation token for cross-repo sibling access
@@ -7378,11 +7410,15 @@ jobs:
 
   ct-test-certificates:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job
-    # NO GREEN SAMPLE: the job is new. The lane itself compiles and runs six
-    # small Nim suites (about 12 s warm, a few minutes cold); the bound is
-    # dominated by Nix setup, the same setup `viewmodel-tests` does. 30m is
-    # chosen structurally. Revisit once it has run green.
-    timeout-minutes: 30
+    # The bound is dominated by Nix setup and sibling provisioning, the same
+    # setup `viewmodel-tests` does; the lane itself compiles and runs six small
+    # Nim suites. Measured: the green run on dev 3266ab28aa (job 125610740352)
+    # took 26 minutes, 12.5 provisioning and 11 in the lane. Runs on colder
+    # runners spent 15.5 and 22 minutes provisioning (jobs 126332982114 and
+    # the second run of PR #903) and were cancelled at the old 30m in the lane,
+    # as dev's own run on ef129742ac was. 45m covers the slowest provisioning
+    # seen plus the lane, with a margin.
+    timeout-minutes: 45
     name: ct-test certificates and conformance vectors
     env:
       # A fixed nimcache root so the step after the lane can find the
@@ -8263,6 +8299,18 @@ jobs:
           # after the checkout, and these runners reuse their work tree.
           persist-credentials: false
           submodules: false
+
+      # sibling-provisioning-test.sh checks that the git-auth pin in
+      # provision-repro-lock-siblings names a commit of metacraft-github-actions
+      # that carries the action, against a checkout beside this one, and fails
+      # when there is none. The repository is public, so a plain clone needs no
+      # credential; actions/checkout cannot write outside the workspace. A full
+      # clone, because the pin need not be on the default branch.
+      - name: Clone metacraft-github-actions beside the checkout
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: |
+          rm -rf ../metacraft-github-actions
+          git clone --quiet https://github.com/metacraft-labs/metacraft-github-actions ../metacraft-github-actions
 
       - name: Assert the Windows lane provisions its own git and bash
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
