@@ -2,7 +2,7 @@ import
   async, strutils, strformat, sequtils, algorithm, jsffi, jsconsole,
   kdom, dom,
   types, lang,
-  lib / [ logging, monaco_lib, jslib ],
+  lib / [ logging, monaco_lib, monaco_appearance, jslib ],
   ui / [auto_hide, editor_focus]
 
 import viewmodel / viewmodels / editor_gutter_lanes
@@ -14,7 +14,7 @@ const
   VALUE_COMPONENT_NAME_WIDTH*: float = 40.0
   VALUE_COMPONENT_VALUE_WIDTH*: float = 55.0
 
-const CODE_FONT_FAMILY* = cstring"SpaceMono, monospace"
+const CODE_FONT_FAMILY* = cstring(monaco_appearance.CodeFontFamily)
   ## The face for every code surface in the app: the editors, the trace and
   ## agent editors, and the unified diff.
   ##
@@ -1049,7 +1049,7 @@ when defined(ctRenderer):
     layoutSizes: LayoutSizes(startSize: true),
     monacoEditors: @[],
     traceMonacoEditors: @[],
-    fontSize: 16,
+    fontSize: DefaultEditorFontSize,
     editModeHiddenPanels: @[],
     editModeLayout: nil,
     activeAgentSessionId: cstring"")

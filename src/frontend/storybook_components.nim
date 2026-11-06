@@ -12,7 +12,7 @@
 when not defined(js):
   {.error: "storybook_components.nim requires the JS backend (nim js)".}
 
-import std/[json, options, strutils, tables]
+import std/[json, jsconsole, jsffi, options, strutils, tables]
 
 import isonim/core/async_compat
 import isonim/rxcore
@@ -37,6 +37,7 @@ import viewmodel/viewmodels/[
   flow_vm,
   frame_viewer_vm,
   pixel_history_vm,
+  review_entry,
   shader_debug_vm,
   low_level_code_vm,
   no_source_vm,
@@ -98,6 +99,13 @@ import viewmodel/views/[
   isonim_welcome_screen_view,
 ]
 import viewmodel/app/isonim_app_shell
+import lib/monaco_appearance
+from ../common/types as ct import nil
+import ui/[review_diff_editor, review_flow_selection]
+import viewmodel/viewmodels/[diff_document, context_expansion, review_flow_overlay]
+import viewmodel/views/isonim_unified_diff_view
+import stories/review_story_data
+from viewmodel/viewmodels/editor_gutter_lanes import lineDecorationsWidthPx
 # Agent Harbor front-end prototypes: the viewmodels and their fixture data
 # source come from nim-agents-isonim-viewmodels; only the views are here.
 import nim_agents_isonim_viewmodels/agent_harbor/[fixture_source, fleet_vm]
@@ -112,69 +120,96 @@ type
   DisposeProc = proc()
   MountBody = proc(store: ReplayDataStore): DisposeProc
 
+const
+  StoryStopPath = "src/shield.nr"
+  StoryStopLine = 7
+    ## Where every story's replay is stopped: `remaining_shield -= damage;` in
+    ## `iterate_asteroids`, test-programs/noir_space_ship. The fixtures below
+    ## (calltrace, state, editor, status bar, trace log, points) all describe
+    ## that program, so a story names only files and lines it really has.
+  StoryProgramSources = [
+    ("src/main.nr", staticRead("../../test-programs/noir_space_ship/src/main.nr")),
+    ("src/shield.nr", staticRead("../../test-programs/noir_space_ship/src/shield.nr")),
+  ]
+    ## The program's sources, read at compile time: what the editor story
+    ## shows.
+
+proc storyProgramSource(path: string): string =
+  for (sourcePath, text) in StoryProgramSources:
+    if sourcePath == path: return text
+  raise newException(KeyError, "the story program has no file " & path)
+
+proc appendRendered(container: isonim_dom.Element; node: isonim_dom.Element) =
+  discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(node))
+
+proc createHost(container: isonim_dom.Element; tag, id: string): isonim_dom.Element =
+  result = isonim_dom.createElement(isonim_dom.document, cstring(tag))
+  isonim_dom.setAttribute(result, cstring"id", cstring(id))
+  discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(result))
+
 proc storyCalltraceLines(): seq[CallLine] =
   result = @[
     CallLine(index: 0, name: "main", depth: 0, rrTicks: 2'u64,
-             location: Location(file: "src/main.nr", line: 13, column: 3),
+             location: Location(file: "src/main.nr", line: 12, column: 1),
              hasChildren: true, isExpanded: true, callKey: "main:0"),
   ]
   var idx = 1'i64
 
   template addIterationBlock(prefix: string; iteration: int;
-                             rrBase: uint64; statusLine: int) =
+                             rrBase: uint64) =
     result.add(CallLine(index: idx, name: "calculate_damage",
       depth: 2, rrTicks: rrBase,
-      location: Location(file: "src/shield.nr", line: 58, column: 3,
+      location: Location(file: "src/shield.nr", line: 22, column: 1,
                          callstackDepth: 2),
       hasChildren: true, isExpanded: true,
       callKey: prefix & "-damage:" & $iteration))
     inc idx
     result.add(CallLine(index: idx, name: "calculate_remaining_shield_pct",
       depth: 3, rrTicks: rrBase + 6,
-      location: Location(file: "src/shield.nr", line: 61, column: 3,
+      location: Location(file: "src/shield.nr", line: 48, column: 1,
                          callstackDepth: 3),
       hasChildren: false, isExpanded: false,
       callKey: prefix & "-remaining:" & $iteration))
     inc idx
     result.add(CallLine(index: idx, name: "calculate_shield_regeneration",
       depth: 2, rrTicks: rrBase + 20,
-      location: Location(file: "src/shield.nr", line: 66, column: 3,
+      location: Location(file: "src/shield.nr", line: 40, column: 1,
                          callstackDepth: 2),
       hasChildren: false, isExpanded: false,
       callKey: prefix & "-regen:" & $iteration))
     inc idx
     result.add(CallLine(index: idx, name: "status_report",
-      depth: 1, rrTicks: rrBase + 62,
-      location: Location(file: "src/main.nr", line: statusLine, column: 3,
-                         callstackDepth: 1),
+      depth: 2, rrTicks: rrBase + 62,
+      location: Location(file: "src/shield.nr", line: 53, column: 1,
+                         callstackDepth: 2),
       hasChildren: true, isExpanded: true,
       callKey: prefix & "-status:" & $iteration))
     inc idx
     result.add(CallLine(index: idx, name: "calculate_remaining_shield_pct",
-      location: Location(file: "src/shield.nr", line: 61, column: 3,
-                         callstackDepth: 2),
-      depth: 2, rrTicks: rrBase + 68,
+      location: Location(file: "src/shield.nr", line: 48, column: 1,
+                         callstackDepth: 3),
+      depth: 3, rrTicks: rrBase + 68,
       hasChildren: false, isExpanded: false,
       callKey: prefix & "-status-remaining:" & $iteration))
     inc idx
 
   result.add(CallLine(index: idx, name: "iterate_asteroids",
     depth: 1, rrTicks: 46'u64,
-    location: Location(file: "src/shield.nr", line: 54, column: 3),
+    location: Location(file: "src/shield.nr", line: 1, column: 1, callstackDepth: 1),
     hasChildren: true, isExpanded: true,
     callKey: "iterate:positive"))
   inc idx
   for iteration in 0 .. 7:
-    addIterationBlock("positive", iteration, uint64(52 + iteration * 68), 17)
+    addIterationBlock("positive", iteration, uint64(52 + iteration * 68))
 
   result.add(CallLine(index: idx, name: "iterate_asteroids",
     depth: 1, rrTicks: 590'u64,
-    location: Location(file: "src/shield.nr", line: 54, column: 3),
+    location: Location(file: "src/shield.nr", line: 1, column: 1, callstackDepth: 1),
     hasChildren: true, isExpanded: true,
     callKey: "iterate:negative"))
   inc idx
   for iteration in 0 .. 3:
-    addIterationBlock("negative", iteration, uint64(596 + iteration * 68), 27)
+    addIterationBlock("negative", iteration, uint64(596 + iteration * 68))
 
 proc storyCalltraceArgs(): Table[string, seq[CallArg]] =
   result = initTable[string, seq[CallArg]]()
@@ -280,31 +315,42 @@ proc makeStore(): ReplayDataStore =
     maxRRTicks: 400'u64,
     currentRRTicks: 180'u64,
   )
+  # Stopped in `iterate_asteroids` (test-programs/noir_space_ship), in the
+  # third pass of the positive case, before the hit is subtracted: the same
+  # moment the calltrace, the editor and the status bar show.
   result.debugger.val = DebuggerState(
-    location: Location(file: "examples/noir/noir-space-ship/src/main.nr",
-                       line: 42, column: 3, callstackDepth: 1),
+    location: Location(file: StoryStopPath, line: StoryStopLine, column: 9,
+                       callstackDepth: 1),
     rrTicks: 180'u64,
     status: dsIdle,
     threadId: 1'u32,
   )
-  result.locals.codeStateLine.val = "42 | let remaining_shield = shield - damage;"
+  result.locals.codeStateLine.val = $StoryStopLine & " | remaining_shield -= damage;"
   result.locals.locals.val = @[
-    Variable(name: "remaining_shield", value: "71", typeName: "u32"),
-    Variable(name: "damage", value: "29", typeName: "u32"),
+    Variable(name: "i", value: "2", typeName: "u32"),
+    Variable(name: "mass", value: "200", typeName: "Field"),
+    Variable(name: "damage", value: "2000", typeName: "Field"),
+    Variable(name: "remaining_shield", value: "9000", typeName: "Field"),
+    Variable(name: "initial_shield", value: "10000", typeName: "Field"),
+    Variable(name: "shield_regen_percentage", value: "10", typeName: "Field"),
     Variable(
-      name: "ship",
-      value: "{ hull: 100, shield: 71 }",
-      typeName: "ShipState",
+      name: "masses",
+      value: "[100, 2000, 200, 100, 100, 50, 50, 14]",
+      typeName: "[Field; 8]",
       hasChildren: true,
       children: @[
-        Variable(name: "hull", value: "100", typeName: "u32"),
-        Variable(name: "shield", value: "71", typeName: "u32"),
+        Variable(name: "[0]", value: "100", typeName: "Field"),
+        Variable(name: "[1]", value: "2000", typeName: "Field"),
+        Variable(name: "[2]", value: "200", typeName: "Field"),
+        Variable(name: "[3]", value: "100", typeName: "Field"),
+        Variable(name: "[4]", value: "100", typeName: "Field"),
+        Variable(name: "[5]", value: "50", typeName: "Field"),
+        Variable(name: "[6]", value: "50", typeName: "Field"),
+        Variable(name: "[7]", value: "14", typeName: "Field"),
       ],
     ),
   ]
-  result.locals.globals.val = @[
-    Variable(name: "MAX_SHIELD", value: "100", typeName: "u32"),
-  ]
+  result.locals.globals.val = @[]
   result.calltrace.lines.val = storyCalltraceLines()
   result.calltrace.args.val = storyCalltraceArgs()
   result.calltrace.totalCallsCount.val = 80'u64
@@ -509,7 +555,7 @@ proc storyLine(raw: string; isStdout: bool; severity = blsNone;
 
 proc applyBuild(vm: BuildVM; fixture: string) =
   vm.setCommand("nargo test")
-  vm.setRunning(fixture == "loading")
+  vm.setRunning(fixture == "running")
   vm.appendLine(storyLine("$ nargo test --workspace noir_space_ship", true,
                           blsInfo))
   vm.appendLine(storyLine("Compiling noir_space_ship v0.2.0", true, blsInfo))
@@ -537,27 +583,27 @@ proc applyScratchpad(vm: ScratchpadVM) =
   vm.clearValues()
   vm.addValue(ScratchpadValueEntry(
     expression: "remaining_shield",
-    valueText: "71",
+    valueText: "9000",
     isError: false,
     isLiteral: false))
   vm.addValue(ScratchpadValueEntry(
-    expression: "ship",
-    valueText: "{ hull: 100, shield: 71 }",
+    expression: "calculate_remaining_shield_pct(initial_shield, remaining_shield)",
+    valueText: "90",
     isError: false,
     isLiteral: false))
   vm.addValue(ScratchpadValueEntry(
-    expression: "last_error",
-    valueText: "division by zero",
+    expression: "masses[8]",
+    valueText: "index out of bounds: the length is 8 but the index is 8",
     isError: true,
     isLiteral: false))
 
 proc applySearchResults(vm: SearchResultsVM) =
   vm.setQuery("shield")
   vm.setResults(@[
-    SearchResultLine(path: "src/main.nr", line: 13,
-                     text: "let did_survive_positive = shield.iterate_asteroids(...)"),
-    SearchResultLine(path: "src/shield.nr", line: 61,
-                     text: "fn calculate_remaining_shield_pct(initial_shield, remaining_shield)"),
+    SearchResultLine(path: "src/main.nr", line: 15,
+                     text: "let did_survive_positive = shield::iterate_asteroids(initial_shield, shield_regen_percentage , asteroid_masses_positive);"),
+    SearchResultLine(path: "src/shield.nr", line: 48,
+                     text: "fn calculate_remaining_shield_pct(initial_shield: Field, remaining_shield: Field) -> Field {"),
   ])
   vm.setActive(true)
 
@@ -610,7 +656,7 @@ proc applyCalltrace(vm: CalltraceVM) =
   vm.store.calltrace.loadingState.val = lsIdle
 
 proc applyState(vm: StateVM) =
-  vm.selectPath("ship.shield")
+  vm.selectPath("remaining_shield")
 
 proc applyEmptyState(store: ReplayDataStore) =
   store.locals.codeStateLine.val = ""
@@ -628,15 +674,16 @@ proc applyFilesystem(vm: FilesystemVM) =
 
 proc applyTraceLog(vm: TraceLogVM) =
   vm.setEntries(@[
-    TraceLogEntry(rrTicks: 120, minRRTicks: 0, maxRRTicks: 400,
-                  path: "src/main.nr", line: 13, functionName: "main",
-                  localsText: "shield=10000 damage=100", eventId: 10,
-                  tracepointId: 1),
-    TraceLogEntry(rrTicks: 180, minRRTicks: 0, maxRRTicks: 400,
-                  path: "src/shield.nr", line: 58,
-                  functionName: "calculate_damage",
-                  localsText: "remaining_shield=9900", eventId: 12,
-                  tracepointId: 1),
+    TraceLogEntry(rrTicks: 58, minRRTicks: 0, maxRRTicks: 400,
+                  path: StoryStopPath, line: StoryStopLine,
+                  functionName: "iterate_asteroids",
+                  localsText: "i=0 remaining_shield=10000 damage=100",
+                  eventId: 10, tracepointId: 1),
+    TraceLogEntry(rrTicks: 126, minRRTicks: 0, maxRRTicks: 400,
+                  path: StoryStopPath, line: StoryStopLine,
+                  functionName: "iterate_asteroids",
+                  localsText: "i=1 remaining_shield=10000 damage=2000",
+                  eventId: 12, tracepointId: 1),
   ])
   vm.selectEntry(1)
 
@@ -646,32 +693,32 @@ proc applyStepList(vm: StepListVM) =
              location: StepLineLocation(path: "src/main.nr", line: 12,
                                         functionName: "main",
                                         rrTicks: 120),
-             sourceLine: "fn main(initial_shield: Field, shield_regen_percentage: Field) {",
+             sourceLine: "fn main(initial_shield: Field, shield_regen_percentage: Field, asteroid_masses_positive: pub [Field; 8], asteroid_masses_negative: pub [Field; 8]) -> pub bool {",
              values: @[StepLineFlowValue(expression: "initial_shield",
                                          value: "10000")]),
     StepLine(kind: slkLine, delta: 0,
-             location: StepLineLocation(path: "src/main.nr", line: 13,
+             location: StepLineLocation(path: "src/main.nr", line: 15,
                                         functionName: "main",
                                         rrTicks: 180),
-             sourceLine: "let did_survive_positive = shield.iterate_asteroids(...)",
+             sourceLine: "let did_survive_positive = shield::iterate_asteroids(initial_shield, shield_regen_percentage , asteroid_masses_positive);",
              values: @[StepLineFlowValue(expression: "did_survive_positive",
                                          value: "true")]),
     StepLine(kind: slkCall, delta: 1,
-             location: StepLineLocation(path: "src/shield.nr", line: 58,
+             location: StepLineLocation(path: "src/shield.nr", line: 22,
                                         functionName: "calculate_damage",
                                         rrTicks: 220),
              sourceLine: "calculate_damage",
              values: @[StepLineFlowValue(expression: "mass", value: "100"),
                        StepLineFlowValue(expression: "damage", value: "100")]),
     StepLine(kind: slkReturn, delta: 2,
-             location: StepLineLocation(path: "src/shield.nr", line: 61,
+             location: StepLineLocation(path: "src/shield.nr", line: 48,
                                         functionName: "calculate_remaining_shield_pct",
                                         rrTicks: 240),
              sourceLine: "calculate_remaining_shield_pct",
              values: @[StepLineFlowValue(expression: "remaining_shield",
                                          value: "99")]),
   ])
-  vm.setCurrentLocation(StepLineLocation(path: "src/main.nr", line: 13,
+  vm.setCurrentLocation(StepLineLocation(path: "src/main.nr", line: 15,
                                         functionName: "main",
                                         rrTicks: 180))
 
@@ -690,19 +737,28 @@ proc applyLowLevelCode(vm: LowLevelCodeVM) =
   vm.setAddress(0x401000)
   vm.setInstructions(@[
     LowLevelInstruction(name: "mov", args: "eax, [rbp-0x8]",
-                        other: "load shield", offset: 0,
-                        highLevelPath: "src/combat.nr", highLevelLine: 42),
+                        other: "load remaining_shield", offset: 0,
+                        highLevelPath: StoryStopPath, highLevelLine: StoryStopLine),
     LowLevelInstruction(name: "sub", args: "eax, ecx",
                         other: "apply damage", offset: 4,
-                        highLevelPath: "src/combat.nr", highLevelLine: 42),
+                        highLevelPath: StoryStopPath, highLevelLine: StoryStopLine),
     LowLevelInstruction(name: "ret", args: "", other: "", offset: 8,
-                        highLevelPath: "src/combat.nr", highLevelLine: 43),
+                        highLevelPath: StoryStopPath, highLevelLine: StoryStopLine + 2),
   ])
   vm.setActiveOffset(4)
 
 proc applyRepl(vm: ReplVM) =
   vm.setReplEnabled(true)
   vm.setLangName("Noir")
+  # Expressions evaluated at the stopped line, each sent and answered the way
+  # the pane sends them and the debugger's answer arrives.
+  for (expression, kind, answer) in [
+      ("remaining_shield", rokResult, "9000"),
+      ("damage * 100 / initial_shield", rokResult, "20"),
+      ("masses[8]", rokError,
+       "index out of bounds: the length is 8 but the index is 8")]:
+    vm.submitInput(expression)
+    vm.onDebugOutput(ReplOutput(kind: kind, output: answer))
 
 proc applyRequestPanel(vm: RequestPanelVM) =
   vm.setRequests(@[
@@ -752,15 +808,20 @@ proc applyWelcome(vm: WelcomeScreenVM) =
   # readability.
   vm.setRecentTraces(@[
     RecentTraceRecord(recordingId: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb",
-                      program: "zir_shields",
+                      program: "noir_space_ship",
                       args: @[], workdir: "/workspace/noir_space_ship",
                       date: "2026/05/04 16:03:00", duration: "4.2s"),
     RecentTraceRecord(recordingId: "01949fcc-7d92-7e9c-aaaa-cccccccccccc",
-                      program: "zir_shields",
+                      program: "noir_space_ship",
                       args: @[], workdir: "/workspace/noir_space_ship",
                       date: "2026/05/03 12:44:00", duration: "1.1s"),
   ])
-  vm.setRecentFolders(@[])
+  vm.setRecentFolders(@[
+    RecentFolderRecord(id: 1, name: "noir_space_ship",
+                       path: "/workspace/noir_space_ship"),
+    RecentFolderRecord(id: 2, name: "codetracer",
+                       path: "/workspace/codetracer"),
+  ])
   # The DESKTOP arm's real strip, from the same builder the product calls, so
   # this catalogue entry shows what ships — including the refused "CodeTracer
   # shell" row and the `title` that says why it is refused (issue #734). It
@@ -778,30 +839,38 @@ proc applyCommandPalette(vm: CommandPaletteVM) =
     CommandPaletteResultEntry(value: "src/main.nr", kind: cprkFile,
                               file: "src/main.nr"),
     CommandPaletteResultEntry(value: "calculate_damage", kind: cprkSymbol,
-                              file: "src/combat.nr", line: 38,
+                              file: "src/shield.nr", line: 22,
                               symbolKind: "function"),
   ])
   vm.setSelected(1)
 
 proc applyVCS(vm: VCSVM) =
+  ## The story program's repository mid-change: the latest commit opened on
+  ## its files, and the working tree carrying the edit not yet committed.
   vm.setHeader("Source Control")
   vm.setGitRepoState(true)
-  vm.setBranchState("codetracer-viewmodel", ["main", "codetracer-viewmodel"], false)
+  vm.setBranchState("clamp-shield", ["main", "clamp-shield"], false)
   vm.setCommits([
-    VCSCommitRow(hash: "23686aaa",
-                 message: "fix(storybook): make terminal story buildable",
-                 relativeTime: "today"),
-    VCSCommitRow(hash: "4635f657",
-                 message: "feat: scaffold terminal output storybook",
-                 relativeTime: "today"),
+    VCSCommitRow(hash: "4f2c9e1b",
+                 message: "fix(shield): clamp the shield at zero after a hit",
+                 relativeTime: "12 minutes ago", date: "2026-11-05",
+                 author: "Ada Example",
+                 fullHash: "4f2c9e1b7a3d5c8e0f1a2b3c4d5e6f708192a3b4"),
+    VCSCommitRow(hash: "9b81d02c",
+                 message: "test: an asteroid field that drains the shield",
+                 relativeTime: "1 hour ago", date: "2026-11-05",
+                 author: "Ada Example",
+                 fullHash: "9b81d02c3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b"),
   ], [0], 0)
-  vm.setChangedFiles([
-    VCSFileRow(path: "src/frontend/storybook_components.nim", status: "modified",
-               baseName: "storybook_components.nim", additions: 240,
-               deletions: 20, coverageText: "story", selected: true),
-    VCSFileRow(path: "storybook/stories/CodeTracerSurfaces.stories.js",
-               status: "added", baseName: "CodeTracerSurfaces.stories.js",
-               additions: 180, deletions: 0, coverageText: "story"),
+  vm.setCommitFiles(0, [
+    VCSFileRow(path: "src/shield.nr", status: "modified", baseName: "shield.nr",
+               additions: 4, deletions: 1),
+    VCSFileRow(path: "src/main.nr", status: "modified", baseName: "main.nr",
+               additions: 1, deletions: 1),
+  ])
+  vm.setWorkingTreeFiles([
+    VCSFileRow(path: "Prover.toml", status: "modified", baseName: "Prover.toml",
+               additions: 2, deletions: 2, selected: true),
   ])
   # No diff is staged into this story: the VCS panel is not a diff surface.
   # A unified diff is an editor-area Monaco document of its own
@@ -816,15 +885,36 @@ proc applyShell(vm: ShellVM) =
   ## A session as the pane shows one: a build's output and the recording it
   ## made, fed through the model's own entry points (the story has no shell
   ## process behind it).
-  vm.screen = newShellScreen(60, 8)
-  vm.receiveOutput("$ ./build.sh\r\ncompiling space_ship...\r\n")
+  ##
+  ## The session is started as a front-end starts one (`startShell`), over a
+  ## host whose process side accepts the start and drops what it is sent:
+  ## the pane's header then reads the running session's state, as the app's
+  ## does over a live shell, not "not started" above its output.
+  vm.host = ShellHost(
+    start: proc(cols, rows: int): string = "",
+    input: proc(data: string) = discard)
+  vm.startShell(60, 8)
+  # The recording every other story replays: the noir_space_ship program,
+  # whose positive case prints the two lines below. The stream is what the
+  # pane's terminal receives from a real shell, in its order: the shell
+  # echoes each command line after its prompt (`$ ct record .`) before the
+  # command runs, so the line precedes the recording's start event; the
+  # program's output is the recording's range; and `ct record` prints the
+  # recording's id as it exits, after the range closes, as the desktop's
+  # captured session shows (`src/tests/visual/answers/plat61-shell.electron.json`:
+  # the program's rows marked `start` / `range`, then `recordingId:<id>`
+  # unmarked).
+  const recordingId = "0191abcd-0000-7000-8000-000000000001"
+  vm.receiveOutput("$ cd test-programs/noir_space_ship && nargo compile\r\n")
+  vm.receiveOutput("$ ct record .\r\n")
   vm.receiveEvent(%*{"kind": "RecordingCommand", "status": "WorkingStatus",
-                     "actionId": 1, "command": "python3 space_ship.py"})
-  vm.receiveOutput("\e[32mshield ok\e[0m 42\r\n")
+                     "actionId": 1, "command": "ct record ."})
+  vm.receiveOutput("Positive Test Case\r\n\e[32mshields will hold as expected\e[0m\r\n")
   vm.receiveEvent(%*{"kind": "RecordingCommand", "status": "OkStatus",
-                     "actionId": 1, "command": "python3 space_ship.py",
-                     "trace": {"recordingId": "0191abcd-0000-7000-8000-000000000001",
-                               "outputFolder": "/tmp/space_ship"}})
+                     "actionId": 1, "command": "ct record .",
+                     "trace": {"recordingId": recordingId,
+                               "outputFolder": "/tmp/noir_space_ship"}})
+  vm.receiveOutput("recordingId:" & recordingId & "\r\n")
   vm.receiveOutput("$ ")
 
 proc mountBuild(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -883,8 +973,8 @@ proc mountCalltrace(container: isonim_dom.Element; fixture: string): DisposeProc
                              (247'u64, "20")]:
         matches.add CalltraceSearchResult(
           name: "status_report", key: key, rrTicks: rrTicks,
-          location: Location(file: "src/main.nr", line: 17, column: 3,
-                             callstackDepth: 1))
+          location: Location(file: StoryStopPath, line: 53, column: 1,
+                             callstackDepth: 2))
       vm.setBackendSearchResults(matches)
     discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
       renderCalltracePanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
@@ -893,21 +983,134 @@ proc mountCalltrace(container: isonim_dom.Element; fixture: string): DisposeProc
 proc mountState(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createStateVM(store)
-    if fixture == "variables":
-      vm.applyState()
-    else:
+    if fixture == "empty":
       store.applyEmptyState()
+    else:
+      vm.applyState()
     store.locals.loadingState.val = lsIdle
     mountIsoNimStatePanel(container, vm)
     store.locals.loadingState.val = lsIdle
     return proc() = vm.dispose())
 
+# The editor's body is Monaco, as in the app: the IsoNim view renders only the
+# container Monaco attaches to (`isonim_editor_view.nim`). The page loads the
+# vendored Monaco (`src/public/third_party/monaco-editor/min`, served at
+# `/public` by StoryBook and the IsoNim Editor instance alike) on first use.
+proc whenStoryMonacoLoaded(onReady: proc()) {.importjs: """
+  (function (onReady) {
+    if (window.monaco && window.monaco.editor) { onReady(); return; }
+    var base = "/public/third_party/monaco-editor/min/vs";
+    if (!document.querySelector("link[data-ct-story-monaco]")) {
+      var css = document.createElement("link");
+      css.rel = "stylesheet";
+      css.href = base + "/editor/editor.main.css";
+      css.dataset.ctStoryMonaco = "true";
+      document.head.appendChild(css);
+    }
+    var waiting = window.__ctStoryMonacoWaiting = window.__ctStoryMonacoWaiting || [];
+    waiting.push(onReady);
+    if (waiting.length > 1) return;
+    var start = function () {
+      window.require.config({ paths: { vs: base } });
+      window.require(["vs/editor/editor.main"], function () {
+        var ready = window.__ctStoryMonacoWaiting.splice(0);
+        for (var i = 0; i < ready.length; i++) ready[i]();
+      });
+    };
+    var loader = document.createElement("script");
+    loader.src = base + "/loader.js";
+    loader.onload = start;
+    loader.onerror = function () { console.error("the editor story could not load Monaco from " + base); };
+    document.head.appendChild(loader);
+  })(#)
+""".}
+
+proc storyAppTheme(): string =
+  ## The CodeTracer theme the story is shown in (StoryBook's `theme` global,
+  ## which `storybook/.storybook/appStyles.js` writes onto the document).
+  var key: cstring
+  {.emit: "`key` = document.documentElement.dataset.codetracerTheme || 'dark';".}
+  if key == cstring"light": "default_white" else: "default_dark"
+
+proc createStoryMonacoEditor(host: isonim_dom.Element; source, language,
+                             theme, fontFamily: cstring; fontSize,
+                             decorationsWidth, line, column: int;
+                             gutter: proc(line: int): cstring) {.importjs: """
+  (function (host, source, language, theme, fontFamily, fontSize, decorationsWidth, line, column, gutter) {
+    // The options `ui/editor.nim` `initMonacoForEditor` gives a replay tab.
+    // The app builds them as a Nim object, whose unset fields reach Monaco
+    // as their zero values: `glyphMargin` and the scroll options are off
+    // there, so they are off here (Monaco's own default draws a glyph
+    // margin the app does not have). The line numbers are the app's custom
+    // gutter (`gutter`), with the execution-pointer arrow on the stopped
+    // line.
+    var overflow = document.createElement("div");
+    overflow.className = "monaco-editor";
+    document.body.appendChild(overflow);
+    host.__ctStoryMonacoOverflow = overflow;
+    var editor = monaco.editor.create(host, {
+      value: source, language: language, readOnly: true, theme: theme,
+      automaticLayout: true, folding: true, fontSize: fontSize,
+      fontFamily: fontFamily, fontLigatures: true, minimap: { enabled: false },
+      renderIndentGuides: true, find: { addExtraSpaceOnTop: false },
+      renderLineHighlight: "", glyphMargin: false,
+      scrollBeyondLastLine: false, smoothScrolling: false,
+      renderOverviewRuler: false,
+      lineNumbers: gutter,
+      lineNumbersMinChars: Math.max(4, String(source.split("\n").length).length + 2),
+      lineDecorationsWidth: decorationsWidth, showFoldingControls: "always",
+      scrollBeyondLastColumn: 0, contextmenu: false,
+      overflowWidgetsDomNode: overflow, fixedOverflowWidgets: true
+    });
+    // The stopped line, decorated as the app does (`styleLines`: a whole-line
+    // `on on-<line>` decoration), with the cursor on it.
+    editor.createDecorationsCollection([{
+      range: new monaco.Range(line, 1, line, 1),
+      options: { isWholeLine: true, className: "on on-" + line }
+    }]);
+    editor.setPosition({ lineNumber: line, column: column });
+    editor.revealLineInCenter(line);
+    host.__ctStoryMonaco = editor;
+  })(#, #, #, #, #, #, #, #, #, #)
+""".}
+
+proc disposeStoryMonacoEditor(host: isonim_dom.Element) {.importjs:
+  "(function (h) { if (h.__ctStoryMonaco) h.__ctStoryMonaco.dispose(); if (h.__ctStoryMonacoOverflow) h.__ctStoryMonacoOverflow.remove(); })(#)".}
+
 proc mountEditor(container: isonim_dom.Element; fixture: string): DisposeProc =
+  ## The editor tab of the file the replay is stopped in, at the stopped
+  ## line: the IsoNim container (`mountIsoNimEditor`) with Monaco in it over
+  ## the program's real source.
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createEditorVM(store)
-    vm.setCursor(42, 3)
-    discard mountIsoNimEditor(container, vm, 0, "src/combat.nr", false, 0, "storybook-editor")
-    return proc() = vm.dispose())
+    vm.setCursor(StoryStopLine, 9)
+    let host = mountIsoNimEditor(container, vm, 0, StoryStopPath, false, 0)
+    var disposed = false
+    # Pending until Monaco is in: the render check waits for no
+    # `[data-story-pending]` before judging what a story shows.
+    isonim_dom.setAttribute(host, cstring"data-story-pending", cstring"monaco")
+    whenStoryMonacoLoaded(proc() =
+      if disposed: return
+      try:
+        defineCodeTracerMonacoThemes()
+      except:
+        console.error(cstring("the editor story could not define CodeTracer's Monaco themes: " &
+                              getCurrentExceptionMsg()))
+      createStoryMonacoEditor(host, cstring(storyProgramSource(StoryStopPath)),
+        cstring(editorLanguageForPath(StoryStopPath, "rust")),
+        cstring(monacoThemeFor(storyAppTheme())), cstring(CodeFontFamily),
+        DefaultEditorFontSize, lineDecorationsWidthPx(DefaultEditorFontSize),
+        StoryStopLine, 9,
+        proc(line: int): cstring =
+          # The app's gutter for a replay tab (`editorLineNumber`): no
+          # tracepoints or breakpoints in this story, the arrow on the
+          # line the replay is stopped on.
+          editorGutterLineHtml(cstring($line), executionLine = line == StoryStopLine))
+      isonim_dom.removeAttribute(host, cstring"data-story-pending"))
+    return proc() =
+      disposed = true
+      disposeStoryMonacoEditor(host)
+      vm.dispose())
 
 proc mountFilesystem(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
@@ -917,26 +1120,42 @@ proc mountFilesystem(container: isonim_dom.Element; fixture: string): DisposePro
       renderFilesystemPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
+proc applyFlow(vm: FlowVM) =
+  ## The loop of `iterate_asteroids` at the stopped pass (i = 2 of 8): the
+  ## lines it runs and what each changes.
+  vm.iterationCount.val = 8
+  vm.selectIteration(2)
+  vm.hoverStep(some(1))
+  vm.setSteps([
+    FlowStepEntry(step: 0, location: "shield.nr:5",
+                  expression: "mass", beforeValue: "2000",
+                  afterValue: "200"),
+    FlowStepEntry(step: 1, location: "shield.nr:6",
+                  expression: "damage", beforeValue: "2000",
+                  afterValue: "2000"),
+    FlowStepEntry(step: 2, location: "shield.nr:7",
+                  expression: "remaining_shield", beforeValue: "9000",
+                  afterValue: "7000"),
+    FlowStepEntry(step: 3, location: "shield.nr:12",
+                  expression: "remaining_shield", beforeValue: "7000",
+                  afterValue: "8000"),
+  ])
+
+proc applyPointList(vm: PointListVM) =
+  vm.setPoints([
+    PointListEntry(kind: "trace", label: "damage after subtraction",
+                   path: StoryStopPath, line: StoryStopLine, enabled: true),
+    PointListEntry(kind: "break", label: "status report",
+                   path: "src/shield.nr", line: 14, enabled: true),
+    PointListEntry(kind: "trace", label: "regen calculation",
+                   path: "src/shield.nr", line: 42, enabled: false),
+  ])
+  vm.selectPoint(some(0))
+
 proc mountFlow(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createFlowVM(store)
-    vm.iterationCount.val = 12
-    vm.selectIteration(5)
-    vm.hoverStep(some(1))
-    vm.setSteps([
-      FlowStepEntry(step: 0, location: "main.nr:13",
-                    expression: "initial_shield", beforeValue: "10000",
-                    afterValue: "10000"),
-      FlowStepEntry(step: 1, location: "shield.nr:58",
-                    expression: "damage", beforeValue: "100",
-                    afterValue: "2000"),
-      FlowStepEntry(step: 2, location: "shield.nr:61",
-                    expression: "remaining_shield", beforeValue: "10000",
-                    afterValue: "8000"),
-      FlowStepEntry(step: 3, location: "shield.nr:66",
-                    expression: "shield_status", beforeValue: "90%",
-                    afterValue: "80%"),
-    ])
+    vm.applyFlow()
     mountIsoNimFlow(container, vm)
     return proc() = vm.dispose())
 
@@ -1243,6 +1462,198 @@ proc mountVcs(container: isonim_dom.Element; fixture: string): DisposeProc =
     if rootDisposer != nil: rootDisposer()
     container.innerHTML = ""
 
+proc debugControlsHost(container: isonim_dom.Element): isonim_dom.Element =
+  ## The toolbar's host where the app has it: `#isonim-debug-controls` in
+  ## the caption bar (`#menu`, `isonim_menu_shell_view`), which
+  ## `ui/debug_toolbar.nim` renders the topbar into. Its styles are scoped to
+  ## that bar (`menu_bar.styl`), so a toolbar mounted anywhere else -- in a
+  ## panel, as this story once did -- draws its buttons loose in the middle
+  ## of an empty pane.
+  createHost(createHost(container, "div", "menu"), "div", DebugControlsHostId)
+
+proc storyReviewDataset(shield: ct.DeepReviewFileData): ReviewDataset =
+  ## A review of an agent's change to the story program: a hit could take the
+  ## shield below zero, and the change clamps it. Two recordings back it, the
+  ## program's own run and the test the agent added.
+  ReviewDataset(
+    title: "Clamp the shield at zero after a hit",
+    commit: abbreviatedCommit("4f2c9e1b7a3d5c8e0f1a2b3c4d5e6f708192a3b4"),
+    files: @[
+      ReviewFile(path: "src/shield.nr", baseName: "shield.nr", status: "M",
+                 additions: shield.diff.linesAdded,
+                 deletions: shield.diff.linesRemoved,
+                 coveredLines: 58, totalLines: 67,
+                 hasFlow: true),
+      ReviewFile(path: "src/main.nr", baseName: "main.nr", status: "M",
+                 additions: 1, deletions: 1, coveredLines: 34, totalLines: 38,
+                 hasFlow: true),
+      ReviewFile(path: "Prover.toml", baseName: "Prover.toml", status: "M",
+                 additions: 2, deletions: 2),
+    ],
+    traceContexts: @[
+      VCSTraceContextRow(id: 0, label: "nargo execute: both asteroid fields"),
+      VCSTraceContextRow(id: 1, label: "nargo test: shield_never_negative"),
+    ],
+    functionsTraced: 6)
+
+proc storyPanelStack(parent: isonim_dom.Element; title, flex: string;
+                     active = true): isonim_dom.Element =
+  ## One GoldenLayout stack holding one tab, as the app draws a panel
+  ## (`storybook/stories/lib/surfaces.js` `createGoldenPanelHost`: the
+  ## GoldenLayout elements, the tab's pin and close, an empty control bar),
+  ## sized by `flex` in a row or column of stacks. Answers the element the
+  ## panel mounts into.
+  proc el(parent: isonim_dom.Element; tag, class: string): isonim_dom.Element =
+    result = isonim_dom.createElement(isonim_dom.document, cstring(tag))
+    isonim_dom.setAttribute(result, cstring"class", cstring(class))
+    discard isonim_dom.appendChild(isonim_dom.Node(parent), isonim_dom.Node(result))
+  let layout = el(parent, "div", "lm_goldenlayout lm_item lm_root ct-storybook-golden-panel")
+  isonim_dom.setStyleProperty(layout, cstring"flex", cstring(flex))
+  isonim_dom.setStyleProperty(layout, cstring"minWidth", cstring"0")
+  let stack = el(layout, "div", "lm_item lm_stack")
+  let header = el(stack, "div", "lm_header")
+  let tabs = el(header, "section", "lm_tabs")
+  let tab = el(tabs, "div", if active: "lm_tab lm_active" else: "lm_tab")
+  isonim_dom.setAttribute(tab, cstring"title", cstring(title))
+  let tabTitle = el(tab, "span", "lm_title")
+  discard isonim_dom.appendChild(isonim_dom.Node(tabTitle),
+    isonim_dom.createTextNode(isonim_dom.document, cstring(title)))
+  isonim_dom.setAttribute(el(tab, "div", "lm_pin_tab"), cstring"title", cstring"Pin to the sidebar")
+  isonim_dom.setAttribute(el(tab, "div", "lm_close_tab"), cstring"title", cstring"Close panel")
+  discard el(header, "div", "lm_controls")
+  let items = el(stack, "div", "lm_items")
+  let content = el(items, "div", "lm_item lm_content")
+  result = el(content, "div", "ct-storybook-panel-content")
+
+proc storyStackRow(parent: isonim_dom.Element; column = false): isonim_dom.Element =
+  ## A row (or a column) of panel stacks filling `parent`.
+  result = isonim_dom.createElement(isonim_dom.document, cstring"div")
+  isonim_dom.setAttribute(result, cstring"class",
+    cstring(if column: "ct-storybook-stack-column" else: "ct-storybook-stack-row"))
+  isonim_dom.setAttribute(result, cstring"style", cstring(
+    "display: flex; flex-direction: " & (if column: "column" else: "row") &
+    "; flex: 1 1 0; width: 100%; height: 100%; min-width: 0; min-height: 0; gap: 2px"))
+  discard isonim_dom.appendChild(isonim_dom.Node(parent), isonim_dom.Node(result))
+
+proc storySetTimeout(callback: proc(); ms: int) {.importjs: "setTimeout(#, #)".}
+
+const DeepReviewDiffHostId = "unifiedDiffEditor-story"
+  ## The diff tab's editor host (`ui/unified_diff.editorHostId` names the
+  ## app's by the tab's component id).
+
+proc storyReviewDiffEditor(vm: VCSVM; file: ct.DeepReviewFileData;
+                           fontSize: int): proc() =
+  ## The review's diff editor over `file`, as `ui/unified_diff.initEditor`
+  ## creates it, through the same module: the options, the gutter, the diff
+  ## decorations, the flow classes and the value bands. Answers its dispose.
+  let pair = diffPairFor(vm)
+  let doc = pair.modified
+  let diffEditor = udCreateDiffEditor(cstring(DeepReviewDiffHostId),
+    reviewDiffEditorOptions(cstring(monacoThemeFor(storyAppTheme())),
+                            diffContextLineCount(pair), fontSize,
+                            cstring(CodeFontFamily)))
+  let language = cstring(pair.language)
+  let originalModel = udCreateModel(cstring(documentText(pair.original)), language)
+  let modifiedModel = udCreateModel(cstring(documentText(pair.modified)), language)
+  originalModel.udForceTokenization(DiffTokenizeLineLimit)
+  diffEditor.udSetDiffModel(originalModel, modifiedModel)
+  let editor = diffEditor.udDiffModifiedEditor()
+  let originalEditor = diffEditor.udDiffOriginalEditor()
+  let (labels, originalLabels) = reviewDiffLineLabels(pair)
+  applyReviewDiffGutterOptions(editor, originalEditor, labels, originalLabels,
+                               lineNumberColumnWidth(pair))
+  discard editor.udCreateDecorationsCollection(
+    monacoDecorations(pair.modified, []).toJs)
+  discard originalEditor.udCreateDecorationsCollection(
+    monacoDecorations(pair.original, []).toJs)
+  discard editor.udCreateDecorationsCollection(monacoFlowDecorations(
+    storyShieldFlowDecorations(file, doc)).toJs)
+  # The values are placed once the editor has laid itself out: where a band
+  # goes (beside the code or on its own row) is measured against the pane.
+  var widgets: seq[js]
+  var disposed = false
+  storySetTimeout(proc() =
+    if disposed: return
+    placeReviewValueBands(
+      editor, doc, storyShieldValueAnnotations(file, doc), 0, fontSize,
+      ReviewValueBandSink(
+        bandLeft: proc(px: int) = discard,
+        widget: proc(widget: js) = widgets.add(widget),
+        # A view zone lives in the editor and goes with it.
+        zone: proc(zoneId: int) = discard)), 0)
+  # Nothing once the story is disposed: the retries outlive a quick story
+  # switch, and the models are disposed with the editor.
+  scheduleReviewDeletedLineTokens(
+    proc(): ReviewDiffEditorRefs =
+      if not disposed: result = (diffEditor, originalModel),
+    cstring(DeepReviewDiffHostId), 0)
+  return proc() =
+    disposed = true
+    for widget in widgets: editor.udRemoveContentWidget(widget)
+    udDisposeDiffEditor(diffEditor)
+    udDisposeModel(originalModel)
+    udDisposeModel(modifiedModel)
+
+proc mountDeepReview(container: isonim_dom.Element; fixture: string): DisposeProc =
+  ## A review as the app shows one, with `src/shield.nr` selected. DeepReview
+  ## is a mode of the debugger window, not a pane: the VCS panel switched
+  ## into DeepReview mode lists the change (title, commit, stats, trace
+  ## contexts, the changed files), populated through the routine every review
+  ## launch path calls (`review_entry.applyReviewDataset`), and the selected
+  ## file opens as a diff tab in the editor area (`ui/vcs.openUnifiedDiffTab`):
+  ## Monaco's inline diff with the values the recording holds beside the
+  ## changed lines, drawn by `ui/review_diff_editor` as the app's tab draws
+  ## them.
+  ##
+  ## The diff shows the call of `calculate_damage` and the pass of
+  ## `iterate_asteroids`' loop the other stories are stopped in
+  ## (`review_story_data`): the in-editor selectors that choose them in the
+  ## app (`ui/unified_diff.rebuildInvocationZones`) are drawn by the tab's
+  ## Karax code and are not part of this story.
+  let file = storyShieldReviewFile()
+  clearReviewFlowSelections()
+  setReviewInvocationOrdinal(ShieldPath, "calculate_damage", StoryCalculateDamageCall)
+  setReviewLoopIteration(ShieldPath, "iterate_asteroids", 1, StoryIterateAsteroidsPass)
+  let row = storyStackRow(container)
+  let vcsMount = storyPanelStack(row, "VCS", "0 0 26rem")
+  let diffMount = storyPanelStack(row, "Diff: shield.nr", "1 1 0")
+  var rootDisposer: proc()
+  var vm, diffVm: VCSVM
+  createRoot proc(dispose: proc()) =
+    rootDisposer = dispose
+    vm = createVCSVM()
+    discard vm.applyReviewDataset(storyReviewDataset(file), 0)
+    discard isonim_dom.appendChild(isonim_dom.Node(vcsMount), isonim_dom.Node(
+      renderVCSPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
+    diffVm = createVCSVM()
+    diffVm.setUnifiedDiff(true, [reviewDiffFileRow(
+      file, 0, sourceTextLines(file.sourceContent))])
+    discard isonim_dom.appendChild(isonim_dom.Node(diffMount), isonim_dom.Node(
+      renderUnifiedDiffTab[WebRenderer, isonim_dom.Element](
+        WebRenderer(), diffVm, DeepReviewDiffHostId)))
+  var disposeEditor: proc()
+  var disposed = false
+  # Pending until Monaco is in: the render check waits for no
+  # `[data-story-pending]` before judging what a story shows.
+  isonim_dom.setAttribute(diffMount, cstring"data-story-pending", cstring"monaco")
+  whenStoryMonacoLoaded(proc() =
+    if disposed: return
+    try:
+      defineCodeTracerMonacoThemes()
+      disposeEditor = storyReviewDiffEditor(diffVm, file, DefaultEditorFontSize)
+    except:
+      console.error(cstring("the Deep Review story could not create its diff editor: " &
+                            getCurrentExceptionMsg()))
+    isonim_dom.removeAttribute(diffMount, cstring"data-story-pending"))
+  return proc() =
+    disposed = true
+    if disposeEditor != nil: disposeEditor()
+    if vm != nil: vm.dispose()
+    if diffVm != nil: diffVm.dispose()
+    if rootDisposer != nil: rootDisposer()
+    clearReviewFlowSelections()
+    container.innerHTML = ""
+
 proc mountDebugControls(container: isonim_dom.Element; fixture: string): DisposeProc =
   if fixture == "live-mcr":
     var rootDisposer: proc()
@@ -1296,7 +1707,8 @@ proc mountDebugControls(container: isonim_dom.Element; fixture: string): Dispose
         threadId: 1'u32,
       )
       vm = createDebugControlsVM(store)
-      renderTopbar[WebRenderer, isonim_dom.Element](WebRenderer(), container, vm)
+      renderTopbar[WebRenderer, isonim_dom.Element](WebRenderer(),
+        debugControlsHost(container), vm)
       discard isonim_dom.appendChild(isonim_dom.Node(container),
                                      isonim_dom.Node(logNode))
       store.requestRecordingHead()
@@ -1309,21 +1721,14 @@ proc mountDebugControls(container: isonim_dom.Element; fixture: string): Dispose
 
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createDebugControlsVM(store)
-    renderTopbar[WebRenderer, isonim_dom.Element](WebRenderer(), container, vm)
+    renderTopbar[WebRenderer, isonim_dom.Element](WebRenderer(),
+      debugControlsHost(container), vm)
     return proc() = vm.dispose())
 
 proc mountPointList(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createPointListVM(store)
-    vm.setPoints([
-      PointListEntry(kind: "trace", label: "damage after subtraction",
-                     path: "src/combat.nr", line: 42, enabled: true),
-      PointListEntry(kind: "break", label: "status report branch",
-                     path: "src/main.nr", line: 17, enabled: true),
-      PointListEntry(kind: "trace", label: "regen calculation",
-                     path: "src/shield.nr", line: 61, enabled: false),
-    ])
-    vm.selectPoint(some(0))
+    vm.applyPointList()
     discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
       renderPointListPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
@@ -1335,10 +1740,10 @@ proc mountSearch(container: isonim_dom.Element; fixture: string): DisposeProc =
       vm.applySearch()
       vm.setResults([
         SearchPanelResultEntry(label: "remaining_shield",
-                               detail: "src/combat.nr:42",
+                               detail: "src/shield.nr:7",
                                shortcut: "text"),
-        SearchPanelResultEntry(label: "shield_status",
-                               detail: "src/shield.nr:66",
+        SearchPanelResultEntry(label: "calculate_remaining_shield_pct",
+                               detail: "src/shield.nr:48",
                                shortcut: "symbol"),
         SearchPanelResultEntry(label: "src/shield.nr",
                                detail: "file result",
@@ -1486,13 +1891,131 @@ proc mountTestResults(container: isonim_dom.Element; fixture: string): DisposePr
     if rootDisposer != nil: rootDisposer()
     container.innerHTML = ""
 
-proc appendRendered(container: isonim_dom.Element; node: isonim_dom.Element) =
-  discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(node))
+proc renderStoryStatusBar(r: WebRenderer; container: isonim_dom.Element;
+                          showNotifications: bool;
+                          replayReadyToast = true): isonim_dom.Element =
+  ## The status bar as the app has it (`footer > #status`, `renderStatusInto`),
+  ## at the story's stopped location; answers `#status`. The bottom strip and
+  ## the collapsed-icon zone are hosts inside it.
+  let footerHost = isonim_dom.createElement(isonim_dom.document, cstring"footer")
+  result = createHost(footerHost, "div", "status")
+  discard isonim_dom.appendChild(isonim_dom.Node(container),
+                                 isonim_dom.Node(footerHost))
+  renderStatusInto(r, result, StatusShellModel(
+    activeNotifications: (if replayReadyToast: @[
+      StatusNotificationRecord(index: 0, kindClass: "info",
+                               variantClass: "default",
+                               text: "Replay ready", dismissible: true),
+    ] else: @[]),
+    base: StatusBaseModel(language: "Noir", encoding: "UTF-8",
+                          processClass: "debug-status-ready",
+                          processText: "ready",
+                          locationText: StoryStopPath & ":" & $StoryStopLine,
+                          locationTitle: StoryStopPath & ":" & $StoryStopLine),
+    showNotifications: showNotifications,
+  ))
 
-proc createHost(container: isonim_dom.Element; tag, id: string): isonim_dom.Element =
-  result = isonim_dom.createElement(isonim_dom.document, cstring(tag))
-  isonim_dom.setAttribute(result, cstring"id", cstring(id))
-  discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(result))
+proc statusBarHost(container: isonim_dom.Element; id: string): isonim_dom.Element =
+  ## A host the status bar rendered (the bottom strip, the collapsed-icon zone).
+  result = isonim_dom.getElementById(isonim_dom.document, cstring(id))
+  doAssert not isonim_dom.isNodeNil(isonim_dom.Node(result)),
+    "the status bar has no #" & id
+
+proc storyMenuShellModel(active: bool): MenuShellModel =
+  ## The caption bar's menu: "Open File" and a Debug menu, open (`active`)
+  ## or closed, with the window controls.
+  let fileNode = MenuNodeRecord(kind: MenuRecordElement, name: "Open File",
+                                shortcut: "Ctrl+P", enabled: true,
+                                nodeClass: "", path: @[0], nameWidth: 16)
+  let debugNode = MenuNodeRecord(kind: MenuRecordFolder, name: "Debug",
+                                 enabled: true, nodeClass: "", path: @[1],
+                                 nameWidth: 16, children: @[
+    MenuNodeRecord(kind: MenuRecordElement, name: "Start Debugging",
+                   shortcut: "F5", enabled: true, path: @[1, 0],
+                   nameWidth: 18),
+  ])
+  MenuShellModel(showNavigation: true, active: active, searchQuery: "",
+                 rootNodes: @[fileNode, debugNode], showWindowMenu: true)
+
+proc mountDebugShell(container: isonim_dom.Element; fixture: string): DisposeProc =
+  ## The debugger window's shell as the app composes it (`index.html`,
+  ## `ui/menu.nim`), around a replay stopped at `src/shield.nr:7`:
+  ##
+  ## - the caption bar `#menu`, built by the menu shell
+  ##   (`renderMenuShellInto`) with its children in the app's order: the
+  ##   navigation menu, the debug toolbar's host, the debug shell `#debug`
+  ##   and the session tabs. The omnibox is centred because the toolbar and
+  ##   the tabs share the bar's free space either side of it
+  ##   (`menu_bar.styl`), so all three are filled as the app fills them: the
+  ##   toolbar (`ui/debug_toolbar.ensureDebugToolbar` -> `renderTopbar`), the
+  ##   debug shell's chrome and its command palette, closed: the omnibox
+  ##   field (`requestDebugShellRender` -> `renderDebugChromeInto`, then the
+  ##   palette mounted into the host it made), and the session tabs
+  ##   (`renderSessionTabsInto`);
+  ## - the panels area `#root-container > #auto-hide-layout-row > #ROOT >
+  ##   #session-container-0`, beside its empty `#main`, with the editor on
+  ##   the stopped line beside Variables and the call trace;
+  ## - the status bar, `footer > #status`, in `#root-container` as the app
+  ##   has it.
+  let r = WebRenderer()
+  var disposers: seq[DisposeProc] = @[]
+  let menuHost = createHost(container, "div", "menu")
+  isonim_dom.setAttribute(menuHost, cstring"class", cstring"menu")
+  renderMenuShellInto[WebRenderer, isonim_dom.Element](r, menuHost,
+    storyMenuShellModel(active = false))
+  disposers.add mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
+    const paletteId = 3
+    let toolbarVm = createDebugControlsVM(store)
+    renderTopbar[WebRenderer, isonim_dom.Element](r,
+      isonim_dom.getElementById(isonim_dom.document, cstring(DebugControlsHostId)),
+      toolbarVm)
+    renderDebugChromeInto(r,
+      isonim_dom.getElementById(isonim_dom.document, cstring(DebugShellId)), paletteId)
+    let paletteVm = createCommandPaletteVM(store)
+    mountIsoNimCommandPalettePanel(isonim_dom.getElementById(isonim_dom.document,
+      cstring(commandPaletteHostId(paletteId))), paletteVm)
+    return proc() =
+      paletteVm.dispose()
+      toolbarVm.dispose())
+  renderSessionTabsInto(r,
+    isonim_dom.getElementById(isonim_dom.document, cstring"session-tab-bar"), @[
+      SessionTabRecord(label: "noir-space-ship"),
+      SessionTabRecord(label: "sudoku"),
+    ], 0)
+
+  let rootContainer = createHost(container, "div", "root-container")
+  let layoutRow = createHost(rootContainer, "div", "auto-hide-layout-row")
+  discard createHost(layoutRow, "div", "auto-hide-strip-left")
+  let root = createHost(layoutRow, "div", "ROOT")
+  let session = createHost(root, "div", "session-container-0")
+  isonim_dom.setAttribute(session, cstring"class", cstring"session-container")
+  # As `index.html` has it: an empty `section#main` in the session container,
+  # with GoldenLayout's root its next child (`ui/layout.initLayout`). The
+  # panels go beside `#main`, not into it: `#main` sets 1.25rem
+  # (`shared_widgets.styl`), which in the app applies to nothing.
+  discard createHost(session, "section", "main")
+  discard createHost(layoutRow, "div", "auto-hide-strip-right")
+  # GoldenLayout sizes these from the window in the app (`ui/layout.nim`);
+  # here they fill the panels area with flex boxes instead. The session
+  # container stays a block, as in the app, so the empty `#main` takes no
+  # room beside the panels.
+  isonim_dom.setAttribute(root, cstring"style", cstring(
+    "display: flex; flex: 1 1 auto; width: 100%; height: 100%; " &
+    "min-width: 0; min-height: 0"))
+  isonim_dom.setAttribute(session, cstring"style", cstring(
+    "flex: 1 1 auto; width: 100%; height: 100%; min-width: 0; min-height: 0"))
+  let panels = storyStackRow(session)
+  disposers.add mountEditor(storyPanelStack(panels, StoryStopPath, "1 1 0"), "populated")
+  let side = storyStackRow(panels, column = true)
+  isonim_dom.setStyleProperty(side, cstring"flex", cstring"0 0 34%")
+  disposers.add mountState(storyPanelStack(side, "VARIABLES", "1 1 0"), "populated")
+  disposers.add mountCalltrace(storyPanelStack(side, "CALLTRACE", "1 1 0"), "populated")
+  # Without the "Replay ready" toast the status bar shows when a replay
+  # opens: the window is past that moment.
+  discard renderStoryStatusBar(r, rootContainer, false, replayReadyToast = false)
+  return proc() =
+    for dispose in disposers: dispose()
+    container.innerHTML = ""
 
 proc mountStructure(container: isonim_dom.Element; name, fixture: string): DisposeProc =
   let r = WebRenderer()
@@ -1507,42 +2030,11 @@ proc mountStructure(container: isonim_dom.Element; name, fixture: string): Dispo
       SessionTabRecord(label: "sudoku"),
     ], 0))
   of "menu-shell":
-    let fileNode = MenuNodeRecord(kind: MenuRecordElement, name: "Open File",
-                                  shortcut: "Ctrl+P", enabled: true,
-                                  nodeClass: "", path: @[0], nameWidth: 16)
-    let debugNode = MenuNodeRecord(kind: MenuRecordFolder, name: "Debug",
-                                   enabled: true, nodeClass: "", path: @[1],
-                                   nameWidth: 16, children: @[
-      MenuNodeRecord(kind: MenuRecordElement, name: "Start Debugging",
-                     shortcut: "F5", enabled: true, path: @[1, 0],
-                     nameWidth: 18),
-    ])
     let menuHost = createHost(container, "div", "menu")
-    renderMenuShellInto[WebRenderer, isonim_dom.Element](r, menuHost, MenuShellModel(
-      showNavigation: true, active: true, searchQuery: "",
-      rootNodes: @[fileNode, debugNode],
-      showWindowMenu: true,
-    ))
+    renderMenuShellInto[WebRenderer, isonim_dom.Element](r, menuHost,
+      storyMenuShellModel(active = true))
   of "status-shell":
-    let footerHost = isonim_dom.createElement(isonim_dom.document, cstring"footer")
-    let statusHost = createHost(footerHost, "div", "status")
-    discard isonim_dom.appendChild(isonim_dom.Node(container),
-                                   isonim_dom.Node(footerHost))
-    renderStatusInto(r, statusHost, StatusShellModel(
-      activeNotifications: @[
-        StatusNotificationRecord(index: 0, kindClass: "info",
-                                 variantClass: "default",
-                                 text: "Replay ready", dismissible: true),
-      ],
-      base: StatusBaseModel(language: "Noir", encoding: "UTF-8",
-                            processClass: "debug-status-ready",
-                            processText: "ready",
-                            locationText: "src/combat.nr:42",
-                            locationTitle: "src/combat.nr:42"),
-      showNotifications: fixture == "history",
-    ))
-  of "debug-shell":
-    appendRendered(container, renderDebugChromePanel[WebRenderer, isonim_dom.Element](r, 3))
+    discard renderStoryStatusBar(r, container, fixture == "history")
   of "auto-hide-bottom-strip":
     # The fixture renders the *live* bottom-strip view. It used to render
     # `isonim_auto_hide_bottom_tabs_view`, a second bottom-tabs renderer that
@@ -1560,26 +2052,62 @@ proc mountStructure(container: isonim_dom.Element; name, fixture: string): Dispo
     # inherits only the vertical side-strip styles and the story would show
     # something users never see — the same class of drift that made this
     # fixture worth fixing in the first place.
-    let stripHost = createHost(container, "div", BottomStripHostId)
-    renderAutoHideBottomStripInto(r, stripHost, @[
+    #
+    # And in the status bar, where the host lives in the app (`isonim_status_view`
+    # renders it inside `#status-base`): the strip is centred across the bar,
+    # positioned against it, so outside one it stood alone mid-frame.
+    discard renderStoryStatusBar(r, container, false)
+    renderAutoHideBottomStripInto(r, statusBarHost(container, BottomStripHostId), @[
       AutoHideBottomStripRecord(title: "Terminal Output", active: true),
       AutoHideBottomStripRecord(title: "Build", active: false),
     ])
   of "auto-hide-collapsed-icons":
-    appendRendered(container, renderAutoHideCollapsedIconsPanel[WebRenderer, isonim_dom.Element](r, @[
+    # In the status bar's collapsed-icon zone, as `ui/auto_hide.nim`
+    # `requestCollapsedIconZoneRender` fills it.
+    discard renderStoryStatusBar(r, container, false)
+    renderAutoHideCollapsedIconsInto(r, statusBarHost(container, CollapsedIconZoneHostId), @[
       AutoHideCollapsedIconRecord(title: "Calltrace", icon: "C"),
       AutoHideCollapsedIconRecord(title: "Variables", icon: "V"),
-    ]))
+    ])
   of "auto-hide-overlay-tabs":
-    appendRendered(container, renderAutoHideOverlayTabsPanel[WebRenderer, isonim_dom.Element](r, @[
+    # Inside the overlay's body (`index.html` `#auto-hide-overlay-body`), between
+    # the screen edge and the overlay's content, as `ui/auto_hide.nim`
+    # `requestOverlaySideEdgeTabsRender` draws them; the content is the active
+    # tab's panel.
+    let body = createHost(container, "div", "auto-hide-overlay-body")
+    isonim_dom.setAttribute(body, cstring"style",
+      cstring"display:flex; flex:1; min-height:0; overflow:hidden; height:100%")
+    let tabsHost = createHost(body, "div", "auto-hide-overlay-side-tabs")
+    let contentHost = createHost(body, "div", "auto-hide-overlay-content")
+    renderAutoHideOverlayTabsInto(r, tabsHost, @[
       AutoHideOverlayTabRecord(title: "Calltrace", active: true),
       AutoHideOverlayTabRecord(title: "Variables", active: false),
-    ], true, " side-tabs-left"))
+    ], true, " side-tabs-left")
+    return mountCalltrace(contentHost, "populated")
   of "auto-hide-side-strip":
-    appendRendered(container, renderAutoHideSideStripPanel[WebRenderer, isonim_dom.Element](r, @[
-      AutoHideSideStripRecord(title: "Calltrace"),
-      AutoHideSideStripRecord(title: "Variables"),
-    ], fixture == "collapsed"))
+    # The left strip in the layout row beside `#ROOT`, as `ui/auto_hide.nim`
+    # `requestAutoHideSideStripRender` fills `#auto-hide-strip-left`: its
+    # rules (and the room `#ROOT` gives it) are written against that row.
+    # The window's column: the row over the status bar. Collapsed, the strip
+    # is a line and its panels are the status bar's collapsed icons, which is
+    # how the app shows a collapsed edge (`requestCollapsedIconZoneRender`).
+    let window = createHost(container, "div", "ct-story-window")
+    isonim_dom.setAttribute(window, cstring"style",
+      cstring"display:flex; flex-direction:column; height:100vh")
+    let row = createHost(window, "div", "auto-hide-layout-row")
+    let stripHost = createHost(row, "div", "auto-hide-strip-left")
+    discard createHost(row, "div", "ROOT")
+    let collapsed = fixture == "collapsed"
+    renderAutoHideSideStripInto(r, stripHost, @[
+      AutoHideSideStripRecord(title: "Calltrace", key: "calltrace", active: not collapsed),
+      AutoHideSideStripRecord(title: "Variables", key: "state"),
+    ], collapsed)
+    discard renderStoryStatusBar(r, window, false)
+    if collapsed:
+      renderAutoHideCollapsedIconsInto(r, statusBarHost(window, CollapsedIconZoneHostId), @[
+        AutoHideCollapsedIconRecord(title: "Calltrace", icon: "C"),
+        AutoHideCollapsedIconRecord(title: "Variables", icon: "V"),
+      ])
   else:
     let node = r.createElement("div")
     r.setAttribute(node, "class", "ct-storybook-missing")
@@ -1588,6 +2116,9 @@ proc mountStructure(container: isonim_dom.Element; name, fixture: string): Dispo
   return proc() = container.innerHTML = ""
 
 proc mountLayout(container: isonim_dom.Element; name, fixture: string): DisposeProc =
+  if name == "deepreview":
+    # The VCS panel and the diff tab side by side, as a review opens them.
+    return mountDeepReview(container, fixture)
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let r = WebRenderer()
     let shell = renderIsoNimAppShell(r)
@@ -1597,6 +2128,8 @@ proc mountLayout(container: isonim_dom.Element; name, fixture: string): DisposeP
       case section.panelId
       of "state":
         let vm = createStateVM(store); vm.applyState()
+        # Loaded, as in the State panel story: the store starts out loading.
+        store.locals.loadingState.val = lsIdle
         mountIsoNimStatePanel(section.content, vm)
         disposers.add(proc() = vm.dispose())
       of "calltrace":
@@ -1610,7 +2143,7 @@ proc mountLayout(container: isonim_dom.Element; name, fixture: string): DisposeP
           renderEventLogPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
         disposers.add(proc() = vm.dispose())
       of "flow":
-        let vm = createFlowVM(store); vm.iterationCount.val = 12; vm.selectIteration(5)
+        let vm = createFlowVM(store); vm.applyFlow()
         mountIsoNimFlow(section.content, vm)
         disposers.add(proc() = vm.dispose())
       of "search":
@@ -1619,7 +2152,7 @@ proc mountLayout(container: isonim_dom.Element; name, fixture: string): DisposeP
           renderSearchPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
         disposers.add(proc() = vm.dispose())
       of "point-list":
-        let vm = createPointListVM(store); vm.selectPoint(some(0))
+        let vm = createPointListVM(store); vm.applyPointList()
         discard isonim_dom.appendChild(isonim_dom.Node(section.content), isonim_dom.Node(
           renderPointListPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
         disposers.add(proc() = vm.dispose())
@@ -1666,6 +2199,8 @@ proc mountCodeTracerStory*(container: isonim_dom.Element;
     of "agent-harbor-session-tabs": mountAgentHarborSessionTabs(container, f)
     of "agent-harbor-initiative-tabs": mountAgentHarborInitiativeTabs(container, f)
     of "agent-harbor-session-list": mountAgentHarborSessionList(container, f)
+    of "debug-shell": mountDebugShell(container, f)
+    of "debug-controls": mountDebugControls(container, f)
     else: mountStructure(container, n, f)
   else:
     case n

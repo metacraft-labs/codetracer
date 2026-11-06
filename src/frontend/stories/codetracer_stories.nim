@@ -48,6 +48,13 @@ type
     check*: string
       ## A named StoryBook play check (`storybook/stories/lib/plays.js`) run
       ## after the default "the surface mounted" check; empty for none.
+    state*: string
+      ## What the story claims to show: `data` (its surface over realistic
+      ## data, the default) or a declared `empty`, `loading` or `error`
+      ## state. `storybook/scripts/check-story-render.mjs` (`just
+      ## storybook-check-render`) fails a `data` story that renders a
+      ## placeholder, an empty panel or a component's empty / loading / error
+      ## fallback, and a story that declares a state but does not show it.
     description*: string
 
   CodeTracerStorySection* = object
@@ -62,16 +69,18 @@ type
     stories*: seq[CodeTracerStory]
 
 const storyKinds* = ["panel", "view", "component", "layout"]
+const storyStates* = ["data", "empty", "loading", "error"]
+  ## The states a story may declare (`CodeTracerStory.state`).
 
 func story(exportName, name, kind, surface: string; fixture = "populated";
-           check = ""; description = ""): CodeTracerStory =
+           check = ""; description = ""; state = "data"): CodeTracerStory =
   CodeTracerStory(exportName: exportName, name: name, kind: kind,
                   surface: surface, fixture: fixture, check: check,
-                  description: description)
+                  description: description, state: state)
 
 func panel(exportName, name, surface: string; fixture = "populated";
-           check = ""; description = ""): CodeTracerStory =
-  story(exportName, name, "panel", surface, fixture, check, description)
+           check = ""; description = ""; state = "data"): CodeTracerStory =
+  story(exportName, name, "panel", surface, fixture, check, description, state)
 
 func agentHarborSection(): CodeTracerStorySection =
   ## CodeTracer as an Agent Harbor front-end: the prototypes of the panels
@@ -102,16 +111,20 @@ func agentHarborSection(): CodeTracerStorySection =
             "The snapshot with its first session selected"),
       panel("FleetLoading", "Fleet: Loading", "agent-harbor-fleet",
             "loading", "agent-harbor-fleet-loading",
-            "Waiting for the server's first answer"),
+            "Waiting for the server's first answer",
+            state = "loading"),
       panel("FleetError", "Fleet: Error", "agent-harbor-fleet",
             "error", "agent-harbor-fleet-error",
-            "The server could not be reached"),
+            "The server could not be reached",
+            state = "error"),
       panel("FleetEmpty", "Fleet: Empty", "agent-harbor-fleet",
             "empty", "agent-harbor-fleet-empty",
-            "A server with no sessions"),
+            "A server with no sessions",
+            state = "empty"),
       panel("FleetFilteredEmpty", "Fleet: Filter Leaves Nothing", "agent-harbor-fleet",
             "filtered-empty", "agent-harbor-fleet-filtered-empty",
-            "The working set under the Queued filter: no session matches"),
+            "The working set under the Queued filter: no session matches",
+            state = "empty"),
       panel("FleetExpanded", "Fleet: Activity Unfolded", "agent-harbor-fleet",
             "expanded", "agent-harbor-fleet-expanded",
             "The snapshot with one row's activity lines unfolded"),
@@ -141,13 +154,16 @@ func agentHarborSection(): CodeTracerStorySection =
             "An initiative selected: its tabs highlighted, its first active"),
       story("SessionTabsEmpty", "Session Tabs: Empty", "view", "agent-harbor-session-tabs", "empty",
             "agent-harbor-session-tabs-empty",
-            "A server with no sessions"),
+            "A server with no sessions",
+            state = "empty"),
       story("SessionTabsLoading", "Session Tabs: Loading", "view", "agent-harbor-session-tabs", "loading",
             "agent-harbor-session-tabs-loading",
-            "Waiting for the server's first answer"),
+            "Waiting for the server's first answer",
+            state = "loading"),
       story("SessionTabsError", "Session Tabs: Error", "view", "agent-harbor-session-tabs", "error",
             "agent-harbor-session-tabs-error",
-            "The server could not be reached"),
+            "The server could not be reached",
+            state = "error"),
       story("SessionListSidebar", "Session List: Sidebar", "view", "agent-harbor-session-list", "sidebar",
             "agent-harbor-session-list",
             "The tabs as a sidebar list, grouped by initiative"),
@@ -183,7 +199,7 @@ func agentHarborSection(): CodeTracerStorySection =
             "Auto-switch on: after the instruction, the next waiting session came up"),
       story("InitiativeTabsRecordingsMany", "Initiative Tabs: Many Recordings", "view", "agent-harbor-initiative-tabs", "recordings-many",
             "agent-harbor-initiative-tabs-recordings",
-            "Twelve recordings: nine buttons, +3, one loading, one failed"),
+            "Twelve recordings: five buttons and +7 on a wide bar, the active one and +11 on a compact one; one loading, one failed, one missing"),
       story("InitiativeTabsOverflow", "Initiative Tabs: 40 Sessions Over 5", "view", "agent-harbor-initiative-tabs", "overflow-40",
             "agent-harbor-initiative-tabs",
             "Five invented initiatives and forty sessions"),
@@ -195,25 +211,31 @@ func agentHarborSection(): CodeTracerStorySection =
             "The real running plans and the real fleet sessions: Agent Harbor reports no session's plan yet, so only the capturing host's own session is associated (with the CodeTracer plan)"),
       story("InitiativeTabsEmpty", "Initiative Tabs: Empty", "view", "agent-harbor-initiative-tabs", "empty",
             "agent-harbor-initiative-tabs-empty",
-            "No initiative is running"),
+            "No initiative is running",
+            state = "empty"),
       story("InitiativeTabsLoading", "Initiative Tabs: Loading", "view", "agent-harbor-initiative-tabs", "loading",
             "agent-harbor-initiative-tabs-loading",
-            "Waiting for the server's first answer"),
+            "Waiting for the server's first answer",
+            state = "loading"),
       story("InitiativeTabsError", "Initiative Tabs: Error", "view", "agent-harbor-initiative-tabs", "error",
             "agent-harbor-initiative-tabs-error",
-            "The server could not be reached"),
+            "The server could not be reached",
+            state = "error"),
       story("SessionListSidebarTreeFolded", "Session List: Initiatives Tree, Folded", "view", "agent-harbor-session-list", "sidebar-tree-folded",
             "agent-harbor-session-list-tree",
             "The sidebar as the initiatives tree, its first two nodes folded"),
       story("SessionListEmpty", "Session List: Empty", "view", "agent-harbor-session-list", "empty",
             "agent-harbor-session-list-empty",
-            "A server with no sessions"),
+            "A server with no sessions",
+            state = "empty"),
       story("SessionListLoading", "Session List: Loading", "view", "agent-harbor-session-list", "loading",
             "agent-harbor-session-list-loading",
-            "Waiting for the server's first answer"),
+            "Waiting for the server's first answer",
+            state = "loading"),
       story("SessionListError", "Session List: Error", "view", "agent-harbor-session-list", "error",
             "agent-harbor-session-list-error",
-            "The server could not be reached"),
+            "The server could not be reached",
+            state = "error"),
       panel("Initiatives", "Initiatives", "agent-harbor-initiatives", "populated",
             "agent-harbor-initiatives",
             "The running initiatives of the captured plans and their sessions"),
@@ -231,13 +253,16 @@ func agentHarborSection(): CodeTracerStorySection =
             "The real running plans and the real fleet sessions; only the capturing host's own session is associated with a plan (Agent Harbor reports no association yet)"),
       panel("InitiativesEmpty", "Initiatives: Empty", "agent-harbor-initiatives", "empty",
             "agent-harbor-initiatives-empty",
-            "A server with no running initiative"),
+            "A server with no running initiative",
+            state = "empty"),
       panel("InitiativesLoading", "Initiatives: Loading", "agent-harbor-initiatives", "loading",
             "agent-harbor-initiatives-loading",
-            "Waiting for the server's first answer"),
+            "Waiting for the server's first answer",
+            state = "loading"),
       panel("InitiativesError", "Initiatives: Error", "agent-harbor-initiatives", "error",
             "agent-harbor-initiatives-error",
-            "The server could not be reached"),
+            "The server could not be reached",
+            state = "error"),
       panel("InitiativeProgress", "Initiative Progress", "agent-harbor-initiative-progress", "current",
             "agent-harbor-progress",
             "The progress of the initiative most sessions work on"),
@@ -258,13 +283,16 @@ func agentHarborSection(): CodeTracerStorySection =
             "A real running plan's progress (the CodeTracer plan, the one a real session runs)"),
       panel("InitiativeProgressUnknown", "Initiative Progress: Unknown Initiative", "agent-harbor-initiative-progress", "unknown",
             "agent-harbor-progress-empty",
-            "An initiative the server does not know"),
+            "An initiative the server does not know",
+            state = "empty"),
       panel("InitiativeProgressLoading", "Initiative Progress: Loading", "agent-harbor-initiative-progress", "loading",
             "agent-harbor-progress-loading",
-            "Waiting for the server's first answer"),
+            "Waiting for the server's first answer",
+            state = "loading"),
       panel("InitiativeProgressError", "Initiative Progress: Error", "agent-harbor-initiative-progress", "error",
             "agent-harbor-progress-error",
-            "The server could not be reached"),
+            "The server could not be reached",
+            state = "error"),
     ])
 
 func panelsSection(): CodeTracerStorySection =
@@ -279,11 +307,15 @@ func panelsSection(): CodeTracerStorySection =
       panel("Build", "Build", "build"),
       panel("Calltrace", "Calltrace", "calltrace"),
       panel("CommandPalette", "Command Palette", "command-palette"),
-      panel("DebugControls", "Debug Controls", "debug-controls"),
-      panel("LiveMcrDebugControls", "Live MCR Debug Controls",
+      # The toolbar in the caption bar, where the app draws it.
+      story("DebugControls", "Debug Controls", "view", "debug-controls"),
+      story("LiveMcrDebugControls", "Live MCR Debug Controls", "view",
             "debug-controls", "live-mcr"),
-      panel("DeepReview", "Deep Review", "deepreview"),
-      panel("Editor", "Editor", "editor"),
+      story("DeepReview", "Deep Review", "layout", "deepreview", check = "deep-review",
+            description = "A review with src/shield.nr selected: the VCS panel in " &
+              "DeepReview mode and the file's diff tab, with the values the " &
+              "recording holds beside the changed lines"),
+      panel("Editor", "Editor", "editor", check = "editor-gutter"),
       panel("Errors", "Errors", "errors"),
       panel("EventLog", "Event Log", "event-log"),
       panel("Filesystem", "Filesystem", "filesystem"),
@@ -299,7 +331,7 @@ func panelsSection(): CodeTracerStorySection =
       panel("Scratchpad", "Scratchpad", "scratchpad"),
       panel("Search", "Search", "search"),
       panel("SearchResults", "Search Results", "search-results"),
-      panel("Shell", "Shell", "shell"),
+      panel("Shell", "Shell", "shell", check = "shell-rows"),
       panel("State", "State", "state"),
       panel("StepList", "Step List", "step-list"),
       panel("TerminalOutput", "Terminal Output", "terminal-output"),
@@ -345,7 +377,8 @@ func viewsSection(): CodeTracerStorySection =
     module: "CodeTracerViews",
     description: "The shell's building blocks in the app frame",
     stories: shellPieces("view") &
-      @[story("DebugShell", "Debug Shell", "view", "debug-shell")] &
+      @[story("DebugShell", "Debug Shell", "view", "debug-shell",
+              check = "debug-shell")] &
       autoHidePieces("view") &
       @[story("AutoHideSideStripCollapsed", "Auto Hide Side Strip Collapsed",
               "view", "auto-hide-side-strip", "collapsed")])
@@ -357,10 +390,13 @@ func fixturesSection(): CodeTracerStorySection =
     module: "CodeTracerFixtures",
     description: "Panels in their loading, empty and alternative states",
     stories: @[
-      panel("BuildRunning", "Build Running", "build", "loading"),
-      panel("ErrorsEmpty", "Errors Empty", "errors", "empty"),
-      panel("TerminalEmpty", "Terminal Empty", "terminal-output", "empty"),
-      panel("TerminalLoading", "Terminal Loading", "terminal-output", "loading"),
+      panel("BuildRunning", "Build Running", "build", "running"),
+      panel("ErrorsEmpty", "Errors Empty", "errors", "empty",
+            state = "empty"),
+      panel("TerminalEmpty", "Terminal Empty", "terminal-output", "empty",
+            state = "empty"),
+      panel("TerminalLoading", "Terminal Loading", "terminal-output", "loading",
+            state = "loading"),
       panel("WelcomeRecord", "Welcome Record", "welcome-screen", "record"),
       panel("WelcomeOnlineTrace", "Welcome Online Trace", "welcome-screen",
             "online"),
@@ -410,9 +446,11 @@ func terminalOutputSection(): CodeTracerStorySection =
       panel("Populated", "Populated", "terminal-output", "demo",
             "terminal-output-populated"),
       panel("Empty", "Empty", "terminal-output", "empty",
-            "terminal-output-empty"),
+            "terminal-output-empty",
+            state = "empty"),
       panel("Loading", "Loading", "terminal-output", "loading",
-            "terminal-output-loading"),
+            "terminal-output-loading",
+            state = "loading"),
     ])
 
 const agentHarborPanelNames = [
@@ -459,7 +497,9 @@ func validateStorySections*(sections: seq[CodeTracerStorySection]): seq[string] 
   ## unreachable: a duplicate section title, group or module, a duplicate
   ## export or name inside a section (StoryBook ids and editor story refs
   ## must be unique), an export name StoryBook cannot index (it must be a
-  ## capitalised identifier), and an unknown kind. Empty means valid.
+  ## capitalised identifier), an unknown kind or state, and a fixture named
+  ## for a state (`empty`, `loading`, `error`) in a story that does not
+  ## declare that state. Empty means valid.
   var titles, groups, modules: HashSet[string]
   for section in sections:
     if section.title in titles: result.add "duplicate section title " & section.title
@@ -484,3 +524,12 @@ func validateStorySections*(sections: seq[CodeTracerStorySection]): seq[string] 
         result.add "unknown kind " & story.kind & " in " & where
       if story.surface.len == 0 or story.fixture.len == 0:
         result.add "missing surface or fixture in " & where
+      if story.state notin storyStates:
+        result.add "unknown state " & story.state & " in " & where
+      # A fixture named for a state shows that state, so the story must say
+      # so: the render check holds a `data` story to showing data.
+      for word in ["empty", "loading", "error"]:
+        if (story.fixture == word or story.fixture.endsWith("-" & word)) and
+            story.state != word:
+          result.add where & ": fixture " & story.fixture & " shows the " &
+            word & " state; declare state = \"" & word & "\""

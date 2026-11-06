@@ -64,10 +64,22 @@ function newestInput(paths: string[]): FileMtime {
   return newest;
 }
 
+// When `outputPath` was last built. For the components bundle that is the
+// later of the bundle and the stamp `just build-storybook-components` sets to
+// the start of every successful compile (`storybook/dist/components.js.compiled`): `nim js`
+// leaves a byte-identical bundle untouched, so the bundle's own mtime says
+// when it last changed, not when it was last compiled.
+function builtAt(outputPath: string): number {
+  const stamp = `${outputPath}.compiled`;
+  const own = fs.statSync(outputPath).mtimeMs;
+  return outputPath === storybookComponentsBundle && fs.existsSync(stamp)
+    ? Math.max(own, fs.statSync(stamp).mtimeMs)
+    : own;
+}
+
 function assertFreshOutput(outputPath: string, inputPaths: string[], staleMessage: string) {
-  const outputStat = fs.statSync(outputPath);
   const latestInput = newestInput(inputPaths);
-  if (latestInput.mtimeMs - outputStat.mtimeMs <= 1000) return;
+  if (latestInput.mtimeMs - builtAt(outputPath) <= 1000) return;
 
   throw new Error(
     [

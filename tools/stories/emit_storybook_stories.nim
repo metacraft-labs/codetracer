@@ -4,9 +4,10 @@
 ## which the IsoNim Editor instance reads too. This tool turns each section
 ## into a CSF file, `storybook/stories/generated/<module>.stories.js`, whose
 ## stories call `story()` from `storybook/stories/lib/csf.js`, and writes
-## `storybook/stories/generated/stories.json`: the StoryBook id, title and
-## export of every story, which the editor smoke check and reviewers compare
-## against what StoryBook indexed.
+## `storybook/stories/generated/stories.json`: the StoryBook id, title,
+## export, surface, fixture and declared state of every story, which the
+## editor smoke check and reviewers compare against what StoryBook indexed
+## and the render check (`just storybook-check-render`) judges each story by.
 ##
 ## The generated directory is git-ignored and rewritten whole: a story removed
 ## from the declaration disappears from StoryBook on the next run, and a file
@@ -87,6 +88,7 @@ proc storyIndex(sections: seq[CodeTracerStorySection]): string =
         "kind": story.kind,
         "surface": story.surface,
         "fixture": story.fixture,
+        "state": story.state,
       }
   pretty(%*{"generatedBy": "tools/stories/emit_storybook_stories.nim",
             "stories": stories}) & "\n"

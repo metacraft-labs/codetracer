@@ -28,7 +28,7 @@ import
   # made `-d:ctWeb` builds of the renderer impossible: `electron_lib` is
   # `{.error.}` on that arm by design. `lib/electron_presence` answers the same
   # question by probing the runtime, and imports nothing.
-  lib/[ logging, monaco_lib, jslib, misc_lib, electron_presence ],
+  lib/[ logging, monaco_lib, monaco_appearance, jslib, misc_lib, electron_presence ],
   ui/file_conflict_dialog,
   # Pure, DOM-free decision for the context menu's non-interactive hint row.
   viewmodel/views/context_menu_hint,
@@ -169,19 +169,12 @@ proc ensureMonacoThemesDefined*() =
   ## `monacoThemeName` does it for every caller that asks for a theme by
   ## configuration, which is all of them.
   ##
-  ## The theme documents are the checked-in Monaco theme JSONs under
-  ## `src/public/third_party/monaco-themes/themes/customThemes/json/`, read at
-  ## Nim compile time and emitted as object literals so no runtime fetch (and
-  ## no ordering against the asset pipeline) is involved.
+  ## The definitions are `lib/monaco_appearance`'s, which the StoryBook bundle
+  ## registers too.
   if monacoThemesDefined:
     return
-  const whiteThemeDef =
-    staticRead("../public/third_party/monaco-themes/themes/customThemes/json/codetracerWhite.json")
-  const darkThemeDef =
-    staticRead("../public/third_party/monaco-themes/themes/customThemes/json/codetracerDark.json")
   try:
-    {.emit: "monaco.editor.defineTheme('codetracerWhite', " & whiteThemeDef & ")\n".}
-    {.emit: "monaco.editor.defineTheme('codetracerDark', " & darkThemeDef & ")\n".}
+    defineCodeTracerMonacoThemes()
     monacoThemesDefined = true
   except:
     # Leave the flag down so a later caller (one running after Monaco has
@@ -202,10 +195,9 @@ proc monacoThemeName*(configTheme: cstring): cstring =
   ## `default_black` and `mac_classic` all map to `codetracerDark`, matching
   ## `monacoThemeNames` below.
   ensureMonacoThemesDefined()
-  if configTheme == cstring"default_white":
-    cstring"codetracerWhite"
-  else:
-    cstring"codetracerDark"
+  # A nil theme (a config not loaded yet) is the dark default: `$` of a nil
+  # cstring would raise on the JS backend.
+  cstring(monacoThemeFor(if configTheme.isNil: "" else: $configTheme))
 
 proc loadMonacoTheme*(themeName: cstring) =
   ## Switch every live Monaco instance to `themeName`.

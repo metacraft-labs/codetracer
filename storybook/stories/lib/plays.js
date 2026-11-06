@@ -17,6 +17,35 @@ function waitFor(canvasElement, selector, timeoutMs = 5000) {
   });
 }
 
+// Wait until `ready()` answers true: for a view whose parts arrive at
+// different times (an editor's decorations after its widgets), so a play
+// checks the state it means rather than whichever part came first.
+function waitUntil(ready, what, timeoutMs = 5000) {
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+    const poll = () => {
+      let ok = false;
+      try { ok = ready(); } catch { ok = false; }
+      if (ok) return resolve();
+      if (Date.now() - started > timeoutMs) return reject(new Error(`timed out waiting for ${what}`));
+      setTimeout(poll, 25);
+    };
+    poll();
+  });
+}
+
+// The computed font size of the first element matching `selector`, or null.
+function fontSizeOf(root, selector) {
+  const el = root.querySelector(selector);
+  return el ? getComputedStyle(el).fontSize : null;
+}
+
+// The type size the desktop app draws its code, its panes' rows and the
+// review's value chips at: measured in the running app at 1440x900 with the
+// default configuration (2026-11-05), every one 16px, the window's own size.
+// A story that mounted its panels inside `#main` (1.25rem) drew them at 20px.
+const APP_TYPE_SIZE = "16px";
+
 // --- Agent Harbor ---------------------------------------------------------
 // The fleet stories run over the private capture of a real fleet where the
 // build can see it and over the public synthetic set otherwise
@@ -310,16 +339,127 @@ export const plays = {
     expect(el.querySelector(".empty-overlay")?.textContent).toContain("Loading record output");
   }),
 
+  // A review with src/shield.nr selected: the changed-files list in the VCS
+  // panel, and the file's diff tab with the values the recording holds
+  // beside the changed lines, in the call the other stories are stopped
+  // after (pass 2 of the positive field).
+  //
+  // Monaco draws the diff in parts: the value bands are content widgets and
+  // the added-line wash is a decoration of a later render pass, so the play
+  // waits for every part it checks, not only the first.
+  "deep-review": async ({ canvasElement }) => {
+    const chipTexts = () => [...canvasElement.querySelectorAll(".review-flow-band-host .ct-omni-value")]
+      .map((chip) => chip.textContent.replace(/\s+/g, ""));
+    await waitUntil(() =>
+      canvasElement.querySelector(".unified-diff-file-header-host")?.textContent.includes("src/shield.nr") &&
+      canvasElement.querySelectorAll(".view-overlays .ct-diff-line-added").length > 0 &&
+      ["<damage>2000", "<remaining_shield>9000", "<shield_pct>90"].every((c) => chipTexts().includes(c)),
+    "the diff's header, added-line decorations and value chips", 60000).catch(() => {});
+    await expect(canvasElement.textContent).toContain("Clamp the shield at zero after a hit");
+    await expect(canvasElement.querySelector(".unified-diff-file-header-host")?.textContent).toContain("src/shield.nr");
+    await expect(canvasElement.querySelectorAll(".view-overlays .ct-diff-line-added").length).toBeGreaterThan(0);
+    const chips = chipTexts();
+    await expect(chips).toContain("<damage>2000");
+    await expect(chips).toContain("<remaining_shield>9000");
+    await expect(chips).toContain("<shield_pct>90");
+    // The chips at the app's type size, the code's.
+    const code = fontSizeOf(canvasElement, ".monaco-editor .view-line");
+    await expect(code).toBe(APP_TYPE_SIZE);
+    await expect(fontSizeOf(canvasElement, ".review-flow-band-host .ct-omni-value")).toBe(code);
+  },
+
+  // The editor's gutter is the app's (`editorGutterLineHtml`): the
+  // execution-pointer arrow on the stopped line, and every line number clear
+  // of the code.
+  "editor-gutter": async ({ canvasElement }) => {
+    await waitFor(canvasElement, ".monaco-editor .gutter-line", 60000);
+    const arrow = canvasElement.querySelector(".gutter-highlight-active");
+    await expect(arrow).toBeTruthy();
+    await expect(arrow.closest(".gutter")?.dataset.line).toBe("7");
+    const code = canvasElement.querySelector(".monaco-editor .view-lines").getBoundingClientRect();
+    for (const number of canvasElement.querySelectorAll(".gutter-line")) {
+      await expect(number.getBoundingClientRect().right).toBeLessThanOrEqual(code.left);
+    }
+  },
+
+  // The debug shell as the app composes it: the caption bar's children in
+  // the app's order with the omnibox between the toolbar and the session
+  // tabs, the panels area and the status bar.
+  "debug-shell": async ({ canvasElement }) => {
+    await waitFor(canvasElement, "#debug input", 10000);
+    const menu = canvasElement.querySelector("#menu");
+    const order = [...menu.children].map((child) => child.id || child.className);
+    const at = (id) => order.indexOf(id);
+    await expect(at("isonim-debug-controls")).toBeGreaterThanOrEqual(0);
+    await expect(at("debug")).toBe(at("isonim-debug-controls") + 1);
+    await expect(at("session-tab-bar")).toBe(at("debug") + 1);
+    const toolbar = menu.querySelector("#isonim-debug-controls").getBoundingClientRect();
+    const omnibox = menu.querySelector("#debug").getBoundingClientRect();
+    const tabs = menu.querySelector("#session-tab-bar").getBoundingClientRect();
+    await expect(omnibox.left).toBeGreaterThanOrEqual(toolbar.right);
+    await expect(omnibox.right).toBeLessThanOrEqual(tabs.left);
+    await expect(menu.querySelectorAll("#isonim-debug-controls button").length).toBeGreaterThan(5);
+    await expect(canvasElement.querySelectorAll("#ROOT .lm_stack").length).toBe(3);
+    await expect(canvasElement.querySelector("#root-container footer #status")).toBeTruthy();
+    // The panes at the app's type size, the code's.
+    await waitFor(canvasElement, ".monaco-editor .view-line", 60000);
+    const code = fontSizeOf(canvasElement, ".monaco-editor .view-line");
+    await expect(code).toBe(APP_TYPE_SIZE);
+    await expect(fontSizeOf(canvasElement, ".calltrace-call-line")).toBe(code);
+    await expect(fontSizeOf(canvasElement, ".value-name")).toBe(code);
+  },
+
+  // The Shell pane's rows: each line's gutter mark sits beside its text, not
+  // over it (a stylesheet rule left from the xterm pane once made the gutter
+  // an absolute overlay that hid the first two columns of every line).
+  "shell-rows": async ({ canvasElement }) => {
+    await waitFor(canvasElement, ".isonim-shell .shell-row");
+    // The header reads the session the rows come from: a running shell.
+    await expect(canvasElement.querySelector(".isonim-shell .shell-status")?.textContent).toContain("running");
+    const rows = [...canvasElement.querySelectorAll(".isonim-shell .shell-row")];
+    await expect(rows.length).toBeGreaterThan(2);
+    for (const row of rows) {
+      const gutter = row.querySelector(".shell-gutter").getBoundingClientRect();
+      const text = row.querySelector(".shell-text").getBoundingClientRect();
+      await expect(text.left).toBeGreaterThanOrEqual(gutter.right - 0.5);
+    }
+    await expect(rows[0].querySelector(".shell-text").textContent).toContain("$ cd test-programs/noir_space_ship");
+    // The command line the shell echoed comes before the program's output,
+    // and the recording's range starts at that output, not at the command.
+    const texts = rows.map((row) => row.querySelector(".shell-text").textContent.replace(/\s+$/, ""));
+    const command = texts.indexOf("$ ct record .");
+    const start = rows.findIndex((row) => row.getAttribute("data-mark") === "start");
+    await expect(command).toBeGreaterThan(0);
+    await expect(start).toBe(command + 1);
+    await expect(texts[start]).toBe("Positive Test Case");
+  },
+
   "frame-viewer": async ({ canvasElement }) => {
     const image = canvasElement.querySelector(".frame-viewer-image");
     await expect(image).toBeTruthy();
-    await expect(image).toHaveAttribute("src", /data:image\/svg\+xml/);
+    // `toHaveAttribute` compares a value with `equals`, so a bare RegExp is
+    // compared as an object and never matches a string; an asymmetric
+    // matcher is how a value is matched against a pattern
+    // (https://github.com/testing-library/jest-dom#tohaveattribute).
+    await expect(image).toHaveAttribute("src", expect.stringMatching(/^data:image\/svg\+xml/));
     await expect(canvasElement.querySelector(".frame-viewer-draw-call")).toBeTruthy();
 
     const firstSrc = image.getAttribute("src");
+    const label = canvasElement.querySelector(".frame-viewer-frame-label");
+    const firstLabel = label.textContent;
     const next = canvasElement.querySelector(".frame-viewer-next-frame");
     next.click();
     await tick();
     await expect(image.getAttribute("src")).not.toBe(firstSrc);
+    await expect(label.textContent).not.toBe(firstLabel);
+
+    // Step back, so the story is left on the frame it opened on: a reader
+    // of the story, and the Playwright suite that drives the same story
+    // after this play has run (frame-viewer-storybook.spec.ts), start from
+    // the first frame. Returning also checks the previous-frame control.
+    canvasElement.querySelector(".frame-viewer-prev-frame").click();
+    await tick();
+    await expect(image.getAttribute("src")).toBe(firstSrc);
+    await expect(label.textContent).toBe(firstLabel);
   },
 };

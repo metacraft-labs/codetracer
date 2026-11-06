@@ -49,6 +49,8 @@
 import ./diff_document
 import ../../ui/flow_line_styles
 import ../../ui/review_flow_adapter
+import ../../ui/review_flow_selection
+import std/tables
 
 type
   ReviewFlowDecoration* = object
@@ -758,3 +760,98 @@ proc nextIteration*(zone: ReviewLoopZone; delta: int): int =
     result = 0
   if result > zone.total - 1:
     result = zone.total - 1
+
+# ---------------------------------------------------------------------------
+# What the review recorded, per displayed invocation
+# ---------------------------------------------------------------------------
+
+proc reviewInvocationZonesOf*[F](file: F; fileIndex: int; doc: DiffDocument):
+    seq[ReviewInvocationZone] =
+  ## The invocation selector of every function `doc` shows of `file` (the
+  ## review's `fileIndex`-th file), each on the call the reader chose
+  ## (`review_flow_selection.reviewInvocationOrdinal`).
+  if file.isNil:
+    return @[]
+  let path =
+    when typeof(file.path) is cstring:
+      (if file.path.isNil: "" else: $file.path)
+    else:
+      file.path
+  var ordinals: seq[(string, int)] = @[]
+  let functions = reviewFunctionInvocations(file)
+  for fn in functions:
+    ordinals.add((fn.functionKey, reviewInvocationOrdinal(path, fn.functionKey)))
+  reviewInvocationZones(doc, fileIndex, functions, ordinals)
+
+proc reviewLoopIterationsOf*(plan: ReviewFlowPlan): seq[(int, int)] =
+  ## The reader's chosen pass through every loop of `plan`, as
+  ## `review_flow_overlay` wants it.
+  ##
+  ## Read for every loop the plan carries rather than only the ones with a
+  ## control, so a loop that ran once (no control) still resolves to iteration
+  ## 0 by the same path as one that ran six times.
+  result = @[]
+  for loopIndex in 1 ..< plan.loops.len:
+    result.add((loopIndex,
+                reviewLoopIteration(plan.path, plan.functionKey, loopIndex)))
+
+proc reviewDisplayedPlansOf*[F](file: F; fileIndex: int; doc: DiffDocument):
+    seq[ReviewFlowPlan] =
+  ## The invocation each on-screen function is currently showing.
+  ##
+  ## One invocation *per function*, chosen by the invocation zones, so the
+  ## annotations a reader sees always describe the calls the controls above them
+  ## name.
+  result = @[]
+  if file.isNil:
+    return
+  for zone in reviewInvocationZonesOf(file, fileIndex, doc):
+    if zone.invocationIndex == NoInvocation:
+      continue
+    let plan = reviewFlowPlan(file, zone.invocationIndex)
+    if plan.found:
+      result.add(plan)
+
+proc reviewFlowDecorationsOf*[F, U, V](file: F; fileIndex: int;
+                                     doc: DiffDocument; updateType: typedesc[U];
+                                     view: V): seq[ReviewFlowDecoration] =
+  ## Every displayed invocation's per-line flow, mapped onto this document.
+  ## `updateType` is the `FlowUpdate` of the caller's type world and `view`
+  ## its `ViewSource` (the application's and the native one differ only in
+  ## their string type).
+  result = @[]
+  if fileIndex < 0:
+    return
+  for plan in reviewDisplayedPlansOf(file, fileIndex, doc):
+    var update = U()
+    # The overload that takes the file: it fills the structured values the
+    # materialized collector now writes (UD-3) on top of everything the plan
+    # decides, so a review's `FlowStep.beforeValues` hold the recorder's own
+    # `Value`s wherever the dataset has them.
+    fillFlowUpdate(file, plan, update, view)
+    result.add(reviewFlowDecorations(
+      doc, fileIndex,
+      flowStyledLines(update.viewUpdates[view], update.finished)))
+
+proc reviewValueAnnotationsOf*[F](file: F; fileIndex: int; doc: DiffDocument;
+                                  maxColumns: int = 1):
+    seq[ReviewValueAnnotation] =
+  ## Every displayed invocation's inline values (§4.4), mapped onto this
+  ## document — the values the *selected* call recorded, and (UD-3) a column
+  ## per recorded pass through any loop containing the line, starting at the
+  ## pass the loop control names.
+  result = @[]
+  if fileIndex < 0:
+    return
+  for plan in reviewDisplayedPlansOf(file, fileIndex, doc):
+    result.add(reviewValueAnnotations(
+      doc, fileIndex, plan, reviewLoopIterationsOf(plan), maxColumns))
+
+proc reviewLoopZonesOf*[F](file: F; fileIndex: int; doc: DiffDocument):
+    seq[ReviewLoopZone] =
+  result = @[]
+  if fileIndex < 0:
+    return
+  for plan in reviewDisplayedPlansOf(file, fileIndex, doc):
+    result.add(reviewLoopZones(
+      doc, fileIndex, plan, reviewLoopIterationsOf(plan)))

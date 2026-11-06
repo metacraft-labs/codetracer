@@ -64,6 +64,13 @@ if (!existsSync(bundlePath)) {
 // measure. Comparing the command string the VM currently sends against what
 // the bundle contains has no such failure mode: a legitimate rebuild always
 // agrees, and a bundle built from different source does not.
+//
+// Nim's JS backend does not emit a string literal as JavaScript text: a Nim
+// `string` is a byte array, so `backend.send("ct/source-line-jump", …)`
+// compiles to `[99,116,47,…]`, the literal's UTF-8 bytes. Searching the
+// bundle for the text found nothing, and the gate refused every bundle, a
+// fresh one included. It looks for that array, and for the text too, in case
+// the literal is ever emitted as a JavaScript string.
 {
   const vmPath = resolve(repoRoot, 'src/frontend/viewmodel/viewmodels/low_level_code_vm.nim');
   const vmSource = await readFile(vmPath, 'utf8');
@@ -73,9 +80,12 @@ if (!existsSync(bundlePath)) {
     console.error(`could not read the command sent by jumpToInstruction in ${vmPath}`);
     process.exit(2);
   }
-  if (!(await readFile(bundlePath, 'utf8')).includes(wanted)) {
+  const bundleText = await readFile(bundlePath, 'utf8');
+  const asNimJsBytes = `[${[...Buffer.from(wanted, 'utf8')].join(',')}]`;
+  if (!bundleText.includes(asNimJsBytes) && !bundleText.includes(wanted)) {
     console.error(
-      `storybook/dist/components.js does not contain "${wanted}", the command\n` +
+      `storybook/dist/components.js does not contain "${wanted}" (as Nim's JS\n` +
+        `backend emits it, ${asNimJsBytes}), the command\n` +
         `${vmPath} currently sends — the bundle was built from different source.\n` +
         'run: just build-storybook-components',
     );
@@ -182,8 +192,9 @@ const rows = page.locator('.low-level-code-instruction');
 const rowCount = await rows.count();
 check('the shipped web arm painted the fixture rows (count asserted)', rowCount === 3, `got ${rowCount}`);
 
-// The THIRD row is offset 8 -> line 43. Row 1 is line 42 and the ACTIVE row is
-// offset 4, so a payload of 43 can only come from the row actually clicked.
+// The THIRD row is offset 8 -> line 9 (StoryStopLine + 2). Row 1 is line 7,
+// the line the story is stopped on, and the ACTIVE row is offset 4, so a
+// payload of 9 can only come from the row actually clicked.
 const target = rows.nth(2);
 const box = await target.boundingBox();
 check('the target row has a real hit-testable box', !!box && box.width > 0 && box.height > 0, JSON.stringify(box));
@@ -195,8 +206,8 @@ const sent = await sentCommands();
 check('exactly one backend request resulted from the click', sent.length === 1, JSON.stringify(sent));
 if (sent.length === 1) {
   check('the click asked for a source-line jump', sent[0].command === 'ct/source-line-jump', `got ${sent[0].command}`);
-  check("it carried the clicked row's path", sent[0].args.path === 'src/combat.nr', JSON.stringify(sent[0].args));
-  check("it carried the clicked row's line (43, not 42)", sent[0].args.line === 43, JSON.stringify(sent[0].args));
+  check("it carried the clicked row's path", sent[0].args.path === 'src/shield.nr', JSON.stringify(sent[0].args));
+  check("it carried the clicked row's line (9, not 7)", sent[0].args.line === 9, JSON.stringify(sent[0].args));
 }
 check('no error banner on a row that could jump', (await page.locator('.low-level-code-error').count()) === 0);
 

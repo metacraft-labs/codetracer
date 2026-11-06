@@ -1081,6 +1081,11 @@ test_lane_files() {
 		# `low_level_code_markup_dom_test.nim`: a source line in the Low Level
 		# Code pane is text in a real DOM, whatever markup it contains (HSF-D3).
 		echo src/frontend/tests/low_level_code_markup_dom_test.nim
+		# `review_deleted_line_tokens_dom_test.nim`: the review diff editor's
+		# deleted-line repaint asks for the diff tab's CURRENT editor and model
+		# on every retry, so a re-initialised tab is followed and a disposed
+		# model is never touched (Monaco throws "Model is disposed!").
+		echo src/frontend/tests/review_deleted_line_tokens_dom_test.nim
 		# `shared_rows_keyboard_dom_test.nim`: Enter and Space on a shared
 		# view's `role="button"` row are its click, in a real DOM.
 		echo src/frontend/tests/shared_rows_keyboard_dom_test.nim

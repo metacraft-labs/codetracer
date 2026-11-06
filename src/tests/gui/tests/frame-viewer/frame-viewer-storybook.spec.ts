@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
 const repoRoot = path.resolve(__dirname, "../../../../..");
 const staticRoot = path.join(repoRoot, "storybook", "storybook-static");
@@ -13,6 +13,35 @@ function contentType(filePath: string): string {
   if (filePath.endsWith(".json")) return "application/json";
   if (filePath.endsWith(".svg")) return "image/svg+xml";
   return "application/octet-stream";
+}
+
+// StoryBook announces the end of a story's render, after its play function
+// has run, on the preview's channel ("storyRendered"). The Frame Viewer
+// story's play steps a frame forward and back; driving the viewer before it
+// is done would race it. Capture the channel as the preview creates it so the
+// event cannot be missed, and wait for it before touching the story.
+async function gotoStoryAndAwaitPlay(page: Page, url: string): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __ctStoryEvents: string[]; __STORYBOOK_ADDONS_CHANNEL__?: unknown };
+    w.__ctStoryEvents = [];
+    let channel: { on: (name: string, cb: () => void) => void } | undefined;
+    Object.defineProperty(window, "__STORYBOOK_ADDONS_CHANNEL__", {
+      configurable: true,
+      get: () => channel,
+      set: (value) => {
+        channel = value;
+        for (const name of ["storyRendered", "storyErrored", "storyThrewException", "playFunctionThrewException"]) {
+          value.on(name, () => w.__ctStoryEvents.push(name));
+        }
+      },
+    });
+  });
+  await page.goto(url);
+  await page.waitForFunction(() => (window as unknown as { __ctStoryEvents: string[] }).__ctStoryEvents.length > 0);
+  // The story rendered and its play check passed: anything else is a failure.
+  expect(await page.evaluate(() => (window as unknown as { __ctStoryEvents: string[] }).__ctStoryEvents)).toEqual([
+    "storyRendered",
+  ]);
 }
 
 test.describe("Frame Viewer StoryBook", () => {
@@ -57,7 +86,7 @@ test.describe("Frame Viewer StoryBook", () => {
   });
 
   test("renders a non-empty frame and updates on frame change", async ({ page }) => {
-    await page.goto(`${baseUrl}/iframe.html?id=codetracer-panels--frame-viewer&viewMode=story`);
+    await gotoStoryAndAwaitPlay(page, `${baseUrl}/iframe.html?id=codetracer-panels--frame-viewer&viewMode=story`);
 
     const image = page.locator(".frame-viewer-image");
     await expect(image).toBeVisible();
@@ -73,6 +102,8 @@ test.describe("Frame Viewer StoryBook", () => {
       )
       .toMatchObject({ width: 320, height: 180 });
 
+    // The play check leaves the viewer on the frame it opened on.
+    await expect(page.locator(".frame-viewer-frame-label")).toContainText("GEID 120");
     const firstSrc = await image.getAttribute("src");
     expect(firstSrc).toContain("data:image/svg+xml");
 
@@ -107,7 +138,9 @@ test.describe("Frame Viewer StoryBook", () => {
     await expect(page.locator(".frame-viewer-connection-status")).toContainText(
       "Visual replay connected",
     );
-    await expect(page.locator(".lm_tab", { hasText: "src/main.nr" })).toBeVisible();
+    // The editor shows the file the replay is stopped in: every story's
+    // replay stops in iterate_asteroids, at src/shield.nr:7.
+    await expect(page.locator(".lm_tab", { hasText: "src/shield.nr" })).toBeVisible();
     await expect(page.locator(".lm_tab", { hasText: "VARIABLES" })).toBeVisible();
     await expect(page.locator(".lm_tab", { hasText: "CALLTRACE" })).toBeVisible();
     await expect(page.locator(".lm_tab", { hasText: "EVENT LOG" })).toBeVisible();

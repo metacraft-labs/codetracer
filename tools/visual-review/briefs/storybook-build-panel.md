@@ -23,7 +23,7 @@ problem rows.
 - Dark CodeTracer app background and app font styling.
 - Build header/status controls styled like the app.
 - Compiler output lines with error/warning colors.
-- Clickable source-location styling for `src/combat.nr:42`.
+- Clickable source-location styling for `src/main.nr:13`.
 
 ## Must Not Show
 

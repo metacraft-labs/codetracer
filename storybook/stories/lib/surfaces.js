@@ -96,10 +96,10 @@ export function injectSurfaceStyles(container) {
       min-width: 0;
     }
 
-    .ct-storybook-karax-root-container #main.ct-storybook-frame {
-      min-height: 0;
-      height: 0;
-      overflow: hidden;
+    .ct-storybook-session-frame {
+      display: flex;
+      flex-wrap: wrap;
+      flex-direction: row;
     }
 
     .ct-storybook-golden-panel {
@@ -293,329 +293,8 @@ export function injectSurfaceStyles(container) {
       min-height: 100vh;
     }
 
-    .ct-storybook-editor-fixture {
-      box-sizing: border-box;
-      position: relative;
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-    }
-
-    .ct-storybook-editor-fixture .overflow-guard {
-      box-sizing: border-box;
-      position: absolute;
-      inset: 0;
-      overflow: hidden;
-    }
-
-    .ct-storybook-editor-fixture .margin {
-      box-sizing: border-box;
-      position: absolute;
-      left: 0;
-      top: 0;
-      width: 91px;
-      height: 100%;
-      contain: strict;
-    }
-
-    .ct-storybook-editor-fixture .margin-view-overlays {
-      box-sizing: border-box;
-      position: absolute;
-      inset: 0;
-      line-height: 22px;
-    }
-
-    .ct-storybook-editor-fixture .monaco-scrollable-element {
-      box-sizing: border-box;
-      position: absolute;
-      inset: 0;
-      overflow: hidden;
-    }
-
-    .ct-storybook-editor-fixture .lines-content {
-      box-sizing: border-box;
-      position: absolute;
-      left: 91px;
-      top: 0;
-      min-width: max-content;
-      height: 100%;
-    }
-
-    .ct-storybook-editor-fixture .view-lines {
-      box-sizing: border-box;
-      display: flex;
-      flex-direction: column;
-      min-width: max-content;
-    }
-
-    .ct-storybook-editor-fixture .view-line {
-      box-sizing: border-box;
-      height: 22px;
-      line-height: 22px;
-      white-space: pre;
-      min-width: 38em;
-    }
-
-    .ct-storybook-editor-fixture .margin-view-overlays > div {
-      box-sizing: border-box;
-      position: relative;
-      height: 22px;
-      line-height: 22px;
-    }
-
-    .ct-storybook-editor-fixture .line-numbers {
-      box-sizing: border-box;
-      position: absolute;
-      left: 0;
-      width: 39px !important;
-      text-align: right;
-      user-select: none;
-    }
-
-    .ct-storybook-editor-fixture .gutter {
-      width: 39px !important;
-    }
-
-    .ct-storybook-editor-fixture .gutter .gutter-line {
-      width: 39px !important;
-      margin-left: 0 !important;
-      margin-right: 0 !important;
-      padding-right: 0.15em !important;
-    }
-
-    .ct-storybook-editor-fixture .folding {
-      display: inline-flex !important;
-      position: absolute !important;
-      left: 39px;
-      width: 52px !important;
-      height: 22px;
-      align-items: center;
-      justify-content: center;
-      text-align: center;
-      user-select: none;
-    }
-
-    .ct-storybook-editor-fixture .gutter-highlight-active {
-      position: absolute;
-      inset: 0;
-    }
-
-    .ct-storybook-editor-fixture .current-arrow {
-      display: inline-block;
-      width: 1.1em;
-      margin-left: -1.1em;
-      padding-right: 0.35em;
-    }
-
-    .ct-storybook-editor-fixture .indent-guide {
-      position: absolute;
-      top: 264px;
-      bottom: 0;
-      left: 194px;
-      width: 1px;
-      pointer-events: none;
-    }
-
-    .ct-storybook-editor-fixture .scrollbar.vertical {
-      position: absolute;
-      top: 0;
-      right: 0;
-      width: 0.875rem;
-      height: 100%;
-    }
-
-    .ct-storybook-editor-fixture .scrollbar.vertical .slider {
-      position: absolute;
-      top: 62px;
-      right: 0;
-      width: 0.875rem;
-      height: 22%;
-    }
-
   `;
   container.appendChild(style);
-}
-
-const storybookEditorLines = [
-  [{ t: "mod", c: "token-keyword" }, { t: " shield;" }],
-  [],
-  [{ t: "// We are on a space ship, moving near light speed toward an asteroid field.", c: "token-comment" }],
-  [{ t: "// We are about to pass through an asteroid field, changing course requires energy.", c: "token-comment" }],
-  [{ t: "// We have to proove to everyone that we can survive the asteroid field.", c: "token-comment" }],
-  [],
-  [{ t: "// We need to have at least 1 unit of shields left in order to survive.", c: "token-comment" }],
-  [],
-  [{ t: "// We can not reveal how much shields we have will have after the field.", c: "token-comment" }],
-  [{ t: "// The space pirates can track our course but our shield should remain hidden.", c: "token-comment" }],
-  [],
-  [
-    { t: "fn", c: "token-keyword" },
-    { t: " main(initial_shield: Field, shield_regen_percentage: Field) {" },
-  ],
-  [
-    { t: "    " },
-    { t: "println", c: "token-function" },
-    { t: "(" },
-    { t: "\"Positive Test Case\"", c: "token-string" },
-    { t: ");" },
-  ],
-  [],
-  [{ t: "    " }, { t: "let", c: "token-keyword" }, { t: " did_survive_positive = shield::iterate_asteroids(" }],
-  [{ t: "    " }, { t: "if", c: "token-keyword" }, { t: "(did_survive_positive)" }, { t: "{", c: "token-operator" }],
-  [
-    { t: "        " },
-    { t: "println", c: "token-function" },
-    { t: "(" },
-    { t: "\"shields will hold as expected\"", c: "token-string" },
-    { t: ");" },
-  ],
-  [{ t: "    " }, { t: "}", c: "token-operator" }],
-  [{ t: "    " }, { t: "else", c: "token-keyword" }, { t: "{", c: "token-operator" }],
-  [
-    { t: "        " },
-    { t: "println", c: "token-function" },
-    { t: "(" },
-    { t: "\"shields will not hold but where expected to fall\"", c: "token-string" },
-    { t: ");" },
-  ],
-  [{ t: "    " }, { t: "}", c: "token-operator" }],
-  [],
-  [{ t: "    " }, { t: "println", c: "token-function" }, { t: "(\"------------------\");", c: "token-string" }],
-  [{ t: "    " }, { t: "println", c: "token-function" }, { t: "(\"Negative Test Case\");", c: "token-string" }],
-  [{ t: "    " }, { t: "println", c: "token-function" }, { t: "(\"------------------\");", c: "token-string" }],
-  [],
-  [{ t: "    " }, { t: "let", c: "token-keyword" }, { t: " did_survive_negative = shield::iterate_asteroids(" }],
-  [{ t: "    " }, { t: "if", c: "token-keyword" }, { t: "(did_survive_negative)" }, { t: "{", c: "token-operator" }],
-  [
-    { t: "        " },
-    { t: "println", c: "token-function" },
-    { t: "(" },
-    { t: "\"shields will hold, but where expected to fall\"", c: "token-string" },
-    { t: ");" },
-  ],
-  [{ t: "    " }, { t: "}", c: "token-operator" }],
-  [{ t: "    " }, { t: "else", c: "token-keyword" }, { t: "{", c: "token-operator" }],
-  [
-    { t: "        " },
-    { t: "println", c: "token-function" },
-    { t: "(" },
-    { t: "\"shields will not hold as expected\"", c: "token-string" },
-    { t: ");" },
-  ],
-  [{ t: "    " }, { t: "}", c: "token-operator" }],
-  [],
-  [{ t: "    assert(did_survive_positive == true);" }],
-  [{ t: "    assert(did_survive_negative == false);" }],
-  [{ t: "    did_survive_positive & !did_survive_negative" }],
-  [{ t: "}", c: "token-punctuation" }],
-  [],
-  [{ t: "fn", c: "token-keyword" }, { t: " calculate_remaining_shield_pct(initial_shield: Field) -> Field {" }],
-  [{ t: "  initial_shield / 100", c: "token-number" }],
-  [{ t: "}", c: "token-punctuation" }],
-];
-
-function appendToken(parent, token) {
-  const span = document.createElement("span");
-  if (token.c) span.className = token.c;
-  span.textContent = token.t;
-  parent.appendChild(span);
-}
-
-function installStorybookEditorFixture(mount) {
-  const host = mount.querySelector(".code-editor");
-  if (!host || host.querySelector(".ct-storybook-editor-fixture")) return;
-  host.id = "editorComponent-0";
-  host.dataset.label = "/home/user/metacraft/codetracer-main/test-programs/noir_space_ship/src/main.nr";
-
-  const editor = document.createElement("div");
-  editor.className =
-    "monaco-editor no-user-select showUnused showDeprecated vs-dark ct-storybook-editor-fixture";
-  editor.setAttribute("role", "code");
-  editor.dataset.uri = "inmemory://model/storybook-default-layout";
-
-  const guard = document.createElement("div");
-  guard.className = "overflow-guard";
-  guard.dataset.mprt = "3";
-
-  const margin = document.createElement("div");
-  margin.className = "margin";
-  margin.setAttribute("role", "presentation");
-  margin.setAttribute("aria-hidden", "true");
-  const marginOverlays = document.createElement("div");
-  marginOverlays.className = "margin-view-overlays";
-  marginOverlays.setAttribute("role", "presentation");
-  marginOverlays.setAttribute("aria-hidden", "true");
-
-  const scrollable = document.createElement("div");
-  scrollable.className = "monaco-scrollable-element";
-  const lines = document.createElement("div");
-  lines.className = "lines-content";
-  const viewLines = document.createElement("div");
-  viewLines.className = "view-lines";
-
-  storybookEditorLines.forEach((tokens, index) => {
-    const lineNumber = index + 1;
-    const marginRow = document.createElement("div");
-    if (lineNumber === 13) {
-      const currentMargin = document.createElement("div");
-      currentMargin.className = "current-line current-line-margin-both";
-      marginRow.appendChild(currentMargin);
-    }
-    const number = document.createElement("div");
-    number.className = `line-numbers lh-even${lineNumber === 13 ? " active-line-number" : ""}`;
-    const gutter = document.createElement("div");
-    gutter.className = "gutter";
-    gutter.dataset.line = String(lineNumber);
-    if (lineNumber === 13) {
-      const activeMarker = document.createElement("div");
-      activeMarker.className = "gutter-highlight-active";
-      gutter.appendChild(activeMarker);
-    }
-    const gutterLine = document.createElement("div");
-    gutterLine.className = "gutter-line";
-    gutterLine.textContent = String(lineNumber);
-    gutter.appendChild(gutterLine);
-    number.appendChild(gutter);
-    marginRow.appendChild(number);
-
-    const folding = document.createElement("div");
-    folding.className = "folding";
-    if ([12, 16, 19, 28, 32, 39].includes(lineNumber)) folding.textContent = "v";
-    marginRow.appendChild(folding);
-    marginOverlays.appendChild(marginRow);
-
-    const code = document.createElement("div");
-    code.className = `view-line${lineNumber === 13 ? " current-line" : ""}`;
-    code.style.height = "22px";
-    code.style.lineHeight = "22px";
-    if (lineNumber === 13) {
-      const selected = document.createElement("span");
-      selected.className = "selected-text";
-      for (const token of tokens) appendToken(selected, token);
-      code.appendChild(selected);
-    } else {
-      for (const token of tokens) appendToken(code, token);
-    }
-    viewLines.appendChild(code);
-  });
-
-  const indentGuide = document.createElement("div");
-  indentGuide.className = "indent-guide";
-  const scrollbar = document.createElement("div");
-  scrollbar.className = "scrollbar vertical";
-  const slider = document.createElement("div");
-  slider.className = "slider";
-  scrollbar.appendChild(slider);
-
-  lines.appendChild(viewLines);
-  scrollable.appendChild(lines);
-  margin.appendChild(marginOverlays);
-  guard.appendChild(margin);
-  guard.appendChild(scrollable);
-  guard.appendChild(indentGuide);
-  guard.appendChild(scrollbar);
-  editor.appendChild(guard);
-  host.appendChild(editor);
 }
 
 export function createGoldenPanelHost(frame, title) {
@@ -978,12 +657,11 @@ function appendDefaultDebugLayout(shellRoot, variant) {
     {
       parent: editorStackParent,
       layoutBox: "editor",
-      tabs: [{ title: "src/main.nr", name: "editor" }],
+      tabs: [{ title: "src/shield.nr", name: "editor" }],
     },
     {
       parent: rightTopLeft,
       layoutBox: "rightTopLeft",
-      fixture: "empty",
       tabs: [
         { title: "VARIABLES", name: "state" },
         { title: "SCRATCHPAD", name: "scratchpad" },
@@ -1033,7 +711,9 @@ function appendDefaultDebugLayout(shellRoot, variant) {
   row.appendChild(createSplitter("horizontal"));
   row.appendChild(rightColumn);
   layoutRoot.appendChild(row);
-  shellRoot.appendChild(layoutRoot);
+  // Into the session container, beside its empty `#main`, where the app's
+  // GoldenLayout root is (`createKaraxReferenceShell`).
+  (shellRoot.querySelector(":scope > .session-container") ?? shellRoot).appendChild(layoutRoot);
   syncDefaultLayoutGeometry(shellRoot);
   window.requestAnimationFrame(() => syncDefaultLayoutGeometry(shellRoot));
 
@@ -1224,10 +904,18 @@ function createKaraxReferenceShell(container, variant) {
   fixedSearch.appendChild(fixedSearchExcludeField);
   root.appendChild(fixedSearch);
 
-  const frame = document.createElement("section");
-  frame.id = "main";
-  frame.className = "ct-storybook-frame";
-  root.appendChild(frame);
+  // As `index.html` has it: the first tab's session container in `#ROOT`,
+  // holding an empty `section#main`. GoldenLayout's root is the container's
+  // next child (`ui/layout.initLayout`), so a panel inherits the window's
+  // type size, not `#main`'s 1.25rem (`shared_widgets.styl`), which in the
+  // app applies to nothing.
+  const session = document.createElement("div");
+  session.id = "session-container-0";
+  session.className = "session-container";
+  const main = document.createElement("section");
+  main.id = "main";
+  session.appendChild(main);
+  root.appendChild(session);
 
   rootContainer.appendChild(root);
   container.appendChild(rootContainer);
@@ -1271,7 +959,7 @@ function createKaraxReferenceShell(container, variant) {
   const locationPath = document.createElement("span");
   locationPath.className = "location-path status-inline";
   locationPath.textContent =
-    "/home/user/metacraft/codetracer-main/test-programs/noir_space_ship/src/main.nr:13#0";
+    "/home/user/metacraft/codetracer-main/test-programs/noir_space_ship/src/shield.nr:7#0";
   location.appendChild(locationPath);
   const copyPath = document.createElement("button");
   copyPath.id = "copy-path-image";
@@ -1324,10 +1012,14 @@ function createAppShell(container, kind, name, displayTitle = null) {
   session.id = "session-container-0";
   session.className = "session-container";
 
-  const frame = document.createElement("section");
-  frame.id = "main";
-  frame.className = "ct-storybook-frame";
-  session.appendChild(frame);
+  // As `index.html` has it: the session container holds an empty
+  // `section#main`, and GoldenLayout's root is the container's next child
+  // (`ui/layout.initLayout`). A panel mounted INSIDE `#main` inherited its
+  // 1.25rem (`shared_widgets.styl`) and drew its text at 20px where the app
+  // draws 16px.
+  const main = document.createElement("section");
+  main.id = "main";
+  session.appendChild(main);
   root.appendChild(session);
 
   const rightStrip = document.createElement("div");
@@ -1340,9 +1032,15 @@ function createAppShell(container, kind, name, displayTitle = null) {
   container.appendChild(rootContainer);
 
   if (kind === "panel") {
-    return createGoldenPanelHost(frame, displayTitle ?? titleize(name));
+    // GoldenLayout's root, in the session container as in the app.
+    return createGoldenPanelHost(session, displayTitle ?? titleize(name));
   }
 
+  // A layout story builds its own stacks: they go where GoldenLayout's root
+  // goes, in a frame laid out as the app lays out the session's content.
+  const frame = document.createElement("div");
+  frame.className = "ct-storybook-frame ct-storybook-session-frame";
+  session.appendChild(frame);
   return frame;
 }
 
@@ -1366,9 +1064,6 @@ function renderDefaultDebugLayout(container, fixture) {
     for (const { name, mount, fixture } of mounts) {
       try {
         disposes.push(mountCodeTracerStory(mount, "panel", name, fixture ?? "populated"));
-        if (name === "editor") {
-          window.requestAnimationFrame(() => installStorybookEditorFixture(mount));
-        }
       } catch (error) {
         console.error(`Failed to mount default layout panel "${name}"`, error);
       }

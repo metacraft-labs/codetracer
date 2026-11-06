@@ -15,6 +15,9 @@ from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 from ./editor_points import gutterMarkFor, EditorMark, emNone, emBreakpoint,
   emBreakpointDisabled, emTracepoint
 import ./presented_value
+from ../lib/monaco_appearance import editorGutterLineHtml, GutterTraceMark,
+  GutterBreakpointMark, gtmNone, gtmEnabled, gtmDisabled, gbmNone, gbmEnabled,
+  gbmDisabled
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/viewmodels/timeline_vm import
   TimelineVM, createTimelineVM
@@ -1122,32 +1125,23 @@ proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isDe
     else:
       line + self.tabInfo.location.expansionFirstLine - 1
 
-  var tracepointHtml = cstring"<div class='gutter-no-trace' onmousedown='event.stopPropagation()'></div>"
-  var breakpointHtml = cstring"<div class='gutter-no-breakpoint' onmousedown='event.stopPropagation()'></div>"
-  var highlightHtml = cstring"<div class='gutter-no-highlight' onmousedown='event.stopPropagation()'></div>"
-
+  # The slots' markup is `lib/monaco_appearance.editorGutterLineHtml`'s,
+  # which the StoryBook editor builds its gutter with too; what is decided
+  # here is which mark each slot shows.
+  var trace = gtmNone
   if self.traces.hasKey(realLine):
-    var editor = self.traces[realLine]
+    trace = if self.traces[realLine].isDisabled: gtmDisabled else: gtmEnabled
 
-    if not editor.isDisabled:
-      tracepointHtml = cstring"<div class='gutter-trace' onmousedown='event.stopPropagation()'></div>"
-    else:
-      tracepointHtml = cstring"<div class='gutter-disabled-trace' onmousedown='event.stopPropagation()'></div>"
-
-  if line == self.location.line and
-      path == self.location.path and
-      not isDeleteChunk:
-    highlightHtml = cstring"<div class='gutter-highlight-active' onmousedown='event.stopPropagation()'></div>"
+  let executionLine = line == self.location.line and
+    path == self.location.path and
+    not isDeleteChunk
 
   # The line's mark is the session store's (`editor_points.gutterMarkFor`),
   # the same `EditorMark` the terminal and GPUI draw for this line.
-  case gutterMarkFor($path, realLine)
-  of emBreakpoint:
-    breakpointHtml = cstring"<div class='gutter-breakpoint-enabled' onmousedown='event.stopPropagation()'></div>"
-  of emBreakpointDisabled:
-    breakpointHtml = cstring"<div class='gutter-breakpoint-disabled' onmousedown='event.stopPropagation()'></div>"
-  of emNone, emTracepoint:
-    discard
+  let breakpoint = case gutterMarkFor($path, realLine)
+    of emBreakpoint: gbmEnabled
+    of emBreakpointDisabled: gbmDisabled
+    of emNone, emTracepoint: gbmNone
 
   var runTestHtml = cstring""
   if not isDeleteChunk and gutterHasTest(path, realLine):
@@ -1163,15 +1157,10 @@ proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isDe
       cstring"' onmousedown='event.stopPropagation()'></div>"
 
   let trueLineNumber = if not isDeleteChunk: toCString(realLine) else: toCString(line + lineNumber - 1)
-  let lineHtml = cstring"<div class='gutter-line' onmousedown='event.stopPropagation()'>" & trueLineNumber & cstring"</div>"
-  let diffHtml = cstring"<div class='diff-line' onmousedown='event.stopPropagation()'>" & cstring"</div>"
   let klass = if isDeleteChunk: cstring"diff-deleted-gutter" elif line in self.diffAddedLines: cstring"diff-added-gutter" else: cstring""
 
-  # The run slot goes in FIRST, before the highlight, so its `z-index` contest
-  # with the current-line arrow is decided by the stylesheet rather than by
-  # document order — and so a reader of this line sees the lane order the
-  # stylesheet's header describes, left to right.
-  result = cstring"<div class='gutter " & klass & "' data-line=" & trueLineNumber & cstring" onmousedown='event.stopPropagation()'>" & runTestHtml & highlightHtml & lineHtml & diffHtml & tracepointHtml & breakpointHtml & cstring"</div>"
+  result = editorGutterLineHtml(trueLineNumber, klass, runTestHtml,
+                                executionLine, trace, breakpoint)
 
 proc updateLineNumbersOnly*(self: EditorViewComponent) =
   let editorInstance = self.monacoEditor
