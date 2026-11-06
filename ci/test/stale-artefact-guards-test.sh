@@ -124,7 +124,7 @@ BUILD_SIBLINGS="${SUITE_ROOT}/scripts/build-siblings.sh"
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=133
+EXPECTED_ASSERTIONS=142
 
 ASSERTIONS=0
 FAILURES=0
@@ -426,6 +426,9 @@ SB_T_RENDERER=202001050000 # the copied renderer outruns the build
 SB_T_REBUILD2=202001060000 # corpus rebuilt, fresh again
 SB_T_NIM=202001070000      # a Nim source outruns the components bundle
 SB_T_REBUILD3=202001080000 # both artefacts rebuilt, fresh again
+SB_T_PROGRAM=202001090000  # a compiled test program beside its .nim
+SB_T_NIM2=202001100000     # a Nim source outruns an unchanged bundle
+SB_T_STAMP=202001110000    # the bundle recompiled unchanged: only its stamp moves
 
 # `firstNewerThan` walks directories but only ever COMPARES files (it recurses
 # on `isDirectory()` and stats the leaves), so stamping the files is enough and
@@ -491,6 +494,38 @@ touch -t "${SB_T_REBUILD3}" "${SB}/storybook/dist/components.js" \
 assert_contains "$(check_storybook)" "FRESH" \
 	"rebuilding both artefacts makes it green again"
 
+# A test program `nim c` wrote beside its source (no `-o`: an extensionless
+# executable named after the .nim) is an output of that compile, not a source
+# of the bundle. Counted as one, compiling a test under src/frontend made the
+# next check refuse a fresh build. The same file without the executable bit,
+# or with no .nim beside it, is still a source.
+printf '\177ELF\n' >"${SB}/src/frontend/ui"
+chmod +x "${SB}/src/frontend/ui"
+touch -t "${SB_T_PROGRAM}" "${SB}/src/frontend/ui"
+assert_contains "$(check_storybook)" "FRESH" \
+	"a compiled Nim test program beside its source is not a source"
+chmod -x "${SB}/src/frontend/ui"
+run_expect_failure "...but a newer extensionless file that is not a program is" \
+	"Stale storybook components" -- check_storybook
+rm -f "${SB}/src/frontend/ui"
+assert_contains "$(check_storybook)" "FRESH" \
+	"...and removing it makes it green again"
+
+# `just build-storybook-components` touches a compile stamp beside the bundle
+# and leaves the bundle itself alone (`nim js` does not rewrite identical
+# output), so a recompile that changes nothing does not make storybook-static
+# older than the bundle it copied. The bundle is current with its Nim sources
+# as of the later of the two, and the stamp is no source of storybook-static:
+# here it is newer than the corpus, and the corpus is still fresh.
+touch -t "${SB_T_NIM2}" "${SB}/src/frontend/ui.nim"
+touch -t "${SB_T_STAMP}" "${SB}/storybook/dist/components.js.compiled"
+assert_contains "$(check_storybook)" "FRESH" \
+	"a compile stamp newer than the Nim source keeps an unchanged bundle current, and the corpus fresh"
+rm -f "${SB}/storybook/dist/components.js.compiled"
+run_expect_failure "...and without the stamp the same bundle is refused" \
+	"Stale storybook components" -- check_storybook
+touch -t "${SB_T_NIM}" "${SB}/src/frontend/ui.nim"
+
 rm -f "${SB}/storybook/storybook-static/index.html"
 run_expect_failure "an absent corpus is still refused, with the remedy" \
 	"just storybook-build" -- check_storybook
@@ -531,11 +566,13 @@ printf 'x\n' >"${CB}/storybook/dist/components.js"
 printf 'x\n' >"${CB}/storybook/storybook-static/index.html"
 
 # The stub records its argv, then fails when NIM_FAIL is set. On success it
-# leaves the output alone, which is what an unchanged compile looks like.
+# leaves the output alone, which is what an unchanged compile looks like, unless
+# NIM_WRITE is set: then it rewrites the bundle, as a compile that changed it does.
 cat >"${CB_BIN}/nim" <<STUB
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >>"${CB_NIM_CALLS}"
-[[ -z "\${NIM_FAIL:-}" ]]
+[[ -z "\${NIM_FAIL:-}" ]] || exit 1
+[[ -z "\${NIM_WRITE:-}" ]] || printf 'y\n' >"${CB}/storybook/dist/components.js"
 STUB
 chmod +x "${CB_BIN}/nim"
 
@@ -578,6 +615,22 @@ assert_contains "$(cat "${CB_NIM_CALLS}")" "js src/frontend/storybook_components
 touch "${CB}/storybook/storybook-static/index.html"
 assert_contains "$(check_components)" "FRESH" \
 	"a bundle the recipe has just built is fresh, though nim left it unchanged"
+bundle="${CB}/storybook/dist/components.js"
+compiled_stamp="${bundle}.compiled"
+touch -t 202001020000 "${CB_REF}"
+if [[ ! ${bundle} -nt ${CB_REF} && ! ${CB_REF} -nt ${bundle} ]]; then
+	ok "a compile nim left unchanged leaves the bundle's mtime alone"
+else
+	bad "a compile nim left unchanged leaves the bundle's mtime alone" "the bundle's mtime moved"
+fi
+
+# `storybook-static` copies the bundle, so a recompile that changes nothing (the
+# low-level-code gate recompiles it) must not leave the corpus older than an
+# identical bundle: the stamp beside the bundle moves, the bundle does not.
+sleep 1
+build_components >/dev/null
+assert_contains "$(check_components)" "FRESH" \
+	"a recompile that changes nothing leaves the corpus built before it fresh"
 
 # A Nim source edited after that build is still refused. The sleep makes the
 # edit strictly newer than the stamp on a filesystem with one-second mtimes.
@@ -590,6 +643,7 @@ assert_contains "$(check_components)" "ui.nim" \
 
 # A compile that fails must not stamp the bundle: the guard keeps refusing.
 touch -r "${CB}/storybook/dist/components.js" "${CB_REF}"
+touch -r "${compiled_stamp}" "${CB_REF}.compiled"
 fail_out="$(NIM_FAIL=1 build_components)"
 fail_status=$?
 if [[ ${fail_status} -ne 0 ]]; then
@@ -597,11 +651,15 @@ if [[ ${fail_status} -ne 0 ]]; then
 else
 	bad "a failed compile fails the recipe" "output: ${fail_out:0:600}"
 fi
-bundle="${CB}/storybook/dist/components.js"
 if [[ ! ${bundle} -nt ${CB_REF} && ! ${CB_REF} -nt ${bundle} ]]; then
 	ok "a failed compile does not restamp the bundle"
 else
 	bad "a failed compile does not restamp the bundle" "the bundle's mtime changed"
+fi
+if [[ ! ${compiled_stamp} -nt ${CB_REF}.compiled && ! ${CB_REF}.compiled -nt ${compiled_stamp} ]]; then
+	ok "a failed compile does not move the compile stamp"
+else
+	bad "a failed compile does not move the compile stamp" "the stamp's mtime changed"
 fi
 run_expect_failure "a failed compile leaves the bundle refused" \
 	"Stale storybook components" -- check_components
@@ -617,6 +675,16 @@ fi
 touch "${CB}/storybook/storybook-static/index.html"
 assert_contains "$(check_components)" "FRESH" \
 	"a successful rebuild after the edit makes it fresh again"
+
+# A compile that does rewrite the bundle dates it at the compile's start, as the
+# stamp is: an edit made while nim read the sources must not read as built.
+NIM_WRITE=1 build_components >/dev/null
+if [[ ! ${bundle} -nt ${compiled_stamp} && ! ${compiled_stamp} -nt ${bundle} ]]; then
+	ok "a bundle nim rewrote is dated at the compile's start, like the stamp"
+else
+	bad "a bundle nim rewrote is dated at the compile's start, like the stamp" \
+		"bundle and stamp mtimes differ"
+fi
 
 # ---------------------------------------------------------------------------
 section "CI's rr-backend setup refuses a checkout that is not the locked one"

@@ -469,6 +469,13 @@ StoryBook's story files from it into the git-ignored
 Editor instance (`just isonim-editor-codetracer`, port 6106; `--smoke` checks
 it) shows the same stories. Add, rename or remove a story there, never in a
 `*.stories.js` file.
+After changing a story, a fixture or a view a story mounts, run
+`just storybook-check-render`: it renders every story and fails on a
+placeholder (nothing but an empty, loading or error message counts as one),
+an empty panel, a panel at another type size than the app's, or a console
+error. `tools/visual-review/capture-storybook.mjs` shoots only stories that
+check passes; check a capture directory with `just check-storybook-captures <dir>`. A story shows realistic data
+unless it declares `state = "empty"` / `"loading"` / `"error"`.
 
 When you are an agent session of the editor instance and the operator asks you
 to act on review comments: the comments arrive in the editor context

@@ -10,7 +10,33 @@ just build-storybook-components
 just storybook-check-styles
 just storybook
 just storybook-build
+just storybook-check-render
 ```
+
+`just storybook-check-render` renders every story in both themes and fails on
+a placeholder (including a story, or a layout's panel, that shows nothing but
+lines worded as an empty, loading or error message, such as "No calls
+recorded", "Loading initiatives…" or "Failed to load the call trace", with at
+most an icon or a spinner beside them, in a story that declares data), an
+empty panel (one that
+shows only its chrome, its own name or Monaco's gutter; content counts only
+where it is visible, so an ancestor's `opacity: 0` hides it), a panel drawn at
+another type size than the window's, a console or page error, a failed or
+aborted request (only the theme stylesheet a theme switch supersedes is
+excused) or a play check that threw (its `--self-test` plants each of those
+first and must see them fail). When a story counts as rendered, and the
+verdict, are defined once, in `storybook/scripts/story-render-judge.mjs`,
+which the capture tool below uses too.
+
+Panels mount where the app mounts them: GoldenLayout's root in `#ROOT`'s
+session container (`#session-container-0`), beside an empty `section#main`,
+as `src/frontend/index.html` and `ui/layout.initLayout` have it. `#main` sets
+`font-size: 1.25rem`, so a panel mounted inside it draws its text at 20px
+where the app draws 16px; the render check fails such a panel. A
+story claims realistic data unless its declaration says `state = "empty"`,
+`"loading"` or `"error"`, and then it must show that state:
+there is no allowlist, so a story that cannot show its surface over realistic
+data is fixed or removed.
 
 ## Where stories are declared
 
@@ -53,7 +79,13 @@ nix shell nixpkgs#nodejs --command node tools/visual-review/capture-storybook.mj
 
 The capture tool builds Storybook, serves `storybook/storybook-static`, captures
 named stories at the configured viewport sizes, and writes diagnostics beside
-the screenshots. It also writes HTML and computed-style dumps that can be
+the screenshots. It waits for each story as the render check does and shoots
+only a story the render check's judge passes: a story it fails is REFUSED (no
+image is written, and the run exits 1). Each image's verdict, its sha256 and
+the boxes where its story drew content go into `capture-verdicts.json` beside
+the images, and `just check-storybook-captures <dir>...` holds a capture directory
+to it: every PNG must be one a judged capture wrote and must draw something in
+each content box. It also writes HTML and computed-style dumps that can be
 compared against reference dumps from older known-good builds:
 
 ```bash

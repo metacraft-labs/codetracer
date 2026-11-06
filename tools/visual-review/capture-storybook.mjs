@@ -1,12 +1,19 @@
 #!/usr/bin/env node
 
 import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
 import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
 import { requireFreshStorybookStatic } from "./storybook-freshness.mjs";
+// When a story has rendered, and whether what it rendered is a story: the
+// render check's own definition (`just storybook-check-render`), not a
+// second one. A capture is taken only after that readiness and only of a
+// story its judge passes; a story it fails is REFUSED, its image not written.
+import { loadStoryDeclarations, renderAndJudge } from "../../storybook/scripts/story-render-judge.mjs";
+import { readVerdicts, writeVerdicts } from "./capture-verdicts.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "../..");
@@ -378,6 +385,13 @@ async function main() {
   }
 
   const expandedViews = selectedViews.flatMap((name) => viewFamilies[name] ?? [name]);
+  // The declarations say what each story is meant to show (data, or a
+  // declared empty / loading / error state): the judge needs them.
+  const declarations = new Map(loadStoryDeclarations(repoRoot).stories.map((story) => [story.id, story]));
+  // Each written image's verdict, kept beside the images
+  // (`capture-verdicts.json`, VERDICTS_FILE; check-storybook-captures.mjs reads it).
+  const verdicts = readVerdicts(outDir);
+  const refused = [];
 
   const server = startStaticServer(port);
   try {
@@ -401,55 +415,40 @@ async function main() {
         : view.themes ?? ["dark"];
       for (const [sizeName, viewport] of viewSizes)
       for (const theme of viewThemes) {
+        const captureId = view.themes || theme !== "dark"
+          ? `${viewName}-${sizeName}-${theme}`
+          : `${viewName}-${sizeName}`;
+        const screenshotPath = join(outDir, `${captureId}.png`);
+        const story = declarations.get(view.storyId);
+        if (!story) {
+          throw new Error(`${captureId}: story ${view.storyId} is not declared in storybook/stories/generated/stories.json (run just storybook-stories)`);
+        }
         const page = await browser.newPage({ viewport });
-        const resourceErrors = [];
-        page.on("response", (response) => {
-          if (response.status() >= 400) {
-            resourceErrors.push(`${response.status()} ${response.url()}`);
-          }
-        });
-        page.on("console", (message) => {
-          if (message.type() === "error") {
-            const text = message.text();
-            if (
-              !text.startsWith("[PIPELINE]") &&
-              !text.startsWith("Failed to load resource:")
-            ) {
-              resourceErrors.push(`console: ${text}`);
-            }
-          }
-        });
-        const navigationWarnings = [];
-
         const url = `http://127.0.0.1:${port}/iframe.html?id=${view.storyId}&viewMode=story&globals=theme:${theme}`;
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
-        try {
-          await page.waitForLoadState("networkidle", { timeout: 10000 });
-        } catch (error) {
-          navigationWarnings.push(`networkidle timeout: ${error.message}`);
+        // The render check's readiness (StoryBook's render event after the
+        // play check, no pending mount, network and DOM quiet twice) and its
+        // verdict. Until 2026-11-06 this waited only for some visible text
+        // and 750 ms, and shot panels whose data had not arrived: empty
+        // panels and windows that the render check, waiting for the story,
+        // passed.
+        const { observed, failures } = await renderAndJudge(page, `http://127.0.0.1:${port}`, story, theme);
+        if (failures.length > 0) {
+          await page.close();
+          // No image of a story the judge fails, and none left behind from an
+          // earlier run under the same name: the directory then shows that
+          // the capture is missing, and the PNG check fails on it.
+          rmSync(screenshotPath, { force: true });
+          verdicts[basename(screenshotPath)] = {
+            storyId: view.storyId, size: sizeName, theme, viewport, verdict: "refused",
+            failures, judgedAt: new Date().toISOString(),
+          };
+          refused.push({ captureId, failures });
+          console.error(`REFUSED ${captureId} (${view.storyId}): the render check's judge fails it`);
+          for (const f of failures) console.error(`       ${f.category}: ${f.message}`);
+          continue;
         }
-        // The story must have rendered: on a loaded host StoryBook can still
-        // be mounting it after the network goes idle, and a screenshot taken
-        // then is the bare theme background -- a blank capture that a review
-        // reads as a missing view. The story's frame appears before the
-        // component bundle has mounted into it, so wait for visible TEXT in
-        // the story root (every story draws some: a title, a notice, a
-        // label), and refuse the capture when it never appears.
-        try {
-          await page.waitForFunction(() => {
-            const root = document.querySelector("#storybook-root");
-            if (!root) return false;
-            for (const el of root.querySelectorAll("*")) {
-              if (el.childElementCount !== 0 || !el.textContent.trim()) continue;
-              const box = el.getBoundingClientRect();
-              if (box.width > 0 && box.height > 0) return true;
-            }
-            return false;
-          }, null, { timeout: 30000 });
-        } catch (error) {
-          throw new Error(`${viewName} at ${sizeName} (${theme}): the story did not render within 30 s (${error.message})`);
-        }
-        await page.waitForTimeout(750);
+        const resourceErrors = [];
+        const navigationWarnings = [];
 
         // The image must be set in the design system's faces, not in a
         // fallback: a story whose fonts 404 renders in the browser's default
@@ -469,7 +468,8 @@ async function main() {
           const root = document.querySelector("#storybook-root") ?? document.body;
           const used = new Set();
           for (const el of root.querySelectorAll("*")) {
-            if (el.childElementCount !== 0 || !el.textContent.trim()) continue;
+            const fieldText = el.matches("input,textarea") ? (el.value || el.placeholder || "").trim() : "";
+            if (!fieldText && (el.childElementCount !== 0 || !el.textContent.trim())) continue;
             used.add(getComputedStyle(el).fontFamily.split(",")[0].replace(/["']/g, "").trim());
           }
           const usedFamilies = [...used];
@@ -499,9 +499,6 @@ async function main() {
           );
         }
 
-        const captureId = view.themes || theme !== "dark"
-          ? `${viewName}-${sizeName}-${theme}`
-          : `${viewName}-${sizeName}`;
         // The window must WEAR the theme it is labelled with: the app's
         // `#theme` stylesheet must be the requested build, or the image is a
         // dark capture named light (tools/visual-review/capture-deepreview-views.mjs
@@ -511,8 +508,18 @@ async function main() {
         if (!themeHref.endsWith(wantedSheet)) {
           throw new Error(`${captureId}: theme '${theme}' requested but #theme is '${themeHref}'`);
         }
-        const screenshotPath = join(outDir, `${captureId}.png`);
         await page.screenshot({ path: screenshotPath, fullPage: true });
+        // The verdict the image was written under, and where the story drew
+        // its content, so the image itself can be checked afterwards
+        // (tools/visual-review/check-storybook-captures.mjs): it must be these bytes,
+        // and it must show something inside each content box.
+        verdicts[basename(screenshotPath)] = {
+          storyId: view.storyId, size: sizeName, theme, viewport, verdict: "pass",
+          kind: observed.page.kind, state: story.state ?? "data",
+          contentBoxes: observed.page.contentBoxes,
+          sha256: createHash("sha256").update(readFileSync(screenshotPath)).digest("hex"),
+          judgedAt: new Date().toISOString(),
+        };
         const htmlPath = join(dumpDir, `${captureId}.html`);
         writeFileSync(htmlPath, await page.content());
 
@@ -728,8 +735,6 @@ async function main() {
             ".selected-text",
             ".scrollbar",
             ".slider",
-            ".ct-storybook-editor-fixture",
-            ".ct-storybook-editor-row",
             ".local-calltrace-view",
             ".local-calltrace",
             ".calltrace-search-input",
@@ -856,8 +861,16 @@ async function main() {
 
     await browser.close();
     console.log(reports.join("\n"));
+    if (refused.length > 0) {
+      console.error(`\n${refused.length} capture(s) REFUSED: the render check's judge fails their story:`);
+      for (const r of refused) console.error(`  ${r.captureId}: ${r.failures.map((f) => f.category).join(", ")}`);
+      process.exitCode = 1;
+    }
   } finally {
     server.kill();
+    // Also when a later capture throws (a font or theme refusal): the
+    // images already written keep their verdicts.
+    writeVerdicts(outDir, verdicts);
   }
 }
 

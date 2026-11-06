@@ -926,6 +926,36 @@ storybook-build: build-storybook-components storybook-deps
 storybook-check-styles: storybook-deps
   cd storybook && npm run check-styles
 
+# Render EVERY story (both themes) from a fresh `storybook-static` and fail on
+# a placeholder ("No structure story registered", or an empty / loading /
+# error state, or nothing but lines worded as an empty, loading or error
+# message, in a story that declares data), an empty panel (nothing visible beyond chrome, the panel's own name
+# and Monaco's gutter), a panel at another type size than the window's (one
+# mounted outside the app's `#ROOT > .session-container`), a console error, a
+# page error, a failed or aborted request (only the theme stylesheet a theme
+# switch supersedes is excused) or a play check that threw; a story that
+# declares a state must show it. Each story's declared state is in
+# `src/frontend/stories/codetracer_stories.nim`. The self-test plants each
+# failure into a story that passes and fails unless the check catches every
+# one. Options after `--` go to the script
+# (`--filter <id-part>`, `--theme dark`, `--jobs N`, `--shots <dir>`,
+# `--url <running storybook>`); see storybook/scripts/check-story-render.mjs.
+[positional-arguments]
+storybook-check-render *args: storybook-build
+  node storybook/scripts/check-story-render.mjs --self-test
+  node storybook/scripts/check-story-render.mjs "$@"
+
+# Check directories of captures written by tools/visual-review/capture-storybook.mjs
+# (which shoots only stories the render check's judge passes, and records each
+# image's verdict in the directory's capture-verdicts.json): every PNG must be
+# the one a judged capture wrote, and must draw something inside each box where
+# its story drew content. Runs the check's self-test first. `--pixels-only`
+# judges the images on their pixels alone.
+[positional-arguments]
+check-storybook-captures *args:
+  node tools/visual-review/check-storybook-captures.mjs --self-test
+  node tools/visual-review/check-storybook-captures.mjs "$@"
+
 [positional-arguments]
 ensure-storybook-static *args:
   #!/usr/bin/env bash
