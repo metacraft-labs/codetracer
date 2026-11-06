@@ -3737,13 +3737,15 @@ jobs:
     # half of GitHub's 360m default. Tighten it from the first green runs.
     #
     # MEASURED since, on cold GARM runners (PR #903): provisioning, which first
-    # realises the dev shell, took 77, 99 and 104 minutes, and `just
-    # build-once` ran 85 minutes in the one run that got that far. That is
-    # most of the old 180m before a single TUI test, so the bound is now the
-    # measured setup plus the estimate above: 104 + 85 + 100 is about 290, and
-    # 330m keeps a margin while staying under GitHub's 360m default, which
-    # ci/verdict/job-timeouts.py rejects.
-    timeout-minutes: 330
+    # realises the dev shell, took 77 to 104 minutes, and `just build-once`
+    # ran 85 minutes in one run and to completion in 218 in another (job
+    # 127706075383, on a host at load ~100). That is most of the old 180m
+    # before a single TUI test. Setup plus the estimate above comes to about
+    # 430m on such a host, more than ci/verdict/job-timeouts.py allows (a
+    # bound must be tighter than GitHub's 360m default), so this is that
+    # ceiling: 355m. It fits a host at ordinary load; tighten it once the job
+    # has run on a warm cache.
+    timeout-minutes: 355
     name: TUI tests (Tier 1 + Tier 2)
     # WHY THIS JOB EXISTS. `just test-tui` and `just test-tui-real-terminal` are
     # the only routes to the `tui` and `tui-real-terminal` lanes of
