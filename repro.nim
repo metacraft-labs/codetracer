@@ -690,7 +690,7 @@ package codeTracer:
     setEnv "REPROBUILD_USE_SYSTEM_HASH_LIBS", "1"
     appendPath "NODE_PATH", projectRoot / "node_modules"
     prependPath "PATH", projectRoot / "node_modules" / ".bin"
-    prependPath "PATH", projectRoot / buildDebugRoot() / "bin"
+    prependPath "PATH", projectRoot / activeBuildRoot() / "bin"
 
     let metacraftScripts = metacraftScriptsPath(projectRoot, workspaceRoot)
     if metacraftScripts.len > 0:

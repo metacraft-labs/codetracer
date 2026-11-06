@@ -39,7 +39,9 @@ Default install root:
   `non-nix-build/windows/setup-codetracer-runtime-env.ps1`:
   - creates `ct_paths.json` when missing (required by
     `ct.exe` wrapper)
-  - sets `CODETRACER_PREFIX`, `CODETRACER_REPO_ROOT_PATH`
+  - sets `CODETRACER_REPO_ROOT_PATH` and, in the PowerShell helper,
+    `CODETRACER_BUILD_DIR` (neither helper exports `CODETRACER_PREFIX`: `ct`
+    resolves its prefix from its own location)
   - sets `CODETRACER_E2E_CT_PATH` to
     `src/build-debug/bin/ct.exe` when available
   - prepends `src/build-debug/bin` to PATH for direct `ct`
