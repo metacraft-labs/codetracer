@@ -36,6 +36,57 @@ if [ -n "${NIX_CONFIG:-}" ] && [ -n "${GITHUB_ENV:-}" ] &&
 	echo "refreshed access-tokens in NIX_CONFIG for later steps"
 fi
 
+# The job credential directory. Newer setup-nix keeps the Nix token out of the
+# environment: NIX_CONFIG and nix.conf hold only an `!include` of
+# $MCL_JOB_CREDENTIALS_DIR/nix-access-tokens.conf, whose `netrc-file` names the
+# job netrc beside it, and a refresh is meant to rewrite those two files in
+# place, after which every new `nix` process reads the new token
+# (metacraft-github-actions refresh-build-auth/job-credentials.cjs, `rotate`).
+# The NIX_CONFIG rewrite above cannot reach them, so TUI job 127569213481 still
+# got "401 Bad credentials" after a refresh. Same edits as `rotate`: the
+# github.com entry and a github.com/metacraft-labs prefix get the new token,
+# every other host and machine is kept, and each file is replaced atomically.
+cred_dir="${MCL_JOB_CREDENTIALS_DIR:-}"
+if [ -n "$cred_dir" ] && [ -f "$cred_dir/nix-access-tokens.conf" ]; then
+	tokens_file="$cred_dir/nix-access-tokens.conf"
+	tmp="$(mktemp "$tokens_file.tmp.XXXXXXXX")"
+	awk -v tok="$NEW_TOKEN" '
+    /^[[:space:]]*access-tokens[[:space:]]*=/ {
+      sub(/^[[:space:]]*access-tokens[[:space:]]*=[[:space:]]*/, "")
+      n = split($0, entries, /[[:space:]]+/)
+      out = ""; seen = 0
+      for (i = 1; i <= n; i++) {
+        if (entries[i] == "") continue
+        eq = index(entries[i], "=")
+        host = substr(entries[i], 1, eq - 1)
+        if (host == "github.com") { seen = 1 }
+        if (host == "github.com" || host == "github.com/metacraft-labs") {
+          entries[i] = host "=" tok
+        }
+        out = out (out == "" ? "" : " ") entries[i]
+      }
+      if (!seen) out = "github.com=" tok (out == "" ? "" : " " out)
+      print "access-tokens = " out
+      next
+    }
+    { print }
+  ' "$tokens_file" >"$tmp"
+	chmod 600 "$tmp"
+	mv -f "$tmp" "$tokens_file"
+	echo "refreshed access-tokens in the job credential directory"
+	job_netrc="$cred_dir/netrc"
+	if [ -f "$job_netrc" ]; then
+		tmp="$(mktemp "$job_netrc.tmp.XXXXXXXX")"
+		{
+			echo "machine github.com login x-access-token password $NEW_TOKEN"
+			grep -Ev '^[[:space:]]*machine[[:space:]]+github\.com([[:space:]]|$)' "$job_netrc" | grep -v '^$' || true
+		} >"$tmp"
+		chmod 600 "$tmp"
+		mv -f "$tmp" "$job_netrc"
+		echo "refreshed github.com in the job netrc"
+	fi
+fi
+
 # The Nix netrc: git+https inputs, which Nix fetches by running git.
 netrc="$HOME/.config/nix/netrc"
 if [ -f "$netrc" ] && grep -q 'machine github.com' "$netrc"; then
