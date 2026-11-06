@@ -18,6 +18,10 @@ test-nix-git-hooks:
 test-captured-dev-env *args:
   bash scripts/test-captured-dev-env.sh "$@"
 
+# Host integration: the reprobuild dev env exports CODETRACER_BUILD_DIR, not CODETRACER_PREFIX.
+test-repro-dev-env:
+  bash scripts/test-repro-dev-env.sh
+
 # Install the commit/push checks nix/pre-commit.nix declares on a host WITHOUT
 # the Nix dev shell -- native Windows is the case it exists for. The Nix shell
 # installs its own leg on entry; this one runs the same hooks through the
@@ -3783,9 +3787,10 @@ test-frontend-units:
   #
   # WHICH build tree is the one scripts/build-once.sh builds, and the recipe
   # asks it rather than guessing.  It used to export
-  # `${CODETRACER_PREFIX:-$PWD/src/build-debug}`, but the repro dev env already
-  # sets CODETRACER_PREFIX to src/build-<type>-repro (repro.nim `devEnv:`), so
-  # the default never applied under `repro exec`.  On Linux build-once builds
+  # `${CODETRACER_PREFIX:-$PWD/src/build-debug}`, but the repro dev env used to
+  # set CODETRACER_PREFIX to src/build-<type>-repro (repro.nim `devEnv:`, which
+  # now exports CODETRACER_BUILD_DIR instead), so the default never applied
+  # under `repro exec`.  On Linux build-once builds
   # with tup into src/build-<config>, so after a successful build the suite
   # still found no server_index.js, reported DID NOT RUN, and the lane exited 1.
   # build-once publishes the output root it resolved (tup or reprobuild, per
