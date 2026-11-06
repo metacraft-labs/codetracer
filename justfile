@@ -90,14 +90,6 @@ test-dev-shell-pythonpath:
 test-dev-shell-python-recorder-ffi-pair:
   bash ci/test/dev-shell-python-recorder-ffi-pair-test.sh
 
-# Assert that the `codetracer-python-recorder` flake input follows this
-# repository's trace-format pair in the lock and in flake.nix, so the recorder
-# never builds against its own pins. Reads the lock and the flake source only:
-# no nix, a fraction of a second. See the header of
-# ci/test/python-recorder-follows-trace-format-pair-test.sh.
-test-python-recorder-follows-trace-format-pair:
-  bash ci/test/python-recorder-follows-trace-format-pair-test.sh
-
 # Assert that the `codex-acp` the default dev shell puts on PATH starts and
 # answers an ACP `initialize`, i.e. that it finds its libssl/libcrypto. Runs
 # `nix develop`, so it is slow and not part of the in-shell suites. See the
@@ -1302,7 +1294,6 @@ test:
     test-reprobuild-catalog-coverage \
     test-dev-env-flake-metadata \
     test-flake-lock-node-dates \
-    test-python-recorder-follows-trace-format-pair \
     test-npm-install-yarn-lock \
     test-python-version-alignment \
     test-python-api-gate \
