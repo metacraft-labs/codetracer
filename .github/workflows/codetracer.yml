@@ -3735,7 +3735,15 @@ jobs:
     # compile-and-run of a program importing isonim-tui (an estimate, not a
     # measurement), 65-100m on its own. 180m clears the sum of those upper ends by about a third and stays
     # half of GitHub's 360m default. Tighten it from the first green runs.
-    timeout-minutes: 180
+    #
+    # MEASURED since, on cold GARM runners (PR #903): provisioning, which first
+    # realises the dev shell, took 77, 99 and 104 minutes, and `just
+    # build-once` ran 85 minutes in the one run that got that far. That is
+    # most of the old 180m before a single TUI test, so the bound is now the
+    # measured setup plus the estimate above: 104 + 85 + 100 is about 290, and
+    # 330m keeps a margin while staying under GitHub's 360m default, which
+    # ci/verdict/job-timeouts.py rejects.
+    timeout-minutes: 330
     name: TUI tests (Tier 1 + Tier 2)
     # WHY THIS JOB EXISTS. `just test-tui` and `just test-tui-real-terminal` are
     # the only routes to the `tui` and `tui-real-terminal` lanes of
