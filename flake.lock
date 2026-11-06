@@ -841,11 +841,9 @@
     "codetracer-image-diff": {
       "flake": false,
       "locked": {
-        "lastModified": 1793050497,
-        "narHash": "sha256-w4Ahbo3XgnFptT8YGMo8THl9uKdPpUfL8oyMk5o+wK0=",
         "owner": "metacraft-labs",
         "repo": "codetracer-image-diff",
-        "rev": "e002498eac522ccc90c1dab4800e0b934bdc72fd",
+        "rev": "61cc773ba0d1a1b5d6e38d9a872bdd43fe2f9004",
         "type": "github"
       },
       "original": {
@@ -1159,11 +1157,9 @@
     "codetracer-trace-format-nim_2": {
       "flake": false,
       "locked": {
-        "lastModified": 1793657090,
-        "narHash": "sha256-RHrWP0mfxLhiEx57Eld5XWKz9wIWFF9Bq13Z8/KsrrA=",
         "owner": "metacraft-labs",
         "repo": "codetracer-trace-format-nim",
-        "rev": "4c67a4507b1fe64752f71f287e62e8c4a3953b61",
+        "rev": "d282be4c45f3f31ce6b666f79a1bd8b6813010c7",
         "type": "github"
       },
       "original": {
