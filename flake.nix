@@ -441,11 +441,11 @@
     # framing. config.nims reads TEST_CERTIFICATES_TOOLS_SRC after the
     # `../test-certificates-tools` sibling; the sandboxed package build and
     # the dev shell have no sibling, so they seed it from here. Pinned at the
-    # same revision reprobuild links (its `test-certificates-tools-src` input at
-    # reprobuild `agents` e7225d709, the revision flake.lock pins) until the
-    # v0.1.0 tag carries it.
+    # `agents` head this workspace's repro.lock resolves the sibling to, moved
+    # forward from 4b395de (the revision reprobuild `agents` still pins in its
+    # own flake.nix). Until the v0.1.0 tag carries it.
     test-certificates-tools = {
-      url = "github:metacraft-labs/test-certificates-tools/4b395de551d86c745d6eb8ebf7c7228df25298f5";
+      url = "github:metacraft-labs/test-certificates-tools/a726655886808d1062390d05c50f4fce03150eb4";
       flake = false;
     };
 
