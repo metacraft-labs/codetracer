@@ -40,13 +40,25 @@ let buildType = block:
     explicitId = "", descriptionFile = info.filename,
     descriptionLine = info.line, descriptionColumn = 0, site = s)
 
+proc resolvedBuildType(): string =
+  ## The resolved ``buildType`` variant; ``debug`` if read before finalisation.
+  try: buildType.value
+  except EVariantNotResolved: "debug"
+
 proc buildDebugRoot(): string =
   ## ``src/build-<buildType>-repro``. Reads the resolved ``buildType``
   ## variant; falls back to ``debug`` if read before finalisation.
-  let bt =
-    try: buildType.value
-    except EVariantNotResolved: "debug"
-  "src/build-" & bt & "-repro"
+  "src/build-" & resolvedBuildType() & "-repro"
+
+proc activeBuildRoot(): string =
+  ## The build output dir the dev shells name as ``CODETRACER_BUILD_DIR``, as
+  ## ``nix/shells/ci-base.nix`` does: the tup tree on Linux
+  ## (``src/build-<buildType>``), the reprobuild tree on macOS and Windows
+  ## (``buildDebugRoot()``).
+  when defined(macosx) or defined(windows):
+    buildDebugRoot()
+  else:
+    "src/build-" & resolvedBuildType()
 
 # Windows: extra C/linker flags so the bundled libzip C sources compile under
 # MinGW UCRT (mirror of src/Tuprules.tup's NIM_WINDOWS_CFLAGS / DYNLIB_OVERRIDE_FLAGS
@@ -667,7 +679,10 @@ package codeTracer:
         discard readDevEnvFile(inputFile)
 
     setEnv "CODETRACER_REPO_ROOT_PATH", projectRoot
-    setEnv "CODETRACER_PREFIX", projectRoot / buildDebugRoot()
+    # CODETRACER_PREFIX stays unset: `ct` resolves its prefix from its own
+    # location, so an export here would point every `ct` in the env at one
+    # tree (Build-Outputs-And-Path-Resolution.md §4.1).
+    setEnv "CODETRACER_BUILD_DIR", projectRoot / activeBuildRoot()
     setEnv "CODETRACER_DEV_TOOLS", "0"
     setEnv "CODETRACER_LOG_LEVEL", "INFO"
     setEnv "RUST_LOG", "info"
@@ -675,7 +690,7 @@ package codeTracer:
     setEnv "REPROBUILD_USE_SYSTEM_HASH_LIBS", "1"
     appendPath "NODE_PATH", projectRoot / "node_modules"
     prependPath "PATH", projectRoot / "node_modules" / ".bin"
-    prependPath "PATH", projectRoot / buildDebugRoot() / "bin"
+    prependPath "PATH", projectRoot / activeBuildRoot() / "bin"
 
     let metacraftScripts = metacraftScriptsPath(projectRoot, workspaceRoot)
     if metacraftScripts.len > 0:

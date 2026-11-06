@@ -182,7 +182,10 @@ unset _tc_file _gnat_ver _ldc_cand _nim_cand _tool_dirs _d SHIMS_DIR
 # ---------------------------------------------------------------------------
 
 export CODETRACER_REPO_ROOT_PATH="$ROOT_DIR"
-export CODETRACER_PREFIX="${CODETRACER_PREFIX:-${CODETRACER_BUILD_DIR:-$ROOT_DIR/src/build-debug}}"
+# The build dir this helper lays out `public` and `config` under, and finds `ct` in. An
+# explicit CODETRACER_PREFIX still wins (Build-Outputs-And-Path-Resolution.md §3.1), but it is
+# not exported: `ct` resolves its own prefix from its location.
+_ct_helper_prefix="${CODETRACER_PREFIX:-${CODETRACER_BUILD_DIR:-$ROOT_DIR/src/build-debug}}"
 export CODETRACER_LD_LIBRARY_PATH="${CODETRACER_LD_LIBRARY_PATH:-}"
 export CODETRACER_DEV_TOOLS="${CODETRACER_DEV_TOOLS:-0}"
 export CODETRACER_LOG_LEVEL="${CODETRACER_LOG_LEVEL:-INFO}"
@@ -210,33 +213,33 @@ fi
 # `ct host` serves static assets from `<build-debug>/public` in non-Nix mode.
 # `ct` runtime expects `<build-debug>/config/default_config.yaml` in non-Nix mode.
 #
-# On Windows with tup, CODETRACER_PREFIX points to the tup variant directory
+# On Windows with tup, `_ct_helper_prefix` points to the tup variant directory
 # (src/build-debug) which must ONLY contain tup.config before `tup build-debug`
 # runs. Skip creating config/public here if tup.config exists and the directory
 # doesn't yet have the tup-generated output (no bin/ dir yet). After tup builds,
 # these will be populated by the build system or can be set up separately.
 _should_setup_prefix_dirs=1
-if [[ -f "$CODETRACER_PREFIX/tup.config" && ! -d "$CODETRACER_PREFIX/bin" ]]; then
+if [[ -f "$_ct_helper_prefix/tup.config" && ! -d "$_ct_helper_prefix/bin" ]]; then
 	_should_setup_prefix_dirs=0
 fi
 
 if [[ $_should_setup_prefix_dirs -eq 1 ]]; then
 	# Ensure the folder exists by linking it to `src/public` when missing.
-	if [[ ! -e "$CODETRACER_PREFIX/public" && -d "$ROOT_DIR/src/public" ]]; then
-		mkdir -p "$CODETRACER_PREFIX"
-		ln -s "$ROOT_DIR/src/public" "$CODETRACER_PREFIX/public" 2>/dev/null || cp -R "$ROOT_DIR/src/public" "$CODETRACER_PREFIX/public"
+	if [[ ! -e "$_ct_helper_prefix/public" && -d "$ROOT_DIR/src/public" ]]; then
+		mkdir -p "$_ct_helper_prefix"
+		ln -s "$ROOT_DIR/src/public" "$_ct_helper_prefix/public" 2>/dev/null || cp -R "$ROOT_DIR/src/public" "$_ct_helper_prefix/public"
 	fi
 
-	if [[ ! -e "$CODETRACER_PREFIX/config" && -d "$ROOT_DIR/src/config" ]]; then
-		mkdir -p "$CODETRACER_PREFIX"
-		ln -s "$ROOT_DIR/src/config" "$CODETRACER_PREFIX/config" 2>/dev/null || cp -R "$ROOT_DIR/src/config" "$CODETRACER_PREFIX/config"
+	if [[ ! -e "$_ct_helper_prefix/config" && -d "$ROOT_DIR/src/config" ]]; then
+		mkdir -p "$_ct_helper_prefix"
+		ln -s "$ROOT_DIR/src/config" "$_ct_helper_prefix/config" 2>/dev/null || cp -R "$ROOT_DIR/src/config" "$_ct_helper_prefix/config"
 	fi
 
 	if [[ -d "$ROOT_DIR/src/config" ]]; then
-		mkdir -p "$CODETRACER_PREFIX/config"
+		mkdir -p "$_ct_helper_prefix/config"
 		for filename in default_config.yaml default_layout.json; do
-			if [[ -f "$ROOT_DIR/src/config/$filename" && ! -f "$CODETRACER_PREFIX/config/$filename" ]]; then
-				cp "$ROOT_DIR/src/config/$filename" "$CODETRACER_PREFIX/config/$filename"
+			if [[ -f "$ROOT_DIR/src/config/$filename" && ! -f "$_ct_helper_prefix/config/$filename" ]]; then
+				cp "$ROOT_DIR/src/config/$filename" "$_ct_helper_prefix/config/$filename"
 			fi
 		done
 	fi
@@ -244,15 +247,16 @@ fi
 unset _should_setup_prefix_dirs
 
 if [[ -z ${CODETRACER_E2E_CT_PATH:-} ]]; then
-	if [[ -f "$CODETRACER_PREFIX/bin/ct.exe" ]]; then
-		export CODETRACER_E2E_CT_PATH="$CODETRACER_PREFIX/bin/ct.exe"
-	elif [[ -f "$CODETRACER_PREFIX/bin/ct" ]]; then
-		export CODETRACER_E2E_CT_PATH="$CODETRACER_PREFIX/bin/ct"
+	if [[ -f "$_ct_helper_prefix/bin/ct.exe" ]]; then
+		export CODETRACER_E2E_CT_PATH="$_ct_helper_prefix/bin/ct.exe"
+	elif [[ -f "$_ct_helper_prefix/bin/ct" ]]; then
+		export CODETRACER_E2E_CT_PATH="$_ct_helper_prefix/bin/ct"
 	fi
 fi
 
 if [[ -d "$ROOT_DIR/node_modules/.bin" ]]; then
-	export PATH="$CODETRACER_PREFIX/bin:$ROOT_DIR/node_modules/.bin:$PATH"
+	export PATH="$_ct_helper_prefix/bin:$ROOT_DIR/node_modules/.bin:$PATH"
 else
-	export PATH="$CODETRACER_PREFIX/bin:$PATH"
+	export PATH="$_ct_helper_prefix/bin:$PATH"
 fi
+unset _ct_helper_prefix
