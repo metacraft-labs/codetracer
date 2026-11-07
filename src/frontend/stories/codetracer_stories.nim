@@ -402,6 +402,83 @@ func fixturesSection(): CodeTracerStorySection =
             "online"),
     ])
 
+func agenticWindows(): seq[CodeTracerStory] =
+  ## CodeTracer as an Agent Harbor front-end in whole windows: one moment of
+  ## one invented project per story (`stories/layout_story_data.nim`, its
+  ## fixture names the moment), the window as the app composes it -- caption
+  ## bar with the Agent Harbor tabs the story shows, the panels in the
+  ## session container, the status bar -- with Deep Review, the debugger
+  ## panels, Test Results and the agent's session side by side: sessions as
+  ## tabs (one row, several rows, a sidebar), initiatives as tabs with their
+  ## recording buttons, the sessions started elsewhere, Previous/Next with
+  ## auto-switch, and the initiatives and their progress, in context.
+  func window(exportName, name, moment, description: string): CodeTracerStory =
+    # The moments whose editor replays a recording made before the clamp
+    # (`storybook_components.mountReplayEditor`): their play checks that the
+    # editor shows that revision, not the reviewed one.
+    const replayMoments = ["debug-failing-test", "needs-input", "inbox-next",
+                           "remote-test-triage", "initiatives-popup",
+                           "session-sidebar", "top-bar-one-row", "top-bar-rows",
+                           "omnibox-routing"]
+    story(exportName, name, "layout", "agentic-window", moment,
+          check = (if moment in replayMoments: "layout-editor-before-clamp" else: ""),
+          description = description)
+  @[
+    window("L1FailingTestAgentAtWork", "L1 Failing Test, Agent At Work",
+           "debug-failing-test",
+           "Debugging shield_never_negative in its recording while the agent " &
+             "clamps the damage: initiative tabs with recording buttons, editor, " &
+             "the failing nargo test, Variables, the call trace, the agent's session"),
+    window("L2ReviewingAnAgentsChange", "L2 Reviewing An Agent's Change",
+           "review-agent-change",
+           "The agent's clamp in Deep Review (changed lines with recorded values), " &
+             "the tests it ran with their recordings, and the call trace of the " &
+             "recording, opened from its session tab"),
+    window("L3AgentNeedsInput", "L3 Agent Needs Input Mid-Debugging", "needs-input",
+           "Next took the view to the drained-field test's question; its agent " &
+             "asks to open a recording in a new tab, waiting for one-click approval"),
+    window("L4AgentHarborArrangement", "L4 Agent Harbor Arrangement",
+           "harbor-arrangement",
+           "The Initiatives panel docked left, each initiative over its sessions, the " &
+             "session in view in the centre, its change in Deep Review on the right"),
+    window("L5RemoteTestRunsStreaming", "L5 Remote Test Runs Streaming",
+           "remote-test-runs",
+           "nargo test on the arm64 and macOS runners streaming into Test Results " &
+             "with a recording per test, beside the agent that started them and " &
+             "its initiative's progress"),
+    window("L6InitiativesPopupAndElsewhere", "L6 Initiatives, Popup And Sessions Elsewhere",
+           "initiatives-popup",
+           "Four initiatives as tabs, the progress popup over Shield model " &
+             "hardening and the sessions-started-elsewhere menu open"),
+    window("L7ControlCenter", "L7 Control Center Tab", "control-center",
+           "The control center as a full-window tab: every initiative and its " &
+             "state, the selected one's progress, the sessions by initiative"),
+    window("L8AgentDeliversADeepReview", "L8 Agent Delivers A Deep Review",
+           "agent-delivers-review",
+           "The agent's session ends with its result, which opened Deep Review on " &
+             "the changed lines with recorded values and the tests it ran"),
+    window("L9SessionTabsInASidebar", "L9 Session Tabs In A Sidebar", "session-sidebar",
+           "The sessions as a sidebar list beside a debugging layout"),
+    window("L10SessionTabsOnOneRow", "L10 Session Tabs On One Row", "top-bar-one-row",
+           "The sessions as tabs on one row of the caption bar, the rest in the " &
+             "open overflow menu"),
+    window("L11SessionTabsOnSeveralRows", "L11 Session Tabs On Several Rows",
+           "top-bar-rows",
+           "The sessions as tabs wrapping onto several rows; the caption bar grows"),
+    window("L12OmniboxInstructionRouted", "L12 Omnibox Instruction Routed",
+           "omnibox-routing",
+           "An instruction typed in the omnibox for an agent, with where it can " &
+             "go: the session in view, the initiative's manager agent, a UI action"),
+    window("L13InboxMovesToTheNextSession", "L13 Inbox Moves To The Next Session",
+           "inbox-next",
+           "Auto-switch on: once the drained-field question was answered the view " &
+             "moved to the next waiting session, the macOS timeout"),
+    window("L14RemoteTestFailureTriaged", "L14 Remote Test Failure Triaged",
+           "remote-test-triage",
+           "negative_field_fails timed out on macOS: its remote recording opened " &
+             "from the Runners tab, the failed row selected, the agent's report"),
+  ]
+
 func layoutsSection(): CodeTracerStorySection =
   func debug(exportName, name, fixture: string): CodeTracerStory =
     story(exportName, name, "layout", "default-debug", fixture)
@@ -409,8 +486,9 @@ func layoutsSection(): CodeTracerStorySection =
     title: "CodeTracer/Layouts",
     group: "Layouts",
     module: "CodeTracerLayouts",
-    description: "The default debugging layout and the app shell",
-    stories: @[
+    description: "Whole windows: the agentic surfaces in realistic development " &
+      "moments, the default debugging layout and the app shell",
+    stories: agenticWindows() & @[
       debug("DefaultDebug", "Default Debug", "populated"),
       debug("McrVisualDebug", "MCR Visual Debug", "mcr-visual"),
       debug("NoirFilesystemActive", "Noir Filesystem Active", "filesystem-active"),

@@ -212,7 +212,7 @@ export const plays = {
     const item = el.querySelector(".ah-elsewhere");
     expect(item.querySelector(".ah-elsewhere-count")?.textContent).toMatch(/^\d+$/);
     expect(item.textContent).not.toMatch(/[\[\]]/);
-    expect(item.getAttribute("title")).toMatch(/^\d+ agent harbor sessions? started elsewhere/);
+    expect(item.getAttribute("title")).toMatch(/^\d+ Agent Harbor sessions? started elsewhere/);
     const rows = el.querySelectorAll(".ah-elsewhere-menu .session-tab-overflow-item");
     expect(rows.length).toBeGreaterThan(0);
     // Each session's initiative beside its state.
@@ -461,5 +461,19 @@ export const plays = {
     await tick();
     await expect(image.getAttribute("src")).toBe(firstSrc);
     await expect(label.textContent).toBe(firstLabel);
+  },
+  // A whole-window layout whose editor replays one of the failing tests'
+  // recordings: those were made of `src/shield.nr` before the agent's clamp,
+  // so the editor shows that revision (`calculate_damage` ending in the bare
+  // `damage` at line 34, no clamp anywhere), never the reviewed one the Deep
+  // Review shows. Read from the editor's own model, so a layout wired to the
+  // program's current source fails here.
+  "layout-editor-before-clamp": async ({ canvasElement }) => {
+    await waitFor(canvasElement, ".monaco-editor .view-line", 60000);
+    const host = canvasElement.querySelector(".monaco-editor").parentElement;
+    const model = host.__ctStoryMonaco?.getModel();
+    await expect(model).toBeTruthy();
+    await expect(model.getLineContent(34).trim()).toBe("damage");
+    await expect(model.getValue()).not.toContain("if(damage as u32 > remaining_shield as u32)");
   },
 };

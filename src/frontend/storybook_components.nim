@@ -109,7 +109,7 @@ from viewmodel/viewmodels/editor_gutter_lanes import lineDecorationsWidthPx
 # Agent Harbor front-end prototypes: the viewmodels and their fixture data
 # source come from nim-agents-isonim-viewmodels; only the views are here.
 import nim_agents_isonim_viewmodels/agent_harbor/[fixture_source, fleet_vm]
-import stories/agent_harbor_stories
+import stories/[agent_harbor_stories, layout_story_data]
 import viewmodel/views/isonim_agent_harbor_fleet_view
 import viewmodel/views/[isonim_agent_harbor_session_tabs_view,
                         isonim_agent_harbor_initiatives_view,
@@ -1077,10 +1077,12 @@ proc createStoryMonacoEditor(host: isonim_dom.Element; source, language,
 proc disposeStoryMonacoEditor(host: isonim_dom.Element) {.importjs:
   "(function (h) { if (h.__ctStoryMonaco) h.__ctStoryMonaco.dispose(); if (h.__ctStoryMonacoOverflow) h.__ctStoryMonacoOverflow.remove(); })(#)".}
 
-proc mountEditor(container: isonim_dom.Element; fixture: string): DisposeProc =
+proc mountEditor(container: isonim_dom.Element; fixture: string;
+                 source = storyProgramSource(StoryStopPath)): DisposeProc =
   ## The editor tab of the file the replay is stopped in, at the stopped
   ## line: the IsoNim container (`mountIsoNimEditor`) with Monaco in it over
-  ## the program's real source.
+  ## the program's real source (`source`: the revision the replayed recording
+  ## was made of, the program's own by default).
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createEditorVM(store)
     vm.setCursor(StoryStopLine, 9)
@@ -1096,7 +1098,7 @@ proc mountEditor(container: isonim_dom.Element; fixture: string): DisposeProc =
       except:
         console.error(cstring("the editor story could not define CodeTracer's Monaco themes: " &
                               getCurrentExceptionMsg()))
-      createStoryMonacoEditor(host, cstring(storyProgramSource(StoryStopPath)),
+      createStoryMonacoEditor(host, cstring(source),
         cstring(editorLanguageForPath(StoryStopPath, "rust")),
         cstring(monacoThemeFor(storyAppTheme())), cstring(CodeFontFamily),
         DefaultEditorFontSize, lineDecorationsWidthPx(DefaultEditorFontSize),
@@ -1594,7 +1596,8 @@ proc storyReviewDiffEditor(vm: VCSVM; file: ct.DeepReviewFileData;
     udDisposeModel(originalModel)
     udDisposeModel(modifiedModel)
 
-proc mountDeepReview(container: isonim_dom.Element; fixture: string): DisposeProc =
+proc mountDeepReview(container: isonim_dom.Element; fixture: string;
+                     vcsFlex = "0 0 26rem"): DisposeProc =
   ## A review as the app shows one, with `src/shield.nr` selected. DeepReview
   ## is a mode of the debugger window, not a pane: the VCS panel switched
   ## into DeepReview mode lists the change (title, commit, stats, trace
@@ -1615,7 +1618,9 @@ proc mountDeepReview(container: isonim_dom.Element; fixture: string): DisposePro
   setReviewInvocationOrdinal(ShieldPath, "calculate_damage", StoryCalculateDamageCall)
   setReviewLoopIteration(ShieldPath, "iterate_asteroids", 1, StoryIterateAsteroidsPass)
   let row = storyStackRow(container)
-  let vcsMount = storyPanelStack(row, "VCS", "0 0 26rem")
+  # `vcsFlex`: a window that shares its width with other panels gives the
+  # change list less, so the diff keeps room for the values beside it.
+  let vcsMount = storyPanelStack(row, "VCS", vcsFlex)
   let diffMount = storyPanelStack(row, "Diff: shield.nr", "1 1 0")
   var rootDisposer: proc()
   var vm, diffVm: VCSVM
@@ -2115,7 +2120,445 @@ proc mountStructure(container: isonim_dom.Element; name, fixture: string): Dispo
     appendRendered(container, node)
   return proc() = container.innerHTML = ""
 
+# ---------------------------------------------------------------------------
+# Full-window layouts: the agentic surfaces in a whole CodeTracer window
+# ---------------------------------------------------------------------------
+#
+# A story of the `agentic-window` surface is one moment of one invented
+# project (`stories/layout_story_data.nim`, its fixture names the moment):
+# the window as the app composes it (`index.html`: the caption bar `#menu`,
+# `#root-container > #auto-hide-layout-row > #ROOT > #session-container-0`
+# with its empty `#main`, the status bar `footer > #status`), with the caption
+# bar's session tabs replaced by the Agent Harbor tab variant the story shows
+# and the panels of the moment in GoldenLayout stacks beside `#main`. Every
+# panel is a production IsoNim view over its viewmodel, fed by the moment's
+# data, so the panels of one window tell the same story.
+
+type
+  CaptionTabs = enum
+    ## What the caption bar shows where the app has its session tabs.
+    ctNone           ## nothing (the tabs are elsewhere: a sidebar, a tree)
+    ctPlain          ## CodeTracer's own session tabs
+    ctInitiatives    ## the initiative tab bar
+    ctStripOneRow    ## the Agent Harbor session tabs on one row
+    ctStripRows      ## the same, wrapping onto several rows
+
+  StoryWindow = object
+    session: isonim_dom.Element   ## `#session-container-0`, where panels go
+    menu: isonim_dom.Element
+
+proc layoutNowMs(): int64 =
+  ## The fixture set's clock, so the project ages like the other stories.
+  let fixtures = newFixtureDataSource()
+  if fixtures.capturedAtMs > 0: fixtures.capturedAtMs else: 1_762_300_000_000'i64
+
+proc layoutSource(moment: string): AgentHarborDataSource =
+  let (snapshot, plans) = projectWorkingSet(moment, layoutNowMs())
+  newSnapshotDataSource(snapshot, "invented project " & ProjectRepository, plans)
+
+proc elementWidth(el: isonim_dom.Element): int {.importjs: "(#.getBoundingClientRect().width | 0)".}
+proc elementHeight(el: isonim_dom.Element): int {.importjs: "(#.getBoundingClientRect().height | 0)".}
+proc setCssVariable(el: isonim_dom.Element; name, value: cstring) {.importjs: "#.style.setProperty(#, #)".}
+proc onWindowResize(cb: proc()) {.importjs: "window.addEventListener('resize', #)".}
+proc offWindowResize(cb: proc()) {.importjs: "window.removeEventListener('resize', #)".}
+
+proc placeTabBar(menu, host: isonim_dom.Element; ownLine: bool) =
+  ## Puts the Agent Harbor tab bar `host` renders (a `display: contents`
+  ## host around a `.session-tab-bar`) where the caption bar has its session
+  ## tabs, in the bar's one flow: the toolbar and the tabs share the free
+  ## space either side of the omnibox (`menu_bar.styl`). With `ownLine` the
+  ## bar takes a line of its own under the toolbar and the omnibox
+  ## (`#menu.ah-caption-tab-line`, `agent_harbor.styl`): the caption's own
+  ## empty tab bar stays on the first line, without its id, so the omnibox
+  ## stays centred.
+  let placeholder = isonim_dom.getElementById(isonim_dom.document,
+                                              cstring(MenuShellSessionTabBarId))
+  doAssert not isonim_dom.isNodeNil(isonim_dom.Node(placeholder)),
+    "the caption bar has no session tab bar"
+  if ownLine:
+    isonim_dom.removeAttribute(placeholder, cstring"id")
+    discard isonim_dom.appendChild(isonim_dom.Node(menu), isonim_dom.Node(host))
+    isonim_dom.setAttribute(menu, cstring"class", cstring"menu ah-caption-tab-line")
+  else:
+    discard isonim_dom.insertBefore(isonim_dom.Node(menu), isonim_dom.Node(host),
+                                    isonim_dom.Node(placeholder))
+    discard isonim_dom.removeChild(isonim_dom.Node(menu), isonim_dom.Node(placeholder))
+
+proc firstChildElement(el: isonim_dom.Element): isonim_dom.Element {.importjs: "#.firstElementChild".}
+
+proc followCaptionHeight(container, menu: isonim_dom.Element): DisposeProc =
+  ## A caption bar that grows (its tabs on a line of their own, or wrapping)
+  ## pushes the panels area down: `#root-container`'s `top` is
+  ## `--caption-bar-height` (`shared_widgets.styl`), set here on the story's
+  ## own container to the bar's measured height.
+  let measure = proc() =
+    let h = elementHeight(menu)
+    if h > 0:
+      setCssVariable(container, cstring"--caption-bar-height", cstring($h & "px"))
+  measure()
+  storySetTimeout(measure, 0)
+  onWindowResize(measure)
+  return proc() = offWindowResize(measure)
+
+proc mountCaptionTabs(window: StoryWindow; container: isonim_dom.Element;
+                      tabs: CaptionTabs; moment: string;
+                      prepare: proc(vm: InitiativeTabStripVM) = nil): DisposeProc =
+  ## The caption bar's tabs for `tabs`, over the moment's sessions. The
+  ## initiative tab bar and the wrapping session tabs need more room than
+  ## the caption bar leaves beside the toolbar and the omnibox at laptop
+  ## width (about 320px at 1440px), so they take a line of their own; the
+  ## one-row session tabs stay beside the omnibox, as CodeTracer's own do,
+  ## and overflow.
+  let r = WebRenderer()
+  var rootDisposer: proc()
+  var measured: isonim_dom.Element
+  var setWidth: proc(w: int)
+  var disposeVm: proc()
+  case tabs
+  of ctNone:
+    return proc() = discard
+  of ctPlain:
+    renderSessionTabsInto(r,
+      isonim_dom.getElementById(isonim_dom.document, cstring(MenuShellSessionTabBarId)), @[
+        SessionTabRecord(label: "Control Center"),
+        SessionTabRecord(label: ProjectRepository),
+      ], 0)
+    return proc() = discard
+  of ctInitiatives:
+    var vm: InitiativeTabStripVM
+    createRoot proc(dispose: proc()) =
+      rootDisposer = dispose
+      vm = newInitiativeTabStripVM(layoutSource(moment))
+      vm.load()
+      for initiativeId in [ShieldInitiative, RunnersInitiative]:
+        let recordings = projectRecordings(initiativeId, moment)
+        vm.setRecordings(initiativeId, recordings, recordings[0].id)
+      if prepare != nil: prepare(vm)
+      let host = renderAgentHarborInitiativeTabBar[WebRenderer, isonim_dom.Element](r, vm)
+      placeTabBar(window.menu, host, ownLine = true)
+      measured = firstChildElement(host)
+    setWidth = proc(w: int) =
+      if w != vm.stripWidth.val: vm.stripWidth.val = w
+    disposeVm = proc() = vm.dispose()
+  of ctStripOneRow, ctStripRows:
+    var vm: SessionTabStripVM
+    createRoot proc(dispose: proc()) =
+      rootDisposer = dispose
+      vm = newSessionTabStripVM(layoutSource(moment),
+                                if tabs == ctStripRows: tsmMultiLine else: tsmSingleLine,
+                                tabStripSessionPolicy())
+      vm.load()
+      # The session in view is the moment's (the conversation it shows).
+      discard vm.activate(projectConversation(moment).sessionId)
+      if moment == "top-bar-one-row": vm.overflowOpen.val = true
+      let host = renderAgentHarborTabStrip[WebRenderer, isonim_dom.Element](
+        r, vm, AgentHarborTabCallbacks())
+      placeTabBar(window.menu, host, ownLine = tabs == ctStripRows)
+      measured = firstChildElement(host)
+    setWidth = proc(w: int) =
+      if w != vm.stripWidthPx.val: vm.stripWidthPx.val = w
+    disposeVm = proc() = vm.dispose()
+  # The viewmodel decides what fits from the bar's own width.
+  let measure = proc() =
+    let w = elementWidth(measured)
+    if w > 0: setWidth(w)
+  measure()
+  onWindowResize(measure)
+  let followHeight = followCaptionHeight(container, window.menu)
+  return proc() =
+    followHeight()
+    offWindowResize(measure)
+    if disposeVm != nil: disposeVm()
+    if rootDisposer != nil: rootDisposer()
+
+proc applyLayoutPalette(vm: CommandPaletteVM; moment: string) =
+  ## The omnibox of a moment: closed, or (`omnibox-routing`) open on an
+  ## instruction typed for an agent, with where it can go listed under it:
+  ## the session in view, Agent Harbor's manager agent, or a CodeTracer UI
+  ## action, the first selected. The existing palette stands in for the
+  ## routing composer until it is built (its rows are `cprkAgent` and
+  ## `cprkProjectAction` results).
+  if moment != "omnibox-routing": return
+  vm.open()
+  vm.setMode(cpmAgent)
+  vm.setQuery("/ai also test a hit on an empty shield")
+  vm.setResults([
+    CommandPaletteResultEntry(kind: cprkAgent,
+      value: "To this session: Clamp the shield at zero"),
+    CommandPaletteResultEntry(kind: cprkAgent,
+      value: "To the Shield model hardening manager"),
+    CommandPaletteResultEntry(kind: cprkProjectAction,
+      value: "UI action: show calculate_damage beside"),
+  ])
+  vm.setSelected(0)
+
+proc mountStoryWindow(container: isonim_dom.Element; moment: string;
+                      tabs: CaptionTabs; disposers: var seq[DisposeProc];
+                      prepare: proc(vm: InitiativeTabStripVM) = nil): StoryWindow =
+  ## The window around the moment's panels: the caption bar (navigation
+  ## menu, debug toolbar, omnibox, the tabs `tabs` names), the panels area
+  ## (answered: `#session-container-0`) and the status bar, stopped where
+  ## every story's replay is.
+  let r = WebRenderer()
+  result.menu = createHost(container, "div", "menu")
+  isonim_dom.setAttribute(result.menu, cstring"class", cstring"menu")
+  renderMenuShellInto[WebRenderer, isonim_dom.Element](r, result.menu,
+    storyMenuShellModel(active = false))
+  disposers.add mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
+    const paletteId = 3
+    let toolbarVm = createDebugControlsVM(store)
+    renderTopbar[WebRenderer, isonim_dom.Element](r,
+      isonim_dom.getElementById(isonim_dom.document, cstring(DebugControlsHostId)),
+      toolbarVm)
+    renderDebugChromeInto(r,
+      isonim_dom.getElementById(isonim_dom.document, cstring(DebugShellId)), paletteId)
+    let paletteVm = createCommandPaletteVM(store)
+    paletteVm.applyLayoutPalette(moment)
+    mountIsoNimCommandPalettePanel(isonim_dom.getElementById(isonim_dom.document,
+      cstring(commandPaletteHostId(paletteId))), paletteVm)
+    return proc() =
+      paletteVm.dispose()
+      toolbarVm.dispose())
+  disposers.add mountCaptionTabs(result, container, tabs, moment, prepare)
+
+  let rootContainer = createHost(container, "div", "root-container")
+  let layoutRow = createHost(rootContainer, "div", "auto-hide-layout-row")
+  discard createHost(layoutRow, "div", "auto-hide-strip-left")
+  let root = createHost(layoutRow, "div", "ROOT")
+  result.session = createHost(root, "div", "session-container-0")
+  isonim_dom.setAttribute(result.session, cstring"class", cstring"session-container")
+  # `#main` empty, the panels beside it, as `mountDebugShell` explains.
+  discard createHost(result.session, "section", "main")
+  discard createHost(layoutRow, "div", "auto-hide-strip-right")
+  isonim_dom.setAttribute(root, cstring"style", cstring(
+    "display: flex; flex: 1 1 auto; width: 100%; height: 100%; " &
+    "min-width: 0; min-height: 0"))
+  isonim_dom.setAttribute(result.session, cstring"style", cstring(
+    "flex: 1 1 auto; width: 100%; height: 100%; min-width: 0; min-height: 0"))
+  discard renderStoryStatusBar(r, rootContainer, false, replayReadyToast = false)
+
+proc mountLayoutActivity(container: isonim_dom.Element; moment: string): DisposeProc =
+  ## The Agent Activity pane on the session the moment has in view.
+  mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
+    let vm = createAgentActivityVM(store)
+    let conversation = projectConversation(moment)
+    vm.setSessionKey(conversation.sessionId)
+    vm.setMessages(conversation.messages)
+    vm.setBranchState(conversation.branch, ["main", conversation.branch])
+    vm.setSelectedModel(conversation.model)
+    if conversation.permission.len > 0:
+      vm.setPromptFlags(false, true)
+      vm.setPermissionInfo(conversation.permission)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderAgentActivityPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm, 101,
+        "storybook-agent-input")))
+    return proc() = vm.dispose())
+
+proc mountLayoutTests(container: isonim_dom.Element; moment: string): DisposeProc =
+  ## Test Results over the moment's run, folded through the pane's own
+  ## `ingestEvent`; a remote run still streaming stays in flight.
+  var rootDisposer: proc()
+  var vm: TestResultsVM
+  createRoot proc(dispose: proc()) =
+    rootDisposer = dispose
+    vm = createTestResultsVM()
+    vm.setCatalog(projectTestCatalog())
+    let run = projectTestEvents(moment)
+    vm.beginRun()
+    for event in run.events: vm.ingestEvent(event)
+    if run.finished: vm.endRun()
+    if moment == "remote-test-triage":
+      for event in run.events:
+        if event.kind == tekFailure: vm.selectTest(event.testId)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderTestResultsPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
+  return proc() =
+    if vm != nil: vm.dispose()
+    if rootDisposer != nil: rootDisposer()
+    container.innerHTML = ""
+
+proc mountLayoutBuild(container: isonim_dom.Element): DisposeProc =
+  ## The Build pane on the operator's failing `nargo test` run.
+  mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
+    let vm = createBuildVM(store)
+    vm.setCommand("nargo test")
+    for line in projectFailingTestRun():
+      vm.appendLine(storyLine(line.raw, line.isStdout,
+        if line.error: blsError elif line.warning: blsWarning
+        elif line.isStdout and line.raw.startsWith("$"): blsInfo else: blsNone,
+        line.path, line.line))
+    vm.appendProblem(BuildProblemLine(severity: blsError, path: "src/tests.nr",
+      line: 9, col: 5, message: "Failed assertion: \"the shield never goes below zero\""))
+    vm.setCode(1)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderBuildPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
+    return proc() = vm.dispose())
+
+proc mountLayoutSessionList(container: isonim_dom.Element; moment: string;
+                            mode = tsmSidebar): DisposeProc =
+  ## The sessions as a sidebar list, grouped by initiative (the initiatives
+  ## tree: each initiative a node over its sessions), the moment's session in
+  ## view.
+  mountAgentHarborVM(container,
+    proc(): SessionTabStripVM =
+      var policy = tabStripSessionPolicy()
+      policy.order = soAttention
+      result = newSessionTabStripVM(layoutSource(moment), mode, policy)
+      result.load()
+      discard result.activate(projectConversation(moment).sessionId),
+    proc(host: isonim_dom.Element; vm: SessionTabStripVM) =
+      mountAgentHarborSessionList(host, vm))
+
+proc mountLayoutInitiatives(container: isonim_dom.Element; moment: string): DisposeProc =
+  mountAgentHarborVM(container,
+    proc(): InitiativesVM =
+      result = newInitiativesVM(layoutSource(moment))
+      result.load()
+      result.select(ShieldInitiative),
+    proc(host: isonim_dom.Element; vm: InitiativesVM) =
+      mountAgentHarborInitiativesPanel(host, vm))
+
+proc mountLayoutProgress(container: isonim_dom.Element; moment, initiativeId: string): DisposeProc =
+  mountAgentHarborVM(container,
+    proc(): InitiativeProgressVM =
+      result = newInitiativeProgressVM(layoutSource(moment), initiativeId)
+      result.load(),
+    proc(host: isonim_dom.Element; vm: InitiativeProgressVM) =
+      mountAgentHarborProgressPanel(host, vm))
+
+proc stack(parent: isonim_dom.Element; title, flex: string): isonim_dom.Element =
+  storyPanelStack(parent, title, flex)
+
+proc column(parent: isonim_dom.Element; flex: string): isonim_dom.Element =
+  result = storyStackRow(parent, column = true)
+  isonim_dom.setStyleProperty(result, cstring"flex", cstring(flex))
+
+const VariablesSideFlex = "0 0 max(24%, 22.5rem)"
+  ## The column Variables and the call trace share beside a layout's editor:
+  ## a quarter of the window, and never less than the Variables pane's
+  ## widest row needs. A variable's name is never cut (only its value gives
+  ## up width), so `shield_regen_percentage:10 Field` and its history toggle
+  ## need about 22rem; at 1440px a quarter is 344px and the row ran 10px past
+  ## the pane, its toggle cut at the edge. Wider windows keep their quarter.
+
+proc mountReplayEditor(container: isonim_dom.Element): DisposeProc =
+  ## A layout's editor: the replay of a recording made before the clamp (the
+  ## failing `shield_never_negative`, the drained field, the macOS run of the
+  ## negative field), so it shows `src/shield.nr` as that recording has it,
+  ## `calculate_damage` returning the bare `damage` at line 34 -- the line the
+  ## clamp session says it is replacing while it works. The clamp itself is
+  ## seen only where it is reviewed (the Deep Review's diff); no moment has
+  ## it landed in the checkout the recordings came from. The stopped values
+  ## (pass 2: `mass` 200, `damage` 2000) are the same in both revisions, as
+  ## the hit does not reach the clamp.
+  mountEditor(container, "populated", storyShieldSourceBefore())
+
+proc mountDebugPanels(row: isonim_dom.Element; disposers: var seq[DisposeProc];
+                      sideFlex = "0 0 28%") =
+  ## The debugging core every debugging moment shares: the editor on the
+  ## stopped line, Variables and the call trace beside it.
+  disposers.add mountReplayEditor(stack(row, StoryStopPath, "1 1 0"))
+  let side = column(row, sideFlex)
+  disposers.add mountState(stack(side, "VARIABLES", "1 1 0"), "populated")
+  disposers.add mountCalltrace(stack(side, "CALLTRACE", "1 1 0"), "populated")
+
+proc mountAgenticWindow(container: isonim_dom.Element; moment: string): DisposeProc =
+  ## One moment of the project in a whole window; see the section comment.
+  if moment notin LayoutScenarios:
+    raise newException(ValueError, "no layout story moment named " & moment)
+  var disposers: seq[DisposeProc] = @[]
+  let tabs = case moment
+    of "review-agent-change", "agent-delivers-review", "top-bar-one-row",
+       "omnibox-routing": ctStripOneRow
+    of "top-bar-rows": ctStripRows
+    of "control-center": ctPlain
+    of "harbor-arrangement", "session-sidebar": ctNone
+    else: ctInitiatives
+  let prepare = proc(vm: InitiativeTabStripVM) =
+    case moment
+    of "initiatives-popup":
+      vm.popupId.val = ShieldInitiative
+      vm.elsewhereOpen.val = true
+    of "needs-input":
+      # Next taken: the first waiting session, the drained-field test's
+      # question, came into view inside its initiative's tab.
+      discard vm.showSession(DrainedTestSession)
+    of "inbox-next":
+      vm.autoSwitch.val = true
+      discard vm.showSession(MacTimeoutSession)
+    of "remote-test-runs", "remote-test-triage":
+      discard vm.showSession(RemoteRunSession)
+      if moment == "remote-test-triage":
+        discard vm.selectRecording(RunnersInitiative, "rec-negative-macos")
+    else:
+      discard vm.showSession(ClampSession)
+  let window = mountStoryWindow(container, moment, tabs, disposers, prepare)
+  let row = storyStackRow(window.session)
+  case moment
+  of "debug-failing-test":
+    let left = column(row, "1 1 0")
+    disposers.add mountReplayEditor(stack(left, StoryStopPath, "1 1 0"))
+    disposers.add mountLayoutBuild(stack(left, "BUILD", "0 0 34%"))
+    let side = column(row, VariablesSideFlex)
+    disposers.add mountState(stack(side, "VARIABLES", "1 1 0"), "populated")
+    disposers.add mountCalltrace(stack(side, "CALLTRACE", "1 1 0"), "populated")
+    disposers.add mountLayoutActivity(stack(row, "Agent Activity", "0 0 28%"), moment)
+  of "review-agent-change":
+    disposers.add mountDeepReview(row, "populated")
+    let side = column(row, "0 0 30%")
+    disposers.add mountLayoutTests(stack(side, "Test Results", "1 1 0"), moment)
+    disposers.add mountCalltrace(stack(side, "CALLTRACE", "1 1 0"), "populated")
+  of "needs-input", "inbox-next":
+    mountDebugPanels(row, disposers, VariablesSideFlex)
+    disposers.add mountLayoutActivity(stack(row, "Agent Activity", "0 0 30%"), moment)
+  of "harbor-arrangement":
+    disposers.add mountLayoutInitiatives(stack(row, "Initiatives", "0 0 22rem"), moment)
+    disposers.add mountLayoutActivity(stack(row, "Agent Activity", "0 0 24%"), moment)
+    disposers.add mountDeepReview(column(row, "1 1 0"), "populated", vcsFlex = "0 0 18rem")
+  of "remote-test-runs":
+    disposers.add mountLayoutTests(stack(row, "Test Results", "1 1 0"), moment)
+    disposers.add mountLayoutActivity(stack(row, "Agent Activity", "0 0 34%"), moment)
+    disposers.add mountLayoutProgress(stack(row, "Initiative Progress", "0 0 24%"),
+                                      moment, RunnersInitiative)
+  of "remote-test-triage":
+    let left = column(row, "1 1 0")
+    disposers.add mountReplayEditor(stack(left, StoryStopPath, "1 1 0"))
+    disposers.add mountLayoutTests(stack(left, "Test Results", "0 0 38%"), moment)
+    let side = column(row, VariablesSideFlex)
+    disposers.add mountState(stack(side, "VARIABLES", "1 1 0"), "populated")
+    disposers.add mountCalltrace(stack(side, "CALLTRACE", "1 1 0"), "populated")
+    disposers.add mountLayoutActivity(stack(row, "Agent Activity", "0 0 28%"), moment)
+  of "initiatives-popup":
+    mountDebugPanels(row, disposers)
+  of "control-center":
+    disposers.add mountLayoutInitiatives(stack(row, "Initiatives", "1.3 1 0"), moment)
+    let side = column(row, "1 1 0")
+    disposers.add mountLayoutProgress(stack(side, "Initiative Progress", "1 1 0"),
+                                      moment, ShieldInitiative)
+    disposers.add mountLayoutSessionList(stack(side, "Sessions", "1 1 0"), moment, tsmDocked)
+  of "agent-delivers-review":
+    disposers.add mountLayoutActivity(stack(row, "Agent Activity", "0 0 30%"), moment)
+    let review = column(row, "1 1 0")
+    disposers.add mountDeepReview(review, "populated", vcsFlex = "0 0 22rem")
+    disposers.add mountLayoutTests(stack(review, "Test Results", "0 0 30%"), moment)
+  of "session-sidebar":
+    disposers.add mountLayoutSessionList(stack(row, "Sessions", "0 0 19rem"), moment)
+    mountDebugPanels(row, disposers)
+  of "top-bar-one-row", "top-bar-rows", "omnibox-routing":
+    mountDebugPanels(row, disposers, VariablesSideFlex)
+    disposers.add mountLayoutActivity(stack(row, "Agent Activity", "0 0 28%"), moment)
+  else:
+    # A moment added to `LayoutScenarios` without an arrangement here would
+    # draw a window with no panels; refuse it instead.
+    raise newException(ValueError, "no panels arranged for layout moment " & moment)
+  return proc() =
+    for i in countdown(disposers.high, 0): disposers[i]()
+    container.innerHTML = ""
+
 proc mountLayout(container: isonim_dom.Element; name, fixture: string): DisposeProc =
+  if name == "agentic-window":
+    # A whole window, caption bar and status bar included.
+    return mountAgenticWindow(container, fixture)
   if name == "deepreview":
     # The VCS panel and the diff tab side by side, as a review opens them.
     return mountDeepReview(container, fixture)

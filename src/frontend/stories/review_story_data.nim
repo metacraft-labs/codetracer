@@ -168,6 +168,26 @@ proc shieldHunk(): ct.DeepReviewHunk =
   result.lines.add(ct.DeepReviewHunkLine(`type`: "context",
     content: " " & lines[last], oldLine: first + 1, newLine: last + 1))
 
+proc storyShieldSourceBefore*(): string =
+  ## `src/shield.nr` before the change under review: the reviewed revision
+  ## with the change's hunk undone -- its context and removed lines in place
+  ## of its new side, so `calculate_damage` returns the bare `damage` again.
+  ## The recordings of the failing tests were made of this revision (the bug
+  ## they show is the missing clamp), so an editor replaying one shows it.
+  ## Derived from the hunk rather than written out, so the review and the
+  ## replays cannot disagree about what the change was.
+  let hunk = shieldHunk()
+  let lines = ShieldSource.splitLines
+  var before: seq[string]
+  for n in 1 ..< hunk.newStart:
+    before.add lines[n - 1]
+  for line in hunk.lines:
+    if line.`type` in ["context", "removed"]:
+      before.add line.content[1 .. ^1]
+  for n in hunk.newStart + hunk.newCount .. lines.len:
+    before.add lines[n - 1]
+  before.join("\n")
+
 proc functionSpan(name: string; calls: int): ct.DeepReviewFunctionCoverage =
   ## A function's span: its `fn` line to the line before the next `fn` (or
   ## the end of the file).

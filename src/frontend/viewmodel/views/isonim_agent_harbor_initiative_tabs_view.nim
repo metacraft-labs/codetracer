@@ -14,7 +14,7 @@
 ## - a tab per open session launched for no initiative;
 ## - the `+N` overflow chip, and "+" right after the last tab;
 ## - at the bar's end, as ghost controls (no fill until hovered): the
-##   sessions started elsewhere, a count badge and `agent harbor sessions`
+##   sessions started elsewhere, a count badge and `Agent Harbor sessions`
 ##   (on a compact bar the badge alone, its label in the tooltip), a menu
 ##   listing each with its initiative and state, from which one is brought
 ##   into view; then Previous / Next session (`← 2 of 5 →`) and the

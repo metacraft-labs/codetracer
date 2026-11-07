@@ -38,6 +38,17 @@ story claims realistic data unless its declaration says `state = "empty"`,
 there is no allowlist, so a story that cannot show its surface over realistic
 data is fixed or removed.
 
+The whole-window layouts of `CodeTracer/Layouts` (surface `agentic-window`,
+`mountAgenticWindow` in `src/frontend/storybook_components.nim`) build the
+window themselves, as the app composes it: the caption bar with the debug
+toolbar, the omnibox and the tabs the story shows, the panels area down to
+`#session-container-0`, and the status bar; the harness only gives them a
+bare frame. Each is one moment of one invented project
+(`src/frontend/stories/layout_story_data.nim`), so every panel of a window
+tells the same story. Capture them with
+`node tools/visual-review/capture-storybook.mjs --view agent-harbor-layouts`
+(1440x900 and 1920x1080, both themes).
+
 ## Where stories are declared
 
 Every story is declared once, in Nim:

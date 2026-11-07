@@ -251,9 +251,7 @@ proc renderListRow[R](r: R; vm: SessionTabStripVM; cb: AgentHarborTabCallbacks;
            onclick = proc() = vm.invokeActivate(cb, id)):
         span(class = "ah-tab-mark"):
           discard
-  let detail = if tab.failureText.len > 0: tab.failureText
-               elif tab.activity.len > 0: tab.activity[0].lineText
-               else: ""
+  let detail = tab.lastActivityLine
   ui(r):
     tdiv(class = cls, title = tab.tooltip, role = "button", tabindex = "0",
          onclick = proc() = vm.invokeActivate(cb, id)):

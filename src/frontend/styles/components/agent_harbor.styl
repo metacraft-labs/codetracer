@@ -634,6 +634,33 @@ AH_MARK = 0.5rem
   align-items: flex-start
   padding-bottom: 0.375rem
 
+// The Agent Harbor tab bar on a line of its own, under the toolbar and the
+// omnibox: in a whole window the toolbar leaves the tabs about 320px beside
+// the omnibox at laptop width, too little for the initiative tabs and their
+// right-hand group, so the caption bar wraps and grows. The first line keeps
+// the toolbar and the omnibox where they were (the caption's own empty tab
+// bar still balances the toolbar, so the omnibox stays centred); the tabs
+// take the window's width below. The panels area starts under the bar: the
+// window sets `--caption-bar-height` to the bar's height.
+#menu.ah-caption-tab-line
+  flex-wrap: wrap
+  height: auto
+  max-height: none
+  align-content: flex-start
+  row-gap: 0.25rem
+
+  .ah-tab-strip
+    flex: 1 0 100%
+    order: 10
+    margin-left: 0
+    height: auto
+    min-height: 1.75rem
+
+  // The window controls stay on the first line.
+  .window-menu
+    bottom: auto
+    height: "calc(%s - %s - 0.375rem)" % (CAPTION_BAR_HEIGHT_WORKSPACE CAPTION_BAR_PADDING_TOP)
+
 // Loading, error and empty: one tab-shaped notice, no tabs.
 // Tab-shaped: the plain tab's fill at rest, so it is not mistaken for a label.
 .ah-tab-strip .session-tab.ah-tab-notice
@@ -1484,7 +1511,7 @@ AH_MARK = 0.5rem
 .ah-inbox-step
   font-size: ah-rem(type-ui-size-body-lg)
 
-// `[N agent harbor sessions]`: a chip at the strip's end, the +N chip's
+// `N Agent Harbor sessions`: a chip at the strip's end, the +N chip's
 // fill, so it reads as the menu it opens.
 .ah-elsewhere
   display: inline-flex

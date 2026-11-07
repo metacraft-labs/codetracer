@@ -395,3 +395,5 @@ xdist
 xfail
 codetracerconf
 LLDB
+agentic
+omnibox

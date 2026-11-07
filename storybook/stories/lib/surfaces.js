@@ -978,8 +978,13 @@ function createKaraxReferenceShell(container, variant) {
   return root;
 }
 
+// Layouts that are a whole window: the Nim mount builds the caption bar, the
+// panels area (`#root-container` ... `#session-container-0`) and the status
+// bar itself, as the app composes them, so the harness gives it a bare frame.
+const WINDOW_LAYOUTS = new Set(["agentic-window"]);
+
 function createAppShell(container, kind, name, displayTitle = null) {
-  if (kind === "view" || kind === "component") {
+  if (kind === "view" || kind === "component" || (kind === "layout" && WINDOW_LAYOUTS.has(name))) {
     const frame = document.createElement("div");
     frame.className = "ct-storybook-frame";
     container.appendChild(frame);
