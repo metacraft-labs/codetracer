@@ -379,6 +379,19 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
+          # THE NIX CREDENTIAL OUTLIVES THE HOUR. With the App's id and key,
+          # setup-dev-env starts its job credential broker, which re-mints the
+          # Nix GitHub credential before it expires and rewrites the job's
+          # credential files in place, so nix and reprobuild-nix-daemon calls
+          # started before a refresh read the new token on their next fetch.
+          # Without it, run 42308193072 (attempt 2, cold garm runner) reached
+          # the bundle build at 02:22:46, 27 seconds after the token minted at
+          # 01:22:19 expired, and every `nix-provision` the daemon resolved for
+          # `repro exec` answered `HTTP error 401` on the PUBLIC nixpkgs
+          # tarball. The broker mints its own `contents: read` tokens through
+          # its own channel; this job still has exactly one mint step.
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           attic-token: ${{ secrets.ATTIC_TOKEN }}
@@ -519,7 +532,10 @@ jobs:
         # That token is minted once in this job's first step and a GitHub App
         # installation token expires 60 MINUTES LATER; `ci/test/
         # sibling-provisioning-test.sh` asserts "no job mints more than one
-        # installation token", so refreshing it mid-job is not available here.
+        # installation token", so refreshing it mid-job was not available here.
+        # (Since 2026-11-07 setup-dev-env's credential broker keeps the NIX
+        # credential fresh — see "Setup dev env" — but the git credential is
+        # still the one minted above, so this step stays early.)
         # In run 37938206801 the token was minted at 13:44:45, the bundle build
         # started at 14:28:31 and the fetch answered at 15:12:03 with
         #
@@ -713,8 +729,10 @@ jobs:
         #    that provides `repro` is not realised until ~+75 minutes, and the
         #    installation token dies at +60; `ci/test/sibling-provisioning-
         #    test.sh` asserts "no job mints more than one installation token",
-        #    so there is no second credential to reach for. The fetch has to
-        #    stop happening, and reprobuild's own documented escape is the way:
+        #    so there is no second credential to reach for. (The credential
+        #    broker "Setup dev env" now starts covers the other fetches that
+        #    run after the hour; this one is still removed outright.) The fetch
+        #    has to stop happening, and reprobuild's own documented escape is the way:
         #    point it at a compiler that is already here. `.#ci` carries gcc
         #    and clang (ci-base.nix), both already realised by the line above,
         #    so this costs nothing and removes the last authenticated GitHub
