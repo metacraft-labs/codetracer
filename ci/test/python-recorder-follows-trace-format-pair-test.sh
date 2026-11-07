@@ -23,6 +23,13 @@
 #   3. The recorder's own flake exposes both names: the lock records the input
 #      names the recorder declares, and the test refuses to pass if either is
 #      missing from that node.
+#   4. The root `codetracer-trace-format-nim` is locked as a flake, not with
+#      `"flake": false`. The recorder's flake reads
+#      `codetracer-trace-format-nim.packages.<system>.trace-writer-ffi`, and a
+#      follows hands it the root input as it is: a non-flake root has no
+#      `packages`, so evaluating the recorder fails with `attribute 'packages'
+#      missing` while assertions 1-3 still pass. The follows commit 2f28416d9
+#      shipped in exactly that state.
 #
 # No `nix` invocation: this reads the lock and the flake source, so it runs in
 # seconds and needs `jq` only. The build-level check, that the dev shell links
@@ -77,6 +84,19 @@ for name in "${NAMES[@]}"; do
 	esac
 done
 
+# The recorder reads the trace-format-nim input as a flake (assertion 4). The
+# lock records `"flake": false` only for a non-flake input; a flake's node has
+# no `flake` key.
+nim_flake="$(jq -r '.nodes[.nodes.root.inputs["codetracer-trace-format-nim"]] | if has("flake") then .flake else true end' "$lock")"
+if [ "$nim_flake" = "false" ]; then
+	echo "FAIL: the root 'codetracer-trace-format-nim' is locked with \"flake\": false;" >&2
+	echo "      $INPUT reads its packages.<system>.trace-writer-ffi, which a non-flake" >&2
+	echo "      input does not have. Declare it 'flake = true;' in flake.nix and relock." >&2
+	failures=$((failures + 1))
+else
+	echo "ok:   the root 'codetracer-trace-format-nim' is locked as a flake"
+fi
+
 # The declaration in flake.nix: the block from `$INPUT = {` to its closing
 # `};`, which holds no nested braces in this repository.
 block="$(awk -v key="$INPUT" '
@@ -98,7 +118,7 @@ for name in "${NAMES[@]}"; do
 done
 
 if [ "$failures" -ne 0 ]; then
-	echo "FAIL: $failures check(s) failed; the recorder can link a writer from a different pair" >&2
+	echo "FAIL: $failures check(s) failed; the recorder can link a writer from a different pair, or cannot be evaluated" >&2
 	exit 1
 fi
 echo "the $INPUT input follows the codetracer trace-format pair"

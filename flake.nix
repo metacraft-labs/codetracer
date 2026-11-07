@@ -335,7 +335,7 @@
       flake = false;
     };
 
-    # Non-flake inputs: needed by ``src/db-backend/build.rs`` and
+    # Needed by ``src/db-backend/build.rs`` and
     # ``codetracer_trace_writer_nim``'s build.rs to materialise
     # generated C / Nim FFI sources before the Rust crate links.  The
     # build script canonicalises ``../../../codetracer-native-recorder``
@@ -352,7 +352,20 @@
     codetracer-trace-format-nim = {
       # `/agents` with `codetracer-trace-format` above, for the same reason.
       url = "github:metacraft-labs/codetracer-trace-format-nim/agents";
-      flake = false;
+      # A flake, not a bare source tree. The python recorder input follows
+      # this name, and the recorder's flake reads
+      # `codetracer-trace-format-nim.packages.<system>.trace-writer-ffi` from
+      # it, so a `flake = false` input here has no `packages` and every
+      # evaluation of the recorder fails with `attribute 'packages' missing`.
+      # The consumers in this repository interpolate the input as a path
+      # (`${inputs.codetracer-trace-format-nim}/src`), which a flake input's
+      # `outPath` still provides, and the ruby, js and shell recorders that
+      # follow it read it the same way. Its own inputs are left unfollowed:
+      # the writer archive is then built with the toolchain the trace-format
+      # repository pins and tests, as it was when the recorder locked the
+      # flake itself. ci/test/python-recorder-follows-trace-format-pair-test.sh
+      # keeps this a flake.
+      flake = true;
     };
     # The native CLI used by backend-manager's recording tests imports the
     # production CTFS visual-stream reader, even for a non-graphics recording.
