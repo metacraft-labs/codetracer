@@ -43,13 +43,12 @@ when defined(js):
 
 import nim_agents_isonim_viewmodels/agent_harbor/fleet_vm
 
-export signals, computation, components, fleet_vm
+import ./agent_harbor_words
+
+export signals, computation, components, fleet_vm, agent_harbor_words
 
 const
   AgentHarborFleetClass* = "component-container agent-harbor-fleet"
-  AgentHarborFleetLoadingText* = "Loading sessions\xE2\x80\xA6"
-  AgentHarborFleetEmptyText* = "No sessions on this server yet."
-  AgentHarborFleetFilteredEmptyText* = "No session in this category."
 
 type
   AgentHarborFleetCallbacks* = object
@@ -59,74 +58,12 @@ type
     onFilter*: proc(filter: FleetFilter)
     onRetry*: proc()
 
-proc filterLabel*(filter: FleetFilter): string =
-  case filter
-  of ffAll: "All"
-  of ffNeedsInput: "Needs input"
-  of ffRunning: "Running"
-  of ffQueued: "Queued"
-  of ffFailed: "Failed"
-  of ffEnded: "Ended"
-
-proc filterCount*(counts: FleetCounts; filter: FleetFilter): int =
-  case filter
-  of ffAll: counts.listed
-  of ffNeedsInput: counts.byCategory[fcNeedsInput]
-  of ffRunning: counts.byCategory[fcRunning]
-  of ffQueued: counts.byCategory[fcQueued]
-  of ffFailed: counts.byCategory[fcFailed]
-  of ffEnded: counts.byCategory[fcEnded]
-
 proc categoryClass*(category: FleetCategory): string =
   "ah-fleet-cat-" & $category
 
 proc rowClass*(row: FleetRow): string =
   result = "ah-fleet-row " & categoryClass(row.category)
   if row.selected: result.add(" ah-fleet-row-selected")
-
-proc metaPartsShort*(row: FleetRow): seq[string] =
-  ## The meta line when agent, host, initiative and duration have columns.
-  if row.repository.len > 0:
-    result.add(if row.branch.len > 0: row.repository & " \xC2\xB7 " & row.branch
-               else: row.repository)
-  if row.workspace.len > 0: result.add(row.workspace)
-  if row.titleSource != "id": result.add(row.shortId)
-
-proc metaParts*(row: FleetRow): seq[string] =
-  ## The meta line, in reading order; empty parts are left out.
-  if row.agentLabel.len > 0:
-    result.add(if row.agentCount > 1: row.agentLabel & " \xC3\x97" & $row.agentCount
-               else: row.agentLabel)
-  if row.repository.len > 0:
-    result.add(if row.branch.len > 0: row.repository & " \xC2\xB7 " & row.branch
-               else: row.repository)
-  if row.workspace.len > 0: result.add(row.workspace)
-  if row.initiative.len > 0: result.add(row.initiative)
-  if row.host.len > 0: result.add(row.host)
-  if row.titleSource != "id": result.add(row.shortId)
-  if row.durationLabel.len > 0: result.add(row.durationLabel)
-
-proc withheldNote*(vm: FleetSnapshotVM): string =
-  ## Said once, in the header, after the session count: the server withheld
-  ## the prompts, so rows are titled by what else names them.
-  let counts = vm.counts
-  if counts.withheldPrompts == 0: ""
-  elif counts.withheldPrompts >= counts.listed:
-    "prompts withheld by the server"
-  else:
-    "prompts of " & $counts.withheldPrompts & " withheld by the server"
-
-proc headerSummary*(vm: FleetSnapshotVM): string =
-  ## `471 sessions`; `13 of 471 sessions` while a filter shows some of them
-  ## (or while the server reports more than it listed).
-  let counts = vm.counts
-  let filtered = vm.filter.val != ffAll
-  let shown = if filtered: vm.rows.len else: counts.listed
-  let outOf = if filtered: counts.listed else: counts.total
-  if outOf > shown or filtered:
-    $shown & " of " & $outOf & " sessions"
-  else:
-    $shown & (if shown == 1: " session" else: " sessions")
 
 proc appendRendered[R, N](r: R; host, child: N) =
   # Bound where instantiated: on JS this module also sees WebRenderer's.
