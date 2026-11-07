@@ -22,6 +22,9 @@
 #                               repo's log the summary prints, and of the
 #                               toolchain lookup's log when that fails
 #                               (default 60; 0 prints none).
+#   BUILD_SIBLINGS_TOOLCHAIN_TIMEOUT=N — seconds the toolchain lookup (one
+#                               `repro exec` on this checkout) may run before
+#                               the script gives up and names it (default 1200).
 #
 # Conventions:
 #   - All builds are run via `repro exec <repo> -- <cmd>` so each repo's flake
@@ -99,6 +102,14 @@ case "$fail_tail_lines" in
 '' | *[!0-9]*) fail_tail_lines=60 ;;
 esac
 
+# How long the toolchain lookup may run before this script gives up on it. A
+# zero or non-numeric value falls back to the default: an unbounded lookup is
+# the failure this bound exists to end.
+toolchain_timeout="${BUILD_SIBLINGS_TOOLCHAIN_TIMEOUT:-1200}"
+case "$toolchain_timeout" in
+'' | *[!0-9]* | 0) toolchain_timeout=1200 ;;
+esac
+
 # print_log_tail <label> <log>: the last $fail_tail_lines lines of <log>,
 # prefixed so they stand apart from this script's own messages. Diagnostics
 # only; callers decide the exit status.
@@ -141,16 +152,33 @@ resolve_toolchain() {
 	local toolchain_output toolchain_log
 	toolchain_output="$(mktemp "$LOG_DIR/toolchain.XXXXXX")" || exit 1
 	toolchain_log="${toolchain_output}.log"
+	# The lookup's output is captured, so nothing reaches the caller's log while
+	# it runs. Say what it is about to wait on, and bound the wait: an unbounded
+	# silent `repro exec` looks the same as a hang until the caller's own limit
+	# cancels the job (launcher-recorder-e2e's Build ct-print step ran 2 h 8 min
+	# this way on a CI runner).
+	echo "build-siblings.sh: resolving the toolchain (repro exec $CT_ROOT, at most ${toolchain_timeout} s; its output goes to $toolchain_log)" >&2
+	local toolchain_started="$SECONDS" rc=0
 	# NUL-separated values preserve spaces and shell metacharacters as data.
+	# `--kill-after` makes the bound hold even for a `repro exec` that ignores
+	# SIGTERM.
 	# shellcheck disable=SC2016
-	if ! repro exec "$CT_ROOT" -- bash -e -c '
+	timeout --kill-after=30 "$toolchain_timeout" repro exec "$CT_ROOT" -- bash -e -c '
 		nim_path=$(command -v nim)
 		nimble_path=$(command -v nimble)
 		zstd_cflags=$(pkg-config --cflags libzstd 2>/dev/null || pkg-config --cflags zstd)
 		zstd_libs=$(pkg-config --libs libzstd 2>/dev/null || pkg-config --libs zstd)
 		printf "%s\0" "$(dirname "$nim_path")" "$(dirname "$nimble_path")" "$zstd_cflags" "$zstd_libs"
-	' >"$toolchain_output" 2>"$toolchain_log"; then
-		echo "build-siblings.sh: ERROR: required toolchain lookup failed; see $toolchain_log" >&2
+	' >"$toolchain_output" 2>"$toolchain_log" || rc=$?
+	if [ "$rc" -ne 0 ]; then
+		# timeout exits 124 when the bound ends the call, and 137 once it has
+		# had to KILL it. 137 can also be an OOM kill, so the exit code is in
+		# the message as well.
+		if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+			echo "build-siblings.sh: ERROR: toolchain lookup did not finish within ${toolchain_timeout} s (exit $rc); repro exec on $CT_ROOT was still running; see $toolchain_log" >&2
+		else
+			echo "build-siblings.sh: ERROR: required toolchain lookup failed; see $toolchain_log" >&2
+		fi
 		# Naming the log is not enough: the beam arm of desktop-edge run
 		# 36407231861 ended on exactly the line above, on an ephemeral runner
 		# whose log was gone with it, so why `repro exec` failed was never seen.
@@ -158,6 +186,7 @@ resolve_toolchain() {
 		rm -f "$toolchain_output"
 		exit 1
 	fi
+	echo "build-siblings.sh: toolchain resolved in $((SECONDS - toolchain_started)) s" >&2
 	local nim_toolchain_bin nimble_toolchain_bin
 	if ! {
 		IFS= read -r -d '' nim_toolchain_bin &&

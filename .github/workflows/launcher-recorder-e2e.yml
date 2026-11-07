@@ -1073,9 +1073,23 @@ jobs:
         # LRC-2 added to scripts/build-siblings.sh; the repo builds it at its
         # own root because downstream tests resolve it at the fixed sibling
         # path ../codetracer-trace-format-nim/ct-print.
+        #
+        # BOUNDED AND VISIBLE.  The step used to have no limit of its own, so a
+        # stall in it held a runner slot until the job's 180-minute limit, and
+        # its log said nothing while it did: build-siblings.sh captured the
+        # toolchain lookup and the build into files, and the step printed only
+        # what came before them (codetracer-pm issue 2026-11-06-launcher-
+        # recorder-e2e-build-ct-print-hangs-silently-until-the-job-timeout.md).
+        # The timeout below covers the `nix develop` shell entry as well as the
+        # build.  BUILD_SIBLINGS_VERBOSE streams the build's own output into
+        # this log, and build-siblings.sh bounds its toolchain lookup
+        # (BUILD_SIBLINGS_TOOLCHAIN_TIMEOUT, 20 minutes by default) and names
+        # that stage before it starts, so a stall shows which one it is in.
+        timeout-minutes: 60
         shell: bash
         env:
           CT_DIR: ${{ steps.plan.outputs.ct-dir }}
+          BUILD_SIBLINGS_VERBOSE: "1"
         run: |
           set -euo pipefail
           cd "${CT_DIR}"

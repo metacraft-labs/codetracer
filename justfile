@@ -256,6 +256,14 @@ test-build-siblings-native-backend:
 test-build-siblings-noir:
   bash ci/test/build-siblings-noir-fresh-checkout-test.sh
 
+# Assert that `build-siblings` names its toolchain lookup and gives up on it
+# after a bound when that lookup stalls, instead of printing nothing until its
+# caller's job limit cancels it (launcher-recorder-e2e's Build ct-print step).
+# Replaces only `repro` with a stub that stalls; the script is the real one.
+# Needs the sibling at ../codetracer-trace-format-nim; takes about 10 seconds.
+test-build-siblings-toolchain-stage:
+  bash ci/test/build-siblings-toolchain-stage-bounded-test.sh
+
 # Assert that the built output tree carries the assets `ct` reads on startup
 # (`<prefix>/config/default_config.yaml` and `default_layout.json`). A tup
 # build exits 0 when a runtime asset is simply never published -- there is no
