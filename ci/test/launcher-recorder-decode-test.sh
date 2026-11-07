@@ -20,8 +20,12 @@
 #   codetracer-trace-format-nim's own checked-in goldens, which are what its
 #   `ct-print` prints for each of the two trace families this gate records:
 #
-#     tests/goldens/ct_print_full.json          v4 (python/ruby/js/beam)
+#     tests/goldens/ct_print_full.json.hex      v4 (python/ruby/js/beam)
 #     tests/goldens/native_replay_hello.full.json   native MCR bundle
+#
+#   trace-format-nim ships the v4 golden as uppercase hex of its bytes (the
+#   plain .json was removed in 19cad03); the gate decodes it into its scratch
+#   directory, so the document it asserts against is the same bytes.
 #
 #   Not hand-written stand-ins: the point of several assertions below is
 #   exactly what the real decoder really emits (`counts.steps: 0` on a perfectly
@@ -92,15 +96,29 @@ trap 'rm -rf "$TMP"' EXIT
 # The real decoder output.
 # ---------------------------------------------------------------------------
 GOLDENS="$WS_ROOT/codetracer-trace-format-nim/tests/goldens"
-V4_DOC="$GOLDENS/ct_print_full.json"
+V4_HEX="$GOLDENS/ct_print_full.json.hex"
 NATIVE_DOC="$GOLDENS/native_replay_hello.full.json"
-for f in "$V4_DOC" "$NATIVE_DOC"; do
+for f in "$V4_HEX" "$NATIVE_DOC"; do
 	[[ -f $f ]] || die "missing $f
   This gate asserts against codetracer-trace-format-nim's real ct-print
   goldens, not against documents written here -- several of its assertions are
   about what the decoder actually emits.  Clone the sibling next to this repo.
   Deliberately NOT a skip."
 done
+
+# The v4 golden is stored as uppercase hex of its bytes.  `basenc` (GNU
+# coreutils) decodes it and exits non-zero on malformed or missing input,
+# possibly after writing a prefix, so a damaged golden stops the gate here
+# instead of being read as a shorter document.  The decoded copy goes to the
+# scratch directory that the EXIT trap removes.
+load_v4_golden() { # <hex-golden> <decoded-out>
+	basenc --base16 -d <"$1" >"$2" ||
+		die "could not decode $1 as base16 (needs GNU coreutils basenc)
+  This gate asserts against codetracer-trace-format-nim's real ct-print
+  goldens, so a golden that does not decode is a failure, not a skip."
+}
+V4_DOC="$TMP/ct_print_full.json"
+load_v4_golden "$V4_HEX" "$V4_DOC"
 
 [[ -f $LIB ]] || die "missing $LIB"
 # shellcheck source=../lib/launcher-recorder-decode.sh
@@ -185,6 +203,38 @@ if [[ $(lrd_trace_shape "$TMP/m1.json") == "unknown" ]]; then
 else
 	t_fail "M1: a half-native document was classified '$(lrd_trace_shape "$TMP/m1.json")'"
 fi
+
+# M0: the golden loader the gate runs must FAIL on a damaged or missing golden,
+# with the remedy in its message.  Each case runs in a subshell, because the
+# loader's failure path is `die`, which exits.
+load_refuses() { # <hex> <out> -> 0 when the loader exits non-zero
+	( load_v4_golden "$1" "$2" ) >/dev/null 2>&1 && return 1
+	return 0
+}
+names_remedy() { # <hex> <out> -> 0 when the loader's failure message names the golden
+	local err
+	err="$( (load_v4_golden "$1" "$2") 2>&1 )"
+	[[ $err == *"could not decode $1"* ]]
+}
+printf 'ABC\n' >"$TMP/m0-odd.hex"
+printf '7B0A2020ZZ\n' >"$TMP/m0-junk.hex"
+check "M0: an odd-length hex golden is refused" \
+	load_refuses "$TMP/m0-odd.hex" "$TMP/m0-odd.json"
+check "M0: a golden with a non-hex character is refused" \
+	load_refuses "$TMP/m0-junk.hex" "$TMP/m0-junk.json"
+check "M0: a missing hex golden is refused" \
+	load_refuses "$TMP/m0-absent.hex" "$TMP/m0-absent.json"
+check "M0: the refusal names the damaged golden and the remedy" \
+	names_remedy "$TMP/m0-odd.hex" "$TMP/m0-odd.json"
+# Control: the real golden is NOT refused, so the refusals above are about the
+# input and not about a loader or helper that refuses everything.
+check_not "M0 (control): the real v4 golden is not refused by the loader" \
+	load_refuses "$V4_HEX" "$TMP/m0-control.json"
+check_not "M0 (control): the real v4 golden produces no refusal message" \
+	names_remedy "$V4_HEX" "$TMP/m0-control.json"
+is_v4_document() { [[ $(lrd_trace_shape "$1") == v4 ]]; }
+check "M0 (control): the real v4 golden loads and decodes to a v4 document" \
+	is_v4_document "$V4_DOC"
 
 # ---------------------------------------------------------------------------
 echo
