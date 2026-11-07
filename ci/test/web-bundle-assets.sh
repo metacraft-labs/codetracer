@@ -195,7 +195,21 @@ build() {
 	return 0
 }
 build renderer src/frontend/ui_js.nim "${out_dir}/ui.js" \
-	-d:chronicles_enabled=off -d:ctRenderer -d:ctWeb
+	-d:chronicles_enabled=off -d:ctRenderer -d:ctWeb \
+	--stackTrace:off --lineTrace:off
+# NO NIM STACK OR LINE TRACING IN THE PUBLISHED RENDERER, because with it the
+# file does not fit on the host. `nim js` instruments every proc with a frame
+# record (`var F = {procname, prev: framePtr, filename, line}`) and every
+# statement with `F.line = …`. That bookkeeping alone was ~8.7 MB of a
+# 26,692,838-byte ui.js at dev f288cfadc3, and Cloudflare Pages refuses any
+# file over 25 MiB: deploy run 42308193072 (attempt 3) built and proved the
+# bundle, then failed at upload with "ui.js is 25.6 MiB in size". Without the
+# two switches the same tree builds to 19,851,298 bytes. Nothing in the web
+# product reads a Nim stack trace — an uncaught exception still carries its
+# message and the browser's own JS stack — and the pre-publish browser proofs
+# in deploy-web-codetracer.yml run against THIS build, not a traced one.
+# Step 4b below holds the ceiling, so the next growth fails here rather than
+# after an hour of CI at the upload.
 # NO `-d:nodejs`, and that is a correction rather than a tidy-up. This script
 # assembles the bundle that gets DEPLOYED, and `-d:nodejs` selects Nim's node
 # arm — the same define `ci/test/renderer-browser-build.sh` proves substitutes
@@ -909,6 +923,26 @@ while IFS=$'\t' read -r id path mode req behaviour; do
 		fi
 	fi
 done < <(printf '%s\n' "${manifest}")
+echo
+
+# ---------------------------------------------------------------------------
+echo "Step 4b: no file in the bundle is larger than the host will accept"
+echo "    Cloudflare Pages serves no file over 25 MiB"
+echo "    (https://developers.cloudflare.com/pages/platform/limits/#file-size)."
+echo "    wrangler only says so at upload, after every proof has already run."
+# ---------------------------------------------------------------------------
+readonly PAGES_MAX_FILE_BYTES=$((25 * 1024 * 1024))
+oversize=0
+while IFS= read -r -d '' f; do
+	size="$(wc -c <"${f}" | tr -d ' ')"
+	if [ "${size}" -gt "${PAGES_MAX_FILE_BYTES}" ]; then
+		bad "${f#"${out_dir}"/}: ${size} bytes, over the ${PAGES_MAX_FILE_BYTES}-byte Pages limit"
+		oversize=$((oversize + 1))
+	fi
+done < <(find "${out_dir}" -type f -print0)
+if [ "${oversize}" -eq 0 ]; then
+	ok "every file is at most ${PAGES_MAX_FILE_BYTES} bytes (ui.js: $(wc -c <"${out_dir}/ui.js" 2>/dev/null | tr -d ' ') bytes)"
+fi
 echo
 
 # ---------------------------------------------------------------------------
