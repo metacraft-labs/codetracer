@@ -21,7 +21,12 @@ most an icon or a spinner beside them, in a story that declares data), an
 empty panel (one that
 shows only its chrome, its own name or Monaco's gutter; content counts only
 where it is visible, so an ancestor's `opacity: 0` hides it), a panel drawn at
-another type size than the window's, a console or page error, a failed or
+another type size than the window's, a character drawn as the missing-glyph
+box (a control reading as a boxed "?": no face on the page nor any fallback
+has it) or a font face that failed to load, a caption-bar icon control that
+paints no mark or one too faint to see (read from the rendered pixels), an
+Agent Activity message at another size than the window's body text, a
+variable's name cut with no ellipsis, a console or page error, a failed or
 aborted request (only the theme stylesheet a theme switch supersedes is
 excused) or a play check that threw (its `--self-test` plants each of those
 first and must see them fail). When a story counts as rendered, and the

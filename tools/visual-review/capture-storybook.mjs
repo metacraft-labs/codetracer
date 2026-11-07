@@ -12,7 +12,7 @@ import { requireFreshStorybookStatic } from "./storybook-freshness.mjs";
 // render check's own definition (`just storybook-check-render`), not a
 // second one. A capture is taken only after that readiness and only of a
 // story its judge passes; a story it fails is REFUSED, its image not written.
-import { loadStoryDeclarations, renderAndJudge } from "../../storybook/scripts/story-render-judge.mjs";
+import { JUDGE_RULES, loadStoryDeclarations, renderAndJudge } from "../../storybook/scripts/story-render-judge.mjs";
 import { readVerdicts, writeVerdicts } from "./capture-verdicts.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -148,6 +148,24 @@ for (const name of sessionTabsExports) {
 for (const [name, storyId] of Object.entries(agentHarborViews)) {
   views[name] = { storyId, brief: agentHarborBrief, sizes: agentHarborSizes, themes: agentHarborThemes };
 }
+// The agentic surfaces in whole windows (the `agentic-window` layouts of
+// the Layouts section): a window is reviewed at a laptop's and a desktop
+// monitor's size, in both themes. One view per story, named after its id
+// (`codetracer-layouts--l-1-failing-test-agent-at-work` ->
+// `agent-harbor-layout-l-1-failing-test-agent-at-work`), in the family
+// `agent-harbor-layouts`, read from the story declarations so a layout added
+// there is captured without a second list here. Read in `main`, after the
+// StoryBook build has written the declarations; an unreadable declarations
+// file fails the tool there, and an empty family fails its `--view`.
+const agentHarborLayoutViews = [];
+function addLayoutViews(declarations) {
+  for (const story of declarations) {
+    if (story.kind !== "layout" || story.surface !== "agentic-window") continue;
+    const name = `agent-harbor-layout-${story.id.replace(/^codetracer-layouts--/, "")}`;
+    views[name] = { storyId: story.id, brief: agentHarborBrief, sizes: ["laptop", "wide"], themes: agentHarborThemes };
+    agentHarborLayoutViews.push(name);
+  }
+}
 // `--view agent-harbor-fleet` (or any prefix ending in a view family) selects
 // every view of that family, e.g. `--view agent-harbor-ref` for the
 // reference panels.
@@ -156,6 +174,7 @@ const viewFamilies = {
   "agent-harbor-fleet": Object.keys(agentHarborViews).filter((v) => v.startsWith("agent-harbor-fleet-")),
   "agent-harbor-ref": Object.keys(agentHarborViews).filter((v) => v.startsWith("agent-harbor-ref-")),
   "agent-harbor-session-tabs": sessionTabsExports.map((name) => `agent-harbor-${kebab(name)}`),
+  "agent-harbor-layouts": agentHarborLayoutViews,
 };
 
 // The colour themes, as the StoryBook `theme` global (.storybook/preview.js)
@@ -373,6 +392,7 @@ async function main() {
   // own message ("Run without --no-build first") named the condition it could
   // not detect. See tools/visual-review/storybook-freshness.mjs.
   requireFreshStorybookStatic(repoRoot);
+  addLayoutViews(loadStoryDeclarations(repoRoot).stories);
 
   const allViews = {
     ...loadStorybookViews(),
@@ -385,6 +405,13 @@ async function main() {
   }
 
   const expandedViews = selectedViews.flatMap((name) => viewFamilies[name] ?? [name]);
+  // A family asked for by name must name something: an empty one would
+  // capture nothing and still exit 0.
+  for (const name of selectedViews) {
+    if (viewFamilies[name] && viewFamilies[name].length === 0) {
+      throw new Error(`view family "${name}" is empty (no story declares it; run just storybook-stories)`);
+    }
+  }
   // The declarations say what each story is meant to show (data, or a
   // declared empty / loading / error state): the judge needs them.
   const declarations = new Map(loadStoryDeclarations(repoRoot).stories.map((story) => [story.id, story]));
@@ -516,6 +543,7 @@ async function main() {
         verdicts[basename(screenshotPath)] = {
           storyId: view.storyId, size: sizeName, theme, viewport, verdict: "pass",
           kind: observed.page.kind, state: story.state ?? "data",
+          rules: JUDGE_RULES,
           contentBoxes: observed.page.contentBoxes,
           sha256: createHash("sha256").update(readFileSync(screenshotPath)).digest("hex"),
           judgedAt: new Date().toISOString(),

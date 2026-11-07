@@ -30,8 +30,11 @@
 // alone (in a CodeTracer panel and in an Agent Harbor panel; beside a
 // spinner; split over an inline element; in one panel of a layout), an editor with
 // an empty model, content faded out by an ancestor, the review without its
-// diff, a panel mounted in `#main`, a console error, a thrown error, failed
-// and aborted requests, and a declared empty state that shows data) and
+// diff, a panel mounted in `#main`, a control drawn as a character no face
+// has, an icon face that fails to load, a caption-bar control with no mark
+// and one with a mark too faint to see, an agent's reply at a smaller size,
+// a variable's name cut with no ellipsis, a console error, a thrown error,
+// failed and aborted requests, and a declared empty state that shows data) and
 // exits 0 only when the unplanted story passes and every planted one fails
 // with the right category.
 
@@ -86,6 +89,13 @@ const storyTimeoutMs = Number(argValues("--timeout")[0] ?? 90000);
 // Each plant is JavaScript appended to `dist/components.js` as the page loads
 // it, wrapping the real `mountCodeTracerStory` the bundle exports, so the
 // failure goes through the real mount and the real StoryBook render.
+//
+// plantStyle(css): a plant that adds `css` to the page with the mount, so a
+// stylesheet defect is planted through the real stylesheets and the real
+// story.
+const plantStyle = (css) => `mountCodeTracerStory = (function (real) { return function (c, k, n, f) {
+      const s = document.createElement("style"); s.textContent = ${JSON.stringify(css)};
+      document.head.appendChild(s); return real(c, k, n, f); }; })(mountCodeTracerStory);`;
 const PLANTS = {
   placeholder: {
     expect: "placeholder",
@@ -271,6 +281,61 @@ const PLANTS = {
         if (h && h.firstChild) h.replaceChildren();
       }).observe(document.body, { childList: true, subtree: true });
       return dispose; }; })(mountCodeTracerStory);`,
+  },
+  "missing-glyph": {
+    // A control drawn as a character no face on the page (nor any fallback)
+    // has, as the Test Results pane's open control once drew: a boxed "?"
+    // where U+23F5 should be.
+    expect: "missing-glyph",
+    code: `mountCodeTracerStory = (function (real) { return function (c, k, n, f) {
+      const dispose = real(c, k, n, f);
+      const b = document.createElement("span"); b.className = "planted-control"; b.textContent = "\u23F5";
+      c.appendChild(b); return dispose; }; })(mountCodeTracerStory);`,
+  },
+  "icon-font-not-loaded": {
+    // An icon face declared with a broken font file (a data: URL, so no
+    // request fails and only the new rule can catch it), and a glyph drawn
+    // in it.
+    expect: "missing-glyph",
+    code: `mountCodeTracerStory = (function (real) { return function (c, k, n, f) {
+      const dispose = real(c, k, n, f);
+      const s = document.createElement("style");
+      s.textContent = "@font-face { font-family: PlantedIcons; src: url(data:font/woff2;base64,AAAAAAAA) format('woff2'); }";
+      document.head.appendChild(s);
+      const i = document.createElement("span"); i.style.fontFamily = "PlantedIcons"; i.textContent = "\u{F101} planted icon";
+      c.appendChild(i); return dispose; }; })(mountCodeTracerStory);`,
+  },
+  // The caption bar's marks, the conversation's type size and the
+  // Variables' names: each planted as the stylesheet defect it stands for
+  // (a style the page gains after the mount), into a story that shows the
+  // element.
+  "caption-icon-no-mark": {
+    // The toolbar's Stop button with its mark painted in nothing, as the
+    // light theme's undefined image role left it.
+    expect: "icon-ink",
+    story: "codetracer-views--debug-shell",
+    code: plantStyle("#stop-image::before { background-color: transparent !important; }"),
+  },
+  "caption-icon-low-contrast": {
+    // A window button's mark painted barely apart from the bar, as the
+    // light theme's near-white glyphs were on the light bar.
+    expect: "icon-ink",
+    story: "codetracer-views--debug-shell",
+    code: plantStyle("#menu .menu-button-svg.close { background-color: #3a3a3a !important; }"),
+  },
+  "agent-reply-small": {
+    // The agent's final reply at 14px, as it was drawn while every other
+    // message of the conversation was at the body size.
+    expect: "type-size",
+    story: "codetracer-layouts--l-3-agent-needs-input",
+    code: plantStyle(".agent-final-message { font-size: 0.875rem !important; }"),
+  },
+  "variable-name-cut": {
+    // The name's box shrinking with the value's again, clipped with no
+    // ellipsis ("masses" drawn as "mas").
+    expect: "name-cut",
+    story: "codetracer-layouts--l-1-failing-test-agent-at-work",
+    code: plantStyle(".isonim-state .value-expanded-atom-parent > .value-name-container { flex: 1 1 auto !important; min-width: 0 !important; overflow: hidden !important; }"),
   },
   "panel-inside-main": {
     // The panel mounted inside \`#main\` (its 1.25rem), where the harness

@@ -472,8 +472,10 @@ it) shows the same stories. Add, rename or remove a story there, never in a
 After changing a story, a fixture or a view a story mounts, run
 `just storybook-check-render`: it renders every story and fails on a
 placeholder (nothing but an empty, loading or error message counts as one),
-an empty panel, a panel at another type size than the app's, or a console
-error. `tools/visual-review/capture-storybook.mjs` shoots only stories that
+an empty panel, a panel or a conversation message at another type size than
+the app's, a character drawn as the missing-glyph box (or a font face that
+failed to load), a caption-bar icon with no visible mark, a variable name cut
+with no ellipsis, or a console error. `tools/visual-review/capture-storybook.mjs` shoots only stories that
 check passes; check a capture directory with `just check-storybook-captures <dir>`. A story shows realistic data
 unless it declares `state = "empty"` / `"loading"` / `"error"`.
 

@@ -39,6 +39,25 @@
 //   type-size    A panel (a GoldenLayout root) inherits another type size
 //                than the window's: the app mounts every panel in `#ROOT`'s
 //                session container, never in `#main` (1.25rem).
+//   missing-glyph  A visible character drawn as the missing-glyph box (no
+//                face the element names, nor any fallback the machine has,
+//                draws it: a control reading as a boxed "?"), or a declared
+//                font face that failed to load (an icon font that never
+//                arrived).
+//                The type-size category also covers the conversation: an
+//                agent's reply or the user's message (`.msg-content` in the
+//                Agent Activity pane) drawn at another size than the
+//                window's body size.
+//   icon-ink     A control of the caption bar drawn as an icon (no text of
+//                its own: the logo, the debugger toolbar, the window
+//                buttons) that paints no mark, or a mark so faint against
+//                the control's own background that it reads as none (below
+//                2:1; an inert control needs only to show a mark), measured
+//                on the rendered pixels.
+//   name-cut     A variable's name (`.value-name`, the Variables pane, the
+//                Scratchpad, a value popup) drawn cut, with no ellipsis: the
+//                name is a fixed part of the row and the value is what gives
+//                up width.
 //
 // What a story is meant to show comes from its declaration
 // (`src/frontend/stories/codetracer_stories.nim`, `state`, emitted into
@@ -50,6 +69,8 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+
+import { decodePng } from "../../tools/visual-review/capture-verdicts.mjs";
 
 // --- What counts as a state, and as chrome ------------------------------------
 
@@ -85,6 +106,10 @@ export const MESSAGE_WORDING = {
   loading: STATE_TEXT.loading,
   error: STATE_TEXT.error,
 };
+// The categories a verdict can carry. A capture records the ones it was
+// judged under (`capture-verdicts.json`), so an image judged before a rule
+// existed can be told from one judged under it.
+export const JUDGE_RULES = ["placeholder", "empty", "error", "type-size", "missing-glyph", "icon-ink", "name-cut"];
 export const MISSING_TEXT = "No structure story registered";
 export const MISSING_CLASS = "ct-storybook-missing";
 // Elements whose text is chrome rather than content: controls, tabs and the
@@ -375,6 +400,128 @@ function inspectStory({ statePatterns, stateText, messageWording, missingText, m
   // A layout drawn without the harness's panel frames (the standalone app
   // shell) is judged as one box, as a panel is.
   if (contentBoxes.length === 0) contentBoxes.push(pageBox(content, kind || "story"));
+  // Missing glyphs: a character no face the element names, and no fallback
+  // face the machine has, can draw comes out as the missing-glyph box
+  // (".notdef", "tofu"): a control that reads as "?" in a box, or an icon
+  // font that never loaded. Each visible character outside ASCII is drawn on
+  // a canvas in its element's font and compared with a code point no font
+  // has (U+10FFFD, private use, plane 16): drawn identically, it is the box
+  // too. Whitespace and format characters draw nothing and are skipped, as
+  // is text set at no size (an accessible label kept in the DOM, drawn as
+  // an icon). Every story text counts, chrome included: a broken control is
+  // broken wherever it is.
+  const glyphCanvas = document.createElement("canvas");
+  glyphCanvas.width = 48; glyphCanvas.height = 48;
+  const glyphContext = glyphCanvas.getContext("2d", { willReadFrequently: true });
+  const drawnAs = new Map();
+  const pixelsOf = (font, ch) => {
+    const key = font + "\u0000" + ch;
+    if (drawnAs.has(key)) return drawnAs.get(key);
+    glyphContext.clearRect(0, 0, 48, 48);
+    glyphContext.font = font;
+    glyphContext.fillStyle = "#000";
+    glyphContext.fillText(ch, 4, 36);
+    const data = glyphContext.getImageData(0, 0, 48, 48).data;
+    let ink = 0, hash = 0;
+    for (let i = 3; i < data.length; i += 4) { if (data[i]) ink++; hash = (hash * 31 + data[i]) | 0; }
+    const value = { ink, hash };
+    drawnAs.set(key, value);
+    return value;
+  };
+  const missingGlyphs = [];
+  const seenGlyphs = new Set();
+  const glyphWalker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let node = glyphWalker.nextNode(); node; node = glyphWalker.nextNode()) {
+    const parent = node.parentElement;
+    if (!parent || !visible(parent) || parent.closest(".monaco-editor")) continue;
+    const style = getComputedStyle(parent);
+    if (parseFloat(style.fontSize) < 2) continue;
+    const font = `${style.fontStyle} ${style.fontWeight} 32px ${style.fontFamily}`;
+    for (const ch of node.textContent) {
+      const code = ch.codePointAt(0);
+      if (code < 0x80 || /[\s\p{Cf}\p{Mn}]/u.test(ch)) continue;
+      const key = font + "\u0000" + ch;
+      if (seenGlyphs.has(key)) continue;
+      seenGlyphs.add(key);
+      const drawn = pixelsOf(font, ch);
+      const box = pixelsOf(font, "\u{10FFFD}");
+      if (box.ink > 0 && drawn.ink === box.ink && drawn.hash === box.hash) {
+        missingGlyphs.push({ char: ch, code: "U+" + code.toString(16).toUpperCase().padStart(4, "0"),
+                             font: style.fontFamily.slice(0, 80), text: lineOf(parent).slice(0, 60) });
+      }
+    }
+  }
+  // A face the page declared that failed to load (a missing or broken font
+  // file): whatever it was meant to draw falls back, or is a box.
+  const failedFonts = [...new Set([...document.fonts].filter((f) => f.status === "error")
+    .map((f) => f.family.replace(/["']/g, "")))];
+  // The conversation's type size: every message of the Agent Activity pane
+  // -- the user's, the agent's while it works, its final reply -- is body
+  // text, drawn at the window's size. (Inline code and the tool-call rows
+  // inside a message are their own elements and are not measured here.)
+  const replySizes = [];
+  for (const message of root.querySelectorAll(".agent-msg-wrapper .msg-content")) {
+    if (!visible(message) || !lineOf(message)) continue;
+    const size = getComputedStyle(message).fontSize;
+    if (size !== rootFontSize) replySizes.push({ size, rootSize: rootFontSize, text: lineOf(message).slice(0, 60) });
+  }
+  // Variable names cut with no ellipsis: the part of a name a person sees
+  // ends where the first ancestor that clips it ends (overflow other than
+  // visible; a scrolling box does not count, what it hides is reachable).
+  // A name is cut when less than all of it shows, and the clipping box draws
+  // no `…`.
+  const cutNames = [];
+  for (const name of root.querySelectorAll(".value-name")) {
+    if (!visible(name)) continue;
+    const text = name.textContent.replace(/[:\s]+$/, "");
+    if (!text) continue;
+    const full = name.scrollWidth;
+    const left = name.getBoundingClientRect().left;
+    let right = left + full;
+    let clipper = null;
+    for (let a = name; a && a !== root; a = a.parentElement) {
+      const cs = getComputedStyle(a);
+      if (cs.overflowX === "visible" || cs.overflowX === "auto" || cs.overflowX === "scroll") continue;
+      const r = a.getBoundingClientRect().right;
+      if (r < right) { right = r; clipper = a; }
+    }
+    const shown = right - left;
+    if (shown < full - 1) {
+      const ellipsis = [name, clipper].some((e) => e && getComputedStyle(e).textOverflow === "ellipsis");
+      if (!ellipsis) cutNames.push({ text: text.slice(0, 60), shown: Math.round(Math.max(0, shown)), full: Math.round(full) });
+    }
+  }
+  // The caption bar's icon controls, for the pixel check of the marks they
+  // paint (`measureIconInk`): every visible control in `#menu` with no text
+  // of its own. Its content box (inside its border and padding: the logo's
+  // button draws a border of its own) is where the mark is drawn.
+  const iconControls = [];
+  // A control's own text is what a person sees of it: a tooltip it holds,
+  // hidden until hover, is not.
+  const shownText = (el) => {
+    let text = "";
+    const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n = w.nextNode(); n; n = w.nextNode()) if (n.parentElement && visible(n.parentElement)) text += n.textContent;
+    return text.trim();
+  };
+  for (const el of document.querySelectorAll("#menu button, #menu [role=button], #menu .menu-button-svg")) {
+    if (!visible(el) || shownText(el)) continue;
+    if (el.parentElement?.closest("#menu button, #menu [role=button], #menu .menu-button-svg")) continue;
+    const cs = getComputedStyle(el);
+    const b = el.getBoundingClientRect();
+    const px = (v) => parseFloat(v) || 0;
+    const x = b.left + px(cs.borderLeftWidth) + px(cs.paddingLeft);
+    const y = b.top + px(cs.borderTopWidth) + px(cs.paddingTop);
+    const width = b.right - px(cs.borderRightWidth) - px(cs.paddingRight) - x;
+    const height = b.bottom - px(cs.borderBottomWidth) - px(cs.paddingBottom) - y;
+    if (width < 8 || height < 8) continue;
+    // Off the window (a toolbar wider than its bar, pushed out at an edge):
+    // no one sees it, so it is not judged on pixels.
+    if (x + width <= 0 || y + height <= 0 || x >= innerWidth || y >= innerHeight) continue;
+    const name = el.id ? "#" + el.id : el.getAttribute("title") || el.getAttribute("aria-label") || el.className.toString().split(" ").pop() || el.tagName.toLowerCase();
+    iconControls.push({ name, x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height),
+                        inert: el.disabled === true || el.getAttribute("aria-disabled") === "true" });
+  }
   const box = content.getBoundingClientRect();
   return {
     kind,
@@ -390,6 +537,11 @@ function inspectStory({ statePatterns, stateText, messageWording, missingText, m
     stateTexts,
     messageTexts,
     typeSizes,
+    missingGlyphs,
+    failedFonts,
+    replySizes,
+    cutNames,
+    iconControls,
     contentBox: { width: Math.round(box.width), height: Math.round(box.height) },
     contentBoxes,
   };
@@ -463,6 +615,25 @@ export function judge(story, observed) {
   for (const t of page.typeSizes ?? []) {
     add("type-size", `the ${t.panel} panel inherits ${t.size}, the window's type size is ${t.rootSize}` +
       " (mounted outside the app's #ROOT > .session-container chain)");
+  }
+  for (const g of page.missingGlyphs ?? []) {
+    add("missing-glyph", `draws ${g.char} (${g.code}) as the missing-glyph box: no face of "${g.font}" nor any fallback has it ("${g.text}")`);
+  }
+  for (const family of page.failedFonts ?? []) {
+    add("missing-glyph", `the font face "${family}" failed to load`);
+  }
+  for (const r of page.replySizes ?? []) {
+    add("type-size", `the Agent Activity message "${r.text}" is drawn at ${r.size}, the window's body size is ${r.rootSize}`);
+  }
+  for (const icon of page.iconInk ?? []) {
+    if (icon.ink < ICON_MIN_INK) {
+      add("icon-ink", `the caption bar's ${icon.name} control paints no mark (${icon.ink} pixel(s) apart from its background in its ${icon.width}x${icon.height} box)`);
+    } else if (!icon.inert && icon.contrast < ICON_MIN_CONTRAST) {
+      add("icon-ink", `the caption bar's ${icon.name} control paints its mark at ${icon.contrast.toFixed(2)}:1 against its background, below ${ICON_MIN_CONTRAST}:1`);
+    }
+  }
+  for (const n of page.cutNames ?? []) {
+    add("name-cut", `the variable name "${n.text}" is cut to ${n.shown} of its ${n.full}px with no ellipsis`);
   }
   return failures;
 }
@@ -557,6 +728,74 @@ export async function settleStory(page, observed, { timeoutMs = 90000 } = {}) {
   }
 }
 
+// --- The caption bar's marks, on the pixels ---------------------------------------
+
+// A mark is at least this many pixels apart from its control's background.
+export const ICON_MIN_INK = 6;
+// Below this contrast against its background a mark reads as missing: the
+// light theme's near-white window glyphs on the light bar drew at 1.07:1.
+// It is the floor for "the control shows its mark", read on pixels, not WCAG
+// 2.2 SC 1.4.11's 3:1 between colours
+// (https://www.w3.org/TR/WCAG22/#non-text-contrast): a hairline mark never
+// reaches its colour on any pixel, so the new-tab "+" (#b0b0b0 on #333333,
+// 5.8:1 as colours) draws at 2.7:1 at its strongest pixel, and a 3:1 pixel
+// floor would fail a mark whose colours pass.
+export const ICON_MIN_CONTRAST = 2;
+// A pixel counts as part of the mark when it differs from the background by
+// at least this contrast ratio: anti-aliased edges count, noise does not.
+const INK_THRESHOLD = 1.25;
+
+// WCAG relative luminance of an sRGB colour (0..255 channels).
+// https://www.w3.org/TR/WCAG22/#dfn-relative-luminance
+function luminance(r, g, b) {
+  const lin = (c) => { c /= 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+export function contrastRatio(a, b) {
+  const la = luminance(...a), lb = luminance(...b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+// iconInkOf(image, box) -> { ink, contrast }: in `box` of a decoded
+// screenshot, the background is the colour most pixels have; the mark is
+// every pixel at least INK_THRESHOLD apart from it, and its contrast is the
+// strongest of them (a stroke's core, not its anti-aliased edge).
+export function iconInkOf(image, box) {
+  const counts = new Map();
+  const at = (x, y) => {
+    const o = (y * image.width + x) * image.channels;
+    return [image.pixels[o], image.pixels[o + 1], image.pixels[o + 2]];
+  };
+  const x0 = Math.max(0, box.x), y0 = Math.max(0, box.y);
+  const x1 = Math.min(image.width, box.x + box.width), y1 = Math.min(image.height, box.y + box.height);
+  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+    const key = at(x, y).join(",");
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  let background = null, most = -1;
+  for (const [key, n] of counts) if (n > most) { most = n; background = key.split(",").map(Number); }
+  let ink = 0, contrast = 1;
+  if (!background) return { ink, contrast };
+  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+    const c = contrastRatio(at(x, y), background);
+    if (c >= INK_THRESHOLD) { ink++; if (c > contrast) contrast = c; }
+  }
+  return { ink, contrast };
+}
+
+// measureIconInk(page, observed): the marks the caption bar's icon controls
+// paint, read from one screenshot of the bar (`observed.page.iconControls`
+// names the boxes), into `observed.page.iconInk`.
+async function measureIconInk(page, observed) {
+  const controls = observed.page?.iconControls ?? [];
+  if (controls.length === 0) return;
+  const viewport = page.viewportSize();
+  const bottom = Math.min(viewport.height, Math.max(...controls.map((c) => c.y + c.height)) + 1);
+  const shot = await page.screenshot({ clip: { x: 0, y: 0, width: viewport.width, height: bottom }, animations: "disabled", caret: "hide" });
+  const image = decodePng(shot);
+  observed.page.iconInk = controls.map((c) => ({ ...c, ...iconInkOf(image, c) }));
+}
+
 // inspectRenderedStory(page, story, observed) -> observed.page: what the
 // settled story drew, as `judge` reads it.
 export async function inspectRenderedStory(page, story, observed) {
@@ -572,6 +811,7 @@ export async function inspectRenderedStory(page, story, observed) {
     // title is not content.
     storyTitles: [story.name, story.name?.split(":")[0]].filter(Boolean),
   });
+  await measureIconInk(page, observed);
   return observed.page;
 }
 
