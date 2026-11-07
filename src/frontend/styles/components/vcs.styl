@@ -115,6 +115,16 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   flex-shrink: 0
   opacity: 0.7
 
+// The header's icon is a Font Awesome glyph (`vcs_vm.headerIcon`, U+F126
+// code-fork), drawn in the face the theme declares for it (`flow.styl`).
+// Without this rule it inherited SpaceGrotesk, which has no glyph at that
+// private-use code point, and the header drew a missing-glyph box before
+// the branch or review title.
+.vcs-branch-icon
+  flex-shrink: 0
+  font-family: FontAwesome
+  opacity: 0.7
+
 .vcs-branch-name
   flex: 1
   overflow: hidden

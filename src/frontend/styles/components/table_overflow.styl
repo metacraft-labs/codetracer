@@ -51,11 +51,21 @@
   min-width: 0
   max-width: 100%
 
-.isonim-state .value-expanded-atom-parent > div,
-.isonim-state .value-expanded-compound-parent > div
+.isonim-state .value-expanded-atom-parent > div:not(.value-name-container),
+.isonim-state .value-expanded-compound-parent > div:not(.value-name-container)
   min-width: 0
   flex: 1 1 auto
   overflow: hidden
+
+// The name is not cut: it is a fixed part of the row, with the expander, the
+// type and the controls, and only the value gives up width (with its `…`).
+// The name's box is a `div` beside the value's, and the rule above used to
+// reach it too, so the two shrank in proportion to their widths and a long
+// value took the name with it -- "masses" drawn as "mas", clipped, with no
+// `…`, beside a value that still had room to give.
+.isonim-state .value-expanded-atom-parent > .value-name-container,
+.isonim-state .value-expanded-compound-parent > .value-name-container
+  flex: 0 0 auto
 
 .isonim-state .value-view
   min-width: 0
