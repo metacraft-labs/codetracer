@@ -1066,8 +1066,9 @@ proc rowWhere*(row: TestResultsRow): string =
 
 proc rowDuration*(row: TestResultsRow): string =
   ## Empty until the test has actually run. "0 ms" against a test nobody
-  ## started is a measurement the pane did not make.
-  if row.state == trsNotRun: ""
+  ## started, or one still running (its duration arrives with its verdict),
+  ## is a measurement the pane did not make.
+  if row.state in {trsNotRun, trsRunning}: ""
   else: formatDurationMs(row.durationMs)
 
 proc runButtonTitle*(vm: TestResultsVM): string =

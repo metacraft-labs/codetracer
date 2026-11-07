@@ -47,7 +47,7 @@ template ck(condition: untyped) =
   inc asserted
   check condition
 
-const ExpectedAssertions = 59
+const ExpectedAssertions = 60
 
 const MainNr = """
 fn main(x: Field, y: pub Field) {
@@ -84,6 +84,7 @@ suite "PLAT-53: the words every front-end draws":
     ck rowWhere(rowOf("t", trsPassed, line = 0)) == "src/main.nr"
     ck rowWhere(rowOf("t", trsPassed, file = "")) == ""
     ck rowDuration(rowOf("t", trsNotRun)) == ""
+    ck rowDuration(rowOf("t", trsRunning)) == ""
     ck rowDuration(rowOf("t", trsFailed)) == "12ms"
     # The desktop's view answers with the SAME procs (re-exported).
     ck isonim_test_results_view.stateMark(trsFailed) == "✗"
