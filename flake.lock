@@ -1301,7 +1301,7 @@
       "flake": false,
       "locked": {
         "lastModified": 1793943053,
-        "narHash": "sha256-/ZmLdBAbMrQyYWpKnSWWjTa8PS6hSsoR6HeEzUcODvk=",
+        "narHash": "sha256-b96Ebu73mDZa9iw1jpMC90B/Waia9XcxpBjY6dmlsJM=",
         "owner": "metacraft-labs",
         "repo": "codetracer-native-backend",
         "rev": "02b7ba9b5fc5b43218933aae5c31b073376953fc",
