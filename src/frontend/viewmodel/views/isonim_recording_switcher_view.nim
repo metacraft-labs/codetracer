@@ -22,6 +22,8 @@ when defined(js):
 
 import nim_agents_isonim_viewmodels/agent_harbor/recording_switcher
 
+from ./agent_harbor_words import stateSuffix
+
 export signals, computation, components, recording_switcher
 
 const
@@ -33,16 +35,6 @@ proc appendRendered[R, N](r: R; host, child: N) =
 
 when defined(js):
   proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
-
-proc stateSuffix*(state: RecordingState): string =
-  ## A recording's state as it reads on the button itself: still loading
-  ## `2 …`, failed to load `3 ✕`, no longer there `4 ?`; a ready one is its
-  ## number alone.
-  case state
-  of rsReady: ""
-  of rsLoading: " \xE2\x80\xA6"
-  of rsFailed: " \xE2\x9C\x95"
-  of rsMissing: " ?"
 
 proc invokeSelect(onSelect: proc(id: string); id: string) =
   if onSelect != nil: onSelect(id)

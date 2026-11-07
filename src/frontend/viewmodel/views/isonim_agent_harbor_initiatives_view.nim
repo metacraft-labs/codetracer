@@ -30,16 +30,14 @@ when defined(js):
 
 import nim_agents_isonim_viewmodels/agent_harbor/[initiatives_vm, initiative_progress_vm]
 
-export signals, computation, components, initiatives_vm, initiative_progress_vm
+import ./agent_harbor_words
+
+export signals, computation, components, initiatives_vm, initiative_progress_vm,
+  agent_harbor_words
 
 const
   AgentHarborInitiativesClass* = "component-container agent-harbor-initiatives"
   AgentHarborProgressClass* = "component-container agent-harbor-progress"
-  InitiativesLoadingText* = "Loading initiatives\xE2\x80\xA6"
-  InitiativesEmptyText* = "No initiative is running on this server."
-  ProgressEmptyText* = "Select an initiative to see its progress."
-  InitiativeSessionLinesShown* = 4
-    ## Session lines under an initiative before "+N more".
 
 type
   AgentHarborInitiativesCallbacks* = object
@@ -58,13 +56,6 @@ proc statusClassName*(status: MilestoneStatusClass): string =
   of mscPlanned: "planned"
   of mscCompleted: "completed"
   of mscOther: "other"
-
-proc statusCountsText*(counts: array[MilestoneStatusClass, int]): string =
-  ## `2 in progress · 1 blocked · 9 planned · 5 completed`.
-  var parts: seq[string]
-  for status in MilestoneStatusClass:
-    if counts[status] > 0: parts.add $counts[status] & " " & $status
-  parts.join(" \xC2\xB7 ")
 
 proc renderError[R](r: R; title, message: string; retry: proc()): auto =
   ui(r):
@@ -253,16 +244,6 @@ proc renderAgentHarborInitiativesPanel*[R, N](r: R; vm: InitiativesVM;
 # ---------------------------------------------------------------------------
 # Initiative Progress
 # ---------------------------------------------------------------------------
-
-proc milestoneMetaParts*(m: MilestoneLine): tuple[before, failing, after: string] =
-  ## The meta line split around its failing count (`1 failing`), which a
-  ## view draws in the error role; `failing` is "" when no test fails.
-  let full = (if m.deliverablesText.len > 0: m.deliverablesText & " \xC2\xB7 " else: "") &
-             m.testsText
-  let word = $m.failing & " failing"
-  let at = if m.failing > 0: full.find(word) else: -1
-  if at < 0: return (full, "", "")
-  (full[0 ..< at], word, full[at + word.len .. ^1])
 
 proc renderMilestone[R](r: R; m: MilestoneLine): auto =
   let metaParts = milestoneMetaParts(m)

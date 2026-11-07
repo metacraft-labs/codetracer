@@ -35,14 +35,13 @@ when defined(js):
 import nim_agents_isonim_viewmodels/agent_harbor/session_tabs_vm
 import ./isonim_session_tabs_view
 
-export signals, computation, components, session_tabs_vm
+import ./agent_harbor_words
+
+export signals, computation, components, session_tabs_vm, agent_harbor_words
 
 const
   AgentHarborTabStripClass* = "session-tab-bar ah-tab-strip"
   AgentHarborSessionListClass* = "component-container ah-session-list"
-  AgentHarborTabsLoadingText* = "Loading sessions\xE2\x80\xA6"
-  AgentHarborTabsErrorText* = "Sessions unavailable"
-  AgentHarborTabsEmptyText* = "No sessions yet. Start one with + or from any Agent Harbor front-end."
 
 type
   AgentHarborTabCallbacks* = object
@@ -54,11 +53,6 @@ type
 
 proc attentionClass*(attention: SessionAttention): string =
   "ah-att-" & $attention
-
-proc tabLabelOf*(tab: SessionItem): string =
-  ## A tab's text: its title; for a session known only by its id, the id
-  ## alone -- "Session " would take the room that tells tabs apart.
-  if tab.titleSource == lsId: tab.shortId else: tab.title
 
 proc tabClassOf*(vm: SessionTabStripVM; tab: SessionItem): string =
   result = tabClass(tab.active) & " ah-tab " & attentionClass(tab.attention)
@@ -217,26 +211,6 @@ proc renderAgentHarborTabStrip*[R, N](r: R; vm: SessionTabStripVM;
 # ---------------------------------------------------------------------------
 # The sidebar and docked layouts
 # ---------------------------------------------------------------------------
-
-proc countsText*(counts: array[SessionAttention, int]): string =
-  ## `2 need input · 1 idle · 3 running` -- the states worth naming; ended
-  ## sessions are not (the node's mark says when nothing is live).
-  var parts: seq[string]
-  if counts[saNeedsInput] > 0:
-    parts.add $counts[saNeedsInput] & (if counts[saNeedsInput] == 1: " needs input" else: " need input")
-  if counts[saIdle] > 0: parts.add $counts[saIdle] & " idle"
-  if counts[saRunning] > 0: parts.add $counts[saRunning] & " running"
-  if counts[saQueued] > 0: parts.add $counts[saQueued] & " queued"
-  if counts[saFailed] > 0: parts.add $counts[saFailed] & " failed"
-  parts.join(" \xC2\xB7 ")
-
-proc metaOf*(tab: SessionItem): string =
-  ## The row's meta line after its status word: origin, agent, host.
-  var parts: seq[string]
-  if tab.originLabel.len > 0: parts.add tab.originLabel
-  if tab.agentLabel.len > 0: parts.add tab.agentLabel
-  if tab.host.len > 0: parts.add tab.host
-  parts.join(" \xC2\xB7 ")
 
 proc renderListRow[R](r: R; vm: SessionTabStripVM; cb: AgentHarborTabCallbacks;
                       tab: SessionItem; collapsed: bool): auto =
