@@ -339,6 +339,11 @@ async function main() {
     if (!themes.includes(theme)) throw new Error(`Unknown theme "${theme}" (known: ${themes.join(", ")})`);
   }
   const noBuild = hasArg("--no-build");
+  const regionsArg = argValue("--regions");
+  const regionsDeclaration = regionsArg ? JSON.parse(readFileSync(resolve(regionsArg), "utf8")) : null;
+  if (regionsDeclaration && !Array.isArray(regionsDeclaration.regions)) {
+    throw new Error(`${regionsArg}: no "regions" array`);
+  }
   const listViews = hasArg("--list-views");
   const port = Number(argValue("--port") ?? "6106");
 
@@ -520,6 +525,49 @@ async function main() {
           sha256: createHash("sha256").update(readFileSync(screenshotPath)).digest("hex"),
           judgedAt: new Date().toISOString(),
         };
+        // `--regions <declaration>`: where the browser laid out each declared
+        // region of the story (src/tests/visual/agent-harbor-regions.json),
+        // written beside the image as `<capture id>.regions.json`. The GPUI
+        // story window writes the same file from GPUI's own layout, and the
+        // CTF-P1b layout test compares the two. A region is the first VISIBLE
+        // match of its selector (an element with no area, or hidden, is left
+        // out, as the GPUI side leaves out an element laid out with none).
+        if (regionsDeclaration) {
+          const regions = await page.evaluate((declared) => {
+            const out = {};
+            for (const region of declared) {
+              for (const element of document.querySelectorAll(region.web)) {
+                const rect = element.getBoundingClientRect();
+                const style = getComputedStyle(element);
+                if (rect.width <= 0 || rect.height <= 0 || style.visibility === "hidden" || style.display === "none") continue;
+                out[region.name] = { x: rect.x, y: rect.y, w: rect.width, h: rect.height };
+                // A `fill` region also records the colour the browser
+                // composites behind the element: its own background over
+                // its ancestors', each `rgba()` blended over the one below
+                // (https://www.w3.org/TR/compositing-1/#simplealphacompositing),
+                // down to the page's opaque white.
+                if (region.fill) {
+                  const layers = [];
+                  for (let e = element; e; e = e.parentElement) layers.push(getComputedStyle(e).backgroundColor);
+                  let rgb = [255, 255, 255];
+                  for (const layer of layers.reverse()) {
+                    const m = layer.match(/rgba?\(([^)]+)\)/);
+                    if (!m) continue;
+                    const [r, g, b, a = 1] = m[1].split(",").map((v) => Number(v.trim()));
+                    rgb = [r, g, b].map((c, i) => Math.round(c * a + rgb[i] * (1 - a)));
+                  }
+                  out[region.name].fill = `#${rgb.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
+                }
+                break;
+              }
+            }
+            return out;
+          }, regionsDeclaration.regions.map(({ name, web, fill }) => ({ name, web, fill: Boolean(fill) })));
+          writeFileSync(
+            join(outDir, `${captureId}.regions.json`),
+            `${JSON.stringify({ renderer: "web", story: view.storyId, theme, viewport, regions }, null, 2)}\n`,
+          );
+        }
         const htmlPath = join(dumpDir, `${captureId}.html`);
         writeFileSync(htmlPath, await page.content());
 

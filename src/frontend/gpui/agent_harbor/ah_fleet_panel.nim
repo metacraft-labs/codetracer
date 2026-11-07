@@ -29,12 +29,29 @@ export fleet_vm, ah_theme
 
 const
   ColumnsFromPx = 960        ## `@container ah-fleet (min-width: 60rem)`
-  TitleColumnPx = 512        ## 32rem
-  AgentColumnPx = 144        ## 9rem
-  HostColumnPx = 112         ## 7rem
-  InitiativeColumnPx = 192   ## 12rem
+  NarrowHeaderPx = 640       ## `@container ah-fleet (max-width: 40rem)`
   DurationColumnPx = 80      ## 5rem
-  AgeColumnPx = 48           ## 3rem
+  AgeColumnPx = 48           ## 3rem: a narrow row's age
+  WideAgeColumnPx = 64       ## 4rem: the "Active" column
+  GridGapPx = 8
+
+type
+  FleetGrid = object
+    ## The wide panel's columns (`.ah-fleet-row` / `.ah-fleet-columns`,
+    ## a grid): the dot, then the session at two shares of the free width,
+    ## agent, host and (when any row has one) initiative at one share each,
+    ## then duration (5rem) and active (4rem), 8px apart -- measured in the
+    ## browser at 1440px: 8, 486, 243, 243, 243, 80, 64. Fluid, so a wider
+    ## window widens every share.
+    session, share: int
+
+proc fleetGrid(widthPx: int; anyInitiative: bool): FleetGrid =
+  let shares = if anyInitiative: 5 else: 4
+  let columns = if anyInitiative: 7 else: 6
+  let free = widthPx - 2 * InsetPx - MarkPx - DurationColumnPx - WideAgeColumnPx -
+             GridGapPx * (columns - 1)
+  let share = max(0, free) div shares
+  FleetGrid(session: 2 * share, share: share)
 
 proc markOf(p: AhPalette; category: FleetCategory): MarkStyle =
   ## The row's status dot (`.ah-fleet-cat-*`), in the sessions' status roles.
@@ -74,21 +91,27 @@ proc drawFilter(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; filter: Flee
   r.addEventListener(result, "click", proc() = vm.setFilter(chosen))
 
 proc cell(r: GpuiRenderer; p: AhPalette; s: string; widthPx: int; name: string;
-          right = false): GpuiElement =
-  result = r.text(s, CaptionPx, p.textLabel, pairs = [("width", $widthPx & "px"),
+          right = false; colour = ""): GpuiElement =
+  result = r.text(s, CaptionPx, if colour.len > 0: colour else: p.textLabel,
+                  pairs = [("width", $widthPx & "px"),
                                                      ("min-width", $widthPx & "px")])
   if right: r.setStyle(result, "text-align", "right")
   r.tag(result, "col", name)
 
 proc drawRow(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; row: FleetRow;
-             columns, anyInitiative: bool): GpuiElement =
+             columns, anyInitiative: bool; grid: FleetGrid): GpuiElement =
   let id = row.id
   result = r.box(pairs = [("gap", "8px"), ("items", "start"), ("padding-top", "6px"),
                           ("padding-bottom", "6px"), ("padding-left", $InsetPx & "px"),
                           ("padding-right", $InsetPx & "px"), ("flex-shrink", "0"),
                           ("cursor", "pointer")])
   r.rule(result, p.borderSecondary)
-  if row.selected: r.setStyle(result, "background", p.hover)
+  # The selected row: the action surface, and every text of it -- status
+  # words and notes included -- in the selected commit row's text colour
+  # (`.ah-fleet-row-selected`, after vcs.styl).
+  let sel = row.selected
+  let selText = p.selectedText
+  if sel: r.setStyle(result, "background", p.action)
   r.tag(result, "row", id)
   r.tag(result, "category", $row.category)
   r.tag(result, "selected", $row.selected)
@@ -99,23 +122,25 @@ proc drawRow(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; row: FleetRow;
   r.appendChild(result, markHolder)
   let main = r.box(column = true, pairs = [("gap", "2px"), ("flex-grow", "1"),
                                            ("overflow", "hidden")])
-  if columns: r.styles(main, [("width", $TitleColumnPx & "px"), ("flex-grow", "0"),
+  if columns: r.styles(main, [("width", $grid.session & "px"), ("flex-grow", "0"),
                               ("min-width", "0px")])
   let title = r.text(row.title, BodyPx,
-                     if row.titleIsPlaceholder: p.textCaption else: p.textBody)
+                     if sel: selText
+                     elif row.titleIsPlaceholder: p.textCaption else: p.textBody)
   r.tag(title, "title", row.title)
   r.appendChild(main, title)
   let meta = r.box(pairs = [("gap", "6px"), ("items", "center")])
-  let status = r.text(row.statusLabel, CaptionPx, p.statusColour(row.category), shrink = false)
+  let status = r.text(row.statusLabel, CaptionPx,
+                      if sel: selText else: p.statusColour(row.category), shrink = false)
   r.tag(status, "status", row.statusLabel)
   r.appendChild(meta, status)
   let metaWords = (if columns: row.metaPartsShort else: row.metaParts).join(Middot)
-  let metaText = r.text(metaWords, CaptionPx, p.textCaption)
+  let metaText = r.text(metaWords, CaptionPx, if sel: selText else: p.textCaption)
   r.tag(metaText, "meta", metaWords)
   r.appendChild(meta, metaText)
   r.appendChild(main, meta)
   if row.failureText.len > 0:
-    let failure = r.text(row.failureText, CaptionPx, p.textError)
+    let failure = r.text(row.failureText, CaptionPx, if sel: selText else: p.textError)
     r.tag(failure, "failure", row.failureText)
     r.appendChild(main, failure)
   let shown = if row.expanded: row.activity.len else: min(1, row.activity.len)
@@ -123,7 +148,8 @@ proc drawRow(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; row: FleetRow;
     let level = if i < row.activityLevels.len: row.activityLevels[i] else: ""
     let line = r.box(pairs = [("gap", "6px"), ("items", "center")])
     let t = r.text(row.activity[i], CaptionPx,
-                   if level == "error": p.textError else: p.textLabel)
+                   if sel: selText
+                   elif level == "error": p.textError else: p.textLabel)
     r.tag(t, "activity", row.activity[i])
     r.appendChild(line, t)
     if i == 0 and row.activity.len + row.activityMore > 1:
@@ -131,22 +157,29 @@ proc drawRow(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; row: FleetRow;
       let label = if row.expanded: "less" else: "+" & $hidden
       let more = r.box(pairs = [("height", "16px"), ("items", "center"),
                                 ("padding-left", "6px"), ("padding-right", "6px"),
-                                ("rounded", "4px"), ("background", p.tertiary),
-                                ("flex-shrink", "0"), ("cursor", "pointer")])
+                                ("rounded", "4px"), ("flex-shrink", "0"),
+                                ("cursor", "pointer")])
+      # On a selected row the chip takes the selection's text, no fill.
+      if not sel: r.setStyle(more, "background", p.tertiary)
       r.tag(more, "activity-more", label)
-      r.appendChild(more, r.text(label, CaptionPx - 1, p.textLabel, shrink = false))
+      r.appendChild(more, r.text(label, CaptionPx - 1, if sel: selText else: p.textLabel,
+                                 shrink = false))
       r.addEventListener(more, "click", proc() = vm.toggleExpanded(id))
       r.appendChild(line, more)
     r.appendChild(main, line)
   r.appendChild(result, main)
   if columns:
-    r.appendChild(result, r.cell(p, row.agentText, AgentColumnPx, "agent"))
-    r.appendChild(result, r.cell(p, row.host, HostColumnPx, "host"))
+    let c = if sel: selText else: ""
+    r.appendChild(result, r.cell(p, row.agentText, grid.share, "agent", colour = c))
+    r.appendChild(result, r.cell(p, row.host, grid.share, "host", colour = c))
     if anyInitiative:
-      r.appendChild(result, r.cell(p, row.initiative, InitiativeColumnPx, "initiative"))
-    r.appendChild(result, r.cell(p, row.durationLabel, DurationColumnPx, "duration", true))
-  let age = r.text(row.ageLabel, CaptionPx, p.textCaption, shrink = false,
-                   pairs = [("width", $AgeColumnPx & "px"), ("text-align", "right")])
+      r.appendChild(result, r.cell(p, row.initiative, grid.share, "initiative",
+                                   colour = c))
+    r.appendChild(result, r.cell(p, row.durationLabel, DurationColumnPx, "duration", true,
+                                 colour = c))
+  let age = r.text(row.ageLabel, CaptionPx, if sel: selText else: p.textCaption, shrink = false,
+                   pairs = [("width", $(if columns: WideAgeColumnPx else: AgeColumnPx) & "px"),
+                            ("text-align", "right"), ("flex-shrink", "0")])
   r.tag(age, "age", row.ageLabel)
   r.appendChild(result, age)
 
@@ -160,39 +193,54 @@ proc drawFleetPanel*(r: GpuiRenderer; host: GpuiElement; vm: FleetSnapshotVM;
   let ready = vm.state.val == asReady
   r.tag(host, "state", stateName(vm.state.val))
   let header = r.drawSectionHeader(p, "Agent Harbor sessions", vm.sourceLabel,
-                                   if ready: vm.headerSummary else: "")
-  if ready and vm.withheldNote.len > 0:
-    let caveat = r.text(vm.withheldNote, CaptionPx, p.textCaption, shrink = false,
-                        pairs = [("font-style", "italic")])
-    r.tag(caveat, "caveat", vm.withheldNote)
-    r.insertBefore(header, caveat, nthChild(header, childCount(header) - 1))
-  r.appendChild(host, header)
+                                   if ready: vm.headerSummary else: "", widthPx,
+                                   caveat = if ready: vm.withheldNote else: "",
+                                   narrow = widthPx <= NarrowHeaderPx)
+  # The head, as the web's `.ah-fleet-head`: the section header, the filter
+  # strip and the column names, one block above the rows.
+  let head = r.box(column = true, pairs = [("flex-shrink", "0")])
+  r.tag(head, "head", "section header, filters, columns")
+  r.appendChild(head, header)
+  r.appendChild(host, head)
   let columns = widthPx >= ColumnsFromPx
+  let grid = fleetGrid(widthPx, ready and vm.anyInitiative)
   let anyInitiative = ready and vm.anyInitiative
+  # The filter strip shows over data only; the column names whenever the
+  # panel is wide, loading and failing included (`.ah-fleet-columns`).
   if ready:
-    let filters = r.box(pairs = [("gap", "4px"), ("items", "center"), ("padding-top", "6px"),
-                                 ("padding-bottom", "6px"), ("padding-left", $InsetPx & "px"),
-                                 ("padding-right", $InsetPx & "px"), ("flex-shrink", "0")])
+    # The filter strip wraps at a narrow width (`.ah-fleet-filters`:
+    # `flex-wrap: wrap`, 6px by 8px in, 4px apart).
+    let filters = r.box(column = true, pairs = [("padding-top", "6px"),
+                                                ("padding-bottom", "6px"),
+                                                ("padding-left", $InsetPx & "px"),
+                                                ("padding-right", $InsetPx & "px"),
+                                                ("flex-shrink", "0")])
     r.rule(filters, p.borderSecondary)
     let counts = vm.counts
+    var chips: seq[FlowItem]
     for filter in FleetFilter:
-      r.appendChild(filters, r.drawFilter(p, vm, filter, counts.filterCount(filter),
-                                          filter == vm.filter.val))
-    r.appendChild(host, filters)
-    if columns:
-      let names = r.box(pairs = [("gap", "8px"), ("items", "center"), ("height", "22px"),
-                                 ("padding-left", $(InsetPx + MarkPx + 8) & "px"),
-                                 ("padding-right", $InsetPx & "px"), ("flex-shrink", "0")])
-      r.rule(names, p.borderSecondary)
-      r.tag(names, "columns", "")
-      r.appendChild(names, r.cell(p, "Session", TitleColumnPx, "session"))
-      r.appendChild(names, r.cell(p, "Agent", AgentColumnPx, "agent"))
-      r.appendChild(names, r.cell(p, "Host", HostColumnPx, "host"))
-      if anyInitiative:
-        r.appendChild(names, r.cell(p, "Initiative", InitiativeColumnPx, "initiative"))
-      r.appendChild(names, r.cell(p, "Duration", DurationColumnPx, "duration", true))
-      r.appendChild(names, r.cell(p, "Active", AgeColumnPx, "age", true))
-      r.appendChild(host, names)
+      let n = counts.filterCount(filter)
+      chips.add FlowItem(el: r.drawFilter(p, vm, filter, n, filter == vm.filter.val),
+                         widthPx: 16 + textPx(filterLabel(filter), CaptionPx) + 6 +
+                                  textPx($n, CaptionPx))
+    r.appendChild(filters, r.flowLines(chips, max(1, widthPx - 2 * InsetPx), 4,
+                                       ControlPx, 4))
+    r.appendChild(head, filters)
+  if columns:
+    # `.ah-fleet-columns`: 24px names, 4px by 8px in, over a hairline.
+    let names = r.box(pairs = [("gap", $GridGapPx & "px"), ("items", "center"), ("height", "33px"),
+                               ("padding-left", $(InsetPx + MarkPx + GridGapPx) & "px"),
+                               ("padding-right", $InsetPx & "px"), ("flex-shrink", "0")])
+    r.rule(names, p.borderSecondary)
+    r.tag(names, "columns", "")
+    r.appendChild(names, r.cell(p, "Session", grid.session, "session"))
+    r.appendChild(names, r.cell(p, "Agent", grid.share, "agent"))
+    r.appendChild(names, r.cell(p, "Host", grid.share, "host"))
+    if anyInitiative:
+      r.appendChild(names, r.cell(p, "Initiative", grid.share, "initiative"))
+    r.appendChild(names, r.cell(p, "Duration", DurationColumnPx, "duration", true))
+    r.appendChild(names, r.cell(p, "Active", WideAgeColumnPx, "age", true))
+    r.appendChild(head, names)
   case vm.state.val
   of asIdle, asLoading:
     r.appendChild(host, r.notice(p, AgentHarborFleetLoadingText, "loading"))
@@ -208,7 +256,8 @@ proc drawFleetPanel*(r: GpuiRenderer; host: GpuiElement; vm: FleetSnapshotVM;
         else: AgentHarborFleetFilteredEmptyText, "empty"))
     else:
       let list = r.box(column = true, pairs = [("flex-grow", "1"), ("overflow", "hidden")])
-      for row in rows: r.appendChild(list, r.drawRow(p, vm, row, columns, anyInitiative))
+      r.tag(list, "rows", "list")
+      for row in rows: r.appendChild(list, r.drawRow(p, vm, row, columns, anyInitiative, grid))
       r.appendChild(host, list)
 
 proc mountFleetPanel*(r: GpuiRenderer; host: GpuiElement; vm: FleetSnapshotVM;

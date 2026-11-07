@@ -36,7 +36,8 @@ const
     "agent-harbor-initiative-progress",
   ]
     ## Every surface of the Agent Harbor section this module draws.
-  FrameTitlePx = 28
+  FrameTitlePx = 32          ## `.lm_header`
+  FrameInsetPx = 4           ## the golden-layout root's side inset
 
 type
   AhStoryMount* = object
@@ -59,18 +60,34 @@ proc hasGpuiRendering*(surface: string): bool =
 
 proc drawFrame(r: GpuiRenderer; p: AhPalette; title: string;
                widthPx, heightPx: int): tuple[frame, body: GpuiElement] =
-  ## A panel's frame as the window draws one: its title tab on the strip,
-  ## the panel under it (the web story's golden-layout tab).
+  ## A panel's frame as the web story frames one (a golden-layout stack):
+  ## 4px in from the window's sides, a 32px header holding the panel's tab
+  ## (4px down, 24px high, rounded on top, on the panel's surface, its title
+  ## at 14px in the label role), then the panel body on the same surface,
+  ## 8px below the tab and rounded at the bottom.
   let frame = r.box(column = true, pairs = [("width", $widthPx & "px"),
                                             ("height", $heightPx & "px"),
+                                            ("padding-left", $FrameInsetPx & "px"),
+                                            ("padding-right", $FrameInsetPx & "px"),
                                             ("background", p.ground)])
-  let strip = r.box(pairs = [("height", $FrameTitlePx & "px"), ("items", "center"),
-                             ("padding-left", "8px"), ("flex-shrink", "0")])
-  let t = r.text(title, CaptionPx + 1, p.textBody, shrink = false)
+  let strip = r.box(pairs = [("height", $FrameTitlePx & "px"), ("flex-shrink", "0"),
+                             ("items", "end")])
+  r.tag(strip, "frame-header", title)
+  let tab = r.box(pairs = [("height", "24px"), ("flex-grow", "1"), ("items", "center"),
+                           ("padding-left", "8px"), ("padding-right", "8px"),
+                           ("background", p.panel),
+                           ("border-top-left-radius", $ControlRadiusPx & "px"),
+                           ("border-top-right-radius", $ControlRadiusPx & "px")])
+  let t = r.text(title, BodyPx, p.textLabel, shrink = false)
   r.tag(t, "frame-title", title)
-  r.appendChild(strip, t)
+  r.appendChild(tab, t)
+  r.appendChild(strip, tab)
   r.appendChild(frame, strip)
-  let body = r.box(column = true, pairs = [("flex-grow", "1"), ("overflow", "hidden")])
+  let body = r.box(column = true, pairs = [("flex-grow", "1"), ("min-height", "0px"),
+                                           ("overflow", "hidden"), ("padding-top", "8px"),
+                                           ("background", p.panel),
+                                           ("border-bottom-left-radius", $ControlRadiusPx & "px"),
+                                           ("border-bottom-right-radius", $ControlRadiusPx & "px")])
   r.appendChild(frame, body)
   (frame, body)
 
@@ -91,12 +108,16 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
     let (frame, body) = r.drawFrame(p, frameTitle, widthPx, heightPx)
     m.root = frame
     host = r.createElement("div")
+    # The panel takes the body's height (a percentage of a flex item's
+    # height does not resolve in GPUI's layout; growing does).
+    r.setStyle(host, "flex-grow", "1")
+    r.setStyle(host, "min-height", "0px")
     r.appendChild(body, host)
   else:
     host = r.createElement("div")
     m.root = host
   m.view = host
-  let bodyW = widthPx
+  let bodyW = if frameTitle.len > 0: widthPx - 2 * FrameInsetPx else: widthPx
   var rootDisposer: proc()
   createRoot proc(dispose: proc()) =
     rootDisposer = dispose

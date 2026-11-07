@@ -11,8 +11,50 @@
 # (`ci/test/plat35-gpui-window-capture.sh`, the real GPUI window on headless
 # sway). A view missing from either side is reported by name
 # and the script exits non-zero after doing the others.
+#
+# parity-pairs.sh --agent-harbor [out-dir] — the same for CTF-P1b's Agent
+# Harbor stories: every GPUI capture `build/ctf-p1b/gpui/<id>.png`
+# (`ci/test/ctf-p1b-gpui-story-capture.sh`) beside the web capture of the same
+# story, theme and size, `build/ctf-p1b/web/<id>.png`
+# (`ci/test/ctf-p1b-web-capture.sh`), as `<id>.web.png`, `<id>.gpui.png` and
+# `<id>.side-by-side.png` (web on the left) in <out-dir> (default
+# `build/ctf-p1b/parity`, where the layout test writes its report). A capture
+# with no partner is reported by name and the script exits non-zero after
+# doing the others.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+if [ "${1:-}" = "--agent-harbor" ]; then
+	gpui_dir="${CTF_P1B_GPUI_OUT:-${root}/build/ctf-p1b/gpui}"
+	web_dir="${CTF_P1B_WEB_OUT:-${root}/build/ctf-p1b/web}"
+	out="${2:-${root}/build/ctf-p1b/parity}"
+	mkdir -p "${out}"
+	# One imagemagick for every pair: a `nix shell` per pair costs a second
+	# each, over hundreds of pairs.
+	# shellcheck disable=SC2016  # the inner bash expands these, from its arguments
+	nix shell nixpkgs#imagemagick --command bash -c '
+		set -uo pipefail
+		gpui_dir="$1" web_dir="$2" out="$3"
+		status=0 pairs=0
+		shopt -s nullglob
+		ids=()
+		for f in "${gpui_dir}"/*.png "${web_dir}"/*.png; do
+			ids+=("$(basename "${f}" .png)")
+		done
+		[ "${#ids[@]}" -gt 0 ] || { echo "parity-pairs: no captures in ${gpui_dir} or ${web_dir}" >&2; exit 1; }
+		for id in $(printf "%s\n" "${ids[@]}" | sort -u); do
+			gpui="${gpui_dir}/${id}.png" web="${web_dir}/${id}.png"
+			for f in "${web}" "${gpui}"; do
+				[ -f "${f}" ] || { echo "parity-pairs: ${id}: missing ${f}" >&2; status=1; continue 2; }
+			done
+			cp "${web}" "${out}/${id}.web.png"
+			cp "${gpui}" "${out}/${id}.gpui.png"
+			magick "${web}" "${gpui}" -background "#ff00ff" +append "${out}/${id}.side-by-side.png"
+			pairs=$((pairs + 1))
+		done
+		echo "parity-pairs: ${pairs} Agent Harbor pairs in ${out}"
+		exit "${status}"' pairs "${gpui_dir}" "${web_dir}" "${out}"
+	exit $?
+fi
 out="${1:-${root}/build/plat35/parity}"
 mkdir -p "${out}"
 status=0

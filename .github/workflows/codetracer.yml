@@ -4136,6 +4136,16 @@ jobs:
         if: ${{ !cancelled() }}
         run: nix develop .#devShells.x86_64-linux.default --command just plat35-capture-gpui-window
 
+      - name: CTF-P1b's Agent Harbor stories as real windows, against the web layout
+        # One `codetracer-gpui-story` window per story, theme and size on
+        # GuiAssert's headless sway (the same windowed shim and GuiAssert
+        # checkout as above), then the `agent-harbor-gpui-captures` lane:
+        # each capture's laid-out regions against the committed web record
+        # (`src/tests/visual/agent-harbor-web-regions.json`) within PLAT-35's
+        # pane-rectangle tolerance; a missing or blank capture fails by name.
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just ctf-p1b-gpui-captures
+
       - name: Upload the frames
         if: failure()
         uses: actions/upload-artifact@v4
@@ -4147,6 +4157,7 @@ jobs:
             build/plat48-gpui/
             build/plat69/
             build/plat35/gpui-window/
+            build/ctf-p1b/
             src/tests/visual/plat45-gpui-arrangement.json
             src/tests/visual/plat47-gpui-window.json
             src/tests/visual/plat48-gpui-window.json

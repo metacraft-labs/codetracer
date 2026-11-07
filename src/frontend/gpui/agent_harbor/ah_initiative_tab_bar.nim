@@ -30,12 +30,18 @@ export initiative_tabs_vm, ah_theme
 const
   TabPadPx = 10
   TabInnerGapPx = 6
-  TabTitlePx = BodyPx
-  InitiativeTabMaxPx = 320   ## 20rem: the active tab with its recordings
+  TabTitlePx = BodyLargePx    ## the bar's 1rem, as the session strip's
+  TabMinPx = 128              ## every initiative tab's `min-width: 8rem`
+  InactiveTabMaxPx = 256      ## an inactive tab's `max-width: 16rem`
+  InitiativeTabMaxPx = 384    ## the active one's (24rem): it holds its recordings
   RecordingButtonGapPx = 2
-  PopupWidthPx = 384
-  ElsewhereMenuPx = 420
+  PopupWidthPx = 384          ## `.ah-initiative-popup`: 24rem, at most 80vw
+  ElsewhereMenuPx = 608       ## `.ah-elsewhere-menu`: 38rem, at most 100vw - 1rem
   BarGapPx = 4
+  BarChipGapPx = 8            ## the bar's `+N` chip: 6px margin, "+" 2px more
+  InboxStepPx = 25
+  InboxPositionPx = 72        ## `.ah-inbox-position` min-width: 4.5rem
+  InboxMarginPx = 6           ## `.ah-inbox` margin-right: 0.375rem
 
 proc recordingButtonWidth(rb: RecordingButton): int =
   max(18, 8 + textPx($rb.number & stateSuffix(rb.state), CaptionPx))
@@ -46,17 +52,34 @@ proc recordingsWidth(buttons: RecordingButtons): int =
   for rb in buttons.buttons: result += recordingButtonWidth(rb) + RecordingButtonGapPx
   if buttons.hidden > 0: result += textPx("+" & $buttons.hidden, CaptionPx) + 4
 
-proc initiativeTabWidth*(vm: InitiativeTabStripVM; tab: StripTab): int =
-  ## Its content, from 12rem (`InitiativeTabMinWidthPx`) to 20rem.
-  var w = 2 * TabPadPx + MarkPx + TabInnerGapPx + textPx(tab.title, TabTitlePx)
+proc initiativeTabContent(vm: InitiativeTabStripVM; tab: StripTab): int =
+  ## Its content's width, unclamped: what a browser takes as its flex base
+  ## size, and so what it shrinks in proportion to.
+  result = 2 * TabPadPx + MarkPx + TabInnerGapPx + textPx(tab.title, TabTitlePx)
   if tab.kind == stkInitiative:
-    w += TabInnerGapPx + textPx(tab.progressText, CaptionPx)
-    if tab.active: w += recordingsWidth(vm.recordingButtonsOf(tab.id))
+    result += TabInnerGapPx + textPx(tab.progressText, CaptionPx)
+    if tab.active: result += recordingsWidth(vm.recordingButtonsOf(tab.id))
   elif tab.session.originShort.len > 0:
-    w += TabInnerGapPx + textPx(tab.session.originShort, 10)
-  let low = vm.tabMinWidth
-  let high = if tab.active: InitiativeTabMaxPx else: low + 16
-  clamp(w, low, max(low, high))
+    result += TabInnerGapPx + textPx(tab.session.originShort, 10)
+
+proc initiativeTabWidth*(vm: InitiativeTabStripVM; tab: StripTab; barPx = 0): int =
+  ## Its content, from 8rem to 16rem (the active one to 24rem).
+  let w = initiativeTabContent(vm, tab)
+  # A stacked bar's active tab leaves its line room for the chip and "+"
+  # (`max-width: calc(100% - 88px)`).
+  let activeMax = if vm.stacked and barPx > 0: min(InitiativeTabMaxPx, barPx - 88)
+                  else: InitiativeTabMaxPx
+  clamp(w, TabMinPx, if tab.active: max(TabMinPx, activeMax) else: InactiveTabMaxPx)
+
+proc initiativeTabMinWidth(vm: InitiativeTabStripVM; tab: StripTab): int =
+  ## The narrowest a tab shrinks to when the bar is full: its name at its
+  ## `min-width: 4.5rem` beside everything else it holds, and never under
+  ## `min-width: 8rem`.
+  result = 2 * TabPadPx + MarkPx + TabInnerGapPx + 72
+  if tab.kind == stkInitiative:
+    result += TabInnerGapPx + textPx(tab.progressText, CaptionPx)
+    if tab.active: result += recordingsWidth(vm.recordingButtonsOf(tab.id))
+  result = max(result, TabMinPx)
 
 proc drawRecordingButton(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
                          initiativeId: string; rb: RecordingButton): GpuiElement =
@@ -69,20 +92,30 @@ proc drawRecordingButton(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM
   r.tag(result, "recording-state", $rb.state)
   r.tag(result, "recording-active", $rb.active)
   r.tag(result, "tooltip", rb.tooltip)
+  # Every recording button is outlined (`.ah-rec-button`, 1px in the
+  # primary border role); loading dashes it, a failed one is outlined in
+  # the error role (Light: its text colour), a missing one in the warning
+  # icon role; the active one is filled with the action role
+  # (`by-mode(surface-action-primary, border-action)`) in on-action text.
   var colour = p.textLabel
+  var border = p.borderPrimary
   case rb.state
   of rsReady: discard
   of rsLoading:
-    r.styles(result, [("border-width", "1px"), ("border-color", p.borderPrimary)])
+    border = if p.mode == dmDark: p.textCaption else: p.textLabel
+    r.setStyle(result, "border-style", "dashed")
   of rsFailed:
     colour = p.textError
-    r.styles(result, [("border-width", "1px"), ("border-color", p.iconError)])
+    border = if p.mode == dmDark: p.borderError else: p.textError
   of rsMissing:
     colour = p.textWarning
-    r.styles(result, [("border-width", "1px"), ("border-color", p.iconWarning)])
+    border = p.iconWarning
   if rb.active:
-    r.setStyle(result, "background", p.action)
+    let fill = if p.mode == dmDark: p.action else: p.borderAction
+    r.setStyle(result, "background", fill)
+    if rb.state != rsLoading: border = fill
     colour = p.onAction
+  r.styles(result, [("border-width", "1px"), ("border-color", border)])
   r.appendChild(result, r.text($rb.number & stateSuffix(rb.state), CaptionPx, colour,
                                shrink = false))
   let target = vm
@@ -90,17 +123,23 @@ proc drawRecordingButton(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM
                      proc() = discard target.selectRecording(initiativeId, id))
 
 proc drawBarTab(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
-                tab: StripTab; widthPx: int): GpuiElement =
+                tab: StripTab; widthPx, minPx, basisPx: int): GpuiElement =
   let key = if tab.kind == stkInitiative: initiativeKey(tab.id) else: sessionKey(tab.id)
   let id = tab.id
-  result = r.box(pairs = [("width", $widthPx & "px"),
+  # `flex: 0 1 auto` over the tab's natural width, down to `min-width:
+  # 8rem`: the bar's own flex layout shrinks a full bar's tabs (in
+  # proportion to their widths, CSS Flexbox §9.7), as the web bar does; the
+  # name keeps 4.5rem of itself (its own `min-width`).
+  # The flex basis is the content's whole width, the cap its `max-width`.
+  result = r.box(pairs = [("flex-basis", $basisPx & "px"), ("max-width", $widthPx & "px"),
+                          ("min-width", $minPx & "px"),
                           ("height", $StripTabPx & "px"), ("items", "center"),
                           ("gap", $TabInnerGapPx & "px"),
                           ("padding-left", $TabPadPx & "px"),
                           ("padding-right", $TabPadPx & "px"),
-                          ("rounded", $ControlRadiusPx & "px"), ("flex-shrink", "0"),
-                          ("cursor", "pointer")])
-  if tab.active: r.setStyle(result, "background", p.hover)
+                          ("rounded", $ControlRadiusPx & "px"), ("flex-shrink", "1"),
+                          ("overflow", "hidden"), ("cursor", "pointer")])
+  if tab.active: r.setStyle(result, "background", p.activeTab)
   r.tag(result, "tab", key)
   r.tag(result, "active", $tab.active)
   r.tag(result, "tooltip", tab.tooltip)
@@ -116,12 +155,17 @@ proc drawBarTab(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
   else:
     r.tag(result, "attention", $tab.session.attention)
     r.appendChild(result, r.mark(p.markOf(tab.session.attention)))
-  let title = r.text(tab.title, TabTitlePx, if tab.active: p.textBody else: p.textCaption,
-                     pairs = [("flex-grow", "1")])
+  let title = r.text(tab.title, TabTitlePx,
+                     if tab.active: p.activeTabText else: p.textCaption,
+                     pairs = [("flex-grow", "1"), ("min-width", "72px")])
   r.tag(title, "label", tab.title)
   r.appendChild(result, title)
   if tab.kind == stkInitiative:
-    let progress = r.text(tab.progressText, CaptionPx, p.textCaption, shrink = false)
+    # The active tab's figures, readable on Light's raised fill:
+    # `by-mode(caption, label)`.
+    let progress = r.text(tab.progressText, CaptionPx,
+                          if tab.active: p.activeRowQuiet else: p.textCaption,
+                          shrink = false)
     r.tag(progress, "progress", tab.progressText)
     r.appendChild(result, progress)
     if tab.active:
@@ -132,7 +176,14 @@ proc drawBarTab(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
         r.tag(switcher, "recordings", $buttons.buttons.len)
         for rb in buttons.buttons: r.appendChild(switcher, r.drawRecordingButton(p, vm, id, rb))
         if buttons.hidden > 0:
-          let more = r.text("+" & $buttons.hidden, CaptionPx, p.textCaption, shrink = false)
+          # The recordings that did not fit: a count in a recording
+          # button's outline.
+          let more = r.box(pairs = [("height", "18px"), ("items", "center"),
+                                    ("padding-left", "4px"), ("padding-right", "4px"),
+                                    ("rounded", "4px"), ("border-width", "1px"),
+                                    ("border-color", p.borderPrimary), ("flex-shrink", "0")])
+          r.appendChild(more, r.text("+" & $buttons.hidden, CaptionPx, p.textCaption,
+                                     shrink = false))
           r.tag(more, "recordings-hidden", $buttons.hidden)
           r.appendChild(switcher, more)
         r.appendChild(result, switcher)
@@ -144,8 +195,9 @@ proc drawPopup(r: GpuiRenderer; p: AhPalette; popup: InitiativePopup; widthPx: i
   ## The initiative's progress popup, dropped from its tab.
   result = r.box(column = true, pairs = [
     ("position", "absolute"), ("left", $left & "px"), ("top", $top & "px"),
-    ("width", $widthPx & "px"), ("background", p.menu), ("gap", "6px"),
-    ("padding", "12px"), ("border-width", "1px"), ("border-color", p.borderPrimary),
+    ("width", $widthPx & "px"), ("background", p.ground), ("gap", "6px"),
+    ("padding-top", "10px"), ("padding-bottom", "10px"), ("padding-left", "12px"),
+    ("padding-right", "12px"), ("border-width", "1px"), ("border-color", p.borderPrimary),
     ("rounded", $ControlRadiusPx & "px")])
   r.tag(result, "popup", popup.id)
   let head = r.box(pairs = [("gap", "8px"), ("items", "center")])
@@ -174,36 +226,81 @@ proc drawPopup(r: GpuiRenderer; p: AhPalette; popup: InitiativePopup; widthPx: i
   for item in popup.sessions: r.appendChild(sessions, r.drawSessionLine(p, item))
   r.appendChild(result, sessions)
 
+proc autoLabel(vm: InitiativeTabStripVM): string =
+  (if vm.compact: "Auto: " else: "Auto-switch: ") & (if vm.autoSwitch.val: "on" else: "off")
+
+proc inboxWidth(vm: InitiativeTabStripVM): int =
+  ## How wide `drawInbox` draws, its 6px margin included: the two steps,
+  ## the position at its fixed 4.5rem, the toggle 4px further off (6px in,
+  ## a 1px border, and when on the action mark 6px before its words), all
+  ## 2px apart.
+  result = 2 * InboxStepPx + 2 * 2 + 4 + 12 + 2 + textPx(autoLabel(vm), CaptionPx) +
+           InboxMarginPx
+  if vm.autoSwitch.val: result += MarkPx + 6
+  if not vm.compact: result += 2 + InboxPositionPx
+
+proc elsewhereWidth(vm: InitiativeTabStripVM): int =
+  ## How wide `drawElsewhere` draws: 4px and 6px in, its count badge, and
+  ## (unless compact) its label 6px after it.
+  result = 12 + max(18, 8 + textPx($vm.elsewhereCount, CaptionPx - 1))
+  if not vm.compact: result += 6 + textPx(vm.elsewhereLabel, CaptionPx)
+
+proc inboxStep(r: GpuiRenderer; p: AhPalette; arrow: string; onClick: proc()): GpuiElement =
+  ## Previous or Next (`.ah-inbox-step`): a 16px arrow, 6px in, 24px high,
+  ## 25px wide as the browser sets it (the arrow's advance in the
+  ## interface face; GPUI may set the glyph from a fallback face).
+  result = r.box(pairs = [("height", $ControlPx & "px"), ("items", "center"),
+                          ("width", $InboxStepPx & "px"),
+                          ("justify", "center"), ("padding-left", "6px"),
+                          ("padding-right", "6px"), ("flex-shrink", "0"),
+                          ("rounded", $ControlRadiusPx & "px"), ("cursor", "pointer")])
+  r.appendChild(result, r.text(arrow, BodyLargePx, p.textLabel, shrink = false))
+  r.tag(result, "button", arrow)
+  r.addEventListener(result, "click", onClick)
+
 proc drawInbox(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM): GpuiElement =
   ## Previous / Next over the waiting sessions, and auto-switch; compact, no
-  ## position and `Auto: on|off`.
+  ## position and `Auto: on|off`. `.ah-inbox`: its parts 2px apart, 6px
+  ## clear of the bar's end; the position a fixed 4.5rem, centred, so the
+  ## steps do not move as it changes; the toggle outlined in the action
+  ## role, with the action mark, while on.
   let target = vm
   let position = vm.inboxPosition
   let compact = vm.compact
   let auto = vm.autoSwitch.val
-  result = r.box(pairs = [("gap", "4px"), ("items", "center"), ("flex-shrink", "0")])
+  result = r.box(pairs = [("gap", "2px"), ("items", "center"), ("flex-shrink", "0"),
+                          ("margin-right", $InboxMarginPx & "px")])
   r.tag(result, "inbox", if position.len == 0: "inbox empty" else: position)
-  r.appendChild(result, r.button(p, "\xE2\x86\x90", proc() = discard target.stepInbox(-1),
-                                 outlined = false))
+  r.appendChild(result, r.inboxStep(p, "\xE2\x86\x90", proc() = discard target.stepInbox(-1)))
   if not compact:
+    let slot = r.box(pairs = [("width", $InboxPositionPx & "px"), ("justify", "center"),
+                              ("items", "center"), ("flex-shrink", "0")])
     let pos = r.text(if position.len == 0: "inbox empty" else: position, CaptionPx,
-                     p.textLabel, shrink = false)
+                     p.textCaption, shrink = false)
     r.tag(pos, "inbox-position", if position.len == 0: "inbox empty" else: position)
-    r.appendChild(result, pos)
-  r.appendChild(result, r.button(p, "\xE2\x86\x92", proc() = discard target.stepInbox(1),
-                                 outlined = false))
-  let label = (if compact: "Auto: " else: "Auto-switch: ") & (if auto: "on" else: "off")
-  let toggle = r.button(p, label, proc() = target.autoSwitch.val = not target.autoSwitch.val,
-                        outlined = false)
+    r.appendChild(slot, pos)
+    r.appendChild(result, slot)
+  r.appendChild(result, r.inboxStep(p, "\xE2\x86\x92", proc() = discard target.stepInbox(1)))
+  let toggle = r.box(pairs = [("height", $ControlPx & "px"), ("items", "center"),
+                              ("gap", "6px"), ("padding-left", "6px"),
+                              ("padding-right", "6px"), ("margin-left", "4px"),
+                              ("flex-shrink", "0"), ("rounded", $ControlRadiusPx & "px"),
+                              ("border-width", "1px"),
+                              ("border-color", if auto: p.borderAction else: p.ground),
+                              ("cursor", "pointer")])
+  if auto: r.appendChild(toggle, r.mark(MarkStyle(colour: p.action)))
+  r.appendChild(toggle, r.text(autoLabel(vm), CaptionPx,
+                               if auto: p.textBody else: p.textLabel, shrink = false))
+  r.tag(toggle, "button", autoLabel(vm))
   r.tag(toggle, "auto-switch", $auto)
-  if auto: r.setStyle(toggle, "background", p.hover)
+  r.addEventListener(toggle, "click", proc() = target.autoSwitch.val = not target.autoSwitch.val)
   r.appendChild(result, toggle)
 
 proc drawElsewhere(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM): GpuiElement =
   ## The count badge of the sessions started elsewhere, and its label.
   let target = vm
   result = r.box(pairs = [("gap", "6px"), ("items", "center"), ("height", $ControlPx & "px"),
-                          ("padding-left", "4px"), ("padding-right", "6px"),
+                          ("padding-left", "6px"), ("padding-right", "6px"),
                           ("rounded", $ControlRadiusPx & "px"), ("cursor", "pointer"),
                           ("flex-shrink", "0")])
   if vm.elsewhereOpen.val: r.setStyle(result, "background", p.hover)
@@ -228,64 +325,68 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
   r.clearChildren(host)
   r.styles(host, [("position", "relative"), ("background", p.ground),
                   ("width", $widthPx & "px"), ("display", "flex"),
-                  ("flex-direction", "column")])
+                  ("flex-direction", "column"), ("padding-top", $StripTopPx & "px")])
   r.tag(host, "surface", "agent-harbor-initiative-tabs")
   let ready = vm.state.val == asReady
   r.tag(host, "state", if ready and vm.tabs.len == 0: "empty" else: stateName(vm.state.val))
   r.tag(host, "compact", $vm.compact)
   r.tag(host, "stacked", $vm.stacked)
+  # The tabs start at the bar's left edge, as `.session-tab-bar` does; the
+  # bar ends 8px short of the window.
   let line = r.box(pairs = [("height", $StripLinePx & "px"), ("items", "center"),
-                            ("gap", $BarGapPx & "px"), ("padding-left", "4px"),
-                            ("padding-right", "4px")])
+                            ("gap", $BarGapPx & "px"), ("padding-right", "8px")])
   let controls = r.box(pairs = [("gap", "8px"), ("items", "center"), ("flex-shrink", "0")])
-  r.tag(controls, "controls", "")
-  var x = 4
+  r.tag(controls, "controls", "bar controls")
+  var x = 0
   var popupLeft = -1
+  var elsewhereRight = -1
   let tabs = vm.tabs
   var overflow: seq[int]
   case vm.state.val
   of asIdle, asLoading:
-    let n = r.box(pairs = [("height", $StripTabPx & "px"), ("items", "center"),
-                           ("padding-left", "10px"), ("padding-right", "10px"),
-                           ("rounded", $ControlRadiusPx & "px"), ("background", p.tertiary)])
-    r.tag(n, "notice", "loading")
-    r.appendChild(n, r.text("Loading initiatives" & Ellipsis, TabTitlePx, p.textCaption))
+    let n = r.stripNotice(p, "Loading initiatives" & Ellipsis, "loading", TabTitlePx)
+    if vm.stacked: r.setStyle(n, "max-width", $(widthPx - 8 - 40) & "px")
     r.appendChild(line, n)
   of asError:
     let message = "Initiatives unavailable: " & vm.error.val
-    let n = r.box(pairs = [("height", $StripTabPx & "px"), ("items", "center"),
-                           ("gap", "8px"), ("padding-left", "10px"),
-                           ("padding-right", "10px"), ("flex-shrink", "1"),
-                           ("rounded", $ControlRadiusPx & "px"), ("background", p.tertiary)])
-    r.tag(n, "notice", "error")
-    let t = r.text(message, TabTitlePx, p.textError)
-    r.tag(t, "error", message)
-    r.appendChild(n, t)
+    let n = r.stripNotice(p, message, "error", TabTitlePx)
+    # Stacked, the notice gives way first, keeping "+" on its line
+    # (`max-width: calc(100% - 2.5rem)`).
+    if vm.stacked: r.setStyle(n, "max-width", $(widthPx - 8 - 40) & "px")
     let target = vm
-    r.appendChild(n, r.button(p, "Retry", proc() = target.load()))
+    r.appendChild(n, r.stripRetry(p, proc() = target.load()))
     r.appendChild(line, n)
   of asReady:
     if tabs.len == 0:
-      let n = r.box(pairs = [("height", $StripTabPx & "px"), ("items", "center"),
-                             ("padding-left", "10px"), ("padding-right", "10px"),
-                             ("rounded", $ControlRadiusPx & "px"), ("background", p.tertiary)])
-      r.tag(n, "notice", "empty")
-      r.appendChild(n, r.text("No initiative is running.", TabTitlePx, p.textCaption))
+      let n = r.stripNotice(p, "No initiative is running.", "empty", TabTitlePx)
+      if vm.stacked: r.setStyle(n, "max-width", $(widthPx - 8 - 40) & "px")
       r.appendChild(line, n)
     let layout = vm.singleLine
     overflow = layout.overflow
     # The tabs shrink toward their narrowest to leave the controls their room
     # (`flex: 0 1 auto`), as the viewmodel's capacity rule assumes.
-    var widths: seq[int]
-    for i in layout.visible: widths.add initiativeTabWidth(vm, tabs[i])
-    let controlsPx =
-      if vm.stacked: InitiativeBarChipPx
-      elif vm.compact: InitiativeBarCompactControlsPx
-      else: vm.controlsWidth
-    let fitted = fitWidths(widths, widthPx - 8 - controlsPx, vm.tabMinWidth, BarGapPx)
+    var widths, mins: seq[int]
+    for i in layout.visible:
+      widths.add initiativeTabWidth(vm, tabs[i], widthPx - 8)
+      mins.add initiativeTabMinWidth(vm, tabs[i])
+    # The bar's controls at its end never shrink (`.ah-bar-controls`), so
+    # the tabs get what they leave.
+    # What the rest of the line takes, as drawn here: "+", the chip with its
+    # 12px, and -- unless the bar is stacked -- the controls group (the
+    # elsewhere control and the inbox), 4px apart.
+    var controlsPx = 26 + BarGapPx
+    if overflow.len > 0: controlsPx += overflowChipWidth(overflow.len, true) + BarChipGapPx
+    if not vm.stacked:
+      controlsPx += inboxWidth(vm)
+      if vm.elsewhereCount > 0: controlsPx += 8 + elsewhereWidth(vm)
+    # Where each tab will end up (the popup and the overflow menu hang from
+    # them): the same proportional shrink the layout applies.
+    let fitted = fitWidths(widths, widthPx - 8 - controlsPx, TabMinPx, BarGapPx,
+                           mins = mins)
     for k, i in layout.visible:
       if tabs[i].kind == stkInitiative and vm.popupId.val == tabs[i].id: popupLeft = x
-      r.appendChild(line, r.drawBarTab(p, vm, tabs[i], fitted[k]))
+      r.appendChild(line, r.drawBarTab(p, vm, tabs[i], widths[k], min(TabMinPx, widths[k]),
+                                       initiativeTabContent(vm, tabs[i])))
       x += fitted[k] + BarGapPx
     if overflow.len > 0:
       var waits = 0
@@ -294,35 +395,60 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
             tabs[i].kind == stkSession and tabs[i].session.attention == saNeedsInput:
           inc waits
       let target = vm
-      r.appendChild(line, r.drawOverflowChip(p, overflow.len, waits, proc() =
-        target.overflowOpen.val = not target.overflowOpen.val))
-    if vm.elsewhereCount > 0: r.appendChild(controls, r.drawElsewhere(p, vm))
+      # The bar's chip is unfilled (its own rule), 8px from "+".
+      let chip = r.drawOverflowChip(p, overflow.len, waits, proc() =
+        target.overflowOpen.val = not target.overflowOpen.val, filled = false)
+      r.setStyle(chip, "margin-right", $(BarChipGapPx - BarGapPx) & "px")
+      r.appendChild(line, chip)
+      x += 28 + BarChipGapPx
+    if vm.elsewhereCount > 0:
+      r.appendChild(controls, r.drawElsewhere(p, vm))
+      # Where the elsewhere control ends: its menu hangs right-aligned
+      # under it (`right: 0`), unless the bar is stacked.
+      elsewhereRight = widthPx - 8 - (if vm.state.val in {asReady, asError}: inboxWidth(vm) + 8
+                                      else: 0)
   # "+" right after the last tab.
   let add = r.box(pairs = [("width", "26px"), ("height", "26px"), ("rounded", "13px"),
                            ("items", "center"), ("justify", "center"),
                            ("background", p.tertiary), ("flex-shrink", "0")])
   r.tag(add, "add", "+")
-  r.appendChild(add, r.text("+", BodyLargePx, p.textCaption, shrink = false))
+  r.appendChild(add, r.text("+", BodyLargePx, p.addText, shrink = false))
   r.appendChild(line, add)
   if vm.state.val in {asReady, asError}: r.appendChild(controls, r.drawInbox(p, vm))
   if vm.stacked:
     r.appendChild(host, line)
+    # Stacked, the controls take the second line's width (`.ah-bar-stacked
+    # .ah-bar-controls`), their parts from its start.
     let second = r.box(pairs = [("height", $StripLinePx & "px"), ("items", "center"),
-                                ("padding-left", "4px"), ("padding-right", "4px")])
+                                ("padding-right", "8px")])
+    r.setStyle(controls, "flex-grow", "1")
     r.appendChild(second, controls)
     r.appendChild(host, second)
   else:
+    # The controls at the bar's end (`margin-left: auto`): right after "+"
+    # when the tabs fill the bar.
     r.appendChild(line, r.box(pairs = [("flex-grow", "1")]))
+    r.setStyle(controls, "margin-left", "-" & $(2 * BarGapPx) & "px")
     r.appendChild(line, controls)
     r.appendChild(host, line)
-  let below = (if vm.stacked: 2 else: 1) * StripLinePx
+  # A menu or the popup hangs 6px below the line it drops from.
+  let tabBottom = StripTopPx + (StripLinePx + StripTabPx) div 2
+  let below = (if vm.stacked: 2 else: 1) * StripLinePx + StripTopPx + MenuGapPx - 2
   if ready and popupLeft >= 0:
-    let popupW = min(PopupWidthPx, max(160, widthPx - 8))
-    let left = min(popupLeft, max(0, widthPx - popupW - 4))
-    r.appendChild(host, drawPopup(r, p, vm.popupOf(vm.popupId.val), popupW, left, below + 4))
+    let popupW = min(PopupWidthPx, widthPx * 4 div 5)
+    let left = min(popupLeft, max(0, widthPx - popupW))
+    r.appendChild(host, drawPopup(r, p, vm.popupOf(vm.popupId.val), popupW, left,
+                                  tabBottom + MenuGapPx))
   if ready and overflow.len > 0 and vm.overflowOpen.val:
-    let menuW = min(OverflowMenuPx, max(160, widthPx - 8))
-    let menu = r.drawMenu(p, below, max(0, min(x, widthPx - menuW - 4)), menuW, "overflow")
+    var widest = 0
+    for i in overflow:
+      widest = max(widest, menuItemWidth(tabs[i].title,
+                                         if tabs[i].progressText.len > 0: @[tabs[i].progressText]
+                                         else: @[]))
+    let menuW = clamp(widest, MenuMinPx, max(MenuMinPx, widthPx - 12))
+    let menu = r.drawMenu(p, tabBottom + MenuGapPx,
+                          max(0, min(x - 28 - BarChipGapPx, widthPx - 12 - menuW)), menuW,
+                          "overflow")
     for i in overflow:
       let tab = tabs[i]
       let key = if tab.kind == stkInitiative: initiativeKey(tab.id) else: sessionKey(tab.id)
@@ -334,9 +460,9 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
         proc() = discard target.activate(key)))
     r.appendChild(host, menu)
   if ready and vm.elsewhereCount > 0 and vm.elsewhereOpen.val:
-    let elsewhereW = min(ElsewhereMenuPx, max(160, widthPx - 8))
-    let menu = r.drawMenu(p, below, max(0, widthPx - elsewhereW - 4), elsewhereW,
-                          "elsewhere")
+    let elsewhereW = if vm.stacked: widthPx - 16 else: min(ElsewhereMenuPx, widthPx - 16)
+    let left = if vm.stacked: 0 else: max(0, elsewhereRight + 4 - elsewhereW)
+    let menu = r.drawMenu(p, below, left, elsewhereW, "elsewhere")
     for entry in vm.elsewhere:
       let id = entry.item.id
       let where = if entry.initiativeTitle.len > 0: entry.initiativeTitle
@@ -347,7 +473,8 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
       let target = vm
       r.appendChild(menu, r.drawMenuItem(p, p.markOf(entry.item.attention), entry.item.title,
                                          id, false, trailing,
-                                         proc() = discard target.openSession(id)))
+                                         proc() = discard target.openSession(id),
+                                         twoLines = vm.stacked))
     r.appendChild(host, menu)
 
 proc mountInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;

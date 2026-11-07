@@ -31,47 +31,87 @@ export session_tabs_vm, ah_theme
 const
   TabPadPx = 10            ## a tab's side padding (0.625em)
   TabInnerGapPx = 6        ## between a tab's mark, title, origin and close
-  TabTitlePx = BodyPx
+  TabTitlePx = BodyLargePx ## the strip's 1rem (`.session-tab`; the title inherits it)
   TabOriginPx = 10
   TabClosePx = 10
   TabMaxPx = 192           ## 12rem
-  ActiveTabMaxPx = TabMinWidthPx + ActiveTabExtraPx
+  ActiveTabPx = TabMinWidthPx + ActiveTabExtraPx
+    ## 14rem: the session strip's active tab is exactly the width the
+    ## viewmodel counts for it (`agent_harbor.styl`, `flex: 0 0 14rem`).
+  WrapTabPx = 176          ## several lines: `flex: 0 1 11rem; max-width: 11rem`
   StripGapPx = session_tabs_vm.TabGapPx
+  StripTopPx* = 4
+    ## The caption bar's top padding above a strip line (`#menu`'s 6px, less
+    ## the line's own 2px above its 26px tab), so a tab sits 6px down as on
+    ## the web.
   AddButtonPx = 26
   ChipPx = 46
-  OverflowMenuPx* = 320
+  ChipGapPx* = 12          ## `.ah-tab-overflow-count` margin-right: 0.75rem
+  MenuGapPx* = 6           ## DROPDOWN_TRIGGER_GAP: a menu hangs 6px below its bar
+  MenuMinPx* = 220         ## `.session-tab-overflow-menu` min-width: 13.75em
+  MenuItemPx = 28          ## `.session-tab-overflow-item` min-height: 1.75rem
+  MenuItemPadPx = 10
+  MenuItemTextPx = BodyPx  ## 0.875rem
   SidebarMaxPx* = 448      ## `.ah-session-list-sidebar` max-width: 28rem
   RailPx* = 40             ## collapsed: 2.5rem
   DockedColumnsFromPx = 768  ## `@container ah-session-list (min-width: 48rem)`
-  DockedRowMaxPx = 1024
   RowAgePx = 40
 
 # ---------------------------------------------------------------------------
 # The strip
 # ---------------------------------------------------------------------------
 
-proc tabWidth*(tab: SessionItem; closable: bool): int =
-  ## A tab's width as the web strip sizes it: its content, between 10rem and
-  ## 12rem (14rem for the active tab, which also holds the close control).
+proc tabWidth*(tab: SessionItem; closable: bool; wrapped = false): int =
+  ## A tab's width as the web strip sizes it: the active tab exactly 14rem
+  ## (it holds the close control); on several lines every other tab 11rem;
+  ## on one line every other tab its content, between 10rem and 12rem.
+  if tab.active: return ActiveTabPx
+  if wrapped: return WrapTabPx
   var w = 2 * TabPadPx + MarkPx + TabInnerGapPx + textPx(tabLabelOf(tab), TabTitlePx)
   if tab.originShort.len > 0: w += TabInnerGapPx + textPx(tab.originShort, TabOriginPx)
   if closable and tab.active: w += TabInnerGapPx + TabClosePx
-  clamp(w, TabMinWidthPx, if tab.active: ActiveTabMaxPx else: TabMaxPx)
+  clamp(w, TabMinWidthPx, TabMaxPx)
 
-proc fitWidths*(widths: seq[int]; budget, minPx, gap: int): seq[int] =
-  ## Shrinks tabs that are wider than `minPx` until the row fits `budget`
-  ## (CSS `flex: 0 1 auto` over `min-width`): the widest give first, none
-  ## below its minimum. A row that cannot fit at the minimum keeps it.
+proc fitWidths*(widths: seq[int]; budget, minPx, gap: int;
+                fixed: seq[bool] = @[]; mins: seq[int] = @[]): seq[int] =
+  ## The widths a row of `flex: 0 1 auto` tabs takes when their natural
+  ## `widths` overflow `budget` (CSS Flexbox §9.7, "Resolving Flexible
+  ## Lengths", https://www.w3.org/TR/css-flexbox-1/#resolve-flexible-lengths):
+  ## every tab gives up room IN PROPORTION TO ITS WIDTH, none below `minPx`
+  ## (a tab that reaches it is frozen there and the rest share what remains);
+  ## a `fixed` tab never shrinks (the session strip's active tab, `flex: 0 0
+  ## 14rem`). `mins`, when given, is each tab's own minimum (its
+  ## min-content), in place of `minPx`. A row that cannot fit at the minimum
+  ## keeps it.
   result = widths
-  var total = gap * max(0, widths.len - 1)
-  for w in widths: total += w
-  while total > budget:
-    var widest = -1
+  var floor = newSeq[int](widths.len)
+  var frozen = newSeq[bool](widths.len)
+  for i in 0 ..< widths.len:
+    floor[i] = if i < mins.len: min(mins[i], widths[i]) else: minPx
+    frozen[i] = (i < fixed.len and fixed[i]) or widths[i] <= floor[i]
+  while true:
+    var total = gap * max(0, widths.len - 1)
+    var basis = 0
     for i, w in result:
-      if w > minPx and (widest < 0 or w > result[widest]): widest = i
-    if widest < 0: break
-    dec result[widest]
-    dec total
+      total += w
+      if not frozen[i]: basis += widths[i]
+    let deficit = total - budget
+    if deficit <= 0 or basis == 0: break
+    var clamped = false
+    var given = 0
+    for i in 0 ..< result.len:
+      if frozen[i]: continue
+      let share = (deficit * widths[i] + basis - 1) div basis
+      let target = result[i] - share
+      if target <= floor[i]:
+        given += result[i] - floor[i]
+        result[i] = floor[i]
+        frozen[i] = true
+        clamped = true
+      else:
+        given += share
+        result[i] = target
+    if not clamped or given >= deficit: break
 
 proc drawTab(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
              tab: SessionItem; closable: bool; widthPx = -1): GpuiElement =
@@ -83,20 +123,21 @@ proc drawTab(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
                           ("padding-right", $TabPadPx & "px"),
                           ("rounded", $ControlRadiusPx & "px"),
                           ("flex-shrink", "0"), ("cursor", "pointer")])
-  if tab.active: r.setStyle(result, "background", p.hover)
-  elif vm.isInFocus(tab): r.setStyle(result, "background", p.tertiary)
+  if tab.active: r.setStyle(result, "background", p.activeTab)
   r.tag(result, "tab", id)
   r.tag(result, "attention", $tab.attention)
   r.tag(result, "active", $tab.active)
   r.tag(result, "tooltip", tab.tooltip)
   r.appendChild(result, r.mark(p.markOf(tab.attention)))
   let title = r.text(tabLabelOf(tab), TabTitlePx,
-                     if tab.active: p.textBody else: p.textCaption,
+                     if tab.active: p.activeTabText else: p.textCaption,
                      pairs = [("flex-grow", "1")])
   r.tag(title, "label", tabLabelOf(tab))
   r.appendChild(result, title)
   if tab.originShort.len > 0:
-    let origin = r.text(tab.originShort, TabOriginPx, p.textCaption, shrink = false)
+    let origin = r.text(tab.originShort, TabOriginPx,
+                        if tab.active: p.activeTabOrigin else: p.textCaption,
+                        shrink = false)
     r.tag(origin, "origin", tab.originShort)
     r.appendChild(result, origin)
   if closable and tab.active:
@@ -105,25 +146,23 @@ proc drawTab(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
     r.tag(close, "close", id)
     r.addEventListener(close, "click", proc() = discard vm.close(id))
     r.appendChild(result, close)
+  if vm.isInFocus(tab):
+    # The focused initiative's tabs: a flat 2px underline in the action
+    # role, inside the tab's corners (`.ah-tab-in-focus::after`), never a
+    # fill -- a fill reads as the active tab.
+    r.setStyle(result, "position", "relative")
+    r.appendChild(result, r.underline(p.borderAction, 8, w))
+    r.tag(result, "in-focus", "true")
   r.addEventListener(result, "click", proc() = discard vm.activate(id))
 
 proc drawStatusTab(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
                    message, kind: string; retry: bool): GpuiElement =
   ## A tab-shaped notice in place of the tabs: loading, empty, or an error
   ## with its Retry.
-  result = r.box(pairs = [("height", $StripTabPx & "px"), ("items", "center"),
-                          ("gap", "8px"), ("padding-left", $TabPadPx & "px"),
-                          ("padding-right", $TabPadPx & "px"),
-                          ("rounded", $ControlRadiusPx & "px"),
-                          ("background", p.tertiary), ("flex-shrink", "1")])
-  r.tag(result, "notice", kind)
-  let words = r.text(message, TabTitlePx,
-                     if kind == "error": p.textError else: p.textCaption)
-  if kind == "error": r.tag(words, "error", message)
-  r.appendChild(result, words)
+  result = r.stripNotice(p, message, kind, TabTitlePx)
   if retry:
     let target = vm
-    r.appendChild(result, r.button(p, "Retry", proc() = target.load()))
+    r.appendChild(result, r.stripRetry(p, proc() = target.load()))
 
 proc drawAddButton(r: GpuiRenderer; p: AhPalette): GpuiElement =
   ## "+", a round ghost control (`session-tab-add`).
@@ -132,16 +171,24 @@ proc drawAddButton(r: GpuiRenderer; p: AhPalette): GpuiElement =
                           ("justify", "center"), ("background", p.tertiary),
                           ("flex-shrink", "0")])
   r.tag(result, "add", "+")
-  r.appendChild(result, r.text("+", BodyLargePx, p.textCaption, shrink = false))
+  r.appendChild(result, r.text("+", BodyLargePx, p.addText, shrink = false))
+
+proc overflowChipWidth*(hidden: int; waits: bool): int =
+  ## How wide `drawOverflowChip` draws: 8px in on either side, the warning
+  ## mark and its 4px when a hidden tab waits, `+N`; at least 28px.
+  max(28, 16 + textPx("+" & $hidden, CaptionPx) + (if waits: MarkPx + 4 else: 0))
 
 proc drawOverflowChip*(r: GpuiRenderer; p: AhPalette; hidden, hiddenWaits: int;
-                       onClick: proc()): GpuiElement =
+                       onClick: proc(); filled = true): GpuiElement =
   ## `+N`: the tabs one line has no room for; a waiting one marks it.
-  result = r.box(pairs = [("height", $StripTabPx & "px"), ("min-width", "32px"),
+  # A chip the shape of "+" beside it (`.ah-tab-overflow-count`): 24px
+  # high on the secondary-hover surface, 12px clear of "+".
+  result = r.box(pairs = [("height", "24px"), ("min-width", "28px"),
                           ("items", "center"), ("justify", "center"), ("gap", "4px"),
-                          ("padding-left", "6px"), ("padding-right", "6px"),
+                          ("padding-left", "8px"), ("padding-right", "8px"),
                           ("rounded", $ControlRadiusPx & "px"), ("flex-shrink", "0"),
                           ("cursor", "pointer")])
+  if filled: r.setStyle(result, "background", p.hover)
   r.tag(result, "overflow", $hidden)
   r.tag(result, "overflow-waits", $hiddenWaits)
   if hiddenWaits > 0: r.appendChild(result, r.mark(p.markOf(saNeedsInput)))
@@ -150,32 +197,56 @@ proc drawOverflowChip*(r: GpuiRenderer; p: AhPalette; hidden, hiddenWaits: int;
                                shrink = false))
   if onClick != nil: r.addEventListener(result, "click", onClick)
 
+proc menuItemWidth*(title: string; trailing: seq[string]): int =
+  ## The width a dropdown takes for one item set on one line: the menu's own
+  ## padding and border, the item's padding, its mark, title and quieter
+  ## words, 8px apart.
+  result = 2 * 4 + 2 + 2 * MenuItemPadPx + MarkPx + 8 + textPx(title, MenuItemTextPx)
+  for word in trailing: result += 8 + textPx(word, CaptionPx)
+
 proc drawMenu*(r: GpuiRenderer; p: AhPalette; top, left, width: int;
                kind: string): GpuiElement =
   ## A dropdown under the strip (`session-tab-overflow-menu`).
+  ## The dropdown surface is the window's own (`dropdown-surface()`:
+  ## surface-primary-default), outlined.
   result = r.box(column = true, pairs = [
     ("position", "absolute"), ("top", $top & "px"), ("left", $left & "px"),
-    ("width", $width & "px"), ("background", p.menu), ("padding", "4px"),
+    ("width", $width & "px"), ("background", p.ground), ("padding", "4px"),
     ("border-width", "1px"), ("border-color", p.borderPrimary),
-    ("rounded", $ControlRadiusPx & "px"), ("gap", "2px")])
+    ("rounded", $ControlRadiusPx & "px")])
   r.tag(result, "menu", kind)
 
 proc drawMenuItem*(r: GpuiRenderer; p: AhPalette; markStyle: MarkStyle;
                    title, key: string; active: bool;
                    trailing: openArray[(string, string)] = [];
-                   onClick: proc() = nil): GpuiElement =
-  ## One item of a dropdown: a mark, a title, then quieter facts.
-  result = r.box(pairs = [("height", $ControlPx & "px"), ("items", "center"),
-                          ("gap", "8px"), ("padding-left", "8px"),
-                          ("padding-right", "8px"), ("rounded", "4px"),
-                          ("cursor", "pointer")])
-  if active: r.setStyle(result, "background", p.hover)
+                   onClick: proc() = nil; twoLines = false): GpuiElement =
+  ## One item of a dropdown: a mark, a title, then quieter facts -- on the
+  ## title's line, or `twoLines`, under it (a stacked bar's full-width
+  ## menu, 4px by 10px in).
+  result = r.box(pairs = [("height", (if twoLines: "49" else: $MenuItemPx) & "px"),
+                          ("items", "center"),
+                          ("gap", "8px"), ("padding-left", $MenuItemPadPx & "px"),
+                          ("padding-right", $MenuItemPadPx & "px"),
+                          ("flex-shrink", "0"), ("cursor", "pointer")])
+  if active: r.setStyle(result, "background", p.activeTab)
   r.tag(result, "menu-item", key)
   r.appendChild(result, r.mark(markStyle))
-  r.appendChild(result, r.text(title, CaptionPx + 1, p.textBody,
-                               pairs = [("flex-grow", "1")]))
-  for (word, colour) in trailing:
-    r.appendChild(result, r.text(word, CaptionPx, colour, shrink = false))
+  let titleEl = r.text(title, MenuItemTextPx,
+                       if active: p.activeTabText else: p.textBody,
+                       pairs = [("flex-grow", "1")])
+  if twoLines:
+    let column = r.box(column = true, pairs = [("flex-grow", "1"), ("min-width", "0px"),
+                                               ("gap", "2px")])
+    r.appendChild(column, titleEl)
+    let facts = r.box(pairs = [("gap", "8px"), ("items", "center")])
+    for (word, colour) in trailing:
+      r.appendChild(facts, r.text(word, CaptionPx, colour, shrink = false))
+    r.appendChild(column, facts)
+    r.appendChild(result, column)
+  else:
+    r.appendChild(result, titleEl)
+    for (word, colour) in trailing:
+      r.appendChild(result, r.text(word, CaptionPx, colour, shrink = false))
   if onClick != nil: r.addEventListener(result, "click", onClick)
 
 proc drawSessionTabStrip*(r: GpuiRenderer; host: GpuiElement;
@@ -184,15 +255,17 @@ proc drawSessionTabStrip*(r: GpuiRenderer; host: GpuiElement;
   ## or several by `vm.mode`.
   r.clearChildren(host)
   r.styles(host, [("position", "relative"), ("background", p.ground),
-                  ("width", $widthPx & "px")])
+                  ("width", $widthPx & "px"), ("display", "flex"),
+                  ("flex-direction", "column"), ("padding-top", $StripTopPx & "px")])
   r.tag(host, "surface", "agent-harbor-session-tabs")
   r.tag(host, "mode", $vm.mode.val)
   r.tag(host, "state", stateName(vm.state.val))
   let tabs = vm.tabs
   var lines: seq[GpuiElement]
   proc newLine(): GpuiElement =
+    # The tabs start at the bar's left edge, as `.session-tab-bar` does.
     result = r.box(pairs = [("height", $StripLinePx & "px"), ("items", "center"),
-                            ("gap", $StripGapPx & "px"), ("padding-left", "4px")])
+                            ("gap", $StripGapPx & "px")])
     lines.add result
   var line = newLine()
   var overflow: seq[int]
@@ -209,21 +282,25 @@ proc drawSessionTabStrip*(r: GpuiRenderer; host: GpuiElement;
       let closable = tabs.len > 1
       if vm.mode.val == tsmMultiLine:
         var widths: seq[int]
-        for tab in tabs: widths.add tabWidth(tab, closable)
+        for tab in tabs: widths.add tabWidth(tab, closable, wrapped = true)
         # The last line also holds "+".
         let budget = max(TabMinWidthPx, widthPx - 8 - AddButtonPx - StripGapPx)
         let rows = packTabRows(widths, budget, StripGapPx)
         for ri, row in rows:
           if ri > 0: line = newLine()
-          for i in row: r.appendChild(line, r.drawTab(p, vm, tabs[i], closable))
+          for i in row: r.appendChild(line, r.drawTab(p, vm, tabs[i], closable, widths[i]))
       else:
         let layout = vm.singleLine
         overflow = layout.overflow
         var widths: seq[int]
-        for i in layout.visible: widths.add tabWidth(tabs[i], closable)
+        var fixed: seq[bool]
+        for i in layout.visible:
+          widths.add tabWidth(tabs[i], closable)
+          fixed.add tabs[i].active
         let controls = AddButtonPx + StripGapPx +
-                       (if overflow.len > 0: ChipPx + StripGapPx else: 0)
-        let fitted = fitWidths(widths, widthPx - 8 - controls, TabMinWidthPx, StripGapPx)
+                       (if overflow.len > 0: ChipPx + ChipGapPx else: 0)
+        let fitted = fitWidths(widths, widthPx - 8 - controls, TabMinWidthPx, StripGapPx,
+                               fixed)
         for k, i in layout.visible:
           r.appendChild(line, r.drawTab(p, vm, tabs[i], closable, fitted[k]))
   if overflow.len > 0:
@@ -231,15 +308,25 @@ proc drawSessionTabStrip*(r: GpuiRenderer; host: GpuiElement;
     for i in overflow:
       if tabs[i].attention == saNeedsInput: inc waits
     let target = vm
-    r.appendChild(line, r.drawOverflowChip(p, overflow.len, waits,
-                                           proc() = target.toggleOverflow()))
+    let chip = r.drawOverflowChip(p, overflow.len, waits, proc() = target.toggleOverflow())
+    # 12px clear of "+" (the strip's 4px gap plus the chip's 8px margin).
+    r.setStyle(chip, "margin-right", $(ChipGapPx - StripGapPx) & "px")
+    r.appendChild(line, chip)
   r.appendChild(line, r.drawAddButton(p))
   for l in lines: r.appendChild(host, l)
   r.tag(host, "lines", $lines.len)
   if overflow.len > 0 and vm.overflowOpen.val:
-    let menuW = min(OverflowMenuPx, max(160, widthPx - 8))
-    let menu = r.drawMenu(p, lines.len * StripLinePx,
-                          max(0, widthPx - menuW - 4), menuW, "overflow")
+    # As wide as its widest item, from 13.75em to the window less 0.75rem,
+    # its right edge 4px in from the bar's (which ends 8px short of the
+    # window), 6px below the bar.
+    var widest = 0
+    for i in overflow:
+      widest = max(widest, menuItemWidth(tabs[i].title,
+                                         if tabs[i].originShort.len > 0: @[tabs[i].originShort]
+                                         else: @[]))
+    let menuW = clamp(widest, MenuMinPx, max(MenuMinPx, widthPx - 12))
+    let menu = r.drawMenu(p, StripTopPx + lines.len * StripLinePx + MenuGapPx,
+                          max(0, widthPx - 12 - menuW), menuW, "overflow")
     for i in overflow:
       let id = tabs[i].id
       var trailing: seq[(string, string)]
@@ -269,8 +356,15 @@ proc drawListRow(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
                           ("padding-bottom", "5px"), ("padding-left", $InsetPx & "px"),
                           ("padding-right", $InsetPx & "px"), ("items", "start"),
                           ("cursor", "pointer"), ("flex-shrink", "0")])
-  if tab.active: r.setStyle(result, "background", p.hover)
-  elif vm.isInFocus(tab): r.setStyle(result, "background", p.tertiary)
+  # The active session: the strip's active tab, as a row
+  # (`.ah-session-row-active`). The focused initiative's rows: a 2px bar in
+  # the action role down the left edge (`.ah-session-row.ah-tab-in-focus`),
+  # never a fill.
+  if tab.active: r.setStyle(result, "background", p.activeRow)
+  r.setStyle(result, "position", "relative")
+  if vm.isInFocus(tab) and not collapsed:
+    r.appendChild(result, r.insetBar(p.borderAction, 2))
+    r.tag(result, "in-focus", "true")
   r.tag(result, "row", id)
   r.tag(result, "attention", $tab.attention)
   r.tag(result, "active", $tab.active)
@@ -285,12 +379,17 @@ proc drawListRow(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
   let detail = if tab.failureText.len > 0: tab.failureText
                elif tab.activity.len > 0: tab.activity[0].lineText
                else: ""
-  let title = r.text(tab.title, BodyPx, p.textBody)
+  let quiet = if tab.active: p.activeRowQuiet else: p.textCaption
+  # 16px lines throughout (`type-ui-lineheight-body-sm` and `-caption-md`),
+  # so a row is as tall as the web's: 5px, three 16px lines 1px apart, 5px.
+  let title = r.text(tab.title, BodyPx, if tab.active: p.activeTabText else: p.textBody,
+                     pairs = [("line-height", "16px")])
   r.tag(title, "title", tab.title)
-  let status = r.text(tab.statusLabel, CaptionPx, p.statusWordColour(tab.attention),
+  let status = r.text(tab.statusLabel, CaptionPx,
+                      if tab.active: p.activeRowQuiet else: p.statusWordColour(tab.attention),
                       shrink = false)
   r.tag(status, "status", tab.statusLabel)
-  let metaText = r.text(metaOf(tab), CaptionPx, p.textCaption)
+  let metaText = r.text(metaOf(tab), CaptionPx, quiet, pairs = [("line-height", "16px")])
   r.tag(metaText, "meta", metaOf(tab))
   let meta = r.box(pairs = [("gap", "6px"), ("items", "center")])
   r.appendChild(meta, status)
@@ -298,7 +397,8 @@ proc drawListRow(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
   var detailEl: GpuiElement
   if detail.len > 0:
     detailEl = r.text(detail, CaptionPx,
-                      if tab.failureText.len > 0: p.textError else: p.textCaption)
+                      if tab.failureText.len > 0 and not tab.active: p.textError else: quiet,
+                      pairs = [("line-height", "16px")])
     r.tag(detailEl, "detail", detail)
   let age = r.text(tab.ageLabel, CaptionPx, p.textCaption, shrink = false,
                    pairs = [("width", $RowAgePx & "px"), ("text-align", "right")])
@@ -306,7 +406,6 @@ proc drawListRow(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
   if columns:
     # Docked along the bottom of a wide window: title, then status and meta,
     # then the age on one line; the activity under the title.
-    r.setStyle(result, "max-width", $DockedRowMaxPx & "px")
     let main = r.box(column = true, pairs = [("flex-grow", "1"), ("gap", "1px")])
     let top = r.box(pairs = [("gap", "12px"), ("items", "center")])
     r.setStyle(title, "max-width", "512px")
@@ -330,7 +429,10 @@ proc drawGroupHeader(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
   ## An initiative's node of the tree: fold control, state mark, name,
   ## `n/m` milestones and its sessions' counts.
   let planId = group.planId
-  result = r.box(pairs = [("gap", "8px"), ("items", "center"), ("height", "28px"),
+  # `.ah-session-group-header`: 6px above, 4px below a 24px line, over a
+  # hairline.
+  result = r.box(pairs = [("gap", "8px"), ("items", "center"), ("height", "35px"),
+                          ("padding-top", "6px"), ("padding-bottom", "4px"),
                           ("padding-left", $InsetPx & "px"),
                           ("padding-right", $InsetPx & "px"),
                           ("cursor", "pointer"), ("flex-shrink", "0")])
@@ -376,7 +478,8 @@ proc drawSessionList*(r: GpuiRenderer; host: GpuiElement; vm: SessionTabStripVM;
   let head = r.box(column = true, pairs = [("padding-top", "4px"), ("padding-bottom", "4px"),
                                            ("padding-left", (if collapsed: "0" else: $InsetPx) & "px"),
                                            ("padding-right", (if collapsed: "0" else: $InsetPx) & "px"),
-                                           ("gap", "2px"), ("flex-shrink", "0")])
+                                           ("gap", "8px"), ("flex-shrink", "0")])
+  r.tag(head, "head", "sessions")
   r.rule(head, p.borderSecondary)
   let titleLine = r.box(pairs = [("items", "center"), ("height", $ControlPx & "px"),
                                  ("justify", if collapsed: "center" else: "space-between")])
@@ -396,12 +499,20 @@ proc drawSessionList*(r: GpuiRenderer; host: GpuiElement; vm: SessionTabStripVM;
     r.appendChild(titleLine, toggle)
   r.appendChild(head, titleLine)
   if not collapsed and vm.state.val == asReady:
-    let summary = r.text(vm.summaryText, CaptionPx, p.textCaption)
+    let summary = r.text(vm.summaryText, CaptionPx, p.textCaption,
+                         pairs = [("line-height", "24px")])
     r.tag(summary, "summary", vm.summaryText)
-    r.appendChild(head, summary)
+    if sidebar or not columns:
+      r.appendChild(head, summary)
+    else:
+      # Docked across a wide window, the head is one line: the label, then
+      # the summary beside it.
+      r.styles(titleLine, [("justify", "start"), ("gap", "8px")])
+      r.appendChild(titleLine, summary)
   r.appendChild(host, head)
   if not collapsed and vm.sourceLabel.len > 0:
     let source = r.box(pairs = [("padding-top", "4px"), ("padding-bottom", "4px"),
+                                ("height", "33px"), ("items", "center"),
                                 ("padding-left", $InsetPx & "px"),
                                 ("padding-right", $InsetPx & "px"),
                                 ("flex-shrink", "0")])
@@ -423,6 +534,7 @@ proc drawSessionList*(r: GpuiRenderer; host: GpuiElement; vm: SessionTabStripVM;
       r.appendChild(host, r.notice(p, AgentHarborTabsEmptyText, "empty"))
     else:
       let list = r.box(column = true, pairs = [("flex-grow", "1"), ("overflow", "hidden")])
+      r.tag(list, "rows", "list")
       for group in vm.groups:
         let showHeader = vm.grouped.val and not collapsed
         if showHeader: r.appendChild(list, r.drawGroupHeader(p, vm, group))

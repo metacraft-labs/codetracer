@@ -1,0 +1,130 @@
+{
+  "_comment": [
+    "CTF-P1b — THE REGIONS OF AN AGENT HARBOR STORY, NAMING NO RENDERER'S LAYOUT.",
+    "",
+    "Each region is one part of a story's drawing — the view, its frame's title",
+    "tab, the head and the rows of a panel or list, the active tab, the +N chip,",
+    "the '+' control, a hover popup, an open dropdown, a loading / empty / error",
+    "notice — and says which element it is in EACH renderer, in that renderer's",
+    "own terms: `web` is a CSS selector over the web views' classes (the first",
+    "visible match in document order, `document.querySelector`), `gpui` the",
+    "`data-ah-*` facts the GPUI views put on the element (every one present; a",
+    "non-empty value must match exactly). It is read by both capture paths and",
+    "transcribed into neither: `tools/visual-review/capture-storybook.mjs",
+    "--regions` (the browser's `getBoundingClientRect`) and `codetracer-gpui-story",
+    "--regions` (GPUI's own layout, read back through isonim-gpui's",
+    "`layout_bounds`). Where it is laid out is each renderer's own answer.",
+    "",
+    "A region a story does not draw is absent from both sides' answer; a region",
+    "one side draws and the other does not is a failure of",
+    "`test_ctf_p1b_gpui_capture_matches_web_layout`, which compares the two",
+    "answers with PLAT-35's pane-rectangle comparator (`layout_questions",
+    ".compareAnswer`, `PaneRectangleTolerancePp`: 2 hundredths of the viewport",
+    "per edge, never raised).",
+    "",
+    "A region marked `fill` is also checked for its BACKGROUND, which no layout",
+    "answer carries: the web capture records the colour the browser composites",
+    "behind the element (its own background over its ancestors'), and the layout",
+    "test reads the GPUI frame's pixel 4px in from the region's right edge, half",
+    "way down -- inside the element's padding, clear of its text -- against it."
+  ],
+  "schemaVersion": 1,
+  "regions": [
+    {
+      "name": "surface",
+      "web": ".ah-tab-caption, .ah-session-list, .agent-harbor-initiatives, .agent-harbor-progress, .agent-harbor-fleet",
+      "gpui": {
+        "data-ah-surface": ""
+      }
+    },
+    {
+      "name": "frame-header",
+      "web": ".lm_header",
+      "gpui": {
+        "data-ah-frame-header": ""
+      }
+    },
+    {
+      "name": "head",
+      "web": ".ah-fleet-head, .ah-session-list-head",
+      "gpui": {
+        "data-ah-head": ""
+      }
+    },
+    {
+      "name": "rows",
+      "web": ".ah-fleet-list, .ah-session-list-rows",
+      "gpui": {
+        "data-ah-rows": ""
+      }
+    },
+    {
+      "name": "active-tab",
+      "web": ".session-tab.active",
+      "gpui": {
+        "data-ah-tab": "",
+        "data-ah-active": "true"
+      },
+      "fill": true
+    },
+    {
+      "name": "active-row",
+      "web": ".ah-session-row-active",
+      "gpui": {
+        "data-ah-row": "",
+        "data-ah-active": "true"
+      },
+      "fill": true
+    },
+    {
+      "name": "selected-row",
+      "web": ".ah-fleet-row-selected, .ah-initiative-row-selected",
+      "gpui": {
+        "data-ah-selected": "true"
+      },
+      "fill": true
+    },
+    {
+      "name": "overflow",
+      "web": ".session-tab-overflow",
+      "gpui": {
+        "data-ah-overflow": ""
+      }
+    },
+    {
+      "name": "add",
+      "web": ".session-tab-add",
+      "gpui": {
+        "data-ah-add": ""
+      }
+    },
+    {
+      "name": "controls",
+      "web": ".ah-bar-controls",
+      "gpui": {
+        "data-ah-controls": ""
+      }
+    },
+    {
+      "name": "popup",
+      "web": ".ah-initiative-popup",
+      "gpui": {
+        "data-ah-popup": ""
+      }
+    },
+    {
+      "name": "menu",
+      "web": ".session-tab-overflow-menu",
+      "gpui": {
+        "data-ah-menu": ""
+      }
+    },
+    {
+      "name": "notice",
+      "web": ".empty-overlay, .ah-fleet-error, .ah-tab-loading, .ah-tab-error, .ah-tab-empty",
+      "gpui": {
+        "data-ah-notice": ""
+      }
+    }
+  ]
+}

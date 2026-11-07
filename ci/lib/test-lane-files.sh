@@ -271,6 +271,7 @@ book-isonim
 tui
 tui-real-terminal
 gpui-shell
+agent-harbor-gpui-captures
 ui-selection
 ct-host-admission
 ct-host-manifest
@@ -318,6 +319,7 @@ test_lane_description() {
 	tui) echo "CodeTracer TUI Tier-1 suites (isonim-tui harness, no terminal)" ;;
 	tui-real-terminal) echo "CodeTracer TUI Tier-2 suites (TermAssert: real pty + libvterm)" ;;
 	gpui-shell) echo "PLAT-20 GPUI shell: the dock projection against gpui-kit's own fixtures, and the shell/leaf split through the real isonim-gpui shim" ;;
+	agent-harbor-gpui-captures) echo "CTF-P1b: the GPUI window captures of the Agent Harbor stories against the committed web layout record (just ctf-p1b-gpui-captures takes the captures on headless sway first)" ;;
 	ui-selection) echo 'PLAT-1 --ui front-end selection, end to end: the real launcher, the real ct, the real TUI and a real ct host server' ;;
 	ct-host-admission) echo 'ct host admission, session isolation and lifetime, end to end: the real ct host refuses a client without its session secret or from a foreign origin, gives every client its own replay and session, and leaves no process behind when it is signalled or killed; and it refuses a trace container it cannot read with one error line naming the reason' ;;
 	ct-host-manifest) echo 'ct host --manifest slice selection, end to end: the real ct host opens the mcr_slices slice the replay start (or CODETRACER_START_SLICE_KEY) names, refuses one it does not list' ;;
@@ -2222,6 +2224,16 @@ test_lane_files() {
 		# tree-sitter link flags, i.e. giving the GPUI lane a terminal
 		# renderer, which is exactly what the split forbids.
 		_tlf_glob src/frontend/gpui/tests 'test_*.nim'
+		;;
+
+	agent-harbor-gpui-captures)
+		# CTF-P1b. `test_ctf_p1b_gpui_capture_matches_web_layout.nim` reads the
+		# git-ignored GPUI window captures `ci/test/ctf-p1b-gpui-story-capture.sh`
+		# takes on GuiAssert's headless sway (`build/ctf-p1b/gpui/`) and the
+		# committed web record, so it is not in `gpui-shell`, whose recipe opens
+		# no window. `just ctf-p1b-gpui-captures` captures first and then runs
+		# this lane; the `gpui-window-captures` CI job runs that recipe.
+		_tlf_glob src/tests/visual/agent_harbor 'test_*.nim'
 		;;
 
 	screen-oracle)

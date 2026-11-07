@@ -5721,6 +5721,27 @@ gpui-window-captures *which:
 plat35-capture-gpui-window *view: tui-prereqs
   bash ci/test/plat35-gpui-window-capture.sh {{view}}
 
+# CTF-P1b: every Agent Harbor story as a REAL GPUI window — the story host
+# `codetracer-gpui-story` on GuiAssert's headless sway, both themes, laptop and
+# sidebar sizes, frames and laid-out regions in `build/ctf-p1b/gpui/` — then
+# the `agent-harbor-gpui-captures` lane, whose
+# `test_ctf_p1b_gpui_capture_matches_web_layout` compares each capture's
+# regions with the committed web record (PLAT-35's pane-rectangle tolerance)
+# and fails on a missing or blank capture. Needs no recording. The report is
+# `build/ctf-p1b/parity/report.md`; `tools/visual-review/parity-pairs.sh
+# --agent-harbor` adds the side-by-side images.
+ctf-p1b-gpui-captures:
+  bash ci/test/ctf-p1b-gpui-story-capture.sh
+  bash ci/lib/run-nim-test-lane.sh agent-harbor-gpui-captures
+
+# CTF-P1b's web arm: the same stories in StoryBook (`capture-storybook.mjs
+# --regions`) into `build/ctf-p1b/web/`, and the browser's regions into the
+# committed `src/tests/visual/agent-harbor-web-regions.json`. Re-take and
+# commit it after changing a web view, a story or the region declaration.
+# `--no-build` reuses a fresh StoryBook.
+ctf-p1b-web-captures *args:
+  bash ci/test/ctf-p1b-web-capture.sh {{args}}
+
 # PLAT-69: the GPUI window as a normal desktop window — its top bar is the
 # title bar — as GuiAssert scenarios on a headless sway (`PLAT69_TARGET=gnome`
 # for GuiAssert's headless GNOME): the window moved, resized, maximized and

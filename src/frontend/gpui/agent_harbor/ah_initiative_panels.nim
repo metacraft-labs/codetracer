@@ -30,8 +30,12 @@ export initiatives_vm, initiative_progress_vm, ah_theme
 const
   MilestoneBarOrder* = [mscCompleted, mscInProgress, mscPartial, mscBlocked,
                         mscPlanned, mscOther]
-  BarPx = 4
+  BarPx = 6                ## `.ah-ms-bar` height: 0.375rem
   SessionIndentPx = 20     ## `.ah-initiative-sessions` padding-left: 1.25rem
+  WidePanelPx = 960        ## `@container ah-initiatives (min-width: 60rem)`
+  WideInfoMaxPx = 576      ## the wide row's first column: `minmax(0, 36rem)`
+  WideColumnGapPx = 32     ## `column-gap: 2rem`
+  MilestoneMetaPx = 352    ## the wide table's counts column, at most 22rem
   LegendGapPx = 10
 
 proc bandOf(p: AhPalette): string =
@@ -39,21 +43,49 @@ proc bandOf(p: AhPalette): string =
   if p.mode == dmDark: p.hover else: p.menu
 
 proc drawSectionHeader*(r: GpuiRenderer; p: AhPalette; title, source,
-                        summary: string): GpuiElement =
-  ## The VCS panel's section header: an uppercase label, a quieter source,
-  ## the summary at the right, over a hairline.
-  result = r.box(pairs = [("items", "center"), ("gap", "8px"), ("min-height", "28px"),
-                          ("padding-left", $InsetPx & "px"),
-                          ("padding-right", $InsetPx & "px"), ("flex-shrink", "0")])
+                        summary: string; widthPx: int; caveat = "";
+                        narrow = false; sourceBasisPx = -1): GpuiElement =
+  ## The VCS panel's section header (`.ah-fleet-section-header`): an
+  ## uppercase label, a quieter source taking the free width, the summary
+  ## pushed to the right, a caveat after it, over a hairline, 4px by 8px in
+  ## and WRAPPING as the web header does when the panel is too narrow for
+  ## one line (24px lines, 2px apart). `narrow` is the fleet's own narrow
+  ## header (`@container ah-fleet (max-width: 40rem)`): the title and the
+  ## summary on the first line, the source and the caveat each on one of
+  ## their own, 16px lines.
+  result = r.box(column = true, pairs = [("padding-top", "4px"), ("padding-bottom", "4px"),
+                                         ("padding-left", $InsetPx & "px"),
+                                         ("padding-right", $InsetPx & "px"),
+                                         ("flex-shrink", "0")])
   r.rule(result, p.borderSecondary)
-  r.appendChild(result, r.text(title.toUpperAscii, CaptionPx, p.textBody, bold = true,
-                               shrink = false))
-  let s = r.text(source, CaptionPx, p.textCaption, pairs = [("flex-grow", "1")])
+  let upper = title.toUpperAscii
+  let t = r.text(upper, CaptionPx, p.textBody, bold = true, shrink = false)
+  let s = r.text(source, CaptionPx, p.textCaption)
   r.tag(s, "source", source)
-  r.appendChild(result, s)
-  let sm = r.text(summary, CaptionPx, p.textCaption, shrink = false)
+  let sm = r.text(summary, CaptionPx, p.textCaption)
   r.tag(sm, "summary", summary)
-  r.appendChild(result, sm)
+  # The label is set semibold and spaced; measured in the browser it is a
+  # tenth wider than the regular face's metrics say (130, 69 and 159px for
+  # the three panels' labels against 118, 63 and 145).
+  var items = @[FlowItem(el: t, widthPx: textPx(upper, CaptionPx) * 11 div 10)]
+  var cv: GpuiElement
+  if caveat.len > 0:
+    cv = r.text(caveat, CaptionPx, p.textCaption, pairs = [("font-style", "italic")])
+    r.tag(cv, "caveat", caveat)
+  if narrow:
+    items.add FlowItem(el: sm, widthPx: textPx(summary, CaptionPx), alignEnd: true)
+    items.add FlowItem(el: s, widthPx: textPx(source, CaptionPx), grow: true, ownLine: true)
+    if cv != nil:
+      items.add FlowItem(el: cv, widthPx: textPx(caveat, CaptionPx), ownLine: true)
+  else:
+    # The source's flex basis: its text, or (the progress panel's, `flex: 1 1
+    # 8rem`) a fixed one, which is what decides whether it wraps.
+    items.add FlowItem(el: s, widthPx: if sourceBasisPx >= 0: sourceBasisPx
+                                       else: textPx(source, CaptionPx), grow: true)
+    items.add FlowItem(el: sm, widthPx: textPx(summary, CaptionPx), alignEnd: true)
+    if cv != nil: items.add FlowItem(el: cv, widthPx: textPx(caveat, CaptionPx))
+  r.appendChild(result, r.flowLines(items, max(1, widthPx - 2 * InsetPx), 8,
+                                    if narrow: 16 else: 24, if narrow: 0 else: 2))
 
 proc drawMilestoneBar*(r: GpuiRenderer; p: AhPalette;
                        counts: array[MilestoneStatusClass, int];
@@ -117,17 +149,23 @@ proc drawSessionLine*(r: GpuiRenderer; p: AhPalette; item: SessionItem;
 # ---------------------------------------------------------------------------
 
 proc drawInitiativeRow(r: GpuiRenderer; p: AhPalette; vm: InitiativesVM;
-                       row: InitiativeRow; index: int): GpuiElement =
+                       row: InitiativeRow; index: int; widthPx: int): GpuiElement =
   let id = row.id
   let selected = row.selected
-  let fg = if selected: p.onAction else: p.textBody
-  let quiet = if selected: p.onAction else: p.textCaption
+  # The selected initiative keeps its words' colours -- status words
+  # included -- over a tint, with a 3px bar in the action role down its
+  # left edge (`.ah-initiative-row-selected`: Dark a 28% action tint, Light
+  # the secondary-hover surface).
+  let fg = p.textBody
+  let quiet = p.textCaption
   result = r.box(column = true, pairs = [("gap", "6px"), ("padding-top", "10px"),
                                          ("padding-bottom", "10px"),
                                          ("padding-left", $InsetPx & "px"),
                                          ("padding-right", $InsetPx & "px"),
                                          ("cursor", "pointer"), ("flex-shrink", "0")])
-  if selected: r.setStyle(result, "background", p.action)
+  if selected:
+    r.styles(result, [("background", p.selectedTint), ("position", "relative")])
+    r.appendChild(result, r.insetBar(p.borderAction, 3))
   elif index mod 2 == 1: r.setStyle(result, "background", p.bandOf)
   r.tag(result, "initiative", id)
   r.tag(result, "state", $row.state)
@@ -147,25 +185,36 @@ proc drawInitiativeRow(r: GpuiRenderer; p: AhPalette; vm: InitiativesVM;
   let progress = r.text(row.progressText, CaptionPx, quiet, shrink = false)
   r.tag(progress, "progress", row.progressText)
   r.appendChild(head, progress)
-  r.appendChild(result, head)
-  r.appendChild(result, r.drawMilestoneBar(p, row.statusCounts, labelled = false))
+  # A wide panel (`@container ah-initiatives (min-width: 60rem)`): each
+  # initiative one row across the width -- what it is and how far it got in
+  # a column on the left (at most 36rem), its sessions on the right, 2rem
+  # apart. Narrower, one column, the sessions indented under it.
+  let wide = widthPx >= WidePanelPx
+  var info = result
+  if wide:
+    r.styles(result, [("flex-direction", "row"), ("gap", $WideColumnGapPx & "px"),
+                      ("items", "start")])
+    info = r.box(column = true, pairs = [("gap", "6px"), ("flex-shrink", "0"),
+      ("width", $min(WideInfoMaxPx, (widthPx - 2 * InsetPx - WideColumnGapPx) div 2) & "px")])
+    r.appendChild(result, info)
+  r.appendChild(info, head)
+  r.appendChild(info, r.drawMilestoneBar(p, row.statusCounts, labelled = false))
   if row.currentMilestone.len > 0:
-    r.appendChild(result, r.drawCurrent(p, row.currentMilestone,
-                                        if selected: p.onAction else: ""))
+    r.appendChild(info, r.drawCurrent(p, row.currentMilestone, ""))
   var meta: seq[string]
   if row.repository.len > 0: meta.add row.repository
   if row.manager.len > 0: meta.add "manager " & row.manager
   if meta.len > 0:
     let m = r.text(meta.join(Middot), CaptionPx, quiet)
     r.tag(m, "meta", meta.join(Middot))
-    r.appendChild(result, m)
+    r.appendChild(info, m)
   if not row.folded:
-    let sessions = r.box(column = true, pairs = [("padding-left", $SessionIndentPx & "px"),
+    let sessions = r.box(column = true, pairs = [("padding-left", (if wide: "0" else: $SessionIndentPx) & "px"),
                                                  ("gap", "0px")])
     let shown = if row.expanded: row.sessions.len
                 else: min(row.sessions.len, InitiativeSessionLinesShown)
     for i in 0 ..< shown:
-      r.appendChild(sessions, r.drawSessionLine(p, row.sessions[i], selected))
+      r.appendChild(sessions, r.drawSessionLine(p, row.sessions[i]))
     let hidden = row.sessions.len - shown
     if hidden > 0 or row.expanded and row.sessions.len > InitiativeSessionLinesShown:
       let label = if row.expanded: "Show fewer" else: "+" & $hidden & " more"
@@ -182,6 +231,7 @@ proc drawInitiativeRow(r: GpuiRenderer; p: AhPalette; vm: InitiativesVM;
       let tail = r.text(label, CaptionPx, quiet, pairs = [("font-style", "italic")])
       r.tag(tail, "more", label)
       r.appendChild(sessions, tail)
+    if wide: r.setStyle(sessions, "flex-grow", "1")
     r.appendChild(result, sessions)
 
 proc drawInitiativesPanel*(r: GpuiRenderer; host: GpuiElement; vm: InitiativesVM;
@@ -192,8 +242,10 @@ proc drawInitiativesPanel*(r: GpuiRenderer; host: GpuiElement; vm: InitiativesVM
                   ("background", p.panel), ("overflow", "hidden")])
   r.tag(host, "surface", "agent-harbor-initiatives")
   r.tag(host, "state", stateName(vm.state.val))
-  r.appendChild(host, r.drawSectionHeader(p, "Initiatives", vm.sourceLabel,
-    if vm.state.val == asReady: vm.summaryText else: ""))
+  let head = r.drawSectionHeader(p, "Initiatives", vm.sourceLabel,
+    if vm.state.val == asReady: vm.summaryText else: "", widthPx)
+  r.tag(head, "head", "section header")
+  r.appendChild(host, head)
   case vm.state.val
   of asIdle, asLoading:
     r.appendChild(host, r.notice(p, InitiativesLoadingText, "loading"))
@@ -207,7 +259,8 @@ proc drawInitiativesPanel*(r: GpuiRenderer; host: GpuiElement; vm: InitiativesVM
       r.appendChild(host, r.notice(p, InitiativesEmptyText, "empty"))
     else:
       let list = r.box(column = true, pairs = [("flex-grow", "1"), ("overflow", "hidden")])
-      for i, row in rows: r.appendChild(list, r.drawInitiativeRow(p, vm, row, i))
+      r.tag(list, "rows", "list")
+      for i, row in rows: r.appendChild(list, r.drawInitiativeRow(p, vm, row, i, widthPx))
       r.appendChild(host, list)
 
 proc mountInitiativesPanel*(r: GpuiRenderer; host: GpuiElement; vm: InitiativesVM;
@@ -220,7 +273,7 @@ proc mountInitiativesPanel*(r: GpuiRenderer; host: GpuiElement; vm: InitiativesV
 # ---------------------------------------------------------------------------
 
 proc drawMilestone(r: GpuiRenderer; p: AhPalette; m: MilestoneLine;
-                   index: int): GpuiElement =
+                   index: int; wide: bool): GpuiElement =
   result = r.box(pairs = [("gap", "8px"), ("items", "start"), ("padding-top", "6px"),
                           ("padding-bottom", "6px"), ("padding-left", $InsetPx & "px"),
                           ("padding-right", $InsetPx & "px"), ("flex-shrink", "0")])
@@ -241,6 +294,14 @@ proc drawMilestone(r: GpuiRenderer; p: AhPalette; m: MilestoneLine;
   r.tag(name, "title", m.title)
   r.appendChild(title, name)
   r.appendChild(main, title)
+  if wide:
+    # A wide panel lists the milestones as a table
+    # (`.ah-milestone`: `AH_MARK minmax(0, 1fr) minmax(14rem, 22rem)`): the
+    # title takes the width, its counts a right-aligned column on the same
+    # line.
+    r.styles(main, [("flex-direction", "row"), ("items", "center"), ("gap", "24px")])
+    r.setStyle(title, "flex-grow", "1")
+    r.setStyle(title, "min-width", "0px")
   let parts = milestoneMetaParts(m)
   let meta = r.box(pairs = [("gap", "6px"), ("items", "center")])
   if m.current:
@@ -253,6 +314,9 @@ proc drawMilestone(r: GpuiRenderer; p: AhPalette; m: MilestoneLine;
     r.appendChild(metaRun, r.text(parts.failing, CaptionPx, p.textError, shrink = false))
     r.appendChild(metaRun, r.text(parts.after, CaptionPx, p.textCaption, shrink = false))
   r.appendChild(meta, metaRun)
+  if wide:
+    r.styles(meta, [("width", $MilestoneMetaPx & "px"), ("flex-shrink", "0"),
+                    ("justify", "end")])
   r.appendChild(main, meta)
   r.appendChild(result, main)
 
@@ -267,8 +331,11 @@ proc drawProgressPanel*(r: GpuiRenderer; host: GpuiElement; vm: InitiativeProgre
   r.tag(host, "state", if vm.state.val == asReady and not vm.found: "empty"
                        else: stateName(vm.state.val))
   let initiative = vm.current
-  r.appendChild(host, r.drawSectionHeader(p, "Initiative progress",
-    if ready: initiative.title else: "", if ready: vm.headline else: ""))
+  let head = r.drawSectionHeader(p, "Initiative progress",
+    if ready: initiative.title else: "", if ready: vm.headline else: "", widthPx,
+    sourceBasisPx = 128)
+  r.tag(head, "head", "section header")
+  r.appendChild(host, head)
   case vm.state.val
   of asIdle, asLoading:
     r.appendChild(host, r.notice(p, InitiativesLoadingText, "loading"))
@@ -281,6 +348,7 @@ proc drawProgressPanel*(r: GpuiRenderer; host: GpuiElement; vm: InitiativeProgre
       r.appendChild(host, r.notice(p, ProgressEmptyText, "empty"))
       return
     let list = r.box(column = true, pairs = [("flex-grow", "1"), ("overflow", "hidden")])
+    r.tag(list, "rows", "list")
     let summaryBlock = r.box(column = true, pairs = [("gap", "8px"), ("padding", "8px"),
                                                      ("flex-shrink", "0")])
     r.rule(summaryBlock, p.borderSecondary)
@@ -306,7 +374,8 @@ proc drawProgressPanel*(r: GpuiRenderer; host: GpuiElement; vm: InitiativeProgre
       r.appendChild(header, r.text("(" & $group.count & ")", CaptionPx, p.textCaption,
                                    shrink = false))
       r.appendChild(list, header)
-      for i, m in group.milestones: r.appendChild(list, r.drawMilestone(p, m, i))
+      for i, m in group.milestones:
+        r.appendChild(list, r.drawMilestone(p, m, i, widthPx >= WidePanelPx))
     r.appendChild(host, list)
 
 proc mountProgressPanel*(r: GpuiRenderer; host: GpuiElement; vm: InitiativeProgressVM;
