@@ -210,7 +210,15 @@ async function expectCaptionChrome(page: Page): Promise<void> {
 
   const logo = page.locator("#menu-logo-img");
   await expect(logo).toBeVisible({ timeout: 10_000 });
-  await expect(logo).toHaveCSS("background-image", /Icon|logo|svg|png|url/i);
+  // The logo is a mask of its artwork painted in the theme's icon colour
+  // (`components/menu_bar.styl`): the artwork is named by `mask-image` and the
+  // colour is the element's background, so both must be there for it to draw.
+  const logoPaint = await logo.evaluate((el) => {
+    const style = getComputedStyle(el) as CSSStyleDeclaration & { webkitMaskImage?: string };
+    return { mask: style.maskImage || style.webkitMaskImage || "", colour: style.backgroundColor };
+  });
+  expect(logoPaint.mask).toMatch(/ct_logo|logo|svg|url/i);
+  expect(logoPaint.colour).not.toMatch(/^(transparent|rgba\(0, 0, 0, 0\))$/);
 
   const debugHost = page.locator("#debug");
   await expect(debugHost).toBeVisible({ timeout: 10_000 });

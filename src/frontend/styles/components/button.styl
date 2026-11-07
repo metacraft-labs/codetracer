@@ -345,8 +345,35 @@ button
 #reset-operation-loading-image
   background-image: ct-images-reset-operation-loading
 
+// Stop and Run Tests draw their marks as the strip's twelve inline marks do
+// (`views/debug_control_marks.nim`): in the button's own `color`, through a
+// `::before` stencil (a mask uses only the file's shape), as
+// `#trace-run-button` does below.  They were `background-image`s named by
+// `ct-images-stop` / `ct-images-run-tests`, which only the dark palette
+// defines, each a fixed near-white drawing; in the light theme the
+// declaration was the bare identifier, which the browser drops, so both
+// buttons were empty.  Following `color` also gives them the strip's hover,
+// focus and inert treatment.  Sized as the old images were: 1em tall, the
+// width from the artwork's ratio (16x16 and 21x16).
+#stop-image,
+#run-tests-image[class*="ct-button-image-"],
+#jump-to-live-debug
+  background-image: none
+
+  &::before
+    content: ""
+    flex: 0 0 auto
+    height: 1em
+    background-color: currentColor
+    pointer-events: none
+    -webkit-mask: var(--ct-toolbar-stencil) center / contain no-repeat
+    mask: var(--ct-toolbar-stencil) center / contain no-repeat
+
 #stop-image
-  background-image: ct-images-stop
+  --ct-toolbar-stencil: url('../../public/resources/debug/stop_16_dark.svg')
+
+  &::before
+    width: 1em
 
 #jump-before-image
   background-image: ct-images-jump-before
@@ -368,11 +395,14 @@ button
 // top of the words. That is what "the toolbar looks broken" was pointing at.
 //
 // Requiring the image-button class is therefore not a specificity tweak but the
-// actual precondition: this declaration is only meaningful on an element that
-// also gets the sizing rules above.
+// actual precondition: this mark is only meaningful on an element that also
+// gets the sizing rules above.
 #run-tests-image[class*="ct-button-image-"]
 #jump-to-live-debug
-  background-image: ct-images-run-tests
+  --ct-toolbar-stencil: url('../../public/resources/shared/run_test_img.svg')
+
+  &::before
+    width: 1.3125em
 
 #run-tests-loading-image
   background-image: ct-images-run-tests-loading

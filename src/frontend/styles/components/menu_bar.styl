@@ -193,29 +193,43 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
   align-items: center
   cursor: pointer
 
+  // The three marks are stencils painted in the theme's icon colour
+  // (`icon/primary/default`), as `.value-history-button` and the origin badge
+  // draw theirs (button.styl): a mask uses only the file's SHAPE, so one file
+  // serves every theme and the colour comes from the palette's role.  They
+  // used to be `background-image`s named by per-palette variables, and the
+  // light palette pointed those at 16px near-white (`#FDFDFD`) artwork: on the
+  // light caption bar the buttons drew oversized white glyphs that read as
+  // nothing.  Drawn at the artwork's own size (10x2, 14x11, 10x10 units), as
+  // the dark theme always drew them.
   .menu-button-svg
     width: 1.5em
     height: 1.5em
     border-radius: 50%
-    background-position: center
-    background-repeat: no-repeat
+    background-color: colors-ui-icon-primary-default
+    -webkit-mask-position: center
+    mask-position: center
+    -webkit-mask-repeat: no-repeat
+    mask-repeat: no-repeat
 
     &.minimize
-      background-image: WINDOW_MINIMIZE_ICON_PATH
+      -webkit-mask-image: url('../../public/resources/window/minimize_window_dark.svg')
+      mask-image: url('../../public/resources/window/minimize_window_dark.svg')
       opacity: 1
-      background-position: center
-      background-position-y: 65%
+      -webkit-mask-position: center 65%
+      mask-position: center 65%
 
-    &.restore
-      background-image: WINDOW_RESTORE_ICON_PATH
-      opacity: 1
-
+    // The restore button shows the maximize mark, so the button looks the
+    // same whichever state the window is in.
+    &.restore,
     &.maximize
-      background-image: WINDOW_MAXIMIZE_ICON_PATH
+      -webkit-mask-image: url('../../public/resources/window/maximize_window_dark.svg')
+      mask-image: url('../../public/resources/window/maximize_window_dark.svg')
       opacity: 1
 
     &.close
-      background-image: WINDOW_CLOSE_ICON_PATH
+      -webkit-mask-image: url('../../public/resources/window/close_window_dark.svg')
+      mask-image: url('../../public/resources/window/close_window_dark.svg')
       opacity: 1
       font-size: inherit !important
 
@@ -289,12 +303,16 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
     // unable to see where focus is (WCAG 2.4.7).  If the ring is the wrong
     // shape here, restyle it; do not remove it.
 
+    // The logo is a stencil in the theme's icon colour, like the window
+    // buttons above: its artwork is a near-white (`#F3F3F3`) drawing, and as a
+    // `background-image` it vanished into the light caption bar, leaving the
+    // logo button an empty box.
     #menu-logo-img
       width: 1.25em
       height: 1.25em
-      background-image: ct-images-logo-dark
-      background-size: cover
-      background-position: center
+      background-color: colors-ui-icon-primary-default
+      -webkit-mask: url('../../public/resources/menu/ct_logo_dark.svg') center / cover no-repeat
+      mask: url('../../public/resources/menu/ct_logo_dark.svg') center / cover no-repeat
       display: inline-block
       position: relative
       cursor: pointer

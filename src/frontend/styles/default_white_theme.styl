@@ -120,12 +120,11 @@ LAYOUT_SPLITTER_COLOR = #bfb8aa
 FLOW_HIDE_ICON = url('../../public/resources/shared/flow_hide_dark.svg')
 FLOW_SHOW_ICON = url('../../public/resources/shared/flow_show_dark.svg')
 
-WINDOW_MINIMIZE_ICON_PATH = url('../../public/resources/window/minimize_16_white.svg')
-WINDOW_MAXIMIZE_ICON_PATH = url('../../public/resources/window/maximize_16_white.svg')
-WINDOW_CLOSE_ICON_PATH = url('../../public/resources/window/close_16_white.svg')
-// The caption bar's restore button: the maximize icon, as in the dark theme,
-// so the button looks the same whichever state the window is in.
-WINDOW_RESTORE_ICON_PATH = WINDOW_MAXIMIZE_ICON_PATH
+// The caption bar's window buttons, the logo, Stop and Run Tests are masks of
+// one file each, painted in a role (components/menu_bar.styl, button.styl),
+// so no palette names their artwork.  (This palette named 16px near-white
+// window glyphs and no Stop or Run Tests image, so on the light caption bar
+// they drew oversized white glyphs and two empty buttons.)
 
 WELCOME_SCREEN_WINDOW_MINIMIZE_ICON_PATH = url('../../public/resources/window/minimize_16_grey.svg')
 WELCOME_SCREEN_WINDOW_MAXIMIZE_ICON_PATH = url('../../public/resources/window/maximize_16_grey.svg')
@@ -564,5 +563,3 @@ ct-images-event-log-fa-up=url("../../public/resources/shared/fa_up_dark.svg")
 ct-images-default-search-icon=url("../../public/resources/shared/input_default_search_icon_dark.svg")
 ct-images-disabled-search-icon=url("../../public/resources/shared/input_disabled_search_icon_dark.svg")
 ct-images-empty-search-icon=url("../../public/resources/shared/input_empty_search_icon_dark.svg")
-
-ct-images-logo-dark = url("../../public/resources/menu/ct_logo_dark.svg")

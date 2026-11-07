@@ -405,14 +405,15 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
     align-items: center
     gap: 0.375em
 
+  // A stencil in the theme's icon colour: the chevron's drawing strokes a
+  // near-white, which as a `background-image` vanished on the light panel.
   .agent-chevron
     display: inline-block
     width: 0.5625rem
     height: 0.3125rem
-    background-image: url("data:image/svg+xml,%3Csvg width='9' height='5' viewBox='0 0 9 5' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0.353577 0.353516L4.35358 4.35352L8.35358 0.353515' stroke='%23DDDDDD' stroke-linejoin='round'/%3E%3C/svg%3E")
-    background-repeat: no-repeat
-    background-position: center
-    background-size: contain
+    background-color: colors-ui-icon-primary-default
+    -webkit-mask: url("data:image/svg+xml,%3Csvg width='9' height='5' viewBox='0 0 9 5' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0.353577 0.353516L4.35358 4.35352L8.35358 0.353515' stroke='%23DDDDDD' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat
+    mask: url("data:image/svg+xml,%3Csvg width='9' height='5' viewBox='0 0 9 5' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0.353577 0.353516L4.35358 4.35352L8.35358 0.353515' stroke='%23DDDDDD' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat
     transition: transform 0.15s ease
     flex-shrink: 0
 

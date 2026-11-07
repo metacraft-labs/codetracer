@@ -266,21 +266,27 @@
   display: flex
   align-items: center
 
-  .caret-collapse
+  // The expander's caret is a stencil in the theme's icon colour: its file
+  // strokes a near-white `#DDDDDD`, which as a `background-image` was
+  // invisible on the light panel (a compound value showed no caret at all).
+  .caret-collapse,
+  .caret-expand
     display: block
-    background-image: SHARED_OPEN_FA_ICON
-    background-position: center
-    background-repeat: no-repeat
+    background-color: colors-ui-icon-primary-default
+    -webkit-mask-position: center
+    mask-position: center
+    -webkit-mask-repeat: no-repeat
+    mask-repeat: no-repeat
     width: 0.5em
     height: 0.5em
 
+  .caret-collapse
+    -webkit-mask-image: SHARED_OPEN_FA_ICON
+    mask-image: SHARED_OPEN_FA_ICON
+
   .caret-expand
-    display: block
-    background-image: SHARED_CLOSE_FA_ICON
-    background-position: center
-    background-repeat: no-repeat
-    width: 0.5em
-    height: 0.5em
+    -webkit-mask-image: SHARED_CLOSE_FA_ICON
+    mask-image: SHARED_CLOSE_FA_ICON
 
 .value-line-view-text
   display: flex

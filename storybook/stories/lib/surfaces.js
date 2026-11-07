@@ -1055,7 +1055,10 @@ function renderDefaultDebugLayout(container, fixture) {
     // (`views/debug_control_marks`), so they are fetched from there rather
     // than transcribed here — a second copy of twelve paths in a story file
     // is a copy nothing compares against.
-    const debugHeader = root.querySelector("#debug");
+    // The header is the shell's `#menu`, a sibling of the `#ROOT` it
+    // returns, so it is looked up in the whole surface: looked up under
+    // `#ROOT` it was never found and every button stayed blank.
+    const debugHeader = container.querySelector("#debug");
     if (debugHeader && typeof ctAttachDebugControlMarks !== "undefined") {
       ctAttachDebugControlMarks(debugHeader);
     }
