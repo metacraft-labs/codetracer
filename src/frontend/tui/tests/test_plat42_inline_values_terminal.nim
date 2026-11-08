@@ -56,10 +56,12 @@ const
   ValueScenarios = ["advanced-state", "returned-calltrace",
                     "continued-event-log"]
   ModuleScenario = "stepped-editor"
-    ## A stop at a `def` line at module level: its line names nothing in
-    ## scope, and the flow's values — the module's globals on the `def` lines
-    ## the run reached, the dict entries' functions — are what both media
-    ## draw (it was the "quiet" stop until the values became the flow's).
+    ## A stop at a `def` line at module level: its line names nothing, so it
+    ## carries no value on either medium, and neither does any other `def`
+    ## header the run reached; the flow's values are the dispatch table's
+    ## (`OPERATIONS` and its entries' functions). Until a Python line's own
+    ## names became authoritative the `def` lines carried the module's
+    ## globals, `__builtins__` and the rest.
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 
@@ -145,6 +147,8 @@ suite "PLAT-42: PG3 re-measured — one producer, two native editors":
         ck model.executionLine == lineOfRow(gpuiRow)
         let screen = sourcePaneScreen(model, Cols, Rows)
         var compared, valued = 0
+        var execCompared = false
+        var execNames: seq[string] = @[]
         for row in gpuiRows(sid):
           let line = lineOfRow(row)
           if line < model.viewportTop or line >= model.viewportTop + Rows - 1 or
@@ -158,6 +162,9 @@ suite "PLAT-42: PG3 re-measured — one producer, two native editors":
                      " gpui=" & $want)
           ck got == want
           inc compared
+          if line == model.executionLine:
+            execCompared = true
+            execNames = got
           # …and the terminal DRAWS them on that line — or draws nothing
           # there when there is nothing.
           let painted = rowText(screen.rows[1 + line - model.viewportTop])
@@ -167,9 +174,18 @@ suite "PLAT-42: PG3 re-measured — one producer, two native editors":
             ck ("/* " & want[0] & ": ") in painted
           else:
             ck "/* " notin painted
-        # Not vacuous: the stop's lines were compared, and some carry values.
+        # Not vacuous: the stop's lines were compared, the stop's own line
+        # among them, and some carry values. Except at the module stop: it is
+        # on `def div(left, right):`, which names nothing, and this pane shows
+        # lines 22..47, docstrings and `def` headers alone — so there the
+        # comparison is that NEITHER medium draws a value on any of them, the
+        # stop's own line included, the module's globals included.
         ck compared > 0
-        ck valued > 0
+        ck execCompared
+        if sid == ModuleScenario:
+          ck execNames.len == 0
+        else:
+          ck valued > 0
 
 suite "PLAT-28: REAL inline values, placed by the inlay model":
   ## PLAT-28's real-stack box: *"A real recording, stepped, with inline values

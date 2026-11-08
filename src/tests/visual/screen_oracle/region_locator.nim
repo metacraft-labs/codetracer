@@ -149,6 +149,32 @@ const
     ## | **0.95** | **all real gutters found, no false ones** | **chosen** |
     ## | 1.00 | brittle | a single antialiased pixel anywhere along a true gutter rejects it |
 
+  SplitterDarkerSlack* = 3
+    ## Grey levels a horizontal splitter's darkest row may sit BELOW the
+    ## frame's gutter tone (`deriveGutterTones`) and still be a splitter.
+    ##
+    ## A splitter is painted in the gutter's colour, and the only thing a
+    ## rasteriser or a downscale does to it is blend it toward the LIGHTER pane
+    ## ground beside it. Nothing in a splitter is darker than the gutter. A
+    ## SHADOW is: it is black composited over the ground. Since the editor
+    ## learned Monaco's sticky scroll (2026-10-17), a scrolled GPUI editor draws
+    ## the sticky widget's shadow across the WHOLE pane under its headers —
+    ## `leaves.nim`, alphas 0.225/0.475/0.225/0.075 of black when a header is
+    ## pushed up, 0.95/0.7/0.325/0.075/0.025 under whole headers. Over the
+    ## `#282828` ground (40) that is rows of 31, 21, 31, 37 (measured on the
+    ## `stepped-editor` window frame at codetracer `b7e12b7450b`): three rows
+    ## under the gutter threshold, reaching both sides of the editor's cell —
+    ## so the split rule took it for a splitter and cut the editor into its
+    ## 37 px title strip and an untitled body, and the PLAT-42 window record
+    ## found no editor rows on four of the eight frames. The splitters in the
+    ## same frame are eight rows of exactly 27, the gutter tone.
+    ##
+    ## | candidate | consequence | decision |
+    ## |---|---|---|
+    ## | no check | the sticky shadow splits the editor | rejected (the defect) |
+    ## | 0 | a one-level rounding difference drops a real splitter | rejected |
+    ## | **3** | **splitters (27 at gutter 27) kept; the shadows' 21 and 2 rejected** | **chosen** |
+    ## | 6 | the pushed-up shadow's 21 sits exactly 6 under 27 and splits again | rejected |
   EdgeChromeMargin* = 60
     ## Runs closer than this to the top or bottom of the frame are the window
     ## chrome and the status bar, not pane splits. They are excluded before the
@@ -160,7 +186,7 @@ func medianOf(values: var seq[uint8]): int =
   values.sort()
   int(values[values.len div 2])
 
-proc deriveGutterThreshold*(img: GrayImage): int =
+proc deriveGutterTones*(img: GrayImage): tuple[threshold, gutterTone: int] =
   ## **THE THRESHOLD IS DERIVED FROM THE FRAME, NOT BAKED IN — because the two
   ## front-ends do not share a palette.**
   ##
@@ -195,7 +221,7 @@ proc deriveGutterThreshold*(img: GrayImage): int =
       vals.add uint8(img.pixels[y * img.width + x])
       y += 3
     hist.inc medianOf(vals)
-  if hist.len < 2: return GutterMedianThreshold
+  if hist.len < 2: return (GutterMedianThreshold, -1)
   # The pane tone is the most common median. The gutter tone is the most common
   # median BELOW it — "below" because a gutter is darker than a pane in both
   # renderers, and taking simply the second-most-common would pick up a
@@ -207,8 +233,12 @@ proc deriveGutterThreshold*(img: GrayImage): int =
     if tone < paneTone and count > gutterCount:
       gutterTone = tone
       gutterCount = count
-  if gutterTone < 0: return GutterMedianThreshold
-  (paneTone + gutterTone) div 2
+  if gutterTone < 0: return (GutterMedianThreshold, -1)
+  ((paneTone + gutterTone) div 2, gutterTone)
+
+proc deriveGutterThreshold*(img: GrayImage): int =
+  ## The threshold alone; see `deriveGutterTones`.
+  deriveGutterTones(img).threshold
 
 proc darkFractionIn*(img: GrayImage, r: Rect, vertical: bool,
                      index: int,
@@ -249,13 +279,24 @@ proc darkFractionIn*(img: GrayImage, r: Rect, vertical: bool,
       x += 2
   if total == 0: 0.0 else: dark / total
 
+proc rowMedianIn(img: GrayImage, r: Rect, row: int): int =
+  var vals: seq[uint8] = @[]
+  var x = r.x
+  while x < r.x + r.w:
+    vals.add uint8(img.pixels[row * img.width + x])
+    x += 2
+  medianOf(vals)
+
 proc splitRect*(img: GrayImage, r: Rect, vertical: bool,
                 minGutter: int,
-                threshold = GutterMedianThreshold): seq[GutterRun] =
+                threshold = GutterMedianThreshold,
+                gutterTone = -1): seq[GutterRun] =
   ## Gutters inside `r`, measured inside `r` only. `minGutter` is the
   ## thickness floor; horizontal runs additionally need a core of that many
   ## consecutive rows connecting both sides, so an inset border cannot split
-  ## the pane even when it covers `GutterDarkFraction` of each row.
+  ## the pane even when it covers `GutterDarkFraction` of each row. With the
+  ## frame's `gutterTone` known, a horizontal run with a row darker than it
+  ## (beyond `SplitterDarkerSlack`) is a shadow, not a splitter.
   let n = if vertical: r.w else: r.h
   let origin = if vertical: r.x else: r.y
   var frac = newSeq[float](n)
@@ -282,6 +323,11 @@ proc splitRect*(img: GrayImage, r: Rect, vertical: bool,
               if sideRun >= minGutter: connectsSides = true
             else:
               sideRun = 0
+        if connectsSides and not vertical and gutterTone >= 0:
+          for row in origin + i ..< origin + j:
+            if rowMedianIn(img, r, row) < gutterTone - SplitterDarkerSlack:
+              connectsSides = false
+              break
         if connectsSides:
           result.add GutterRun(first: origin + i, last: origin + j - 1)
       i = j
@@ -289,7 +335,8 @@ proc splitRect*(img: GrayImage, r: Rect, vertical: bool,
       inc i
 
 proc partition*(img: GrayImage, r: Rect, depth = 0,
-                threshold = GutterMedianThreshold): seq[Rect] =
+                threshold = GutterMedianThreshold,
+                gutterTone = -1): seq[Rect] =
   ## **RECURSIVE BINARY PARTITION, BECAUSE THE LAYOUT IS NOT A GRID.**
   ##
   ## Measured 2026-09-22, and this is why a grid is wrong: in the 1920x1080
@@ -316,24 +363,25 @@ proc partition*(img: GrayImage, r: Rect, depth = 0,
     for g in vg:
       if g.first - cursor >= MinPaneExtent:
         result.add partition(img, Rect(x: cursor, y: r.y,
-                                       w: g.first - cursor, h: r.h), depth + 1, threshold)
+                                       w: g.first - cursor, h: r.h), depth + 1, threshold, gutterTone)
       cursor = g.last + 1
     if r.x + r.w - cursor >= MinPaneExtent:
       result.add partition(img, Rect(x: cursor, y: r.y,
-                                     w: r.x + r.w - cursor, h: r.h), depth + 1, threshold)
+                                     w: r.x + r.w - cursor, h: r.h), depth + 1, threshold, gutterTone)
     return
   let hg = splitRect(img, r, vertical = false,
-                     minGutter = MinInteriorRowGutter, threshold = threshold)
+                     minGutter = MinInteriorRowGutter, threshold = threshold,
+                     gutterTone = gutterTone)
   if hg.len > 0:
     var cursor = r.y
     for g in hg:
       if g.first - cursor >= MinPaneExtent:
         result.add partition(img, Rect(x: r.x, y: cursor,
-                                       w: r.w, h: g.first - cursor), depth + 1, threshold)
+                                       w: r.w, h: g.first - cursor), depth + 1, threshold, gutterTone)
       cursor = g.last + 1
     if r.y + r.h - cursor >= MinPaneExtent:
       result.add partition(img, Rect(x: r.x, y: cursor,
-                                     w: r.w, h: r.y + r.h - cursor), depth + 1, threshold)
+                                     w: r.w, h: r.y + r.h - cursor), depth + 1, threshold, gutterTone)
     return
   @[r]
 
@@ -426,7 +474,7 @@ proc locateGrid*(img: GrayImage): ScreenReading[PaneGrid] =
   ## Locate the pane grid, or say why not.
   if img.width == 0 or img.height == 0:
     return unreadable[PaneGrid](urFrameBlank, "image has a zero dimension")
-  let threshold = deriveGutterThreshold(img)
+  let (threshold, gutterTone) = deriveGutterTones(img)
   let cm = columnMedians(img)
   let rm = rowMedians(img)
   if isDegenerate(cm) or isDegenerate(rm):
@@ -471,7 +519,7 @@ proc locateGrid*(img: GrayImage): ScreenReading[PaneGrid] =
   # out a grid.
   grid.cells = partition(img, Rect(x: 0, y: contentTop, w: img.width,
                                    h: contentBottom - contentTop + 1),
-                         0, threshold)
+                         0, threshold, gutterTone)
   if grid.cells.len == 0:
     return unreadable[PaneGrid](urFrameBlank, "no pane cells survived segmentation")
   read(grid)

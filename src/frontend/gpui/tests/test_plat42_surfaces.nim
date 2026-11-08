@@ -46,6 +46,13 @@ const Scenarios = ["entry-shell", "stepped-editor", "advanced-state",
 # the stop is on — see surface 3.)
 const ValuesExpected = ["advanced-state", "returned-calltrace",
                         "continued-event-log"]
+const NothingRanYet = "entry-shell"
+  ## The recording's first stop, on line 1, before any statement ran. It
+  ## carries NO value: the only ones it had were the module's globals
+  ## (`__builtins__` and the rest), copied onto the docstring and `def`
+  ## lines while a name-less Python line fell back to every local of its
+  ## frame. A Python line's own names are authoritative since then, and this
+  ## stop is the one that says so — a value here is that fallback back.
 
 proc rec(): JsonNode = parseJson(readFile(recordPath))
 proc rowsOf(s: string): seq[JsonNode] = rec()["scenarios"][s]["rows"].getElems
@@ -134,7 +141,8 @@ suite "PLAT-42 surface 3 — inline values, on the lines the run REACHED":
           checkpoint(s & " row " & r["text"].getStr & " flow " &
                      r["flow"].getStr)
           ck reachedOrHeader(r)
-      ck carrying > 0
+      if s == NothingRanYet: ck carrying == 0
+      else: ck carrying > 0
 
   test "the declined arm carries no value, and every value is on a reached line — noir":
     var declined, carrying = 0

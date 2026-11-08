@@ -565,3 +565,8 @@ src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/tui/
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/gpui/main.nim	fa6ce99bb834829cbe860e9799d39701d88d2840c2a45ad327ae0f3a61d89728	9586b1d91b33dee37dfa0adbb8bdc5dbed5ea87390ff4e1ecb41ca587b2eb7ed
 src/frontend/tui/tests/plat70g-multiclick-mutation-control.sha256	src/frontend/headless_app/pane_clicks.nim	77e32c2078656ec90b2d2690616b650c71a4d03c3e8e32bbbf8fcec0c56a1c57	22555ed32cf89d0999dd27af566500d811e55d18f638ae8e3e161fa8dc9dac10
 src/frontend/viewmodel/tests/unit/plat29-async-mutation-control.sha256	src/frontend/ui/state.nim	53b545428d53a6367dc03abba3dd0d5683b828d3713705fcd1cd4b0bdcd39dee	dffab8fbd926da0a6350b4bfa1ee15ae5940fb3b35e8630fe3fc07cb370f4e9f
+
+# 2026-11-08: the PLAT-42 window reader brought to the current GPUI window and the
+# records re-taken; the inline-values suite no longer expects values on the module
+# stop's `def` lines. The surface harness was already unable to grade (above).
+src/frontend/tui/tests/plat42-surface-mutation-control.sha256	src/frontend/tui/tests/test_plat42_inline_values_terminal.nim	7a8b08decd7c2e6f44b72de8b3692fccd158be94f034fc54b4a14e5cac96232b	2f22db41a65b005257c285696362f3480d5f17c868d08ba79d6ab20d8088d27f

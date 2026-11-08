@@ -5,12 +5,12 @@
     "Regenerate with `just plat42-surfaces-record`. Asserted by",
     "src/frontend/gpui/tests/test_plat42_surfaces.nim, which reads no binary."
   ],
-  "takenAt": "2026-10-17T04:58:57Z",
-  "host": "nixos-ci-bare-001",
+  "takenAt": "2026-11-08T08:56:04Z",
+  "host": "gpu-server-001",
   "scenarios": {
     "entry-shell": {
       "replayOps": "",
-      "planSha256": "eb15277e3f4112c018f0e77445e35c3f43e78039b277b380f1b5848461de9113",
+      "planSha256": "9d49734751b707ab90fbb75f329beba40b55ea147036ef43eef87ced52bec189",
       "rowCount": 45,
       "rows": [
         {
@@ -28,7 +28,7 @@
           "row": 2,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=nil|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil",
+          "values": "",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
@@ -325,11 +325,11 @@
           "row": 29,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil",
+          "values": "",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "29def add(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "text": "29def add(left, right):",
           "code": "def add(left, right):"
         },
         {
@@ -380,11 +380,11 @@
           "row": 34,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026",
+          "values": "",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "34def sub(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "text": "34def sub(left, right):",
           "code": "def sub(left, right):"
         },
         {
@@ -435,11 +435,11 @@
           "row": 39,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|sub=<function sub at 0x7fffe862c4\u2026",
+          "values": "",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "39def mul(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "text": "39def mul(left, right):",
           "code": "def mul(left, right):"
         },
         {
@@ -490,11 +490,11 @@
           "row": 44,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|mul=<function mul at 0x7fffe862c5\u2026|sub=<function sub at 0x7fffe862c4\u2026",
+          "values": "",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "44def div(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "text": "44def div(left, right):",
           "code": "def div(left, right):"
         },
         {
@@ -512,7 +512,7 @@
     },
     "stepped-editor": {
       "replayOps": "stepIn=5",
-      "planSha256": "aa3ae7b251ffeaf4a43ad92e216f9037276525e7645a3de8bde8d31658699b22",
+      "planSha256": "a8ee3427a7e0d787720c0985f82b932d171114594a5f2e22b876025053a84805",
       "rowCount": 45,
       "rows": [
         {
@@ -596,11 +596,11 @@
           "row": 29,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil",
+          "values": "",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "29def add(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "text": "29def add(left, right):",
           "code": "def add(left, right):"
         },
         {
@@ -651,11 +651,11 @@
           "row": 34,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026",
+          "values": "",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "34def sub(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "text": "34def sub(left, right):",
           "code": "def sub(left, right):"
         },
         {
@@ -706,11 +706,11 @@
           "row": 39,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|sub=<function sub at 0x7fffe862c4\u2026",
+          "values": "",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "39def mul(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "text": "39def mul(left, right):",
           "code": "def mul(left, right):"
         },
         {
@@ -761,11 +761,11 @@
           "row": 44,
           "pointer": "eptExecution",
           "mark": "emNone",
-          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|mul=<function mul at 0x7fffe862c5\u2026|sub=<function sub at 0x7fffe862c4\u2026",
+          "values": "",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "#404040",
-          "text": "44def div(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "text": "44def div(left, right):",
           "code": "def div(left, right):"
         },
         {
@@ -860,55 +860,55 @@
           "row": 53,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "OPERATIONS=@[(\"+\", <function add at 0x7f\u2026",
+          "values": "OPERATIONS=@[(\"+\", <function add at 0x7d\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "53OPERATIONS = {OPERATIONS@[(\"+\", <function add at 0x7f\u2026",
+          "text": "53OPERATIONS = {OPERATIONS@[(\"+\", <function add at 0x7d\u2026",
           "code": "OPERATIONS = {"
         },
         {
           "row": 54,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "add=<function add at 0x7fffe862c4\u2026",
+          "values": "add=<function add at 0x7d632d1aea\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "54    \"+\": add,add<function add at 0x7fffe862c4\u2026",
+          "text": "54    \"+\": add,add<function add at 0x7d632d1aea\u2026",
           "code": "    \"+\": add,"
         },
         {
           "row": 55,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "sub=<function sub at 0x7fffe862c4\u2026",
+          "values": "sub=<function sub at 0x7d632d1acd\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "55    \"-\": sub,sub<function sub at 0x7fffe862c4\u2026",
+          "text": "55    \"-\": sub,sub<function sub at 0x7d632d1acd\u2026",
           "code": "    \"-\": sub,"
         },
         {
           "row": 56,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "mul=<function mul at 0x7fffe862c5\u2026",
+          "values": "mul=<function mul at 0x7d632d1ace\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "56    \"*\": mul,mul<function mul at 0x7fffe862c5\u2026",
+          "text": "56    \"*\": mul,mul<function mul at 0x7d632d1ace\u2026",
           "code": "    \"*\": mul,"
         },
         {
           "row": 57,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "div=<function div at 0x7fffe862c5\u2026",
+          "values": "div=<function div at 0x7d632d1acc\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "57    \"/\": div,div<function div at 0x7fffe862c5\u2026",
+          "text": "57    \"/\": div,div<function div at 0x7d632d1acc\u2026",
           "code": "    \"/\": div,"
         },
         {
@@ -948,11 +948,11 @@
           "row": 61,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "OPERATIONS=@[(\"+\", <function add at 0x7f\u2026|__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|div=<function div at 0x7fffe862c5\u2026|mul=<function mul at 0x7fffe862c5\u2026|sub=<function sub at 0x7fffe862c4\u2026",
+          "values": "",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "61def apply_op(symbol, left, right):OPERATIONS@[(\"+\", <function add at 0x7f\u2026__bu",
+          "text": "61def apply_op(symbol, left, right):",
           "code": "def apply_op(symbol, left, right):"
         },
         {
@@ -1014,18 +1014,18 @@
     },
     "advanced-state": {
       "replayOps": "stepIn=5,next=3",
-      "planSha256": "173f98ad741a85096b9421e66139488602e911d0c3a59b9bcac235a9f45e616e",
+      "planSha256": "eb0c631181d03a1d8dbde554d8f831c9c6fc71808e94de59650b7c749cf5ce45",
       "rowCount": 45,
       "rows": [
         {
           "row": 34,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026",
+          "values": "",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "34def sub(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "text": "34def sub(left, right):",
           "code": "def sub(left, right):"
         },
         {
@@ -1076,11 +1076,11 @@
           "row": 39,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|sub=<function sub at 0x7fffe862c4\u2026",
+          "values": "",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "39def mul(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "text": "39def mul(left, right):",
           "code": "def mul(left, right):"
         },
         {
@@ -1131,11 +1131,11 @@
           "row": 44,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|mul=<function mul at 0x7fffe862c5\u2026|sub=<function sub at 0x7fffe862c4\u2026",
+          "values": "",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "44def div(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "text": "44def div(left, right):",
           "code": "def div(left, right):"
         },
         {
@@ -1230,55 +1230,55 @@
           "row": 53,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "OPERATIONS=@[(\"+\", <function add at 0x7f\u2026",
+          "values": "OPERATIONS=@[(\"+\", <function add at 0x7d\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "53OPERATIONS = {OPERATIONS@[(\"+\", <function add at 0x7f\u2026",
+          "text": "53OPERATIONS = {OPERATIONS@[(\"+\", <function add at 0x7d\u2026",
           "code": "OPERATIONS = {"
         },
         {
           "row": 54,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "add=<function add at 0x7fffe862c4\u2026",
+          "values": "add=<function add at 0x7d632d1aea\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "54    \"+\": add,add<function add at 0x7fffe862c4\u2026",
+          "text": "54    \"+\": add,add<function add at 0x7d632d1aea\u2026",
           "code": "    \"+\": add,"
         },
         {
           "row": 55,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "sub=<function sub at 0x7fffe862c4\u2026",
+          "values": "sub=<function sub at 0x7d632d1acd\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "55    \"-\": sub,sub<function sub at 0x7fffe862c4\u2026",
+          "text": "55    \"-\": sub,sub<function sub at 0x7d632d1acd\u2026",
           "code": "    \"-\": sub,"
         },
         {
           "row": 56,
           "pointer": "eptExecution",
           "mark": "emNone",
-          "values": "mul=<function mul at 0x7fffe862c5\u2026",
+          "values": "mul=<function mul at 0x7d632d1ace\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "#404040",
-          "text": "56    \"*\": mul,mul<function mul at 0x7fffe862c5\u2026",
+          "text": "56    \"*\": mul,mul<function mul at 0x7d632d1ace\u2026",
           "code": "    \"*\": mul,"
         },
         {
           "row": 57,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "div=<function div at 0x7fffe862c5\u2026",
+          "values": "div=<function div at 0x7d632d1acc\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "57    \"/\": div,div<function div at 0x7fffe862c5\u2026",
+          "text": "57    \"/\": div,div<function div at 0x7d632d1acc\u2026",
           "code": "    \"/\": div,"
         },
         {
@@ -1318,11 +1318,11 @@
           "row": 61,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "OPERATIONS=@[(\"+\", <function add at 0x7f\u2026|__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|div=<function div at 0x7fffe862c5\u2026|mul=<function mul at 0x7fffe862c5\u2026|sub=<function sub at 0x7fffe862c4\u2026",
+          "values": "",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "61def apply_op(symbol, left, right):OPERATIONS@[(\"+\", <function add at 0x7f\u2026__bu",
+          "text": "61def apply_op(symbol, left, right):",
           "code": "def apply_op(symbol, left, right):"
         },
         {
@@ -1439,11 +1439,11 @@
           "row": 72,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "OPERATIONS=@[(\"+\", <function add at 0x7f\u2026|__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|apply_op=<function apply_op at 0x7fffe\u2026|div=<function div at 0x7fffe862c5\u2026|mul=<function mul at 0x7fffe862c5\u2026|sub=<function sub at 0x7fffe862c4\u2026",
+          "values": "",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "72def evaluate(expression):OPERATIONS@[(\"+\", <function add at 0x7f\u2026__builtins__@",
+          "text": "72def evaluate(expression):",
           "code": "def evaluate(expression):"
         },
         {
@@ -1516,7 +1516,7 @@
     },
     "returned-calltrace": {
       "replayOps": "stepIn=21,stepOut=1",
-      "planSha256": "638735a7c8172605dc426aa72f67f0fb6c5231316940fcc41b9de80a3552919c",
+      "planSha256": "4f5169da834d8214f3a15d8fa3a836ba56bb9a43ea7209016649069489f5560e",
       "rowCount": 45,
       "rows": [
         {
@@ -2018,7 +2018,7 @@
     },
     "continued-event-log": {
       "replayOps": "continueForward=1",
-      "planSha256": "693987040d50328d2139c5c30a5fc666772ef2df7e420ce72f42030ebb9757fa",
+      "planSha256": "1d3bb934096045f80a8382e3721314e35a0a74df38d4e982a63c814e6823deb2",
       "rowCount": 45,
       "rows": [
         {
@@ -2520,7 +2520,7 @@
     },
     "breakpoint-editor": {
       "replayOps": "stepIn=5,setBreakpoint@1",
-      "planSha256": "d6bfa9da670d2ce221648b96a822e580db4e05b2107126ecd4fd174949a3af30",
+      "planSha256": "edd3e7771193871a5d2dffcdb7ff80baa11d608fb4fba09e6cc4aaa9c6b2b05a",
       "rowCount": 45,
       "rows": [
         {
@@ -2604,11 +2604,11 @@
           "row": 29,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil",
+          "values": "",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "29def add(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "text": "29def add(left, right):",
           "code": "def add(left, right):"
         },
         {
@@ -2659,11 +2659,11 @@
           "row": 34,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026",
+          "values": "",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "34def sub(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "text": "34def sub(left, right):",
           "code": "def sub(left, right):"
         },
         {
@@ -2714,11 +2714,11 @@
           "row": 39,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|sub=<function sub at 0x7fffe862c4\u2026",
+          "values": "",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "39def mul(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "text": "39def mul(left, right):",
           "code": "def mul(left, right):"
         },
         {
@@ -2769,11 +2769,11 @@
           "row": 44,
           "pointer": "eptExecution",
           "mark": "emNone",
-          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|mul=<function mul at 0x7fffe862c5\u2026|sub=<function sub at 0x7fffe862c4\u2026",
+          "values": "",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "#404040",
-          "text": "44def div(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "text": "44def div(left, right):",
           "code": "def div(left, right):"
         },
         {
@@ -2868,55 +2868,55 @@
           "row": 53,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "OPERATIONS=@[(\"+\", <function add at 0x7f\u2026",
+          "values": "OPERATIONS=@[(\"+\", <function add at 0x7d\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "53OPERATIONS = {OPERATIONS@[(\"+\", <function add at 0x7f\u2026",
+          "text": "53OPERATIONS = {OPERATIONS@[(\"+\", <function add at 0x7d\u2026",
           "code": "OPERATIONS = {"
         },
         {
           "row": 54,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "add=<function add at 0x7fffe862c4\u2026",
+          "values": "add=<function add at 0x7d632d1aea\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "54    \"+\": add,add<function add at 0x7fffe862c4\u2026",
+          "text": "54    \"+\": add,add<function add at 0x7d632d1aea\u2026",
           "code": "    \"+\": add,"
         },
         {
           "row": 55,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "sub=<function sub at 0x7fffe862c4\u2026",
+          "values": "sub=<function sub at 0x7d632d1acd\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "55    \"-\": sub,sub<function sub at 0x7fffe862c4\u2026",
+          "text": "55    \"-\": sub,sub<function sub at 0x7d632d1acd\u2026",
           "code": "    \"-\": sub,"
         },
         {
           "row": 56,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "mul=<function mul at 0x7fffe862c5\u2026",
+          "values": "mul=<function mul at 0x7d632d1ace\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "56    \"*\": mul,mul<function mul at 0x7fffe862c5\u2026",
+          "text": "56    \"*\": mul,mul<function mul at 0x7d632d1ace\u2026",
           "code": "    \"*\": mul,"
         },
         {
           "row": 57,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "div=<function div at 0x7fffe862c5\u2026",
+          "values": "div=<function div at 0x7d632d1acc\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "57    \"/\": div,div<function div at 0x7fffe862c5\u2026",
+          "text": "57    \"/\": div,div<function div at 0x7d632d1acc\u2026",
           "code": "    \"/\": div,"
         },
         {
@@ -2956,11 +2956,11 @@
           "row": 61,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "OPERATIONS=@[(\"+\", <function add at 0x7f\u2026|__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|div=<function div at 0x7fffe862c5\u2026|mul=<function mul at 0x7fffe862c5\u2026|sub=<function sub at 0x7fffe862c4\u2026",
+          "values": "",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "61def apply_op(symbol, left, right):OPERATIONS@[(\"+\", <function add at 0x7f\u2026__bu",
+          "text": "61def apply_op(symbol, left, right):",
           "code": "def apply_op(symbol, left, right):"
         },
         {
@@ -3025,7 +3025,7 @@
   "flowScenarios": {
     "noir-declined-arm": {
       "replayOps": "stepIn=28",
-      "planSha256": "747c78f11a05b2193319ff7894538a9b25d48cdbf12eb84337bd3e3b9bf6a8fe",
+      "planSha256": "307830c2d65407688c7cf4977784f08b3a8d4950b72023fd668a6ec19f5ada64",
       "rowCount": 45,
       "rows": [
         {

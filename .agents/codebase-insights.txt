@@ -8373,7 +8373,6 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - A press event's key is `x,y,count` for left and middle presses (the platform's click count), read by `pointerOf`.
 - The glyph column on the desktop is Monaco's glyph margin: marks have no element keyed by line, so tests read `getLineDecorations` (`src/tests/gui/lib/glyph-column.ts`). `JsAssoc[int, _]` keys are strings at run time.
 - Line and column breakpoints coexist on a line: `plannedToggle` is the line's, `plannedInlineToggle` a column's.
-||||||| parent of 315ebfe16eb (wip: input routing)
 - Input routing: an operation name reaches its procedure through `viewmodel/input/operation_table.invoke`
   (`runtime.buildOperationTables`, GPUI's `buildWindowOperationTables`); adding a pane's key means a row
   (`keymap/*_keymap`, `overlay_rows`, `pointer_rows`) and a table entry, never a `case` over a key name:
@@ -8383,3 +8382,9 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - A new `ClientAction` member fails `test_plat64_operation_mapping` until it is in
   `keymap/client_actions`; a new catalogue name with no row, element or menu fails
   `test_plat64_reachability` until it is reachable or listed there.
+
+## The PLAT-42 window record's pixel reader (`src/tests/visual/screen_oracle/`)
+- A scrolled GPUI editor draws Monaco's sticky-scroll shadow across the whole pane (`leaves.nim`, rows of black at 0.225..0.95 alpha). `region_locator.splitRect` only treats a dark horizontal run as a splitter when no row of it is darker than the frame's gutter tone (`SplitterDarkerSlack`); without the gutter tone (`gutterTone = -1`) the shadow splits the editor into its title strip and an untitled body.
+- The execution arrow's lane is the shared gutter map's `gbPointer` band (`plat42_code_column.pointerLane`, from `editor_gutter_lanes` at `chrome.CodeFontPx`). The breakpoint disc is in `gbGlyph`, LEFT of it, so "ink left of the number" reads a breakpoint as a second pointer.
+- `codeColumnLeft` must step over 1 px indent guides and the 2 px caret crossing the execution band (`MaxCrossingPx`); a guide reads as a band of another grey.
+- `plat42_window_record` OCRs every row and chip: 10 to 40 minutes on the shared host. `ci/test/plat42-surfaces-window.sh` reads `CODETRACER_PLAT42_BIN`, `_TRACE` and `_FLOW_TRACE`.

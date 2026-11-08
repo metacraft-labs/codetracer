@@ -46,20 +46,17 @@ const
                    "breakpoint-editor"]
   ValueScenarios = ["advanced-state", "returned-calltrace",
                     "continued-event-log"]
+  NothingRanYet = "entry-shell"
+    ## The first stop, before any statement ran: no value on any row since a
+    ## Python line's own names became authoritative (it showed the module's
+    ## globals on the docstring and `def` lines until then).
   CalcSource = "test-programs/calc/main.py"
     ## The calc recording's source (the window's status bar names it), for
     ## the length of each line — which is where a row's chips go.
-  FlowCh = 10.18
-    ## The desktop flow container's `ch` in px: a row's first chip is at
-    ## `(line length + 1) * FlowCh` from the code's left (`ui/flow.nim`'s
-    ## `calc(<len>ch + 1ch)`, measured on the desktop's six reference states).
   ChipXSlackPx = 4
     ## The record's code-column left is the leftmost GLYPH INK of the pane's
     ## code (a glyph's side bearing in from the column), and the chip's left
     ## its box's first ground pixel (a 4 px rounded corner): a few px.
-  ChipVisiblePx = 30
-    ## A chip whose left is this far inside the code column's right edge is on
-    ## screen whole enough to be found (the record keeps boxes >= 12 px).
   LongValueCols = 30
     ## A value this long, or one the presenter already elided (`…`), is drawn
     ## with the "view more" eye cell (`ui/flow.nim`'s `max-width: 30ch`).
@@ -147,7 +144,8 @@ suite "PLAT-42: the four surfaces in a real window":
         if not known: continue
         let chips = r["chips"]
         var shown: seq[string] = @[]
-        for c in chips: shown.add valueCommentName(c["text"].getStr)
+        for c in chips:
+          shown.add chipName(c["text"].getStr, c["clipped"].getBool)
         checkpoint(sid & " line " & $line & ": model " & $names &
                    " | chips " & $chips)
         if names.len == 0:
@@ -157,8 +155,8 @@ suite "PLAT-42: the four surfaces in a real window":
           continue
         inc withValues
         # PLACEMENT: `(line length + 1)` of the flow's `ch` from the code.
-        let wantX = int(round(float(source[line - 1].runeLen + 1) * FlowCh))
-        if wantX + ChipVisiblePx <= codeWidth:
+        let wantX = chipLeftPx(source[line - 1].runeLen)
+        if chipOnScreen(source[line - 1].runeLen, codeWidth):
           ck chips.len > 0
         if chips.len == 0: continue
         ck abs(chips[0]["x"].getInt - wantX) <= ChipXSlackPx
@@ -175,8 +173,13 @@ suite "PLAT-42: the four surfaces in a real window":
           ck c["more"].getBool == long
       checkpoint(sid & ": " & $withValues & " rows with values (" & $named &
                  " chips named), " & $without & " without")
-      ck withValues > 0
-      ck named > 0
+      if sid == NothingRanYet:
+        # The model gives this stop no value (`test_plat42_surfaces`), so
+        # every row is the negative twin above; not one chip on screen.
+        ck withValues == 0
+      else:
+        ck withValues > 0
+        ck named > 0
       ck without > 10
 
   for sid in ValueScenarios:
@@ -192,7 +195,8 @@ suite "PLAT-42: the four surfaces in a real window":
       # line, so `first in rowText` held with or without a value drawn.
       ck chips.len > 0
       if chips.len > 0:
-        let shown = valueCommentName(chips[0]["text"].getStr)
+        let shown = chipName(chips[0]["text"].getStr,
+                             chips[0]["clipped"].getBool)
         checkpoint(sid & " line " & $line & ": " & $chips &
                    " | chip names '" & shown & "', model '" & first & "'")
         ck legiblyNames(shown, first)
