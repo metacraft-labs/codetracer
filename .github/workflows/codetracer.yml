@@ -6690,15 +6690,22 @@ jobs:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
 
-      - name: Setup dev env
-        # setup-dev-env installs Nix (with the Attic substituter/keys) and
-        # clones codetracer-trace-format adjacent to this checkout at the
-        # pinned `dev` ref, replacing the former
-        # Checkout-manifests / Resolve-lock / clone-repo / Install Nix steps.
-        # The flake build below reads the in-repo path
-        # libs/codetracer-trace-format, so the sibling clone is mirrored
-        # there by the next step.
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
+      - name: Setup dev env and the db-backend siblings
+        # Installs Nix (with the Attic substituter/keys) and clones the
+        # db-backend siblings -- codetracer-trace-format{,-nim} and
+        # codetracer-native-recorder -- adjacent to this checkout, at the
+        # revisions the shared action pins (its comments give the refresh
+        # rule), so this job carries no copy of those pins. The flake build
+        # below reads the in-repo paths libs/codetracer-trace-format{,-nim},
+        # so the clones are mirrored there by the staging steps.
+        #
+        # `just test-gui` depends on `build-once`, whose preflight
+        # (scripts/require-siblings.sh) refuses a workspace missing any
+        # REQUIRED sibling. This job used to clone only trace-format,
+        # trace-format-nim and the fixture below, so it could never get past
+        # that preflight; the rest come from this action and the two steps
+        # after it.
+        uses: ./.github/actions/setup-db-backend-siblings
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
@@ -6706,26 +6713,10 @@ jobs:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           attic-token: ${{ secrets.ATTIC_TOKEN }}
           attic-cache: ${{ vars.ATTIC_CACHE }}
-          siblings: |
-            # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
-            # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
-            # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
-            # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
-            # sibling cloned at `dev` fails to compile. Full account and the refresh
-            # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=1f360faf4c8fbb60afc5b9af69af8a8273217000
-            codetracer-trace-format-nim=d282be4c45f3f31ce6b666f79a1bd8b6813010c7
+          extra-siblings: |
             # The native fixture the desktop's native Low Level Code capture
             # records (`c/sudoku_solver`), at the revision repro.lock pins.
             codetracer-native-test-programs=af5a77b20f5a4ae09c202902b3ee01e9edf5473f
-            # `just test-gui` depends on `build-once`, whose preflight
-            # (scripts/require-siblings.sh) refuses a workspace missing any
-            # REQUIRED sibling. This job used to clone only the three repos
-            # above, so it could never get past that preflight. The rest come
-            # from the two steps below; codetracer-native-recorder is not a
-            # repro.lock build input, so it is cloned here at the revision every
-            # other job in this file pins.
-            codetracer-native-recorder=3f053ab8652aa2edbd7fbe509c46f64ed3cb29f3
 
       - name: Clone runquota sibling
         # `just test-gui` -> `build-once` compiles `ct`, which imports
