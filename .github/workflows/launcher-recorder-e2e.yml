@@ -701,7 +701,7 @@ jobs:
             # src/io_mon/depfile.nim).
             # runquota is locked as a `follows` of reprobuild's `runquota-src`;
             # the pin below is that node's rev.
-            io-mon=e66e05c9471ce184e9a3b0d793b2db62ca5557b9
+            io-mon=ac06360d15be70aca46202d0ce04c5b17cba5ac1
             nim-shm-queue=84fd76b174d4868e703ba3d599668ee340e0b6ea
             nim-shm-gset=953bd231a022243fcee96092234d7cf80f7042b0
             nim-stackable-hooks=d715806424e8373708494913e59a48237978cc2a
@@ -710,7 +710,7 @@ jobs:
             # repro.lock since 6850efc5e, and took the SHA shape because the
             # recorder repos' lock records these edges also resolve did not
             # carry it. They do now; going bare is a separate change.
-            isonim=fed3655a404101ab8df997435bc4b3db000c8355
+            isonim=b7ff71e7c17593beccbee772cba87519e746e030
             isonim-tui=ff295f7be6d7efc095ef4d249b1df0577d969c89
             runquota=9818dc0c90be8ba7993424a7bbfbb6e009ffa965
             # Required by scripts/require-siblings.sh (`ct` links its reference
