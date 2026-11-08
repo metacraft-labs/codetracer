@@ -1527,6 +1527,29 @@ proc generatedCodeMenuItems*(commands: seq[TargetCommand]; path: cstring; line: 
 
 
 # Fill contextMenu with ContextMenuItem variables and return it to be used in the context menu
+proc nimTraceLines*(self: EditorViewComponent): seq[string] =
+  ## The Monaco model's lines, for the Nim trace offer.
+  if self.monacoEditor.isNil:
+    return @[]
+  let model = self.monacoEditor.toJs.getModel()
+  if model.isNil:
+    return @[]
+  let count = cast[int](model.getLineCount())
+  for ln in 1 .. count:
+    result.add $cast[cstring](model.getLineContent(ln))
+
+proc runNimTraceAtCaret*(self: EditorViewComponent; action: NimTraceAction) =
+  ## An `editor.trace-*` operation (its chord, the palette): the caret's
+  ## position, traced through the shared ViewModel.
+  if self.monacoEditor.isNil:
+    return
+  let pos = self.monacoEditor.toJs.getPosition()
+  if pos.isNil:
+    return
+  startNimTrace(self.data, action, self.path,
+                cast[int](pos.lineNumber), cast[int](pos.column),
+                self.nimTraceLines())
+
 proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuItem] =
   # Editor context menu items
   var callLine:                   ContextMenuItem
@@ -1986,100 +2009,31 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
   # which `Mode-Transitions.md` §8.3 keeps working in both modes for the same
   # reason: "a developer who hits Build reflexively means it".
   #
-  # "Trace Macro Execution" action for Nim files (M11).
-  # Available when the current file is a Nim source file and the cursor
-  # is on a line that could contain a macro call.  Sends the LSP request
-  # and opens the resulting .ct trace in a new session tab.
+  # Nim's compile-time tracing (M11, CTFS-M-StaticBlockTrace): which of the
+  # entries the caret offers is the shared ViewModel's answer
+  # (`nim_tracing_vm.availableNimTraceActions`, the terminal's and GPUI's
+  # too) over the document's lines — a macro call on any line of code, a
+  # static block inside a `static:` block or on a `static(expr)`, a constant
+  # inside a `const` declaration, never a routine's own line.
   if tabInfo.lang == LangNim:
     let traceLine = line
     let traceCol = cast[int](ev.target.position.column)
     let tracePath = self.path
     let traceData = self.data
-    let traceMacroItem = ContextMenuItem(
-      name: "Trace Macro Execution",
-      hint: "",
-      handler: proc(e: Event) =
-        # Monaco positions are 1-based; LSP uses 0-based coordinates.
-        discard traceExpandMacro(traceData, tracePath,
-                                 traceLine - 1, traceCol - 1)
-    )
-    contextMenu &= traceMacroItem
-
-    # "Trace Static Block Execution" action (CTFS-M-StaticBlockTrace).
-    # Heuristic offer: surface the action when the right-clicked line —
-    # or any of the few lines above it inside the current Nim view —
-    # contains a ``static:`` / ``const`` / ``{.compileTime.}`` token.
-    # The langserver itself does the authoritative check via nimsuggest's
-    # ``tracestatic`` query (which matches at evalConstExprAux entry
-    # points), so a false positive here just yields a user-visible
-    # "not a static block" warning.
-    #
-    # TODO: replace the textual heuristic with a real AST / sym check
-    # once nimsuggest exposes a position-classification query that
-    # mirrors what `tracestatic` accepts.
-    let model = self.monacoEditor.toJs.getModel()
-    var showStaticAction = false
-    if not model.isNil:
-      # Walk upward from the cursor for a bounded number of lines.  The
-      # langserver's `tracestatic` query is authoritative — a false
-      # positive here just yields a user-visible "not a static block"
-      # warning, so we err on the side of being permissive within the
-      # scan window.
-      let scanFrom = max(1, traceLine - 20)
-      var scanned = 0
-      for ln in countdown(traceLine, scanFrom):
-        try:
-          let raw = $cast[cstring](model.getLineContent(ln))
-          let trimmed = raw.strip()
-          # `static:` block opener (allow trailing comment).
-          if trimmed.startsWith("static:"):
-            showStaticAction = true
-            break
-          # `const` section / single-line const declaration.
-          if trimmed == "const" or trimmed.startsWith("const ") or
-             trimmed.startsWith("const\t") or trimmed.startsWith("const:"):
-            showStaticAction = true
-            break
-          # `{.compileTime.}` pragma — usually on a proc/func signature.
-          if "{.compileTime" in trimmed or "{. compileTime" in trimmed:
-            showStaticAction = true
-            break
-          # `static(expr)` — single-token form, anywhere on the line.
-          if "static(" in trimmed:
-            showStaticAction = true
-            break
-          # Bail out once the scan crosses a clearly unrelated top-level
-          # construct: an `import`/`type`/`proc`/etc. above us means we
-          # are no longer inside a static: / const section.  Skip the
-          # very first iteration (the right-clicked line itself) so the
-          # action still appears when the user right-clicks directly on
-          # a `proc {.compileTime.}` signature line.
-          if scanned > 0 and trimmed.len > 0 and
-             (trimmed.startsWith("proc ") or trimmed.startsWith("func ") or
-              trimmed.startsWith("template ") or trimmed.startsWith("macro ") or
-              trimmed.startsWith("method ") or trimmed.startsWith("iterator ") or
-              trimmed.startsWith("converter ") or trimmed.startsWith("type ") or
-              trimmed.startsWith("import ") or trimmed.startsWith("from ") or
-              trimmed.startsWith("include ")):
-            break
-          inc scanned
-        except:
-          break
-
-    if showStaticAction:
-      let staticLine = traceLine
-      let staticCol = traceCol
-      let staticPath = tracePath
-      let staticData = traceData
-      let traceStaticItem = ContextMenuItem(
-        name: "Trace Static Block Execution",
+    let lines = self.nimTraceLines()
+    let offered = availableNimTraceActions($tracePath, lines, traceLine,
+                                           traceCol)
+    for action in [ntaMacro, ntaStaticBlock, ntaConstant]:
+      if action notin offered:
+        continue
+      let chosen = action
+      contextMenu &= ContextMenuItem(
+        name: cstring(nimTraceLabelOf(chosen)),
         hint: "",
         handler: proc(e: Event) =
-          # Monaco positions are 1-based; LSP uses 0-based coordinates.
-          discard traceStaticBlock(staticData, staticPath,
-                                   staticLine - 1, staticCol - 1)
-      )
-      contextMenu &= traceStaticItem
+          # The editor's 1-based position; the ViewModel decides the wire's.
+          startNimTrace(traceData, chosen, tracePath, traceLine, traceCol,
+                        lines))
 
   return contextMenu
 

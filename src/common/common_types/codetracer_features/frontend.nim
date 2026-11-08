@@ -357,7 +357,14 @@ type
     aInlineBreakpoint,            # Shift+F9: a column breakpoint at the caret
     # View › Constraints: how a desktop user opens the pane where the layout
     # does not place it (Debug mode). Appended, for the same reason.
-    aConstraints                  # menu: View › Constraints
+    aConstraints,                 # menu: View › Constraints
+    # Nim's compile-time tracing at the editor's caret (`nim_tracing_vm`):
+    # the four `editor.trace-*` operations' palette entries. Appended, for
+    # the same reason.
+    aNimTraceMacro,               # palette: Nim: Trace Macro at Cursor
+    aNimTraceStaticBlock,         # palette: Nim: Trace Static Block at Cursor
+    aNimTraceConstant,            # palette: Nim: Trace Constant at Cursor
+    aNimTraceEval                 # palette: Nim: Trace NimScript Evaluation
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

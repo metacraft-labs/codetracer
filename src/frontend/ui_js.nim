@@ -310,6 +310,7 @@ import viewmodel/collab/[front_end_adapter, invite_bootstrap, join_session,
 import viewmodel/app/isonim_app
 import viewmodel/views/tooltips
 import viewmodel/viewmodels/visual_replay_layout
+import viewmodel/viewmodels/nim_tracing_vm   # the palette's Nim trace entries
 import viewmodel/viewmodels/deepreview_layout
 from viewmodel/viewmodels/product_menu import productMenuTree, MenuItem, mikFolder
 from isonim/core/batch as isoBatch import batch
@@ -1904,7 +1905,13 @@ proc refreshCommandPaletteMenuIndex*(data: Data) =
                            aTestsOpenInCurrentTab),
                           # …and the palette pair.
                           (RunTestLabel, aTestsRun),
-                          (RunTestInCurrentTabLabel, aTestsRunInCurrentTab)]:
+                          (RunTestInCurrentTabLabel, aTestsRunInCurrentTab),
+                          # Nim's compile-time tracing (the natives'
+                          # `omnibar_sources.nimTraceCommands`).
+                          (NimTracePaletteLabels[0], aNimTraceMacro),
+                          (NimTracePaletteLabels[1], aNimTraceStaticBlock),
+                          (NimTracePaletteLabels[2], aNimTraceConstant),
+                          (NimTracePaletteLabels[3], aNimTraceEval)]:
     data.ui.commandPalette.interpreter.commands[cstring(label)] = Command(
       name: cstring(label), kind: ActionCommand, action: action,
       shortcut: displayedChord(action))
@@ -4645,6 +4652,17 @@ proc saveReplayOpenIn(data: Data; policy: TraceOpenPolicy) =
   data.ipc.send cstring"CODETRACER::replay-open-in-save",
     js{workspace: cstring(workspace), policy: cstring($policy)}
 
+proc runNimTraceInActiveEditor(data: Data; action: NimTraceAction) =
+  ## The palette's **Nim: Trace … at Cursor** entries and the
+  ## `editor.trace-*` chords (`client_actions`): the active editor's caret,
+  ## traced through the shared ViewModel (`editor.runNimTraceAtCaret`).
+  let active = data.services.editor.active
+  if not data.ui.editors.hasKey(active):
+    data.viewsApi.warnMessage(cstring(nimTraceLabelOf(action) &
+                                      ": there is no file in the editor"))
+    return
+  data.ui.editors[active].runNimTraceAtCaret(action)
+
 proc runTestFromPalette(data: Data; policy: TraceOpenPolicy) =
   ## The palette's **Tests: Run** / **Tests: Run in Current Tab** (§9.3):
   ## the pane's selected test, recorded and opened where the command says
@@ -6468,6 +6486,16 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   aInlineBreakpoint: proc(actionData: JsObject) = data.toggleInlineBreakpointAtCaret(),
   aConstraints: proc(actionData: JsObject) = # aConstraints
     data.openLayoutTab(Content.Constraints),
+  aNimTraceMacro: proc(actionData: JsObject) = # aNimTraceMacro
+    ## Nim's compile-time tracing at the active editor's caret
+    ## (`trace_macro.startNimTrace`, through the shared ViewModel).
+    data.runNimTraceInActiveEditor(ntaMacro),
+  aNimTraceStaticBlock: proc(actionData: JsObject) = # aNimTraceStaticBlock
+    data.runNimTraceInActiveEditor(ntaStaticBlock),
+  aNimTraceConstant: proc(actionData: JsObject) = # aNimTraceConstant
+    data.runNimTraceInActiveEditor(ntaConstant),
+  aNimTraceEval: proc(actionData: JsObject) = # aNimTraceEval
+    data.runNimTraceInActiveEditor(ntaEval),
 ]
 
 data.actions = actions

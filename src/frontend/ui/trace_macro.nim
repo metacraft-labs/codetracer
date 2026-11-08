@@ -1,17 +1,24 @@
-## Trace Macro Execution (M11)
+## Trace Macro Execution (M11) — the desktop's route for Nim's compile-time
+## tracing.
 ##
-## Provides the "Trace Macro Execution" context menu action for the
-## CodeTracer editor.  When triggered on a Nim macro call, this sends
-## the ``workspace/executeCommand`` request with ``nim/traceExpandMacro``
-## to the Nim language server.  The langserver invokes nimsuggest's
-## ``traceExpand`` command which produces a .ct trace file.  The
-## resulting trace file path is used to open a new session tab.
+## What is offered at the caret, the request, its progress and its failure,
+## and where the recording opens are the shared ViewModel's
+## (`viewmodel/viewmodels/nim_tracing_vm`, which the terminal and the GPUI
+## window use too). This module is the one thing the desktop does
+## differently: it sends the request through its JavaScript LSP router
+## (`lsp_router`) to the Nim language server as `workspace/executeCommand`
+## — `nim/traceExpandMacro` for a macro call, `nim/traceStaticBlock` for a
+## static block or a constant (`trace_static`) — and loads the `.ct` the
+## language server names through `CODETRACER::load-trace-file`.
 
 import
   std/[asyncjs, jsffi, strformat],
   ui_imports,
   ../[event_helpers, lsp_router],
-  session_switch
+  session_switch,
+  ../viewmodel/viewmodels/nim_tracing_vm
+
+export nim_tracing_vm
 
 # JS interop helpers for building the LSP request payload.
 proc newJsObj(): JsObject {.importjs: "({})".}
@@ -24,79 +31,94 @@ proc getField(target: JsObject; name: cstring): JsObject {.importjs: "#[#]".}
 proc toStr(value: JsObject): cstring {.importjs: "String(#)".}
 proc jsIsNilOrUndefined(value: JsObject): bool {.importjs: "((function(v){return v == null || v === undefined})(#))".}
 
-proc traceExpandMacro*(data: Data; filePath: cstring; line: int;
-                       character: int) {.async.} =
-  ## Send ``nim/traceExpandMacro`` via ``workspace/executeCommand`` and
-  ## open the resulting .ct trace in a new session tab.
-  ##
-  ## ``line`` and ``character`` use zero-based LSP coordinates (the
-  ## Monaco editor position is 1-based, so the caller must subtract 1
-  ## from the line number before calling this proc).
-  let nimClient = getActiveClient("nim")
-  if nimClient.isNil:
-    data.viewsApi.warnMessage(
-      cstring"Nim language server is not connected. Cannot trace macro.")
+var desktopNimTracing* = newNimTracingVM()
+  ## The window's one Nim trace — the shared ViewModel's state, which the
+  ## status bar's messages below read.
+
+proc showNimTraceState(data: Data; vm: NimTracingVM) =
+  case vm.phase
+  of ntpRunning, ntpDone: data.viewsApi.infoMessage(cstring(vm.message))
+  of ntpFailed:
+    if vm.failure in {ntfNotAvailable, ntfNotAMacro, ntfNotAStaticBlock,
+                      ntfBusy}:
+      data.viewsApi.warnMessage(cstring(vm.message))
+    else:
+      data.viewsApi.errorMessage(cstring(vm.message))
+  of ntpIdle: discard
+
+proc sendNimTrace*(data: Data; vm: NimTracingVM) {.async.} =
+  ## Send `vm`'s started request to the Nim language server and open the
+  ## recording it names where the shared rule places it.
+  let request = vm.request
+  let command = lspCommandOf(request.action)
+  if command.len == 0:
+    # The language server runs no NimScript; the evaluation is the native
+    # front-ends' (`host/native_nim_tracer`, `nim e --trace`).
+    vm.fail(ntfNoLanguageServer, "the desktop's Nim language server runs " &
+            "no NimScript; trace the evaluation from the terminal or GPUI")
+    data.showNimTraceState(vm)
+    return
+  if getActiveClient("nim").isNil:
+    vm.fail(ntfNoLanguageServer,
+            "Nim language server is not connected. Cannot trace.")
+    data.showNimTraceState(vm)
     return
 
-  # Build the workspace/executeCommand request payload.
-  # The Nim langserver's executeCommand handler for nim/traceExpandMacro
-  # expects a single argument object: {uri, line, character}.
+  # The language server's executeCommand handler expects a single argument
+  # object: {uri, line, character}, zero-based (`wirePositionOf`).
+  let at = wirePositionOf(request)
   let arg = newJsObj()
-  let uri = cstring("file://" & $filePath)
-  arg.setStr("uri", uri)
-  arg.setInt("line", line)
-  arg.setInt("character", character)
-
+  arg.setStr("uri", cstring(fileUriOf(request.path)))
+  arg.setInt("line", at.line)
+  arg.setInt("character", at.character)
   let args = jsArr()
   args.jsPush(arg)
-
   let params = newJsObj()
-  params.setStr("command", cstring"nim/traceExpandMacro")
+  params.setStr("command", cstring(command))
   params.setObj("arguments", args)
 
-  data.viewsApi.infoMessage(cstring"Tracing macro expansion...")
+  data.showNimTraceState(vm)
 
   var response: JsObject
   try:
     response = await sendLspRequest("nim",
       cstring"workspace/executeCommand", params)
   except CatchableError as e:
-    let msg = e.msg
-    if "not a macro" in msg or "No trace result" in msg:
-      data.viewsApi.warnMessage(
-        cstring"No macro call found at this position.")
-    elif "not support" in msg or "traceExpand" in msg:
-      data.viewsApi.errorMessage(
-        cstring"The Nim language server does not support trace expansion. " &
-        cstring"Ensure a trace-enabled nimsuggest is configured.")
-    else:
-      data.viewsApi.errorMessage(
-        cstring("Trace macro failed: " & msg))
+    vm.refuse(e.msg)
+    data.showNimTraceState(vm)
     return
 
-  if response.isNil:
-    data.viewsApi.errorMessage(
-      cstring"Trace macro returned an empty response.")
+  let tracePath =
+    if response.isNil or jsIsNilOrUndefined(response.getField("tracePath")):
+      ""
+    else: $response.getField("tracePath").toStr
+  vm.succeed(tracePath)
+  data.showNimTraceState(vm)
+  if vm.phase != ntpDone:
     return
-
-  let tracePathField = response.getField("tracePath")
-  if jsIsNilOrUndefined(tracePathField):
-    data.viewsApi.errorMessage(
-      cstring"Trace macro response did not contain a trace path.")
-    return
-
-  let tracePath = tracePathField.toStr
-  if tracePath.len == 0:
-    data.viewsApi.errorMessage(
-      cstring"Trace macro returned an empty trace path.")
-    return
-
-  clog cstring(fmt"trace_macro: received trace path: {tracePath}")
-
-  # Open the .ct file in a new session tab.  The main process handles
-  # the actual trace loading -- we send an IPC message with the path
-  # and the main process resolves the trace metadata and starts the
-  # replay backend.
-  createNewSession(data)
+  clog cstring(fmt"nim trace: received trace path: {tracePath}")
+  # Where it opens is the shared rule's (`nimTracePlacement`): a new session
+  # tab. The main process resolves the trace and starts its replay.
+  let placed = traceOpenRequestOf(tracePath)
+  if placed.policy == topNewTab:
+    createNewSession(data)
   data.ipc.send(cstring"CODETRACER::load-trace-file",
-                js{tracePath: tracePath})
+                js{tracePath: cstring(placed.tracePath)})
+
+proc startNimTrace*(data: Data; action: NimTraceAction; path: cstring;
+                    line, column: int; lines: seq[string]) =
+  ## The editor's entry (its menu, the `editor.trace-*` operations): the
+  ## caret at the editor's 1-based `line:column` of `path`, whose text is
+  ## `lines` — begun by the shared ViewModel, which refuses what the caret
+  ## does not offer, then sent.
+  let vm = desktopNimTracing
+  if not vm.begin(NimTraceRequest(action: action, path: $path, line: line,
+                                  column: column), lines):
+    data.showNimTraceState(vm)
+    return
+  discard sendNimTrace(data, vm)
+
+proc traceExpandMacro*(data: Data; filePath: cstring; line, column: int;
+                       lines: seq[string]) =
+  ## "Trace Macro Execution" at the editor's 1-based `line:column`.
+  startNimTrace(data, ntaMacro, filePath, line, column, lines)
