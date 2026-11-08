@@ -2101,6 +2101,12 @@ jobs:
             exit 1
           fi
 
+      # The reprobuild dev env must name the active build dir and must not
+      # export CODETRACER_PREFIX. It activates the real dev env through
+      # `repro exec`, so it runs where Nix and `repro` are present.
+      - name: Check the reprobuild dev env exports CODETRACER_BUILD_DIR, not CODETRACER_PREFIX
+        run: nix develop . --command just test-repro-dev-env
+
   # M12: macOS verification pass for Value Origin Tracking.
   # The per-PR gate runs the seven materialized Python origin-DAP scenarios.
   # Ruby and JavaScript join Python in the routed nightly job below; other
