@@ -407,6 +407,11 @@ These commands work when your outer shell is zsh: the capture is evaluated in
 Bash. Keep `&&` so a failed source stops the requested command, and leave stderr
 visible. A capture is checkout-specific and temporary; regenerate it after
 changing the checkout, flake inputs or garbage-collecting its Nix store paths.
+It records the checkout it was taken in and runs the shell hook there, so
+sourcing it from any directory gives that checkout's PATH (`node_modules/.bin`
+included) and build directory, and leaves you in the directory you sourced it
+from. If that checkout has been moved or removed, sourcing returns 1 before
+changing anything.
 
 Raw `nix print-dev-env` output is Bash code. Do not source it directly from zsh
 or remove its `LINENO=` assignment: zsh treats `LINENO` as read-only and stops

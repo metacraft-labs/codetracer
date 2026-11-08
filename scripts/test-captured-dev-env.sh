@@ -2,6 +2,9 @@
 # Exercise the real Linux CodeTracer Nix environment in clean Bash and zsh processes.
 # The Bash consumer must reach PATH and the shellHook; zsh must refuse before
 # any Nix assignment, with a useful diagnostic and its original PATH intact.
+# Sourced outside the checkout, the capture must give the same environment as
+# inside it and return the caller to its directory; a capture whose checkout
+# is gone must refuse before any Nix assignment.
 # No shell/Nix mocks: a supplied capture lets the same assertions demonstrate
 # the original LINENO failure against raw `nix print-dev-env` output.
 # Default mode also checks that a real Nix evaluation failure preserves an
@@ -65,7 +68,79 @@ for tool in node npm Xvfb; do
 		fail "Bash did not resolve $tool from the captured Nix PATH"
 done
 
+# A capture is the environment of its checkout wherever it is sourced. The
+# shell hook picks its checkout from the working directory, so a capture
+# sourced outside one used to drop node_modules/.bin (and stylus with it) from
+# PATH; a wrapper that sourced first and cd'd afterwards then handed Tup a
+# changed PATH, and the re-run stylesheet rules failed and lost their outputs.
+# $scratch is outside every git repository. Volatile per-source variables
+# (the hook's mktemp NIX_BUILD_TOP and its TMP aliases, the shell's own
+# bookkeeping) are excluded; everything else must match byte for byte.
+outside="$scratch/outside dir"
+mkdir -p "$outside"
+# shellcheck disable=SC2016
+dump_env='
+    OLDPWD=/caller-oldpwd
+    source "$1" 2>"$2" >/dev/null || exit 21
+    [ "$PWD" = "$3" ] || { printf "cwd not restored: %s\n" "$PWD" >&2; exit 22; }
+    command -v stylus || exit 23
+    printf "%s\n" "${OLDPWD-<unset>}" >"$4"
+    printf "CODETRACER_REPO_ROOT_PATH=%s\n" "${CODETRACER_REPO_ROOT_PATH:-}"
+    env -0 | sort -z | tr "\0" "\n" |
+        grep -Ev "^(NIX_BUILD_TOP|TMP|TMPDIR|TEMP|TEMPDIR|PWD|OLDPWD|SHLVL|_)="
+'
+source_capture_in() {
+	(cd "$1" && env -i HOME="$HOME" PATH="$base_path" CODETRACER_HOME="$scratch/ct-home" \
+		NIX_CONFIG="${NIX_CONFIG:-}" "$bash_bin" --noprofile --norc -c "$dump_env" \
+		captured-env-test "$capture" "$2" "$1" "$2.oldpwd")
+}
+source_capture_in "$repo" "$scratch/inside.err" >"$scratch/inside.env" ||
+	{
+		cat "$scratch/inside.err" >&2
+		fail 'sourcing inside the checkout failed'
+	}
+if ! source_capture_in "$outside" "$scratch/outside.err" >"$scratch/outside.env"; then
+	cat "$scratch/outside.err" >&2
+	fail 'sourcing outside the checkout did not give the checkout environment (stylus missing or cwd not restored)'
+fi
+[ "$(head -n 1 "$scratch/outside.env")" = "$repo/node_modules/.bin/stylus" ] ||
+	fail "stylus did not resolve from the captured checkout: $(head -n 1 "$scratch/outside.env")"
+grep -Fx "CODETRACER_REPO_ROOT_PATH=$repo" "$scratch/outside.env" >/dev/null ||
+	fail 'CODETRACER_REPO_ROOT_PATH is not the captured checkout outside it'
+if grep -F 'not inside a CodeTracer checkout' "$scratch/outside.err"; then
+	fail 'the shell hook skipped repository setup when sourced outside the checkout'
+fi
+if ! diff -u "$scratch/inside.env" "$scratch/outside.env" >"$scratch/env.diff"; then
+	cat "$scratch/env.diff" >&2
+	fail 'the capture gives a different environment outside its checkout'
+fi
+# Entering the checkout and leaving it must not leave OLDPWD naming it (Nix's
+# program also assigns OLDPWD=''), or a later `cd -` goes somewhere unexpected.
+[ "$(cat "$scratch/outside.err.oldpwd")" = /caller-oldpwd ] ||
+	fail "the caller's OLDPWD was not restored: $(cat "$scratch/outside.err.oldpwd")"
+
 if [ "$#" -eq 0 ]; then
+	# The recorded checkout is gone: refuse before any Nix assignment.
+	# shellcheck disable=SC2016
+	sed 's|^__codetracer_capture_checkout=.*$|__codetracer_capture_checkout='"'$scratch/removed-checkout'"'|' \
+		"$capture" >"$scratch/moved.sh"
+	grep -Fx "__codetracer_capture_checkout='$scratch/removed-checkout'" "$scratch/moved.sh" >/dev/null ||
+		fail 'the capture does not record its checkout'
+	# shellcheck disable=SC2016
+	if ! (cd "$outside" && env -i HOME="$HOME" PATH="$base_path" "$bash_bin" --noprofile --norc -c '
+        original_path=$PATH
+        source "$1" >/dev/null
+        [ $? -eq 1 ] || exit 31
+        [ "$PATH" = "$original_path" ] || exit 32
+        [ -z "${IN_NIX_SHELL+x}" ] || exit 33
+        [ "$PWD" = "$2" ] || exit 34
+    ' captured-env-test "$scratch/moved.sh" "$outside") 2>"$scratch/moved.err"; then
+		cat "$scratch/moved.err" >&2
+		fail 'a capture of a missing checkout did not refuse before changing the environment'
+	fi
+	grep -F "CodeTracer: the checkout this environment was captured in is missing: $scratch/removed-checkout" \
+		"$scratch/moved.err" >/dev/null || fail 'the missing-checkout refusal does not name the checkout'
+
 	cp "$capture" "$scratch/expected"
 	if bash "$repo/scripts/capture-dev-env.sh" "$capture" "$scratch/missing-flake" >"$scratch/failed.out" 2>"$scratch/failed.err"; then
 		fail 'a missing flake unexpectedly produced a capture'
@@ -74,4 +149,4 @@ if [ "$#" -eq 0 ]; then
 	cmp "$scratch/expected" "$capture" || fail 'failed capture replaced the previous environment'
 	[ -z "$(find "$scratch" -name '*.tmp.*' -print)" ] || fail 'failed capture left a temporary file'
 fi
-printf '%s\n' 'PASS: captured dev environment enters Bash fully and refuses zsh before assignments'
+printf '%s\n' 'PASS: captured dev environment enters Bash fully from any directory and refuses zsh and a missing checkout before assignments'
