@@ -97,9 +97,11 @@ proc rowHandlers(vm: CalltraceVM; item: proc(): CallLine): RowHandlers =
       # navigation, Playwright `activate()` selects the row but the
       # editor never opens the target file.
       # Select the row's CALL, so the mark stays on it when a collapse or
-      # a filter change moves it to another row (#811).
+      # a filter change moves it to another row (#811). `ForMove`, because
+      # the jump below lands where several frames can share the step, and
+      # following the debugger's call there would mark a deeper one.
       if line.callKey.len > 0:
-        vm.selectCall(line.callKey)
+        vm.selectCallForMove(line.callKey)
       else:
         vm.selectEntry(some(line.index))
       vm.doubleClickEntry(line.index),
