@@ -17,12 +17,12 @@ import ../fixtures/fixture_provider
 import ./lifecycle_support
 
 const
-  ExpectedAssertions = 8
+  ExpectedAssertions = 9
   Cols = 200
   Rows = 50
   UserRows = """[
   { "key": "ctrl+alt+j", "command": "debugger.step-over" },
-  { "key": "ctrl+click", "command": "debugger.step-over",
+  { "key": "ctrl+click", "command": "debugger.continue",
     "when": "paneKind == calltrace && elementKind == row" },
 ]
 """
@@ -84,10 +84,25 @@ proc callRow(sess: var TuiTestSession; head: string; args = ""): (int, int) =
     if h >= 0 and (args.len == 0 or t.find(args) > h): return (r, t[0 ..< h].runeLen)
   (-1, -1)
 
-proc screenHas(sess: var TuiTestSession; needle: string): bool =
+proc atRecordingEnd(sess: var TuiTestSession): bool =
+  ## The top bar reads `tick: N / N`: the debugger is at the recording's end.
   discard sess.drainOutput(200)
-  for r in 0 ..< Rows:
-    if needle in sess.text(r): return true
+  for r in 0 ..< 2:
+    let t = sess.text(r)
+    let at = t.find("tick: ")
+    if at >= 0:
+      let parts = t[at + 6 .. ^1].split(' ')
+      if parts.len >= 3 and parts[1] == "/" and parts[0] == parts[2]:
+        return true
+  false
+
+proc screenHas(sess: var TuiTestSession; needle: string): bool =
+  ## Whether `needle` is drawn, waiting up to ten seconds for the frame.
+  for _ in 0 ..< 50:
+    discard sess.drainOutput(200)
+    for r in 0 ..< Rows:
+      if needle in sess.text(r): return true
+    sleep(200)
   false
 
 suite "PLAT-64 on a real terminal":
@@ -116,6 +131,8 @@ suite "PLAT-64 on a real terminal":
     ck r0 >= 0
     sess.press(r0, c0 + 2, ctrl = true)
     let afterCtrl = sess.settled
+    # The user's row is Continue (no breakpoint: to the end); the press did not go to the call.
+    ck sess.atRecordingEnd
     # The user's row stepped: not `add`'s body, where the plain press goes.
     ck afterCtrl != afterChord
     # The plain press on `sub` (10 - 4), elsewhere than where the debugger is

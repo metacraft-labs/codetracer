@@ -7221,6 +7221,10 @@ test-own-xvfb:
 plat68-one-keymap:
   bash ci/test/plat68-one-keymap-three-front-ends.sh
 
+# Input-Routing-And-Keymaps.md IR-3, IR-5 and §5.1 on all three front-ends.
+plat64-input-routing:
+  bash ci/test/plat64-input-routing-three-front-ends.sh
+
 # Published parity figures require two independent captures of each renderer.
 # Raw capture recipes above produce diagnostics, not stable parity scalars.
 [positional-arguments]

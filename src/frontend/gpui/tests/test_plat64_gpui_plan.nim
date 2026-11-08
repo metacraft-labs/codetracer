@@ -19,7 +19,7 @@ const
   H = 1400
   UserRows = """[
   { "key": "ctrl+alt+j", "command": "debugger.step-over" },
-  { "key": "ctrl+click", "command": "debugger.step-over",
+  { "key": "ctrl+click", "command": "debugger.continue",
     "when": "paneKind == calltrace && elementKind == row" },
 ]
 """
@@ -93,7 +93,7 @@ suite "PLAT-64 on GPUI":
 
   test "a Ctrl+press the user rebound follows the rebinding":
     let r = run("wait:1500," & callPress(1) & ":left:ctrl,wait:1000")
-    check "pointer Ctrl+Click -> debugger.step-over" in r.trace
+    check "pointer Ctrl+Click -> debugger.continue" in r.trace
     check "calltrace jump" notin r.trace
 
   test "a context click opens the element's menu":

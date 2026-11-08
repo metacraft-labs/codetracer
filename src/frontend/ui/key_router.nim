@@ -892,6 +892,9 @@ proc onKeyUp(ev: JsObject) =
   if deskAltTap.modifiersChanged(heldModifiers(ev)):
     routeKey("Alt", ev)
 
+var swallowNextClick = false
+  ## A press a user's pointer row ran; its click is swallowed.
+
 proc elementKindOfTarget(target: JsObject): cstring {.importjs: """
   (function (t) {
     if (!t || !t.closest) return '';
@@ -923,9 +926,17 @@ proc routeUserPointerGesture(ev: JsObject) =
     pointerGesture(button, ev.ctrlKey.to(bool), ev.shiftKey.to(bool),
                    ev.altKey.to(bool), ev.metaKey.to(bool)))
   if res.kind == erOperation and res.layer.startsWith("user:"):
-    traceOperation(res.operation)
     if runDesktopOperation(res) == nkHandled:
       stop(ev)
+      # The press's `click` and `auxclick` follow: they are the gesture's too,
+      # and the element's own handler must not also run.
+      swallowNextClick = true
+
+proc onClickAfterGesture(ev: JsObject) =
+  ## Swallows the click of a press a user's pointer row took.
+  if swallowNextClick:
+    swallowNextClick = false
+    stop(ev)
 
 proc onPointerDown(ev: JsObject) =
   deskAltTap.interrupted()       # Alt+click is not Alt tapped
@@ -1065,6 +1076,8 @@ proc installKeyRouter*() =
            "window.addEventListener('keyup', ", onKeyUp, ", true);",
            "window.addEventListener('mousedown', ", onPointerDown, ", true);",
            "window.addEventListener('mousedown', ", routeUserPointerGesture, ", true);",
+           "window.addEventListener('click', ", onClickAfterGesture, ", true);",
+           "window.addEventListener('auxclick', ", onClickAfterGesture, ", true);",
            "window.addEventListener('blur', ", onWindowBlur, ");"].}
   if not data.isNil and not data.ipc.isNil:
     data.ipc.on(KeybindingsMessage, proc(event: JsObject; payload: JsObject) =
