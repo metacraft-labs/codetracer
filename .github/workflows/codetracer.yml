@@ -1743,6 +1743,9 @@ jobs:
     # (2026-10-25/26) that step took 26-35m and the flake check 10-18m, and on
     # #882 every attempt on a cold garm slot was cancelled at 25m inside the
     # build. 90m is ~2x the slowest local measurement of the two steps together.
+    # The ct-mcr test recorder and the license check left those inputs when
+    # backend-manager's check phase stopped running the CPUID-faulting
+    # recording test; the limit is kept until the lane is measured again.
     timeout-minutes: 90
     steps:
       - name: Mint installation token for cross-repo sibling access

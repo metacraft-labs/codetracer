@@ -842,149 +842,6 @@
             };
           };
 
-        # Check-only recorder for backend-manager's real meta.dat round trip.
-        # Build the production CLI and dynamic interposer: the fixture records
-        # a dynamically linked C program and does not need CLR tools.
-        backend-manager-test-recorder-core = pkgs.stdenv.mkDerivation {
-          pname = "backend-manager-test-recorder";
-          version = "0.1.0";
-          src = inputs.codetracer-native-recorder;
-          nativeBuildInputs = [ nim-codetracer ];
-          buildInputs = [
-            pkgs.zstd
-          ]
-          ++ pkgs.lib.optional (
-            pkgs.stdenv.hostPlatform.isLinux && pkgs.stdenv.hostPlatform.isx86
-          ) pkgs.libipt;
-          dontConfigure = true;
-          nimPaths = pkgs.lib.concatMapStringsSep " " (path: "--path:${path}") [
-            inputs.nim-results
-            inputs.nim-stew
-            "${inputs.codetracer-trace-format-nim}/src"
-            "${inputs.codetracer-visual-replay}/src"
-            "${inputs.nim-stackable-hooks}/src"
-            inputs.nim-confutils
-            inputs.nim-serialization
-            inputs.nim-faststreams
-          ];
-          buildPhase = ''
-            runHook preBuild
-            export HOME="$TMPDIR/home"
-            mkdir -p "$HOME"
-            export STACKABLE_HOOKS_SRC=${inputs.nim-stackable-hooks}/src
-            export CODETRACER_TRACE_FORMAT_NIM_SRC=${inputs.codetracer-trace-format-nim}/src
-            (
-              cd ct_interpose
-              nim c --parallelBuild:2 $nimPaths --app:lib --noMain --mm:none \
-                --stackTrace:off --lineTrace:off -o:libct_interpose${pkgs.stdenv.hostPlatform.extensions.sharedLibrary} \
-                src/ct_interpose/library_init.nim
-            )
-            (
-              cd ct_cli
-              nim c --parallelBuild:2 $nimPaths -o:ct_cli src/ct_cli.nim
-            )
-            runHook postBuild
-          '';
-          installPhase = ''
-            mkdir -p "$out/bin"
-            cp ct_cli/ct_cli "$out/bin/ct-mcr"
-            cp ct_interpose/libct_interpose${pkgs.stdenv.hostPlatform.extensions.sharedLibrary} "$out/bin/"
-          '';
-        };
-
-        backend-manager-test-static-interposer = backend-manager-test-recorder-core.overrideAttrs (old: {
-          pname = "backend-manager-test-static-interposer";
-          buildPhase = ''
-            export HOME="$TMPDIR/home"
-            mkdir -p "$HOME"
-            export STACKABLE_HOOKS_SRC=${inputs.nim-stackable-hooks}/src
-            export CODETRACER_TRACE_FORMAT_NIM_SRC=${inputs.codetracer-trace-format-nim}/src
-            for pathFlag in $nimPaths; do
-              printf 'switch("path", "%s")\n' "''${pathFlag#--path:}" >> config.nims
-            done
-            echo 'switch("parallelBuild", "2")' >> config.nims
-            cd ct_interpose
-            # Execute the unchanged production task body directly: Nimble
-            # tries to refresh its package registry even in offline mode.
-            # All dependencies are already supplied by config.nims above.
-            sed -n '/^task buildStatic,/,$p' ct_interpose.nimble \
-              | sed '1c block:' > build_static.nims
-            nim e build_static.nims
-          '';
-          installPhase = ''
-            mkdir -p "$out/lib"
-            cp build/static_shim/libct_interpose_static.so "$out/lib/"
-          '';
-        });
-
-        backend-manager-test-dwarf-paths = pkgs.rustPlatform.buildRustPackage {
-          pname = "backend-manager-test-dwarf-paths";
-          version = "0.1.0";
-          src = "${inputs.codetracer-native-recorder}/ct_dwarf_paths";
-          cargoLock.lockFile = "${inputs.codetracer-native-recorder}/ct_dwarf_paths/Cargo.lock";
-        };
-
-        backend-manager-test-license = pkgs.rustPlatform.buildRustPackage {
-          pname = "backend-manager-test-license";
-          version = "0.1.0";
-          src = pkgs.runCommand "backend-manager-test-license-src" { } ''
-            mkdir -p "$out/codetracer/libs"
-            cp -r ${inputs.codetracer-native-backend} "$out/codetracer-native-backend"
-            cp -r ${inputs.codetracer-trace-format} "$out/codetracer-trace-format"
-            cp -r ${../../libs/ct-dap-client} "$out/codetracer/libs/ct-dap-client"
-            cp -r ${../../libs/ct-lang} "$out/codetracer/libs/ct-lang"
-          '';
-          sourceRoot = "backend-manager-test-license-src/codetracer-native-backend";
-          cargoDeps =
-            (pkgs.callPackage "${pkgs.path}/pkgs/build-support/rust/import-cargo-lock.nix" {
-              fetchgit =
-                args:
-                if
-                  args.url == "https://github.com/metacraft-labs/lldb-sys.rs.git"
-                  && args.rev == inputs.native-license-lldb-sys.rev
-                then
-                  inputs.native-license-lldb-sys
-                else
-                  pkgs.fetchgit args;
-            })
-              {
-                lockFile = "${inputs.codetracer-native-backend}/Cargo.lock";
-                outputHashes."lldb-sys-0.0.31" = inputs.native-license-lldb-sys.narHash;
-              };
-          # This is the production verifier built with its development key,
-          # matching the recorder's development build, without any bypass.
-          buildType = "debug";
-          cargoBuildFlags = [
-            "--package"
-            "ct_license_ffi"
-            "--lib"
-          ];
-          doCheck = false;
-          nativeBuildInputs = [ pkgs.pkg-config ];
-          buildInputs = [
-            pkgs.lldb
-            pkgs.llvm
-            pkgs.openssl
-          ];
-          LLVM_CONFIG = "${pkgs.llvm.dev}/bin/llvm-config";
-          LLDB_LIB_PATH = "${pkgs.lldb}/lib";
-          LLDB_ADDITIONAL_INCLUDE_DIRS = "${pkgs.lldb.dev}/include";
-          installPhase = ''
-            mkdir -p "$out/lib"
-            cp target/*/debug/libct_license_ffi${pkgs.stdenv.hostPlatform.extensions.sharedLibrary} "$out/lib/"
-          '';
-        };
-
-        backend-manager-test-recorder = pkgs.runCommand "backend-manager-test-recorder" { } ''
-          mkdir -p "$out/bin"
-          cp ${backend-manager-test-recorder-core}/bin/* "$out/bin/"
-          cp ${backend-manager-test-license}/lib/* "$out/bin/"
-          cp ${backend-manager-test-dwarf-paths}/bin/* "$out/bin/"
-          ${pkgs.lib.optionalString pkgs.stdenv.isLinux ''
-            cp ${backend-manager-test-static-interposer}/lib/* "$out/bin/"
-          ''}
-        '';
-
         backend-manager = pkgs.rustPlatform.buildRustPackage {
           name = "backend-manager";
           pname = "backend-manager";
@@ -1067,11 +924,9 @@
           nativeCheckInputs = [
             pkgs.python3
             db-backend
-            backend-manager-test-recorder
           ]
           ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.util-linux ];
           CODETRACER_REPLAY_SERVER_CMD = "${db-backend}/bin/replay-server";
-          CODETRACER_CT_MCR_CMD = "${backend-manager-test-recorder}/bin/ct-mcr";
 
           cargoLock = {
             lockFile = ../../src/backend-manager/Cargo.lock;
@@ -1081,8 +936,8 @@
           checkPhase = ''
             runHook preCheck
 
-            # Real recorder/verifier children keep their counters and state
-            # inside this build, as the checkout test harnesses do.
+            # The real children the tests start (replay server, Python) keep
+            # their state inside this build, as the checkout test harnesses do.
             export CODETRACER_HOME="$(mktemp -d)"
 
             # ``buildRustPackage`` runs the crate's whole test suite here,
@@ -1244,8 +1099,45 @@
               cargoTestTargets="$cargoTestTargets --test $testTarget"
             done
 
-            # Two guards keep the single-test exclusion honest -- it must stay
-            # exactly one test wide, and it must never become a no-op.
+            # ---------------------------------------------------------------
+            # Third exclusion: ONE test of ``tests/meta_dat_real_mcr_recording.rs``,
+            #
+            #   a_native_recording_and_each_of_its_slices_name_the_recording
+            #
+            # It records a C program with a real ``ct-mcr``, and ``ct-mcr
+            # record`` needs CPUID faulting (``arch_prctl(ARCH_SET_CPUID, 0)``),
+            # which is a property of the builder's CPU and kernel, not of the
+            # platform (``system``) this derivation declares. Nix schedules the
+            # derivation on any builder of that platform, so with the test here
+            # the package built or failed by machine. Observed: codetracer
+            # ``agents`` 9670eb831, job 128586976683 on high-mem-server-mcl-003
+            # (no CPUID faulting) failed it --
+            #
+            #   [ct_interpose] FATAL (cpu input): this host refused CPUID
+            #     faulting (arch_prctl(ARCH_SET_CPUID, 0)); ...
+            #
+            # -- and took out runtime-deps and codetracer with it, while the
+            # same inputs passed on gpu-server-002-mcl-003. A rerun on the same
+            # runner fails the same way.
+            #
+            # The test is NOT weakened and NOT skipped: it still fails rather
+            # than skips where ct-mcr cannot record, and it runs in
+            # ``mcr-dap-flow`` (``just test-mcr-dap-flow``), the lane
+            # ``ci/test/non-gui-not-provided.linux.txt`` assigns it. The 39
+            # other tests of that target -- the meta_dat / trace_metadata unit
+            # tests it compiles in through ``#[path]`` -- need nothing and keep
+            # running here, which is why this is a test and not a target.
+            #
+            # Declaring the capability instead (``requiredSystemFeatures``) was
+            # rejected: no builder advertises a CPUID-faulting feature today,
+            # so the app package would become unbuildable everywhere, and once
+            # one did, every consumer building the app would be confined to
+            # those builders for the sake of one test. With the test gone, this
+            # derivation no longer builds a recorder for its check phase at
+            # all.
+
+            # Two guards keep the single-test exclusions honest -- each must
+            # stay exactly one test wide, and none may become a no-op.
             # ``$cargoTestTargets`` is deliberately unquoted: it is a list of
             # arguments, not one argument.
             # shellcheck disable=SC2086
@@ -1253,20 +1145,27 @@
               $cargoTestTargets -- --list)
             listed=$(printf '%s\n' "$listing" | grep -c ': test$')
 
-            excluded=browser_stream_host::tests::a_real_browser_recording_is_a_ct_with_a_complete_boundary_log
-            # Here-strings, not ``printf | grep -q``: setup runs this phase
-            # under pipefail, and on output this size the early grep exit
-            # breaks printf's pipe (ci/test/grep-q-pipefail-gate.sh).
-            if ! grep -qx "$excluded: test" <<<"$listing"; then
-              echo "ERROR: $excluded is not in this crate's test list." >&2
-              echo "The exclusion below would silently filter nothing. If the test was" >&2
-              echo "renamed, rename it here; if it was deleted, delete this phase." >&2
-              exit 1
-            fi
+            excludedTests=(
+              browser_stream_host::tests::a_real_browser_recording_is_a_ct_with_a_complete_boundary_log
+              a_native_recording_and_each_of_its_slices_name_the_recording
+            )
+            skipArgs=()
+            for excluded in "''${excludedTests[@]}"; do
+              # Here-strings, not ``printf | grep -q``: setup runs this phase
+              # under pipefail, and on output this size the early grep exit
+              # breaks printf's pipe (ci/test/grep-q-pipefail-gate.sh).
+              if ! grep -qx "$excluded: test" <<<"$listing"; then
+                echo "ERROR: $excluded is not in this crate's test list." >&2
+                echo "Its exclusion would silently filter nothing. If the test was" >&2
+                echo "renamed, rename it here; if it was deleted, delete its exclusion." >&2
+                exit 1
+              fi
+              skipArgs+=(--skip "$excluded")
+            done
 
             # shellcheck disable=SC2086
             output=$(cargo test --release --offline --target "$cargoTargetTriple" \
-              $cargoTestTargets -- --skip "$excluded" 2>&1) || {
+              $cargoTestTargets -- "''${skipArgs[@]}" 2>&1) || {
               printf '%s\n' "$output"
               exit 1
             }
@@ -1319,9 +1218,10 @@
             accounted=$(printf '%s\n' "$output" |
               sed -n 's/^test result: ok\. \([0-9]*\) passed; [0-9]* failed; \([0-9]*\) ignored.*/\1 \2/p' |
               awk '{ total += $1 + $2 } END { print total + 0 }')
-            if [ "$accounted" -ne "$((listed - 1))" ]; then
-              echo "ERROR: accounted for $accounted tests, expected $((listed - 1))" >&2
-              echo "(= $listed listed, minus the one that needs a repository)." >&2
+            expected=$((listed - ''${#excludedTests[@]}))
+            if [ "$accounted" -ne "$expected" ]; then
+              echo "ERROR: accounted for $accounted tests, expected $expected" >&2
+              echo "(= $listed listed, minus the ''${#excludedTests[@]} excluded by name above)." >&2
               echo "The exclusion has grown, or tests stopped reporting. Coverage in" >&2
               echo "this lane must not shrink quietly." >&2
               exit 1

@@ -25,7 +25,12 @@
 //! caller's environment.  `ct-mcr record` refuses a host without CPUID
 //! faulting (Multi-Core-Recorder.md §8.3), so on such a host this test
 //! fails at the recording step and says why; the debug knob that would
-//! let it record there is stripped on purpose.
+//! let it record there is stripped on purpose.  For the same reason the
+//! recording test runs in the `mcr-dap-flow` CI lane, on hosts that have
+//! the capability, and the `backend-manager` package's check phase
+//! (`nix/packages/default.nix`) excludes it by name: Nix builds that
+//! package on any x86_64-linux builder.  This file's other tests, the
+//! `meta_dat` / `trace_metadata` unit tests, run in both.
 
 #[path = "../src/meta_dat.rs"]
 #[allow(dead_code)]

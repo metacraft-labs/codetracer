@@ -367,20 +367,17 @@
       # keeps this a flake.
       flake = true;
     };
-    # The native CLI used by backend-manager's recording tests imports the
-    # production CTFS visual-stream reader, even for a non-graphics recording.
+    # No derivation builds from these two. Their flake.lock revisions are the
+    # pins the CI sibling checkouts must name by SHA (`flake_rev` in
+    # ci/test/sibling-provisioning-test.sh, FLAKE_PINNED_SIBLINGS): the native
+    # CLI that ensure-ct-mcr builds imports visual-replay's CTFS visual-stream
+    # reader, and native-backend provides ct-native-replay.
     codetracer-visual-replay = {
       url = "github:metacraft-labs/codetracer-visual-replay/agents";
       flake = false;
     };
     codetracer-native-backend = {
       url = "github:metacraft-labs/codetracer-native-backend/agents";
-      flake = false;
-    };
-    # Match native-backend's Cargo.lock. Fetch this private source through
-    # Nix's authenticated flake fetcher, rather than fetchgit in the sandbox.
-    native-license-lldb-sys = {
-      url = "github:metacraft-labs/lldb-sys.rs/7db095133fc4a03b39822de33907f5d25efcbd7c";
       flake = false;
     };
 
@@ -390,25 +387,6 @@
     # this repository's libs/nim-stew gitlink for sandboxed recorder builds.
     nim-stew = {
       url = "github:status-im/nim-stew/9c3596d9de809a5933fd777cec1183c2cdf521ec";
-      flake = false;
-    };
-
-    # The sandboxed backend-manager test recorder (nix/packages/default.nix)
-    # compiles codetracer-native-recorder's ct_cli, whose record parser needs
-    # the metacraft-labs confutils fork at the exact commit its ct_cli.nimble
-    # pins (the `valueName` / `implicitValue` / `alsoSets` pragmas). The main
-    # source input carries no Git submodules, so these cannot come from
-    # libs/; serialization and faststreams match this repository's gitlinks.
-    nim-confutils = {
-      url = "github:metacraft-labs/nim-confutils/331c5fa2f741a6657c16404bfc9401b18d295f92";
-      flake = false;
-    };
-    nim-serialization = {
-      url = "github:status-im/nim-serialization/9eb88077063bf7e16357e1ed6aaa7c1391b4d7c4";
-      flake = false;
-    };
-    nim-faststreams = {
-      url = "github:status-im/nim-faststreams/37a183153c071539ab870f427c09a1376ba311b9";
       flake = false;
     };
 
