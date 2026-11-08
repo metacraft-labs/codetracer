@@ -169,6 +169,14 @@ type
       ## (selection, copy, find, the tracepoint line). Nil in a session with
       ## no recording; the editor then has no document and its facts are
       ## `sourceViewFacts`.
+    startNimTrace*: proc(request: NimTraceRequest;
+                         lines: seq[string]): string {.closure.}
+      ## Nim's compile-time tracing (`codetracer_embed.nim_tracing_vm`):
+      ## start tracing `request` over the document's `lines` — nimsuggest or
+      ## `nim e`, run by the host (`host/native_nim_tracer`), which polls it
+      ## and opens the recording in a new session tab. Answers what the status
+      ## line says now: the trace's progress, or why it did not start. Nil in
+      ## a host that runs no compiler.
     reloadKeybindings*: proc(): string {.closure.}
       ## PLAT-68: re-read the user's `keybindings.json` and lay it over the
       ## base (`:keys reload`); answers the load summary. Nil in a host that
@@ -652,6 +660,9 @@ proc actOnVerification*(rt: TuiRuntime; act: VerificationAct;
   ## PLAT-63: FORWARD-DECLARED for the command line's `:verify`; defined
   ## beside the Verification pane's other helpers.
 
+proc editorCaretLine(rt: TuiRuntime): int
+  ## Forward-declared for the Nim trace operations; defined beside
+  ## `editorBuffer`.
 proc runFileJob(rt: TuiRuntime; job: FileJob)
 proc deliverFileJob*(rt: TuiRuntime; res: FileJobResult): bool
   ## Forward-declared for `writeBuffersForRun`; defined beside `runFileJob`.
@@ -4412,6 +4423,50 @@ proc inlineChord(rt: TuiRuntime): string =
   ## The active base's chord for the inline entry, the user's rows included.
   rt.chordOfOperation("editor.toggle-inline-breakpoint")
 
+proc nimTraceDocument(rt: TuiRuntime): tuple[path: string;
+                                              lines: seq[string]] =
+  ## The editor's document for Nim tracing: its file, absolute, and its
+  ## lines — Edit mode's buffer, or the recording's file in Debug mode.
+  let buf = rt.editorBuffer()
+  if buf.isNil:
+    return (rt.app.source.path, @[])
+  var path = buf.path
+  if path.len > 0 and not path.isAbsolute:
+    let root = if rt.editServices.projectDir.isNil: getCurrentDir()
+               else: rt.editServices.projectDir()
+    path = root / path
+  (path, buf.lines)
+
+proc nimTraceEntriesAt(rt: TuiRuntime; path: string; lines: seq[string];
+                       line, column: int): seq[NimTraceEntry] =
+  ## The editor menu's Nim trace entries at `line:column`, hinted with the
+  ## active base's chords.
+  let r = rt
+  nimTraceEntriesOf(availableNimTraceActions(path, lines, line, column),
+                    proc(op: string): string = r.chordOfOperation(op))
+
+proc runNimTrace(rt: TuiRuntime; action: NimTraceAction; line = 0;
+                 column = 0) =
+  ## An `editor.trace-*` operation (its chord, the palette, the editor
+  ## menu): the caret's line and column — or the menu's — traced by the
+  ## host; the status line says what happened.
+  let doc = rt.nimTraceDocument()
+  let buf = rt.editorBuffer()
+  if doc.path.len == 0:
+    rt.note(nimTraceLabelOf(action) & ": there is no file in the editor")
+    return
+  let at = if line > 0: line elif not buf.isNil: buf.caretLine
+           else: rt.editorCaretLine()
+  let col = if line > 0: max(1, column)
+            elif not buf.isNil: buf.caretColumn + 1
+            else: 1
+  if rt.editServices.startNimTrace.isNil:
+    rt.note(nimTraceLabelOf(action) & ": this window runs no Nim compiler")
+    return
+  rt.note(rt.editServices.startNimTrace(
+    NimTraceRequest(action: action, path: doc.path, line: at, column: col),
+    doc.lines))
+
 proc editorTextMenu(rt: TuiRuntime; target: SourceClickTarget):
     ContextMenuModel =
   ## The editor menu on `target`'s line, with the line's breakpoint state and
@@ -4435,7 +4490,10 @@ proc editorTextMenu(rt: TuiRuntime; target: SourceClickTarget):
                         tokenError = tokenError, breakpoint = onLine,
                         fileHasBreakpoints = inFile, anyBreakpoints = any,
                         inlineBreakpoint = (target.line, target.column) in src.columnMarks,
-                        inlineChord = rt.inlineChord())
+                        inlineChord = rt.inlineChord(),
+                        nimTrace = rt.nimTraceEntriesAt(
+                          src.path, rt.nimTraceDocument().lines,
+                          target.line, target.column))
 
 proc lineValues(target: SourceClickTarget): seq[NamedValue] =
   for v in target.values:
@@ -5045,7 +5103,18 @@ proc runEditorEffect(rt: TuiRuntime; action: PointerAction; press: EditorPress;
   of pfContextMenu:
     rt.noteSelection(buf, outcome)
     if editing:
-      return false
+      # Edit mode's menu holds what makes a recording — the Nim trace
+      # entries — and is not opened where the caret offers none.
+      let doc = rt.nimTraceDocument()
+      let entries = rt.nimTraceEntriesAt(doc.path, doc.lines, target.line,
+                                         target.column)
+      if entries.len == 0:
+        return false
+      rt.openContextMenu(editorEditContextMenu(doc.path, target.line,
+                                               target.lineText,
+                                               target.column, entries),
+                         event.row, event.col, outcome)
+      return true
     rt.openContextMenu(rt.editorTextMenu(target), event.row, event.col, outcome)
     true
 
@@ -5764,6 +5833,10 @@ proc runContextAction(rt: TuiRuntime; action: ContextAction;
   of caAddTracepoint:
     # The desktop opens its tracepoint editor on the line.
     rt.openTracepointEditorAt(target.path, target.line)
+  of caTraceMacro, caTraceStaticBlock, caTraceConstant, caTraceEval:
+    rt.runNimTrace(nimTraceActionOf(action).action, target.line,
+                   target.column)
+    outcome.repaint = true
   of caToggleCallChildren:
     outcome.togglesCall = true
     outcome.callIndex = target.index
@@ -9106,6 +9179,11 @@ proc buildOperationTables(rt: TuiRuntime) =
       else: AlwaysEnabled)
   session.bindOp("editor.toggle-tracepoint",
              act(rt.openTracepointEditorAt(rt.app.source.path, rt.editorCaretLine())))
+  # Nim's compile-time tracing at the caret (`nim_tracing_vm`).
+  session.onEach([TraceMacroOperation, TraceStaticBlockOperation,
+                  TraceConstantOperation, TraceEvalOperation], act do:
+    rt.runNimTrace(nimTraceActionOfOperation(c.name).action)
+    outcome.repaint = true)
   # M76: the keymap's Stop (CUA's `Shift+F5`) — the menu item's proc.
   session.bindOp("debugger.stop", act(rt.stopDebugging(outcome)),
                  proc(): Enablement =

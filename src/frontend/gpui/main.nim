@@ -183,6 +183,7 @@ import ../viewmodel/host/native_shell_host   # PLAT-61: its shell's process
 from isonim/core/async_compat import drainPlatformCallbacks
 import ../viewmodel/host/native_test_host   # PLAT-53: the desktop's host, native producers
 import ./agent_activity_leaf   # PLAT-54: Agent Activity, drawn natively
+import ../viewmodel/host/native_nim_tracer   # Nim's compile-time tracing
 import ../viewmodel/host/native_agent_host   # PLAT-54: its host
 import ../viewmodel/viewmodels/trace_open   # PLAT-54: a test's recording opened
 import ../viewmodel/viewmodels/search_results_vm
@@ -1530,6 +1531,9 @@ var
   gRecordJob: NativeRecordJob = nil
   gRecordSerial = -1
   gTestJob: NativeRecordJob = nil
+  gNimTracer: NativeNimTracer = nil
+    ## Nim's compile-time tracing (`host/native_nim_tracer`): the trace in
+    ## flight, polled on the record tick (`pollGpuiNimTrace`).
     ## The top bar's run-tests, running (`native_host.startRecordTestJob`).
   gFolderArms = initTable[int, GpuiEditArm]()
     ## A folder tab's editing core (`app/edit_arm`), by the tab's serial.
@@ -7783,6 +7787,15 @@ const AgentPollMs = 100
 const SearchPollMs = 15
   ## PLAT-57: how often a streaming Find in Files search is pumped.
 const RecordPollMs = 200
+
+proc nimTraceRunning(): bool =
+  not gNimTracer.isNil and gNimTracer.vm.running
+
+proc pollGpuiNimTrace(r: GpuiRenderer): bool
+  ## Forward-declared; defined with the editor's Nim trace operations.
+proc runGpuiNimTrace(r: GpuiRenderer; action: NimTraceAction; path = "";
+                     line = 0; column = 0)
+  ## Forward-declared; defined with the editor's Nim trace operations.
   ## PLAT-51: how often a welcome tab's running `ct record` is polled.
 var gVcsDirectory = ""
   ## The repository the VCS pane shows, re-read every `VCSRefreshIntervalMs`
@@ -7839,7 +7852,7 @@ proc armHoverTick() =
   # PLAT-61: a running shell, every `ShellPollMs` — below the activities
   # above, whose ticks pump it too (`pumpShellWindow`).
   if due < 0 and shellLive() and gRecordJob.isNil and gTestJob.isNil and
-     not gTestsHost.running and (gBuild.isNil or
+     not nimTraceRunning() and not gTestsHost.running and (gBuild.isNil or
                                  gBuild.session.verdict != bvRunning):
     let want = (due: -7'i64, vcs: false)
     if gArmedTick != want:
@@ -7849,6 +7862,7 @@ proc armHoverTick() =
   # PLAT-51: a welcome tab's `ct record` is polled on the same tick, every
   # `RecordPollMs`, while it runs.
   if due < 0 and (gVerification.running or   # PLAT-63: a Verno run
+                  nimTraceRunning() or   # a Nim trace, compiling
                   (not gRecordJob.isNil and not gRecordJob.done) or
                   (not gTestJob.isNil and not gTestJob.done) or
                   # PLAT-53: a Test Results run, polled on the same tick.
@@ -9989,6 +10003,7 @@ proc recordTick() {.cdecl.} =
   discard pumpShellWindow(r)   # PLAT-61: a running shell rides every tick
   gArmedTick = (due: -2'i64, vcs: false)
   discard pollWelcomeRecording(r)
+  discard pollGpuiNimTrace(r)
   discard pollTestRun(r)
   discard pollTestsHost(r)
   discard pollConstraintsHost(r)
@@ -10452,8 +10467,30 @@ proc toggleInlineAt(r: GpuiRenderer; path: string; line, column: int) =
     traceGesture("inline breakpoint " & $line & ":" & $min(max(1, column), last))
   if gViewedFile.len > 0: showViewedFile(r) else: refreshReplayWindow(r)
 
+proc nimTraceLinesOf(path: string): seq[string] =
+  ## The document's lines for the Nim trace offer: the Edit window's buffer,
+  ## or the shown file's Debug-mode document.
+  if not openArm.isNil:
+    return openArm.doc.lines
+  if debugDocumentFor(path, gEditorSurface.executionLine):
+    return gDebugDocs[path].lines
+  @[]
+
+proc nimTraceEntriesAt(path: string; line, column: int): seq[NimTraceEntry] =
+  ## The editor menu's Nim trace entries at `line:column`, hinted with the
+  ## active base's chords.
+  nimTraceEntriesOf(
+    availableNimTraceActions(path, nimTraceLinesOf(path), line, column),
+    proc(op: string): string =
+      gRouter.chordFor(op, windowSessionFacts(), windowScopePath(),
+                       nmNormal, ""))
+
 proc editorMenuAt(path: string; line, column: int): ContextMenuModel =
   ## The editor menu for a press on `column` of `path:line`.
+  if gSession.isNil or gEditorSurface.productMode == pmEdit:
+    # Edit mode's menu: what makes a recording — the Nim trace entries.
+    return editorEditContextMenu(path, line, lineTextOf(path, line), column,
+                                 nimTraceEntriesAt(path, line, column))
   let session = gSession.session
   let mark = lineMarkOf(path, line)
   var inFile, any = false
@@ -10477,7 +10514,8 @@ proc editorMenuAt(path: string; line, column: int): ContextMenuModel =
                           gSession.heldBreakpoints(path), line, column),
                         inlineChord = gRouter.chordFor(
                           "editor.toggle-inline-breakpoint",
-                          windowSessionFacts(), windowScopePath(), nmNormal, ""))
+                          windowSessionFacts(), windowScopePath(), nmNormal, ""),
+                        nimTrace = nimTraceEntriesAt(path, line, column))
 
 # ---- the window's maximised container --------------------------------------
 
@@ -10891,10 +10929,16 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
                    caVerificationCloseCounterexample,
                    # PLAT-62: the Constraints pane is the window's project's.
                    caConstraintGoToSource, caConstraintCopyName,
-                   caConstraintCopySourceLocation}:
+                   caConstraintCopySourceLocation,
+                   # A Nim trace runs the compiler, not the replay.
+                   caTraceMacro, caTraceStaticBlock, caTraceConstant,
+                   caTraceEval}:
     return
   case action
   of caNone: discard
+  of caTraceMacro, caTraceStaticBlock, caTraceConstant, caTraceEval:
+    runGpuiNimTrace(r, nimTraceActionOf(action).action, target.path,
+                    target.line, target.column)
   of caPinLeft, caPinBottom, caPinRight, caPinTop:
     applyGestureCommand(r, cmdDock(target.pane,
       (case action
@@ -11411,6 +11455,62 @@ proc editorDocumentOf(path: string): ptr EditingDocument =
   if not debugDocumentFor(path, gEditorSurface.executionLine):
     return nil
   addr gDebugDocs[path]
+
+proc runGpuiNimTrace(r: GpuiRenderer; action: NimTraceAction; path: string;
+                     line, column: int) =
+  ## An `editor.trace-*` operation (its chord, the palette, the editor
+  ## menu): the caret's line and column — or the menu's — traced by
+  ## nimsuggest or `nim e` (`host/native_nim_tracer`), polled on the record
+  ## tick; the status bar says what happened.
+  let file = if path.len > 0: path
+             elif not openArm.isNil: openArm.path
+             else: editorPath()
+  if file.len == 0:
+    traceGesture(nimTraceLabelOf(action) & ": there is no file in the editor")
+    drawTopBar(r)
+    return
+  let dp = editorDocumentOf(file)
+  let at = if line > 0: line elif not dp.isNil: dp[].caretLine
+           else: max(1, gEditorSurface.executionLine)
+  let col = if line > 0: max(1, column)
+            elif not dp.isNil: dp[].caretColumn + 1
+            else: 1
+  if gNimTracer.isNil:
+    gNimTracer = newNativeNimTracer()
+  discard gNimTracer.startNimTrace(
+    NimTraceRequest(action: action, path: absolutePath(file), line: at,
+                    column: col),
+    nimTraceLinesOf(file))
+  traceGesture("nim trace: " & gNimTracer.vm.message)
+  armHoverTick()
+  drawTopBar(r)
+
+proc pollGpuiNimTrace(r: GpuiRenderer): bool =
+  ## The Nim trace in flight: once it settles, its recording opens where the
+  ## shared rule places it (`nimTracePlacement`, a new session tab); an Edit
+  ## window, which has no session tabs, says where it is.
+  if gNimTracer.isNil or not gNimTracer.pollNimTrace():
+    return false
+  let vm = gNimTracer.vm
+  if vm.phase != ntpDone:
+    traceGesture("nim trace: " & vm.message)
+  elif gShell.isNil:
+    traceGesture("nim trace: " & vm.message & " (this window has no " &
+                 "session tabs; the recording is at " & vm.tracePath & ")")
+  else:
+    let request = traceOpenRequestOf(vm.tracePath)
+    let current = gShell.app.activeSessionId()
+    let before = gSessionsOpened.len
+    openRecordingInTab(r, request.tracePath)
+    if gSessionsOpened.len <= before:
+      traceGesture("nim trace: could not open " & request.tracePath)
+    else:
+      if request.policy == topCurrentTab:
+        replaceSessionTab(r, current)
+      traceGesture("nim trace: " & vm.message & " — opened in a new " &
+                   "session tab")
+  drawTopBar(r)
+  true
 
 proc redrawAfterPointer(r: GpuiRenderer; path: string) =
   if not openArm.isNil:
@@ -12332,6 +12432,10 @@ proc buildWindowOperationTables(r: GpuiRenderer) =
     gTracepointAt = (path, line)
     traceGesture("tracepoint editor at " & $line)
     openOmnibar(r, TracepointCommand))
+  # Nim's compile-time tracing at the caret (`nim_tracing_vm`).
+  window.onEach([TraceMacroOperation, TraceStaticBlockOperation,
+                 TraceConstantOperation, TraceEvalOperation], act do:
+    runGpuiNimTrace(r, nimTraceActionOfOperation(c.name).action))
   window.onEach(["menu.open", "menu.toggle", "menu.open-folder"], act do:
     runMenuOperation(c.name, c.argument)
     drawTopBar(r))
@@ -12757,7 +12861,9 @@ proc onPaneClick(c: GPaneClick) =
         if gViewedFile.len > 0: showViewedFile(r)
         else: refreshReplayWindow(r)
     of pfContextMenu:
-      openContextMenuAt(r, editorMenuAt(path, c.line, column), c.x, c.y)
+      let menu = editorMenuAt(path, c.line, column)
+      if menu.entries.len > 0:
+        openContextMenuAt(r, menu, c.x, c.y)
     of pfCallJump:
       let (token, err) = callTokenAt(lineTextOf(path, c.line), column,
                                      rust = path.endsWith(".rs"))
@@ -14652,6 +14758,14 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
         let deadline = epochTime() + float(at(1)) / 1000.0
         while epochTime() < deadline:
           if pollWelcomeRecording(r):
+            break
+          sleep(RecordPollMs)
+      # And a Nim trace compiling — REALLY waited for, up to `ms`, polled
+      # as the record tick polls it.
+      if nimTraceRunning():
+        let deadline = epochTime() + float(at(1)) / 1000.0
+        while epochTime() < deadline:
+          if pollGpuiNimTrace(r):
             break
           sleep(RecordPollMs)
       # PLAT-54: and a live agent's turn — REALLY waited for, up to `ms`,

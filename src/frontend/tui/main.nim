@@ -104,6 +104,7 @@ from ../viewmodel/viewmodels/test_results_vm import TraceOpenPolicy,
   noteTestTab, forgetTestTab   # Test-Results-Pane.md §9
 import ./host/build_output_source   # PLAT-56
 from ../viewmodel/host/native_requests_host import wireRequests   # PLAT-58
+import ../viewmodel/host/native_nim_tracer   # Nim's compile-time tracing
 import ./app/views/requests_pane   # PLAT-58: `RequestsAct`
 import ./app/views/shell_session_pane   # PLAT-61: `ShellAct`
 # PLAT-49 part B: the session strip's sessions — opened, adopted, closed here.
@@ -189,6 +190,9 @@ type
     ## rule, and the copy that would have been forgotten is the entrypoint's,
     ## because no suite compiles this module.
     running: RunningBuild
+    nimTracer: NativeNimTracer
+      ## Nim's compile-time tracing: the one trace in flight, polled by the
+      ## loop like the build (`advanceNimTrace`).
 
 proc wireEditServices(rt: TuiRuntime; root: string; keymapFlag: string;
                       listFiles: proc(): EditListResult): EditHostState =
@@ -267,6 +271,13 @@ proc wireEditServices(rt: TuiRuntime; root: string; keymapFlag: string;
       BuildStartResult(ok: true, message: $kind & " started: " & cmd)
     else:
       BuildStartResult(ok: false, message: describeVerdict(state.running.session))
+  # Nim's compile-time tracing: nimsuggest or `nim e`, run here; the loop
+  # polls it (`advanceNimTrace`) and opens what it records.
+  state.nimTracer = newNativeNimTracer()
+  rt.editServices.startNimTrace = proc(request: NimTraceRequest;
+                                       lines: seq[string]): string =
+    discard state.nimTracer.startNimTrace(request, lines)
+    state.nimTracer.vm.message
   # Build-Output-Pane.md §3.6: a build TASK — its command in its own working
   # directory, named, read by its problem matcher.
   rt.editServices.projectDir = proc(): string = rootOf()
@@ -282,6 +293,32 @@ proc wireEditServices(rt: TuiRuntime; root: string; keymapFlag: string;
     else:
       BuildStartResult(ok: false, message: describeVerdict(state.running.session))
   state
+
+proc advanceNimTrace(rt: TuiRuntime; edit: EditHostState;
+                     open: proc(request: TraceOpenRequest): string): bool =
+  ## The Nim trace in flight, polled: once it settles, its recording is
+  ## opened where the shared rule places it (`nimTracePlacement`, a new
+  ## session tab) — or, in a loop that has no session tabs (`open` nil), the
+  ## status line says where it is. True when the trace settled on this poll.
+  let t = edit.nimTracer
+  if t.isNil or not t.pollNimTrace():
+    return false
+  if t.vm.phase != ntpDone:
+    rt.app.notification = t.vm.message
+    return true
+  if open.isNil:
+    rt.app.notification = t.vm.message & " | " & NoSessionTabsText &
+                          t.vm.tracePath
+    return true
+  let why = open(traceOpenRequestOf(t.vm.tracePath))
+  if why.len == 0 and rt.app.modes.product == pmEdit:
+    # A replay opens in Debug mode (Mode-Transitions.md): a trace started
+    # from Edit mode shows its recording, not the buffer it was asked from.
+    rt.enterProductMode(pmDebug)
+  rt.app.notification =
+    if why.len > 0: why
+    else: t.vm.message & " — opened in a new session tab"
+  true
 
 proc wireKeybindings(rt: TuiRuntime): ref KeybindingsLoad =
   ## PLAT-68: THE ONE USER KEYMAP (Base-Keymaps-And-Layer-Stack.md §3.5) —
@@ -1484,6 +1521,16 @@ proc interactive(command: TuiCommand): int =
       app.recentFolders.insert(path, 0)
       rt.enterProductMode(pmEdit)
       ""
+  proc openNimTrace(request: TraceOpenRequest): string =
+    ## A Nim trace's recording, opened where `request.policy` says: a new
+    ## session tab, or in place of the current tab's session.
+    if app.recordingOpener.isNil:
+      return "this terminal cannot open " & request.tracePath
+    if request.policy != topCurrentTab:
+      return app.recordingOpener(request.tracePath)
+    replaceTab = int(shownId)
+    try: app.recordingOpener(request.tracePath)
+    finally: replaceTab = -1
   proc pollRecording(): bool =
     ## The background `ct record`, once it finishes: its recording opened
     ## in the tab that asked, or the failure on that tab's screen.
@@ -1611,8 +1658,9 @@ proc interactive(command: TuiCommand): int =
       let shellChanged = session.pumpShell(rt)
       # PLAT-59: the player's answers, playback, a held scrubber's frame.
       let visualChanged = session.pumpVisual(rt, nowMs())
-      # PLAT-51: a welcome tab's recording, when it finishes.
-      let recorded = pollRecording()
+      # PLAT-51: a welcome tab's recording, when it finishes; a Nim trace's
+      # too.
+      let recorded = pollRecording() or advanceNimTrace(rt, edit, openNimTrace)
       # PLAT-49 part B: the auto-hide hover's clock — a preview due after
       # the pointer rested on a label, a dismissal due after it left.
       let hoverChanged = rt.tickAutoHide(nowMs()) or
@@ -2034,7 +2082,8 @@ proc editInteractive(command: TuiCommand): int =
       # is the whole of §5's cancellability requirement: the key that cancels is
       # read while the compiler runs, and the clock that bounds an unattended
       # session is checked on every tick. See `host/build_runner.pollBuild`.
-      let built = advanceBuild(rt, edit, report = true)
+      let built = advanceBuild(rt, edit, report = true) or
+                  advanceNimTrace(rt, edit, nil)
       let vcsChanged = vcs.tick(rt)
       let testsChanged = tests.tick(rt)
       let problemsTicked = problems.tick(rt, nowMonoMs())
