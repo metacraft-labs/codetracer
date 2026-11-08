@@ -48,13 +48,15 @@
 #      through a `siblings:` block, through one of this repo's
 #      `.github/actions/setup-*-siblings` composites, or through a `clone-repo`
 #      step -- except for pairs recorded in KNOWN_GAPS below.
-#      SCOPE, stated rather than implied: the scanner matches the literal
-#      command in a non-comment line, so a job that reaches build-once through
-#      a wrapper script is out of its reach. `visual-replay-regression-gate` is
+#      A job counts when a non-comment line runs `scripts/build-once.sh` or
+#      `just <recipe>` for `build-once` or any justfile recipe whose
+#      prerequisites reach it (`test-gui`, ...), read from the justfile.
+#      SCOPE, stated rather than implied: a job that reaches build-once through
+#      a wrapper SCRIPT is out of its reach. `visual-replay-regression-gate` is
 #      the one such job today -- it names `just build-once` only in prose and
 #      drives it from ci/, and it happens to provision all nine anyway. A
-#      wrapper is therefore a way to escape this check; adding the wrapper's
-#      name to the pattern is how to close that.
+#      wrapper script is therefore a way to escape this check; adding the
+#      wrapper's name to the pattern is how to close that.
 #   3. KNOWN_GAPS is shrink-only: a recorded gap that has been fixed must be
 #      deleted from the list rather than left to rot, so the exception list
 #      cannot quietly become the specification.
@@ -322,6 +324,60 @@ unset _repro_provides
 # -----------------------------------------------------------------------------
 echo "every job that runs 'just build-once' provisions the required siblings"
 
+# The `just` recipes that run build-once: `build-once` itself and every recipe
+# whose prerequisites reach it, transitively, read from the justfile. A job
+# running `just test-gui` (`test-gui *args: build-once build-siblings`) starts
+# the same preflight as one running `just build-once`, and matching only the
+# literal let `test-ui-tests-rr` clone three repos and pass this check
+# (codetracer-pm issue 2026-11-08-ct-core-imports-nim-pty-which-the-sibling-
+# check-calls-optional).
+build_once_recipes() { # <justfile> ; echoes one recipe name per line
+	awk '
+		# A recipe header: `[@]name [params...]: [deps...]` at column 0. Skip
+		# assignments (`x := ...`), settings, attributes and comments. Quoted
+		# strings are blanked first: a parameter default (`port="3000"`) or a
+		# dependency argument may hold `=`, `:` or `#`, and an earlier pattern
+		# that refused any `=` before the colon silently skipped every recipe
+		# with a defaulted parameter.
+		{
+			line = $0
+			gsub(/"[^"]*"/, "\"\"", line); gsub(/\047[^\047]*\047/, "\"\"", line)
+		}
+		line ~ /^[@A-Za-z0-9_-]+([ \t][^:]*)?:([ \t]|$)/ && line !~ /:=/ {
+			name = line; sub(/[ \t:].*/, "", name); sub(/^@/, "", name)
+			deps = line; sub(/^[^:]*:/, "", deps); sub(/#.*/, "", deps)
+			n = split(deps, toks, /[ \t]+/)
+			for (i = 1; i <= n; i++) {
+				t = toks[i]; gsub(/[()]/, "", t)
+				if (t != "" && t !~ /^&&$/) edges[name] = edges[name] " " t
+			}
+			names[name] = 1
+		}
+		END {
+			reach["build-once"] = 1
+			do {
+				changed = 0
+				for (r in names) {
+					if (r in reach) continue
+					n = split(edges[r], toks, " ")
+					for (i = 1; i <= n; i++) if (toks[i] in reach) { reach[r] = 1; changed = 1; break }
+				}
+			} while (changed)
+			for (r in reach) print r
+		}
+	' "$1"
+}
+
+BUILD_ONCE_RECIPES="$(build_once_recipes "$REPO_ROOT/justfile" | sort)"
+if ! grep -qx 'test-gui' <<<"$BUILD_ONCE_RECIPES"; then
+	fail "the justfile recipes that run build-once are readable" \
+		"recipe test-gui (whose prerequisites name build-once) is not among them:" \
+		"$(tr '\n' ' ' <<<"$BUILD_ONCE_RECIPES")" \
+		"the recipe parser regressed, so jobs that reach build-once through a" \
+		"recipe would silently drop out of this scan."
+fi
+build_once_pattern="scripts/build-once\\.sh|just[[:space:]]+(-[^[:space:]]+[[:space:]]+)*($(tr '\n' '|' <<<"$BUILD_ONCE_RECIPES" | sed 's/|$//'))([[:space:]\"'\'']|$)"
+
 gaps_seen=()
 missing_reports=()
 build_once_jobs=0
@@ -379,7 +435,7 @@ for wf in "$WORKFLOW_DIR"/*.yml; do
 		#
 		# A herestring feeds `grep` from a temporary file: no pipe, no writer,
 		# no EPIPE, and the exit status is `grep`'s own in every case.
-		grep -qE 'just build-once|scripts/build-once\.sh' <<<"$job_code" || continue
+		grep -qE "$build_once_pattern" <<<"$job_code" || continue
 		build_once_jobs=$((build_once_jobs + 1))
 
 		# What this job provisions: its own inline blocks, plus the blocks of
@@ -388,8 +444,12 @@ for wf in "$WORKFLOW_DIR"/*.yml; do
 		printf '%s\n' "$job_body" >"$job_tmp"
 		provided=" $(sibling_names_in_block "$job_tmp" | tr '\n' ' ') "
 		rm -f "$job_tmp"
+		# A composite counts only when a `uses:` line of the job's code names
+		# it. Matching anywhere in the body credited `test-ui-tests-rr` with
+		# setup-db-backend-siblings' siblings because a comment in its
+		# `siblings:` block cites that action's file for the refresh rule.
 		for comp in "${!COMPOSITE_PROVIDES[@]}"; do
-			if grep -q "actions/$comp" <<<"$job_body"; then
+			if grep -qE "^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*[^#[:space:]]*actions/$comp([@/[:space:]]|\$)" <<<"$job_code"; then
 				provided="${provided}${COMPOSITE_PROVIDES[$comp]} "
 			fi
 		done
@@ -397,7 +457,7 @@ for wf in "$WORKFLOW_DIR"/*.yml; do
 		while IFS= read -r repo_line; do
 			leaf="${repo_line##*/}"
 			[ -n "$leaf" ] && provided="${provided}${leaf} "
-		done < <(printf '%s\n' "$job_body" | sed -n 's/^[ \t]*repo:[ \t]*\([A-Za-z0-9_.-]*\/[A-Za-z0-9_.-]*\).*$/\1/p')
+		done < <(printf '%s\n' "$job_code" | sed -n 's/^[ \t]*repo:[ \t]*\([A-Za-z0-9_.-]*\/[A-Za-z0-9_.-]*\).*$/\1/p')
 
 		while IFS= read -r name; do
 			[ -n "$name" ] || continue

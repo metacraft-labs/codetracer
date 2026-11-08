@@ -6718,6 +6718,37 @@ jobs:
             # The native fixture the desktop's native Low Level Code capture
             # records (`c/sudoku_solver`), at the revision repro.lock pins.
             codetracer-native-test-programs=af5a77b20f5a4ae09c202902b3ee01e9edf5473f
+            # `just test-gui` depends on `build-once`, whose preflight
+            # (scripts/require-siblings.sh) refuses a workspace missing any
+            # REQUIRED sibling. This job used to clone only the three repos
+            # above, so it could never get past that preflight. The rest come
+            # from the two steps below; codetracer-native-recorder is not a
+            # repro.lock build input, so it is cloned here at the revision every
+            # other job in this file pins.
+            codetracer-native-recorder=3f053ab8652aa2edbd7fbe509c46f64ed3cb29f3
+
+      - name: Clone runquota sibling
+        # `just test-gui` -> `build-once` compiles `ct`, which imports
+        # `runquota_process`. Not a repro.lock build input; cloned the way
+        # `tui-tests` and `cross-process-linux` clone it.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/runquota
+          ref: dev
+          path: ${{ github.workspace }}/../runquota
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Provision dependency siblings from repro.lock
+        # isonim, isonim-tui, nim-agents, nim-agent-harbor, nim-acp,
+        # nim-everywhere, test-certificates-tools, io-mon, nim-stackable-hooks
+        # and nim-pty: the rest of build-once's required siblings. After
+        # `Setup dev env`, which installed Nix: this action reaches `repro`
+        # through the dev shell.
+        uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Stage codetracer-trace-format into libs/
         # The flake override below points at ./libs/codetracer-trace-format;
