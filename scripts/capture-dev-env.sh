@@ -48,24 +48,64 @@ if ! builtin cd -- "$__codetracer_capture_checkout" 2>/dev/null; then
     unset __codetracer_capture_checkout __codetracer_capture_caller __codetracer_capture_oldpwd __codetracer_capture_oldpwd_set
     return 1
 fi
+# Return the caller to its directory and OLDPWD and remove this wrapper's
+# function and variables. Runs once: explicitly after the shell hook, or from
+# the RETURN trap below when the source ends early. The shell hook ends the
+# source with `return 1` when it cannot finish repository setup (for instance
+# when the Git checks cannot be installed); without the trap that left the
+# caller inside the checkout.
+# The caller's RETURN trap is restored by the top-level code that calls this
+# function, never inside it: without `set -T`, Bash puts back the RETURN trap
+# an untraced function was called with when it returns, so a `trap - RETURN`
+# here would be undone and leave this wrapper's trap in the caller's shell.
+__codetracer_capture_leave() {
+    local status=0
+    if ! builtin cd -- "$__codetracer_capture_caller"; then
+        printf 'CodeTracer: could not return to %s after entering the captured environment\n' "$__codetracer_capture_caller" >&2
+        status=1
+    elif [ -n "$__codetracer_capture_oldpwd_set" ]; then
+        OLDPWD=$__codetracer_capture_oldpwd
+    else
+        unset OLDPWD
+    fi
+    unset __codetracer_capture_checkout __codetracer_capture_caller __codetracer_capture_oldpwd \
+        __codetracer_capture_oldpwd_set __codetracer_capture_depth
+    unset -f __codetracer_capture_leave
+    return "$status"
+}
+__codetracer_capture_depth=${#BASH_SOURCE[@]}
+# Without `set -T` Bash hides the caller's RETURN trap while a file is sourced
+# and restores it afterwards unless the file set one; this then reads empty and
+# `trap - RETURN` below lets Bash restore it. With `set -T` the caller's trap is
+# visible here and is put back explicitly.
+__codetracer_capture_return_trap=$(trap -p RETURN)
+# Bash runs a RETURN trap when a sourced file finishes, early `return` included
+# (https://www.gnu.org/software/bash/manual/bash.html#index-trap). Under
+# `set -T` it also runs when a function returns, the Nix program's and this
+# wrapper's own included; those run at a BASH_SOURCE depth no lower than this
+# file's, and only the end of the source, below it, is ours. Once the wrapper
+# has left, the depth variable is gone and the comparison with 0 is false.
+trap 'if [ "${#BASH_SOURCE[@]}" -lt "${__codetracer_capture_depth:-0}" ]; then
+    __codetracer_capture_leave
+    eval "${__codetracer_capture_return_trap:-trap - RETURN}"
+    unset __codetracer_capture_return_trap
+fi' RETURN
 ENTER
 cd "$repo"
 nix print-dev-env --no-write-lock-file "$@" >>"$capture_tmp"
 # Nix's program ends by evaluating the shell hook; only then go back.
 cat >>"$capture_tmp" <<'LEAVE'
 
-if ! builtin cd -- "$__codetracer_capture_caller"; then
-    # Fail the source so a `source … && <command>` consumer does not run its
-    # command in a directory it did not choose.
-    printf 'CodeTracer: could not return to %s after entering the captured environment\n' "$__codetracer_capture_caller" >&2
-    unset __codetracer_capture_checkout __codetracer_capture_caller __codetracer_capture_oldpwd __codetracer_capture_oldpwd_set
+# Fail the source when the caller's directory is gone, so a
+# `source … && <command>` consumer does not run its command somewhere else.
+# The caller's RETURN trap goes back at top level (see __codetracer_capture_leave).
+if __codetracer_capture_leave; then
+    eval "${__codetracer_capture_return_trap:-trap - RETURN}"
+    unset __codetracer_capture_return_trap
+else
+    eval "${__codetracer_capture_return_trap:-trap - RETURN}"
+    unset __codetracer_capture_return_trap
     return 1
 fi
-if [ -n "$__codetracer_capture_oldpwd_set" ]; then
-    OLDPWD=$__codetracer_capture_oldpwd
-else
-    unset OLDPWD
-fi
-unset __codetracer_capture_checkout __codetracer_capture_caller __codetracer_capture_oldpwd __codetracer_capture_oldpwd_set
 LEAVE
 mv -f -- "$capture_tmp" "$destination"

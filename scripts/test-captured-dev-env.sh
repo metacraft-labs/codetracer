@@ -141,6 +141,61 @@ if [ "$#" -eq 0 ]; then
 	grep -F "CodeTracer: the checkout this environment was captured in is missing: $scratch/removed-checkout" \
 		"$scratch/moved.err" >/dev/null || fail 'the missing-checkout refusal does not name the checkout'
 
+	# The shell hook ends the source early with `return 1` when it cannot finish
+	# repository setup (the Git checks it installs, see nix/shells/ci-base.nix).
+	# That path cannot be provoked here without breaking this checkout's Git
+	# configuration, so the hook is made to end exactly that way: the copy
+	# appends the hook's own `return 1 2>/dev/null || exit 1` to it, just before
+	# Nix evaluates it. Whether the hook fails or finishes, the caller must get
+	# its directory, OLDPWD and RETURN trap back (none when it had none), with
+	# or without `set -T`, and no function, variable or trap of the capture may
+	# be left behind to fire on a later source or function return. A caller
+	# without a RETURN trap is the common case and must be covered: without
+	# `set -T` Bash undoes a RETURN-trap change made inside an untraced
+	# function, so a capture that reset its trap there would leave it behind.
+	# shellcheck disable=SC2016
+	[ "$(grep -cFx 'eval "${shellHook:-}"' "$capture")" -eq 1 ] ||
+		fail 'Nix no longer ends the capture by evaluating the shell hook once'
+	# shellcheck disable=SC2016
+	sed 's|^eval "\${shellHook:-}"$|shellHook="${shellHook:-}"$'"'"'\\necho "simulated shell-hook failure" >\&2; return 1 2>/dev/null \|\| exit 1'"'"'\n&|' \
+		"$capture" >"$scratch/hook-fails.sh"
+	for hook in fails finishes; do
+		case "$hook" in
+		fails) sourced="$scratch/hook-fails.sh" expected_status=1 ;;
+		finishes) sourced=$capture expected_status=0 ;;
+		esac
+		for tracing in +T -T; do
+			for caller_trap in ': caller trap' ''; do
+				# shellcheck disable=SC2016
+				if ! (cd "$outside" && env -i HOME="$HOME" PATH="$base_path" CODETRACER_HOME="$scratch/ct-home" \
+					NIX_CONFIG="${NIX_CONFIG:-}" "$bash_bin" --noprofile --norc -c '
+                set "$3"
+                [ -z "$5" ] || trap "$5" RETURN
+                caller_trap=$(trap -p RETURN)
+                OLDPWD=/caller-oldpwd
+                source "$1" >/dev/null
+                status=$?
+                [ "$status" -eq "$4" ] || { printf "source returned %s\n" "$status" >&2; exit 41; }
+                [ "$PWD" = "$2" ] || { printf "cwd not restored: %s\n" "$PWD" >&2; exit 42; }
+                [ "$OLDPWD" = /caller-oldpwd ] || { printf "OLDPWD not restored: %s\n" "$OLDPWD" >&2; exit 43; }
+                [ "$(trap -p RETURN)" = "$caller_trap" ] || { printf "RETURN trap not restored: %s\n" "$(trap -p RETURN)" >&2; exit 44; }
+                ! declare -F | grep -F __codetracer_capture >&2 || exit 45
+                ! compgen -v | grep -F __codetracer_capture >&2 || exit 46
+            ' captured-env-test "$sourced" "$outside" "$tracing" "$expected_status" "$caller_trap") 2>"$scratch/hook.err"; then
+					cat "$scratch/hook.err" >&2
+					fail "a shell hook that $hook (set $tracing, caller RETURN trap '$caller_trap') left the caller outside its directory or state"
+				fi
+				if grep -F __codetracer_capture "$scratch/hook.err"; then
+					fail "the capture's own trap ran outside it (hook $hook, set $tracing, caller RETURN trap '$caller_trap')"
+				fi
+				if [ "$hook" = fails ]; then
+					grep -F 'simulated shell-hook failure' "$scratch/hook.err" >/dev/null ||
+						fail 'the simulated shell-hook failure did not run'
+				fi
+			done
+		done
+	done
+
 	cp "$capture" "$scratch/expected"
 	if bash "$repo/scripts/capture-dev-env.sh" "$capture" "$scratch/missing-flake" >"$scratch/failed.out" 2>"$scratch/failed.err"; then
 		fail 'a missing flake unexpectedly produced a capture'
@@ -149,4 +204,4 @@ if [ "$#" -eq 0 ]; then
 	cmp "$scratch/expected" "$capture" || fail 'failed capture replaced the previous environment'
 	[ -z "$(find "$scratch" -name '*.tmp.*' -print)" ] || fail 'failed capture left a temporary file'
 fi
-printf '%s\n' 'PASS: captured dev environment enters Bash fully from any directory and refuses zsh and a missing checkout before assignments'
+printf '%s\n' 'PASS: captured dev environment enters Bash fully from any directory and restores the caller after a failing hook, and refuses zsh and a missing checkout before assignments'
