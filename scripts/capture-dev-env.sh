@@ -70,29 +70,90 @@ __codetracer_capture_leave() {
     fi
     unset __codetracer_capture_checkout __codetracer_capture_caller __codetracer_capture_oldpwd \
         __codetracer_capture_oldpwd_set __codetracer_capture_depth
-    unset -f __codetracer_capture_leave
+    unset -f __codetracer_capture_leave __codetracer_capture_action_of
     return "$status"
 }
+# Print the action of a RETURN trap given as `trap -p` prints it,
+# `trap -- 'ACTION' RETURN`, by evaluating that text with the builtin shadowed.
+# Call it only in a subshell whose RETURN trap is cleared: under `set -T` a
+# subshell inherits the RETURN trap, which would run when the shadow returns
+# (printing into the result), and the shadow must not outlive the subshell.
+__codetracer_capture_action_of() {
+    trap() { printf '%s' "$2"; }
+    eval "$1"
+}
 __codetracer_capture_depth=${#BASH_SOURCE[@]}
-# Without `set -T` Bash hides the caller's RETURN trap while a file is sourced
-# and restores it afterwards unless the file set one; this then reads empty and
-# `trap - RETURN` below lets Bash restore it. With `set -T` the caller's trap is
-# visible here and is put back explicitly.
+# The caller's RETURN trap, as `trap -p` prints it (empty when it has none), and
+# the action alone. A sourced file sees the caller's trap. Bash would run that
+# action when this source ends, and under `set -T` also when a function the
+# Nix program calls returns; this wrapper's trap stands in for it meanwhile, so
+# the trap below runs the action at those same points.
 __codetracer_capture_return_trap=$(trap -p RETURN)
+__codetracer_capture_return_action=$(
+    builtin trap - RETURN
+    __codetracer_capture_action_of "$__codetracer_capture_return_trap"
+)
 # Bash runs a RETURN trap when a sourced file finishes, early `return` included
 # (https://www.gnu.org/software/bash/manual/bash.html#index-trap). Under
 # `set -T` it also runs when a function returns, the Nix program's and this
 # wrapper's own included; those run at a BASH_SOURCE depth no lower than this
 # file's, and only the end of the source, below it, is ours. Once the wrapper
 # has left, the depth variable is gone and the comparison with 0 is false.
-trap 'if [ "${#BASH_SOURCE[@]}" -lt "${__codetracer_capture_depth:-0}" ]; then
+# On the early-return path Bash does not run the caller's restored trap for
+# this source, so it is run here; on the normal path the end-of-file block
+# restores it before the source ends and Bash runs it itself.
+# For a function return the caller's action runs with the `$?` Bash gives the
+# trap ((exit N) sets it without tripping `set -e`: only the last command of an
+# `||` list can). The action may itself change the RETURN trap (a one-shot
+# `trap - RETURN`, say), which replaces this one; the change is then taken as
+# the caller's trap, for later returns and for the end of the source, and this
+# trap is put back, or a later early return would strand the caller.
+# Commands called from inside a RETURN trap do not run it again.
+trap '__codetracer_capture_status=$?
+if [ "${#BASH_SOURCE[@]}" -lt "${__codetracer_capture_depth:-0}" ]; then
     __codetracer_capture_leave
     eval "${__codetracer_capture_return_trap:-trap - RETURN}"
-    unset __codetracer_capture_return_trap
+    unset __codetracer_capture_status __codetracer_capture_self __codetracer_capture_return_now
+    eval "${__codetracer_capture_return_action-}"
+    unset __codetracer_capture_return_trap __codetracer_capture_return_action
+elif [ -n "${__codetracer_capture_return_action-}" ] && [ "${FUNCNAME[0]-}" != __codetracer_capture_leave ]; then
+    if [ "$__codetracer_capture_status" -eq 0 ]; then
+        eval "$__codetracer_capture_return_action"
+    else
+        (exit "$__codetracer_capture_status") || eval "$__codetracer_capture_return_action"
+    fi
+    __codetracer_capture_return_now=$(trap -p RETURN)
+    if [ "$__codetracer_capture_return_now" != "$__codetracer_capture_self" ]; then
+        __codetracer_capture_return_trap=$__codetracer_capture_return_now
+        __codetracer_capture_return_action=$(
+            builtin trap - RETURN
+            __codetracer_capture_action_of "$__codetracer_capture_return_now"
+        )
+        eval "$__codetracer_capture_self"
+    fi
 fi' RETURN
+# This wrapper's trap as `trap -p` prints it, to tell it from a replacement.
+__codetracer_capture_self=$(trap -p RETURN)
 ENTER
 cd "$repo"
-nix print-dev-env --no-write-lock-file "$@" >>"$capture_tmp"
+nix_program=$(mktemp "${destination}.tmp.XXXXXX")
+trap 'rm -f -- "$capture_tmp" "$nix_program"' EXIT
+nix print-dev-env --no-write-lock-file "$@" >"$nix_program"
+# The wrapper returns the caller to its directory through its RETURN trap when
+# the shell hook ends the source early; a RETURN trap set by the Nix program
+# would replace it and silently lose that. Refuse such a program at capture
+# time rather than publish a capture that would strand its caller.
+# The check reads lines, so it matches `trap … RETURN` on one line (the signal
+# quoted or not) and the closing line of a multi-line action, `…' RETURN`;
+# Bash also accepts the signal name in lowercase, so it is matched in any case.
+return_signal='[Rr][Ee][Tt][Uu][Rr][Nn]([^[:alnum:]_]|$)'
+return_trap_pattern="(^|[^[:alnum:]_])trap[[:space:]].*[[:space:]]['\"]?$return_signal"
+return_trap_pattern+="|['\"][[:space:]]+['\"]?$return_signal"
+if grep -nE "$return_trap_pattern" "$nix_program" >&2; then
+	printf '%s\n' 'capture-dev-env: the development shell sets a RETURN trap (lines above); the captured environment needs that trap to restore its caller, so it was not written' >&2
+	exit 1
+fi
+cat "$nix_program" >>"$capture_tmp"
 # Nix's program ends by evaluating the shell hook; only then go back.
 cat >>"$capture_tmp" <<'LEAVE'
 
@@ -101,10 +162,12 @@ cat >>"$capture_tmp" <<'LEAVE'
 # The caller's RETURN trap goes back at top level (see __codetracer_capture_leave).
 if __codetracer_capture_leave; then
     eval "${__codetracer_capture_return_trap:-trap - RETURN}"
-    unset __codetracer_capture_return_trap
+    unset __codetracer_capture_return_trap __codetracer_capture_return_action \
+        __codetracer_capture_status __codetracer_capture_self __codetracer_capture_return_now
 else
     eval "${__codetracer_capture_return_trap:-trap - RETURN}"
-    unset __codetracer_capture_return_trap
+    unset __codetracer_capture_return_trap __codetracer_capture_return_action \
+        __codetracer_capture_status __codetracer_capture_self __codetracer_capture_return_now
     return 1
 fi
 LEAVE
