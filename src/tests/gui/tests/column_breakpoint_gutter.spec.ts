@@ -34,6 +34,7 @@ import * as childProcess from "node:child_process";
 import { test, expect, readyOnEntryTest as readyOnEntry } from "../lib/fixtures";
 import { LayoutPage } from "../page-objects/layout-page";
 import { EditorPane } from "../page-objects/panes/editor/editor-pane";
+import { getColumnMarkerDecorations } from "../lib/column-aware-helpers";
 
 // ---------------------------------------------------------------------------
 // Fixture preparation — mirrors `column_breakpoint.spec.ts`'s
@@ -199,11 +200,6 @@ async function getCurrentLine(editor: EditorPane): Promise<number | null> {
   });
 }
 
-interface ClickTarget {
-  x: number;
-  y: number;
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -279,7 +275,7 @@ test.describe("M6 — Column-aware gutter / text click affordance", () => {
     expect(editor, "program.js editor tab should be open").toBeDefined();
     if (!editor) return;
 
-    // Click the gutter HTML on line 2 — the canonical legacy path
+    // Press the glyph column on line 2 — the canonical legacy path
     // verified by the M1 spec.  The breakpoint MUST carry column = 0
     // (the legacy sentinel) so the M1 back-compat invariant holds
     // end-to-end.
@@ -292,7 +288,7 @@ test.describe("M6 — Column-aware gutter / text click affordance", () => {
     expect(bp, "legacy line-only breakpoint must be registered").not.toBeNull();
     expect(bp!.column).toBe(0);
 
-    // The gutter click MUST NOT emit a column-anchored decoration on
+    // The glyph press MUST NOT emit a column-anchored decoration on
     // the legacy-line — that would lie about the (absent) bound
     // column.
     const decorations = await getColumnMarkerDecorations(

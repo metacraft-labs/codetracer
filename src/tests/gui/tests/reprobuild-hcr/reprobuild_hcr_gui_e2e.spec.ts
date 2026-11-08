@@ -3,6 +3,7 @@ import type { Locator, Page, TestInfo } from "@playwright/test";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { EditorPane } from "../../page-objects/panes/editor/editor-pane";
 import { retry } from "../../lib/retry-helpers";
+import { glyphCentre } from "../../lib/glyph-column";
 import {
   clearHcrTargetEnv,
   createHcrRunPaths,
@@ -230,25 +231,39 @@ async function enableBreakpoint(
   line: number,
 ): Promise<void> {
   await editor.revealLine(line);
-  const editorLine = editor.lineByNumber(line);
   if (!(await editor.hasBreakpointAt(line))) {
-    {
-      try {
-        await editor.pressGlyph(line);
-      } catch {
-        // Fall through to the DOM click below.
-      }
+    try {
+      await editor.pressGlyph(line);
+    } catch {
+      // Fall through to the DOM press below.
     }
     if (!(await editor.hasBreakpointAt(line))) {
       try {
-        await gutter.evaluate((element) =>
-          element.dispatchEvent(
-            new MouseEvent("click", {
-              bubbles: true,
-              cancelable: true,
-              view: window,
-            }),
-          ),
+        // The same press delivered as DOM events on the element under the
+        // glyph cell, for when the pointer route does not reach Monaco's
+        // mouse handler. The glyph column's marks are decorations, so there
+        // is no per-line element to click; Monaco maps the coordinates back
+        // to the glyph margin of `line`.
+        const { x, y } = await glyphCentre(editor.page, line);
+        await editor.page.evaluate(
+          ({ x, y }) => {
+            const element = document.elementFromPoint(x, y);
+            if (!element) return;
+            for (const type of ["mousedown", "mouseup"]) {
+              element.dispatchEvent(
+                new MouseEvent(type, {
+                  bubbles: true,
+                  cancelable: true,
+                  view: window,
+                  button: 0,
+                  buttons: type === "mousedown" ? 1 : 0,
+                  clientX: x,
+                  clientY: y,
+                }),
+              );
+            }
+          },
+          { x, y },
         );
       } catch {
         // Monaco virtualizes offscreen rows; fall through to the same
