@@ -641,10 +641,22 @@ jobs:
         # native ccbe5866 and js 634bce37 records: neither names it; it only
         # appears in records whose publisher's workspace happened to carry the
         # isonim project), so a bare entry would fail this step and it takes
-        # the same flake.lock SHA shape.  isonim-gpui / nim-termctl / nim-pty
-        # are on the same `--path` list but nothing a tup rule builds imports
-        # them (only the terminal and GPUI front-ends do); they stay
-        # unprovisioned and require-siblings.sh keeps them advisory.
+        # the same flake.lock SHA shape.  isonim-gpui / nim-termctl are on the
+        # same `--path` list but nothing a tup rule builds imports them (only
+        # the terminal and GPUI front-ends do); they stay unprovisioned and
+        # require-siblings.sh keeps them advisory.
+        #
+        # NIM-PTY.  It was in that advisory list until 2026-11-08, and was
+        # wrong to be from 4e856d570 on: `ct` itself compiles
+        # src/common/shell_session.nim (for `ct shell-session`), which imports
+        # `nim_pty`.  Without it every arm of this gate died in `Build the
+        # codetracer-desktop core` with
+        #
+        #   src/common/shell_session.nim(40, 8) Error: cannot open file: nim_pty
+        #
+        # (codetracer-beam-recorder PR #16 at bdfa491, job 128550018745).
+        # require-siblings.sh lists it as REQUIRED since the fix, so
+        # ci/test/build-once-workspace-test.sh fails if this block drops it.
         #
         # THE PROPER FIX IS STILL IN ANOTHER REPOSITORY, and this is a bridge to
         # it, not a replacement for it: declare `isonim`, `isonim-tui` and
@@ -718,6 +730,11 @@ jobs:
             # repos, whose repro.lock need not pin it. It is a flake input, so the
             # SHA is the one flake.lock pins.
             test-certificates-tools=a726655886808d1062390d05c50f4fce03150eb4
+            # Required by scripts/require-siblings.sh (`ct shell-session`
+            # imports `nim_pty`; see "NIM-PTY" above). SHA, not bare, for the
+            # same reason as test-certificates-tools: recorder repos' locks need
+            # not pin it. It is a flake input, so the SHA is flake.lock's.
+            nim-pty=2845abd58dd2073475177301590c8b51aa5c9094
 
       - name: Check the workspace has the shape the driver expects
         # Cheap, and it turns the one class of failure a local rehearsal cannot

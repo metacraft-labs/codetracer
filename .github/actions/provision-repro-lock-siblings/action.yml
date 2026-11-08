@@ -130,7 +130,10 @@ description: |
   only acceptable route.) Today the GPUI and TUI frontends import them
   (``just build-gpui``, ``just build-tui``, ``just test-tui``) and the plat37
   shim gate reads ``isonim-gpui/tools``; ``just build-once`` compiles none of
-  that, so ``scripts/require-siblings.sh`` keeps them ADVISORY. When this was
+  that for ``isonim-gpui`` and ``nim-termctl``, so
+  ``scripts/require-siblings.sh`` keeps those two ADVISORY. ``nim-pty`` is
+  REQUIRED there since 2026-11-08: ``ct`` itself imports ``nim_pty`` through
+  ``src/common/shell_session.nim`` (``ct shell-session``). When this was
   written nothing compiled against them. If a sibling ever does become a real
   dependency, the fix is to declare it in ``repro.nim``/``repro.lock`` so the
   lock pins it -- not to clone it here off a branch tip.

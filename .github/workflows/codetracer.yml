@@ -4863,6 +4863,8 @@ jobs:
             test-certificates-tools
             nim-shm-queue
             nim-shm-gset
+            # `ct shell-session` imports nim_pty (src/common/shell_session.nim).
+            nim-pty
 
       - name: Build CodeTracer-Setup.exe
         shell: bash

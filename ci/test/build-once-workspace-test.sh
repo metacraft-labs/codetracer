@@ -67,10 +67,12 @@
 #      launcher-recorder-e2e logs for d05e45f9 contain the recipe failure and
 #      not one word of the report above.
 #   5. Every sibling the `ct` compile imports (io-mon, nim-stackable-hooks, via
-#      src/ct_test/incremental/io_mon_capture.nim) is in the REQUIRED tier:
-#      the preflight accepts a workspace of exactly the required siblings and
-#      refuses one missing either repo, by name, even when only the repo's
-#      `*_SRC` variable (which tup strips) points at a copy.
+#      src/ct_test/incremental/io_mon_capture.nim; nim-pty, via
+#      src/common/shell_session.nim) is in the REQUIRED tier: the import chain
+#      from src/ct/codetracer.nim to the importing module still holds, and the
+#      preflight accepts a workspace of exactly the required siblings and
+#      refuses one missing any of those repos, by name, even when only the
+#      repo's `*_SRC` variable (which tup strips) points at a copy.
 #
 # # No mocks
 #
@@ -533,34 +535,98 @@ fi
 # -----------------------------------------------------------------------------
 # 6. Every sibling the `ct` compile imports is in the REQUIRED tier.
 #
-# The defect being pinned (codetracer-pm issue 2026-10-30-require-siblings-
-# calls-io-mon-advisory-but-build-once-cannot-compile-ct-without-it): io-mon
-# and nim-stackable-hooks sat in the ADVISORY tier, so a workspace without them
-# passed the preflight ("optional sibling repo(s) are missing ... The build
-# continues") and then failed in tup on `cannot open file: io_mon/depfile`.
-# `src/ct_test/incremental/io_mon_capture.nim` imports both unconditionally and
-# is reached from every `ct` build (src/ct/codetracer.nim ->
-# ../ct_test/incremental_cli -> incremental/io_mon_capture).
+# The defects being pinned:
 #
-# Executed, not grepped: the real preflight runs against a throwaway workspace
-# holding the probe file of every REQUIRED row and nothing else. It must
+#   * codetracer-pm issue 2026-10-30-require-siblings-calls-io-mon-advisory-
+#     but-build-once-cannot-compile-ct-without-it: io-mon and
+#     nim-stackable-hooks sat in the ADVISORY tier, so a workspace without them
+#     passed the preflight ("optional sibling repo(s) are missing ... The build
+#     continues") and then failed in tup on `cannot open file: io_mon/depfile`.
+#     `src/ct_test/incremental/io_mon_capture.nim` imports both
+#     unconditionally and is reached from every `ct` build.
+#   * codetracer-pm issue 2026-11-08-ct-core-imports-nim-pty-which-the-
+#     sibling-check-calls-optional: the same mistake for nim-pty. Since
+#     4e856d570 `src/common/shell_session.nim` imports `nim_pty`, and `ct`
+#     compiles it for `ct shell-session` (src/ct/codetracer.nim ->
+#     shell_session_command -> ../common/shell_session). The preflight still
+#     called nim-pty a TUI-only advisory sibling, the launcher-recorder-e2e
+#     workflow did not clone it, and its `Build the codetracer-desktop core`
+#     step died on `shell_session.nim(40, 8) Error: cannot open file: nim_pty`.
+#
+# Statically checked first: each row carries the chain of imports from
+# src/ct/codetracer.nim to the module that imports the sibling, and every link
+# is verified against the source -- the importing file names the next module,
+# and that module resolves to the next file in the chain. So a row cannot
+# outlive the imports it stands for, and a reader can see WHY `ct` needs it.
+#
+# Then executed, not grepped: the real preflight runs against a throwaway
+# workspace holding the probe file of every REQUIRED row and nothing else. It
+# must
 #   a. accept that workspace (the control -- otherwise b proves nothing, and it
 #      also pins that nim-shm-queue / nim-shm-gset, which `ct`'s
 #      `io_mon/depfile` closure does not reach, are NOT required);
 #   b. refuse it, naming the repo, once one of CT_IMPORT_SIBLINGS is removed;
 #   c. still refuse when only the repo's *_SRC variable points at a copy,
 #      because tup strips those variables before `config.nims` reads them.
-# The module list is checked against io_mon_capture.nim's imports first, so
-# the list below cannot outlive the imports it stands for.
+#      nim-pty has no such variable (config.nims and src/Tuprules.tup reach it
+#      only as ../nim-pty/src), so its row leaves the column empty and c does
+#      not apply to it.
 # -----------------------------------------------------------------------------
 echo "every sibling the ct compile imports is a REQUIRED sibling"
 
-readonly CT_IMPORT_MODULE="$REPO_ROOT/src/ct_test/incremental/io_mon_capture.nim"
-# repo | module imported by CT_IMPORT_MODULE | env var tup does not export
+# repo | module the chain's last file imports | env var tup does not export
+#   (empty: none exists) | import chain
+#
+# The chain is space-separated `<file>:<import spelling>` links, starting at
+# src/ct/codetracer.nim. Each spelling, resolved against its file's directory,
+# must name the next link's file; the last link's spelling is the sibling's
+# module.
 CT_IMPORT_SIBLINGS=(
-	"io-mon|io_mon/depfile|IO_MON_SRC"
-	"nim-stackable-hooks|stackable_hooks/propagation|NIM_STACKABLE_HOOKS_SRC"
+	"io-mon|io_mon/depfile|IO_MON_SRC|src/ct/codetracer.nim:../ct_test/incremental_cli src/ct_test/incremental_cli.nim:incremental/io_mon_capture src/ct_test/incremental/io_mon_capture.nim:io_mon/depfile"
+	"nim-stackable-hooks|stackable_hooks/propagation|NIM_STACKABLE_HOOKS_SRC|src/ct/codetracer.nim:../ct_test/incremental_cli src/ct_test/incremental_cli.nim:incremental/io_mon_capture src/ct_test/incremental/io_mon_capture.nim:stackable_hooks/propagation"
+	"nim-pty|nim_pty||src/ct/codetracer.nim:shell_session_command src/ct/shell_session_command.nim:../common/shell_session src/common/shell_session.nim:nim_pty"
 )
+
+# True when <file> imports <spelling>: on a non-comment line, as a whole token
+# of an `import` statement, a bracketed `std/[...]` list, or a line of a
+# multi-line `import` block (src/ct/codetracer.nim uses one). Indentation is
+# allowed, because `ct shell-session` is imported under `when not defined(js)`.
+file_imports() { # <file> <spelling>
+	local pattern
+	pattern="$(printf '%s' "$2" | sed 's/[.]/\\./g')"
+	# Herestring, not a pipe: `grep -q` stops at its first match, and under
+	# `pipefail` the SIGPIPE that kills a still-writing `sed` would turn a
+	# match into a failure (see the note on job scanning in assertion 3).
+	grep -qE "(^|[[:space:],\[])${pattern}([[:space:],]|\]|$)" <<<"$(sed 's/#.*//' "$1")"
+}
+
+# Echoes "" when the chain holds, else the first broken link, described.
+check_import_chain() { # <module> <chain>
+	local module="$1" link file spelling expected="" prev_dir=""
+	local -a links
+	read -r -a links <<<"$2"
+	for link in "${links[@]}"; do
+		file="${link%%:*}"
+		spelling="${link#*:}"
+		if [ -n "$expected" ] && [ "$file" != "$expected" ]; then
+			printf '%s' "the chain jumps: the previous link resolves to $expected, not $file"
+			return
+		fi
+		if [ ! -f "$REPO_ROOT/$file" ]; then
+			printf '%s' "$file does not exist"
+			return
+		fi
+		if ! file_imports "$REPO_ROOT/$file" "$spelling"; then
+			printf '%s' "$file no longer imports $spelling"
+			return
+		fi
+		prev_dir="$(dirname "$file")"
+		expected="$(realpath -m --relative-to="$REPO_ROOT" "$REPO_ROOT/$prev_dir/$spelling.nim")"
+	done
+	if [ "$spelling" != "$module" ]; then
+		printf '%s' "the chain ends at $spelling, not at the sibling module $module"
+	fi
+}
 
 # Build a workspace with every REQUIRED row's probe present, minus $2 (a repo
 # name, or empty). Echoes the workspace root.
@@ -606,13 +672,16 @@ run_tier_preflight() { # <workspace root> [VAR=value...]
 }
 
 for entry in "${CT_IMPORT_SIBLINGS[@]}"; do
-	IFS='|' read -r name module _ <<<"$entry"
-	if grep -qE "^import[[:space:]]+${module}([[:space:]]|$)" "$CT_IMPORT_MODULE"; then
-		ok "io_mon_capture.nim still imports $module (from $name)"
+	IFS='|' read -r name module _ chain <<<"$entry"
+	broken="$(check_import_chain "$module" "$chain")"
+	if [ -z "$broken" ]; then
+		ok "src/ct/codetracer.nim still reaches \`import $module\` (from $name): ${chain// / -> }"
 	else
-		fail "io_mon_capture.nim still imports $module (from $name)" \
-			"the import is gone, so this entry of CT_IMPORT_SIBLINGS no longer stands" \
-			"for anything -- drop it here, and reconsider $name's tier in the preflight."
+		fail "src/ct/codetracer.nim still reaches \`import $module\` (from $name)" \
+			"$broken." \
+			"This entry of CT_IMPORT_SIBLINGS no longer stands for what it says: re-trace" \
+			"the chain, or, if \`ct\` really stopped importing $module, drop the entry and" \
+			"reconsider $name's tier in the preflight."
 	fi
 done
 
@@ -628,7 +697,7 @@ else
 fi
 
 for entry in "${CT_IMPORT_SIBLINGS[@]}"; do
-	IFS='|' read -r name module var <<<"$entry"
+	IFS='|' read -r name module var _ <<<"$entry"
 	omit_ws="$(make_tier_workspace "without-$name" "$name")"
 	omit_out="$(run_tier_preflight "$omit_ws")"
 	omit_rc=$?
@@ -644,6 +713,10 @@ for entry in "${CT_IMPORT_SIBLINGS[@]}"; do
 	fi
 
 	# A copy of the repo reachable ONLY through the variable tup strips.
+	if [ -z "$var" ]; then
+		echo "  skip $name has no *_SRC override variable to test (the build reaches it only as ../$name/src)"
+		continue
+	fi
 	alias_dir="$tier_fixture_root/alias-$name/src"
 	mkdir -p "$alias_dir/$(dirname "$module")"
 	: >"$alias_dir/$module.nim"
