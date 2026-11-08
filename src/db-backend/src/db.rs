@@ -3924,6 +3924,17 @@ impl MaterializedReplaySession {
                 // pre-reload step reads pre-reload text.
                 self.reader.path_version_ordinal(step_record.path_id),
             );
+            if source_origin != SourceOrigin::Unavailable {
+                line_text = complete_statement(line_text, |next| {
+                    let (text, from) = expr_loader.get_source_line_v2(
+                        &probe_path,
+                        row + next,
+                        meta_dat_sources_root,
+                        self.reader.path_version_ordinal(step_record.path_id),
+                    );
+                    (from != SourceOrigin::Unavailable).then_some(text)
+                });
+            }
             // Pre-execution snapshot fallback: when the line at
             // `last_change_step` does not parse as an assignment that
             // names `current_var_name`, walk to the immediately
@@ -4136,6 +4147,16 @@ impl MaterializedReplaySession {
                 && !line_mutates_variable(&line_text, &current_var_name)
             {
                 if first_sighting {
+                    // Seen first at this frame's start, under a name the frame never
+                    // assigns: a global, written by an enclosing frame. Its origin is
+                    // there.
+                    if let Some((outer_frame, outer_step)) =
+                        self.enclosing_frame_holding(&current_var_name, current_frame)
+                    {
+                        current_frame = outer_frame;
+                        current_step = outer_step;
+                        continue;
+                    }
                     terminator = Terminator::new(TerminatorKind::RecordingStart);
                     terminator.expression = current_var_name.clone();
                     break;
@@ -4659,6 +4680,22 @@ impl MaterializedReplaySession {
         ))
     }
 
+    /// The frame that called `frame`, and its last step before the call, when
+    /// `var_name` is recorded there too: where a global seen first at
+    /// `frame`'s start was written.
+    fn enclosing_frame_holding(&self, var_name: &str, frame: CallKey) -> Option<(CallKey, StepId)> {
+        let call = self.reader.call(frame)?;
+        let outer = call.parent_key;
+        if outer.0 < 0 || outer == frame {
+            return None;
+        }
+        let step = self.nearest_prior_step_in_frame(call.step_id, outer)?;
+        let vars = self.reader.variables_at(step).unwrap_or(&[]);
+        vars.iter()
+            .any(|v| self.var_name_matches(v.variable_id, var_name))
+            .then_some((outer, step))
+    }
+
     fn nearest_prior_step_in_frame(&self, from_step: StepId, frame: CallKey) -> Option<StepId> {
         let mut step_id = from_step.0 - 1;
         while step_id >= 0 {
@@ -4855,6 +4892,17 @@ impl MaterializedReplaySession {
                     self.reader.path_version_ordinal(step.path_id),
                 );
                 if origin != SourceOrigin::Unavailable && !line_text.trim().is_empty() {
+                    // A statement written over several lines (`X = [`, its items, `]`)
+                    // is read whole, so the classifier sees the assignment.
+                    let line_text = complete_statement(line_text, |next| {
+                        let (text, from) = expr_loader.get_source_line_v2(
+                            &probe_path.to_path_buf(),
+                            row + next,
+                            meta_dat_sources_root,
+                            self.reader.path_version_ordinal(step.path_id),
+                        );
+                        (from != SourceOrigin::Unavailable).then_some(text)
+                    });
                     return Some((sid, line_text, origin));
                 }
             } else if step.call_key.0 < frame.0 {
@@ -5237,6 +5285,52 @@ fn value_records_equal(a: &ValueRecord, b: &ValueRecord) -> bool {
         (ValueRecord::Raw { r: x, .. }, ValueRecord::Raw { r: y, .. }) => x == y,
         _ => false,
     }
+}
+
+/// `first`, and the lines after it while its brackets are still open: one
+/// statement, joined. `more(k)` reads the line `k` after the first, `None`
+/// past the end. Strings are skipped so a bracket inside one does not count;
+/// a statement still open after 64 lines is returned as its first line.
+fn complete_statement(first: String, mut more: impl FnMut(usize) -> Option<String>) -> String {
+    fn depth_after(text: &str, mut depth: i64) -> i64 {
+        let mut quote: Option<char> = None;
+        let mut escaped = false;
+        for c in text.chars() {
+            if let Some(q) = quote {
+                if escaped {
+                    escaped = false;
+                } else if c == '\\' {
+                    escaped = true;
+                } else if c == q {
+                    quote = None;
+                }
+                continue;
+            }
+            match c {
+                '"' | '\'' => quote = Some(c),
+                '#' => break,
+                '(' | '[' | '{' => depth += 1,
+                ')' | ']' | '}' => depth -= 1,
+                _ => {}
+            }
+        }
+        depth
+    }
+    let mut depth = depth_after(&first, 0);
+    if depth <= 0 {
+        return first;
+    }
+    let mut joined = first.trim_end().to_string();
+    for k in 1..=64 {
+        let Some(next) = more(k) else { break };
+        depth = depth_after(&next, depth);
+        joined.push(' ');
+        joined.push_str(next.trim());
+        if depth <= 0 {
+            return joined;
+        }
+    }
+    first
 }
 
 /// Whether `line` changes `name` through its own members: `name.append(v)`,

@@ -2108,8 +2108,9 @@ fn test_origin_chain_of_a_dunder_never_assigned_has_no_hop() {
 fn test_origin_chain_of_a_list_is_its_mutation_then_its_assignment() {
     let (db, tmpdir) = dunder_recipe();
     let chain = run_chain(db, "results", 4, tmpdir.path());
-    assert_eq!(chain.hops.len(), 2, "hops: {:?}", chain.hops);
+    assert!(!chain.hops.is_empty(), "no hop at all");
     assert_eq!(chain.hops[0].source_expr, "results.append(value)");
+    assert_eq!(chain.hops.len(), 2, "hops: {:?}", chain.hops);
     assert_eq!(chain.hops[0].target_expr, "results");
     assert_eq!(chain.hops[0].location.line, 3);
     assert_eq!(chain.hops[1].source_expr, "[]");
@@ -2138,4 +2139,61 @@ fn test_origin_chain_of_a_change_on_another_variables_line_is_unknown() {
     assert_eq!(chain.hops.len(), 1, "hops: {:?}", chain.hops);
     assert_eq!(chain.hops[0].target_expr, "n");
     assert_eq!(chain.hops[0].kind, OriginKind::Unknown);
+}
+
+#[test]
+fn test_origin_chain_of_a_global_read_in_a_function_is_its_module_write() {
+    // `calc`'s shape: a module global, a function that never assigns it and
+    // begins with an assignment to its own local. The global's origin is the
+    // module's write, not the function's first line and not "no write".
+    let g = || ("G", list_value(&[1, 2]));
+    let (db, tmpdir) = build_trace(Recipe {
+        source_path: "fixture.py",
+        source: "G = [1, 2]\ndef main():\n    results = []\n    print(G)\nmain()\n",
+        function_name: "<module>",
+        steps: vec![
+            (1, vec![]),
+            (2, vec![g()]),
+            (5, vec![g()]),
+            (3, vec![g()]),
+            (4, vec![g(), ("results", list_value(&[]))]),
+        ],
+        extra_calls: vec![CallShape {
+            function_name: "main",
+            step_range: 3..5,
+            args: vec![],
+        }],
+    });
+    let chain = run_chain(db, "G", 4, tmpdir.path());
+    assert_eq!(chain.hops.len(), 1, "hops: {:?}", chain.hops);
+    assert_eq!(chain.hops[0].target_expr, "G");
+    assert_eq!(chain.hops[0].location.line, 1);
+}
+
+#[test]
+fn test_origin_chain_reads_a_statement_written_over_several_lines() {
+    // `EXPRESSIONS = [` … `]`: the write is the whole statement, and its value
+    // is first recorded on the line after it.
+    let g = || ("EXPRESSIONS", list_value(&[1, 2]));
+    let (db, tmpdir) = build_trace(Recipe {
+        source_path: "fixture.py",
+        source: "EXPRESSIONS = [\n    1,\n    2,\n]\ndef main():\n    results = []\n    print(EXPRESSIONS)\nmain()\n",
+        function_name: "<module>",
+        steps: vec![
+            (1, vec![]),
+            (5, vec![g()]),
+            (8, vec![g()]),
+            (6, vec![g()]),
+            (7, vec![g(), ("results", list_value(&[]))]),
+        ],
+        extra_calls: vec![CallShape {
+            function_name: "main",
+            step_range: 3..5,
+            args: vec![],
+        }],
+    });
+    let chain = run_chain(db, "EXPRESSIONS", 4, tmpdir.path());
+    assert_eq!(chain.hops.len(), 1, "hops: {:?}", chain.hops);
+    assert_eq!(chain.hops[0].location.line, 1);
+    assert!(chain.hops[0].source_expr.starts_with('['), "source: {:?}", chain.hops[0].source_expr);
 }

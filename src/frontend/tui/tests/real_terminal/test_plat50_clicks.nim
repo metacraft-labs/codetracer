@@ -559,13 +559,16 @@ suite "PLAT-50 on a real terminal: Variables and the timeline (K27, K28, K30)":
       if hopAt < 0: ""
       else: hopRow[hopAt + "⇠ tick ".len .. ^1].split("▏")[0]
     checkpoint("origin hop: " & hopSeg)
-    ck hopSeg.contains(" <-")
+    # EXPRESSIONS is the module's global, written by the module's own
+    # `EXPRESSIONS = [ … ]` (a statement over six lines) before `main` ran.
+    ck hopSeg.contains("computational  EXPRESSIO")
     # And `:origin` — the walk, which froze the terminal before: it answers.
     sess.send(":origin EXPRESSIONS\r")
     discard sess.waitFor("EXPRESSIONS computed from", timeoutMs = 30000)
     sess.send("n")
+    # The walk goes back in time, to that write.
     let t = sess.waitTick(114)
-    ck t > 114
+    ck t < 114
     sess.quit()
 
   test "`o` on the selected variable asks for its origin and answers":
