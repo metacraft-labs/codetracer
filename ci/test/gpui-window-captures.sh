@@ -216,13 +216,12 @@ for w in "${which[@]}"; do
 		# real keys. Linux has no off-screen GPUI renderer, so these are the
 		# window's pixels. Needs what the desktop's Visual Replay needs: ct-mcr
 		# and ct_gfx_player.
-		# shellcheck disable=SC1090 # written by the script just run
-		bash ci/test/visual-replay-tools.sh build/plat59-tools.env &&
-			. build/plat59-tools.env ||
-			{
-				failed+=("${w}")
-				continue
-			}
+		# shellcheck disable=SC1090,SC1091 # written by the script just run
+		if ! bash ci/test/visual-replay-tools.sh build/plat59-tools.env ||
+			! . build/plat59-tools.env; then
+			failed+=("${w}")
+			continue
+		fi
 		[ -f "${CODETRACER_VISUAL_REPLAY_FIXTURE:-test-logs/tui-fixtures/visual-gl-scene}/gfx_stream/gfx_frames.idx" ] ||
 			(cd "${WS}/codetracer-visual-replay" && nix develop --command bash \
 				"${root}/scripts/record-visual-replay-fixture.sh" \

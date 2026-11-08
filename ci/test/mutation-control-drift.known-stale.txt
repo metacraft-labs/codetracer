@@ -481,7 +481,7 @@ src/frontend/viewmodel/tests/unit/plat32-history-mutation-control.sha256	src/fro
 src/frontend/viewmodel/tests/unit/plat32-history-mutation-control.sha256	src/frontend/viewmodel/editor/operations.nim	4243f588d96eef7748616586dfe85e692273aa467242a17221f3a2341b5730b4	f28dfaefe805c8a0f6958bb2c1ff272574299ed5e1de841a2dc3ad88f68a93cb
 src/frontend/viewmodel/tests/unit/plat32-history-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_editor_history_laws.nim	a44a720d343372a7e65522f595937508e75742849687f7f5ab321ec15d4044a0	3d77ced2772280a988f392e1049173dcc6b47bc0fb3ff552cbb552fc36ffe097
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	src/frontend/viewmodel/editor/operations.nim	4243f588d96eef7748616586dfe85e692273aa467242a17221f3a2341b5730b4	f28dfaefe805c8a0f6958bb2c1ff272574299ed5e1de841a2dc3ad88f68a93cb
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml	b622e9d774ee64da319c2053ebd1d4af7d5a5c7947f29b35c36a72954495465e	9db74137566485b0e86bb7f982a4bd7f2daddbecc2d82a82d0e38ab5df7869a9
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml	b622e9d774ee64da319c2053ebd1d4af7d5a5c7947f29b35c36a72954495465e	a72d10378069138aa8a13bf2f22c4e4136229ce0ddf4877ccc3aa6055842a74d
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	justfile	35b1dbb41f6528ad8cd944b95269528f6411c51fa5c4f5771a781970ff32f89a	09e59762268bd3f66dc44c036e4bb43b3db44b3223cb7bab776174e74df49c82
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/test-lane-files.sh	e1d6e76c7d034416265f9af9000a8f28fa89fca5bea3802612e162913f88f249	0ce7227dbe56c10b780a395a0303d685cd02dbd40234ae1173518a6a379a0a7f
 src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	src/frontend/viewmodel/editing_core.nim	22091e34cac128635c133093fe54db4b5aaffb70f6403f77232291833912770d	523e410249726163c1fcb2f1117c70346130e56c3b84fd3bb3e5105d15a9fc86
@@ -528,3 +528,15 @@ src/frontend/tui/tests/plat63-verification-mutation-control.sha256	src/frontend/
 src/frontend/tui/tests/plat63-verification-mutation-control.sha256	src/frontend/view_vocabulary/pane_views.nim	e7a95d1e32d1a6b55c7abb575bb6e590c8b34f0fef6e1cda69ec0986ad5cbd43	81eff64b1711b9a013b85a03cd3c7014747b8d9014fd3ddc3084ba7383350bea
 src/frontend/tui/tests/plat63-verification-mutation-control.sha256	src/frontend/ui_js.nim	f4c03320ad5823088b3a7a042a34639ca8b92b75d9d3a4da19533d32de8658e7	2912f4f0624cd894af52a325fbb00a714f7a515ad27763cc736fe65bbd8bbad6
 src/frontend/tui/tests/plat63-verification-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_plat63_verification_vm.nim	a36edadb7b9ddcefe3a4e5f65785f4e23272a0383f35019222b2e1968f230800	89c96c264d87c043b3d3f7c60195695e843834b5731757a975c6d7a494fa7c5e
+# 2026-11-08, the db-backend clippy/rustfmt fix (264d484fab1) edited two subjects
+# of run-plat70f-pointer-mutations.py. In db.rs it declared `first_sighting`
+# without an initial value, and the compiler's definite-assignment check proves
+# the read after the match sees the same value. In origin_dap_test.rs it only
+# reformatted one assertion. The engine arms O1-O6 have needles in db.rs, and
+# O2's needle sits next to the edited declaration, so these arms owe a re-grade.
+# The harness cannot grade from a plain worktree at this tip: arm P5's needle is
+# read from the nim-termctl sibling, and the scan fails unless that sibling is at
+# its pinned revision. Recorded as debt: no mutation grade is claimed and no
+# control file was re-recorded.
+src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/db-backend/src/db.rs	cdcf959be10369739b2e57e536eff9b4a92ef9c2a357f2b947e373558da1b3e4	062a0ad77cf58f8a74dc7a94570b65f09b13fbc4e46d6d34e81ebd8ef134acfb
+src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/db-backend/tests/origin_dap_test.rs	b9a4359e77584873fd772b737796f670d5b27c42a80f7bdfea000c7048fa5fee	0a1224bbba4a4b16f650c982d77c505bb17e7eaadf652f7b2acc975b07d9e373

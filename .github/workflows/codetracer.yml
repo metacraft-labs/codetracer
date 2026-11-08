@@ -6793,6 +6793,16 @@ jobs:
         # depends on it.
         run: "nix develop .#devShells.x86_64-linux.default --command just test-build-siblings-native-backend"
 
+      - name: Assert build-siblings bounds and names a stalled toolchain lookup
+        # `scripts/build-siblings.sh` resolves its toolchain through
+        # `repro exec`, and that call once stalled with nothing printed until
+        # the job's own limit cancelled it two hours later. The suite runs the
+        # real script with a `repro` that never returns and requires it to
+        # announce the stage and give up after its bound. It needs the
+        # `../codetracer-trace-format-nim` sibling this job already checks out;
+        # about ten seconds, no network.
+        run: "nix develop .#devShells.x86_64-linux.default --command just test-build-siblings-toolchain-stage"
+
       - name: Run TypeScript Playwright UI tests (RR-based only)
         env:
           CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct

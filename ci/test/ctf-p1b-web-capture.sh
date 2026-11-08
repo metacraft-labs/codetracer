@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# NOT-A-CI-GATE: a capture tool that REWRITES a committed record, not a check.
+# Its output, `src/tests/visual/agent-harbor-web-regions.json`, is committed,
+# and the gate is the layout test that reads it
+# (`test_ctf_p1b_gpui_capture_matches_web_layout.nim`). Running this in CI
+# would only re-take the record the test compares against.
 # ctf-p1b-web-capture.sh [--no-build] — CTF-P1b's WEB arm of the GPUI/web
 # layout comparison: every Agent Harbor story in StoryBook, both themes, at
 # the laptop and sidebar sizes, shot by `tools/visual-review/capture-storybook.mjs

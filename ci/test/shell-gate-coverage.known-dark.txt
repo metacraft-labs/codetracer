@@ -54,11 +54,11 @@
 #
 # It is not an exemption list. `NOT-A-CI-GATE:` in a file's own header is the
 # exemption, and it means "this is not a gate" — a claim about the file, made in
-# the file, that a reviewer can disagree with. SIXTEEN files say that about
+# the file, that a reviewer can disagree with. SEVENTEEN files say that about
 # themselves, and the guard prints the count on every run so this sentence
 # cannot drift again. They include a PATH diagnostic, a stylus generator,
-# documentation-capture tools, a cross-repository shim and the two fixtures
-# `sourced-var-collision-gate.sh` scans as text.
+# documentation-capture tools, a layout-record capture tool, a cross-repository
+# shim and the two fixtures `sourced-var-collision-gate.sh` scans as text.
 #
 # THE TWO FIXTURES WERE ADDED 2026-09-06, and neither is a hole being
 # excused. Each was counted REACHABLE until that day only because something
