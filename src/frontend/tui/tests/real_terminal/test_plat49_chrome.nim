@@ -158,6 +158,20 @@ proc waitRow(sess: var TuiTestSession; row: int; needle: string;
     "row " & $row & (if present: " never showed '" else: " kept showing '") &
     needle & "': " & result)
 
+template awaitTerminal(sess: var TuiTestSession; cond: untyped;
+                       timeoutMs = 30000) =
+  ## Reads the terminal until `cond` holds of it, or `timeoutMs` passes; the
+  ## check that follows then fails on what the terminal shows. A key's frame
+  ## (the caret's place, its shape) can take longer than any fixed pause on a
+  ## loaded host: a 300 ms sleep read the caret where the previous key had
+  ## left it.
+  block:
+    let until = getMonoTime() + initDuration(milliseconds = timeoutMs)
+    discard sess.drainOutput(40)
+    while not (cond) and getMonoTime() < until:
+      sleep(25)
+      discard sess.drainOutput(40)
+
 proc esc(sess: var TuiTestSession) =
   sess.send(Esc)
   sleep(200)
@@ -244,8 +258,12 @@ suite "PLAT-49 on a real terminal: the menu is one root button with cascades":
     sess.click(debugRow, 2)
     discard sess.waitRow(debugRow, "Continue")
     ck sess.rowText(debugRow).cellFind(" Continue ") > folderAt + 8
+    # Each Esc's close is waited for, as above: two ESC bytes read in one
+    # burst are one `Esc` key, and the quit would land in the open menu.
     sess.esc()
+    discard sess.waitRow(debugRow, "Continue", present = false)
     sess.esc()
+    discard sess.waitRow(2, " File ", present = false)
     sess.quit()
 
 suite "PLAT-49 on a real terminal: a click is a click":
@@ -507,8 +525,7 @@ suite "PLAT-49 on a real terminal: tooltips and the omnibar":
     ck fieldBg != barBg
     ck caItalic in s[0][field + 3].attrs
     sess.send(CtrlP)
-    sleep(400)
-    discard sess.drainOutput(80)
+    sess.awaitTerminal(sess.cursorVisible())
     let open0 = sess.rowText(0)
     let lead = open0.cellFind("⌕ ")
     ck sess.cursorVisible()
@@ -518,20 +535,17 @@ suite "PLAT-49 on a real terminal: tooltips and the omnibar":
     discard sess.waitRow(0, "⌕ calc")
     ck sess.cursorPosition() == (0, lead + 6)
     sess.send(Left)
-    sleep(300)
-    discard sess.drainOutput(40)
+    sess.awaitTerminal(sess.cursorPosition() == (0, lead + 5))
     ck sess.cursorPosition() == (0, lead + 5)
     sess.send(Insert)
-    sleep(300)
-    discard sess.drainOutput(40)
+    sess.awaitTerminal(sess.cursorShape() == csBlock)
     ck sess.cursorShape() == csBlock
     sess.send("X")
     discard sess.waitRow(0, "⌕ calX")
     ck not sess.rowText(0).contains("⌕ calXc")
     sess.send(Right)
     sess.send(Insert)
-    sleep(300)
-    discard sess.drainOutput(40)
+    sess.awaitTerminal(sess.cursorShape() == csBar)
     ck sess.cursorShape() == csBar
     sess.esc()
     discard sess.waitRow(0, "⌕ calX", present = false)
@@ -551,7 +565,7 @@ suite "PLAT-49 on a real terminal: tooltips and the omnibar":
     # The insert caret: the cell after the query, underlined.
     ck s[0][lead + 4].underline != usNone
     sess.send(Insert)
-    sleep(300)
+    sess.awaitTerminal(caReverse in sess.cellAt(0, lead + 4).attrs)
     let s2 = sess.snap()
     ck caReverse in s2[0][lead + 4].attrs
     sess.esc()
