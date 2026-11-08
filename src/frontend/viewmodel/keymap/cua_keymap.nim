@@ -474,6 +474,16 @@ const
             whenText: "editorFocus && editorReadOnly && " & Debug),
     BaseRow(chords: "Ctrl+Shift+O", operation: "editor.jump-to-value-origin",
             whenText: "editorFocus && " & Debug),
+    # Nim's compile-time tracing: `Ctrl+K T` and the construct's letter, in
+    # both modes (a trace MAKES a recording, as Build and Run do).
+    BaseRow(chords: "Ctrl+K T M", operation: "editor.trace-macro-at-cursor",
+            whenText: "editorFocus"),
+    BaseRow(chords: "Ctrl+K T S", operation: "editor.trace-static-block-at-cursor",
+            whenText: "editorFocus"),
+    BaseRow(chords: "Ctrl+K T C", operation: "editor.trace-constant-at-cursor",
+            whenText: "editorFocus"),
+    BaseRow(chords: "Ctrl+K T E", operation: "editor.trace-eval",
+            whenText: "editorFocus"),
     # PLAT-70 Part E: the desktop's chord, widened from the editor to the
     # variable focused in the Variables pane — its chain opens under the row.
     BaseRow(chords: "Ctrl+Shift+O", operation: "variables.show-value-origin",

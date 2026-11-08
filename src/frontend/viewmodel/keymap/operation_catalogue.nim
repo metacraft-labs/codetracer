@@ -136,6 +136,14 @@ const
     op("editor.toggle-breakpoint", EditorTable, "Toggle Breakpoint"),
     op("editor.toggle-inline-breakpoint", EditorTable, "Toggle Inline Breakpoint"),
     op("editor.toggle-tracepoint", EditorTable, "Toggle Tracepoint"),
+    # Nim's compile-time code, traced into a recording that opens in a new
+    # session tab (`viewmodels/nim_tracing_vm`).
+    op("editor.trace-macro-at-cursor", EditorTable, "Trace Macro Execution"),
+    op("editor.trace-static-block-at-cursor", EditorTable,
+       "Trace Static Block Execution"),
+    op("editor.trace-constant-at-cursor", EditorTable,
+       "Trace Constant Initializer"),
+    op("editor.trace-eval", EditorTable, "Trace NimScript Evaluation"),
 
     # --- Find (CUA-Keymap.md §3.5) ----------------------------------------
     op("find.open", GlobalTable, "Find"),

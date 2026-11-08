@@ -37,6 +37,9 @@ import ./layout_model
 # (`viewmodels/agent_prompt_context`, re-exported by `codetracer_embed`).
 from codetracer_embed import AgentAddContextItem, label,
   AgentNoEditorSelectionReason
+# The editor's Nim trace entries (`viewmodels/nim_tracing_vm`).
+from codetracer_embed import NimTraceAction, nimTraceLabelOf,
+  nimTraceOperationOf
 
 type
   ClickGesture* = enum
@@ -158,6 +161,14 @@ type
       ## name `ContextTarget.text`.
     caConstraintCopyName = "constraint-copy-name"
     caConstraintCopySourceLocation = "constraint-copy-source-location"
+    caTraceMacro = "trace-macro"
+      ## Nim's compile-time tracing (`viewmodels/nim_tracing_vm`): the
+      ## editor's four entries, offered where the caret is on what they
+      ## trace; each runs its `editor.trace-*` operation at the menu's line
+      ## and column.
+    caTraceStaticBlock = "trace-static-block"
+    caTraceConstant = "trace-constant"
+    caTraceEval = "trace-eval"
 
   ContextMenuKind* = enum
     cmkTab = "tab"
@@ -423,6 +434,44 @@ func dockLabelContextMenu*(pane: PaneKind; edge: LayoutEdge): ContextMenuModel =
   result.entries.add entry(DesktopTabMenuLabels[3], caClosePane)
 
 type
+  NimTraceEntry* = tuple[label: string; action: ContextAction; hint: string]
+    ## One of the editor's Nim trace entries, as the caller decided it from
+    ## the document and the caret (`nim_tracing_vm.availableNimTraceActions`)
+    ## and the active base's chord.
+
+func nimTraceContextAction*(action: NimTraceAction): ContextAction =
+  case action
+  of ntaMacro: caTraceMacro
+  of ntaStaticBlock: caTraceStaticBlock
+  of ntaConstant: caTraceConstant
+  of ntaEval: caTraceEval
+
+func nimTraceActionOf*(action: ContextAction): tuple[found: bool;
+                                                    action: NimTraceAction] =
+  case action
+  of caTraceMacro: (true, ntaMacro)
+  of caTraceStaticBlock: (true, ntaStaticBlock)
+  of caTraceConstant: (true, ntaConstant)
+  of caTraceEval: (true, ntaEval)
+  else: (false, ntaMacro)
+
+proc nimTraceEntriesOf*(actions: set[NimTraceAction];
+                        chordOf: proc(operation: string): string):
+    seq[NimTraceEntry] =
+  ## The entries for the actions the caret offers, in the actions' order,
+  ## each hinted with its chord in the active base (`chordOf`, "" for none).
+  for a in NimTraceAction:
+    if a in actions:
+      let op = nimTraceOperationOf(a)
+      result.add (nimTraceLabelOf(a), nimTraceContextAction(a),
+                  (if chordOf.isNil: "" else: chordOf(op)))
+
+func addNimTraceEntries(menu: var ContextMenuModel;
+                        entries: openArray[NimTraceEntry]) =
+  for e in entries:
+    menu.entries.add entry(e.label, e.action, hint = e.hint)
+
+type
   LineBreakpoint* = enum
     ## The breakpoint on the line a menu is opened on.
     lbNone, lbEnabled, lbDisabled
@@ -432,7 +481,9 @@ func editorTextContextMenu*(path: string; line: int; lineText = "";
                             breakpoint = lbNone; fileHasBreakpoints = false;
                             anyBreakpoints = false;
                             inlineBreakpoint = false;
-                            inlineChord = "Shift+F9"): ContextMenuModel =
+                            inlineChord = "Shift+F9";
+                            nimTrace: openArray[NimTraceEntry] = []):
+    ContextMenuModel =
   ## The editor's right-click menu in a replay — `ui/editor.
   ## createContextMenuItems`' Debug branch, measured on the real desktop
   ## (`plat50-desktop-capture.spec.ts`, `menus.editorText` and
@@ -487,6 +538,23 @@ func editorTextContextMenu*(path: string; line: int; lineText = "";
     result.entries.add entry("Delete ALL breakpoints", caDeleteAllBreakpoints)
   result.entries.add entry("Add tracepoint", caAddTracepoint,
                            hint = "Enter<on line>")
+  # The Nim trace entries close the menu, as on the desktop.
+  result.addNimTraceEntries(nimTrace)
+
+func editorEditContextMenu*(path: string; line: int; lineText = "";
+                            column = 0;
+                            nimTrace: openArray[NimTraceEntry] = []):
+    ContextMenuModel =
+  ## The editor's right-click menu in EDIT mode on the native front-ends:
+  ## the entries that MAKE a recording rather than navigate one — the Nim
+  ## trace entries — which the desktop offers in both its menus
+  ## (`ui/editor.createContextMenuItems`, Mode-Transitions.md §8.3). Empty
+  ## where the caret offers none; a front-end opens no menu then.
+  result = ContextMenuModel(
+    kind: cmkEditorText,
+    target: ContextTarget(pane: paneEditor, path: path, line: line,
+                          column: column, text: lineText))
+  result.addNimTraceEntries(nimTrace)
 
 func callTraceContextMenu*(index: int64; hasChildren,
                            expanded: bool): ContextMenuModel =

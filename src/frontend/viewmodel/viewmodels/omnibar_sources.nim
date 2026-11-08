@@ -22,6 +22,7 @@ import isonim/core/signals
 import ../store/[replay_data_store, types]
 import ./[filesystem_vm, layout_settings, menu_vm, omnibar_vm]
 import ./replay_open_setting
+import ./nim_tracing_vm
 import ../keymap/keymap_selection
 
 export layout_settings, replay_open_setting
@@ -169,6 +170,17 @@ proc findCommands*(): seq[OmnibarEntry] =
   result.add OmnibarEntry(kind: omCommand, label: FindCancelLabel,
                           target: OperationCommandPrefix & "find.cancel")
 
+proc nimTraceCommands*(): seq[OmnibarEntry] =
+  ## NIM'S COMPILE-TIME TRACING (`nim_tracing_vm`): **Nim: Trace Macro at
+  ## Cursor**, **… Static Block …**, **… Constant …** and **Nim: Trace
+  ## NimScript Evaluation** — the four `editor.trace-*` operations, run at
+  ## the editor's caret.
+  for a in NimTraceAction:
+    result.add OmnibarEntry(kind: omCommand,
+                            label: nimTracePaletteLabelOf(a),
+                            target: OperationCommandPrefix &
+                                    nimTraceOperationOf(a))
+
 proc parseOperationCommand*(target: string): tuple[ok: bool; operation: string] =
   ## `operation:<name>[(<arg>)]` -> the operation text; `ok` false otherwise.
   if not target.startsWith(OperationCommandPrefix):
@@ -208,6 +220,7 @@ proc omnibarIndexOf*(fs: FilesystemVM; store: ReplayDataStore;
   result.add tableCommands()
   result.add viewScrollCommands()
   result.add findCommands()
+  result.add nimTraceCommands()
   result.add layoutSettingCommands(terminalSettings)
   result.add baseKeymapCommands()
   result.add replayOpenCommands()

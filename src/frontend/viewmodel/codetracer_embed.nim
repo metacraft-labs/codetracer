@@ -590,6 +590,14 @@ export native_welcome, layout_settings
 import viewmodels/agent_activity_feed
 export agent_activity_feed
 
+# Nim's compile-time tracing from the editor: the offer at the caret, the
+# request each route sends, its progress and failure, and where the
+# recording opens — the shared half of every front-end's four
+# `editor.trace-*` operations (the native process half is
+# `host/native_nim_tracer`, outside the facade with the other hosts).
+import viewmodels/nim_tracing_vm
+export nim_tracing_vm
+
 const
   CodeTracerEmbedFacadeModule* = "codetracer_embed"
     ## The one module name a consumer may import from this SDK. The import
