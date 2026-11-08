@@ -339,6 +339,16 @@ async function main() {
     if (!themes.includes(theme)) throw new Error(`Unknown theme "${theme}" (known: ${themes.join(", ")})`);
   }
   const noBuild = hasArg("--no-build");
+  // `--font-render-hinting <none|slight|medium|full>`: Chromium's own switch
+  // for how the text rasteriser hints glyphs on Linux. Unset, the browser's
+  // default applies (headless Chromium on Linux hints fully, which rounds
+  // the advances of small text -- 11 to 13px -- to whole, often wider,
+  // pixels); `none` sets text at the face's own advances, as a browser on
+  // macOS does and as GPUI's text system does.
+  const fontRenderHinting = argValue("--font-render-hinting");
+  if (fontRenderHinting && !["none", "slight", "medium", "full"].includes(fontRenderHinting)) {
+    throw new Error(`--font-render-hinting: unknown value "${fontRenderHinting}"`);
+  }
   const regionsArg = argValue("--regions");
   const regionsDeclaration = regionsArg ? JSON.parse(readFileSync(resolve(regionsArg), "utf8")) : null;
   if (regionsDeclaration && !Array.isArray(regionsDeclaration.regions)) {
@@ -404,7 +414,7 @@ async function main() {
     const browser = await chromium.launch({
       executablePath: chromiumExecutable(),
       headless: true,
-      args: ["--no-sandbox"],
+      args: ["--no-sandbox", ...(fontRenderHinting ? [`--font-render-hinting=${fontRenderHinting}`] : [])],
     });
 
     const reports = [];
@@ -531,16 +541,36 @@ async function main() {
         // story window writes the same file from GPUI's own layout, and the
         // CTF-P1b layout test compares the two. A region is the first VISIBLE
         // match of its selector (an element with no area, or hidden, is left
-        // out, as the GPUI side leaves out an element laid out with none).
+        // out, as the GPUI side leaves out an element laid out with none), or,
+        // for `"pick": "last-whole"`, the last visible match drawn whole --
+        // its bottom edge inside the viewport (the last row of a list the
+        // window shows entirely; a row cut by the window's edge can show
+        // nothing but its background). A picked region also records its `index` among the
+        // visible matches, so the layout test can tell that both sides picked
+        // the same row and not two different rows that happen to sit near the
+        // bottom of their windows.
         if (regionsDeclaration) {
           const regions = await page.evaluate((declared) => {
             const out = {};
             for (const region of declared) {
+              const visible = [];
               for (const element of document.querySelectorAll(region.web)) {
                 const rect = element.getBoundingClientRect();
                 const style = getComputedStyle(element);
                 if (rect.width <= 0 || rect.height <= 0 || style.visibility === "hidden" || style.display === "none") continue;
+                visible.push({ element, rect });
+              }
+              let chosen = visible.length > 0 ? 0 : -1;
+              if (region.pick === "last-whole") {
+                chosen = -1;
+                visible.forEach(({ rect }, i) => {
+                  if (rect.y + rect.height <= window.innerHeight) chosen = i;
+                });
+              }
+              if (chosen >= 0) {
+                const { element, rect } = visible[chosen];
                 out[region.name] = { x: rect.x, y: rect.y, w: rect.width, h: rect.height };
+                if (region.pick) out[region.name].index = chosen;
                 // A `fill` region also records the colour the browser
                 // composites behind the element: its own background over
                 // its ancestors', each `rgba()` blended over the one below
@@ -558,11 +588,10 @@ async function main() {
                   }
                   out[region.name].fill = `#${rgb.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
                 }
-                break;
               }
             }
             return out;
-          }, regionsDeclaration.regions.map(({ name, web, fill }) => ({ name, web, fill: Boolean(fill) })));
+          }, regionsDeclaration.regions.map(({ name, web, fill, pick }) => ({ name, web, fill: Boolean(fill), pick })));
           writeFileSync(
             join(outDir, `${captureId}.regions.json`),
             `${JSON.stringify({ renderer: "web", story: view.storyId, theme, viewport, regions }, null, 2)}\n`,

@@ -21,6 +21,15 @@
 # script refuses a StoryBook built over any other set), so it carries nothing
 # private.
 #
+# Text is set at the face's own advances (`--font-render-hinting none`).
+# Headless Chromium on Linux otherwise hints glyphs fully, which rounds the
+# advances of small text to whole, often wider, pixels: at the 12px caption
+# size "needs input" is 74px against the face's 69.6 (measured 2026-11-08),
+# while at 14px and above it matches the face. That is the rasteriser of the
+# machine taking the record, not the web views: a browser on macOS sets the
+# face's advances, as GPUI's text system does, so a hinted record would make
+# GPUI's wraps and cuts disagree with what the views lay out everywhere else.
+#
 # The images stay in the git-ignored build tree; the side-by-side pairs are
 # `tools/visual-review/parity-pairs.sh --agent-harbor`.
 set -euo pipefail
@@ -44,7 +53,7 @@ grep -q '"fixtureSet\\": \\"synthetic\\"' storybook/dist/components.js || {
 }
 mkdir -p "${OUT}"
 for size in laptop sidebar; do
-	node tools/visual-review/capture-storybook.mjs --no-build \
+	node tools/visual-review/capture-storybook.mjs --no-build --font-render-hinting none \
 		--view agent-harbor-session-tabs --view agent-harbor-fleet \
 		--size "${size}" --theme dark --theme light \
 		--out "${OUT}" --regions "${DECL}"
@@ -68,7 +77,8 @@ writeFileSync(record, `${JSON.stringify({
     "CTF-P1b: where the browser laid out each region of each Agent Harbor story",
     "(src/tests/visual/agent-harbor-regions.json), in CSS pixels of the capture's",
     "viewport. WRITTEN by ci/test/ctf-p1b-web-capture.sh from StoryBook over the",
-    "synthetic fixture set; read by test_ctf_p1b_gpui_capture_matches_web_layout.nim.",
+    "synthetic fixture set, text at the face's own advances (no font hinting);",
+    "read by test_ctf_p1b_gpui_capture_matches_web_layout.nim.",
     "Do not edit by hand: re-take it.",
   ],
   schemaVersion: 1,

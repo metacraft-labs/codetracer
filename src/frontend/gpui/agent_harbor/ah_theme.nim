@@ -20,6 +20,9 @@
 ## the views through them.
 
 import ../../../common/pointer_shape
+import ../../../common/content_file_cache
+import std/[base64, strutils]
+
 import isonim_gpui/renderer
 import isonim/viewmodel
 import nim_agents_isonim_viewmodels/agent_harbor/[data_source, session_items]
@@ -44,6 +47,7 @@ type
     action*: string          ## surface/action/primary: the active recording
     onAction*: string        ## text/on-action/primary
     textBody*: string
+    textBodySubtle*: string  ## a row's age (`.ah-fleet-row-age`, `.ah-session-row-age`)
     textCaption*: string
     textLabel*: string
     textDisabled*: string
@@ -61,6 +65,9 @@ type
     iconSubtle*: string      ## an ended session's grey mark
     iconDefault*: string     ## the hollow ring of an idle session
     trackPlanned*: string    ## the milestone bar's planned segment (`by-mode`)
+    tabIcon*: string
+      ## A frame tab's pin and close icons: `TAB_ICON_COLOR`, the
+      ## icon-subtle role (#919191 / #999180), as the masks are painted.
     activeTab*: string
       ## The active tab, the active session row and the active item of a
       ## tab dropdown: `by-mode(#3c3c3c, colors-ui-surface-primary-tertiary)`
@@ -71,8 +78,13 @@ type
     activeTabText*: string   ## its title: `by-mode(#ffffff, text-primary-body)`
     activeTabOrigin*: string ## its origin: `by-mode(#b0b0b0, text-primary-caption)`
     activeRowQuiet*: string
-      ## The active session row's status, meta and detail: `by-mode(caption,
-      ## label)` (Light's tertiary is too dark for the caption role).
+      ## The active session row's meta and detail: `by-mode(caption, label)`
+      ## (Light's tertiary is too dark for the caption role). Its status word
+      ## keeps its status colour.
+    rowDetail*: string
+      ## Any session row's detail line, and a fleet row's activity line:
+      ## `by-mode(caption, label)` -- on Light's warm panel the caption role
+      ## sits near 3:1 under a title.
     addText*: string         ## "+": `by-mode(#b0b0b0, text-primary-label)`
     selectedText*: string
       ## Every text of a row on the action surface (the fleet's selected
@@ -112,6 +124,7 @@ proc ahPalette*(mode: DesignMode): AhPalette =
     action: t(dtColorsUiSurfaceActionPrimary),
     onAction: t(dtColorsUiTextOnActionPrimary),
     textBody: t(dtColorsUiTextPrimaryBody),
+    textBodySubtle: t(dtColorsUiTextPrimaryBodySubtle),
     textCaption: t(dtColorsUiTextPrimaryCaption),
     textLabel: t(dtColorsUiTextPrimaryLabel),
     textDisabled: t(dtColorsUiTextPrimaryDisabled),
@@ -134,6 +147,7 @@ proc ahPalette*(mode: DesignMode): AhPalette =
     # filled.
     trackPlanned: (if mode == dmDark: t(dtColorsUiIconPrimarySubtle)
                    else: t(dtColorsUiBorderPrimary)),
+    tabIcon: t(dtColorsUiIconPrimarySubtle),
     # The stylesheet's own literals for Dark, where it states one (`by-mode`
     # with a hex): the design system has no role for these greys.
     activeTab: (if mode == dmDark: "#3c3c3c" else: t(dtColorsUiSurfacePrimaryTertiary)),
@@ -142,6 +156,8 @@ proc ahPalette*(mode: DesignMode): AhPalette =
     activeTabOrigin: (if mode == dmDark: "#b0b0b0" else: t(dtColorsUiTextPrimaryCaption)),
     activeRowQuiet: (if mode == dmDark: t(dtColorsUiTextPrimaryCaption)
                      else: t(dtColorsUiTextPrimaryLabel)),
+    rowDetail: (if mode == dmDark: t(dtColorsUiTextPrimaryCaption)
+                else: t(dtColorsUiTextPrimaryLabel)),
     addText: (if mode == dmDark: "#b0b0b0" else: t(dtColorsUiTextPrimaryLabel)),
     selectedText: (if mode == dmDark: t(dtColorsUiTextOnActionPrimary)
                    else: t(dtColorsUiTextPrimaryBody)),
@@ -207,6 +223,10 @@ proc textPx*(text: string; sizePx: int): int =
   ## How wide the interface face sets `text` (`design_font_metrics`).
   groteskTextPx(text, float(sizePx))
 
+proc textWidth*(text: string; sizePx: int): float =
+  ## The same, unrounded.
+  groteskTextWidth(text, float(sizePx))
+
 proc styles*(r: GpuiRenderer; el: GpuiElement;
              pairs: openArray[(string, string)]) =
   for (k, v) in pairs: r.setStyle(el, k, v)
@@ -250,6 +270,91 @@ proc mark*(r: GpuiRenderer; m: MarkStyle; sizePx = MarkPx): GpuiElement =
   else:
     r.setStyle(result, "background", m.colour)
   r.tag(result, "mark", if m.ring: "ring:" & m.colour else: m.colour)
+
+# ---------------------------------------------------------------------------
+# Icons: the web's images and masks, drawn as GPUI images
+# ---------------------------------------------------------------------------
+
+const
+  PlusSvg = staticRead("../../../public/resources/shared/session_tab_add.svg")
+    ## `.session-tab-add::before`'s mask (12×12, `#DDDDDD` filled).
+  TabPinSvg = staticRead("../../../public/resources/menu/lm_pin_tab_dark.svg")
+    ## `LAYOUT_TAB_PIN_ICON_PATH`, both themes (`#919191` filled).
+  TabCloseSvg = staticRead("../../../public/resources/menu/lm_close_tab_dark.svg")
+    ## `LAYOUT_TAB_CLOSE_ICON_PATH` in Dark (`#919191` filled).
+  TabClosePng = staticRead("../../../public/third_party/golden-layout/dist/img/lm_close_black.png")
+    ## `LAYOUT_TAB_CLOSE_ICON_PATH` in Light: golden-layout's 9×9 black X.
+
+proc iconFile(name, content: string): string =
+  ## An icon as a file, since GPUI's `img` loads a picture from a path: in
+  ## the per-user cache, named by its content, so every process draws the
+  ## same icon from the same file and leaves nothing behind
+  ## (`common/content_file_cache`).
+  contentFile("gpui-agent-harbor-icons", name, content)
+
+proc maskedPng(png: string; side: int; colour: string): string =
+  ## A raster image as an SVG whose alpha is the PNG's (`mask-type: alpha`,
+  ## https://www.w3.org/TR/css-masking-1/#the-mask-type), over a rectangle
+  ## of `colour`: usable as a `mask-image`, whose colour does not matter.
+  let uri = "data:image/png;base64," & encode(png)
+  "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" " &
+    "width=\"" & $side & "\" height=\"" & $side & "\" viewBox=\"0 0 " & $side & " " & $side & "\">" &
+    "<mask id=\"m\" mask-type=\"alpha\" style=\"mask-type:alpha\">" &
+    "<image width=\"" & $side & "\" height=\"" & $side & "\" href=\"" & uri &
+    "\" xlink:href=\"" & uri & "\"/></mask>" &
+    "<rect width=\"" & $side & "\" height=\"" & $side & "\" fill=\"" & colour &
+    "\" mask=\"url(#m)\"/></svg>"
+
+proc icon(r: GpuiRenderer; file: string; widthPx, heightPx: float;
+          opacity = 1.0): GpuiElement =
+  result = r.createElement("img")
+  r.setAttribute(result, "src", file)
+  r.styles(result, [("width", formatFloat(widthPx, ffDecimal, 1) & "px"),
+                    ("height", formatFloat(heightPx, ffDecimal, 1) & "px"),
+                    ("flex-shrink", "0")])
+  if opacity < 1.0: r.setStyle(result, "opacity", $opacity)
+
+proc maskIcon(r: GpuiRenderer; mask: string; colour: string; widthPx, heightPx: float;
+              opacity = 1.0): GpuiElement =
+  ## A one-colour icon as the stylesheet draws it: `colour` painted through
+  ## the mask file's alpha (`background-color` under `mask-image`,
+  ## https://www.w3.org/TR/css-masking-1/#the-mask-image), which isonim-gpui
+  ## renders at the box's device size. An `img` of a recoloured SVG is
+  ## minified from twice its size with straight-alpha filtering and draws
+  ## every 1px stroke dimmer than the browser (isonim-gpui shim-design.md,
+  ## "Mask Image").
+  result = r.createElement("div")
+  r.styles(result, [("width", formatFloat(widthPx, ffDecimal, 1) & "px"),
+                    ("height", formatFloat(heightPx, ffDecimal, 1) & "px"),
+                    ("flex-shrink", "0"), ("background", colour),
+                    ("mask-image", "url(\"" & mask & "\")")])
+  if opacity < 1.0: r.setStyle(result, "opacity", $opacity)
+
+proc plusIcon*(r: GpuiRenderer; p: AhPalette): GpuiElement =
+  ## "+" on its disc (`.session-tab-add::before`): the 12px plus mask in the
+  ## control's colour (`by-mode(#b0b0b0, text-primary-label)`) at 0.7.
+  r.maskIcon(iconFile("session-tab-add.svg", PlusSvg), p.addText, 12, 12, 0.7)
+
+proc tabCloseIcon*(r: GpuiRenderer; p: AhPalette): GpuiElement =
+  ## A session tab's close control (`.session-tab-close`): the layout's close
+  ## image as it is (`background-image`, not a mask) -- the SVG in Dark,
+  ## golden-layout's black PNG in Light -- 0.6em (9.6px) at 0.4.
+  if p.mode == dmDark:
+    r.icon(iconFile("tab-close-dark.svg", TabCloseSvg), 9.6, 9.6, 0.4)
+  else:
+    r.icon(iconFile("tab-close-light.png", TabClosePng), 9.6, 9.6, 0.4)
+
+proc framePinIcon*(r: GpuiRenderer; p: AhPalette): GpuiElement =
+  ## A frame tab's pin (`.lm_pin_tab`): the pin mask, 0.85em (13.6px), in
+  ## `TAB_ICON_COLOR`.
+  r.maskIcon(iconFile("lm-pin-tab.svg", TabPinSvg), p.tabIcon, 13.6, 13.6)
+
+proc frameCloseIcon*(r: GpuiRenderer; p: AhPalette): GpuiElement =
+  ## A frame tab's close (`.lm_close_tab`): the theme's close image used as
+  ## a mask, 0.6em (9.6px), in `TAB_ICON_COLOR`.
+  let mask = if p.mode == dmDark: iconFile("lm-close-tab.svg", TabCloseSvg)
+             else: iconFile("lm-close-black.svg", maskedPng(TabClosePng, 9, "#000000"))
+  r.maskIcon(mask, p.tabIcon, 9.6, 9.6)
 
 proc rule*(r: GpuiRenderer; el: GpuiElement; colour: string) =
   ## The hairline under a section (`border-bottom: 1px solid …`).
@@ -326,6 +431,9 @@ type
     grow*: bool        ## takes its line's free width (`flex: 1 1 auto`)
     ownLine*: bool     ## starts a line of its own (`flex-basis: 100%`)
     alignEnd*: bool    ## pushed to its line's end (`margin-left: auto`)
+    exactPx*: float
+      ## Its exact (fractional) width, when every part of it is known
+      ## exactly; 0 when only the rounded `widthPx` is.
 
 proc flowLines*(r: GpuiRenderer; items: openArray[FlowItem]; availPx, gapPx,
                 lineHeightPx, rowGapPx: int): GpuiElement =
@@ -340,24 +448,37 @@ proc flowLines*(r: GpuiRenderer; items: openArray[FlowItem]; availPx, gapPx,
   var used = 0
   var count = 0
   var grows = false
+  var exactUsed = 0.0
+  var allExact = true
   for item in items:
     let need = if line == nil or used == 0: item.widthPx else: used + gapPx + item.widthPx
     # A measured width is a whole pixel, rounded; the browser's is
     # fractional. One pixel of slack per item already on the line keeps an
-    # item whose true width fits exactly from breaking the line.
-    if line == nil or item.ownLine or (used > 0 and need > availPx + count):
+    # item whose true width fits exactly from breaking the line. When every
+    # item on the line knows its exact width, the line breaks exactly where
+    # the browser's does, with no slack: a line that overflows by half a
+    # pixel breaks there too.
+    let exact = allExact and item.exactPx > 0
+    let overflows =
+      if exact: exactUsed + float(gapPx) + item.exactPx > float(availPx)
+      else: need > availPx + count
+    if line == nil or item.ownLine or (used > 0 and overflows):
       if line != nil: r.appendChild(column, line)
       line = r.box(pairs = [("height", $lineHeightPx & "px"), ("items", "center"),
                             ("gap", $gapPx & "px"), ("width", $availPx & "px")])
       used = 0
       count = 0
       grows = false
+      exactUsed = 0.0
+      allExact = true
     if item.alignEnd and not grows:
       r.appendChild(line, r.box(pairs = [("flex-grow", "1")]))
     if item.grow:
       grows = true
       r.styles(item.el, [("flex-grow", "1"), ("flex-shrink", "1"), ("min-width", "0px")])
     r.appendChild(line, item.el)
+    exactUsed = if used == 0: item.exactPx else: exactUsed + float(gapPx) + item.exactPx
+    allExact = allExact and item.exactPx > 0
     used = if used == 0: min(item.widthPx, availPx) else: used + gapPx + item.widthPx
     inc count
   if line != nil: r.appendChild(column, line)

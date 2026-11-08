@@ -40,7 +40,16 @@
 ##     than PLAT-35's `PaneRectangleTolerancePp` from the web's. The
 ##     comparison IS PLAT-35's: `layout_questions.compareAnswer` over
 ##     `formatPaneRectangles`, the one comparator its own gate uses, with its
-##     tolerance (2, "never raised"). Nothing here loosens it.
+##     tolerance (2, "never raised"). Nothing here loosens it;
+##   * a row region (one row of a list: its first, or the last one drawn whole) is a
+##     different row on the two sides -- each side reports the row's `index`
+##     among the list's visible rows, and they must be equal. Rows drawn a
+##     few pixels taller than the web's drift a long list down while its
+##     outer box stays put, and the last row in the window is where that shows; by
+##     position alone, two different rows that each sit near the bottom of
+##     their window could still be within the tolerance of each other;
+##   * a `fill` region's background is more than `FillTolerance` per channel
+##     from the colour the browser composites behind it.
 ##
 ## The verdicts, each region's rectangle on both sides and its deltas are
 ## written to `build/ctf-p1b/parity/report.json` and `report.md` (the
@@ -52,7 +61,8 @@
 ## regions file and a region shifted one point beyond the tolerance must each
 ## fail by name, while the untouched copy and one shifted by exactly the
 ## tolerance pass — so a judge that cannot fail, or one whose tolerance
-## silently became zero, is caught.
+## silently became zero, is caught. The same for a row picked at another
+## index, and for a fill one and two units off (one passes, two fails).
 ##
 ## No mocks: both sides are real captures of real renderers, over the
 ## committed synthetic fixture set both builds embed.
@@ -74,12 +84,14 @@ const
     ## The design brief's laptop and narrow sizes (`capture-storybook.mjs`'s
     ## `laptop` and `sidebar`).
   Themes = ["dark", "light"]
-  FillTolerance = 3
+  FillTolerance = 1
     ## Per channel, between the GPUI frame's pixel and the colour the browser
-    ## composites: GPUI blends a translucent fill in its own arithmetic (the
-    ## selected initiative's 28% tint), which rounds a unit or two apart from
-    ## the browser's. An opaque fill is drawn exactly. A wrong role is tens of
-    ## units off (#3c3c3c against #333333 is 9 in every channel).
+    ## composites: one unit, for the rounding of a translucent fill blended
+    ## in GPUI's arithmetic rather than the browser's (the selected
+    ## initiative's 28% tint). Every fill measured so far is exact. It is no
+    ## wider because the palette holds roles TWO units apart
+    ## (`surface/base/card` #262626 against `base/panel` #282828): a
+    ## tolerance of 2 or more could not tell those apart.
   MinimumStories = 59
     ## The section's stories at CTF-P2a's landing; a floor, so a declaration
     ## that lost its stories cannot pass by expecting nothing.
@@ -93,6 +105,9 @@ let reportDir = getEnv("CTF_P1B_REPORT_DIR", repoRoot / "build" / "ctf-p1b" / "p
 type
   Rect = object
     x, y, w, h: float
+    index: int
+      ## A row region's position among its list's visible rows on that
+      ## side (`"pick"` in the declaration); -1 for any other region.
 
   RegionSet = OrderedTable[string, Rect]
 
@@ -115,6 +130,7 @@ type
     webPx, gpuiPx: Rect
     onlyOn: string              ## "web" / "gpui" when the other side has none
     within: bool
+    sameRow: bool               ## a row region: both sides picked the same row
     webFill, gpuiFill: string   ## a `fill` region's background, `#rrggbb`
 
   CaptureJudgement = object
@@ -198,7 +214,8 @@ proc channelsApart(a, b: string): int =
 proc regionsOf(node: JsonNode): RegionSet =
   for name, r in node.pairs:
     result[name] = Rect(x: r["x"].getFloat, y: r["y"].getFloat,
-                        w: r["w"].getFloat, h: r["h"].getFloat)
+                        w: r["w"].getFloat, h: r["h"].getFloat,
+                        index: r{"index"}.getInt(-1))
 
 proc normalised(r: Rect; name: string; vw, vh: int): PaneRect =
   ## Hundredths of the viewport, rounded as PLAT-35's GPUI answer path rounds
@@ -256,7 +273,13 @@ proc compareRegions(web, gpui: RegionSet; vw, vh: int;
       d.within = compareAnswer(lqPaneRectangles, formatPaneRectangles(@[d.web]),
                                formatPaneRectangles(@[d.gpui])).verdict in
                  {cvEqual, cvWithinTolerance}
+      d.sameRow = web[n].index == gpui[n].index
     judgement.regions.add d
+  for d in judgement.regions:
+    if d.onlyOn.len == 0 and not d.sameRow:
+      judgement.verdict = vLayout
+      judgement.problems.add "region " & d.name & " is row " & $d.webPx.index &
+        " of its list on the web and row " & $d.gpuiPx.index & " in GPUI"
   let c = compareAnswer(lqPaneRectangles, formatPaneRectangles(webRects),
                         formatPaneRectangles(gpuiRects))
   if c.verdict notin {cvEqual, cvWithinTolerance}:
@@ -373,6 +396,8 @@ proc toJson(d: RegionDelta): JsonNode =
                         "px": [d.gpuiPx.x, d.gpuiPx.y, d.gpuiPx.w, d.gpuiPx.h]}
   if d.webFill.len > 0:
     result["fill"] = %*{"web": d.webFill, "gpui": d.gpuiFill}
+  if d.webPx.index >= 0 or d.gpuiPx.index >= 0:
+    result["index"] = %*{"web": d.webPx.index, "gpui": d.gpuiPx.index}
   if d.onlyOn.len == 0:
     result["deltaPp"] = %[d.gpui.x - d.web.x, d.gpui.y - d.web.y,
                           d.gpui.w - d.web.w, d.gpui.h - d.web.h]
@@ -520,4 +545,49 @@ suite "CTF-P1b: the layout judge fails what it must (negative controls)":
     check other{"regions"}{"active-tab"}{"fill"} != nil
     other["regions"]["active-tab"]["fill"] = %"#ff0000"
     check judgeCapture(source.id, plant(), other, source.width, source.height).verdict == vFill
+
+  test "a fill one unit off passes, one exactly two units off fails":
+    # The palette holds roles two units apart (`surface/base/card` #262626
+    # and `base/panel` #282828), so a fill two off must be told apart from
+    # the right one. The expected colour is set from the GPUI frame's own
+    # pixel, so this measures the judge, not today's views.
+    let dir = plant()
+    let f = readPpm(dir / (source.id & ".ppm"))
+    let r = regionsOf(parseJson(readFile(dir / (source.id & ".regions.json")))["regions"])["active-tab"]
+    let (x, y) = fillSample(r)
+    let drawn = hexOf(f, x, y)
+    proc offBy(hex: string; units: int): string =
+      ## Every channel `units` away, towards whichever end has room.
+      result = "#"
+      for i in 0 .. 2:
+        let c = parseHexInt(hex[1 + 2 * i .. 2 + 2 * i])
+        result.add toHex(if c + units <= 255: c + units else: c - units, 2).toLowerAscii
+    check channelsApart(drawn, offBy(drawn, 1)) == 1
+    check channelsApart(drawn, offBy(drawn, 2)) == 2
+    var oneOff = web{source.id}.copy
+    oneOff["regions"]["active-tab"]["fill"] = %offBy(drawn, 1)
+    check judgeCapture(source.id, dir, oneOff, source.width, source.height).verdict == vPass
+    var twoOff = web{source.id}.copy
+    twoOff["regions"]["active-tab"]["fill"] = %offBy(drawn, 2)
+    let j = judgeCapture(source.id, dir, twoOff, source.width, source.height)
+    check j.verdict == vFill
+    check j.problems.len > 0 and "region active-tab is filled" in j.problems[0]
+
+  test "a row region that is another row on the GPUI side fails":
+    # The popup's last session line, reported one row further down: the
+    # same list, a different row, whatever its position.
+    let dir = plant()
+    let path = dir / (source.id & ".regions.json")
+    var doc = parseJson(readFile(path))
+    check doc{"regions"}{"session-line-last"} != nil
+    check web{source.id}{"regions"}{"session-line-last"}{"index"} != nil
+    doc["regions"]["session-line-last"]["index"] =
+      %(doc["regions"]["session-line-last"]["index"].getInt + 1)
+    writeFile(path, $doc)
+    let j = judgeCapture(source.id, dir, web{source.id}, source.width, source.height)
+    check j.verdict == vLayout
+    var named = false
+    for problem in j.problems:
+      if "region session-line-last is row" in problem: named = true
+    check named
     removeDir(scratch)

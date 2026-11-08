@@ -42,7 +42,8 @@ const
   BarChipGapPx = 8            ## the bar's `+N` chip: 6px margin, "+" 2px more
   InboxStepPx = 25
   InboxPositionPx = 72        ## `.ah-inbox-position` min-width: 4.5rem
-  InboxMarginPx = 6           ## `.ah-inbox` margin-right: 0.375rem
+  ControlsGapPx = 4           ## `.ah-bar-controls` gap: 0.25rem
+  ElsewhereMarginPx = 4       ## `.ah-elsewhere` margin-right: 0.25rem
 
 proc recordingButtonWidth(rb: RecordingButton): int =
   max(18, 8 + textPx($rb.number & stateSuffix(rb.state), CaptionPx))
@@ -61,7 +62,7 @@ proc initiativeTabContent(vm: InitiativeTabStripVM; tab: StripTab): int =
     result += TabInnerGapPx + textPx(tab.progressText, CaptionPx)
     if tab.active: result += recordingsWidth(vm.recordingButtonsOf(tab.id))
   elif tab.session.originShort.len > 0:
-    result += TabInnerGapPx + textPx(tab.session.originShort, 10)
+    result += TabInnerGapPx + textPx(tab.session.originShort, CaptionPx)
 
 proc initiativeTabWidth*(vm: InitiativeTabStripVM; tab: StripTab; barPx = 0): int =
   ## Its content, from 8rem to 16rem (the active one to 24rem).
@@ -189,7 +190,7 @@ proc drawBarTab(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
           r.appendChild(switcher, more)
         r.appendChild(result, switcher)
   elif tab.session.originShort.len > 0:
-    r.appendChild(result, r.text(tab.session.originShort, 10, p.textCaption, shrink = false))
+    r.appendChild(result, r.text(tab.session.originShort, CaptionPx, p.textCaption, shrink = false))
 
 proc drawPopup(r: GpuiRenderer; p: AhPalette; popup: InitiativePopup; widthPx: int;
                left, top: int): GpuiElement =
@@ -201,28 +202,40 @@ proc drawPopup(r: GpuiRenderer; p: AhPalette; popup: InitiativePopup; widthPx: i
     ("padding-right", "12px"), ("border-width", "1px"), ("border-color", p.borderPrimary),
     ("rounded", $ControlRadiusPx & "px")])
   r.tag(result, "popup", popup.id)
-  let head = r.box(pairs = [("gap", "8px"), ("items", "center")])
+  # `.ah-popup-head`: the title semibold at 14px and the state at 12px, on
+  # the face's normal line heights (21px and 18px), the state in the label
+  # role unless it names a status (`.ah-popup-state-*`).
+  let head = r.box(pairs = [("gap", "8px"), ("items", "center"), ("height", "21px")])
   r.appendChild(head, r.mark(p.markOf(popup.state)))
-  let title = r.text(popup.title, BodyPx, p.textBody, bold = true, pairs = [("flex-grow", "1")])
+  let title = r.text(popup.title, BodyPx, p.textBody, bold = true,
+                     pairs = [("flex-grow", "1"), ("line-height", "21px")])
   r.tag(title, "title", popup.title)
   r.appendChild(head, title)
-  let state = r.text(stateWord(popup.state), CaptionPx, p.stateWordColour(popup.state),
-                     shrink = false)
+  let stateColour = case popup.state
+                    of isNeedsInput, isWorking, isBlocked: p.stateWordColour(popup.state)
+                    else: p.textLabel
+  let state = r.text(stateWord(popup.state), CaptionPx, stateColour,
+                     shrink = false, pairs = [("line-height", "18px")])
   r.tag(state, "state", stateWord(popup.state))
   r.appendChild(head, state)
   r.appendChild(result, head)
-  let headline = r.text(popup.headline, CaptionPx, p.textLabel)
+  # `.ah-popup-headline`: caption text in the caption role, on an 18px line.
+  let headline = r.text(popup.headline, CaptionPx, p.textCaption,
+                        pairs = [("line-height", "18px")])
   r.tag(headline, "headline", popup.headline)
   r.appendChild(result, headline)
-  r.appendChild(result, r.drawMilestoneBar(p, popup.statusCounts, labelled = true))
+  # Inside the popup's 12px padding and 1px border.
+  r.appendChild(result, r.drawMilestoneBar(p, popup.statusCounts, labelled = true,
+                                           availPx = widthPx - 2 * 12 - 2))
   if popup.currentMilestone.len > 0:
     r.appendChild(result, r.drawCurrent(p, popup.currentMilestone))
   if popup.executiveSummary.len > 0:
     let summary = r.text(popup.executiveSummary, CaptionPx, p.textBody, shrink = false,
-                         pairs = [("white-space", "normal")])
+                         pairs = [("white-space", "normal"), ("line-height", "16px")])
     r.tag(summary, "executive-summary", popup.executiveSummary)
     r.appendChild(result, summary)
-  let sessions = r.box(column = true, pairs = [("padding-top", "6px")])
+  # `.ah-popup-sessions`: under a hairline, 6px down, the lines 1px apart.
+  let sessions = r.box(column = true, pairs = [("padding-top", "6px"), ("gap", "1px")])
   r.styles(sessions, [("border-top-width", "1px"), ("border-color", p.borderSecondary)])
   for item in popup.sessions: r.appendChild(sessions, r.drawSessionLine(p, item))
   r.appendChild(result, sessions)
@@ -231,19 +244,18 @@ proc autoLabel(vm: InitiativeTabStripVM): string =
   (if vm.compact: "Auto: " else: "Auto-switch: ") & (if vm.autoSwitch.val: "on" else: "off")
 
 proc inboxWidth(vm: InitiativeTabStripVM): int =
-  ## How wide `drawInbox` draws, its 6px margin included: the two steps,
-  ## the position at its fixed 4.5rem, the toggle 4px further off (6px in,
-  ## a 1px border, and when on the action mark 6px before its words), all
-  ## 2px apart.
-  result = 2 * InboxStepPx + 2 * 2 + 4 + 12 + 2 + textPx(autoLabel(vm), CaptionPx) +
-           InboxMarginPx
+  ## How wide `drawInbox` draws (no margins: `.ah-bar-controls .ah-inbox`
+  ## zeroes them): the two steps, the position at its fixed 4.5rem, the
+  ## toggle 4px further off (6px in, no border, and when on the action mark
+  ## 6px before its words), all 2px apart.
+  result = 2 * InboxStepPx + 2 * 2 + 4 + 12 + textPx(autoLabel(vm), CaptionPx)
   if vm.autoSwitch.val: result += MarkPx + 6
   if not vm.compact: result += 2 + InboxPositionPx
 
 proc elsewhereWidth(vm: InitiativeTabStripVM): int =
-  ## How wide `drawElsewhere` draws: 4px and 6px in, its count badge, and
-  ## (unless compact) its label 6px after it.
-  result = 12 + max(18, 8 + textPx($vm.elsewhereCount, CaptionPx - 1))
+  ## How wide `drawElsewhere` draws, its 4px right margin included: 6px in,
+  ## its count badge, and (unless compact) its label 6px after it.
+  result = ElsewhereMarginPx + 12 + max(18, 8 + textPx($vm.elsewhereCount, CaptionPx - 1))
   if not vm.compact: result += 6 + textPx(vm.elsewhereLabel, CaptionPx)
 
 proc inboxStep(r: GpuiRenderer; p: AhPalette; arrow: string; onClick: proc()): GpuiElement =
@@ -261,23 +273,23 @@ proc inboxStep(r: GpuiRenderer; p: AhPalette; arrow: string; onClick: proc()): G
 
 proc drawInbox(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM): GpuiElement =
   ## Previous / Next over the waiting sessions, and auto-switch; compact, no
-  ## position and `Auto: on|off`. `.ah-inbox`: its parts 2px apart, 6px
-  ## clear of the bar's end; the position a fixed 4.5rem, centred, so the
-  ## steps do not move as it changes; the toggle outlined in the action
-  ## role, with the action mark, while on.
+  ## position and `Auto: on|off`. `.ah-inbox`: its parts 2px apart, no
+  ## margins inside the bar's controls; the position a fixed 4.5rem,
+  ## centred, so the steps do not move as it changes; the toggle without an
+  ## outline, with the action mark while on.
   let target = vm
   let position = vm.inboxPosition
   let compact = vm.compact
   let auto = vm.autoSwitch.val
-  result = r.box(pairs = [("gap", "2px"), ("items", "center"), ("flex-shrink", "0"),
-                          ("margin-right", $InboxMarginPx & "px")])
+  result = r.box(pairs = [("gap", "2px"), ("items", "center"), ("flex-shrink", "0")])
   r.tag(result, "inbox", if position.len == 0: "inbox empty" else: position)
   r.appendChild(result, r.inboxStep(p, "\xE2\x86\x90", proc() = discard target.stepInbox(-1)))
   if not compact:
     let slot = r.box(pairs = [("width", $InboxPositionPx & "px"), ("justify", "center"),
                               ("items", "center"), ("flex-shrink", "0")])
+    # `.ah-inbox-position` in the label role (the stylesheet's later rule).
     let pos = r.text(if position.len == 0: "inbox empty" else: position, CaptionPx,
-                     p.textCaption, shrink = false)
+                     p.textLabel, shrink = false)
     r.tag(pos, "inbox-position", if position.len == 0: "inbox empty" else: position)
     r.appendChild(slot, pos)
     r.appendChild(result, slot)
@@ -286,9 +298,10 @@ proc drawInbox(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM): GpuiEle
                               ("gap", "6px"), ("padding-left", "6px"),
                               ("padding-right", "6px"), ("margin-left", "4px"),
                               ("flex-shrink", "0"), ("rounded", $ControlRadiusPx & "px"),
-                              ("border-width", "1px"),
-                              ("border-color", if auto: p.borderAction else: p.ground),
                               ("cursor", cursorOf(hkControl))])
+  # No outline in the bar, on or off (`.ah-initiative-tab-bar .ah-inbox-auto`:
+  # `border-width: 0`, and while on `box-shadow: none`): "on" is told by the
+  # action mark and the body colour.
   if auto: r.appendChild(toggle, r.mark(MarkStyle(colour: p.action)))
   r.appendChild(toggle, r.text(autoLabel(vm), CaptionPx,
                                if auto: p.textBody else: p.textLabel, shrink = false))
@@ -297,14 +310,91 @@ proc drawInbox(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM): GpuiEle
   r.addEventListener(toggle, "click", proc() = target.autoSwitch.val = not target.autoSwitch.val)
   r.appendChild(result, toggle)
 
+const
+  ElsewhereInitiativePx = 144 ## the menu's initiative column: `minmax(0, 9rem)`
+  ElsewhereStatusPx = 88      ## its state column: 5.5rem
+  ElsewhereOriginPx = 28      ## its origin column: 1.75rem
+  ElsewhereColumnGapPx = 10   ## `column-gap: 0.625rem`
+  ElsewhereStackedPx = 49     ## a stacked row: two lines, 4px above and below
+
+proc drawElsewhereItem(r: GpuiRenderer; p: AhPalette; entry: ElsewhereSession;
+                       stacked: bool; onClick: proc()): GpuiElement =
+  ## One row of the sessions-started-elsewhere menu, laid out as the web lays
+  ## it out (`.ah-elsewhere-menu .ah-tab-overflow-item`, a grid): the mark,
+  ## the title, then the initiative, the state and the front-end of origin
+  ## in columns of their own, so every row's initiative and state start at
+  ## one x. The initiative is in the label role (a session of no initiative
+  ## says so in the caption role); the state and the origin are in the
+  ## caption role -- the menu does not colour the state, the mark carries it.
+  ## On a stacked bar each row takes two lines: the title and its origin,
+  ## then the initiative and the state under the title, both right ends
+  ## aligned.
+  let noInitiative = entry.initiativeTitle.len == 0
+  let initiative = r.text(if noInitiative: "no initiative" else: entry.initiativeTitle,
+                          CaptionPx, if noInitiative: p.textCaption else: p.textLabel)
+  let status = r.text(entry.item.statusLabel, CaptionPx, p.textCaption, shrink = false)
+  let title = r.text(entry.item.title, MenuItemTextPx, p.textBody,
+                     pairs = [("flex-grow", "1"), ("flex-basis", "0px"), ("min-width", "0px")])
+  var origin: GpuiElement = nil
+  if entry.item.originShort.len > 0:
+    origin = r.text(entry.item.originShort, CaptionPx, p.textCaption, shrink = false)
+  result = r.box(pairs = [("padding-left", $MenuItemPadPx & "px"),
+                          ("padding-right", $MenuItemPadPx & "px"),
+                          ("flex-shrink", "0"), ("cursor", cursorOf(hkControl))])
+  r.tag(result, "menu-item", entry.item.id)
+  if not stacked:
+    r.styles(result, [("height", $MenuItemPx & "px"), ("items", "center"),
+                      ("gap", $ElsewhereColumnGapPx & "px")])
+    r.appendChild(result, r.mark(p.markOf(entry.item.attention)))
+    r.appendChild(result, title)
+    r.styles(initiative, [("width", $ElsewhereInitiativePx & "px"),
+                          ("min-width", $ElsewhereInitiativePx & "px"), ("flex-shrink", "0")])
+    r.appendChild(result, initiative)
+    r.styles(status, [("width", $ElsewhereStatusPx & "px"),
+                      ("min-width", $ElsewhereStatusPx & "px")])
+    r.appendChild(result, status)
+    # The origin column ends at the row's right edge (`justify-self: end`).
+    let originCell = r.box(pairs = [("width", $ElsewhereOriginPx & "px"),
+                                    ("min-width", $ElsewhereOriginPx & "px"),
+                                    ("flex-shrink", "0"), ("justify", "end")])
+    if origin != nil: r.appendChild(originCell, origin)
+    r.appendChild(result, originCell)
+  else:
+    # Two grid lines, 2px apart, between 4px insets; the mark sits on the
+    # title's line, the initiative under the title, and the third column
+    # (as wide as its widest cell) holds the origin over the state, both at
+    # its right end.
+    r.styles(result, [("height", $ElsewhereStackedPx & "px"), ("flex-direction", "column"),
+                      ("justify", "center"), ("gap", "2px")])
+    # The third column (`auto`) is as wide as the wider of its two cells.
+    let thirdPx = max(textPx(entry.item.originShort, CaptionPx),
+                      textPx(entry.item.statusLabel, CaptionPx))
+    proc third(cell: GpuiElement): GpuiElement =
+      result = r.box(pairs = [("width", $thirdPx & "px"), ("min-width", $thirdPx & "px"),
+                              ("flex-shrink", "0"), ("justify", "end")])
+      if cell != nil: r.appendChild(result, cell)
+    let first = r.box(pairs = [("items", "center"), ("gap", $ElsewhereColumnGapPx & "px")])
+    r.appendChild(first, r.mark(p.markOf(entry.item.attention)))
+    r.appendChild(first, title)
+    r.appendChild(first, third(origin))
+    let second = r.box(pairs = [("items", "center"), ("gap", $ElsewhereColumnGapPx & "px"),
+                                ("padding-left", $(MarkPx + ElsewhereColumnGapPx) & "px")])
+    r.styles(initiative, [("flex-grow", "1"), ("flex-basis", "0px"), ("min-width", "0px")])
+    r.appendChild(second, initiative)
+    r.appendChild(second, third(status))
+    r.appendChild(result, first)
+    r.appendChild(result, second)
+  if onClick != nil: r.addEventListener(result, "click", onClick)
+
 proc drawElsewhere(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM): GpuiElement =
   ## The count badge of the sessions started elsewhere, and its label.
   let target = vm
   result = r.box(pairs = [("gap", "6px"), ("items", "center"), ("height", $ControlPx & "px"),
                           ("padding-left", "6px"), ("padding-right", "6px"),
                           ("rounded", $ControlRadiusPx & "px"), ("cursor", cursorOf(hkControl)),
-                          ("flex-shrink", "0")])
-  if vm.elsewhereOpen.val: r.setStyle(result, "background", p.hover)
+                          ("flex-shrink", "0"), ("margin-right", $ElsewhereMarginPx & "px")])
+  # The tertiary surface while its menu is open (`.ah-elsewhere-open`).
+  if vm.elsewhereOpen.val: r.setStyle(result, "background", p.tertiary)
   r.tag(result, "elsewhere", $vm.elsewhereCount)
   r.tag(result, "tooltip", vm.elsewhereTooltip)
   let badge = r.box(pairs = [("min-width", "18px"), ("height", "18px"), ("rounded", "9px"),
@@ -336,7 +426,8 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
   # bar ends 8px short of the window.
   let line = r.box(pairs = [("height", $StripLinePx & "px"), ("items", "center"),
                             ("gap", $BarGapPx & "px"), ("padding-right", "8px")])
-  let controls = r.box(pairs = [("gap", "8px"), ("items", "center"), ("flex-shrink", "0")])
+  let controls = r.box(pairs = [("gap", $ControlsGapPx & "px"), ("items", "center"),
+                                ("flex-shrink", "0")])
   r.tag(controls, "controls", "bar controls")
   var x = 0
   var popupLeft = -1
@@ -379,7 +470,7 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
     if overflow.len > 0: controlsPx += overflowChipWidth(overflow.len, true) + BarChipGapPx
     if not vm.stacked:
       controlsPx += inboxWidth(vm)
-      if vm.elsewhereCount > 0: controlsPx += 8 + elsewhereWidth(vm)
+      if vm.elsewhereCount > 0: controlsPx += ControlsGapPx + elsewhereWidth(vm)
     # Where each tab will end up (the popup and the overflow menu hang from
     # them): the same proportional shrink the layout applies.
     let fitted = fitWidths(widths, widthPx - 8 - controlsPx, TabMinPx, BarGapPx,
@@ -396,24 +487,25 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
             tabs[i].kind == stkSession and tabs[i].session.attention == saNeedsInput:
           inc waits
       let target = vm
-      # The bar's chip is unfilled (its own rule), 8px from "+".
+      # 8px from "+"; filled only while its menu is open.
       let chip = r.drawOverflowChip(p, overflow.len, waits, proc() =
-        target.overflowOpen.val = not target.overflowOpen.val, filled = false)
+        target.overflowOpen.val = not target.overflowOpen.val, open = vm.overflowOpen.val)
       r.setStyle(chip, "margin-right", $(BarChipGapPx - BarGapPx) & "px")
       r.appendChild(line, chip)
       x += 28 + BarChipGapPx
     if vm.elsewhereCount > 0:
       r.appendChild(controls, r.drawElsewhere(p, vm))
-      # Where the elsewhere control ends: its menu hangs right-aligned
-      # under it (`right: 0`), unless the bar is stacked.
-      elsewhereRight = widthPx - 8 - (if vm.state.val in {asReady, asError}: inboxWidth(vm) + 8
-                                      else: 0)
+      # Where the elsewhere control's anchor ends (the chip and its 4px
+      # margin, the controls' gap before the inbox): its menu hangs
+      # right-aligned under it (`right: 0`), unless the bar is stacked.
+      elsewhereRight = widthPx - 8 -
+        (if vm.state.val in {asReady, asError}: inboxWidth(vm) + ControlsGapPx else: 0)
   # "+" right after the last tab.
   let add = r.box(pairs = [("width", "26px"), ("height", "26px"), ("rounded", "13px"),
                            ("items", "center"), ("justify", "center"),
                            ("background", p.tertiary), ("flex-shrink", "0")])
   r.tag(add, "add", "+")
-  r.appendChild(add, r.text("+", BodyLargePx, p.addText, shrink = false))
+  r.appendChild(add, r.plusIcon(p))
   r.appendChild(line, add)
   if vm.state.val in {asReady, asError}: r.appendChild(controls, r.drawInbox(p, vm))
   if vm.stacked:
@@ -462,20 +554,13 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
     r.appendChild(host, menu)
   if ready and vm.elsewhereCount > 0 and vm.elsewhereOpen.val:
     let elsewhereW = if vm.stacked: widthPx - 16 else: min(ElsewhereMenuPx, widthPx - 16)
-    let left = if vm.stacked: 0 else: max(0, elsewhereRight + 4 - elsewhereW)
+    let left = if vm.stacked: 0 else: max(0, elsewhereRight - elsewhereW)
     let menu = r.drawMenu(p, below, left, elsewhereW, "elsewhere")
     for entry in vm.elsewhere:
       let id = entry.item.id
-      let where = if entry.initiativeTitle.len > 0: entry.initiativeTitle
-                  else: "no initiative"
-      var trailing = @[(where, p.textCaption),
-                       (entry.item.statusLabel, p.statusWordColour(entry.item.attention))]
-      if entry.item.originShort.len > 0: trailing.add (entry.item.originShort, p.textCaption)
       let target = vm
-      r.appendChild(menu, r.drawMenuItem(p, p.markOf(entry.item.attention), entry.item.title,
-                                         id, false, trailing,
-                                         proc() = discard target.openSession(id),
-                                         twoLines = vm.stacked))
+      r.appendChild(menu, r.drawElsewhereItem(p, entry, vm.stacked,
+                                              proc() = discard target.openSession(id)))
     r.appendChild(host, menu)
 
 proc mountInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;

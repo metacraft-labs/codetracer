@@ -30,7 +30,13 @@
 ## `data-layout-probe` attribute, so the shim records where the window laid it
 ## out (isonim-gpui `layout_bounds`), and once two consecutive ticks read the
 ## same bounds the regions are written to `--regions-out` as JSON, in window
-## pixels, beside the viewport they were measured in. The web capture writes
+## pixels, beside the viewport they were measured in. A region is the first
+## element in document order carrying its facts, or, for `"pick":
+## "last-whole"`, the last one drawn whole, its bottom edge inside the window
+## (the last row of a list the window shows entirely); a region with a
+## `pick` also reports its `index` among the matches laid out with an area,
+## as the web capture does, so the layout test can tell the same row from
+## another. The web capture writes
 ## the same file from the browser's own layout (`capture-storybook.mjs
 ## --regions`), and the CTF-P1b layout test compares the two
 ## (`src/tests/visual/agent_harbor/test_ctf_p1b_gpui_capture_matches_web_layout.nim`).
@@ -73,12 +79,19 @@ type
     quitAfterMs: uint32
     list: bool
 
+  RegionPick = enum
+    rpNone        ## no `pick`: the first match, and no index reported
+    rpFirst       ## `"pick": "first"`: the first match, with its index
+    rpLastWhole   ## `"pick": "last-whole"`: the last match the window shows whole
+
   RegionProbe = object
     ## One declared region: its name, the `data-ah-*` facts its element
-    ## carries, and the element the mounted story has for it (nil: none).
+    ## carries, how one of several matches is picked, and every element of
+    ## the mounted story that carries them, in document order (empty: none).
     name: string
     facts: seq[(string, string)]
-    element: GpuiElement
+    pick: RegionPick
+    elements: seq[GpuiElement]
 
   StoryWindow = object
     ## Everything the cdecl root builder and the tick need, which cannot be
@@ -152,6 +165,13 @@ proc readDeclaration(path: string): seq[RegionProbe] =
   for region in doc["regions"]:
     var probe = RegionProbe(name: region["name"].getStr)
     for k, v in region["gpui"].pairs: probe.facts.add (k, v.getStr)
+    probe.pick =
+      case region{"pick"}.getStr
+      of "": rpNone
+      of "first": rpFirst
+      of "last-whole": rpLastWhole
+      else: raise newException(ValueError, path & ": region " & probe.name &
+                               ": unknown pick " & region{"pick"}.getStr)
     if probe.name.len == 0 or probe.facts.len == 0:
       raise newException(ValueError, path & ": a region needs a name and gpui facts")
     result.add probe
@@ -162,26 +182,42 @@ proc matches(el: GpuiElement; facts: seq[(string, string)]): bool =
     if have.len == 0 or (want.len > 0 and have != want): return false
   true
 
-proc firstMatch(node: GpuiElement; facts: seq[(string, string)]): GpuiElement =
-  ## The first element under `node` (itself included), in document order,
-  ## carrying every fact — the order `document.querySelector` answers in.
-  if node.isNil: return nil
-  if matches(node, facts): return node
+proc allMatches(node: GpuiElement; facts: seq[(string, string)];
+                into: var seq[GpuiElement]) =
+  ## Every element under `node` (itself included), in document order,
+  ## carrying every fact — the order `document.querySelectorAll` answers in.
+  if node.isNil: return
+  if matches(node, facts): into.add node
   for i in 0 ..< childCount(node):
-    let hit = firstMatch(nthChild(node, i), facts)
-    if not hit.isNil: return hit
+    allMatches(nthChild(node, i), facts, into)
 
-proc readRegions(probes: seq[RegionProbe]): JsonNode =
-  ## The laid-out regions, or nil while any probed element has no bounds yet.
-  ## A region whose element is absent, or laid out with no area, is left out:
-  ## the web side leaves out an invisible element the same way.
+proc readRegions(probes: seq[RegionProbe]; viewportHeight: int): JsonNode =
+  ## The laid-out regions, or nil while the first match of a region has no
+  ## bounds yet. A region whose element is absent, or laid out with no area,
+  ## is left out: the web side leaves out an invisible element the same way.
+  ## Of a picked region's matches, those after the first that no frame laid
+  ## out are counted as not shown (a frame lays out the whole tree, so once
+  ## the first has bounds the others' are in the same frame or never).
   result = newJObject()
   for probe in probes:
-    if probe.element.isNil: continue
-    var x, y, w, h: float
-    if not layoutBounds(probe.element, x, y, w, h): return nil
-    if w <= 0 or h <= 0: continue
-    result[probe.name] = %*{"x": x, "y": y, "w": w, "h": h}
+    if probe.elements.len == 0: continue
+    var shown: seq[tuple[x, y, w, h: float]]
+    for i, el in probe.elements:
+      var x, y, w, h: float
+      if not layoutBounds(el, x, y, w, h):
+        if i == 0: return nil
+        continue
+      if w > 0 and h > 0: shown.add (x, y, w, h)
+      if probe.pick == rpNone: break
+    var chosen = if shown.len > 0: 0 else: -1
+    if probe.pick == rpLastWhole:
+      chosen = -1
+      for i, b in shown:
+        if b.y + b.h <= float(viewportHeight): chosen = i
+    if chosen < 0: continue
+    let b = shown[chosen]
+    result[probe.name] = %*{"x": b.x, "y": b.y, "w": b.w, "h": b.h}
+    if probe.pick != rpNone: result[probe.name]["index"] = %chosen
 
 proc writeRegions(regions: JsonNode) =
   let c = gWindow.cmd
@@ -199,7 +235,7 @@ proc regionTick() {.cdecl.} =
   ## Every `TickMs`: once two consecutive reads of the laid-out regions agree,
   ## they are the settled layout, and are written once.
   if gWindow.written: return
-  let regions = readRegions(gWindow.probes)
+  let regions = readRegions(gWindow.probes, gWindow.cmd.height)
   if regions.isNil: return
   let read = $regions
   if read == gWindow.lastRead: inc gWindow.stableReads
@@ -234,9 +270,12 @@ proc buildStory(root: GpuiElement) {.cdecl.} =
                                               c.width, c.height, c.mode, frameTitle)
   r.appendChild(root, gWindow.mount.root)
   for probe in gWindow.probes.mitems:
-    probe.element = firstMatch(gWindow.mount.root, probe.facts)
-    if not probe.element.isNil:
-      r.setAttribute(probe.element, LayoutProbeAttribute, probe.name)
+    probe.elements.setLen 0
+    allMatches(gWindow.mount.root, probe.facts, probe.elements)
+    # Only the first match is measured unless one of several is picked.
+    if probe.pick == rpNone and probe.elements.len > 1: probe.elements.setLen 1
+    for el in probe.elements:
+      r.setAttribute(el, LayoutProbeAttribute, probe.name)
   if gWindow.probes.len > 0:
     gpui_layout_bounds_reset()
     gpui_set_tick(TickMs, regionTick)

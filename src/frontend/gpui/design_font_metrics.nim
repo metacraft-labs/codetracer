@@ -15,11 +15,15 @@
 ## applied, as the desktop's labels measure without it to the pixel (BUILD
 ## 38 px, PROBLEMS 71, FIND IN FILES 83, REQUESTS 67 at 14 px with the
 ## desktop's -0.14 px letter spacing). A character outside the table is
-## budgeted as a capital M.
+## budgeted as ONE capital M -- one per character, not one per UTF-8 byte:
+## until 2026-11-08 a "…" counted three Ms and a "×" or "·" two, which
+## over-budgeted the Agent Harbor views' flex bases (an active initiative
+## tab holding "2…" and "3×" recording buttons took about 12 px more of a
+## full bar than the browser gives it).
 ##
 ## Pure: no renderer, no font file at run time.
 
-import std/math
+import std/[math, unicode]
 
 const
   GroteskRegularAdvance: array[32 .. 126, int] = [
@@ -34,16 +38,23 @@ const
   LabelLetterSpacing* = -0.14
     ## The desktop's tab and strip labels (`.lm_tab` `letter-spacing`).
 
-func groteskTextPx*(s: string; sizePx: float; letterSpacing = 0.0): int =
-  ## How many pixels Space Grotesk Regular sets `s` in at `sizePx`, to the
-  ## nearest pixel (the desktop's fractional layout lands its labels there).
-  ## Bytes, not runes: a multi-byte character counts once per byte as a
-  ## capital M, which over-budgets rather than clips.
+func groteskTextWidth*(s: string; sizePx: float; letterSpacing = 0.0): float =
+  ## How wide Space Grotesk Regular sets `s` at `sizePx`, unrounded: the
+  ## width a browser's fractional layout works with when it decides whether
+  ## items still fit on a line. Per character (a UTF-8 rune): one outside
+  ## the table counts as a capital M, which over-budgets rather than clips;
+  ## letter spacing is added once per character, as a browser adds it.
   var units = 0
-  for c in s:
-    let o = ord(c)
+  var chars = 0
+  for r in s.runes:
+    let o = int(r)
     units += (if o in GroteskRegularAdvance.low .. GroteskRegularAdvance.high:
                 GroteskRegularAdvance[o]
               else: GroteskRegularAdvance[ord('M')])
-  int(round(float(units) * sizePx / float(GroteskUnitsPerEm) +
-            letterSpacing * float(s.len)))
+    inc chars
+  float(units) * sizePx / float(GroteskUnitsPerEm) + letterSpacing * float(chars)
+
+func groteskTextPx*(s: string; sizePx: float; letterSpacing = 0.0): int =
+  ## `groteskTextWidth` to the nearest pixel (the desktop's fractional layout
+  ## lands its labels there).
+  int(round(groteskTextWidth(s, sizePx, letterSpacing)))

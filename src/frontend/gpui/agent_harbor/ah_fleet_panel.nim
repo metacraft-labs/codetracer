@@ -21,7 +21,7 @@ import nim_agents_isonim_viewmodels/agent_harbor/fleet_vm
 from ../../viewmodel/views/agent_harbor_words import
   filterLabel, filterCount, metaParts, metaPartsShort, withheldNote, headerSummary,
   AgentHarborFleetLoadingText, AgentHarborFleetEmptyText,
-  AgentHarborFleetFilteredEmptyText
+  AgentHarborFleetFilteredEmptyText, AgentHarborFleetEmptyCellText
 
 import ./ah_theme
 import ./ah_initiative_panels
@@ -32,7 +32,9 @@ const
   ColumnsFromPx = 960        ## `@container ah-fleet (min-width: 60rem)`
   NarrowHeaderPx = 640       ## `@container ah-fleet (max-width: 40rem)`
   DurationColumnPx = 80      ## 5rem
-  AgeColumnPx = 48           ## 3rem: a narrow row's age
+  LinePx = 16                ## a row's lines: `type-ui-lineheight-body-sm` / `-caption-md`
+  ChipLinePx = 18            ## the activity line: the `+N` chip's 16px line and its 1px border
+  TitleMetaGapPx = 12        ## a wide row's title and meta on one line: `column-gap: 0.75rem`
   WideAgeColumnPx = 64       ## 4rem: the "Active" column
   GridGapPx = 8
 
@@ -64,11 +66,13 @@ proc markOf(p: AhPalette; category: FleetCategory): MarkStyle =
   of fcEnded: MarkStyle(colour: p.iconSubtle)
 
 proc statusColour(p: AhPalette; category: FleetCategory): string =
+  ## The status word (`.ah-fleet-status-label`): the label role, or the
+  ## status's own text role for failed, running and needs input.
   case category
   of fcNeedsInput: p.textWarning
   of fcRunning: p.textSuccess
   of fcFailed: p.textError
-  else: p.textCaption
+  else: p.textLabel
 
 proc agentText(row: FleetRow): string =
   if row.agentCount > 1: row.agentLabel & " \xC3\x97" & $row.agentCount else: row.agentLabel
@@ -93,11 +97,28 @@ proc drawFilter(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; filter: Flee
 
 proc cell(r: GpuiRenderer; p: AhPalette; s: string; widthPx: int; name: string;
           right = false; colour = ""): GpuiElement =
-  result = r.text(s, CaptionPx, if colour.len > 0: colour else: p.textLabel,
-                  pairs = [("width", $widthPx & "px"),
-                                                     ("min-width", $widthPx & "px")])
-  if right: r.setStyle(result, "text-align", "right")
+  ## A column cell, on a 16px line (`.ah-fleet-col`: caption size,
+  ## `type-ui-lineheight-body-sm`). An empty one shows the shared placeholder
+  ## in the disabled role, whatever the row's own text colour
+  ## (`.ah-fleet-col-empty`).
+  let empty = s.len == 0
+  let words = r.text(if empty: AgentHarborFleetEmptyCellText else: s, CaptionPx,
+                     if empty: p.textDisabled
+                     elif colour.len > 0: colour else: p.textLabel,
+                     pairs = [("line-height", "16px")])
+  if right:
+    # Right-aligned (the stylesheet's `text-align: right`): the words at the
+    # end of a box of the column's width. The shim draws `text-align` too
+    # (isonim-gpui, 2026-11-08), but a cell is one line, which `justify: end`
+    # places exactly where the alignment would.
+    result = r.box(pairs = [("width", $widthPx & "px"), ("min-width", $widthPx & "px"),
+                            ("justify", "end"), ("flex-shrink", "0")])
+    r.appendChild(result, words)
+  else:
+    result = words
+    r.styles(result, [("width", $widthPx & "px"), ("min-width", $widthPx & "px")])
   r.tag(result, "col", name)
+  if empty: r.tag(result, "empty", "true")
 
 proc drawRow(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; row: FleetRow;
              columns, anyInitiative: bool; grid: FleetGrid): GpuiElement =
@@ -121,50 +142,80 @@ proc drawRow(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; row: FleetRow;
   let markHolder = r.box(pairs = [("height", "20px"), ("items", "center")])
   r.appendChild(markHolder, r.mark(p.markOf(row.category)))
   r.appendChild(result, markHolder)
+  # Every line of the row is 16px (`.ah-fleet-row-title`, `-meta`,
+  # `-failure`, `.ah-fleet-activity-line`), 2px apart, so a row is as tall as
+  # the web's: 6px, title, meta, activity (18px with its chip), 6px, the
+  # hairline -- 67px.
+  let lh = ("line-height", $LinePx & "px")
   let main = r.box(column = true, pairs = [("gap", "2px"), ("flex-grow", "1"),
                                            ("overflow", "hidden")])
   if columns: r.styles(main, [("width", $grid.session & "px"), ("flex-grow", "0"),
                               ("min-width", "0px")])
   let title = r.text(row.title, BodyPx,
                      if sel: selText
-                     elif row.titleIsPlaceholder: p.textCaption else: p.textBody)
+                     elif row.titleIsPlaceholder: p.textCaption else: p.textBody,
+                     pairs = [lh])
   r.tag(title, "title", row.title)
-  r.appendChild(main, title)
-  let meta = r.box(pairs = [("gap", "6px"), ("items", "center")])
+  let meta = r.box(pairs = [("gap", "6px"), ("items", "center"), ("min-width", "0px")])
   let status = r.text(row.statusLabel, CaptionPx,
-                      if sel: selText else: p.statusColour(row.category), shrink = false)
+                      if sel: selText else: p.statusColour(row.category), shrink = false,
+                      pairs = [lh])
   r.tag(status, "status", row.statusLabel)
   r.appendChild(meta, status)
   let metaWords = (if columns: row.metaPartsShort else: row.metaParts).join(Middot)
-  let metaText = r.text(metaWords, CaptionPx, if sel: selText else: p.textCaption)
+  let metaText = r.text(metaWords, CaptionPx, if sel: selText else: p.textCaption,
+                        pairs = [lh])
   r.tag(metaText, "meta", metaWords)
   r.appendChild(meta, metaText)
-  r.appendChild(main, meta)
+  if columns:
+    # A wide row's title and meta share a line when both fit at their own
+    # widths, 12px apart, and wrap otherwise (`.ah-fleet-row-main`: a
+    # wrapping flex row; title and meta `flex: 0 1 auto`).
+    let metaPx = textPx(row.statusLabel, CaptionPx) + 6 + textPx(metaWords, CaptionPx)
+    r.appendChild(main, r.flowLines([
+      FlowItem(el: title, widthPx: textPx(row.title, BodyPx)),
+      FlowItem(el: meta, widthPx: metaPx)], grid.session, TitleMetaGapPx, LinePx, 2))
+  else:
+    r.appendChild(main, title)
+    r.appendChild(main, meta)
   if row.failureText.len > 0:
-    let failure = r.text(row.failureText, CaptionPx, if sel: selText else: p.textError)
+    let failure = r.text(row.failureText, CaptionPx, if sel: selText else: p.textError,
+                         pairs = [lh])
     r.tag(failure, "failure", row.failureText)
     r.appendChild(main, failure)
   let shown = if row.expanded: row.activity.len else: min(1, row.activity.len)
   for i in 0 ..< shown:
     let level = if i < row.activityLevels.len: row.activityLevels[i] else: ""
-    let line = r.box(pairs = [("gap", "6px"), ("items", "center")])
+    let hasChip = i == 0 and row.activity.len + row.activityMore > 1
+    # `.ah-fleet-activity-row`: the line and the chip 8px apart.
+    let line = r.box(pairs = [("gap", "8px"), ("items", "center"), ("min-width", "0px")])
+    if hasChip: r.setStyle(line, "height", $ChipLinePx & "px")
     let t = r.text(row.activity[i], CaptionPx,
                    if sel: selText
-                   elif level == "error": p.textError else: p.textLabel)
+                   elif level == "error": p.textError else: p.rowDetail,
+                   pairs = [lh])
     r.tag(t, "activity", row.activity[i])
     r.appendChild(line, t)
-    if i == 0 and row.activity.len + row.activityMore > 1:
+    if hasChip:
       let hidden = row.activity.len - 1 + row.activityMore
       let label = if row.expanded: "less" else: "+" & $hidden
-      let more = r.box(pairs = [("height", "16px"), ("items", "center"),
+      # `.ah-fleet-activity-more`: a chip 4px further on, 6px in, the control
+      # radius, a 1px border round a 16px caption line. At rest it sits on
+      # the tertiary surface with a transparent border; on a selected row it
+      # is OUTLINED in the selection's text colour, with no fill
+      # (`.ah-fleet-row-selected .ah-fleet-activity-more`).
+      let more = r.box(pairs = [("height", $ChipLinePx & "px"), ("items", "center"),
+                                ("margin-left", "4px"),
                                 ("padding-left", "6px"), ("padding-right", "6px"),
-                                ("rounded", "4px"), ("flex-shrink", "0"),
+                                ("rounded", $ControlRadiusPx & "px"), ("flex-shrink", "0"),
+                                ("border-width", "1px"),
+                                ("border-color", if sel: selText else: p.tertiary),
                                 ("cursor", cursorOf(hkControl))])
-      # On a selected row the chip takes the selection's text, no fill.
       if not sel: r.setStyle(more, "background", p.tertiary)
       r.tag(more, "activity-more", label)
-      r.appendChild(more, r.text(label, CaptionPx - 1, if sel: selText else: p.textLabel,
-                                 shrink = false))
+      r.tag(more, "outlined", $sel)
+      r.appendChild(more, r.text(label, CaptionPx, if sel: selText else: p.textLabel,
+                                 shrink = false, pairs = [lh]))
       r.addEventListener(more, "click", proc() = vm.toggleExpanded(id))
       r.appendChild(line, more)
     r.appendChild(main, line)
@@ -178,11 +229,19 @@ proc drawRow(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; row: FleetRow;
                                    colour = c))
     r.appendChild(result, r.cell(p, row.durationLabel, DurationColumnPx, "duration", true,
                                  colour = c))
-  let age = r.text(row.ageLabel, CaptionPx, if sel: selText else: p.textCaption, shrink = false,
-                   pairs = [("width", $(if columns: WideAgeColumnPx else: AgeColumnPx) & "px"),
-                            ("text-align", "right"), ("flex-shrink", "0")])
+  # The age: the "Active" column (4rem) at a laptop's width; in a narrow
+  # panel the row's last grid column, sized to its text (`auto`).
+  let age = r.text(row.ageLabel, CaptionPx, if sel: selText else: p.textBodySubtle, shrink = false,
+                   pairs = [("flex-shrink", "0"), lh])
   r.tag(age, "age", row.ageLabel)
-  r.appendChild(result, age)
+  if columns:
+    # The column's end, as `text-align: right` puts it.
+    let ageCell = r.box(pairs = [("width", $WideAgeColumnPx & "px"), ("justify", "end"),
+                                 ("flex-shrink", "0")])
+    r.appendChild(ageCell, age)
+    r.appendChild(result, ageCell)
+  else:
+    r.appendChild(result, age)
 
 proc drawFleetPanel*(r: GpuiRenderer; host: GpuiElement; vm: FleetSnapshotVM;
                      p: AhPalette; widthPx: int) =

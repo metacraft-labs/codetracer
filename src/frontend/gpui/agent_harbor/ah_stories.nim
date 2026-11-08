@@ -63,8 +63,9 @@ proc drawFrame(r: GpuiRenderer; p: AhPalette; title: string;
   ## A panel's frame as the web story frames one (a golden-layout stack):
   ## 4px in from the window's sides, a 32px header holding the panel's tab
   ## (4px down, 24px high, rounded on top, on the panel's surface, its title
-  ## at 14px in the label role), then the panel body on the same surface,
-  ## 8px below the tab and rounded at the bottom.
+  ## at 14px in the label role, then its pin and close icons at its end,
+  ## 4.8px apart), then the panel body on the same surface, 8px below the
+  ## tab and rounded at the bottom.
   let frame = r.box(column = true, pairs = [("width", $widthPx & "px"),
                                             ("height", $heightPx & "px"),
                                             ("padding-left", $FrameInsetPx & "px"),
@@ -73,14 +74,28 @@ proc drawFrame(r: GpuiRenderer; p: AhPalette; title: string;
   let strip = r.box(pairs = [("height", $FrameTitlePx & "px"), ("flex-shrink", "0"),
                              ("items", "end")])
   r.tag(strip, "frame-header", title)
-  let tab = r.box(pairs = [("height", "24px"), ("flex-grow", "1"), ("items", "center"),
+  # `.lm_tab`: 24px, 4px down in the 32px header (4 + 24 + 4); the active
+  # tab's fill runs on down into its panel (its `box-shadow` bridge), so the
+  # box reaches the header's foot and its contents keep to the top 24px.
+  let tab = r.box(pairs = [("height", "28px"), ("flex-grow", "1"), ("items", "center"),
+                           ("padding-bottom", "4px"),
                            ("padding-left", "8px"), ("padding-right", "8px"),
                            ("background", p.panel),
                            ("border-top-left-radius", $ControlRadiusPx & "px"),
                            ("border-top-right-radius", $ControlRadiusPx & "px")])
-  let t = r.text(title, BodyPx, p.textLabel, shrink = false)
+  # `.lm_title`: 14px on the face's normal line (18px), centred in the tab.
+  let t = r.text(title, BodyPx, p.textLabel, pairs = [("flex-grow", "1"), ("line-height", "18px")])
   r.tag(t, "frame-title", title)
   r.appendChild(tab, t)
+  # `.lm_pin_tab` (0.85em, 0.3em before the close) and `.lm_close_tab`
+  # (0.6em): the active tab's icons, at full strength.
+  let pin = r.framePinIcon(p)
+  r.setStyle(pin, "margin-right", "4.8px")
+  r.tag(pin, "frame-pin", "")
+  r.appendChild(tab, pin)
+  let close = r.frameCloseIcon(p)
+  r.tag(close, "frame-close", "")
+  r.appendChild(tab, close)
   r.appendChild(strip, tab)
   r.appendChild(frame, strip)
   let body = r.box(column = true, pairs = [("flex-grow", "1"), ("min-height", "0px"),
