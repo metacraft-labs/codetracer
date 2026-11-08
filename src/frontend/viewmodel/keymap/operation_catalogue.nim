@@ -138,9 +138,8 @@ const
     op("editor.toggle-tracepoint", EditorTable, "Toggle Tracepoint"),
     # Nim's compile-time code, traced into a recording that opens in a new
     # session tab (`viewmodels/nim_tracing_vm`).
-    op("editor.trace-macro-at-cursor", EditorTable, "Trace Macro Execution"),
-    op("editor.trace-static-block-at-cursor", EditorTable,
-       "Trace Static Block Execution"),
+    # (macro and static block are catalogued with the editor's other
+    # target operations below.)
     op("editor.trace-constant-at-cursor", EditorTable,
        "Trace Constant Initializer"),
     op("editor.trace-eval", EditorTable, "Trace NimScript Evaluation"),

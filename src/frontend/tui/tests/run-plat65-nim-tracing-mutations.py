@@ -111,8 +111,8 @@ ARMS = [
      [(PTY, PTY_MAIN)],
      "the recording carries no source, and the new tab shows no code"),
     # ---- the terminal -----------------------------------------------------
-    ("T1", [(RUNTIME, "    rt.runNimTrace(nimTraceActionOfOperation(res.operation).action)",
-             "    discard")],
+    ("T1", [(RUNTIME, "    rt.runNimTrace(nimTraceActionOfOperation(c.name).action)",
+             "    discard c")],
      [(PTY, PTY_PROC)],
      "the terminal's chords run no trace"),
     ("T2", [(TUI_MAIN, "      let recorded = pollRecording() or advanceNimTrace(rt, edit, openNimTrace)",
@@ -126,8 +126,8 @@ ARMS = [
      [(PTY, PTY_MAIN)],
      "the editor menu offers no trace entry"),
     # ---- the GPUI window --------------------------------------------------
-    ("G1", [(GPUI_MAIN, "    runGpuiNimTrace(r, nimTraceActionOfOperation(res.operation).action)",
-             "    discard")],
+    ("G1", [(GPUI_MAIN, "    runGpuiNimTrace(r, nimTraceActionOfOperation(c.name).action))",
+             "    discard c)")],
      [(PLAN, PLAN_EVAL)],
      "the window's chords run no trace"),
     ("G2", [(GPUI_MAIN, "                        nimTrace = nimTraceEntriesAt(path, line, column))",

@@ -1908,10 +1908,10 @@ proc refreshCommandPaletteMenuIndex*(data: Data) =
                           (RunTestInCurrentTabLabel, aTestsRunInCurrentTab),
                           # Nim's compile-time tracing (the natives'
                           # `omnibar_sources.nimTraceCommands`).
-                          (NimTracePaletteLabels[0], aNimTraceMacro),
-                          (NimTracePaletteLabels[1], aNimTraceStaticBlock),
-                          (NimTracePaletteLabels[2], aNimTraceConstant),
-                          (NimTracePaletteLabels[3], aNimTraceEval)]:
+                          (NimTracePaletteLabels[0], aTraceMacroAtCursor),
+                          (NimTracePaletteLabels[1], aTraceStaticBlockAtCursor),
+                          (NimTracePaletteLabels[2], aTraceConstantAtCursor),
+                          (NimTracePaletteLabels[3], aTraceEval)]:
     data.ui.commandPalette.interpreter.commands[cstring(label)] = Command(
       name: cstring(label), kind: ActionCommand, action: action,
       shortcut: displayedChord(action))
@@ -6338,11 +6338,11 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     data.viewsApi.successMessage(
       cstring"View Disassembly is not yet wired up"),
   aTraceMacroAtCursor: proc(actionData: JsObject) = # aTraceMacroAtCursor
-    data.viewsApi.successMessage(
-      cstring"Trace Macro at Cursor is not yet wired up"),
+    ## Nim's compile-time tracing at the active editor's caret
+    ## (`trace_macro.startNimTrace`, through the shared ViewModel).
+    data.runNimTraceInActiveEditor(ntaMacro),
   aTraceStaticBlockAtCursor: proc(actionData: JsObject) = # aTraceStaticBlockAtCursor
-    data.viewsApi.successMessage(
-      cstring"Trace Static Block at Cursor is not yet wired up"),
+    data.runNimTraceInActiveEditor(ntaStaticBlock),
   aCollabInvite: proc(actionData: JsObject) = # aCollabInvite
     openCollabInviteDialog(@[
       cstring(cgpViewer.presetName),
@@ -6486,15 +6486,9 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   aInlineBreakpoint: proc(actionData: JsObject) = data.toggleInlineBreakpointAtCaret(),
   aConstraints: proc(actionData: JsObject) = # aConstraints
     data.openLayoutTab(Content.Constraints),
-  aNimTraceMacro: proc(actionData: JsObject) = # aNimTraceMacro
-    ## Nim's compile-time tracing at the active editor's caret
-    ## (`trace_macro.startNimTrace`, through the shared ViewModel).
-    data.runNimTraceInActiveEditor(ntaMacro),
-  aNimTraceStaticBlock: proc(actionData: JsObject) = # aNimTraceStaticBlock
-    data.runNimTraceInActiveEditor(ntaStaticBlock),
-  aNimTraceConstant: proc(actionData: JsObject) = # aNimTraceConstant
+  aTraceConstantAtCursor: proc(actionData: JsObject) = # aTraceConstantAtCursor
     data.runNimTraceInActiveEditor(ntaConstant),
-  aNimTraceEval: proc(actionData: JsObject) = # aNimTraceEval
+  aTraceEval: proc(actionData: JsObject) = # aTraceEval
     data.runNimTraceInActiveEditor(ntaEval),
 ]
 

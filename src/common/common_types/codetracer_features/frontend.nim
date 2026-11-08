@@ -358,13 +358,11 @@ type
     # View › Constraints: how a desktop user opens the pane where the layout
     # does not place it (Debug mode). Appended, for the same reason.
     aConstraints,                 # menu: View › Constraints
-    # Nim's compile-time tracing at the editor's caret (`nim_tracing_vm`):
-    # the four `editor.trace-*` operations' palette entries. Appended, for
-    # the same reason.
-    aNimTraceMacro,               # palette: Nim: Trace Macro at Cursor
-    aNimTraceStaticBlock,         # palette: Nim: Trace Static Block at Cursor
-    aNimTraceConstant,            # palette: Nim: Trace Constant at Cursor
-    aNimTraceEval                 # palette: Nim: Trace NimScript Evaluation
+    # Nim's compile-time tracing at the editor's caret (`nim_tracing_vm`),
+    # beside `aTraceMacroAtCursor` / `aTraceStaticBlockAtCursor`: the
+    # constant's and the evaluation's. Appended, for the same reason.
+    aTraceConstantAtCursor,       # palette: Nim: Trace Constant at Cursor
+    aTraceEval                    # palette: Nim: Trace NimScript Evaluation
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

@@ -35,7 +35,6 @@ const
     # how they are reached today. Each is a surface to add, or a member to retire.
     "app.suspend", "build.compile", "build.run-program-in-current-tab",
     "build.run-static", "editor.toggle-macro-expansion",
-    "editor.trace-macro-at-cursor", "editor.trace-static-block-at-cursor",
     "flow.loop-level-at-position", "flow.zoom-loop-in", "flow.zoom-loop-out",
     "help.about", "help.check-key-delivery", "help.suggest-feature",
     "help.user-manual", "layout.load", "layout.new-event-log",

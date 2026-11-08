@@ -312,7 +312,11 @@ const ContextActionOperations*: array[ContextAction, string] = [
     caVerificationCloseCounterexample: "verification.close-counterexample",
     caConstraintGoToSource: "constraints.go-to-source",
     caConstraintCopyName: "constraints.copy-name",
-    caConstraintCopySourceLocation: "constraints.copy-source-location"]
+    caConstraintCopySourceLocation: "constraints.copy-source-location",
+    caTraceMacro: "editor.trace-macro-at-cursor",
+    caTraceStaticBlock: "editor.trace-static-block-at-cursor",
+    caTraceConstant: "editor.trace-constant-at-cursor",
+    caTraceEval: "editor.trace-eval"]
   ## The operation each context menu action runs (Input-Routing §3.2): the
   ## array's index type makes it total, and `test_plat64_operation_mapping`
   ## asserts every name is catalogued and none is listed twice.
