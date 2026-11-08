@@ -1104,10 +1104,12 @@
             #
             #   a_native_recording_and_each_of_its_slices_name_the_recording
             #
-            # It records a C program with a real ``ct-mcr``, and ``ct-mcr
-            # record`` needs CPUID faulting (``arch_prctl(ARCH_SET_CPUID, 0)``),
-            # which is a property of the builder's CPU and kernel, not of the
-            # platform (``system``) this derivation declares. Nix schedules the
+            # It records a C program with a real ``ct-mcr``, and whether a real
+            # recording succeeds depends on what the builder's CPU and kernel
+            # let the recorder do -- when this was observed, ``ct-mcr record``
+            # refused a host without CPUID faulting
+            # (``arch_prctl(ARCH_SET_CPUID, 0)``) -- not on the platform
+            # (``system``) this derivation declares. Nix schedules the
             # derivation on any builder of that platform, so with the test here
             # the package built or failed by machine. Observed: codetracer
             # ``agents`` 9670eb831, job 128586976683 on high-mem-server-mcl-003
