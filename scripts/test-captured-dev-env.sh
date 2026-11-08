@@ -293,6 +293,77 @@ FLAKE
 			fail "the $signal-trap refusal replaced the previous capture"
 	done
 
+	# A comment that only mentions such a trap sets nothing and must not be
+	# refused (nor may the real development shell be, which the full capture
+	# at the top of this test already shows).
+	mkdir -p "$scratch/return-trap-comment-flake"
+	cat >"$scratch/return-trap-comment-flake/flake.nix" <<'FLAKE'
+{
+  outputs = { self, nixpkgs }: {
+    devShells = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" "x86_64-darwin" ] (system: {
+      default = nixpkgs.legacyPackages.${system}.mkShellNoCC {
+        shellHook = ''
+          # never trap cleanup RETURN here: the capture needs that trap
+          export CT_TEST_COMMENT_HOOK=1 # nor "trap 'cleanup' RETURN" here
+        '';
+      };
+    });
+  };
+}
+FLAKE
+	bash "$repo/scripts/capture-dev-env.sh" "$scratch/return-trap-comment.sh" --inputs-from "$repo" \
+		"path:$scratch/return-trap-comment-flake" >"$scratch/return-trap.out" 2>"$scratch/return-trap.err" || {
+		cat "$scratch/return-trap.err" >&2
+		fail 'a development shell that only mentions a RETURN trap in a comment was refused'
+	}
+	grep -F 'never trap cleanup RETURN here' "$scratch/return-trap-comment.sh" >/dev/null ||
+		fail 'the comment-only capture does not contain the hook it was given'
+
+	# A line that starts with `#` is not always a comment: each of these hooks
+	# sets the trap on such a line (after a backslash-newline, inside a
+	# multi-line parameter expansion, and from a here-document spliced into an
+	# `eval`), so each must still be refused.
+	for hidden in continuation expansion heredoc; do
+		mkdir -p "$scratch/return-trap-$hidden-flake"
+		case $hidden in
+		continuation) hook='echo x\
+          #;trap ct_test_trap RETURN' ;;
+		expansion) hook=": ''\${CT_TEST_UNSET:-
+          #}; trap ct_test_trap RETURN" ;;
+		heredoc) hook="ct_test_rest=\$(cat <<'EOF'
+          #;trap ct_test_trap RETURN
+          EOF
+          )
+          eval \"echo x\$ct_test_rest\"" ;;
+		esac
+		# Control: the hook, as Bash evaluates it, really sets the trap.
+		control=$(printf '%s\n' "$hook" | sed -e 's/^ \{10\}//' -e "s/''\\\${/\${/")
+		[ -n "$(bash -c 'ct_test_trap() { :; }; eval "$1" >/dev/null; trap -p RETURN' _ "$control")" ] ||
+			fail "the $hidden hook does not set a RETURN trap, so its refusal would prove nothing"
+		cat >"$scratch/return-trap-$hidden-flake/flake.nix" <<FLAKE
+{
+  outputs = { self, nixpkgs }: {
+    devShells = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" "x86_64-darwin" ] (system: {
+      default = nixpkgs.legacyPackages.\${system}.mkShellNoCC {
+        shellHook = ''
+          ct_test_trap() { :; }
+          $hook
+        '';
+      };
+    });
+  };
+}
+FLAKE
+		if bash "$repo/scripts/capture-dev-env.sh" "$scratch/return-trap-$hidden.sh" --inputs-from "$repo" \
+			"path:$scratch/return-trap-$hidden-flake" >"$scratch/return-trap.out" 2>"$scratch/return-trap.err"; then
+			fail "a development shell that sets a RETURN trap on a line starting with # ($hidden) was captured"
+		fi
+		grep -F 'the development shell sets a RETURN trap' "$scratch/return-trap.err" >/dev/null || {
+			cat "$scratch/return-trap.err" >&2
+			fail "the $hidden RETURN-trap refusal did not explain itself"
+		}
+	done
+
 	cp "$capture" "$scratch/expected"
 	if bash "$repo/scripts/capture-dev-env.sh" "$capture" "$scratch/missing-flake" >"$scratch/failed.out" 2>"$scratch/failed.err"; then
 		fail 'a missing flake unexpectedly produced a capture'

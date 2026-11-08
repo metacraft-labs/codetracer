@@ -149,7 +149,44 @@ nix print-dev-env --no-write-lock-file "$@" >"$nix_program"
 return_signal='[Rr][Ee][Tt][Uu][Rr][Nn]([^[:alnum:]_]|$)'
 return_trap_pattern="(^|[^[:alnum:]_])trap[[:space:]].*[[:space:]]['\"]?$return_signal"
 return_trap_pattern+="|['\"][[:space:]]+['\"]?$return_signal"
-if grep -nE "$return_trap_pattern" "$nix_program" >&2; then
+# A comment in the shell hook that only mentions such a trap sets nothing, but
+# a line reader cannot tell a comment from a line that merely starts with `#`:
+# after `echo x\`, inside a multi-line `${u:-…}`, or in a here-document that is
+# spliced into an `eval`, `#;trap f RETURN` sets the trap. So Bash's own parser
+# drops the comments: `bash --pretty-print` (Bash 5.2+) reprints the hook as it
+# parsed it without running any of it, and the check reads that reprint.
+# Nix prints the hook as `shellHook='…'`, a single-quoted literal in which a
+# quote is written `'\''`; the awk program below decodes it (mode=hook) or
+# prints the rest of the program (mode=rest). When the literal does not end,
+# the hook does not parse, or this Bash cannot pretty-print, the raw program
+# is checked instead, comments included.
+# shellcheck disable=SC2016 # an awk program: its `$0` is awk's, not the shell's
+split_shell_hook='
+	BEGIN { q = sprintf("%c", 39); state = 0 }
+	state == 0 && index($0, "shellHook=" q) == 1 { state = 1; $0 = substr($0, 12) }
+	state == 0 { if (mode == "rest") print; next }
+	{
+		out = ""
+		while ($0 != "") {
+			c = substr($0, 1, 1)
+			if (c == q && substr($0, 1, 4) == q "\\" q q) { out = out q; $0 = substr($0, 5); continue }
+			if (c == q) { state = 2; $0 = substr($0, 2); break }
+			out = out c; $0 = substr($0, 2)
+		}
+		if (mode == "hook") print out
+		if (state == 2) { state = 0; if (mode == "rest" && $0 != "") print }
+	}
+	END { if (state != 0) exit 1 }'
+if hook=$(awk -v mode=hook "$split_shell_hook" "$nix_program") &&
+	rest=$(awk -v mode=rest "$split_shell_hook" "$nix_program") &&
+	hook=$(printf '%s\n' "$hook" | "${BASH:-bash}" --pretty-print 2>/dev/null); then
+	checked_program=$(printf '%s\n%s\n' "$rest" "$hook")
+else
+	checked_program=$(cat "$nix_program")
+fi
+return_trap_lines=$(printf '%s\n' "$checked_program" | grep -E "$return_trap_pattern" || true)
+if [ -n "$return_trap_lines" ]; then
+	printf '%s\n' "$return_trap_lines" >&2
 	printf '%s\n' 'capture-dev-env: the development shell sets a RETURN trap (lines above); the captured environment needs that trap to restore its caller, so it was not written' >&2
 	exit 1
 fi
