@@ -123,7 +123,10 @@ run_script() {
 }
 
 summary_has() { # <out> <state> <key>
-	sed -n '/^==== build-siblings summary ====$/,$p' "$1" | grep -Eq "^  $2 +$3 "
+	# A here-string, not a pipe: under pipefail a `grep -q` that matches early
+	# can SIGPIPE `sed` and report the match as a failure
+	# (ci/test/grep-q-pipefail-gate.sh).
+	grep -Eq "^  $2 +$3 " <<<"$(sed -n '/^==== build-siblings summary ====$/,$p' "$1")"
 }
 
 # check_keep_going <label> <out> <rc>
