@@ -43,7 +43,11 @@
 ## the module's output, not replacing a collaborator. The JavaScript backend
 ## cannot start a process, so there it reads the same build's recorded
 ## transcript (`Plat56FailTranscript`), which the native run asserts the
-## compiler still writes.
+## compiler still writes. The wasm32 module cannot start one either
+## (`std/osproc` links `posix_spawnp`, which emscripten declares and does not
+## define), but its Node test host can: there `start` hands the same shell
+## command to the host's `child_process.spawnSync`, so the real `gcc` still
+## runs, on the host filesystem the lane exposes with `-sNODERAWFS`.
 
 import std/[strutils, unittest]
 
@@ -58,7 +62,9 @@ import ../../viewmodels/build_auto_reveal
 import ../../viewmodels/editor_diagnostics
 import ./build_fixtures/plat56_c_build
 
-when not defined(js):
+when defined(wasm32):
+  import std/[json, os]
+elif not defined(js):
   import std/[os, osproc]
 
 var asserted = 0
@@ -98,6 +104,25 @@ proc transcriptOf(command: string): tuple[lines: seq[string]; code: int] =
     else: (newSeq[string](), 0)
   else:
     discard
+
+when defined(wasm32):
+  proc evaluateScript(script: cstring): cstring {.importc: "emscripten_run_script_string",
+    header: "<emscripten.h>".}
+
+  proc execCmdEx(command: string): tuple[output: string; exitCode: int] =
+    ## `osproc.execCmdEx` through the Node host: the same `/bin/sh -c`
+    ## command line, its output with stderr joined to stdout (the
+    ## `poStdErrToStdOut` execCmdEx defaults to) and its exit status. JSON
+    ## carries the command and the result across the boundary, so nothing
+    ## is quoted twice.
+    let script = "JSON.stringify((function() {" &
+      "const r = require('child_process').spawnSync('/bin/sh', ['-c', " &
+      $(%("exec 2>&1\n" & command)) & "], {encoding:'utf8', maxBuffer:64*1024*1024});" &
+      "if (r.error) throw r.error;" &
+      "if (r.status === null) throw new Error('sh terminated: ' + r.signal);" &
+      "return {code:r.status, output:r.stdout};})())"
+    let response = parseJson($evaluateScript(cstring(script)))
+    (response["output"].getStr, response["code"].getInt)
 
 when not defined(js):
   var projectDir = writePlat56Project("ct-build-tasks-")
