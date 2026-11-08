@@ -606,13 +606,22 @@ else
 	actual_deps="<repro.lock not found>"
 fi
 
-if [ "$actual_deps" = "$LOCK_DECLARED_DEPS" ]; then
+# Compared as a SET (sorted, duplicates kept so a repeated name still differs):
+# `repro lock` does not keep the order of `depends` stable across refreshes.
+# The 2026-11-06 refresh (835d414b9) moved infra and isonim-platform into
+# sorted position among the same 56 members, and an ordered comparison failed
+# on a lock that declared exactly this set. The order that consumers read,
+# the build-input prefix, has its own assertion below.
+sorted_dep_set() { tr ',' '\n' <<<"$1" | LC_ALL=C sort; }
+if [ "$(sorted_dep_set "$actual_deps")" = "$(sorted_dep_set "$LOCK_DECLARED_DEPS")" ]; then
 	ok "repro.lock declares the dependency set CI provisions ($actual_deps)"
 else
 	fail "repro.lock declares the dependency set CI provisions" \
 		"this is the develop set: the build-input subset is what" \
 		"provision-repro-lock-siblings clones, and every member is what" \
 		"clone-siblings resolves a bare sibling name against" \
+		"missing from repro.lock: $(comm -23 <(sorted_dep_set "$LOCK_DECLARED_DEPS") <(sorted_dep_set "$actual_deps") | paste -sd, -)" \
+		"not declared here:      $(comm -13 <(sorted_dep_set "$LOCK_DECLARED_DEPS") <(sorted_dep_set "$actual_deps") | paste -sd, -)" \
 		"expected: $LOCK_DECLARED_DEPS" \
 		"actual:   $actual_deps"
 fi
