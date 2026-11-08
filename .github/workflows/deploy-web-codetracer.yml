@@ -436,15 +436,15 @@ jobs:
             # not build" -- `isonim_menu_shell_view.nim` calls
             # `firstElementChild`, which isonim 45673bba does not define.
             # isonim and isonim-tui refreshed again 2026-11-01.
-            isonim=6a72640a17341b9d8cd64c5d58093516707a7ae9
+            isonim=fed3655a404101ab8df997435bc4b3db000c8355
             isonim-tui=ff295f7be6d7efc095ef4d249b1df0577d969c89
-            isonim-gpui=9248fc0109a4be41b97d16140b4480fb05599558
-            nim-everywhere=1ef439320e7c11cad9a11a13960e94d37afe8482
+            isonim-gpui=c374ad4bbca0a9551ece598bf8bfa6e5248c37c3
+            nim-everywhere=23cf930e5b2463d964579b318e01e4ef1cab63b3
             nim-termctl=16a81f4d2fc90598a4c61b72aaf93b51162bed3e
             nim-pty=2845abd58dd2073475177301590c8b51aa5c9094
-            nim-acp=9f3c80611590cdd8c0dc1b9f7ad31b9741260cb6
-            nim-agent-harbor=4e9b8208b312a949a15dfcf1f3eb9491da78ad64
-            nim-agents=35f30a9543375ac9af873d69ced375295a92b3d0
+            nim-acp=d0fcc8beb97db7132cd22db7abaf49bbbbaf08c4
+            nim-agent-harbor=8d8024331ac46cae7f52bf9bff19f635e70f82f5
+            nim-agents=25c3bf7dd9ad060744452824fc44c62db08287eb
             # THE REPROBUILD-PACKAGES CATALOG, pinned to the revision the
             # locked reprobuild (flake.lock `reprobuild`, 9ceb532d) is tested
             # against: its own `.github/sibling-repos` pins

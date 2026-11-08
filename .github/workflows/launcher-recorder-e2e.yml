@@ -710,14 +710,14 @@ jobs:
             # repro.lock since 6850efc5e, and took the SHA shape because the
             # recorder repos' lock records these edges also resolve did not
             # carry it. They do now; going bare is a separate change.
-            isonim=6a72640a17341b9d8cd64c5d58093516707a7ae9
+            isonim=fed3655a404101ab8df997435bc4b3db000c8355
             isonim-tui=ff295f7be6d7efc095ef4d249b1df0577d969c89
             runquota=9818dc0c90be8ba7993424a7bbfbb6e009ffa965
             # Required by scripts/require-siblings.sh (`ct` links its reference
             # library). SHA, not bare: this workflow is also called from recorder
             # repos, whose repro.lock need not pin it. It is a flake input, so the
             # SHA is the one flake.lock pins.
-            test-certificates-tools=4b395de551d86c745d6eb8ebf7c7228df25298f5
+            test-certificates-tools=a726655886808d1062390d05c50f4fce03150eb4
 
       - name: Check the workspace has the shape the driver expects
         # Cheap, and it turns the one class of failure a local rehearsal cannot
