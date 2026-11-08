@@ -75,6 +75,7 @@ ENGINE = "src/db-backend/src/db.rs"
 
 VMU = "src/frontend/viewmodel/tests/unit/test_plat70f_pointer_shapes.nim"
 PTY = "src/frontend/tui/tests/real_terminal/test_plat70f_pointer_pty.nim"
+PTY_E = "src/frontend/tui/tests/real_terminal/test_plat70e_origin_keys_pty.nim"
 PLAN = "src/frontend/gpui/tests/test_plat70f_gpui_plan.nim"
 SPEC = "src/tests/gui/tests/value-origin/plat70f-pointer.spec.ts"
 ENGINE_TEST = "src/db-backend/tests/origin_dap_test.rs"
@@ -98,7 +99,6 @@ PTY_VT = "*::a silent peer with TERM=vt220 is never sent OSC 22"
 PTY_OFF = "*::--pointer-shapes=off asks nothing and writes nothing"
 PTY_TMUX_OFF = "*::a silent wrapped query: nothing sent, and the remedy reported"
 PTY_TMUX_ON = "*::an answered wrapped query: every sequence wrapped"
-PTY_E = "src/frontend/tui/tests/real_terminal/test_plat70e_origin_keys_pty.nim"
 PTY_HOP = "*::a press on a hop seeks to its tick, with the cursor on it"
 PLAN_SHAPES = "*::the render plan carries each element's shape"
 PLAN_HOLD = "*::during a tab drag the window's override is the gesture's"
@@ -113,6 +113,8 @@ VMU_NATIVE = "*::no native front-end module sets a cursor by name"
 ENGINE_DUNDER = "test_origin_chain_of_a_dunder_never_assigned_has_no_hop"
 ENGINE_LIST = "test_origin_chain_of_a_list_is_its_mutation_then_its_assignment"
 ENGINE_OTHER = "test_origin_chain_of_a_change_on_another_variables_line_is_unknown"
+ENGINE_GLOBAL = "test_origin_chain_of_a_global_read_in_a_function_is_its_module_write"
+ENGINE_MULTILINE = "test_origin_chain_reads_a_statement_written_over_several_lines"
 
 ARMS = [
     # ---- the shared function ------------------------------------------------
@@ -237,10 +239,10 @@ ARMS = [
      [(PLAN, PLAN_HOLD)],
      "§4: no override during a gesture"),
     # ---- the desktop --------------------------------------------------------
-    ("D1", [(STAMP, "  stampTree(documentRoot)",
-             "  discard documentRoot")],
+    ("D1", [(STAMP, "  observer.observeAll(documentRoot)",
+             "  discard observer")],
      [(SPEC, None)],
-     "§4: what is on the page carries no data-pointer"),
+     "§4: what is rendered after start-up carries no data-pointer"),
     ("D2", [(STAMP, "    setGesture(dragGestureAt(e.evTarget)))",
              "    discard dragGestureAt(e.evTarget))")],
      [(SPEC, None)],
@@ -250,18 +252,26 @@ ARMS = [
              "        (ValueRecord::Sequence { .. }, ValueRecord::Sequence { .. }) => false,")],
      [(ENGINE_TEST, ENGINE_LIST)],
      "a list that kept its contents reads as changed"),
-    ("O2", [(ENGINE, "                if first_sighting {\n                    terminator = Terminator::new(TerminatorKind::RecordingStart);",
-             "                if false {\n                    terminator = Terminator::new(TerminatorKind::RecordingStart);")],
+    ("O2", [(ENGINE, "                if first_sighting {\n                    // Seen first at this frame's start, under a name the frame never",
+             "                if false {\n                    // Seen first at this frame's start, under a name the frame never")],
      [(ENGINE_TEST, ENGINE_DUNDER)],
      "a dunder's first sighting reads as a write"),
     ("O3", [(ENGINE, "                .is_some_and(|ast| !ast.targets_variable(&current_var_name))",
              "                .is_some_and(|_ast| false)")],
-     [(ENGINE_TEST, ENGINE_DUNDER), (ENGINE_TEST, ENGINE_OTHER)],
+     [(ENGINE_TEST, ENGINE_OTHER)],
      "another variable's assignment is taken as this one's origin"),
     ("O4", [(ENGINE, "        .is_some_and(|rest| rest.starts_with('.') || rest.starts_with('['))",
              "        .is_some_and(|_rest| false)")],
      [(ENGINE_TEST, ENGINE_LIST)],
      "an in-place mutation is not a write"),
+    ("O5", [(ENGINE, "        if outer.0 < 0 || outer == frame {",
+             "        if true || outer == frame {")],
+     [(ENGINE_TEST, ENGINE_GLOBAL)],
+     "a global read in a function is not followed to the frame that wrote it"),
+    ("O6", [(ENGINE, "    let mut depth = depth_after(&first, 0);",
+             "    let mut depth = depth_after(&first, 0) * 0;")],
+     [(ENGINE_TEST, ENGINE_MULTILINE)],
+     "a statement over several lines is read as its first line"),
     # ---- the declared survivor ----------------------------------------------
     ("N1", [(SHAPE, "  $shape",
              "  result = $shape")],
@@ -447,9 +457,16 @@ def run_cargo(suite, test_filter):
         return ("GREEN", []) if "1 passed" in out or " passed;" in out else ("RAN-NOTHING", [])
     if "error: could not compile" in out:
         return "DID-NOT-COMPILE", []
-    first = [ln.strip() for ln in out.splitlines() if "panicked at" in ln or
-             ln.startswith("assertion")][:1]
-    return "RED", first
+    # The panic's place and the values it compared, without the thread's id:
+    # two arms that fail one assertion differently are told apart.
+    lines = out.splitlines()
+    for i, ln in enumerate(lines):
+        if "panicked at" in ln:
+            place = re.sub(r"^thread '([^']*)' \(\d+\) ", r"thread '\1' ", ln.strip())
+            detail = [x.strip() for x in lines[i + 1:i + 4]
+                      if x.strip().startswith(("left:", "right:", "assertion", "hops"))]
+            return "RED", [" ".join([place] + detail)]
+    return "RED", []
 
 
 def run_suite(suite, test_filter):
@@ -488,7 +505,8 @@ def run_suite(suite, test_filter):
     if refused:
         return "RED", refused[:1]
     if not failures and "Error:" in out and "[FAILED]" not in out:
-        return "DID-NOT-COMPILE", failures
+        return "DID-NOT-COMPILE", [ln.strip() for ln in out.splitlines()
+                                   if "Error:" in ln][:1]
     if not failures:
         lines = out.splitlines()
         for i, ln in enumerate(lines):
