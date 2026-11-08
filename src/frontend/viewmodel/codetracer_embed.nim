@@ -532,7 +532,9 @@ import keymap/keymap_router
 import keymap/keymap_importers
 import keymap/client_actions
 import keymap/navigation_keymap
-export keymap_router, keymap_importers, client_actions, navigation_keymap
+import input/operation_table
+export keymap_router, keymap_importers, client_actions, navigation_keymap,
+  operation_table
 
 # PLAT-8's I/O primitives are DELIBERATELY NOT HERE, and the reason is the
 # whole of §8's argument.

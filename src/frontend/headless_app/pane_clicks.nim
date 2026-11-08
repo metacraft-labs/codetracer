@@ -214,6 +214,8 @@ type
       ## The editor column pressed, 1-based (0: none).
     index*: int64
       ## A call-trace row's call index.
+    tick*: uint64
+      ## An event's or a history entry's moment.
     token*: string
       ## The word under the pointer in the editor — what the call jumps send
       ## (`callTokenAt`); empty when the press was not on a word.
@@ -243,6 +245,66 @@ type
       ## moves it there.
     anchorRow*, anchorCol*: int
       ## Where it was opened: a cell (terminal) or, scaled, a pixel (GPUI).
+
+const ContextActionOperations*: array[ContextAction, string] = [
+    caNone: "",
+    caPinLeft: "layout.pin-pane-left",
+    caPinBottom: "layout.pin-pane-bottom",
+    caPinRight: "layout.pin-pane-right",
+    caPinTop: "layout.pin-pane-top",
+    caUnpin: "layout.unpin-pane",
+    caClosePane: "layout.close-pane",
+    caMaximise: "layout.maximize-pane",
+    caCopy: "editor.copy-at",
+    caFind: "find.open",
+    caJumpToLine: "debugger.smart-jump",
+    caRunToCursor: "debugger.run-to-cursor",
+    caJumpBackwardToLine: "debugger.jump-backward-to-line",
+    caJumpToCall: "debugger.source-call-jump",
+    caJumpForwardToCall: "debugger.jump-forward-to-call",
+    caJumpBackwardToCall: "debugger.jump-backward-to-call",
+    caAddBreakpoint: "editor.add-breakpoint",
+    caToggleInlineBreakpoint: "editor.toggle-inline-breakpoint",
+    caDeleteBreakpoint: "editor.delete-breakpoint",
+    caEnableBreakpoint: "editor.enable-breakpoint",
+    caDisableBreakpoint: "editor.disable-breakpoint",
+    caDeleteBreakpointsInFile: "editor.delete-breakpoints-in-file",
+    caDeleteAllBreakpoints: "editor.delete-all-breakpoints",
+    caAddTracepoint: "editor.toggle-tracepoint",
+    caToggleCallChildren: "calltrace.toggle-call",
+    caToggleValueHistory: "variables.value-history",
+    caShowValueOrigin: "variables.show-value-origin",
+    caAddValueToScratchpad: "scratchpad.add-value",
+    caAddAllValuesToScratchpad: "scratchpad.add-all-values",
+    caJumpToValue: "variables.jump-to-value",
+    caFileCreate: "file-tree.create",
+    caFileRename: "file-tree.rename",
+    caFileDelete: "file-tree.delete",
+    caFileEdit: "file-tree.edit",
+    caAgentAttachUpload: "agent-activity.attach-upload",
+    caAgentAttachFilesFolders: "agent-activity.attach-files-folders",
+    caAgentAttachEditorSelection: "agent-activity.attach-editor-selection",
+    caAgentAttachRecording: "agent-activity.attach-recording",
+    caRequestGoToHandler: "requests.go-to-handler",
+    caRequestCopyUrl: "requests.copy-url",
+    caRequestFilterMethod: "requests.filter-method",
+    caRequestFilterStatus: "requests.filter-status",
+    caRequestClearFilters: "requests.clear-filters",
+    caLowLevelGoToSourceLine: "low-level.go-to-source-line",
+    caLowLevelShowSourceLine: "low-level.show-source-line",
+    caLowLevelCopyInstruction: "low-level.copy-instruction",
+    caLowLevelCopySourceLocation: "low-level.copy-source-location",
+    caVerificationGoToSource: "verification.go-to-source",
+    caVerificationOpenCounterexample: "verification.open-counterexample",
+    caVerificationCopyMessage: "verification.copy-message",
+    caVerificationCopyLocation: "verification.copy-location",
+    caVerificationCloseCounterexample: "verification.close-counterexample",
+    caConstraintGoToSource: "constraints.go-to-source",
+    caConstraintCopyName: "constraints.copy-name",
+    caConstraintCopySourceLocation: "constraints.copy-source-location"]
+  ## The operation each context menu action runs (Input-Routing §3.2): the
+  ## array's index type makes it total, and `test_plat64_operation_mapping`
+  ## asserts every name is catalogued and none is listed twice.
 
 const
   DesktopTabMenuLabels* = ["Pin to Left", "Pin to Bottom", "Pin to Right",
@@ -1008,6 +1070,54 @@ const ClickInventory*: array[75, ClickBehaviour] = [
       "the medium delivers it; Alt+click adds a whole-line cursor; right click " &
       "opens the editor menu",
     "select-line-at, extend-by-unit-to", nsDone, nsDone)]
+
+const
+  GestureMachine* = "gesture"
+    ## A row whose drag goes to a gesture machine (`layout_interaction`), not an
+    ## operation (Input-Routing §5.2).
+
+  ClickOperations*: seq[tuple[id, operation: string]] = @[
+    ## Each behaviour as the OPERATION its element declares (Input-Routing
+    ## §5.1). The rows `pointer_rows` holds resolve through the pointer keymap;
+    ## `test_plat64_operation_mapping` asserts every row a front-end implements
+    ## is here and names an operation that exists.
+    ("K1", "menu.open"), ("K2", "debugger.step-over"),
+    ("K3", "palette.open-commands"), ("K4", "session-tabs.activate"),
+    ("K5", "layout.activate-tab"), ("K6", GestureMachine),
+    ("K7", "context-menu.open"), ("K8", "layout.reveal-next-docked"),
+    ("K9", GestureMachine), ("K10", "editor.toggle-breakpoint"),
+    ("K11", "editor.enable-breakpoint"), ("K12", "debugger.smart-jump"),
+    ("K13", "context-menu.open"), ("K14", "editor.add-column-breakpoint"),
+    ("K15", "debugger.source-call-jump"), ("K17", "file-tree.activate"),
+    ("K18", "file-tree.activate"), ("K19", "context-menu.open"),
+    ("K20", "calltrace.go-to-call"), ("K21", "calltrace.toggle-call"),
+    ("K22", "context-menu.open"), ("K23", "context-menu.open"),
+    ("K24", "event-log.jump"), ("K25", "event-log.show-content"),
+    ("K26", "event-log.sort"), ("K27", "variables.toggle-expand"),
+    ("K28", "context-menu.open"),
+    ("K29", "variables.hide-other-process-watches"),
+    ("K31", "point-list.select"), ("K32", "terminal-output.jump-to-write"),
+    ("K33", "scratchpad.remove"), ("K34", "vcs.open-file-diff"),
+    ("K35", "search.open-result"), ("K36", "scratchpad.add-value"),
+    ("K37", "status.copy-path"), ("K38", "calltrace.go-to-call"),
+    ("K40", "variables.value-history"), ("K41", "variables.value-origin"),
+    ("K42", "context-menu.open"), ("K43", "layout.pin-pane-left"),
+    ("K53", "vcs.toggle-commit"), ("K58", "requests.go-to-handler"),
+    ("K59", "context-menu.open"), ("K60", "requests.filter-method"),
+    ("K61", "low-level.go-to-source-line"), ("K62", "context-menu.open"),
+    ("K63", "low-level.toggle-sync"), ("K64", "verification.go-to-source"),
+    ("K65", "context-menu.open"), ("K66", "verification.run"),
+    ("K67", "constraints.go-to-source"), ("K68", "context-menu.open"),
+    ("K69", "video-player.toggle-play"), ("K70", "video-player.seek-frame"),
+    ("K71", "video-player.seek-draw"), ("K72", "video-player.select-pixel"),
+    ("K73", "pixel-history.activate"), ("K74", "shader-debug.step"),
+    ("K75", "editor.select-line-at")]
+
+func clickOperationOf*(id: string): string =
+  ## The operation inventory row `id` declares, or "".
+  for (k, op) in ClickOperations:
+    if k == id: return op
+  ""
 
 func behaviour*(id: string): ClickBehaviour =
   ## The inventory row named `id` (`K1` …); an empty value for an unknown id.

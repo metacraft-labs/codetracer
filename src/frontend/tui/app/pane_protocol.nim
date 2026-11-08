@@ -169,11 +169,19 @@ proc keymapJson*(entries: seq[ReferenceEntry];
       b["shadowedBy"] = %e.shadowedBy
     result.add b
 
+func isHostedPaneOperation(name: string): bool =
+  ## Listed below, with the protocol's `pane` flag.
+  for (op, _) in PaneOperations:
+    if op == name: return true
+  for (op, _) in FrameViewerOperations:
+    if op == name: return true
+
 proc operationsJson*(): JsonNode =
   ## The operation catalogue (§E6: the plugins generate their commands from
   ## it): every catalogued operation, then the panes' own.
   result = newJArray()
   for o in Catalogue:
+    if o.arg == oaTarget and o.name.isHostedPaneOperation: continue
     result.add %*{"name": o.name, "label": o.label, "argument": $o.arg}
   for (name, label) in PaneOperations:
     result.add %*{"name": name, "label": label, "argument": "pane-target",
