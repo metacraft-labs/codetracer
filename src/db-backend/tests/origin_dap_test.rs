@@ -2050,3 +2050,92 @@ fn test_origin_summary_lazy_batch_resolves_placeholders() {
         bad_summary.terminator_kind
     );
 }
+
+// ---------------------------------------------------------------------------
+// A variable the line does not assign
+// ---------------------------------------------------------------------------
+
+fn string_value(text: &str) -> ValueRecord {
+    ValueRecord::String {
+        text: text.to_string(),
+        type_id: codetracer_trace_types::TypeId(0),
+    }
+}
+
+fn list_value(items: &[i64]) -> ValueRecord {
+    ValueRecord::Sequence {
+        elements: items.iter().map(|i| int_value(*i)).collect(),
+        is_slice: false,
+        type_id: codetracer_trace_types::TypeId(0),
+    }
+}
+
+/// What the `calc` program's module looks like: a dunder the program never
+/// assigns is first recorded on the first statement, which assigns `results`;
+/// `results` then changes through `append`, and Python's snapshot of the change
+/// is on the line after it.
+fn dunder_recipe() -> (Db, TempDir) {
+    let doc = || ("__doc__", string_value("the calculator"));
+    build_trace(Recipe {
+        source_path: "fixture.py",
+        source: "results = []\nvalue = 3\nresults.append(value)\nprint(value)\nprint(results)\n",
+        function_name: "<module>",
+        steps: vec![
+            (1, vec![doc()]),
+            (2, vec![doc(), ("results", list_value(&[]))]),
+            (3, vec![doc(), ("results", list_value(&[])), ("value", int_value(3))]),
+            (4, vec![doc(), ("results", list_value(&[3])), ("value", int_value(3))]),
+            (5, vec![doc(), ("results", list_value(&[3])), ("value", int_value(3))]),
+        ],
+        extra_calls: Vec::new(),
+    })
+}
+
+#[test]
+fn test_origin_chain_of_a_dunder_never_assigned_has_no_hop() {
+    let (db, tmpdir) = dunder_recipe();
+    let chain = run_chain(db, "__doc__", 4, tmpdir.path());
+    assert!(
+        chain.hops.is_empty(),
+        "a dunder the program never assigns was answered with another variable's write: {:?}",
+        chain.hops
+    );
+    assert_eq!(chain.terminator.kind, TerminatorKind::RecordingStart);
+    assert_eq!(chain.terminator.expression, "__doc__");
+}
+
+#[test]
+fn test_origin_chain_of_a_list_is_its_mutation_then_its_assignment() {
+    let (db, tmpdir) = dunder_recipe();
+    let chain = run_chain(db, "results", 4, tmpdir.path());
+    assert_eq!(chain.hops.len(), 2, "hops: {:?}", chain.hops);
+    assert_eq!(chain.hops[0].source_expr, "results.append(value)");
+    assert_eq!(chain.hops[0].target_expr, "results");
+    assert_eq!(chain.hops[0].location.line, 3);
+    assert_eq!(chain.hops[1].source_expr, "[]");
+    assert_eq!(chain.hops[1].target_expr, "results");
+    assert_eq!(chain.hops[1].location.line, 1);
+}
+
+#[test]
+fn test_origin_chain_of_a_change_on_another_variables_line_is_unknown() {
+    // `n` really changed, and the only line in reach assigns `m`: the hop says
+    // the source is unknown, under `n`'s own name, never `m <- bump()`.
+    let (db, tmpdir) = build_trace(Recipe {
+        source_path: "fixture.py",
+        source: "n = 1\nm = bump()\nprint(m)\n",
+        function_name: "main",
+        steps: vec![
+            (1, vec![("n", int_value(1))]),
+            (2, vec![("n", int_value(1))]),
+            (2, vec![("n", int_value(2)), ("m", int_value(0))]),
+            (3, vec![("n", int_value(2)), ("m", int_value(0))]),
+        ],
+        extra_calls: Vec::new(),
+    });
+    let chain = run_chain(db, "n", 3, tmpdir.path());
+    assert_eq!(chain.terminator.kind, TerminatorKind::UnknownSource);
+    assert_eq!(chain.hops.len(), 1, "hops: {:?}", chain.hops);
+    assert_eq!(chain.hops[0].target_expr, "n");
+    assert_eq!(chain.hops[0].kind, OriginKind::Unknown);
+}

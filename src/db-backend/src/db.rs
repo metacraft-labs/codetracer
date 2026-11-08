@@ -3453,7 +3453,13 @@ impl MaterializedOriginChainContext<'_> {
 enum BackwardScanOutcome {
     /// Found a step inside `current_frame` where `current_var` changed.
     /// `step_id` is the step at which the new value first appeared.
-    FoundInFrame { step_id: StepId, steps_scanned: u64 },
+    /// `first_sighting`: nothing earlier disagrees with this value; the variable
+    /// simply is not recorded before this step, so the step need not be a write.
+    FoundInFrame {
+        step_id: StepId,
+        steps_scanned: u64,
+        first_sighting: bool,
+    },
     /// Reached the entry of the current frame — the chain may cross into
     /// the caller via the matching `Call` event.
     FrameEntryReached { call_step: StepId, steps_scanned: u64 },
@@ -3694,6 +3700,7 @@ impl MaterializedReplaySession {
                 break;
             }
 
+            let mut first_sighting = false;
             // (1) Find the most recent step ≤ current_step inside
             //     current_frame where current_var's value changed.
             let scan_outcome = self.scan_backward_for_value_change(
@@ -3705,8 +3712,13 @@ impl MaterializedReplaySession {
                 &deadline,
             );
             let last_change_step = match scan_outcome {
-                BackwardScanOutcome::FoundInFrame { step_id, steps_scanned } => {
+                BackwardScanOutcome::FoundInFrame {
+                    step_id,
+                    steps_scanned,
+                    first_sighting: first,
+                } => {
                     metrics.steps_scanned += steps_scanned;
+                    first_sighting = first;
                     step_id
                 }
                 BackwardScanOutcome::FrameEntryReached {
@@ -3955,6 +3967,7 @@ impl MaterializedReplaySession {
                 .unwrap_or(false);
             let mut origin_step = last_change_step;
             if !line_matches_target
+                && !line_mutates_variable(&line_text, &current_var_name)
                 && let Some((prev_step, prev_line_text, prev_origin)) = self.resolve_previous_frame_source_line(
                     last_change_step,
                     current_frame,
@@ -3962,10 +3975,11 @@ impl MaterializedReplaySession {
                     meta_dat_sources_root,
                     expr_loader,
                 )
-                && classifier_lang
-                    .and_then(|lang| parse_assignment(&prev_line_text, lang))
-                    .map(|ast| ast.targets_variable(&current_var_name))
-                    .unwrap_or(false)
+                && (line_mutates_variable(&prev_line_text, &current_var_name)
+                    || classifier_lang
+                        .and_then(|lang| parse_assignment(&prev_line_text, lang))
+                        .map(|ast| ast.targets_variable(&current_var_name))
+                        .unwrap_or(false))
             {
                 line_text = prev_line_text;
                 source_origin = prev_origin;
@@ -4110,6 +4124,42 @@ impl MaterializedReplaySession {
                 break;
             }
 
+            // An assignment to something else says nothing about this variable: a
+            // hop built from it would show another variable's write as this
+            // one's origin. Where the variable was merely first seen here (a
+            // module's `__doc__`, which the program never assigns) there is no
+            // recorded write at all; where its value really changed, the change
+            // has an unknown source.
+            if classifier_lang
+                .and_then(|lang| parse_assignment(&line_text, lang))
+                .is_some_and(|ast| !ast.targets_variable(&current_var_name))
+                && !line_mutates_variable(&line_text, &current_var_name)
+            {
+                if first_sighting {
+                    terminator = Terminator::new(TerminatorKind::RecordingStart);
+                    terminator.expression = current_var_name.clone();
+                    break;
+                }
+                hops.push(OriginHop {
+                    kind: WireOriginKind::Unknown,
+                    target_expr: current_var_name.clone(),
+                    source_expr: line_text.trim().to_string(),
+                    source_variable: None,
+                    location: self.reader.load_location(origin_step, current_frame, expr_loader),
+                    source_text: line_text.clone(),
+                    step_id: last_change_step.0,
+                    frame_transition: None,
+                    operand_snapshots: Vec::new(),
+                    truncated_operands: false,
+                    confidence: 0.0,
+                    classification_provenance: Some("built-in: the line assigns another variable".to_string()),
+                    correlation_transition: None,
+                });
+                terminator = Terminator::new(TerminatorKind::UnknownSource);
+                terminator.source_line = Some(line_text);
+                break;
+            }
+
             // (3) Parse with the classifier.
             // `classify` runs against the *full source line* but stores
             // byte offsets into that line, so the `slice` calls below
@@ -4134,6 +4184,28 @@ impl MaterializedReplaySession {
             let (classification, ast_source) = match classification {
                 Some(pair) => pair,
                 None => {
+                    // `results.append(value)`: the variable changed through a method
+                    // of its own. That is a write; its earlier ones are the rest of
+                    // the chain.
+                    if line_mutates_variable(&line_text, &current_var_name) {
+                        hops.push(OriginHop {
+                            kind: WireOriginKind::Computational,
+                            target_expr: current_var_name.clone(),
+                            source_expr: line_text.trim().to_string(),
+                            source_variable: None,
+                            location: location.clone(),
+                            source_text: line_text.clone(),
+                            step_id: last_change_step.0,
+                            frame_transition: None,
+                            operand_snapshots: Vec::new(),
+                            truncated_operands: false,
+                            confidence: 0.5,
+                            classification_provenance: Some("built-in: in-place mutation".to_string()),
+                            correlation_transition: None,
+                        });
+                        current_step = StepId(last_change_step.0 - 1);
+                        continue;
+                    }
                     if last_change_step.0 > 0
                         && let Some(lang) = classifier_lang
                         && parse_call_arguments(&line_text, lang)
@@ -4419,6 +4491,7 @@ impl MaterializedReplaySession {
                                 return BackwardScanOutcome::FoundInFrame {
                                     step_id: prev_step,
                                     steps_scanned,
+                                    first_sighting: false,
                                 };
                             }
                         }
@@ -4433,6 +4506,7 @@ impl MaterializedReplaySession {
                             return BackwardScanOutcome::FoundInFrame {
                                 step_id: prev_step,
                                 steps_scanned,
+                                first_sighting: true,
                             };
                         }
                     }
@@ -4482,6 +4556,7 @@ impl MaterializedReplaySession {
                         return BackwardScanOutcome::FoundInFrame {
                             step_id: prev_step,
                             steps_scanned,
+                            first_sighting: true,
                         };
                     }
                     return BackwardScanOutcome::FrameEntryReached {
@@ -4503,6 +4578,7 @@ impl MaterializedReplaySession {
             return BackwardScanOutcome::FoundInFrame {
                 step_id: prev_step,
                 steps_scanned,
+                first_sighting: true,
             };
         }
         BackwardScanOutcome::RecordingStart { steps_scanned }
@@ -5141,27 +5217,34 @@ fn ruby_block_argument_source(line_text: &str, param_name: &str) -> Option<Strin
 }
 
 fn value_records_equal(a: &ValueRecord, b: &ValueRecord) -> bool {
-    // Equality at the wire level is value-by-value. We compare the
-    // serialised debug representation because ValueRecord does not
-    // implement PartialEq (compound types contain HashMaps etc.).
-    // The debug format is stable for primitives (int/float/string/bool)
-    // which is the only case where same-value chains arise in practice;
-    // for compound values we fall back to "not equal" which means the
-    // backward scan terminates one hop earlier — a conservative choice
-    // that never returns a wrong answer.
-    matches!(
-        (a, b),
-        (ValueRecord::Int { i: ai, .. }, ValueRecord::Int { i: bi, .. }) if ai == bi
-    ) || matches!(
-        (a, b),
-        (ValueRecord::Float { f: af, .. }, ValueRecord::Float { f: bf, .. }) if af == bf
-    ) || matches!(
-        (a, b),
-        (ValueRecord::String { text: at, .. }, ValueRecord::String { text: bt, .. }) if at == bt
-    ) || matches!(
-        (a, b),
-        (ValueRecord::Bool { b: ab, .. }, ValueRecord::Bool { b: bb, .. }) if ab == bb
-    )
+    // Value by value, compound values element by element: a list that kept its
+    // contents did not change, and a backward scan that believed it had would
+    // name the query's own line as the write. A `Cell` names a place, not a
+    // value, so it counts as changed: the scan stops one hop early,
+    // which never reports a wrong write further back.
+    fn all_equal(a: &[ValueRecord], b: &[ValueRecord]) -> bool {
+        a.len() == b.len() && a.iter().zip(b).all(|(x, y)| value_records_equal(x, y))
+    }
+    match (a, b) {
+        (ValueRecord::Int { i: x, .. }, ValueRecord::Int { i: y, .. }) => x == y,
+        (ValueRecord::Float { f: x, .. }, ValueRecord::Float { f: y, .. }) => x == y,
+        (ValueRecord::Bool { b: x, .. }, ValueRecord::Bool { b: y, .. }) => x == y,
+        (ValueRecord::String { text: x, .. }, ValueRecord::String { text: y, .. }) => x == y,
+        (ValueRecord::None { .. }, ValueRecord::None { .. }) => true,
+        (ValueRecord::Sequence { elements: x, .. }, ValueRecord::Sequence { elements: y, .. }) => all_equal(x, y),
+        (ValueRecord::Tuple { elements: x, .. }, ValueRecord::Tuple { elements: y, .. }) => all_equal(x, y),
+        (ValueRecord::Struct { field_values: x, .. }, ValueRecord::Struct { field_values: y, .. }) => all_equal(x, y),
+        (ValueRecord::Raw { r: x, .. }, ValueRecord::Raw { r: y, .. }) => x == y,
+        _ => false,
+    }
+}
+
+/// Whether `line` changes `name` through its own members: `name.append(v)`,
+/// `name[0] = v`. A word boundary is the character right after the name.
+fn line_mutates_variable(line: &str, name: &str) -> bool {
+    line.trim_start()
+        .strip_prefix(name)
+        .is_some_and(|rest| rest.starts_with('.') || rest.starts_with('['))
 }
 
 // ---------------------------------------------------------------------------
