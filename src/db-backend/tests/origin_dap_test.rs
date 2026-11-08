@@ -2195,5 +2195,9 @@ fn test_origin_chain_reads_a_statement_written_over_several_lines() {
     let chain = run_chain(db, "EXPRESSIONS", 4, tmpdir.path());
     assert_eq!(chain.hops.len(), 1, "hops: {:?}", chain.hops);
     assert_eq!(chain.hops[0].location.line, 1);
-    assert!(chain.hops[0].source_expr.starts_with('['), "source: {:?}", chain.hops[0].source_expr);
+    assert!(
+        chain.hops[0].source_expr.starts_with('['),
+        "source: {:?}",
+        chain.hops[0].source_expr
+    );
 }

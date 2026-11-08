@@ -3700,7 +3700,9 @@ impl MaterializedReplaySession {
                 break;
             }
 
-            let mut first_sighting = false;
+            // Set by the `FoundInFrame` arm below; every other arm leaves the
+            // loop (`continue` or `break`) before the read after the match.
+            let first_sighting;
             // (1) Find the most recent step ≤ current_step inside
             //     current_frame where current_var's value changed.
             let scan_outcome = self.scan_backward_for_value_change(
