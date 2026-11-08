@@ -368,7 +368,12 @@ proc pythonRecorderBuilt(repo: string): bool =
 proc ensurePythonRecorderBuilt(repo: string): tuple[ok: bool, diagnostic: string] =
   if pythonRecorderBuilt(repo):
     return (true, "")
-  let (output, code) = runInRecorderShell(repo, "just venv 3.13 dev")
+  # `just venv dev` builds on the interpreter the recorder's `.python-version`
+  # declares. It no longer takes a version: `just venv 3.13 dev` passed 3.13
+  # to one `uv sync`, and `dev`'s `uv run` then rebuilt `.venv` on the
+  # declared version anyway, so this always got a 3.12 build while asking for
+  # 3.13. Another interpreter is selected with UV_PYTHON, for every uv call.
+  let (output, code) = runInRecorderShell(repo, "just venv dev")
   if code != 0 or not pythonRecorderBuilt(repo):
     return (false, "failed to build the Python recorder (exit " & $code &
       "):\n" & output)
