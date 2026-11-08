@@ -1,3 +1,4 @@
+import { pressGlyph } from "../../../lib/glyph-column";
 import type { Locator, Page } from "@playwright/test";
 import { EditorLine } from "./editor-line";
 import { FlowValue } from "./flow-value";
@@ -171,6 +172,11 @@ export class EditorPane {
       );
     }
     await this.page.mouse.click(coordsForClick.x, coordsForClick.y);
+  }
+
+  /** Press this line's glyph cell (the breakpoint column, Editor-Pane.md MC.5). */
+  async pressGlyph(lineNumber: number, button: "left" | "right" = "left"): Promise<void> {
+    await pressGlyph(this.page, lineNumber, { button });
   }
 
   gutterElement(lineNumber: number): Locator {

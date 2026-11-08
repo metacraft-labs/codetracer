@@ -126,6 +126,8 @@ type
       ## moved by the keyboard, distinct from the execution pointer and the
       ## inspection cursor — or 0 for none.
     caretColumn*: int
+    extraCarets*: seq[tuple[line, column: int]]
+      ## The other cursors (Alt+click, MC.4).
       ## Its 1-based column.
     crossRefLine*: int
       ## PLAT-60: the line the Low Level Code listing's selected instruction

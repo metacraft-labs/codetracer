@@ -52,6 +52,7 @@ type
     grBreakpoint = "breakpoint"
     grBreakpointDisabled = "breakpoint disabled"
     grTracepoint = "tracepoint"
+    grBreakpointTracepoint = "breakpoint-tracepoint"
     grNeedle = "timeline needle"
     grSpan = "timeline span"
     grDotFill = "dotted fill"
@@ -140,6 +141,7 @@ const
     grBreakpoint:          ["●",      "●",    "*",   "*"],
     grBreakpointDisabled:  ["○",      "○",    "o",   "o"],
     grTracepoint:          ["◆",      "♦",    "+",   "+"],
+    grBreakpointTracepoint: ["◉",     "●",    "@",   "@"],
     grNeedle:              ["▲",      "▲",    "^",   "^"],
     grSpan:                ["█",      "█",    "#",   RvSpace],
     grDotFill:             ["·",      "·",    ".",   "."],

@@ -35,7 +35,7 @@ from viewmodels/product_mode import editorTabLabel
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 118
+const ExpectedAssertions = 119
   ## Two checks cover Top in the tab and dock-label menus.
   ## K19: 108 -> 116 — a Files node opens the Files pane's menu (its four
   ## rows, the reason on three, a disabled entry inert, Edit opening the
@@ -58,7 +58,6 @@ const
   RightButton = 2
   MiddleButton = 1
   CtrlLeft = 16
-  AltLeft = 8
   CtrlAltLeft = 24
 
 type Snapshot = seq[seq[Cell]]
@@ -221,9 +220,8 @@ proc waitTick(sess: var TuiTestSession; changedFrom: int;
     result = sess.rowText(0).tickOf
 
 proc editorRowOfLine(s: Snapshot; line: int): (int, int) =
-  ## The screen row the editor draws source line `line` on, and the column
-  ## of its number — the gutter's line-number field, right of the Files
-  ## pane's divider.
+  ## The screen row the editor draws source line `line` on, and the column of
+  ## its glyph cell, right of the Files pane's divider (Editor-Pane.md MC.5).
   let needle = " " & $line & " "
   for r in 2 ..< Rows - 1:
     let t = s.text(r)
@@ -231,7 +229,7 @@ proc editorRowOfLine(s: Snapshot; line: int): (int, int) =
     if bar < 0: continue
     let c = t.cellFind(needle, t.runeOffset(bar))
     if c >= 0 and c < bar + 8:
-      return (r, c + 1)
+      return (r, bar + 1)
   (-1, -1)
 
 proc pointerLine(s: Snapshot): int =
@@ -377,11 +375,11 @@ suite "PLAT-50 on a real terminal: the editor (K10-K13)":
     for label in ["Find", "Jump to line", "Run to Cursor",
                   "Jump backward to line", "Jump to call",
                   "Jump forward to call", "Jump backward to call",
-                  "Add breakpoint", "Add tracepoint"]:
+                  "Add breakpoint", "Add Inline Breakpoint", "Add tracepoint"]:
       order.add s.findRow(label, fromCol = cc - 4)[0]
     ck rcopy >= 0
     ck order == @[rcopy + 1, rcopy + 2, rcopy + 3, rcopy + 4, rcopy + 5,
-                  rcopy + 6, rcopy + 7, rcopy + 8, rcopy + 9]
+                  rcopy + 6, rcopy + 7, rcopy + 8, rcopy + 9, rcopy + 10]
     ck rc == rcopy + 3
     # Every entry is enabled, as on the desktop: none drawn in the
     # disabled (italic) tier.
@@ -411,14 +409,15 @@ suite "PLAT-50 on a real terminal: the editor (K10-K13)":
     let (rd, cd) = sess.waitFor("Disable breakpoint")
     let s = sess.snap()
     ck s.findRow("Delete breakpoint", fromCol = cd - 2)[0] == rd + 1
-    ck s.findRow("Delete breakpoints in file", fromCol = cd - 2)[0] == rd + 2
-    ck s.findRow("Delete ALL breakpoints", fromCol = cd - 2)[0] == rd + 3
+    ck s.findRow("Add Inline Breakpoint", fromCol = cd - 2)[0] == rd + 2
+    ck s.findRow("Delete breakpoints in file", fromCol = cd - 2)[0] == rd + 3
+    ck s.findRow("Delete ALL breakpoints", fromCol = cd - 2)[0] == rd + 4
     ck s.findRow("Add breakpoint", fromCol = cd - 2)[0] < 0
     sess.press(rd, cd + 2)
     discard sess.waitFor("○ 31")
     sess.press(r31, c31 + 12, RightButton)
     let (ra, ca) = sess.waitFor("Delete ALL breakpoints")
-    ck sess.snap().findRow("Enable breakpoint", fromCol = ca - 2)[0] == ra - 3
+    ck sess.snap().findRow("Enable breakpoint", fromCol = ca - 2)[0] == ra - 4
     sess.press(ra, ca + 2)
     discard sess.waitFor("○ 31", present = false)
     ck sess.rowText(StatusRow).contains("deleted the breakpoints")
@@ -626,17 +625,19 @@ proc osc52(sess: var TuiTestSession): seq[string] =
 
 suite "PLAT-50 on a real terminal: column breakpoints and call jumps (K14, K15)":
 
-  test "Alt+click anchors a breakpoint at the column; the replay honours it":
+  test "Shift+F9 at the caret anchors a breakpoint at the column; the replay honours it":
     var sess = open()
     sess.stepToAdd()
     let (r31, _) = sess.snap().editorRowOfLine(31)
     let line = sess.snap().text(r31)
     let at = line.cellFind("left + right")
     ck at > 0
-    sess.press(r31, at, AltLeft)
-    discard sess.waitFor("a breakpoint at line 31, column 12")
+    sess.press(r31, at)
+    sleep(400)
+    sess.send("\e[20;2~")
+    discard sess.waitFor("inline breakpoint toggled at line 31, column 12")
     let s = sess.snap()
-    # The gutter's mark, and the anchored cell underlined in the
+    # The mark in the glyph column, and the anchored cell underlined in the
     # breakpoint's colour (the desktop's `ct-column-breakpoint-marker`).
     ck s.text(r31).contains("● 31")
     ck s[r31][at].underline != usNone

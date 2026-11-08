@@ -107,7 +107,10 @@ type
     line*: int
       ## An editor row's line.
     button*: GClickButton
-    ctrl*, alt*: bool
+    ctrl*, alt*, shift*: bool
+    clickCount*: int
+      ## The platform's count (GPUI's `MouseDownEvent.click_count`), 0 when the
+      ## event carries none.
     x*, y*: int
       ## The press, in window pixels.
 
@@ -172,10 +175,12 @@ proc wireOne(r: GpuiRenderer; el: GpuiElement; c: GPaneClick;
     click.button = buttonOf(ev)
     click.ctrl = gmControl in ev.modifiers
     click.alt = gmAlt in ev.modifiers
+    click.shift = gmShift in ev.modifiers
     let p = pointerOf(ev)
     if p.valid:
       click.x = int(p.x)
       click.y = int(p.y)
+      click.clickCount = p.clickCount
     onClick(click)
   for name in ["mousedown", "contextmenu", "auxdown"]:
     r.addEventListener(el, name, handler)

@@ -826,6 +826,29 @@ proc moveCaretTo*(d: var EditingDocument; line, column: int) =
   ## normalisation invariant `FUZZ-3` asserts holds by construction.
   d.state.selection = caretSelection(d.offsetAt(line, column))
 
+func offsetAtView*(d: EditingDocument; line, viewColumn: int): int =
+  ## The byte offset of the 0-based (line, view column), the terminal's and
+  ## GPUI's hit test, clamped into the document. A column past the end of the
+  ## line is the end of the line; tabs and wide glyphs are counted as painted.
+  let ls = d.lines
+  if ls.len == 0:
+    return 0
+  let l = clamp(line, 0, ls.len - 1)
+  toTextStore(d.state.doc).offsetOf(TextPos(
+    line: l, column: offsetAtColumn(ls[l], viewColumn, ViewColumnPolicy)))
+
+func secondaryCarets*(d: EditingDocument): seq[tuple[line, column: int]] =
+  ## The cursors other than the primary, as 1-based lines and view columns: an
+  ## added cursor is painted where it is (Alt+click, Editor-Pane.md MC.4).
+  let text = d.text
+  let ls = d.lines
+  for i, r in d.state.selection.ranges:
+    if i == d.state.selection.primaryIndex:
+      continue
+    let p = caretPosOf(text, r.head)
+    if p.line < ls.len:
+      result.add (p.line + 1, columnAt(ls[p.line], p.column, ViewColumnPolicy) + 1)
+
 proc extendSelectionTo*(d: var EditingDocument; line, column: int) =
   ## Keep the main selection's anchor and move its head to the 0-based
   ## (line, cluster column) — a pointer DRAG over the text, every

@@ -53,10 +53,10 @@ proc breakpointAt*(store: ReplayDataStore; path: string;
 
 func plannedToggle*(held: openArray[BreakpointSpec];
                     line: int): seq[BreakpointSpec] =
-  ## A gutter click: the breakpoint on `line` removed if there is one (armed
-  ## or not — toggling a disabled breakpoint removes it, as the desktop's
-  ## gutter does), else a whole-line breakpoint added. Every other
-  ## breakpoint is kept as it is.
+  ## A press on the glyph column: the breakpoint on `line` removed if there is
+  ## one (armed or not, line or column, as VS Code's glyph click removes every
+  ## breakpoint on the line), else a whole-line breakpoint added. Every other
+  ## line is kept as it is. The engine binds one breakpoint per line.
   var removing = false
   for sp in held:
     if sp.line == line: removing = true
@@ -66,26 +66,62 @@ func plannedToggle*(held: openArray[BreakpointSpec];
 
 func plannedAnchored*(held: openArray[BreakpointSpec]; line, column: int;
                       condition = ""; logMessage = ""): seq[BreakpointSpec] =
-  ## A breakpoint at `line` anchored at `column` — the desktop's Alt+click
-  ## (Column-Aware Navigation M6), with an optional condition (M9) or log
-  ## message (M10). It REPLACES whatever the line had (one breakpoint per
-  ## line) and is never a toggle.
+  ## A breakpoint at `line` anchored at `column` (Column-Aware Navigation M6),
+  ## with an optional condition (M9) or log message (M10). It REPLACES whatever
+  ## the line had (the engine binds one breakpoint per line) and is never a
+  ## toggle.
   for sp in held:
     if sp.line != line: result.add sp
   result.add BreakpointSpec(line: line, column: max(0, column),
                             condition: condition, logMessage: logMessage,
                             enabled: true)
 
+func plannedInlineToggle*(held: openArray[BreakpointSpec];
+                          line, column: int): seq[BreakpointSpec] =
+  ## `toggle-inline-breakpoint` at a caret on column 2 or later: the column
+  ## breakpoint there removed if the line has one, else one put there in place
+  ## of whatever the line had (Editor-Pane.md § Inline breakpoints).
+  for sp in held:
+    if sp.line == line and sp.column == column:
+      for other in held:
+        if other.line != line: result.add other
+      return
+  result = plannedAnchored(held, line, column)
+
+func inlineBreakpointPlan*(held: openArray[BreakpointSpec]; line, column,
+                           lineMaxColumn: int;
+                           columnsSupported = true): seq[BreakpointSpec] =
+  ## The one rule for the caret's column, every front-end's: clamped to the
+  ## line's last column; column 1 is a line breakpoint (Column-Aware M6's
+  ## invariant), and so is every column when the recorder does not advertise
+  ## column breakpoints.
+  var col = max(1, column)
+  if lineMaxColumn >= 1:
+    col = min(col, lineMaxColumn)
+  if col < 2 or not columnsSupported:
+    plannedToggle(held, line)
+  else:
+    plannedInlineToggle(held, line, col)
+
+func columnBreakpointAt*(held: openArray[BreakpointSpec];
+                         line, column: int): bool =
+  ## Whether a column breakpoint is bound there: the menu's Add / Remove.
+  for sp in held:
+    if sp.line == line and sp.column == column and column >= 2:
+      return true
+
 func plannedEnabled*(held: openArray[BreakpointSpec]; line: int;
                      enabled: bool): Option[seq[BreakpointSpec]] =
   ## The breakpoint on `line` armed or disarmed, everything else kept; `none`
   ## when the line has no breakpoint (a right-click on an empty gutter slot
-  ## does nothing).
+  ## does nothing). Its line breakpoint when it has one, which a column
+  ## breakpoint on the same line does not follow.
   var found = false
   var plan: seq[BreakpointSpec] = @[]
+  let target = breakpointAt(held, line)
   for sp in held:
     var s = sp
-    if s.line == line:
+    if target.isSome and s.line == line and s.column == target.get.column:
       found = true
       s.enabled = enabled
     plan.add s
@@ -185,6 +221,12 @@ proc setAnchoredBreakpoint*(store: ReplayDataStore; path: string;
   ## (`plannedAnchored`).
   store.requestBreakpoints(path, plannedAnchored(store.heldBreakpoints(path),
     line, column, condition, logMessage))
+
+proc toggleInlineBreakpoint*(store: ReplayDataStore; path: string; line, column,
+                             lineMaxColumn: int; columnsSupported = true) =
+  ## Shift+F9 and the context menu's inline entry, at the caret.
+  store.requestBreakpoints(path, inlineBreakpointPlan(
+    store.heldBreakpoints(path), line, column, lineMaxColumn, columnsSupported))
 
 proc setBreakpointEnabled*(store: ReplayDataStore; path: string; line: int;
                            enabled: bool): bool =

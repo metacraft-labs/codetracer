@@ -461,6 +461,7 @@ proc markName(m: GutterMark): string =
   of gmBreakpoint: "breakpoint"
   of gmBreakpointDisabled: "breakpoint-disabled"
   of gmTracepoint: "tracepoint"
+  of gmBreakpointTracepoint: "breakpoint-tracepoint"
   of gmNone: ""
 
 proc decorationsOf(s: ServerSession): JsonNode =

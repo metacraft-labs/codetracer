@@ -8360,3 +8360,13 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   407 and Ghostty 1.3.1 ignore the empty `OSC 22 ; ST` reset, so they are given their I-beam by name.
   A SIGTSTP on a pty whose session is the binary's own is discarded by the kernel (orphaned group), so
   the restore and the resume arrive together; a test reads both, it cannot see the stop in between.
+
+## The editor's pointer (multi-click, gutter zones, Alt+click)
+- `viewmodel/input/editor_pointer.nim` is the terminal's and GPUI's whole pointer model: a front-end hit-tests to a `PointerHit`, calls `pressEditor` / `dragEditor`, and performs the `PointerEffect` that comes back. Add a gesture as a row of `EditorPointerRows`, not as a `case` in a view.
+- `PointerAnchor.selection` is what makes the anchor die: `pointerAnchorAlive` compares it with the document's selection, so no other operation has to clear it.
+- A press names a caret boundary on pixels and a cell on the terminal without DECSET 1016 (`cellHit`); the two differ only on a single separator.
+- A press with no release since, at the same place, is a duplicate (`ClickCount.duplicate`). `--window-ops`' `click:` has no release of its own, so it calls `releaseEditor` after dispatching; a test that fires presses without releases sees duplicates.
+- GPUI's window rows are new elements after every redraw: call `wireClicks` after redrawing them or the next press finds no wired row.
+- A press event's key is `x,y,count` for left and middle presses (the platform's click count), read by `pointerOf`.
+- The glyph column on the desktop is Monaco's glyph margin: marks have no element keyed by line, so tests read `getLineDecorations` (`src/tests/gui/lib/glyph-column.ts`). `JsAssoc[int, _]` keys are strings at run time.
+- Line and column breakpoints coexist on a line: `plannedToggle` is the line's, `plannedInlineToggle` a column's.

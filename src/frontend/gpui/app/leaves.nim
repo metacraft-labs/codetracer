@@ -253,6 +253,8 @@ const
     ## browser accumulates inline runs at 1/64 px and rounds once.
     ##
     ## This asks for the same thing: one rounding for the whole row.
+  GutterHintAttribute* = "data-ct-gutter-hint"
+    ## On the hover hint's disc: its line (gesture 7a).
   GutterLaneAttribute* = "data-ct-gutter-lane"
     ## **WHICH LANE OF THE GUTTER A RUN IS** — `pointer`, `mark` or `number`
     ## (`GutterRunKind`). PLAT-35 / `PLAT35-F13`, `PLAT35-F14`.
@@ -340,6 +342,7 @@ const
   BreakpointGlyph* = "●"
   BreakpointDisabledGlyph* = "○"
   TracepointGlyph* = "◆"
+  BreakpointTracepointGlyph* = "◉"
   EmptyLaneGlyph* = "\u00A0"
     ## **AN EMPTY LANE IS ONE NO-BREAK SPACE, and the no-break is load-bearing
     ## rather than tidy.** Each lane is drawn as its own span (see
@@ -400,6 +403,7 @@ func markGlyph*(m: EditorMark): string =
   of emBreakpoint: BreakpointGlyph
   of emBreakpointDisabled: BreakpointDisabledGlyph
   of emTracepoint: TracepointGlyph
+  of emBreakpointTracepoint: BreakpointTracepointGlyph
 
 var executionMarkFile {.threadvar.}: string
 
@@ -545,6 +549,7 @@ func markColour*(m: EditorMark; inherited: string): string =
   of emBreakpointDisabled:
     DesignTokenHex[dtColorsUiSurfacePrimaryTertiary][dmDark]
   of emTracepoint: DesignTokenHex[dtColorsUiBorderAction][dmDark]
+  of emBreakpointTracepoint: DesignTokenHex[dtColorsUiTextErrorPrimary][dmDark]
 
 const GutterGap* = "\u00A0\u00A0\u00A0\u00A0"
   ## Between the gutter and the code. A reader — a person, or PLAT-39's
@@ -845,6 +850,7 @@ func gpuiTokenFor*(role: TextRole; row: EditorRow): string =
     of emBreakpoint: "gutter.breakpoint.enabled"
     of emBreakpointDisabled: "gutter.breakpoint.disabled"
     of emTracepoint: "gutter.tracepoint"
+    of emBreakpointTracepoint: "gutter.breakpoint.enabled"
     of emNone: "editor.lineNumber.foreground"
   of trPaneTitle: "pane.title.foreground"
   of trValueName: "value.name.foreground"
@@ -1109,6 +1115,9 @@ func editorNumberWidth*(rows: openArray[EditorRow]): int =
     result = max(result, len($row.line))
 
 const
+  GutterBreakpointHintColour* = DesignTokenHex[dtColorsUiSurfaceAlertError][dmDark]
+    ## `gutter.breakpoint.hint`: distinct from the enabled breakpoint's red and
+    ## the disabled one's muted ground (Editor-Pane.md MC.5).
   EditorGutterPx* = 110
     ## The code column starts after this margin. Lane order, ownership and
     ## widths inside it come from editor_gutter_lanes at CodeFontPx.
@@ -1479,9 +1488,15 @@ const
   DiagnosticSquigglePx* = 2
     ## The squiggle's thickness at the row's foot.
 
+func extrasOn(surface: EditorSurface; line: int): seq[int] =
+  for c in surface.extraCarets:
+    if c.line == line:
+      result.add c.column
+
 proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
                      numberWidth = 1; skipCols = 0;
                      caretColumn = 0;
+                     extraCarets: openArray[int] = [];
                      selected: openArray[tuple[fromColumn, toColumn: int]] = [];
                      findMarks: openArray[tuple[fromColumn, toColumn: int;
                                                 current: bool]] = [];
@@ -1590,7 +1605,7 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
       r.setStyle(lane, "justify", "end")
       if not stickyHeader:
         r.appendChild(lane, r.createTextNode($row.line))
-    of gbMarker:
+    of gbGlyph:
       r.setAttribute(lane, GutterLaneAttribute, $grkMark)
       r.setStyle(lane, "color", runs3[1].colour)
       r.setStyle(lane, "position", "relative")
@@ -1599,16 +1614,31 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
         # glyph sizes and separation stay local to that band; neither changes
         # the flow width or the following folding control's position.
         let side = if row.mark == emTracepoint: 10 else: GutterBreakpointPx
+        let widthOfLane = band.rightPx - band.leftPx
         let disc = r.createElement("div")
         r.setAttribute(disc, "data-ct-mark-glyph", runs3[1].text)
         r.setStyle(disc, "position", "absolute")
-        r.setStyle(disc, "left", (if row.mark == emTracepoint: "11px" else: "0px"))
+        r.setStyle(disc, "left", $((widthOfLane - side) div 2) & "px")
         r.setStyle(disc, "top", formatFloat(float(EditorLinePx - side) / 2,
                                             ffDecimal, 1) & "px")
         r.setStyle(disc, "width", $side & "px")
         r.setStyle(disc, "height", $side & "px")
         r.setStyle(disc, "rounded", $(side div 2 + 1) & "px")
         r.setStyle(disc, "background-color", runs3[1].colour)
+        r.setStyle(disc, "flex-shrink", "0")
+        r.appendChild(lane, disc)
+      elif row.hinted:
+        # Gesture 7a: `gutter.breakpoint.hint`, a colour of its own.
+        let disc = r.createElement("div")
+        r.setAttribute(disc, GutterHintAttribute, $row.line)
+        r.setStyle(disc, "position", "absolute")
+        r.setStyle(disc, "left", $((band.rightPx - band.leftPx - GutterBreakpointPx) div 2) & "px")
+        r.setStyle(disc, "top", formatFloat(float(EditorLinePx - GutterBreakpointPx) / 2,
+                                            ffDecimal, 1) & "px")
+        r.setStyle(disc, "width", $GutterBreakpointPx & "px")
+        r.setStyle(disc, "height", $GutterBreakpointPx & "px")
+        r.setStyle(disc, "rounded", $(GutterBreakpointPx div 2 + 1) & "px")
+        r.setStyle(disc, "background-color", GutterBreakpointHintColour)
         r.setStyle(disc, "flex-shrink", "0")
         r.appendChild(lane, disc)
     of gbFolding:
@@ -1632,7 +1662,7 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
         r.setStyle(chevron, "height", $side & "px")
         r.appendChild(holder, chevron)
         r.appendChild(lane, holder)
-    of gbVcs, gbVcsSplit, gbMarkerGap:
+    of gbVcs, gbVcsSplit:
       discard # Reserved even when this row has no indicator to paint.
     r.appendChild(gutter, lane)
   if stickyHeader:
@@ -1726,6 +1756,19 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
       r.setStyle(band, "height", $DiagnosticSquigglePx & "px")
       r.setStyle(band, "background", colourOf(d.severity))
       r.appendChild(column, band)
+  for extra in extraCarets:
+    if extra > skipCols:
+      r.setStyle(column, "position", "relative")
+      let caret = r.createElement("div")
+      r.setAttribute(caret, EditorCaretAttribute, $row.line & ":" & $extra)
+      r.setStyle(caret, "position", "absolute")
+      r.setStyle(caret, "left", formatFloat(float(extra - 1 - skipCols) *
+                                            EditorColumnPx, ffDecimal, 1) & "px")
+      r.setStyle(caret, "top", "0px")
+      r.setStyle(caret, "width", "2px")
+      r.setStyle(caret, "height", "100%")
+      r.setStyle(caret, "background", EditorTextColour)
+      r.appendChild(column, caret)
   if caretColumn > 0 and caretColumn > skipCols:
     # PLAT-51: THE CARET of the read-only debugging editor — a thin bar
     # before its column, in the editor's foreground (Monaco's cursor),
@@ -2269,6 +2312,7 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
                                 scroll.leftCols,
                                 (if row.line == surface.caretLine:
                                    surface.caretColumn else: 0),
+                                extrasOn(surface, row.line),
                                 selected, found, folds[i], depths[i],
                                 guideCounts[i],
                                 markersView =

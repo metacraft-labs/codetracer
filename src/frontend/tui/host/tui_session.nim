@@ -1924,12 +1924,12 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
       if vm.view.val == tvLines and c.text == $tvScreen:
         rt.app.notification = "this recording's output drives no screen"
     s.refreshTerminalOutput(rt)
-  of pcColumnBreakpoint:
-    # K14: the desktop's Alt+click (`lineActionClickAt` →
-    # `addColumnBreakpoint`).
-    if session.setColumnBreakpoint(c.path, c.line, c.column):
-      rt.app.notification = "a breakpoint at line " & $c.line & ", column " &
-                            $c.column
+  of pcToggleInlineBreakpoint:
+    # Shift+F9 and the menu's entry (Editor-Pane.md § Inline breakpoints). Clamped
+    # to the line's last column by the one rule; column 1 is a line breakpoint.
+    if session.toggleInlineBreakpoint(c.path, c.line, c.column, c.lastColumn):
+      rt.app.notification = "inline breakpoint toggled at line " & $c.line &
+                            ", column " & $c.column
     else:
       rt.app.notification = "the engine refused a breakpoint at " & c.path &
                             ":" & $c.line & ":" & $c.column

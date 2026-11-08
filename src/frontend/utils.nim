@@ -44,7 +44,7 @@ proc monacoLineNumbersMinChars*(lineCount: int): int =
   max(4, ($max(1, lineCount)).len + 2)
 
 proc monacoLineDecorationsWidth*(fontSize: int): int =
-  ## Reserve the custom marker lane, the VCS lane and the folding chevron lane.
+  ## Reserve the VCS lane and the folding chevron lane.
   ## The line-number column width is controlled separately via
   ## `lineNumbersMinChars`.
   ##

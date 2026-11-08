@@ -287,7 +287,7 @@ test.describe("M1 — Column-aware breakpoint", () => {
     if (!editor) return;
 
     // Click the gutter on line 2 — legacy line-only path.
-    await editor.gutterElement(fixture.legacyLine).click();
+    await editor.pressGlyph(fixture.legacyLine);
     await expect.poll(() => editor.hasBreakpointAt(fixture.legacyLine)).toBeTruthy();
 
     const bp = await readBreakpoint(editor, fixture.legacyLine);

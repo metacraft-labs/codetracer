@@ -7,8 +7,8 @@
 ##   * the breakpoint is sent with its column and the replay stops at the
 ##     step recorded at that column — the second statement of a line, not the
 ##     first;
-##   * it REPLACES the line's breakpoint (one per line, as the desktop's
-##     `breakpointTable[path][line]` holds one) and is not a toggle;
+##   * it REPLACES the line's breakpoint (the engine binds one per line) and
+##     is not a toggle;
 ##   * the point list carries the column (`PointListEntry.column`), and a
 ##     toggle on ANOTHER line, a disable and a re-enable keep it — each of
 ##     them re-sends the file's whole set (DAP's `setBreakpoints` replaces
@@ -157,7 +157,7 @@ suite "PLAT-50: a column breakpoint, the shared operation":
       ck session.getCurrentLine() == 1
       ck session.getCurrentColumn() == some(fixture.lineCol1)
       let path = fixture.sourcePath
-      # A line breakpoint first: the Alt+click REPLACES it.
+      # A line breakpoint first: the column one replaces it.
       ck session.toggleBreakpoint(path, 1)
       ck session.setColumnBreakpoint(path, 1, fixture.lineCol14)
       var rows = session.breakpointRows(path)

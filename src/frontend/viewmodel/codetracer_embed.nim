@@ -131,6 +131,12 @@ export dap_commands
 # ---------------------------------------------------------------------------
 # ReplayDataStore and the trace data models (§3.1, rows 1 and 8)
 # ---------------------------------------------------------------------------
+import input/editor_pointer
+export editor_pointer
+
+import viewmodels/editor_gutter_lanes
+export editor_gutter_lanes
+
 import store/types
 export types
 

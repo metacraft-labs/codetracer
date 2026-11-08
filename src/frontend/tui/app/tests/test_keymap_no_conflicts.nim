@@ -63,7 +63,7 @@ import ./navigation_table
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 335
+const ExpectedAssertions = 338
   ## PLAT-70 Part E: +6 — `g o` and `Menu` in NORMAL and INSPECT (their four
   ## reachability checks), and `CSI 29 ~` / `CSI 57363 u` decoded to `Menu`.
   ## PLAT-70 Part B: +3 — `Shift+K` (`list.show-detail`) in NORMAL and
@@ -101,12 +101,12 @@ const
   SpecSectionHeading = "### 4.2 Keybindings Reference Table"
   SpecRelativePath = specDocumentRef("Front-Ends/CodeTracer-TUI.md")
 
-  ExpectedSpecRows = 34
+  ExpectedSpecRows = 35
     ## §4.2's row count, counted from the document on 2026-09-06. Asserted so
     ## that a parser which silently stopped at the first odd row — or a table
     ## that lost a row — is red here rather than quietly checking less.
 
-  ExpectedBindingCount = 106
+  ExpectedBindingCount = 107
     ## Every binding in `defaultKeymap()`, across all four modes. The
     ## NON-VACUITY FLOOR: every "for every binding …" sweep below is satisfied
     ## for free by an empty table, and this is the one assertion that is not.
@@ -183,6 +183,7 @@ const
     # (ctlseqs, "PC-Style Function Keys"), Alt is `1 + 2 = 3`.
     ("\x1b[1;3D", "Alt+Left"), ("\x1b[1;3C", "Alt+Right"),
     ("\x1b[17~", "F6"), ("\x1b[17;2~", "Shift+F6"),
+    ("\x1b[20;2~", "Shift+F9"),
     # PLAT-70 Part E: the application (context-menu) key — xterm's
     # `CSI 29 ~` and the Kitty protocol's `CSI 57363 u`.
     ("\x1b[29~", "Menu"), ("\x1b[57363u", "Menu"),
@@ -499,7 +500,7 @@ suite "CTUI-9: the keymap is §4.2, and it has no conflicts":
       if got notin names:
         names.add got
     ck decoded == KeyBytes.len
-    ck decoded == 79
+    ck decoded == 80
 
     var unreachable: seq[string] = @[]
     var chordsChecked = 0

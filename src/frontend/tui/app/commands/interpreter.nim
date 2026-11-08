@@ -791,6 +791,10 @@ proc dispatchAction*(d: Dispatcher; ctx: CommandContext; action: KeyAction;
   of kaViewMemoryDump:
     unsupported(action, NoMemorySurfaceNote)
 
+  of kaToggleInlineBreakpoint:
+    # The runtime answers it at the caret (`applyLocalAction`).
+    paneLocal(action)
+
   of kaToggleBreakpoint:
     # §4.2's `F9` / `Space` and §4.3's `:break` are the same action. The line
     # comes from the argument when there is one and from the cursor when there

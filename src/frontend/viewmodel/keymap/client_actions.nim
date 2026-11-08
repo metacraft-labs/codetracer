@@ -32,6 +32,7 @@ const
     ("debugger.step-out", "forwardStepOut"),
     ("debugger.reverse-step-out", "reverseStepOut"),
     ("debugger.stop", "stop"),
+    ("editor.toggle-inline-breakpoint", "aInlineBreakpoint"),
     ("debugger.restart", "aRestart"),
     ("debugger.run-to-entry", "aRunToEntry"),
     ("debugger.reset-operation", "aResetOperation"),

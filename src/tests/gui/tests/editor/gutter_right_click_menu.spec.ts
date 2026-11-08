@@ -23,9 +23,9 @@
  * WHAT IS ASSERTED, in both directions so that neither a menu that always
  * says "Enable" nor one that always says "Disable" can pass:
  *
- *   1. a click on line 31's `.gutter-line` adds an enabled breakpoint;
- *   2. a right click on its `.gutter-breakpoint-enabled` marker disables it —
- *      the marker turns `.gutter-breakpoint-disabled`, the frontend's
+ *   1. a press on line 31's glyph cell adds an enabled breakpoint;
+ *   2. a right click on its glyph disables it —
+ *      the mark turns `gutter-glyph-breakpoint-disabled`, the frontend's
  *      the session's breakpoint rows holds it `enabled: false` — and NO menu is open;
  *   3. the first right click on line 31's text offers "Enable breakpoint" and
  *      not "Disable breakpoint";
@@ -39,14 +39,10 @@
  *      stays enabled. Toggling there as well as opening the menu would build
  *      the menu before the toggle, which is this defect again;
  *   6. a right click on the EMPTY glyph slot of line 36 (`return left -
- *      right`, code and no breakpoint), the transparent
- *      `.gutter-no-breakpoint` placeholder `trace.editorLineNumber` draws
- *      where a marker would be, does nothing ("On a line without a
+ *      right`, code and no breakpoint) does nothing ("On a line without a
  *      breakpoint it does nothing", gesture 8): no menu opens, no marker
  *      appears on the line and the session's breakpoint rows gains no entry for it.
- *      Until `isGutterToggleTarget` matched the placeholder, Monaco's
- *      listener took the press for an ordinary margin right click and opened
- *      the editor's menu.
+ *      The glyph margin's own right click stands Monaco's menu down.
  *
  * No mocks: the real Electron app (`src/build-debug/bin/ct`, this checkout's
  * build), a real `replay-server`, and a real `.ct` recording — the terminal
@@ -54,6 +50,7 @@
  * `tests/visual/plat50-desktop-capture.spec.ts` opens.
  */
 
+import { glyphMarksOn, pressGlyph } from "../../lib/glyph-column";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -94,8 +91,6 @@ const gutterOf = (page: Page) =>
 /** `calc/main.py` line 36, `return left - right`: a line with code on it that
  *  no step of this test puts a breakpoint on (step 6). */
 const EMPTY_LINE = 36;
-const emptyGutterOf = (page: Page) =>
-  page.locator(`.monaco-editor .margin-view-overlays .gutter[data-line='${EMPTY_LINE}']`).first();
 
 /** The breakpoint the session holds on `line` (default 31) of any `main.py`
  *  (`ctBreakpointRows`, the session store's rows), or null. */
@@ -170,8 +165,9 @@ async function numberMenu(page: Page): Promise<string[]> {
 async function toggleByMarker(page: Page, from: "enabled" | "disabled"): Promise<string[] | null> {
   const to = from === "enabled" ? "disabled" : "enabled";
   await centreLine(page);
-  await gutterOf(page).locator(`.gutter-breakpoint-${from}`).first().click({ button: "right" });
-  await expect(gutterOf(page).locator(`.gutter-breakpoint-${to}`)).toHaveCount(1, { timeout: 10_000 });
+  await pressGlyph(page, LINE, { button: "right" });
+  const toClass = to === "enabled" ? "gutter-glyph-breakpoint" : "gutter-glyph-breakpoint-disabled";
+  await expect.poll(() => glyphMarksOn(page, LINE), { timeout: 10_000 }).toEqual([toClass]);
   await expect.poll(() => breakpointOnLine(page), { timeout: 10_000 })
     .toEqual({ enabled: to === "enabled" });
   // Long enough for a menu the press opened to have appeared: the stale one
@@ -186,8 +182,8 @@ test("a right click on a breakpoint's gutter marker toggles it and opens no menu
   await expect(gutterOf(ctPage)).toHaveCount(1, { timeout: 30_000 });
 
   // 1. A breakpoint on line 31.
-  await gutterOf(ctPage).locator(".gutter-line").first().click();
-  await expect(gutterOf(ctPage).locator(".gutter-breakpoint-enabled")).toHaveCount(1, { timeout: 10_000 });
+  await pressGlyph(ctPage, LINE);
+  await expect.poll(() => glyphMarksOn(ctPage, LINE), { timeout: 10_000 }).toEqual(["gutter-glyph-breakpoint"]);
   await expect.poll(() => breakpointOnLine(ctPage), { timeout: 10_000 }).toEqual({ enabled: true });
 
   // 2. Disabled by the marker's right click, with no menu.
@@ -212,23 +208,21 @@ test("a right click on a breakpoint's gutter marker toggles it and opens no menu
   const onNumber = await numberMenu(ctPage);
   expect(onNumber).toContain("Disable breakpoint");
   expect(onNumber).not.toContain("Enable breakpoint");
-  await expect(gutterOf(ctPage).locator(".gutter-breakpoint-enabled")).toHaveCount(1);
+  expect(await glyphMarksOn(ctPage, LINE)).toEqual(["gutter-glyph-breakpoint"]);
   expect(await breakpointOnLine(ctPage)).toEqual({ enabled: true });
 
   // 6. The empty glyph slot of a line with no breakpoint does nothing: no
   //    menu opens and no breakpoint appears.
   await centreLine(ctPage, EMPTY_LINE);
-  const placeholder = emptyGutterOf(ctPage).locator(".gutter-no-breakpoint");
-  await expect(placeholder).toHaveCount(1, { timeout: 10_000 });
   expect(await breakpointOnLine(ctPage, EMPTY_LINE), "line 36 had a breakpoint before step 6").toBeNull();
-  await placeholder.first().click({ button: "right" });
+  await pressGlyph(ctPage, EMPTY_LINE, { button: "right" });
   // Long enough for a menu the press opened to have appeared (Monaco shows
   // its menu synchronously) and for a breakpoint it added to have reached the
   // table and the gutter.
   await ctPage.waitForTimeout(500);
   const leftOpenOnEmpty = (await ctPage.locator(MENU).isVisible()) ? await openMenuLabels(ctPage) : null;
   expect(leftOpenOnEmpty, "the empty glyph slot's right click opened a context menu").toBeNull();
-  await expect(emptyGutterOf(ctPage).locator("[class*='gutter-breakpoint-']")).toHaveCount(0);
+  expect((await glyphMarksOn(ctPage, EMPTY_LINE)).filter((m) => m !== "gutter-glyph-hint")).toEqual([]);
   expect(await breakpointOnLine(ctPage, EMPTY_LINE), "the empty glyph slot's right click added a breakpoint")
     .toBeNull();
 });

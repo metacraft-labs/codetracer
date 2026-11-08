@@ -100,6 +100,7 @@ type
     caJumpForwardToCall = "jump-forward-to-call"
     caJumpBackwardToCall = "jump-backward-to-call"
     caAddBreakpoint = "add-breakpoint"
+    caToggleInlineBreakpoint = "toggle-inline-breakpoint"
     caDeleteBreakpoint = "delete-breakpoint"
     caEnableBreakpoint = "enable-breakpoint"
     caDisableBreakpoint = "disable-breakpoint"
@@ -367,7 +368,9 @@ type
 func editorTextContextMenu*(path: string; line: int; lineText = "";
                             column = 0; token = ""; tokenError = "";
                             breakpoint = lbNone; fileHasBreakpoints = false;
-                            anyBreakpoints = false): ContextMenuModel =
+                            anyBreakpoints = false;
+                            inlineBreakpoint = false;
+                            inlineChord = "Shift+F9"): ContextMenuModel =
   ## The editor's right-click menu in a replay — `ui/editor.
   ## createContextMenuItems`' Debug branch, measured on the real desktop
   ## (`plat50-desktop-capture.spec.ts`, `menus.editorText` and
@@ -399,7 +402,7 @@ func editorTextContextMenu*(path: string; line: int; lineText = "";
   case breakpoint
   of lbNone:
     result.entries.add entry("Add breakpoint", caAddBreakpoint,
-                             hint = "<click line number gutter>")
+                             hint = "<click left of the line number>")
   of lbEnabled:
     result.entries.add entry("Disable breakpoint", caDisableBreakpoint)
     result.entries.add entry("Delete breakpoint", caDeleteBreakpoint,
@@ -408,6 +411,13 @@ func editorTextContextMenu*(path: string; line: int; lineText = "";
     result.entries.add entry("Enable breakpoint", caEnableBreakpoint)
     result.entries.add entry("Delete breakpoint", caDeleteBreakpoint,
                              hint = "<click on the red dot>")
+  # Editor-Pane.md § Inline breakpoints: directly after the line breakpoint's
+  # entries, at the press (a right press places the caret first). Its hint is
+  # the active base's chord, read from the keymap by the caller.
+  result.entries.add entry(
+    (if inlineBreakpoint: "Remove Inline Breakpoint"
+     else: "Add Inline Breakpoint"),
+    caToggleInlineBreakpoint, hint = inlineChord)
   if fileHasBreakpoints:
     result.entries.add entry("Delete breakpoints in file",
                              caDeleteBreakpointsInFile)
@@ -726,7 +736,7 @@ func k(id, target: string; gestures: set[ClickGesture];
                  desktop: desktop, sharedOp: sharedOp, terminal: terminal,
                  gpui: gpui, note: note)
 
-const ClickInventory*: array[74, ClickBehaviour] = [
+const ClickInventory*: array[75, ClickBehaviour] = [
   k("K1", "Top bar: menu button / item", {cgClick},
     "open the menu; run the item / enter the folder", "MenuVM",
     nsExisting, nsExisting, "PLAT-48/49"),
@@ -749,9 +759,9 @@ const ClickInventory*: array[74, ClickBehaviour] = [
     "auto_hide_hover", nsExisting, nsExisting, "PLAT-49 part B"),
   k("K9", "Divider", {cgDrag}, "resize", "lcSetWeight", nsExisting,
     nsExisting, "PLAT-6/47"),
-  k("K10", "Editor gutter", {cgClick}, "toggle a breakpoint on the line",
+  k("K10", "Editor gutter: glyph column", {cgClick}, "toggle a breakpoint on the line",
     "toggleBreakpoint", nsDone, nsDone),
-  k("K11", "Editor gutter", {cgRightClick},
+  k("K11", "Editor gutter: glyph column", {cgRightClick},
     "enable / disable the line's breakpoint", "setBreakpointEnabled",
     nsDone, nsDone,
     "the desktop's own handler did nothing on a marker; fixed by PLAT-50"),
@@ -759,10 +769,11 @@ const ClickInventory*: array[74, ClickBehaviour] = [
     "sourceLineJump(smart)", nsDone, nsDone),
   k("K13", "Editor text", {cgRightClick},
     "menu: Copy, Find, the line and call jumps, the breakpoint entries, " &
-      "Add tracepoint",
+      "Add / Remove Inline Breakpoint, Add tracepoint",
     "editorTextContextMenu", nsDone, nsDone),
-  k("K14", "Editor text", {cgAltClick}, "a column-anchored breakpoint",
-    "setColumnBreakpoint", nsDone, nsDone),
+  k("K14", "Editor text", {cgAltClick}, "add a cursor",
+    "add-cursor-at-point", nsDone, nsDone,
+    "was a column-anchored breakpoint; column breakpoints are set at the caret"),
   k("K15", "Editor text: a call", {cgCtrlAltClick}, "Jump to call",
     "sourceCallJump", nsDone, nsDone),
   k("K16", "Editor gutter: run-test control", {cgClick},
@@ -990,7 +1001,13 @@ const ClickInventory*: array[74, ClickBehaviour] = [
   k("K74", "Shader Debug: step button", {cgClick},
     "First / Back / Step / Last",
     "ShaderDebugVM.stepFirst / stepBackward / stepForward / stepLast",
-    nsDone, nsDone, "PLAT-59")]
+    nsDone, nsDone, "PLAT-59"),
+  k("K75", "Editor gutter: line numbers",
+    {cgClick, cgDrag, cgRightClick, cgAltClick},
+    "select the line; drag selects lines, Shift+click extends by lines where " &
+      "the medium delivers it; Alt+click adds a whole-line cursor; right click " &
+      "opens the editor menu",
+    "select-line-at, extend-by-unit-to", nsDone, nsDone)]
 
 func behaviour*(id: string): ClickBehaviour =
   ## The inventory row named `id` (`K1` …); an empty value for an unknown id.

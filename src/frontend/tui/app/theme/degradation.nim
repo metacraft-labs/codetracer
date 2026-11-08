@@ -177,6 +177,7 @@ proc roleGlyph*(role: SemanticRole; p: GlyphProfile): string =
     if s == RvSpace: " " else: s
   case role
   of srGutterBreakpoint: g(grBreakpoint)
+  of srGutterBreakpointHint: g(grBreakpoint)
   of srGutterBreakpointDisabled: g(grBreakpointDisabled)
   of srGutterTracepoint: g(grTracepoint)
   of srGutterExecutionPointer: p.pointerField(grExecPointer)

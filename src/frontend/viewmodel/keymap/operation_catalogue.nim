@@ -119,6 +119,7 @@ const
     op("editor.center-on-pointer", EditorTable, "Center on Execution Pointer"),
     op("editor.jump-to-value-origin", GlobalTable, "Jump to Value Origin"),
     op("editor.toggle-breakpoint", EditorTable, "Toggle Breakpoint"),
+    op("editor.toggle-inline-breakpoint", EditorTable, "Toggle Inline Breakpoint"),
     op("editor.toggle-tracepoint", EditorTable, "Toggle Tracepoint"),
 
     # --- Find (CUA-Keymap.md §3.5) ----------------------------------------

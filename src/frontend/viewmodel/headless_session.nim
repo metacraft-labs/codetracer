@@ -848,7 +848,7 @@ proc sendBreakpoints(s: HeadlessDebugSession; path: string;
     answeredBreakpoints(plan, resp.getOrDefault("body")))
   true
 
-proc heldBreakpoints(s: HeadlessDebugSession; path: string): seq[BreakpointSpec] =
+proc heldBreakpoints*(s: HeadlessDebugSession; path: string): seq[BreakpointSpec] =
   ## `path`'s breakpoints as the store holds them, armed and disabled.
   heldBreakpoints(s.session.store, path)
 
@@ -884,14 +884,20 @@ proc toggleBreakpoint*(s: HeadlessDebugSession; path: string;
 
 proc setColumnBreakpoint*(s: HeadlessDebugSession; path: string; line,
                           column: int): bool =
-  ## PLAT-50: a breakpoint at `path:line` ANCHORED AT `column` — the
-  ## desktop's Alt+click (`ui/editor.lineActionClickAt`), which REPLACES
-  ## whatever breakpoint the line had and is never a toggle
+  ## PLAT-50: a breakpoint at `path:line` ANCHORED AT `column`, which replaces
+  ## what that column held and is never a toggle
   ## (`plannedAnchored`). The engine stops on it only at a step recorded at
   ## that column. False when the engine refused, or `column` is not a column.
   if column < 1:
     return false
   s.sendBreakpoints(path, plannedAnchored(s.heldBreakpoints(path), line, column))
+
+proc toggleInlineBreakpoint*(s: HeadlessDebugSession; path: string; line, column,
+                             lineMaxColumn: int): bool =
+  ## Shift+F9 and the context menu's inline entry, at the caret
+  ## (Editor-Pane.md § Inline breakpoints).
+  s.sendBreakpoints(path, inlineBreakpointPlan(s.heldBreakpoints(path), line,
+                                               column, lineMaxColumn))
 
 proc clearBreakpoints*(s: HeadlessDebugSession; path: string): bool =
   ## PLAT-50: delete every breakpoint of `path` — the editor menu's "Delete

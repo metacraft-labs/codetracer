@@ -59,6 +59,9 @@ type
     gmBreakpoint          ## `●`, red — an active breakpoint
     gmBreakpointDisabled  ## `○`, muted — a disabled breakpoint
     gmTracepoint          ## `◆`, cyan — a tracepoint: records without stopping
+    gmBreakpointTracepoint
+      ## `◉`, red: a line breakpoint and a tracepoint on one line. The glyph
+      ## column has one cell, so the two share one mark (Editor-Pane.md MC.5).
 
   GutterMode* = enum
     ## Which number the gutter shows.
@@ -95,6 +98,8 @@ type
       ## The number field's style. Defaulted by `gutterRow` from `provenance`
       ## when left unset; heatmap mode supplies the flame colour.
     mark*: GutterMark
+    hinted*: bool
+      ## The pointer is over this line's empty glyph cell (gesture 7a).
     isExecutionLine*: bool
     isInspectionLine*: bool
       ## CTUI-6. This line is the one the CALL STACK pane's inspection cursor
@@ -160,6 +165,9 @@ const
 
   BreakpointStyle* = CellStyle(role: srGutterBreakpoint)
   BreakpointDisabledStyle* = CellStyle(role: srGutterBreakpointDisabled)
+  BreakpointHintStyle* = CellStyle(role: srGutterBreakpointHint)
+    ## The glyph column's hover hint (gesture 7a). A colour, because libvterm
+    ## has no dim bit; `gutter.breakpoint.hint` on every front-end.
   TracepointStyle* = CellStyle(role: srGutterTracepoint)
   ExecutionPointerStyle* = CellStyle(role: srGutterExecutionPointer)
   InspectionPointerStyle* = CellStyle(role: srGutterInspectionPointer)
@@ -211,6 +219,7 @@ proc markGlyph*(mark: GutterMark; glyphs = DefaultGlyphs): string =
   of gmBreakpoint: glyphs.glyph(grBreakpoint)
   of gmBreakpointDisabled: glyphs.glyph(grBreakpointDisabled)
   of gmTracepoint: glyphs.glyph(grTracepoint)
+  of gmBreakpointTracepoint: glyphs.glyph(grBreakpointTracepoint)
 
 proc markStyle*(mark: GutterMark): CellStyle =
   case mark
@@ -218,6 +227,7 @@ proc markStyle*(mark: GutterMark): CellStyle =
   of gmBreakpoint: BreakpointStyle
   of gmBreakpointDisabled: BreakpointDisabledStyle
   of gmTracepoint: TracepointStyle
+  of gmBreakpointTracepoint: BreakpointStyle
 
 proc lineNumberStyle*(provenance: GutterProvenance): CellStyle =
   case provenance
@@ -250,8 +260,12 @@ proc gutterRow*(spec: GutterLineSpec; glyphs = DefaultGlyphs): StyledRow =
   ## gutter whose SPAN COUNT changed when a breakpoint appeared would
   ## invalidate every entry on the row rather than one.
   result = @[]
-  result.add StyledSpan(text: markGlyph(spec.mark, glyphs),
-                        style: markStyle(spec.mark))
+  if spec.hinted and spec.mark == gmNone:
+    result.add StyledSpan(text: glyphs.glyph(grBreakpoint),
+                          style: BreakpointHintStyle)
+  else:
+    result.add StyledSpan(text: markGlyph(spec.mark, glyphs),
+                          style: markStyle(spec.mark))
 
   let number =
     if spec.numberText.len > 0: spec.numberText

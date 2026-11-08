@@ -107,7 +107,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 2879
+const ExpectedAssertions = 2894
   ## +15 on 2026-10-24: PLAT-70 Part C's `find_match.nim` joined the editor
   ## directory, so the §35 scan covers one more module.
   ## **AND AGAIN ON 2026-09-20: PLAT-33 ADDED `collab_text.nim`, THE SEVENTH
@@ -1146,6 +1146,7 @@ suite "PLAT-27 — FUZZ-6, the cache under a random stream":
 
 const
   WrapSource = staticRead("../../editor/wrap.nim")
+  WordClassifierSource = staticRead("../../editor/word_classifier.nim")
   SelectionSource = staticRead("../../editor/selection.nim")
   SelectionOpsSource = staticRead("../../editor/selection_ops.nim")
   ChangeSetSource = staticRead("../../editor/change_set.nim")
@@ -1182,7 +1183,7 @@ const
     ## wrap in exactly one module" surviving a milestone that moves the wrap
     ## point.
 
-const ScannedModules = ["anchor.nim", "change_set.nim", "collab_text.nim",
+const ScannedModules = ["word_classifier.nim", "anchor.nim", "change_set.nim", "collab_text.nim",
                         "decoration.nim",
                         "document_version.nim", "editor_state.nim",
                         "find_match.nim", "history.nim",
@@ -1248,6 +1249,7 @@ const OtherModules = block:
   # PLAT-70 Part C's `find_match.nim`: the one document matcher, over bytes;
   # it has no display question either.
   xs.add ("find_match.nim", FindMatchSource)
+  xs.add ("word_classifier.nim", WordClassifierSource)
   xs
 
 proc codeOnly(src: string): string =
@@ -1332,7 +1334,7 @@ suite "PLAT-27 — the suite's own non-vacuity":
     for name in EditorDirModules:
       checkpoint(name)
       counted name in ScannedModules
-    counted ScannedModules.len == 20
+    counted ScannedModules.len == 21
     counted OtherModules.len == ScannedModules.len - 1
 
   test "NO MODULE OF THE CORE REACHES A RENDERER — the dependency does not invert":

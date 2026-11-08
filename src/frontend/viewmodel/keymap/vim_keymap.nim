@@ -504,6 +504,13 @@ const
       "VS Code's `Ctrl+K Ctrl+D`, a multi-cursor refinement Vim does not have"),
     FiledDeclaration(decl: "add-cursor-at-point", forms: {}, reason:
       "a POINTER gesture (Alt+click, Input-Routing §5.1), not a key in any base"),
+    FiledDeclaration(decl: "select-word-at", forms: {}, reason:
+      "a POINTER gesture (a double click, Input-Routing §5.1), not a key in any base"),
+    FiledDeclaration(decl: "select-line-at", forms: {}, reason: "as `select-word-at`"),
+    FiledDeclaration(decl: "extend-by-unit-to", forms: {}, reason: "as `select-word-at`"),
+    FiledDeclaration(decl: "column-select-to", forms: {}, reason: "as `select-word-at`"),
+    FiledDeclaration(decl: "toggle-inline-breakpoint", forms: {}, reason:
+      "bound in the navigation table, as `toggle-breakpoint`"),
     FiledDeclaration(decl: "clipboard-cut", forms: {}, reason:
       "Vim reaches the system clipboard through the `+` REGISTER and its " &
       "own operators (`\"+d`), not through VS Code's empty-selection operation"),

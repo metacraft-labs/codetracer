@@ -640,6 +640,10 @@ proc scenarioSpecs*(): seq[ScenarioSpec] =
     sp("move-last-cursor-to-next-match", spNeedle, {ckSelectionChanged}),
     sp("add-cursor-at-point", caLine0Mid, {ckRangeCountUp},
        args = OpArgs(number: 0)),
+    sp("select-word-at", caLine0Mid, {ckSelectionChanged}, args = OpArgs(number: 0)),
+    sp("select-line-at", caLine0Mid, {ckSelectionChanged}, args = OpArgs(number: 0)),
+    sp("extend-by-unit-to", caLine0Mid, {ckSelectionChanged}, args = OpArgs(number: 0)),
+    sp("column-select-to", caLine0Mid, {ckSelectionChanged}, args = OpArgs(number: 0)),
 
     sp("clipboard-cut", spLine0Clusters, {ckDocMinusSelection, ckClipboardChanged}),
     sp("clipboard-copy", spLine0Clusters, {ckClipboardChanged}),
@@ -706,6 +710,7 @@ proc scenarioSpecs*(): seq[ScenarioSpec] =
     sp("yank-pop", caLine0Mid, {ckDocChanged, ckKillChanged}, {prYanked}),
 
     sp("toggle-breakpoint", caLine1Mid, {ckMarkerChanged}),
+    sp("toggle-inline-breakpoint", caLine1Mid, {ckIntent}),
     sp("toggle-tracepoint", caLine1Mid, {ckMarkerChanged}),
     sp("toggle-flow-overlay", caLine1Mid, {ckMarkerChanged}),
     sp("jump-to-value-origin", caLine1Mid, {ckIntent}),

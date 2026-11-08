@@ -31,7 +31,7 @@
 ##     Edit opening the file;
 ##   * K23 / K33 — an argument pinned to the scratchpad, its close button;
 ##   * K26 — an event-log header orders the log, again reverses it;
-##   * K14 / K15 — Alt+click anchors a column breakpoint, Ctrl+Alt+click and
+##   * K14 / K15 — Alt+click adds a cursor, Ctrl+Alt+click and
 ##     the menu's "Jump to call" go into the call;
 ##   * K36 — an inline value's menu, Ctrl+click pins it;
 ##   * K29 / K31 / K37 / K42 — the Variables tabs, a point selected in the
@@ -68,7 +68,7 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 121
+  ExpectedAssertions = 122
     ## The native Top action adds two checks of the actual window plan.
     ## Four checks keep a file opened from Files through docking and resize.
     ## K19: 108 -> 115 — a Files node opens the Files pane's menu (its
@@ -283,7 +283,7 @@ suite "PLAT-50 GPUI: the event log, the editor and the timeline":
     ck labels == @["Copy", "Find", "Jump to line", "Run to Cursor",
                    "Jump backward to line", "Jump to call",
                    "Jump forward to call", "Jump backward to call",
-                   "Add breakpoint", "Add tracepoint"]
+                   "Add breakpoint", "Add Inline Breakpoint", "Add tracepoint"]
     # Every entry enabled, as on the desktop.
     for (_, enabled) in entries: ck enabled == "true"
     let menu = plan.nodesWith("data-ct-context-menu")
@@ -481,14 +481,14 @@ suite "PLAT-50 GPUI: the sweep's other rows":
     ck d.contains("output ▼")
     ck d.find("checksum = 73") < d.find("2 + 3 = 5")
 
-  test "Alt+click anchors a column breakpoint; Ctrl+Alt+click goes into a call":
+  test "Shift+F9 anchors a column breakpoint at the caret; Ctrl+Alt+click goes into a call":
     var trace = ""
-    let plan = windowPlan("click:code:31@12:left:alt", trace = trace)
+    let plan = windowPlan("click:code:31@12l:left,key:f9:shift", trace = trace)
     ck plan.markOf(31) == "emBreakpoint"
-    ck trace.contains("column breakpoint 31:12")
+    ck trace.contains("inline breakpoint 31:12")
     # The point list holds the breakpoint AT ITS COLUMN (the store's row is
     # the engine's verified anchor), as the Points pane lists it.
-    let listed = windowPlan("click:code:31@12:left:alt," &
+    let listed = windowPlan("click:code:31@12l:left,key:f9:shift," &
       "key:p:control,key:colon" & typed("Breakp") & ",key:enter")
     var rows: seq[string] = @[]
     for n in listed.nodesWith("data-ct-clicks"):

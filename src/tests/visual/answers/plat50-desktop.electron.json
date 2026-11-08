@@ -108,6 +108,7 @@
    "Jump forward to call",
    "Jump backward to call",
    "Add breakpoint",
+   "Add Inline Breakpoint",
    "Add tracepoint"
   ],
   "callArgument": [
@@ -130,6 +131,7 @@
    "Jump backward to call",
    "Enable breakpoint",
    "Delete breakpoint",
+   "Add Inline Breakpoint",
    "Delete breakpoints in file",
    "Delete ALL breakpoints",
    "Add tracepoint"
@@ -145,6 +147,7 @@
    "Jump backward to call",
    "Enable breakpoint",
    "Delete breakpoint",
+   "Add Inline Breakpoint",
    "Delete breakpoints in file",
    "Delete ALL breakpoints",
    "Add tracepoint"

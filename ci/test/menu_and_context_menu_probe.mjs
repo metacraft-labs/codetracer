@@ -501,9 +501,11 @@ try {
     if (c) c.style.display = "none";
     window.__gut = () => ({
       lines: [...document.querySelectorAll(".margin-view-overlays .gutter-line")].length,
-      breakpoints: [...document.querySelectorAll(".margin-view-overlays .gutter")]
-        .filter((g) => g.querySelector('[class*="gutter-breakpoint-"]'))
-        .map((g) => g.getAttribute("data-line")),
+      // The marks are Monaco's glyph margin (Editor-Pane.md MC.5).
+      breakpoints: window.monaco.editor.getEditors().flatMap((e) =>
+        (e.getModel()?.getAllDecorations() ?? [])
+          .filter((d) => (d.options.glyphMarginClassName ?? "").includes("gutter-glyph-breakpoint"))
+          .map((d) => d.range.startLineNumber)),
       collapsed: document.querySelectorAll(".codicon-folding-collapsed").length,
     });
   });
@@ -521,8 +523,6 @@ try {
     if (!gut) return null;
     const zoneSel = {
       lineNumber: ".gutter-line",
-      breakpoint: '[class*="gutter-no-breakpoint"], [class*="gutter-breakpoint-"]',
-      tracepoint: '[class*="gutter-no-trace"], [class*="gutter-trace"], [class*="gutter-disabled-trace"]',
     };
     const zones = {};
     for (const [name, sel] of Object.entries(zoneSel)) {
@@ -553,7 +553,13 @@ try {
       }
     }
     const ln = gut.querySelector(".gutter-line");
+    // The glyph column's centre on this row: a press here is the breakpoint.
+    const glyphBox = document.querySelector(".monaco-editor .glyph-margin")?.getBoundingClientRect();
+    const glyphCentre = glyphBox
+      ? { x: Math.round(glyphBox.x + glyphBox.width / 2), y: Math.round(cr.y + cr.height / 2) }
+      : null;
     return {
+      glyphCentre,
       line: gut.getAttribute("data-line"),
       gutter: (r => ({ x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }))(gut.getBoundingClientRect()),
       chevron: { x: Math.round(cr.x), y: Math.round(cr.y), w: Math.round(cr.width), h: Math.round(cr.height) },
@@ -573,11 +579,7 @@ try {
       await page.mouse.click(pt.x, pt.y);
       await page.waitForTimeout(800);
       const after = await page.evaluate(() => window.__gut());
-      // Monaco's own view of the same press. An empty list is a RESULT and not
-      // a missing measurement: every node the custom gutter emits carries
-      // `onmousedown='event.stopPropagation()'`, so a press on our markup is
-      // one Monaco never hears about — which is why no folding handler of its
-      // can act on it.
+      // Monaco's own view of the same press.
       const monacoTargets = await page.evaluate(() => window.__mt);
       return {
         breakpointChanged: JSON.stringify(before.breakpoints) !== JSON.stringify(after.breakpoints),
@@ -589,9 +591,9 @@ try {
     };
 
     // A gutter click must set a breakpoint AND NOT FOLD.
-    report.gutter.clickGutter = await clickAndWatch(gutterGeom.zones.breakpoint.centre);
+    report.gutter.clickGutter = await clickAndWatch(gutterGeom.glyphCentre);
     // Put it back.
-    await page.mouse.click(gutterGeom.zones.breakpoint.centre.x, gutterGeom.zones.breakpoint.centre.y);
+    await page.mouse.click(gutterGeom.glyphCentre.x, gutterGeom.glyphCentre.y);
     await page.waitForTimeout(600);
 
     // The dedicated control must fold AND NOT touch breakpoints.

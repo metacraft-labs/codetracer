@@ -1,0 +1,2317 @@
+{
+ "fixture": "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator",
+ "presses": [
+  {
+   "line": 1,
+   "column": 3,
+   "mods": "none",
+   "count": 1,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 1,
+   "column": 3,
+   "mods": "none",
+   "count": 2,
+   "selections": [
+    "snake_case_name"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 3,
+   "mods": "none",
+   "count": 3,
+   "selections": [
+    "snake_case_name = other.attr(x)\n"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 3,
+   "mods": "none",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 3,
+   "mods": "shift",
+   "count": 1,
+   "selections": [
+    "sn"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 3,
+   "mods": "shift",
+   "count": 2,
+   "selections": [
+    "snake_case_name"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 3,
+   "mods": "shift",
+   "count": 3,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 1,
+   "column": 3,
+   "mods": "shift",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 3,
+   "mods": "alt",
+   "count": 1,
+   "selections": [
+    "",
+    ""
+   ]
+  },
+  {
+   "line": 1,
+   "column": 3,
+   "mods": "alt",
+   "count": 2,
+   "selections": [
+    "snake_case_name"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 3,
+   "mods": "alt",
+   "count": 3,
+   "selections": [
+    "snake_case_name = other.attr(x)\n"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 3,
+   "mods": "alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 3,
+   "mods": "shift+alt",
+   "count": 1,
+   "selections": [
+    "sn"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 3,
+   "mods": "shift+alt",
+   "count": 2,
+   "selections": [
+    "snake_case_name"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 3,
+   "mods": "shift+alt",
+   "count": 3,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 1,
+   "column": 3,
+   "mods": "shift+alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 16,
+   "mods": "none",
+   "count": 1,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 1,
+   "column": 16,
+   "mods": "none",
+   "count": 2,
+   "selections": [
+    "snake_case_name"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 16,
+   "mods": "none",
+   "count": 3,
+   "selections": [
+    "snake_case_name = other.attr(x)\n"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 16,
+   "mods": "none",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 16,
+   "mods": "shift",
+   "count": 1,
+   "selections": [
+    "snake_case_name"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 16,
+   "mods": "shift",
+   "count": 2,
+   "selections": [
+    "snake_case_name"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 16,
+   "mods": "shift",
+   "count": 3,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 1,
+   "column": 16,
+   "mods": "shift",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 16,
+   "mods": "alt",
+   "count": 1,
+   "selections": [
+    "",
+    ""
+   ]
+  },
+  {
+   "line": 1,
+   "column": 16,
+   "mods": "alt",
+   "count": 2,
+   "selections": [
+    "snake_case_name"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 16,
+   "mods": "alt",
+   "count": 3,
+   "selections": [
+    "snake_case_name = other.attr(x)\n"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 16,
+   "mods": "alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 16,
+   "mods": "shift+alt",
+   "count": 1,
+   "selections": [
+    "snake_case_name"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 16,
+   "mods": "shift+alt",
+   "count": 2,
+   "selections": [
+    "snake_case_name"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 16,
+   "mods": "shift+alt",
+   "count": 3,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 1,
+   "column": 16,
+   "mods": "shift+alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 17,
+   "mods": "none",
+   "count": 1,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 1,
+   "column": 17,
+   "mods": "none",
+   "count": 2,
+   "selections": [
+    " "
+   ]
+  },
+  {
+   "line": 1,
+   "column": 17,
+   "mods": "none",
+   "count": 3,
+   "selections": [
+    "snake_case_name = other.attr(x)\n"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 17,
+   "mods": "none",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 17,
+   "mods": "shift",
+   "count": 1,
+   "selections": [
+    "snake_case_name "
+   ]
+  },
+  {
+   "line": 1,
+   "column": 17,
+   "mods": "shift",
+   "count": 2,
+   "selections": [
+    "snake_case_name "
+   ]
+  },
+  {
+   "line": 1,
+   "column": 17,
+   "mods": "shift",
+   "count": 3,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 1,
+   "column": 17,
+   "mods": "shift",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 17,
+   "mods": "alt",
+   "count": 1,
+   "selections": [
+    "",
+    ""
+   ]
+  },
+  {
+   "line": 1,
+   "column": 17,
+   "mods": "alt",
+   "count": 2,
+   "selections": [
+    "",
+    " "
+   ]
+  },
+  {
+   "line": 1,
+   "column": 17,
+   "mods": "alt",
+   "count": 3,
+   "selections": [
+    "snake_case_name = other.attr(x)\n"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 17,
+   "mods": "alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 17,
+   "mods": "shift+alt",
+   "count": 1,
+   "selections": [
+    "snake_case_name "
+   ]
+  },
+  {
+   "line": 1,
+   "column": 17,
+   "mods": "shift+alt",
+   "count": 2,
+   "selections": [
+    "snake_case_name "
+   ]
+  },
+  {
+   "line": 1,
+   "column": 17,
+   "mods": "shift+alt",
+   "count": 3,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 1,
+   "column": 17,
+   "mods": "shift+alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 21,
+   "mods": "none",
+   "count": 1,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 1,
+   "column": 21,
+   "mods": "none",
+   "count": 2,
+   "selections": [
+    "other"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 21,
+   "mods": "none",
+   "count": 3,
+   "selections": [
+    "snake_case_name = other.attr(x)\n"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 21,
+   "mods": "none",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 21,
+   "mods": "shift",
+   "count": 1,
+   "selections": [
+    "snake_case_name = ot"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 21,
+   "mods": "shift",
+   "count": 2,
+   "selections": [
+    "snake_case_name = other"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 21,
+   "mods": "shift",
+   "count": 3,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 1,
+   "column": 21,
+   "mods": "shift",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 21,
+   "mods": "alt",
+   "count": 1,
+   "selections": [
+    "",
+    ""
+   ]
+  },
+  {
+   "line": 1,
+   "column": 21,
+   "mods": "alt",
+   "count": 2,
+   "selections": [
+    "",
+    "other"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 21,
+   "mods": "alt",
+   "count": 3,
+   "selections": [
+    "snake_case_name = other.attr(x)\n"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 21,
+   "mods": "alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 21,
+   "mods": "shift+alt",
+   "count": 1,
+   "selections": [
+    "snake_case_name = ot"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 21,
+   "mods": "shift+alt",
+   "count": 2,
+   "selections": [
+    "snake_case_name = other"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 21,
+   "mods": "shift+alt",
+   "count": 3,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 1,
+   "column": 21,
+   "mods": "shift+alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 24,
+   "mods": "none",
+   "count": 1,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 1,
+   "column": 24,
+   "mods": "none",
+   "count": 2,
+   "selections": [
+    "other"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 24,
+   "mods": "none",
+   "count": 3,
+   "selections": [
+    "snake_case_name = other.attr(x)\n"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 24,
+   "mods": "none",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 24,
+   "mods": "shift",
+   "count": 1,
+   "selections": [
+    "snake_case_name = other"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 24,
+   "mods": "shift",
+   "count": 2,
+   "selections": [
+    "snake_case_name = other"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 24,
+   "mods": "shift",
+   "count": 3,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 1,
+   "column": 24,
+   "mods": "shift",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 24,
+   "mods": "alt",
+   "count": 1,
+   "selections": [
+    "",
+    ""
+   ]
+  },
+  {
+   "line": 1,
+   "column": 24,
+   "mods": "alt",
+   "count": 2,
+   "selections": [
+    "",
+    "other"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 24,
+   "mods": "alt",
+   "count": 3,
+   "selections": [
+    "snake_case_name = other.attr(x)\n"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 24,
+   "mods": "alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 24,
+   "mods": "shift+alt",
+   "count": 1,
+   "selections": [
+    "snake_case_name = other"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 24,
+   "mods": "shift+alt",
+   "count": 2,
+   "selections": [
+    "snake_case_name = other"
+   ]
+  },
+  {
+   "line": 1,
+   "column": 24,
+   "mods": "shift+alt",
+   "count": 3,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 1,
+   "column": 24,
+   "mods": "shift+alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 2,
+   "column": 3,
+   "mods": "none",
+   "count": 1,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 2,
+   "column": 3,
+   "mods": "none",
+   "count": 2,
+   "selections": [
+    "    "
+   ]
+  },
+  {
+   "line": 2,
+   "column": 3,
+   "mods": "none",
+   "count": 3,
+   "selections": [
+    "    leading indentation\n"
+   ]
+  },
+  {
+   "line": 2,
+   "column": 3,
+   "mods": "none",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 2,
+   "column": 3,
+   "mods": "shift",
+   "count": 1,
+   "selections": [
+    "snake_case_name = other.attr(x)\n  "
+   ]
+  },
+  {
+   "line": 2,
+   "column": 3,
+   "mods": "shift",
+   "count": 2,
+   "selections": [
+    "snake_case_name = other.attr(x)\n  "
+   ]
+  },
+  {
+   "line": 2,
+   "column": 3,
+   "mods": "shift",
+   "count": 3,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\n"
+   ]
+  },
+  {
+   "line": 2,
+   "column": 3,
+   "mods": "shift",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 2,
+   "column": 3,
+   "mods": "alt",
+   "count": 1,
+   "selections": [
+    "",
+    ""
+   ]
+  },
+  {
+   "line": 2,
+   "column": 3,
+   "mods": "alt",
+   "count": 2,
+   "selections": [
+    "",
+    "    "
+   ]
+  },
+  {
+   "line": 2,
+   "column": 3,
+   "mods": "alt",
+   "count": 3,
+   "selections": [
+    "",
+    "    leading indentation\n"
+   ]
+  },
+  {
+   "line": 2,
+   "column": 3,
+   "mods": "alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 2,
+   "column": 3,
+   "mods": "shift+alt",
+   "count": 1,
+   "selections": [
+    "sn",
+    "  "
+   ]
+  },
+  {
+   "line": 2,
+   "column": 3,
+   "mods": "shift+alt",
+   "count": 2,
+   "selections": [
+    "sn",
+    "  "
+   ]
+  },
+  {
+   "line": 2,
+   "column": 3,
+   "mods": "shift+alt",
+   "count": 3,
+   "selections": [
+    "sn",
+    ""
+   ]
+  },
+  {
+   "line": 2,
+   "column": 3,
+   "mods": "shift+alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 2,
+   "column": 10,
+   "mods": "none",
+   "count": 1,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 2,
+   "column": 10,
+   "mods": "none",
+   "count": 2,
+   "selections": [
+    "leading"
+   ]
+  },
+  {
+   "line": 2,
+   "column": 10,
+   "mods": "none",
+   "count": 3,
+   "selections": [
+    "    leading indentation\n"
+   ]
+  },
+  {
+   "line": 2,
+   "column": 10,
+   "mods": "none",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 2,
+   "column": 10,
+   "mods": "shift",
+   "count": 1,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leadi"
+   ]
+  },
+  {
+   "line": 2,
+   "column": 10,
+   "mods": "shift",
+   "count": 2,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading"
+   ]
+  },
+  {
+   "line": 2,
+   "column": 10,
+   "mods": "shift",
+   "count": 3,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\n"
+   ]
+  },
+  {
+   "line": 2,
+   "column": 10,
+   "mods": "shift",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 2,
+   "column": 10,
+   "mods": "alt",
+   "count": 1,
+   "selections": [
+    "",
+    ""
+   ]
+  },
+  {
+   "line": 2,
+   "column": 10,
+   "mods": "alt",
+   "count": 2,
+   "selections": [
+    "",
+    "leading"
+   ]
+  },
+  {
+   "line": 2,
+   "column": 10,
+   "mods": "alt",
+   "count": 3,
+   "selections": [
+    "",
+    "    leading indentation\n"
+   ]
+  },
+  {
+   "line": 2,
+   "column": 10,
+   "mods": "alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 2,
+   "column": 10,
+   "mods": "shift+alt",
+   "count": 1,
+   "selections": [
+    "snake_cas",
+    "    leadi"
+   ]
+  },
+  {
+   "line": 2,
+   "column": 10,
+   "mods": "shift+alt",
+   "count": 2,
+   "selections": [
+    "snake_cas",
+    "    leading"
+   ]
+  },
+  {
+   "line": 2,
+   "column": 10,
+   "mods": "shift+alt",
+   "count": 3,
+   "selections": [
+    "snake_cas",
+    ""
+   ]
+  },
+  {
+   "line": 2,
+   "column": 10,
+   "mods": "shift+alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 3,
+   "column": 4,
+   "mods": "none",
+   "count": 1,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 3,
+   "column": 4,
+   "mods": "none",
+   "count": 2,
+   "selections": [
+    "=="
+   ]
+  },
+  {
+   "line": 3,
+   "column": 4,
+   "mods": "none",
+   "count": 3,
+   "selections": [
+    "a == b and p->q\n"
+   ]
+  },
+  {
+   "line": 3,
+   "column": 4,
+   "mods": "none",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 3,
+   "column": 4,
+   "mods": "shift",
+   "count": 1,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na ="
+   ]
+  },
+  {
+   "line": 3,
+   "column": 4,
+   "mods": "shift",
+   "count": 2,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na ="
+   ]
+  },
+  {
+   "line": 3,
+   "column": 4,
+   "mods": "shift",
+   "count": 3,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\n"
+   ]
+  },
+  {
+   "line": 3,
+   "column": 4,
+   "mods": "shift",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 3,
+   "column": 4,
+   "mods": "alt",
+   "count": 1,
+   "selections": [
+    "",
+    ""
+   ]
+  },
+  {
+   "line": 3,
+   "column": 4,
+   "mods": "alt",
+   "count": 2,
+   "selections": [
+    "",
+    "=="
+   ]
+  },
+  {
+   "line": 3,
+   "column": 4,
+   "mods": "alt",
+   "count": 3,
+   "selections": [
+    "",
+    "a == b and p->q\n"
+   ]
+  },
+  {
+   "line": 3,
+   "column": 4,
+   "mods": "alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 3,
+   "column": 4,
+   "mods": "shift+alt",
+   "count": 1,
+   "selections": [
+    "sna",
+    "   ",
+    "a ="
+   ]
+  },
+  {
+   "line": 3,
+   "column": 4,
+   "mods": "shift+alt",
+   "count": 2,
+   "selections": [
+    "sna",
+    "   ",
+    "a ="
+   ]
+  },
+  {
+   "line": 3,
+   "column": 4,
+   "mods": "shift+alt",
+   "count": 3,
+   "selections": [
+    "sna",
+    "   ",
+    ""
+   ]
+  },
+  {
+   "line": 3,
+   "column": 4,
+   "mods": "shift+alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 3,
+   "column": 13,
+   "mods": "none",
+   "count": 1,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 3,
+   "column": 13,
+   "mods": "none",
+   "count": 2,
+   "selections": [
+    "p"
+   ]
+  },
+  {
+   "line": 3,
+   "column": 13,
+   "mods": "none",
+   "count": 3,
+   "selections": [
+    "a == b and p->q\n"
+   ]
+  },
+  {
+   "line": 3,
+   "column": 13,
+   "mods": "none",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 3,
+   "column": 13,
+   "mods": "shift",
+   "count": 1,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p"
+   ]
+  },
+  {
+   "line": 3,
+   "column": 13,
+   "mods": "shift",
+   "count": 2,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p"
+   ]
+  },
+  {
+   "line": 3,
+   "column": 13,
+   "mods": "shift",
+   "count": 3,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\n"
+   ]
+  },
+  {
+   "line": 3,
+   "column": 13,
+   "mods": "shift",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 3,
+   "column": 13,
+   "mods": "alt",
+   "count": 1,
+   "selections": [
+    "",
+    ""
+   ]
+  },
+  {
+   "line": 3,
+   "column": 13,
+   "mods": "alt",
+   "count": 2,
+   "selections": [
+    "",
+    "p"
+   ]
+  },
+  {
+   "line": 3,
+   "column": 13,
+   "mods": "alt",
+   "count": 3,
+   "selections": [
+    "",
+    "a == b and p->q\n"
+   ]
+  },
+  {
+   "line": 3,
+   "column": 13,
+   "mods": "alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 3,
+   "column": 13,
+   "mods": "shift+alt",
+   "count": 1,
+   "selections": [
+    "snake_case_n",
+    "    leading ",
+    "a == b and p"
+   ]
+  },
+  {
+   "line": 3,
+   "column": 13,
+   "mods": "shift+alt",
+   "count": 2,
+   "selections": [
+    "snake_case_n",
+    "    leading ",
+    "a == b and p"
+   ]
+  },
+  {
+   "line": 3,
+   "column": 13,
+   "mods": "shift+alt",
+   "count": 3,
+   "selections": [
+    "snake_case_n",
+    "    leading ",
+    ""
+   ]
+  },
+  {
+   "line": 3,
+   "column": 13,
+   "mods": "shift+alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 4,
+   "column": 2,
+   "mods": "none",
+   "count": 1,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 4,
+   "column": 2,
+   "mods": "none",
+   "count": 2,
+   "selections": [
+    "a"
+   ]
+  },
+  {
+   "line": 4,
+   "column": 2,
+   "mods": "none",
+   "count": 3,
+   "selections": [
+    "a.b\n"
+   ]
+  },
+  {
+   "line": 4,
+   "column": 2,
+   "mods": "none",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 4,
+   "column": 2,
+   "mods": "shift",
+   "count": 1,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na"
+   ]
+  },
+  {
+   "line": 4,
+   "column": 2,
+   "mods": "shift",
+   "count": 2,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na"
+   ]
+  },
+  {
+   "line": 4,
+   "column": 2,
+   "mods": "shift",
+   "count": 3,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n"
+   ]
+  },
+  {
+   "line": 4,
+   "column": 2,
+   "mods": "shift",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 4,
+   "column": 2,
+   "mods": "alt",
+   "count": 1,
+   "selections": [
+    "",
+    ""
+   ]
+  },
+  {
+   "line": 4,
+   "column": 2,
+   "mods": "alt",
+   "count": 2,
+   "selections": [
+    "",
+    "a"
+   ]
+  },
+  {
+   "line": 4,
+   "column": 2,
+   "mods": "alt",
+   "count": 3,
+   "selections": [
+    "",
+    "a.b\n"
+   ]
+  },
+  {
+   "line": 4,
+   "column": 2,
+   "mods": "alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 4,
+   "column": 2,
+   "mods": "shift+alt",
+   "count": 1,
+   "selections": [
+    "s",
+    " ",
+    "a",
+    "a"
+   ]
+  },
+  {
+   "line": 4,
+   "column": 2,
+   "mods": "shift+alt",
+   "count": 2,
+   "selections": [
+    "s",
+    " ",
+    "a",
+    "a"
+   ]
+  },
+  {
+   "line": 4,
+   "column": 2,
+   "mods": "shift+alt",
+   "count": 3,
+   "selections": [
+    "s",
+    " ",
+    "a",
+    ""
+   ]
+  },
+  {
+   "line": 4,
+   "column": 2,
+   "mods": "shift+alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 4,
+   "column": 3,
+   "mods": "none",
+   "count": 1,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 4,
+   "column": 3,
+   "mods": "none",
+   "count": 2,
+   "selections": [
+    "b"
+   ]
+  },
+  {
+   "line": 4,
+   "column": 3,
+   "mods": "none",
+   "count": 3,
+   "selections": [
+    "a.b\n"
+   ]
+  },
+  {
+   "line": 4,
+   "column": 3,
+   "mods": "none",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 4,
+   "column": 3,
+   "mods": "shift",
+   "count": 1,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na."
+   ]
+  },
+  {
+   "line": 4,
+   "column": 3,
+   "mods": "shift",
+   "count": 2,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na."
+   ]
+  },
+  {
+   "line": 4,
+   "column": 3,
+   "mods": "shift",
+   "count": 3,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n"
+   ]
+  },
+  {
+   "line": 4,
+   "column": 3,
+   "mods": "shift",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 4,
+   "column": 3,
+   "mods": "alt",
+   "count": 1,
+   "selections": [
+    "",
+    ""
+   ]
+  },
+  {
+   "line": 4,
+   "column": 3,
+   "mods": "alt",
+   "count": 2,
+   "selections": [
+    "",
+    "b"
+   ]
+  },
+  {
+   "line": 4,
+   "column": 3,
+   "mods": "alt",
+   "count": 3,
+   "selections": [
+    "",
+    "a.b\n"
+   ]
+  },
+  {
+   "line": 4,
+   "column": 3,
+   "mods": "alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 4,
+   "column": 3,
+   "mods": "shift+alt",
+   "count": 1,
+   "selections": [
+    "sn",
+    "  ",
+    "a ",
+    "a."
+   ]
+  },
+  {
+   "line": 4,
+   "column": 3,
+   "mods": "shift+alt",
+   "count": 2,
+   "selections": [
+    "sn",
+    "  ",
+    "a ",
+    "a."
+   ]
+  },
+  {
+   "line": 4,
+   "column": 3,
+   "mods": "shift+alt",
+   "count": 3,
+   "selections": [
+    "sn",
+    "  ",
+    "a ",
+    ""
+   ]
+  },
+  {
+   "line": 4,
+   "column": 3,
+   "mods": "shift+alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 5,
+   "column": 1,
+   "mods": "none",
+   "count": 1,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 5,
+   "column": 1,
+   "mods": "none",
+   "count": 2,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 5,
+   "column": 1,
+   "mods": "none",
+   "count": 3,
+   "selections": [
+    "\n"
+   ]
+  },
+  {
+   "line": 5,
+   "column": 1,
+   "mods": "none",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 5,
+   "column": 1,
+   "mods": "shift",
+   "count": 1,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n"
+   ]
+  },
+  {
+   "line": 5,
+   "column": 1,
+   "mods": "shift",
+   "count": 2,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n"
+   ]
+  },
+  {
+   "line": 5,
+   "column": 1,
+   "mods": "shift",
+   "count": 3,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\n"
+   ]
+  },
+  {
+   "line": 5,
+   "column": 1,
+   "mods": "shift",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 5,
+   "column": 1,
+   "mods": "alt",
+   "count": 1,
+   "selections": [
+    "",
+    ""
+   ]
+  },
+  {
+   "line": 5,
+   "column": 1,
+   "mods": "alt",
+   "count": 2,
+   "selections": [
+    "",
+    ""
+   ]
+  },
+  {
+   "line": 5,
+   "column": 1,
+   "mods": "alt",
+   "count": 3,
+   "selections": [
+    "",
+    "\n"
+   ]
+  },
+  {
+   "line": 5,
+   "column": 1,
+   "mods": "alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 5,
+   "column": 1,
+   "mods": "shift+alt",
+   "count": 1,
+   "selections": [
+    "",
+    "",
+    "",
+    "",
+    ""
+   ]
+  },
+  {
+   "line": 5,
+   "column": 1,
+   "mods": "shift+alt",
+   "count": 2,
+   "selections": [
+    "",
+    "",
+    "",
+    "",
+    ""
+   ]
+  },
+  {
+   "line": 5,
+   "column": 1,
+   "mods": "shift+alt",
+   "count": 3,
+   "selections": [
+    "",
+    "",
+    "",
+    "",
+    ""
+   ]
+  },
+  {
+   "line": 5,
+   "column": 1,
+   "mods": "shift+alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 8,
+   "mods": "none",
+   "count": 1,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 6,
+   "column": 8,
+   "mods": "none",
+   "count": 2,
+   "selections": [
+    "λx"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 8,
+   "mods": "none",
+   "count": 3,
+   "selections": [
+    "price λx 3€ end\n"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 8,
+   "mods": "none",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 8,
+   "mods": "shift",
+   "count": 1,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λ"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 8,
+   "mods": "shift",
+   "count": 2,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 8,
+   "mods": "shift",
+   "count": 3,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\n"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 8,
+   "mods": "shift",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 8,
+   "mods": "alt",
+   "count": 1,
+   "selections": [
+    "",
+    ""
+   ]
+  },
+  {
+   "line": 6,
+   "column": 8,
+   "mods": "alt",
+   "count": 2,
+   "selections": [
+    "",
+    "λx"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 8,
+   "mods": "alt",
+   "count": 3,
+   "selections": [
+    "",
+    "price λx 3€ end\n"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 8,
+   "mods": "alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 8,
+   "mods": "shift+alt",
+   "count": 1,
+   "selections": [
+    "snake_c",
+    "    lea",
+    "a == b ",
+    "a.b",
+    "",
+    "price λ"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 8,
+   "mods": "shift+alt",
+   "count": 2,
+   "selections": [
+    "snake_c",
+    "    lea",
+    "a == b ",
+    "a.b",
+    "",
+    "price λx"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 8,
+   "mods": "shift+alt",
+   "count": 3,
+   "selections": [
+    "snake_c",
+    "    lea",
+    "a == b ",
+    "a.b",
+    "",
+    ""
+   ]
+  },
+  {
+   "line": 6,
+   "column": 8,
+   "mods": "shift+alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 11,
+   "mods": "none",
+   "count": 1,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 6,
+   "column": 11,
+   "mods": "none",
+   "count": 2,
+   "selections": [
+    "3€"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 11,
+   "mods": "none",
+   "count": 3,
+   "selections": [
+    "price λx 3€ end\n"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 11,
+   "mods": "none",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 11,
+   "mods": "shift",
+   "count": 1,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 11,
+   "mods": "shift",
+   "count": 2,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 11,
+   "mods": "shift",
+   "count": 3,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\n"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 11,
+   "mods": "shift",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 11,
+   "mods": "alt",
+   "count": 1,
+   "selections": [
+    "",
+    ""
+   ]
+  },
+  {
+   "line": 6,
+   "column": 11,
+   "mods": "alt",
+   "count": 2,
+   "selections": [
+    "",
+    "3€"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 11,
+   "mods": "alt",
+   "count": 3,
+   "selections": [
+    "",
+    "price λx 3€ end\n"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 11,
+   "mods": "alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 11,
+   "mods": "shift+alt",
+   "count": 1,
+   "selections": [
+    "snake_case",
+    "    leadin",
+    "a == b and",
+    "a.b",
+    "",
+    "price λx 3"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 11,
+   "mods": "shift+alt",
+   "count": 2,
+   "selections": [
+    "snake_case",
+    "    leadin",
+    "a == b and",
+    "a.b",
+    "",
+    "price λx 3€"
+   ]
+  },
+  {
+   "line": 6,
+   "column": 11,
+   "mods": "shift+alt",
+   "count": 3,
+   "selections": [
+    "snake_case",
+    "    leadin",
+    "a == b and",
+    "a.b",
+    "",
+    ""
+   ]
+  },
+  {
+   "line": 6,
+   "column": 11,
+   "mods": "shift+alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 7,
+   "column": 24,
+   "mods": "none",
+   "count": 1,
+   "selections": [
+    ""
+   ]
+  },
+  {
+   "line": 7,
+   "column": 24,
+   "mods": "none",
+   "count": 2,
+   "selections": [
+    "terminator"
+   ]
+  },
+  {
+   "line": 7,
+   "column": 24,
+   "mods": "none",
+   "count": 3,
+   "selections": [
+    "last line no terminator"
+   ]
+  },
+  {
+   "line": 7,
+   "column": 24,
+   "mods": "none",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 7,
+   "column": 24,
+   "mods": "shift",
+   "count": 1,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 7,
+   "column": 24,
+   "mods": "shift",
+   "count": 2,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 7,
+   "column": 24,
+   "mods": "shift",
+   "count": 3,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 7,
+   "column": 24,
+   "mods": "shift",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 7,
+   "column": 24,
+   "mods": "alt",
+   "count": 1,
+   "selections": [
+    "",
+    ""
+   ]
+  },
+  {
+   "line": 7,
+   "column": 24,
+   "mods": "alt",
+   "count": 2,
+   "selections": [
+    "",
+    "terminator"
+   ]
+  },
+  {
+   "line": 7,
+   "column": 24,
+   "mods": "alt",
+   "count": 3,
+   "selections": [
+    "",
+    "last line no terminator"
+   ]
+  },
+  {
+   "line": 7,
+   "column": 24,
+   "mods": "alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  },
+  {
+   "line": 7,
+   "column": 24,
+   "mods": "shift+alt",
+   "count": 1,
+   "selections": [
+    "snake_case_name = other",
+    "    leading indentation",
+    "a == b and p->q",
+    "a.b",
+    "",
+    "price λx 3€ end",
+    "last line no terminator"
+   ]
+  },
+  {
+   "line": 7,
+   "column": 24,
+   "mods": "shift+alt",
+   "count": 2,
+   "selections": [
+    "snake_case_name = other",
+    "    leading indentation",
+    "a == b and p->q",
+    "a.b",
+    "",
+    "price λx 3€ end",
+    "last line no terminator"
+   ]
+  },
+  {
+   "line": 7,
+   "column": 24,
+   "mods": "shift+alt",
+   "count": 3,
+   "selections": [
+    "snake_case_name = other",
+    "    leading indentation",
+    "a == b and p->q",
+    "a.b",
+    "",
+    "price λx 3€ end",
+    ""
+   ]
+  },
+  {
+   "line": 7,
+   "column": 24,
+   "mods": "shift+alt",
+   "count": 4,
+   "selections": [
+    "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+   ]
+  }
+ ],
+ "gutter": {
+  "glyph": [
+   2,
+   2,
+   2
+  ],
+  "lineNumber": [
+   3,
+   3,
+   3
+  ],
+  "decorations": [
+   4,
+   4,
+   4
+  ],
+  "glyphWidth": 19
+ }
+}

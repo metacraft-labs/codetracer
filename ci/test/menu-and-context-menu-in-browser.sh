@@ -534,7 +534,7 @@ print(len(z))
 ")"
 unowned_names="$(printf '%s\n' "${unowned}" | head -1)"
 zone_count="$(printf '%s\n' "${unowned}" | tail -1)"
-if [ "${zone_count:-0}" -ge 3 ] && [ "${unowned_names}" = "none" ]; then
+if [ "${zone_count:-0}" -ge 1 ] && [ "${unowned_names}" = "none" ]; then
 	ck ok "[gutter/lanes] all ${zone_count} lanes own the hit test at their own centre"
 else
 	ck fail "[gutter/lanes] ${zone_count} lane(s) found; these do not own their own" \
@@ -549,8 +549,7 @@ else
 fi
 
 if [ "$(q gutter geom lineNumberClipped)" = "false" ]; then
-	ck ok "[gutter/lanes] and the line number still fits its lane after the marker" \
-		"lane was widened to separate the markers"
+	ck ok "[gutter/lanes] and the line number still fits its lane"
 else
 	ck fail "[gutter/lanes] the line number is clipped by its lane"
 fi
@@ -609,25 +608,18 @@ case "${hooked_n}" in
 esac
 
 gut_targets="$(qraw gutter clickGutter monacoTargetNames)"
-gut_target_n="$(python3 -c "
-import json
-print(len(json.loads('''$(q gutter clickGutter monacoTargets)''') or []))
-" 2>/dev/null || echo "?")"
-if [ "${gut_target_n}" = "0" ]; then
-	ck ok "[gutter/monaco] a gutter click reaches Monaco as NO mouse target at all" \
-		"(${gut_target_n} recorded) — the stopPropagation guards keep our markup" \
-		"out of Monaco's mouse handling, which is why no folding contribution can" \
-		"act on it"
+if [ "${gut_targets}" = "GUTTER_GLYPH_MARGIN" ]; then
+	ck ok "[gutter/monaco] a press on the glyph column reaches Monaco as" \
+		"GUTTER_GLYPH_MARGIN, the toggle's own target (Editor-Pane.md MC.5)"
 else
-	ck fail "[gutter/monaco] a gutter click reached Monaco as ${gut_target_n} target(s):" \
-		"${gut_targets} — expected none. The stopPropagation guards on the custom" \
-		"gutter markup have been lost, and Monaco now selects the line on press."
+	ck fail "[gutter/monaco] a press on the glyph column reached Monaco as" \
+		"'${gut_targets}'; expected exactly GUTTER_GLYPH_MARGIN."
 fi
 
 chev_targets="$(qraw gutter clickChevron monacoTargetNames)"
 if [ "${chev_targets}" = "GUTTER_LINE_DECORATIONS" ]; then
 	ck ok "[gutter/monaco] and the chevron reaches Monaco as ${chev_targets}, a" \
-		"different band from the GUTTER_LINE_NUMBERS our gutter is painted into"
+		"different band from the glyph column's"
 else
 	ck fail "[gutter/monaco] the chevron reached Monaco as '${chev_targets}';" \
 		"expected exactly GUTTER_LINE_DECORATIONS. Anything else means the folding" \

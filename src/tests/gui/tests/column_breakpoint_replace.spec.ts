@@ -52,7 +52,7 @@ import { test, expect, readyOnEntryTest as readyOnEntry } from "../lib/fixtures"
 import { LayoutPage } from "../page-objects/layout-page";
 import {
   addColumnBreakpoint,
-  altClickAtColumn,
+  inlineBreakpointAtColumn,
   getCurrentColumn,
   getCurrentLine,
   readBreakpoint,
@@ -196,7 +196,7 @@ test.describe("M1/M6 — Column-aware breakpoint replacement on same line", () =
     // slot.  The Alt+click MUST overwrite the previous column
     // (not append a second breakpoint).  A regression that
     // appended would surface as the first column "winning" below.
-    await altClickAtColumn(editor, 1, fixture.laterStatementColumn);
+    await inlineBreakpointAtColumn(editor, 1, fixture.laterStatementColumn);
 
     await expect
       .poll(async () => (await readBreakpoint(editor, 1))?.column ?? -1)

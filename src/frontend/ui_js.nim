@@ -5559,6 +5559,14 @@ proc addBreakpointAtPosition*(data: Data) =
   debuggerService.addBreakpoint(activeEditorPath, line)
   editor.refreshEditorLine(line)
 
+proc toggleInlineBreakpointAtCaret*(data: Data) =
+  ## Shift+F9 (Editor-Pane.md § Inline breakpoints).
+  data.pointsOperationsSetup()
+  let pos = editor.monacoEditor.getPosition()
+  if not pos.isNil:
+    editor.toggleInlineBreakpointAt(activeEditorPath, cast[int](pos.lineNumber),
+                                    cast[int](pos.column))
+
 proc removeBreakpointAtPosition*(data: Data) =
   data.pointsOperationsSetup()
   debuggerService.deleteBreakpoint(activeEditorPath, line)
@@ -6415,6 +6423,7 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     runProgramIn(data, topNewTab),
   aRunProgramInCurrentTab: proc(actionData: JsObject) = # aRunProgramInCurrentTab
     runProgramIn(data, topCurrentTab),
+  aInlineBreakpoint: proc(actionData: JsObject) = data.toggleInlineBreakpointAtCaret(),
 ]
 
 data.actions = actions

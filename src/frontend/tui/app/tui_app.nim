@@ -180,6 +180,11 @@ type
       ## `follow`) and the screen scrubber's preview are the pane's own.
     terminalDrag*: TerminalDragKind
       ## PLAT-52: a press held on one of the pane's scrubbers.
+    editorPointer*: EditorPointerState
+      ## The editor's click count and the gesture a held press is making
+      ## (Editor-Pane.md MC.1, MC.4).
+    wordSeparators*: string
+      ## `word-separators`, handed to each document a press lands on.
     textDrag*: bool
       ## PLAT-68: a left press on the editor's text is held — the pointer's
       ## motion extends the selection from where it was pressed.

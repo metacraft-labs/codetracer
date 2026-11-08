@@ -5,7 +5,7 @@ import
   ../viewmodel/session_vm,
   shortcut_labels,
   trace_macro, trace_static,
-  column_click_resolver, editor_scope,
+  editor_scope,
   editor_decoration_layers, trace_redraw_policy,
   flow_line_styles, review_flow_adapter, review_flow_selection,
   ../[ renderer, communication, event_helpers, lsp_router ],
@@ -40,6 +40,8 @@ from ../viewmodel/viewmodels/run_control_ownership import rollbackRunSpinner
 # is still drawn by `ui/flow.nim`'s FlowComponent (D7.4 (b) is open).
 # ---------------------------------------------------------------------------
 import std/[json, tables]
+from ./chord_display import displayedChord
+from ../viewmodel/editor/word_classifier import UsualWordSeparators
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/viewmodels/editor_vm import
@@ -117,6 +119,7 @@ proc watchEditorPoints(store: ReplayDataStore) =
             editor.refreshEditorLine(line)
         drawnMarks[path] = now
         editor.applyColumnBreakpointDecorations()
+        editor.updateGlyphMarks()
 
     # MONACO FOLLOWS THE EDITOR SURFACE (Shared-DOM-Front-Ends D7.4 (a)): the
     # execution line, the flow's line styles and the marks are re-applied
@@ -569,116 +572,30 @@ proc setColumnBreakpoint*(
   setAnchoredBreakpoint(editorPointStore(), $tabInfo.name, line, column)
 
 
-proc lineActionClickAt*(
-    self: EditorViewComponent;
-    tabInfo: TabInfo;
-    line: int;
-    monacoColumn: Option[int];
-    onGutterElement: bool;
-    lineMaxColumn: Option[int] = none(int)) =
-  ## M6 — dispatch a gutter / editor click to either the legacy
-  ## line-only ``toggleBreakpoint`` or the column-aware
-  ## ``addColumnBreakpoint`` path, based on the resolver in
-  ## ``column_click_resolver``.
-  ##
-  ## The pixel→column mapping is provided by Monaco
-  ## (``e.target.position.column``) when available; this proc just
-  ## consumes the resolver's verdict.  Pulling the dispatch out of
-  ## the raw DOM event handler keeps the legacy
-  ## ``lineActionClick(element)`` path untouched for the
-  ## ``gutter-line`` / ``gutter-breakpoint`` HTML elements that the
-  ## CodeTracer custom gutter emits.
-  if line <= 0:
-    return
-  let resolution = resolveColumnClick(
-    line = line,
-    monacoColumn = monacoColumn,
-    onGutterElement = onGutterElement,
-    lineMaxColumn = lineMaxColumn)
-  case resolution.kind
-  of ColumnAwareClick:
-    self.setColumnBreakpoint(tabInfo, resolution.line, resolution.column)
-  of GutterClick:
-    toggleBreakpoint(editorPointStore(), $tabInfo.name, resolution.line)
+const
+  # Monaco's `MouseTargetType`.
+  MouseTargetGutterGlyphMargin = 2
+  MouseTargetGutterLineNumbers = 3
+  MouseTargetGutterLineDecorations = 4
+
+proc toggleInlineBreakpointAt*(self: EditorViewComponent; path: cstring;
+                               line, column: int) =
+  ## Shift+F9 and the context menu's inline entry, at the caret. The column
+  ## rule is the shared one (`sdk/breakpoints.inlineBreakpointPlan`).
+  var lastColumn = 0
+  let textModel = self.monacoEditor.getModel()
+  if not textModel.isNil:
+    lastColumn = textModel.getLineMaxColumn(line)
+  toggleInlineBreakpoint(editorPointStore(), $path, line, column, lastColumn)
 
 
-proc lineActionClick(self: EditorViewComponent, tabInfo: TabInfo, line: js) =
-  var element = line
-  var dataset = element.dataset
-
-  if dataset.line.isNil:
-    element = element.parentNode
-    dataset = element.dataset
-
-  if not dataset.line.isNil:
-    let lineNumber = cast[cstring](dataset.line).parseJSInt()
-    toggleBreakpoint(editorPointStore(), $tabInfo.name, lineNumber)
-
-proc lineActionContextMenu(self: EditorViewComponent, tabInfo: TabInfo, line: js) =
-  # PLAT-50: THE PARENT'S DATASET IS READ AFTER MOVING TO IT, as
-  # `lineActionClick` does. It read the clicked element's `dataset` once and
-  # kept it, so a right-click on a gutter marker (whose `data-line` is on the
-  # `.gutter` row around it) moved to the row and then tested the marker's
-  # empty dataset again — measured on the real desktop: a right-click on a
-  # breakpoint enabled nothing and disabled nothing
-  # (`plat50-desktop-capture.spec.ts`).
-  var element = line
-  var dataset = element.dataset
-
-  if dataset.line.isNil:
-    element = element.parentNode
-    dataset = element.dataset
-  if not dataset.line.isNil:
-    let lineNumber = cast[cstring](dataset.line).parseJSInt()
-    let path = $tabInfo.name
-    let held = breakpointOn(path, lineNumber)
-    # An empty slot does nothing (`isGutterToggleTarget`): no row, no request.
-    if held.isSome:
-      discard setBreakpointEnabled(editorPointStore(), path, lineNumber,
-                                   not held.get.enabled)
-
-proc isGutterToggleTarget(target: js): bool =
-  ## Whether a right click on `target` is the gutter's enable / disable toggle
-  ## (`Editor-Pane.md`, "On the gutter", gesture 8, the glyph column's right
-  ## click): an element with a class starting with `gutter-breakpoint`, which
-  ## is the breakpoint's marker (`gutter-breakpoint-enabled` / `-disabled` /
-  ## `-error`, drawn by `trace.editorLineNumber`). An exact
-  ## `gutter-breakpoint` matched no element the gutter draws (PLAT-50).
-  ##
-  ## AND THE EMPTY SLOT, `gutter-no-breakpoint`. On a line with no breakpoint
-  ## `trace.editorLineNumber` draws this placeholder where the marker would
-  ## be (it is what shows the faint dot on hover), so it IS that line's glyph
-  ## column, and gesture 8 governs it too: "On a line without a breakpoint it
-  ## does nothing." Before it was matched here, a right click on it reached
-  ## Monaco's `onContextMenu` as an ordinary margin press and opened the
-  ## editor's menu (`gutter_right_click_menu.spec.ts`, step 6).
-  ##
-  ## Matching it gives "does nothing" from the two listeners as they are:
-  ## Monaco's menu stands down, and the container listener's
-  ## `lineActionContextMenu` changes nothing: with no breakpoint on the line
-  ## the store holds no row for it, so nothing is planned and nothing is sent.
-  ## The class is drawn only by `trace.editorLineNumber`, in the gutter, so no
-  ## surface where the menu should open carries it.
-  ##
-  ## NOT THE LINE NUMBER. `gutter-line` is the element holding the line's
-  ## number, and a right click on the line numbers opens the editor's menu for
-  ## that line (the same section, after its table). It used to toggle here as
-  ## well, so one press both toggled and opened a menu built before the
-  ## toggle: the defect this predicate exists to stop. The menu carries the
-  ## breakpoint entries, so nothing the toggle offered is lost there.
-  ##
-  ## ONE TEST FOR BOTH LISTENERS. The container's `contextmenu` listener
-  ## toggles on exactly these targets, and Monaco's `onContextMenu` must stand
-  ## down on exactly the same ones (see there). Two copies of the class test
-  ## could drift apart, and a target one of them matched and the other did
-  ## not would bring the stale menu back, or a press with no answer at all.
-  if target.isNil or target.classList.isNil:
-    return false
-  for element in cast[seq[cstring]](target.classList):
-    if cstrutils.startsWith(element, cstring"gutter-breakpoint") or
-        element == cstring"gutter-no-breakpoint":
-      return true
-  false
+proc toggleGlyphEnabled(self: EditorViewComponent; path: cstring; line: int) =
+  ## Gesture 8: enable or disable the line's breakpoint; nothing on a line with
+  ## none (`DebuggerService.enable` acts only on one the line has).
+  let held = breakpointOn($path, line)
+  if held.isSome:
+    discard setBreakpointEnabled(editorPointStore(), $path, line,
+                                 not held.get.enabled)
 
 method clear*(self: EditorViewComponent) =
   self.flow.clear()
@@ -1865,12 +1782,25 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
     else:
       toggleBreakpoint = ContextMenuItem(
         name: "Add breakpoint",
-        hint: "<click line number gutter>",
+        hint: "<click left of the line number>",
         handler: proc(e: Event) =
           toggleBreakpoint(editorPointStore(), $path, line)
       )
 
     contextMenu &= toggleBreakpoint
+
+    # Editor-Pane.md § Inline breakpoints: at the press, whose column the right
+    # click resolved, and with the active base's chord as its hint.
+    let inlineColumn =
+      if ev.target.position.isNil: 1
+      else: cast[int](ev.target.position.column)
+    contextMenu &= ContextMenuItem(
+      name: (if columnBreakpointAt(breakpointsInFile($path), line, inlineColumn):
+               "Remove Inline Breakpoint"
+             else: "Add Inline Breakpoint"),
+      hint: displayedChord(aInlineBreakpoint),
+      handler: proc(e: Event) =
+        self.toggleInlineBreakpointAt(path, line, inlineColumn))
 
     # Delete Breakpoints in file: offered when THIS file holds one, and it
     # deletes this file's breakpoints only.
@@ -2389,6 +2319,8 @@ proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, line
           renderIndentGuides: true,
           find: js{ addExtraSpaceOnTop: false },
           renderLineHighlight: if self.editorView == ViewLowLevelCode: "none".cstring else: "".cstring,
+          glyphMargin: true,
+          selectOnLineNumbers: false,
           lineNumbers: proc(line: int): cstring = self.editorLineNumber(self.path, line, true, lineNumber),
           lineNumbersMinChars: monacoLineNumbersMinChars(lineCountForGutter(source)),
           lineDecorationsWidth: monacoLineDecorationsWidth(self.data.ui.fontSize),
@@ -3437,6 +3369,9 @@ proc initMonacoForEditor(self: EditorViewComponent, host: JsObject) =
         renderIndentGuides: true,
         find: js{ addExtraSpaceOnTop: false },
         renderLineHighlight: if self.editorView == ViewLowLevelCode: "none".cstring else: "".cstring,
+        glyphMargin: true,
+        selectOnLineNumbers: true,
+        wordSeparators: cstring(UsualWordSeparators),
         lineNumbers: proc(line: int): cstring = self.editorLineNumber(path, line),
         lineNumbersMinChars: monacoLineNumbersMinChars(lineCountForGutter(tabInfo.source)),
         lineDecorationsWidth: monacoLineDecorationsWidth(self.data.ui.fontSize),
@@ -3494,7 +3429,23 @@ proc initMonacoForEditor(self: EditorViewComponent, host: JsObject) =
     cdebug "M6 onMouseDown fired ctrl=" & $cast[bool](e.event.ctrlKey) &
       " alt=" & $cast[bool](e.event.altKey) &
       " shift=" & $cast[bool](e.event.shiftKey)
-    if cast[bool](e.event.ctrlKey) and cast[bool](e.event.altKey):
+    let targetType = cast[int](e.target.toJs["type"])
+    if targetType == MouseTargetGutterGlyphMargin:
+      # Gestures 7 and 8, on the press and by this event's own line. Only the
+      # left button, and Ctrl does nothing here (MC.6).
+      if cast[bool](e.event.leftButton) and not cast[bool](e.event.ctrlKey) and
+         not e.target.position.isNil:
+        let line = cast[int](e.target.position.lineNumber)
+        if cast[bool](e.event.altKey):
+          self.toggleGlyphEnabled(self.name, line)
+        else:
+          toggleBreakpoint(editorPointStore(), $self.name, line)
+    elif targetType in [MouseTargetGutterLineNumbers,
+                        MouseTargetGutterLineDecorations]:
+      # Monaco's own: a press on the numbers selects the line, whatever the
+      # modifier (gestures 9 - 12), and K12 is a gesture on the text.
+      discard
+    elif cast[bool](e.event.ctrlKey) and cast[bool](e.event.altKey):
       try:
         let targetToken = self.getTokenFromPosition(e.target.position)
         if targetToken != "":
@@ -3505,49 +3456,6 @@ proc initMonacoForEditor(self: EditorViewComponent, host: JsObject) =
             SmartJump)
       except AmbiguousFunctionCallException:
         self.api.errorMessage getCurrentExceptionMsg()
-    elif cast[bool](e.event.altKey) and
-        not cast[bool](e.event.ctrlKey) and
-        not cast[bool](e.event.shiftKey) and
-        not cast[bool](e.event.middleButton):
-      # M6 — Column-Aware Replay Navigation: Alt+click on the line
-      # text places a column-anchored breakpoint at the exact column
-      # Monaco resolves under the click.  The gutter HTML click
-      # handler below still drives the legacy line-only path so
-      # M1's back-compat invariant holds — Alt+click is opt-in.
-      cdebug "M6 alt+click fired"
-      let position = e.target.position
-      if not position.isNil:
-        let lineNumber = cast[int](position.lineNumber)
-        let column = cast[int](e.target.toJs.position.column)
-        cdebug "M6 alt+click line=" & $lineNumber & " column=" & $column
-        var maxColumn = none(int)
-        let textModel = self.monacoEditor.getModel()
-        if not textModel.isNil:
-          let lm = textModel.getLineMaxColumn(lineNumber)
-          if lm >= 1:
-            maxColumn = some(lm)
-        # The target element class tells us whether Monaco hit the
-        # gutter region (margin / overlay / decorations) — those
-        # should fall through to the legacy line-only path even
-        # under Alt+click.
-        var onGutter = false
-        let targetClass =
-          cast[cstring](e.target.element.classList.value)
-        cdebug "M6 alt+click targetClass=" & $targetClass
-        if ($targetClass).contains("margin") or
-           ($targetClass).contains("glyph") or
-           ($targetClass).contains("line-numbers"):
-          onGutter = true
-        self.lineActionClickAt(
-          tabInfo,
-          lineNumber,
-          monacoColumn = some(column),
-          onGutterElement = onGutter,
-          lineMaxColumn = maxColumn)
-        e.event.preventDefault()
-        e.event.stopPropagation()
-      else:
-        cdebug "M6 alt+click position nil"
     elif cast[bool](e.event.ctrlKey) or cast[bool](e.event.middleButton):
       self.lastMouseClickLine = self.lastMouseMoveLine
       self.lastMouseClickCol = cast[int](e.target.toJs.position.column)
@@ -3632,7 +3540,12 @@ proc initMonacoForEditor(self: EditorViewComponent, host: JsObject) =
     # `ev.event` is Monaco's `StandardMouseEvent`, whose `target` is the DOM
     # element under the press — the same element the container listener's
     # `ev.target` names.
-    if isGutterToggleTarget(ev.event.target):
+    if cast[int](ev.target.toJs["type"]) == MouseTargetGutterGlyphMargin:
+      # Gesture 8: the glyph column's right click is the toggle alone, and its
+      # empty slot does nothing.
+      ev.event.preventDefault()
+      if not ev.target.position.isNil:
+        self.toggleGlyphEnabled(self.name, cast[int](ev.target.position.lineNumber))
       return
     ev.event.preventDefault()
     let contextMenu = createContextMenuItems(self, ev)
@@ -3646,7 +3559,19 @@ proc initMonacoForEditor(self: EditorViewComponent, host: JsObject) =
         cast[int](position.lineNumber)
       else:
         (cast[int](event.target.element.parentElement.offsetTop) div 20) + tabInfo.location.expansionFirstLine
-    self.lastMouseMoveLine = line)
+    self.lastMouseMoveLine = line
+    # Gesture 7a: the faint dot on the hovered line of the glyph column.
+    let hint = if cast[int](event.target.toJs["type"]) == MouseTargetGutterGlyphMargin and
+                  not position.isNil: line
+               else: 0
+    if hint != self.glyphHintLine:
+      self.glyphHintLine = hint
+      self.updateGlyphMarks())
+
+  tabInfo.monacoEditor.toJs.onMouseLeave(proc(event: js) =
+    if self.glyphHintLine != 0:
+      self.glyphHintLine = 0
+      self.updateGlyphMarks())
 
   tabInfo.monacoEditor.toJs.getModel().onDidChangeContent(proc =
     if tabInfo.reloadChange:
@@ -3689,12 +3614,8 @@ proc initMonacoForEditor(self: EditorViewComponent, host: JsObject) =
 
   cast[Element](host).addEventListener(cstring"click", proc(ev: Event) =
     ev.stopPropagation()
-    # THE RUN SLOT IS ROUTED FIRST, and the order is the whole of the guard.
-    # `gutter-runtest` contains "gutter", so the sweep at the bottom of this
-    # loop would toggle a breakpoint on it — one point answering two controls,
-    # which is exactly what the marker lanes were given disjoint hit areas to
-    # stop. Read from the attribute rather than from the class, because the line
-    # is what the handler needs and the class does not carry it.
+    # The run-test control (K16): the line is in its attribute. The glyph column
+    # and the numbers are read from Monaco's mouse events, above.
     let runAttr =
       cast[Element](ev.target).getAttribute(cstring"data-runtest-line")
     if not runAttr.isNil and runAttr.len > 0:
@@ -3703,27 +3624,9 @@ proc initMonacoForEditor(self: EditorViewComponent, host: JsObject) =
       except CatchableError:
         self.api.errorMessage("This line's run control names no line.")
       return
-    for element in cast[seq[cstring]](ev.toJs.target.classList):
-      if element == cstring"gutter-line" or element == cstring"gutter-breakpoint":
-        self.lineActionClick(tabInfo, ev.target.toJs)
-        return
-      if ($element).contains("gutter"):
-        self.lineActionClick(tabInfo, ev.target.toJs)
   )
 
-  cast[Element](host).addEventListener(cstring"contextmenu", proc(ev: Event) =
-    # The gutter's right-click toggle. Monaco's `onContextMenu` above has
-    # already seen this press and, for these same targets, stood down without
-    # a menu (`isGutterToggleTarget`), so the toggle here is the whole answer.
-    # On the empty slot of a line with no breakpoint that answer is nothing
-    # at all: `lineActionContextMenu` finds no breakpoint to enable (see
-    # `isGutterToggleTarget`), and the `preventDefault` keeps the browser's
-    # menu away too.
-    if isGutterToggleTarget(ev.target.toJs):
-      ev.preventDefault()
-      ev.stopPropagation()
-      self.lineActionContextMenu(tabInfo, ev.target.toJs)
-  )
+  self.updateGlyphMarks()
 
   discard self.loadInitialFlowIfReady()
 

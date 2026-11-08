@@ -24,6 +24,11 @@
 ##     draws with real fonts and offers none of them. Any of them may be
 ##     scoped to one terminal by a `[terminal "<glob>"]` section of the
 ##     remembered file (`ScopedSettings`, OQ-T6).
+##   * the editor pointer's (Editor-Pane.md MC.1, MC.3):
+##     `multi-click-interval`, in milliseconds, and `word-separators`, the
+##     characters that end a word under a double click. They take any value
+##     of their kind, not a word from a list, so `settingValues` is what the
+##     omnibox offers and `parseValue` is what is accepted.
 ##
 ## A setting is on / off, or takes one of a list of VALUES
 ## (`settingValues`); every text form — the flag, the `:set` line, the
@@ -42,6 +47,8 @@
 
 import std/strutils
 
+import ../editor/word_classifier
+import ../input/click_counter
 import ./scrollbar_interaction
 
 export scrollbar_interaction
@@ -63,6 +70,8 @@ type
     lsReduceMotion = "reduce-motion"
     lsPointerShapes = "pointer-shapes"
     lsTerminalHints = "terminal-hints"
+    lsMultiClickInterval = "multi-click-interval"
+    lsWordSeparators = "word-separators"
 
   TerminalSettingWords* = object
     ## The terminal settings' value words (PLAT-71). `modern-unicode` lives
@@ -91,6 +100,8 @@ type
     scrollbars*: ScrollbarOptions
     terminal*: TerminalSettingWords
     scoped*: seq[ScopedSettings]
+    multiClickIntervalMs*: int
+    wordSeparators*: string
 
   SettingOverride* = enum
     ## A CLI flag's answer for one setting. The zero value is "not given".
@@ -123,6 +134,9 @@ const
     ## Pointer-Affordances.md §5.6's palette entry.
 
 const
+  MaxMultiClickIntervalMs* = 5000
+
+const
   DefaultTerminalSettingWords* = TerminalSettingWords(
     glyphs: "auto", modernUnicode: "off", ambiguousWidth: "auto",
     colors: "auto", terminalProbe: "on", reduceMotion: "auto",
@@ -136,7 +150,9 @@ func defaultLayoutSettings*(overflowMarkers = true): LayoutSettings =
   LayoutSettings(focusHighlight: true, liveResize: true,
                  overflowMarkers: overflowMarkers,
                  scrollbars: DefaultScrollbarOptions,
-                 terminal: DefaultTerminalSettingWords)
+                 terminal: DefaultTerminalSettingWords,
+                 multiClickIntervalMs: DefaultMultiClickIntervalMs,
+                 wordSeparators: UsualWordSeparators)
 
 func isTerminalSetting*(which: LayoutSetting): bool =
   ## PLAT-71: a setting only the terminal front-end has (§5.3).
@@ -147,7 +163,7 @@ func isOnOff*(which: LayoutSetting): bool =
   ## Whether the setting is on / off (else it takes `settingValues`).
   which notin {lsScrollbarThickness, lsScrollbarClick, lsModernUnicode,
                lsGlyphs, lsAmbiguousWidth, lsColors, lsReduceMotion,
-               lsPointerShapes}
+               lsPointerShapes, lsMultiClickInterval, lsWordSeparators}
 
 func settingValues*(which: LayoutSetting): seq[string] =
   ## The words the setting takes, in the order the omnibox lists them.
@@ -162,9 +178,17 @@ func settingValues*(which: LayoutSetting): seq[string] =
   of lsColors: result = @["auto", "truecolor", "256", "16", "mono"]
   of lsReduceMotion: result = @["auto", "on", "off"]
   of lsPointerShapes: result = @["auto", "on", "off"]
+  of lsMultiClickInterval: result = @["300", "400", "500", "600"]
+  of lsWordSeparators:
+    # The default, and the default with `-` a word character (kebab-case names).
+    result = @[UsualWordSeparators, UsualWordSeparators.replace("-", "")]
   else: result = @["on", "off"]
 
 func valuesText(which: LayoutSetting): string =
+  if which == lsMultiClickInterval:
+    return "a time in milliseconds, 1 to " & $MaxMultiClickIntervalMs
+  if which == lsWordSeparators:
+    return "the characters that separate words, with no spaces"
   let v = settingValues(which)
   if v.len == 2: v[0] & " or " & v[1]
   else: v[0 ..< v.len - 1].join(", ") & " or " & v[^1]
@@ -193,6 +217,17 @@ func parseValue*(which: LayoutSetting; word: string):
   if which.isOnOff:
     let (ok, on) = parseOnOff(word)
     return (ok, (if on: "on" else: "off"))
+  if which == lsWordSeparators:
+    let w = word.strip
+    return (w.len > 0, w)
+  if which == lsMultiClickInterval:
+    try:
+      let ms = parseInt(word.strip)
+      if ms >= 1 and ms <= MaxMultiClickIntervalMs:
+        return (true, $ms)
+    except ValueError:
+      discard
+    return (false, "")
   let w = word.strip.toLowerAscii
   for v in settingValues(which):
     if v == w:
@@ -219,6 +254,8 @@ func valueText*(s: LayoutSettings; which: LayoutSetting): string =
   of lsReduceMotion: s.terminal.reduceMotion
   of lsPointerShapes: s.terminal.pointerShapes
   of lsTerminalHints: s.terminal.terminalHints
+  of lsMultiClickInterval: $s.multiClickIntervalMs
+  of lsWordSeparators: s.wordSeparators
 
 proc assignValue*(s: var LayoutSettings; which: LayoutSetting;
                   value: string): bool =
@@ -246,6 +283,8 @@ proc assignValue*(s: var LayoutSettings; which: LayoutSetting;
   of lsReduceMotion: s.terminal.reduceMotion = v
   of lsPointerShapes: s.terminal.pointerShapes = v
   of lsTerminalHints: s.terminal.terminalHints = v
+  of lsMultiClickInterval: s.multiClickIntervalMs = parseInt(v)
+  of lsWordSeparators: s.wordSeparators = v
   of lsScrollbarThickness:
     for t in BarThickness:
       if $t == v: s.scrollbars.thickness = t
@@ -275,7 +314,12 @@ func parseSetLine*(line: string): SetLine =
   var text = line.strip
   if text.startsWith(":"):
     text = text[1 .. ^1].strip
-  let words = text.splitWhitespace()
+  var words = text.splitWhitespace()
+  # `:set multi-click-interval=600` is the same line as with a space.
+  if words.len == 2 and words[0] == "set":
+    let eq = words[1].find('=')
+    if eq > 0:
+      words = @["set", words[1][0 ..< eq], words[1][eq + 1 .. ^1]]
   if words.len == 0 or words[0] != "set":
     return SetLine(isSet: false)
   result = SetLine(isSet: true)
@@ -424,7 +468,8 @@ func parseSettingCommandTarget*(target: string): tuple[ok: bool;
   ## `layoutSetting:<name>:<value>` -> its parts.
   if not target.startsWith(LayoutSettingCommandPrefix):
     return (false, lsFocusHighlight, false, "")
-  let rest = target[LayoutSettingCommandPrefix.len .. ^1].split(':')
+  # The value's own `:` stays with it (`word-separators` holds one).
+  let rest = target[LayoutSettingCommandPrefix.len .. ^1].split(':', 1)
   if rest.len != 2:
     return (false, lsFocusHighlight, false, "")
   let (known, which) = parseSettingName(rest[0])
@@ -454,6 +499,8 @@ func settingCommandLabel*(which: LayoutSetting; value: string): string =
     of lsReduceMotion: "Reduce motion"
     of lsPointerShapes: "Pointer shapes"
     of lsTerminalHints: "Terminal hints"
+    of lsMultiClickInterval: "Multi-click interval"
+    of lsWordSeparators: "Word separators"
   name & ": " & value
 
 func settingCommandLabel*(which: LayoutSetting; on: bool): string =

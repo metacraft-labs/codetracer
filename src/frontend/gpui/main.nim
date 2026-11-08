@@ -80,6 +80,8 @@ when defined(js):
   {.error: "src/frontend/gpui is native-only: it opens a window.".}
 
 import ./design_fonts
+from sdk/breakpoints import columnBreakpointAt
+import viewmodels/editor_gutter_lanes
 import std/[cpuinfo, json, math, options, os, sequtils, sets, strutils, tables,
             times, exitprocs]
 from std/unicode import runeLen   # PLAT-61: a typed character
@@ -969,6 +971,9 @@ type
 
 var
   openArm: GpuiEditArm = nil
+  gEditorPointer: EditorPointerState
+    ## The editor's click count and the gesture a held press is making
+    ## (Editor-Pane.md MC.1, MC.4).
   gEditorTab = ""
     ## PLAT-49: what the editor's lone tab says — the open file's name, with
     ## " ●" while an Edit buffer is modified (`product_mode.editorTabLabel`,
@@ -1233,6 +1238,8 @@ proc redrawEditor() =
   while childCount(editPane) > keep:
     r.removeChild(editPane, nthChild(editPane, childCount(editPane) - 1))
   gEditorSurface = openArm.surfaceOf(editViewportRows)
+  for row in gEditorSurface.rows.mitems:
+    row.hinted = row.line == gEditorPointer.hintLine and row.mark == emNone
   drawEditorBody(r, editPane)
   noteEditorTab(r, editorTabLabel(openArm.root / openArm.path, openArm.isDirty))
   applyTextFaces(r, editPane)
@@ -2790,6 +2797,9 @@ proc withDebugDocument(surface: EditorSurface): EditorSurface =
     result.caretLine = d.caretLine
     result.caretColumn = d.caretColumn + 1
   result.selection = d.selectionCells
+  result.extraCarets = d.secondaryCarets
+  for row in result.rows.mitems:
+    row.hinted = row.line == gEditorPointer.hintLine
   # PLAT-60: the Low Level Code listing's cross-reference — the line its
   # selected instruction came from — while the listing is shown.
   if not gSession.isNil and not gSession.session.lowLevelCodeVM.isNil and
@@ -4132,6 +4142,7 @@ proc focusWindowPane(r: GpuiRenderer; pane: string)
   ## PLAT-68: forward-declared; the focus, onto a pane's element.
 
 proc dragTextTo(r: GpuiRenderer; x, y: int)
+proc hoverEditorGutter(r: GpuiRenderer; x, y: int)
   ## PLAT-68: forward-declared; a held press on the text, moved.
 
 func wheelDeltas*(dy, dx: float; shift: bool): tuple[dy, dx: float] =
@@ -4334,6 +4345,7 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     if gTextDrag:
       dragTextTo(r, x, y)
       return
+    hoverEditorGutter(r, x, y)
     if gTerminal.drag != gtdNone:
       moveTerminal(r, x, y)
       return
@@ -4419,9 +4431,11 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       scrubEditorVBar(r, y, click = false)
       gEditorVBarDrag = false
       return
+    gEditorPointer.counter.noteRelease()
     if gTextDrag:
       dragTextTo(r, x, y)
       gTextDrag = false
+      gEditorPointer.releaseEditor()
       return
     if gTerminal.drag != gtdNone:
       releaseTerminal(r, x, y)
@@ -10238,9 +10252,7 @@ proc showViewedFile(r: GpuiRenderer; atLine = 1; topLine = 0) =
     var mark = emNone
     for p in points:
       if p.path == gViewedFile and p.line == i + 1:
-        mark = (if p.kind == epkTracepoint: emTracepoint
-                elif p.enabled: emBreakpoint
-                else: emBreakpointDisabled)
+        mark = markFor(points, gViewedFile, i + 1)
     surface.rows.add EditorRow(line: i + 1, text: lines[i], held: true,
                                mark: mark)
   # PLAT-68: the surface the editor was drawn from is the one its caret,
@@ -10473,6 +10485,16 @@ proc lineValuesOf(row: EditorRow): seq[NamedValue] =
   for v in row.values:
     result.add (v.name, v.value)
 
+proc toggleInlineAt(r: GpuiRenderer; path: string; line, column: int) =
+  ## `toggle-inline-breakpoint` (Editor-Pane.md § Inline breakpoints).
+  if gSession.isNil:
+    traceGesture("inline breakpoints need a recording in this window")
+    return
+  let last = lineTextOf(path, line).runeLen + 1
+  if gSession.toggleInlineBreakpoint(path, line, column, last):
+    traceGesture("inline breakpoint " & $line & ":" & $min(max(1, column), last))
+  if gViewedFile.len > 0: showViewedFile(r) else: refreshReplayWindow(r)
+
 proc editorMenuAt(path: string; line, column: int): ContextMenuModel =
   ## The editor menu for a press on `column` of `path:line`.
   let session = gSession.session
@@ -10493,7 +10515,12 @@ proc editorMenuAt(path: string; line, column: int): ContextMenuModel =
   editorTextContextMenu(path, line, lineText = text, column = column,
                         token = token, tokenError = tokenError,
                         breakpoint = onLine, fileHasBreakpoints = inFile,
-                        anyBreakpoints = any)
+                        anyBreakpoints = any,
+                        inlineBreakpoint = columnBreakpointAt(
+                          gSession.heldBreakpoints(path), line, column),
+                        inlineChord = gRouter.chordFor(
+                          "editor.toggle-inline-breakpoint",
+                          windowSessionFacts(), windowScopePath(), nmNormal, ""))
 
 # ---- the window's maximised container --------------------------------------
 
@@ -10997,6 +11024,8 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
       refreshReplayWindow(r)
       return
     afterMove(r)
+  of caToggleInlineBreakpoint:
+    toggleInlineAt(r, target.path, target.line, target.column)
   of caAddBreakpoint, caDeleteBreakpoint:
     discard gSession.toggleBreakpoint(target.path, target.line)
     refreshReplayWindow(r)
@@ -11417,22 +11446,120 @@ proc editorYOfLine(line: int): int =
              GpuiEditorRowPx div 2
   0
 
+proc editorDocumentOf(path: string): ptr EditingDocument =
+  ## The document a press on the editor acts on: the Edit window's, or the shown
+  ## file's Debug-mode document (which `Ctrl+E` can make writable).
+  if not openArm.isNil:
+    return addr openArm.doc
+  if not debugDocumentFor(path, gEditorSurface.executionLine):
+    return nil
+  addr gDebugDocs[path]
+
+proc redrawAfterPointer(r: GpuiRenderer; path: string) =
+  if not openArm.isNil:
+    redrawEditor()
+  elif gEditorSurface.path == path:
+    drawDebugDocument(r)
+  # The rows are new elements, and a second press must find them wired.
+  wireClicks(r)
+
+proc traceSelection(d: EditingDocument) =
+  let cells = d.selectionCells
+  traceGesture("selection " & (if cells.len == 0: "none" else:
+    $cells[0].line & ":" & $cells[0].fromColumn & "-" & $cells[^1].line &
+    ":" & $cells[^1].toColumn) & " ranges " & $d.state.selection.rangeCount &
+    " mode " & $d.state.mode)
+
+proc editorGutterLeftPx(): int =
+  let left = editorCodeLeftPx()
+  if left < 0: -1 else: left - EditorGutterPx
+
+proc gutterGeometryOf(): GutterGeometry =
+  ## The band map at the editor's font. This window draws no run-test control.
+  windowGutterGeometry(CodeFontPx, EditorGutterPx)
+
+proc editorHitAt(d: EditingDocument; line, x: int; onGutter: bool): PointerHit =
+  ## The press as the shared model takes it: every position is a caret boundary
+  ## on this medium, the nearest one to the pixel, as Monaco's.
+  result.line = line
+  if onGutter:
+    let at = x - editorGutterLeftPx()
+    result.element = if gutterGeometryOf().gutterZoneAt(at) == gzGlyph:
+                       peGutterGlyph
+                     else: peGutterLineNumber
+  else:
+    result.element = peText
+    let left = editorCodeLeftPx()
+    result.displayColumn =
+      max(0, int(round(float(x - left) / EditorColumnPx)) + gEditorView.leftCol)
+  result.offset = d.offsetAtView(line - 1, result.displayColumn)
+
+proc pressEditorAt(r: GpuiRenderer; c: GPaneClick; path: string;
+                   onGutter: bool): PointerAction =
+  ## One press through the shared pointer model. What it selected is drawn here;
+  ## the caller performs what it hands back for the debugger.
+  let dp = editorDocumentOf(path)
+  if dp.isNil:
+    return PointerAction(effect: pfNone, fresh: true)
+  # A document opened before the window's base was known takes it now.
+  if dp[].model != gRouter.base:
+    dp[].switchModel(gRouter.base)
+  dp[].state.wordSeparators = gLayoutSettings.wordSeparators
+  gEditorPointer.counter.intervalMs = gLayoutSettings.multiClickIntervalMs
+  let button = case c.button
+               of gbRight: pbRight
+               of gbMiddle: pbMiddle
+               else: pbLeft
+  result = gEditorPointer.pressEditor(dp[], PointerPress(
+    timeMs: int64(epochTime() * 1000),
+    button: button, mods: pointerModsOf(c.ctrl, c.alt, c.shift),
+    hit: editorHitAt(dp[], c.line, c.x, onGutter), documentId: path,
+    platformCount: (if c.clickCount > 0: c.clickCount else: NoPlatformCount)))
+  if result.effect in {pfSelected, pfContextMenu}:
+    if gFocusPane != $paneEditor:
+      focusWindowPane(r, $paneEditor)
+    gTextDrag = gEditorPointer.held
+    traceGesture("press count " & $result.count & " " & $result.operation)
+    redrawAfterPointer(r, path)
+    traceSelection(dp[])
+    traceGesture("caret " & $dp[].caretLine & ":" & $(dp[].caretColumn + 1))
+
+proc hoverEditorGutter(r: GpuiRenderer; x, y: int) =
+  ## Gesture 7a: the faint breakpoint dot on the hovered line of the glyph column.
+  var element = peText
+  var line = 0
+  let i = gGeom.tabsNodeOfPane($paneEditor)
+  let at = x - editorGutterLeftPx()
+  if i >= 0 and gGeom.nodes[i].body.contains(x, y) and at >= 0 and
+     at < EditorGutterPx:
+    line = editorLineAt(y)
+    if line > 0 and gutterGeometryOf().gutterZoneAt(at) == gzGlyph:
+      element = peGutterGlyph
+  let path = editorPath()
+  let marked = line > 0 and
+    (if openArm.isNil: lineMarkOf(path, line) != emNone
+     else: markFor(openArm.points, openArm.doc.path, line) != emNone)
+  if gEditorPointer.hoverEditor(element, line, marked):
+    traceGesture("gutter hint " & $gEditorPointer.hintLine)
+    redrawAfterPointer(r, path)
+
 proc dragTextTo(r: GpuiRenderer; x, y: int) =
-  ## A held press on the text moved: the selection runs from where it was
-  ## pressed to the cell under the pointer (`extendSelectionTo`, every
-  ## front-end's drag).
-  let path = gEditorSurface.path
-  if not gDebugDocs.hasKey(path):
+  ## A held press on the text moved: the selection grows a whole unit at a time
+  ## to the pointer (`dragEditor`, Editor-Pane.md MC.4), from the numbers too.
+  let path = editorPath()
+  let dp = editorDocumentOf(path)
+  if dp.isNil:
     return
   let line = editorLineAt(y)
   if line <= 0:
     return
-  gDebugDocs[path].extendSelectionTo(line - 1, max(1, editorColumnAt(x)) - 1)
-  drawDebugDocument(r)
-  let cells = gDebugDocs[path].selectionCells
-  traceGesture("selection " & (if cells.len == 0: "none" else:
-    $cells[0].line & ":" & $cells[0].fromColumn & "-" & $cells[^1].line &
-    ":" & $cells[^1].toColumn))
+  let onCode = x >= editorCodeLeftPx()
+  var hit = editorHitAt(dp[], line, max(x, editorCodeLeftPx()), onGutter = false)
+  if not onCode:
+    hit.element = peGutterLineNumber
+  if gEditorPointer.dragEditor(dp[], hit, int64(epochTime() * 1000)):
+    redrawAfterPointer(r, path)
+    traceSelection(dp[])
 
 proc focusWindowPane(r: GpuiRenderer; pane: string) =
   ## Give `pane` the focus: its element takes GPUI's element focus (the
@@ -11962,6 +12089,12 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
   if res.operation.startsWith("list.") and constraintsKey(r, res.operation):
     return
   case res.operation
+  of "editor.toggle-inline-breakpoint":
+    let path = editorPath()
+    let dp = editorDocumentOf(path)
+    if not dp.isNil:
+      toggleInlineAt(r, path, dp[].caretLine, dp[].caretColumn + 1)
+    return
   of "editor.toggle-read-only":
     let path = editorPath()
     if not debugDocumentFor(path, gEditorSurface.executionLine):
@@ -12308,7 +12441,7 @@ proc onPaneClick(c: GPaneClick) =
      unpinButtonRect().contains(c.x, c.y):
     return
   # K19: an Edit window has no session, and its Files tree is its own.
-  if gSession.isNil and c.part != gcpFileNode:
+  if gSession.isNil and c.part notin {gcpFileNode, gcpGutter, gcpCode}:
     return
   # PLAT-70 Part B: a press on a `…` or a column separator is the table's
   # gesture; GPUI hands the row under it the press first, and the row must
@@ -12340,6 +12473,19 @@ proc onPaneClick(c: GPaneClick) =
       discard openEditFile(e.path)
     else:
       openTreeFile(r, e.path)
+    return
+  if gSession.isNil:
+    # An Edit window: its gutter and text are the shared pointer model's, with
+    # the window's own points (Editor-Pane.md MC.5).
+    if openArm.isNil or c.part notin {gcpGutter, gcpCode}:
+      return
+    let path = editorPath()
+    let action = pressEditorAt(r, c, path, c.part == gcpGutter)
+    case action.effect
+    of pfToggleBreakpoint: openArm.togglePoint(c.line)
+    of pfSetBreakpointEnabled: openArm.setPointEnabled(c.line)
+    else: return
+    redrawAfterPointer(r, path)
     return
   let session = gSession.session
   case c.part
@@ -12378,58 +12524,46 @@ proc onPaneClick(c: GPaneClick) =
       session.stateVM.selectPath(c.key)
       session.stateVM.toggleExpand(c.key)
       redrawPaneOf(r, paneState)
-  of gcpGutter:
-    # K10 / K11.
+  of gcpGutter, gcpCode:
+    # K10 - K15, K47 and the multi-click rows: the shared pointer model
+    # (Editor-Pane.md § Mouse Gestures, MC.1 - MC.7).
     let path = editorPath()
-    if c.button == gbLeft:
+    let onGutter = c.part == gcpGutter
+    let action = pressEditorAt(r, c, path, onGutter)
+    let column = if onGutter: 1 else: editorColumnAt(c.x)
+    case action.effect
+    of pfNone, pfSelected:
+      discard
+    of pfToggleBreakpoint:
       discard gSession.toggleBreakpoint(path, c.line)
       if gViewedFile.len > 0: showViewedFile(r) else: refreshReplayWindow(r)
-    elif c.button == gbRight:
+    of pfSetBreakpointEnabled:
       let mark = lineMarkOf(path, c.line)
-      if mark in {emBreakpoint, emBreakpointDisabled}:
+      if mark in {emBreakpoint, emBreakpointDisabled, emBreakpointTracepoint}:
         discard gSession.setBreakpointEnabled(path, c.line,
                                               mark == emBreakpointDisabled)
         if gViewedFile.len > 0: showViewedFile(r)
         else: refreshReplayWindow(r)
-  of gcpCode:
-    # K12-K15.
-    let path = editorPath()
-    let column = editorColumnAt(c.x)
-    if (c.button == gbLeft and not c.ctrl and not c.alt) or c.button == gbRight:
-      # K47 (PLAT-51): a press on the text PLACES THE CARET there, as
-      # Monaco's does in a read-only model (a right press too, before its
-      # menu opens) — and the editor has the focus.
-      if gFocusPane != $paneEditor:
-        focusWindowPane(r, $paneEditor)
-      placeCaret(r, path, c.line, column)
-      # PLAT-68: a held left press SELECTS as the pointer moves.
-      gTextDrag = c.button == gbLeft
-    if c.button == gbRight:
+    of pfContextMenu:
       openContextMenuAt(r, editorMenuAt(path, c.line, column), c.x, c.y)
-    elif c.button == gbLeft and c.ctrl and c.alt:
-      # K15: Ctrl+Alt+click on a function's name.
+    of pfCallJump:
       let (token, err) = callTokenAt(lineTextOf(path, c.line), column,
                                      rust = path.endsWith(".rs"))
-      if token.len == 0:
-        traceGesture(if err.len > 0: err & " on line " & $c.line & "."
-                     else: NoWordSelected)
-        return
       try:
-        gSession.sourceCallJump(path, c.line, token, "smart")
+        if token.len > 0:
+          gSession.sourceCallJump(path, c.line, token, "smart")
+        elif c.button == gbMiddle:
+          gSession.sourceLineJump(path, c.line, "smart")
+        else:
+          traceGesture(if err.len > 0: err & " on line " & $c.line & "."
+                       else: NoWordSelected)
+          return
       except CatchableError as e:
         traceGesture("call jump failed: " & e.msg)
         refreshReplayWindow(r)
         return
       afterMove(r)
-    elif c.button == gbLeft and c.alt:
-      # K14: Alt+click — a breakpoint anchored at the column, clamped to the
-      # line (`column_click_resolver`).
-      let width = max(1, lineTextOf(path, c.line).runeLen)
-      let col = max(1, min(column, width))
-      if gSession.setColumnBreakpoint(path, c.line, col):
-        traceGesture("column breakpoint " & $c.line & ":" & $col)
-      if gViewedFile.len > 0: showViewedFile(r) else: refreshReplayWindow(r)
-    elif c.button == gbMiddle or (c.button == gbLeft and c.ctrl):
+    of pfLineJump:
       try:
         gSession.sourceLineJump(path, c.line, "smart")
       except CatchableError as e:
@@ -14105,14 +14239,30 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
         shift = 1
       let button = if parts.len > 3 + shift: parts[3 + shift] else: "left"
       let mods = if parts.len > 4 + shift: parts[4 + shift] else: ""
+      # `count=N`: the platform's click count (GPUI's own), as the shim delivers it.
+      var platformCount = 0
+      if parts.len > 5 + shift and parts[5 + shift].startsWith("count="):
+        try: platformCount = parseInt(parts[5 + shift]["count=".len .. ^1])
+        except ValueError: return "bad count in '" & parts[5 + shift] & "'"
       let ctrl = "ctrl" in mods
       let alt = "alt" in mods
       # An editor press names its COLUMN too: `<line>@<column>`, pressed at
       # that column's pixel (`editorXOfColumn`, the inverse of the mapping a
       # press is read back with).
       var column = 0
+      var half = 0
+      var gutterPx = -1
+      if part == gcpGutter and '@' in key:
+        try: gutterPx = parseInt(key[key.find('@') + 1 .. ^1])
+        except ValueError: return "bad gutter pixel in '" & key & "'"
+        key = key[0 ..< key.find('@')]
       if part in {gcpCode, gcpValue} and '@' in key:
-        try: column = parseInt(key[key.find('@') + 1 .. ^1])
+        # `<line>@<column>l` and `r`: the left or right half of the column.
+        var word = key[key.find('@') + 1 .. ^1]
+        if word.endsWith("l"): half = -1
+        elif word.endsWith("r"): half = 1
+        if half != 0: word = word[0 ..< word.len - 1]
+        try: column = parseInt(word)
         except ValueError: return "bad column in '" & key & "'"
         key = key[0 ..< key.find('@')]
       # PLAT-70 Part B: a table row's press can name its PIXEL,
@@ -14142,7 +14292,11 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
         return "no " & parts[1] & " row '" & key & "' in the window"
       var x = 0
       if column > 0:
-        x = editorXOfColumn(column)
+        x = editorXOfColumn(column) + half * int(EditorColumnPx / 4)
+      if part == gcpGutter:
+        # The glyph column's centre, unless the op names its pixel.
+        x = editorGutterLeftPx() +
+            (if gutterPx >= 0: gutterPx else: gbGlyph.widthPx(CodeFontPx) div 2)
       let kind = case button
                  of "right": gekContextMenu
                  of "middle": gekAuxDown
@@ -14164,7 +14318,8 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       # native menu to fall back to (Native-Front-End-Parity.md §1).
       if "shift" in mods: modifiers.incl gmShift
       let ev = GpuiEvent(kind: kind,
-                         key: (if at.x >= 0: $at.x & "," & $at.y else: $x & ",0"),
+                         key: (if at.x >= 0: $at.x & "," & $at.y else: $x & ",0") &
+                              (if platformCount > 0: "," & $platformCount else: ""),
                          modifiers: modifiers)
       var node = el
       while not node.isNil and
@@ -14172,6 +14327,9 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
         discard fireEvent(node, name, ev)
         node = r.parentNode(node)
       gPressDedupe.clear()
+      # A click: its release too, which a real press has by now.
+      gEditorPointer.releaseEditor()
+      gTextDrag = false
       if at.x >= 0 and kind == gekPointerDown:
         pressAt(at.x, at.y)
       return ""

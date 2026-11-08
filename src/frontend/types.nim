@@ -1232,6 +1232,10 @@ type
     ## ``MonacoEditor.deltaDecorations``; passing them back lets
     ## Monaco diff the column-marker layer cleanly on each refresh.
     columnBreakpointDecorations*: seq[cstring]
+    glyphDecorations*: seq[cstring]
+      ## The glyph column's marks and hover hint (`trace.updateGlyphMarks`).
+    glyphHintLine*: int
+      ## The line the pointer is over in the glyph column, 0 for none.
     whitespace*:     Whitespace
     encoding*:       cstring
     # monacoJsonSchemes*: JsAssoc[cstring, js]

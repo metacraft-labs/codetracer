@@ -4,7 +4,8 @@
 ## -----------------------------------------------------
 ## The gutter carries FOUR concerns that a pointer must be able to tell apart:
 ##
-##   * the breakpoint and tracepoint markers,
+##   * the breakpoint and tracepoint marks, in the glyph lane at the far left
+##     (VS Code's layout, Editor-Pane.md MC.5),
 ##   * the VCS change indicator,
 ##   * the line number,
 ##   * the run-test control.
@@ -55,12 +56,11 @@ type
   GutterBand* = enum
     ## Left to right. The declaration order IS the layout order and
     ## `resolveBands` depends on it.
+    gbGlyph = "glyph"
     gbPointer = "pointer"
     gbLineNumber = "line-number"
     gbVcs = "vcs"
     gbVcsSplit = "vcs-split"
-    gbMarker = "marker"
-    gbMarkerGap = "marker-gap"
     gbFolding = "folding"
 
   GutterConcern* = enum
@@ -93,20 +93,17 @@ proc widthEmMilli*(band: GutterBand): int =
   ## by `ci/test/web-renderer-mounts.sh`, so a change to one that is not made
   ## to the other reddens a gate rather than drifting quietly.
   case band
+  # THE GLYPH MARGIN'S WIDTH IS MONACO'S: its `glyphMarginWidth` is the line
+  # height, one lane, and Monaco's line height is `GOLDEN_LINE_HEIGHT_RATIO` em,
+  # rounded (`widthPx`). GPUI draws the same box.
+  of gbGlyph:
+    when defined(macosx): 1500 else: 1350
   of gbPointer: 750       # --ct-gutter-pointer-lane:   0.75em
   of gbLineNumber: RemainderWidth
   of gbVcs: 350           # --ct-gutter-vcs-lane:       0.35em
-  # SMALL, BUT IT MUST NOT BE ZERO, and this is the second time this strip has
-  # needed the sentence. `--ct-gutter-marker-split` exists because two hit
-  # areas that merely touch are one hit area to a rounding error. The VCS band
-  # met the same edge: with it abutting the marker lane it resolved to
-  # [337,342] against a breakpoint at [341,350] — a one-pixel overlap, and
-  # `elementFromPoint` at the VCS band's own centre returned the breakpoint.
-  # The marker lane's left edge and the breakpoint's left edge coincide, so
-  # anything flush against the lane is flush against the marker.
+  # Small, but it must not be zero: two hit areas that merely touch are one hit
+  # area to a rounding error.
   of gbVcsSplit: 250      # --ct-gutter-vcs-split:      0.25em
-  of gbMarker: 2050       # --ct-gutter-marker-lane:    2.05em
-  of gbMarkerGap: 450     # --ct-gutter-marker-gap:     0.45em
   of gbFolding: 850       # --ct-gutter-folding-lane:   0.85em
 
 proc owners*(band: GutterBand): seq[GutterConcern] =
@@ -120,22 +117,22 @@ proc owners*(band: GutterBand): seq[GutterConcern] =
   ## language. When both want the band the control wins, and only while the row
   ## is hovered — see the stylesheet's `.gutter:hover` rules.
   case band
+  of gbGlyph: @[gcBreakpoint, gcTracepoint]
   of gbPointer: @[gcCurrentLineArrow, gcRunTestControl]
   of gbLineNumber: @[gcLineNumber]
   of gbVcs: @[gcVcsChange]
   of gbVcsSplit: @[]
-  of gbMarker: @[gcBreakpoint, gcTracepoint]
-  of gbMarkerGap: @[]
   of gbFolding: @[gcFoldingChevron]
 
 proc isOurs*(band: GutterBand): bool =
   ## Whether CodeTracer's own markup lays this band out.
   ##
-  ## `gbFolding` is MONACO'S. `.gutter` subtracts its width from its own so the
+  ## `gbFolding` and `gbGlyph` are MONACO'S on the desktop (the glyph margin,
+  ## with `glyphMargin: true`). `.gutter` subtracts its width from its own so the
   ## chevron is never underneath us, which is the arrangement the reported
   ## "clicking the gutter also collapses the function" would need broken to
   ## occur — and the reason `--ct-gutter-folding-lane: 0` is a mutation arm.
-  band != gbFolding
+  band notin {gbFolding, gbGlyph}
 
 proc bandFor*(concern: GutterConcern): GutterBand =
   ## The one band a concern paints in. Total by construction: adding a concern
@@ -144,12 +141,13 @@ proc bandFor*(concern: GutterConcern): GutterBand =
   of gcCurrentLineArrow, gcRunTestControl: gbPointer
   of gcLineNumber: gbLineNumber
   of gcVcsChange: gbVcs
-  of gcBreakpoint, gcTracepoint: gbMarker
+  of gcBreakpoint, gcTracepoint: gbGlyph
   of gcFoldingChevron: gbFolding
 
 proc widthPx*(band: GutterBand; fontSizePx: int): int =
   ## The band's width at a given editor font size, or `RemainderWidth`.
   if band.widthEmMilli == RemainderWidth: RemainderWidth
+  elif band == gbGlyph: (band.widthEmMilli * fontSizePx + 500) div 1000
   else: (band.widthEmMilli * fontSizePx) div 1000
 
 proc lineDecorationsWidthPx*(fontSizePx: int): int =
@@ -163,17 +161,11 @@ proc lineDecorationsWidthPx*(fontSizePx: int): int =
   ## need the digits. The VCS band was the fourth concern this strip had to
   ## hold and it is the one that would have paid for it.
   ##
-  ## The two historical terms are kept at the values they had rather than
-  ## recomputed from `widthEmMilli`: `markerLane` here is `1.8em` where the
-  ## stylesheet's band is `2.05em`, and the gap is not counted at all. They
-  ## disagree because Monaco's reservation and our in-gutter layout have never
-  ## been the same number, and correcting that is a resize of every editor in
-  ## the product for no reported symptom. What matters — and what is asserted —
-  ## is that the total GROWS by the VCS band, so nothing else loses room.
-  let markerLane = (fontSizePx * 9) div 5
+  ## The glyph lane is not in here: it is Monaco's own glyph margin, to the left
+  ## of the numbers.
   let vcsLane = gbVcs.widthPx(fontSizePx) + gbVcsSplit.widthPx(fontSizePx)
   let foldingLane = fontSizePx div 2
-  max(20, markerLane + vcsLane + foldingLane)
+  max(20, vcsLane + foldingLane)
 
 proc resolveBands*(fontSizePx: int; totalWidthPx: int): seq[ResolvedBand] =
   ## Where every band lands, left to right, across `totalWidthPx`.
@@ -199,6 +191,55 @@ proc resolveBands*(fontSizePx: int; totalWidthPx: int): seq[ResolvedBand] =
     let width = if w == RemainderWidth: totalWidthPx - fixed else: w
     result.add ResolvedBand(band: band, leftPx: x, rightPx: x + width)
     x += width
+
+type
+  GutterZone* = enum
+    ## Editor-Pane.md MC.5: what a position in the gutter means. Every pixel
+    ## of a zone acts alike, and the boundary between the two zones is the
+    ## glyph column's right edge on every front-end.
+    gzGlyph = "glyph"
+    gzLineNumber = "line-number"
+    gzControl = "control"
+      ## Named controls that are neither zone: the VCS lane, the fold chevron
+      ## and the run-test control.
+    gzNone = "none"
+
+  GutterGeometry* = object
+    ## A front-end's gutter, in its own unit (cells or pixels), from its left
+    ## edge.
+    glyphRight*: int
+    totalWidth*: int
+    controls*: seq[tuple[left, right: int]]
+
+func terminalGutterGeometry*(gutterCells, markCells: int): GutterGeometry =
+  ## The terminal's: the mark cell, then every other cell the line numbers.
+  GutterGeometry(glyphRight: markCells, totalWidth: gutterCells)
+
+func windowGutterGeometry*(fontSizePx, totalWidthPx: int;
+                           runTestControl = false): GutterGeometry =
+  ## GPUI's and the desktop's, from the band map. The run-test control, on a
+  ## line that declares a test, lies over the pointer band.
+  result.totalWidth = totalWidthPx
+  for b in resolveBands(fontSizePx, totalWidthPx):
+    case b.band
+    of gbGlyph: result.glyphRight = b.rightPx
+    of gbVcs, gbVcsSplit, gbFolding:
+      result.controls.add (b.leftPx, b.rightPx)
+    of gbPointer:
+      if runTestControl:
+        result.controls.add (b.leftPx, b.rightPx)
+    of gbLineNumber: discard
+
+func gutterZoneAt*(g: GutterGeometry; x: int): GutterZone =
+  ## The one answer to "which zone is `x` in"; no view decides this itself.
+  if x < 0 or x >= g.totalWidth:
+    return gzNone
+  if x < g.glyphRight:
+    return gzGlyph
+  for c in g.controls:
+    if x >= c.left and x < c.right:
+      return gzControl
+  gzLineNumber
 
 proc overlappingBands*(resolved: seq[ResolvedBand]):
     seq[tuple[a, b: GutterBand, px: int]] =

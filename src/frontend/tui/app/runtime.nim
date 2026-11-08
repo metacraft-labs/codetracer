@@ -36,7 +36,7 @@
 ## wrong and recorded it: with nothing pumping the event, a step is sent, the
 ## engine moves, and every pane keeps reporting the old position forever.
 
-import std/[monotimes, options, os, strutils, tables]
+import std/[math, monotimes, options, os, strutils, tables]
 
 import codetracer_embed   # PLAT-43: `BaseKeymap`, `selectKeymap`
 import headless_app/auto_hide_hover
@@ -206,7 +206,7 @@ type
       ## The editor's menu: delete every breakpoint of `path` ("Delete
       ## breakpoints in file"), or of every file when `path` is "" ("Delete
       ## ALL breakpoints").
-    pcColumnBreakpoint
+    pcToggleInlineBreakpoint
       ## The editor's text, Alt+click: a breakpoint on `path:line` anchored
       ## at `column`.
     pcCallJump
@@ -282,6 +282,8 @@ type
     path*: string
     line*: int
     column*: int
+    lastColumn*: int
+      ## `pcToggleInlineBreakpoint`: the line's last column, the clamp.
     index*: int64
     tick*: uint64
     enabled*: bool
@@ -562,6 +564,11 @@ type
       ## it across a token to know a committed arrangement may have resized
       ## a pane — the ONE moment a pane fetches for its new size (Layout-
       ## ViewModel §4.3a: never mid-drag).
+    pointerClockMs*: int64
+      ## When the report being handled was decoded: the time a press is counted
+      ## by (Editor-Pane.md MC.1).
+    multiClickIntervalMs*: int
+      ## `multi-click-interval`; zero is the default.
     savePreference*: proc(name, value: string): string {.closure.}
       ## PLAT-51: the HOST's write of a layout preference (`:set
       ## focus-highlight off`, `:set scrollbar-thickness thin`), "" on
@@ -1213,6 +1220,10 @@ proc applyLayoutSetting*(rt: TuiRuntime; which: LayoutSetting; value: string;
       rt.app.layoutBinding.liveResize = on
   of lsOverflowMarkers:
     rt.app.overflowMarkersOff = not on
+  of lsMultiClickInterval:
+    rt.multiClickIntervalMs = parseInt(value)
+  of lsWordSeparators:
+    rt.app.wordSeparators = value
   of lsModernUnicode, lsGlyphs, lsAmbiguousWidth, lsColors,
      lsTerminalProbe, lsReduceMotion, lsPointerShapes, lsTerminalHints:
     discard
@@ -2552,9 +2563,12 @@ proc editorPaneModel(rt: TuiRuntime; model: var ShellModel; follow: bool) =
       let buf = rt.app.editSession.buffers[at]
       if buf.doc.isReadOnly:
         model.source.selected = selectedCells(buf)
+        model.source.extraCarets = buf.doc.secondaryCarets
       else:
         model.editorWritable = true
         model.edit = editPaneModelFor(rt.app.editSession, buf)
+        model.edit.hintLine = rt.app.editorPointer.hintLine
+        model.edit.extraCarets = buf.doc.secondaryCarets
   let buf = rt.editorBuffer()
   if buf.isNil:
     return
@@ -2591,6 +2605,8 @@ proc editorPaneModel(rt: TuiRuntime; model: var ShellModel; follow: bool) =
     model.edit.caretViewColumn = buf.doc.caretViewColumn
     model.edit.overflowMarkers = markers
     model.edit.selected = selectedCells(buf)
+    model.edit.hintLine = rt.app.editorPointer.hintLine
+    model.edit.extraCarets = buf.doc.secondaryCarets
     model.edit.findMarks = marks
   else:
     model.source.hview = buf.hview
@@ -4334,6 +4350,30 @@ proc routeEventLogClick(rt: TuiRuntime; area: CellArea; event: MouseEvent;
                                         line: ev.line, text: ev.content))
   true
 
+proc toggleInlineAt(rt: TuiRuntime; path: string; line, column: int;
+                    outcome: var RuntimeOutcome) =
+  ## `toggle-inline-breakpoint` at `line:column`: the engine's in Debug, the edit
+  ## session's in Edit mode. The column rule is `sdk/breakpoints`'.
+  if rt.app.modes.product == pmEdit:
+    let lastColumn = max(1, cellWidthOf(rt.app.editPaneModel().lineAt(line)) + 1)
+    let col = min(max(1, column), lastColumn)
+    if col < 2:
+      discard rt.app.editSession.togglePointAt(path, line)
+    else:
+      discard rt.app.editSession.toggleInlinePointAt(path, line, col)
+    rt.note("inline breakpoint toggled at " & path & ":" & $line & ":" & $col)
+    outcome.repaint = true
+  else:
+    let text = rt.app.source.heldTextAt(line)
+    outcome.requestClick(PaneClickRequest(kind: pcToggleInlineBreakpoint,
+                                          path: path, line: line,
+                                          column: max(1, column),
+                                          lastColumn: cellWidthOf(text) + 1))
+
+proc inlineChord(rt: TuiRuntime): string =
+  ## The active base's chord for the inline entry, the user's rows included.
+  rt.chordOfOperation("editor.toggle-inline-breakpoint")
+
 proc editorTextMenu(rt: TuiRuntime; target: SourceClickTarget):
     ContextMenuModel =
   ## The editor menu on `target`'s line, with the line's breakpoint state and
@@ -4355,7 +4395,9 @@ proc editorTextMenu(rt: TuiRuntime; target: SourceClickTarget):
   editorTextContextMenu(src.path, target.line, lineText = target.lineText,
                         column = target.column, token = token,
                         tokenError = tokenError, breakpoint = onLine,
-                        fileHasBreakpoints = inFile, anyBreakpoints = any)
+                        fileHasBreakpoints = inFile, anyBreakpoints = any,
+                        inlineBreakpoint = (target.line, target.column) in src.columnMarks,
+                        inlineChord = rt.inlineChord())
 
 proc lineValues(target: SourceClickTarget): seq[NamedValue] =
   for v in target.values:
@@ -4777,70 +4819,218 @@ proc followCaretInSource(rt: TuiRuntime; buf: EditBuffer;
                                       line: buf.caretLine,
                                       column: buf.caretColumn + 1), outcome)
 
+proc pointerBuffer(rt: TuiRuntime): EditBuffer =
+  ## The document a press on the editor pane acts on, in either product mode.
+  if rt.app.modes.product == pmEdit:
+    if rt.app.editSession.isNil: nil else: rt.app.editSession.activeBuffer()
+  else:
+    rt.debugBuffer()
+
+type
+  EditorPress = object
+    ## A press on the editor pane, hit-tested, in the terminal's cells.
+    line: int
+    gutterCell: int
+    gutterWidth: int
+    column: int
+    pixelColumn: float
+
+proc editorPressAt(rt: TuiRuntime; under: CellArea; row, col: int):
+    tuple[press: EditorPress; target: SourceClickTarget] =
+  if rt.app.modes.product == pmEdit:
+    let h = rt.app.editPaneModel().editPaneHitAt(under, row, col)
+    result.press = EditorPress(line: h.line, gutterCell: h.gutterCell,
+                               gutterWidth: h.gutterWidth, column: h.column,
+                               pixelColumn: h.pixelColumn)
+    result.target = SourceClickTarget(value: -1)
+  else:
+    let t = rt.sourceWithView().sourceClickTargetAt(under, row, col)
+    result.press = EditorPress(line: t.line, gutterCell: t.gutterCell,
+                               gutterWidth: t.gutterWidth, column: t.column,
+                               pixelColumn: t.pixelColumn)
+    result.target = t
+
+proc pointerHitOf(p: EditorPress; buf: EditBuffer; event: MouseEvent): PointerHit =
+  ## The press as the shared model takes it. A cell names no caret boundary, so
+  ## without DECSET 1016 the word is the cell rule's (MC.3); a pixel report
+  ## names the boundary nearest the pixel.
+  let zone =
+    if p.gutterCell < 0: gzNone
+    else: terminalGutterGeometry(p.gutterWidth, GutterMarkCells).gutterZoneAt(
+      p.gutterCell)
+  result.line = p.line
+  result.element =
+    case zone
+    of gzGlyph: peGutterGlyph
+    of gzLineNumber: peGutterLineNumber
+    else: peText
+  var view = max(1, p.column) - 1
+  if event.pixel and result.element == peText:
+    view = max(0, int(round(event.px / mouseMetrics().cellW - p.pixelColumn)))
+  else:
+    result.cellHit = result.element == peText
+  result.displayColumn = view
+  if not buf.isNil:
+    result.offset = buf.doc.offsetAtView(p.line - 1, view)
+
+proc lineHasMark(rt: TuiRuntime; line: int): GutterMark =
+  if rt.app.modes.product == pmEdit:
+    rt.app.editPaneModel().markFor(line)
+  else:
+    rt.app.source.markFor(line)
+
+proc noteSelection(rt: TuiRuntime; buf: EditBuffer;
+                   outcome: var RuntimeOutcome) =
+  if not buf.isNil:
+    rt.syncCaretFrom(buf)
+  outcome.repaint = true
+
 proc routeTextDrag(rt: TuiRuntime; event: MouseEvent;
                    outcome: var RuntimeOutcome): bool =
-  ## PLAT-68: a press held on the editor's text owns the pointer until it is
-  ## released: each motion extends the document's selection to the cell
-  ## under the pointer (`extendSelectionTo`, every front-end's drag).
+  ## A press held on the editor owns the pointer until it is released: each
+  ## motion extends the selection a whole unit at a time (`dragEditor`,
+  ## Editor-Pane.md MC.4), past the pane's edges too.
   if not rt.app.textDrag:
     return false
   if event.kind == mekPress:
     rt.app.textDrag = false
     return false
-  if event.kind == mekRelease:
-    rt.app.textDrag = false
-  let buf = rt.debugBuffer()
+  let buf = rt.pointerBuffer()
   let geometry = rt.paintedGeometry()
   var area = CellArea()
   for i, region in geometry.projection.regions:
     if region.pane == paneEditor: area = paneUnderStrip(geometry, i)
-  if buf.isNil or area.width <= 0:
-    return true
-  let row = clamp(event.row, area.row, area.row + area.height - 1)
-  let col = clamp(event.col, area.col, area.col + area.width - 1)
-  let target = rt.sourceWithView().sourceClickTargetAt(area, row, col)
-  if target.line >= 1:
-    buf.doc.extendSelectionTo(target.line - 1, max(1, target.column) - 1)
-    rt.syncCaretFrom(buf)
-  outcome.repaint = true
+  if not buf.isNil and area.width > 0:
+    let row = clamp(event.row, area.row, area.row + area.height - 1)
+    let col = clamp(event.col, area.col, area.col + area.width - 1)
+    let at = rt.editorPressAt(area, row, col).press
+    if at.line >= 1:
+      buf.doc.state.wordSeparators = rt.app.wordSeparators
+      let hit = at.pointerHitOf(buf, event)
+      discard rt.app.editorPointer.dragEditor(buf.doc, hit, rt.pointerClockMs)
+      rt.syncCaretFrom(buf)
+    outcome.repaint = true
+  if event.kind == mekRelease:
+    rt.app.textDrag = false
+    rt.app.editorPointer.releaseEditor()
   true
+
+proc routeGutterHover(rt: TuiRuntime; event: MouseEvent;
+                      outcome: var RuntimeOutcome) =
+  ## Gesture 7a, under `?1003`: the pointer passing over the glyph column of an
+  ## unmarked line draws the hint. Where the terminal reports no motion there is
+  ## no hint, and a press still toggles.
+  var element = peText
+  var line = 0
+  let geometry = rt.paintedGeometry()
+  for i, region in geometry.projection.regions:
+    if region.pane == paneEditor:
+      let area = paneUnderStrip(geometry, i)
+      if area.contains(event.row, event.col):
+        let at = rt.editorPressAt(area, event.row, event.col).press
+        if at.gutterCell >= 0:
+          line = at.line
+          element = at.pointerHitOf(nil, event).element
+  if rt.app.editorPointer.hoverEditor(element, line, line > 0 and
+                                rt.lineHasMark(line) != gmNone):
+    rt.app.source.hintLine = rt.app.editorPointer.hintLine
+    outcome.repaint = true
+
+proc runEditorEffect(rt: TuiRuntime; action: PointerAction; press: EditorPress;
+                     target: SourceClickTarget; event: MouseEvent;
+                     outcome: var RuntimeOutcome): bool =
+  ## The half of a press that is not a selection. Debug's go to the engine; Edit
+  ## mode has none, and its breakpoints are the edit session's, which the next
+  ## session sends.
+  let editing = rt.app.modes.product == pmEdit
+  let buf = rt.pointerBuffer()
+  let path = if editing: (if buf.isNil: "" else: buf.path)
+             else: rt.app.source.path
+  let line = press.line
+  case action.effect
+  of pfNone:
+    not action.fresh
+  of pfSelected:
+    rt.app.textDrag = rt.app.editorPointer.held
+    rt.noteSelection(buf, outcome)
+    true
+  of pfToggleBreakpoint:
+    if editing:
+      let placed = rt.app.editSession.togglePointAt(path, line)
+      rt.note((if placed: "breakpoint at " else: "removed the breakpoint at ") &
+              path & ":" & $line)
+      outcome.repaint = true
+    else:
+      outcome.requestClick(PaneClickRequest(kind: pcToggleBreakpoint,
+                                            path: path, line: line))
+    true
+  of pfSetBreakpointEnabled:
+    # The desktop's right click enables or disables a breakpoint that is there,
+    # and does nothing on a line without one.
+    let mark = rt.lineHasMark(line)
+    if mark notin {gmBreakpoint, gmBreakpointDisabled, gmBreakpointTracepoint}:
+      return false
+    if editing:
+      discard rt.app.editSession.setPointEnabled(path, line,
+                                                 mark == gmBreakpointDisabled)
+      outcome.repaint = true
+    else:
+      outcome.requestClick(PaneClickRequest(
+        kind: pcSetBreakpointEnabled, path: path, line: line,
+        enabled: mark == gmBreakpointDisabled))
+    true
+  of pfLineJump:
+    if editing:
+      return false
+    outcome.requestClick(PaneClickRequest(kind: pcLineJump, path: path,
+                                          line: line, behaviour: "smart"))
+    true
+  of pfCallJump:
+    if editing:
+      return false
+    # K15, and the double middle click (gesture 3).
+    let (token, err) = callTokenAt(target.lineText, target.column,
+                                   rust = path.endsWith(".rs"))
+    if token.len == 0:
+      if event.button == mbMiddle:
+        outcome.requestClick(PaneClickRequest(kind: pcLineJump, path: path,
+                                              line: line, behaviour: "smart"))
+      else:
+        rt.note(if err.len > 0: err & " on line " & $line & "."
+                else: NoWordSelected)
+        outcome.repaint = true
+    else:
+      outcome.requestClick(PaneClickRequest(kind: pcCallJump, path: path,
+                                            line: line, text: token,
+                                            behaviour: "smart"))
+    true
+  of pfContextMenu:
+    rt.noteSelection(buf, outcome)
+    if editing:
+      return false
+    rt.openContextMenu(rt.editorTextMenu(target), event.row, event.col, outcome)
+    true
 
 proc routeEditorClick(rt: TuiRuntime; under: CellArea; event: MouseEvent;
                       outcome: var RuntimeOutcome): bool =
-  ## K10-K15 and K36 on the recording's source in Debug: the gutter's toggle
-  ## and enable / disable, the text's line and call jumps, a column
-  ## breakpoint, the editor menu, and an inline value's click, Ctrl+click and
-  ## menu — `ui/editor`'s and `ui/flow`'s mouse handlers.
-  if rt.app.modes.product == pmEdit or rt.app.source.isEmpty:
+  ## Every press on the editor pane, in Debug and in Edit mode: an inline value
+  ## keeps its own gestures (K36), and everything else is the shared pointer
+  ## model's (Editor-Pane.md § Mouse Gestures, MC.1 – MC.7).
+  let editing = rt.app.modes.product == pmEdit
+  if not editing and rt.app.source.isEmpty:
     return false
-  let src = rt.sourceWithView()
-  let target = src.sourceClickTargetAt(under, event.row, event.col)
-  if target.line < 1:
-    return false
-  let line = target.line
-  if target.onGutter:
-    if event.button == mbLeft:
-      outcome.requestClick(PaneClickRequest(kind: pcToggleBreakpoint,
-                                            path: src.path, line: line))
-      return true
-    if event.button == mbRight:
-      # The desktop's gutter right-click enables / disables a breakpoint
-      # that is there, and does nothing on a line without one.
-      let mark = src.markFor(line)
-      if mark in {gmBreakpoint, gmBreakpointDisabled}:
-        outcome.requestClick(PaneClickRequest(
-          kind: pcSetBreakpointEnabled, path: src.path, line: line,
-          enabled: mark == gmBreakpointDisabled))
-        return true
+  let (press, target) = rt.editorPressAt(under, event.row, event.col)
+  if press.line < 1:
     return false
   # K36: AN INLINE VALUE — `ui/flow`'s value: a click goes to the step the
   # line ran at, Ctrl+click pins it, a right click opens its menu.
   if target.value >= 0:
     let v = target.values[target.value]
+    let line = press.line
     case event.button
     of mbRight:
-      rt.openContextMenu(flowValueContextMenu(src.path, line, v.name, v.value,
-                                              lineValues(target)),
+      rt.openContextMenu(flowValueContextMenu(rt.app.source.path, line, v.name,
+                                              v.value, lineValues(target)),
                          event.row, event.col, outcome)
     of mbLeft:
       if event.ctrl:
@@ -4854,55 +5044,35 @@ proc routeEditorClick(rt: TuiRuntime; under: CellArea; event: MouseEvent;
     else:
       return false
     return true
-  # K47 (PLAT-51): A PRESS ON THE TEXT PLACES THE CARET, as Monaco's does in
-  # a read-only model — a plain left press, and a right press before its menu.
-  if event.button == mbRight or
-     (event.button == mbLeft and not event.ctrl and not event.alt):
-    rt.placeCaret(src.path, line, max(1, target.column))
-    # PLAT-68: a held left press SELECTS as the pointer moves.
-    rt.app.textDrag = event.button == mbLeft
-    outcome.repaint = true
-  case event.button
-  of mbRight:
-    rt.openContextMenu(rt.editorTextMenu(target), event.row, event.col,
-                       outcome)
-    true
-  of mbMiddle:
-    outcome.requestClick(PaneClickRequest(kind: pcLineJump, path: src.path,
-                                          line: line, behaviour: "smart"))
-    true
-  of mbLeft:
-    if event.ctrl and event.alt:
-      # K15: the desktop's Ctrl+Alt+click on a function's name.
-      let (token, err) = callTokenAt(target.lineText, target.column,
-                                     rust = src.path.endsWith(".rs"))
-      if token.len == 0:
-        rt.note(if err.len > 0: err & " on line " & $line & "."
-                else: NoWordSelected)
-        outcome.repaint = true
-      else:
-        outcome.requestClick(PaneClickRequest(kind: pcCallJump,
-                                              path: src.path, line: line,
-                                              text: token,
-                                              behaviour: "smart"))
-      true
-    elif event.alt:
-      # K14: the desktop's Alt+click — a breakpoint anchored at the column
-      # (`column_click_resolver`: the text's column, clamped to the line).
-      let width = max(1, cellWidthOf(target.lineText))
-      outcome.requestClick(PaneClickRequest(
-        kind: pcColumnBreakpoint, path: src.path, line: line,
-        column: max(1, min(target.column, width))))
-      true
-    elif event.ctrl:
-      outcome.requestClick(PaneClickRequest(kind: pcLineJump, path: src.path,
-                                            line: line, behaviour: "smart"))
-      true
-    else:
-      # The caret was placed above.
-      true
-  else:
-    false
+  let buf = rt.pointerBuffer()
+  let button =
+    case event.button
+    of mbLeft: pbLeft
+    of mbMiddle: pbMiddle
+    of mbRight: pbRight
+    else: return false
+  let hit = press.pointerHitOf(buf, event)
+  if buf.isNil:
+    # No document to select in (no file the recording can serve): the debugger's
+    # own gestures still answer.
+    var scratch = initEditingDocument("", "")
+    let action = rt.app.editorPointer.pressEditor(scratch, PointerPress(
+      timeMs: rt.pointerClockMs, button: button,
+      mods: pointerModsOf(event.ctrl, event.alt, false), hit: hit,
+      documentId: rt.app.source.path, platformCount: NoPlatformCount))
+    if action.effect == pfSelected:
+      rt.app.editorPointer.held = false
+      rt.app.caret = (rt.app.source.path, press.line, max(1, press.column))
+      outcome.repaint = true
+      return true
+    return rt.runEditorEffect(action, press, target, event, outcome)
+  buf.doc.state.wordSeparators = rt.app.wordSeparators
+  rt.app.editorPointer.counter.intervalMs = rt.multiClickIntervalMs
+  let action = rt.app.editorPointer.pressEditor(buf.doc, PointerPress(
+    timeMs: rt.pointerClockMs, button: button,
+    mods: pointerModsOf(event.ctrl, event.alt, false), hit: hit,
+    documentId: buf.path, platformCount: NoPlatformCount))
+  rt.runEditorEffect(action, press, target, event, outcome)
 
 proc openTracepointEditorAt(rt: TuiRuntime; path: string; line: int) =
   ## PLAT-51 (and K13's "Add tracepoint"): the tracepoint editor on `line` —
@@ -5515,6 +5685,8 @@ proc runContextAction(rt: TuiRuntime; action: ContextAction;
   of caFind:
     # The desktop's Find (Monaco's find widget): this front-end's search.
     discard rt.applyLocalAction(kaSearchForward, outcome)
+  of caToggleInlineBreakpoint:
+    rt.toggleInlineAt(target.path, target.line, target.column, outcome)
   of caAddBreakpoint, caDeleteBreakpoint:
     outcome.requestClick(PaneClickRequest(kind: pcToggleBreakpoint,
                                           path: target.path,
@@ -6122,6 +6294,16 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
     # PLAT-70 Part C: the find session, its field the status line's prompt.
     rt.openFindSession(backward = action == kaSearchBackward, symbol = false,
                        outcome)
+    true
+  of kaToggleInlineBreakpoint:
+    # Shift+F9 at the primary caret (Editor-Pane.md § Inline breakpoints), in
+    # both modes, and never a move of the replay.
+    let buf = rt.pointerBuffer()
+    if buf.isNil:
+      rt.note("no file is open to place a breakpoint in")
+      outcome.repaint = true
+      return true
+    rt.toggleInlineAt(buf.path, buf.caretLine, buf.caretColumn + 1, outcome)
     true
   of kaToggleBreakpoint:
     # EDIT MODE ANSWERS IT HERE; DEBUG MODE SENDS IT TO THE ENGINE. An edit
@@ -8959,6 +9141,11 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   # button) is theirs or nobody's: it never repaints a frame for nothing.
   block:
     let (isMouse, event) = decodeMouse(token)
+    if isMouse:
+      rt.pointerClockMs = nowMs
+      # MC.1: every release ends a press, whichever widget takes the report.
+      if event.kind == mekRelease and not rt.app.textDrag:
+        rt.app.editorPointer.counter.noteRelease()
     # PLAT-51 (Native-Front-End-Parity.md §1, CodeTracer-TUI.md §4.4): SHIFT
     # IS THE TERMINAL'S. Most terminals bypass mouse reporting while Shift is
     # held, so their own selection and menu work; one that DELIVERS a
@@ -8995,6 +9182,9 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
       # status line while the pointer is over it; a press ends the hover.
       if event.kind == mekMotion and event.button != mbLeft:
         rt.testsHoverPointer(event, result)
+        if not (rt.app.menu.isOpen or rt.app.omnibar.isOpen or rt.prompt.open or
+                rt.app.textDrag):
+          rt.routeGutterHover(event, result)
       elif event.kind == mekPress and rt.app.testsHover.len > 0:
         rt.app.testsHover = ""
         result.repaint = true

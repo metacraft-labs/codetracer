@@ -66,10 +66,10 @@ suite "editor gutter band map":
     let order = concernsInOrder().mapIt($it)
     checkpoint "concerns, left to right: " & order.join(" ")
     check order == @[
+      "breakpoint", "tracepoint",
       "current-line-arrow", "run-test-control",
       "line-number",
       "vcs-change",
-      "breakpoint", "tracepoint",
       "folding-chevron"]
 
   test "the run-test control is not in the breakpoint's band":
@@ -79,11 +79,11 @@ suite "editor gutter band map":
       ", breakpoint -> " & $gcBreakpoint.bandFor &
       ", tracepoint -> " & $gcTracepoint.bandFor
     check gcRunTestControl.bandFor == gbPointer
-    check gcBreakpoint.bandFor == gbMarker
-    check gcTracepoint.bandFor == gbMarker
+    check gcBreakpoint.bandFor == gbGlyph
+    check gcTracepoint.bandFor == gbGlyph
     check gcRunTestControl.bandFor != gcBreakpoint.bandFor
 
-  test "the VCS band is its own band and is not the marker band":
+  test "the VCS band is its own band and is not the glyph band":
     ## The correction. Before this module `.diff-line` had no band: it was laid
     ## across the line number and both markers at once.
     checkpoint "vcs-change -> " & $gcVcsChange.bandFor &
@@ -93,13 +93,11 @@ suite "editor gutter band map":
     check gcVcsChange.bandFor != gcLineNumber.bandFor
     check gbVcs.owners == @[gcVcsChange]
 
-  test "the marker gap owns nothing and the folding band is Monaco's":
-    checkpoint "marker-gap owners: " & $gbMarkerGap.owners.len &
-      ", folding isOurs: " & $gbFolding.isOurs
-    check gbMarkerGap.owners.len == 0
+  test "the split owns nothing, and the glyph and folding bands are Monaco's":
+    checkpoint "folding isOurs: " & $gbFolding.isOurs
     check gbVcsSplit.owners.len == 0
     check gbFolding.isOurs == false
-    check gbMarker.isOurs
+    check gbGlyph.isOurs == false
     check gbVcs.isOurs
 
   test "the bands resolve to these pixels at the measured font size":
@@ -108,27 +106,22 @@ suite "editor gutter band map":
     ## before it lands in a browser.
     let resolved = resolveBands(FontSize, GutterWidth)
     checkpoint bandLine(resolved)
-    check resolved.len == 7
+    check resolved.len == 6
     check resolved.mapIt($it.band) == @[
-      "pointer", "line-number", "vcs", "vcs-split", "marker", "marker-gap",
-      "folding"]
-    # pointer 0.75em -> 11, vcs 0.35em -> 5, vcs-split 0.25em -> 3,
-    # marker 2.05em -> 30, gap 0.45em -> 6, folding 0.85em -> 12. Fixed total
-    # 67; the line number takes the remaining 6 of the 73 measured.
+      "glyph", "pointer", "line-number", "vcs", "vcs-split", "folding"]
+    # glyph (Monaco's line height, 1.35 em rounded on Linux), pointer 0.75em -> 11,
+    # vcs 0.35em -> 5, vcs-split 0.25em -> 3, folding 0.85em -> 12; the line number
+    # takes what is left.
+    let glyph = gbGlyph.widthPx(FontSize)
+    let number = GutterWidth - glyph - 11 - 5 - 3 - 12
     check resolved[0].leftPx == 0
-    check resolved[0].rightPx == 11
-    check resolved[1].leftPx == 11
-    check resolved[1].rightPx == 17
-    check resolved[2].leftPx == 17
-    check resolved[2].rightPx == 22
-    check resolved[3].leftPx == 22
-    check resolved[3].rightPx == 25
-    check resolved[4].leftPx == 25
-    check resolved[4].rightPx == 55
-    check resolved[5].leftPx == 55
-    check resolved[5].rightPx == 61
-    check resolved[6].leftPx == 61
-    check resolved[6].rightPx == 73
+    check resolved[0].rightPx == glyph
+    check resolved[1].leftPx == glyph
+    check resolved[1].rightPx == glyph + 11
+    check resolved[2].rightPx == glyph + 11 + number
+    check resolved[3].rightPx == glyph + 11 + number + 5
+    check resolved[4].rightPx == glyph + 11 + number + 8
+    check resolved[5].rightPx == GutterWidth
 
   test "no two bands share a pixel":
     ## Computed from the resolved EDGES, so a band moved on top of another is
@@ -150,14 +143,14 @@ suite "editor gutter band map":
       ResolvedBand(band: gbPointer, leftPx: 0, rightPx: 11),
       ResolvedBand(band: gbLineNumber, leftPx: 11, rightPx: 20),
       ResolvedBand(band: gbVcs, leftPx: 0, rightPx: 55),
-      ResolvedBand(band: gbMarker, leftPx: 25, rightPx: 55)]
+      ResolvedBand(band: gbFolding, leftPx: 25, rightPx: 55)]
     let clashes = overlappingBands(broken)
     checkpoint "overlaps found: " & clashes.mapIt(
       $it.a & "/" & $it.b & " " & $it.px & "px").join(", ")
     check clashes.len == 3
     check clashes.anyIt(it.a == gbPointer and it.b == gbVcs and it.px == 11)
     check clashes.anyIt(it.a == gbLineNumber and it.b == gbVcs and it.px == 9)
-    check clashes.anyIt(it.a == gbVcs and it.b == gbMarker and it.px == 30)
+    check clashes.anyIt(it.a == gbVcs and it.b == gbFolding and it.px == 30)
 
   test "abutting bands are not an overlap":
     ## The twin of the check above. `[0,10)` and `[10,20)` share no pixel, and
@@ -175,47 +168,38 @@ suite "editor gutter band map":
     ## inside.
     let collapsed = @[
       ResolvedBand(band: gbVcs, leftPx: 20, rightPx: 20),
-      ResolvedBand(band: gbMarker, leftPx: 0, rightPx: 55)]
+      ResolvedBand(band: gbFolding, leftPx: 0, rightPx: 55)]
     check overlappingBands(collapsed).len == 0
 
-  test "the margin reservation grows by the VCS band":
-    ## The half that keeps the line number's room. Monaco sizes the margin as
-    ## the number column plus `lineDecorationsWidthPx`; a band added to our
-    ## markup and not to this total is paid for out of the digits.
+  test "the margin reservation is the VCS band and the folding lane":
+    ## Monaco sizes the margin as the glyph margin, the number column and
+    ## `lineDecorationsWidthPx`; a band added to our markup and not to this total
+    ## is paid for out of the digits. The marks left it for the glyph margin.
     let vcs = gbVcs.widthPx(FontSize) + gbVcsSplit.widthPx(FontSize)
-    let withVcs = lineDecorationsWidthPx(FontSize)
-    # What the function returned before the VCS band existed, recomputed here
-    # rather than remembered: marker 1.8em + folding 0.5em.
-    let withoutVcs = max(20, (FontSize * 9) div 5 + FontSize div 2)
     checkpoint "fontSize " & $FontSize & ": vcs band + split " & $vcs & "px, " &
-      "lineDecorationsWidth " & $withoutVcs & " -> " & $withVcs
+      "lineDecorationsWidth " & $lineDecorationsWidthPx(FontSize)
     check gbVcs.widthPx(FontSize) == 5
     check gbVcsSplit.widthPx(FontSize) == 3
     check vcs == 8
-    check withoutVcs == 34
-    check withVcs == 42
-    check withVcs - withoutVcs == vcs
+    check lineDecorationsWidthPx(FontSize) == max(20, vcs + FontSize div 2)
 
   test "the reservation never drops below Monaco's floor":
     ## `max(20, ...)` is load-bearing at small font sizes, and a floor asserted
     ## nowhere is a floor that gets refactored away.
     ## Raw sums, so the assertions below say which side of the floor each font
     ## size falls on rather than only what came out:
-    ##   7 -> 12 + 1 + 1 + 3 = 18   floored to 20
-    ##   8 -> 14 + 2 + 2 + 4 = 22   above it
-    ##   9 -> 16 + 3 + 2 + 4 = 25   above it
+    ##   7 -> 2 + 1 + 3 = 6      floored to 20
+    ##  28 -> 9 + 7 + 14 = 30    above it
     let raw = proc(f: int): int =
-      (f * 9) div 5 + gbVcs.widthPx(f) + gbVcsSplit.widthPx(f) + f div 2
+      gbVcs.widthPx(f) + gbVcsSplit.widthPx(f) + f div 2
     checkpoint "fontSize 7: raw " & $raw(7) & " -> " & $lineDecorationsWidthPx(7) &
       "; 8: raw " & $raw(8) & " -> " & $lineDecorationsWidthPx(8) &
       "; 9: raw " & $raw(9) & " -> " & $lineDecorationsWidthPx(9) &
       "; 15: raw " & $raw(15) & " -> " & $lineDecorationsWidthPx(15)
-    check raw(7) == 18
+    check raw(7) == 6
     check lineDecorationsWidthPx(7) == 20
-    check raw(8) == 22
-    check lineDecorationsWidthPx(8) == 22
-    check raw(9) == 25
-    check lineDecorationsWidthPx(9) == 25
+    check raw(28) == 30
+    check lineDecorationsWidthPx(28) == 30
     check lineDecorationsWidthPx(1) == 20
 
   test "band widths are the same integers on both backends":
@@ -229,8 +213,7 @@ suite "editor gutter band map":
     check gbLineNumber.widthPx(FontSize) == RemainderWidth
     check gbVcs.widthPx(FontSize) == 5
     check gbVcsSplit.widthPx(FontSize) == 3
-    check gbMarker.widthPx(FontSize) == 30
-    check gbMarkerGap.widthPx(FontSize) == 6
+    check gbGlyph.widthPx(FontSize) > 0
     check gbFolding.widthPx(FontSize) == 12
 
   test "a gutter too narrow for its bands reports it rather than clamping":
@@ -240,4 +223,4 @@ suite "editor gutter band map":
     let resolved = resolveBands(FontSize, 40)
     checkpoint bandLine(resolved)
     let lineNumber = resolved.filterIt(it.band == gbLineNumber)[0]
-    check lineNumber.rightPx - lineNumber.leftPx == -27
+    check lineNumber.rightPx - lineNumber.leftPx == 40 - gbGlyph.widthPx(FontSize) - 11 - 5 - 3 - 12

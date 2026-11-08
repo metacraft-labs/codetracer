@@ -104,9 +104,10 @@ import ./selection
 import ./selection_ops
 import ./text_store
 import ./transaction
+import ./word_classifier
 import ./wrap
 
-export editor_state, selection, selection_ops, wrap
+export editor_state, selection, selection_ops, word_classifier, wrap
 
 type
   OpCategory* = enum
@@ -141,6 +142,23 @@ type
     akOperator = "op"     ## `begin-operator(op)`
     akDigit = "d"         ## `push-count-digit(d)`
 
+  PointerArgs* = object
+    ## How a press named its position, for the pointer operations of category
+    ## D (`select-word-at`, `select-line-at`, `extend-by-unit-to`,
+    ## `column-select-to`, `add-cursor-at-point`). The zero value is a plain
+    ## press at a caret boundary that acts on the whole selection.
+    cellHit*: bool
+      ## The press named a terminal cell, not a boundary (MC.3's cell rule).
+    keepOthers*: bool
+      ## Alt: act on the primary range and keep the other cursors.
+    unit*: PointerUnit
+      ## `extend-by-unit-to`: the unit to grow by, when it is not the anchor's.
+    wholeLine*: bool
+      ## `add-cursor-at-point`: the new cursor selects its line (gesture 12).
+    displayColumn*: int
+      ## `column-select-to`: the pointer's display column, 0-based, which may
+      ## lie past the end of the line.
+
   OpArgs* = object
     ## Everything any of the eight argument kinds needs. One object rather
     ## than a variant: the executor reads the field its declaration's `ArgKind`
@@ -153,6 +171,8 @@ type
     command*: string
     operator*: string
     digit*: int
+    pointer*: PointerArgs
+      ## The pointer operations' press, beside the document offset in `number`.
 
   OpOutcome* = enum
     ## `FUZZ-8`'s *"a refusal is a typed value"*, plus the distinction §34
@@ -187,6 +207,7 @@ type
     hiReload = "reload-from-disk"
     hiPipe = "pipe"
     hiValueOrigin = "jump-to-value-origin"
+    hiInlineBreakpoint = "toggle-inline-breakpoint"
 
   HostIntent* = object
     kind*: HostIntentKind
@@ -1698,6 +1719,8 @@ proc cSelectAll(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   var after = st
   after.pushSelectionHistory(env.nowMs)
   after.selection = singleSelection(0, st.doc.len)
+  after.pointerAnchor = PointerAnchor(unit: puDocument, last: st.doc.len,
+                                      selection: after.selection)
   settle(st, after)
 
 proc cSelectLine(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
@@ -2263,16 +2286,224 @@ proc cMoveLastCursorToNextMatch(env: OpEnv; st: EditorState; args: OpArgs): OpRe
   after.selection = editorSelection(ranges, st.selection.primaryIndex)
   settle(st, after)
 
-proc cAddCursorAtPoint(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
-  ## A caret at a document offset — the pointer's Alt+click, which names a
-  ## position rather than a direction.
+proc classifierOf(st: EditorState): WordClassifier =
+  wordClassifier(if st.wordSeparators.len > 0: st.wordSeparators
+                 else: UsualWordSeparators)
+
+proc lineTextAt(env: OpEnv; line: int): string =
+  ## The logical line without its terminator.
+  let (a, b) = lineSpanOf(env, line)
+  result = env.ctx.doc[a ..< b]
+  while result.len > 0 and result[^1] in {'\n', '\r'}:
+    result.setLen(result.len - 1)
+
+proc wordUnitAt(env: OpEnv; st: EditorState; offset: int; cell: bool):
+    tuple[a, b: int] =
+  let line = env.lineOf(offset)
+  let start = env.lineStartOf(line)
+  let text = env.lineTextAt(line)
+  let c = st.classifierOf
+  let span = if cell: c.wordAtCell(text, offset - start)
+             else: c.wordAtBoundary(text, offset - start)
+  (start + span.first, start + span.last)
+
+proc withPointerRange(env: OpEnv; st: EditorState; r: SelectionRange;
+                      keepOthers: bool; push: bool): EditorState =
+  ## `r` as the selection, or as the primary range beside the other cursors.
+  result = st
+  if push:
+    result.pushSelectionHistory(env.nowMs)
+  if keepOthers:
+    var ranges = st.selection.ranges
+    ranges[st.selection.primaryIndex] = r
+    result.selection = editorSelection(ranges, st.selection.primaryIndex)
+  else:
+    result.selection = editorSelection([r], 0)
+
+proc anchored(after: var EditorState; unit: PointerUnit; a, b: int) =
+  after.pointerAnchor = PointerAnchor(unit: unit, first: a, last: b,
+                                      selection: after.selection)
+
+proc cSelectWordAt(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  ## Count 2 (MC.2, MC.3): the word at the press, which becomes the anchor.
   if args.number < 0 or args.number > st.doc.len:
     return refused(st, rrOutOfRange)
+  let offset = env.ctx.boundaryAtOrBefore(args.number)
+  let (a, b) = env.wordUnitAt(st, offset, args.pointer.cellHit)
+  var after = env.withPointerRange(st, spanRange(a, b), args.pointer.keepOthers,
+                                   push = true)
+  after.anchored(puWord, a, b)
+  settle(st, after)
+
+proc cSelectLineAt(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  ## Count 3, and every press on the line numbers (MC.2, gesture 9): the
+  ## logical line with its break.
+  if args.number < 0 or args.number > st.doc.len:
+    return refused(st, rrOutOfRange)
+  let (a, b) = lineSpanOf(env, env.lineOf(args.number))
+  var after = env.withPointerRange(st, spanRange(a, b), args.pointer.keepOthers,
+                                   push = true)
+  after.anchored(puLine, a, b)
+  settle(st, after)
+
+func extendFromAnchor(anchor: PointerAnchor; head: int): SelectionRange =
+  ## `SingleCursorState._computeSelection`: from the side of the anchor unit
+  ## away from the head, so the unit stays selected.
+  if anchor.first == anchor.last or head > anchor.first:
+    spanRange(anchor.first, head)
+  else:
+    spanRange(anchor.last, head)
+
+proc wordHead(env: OpEnv; st: EditorState; anchor: PointerAnchor;
+              offset: int): int =
+  ## `WordOperations.word(…, inSelectionMode = true)`.
+  let line = env.lineOf(offset)
+  let start = env.lineStartOf(line)
+  let inside = st.classifierOf.wordExtensionAt(env.lineTextAt(line),
+                                               offset - start)
+  func contains(p: int): bool = anchor.first <= p and p <= anchor.last
+  if contains(offset):
+    anchor.last
+  elif offset <= anchor.first:
+    let p = start + inside.first
+    if contains(p): anchor.last else: p
+  else:
+    let p = start + inside.last
+    if contains(p): anchor.first else: p
+
+proc displayRowOf(env: OpEnv; offset: int): int =
+  env.display.cache.toDisplay(env.ctx.store.posOf(offset)).row
+
+proc rowStartOffset(env: OpEnv; row: int): int =
+  let r = env.display.cache.rowAt(row)
+  env.lineStartOf(r.line) + r.startByte
+
+proc lineHead(env: OpEnv; anchor: PointerAnchor; offset: int): int =
+  ## `CursorMoveCommands.line`, continuing, in display rows: the start of the
+  ## pointer's row above the anchor line, the start of the next row (or the end
+  ## of the document) below it, and the anchor unit's end on it.
+  let anchorLine = env.lineOf(anchor.first)
+  let line = env.lineOf(offset)
+  if line < anchorLine:
+    env.rowStartOffset(env.displayRowOf(offset))
+  elif line > anchorLine:
+    let next = env.displayRowOf(offset) + 1
+    if next >= env.display.cache.rowCount: env.ctx.doc.len
+    else: env.rowStartOffset(next)
+  else:
+    anchor.last
+
+proc cExtendByUnitTo(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  ## A drag or a Shift+press (MC.4): the head goes to the press a whole unit
+  ## at a time, from the live anchor unit; with none, from the selection's
+  ## anchor by character.
+  if args.number < 0 or args.number > st.doc.len:
+    return refused(st, rrOutOfRange)
+  let offset = env.ctx.boundaryAtOrBefore(args.number)
+  var anchor = st.pointerAnchor
+  if not st.pointerAnchorAlive or anchor.unit == puColumn:
+    let from0 = st.selection.mainRange.anchor
+    anchor = PointerAnchor(unit: puCharacter, first: from0, last: from0)
+  if args.pointer.unit != puNone:
+    anchor.unit = args.pointer.unit
+  let r =
+    case anchor.unit
+    of puDocument: spanRange(0, st.doc.len)
+    of puWord: extendFromAnchor(anchor, env.wordHead(st, anchor, offset))
+    of puLine: extendFromAnchor(anchor, env.lineHead(anchor, offset))
+    else: extendFromAnchor(anchor, offset)
+  var after = env.withPointerRange(st, r, args.pointer.keepOthers, push = false)
+  anchor.selection = after.selection
+  after.pointerAnchor = anchor
+  settle(st, after)
+
+proc lineOffsetAtDisplay(env: OpEnv; line, column: int): int =
+  env.lineStartOf(line) + offsetAtColumn(env.lineTextAt(line), column,
+                                         env.settings.policy)
+
+proc cColumnSelectTo(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  ## Shift+Alt (MC.4), `ColumnSelection.columnSelect`: one range per line from
+  ## the block's first display column to the pointer's. A line too short to
+  ## reach the block contributes nothing, unless no line does; then each line
+  ## between the two contributes a caret at its end.
+  if args.number < 0 or args.number > st.doc.len:
+    return refused(st, rrOutOfRange)
+  var anchor = st.pointerAnchor
+  if not st.pointerAnchorAlive or anchor.unit != puColumn:
+    let head = st.selection.mainRange.head
+    let line = env.lineOf(head)
+    anchor = PointerAnchor(
+      unit: puColumn, columnLine: line,
+      columnFrom: columnAt(env.lineTextAt(line), head - env.lineStartOf(line),
+                           env.settings.policy))
+  let toLine = env.lineOf(args.number)
+  let fromColumn = anchor.columnFrom
+  let toColumn = max(0, args.pointer.displayColumn)
+  let step = if toLine >= anchor.columnLine: 1 else: -1
+  var ranges: seq[SelectionRange] = @[]
+  var line = anchor.columnLine
+  while true:
+    let a = env.lineOffsetAtDisplay(line, fromColumn)
+    let b = env.lineOffsetAtDisplay(line, toColumn)
+    let text = env.lineTextAt(line)
+    let start = env.lineStartOf(line)
+    let shownA = columnAt(text, a - start, env.settings.policy)
+    let shownB = columnAt(text, b - start, env.settings.policy)
+    let reached =
+      if fromColumn <= toColumn: shownB >= fromColumn and shownA <= toColumn
+      else: shownA >= toColumn and shownB <= fromColumn
+    if reached:
+      ranges.add spanRange(a, b)
+    if line == toLine: break
+    line += step
+  if ranges.len == 0:
+    line = anchor.columnLine
+    while true:
+      let e = env.lineStartOf(line) + env.lineTextAt(line).len
+      ranges.add caret(e)
+      if line == toLine: break
+      line += step
+  var after = st
+  after.selection = editorSelection(ranges, ranges.len - 1)
+  anchor.selection = after.selection
+  after.pointerAnchor = anchor
+  settle(st, after)
+
+proc cToggleInlineBreakpoint(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  ## Shift+F9 at the primary caret. The engine's breakpoints are the host's
+  ## (Editor-Pane.md § Inline breakpoints), so the operation names the intent.
+  let head = st.selection.mainRange.head
+  let line = env.lineOf(head)
+  let column = columnAt(env.lineTextAt(line), head - env.lineStartOf(line),
+                        env.settings.policy) + 1
+  settle(st, st, @[HostIntent(kind: hiInlineBreakpoint,
+                              payload: $(line + 1) & ":" & $column)])
+
+proc cAddCursorAtPoint(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  ## A caret at a document offset, the pointer's Alt+click: `CreateCursor`. A
+  ## press inside an existing cursor, when there is more than one, removes it;
+  ## with `wholeLine` (gesture 12) the new cursor selects its line.
+  if args.number < 0 or args.number > st.doc.len:
+    return refused(st, rrOutOfRange)
+  let offset = env.ctx.boundaryAtOrBefore(args.number)
   var ranges = st.selection.ranges
-  ranges.add caret(env.ctx.boundaryAtOrBefore(args.number))
   var after = st
   after.pushSelectionHistory(env.nowMs)
+  if ranges.len > 1:
+    for i, r in ranges:
+      if r.rangeFrom <= offset and offset <= r.rangeTo:
+        ranges.delete(i)
+        after.selection = editorSelection(ranges, ranges.len - 1)
+        return settle(st, after)
+  var a = offset
+  var b = offset
+  if args.pointer.wholeLine:
+    (a, b) = lineSpanOf(env, env.lineOf(offset))
+    ranges.add spanRange(a, b)
+  else:
+    ranges.add caret(offset)
   after.selection = editorSelection(ranges, ranges.len - 1)
+  after.anchored(if args.pointer.wholeLine: puLine else: puCharacter, a, b)
   settle(st, after)
 
 proc cToggleBlockComment(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
@@ -2599,6 +2830,13 @@ proc buildVocabulary(): seq[Declaration] =
     commandDecl("select-all-matches", cSelectAllMatches),
     commandDecl("move-last-cursor-to-next-match", cMoveLastCursorToNextMatch),
     commandDecl("add-cursor-at-point", cAddCursorAtPoint, akNumber),
+    commandDecl("select-word-at", cSelectWordAt, akNumber),
+    commandDecl("select-line-at", cSelectLineAt, akNumber),
+    # Only a live line anchor reads the display rows (MC.4). The column is declared
+    # on §2.2's motions and objects, and a command with no such anchor is not
+    # display-dependent.
+    commandDecl("extend-by-unit-to", cExtendByUnitTo, akNumber),
+    commandDecl("column-select-to", cColumnSelectTo, akNumber),
 
     commandDecl("clipboard-cut", cClipboardCut),
     commandDecl("clipboard-copy", cClipboardCopy),
@@ -2658,6 +2896,7 @@ proc buildVocabulary(): seq[Declaration] =
     commandDecl("yank-pop", cYankPop),
 
     commandDecl("toggle-breakpoint", cToggleBreakpoint),
+    commandDecl("toggle-inline-breakpoint", cToggleInlineBreakpoint),
     commandDecl("toggle-tracepoint", cToggleTracepoint),
     commandDecl("toggle-flow-overlay", cToggleFlowOverlay),
     commandDecl("jump-to-value-origin", cJumpToValueOrigin),

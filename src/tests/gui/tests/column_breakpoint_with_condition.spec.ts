@@ -278,7 +278,7 @@ test.describe("M9 — Column-aware conditional breakpoint", () => {
     // with a column that we KNOW exists on the line by first reading
     // any step on the body line: set a column-less line breakpoint
     // via gutter click is the cleanest approach.
-    await editor.gutterElement(fixture.loopBodyLine).click();
+    await editor.pressGlyph(fixture.loopBodyLine);
     await expect.poll(() => editor.hasBreakpointAt(fixture.loopBodyLine)).toBeTruthy();
     await layout.continueButton().click();
     await expect.poll(async () => await getCurrentLine(editor)).toBe(fixture.loopBodyLine);

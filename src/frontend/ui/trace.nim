@@ -12,12 +12,11 @@ import
 # ---------------------------------------------------------------------------
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
-from ./editor_points import gutterMarkFor, EditorMark, emNone, emBreakpoint,
+from ./editor_points import gutterMarkFor, breakpointsInFile, EditorMark, emNone, emBreakpoint,
+  emBreakpointTracepoint,
   emBreakpointDisabled, emTracepoint
 import ./presented_value
-from ../lib/monaco_appearance import editorGutterLineHtml, GutterTraceMark,
-  GutterBreakpointMark, gtmNone, gtmEnabled, gtmDisabled, gbmNone, gbmEnabled,
-  gbmDisabled
+from ../lib/monaco_appearance import editorGutterLineHtml
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/viewmodels/timeline_vm import
   TimelineVM, createTimelineVM
@@ -1065,57 +1064,70 @@ proc gutterTestLinesFor*(path: cstring): seq[int] =
 proc gutterHasTest(path: cstring; line: int): bool =
   line in gutterTestLinesFor(path)
 
+proc updateGlyphMarks*(self: EditorViewComponent) =
+  ## The glyph column (Editor-Pane.md MC.5): each line's mark, one per line, as
+  ## Monaco glyph-margin decorations, from the session store (`gutterMarkFor`,
+  ## the one the terminal and GPUI draw), and the hover hint on an unmarked
+  ## line. Tracepoints come from the editor's own traces, which the store's
+  ## rows do not hold until a sweep.
+  let editorInstance = self.monacoEditor
+  if editorInstance.isNil or editorInstance.getModel().isNil:
+    return
+  let firstLine = if self.isExpansion: self.tabInfo.location.expansionFirstLine else: 1
+  var decorations: seq[DeltaDecoration] = @[]
+  var seen: seq[int] = @[]
+  proc mark(realLine: int) =
+    if realLine in seen:
+      return
+    seen.add realLine
+    let line = realLine - firstLine + 1
+    let traced = self.traces.hasKey(realLine)
+    let class: cstring =
+      case gutterMarkFor($self.path, realLine)
+      of emBreakpoint:
+        if traced: cstring"gutter-glyph-breakpoint-tracepoint"
+        else: cstring"gutter-glyph-breakpoint"
+      of emBreakpointTracepoint: cstring"gutter-glyph-breakpoint-tracepoint"
+      of emBreakpointDisabled: cstring"gutter-glyph-breakpoint-disabled"
+      of emTracepoint: cstring"gutter-glyph-tracepoint"
+      of emNone:
+        if traced: cstring"gutter-glyph-tracepoint" else: cstring""
+    if class.len > 0:
+      decorations.add(DeltaDecoration(
+        `range`: newMonacoRange(line, 1, line, 1),
+        options: js{glyphMarginClassName: class, stickiness: 1}))
+  for sp in breakpointsInFile($self.path):
+    mark(sp.line)
+  # A `JsAssoc[int, _]`'s keys come back as JavaScript strings.
+  for key, _ in self.traces:
+    mark(parseJSInt(cast[cstring](key)))
+  # The hover hint, only where the line has no mark.
+  if self.glyphHintLine > 0 and self.glyphHintLine + firstLine - 1 notin seen:
+    decorations.add(DeltaDecoration(
+      `range`: newMonacoRange(self.glyphHintLine, 1, self.glyphHintLine, 1),
+      options: js{glyphMarginClassName: cstring"gutter-glyph-hint", stickiness: 1}))
+  self.glyphDecorations = editorInstance.deltaDecorations(self.glyphDecorations,
+                                                          decorations)
+
 proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isDeleteChunk: bool = false, lineNumber: int = NO_LINE): cstring =
   ## The custom gutter, as HTML handed to Monaco's `lineNumbers` callback.
   ##
-  ## TWO THINGS ABOUT THIS MARKUP THAT WERE ASKED ABOUT AND ARE NOW MEASURED,
-  ## because both look like defects and only one is.
+  ## THE BREAKPOINT AND TRACEPOINT MARKS ARE NOT HERE. They are Monaco's glyph
+  ## margin, left of this band (`ui/editor.updateGlyphMarks`, Editor-Pane.md MC.5).
   ##
-  ## 1. `onmousedown='event.stopPropagation()'` ON EVERY NODE IS LOAD-BEARING.
-  ##    It reads like a guard on the wrong event — the breakpoint handler is a
-  ##    `click` listener (`ui/editor.nim`), so a guard on `mousedown` cannot
-  ##    stop anything that acts on `click` or `mouseup`, which is how Monaco's
-  ##    folding works.  Measured in a real tab by stripping all 132 of them from
-  ##    a live page and repeating the same click:
-  ##
-  ##        with the guards     breakpoint toggled, no selection, no fold
-  ##        without them        Monaco SELECTS THE LINE, and the breakpoint is
-  ##                            not toggled at all
-  ##
-  ##    So they stop Monaco's line-selection on press, which is their job, and
-  ##    they are also what keeps the click path working.
-  ##
-  ##    AND THEY DO STOP THE FOLD.  The paragraph that used to end this item
-  ##    said they did not, and that "nothing needs to, because `.gutter`
-  ##    subtracts `--ct-gutter-folding-lane` and the chevron is never underneath
-  ##    us".  The second half is true and the first is false, and the whole of
-  ##    the reported defect (c) — "clicking in the gutter to place a breakpoint
-  ##    also triggers the folding collapse" — lives in the difference.
-  ##
-  ##    Measured by stripping the guards from THIS PROC, rebuilding, and
-  ##    repeating the same click at the same coordinates
-  ##    (`ci/test/menu-and-context-menu-in-browser.sh`, which now records
-  ##    Monaco's own `MouseTargetType` for the press):
-  ##
-  ##        with the guards     0 Monaco mouse targets; breakpoint toggled,
-  ##                            22 rendered lines before and after
-  ##        without them        1 target, GUTTER_LINE_DECORATIONS; breakpoint
-  ##                            toggled AND the function folded
-  ##
-  ##    `GUTTER_LINE_DECORATIONS` is the band Monaco's own folding contribution
-  ##    owns, and Monaco resolves a press on OUR markup into it — the chevron's
-  ##    box being elsewhere does not enter into it, because the classification
-  ##    is by band and not by which element was hit.  So the guards are the only
-  ##    thing standing between this gutter and the reported symptom, and they
-  ##    are now asserted by name rather than reasoned about.
+  ## 1. A PRESS ON THE NUMBER AND THE POINTER LANE REACHES MONACO, which selects
+  ##    the line (`startedOnLineNumbers`, gestures 9 - 12). The run-test control
+  ##    and the VCS lane keep `onmousedown='event.stopPropagation()'`: the control
+  ##    has its own click, and the VCS lane lies where Monaco resolves an unguarded
+  ##    press to `GUTTER_LINE_DECORATIONS`, which folds the function (measured,
+  ##    `ci/test/menu-and-context-menu-in-browser.sh`).
   ##
   ## 2. `diffHtml` IS THE VCS BAND, and it was a dead slot until it was given
   ##    one.  Measured on `cloud` 402c1d35: `.diff-line` rendered at 73x0 px —
   ##    a box spanning the whole gutter, lying across the line number by 29px,
   ##    the breakpoint by 9px and the tracepoint by 10px at once, with no
   ##    height, no hit area and nothing drawn.  It now has a reserved band of
-  ##    its own between the line number and the markers, with clearance from
-  ##    both; `viewmodel/viewmodels/editor_gutter_lanes.nim` declares the order
+  ##    its own between the line number and the folding lane; `viewmodel/viewmodels/editor_gutter_lanes.nim` declares the order
   ##    and `ci/test/web-renderer-mounts.sh` asserts the painted boxes.
   let realLine =
     if isDeleteChunk:
@@ -1126,22 +1138,11 @@ proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isDe
       line + self.tabInfo.location.expansionFirstLine - 1
 
   # The slots' markup is `lib/monaco_appearance.editorGutterLineHtml`'s,
-  # which the StoryBook editor builds its gutter with too; what is decided
-  # here is which mark each slot shows.
-  var trace = gtmNone
-  if self.traces.hasKey(realLine):
-    trace = if self.traces[realLine].isDisabled: gtmDisabled else: gtmEnabled
-
+  # which the StoryBook editor builds its gutter with too. The marks are the
+  # glyph margin's (`updateGlyphMarks`).
   let executionLine = line == self.location.line and
     path == self.location.path and
     not isDeleteChunk
-
-  # The line's mark is the session store's (`editor_points.gutterMarkFor`),
-  # the same `EditorMark` the terminal and GPUI draw for this line.
-  let breakpoint = case gutterMarkFor($path, realLine)
-    of emBreakpoint: gbmEnabled
-    of emBreakpointDisabled: gbmDisabled
-    of emNone, emTracepoint: gbmNone
 
   var runTestHtml = cstring""
   if not isDeleteChunk and gutterHasTest(path, realLine):
@@ -1160,7 +1161,7 @@ proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isDe
   let klass = if isDeleteChunk: cstring"diff-deleted-gutter" elif line in self.diffAddedLines: cstring"diff-added-gutter" else: cstring""
 
   result = editorGutterLineHtml(trueLineNumber, klass, runTestHtml,
-                                executionLine, trace, breakpoint)
+                                executionLine)
 
 proc updateLineNumbersOnly*(self: EditorViewComponent) =
   let editorInstance = self.monacoEditor
@@ -1169,6 +1170,7 @@ proc updateLineNumbersOnly*(self: EditorViewComponent) =
 
     currentOptions["lineNumbers"] = proc(line: int): cstring = self.editorLineNumber(self.path, line)
     editorInstance.updateOptions(cast[MonacoEditorOptions](currentOptions))
+    self.updateGlyphMarks()
 
 proc toggleTraceState*(self: TraceComponent) =
   self.api.emit(CtTracepointToggle, TracepointId(id: self.id))

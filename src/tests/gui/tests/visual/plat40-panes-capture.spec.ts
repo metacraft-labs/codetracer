@@ -23,6 +23,7 @@
  * absence FAILS BY NAME rather than skipping.
  */
 
+import { glyphMarksOn, pressGlyph } from "../../lib/glyph-column";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -127,16 +128,8 @@ test("the call trace, event log and breakpoint list, photographed at one stop", 
 
   // The breakpoint, through the gutter the product drew for the line.
   const line = scenario.breakpointLine;
-  const cell = ctPage.locator(
-    `div[id^='editorComponent'] .margin-view-overlays .gutter[data-line='${line}']`,
-  );
-  await cell.dispatchEvent("click");
-  await expect(
-    ctPage.locator(
-      `div[id^='editorComponent'] .margin-view-overlays .gutter[data-line='${line}'] ` +
-        ".gutter-breakpoint-enabled",
-    ),
-  ).toHaveCount(1, { timeout: 15_000 });
+  await pressGlyph(ctPage, line);
+  await expect.poll(() => glyphMarksOn(ctPage, line), { timeout: 15_000 }).toContain("gutter-glyph-breakpoint");
 
   // The pane, from the View menu, as a user opens it.
   if (!(await ctPage.locator("#menu-main").isVisible())) {

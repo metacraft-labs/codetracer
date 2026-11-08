@@ -1,0 +1,24 @@
+# Control digests for run-plat70g-multiclick-mutations.py — the
+# subjects AND the suites the arms are graded by (§16c).
+# Refreshed with --record-control-hashes, gated by the
+# needle scan (§39a).
+1f18054371020d3a6fcf55e7753665f0519d9a0f154eacdf441d02303004051b  src/frontend/viewmodel/input/click_counter.nim
+94a4964ce47881e126063f25822a66629b284c3a887579c8dcd1769009791ad8  src/frontend/viewmodel/input/editor_pointer.nim
+e6cdc103a1fc0b971d912da4ce31c991d66909b381c5b80b72bd350627ac767f  src/frontend/viewmodel/editor/word_classifier.nim
+f28dfaefe805c8a0f6958bb2c1ff272574299ed5e1de841a2dc3ad88f68a93cb  src/frontend/viewmodel/editor/operations.nim
+9ee3f233681bed6a3d82b6fb5bda6b5142df394823ba95ed3deaf03d230e3333  src/frontend/viewmodel/viewmodels/editor_gutter_lanes.nim
+9826a71760e563c11730e057b174827981c097103e0950685820d2908e3862ca  src/frontend/viewmodel/sdk/breakpoints.nim
+77e32c2078656ec90b2d2690616b650c71a4d03c3e8e32bbbf8fcec0c56a1c57  src/frontend/headless_app/pane_clicks.nim
+71d4e739a1fc3f7939b94ca792e13879bf76dfcfdd1840442d67ac9f2c7ac664  src/frontend/tui/app/runtime.nim
+44373bc763be9d896445891509ac39004d39d783c098a269874e096b730198db  src/frontend/tui/app/theme/roles.nim
+a92db8e5e3de47853757de8a52ed9c89568a2fc14ab372015f30bbd9f785907a  src/frontend/tui/app/input/mouse.nim
+8a2b2e6d3f20c08d4e66148729f95c156a8607b730ff7e05f58d1e57ec48356f  src/frontend/gpui/window_clicks.nim
+bcc9a6018cf8053db358200efffbb7647898652bf70d44f4d01e0124537dbe4e  src/frontend/gpui/app/leaves.nim
+56d8e4d6cb7f04b5134570ceeee113fec5db7df1ceaed48586638f2b42522354  src/frontend/ui/editor.nim
+45679d35b00220ad624a97a88c30add2d2bb5d71082dc4f61ad05c36118f373c  src/frontend/ui/trace.nim
+cfc4f5e2ea00fb652dfdd80008cdee963469952095794f525ffb9474890f4845  src/frontend/lib/monaco_appearance.nim
+b812f4b14e883af2e965664cfbd92dbac91669e033e035a47ada072a2570adba  src/frontend/viewmodel/tests/unit/test_plat70g_pointer_vm.nim
+ffa4a728d56d0303410f91e7a4974d8fb58d5bac215ed3c526df82df561263f4  src/frontend/tui/tests/test_plat70g_differential.nim
+d3b3fedd4f56ef1e6a47804afb0a013eb6711a271b2251f9891868ac7adf694f  src/frontend/tui/tests/real_terminal/test_plat70g_multiclick_pty.nim
+b834be1646bacbe9e4475695c28bf236a804e9f85561b40a6b48ef04b5b68404  src/frontend/gpui/tests/test_plat70g_gpui_plan.nim
+6fd0acfbda9d3e131cac242289903e4d3ed5b334998c358808371048472602ba  src/tests/gui/tests/editor/plat70g-multiclick.spec.ts

@@ -31,6 +31,8 @@ type
     lineDecorationsWidth*:   int
     renderLineHighlight*:    cstring
     glyphMargin*:            bool
+    selectOnLineNumbers*:    bool
+    wordSeparators*:         cstring
     folding*:                bool
     showFoldingControls*:    cstring
     scrollBeyondLastColumn*: int

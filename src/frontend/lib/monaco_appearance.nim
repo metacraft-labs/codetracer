@@ -42,61 +42,42 @@ when defined(js):
     {.emit: "monaco.editor.defineTheme('" & CodeTracerWhiteTheme & "', " & whiteThemeDef & ")\n".}
     {.emit: "monaco.editor.defineTheme('" & CodeTracerDarkTheme & "', " & darkThemeDef & ")\n".}
 
-type
-  GutterTraceMark* = enum
-    ## The tracepoint slot of a gutter line.
-    gtmNone, gtmEnabled, gtmDisabled
-  GutterBreakpointMark* = enum
-    ## The breakpoint slot of a gutter line.
-    gbmNone, gbmEnabled, gbmDisabled
-
 when defined(js):
   func `&`(a, b: cstring): cstring {.importjs: "(# + #)".}
     ## JavaScript string concatenation (this leaf module imports no helper
     ## library that defines it).
 
-  func gutterSlot(class: cstring): cstring =
-    ## One slot of the gutter. Every node stops `mousedown`: that is what
-    ## keeps a press on the gutter from selecting the line or folding the
-    ## function under it (`ui/trace.nim` `editorLineNumber` records the
-    ## measurements).
-    cstring"<div class='" & class & cstring"' onmousedown='event.stopPropagation()'></div>"
+  func gutterSlot(class: cstring; guarded = false): cstring =
+    ## One slot of the gutter. A press on the pointer lane or the number reaches
+    ## Monaco, which selects the line (Editor-Pane.md MC.5); the VCS lane stops
+    ## `mousedown`, because Monaco resolves a press there to its folding band.
+    cstring"<div class='" & class & cstring"'" &
+      (if guarded: cstring" onmousedown='event.stopPropagation()'" else: cstring"") &
+      cstring"></div>"
 
   func editorGutterLineHtml*(lineText: cstring; lineClass: cstring = "";
-                             runTestHtml: cstring = ""; executionLine = false;
-                             trace = gtmNone;
-                             breakpoint = gbmNone): cstring =
+                             runTestHtml: cstring = "";
+                             executionLine = false): cstring =
     ## The custom gutter of one editor line: the HTML CodeTracer hands to
     ## Monaco's `lineNumbers` option, which Monaco puts in the line-number
     ## cell (https://microsoft.github.io/monaco-editor/typedoc/interfaces/editor.IEditorOptions.html#lineNumbers).
     ## The stylesheet (`styles/components/text_editor.styl`, `.gutter` and
     ## its lanes) lays the slots out left to right: the run-test slot, the
     ## execution-pointer arrow (`gutter-highlight-active` on the line the
-    ## replay is stopped on), the line number, the VCS band, the tracepoint
-    ## and the breakpoint, clear of Monaco's folding lane. A plain number
-    ## instead of this markup is stretched across the whole margin and runs
-    ## into the code.
+    ## replay is stopped on), the line number and the VCS band, clear of
+    ## Monaco's folding lane. The breakpoint and tracepoint marks are not here:
+    ## they are Monaco's glyph margin, left of this cell (`ui/trace.updateGlyphMarks`).
     ##
     ## The app's editors (`EditorViewComponent.editorLineNumber`) and the
     ## StoryBook editor build their gutter here, so both draw the same one.
     let highlight =
       if executionLine: gutterSlot(cstring"gutter-highlight-active")
       else: gutterSlot(cstring"gutter-no-highlight")
-    let traceSlot = case trace
-      of gtmNone: gutterSlot(cstring"gutter-no-trace")
-      of gtmEnabled: gutterSlot(cstring"gutter-trace")
-      of gtmDisabled: gutterSlot(cstring"gutter-disabled-trace")
-    let breakpointSlot = case breakpoint
-      of gbmNone: gutterSlot(cstring"gutter-no-breakpoint")
-      of gbmEnabled: gutterSlot(cstring"gutter-breakpoint-enabled")
-      of gbmDisabled: gutterSlot(cstring"gutter-breakpoint-disabled")
-    let lineHtml = cstring"<div class='gutter-line' onmousedown='event.stopPropagation()'>" &
-      lineText & cstring"</div>"
+    let lineHtml = cstring"<div class='gutter-line'>" & lineText & cstring"</div>"
     # The run slot goes in FIRST, before the highlight, so its `z-index`
     # contest with the current-line arrow is decided by the stylesheet rather
     # than by document order, and the markup reads in the lane order the
     # stylesheet's header describes.
     cstring"<div class='gutter " & lineClass & cstring"' data-line=" & lineText &
-      cstring" onmousedown='event.stopPropagation()'>" & runTestHtml & highlight &
-      lineHtml & gutterSlot(cstring"diff-line") & traceSlot & breakpointSlot &
-      cstring"</div>"
+      cstring">" & runTestHtml & highlight & lineHtml &
+      gutterSlot(cstring"diff-line", guarded = true) & cstring"</div>"

@@ -114,6 +114,7 @@ const
   MarkClassBreakpoint* = "ct-mark-breakpoint"
   MarkClassBreakpointDisabled* = "ct-mark-breakpoint-disabled"
   MarkClassTracepoint* = "ct-mark-tracepoint"
+  MarkClassBreakpointTracepoint* = "ct-mark-breakpoint-tracepoint"
 
   PointerClassNone* = "ct-pointer-none"
   PointerClassInspection* = "ct-pointer-inspection"
@@ -134,12 +135,14 @@ func classOfMark*(m: EditorMark): string =
   of emBreakpoint: MarkClassBreakpoint
   of emBreakpointDisabled: MarkClassBreakpointDisabled
   of emTracepoint: MarkClassTracepoint
+  of emBreakpointTracepoint: MarkClassBreakpointTracepoint
 
 func markOfClass*(cls: string): EditorMark =
   if cls == MarkClassNone: emNone
   elif cls == MarkClassBreakpoint: emBreakpoint
   elif cls == MarkClassBreakpointDisabled: emBreakpointDisabled
   elif cls == MarkClassTracepoint: emTracepoint
+  elif cls == MarkClassBreakpointTracepoint: emBreakpointTracepoint
   else:
     raise newException(RowProjectionError,
       "markOfClass: '" & cls & "' is not a declared mark class. Refused " &

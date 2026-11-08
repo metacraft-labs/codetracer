@@ -232,12 +232,9 @@ async function enableBreakpoint(
   await editor.revealLine(line);
   const editorLine = editor.lineByNumber(line);
   if (!(await editor.hasBreakpointAt(line))) {
-    const gutter = editorLine.gutterElement();
-    try {
-      await gutter.click({ timeout: 5_000 });
-    } catch {
+    {
       try {
-        await gutter.click({ force: true, timeout: 5_000 });
+        await editor.pressGlyph(line);
       } catch {
         // Fall through to the DOM click below.
       }

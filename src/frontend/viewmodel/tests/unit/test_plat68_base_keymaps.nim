@@ -38,7 +38,7 @@ import std/[strutils, tables, unittest]
 
 import ../../editing_core
 
-const ExpectedAssertions = 1192
+const ExpectedAssertions = 1214
   ## +5 on 2026-10-30 (PLAT-70 Part E): CUA's `Menu`, `Ctrl+K Shift+F10` and
   ## `Ctrl+Shift+O` (`variables.show-value-origin`), Emacs's `Menu` and
   ## `Ctrl+Shift+O` — one `when` assertion per shipped row.

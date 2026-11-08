@@ -2,11 +2,9 @@
 
 // THE GUTTER IS A ROW OF LANES, AND EACH ONE HAS EXACTLY ONE OWNER.
 //
-// Written down because a third control is being added to this strip and it
-// already carries six things: the current-line highlight, the line number, a
-// VCS slot, a tracepoint marker, a breakpoint marker, and — immediately to the
-// right of all of them, owned by Monaco rather than by us — the folding
-// chevron.  Reading from the left edge of `.gutter`:
+// Left of `.gutter` is Monaco's glyph margin, one lane, holding the breakpoint and
+// tracepoint marks and the hover hint (`.gutter-glyph-*`, VS Code's layout,
+// Editor-Pane.md MC.5). Reading from the left edge of `.gutter`:
 //
 //   pointer lane   --ct-gutter-pointer-lane   the current-line highlight, and
 //                                             — ON HOVER ONLY — the run-test
@@ -15,9 +13,7 @@
 //   VCS lane       --ct-gutter-vcs-lane       the per-line change indicator
 //                                             (.diff-line)
 //   (split)        --ct-gutter-vcs-split      nothing; keeps the VCS band off
-//                                             the breakpoint's hit area
-//   marker lane    --ct-gutter-marker-lane    breakpoint, then tracepoint
-//   (gap)          --ct-gutter-marker-gap     nothing; keeps us off the chevron
+//                                             the chevron's hit area
 //   folding lane   --ct-gutter-folding-lane   MONACO'S.  `.gutter` subtracts
 //                                             this from its own width so the
 //                                             chevron is never under us.
@@ -109,33 +105,17 @@
   --ct-gutter-trace-size: 1.2ch
   --ct-gutter-highlight-left: 0.15em
   --ct-gutter-pointer-lane: 0.75em
-  // 1.9em before the markers were separated; the extra 0.15em is the room the
-  // breakpoint dot moved left into, and the gate asserts the line number still
-  // fits what is left.
-  --ct-gutter-marker-lane: 2.05em
   // The VCS change indicator's own band.  Narrow, because what goes here is a
   // BAR and not a glyph — the same shape every editor draws for "this line
   // differs from the index" — but not narrower than a pointer can hit.
   --ct-gutter-vcs-lane: 0.35em
-  // The clear space between the VCS band and the marker lane, and it is the
-  // same sentence as `--ct-gutter-marker-split` one band over: two hit areas
-  // that merely touch are one hit area to a rounding error.  Measured with
-  // this at zero, the VCS band resolved to [337,342] against a breakpoint at
-  // [341,350] and `elementFromPoint` at the VCS band's own centre returned the
-  // BREAKPOINT.  The marker lane's left edge and the breakpoint's left edge
-  // coincide, so anything flush against the lane is flush against the marker.
+  // The clear space after the VCS band: two hit areas that merely touch are one
+  // hit area to a rounding error.
   --ct-gutter-vcs-split: 0.25em
   --ct-gutter-folding-lane: 0.85em
-  --ct-gutter-marker-gap: 0.45em
   --ct-gutter-line-gap: 0.15em
   --ct-gutter-highlight-size: 0.8em
-  --ct-gutter-trace-right: 0.6em
-  // The clear space between the two markers.  Small, but it must not be zero:
-  // two hit areas that merely touch are one hit area to a rounding error.
-  --ct-gutter-marker-split: 0.15em
-  // DERIVED, never a literal.  This is what makes the two lanes disjoint by
-  // construction rather than by two numbers that happened to agree.
-  --ct-gutter-breakpoint-right: calc(var(--ct-gutter-trace-right) + var(--ct-gutter-trace-size) + var(--ct-gutter-marker-split))
+  --ct-gutter-glyph-size: 0.7em
   margin-left: 0
   border-bottom-left-radius: 0.375em
 
@@ -816,7 +796,7 @@
   width: 100%
 
 .gutter
-  width: calc(100% - var(--ct-gutter-folding-lane) - var(--ct-gutter-marker-gap))
+  width: calc(100% - var(--ct-gutter-folding-lane))
   height: 100%
   position: relative
   box-sizing: border-box
@@ -824,98 +804,14 @@
   overflow: hidden
   // &:hover
   // TODO relative to font size margin top/width/height
-  .gutter-trace
-    width: var(--ct-gutter-trace-size)
-    background: colors-ui-border-action
-    height: var(--ct-gutter-trace-size)
-    border-radius: 50%
-    top: 0
-    margin-top: 0.57ch
-    position: absolute
-    right: var(--ct-gutter-trace-right)
-    z-index: 9
-    outline: 0.125em solid colors-ui-surface-base-panel
-
-  .gutter-disabled-trace
-    width: var(--ct-gutter-trace-size) !important
-    background: colors-ui-surface-primary-tertiary
-    height: var(--ct-gutter-trace-size)
-    border-radius: 50%
-    top: 0
-    margin-top: 0.57ch
-    position: absolute
-    right: var(--ct-gutter-trace-right)
-    z-index: 9
-    outline: 0.125em solid colors-ui-surface-base-panel
-
-  .gutter-breakpoint-enabled
-    width: var(--ct-gutter-breakpoint-size)
-    background: colors-ui-text-error-primary
-    height: var(--ct-gutter-breakpoint-size)
-    border-radius: 50%
-    top: 0
-    margin-top: 0.63ch
-    position: absolute
-    right: var(--ct-gutter-breakpoint-right)
-    z-index: 8
-
-  .gutter-breakpoint-error
-    width: var(--ct-gutter-breakpoint-size)
-    background: red
-    height: var(--ct-gutter-breakpoint-size)
-    border-radius: 50%
-    top: 0
-    margin-top: 0.25em
-    position: absolute
-    right: var(--ct-gutter-breakpoint-right)
-
-  .gutter-breakpoint-disabled
-    width: var(--ct-gutter-breakpoint-size)
-    background: colors-ui-surface-primary-tertiary
-    height: var(--ct-gutter-breakpoint-size)
-    border-radius: 50%
-    top: 0
-    margin-top: 0.63ch
-    position: absolute
-    right: var(--ct-gutter-breakpoint-right)
-    z-index: 8
-
-  .gutter-no-breakpoint
-    width: var(--ct-gutter-breakpoint-size)
-    height: var(--ct-gutter-breakpoint-size)
-    background: transparent
-    top: 0
-    position: absolute
-    margin-top: 0.63ch
-    right: var(--ct-gutter-breakpoint-right)
-    z-index: 8
-
-  .gutter-no-trace
-    width: var(--ct-gutter-trace-size)
-    height: var(--ct-gutter-trace-size)
-    background: transparent
-    top: 0
-    position: absolute
-    margin-top: 0.57ch
-    right: var(--ct-gutter-trace-right)
-    z-index: 9
-
-  &:hover > .gutter-no-breakpoint
-    background: colors-ui-text-error-primary
-    border-radius: 50%
-    margin-top: 0.63ch
-    opacity: 0.3
-
   .gutter-no-highlight
     display: none
 
 
   // THE VCS CHANGE INDICATOR'S BAND.
   //
-  // Between the line number and the markers, so it is disjoint from all three
-  // of the other concerns this strip carries: the run control is at the far
-  // left, the markers at the far right, and the number is what this band is
-  // subtracted from.
+  // Between the line number and the folding lane; the number is what this band
+  // is subtracted from.
   //
   // ALWAYS LAID OUT, NEVER ALWAYS PAINTED.  The box exists on every line —
   // `.diff-line` is emitted by `ui/trace.editorLineNumber` unconditionally —
@@ -928,11 +824,8 @@
     top: 0
     height: 100%
     width: var(--ct-gutter-vcs-lane)
-    right: calc(var(--ct-gutter-marker-lane) + var(--ct-gutter-vcs-split))
+    right: var(--ct-gutter-vcs-split)
     box-sizing: border-box
-    // Under the markers and over nothing.  It cannot reach them — the bands do
-    // not touch — but a stacking order stated here is one that survives the
-    // next band someone adds.
     z-index: 4
 
   .diff-line:before
@@ -958,7 +851,7 @@
     background: colors-ui-text-error-primary
 
   .gutter-line
-    width: calc(100% - var(--ct-gutter-pointer-lane) - var(--ct-gutter-vcs-lane) - var(--ct-gutter-vcs-split) - var(--ct-gutter-marker-lane) - (var(--ct-gutter-line-gap) * 2))
+    width: calc(100% - var(--ct-gutter-pointer-lane) - var(--ct-gutter-vcs-lane) - var(--ct-gutter-vcs-split) - calc(2 * var(--ct-gutter-line-gap)))
     height: 100%
     display: block
     box-sizing: border-box
@@ -1398,3 +1291,46 @@ else
 .line-diff-removed
   background-color: rgba(248, 81, 73, 0.18)
   border-left: 0.1875em solid #f85149
+
+// THE GLYPH COLUMN (Editor-Pane.md MC.5): Monaco's glyph margin, one lane, one
+// mark per line, centred. The hint is `gutter.breakpoint.hint`, a colour of its
+// own, distinct from the enabled breakpoint's red and the disabled one's ground.
+.monaco-editor .margin-view-overlays .cgmr
+  &.gutter-glyph-breakpoint,
+  &.gutter-glyph-breakpoint-disabled,
+  &.gutter-glyph-breakpoint-tracepoint,
+  &.gutter-glyph-hint,
+  &.gutter-glyph-tracepoint
+    display: flex
+    align-items: center
+    justify-content: center
+    background-color: transparent
+
+  &.gutter-glyph-breakpoint:before,
+  &.gutter-glyph-breakpoint-disabled:before,
+  &.gutter-glyph-breakpoint-tracepoint:before,
+  &.gutter-glyph-tracepoint:before,
+  &.gutter-glyph-hint:before
+    content: ""
+    display: block
+    width: var(--ct-gutter-glyph-size)
+    height: var(--ct-gutter-glyph-size)
+    border-radius: 50%
+
+  &.gutter-glyph-breakpoint:before
+    background: colors-ui-text-error-primary
+
+  &.gutter-glyph-breakpoint-disabled:before
+    background: colors-ui-surface-primary-tertiary
+
+  &.gutter-glyph-breakpoint-tracepoint:before
+    background: colors-ui-text-error-primary
+    box-shadow: 0 0 0 0.12em colors-ui-border-action
+
+  &.gutter-glyph-tracepoint:before
+    background: colors-ui-border-action
+    border-radius: 0
+    transform: rotate(45deg)
+
+  &.gutter-glyph-hint:before
+    background: colors-ui-surface-alert-error

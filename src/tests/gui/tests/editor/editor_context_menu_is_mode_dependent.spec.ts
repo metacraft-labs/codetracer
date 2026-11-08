@@ -200,7 +200,7 @@ test.describe("The editor context menu follows the mode", () => {
     }
 
     // The hint column is text, rendered with `textContent`. An HTML entity in
-    // it reaches the user as the entity — `&lt;click line number gutter&gt;`
+    // it reaches the user as the entity — `&lt;click left of the line number&gt;`
     // was on screen until the literals were unescaped.
     for (const row of editRows) {
       expect(

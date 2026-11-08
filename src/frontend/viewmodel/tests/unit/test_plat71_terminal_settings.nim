@@ -27,7 +27,7 @@ template ck(cond: untyped) =
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 205
+const ExpectedAssertions = 207
 
 const TerminalSettings = [lsModernUnicode, lsGlyphs, lsAmbiguousWidth,
                           lsColors, lsTerminalProbe, lsReduceMotion,

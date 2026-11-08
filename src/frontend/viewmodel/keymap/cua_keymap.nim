@@ -464,6 +464,8 @@ const
 
     # --- §3.9 Debugger surfaces in the editor --------------------------------
     BaseRow(chords: "F9", operation: "editor.toggle-breakpoint", whenText: "editorFocus"),
+    BaseRow(chords: "Shift+F9", operation: "editor.toggle-inline-breakpoint",
+            whenText: "editorFocus"),
     BaseRow(chords: "Enter", operation: "editor.toggle-tracepoint",
             whenText: "editorTextFocus && editorReadOnly && " & Debug),
     BaseRow(chords: "Ctrl+Enter", operation: "editor.toggle-tracepoint",

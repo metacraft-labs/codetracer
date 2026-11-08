@@ -77,7 +77,7 @@ import ../generators/vocabulary_generator
 proc describeError(e: EditingKeymapError): string =
   "keys:" & $e.line & ": " & e.message & " — in: " & e.text.strip()
 
-const ExpectedAssertions = 18612
+const ExpectedAssertions = 18642
   ## **+56 ON 2026-10-24 (PLAT-70 Part C)**: one declaration joined the
   ## vocabulary (`search-selection-whole-word`), swept like every other, and
   ## Vim's editor table gained `/` / `?` (`find.open`) and the four `*`
@@ -608,7 +608,7 @@ suite "PLAT-31: what a keymap reaches and what it files, as an equality":
       # could otherwise use to excuse a binding that exists.
       ck coverageOverlaps(def).len == 0
       ck reach.len + filed.len == operations().len
-      ck operations().len == 246
+      ck operations().len == 251
 
   test "every model: the coverage GAP is empty":
     for def in allModels():

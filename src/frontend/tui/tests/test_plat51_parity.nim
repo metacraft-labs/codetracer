@@ -58,7 +58,7 @@ import ./fixtures/fixture_provider
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 157
+const ExpectedAssertions = 158
   ## +2: an unbound Alt+<char> is the character alone (the caret case).
 
 var countedAssertions = 0

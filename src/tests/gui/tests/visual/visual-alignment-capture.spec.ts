@@ -68,6 +68,7 @@
  * rule.
  */
 
+import { glyphMarksOn, pressGlyph } from "../../lib/glyph-column";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -571,22 +572,8 @@ async function drive(
           );
           expect(lines.length, "the editor drew no gutter rows").toBeGreaterThan(0);
           const target = lines[Math.min(op.line ?? 1, lines.length - 1)];
-          const cell = layout.page.locator(
-            `div[id^='editorComponent'] .margin-view-overlays .gutter[data-line='${target}']`,
-          );
-          // `dispatchEvent`, not `click`. Monaco rebuilds the margin overlays
-          // on every render, so an actionability-checked click loses the race:
-          // measured 2026-09-20 — *"element was detached from the DOM,
-          // retrying"*, for the full 30 s budget, on an element the locator had
-          // already resolved. `calltrace_move_sync.spec.ts` dispatches for the
-          // same reason on the same kind of surface.
-          await cell.dispatchEvent("click");
-          await expect(
-            layout.page.locator(
-              `div[id^='editorComponent'] .margin-view-overlays ` +
-                `.gutter[data-line='${target}'] .gutter-breakpoint-enabled`,
-            ),
-          ).toHaveCount(1, { timeout: 15_000 });
+          await pressGlyph(layout.page, target);
+          await expect.poll(() => glyphMarksOn(layout.page, target), { timeout: 15_000 }).toContain("gutter-glyph-breakpoint");
           // **ITS EFFECT IS THE MARK, AND ITS NON-EFFECT IS ALSO ASSERTED.**
           // Setting a breakpoint must not move the program: a gutter click
           // that stepped the debugger would give this scenario a different

@@ -72,7 +72,10 @@ import ../../editor/operations
 import ../generators/vocabulary_generator
 import ../../../test_support/spec_documents
 
-const ExpectedAssertions = 1052
+const ExpectedAssertions = 1082
+  ## +5 on 2026-11-05: the pointer's `select-word-at`, `select-line-at`,
+  ## `extend-by-unit-to` and `column-select-to`,
+  ## and `toggle-inline-breakpoint`.
   ## +6 on 2026-10-24 (PLAT-70 Part C): `search-selection-whole-word`, one
   ## more row of §2.2 compared both ways.
 
@@ -95,13 +98,13 @@ const
   SectionStart = "### 2.2 The four categories"
   SectionEnd = "### 2.3 "
 
-  ExpectedDeclarations = 162
+  ExpectedDeclarations = 167
     ## 161 until PLAT-70 Part C added `search-selection-whole-word` to D's
     ## Search row (and the census, both parsers, re-taken).
-  ExpectedOperations = 246
+  ExpectedOperations = 251
   ExpectedDisplayDependent = 24
-  ExpectedDisplayIndependent = 222
-  ExpectedPerCategory = [34, 16, 21, 91]      ## A, B, C, D
+  ExpectedDisplayIndependent = 227
+  ExpectedPerCategory = [34, 16, 21, 96]      ## A, B, C, D
   ExpectedDisplayColumnRows = 50              ## A's 34 and B's 16 carry one
 
   # The forms each category generates. §2.2 A and §2.2 B state them; this is

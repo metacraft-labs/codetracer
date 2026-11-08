@@ -42,7 +42,8 @@ import viewmodels/event_log_vm
 # 257 -> 260 (PLAT-63): K64-K66, the Verification rows (+3).
 # 260 -> 262 (PLAT-62): K67-K68, the Constraints rows (+2).
 # 262 -> 268 (PLAT-59): K69-K74, the Visual Replay panes' rows (+6).
-const ExpectedAssertions = 268
+# 268 -> 273: K75, the line numbers; the inline menu entry's action and hints.
+const ExpectedAssertions = 273
 
 var countedAssertions = 0
 
@@ -64,7 +65,7 @@ suite "PLAT-50: the click inventory":
       ck b.id == "K" & $(i + 1)
       ids.incl b.id
     ck ids.len == ClickInventory.len
-    ck ClickInventory.len == 74
+    ck ClickInventory.len == 75
     for b in ClickInventory:
       if b.target.len == 0 or b.gestures.card == 0 or b.desktop.len == 0:
         checkpoint("incomplete row " & b.id)
@@ -158,7 +159,7 @@ suite "PLAT-50: the context menus are the desktop's":
     ck m.labels == @["Copy", "Find", "Jump to line", "Run to Cursor",
                      "Jump backward to line", "Jump to call",
                      "Jump forward to call", "Jump backward to call",
-                     "Add breakpoint", "Add tracepoint"]
+                     "Add breakpoint", "Add Inline Breakpoint", "Add tracepoint"]
     ck m.target.line == 31 and m.target.path == "/a/main.py"
     ck m.target.token == "left" and m.target.column == 12
     ck m.target.text == "    return left + right"
@@ -169,14 +170,17 @@ suite "PLAT-50: the context menus are the desktop's":
     ck m.entries[4].action == caJumpBackwardToLine
     ck m.entries[5].action == caJumpToCall
     ck m.entries[8].action == caAddBreakpoint
-    ck m.entries[9].action == caAddTracepoint
+    ck m.entries[9].action == caToggleInlineBreakpoint
+    ck m.entries[9].hint == "Shift+F9"
+    ck m.entries[8].hint == "<click left of the line number>"
+    ck m.entries[10].action == caAddTracepoint
 
   test "the editor's menu on a breakpoint's line":
     let on = editorTextContextMenu("p", 31, breakpoint = lbEnabled,
                                    fileHasBreakpoints = true,
                                    anyBreakpoints = true)
     ck on.labels[8 .. ^1] == @["Disable breakpoint", "Delete breakpoint",
-                               "Delete breakpoints in file",
+                               "Add Inline Breakpoint", "Delete breakpoints in file",
                                "Delete ALL breakpoints", "Add tracepoint"]
     let off = editorTextContextMenu("p", 31, breakpoint = lbDisabled,
                                     fileHasBreakpoints = true,
@@ -185,11 +189,12 @@ suite "PLAT-50: the context menus are the desktop's":
     ck off.entries[8].action == caEnableBreakpoint
     ck on.entries[8].action == caDisableBreakpoint
     ck on.entries[9].action == caDeleteBreakpoint
-    ck on.entries[10].action == caDeleteBreakpointsInFile
-    ck on.entries[11].action == caDeleteAllBreakpoints
+    ck on.entries[11].action == caDeleteBreakpointsInFile
+    ck on.entries[12].action == caDeleteAllBreakpoints
     let elsewhere = editorTextContextMenu("p", 31, breakpoint = lbNone,
                                           anyBreakpoints = true)
     ck elsewhere.labels[8 .. ^1] == @["Add breakpoint",
+                                      "Add Inline Breakpoint",
                                       "Delete ALL breakpoints",
                                       "Add tracepoint"]
 
@@ -236,7 +241,7 @@ suite "PLAT-50: an open menu":
     ck s.open and s.anchorRow == 10 and s.anchorCol == 20
     ck s.selected == 0                        # Copy
     s.move(-1)
-    ck s.selected == 9                        # wraps to Add tracepoint
+    ck s.selected == 10                       # wraps to Add tracepoint
     # A menu with a disabled entry between enabled ones (built here: no
     # desktop menu has one now, but the open menu must skip it).
     var mixed: ContextMenuState

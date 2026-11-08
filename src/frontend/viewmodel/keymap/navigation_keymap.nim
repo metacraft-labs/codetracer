@@ -91,6 +91,8 @@ const
     BaseRow(chords: "Ctrl+D", operation: "editor.scroll-half-page-down", table: G, navModes: N),
     BaseRow(chords: ".", operation: "editor.center-on-pointer", table: G, navModes: N),
     BaseRow(chords: "F9", operation: "editor.toggle-breakpoint", table: G, navModes: N),
+    BaseRow(chords: "Shift+F9", operation: "editor.toggle-inline-breakpoint",
+            table: G, navModes: N),
     BaseRow(chords: "Space", operation: "editor.toggle-breakpoint", table: G, navModes: N),
     # PLAT-70 (Horizontal-Overflow.md §4.4): the output panes' view — Vim's
     # `zh` / `zl`, `zH` / `zL` and `0`. Over these two panes `z` is their

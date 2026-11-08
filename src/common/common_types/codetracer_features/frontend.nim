@@ -353,7 +353,8 @@ type
     # destination — the project's program recorded and opened. Appended at
     # the end, for the reason every note above gives.
     aRunProgram,                  # palette: Project: Run
-    aRunProgramInCurrentTab       # palette: Project: Run in Current Tab
+    aRunProgramInCurrentTab,      # palette: Project: Run in Current Tab
+    aInlineBreakpoint             # Shift+F9: a column breakpoint at the caret
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

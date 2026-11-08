@@ -30,6 +30,7 @@
  * comes from `scripts/plat45-desktop-prefix.sh` via `PLAT50_DESKTOP_PREFIX`.
  */
 
+import { glyphMarksOn, pressGlyph } from "../../lib/glyph-column";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -285,14 +286,12 @@ test("PLAT-50: the desktop's caption bar, strips, menu surface and click behavio
   // number puts a breakpoint there; a right-click disables it.
   const gutter = ctPage.locator(".monaco-editor .margin-view-overlays .gutter[data-line='31']").first();
   if ((await gutter.count()) > 0) {
-    await gutter.locator(".gutter-line").first().click();
+    await pressGlyph(ctPage, 31);
     await ctPage.waitForTimeout(800);
-    clicks.gutterBreakpoint = await ctPage.locator(
-      ".monaco-editor .margin-view-overlays .gutter[data-line='31'] .gutter-breakpoint-enabled").count() > 0;
+    clicks.gutterBreakpoint = (await glyphMarksOn(ctPage, 31)).includes("gutter-glyph-breakpoint");
     // The right-click lands on the breakpoint's own marker — the element the
     // desktop's `lineActionContextMenu` is written for.
-    await ctPage.locator(".monaco-editor .margin-view-overlays .gutter[data-line='31'] .gutter-breakpoint-enabled")
-      .first().click({ button: "right" });
+    await pressGlyph(ctPage, 31, { button: "right" });
     await ctPage.waitForTimeout(800);
     // AND NO MENU: the marker's right-click is the enable / disable toggle and
     // nothing else (`Editor-Pane.md`, the gutter's gesture 8). Monaco's own
@@ -303,8 +302,7 @@ test("PLAT-50: the desktop's caption bar, strips, menu surface and click behavio
     // 2026-10-04-desktop-editor-menu-offers-disable-for-a-just-disabled-
     // breakpoint).
     clicks.gutterRightClickMenu = await ctPage.locator("#context-menu-container").isVisible();
-    clicks.gutterDisabled = await ctPage.locator(
-      ".monaco-editor .margin-view-overlays .gutter[data-line='31'] .gutter-breakpoint-disabled").count() > 0;
+    clicks.gutterDisabled = (await glyphMarksOn(ctPage, 31)).includes("gutter-glyph-breakpoint-disabled");
     // The editor's menu on a line WITH a breakpoint — the one just disabled,
     // so its entry reads "Enable breakpoint", on the FIRST press as on the
     // second. Both are recorded and both are asserted below.
