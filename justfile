@@ -264,6 +264,15 @@ test-build-siblings-noir:
 test-build-siblings-toolchain-stage:
   bash ci/test/build-siblings-toolchain-stage-bounded-test.sh
 
+# Assert that one sibling that fails to build fails `build-siblings` by
+# default, and under `--keep-going` / BUILD_SIBLINGS_KEEP_GOING=1 is named
+# (summary row, log tail, closing line) without failing the run, its earlier
+# artifact removed. Callers that run part of `test-gui` rely on the second
+# form; the whole suite relies on the first. Two scratch siblings with real
+# justfiles, `repro` replaced by a pass-through; a few seconds, no network.
+test-build-siblings-keep-going:
+  bash ci/test/build-siblings-keep-going-test.sh
+
 # Assert that the built output tree carries the assets `ct` reads on startup
 # (`<prefix>/config/default_config.yaml` and `default_layout.json`). A tup
 # build exits 0 when a runtime asset is simply never published -- there is no
@@ -284,6 +293,11 @@ test-runtime-assets-guard:
 # Idempotent — already-built artefacts short-circuit, so this is cheap on
 # warm checkouts.  Pass `--force` to rebuild everything; `--check` to just
 # report status without building.  See scripts/build-siblings.sh.
+# Any sibling that fails to build fails this recipe, and with it `test-gui`.
+# A caller running only some specs, whose specs fail by name on an absent
+# sibling, sets BUILD_SIBLINGS_KEEP_GOING=1 (or passes `--keep-going`): the
+# failures are still named, but a recorder those specs never use cannot fail
+# them.
 build-siblings *args:
   bash scripts/build-siblings.sh {{args}}
 

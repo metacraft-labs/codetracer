@@ -6803,6 +6803,16 @@ jobs:
         # about ten seconds, no network.
         run: "nix develop .#devShells.x86_64-linux.default --command just test-build-siblings-toolchain-stage"
 
+      - name: Assert build-siblings names a failed sibling, and fails only when asked to
+        # `just test-gui` below fails when any sibling fails to build, which is
+        # what the whole suite needs; callers that run one spec through
+        # `test-gui` set BUILD_SIBLINGS_KEEP_GOING=1 so that a recorder their
+        # spec never uses cannot fail them (a flow-recorder lock drift once
+        # failed every codetracer-observability-e2e recipe this way). The suite
+        # holds both behaviours with two scratch siblings and a pass-through
+        # `repro`; a few seconds, no network.
+        run: "nix develop .#devShells.x86_64-linux.default --command just test-build-siblings-keep-going"
+
       - name: Run TypeScript Playwright UI tests (RR-based only)
         env:
           CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
