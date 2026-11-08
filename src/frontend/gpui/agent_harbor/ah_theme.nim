@@ -219,13 +219,15 @@ proc stateWordColour*(p: AhPalette; state: InitiativeState): string =
 # Element helpers
 # ---------------------------------------------------------------------------
 
-proc textPx*(text: string; sizePx: int): int =
-  ## How wide the interface face sets `text` (`design_font_metrics`).
-  groteskTextPx(text, float(sizePx))
+proc textPx*(text: string; sizePx: int; tabular = false): int =
+  ## How wide the interface face sets `text` (`design_font_metrics`);
+  ## `tabular`: in tabular figures, as `text(..., tabular = true)` draws it.
+  groteskTextPx(text, float(sizePx), tabular = tabular)
 
-proc textWidth*(text: string; sizePx: int): float =
-  ## The same, unrounded.
-  groteskTextWidth(text, float(sizePx))
+proc textWidth*(text: string; sizePx: int; tabular = false): float =
+  ## The same, unrounded and KERNED, as a browser and GPUI set it: the width
+  ## an exact line break is decided on (`FlowItem.exactPx`).
+  groteskTextWidth(text, float(sizePx), tabular = tabular, kerned = true)
 
 proc styles*(r: GpuiRenderer; el: GpuiElement;
              pairs: openArray[(string, string)]) =
@@ -244,13 +246,19 @@ proc box*(r: GpuiRenderer; column = false;
   r.styles(result, pairs)
 
 proc text*(r: GpuiRenderer; s: string; sizePx: int; colour: string;
-           bold = false; shrink = true; pairs: openArray[(string, string)] = []): GpuiElement =
+           bold = false; shrink = true; tabular = false;
+           pairs: openArray[(string, string)] = []): GpuiElement =
   ## One line of text: never wraps, elides at its box's edge when it may
   ## shrink (the stylesheet's `white-space: nowrap; text-overflow: ellipsis`).
+  ## `tabular`: its digits in tabular figures, all one width
+  ## (`font-variant-numeric: tabular-nums`, which the stylesheet sets on
+  ## counts, ages, `n/m` and the recording buttons); measure such text with
+  ## `textPx(..., tabular = true)`.
   result = r.createElement("span")
   r.styles(result, [("font-size", $sizePx & "px"), ("color", colour),
                     ("font-family", WindowFontFamily), ("white-space", "nowrap")])
   if bold: r.setStyle(result, "font-weight", "600")
+  if tabular: r.setStyle(result, "font-variant-numeric", "tabular-nums")
   if shrink:
     r.styles(result, [("overflow", "hidden"), ("text-overflow", "ellipsis"),
                       ("flex-shrink", "1")])

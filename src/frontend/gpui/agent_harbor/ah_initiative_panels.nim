@@ -39,6 +39,7 @@ const
   MilestoneMetaPx = 352    ## the wide table's counts column, at most 22rem
   LegendGapPx = 10
   LegendPx = 14            ## the counts beside a bar: `.ah-ms-legend`, 14px high
+  LegendMinPx = 144        ## `.ah-ms-legend` min-width: 9rem, its counts at its end
   LinePx = 16              ## `type-ui-lineheight-body-sm` / `-caption-md`
   HeadLinePx = 24          ## an initiative's head line (its fold and counts inherit 24px)
   SessionLinePx = 18       ## a session line: 16px and 1px above and below
@@ -122,6 +123,16 @@ proc drawMilestoneBar*(r: GpuiRenderer; p: AhPalette;
   if not labelled: r.setStyle(bar, "max-width", "580px")
   let legend = r.box(pairs = [("gap", $LegendGapPx & "px"), ("items", "center"),
                               ("height", $LegendPx & "px"), ("flex-shrink", "0")])
+  # Beside the bar, the legend is at least 9rem wide with its counts at its
+  # end, "so the bars of all rows end together" (`.ah-ms-legend`:
+  # `min-width: 9rem; justify-content: flex-end`); a labelled legend under
+  # the bar has no minimum and starts at the left (`.ah-ms-labelled`).
+  if not labelled:
+    r.styles(legend, [("min-width", $LegendMinPx & "px"), ("justify", "end")])
+  # The bar and its legend on their own, for the layout test's regions
+  # (`.ah-ms-bar`, `.ah-ms-legend`); a region's fact needs a non-empty
+  # value, and a bar with no milestones is still drawn.
+  r.tag(bar, "ms-bar", "track")
   var flow: seq[FlowItem]
   for status in MilestoneBarOrder:
     let n = counts[status]
@@ -133,18 +144,20 @@ proc drawMilestoneBar*(r: GpuiRenderer; p: AhPalette;
     let item = r.box(pairs = [("gap", "4px"), ("items", "center"), ("flex-shrink", "0")])
     let words = $n & (if labelled: " " & $status else: "")
     r.appendChild(item, r.mark(p.markOf(status)))
+    # The counts in tabular figures (`.ah-ms-legend`).
     r.appendChild(item, r.text(words, CaptionPx, p.textLabel, shrink = false,
+                               tabular = true,
                                pairs = [("line-height", $LegendPx & "px")]))
     if labelled and availPx > 0:
-      flow.add FlowItem(el: item, widthPx: MarkPx + 4 + textPx(words, CaptionPx),
-                        exactPx: float(MarkPx + 4) + textWidth(words, CaptionPx))
+      flow.add FlowItem(el: item, widthPx: MarkPx + 4 + textPx(words, CaptionPx, tabular = true),
+                        exactPx: float(MarkPx + 4) + textWidth(words, CaptionPx, tabular = true))
     else:
       r.appendChild(legend, item)
   r.appendChild(result, bar)
-  if flow.len > 0:
-    r.appendChild(result, r.flowLines(flow, availPx, LegendGapPx, LegendPx, LegendGapPx))
-  else:
-    r.appendChild(result, legend)
+  let legendEl = if flow.len > 0: r.flowLines(flow, availPx, LegendGapPx, LegendPx, LegendGapPx)
+                 else: legend
+  r.tag(legendEl, "ms-legend", if labelled: "under" else: "beside")
+  r.appendChild(result, legendEl)
 
 proc drawCurrent*(r: GpuiRenderer; p: AhPalette; text: string; colour = ""): GpuiElement =
   ## `CURRENT  RC-M2: Core change`.
@@ -234,7 +247,9 @@ proc drawInitiativeRow(r: GpuiRenderer; p: AhPalette; vm: InitiativesVM;
                      pairs = [("flex-grow", "1"), ("line-height", $LinePx & "px")])
   r.tag(title, "title", row.title)
   r.appendChild(head, title)
-  let progress = r.text(row.progressText, CaptionPx, p.textLabel, shrink = false)
+  # `.ah-initiative-progress-text`: tabular figures.
+  let progress = r.text(row.progressText, CaptionPx, p.textLabel, shrink = false,
+                        tabular = true)
   r.tag(progress, "progress", row.progressText)
   r.appendChild(head, progress)
   # A wide panel (`@container ah-initiatives (min-width: 60rem)`): each
@@ -374,7 +389,8 @@ proc drawMilestone(r: GpuiRenderer; p: AhPalette; m: MilestoneLine;
   let main = r.box(column = true, pairs = [("flex-grow", "1"), ("gap", "1px")])
   let title = r.box(pairs = [("gap", "8px"), ("items", "center"), ("height", $LinePx & "px")])
   let idPx = if narrow: MilestoneIdNarrowPx else: MilestoneIdPx
-  r.appendChild(title, r.text(m.id, BodyPx, p.textLabel, shrink = false,
+  # `.ah-milestone-id`: tabular figures.
+  r.appendChild(title, r.text(m.id, BodyPx, p.textLabel, shrink = false, tabular = true,
                               pairs = [("min-width", $idPx & "px"), lh]))
   let name = r.text(m.title, BodyPx, p.textBody, pairs = [lh])
   r.tag(name, "title", m.title)

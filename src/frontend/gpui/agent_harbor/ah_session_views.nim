@@ -46,7 +46,6 @@ const
     ## the line's own 2px above its 26px tab), so a tab sits 6px down as on
     ## the web.
   AddButtonPx = 26
-  ChipPx = 46
   ChipGapPx* = 12          ## `.ah-tab-overflow-count` margin-right: 0.75rem
   MenuGapPx* = 6           ## DROPDOWN_TRIGGER_GAP: a menu hangs 6px below its bar
   MenuMinPx* = 220         ## `.session-tab-overflow-menu` min-width: 13.75em
@@ -84,6 +83,13 @@ proc fitWidths*(widths: seq[int]; budget, minPx, gap: int;
   ## 14rem`). `mins`, when given, is each tab's own minimum (its
   ## min-content), in place of `minPx`. A row that cannot fit at the minimum
   ## keeps it.
+  ##
+  ## The widths are whole pixels and a browser's are not, so the deficit is
+  ## handed out whole: each tab gives up the floor of its exact share, and
+  ## the pixels left over go one each to the tabs with the largest
+  ## remainders, so the row ends exactly at `budget`, as the browser's does.
+  ## (Rounding every share UP left the row a pixel short per shrunk tab:
+  ## seven pixels of free strip on a full single-line strip.)
   result = widths
   var floor = newSeq[int](widths.len)
   var frozen = newSeq[bool](widths.len)
@@ -98,21 +104,41 @@ proc fitWidths*(widths: seq[int]; budget, minPx, gap: int;
       if not frozen[i]: basis += widths[i]
     let deficit = total - budget
     if deficit <= 0 or basis == 0: break
+    # A tab whose exact share takes it to its minimum is frozen there, and
+    # the rest share what remains (the next round).
     var clamped = false
-    var given = 0
     for i in 0 ..< result.len:
       if frozen[i]: continue
-      let share = (deficit * widths[i] + basis - 1) div basis
-      let target = result[i] - share
-      if target <= floor[i]:
-        given += result[i] - floor[i]
+      if result[i] * basis - deficit * widths[i] <= floor[i] * basis:
         result[i] = floor[i]
         frozen[i] = true
         clamped = true
-      else:
-        given += share
-        result[i] = target
-    if not clamped or given >= deficit: break
+    if clamped: continue
+    var shares = newSeq[int](result.len)
+    var given = 0
+    for i in 0 ..< result.len:
+      if frozen[i]: continue
+      shares[i] = deficit * widths[i] div basis
+      given += shares[i]
+    while given < deficit:
+      # The largest remainder not yet given its extra pixel; on a tie, the
+      # first.
+      var best = -1
+      var bestRem = -1
+      for i in 0 ..< result.len:
+        if frozen[i] or shares[i] > deficit * widths[i] div basis: continue
+        # Never below the tab's minimum for the sake of a pixel.
+        if result[i] - shares[i] - 1 < floor[i]: continue
+        let rem = deficit * widths[i] mod basis
+        if rem > bestRem:
+          best = i
+          bestRem = rem
+      if best < 0: break
+      inc shares[best]
+      inc given
+    for i in 0 ..< result.len:
+      if not frozen[i]: result[i] -= shares[i]
+    break
 
 proc drawTab(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
              tab: SessionItem; closable: bool; widthPx = -1): GpuiElement =
@@ -202,12 +228,12 @@ proc drawOverflowChip*(r: GpuiRenderer; p: AhPalette; hidden, hiddenWaits: int;
                                if open: p.textBody else: p.textLabel, shrink = false))
   if onClick != nil: r.addEventListener(result, "click", onClick)
 
-proc menuItemWidth*(title: string; trailing: seq[string]): int =
+proc menuItemWidth*(title: string; trailing: seq[string]; tabular = false): int =
   ## The width a dropdown takes for one item set on one line: the menu's own
   ## padding and border, the item's padding, its mark, title and quieter
-  ## words, 8px apart.
+  ## words, 8px apart (`tabular`: the words in tabular figures).
   result = 2 * 4 + 2 + 2 * MenuItemPadPx + MarkPx + 8 + textPx(title, MenuItemTextPx)
-  for word in trailing: result += 8 + textPx(word, CaptionPx)
+  for word in trailing: result += 8 + textPx(word, CaptionPx, tabular)
 
 proc drawMenu*(r: GpuiRenderer; p: AhPalette; top, left, width: int;
                kind: string): GpuiElement =
@@ -224,10 +250,12 @@ proc drawMenu*(r: GpuiRenderer; p: AhPalette; top, left, width: int;
 proc drawMenuItem*(r: GpuiRenderer; p: AhPalette; markStyle: MarkStyle;
                    title, key: string; active: bool;
                    trailing: openArray[(string, string)] = [];
-                   onClick: proc() = nil; twoLines = false): GpuiElement =
+                   onClick: proc() = nil; twoLines = false;
+                   tabular = false): GpuiElement =
   ## One item of a dropdown: a mark, a title, then quieter facts -- on the
   ## title's line, or `twoLines`, under it (a stacked bar's full-width
-  ## menu, 4px by 10px in).
+  ## menu, 4px by 10px in). `tabular`: the facts in tabular figures (an
+  ## initiative's `n/m`, `.ah-tab-progress`).
   result = r.box(pairs = [("height", (if twoLines: "49" else: $MenuItemPx) & "px"),
                           ("items", "center"),
                           ("gap", "8px"), ("padding-left", $MenuItemPadPx & "px"),
@@ -245,13 +273,15 @@ proc drawMenuItem*(r: GpuiRenderer; p: AhPalette; markStyle: MarkStyle;
     r.appendChild(column, titleEl)
     let facts = r.box(pairs = [("gap", "8px"), ("items", "center")])
     for (word, colour) in trailing:
-      r.appendChild(facts, r.text(word, CaptionPx, colour, shrink = false))
+      r.appendChild(facts, r.text(word, CaptionPx, colour, shrink = false,
+                                  tabular = tabular))
     r.appendChild(column, facts)
     r.appendChild(result, column)
   else:
     r.appendChild(result, titleEl)
     for (word, colour) in trailing:
-      r.appendChild(result, r.text(word, CaptionPx, colour, shrink = false))
+      r.appendChild(result, r.text(word, CaptionPx, colour, shrink = false,
+                                   tabular = tabular))
   if onClick != nil: r.addEventListener(result, "click", onClick)
 
 proc drawSessionTabStrip*(r: GpuiRenderer; host: GpuiElement;
@@ -302,8 +332,14 @@ proc drawSessionTabStrip*(r: GpuiRenderer; host: GpuiElement;
         for i in layout.visible:
           widths.add tabWidth(tabs[i], closable)
           fixed.add tabs[i].active
+        # "+" and, when tabs overflow, the `+N` chip as `drawOverflowChip`
+        # draws it, 12px clear of "+".
+        var waits = 0
+        for i in overflow:
+          if tabs[i].attention == saNeedsInput: inc waits
         let controls = AddButtonPx + StripGapPx +
-                       (if overflow.len > 0: ChipPx + ChipGapPx else: 0)
+                       (if overflow.len > 0: overflowChipWidth(overflow.len, waits > 0) + ChipGapPx
+                        else: 0)
         let fitted = fitWidths(widths, widthPx - 8 - controls, TabMinWidthPx, StripGapPx,
                                fixed)
         for k, i in layout.visible:
@@ -416,9 +452,10 @@ proc drawListRow(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
                       if tab.failureText.len > 0: p.textError else: p.rowDetail,
                       pairs = [lh])
     r.tag(detailEl, "detail", detail)
-  # The age is the row's last grid column, sized to its text (`auto`).
+  # The age is the row's last grid column, sized to its text (`auto`), in
+  # tabular figures (`.ah-session-row-age`).
   let age = r.text(tab.ageLabel, CaptionPx, p.textBodySubtle, shrink = false,
-                   pairs = [("text-align", "right"), lh])
+                   tabular = true, pairs = [("text-align", "right"), lh])
   r.tag(age, "age", tab.ageLabel)
   if columns:
     # Docked along the bottom of a wide window, a grid (`.ah-session-list-
@@ -488,8 +525,9 @@ proc drawGroupHeader(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
   r.tag(title, "title", group.title)
   r.appendChild(result, title)
   if group.progressText.len > 0:
+    # `n/m` (`.ah-tab-progress`): tabular figures.
     r.appendChild(result, r.text(group.progressText, CaptionPx, p.textCaption,
-                                 shrink = false))
+                                 shrink = false, tabular = true))
   let counts = r.text(countWords, CaptionPx, p.textCaption,
                       pairs = [("flex-shrink", "100"), ("min-width", "0px"),
                                ("max-width", half)])

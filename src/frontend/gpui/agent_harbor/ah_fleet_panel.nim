@@ -90,22 +90,25 @@ proc drawFilter(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; filter: Flee
   r.tag(result, "active", $active)
   r.appendChild(result, r.text(filterLabel(filter), CaptionPx,
                                if active: p.textBody else: p.textLabel, shrink = false))
+  # `.ah-fleet-filter-count`: tabular figures.
   r.appendChild(result, r.text($count, CaptionPx,
                                if count == 0: p.textDisabled
-                               elif active: p.textBody else: p.textCaption, shrink = false))
+                               elif active: p.textBody else: p.textCaption, shrink = false,
+                               tabular = true))
   r.addEventListener(result, "click", proc() = vm.setFilter(chosen))
 
 proc cell(r: GpuiRenderer; p: AhPalette; s: string; widthPx: int; name: string;
-          right = false; colour = ""): GpuiElement =
+          right = false; colour = ""; tabular = false): GpuiElement =
   ## A column cell, on a 16px line (`.ah-fleet-col`: caption size,
   ## `type-ui-lineheight-body-sm`). An empty one shows the shared placeholder
   ## in the disabled role, whatever the row's own text colour
-  ## (`.ah-fleet-col-empty`).
+  ## (`.ah-fleet-col-empty`). `tabular`: figures one width
+  ## (`.ah-fleet-col-duration`).
   let empty = s.len == 0
   let words = r.text(if empty: AgentHarborFleetEmptyCellText else: s, CaptionPx,
                      if empty: p.textDisabled
                      elif colour.len > 0: colour else: p.textLabel,
-                     pairs = [("line-height", "16px")])
+                     tabular = tabular, pairs = [("line-height", "16px")])
   if right:
     # Right-aligned (the stylesheet's `text-align: right`): the words at the
     # end of a box of the column's width. The shim draws `text-align` too
@@ -184,6 +187,10 @@ proc drawRow(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; row: FleetRow;
     r.tag(failure, "failure", row.failureText)
     r.appendChild(main, failure)
   let shown = if row.expanded: row.activity.len else: min(1, row.activity.len)
+  # `.ah-fleet-row-activity`: the activity lines stacked with no gap of
+  # their own -- an unfolded row's later lines follow the first directly,
+  # 16px apart, not the row's 2px further each.
+  let activity = r.box(column = true, pairs = [("min-width", "0px")])
   for i in 0 ..< shown:
     let level = if i < row.activityLevels.len: row.activityLevels[i] else: ""
     let hasChip = i == 0 and row.activity.len + row.activityMore > 1
@@ -218,7 +225,8 @@ proc drawRow(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; row: FleetRow;
                                  shrink = false, pairs = [lh]))
       r.addEventListener(more, "click", proc() = vm.toggleExpanded(id))
       r.appendChild(line, more)
-    r.appendChild(main, line)
+    r.appendChild(activity, line)
+  if shown > 0: r.appendChild(main, activity)
   r.appendChild(result, main)
   if columns:
     let c = if sel: selText else: ""
@@ -228,11 +236,12 @@ proc drawRow(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; row: FleetRow;
       r.appendChild(result, r.cell(p, row.initiative, grid.share, "initiative",
                                    colour = c))
     r.appendChild(result, r.cell(p, row.durationLabel, DurationColumnPx, "duration", true,
-                                 colour = c))
+                                 colour = c, tabular = true))
   # The age: the "Active" column (4rem) at a laptop's width; in a narrow
   # panel the row's last grid column, sized to its text (`auto`).
+  # `.ah-fleet-row-age`: tabular figures.
   let age = r.text(row.ageLabel, CaptionPx, if sel: selText else: p.textBodySubtle, shrink = false,
-                   pairs = [("flex-shrink", "0"), lh])
+                   tabular = true, pairs = [("flex-shrink", "0"), lh])
   r.tag(age, "age", row.ageLabel)
   if columns:
     # The column's end, as `text-align: right` puts it.
@@ -282,7 +291,7 @@ proc drawFleetPanel*(r: GpuiRenderer; host: GpuiElement; vm: FleetSnapshotVM;
       let n = counts.filterCount(filter)
       chips.add FlowItem(el: r.drawFilter(p, vm, filter, n, filter == vm.filter.val),
                          widthPx: 16 + textPx(filterLabel(filter), CaptionPx) + 6 +
-                                  textPx($n, CaptionPx))
+                                  textPx($n, CaptionPx, tabular = true))
     r.appendChild(filters, r.flowLines(chips, max(1, widthPx - 2 * InsetPx), 4,
                                        ControlPx, 4))
     r.appendChild(head, filters)

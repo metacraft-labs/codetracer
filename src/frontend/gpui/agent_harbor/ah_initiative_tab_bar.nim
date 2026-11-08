@@ -46,7 +46,8 @@ const
   ElsewhereMarginPx = 4       ## `.ah-elsewhere` margin-right: 0.25rem
 
 proc recordingButtonWidth(rb: RecordingButton): int =
-  max(18, 8 + textPx($rb.number & stateSuffix(rb.state), CaptionPx))
+  ## Its number in tabular figures (`.ah-rec-button`), 4px in on each side.
+  max(18, 8 + textPx($rb.number & stateSuffix(rb.state), CaptionPx, tabular = true))
 
 proc recordingsWidth(buttons: RecordingButtons): int =
   if buttons.buttons.len == 0: return 0
@@ -59,7 +60,7 @@ proc initiativeTabContent(vm: InitiativeTabStripVM; tab: StripTab): int =
   ## size, and so what it shrinks in proportion to.
   result = 2 * TabPadPx + MarkPx + TabInnerGapPx + textPx(tab.title, TabTitlePx)
   if tab.kind == stkInitiative:
-    result += TabInnerGapPx + textPx(tab.progressText, CaptionPx)
+    result += TabInnerGapPx + textPx(tab.progressText, CaptionPx, tabular = true)
     if tab.active: result += recordingsWidth(vm.recordingButtonsOf(tab.id))
   elif tab.session.originShort.len > 0:
     result += TabInnerGapPx + textPx(tab.session.originShort, CaptionPx)
@@ -79,7 +80,7 @@ proc initiativeTabMinWidth(vm: InitiativeTabStripVM; tab: StripTab): int =
   ## `min-width: 8rem`.
   result = 2 * TabPadPx + MarkPx + TabInnerGapPx + 72
   if tab.kind == stkInitiative:
-    result += TabInnerGapPx + textPx(tab.progressText, CaptionPx)
+    result += TabInnerGapPx + textPx(tab.progressText, CaptionPx, tabular = true)
     if tab.active: result += recordingsWidth(vm.recordingButtonsOf(tab.id))
   result = max(result, TabMinPx)
 
@@ -119,7 +120,7 @@ proc drawRecordingButton(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM
     colour = p.onAction
   r.styles(result, [("border-width", "1px"), ("border-color", border)])
   r.appendChild(result, r.text($rb.number & stateSuffix(rb.state), CaptionPx, colour,
-                               shrink = false))
+                               shrink = false, tabular = true))
   let target = vm
   r.addEventListener(result, "click",
                      proc() = discard target.selectRecording(initiativeId, id))
@@ -164,10 +165,10 @@ proc drawBarTab(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
   r.appendChild(result, title)
   if tab.kind == stkInitiative:
     # The active tab's figures, readable on Light's raised fill:
-    # `by-mode(caption, label)`.
+    # `by-mode(caption, label)`; tabular (`.ah-tab-progress`).
     let progress = r.text(tab.progressText, CaptionPx,
                           if tab.active: p.activeRowQuiet else: p.textCaption,
-                          shrink = false)
+                          shrink = false, tabular = true)
     r.tag(progress, "progress", tab.progressText)
     r.appendChild(result, progress)
     if tab.active:
@@ -179,12 +180,15 @@ proc drawBarTab(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
         for rb in buttons.buttons: r.appendChild(switcher, r.drawRecordingButton(p, vm, id, rb))
         if buttons.hidden > 0:
           # The recordings that did not fit: a count in a recording
-          # button's outline.
+          # button's outline (`.ah-rec-more`: the label role, outlined
+          # `by-mode(border-primary, text-primary-caption)` so it shows on
+          # the active tab's fill in Light too).
+          let moreBorder = if p.mode == dmDark: p.borderPrimary else: p.textCaption
           let more = r.box(pairs = [("height", "18px"), ("items", "center"),
                                     ("padding-left", "4px"), ("padding-right", "4px"),
                                     ("rounded", "4px"), ("border-width", "1px"),
-                                    ("border-color", p.borderPrimary), ("flex-shrink", "0")])
-          r.appendChild(more, r.text("+" & $buttons.hidden, CaptionPx, p.textCaption,
+                                    ("border-color", moreBorder), ("flex-shrink", "0")])
+          r.appendChild(more, r.text("+" & $buttons.hidden, CaptionPx, p.textLabel,
                                      shrink = false))
           r.tag(more, "recordings-hidden", $buttons.hidden)
           r.appendChild(switcher, more)
@@ -255,7 +259,8 @@ proc inboxWidth(vm: InitiativeTabStripVM): int =
 proc elsewhereWidth(vm: InitiativeTabStripVM): int =
   ## How wide `drawElsewhere` draws, its 4px right margin included: 6px in,
   ## its count badge, and (unless compact) its label 6px after it.
-  result = ElsewhereMarginPx + 12 + max(18, 8 + textPx($vm.elsewhereCount, CaptionPx - 1))
+  result = ElsewhereMarginPx + 12 +
+           max(18, 8 + textPx($vm.elsewhereCount, CaptionPx - 1, tabular = true))
   if not vm.compact: result += 6 + textPx(vm.elsewhereLabel, CaptionPx)
 
 proc inboxStep(r: GpuiRenderer; p: AhPalette; arrow: string; onClick: proc()): GpuiElement =
@@ -287,9 +292,10 @@ proc drawInbox(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM): GpuiEle
   if not compact:
     let slot = r.box(pairs = [("width", $InboxPositionPx & "px"), ("justify", "center"),
                               ("items", "center"), ("flex-shrink", "0")])
-    # `.ah-inbox-position` in the label role (the stylesheet's later rule).
+    # `.ah-inbox-position` in the label role (the stylesheet's later rule),
+    # in tabular figures.
     let pos = r.text(if position.len == 0: "inbox empty" else: position, CaptionPx,
-                     p.textLabel, shrink = false)
+                     p.textLabel, shrink = false, tabular = true)
     r.tag(pos, "inbox-position", if position.len == 0: "inbox empty" else: position)
     r.appendChild(slot, pos)
     r.appendChild(result, slot)
@@ -401,8 +407,9 @@ proc drawElsewhere(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM): Gpu
                              ("items", "center"), ("justify", "center"),
                              ("background", p.tertiary), ("padding-left", "4px"),
                              ("padding-right", "4px")])
+  # `.ah-elsewhere-count`: tabular figures.
   r.appendChild(badge, r.text($vm.elsewhereCount, CaptionPx - 1, p.textBody, bold = true,
-                              shrink = false))
+                              shrink = false, tabular = true))
   r.appendChild(result, badge)
   if not vm.compact:
     let label = r.text(vm.elsewhereLabel, CaptionPx, p.textLabel, shrink = false)
@@ -537,7 +544,7 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
     for i in overflow:
       widest = max(widest, menuItemWidth(tabs[i].title,
                                          if tabs[i].progressText.len > 0: @[tabs[i].progressText]
-                                         else: @[]))
+                                         else: @[], tabular = true))
     let menuW = clamp(widest, MenuMinPx, max(MenuMinPx, widthPx - 12))
     let menu = r.drawMenu(p, tabBottom + MenuGapPx,
                           max(0, min(x - 28 - BarChipGapPx, widthPx - 12 - menuW)), menuW,
@@ -550,7 +557,7 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
       let target = vm
       r.appendChild(menu, r.drawMenuItem(p, m, tab.title, key, tab.active,
         (if tab.progressText.len > 0: @[(tab.progressText, p.textCaption)] else: @[]),
-        proc() = discard target.activate(key)))
+        proc() = discard target.activate(key), tabular = true))
     r.appendChild(host, menu)
   if ready and vm.elsewhereCount > 0 and vm.elsewhereOpen.val:
     let elsewhereW = if vm.stacked: widthPx - 16 else: min(ElsewhereMenuPx, widthPx - 16)

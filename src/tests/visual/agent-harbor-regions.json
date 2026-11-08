@@ -36,7 +36,13 @@
     "drift. A region with a `pick` also reports its `index` among the visible",
     "matches on both sides, and the layout test requires the two to agree: two",
     "different rows that each sit near the bottom of their window can be within",
-    "the tolerance of each other by position alone."
+    "the tolerance of each other by position alone.",
+    "",
+    "`milestone-bar` and `milestone-legend` are the first milestone bar drawn",
+    "and the counts beside (or, labelled, under) it. A bar can be the wrong",
+    "width while the row around it keeps its box: the web gives the legend",
+    "`min-width: 9rem` so the bars of all rows end together, and a view that",
+    "did not drew its bar about 70px wider."
   ],
   "schemaVersion": 1,
   "regions": [
@@ -219,6 +225,20 @@
         "data-ah-milestone": ""
       },
       "pick": "last-whole"
+    },
+    {
+      "name": "milestone-bar",
+      "web": ".ah-ms-bar",
+      "gpui": {
+        "data-ah-ms-bar": ""
+      }
+    },
+    {
+      "name": "milestone-legend",
+      "web": ".ah-ms-legend",
+      "gpui": {
+        "data-ah-ms-legend": ""
+      }
     },
     {
       "name": "menu-item-first",
