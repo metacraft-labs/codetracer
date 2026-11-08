@@ -39,7 +39,9 @@ import std/[strutils, tables, unittest]
 import ../../editing_core
 import ../../keymap/[overlay_rows, pointer_rows]
 
-const ExpectedAssertions = 1214
+const ExpectedAssertions = 1222
+  ## +8 on 2026-11-08, measured: CUA's four `Ctrl+K T` rows and the four
+  ## catalogued `editor.trace-*` operations they bind.
   ## +5 on 2026-10-30 (PLAT-70 Part E): CUA's `Menu`, `Ctrl+K Shift+F10` and
   ## `Ctrl+Shift+O` (`variables.show-value-origin`), Emacs's `Menu` and
   ## `Ctrl+Shift+O` — one `when` assertion per shipped row.

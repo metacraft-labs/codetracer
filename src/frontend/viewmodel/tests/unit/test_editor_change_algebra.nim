@@ -117,7 +117,10 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 2072
+const ExpectedAssertions = 2075
+  ## *2072 -> 2075 on 2026-11-08: `host/native_nim_tracer.nim` (the native
+  ## route for Nim's compile-time tracing) x three assertions. It calls no
+  ## `rebase(` and spells no `mapOver`.*
   ## *2057 -> 2072 on 2026-11-08, measured: `input/operation_table`, `keymap/overlay_rows`,
   ## `keymap/pointer_rows`, `views/field_keys`, `views/dismissals` and
   ## `views/shell_keys` x three assertions. None calls `rebase(` or spells

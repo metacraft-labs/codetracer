@@ -84,8 +84,8 @@ ARMS = [
              "    return TracedConstruct(context: ccStatic, line: line)")],
      [(VMU, None), (PTY, PTY_PROC)],
      "the static action is offered on a proc line"),
-    ("V2", [(VM, "  WirePosition(line: max(0, request.line - 1),",
-             "  WirePosition(line: max(0, request.line),")],
+    ("V2", [(VM, "  (line: max(0, request.line - 1), character: max(0, request.column - 1))",
+             "  (line: max(0, request.line), character: max(0, request.column - 1))")],
      [(VMU, None), (PTY, PTY_MAIN)],
      "the request is sent with a 1-based line"),
     ("V3", [(VM, "  ## same trace, so replacing it would only lose it.\n  topNewTab",
@@ -143,7 +143,7 @@ ARMS = [
      [(VMU, None)],
      "the palette does not list the four"),
     # ---- the declared survivor ---------------------------------------------
-    ("Z1", [(VM, "  StaticScanLines* = 200", "  StaticScanLines* = 201")],
+    ("Z1", [(VM, "  StaticScanLines = 200", "  StaticScanLines = 201")],
      [(VMU, None)],
      "behaviour-preserving: the DECLARED SURVIVOR (the offer's scan window)"),
 ]

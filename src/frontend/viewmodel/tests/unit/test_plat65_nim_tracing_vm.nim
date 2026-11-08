@@ -43,7 +43,7 @@ import ../../keymap/operation_catalogue
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 98
+const ExpectedAssertions = 99
 
 var countedAssertions = 0
 
@@ -293,6 +293,12 @@ suite "the names: catalogue, keymap, palette":
     for i, e in entries:
       ck parseOperationCommand(e.target) ==
          (true, nimTraceOperationOf(NimTraceAction(i)))
+    # …and the palette's own index (every native front-end's) carries them.
+    var listed = 0
+    for e in omnibarIndexOf(nil, nil, nil):
+      if e.label in NimTracePaletteLabels:
+        inc listed
+    ck listed == 4
 
   test "the assertion count is the one declared":
     check countedAssertions == ExpectedAssertions
