@@ -134,9 +134,9 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=083babb38ea38153d5ea481884eba83c394433fe
+            codetracer-trace-format=1f360faf4c8fbb60afc5b9af69af8a8273217000
             codetracer-trace-format-nim=d282be4c45f3f31ce6b666f79a1bd8b6813010c7
-            codetracer-native-recorder=04ed3bd23668653221f346470bfcbb709962987a
+            codetracer-native-recorder=3f053ab8652aa2edbd7fbe509c46f64ed3cb29f3
 
       - name: Unfold native-backend submodules into parent index
         # codetracer-native-backend's flake.nix has

@@ -1333,14 +1333,14 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
           env-ps1-path: ./env.ps1
           siblings: |
-            codetracer-native-recorder=04ed3bd23668653221f346470bfcbb709962987a
+            codetracer-native-recorder=3f053ab8652aa2edbd7fbe509c46f64ed3cb29f3
             # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
             # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
             # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=083babb38ea38153d5ea481884eba83c394433fe
+            codetracer-trace-format=1f360faf4c8fbb60afc5b9af69af8a8273217000
             codetracer-trace-format-nim=d282be4c45f3f31ce6b666f79a1bd8b6813010c7
 
       - name: Install Nim dependencies
@@ -1853,9 +1853,9 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=083babb38ea38153d5ea481884eba83c394433fe
+            codetracer-trace-format=1f360faf4c8fbb60afc5b9af69af8a8273217000
             codetracer-trace-format-nim=d282be4c45f3f31ce6b666f79a1bd8b6813010c7
-            codetracer-native-recorder=04ed3bd23668653221f346470bfcbb709962987a
+            codetracer-native-recorder=3f053ab8652aa2edbd7fbe509c46f64ed3cb29f3
 
       # MEASURE THE FETCH ENVIRONMENT BEFORE NIX TOUCHES THE NETWORK, and
       # before the FIRST `nix develop` in this job rather than before the
@@ -4851,9 +4851,9 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=083babb38ea38153d5ea481884eba83c394433fe
+            codetracer-trace-format=1f360faf4c8fbb60afc5b9af69af8a8273217000
             codetracer-trace-format-nim=d282be4c45f3f31ce6b666f79a1bd8b6813010c7
-            codetracer-native-recorder=04ed3bd23668653221f346470bfcbb709962987a
+            codetracer-native-recorder=3f053ab8652aa2edbd7fbe509c46f64ed3cb29f3
             # Required by scripts/require-siblings.sh, which build-once.sh runs first.
             # BARE: this job only runs on codetracer, so clone-siblings resolves
             # them from this commit's own committed repro.lock, which pins all of them.
@@ -6128,14 +6128,14 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=083babb38ea38153d5ea481884eba83c394433fe
+            codetracer-trace-format=1f360faf4c8fbb60afc5b9af69af8a8273217000
             codetracer-trace-format-nim=d282be4c45f3f31ce6b666f79a1bd8b6813010c7
-            codetracer-native-recorder=04ed3bd23668653221f346470bfcbb709962987a
+            codetracer-native-recorder=3f053ab8652aa2edbd7fbe509c46f64ed3cb29f3
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
-            codetracer-visual-replay=c0c08a878dc5497d5566bb737630978da8b0cc0d
+            codetracer-visual-replay=affbd3ba4d66b8f433ac5fcce81151793f1f5d7a
             codetracer-native-backend=2c4d3c1ea6455fac42645a73dbd4bd00838a8813
             runquota=dev
 
@@ -6708,7 +6708,7 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=083babb38ea38153d5ea481884eba83c394433fe
+            codetracer-trace-format=1f360faf4c8fbb60afc5b9af69af8a8273217000
             codetracer-trace-format-nim=d282be4c45f3f31ce6b666f79a1bd8b6813010c7
             # The native fixture the desktop's native Low Level Code capture
             # records (`c/sudoku_solver`), at the revision repro.lock pins.
@@ -7061,9 +7061,9 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=083babb38ea38153d5ea481884eba83c394433fe
+            codetracer-trace-format=1f360faf4c8fbb60afc5b9af69af8a8273217000
             codetracer-trace-format-nim=d282be4c45f3f31ce6b666f79a1bd8b6813010c7
-            io-mon=ac06360d15be70aca46202d0ce04c5b17cba5ac1
+            io-mon=e66e05c9471ce184e9a3b0d793b2db62ca5557b9
             nim-shm-queue=84fd76b174d4868e703ba3d599668ee340e0b6ea
             nim-shm-gset=953bd231a022243fcee96092234d7cf80f7042b0
             nim-stackable-hooks=dev
@@ -7071,9 +7071,9 @@ jobs:
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
-            codetracer-visual-replay=c0c08a878dc5497d5566bb737630978da8b0cc0d
+            codetracer-visual-replay=affbd3ba4d66b8f433ac5fcce81151793f1f5d7a
             codetracer-native-backend=2c4d3c1ea6455fac42645a73dbd4bd00838a8813
-            codetracer-native-recorder=04ed3bd23668653221f346470bfcbb709962987a
+            codetracer-native-recorder=3f053ab8652aa2edbd7fbe509c46f64ed3cb29f3
             codetracer-native-test-programs=dev
             codetracer-visual-replay-fixtures=dev
             runquota=dev
@@ -7389,13 +7389,13 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=083babb38ea38153d5ea481884eba83c394433fe
+            codetracer-trace-format=1f360faf4c8fbb60afc5b9af69af8a8273217000
             codetracer-trace-format-nim=d282be4c45f3f31ce6b666f79a1bd8b6813010c7
-            io-mon=ac06360d15be70aca46202d0ce04c5b17cba5ac1
+            io-mon=e66e05c9471ce184e9a3b0d793b2db62ca5557b9
             nim-shm-queue=84fd76b174d4868e703ba3d599668ee340e0b6ea
             nim-shm-gset=953bd231a022243fcee96092234d7cf80f7042b0
             nim-stackable-hooks=dev
-            codetracer-native-recorder=04ed3bd23668653221f346470bfcbb709962987a
+            codetracer-native-recorder=3f053ab8652aa2edbd7fbe509c46f64ed3cb29f3
             codetracer-js-recorder=dev
             codetracer-ruby-recorder=dev
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
@@ -7403,7 +7403,7 @@ jobs:
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
             codetracer-native-backend=2c4d3c1ea6455fac42645a73dbd4bd00838a8813
-            codetracer-visual-replay=c0c08a878dc5497d5566bb737630978da8b0cc0d
+            codetracer-visual-replay=affbd3ba4d66b8f433ac5fcce81151793f1f5d7a
 
       - name: Allow direnv in the cloned recorder siblings
         # scripts/build-siblings.sh runs every sibling build as
