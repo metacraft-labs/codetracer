@@ -18,8 +18,8 @@
 //! from the spec's layout.
 //!
 //! Prerequisites, each a FAILURE when absent (never a skip): a C compiler
-//! (`cc`, or `CC`), and `ct-mcr` (`CODETRACER_CT_MCR_CMD`, else the sibling
-//! `codetracer-native-recorder/ct_cli/ct_cli`, else `ct-mcr` on `PATH`).
+//! (`cc`, or `CC`), and `ct-mcr` (an override, else built from the
+//! `codetracer-native-recorder` sibling: `find_ct_mcr`).
 //!
 //! Hermetic: the recorder runs without any `CT_*_DEBUG_*` variable from the
 //! caller's environment.  `ct-mcr record` refuses a host without CPUID
@@ -34,6 +34,13 @@ mod meta_dat;
 #[path = "../src/trace_metadata.rs"]
 #[allow(dead_code)]
 mod trace_metadata;
+
+// Finding `ct-mcr`, or building the sibling's: the same code, script and
+// cross-process lock db-backend's harness provisions with.  `rustfmt::skip`:
+// the file is db-backend's and formatted by db-backend's rustfmt.toml.
+#[rustfmt::skip]
+#[path = "../../db-backend/tests/test_harness/sibling_provisioning.rs"]
+mod sibling_provisioning;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -59,33 +66,13 @@ int main(int argc, char **argv) {
 }
 "#;
 
-/// Locate `ct-mcr`, or fail naming every place looked at.
+/// Locate `ct-mcr`, or provision the sibling's: the rule every Rust test that
+/// needs it shares ([`sibling_provisioning::resolve_ct_mcr`]), which panics
+/// naming the remedy when neither an override nor a build answers.  This
+/// test reads a recording made on the fly; without the recorder it has
+/// nothing to read.
 fn find_ct_mcr() -> PathBuf {
-    if let Ok(cmd) = std::env::var("CODETRACER_CT_MCR_CMD")
-        && !cmd.is_empty()
-    {
-        return PathBuf::from(cmd);
-    }
-    let sibling = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../codetracer-native-recorder/ct_cli/ct_cli");
-    if sibling.is_file() {
-        return sibling;
-    }
-    if let Ok(output) = Command::new("which").arg("ct-mcr").output()
-        && output.status.success()
-    {
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-        if !path.is_empty() {
-            return PathBuf::from(path);
-        }
-    }
-    panic!(
-        "MISSING PREREQUISITE: ct-mcr was not found (CODETRACER_CT_MCR_CMD is unset, \
-         {} does not exist, and ct-mcr is not on PATH).  Build it with \
-         `just build-ct-mcr` in codetracer-native-recorder.  This test reads a \
-         recording made on the fly; without the recorder it has nothing to read.",
-        sibling.display()
-    );
+    sibling_provisioning::resolve_ct_mcr()
 }
 
 /// A command whose environment carries no `CT_*_DEBUG_*` variable.

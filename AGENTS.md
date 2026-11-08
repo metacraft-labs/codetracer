@@ -198,9 +198,10 @@ Suites that drive a recorder or tool from a sibling checkout (BEAM, JS and
 Ruby recorders, `ct-native-replay`, `ct-mcr`, `ct-print`, and the `ct-instrument` +
 JS recorder + `session-manager` set the materialised cross-process
 recordings are made with) provision it themselves: when no override names a
-tool, the finder in `tests/test_harness/mod.rs` (and, for `ct-native-replay`
-and the Ruby recorder, `src/backend-manager/tests/real_recording_integration.rs`,
-through the same `tests/test_harness/sibling_provisioning.rs`) runs
+tool, the finder in `tests/test_harness/mod.rs` (and, for `ct-native-replay`,
+`ct-mcr` and the Ruby recorder, the backend-manager tests
+`real_recording_integration.rs` and `meta_dat_real_mcr_recording.rs`, through
+the same `tests/test_harness/sibling_provisioning.rs`) runs
 `scripts/build-siblings.sh --only <key>` (or
 `scripts/provision-cross-process-recording.sh`) once per test binary, under
 a file lock shared by concurrent test binaries, and uses what it built. A
@@ -219,9 +220,12 @@ Playwright worker can run `build-siblings.sh` for the same key at once.
   variable (`CT_NATIVE_REPLAY_PATH`, `CODETRACER_CT_MCR_CMD`, `CODETRACER_JS_RECORDER_PATH`,
   `CODETRACER_BEAM_RECORDER_BIN`, `CODETRACER_RUBY_RECORDER_PATH`,
   `CODETRACER_CT_PRINT`, `CODETRACER_RECORD_WEB_BIN`, …), or a tool on
-  `PATH` that is not the sibling's own build output. `CODETRACER_CT_MCR_CMD`
-  naming the sibling's own `ct_cli` (as the dev shell exports it) is not an
-  override: that build is refreshed like any other.
+  `PATH` that is not the sibling's own build output. For `ct-mcr` the
+  variables are the two `ct` reads, in its order: `CODETRACER_CT_MCR_CMD`,
+  then `CODETRACER_CT_MCR_PATH`; a tool on `PATH` counts only when neither is
+  set. A variable naming the sibling's own `ct_cli` (as the dev shell exports
+  `CODETRACER_CT_MCR_CMD`) is not an override: that build is refreshed like
+  any other.
 
 ### rr recordings on hybrid (P-core + E-core) hosts
 

@@ -206,8 +206,8 @@ type UnixStream = tokio::net::TcpStream;
 use tokio::process::Command;
 use tokio::time::{sleep, timeout};
 
-// Building a missing or stale workspace sibling (ct-native-replay, the Ruby
-// recorder's native extension) for the tests that need it: the same code,
+// Building a missing or stale workspace sibling (ct-native-replay, ct-mcr, the
+// Ruby recorder's native extension) for the tests that need it: the same code,
 // script and cross-process lock db-backend's harness provisions with.
 // `rustfmt::skip`: the file is db-backend's and formatted by db-backend's
 // rustfmt.toml (max_width = 120); this crate's defaults would fight it.
@@ -12122,9 +12122,9 @@ async fn test_real_custom_mcp_exec_script_relative_trace_path() {
 // and Python.
 //
 // Prerequisites, each a failure when missing (`prereq_missing`): a C compiler
-// (`cc`, or `CC`), `ct-mcr` (`CODETRACER_CT_MCR_CMD`, else the sibling
-// `codetracer-native-recorder/ct_cli/ct_cli`, else `ct-mcr` on `PATH`),
-// `ct-native-replay` and `replay-server`.  Hermetic: the recorder, the daemon
+// (`cc`, or `CC`), `ct-mcr` (an override, else built from the
+// `codetracer-native-recorder` sibling: `find_ct_mcr`), `ct-native-replay`
+// and `replay-server`.  Hermetic: the recorder, the daemon
 // and the MCP server run without any `CT_*_DEBUG_*` variable from the
 // caller's environment.  `ct-mcr record` refuses a host without CPUID
 // faulting (Multi-Core-Recorder.md §8.3), so on such a host this test fails
@@ -12136,34 +12136,12 @@ fn span_goto_probe_source() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/native/span_goto_probe.c")
 }
 
-/// Locate `ct-mcr`, or report it missing through [`prereq_missing`].
+/// Locate `ct-mcr`, or provision the sibling's: the rule every Rust test that
+/// needs it shares ([`sibling_provisioning::resolve_ct_mcr`]), which panics
+/// naming the remedy when neither an override nor a build answers.
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn find_ct_mcr() -> Option<PathBuf> {
-    if let Ok(cmd) = std::env::var("CODETRACER_CT_MCR_CMD")
-        && !cmd.is_empty()
-    {
-        return Some(PathBuf::from(cmd));
-    }
-    let sibling = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../codetracer-native-recorder/ct_cli/ct_cli");
-    if sibling.is_file() {
-        return Some(sibling.canonicalize().unwrap_or(sibling));
-    }
-    if let Ok(output) = std::process::Command::new("which").arg("ct-mcr").output()
-        && output.status.success()
-    {
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-        if !path.is_empty() {
-            return Some(PathBuf::from(path));
-        }
-    }
-    prereq_missing(&format!(
-        "ct-mcr was not found (CODETRACER_CT_MCR_CMD is unset, {} does not \
-         exist, and ct-mcr is not on PATH).  Build it with `just build-ct-mcr` \
-         in codetracer-native-recorder.",
-        sibling.display()
-    ));
-    None
+    Some(sibling_provisioning::resolve_ct_mcr())
 }
 
 /// The names of the `CT_*_DEBUG_*` variables in this process's environment:

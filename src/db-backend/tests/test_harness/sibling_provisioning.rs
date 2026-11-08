@@ -2,8 +2,10 @@
 //!
 //! Shared by two test crates: db-backend's harness declares it as a submodule
 //! (`test_harness/mod.rs`), and backend-manager's integration tests include it
-//! with `#[path]` (`src/backend-manager/tests/real_recording_integration.rs`),
-//! so both crates build a missing or stale sibling the same way, through
+//! with `#[path]` (`src/backend-manager/tests/real_recording_integration.rs`,
+//! `meta_dat_real_mcr_recording.rs`), as does db-backend's
+//! `tests/reprobuild_hcr_in_codetracer_test.rs`, which does not use the rest of
+//! the harness. So both crates build a missing or stale sibling the same way, through
 //! `scripts/build-siblings.sh`, under the same cross-process lock. It uses
 //! only the standard library, so either crate can compile it.
 //!
@@ -38,9 +40,10 @@ mod path_tools;
 pub use path_tools::bash_command;
 
 use std::collections::HashMap;
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 
 /// Canonicalize a path, stripping the Windows `\\?\` UNC prefix if present.
 ///
@@ -222,4 +225,91 @@ pub fn provision_sibling(key: &str, repo: &str, artifact: &str) -> PathBuf {
         }
         Ok(safe_canonicalize(&artifact_path))
     })
+}
+
+/// Look up a tool on the system `PATH`: `which` on Unix, `where` on Windows
+/// (its first hit).
+pub fn find_on_path(name: &str) -> Option<PathBuf> {
+    let finder = if cfg!(windows) { "where" } else { "which" };
+    let output = Command::new(finder).arg(name).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let path = stdout.lines().next().unwrap_or("").trim();
+    (!path.is_empty()).then(|| PathBuf::from(path))
+}
+
+/// The environment variable that names the `ct-mcr` binary to every process
+/// that records or replays MCR traces: `ct-native-replay`
+/// (`codetracer-native-backend/src/mcr_record.rs`), `ct`, and these tests.
+pub const CT_MCR_CMD_ENV: &str = "CODETRACER_CT_MCR_CMD";
+
+/// The older name `ct` also reads for the `ct-mcr` binary, after
+/// [`CT_MCR_CMD_ENV`] (`src/common/paths.nim`), and the one `ct`'s install
+/// hint tells a developer to set.
+pub const CT_MCR_PATH_ENV: &str = "CODETRACER_CT_MCR_PATH";
+
+/// The `ct-mcr` binary (codetracer-native-recorder's `ct_cli`) an MCR test
+/// records and replays with. Every Rust test that needs `ct-mcr` finds it
+/// here, so they all follow one rule: codetracer `AGENTS.md`, "Sibling
+/// recorders and tools are built by the tests that need them", and
+/// codetracer-pm `spec/Testing/Test-Program-Layout.md`, "Provisioning the
+/// Recorder a Recording Needs", which the Playwright fixture follows too
+/// (`src/tests/gui/lib/sibling-provisioning.ts`, `ensureCtMcr`).
+///
+/// Search order:
+///
+/// 1. The variable `ct` itself would read: the first non-empty one of
+///    `CODETRACER_CT_MCR_CMD` and `CODETRACER_CT_MCR_PATH`, in that order
+///    (`src/common/paths.nim`). Unless it names the workspace sibling's own
+///    build, it is an explicit override, used as given and never built. It
+///    must name a file; a dangling override panics, naming the variable,
+///    rather than being ignored. An empty variable counts as unset.
+/// 2. With neither variable set, `ct-mcr` or `ct_cli` on `PATH`, unless the
+///    hit is the workspace sibling's own build.
+/// 3. The workspace's `codetracer-native-recorder` sibling, PROVISIONED: built
+///    or refreshed by `scripts/build-siblings.sh --only
+///    codetracer-native-recorder/ct-mcr` (see [`provision_sibling`]), which
+///    panics naming the remedy when the sibling is not checked out or does not
+///    build.
+///
+/// A variable naming the sibling goes to step 3, not step 2: `ct` would use
+/// that variable before anything on `PATH`. Steps 1 and 2 defer to step 3 for
+/// a hit inside the sibling because that is what the codetracer dev shell
+/// supplies (`scripts/detect-siblings.sh` exports `CODETRACER_CT_MCR_CMD` and
+/// puts `ct_cli/` on `PATH` whenever the sibling has been built once): it
+/// says the sibling was built at some point, not that the build is current.
+pub fn resolve_ct_mcr() -> PathBuf {
+    const SIBLING: &str = "codetracer-native-recorder";
+    let named = [CT_MCR_CMD_ENV, CT_MCR_PATH_ENV].into_iter().find_map(|name| {
+        env::var_os(name)
+            .filter(|value| !value.is_empty())
+            .map(|value| (name, PathBuf::from(value)))
+    });
+    if let Some((name, path)) = &named
+        && !is_in_workspace_sibling(path, SIBLING)
+    {
+        assert!(
+            path.is_file(),
+            "{name}='{}' does not name a file. Unset it to build the workspace's \
+             {SIBLING}/ct_cli/ct_cli, or point it at a ct-mcr binary.",
+            path.display()
+        );
+        return path.clone();
+    }
+    if named.is_none()
+        && let Some(path) = find_on_path("ct-mcr")
+            .or_else(|| find_on_path("ct_cli"))
+            .filter(|path| !is_in_workspace_sibling(path, SIBLING))
+    {
+        return path;
+    }
+    // The artifact is the one build-siblings.sh's entry names
+    // (`just build-ct-mcr` builds ct_cli in place).
+    provision_sibling(
+        "codetracer-native-recorder/ct-mcr",
+        SIBLING,
+        &format!("ct_cli/ct_cli{}", std::env::consts::EXE_SUFFIX),
+    )
 }
