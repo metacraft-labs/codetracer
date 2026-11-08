@@ -25,6 +25,7 @@
 ## decoration added under `when N is isonim_dom.Element`.
 
 import std/[math, options, strutils]
+import ./field_keys
 
 import isonim/core/[signals, computation]
 import isonim/dsl/ui
@@ -592,8 +593,8 @@ when defined(js):
       let shown = $vm.footerStart
       if not footerInput.isFocused:
         footerInput.setInputValue(cstring(shown))
-    onDomEvent(footerInput, cstring"keydown", proc(ev: JsObject) =
-      if ev.keyOf == cstring"Enter":
+    onDomEvent(footerInput, cstring KeyDownEvent, proc(ev: JsObject) =
+      if fieldKeyOf($ev.keyOf) == fkCommit:
         try:
           let row = max(1, parseInt($inputValueOf(footerInput)))
           scrollBody.setScrollTop(float(row - 1) * rowPx())

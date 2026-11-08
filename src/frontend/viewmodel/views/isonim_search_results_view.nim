@@ -80,6 +80,7 @@
 
 
 import isonim/core/[signals, computation]
+import ./field_keys
 when defined(js):
   # Enter and Space on a `role="button"` row are its click.
   import ./isonim_activation
@@ -214,9 +215,9 @@ when defined(js):
         clearNode.setNodeDisplay(if req.seed.len > 0: cstring"flex"
                                  else: cstring"none")
         inputNode.focusAndSelectSoon()
-    isonim_dom.addEventListener(inputNode, cstring"keydown",
+    isonim_dom.addEventListener(inputNode, cstring KeyDownEvent,
       proc(ev: isonim_dom.Event) =
-        if ev.eventKeyCode() == 13:
+        if fieldKeyOfCode(ev.eventKeyCode()) == fkCommit:
           let qs = $inputNode.inputNodeValue()
           if qs.len > 0:
             vm.search(qs)

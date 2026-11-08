@@ -57,6 +57,7 @@
 ##   handle the dynamic content).
 
 import std/[strutils, tables]
+import ./field_keys
 when defined(js):
   # Enter and Space on a `role="button"` row are its click.
   import ./isonim_activation
@@ -338,16 +339,17 @@ proc renderNameField[R, N](r: R; vm: FilesystemVM;
   when isDomElement(N):
     setFieldValue(input, cstring(vm.nameEditDraft))
     let inputNode = isonim_dom.Node(input)
-    isonim_dom.addEventListener(inputNode, cstring"keydown",
+    isonim_dom.addEventListener(inputNode, cstring KeyDownEvent,
       proc(ev: isonim_dom.Event) =
         ev.fsStopPropagation()
-        let key = $ev.eventKey()
-        if key == "Enter":
+        case fieldKeyOf($ev.eventKey())
+        of fkCommit:
           ev.fsPreventDefault()
           discard vm.commitNameEdit($fieldValue(input))
-        elif key == "Escape":
+        of fkCancel:
           ev.fsPreventDefault()
-          vm.cancelNameEdit())
+          vm.cancelNameEdit()
+        else: discard)
     isonim_dom.addEventListener(inputNode, cstring"input",
       proc(ev: isonim_dom.Event) =
         vm.nameEditDraft = $fieldValue(input))
@@ -366,12 +368,12 @@ proc renderNameField[R, N](r: R; vm: FilesystemVM;
     focusFieldSoon(input)
   elif N is MockNode:
     r.setInputValue(input, vm.nameEditDraft)
-    r.addEventListener(input, "keydown", proc(ev: MockEvent) =
+    r.addEventListener(input, KeyDownEvent, proc(ev: MockEvent) =
       ev.fsStopPropagation()
-      if ev.key == "Enter":
-        discard vm.commitNameEdit(r.inputValue(input))
-      elif ev.key == "Escape":
-        vm.cancelNameEdit())
+      case fieldKeyOf(ev.key)
+      of fkCommit: discard vm.commitNameEdit(r.inputValue(input))
+      of fkCancel: vm.cancelNameEdit()
+      else: discard)
     r.addEventListener(input, "input", proc() =
       vm.nameEditDraft = r.inputValue(input))
     # The mock has no focus moves of its own: a "blur" fired by a test is

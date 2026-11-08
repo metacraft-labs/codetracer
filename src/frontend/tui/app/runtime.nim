@@ -444,6 +444,9 @@ type
     dismissHints*: proc(): string {.closure.}
       ## `:terminal-info dismiss`: no start-up hint ever again (§10.2).
 
+  TerminalCall* = OperationCall[ContextTarget]
+  TerminalAction = OperationAction[ContextTarget, RuntimeOutcome]
+
   TuiRuntime* = ref object
     ## The running front-end's state, minus the terminal and minus the process.
     app*: TuiApp
@@ -455,6 +458,8 @@ type
       ## PLAT-59: the Visual Replay panes have work due soon — playback
       ## running, a held scrubber's coalesced frame, a request in flight —
       ## so the loop wakes on the panes' clock (`VisualTickMs`).
+    operations: OperationHub[ContextTarget, RuntimeOutcome]
+      ## The tables `runOperation` dispatches through (`buildOperationTables`).
     lowLevelCursor*: (string, int)
       ## PLAT-60: the editor caret's line last told to the Low Level Code
       ## listing (`syncLowLevelCursor`), so it is told once per move.
@@ -2365,40 +2370,33 @@ proc routeFrameViewerMouse(rt: TuiRuntime; event: MouseEvent;
   rt.scrubFrameViewer(event.col, "drag", outcome)
   true
 
-proc terminalOutputOwnsToken*(rt: TuiRuntime; token: string): bool =
-  ## The pane's own keys while it is focused: in the SCREEN view Left / Right
-  ## step a write back / forward (Terminal-Output-Pane.md §3's "step-by-write
-  ## keys ... scoped to the pane", the desktop's screen keys); `v` toggles
-  ## lines / screen. In the LINE view the arrows are the view's
-  ## (Horizontal-Overflow.md §4.4: the pane has no caret, so `Left` / `Right`
-  ## scroll it sideways — `view.scroll-left` / `-right`, through the router).
+proc terminalOutputFocused(rt: TuiRuntime): bool =
+  ## The Terminal Output pane holds the focus and has a recording's output.
   let (had, focused) = rt.focus.focusedPane()
-  if not had or focused != paneTerminalOutput or
-     not rt.app.terminalOutput.loaded:
-    return false
-  let key = rt.keyOf(token)
-  key == "v" or
-    (key in ["Left", "Right"] and rt.app.terminalOutput.screenShown)
+  had and focused == paneTerminalOutput and rt.app.terminalOutput.loaded
 
-proc routeTokenToTerminalOutput(rt: TuiRuntime; token: string;
-                                outcome: var RuntimeOutcome) =
+proc toggleTerminalView(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  ## `terminal-output.toggle-view`: lines / screen.
   let m = rt.app.terminalOutput
-  case rt.keyOf(token)
-  of "v":
-    outcome.requestClick(PaneClickRequest(
-      kind: pcTerminalView,
-      text: (if m.view == tvScreen: $tvLines else: $tvScreen)))
-  of "Left", "Right":
-    let n = if m.screen.isNil: 0 else: m.screen.writeCount
-    let delta = if rt.keyOf(token) == "Left": -1 else: 1
-    let at = m.shownWrite
-    let target = if at < 0 and delta > 0: 0 else: at + delta
-    if n == 0 or target < 0 or target >= n:
-      rt.note(if delta < 0: "no earlier write" else: "no later write")
-      outcome.repaint = true
-      return
-    discard rt.terminalWriteJump(target, outcome)
-  else: discard
+  outcome.requestClick(PaneClickRequest(
+    kind: pcTerminalView,
+    text: (if m.view == tvScreen: $tvLines else: $tvScreen)))
+
+proc stepTerminalWrite(rt: TuiRuntime; delta: int;
+                       outcome: var RuntimeOutcome) =
+  ## `view.scroll-left` / `-right` in the SCREEN view step a write back /
+  ## forward (Terminal-Output-Pane.md §3's step-by-write keys, the desktop's
+  ## screen keys). In the LINE view those operations scroll it sideways
+  ## (Horizontal-Overflow.md §4.4).
+  let m = rt.app.terminalOutput
+  let n = if m.screen.isNil: 0 else: m.screen.writeCount
+  let at = m.shownWrite
+  let target = if at < 0 and delta > 0: 0 else: at + delta
+  if n == 0 or target < 0 or target >= n:
+    rt.note(if delta < 0: "no earlier write" else: "no later write")
+    outcome.repaint = true
+    return
+  discard rt.terminalWriteJump(target, outcome)
 
 proc showContent(rt: TuiRuntime; title, text: string; diff = false;
                  outcome: var RuntimeOutcome) =
@@ -2429,7 +2427,22 @@ proc terminalInfoBody*(rt: TuiRuntime): seq[StyledRow] =
   result.add @[StyledSpan(text: "")]
   result.add glyphTestCard(rt.caps)
 
-proc handleTerminalInfoToken(rt: TuiRuntime; token: string;
+proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
+                  outcome: var RuntimeOutcome)
+proc probeKey*(rt: TuiRuntime; name: string): EditingResolution
+
+proc overlayTakes(rt: TuiRuntime; name, table: string; nowMs: int64;
+                  outcome: var RuntimeOutcome): bool =
+  ## `name` resolved here to an operation of the open overlay's `table`: it is
+  ## run, and the key is the overlay's. Anything else is left to the caller,
+  ## who knows whether the overlay owns every key.
+  let res = rt.probeKey(name)
+  if res.kind != erOperation or tableOfOperation(res.operation) != table:
+    return false
+  rt.runOperation(res, nowMs, outcome)
+  true
+
+proc handleTerminalInfoToken(rt: TuiRuntime; token: string; nowMs: int64;
                              outcome: var RuntimeOutcome) =
   ## Every token while `:terminal-info` is open is its own: a key is shown
   ## decoded (the interactive half of the report), a pointer report is shown
@@ -2442,33 +2455,7 @@ proc handleTerminalInfoToken(rt: TuiRuntime; token: string;
     return
   let name = rt.keyOf(token)
   rt.terminalInfo.lastKey = name
-  let service = rt.terminalService
-  case name
-  of "Esc", "q":
-    rt.terminalInfo.open = false
-  of "Up":
-    rt.terminalInfo.scroll = max(0, rt.terminalInfo.scroll - 1)
-  of "Down":
-    rt.terminalInfo.scroll = min(max(0, rt.terminalInfoBody().len - 1),
-                                 rt.terminalInfo.scroll + 1)
-  of "r":
-    rt.terminalInfo.note =
-      if service.isNil or service.rerun.isNil: "no terminal to ask"
-      else: service.rerun()
-  of "y", "n":
-    # §10.3: the answer to "do the Legacy Computing glyphs look right?"
-    # sets modern-unicode for THIS terminal only (OQ-T6).
-    let value = if name == "y": "on" else: "off"
-    rt.terminalInfo.note =
-      if service.isNil or service.setForThisTerminal.isNil:
-        "this session keeps no state"
-      else: service.setForThisTerminal(lsModernUnicode, value)
-  of "c":
-    rt.copyToClipboard(TerminalInfoCopyText, "an OSC 52 test string")
-    rt.terminalInfo.note = "copied '" & TerminalInfoCopyText &
-      "' (" & rt.caps.clipboard & "): paste it to check"
-  else:
-    discard
+  discard rt.overlayTakes(name, TerminalInfoTable, nowMs, outcome)
 
 proc eventRowAt(model: EventLogModel; area: CellArea;
                 row: int): (bool, event_log.EventLogRow, EventLogScreen) =
@@ -4309,6 +4296,64 @@ proc scrollEventLog(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
   rt.app.eventLog.releaseOutside(top, body)
   outcome.repaint = true
 
+proc buildOperationTables(rt: TuiRuntime)
+
+func buttonOf(event: MouseEvent): PressButton =
+  case event.button
+  of mbMiddle: prMiddle
+  of mbRight: prSecondary
+  else: prPrimary
+
+func gestureOf(event: MouseEvent): string =
+  ## A press as the pointer keymap names it, modifiers and all.
+  pointerGesture(event.buttonOf, event.ctrl, event.shift, event.alt)
+
+func plainGestureOf(event: MouseEvent): string =
+  ## The same press without its modifiers.
+  pointerGesture(event.buttonOf, false, false, false)
+
+proc pointerOperation(rt: TuiRuntime; event: MouseEvent; pane: PaneKind;
+                      kind: ElementKind): EditingResolution =
+  ## The operation a press on this element runs (`pointer_rows`, a user's
+  ## `keybindings.json`). A modified press with no row of its own is the plain
+  ## gesture: a Ctrl+click on a row is still a click on it.
+  let path = @[element(ekWindow, "window"), pane($pane), element(kind, "")]
+  let facts = rt.sessionFacts
+  result = rt.router.routePointer(facts, path, rt.navMode, gestureOf(event))
+  if result.kind != erOperation:
+    result = rt.router.routePointer(facts, path, rt.navMode, plainGestureOf(event))
+
+proc runPointer(rt: TuiRuntime; event: MouseEvent; pane: PaneKind;
+                kind: ElementKind; target: ContextTarget;
+                outcome: var RuntimeOutcome;
+                menu = ContextMenuModel()): bool =
+  ## **A PRESS ON AN ELEMENT, THROUGH THE ROUTER** (Input-Routing §5.1): its
+  ## operation is the pointer keymap's, performed by the operation tables. A
+  ## context click opens the element's `menu`. Answers whether it was taken.
+  let res = rt.pointerOperation(event, pane, kind)
+  if res.kind != erOperation:
+    return false
+  if res.operation == "context-menu.open":
+    if menu.entries.len == 0:
+      return false
+    rt.openContextMenu(menu, event.row, event.col, outcome)
+    return true
+  if '.' notin res.operation:
+    return false
+  if rt.operations.isNil:
+    rt.buildOperationTables()
+  outcome.repaint = true
+  let answer = rt.operations.invoke(
+    TerminalCall(name: res.operation, argument: res.argument, target: target,
+                 pointer: true), outcome)
+  case answer.kind
+  of oiRan: discard
+  of oiDisabled: rt.note(answer.reason)
+  of oiAbsent:
+    rt.note("`" & res.operation & "` (" & operationLabelOf(res.operation) &
+            ") is not available in the terminal")
+  answer.kind != oiAbsent
+
 proc routeEventLogClick(rt: TuiRuntime; area: CellArea; event: MouseEvent;
                         outcome: var RuntimeOutcome): bool =
   ## K24 / K25 / K26: a left click on an event goes to it (`eventJump`, the
@@ -4331,24 +4376,17 @@ proc routeEventLogClick(rt: TuiRuntime; area: CellArea; event: MouseEvent;
       outcome.repaint = true
       return true
     let (onHeader, column) = screen.headerColumnAt(event.row, event.col)
-    if onHeader and event.button == mbLeft:
-      outcome.requestClick(PaneClickRequest(
-        kind: pcEventOrder,
-        order: rt.app.eventLog.order.clickedHeader(column)))
-      return true
+    if onHeader:
+      return rt.runPointer(event, paneEventLog, ekHeader,
+                           ContextTarget(pane: paneEventLog, index: int64(ord(column))),
+                           outcome)
     return false
   let ev = row.event
   rt.app.eventLog.selected = row.index
-  if event.button == mbRight:
-    rt.showContent("event #" & $ev.index & " at tick " & $ev.tick &
-                     (if ev.file.len > 0: "  " & ev.file & ":" & $ev.line
-                      else: ""),
-                   ev.content, outcome = outcome)
-    return true
-  outcome.requestClick(PaneClickRequest(kind: pcEventJump, index: ev.index,
-                                        tick: ev.tick, path: ev.file,
-                                        line: ev.line, text: ev.content))
-  true
+  rt.runPointer(event, paneEventLog, ekRow,
+                ContextTarget(pane: paneEventLog, index: ev.index, tick: ev.tick,
+                              path: ev.file, line: ev.line, text: ev.content),
+                outcome)
 
 proc toggleInlineAt(rt: TuiRuntime; path: string; line, column: int;
                     outcome: var RuntimeOutcome) =
@@ -5183,8 +5221,9 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
     if event.button == mbRight:
       rt.openFilesMenu(i, event.row, event.col, outcome)
       return true
-    rt.activateFilesRow(i, outcome)
-    return true
+    return rt.runPointer(event, paneFileTree, ekRow,
+                         ContextTarget(pane: paneFileTree, index: int64(i)),
+                         outcome)
   of paneEditor:
     return rt.routeEditorClick(under, event, outcome)
   of paneCalltrace:
@@ -5203,10 +5242,12 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
       rt.openContextMenu(callArgumentContextMenu(hit.index, a.name, a.value),
                          event.row, event.col, outcome)
       return true
-    rt.openContextMenu(callTraceContextMenu(hit.index, call.toggle != crtLeaf,
-                                            call.toggle == crtExpanded),
-                       event.row, event.col, outcome)
-    return true
+    return rt.runPointer(event, paneCalltrace, ekRow,
+                         ContextTarget(pane: paneCalltrace, index: hit.index),
+                         outcome,
+                         menu = callTraceContextMenu(hit.index,
+                                                     call.toggle != crtLeaf,
+                                                     call.toggle == crtExpanded))
   of paneEventLog:
     if event.button notin {mbLeft, mbRight}:
       return false
@@ -5286,12 +5327,12 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
     rt.app.variables.focused = path
     # `o` acts on the selected variable (`CommandContext.selectedVariable`).
     rt.context.selectedVariable = variablePathOf(path)
-    if event.button == mbRight:
-      rt.openContextMenu(variablesContextMenu(path), event.row, event.col,
-                         outcome)
+    if rt.runPointer(event, paneState, ekRow,
+                     ContextTarget(pane: paneState, path: path), outcome,
+                     menu = variablesContextMenu(path)):
       return true
     if event.button == mbLeft:
-      discard rt.app.variables.toggleNode(path)
+      discard
       outcome.repaint = true
       return true
     return false
@@ -5953,16 +5994,14 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
       let hit = rt.app.callTrace.callTraceHitAt(area, event.row, event.col)
       case hit.kind
       of cthRow:
-        outcome.jumpsToCall = true
-        outcome.callIndex = hit.index
-        outcome.repaint = true
-        rt.rebuildFocus()
-        discard rt.focus.focusPaneKind(paneCalltrace)
+        discard rt.runPointer(event, paneCalltrace, ekRow,
+                              ContextTarget(pane: paneCalltrace, index: hit.index),
+                              outcome)
         return
       of cthToggle:
-        outcome.togglesCall = true
-        outcome.callIndex = hit.index
-        outcome.repaint = true
+        discard rt.runPointer(event, paneCalltrace, ekToggle,
+                              ContextTarget(pane: paneCalltrace, index: hit.index),
+                              outcome)
         return
       of cthTrack, cthThumb:
         # PLAT-70 Part H: the scrollbar's (`routeScrollbars`).
@@ -6470,7 +6509,6 @@ const
     ## `Alt+<mnemonic>`, `F10` in Edit mode; Vim's `F12`). The menu is also a
     ## click on `≡` or a folder title.
 
-proc probeKey*(rt: TuiRuntime; name: string): EditingResolution
 proc refreshMenuAvailability*(rt: TuiRuntime)
   ## Forward-declared; defined beside the menu's action table below.
 
@@ -6981,13 +7019,7 @@ proc routeWelcomeKey(rt: TuiRuntime; token: string;
   let w = rt.app.shownWelcome()
   if w.isNil or rt.app.menu.isOpen or rt.app.omnibar.isOpen or rt.prompt.open:
     return false
-  let name = rt.keyOf(token)
-  var key = name
-  if isTextKey(name):
-    key = keyCharacter(name)
-  if w.form == nwfNone and key.len == 1 and key notin [" "]:
-    return false
-  if not w.applyKey(key, rt.welcomeFolderDefault()):
+  if not w.applyKey(rt.keyOf(token), rt.welcomeFolderDefault()):
     return false
   outcome.repaint = true
   rt.runWelcomeIntent(outcome)
@@ -7453,24 +7485,12 @@ proc handleMenuKey(rt: TuiRuntime; token: string; nowMs: int64;
   if res.kind == erOperation and res.operation in MenuOperations:
     rt.runMenuOperation(res.operation, res.argument)
     return
-  case name
-  of "Esc": vm.escape()
-  of "Enter":
-    let chosen = vm.highlightedItem()
-    let act = vm.activate()
-    if act.ran:
-      rt.runMenuAction(act.action, outcome)
-    else:
-      rt.sayRefusal(chosen)
-  of "Up": vm.moveHighlight(-1)
-  of "Down": vm.moveHighlight(1)
-  of "Right": discard vm.enterFolder()
-  of "Left": discard vm.leaveFolder()
+  if rt.overlayTakes(name, MenuTable, nowMs, outcome):
+    discard
+  elif isTextKey(name):
+    vm.typeToSelect(keyCharacter(name), nowMs)
   else:
-    if isTextKey(name):
-      vm.typeToSelect(keyCharacter(name), nowMs)
-    else:
-      outcome.repaint = false
+    outcome.repaint = false
   if not vm.isOpen:
     rt.note(if outcome.detail.len > 0: outcome.detail else: rt.app.notification)
 
@@ -7686,14 +7706,17 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
       rt.refreshMenuAvailability()
       vm.open(keyboard = false)
   of thControl:
+    # A toolbar button carries its operation (Input-Routing §5.1): the action
+    # it names, by the one table.
     let c = TransportControls[hit.index]
-    let ka = transportKeyAction(c.id)
     let enabled = hit.index < rt.app.controlsEnabledOf().len and
                   rt.app.controlsEnabledOf()[hit.index]
     if not enabled:
       rt.note(c.label & " is not available here")
     else:
-      rt.performAction(ka, outcome)
+      let (name, arg) = splitOperation(operationOfClientAction(c.clientAction))
+      rt.runOperation(EditingResolution(kind: erOperation, operation: name,
+                                        argument: arg), 0, outcome)
   of thOmnibar:
     if not rt.app.omnibar.isOpen:
       rt.openOmnibar()
@@ -7972,6 +7995,18 @@ proc syncOverlayLayers(rt: TuiRuntime) =
   let promptFind = rt.prompt.open and rt.prompt.kind != pkCommand
   if not rt.app.contextMenu.open:
     rt.want(ContextMenuTable, "window", "MENU", false)
+  let gesture = rt.layoutBindingEnabled() and
+                rt.app.layoutBinding.interaction.kind in {ikDraggingTab,
+                                                          ikResizingSplit,
+                                                          ikRevealingDock}
+  if not gesture:
+    rt.want(LayoutGestureTable, "window", "", false)
+  if not rt.app.menu.isOpen:
+    rt.want(MenuTable, "window", "", false)
+  if not rt.app.content.open:
+    rt.want(ContentViewTable, "window", "", false)
+  if not rt.terminalInfo.open:
+    rt.want(TerminalInfoTable, "window", "", false)
   if not rt.app.omnibar.isOpen:
     rt.want(PaletteTable, "window", "PALETTE", false)
   if not promptCommand:
@@ -7986,6 +8021,10 @@ proc syncOverlayLayers(rt: TuiRuntime) =
   rt.want(CommandLineTable, "window", "COMMAND", promptCommand)
   rt.want(PaletteTable, "window", "PALETTE", rt.app.omnibar.isOpen)
   rt.want(ContextMenuTable, "window", "MENU", rt.app.contextMenu.open)
+  rt.want(MenuTable, "window", "", rt.app.menu.isOpen)
+  rt.want(LayoutGestureTable, "window", "", gesture)
+  rt.want(ContentViewTable, "window", "", rt.app.content.open)
+  rt.want(TerminalInfoTable, "window", "", rt.terminalInfo.open)
 
 proc pendingPrefixDueMs*(rt: TuiRuntime): int64 =
   ## When the pending chord prefix times out under this base (Vim and
@@ -8704,15 +8743,474 @@ proc runProblemsKeyOperation(rt: TuiRuntime; operation: string;
     true
   else: false
 
+template act(body: untyped): TerminalAction =
+  ## An entry's action procedure, reading the call and the dispatch's outcome.
+  ## It answers `true` unless the body returns `false` ("not this table's").
+  (proc(c {.inject.}: TerminalCall; outcome {.inject.}: var RuntimeOutcome): bool =
+     result = true
+     body)
+
+template ask(answer: untyped): TerminalAction =
+  ## An entry whose procedure itself answers whether the operation was its own.
+  (proc(c {.inject.}: TerminalCall; outcome {.inject.}: var RuntimeOutcome): bool =
+     answer)
+
+func inert(c: TerminalCall; outcome: var RuntimeOutcome): bool =
+  ## Taken and nothing done: an open overlay keeps its whole namespace.
+  true
+
+func fullName(c: TerminalCall): string =
+  if c.argument.len > 0: c.name & "(" & c.argument & ")" else: c.name
+
+func resolutionOf(c: TerminalCall): EditingResolution =
+  EditingResolution(kind: erOperation, operation: c.name, argument: c.argument,
+                    args: c.args)
+
+proc buildOperationTables(rt: TuiRuntime) =
+  ## **THE TERMINAL'S OPERATION TABLES** (Input-Routing §3), innermost first:
+  ## the overlays and their fields, the focused pane, the command line, the
+  ## session. What each entry names is the procedure that performs it; which
+  ## entry a resolved operation reaches is `operation_table.invoke`'s walk.
+  let hub = newOperationHub[ContextTarget, RuntimeOutcome]()
+  rt.operations = hub
+
+  # --- What a context menu's entry runs, on the element it was opened on -----
+  # (§5.1: the entries are operation references, `ContextActionOperations`.) From
+  # a key there is no such element, and the walk goes on to the operation's other
+  # tables.
+  let chosenEntries = newOperationTable[ContextTarget, RuntimeOutcome]("context-menu-entry")
+  for action in ContextAction:
+    closureScope:
+      let chosen = action
+      if ContextActionOperations[chosen].len > 0:
+        chosenEntries.bindOp(ContextActionOperations[chosen], act do:
+          if not c.pointer:
+            return false
+          rt.runContextAction(chosen, c.target, outcome))
+  hub.add chosenEntries
+
+  # --- The palette and its field --------------------------------------------
+  let palette = newOperationTable[ContextTarget, RuntimeOutcome]("palette",
+    proc(): bool = rt.app.omnibar.isOpen)
+  palette.bindOp("palette.focus-previous", act(rt.app.omnibar.moveSelection(-1)))
+  palette.bindOp("palette.focus-next", act(rt.app.omnibar.moveSelection(1)))
+  palette.bindOp("palette.focus-page-up", act(rt.app.omnibar.moveSelection(-10)))
+  palette.bindOp("palette.focus-page-down", act(rt.app.omnibar.moveSelection(10)))
+  palette.bindOp("palette.accept", act(rt.acceptOmnibar(outcome)))
+  palette.bindOp("palette.close", act do:
+    rt.app.omnibar.close()
+    rt.note(""))
+  palette.bindOp("input.move-left", act(rt.app.omnibar.moveCursor(-1)))
+  palette.bindOp("input.move-right", act(rt.app.omnibar.moveCursor(1)))
+  palette.bindOp("input.move-start", act(rt.app.omnibar.cursorHome()))
+  palette.bindOp("input.move-end", act(rt.app.omnibar.cursorEnd()))
+  palette.bindOp("input.delete-backward", act(rt.app.omnibar.backspace()))
+  palette.bindOp("input.delete-forward", act(rt.app.omnibar.deleteForward()))
+  palette.bindOp("input.toggle-overwrite", act(rt.app.omnibar.toggleOverwrite()))
+  palette.onEach(["input.copy", "input.cut"], act do:
+    # A field holds no selection: the whole of it is what is copied.
+    if rt.app.omnibar.query.len > 0:
+      rt.copyToClipboard(rt.app.omnibar.query, "the query")
+      if c.name == "input.cut": rt.app.omnibar.setQuery(""))
+  palette.bindOp("input.paste", act do:
+    if not rt.holdPaste(ptPalette, resolutionOf(c)): rt.pasteIntoField(ptPalette))
+  palette.bindOp("input.commit", act(rt.acceptOmnibar(outcome)))
+  palette.bindOp("input.cancel", act do:
+    rt.app.omnibar.close()
+    rt.note(""))
+  for o in Catalogue:
+    if palette.holds(o.name): continue
+    if o.name.startsWith("palette."):
+      # An open palette takes its namespace whole: another palette chord while
+      # it is open does not stack a second one.
+      palette.bindOp(o.name, inert)
+    elif o.name.startsWith("input."):
+      palette.bindOp(o.name, act(rt.note("`" & c.fullName & "` is not available in the palette")))
+  hub.add palette
+
+  # --- The overlays every base shares (`overlay_rows`) -----------------------
+  let terminalInfo = newOperationTable[ContextTarget, RuntimeOutcome]("terminal-info",
+    proc(): bool = rt.terminalInfo.open)
+  terminalInfo.bindOp("terminal-info.close", act do:
+    rt.terminalInfo.open = false)
+  terminalInfo.bindOp("terminal-info.scroll-up", act do:
+    rt.terminalInfo.scroll = max(0, rt.terminalInfo.scroll - 1))
+  terminalInfo.bindOp("terminal-info.scroll-down", act do:
+    rt.terminalInfo.scroll = min(max(0, rt.terminalInfoBody().len - 1),
+                                 rt.terminalInfo.scroll + 1))
+  terminalInfo.bindOp("terminal-info.ask-again", act do:
+    let service = rt.terminalService
+    rt.terminalInfo.note =
+      if service.isNil or service.rerun.isNil: "no terminal to ask"
+      else: service.rerun())
+  # §10.3: the answer to "do the Legacy Computing glyphs look right?" sets
+  # modern-unicode for THIS terminal only (OQ-T6).
+  terminalInfo.onEach(["terminal-info.glyphs-look-right",
+                       "terminal-info.glyphs-look-wrong"], act do:
+    let service = rt.terminalService
+    let value = if c.name == "terminal-info.glyphs-look-right": "on" else: "off"
+    rt.terminalInfo.note =
+      if service.isNil or service.setForThisTerminal.isNil:
+        "this session keeps no state"
+      else: service.setForThisTerminal(lsModernUnicode, value))
+  terminalInfo.bindOp("terminal-info.copy-test", act do:
+    rt.copyToClipboard(TerminalInfoCopyText, "an OSC 52 test string")
+    rt.terminalInfo.note = "copied '" & TerminalInfoCopyText &
+      "' (" & rt.caps.clipboard & "): paste it to check")
+  hub.add terminalInfo
+
+  let contentView = newOperationTable[ContextTarget, RuntimeOutcome]("content-view",
+    proc(): bool = rt.app.content.open)
+  contentView.bindOp("content-view.close", act do:
+    rt.app.content = ContentOverlay())
+  contentView.bindOp("content-view.scroll-up", act(rt.app.content.scroll(-1)))
+  contentView.bindOp("content-view.scroll-down", act(rt.app.content.scroll(1)))
+  contentView.bindOp("content-view.page-up", act(rt.app.content.scroll(-10)))
+  contentView.bindOp("content-view.page-down", act(rt.app.content.scroll(10)))
+  hub.add contentView
+
+  let programMenu = newOperationTable[ContextTarget, RuntimeOutcome]("menu",
+    proc(): bool = rt.app.menu.isOpen)
+  programMenu.bindOp("menu.focus-previous", act(rt.app.menu.moveHighlight(-1)))
+  programMenu.bindOp("menu.focus-next", act(rt.app.menu.moveHighlight(1)))
+  programMenu.bindOp("menu.enter-folder", act do:
+    discard rt.app.menu.enterFolder())
+  programMenu.bindOp("menu.leave-folder", act do:
+    discard rt.app.menu.leaveFolder())
+  programMenu.bindOp("menu.close", act(rt.app.menu.escape()))
+  programMenu.bindOp("menu.accept", act do:
+    let vm = rt.app.menu
+    let chosen = vm.highlightedItem()
+    let picked = vm.activate()
+    if picked.ran:
+      rt.runMenuAction(picked.action, outcome)
+    else:
+      rt.sayRefusal(chosen))
+  hub.add programMenu
+
+  # --- The context menu -----------------------------------------------------
+  let menu = newOperationTable[ContextTarget, RuntimeOutcome]("context-menu",
+    proc(): bool = rt.app.contextMenu.open)
+  menu.bindOp("context-menu.focus-previous", act(rt.app.contextMenu.move(-1)))
+  menu.bindOp("context-menu.focus-next", act(rt.app.contextMenu.move(1)))
+  menu.bindOp("context-menu.focus-first", act(rt.app.contextMenu.moveToEnd(last = false)))
+  menu.bindOp("context-menu.focus-last", act(rt.app.contextMenu.moveToEnd(last = true)))
+  menu.bindOp("context-menu.accept", act do:
+    let chosen = rt.app.contextMenu.choose(-1)
+    if chosen.chosen and ContextActionOperations[chosen.action].len > 0:
+      discard rt.operations.invoke(
+        TerminalCall(name: ContextActionOperations[chosen.action],
+                     target: chosen.target, pointer: true), outcome))
+  menu.bindOp("context-menu.close", act(rt.app.contextMenu.close()))
+  for o in Catalogue:
+    if o.name.startsWith("context-menu.") and not menu.holds(o.name):
+      menu.bindOp(o.name, inert)
+  hub.add menu
+
+  # --- The focused pane -----------------------------------------------------
+  proc focusedOn(pane: PaneKind): bool =
+    if rt.prompt.open: return false
+    let (had, focused) = rt.focus.focusedPane()
+    had and focused == pane
+
+  let files = newOperationTable[ContextTarget, RuntimeOutcome]("pane:fileTree",
+    proc(): bool = focusedOn(paneFileTree))
+  files.onEach(ListMoveOperations, ask(rt.runFilesKeyOperation(c.name, outcome)))
+  files.onEach(["list.activate", "list.expand", "list.toggle-expand",
+                "context-menu.open"],
+               ask(rt.runFilesKeyOperation(c.name, outcome)))
+  hub.add files
+
+  let state = newOperationTable[ContextTarget, RuntimeOutcome]("pane:state",
+    proc(): bool = focusedOn(paneState) and not rt.app.variables.isEmpty)
+  state.onEach(ListMoveOperations & @["editor.scroll-half-page-down",
+                                      "editor.scroll-half-page-up",
+                                      "modal.return-to-normal",
+                                      "list.clear-selection", "list.activate",
+                                      "list.expand", "list.collapse",
+                                      "list.toggle-expand", "context-menu.open",
+                                      ShowValueOriginOperation],
+               ask(rt.runVariablesKeyOperation(c.name, outcome)))
+  hub.add state
+
+  let tests = newOperationTable[ContextTarget, RuntimeOutcome]("pane:testResults",
+    proc(): bool = focusedOn(paneTestResults) and rt.app.tests.loaded)
+  tests.onEach(ListMoveOperations & @["list.activate", "list.activate-redirected"],
+               ask(rt.runTestsKeyOperation(c.name, outcome)))
+  hub.add tests
+
+  proc problemsTable(owner: string; active: proc(): bool {.closure.}) =
+    let t = newOperationTable[ContextTarget, RuntimeOutcome](owner, active)
+    t.onEach(ListMoveOperations & @["list.activate"],
+             ask(rt.runProblemsKeyOperation(c.name, outcome)))
+    hub.add t
+  problemsTable("pane:problems",
+    proc(): bool = focusedOn(paneProblems) and rt.app.problems.loaded)
+
+  let requests = newOperationTable[ContextTarget, RuntimeOutcome]("pane:requests",
+    proc(): bool = focusedOn(paneRequests) and rt.app.requests.loaded)
+  requests.onEach(ListMoveOperations & @["list.activate", "list.filter",
+                                         "list.copy", "list.clear-selection"],
+                  ask(rt.runRequestsKeyOperation(c.name, outcome)))
+  hub.add requests
+
+  let lowLevel = newOperationTable[ContextTarget, RuntimeOutcome]("pane:lowLevelCode",
+    proc(): bool = focusedOn(paneLowLevelCode) and rt.app.lowLevel.loaded)
+  lowLevel.onEach(ListMoveOperations & @["list.activate", "list.copy",
+                                         "list.clear-selection",
+                                         "debugger.step-over", "debugger.step-into",
+                                         "debugger.reverse-step-over",
+                                         "debugger.reverse-step-into"],
+                  ask(rt.runLowLevelKeyOperation(c.name, outcome)))
+  hub.add lowLevel
+
+  let verification = newOperationTable[ContextTarget, RuntimeOutcome]("pane:verification",
+    proc(): bool = focusedOn(paneVerification) and rt.app.verification.loaded)
+  verification.onEach(ListMoveOperations & @["list.activate"],
+                      ask(rt.runVerificationKeyOperation(c.name, outcome)))
+  hub.add verification
+
+  # PLAT-59: Pixel History and the Shader Debugger's rows.
+  let visual = newOperationTable[ContextTarget, RuntimeOutcome]("pane:visual",
+    proc(): bool = focusedOn(panePixelHistory) or focusedOn(paneShaderDebug))
+  visual.onEach(["list.focus-next", "list.focus-previous", "list.focus-first",
+                 "list.focus-last", "list.focus-page-down", "list.focus-page-up",
+                 "list.activate"], ask do:
+    let (_, focused) = rt.focus.focusedPane()
+    rt.runVisualKeyOperation(focused, c.name, outcome))
+
+  let constraints = newOperationTable[ContextTarget, RuntimeOutcome]("pane:constraints",
+    proc(): bool = focusedOn(paneConstraints) and rt.app.constraints.loaded)
+  constraints.onEach(ListMoveOperations & @["list.activate", "list.copy"],
+                     ask(rt.runConstraintsKeyOperation(c.name, outcome)))
+  hub.add constraints
+  hub.add visual
+
+  # PLAT-52: the Terminal Output pane's own keys while it is focused.
+  let terminalOutput = newOperationTable[ContextTarget, RuntimeOutcome]("pane:terminalOutput",
+    proc(): bool = focusedOn(paneTerminalOutput) and rt.terminalOutputFocused)
+  terminalOutput.bindOp("terminal-output.toggle-view", act(rt.toggleTerminalView(outcome)))
+  terminalOutput.onEach(["view.scroll-left", "view.scroll-right"], act do:
+    if not rt.app.terminalOutput.screenShown:
+      return false
+    rt.stepTerminalWrite((if c.name == "view.scroll-left": -1 else: 1), outcome))
+  hub.add terminalOutput
+
+  # PLAT-55: the docked Problems pane, pressed while shown, takes the list
+  # keys too (`dockKeys`).
+  problemsTable("dock:problems",
+    proc(): bool = not rt.prompt.open and rt.hasDockKeys and
+      rt.dockKeys == paneProblems and rt.app.problems.loaded and
+      rt.paneAreaOf(paneProblems).width > 0)
+
+  # --- The command line's field ---------------------------------------------
+  let prompt = newOperationTable[ContextTarget, RuntimeOutcome]("command-line",
+    proc(): bool = rt.prompt.open)
+  prompt.onEach(["input.copy", "input.cut"], act do:
+    if rt.prompt.buffer.len > 0:
+      rt.copyToClipboard(rt.prompt.buffer, "the command line")
+      if c.name == "input.cut":
+        discard rt.prompt.moveCursor(KeyEnd)
+        while rt.prompt.buffer.len > 0:
+          discard rt.prompt.backspace())
+  prompt.bindOp("input.paste", act do:
+    if not rt.holdPaste(ptPrompt, resolutionOf(c)): rt.pasteIntoField(ptPrompt))
+  const PromptEdits = [("input.commit", "Enter"), ("input.cancel", "Esc"),
+                       ("input.delete-backward", "Backspace"),
+                       ("input.delete-forward", "Delete"),
+                       ("input.move-left", "Left"), ("input.move-right", "Right"),
+                       ("input.move-start", "Home"), ("input.move-end", "End"),
+                       ("input.history-previous", "Up"),
+                       ("input.history-next", "Down"), ("input.complete", "Tab")]
+  for (name, key) in PromptEdits:
+    closureScope:
+      let editKey = key
+      prompt.bindOp(name, act(rt.runPromptKey(editKey, outcome)))
+  for o in Catalogue:
+    if o.name.startsWith("input.") and not prompt.holds(o.name):
+      prompt.bindOp(o.name, act(rt.note("`" & c.fullName & "` is not available in the command line")))
+  hub.add prompt
+
+  # --- What an element's press runs (`pointer_rows`), and a hosted pane's row ---
+  let elements = newOperationTable[ContextTarget, RuntimeOutcome]("elements")
+  template onTarget(name: string; body: untyped) =
+    ## An operation that acts on an element: the row a press hit-tested, or a
+    ## hosted pane's row. From a key there is no element here: it says so.
+    elements.bindOp(name, act do:
+      if not c.pointer:
+        return false
+      body)
+  onTarget("calltrace.go-to-call"):
+    outcome.jumpsToCall = true
+    outcome.callIndex = c.target.index
+    rt.rebuildFocus()
+    discard rt.focus.focusPaneKind(paneCalltrace)
+  onTarget("calltrace.toggle-call"):
+    outcome.togglesCall = true
+    outcome.callIndex = c.target.index
+  onTarget("event-log.jump"):
+    outcome.requestClick(PaneClickRequest(kind: pcEventJump, index: c.target.index,
+                                          tick: c.target.tick, path: c.target.path,
+                                          line: c.target.line, text: c.target.text))
+  onTarget("event-log.show-content"):
+    rt.showContent("event #" & $c.target.index & " at tick " & $c.target.tick &
+                     (if c.target.path.len > 0:
+                        "  " & c.target.path & ":" & $c.target.line
+                      else: ""),
+                   c.target.text, outcome = outcome)
+  onTarget("event-log.sort"):
+    outcome.requestClick(PaneClickRequest(
+      kind: pcEventOrder,
+      order: rt.app.eventLog.order.clickedHeader(EventLogColumn(c.target.index))))
+  onTarget("variables.toggle-expand"):
+    discard rt.app.variables.toggleNode(c.target.path)
+  onTarget("variables.value-history"):
+    outcome.requestClick(PaneClickRequest(kind: pcValueHistory, path: c.target.path))
+  onTarget("variables.value-origin"):
+    outcome.requestClick(PaneClickRequest(kind: pcValueOrigin, path: c.target.path))
+  onTarget("variables.load-more"):
+    discard rt.app.variables.expandMore(c.target.path)
+  onTarget("history.seek-to-tick"):
+    outcome.requestClick(PaneClickRequest(kind: pcSeek, tick: c.target.tick))
+  onTarget("file-tree.open"):
+    outcome.requestClick(PaneClickRequest(kind: pcOpenFile, path: c.target.path))
+  onTarget("file-tree.toggle-folder"):
+    outcome.requestClick(PaneClickRequest(kind: pcToggleFolder, path: c.target.path))
+  onTarget("file-tree.activate"):
+    rt.activateFilesRow(c.target.index.int, outcome)
+  hub.add elements
+
+  # --- The session ----------------------------------------------------------
+  let session = newOperationTable[ContextTarget, RuntimeOutcome]("session")
+  # PLAT-70 Part C (Find-And-Incremental-Search.md §3, §4): the find session's
+  # operations, onto the shared `FindVM`.
+  session.onEach(["find.next", "find.previous"],
+                 act(rt.walkFind(c.name == "find.next", outcome)))
+  session.onEach(["find.close", "find.accept"], act(rt.acceptFind(outcome)))
+  session.bindOp("find.cancel", act(rt.cancelFind(outcome)))
+  session.bindOp("find.open-symbol-at-caret",
+             act(rt.openFindSession(backward = false, symbol = true, outcome)))
+  session.onEach(["find.next-selection-match", "find.previous-selection-match"],
+                 act(rt.findSelectionMatch(c.name == "find.previous-selection-match",
+                                           c.nowMs, outcome)))
+  session.onEach(["find.toggle-case", "find.toggle-whole-word", "find.yank-word"],
+                 act(rt.changeFind(c.name, outcome)))
+  session.bindOp("editor.toggle-read-only", act do:
+      let buf = rt.editorBuffer()
+      buf.doc.setReadOnly(not buf.doc.isReadOnly)
+      rt.note(if buf.doc.isReadOnly: "the editor is read-only"
+              else: "the editor is writable — Ctrl+E makes it read-only again"),
+    proc(): Enablement =
+      if rt.editorBuffer().isNil:
+        operationDisabled("there is no document in the editor to make writable")
+      else: AlwaysEnabled)
+  session.bindOp("editor.toggle-tracepoint",
+             act(rt.openTracepointEditorAt(rt.app.source.path, rt.editorCaretLine())))
+  # M76: the keymap's Stop (CUA's `Shift+F5`) — the menu item's proc.
+  session.bindOp("debugger.stop", act(rt.stopDebugging(outcome)),
+                 proc(): Enablement =
+                   if rt.hasDebugSession: AlwaysEnabled
+                   else: operationDisabled("Stop: " & NoDebugSessionReason))
+  # The toolbar's run-to-entry: this terminal's jump to the recording's start.
+  session.bindOp("debugger.run-to-entry", act(rt.performAction(kaJumpToStart, outcome)))
+  session.bindOp("editor.toggle-tab-moves-focus", act do:
+    rt.tabMovesFocus = not rt.tabMovesFocus
+    rt.note(if rt.tabMovesFocus: "Tab moves the focus (Ctrl+M again to indent)"
+            else: "Tab indents"))
+  session.bindOp("list.toggle-expand", ask(rt.callTraceTreeKey(c.name, outcome)))
+  session.bindOp("list.expand", act do:
+    if not rt.callTraceTreeKey(c.name, outcome):
+      rt.performAction(kaExpandNode, outcome))
+  session.bindOp("list.collapse", act do:
+    if not rt.callTraceTreeKey(c.name, outcome):
+      rt.performAction(kaCollapseNode, outcome))
+  # PLAT-70 Part B (Horizontal-Overflow.md §5.3).
+  session.bindOp("list.show-detail", act(rt.showDetail(outcome)))
+  # PLAT-70 Part E: the focused Variables pane takes it above; from anywhere
+  # else (the palette) it says where it works.
+  session.bindOp(ShowValueOriginOperation, act do:
+    rt.note("Show Value Origin works on the variable selected in the " &
+            "Variables pane"))
+  # PLAT-70 Part B (§5.2): the Event Log is the table whose columns resize.
+  session.bindOp("table.resize-column",
+             act(rt.resizeEventLogColumn(c.argument, outcome)))
+  session.bindOp("list.copy", act do:
+    let (text, what) = rt.focusedRowText()
+    if text.len == 0: rt.note("nothing is selected here to copy")
+    else: rt.copyToClipboard(text, what))
+  session.bindOp("list.focus-previous", act(rt.performAction(kaScrollLineUp, outcome)))
+  session.bindOp("list.focus-next", act(rt.performAction(kaScrollLineDown, outcome)))
+  session.bindOp("list.focus-page-up", act(rt.performAction(kaHalfPageUp, outcome)))
+  session.bindOp("list.focus-page-down", act(rt.performAction(kaHalfPageDown, outcome)))
+  # PLAT-70 (Horizontal-Overflow.md §4.4): the output panes' view.
+  session.onEach(["view.scroll-left", "view.scroll-right", "view.scroll-left-half",
+                  "view.scroll-right-half", "view.scroll-to-line-start"],
+                 act do:
+                   discard rt.runViewOperation(c.name, outcome))
+  session.bindOp("help.keyboard-shortcuts", act(rt.showShortcutReference(outcome)))
+  session.bindOp("help.check-key-delivery", act do:
+    rt.keyCheck = startCheck()
+    rt.note("keys check: press keys to see how they arrive; Esc ends the check"))
+  session.onEach(["menu.open", "menu.toggle", "menu.open-folder"], act do:
+    rt.runMenuOperation(c.name, c.argument))
+  session.bindOp("layout.reveal-next-docked", act(rt.cycleReveal(outcome)))
+  # PLAT-47: `Esc` CANCELS A GESTURE IN FLIGHT — a drag's drop tint and ghost
+  # go, a held divider snaps back, and nothing is committed.
+  session.bindOp("layout.cancel-drag", act do:
+    if not rt.layoutBindingEnabled():
+      return false
+    let cancelled = rt.app.layoutBinding.cancelGesture()
+    rt.rebuildFocus()
+    rt.note(cancelled.message)
+    outcome.detail = cancelled.message)
+  # PLAT-57: `search.find-in-files(query?)` — with a pattern, the search;
+  # without, the pane and its field (`Ctrl+Shift+F`).
+  session.bindOp("search.find-in-files", act do:
+    if c.argument.len > 0: rt.runFindInFiles(c.argument, outcome)
+    else: rt.openFindInFiles(outcome))
+  # Build-Output-Pane.md §3.11: `Ctrl+Shift+B` — the build task picker.
+  session.bindOp("build.run", act(rt.note(rt.openBuildTaskPicker())))
+  # PLAT-60: Alt+1, the desktop's `aLowLevel1` — the Low Level Code pane
+  # beside the source.
+  session.bindOp("view.low-level-code", act(rt.openLowLevelCode(outcome)))
+  # PLAT-55 (EMT-D22): `F8` / `Shift+F8` in Edit mode, `Ctrl+Alt+N` /
+  # `Ctrl+Alt+P` — the desktop's `aGotoNextError` / `aGotoPreviousError`.
+  session.onEach(["problems.next", "problems.previous"], act do:
+    rt.problemsCommand((if c.name == "problems.next": pcmNext else: pcmPrevious),
+                       -1, outcome))
+  # PLAT-57 (§5.3): `F4` / `Shift+F4`, `Alt+G N` / `Alt+G P`.
+  session.onEach(["search.next-result", "search.previous-result"], act do:
+    rt.stepFindInFiles((if c.name == "search.next-result": 1 else: -1), outcome))
+  # PLAT-57: `Alt+C` / `Alt+W` / `Alt+R` in Find in Files' field (the omnibox
+  # on `:grep`, `searchInputFocus`) — the toggle flips and a search that ran
+  # runs again.
+  session.onEach(["search.toggle-case", "search.toggle-whole-word",
+                  "search.toggle-regex"], act do:
+    rt.note(if rt.app.toggleSearchOption.isNil:
+              "Find in Files needs a recording or a project to search"
+            else: rt.app.toggleSearchOption(c.name)))
+  # The palette's openers (`Ctrl+P`, `Ctrl+Shift+P`, `Ctrl+Shift+O`, `Ctrl+T`).
+  for o in Catalogue:
+    if paletteQueryOf(o.name).ok:
+      session.bindOp(o.name, act do:
+        outcome.action = kaCommandPalette
+        rt.openOmnibar(paletteQueryOf(c.name).query))
+  # Everything the terminal's action vocabulary has.
+  for (operation, _) in OperationActions:
+    let (name, _) = splitOperation(operation)
+    if not session.holds(name):
+      session.bindOp(name, act do:
+        let action = actionOfOperation(c.fullName)
+        if action == kaNone: return false
+        rt.performAction(action, outcome))
+  hub.add session
+
 proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
                   outcome: var RuntimeOutcome) =
-  ## **THE TERMINAL'S DISPATCH** of a resolved operation onto its ViewModels:
-  ## the editing vocabulary onto the editor's document, the overlays' and
-  ## inputs' operations onto the overlay that is open, everything the
-  ## terminal's action vocabulary has onto `performAction`. An operation the
-  ## terminal does not perform is INERT AND SAYS SO (Input-Routing IR-6).
-  let op = if res.argument.len > 0: res.operation & "(" & res.argument & ")"
-           else: res.operation
+  ## **THE TERMINAL'S DISPATCH** of a resolved operation: the editing vocabulary
+  ## onto the editor's document, everything else through the operation tables.
+  ## An operation the terminal does not perform, or one that is disabled now, is
+  ## INERT AND SAYS SO (Input-Routing IR-6).
   outcome.repaint = true
   if '.' notin res.operation:
     let buf = rt.editorBuffer()
@@ -8721,263 +9219,17 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
     else:
       rt.runEditorOperation(buf, res, nowMs, outcome)
     return
-  # The overlays and inputs.
-  if res.operation.startsWith("palette.") and rt.app.omnibar.isOpen:
-    case res.operation
-    of "palette.focus-previous": rt.app.omnibar.moveSelection(-1)
-    of "palette.focus-next": rt.app.omnibar.moveSelection(1)
-    of "palette.focus-page-up": rt.app.omnibar.moveSelection(-10)
-    of "palette.focus-page-down": rt.app.omnibar.moveSelection(10)
-    of "palette.accept": rt.acceptOmnibar(outcome)
-    of "palette.close":
-      rt.app.omnibar.close()
-      rt.note("")
-    else: discard
-    return
-  if res.operation.startsWith("input.") and rt.app.omnibar.isOpen:
-    case res.operation
-    of "input.move-left": rt.app.omnibar.moveCursor(-1)
-    of "input.move-right": rt.app.omnibar.moveCursor(1)
-    of "input.move-start": rt.app.omnibar.cursorHome()
-    of "input.move-end": rt.app.omnibar.cursorEnd()
-    of "input.delete-backward": rt.app.omnibar.backspace()
-    of "input.delete-forward": rt.app.omnibar.deleteForward()
-    of "input.toggle-overwrite": rt.app.omnibar.toggleOverwrite()
-    of "input.copy", "input.cut":
-      # A field holds no selection: the whole of it is what is copied.
-      if rt.app.omnibar.query.len > 0:
-        rt.copyToClipboard(rt.app.omnibar.query, "the query")
-        if res.operation == "input.cut": rt.app.omnibar.setQuery("")
-    of "input.paste":
-      if not rt.holdPaste(ptPalette, res): rt.pasteIntoField(ptPalette)
-    of "input.commit": rt.acceptOmnibar(outcome)
-    of "input.cancel":
-      rt.app.omnibar.close()
-      rt.note("")
-    else: rt.note("`" & op & "` is not available in the palette")
-    return
-  if res.operation.startsWith("context-menu.") and rt.app.contextMenu.open:
-    case res.operation
-    of "context-menu.focus-previous": rt.app.contextMenu.move(-1)
-    of "context-menu.focus-next": rt.app.contextMenu.move(1)
-    of "context-menu.focus-first": rt.app.contextMenu.moveToEnd(last = false)
-    of "context-menu.focus-last": rt.app.contextMenu.moveToEnd(last = true)
-    of "context-menu.accept":
-      let chosen = rt.app.contextMenu.choose(-1)
-      if chosen.chosen:
-        rt.runContextAction(chosen.action, chosen.target, outcome)
-    of "context-menu.close": rt.app.contextMenu.close()
-    else: discard
-    return
-  # K17 / K18 / K19 from the keyboard, on the focused Files pane.
-  if not rt.prompt.open:
-    let (had, focused) = rt.focus.focusedPane()
-    if had and focused == paneFileTree and
-       rt.runFilesKeyOperation(res.operation, outcome):
-      return
-    # PLAT-70 Part E: the Variables pane, its origin chains' hops included.
-    if had and focused == paneState and not rt.app.variables.isEmpty and
-       rt.runVariablesKeyOperation(res.operation, outcome):
-      return
-    if had and focused == paneTestResults and rt.app.tests.loaded and
-       rt.runTestsKeyOperation(res.operation, outcome):
-      return
-    if had and focused == paneProblems and rt.app.problems.loaded and
-       rt.runProblemsKeyOperation(res.operation, outcome):
-      return
-    if had and focused == paneRequests and rt.app.requests.loaded and
-       rt.runRequestsKeyOperation(res.operation, outcome):
-      return
-    if had and focused == paneLowLevelCode and rt.app.lowLevel.loaded and
-       rt.runLowLevelKeyOperation(res.operation, outcome):
-      return
-    if had and focused == paneVerification and
-       rt.app.verification.loaded and
-       rt.runVerificationKeyOperation(res.operation, outcome):
-      return
-    if had and focused == paneConstraints and rt.app.constraints.loaded and
-       rt.runConstraintsKeyOperation(res.operation, outcome):
-      return
-    if had and focused in {panePixelHistory, paneShaderDebug} and
-       rt.runVisualKeyOperation(focused, res.operation, outcome):
-      return
-  # PLAT-55: the docked Problems pane, pressed while shown, takes the list
-  # keys too (`dockKeys`).
-  if not rt.prompt.open and rt.hasDockKeys and rt.dockKeys == paneProblems and
-     rt.app.problems.loaded and rt.paneAreaOf(paneProblems).width > 0 and
-     rt.runProblemsKeyOperation(res.operation, outcome):
-    return
-  if res.operation.startsWith("input.") and rt.prompt.open:
-    case res.operation
-    of "input.copy", "input.cut":
-      if rt.prompt.buffer.len > 0:
-        rt.copyToClipboard(rt.prompt.buffer, "the command line")
-        if res.operation == "input.cut":
-          discard rt.prompt.moveCursor(KeyEnd)
-          while rt.prompt.buffer.len > 0:
-            discard rt.prompt.backspace()
-      return
-    of "input.paste":
-      if not rt.holdPaste(ptPrompt, res): rt.pasteIntoField(ptPrompt)
-      return
-    else: discard
-    let key = case res.operation
-              of "input.commit": "Enter"
-              of "input.cancel": "Esc"
-              of "input.delete-backward": "Backspace"
-              of "input.delete-forward": "Delete"
-              of "input.move-left": "Left"
-              of "input.move-right": "Right"
-              of "input.move-start": "Home"
-              of "input.move-end": "End"
-              of "input.history-previous": "Up"
-              of "input.history-next": "Down"
-              of "input.complete": "Tab"
-              else: ""
-    if key.len == 0:
-      rt.note("`" & op & "` is not available in the command line")
-    else:
-      rt.runPromptKey(key, outcome)
-    return
-  case res.operation
-  # PLAT-70 Part C (Find-And-Incremental-Search.md §3, §4): the find
-  # session's operations, onto the shared `FindVM`.
-  of "find.next", "find.previous":
-    rt.walkFind(res.operation == "find.next", outcome)
-    return
-  of "find.close", "find.accept":
-    rt.acceptFind(outcome)
-    return
-  of "find.cancel":
-    rt.cancelFind(outcome)
-    return
-  of "find.open", "find.open-backward", "find.open-symbol-at-caret":
-    if res.operation == "find.open-symbol-at-caret":
-      rt.openFindSession(backward = false, symbol = true, outcome)
-      return
-    # Through the local action, which the modal machine's transition and the
-    # context menu's Find share (`applyLocalAction`).
-  of "find.next-selection-match", "find.previous-selection-match":
-    rt.findSelectionMatch(res.operation == "find.previous-selection-match",
-                          nowMs, outcome)
-    return
-  of "find.toggle-case", "find.toggle-whole-word", "find.yank-word":
-    rt.changeFind(res.operation, outcome)
-    return
-  of "editor.toggle-read-only":
-    let buf = rt.editorBuffer()
-    if buf.isNil:
-      rt.note("there is no document in the editor to make writable")
-    else:
-      buf.doc.setReadOnly(not buf.doc.isReadOnly)
-      rt.note(if buf.doc.isReadOnly: "the editor is read-only"
-              else: "the editor is writable — Ctrl+E makes it read-only again")
-    return
-  of "editor.toggle-tracepoint":
-    rt.openTracepointEditorAt(rt.app.source.path, rt.editorCaretLine())
-    return
-  of "debugger.stop":
-    # M76: the keymap's Stop (CUA's `Shift+F5`) — the menu item's proc.
-    rt.stopDebugging(outcome)
-    return
-  of "editor.toggle-tab-moves-focus":
-    rt.tabMovesFocus = not rt.tabMovesFocus
-    rt.note(if rt.tabMovesFocus: "Tab moves the focus (Ctrl+M again to indent)"
-            else: "Tab indents")
-    return
-  of "list.expand", "list.collapse", "list.toggle-expand":
-    if rt.callTraceTreeKey(res.operation, outcome):
-      return
-  of "list.show-detail":
-    # PLAT-70 Part B (Horizontal-Overflow.md §5.3).
-    rt.showDetail(outcome)
-    return
-  of ShowValueOriginOperation:
-    # PLAT-70 Part E: the focused Variables pane takes it above; from
-    # anywhere else (the palette) it says where it works.
-    rt.note("Show Value Origin works on the variable selected in the " &
-            "Variables pane")
-    outcome.repaint = true
-    return
-  of "table.resize-column":
-    # PLAT-70 Part B (§5.2): the Event Log is the table whose columns resize.
-    rt.resizeEventLogColumn(res.argument, outcome)
-    return
-  of "list.copy":
-    let (text, what) = rt.focusedRowText()
-    if text.len == 0: rt.note("nothing is selected here to copy")
-    else: rt.copyToClipboard(text, what)
-    return
-  of "list.focus-previous": rt.performAction(kaScrollLineUp, outcome); return
-  of "list.focus-next": rt.performAction(kaScrollLineDown, outcome); return
-  of "list.focus-page-up": rt.performAction(kaHalfPageUp, outcome); return
-  of "list.focus-page-down": rt.performAction(kaHalfPageDown, outcome); return
-  of "view.scroll-left", "view.scroll-right", "view.scroll-left-half",
-     "view.scroll-right-half", "view.scroll-to-line-start":
-    # PLAT-70 (Horizontal-Overflow.md §4.4): the output panes' view.
-    discard rt.runViewOperation(res.operation, outcome)
-    return
-  of "help.keyboard-shortcuts":
-    rt.showShortcutReference(outcome)
-    return
-  of "help.check-key-delivery":
-    rt.keyCheck = startCheck()
-    rt.note("keys check: press keys to see how they arrive; Esc ends the check")
-    return
-  of "menu.open", "menu.toggle", "menu.open-folder":
-    rt.runMenuOperation(res.operation, res.argument)
-    outcome.repaint = true
-    return
-  of "layout.reveal-next-docked":
-    rt.cycleReveal(outcome)
-    return
-  of "search.find-in-files":
-    # PLAT-57: `search.find-in-files(query?)` — with a pattern, the search;
-    # without, the pane and its field (`Ctrl+Shift+F`).
-    if res.argument.len > 0: rt.runFindInFiles(res.argument, outcome)
-    else: rt.openFindInFiles(outcome)
-    return
-  of "build.run":
-    # Build-Output-Pane.md §3.11: `Ctrl+Shift+B` — the build task picker.
-    rt.note(rt.openBuildTaskPicker())
-    outcome.repaint = true
-    return
-  of "view.low-level-code":
-    # PLAT-60: Alt+1, the desktop's `aLowLevel1` — the Low Level Code pane
-    # beside the source.
-    rt.openLowLevelCode(outcome)
-    return
-  of "problems.next", "problems.previous":
-    # PLAT-55 (EMT-D22): `F8` / `Shift+F8` in Edit mode, `Ctrl+Alt+N` /
-    # `Ctrl+Alt+P` — the desktop's `aGotoNextError` / `aGotoPreviousError`.
-    rt.problemsCommand((if res.operation == "problems.next": pcmNext
-                        else: pcmPrevious), -1, outcome)
-    return
-  of "search.next-result", "search.previous-result":
-    # PLAT-57 (§5.3): `F4` / `Shift+F4`, `Alt+G N` / `Alt+G P`.
-    rt.stepFindInFiles((if res.operation == "search.next-result": 1 else: -1),
-                       outcome)
-    return
-  of "search.toggle-case", "search.toggle-whole-word", "search.toggle-regex":
-    # PLAT-57: `Alt+C` / `Alt+W` / `Alt+R` in Find in Files' field (the
-    # omnibox on `:grep`, `searchInputFocus`) — the toggle flips and a search
-    # that ran runs again.
-    rt.note(if rt.app.toggleSearchOption.isNil:
-              "Find in Files needs a recording or a project to search"
-            else: rt.app.toggleSearchOption(res.operation))
-    return
-  else: discard
-  let palette = paletteQueryOf(res.operation)
-  if palette.ok:
-    outcome.action = kaCommandPalette
-    rt.openOmnibar(palette.query)
-    return
-  let action = actionOfOperation(op)
-  if action == kaNone:
-    rt.note("`" & op & "` (" & operationLabelOf(res.operation) &
+  if rt.operations.isNil:
+    rt.buildOperationTables()
+  let call = TerminalCall(name: res.operation, argument: res.argument,
+                          args: res.args, nowMs: nowMs)
+  let answer = rt.operations.invoke(call, outcome)
+  case answer.kind
+  of oiRan: discard
+  of oiDisabled: rt.note(answer.reason)
+  of oiAbsent:
+    rt.note("`" & call.fullName & "` (" & operationLabelOf(res.operation) &
             ") is not available in the terminal")
-    return
-  rt.performAction(action, outcome)
 
 proc runResolution(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
                    outcome: var RuntimeOutcome) =
@@ -9028,17 +9280,15 @@ proc runPromptKey(rt: TuiRuntime; key: string;
   if findField and rt.app.find.fieldSelected:
     # §3.2: a seed is selected in the field, so the first typed character
     # replaces it (and a delete removes it).
-    if key in ["Backspace", "Delete", "\x7f", "\b"]:
+    if isFieldDeleteKey(key):
       rt.fillFieldWith("")
       rt.findFieldEdited(outcome)
       outcome.repaint = true
       return
-    if key.len > 0 and key notin ["Enter", "Esc", "\r", "\n", "\x1b",
-                                  "Tab", "\t", "Left", "Right", "Up", "Down",
-                                  "Home", "End"]:
+    if key.len > 0 and not isFieldMoveKey(key):
       rt.fillFieldWith("")
     rt.app.find.fieldSelected = false
-  let line = if key == "Enter": rt.prompt.buffer else: ""
+  let line = if isFieldCommitKey(key): rt.prompt.buffer else: ""
   let cla = rt.prompt.applyKey(key, rt.promptCandidates())
   outcome.repaint = true
   if findField and rt.prompt.open and
@@ -9128,7 +9378,7 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
     return rt.handleToken(token[1 .. 1], nowMs)
   # PLAT-71: `:terminal-info` takes every token while it is open.
   if rt.terminalInfo.open:
-    rt.handleTerminalInfoToken(token, result)
+    rt.handleTerminalInfoToken(token, nowMs, result)
     return
 
   # PLAT-6's MOUSE HALF, ROUTED HERE AND ONLY WHEN A BINDING IS ENABLED. The
@@ -9232,51 +9482,20 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
     if isMouse:
       rt.routeMouseReport(event, result)
       return
-    # PLAT-47: `Esc` CANCELS A GESTURE IN FLIGHT — a drag's drop tint and
-    # ghost go, a held divider snaps back, and nothing is committed (`cancel`
-    # takes no layout). Only when one is in flight: otherwise `Esc` is the
-    # mode key it has always been.
-    if rt.keyOf(token) == "Esc" and not rt.app.menu.isOpen and
-        not rt.app.omnibar.isOpen and
-        rt.app.layoutBinding.interaction.kind in {ikDraggingTab,
-                                                  ikResizingSplit,
-                                                  ikRevealingDock}:
-      let cancelled = rt.app.layoutBinding.cancelGesture()
-      rt.rebuildFocus()
-      rt.note(cancelled.message)
-      result.detail = cancelled.message
-      result.repaint = true
-      return
-
   # PLAT-51: a new tab's Welcome Screen takes its keys (its form, the
   # arrows, Enter); everything else falls through.
   if rt.routeWelcomeKey(token, result):
     return
 
-  # PLAT-50: an event's content overlay closes on Esc / q / Enter and
-  # scrolls; the program menu (PLAT-48/49) owns every key while open, with
-  # its type-to-select. Both are the terminal's own widgets over their
-  # ViewModels (`ContentOverlay`, `MenuVM`), outside the keymap.
-  if rt.app.content.open:
-    case rt.keyOf(token)
-    of "Escape", "Esc", "Enter", "q":
-      rt.app.content = ContentOverlay()
-      result.repaint = true
-      return
-    of "Up", "k": rt.app.content.scroll(-1); result.repaint = true; return
-    of "Down", "j": rt.app.content.scroll(1); result.repaint = true; return
-    of "PageUp": rt.app.content.scroll(-10); result.repaint = true; return
-    of "PageDown", "Space":
-      rt.app.content.scroll(10); result.repaint = true; return
-    else: discard
+  # PLAT-50: an event's content overlay and the program menu (PLAT-48/49) are
+  # the terminal's own widgets over their ViewModels: their rows are pushed
+  # layers (`overlay_rows`), and the menu owns every key while open, with its
+  # type-to-select.
+  if rt.app.content.open and
+     rt.overlayTakes(rt.keyOf(token), ContentViewTable, nowMs, result):
+    return
   if rt.app.menu.isOpen:
     rt.handleMenuKey(token, nowMs, result)
-    return
-
-  # PLAT-52: THE TERMINAL OUTPUT'S OWN KEYS while it is focused — the
-  # previous / next write and the view toggle, keys no global binding uses.
-  if rt.terminalOutputOwnsToken(token):
-    rt.routeTokenToTerminalOutput(token, result)
     return
 
   # PLAT-59: THE VIDEO PLAYER'S OWN KEYS while it is focused — the
@@ -9288,7 +9507,7 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   # PLAT-68: `:keys check` — every key is reported, none is run, until Esc.
   let name = rt.keyOf(token)
   if rt.keyCheck.active:
-    if name == "Esc":
+    if endsKeyCheck(name):
       var bound: seq[string] = @[]
       for b in rt.router.effective.bindings & rt.router.user.bindings:
         if b.chords.len == 1: bound.add b.chords[0]
@@ -9761,33 +9980,14 @@ proc runPaneOperation*(rt: TuiRuntime; operation: string; args: PaneOpArgs;
   ## A hosted pane's operation (`PaneOperations`), as the outcome the same
   ## click on the terminal's pane produces; the host applies it as it applies
   ## a click's (`tui_session.applyOutcome`). False for an unknown operation.
+  if rt.operations.isNil:
+    rt.buildOperationTables()
   outcome.repaint = true
-  case operation
-  of "calltrace.go-to-call":
-    outcome.jumpsToCall = true
-    outcome.callIndex = args.index
-  of "calltrace.toggle-call":
-    outcome.togglesCall = true
-    outcome.callIndex = args.index
-  of "event-log.jump":
-    outcome.requestClick(PaneClickRequest(kind: pcEventJump, index: args.index,
-                                          tick: args.tick, path: args.path,
-                                          line: args.line, text: args.text))
-  of "variables.toggle-expand":
-    discard rt.app.variables.toggleNode(args.path)
-  of "variables.value-history":
-    outcome.requestClick(PaneClickRequest(kind: pcValueHistory, path: args.path))
-  of "variables.value-origin":
-    outcome.requestClick(PaneClickRequest(kind: pcValueOrigin, path: args.path))
-  of "variables.load-more":
-    discard rt.app.variables.expandMore(args.path)
-  of "history.seek-to-tick":
-    outcome.requestClick(PaneClickRequest(kind: pcSeek, tick: args.tick))
-  of "file-tree.open":
-    outcome.requestClick(PaneClickRequest(kind: pcOpenFile, path: args.path))
-  of "file-tree.toggle-folder":
-    outcome.requestClick(PaneClickRequest(kind: pcToggleFolder, path: args.path))
-  else:
+  let call = TerminalCall(name: operation, pointer: true, target: ContextTarget(
+    index: args.index, tick: args.tick, path: args.path, line: args.line,
+    text: args.text))
+  if not isCatalogued(operation) or
+     rt.operations.invoke(call, outcome).kind != oiRan:
     outcome.repaint = false
     return false
   true

@@ -33,6 +33,12 @@ type
     ekGutter = "gutter"
     ekMenu = "menu"
     ekOverlay = "overlay"
+    ekToggle = "toggle"
+      ## A row's expander: what a press on it means is not the row's.
+    ekHeader = "header"
+      ## A table's column header.
+    ekValue = "value"
+      ## A value shown inline, in the editor or a row.
 
   ScopeElement* = object
     kind*: ElementKind
@@ -265,7 +271,8 @@ func tablesOf*(e: ScopeElement): seq[string] =
   of ekPane:
     if isListPane(e.paneKind): @[PaneTablePrefix & e.paneKind, ListTable]
     else: @[PaneTablePrefix & e.paneKind]
-  of ekTab, ekRow, ekButton, ekGutter, ekMenu, ekOverlay: @[]
+  of ekTab, ekRow, ekButton, ekGutter, ekMenu, ekOverlay, ekToggle, ekHeader,
+     ekValue: @[]
 
 func `$`*(e: ScopeElement): string =
   if e.kind == ekPane: "pane:" & e.paneKind

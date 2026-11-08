@@ -584,12 +584,6 @@ when defined(js):
     let nav = dom_api.getElementById(dom_api.document, cstring NavigationMenuId)
     if dom_api.isNodeNil(dom_api.Node(nav)):
       return
-    dom_api.addEventListener(dom_api.Node(nav), cstring"keydown",
-      proc(ev: dom_api.Event) =
-        if ev.eventKeyCode() == ESC_KEY_CODE:
-          self.closeMenu()
-          self.data.redraw())
-
     let main = dom_api.getElementById(dom_api.document, cstring"menu-main")
     if not dom_api.isNodeNil(dom_api.Node(main)):
       dom_api.addEventListener(dom_api.Node(main), cstring"mousedown",
@@ -627,36 +621,41 @@ when defined(js):
     self.requestMenuRender()
     self.data.redraw()
 
-  proc menuKey(self: MenuComponent; name: string): bool =
-    ## The open menu's own keys (the terminal's and GPUI's alike): `Up` /
-    ## `Down` within the level, `Right` / `Enter` into a folder or run an
-    ## item, `Left` out, `Esc` out and closed at the top, a letter
-    ## type-to-select. A field in the menu (its search) keeps its letters and
-    ## its `Left` / `Right`.
+  proc menuOwnOperation(self: MenuComponent; operation: string): bool =
+    ## The open menu's own operations (the terminal's and GPUI's alike): up and
+    ## down within the level, into a folder or run an item, out, out and closed
+    ## at the top. A field in the menu (its search) keeps its `Left` / `Right`.
     let field = focusInTextField()
-    case name
-    of "Up":
+    case operation
+    of "menu.focus-previous":
       if self.vm.searchResults.len > 0: self.vm.moveSearch(-1)
       else: self.vm.moveHighlight(-1)
-    of "Down":
+    of "menu.focus-next":
       if self.vm.searchResults.len > 0: self.vm.moveSearch(1)
       else: self.vm.moveHighlight(1)
-    of "Right":
+    of "menu.enter-folder":
       if field: return false
       discard self.vm.enterFolder()
-    of "Left":
+    of "menu.leave-folder":
       if field: return false
       discard self.vm.leaveFolder()
-    of "Enter":
+    of "menu.accept":
       self.enterElement()
-    of "Esc":
+    of "menu.close":
       self.vm.escape()
       if not self.vm.isOpen:
         self.closeMenu()
     else:
-      if field or name.len != 1:
-        return false
-      self.vm.typeToSelect(name, int64(epochTime() * 1000))
+      return false
+    self.requestMenuRender()
+    self.data.redraw()
+    true
+
+  proc menuTypeToSelect(self: MenuComponent; name: string): bool =
+    ## A letter of the open menu's type-to-select; a field keeps its own.
+    if focusInTextField() or name.len != 1:
+      return false
+    self.vm.typeToSelect(name, int64(epochTime() * 1000))
     self.requestMenuRender()
     self.data.redraw()
     true
@@ -671,7 +670,8 @@ when defined(js):
     let component = self
     menuAccess = MenuAccess(
       isOpen: proc(): bool = component.vm.isOpen,
-      key: proc(name: string): bool = component.menuKey(name),
+      ownOperation: proc(operation: string): bool = component.menuOwnOperation(operation),
+      typeToSelect: proc(name: string): bool = component.menuTypeToSelect(name),
       operation: proc(operation, argument: string) =
         component.menuOperation(operation, argument))
     setWindowProperty(cstring"__ctMenuVM", js{

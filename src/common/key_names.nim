@@ -81,7 +81,9 @@ const
     "Esc", "Enter", "Tab", "Backspace", "Delete", "Insert", "Space",
     "Home", "End", "PageUp", "PageDown", "Up", "Down", "Left", "Right",
     "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11",
-    "F12", "Alt", "Menu"]
+    "F12", "Alt", "Menu",
+    "Click", "DoubleClick", "TripleClick", "QuadrupleClick", "MiddleClick",
+    "RightClick"]
     ## Every canonical non-character key name. Closed: `normalizeChord`
     ## refuses anything that is neither one of these nor one printable
     ## character.
@@ -95,6 +97,11 @@ const
     ## Windows's context-menu key, `KeyboardEvent.key` `ContextMenu`; xterm
     ## sends `CSI 29 ~` and the Kitty protocol `CSI 57363 u` (PLAT-70 Part E,
     ## Variable-State-Pane.md § Value origin from the keyboard).
+    ##
+    ## `Click` and its siblings are POINTER GESTURES: a binding's "key" can be
+    ## one (`Ctrl+Click`), so a modifier click is data, resolved by the one
+    ## resolver and rebound like any chord (Input-Routing-And-Keymaps.md §5.1).
+    ## No keyboard decoder produces them.
 
   KeyAliases = {
     "escape": "Esc", "esc": "Esc", "return": "Enter", "enter": "Enter",
@@ -106,7 +113,9 @@ const
     "downarrow": "Down", "left": "Left", "leftarrow": "Left",
     "right": "Right", "rightarrow": "Right", "backquote": "`",
     "alt": "Alt", "menu": "Menu", "contextmenu": "Menu", "apps": "Menu",
-    "application": "Menu"}.toTable
+    "application": "Menu", "click": "Click", "doubleclick": "DoubleClick",
+    "tripleclick": "TripleClick", "quadrupleclick": "QuadrupleClick",
+    "middleclick": "MiddleClick", "rightclick": "RightClick"}.toTable
     ## Spellings `normalizeChord` accepts for a key, lower-cased: this
     ## product's own, VS Code's (`escape`, `pageup`), and GPUI's.
 
@@ -219,6 +228,33 @@ func normalizeChordSequence*(text: string): string =
     if n.len == 0: return ""
     parts.add n
   parts.join(" ")
+
+type
+  PressButton* = enum
+    ## The button of a press, as the pointer keymap names its gesture.
+    prPrimary, prMiddle, prSecondary
+
+func pointerGesture*(button: PressButton; ctrl, shift, alt: bool;
+                     meta = false): string =
+  ## A press as the pointer keymap names it (`Ctrl+Click`, `RightClick`):
+  ## every front-end's hit test hands its press here, so the spelling is this
+  ## module's, in the one modifier order.
+  var mods: KeyModifiers = {}
+  if ctrl: mods.incl kmodCtrl
+  if shift: mods.incl kmodShift
+  if alt: mods.incl kmodAlt
+  if meta: mods.incl kmodMeta
+  chordName(mods, case button
+                  of prPrimary: "Click"
+                  of prMiddle: "MiddleClick"
+                  of prSecondary: "RightClick")
+
+func isPointerChord*(name: string): bool =
+  ## Whether a canonical name is a pointer gesture, modifiers or not.
+  let at = name.rfind('+')
+  let key = if at < 0: name else: name[at + 1 .. ^1]
+  key in ["Click", "DoubleClick", "TripleClick", "QuadrupleClick",
+          "MiddleClick", "RightClick"]
 
 func isPrintableKey*(name: string): bool =
   ## Whether a canonical key name is a single printable character.

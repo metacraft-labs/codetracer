@@ -57,6 +57,8 @@
 ## the running product, which is what makes such an upgrade fail loudly.
 
 import ui_imports
+import ../viewmodel/views/field_keys
+import ../viewmodel/views/dismissals
 
 import ../viewmodel/viewmodels/diff_expansion_menu
 
@@ -193,6 +195,12 @@ proc dxObserve(hostId: cstring, onChange: proc()) {.importjs: """
 proc dxHasOpenMenu(): bool
   {.importjs: "!!document.querySelector('.ct-diff-expand-menu')".}
 
+var menuDismissalRegistered = false
+  ## `Escape` closes an open boundary menu; registered with the first one.
+
+proc dxAnyMenuOpen(): bool {.importjs: """
+  (document.querySelector('.ct-diff-expand-menu') !== null)""".}
+
 proc dxCloseMenus() {.importjs: """
   (function() {
     var menus = document.querySelectorAll('.ct-diff-expand-menu');
@@ -299,9 +307,13 @@ proc openBoundaryMenu(regions: js; regionIndex: int;
   # The first item takes focus so the menu is operable by the same keyboard
   # that opened it; Escape and any click elsewhere close it.
   dxFocus(dxFirstChild(menu))
-  dxAddListener(menu, cstring"keydown", proc(e: js) =
-    if $dxEventKey(e) == "Escape":
-      dxCloseMenus())
+  if not menuDismissalRegistered:
+    menuDismissalRegistered = true
+    registerDismissal(proc(): bool =
+      if dxAnyMenuOpen():
+        dxCloseMenus()
+        return true
+      false)
 
 proc bindBoundaryHandlers(element: Node; diffEditor: js; hostId: string) =
   ## Attach one handle's keyboard, menu and press handlers.
@@ -335,13 +347,12 @@ proc bindBoundaryHandlers(element: Node; diffEditor: js; hostId: string) =
        directionWord(dedAbove): dedAbove
     else: dedBelow
 
-  element.dxAddListener(cstring"keydown", proc(e: js) =
+  element.dxAddListener(cstring KeyDownEvent, proc(e: js) =
     let key = $dxEventKey(e)
     let (regions, index) = regionOf()
     if index < 0:
       return
-    case key
-    of "Enter", " ", "Spacebar":
+    if isActivationKey(key):
       dxPreventDefault(e)
       dxStopPropagation(e)
       # Shift takes everything left in that direction, which is the same offer
@@ -352,14 +363,14 @@ proc bindBoundaryHandlers(element: Node; diffEditor: js; hostId: string) =
         else: DiffExpandStep
       dxShowMore(regions, index, directionOfElement() == dedAbove, lines)
       refreshExpansionAffordances(diffEditor, hostId)
-    of "ContextMenu", "F10":
-      if key == "F10" and not dxEventShift(e):
-        return
+      return
+    case fieldKeyOf(key, shift = dxEventShift(e))
+    of fkContextMenu:
       dxPreventDefault(e)
       dxStopPropagation(e)
       openBoundaryMenu(regions, index, directionOfElement(),
                        dxElementRectLeft(element), dxElementRectBottom(element))
-    of "Escape":
+    of fkCancel:
       dxCloseMenus()
     else:
       discard)

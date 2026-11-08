@@ -117,7 +117,11 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 2057
+const ExpectedAssertions = 2072
+  ## *2057 -> 2072 on 2026-11-08, measured: `input/operation_table`, `keymap/overlay_rows`,
+  ## `keymap/pointer_rows`, `views/field_keys`, `views/dismissals` and
+  ## `views/shell_keys` x three assertions. None calls `rebase(` or spells
+  ## `mapOver`.*
   ## *2040 -> 2057 on 2026-11-08: the editor pointer's modules add their scanned
   ## assertions (measured on the branch).*
   ## *2037 -> 2031 on 2026-11-06, measured on a clean checkout of agents

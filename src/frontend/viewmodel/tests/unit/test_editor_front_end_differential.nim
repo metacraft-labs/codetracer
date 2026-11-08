@@ -91,7 +91,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 454
+const ExpectedAssertions = 458
   ## 452 -> 454: the twenty-second scanned keymap module
   ## (`menu_accelerators`).
   ## 450 -> 452: the twenty-first scanned keymap module (`alt_tap`).
@@ -260,9 +260,10 @@ const ScannedKeymapModules = [
   "base_keymaps.nim", "binding_sets.nim", "client_actions.nim",
   "keymap_importers.nim", "keymap_router.nim", "layer_stack.nim",
   "navigation_keymap.nim", "operation_catalogue.nim", "scope_path.nim",
+  "overlay_rows.nim", "pointer_rows.nim",
   "user_keymap.nim", "alt_tap.nim", "menu_accelerators.nim"]
 
-const ScannedKeymapModuleCount = 22
+const ScannedKeymapModuleCount = 24
   ## **TWENTY-TWO SINCE 2026-10-25** (the twenty-second is
   ## `menu_accelerators`, the macOS menu's chords from the router).
   ## **TWENTY-ONE SINCE 2026-10-12** (the twenty-first is `alt_tap`, the

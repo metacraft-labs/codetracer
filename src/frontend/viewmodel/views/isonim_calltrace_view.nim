@@ -33,6 +33,7 @@
 ## web renderer, as leaves over elements captured with `ref = …`.
 
 import std/[json, options, tables]
+import ./field_keys
 
 import isonim/core/[signals, computation]
 import isonim/dsl/ui
@@ -407,7 +408,7 @@ when defined(js):
     ## A search result jumps on `mousedown`, not on a click, so the
     ## document's Enter/Space-is-click (`isonim_activation`) would reach
     ## nothing: its keys run the jump here.
-    isonim_dom.addEventListener(isonim_dom.Node(el), cstring"keydown",
+    isonim_dom.addEventListener(isonim_dom.Node(el), cstring KeyDownEvent,
       proc(ev: isonim_dom.Event) =
         if ev.eventRepeats() or not isActivationKey($ev.eventKeyName()):
           return
@@ -427,9 +428,9 @@ when defined(js):
         ev.stopPropagation()
         let query = inputNode.inputValue()
         vm.setSearchQuery($query))
-    isonim_dom.addEventListener(inputNode, cstring"keydown",
+    isonim_dom.addEventListener(inputNode, cstring KeyDownEvent,
       proc(ev: isonim_dom.Event) =
-        if ev.eventKeyCode() == 13:
+        if fieldKeyOfCode(ev.eventKeyCode()) == fkCommit:
           ev.preventDefault()
           ev.stopPropagation()
           let query = inputNode.inputValue()

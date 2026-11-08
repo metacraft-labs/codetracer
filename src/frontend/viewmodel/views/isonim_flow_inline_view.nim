@@ -25,6 +25,7 @@
 ## tests). Each proc says which of its names are load-bearing.
 
 import std/strutils
+import ./field_keys
 
 import isonim/testing/mock_dom
 when defined(js):
@@ -501,8 +502,8 @@ proc renderFlowLoopIteration*[R, N](r: R; control: FlowLoopControl;
       entered = clampedIterationEntry(input.value, allIterations, entered))
     listen(r, field, "blur", proc(input: FlowInput) =
       onCommit(entered, true))
-    listen(r, field, "keydown", proc(input: FlowInput) =
-      if input.key == "Enter" or input.keyCode == 13:
+    listen(r, field, KeyDownEvent, proc(input: FlowInput) =
+      if fieldKeyOf(input.key) == fkCommit or fieldKeyOfCode(input.keyCode) == fkCommit:
         input.prevent = true
         onCommit(entered, false))
   r.appendChild(loopSpan, field)

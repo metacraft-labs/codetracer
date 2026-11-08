@@ -5,6 +5,7 @@
 ## generic view (`renderStatusShell[R, N]`) rendered under every renderer.
 
 import isonim/dsl/ui
+import ./field_keys
 import isonim/core/[signals, computation]
 import isonim/dsl/components
 import isonim/testing/mock_dom
@@ -546,7 +547,9 @@ proc renderStatusShell*[R, N](
 when defined(js):
   proc inputValue(node: isonim_dom.Element): cstring {.importjs: "(#.value || '')".}
   proc setInputValue(node: isonim_dom.Element; value: cstring) {.importjs: "#.value = #".}
-  proc isCtrlEnter(ev: isonim_dom.Event): bool {.importjs: "(function(ev) { return !!(ev.ctrlKey && ev.keyCode === 13); })(#)".}
+  proc statusEventKey(ev: isonim_dom.Event): cstring {.importjs: "(#.key || '')".}
+  proc statusEventCtrl(ev: isonim_dom.Event): bool {.importjs: "!!#.ctrlKey".}
+  proc statusEventMeta(ev: isonim_dom.Event): bool {.importjs: "!!#.metaKey".}
 
   proc readInputValue(id: cstring): string =
     let node = isonim_dom.getElementById(isonim_dom.document, id)
@@ -571,9 +574,10 @@ when defined(js):
       let node = isonim_dom.getElementById(isonim_dom.document, id)
       if isonim_dom.isNodeNil(isonim_dom.Node(node)):
         continue
-      isonim_dom.addEventListener(isonim_dom.Node(node), cstring"keydown",
+      isonim_dom.addEventListener(isonim_dom.Node(node), cstring KeyDownEvent,
         proc(ev: isonim_dom.Event) =
-          if ev.isCtrlEnter():
+          if fieldKeyOf($ev.statusEventKey(), ctrl = ev.statusEventCtrl(),
+                        meta = ev.statusEventMeta()) == fkCommitModified:
             sendBugReportFromDom(callbacks))
 
   proc querySelectorIn(

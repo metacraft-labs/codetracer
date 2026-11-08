@@ -289,6 +289,15 @@ proc syncPaletteLayer() =
   elif not open and at >= 0:
     discard deskRouter.popLayer(deskRouter.stack.layers[at].token)
 
+proc syncMenuLayer() =
+  ## The program menu's rows (`overlay_rows`) are a pushed layer, on the stack
+  ## exactly while it is open.
+  let at = deskRouter.stack.indexOfLayer(MenuTable, "window")
+  if menuIsOpen() and at < 0:
+    discard deskRouter.pushLayer(MenuTable, "window", "")
+  elif not menuIsOpen() and at >= 0:
+    discard deskRouter.popLayer(deskRouter.stack.layers[at].token)
+
 proc syncContextMenuLayer() =
   ## The right-click menu's table is pushed exactly while the menu shows, as
   ## the terminal and GPUI push theirs (CUA-Keymap.md §3.8: once open, the
@@ -762,6 +771,7 @@ proc routeKey(name: string; ev: JsObject) =
   ## it was run.
   syncPaletteLayer()
   syncContextMenuLayer()
+  syncMenuLayer()
   let path = desktopScopePath()
   let facts = desktopFacts()
   # An open program menu owns its keys, as on the terminal and GPUI; the
@@ -776,7 +786,12 @@ proc routeKey(name: string; ev: JsObject) =
       menuAccess.operation(res.operation, res.argument)
       stop(ev)
       return
-    if menuAccess.key(name):
+    if res.kind == erOperation and tableOfOperation(res.operation) == MenuTable and
+       menuAccess.ownOperation(res.operation):
+      traceOperation(res.operation)
+      stop(ev)
+      return
+    if menuAccess.typeToSelect(name):
       stop(ev)
       return
   let res = deskRouter.route(facts, path, nmNormal, name, int64(now()))
@@ -876,6 +891,41 @@ proc onKeyUp(ev: JsObject) =
     return
   if deskAltTap.modifiersChanged(heldModifiers(ev)):
     routeKey("Alt", ev)
+
+proc elementKindOfTarget(target: JsObject): cstring {.importjs: """
+  (function (t) {
+    if (!t || !t.closest) return '';
+    if (t.closest('.lm_tab, .session-tab')) return 'tab';
+    if (t.closest('.eventLog-column-header .eventLog-cell')) return 'header';
+    if (t.closest('.calltrace-lines > *, .eventLog-row, .value-expanded, .jstree-anchor')) return 'row';
+    if (t.closest('button, [role="button"]')) return 'button';
+    return '';
+  })(#)""".}
+  ## §5.3: which kind of element is under the press, in the DOM's geometry.
+
+proc routeUserPointerGesture(ev: JsObject) =
+  ## **A PRESS A USER'S `keybindings.json` BOUND** (Input-Routing §5.1): a pointer
+  ## row of the user layer runs its operation instead of the element's own
+  ## handler. The base's rows name what those handlers already do, so they are
+  ## left to them while the desktop's views still hold their DOM handlers.
+  let kind = $elementKindOfTarget(ev.target)
+  if kind.len == 0 or deskRouter.user.bindingCount == 0:
+    return
+  var path = scopeChainOf(ev.target)
+  if path.innermostPane < 0:
+    return
+  path.add elementOfAttributes(kind, "")
+  let button = case ev.button.to(int)
+               of 1: prMiddle
+               of 2: prSecondary
+               else: prPrimary
+  let res = deskRouter.routePointer(desktopFacts(), path, nmNormal,
+    pointerGesture(button, ev.ctrlKey.to(bool), ev.shiftKey.to(bool),
+                   ev.altKey.to(bool), ev.metaKey.to(bool)))
+  if res.kind == erOperation and res.layer.startsWith("user:"):
+    traceOperation(res.operation)
+    if runDesktopOperation(res) == nkHandled:
+      stop(ev)
 
 proc onPointerDown(ev: JsObject) =
   deskAltTap.interrupted()       # Alt+click is not Alt tapped
@@ -1014,6 +1064,7 @@ proc installKeyRouter*() =
   {.emit: ["window.addEventListener('keydown', ", onKeyDown, ", true);",
            "window.addEventListener('keyup', ", onKeyUp, ", true);",
            "window.addEventListener('mousedown', ", onPointerDown, ", true);",
+           "window.addEventListener('mousedown', ", routeUserPointerGesture, ", true);",
            "window.addEventListener('blur', ", onWindowBlur, ");"].}
   if not data.isNil and not data.ipc.isNil:
     data.ipc.on(KeybindingsMessage, proc(event: JsObject; payload: JsObject) =

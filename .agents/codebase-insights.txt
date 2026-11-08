@@ -8373,10 +8373,13 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - A press event's key is `x,y,count` for left and middle presses (the platform's click count), read by `pointerOf`.
 - The glyph column on the desktop is Monaco's glyph margin: marks have no element keyed by line, so tests read `getLineDecorations` (`src/tests/gui/lib/glyph-column.ts`). `JsAssoc[int, _]` keys are strings at run time.
 - Line and column breakpoints coexist on a line: `plannedToggle` is the line's, `plannedInlineToggle` a column's.
-||||||| parent of b058150866e (feat(desktop): run the project's Verno action from the Verification pane)
-||||||| parent of 6454c5a4603 (wip)
-||||||| parent of d592263ff05 (wip)
-- Desktop Verification runs: the renderer (`ui/verification.nim`) reads the project's task files with node `fs`, picks the first Verno action (`vernoActions`), and sends its argv (`project_actions.launchArgv`, shared with `host/project_action_runner.launchSpec`) to the main process (`index/verification_runner`, `CODETRACER::verification-start`/`-cancel`; answers `-running`, `-output`, `-exit`, `-failed-to-start`, handled in `ui_js.nim`). The report (`<cwd>/target/verno-report.json`) is read by the renderer only on `-exit`. The pane's Run/Stop reach the host through `isonim_verification_view.verificationRunRequest`/`verificationStopRequest`; a browser tab (no `inElectron`) offers no Run.
-- The PLAT-63 replay `verno` (`tui/tests/fixtures/plat63_verno_projects.nim`) waits 60 s when a `hold` file sits beside it, so a suite can watch a run live and Stop it; the fixture's `when isMainModule` writes a package for the desktop Playwright spec (`tests/verification-pane/desktop_verno_run.spec.ts`).
-- A `KeymapRouter` caches its resolution tries per router (`editing_keymap.trieFor`). A fresh router's first key builds them (306-342 us of CPU at load 66-98); a warm dispatch is 34-38 us mean, 86-100 us worst. `tui/tests/test_modal_dispatch_gate` gates both, separately, at 2 ms.
-- `ci/test/shell-gate-coverage.sh` scans the disk (`find`), not git: a stale untracked script left in an rsync mirror (e.g. the removed `ci/test/readonly-leftovers-sweep-test.sh`) shows up as an unrecorded dark gate.
+||||||| parent of 315ebfe16eb (wip: input routing)
+- Input routing: an operation name reaches its procedure through `viewmodel/input/operation_table.invoke`
+  (`runtime.buildOperationTables`, GPUI's `buildWindowOperationTables`); adding a pane's key means a row
+  (`keymap/*_keymap`, `overlay_rows`, `pointer_rows`) and a table entry, never a `case` over a key name:
+  `ci/test/input-routing-gate.sh` reddens on one. A catalogue name must exist before `bindOp` (it raises
+  at the first dispatch, so every suite through that front-end fails by name). Inside a `for` that builds
+  entries, use `closureScope:` or every closure shares the last iteration's `let`.
+- A new `ClientAction` member fails `test_plat64_operation_mapping` until it is in
+  `keymap/client_actions`; a new catalogue name with no row, element or menu fails
+  `test_plat64_reachability` until it is reachable or listed there.

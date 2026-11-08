@@ -1,0 +1,10 @@
+# Key-name sites in view modules not yet moved to the router (input-routing-gate.sh).
+# <file> <check> <count>. This file only shrinks.
+#
+# The Video Player's own keys (Visual-Replay.md § Keyboard Shortcuts) on the
+# terminal and in the GPUI window: they arrived with the Visual Replay panes,
+# after the router; their operations are catalogued (`video-player.*`) and the
+# rows are owed.
+src/frontend/gpui/main.nim case 18
+src/frontend/tui/app/runtime.nim case 17
+src/frontend/tui/app/runtime.nim compare 3

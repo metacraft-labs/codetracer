@@ -913,6 +913,14 @@ lint_step "Keymap clean code: contract suite" \
 lint_step "Keymap clean code: one resolver, one decoder per device, one modifier order, bases as data" \
 	bash ci/test/keymap-clean-code.sh
 
+# Input-Routing-And-Keymaps.md §9 IR-1: no view module binds a chord or switches
+# on a key name. Its contract suite plants each violation first.
+lint_step "Input routing: contract suite" \
+	bash ci/test/input-routing-gate-test.sh
+
+lint_step "Input routing: no view switches on a key name" \
+	bash ci/test/input-routing-gate.sh
+
 # PLAT-2's verification gate: no surface formats a value by a path that
 # bypasses the one presenter, and the presenter is pure.
 # CodeTracer-Platform.milestones.org asks for it "in the shape

@@ -13,6 +13,7 @@ from std / dom import nil # imports dom, without directly its items: you need to
 # The StateVM receives the same data but does not affect rendering yet.
 # ---------------------------------------------------------------------------
 import std/json
+import ../viewmodel/views/field_keys
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 from ../dap import trackCtRequests, ctRequestIdOf, ctRequestSessionId
 import ./session_viewmodels
@@ -162,23 +163,23 @@ when defined(js):
       if chainOpt.isNone:
         return
       let chain = chainOpt.get
-      case key
-      of "ArrowDown":
+      case fieldKeyOf(key)
+      of fkNext:
         focusNextHop(originSidePanelState, chain)
-      of "ArrowUp":
+      of fkPrevious:
         focusPrevHop(originSidePanelState, chain)
-      of "Enter":
+      of fkCommit:
         enterHop(originSidePanelState, chain, originChainVMInstance)
-      of "ArrowRight":
+      of fkRight:
         expandFocusedOperands(originSidePanelState, chain)
-      of "ArrowLeft":
+      of fkLeft:
         collapseFocusedOperands(originSidePanelState)
-      of "Escape":
+      of fkCancel:
         dismissPanel(originSidePanelState)
         originChainVMInstance.closeSidePanel()
       else:
         return
-    host.addEventListener(cstring"keydown", onKey)
+    host.addEventListener(cstring KeyDownEvent, onKey)
     host.setAttribute(cstring"tabindex", cstring"-1")
     originSidePanelHost = host
     host

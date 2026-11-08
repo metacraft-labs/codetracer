@@ -121,6 +121,10 @@ when defined(js):
       // On screen: a hidden panel's open dropdown must not swallow the key.
       function onScreen(el) { return el.getClientRects().length > 0 && shown(el); }
       function closeOpenDropdown() {
+        var dismissals = globalThis.__ctDismissals || [];
+        for (var d = dismissals.length - 1; d >= 0; d--) {
+          if (dismissals[d]()) return true;
+        }
         for (var i = 0; i < DROPDOWNS.length; i++) {
           var d = DROPDOWNS[i];
           var open = all(document, d.open).filter(onScreen)[0];

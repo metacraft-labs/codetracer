@@ -48,6 +48,7 @@
 ## screen step a write back / forward.
 
 import std/[math, strutils, tables]
+import ./field_keys
 
 import isonim/core/[signals, computation]
 import isonim/testing/mock_dom
@@ -118,11 +119,11 @@ when defined(js):
 
 proc stepKey*(vm: TerminalOutputVM; key: string): bool =
   ## ArrowLeft / ArrowRight on the screen: the previous / next write.
-  case key
-  of "ArrowLeft":
+  case fieldKeyOf(key)
+  of fkLeft:
     discard vm.stepWrite(-1)
     true
-  of "ArrowRight":
+  of fkRight:
     discard vm.stepWrite(1)
     true
   else: false
@@ -160,13 +161,13 @@ proc wireStepKeys[R, N](r: R; node: N; vm: TerminalOutputVM) =
   ## ArrowLeft / ArrowRight on the screen step by write (`stepKey`).
   when defined(js):
     when N is isonim_dom.Element:
-      r.addEventListener(node, "keydown", proc(ev: isonim_dom.Event) =
+      r.addEventListener(node, KeyDownEvent, proc(ev: isonim_dom.Event) =
         if stepKey(vm, $evKey(ev)): stopEvent(ev))
     else:
-      r.addEventListener(node, "keydown", proc(ev: MockEvent) =
+      r.addEventListener(node, KeyDownEvent, proc(ev: MockEvent) =
         if stepKey(vm, ev.key): ev.preventDefault())
   else:
-    r.addEventListener(node, "keydown", proc(ev: MockEvent) =
+    r.addEventListener(node, KeyDownEvent, proc(ev: MockEvent) =
       if stepKey(vm, ev.key): ev.preventDefault())
 
 proc wireLineClick[R, N](r: R; node: N; vm: TerminalOutputVM; write: int) =

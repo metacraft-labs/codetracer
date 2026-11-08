@@ -66,6 +66,7 @@ import
 
 when defined(js):
   import isonim/web/web_renderer
+  import ../viewmodel/views/dismissals
   from isonim/web/dom_api import nil
   from std/strutils import nil
   from ../viewmodel/views/isonim_auto_hide_bottom_strip_view import
@@ -2082,11 +2083,11 @@ when defined(js):
       (function(e) { const t = e && e.target;
         return !!(t && t.closest &&
           t.closest('.auto-hide-tablist-menu, .auto-hide-tablist-button')); })(#)""".}
-    proc isEscape(ev: kdom.Event): bool {.importjs: "(#.key === 'Escape')".}
     kdom.document.addEventListener(cstring"mousedown", proc(ev: kdom.Event) =
       if not inTabList(ev): closeTabLists(), true)
-    kdom.document.addEventListener(cstring"keydown", proc(ev: kdom.Event) =
-      if isEscape(ev): closeTabLists())
+    registerDismissal(proc(): bool =
+      closeTabLists()
+      false)
 
   proc requestCollapsedIconZoneRender*(containerId: cstring, edge: AutoHideEdge = Left) =
     ## Refresh the collapsed status-bar icon zone through IsoNim direct DOM.
@@ -2366,11 +2367,11 @@ proc setupOverlayDismissal*() =
   ## Call once after DOM is ready.
 
   # Escape key handler.
-  document.addEventListener(cstring"keydown", proc(ev: Event) =
-    let keyEv = cast[JsObject](ev)
-    if keyEv.key.to(cstring) == cstring"Escape":
-      if not autoHideState.isNil and autoHideState.overlayVisible:
-        hideOverlay())
+  registerDismissal(proc(): bool =
+    if not autoHideState.isNil and autoHideState.overlayVisible:
+      hideOverlay()
+      return true
+    false)
 
   # Backdrop click handler.
   let backdrop = document.getElementById(cstring"auto-hide-backdrop")

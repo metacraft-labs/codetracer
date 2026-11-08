@@ -148,7 +148,7 @@ when defined(js):
       document.addEventListener('focusout', function () {
         if (current && current.how === 'focus') leave();
       });
-      window.addEventListener('keydown', function (ev) {
+      window.addEventListener('keydown', function (ev) { // ir1-gate: not a key: any key but Tab hides it
         if (ev.key !== 'Tab') hide();
       }, true);
       document.addEventListener('pointerdown', hide, { capture: true, passive: true });

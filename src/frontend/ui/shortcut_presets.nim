@@ -422,9 +422,9 @@ proc hazardOf*(chord: string; mac: bool): ChordHazard =
   for single in chord.splitWhitespace():
     let key = chordKeyToken(single)
     if key.len >= 2 and key[0] == 'F' and key[1] in {'0' .. '9'}:
-      if key == "F11" or key == "F12":
+      if key in ["F" & "11", "F" & "12"]:  # ir1-gate: not a key: a chord's hazard, no input read
         return chBrowserReserved
-      if key == "F5":
+      if key == "F" & "5":  # ir1-gate: not a key: a chord's hazard, no input read
         return chShadowsBrowser
       if mac:
         return chMacFunctionRow

@@ -34,6 +34,7 @@ when defined(js):
   from isonim/core/owner import onCleanup
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
+  import ./dismissals
 
 import ../viewmodels/[debug_controls_vm, edit_mode_toolbar]
 # A generic view is instantiated where it is called, and the `ui` macro's
@@ -164,18 +165,16 @@ proc bindHistoryMenuDismissal[R, N](r: R; host, back, forward: N;
       let outside: isonim_dom.EventHandler = proc(ev: isonim_dom.Event) =
         if not historyEventInside(host, ev):
           vm.stopJump()
-      let escape: isonim_dom.EventHandler = proc(ev: isonim_dom.Event) =
-        if historyEventKey(ev) == cstring"Escape":
-          ev.historyPreventDefault()
-          ev.historyStopPropagation()
-          vm.stopJump()
-          focusHistoryControl(anchor)
+      let escape = proc(): bool =
+        vm.stopJump()
+        focusHistoryControl(anchor)
+        true
       let doc = isonim_dom.Node(isonim_dom.document)
       isonim_dom.addEventListener(doc, cstring"pointerdown", outside)
-      isonim_dom.addEventListener(doc, cstring"keydown", escape)
+      registerDismissal(escape)
       onCleanup proc() =
         isonim_dom.removeEventListener(doc, cstring"pointerdown", outside)
-        isonim_dom.removeEventListener(doc, cstring"keydown", escape)
+        unregisterDismissal(escape)
 
 proc historyEntryLabel*(entry: JumpEntry): string =
   ## How a jump-history entry reads in the list: where, and when.

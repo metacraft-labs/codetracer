@@ -1316,7 +1316,7 @@ proc armEditorPane(r: GpuiRenderer) =
   armedEditPane = editPane
   setFocusable(editPane)
   discard focusElement(editPane)
-  r.addEventListener(editPane, "keydown", editKeyHandler(editPane))
+  r.addEventListener(editPane, "keydown", editKeyHandler(editPane))  # ir1-gate: not a key: the pane's listener, into the router
 
 proc focusEditKeys() =
   ## K19: the Edit window's keys back to its editor's listener — the one
@@ -2942,6 +2942,13 @@ proc pressEditorVBar(r: GpuiRenderer; x, y: int): bool
 proc scrubEditorVBar(r: GpuiRenderer; y: int; click: bool)
   ## M73: FORWARD-DECLARED for `windowPointer`; defined with the scroll above.
 
+var gPressGesture = "Click"
+  ## The gesture a press on a call row was made with, modifiers and all.
+
+proc runElementGesture(r: GpuiRenderer; gesture: string; pane: PaneKind;
+                       kind: ElementKind; target: ContextTarget;
+                       menu = ContextMenuModel(); x = 0; y = 0): bool {.discardable.}
+
 proc clickCalltrace(r: GpuiRenderer; x, y: int): bool =
   ## PLAT-49 part B: a press on the call trace's body. On a row: go to that
   ## call (`ct/calltrace-jump`, the desktop's click) and redraw the window
@@ -2970,21 +2977,13 @@ proc clickCalltrace(r: GpuiRenderer; x, y: int): bool =
   let local = row.index - store.calltrace.startLineIndex.val
   if local < 0 or local >= store.calltrace.lines.val.len.int64:
     return false
-  if row.toggle != crtLeaf and x >= toggleX and x < toggleX + 14:
-    traceGesture("calltrace toggle #" & $row.index)
-    let why = gSession.toggleCallChildren(row.index)
-    if why.len > 0:
-      traceGesture("calltrace toggle failed: " & why)
-    redrawCalltrace(r)
-    return true
-  traceGesture("calltrace jump #" & $row.index)
-  vm.selectEntry(some(row.index))
-  let why = gSession.jumpToCall(row.index)
-  if why.len > 0:
-    traceGesture("calltrace jump failed: " & why)
-    return true
-  refreshReplayWindow(r)
-  true
+  # `gPressGesture` is the press's own modifiers when a row listener heard it
+  # first (the row's listener runs before the root's that calls this).
+  let gesture = gPressGesture
+  gPressGesture = "Click"
+  let onToggle = row.toggle != crtLeaf and x >= toggleX and x < toggleX + 14
+  runElementGesture(r, gesture, paneCalltrace, (if onToggle: ekToggle else: ekRow),
+                    ContextTarget(pane: paneCalltrace, index: row.index))
 
 proc handlePopoverPress(r: GpuiRenderer; kind: GpuiEventKind;
                         x, y: int): bool
@@ -3207,29 +3206,13 @@ proc releaseTerminal(r: GpuiRenderer; x, y: int) =
       vm.cancelScrub()
     drawTerminalPane(r)
 
-proc terminalKey(r: GpuiRenderer; key: string): bool =
-  ## The pane's keys while it has the pointer's focus: in the SCREEN view
-  ## Left / Right step a write back / forward (Terminal-Output-Pane §3's
-  ## step-by-write keys); `v` toggles lines / screen. In the LINE view the
-  ## arrows are the view's (PLAT-70, Horizontal-Overflow.md §4.4:
-  ## `view.scroll-left` / `-right`, through the router).
-  let vm = terminalVM()
-  if vm.isNil or not gTerminal.focused:
-    return false
-  case key.toLowerAscii
-  of "left", "arrowleft", "right", "arrowright":
-    if not vm.screenShown:
-      return false
-    let delta = if key.toLowerAscii in ["left", "arrowleft"]: -1 else: 1
-    let target = vm.stepTarget(delta)
-    if target >= 0:
-      discard terminalJump(r, target)
-    true
-  of "v":
-    vm.toggleView()
-    drawTerminalPane(r)
-    true
-  else: false
+proc stepTerminalWrite(r: GpuiRenderer; delta: int) =
+  ## `view.scroll-left` / `-right` in the SCREEN view step a write back /
+  ## forward (Terminal-Output-Pane §3's step-by-write keys). In the LINE view
+  ## those operations scroll it sideways (Horizontal-Overflow.md §4.4).
+  let target = terminalVM().stepTarget(delta)
+  if target >= 0:
+    discard terminalJump(r, target)
 
 # ---------------------------------------------------------------------------
 # PLAT-57: Find in Files, drawn natively (`search_results_leaf`)
@@ -4750,9 +4733,6 @@ proc windowKey(key: string; mods: seq[string]) =
   # (CodeTracer-Shell.md §7.5) — except after its prefix.
   if shellKey(r, key, mods):
     return
-  # PLAT-52: the Terminal Output pane's own keys, while it has focus.
-  if mods.len == 0 and terminalKey(r, key):
-    return
   # PLAT-59: the Video Player's own keys while it has the focus (the
   # desktop's, scoped to the pane).
   if visualKey(r, key, mods):
@@ -4793,7 +4773,7 @@ proc armPaneKeys(r: GpuiRenderer; pane: GpuiElement) =
     return
   gPanesArmed.add pane
   setFocusable(pane)
-  r.addEventListener(pane, "keydown", gestureKeyHandler(pane))
+  r.addEventListener(pane, "keydown", gestureKeyHandler(pane))  # ir1-gate: not a key: the pane's listener, into the router
   r.addEventListener(pane, "modifierschange", modifiersHandler(pane))
 
 proc armPointer(r: GpuiRenderer; root: GpuiElement) =
@@ -6910,29 +6890,13 @@ proc pollTestRun(r: GpuiRenderer): bool =
   drawTopBar(r)
   true
 
-proc welcomeKeyName(key: string; mods: seq[string]): string =
-  ## A window key in the shared model's names.
-  case key.toLowerAscii
-  of "up", "arrowup": "Up"
-  of "down", "arrowdown": "Down"
-  of "left", "arrowleft": "Left"
-  of "right", "arrowright": "Right"
-  of "tab": (if "shift" in mods: "Shift+Tab" else: "Tab")
-  of "enter", "return": "Enter"
-  of "escape", "esc": "Esc"
-  of "backspace": "Backspace"
-  of "space": "Space"
-  else:
-    if key.len == 1 and "control" notin mods and "ctrl" notin mods: key
-    else: ""
-
 proc welcomeKey(r: GpuiRenderer; key: string; mods: seq[string]): bool =
   ## PLAT-51: a key while a Welcome Screen is shown — its form, the arrows,
   ## Enter. True when the screen took it.
   let w = shownWelcome()
   if w.isNil:
     return false
-  let name = welcomeKeyName(key, mods)
+  let name = canonicalKeyOfGpui(key, mods)
   if name.len == 0:
     return false
   let folderDefault = getCurrentDir()
@@ -7599,6 +7563,7 @@ proc runMenuOperation(operation, argument: string) =
                           else: "closed"))
 
 proc probeWindowResolution(key: string; mods: seq[string]): EditingResolution
+proc runWindowOperation(r: GpuiRenderer; res: EditingResolution; nowMs: int64)
 
 proc handleTopKey(r: GpuiRenderer; key: string;
                   mods: seq[string]): bool =
@@ -7609,17 +7574,12 @@ proc handleTopKey(r: GpuiRenderer; key: string;
   ## router — `routeWindowKey`.)
   if gMenu.isNil or gOmnibar.isNil:
     return false
-  let k = key.toLowerAscii
   let ctrl = "control" in mods
   if gContent.open:
-    case k
-    of "escape", "esc", "enter", "return": gContent = GContent()
-    of "up": gContent.top = max(0, gContent.top - 1)
-    of "down": gContent.top = gContent.top + 1
-    of "pageup": gContent.top = max(0, gContent.top - 10)
-    of "pagedown", "space": gContent.top = gContent.top + 10
-    else: return true
-    drawTopBar(r)
+    # A shown text owns every key; its rows are a pushed layer (`overlay_rows`).
+    let res = probeWindowResolution(key, mods)
+    if res.kind == erOperation and tableOfOperation(res.operation) == ContentViewTable:
+      runWindowOperation(r, res, int64(epochTime() * 1000))
     return true
   if gMenu.isOpen:
     # The keymap's own menu keys keep their meaning inside it: another
@@ -7629,26 +7589,15 @@ proc handleTopKey(r: GpuiRenderer; key: string;
       runMenuOperation(res.operation, res.argument)
       drawTopBar(r)
       return true
-    # The desktop's cascade (PLAT-49): Up/Down within the open level, Right
-    # (or Enter) into a folder's submenu, Left back out, Esc out and closed.
-    case k
-    of "escape", "esc": gMenu.escape()
-    of "enter", "return":
-      let chosen = gMenu.highlightedItem()
-      let act = gMenu.activate()
-      if act.ran:
-        runGpuiMenuAction(r, act.action)
-        return true
-      if refusalOf(chosen).len > 0:
-        traceGesture("menu refused: " & refusalOf(chosen))
-    of "up": gMenu.moveHighlight(-1)
-    of "down": gMenu.moveHighlight(1)
-    of "right": discard gMenu.enterFolder()
-    of "left": discard gMenu.leaveFolder()
+    # The desktop's cascade (PLAT-49): its rows are a pushed layer
+    # (`overlay_rows`), and a character is its type-to-select.
+    if res.kind == erOperation and tableOfOperation(res.operation) == MenuTable:
+      runWindowOperation(r, res, int64(epochTime() * 1000))
+    elif key.len == 1 and not ctrl:
+      gMenu.typeToSelect(key, int64(epochTime() * 1000))
+      drawTopBar(r)
     else:
-      if key.len == 1 and not ctrl:
-        gMenu.typeToSelect(key, int64(epochTime() * 1000))
-    drawTopBar(r)
+      drawTopBar(r)
     return true
   false
 
@@ -7742,7 +7691,14 @@ proc handleTopPress(r: GpuiRenderer; x, y: int): bool =
       refreshGpuiMenuAvailability()
       gMenu.open(keyboard = false)
   of gtControl:
-    performControl(r, TransportControls[hit.index].id)
+    # A toolbar button carries its operation (Input-Routing §5.1): the action
+    # it names, by the one table. `performControl` is what a control's
+    # operation runs in this window.
+    let (name, arg) = splitOperation(
+      operationOfClientAction(TransportControls[hit.index].clientAction))
+    runWindowOperation(r, EditingResolution(kind: erOperation, operation: name,
+                                            argument: arg),
+                       int64(epochTime() * 1000))
     return true
   of gtTool:
     performTool(r, GToolButton(hit.index))
@@ -11641,8 +11597,16 @@ proc windowScopePath(): ScopePath =
   if gCtxMenu.open:
     return @[window, element(ekOverlay, "context-menu")]
   if chain.len == 0:
-    return @[window]
-  result = chain
+    result = @[window]
+  else:
+    result = chain
+  # PLAT-52: a press in the Terminal Output pane gives it the keys, though no
+  # element of it holds the window's focus.
+  if gTerminal.focused:
+    result.add pane($paneTerminalOutput)
+    return
+  if chain.len == 0:
+    return
   let path = editorPath()
   if result[^1].kind == ekPane and result[^1].paneKind == $paneEditor and
      gDebugDocs.hasKey(path):
@@ -11674,10 +11638,15 @@ proc syncOverlayLayers() =
     discard gRouter.popLayer(gRouter.stack.layers[findAt].token)
   elif gFind.open and findAt < 0:
     discard gRouter.pushLayer(FindTable, gFind.owner, "FIND")
+  let menuOpen = not gMenu.isNil and gMenu.isOpen
   if not gCtxMenu.open: want(ContextMenuTable, "MENU", false)
+  if not menuOpen: want(MenuTable, "", false)
+  if not gContent.open: want(ContentViewTable, "", false)
   if not palette: want(PaletteTable, "PALETTE", false)
   want(PaletteTable, "PALETTE", palette)
   want(ContextMenuTable, "MENU", gCtxMenu.open)
+  want(MenuTable, "", menuOpen)
+  want(ContentViewTable, "", gContent.open)
 
 proc refreshMenuShortcuts() =
   ## The menu's chords are THE ROUTER'S (KL-8): each item's operation
@@ -12000,103 +11969,349 @@ proc calltraceKey(r: GpuiRenderer; operation: string): bool =
   redrawCalltrace(r)
   true
 
-proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
-                        nowMs: int64) =
-  ## **GPUI'S DISPATCH** of a resolved operation onto its ViewModels — the
-  ## terminal's `runtime.runOperation`, this window's half: the editing
-  ## vocabulary onto the shown file's document, the overlays' operations
-  ## onto the overlay that is open, a `ClientAction` operation onto the
-  ## window's menu action (the desktop's own action names). An operation
-  ## this window does not perform is INERT AND SAYS SO (IR-6).
-  let op = if res.argument.len > 0: res.operation & "(" & res.argument & ")"
-           else: res.operation
-  traceGesture("operation " & op)
-  if '.' notin res.operation:
-    runDebugEditorOperation(r, res, nowMs)
-    return
-  if res.operation.startsWith("palette.") and gOmnibar.isOpen:
-    case res.operation
-    of "palette.focus-previous": gOmnibar.moveSelection(-1)
-    of "palette.focus-next": gOmnibar.moveSelection(1)
-    of "palette.focus-page-up": gOmnibar.moveSelection(-10)
-    of "palette.focus-page-down": gOmnibar.moveSelection(10)
-    of "palette.accept":
-      acceptOmnibar(r)
-      return
-    of "palette.close": gOmnibar.close()
-    else: discard
-    drawTopBar(r)
-    return
-  if res.operation.startsWith("input.") and gOmnibar.isOpen:
-    case res.operation
-    of "input.move-left": gOmnibar.moveCursor(-1)
-    of "input.move-right": gOmnibar.moveCursor(1)
-    of "input.move-start": gOmnibar.cursorHome()
-    of "input.move-end": gOmnibar.cursorEnd()
-    of "input.delete-backward": gOmnibar.backspace()
-    of "input.delete-forward": gOmnibar.deleteForward()
-    of "input.toggle-overwrite": gOmnibar.toggleOverwrite()
-    of "input.paste": gOmnibar.typeText(clipboardText())
-    of "input.commit":
-      acceptOmnibar(r)
-      return
-    of "input.cancel": gOmnibar.close()
-    else: traceGesture("`" & op & "` is not available in the palette")
-    drawTopBar(r)
-    return
-  if res.operation.startsWith("input.") and gFind.open and editorFocused():
-    # PLAT-70 Part C: the find widget's field.
-    findFieldOperation(r, res.operation)
-    return
+type
+  WindowDispatch = object
+    ## Nothing a window's dispatch has to hand back: its state is the window's.
+  WindowCall = OperationCall[ContextTarget]
+  WindowAction = OperationAction[ContextTarget, WindowDispatch]
+
+template act(body: untyped): WindowAction =
+  ## An entry's action procedure. It answers `true` unless the body returns
+  ## `false` ("not this table's").
+  (proc(c {.inject.}: WindowCall; ctx: var WindowDispatch): bool =
+     result = true
+     body)
+
+template ask(answer: untyped): WindowAction =
+  ## An entry whose procedure itself answers whether the operation was its own.
+  (proc(c {.inject.}: WindowCall; ctx: var WindowDispatch): bool =
+     answer)
+
+func fullName(c: WindowCall): string =
+  if c.argument.len > 0: c.name & "(" & c.argument & ")" else: c.name
+
+proc inert(c: WindowCall; ctx: var WindowDispatch): bool =
+  ## Taken and nothing done: an open overlay keeps its whole namespace.
+  true
+
+var gOperations: OperationHub[ContextTarget, WindowDispatch]
+  ## The window's operation tables (`buildWindowOperationTables`).
+
+proc buildWindowOperationTables(r: GpuiRenderer) =
+  ## **GPUI'S OPERATION TABLES** (Input-Routing §3), innermost first: the
+  ## overlays and their fields, the focused pane, the window, and last the
+  ## desktop's action names through the menu's routes. What each entry names is
+  ## the procedure that performs it; which entry a resolved operation reaches
+  ## is `operation_table.invoke`'s walk.
+  let hub = newOperationHub[ContextTarget, WindowDispatch]()
+  gOperations = hub
+
+  # --- What a context menu's entry runs, on the element it was opened on -----
+  # (§5.1: the entries are operation references, `ContextActionOperations`.) From
+  # a key there is no such element, and the walk goes on to the operation's other
+  # tables.
+  let chosenEntries = newOperationTable[ContextTarget, WindowDispatch]("context-menu-entry")
+  for action in ContextAction:
+    closureScope:
+      let chosen = action
+      if ContextActionOperations[chosen].len > 0:
+        chosenEntries.bindOp(ContextActionOperations[chosen], act do:
+          if not c.pointer:
+            return false
+          runContextAction(r, chosen, c.target))
+  hub.add chosenEntries
+
+  # --- The palette and its field --------------------------------------------
+  let palette = newOperationTable[ContextTarget, WindowDispatch]("palette",
+    proc(): bool = gOmnibar.isOpen)
+  palette.bindOp("palette.focus-previous", act do:
+    gOmnibar.moveSelection(-1)
+    drawTopBar(r))
+  palette.bindOp("palette.focus-next", act do:
+    gOmnibar.moveSelection(1)
+    drawTopBar(r))
+  palette.bindOp("palette.focus-page-up", act do:
+    gOmnibar.moveSelection(-10)
+    drawTopBar(r))
+  palette.bindOp("palette.focus-page-down", act do:
+    gOmnibar.moveSelection(10)
+    drawTopBar(r))
+  palette.onEach(["palette.accept", "input.commit"], act(acceptOmnibar(r)))
+  palette.onEach(["palette.close", "input.cancel"], act do:
+    gOmnibar.close()
+    drawTopBar(r))
+  palette.bindOp("input.move-left", act do:
+    gOmnibar.moveCursor(-1)
+    drawTopBar(r))
+  palette.bindOp("input.move-right", act do:
+    gOmnibar.moveCursor(1)
+    drawTopBar(r))
+  palette.bindOp("input.move-start", act do:
+    gOmnibar.cursorHome()
+    drawTopBar(r))
+  palette.bindOp("input.move-end", act do:
+    gOmnibar.cursorEnd()
+    drawTopBar(r))
+  palette.bindOp("input.delete-backward", act do:
+    gOmnibar.backspace()
+    drawTopBar(r))
+  palette.bindOp("input.delete-forward", act do:
+    gOmnibar.deleteForward()
+    drawTopBar(r))
+  palette.bindOp("input.toggle-overwrite", act do:
+    gOmnibar.toggleOverwrite()
+    drawTopBar(r))
+  palette.bindOp("input.paste", act do:
+    gOmnibar.typeText(clipboardText())
+    drawTopBar(r))
+  for o in Catalogue:
+    if palette.holds(o.name): continue
+    if o.name.startsWith("palette."):
+      palette.bindOp(o.name, act(drawTopBar(r)))
+    elif o.name.startsWith("input."):
+      palette.bindOp(o.name, act do:
+        traceGesture("`" & c.fullName & "` is not available in the palette")
+        drawTopBar(r))
+  hub.add palette
+
+  # PLAT-70 Part C: the find widget's field.
+  let findField = newOperationTable[ContextTarget, WindowDispatch]("find-field",
+    proc(): bool = gFind.open and editorFocused())
+  for o in Catalogue:
+    if o.name.startsWith("input."):
+      findField.bindOp(o.name, act(findFieldOperation(r, c.name)))
+  hub.add findField
+
   # PLAT-70 Part E: the focused Variables pane's keys — its cursor over the
-  # variables and their origin chains' hops, the row menu — by the shared
-  # rule (`runStateKey`).
-  if gFocusPane == $paneState and not gCtxMenu.open and not gOmnibar.isOpen and
-     runStateKey(r, res.operation):
-    return
-  case res.operation
-  of "editor.jump-to-value-origin", "debugger.reverse-origin":
-    walkValueOrigin(r, reverse = res.operation == "debugger.reverse-origin")
-    return
-  of ShowValueOriginOperation:
-    traceGesture("Show Value Origin works on the variable selected in the " &
-                 "Variables pane")
-    return
-  else: discard
-  if res.operation.startsWith("context-menu.") and gCtxMenu.open:
-    case res.operation
-    of "context-menu.focus-previous": gCtxMenu.move(-1)
-    of "context-menu.focus-next": gCtxMenu.move(1)
-    of "context-menu.focus-first": gCtxMenu.moveToEnd(last = false)
-    of "context-menu.focus-last": gCtxMenu.moveToEnd(last = true)
-    of "context-menu.accept":
-      let chosen = gCtxMenu.choose(-1)
-      if chosen.chosen:
-        drawTopBar(r)
-        runContextAction(r, chosen.action, chosen.target)
-        return
-    of "context-menu.close": gCtxMenu.close()
-    else: discard
+  # variables and their origin chains' hops, the row menu — by the shared rule
+  # (`runStateKey`).
+  let state = newOperationTable[ContextTarget, WindowDispatch]("pane:state",
+    proc(): bool = gFocusPane == $paneState and not gCtxMenu.open and
+      not gOmnibar.isOpen)
+  state.onEach(ListMoveOperations & @["editor.scroll-half-page-down",
+                                      "editor.scroll-half-page-up",
+                                      "modal.return-to-normal",
+                                      "list.clear-selection", "list.activate",
+                                      "list.expand", "list.collapse",
+                                      "list.toggle-expand", "context-menu.open",
+                                      ShowValueOriginOperation],
+               ask(runStateKey(r, c.name)))
+  hub.add state
+
+  # --- The overlays every base shares (`overlay_rows`) -----------------------
+  let contentView = newOperationTable[ContextTarget, WindowDispatch]("content-view",
+    proc(): bool = gContent.open)
+  contentView.bindOp("content-view.close", act do:
+    gContent = GContent()
+    drawTopBar(r))
+  contentView.bindOp("content-view.scroll-up", act do:
+    gContent.top = max(0, gContent.top - 1)
+    drawTopBar(r))
+  contentView.bindOp("content-view.scroll-down", act do:
+    gContent.top = gContent.top + 1
+    drawTopBar(r))
+  contentView.bindOp("content-view.page-up", act do:
+    gContent.top = max(0, gContent.top - 10)
+    drawTopBar(r))
+  contentView.bindOp("content-view.page-down", act do:
+    gContent.top = gContent.top + 10
+    drawTopBar(r))
+  hub.add contentView
+
+  let programMenu = newOperationTable[ContextTarget, WindowDispatch]("menu",
+    proc(): bool = not gMenu.isNil and gMenu.isOpen)
+  programMenu.bindOp("menu.focus-previous", act do:
+    gMenu.moveHighlight(-1)
+    drawTopBar(r))
+  programMenu.bindOp("menu.focus-next", act do:
+    gMenu.moveHighlight(1)
+    drawTopBar(r))
+  programMenu.bindOp("menu.enter-folder", act do:
+    discard gMenu.enterFolder()
+    drawTopBar(r))
+  programMenu.bindOp("menu.leave-folder", act do:
+    discard gMenu.leaveFolder()
+    drawTopBar(r))
+  programMenu.bindOp("menu.close", act do:
+    gMenu.escape()
+    drawTopBar(r))
+  programMenu.bindOp("menu.accept", act do:
+    let chosen = gMenu.highlightedItem()
+    let picked = gMenu.activate()
+    if picked.ran:
+      runGpuiMenuAction(r, picked.action)
+      return true
+    if refusalOf(chosen).len > 0:
+      traceGesture("menu refused: " & refusalOf(chosen))
+    drawTopBar(r))
+  hub.add programMenu
+
+  # PLAT-52: the Terminal Output pane's own keys, while it has focus.
+  let terminalOutput = newOperationTable[ContextTarget, WindowDispatch]("pane:terminalOutput",
+    proc(): bool = gTerminal.focused and not terminalVM().isNil)
+  terminalOutput.bindOp("terminal-output.toggle-view", act do:
+    terminalVM().toggleView()
+    drawTerminalPane(r))
+  terminalOutput.onEach(["view.scroll-left", "view.scroll-right"], act do:
+    if not terminalVM().screenShown:
+      return false
+    stepTerminalWrite(r, (if c.name == "view.scroll-left": -1 else: 1)))
+  hub.add terminalOutput
+
+  # --- The context menu -----------------------------------------------------
+  let menu = newOperationTable[ContextTarget, WindowDispatch]("context-menu",
+    proc(): bool = gCtxMenu.open)
+  menu.bindOp("context-menu.focus-previous", act do:
+    gCtxMenu.move(-1)
+    drawTopBar(r))
+  menu.bindOp("context-menu.focus-next", act do:
+    gCtxMenu.move(1)
+    drawTopBar(r))
+  menu.bindOp("context-menu.focus-first", act do:
+    gCtxMenu.moveToEnd(last = false)
+    drawTopBar(r))
+  menu.bindOp("context-menu.focus-last", act do:
+    gCtxMenu.moveToEnd(last = true)
+    drawTopBar(r))
+  menu.bindOp("context-menu.accept", act do:
+    let chosen = gCtxMenu.choose(-1)
     drawTopBar(r)
-    return
-  let palette = paletteQueryOf(res.operation)
-  if palette.ok:
-    openOmnibar(r, palette.query)
-    return
+    if chosen.chosen and ContextActionOperations[chosen.action].len > 0:
+      var inner = WindowDispatch()
+      discard gOperations.invoke(
+        WindowCall(name: ContextActionOperations[chosen.action],
+                   target: chosen.target, pointer: true), inner))
+  menu.bindOp("context-menu.close", act do:
+    gCtxMenu.close()
+    drawTopBar(r))
+  for o in Catalogue:
+    if o.name.startsWith("context-menu.") and not menu.holds(o.name):
+      menu.bindOp(o.name, act(drawTopBar(r)))
+  hub.add menu
+
+  # --- The focused pane, each deciding by its own focus test ----------------
+  const ListNames = ["list.focus-next", "list.focus-previous", "list.focus-first",
+                     "list.focus-last", "list.focus-page-down",
+                     "list.focus-page-up", "list.activate",
+                     "list.activate-redirected"]
+  var everyList: seq[string] = @[]
+  for o in Catalogue:
+    if o.name.startsWith("list."): everyList.add o.name
+  proc paneTable(owner: string; names: openArray[string];
+                 action: WindowAction) =
+    let t = newOperationTable[ContextTarget, WindowDispatch](owner)
+    t.onEach(names, action)
+    hub.add t
   # PLAT-58: the focused Requests pane takes its list operations first.
-  if res.operation.startsWith("list.") and requestsKey(r, res.operation):
-    return
+  paneTable("pane:requests", everyList, ask(requestsKey(r, c.name)))
   # PLAT-62: and the focused Constraints pane.
-  if res.operation.startsWith("list.") and constraintsKey(r, res.operation):
-    return
-  case res.operation
-  of "editor.toggle-inline-breakpoint":
+  paneTable("pane:constraints", everyList, ask(constraintsKey(r, c.name)))
+  # PLAT-53: the focused Test Results pane's list.
+  paneTable("pane:testResults", ListNames, ask(testsKey(r, c.name)))
+  # PLAT-55: and the focused Problems pane's.
+  paneTable("pane:problems", ListNames, ask(problemsKey(r, c.name)))
+  # PLAT-60: and the focused Low Level Code listing's.
+  paneTable("pane:lowLevelCode", @ListNames & @["list.clear-selection"],
+            ask(lowLevelKey(r, c.name)))
+  paneTable("pane:lowLevelCode:step",
+            ["debugger.step-over", "debugger.step-into",
+             "debugger.reverse-step-over", "debugger.reverse-step-into"],
+            ask(lowLevelStep(r, c.name)))
+  # PLAT-63: and the focused Verification pane's.
+  paneTable("pane:verification", ListNames, ask(verificationKey(r, c.name)))
+  # The rest of the list table, on the focused call trace; another pane's press
+  # stays inert and says so.
+  paneTable("pane:calltrace",
+            @ListNames & @["list.clear-selection", "list.expand", "list.collapse",
+                           "list.toggle-expand"],
+            ask(calltraceKey(r, c.name)))
+
+  # --- What an element's press runs (`pointer_rows`) ------------------------
+  let elements = newOperationTable[ContextTarget, WindowDispatch]("elements")
+  template onTarget(name: string; body: untyped) =
+    ## An operation that acts on an element: the row a press hit-tested. From a
+    ## key there is no element here, and it says so.
+    elements.bindOp(name, act do:
+      if not c.pointer:
+        return false
+      body)
+  onTarget("calltrace.go-to-call"):
+    let vm = gSession.session.calltraceVM
+    traceGesture("calltrace jump #" & $c.target.index)
+    vm.selectEntry(some(c.target.index))
+    let why = gSession.jumpToCall(c.target.index)
+    if why.len > 0:
+      traceGesture("calltrace jump failed: " & why)
+    else:
+      refreshReplayWindow(r)
+  onTarget("calltrace.toggle-call"):
+    traceGesture("calltrace toggle #" & $c.target.index)
+    let why = gSession.toggleCallChildren(c.target.index)
+    if why.len > 0:
+      traceGesture("calltrace toggle failed: " & why)
+    redrawCalltrace(r)
+  onTarget("event-log.jump"):
+    let rows = gSession.session.eventLogVM.eventRows.val
+    if c.target.index < 0 or c.target.index >= rows.len.int64:
+      return
+    try:
+      gSession.eventJump(toEventLogEntry(rows[c.target.index.int]))
+    except CatchableError as e:
+      traceGesture("event jump failed: " & e.msg)
+      return
+    afterMove(r)
+  onTarget("event-log.show-content"):
+    let rows = gSession.session.eventLogVM.eventRows.val
+    if c.target.index < 0 or c.target.index >= rows.len.int64:
+      return
+    let row = rows[c.target.index.int]
+    showContent(r, "event #" & $row.eventIndex & " at tick " & $row.rrTicks,
+                row.value)
+  onTarget("event-log.sort"):
+    let vm = gSession.session.eventLogVM
+    if vm.isNil:
+      return
+    let shown = vm.columns.val.visibleColumns
+    if c.target.index < 0 or c.target.index >= shown.len:
+      return
+    orderEventLog(r, vm.order.clickedHeader(shown[c.target.index]))
+  onTarget("variables.toggle-expand"):
+    # PLAT-70 Part B: the pressed variable is the pane's row — the one
+    # `list.show-detail` and `list.copy` act on.
+    gSession.session.stateVM.selectPath(c.target.path)
+    gSession.session.stateVM.toggleExpand(c.target.path)
+    redrawPaneOf(r, paneState)
+  onTarget("file-tree.activate"):
+    # K17 / K18.
+    let vm = windowFilesVM()
+    let e = fileEntryOf(vm, c.target.text)
+    if e.text.len == 0:
+      return
+    if e.isFolder:
+      vm.toggleExpanded(e.path)
+      redrawPaneOf(r, paneFileTree)
+    elif not openArm.isNil:
+      discard openEditFile(e.path)
+    else:
+      openTreeFile(r, e.path)
+  hub.add elements
+
+  # --- The window -----------------------------------------------------------
+  let window = newOperationTable[ContextTarget, WindowDispatch]("window")
+  window.onEach(["editor.jump-to-value-origin", "debugger.reverse-origin"], act do:
+    walkValueOrigin(r, reverse = c.name == "debugger.reverse-origin"))
+  window.bindOp(ShowValueOriginOperation, act do:
+    traceGesture("Show Value Origin works on the variable selected in the " &
+                 "Variables pane"))
+  for o in Catalogue:
+    if paletteQueryOf(o.name).ok:
+      window.bindOp(o.name, act(openOmnibar(r, paletteQueryOf(c.name).query)))
+  window.bindOp("editor.toggle-inline-breakpoint", act do:
     let path = editorPath()
     let dp = editorDocumentOf(path)
     if not dp.isNil:
-      toggleInlineAt(r, path, dp[].caretLine, dp[].caretColumn + 1)
-    return
-  of "editor.toggle-read-only":
+      toggleInlineAt(r, path, dp[].caretLine, dp[].caretColumn + 1))
+  window.bindOp("editor.toggle-read-only", act do:
     let path = editorPath()
     if not debugDocumentFor(path, gEditorSurface.executionLine):
       traceGesture("there is no document in the editor to make writable")
@@ -12106,9 +12321,8 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
                  else: "the editor is writable")
     # Back to read-only: the recording's rows again, from the session.
     if gViewedFile.len > 0: showViewedFile(r)
-    else: refreshReplayWindow(r)
-    return
-  of "editor.toggle-tracepoint":
+    else: refreshReplayWindow(r))
+  window.bindOp("editor.toggle-tracepoint", act do:
     # The desktop's `Enter` / `Ctrl+Enter` / `Alt+T` in the read-only
     # editor (`Editor.TracepointCreation`): the tracepoint editor, on the
     # caret's line.
@@ -12117,147 +12331,167 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
                else: max(1, gEditorSurface.executionLine)
     gTracepointAt = (path, line)
     traceGesture("tracepoint editor at " & $line)
-    openOmnibar(r, TracepointCommand)
-    return
-  of "menu.open", "menu.toggle", "menu.open-folder":
-    runMenuOperation(res.operation, res.argument)
-    drawTopBar(r)
-    return
-  of "layout.reveal-next-docked":
-    revealNext(r)
-    return
-  of "layout.cancel-drag":
-    discard cancelWindowGesture()
-    return
-  of "session-tabs.next", "session-tabs.previous", "session-tabs.next-recent",
-     "session-tabs.previous-recent":
+    openOmnibar(r, TracepointCommand))
+  window.onEach(["menu.open", "menu.toggle", "menu.open-folder"], act do:
+    runMenuOperation(c.name, c.argument)
+    drawTopBar(r))
+  window.bindOp("layout.reveal-next-docked", act(revealNext(r)))
+  window.bindOp("layout.cancel-drag", act do:
+    discard cancelWindowGesture())
+  window.onEach(["session-tabs.next", "session-tabs.previous",
+                 "session-tabs.next-recent", "session-tabs.previous-recent"], act do:
     if not gShell.isNil:
-      let step = if res.operation.endsWith("next") or
-                    res.operation.endsWith("next-recent"): 1 else: -1
+      let step = if c.name.endsWith("next") or c.name.endsWith("next-recent"): 1
+                 else: -1
       if gShell.app.stepTab(step):
         traceGesture("session tab " & $gShell.app.activeTabIndex())
-    drawTopBar(r)
-    return
-  of "layout.focus-next-pane", "layout.focus-previous-pane":
-    # PLAT-70 Part E: `F6` / `Shift+F6` — the keyboard's way to a pane.
-    cycleFocus(r, (if res.operation == "layout.focus-next-pane": 1 else: -1))
-    return
-  of "list.focus-next", "list.focus-previous", "list.focus-first",
-     "list.focus-last", "list.focus-page-down", "list.focus-page-up",
-     "list.activate", "list.activate-redirected":
-    # PLAT-53: the focused Test Results pane's list (other panes say below
-    # that the operation is not theirs here, as before).
-    if testsKey(r, res.operation):
-      return
-    # PLAT-55: and the focused Problems pane's.
-    if problemsKey(r, res.operation):
-      return
-    # PLAT-60: and the focused Low Level Code listing's.
-    if lowLevelKey(r, res.operation):
-      return
-    # PLAT-63: and the focused Verification pane's.
-    if verificationKey(r, res.operation):
-      return
-    if calltraceKey(r, res.operation):
-      return
-  of "list.clear-selection", "list.expand", "list.collapse",
-     "list.toggle-expand":
-    # The rest of the list table, on the focused call trace and the Low Level
-    # Code listing; another pane's press stays inert and says so below.
-    if calltraceKey(r, res.operation):
-      return
-    if res.operation == "list.clear-selection" and lowLevelKey(r, res.operation):
-      return
-  of "list.copy":
+    drawTopBar(r))
+  # PLAT-70 Part E: `F6` / `Shift+F6` — the keyboard's way to a pane.
+  window.onEach(["layout.focus-next-pane", "layout.focus-previous-pane"], act do:
+    cycleFocus(r, (if c.name == "layout.focus-next-pane": 1 else: -1)))
+  window.bindOp("list.copy", act do:
     let (text, what) = focusedRowText()
     if text.len == 0: traceGesture("nothing is selected here to copy")
-    else: copyToClipboard(text, what)
-    return
-  of "editor.scroll-line-down", "editor.scroll-line-up",
-     "editor.scroll-half-page-down", "editor.scroll-half-page-up",
-     "editor.scroll-page-down", "editor.scroll-page-up",
-     "editor.center-on-pointer":
-    # M73 (#840): §4.2 Source Navigation on the focused read-only editor —
-    # `j` / `k` (CUA's `Ctrl+Down` / `Ctrl+Up`) a line, `Ctrl+d` / `Ctrl+u`
-    # half the editor (CUA's `Alt+PageDown` / `Alt+PageUp` a page), `.` the
-    # pointer centred — the window only, the pointer and the caret stay.
-    # Until M73 these were inert here ("not available in this window").
-    if editorFocused() and debugSourceShown():
-      let rows = max(1, editorRowsOf(gGeom))
-      case res.operation
-      of "editor.center-on-pointer": centreEditorOnPointer(r)
-      of "editor.scroll-line-down": scrollEditorLines(r, 1)
-      of "editor.scroll-line-up": scrollEditorLines(r, -1)
-      of "editor.scroll-half-page-down": scrollEditorLines(r, max(1, rows div 2))
-      of "editor.scroll-half-page-up": scrollEditorLines(r, -max(1, rows div 2))
-      of "editor.scroll-page-down": scrollEditorLines(r, rows)
-      else: scrollEditorLines(r, -rows)
-      return
-  of "list.show-detail":
-    # PLAT-70 Part B (Horizontal-Overflow.md §5.3).
-    showTableDetail(r)
-    return
-  of "table.resize-column":
-    # PLAT-70 Part B (§5.2): the Event Log is the table whose columns resize.
-    resizeEventLogColumn(r, res.argument)
-    return
-  of "view.scroll-left", "view.scroll-right", "view.scroll-left-half",
-     "view.scroll-right-half", "view.scroll-to-line-start":
-    runGpuiViewOperation(r, res.operation)
-    return
-  of "help.keyboard-shortcuts":
-    showShortcutReference(r)
-    return
-  of "modal.return-to-normal":
-    # PLAT-70 Part C: `Escape` ends a committed search's browsing.
+    else: copyToClipboard(text, what))
+  # M73 (#840): §4.2 Source Navigation on the focused read-only editor — `j` /
+  # `k` (CUA's `Ctrl+Down` / `Ctrl+Up`) a line, `Ctrl+d` / `Ctrl+u` half the
+  # editor (CUA's `Alt+PageDown` / `Alt+PageUp` a page), `.` the pointer centred
+  # — the window only, the pointer and the caret stay.
+  window.onEach(["editor.scroll-line-down", "editor.scroll-line-up",
+                 "editor.scroll-half-page-down", "editor.scroll-half-page-up",
+                 "editor.scroll-page-down", "editor.scroll-page-up",
+                 "editor.center-on-pointer"], act do:
+    if not editorFocused() or not debugSourceShown():
+      return false
+    let rows = max(1, editorRowsOf(gGeom))
+    case c.name
+    of "editor.center-on-pointer": centreEditorOnPointer(r)
+    of "editor.scroll-line-down": scrollEditorLines(r, 1)
+    of "editor.scroll-line-up": scrollEditorLines(r, -1)
+    of "editor.scroll-half-page-down": scrollEditorLines(r, max(1, rows div 2))
+    of "editor.scroll-half-page-up": scrollEditorLines(r, -max(1, rows div 2))
+    of "editor.scroll-page-down": scrollEditorLines(r, rows)
+    else: scrollEditorLines(r, -rows))
+  # PLAT-70 Part B (Horizontal-Overflow.md §5.3, §5.2): the Event Log is the
+  # table whose columns resize.
+  window.bindOp("list.show-detail", act(showTableDetail(r)))
+  window.bindOp("table.resize-column", act(resizeEventLogColumn(r, c.argument)))
+  window.onEach(["view.scroll-left", "view.scroll-right", "view.scroll-left-half",
+                 "view.scroll-right-half", "view.scroll-to-line-start"],
+                act(runGpuiViewOperation(r, c.name)))
+  window.bindOp("help.keyboard-shortcuts", act(showShortcutReference(r)))
+  # PLAT-70 Part C: `Escape` ends a committed search's browsing.
+  window.bindOp("modal.return-to-normal", act do:
     gFindBrowsing = false
-    traceGesture("find browsing ended")
+    traceGesture("find browsing ended"))
+  # PLAT-70 Part C: the in-document find session (`find_vm`) — no longer the
+  # omnibar's `:grep`, which is Find in Files (§5).
+  window.onEach(["find.open", "find.open-backward", "find.open-symbol-at-caret",
+                 "find.next", "find.previous", "find.close", "find.accept",
+                 "find.cancel", "find.toggle-case", "find.toggle-whole-word",
+                 "find.yank-word", "find.next-selection-match",
+                 "find.previous-selection-match"],
+                act(runFindOperation(r, c.name, c.nowMs)))
+  # PLAT-57: with a pattern, the search; without, the pane and its field.
+  window.bindOp("search.find-in-files", act do:
+    if c.argument.len > 0: runGpuiFindInFiles(r, c.argument)
+    else: openFindInFiles(r))
+  # Build-Output-Pane.md §3.11: `Ctrl+Shift+B` — the build task picker.
+  window.bindOp("build.run", act(traceGesture(openGpuiBuildTaskPicker(r))))
+  # PLAT-55 (EMT-D22): the desktop's `aGotoNextError` / `aGotoPreviousError`.
+  window.onEach(["problems.next", "problems.previous"],
+                act(stepProblem(r, c.name == "problems.next")))
+  # PLAT-57 (§5.3): `F4` / `Shift+F4`, `Alt+G N` / `Alt+G P`.
+  window.onEach(["search.next-result", "search.previous-result"], act do:
+    stepSearchResult(r, (if c.name == "search.next-result": 1 else: -1)))
+  # `Alt+C` / `Alt+W` / `Alt+R` in Find in Files' field (the omnibox on `:grep`).
+  window.onEach(["search.toggle-case", "search.toggle-whole-word",
+                 "search.toggle-regex"], act do:
+    toggleSearchOption(r, searchOptionOf(c.name).option)
+    drawTopBar(r))
+  # A toolbar control's operation runs what its press has always run.
+  for control in TransportControls:
+    closureScope:
+      let (name, _) = splitOperation(operationOfClientAction(control.clientAction))
+      let id = control.id
+      if not window.holds(name):
+        window.bindOp(name, act(performControl(r, id)),
+                      proc(): Enablement =
+                        if gSession.isNil or gSession.session.debugControlsVM.isNil or
+                           not gSession.session.debugControlsVM.transportAvailable(id):
+                          operationDisabled("`" & name & "` is not available here")
+                        else: AlwaysEnabled)
+  hub.add window
+
+  # --- The desktop's action names, through the menu's routes ----------------
+  let actions = newOperationTable[ContextTarget, WindowDispatch]("menu-actions")
+  for (operation, _) in ClientActionOperations:
+    let (name, _) = splitOperation(operation)
+    if not actions.holds(name):
+      actions.bindOp(name, act do:
+        let action = clientActionOf(c.fullName)
+        if action.len == 0 or not gpuiMenuAvailability(action).enabled:
+          return false
+        runGpuiMenuAction(r, action))
+  hub.add actions
+
+proc runElementGesture(r: GpuiRenderer; gesture: string; pane: PaneKind;
+                       kind: ElementKind; target: ContextTarget;
+                       menu = ContextMenuModel(); x = 0; y = 0): bool =
+  ## **A PRESS ON AN ELEMENT, THROUGH THE ROUTER** (Input-Routing §5.1): its
+  ## operation is the pointer keymap's, performed by the operation tables. A
+  ## context click opens the element's `menu`. A modified press with no row of
+  ## its own is the plain gesture: a Ctrl+click on a row is still a click on it.
+  let path = @[element(ekWindow, "window"), pane($pane), element(kind, "")]
+  let facts = windowSessionFacts()
+  var res = gRouter.routePointer(facts, path, nmNormal, gesture)
+  if res.kind != erOperation and '+' in gesture:
+    res = gRouter.routePointer(facts, path, nmNormal,
+                               gesture[gesture.rfind('+') + 1 .. ^1])
+  if res.kind != erOperation or '.' notin res.operation:
+    return false
+  traceGesture("pointer " & gesture & " -> " & res.operation)
+  if res.operation == "context-menu.open":
+    if menu.entries.len == 0:
+      return false
+    openContextMenuAt(r, menu, x, y)
+    return true
+  if gOperations.isNil:
+    buildWindowOperationTables(r)
+  var ctx = WindowDispatch()
+  let answer = gOperations.invoke(
+    WindowCall(name: res.operation, argument: res.argument, target: target,
+               pointer: true), ctx)
+  case answer.kind
+  of oiRan: discard
+  of oiDisabled: traceGesture(answer.reason)
+  of oiAbsent:
+    traceGesture("`" & res.operation & "` (" & operationLabelOf(res.operation) &
+                 ") is not available in this window")
+  answer.kind != oiAbsent
+
+proc runWindowOperation(r: GpuiRenderer; res: EditingResolution; nowMs: int64) =
+  ## **GPUI'S DISPATCH** of a resolved operation — the terminal's
+  ## `runtime.runOperation`, this window's half: the editing vocabulary onto
+  ## the shown file's document, everything else through the operation tables.
+  ## An operation this window does not perform, or one disabled now, is INERT
+  ## AND SAYS SO (IR-6).
+  let call = WindowCall(name: res.operation, argument: res.argument,
+                        args: res.args, nowMs: nowMs)
+  traceGesture("operation " & call.fullName)
+  if '.' notin res.operation:
+    runDebugEditorOperation(r, res, nowMs)
     return
-  of "find.open", "find.open-backward", "find.open-symbol-at-caret",
-     "find.next", "find.previous", "find.close", "find.accept", "find.cancel",
-     "find.toggle-case", "find.toggle-whole-word", "find.yank-word",
-     "find.next-selection-match", "find.previous-selection-match":
-    # PLAT-70 Part C: the in-document find session (`find_vm`) — no longer
-    # the omnibar's `:grep`, which is Find in Files (§5).
-    runFindOperation(r, res.operation, nowMs)
-    return
-  of "search.find-in-files":
-    # PLAT-57: with a pattern, the search; without, the pane and its field.
-    if res.argument.len > 0: runGpuiFindInFiles(r, res.argument)
-    else: openFindInFiles(r)
-    return
-  of "build.run":
-    # Build-Output-Pane.md §3.11: `Ctrl+Shift+B` — the build task picker.
-    traceGesture(openGpuiBuildTaskPicker(r))
-    return
-  of "problems.next", "problems.previous":
-    # PLAT-55 (EMT-D22): the desktop's `aGotoNextError` /
-    # `aGotoPreviousError` — `F8` / `Shift+F8` in Edit mode, `Ctrl+Alt+N` /
-    # `Ctrl+Alt+P`.
-    stepProblem(r, res.operation == "problems.next")
-    return
-  of "search.next-result", "search.previous-result":
-    # PLAT-57 (§5.3): `F4` / `Shift+F4`, `Alt+G N` / `Alt+G P`.
-    stepSearchResult(r, (if res.operation == "search.next-result": 1 else: -1))
-    return
-  of "search.toggle-case", "search.toggle-whole-word", "search.toggle-regex":
-    # `Alt+C` / `Alt+W` / `Alt+R` in Find in Files' field (the omnibox on
-    # `:grep`).
-    toggleSearchOption(r, searchOptionOf(res.operation).option)
-    drawTopBar(r)
-    return
-  of "debugger.step-over", "debugger.step-into", "debugger.reverse-step-over",
-     "debugger.reverse-step-into":
-    # PLAT-60: by instruction from the focused listing, where offered.
-    if lowLevelStep(r, res.operation):
-      return
-  else: discard
-  let action = clientActionOf(op)
-  if action.len > 0 and gpuiMenuAvailability(action).enabled:
-    runGpuiMenuAction(r, action)
-    return
-  traceGesture("`" & op & "` (" & operationLabelOf(res.operation) &
-               ") is not available in this window")
+  if gOperations.isNil:
+    buildWindowOperationTables(r)
+  var ctx = WindowDispatch()
+  let answer = gOperations.invoke(call, ctx)
+  case answer.kind
+  of oiRan: discard
+  of oiDisabled: traceGesture(answer.reason)
+  of oiAbsent:
+    traceGesture("`" & call.fullName & "` (" & operationLabelOf(res.operation) &
+                 ") is not available in this window")
 
 func decodePercent(text: string): string =
   ## `%XX` (two hex digits) → that byte; anything else as it is. Only the
@@ -12426,6 +12660,13 @@ proc historyPathAt(ticks: uint64): string =
         return path
   ""
 
+func gestureOfClick(c: GPaneClick): string =
+  ## A press as the pointer keymap names it, modifiers and all.
+  pointerGesture((case c.button
+                  of gbMiddle: prMiddle
+                  of gbRight: prSecondary
+                  of gbLeft: prPrimary), c.ctrl, false, c.alt)
+
 proc onPaneClick(c: GPaneClick) =
   ## PLAT-50: a press on a row of a pane (`window_clicks`), as the desktop's
   ## click there. An open popover (a menu, the omnibar's results, a
@@ -12462,18 +12703,9 @@ proc onPaneClick(c: GPaneClick) =
     let e = fileEntryOf(vm, c.key)
     if e.text.len == 0:
       return
-    if c.button == gbRight:
-      openContextMenuAt(r, vm.fileTreeContextMenuOf(e.path), c.x, c.y)
-      return
-    if c.button != gbLeft:
-      return
-    if e.isFolder:
-      vm.toggleExpanded(e.path)
-      redrawPaneOf(r, paneFileTree)
-    elif not openArm.isNil:
-      discard openEditFile(e.path)
-    else:
-      openTreeFile(r, e.path)
+    runElementGesture(r, gestureOfClick(c), paneFileTree, ekRow,
+                      ContextTarget(pane: paneFileTree, path: e.path, text: c.key),
+                      menu = vm.fileTreeContextMenuOf(e.path), x = c.x, y = c.y)
     return
   if gSession.isNil:
     # An Edit window: its gutter and text are the shared pointer model's, with
@@ -12493,38 +12725,17 @@ proc onPaneClick(c: GPaneClick) =
   of gcpNone, gcpFileNode: discard
   of gcpEventRow:
     # K24 / K25.
-    let rows = session.eventLogVM.eventRows.val
-    if c.index < 0 or c.index >= rows.len.int64:
-      return
-    let row = rows[c.index.int]
-    if c.button == gbRight:
-      showContent(r, "event #" & $row.eventIndex & " at tick " &
-                       $row.rrTicks, row.value)
-    elif c.button == gbLeft:
-      try:
-        gSession.eventJump(toEventLogEntry(row))
-      except CatchableError as e:
-        traceGesture("event jump failed: " & e.msg)
-        return
-      afterMove(r)
+    runElementGesture(r, gestureOfClick(c), paneEventLog, ekRow,
+                      ContextTarget(pane: paneEventLog, index: c.index))
   of gcpEventHeader:
     # K26: the column's header orders the log by it, again to reverse.
-    if c.button != gbLeft or session.eventLogVM.isNil:
-      return
-    let shown = session.eventLogVM.columns.val.visibleColumns
-    if c.index < 0 or c.index >= shown.len:
-      return
-    orderEventLog(r, session.eventLogVM.order.clickedHeader(shown[c.index]))
+    runElementGesture(r, gestureOfClick(c), paneEventLog, ekHeader,
+                      ContextTarget(pane: paneEventLog, index: c.index))
   of gcpVariable:
     # K27 / K28.
-    if c.button == gbRight:
-      openContextMenuAt(r, variablesContextMenu(c.key), c.x, c.y)
-    elif c.button == gbLeft:
-      # PLAT-70 Part B: the pressed variable is the pane's row — the one
-      # `list.show-detail` and `list.copy` act on.
-      session.stateVM.selectPath(c.key)
-      session.stateVM.toggleExpand(c.key)
-      redrawPaneOf(r, paneState)
+    runElementGesture(r, gestureOfClick(c), paneState, ekRow,
+                      ContextTarget(pane: paneState, path: c.key),
+                      menu = variablesContextMenu(c.key), x = c.x, y = c.y)
   of gcpGutter, gcpCode:
     # K10 - K15, K47 and the multi-click rows: the shared pointer model
     # (Editor-Pane.md § Mouse Gestures, MC.1 - MC.7).
@@ -12594,6 +12805,7 @@ proc onPaneClick(c: GPaneClick) =
   of gcpCallRow:
     # K22 (K20 / K21 are `clickCalltrace`'s, by the rows' fixed pitch).
     if c.button != gbRight:
+      gPressGesture = gestureOfClick(c)
       return
     let store = session.store
     let local = c.index - store.calltrace.startLineIndex.val
@@ -12601,8 +12813,11 @@ proc onPaneClick(c: GPaneClick) =
     if local < 0 or local >= lines.len.int64:
       return
     let line = lines[local.int]
-    openContextMenuAt(r, callTraceContextMenu(c.index, line.hasChildren,
-                                              line.isExpanded), c.x, c.y)
+    runElementGesture(r, gestureOfClick(c), paneCalltrace, ekRow,
+                      ContextTarget(pane: paneCalltrace, index: c.index),
+                      menu = callTraceContextMenu(c.index, line.hasChildren,
+                                                  line.isExpanded),
+                      x = c.x, y = c.y)
   of gcpCallArg:
     # K23: an argument's menu (a left press is the row's, `clickCalltrace`).
     if c.button != gbRight:
@@ -12950,7 +13165,7 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
       setFocusable(pane)
       discard focusElement(pane)
       probeTarget = pane
-      r.addEventListener(pane, "keydown", probeHandler(pane))
+      r.addEventListener(pane, "keydown", probeHandler(pane))  # ir1-gate: not a key: a probe's listener, into the router
     inc painted
 
   # PLAT-45 — THE WINDOW DRAWS THE ARRANGEMENT IT WAS GIVEN, and since
@@ -12993,7 +13208,7 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
           setFocusable(first)
           discard focusElement(first)
           probeTarget = first
-          r.addEventListener(first, "keydown", probeHandler(first))
+          r.addEventListener(first, "keydown", probeHandler(first))  # ir1-gate: not a key: a probe's listener, into the router
         break
 
   # PLAT-44 — THE EDITOR TAKES KEYS. Attached here for the probe's reason:
@@ -13251,8 +13466,12 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
           windowPointer(r, gekPointerUp, scrubX(b), y)
       of "key":
         gTerminal.focused = true
-        if not terminalKey(r, parts[2]):
+        let key = parts[2].toLowerAscii
+        let res = probeWindowResolution(key, @[])
+        if res.kind != erOperation or
+           res.layer != "base:" & PaneTablePrefix & $paneTerminalOutput:
           return "the terminal output pane does not take '" & parts[2] & "'"
+        routeWindowKey(r, key, @[])
       of "wheel":
         let (cx, cy) = centreOf(body)
         windowPointer(r, gekWheel, cx, cy, -float(at(2) * TerminalRowPx))

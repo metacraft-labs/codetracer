@@ -3,6 +3,7 @@ when defined(js):
   import kdom
   import ../../context_menu_item
   import context_menu_hint
+  import ./dismissals
   from ../../lib/electron_presence import inElectron
 
   var contextMenuHandlers: seq[proc(ev: kdom.Event) {.closure.}]
@@ -176,6 +177,8 @@ when defined(js):
 
     kdom.document.addEventListener(cstring"click", proc(ev: kdom.Event) =
       hideContextMenu())
-    kdom.document.addEventListener(cstring"keydown", proc(ev: kdom.Event) =
-      if ev.eventKeyCode() == 27:
-        hideContextMenu())
+    registerDismissal(proc(): bool =
+      if contextMenuIsOpen():
+        hideContextMenu()
+        return true
+      false)
