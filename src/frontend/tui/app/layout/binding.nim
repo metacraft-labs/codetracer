@@ -1627,6 +1627,35 @@ proc dividerFraction(b: LayoutBinding; geom: LayoutGeometry; node: string;
        else:
          float(row - bounds.row + 1) / float(bounds.height))
 
+type
+  DividerAxis* = enum
+    ## Which way the divider under a cell is dragged.
+    daNone, daAcrossColumns, daAcrossRows
+
+proc dividerAxisAt*(b: LayoutBinding; geom: LayoutGeometry;
+                    row, col: int): DividerAxis =
+  ## Pointer-Affordances §3.2: the divider a press here would hold, if any.
+  let divider = b.dividerAt(geom, row, col)
+  if divider.isNone:
+    return daNone
+  let container = b.layout.tree.nodeAtPath(divider.get[0])
+  if not container.isNil and container.kind == lnColumn: daAcrossRows
+  else: daAcrossColumns
+
+proc tabUnder*(b: LayoutBinding; geom: LayoutGeometry; row, col: int): bool =
+  ## Whether a press here lands on a tab of a strip.
+  b.tabAtCell(geom, row, col).isSome
+
+proc resizingAcrossRows*(b: LayoutBinding): bool =
+  ## The divider held in flight is dragged up and down.
+  if b.interaction.kind != ikResizingSplit:
+    return false
+  let parent = parentPath(b.interaction.node)
+  if parent.isNone:
+    return false
+  let container = b.layout.tree.nodeAtPath(parent.get)
+  not container.isNil and container.kind == lnColumn
+
 proc previewDivider(b: LayoutBinding; geom: LayoutGeometry;
                     row, col: int): LayoutAction =
   ## PLAT-47: a divider drag's LIVE preview — the pointer moved with the

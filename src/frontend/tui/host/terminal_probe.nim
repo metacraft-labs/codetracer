@@ -228,6 +228,12 @@ proc noteReply*(probe: var TerminalProbe; token: string): bool =
   if isKittyKeyboardReply(token):
     probe.kittyKeyboardAnswered = true
     return true
+  if isPointerReply(token):
+    let (ok, reply) = parsePointerReply(token)
+    if ok:
+      probe.pointerAnswered = true
+      probe.pointerReply = reply
+    return true
   if isPixelMouseReply(token):
     # `CSI ? 1016 ; Ps $ y`: 1 set, 2 reset, 3 permanently set — the mode is
     # known; 0 not recognised, 4 permanently reset.
@@ -424,6 +430,10 @@ proc queriesFor*(flags: CapabilityFlags; env = TerminalEnv(term: "xterm");
   if not flags.noMouse:
     result.add PixelMouseQuery & CellSizeQuery
   result.add KittyKeyboardQuery
+  # Pointer-Affordances §5.2: before the fence, unless the shapes are off.
+  # A hardware terminal (`vt220`) has no pointer to shape: PA-5.
+  if flags.pointerQueryWanted and not env.term.toLowerAscii.startsWith("vt"):
+    result.add pointerQuery(env.tmux.len > 0)
   result.add XtversionQuery & Da2Query & SyncModeQuery & GraphemeModeQuery
   result.add widthProbeBytes(cols)[0]
   result.add Da1Query
@@ -450,6 +460,7 @@ proc runStartupProbe*(d: TerminalDriver; env: TerminalEnv;
   result = TerminalProbe(attempted: true)
   let cols = d.size().cols
   result.cprExpected = cprCountFor(env, cols)
+  result.pointerWrappedAsked = env.tmux.len > 0 and flags.pointerQueryWanted
   var tmux = TmuxQuery()
   if env.tmux.len > 0:
     tmux = startTmuxQuery()
@@ -477,13 +488,17 @@ proc runStartupProbe*(d: TerminalDriver; env: TerminalEnv;
       result.rttMeasured = true
       result.rttMs = int((getMonoTime() - writtenAt).inMilliseconds)
   finishTmuxQuery(tmux, result)
-  if result.answered:
+  if result.answered and not result.pointerWrappedAsked:
     d.expectReplies(false)
 
 proc replyWindowOpen*(probe: TerminalProbe; startedMs, nowMs: int64): bool =
   ## Whether a late reply can still arrive: the fence has not, and the window
-  ## has not closed.
-  probe.attempted and not probe.answered and nowMs - startedMs < ReplyWindowMs
+  ## has not closed. Through tmux the fence is tmux's own and says nothing
+  ## about the wrapped pointer query, which the outer terminal answers later.
+  probe.attempted and
+    (not probe.answered or
+     (probe.pointerWrappedAsked and not probe.pointerAnswered)) and
+    nowMs - startedMs < ReplyWindowMs
 
 # ---------------------------------------------------------------------------
 # The negotiation, as the entrypoint holds it
@@ -561,7 +576,8 @@ proc takeReply*(n: StartupNegotiation; d: TerminalDriver;
   let wasAnswered = n.probe.answered
   discard noteReply(n.probe, token)
   if n.probe.answered:
-    d.expectReplies(false)
+    if n.probe.pointerAnswered or not n.probe.pointerWrappedAsked:
+      d.expectReplies(false)
     if not wasAnswered and not n.probe.rttMeasured:
       # A LATE fence: the round trip is the time since the round was
       # written (§4.6) — a slow link, measured.

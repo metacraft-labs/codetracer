@@ -45,7 +45,7 @@ import ../../views/[isonim_calltrace_view, isonim_event_log_view,
                     isonim_state_view]
 
 # Counted, so a loop over an empty list cannot pass by asserting nothing.
-const ExpectedAssertions = 44
+const ExpectedAssertions = 42
 
 var checks = 0
 template ck(cond: untyped) =
@@ -186,7 +186,7 @@ suite "the shared views' clickable rows are controls":
 
 const
   ScrubberStyl = staticRead("../../../styles/components/list_scrubber.styl")
-  DataTablesStyl = staticRead("../../../styles/components/data_tables.styl")
+  PointerStamp = staticRead("../../../ui/pointer_stamp.nim")
 
 proc stylBlock(text, header: string; indent: int): string =
   ## The lines of the Stylus block whose header line is exactly `header` at
@@ -211,12 +211,10 @@ suite "the hand is drawn only on a control":
       ck "cursor: pointer" notin rule
 
   test "a table's body shows no hand; its control rows do":
-    let body = stylBlock(DataTablesStyl, "tbody", 4)
-    ck body.len > 0
-    ck "cursor: pointer" notin body
-    let rows = stylBlock(DataTablesStyl, "&[role=\"button\"]", 4)
-    ck rows.len > 0
-    ck "cursor: pointer" in rows
+    # The stylesheets say no `cursor` (Pointer-Affordances §4): which element
+    # shows the hand is a row of the desktop's table of element kinds.
+    ck ".data-table tbody\"" notin PointerStamp
+    ck ".data-table tr[role=\"\"button\"\"]\", hkControl, false" in PointerStamp
 
 suite "assertion count":
   test "every assertion ran":

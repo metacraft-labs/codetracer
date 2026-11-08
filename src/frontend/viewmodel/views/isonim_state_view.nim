@@ -41,6 +41,7 @@ when defined(js):
 
 import ../viewmodels/state_vm
 import ../viewmodels/origin_chain_types
+import ../viewmodels/state_pane_keys
 import ../views/state_view
 when defined(js):
   import std/jsffi
@@ -649,10 +650,21 @@ proc onToggleExpand(vm: StateVM; item: proc(): VariableViewState): proc() =
 # on the State panel means every debugger step — destroying focus and
 # expansion state. Position-keyed reuse is what this panel wants.
 
-proc renderOriginChainLine[R, N](r: R; line: proc(): OriginChainLineView): N =
-  ## One line of the in-row origin chain (hop or terminator).
+proc renderOriginChainLine[R, N](r: R; line: proc(): OriginChainLineView;
+                                 item: proc(): VariableViewState; vm: StateVM;
+                                 index: int): N =
+  ## One line of the in-row origin chain (hop or terminator). A hop is a
+  ## navigation row: a click does what `Enter` on it does in the native panes
+  ## (`state_pane_keys.stateRowClick`).
+  let seek = proc() =
+    let chain = chainForRow(vm, item())
+    if chain.isNone:
+      return
+    let effect = stateRowClick(chain.get.chainKeyRows, StateCursor(hop: index))
+    if effect.kind == skeSeek:
+      vm.jumpToHistoryEntry(int64(effect.tick))
   ui(r):
-    tdiv(class = chainLineClass(line)):
+    tdiv(class = chainLineClass(line), onclick = seek):
       span(class = chainLineIconClass(line)):
         discard
       span(class = chainLineTextClass(line)):
@@ -684,7 +696,7 @@ proc renderOriginChainLines[R, N](r: R; container: N;
   indexEach[OriginChainLineView, R, N](r, container,
     proc(): seq[OriginChainLineView] = originChainLines(vm, item()),
     proc(line: proc(): OriginChainLineView, index: int): N =
-      renderOriginChainLine[R, N](r, line))
+      renderOriginChainLine[R, N](r, line, item, vm, index))
 
 proc renderHistoryRows[R, N](r: R; container: N;
                              item: proc(): VariableViewState; vm: StateVM) =

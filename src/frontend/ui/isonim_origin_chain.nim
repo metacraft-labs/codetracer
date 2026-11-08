@@ -36,7 +36,7 @@ import std/[options, sequtils, strformat, strutils]
 
 import isonim/core/signals
 
-import ../viewmodel/viewmodels/[origin_chain_types, origin_chain_vm]
+import ../viewmodel/viewmodels/[origin_chain_types, origin_chain_vm, state_pane_keys]
 import origin_badge
 
 type
@@ -312,13 +312,22 @@ when defined(js):
           vm.onSwitchToSpan(s)
           return
 
-  proc hopSeekHandler(vm: OriginChainVM; index: int): proc(ev: Event) =
+  proc insideOperands(ev: Event): bool {.importjs:
+    "(#.target.closest('details') !== null)".}
+
+  proc hopRowClickHandler(vm: OriginChainVM; index: int): proc(ev: Event) =
+    ## A press anywhere on the row, through the rule every front-end's click
+    ## on a hop goes through (`state_pane_keys.stateRowClick`). The operand
+    ## snapshots under the row open and close by themselves.
     let hopIndex = index
-    result = proc(_: Event) =
+    result = proc(ev: Event) =
       let active = vm.activeChain.val
-      if active.isNone:
+      if active.isNone or insideOperands(ev):
         return
-      vm.seekToHopInOwningProcess(active.get, hopIndex)
+      let effect = stateRowClick(active.get.chainKeyRows,
+                                 StateCursor(hop: hopIndex))
+      if effect.kind == skeSeek:
+        vm.seekToHopInOwningProcess(active.get, effect.hop)
 
   proc renderPanelDom*(parent: Node;
                        vm: OriginChainVM;
@@ -421,8 +430,8 @@ when defined(js):
       # `seekToHopInOwningProcess` also rotates the active recording
       # when the hop lives in a sibling process, so a chain that walked
       # a boundary can be navigated back across it.
-      button.addEventListener(cstring"click", hopSeekHandler(vm, hopIndex))
       li.appendChild(button)
+      li.addEventListener(cstring"click", hopRowClickHandler(vm, hopIndex))
       if hop.operandSnapshots.len > 0:
         let details = document.createElement(cstring"details")
         let summary = document.createElement(cstring"summary")

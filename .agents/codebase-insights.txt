@@ -8324,7 +8324,6 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   ~/.cache/codetracer can fail it. The `|| :` matters under `set -e`: the call
   returns 1 inside the sandboxed re-run and on hosts without user namespaces.
   `lane-user-state-guard-test.sh` case 12 flags an entry point without it.
-||||||| parent of 7c23a507647 (wip: visual replay panes)
 - Visual Replay (PLAT-59): the three panes (Video Player, Pixel History,
   Shader Debug) are ONE model, `viewmodels/visual_replay_panes_vm.VisualReplayPanesVM`
   (frame + player + history + shader over one client; `setClient` sets all
@@ -8351,3 +8350,13 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   and `../../../codetracer-visual-replay` from its REAL path; building it
   against pinned siblings needs a copy beside symlinks to the pinned worktrees
   (nim `--path` on the command line does not override config.nims there).
+
+- 2026-11-05 (pointer shapes): `viewmodel/input/pointer_shape.pointerShapeOf` is the only place a shape
+  is decided. The desktop's stylesheets hold no `cursor:` outside `styles/components/pointer.styl`; a new
+  interactive element gets its shape from a row in `ui/pointer_stamp.nim`'s selector table, not from CSS.
+  `cstring"..."` there is a RAW literal, so a quote is `""`. One selector Chromium refuses would throw from
+  every `matches`, so the table is filtered at start-up and the count is `html[data-pointer-refused]`.
+  Measured: kitty 0.47 has no `col-resize` / `row-resize` (it takes `ew-resize` / `ns-resize`), and xterm
+  407 and Ghostty 1.3.1 ignore the empty `OSC 22 ; ST` reset, so they are given their I-beam by name.
+  A SIGTSTP on a pty whose session is the binary's own is discarded by the kernel (orphaned group), so
+  the restore and the resume arrive together; a test reads both, it cannot see the stop in between.

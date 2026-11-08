@@ -45,10 +45,7 @@ TAB_CORNER_RADIUS = 0.375rem
   opacity: unset !important
   transition: background 150ms ease !important
   z-index: 4 !important
-  cursor: col-resize
 
-  &.lm_vertical
-    cursor: row-resize
 
   &:hover
     background: colors-ui-border-action !important
@@ -260,7 +257,6 @@ TAB_CORNER_RADIUS = 0.375rem
   background-size: 1em 1em !important
   width: 1.5em !important
   height: 1.5em !important
-  cursor: pointer
 
   &:focus:not(:focus-visible)
     outline: none !important
@@ -291,7 +287,6 @@ TAB_CORNER_RADIUS = 0.375rem
   width: 0.6em !important
   height: 0.6em !important
   position: static !important
-  cursor: pointer
   // `.lm_tab` is a flex row and `.lm_title` asks for `width: 100%`, so the row
   // is always over-constrained and every shrinkable item gives up width. Without
   // this the close box — the only child that could shrink, since `.lm_pin_tab`
@@ -307,7 +302,6 @@ TAB_CORNER_RADIUS = 0.375rem
   width: 0.85em !important
   height: 0.85em !important
   position: static !important
-  cursor: pointer
   margin-right: 0.3em
   flex-shrink: 0
 

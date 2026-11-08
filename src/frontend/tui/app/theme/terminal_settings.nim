@@ -53,6 +53,10 @@ proc choicesOf*(which: LayoutSetting; word: string;
       var v: bool
       if not parseOnOffWord(word, v): return false
       into.reduceMotion = some(v)
+  of lsPointerShapes:
+    var v: PointerShapesChoice
+    if not parseChoice(word, v): return false
+    into.pointerShapes = (if v == pscAuto: none(PointerShapesChoice) else: some(v))
   else:
     return false
   true
@@ -69,6 +73,7 @@ proc choicesOf*(words: TerminalSettingWords): TerminalChoices =
   if words.terminalProbe == "off":
     discard choicesOf(lsTerminalProbe, words.terminalProbe, result)
   discard choicesOf(lsReduceMotion, words.reduceMotion, result)
+  discard choicesOf(lsPointerShapes, words.pointerShapes, result)
 
 proc prefsOf*(s: LayoutSettings): TerminalPrefs =
   ## Ranks 4 and 5: the `[terminal "<glob>"]` sections and the global

@@ -61,6 +61,7 @@ type
     lsColors = "colors"
     lsTerminalProbe = "terminal-probe"
     lsReduceMotion = "reduce-motion"
+    lsPointerShapes = "pointer-shapes"
     lsTerminalHints = "terminal-hints"
 
   TerminalSettingWords* = object
@@ -74,6 +75,7 @@ type
     colors*: string
     terminalProbe*: string
     reduceMotion*: string
+    pointerShapes*: string
     terminalHints*: string
 
   ScopedSettings* = object
@@ -117,11 +119,14 @@ const
     ## (**View: Toggle Overflow Markers**).
   ToggleOverflowMarkersLabel* = "View: Toggle Overflow Markers"
     ## Horizontal-Overflow.md §4.6's palette entry.
+  TogglePointerShapesLabel* = "View: Toggle Pointer Shapes"
+    ## Pointer-Affordances.md §5.6's palette entry.
 
 const
   DefaultTerminalSettingWords* = TerminalSettingWords(
     glyphs: "auto", modernUnicode: "off", ambiguousWidth: "auto",
     colors: "auto", terminalProbe: "on", reduceMotion: "auto",
+    pointerShapes: "auto",
     terminalHints: "on")
     ## §5.3's defaults. `modern-unicode` is `off` (the user's decision).
 
@@ -136,12 +141,13 @@ func defaultLayoutSettings*(overflowMarkers = true): LayoutSettings =
 func isTerminalSetting*(which: LayoutSetting): bool =
   ## PLAT-71: a setting only the terminal front-end has (§5.3).
   which in {lsModernUnicode, lsGlyphs, lsAmbiguousWidth, lsColors,
-            lsTerminalProbe, lsReduceMotion, lsTerminalHints}
+            lsTerminalProbe, lsReduceMotion, lsPointerShapes, lsTerminalHints}
 
 func isOnOff*(which: LayoutSetting): bool =
   ## Whether the setting is on / off (else it takes `settingValues`).
   which notin {lsScrollbarThickness, lsScrollbarClick, lsModernUnicode,
-               lsGlyphs, lsAmbiguousWidth, lsColors, lsReduceMotion}
+               lsGlyphs, lsAmbiguousWidth, lsColors, lsReduceMotion,
+               lsPointerShapes}
 
 func settingValues*(which: LayoutSetting): seq[string] =
   ## The words the setting takes, in the order the omnibox lists them.
@@ -155,6 +161,7 @@ func settingValues*(which: LayoutSetting): seq[string] =
   of lsAmbiguousWidth: result = @["auto", "narrow", "wide"]
   of lsColors: result = @["auto", "truecolor", "256", "16", "mono"]
   of lsReduceMotion: result = @["auto", "on", "off"]
+  of lsPointerShapes: result = @["auto", "on", "off"]
   else: result = @["on", "off"]
 
 func valuesText(which: LayoutSetting): string =
@@ -210,6 +217,7 @@ func valueText*(s: LayoutSettings; which: LayoutSetting): string =
   of lsColors: s.terminal.colors
   of lsTerminalProbe: s.terminal.terminalProbe
   of lsReduceMotion: s.terminal.reduceMotion
+  of lsPointerShapes: s.terminal.pointerShapes
   of lsTerminalHints: s.terminal.terminalHints
 
 proc assignValue*(s: var LayoutSettings; which: LayoutSetting;
@@ -236,6 +244,7 @@ proc assignValue*(s: var LayoutSettings; which: LayoutSetting;
   of lsColors: s.terminal.colors = v
   of lsTerminalProbe: s.terminal.terminalProbe = v
   of lsReduceMotion: s.terminal.reduceMotion = v
+  of lsPointerShapes: s.terminal.pointerShapes = v
   of lsTerminalHints: s.terminal.terminalHints = v
   of lsScrollbarThickness:
     for t in BarThickness:
@@ -443,6 +452,7 @@ func settingCommandLabel*(which: LayoutSetting; value: string): string =
     of lsColors: "Terminal colours"
     of lsTerminalProbe: "Terminal probe"
     of lsReduceMotion: "Reduce motion"
+    of lsPointerShapes: "Pointer shapes"
     of lsTerminalHints: "Terminal hints"
   name & ": " & value
 

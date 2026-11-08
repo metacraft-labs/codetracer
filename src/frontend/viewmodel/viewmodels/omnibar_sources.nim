@@ -269,3 +269,8 @@ proc layoutSettingCommands*(terminalSettings = true): seq[OmnibarEntry] =
                           label: ToggleOverflowMarkersLabel,
                           detail: ":set " & $lsOverflowMarkers & " on|off",
                           target: settingToggleTarget(lsOverflowMarkers))
+  if terminalSettings:
+    result.add OmnibarEntry(kind: OmnibarMode.omCommand,
+                            label: TogglePointerShapesLabel,
+                            detail: ":set " & $lsPointerShapes & " on|off",
+                            target: settingToggleTarget(lsPointerShapes))

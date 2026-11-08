@@ -1,0 +1,11 @@
+// The pointer's shape (Pointer-Affordances.md §4). Elements carry
+// `data-pointer` from the one shared function (`common/pointer_shape`,
+// stamped by `ui/pointer_stamp`), and these are the only `cursor` rules in the
+// stylesheets. During a gesture the body carries `data-pointer-gesture`, which
+// wins over every element until the gesture ends.
+for shape in default pointer text col-resize row-resize grab grabbing not-allowed
+  [data-pointer=\"{shape}\"]
+    cursor: unquote(shape)
+  body[data-pointer-gesture=\"{shape}\"],
+  body[data-pointer-gesture=\"{shape}\"] *
+    cursor: unquote(shape) !important

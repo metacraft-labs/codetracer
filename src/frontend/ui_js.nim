@@ -293,6 +293,7 @@ proc hideWelcomeScreenSurface() =
 import viewmodel/session_vm
 import ui/session_viewmodels
 import ui/panel_host   # the panes it mounts render their tab's ViewModels
+import ui/pointer_stamp
 from ui/pane_host_lookup import tabOfPaneHost
 from isonim/web/dom_api as isonim_dom import nil
 import viewmodel/sdk/[debugger_session, trace_source]
@@ -2136,6 +2137,7 @@ window.__ctApplyVisualReplayTabs = function() {
 
 proc callInitLayoutUnchecked(config: GoldenLayoutResolvedConfig) =
   initLayout(config)
+  installPointerStamp()
 
 proc tryInitLayout*(data: Data) =
   ## Mount the GoldenLayout tree once both the page and the init event are in.

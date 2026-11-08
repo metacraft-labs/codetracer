@@ -491,6 +491,15 @@ var gCaretSupport = caretShapes
   ## PLAT-49: whether the running terminal shapes its cursor (`interactive`
   ## decides it once, from `TERM` / `TERM_PROGRAM` / `TMUX`).
 
+proc projectPointer(driver: TerminalDriver; rt: TuiRuntime; token: string) =
+  ## Pointer-Affordances §5.3: each mouse report's shape, written on change.
+  ## A Shift-modified report is the terminal's own (`handleToken`).
+  if driver.pointer.caps.dialect == pdOff:
+    return
+  let (isMouse, event) = decodeMouse(token)
+  if isMouse and not event.shift:
+    driver.setPointerShape(rt.pointerShapeAt(event))
+
 proc paint(driver: TerminalDriver; rt: TuiRuntime) =
   ## One frame of `rt` onto `driver`.
   ##
@@ -1637,6 +1646,7 @@ proc interactive(command: TuiCommand): int =
       discard vcs.followViewport(rt)
       paint(driver, rt)
     of dekFocus:
+      driver.pointerFocusChanged(ev.focused)
       # THE VCS PANE'S SECOND TRIGGER (VCS-Panel.md's auto-refresh, the
       # desktop's window `focus` listener in `ui/vcs.nim`): the terminal
       # window regained focus (`CSI I`, DECSET 1004), so the repository is
@@ -1683,6 +1693,7 @@ proc interactive(command: TuiCommand): int =
       # than the one it recorded.
       journal.note(ev.token)
       let outcome = rt.handleToken(ev.token, nowMs())
+      driver.projectPointer(rt, ev.token)
       if outcome.quit:
         running = false
       else:
@@ -2061,6 +2072,7 @@ proc editInteractive(command: TuiCommand): int =
           paint(driver, rt)
         continue
       let outcome = rt.handleToken(ev.token, nowMs())
+      driver.projectPointer(rt, ev.token)
       if outcome.quit:
         loop = false
       else:

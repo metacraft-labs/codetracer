@@ -2977,6 +2977,8 @@ const
     ## click goes to that moment.
   StateOriginHopAttribute* = "data-ct-origin-hop"
     ## PLAT-51: on a value-origin hop under its variable — the hop's index.
+  StateOriginPathAttribute* = "data-ct-origin-path"
+    ## On a hop — the path of the variable whose chain it belongs to.
   StateOriginTickAttribute* = "data-ct-origin-tick"
     ## PLAT-70 Part E: on a hop — the tick `Enter` on it seeks to.
   StateOriginOperandAttribute* = "data-ct-origin-operand"
@@ -3712,6 +3714,7 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
         let o = r.createElement("div")
         r.setAttribute(o, StateOriginHopAttribute, $i)
         r.setAttribute(o, StateOriginTickAttribute, $hop.tick)
+        r.setAttribute(o, StateOriginPathAttribute, row.path)
         # PLAT-70 Part E: a hop is a row the keyboard cursor stops on
         # (Value-Origin-Tracking.md §13.0), drawn on the selected row's
         # ground while it is there.

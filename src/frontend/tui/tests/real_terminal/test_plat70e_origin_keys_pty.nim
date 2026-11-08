@@ -39,7 +39,7 @@ import ../../app/theme/roles
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 16
+const ExpectedAssertions = 19
 
 var countedAssertions = 0
 
@@ -240,6 +240,25 @@ proc atResults(sess: var TuiTestSession) =
     proc(s: Snapshot): bool = s.varsFind("value ")[0] >= 0)
 
 suite "PLAT-70 Part E on a real terminal: value origin from the keyboard":
+
+  test "a press on a hop seeks to its tick, with the cursor on it":
+    var (sess, state) = open()
+    defer: sess.quit(state)
+    sess.atResults()
+    sess.focusVariables()
+    let (rx, _) = sess.selectVariable("value")
+    ck rx > 0
+    sess.key(CtrlShiftO)
+    var s = sess.waitUntil("the chain under value",
+      proc(s: Snapshot): bool = s.findRow("⇠ tick ", rx + 1)[0] > rx)
+    let (h0, hc) = s.findRow("⇠ tick ", rx + 1)
+    let wanted = hopTick(s.text(h0))
+    ck wanted > 0
+    sess.sendMouseClick(h0, hc + 4)
+    s = sess.waitUntil("the recording at the hop's tick",
+      proc(s: Snapshot): bool = s.tick == wanted)
+    let (h1, hc1) = s.findRow("⇠ tick ", 1)
+    ck h1 > 0 and s.selected(h1, hc1)
 
   test "CUA: Ctrl+Shift+O, Down onto a hop, Escape, Enter seeks, Menu":
     var (sess, state) = open()

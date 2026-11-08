@@ -13,6 +13,7 @@
 ## `viewmodel/views/agent_harbor_words.nim` (`filterLabel`, `filterCount`, `metaParts`,
 ## `metaPartsShort`, `withheldNote`, `headerSummary` and the notices).
 
+import ../../../common/pointer_shape
 import std/strutils
 
 import isonim/core/[signals, computation]
@@ -78,7 +79,7 @@ proc drawFilter(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; filter: Flee
   result = r.box(pairs = [("height", $ControlPx & "px"), ("items", "center"), ("gap", "6px"),
                           ("padding-left", "8px"), ("padding-right", "8px"),
                           ("rounded", $ControlRadiusPx & "px"), ("flex-shrink", "0"),
-                          ("cursor", "pointer")])
+                          ("cursor", cursorOf(hkControl))])
   if active: r.setStyle(result, "background", p.hover)
   r.tag(result, "filter", $filter)
   r.tag(result, "filter-count", $count)
@@ -104,7 +105,7 @@ proc drawRow(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; row: FleetRow;
   result = r.box(pairs = [("gap", "8px"), ("items", "start"), ("padding-top", "6px"),
                           ("padding-bottom", "6px"), ("padding-left", $InsetPx & "px"),
                           ("padding-right", $InsetPx & "px"), ("flex-shrink", "0"),
-                          ("cursor", "pointer")])
+                          ("cursor", cursorOf(hkControl))])
   r.rule(result, p.borderSecondary)
   # The selected row: the action surface, and every text of it -- status
   # words and notes included -- in the selected commit row's text colour
@@ -158,7 +159,7 @@ proc drawRow(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; row: FleetRow;
       let more = r.box(pairs = [("height", "16px"), ("items", "center"),
                                 ("padding-left", "6px"), ("padding-right", "6px"),
                                 ("rounded", "4px"), ("flex-shrink", "0"),
-                                ("cursor", "pointer")])
+                                ("cursor", cursorOf(hkControl))])
       # On a selected row the chip takes the selection's text, no fill.
       if not sel: r.setStyle(more, "background", p.tertiary)
       r.tag(more, "activity-more", label)

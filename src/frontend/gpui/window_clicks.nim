@@ -88,6 +88,9 @@ type
       ## PLAT-51: the Watches tab's "Add watch expression…" row.
     gcpCallSearch = "callsearch"
       ## The call trace's search field (`CallSearchAttribute`).
+    gcpOriginHop = "hop"
+      ## A hop of an open origin chain; the key is its index, its variable's
+      ## path after `#` (`StateOriginHopAttribute`).
 
   GClickButton* = enum
     gbLeft = "left"
@@ -270,6 +273,10 @@ proc wireWindowClicks*(r: GpuiRenderer; root: GpuiElement;
       elif getAttribute(el, StateHistoryEntryAttribute).len > 0:
         c = GPaneClick(part: gcpHistoryEntry,
                        key: getAttribute(el, StateHistoryEntryAttribute))
+      elif getAttribute(el, StateOriginHopAttribute).len > 0:
+        c = GPaneClick(part: gcpOriginHop,
+                       key: getAttribute(el, StateOriginHopAttribute) & "#" &
+                            getAttribute(el, StateOriginPathAttribute))
       elif getAttribute(el, StateAddWatchAttribute).len > 0:
         c = GPaneClick(part: gcpAddWatch, key: "watch")
       elif getAttribute(el, CallSearchAttribute).len > 0:
@@ -313,6 +320,9 @@ proc findClickTarget*(r: GpuiRenderer; root: GpuiElement; part: GClickPart;
     of gcpCallRow: getAttribute(el, CallRowAttribute) == key
     of gcpTab: getAttribute(el, TabPaneAttribute) == key
     of gcpPosition, gcpAddWatch, gcpCallSearch: true
+    of gcpOriginHop:
+      getAttribute(el, StateOriginHopAttribute) & "#" &
+        getAttribute(el, StateOriginPathAttribute) == key
     of gcpStateControl, gcpHistoryEntry:
       getAttribute(el, StateControlAttribute) == key or
         getAttribute(el, StateHistoryEntryAttribute) == key

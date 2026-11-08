@@ -288,7 +288,6 @@ body:has(#auto-hide-overlay.closing) .ct-overlay-outline
   top: 0
   bottom: 0
   width: 0.25rem
-  cursor: col-resize
   z-index: 10
   flex-shrink: 0
   background: colors-ui-surface-primary-default
@@ -333,7 +332,6 @@ COLLAPSED_STRIP_RADIUS = 0.375rem
   padding-left: 0
   padding-right: 0
   background-color: colors-ui-surface-base-canvas
-  cursor: pointer
   overflow: hidden
   align-items: center
 
@@ -474,7 +472,6 @@ COLLAPSED_STRIP_RADIUS = 0.375rem
   position: relative
   width: 100%
   height: 100%
-  cursor: pointer
 
   &::before
     content: ""
@@ -557,7 +554,6 @@ DOCK_BOTTOM_HANDLE_SIZE = 0.25rem
   bottom: auto
   height: DOCK_BOTTOM_HANDLE_SIZE
   width: auto
-  cursor: ns-resize
 
 // ---------------------------------------------------------------------------
 // Bottom auto-hide strip — one of #status-base's flex children, taking the
@@ -736,7 +732,6 @@ DOCK_BOTTOM_HANDLE_SIZE = 0.25rem
   color: colors-ui-text-primary-label-subtle
   background-color: colors-ui-surface-base-panel
   border-radius: TAB_CORNER_RADIUS
-  cursor: pointer
   // No horizontal padding — the tab is only 2em wide and removing horizontal
   // padding gives the rotated label enough block-size to render without clipping.
   // top/bottom 0.5em matches lm_tab left/right rotated; horizontal padding is
@@ -930,7 +925,6 @@ body:has(#auto-hide-strip-right .auto-hide-strip-tab.active:first-child)
   display: block
   background-repeat: no-repeat
   background-position: center
-  cursor: pointer
   border: none
   padding: 0
   background-color: transparent
@@ -979,7 +973,6 @@ body:has(#auto-hide-strip-right .auto-hide-strip-tab.active:first-child)
   width: 1rem
   height: 1rem
   margin-top: 0.25rem
-  cursor: pointer
   tab-icon(url('../../public/resources/shared/close_sm.svg'), 1rem 1rem)
 
 #auto-hide-strip-right .auto-hide-strip-tab-hide
@@ -1163,7 +1156,6 @@ body:has(#auto-hide-strip-right .auto-hide-strip-tab.active:first-child)
   top: 0
   bottom: 0
   width: 0.25rem
-  cursor: col-resize
 
 // Right overlay: drag the LEFT edge to widen.
 .auto-hide-overlay-right .auto-hide-overlay-resize-handle
@@ -1171,7 +1163,6 @@ body:has(#auto-hide-strip-right .auto-hide-strip-tab.active:first-child)
   top: 0
   bottom: 0
   width: 0.25rem
-  cursor: col-resize
 
 // Bottom overlay: drag the TOP edge upward to increase height.
 .auto-hide-overlay-bottom .auto-hide-overlay-resize-handle
@@ -1179,7 +1170,6 @@ body:has(#auto-hide-strip-right .auto-hide-strip-tab.active:first-child)
   left: 0
   right: 0
   height: 0.25rem
-  cursor: ns-resize
 
 // The body carries the panel background and clips content to rounded corners.
 // The resize handle is outside the body (absolute in the outer overlay) so it
@@ -1278,7 +1268,6 @@ body:has(#auto-hide-strip-right .auto-hide-strip-tab.active:first-child)
   top: 0.25rem
   right: 0.25rem
   z-index: 5
-  cursor: pointer
   font-size: 0.875rem
   width: 1.5rem
   height: 1.5rem
@@ -1349,7 +1338,6 @@ body:has(#auto-hide-strip-right .auto-hide-strip-tab.active:first-child)
   // the stricter text threshold is the one `footer-contrast-guard.spec.ts`
   // holds them to.
   color: colors-ui-icon-primary-default
-  cursor: pointer
   padding: 0.0625rem 0.1875rem
   border-radius: 0.125rem
   background-color: transparent
@@ -1402,7 +1390,6 @@ body:has(#auto-hide-strip-right .auto-hide-strip-tab.active:first-child)
   font-weight: 600
   color: colors-ui-text-primary-label
   background-color: colors-ui-surface-primary-secondary
-  cursor: pointer
   padding: 0.1875rem 0.375rem
   margin: 0.125rem
   max-height: 7.5rem
@@ -1449,7 +1436,6 @@ body:has(#auto-hide-strip-right .auto-hide-strip-tab.active:first-child)
   background: transparent
   color: colors-ui-icon-primary-default
   font-size: 1.25rem
-  cursor: pointer
   -webkit-app-region: no-drag
 
   &:hover
@@ -1597,7 +1583,6 @@ CLOSE_SM_ICON_PATH = url('../../public/resources/shared/close_sm.svg')
     width: 1rem
     height: 1rem
     margin-left: auto
-    cursor: pointer
     tab-icon(CLOSE_SM_ICON_PATH, 1rem 1rem)
 
   // The tab whose panel is showing.  On the label as well: `ct-menu-item`

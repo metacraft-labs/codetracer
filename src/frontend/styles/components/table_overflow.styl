@@ -70,8 +70,6 @@
 
 // A cut cell's `…` is its last character: the pointer says it can be pressed
 // (Pointer-Affordances: a truncated cell's `…` is `pointer`).
-[data-ct-cut]
-  cursor: pointer
 
 // PLAT-70 Part I (§5.5): in SCROLL the Event Log's body scrolls sideways and
 // its header strip follows it by a translation (`views/table_fit_dom`); the
@@ -89,7 +87,6 @@
   right: 0
   width: 0.375rem
   height: 100%
-  cursor: col-resize
 
 // A row's full text, open under it.
 .ct-table-detail

@@ -1214,7 +1214,7 @@ proc applyLayoutSetting*(rt: TuiRuntime; which: LayoutSetting; value: string;
   of lsOverflowMarkers:
     rt.app.overflowMarkersOff = not on
   of lsModernUnicode, lsGlyphs, lsAmbiguousWidth, lsColors,
-     lsTerminalProbe, lsReduceMotion, lsTerminalHints:
+     lsTerminalProbe, lsReduceMotion, lsPointerShapes, lsTerminalHints:
     discard
   of lsScrollbarThickness, lsScrollbarFade, lsScrollbarTrack,
      lsScrollbarClick:
@@ -4933,6 +4933,9 @@ proc routeDockLabelClick(rt: TuiRuntime; geometry: LayoutGeometry;
                      event.row, event.col, outcome)
   true
 
+proc runStateRowClick(rt: TuiRuntime; at: StateCursor;
+                      outcome: var RuntimeOutcome)
+
 proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
                     event: MouseEvent; outcome: var RuntimeOutcome): bool =
   ## A press the layout did not act on (`lasNoGesture`), on a pane's strip or
@@ -5063,6 +5066,12 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
                              event.row, event.col, outcome)
           return true
         return false
+      of vrkOrigin:
+        if event.button != mbLeft:
+          return false
+        rt.runStateRowClick(StateCursor(path: prow.node.path, hop: prow.entry),
+                            outcome)
+        return true
       of vrkAddWatch:
         if event.button != mbLeft:
           return false
@@ -7032,6 +7041,12 @@ proc runMenuAction*(rt: TuiRuntime; action: string;
                                   rt.app.overflowMarkersOff))
     outcome.repaint = true
     return
+  # Pointer-Affordances §5.6: **View: Toggle Pointer Shapes**.
+  if toggle.ok and toggle.setting == lsPointerShapes:
+    rt.note(rt.applyLayoutSetting(lsPointerShapes,
+                                  rt.caps.pointer.dialect == pdOff))
+    outcome.repaint = true
+    return
   # PLAT-49 part B: the omnibar's event-log column commands
   # (`omnibar_sources.eventLogColumnCommands`), the `:column-*` verbs.
   let col = parseEventLogColumnCommand(action)
@@ -8200,6 +8215,9 @@ proc filesPaneArea(rt: TuiRuntime): CellArea =
       return paneUnderStrip(geometry, i)
   CellArea()
 
+proc runStateEffect(rt: TuiRuntime; effect: StateKeyEffect; op: string;
+                    body: int; outcome: var RuntimeOutcome): bool
+
 proc runVariablesKeyOperation(rt: TuiRuntime; operation: string;
                               outcome: var RuntimeOutcome): bool =
   ## PLAT-70 Part E (Variable-State-Pane.md § Value origin from the keyboard)
@@ -8240,8 +8258,13 @@ proc runVariablesKeyOperation(rt: TuiRuntime; operation: string;
                        outcome)
     return true
   let body = max(1, rt.paneBodyRows(paneState) - 1)
-  let effect = stateKey(model.stateKeyRows(rows), model.cursorOf, op,
-                        page = body)
+  rt.runStateEffect(stateKey(model.stateKeyRows(rows), model.cursorOf, op,
+                             page = body), op, body, outcome)
+
+proc runStateEffect(rt: TuiRuntime; effect: StateKeyEffect; op: string;
+                    body: int; outcome: var RuntimeOutcome): bool =
+  ## What the shared rule answered, applied to the terminal's Variables pane.
+  let rows = rt.app.variables.paneRows()
   case effect.kind
   of skeUnhandled:
     return false
@@ -8277,6 +8300,20 @@ proc runVariablesKeyOperation(rt: TuiRuntime; operation: string;
                                           path: effect.path))
   outcome.repaint = true
   true
+
+proc runStateRowClick(rt: TuiRuntime; at: StateCursor;
+                      outcome: var RuntimeOutcome) =
+  ## A press on a row of the open chain: the shared rule's answer to it.
+  let model = rt.app.variables
+  let rows = model.paneRows()
+  let effect = stateRowClick(model.stateKeyRows(rows), at)
+  if effect.kind == skeSeek:
+    # The cursor rests on the clicked hop, as `Enter` on it would leave it.
+    rt.app.variables.selected = effect.cursor.path
+    rt.app.variables.focused = effect.cursor.path
+    rt.app.variables.selectedHop = effect.cursor.hop
+    rt.context.selectedVariable = variablePathOf(effect.cursor.path)
+  discard rt.runStateEffect(effect, "list.activate", 1, outcome)
 
 proc runFilesKeyOperation(rt: TuiRuntime; operation: string;
                           outcome: var RuntimeOutcome): bool =
@@ -9586,3 +9623,259 @@ proc paneShortcutReference*(rt: TuiRuntime; pane: PaneKind): seq[ReferenceEntry]
   discard rt.focusHostedPane(pane)
   result = rt.router.shortcutReference(rt.sessionFacts, rt.scopePath, rt.navMode)
   rt.focus = saved
+
+# ---------------------------------------------------------------------------
+# The pointer's shape (Pointer-Affordances.md §3, §5)
+# ---------------------------------------------------------------------------
+#
+# The terminal's half of the hit-test (cells), in the order the mouse routes
+# above take a report, each answering a `HitTarget` through the same *TargetAt
+# functions a press goes through. Every shape comes from `pointerShapeOf`.
+
+proc pointerGesture(rt: TuiRuntime): PointerGesture =
+  ## §3.3: the gesture in flight, read from the machines that hold it.
+  let b = rt.app.layoutBinding
+  if rt.scrollbars.grab.active or rt.scrollbars.paging.hold.active or
+     rt.app.terminalDrag != tdNone:
+    return PointerGesture(kind: pgScrubberDrag)
+  if rt.app.variablesResize.active or rt.app.eventLogResize.active:
+    return PointerGesture(kind: pgColumnDrag)
+  if not b.isNil:
+    case b.interaction.kind
+    of ikDraggingTab:
+      return PointerGesture(kind: pgTabDrag,
+                          legalDrop: b.interaction.hover.isSome)
+    of ikResizingSplit:
+      return PointerGesture(kind: (if b.resizingAcrossRows: pgRowDrag
+                                 else: pgColumnDrag))
+    else: discard
+  if rt.app.textDrag:
+    return PointerGesture(kind: pgTextSelection)
+  PointerGesture()
+
+func paneTarget(kind: HitKind; id = ""): HitTarget =
+  HitTarget(kind: kind, id: id)
+
+proc variablesTargetAt(rt: TuiRuntime; under: CellArea;
+                       event: MouseEvent): HitTarget =
+  if rt.app.variables.isEmpty:
+    return
+  var g = newStyledGrid(under.col + under.width, under.row + under.height)
+  let screen = paintVariables(g, under, rt.app.variables)
+  let (anyRow, row) = screen.rowAtScreenRow(event.row)
+  if not anyRow:
+    return
+  case row.kind
+  of vrkHistory, vrkOrigin: paneTarget(hkRow, row.node.path)
+  of vrkAddWatch: paneTarget(hkControl, "add-watch")
+  of vrkMore: paneTarget(hkLoadMore, row.node.path)
+  of vrkVariable:
+    case screen.controlAt(rt.app.variables, event.row, event.col)
+    of vcHistory, vcOrigin, vcRemoveWatch: paneTarget(hkControl, row.node.path)
+    of vcNameSeparator: paneTarget(hkColumnSeparator, "variables")
+    of vcNone: paneTarget(hkRow, row.node.path)
+  else: HitTarget()
+
+proc paneBodyTargetAt(rt: TuiRuntime; pane: PaneKind; under: CellArea;
+                      event: MouseEvent): HitTarget =
+  ## A pane's body: what a press there would be on (`routePaneClick`).
+  let (r, c) = (event.row, event.col)
+  case pane
+  of paneFileTree:
+    var g = newStyledGrid(under.col + under.width, under.row + under.height)
+    let i = paintFileTree(g, under, rt.app.fileTree).entryIndexAt(r)
+    if i >= 0 and i < rt.app.fileTree.rowCount: paneTarget(hkRow) else: HitTarget()
+  of paneEditor:
+    let src = rt.sourceWithView()
+    if rt.app.modes.product == pmEdit or rt.app.source.isEmpty:
+      return paneTarget(hkEditorText)
+    let target = src.sourceClickTargetAt(under, r, c)
+    if target.onGutter: paneTarget(hkGutterGlyph)
+    elif target.line > 0: paneTarget(hkEditorText)
+    else: HitTarget()
+  of paneCalltrace:
+    if rt.app.callTrace.isEmpty: return
+    case rt.app.callTrace.callTraceHitAt(under, r, c).kind
+    of cthRow: paneTarget(hkRow)
+    of cthToggle: paneTarget(hkExpander)
+    of cthTrack, cthThumb: paneTarget(hkScrubber)
+    of cthNone: HitTarget()
+  of paneEventLog:
+    let (ok, _, screen) = eventRowAt(rt.app.eventLog, under, r)
+    if ok: return paneTarget(hkRow)
+    if screen.separatorAt(r, c)[0]: return paneTarget(hkColumnSeparator)
+    if screen.headerColumnAt(r, c)[0]: paneTarget(hkControl) else: HitTarget()
+  of paneState:
+    rt.variablesTargetAt(under, event)
+  of panePointList:
+    let i = r - under.row - 1
+    if rt.app.points.loaded and i >= 0 and i < rt.app.points.rows.len:
+      paneTarget(hkRow)
+    else: HitTarget()
+  of paneScratchpad:
+    if rt.app.scratchpad.loaded and
+       rt.app.scratchpad.scratchpadHitAt(under, r, c).close:
+      paneTarget(hkControl)
+    else: HitTarget()
+  of paneAgentActivity:
+    if not rt.app.agent.loaded: return
+    let (area, screen) = rt.agentPaneScreen()
+    case rt.app.agent.agentTargetAt(screen, area, r, c).kind
+    of atRow: paneTarget(hkRow)
+    of atButton, atSend, atAddContext, atStop: paneTarget(hkControl)
+    of atPrompt: paneTarget(hkTextInput)
+    of atTrack: paneTarget(hkScrubber)
+    of atNone: HitTarget()
+  of paneSearch:
+    if not rt.app.search.loaded: return
+    let (area, screen) = rt.searchPaneScreen()
+    case rt.app.search.searchTargetAt(screen, area, r, c).kind
+    of stMatch: paneTarget(hkRow)
+    of stOption: paneTarget(hkControl)
+    of stQuery: paneTarget(hkTextInput)
+    of stTrack: paneTarget(hkScrubber)
+    of stFile, stNone: HitTarget()
+  of paneBuildOutput:
+    if not rt.app.buildPane.loaded: return
+    let (area, model, screen) = rt.buildPaneScreen()
+    case model.buildTargetAt(screen, area, r, c).kind
+    of btControl: paneTarget(hkControl)
+    of btHistoryItem, btLine: paneTarget(hkRow)
+    of btTrack: paneTarget(hkScrubber)
+    of btText, btNone: HitTarget()
+  of paneProblems:
+    if not rt.app.problems.loaded: return
+    let (area, screen) = rt.problemsPaneScreen()
+    case rt.app.problems.problemsTargetAt(screen, area, r, c).kind
+    of pbRow: paneTarget(hkRow)
+    of pbFilter, pbGroup: paneTarget(hkControl)
+    of pbTrack: paneTarget(hkScrubber)
+    of pbHeader, pbText, pbNone: HitTarget()
+  of paneLowLevelCode:
+    if not rt.app.lowLevel.loaded: return
+    let (area, screen) = rt.lowLevelPaneScreen()
+    case rt.app.lowLevel.lowLevelTargetAt(screen, area, r, c).kind
+    of ltInstruction: paneTarget(hkRow)
+    of ltSync: paneTarget(hkControl)
+    of ltTrack: paneTarget(hkScrubber)
+    of ltSource, ltHeader, ltNone: HitTarget()
+  of paneVerification:
+    if not rt.app.verification.loaded: return
+    let (area, screen) = rt.verificationPaneScreen()
+    case rt.app.verification.verificationTargetAt(screen, area, r, c).kind
+    of vtLine: paneTarget(hkRow)
+    of vtRun, vtStop: paneTarget(hkControl)
+    of vtTrack: paneTarget(hkScrubber)
+    of vtHeader, vtNone: HitTarget()
+  of paneTestResults:
+    let (area, screen) = rt.testsPaneScreen()
+    case rt.app.tests.testsTargetAt(screen, area, r, c).kind
+    of tpRow, tpOpen: paneTarget(hkRow)
+    of tpRun, tpRefresh: paneTarget(hkControl)
+    of tpTrack: paneTarget(hkScrubber)
+    of tpText, tpNone: HitTarget()
+  of paneRequests:
+    let (area, screen) = rt.requestsPaneScreen()
+    case rt.app.requests.requestsTargetAt(screen, area, r, c).kind
+    of rqRow, rqHandler: paneTarget(hkRow)
+    of rqMethod, rqStatus: paneTarget(hkControl)
+    of rqField: paneTarget(hkTextInput)
+    of rqTrack: paneTarget(hkScrubber)
+    of rqNone, rqHeader, rqDetail, rqMessage: HitTarget()
+  of paneConstraints:
+    if not rt.app.constraints.loaded: return
+    let (area, screen) = rt.constraintsPaneScreen()
+    case rt.app.constraints.constraintsTargetAt(screen, area, r, c).kind
+    of cgRow: paneTarget(hkRow)
+    of cgTrack: paneTarget(hkScrubber)
+    of cgText, cgNone: HitTarget()
+  of paneShell:
+    # A shell's scrollback and prompt: text, as the terminal it is drawn in.
+    paneTarget(hkTextInput)
+  of paneTerminalOutput:
+    case rt.app.terminalOutput.terminalOutputHitAt(under, r, c).kind
+    of thViewLines, thViewScreen, thFragment: paneTarget(hkControl)
+    of thLineTrack, thLineThumb, thScreenTrack, thScreen: paneTarget(hkScrubber)
+    else: HitTarget()
+  else:
+    HitTarget()
+
+proc pointerTargetAt(rt: TuiRuntime; event: MouseEvent): HitTarget =
+  ## What the element under the pointer is, in the order the routes take a
+  ## press (`handleToken`): what is drawn on top first.
+  let (r, c) = (event.row, event.col)
+  if rt.app.contextMenu.open:
+    let screen = shellScreenOf(rt)
+    let (inside, index) = rt.app.contextMenu.contextMenuHitAt(
+      screen.contextMenuArea, r, c)
+    if inside and index >= 0:
+      return HitTarget(kind: hkControl,
+                       disabled: not rt.app.contextMenu.menu.entries[index].enabled)
+    return
+  if rt.app.menu.isOpen:
+    let screen = shellScreenOf(rt)
+    let (inside, path) = menuHitAt(screen.menuDropdowns, r, c)
+    if inside and path.len > 0:
+      return HitTarget(kind: hkControl,
+                       disabled: not rt.app.menu.itemAt(path).enabled)
+  if rt.app.omnibar.isOpen:
+    let screen = shellScreenOf(rt)
+    if rt.omnibarHit(screen, event)[0]:
+      return paneTarget(hkRow)
+    if r == 0:
+      return paneTarget(hkTextInput)
+    return
+  if rt.prompt.open and r >= rt.height - 1:
+    return paneTarget(hkTextInput)
+  if r == 0:
+    let model = rt.app.shellModel(rt.width, rt.height).topBar
+    let hit = shellScreenOf(rt).topBarLayout.topBarHitAt(c, model.tabs)
+    return case hit.kind
+           of thMenuButton, thTabClose, thTabAdd, thTabMore: paneTarget(hkControl)
+           of thControl:
+             HitTarget(kind: hkControl,
+                       disabled: not (hit.index < model.controlsEnabled.len and
+                                      model.controlsEnabled[hit.index]))
+           of thStop: HitTarget(kind: hkControl, disabled: not model.stopEnabled)
+           of thOmnibar: paneTarget(hkTextInput)
+           of thTab: paneTarget(hkTab)
+           of thNone: HitTarget()
+  if rt.scrollbars.paintedValid:
+    for bar in rt.scrollbars.painted:
+      if bar.contains(r, c):
+        return paneTarget(hkScrubber)
+  let shownWelcome = rt.app.shownWelcome()
+  if not shownWelcome.isNil:
+    if r >= rt.height - 1 or
+       rt.shellScreenOf().welcomeLayout.welcomeRowAt(r, c) < 0:
+      return
+    return paneTarget(hkRow)
+  if not rt.layoutBindingEnabled():
+    return
+  let geometry = rt.paintedGeometry()
+  let binding = rt.app.layoutBinding
+  if not rt.maximize.active:
+    case binding.dividerAxisAt(geometry, r, c)
+    of daNone: discard
+    of daAcrossColumns: return paneTarget(hkDividerVertical)
+    of daAcrossRows: return paneTarget(hkDividerHorizontal)
+  if binding.tabUnder(geometry, r, c):
+    return paneTarget(hkTab)
+  if geometry.stripIndexAt(r, c) >= 0:
+    return
+  let (onPane, region, under) = geometry.paneAt(r, c)
+  if not onPane or not under.contains(r, c):
+    return
+  let cell = rt.tableCellAt(r, c)
+  if cell.found and [cell.cut].ellipsisAt(r, c) >= 0:
+    return HitTarget(kind: hkCell, truncated: true)
+  rt.paneBodyTargetAt(region.pane, under, event)
+
+proc pointerShapeAt*(rt: TuiRuntime; event: MouseEvent): PointerShape =
+  ## Pointer-Affordances §5.3: the shape the terminal should show after this
+  ## report. A gesture's shape needs no hit-test, which keeps a live drag's
+  ## reports as cheap as they were.
+  let gesture = rt.pointerGesture()
+  if gesture.kind != pgNone:
+    return pointerShapeOf(HitTarget(), gesture)
+  pointerShapeOf(rt.pointerTargetAt(event))

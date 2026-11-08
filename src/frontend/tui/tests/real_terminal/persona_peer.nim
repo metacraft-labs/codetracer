@@ -41,6 +41,8 @@ type
       ## The width the terminal advances for each width-probe glyph, in the
       ## order the binary prints them (P1 … P6); a missing entry, no report.
     kittyKeyboard*: bool
+    pointerReply*: string
+      ## The answer to OSC 22's query, `1,0,…`; "" answers nothing.
     delayMs*: int
       ## How long the terminal takes to answer (a slow link).
 
@@ -52,10 +54,16 @@ type
     cursorReports*: int
 
 const
+  PointerQuery* =
+    "\x1b]22;?default,pointer,text,col-resize,row-resize,grab,grabbing," &
+    "not-allowed,ew-resize,ns-resize\x1b\\"
+  WrappedPointerQuery* =
+    "\x1bPtmux;\x1b\x1b]22;?default,pointer,text,col-resize,row-resize,grab," &
+    "grabbing,not-allowed,ew-resize,ns-resize\x1b\x1b\\\x1b\\"
   KnownQueries* = [
     "\x1b]11;?\x1b\\", "\x1bP+q524742;5463\x1b\\", "\x1bP$qm\x1b\\",
     "\x1b[?1016$p", "\x1b[16t", "\x1b[?u", "\x1b[>q", "\x1b[>c",
-    "\x1b[?2026$p", "\x1b[?2027$p", "\x1b[6n", "\x1b[c"]
+    "\x1b[?2026$p", "\x1b[?2027$p", "\x1b[6n", "\x1b[c", WrappedPointerQuery, PointerQuery]
     ## Every question of the start-up round (`host/terminal_probe`).
   Da1Query* = "\x1b[c"
   CprQuery* = "\x1b[6n"
@@ -91,6 +99,8 @@ proc answerFor*(p: Persona; query: string; cprIndex: int): string =
   of "\x1b[6n":
     (if cprIndex < p.widths.len: "\x1b[1;" & $(p.widths[cprIndex] + 1) & "R"
      else: "")
+  of PointerQuery, WrappedPointerQuery:
+    (if p.pointerReply.len > 0: "\x1b]22;" & p.pointerReply & "\x1b\\" else: "")
   of "\x1b[c": p.da1
   else: ""
 
@@ -141,7 +151,8 @@ proc kitty*(): Persona =
                       "DECRQM 2026, the keyboard protocol); not captured",
           xtversion: "kitty(0.36.4)", da2: "\x1b[>1;4000;29c",
           da1: "\x1b[?62;22c", modes: {2026: 2, 2027: 0, 1016: 2}.toTable,
-          widths: @[1, 1, 1, 1, 2, 2], kittyKeyboard: true)
+          widths: @[1, 1, 1, 1, 2, 2], kittyKeyboard: true,
+          pointerReply: "1,1,1,0,0,1,1,1,1,1")
 
 proc foot*(): Persona =
   Persona(name: "foot 1.16.2",

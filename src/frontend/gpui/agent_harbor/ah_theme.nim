@@ -19,6 +19,7 @@
 ## carries a `data-ah-*` attribute (`tag`); the CTF-P1b coverage test reads
 ## the views through them.
 
+import ../../../common/pointer_shape
 import isonim_gpui/renderer
 import isonim/viewmodel
 import nim_agents_isonim_viewmodels/agent_harbor/[data_source, session_items]
@@ -261,7 +262,7 @@ proc button*(r: GpuiRenderer; p: AhPalette; label: string; onClick: proc();
                           ("justify", "center"), ("padding-left", "8px"),
                           ("padding-right", "8px"), ("flex-shrink", "0"),
                           ("rounded", $ControlRadiusPx & "px"),
-                          ("cursor", "pointer")])
+                          ("cursor", cursorOf(hkControl))])
   if outlined:
     r.styles(result, [("border-width", "1px"), ("border-color", p.borderPrimary)])
   r.appendChild(result, r.text(label, CaptionPx, p.textLabel, shrink = false))
@@ -312,7 +313,7 @@ proc stripRetry*(r: GpuiRenderer; p: AhPalette; onClick: proc()): GpuiElement =
                           ("padding-right", "8px"), ("flex-shrink", "0"),
                           ("rounded", $ControlRadiusPx & "px"),
                           ("border-width", "1px"), ("border-color", p.borderPrimary),
-                          ("cursor", "pointer")])
+                          ("cursor", cursorOf(hkControl))])
   r.appendChild(result, r.text("Retry", CaptionPx, p.textLabel, shrink = false))
   r.tag(result, "button", "Retry")
   if onClick != nil: r.addEventListener(result, "click", onClick)

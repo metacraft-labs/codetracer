@@ -17,6 +17,7 @@
 ## state suffixes are the web switcher's (`agent_harbor_words.stateSuffix`).
 
 
+import ../../../common/pointer_shape
 import isonim/core/[signals, computation]
 import nim_agents_isonim_viewmodels/agent_harbor/initiative_tabs_vm
 from ../../viewmodel/views/agent_harbor_words import stateSuffix
@@ -87,7 +88,7 @@ proc drawRecordingButton(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM
   result = r.box(pairs = [("height", "18px"), ("min-width", "18px"), ("items", "center"),
                           ("justify", "center"), ("padding-left", "4px"),
                           ("padding-right", "4px"), ("rounded", "4px"),
-                          ("flex-shrink", "0"), ("cursor", "pointer")])
+                          ("flex-shrink", "0"), ("cursor", cursorOf(hkControl))])
   r.tag(result, "recording", $rb.number)
   r.tag(result, "recording-state", $rb.state)
   r.tag(result, "recording-active", $rb.active)
@@ -138,7 +139,7 @@ proc drawBarTab(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
                           ("padding-left", $TabPadPx & "px"),
                           ("padding-right", $TabPadPx & "px"),
                           ("rounded", $ControlRadiusPx & "px"), ("flex-shrink", "1"),
-                          ("overflow", "hidden"), ("cursor", "pointer")])
+                          ("overflow", "hidden"), ("cursor", cursorOf(hkControl))])
   if tab.active: r.setStyle(result, "background", p.activeTab)
   r.tag(result, "tab", key)
   r.tag(result, "active", $tab.active)
@@ -253,7 +254,7 @@ proc inboxStep(r: GpuiRenderer; p: AhPalette; arrow: string; onClick: proc()): G
                           ("width", $InboxStepPx & "px"),
                           ("justify", "center"), ("padding-left", "6px"),
                           ("padding-right", "6px"), ("flex-shrink", "0"),
-                          ("rounded", $ControlRadiusPx & "px"), ("cursor", "pointer")])
+                          ("rounded", $ControlRadiusPx & "px"), ("cursor", cursorOf(hkControl))])
   r.appendChild(result, r.text(arrow, BodyLargePx, p.textLabel, shrink = false))
   r.tag(result, "button", arrow)
   r.addEventListener(result, "click", onClick)
@@ -287,7 +288,7 @@ proc drawInbox(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM): GpuiEle
                               ("flex-shrink", "0"), ("rounded", $ControlRadiusPx & "px"),
                               ("border-width", "1px"),
                               ("border-color", if auto: p.borderAction else: p.ground),
-                              ("cursor", "pointer")])
+                              ("cursor", cursorOf(hkControl))])
   if auto: r.appendChild(toggle, r.mark(MarkStyle(colour: p.action)))
   r.appendChild(toggle, r.text(autoLabel(vm), CaptionPx,
                                if auto: p.textBody else: p.textLabel, shrink = false))
@@ -301,7 +302,7 @@ proc drawElsewhere(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM): Gpu
   let target = vm
   result = r.box(pairs = [("gap", "6px"), ("items", "center"), ("height", $ControlPx & "px"),
                           ("padding-left", "6px"), ("padding-right", "6px"),
-                          ("rounded", $ControlRadiusPx & "px"), ("cursor", "pointer"),
+                          ("rounded", $ControlRadiusPx & "px"), ("cursor", cursorOf(hkControl)),
                           ("flex-shrink", "0")])
   if vm.elsewhereOpen.val: r.setStyle(result, "background", p.hover)
   r.tag(result, "elsewhere", $vm.elsewhereCount)

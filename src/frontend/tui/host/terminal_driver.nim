@@ -604,6 +604,8 @@ type
       ## PLAT-68: the extended key reporting `caps.keyProtocol` negotiated,
       ## enabled on the alternate screen; `nim-termctl` undoes it on every
       ## exit path (`stop`, a signal, `atexit`).
+    pointer*: PointerEmitter
+      ## Pointer-Affordances §5.3: what the terminal was told about the pointer.
     focusReporting: FocusReporting
       ## DECSET 1004, asked for by `start` whenever the terminal is ours (see
       ## "Focus reporting" above). `nim-termctl`'s, like the mouse and key
@@ -669,6 +671,8 @@ proc restoreUnion*(d: TerminalDriver): string =
     result.add "\x1b[?2026l"
   if d.pixelMouseOwned:
     result.add "\x1b[?1016l"
+  # Pointer-Affordances §5.4: on the alternate screen, like the keyboard pop.
+  result.add d.pointer.restoreBytes
   if d.mouseOwned:
     result.add "\x1b[?1003l"
 
@@ -687,6 +691,7 @@ proc resumeUnion*(d: TerminalDriver): string =
     result.add "\x1b[?1016h"
   if d.mouseOwned:
     result.add MotionTrackingOnBytes
+  result.add d.pointer.resumeBytes
 
 proc registerRestore(d: TerminalDriver) =
   discard setExtraRestore(d.restoreUnion())
@@ -700,6 +705,17 @@ proc adoptCapabilities*(d: TerminalDriver; caps: TerminalCapabilities) =
   ## cells painted in the old. PLAT-68: and put the terminal's key reporting
   ## on the protocol the round decided.
   d.caps = caps
+  if caps.pointer != d.pointer.caps:
+    # Another dialect (or none): give back what the old one was told.
+    if d.started:
+      writeAll(d.outFd, d.pointer.restoreBytes)
+    let wanted = d.pointer.wanted
+    let hadWanted = d.pointer.hasWanted
+    d.pointer = PointerEmitter(caps: caps.pointer, wanted: wanted,
+                               hasWanted: hadWanted,
+                               unfocused: d.pointer.unfocused)
+    if d.started and hadWanted:
+      writeAll(d.outFd, d.pointer.emit(wanted))
   d.emitter.caps = caps
   d.emitter.reset()
   d.applyKeyProtocol()
@@ -710,6 +726,22 @@ proc adoptCapabilities*(d: TerminalDriver; caps: TerminalCapabilities) =
     writeAll(d.outFd, "\x1b[?2027h")
     d.graphemeOwned = true
   if d.started:
+    d.registerRestore()
+
+proc setPointerShape*(d: TerminalDriver; shape: PointerShape) =
+  ## The shape the shared function answered for the element under the pointer
+  ## (Pointer-Affordances §5.3): written only when it differs from the last one
+  ## written, and the restore re-registered with the shape it now owes.
+  let bytes = d.pointer.emit(shape)
+  if bytes.len > 0 and d.started:
+    writeAll(d.outFd, bytes)
+    d.registerRestore()
+
+proc pointerFocusChanged*(d: TerminalDriver; focused: bool) =
+  ## §5.3: focus-out gives the pointer back; focus-in applies the last shape.
+  let bytes = d.pointer.focusChanged(focused)
+  if bytes.len > 0 and d.started:
+    writeAll(d.outFd, bytes)
     d.registerRestore()
 
 proc expectReplies*(d: TerminalDriver; on: bool) =
@@ -811,6 +843,8 @@ proc stop*(d: TerminalDriver) =
   # 1003 — the same bytes a SIGTERM or a crash writes, then forgotten.
   if d.started:
     writeAll(d.outFd, d.restoreUnion())
+    d.pointer.pushed = false
+    d.pointer.dirty = false
     discard setExtraRestore("")
     discard setExtraResume("")
   d.graphemeOwned = false

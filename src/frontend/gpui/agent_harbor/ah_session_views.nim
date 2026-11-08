@@ -18,6 +18,7 @@
 ## measured widths.
 
 
+import ../../../common/pointer_shape
 import isonim/core/[signals, computation]
 import nim_agents_isonim_viewmodels/agent_harbor/session_tabs_vm
 from ../../viewmodel/views/agent_harbor_words import
@@ -122,7 +123,7 @@ proc drawTab(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
                           ("padding-left", $TabPadPx & "px"),
                           ("padding-right", $TabPadPx & "px"),
                           ("rounded", $ControlRadiusPx & "px"),
-                          ("flex-shrink", "0"), ("cursor", "pointer")])
+                          ("flex-shrink", "0"), ("cursor", cursorOf(hkControl))])
   if tab.active: r.setStyle(result, "background", p.activeTab)
   r.tag(result, "tab", id)
   r.tag(result, "attention", $tab.attention)
@@ -142,7 +143,7 @@ proc drawTab(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
     r.appendChild(result, origin)
   if closable and tab.active:
     let close = r.text("\xC3\x97", BodyPx, p.textCaption, shrink = false,
-                       pairs = [("cursor", "pointer")])
+                       pairs = [("cursor", cursorOf(hkControl))])
     r.tag(close, "close", id)
     r.addEventListener(close, "click", proc() = discard vm.close(id))
     r.appendChild(result, close)
@@ -187,7 +188,7 @@ proc drawOverflowChip*(r: GpuiRenderer; p: AhPalette; hidden, hiddenWaits: int;
                           ("items", "center"), ("justify", "center"), ("gap", "4px"),
                           ("padding-left", "8px"), ("padding-right", "8px"),
                           ("rounded", $ControlRadiusPx & "px"), ("flex-shrink", "0"),
-                          ("cursor", "pointer")])
+                          ("cursor", cursorOf(hkControl))])
   if filled: r.setStyle(result, "background", p.hover)
   r.tag(result, "overflow", $hidden)
   r.tag(result, "overflow-waits", $hiddenWaits)
@@ -227,7 +228,7 @@ proc drawMenuItem*(r: GpuiRenderer; p: AhPalette; markStyle: MarkStyle;
                           ("items", "center"),
                           ("gap", "8px"), ("padding-left", $MenuItemPadPx & "px"),
                           ("padding-right", $MenuItemPadPx & "px"),
-                          ("flex-shrink", "0"), ("cursor", "pointer")])
+                          ("flex-shrink", "0"), ("cursor", cursorOf(hkControl))])
   if active: r.setStyle(result, "background", p.activeTab)
   r.tag(result, "menu-item", key)
   r.appendChild(result, r.mark(markStyle))
@@ -355,7 +356,7 @@ proc drawListRow(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
   result = r.box(pairs = [("gap", "8px"), ("padding-top", "5px"),
                           ("padding-bottom", "5px"), ("padding-left", $InsetPx & "px"),
                           ("padding-right", $InsetPx & "px"), ("items", "start"),
-                          ("cursor", "pointer"), ("flex-shrink", "0")])
+                          ("cursor", cursorOf(hkControl)), ("flex-shrink", "0")])
   # The active session: the strip's active tab, as a row
   # (`.ah-session-row-active`). The focused initiative's rows: a 2px bar in
   # the action role down the left edge (`.ah-session-row.ah-tab-in-focus`),
@@ -435,7 +436,7 @@ proc drawGroupHeader(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
                           ("padding-top", "6px"), ("padding-bottom", "4px"),
                           ("padding-left", $InsetPx & "px"),
                           ("padding-right", $InsetPx & "px"),
-                          ("cursor", "pointer"), ("flex-shrink", "0")])
+                          ("cursor", cursorOf(hkControl)), ("flex-shrink", "0")])
   r.rule(result, p.borderSecondary)
   if planId.len > 0 and planId == vm.focusedPlan.val:
     r.setStyle(result, "background", p.tertiary)
@@ -490,7 +491,7 @@ proc drawSessionList*(r: GpuiRenderer; host: GpuiElement; vm: SessionTabStripVM;
     let target = vm
     let toggle = r.box(pairs = [("width", $ControlPx & "px"), ("height", $ControlPx & "px"),
                                 ("items", "center"), ("justify", "center"),
-                                ("rounded", $ControlRadiusPx & "px"), ("cursor", "pointer")])
+                                ("rounded", $ControlRadiusPx & "px"), ("cursor", cursorOf(hkControl))])
     r.tag(toggle, "collapse", if collapsed: "expand" else: "collapse")
     r.appendChild(toggle, r.text(if collapsed: "\xC2\xBB" else: "\xC2\xAB", BodyPx,
                                  p.textLabel, shrink = false))

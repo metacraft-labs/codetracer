@@ -102,7 +102,6 @@ control-button()
   border: BUTTON_BORDER_WIDTH solid BUTTON_BORDER_COLOR
   background-color: colors-ui-surface-primary-default
   color: colors-ui-text-primary-body-subtle
-  cursor: pointer
   transition: BUTTON_TRANSITION
 
 control-button-hover()
@@ -152,7 +151,6 @@ button
     // on the button itself: it would fade the fill with everything else.
     color: colors-ui-text-primary-disabled !important
     pointer-events: none
-    cursor: not-allowed
 
     > .ct-control-mark
     > .edit-toolbar-mark
@@ -604,7 +602,6 @@ tooltip-look()
   font-family: inherit
   font-size: 0.75rem
   line-height: 1
-  cursor: pointer
   user-select: none
   // The shared button transition (BUTTON_TRANSITION, top of this file).
   transition: BUTTON_TRANSITION

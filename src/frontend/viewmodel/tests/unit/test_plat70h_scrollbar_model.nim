@@ -28,7 +28,7 @@ template ck(cond: untyped) =
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 1041
+const ExpectedAssertions = 1063
 
 const On = DefaultScrollbarOptions
 
@@ -224,7 +224,8 @@ suite "PLAT-70 Part H: the scrollbar settings":
     # `modern-unicode` became off | on | auto, and glyphs (4), ambiguous-width
     # (3), colors (5), terminal-probe (2), reduce-motion (3) and
     # terminal-hints (2) joined.
-    ck forms == 2 + 2 + 2 + 4 + 2 + 2 + 2 + 3 + 4 + 3 + 5 + 2 + 3 + 2
+    # pointer-shapes (3) came with the pointer's shape.
+    ck forms == 2 + 2 + 2 + 4 + 2 + 2 + 2 + 3 + 4 + 3 + 5 + 2 + 3 + 3 + 2
 
   test "the defaults are §7.1's":
     let d = defaultLayoutSettings()

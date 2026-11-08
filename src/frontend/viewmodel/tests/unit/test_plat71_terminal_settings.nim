@@ -27,11 +27,11 @@ template ck(cond: untyped) =
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 184
+const ExpectedAssertions = 205
 
 const TerminalSettings = [lsModernUnicode, lsGlyphs, lsAmbiguousWidth,
                           lsColors, lsTerminalProbe, lsReduceMotion,
-                          lsTerminalHints]
+                          lsPointerShapes, lsTerminalHints]
 
 suite "PLAT-71: the terminal settings":
 
@@ -42,6 +42,7 @@ suite "PLAT-71: the terminal settings":
     ck settingValues(lsColors) == @["auto", "truecolor", "256", "16", "mono"]
     ck settingValues(lsTerminalProbe) == @["on", "off"]
     ck settingValues(lsReduceMotion) == @["auto", "on", "off"]
+    ck settingValues(lsPointerShapes) == @["auto", "on", "off"]
     for which in TerminalSettings:
       ck which.isTerminalSetting
       for value in settingValues(which):
@@ -111,7 +112,7 @@ suite "PLAT-71: the terminal settings":
       let t = parseSettingCommandTarget(e.target)
       if t.ok and t.setting.isTerminalSetting:
         inc windowLabels
-    ck terminalLabels == 3 + 4 + 3 + 5 + 2 + 3 + 2
+    ck terminalLabels == 3 + 4 + 3 + 5 + 2 + 3 + 3 + 2
     ck windowLabels == 0
 
   test "assertion count":

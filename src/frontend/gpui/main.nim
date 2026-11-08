@@ -108,6 +108,7 @@ from ../../common/ct_home import ctConfigDir
 from ../../ct/trace/ctfs_sources import readCtfsMetaDat
 from ../viewmodel/platform/displayed_product import sessionDocumentTitle
 import ./window_clicks
+import ./window_pointer
 import ./window_preflight               # refuse by kind when no window can open
 import ./list_scrubber
 import ../viewmodel/views/debug_control_marks
@@ -2089,6 +2090,20 @@ proc drawOverlay(r: GpuiRenderer) =
   # (a strip row stays the strips' ground, so two strips connect). The
   # default draws nothing: the gaps are the window's own ground, the colour
   # of the desktop's splitters and of the strips.
+  # Pointer-Affordances §3.2: each divider's own element, the shape's owner.
+  for d in gGeom.dividers:
+    if d.rect.w <= 0 or d.rect.h <= 0:
+      continue
+    let zone = r.createElement("div")
+    r.setStyle(zone, "position", "absolute")
+    r.setStyle(zone, "left", $d.rect.x & "px")
+    r.setStyle(zone, "top", $d.rect.y & "px")
+    r.setStyle(zone, "width", $d.rect.w & "px")
+    r.setStyle(zone, "height", $d.rect.h & "px")
+    r.setAttribute(zone, (if d.horizontal: "data-ct-divider-vertical"
+                          else: "data-ct-divider-horizontal"),
+                   d.container & "/" & $d.index)
+    gOverlay.add zone
   if gOpenCmd.subtleDividers:
     for d in gGeom.dividers:
       if not d.horizontal or d.rect.w <= 0 or d.rect.h <= TabStripPx:
@@ -4133,11 +4148,14 @@ const GpuiWheelLinePx = 16.0 * 1.618034
   ## the editor's rows are `EditorLinePx` (22 px) high since the window's
   ## redesign, and dividing by that turned a Wayland notch (three lines,
   ## 77.7 px) into 21 columns instead of 3 × `WheelColumns`.
+proc applyWindowCursor(r: GpuiRenderer)
+
 proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
                    dy = 0.0; dx = 0.0) =
   ## One pointer event of the window, wherever it came from: the root's
   ## listener (`pointerHandler`) and `--window-ops` (the plan's scripted
   ## pointer) both call this, so a scripted press is the press a user makes.
+  defer: applyWindowCursor(r0)
   var r = r0
   if kind in {gekPointerDown, gekContextMenu, gekAuxDown}:
     gAltTap.interrupted()        # Alt+press is not Alt tapped
@@ -4640,6 +4658,40 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
   if step.changed:
     discard drawArrangement(r)
 
+proc windowPointerGesture(): PointerGesture =
+  ## §3.3: the gesture in flight, read from the machines that hold it.
+  if gGestures.kind == gkDragTab and gGestures.moved:
+    let hover = gGestures.interaction.kind == ikDraggingTab and
+                gGestures.interaction.hover.isSome
+    return PointerGesture(kind: pgTabDrag, legalDrop: hover)
+  if gGestures.kind == gkResize:
+    return PointerGesture(kind: (if gGestures.divider.horizontal: pgColumnDrag
+                                 else: pgRowDrag))
+  if gColumnDrag.active:
+    return PointerGesture(kind: pgColumnDrag)
+  if gEditorBarDrag or gEditorVBarDrag or gTableBarDrag.active or
+     barGrab.held or gTerminal.drag != gtdNone or gSearch.dragging or
+     gBuildPane.dragging or gProblemsPane.dragging or gLowLevel.dragging or
+     gVerificationPane.dragging or gTests.dragging or gRequests.dragging or
+     gAgent.dragging or gListDrag.active:
+    return PointerGesture(kind: pgScrubberDrag)
+  if gTextDrag:
+    return PointerGesture(kind: pgTextSelection)
+  PointerGesture()
+
+const WindowCursorAttribute = "data-ct-window-cursor"
+  ## On the window's root: the override now set, for the render plan's reader.
+
+proc applyWindowCursor(r: GpuiRenderer) =
+  ## §4: while a gesture is in flight its shape wins over every element's,
+  ## through the window-level override; a release or a cancel clears it.
+  let gesture = windowPointerGesture()
+  let name = if gesture.kind == pgNone: ""
+             else: pointerShapeOf(HitTarget(), gesture).cssName
+  r.setWindowCursor(name)
+  if not gRoot.isNil:
+    r.setAttribute(gRoot, WindowCursorAttribute, name)
+
 proc pointerHandler(r0: GpuiRenderer): GpuiEventHandler =
   ## The root's pointer listener: every pointer event of the window. The
   ## root hears a press LAST (GPUI bubbles it from the row under the
@@ -4755,6 +4807,7 @@ proc cancelWindowGesture(): bool =
     return false
   var r: GpuiRenderer
   let step = gGestures.cancelGesture()
+  applyWindowCursor(r)
   traceGesture(step.status)
   discard drawArrangement(r)
   true
@@ -5773,6 +5826,7 @@ proc drawTopBar(r: GpuiRenderer) =
       let rb = absBox(r, row.rect,
                       if it.active: chromeOf(crTabActiveBackground) else: "")
       r.setAttribute(rb, "data-ct-menu-item", it.label)
+      r.setAttribute(rb, "data-ct-enabled", $it.enabled)
       r.setAttribute(rb, "data-ct-menu-active", $it.active)
       r.setStyle(rb, "padding-left", $TabPadPx & "px")
       r.setStyle(rb, "color", chromeOf(
@@ -10670,6 +10724,9 @@ proc openStateRowMenu(r: GpuiRenderer) =
         StateValueRowPx
   openContextMenuAt(r, variablesContextMenu(path), x, y)
 
+proc applyStateEffect(r: GpuiRenderer; vm: StateVM; rows: openArray[StateKeyRow];
+                      effect: StateKeyEffect; op: string): bool
+
 proc runStateKey(r: GpuiRenderer; operation: string): bool =
   ## An operation on the focused Variables pane, through the shared rule.
   ## Answers whether it was the pane's.
@@ -10689,7 +10746,12 @@ proc runStateKey(r: GpuiRenderer; operation: string): bool =
     else: operation
   let rows = stateKeyRowsOf(vm)
   let page = max(1, (statePaneSizePx.h - StateRowsTopPx) div StateValueRowPx)
-  let effect = stateKey(rows, stateCursor(vm), op, page = page)
+  applyStateEffect(r, vm, rows, stateKey(rows, stateCursor(vm), op, page = page),
+                   op)
+
+proc applyStateEffect(r: GpuiRenderer; vm: StateVM; rows: openArray[StateKeyRow];
+                      effect: StateKeyEffect; op: string): bool =
+  ## What the shared rule answered, applied to the window's Variables pane.
   case effect.kind
   of skeUnhandled:
     return false
@@ -12441,6 +12503,26 @@ proc onPaneClick(c: GPaneClick) =
         gSession.session.stateVM.setHideOtherProcessWatches(arg == "on")
         redrawPaneOf(r, paneState)
     else: discard
+  of gcpOriginHop:
+    # A hop is a navigation row: a click does what `Enter` on it does
+    # (`state_pane_keys.stateRowClick`), and leaves the cursor on it.
+    if c.button != gbLeft or gSession.isNil or
+       gSession.session.stateVM.isNil:
+      return
+    let split = c.key.find('#')
+    if split <= 0:
+      return
+    var hop = -1
+    try: hop = parseInt(c.key[0 ..< split])
+    except ValueError: return
+    let vm = gSession.session.stateVM
+    let rows = stateKeyRowsOf(vm)
+    let effect = stateRowClick(rows, StateCursor(path: c.key[split + 1 .. ^1],
+                                                 hop: hop))
+    if effect.kind == skeSeek:
+      vm.selectPath(effect.cursor.path)
+      vm.selectedHop.val = effect.cursor.hop
+    discard applyStateEffect(r, vm, rows, effect, "list.activate")
   of gcpHistoryEntry:
     # PLAT-51: a value-history row is a NAVIGATION ROW — a click goes to the
     # moment its value was recorded; its menu is the desktop's history-row
@@ -12506,8 +12588,10 @@ proc wireClicks(r: GpuiRenderer) =
   # location is a click target too (K37).
   if not gRoot.isNil:
     discard wireWindowClicks(r, gRoot, addr gPressDedupe, onPaneClick)
+    stampPointerShapes(r, gRoot)
   elif not gContainer.isNil:
     discard wireWindowClicks(r, gContainer, addr gPressDedupe, onPaneClick)
+    stampPointerShapes(r, gContainer)
 
 proc handlePopoverPress(r: GpuiRenderer; kind: GpuiEventKind;
                         x, y: int): bool =

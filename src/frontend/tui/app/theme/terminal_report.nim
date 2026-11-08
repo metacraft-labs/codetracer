@@ -76,12 +76,19 @@ proc profileReport*(caps: TerminalCapabilities): seq[string] =
              $caps.keyProtocolFrom & ")"
   result.add pad("Motion") & (if caps.reduceMotion: "reduced" else: "animated") &
              "   (" & $caps.reduceMotionFrom & ")"
+  result.add pad("Pointer") & $caps.pointer.dialect &
+             (if caps.pointer.wrapped: " through tmux" else: "") & "   (" &
+             caps.pointer.source & ")"
   result.add pad("Background") & backgroundNote(caps)
   if caps.remedies.len == 0:
     result.add pad("Remedies") & "none"
   else:
     for i, r in caps.remedies:
       result.add pad(if i == 0: "Remedies" else: "") & r
+
+proc pointerShapeNames(caps: PointerCaps): seq[string] =
+  for shape in caps.supported:
+    result.add shape.cssName
 
 proc axis(value: JsonNode; source: CapabilitySource; note = ""): JsonNode =
   result = %*{"value": value, "from": $source}
@@ -129,6 +136,11 @@ proc profileJson*(caps: TerminalCapabilities): JsonNode =
     "rttMs": axis(%caps.rttMs, caps.rttFrom),
     "linkConservative": axis(%caps.linkConservative, caps.rttFrom),
     "reduceMotion": axis(%caps.reduceMotion, caps.reduceMotionFrom),
+    "pointerShapes": axis(%*{"dialect": $caps.pointer.dialect,
+                             "pushPop": caps.pointer.dialect == pdKitty,
+                             "wrapped": caps.pointer.wrapped,
+                             "supported": pointerShapeNames(caps.pointer)},
+                          caps.pointerFrom, caps.pointer.source),
     "probe": axis(%(not caps.probeOff), caps.probeFrom),
     "remedies": axis(%caps.remedies, csDefault)}
 

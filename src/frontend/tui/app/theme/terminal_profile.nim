@@ -28,6 +28,10 @@
 
 import std/[algorithm, json, options, strutils]
 
+import ./pointer_protocol
+
+export pointer_protocol
+
 export options
 
 # ---------------------------------------------------------------------------
@@ -85,6 +89,8 @@ type
     probe*: Option[bool]
       ## `terminal-probe`: false turns the start-up round off (§4.8 rule 4).
     reduceMotion*: Option[bool]
+    pointerShapes*: Option[PointerShapesChoice]
+      ## `pointer-shapes`: Pointer-Affordances §5.6.
 
   ScopedChoices* = object
     ## A `[terminal "<glob>"]` section (§5.3, OQ-T6).
@@ -135,10 +141,12 @@ proc merge*(above, below: TerminalChoices): TerminalChoices =
   if above.colors.isSome: result.colors = above.colors
   if above.probe.isSome: result.probe = above.probe
   if above.reduceMotion.isSome: result.reduceMotion = above.reduceMotion
+  if above.pointerShapes.isSome: result.pointerShapes = above.pointerShapes
 
 proc isEmpty*(c: TerminalChoices): bool =
   c.glyphs.isNone and c.modernUnicode.isNone and c.ambiguousWidth.isNone and
-    c.colors.isNone and c.probe.isNone and c.reduceMotion.isNone
+    c.colors.isNone and c.probe.isNone and c.reduceMotion.isNone and
+    c.pointerShapes.isNone
 
 # ---------------------------------------------------------------------------
 # Glob matching for `[terminal "<glob>"]`

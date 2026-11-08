@@ -356,7 +356,6 @@
 // and this row exists to fix a menu, not to add a fourth.
 .context-menu-hint
   pointer-events: none
-  cursor: default
   user-select: none
   padding: 0.375rem 0.75rem
   font-size: 0.875rem
@@ -577,7 +576,6 @@
     resize: none
     color: colors-ui-text-primary-body
     outline: none
-    cursor: text
     opacity: 0.7
 
     &:focus
@@ -747,7 +745,6 @@
         color: TRACE_COLOR_FG
 
   .instantiations-menu
-    cursor: pointer
     background-color: INSTANTIATIONS_MENU_COLOR_BG
     color: INSTANTIATIONS_MENU_COLOR_FG
 
@@ -757,7 +754,6 @@
     .instantiation-location
       height: 1.25em
       font-size: 0.9375em
-      cursor: pointer
       background-color: INSTANTIATIONS_MENU_COLOR_BG
       color: INSTANTIATIONS_MENU_COLOR_FG
       opacity: 0.7
@@ -826,7 +822,6 @@
   box-sizing: border-box
   display: block
   overflow: hidden
-  cursor: pointer
   // &:hover
   // TODO relative to font size margin top/width/height
   .gutter-trace
@@ -976,7 +971,6 @@
     // Keep the measured resting line-number colour at full strength.
     opacity: 1
     // overflow: hidden
-    cursor: default
 //font-weight: bold
 
 // The type treatment of a Monaco line number: face, size, weight, and the
@@ -1069,7 +1063,6 @@ line-number-type()
   display: flex
   align-items: center
   justify-content: center
-  cursor: pointer
   // INVISIBLE, NOT ABSENT. `visibility` rather than `display: none` so the
   // element keeps its box and its hit area is stable the instant it appears —
   // a control that is laid out only on hover moves under the pointer that
@@ -1103,7 +1096,6 @@ line-number-type()
 // `restoreEditorTestButton` is what causes the repaint.
 .gutter-runtest.running
   opacity: 1
-  cursor: default
 
   &:before
     content: "\25cf"
@@ -1149,7 +1141,6 @@ editor-execution-pointer()
 
 .trace-button
   margin-left: 40%
-  cursor: pointer
 
 // M6 — Column-Aware Replay Navigation: column-anchored breakpoint
 // marker emitted by ``EditorViewComponent.applyColumnBreakpointDecorations``
@@ -1161,7 +1152,6 @@ editor-execution-pointer()
   border-bottom: 0.125em solid colors-ui-text-error-primary
   background-color: rgba(255, 0, 0, 0.18)
   border-radius: 0.1em
-  cursor: pointer
 
 .breakpoint-program-select
   width: 2em
@@ -1190,12 +1180,10 @@ editor-execution-pointer()
   font-size: 1.125em
 
 .editor-menu-trace
-  cursor: pointer
   margin-right: 1.25em
   color: EDITOR_MENU_TRACE_COLOR
 
 .editor-menu-close
-  cursor: pointer
   color: red
 
 .expand-inline
@@ -1245,7 +1233,6 @@ else
   color: JUMP_COLOR
   width: 100%
   font-size: 1.125em
-  cursor: pointer
 
 .expansion
   left: -4.375em !important
@@ -1373,7 +1360,6 @@ else
   resize: none
   color: colors-ui-text-primary-body
   outline: none
-  cursor: text
   opacity: 0.7
 
   &:focus

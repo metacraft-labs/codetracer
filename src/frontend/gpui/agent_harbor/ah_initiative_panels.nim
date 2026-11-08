@@ -15,6 +15,7 @@
 ## shares through `viewmodel/views/agent_harbor_words.nim` (`statusCountsText`,
 ## `milestoneMetaParts` and the notices).
 
+import ../../../common/pointer_shape
 import std/strutils
 
 import isonim/core/[signals, computation]
@@ -162,7 +163,7 @@ proc drawInitiativeRow(r: GpuiRenderer; p: AhPalette; vm: InitiativesVM;
                                          ("padding-bottom", "10px"),
                                          ("padding-left", $InsetPx & "px"),
                                          ("padding-right", $InsetPx & "px"),
-                                         ("cursor", "pointer"), ("flex-shrink", "0")])
+                                         ("cursor", cursorOf(hkControl)), ("flex-shrink", "0")])
   if selected:
     r.styles(result, [("background", p.selectedTint), ("position", "relative")])
     r.appendChild(result, r.insetBar(p.borderAction, 3))
@@ -174,7 +175,7 @@ proc drawInitiativeRow(r: GpuiRenderer; p: AhPalette; vm: InitiativesVM;
   r.addEventListener(result, "click", proc() = vm.select(id))
   let head = r.box(pairs = [("gap", "8px"), ("items", "center")])
   let fold = r.text(if row.folded: "\xE2\x96\xB8" else: "\xE2\x96\xBE", CaptionPx, quiet,
-                    shrink = false, pairs = [("cursor", "pointer")])
+                    shrink = false, pairs = [("cursor", cursorOf(hkControl))])
   r.tag(fold, "fold", id)
   r.addEventListener(fold, "click", proc() = vm.toggleFolded(id))
   r.appendChild(head, fold)
@@ -219,7 +220,7 @@ proc drawInitiativeRow(r: GpuiRenderer; p: AhPalette; vm: InitiativesVM;
     if hidden > 0 or row.expanded and row.sessions.len > InitiativeSessionLinesShown:
       let label = if row.expanded: "Show fewer" else: "+" & $hidden & " more"
       let more = r.text(label, CaptionPx, quiet, shrink = false,
-                        pairs = [("cursor", "pointer"), ("margin-top", "2px")])
+                        pairs = [("cursor", cursorOf(hkControl)), ("margin-top", "2px")])
       r.tag(more, "more", label)
       r.addEventListener(more, "click", proc() = vm.toggleExpanded(id))
       r.appendChild(sessions, more)
