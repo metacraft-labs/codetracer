@@ -1680,9 +1680,10 @@ AH_MARK = 0.5rem
   .ah-fleet-no-initiative .ah-fleet-head
     max-width: 62rem
 
-// An empty cell says so quietly instead of reading as a gap.
-.ah-fleet-col:empty::before
-  content: "\2014"
+// An empty cell says so quietly instead of reading as a gap: the view draws
+// the shared placeholder (`agent_harbor_words.AgentHarborFleetEmptyCellText`,
+// an em dash) in the disabled role.
+.ah-fleet-col-empty
   color: colors-ui-text-primary-disabled
 
 // The +N chip on a selected row takes the selection's text, no fill.

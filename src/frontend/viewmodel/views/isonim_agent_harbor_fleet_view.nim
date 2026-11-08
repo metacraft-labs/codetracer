@@ -168,10 +168,19 @@ proc renderActivityToggle[R](r: R; vm: FleetSnapshotVM; row: FleetRow): auto =
         proc(ev: isonim_dom.Event) = ev.stopPropagation())
   node
 
+proc renderEmptyCell[R](r: R): auto =
+  ## What an empty column cell shows (`AgentHarborFleetEmptyCellText`).
+  ui(r):
+    span(class = "ah-fleet-col-empty"):
+      text AgentHarborFleetEmptyCellText
+
 proc renderRow[R](r: R; vm: FleetSnapshotVM;
                   callbacks: AgentHarborFleetCallbacks; row: FleetRow): auto =
   let sessionId = row.id
   var activity: typeof(r.createElement("div"))
+  var agentCell, hostCell, initiativeCell, durationCell: typeof(r.createElement("span"))
+  let agentText = if row.agentCount > 1: row.agentLabel & " \xC3\x97" & $row.agentCount
+                  else: row.agentLabel
   let node = ui(r):
     tdiv(role = "button", tabindex = "0", class = rowClass(row),
          title = row.id,
@@ -203,16 +212,21 @@ proc renderRow[R](r: R; vm: FleetSnapshotVM;
         tdiv(ref = activity, class = "ah-fleet-row-activity")
       # Columns of their own at a laptop's width (hidden in a narrow panel,
       # where the meta line carries the same facts).
-      span(class = "ah-fleet-col ah-fleet-col-agent", title = row.agentLabel):
-        text (if row.agentCount > 1: row.agentLabel & " \xC3\x97" & $row.agentCount else: row.agentLabel)
-      span(class = "ah-fleet-col ah-fleet-col-host", title = row.host):
+      span(ref = agentCell, class = "ah-fleet-col ah-fleet-col-agent", title = row.agentLabel):
+        text agentText
+      span(ref = hostCell, class = "ah-fleet-col ah-fleet-col-host", title = row.host):
         text row.host
-      span(class = "ah-fleet-col ah-fleet-col-initiative", title = row.initiative):
+      span(ref = initiativeCell, class = "ah-fleet-col ah-fleet-col-initiative",
+           title = row.initiative):
         text row.initiative
-      span(class = "ah-fleet-col ah-fleet-col-duration"):
+      span(ref = durationCell, class = "ah-fleet-col ah-fleet-col-duration"):
         text row.durationLabel
       span(class = "ah-fleet-row-age"):
         text row.ageLabel
+  # A column with nothing to say shows the shared placeholder.
+  for (cell, value) in [(agentCell, agentText), (hostCell, row.host),
+                        (initiativeCell, row.initiative), (durationCell, row.durationLabel)]:
+    if value.len == 0: r.appendRendered(cell, renderEmptyCell(r))
   let shown = if row.expanded: row.activity.len else: min(1, row.activity.len)
   let allLines = row.activity.join("\n")
   for i in 0 ..< shown:

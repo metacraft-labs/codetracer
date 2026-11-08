@@ -33,6 +33,11 @@ const
   AgentHarborFleetLoadingText* = "Loading sessions\xE2\x80\xA6"
   AgentHarborFleetEmptyText* = "No sessions on this server yet."
   AgentHarborFleetFilteredEmptyText* = "No session in this category."
+  AgentHarborFleetEmptyCellText* = "\xE2\x80\x94"
+    ## A fleet column with nothing to say -- a session of no initiative, an
+    ## agent or host the server did not name: an em dash, set in the disabled
+    ## text role, so the cell reads as empty rather than as a gap in the
+    ## grid. The web and GPUI fleet views both draw it from here.
   InitiativesLoadingText* = "Loading initiatives\xE2\x80\xA6"
   InitiativesEmptyText* = "No initiative is running on this server."
   ProgressEmptyText* = "Select an initiative to see its progress."
