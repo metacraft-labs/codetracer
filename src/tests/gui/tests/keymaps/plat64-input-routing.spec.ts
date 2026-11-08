@@ -110,6 +110,11 @@ test.describe("one keybindings.json: the desktop's answer", () => {
     await ctPage.locator(".calltrace-view .call-text", { hasText: "add" }).first()
       .click({ modifiers: ["Control"] });
     const afterCtrlPress = await settled(ctPage);
+    // The press ran Continue and nothing else: with no breakpoint that is the
+    // recording's end, where a second Continue (F5) moves nothing. Had the
+    // row's own click also run, the press would have gone to the call.
+    await ctPage.keyboard.press("F5");
+    const afterSecondContinue = await settled(ctPage);
     // The plain press is the element's own: it goes to that call.
     await ctPage.locator(".calltrace-view .call-text", { hasText: "add" }).first().click();
     const afterPress = await settled(ctPage);
@@ -121,9 +126,10 @@ test.describe("one keybindings.json: the desktop's answer", () => {
     const answer = { frontEnd: "desktop", start, afterChord, afterCtrlPress, afterPress, chordShown };
     fs.appendFileSync(results, JSON.stringify(answer) + "\n");
     console.log("answer", JSON.stringify(answer), "trace", JSON.stringify(trace));
-    expect(trace).toEqual(["debugger.step-over", "debugger.continue"]);
+    expect(trace).toEqual(["debugger.step-over", "debugger.continue", "debugger.continue"]);
     expect(afterChord).not.toBe(start);
     expect(afterCtrlPress).not.toBe(afterChord);
+    expect(afterSecondContinue).toBe(afterCtrlPress);
     expect(chordShown).toBe(true);
   });
 });
