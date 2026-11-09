@@ -248,7 +248,7 @@ with pkgs;
     # wins. `nim-fork` therefore supplies `nim`, `nimpretty` and `nim-gdb`
     # (its `bin/` holds exactly those three), and
     # `nim-codetracer` — kept immediately below — supplies everything the
-    # fork derivation does not build: `nimsuggest` (ci/lint/nim.sh,
+    # fork derivation does not put on PATH: `nimsuggest` (ci/lint/nim.sh,
     # ci/test/nimsuggest-check.sh, and the editor LSP path), `nim2`,
     # `nimgrep`, `testament` and `nim_dbg`.
     #
@@ -262,16 +262,14 @@ with pkgs;
     # lexer/parser/layouter sources as its `nim`, so there is no skew to
     # notice.
     #
-    # NOTE the skew this INTRODUCES, and be honest that it is new: before the
-    # fork, `nim` and `nimsuggest` both came from nixpkgs 2.2.8 and agreed.
-    # Now `nim` is 2.3.1 while `nimsuggest`, `nim2`, `nimgrep`, `testament`
-    # and `nim_dbg` are still 2.2.8, so nimsuggest analyses against a 2.2.8
-    # stdlib the compiler no longer uses and can report a diagnostic the build
-    # does not. That is an IDE/lint surface only — none of those five compile
-    # anything that ships — and `nimsuggest` is already quarantined here
-    # against an upstream crash (see the header of ci/test/nimsuggest-check.sh).
-    # Building nimsuggest from the fork is the right follow-up, not a
-    # precondition.
+    # The fork also builds a trace-enabled `nimsuggest`, but it is installed
+    # under `libexec/`, off PATH: it crashes under this repo's root
+    # `config.nims` (the failure ci/test/nimsuggest-check.sh documents), so it
+    # must not replace the stock nimsuggest that lint and the editors use. The
+    # shellHook below points `CODETRACER_NIMSUGGEST` at it for the PLAT-65
+    # real-stack suites, the only consumers of its `traceExpand` /
+    # `tracestatic` queries. `nimsuggest`, `nim2`, `nimgrep`, `testament` and
+    # `nim_dbg` still come from nixpkgs 2.2.8.
     ourPkgs.nim-fork
     ourPkgs.nim-codetracer
     nimble
@@ -580,6 +578,13 @@ with pkgs;
     # with no such exports, and it is unset in a shell entered outside a
     # checkout, which still has them.
     export CT_DEV_SHELL=1
+
+    # The trace-enabled nimsuggest the PLAT-65 real-stack suites
+    # (tui/tests/real_terminal/test_plat65_nim_tracing_pty.nim,
+    # gpui/tests/test_plat65_gpui_nim_tracing.nim) drive. They skip with
+    # `MISSING-PREREQ SKIP` when this is unset. The PATH nimsuggest is the
+    # stock one, which has no trace queries.
+    export CODETRACER_NIMSUGGEST="${ourPkgs.nim-fork}/libexec/nimsuggest"
 
     # PLAT-37 — THE GPUI RUNTIME LIBRARY PATH, exported under its OWN name
     # rather than prepended to `LD_LIBRARY_PATH`.
