@@ -3825,9 +3825,12 @@ jobs:
         # `replay-server` (see `gpui-window-captures`). The three extra ones are
         # the Tier-2 lane's: `ci/lib/test-lane-files.sh` compiles every
         # `tui-real-terminal` file with `--path:../TermAssert/src`,
-        # `../TermAssertClient/src` and `../nim-libvterm/src`. All three are in
-        # this repo's committed `repro.lock`, so they are named BARE and clone
-        # at the revision that lock pins -- not at a branch tip.
+        # `../TermAssertClient/src` and `../nim-libvterm/src`. The fourth,
+        # `codetracer-launcher`, is the real `ct` two suites execute (see "Build
+        # the launcher" below), and its source is what `test_caps_file_shape.nim`
+        # imports. All four are in this repo's committed `repro.lock`, so they
+        # are named BARE and clone at the revision that lock pins -- not at a
+        # branch tip.
         uses: ./.github/actions/setup-db-backend-siblings
         with:
           env-flavor: nix
@@ -3836,6 +3839,7 @@ jobs:
             TermAssert
             TermAssertClient
             nim-libvterm
+            codetracer-launcher
 
       - name: Clone runquota sibling
         # `just build-once` compiles `ct`, which imports `runquota_process`
@@ -3894,6 +3898,23 @@ jobs:
         run: |
           (cd ../isonim-gpui && nix develop --command bash -c 'cd rust && cargo build')
           nix develop .#devShells.x86_64-linux.default --command just build-gpui
+
+      - name: Build the launcher the CTUI-12 suites execute
+        # `src/tests/launcher/test_launcher_routes_tui.nim` (Tier 1) and
+        # `real_terminal/test_real_launcher_exec.nim` (Tier 2) execute
+        # `../codetracer-launcher/out/launcher`, the real `ct`, and fail when it
+        # is missing. Nothing in this job used to build it: the suites passed on
+        # a persistent runner that kept a launcher from an earlier job, of
+        # whatever revision that job had, and failed on an ephemeral one
+        # (codetracer-pm issues/2026-11-09-tui-job-runs-launcher-suites-
+        # without-building-the-launcher.md). It is built here from the checkout
+        # cloned above at this commit's `repro.lock` pin, as `ct` and the GPUI
+        # front-end are built from this commit, and in the launcher's OWN dev
+        # shell, which provides the Nim and zig its `build.sh` links with -- as
+        # isonim-gpui's shim is built in its own shell above.
+        # `ci/test/launcher-suites-build-launcher-test.py` fails when a job runs
+        # a launcher suite without cloning and building the launcher first.
+        run: (cd ../codetracer-launcher && nix develop --command just build)
 
       - name: TUI Tier 1 — the suites that need no terminal
         run: nix develop .#devShells.x86_64-linux.default --command just test-tui
@@ -8498,6 +8519,18 @@ jobs:
       - name: Self-test the job-timeout contract
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: bash ci/test/job-timeouts-test.sh
+
+      - name: Jobs that run a launcher suite build the launcher first
+        # `tui-tests` ran two suites that execute `../codetracer-launcher/out/
+        # launcher` and neither cloned nor built it, so they judged whatever an
+        # earlier job left on a persistent runner and failed on an ephemeral one
+        # (codetracer-pm issues/2026-11-09-tui-job-runs-launcher-suites-without-
+        # building-the-launcher.md). This suite reads every job's lanes from the
+        # justfile and `ci/lib/test-lane-files.sh` and fails a job that runs a
+        # launcher suite without a lock-pinned clone and a build before it.
+        # python3, PyYAML and bash, like `job-timeouts.py` above.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: python3 ci/test/launcher-suites-build-launcher-test.py
 
       - name: Check every build-once job provisions the workspace the build needs
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}

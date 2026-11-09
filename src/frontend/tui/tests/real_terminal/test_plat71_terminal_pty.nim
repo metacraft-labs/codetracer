@@ -35,7 +35,9 @@
 ##   * TA-12 — the per-terminal cache gives a silent session the last
 ##     answers, and a live answer replaces them;
 ##   * TA-14 — with a REAL tmux behind `TMUX`, the facts come from one
-##     `tmux display -p` and no passthrough (`DCS tmux;`) is ever written;
+##     `tmux display -p`, and the only query ever written through tmux's
+##     passthrough (`DCS tmux;`) is Pointer-Affordances §5.2's OSC 22 one,
+##     whose reply tmux returns to the pane (§5.5);
 ##   * a slow link (answers 300 ms late) is measured and makes the session
 ##     link-conservative (§4.6);
 ##   * §4.3's F3 rule on the real framer: after the round a `CSI 1 ; 5 R` is
@@ -85,6 +87,31 @@ const
     ## none may survive on the screen (TA-3). (`⏮`, the fourth probe, is
     ## also the `unicode` icons' jump-to-start control, so it is not proof.)
   QueryTexts = ["[>q", "[>c", "2026$p", "2027$p", "[6n"]
+  PointerQuery = "\x1b]22;?default,pointer,text,col-resize,row-resize,grab," &
+                 "grabbing,not-allowed,ew-resize,ns-resize\x1b\\"
+    ## Pointer-Affordances §5.2's question, spelled as the spec spells it.
+
+proc passthroughPayloads(bytes: string): seq[string] =
+  ## Every sequence written inside tmux's passthrough
+  ## (`ESC P tmux ; <payload, each ESC doubled> ESC \`), un-doubled. A
+  ## payload the bytes cut off is returned as far as it got.
+  const Open = "\x1bPtmux;"
+  var at = bytes.find(Open)
+  while at >= 0:
+    var i = at + Open.len
+    var payload = ""
+    while i < bytes.len:
+      if bytes[i] == '\x1b' and i + 1 < bytes.len and bytes[i + 1] == '\x1b':
+        payload.add '\x1b'
+        i += 2
+      elif bytes[i] == '\x1b' and i + 1 < bytes.len and bytes[i + 1] == '\\':
+        i += 2
+        break
+      else:
+        payload.add bytes[i]
+        inc i
+    result.add payload
+    at = bytes.find(Open, i)
 
 var stateRoot = getTempDir() / ("plat71-state-" & $getCurrentProcessId())
 
@@ -580,7 +607,7 @@ suite "PLAT-71 Tier 2: the binary adapts to the terminal it runs in":
       ck j >= 0 and k > j
       ck tokens.contains("[1;5R")
 
-  test "TA-14: under a real tmux, one display spawn and no passthrough":
+  test "TA-14: under a real tmux, one display spawn and no passthrough query but OSC 22's":
     let tmux = findExe("tmux")
     if tmux.len == 0:
       checkpoint("tmux is not on PATH: the lane's environment provides it")
@@ -616,7 +643,19 @@ suite "PLAT-71 Tier 2: the binary adapts to the terminal it runs in":
       client.close()
       checkpoint("pane bytes: " & $bytes.len)
       ck bytes.contains("\x1b[c")                # the round reached tmux
-      ck not bytes.contains("\x1bPtmux;")         # and nothing passed through
+      # Every `DCS tmux;` payload is an OSC 22 or OSC 52 sequence, and the one
+      # QUERY among them is Pointer-Affordances §5.2's own: tmux returns the
+      # outer terminal's OSC 22 reply to the pane (§5.5), and answers every
+      # other query itself, so any other passthrough query is TA-14's defect.
+      let passed = passthroughPayloads(bytes)
+      checkpoint("passthrough payloads: " & $passed)
+      var foreign: seq[string] = @[]
+      for payload in passed:
+        let isSet = (payload.startsWith("\x1b]22;") or
+                     payload.startsWith("\x1b]52;")) and "?" notin payload
+        if not isSet and payload != PointerQuery:
+          foreign.add payload
+      ck foreign.len == 0
       let leave = bytes.rfind("\x1b[?1049l")
       let start = bytes.find('{', max(0, leave))
       let stop = bytes.rfind('}')

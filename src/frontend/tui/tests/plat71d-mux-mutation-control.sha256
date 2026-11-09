@@ -2,7 +2,7 @@
 # subjects AND the suites the arms are graded by.
 # Refreshed with --record-control-hashes, gated by the
 # needle scan.
-741d3613fc28c2adfc4a958b71d24cbcba7872a0d0c631aae667b269c469d385  src/frontend/tui/app/theme/capabilities.nim
-56c9951e9709be281d2cd845265f4a333e155df2fe1fc44c0d7d24ad1de71772  src/frontend/tui/host/terminal_probe.nim
-950fa7ea3516f043674fc99f96a190e531ff9e7a0bdc7b3d6d853270379ffccb  src/frontend/tui/app/tests/test_plat71_terminal_profile.nim
-23f38f31698dc392772fc930e7c9a7406e99316b7075e8b0b9c2cb6156a4ded3  src/frontend/tui/tests/real_terminal/test_plat71_terminal_pty.nim
+40c50a6a381d64a02ff7b1894488fdf9c20f2919acdcf6c645d48cbcce0f0e27  src/frontend/tui/app/theme/capabilities.nim
+9fce287d64b7aec99d425bd446199a4e2897c7b2c06189beb1ffd33246b77a2b  src/frontend/tui/host/terminal_probe.nim
+76a97287c9920c548269a77bb73f253e3ef7cda2f526ce27d14de0cf0bc13d23  src/frontend/tui/app/tests/test_plat71_terminal_profile.nim
+4cc2712d46e2a2bd700cd4e6253d4e690efcbcc6b26bd269896327672d9fa276  src/frontend/tui/tests/real_terminal/test_plat71_terminal_pty.nim

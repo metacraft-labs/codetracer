@@ -756,6 +756,68 @@ proc childCompileCommand*(stem: string): string =
   cmd.add " " & appSourcePath(stem).quoteShell
   cmd
 
+const ChildLibraries* = [
+  # (sibling checkout, entry module under its `src/`, `config.nims` override)
+  ("isonim", "isonim.nim", "ISONIM_SRC"),
+  ("isonim-tui", "isonim_tui.nim", "ISONIM_TUI_SRC"),
+  ("nim-termctl", "nim_termctl.nim", "NIM_TERMCTL_SRC"),
+  ("nim-agents-isonim-viewmodels", "nim_agents_isonim_viewmodels.nim", "")]
+  ## The sibling libraries a child app links through `config.nims` and that
+  ## are edited in this workspace: IsoNim's core, the terminal renderer, the
+  ## terminal-control layer under it, and the Agent Harbor viewmodels the
+  ## story host mounts. Each is in the rebuild stamp for the reason
+  ## `newestSourceTime` gives for `app/`; an empty override means
+  ## `config.nims` offers none. The fifth sibling the child links,
+  ## `TermAssertClient`, is not resolved here because there is nothing to
+  ## resolve: `childCompileCommand` names its checkout itself.
+
+proc resolvedLibrarySource*(sibling, entry, envVar: string): string =
+  ## The `src/` directory the child compile resolves `entry` from, or `""`
+  ## when none of the candidates holds it.
+  ##
+  ## THE STAMP MUST READ THE CHECKOUT THE COMPILER READS, not a guess at it,
+  ## so this repeats `config.nims`'s resolution in its precedence order. Nim
+  ## searches later `--path` entries first, and `config.nims` adds the sibling
+  ## checkout, then the `<envVar>` override, then every `reprobuild.paths`
+  ## line, then includes `repro.paths` (reprobuild's generated
+  ## `switch("path", "<dir>")` lines) — so the last `repro.paths` entry
+  ## holding `entry` wins, then the last such `reprobuild.paths` line, then
+  ## the override, then `../<sibling>/src`.
+  let root = repoRoot()
+  for (file, prefix, suffix) in [("repro.paths", "switch(\"path\", \"", "\")"),
+                                 ("reprobuild.paths", "", "")]:
+    let pathsFile = root / file
+    if not fileExists(pathsFile):
+      continue
+    let lines = readFile(pathsFile).splitLines()
+    for i in countdown(lines.high, 0):
+      let line = lines[i].strip()
+      if not (line.startsWith(prefix) and line.endsWith(suffix)):
+        continue
+      var dir = line[prefix.len ..< line.len - suffix.len]
+      if dir.len > 0 and not dir.isAbsolute:
+        dir = root / dir
+      if dir.len > 0 and fileExists(dir / entry):
+        return dir
+  if envVar.len > 0:
+    let override = getEnv(envVar)
+    if override.len > 0 and fileExists(override / entry):
+      return override
+  let sib = root.parentDir / sibling / "src"
+  if fileExists(sib / entry):
+    return sib
+  ""
+
+proc childLibrarySourceRoots*(): seq[string] =
+  ## The library source trees a child links, as absolute paths: the resolved
+  ## `src/` of every `ChildLibraries` entry that resolves, in that order, then
+  ## the `TermAssertClient` checkout `childCompileCommand` names.
+  for (sibling, entry, envVar) in ChildLibraries:
+    let dir = resolvedLibrarySource(sibling, entry, envVar)
+    if dir.len > 0:
+      result.add absolutePath(dir)
+  result.add repoRoot().parentDir / "TermAssertClient" / "src"
+
 proc newestSourceTime*(stem: string): float =
   ## The newest modification time among everything a child app is built from.
   ##
@@ -772,10 +834,17 @@ proc newestSourceTime*(stem: string): float =
   ## binary is a comparison of two different programs, and it fails — or
   ## passes — for a reason that has nothing to do with the renderer.
   ##
-  ## So the whole of `app/` is in the stamp. `app/` is what a child app draws;
-  ## the sibling libraries are not, and a rebuild on every `isonim-tui` edit
-  ## would cost the lane a link per case for a dependency that changes far less
-  ## often — that residue is recorded here rather than papered over.
+  ## So the whole of `app/` is in the stamp. `app/` is what a child app draws.
+  ## **THE SIBLING LIBRARIES THE CHILD LINKS ARE IN IT TOO**, and an earlier
+  ## version of this comment recorded leaving them out as a deliberate residue
+  ## ("a rebuild on every `isonim-tui` edit would cost the lane a link per
+  ## case"). That cost was misjudged — a stale binary is rebuilt ONCE after an
+  ## edit, not once per case — and the residue bit: CTF-P1b's SGR 58 underline
+  ## colour landed in `isonim-tui`'s `text/ansi`, the story host built before
+  ## it was reused, and the Tier-2 terminal ran the old renderer against a
+  ## Tier-1 model built with the new one. See `childLibrarySourceRoots` for
+  ## which trees, and `compileChildApp` for why the stamp also records WHICH
+  ## checkout of each it read.
   ##
   ## **`host/` IS IN THE STAMP TOO, AS OF PLAT-6's PERSISTENCE**, and it is in
   ## for the reason above rather than for tidiness: `apps/app_layout_persist
@@ -810,36 +879,68 @@ proc newestSourceTime*(stem: string): float =
   ## `apps/app_agent_harbor_story.nim` draws the Agent Harbor views over the
   ## story constructors, the shared words and palette, and the viewmodels of
   ## the sibling `nim-agents-isonim-viewmodels`, and a negative control
-  ## against any of them must not be graded by a binary built before it.
-  for dir in [tui / "app", tui / "host", tui / "agent_harbor",
-              repoRoot() / "src" / "common" / "terminal_graphics",
-              repoRoot() / "src" / "frontend" / "styles" / "generated",
-              repoRoot() / "src" / "frontend" / "stories",
-              repoRoot() / "src" / "frontend" / "viewmodel" / "views",
-              repoRoot().parentDir / "nim-agents-isonim-viewmodels" / "src"]:
+  ## against any of them must not be graded by a binary built before it. (The
+  ## viewmodels are read through `childLibrarySourceRoots`, with the other
+  ## sibling libraries.)
+  for dir in @[tui / "app", tui / "host", tui / "agent_harbor",
+               repoRoot() / "src" / "common" / "terminal_graphics",
+               repoRoot() / "src" / "frontend" / "styles" / "generated",
+               repoRoot() / "src" / "frontend" / "stories",
+               repoRoot() / "src" / "frontend" / "viewmodel" / "views"] &
+              childLibrarySourceRoots():
     if not dirExists(dir):
       continue
     for path in walkDirRec(dir):
       if path.endsWith(".nim"):
         result = max(result, getFileInfo(path).lastWriteTime.toUnixFloat())
 
+proc childStampRootsPath*(stem: string): string =
+  ## The record, beside the binary, of which library checkouts it was built
+  ## from (see `compileChildApp`).
+  appBinaryPath(stem) & ".roots"
+
+proc childStampRoots(): string =
+  childLibrarySourceRoots().join("\n") & "\n"
+
+proc childAppIsCurrent*(stem: string): bool =
+  ## Whether `bin/<stem>` may be reused: it exists, it is newer than every
+  ## file in `newestSourceTime`'s set, and it was built from the library
+  ## checkouts the compile would resolve now.
+  let bin = appBinaryPath(stem)
+  if not fileExists(bin):
+    return false
+  let roots = childStampRootsPath(stem)
+  if not fileExists(roots) or readFile(roots) != childStampRoots():
+    return false
+  getFileInfo(bin).lastWriteTime.toUnixFloat() > newestSourceTime(stem)
+
 proc compileChildApp*(stem: string) =
-  ## Compile `tests/apps/<stem>.nim` if the binary is missing or older than any
-  ## of its sources. Never skips on failure: a child that will not compile is
-  ## the defect, and it is reported with the compiler's own output.
+  ## Compile `tests/apps/<stem>.nim` unless `childAppIsCurrent` says the
+  ## binary may be reused. Never skips on failure: a child that will not
+  ## compile is the defect, and it is reported with the compiler's own output.
+  ##
+  ## MODIFICATION TIMES ALONE CANNOT SEE A CHANGE OF CHECKOUT. Pointing
+  ## `ISONIM_TUI_SRC` at a pinned or older tree changes what the child links
+  ## while every file in the stamp gets OLDER, so the stale binary would win.
+  ## The resolved library roots are therefore written to `<bin>.roots` after
+  ## each successful link, and a binary whose record differs — or that has
+  ## none, like every binary built before the record existed — is rebuilt.
   let src = appSourcePath(stem)
   if not fileExists(src):
     raise newException(DualSnapError, "child app source missing: " & src)
   let bin = appBinaryPath(stem)
   createDir(bin.parentDir)
-  if fileExists(bin):
-    let binTime = getFileInfo(bin).lastWriteTime.toUnixFloat()
-    if binTime > newestSourceTime(stem): return
+  if childAppIsCurrent(stem): return
+  # Removed BEFORE the compile so a failed one cannot leave an old binary
+  # beside a record that still matches it.
+  removeFile(childStampRootsPath(stem))
+  let roots = childStampRoots()
   let (output, code) = execCmdEx(childCompileCommand(stem))
   if code != 0:
     raise newException(DualSnapError,
       "child app '" & stem & "' failed to compile (exit " & $code & "):\n" &
       childCompileCommand(stem) & "\n" & output)
+  writeFile(childStampRootsPath(stem), roots)
 
 # ---------------------------------------------------------------------------
 # Barriers
