@@ -10,10 +10,10 @@
 # Refreshed with --record-control-hashes, which the needle scan GATES (§16):
 # re-recording from a tree whose arms have stopped matching certifies the arms
 # along with the bytes.
-e4f16bc2c8125ec690a4c3e32b049f8b857c3a790c17601f173f34cfc344f3a7  src/frontend/gpui/app/leaves.nim
+d478d57a3af30afc7a7572076336d3dec9fa84e1ea56a60c39d8871f599be9ab  src/frontend/gpui/app/leaves.nim
 afb449bd5ca2f855d995a31636c217a0be2cb46e82bc844e565f6d0b7a5e4d98  src/frontend/view_vocabulary/gpui_layout_answers.nim
 b6a6749fff6ba1c90cc6db571b1c9e07f9d8a5382b59809a083df9c4fb39a43b  src/common/view_vocabulary/layout_questions.nim
 3bd1b04fe2a9161f85fad1b1567808c517b6bc3eea80cbc8074b9e38776fcef2  tools/visual-review-brief.md
 b80875c273eb71880e4ba1894c3eca0751f4e300216e5b18c113e3b66bfd732a  src/tests/visual/scenarios.json
-6121822b8c95cc03de92c95be969415bce7f9906f89818a51ddd50543bd0761e  src/frontend/gpui/tests/test_cross_renderer_visual_alignment.nim
+94b4c5b136b6ac51f9424cdc34bc5bbfe4b1fe2a70466f3d1e5ac4c832e37cfa  src/frontend/gpui/tests/test_cross_renderer_visual_alignment.nim
 64ca1345394c57f7c7067e8c8828de2b64bcc196ae502b55c42ce196b6c5c6b3  src/frontend/gpui/tests/test_plat35_event_log_footer.nim
