@@ -8,8 +8,9 @@
 ## differently: it sends the request through its JavaScript LSP router
 ## (`lsp_router`) to the Nim language server as `workspace/executeCommand`
 ## — `nim/traceExpandMacro` for a macro call, `nim/traceStaticBlock` for a
-## static block or a constant (`trace_static`) — and loads the `.ct` the
-## language server names through `CODETRACER::load-trace-file`.
+## static block or a constant (`trace_static`) — and opens the `.ct` the
+## language server names through `CODETRACER::load-nim-trace-file`, which
+## imports it first (`index/traces.onLoadNimTraceFile`).
 
 import
   std/[asyncjs, jsffi, strformat],
@@ -98,12 +99,14 @@ proc sendNimTrace*(data: Data; vm: NimTracingVM) {.async.} =
     return
   clog cstring(fmt"nim trace: received trace path: {tracePath}")
   # Where it opens is the shared rule's (`nimTracePlacement`): a new session
-  # tab. The main process resolves the trace and starts its replay.
+  # tab. The main process imports the bare `.ct` nimsuggest wrote (with the
+  # sources of the file the request was made in), then starts its replay.
   let placed = traceOpenRequestOf(tracePath)
   if placed.policy == topNewTab:
     createNewSession(data)
-  data.ipc.send(cstring"CODETRACER::load-trace-file",
-                js{tracePath: cstring(placed.tracePath)})
+  data.ipc.send(cstring"CODETRACER::load-nim-trace-file",
+                js{tracePath: cstring(placed.tracePath),
+                   sourcePath: cstring(request.path)})
 
 proc startNimTrace*(data: Data; action: NimTraceAction; path: cstring;
                     line, column: int; lines: seq[string]) =

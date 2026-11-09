@@ -413,6 +413,9 @@ proc configureIpcMain* =
     "load-recent-transaction"
     "open-trace-dialog"
     "load-trace-file"
+    # A Nim compile-time trace the Trace Macro / Static Block / Constant
+    # actions name: imported first, then opened (`index/traces.onLoadNimTraceFile`).
+    "load-nim-trace-file"
     # AA-3 — read the review dataset an evidence tool call in the Agent
     # Activity session feed names, and either report its shape or enter a
     # review over it (`index/review_dataset.onOpenReviewDataset`).

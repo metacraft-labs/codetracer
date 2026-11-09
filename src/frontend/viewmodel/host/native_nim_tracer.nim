@@ -25,6 +25,7 @@ import std/[os, osproc, streams, strutils, times]
 
 import ../viewmodels/nim_tracing_vm
 import ./native_state
+import ../../../common/nim_trace_bundle
 
 export nim_tracing_vm
 
@@ -191,25 +192,6 @@ proc errorLineOf(output: string): string =
       last = l
   last
 
-proc bundleSources(folder, source: string) =
-  ## The traced file's Nim sources, copied into the recording at
-  ## `files/<absolute path>` — where `replay-server` reads a recording's
-  ## source (`dap_handler`'s files root) — so the new session shows its code.
-  ## The compiler's tracer records paths and not text; the file and the Nim
-  ## files beside it (what it imports from its own folder) are what a trace
-  ## of it steps through.
-  let dir = source.parentDir
-  for kind, path in walkDir(dir):
-    if kind notin {pcFile, pcLinkToFile} or not isNimSource(path):
-      continue
-    let target = folder / "files" / absolutePath(path).strip(
-      leading = true, trailing = false, chars = {'/'})
-    try:
-      createDir(target.parentDir)
-      copyFile(path, target)
-    except CatchableError:
-      discard
-
 proc settle(t: NativeNimTracer; code: int) =
   let request = t.vm.request
   var produced = t.produced
@@ -233,7 +215,7 @@ proc settle(t: NativeNimTracer; code: int) =
     try:
       if produced != target:
         moveFile(produced, target)
-      bundleSources(t.folder, request.path)
+      bundleNimTraceSources(t.folder, request.path)
       t.vm.succeed(t.folder)
     except CatchableError as e:
       t.vm.fail(ntfNoRecording, "could not keep " & produced & ": " & e.msg)

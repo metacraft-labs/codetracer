@@ -8,7 +8,7 @@
 ## decided there for every front-end. The language server forwards
 ## `nim/traceStaticBlock` to nimsuggest's `tracestatic`, which writes a `.ct`
 ## under the nimcache; `trace_macro.sendNimTrace` opens it in a new session
-## tab through the same `CODETRACER::load-trace-file` pathway.
+## tab through the same `CODETRACER::load-nim-trace-file` pathway.
 
 import
   ui_imports,

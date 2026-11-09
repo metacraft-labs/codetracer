@@ -37,8 +37,10 @@
 import std/strutils
 
 import ./trace_open
+import ../../../common/nim_source_files
 
 export trace_open
+export nim_source_files
 
 type
   NimTraceAction* = enum
@@ -161,11 +163,6 @@ func extractFilenameOf*(path: string): string =
 
 func isNimScript(path: string): bool =
   path.toLowerAscii.endsWith(".nims")
-
-func isNimSource*(path: string): bool =
-  ## A `.nim` file, or a NimScript one: both hold compile-time code.
-  let p = path.toLowerAscii
-  p.endsWith(".nim") or p.endsWith(".nims")
 
 func indentOf(line: string): int =
   for c in line:

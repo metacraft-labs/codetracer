@@ -1209,6 +1209,52 @@ proc onOpenLocalTrace*(sender: js, response: js) {.async.} =
     else:
       errorPrint "There is no record at given path."
 
+proc loadFoundTrace(trace: Trace) {.async.} =
+  ## Opens a trace the trace store has registered: the window's session takes
+  ## it and its replay starts.
+  mainWindow.webContents.send "CODETRACER::loading-trace",
+    forLoadTab(js{trace: trace})
+  prefetchedTrace = trace
+  data.trace = trace
+  data.pluginClient.trace = trace
+  if await prepareForLoadingTrace(trace.recordingId, nodeProcess.pid.to(int)):
+    await loadExistingRecord(trace.recordingId)
+
+proc jsIsNullish(value: cstring): bool {.importjs: "(# == null)".}
+  ## True for both `null` and `undefined`: a field the sender left out.
+
+proc onLoadNimTraceFile*(sender: js,
+    response: jsobject(tracePath=cstring, sourcePath=cstring)) {.async.} =
+  ## Opens a Nim compile-time trace the Trace Macro / Static Block / Constant
+  ## actions asked for (`ui/trace_macro`). The language server names the `.ct`
+  ## nimsuggest wrote under its nimcache, and nothing has registered it, so it
+  ## is imported first: laid out in a folder of its own with the sources beside
+  ## it, as the terminal and GPUI lay it out (`host/native_nim_tracer`). An
+  ## import that fails is answered with a message naming the path it was asked
+  ## for.
+  # Every message of the load this starts answers the tab that asked.
+  startLoadFor(response.toJs)
+  let tracePath = response.tracePath
+  if tracePath.len == 0:
+    errorPrint "onLoadNimTraceFile: empty trace path"
+    return
+  let sourcePath =
+    if jsIsNullish(response.sourcePath): cstring""
+    else: response.sourcePath
+
+  infoPrint "index: loading Nim trace at ", tracePath
+
+  var trace = await electron_vars.app.findByPath(tracePath)
+  if trace.isNil:
+    trace = await electron_vars.app.importNimTraceFile(tracePath, sourcePath)
+  if not trace.isNil:
+    await loadFoundTrace(trace)
+  else:
+    errorPrint "onLoadNimTraceFile: could not import the Nim trace at ", tracePath
+    mainWindow.webContents.send "CODETRACER::trace-load-error",
+      forLoadTab(js{error: cstring("Could not open the Nim trace at " &
+         $tracePath & ". It could not be imported as a trace.")})
+
 proc onLoadTraceFile*(sender: js, response: jsobject(tracePath=cstring)) {.async.} =
   ## Load a .ct trace file by path.  Used by the "Trace Macro Execution"
   ## action (M11) to open a trace produced by the Nim langserver's
@@ -1247,13 +1293,7 @@ proc onLoadTraceFile*(sender: js, response: jsobject(tracePath=cstring)) {.async
   if trace.isNil:
     trace = await electron_vars.app.findByPath(traceDir)
   if not trace.isNil:
-    mainWindow.webContents.send "CODETRACER::loading-trace",
-      forLoadTab(js{trace: trace})
-    prefetchedTrace = trace
-    data.trace = trace
-    data.pluginClient.trace = trace
-    if await prepareForLoadingTrace(trace.recordingId, nodeProcess.pid.to(int)):
-      await loadExistingRecord(trace.recordingId)
+    await loadFoundTrace(trace)
   else:
     # Name the path the caller actually asked for, not the dirname.  While
     # `dirname` was the only lookup this handler did, naming it was the same

@@ -1448,6 +1448,16 @@ type
           "limit",
         defaultValue: 4,
       .}: int
+      traceMetadataImportCt* {.
+        name: "import-ct",
+        desc: "register the .ct at this path as a Nim trace, laid out in a " &
+          "folder of its own (the desktop's Trace Macro route); prints its row",
+      .}: Option[string]
+      traceMetadataImportSource* {.
+        name: "import-source",
+        desc: "with --import-ct: the Nim source the trace was made from, " &
+          "whose Nim files are copied beside it",
+      .}: Option[string]
       traceMetadataTest* {.
         name: "test",
         defaultValue: false,

@@ -107,7 +107,7 @@ ARMS = [
              '        args = @["--stdin", "--nimcache:" & t.cache, request.path],')],
      [(PTY, PTY_MAIN)],
      "nimsuggest runs without protocol 3, and answers no trace query"),
-    ("H2", [(HOST, "      bundleSources(t.folder, request.path)", "      discard")],
+    ("H2", [(HOST, "      bundleNimTraceSources(t.folder, request.path)", "      discard")],
      [(PTY, PTY_MAIN)],
      "the recording carries no source, and the new tab shows no code"),
     # ---- the terminal -----------------------------------------------------

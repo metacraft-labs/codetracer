@@ -258,6 +258,34 @@ proc findByPath*(app: ElectronApp, path: cstring): Future[Trace] {.async.} =
     echo "error: trying to run the codetracer trace metadata command: ", res.error
     app.quit(1)
 
+proc importNimTraceFile*(app: ElectronApp, ctPath: cstring,
+                         sourcePath: cstring): Future[Trace] {.async.} =
+  ## Registers the nimsuggest `.ct` at `ctPath` as a Nim trace, laid out in a
+  ## folder of its own (`ct trace-metadata --import-ct`), and returns its row.
+  ## Returns nil when the import fails: a failed import is an answer to show,
+  ## not a reason to quit the app, unlike a failed lookup.
+  var args = @[cstring"trace-metadata",
+               cstring("--import-ct=" & $ctPath)]
+  if sourcePath.len > 0:
+    args.add(cstring("--import-source=" & $sourcePath))
+  var imported: Trace = nil
+  let res = await readProcessOutput(codetracerExe.cstring, args)
+  if res.isOk:
+    # A reply that is not the JSON row is an import that did not happen, so it
+    # is answered the same way as a failed command, not raised into the handler.
+    try:
+      let trace = cast[Trace](JSON.parse(res.value))
+      if not trace.isNil:
+        normalizeTraceEnums(trace)
+        imported = trace
+    except:
+      # Bare `except`: on the JS backend V8's `SyntaxError` matches no Nim
+      # exception type, so a narrower clause would let it escape.
+      echo "error: the Nim trace import at ", ctPath, " did not print a trace"
+  else:
+    echo "error: could not import the Nim trace at ", ctPath, ": ", res.error
+  return imported
+
 proc findRecentFoldersWithCodetracer*(
     app: ElectronApp, limit: int, quitOnError: bool = true): Future[seq[RecentFolder]] {.async.} =
   ## List the most recently opened project folders.  See
