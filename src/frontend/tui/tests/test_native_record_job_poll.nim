@@ -52,3 +52,39 @@ suite "pollRecordJob never blocks on a quiet child":
     # Non-blocking must not be lossy: the whole output reached the log,
     # including the unterminated tail.
     check readFile(log) == "first\ntail-no-newline"
+
+  test "a quiet `ct record-test` run is polled to its recording id":
+    # The whole run-tests path (`startRecordTestJob` -> `findCtBinary` ->
+    # `pollRecordJob`), with `CT_BIN` naming a stand-in for `ct`: a script
+    # that is quiet, then prints the marker `recordingId:` line the host
+    # reads back from the log. The stand-in only supplies the child's
+    # behaviour; the job, the pipe and the log are the real ones.
+    let dir = getTempDir() / ("native-record-test-job-" & $getCurrentProcessId())
+    createDir(dir)
+    defer: removeDir(dir)
+    let fakeCt = dir / "ct"
+    writeFile(fakeCt, "#!/bin/sh\nsleep 2\necho recordingId: abc123\n")
+    setFilePermissions(fakeCt, {fpUserRead, fpUserWrite, fpUserExec})
+    let prior = getEnv("CT_BIN")
+    putEnv("CT_BIN", fakeCt)
+    defer:
+      if prior.len > 0: putEnv("CT_BIN", prior) else: delEnv("CT_BIN")
+    let job = startRecordTestJob(dir / "some_test.nim")
+    defer: removeFile(job.logPath)
+    check job.process != nil
+    var whileRunning, worstMs = 0
+    let start = getMonoTime()
+    while (getMonoTime() - start).inMilliseconds < SilenceMs * 5:
+      let before = getMonoTime()
+      let finished = pollRecordJob(job)
+      worstMs = max(worstMs, int((getMonoTime() - before).inMilliseconds))
+      if finished:
+        break
+      inc whileRunning
+      sleep(TickMs)
+    checkpoint "whileRunning=" & $whileRunning & " worstMs=" & $worstMs
+    check job.done
+    check job.ok
+    check job.recordingId == "abc123"
+    check whileRunning >= MinPollsWhileSilent
+    check worstMs < SilenceMs div 3
