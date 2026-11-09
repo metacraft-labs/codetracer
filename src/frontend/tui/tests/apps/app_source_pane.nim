@@ -74,9 +74,11 @@ const
     ## so a step is a visible move rather than a scroll.
 
   SampleMarks* = @[(3, gmBreakpoint), (9, gmBreakpointDisabled),
-                   (13, gmTracepoint)]
-    ## One of each §3.3.2 indicator, so the Tier-2 read has all three to check
-    ## and "breakpoint red" is a colour a terminal really showed.
+                   (13, gmTracepoint), (16, gmBreakpointTracepoint)]
+    ## One of each gutter mark: §3.3.2's three indicators and the combined
+    ## breakpoint-and-tracepoint mark (Editor-Pane.md MC.5), so the Tier-2 read
+    ## has every mark to check and "breakpoint red" is a colour a terminal
+    ## really showed.
 
   SampleValues* = @[Annotation(name: "prefix", value: "\"hello \""),
                     Annotation(name: "count", value: "3")]

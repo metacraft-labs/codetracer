@@ -132,6 +132,7 @@ const
   BreakpointGlyph* = canonical(grBreakpoint)
   BreakpointDisabledGlyph* = canonical(grBreakpointDisabled)
   TracepointGlyph* = canonical(grTracepoint)
+  BreakpointTracepointGlyph* = canonical(grBreakpointTracepoint)
   ExecutionPointerMark = canonical(grExecPointer)
     ## PLAT-51 (CodeTracer-TUI.md §3.3.2, Native-Front-End-Parity.md §3): the
     ## desktop's execution mark is a small right-pointing triangle
