@@ -1638,8 +1638,8 @@ proc dividerAxisAt*(b: LayoutBinding; geom: LayoutGeometry;
   let divider = b.dividerAt(geom, row, col)
   if divider.isNone:
     return daNone
-  let container = b.layout.tree.nodeAtPath(divider.get[0])
-  if not container.isNil and container.kind == lnColumn: daAcrossRows
+  let container = nodeInfoAtPath(b.layout.tree, divider.get[0])
+  if container.isSome and container.get.kind == lnColumn: daAcrossRows
   else: daAcrossColumns
 
 proc tabUnder*(b: LayoutBinding; geom: LayoutGeometry; row, col: int): bool =
@@ -1653,8 +1653,8 @@ proc resizingAcrossRows*(b: LayoutBinding): bool =
   let parent = parentPath(b.interaction.node)
   if parent.isNone:
     return false
-  let container = b.layout.tree.nodeAtPath(parent.get)
-  not container.isNil and container.kind == lnColumn
+  let container = nodeInfoAtPath(b.layout.tree, parent.get)
+  container.isSome and container.get.kind == lnColumn
 
 proc previewDivider(b: LayoutBinding; geom: LayoutGeometry;
                     row, col: int): LayoutAction =
