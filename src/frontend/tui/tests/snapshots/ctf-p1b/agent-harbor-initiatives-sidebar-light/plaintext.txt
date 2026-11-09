@@ -1,7 +1,11 @@
- Initiatives  ✕
- INITIATIVES  4 initiatives · 12 sessions ·…
+ Initiatives  ⚲ ✕
+ INITIATIVES
+ invented working set: 14 sessions over 4
+ initiatives
+               4 initiatives · 12 sessions ·
+           2 need input · 2 in no initiative
  ▾ ● Telemetry upload retries      1/4 · 25%
-     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀       ● 1  ● 1  ● 2
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀            ● 1  ● 1  ● 2
      CURRENT TR-M1: Data model
      orbit-labs/telemetry-retry · manager t…
       ● Retry telemetry uploads… needs input
@@ -16,22 +20,18 @@
       ○ Migrate the CI matrix to the n… idle
       ● Fix the flaky clock-skew te… running
  ▾ ● Route cache on the new stor…  2/6 · 33%
-     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  ● 2  ● 1  ● 1  ● 2
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀       ● 2  ● 1  ● 1  ● 2
      CURRENT RC-M2: Core change
      orbit-labs/route-cache
       ○ Migrate cached routes without … idle
       ● Port the route cache to the… running
       ● Benchmark route cache reads … failed
  ▾ ● Settings redesign             3/8 · 38%
-     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  ● 3  ● 1  ● 1  ● 3
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀       ● 3  ● 1  ● 1  ● 3
      CURRENT SR-M3: Front-end
      orbit-labs/settings-redesign · manager…
       ● Split the settings page int… running
       ● Add search to the settings … running
-                                             
-                                             
-                                             
-                                             
                                              
                                              
                                              

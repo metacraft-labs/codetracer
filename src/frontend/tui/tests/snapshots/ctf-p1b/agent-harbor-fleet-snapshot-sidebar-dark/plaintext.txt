@@ -1,4 +1,4 @@
- Fleet Snapshot  ✕
+ Fleet Snapshot  ⚲ ✕
  AGENT HARBOR SESSIONS           48 sessions
  synthetic fleet, 2026-01-15 10:00 UTC
  prompts of 12 withheld by the server

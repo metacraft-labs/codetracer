@@ -1,4 +1,4 @@
- Fleet Snapshot  ✕
+ Fleet Snapshot  ⚲ ✕
  AGENT HARBOR SESSIONS  empty server                                                                                                                                     0 sessions
   All 0   Needs input 0   Running 0   Queued 0   Failed 0   Ended 0
    Session                                                                      Agent                                  Host                                     Duration     Active

@@ -1,5 +1,6 @@
- Initiatives  ✕
- INITIATIVES  waiting for the Agent Harbor…
+ Initiatives  ⚲ ✕
+ INITIATIVES
+ waiting for the Agent Harbor server
                                              
                                              
                                              
@@ -27,7 +28,6 @@
                                              
                                              
             Loading initiatives…
-                                             
                                              
                                              
                                              

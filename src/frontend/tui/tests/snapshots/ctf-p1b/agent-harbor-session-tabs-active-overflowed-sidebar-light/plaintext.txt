@@ -1,4 +1,5 @@
  ● Port the route ca… CLI ✕   ● +13   +
+                                             
  ● Replace the hand-rolled JSON writer CLI
  ● Cap the telemetry retry budget per h…CT
  ● Fix the flaky clock-skew test on the…Tg
@@ -12,7 +13,6 @@
  ○ Migrate the CI matrix to the new run…CT
  ● Split the settings page into tabs   Web
  ● Retry telemetry uploads with exponen…CT
-                                             
                                              
                                              
                                              

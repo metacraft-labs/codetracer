@@ -1,4 +1,4 @@
- No sessions yet. Start one with + or from any Agent Harbor front-end.                                                                                                           +
+ No sessions yet. Start one with + or from any Agent Harbor front-end.   +
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

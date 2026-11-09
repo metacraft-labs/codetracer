@@ -1,4 +1,4 @@
- Fleet Snapshot  ✕
+ Fleet Snapshot  ⚲ ✕
  AGENT HARBOR SESSIONS  invented working set: 3 sessions over 2 initiatives                                                                                         0 of 3 sessions
   All 3   Needs input 1   Running 1   Queued 0   Failed 1   Ended 0
    Session                                                      Agent                          Host                           Initiative                       Duration      Active

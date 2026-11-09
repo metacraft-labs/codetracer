@@ -1,22 +1,22 @@
- ● Telemetry uploa… 1/4  1   +3    ● +4   +
-                      9    ←  →   Auto: off
- ● Port the route cache to the ne…     CLI
-   Route cache on the new storage… running
- ● Split the settings page into t…     Web
+ ● Telemetry upload… 1/4  1  +3    ● +4   +
+ 9    ←  →   Auto: off
+ ● Port the route cache to th…         CLI
+   Route cache on the new sto…     running
+ ● Split the settings page in…         Web
    Settings redesign               running
- ● Persist the telemetry queue ac…     TUI
+ ● Persist the telemetry queu…         TUI
    Telemetry upload retries        running
- ○ Migrate cached routes without a c…   Tg
-   Route cache on the new storage la… idle
+ ○ Migrate cached routes with…          Tg
+   Route cache on the new sto…        idle
  ● Cache the dependency graph…         CLI
    CI runner migration         needs input
- ● Add jitter to the telemetry …       Web
+ ● Add jitter to the telemetr…         Web
    Telemetry upload retries      completed
- ● Add search to the settings page     TUI
+ ● Add search to the settings…         TUI
    Settings redesign               running
- ● Fix the flaky clock-skew test …      Tg
+ ● Fix the flaky clock-skew t…          Tg
    CI runner migration             running
- ● Replace the hand-rolled JSON w…     CLI
+ ● Replace the hand-rolled JS…         CLI
    no initiative                   running
                                              
                                              

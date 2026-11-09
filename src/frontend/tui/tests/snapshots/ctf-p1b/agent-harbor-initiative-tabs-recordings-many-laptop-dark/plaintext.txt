@@ -1,4 +1,4 @@
- ● Telemetr… 1/4  1   2   3 …   4 ✕   5 ?   +7    ● Route cach… 2/6   ● Settings… 3/8   ● CI runne… 4/10   +1   +     9  agent harbor sessions   ← 4 waiting  →   Auto-switch: off
+ ● Telemetr… 1/4  1  2  3… 4✕ 5? +7    ● Route cache on … 2/6   ● Settings r… 3/8   ● CI runner mi… 4/10   +1   +     9  agent harbor sessions   ← 4 waiting  →   Auto-switch: off
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

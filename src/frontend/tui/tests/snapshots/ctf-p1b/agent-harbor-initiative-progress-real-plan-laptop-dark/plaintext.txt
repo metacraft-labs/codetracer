@@ -1,11 +1,11 @@
- Initiative Progress  ✕
+ Initiative Progress  ⚲ ✕
  INITIATIVE PROGRESS  Route cache on the new storage layer                                                                                                  1 of 3 milestones · 33%
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ● 1 completed  ● 1 in progress  ● 1 planned
  Route cache on the new storage layer: one milestone done, one in progress, one planned.
  CURRENT RC-M2: The main change
  IN PROGRESS (1)
- ● RC-M2     The main change                                                                                                           CURRENT  0/1 deliverables · Tests: 1 pending
+ ● RC-M2     The main change                                                                                                            CURRENT 0/1 deliverables · Tests: 1 pending
  PLANNED (1)
  ● RC-M3     Polish and release                                                                                                                 0/1 deliverables · Tests: 1 pending
  COMPLETED (1)

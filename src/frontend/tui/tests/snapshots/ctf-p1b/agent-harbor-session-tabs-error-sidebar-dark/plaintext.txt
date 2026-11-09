@@ -1,4 +1,4 @@
- Sessions unavailable: GET /ap…  Retry    +
+ Sessions unavailable: GET /api…   Retry   +
                                              
                                              
                                              

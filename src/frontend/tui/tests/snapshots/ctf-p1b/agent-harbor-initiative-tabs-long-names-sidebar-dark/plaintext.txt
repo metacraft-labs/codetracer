@@ -1,5 +1,5 @@
- ● Telemetry uploa… 1/4  1   +3    +4   +
-                      2    ←  →   Auto: off
+ ● Telemetry upload… 1/4  1  +3    +4   +
+ 2    ←  →   Auto: off
                                              
                                              
                                              

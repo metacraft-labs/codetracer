@@ -1,5 +1,5 @@
- No initiative is running.  +
-                           ←  →   Auto: off
+ No initiative is running.   +
+ ←  →   Auto: off
                                              
                                              
                                              

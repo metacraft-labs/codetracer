@@ -24,11 +24,11 @@
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     
-                                                                                                                                                                                    
               Could not load the sessions
-     GET /api/v1/sessions failed: connection refus…
+        GET /api/v1/sessions failed: connection
+       refused (the server is not running, or its
+                   address is wrong)
                          Retry
-                                                                                                                                                                                    
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

@@ -14,6 +14,7 @@
 ## the menus on a click; nothing is boxed: a dropdown is set off by
 ## its own ground.
 
+import std/strutils
 import isonim/core/signals
 import nim_agents_isonim_viewmodels/agent_harbor/initiative_tabs_vm
 from ../../viewmodel/views/agent_harbor_words import stateSuffix
@@ -37,13 +38,20 @@ const
 proc keyOf(tab: StripTab): string =
   if tab.kind == stkInitiative: initiativeKey(tab.id) else: sessionKey(tab.id)
 
-proc buttonLabel(rb: RecordingButton): string = $rb.number & stateSuffix(rb.state)
+proc buttonLabel(rb: RecordingButton): string =
+  ## A recording button as the terminal draws it: three cells, a space, the
+  ## number and its state's mark in the cell after it (`␣1␣`, `␣2…`, `␣3✕`,
+  ## `␣4?`; the web's `2 …` without its space), so the active tab keeps
+  ## room for its title. The leading space parts it from its neighbour.
+  let suffix = stateSuffix(rb.state).strip
+  " " & $rb.number & (if suffix.len > 0: suffix else: " ")
 
 proc recordingsCells(buttons: RecordingButtons): int =
-  ## The switcher's width: " n " per button, a cell apart, and `+N`.
+  ## The switcher's width: a cell before it, its buttons side by side, and
+  ## `+N`.
   if buttons.buttons.len == 0: return 0
   result = 1
-  for rb in buttons.buttons: result += widthOf(buttonLabel(rb)) + 2 + 1
+  for rb in buttons.buttons: result += widthOf(buttonLabel(rb))
   if buttons.hidden > 0: result += widthOf("+" & $buttons.hidden) + 2
 
 proc tabContent(vm: InitiativeTabStripVM; tab: StripTab): int =
@@ -72,7 +80,7 @@ proc drawRecordingButton(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStrip
   ## A numbered button: its ground says it is a control; the active one is
   ## the action role's, a failed or missing one's number is in its role.
   let id = rb.id
-  let label = " " & buttonLabel(rb) & " "
+  let label = buttonLabel(rb)
   let w = widthOf(label)
   var fg = c.p.textLabel
   var bg = c.p.panel
@@ -125,7 +133,7 @@ proc drawBarTab(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStripVM;
                             [("recordings", $buttons.buttons.len)])
       var at = right - rw + 1
       for rb in buttons.buttons:
-        at += c.drawRecordingButton(switcher, vm, id, rb, row, at) + 1
+        at += c.drawRecordingButton(switcher, vm, id, rb, row, at)
       if buttons.hidden > 0:
         let more = " +" & $buttons.hidden & " "
         discard c.put(row, at, more, c.p.textLabel, bg = c.tone.chip)
@@ -145,7 +153,7 @@ proc drawPopup(c: var AhCanvas; parent: AhNode; popup: InitiativePopup;
   ## headline; the milestone bar and its legend; the current milestone; the
   ## executive summary; then its sessions.
   let inner = width - 2
-  let summary = wrapWords(popup.executiveSummary, inner)
+  let summary = wrapCells(popup.executiveSummary, inner)
   let legendRows = 3   # an upper bound for the labelled legend, trimmed below
   var height = 1 + 1 + 1 + legendRows + (if popup.currentMilestone.len > 0: 1 else: 0) +
                summary.len + 1 + popup.sessions.len + 1
@@ -192,10 +200,19 @@ proc drawPopup(c: var AhCanvas; parent: AhNode; popup: InitiativePopup;
 proc autoLabel(vm: InitiativeTabStripVM): string =
   (if vm.compact: "Auto: " else: "Auto-switch: ") & (if vm.autoSwitch.val: "on" else: "off")
 
+proc inboxShown(vm: InitiativeTabStripVM): string =
+  let position = vm.inboxPosition
+  if position.len == 0: "inbox empty" else: position
+
+proc positionSlot(vm: InitiativeTabStripVM): int =
+  ## The position's slot: 9 cells, or its words whole when they are longer
+  ## (`inbox empty`, `14 waiting`): the bar's right-hand group never shrinks.
+  max(9, widthOf(inboxShown(vm)))
+
 proc inboxCells(vm: InitiativeTabStripVM): int =
   result = 3 + 3 + 1 + widthOf(autoLabel(vm)) + 2
   if vm.autoSwitch.val: result += 2
-  if not vm.compact: result += 1 + 9
+  if not vm.compact: result += 1 + positionSlot(vm)
 
 proc elsewhereCells(vm: InitiativeTabStripVM): int =
   result = widthOf($vm.elsewhereCount) + 2 + 1
@@ -204,8 +221,7 @@ proc elsewhereCells(vm: InitiativeTabStripVM): int =
 proc drawInbox(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStripVM; row, col: int) =
   ## ← position → and the auto-switch toggle.
   let target = vm
-  let position = vm.inboxPosition
-  let shown = if position.len == 0: "inbox empty" else: position
+  let shown = inboxShown(vm)
   let n = c.node(parent, row, col, inboxCells(vm), 1, [("inbox", shown)])
   var at = col
   discard c.put(row, at, " \xE2\x86\x90 ", c.p.textLabel)
@@ -214,7 +230,7 @@ proc drawInbox(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStripVM; row, c
   at += 3
   if not vm.compact:
     let pw = widthOf(shown)
-    let slot = 9
+    let slot = positionSlot(vm)
     discard c.text(n, row, at + max(0, (slot - pw) div 2), slot, shown, c.p.textLabel,
                    fact = "inbox-position")
     at += slot + 1
@@ -251,13 +267,20 @@ proc drawElsewhere(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStripVM;
   c.target(row, col, w, 1, proc() = target.elsewhereOpen.val = not target.elsewhereOpen.val)
 
 proc drawElsewhereItem(c: var AhCanvas; menu: AhNode; entry: ElsewhereSession;
-                       stacked: bool; row, col, width: int; onClick: proc()): int =
+                       stacked: bool; index, third: int; row, col, width: int;
+                       onClick: proc()): int =
   ## A session started elsewhere: mark, title, its initiative, state and
-  ## origin — in columns, or on two lines in a stacked bar's menu.
+  ## origin — in columns, or on two lines in a stacked bar's menu, where
+  ## every other item lies on a stripe (as the fleet's rows) so a
+  ## second line is read with its title, and the origin and state share one
+  ## right-hand column `third` cells wide.
   let noInitiative = entry.initiativeTitle.len == 0
   let initiative = if noInitiative: "no initiative" else: entry.initiativeTitle
   let initiativeFg = if noInitiative: c.p.textCaption else: c.p.textLabel
   let height = if stacked: 2 else: 1
+  if stacked and index mod 2 == 1:
+    c.area("menu-item", row, col, width, height,
+           c.tone.stripeOn(c.p, c.tone.menu, besides = c.tone.frame))
   let n = c.node(menu, row, col, width, height, [("menu-item", entry.item.id)])
   c.target(row, col, width, height, onClick)
   discard c.mark(n, row, col + 1, c.p.markOf(entry.item.attention))
@@ -272,7 +295,6 @@ proc drawElsewhereItem(c: var AhCanvas; menu: AhNode; entry: ElsewhereSession;
     at += ElsewhereStatusCells + 1
     discard c.text(n, row, at, ow, entry.item.originShort, c.p.textCaption, alignRight = true)
   else:
-    let third = max(widthOf(entry.item.originShort), widthOf(entry.item.statusLabel))
     discard c.text(n, row, col + 3, max(1, width - 4 - third - 1), entry.item.title,
                    c.p.textBody)
     discard c.text(n, row, col + width - 1 - third, third, entry.item.originShort,
@@ -292,38 +314,35 @@ proc drawInitiativeTabBar*(c: var AhCanvas; vm: InitiativeTabStripVM; row, col, 
                      ("compact", $vm.compact), ("stacked", $vm.stacked)])
   c.fill(row, col, width, if vm.stacked: 2 else: 1, c.tone.frame)
   let controlsRow = if vm.stacked: row + 1 else: row
+  # The right-hand group is measured first and never shrinks; the tabs get
+  # what remains. On a stacked bar it is the second line, from the left edge.
   var controlsW = 0
   if vm.state.val in {asReady, asError}: controlsW += inboxCells(vm)
   if ready and vm.elsewhereCount > 0: controlsW += elsewhereCells(vm) + 1
-  let controlsCol = col + width - 1 - controlsW
+  let controlsCol = if vm.stacked: col else: col + width - 1 - controlsW
+  # The first row under the whole bar: menus and the popup open there, not
+  # over a stacked bar's second line.
+  let barBelow = row + (if vm.stacked: 2 else: 1)
   let tabsRoom = if vm.stacked: width - 1 else: controlsCol - col - 1
   var at = col
   var popupCol = -1
   var overflow: seq[int]
   var chipCol = -1
+  # A notice in place of the tabs is the session strip's: tab-shaped on its
+  # own quiet ground, "+" directly after it.
   case vm.state.val
   of asIdle, asLoading:
-    let n = c.node(host, row, col, tabsRoom - AddCells - 1, 1, [("notice", "loading")])
-    discard c.text(n, row, col + 1, tabsRoom - AddCells - 2,
-                   "Loading initiatives" & Ellipsis, c.p.textCaption)
-    at = col + 1 + min(tabsRoom - AddCells - 2, widthOf("Loading initiatives" & Ellipsis)) + 1
+    at = col + c.drawStripNotice(host, row, col, tabsRoom - AddCells - 1,
+                                 "Loading initiatives" & Ellipsis, "loading", nil) + 1
   of asError:
-    let message = "Initiatives unavailable: " & vm.error.val
-    let n = c.node(host, row, col, tabsRoom - AddCells - 1, 1, [("notice", "error")])
-    let room = tabsRoom - AddCells - 2 - 8
-    let w = c.text(n, row, col + 1, room, message, c.p.textError, fact = "error")
-    let rc = col + 1 + w + 1
-    discard c.put(row, rc, " Retry ", c.p.textLabel, bg = c.tone.chip)
-    discard c.node(n, row, rc + 1, 5, 1, [("button", "Retry")])
     let target = vm
-    c.target(row, rc, 7, 1, proc() = target.load())
-    at = rc + 8
+    at = col + c.drawStripNotice(host, row, col, tabsRoom - AddCells - 1,
+                                 "Initiatives unavailable: " & vm.error.val, "error",
+                                 proc() = target.load()) + 1
   of asReady:
     if tabs.len == 0:
-      let n = c.node(host, row, col, tabsRoom - AddCells - 1, 1, [("notice", "empty")])
-      discard c.text(n, row, col + 1, tabsRoom - AddCells - 2, "No initiative is running.",
-                     c.p.textCaption)
-      at = col + 1 + widthOf("No initiative is running.") + 1
+      at = col + c.drawStripNotice(host, row, col, tabsRoom - AddCells - 1,
+                                   "No initiative is running.", "empty", nil) + 1
     let layout = vm.singleLine
     overflow = layout.overflow
     var widths, mins: seq[int]
@@ -356,27 +375,28 @@ proc drawInitiativeTabBar*(c: var AhCanvas; vm: InitiativeTabStripVM; row, col, 
     c.drawElsewhere(controls, vm, controlsRow, cc)
     cc += elsewhereCells(vm) + 1
   if vm.state.val in {asReady, asError}: c.drawInbox(controls, vm, controlsRow, cc)
-  let below = controlsRow + 1
   if ready and popupCol >= 0:
     let popupW = min(PopupCells, width * 4 div 5)
     let left = min(popupCol, max(col, col + width - popupW))
-    c.drawPopup(host, vm.popupOf(vm.popupId.val), row + 1, left, popupW)
+    c.drawPopup(host, vm.popupOf(vm.popupId.val), barBelow, left, popupW)
     let target = vm
     c.leave.add proc() = target.popupId.val = ""
   if ready and overflow.len > 0 and vm.overflowOpen.val:
     var widest = MenuMinCells
     for i in overflow:
-      widest = max(widest, 4 + widthOf(tabs[i].title) + 1 + widthOf(tabs[i].progressText) + 1)
+      widest = max(widest, 4 + widthOf(tabs[i].title) + 2 + widthOf(tabs[i].progressText) + 1)
     let menuW = min(widest, width - 1)
     let menuCol = max(col, min(chipCol, col + width - 1 - menuW))
-    let menu = c.drawMenu(host, row + 1, menuCol, menuW, overflow.len, "overflow")
+    # A row of the menu's own ground above and below its items, as the
+    # session strip's.
+    let menu = c.drawMenu(host, barBelow, menuCol, menuW, overflow.len + 2, "overflow")
     for k, i in overflow:
       let tab = tabs[i]
       let key = keyOf(tab)
       let m = if tab.kind == stkInitiative: c.p.markOf(tab.state)
               else: c.p.markOf(tab.session.attention)
       let target = vm
-      discard c.drawMenuItem(menu, row + 1 + k, menuCol, menuW, m, tab.title, key, tab.active,
+      discard c.drawMenuItem(menu, barBelow + 1 + k, menuCol, menuW, m, tab.title, key, tab.active,
         (if tab.progressText.len > 0: @[(tab.progressText, c.p.textCaption)] else: @[]),
         proc() = discard target.activate(key))
   if ready and vm.elsewhereCount > 0 and vm.elsewhereOpen.val:
@@ -384,12 +404,17 @@ proc drawInitiativeTabBar*(c: var AhCanvas; vm: InitiativeTabStripVM; row, col, 
     let menuW = if vm.stacked: width - 2 else: min(ElsewhereMenuCells, width - 2)
     let menuCol = if vm.stacked: col else: max(col, controlsCol + elsewhereCells(vm) - menuW)
     let per = if vm.stacked: 2 else: 1
-    let menu = c.drawMenu(host, below, menuCol, menuW, entries.len * per, "elsewhere")
-    var r = below
+    let menu = c.drawMenu(host, barBelow, menuCol, menuW, entries.len * per, "elsewhere")
+    # The stacked menu's right-hand column, one width for every item, so the
+    # titles and initiatives are cut at one width.
+    var third = 0
     for entry in entries:
+      third = max(third, max(widthOf(entry.item.originShort), widthOf(entry.item.statusLabel)))
+    var r = barBelow
+    for k, entry in entries:
       let id = entry.item.id
       let target = vm
-      r += c.drawElsewhereItem(menu, entry, vm.stacked, r, menuCol, menuW,
+      r += c.drawElsewhereItem(menu, entry, vm.stacked, k, third, r, menuCol, menuW,
                                proc() = discard target.openSession(id))
 
 proc mountInitiativeTabBar*(vm: InitiativeTabStripVM; cols: int) =

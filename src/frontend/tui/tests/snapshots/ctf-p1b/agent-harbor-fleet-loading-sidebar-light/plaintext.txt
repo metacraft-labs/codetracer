@@ -1,4 +1,4 @@
- Fleet Snapshot  ✕
+ Fleet Snapshot  ⚲ ✕
  AGENT HARBOR SESSIONS
  waiting for the Agent Harbor server
                                              

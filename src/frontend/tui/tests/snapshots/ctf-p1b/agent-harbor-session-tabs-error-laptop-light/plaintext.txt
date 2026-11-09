@@ -1,4 +1,4 @@
- Sessions unavailable: GET /api/v1/sessions failed: connection refused (the server is not running, or its address is wrong)  Retry                                               +
+ Sessions unavailable: GET /api/v1/sessions failed: connection refused (the server is not running, or its address is wrong)   Retry   +
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

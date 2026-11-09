@@ -62,7 +62,16 @@ if [ "${1:-}" = "--agent-harbor" ] || [ "${1:-}" = "--agent-harbor-tui" ]; then
 			done
 			cp "${web}" "${out}/${id}.web.png"
 			cp "${gpui}" "${out}/${id}.${arm}.png"
-			magick "${web}" "${gpui}" -background "#ff00ff" +append "${out}/${id}.side-by-side.png"
+			# The two halves differ in height by under a cell (a terminal
+			# capture is whole rows: 896 px against the web 900 px). The GPUI
+			# arm pads with magenta, which marks a size mismatch; the terminal
+			# arm pads with the bottom-left colour of its own capture (the
+			# window ground), so the short half ends in its own ground, not a strip.
+			pad="#ff00ff"
+			if [ "${arm}" = tui ]; then
+				pad="$(magick "${gpui}" -format "%[pixel:p{0,h-1}]" info:)"
+			fi
+			magick "${web}" "${gpui}" -background "${pad}" +append "${out}/${id}.side-by-side.png"
 			pairs=$((pairs + 1))
 		done
 		echo "parity-pairs: ${pairs} Agent Harbor ${arm} pairs in ${out}"

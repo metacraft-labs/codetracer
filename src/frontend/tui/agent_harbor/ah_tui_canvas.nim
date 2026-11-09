@@ -55,7 +55,7 @@
 ## `cellsOf(px)` cells.
 
 import std/strutils
-from std/unicode import runes, Rune, `$`
+from std/unicode import runes, Rune, `$`, runeAtPos
 
 import ../app/views/styled_row
 import isonim/viewmodel
@@ -115,7 +115,7 @@ type
     frame*: string   ## the window and a panel frame's header row: surface/primary/default
     body*: string    ## a panel body, a list: surface/base/panel
     head*: string    ## a section head band (title, filters, columns)
-    band*: string    ## a striped row, as the web's `bandOf`
+    band*: string    ## a striped row (Dark: the web's `bandOf`; Light: lighter, see `tone`)
     group*: array[2, string]
       ## A group or status header between rows, by its index's parity: two
       ## folded groups are neighbours, and must not share a ground. Where
@@ -154,7 +154,11 @@ proc tone*(p: AhPalette): AhTone =
   let dark = p.mode == dmDark
   AhTone(frame: p.ground, body: p.panel,
          head: (if dark: p.hover else: p.menu),
-         band: (if dark: p.hover else: p.menu),
+         # Light's stripe is the window's ground, a step LIGHTER than the
+         # panel: on the card (the web's band) the status words fell to
+         # about 2.3:1 (green `running` on #dbd6cc), below their 2.5:1 on
+         # the panel itself; on this ground they read at about 3:1.
+         band: (if dark: p.hover else: p.ground),
          # surface/base/raised: a step off the window's ground in both modes
          # (#161616 against #1b1b1b, #f3f3f3 against #f8f6f2), so a group
          # header at a sidebar's edge is not read as the window.
@@ -166,6 +170,15 @@ proc tone*(p: AhPalette): AhTone =
          # the next grey up.
          chip: (if dark: p.activeTab else: p.tertiary),
          chosen: p.activeTab)
+
+proc stripeOn*(t: AhTone; p: AhPalette; ground: string; besides = ""): string =
+  ## The ground of every other item of a list drawn on `ground`: the band,
+  ## or the next role that differs from `ground` (and from `besides`, the
+  ## ground the list lies against: a menu's window) where the band is one of
+  ## them (Light's band is the window's ground).
+  for candidate in [t.band, p.hover, t.filters]:
+    if candidate != ground and candidate != besides: return candidate
+  t.band
 
 proc selectedGround*(p: AhPalette): string =
   ## The selected initiative's ground: the palette's tint over the panel.
@@ -225,6 +238,73 @@ proc elide*(s: string; cells: int): string =
   if cells == 1: return Ellipsis
   cellSlice(s, 0, cells - 1) & Ellipsis
 
+type
+  WrappedLine* = object
+    ## One line of a wrapped text: what it shows, and where in the text
+    ## (rune index; a cell, in the narrow texts the views wrap) it starts, so
+    ## a caller can colour a part of the text that falls on any line.
+    text*: string
+    start*: int
+
+proc wrapRuns*(text: string; width: int): seq[WrappedLine] =
+  ## `text` broken into lines of at most `width` cells, at spaces, as the
+  ## web's `white-space: normal` breaks it; a word longer than a line is
+  ## cut across lines at the width (`overflow-wrap: anywhere`), so nothing
+  ## of it is lost. The spaces a break falls on are not drawn.
+  ##
+  ## A text that lists its parts with " · " (a summary, a milestone's meta)
+  ## breaks after a separator where the line holds one past its middle, so
+  ## a part (`Tests: 2 pending`) stays on one line and no line starts with
+  ## the separator.
+  let w = max(1, width)
+  var runesOf: seq[string]
+  for r in runes(text): runesOf.add $r
+  var i = 0
+  while i < runesOf.len:
+    while i < runesOf.len and runesOf[i] == " ": inc i
+    if i >= runesOf.len: break
+    # The longest run from i that fits, ending before a space when it can.
+    var cells = 0
+    var j = i
+    var lastBreak = -1
+    while j < runesOf.len:
+      let rw = max(1, cellsOfRune(runesOf[j].runeAtPos(0), awNarrow))
+      if cells + rw > w: break
+      if runesOf[j] == " ": lastBreak = j
+      cells += rw
+      inc j
+    # A rune wider than the whole line (a wide glyph on a one-cell line) is
+    # drawn on a line of its own rather than never placed.
+    if j == i: j = i + 1
+    var stop = j
+    if j < runesOf.len and runesOf[j] != " " and lastBreak > i:
+      stop = lastBreak
+    if stop < runesOf.len:
+      # Break after the line's last separator when it is past the middle.
+      var k = stop - 1
+      while k > i + 1:
+        if runesOf[k] == " " and runesOf[k - 1] == "\xC2\xB7" and runesOf[k - 2] == " ":
+          break
+        dec k
+      if k > i + 1 and (k - i) * 2 >= w: stop = k
+      else:
+        # Never start the next line with the separator: break a word
+        # earlier, so the separator follows that word on the next line.
+        var n = stop
+        while n < runesOf.len and runesOf[n] == " ": inc n
+        if n < runesOf.len and runesOf[n] == "\xC2\xB7":
+          var back = stop - 1
+          while back > i and runesOf[back] != " ": dec back
+          if back > i: stop = back
+    var line = ""
+    for k in i ..< stop: line.add runesOf[k]
+    result.add WrappedLine(text: line.strip(leading = false), start: i)
+    i = stop
+
+proc wrapCells*(text: string; width: int): seq[string] =
+  ## `wrapRuns`' lines as text.
+  for l in wrapRuns(text, width): result.add l.text
+
 proc put*(c: var AhCanvas; row, col: int; s, fg: string; bold = false;
           bg = ""): int =
   ## `s` at (`row`, `col`) in `fg`, on the background already there (or
@@ -253,6 +333,29 @@ proc text*(c: var AhCanvas; parent: AhNode; row, col, cells: int; s, fg: string;
   if fact.len > 0:
     discard c.node(parent, row, at, w, 1, [(fact, s)])
   w
+
+proc para*(c: var AhCanvas; parent: AhNode; row, col, cells: int; s, fg: string;
+           fact = ""; alignRight = false; bold = false): int =
+  ## `s` wrapped to `cells` columns (`wrapCells`) from (`row`, `col`), each
+  ## line right-aligned in the cells when `alignRight` — the web's
+  ## `white-space: normal`, where a terminal line cannot hold what the web's
+  ## does. Never ellipsised: the whole text is drawn. `fact` tags ONE node
+  ## over the lines' rectangle with the full text. Returns the rows drawn
+  ## (none for an empty text).
+  if s.len == 0: return 0
+  let lines = wrapCells(s, cells)
+  let shown = lines.len
+  var left = col + cells
+  var right = col
+  for i in 0 ..< shown:
+    let w = widthOf(lines[i])
+    let at = if alignRight: col + max(0, cells - w) else: col
+    discard c.put(row + i, at, lines[i], fg, bold)
+    left = min(left, at)
+    right = max(right, at + w)
+  if fact.len > 0:
+    discard c.node(parent, row, left, max(0, right - left), shown, [(fact, s)])
+  shown
 
 proc mark*(c: var AhCanvas; parent: AhNode; row, col: int; m: MarkStyle): AhNode =
   ## The status mark: ● filled, ○ for a ring (idle, planned).
@@ -336,15 +439,7 @@ proc notice*(c: var AhCanvas; parent: AhNode; row, col, width, height: int;
   ## sides, wrapping, in the body colour.
   let n = c.node(parent, row, col, width, height, [("notice", kind)])
   let avail = max(1, width - 2 * cellsOf(40))
-  var lines: seq[string]
-  var line = ""
-  for word in message.splitWhitespace:
-    if line.len == 0: line = word
-    elif widthOf(line) + 1 + widthOf(word) <= avail: line.add " " & word
-    else:
-      lines.add line
-      line = word
-  if line.len > 0: lines.add line
+  let lines = wrapCells(message, avail)
   let top = row + max(0, (height - lines.len) div 2)
   for i, l in lines:
     let shown = elide(l, avail)
@@ -357,25 +452,35 @@ proc errorBlock*(c: var AhCanvas; parent: AhNode; row, col, width, height: int;
                  title, message: string; retry: proc()) =
   ## A load failure (`.ah-fleet-error`): what failed, why, and Retry,
   ## centred in the body.
+  ## The title and the reason wrap, centred line by line, as the web's do:
+  ## the reason is the one useful part of the block and is never cut.
   let n = c.node(parent, row, col, width, height, [("notice", "error")])
   let avail = max(1, width - 2 * cellsOf(40))
-  let top = row + max(0, (height - 3) div 2)
-  let t = elide(title, avail)
-  let tc = col + max(0, (width - widthOf(t)) div 2)
-  discard c.put(top, tc, t, c.p.textError)
-  discard c.node(n, top, tc, widthOf(t), 1, [("error-title", title)])
-  let why = elide(message, avail)
-  let whyCol = col + max(0, (width - widthOf(why)) div 2)
-  discard c.put(top + 1, whyCol, why, c.p.textCaption)
-  discard c.node(n, top + 1, whyCol, widthOf(why), 1, [("error", message)])
+  let titleLines = wrapCells(title, avail)
+  let whyLines = wrapCells(message, avail)
+  let top = row + max(0, (height - titleLines.len - whyLines.len - 1) div 2)
+  var r = top
+  proc centred(c: var AhCanvas; lines: seq[string]; r: var int; fg, fact, value: string) =
+    var left = col + width
+    var right = col
+    let first = r
+    for l in lines:
+      let at = col + max(0, (width - widthOf(l)) div 2)
+      discard c.put(r, at, l, fg)
+      left = min(left, at)
+      right = max(right, at + widthOf(l))
+      inc r
+    discard c.node(n, first, left, max(0, right - left), lines.len, [(fact, value)])
+  c.centred(titleLines, r, c.p.textError, "error-title", title)
+  c.centred(whyLines, r, c.p.textCaption, "error", message)
   let label = " Retry "
   let rc = col + max(0, (width - widthOf(label)) div 2)
-  discard c.put(top + 2, rc, label, c.p.textLabel, bg = c.p.secondary)
-  if c.p.secondary == c.bgAt(top + 2, max(0, rc - 1)):
+  discard c.put(r, rc, label, c.p.textLabel, bg = c.p.secondary)
+  if c.p.secondary == c.bgAt(r, max(0, rc - 1)):
     # Retry's ground is the body's in some mode: then the chip's own.
-    discard c.put(top + 2, rc, label, c.p.textLabel, bg = c.p.tertiary)
-  discard c.node(n, top + 2, rc + 1, widthOf(label) - 2, 1, [("button", "Retry")])
-  c.target(top + 2, rc, widthOf(label), 1, retry)
+    discard c.put(r, rc, label, c.p.textLabel, bg = c.p.tertiary)
+  discard c.node(n, r, rc + 1, widthOf(label) - 2, 1, [("button", "Retry")])
+  c.target(r, rc, widthOf(label), 1, retry)
 
 proc stateName*(state: AsyncState): string =
   ## The load state a view's root reports (`data-ah-state`).

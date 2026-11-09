@@ -1,4 +1,4 @@
- Fleet Snapshot  ✕
+ Fleet Snapshot  ⚲ ✕
  AGENT HARBOR SESSIONS            0 sessions
  empty server
   All 0   Needs input 0   Running 0

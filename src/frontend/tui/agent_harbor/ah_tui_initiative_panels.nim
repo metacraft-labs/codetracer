@@ -46,39 +46,99 @@ const
 proc drawSectionHeader*(c: var AhCanvas; parent: AhNode; row, col, width: int;
                         title, source, summary: string; caveat = "";
                         narrow = false): int =
-  ## A panel's head band: its title in capitals, the source, the summary at
-  ## the end; a caveat on its own line. Returns the rows it takes.
+  ## A panel's head band, laid out as the web's wrapping flex row
+  ## (`.ah-fleet-section-header`: `flex-wrap: wrap`): its title in
+  ## capitals, then the source beside it when it fits there whole, else on
+  ## its own line(s); the summary at the end of the last line when it fits
+  ## there, else right-aligned on its own line(s); the caveat after the
+  ## summary when both fit, else on its own line(s). `narrow` is the fleet's
+  ## narrow header (`@container ah-fleet (max-width: 40rem)`): the summary
+  ## beside the title, the source and the caveat each on a line below.
+  ## Nothing is cut: a part a line cannot hold wraps. Returns the rows.
   let upper = title.toUpperAscii
-  let rows = 1 + (if narrow and source.len > 0: 1 else: 0) + (if caveat.len > 0: 1 else: 0)
+  let inner = width - 2
+  let tw = widthOf(upper)
+  let sw = widthOf(summary)
+  let cw = widthOf(caveat)
+  # Plan the lines first (the band is painted under all of them).
+  type Part = object
+    text, fact: string
+    line, col, cells: int   # col 0-based within the band; cells: the wrap width
+    right: bool
+  var parts: seq[Part]
+  var line = 0
+  var x = 1 + tw              # the end of what the current line holds
+  proc fits(x, w: int): bool = x + 2 + w <= width - 1
+  proc ownLines(text: string; right: bool; fact: string) =
+    inc line
+    parts.add Part(text: text, fact: fact, line: line, col: 1, cells: inner, right: right)
+    let lines = wrapCells(text, inner)
+    line += lines.len - 1
+    # A part that wrapped is a box the line's width: nothing follows it on
+    # its last line (a flex item that wrapped fills its line).
+    x = (if right or lines.len > 1: width - 1 else: 1 + widthOf(lines[^1]))
+  proc summaryAndCaveat() =
+    if summary.len == 0: return
+    let both = caveat.len > 0 and not narrow and fits(x, sw + widthOf(Middot) + cw)
+    if both:
+      parts.add Part(text: summary, fact: "summary", line: line,
+                     col: width - 1 - (sw + widthOf(Middot) + cw), cells: sw)
+      parts.add Part(text: Middot, line: line, col: width - 1 - widthOf(Middot) - cw,
+                     cells: widthOf(Middot))
+      parts.add Part(text: caveat, fact: "caveat", line: line, col: width - 1 - cw, cells: cw)
+      x = width - 1
+    elif fits(x, sw):
+      parts.add Part(text: summary, fact: "summary", line: line, col: width - 1 - sw, cells: sw)
+      x = width - 1
+    else:
+      ownLines(summary, true, "summary")
+  if narrow:
+    summaryAndCaveat()
+    if source.len > 0: ownLines(source, false, "source")
+  else:
+    if source.len > 0:
+      if fits(x, widthOf(source)):
+        parts.add Part(text: source, fact: "source", line: line, col: x + 2,
+                       cells: widthOf(source))
+        x += 2 + widthOf(source)
+      else:
+        ownLines(source, false, "source")
+    summaryAndCaveat()
+  var caveatDrawn = false
+  for p in parts:
+    if p.fact == "caveat": caveatDrawn = true
+  if caveat.len > 0 and not caveatDrawn: ownLines(caveat, false, "caveat")
+  let rows = line + 1
   c.area("head", row, col, width, rows, c.tone.head)
   let n = c.node(parent, row, col, width, rows, [("head", "section header")])
-  let tw = c.put(row, col + 1, upper, c.p.textBody, bold = true)
-  let sw = min(widthOf(summary), max(0, width - tw - 4))
-  if summary.len > 0:
-    discard c.text(n, row, col + width - 1 - sw, sw, summary, c.p.textCaption,
-                   fact = "summary")
-  else:
+  discard c.put(row, col + 1, upper, c.p.textBody, bold = true)
+  for p in parts:
+    if p.fact.len == 0:
+      discard c.put(row + p.line, col + p.col, p.text, c.p.textCaption)
+    else:
+      discard c.para(n, row + p.line, col + p.col, p.cells, p.text, c.p.textCaption,
+                     fact = p.fact, alignRight = p.right)
+  if summary.len == 0:
     discard c.node(n, row, col + width - 1, 0, 1, [("summary", "")])
-  var r = row
-  if narrow:
-    if source.len > 0:
-      inc r
-      discard c.text(n, r, col + 1, width - 2, source, c.p.textCaption, fact = "source")
-  else:
-    let room = width - tw - 2 - sw - 3
-    if source.len > 0 and room > 0:
-      discard c.text(n, row, col + 1 + tw + 2, room, source, c.p.textCaption, fact = "source")
-  if caveat.len > 0:
-    inc r
-    discard c.text(n, r, col + 1, width - 2, caveat, c.p.textCaption, fact = "caveat")
   rows
+
+proc legendCells*(counts: array[MilestoneStatusClass, int]): int =
+  ## The width of the numbers-only legend beside a bar: each status's mark,
+  ## a space and its count, two cells apart.
+  for s in MilestoneBarOrder:
+    if counts[s] > 0: result += 2 + widthOf($counts[s]) + 2
+  result = max(0, result - 2)
 
 proc drawMilestoneBar*(c: var AhCanvas; parent: AhNode; row, col, width: int;
                        counts: array[MilestoneStatusClass, int];
-                       labelled: bool): int =
+                       labelled: bool; legendSlot = 0): int =
   ## Milestones by status: a bar of segments, each as wide as its count's
   ## share (at least one cell), and its legend — under it with the words
-  ## (`labelled`, wrapping), or beside it with the numbers. Returns the rows.
+  ## (`labelled`, wrapping), or beside it with the numbers. Beside it, the
+  ## legend has a slot of `legendSlot` cells (at least the 9rem the
+  ## stylesheet gives it) with the counts at its end, so every bar of a list
+  ## given the same slot is one width and ends in one column, on one scale.
+  ## Returns the rows.
   let n = c.node(parent, row, col, width, 1, [("milestone-bar", statusCountsText(counts))])
   var total = 0
   var present: seq[MilestoneStatusClass]
@@ -93,8 +153,9 @@ proc drawMilestoneBar*(c: var AhCanvas; parent: AhNode; row, col, width: int;
   var legendW = 0
   for (_, words) in items: legendW += 2 + widthOf(words) + 2
   legendW = max(0, legendW - 2)
+  let slot = max(LegendMinCells, max(legendSlot, legendW))
   let barW = if labelled: max(1, width - 2)
-             else: max(present.len, min(BarMaxCells, width - 2 - max(legendW, LegendMinCells) - 2))
+             else: max(present.len, min(BarMaxCells, width - 2 - slot - 2))
   # Segments, by largest remainder, none narrower than a cell.
   var cells = newSeq[int](present.len)
   if total > 0:
@@ -131,7 +192,7 @@ proc drawMilestoneBar*(c: var AhCanvas; parent: AhNode; row, col, width: int;
                       [("ms-legend", if labelled: "under" else: "beside")])
   if not labelled:
     # The counts at the legend's end (`min-width: 9rem`).
-    lc = max(lc, lc + max(0, LegendMinCells - legendW))
+    lc = max(lc, lc + max(0, slot - legendW))
   for (s, words) in items:
     let need = 2 + widthOf(words)
     if labelled and lc + need > col + width - 1 and lc > col + 1:
@@ -169,24 +230,12 @@ proc drawSessionLine*(c: var AhCanvas; parent: AhNode; item: SessionItem;
   discard c.text(n, row, col + width - sw, sw, item.statusLabel,
                  c.p.sessionStatusColour(item.attention), fact = "status")
 
-proc wrapWords*(text: string; width: int): seq[string] =
-  ## `text` broken into lines of at most `width` cells, at spaces (a word
-  ## longer than a line is cut there).
-  var line = ""
-  for word in text.splitWhitespace:
-    if line.len == 0: line = word
-    elif widthOf(line) + 1 + widthOf(word) <= width: line.add " " & word
-    else:
-      result.add line
-      line = word
-  if line.len > 0: result.add line
-
 # ---------------------------------------------------------------------------
 # Initiatives
 # ---------------------------------------------------------------------------
 
 proc drawInitiativeRow(c: var AhCanvas; parent: AhNode; vm: InitiativesVM;
-                       row: InitiativeRow; index, top, col, width: int): int =
+                       row: InitiativeRow; index, top, col, width, legendSlot: int): int =
   ## One initiative and, unless folded, its sessions. Returns its rows.
   let id = row.id
   let wide = width * CellPx >= WidePanelPx
@@ -230,7 +279,8 @@ proc drawInitiativeRow(c: var AhCanvas; parent: AhNode; vm: InitiativesVM;
   discard c.text(n, top, col + 1 + infoW - pw, pw, row.progressText, c.p.textLabel,
                  fact = "progress")
   var r = top + 1
-  r += c.drawMilestoneBar(n, r, col + 4, infoW - 3, row.statusCounts, labelled = false)
+  r += c.drawMilestoneBar(n, r, col + 4, infoW - 3, row.statusCounts, labelled = false,
+                          legendSlot = legendSlot)
   if row.currentMilestone.len > 0:
     c.drawCurrent(n, r, col + 5, infoW - 4, row.currentMilestone)
     inc r
@@ -280,9 +330,12 @@ proc drawInitiativesPanel*(c: var AhCanvas; vm: InitiativesVM; row, col, width, 
       c.notice(host, top, col, width, bodyH, InitiativesEmptyText, "empty")
       return
     let list = c.node(host, top, col, width, bodyH, [("rows", "list")])
+    # One legend slot for the list: every bar one width, on one scale.
+    var legendSlot = LegendMinCells
+    for ir in rows: legendSlot = max(legendSlot, legendCells(ir.statusCounts))
     var r = top
     for i, ir in rows:
-      r += c.drawInitiativeRow(list, vm, ir, i, r, col, width)
+      r += c.drawInitiativeRow(list, vm, ir, i, r, col, width, legendSlot)
 
 # ---------------------------------------------------------------------------
 # Initiative Progress
@@ -291,8 +344,22 @@ proc drawInitiativesPanel*(c: var AhCanvas; vm: InitiativesVM; row, col, width, 
 proc drawMilestone(c: var AhCanvas; parent: AhNode; m: MilestoneLine; index, row, col,
                    width: int; wide, narrow: bool): int =
   ## One milestone: its mark, id and title, then its deliverables and tests
-  ## (beside them when wide); `failing` in the error colour.
-  let height = if wide: 1 else: 2
+  ## (beside them when wide); `failing` in the error colour. Wide, the meta
+  ## is a right-hand column that grows to hold its words (the title gives
+  ## way); narrow, it is a line under the title that wraps rather than cut.
+  let parts = milestoneMetaParts(m)
+  let metaText = parts.before & parts.failing & parts.after
+  let tagW = if m.current: widthOf("CURRENT") + 1 else: 0
+  let idW = if narrow: 7 else: MilestoneIdCells
+  # Wide: the meta column, CURRENT hanging to its left, at least the
+  # stylesheet's 22rem and as wide as its words, leaving the title 12 cells.
+  let metaW = if wide: min(max(MilestoneMetaCells, tagW + widthOf(metaText)),
+                           max(MilestoneMetaCells, width - 3 - idW - 1 - 2 - 12))
+              else: width - 4
+  # Narrow: the meta's lines under the title (CURRENT on the first).
+  let metaLines = if wide: @[WrappedLine(text: metaText, start: 0)]
+                  else: wrapRuns(metaText, max(1, metaW - tagW))
+  let height = if wide: 1 else: 1 + metaLines.len
   let ground = if m.current:
                  # Dark's tertiary is the stripe's ground here; the active
                  # tab's grey is the next role up.
@@ -309,31 +376,35 @@ proc drawMilestone(c: var AhCanvas; parent: AhNode; m: MilestoneLine; index, row
                  [("milestone", m.id), ("status-class", $m.statusClass),
                   ("current", $m.current)])
   discard c.mark(n, row, col + 1, c.p.markOf(m.statusClass))
-  let idW = if narrow: 7 else: MilestoneIdCells
   discard c.text(n, row, col + 3, idW, m.id, c.p.textLabel)
-  let parts = milestoneMetaParts(m)
-  let metaText = parts.before & parts.failing & parts.after
-  let metaW = if wide: MilestoneMetaCells else: width - 4
   let titleW = if wide: width - 3 - idW - 1 - metaW - 2 else: width - 3 - idW - 2
   discard c.text(n, row, col + 3 + idW + 1, max(1, titleW), m.title, c.p.textBody,
                  fact = "title")
-  var mr = if wide: row else: row + 1
+  let mr = if wide: row else: row + 1
   var mc = if wide: col + width - 1 - metaW else: col + 3
+  if wide:
+    mc = max(mc, col + width - 1 - widthOf(metaText) - tagW)
   if m.current:
     mc += c.put(mr, mc, "CURRENT", c.p.textLabel, bold = true) + 1
-  let room = (if wide: col + width - 1 else: col + width - 1) - mc
-  if wide:
-    mc = max(mc, col + width - 1 - widthOf(metaText))
-  let shown = elide(metaText, room)
-  discard c.node(n, mr, mc, widthOf(shown), 1, [("meta", metaText)])
-  # The failing count in the error colour, inside the same run.
-  let failAt = if parts.failing.len > 0: widthOf(parts.before) else: -1
-  var k = 0
-  for ch in shown.runes:
-    let colour = if failAt >= 0 and k >= failAt and k < failAt + widthOf(parts.failing):
-                   c.p.textError else: c.p.textCaption
-    discard c.put(mr, mc + k, $ch, colour)
-    k += 1
+  let room = col + width - 1 - mc
+  # The failing count in the error colour, inside the same run, on
+  # whichever line it falls.
+  let failFrom = if parts.failing.len > 0: widthOf(parts.before) else: -1
+  let failTo = failFrom + widthOf(parts.failing)
+  var drawn: seq[string]
+  for i, ml in metaLines:
+    let shown = if wide: elide(ml.text, room) else: ml.text
+    drawn.add shown
+    var k = 0
+    for ch in shown.runes:
+      let at = ml.start + k
+      let colour = if failFrom >= 0 and at >= failFrom and at < failTo: c.p.textError
+                   else: c.p.textCaption
+      discard c.put(mr + i, mc + k, $ch, colour)
+      k += 1
+  var metaWidth = 0
+  for d in drawn: metaWidth = max(metaWidth, widthOf(d))
+  discard c.node(n, mr, mc, metaWidth, metaLines.len, [("meta", metaText)])
   height
 
 proc drawProgressPanel*(c: var AhCanvas; vm: InitiativeProgressVM; row, col, width,
@@ -366,7 +437,7 @@ proc drawProgressPanel*(c: var AhCanvas; vm: InitiativeProgressVM; row, col, wid
     r += c.drawMilestoneBar(list, r, col, width, vm.statusCounts, labelled = true)
     let summaryText = if initiative.executiveSummary.len > 0: initiative.executiveSummary
                       else: "The plan states no executive summary."
-    let lines = wrapWords(summaryText, min(width - 2, 768 div CellPx))
+    let lines = wrapCells(summaryText, min(width - 2, 768 div CellPx))
     let sn = c.node(list, r, col + 1, width - 2, lines.len,
                     [("executive-summary", summaryText)])
     for line in lines:
