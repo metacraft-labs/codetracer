@@ -234,25 +234,42 @@ proc recordingFolderOf*(recordingId: string): string =
   except CatchableError:
     result = ""
 
+proc readableNow(fd: FileHandle): bool =
+  ## Whether `fd` has bytes (or its end) to read NOW. Not `osproc.hasData`:
+  ## on POSIX that is a `select` with no timeout, which BLOCKS until the
+  ## child writes, so a poll of a quiet `ct record` froze the window for as
+  ## long as the recorded program said nothing.
+  var p = TPollfd(fd: cint(fd), events: POLLIN)
+  posix.poll(addr p, 1, 0) == 1 and (p.revents and (POLLIN or POLLHUP)) != 0
+
+proc drainRecordOutput(job: NativeRecordJob): string =
+  ## What the child has written so far, WITHOUT BLOCKING: the fd is asked with
+  ## a zero timeout and read as raw bytes, because a `readLine` would wait for
+  ## the end of a line the child may not finish for a while.
+  var buf: array[4096, char]
+  let fd = job.process.outputHandle
+  while readableNow(fd):
+    let n = posix.read(fd, addr buf[0], buf.len)
+    if n <= 0:
+      break
+    for i in 0 ..< n:
+      result.add buf[i]
+
 proc pollRecordJob*(job: NativeRecordJob): bool =
   ## Whether the job FINISHED on this poll (once): `ok` and `message` say
-  ## how. The recorder's output is drained so a chatty program cannot fill
-  ## the pipe and stall it.
+  ## how. It returns at once, quiet child or not. The recorder's output is
+  ## drained so a chatty program cannot fill the pipe and stall it.
   if job.isNil or job.done:
     return false
   if job.process.isNil:
     job.done = true
     return true
-  var chunk = ""
-  try:
-    let outp = job.process.outputStream
-    while job.process.hasData:
-      var line = ""
-      if not outp.readLine(line):
-        break
-      chunk.add line & "\n"
-  except CatchableError:
-    discard
+  var chunk = job.drainRecordOutput()
+  let code = job.process.peekExitCode()
+  if code != -1:
+    # The child is gone, so all it ever wrote is in the pipe; the log must
+    # hold the tail (`record-test`'s recording id is read from it).
+    chunk.add job.drainRecordOutput()
   if chunk.len > 0:
     try:
       let f = open(job.logPath, fmAppend)
@@ -260,7 +277,6 @@ proc pollRecordJob*(job: NativeRecordJob): bool =
       f.close()
     except CatchableError:
       discard
-  let code = job.process.peekExitCode()
   if code == -1:
     return false
   job.done = true
