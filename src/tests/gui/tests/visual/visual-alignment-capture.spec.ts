@@ -1000,6 +1000,39 @@ for (const scenario of definition.scenarios) {
       // removing that from the frame is the repair, not a side effect.
       await waitForEditorFrameSettled(ctPage);
       const answers = await extractLayoutAnswers(ctPage, scenario.id);
+      // NO GRADIENT BACKGROUND UNDER A ROUNDED CORNER. A gradient is drawn by a
+      // dithering shader, and the software rasteriser's dither over a rounded
+      // clip flipped between two states a few seconds apart (one grey level on
+      // the corner pixels), after the settle loop and the tier-1 canary had
+      // already agreed. That was `continued-event-log`'s intermittent drift:
+      // the disabled `#forward-loop` dimmed its glyph with a flat
+      // `linear-gradient`. With the gradient this assertion fails on every run;
+      // with the dimming done by an inset shadow it passes and the canary held
+      // for 30 repeats. Asserting the cause by name keeps a reintroduction
+      // from showing up as an occasional canary failure nobody can read.
+      const roundedGradients = await ctPage.evaluate(() => {
+        const out: string[] = [];
+        for (const el of Array.from(document.querySelectorAll("*"))) {
+          const r = el.getBoundingClientRect();
+          if (r.width < 1 || r.height < 1) continue;
+          const cs = getComputedStyle(el);
+          if (cs.visibility === "hidden" || cs.display === "none") continue;
+          if (!cs.backgroundImage.includes("gradient(")) continue;
+          if (parseFloat(cs.borderTopLeftRadius) > 0 ||
+              parseFloat(cs.borderTopRightRadius) > 0 ||
+              parseFloat(cs.borderBottomLeftRadius) > 0 ||
+              parseFloat(cs.borderBottomRightRadius) > 0) {
+            out.push(`${el.tagName.toLowerCase()}${el.id ? "#" + el.id : ""}.` +
+              String(el.getAttribute("class") || "").split(/\s+/).join("."));
+          }
+        }
+        return out;
+      });
+      expect(
+        roundedGradients,
+        `scenario '${scenario.id}': a gradient background on a rounded element ` +
+          "makes the frame non-deterministic in the software rasteriser",
+      ).toEqual([]);
       // THE STYLE DUMP: the computed style and box of every visible element of
       // the frame the PNG is of, written beside it as
       // `captures/electron/<scenario>.styles.json`. It is the reference the
