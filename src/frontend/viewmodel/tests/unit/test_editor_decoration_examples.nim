@@ -81,7 +81,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 352
+const ExpectedAssertions = 377
 
 const Policy = ColumnPolicy(tabSize: 4, ambiguous: awNarrow)
 const NoWrap = WrapSettings(wrapColumn: 0, policy: Policy)
@@ -672,6 +672,48 @@ suite "PLAT-28 — where the projection and today's producer deliberately differ
       doc: doc, decorations: ds, firstLine: 40, viewportTop: 42,
       viewportHeight: 1, trailing: tlpDropFinalEmpty))
     counted clipped.len == 1 and clipped[0].line == 42
+
+  test "EVERY CLASS THE PROJECTION WRITES, IT READS BACK — over each enum, not a list":
+    # `editorRowsOf` dispatches a line class through `isMarkClass`,
+    # `isPointerClass` and `isFlowClass` and RAISES on a class none of them
+    # claims. Each predicate used to be a hand-kept list beside the codec, and
+    # the mark list was not updated when `emBreakpointTracepoint` arrived: a
+    # line carrying both a breakpoint and a tracepoint raised instead of
+    # drawing its mark (codetracer-pm issue
+    # 2026-11-08-editor-rows-refuse-the-breakpoint-and-tracepoint-mark-class).
+    # Iterating the ENUMS is what makes a future value fail here rather than
+    # in a renderer's suite.
+    let doc = "x\n"
+    proc rowWith(cls: string): EditorRow =
+      let rows = editorRowsOf(RowProjection(
+        doc: doc, decorations: decorationSet(@[decoration(0, 0, 0,
+                                                linePayload(cls))]),
+        viewportTop: 1, viewportHeight: 0, trailing: tlpDropFinalEmpty))
+      doAssert rows.len == 1
+      rows[0]
+    for m in EditorMark:
+      checkpoint($m)
+      counted isMarkClass(classOfMark(m))
+      counted rowWith(classOfMark(m)).mark == m
+    for p in EditorPointer:
+      checkpoint($p)
+      counted isPointerClass(classOfPointer(p))
+      counted rowWith(classOfPointer(p)).pointer == p
+    for f in EditorFlowState:
+      checkpoint($f)
+      counted isFlowClass(classOfFlow(f))
+      counted rowWith(classOfFlow(f)).flow == f
+
+  test "A LINE WITH A BREAKPOINT AND A TRACEPOINT PROJECTS AS BOTH, through today's producer":
+    # The issue's own conditions, at the producer every surface calls: one
+    # line, both kinds of point.
+    let path = "/plat28/both.py"
+    let rows = editorSurfaceForProject(path, "a\nb\n", "plat28", true, points = @[
+      EditorPoint(path: path, line: 2, kind: epkTracepoint, enabled: true),
+      EditorPoint(path: path, line: 2, kind: epkBreakpoint, enabled: true)]).rows
+    counted rows.len == 2
+    counted rows[0].mark == emNone
+    counted rows[1].mark == emBreakpointTracepoint
 
 suite "PLAT-28 — a line table moves with the text (§8.2)":
   ## `EditorState.folded`, `breakpoints`, `tracepoints` and `trackedLines` name

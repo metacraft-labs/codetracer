@@ -549,7 +549,12 @@ suite "PLAT-22: the GPUI editing surface":
         EditorPoint(path: path, line: 7, kind: epkTracepoint, enabled: true),
         EditorPoint(path: path, line: 9, kind: epkBreakpoint, enabled: true),
         EditorPoint(path: path, line: 11, kind: epkBreakpoint, enabled: false),
-        # BOTH on one line: the line stops, so it must show the breakpoint.
+        # BOTH on one line: the line stops AND records, so it shows the
+        # combined mark, which draws the breakpoint (`markFor` answers
+        # `emBreakpointTracepoint` for an armed breakpoint with a tracepoint,
+        # the desktop's `gutter-glyph-breakpoint-tracepoint`). The case reads
+        # it back from the RENDERED row, so a projection that refuses the
+        # combined class fails here.
         EditorPoint(path: path, line: 13, kind: epkTracepoint, enabled: true),
         EditorPoint(path: path, line: 13, kind: epkBreakpoint, enabled: true),
         # Another FILE's point must not appear on this one.
@@ -560,7 +565,7 @@ suite "PLAT-22: the GPUI editing surface":
       ck renderedMark(root, 7) == $emTracepoint
       ck renderedMark(root, 9) == $emBreakpoint
       ck renderedMark(root, 11) == $emBreakpointDisabled
-      ck renderedMark(root, 13) == $emBreakpoint
+      ck renderedMark(root, 13) == $emBreakpointTracepoint
       ck renderedMark(root, 8) == $emNone
       # The rendering agrees with the shared rule, asked independently.
       for line in 6 .. 14:

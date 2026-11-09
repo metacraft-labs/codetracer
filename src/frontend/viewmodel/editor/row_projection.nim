@@ -178,15 +178,27 @@ func flowOfClass*(cls: string): EditorFlowState =
     raise newException(RowProjectionError,
       "flowOfClass: '" & cls & "' is not a declared flow class.")
 
+# THE PREDICATES ARE DERIVED FROM THE ENUMS THROUGH THE ENCODERS, not kept as
+# lists beside them. A hand-kept list missed `emBreakpointTracepoint` when it
+# was added, and `editorRowsOf` then raised on every line carrying both kinds
+# of point. The `case` in each `classOf*` is exhaustive, so a new enum value
+# cannot compile without a class, and through these loops it is accepted here
+# too.
+
 func isMarkClass*(cls: string): bool =
-  cls in [MarkClassNone, MarkClassBreakpoint, MarkClassBreakpointDisabled,
-          MarkClassTracepoint]
+  for m in EditorMark:
+    if cls == classOfMark(m): return true
+  false
 
 func isPointerClass*(cls: string): bool =
-  cls in [PointerClassNone, PointerClassInspection, PointerClassExecution]
+  for p in EditorPointer:
+    if cls == classOfPointer(p): return true
+  false
 
 func isFlowClass*(cls: string): bool =
-  cls in [FlowClassUnknown, FlowClassTaken, FlowClassNotTaken]
+  for f in EditorFlowState:
+    if cls == classOfFlow(f): return true
+  false
 
 func inlineTextOf*(v: EditorValue): string =
   ## An `EditorValue` as the text an inline widget shows.
