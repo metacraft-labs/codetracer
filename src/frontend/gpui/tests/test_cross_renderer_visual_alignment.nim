@@ -124,7 +124,7 @@ import ../../test_support/spec_documents
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 480
+const ExpectedAssertions = 491
 
 var countedAssertions = 0
 
@@ -305,7 +305,7 @@ proc breakpointOffset(ops: seq[ScenarioOp]): int =
   for op in ops:
     if op.kind == "setBreakpoint": result = op.line
 
-proc runGpuiScenario(sc: Scenario): GpuiRun =
+proc runGpuiScenario(sc: Scenario; alsoTracepoint = false): GpuiRun =
   ## **`gpui/main.nim`'s `runOpen`, minus `createWindow`.** Every call below is
   ## one the shipped binary makes, in the order it makes them; nothing here is
   ## a test affordance.
@@ -415,6 +415,12 @@ proc runGpuiScenario(sc: Scenario): GpuiRun =
       let at = probe.rows[min(offset, probe.rows.high)].line
       points.add EditorPoint(path: session.getCurrentFile(), line: at,
                              kind: epkBreakpoint, enabled: true)
+      if alsoTracepoint:
+        # The same line, as the Electron capture of the both-points case sets
+        # it: one armed breakpoint and one tracepoint, which the glyph column
+        # draws as the one combined mark.
+        points.add EditorPoint(path: session.getCurrentFile(), line: at,
+                               kind: epkTracepoint, enabled: true)
 
   let surface = editorSurfaceFor(
     source = sourceService.vm, editor = session.session.editorVM,
@@ -1453,6 +1459,54 @@ suite "PLAT-35: the comparison can fail, and every gap is filed":
       # The question it is filed against must be one of the published eight.
       ck ($g.question) in publishedKeys
     ck ids.len == gaps.len
+
+suite "PLAT-35: BOTH POINTS ON ONE LINE name the same marks on both front-ends":
+  ## The case no scenario in `scenarios.json` covers. A line carrying an armed
+  ## breakpoint AND a tracepoint draws one combined mark, which the Electron
+  ## extractor answers `breakpoint+tracepoint`. The GPUI producer named no mark
+  ## for it (the line was absent from its answer) until 2026-11-09. The Electron
+  ## arm is the RECORDED capture `breakpoint-tracepoint-editor.electron.json`
+  ## (`visual-alignment-capture.spec.ts`, "an armed breakpoint and a tracepoint
+  ## on one line"); the GPUI arm is live, through the same derivation as every
+  ## scenario above, on the `breakpoint-editor` definition plus one tracepoint.
+  ##
+  ## Only the entries carrying a breakpoint are compared, not the whole answer:
+  ## the rest of the string is the stopped line, and which of the drawn rows is
+  ## in view when the editor is read is a separate, filed divergence.
+  test "the combined line answers breakpoint+tracepoint on both":
+    let base = scenarios.filterIt(it.id == "breakpoint-editor")
+    ck base.len == 1
+    var both = base[0]
+    both.id = "breakpoint-tracepoint-editor"
+    let electron = readElectron(both)
+    let gpui = runGpuiScenario(both, alsoTracepoint = true)
+    proc pointEntries(answers: LayoutAnswerSet): seq[string] =
+      for entry in answers.answerFor(lqGutterMarks)[1].value.split(';'):
+        if "breakpoint" in entry or "tracepoint" in entry: result.add entry
+    let e = pointEntries(electron.answers)
+    let g = pointEntries(gpui.answers)
+    checkpoint("electron: " & $e & ", gpui: " & $g)
+    proc lineOfEntry(entry: string): string = entry.split('=')[0]
+    proc nameOfEntry(entry: string): string = entry.split('=')[1]
+    ck e.len == 1
+    ck g.len == 1
+    ck nameOfEntry(e[0]) == "breakpoint+tracepoint"
+    ck nameOfEntry(g[0]) == nameOfEntry(e[0])
+    # WHICH LINE the breakpoint lands on is the `breakpoint-editor` scenario's
+    # own, already-filed difference between the arms (the gutter-marks gap), and
+    # not this case's claim. This case's claim is that the second point goes on
+    # the SAME line as the breakpoint on each arm, so the line is compared with
+    # that arm's plain-breakpoint line and not across the arms.
+    let plainGpui = pointEntries(gpuiRuns["breakpoint-editor"].answers)
+    let plainElectron = pointEntries(electronRuns["breakpoint-editor"].answers)
+    ck plainGpui.len == 1
+    ck plainElectron.len == 1
+    # The control: without the tracepoint the same line answers the plain
+    # breakpoint, so the case above is about the second point.
+    ck nameOfEntry(plainGpui[0]) == "breakpoint"
+    ck nameOfEntry(plainElectron[0]) == "breakpoint"
+    ck lineOfEntry(g[0]) == lineOfEntry(plainGpui[0])
+    ck lineOfEntry(e[0]) == lineOfEntry(plainElectron[0])
 
 suite "PLAT-35: the assertion count":
   test "every case ran":
