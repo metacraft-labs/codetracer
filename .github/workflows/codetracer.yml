@@ -3858,6 +3858,25 @@ jobs:
           (cd ../isonim-gpui && nix develop --command bash -c 'cd rust && cargo build')
           nix develop .#devShells.x86_64-linux.default --command just build-gpui
 
+      - name: Build the launcher the launcher suites drive
+        # `src/tests/launcher/test_launcher_routes_tui.nim` (Tier 1) and
+        # `real_terminal/test_real_launcher_exec.nim` (Tier 2) exec
+        # `../codetracer-launcher/out/launcher`. `provision-repro-lock-siblings`
+        # clones that sibling at the lock's revision, but nothing here built
+        # it, so the suites passed only on a persistent runner that had kept an
+        # older build: on an ephemeral one they failed with "missing …/out/
+        # launcher" (codetracer-pm issue
+        # 2026-11-09-tui-job-runs-launcher-suites-without-building-the-launcher).
+        # `build.sh` links a static musl binary through zig's `cc`; without zig
+        # on PATH it falls back to `cc` and the link fails on -ldl/-lc, which is
+        # why `launcher-recorder-e2e.yml` provisions zig the same way.
+        run: |
+          set -euo pipefail
+          zig_out="$(nix build --no-link --print-out-paths nixpkgs#zig)"
+          nix develop .#devShells.x86_64-linux.default --command bash -c \
+            "export PATH=${zig_out}/bin:\$PATH; cd ../codetracer-launcher && just build"
+          test -x ../codetracer-launcher/out/launcher
+
       - name: TUI Tier 1 — the suites that need no terminal
         run: nix develop .#devShells.x86_64-linux.default --command just test-tui
 
