@@ -3788,7 +3788,9 @@ jobs:
         # `replay-server` (see `gpui-window-captures`). The three extra ones are
         # the Tier-2 lane's: `ci/lib/test-lane-files.sh` compiles every
         # `tui-real-terminal` file with `--path:../TermAssert/src`,
-        # `../TermAssertClient/src` and `../nim-libvterm/src`. All three are in
+        # `../TermAssertClient/src` and `../nim-libvterm/src`. The fourth,
+        # `codetracer-launcher`, is the sibling the launcher suites exec (see
+        # "Build the launcher the launcher suites drive" below). All four are in
         # this repo's committed `repro.lock`, so they are named BARE and clone
         # at the revision that lock pins -- not at a branch tip.
         uses: ./.github/actions/setup-db-backend-siblings
@@ -3799,6 +3801,7 @@ jobs:
             TermAssert
             TermAssertClient
             nim-libvterm
+            codetracer-launcher
 
       - name: Clone runquota sibling
         # `just build-once` compiles `ct`, which imports `runquota_process`
@@ -3857,6 +3860,27 @@ jobs:
         run: |
           (cd ../isonim-gpui && nix develop --command bash -c 'cd rust && cargo build')
           nix develop .#devShells.x86_64-linux.default --command just build-gpui
+
+      - name: Build the launcher the launcher suites drive
+        # `src/tests/launcher/test_launcher_routes_tui.nim` (Tier 1) and
+        # `real_terminal/test_real_launcher_exec.nim` (Tier 2) exec
+        # `../codetracer-launcher/out/launcher`. Nothing in this job cloned or
+        # built that sibling (`provision-repro-lock-siblings` clones only the
+        # build inputs, and the launcher is not one), so the suites passed only
+        # on a persistent runner that had kept an older checkout and build: on
+        # an ephemeral one they failed with "missing …/out/launcher". The
+        # checkout now comes from the db-backend step's `extra-siblings`, at
+        # the revision `repro.lock` pins (codetracer-pm issue
+        # 2026-11-09-tui-job-runs-launcher-suites-without-building-the-launcher).
+        # `build.sh` links a static musl binary through zig's `cc`; without zig
+        # on PATH it falls back to `cc` and the link fails on -ldl/-lc, which is
+        # why `launcher-recorder-e2e.yml` provisions zig the same way.
+        run: |
+          set -euo pipefail
+          zig_out="$(nix build --no-link --print-out-paths nixpkgs#zig)"
+          nix develop .#devShells.x86_64-linux.default --command bash -c \
+            "export PATH=${zig_out}/bin:\$PATH; cd ../codetracer-launcher && just build"
+          test -x ../codetracer-launcher/out/launcher
 
       - name: TUI Tier 1 — the suites that need no terminal
         run: nix develop .#devShells.x86_64-linux.default --command just test-tui
