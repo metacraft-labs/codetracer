@@ -373,14 +373,23 @@ somewhere in this repository — see
 just tui-prereqs                # submodules + build/grammars/*.a  (idempotent)
 just build-tui                  # build/bin/codetracer-tui
 just test-tui                   # Tier 1
+just test-tui-native            # Tier 1 over an rr recording (needs rr, ct-native-replay)
 just test-tui-real-terminal     # Tier 2 (depends on build-tui)
 ```
 
-Both lanes are discovered, not enumerated: `ci/lib/test-lane-files.sh` globs
+The lanes are discovered, not enumerated: `ci/lib/test-lane-files.sh` globs
 `src/frontend/tui/tests/test_*.nim`, `src/frontend/tui/app/tests/test_*.nim`
 **and** `src/tests/launcher/test_*.nim` one level deep for `tui`, and finds
 `src/frontend/tui/tests/real_terminal/test_*.nim` recursively for
 `tui-real-terminal`. Adding a suite needs no edit there.
+
+`tui-native` is the part of those Tier-1 globs that imports
+`fixtures/native_recording`: suites that record a native program from the
+`codetracer-native-test-programs` sibling with rr and replay it through
+`ct-native-replay` (`just ensure-ct-native-replay`). The split is by that
+import, so such a suite leaves `tui` without an edit. It is a lane of its own
+because rr works only on some hosts: CI runs it in the job that sets rr up and
+builds `ct-native-replay`, not beside the rest of Tier 1.
 
 `src/tests/launcher/` is the third `tui` glob and the odd one out. CTUI-12 put
 it there because the milestone names the path, and the placement is right for

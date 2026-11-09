@@ -23,8 +23,9 @@ and `ci/lib/harness_guard.py`'s argument rule before anything is touched.
 The builds run `$PLAT65_BUILD_TUI` / `$PLAT65_BUILD_GPUI` when set, else
 `just build-tui` / `just build-gpui`; the suites compile with `$PLAT65_NIM`
 when set, else `nim`. The real-stack suites need the trace-enabled
-nimsuggest and compiler (`CODETRACER_NIMSUGGEST`, `CODETRACER_NIM`) and
-`REPLAY_SERVER_BIN` (`tui/tests/fixtures/plat65_nim_project`).
+nimsuggest and compiler (`CODETRACER_NIMSUGGEST`, `CODETRACER_NIM`) and a
+built `replay-server`, found as the product finds it (`$REPLAY_SERVER_BIN`,
+else the build's output tree; `tui/tests/fixtures/plat65_nim_project`).
 
 Usage:
     run-plat65-nim-tracing-mutations.py [--only V1,T1] [--derive]

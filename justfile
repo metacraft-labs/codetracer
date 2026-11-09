@@ -5435,12 +5435,43 @@ build-tui: tui-prereqs
 # are reported as counted `MISSING-PREREQ SKIP:` lines and an all-skipped run
 # FAILS — see that file's header. The first run on a workspace therefore costs
 # a few recordings; every run after it hits the content-addressed cache.
+#
+# The Tier-1 suites that open an rr recording of a native program (every one
+# importing `fixtures/native_recording`, PLAT-60's Low Level Code suite among
+# them) are NOT here: they are the `tui-native` lane, `test-tui-native` below,
+# because they need rr and `ct-native-replay`, which the hosts this lane runs
+# on cannot provide.
 test-tui: tui-prereqs
   #!/usr/bin/env bash
   set -euo pipefail
   mkdir -p test-logs
   exec > >(tee test-logs/test-tui.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh tui
+
+# Tier 1, the rr half: the TUI suites that open an rr recording of a native
+# program (`ci/lib/test-lane-files.sh`'s `tui-native` lane — every Tier-1 suite
+# importing `fixtures/native_recording`).
+#
+# PREREQUISITES, none of which this recipe builds: a built `replay-server`
+# (`just build-once`), a working `rr` on the PATH, `ct-native-replay` at
+# `../codetracer-native-backend/target/debug/` or `$CT_NATIVE_REPLAY_PATH`
+# (`just ensure-ct-native-replay`, or `just test-gui`, which builds it through
+# `scripts/build-siblings.sh`), and the `../codetracer-native-test-programs`
+# sibling whose `c/sudoku_solver` the fixture records. A missing one is a
+# counted `MISSING-PREREQ SKIP:`, and an all-skipped file fails the lane.
+#
+# rr works only on some hosts, so CI runs this in `test-ui-tests-rr` — the job
+# the workflow routes rr work to — after its `ci/setup-rr-backend.sh` and
+# `just test-gui` steps, and not in `tui-tests`, where these suites skipped
+# every case (codetracer-pm
+# `issues/2026-11-09-tui-job-runs-plat60-and-plat65-without-their-prerequisites.md`).
+# `ci/test/native-recording-suites-run-where-rr-is-test.py` holds that order.
+test-tui-native: tui-prereqs
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-tui-native.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh tui-native
 
 # Tier 2: the TUI suites that spawn the real binary in a real pty.
 #

@@ -3917,6 +3917,13 @@ jobs:
         run: (cd ../codetracer-launcher && nix develop --command just build)
 
       - name: TUI Tier 1 — the suites that need no terminal
+        # NOT the Tier-1 suites that open an rr recording of a native program
+        # (those importing `fixtures/native_recording`, PLAT-60's among them):
+        # they are the `tui-native` lane, which `test-ui-tests-rr` runs, because
+        # rr does not work on the hosts this job runs on and nothing here builds
+        # `ct-native-replay` -- in this lane they skipped every case and failed
+        # it (codetracer-pm issues/2026-11-09-tui-job-runs-plat60-and-plat65-
+        # without-their-prerequisites.md).
         run: nix develop .#devShells.x86_64-linux.default --command just test-tui
 
       - name: TUI Tier 2 — the real binary in a real pty
@@ -6899,6 +6906,34 @@ jobs:
         # borrows from. The recipe starts its own Xvfb.
         run: nix develop .#devShells.x86_64-linux.default --command just plat60-native-capture-electron
 
+      - name: TUI Tier 1 over a native rr recording (the `tui-native` lane)
+        if: ${{ !cancelled() }}
+        # The terminal's suites that open an rr recording of a native program
+        # -- every Tier-1 suite importing `fixtures/native_recording`, PLAT-60's
+        # Low Level Code suite among them -- over the same
+        # `codetracer-native-test-programs/c/sudoku_solver` fixture the step
+        # above records. They were in the `tui` lane, which `tui-tests` runs on
+        # the generic Linux hosts, where rr does not work and nothing builds
+        # `ct-native-replay`, so they skipped every case and failed that lane
+        # (codetracer-pm issues/2026-11-09-tui-job-runs-plat60-and-plat65-
+        # without-their-prerequisites.md). Here they get what they need, all
+        # from earlier steps: rr from `Setup rr-backend`, `ct-native-replay` at
+        # `../codetracer-native-backend/target/debug/` and `replay-server` from
+        # `just test-gui` (`build-siblings` and `build-once`), the fixture from
+        # `extra-siblings`, and isonim-tui et al. from the lock-provisioned
+        # siblings. The recipe builds the grammar archive the TUI links
+        # (`tui-prereqs`) from the recursive checkout's `libs/tree-sitter-*`.
+        # COST, against this job's 120m bound: one suite today, so the grammar
+        # archive, one Nim compile and one rr recording. Measured 2026-11-09 on
+        # nixos-ci-bare-002 at codetracer a17bbdf7a plus this change, with the
+        # archive already built and no recording (rr unusable there): 69 s. The
+        # cold archive and the recording come on top; the bound is left as it
+        # is until a run of this job says otherwise.
+        # `ci/test/native-recording-suites-run-where-rr-is-test.py` fails when a
+        # job runs such a suite without rr set up and `ct-native-replay` built
+        # in an earlier step.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-tui-native
+
       - name: Upload test artifacts
         if: failure()
         uses: actions/upload-artifact@v5
@@ -6907,6 +6942,7 @@ jobs:
           path: |
             src/tests/gui/test-results/
             src/tests/gui/playwright-report/
+            test-logs/test-tui-native.log
           retention-days: 14
           if-no-files-found: ignore
 
@@ -8531,6 +8567,21 @@ jobs:
         # python3, PyYAML and bash, like `job-timeouts.py` above.
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 ci/test/launcher-suites-build-launcher-test.py
+
+      - name: Jobs that run a native rr-recording suite set rr up and build ct-native-replay first
+        # `tui-tests` ran PLAT-60's terminal Low Level Code suite, which records
+        # a native program under rr and replays it through `ct-native-replay`,
+        # on hosts where rr does not work and with nothing building that binary,
+        # so it skipped every case and failed its lane (codetracer-pm
+        # issues/2026-11-09-tui-job-runs-plat60-and-plat65-without-their-
+        # prerequisites.md). Such suites are now the `tui-native` lane, run by
+        # `test-ui-tests-rr`. This suite reads every job's lanes from the
+        # justfile and `ci/lib/test-lane-files.sh` and fails a job that runs a
+        # suite importing `fixtures/native_recording` without
+        # `ci/setup-rr-backend.sh` and a `ct-native-replay` build before it.
+        # python3, PyYAML and bash, like the launcher suite above.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: python3 ci/test/native-recording-suites-run-where-rr-is-test.py
 
       - name: Check every build-once job provisions the workspace the build needs
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}

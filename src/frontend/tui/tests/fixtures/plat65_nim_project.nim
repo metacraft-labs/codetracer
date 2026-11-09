@@ -18,13 +18,27 @@
 ##
 ## PREREQUISITES, named rather than assumed: the trace-enabled nimsuggest
 ## (`CODETRACER_NIMSUGGEST`), the compiler (`CODETRACER_NIM`, else `nim` on
-## the PATH — the dev shell's is codetracer-nim's) and `REPLAY_SERVER_BIN`. A
-## suite that finds one missing says `MISSING-PREREQ SKIP:` with which, and
-## skips (`missingPrereq`).
+## the PATH — the dev shell's is codetracer-nim's) and a built
+## `replay-server`, found by `src/common/replay_server_path`'s
+## `locateReplayServer` — the search the spawned front-end itself makes
+## (`host/native_host.findReplayServer`): `$REPLAY_SERVER_BIN` when set, then
+## the output tree the build published, then `src/build-<config>[-repro]/bin`
+## where `just build-once` puts it, then cargo's trees. A suite that finds one
+## missing says `MISSING-PREREQ SKIP:` with which, and skips
+## (`missingPrereq`).
+##
+## The engine used to be accepted ONLY through `$REPLAY_SERVER_BIN`, which no
+## CI job sets: the `tui-tests` job builds it with `just build-once`, and the
+## terminal suite skipped every case over an engine its own child process
+## would have found (codetracer-pm
+## `issues/2026-11-09-tui-job-runs-plat60-and-plat65-without-their-prerequisites.md`).
+## A prerequisite check that asks a narrower question than the product does
+## skips a suite whose product would have run, so this one asks the product's.
 
 import std/[os, strutils, times]
 
 import ../../../viewmodel/host/native_nim_tracer
+import ../../../../common/replay_server_path   # the one search order
 
 const
   TracingNim* = """import std/macros
@@ -103,9 +117,13 @@ proc missingPrereq*(): string =
   if toolAt(NimVar, "nim").len == 0:
     parts.add "the trace-enabled compiler (codetracer-nim's `nim`; set " &
               NimVar & ")"
-  if getEnv("REPLAY_SERVER_BIN").len == 0 or
-     not fileExists(getEnv("REPLAY_SERVER_BIN")):
-    parts.add "replay-server (REPLAY_SERVER_BIN)"
+  # The engine as the spawned front-end will find it, not only through the
+  # override: `locateReplayServer` honours `$REPLAY_SERVER_BIN` first and then
+  # searches the trees the build writes, and "" means none holds a binary.
+  # The message names every path searched, so a skip says which tree is
+  # missing rather than leaving the reader to guess from a variable name.
+  if locateReplayServer().len == 0:
+    parts.add missingReplayServerMessage()
   parts.join("; ")
 
 proc recordEvaluation*(nims, folder: string) =

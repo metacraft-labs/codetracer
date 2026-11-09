@@ -202,6 +202,47 @@ _tlf_vm_unit_candidates() {
 		_tlf_reject '/test_collab_[a-z0-9_]*\.nim$'
 }
 
+# _TLF_NATIVE_RECORDING_IMPORT_RE — a suite that `import`s
+# `fixtures/native_recording` (by any relative spelling, alone or in a list).
+# That fixture records `codetracer-native-test-programs` under rr and replays it
+# through `ct-native-replay`, so the suites that import it run only where rr
+# works and that binary has been built. `tui` rejects them and `tui-native`
+# keeps them: one pattern for both directions, so the two lanes partition the
+# directory by construction. See the `tui-native` lane for why.
+_TLF_NATIVE_RECORDING_IMPORT_RE='^[[:space:]]*import[[:space:]]+.*fixtures/native_recording([[:space:],]|$)'
+
+# _tlf_tui_tier1_candidates — every Tier-1 TUI suite, before the rr split: the
+# directories the `tui` lane discovers over. `tui` and `tui-native` both start
+# here, so a directory added to one is added to the other.
+_tlf_tui_tier1_candidates() {
+	# Discovery, one level deep. `real_terminal/` is the Tier-2 lane
+	# (`tui-real-terminal`) and needs three sibling `--path`s the Tier-1
+	# lanes must not carry: a Tier-1
+	# suite that could compile against TermAssert would be one edit away
+	# from spawning a pty in the fast lane, and the split is what keeps
+	# "asserted in process" and "asserted on a terminal" answerable
+	# separately.
+	_tlf_glob src/frontend/tui/tests 'test_*.nim'
+	# CTUI-3's three layout suites live under `app/tests/` because the
+	# milestone names them there, and the placement is load-bearing rather
+	# than cosmetic: `tests/test_tui_facade_boundary.nim` walks EVERY
+	# `.nim` file under `app/`, so a suite that sat there and reached for
+	# `host/` or `std/posix` would redden that guard. That is exactly the
+	# rule CTUI-3 asks for — SIGWINCH belongs to `host/resize.nim`, and the
+	# Tier-1 reflow suite must therefore go through `h.resize` instead.
+	# Same Tier-1 flags as the directory above; still no TermAssert.
+	_tlf_glob src/frontend/tui/app/tests 'test_*.nim'
+	# CTUI-12's launcher-routing suite. It lives at
+	# `src/tests/launcher/` because the milestone names it there, and the
+	# placement is right for what it is: it drives the `ct` LAUNCHER — a
+	# binary from a sibling repository — over component bundles this
+	# repository's packaging scripts assemble, so it belongs to neither
+	# `app/` (which may not spawn a process) nor `tests/real_terminal/`
+	# (it needs no pty). Tier-1 flags are harmless to it: it links no
+	# grammar archive and imports no `isonim_tui`.
+	_tlf_glob src/tests/launcher 'test_*.nim'
+}
+
 # _tlf_reject PATTERN... — filter stdin, dropping any line matching any of the
 # given `grep -E` patterns. Every call site must say WHY each pattern is there;
 # an unexplained exclusion is the defect this whole file is about.
@@ -269,6 +310,7 @@ agent-api-contract
 bpf
 book-isonim
 tui
+tui-native
 tui-real-terminal
 gpui-shell
 agent-harbor-gpui-captures
@@ -317,6 +359,7 @@ test_lane_description() {
 	bpf) echo "BPF monitor unit / native / integration suites" ;;
 	book-isonim) echo "docs/book-isonim SSG suites" ;;
 	tui) echo "CodeTracer TUI Tier-1 suites (isonim-tui harness, no terminal)" ;;
+	tui-native) echo "CodeTracer TUI Tier-1 suites over an rr recording of a native program (need rr, ct-native-replay and codetracer-native-test-programs; run by the rr CI job)" ;;
 	tui-real-terminal) echo "CodeTracer TUI Tier-2 suites (TermAssert: real pty + libvterm)" ;;
 	gpui-shell) echo "PLAT-20 GPUI shell: the dock projection against gpui-kit's own fixtures, and the shell/leaf split through the real isonim-gpui shim" ;;
 	agent-harbor-gpui-captures) echo "CTF-P1b: the GPUI window captures of the Agent Harbor stories against the committed web layout record (just ctf-p1b-gpui-captures takes the captures on headless sway first)" ;;
@@ -588,7 +631,7 @@ test_lane_parity_partner() {
 # macOS, so there the answer is empty and the run is unchanged.
 test_lane_run_library_path() {
 	case "$1" in
-	gpui-shell | tui | vm-collab-integration)
+	gpui-shell | tui | tui-native | vm-collab-integration)
 		echo "${CODETRACER_GPUI_RUNTIME_LIB_PATH:-}"
 		;;
 	*) echo "" ;;
@@ -741,8 +784,10 @@ test_lane_extra_flags() {
 		echo "--path:src/frontend/viewmodel --path:../GuiAssert/src"
 		;;
 
-	tui | tui-real-terminal)
+	tui | tui-native | tui-real-terminal)
 		# THE TUI LANES. Three groups of flags, and each is load-bearing.
+		# `tui-native` is `tui`'s rr-recording half (see that lane) and
+		# compiles the same kind of Tier-1 suite, so it takes `tui`'s flags.
 		#
 		#   --path:src/frontend/viewmodel
 		#       `codetracer_embed` — the Embed SDK facade, and the only door
@@ -2190,31 +2235,35 @@ test_lane_files() {
 		;;
 
 	tui)
-		# Discovery, one level deep. `real_terminal/` is the Tier-2 lane below
-		# and needs three sibling `--path`s this lane must not carry: a Tier-1
-		# suite that could compile against TermAssert would be one edit away
-		# from spawning a pty in the fast lane, and the split is what keeps
-		# "asserted in process" and "asserted on a terminal" answerable
-		# separately.
-		_tlf_glob src/frontend/tui/tests 'test_*.nim'
-		# CTUI-3's three layout suites live under `app/tests/` because the
-		# milestone names them there, and the placement is load-bearing rather
-		# than cosmetic: `tests/test_tui_facade_boundary.nim` walks EVERY
-		# `.nim` file under `app/`, so a suite that sat there and reached for
-		# `host/` or `std/posix` would redden that guard. That is exactly the
-		# rule CTUI-3 asks for — SIGWINCH belongs to `host/resize.nim`, and the
-		# Tier-1 reflow suite must therefore go through `h.resize` instead.
-		# Same Tier-1 flags as the directory above; still no TermAssert.
-		_tlf_glob src/frontend/tui/app/tests 'test_*.nim'
-		# CTUI-12's launcher-routing suite. It lives at
-		# `src/tests/launcher/` because the milestone names it there, and the
-		# placement is right for what it is: it drives the `ct` LAUNCHER — a
-		# binary from a sibling repository — over component bundles this
-		# repository's packaging scripts assemble, so it belongs to neither
-		# `app/` (which may not spawn a process) nor `tests/real_terminal/`
-		# (it needs no pty). Tier-1 flags are harmless to it: it links no
-		# grammar archive and imports no `isonim_tui`.
-		_tlf_glob src/tests/launcher 'test_*.nim'
+		# The Tier-1 suites (`_tlf_tui_tier1_candidates` says where they are
+		# discovered and why there), MINUS the ones that record a native
+		# program under rr: those are the `tui-native` lane below. Selected by
+		# what the file IMPORTS, not by its name, so the next suite that
+		# reaches for `fixtures/native_recording` moves with no edit here.
+		_tlf_tui_tier1_candidates |
+			_tlf_reject_matching_file "${_TLF_NATIVE_RECORDING_IMPORT_RE}"
+		;;
+
+	tui-native)
+		# The Tier-1 suites that open an rr recording of a native program:
+		# every one that imports `fixtures/native_recording`, which records
+		# `codetracer-native-test-programs` with rr and replays it through
+		# `ct-native-replay` (`../codetracer-native-backend`). Same directories
+		# and same flags as `tui`; a lane of its own because of WHERE it can
+		# run. rr does not work on the generic Linux CI hosts the `tui-tests`
+		# job runs on (`rr record /bin/true` hangs there), and that job builds
+		# no `ct-native-replay`, so in the `tui` lane these suites skipped every
+		# case and the lane — which fails an all-skipped file — was red
+		# (codetracer-pm
+		# `issues/2026-11-09-tui-job-runs-plat60-and-plat65-without-their-prerequisites.md`).
+		# `just test-tui-native` runs this lane in `test-ui-tests-rr`, the job
+		# the workflow routes rr work to: it sets rr up
+		# (`ci/setup-rr-backend.sh`), clones the native test programs, and
+		# builds `ct-native-replay` through `just test-gui` first.
+		# `ci/test/native-recording-suites-run-where-rr-is-test.py` holds every
+		# job that runs such a suite to those prerequisites.
+		_tlf_tui_tier1_candidates |
+			_tlf_keep_matching_file "${_TLF_NATIVE_RECORDING_IMPORT_RE}"
 		;;
 
 	gpui-shell)
