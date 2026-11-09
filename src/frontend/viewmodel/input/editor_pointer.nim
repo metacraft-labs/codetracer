@@ -110,7 +110,7 @@ type
 
 const
   AnyCount = high(int)
-  EditorPointerRows*: array[29, PointerRow] = [
+  EditorPointerRows*: array[31, PointerRow] = [
     # MC.2: the text, unmodified.
     PointerRow(element: peText, mods: pmNone, button: pbLeft, minCount: 1,
                maxCount: 1, operation: poCaret),
@@ -153,6 +153,11 @@ const
                maxCount: AnyCount, operation: poCallJump),
     PointerRow(element: peText, mods: pmNone, button: pbRight, minCount: 1,
                maxCount: AnyCount, operation: poContextMenu),
+    # Shift + right-click is the same menu: a GPUI window has no native menu
+    # to fall back to (Native-Front-End-Parity.md, "GPUI has NO escape hatch").
+    # The browser and terminal stand down on Shift before a press reaches here.
+    PointerRow(element: peText, mods: pmShift, button: pbRight, minCount: 1,
+               maxCount: AnyCount, operation: poContextMenu),
     # MC.5, gestures 7 and 8: the glyph column. Its presses are not counted.
     # Alt is VS Code's `onMouseDown` in `breakpointEditorContribution`: on a
     # breakpoint it toggles the enabled state instead of removing it.
@@ -177,6 +182,8 @@ const
     PointerRow(element: peGutterLineNumber, mods: pmShiftAlt, button: pbLeft,
                minCount: 1, maxCount: AnyCount, operation: poSelectLine),
     PointerRow(element: peGutterLineNumber, mods: pmNone, button: pbRight,
+               minCount: 1, maxCount: AnyCount, operation: poContextMenu),
+    PointerRow(element: peGutterLineNumber, mods: pmShift, button: pbRight,
                minCount: 1, maxCount: AnyCount, operation: poContextMenu),
   ]
 

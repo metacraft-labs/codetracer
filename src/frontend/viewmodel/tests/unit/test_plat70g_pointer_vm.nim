@@ -331,6 +331,15 @@ suite "the debugger's own clicks win (MC.6)":
     check g.press(d, 1900, 4, 0, button = pbMiddle,
                   element = peGutterLineNumber).effect == pfNone
 
+  test "Shift + right-click opens the same menu as a right-click (Native-Front-End-Parity § GPUI)":
+    var d = doc()
+    var g: EditorPointerState
+    check g.press(d, 0, 1, 2, button = pbRight).effect == pfContextMenu
+    check g.press(d, 1000, 1, 2, mods = pmShift,
+                  button = pbRight).effect == pfContextMenu
+    check g.press(d, 2000, 4, 0, mods = pmShift, button = pbRight,
+                  element = peGutterLineNumber).effect == pfContextMenu
+
   test "a duplicate press does nothing at all":
     var d = doc()
     var g: EditorPointerState
