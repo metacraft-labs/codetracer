@@ -1,4 +1,4 @@
- Fleet Snapshot  ✕
+ Fleet Snapshot  ⚲ ✕
  AGENT HARBOR SESSIONS  unreachable server
    Session                                                                      Agent                                  Host                                     Duration     Active
                                                                                                                                                                                     

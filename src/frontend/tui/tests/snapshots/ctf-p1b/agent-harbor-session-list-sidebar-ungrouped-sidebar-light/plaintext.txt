@@ -1,6 +1,8 @@
  SESSIONS                                  «
- 14 sessions · 2 need input · 2 idle · 7 ru…
- invented working set: 14 sessions over 4 i…
+ 14 sessions · 2 need input · 2 idle ·
+ 7 running · 1 failed
+ invented working set: 14 sessions over 4
+ initiatives
  ● Retry telemetry uploads with exponen… now
    needs input CodeTracer · Claude 2.1.0 · …
    assistant: Should the old behaviour stay…
@@ -43,8 +45,6 @@
  ● Add jitter to the telemetry retry del… 1m
    completed WebUI · Claude 2.1.0 · host-c
    assistant: Finished; the tests pass.
-                                             
-                                             
                                              
                                              
                                              

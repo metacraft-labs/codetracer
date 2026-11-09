@@ -23,14 +23,21 @@
 ##      milestones by group; the fleet's filters, counts, rows, selection and
 ##      unfolded activity; and the error a failing source reported. Each
 ##      text fact is held to the cells under it (the full text, or its
-##      elision ending in "…" where the cells are fewer).
+##      elision ending in "…" where the cells are fewer; a wrapped text's
+##      lines read in order). A text the web shows whole — a head band's
+##      source, summary and caveat, a panel's error, the initiative bar's
+##      right-hand group, a milestone's meta — must be drawn whole, wrapped
+##      where a line cannot hold it, and a tree node's title is never cut
+##      while its counts are drawn (`cutTextProblems`).
 ##   2. THE CELL STYLES AGAINST THE VIEWMODEL. The ground and ink of the
 ##      parts whose state the viewmodel decides — the active tab and row, the
 ##      selected initiative and fleet row, the current milestone, the active
 ##      filter and recording, each status mark's colour, an error's colour,
-##      the section head's band — are derived here from the viewmodel and the
-##      design-system palette (`viewmodel/views/agent_harbor_palette.nim`, the
-##      roles GPUI resolves) and compared with the cells.
+##      the section head's band, the focused initiative's underline in the
+##      action colour (its own colour, SGR 58) — are derived here from the
+##      viewmodel and the design-system palette
+##      (`viewmodel/views/agent_harbor_palette.nim`, the roles GPUI resolves)
+##      and compared with the cells.
 ##   3. A REAL TERMINAL. `tests/apps/app_agent_harbor_story.nim` (the
 ##      terminal story host) is spawned in a pty by TermAssert and its frame
 ##      parsed by libvterm; every cell's glyph, foreground and background must
@@ -65,7 +72,7 @@ import nim_agents_isonim_viewmodels/agent_harbor/[fleet_vm, session_tabs_vm,
 from ../../../viewmodel/views/agent_harbor_words import tabLabelOf, filterCount
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling.
-const ExpectedAssertions = 27
+const ExpectedAssertions = 36
 
 const
   Stem = "app_agent_harbor_story"
@@ -100,11 +107,25 @@ proc elidedMatch*(drawn, value: string): bool =
     return value.startsWith(kept) and widthOf(drawn) < widthOf(value)
   false
 
+proc drawnText(m: AhTuiMount; n: AhNode): string =
+  ## The text a node's cells hold: its one row, or the rows of a wrapped
+  ## text (each line's ends trimmed) joined by a space, as the words were.
+  let g = m.canvas.grid
+  if n.height <= 1: return g.cellsText(n.row, n.col, n.width)
+  var lines: seq[string]
+  for r in n.row ..< min(m.rows, n.row + n.height):
+    lines.add g.cellsText(r, n.col, n.width).strip
+  lines.join(" ")
+
+proc sameWords(drawn, value: string): bool =
+  ## A wrapped text against its value: the same words, a word cut across
+  ## two lines (a word longer than a line) included.
+  drawn == value or drawn.replace(" ", "") == value.replace(" ", "")
+
 proc drawnTextProblems(m: AhTuiMount): seq[string] =
   ## Each text fact against the cells under its node. A node below the
   ## screen's foot is in the tree and clipped off it, like a list the web
   ## clips: it is not read, and it must be wholly below the foot.
-  let g = m.canvas.grid
   for fact in DrawnTextFacts:
     for n in m.canvas.root.all(fact):
       if n.row >= m.rows: continue
@@ -112,9 +133,53 @@ proc drawnTextProblems(m: AhTuiMount): seq[string] =
         if n.attr(fact).len > 0:
           result.add "a " & fact & " says '" & n.attr(fact) & "' but draws no cell"
         continue
-      let drawn = g.cellsText(n.row, n.col, n.width)
-      if not elidedMatch(drawn, n.attr(fact)):
+      let drawn = m.drawnText(n)
+      if not (elidedMatch(drawn, n.attr(fact)) or
+              n.height > 1 and sameWords(drawn, n.attr(fact))):
         result.add "a " & fact & " says '" & n.attr(fact) & "' but draws '" & drawn & "'"
+
+const NeverCutFacts = [
+  "summary", "source", "caveat", "error", "error-title", "executive-summary",
+  "inbox-position", "elsewhere-label"]
+  ## The texts the web shows whole at every size — wrapping them where a
+  ## line cannot hold them (a head band's source and summary, the withheld
+  ## note, an error's reason) or giving them the room they need (the bar's
+  ## right-hand group never shrinks). The terminal wraps them too: none may
+  ## end in "…".
+
+proc cutTextProblems(m: AhTuiMount): seq[string] =
+  ## Every text the web never cuts is drawn whole, and so is each
+  ## milestone's meta line on the progress panel (it wraps under its title,
+  ## or its column grows). A title is never cut while its own counts
+  ## survive: a group header gives the counts up first. The bar's
+  ## right-hand group (badge, label, position, auto-switch) shows no "…".
+  proc whole(m: AhTuiMount; n: AhNode; fact: string; into: var seq[string]) =
+    if n.row >= m.rows or n.attr(fact).len == 0: return
+    let drawn = m.drawnText(n)
+    if not sameWords(drawn, n.attr(fact)):
+      into.add "the " & fact & " '" & n.attr(fact) & "' is cut to '" & drawn &
+               "' where the web shows it whole"
+  # A tab strip's one-line notice is cut as the web cuts it (the brief's
+  # `… connection refused …`); a panel's error block wraps its reason.
+  var stripNotices: seq[AhNode]
+  for n in m.canvas.root.all("notice"):
+    if n.height <= 1: stripNotices.add n.all("error")
+  for fact in NeverCutFacts:
+    for n in m.canvas.root.all(fact):
+      if n notin stripNotices: m.whole(n, fact, result)
+  for ms in m.canvas.root.all("milestone"):
+    for n in ms.all("meta"): m.whole(n, "meta", result)
+  for g in m.canvas.root.all("group"):
+    let t = g.first("title")
+    let counts = g.first("counts")
+    if t.isNil or counts.isNil or counts.width == 0 or t.row >= m.rows: continue
+    if m.drawnText(t) != t.attr("title"):
+      result.add "the group title '" & t.attr("title") & "' is cut to '" & m.drawnText(t) &
+                 "' while its counts '" & m.drawnText(counts) & "' are drawn"
+  for n in m.canvas.root.all("controls"):
+    let drawn = m.canvas.grid.cellsText(n.row, n.col, n.width)
+    if Ellipsis in drawn:
+      result.add "the bar's right-hand group is cut: '" & drawn.strip & "'"
 
 proc expect(problems: var seq[string]; what: string; drawn, wanted: auto) =
   if drawn != wanted:
@@ -203,6 +268,8 @@ proc checkSessionList(view: AhNode; vm: SessionTabStripVM): seq[string] =
   result.expect("rows", view.values("row"), rows)
   if not collapsed:
     result.expect("summary", view.values("summary"), @[vm.summaryText])
+    result.expect("source", view.values("source"),
+                  if vm.sourceLabel.len > 0: @[vm.sourceLabel] else: @[])
   for e in view.all("row"):
     if e.attr("active") == "true":
       result.expect("active row", e.attr("row"), vm.activeId.val)
@@ -275,6 +342,8 @@ proc checkInitiatives(view: AhNode; vm: InitiativesVM): seq[string] =
   result.expect("selection", view.values("selected"), selected)
   result.expect("folded", view.values("folded"), folded)
   result.expect("summary", view.values("summary"), @[vm.summaryText])
+  result.expect("source", view.values("source"),
+                if vm.sourceLabel.len > 0: @[vm.sourceLabel] else: @[])
   for row in rows:
     for e in view.all("initiative"):
       if e.attr("initiative") == row.id:
@@ -304,6 +373,7 @@ proc checkProgress(view: AhNode; vm: InitiativeProgressVM): seq[string] =
   for e in view.all("milestone"): drawnCurrent.add e.attr("current")
   result.expect("current milestone", drawnCurrent, current)
   result.expect("headline", view.values("summary"), @[vm.headline])
+  result.expect("initiative title", view.values("source"), @[vm.current.title])
   let summary = vm.current.executiveSummary
   result.expect("executive summary", view.values("executive-summary"),
                 @[if summary.len > 0: summary else: "The plan states no executive summary."])
@@ -317,6 +387,8 @@ proc checkFleet(view: AhNode; vm: FleetSnapshotVM): seq[string] =
   for f in FleetFilter:
     filters.add $f
     filterCounts.add $counts.filterCount(f)
+  result.expect("source", view.values("source"),
+                if vm.sourceLabel.len > 0: @[vm.sourceLabel] else: @[])
   result.expect("filters", view.values("filter"), filters)
   result.expect("filter counts", view.values("filter-count"), filterCounts)
   for e in view.all("filter"):
@@ -362,8 +434,10 @@ proc checkStory(m: AhTuiMount): seq[string] =
 
 type CellLook = object
   ## What a cell shows: its glyph and colours as `#rrggbb` ("" for the
-  ## terminal's default).
-  rune, fg, bg: string
+  ## terminal's default), and its underline's own colour ("" for none or
+  ## the foreground's).
+  rune, fg, bg, ul: string
+  underline: bool
 
 type LookOf = proc(row, col: int): CellLook {.closure.}
 
@@ -371,7 +445,8 @@ proc gridLook(m: AhTuiMount): LookOf =
   let g = m.canvas.grid
   result = proc(row, col: int): CellLook =
     let s = g.styleAt(row, col)
-    CellLook(rune: g.runeAt(row, col), fg: s.fg, bg: s.bg)
+    CellLook(rune: g.runeAt(row, col), fg: s.fg, bg: s.bg,
+             ul: (if s.underline: s.underlineColor else: ""), underline: s.underline)
 
 proc hexOf(c: Color): string =
   case c.kind
@@ -393,10 +468,14 @@ proc expectGround(problems: var seq[string]; look: LookOf; n: AhNode; rows: int;
 
 proc expectInk(problems: var seq[string]; look: LookOf; n: AhNode; rows: int;
                what, wanted: string) =
+  ## The ink of the node's first glyph (a wrapped, centred text's first line
+  ## may start right of the node's left edge).
   if n.isNil or n.row >= rows: return
-  let got = look(n.row, n.col).fg
+  var col = n.col
+  while col < n.col + n.width - 1 and look(n.row, col).rune == " ": inc col
+  let got = look(n.row, col).fg
   if got != wanted:
-    problems.add what & " at (" & $n.row & "," & $n.col & ") is drawn in " & got &
+    problems.add what & " at (" & $n.row & "," & $col & ") is drawn in " & got &
                  ", not " & wanted
 
 proc markInk(m: MarkStyle): string = m.colour
@@ -434,6 +513,18 @@ proc styleProblems(m: AhTuiMount; look: LookOf): seq[string] =
         if tab.id == e.attr("tab"):
           result.expectInk(look, e.first("mark"), rows, "the mark of " & tab.id,
                            markInk(p.markOf(tab.attention)))
+      # The focused initiative's tabs: underlined in the action role
+      # (`colors-ui-border-action`, the web's 2px line), the underline's own
+      # colour, under the tab's inner cells.
+      if e.attr("in-focus") == "true" and e.row < rows:
+        for col in e.col + 1 ..< e.col + e.width - 1:
+          let cell = look(e.row, col)
+          if not cell.underline or cell.ul != p.borderAction:
+            result.add "the focused tab " & e.attr("tab") & " at (" & $e.row & "," & $col &
+                       ") is underlined " & (if cell.underline: "in '" & cell.ul & "'"
+                                             else: "not at all") &
+                       ", not in the action colour " & p.borderAction
+            break
   of "agent-harbor-session-list":
     let vm = m.sessions
     for e in view.all("row"):
@@ -536,7 +627,9 @@ proc terminalLook(sess: ptr TuiTestSession): LookOf =
   result = proc(row, col: int): CellLook =
     let cell = sess[].cellAt(row, col)
     CellLook(rune: if cell.rune.int32 == 0: " " else: $cell.rune,
-             fg: hexOf(cell.fg), bg: hexOf(cell.bg))
+             fg: hexOf(cell.fg), bg: hexOf(cell.bg),
+             ul: (if cell.underline != usNone: hexOf(cell.underlineColor) else: ""),
+             underline: cell.underline != usNone)
 
 proc spawnStory(id: string; cols, rows: int; mode: DesignMode): TuiTestSession =
   result = newTuiTest(appBinaryPath(Stem),
@@ -556,7 +649,8 @@ proc renderOnTerminal(story: CodeTracerStory; sizeName: string; cols, rows: int;
   let m = try: mountStory(story, cols, rows, mode)
           except ValueError as e: return @["no terminal rendering: " & e.msg]
   defer: m.dispose()
-  result = checkStory(m) & drawnTextProblems(m) & styleProblems(m, m.gridLook())
+  result = checkStory(m) & drawnTextProblems(m) & cutTextProblems(m) &
+           styleProblems(m, m.gridLook())
   var sess = spawnStory(id, cols, rows, mode)
   defer: sess.close()
   result.add screenProblems(sess, m)
@@ -666,6 +760,41 @@ suite "CTF-P1b: the comparisons can fail":
     let problems = styleProblems(m, m.gridLook())
     ck problems.len == 1
     ck problems[0].contains("tab " & tab.attr("tab"))
+    m.dispose()
+
+  test "a text the web shows whole, drawn cut, is reported":
+    let m = mountStory(storyOf("agent-harbor-initiatives", "populated"), 45, 56, dmDark)
+    ck cutTextProblems(m).len == 0
+    let summary = m.view.first("summary")
+    summary.tag("summary", summary.attr("summary") & " and more words")
+    let problems = cutTextProblems(m)
+    ck problems.len == 1
+    ck problems.join(" ").contains("where the web shows it whole")
+    m.dispose()
+
+  test "a group title cut while its counts survive is reported":
+    let m = mountStory(storyOf("agent-harbor-session-list", "sidebar"), 45, 56, dmDark)
+    ck cutTextProblems(m).len == 0
+    var tagged = false
+    for g in m.view.all("group"):
+      if not tagged and not g.first("counts").isNil and g.first("counts").width > 0:
+        g.first("title").tag("title", g.first("title").attr("title") & " that runs on")
+        tagged = true
+    ck tagged
+    ck cutTextProblems(m).join(" ").contains("while its counts")
+    m.dispose()
+
+  test "a focused tab underlined in the text's colour is a style mismatch":
+    let m = mountStory(storyOf("agent-harbor-session-tabs", "focused-initiative"), 180, 56,
+                       dmDark)
+    ck styleProblems(m, m.gridLook()).len == 0
+    let focused = m.view.all("in-focus")
+    ck focused.len > 0
+    let tab = focused[0]
+    m.canvas.grid.restyle(tab.row, tab.col + 1, tab.width - 2, proc(s: CellStyle): CellStyle =
+      result = s
+      result.underlineColor = "")
+    ck styleProblems(m, m.gridLook()).join(" ").contains("not in the action colour")
     m.dispose()
 
 suite "CTF-P1b: the story host answers the pointer on a real terminal":

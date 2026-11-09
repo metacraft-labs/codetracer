@@ -1,6 +1,5 @@
- Fleet Snapshot  ✕
- AGENT HARBOR SESSIONS  synthetic fleet, 2026-01-15 10:00 UTC                                                                                                      5 of 48 sessions
- prompts of 12 withheld by the server
+ Fleet Snapshot  ⚲ ✕
+ AGENT HARBOR SESSIONS  synthetic fleet, 2026-01-15 10:00 UTC                                                               5 of 48 sessions · prompts of 12 withheld by the server
   All 48   Needs input 5   Running 9   Queued 3   Failed 9   Ended 22
    Session                                                      Agent                          Host                           Initiative                       Duration      Active
  ● Add a retry budget to the telemetry uploader and cover it w… Claude 4.2.0 ×2                build-01                       Telemetry upload retries              41m         26m
@@ -18,6 +17,7 @@
  ● Write the migration guide for the 3.0 configuration format   Claude 4.2.0                   mac-01                         —                                  3h 08m          2h
    needs input orbit-labs/orbit-sim · fix/latency-chart-light-…
    Asked a single-choice question  +2
+                                                                                                                                                                                    
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

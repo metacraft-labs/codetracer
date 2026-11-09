@@ -1,5 +1,7 @@
- Initiative Progress  ✕
- INITIATIVE PROGRESS  2 of 6 milestones · 3…
+ Initiative Progress  ⚲ ✕
+ INITIATIVE PROGRESS
+ Route cache on the new storage layer
+                     2 of 6 milestones · 33%
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ● 2 completed  ● 1 in progress  ● 1 blocked
  ● 2 planned
@@ -9,10 +11,12 @@
  CURRENT RC-M2: Core change
  IN PROGRESS (1)
  ● RC-M2   Core change
-   CURRENT 2/3 deliverables · Tests: 2 pend…
+   CURRENT 2/3 deliverables ·
+           Tests: 2 pending
  BLOCKED (1)
  ● RC-M3   Front-end
-   0/3 deliverables · Tests: 1 failing, 2 p…
+   0/3 deliverables · Tests: 1 failing, 2
+   pending
  PLANNED (2)
  ● RC-M4   Migration
    1/3 deliverables · Tests: 2 pending
@@ -23,10 +27,6 @@
    3/3 deliverables · Tests: 2 passing
  ● RC-M1   Data model
    3/3 deliverables · Tests: 2 passing
-                                             
-                                             
-                                             
-                                             
                                              
                                              
                                              

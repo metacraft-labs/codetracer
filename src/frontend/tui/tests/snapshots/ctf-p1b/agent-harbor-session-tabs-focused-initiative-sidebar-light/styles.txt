@@ -3,18 +3,18 @@
 1 #16a34a/#f8f6f2
 2 #7a756a/#f8f6f2
 3 #272522/#b5ae9f
-4 #16a34a/#b5ae9f+underline:usSingle
-5 #272522/#b5ae9f+underline:usSingle
-6 #7a756a/#b5ae9f+underline:usSingle
+4 #16a34a/#b5ae9f+underline:usSingle+ul:#6366f1
+5 #272522/#b5ae9f+underline:usSingle+ul:#6366f1
+6 #353430/#b5ae9f+underline:usSingle+ul:#6366f1
 7 #dc2626/#f8f6f2
-8 #999180/#f8f6f2+underline:usSingle
-9 #272522/#f8f6f2+underline:usSingle
-10 #7a756a/#f8f6f2+underline:usSingle
+8 #999180/#f8f6f2+underline:usSingle+ul:#6366f1
+9 #272522/#f8f6f2+underline:usSingle+ul:#6366f1
+10 #7a756a/#f8f6f2+underline:usSingle+ul:#6366f1
 11 #ea580c/#f8f6f2
 12 #2563eb/#f8f6f2
 13 #353430/#f8f6f2
-14 #16a34a/#f8f6f2+underline:usSingle
-15 #ea580c/#f8f6f2+underline:usSingle
+14 #16a34a/#f8f6f2+underline:usSingle+ul:#6366f1
+15 #ea580c/#f8f6f2+underline:usSingle+ul:#6366f1
 16 #353430/#b5ae9f
 r0: 0*1 1*1 0*1 2*14 0*1 2*3 0*24
 r1: 3*1 4*1 5*21 6*2 5*1 6*1 3*1 0*17

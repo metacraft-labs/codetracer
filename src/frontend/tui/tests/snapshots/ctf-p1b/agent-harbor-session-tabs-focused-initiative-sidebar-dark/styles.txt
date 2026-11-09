@@ -3,19 +3,19 @@
 1 #4ade80/#1b1b1b
 2 #b4b4b4/#1b1b1b
 3 #f3f3f3/#3c3c3c
-4 #4ade80/#3c3c3c+underline:usSingle
-5 #f3f3f3/#3c3c3c+underline:usSingle
-6 #ffffff/#3c3c3c+underline:usSingle
-7 #b0b0b0/#3c3c3c+underline:usSingle
+4 #4ade80/#3c3c3c+underline:usSingle+ul:#6366f1
+5 #f3f3f3/#3c3c3c+underline:usSingle+ul:#6366f1
+6 #ffffff/#3c3c3c+underline:usSingle+ul:#6366f1
+7 #b0b0b0/#3c3c3c+underline:usSingle+ul:#6366f1
 8 #fca5a5/#1b1b1b
-9 #919191/#1b1b1b+underline:usSingle
-10 #f3f3f3/#1b1b1b+underline:usSingle
-11 #b4b4b4/#1b1b1b+underline:usSingle
+9 #919191/#1b1b1b+underline:usSingle+ul:#6366f1
+10 #f3f3f3/#1b1b1b+underline:usSingle+ul:#6366f1
+11 #b4b4b4/#1b1b1b+underline:usSingle+ul:#6366f1
 12 #fdba74/#1b1b1b
 13 #93c5fd/#1b1b1b
 14 #dddddd/#1b1b1b
-15 #4ade80/#1b1b1b+underline:usSingle
-16 #fdba74/#1b1b1b+underline:usSingle
+15 #4ade80/#1b1b1b+underline:usSingle+ul:#6366f1
+16 #fdba74/#1b1b1b+underline:usSingle+ul:#6366f1
 17 #b0b0b0/#3c3c3c
 r0: 0*1 1*1 0*1 2*14 0*1 2*3 0*24
 r1: 3*1 4*1 5*1 6*19 5*1 7*2 5*1 7*1 3*1 0*17

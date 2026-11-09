@@ -248,6 +248,14 @@ proc createProgressStoryVM*(fixture: string): InitiativeProgressVM =
       initiativeId = snapshotSource.initiatives[0].id
   of "unknown": initiativeId = "an-initiative-the-server-does-not-know"
   else: discard
+  if fixture == "progress-event":
+    # The invented plan made coherent with the event before it arrives: the
+    # milestone it completes has all its deliverables and passing tests, and
+    # the summary already names the next one current.
+    let snapshotSource = SnapshotDataSource(source)
+    for initiative in snapshotSource.initiatives.mitems:
+      if initiative.id == initiativeId:
+        discard initiative.readyForCompletion(initiative.progress.currentMilestone)
   result = newInitiativeProgressVM(source, initiativeId)
   result.load()
   if fixture == "progress-event":

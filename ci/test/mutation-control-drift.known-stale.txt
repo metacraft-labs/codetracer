@@ -554,3 +554,21 @@ src/frontend/tui/tests/plat70g-multiclick-mutation-control.sha256	src/frontend/v
 # is claimed and no control file was re-recorded.
 src/frontend/tui/tests/plat46-design-mutation-control.sha256	src/frontend/tui/app/tests/test_degraded_style_tables.nim	1db46cdee846f2db18d5a0f95c0c5f855e804734a0523e81a61394a6c81d5f8b	3186722e83443eecc8730685ed332adb6468cdb970e46d527c2155827e91394a
 src/frontend/tui/tests/plat65-nim-tracing-mutation-control.sha256	src/frontend/gpui/main.nim	8f708bfc0683e2fc8bf211040b56b98d3e65b8b9a0ba8db369648f90f76b401e	233feceb0477a02ad931120bb91f49621380b036255ba6e687cb18749e4c7c29
+
+
+# 2026-11-09, 571942981 (report a missing calc fixture as a counted skip in
+# plat48) changed `tests/test_plat48_top_bar.nim`, which the plat48-topbar
+# and plat64-input-routing controls digest, without a line here. No
+# re-grade is claimed and no control file was re-recorded.
+src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/frontend/tui/tests/test_plat48_top_bar.nim	d0971e4dba3dde07f5ae348ab7b3c6647ed2531b0ae9c9159c9229030541d3eb	8d176a5a5beafc3d74e57322412d846de668e9f33c223435d7f230a0e41c6aa6
+src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/tui/tests/test_plat48_top_bar.nim	d0971e4dba3dde07f5ae348ab7b3c6647ed2531b0ae9c9159c9229030541d3eb	8d176a5a5beafc3d74e57322412d846de668e9f33c223435d7f230a0e41c6aa6
+
+# 2026-11-09, CTF-P1b TUI visual review round 1: a cell style carries the
+# underline's own colour (`CellStyle.underlineColor`, sent as SGR 58), so
+# `theme/palette.nim`, `theme/degradation.nim` and `views/styled_row.nim`
+# copy, project and emit one more field. No mutation grade is claimed and no
+# control file was re-recorded.
+src/frontend/tui/tests/plat46-design-mutation-control.sha256	src/frontend/tui/app/theme/palette.nim	99dc7daa706d2ad09620b55f963a24ec7ba16e7bf067caf3fa9a1e8c5a2776fa	f3d393fc820cf09de46805d0639661ae72c75cb26725e3e867441031852d7a60
+src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/tui/app/theme/palette.nim	99dc7daa706d2ad09620b55f963a24ec7ba16e7bf067caf3fa9a1e8c5a2776fa	f3d393fc820cf09de46805d0639661ae72c75cb26725e3e867441031852d7a60
+src/frontend/tui/tests/plat71a-glyphs-mutation-control.sha256	src/frontend/tui/app/theme/degradation.nim	ae9db095dded7eeb7a1a88229b49d4249f3a67cc90fefc521eede102dbdad0cf	9dce6ddf2027ab26ba85d8841af05c76c56351bc05ca5639f79c0cd16f81e061
+src/frontend/tui/tests/plat71a-glyphs-mutation-control.sha256	src/frontend/tui/app/views/styled_row.nim	b0a2f4917ca4ec515bf811d4fd130fe480bdfb1cdcc62d57ebdacc070a95758d	7139873731627681ca18ae41de91e1e209026b61e07e5bac8d17c23f4b68b512

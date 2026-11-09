@@ -1,6 +1,5 @@
- Fleet Snapshot  ✕
- AGENT HARBOR SESSIONS  synthetic fleet, 2026-01-15 10:00 UTC                                                                                                           48 sessions
- prompts of 12 withheld by the server
+ Fleet Snapshot  ⚲ ✕
+ AGENT HARBOR SESSIONS  synthetic fleet, 2026-01-15 10:00 UTC                                                                    48 sessions · prompts of 12 withheld by the server
   All 48   Needs input 5   Running 9   Queued 3   Failed 9   Ended 22
    Session                                                      Agent                          Host                           Initiative                       Duration      Active
  ● Add a retry budget to the telemetry uploader and cover it w… Claude 4.2.0 ×2                build-01                       Telemetry upload retries              41m         26m
@@ -54,3 +53,4 @@
    queued orbit-labs/orbit-sim · fix/latency-chart-light-theme…
  ● Show the upload queue's depth on the status page             Codex 0.91.3                   win-01                         —                                  2h 28m          8h
    failed orbit-ws-6 · cf5812b4
+   build failed: 3 tests did not pass

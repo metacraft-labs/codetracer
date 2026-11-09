@@ -1,9 +1,10 @@
  SESSIONS                                             «
- 14 sessions · 2 need input · 2 idle · 7 running · 1 f…
+ 14 sessions · 2 need input · 2 idle · 7 running ·
+ 1 failed
  invented working set: 14 sessions over 4 initiatives
- ▸ ● Telemetry upload retries 1/4 1 needs input · 2 r…
- ▸ ● CI runner migration      4/10 1 needs input · 1 …
- ▾ ● Route cache on the new s… 2/6 1 idle · 1 running …
+ ▸ ● Telemetry upload retries              1/4 1 needs…
+ ▸ ● CI runner migration                  4/10 1 needs…
+ ▾ ● Route cache on the new storage layer  2/6 1 idle …
  ○ Migrate cached routes without a cold start        5m
    idle Telegram · Codex 0.9.4 · host-f
    assistant: Done for now; ready for the next instruc…
@@ -13,21 +14,20 @@
  ● Benchmark route cache reads on the new layer      2m
    failed CodeTracer · Codex 0.9.4 · host-d
    [exit] status=1
- ▾ ● Settings redesign                   3/8 2 running
+ ▾ ● Settings redesign                     3/8 2 runni…
  ● Split the settings page into tabs                 2m
    running WebUI · Grok 1.2.0 · host-c
    assistant: Running the tests again after the change.
  ● Add search to the settings page                   3m
    running TUI · Grok 1.2.0 · host-e
    assistant: Running the tests again after the change.
- ▾ No initiative                  1 running · 1 queued
+ ▾   No initiative                             1 runni…
  ● Replace the hand-rolled JSON writer               6m
    running CLI · Codex 0.9.4 · host-b
    assistant: Running the tests again after the change.
  ● Profile the importer on the large fixture         6m
    queued CodeTracer · Grok 1.2.0 · host-a
    assistant: Queued until an agent slot frees up.
-                                                                                                                                                                                    
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

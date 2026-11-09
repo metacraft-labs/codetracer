@@ -130,9 +130,14 @@ proc drawRow(c: var AhCanvas; parent: AhNode; vm: FleetSnapshotVM; row: FleetRow
     if hasChip:
       let hidden = row.activity.len - 1 + row.activityMore
       label = " " & (if row.expanded: "less" else: "+" & $hidden) & " "
+    # An activity line the viewmodel marks as an error is red only where no
+    # failure line above already says it in red: the failure line carries
+    # the error, the activity under it is the quiet caption the web draws
+    # (two red lines read as one fault twice).
+    let errorInk = level == "error" and row.failureText.len == 0
     let tw = c.text(n, r, mc, mainW - (if hasChip: widthOf(label) + 1 else: 0),
                     row.activity[i],
-                    if sel: selText elif level == "error": c.p.textError else: c.p.rowDetail,
+                    if sel: selText elif errorInk: c.p.textError else: c.p.rowDetail,
                     fact = "activity")
     if hasChip:
       let at = mc + tw + 1

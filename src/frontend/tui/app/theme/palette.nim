@@ -192,7 +192,8 @@ proc resolvePlain(style: CellStyle; depth: ColorDepth; mode: DesignMode;
   ##
   ## Monochrome keeps the view's attributes, adds each role's `mono` set and
   ## paints no colour at all.
-  result = CellStyle(fg: style.fg, bg: style.bg, bold: style.bold,
+  result = CellStyle(fg: style.fg, bg: style.bg, underlineColor: style.underlineColor,
+                     bold: style.bold,
                      italic: style.italic, underline: style.underline,
                      reverse: style.reverse)
   if style.role == srNone and style.surface == srNone:

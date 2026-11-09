@@ -51,6 +51,10 @@ type
       ## A LITERAL foreground — content, not chrome — or, after
       ## `degradeRows`, the resolved one. "" for the terminal default.
     bg*: string
+    underlineColor*: string
+      ## The underline's own colour (CSS `text-decoration-color`, sent as
+      ## SGR 58), a LITERAL colour like `fg`; "" draws the underline in the
+      ## foreground's. Meaningful only with `underline`.
     bold*: bool
     italic*: bool
     underline*: bool
@@ -98,6 +102,7 @@ func describe*(s: CellStyle): string =
   if s.surface != srNone: parts.add "surface=" & $s.surface
   parts.add "fg=" & (if s.fg.len > 0: s.fg else: "default")
   parts.add "bg=" & (if s.bg.len > 0: s.bg else: "default")
+  if s.underlineColor.len > 0: parts.add "underline-color=" & s.underlineColor
   let attrs = s.attrNames()
   parts.add "attrs={" & attrs.join(",") & "}"
   parts.join(" ")

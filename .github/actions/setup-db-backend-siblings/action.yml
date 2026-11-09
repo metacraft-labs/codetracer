@@ -160,7 +160,7 @@ runs:
         # COMMIT, not by `dev`; the reasons, and the refresh rule, are above
         # the `uses:` line.
         siblings: |
-          codetracer-trace-format=083babb38ea38153d5ea481884eba83c394433fe
+          codetracer-trace-format=096e3f5cb73f125390dc394957b3faaa958a3e93
           codetracer-trace-format-nim=d282be4c45f3f31ce6b666f79a1bd8b6813010c7
-          codetracer-native-recorder=e944a87b238736573f15fbbef77053be8fcc6a83
+          codetracer-native-recorder=a167cb36514ef06bc75ebb0437c614d6bc274085
           ${{ inputs.extra-siblings }}

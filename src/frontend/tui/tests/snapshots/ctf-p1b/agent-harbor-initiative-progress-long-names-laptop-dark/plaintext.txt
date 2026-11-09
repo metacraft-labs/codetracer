@@ -1,19 +1,19 @@
- Initiative Progress  ✕
- INITIATIVE PROGRESS  Telemetry upload retries — and keep the previous behaviour behind a flag until every downstream consumer of the old interface has mi… 1 of 4 milestones · 25%
+ Initiative Progress  ⚲ ✕
+ INITIATIVE PROGRESS
+ Telemetry upload retries — and keep the previous behaviour behind a flag until every downstream consumer of the old interface has migrated, with a note in the changelog
+                                                                                                                                                            1 of 4 milestones · 25%
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ● 1 completed  ● 1 in progress  ● 2 planned
  Telemetry upload retries: 1 of 4 milestones done; the current one is A milestone whose title
  runs on well past any width a panel gives it 1.
  CURRENT TR-M1: A milestone whose title runs on well past any width a panel gives it 1
  IN PROGRESS (1)
- ● TR-M1     A milestone whose title runs on well past any width a panel gives it 1                                                    CURRENT  1/3 deliverables · Tests: 2 pending
+ ● TR-M1     A milestone whose title runs on well past any width a panel gives it 1                                                     CURRENT 1/3 deliverables · Tests: 2 pending
  PLANNED (2)
  ● TR-M2     A milestone whose title runs on well past any width a panel gives it 2                                                             2/3 deliverables · Tests: 2 pending
  ● TR-M3     A milestone whose title runs on well past any width a panel gives it 3                                                             0/3 deliverables · Tests: 2 pending
  COMPLETED (1)
  ● TR-M0     A milestone whose title runs on well past any width a panel gives it 0                                                             3/3 deliverables · Tests: 2 passing
-                                                                                                                                                                                    
-                                                                                                                                                                                    
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

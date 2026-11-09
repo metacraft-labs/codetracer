@@ -77,18 +77,26 @@ proc findStory*(id: string): CodeTracerStory =
     if storybookId(section, story) == id: return story
   raise newException(KeyError, "no Agent Harbor story " & id)
 
+const PinGlyph* = "\xE2\x9A\xB2"
+  ## ⚲ (U+26B2): the panel tab's pin (dock to an edge). The web draws the
+  ## app's pin icon there; a terminal has no picture, and this narrow glyph
+  ## — a round head on a stem — is the nearest a monospace font holds.
+
 proc drawFrame(c: var AhCanvas; title: string): int =
   ## The panel's frame header: the window's ground with the panel's tab at
   ## its start, on the panel's own ground (the active tab runs into its
-  ## panel, as golden-layout draws it), its title in the label role and its
-  ## close at its end. Returns the rows it takes.
+  ## panel, as golden-layout draws it), its title in the label role and the
+  ## app's tab controls at its end: the pin, then the close, in the tab
+  ## icon role. Returns the rows it takes.
   c.area("frame-header", 0, 0, c.cols, 1, c.tone.frame)
   let header = c.node(nil, 0, 0, c.cols, 1, [("frame-header", title)])
-  let w = min(c.cols, widthOf(title) + 6)
+  let w = min(c.cols, widthOf(title) + 8)
   # The tab is an area of its own: the panel's ground, between the
   # header's and the panel head's.
   c.area("frame-tab", 0, 0, w, 1, c.p.panel)
-  discard c.text(header, 0, 1, w - 5, title, c.p.textLabel, fact = "frame-title")
+  discard c.text(header, 0, 1, w - 7, title, c.p.textLabel, fact = "frame-title")
+  discard c.put(0, w - 5, PinGlyph, c.p.tabIcon)
+  discard c.node(header, 0, w - 5, 1, 1, [("frame-pin", "")])
   discard c.put(0, w - 3, "\xE2\x9C\x95", c.p.tabIcon)
   discard c.node(header, 0, w - 3, 1, 1, [("frame-close", "")])
   1
