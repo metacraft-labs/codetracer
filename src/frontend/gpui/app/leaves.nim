@@ -86,7 +86,7 @@
 ## naming another front-end and draws the refusal, so the field has a
 ## PRODUCTION READER and the arm has something to break.
 
-import std/[json, math, options, os, sets, strutils, tables]
+import std/[json, math, options, sets, strutils, tables]
 from std/unicode import runeLen, runeSubstr, Rune, toUTF8
 
 import isonim_gpui/renderer
@@ -106,6 +106,7 @@ from ../../view_vocabulary/fact_reader import ViewIdAttribute,
                                               ViewKindAttribute
 import ../../view_vocabulary/editor_surface
 import ../../../common/view_vocabulary
+import ../../../common/content_file_cache
 import ../../../common/value_presentation
 # Every ViewModel comes through the SDK facade, like every other ViewModel a
 # front-end consumes (`ci/test/sdk-facade-boundary.sh`, consumer-facade-only).
@@ -405,8 +406,6 @@ func markGlyph*(m: EditorMark): string =
   of emTracepoint: TracepointGlyph
   of emBreakpointTracepoint: BreakpointTracepointGlyph
 
-var executionMarkFile {.threadvar.}: string
-
 const
   InlineValuesAttribute* = "data-ct-inline-values"
     ## On a row's inline values: `inlineValueText`'s spelling of them.
@@ -424,15 +423,15 @@ const
     ## `ui/flow.nim`'s `max-width: 30ch` on a long value.
   FlowHideSvg = staticRead("../../../public/resources/shared/flow_hide_dark.svg")
 
-var flowHideFile {.threadvar.}: string
+const IconArea* = "gpui-icons"
+  ## The directory of the per-user cache (`content_file_cache`) the shell's
+  ## generated icons live in. A file is named by its content, so the number
+  ## of files is bounded by the distinct icons and no process leaves one
+  ## behind (codetracer-pm issue 2026-11-08, "The GPUI shell leaves a temp
+  ## icon directory behind for every process").
 
-proc flowHidePath(): string =
-  if flowHideFile.len == 0 or not fileExists(flowHideFile):
-    let dir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
-    createDir(dir)
-    flowHideFile = dir / "flow-hide.svg"
-    writeFile(flowHideFile, FlowHideSvg)
-  flowHideFile
+proc flowHidePath*(): string =
+  contentFile(IconArea, "flow-hide.svg", FlowHideSvg)
 
 const FoldChevronSvg = """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 16 16"><path fill="#c5c5c5" fill-rule="evenodd" clip-rule="evenodd" d="M7.976 10.072l4.357-4.357.62.618L8.284 11h-.618L3 6.333l.619-.618 4.357 4.357z"/></svg>"""
   ## Monaco's `codicon-folding-expanded` (the codicon chevron-down), in the
@@ -446,25 +445,12 @@ const StickyChevronSvg = FoldChevronSvg.replace("#c5c5c5", "#717171")
   ## The same chevron as a sticky header draws it: dimmed, its ink #717171
   ## (measured 2026-10-17).
 
-var foldChevronFile {.threadvar.}: string
-var stickyChevronFile {.threadvar.}: string
-
-proc stickyChevronPath(): string =
-  if stickyChevronFile.len == 0 or not fileExists(stickyChevronFile):
-    let dir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
-    createDir(dir)
-    stickyChevronFile = dir / "fold-sticky.svg"
-    writeFile(stickyChevronFile, StickyChevronSvg)
-  stickyChevronFile
+proc stickyChevronPath*(): string =
+  contentFile(IconArea, "fold-sticky.svg", StickyChevronSvg)
 
 proc foldChevronPath*(): string =
-  ## The fold chevron written once to a file the shim's `img` can load.
-  if foldChevronFile.len == 0 or not fileExists(foldChevronFile):
-    let dir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
-    createDir(dir)
-    foldChevronFile = dir / "fold-expanded.svg"
-    writeFile(foldChevronFile, FoldChevronSvg)
-  foldChevronFile
+  ## The fold chevron as a file the shim's `img` can load.
+  contentFile(IconArea, "fold-expanded.svg", FoldChevronSvg)
 
 func indentOf(text: string): int =
   for c in text:
@@ -490,12 +476,7 @@ func foldableRows*(rows: openArray[EditorRow]): seq[bool] =
 
 proc executionMarkPath*(): string =
   ## The desktop's mark written once to a file the shim's `img` can load.
-  if executionMarkFile.len == 0 or not fileExists(executionMarkFile):
-    let dir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
-    createDir(dir)
-    executionMarkFile = dir / "highlight_line_arrow.svg"
-    writeFile(executionMarkFile, ExecutionMarkSvg)
-  executionMarkFile
+  contentFile(IconArea, "highlight_line_arrow.svg", ExecutionMarkSvg)
 
 func pointerGlyph*(p: EditorPointer): string =
   case p
@@ -2064,7 +2045,7 @@ func stickyScopeLines*(lines: openArray[string]; firstRow, offset: int;
     result.add (next, top)
     deepest = indent(file[next - 1])
 
-proc stateIconPath(name, svg, ink: string): string
+proc stateIconPath*(name, svg, ink: string): string
   ## Forward-declared: an icon written once in `ink` (defined with the state
   ## pane's controls).
 
@@ -2528,7 +2509,6 @@ const
     ("expand-active", staticRead("../../../public/resources/calltrace/expand-active-call-calltrace-dark.svg")),
     ("dot-active", staticRead("../../../public/resources/calltrace/dot-active-call-calltrace-dark.svg"))]
 
-var callIconFiles {.threadvar.}: Table[string, string]
 
 # ---------------------------------------------------------------------------
 # PLAT-70 Part B — the table panes' cut cells (Horizontal-Overflow.md §5)
@@ -2635,16 +2615,11 @@ proc tableHBar*(r: GpuiRenderer; parent: GpuiElement; view: HorizontalView;
   r.appendChild(parent, track)
 
 
-proc callIconPath(name: string): string =
-  if callIconFiles.hasKey(name) and fileExists(callIconFiles[name]):
-    return callIconFiles[name]
-  let dir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
-  createDir(dir)
-  let path = dir / ("call-" & name & ".svg")
+proc callIconPath*(name: string): string =
   for (n, svg) in CallIcons:
-    if n == name: writeFile(path, svg)
-  callIconFiles[name] = path
-  path
+    if n == name: return contentFile(IconArea, "call-" & name & ".svg", svg)
+  # An unknown name has no icon: an empty one, as the file it used to be.
+  contentFile(IconArea, "call-" & name & ".svg", "")
 
 func callRowTopPx*(i: int): int =
   ## Row `i`'s top below the first row's, at the desktop's pitch — which is
@@ -3245,23 +3220,15 @@ func originIconSvg(name: string): string =
     if n == name: return svg
   OriginIconSvgs[5][1]
 
-var stateIconFiles {.threadvar.}: Table[string, string]
-
-proc stateIconPath(name, svg, ink: string): string =
+proc stateIconPath*(name, svg, ink: string): string =
   ## A state-pane icon written once in `ink` — the desktop paints these as
   ## masks in `colors-ui-icon-primary-default`.
-  let key = name & ink
-  if stateIconFiles.hasKey(key) and fileExists(stateIconFiles[key]):
-    return stateIconFiles[key]
-  let dir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
-  createDir(dir)
-  let path = dir / ("state-" & name & ".svg")
   var body = svg.replace("currentColor", ink)
   for fill in ["#DDDDDD", "#dddddd", "#F3F3F3", "#919191", "white", "#fff"]:
     body = body.replace("\"" & fill & "\"", "\"" & ink & "\"")
-  writeFile(path, body)
-  stateIconFiles[key] = path
-  path
+  # Named by content, so one icon in two inks is two files, never one
+  # overwritten under a path GPUI has already cached.
+  contentFile(IconArea, "state-" & name & ".svg", body)
 
 proc stateText(r: GpuiRenderer; text, colour: string; sizePx = 16;
                weight = ""; mono = true): GpuiElement =
