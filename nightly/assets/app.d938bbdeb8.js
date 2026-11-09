@@ -1345,10 +1345,10 @@ framePtr = F.prev;
 var F = {procname: "module tables", prev: framePtr, filename: "/nix/store/alqmbhl55wya852wvcxcnfdq517s2dy4-nim-unwrapped-2.2.4/nim/lib/pure/collections/tables.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module dom_api", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/web/dom_api.nim", line: 0};
+var F = {procname: "module dom_api", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/web/dom_api.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module dom_api", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/web/dom_api.nim", line: 0};
+var F = {procname: "module dom_api", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/web/dom_api.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
 var F = {procname: "module jsffi", prev: framePtr, filename: "/nix/store/alqmbhl55wya852wvcxcnfdq517s2dy4-nim-unwrapped-2.2.4/nim/lib/js/jsffi.nim", line: 0};
@@ -1360,10 +1360,10 @@ framePtr = F.prev;
 var F = {procname: "module jsffi", prev: framePtr, filename: "/nix/store/alqmbhl55wya852wvcxcnfdq517s2dy4-nim-unwrapped-2.2.4/nim/lib/js/jsffi.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module types", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/types.nim", line: 0};
+var F = {procname: "module types", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/types.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module types", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/types.nim", line: 0};
+var F = {procname: "module types", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/types.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
 var F = {procname: "module streams", prev: framePtr, filename: "/nix/store/alqmbhl55wya852wvcxcnfdq517s2dy4-nim-unwrapped-2.2.4/nim/lib/pure/streams.nim", line: 0};
@@ -1423,25 +1423,25 @@ framePtr = F.prev;
 var F = {procname: "module times", prev: framePtr, filename: "/nix/store/alqmbhl55wya852wvcxcnfdq517s2dy4-nim-unwrapped-2.2.4/nim/lib/pure/times.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module js_collections", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/nim-everywhere/src/nim_everywhere/js_collections.nim", line: 0};
+var F = {procname: "module js_collections", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/nim-everywhere/src/nim_everywhere/js_collections.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module js_collections", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/nim-everywhere/src/nim_everywhere/js_collections.nim", line: 0};
+var F = {procname: "module js_collections", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/nim-everywhere/src/nim_everywhere/js_collections.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module platform", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/nim-everywhere/src/nim_everywhere/platform.nim", line: 0};
+var F = {procname: "module platform", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/nim-everywhere/src/nim_everywhere/platform.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module platform", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/nim-everywhere/src/nim_everywhere/platform.nim", line: 0};
+var F = {procname: "module platform", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/nim-everywhere/src/nim_everywhere/platform.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module platform", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/platform.nim", line: 0};
+var F = {procname: "module platform", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/platform.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module platform", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/platform.nim", line: 0};
+var F = {procname: "module platform", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/platform.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module graph", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/graph.nim", line: 0};
+var F = {procname: "module graph", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/graph.nim", line: 0};
 framePtr = F;
 F.line = 47;
 F.filename = "graph.nim";
@@ -1457,16 +1457,16 @@ if (globalThis.ExecCount_1426063390 === undefined) {
   globalThis.ExecCount_1426063390 = [0];
 }
 framePtr = F.prev;
-var F = {procname: "module graph", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/graph.nim", line: 0};
+var F = {procname: "module graph", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/graph.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module owner", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/owner.nim", line: 0};
+var F = {procname: "module owner", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/owner.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module owner", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/owner.nim", line: 0};
+var F = {procname: "module owner", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/owner.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module batch", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/batch.nim", line: 0};
+var F = {procname: "module batch", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/batch.nim", line: 0};
 framePtr = F;
 F.line = 13;
 F.filename = "batch.nim";
@@ -1478,7 +1478,7 @@ var batchDepth_1660944440 = [0];
 F.line = 22;
 var updateComputationCb_1660944443 = [null];
 framePtr = F.prev;
-var F = {procname: "module batch", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/batch.nim", line: 0};
+var F = {procname: "module batch", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/batch.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
 
@@ -1809,7 +1809,7 @@ function raiseIndexError(i_p0, a_p1, b_p2) {
 }
 
 function removeSourceObserver__OOZOOZOOZOOZvfbavzZfepZvfbavzZpberZtencu_u95(source_p0, obsSlot_p1) {
-  var F = {procname: "graph.removeSourceObserver", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/graph.nim", line: 0};
+  var F = {procname: "graph.removeSourceObserver", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/graph.nim", line: 0};
   framePtr = F;
     F.line = 70;
     F.filename = "graph.nim";
@@ -1875,7 +1875,7 @@ function failedAssertImpl__fgqZnffregvbaf_u84(msg_p0) {
 }
 
 function cleanNode__OOZOOZOOZOOZvfbavzZfepZvfbavzZpberZtencu_u116(node_p0, dispose_p1) {
-  var F = {procname: "graph.cleanNode", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/graph.nim", line: 0};
+  var F = {procname: "graph.cleanNode", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/graph.nim", line: 0};
   framePtr = F;
     F.line = 92;
     F.filename = "graph.nim";
@@ -2060,7 +2060,7 @@ function cleanNode__OOZOOZOOZOOZvfbavzZfepZvfbavzZpberZtencu_u116(node_p0, dispo
 }
 
 function updateComputation__OOZOOZOOZOOZvfbavzZfepZvfbavzZpberZpbzchgngvba_u18(comp_p0) {
-  var F = {procname: "computation.updateComputation", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/computation.nim", line: 0};
+  var F = {procname: "computation.updateComputation", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/computation.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     if (cmpClosures(comp_p0.fn, null)) {
@@ -2100,38 +2100,38 @@ function updateComputation__OOZOOZOOZOOZvfbavzZfepZvfbavzZpberZpbzchgngvba_u18(c
   
 }
 var Temporary1;
-var F = {procname: "module computation", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/computation.nim", line: 0};
+var F = {procname: "module computation", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/computation.nim", line: 0};
 framePtr = F;
 F.line = 181;
 F.filename = "computation.nim";
 Temporary1 = updateComputation__OOZOOZOOZOOZvfbavzZfepZvfbavzZpberZpbzchgngvba_u18.bind(null); Temporary1.ClP_0 = updateComputation__OOZOOZOOZOOZvfbavzZfepZvfbavzZpberZpbzchgngvba_u18; Temporary1.ClE_0 = null;
 updateComputationCb_1660944443[0] = Temporary1;
 framePtr = F.prev;
-var F = {procname: "module computation", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/computation.nim", line: 0};
+var F = {procname: "module computation", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/computation.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module signals", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/signals.nim", line: 0};
+var F = {procname: "module signals", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/signals.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module signals", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/signals.nim", line: 0};
+var F = {procname: "module signals", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/signals.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module rxcore", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/rxcore.nim", line: 0};
+var F = {procname: "module rxcore", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/rxcore.nim", line: 0};
 framePtr = F;
 F.line = 93;
 F.filename = "rxcore.nim";
 var sharedConfig_1392509039 = [({context: null, registry: null, completed: null, events: null, done: false, gather: null, load: null, has: null})];
 framePtr = F.prev;
-var F = {procname: "module rxcore", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/rxcore.nim", line: 0};
+var F = {procname: "module rxcore", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/rxcore.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module client", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/web/client.nim", line: 0};
+var F = {procname: "module client", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/web/client.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module client", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/web/client.nim", line: 0};
+var F = {procname: "module client", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/web/client.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module hydration", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/web/hydration.nim", line: 0};
+var F = {procname: "module hydration", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/web/hydration.nim", line: 0};
 framePtr = F;
 F.line = 114;
 F.filename = "hydration.nim";
@@ -2171,7 +2171,7 @@ var isonimHy = {
 };
 
 framePtr = F.prev;
-var F = {procname: "module hydration", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/web/hydration.nim", line: 0};
+var F = {procname: "module hydration", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/web/hydration.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
 var F = {procname: "module monotimes", prev: framePtr, filename: "/nix/store/alqmbhl55wya852wvcxcnfdq517s2dy4-nim-unwrapped-2.2.4/nim/lib/std/monotimes.nim", line: 0};
@@ -2180,7 +2180,7 @@ framePtr = F.prev;
 var F = {procname: "module monotimes", prev: framePtr, filename: "/nix/store/alqmbhl55wya852wvcxcnfdq517s2dy4-nim-unwrapped-2.2.4/nim/lib/std/monotimes.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module boundary_meter", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/boundary_meter.nim", line: 0};
+var F = {procname: "module boundary_meter", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/boundary_meter.nim", line: 0};
 framePtr = F;
 F.line = 136;
 F.filename = "boundary_meter.nim";
@@ -2239,98 +2239,98 @@ function isonimBM_utf8len(s) {
 }
 
 framePtr = F.prev;
-var F = {procname: "module boundary_meter", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/boundary_meter.nim", line: 0};
+var F = {procname: "module boundary_meter", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/boundary_meter.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module web_renderer", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/web/web_renderer.nim", line: 0};
+var F = {procname: "module web_renderer", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/web/web_renderer.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module web_renderer", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/web/web_renderer.nim", line: 0};
+var F = {procname: "module web_renderer", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/web/web_renderer.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module content", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/content.nim", line: 0};
+var F = {procname: "module content", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/content.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module content", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/content.nim", line: 0};
+var F = {procname: "module content", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/content.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module content_embed", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/content_embed.nim", line: 0};
+var F = {procname: "module content_embed", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/content_embed.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module content_embed", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/content_embed.nim", line: 0};
+var F = {procname: "module content_embed", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/content_embed.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module match", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/routing/match.nim", line: 0};
+var F = {procname: "module match", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/routing/match.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module match", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/routing/match.nim", line: 0};
+var F = {procname: "module match", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/routing/match.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module routes", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/routes.nim", line: 0};
+var F = {procname: "module routes", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/routes.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module routes", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/routes.nim", line: 0};
+var F = {procname: "module routes", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/routes.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module anchors", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/anchors.nim", line: 0};
+var F = {procname: "module anchors", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/anchors.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module anchors", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/anchors.nim", line: 0};
+var F = {procname: "module anchors", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/anchors.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module markdown_vm", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+var F = {procname: "module markdown_vm", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module markdown_vm", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+var F = {procname: "module markdown_vm", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module search_vm", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
+var F = {procname: "module search_vm", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module search_vm", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
+var F = {procname: "module search_vm", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module theme_vm", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/theme_vm.nim", line: 0};
+var F = {procname: "module theme_vm", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/theme_vm.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module theme_vm", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/theme_vm.nim", line: 0};
+var F = {procname: "module theme_vm", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/theme_vm.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module escape", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/ssr/escape.nim", line: 0};
+var F = {procname: "module escape", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/ssr/escape.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module escape", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/ssr/escape.nim", line: 0};
+var F = {procname: "module escape", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/ssr/escape.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module config", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/config.nim", line: 0};
+var F = {procname: "module config", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/config.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module config", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/config.nim", line: 0};
+var F = {procname: "module config", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/config.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module navigation_vm", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/navigation_vm.nim", line: 0};
+var F = {procname: "module navigation_vm", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/navigation_vm.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module navigation_vm", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/navigation_vm.nim", line: 0};
+var F = {procname: "module navigation_vm", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/navigation_vm.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module search_view", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/components/search_view.nim", line: 0};
+var F = {procname: "module search_view", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/components/search_view.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module search_view", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/components/search_view.nim", line: 0};
+var F = {procname: "module search_view", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/components/search_view.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module theme_toggle", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/components/theme_toggle.nim", line: 0};
+var F = {procname: "module theme_toggle", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/components/theme_toggle.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
-var F = {procname: "module theme_toggle", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/components/theme_toggle.nim", line: 0};
+var F = {procname: "module theme_toggle", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/components/theme_toggle.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
 
 function newSearchViewModel__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZfrnepu95iz_u528() {
   var result_1795162641 = ({query: [], results: [], cursor: 0, isOpen: false});
 
-  var F = {procname: "search_vm.newSearchViewModel", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
+  var F = {procname: "search_vm.newSearchViewModel", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
   framePtr = F;
     F.line = 252;
     F.filename = "search_vm.nim";
@@ -2344,7 +2344,7 @@ function newSearchViewModel__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZfrnepu95iz_u528()
 function utf8ByteLen__OOZOOZOOZOOZvfbavzZfepZvfbavzZpberZobhaqnel95zrgre_u60(s_p0) {
   var result_1694498878 = 0;
 
-  var F = {procname: "boundary_meter.utf8ByteLen", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/boundary_meter.nim", line: 0};
+  var F = {procname: "boundary_meter.utf8ByteLen", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/boundary_meter.nim", line: 0};
   framePtr = F;
     F.line = 229;
     F.filename = "boundary_meter.nim";
@@ -2365,7 +2365,7 @@ function checkOverflowInt64(a_p0) {
 function frameBytesFor__OOZOOZOOZOOZvfbavzZfepZvfbavzZpberZobhaqnel95zrgre_u70(handles_p0, strBytesTotal_p1, strCount_p2) {
   var result_1694498890 = 0;
 
-  var F = {procname: "boundary_meter.frameBytesFor", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/boundary_meter.nim", line: 0};
+  var F = {procname: "boundary_meter.frameBytesFor", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/boundary_meter.nim", line: 0};
   framePtr = F;
     F.line = 272;
     F.filename = "boundary_meter.nim";
@@ -2548,7 +2548,7 @@ function getMonoTime__fgqZzbabgvzrf_u15() {
 function nowNs__OOZOOZOOZOOZvfbavzZfepZvfbavzZpberZobhaqnel95zrgre_u155() {
   var result_1694498972 = 0n;
 
-  var F = {procname: "boundary_meter.nowNs", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/boundary_meter.nim", line: 0};
+  var F = {procname: "boundary_meter.nowNs", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/boundary_meter.nim", line: 0};
   framePtr = F;
     F.line = 291;
     F.filename = "boundary_meter.nim";
@@ -2562,7 +2562,7 @@ function nowNs__OOZOOZOOZOOZvfbavzZfepZvfbavzZpberZobhaqnel95zrgre_u155() {
 function bmPutStrNim__OOZOOZOOZOOZvfbavzZfepZvfbavzZpberZobhaqnel95zrgre_u63(s_p0) {
   var result_1694498881 = 0;
 
-  var F = {procname: "boundary_meter.bmPutStrNim", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/boundary_meter.nim", line: 0};
+  var F = {procname: "boundary_meter.bmPutStrNim", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/boundary_meter.nim", line: 0};
   framePtr = F;
     F.line = 236;
     F.filename = "boundary_meter.nim";
@@ -2576,7 +2576,7 @@ function bmPutStrNim__OOZOOZOOZOOZvfbavzZfepZvfbavzZpberZobhaqnel95zrgre_u63(s_p
 function bmDecode__OOZOOZOOZOOZvfbavzZfepZvfbavzZpberZobhaqnel95zrgre_u66(at_p0, n_p1) {
   var result_1694498885 = [];
 
-  var F = {procname: "boundary_meter.bmDecode", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/boundary_meter.nim", line: 0};
+  var F = {procname: "boundary_meter.bmDecode", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/boundary_meter.nim", line: 0};
   framePtr = F;
     F.line = 237;
     F.filename = "boundary_meter.nim";
@@ -2588,7 +2588,7 @@ function bmDecode__OOZOOZOOZOOZvfbavzZfepZvfbavzZpberZobhaqnel95zrgre_u66(at_p0,
 }
 
 function noteOp__OOZOOZOOZOOZvfbavzZfepZvfbavzZpberZobhaqnel95zrgre_u157(op_p0, handles_p1, strs_p2) {
-  var F = {procname: "boundary_meter.noteOp", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/core/boundary_meter.nim", line: 0};
+  var F = {procname: "boundary_meter.noteOp", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/core/boundary_meter.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     if (!(meterEnabled_1694498858[0])) {
@@ -2780,7 +2780,7 @@ function noteOp__OOZOOZOOZOOZvfbavzZfepZvfbavzZpberZobhaqnel95zrgre_u157(op_p0, 
 }
 
 function addEventListener__OOZOOZOOZOOZvfbavzZfepZvfbavzZjroZjro95eraqrere_u84(r_p0, node_p1, event_p2, handler_p3) {
-  var F = {procname: "web_renderer.addEventListener", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/web/web_renderer.nim", line: 0};
+  var F = {procname: "web_renderer.addEventListener", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/web/web_renderer.nim", line: 0};
   framePtr = F;
     F.line = 127;
     F.filename = "web_renderer.nim";
@@ -2795,7 +2795,7 @@ function addEventListener__OOZOOZOOZOOZvfbavzZfepZvfbavzZjroZjro95eraqrere_u84(r
 function isWordChar__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZfrnepu95iz_u37(c_p0) {
   var result_1795162151 = false;
 
-  var F = {procname: "search_vm.isWordChar", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
+  var F = {procname: "search_vm.isWordChar", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
   framePtr = F;
     F.line = 89;
     F.filename = "search_vm.nim";
@@ -2830,7 +2830,7 @@ function nsuToLowerAsciiChar(c_p0) {
 function tokenize__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZfrnepu95iz_u44(text_p0) {
   var result_1795162158 = [];
 
-  var F = {procname: "search_vm.tokenize", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
+  var F = {procname: "search_vm.tokenize", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
   framePtr = F;
     F.line = 99;
     F.filename = "search_vm.nim";
@@ -2978,7 +2978,7 @@ function nsuStartsWith(s_p0, prefix_p1) {
 function bestFieldWeight__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZfrnepu95iz_u57(tokens_p0, queryToken_p1, exactWeight_p2, prefixWeight_p3) {
   var result_1795162174 = 0;
 
-  var F = {procname: "search_vm.bestFieldWeight", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
+  var F = {procname: "search_vm.bestFieldWeight", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     Label1: {
@@ -3029,7 +3029,7 @@ function bestFieldWeight__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZfrnepu95iz_u57(token
 function scoreEntry__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZfrnepu95iz_u67(entry_p0, queryTokens_p1) {
   var result_1795162182 = 0;
 
-  var F = {procname: "search_vm.scoreEntry", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
+  var F = {procname: "search_vm.scoreEntry", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     if (((queryTokens_p1).length == 0)) {
@@ -3350,7 +3350,7 @@ function searchIndex__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZfrnepu95iz_u247(index_p0
 function HEX3Aanonymous__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZfrnepu95iz_u287(a_p0, b_p1) {
   var result_1795162402 = 0;
 
-  var F = {procname: "searchIndex.:anonymous", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
+  var F = {procname: "searchIndex.:anonymous", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     F.line = 248;
@@ -3371,7 +3371,7 @@ function HEX3Aanonymous__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZfrnepu95iz_u287(a_p0,
 
   var result_1795162362 = [];
 
-  var F = {procname: "search_vm.searchIndex", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
+  var F = {procname: "search_vm.searchIndex", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     F.line = 239;
@@ -3432,7 +3432,7 @@ function setQuery__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZfrnepu95iz_u549(vm_p0, inde
 
   var result_1795162665 = ({query: [], results: [], cursor: 0, isOpen: false});
 
-  var F = {procname: "search_vm.setQuery", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
+  var F = {procname: "search_vm.setQuery", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
   framePtr = F;
     F.line = 255;
     F.filename = "search_vm.nim";
@@ -3453,7 +3453,7 @@ function setQuery__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZfrnepu95iz_u549(vm_p0, inde
 }
 
 function clearChildren__OOZOOZOOZOOZvfbavzZfepZvfbavzZjroZjro95eraqrere_u117(r_p0, node_p1) {
-  var F = {procname: "web_renderer.clearChildren", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/web/web_renderer.nim", line: 0};
+  var F = {procname: "web_renderer.clearChildren", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/web/web_renderer.nim", line: 0};
   framePtr = F;
     F.line = 169;
     F.filename = "web_renderer.nim";
@@ -3468,7 +3468,7 @@ function clearChildren__OOZOOZOOZOOZvfbavzZfepZvfbavzZjroZjro95eraqrere_u117(r_p
 function isHydrating__OOZOOZOOZOOZvfbavzZfepZvfbavzZekpber_u112() {
   var result_1392509041 = false;
 
-  var F = {procname: "rxcore.isHydrating", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/rxcore.nim", line: 0};
+  var F = {procname: "rxcore.isHydrating", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/rxcore.nim", line: 0};
   framePtr = F;
     F.line = 96;
     F.filename = "rxcore.nim";
@@ -3482,7 +3482,7 @@ function isHydrating__OOZOOZOOZOOZvfbavzZfepZvfbavzZekpber_u112() {
 function hydrationAppend__OOZOOZOOZOOZvfbavzZfepZvfbavzZjroZulqengvba_u111(parent_p0, child_p1) {
   var result_1342177394 = false;
 
-  var F = {procname: "hydration.hydrationAppend", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/web/hydration.nim", line: 0};
+  var F = {procname: "hydration.hydrationAppend", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/web/hydration.nim", line: 0};
   framePtr = F;
     F.line = 173;
     F.filename = "hydration.nim";
@@ -3505,7 +3505,7 @@ function hydrationAppend__OOZOOZOOZOOZvfbavzZfepZvfbavzZjroZulqengvba_u111(paren
 function appendChild__OOZOOZOOZOOZvfbavzZfepZvfbavzZjroZjro95eraqrere_u19(r_p0, parent_p1, child_p2) {
       var Temporary1;
 
-  var F = {procname: "web_renderer.appendChild", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/web/web_renderer.nim", line: 0};
+  var F = {procname: "web_renderer.appendChild", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/web/web_renderer.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     F.line = 67;
@@ -3526,7 +3526,7 @@ function appendChild__OOZOOZOOZOOZvfbavzZfepZvfbavzZjroZjro95eraqrere_u19(r_p0, 
 function getHydrationKey__OOZOOZOOZOOZvfbavzZfepZvfbavzZekpber_u118() {
   var result_1392509047 = null;
 
-  var F = {procname: "rxcore.getHydrationKey", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/rxcore.nim", line: 0};
+  var F = {procname: "rxcore.getHydrationKey", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/rxcore.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     if ((sharedConfig_1392509039[0].context == null)) {
@@ -3555,7 +3555,7 @@ function getHydrationKey__OOZOOZOOZOOZvfbavzZfepZvfbavzZekpber_u118() {
 function get__OOZOOZOOZOOZvfbavzZfepZvfbavzZekpber_u95(r_p0, key_p1) {
   var result_1392509026 = null;
 
-  var F = {procname: "rxcore.get", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/rxcore.nim", line: 0};
+  var F = {procname: "rxcore.get", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/rxcore.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     F.line = 75;
@@ -3574,7 +3574,7 @@ function get__OOZOOZOOZOOZvfbavzZfepZvfbavzZekpber_u95(r_p0, key_p1) {
 }
 
 function delete__OOZOOZOOZOOZvfbavzZfepZvfbavzZekpber_u108(r_p0, key_p1) {
-  var F = {procname: "rxcore.delete", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/rxcore.nim", line: 0};
+  var F = {procname: "rxcore.delete", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/rxcore.nim", line: 0};
   framePtr = F;
     F.line = 86;
     F.filename = "rxcore.nim";
@@ -3587,7 +3587,7 @@ function delete__OOZOOZOOZOOZvfbavzZfepZvfbavzZekpber_u108(r_p0, key_p1) {
 function claimElement__OOZOOZOOZOOZvfbavzZfepZvfbavzZjroZulqengvba_u101(tag_p0) {
   var result_1342177383 = null;
 
-  var F = {procname: "hydration.claimElement", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/web/hydration.nim", line: 0};
+  var F = {procname: "hydration.claimElement", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/web/hydration.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     F.line = 156;
@@ -3632,7 +3632,7 @@ function claimElement__OOZOOZOOZOOZvfbavzZfepZvfbavzZjroZulqengvba_u101(tag_p0) 
 function createElement__OOZOOZOOZOOZvfbavzZfepZvfbavzZjroZjro95eraqrere_u6(r_p0, tag_p1) {
   var result_1325400073 = null;
 
-  var F = {procname: "web_renderer.createElement", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/web/web_renderer.nim", line: 0};
+  var F = {procname: "web_renderer.createElement", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/web/web_renderer.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     F.line = 37;
@@ -3659,7 +3659,7 @@ function createElement__OOZOOZOOZOOZvfbavzZfepZvfbavzZjroZjro95eraqrere_u6(r_p0,
 }
 
 function setAttribute__OOZOOZOOZOOZvfbavzZfepZvfbavzZjroZjro95eraqrere_u27(r_p0, node_p1, name_p2, value_p3) {
-  var F = {procname: "web_renderer.setAttribute", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/web/web_renderer.nim", line: 0};
+  var F = {procname: "web_renderer.setAttribute", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/web/web_renderer.nim", line: 0};
   framePtr = F;
     F.line = 85;
     F.filename = "web_renderer.nim";
@@ -3674,7 +3674,7 @@ function setAttribute__OOZOOZOOZOOZvfbavzZfepZvfbavzZjroZjro95eraqrere_u27(r_p0,
 function createTextNode__OOZOOZOOZOOZvfbavzZfepZvfbavzZjroZjro95eraqrere_u11(r_p0, text_p1) {
   var result_1325400078 = null;
 
-  var F = {procname: "web_renderer.createTextNode", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/web/web_renderer.nim", line: 0};
+  var F = {procname: "web_renderer.createTextNode", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/web/web_renderer.nim", line: 0};
   framePtr = F;
     F.line = 50;
     F.filename = "web_renderer.nim";
@@ -3690,7 +3690,7 @@ function createTextNode__OOZOOZOOZOOZvfbavzZfepZvfbavzZjroZjro95eraqrere_u11(r_p
 function appendChild__OOZOOZOOZOOZvfbavzZfepZvfbavzZjroZjro95eraqrere_u15(r_p0, parent_p1, child_p2) {
       var Temporary1;
 
-  var F = {procname: "web_renderer.appendChild", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim/src/isonim/web/web_renderer.nim", line: 0};
+  var F = {procname: "web_renderer.appendChild", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim/src/isonim/web/web_renderer.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     F.line = 60;
@@ -3909,7 +3909,7 @@ function nsuJoinSep(a_p0, sep_p1) {
 function humanizeKey__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZanivtngvba95iz_u37(key_p0) {
   var result_1912602663 = [];
 
-  var F = {procname: "navigation_vm.humanizeKey", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/navigation_vm.nim", line: 0};
+  var F = {procname: "navigation_vm.humanizeKey", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/navigation_vm.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     F.line = 94;
@@ -4025,7 +4025,7 @@ function renderSearchResultsContent__znva_u629(r_p0, vm_p1) {
 
   var result_1073742458 = null;
 
-  var F = {procname: "renderSearchResultsContent.renderSearchResultsContent", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/components/search_view.nim", line: 0};
+  var F = {procname: "renderSearchResultsContent.renderSearchResultsContent", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/components/search_view.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     F.line = 90;
@@ -4132,7 +4132,7 @@ function renderSearchResultsContent__znva_u629(r_p0, vm_p1) {
 }
 
 function rerenderResults__znva_u613() {
-  var F = {procname: "wireSearch.rerenderResults", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/codetracer/docs/book-isonim/src/main.nim", line: 0};
+  var F = {procname: "wireSearch.rerenderResults", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/codetracer/docs/book-isonim/src/main.nim", line: 0};
   framePtr = F;
     F.line = 81;
     F.filename = "main.nim";
@@ -4147,7 +4147,7 @@ function rerenderResults__znva_u613() {
 function onInput__znva_u651(ev_p0) {
     var Temporary1;
 
-  var F = {procname: "wireSearch.onInput", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/codetracer/docs/book-isonim/src/main.nim", line: 0};
+  var F = {procname: "wireSearch.onInput", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/codetracer/docs/book-isonim/src/main.nim", line: 0};
   framePtr = F;
     F.line = 85;
     F.filename = "main.nim";
@@ -4163,7 +4163,7 @@ function onInput__znva_u651(ev_p0) {
 function moveCursor__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZfrnepu95iz_u559(vm_p0, delta_p1) {
   var result_1795162674 = ({query: [], results: [], cursor: 0, isOpen: false});
 
-  var F = {procname: "search_vm.moveCursor", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
+  var F = {procname: "search_vm.moveCursor", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     F.line = 269;
@@ -4200,7 +4200,7 @@ function selectedResult__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZfrnepu95iz_u573(vm_p0
 
   var result_1795162687 = ({routePath: [], title: [], section: [], summary: [], score: 0});
 
-  var F = {procname: "search_vm.selectedResult", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
+  var F = {procname: "search_vm.selectedResult", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
   framePtr = F;
     F.line = 278;
     F.filename = "search_vm.nim";
@@ -4222,7 +4222,7 @@ function onKeydown__znva_u653(ev_p0) {
       var Temporary1;
       var Temporary2;
 
-  var F = {procname: "wireSearch.onKeydown", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/codetracer/docs/book-isonim/src/main.nim", line: 0};
+  var F = {procname: "wireSearch.onKeydown", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/codetracer/docs/book-isonim/src/main.nim", line: 0};
   framePtr = F;
     F.line = 89;
     F.filename = "main.nim";
@@ -4262,7 +4262,7 @@ function wireSearch__znva_u607(r_p0, index_p1) {
     var Temporary1;
     var Temporary2;
 
-  var F = {procname: "main.wireSearch", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/codetracer/docs/book-isonim/src/main.nim", line: 0};
+  var F = {procname: "main.wireSearch", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/codetracer/docs/book-isonim/src/main.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     F.line = 73;
@@ -4544,7 +4544,7 @@ function splitFrontMatter__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZpbagrag_u175(raw_p0
 
   var result_1728053428 = {Field0: [], Field1: [], Field2: 0};
 
-  var F = {procname: "content.splitFrontMatter", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/content.nim", line: 0};
+  var F = {procname: "content.splitFrontMatter", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/content.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     F.line = 161;
@@ -5032,7 +5032,7 @@ function nsuToLowerAsciiStr(s_p0) {
 function splitFrontMatterList__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZpbagrag_u274(value_p0) {
   var result_1728053524 = [];
 
-  var F = {procname: "content.splitFrontMatterList", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/content.nim", line: 0};
+  var F = {procname: "content.splitFrontMatterList", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/content.nim", line: 0};
   framePtr = F;
     Label1: {
       F.line = 183;
@@ -5097,7 +5097,7 @@ function parseFrontMatter__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZpbagrag_u283(frontR
 
   var result_1728053533 = ({title: [], description: [], section: [], order: 0, slug: [], draft: false, layout: [], hidden: false, aliases: []});
 
-  var F = {procname: "content.parseFrontMatter", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/content.nim", line: 0};
+  var F = {procname: "content.parseFrontMatter", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/content.nim", line: 0};
   framePtr = F;
     Label1: {
       F.line = 194;
@@ -5289,7 +5289,7 @@ function parseDocsPage__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZpbagrag_u7(raw_p0, sou
 
   var result_1728053258 = ({title: [], body: [], sourcePath: []});
 
-  var F = {procname: "content.parseDocsPage", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/content.nim", line: 0};
+  var F = {procname: "content.parseDocsPage", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/content.nim", line: 0};
   framePtr = F;
     F.line = 38;
     F.filename = "content.nim";
@@ -5456,7 +5456,7 @@ function nsuEndsWith(s_p0, suffix_p1) {
 function deriveSlug__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZpbagrag_u333(relPath_p0, front_p1) {
   var result_1728053584 = [];
 
-  var F = {procname: "content.deriveSlug", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/content.nim", line: 0};
+  var F = {procname: "content.deriveSlug", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/content.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     F.line = 222;
@@ -5494,7 +5494,7 @@ function deriveSection__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZpbagrag_u381(relPath_p
 
   var result_1728053632 = [];
 
-  var F = {procname: "content.deriveSection", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/content.nim", line: 0};
+  var F = {procname: "content.deriveSection", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/content.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     F.line = 237;
@@ -5529,7 +5529,7 @@ function deriveRoutePath__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZpbagrag_u410(section
 
   var result_1728053661 = [];
 
-  var F = {procname: "content.deriveRoutePath", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/content.nim", line: 0};
+  var F = {procname: "content.deriveRoutePath", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/content.nim", line: 0};
   framePtr = F;
     F.line = 247;
     F.filename = "content.nim";
@@ -5564,7 +5564,7 @@ function deriveRoutePath__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZpbagrag_u410(section
 function parseContentEntry__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZpbagrag_u414(raw_p0, relPath_p1) {
   var result_1728053665 = ({front: ({title: [], description: [], section: [], order: 0, slug: [], draft: false, layout: [], hidden: false, aliases: []}), page: ({title: [], body: [], sourcePath: []}), slug: [], section: [], routePath: [], source: ({path: [], line: 0})});
 
-  var F = {procname: "content.parseContentEntry", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/content.nim", line: 0};
+  var F = {procname: "content.parseContentEntry", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/content.nim", line: 0};
   framePtr = F;
     F.line = 257;
     F.filename = "content.nim";
@@ -5724,7 +5724,7 @@ function sortContentEntries__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZpbagrag_u499(entr
 function HEX3Aanonymous__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZpbagrag_u501(a_p0, b_p1) {
   var result_1728053752 = 0;
 
-  var F = {procname: "sortContentEntries.:anonymous", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/content.nim", line: 0};
+  var F = {procname: "sortContentEntries.:anonymous", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/content.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     F.line = 284;
@@ -5749,7 +5749,7 @@ function HEX3Aanonymous__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZpbagrag_u501(a_p0, b_
 
 }
 
-  var F = {procname: "content.sortContentEntries", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/content.nim", line: 0};
+  var F = {procname: "content.sortContentEntries", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/content.nim", line: 0};
   framePtr = F;
     F.line = 283;
     F.filename = "content.nim";
@@ -5812,7 +5812,7 @@ function initTable__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZnapubef_u35(initialSize_p0
 function newAnchorIdRegistry__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZnapubef_u21() {
   var result_1828716566 = ({counts: ({data: [], counter: 0})});
 
-  var F = {procname: "anchors.newAnchorIdRegistry", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/anchors.nim", line: 0};
+  var F = {procname: "anchors.newAnchorIdRegistry", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/anchors.nim", line: 0};
   framePtr = F;
     F.line = 39;
     F.filename = "anchors.nim";
@@ -5826,7 +5826,7 @@ function newAnchorIdRegistry__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZnapubef_u21() {
 function directiveName__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u1070(strippedLine_p0) {
   var result_1811940400 = [];
 
-  var F = {procname: "markdown_vm.directiveName", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.directiveName", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 584;
     F.filename = "markdown_vm.nim";
@@ -5852,7 +5852,7 @@ function directiveName__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u1070(str
 function parseComponentProps__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u875(attrs_p0) {
   var result_1811940205 = [];
 
-  var F = {procname: "markdown_vm.parseComponentProps", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.parseComponentProps", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 521;
     F.filename = "markdown_vm.nim";
@@ -6064,7 +6064,7 @@ function parseComponentProps__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u87
 function directiveArgs__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u1126(strippedLine_p0) {
   var result_1811940456 = [];
 
-  var F = {procname: "markdown_vm.directiveArgs", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.directiveArgs", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 592;
     F.filename = "markdown_vm.nim";
@@ -6090,7 +6090,7 @@ function directiveArgs__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u1126(str
 function isDirectiveMarker__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u1176(strippedLine_p0, name_p1) {
   var result_1811940507 = false;
 
-  var F = {procname: "markdown_vm.isDirectiveMarker", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.isDirectiveMarker", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 600;
     F.filename = "markdown_vm.nim";
@@ -6308,7 +6308,7 @@ function nsuFindStr(s_p0, sub_p1, start_p2, last_p3) {
 function isExternalOrAbsoluteLink__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u167(href_p0) {
   var result_1811939497 = false;
 
-  var F = {procname: "markdown_vm.isExternalOrAbsoluteLink", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.isExternalOrAbsoluteLink", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 289;
     F.filename = "markdown_vm.nim";
@@ -6324,7 +6324,7 @@ function resolveRelativePath__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u13
 
   var result_1811939469 = [];
 
-  var F = {procname: "markdown_vm.resolveRelativePath", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.resolveRelativePath", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 270;
     F.filename = "markdown_vm.nim";
@@ -6463,7 +6463,7 @@ function normalizeRelativeLink__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u
 
   var result_1811939506 = {Field0: [], Field1: false};
 
-  var F = {procname: "markdown_vm.normalizeRelativeLink", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.normalizeRelativeLink", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     F.line = 295;
@@ -6547,7 +6547,7 @@ function parseInlineSpans__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u455(t
 
   var result_1811939792 = [];
 
-  var F = {procname: "markdown_vm.parseInlineSpans", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.parseInlineSpans", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 402;
     F.filename = "markdown_vm.nim";
@@ -6725,7 +6725,7 @@ function parseInlineSpans__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u455(t
 function parseBodyParagraphs__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u1209(bodyLines_p0, sourceRelPath_p1, resolveContentPath_p2, resolveSymbol_p3) {
   var result_1811940546 = [];
 
-  var F = {procname: "markdown_vm.parseBodyParagraphs", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.parseBodyParagraphs", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 612;
     F.filename = "markdown_vm.nim";
@@ -6788,7 +6788,7 @@ function parseBodyParagraphs__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u12
 function getStr__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u361(props_p0, name_p1, default_p2) {
   var result_1811939693 = [];
 
-  var F = {procname: "markdown_vm.getStr", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.getStr", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     F.line = 354;
@@ -6836,7 +6836,7 @@ function getStr__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u361(props_p0, n
 function parseCardItems__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u1460(bodyLines_p0, sourceRelPath_p1, resolveContentPath_p2, resolveSymbol_p3) {
   var result_1811940797 = [];
 
-  var F = {procname: "markdown_vm.parseCardItems", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.parseCardItems", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 706;
     F.filename = "markdown_vm.nim";
@@ -6917,7 +6917,7 @@ function normalizeCardVariant__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u1
 
   var result_1811940584 = [];
 
-  var F = {procname: "markdown_vm.normalizeCardVariant", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.normalizeCardVariant", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 630;
     F.filename = "markdown_vm.nim";
@@ -6940,7 +6940,7 @@ function normalizeVariant__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u1251(
 
   var result_1811940581 = [];
 
-  var F = {procname: "markdown_vm.normalizeVariant", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.normalizeVariant", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 625;
     F.filename = "markdown_vm.nim";
@@ -6961,7 +6961,7 @@ function normalizeVariant__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u1251(
 function parseButtonSpecs__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u1535(bodyLines_p0) {
   var result_1811940865 = [];
 
-  var F = {procname: "markdown_vm.parseButtonSpecs", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.parseButtonSpecs", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 729;
     F.filename = "markdown_vm.nim";
@@ -7041,7 +7041,7 @@ function parseButtonSpecs__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u1535(
 function parseFaqItems__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u1586(bodyLines_p0, sourceRelPath_p1, resolveContentPath_p2, resolveSymbol_p3) {
   var result_1811940923 = [];
 
-  var F = {procname: "markdown_vm.parseFaqItems", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.parseFaqItems", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 754;
     F.filename = "markdown_vm.nim";
@@ -7122,7 +7122,7 @@ function parseFormFieldKind__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u164
 
   var result_1811940973 = 0;
 
-  var F = {procname: "markdown_vm.parseFormFieldKind", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.parseFormFieldKind", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 774;
     F.filename = "markdown_vm.nim";
@@ -7157,7 +7157,7 @@ function parseFormFieldKind__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u164
 function getBool__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u384(props_p0, name_p1, default_p2) {
   var result_1811939716 = false;
 
-  var F = {procname: "markdown_vm.getBool", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.getBool", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     F.line = 372;
@@ -7226,7 +7226,7 @@ function getBool__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u384(props_p0, 
 function parseFormFields__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u1662(bodyLines_p0) {
   var result_1811940992 = [];
 
-  var F = {procname: "markdown_vm.parseFormFields", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.parseFormFields", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     Label1: {
       F.line = 790;
@@ -7360,7 +7360,7 @@ function extractYouTubeId__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u1257(
 
   var result_1811940587 = [];
 
-  var F = {procname: "markdown_vm.extractYouTubeId", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.extractYouTubeId", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     F.line = 637;
@@ -7455,7 +7455,7 @@ function parseVideoDirective__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u13
 
   var result_1811940692 = {Field0: [], Field1: [], Field2: []};
 
-  var F = {procname: "markdown_vm.parseVideoDirective", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.parseVideoDirective", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 663;
     F.filename = "markdown_vm.nim";
@@ -7567,7 +7567,7 @@ function isComponentTagLine__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u868
 
   var result_1811940198 = false;
 
-  var F = {procname: "markdown_vm.isComponentTagLine", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.isComponentTagLine", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 507;
     F.filename = "markdown_vm.nim";
@@ -7626,7 +7626,7 @@ function headingMarkerLevel__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u859
 
   var result_1811940189 = 0;
 
-  var F = {procname: "markdown_vm.headingMarkerLevel", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.headingMarkerLevel", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 500;
     F.filename = "markdown_vm.nim";
@@ -7675,7 +7675,7 @@ function slugifyHeadingText__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZnapubef_u3(text_p
 
   var result_1828716549 = [[]];
 
-  var F = {procname: "anchors.slugifyHeadingText", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/anchors.nim", line: 0};
+  var F = {procname: "anchors.slugifyHeadingText", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/anchors.nim", line: 0};
   framePtr = F;
     F.line = 20;
     F.filename = "anchors.nim";
@@ -8424,7 +8424,7 @@ function nextId__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZnapubef_u103(reg_p0, headingT
 
   var result_1828716650 = [];
 
-  var F = {procname: "anchors.nextId", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/anchors.nim", line: 0};
+  var F = {procname: "anchors.nextId", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/anchors.nim", line: 0};
   framePtr = F;
     F.line = 48;
     F.filename = "anchors.nim";
@@ -8460,7 +8460,7 @@ function nextId__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZnapubef_u103(reg_p0, headingT
 function isTableRow__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u795(line_p0) {
   var result_1811940125 = false;
 
-  var F = {procname: "markdown_vm.isTableRow", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.isTableRow", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 483;
     F.filename = "markdown_vm.nim";
@@ -8474,7 +8474,7 @@ function isTableRow__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u795(line_p0
 function isTableSeparatorRow__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u798(line_p0) {
   var result_1811940128 = false;
 
-  var F = {procname: "markdown_vm.isTableSeparatorRow", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.isTableSeparatorRow", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     F.line = 486;
@@ -8530,7 +8530,7 @@ function isTableSeparatorRow__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u79
 function splitTableRow__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u807(line_p0) {
   var result_1811940137 = [];
 
-  var F = {procname: "markdown_vm.splitTableRow", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.splitTableRow", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 493;
     F.filename = "markdown_vm.nim";
@@ -8599,7 +8599,7 @@ function splitTableRow__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u807(line
 function isUnorderedListItem__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u743(line_p0) {
   var result_1811940073 = false;
 
-  var F = {procname: "markdown_vm.isUnorderedListItem", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.isUnorderedListItem", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 472;
     F.filename = "markdown_vm.nim";
@@ -8615,7 +8615,7 @@ function isOrderedListItem__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u730(
 
   var result_1811940060 = false;
 
-  var F = {procname: "markdown_vm.isOrderedListItem", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.isOrderedListItem", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 467;
     F.filename = "markdown_vm.nim";
@@ -8641,7 +8641,7 @@ function listItemText__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u746(line_
 
   var result_1811940076 = [];
 
-  var F = {procname: "markdown_vm.listItemText", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.listItemText", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 475;
     F.filename = "markdown_vm.nim";
@@ -8672,7 +8672,7 @@ function listItemText__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u746(line_
 function startsAnotherBlock__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u1730(line_p0) {
   var result_1811941060 = false;
 
-  var F = {procname: "markdown_vm.startsAnotherBlock", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.startsAnotherBlock", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 811;
     F.filename = "markdown_vm.nim";
@@ -8692,7 +8692,7 @@ function parseMarkdownBlocks__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u17
 
   var result_1811941081 = [[]];
 
-  var F = {procname: "markdown_vm.parseMarkdownBlocks", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.parseMarkdownBlocks", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 837;
     F.filename = "markdown_vm.nim";
@@ -9359,7 +9359,7 @@ function build__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u2994(idx_p0, idx
 
   var result_1811942325 = [];
 
-  var F = {procname: "buildHeadingTree.build", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "buildHeadingTree.build", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     Label1: {
       F.line = 1116;
@@ -9391,7 +9391,7 @@ function buildHeadingTree__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u2991(
 
   var result_1811942321 = [];
 
-  var F = {procname: "markdown_vm.buildHeadingTree", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.buildHeadingTree", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 1123;
     F.filename = "markdown_vm.nim";
@@ -9418,7 +9418,7 @@ function parseMarkdownDoc__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u3049(
 
   var result_1811942397 = ({blocks: [], headingTree: []});
 
-  var F = {procname: "markdown_vm.parseMarkdownDoc", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.parseMarkdownDoc", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     F.line = 1131;
     F.filename = "markdown_vm.nim";
@@ -9471,7 +9471,7 @@ function parseMarkdownDoc__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u3049(
 }
 
 function collectHeadingTexts__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZfrnepu95iz_u585(node_p0, acc_p1, acc_p1_Idx) {
-  var F = {procname: "search_vm.collectHeadingTexts", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
+  var F = {procname: "search_vm.collectHeadingTexts", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
   framePtr = F;
     F.line = 296;
     F.filename = "search_vm.nim";
@@ -9513,7 +9513,7 @@ function collectHeadingTexts__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZfrnepu95iz_u585(
 function spansText__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZznexqbja95iz_u397(spans_p0) {
   var result_1811939727 = [];
 
-  var F = {procname: "markdown_vm.spansText", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
+  var F = {procname: "markdown_vm.spansText", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/markdown_vm.nim", line: 0};
   framePtr = F;
     Label1: {
       F.line = 388;
@@ -9555,7 +9555,7 @@ function searchSummary__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZfrnepu95iz_u630(front_
 
   var result_1795162745 = [];
 
-  var F = {procname: "search_vm.searchSummary", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
+  var F = {procname: "search_vm.searchSummary", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     F.line = 301;
@@ -9613,7 +9613,7 @@ function searchEntry__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZfrnepu95iz_u642(entry_p0
 
   var result_1795162758 = ({routePath: [], title: [], section: [], summary: [], headings: [], aliases: []});
 
-  var F = {procname: "search_vm.searchEntry", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
+  var F = {procname: "search_vm.searchEntry", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
   framePtr = F;
     F.line = 314;
     F.filename = "search_vm.nim";
@@ -9666,7 +9666,7 @@ function searchEntry__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZfrnepu95iz_u642(entry_p0
 function buildSearchIndex__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZfrnepu95iz_u678(manifest_p0, loadEntry_p1) {
   var result_1795162795 = ({entries: []});
 
-  var F = {procname: "search_vm.buildSearchIndex", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
+  var F = {procname: "search_vm.buildSearchIndex", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/search_vm.nim", line: 0};
   framePtr = F;
     F.line = 328;
     F.filename = "search_vm.nim";
@@ -9741,7 +9741,7 @@ function normalizeRoutePath__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZebhgrf_u45(path_p
 
   var result_1761607727 = [];
 
-  var F = {procname: "routes.normalizeRoutePath", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/routes.nim", line: 0};
+  var F = {procname: "routes.normalizeRoutePath", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/routes.nim", line: 0};
   framePtr = F;
     F.line = 98;
     F.filename = "routes.nim";
@@ -9770,7 +9770,7 @@ function normalizeRoutePath__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZebhgrf_u45(path_p
 function newRouteEntry__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZebhgrf_u76(pattern_p0, pageKind_p1, layout_p2, meta_p3) {
   var result_1761607761 = ({pattern: [], canonicalPath: [], pageKind: 0, layout: 0, status: 0, meta: ({title: [], description: [], contentPath: []}), redirectTo: []});
 
-  var F = {procname: "routes.newRouteEntry", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/routes.nim", line: 0};
+  var F = {procname: "routes.newRouteEntry", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/routes.nim", line: 0};
   framePtr = F;
     F.line = 116;
     F.filename = "routes.nim";
@@ -9784,7 +9784,7 @@ function newRouteEntry__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZebhgrf_u76(pattern_p0,
 function newRedirectEntry__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZebhgrf_u175(pattern_p0, redirectTo_p1, meta_p2) {
   var result_1761607859 = ({pattern: [], canonicalPath: [], pageKind: 0, layout: 0, status: 0, meta: ({title: [], description: [], contentPath: []}), redirectTo: []});
 
-  var F = {procname: "routes.newRedirectEntry", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/routes.nim", line: 0};
+  var F = {procname: "routes.newRedirectEntry", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/routes.nim", line: 0};
   framePtr = F;
     F.line = 132;
     F.filename = "routes.nim";
@@ -9798,7 +9798,7 @@ function newRedirectEntry__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZebhgrf_u175(pattern
 function newRouteManifest__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZebhgrf_u180(entries_p0, notFound_p1) {
   var result_1761607863 = ({entries: [], notFound: ({pattern: [], canonicalPath: [], pageKind: 0, layout: 0, status: 0, meta: ({title: [], description: [], contentPath: []}), redirectTo: []})});
 
-  var F = {procname: "routes.newRouteManifest", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/routes.nim", line: 0};
+  var F = {procname: "routes.newRouteManifest", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/routes.nim", line: 0};
   framePtr = F;
     F.line = 143;
     F.filename = "routes.nim";
@@ -9812,7 +9812,7 @@ function newRouteManifest__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZebhgrf_u180(entries
 function notFoundEntry__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZebhgrf_u172(meta_p0) {
   var result_1761607854 = ({pattern: [], canonicalPath: [], pageKind: 0, layout: 0, status: 0, meta: ({title: [], description: [], contentPath: []}), redirectTo: []});
 
-  var F = {procname: "routes.notFoundEntry", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/routes.nim", line: 0};
+  var F = {procname: "routes.notFoundEntry", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/routes.nim", line: 0};
   framePtr = F;
     F.line = 123;
     F.filename = "routes.nim";
@@ -9826,7 +9826,7 @@ function notFoundEntry__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZebhgrf_u172(meta_p0) {
 function buildManifestFromEntries__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZebhgrf_u354(entries_p0) {
   var result_1761608036 = ({entries: [], notFound: ({pattern: [], canonicalPath: [], pageKind: 0, layout: 0, status: 0, meta: ({title: [], description: [], contentPath: []}), redirectTo: []})});
 
-  var F = {procname: "routes.buildManifestFromEntries", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/routes.nim", line: 0};
+  var F = {procname: "routes.buildManifestFromEntries", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/routes.nim", line: 0};
   framePtr = F;
     F.line = 219;
     F.filename = "routes.nim";
@@ -9980,7 +9980,7 @@ function HEX5BHEX5D__znva_u210(t_p0, key_p1) {
 function loadEmbeddedContentEntry__znva_u158(contentPath_p0) {
   var result_1073741984 = ({front: ({title: [], description: [], section: [], order: 0, slug: [], draft: false, layout: [], hidden: false, aliases: []}), page: ({title: [], body: [], sourcePath: []}), slug: [], section: [], routePath: [], source: ({path: [], line: 0})});
 
-  var F = {procname: "main.loadEmbeddedContentEntry", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/codetracer/docs/book-isonim/src/main.nim", line: 0};
+  var F = {procname: "main.loadEmbeddedContentEntry", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/codetracer/docs/book-isonim/src/main.nim", line: 0};
   framePtr = F;
     F.line = 42;
     F.filename = "main.nim";
@@ -9996,7 +9996,7 @@ function siteSearchIndex__znva_u276() {
 
   var result_1073742101 = ({entries: []});
 
-  var F = {procname: "main.siteSearchIndex", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/codetracer/docs/book-isonim/src/main.nim", line: 0};
+  var F = {procname: "main.siteSearchIndex", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/codetracer/docs/book-isonim/src/main.nim", line: 0};
   framePtr = F;
     F.line = 45;
     F.filename = "main.nim";
@@ -10074,7 +10074,7 @@ function themeFromString__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZgurzr95iz_u14(s_p0, 
 
   var result_1845493777 = 0;
 
-  var F = {procname: "theme_vm.themeFromString", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/theme_vm.nim", line: 0};
+  var F = {procname: "theme_vm.themeFromString", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/theme_vm.nim", line: 0};
   framePtr = F;
     F.line = 40;
     F.filename = "theme_vm.nim";
@@ -10102,7 +10102,7 @@ function resolveInitialTheme__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZgurzr95iz_u59(pe
 
   var result_1845493822 = 0;
 
-  var F = {procname: "theme_vm.resolveInitialTheme", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/theme_vm.nim", line: 0};
+  var F = {procname: "theme_vm.resolveInitialTheme", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/theme_vm.nim", line: 0};
   framePtr = F;
     F.line = 61;
     F.filename = "theme_vm.nim";
@@ -10127,7 +10127,7 @@ function resolveInitialTheme__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZgurzr95iz_u59(pe
 function newThemeViewModel__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZgurzr95iz_u63(persisted_p0, prefersDark_p1) {
   var result_1845493826 = ({theme: 0});
 
-  var F = {procname: "theme_vm.newThemeViewModel", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/theme_vm.nim", line: 0};
+  var F = {procname: "theme_vm.newThemeViewModel", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/theme_vm.nim", line: 0};
   framePtr = F;
     F.line = 74;
     F.filename = "theme_vm.nim";
@@ -10143,7 +10143,7 @@ function themeToString__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZgurzr95iz_u11(theme_p0
 
   var result_1845493773 = [];
 
-  var F = {procname: "theme_vm.themeToString", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/theme_vm.nim", line: 0};
+  var F = {procname: "theme_vm.themeToString", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/theme_vm.nim", line: 0};
   framePtr = F;
     F.line = 35;
     F.filename = "theme_vm.nim";
@@ -10168,7 +10168,7 @@ function otherTheme__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZgurzr95iz_u34(theme_p0) {
 
   var result_1845493796 = 0;
 
-  var F = {procname: "theme_vm.otherTheme", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/theme_vm.nim", line: 0};
+  var F = {procname: "theme_vm.otherTheme", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/theme_vm.nim", line: 0};
   framePtr = F;
     F.line = 51;
     F.filename = "theme_vm.nim";
@@ -10191,7 +10191,7 @@ function otherTheme__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZgurzr95iz_u34(theme_p0) {
 function applyTheme__znva_u661() {
     var Temporary1;
 
-  var F = {procname: "wireThemeToggle.applyTheme", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/codetracer/docs/book-isonim/src/main.nim", line: 0};
+  var F = {procname: "wireThemeToggle.applyTheme", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/codetracer/docs/book-isonim/src/main.nim", line: 0};
   framePtr = F;
     F.line = 116;
     F.filename = "main.nim";
@@ -10223,7 +10223,7 @@ function applyTheme__znva_u661() {
 function toggleTheme__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZgurzr95iz_u37(theme_p0) {
   var result_1845493799 = 0;
 
-  var F = {procname: "theme_vm.toggleTheme", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/theme_vm.nim", line: 0};
+  var F = {procname: "theme_vm.toggleTheme", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/theme_vm.nim", line: 0};
   framePtr = F;
     F.line = 55;
     F.filename = "theme_vm.nim";
@@ -10237,7 +10237,7 @@ function toggleTheme__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZgurzr95iz_u37(theme_p0) 
 function toggle__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZgurzr95iz_u40(vm_p0) {
   var result_1845493802 = ({theme: 0});
 
-  var F = {procname: "theme_vm.toggle", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/isonim-docs/src/core/theme_vm.nim", line: 0};
+  var F = {procname: "theme_vm.toggle", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/isonim-docs/src/core/theme_vm.nim", line: 0};
   framePtr = F;
     F.line = 58;
     F.filename = "theme_vm.nim";
@@ -10251,7 +10251,7 @@ function toggle__OOZOOZOOZOOZvfbavz45qbpfZfepZpberZgurzr95iz_u40(vm_p0) {
 function onClick__znva_u668(ev_p0) {
     var Temporary1;
 
-  var F = {procname: "wireThemeToggle.onClick", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/codetracer/docs/book-isonim/src/main.nim", line: 0};
+  var F = {procname: "wireThemeToggle.onClick", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/codetracer/docs/book-isonim/src/main.nim", line: 0};
   framePtr = F;
     F.line = 126;
     F.filename = "main.nim";
@@ -10268,7 +10268,7 @@ function wireThemeToggle__znva_u656(r_p0) {
     var Temporary1;
     var Temporary2;
 
-  var F = {procname: "main.wireThemeToggle", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/codetracer/docs/book-isonim/src/main.nim", line: 0};
+  var F = {procname: "main.wireThemeToggle", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/codetracer/docs/book-isonim/src/main.nim", line: 0};
   framePtr = F;
   BeforeRet: {
     F.line = 104;
@@ -10298,7 +10298,7 @@ function wireThemeToggle__znva_u656(r_p0) {
 
   
 }
-var F = {procname: "module main", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/codetracer/docs/book-isonim/src/main.nim", line: 0};
+var F = {procname: "module main", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/codetracer/docs/book-isonim/src/main.nim", line: 0};
 framePtr = F;
 F.line = 156;
 F.filename = "main.nim";
@@ -10331,6 +10331,6 @@ F.line = 159;
 })()
 ;
 framePtr = F.prev;
-var F = {procname: "module main", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-bench-001/codetracer/codetracer/docs/book-isonim/src/main.nim", line: 0};
+var F = {procname: "module main", prev: framePtr, filename: "/var/lib/github-runner-work/mcl-004/codetracer/codetracer/docs/book-isonim/src/main.nim", line: 0};
 framePtr = F;
 framePtr = F.prev;
