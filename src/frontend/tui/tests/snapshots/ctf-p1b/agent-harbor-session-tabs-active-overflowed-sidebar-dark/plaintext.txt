@@ -1,0 +1,56 @@
+ ● Port the route ca… CLI ✕   ● +13   +
+ ● Replace the hand-rolled JSON writer CLI
+ ● Cap the telemetry retry budget per h…CT
+ ● Fix the flaky clock-skew test on the…Tg
+ ● Add search to the settings page     TUI
+ ● Benchmark route cache reads on the n…CT
+ ● Add jitter to the telemetry retry d…Web
+ ● Cache the dependency graph between …CLI
+ ● Profile the importer on the large fi…CT
+ ○ Migrate cached routes without a cold…Tg
+ ● Persist the telemetry queue across …TUI
+ ○ Migrate the CI matrix to the new run…CT
+ ● Split the settings page into tabs   Web
+ ● Retry telemetry uploads with exponen…CT
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             

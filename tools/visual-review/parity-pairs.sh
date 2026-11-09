@@ -21,19 +21,33 @@
 # `build/ctf-p1b/parity`, where the layout test writes its report). A capture
 # with no partner is reported by name and the script exits non-zero after
 # doing the others.
+#
+# parity-pairs.sh --agent-harbor-tui [out-dir] — the same for the terminal:
+# every terminal capture `build/ctf-p1b/tui/<id>.png`
+# (`ci/test/ctf-p1b-tui-capture.sh`, `CTF_P1B_TUI_OUT` overrides) beside the
+# web capture of the same story, theme and size, as `<id>.web.png`,
+# `<id>.tui.png` and `<id>.side-by-side.png` (web on the left) in <out-dir>
+# (default `build/ctf-p1b/parity-tui`).
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-if [ "${1:-}" = "--agent-harbor" ]; then
-	gpui_dir="${CTF_P1B_GPUI_OUT:-${root}/build/ctf-p1b/gpui}"
+if [ "${1:-}" = "--agent-harbor" ] || [ "${1:-}" = "--agent-harbor-tui" ]; then
+	if [ "${1}" = "--agent-harbor-tui" ]; then
+		gpui_dir="${CTF_P1B_TUI_OUT:-${root}/build/ctf-p1b/tui}"
+		arm=tui
+		out="${2:-${root}/build/ctf-p1b/parity-tui}"
+	else
+		gpui_dir="${CTF_P1B_GPUI_OUT:-${root}/build/ctf-p1b/gpui}"
+		arm=gpui
+		out="${2:-${root}/build/ctf-p1b/parity}"
+	fi
 	web_dir="${CTF_P1B_WEB_OUT:-${root}/build/ctf-p1b/web}"
-	out="${2:-${root}/build/ctf-p1b/parity}"
 	mkdir -p "${out}"
 	# One imagemagick for every pair: a `nix shell` per pair costs a second
 	# each, over hundreds of pairs.
 	# shellcheck disable=SC2016  # the inner bash expands these, from its arguments
 	nix shell nixpkgs#imagemagick --command bash -c '
 		set -uo pipefail
-		gpui_dir="$1" web_dir="$2" out="$3"
+		gpui_dir="$1" web_dir="$2" out="$3" arm="$4"
 		status=0 pairs=0
 		shopt -s nullglob
 		ids=()
@@ -47,12 +61,12 @@ if [ "${1:-}" = "--agent-harbor" ]; then
 				[ -f "${f}" ] || { echo "parity-pairs: ${id}: missing ${f}" >&2; status=1; continue 2; }
 			done
 			cp "${web}" "${out}/${id}.web.png"
-			cp "${gpui}" "${out}/${id}.gpui.png"
+			cp "${gpui}" "${out}/${id}.${arm}.png"
 			magick "${web}" "${gpui}" -background "#ff00ff" +append "${out}/${id}.side-by-side.png"
 			pairs=$((pairs + 1))
 		done
-		echo "parity-pairs: ${pairs} Agent Harbor pairs in ${out}"
-		exit "${status}"' pairs "${gpui_dir}" "${web_dir}" "${out}"
+		echo "parity-pairs: ${pairs} Agent Harbor ${arm} pairs in ${out}"
+		exit "${status}"' pairs "${gpui_dir}" "${web_dir}" "${out}" "${arm}"
 	exit $?
 fi
 out="${1:-${root}/build/plat35/parity}"

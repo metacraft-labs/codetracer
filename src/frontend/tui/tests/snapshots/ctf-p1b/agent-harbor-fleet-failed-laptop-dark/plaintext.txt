@@ -1,0 +1,56 @@
+ Fleet Snapshot  ✕
+ AGENT HARBOR SESSIONS  synthetic fleet, 2026-01-15 10:00 UTC                                                                                                      9 of 48 sessions
+ prompts of 12 withheld by the server
+  All 48   Needs input 5   Running 9   Queued 3   Failed 9   Ended 22
+   Session                                                      Agent                          Host                           Initiative                       Duration      Active
+ ● Show the upload queue's depth on the status page             Codex 0.91.3                   win-01                         —                                  2h 28m          8h
+   failed orbit-ws-6 · cf5812b4
+   build failed: 3 tests did not pass
+   build failed: 3 tests did not pass  +1
+ ● Reject route plans whose waypoints leave the mission corrid… Gemini 1.8.2                   build-01                       Telemetry upload retries           3h 10m          8h
+   failed orbit-labs/flight-planner · fix/propagator-step-coun…
+   build failed: 3 tests did not pass
+   build failed: 3 tests did not pass  +1
+ ● Rename the legacy config keys and keep the old names as ali… Claude 4.2.0                   build-03                       —                                  2h 54m         10h
+   failed orbit-ws-3 · e68df722
+   build failed: 3 tests did not pass
+   build failed: 3 tests did not pass  +1
+ ● Give the latency chart a percentile selector                 Codex 0.91.3                   gpu-01                         Telemetry upload retries           2h 33m         11h
+   failed orbit-labs/telemetry-ui · docs/config-3-migration · …
+   [exit] status=1
+   [exit] status=1  +1
+ ● feat/telemetry-retry-budget                                  Opencode 0.12.7                build-02                       —                                     47m         11h
+   failed meadow/paperboat · 6bba8783
+   workspace provisioning failed: disk quota exceeded
+   workspace provisioning failed: disk quota exceeded  +1
+ ● Shrink the parser's fuzz corpus without losing coverage      Gemini 1.8.2 ×2                mac-01                         Route cache on the new storag…     1h 46m         12h
+   failed orbit-labs/flight-planner · fix/latency-chart-light-…
+   [exit] status=1
+   [exit] status=1  +1
+ ● route-cache-4  failed orbit-ws-6 · 6f212579                  Opencode 0.12.7                win-01                         —                                  1h 44m         13h
+   agent stopped: context window exhausted
+   agent stopped: context window exhausted  +1
+ ● Stream large telemetry exports instead of buffering them     Codex 0.91.3                   build-02                       Route cache on the new storag…     1h 47m         14h
+   cancelled orbit-labs/telemetry-ui · feat/telemetry-retry-bu…
+   Committed 2 files
+   Anti-halting resumed a stalled turn (idle turn)  +1
+ ● Move the scheduler's clock behind an injectable interface    Claude 4.2.0                   build-01                       —                                     25m         14h
+   cancelled orbit-labs/orbit-sim · fix/propagator-step-count …
+   Committed 2 files
+   Committed 2 files  +1
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    

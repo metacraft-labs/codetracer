@@ -1,0 +1,56 @@
+ Sessions  ✕
+ SESSIONS 40 sessions · 6 need input · 8 idle · 16 running · 2 failed
+ invented working set: 40 sessions over 5 initiatives
+ ▾ ● Telemetry upload retries                                                                                                                1/4 2 need input · 2 idle · 2 running
+ ● Retry telemetry uploads with exponential backoff                                    needs input CodeTracer · Claude 2.1.0 · host-a                                           now
+   assistant: Should the old behaviour stay behind a flag, or go?
+ ● Report dropped telemetry batches on the status page                                 needs input CLI · Codex 0.9.4 · host-b                                                    4m
+   assistant: Should the old behaviour stay behind a flag, or go?
+ ○ Test telemetry retries against a flaky collector                                    idle CodeTracer · Grok 1.2.0 · host-a                                                     2m
+   assistant: Done for now; ready for the next instruction.
+ ○ Persist the telemetry queue across restarts                                         idle Telegram · Codex 0.9.4 · host-f                                                      5m
+   assistant: Done for now; ready for the next instruction.
+ ● Document the telemetry retry settings                                               running Telegram · Opencode 0.6.1 · host-f                                               now
+   assistant: Running the tests again after the change.
+ ● Add jitter to the telemetry retry delays                                            running TUI · Grok 1.2.0 · host-e                                                         3m
+   assistant: Running the tests again after the change.
+ ● Cap the telemetry retry budget per hour                                             completed CodeTracer · Opencode 0.6.1 · host-d                                            1m
+   assistant: Finished; the tests pass.
+ ▾ ● Settings redesign                                                                                                                       3/8 2 need input · 2 idle · 2 running
+ ● Add search to the settings page                                                     needs input CLI · Opencode 0.6.1 · host-b                                                now
+   assistant: Should the old behaviour stay behind a flag, or go?
+ ● Show which settings need a restart                                                  needs input WebUI · Claude 2.1.0 · host-c                                                 4m
+   assistant: Should the old behaviour stay behind a flag, or go?
+ ○ Reset a settings tab to its defaults                                                idle CLI · Codex 0.9.4 · host-b                                                           2m
+   assistant: Done for now; ready for the next instruction.
+ ○ Move the account settings into their own tab                                        idle CodeTracer · Claude 2.1.0 · host-a                                                   5m
+   assistant: Done for now; ready for the next instruction.
+ ● Split the settings page into tabs                                                   running WebUI · Grok 1.2.0 · host-c                                                       2m
+   assistant: Running the tests again after the change.
+ ● Keep unsaved settings when switching tabs                                           running Telegram · Codex 0.9.4 · host-f                                                   3m
+   assistant: Running the tests again after the change.
+ ● Add keyboard navigation to the settings tabs                                        completed TUI · Grok 1.2.0 · host-e                                                       1m
+   assistant: Finished; the tests pass.
+ ▾ ● Release 3.0                                                                                                                            5/12 2 need input · 1 idle · 2 running
+ ● Trim the 3.0 release bundle under 40 MB                                             needs input WebUI · Grok 1.2.0 · host-c                                                  now
+   assistant: Should the old behaviour stay behind a flag, or go?
+ ● Tag the 3.0 release candidate                                                       needs input CodeTracer · Opencode 0.6.1 · host-d                                          4m
+   assistant: Should the old behaviour stay behind a flag, or go?
+ ○ Rename the units module's helpers for 3.0                                           idle CLI · Opencode 0.6.1 · host-b                                                        5m
+   assistant: Done for now; ready for the next instruction.
+ ● Remove the deprecated sync API for 3.0                                              running CodeTracer · Codex 0.9.4 · host-d                                                 2m
+   assistant: Running the tests again after the change.
+ ● Draft the 3.0 release notes                                                         running CodeTracer · Claude 2.1.0 · host-a                                                3m
+   assistant: Running the tests again after the change.
+ ● Bump the minimum supported runtime for 3.0                                          completed Telegram · Codex 0.9.4 · host-f                                                 1m
+   assistant: Finished; the tests pass.
+ ● Write the upgrade guide for 3.0                                                     completed TUI · Claude 2.1.0 · host-e                                                     4m
+   assistant: Finished; the tests pass.
+ ▾ ● Route cache on the new storage layer                                                                                             2/6 1 idle · 4 running · 1 queued · 1 failed
+ ○ Expire stale routes when the storage layer compacts                                 idle CodeTracer · Codex 0.9.4 · host-d                                                   now
+   assistant: Done for now; ready for the next instruction.
+ ● Port the route cache to the new storage layer                                       running CLI · Codex 0.9.4 · host-b                                                        1m
+   assistant: Running the tests again after the change.
+ ● Fix the route cache eviction race                                                   running CodeTracer · Claude 2.1.0 · host-a                                                1m
+   assistant: Running the tests again after the change.
+ ● Migrate cached routes without a cold start                                          running Telegram · Opencode 0.6.1 · host-f                                                4m

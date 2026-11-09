@@ -1,0 +1,56 @@
+ SESSIONS                                  «
+ 14 sessions · 2 need input · 2 idle · 7 ru…
+ invented working set: 14 sessions over 4 i…
+ ● Retry telemetry uploads with exponen… now
+   needs input CodeTracer · Claude 2.1.0 · …
+   assistant: Should the old behaviour stay…
+ ● Cache the dependency graph between C… now
+   needs input CLI · Opencode 0.6.1 · host-b
+   assistant: Should the old behaviour stay…
+ ○ Migrate the CI matrix to the new runn… 3m
+   idle CodeTracer · Opencode 0.6.1 · host-d
+   assistant: Done for now; ready for the n…
+ ○ Migrate cached routes without a cold … 5m
+   idle Telegram · Codex 0.9.4 · host-f
+   assistant: Done for now; ready for the n…
+ ● Port the route cache to the new stora… 1m
+   running CLI · Codex 0.9.4 · host-b
+   assistant: Running the tests again after…
+ ● Split the settings page into tabs      2m
+   running WebUI · Grok 1.2.0 · host-c
+   assistant: Running the tests again after…
+ ● Add search to the settings page        3m
+   running TUI · Grok 1.2.0 · host-e
+   assistant: Running the tests again after…
+ ● Persist the telemetry queue across re… 4m
+   running TUI · Claude 2.1.0 · host-e
+   assistant: Running the tests again after…
+ ● Fix the flaky clock-skew test on the … 4m
+   running Telegram · Opencode 0.6.1 · host…
+   assistant: Running the tests again after…
+ ● Cap the telemetry retry budget per ho… 5m
+   running CodeTracer · Claude 2.1.0 · host…
+   assistant: Running the tests again after…
+ ● Replace the hand-rolled JSON writer    6m
+   running CLI · Codex 0.9.4 · host-b
+   assistant: Running the tests again after…
+ ● Profile the importer on the large fix… 6m
+   queued CodeTracer · Grok 1.2.0 · host-a
+   assistant: Queued until an agent slot fr…
+ ● Benchmark route cache reads on the ne… 2m
+   failed CodeTracer · Codex 0.9.4 · host-d
+   [exit] status=1
+ ● Add jitter to the telemetry retry del… 1m
+   completed WebUI · Claude 2.1.0 · host-c
+   assistant: Finished; the tests pass.
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             

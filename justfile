@@ -5748,6 +5748,37 @@ ctf-p1b-gpui-captures:
   bash ci/test/ctf-p1b-gpui-story-capture.sh
   bash ci/lib/run-nim-test-lane.sh agent-harbor-gpui-captures
 
+# CTF-P1b: every Agent Harbor story on a REAL TERMINAL — the terminal story
+# host (`src/frontend/tui/agent_harbor/ah_tui_story_host.nim`) in a pty per
+# story, theme and size (laptop 180x56 and sidebar 45x56 cells: 1440x900 and
+# 360x900 at 8x16 px a cell), read back through TermAssert by the
+# `tui-real-terminal` suite `test_ctf_p1b_tui_views_cover_web_states.nim`
+# (viewmodel, cell styles and committed snapshots), each screen written as an
+# SVG in its colours and rasterised to `build/ctf-p1b/tui/<id>.png`, then
+# paired with the web capture of the same story in `build/ctf-p1b/parity-tui/`
+# when `just ctf-p1b-web-captures` has taken it. Over the synthetic set.
+ctf-p1b-tui-captures: tui-prereqs
+  bash ci/test/ctf-p1b-tui-capture.sh
+
+# CTF-P1b: one Agent Harbor story in this terminal, by its StoryBook id
+# (`--list` among the ids lists them): clicks fold, filter and switch, the
+# pointer opens the initiative popup; `q` ends it (it ends by itself after
+# 30 s, as every snapshot app does). Needs a truecolor terminal.
+ctf-p1b-tui-story story="--list" theme="dark": tui-prereqs
+  #!/usr/bin/env bash
+  set -euo pipefail
+  flags=()
+  for f in $(cat build/grammars/tui-link-flags.txt 2>/dev/null); do flags+=("--passL:${f}"); done
+  AGENT_HARBOR_FIXTURES=synthetic nim c --hints:off --warnings:off --mm:orc -d:release \
+    --path:src/frontend/viewmodel \
+    "-d:isonimTuiGrammarArchive=${PWD}/build/grammars/libcodetracer_tui_grammars.a" \
+    "${flags[@]}" --path:../TermAssertClient/src \
+    --nimcache:build/nimcache/codetracer-tui-story -o:build/bin/codetracer-tui-story \
+    src/frontend/tui/agent_harbor/ah_tui_story_host.nim
+  if [ "{{story}}" = "--list" ]; then exec build/bin/codetracer-tui-story --list; fi
+  exec build/bin/codetracer-tui-story "--story={{story}}" "--theme={{theme}}" \
+    "--cols=$(tput cols)" "--rows=$(tput lines)"
+
 # CTF-P1b's web arm: the same stories in StoryBook (`capture-storybook.mjs
 # --regions`) into `build/ctf-p1b/web/`, and the browser's regions into the
 # committed `src/tests/visual/agent-harbor-web-regions.json`. Re-take and

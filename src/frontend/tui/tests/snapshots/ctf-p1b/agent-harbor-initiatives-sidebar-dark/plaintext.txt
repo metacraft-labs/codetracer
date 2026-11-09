@@ -1,0 +1,56 @@
+ Initiatives  ✕
+ INITIATIVES  4 initiatives · 12 sessions ·…
+ ▾ ● Telemetry upload retries      1/4 · 25%
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀       ● 1  ● 1  ● 2
+     CURRENT TR-M1: Data model
+     orbit-labs/telemetry-retry · manager t…
+      ● Retry telemetry uploads… needs input
+      ● Persist the telemetry queue… running
+      ● Cap the telemetry retry bud… running
+      ● Add jitter to the telemet… completed
+ ▾ ● CI runner migration          4/10 · 40%
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀  ● 4  ● 1  ● 1  ● 1  ● 3
+     CURRENT CM-M4: Migration
+     orbit-labs/ci-runner-migration
+      ● Cache the dependency gr… needs input
+      ○ Migrate the CI matrix to the n… idle
+      ● Fix the flaky clock-skew te… running
+ ▾ ● Route cache on the new stor…  2/6 · 33%
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  ● 2  ● 1  ● 1  ● 2
+     CURRENT RC-M2: Core change
+     orbit-labs/route-cache
+      ○ Migrate cached routes without … idle
+      ● Port the route cache to the… running
+      ● Benchmark route cache reads … failed
+ ▾ ● Settings redesign             3/8 · 38%
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  ● 3  ● 1  ● 1  ● 3
+     CURRENT SR-M3: Front-end
+     orbit-labs/settings-redesign · manager…
+      ● Split the settings page int… running
+      ● Add search to the settings … running
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             

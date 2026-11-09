@@ -1,0 +1,56 @@
+ Initiative Progress  ✕
+ INITIATIVE PROGRESS  1 of 4 milestones · 2…
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ● 1 completed  ● 1 in progress  ● 2 planned
+ Telemetry upload retries: 1 of 4 milestones
+ done; the current one is A milestone whose
+ title runs on well past any width a panel
+ gives it 1.
+ CURRENT TR-M1: A milestone whose title run…
+ IN PROGRESS (1)
+ ● TR-M1   A milestone whose title runs on …
+   CURRENT 1/3 deliverables · Tests: 2 pend…
+ PLANNED (2)
+ ● TR-M2   A milestone whose title runs on …
+   2/3 deliverables · Tests: 2 pending
+ ● TR-M3   A milestone whose title runs on …
+   0/3 deliverables · Tests: 2 pending
+ COMPLETED (1)
+ ● TR-M0   A milestone whose title runs on …
+   3/3 deliverables · Tests: 2 passing
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             

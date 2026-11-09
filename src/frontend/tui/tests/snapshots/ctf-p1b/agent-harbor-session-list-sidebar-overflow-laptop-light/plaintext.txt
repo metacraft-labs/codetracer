@@ -1,0 +1,56 @@
+ SESSIONS                                             «
+ 40 sessions · 6 need input · 8 idle · 16 running · 2 …
+ invented working set: 40 sessions over 5 initiatives
+ ▾ ● Telemetry upload retries 1/4 2 need input · 2 id…
+ ● Retry telemetry uploads with exponential backoff now
+   needs input CodeTracer · Claude 2.1.0 · host-a
+   assistant: Should the old behaviour stay behind a f…
+ ● Report dropped telemetry batches on the status p… 4m
+   needs input CLI · Codex 0.9.4 · host-b
+   assistant: Should the old behaviour stay behind a f…
+ ○ Test telemetry retries against a flaky collector  2m
+   idle CodeTracer · Grok 1.2.0 · host-a
+   assistant: Done for now; ready for the next instruc…
+ ○ Persist the telemetry queue across restarts       5m
+   idle Telegram · Codex 0.9.4 · host-f
+   assistant: Done for now; ready for the next instruc…
+ ● Document the telemetry retry settings            now
+   running Telegram · Opencode 0.6.1 · host-f
+   assistant: Running the tests again after the change.
+ ● Add jitter to the telemetry retry delays          3m
+   running TUI · Grok 1.2.0 · host-e
+   assistant: Running the tests again after the change.
+ ● Cap the telemetry retry budget per hour           1m
+   completed CodeTracer · Opencode 0.6.1 · host-d
+   assistant: Finished; the tests pass.
+ ▾ ● Settings redesign        3/8 2 need input · 2 id…
+ ● Add search to the settings page                  now
+   needs input CLI · Opencode 0.6.1 · host-b
+   assistant: Should the old behaviour stay behind a f…
+ ● Show which settings need a restart                4m
+   needs input WebUI · Claude 2.1.0 · host-c
+   assistant: Should the old behaviour stay behind a f…
+ ○ Reset a settings tab to its defaults              2m
+   idle CLI · Codex 0.9.4 · host-b
+   assistant: Done for now; ready for the next instruc…
+ ○ Move the account settings into their own tab      5m
+   idle CodeTracer · Claude 2.1.0 · host-a
+   assistant: Done for now; ready for the next instruc…
+ ● Split the settings page into tabs                 2m
+   running WebUI · Grok 1.2.0 · host-c
+   assistant: Running the tests again after the change.
+ ● Keep unsaved settings when switching tabs         3m
+   running Telegram · Codex 0.9.4 · host-f
+   assistant: Running the tests again after the change.
+ ● Add keyboard navigation to the settings tabs      1m
+   completed TUI · Grok 1.2.0 · host-e
+   assistant: Finished; the tests pass.
+ ▾ ● Release 3.0              5/12 2 need input · 1 i…
+ ● Trim the 3.0 release bundle under 40 MB          now
+   needs input WebUI · Grok 1.2.0 · host-c
+   assistant: Should the old behaviour stay behind a f…
+ ● Tag the 3.0 release candidate                     4m
+   needs input CodeTracer · Opencode 0.6.1 · host-d
+   assistant: Should the old behaviour stay behind a f…
+ ○ Rename the units module's helpers for 3.0         5m
+   idle CLI · Opencode 0.6.1 · host-b

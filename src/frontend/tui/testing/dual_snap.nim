@@ -805,9 +805,18 @@ proc newestSourceTime*(stem: string): float =
   ## colour a child paints is resolved from `design_tokens.nim` there, so a
   ## token change (a `just sync-design-tokens`, or PLAT-46's derivation
   ## mutation arms) must rebuild the children like a change under `app/`.
-  for dir in [tui / "app", tui / "host",
+  ## **`tui/agent_harbor/`, `stories/`, `viewmodel/views/` AND THE AGENT
+  ## HARBOR VIEWMODELS ARE IN THE STAMP AS OF CTF-P1b**, for the same reason:
+  ## `apps/app_agent_harbor_story.nim` draws the Agent Harbor views over the
+  ## story constructors, the shared words and palette, and the viewmodels of
+  ## the sibling `nim-agents-isonim-viewmodels`, and a negative control
+  ## against any of them must not be graded by a binary built before it.
+  for dir in [tui / "app", tui / "host", tui / "agent_harbor",
               repoRoot() / "src" / "common" / "terminal_graphics",
-              repoRoot() / "src" / "frontend" / "styles" / "generated"]:
+              repoRoot() / "src" / "frontend" / "styles" / "generated",
+              repoRoot() / "src" / "frontend" / "stories",
+              repoRoot() / "src" / "frontend" / "viewmodel" / "views",
+              repoRoot().parentDir / "nim-agents-isonim-viewmodels" / "src"]:
     if not dirExists(dir):
       continue
     for path in walkDirRec(dir):

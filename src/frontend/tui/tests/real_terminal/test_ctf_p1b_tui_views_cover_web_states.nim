@@ -1,0 +1,727 @@
+## test_ctf_p1b_tui_views_cover_web_states.nim — CTF-P1b, Tier 2: **every
+## web story of CodeTracer as an Agent Harbor front-end has a terminal
+## rendering of the same viewmodel state, and a real terminal shows it.**
+##
+## The stories are not listed here. They are read from their one
+## declaration, `stories/codetracer_stories.nim` (`codeTracerStorySections`),
+## and their StoryBook ids are computed by the generator's own `storybookId`,
+## as the GPUI suite (`gpui/tests/test_ctf_p1b_gpui_views_cover_web_states.nim`)
+## does. A story whose surface has no terminal view fails BY ITS ID.
+##
+## For every story of the `CodeTracer/Agent Harbor` section, at the brief's
+## laptop and sidebar sizes (180×56 and 45×56 cells: 1440×900 and 360×900 at
+## 8×16 px a cell, `ah_tui_stories.TuiSizes`) and in both colour modes:
+##
+##   1. THE DRAWING AGAINST THE VIEWMODEL. `mountStory` builds the viewmodel
+##      with the SAME constructor the web mount uses and draws it; the drawn
+##      facts (`AhNode`, the terminal's `data-ah-*`) are compared with that
+##      viewmodel value by value — which tabs a strip draws and in what
+##      order, their labels, attention and the active one, `+N` and its menu;
+##      the list's tree nodes and rows; the initiative bar's tabs, recording
+##      buttons, popup, sessions started elsewhere and inbox; the
+##      initiatives' rows, selection and session lines; the progress panel's
+##      milestones by group; the fleet's filters, counts, rows, selection and
+##      unfolded activity; and the error a failing source reported. Each
+##      text fact is held to the cells under it (the full text, or its
+##      elision ending in "…" where the cells are fewer).
+##   2. THE CELL STYLES AGAINST THE VIEWMODEL. The ground and ink of the
+##      parts whose state the viewmodel decides — the active tab and row, the
+##      selected initiative and fleet row, the current milestone, the active
+##      filter and recording, each status mark's colour, an error's colour,
+##      the section head's band — are derived here from the viewmodel and the
+##      design-system palette (`viewmodel/views/agent_harbor_palette.nim`, the
+##      roles GPUI resolves) and compared with the cells.
+##   3. A REAL TERMINAL. `tests/apps/app_agent_harbor_story.nim` (the
+##      terminal story host) is spawned in a pty by TermAssert and its frame
+##      parsed by libvterm; every cell's glyph, foreground and background must
+##      equal the in-process drawing's, so steps 1 and 2 are statements about
+##      what a terminal shows, not about a buffer.
+##   4. THE COMMITTED SNAPSHOT. The terminal's screen is compared with its
+##      TermAssert styled snapshot (`plaintext.txt` + `styles.txt`, every
+##      cell's colours), committed under `tests/snapshots/ctf-p1b/<capture
+##      id>/` (`SNAP_RECORD=1` re-records). Only over the synthetic fixture
+##      set, the one they are recorded from; another set is reported and not
+##      compared.
+##
+## With `CTF_P1B_TUI_OUT=<dir>` it also writes each screen as
+## `<capture id>.svg` in its colours (TermAssert `renderColourSvg`), the
+## input of `ci/test/ctf-p1b-tui-capture.sh`.
+##
+## No mocks: the viewmodels read the committed fixture set through the
+## production data-source seam, the views are the product's, and the
+## terminal is a real pty and libvterm.
+
+import std/[os, sequtils, sets, strutils, times, unittest]
+from std/unicode import runes, runeAt, `$`, `==`
+
+import term_assert
+
+import ../../testing/dual_snap
+import ../../agent_harbor/ah_tui_stories
+import ../../agent_harbor/ah_tui_session_views
+import ../../agent_harbor/ah_tui_initiative_tab_bar
+import nim_agents_isonim_viewmodels/agent_harbor/[fleet_vm, session_tabs_vm,
+  initiative_tabs_vm, initiatives_vm, initiative_progress_vm, fixture_source]
+from ../../../viewmodel/views/agent_harbor_words import tabLabelOf, filterCount
+
+# One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling.
+const ExpectedAssertions = 27
+
+const
+  Stem = "app_agent_harbor_story"
+  Modes = [dmDark, dmLight]
+  MinimumStories = 59
+    ## The section's stories at CTF-P2a's landing (9 fleet, 11 session tabs,
+    ## 10 session list, 12 initiative tabs, 8 initiatives, 9 progress).
+
+var countedAssertions = 0
+template ck(cond: untyped) =
+  inc countedAssertions
+  check cond
+
+proc themeOf(mode: DesignMode): string = (if mode == dmDark: "dark" else: "light")
+
+# ---------------------------------------------------------------------------
+# 1. The drawing against the viewmodel (the GPUI suite's comparisons, over
+#    the terminal's facts)
+# ---------------------------------------------------------------------------
+
+const DrawnTextFacts = [
+  "label", "title", "summary", "headline", "status", "meta", "progress", "source",
+  "counts", "detail", "age", "activity", "origin", "inbox-position", "elsewhere-label",
+  "frame-title", "caveat", "failure", "error", "error-title"]
+  ## The facts that name a text the node draws on its one row.
+
+proc elidedMatch*(drawn, value: string): bool =
+  ## The cells show `value`, or its start cut to the cells and ended "…".
+  if drawn == value: return true
+  if drawn.endsWith(Ellipsis):
+    let kept = drawn[0 ..< drawn.len - Ellipsis.len]
+    return value.startsWith(kept) and widthOf(drawn) < widthOf(value)
+  false
+
+proc drawnTextProblems(m: AhTuiMount): seq[string] =
+  ## Each text fact against the cells under its node. A node below the
+  ## screen's foot is in the tree and clipped off it, like a list the web
+  ## clips: it is not read, and it must be wholly below the foot.
+  let g = m.canvas.grid
+  for fact in DrawnTextFacts:
+    for n in m.canvas.root.all(fact):
+      if n.row >= m.rows: continue
+      if n.width == 0:
+        if n.attr(fact).len > 0:
+          result.add "a " & fact & " says '" & n.attr(fact) & "' but draws no cell"
+        continue
+      let drawn = g.cellsText(n.row, n.col, n.width)
+      if not elidedMatch(drawn, n.attr(fact)):
+        result.add "a " & fact & " says '" & n.attr(fact) & "' but draws '" & drawn & "'"
+
+proc expect(problems: var seq[string]; what: string; drawn, wanted: auto) =
+  if drawn != wanted:
+    problems.add what & ": drawn " & $drawn & ", the viewmodel says " & $wanted
+
+proc commonState(view: AhNode; state: AsyncState; error: string;
+                 problems: var seq[string]) =
+  if state == asError:
+    var shown = false
+    for e in view.all("error"):
+      if error in e.attr("error"): shown = true
+    if not shown: problems.add "the error the source reported (" & error & ") is not drawn"
+  if state in {asIdle, asLoading}:
+    problems.expect("loading notice", view.values("notice").contains("loading"), true)
+
+proc checkSessionTabs(view: AhNode; vm: SessionTabStripVM): seq[string] =
+  result.expect("state", view.attr("state"), stateName(vm.state.val))
+  commonState(view, vm.state.val, vm.error.val, result)
+  if vm.state.val != asReady: return
+  let tabs = vm.tabs
+  if tabs.len == 0:
+    result.expect("empty notice", view.values("notice"), @["empty"])
+    return
+  var wanted: seq[string]
+  var overflow: seq[int]
+  if vm.mode.val == tsmMultiLine:
+    for t in tabs: wanted.add t.id
+  else:
+    let layout = vm.singleLine
+    for i in layout.visible: wanted.add tabs[i].id
+    overflow = layout.overflow
+  var ids, labels, attention, wantedLabels, wantedAttention: seq[string]
+  var active = ""
+  for e in view.all("tab"):
+    ids.add e.attr("tab")
+    labels.add e.first("label").attr("label")
+    attention.add e.attr("attention")
+    if e.attr("active") == "true": active = e.attr("tab")
+  for id in wanted:
+    for t in tabs:
+      if t.id == id:
+        wantedLabels.add tabLabelOf(t)
+        wantedAttention.add $t.attention
+  result.expect("tabs", ids, wanted)
+  result.expect("tab labels", labels, wantedLabels)
+  result.expect("tab attention", attention, wantedAttention)
+  result.expect("active tab", active, vm.activeId.val)
+  result.expect("+N chip", view.values("overflow"),
+                if overflow.len > 0: @[$overflow.len] else: @[])
+  var menuItems: seq[string]
+  let menu = view.first("menu")
+  if menu != nil: menuItems = menu.values("menu-item")
+  var wantedMenu: seq[string]
+  if vm.overflowOpen.val:
+    for i in overflow: wantedMenu.add tabs[i].id
+  result.expect("overflow menu", menuItems, wantedMenu)
+
+proc checkSessionList(view: AhNode; vm: SessionTabStripVM): seq[string] =
+  result.expect("state", view.attr("state"), stateName(vm.state.val))
+  result.expect("layout", view.attr("mode"), $vm.mode.val)
+  let collapsed = vm.mode.val == tsmSidebar and vm.collapsed.val
+  result.expect("collapsed", view.attr("collapsed"), $collapsed)
+  commonState(view, vm.state.val, vm.error.val, result)
+  if vm.state.val != asReady: return
+  if vm.tabs.len == 0:
+    result.expect("empty notice", view.values("notice"), @["empty"])
+    return
+  let headers = vm.grouped.val and not collapsed
+  var groups, folded, rows: seq[string]
+  for g in vm.groups:
+    if headers:
+      groups.add g.planId
+      folded.add $g.collapsed
+    if not (g.collapsed and headers):
+      for t in g.tabs: rows.add t.id
+  var drawnFolded: seq[string]
+  for e in view.all("folded"): drawnFolded.add e.attr("folded")
+  result.expect("tree nodes", drawnFolded, folded)
+  var namedGroups: seq[string]
+  for g in groups:
+    if g.len > 0: namedGroups.add g
+  var drawnGroups: seq[string]
+  for g in view.values("group"):
+    if g.len > 0: drawnGroups.add g
+  result.expect("initiative nodes", drawnGroups, namedGroups)
+  result.expect("rows", view.values("row"), rows)
+  if not collapsed:
+    result.expect("summary", view.values("summary"), @[vm.summaryText])
+  for e in view.all("row"):
+    if e.attr("active") == "true":
+      result.expect("active row", e.attr("row"), vm.activeId.val)
+
+proc checkInitiativeTabs(view: AhNode; vm: InitiativeTabStripVM): seq[string] =
+  let tabs = vm.tabs
+  let ready = vm.state.val == asReady
+  result.expect("state", view.attr("state"),
+                if ready and tabs.len == 0: "empty" else: stateName(vm.state.val))
+  commonState(view, vm.state.val, vm.error.val, result)
+  if not ready: return
+  let layout = vm.singleLine
+  var wanted: seq[string]
+  for i in layout.visible:
+    wanted.add(if tabs[i].kind == stkInitiative: initiativeKey(tabs[i].id)
+               else: sessionKey(tabs[i].id))
+  result.expect("tabs", view.values("tab"), wanted)
+  var active = ""
+  for e in view.all("tab"):
+    if e.attr("active") == "true": active = e.attr("tab")
+  result.expect("active tab", active, vm.activeTab.val)
+  result.expect("+N chip", view.values("overflow"),
+                if layout.overflow.len > 0: @[$layout.overflow.len] else: @[])
+  var wantedNumbers, wantedHidden: seq[string]
+  for t in tabs:
+    if t.active and t.kind == stkInitiative:
+      let buttons = vm.recordingButtonsOf(t.id)
+      for b in buttons.buttons: wantedNumbers.add $b.number
+      if buttons.hidden > 0: wantedHidden.add $buttons.hidden
+  result.expect("recording buttons", view.values("recording"), wantedNumbers)
+  result.expect("recordings behind +N", view.values("recordings-hidden"), wantedHidden)
+  let popupId = vm.popupId.val
+  result.expect("popup", view.values("popup"), if popupId.len > 0: @[popupId] else: @[])
+  if popupId.len > 0:
+    let popup = vm.popupOf(popupId)
+    let drawn = view.first("popup")
+    if drawn != nil:
+      result.expect("popup title", drawn.first("title").attr("title"), popup.title)
+      result.expect("popup headline", drawn.values("headline"), @[popup.headline])
+      var sessions: seq[string]
+      for s in popup.sessions: sessions.add s.id
+      result.expect("popup sessions", drawn.values("session"), sessions)
+  result.expect("elsewhere badge", view.values("elsewhere"),
+                if vm.elsewhereCount > 0: @[$vm.elsewhereCount] else: @[])
+  var elsewhereMenu: seq[string]
+  for m in view.all("menu"):
+    if m.attr("menu") == "elsewhere": elsewhereMenu = m.values("menu-item")
+  var wantedElsewhere: seq[string]
+  if vm.elsewhereOpen.val:
+    for e in vm.elsewhere: wantedElsewhere.add e.item.id
+  result.expect("elsewhere menu", elsewhereMenu, wantedElsewhere)
+  let position = if vm.inboxPosition.len == 0: "inbox empty" else: vm.inboxPosition
+  result.expect("inbox", view.values("inbox"), @[position])
+  result.expect("auto-switch", view.values("auto-switch"), @[$vm.autoSwitch.val])
+
+proc checkInitiatives(view: AhNode; vm: InitiativesVM): seq[string] =
+  result.expect("state", view.attr("state"), stateName(vm.state.val))
+  commonState(view, vm.state.val, vm.error.val, result)
+  if vm.state.val != asReady: return
+  let rows = vm.rows
+  if rows.len == 0:
+    result.expect("empty notice", view.values("notice"), @["empty"])
+    return
+  var ids, selected, folded: seq[string]
+  for row in rows:
+    ids.add row.id
+    selected.add $row.selected
+    folded.add $row.folded
+  result.expect("initiatives", view.values("initiative"), ids)
+  result.expect("selection", view.values("selected"), selected)
+  result.expect("folded", view.values("folded"), folded)
+  result.expect("summary", view.values("summary"), @[vm.summaryText])
+  for row in rows:
+    for e in view.all("initiative"):
+      if e.attr("initiative") == row.id:
+        var wantedSessions: seq[string]
+        if not row.folded:
+          let shown = if row.expanded: row.sessions.len else: min(row.sessions.len, 4)
+          for i in 0 ..< shown: wantedSessions.add row.sessions[i].id
+        result.expect("sessions of " & row.id, e.values("session"), wantedSessions)
+        result.expect("progress of " & row.id, e.values("progress"), @[row.progressText])
+
+proc checkProgress(view: AhNode; vm: InitiativeProgressVM): seq[string] =
+  let found = vm.state.val == asReady and vm.found
+  result.expect("state", view.attr("state"),
+                if vm.state.val == asReady and not vm.found: "empty"
+                else: stateName(vm.state.val))
+  commonState(view, vm.state.val, vm.error.val, result)
+  if not found: return
+  var groups, milestones, current: seq[string]
+  for g in vm.groups:
+    groups.add g.name
+    for m in g.milestones:
+      milestones.add m.id
+      current.add $m.current
+  result.expect("status groups", view.values("group"), groups)
+  result.expect("milestones", view.values("milestone"), milestones)
+  var drawnCurrent: seq[string]
+  for e in view.all("milestone"): drawnCurrent.add e.attr("current")
+  result.expect("current milestone", drawnCurrent, current)
+  result.expect("headline", view.values("summary"), @[vm.headline])
+  let summary = vm.current.executiveSummary
+  result.expect("executive summary", view.values("executive-summary"),
+                @[if summary.len > 0: summary else: "The plan states no executive summary."])
+
+proc checkFleet(view: AhNode; vm: FleetSnapshotVM): seq[string] =
+  result.expect("state", view.attr("state"), stateName(vm.state.val))
+  commonState(view, vm.state.val, vm.error.val, result)
+  if vm.state.val != asReady: return
+  let counts = vm.counts
+  var filters, filterCounts: seq[string]
+  for f in FleetFilter:
+    filters.add $f
+    filterCounts.add $counts.filterCount(f)
+  result.expect("filters", view.values("filter"), filters)
+  result.expect("filter counts", view.values("filter-count"), filterCounts)
+  for e in view.all("filter"):
+    if e.attr("active") == "true":
+      result.expect("active filter", e.attr("filter"), $vm.filter.val)
+  let rows = vm.rows
+  if rows.len == 0:
+    result.expect("empty notice", view.values("notice"), @["empty"])
+    return
+  var ids, selected, expanded: seq[string]
+  for row in rows:
+    ids.add row.id
+    selected.add $row.selected
+    expanded.add $row.expanded
+  result.expect("rows", view.values("row"), ids)
+  result.expect("selection", view.values("selected"), selected)
+  result.expect("unfolded", view.values("expanded"), expanded)
+  for row in rows:
+    for e in view.all("row"):
+      if e.attr("row") == row.id:
+        let shown = if row.expanded: row.activity.len else: min(1, row.activity.len)
+        result.expect("activity of " & row.shortId, e.values("activity"),
+                      row.activity[0 ..< shown])
+        result.expect("title of " & row.shortId, e.first("title").attr("title"), row.title)
+
+proc checkStory(m: AhTuiMount): seq[string] =
+  let view = m.view
+  if view.isNil: return @["no node says which surface was drawn"]
+  if view.attr("surface") != m.surface:
+    return @["the view's root says surface '" & view.attr("surface") & "'"]
+  case m.surface
+  of "agent-harbor-session-tabs": checkSessionTabs(view, m.sessions)
+  of "agent-harbor-session-list": checkSessionList(view, m.sessions)
+  of "agent-harbor-initiative-tabs": checkInitiativeTabs(view, m.initiativeTabs)
+  of "agent-harbor-initiatives": checkInitiatives(view, m.initiatives)
+  of "agent-harbor-initiative-progress": checkProgress(view, m.progress)
+  of "agent-harbor-fleet": checkFleet(view, m.fleet)
+  else: @["this suite has no comparison for surface " & m.surface]
+
+# ---------------------------------------------------------------------------
+# 2. Cell styles against the viewmodel and the palette
+# ---------------------------------------------------------------------------
+
+type CellLook = object
+  ## What a cell shows: its glyph and colours as `#rrggbb` ("" for the
+  ## terminal's default).
+  rune, fg, bg: string
+
+type LookOf = proc(row, col: int): CellLook {.closure.}
+
+proc gridLook(m: AhTuiMount): LookOf =
+  let g = m.canvas.grid
+  result = proc(row, col: int): CellLook =
+    let s = g.styleAt(row, col)
+    CellLook(rune: g.runeAt(row, col), fg: s.fg, bg: s.bg)
+
+proc hexOf(c: Color): string =
+  case c.kind
+  of ckRgb: "#" & toHex(int(c.r), 2).toLowerAscii & toHex(int(c.g), 2).toLowerAscii &
+            toHex(int(c.b), 2).toLowerAscii
+  of ckIndexed: "indexed:" & $int(c.idx)
+  of ckDefault: ""
+
+proc expectGround(problems: var seq[string]; look: LookOf; n: AhNode; rows: int;
+                  what, wanted: string) =
+  ## Every visible cell of `n` on `wanted`.
+  if n.isNil: return
+  for r in n.row ..< min(rows, n.row + max(1, n.height)):
+    for c in n.col ..< n.col + n.width:
+      let got = look(r, c).bg
+      if got != wanted:
+        problems.add what & " at (" & $r & "," & $c & ") is on " & got & ", not " & wanted
+        return
+
+proc expectInk(problems: var seq[string]; look: LookOf; n: AhNode; rows: int;
+               what, wanted: string) =
+  if n.isNil or n.row >= rows: return
+  let got = look(n.row, n.col).fg
+  if got != wanted:
+    problems.add what & " at (" & $n.row & "," & $n.col & ") is drawn in " & got &
+                 ", not " & wanted
+
+proc markInk(m: MarkStyle): string = m.colour
+
+proc styleProblems(m: AhTuiMount; look: LookOf): seq[string] =
+  ## The grounds and inks the viewmodel's state decides, from the palette.
+  let p = ahPalette(m.mode)
+  let t = tone(p)
+  let view = m.view
+  if view.isNil: return
+  let rows = m.rows
+  # Every section head is on the head band.
+  for h in view.all("head"):
+    if h.attr("head") == "section header":
+      result.expectGround(look, h, rows, "the section head", t.head)
+  # A failure says what failed in the error role: a strip's one-line notice
+  # all of it, a panel's error block its title (its reason is a caption).
+  for n in view.all("notice"):
+    if n.attr("notice") != "error": continue
+    if n.height == 1:
+      result.expectInk(look, n.first("error"), rows, "the error", p.textError)
+    else:
+      result.expectInk(look, n.first("error-title"), rows, "the error's title", p.textError)
+      result.expectInk(look, n.first("error"), rows, "the error's reason", p.textCaption)
+  case m.surface
+  of "agent-harbor-session-tabs":
+    let vm = m.sessions
+    for e in view.all("tab"):
+      let active = e.attr("tab") == vm.activeId.val
+      result.expectGround(look, e, rows, "tab " & e.attr("tab"),
+                          if active: p.activeTab else: t.frame)
+      result.expectInk(look, e.first("label"), rows, "the label of " & e.attr("tab"),
+                       if active: p.activeTabText else: p.textCaption)
+      for tab in vm.tabs:
+        if tab.id == e.attr("tab"):
+          result.expectInk(look, e.first("mark"), rows, "the mark of " & tab.id,
+                           markInk(p.markOf(tab.attention)))
+  of "agent-harbor-session-list":
+    let vm = m.sessions
+    for e in view.all("row"):
+      if e.height == 0 or e.row >= rows: continue
+      let active = e.attr("row") == vm.activeId.val
+      result.expectGround(look, e, rows, "row " & e.attr("row"),
+                          if active: p.activeRow else: t.body)
+      for tab in vm.tabs:
+        if tab.id == e.attr("row"):
+          result.expectInk(look, e.first("mark"), rows, "the mark of " & tab.id,
+                           markInk(p.markOf(tab.attention)))
+  of "agent-harbor-initiative-tabs":
+    let vm = m.initiativeTabs
+    for e in view.all("tab"):
+      let active = e.attr("tab") == vm.activeTab.val
+      if active:
+        # The tab's ground, outside its recording buttons.
+        let label = e.first("label")
+        result.expectGround(look, label, rows, "the active tab's title", p.activeTab)
+      else:
+        result.expectGround(look, e, rows, "tab " & e.attr("tab"), t.frame)
+    for e in view.all("recording"):
+      if e.attr("recording-active") == "true":
+        result.expectGround(look, e, rows, "the active recording",
+                            if m.mode == dmDark: p.action else: p.borderAction)
+    for e in view.all("popup"):
+      let drawn = AhNode(row: e.row, col: e.col, width: e.width, height: 1)
+      result.expectGround(look, drawn, rows, "the popup", t.menu)
+  of "agent-harbor-initiatives":
+    let vm = m.initiatives
+    for i, row in vm.rows:
+      for e in view.all("initiative"):
+        if e.attr("initiative") != row.id or e.row >= rows: continue
+        let wanted = if row.selected: p.selectedGround
+                     elif i mod 2 == 1: t.band else: t.body
+        # The row's first cells after its left edge (the bar is drawn there).
+        let probe = AhNode(row: e.row, col: e.col + 1, width: 1, height: 1)
+        result.expectGround(look, probe, rows, "initiative " & row.id, wanted)
+        result.expectInk(look, e.first("mark"), rows, "the mark of " & row.id,
+                         markInk(p.markOf(row.state)))
+  of "agent-harbor-initiative-progress":
+    let vm = m.progress
+    if vm.state.val == asReady and vm.found:
+      for g in vm.groups:
+        for ml in g.milestones:
+          for e in view.all("milestone"):
+            if e.attr("milestone") != ml.id or e.row >= rows: continue
+            result.expectInk(look, e.first("mark"), rows, "the mark of " & ml.id,
+                             markInk(p.markOf(ml.statusClass)))
+            if ml.current:
+              let probe = AhNode(row: e.row, col: e.col, width: 1, height: 1)
+              result.expectGround(look, probe, rows, "the current milestone",
+                if m.mode == dmDark: p.activeTab
+                elif m.cols * CellPx >= 960: p.hover else: p.menu)
+  of "agent-harbor-fleet":
+    let vm = m.fleet
+    for e in view.all("filter"):
+      if e.attr("filter") == $vm.filter.val:
+        result.expectGround(look, e, rows, "the active filter", t.chosen)
+    for i, row in vm.rows:
+      for e in view.all("row"):
+        if e.attr("row") != row.id or e.row >= rows: continue
+        let probe = AhNode(row: e.row, col: e.col, width: 1, height: 1)
+        result.expectGround(look, probe, rows, "fleet row " & row.shortId,
+          if row.selected: p.action elif i mod 2 == 1: t.band else: t.body)
+  else: discard
+
+# ---------------------------------------------------------------------------
+# 3 and 4. A real terminal, and the committed snapshot
+# ---------------------------------------------------------------------------
+
+let section = agentHarborSection()
+let root = dual_snap.repoRoot()
+let snapshotRoot = root / "src" / "frontend" / "tui"
+  ## `<root>/tests/snapshots/<name>`, TermAssert's layout.
+let captureOut = getEnv("CTF_P1B_TUI_OUT")
+let synthetic = AgentHarborFixtureSet == "synthetic"
+
+proc screenProblems(sess: var TuiTestSession; m: AhTuiMount): seq[string] =
+  ## Every cell the terminal shows against the in-process drawing.
+  var shown = 0
+  let look = m.gridLook()   # once: the closure holds a copy of the grid
+  for r in 0 ..< m.rows:
+    for c in 0 ..< m.cols:
+      let cell = sess.cellAt(r, c)
+      if cell.width == 0: continue
+      let want = look(r, c)
+      let rune = if cell.rune.int32 == 0: " " else: $cell.rune
+      let fg = hexOf(cell.fg)
+      let bg = hexOf(cell.bg)
+      if rune != want.rune or fg != want.fg or bg != want.bg:
+        if shown < 5:
+          result.add "the terminal shows '" & rune & "' " & fg & " on " & bg & " at (" &
+                     $r & "," & $c & "), the drawing '" & want.rune & "' " & want.fg &
+                     " on " & want.bg
+        inc shown
+  if shown > 5: result.add "... and " & $(shown - 5) & " more cells"
+
+proc terminalLook(sess: ptr TuiTestSession): LookOf =
+  result = proc(row, col: int): CellLook =
+    let cell = sess[].cellAt(row, col)
+    CellLook(rune: if cell.rune.int32 == 0: " " else: $cell.rune,
+             fg: hexOf(cell.fg), bg: hexOf(cell.bg))
+
+proc spawnStory(id: string; cols, rows: int; mode: DesignMode): TuiTestSession =
+  result = newTuiTest(appBinaryPath(Stem),
+                      @["--story=" & id, "--theme=" & themeOf(mode),
+                        "--cols=" & $cols, "--rows=" & $rows])
+    .width(cols).height(rows)
+    .envSet("TERM", "xterm-256color")
+    .envSet("COLORTERM", "truecolor")
+    .envSet("LANG", "en_US.UTF-8")
+    .spawn()
+  waitForCompleteFrame(result, cols, rows)
+
+proc renderOnTerminal(story: CodeTracerStory; sizeName: string; cols, rows: int;
+                      mode: DesignMode): seq[string] =
+  ## Steps 1 to 4 for one story, size and mode; the problems found.
+  let id = storybookId(section, story)
+  let m = try: mountStory(story, cols, rows, mode)
+          except ValueError as e: return @["no terminal rendering: " & e.msg]
+  defer: m.dispose()
+  result = checkStory(m) & drawnTextProblems(m) & styleProblems(m, m.gridLook())
+  var sess = spawnStory(id, cols, rows, mode)
+  defer: sess.close()
+  result.add screenProblems(sess, m)
+  result.add styleProblems(m, terminalLook(addr sess))
+  let capture = captureIdOf(id, sizeName, themeOf(mode))
+  if synthetic:
+    for d in styledSnapshotDiffs(sess.screen, snapshotDir("ctf-p1b" / capture, snapshotRoot)):
+      result.add "snapshot " & capture & ": " & d
+  if captureOut.len > 0:
+    let p = ahPalette(mode)
+    createDir(captureOut)
+    writeFile(captureOut / (capture & ".svg"),
+              renderColourSvg(sess.screen, defaultFg = p.textBody, defaultBg = p.ground))
+    writeFile(captureOut / (capture & ".txt"), renderPlain(sess.screen))
+  sess.send("q")
+
+# The child embeds the fixture set this suite embedded, whatever chose it.
+putEnv("AGENT_HARBOR_FIXTURES", AgentHarborFixtureRoot)
+compileChildApp(Stem)
+
+suite "CTF-P1b: the stories come from their one declaration":
+  test "the Agent Harbor section is declared and holds the P2a stories":
+    ck section.title == AgentHarborSectionTitle
+    ck section.stories.len >= MinimumStories
+    var ids: HashSet[string]
+    for story in section.stories: ids.incl storybookId(section, story)
+    ck ids.len == section.stories.len
+    ck "codetracer-agent-harbor--initiative-tabs-popup" in ids
+
+suite "CTF-P1b: every Agent Harbor story has a terminal rendering":
+  test "test_ctf_p1b_tui_views_cover_web_states":
+    var missing: seq[string]
+    for story in section.stories:
+      if not hasTuiRendering(story.surface):
+        missing.add storybookId(section, story) & " (surface " & story.surface & ")"
+    if missing.len > 0:
+      echo "Stories with no terminal rendering:\n  " & missing.join("\n  ")
+    ck missing.len == 0
+    if not synthetic:
+      echo "  the committed snapshots were not compared: this build embeds the '",
+        AgentHarborFixtureSet, "' fixture set, and they are recorded from 'synthetic'"
+    var failures: seq[string]
+    var rendered = 0
+    for story in section.stories:
+      let id = storybookId(section, story)
+      for (sizeName, cols, rows) in TuiSizes:
+        for mode in Modes:
+          let problems = renderOnTerminal(story, sizeName, cols, rows, mode)
+          if problems.len == 0: inc rendered
+          else:
+            failures.add id & " @ " & sizeName & "/" & themeOf(mode) & ": " &
+                         problems.join("; ")
+    if failures.len > 0:
+      echo "Terminal renderings that differ (" & $failures.len & "):\n  " &
+        failures.join("\n  ")
+    ck failures.len == 0
+    ck rendered == section.stories.len * TuiSizes.len * Modes.len
+    echo "  rendered ", rendered, " story renderings on a terminal (",
+      section.stories.len, " stories × ", TuiSizes.len, " sizes × ", Modes.len, " modes)"
+
+proc storyOf(surface, fixture: string): CodeTracerStory =
+  for s in section.stories:
+    if s.surface == surface and s.fixture == fixture: return s
+
+suite "CTF-P1b: the comparisons can fail":
+  # Positive controls: a drawing that disagrees with its viewmodel, a fact
+  # that names a word the cells do not show, and a cell on the wrong ground
+  # must each be reported, or the green run above would mean nothing.
+
+  test "a tab activated after drawing is a mismatch until the view redraws":
+    let m = mountStory(storyOf("agent-harbor-session-tabs", "multi-line"), 180, 56, dmDark)
+    ck checkStory(m).len == 0
+    let tabs = m.sessions.tabs
+    ck m.sessions.activate(tabs[^1].id)
+    let stale = checkStory(m)
+    ck stale.join(" ").contains("active tab")
+    m.draw()
+    ck checkStory(m).len == 0
+    m.dispose()
+
+  test "a click on a fold redraws the tree from the viewmodel":
+    let m = mountStory(storyOf("agent-harbor-initiatives", "populated"), 180, 56, dmDark)
+    let fold = m.view.first("fold")
+    let id = fold.attr("fold")
+    ck m.handleInput("\x1b[<0;" & $(fold.col + 1) & ";" & $(fold.row + 1) & "M")
+    ck m.initiatives.rows[0].folded
+    ck checkStory(m).len == 0
+    for e in m.view.all("initiative"):
+      if e.attr("initiative") == id: ck e.all("session").len == 0
+    m.dispose()
+
+  test "a fact that names a word the cells do not show is a mismatch":
+    let m = mountStory(storyOf("agent-harbor-session-tabs", "single-line"), 180, 56, dmDark)
+    ck drawnTextProblems(m).len == 0
+    m.view.first("label").tag("label", "not the viewmodel's title")
+    let problems = drawnTextProblems(m)
+    ck problems.len == 1
+    ck problems.join(" ").contains("says 'not the viewmodel's title'")
+    m.dispose()
+
+  test "a cell on the wrong ground is a style mismatch":
+    let m = mountStory(storyOf("agent-harbor-session-tabs", "single-line"), 180, 56, dmLight)
+    ck styleProblems(m, m.gridLook()).len == 0
+    let tab = m.view.first("tab")
+    m.canvas.grid.paint(tab.row, tab.col + 2, " ",
+                        CellStyle(fg: "#000000", bg: ahPalette(dmLight).panel))
+    let problems = styleProblems(m, m.gridLook())
+    ck problems.len == 1
+    ck problems[0].contains("tab " & tab.attr("tab"))
+    m.dispose()
+
+suite "CTF-P1b: the story host answers the pointer on a real terminal":
+  # The initiative popup opens on hover (DEC 1003 motion,
+  # SGR 1006) and a press acts on what is under it. Driven through the pty as
+  # a terminal would report the pointer, read back off the screen.
+  test "hovering an initiative tab opens its popup; a press on a fold folds it":
+    let story = storyOf("agent-harbor-initiative-tabs", "tabs")
+    let id = storybookId(section, story)
+    let m = mountStory(story, 180, 56, dmDark)
+    let tab = m.view.first("tab")
+    let initiative = m.initiativeTabs.tabs[0]
+    let headline = m.initiativeTabs.popupOf(initiative.id).headline
+    m.dispose()
+    var sess = spawnStory(id, 180, 56, dmDark)
+    ck not sess.screenContents().contains(headline)
+    sess.sendMouseMove(tab.row, tab.col + 4)
+    sess.waitForText(headline, initDuration(seconds = 10))
+    ck sess.screenContents().contains(headline)
+    sess.send("q")
+    sess.close()
+    let panel = storyOf("agent-harbor-initiatives", "populated")
+    let pm = mountStory(panel, 180, 56, dmDark)
+    let fold = pm.view.first("fold")
+    let firstSession = pm.view.first("initiative").first("session").first("title").attr("title")
+    pm.dispose()
+    var ps = spawnStory(storybookId(section, panel), 180, 56, dmDark)
+    ck ps.screenContents().contains(elide(firstSession, 20)[0 ..< 10])
+    ps.sendMouseClick(fold.row, fold.col)
+    ps.waitForText(FoldedGlyph, initDuration(seconds = 10))
+    ck ps.cellAt(fold.row, fold.col).rune == "\xE2\x96\xB8".runeAt(0)
+    ps.send("q")
+    ps.close()
+
+suite "CTF-P1b: the terminal views share the viewmodels, not the web views":
+  test "no terminal Agent Harbor view imports a web view or the web renderer":
+    # The words and the palette the three front-ends share live in
+    # `viewmodel/views/agent_harbor_words` and `agent_harbor_palette`, which
+    # render nothing. A terminal view that imported an `isonim_*_view`
+    # module, the IsoNim DSL or the web renderer would put the web's
+    # rendering code in the terminal front-end's closure.
+    let viewDir = root / "src" / "frontend" / "tui" / "agent_harbor"
+    var scanned = 0
+    var offenders: seq[string]
+    for path in @[root / "src" / "frontend" / "tui" / "tests" / "apps" / (Stem & ".nim")] &
+                toSeq(walkFiles(viewDir / "*.nim")):
+      inc scanned
+      for line in readFile(path).splitLines:
+        let code = line.strip
+        if not (code.startsWith("import ") or code.startsWith("from ")): continue
+        for forbidden in ["views/isonim_", "isonim/dsl", "isonim/web", "isonim_gpui"]:
+          if forbidden in code: offenders.add path.extractFilename & ": " & code
+    ck scanned >= 7
+    if offenders.len > 0: echo "  web imports:\n    " & offenders.join("\n    ")
+    ck offenders.len == 0
+
+suite "CTF-P1b: assertion count":
+  test "every assertion ran":
+    check countedAssertions == ExpectedAssertions

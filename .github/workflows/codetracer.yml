@@ -3904,6 +3904,22 @@ jobs:
         if: ${{ !cancelled() }}
         run: nix develop .#devShells.x86_64-linux.default --command just test-tui-real-terminal
 
+      - name: CTF-P1b's Agent Harbor stories on a real terminal, as captures
+        # The `tui-real-terminal` suite `test_ctf_p1b_tui_views_cover_web_states`
+        # again (Tier 2 above ran it too), now writing every story, theme and
+        # size as a picture of the terminal's screen (`build/ctf-p1b/tui/`),
+        # the input of the visual review; it fails as the suite does.
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just ctf-p1b-tui-captures
+
+      - name: Upload the terminal captures
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctf-p1b-tui-captures
+          path: build/ctf-p1b/tui/
+          retention-days: 7
+
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4

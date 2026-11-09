@@ -1,0 +1,56 @@
+ Initiatives  ✕
+ INITIATIVES  invented working set: 40 sessions over 5 initiatives                                                  5 initiatives · 35 sessions · 6 need input · 5 in no initiative
+ ▾ ● Telemetry upload retries                                   1/4 · 25%    ● Retry telemetry uploads with exponential backoff                                         needs input
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀       ● 1  ● 1  ● 2     ● Report dropped telemetry batches on the status page                                      needs input
+     CURRENT TR-M1: Data model                                               ○ Persist the telemetry queue across restarts                                                     idle
+     orbit-labs/telemetry-retry · manager tr-manager                         ○ Test telemetry retries against a flaky collector                                                idle
+                                                                              +3 more
+ ▾ ● Settings redesign                                          3/8 · 38%    ● Add search to the settings page                                                          needs input
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  ● 3  ● 1  ● 1  ● 3     ● Show which settings need a restart                                                       needs input
+     CURRENT SR-M3: Front-end                                                ○ Move the account settings into their own tab                                                    idle
+     orbit-labs/settings-redesign · manager sr-manager                       ○ Reset a settings tab to its defaults                                                            idle
+                                                                              +3 more
+ ▾ ● Release 3.0                                               5/12 · 42%    ● Trim the 3.0 release bundle under 40 MB                                                  needs input
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  ● 5  ● 1  ● 1  ● 5     ● Tag the 3.0 release candidate                                                            needs input
+     CURRENT R3-M5: Tests                                                    ○ Rename the units module's helpers for 3.0                                                       idle
+     orbit-labs/release-3 · manager r3-manager                               ● Remove the deprecated sync API for 3.0                                                       running
+                                                                              +3 more
+ ▾ ● Route cache on the new storage layer                       2/6 · 33%    ○ Expire stale routes when the storage layer compacts                                             idle
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  ● 2  ● 1  ● 1  ● 2     ● Port the route cache to the new storage layer                                                running
+     CURRENT RC-M2: Core change                                              ● Migrate cached routes without a cold start                                                   running
+     orbit-labs/route-cache                                                  ● Remove the old route cache backend                                                           running
+                                                                              +3 more
+ ▾ ● CI runner migration                                       4/10 · 40%    ○ Migrate the CI matrix to the new runners                                                        idle
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  ● 4  ● 1  ● 1  ● 1  ● 3     ○ Stream the CI build log instead of buffering it                                                 idle
+     CURRENT CM-M4: Migration                                                ● Cache the dependency graph between CI runs                                                   running
+     orbit-labs/ci-runner-migration                                          ● Fix the flaky clock-skew test on the new runners                                             running
+                                                                              +3 more
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
