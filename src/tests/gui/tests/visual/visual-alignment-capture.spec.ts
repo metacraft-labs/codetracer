@@ -68,7 +68,7 @@
  * rule.
  */
 
-import { glyphCentre, glyphMarksOn, pressGlyph } from "../../lib/glyph-column";
+import { glyphMarksOn, pressGlyph } from "../../lib/glyph-column";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -1261,8 +1261,24 @@ test.describe("PLAT-35 capture: an armed breakpoint and a tracepoint on one line
     // Adding a tracepoint re-lays the editor out and can leave the line
     // outside the rows Monaco has drawn, where the extractor (which reads the
     // drawn gutter rows, as the GPUI producer reads the drawn row nodes) cannot
-    // see it. Reveal it, as `pressGlyph` does before it presses a line.
-    await glyphCentre(ctPage, target);
+    // see it. MEASURED: with the tracepoint added the first drawn row was line
+    // 27 while the glyph was on 26, in four runs of six, and
+    // `revealLineInCenterIfOutsideViewport` (what `glyphCentre` calls) treats a
+    // line scrolled just out of the drawn rows as in view. So the line is
+    // centred unconditionally.
+    const centreTarget = () => ctPage.evaluate((line) => {
+      const w = window as unknown as {
+        data?: {
+          ui?: { editors?: Record<string, { monacoEditor?: { revealLineInCenter(l: number): void } }> };
+          services?: { editor?: { active?: string } };
+        };
+      };
+      const active = w.data?.services?.editor?.active;
+      const editor = active ? w.data?.ui?.editors?.[active]?.monacoEditor : undefined;
+      if (!editor) throw new Error("no active Monaco editor to centre the line in");
+      editor.revealLineInCenter(line);
+    }, target);
+    await centreTarget();
     await layout.waitForStateLoaded();
     await waitForEditorFrameSettled(ctPage);
     await ctPage.waitForTimeout(1_500);
@@ -1274,12 +1290,17 @@ test.describe("PLAT-35 capture: an armed breakpoint and a tracepoint on one line
     await expect
       .poll(
         async () => {
+          // MEASURED: the editor scrolls back to the stop line after the
+          // tracepoint lands (top 696, line 26 at 550, in two runs of eight),
+          // so the line is centred again on every poll rather than once.
+          await centreTarget();
+          await ctPage.waitForTimeout(300);
           const a = await extractLayoutAnswers(ctPage, id);
           return a.answers.find(
             (x: { question: string }) => x.question === "gutter-marks-by-line",
           )?.value;
         },
-        { timeout: 30_000, message: `glyphs on ${target}: ${(await glyphMarksOn(ctPage, target)).join(",")}; drawn gutters: ${JSON.stringify(await gutters.evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.line)))}` },
+        { timeout: 30_000, message: `glyphs on ${target}: ${(await glyphMarksOn(ctPage, target)).join(",")}; drawn gutters: ${JSON.stringify(await gutters.evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.line)))}; editor: ${JSON.stringify(await ctPage.evaluate((line) => { const w = window as any; const ed = w.data?.ui?.editors?.[w.data?.services?.editor?.active]?.monacoEditor; return { visible: ed?.getVisibleRanges?.()?.map((r: any) => [r.startLineNumber, r.endLineNumber]), top: ed?.getScrollTop?.(), topForLine: ed?.getTopForLineNumber?.(line), dom: document.querySelectorAll(`[data-line='${line}']`).length }; }, target))}` },
       )
       .toContain(`${target}=breakpoint+tracepoint`);
     const answers = await extractLayoutAnswers(ctPage, id);
