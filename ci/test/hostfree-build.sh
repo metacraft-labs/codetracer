@@ -72,10 +72,6 @@
 #      53 of the 121 surface modules contain such a block.
 #      CHEAP TO CLOSE: a second pass with `nim js`, which needs a JS-side poison
 #      list (node's `require('fs')`, not `std/os`).
-#      A module that is JS-ONLY — its top level is `when not defined(js):`
-#      `{.error.}` — is this blind spot whole: scenario 1 still compiles it,
-#      but lists it as JS-only instead of as reaching the host when the guard
-#      is the compile's first error (see is_js_only below).
 #   3. A host call inside a GENERIC PROC or a TEMPLATE declared in the surface
 #      module. Nim semchecks those bodies at instantiation, and nothing here
 #      instantiates them. This is an `include`-scoping false pass, not a hole in
@@ -169,51 +165,6 @@ is_known_violation() {
 	return 1
 }
 
-# JS-ONLY MODULES ARE NOT ON THE NATIVE SURFACE
-#
-# A module whose top level opens with
-#
-#     when not defined(js):
-#       {.error: "...".}
-#
-# states that it never runs on a host: there is no native build of it for a
-# host call to hide in, and this is a `nim c` gate. views/pane_measure_dom.nim
-# is one (it measures panes through the browser DOM), and without this rule the
-# gate failed on it for the guard it is supposed to have. Such a module belongs
-# to blind spot 2 in the header, not to the surface: its host access is a JS
-# question, and the renderer's own lanes are what compile it.
-#
-# The source pattern only NOMINATES a module. The compiler decides: the module
-# is JS-only only if the host-free compile's FIRST error is that guard's own
-# line. A guard placed below a host call does not exempt the call, because the
-# call's error comes first (a later scenario plants exactly that), and a guard
-# that does not fire — commented out with `#[ ]#`, or not actually at top
-# level — leaves the module compiled like any other.
-#
-# js_guard_line <module-path> -> the line of the guard's `{.error:`, empty if none
-js_guard_line() {
-	awk '
-		pending && /^[[:space:]]*$/ { next }
-		pending { if ($0 ~ /^[[:space:]]+\{\.error:/) { print NR; exit } pending = 0 }
-		/^when not defined\(js\):[[:space:]]*\{\.error:/ { print NR; exit }
-		/^when not defined\(js\):[[:space:]]*$/ { pending = 1 }
-	' "$1"
-}
-
-# is_js_only <module-path> <first-error-line> -> 0 when the error IS the guard
-is_js_only() {
-	local path="$1" err="$2" line
-	line="$(js_guard_line "${path}")"
-	[ -n "${line}" ] || return 1
-	# The compiler prints the module by absolute path; `${path}` is relative to
-	# the checkout, so it is matched as a suffix. Matching the basename alone
-	# would let a same-named file elsewhere in the import graph stand in.
-	case "${err}" in
-	*"/${path}(${line}, "*") Error: "*) return 0 ;;
-	esac
-	return 1
-}
-
 # compile_hostfree <module-path> -> prints the first Error line, empty if clean
 compile_hostfree() {
 	local path="$1"
@@ -279,16 +230,9 @@ note "surface: ${surface_count} modules under viewmodels/, views/, store/, platf
 
 clean=0
 violating=0
-js_only=()
 for module in "${SURFACE[@]}"; do
 	err="$(compile_hostfree "${module}")"
-	if [ -n "${err}" ] && is_js_only "${module}" "${err}"; then
-		js_only+=("${module}")
-		if is_known_violation "${module}"; then
-			bad "STALE EXCEPTION: ${module} is JS-only, so not on the native surface"
-			note "Remove it from KNOWN_VIOLATIONS in $0."
-		fi
-	elif [ -z "${err}" ]; then
+	if [ -z "${err}" ]; then
 		clean=$((clean + 1))
 		if is_known_violation "${module}"; then
 			bad "STALE EXCEPTION: ${module} now compiles host-free"
@@ -306,10 +250,7 @@ for module in "${SURFACE[@]}"; do
 		fi
 	fi
 done
-note "clean: ${clean}/${surface_count}; declared exceptions: ${violating}; JS-only (not on the native surface): ${#js_only[@]}"
-for module in "${js_only[@]}"; do
-	note "JS-only: ${module}"
-done
+note "clean: ${clean}/${surface_count}; declared exceptions: ${violating}"
 [ "${clean}" -gt 0 ] || bad "no module compiled cleanly — the probe itself is broken"
 if [ "${failures}" -eq 0 ]; then
 	ok "the surface holds"
@@ -511,77 +452,6 @@ else
 	ok "the qualified-call check ignores a local named 'files' and a comment"
 fi
 unplant
-
-# ---------------------------------------------------------------------------
-# JS-only classification. Scenario 1 exempts a module whose top level refuses
-# non-JS compilation; these scenarios show that exemption is decided by the
-# compiler and cannot be used to hide a host call. Each plants into the same
-# real victim module as the scenarios above.
-JS_GUARD_PLANT='when not defined(js):
-  {.error: "Planted by ci/test/hostfree-build.sh and removed again.".}'
-
-scenario=$((scenario + 1))
-echo
-echo "Scenario ${scenario}: a module whose top level refuses non-JS builds is classified JS-only"
-plant "${JS_GUARD_PLANT}" || bad "JS-only guard: could not write the plant"
-err="$(compile_hostfree "${VICTIM}")"
-# Classify BEFORE unplant: is_js_only reads the module to find the guard line.
-classified=no
-[ -n "${err}" ] && is_js_only "${VICTIM}" "${err}" && classified=yes
-unplant
-if [ "${classified}" = yes ]; then
-	ok "a planted JS-only guard is recognised by the error it raises"
-	note "${err}"
-else
-	bad "a planted JS-only guard was NOT recognised"
-	note "got: ${err:-<no error: the guard did not fire>}"
-	note "Scenario 1 would then report every JS-only module as reaching the host."
-fi
-
-scenario=$((scenario + 1))
-echo
-echo "Scenario ${scenario}: a JS-only guard BELOW a host call exempts nothing"
-note "The guard is only honoured when it is the compile's first error. A guard"
-note "appended after a readFile must leave the readFile reported."
-plant "${READFILE_PLANT}
-${JS_GUARD_PLANT}" || bad "guard below readFile: could not write the plant"
-err="$(compile_hostfree "${VICTIM}")"
-# Before unplant, as above: against the restored module this would be vacuous.
-classified=no
-[ -n "${err}" ] && is_js_only "${VICTIM}" "${err}" && classified=yes
-unplant
-if [ -z "${err}" ]; then
-	bad "the host-free build ACCEPTED a readFile followed by a JS-only guard"
-elif [ "${classified}" = yes ]; then
-	bad "a JS-only guard below a readFile exempted the module"
-	note "${err}"
-else
-	case "${err}" in
-	*readFile*)
-		ok "the readFile is still rejected; the guard did not exempt it"
-		note "${err}"
-		;;
-	*)
-		bad "rejected, but not for the readFile"
-		note "got: ${err}"
-		;;
-	esac
-fi
-
-scenario=$((scenario + 1))
-echo
-echo "Scenario ${scenario}: a JS-only guard inside a block comment is not a guard"
-plant "#[
-${JS_GUARD_PLANT}
-]#" || bad "commented guard: could not write the plant"
-err="$(compile_hostfree "${VICTIM}")"
-unplant
-if [ -z "${err}" ]; then
-	ok "a commented-out guard leaves the module compiled, and clean"
-else
-	bad "a commented-out guard changed the compile"
-	note "got: ${err}"
-fi
 
 # ---------------------------------------------------------------------------
 echo
