@@ -49,6 +49,18 @@ suite "content_file_cache":
     check contentFileName("a.svg", "x") == contentFileName("a.svg", "x")
     check contentFileName("a.svg", "x") != contentFileName("a.svg", "y")
 
+  test "a stored name gives back the name it was asked for":
+    for name in ["plus-b0b0b0.svg", "call-collapse-active.svg", "a.png", "x"]:
+      check nameOfContentFile(contentFileName(name, "<svg/>")) == name
+    # A name without the cache's digest is not shortened.
+    check nameOfContentFile("window-restore.svg") == "window-restore.svg"
+    check nameOfContentFile("bar-0123456789abcdeg.svg") ==
+      "bar-0123456789abcdeg.svg" # not hex
+    check nameOfContentFile("bar-0123456789ABCDEF.svg") ==
+      "bar-0123456789ABCDEF.svg" # the digest is lower case
+    check nameOfContentFile("-0123456789abcdef.svg") ==
+      "-0123456789abcdef.svg" # no stem before it
+
   test "a file at the path that holds anything else is rewritten, not drawn":
     let area = "stale"
     let content = "<svg>the real icon</svg>"

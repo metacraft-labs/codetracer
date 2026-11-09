@@ -90,6 +90,7 @@ import ../../tui/tests/fixtures/fixture_provider
 import std/[json, options, os, osproc, streams, strtabs, strutils, tables,
             tempfiles, unittest]
 import ./gpui_child_env
+import ../../../common/content_file_cache # the icons' stored names
 
 import codetracer_embed
 import styles/generated/design_tokens
@@ -277,13 +278,14 @@ proc partText(row: JsonNode; kind: string): string =
   ""
 
 proc toggleIcon(row: JsonNode): string =
-  ## The file name of the icon a row's toggle part draws, "" when the row
-  ## has no toggle image.
+  ## The name of the icon a row's toggle part draws, "" when the row has no
+  ## toggle image: the file's name with the content cache's digest removed
+  ## (`content_file_cache.nameOfContentFile`), so it names the icon.
   for c in row{"children"}.getElems:
     if c.attr(CallPartAttr) == "toggle":
       for img in c{"children"}.getElems:
         let src = img.attr("src")
-        if src.len > 0: return src.extractFilename
+        if src.len > 0: return src.extractFilename.nameOfContentFile
   ""
 
 proc executionLine(plan: JsonNode): int =

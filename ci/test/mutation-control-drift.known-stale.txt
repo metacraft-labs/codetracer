@@ -606,3 +606,11 @@ src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/gpui/t
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/gpui/window_pointer.nim	154ebd06b830e06ff51411b4bb0b203d98777a2881be1e3dcaa2653822cdb6b4	fe5c284894f50c646f4c66a12fceced65f211cf24b9125d72a6183ffb53eb076
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/gpui/window_clicks.nim	8a2b2e6d3f20c08d4e66148729f95c156a8607b730ff7e05f58d1e57ec48356f	7a08b5dc849865d5b5c1c1f6d97dd58ffb9ad9f42bf554bedcc7d6c63c34c6ae
 src/frontend/tui/tests/plat70g-multiclick-mutation-control.sha256	src/frontend/gpui/window_clicks.nim	8a2b2e6d3f20c08d4e66148729f95c156a8607b730ff7e05f58d1e57ec48356f	7a08b5dc849865d5b5c1c1f6d97dd58ffb9ad9f42bf554bedcc7d6c63c34c6ae
+
+# 2026-11-09, three GPUI suites compare an icon's name with the content
+# cache's digest removed (`content_file_cache.nameOfContentFile`), not the
+# stored file's name (codetracer-pm issue 2026-11-09, "Three GPUI suites
+# expect icon file names that the content cache now hashes"). No mutation
+# grade is claimed and no control file was re-recorded.
+src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/gpui/tests/test_plat49_panes_gpui_plan.nim	9c8cb7c0d3ea5b897373fb62857d464e560821b5f91240547687bfcc6737f4a0	f907c8a1db2fc37a1978432f31629808c749a4032bc4c8e55f0a2926dc0c4877
+src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/gpui/tests/test_plat69_gpui_chrome.nim	b1071da9cb5a444387c5f139138551275fbfc0ac733bab3c6903ff428de75380	a9eae5a39ede3b255057e241509e6a1e758435206c6b9968986a25f027f95971

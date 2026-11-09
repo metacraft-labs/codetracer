@@ -30,6 +30,7 @@ import ../../tui/tests/fixtures/fixture_provider
 import std/[json, options, os, osproc, sets, streams, strtabs, strutils,
             tables, tempfiles, unittest]
 import ./gpui_child_env
+import ../../../common/content_file_cache # the icons' stored names
 
 import codetracer_embed
 import headless_app/session_tabs
@@ -215,11 +216,13 @@ proc part(row: JsonNode; kind: string): seq[JsonNode] =
 proc toggleIcon(row: JsonNode): string =
   ## The SVG the row's toggle draws (`leaves.CallIcons`: `collapse`,
   ## `expand`, `dot`, each with an `-active` twin on the selected row), by
-  ## the file name the window wrote it to — `""` when the row has none.
+  ## the name the window asked the content cache for (its digest removed:
+  ## `content_file_cache.nameOfContentFile`) — `""` when the row has none.
   for t in row.part("toggle"):
     for img in t{"children"}.getElems:
       if img{"tag"}.getStr == "img":
-        return img.attr("src").extractFilename.changeFileExt("")
+        return img.attr("src").extractFilename.nameOfContentFile.
+          changeFileExt("")
 
 proc calltraceBody(geom: JsonNode): seq[int] =
   for n in geom["nodes"]:
@@ -591,7 +594,7 @@ suite "PLAT-49 part B review: the GPUI band's + opens a recording in a new tab":
     let add = one.nodesWith("data-ct-session-tab-add")
     # The desktop's "+" is an icon (`bar-session-tab-add.svg`), not a glyph.
     ck add.len == 1 and add[0].textOf == "" and
-       add[0]{"children"}[0].attr("src").extractFilename ==
+       add[0]{"children"}[0].attr("src").extractFilename.nameOfContentFile ==
          "bar-session-tab-add.svg"
     ck add[0].attr("data-ct-session-tab-add") == NewSessionTabTitle
     # PLAT-51 (Multi-Window-Tab-Management.md rule 3): the "+" opens a tab

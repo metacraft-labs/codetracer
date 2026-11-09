@@ -47,6 +47,22 @@ proc contentFileName*(name, content: string): string =
   let (_, stem, ext) = splitFile(name)
   stem & "-" & toHex(fnv1a64(content)).toLowerAscii & ext
 
+proc nameOfContentFile*(fileName: string): string =
+  ## The inverse of `contentFileName`: the name a stored file was asked for
+  ## under, its digest removed (`plus-b0b0b0-<16 hex>.svg` ->
+  ## `plus-b0b0b0.svg`). A name that carries no digest is returned as it
+  ## is. It is what a reader that asks WHICH icon a path draws compares,
+  ## so the answer does not depend on the content's bytes.
+  const DigestLen = 16
+  let (_, stem, ext) = splitFile(fileName)
+  let at = stem.len - DigestLen - 1
+  if at < 1 or stem[at] != '-':
+    return fileName
+  for c in stem[at + 1 .. ^1]:
+    if c notin HexDigits or c in {'A' .. 'F'}:
+      return fileName
+  stem[0 ..< at] & ext
+
 proc contentFileDir*(area: string): string =
   ## Where the files of `area` live: `<ctCacheDir>/<area>`.
   ctCacheDir() / area
