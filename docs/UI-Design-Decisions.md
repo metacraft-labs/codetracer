@@ -443,6 +443,61 @@ src/frontend/viewmodel/views/tooltips.nim :: OURS_INSIDE = '.trace'
 src/frontend/ui/trace.nim :: runButton.setAttribute(cstring"title", cstring"Run tracepoints (Ctrl+Enter)")
 ```
 
+### D-32: 6px between controls, from Figma, on whole pixels
+
+Neighbouring controls are 6px apart: button and button, field and button, side by
+side or stacked. The value is Figma's `space / gap/control` variable (Compact
+density), which is the source of truth, so the code reads it from the generated
+token as `CONTROL_GAP` in `button.styl` and never writes 6px by hand. Tabs are not
+controls here: strip tabs stay 4px apart and sub-tabs keep their track. The status
+bar's sidebar toggle and tab-list button still touch (2026-10-16) until Nikolay
+decides otherwise. Every size lands on a whole pixel: a value that comes to a
+fraction (0.24em = 3.84px, 11.6px, 14.5px) is rounded to the nearest whole pixel,
+and the debug toolbar's half-pixel dividers sit in a 1px box. (2026-11-03)
+
+```guard
+src/frontend/styles/components/button.styl :: CONTROL_GAP = unit(gap-control / 16, 'rem')
+src/frontend/styles/components/custom_components.styl :: gap: CONTROL_GAP
+src/frontend/styles/components/shared_components.styl :: gap: CONTROL_GAP
+src/frontend/styles/components/menu_bar.styl :: gap: CONTROL_GAP
+src/frontend/styles/components/request_panel.styl :: gap: CONTROL_GAP
+src/frontend/styles/components/shared_widgets.styl :: background: linear-gradient(to right, colors-ui-divider-primary 50%, transparent 50%)
+src/frontend/styles/components/auto_hide.styl :: margin-right: 0.25rem
+src/frontend/styles/components/agent_activity.styl :: margin-top: 0.875rem
+```
+
+### D-33: The session tabs' overflow button shows the Design System chevron
+
+When the session tabs don't fit, the button that lists them all shows the chevron-down
+from the Design System icons page (`icons-lg=chevron-down`), shown at 18px, not a typed "⌄"
+character. It is painted through a mask in the button's text colour. The button looks
+and behaves like the "+" beside it: a 26px circle filled with
+`colors/ui/surface/primary/tertiary`, its mark at 70% at rest, and the "+"'s hover and
+press. While its list is open, the chevron turns to point up and the circle is the hover
+colour (`colors/ui/surface/primary/tertiary-hover`) at 35% opacity. Inactive session tabs
+are filled with that hover colour at 25% on screen. The session tabs, the overflow
+button and the "+" are all 6px apart. (2026-11-03)
+
+```guard
+src/frontend/styles/components/session_tabs.styl :: mask-image url('../../public/resources/shared/build_chevron_down.svg')
+src/frontend/styles/components/session_tabs.styl :: flex 0 0 CONTROL_HEIGHT_MD
+src/frontend/styles/components/session_tabs.styl :: controls (CONTROL_GAP, D-32).  Was 0.25em (4px)
+src/frontend/styles/components/session_tabs.styl :: background-color rgba(colors-ui-surface-primary-tertiary-hover, 0.35)
+src/frontend/styles/components/session_tabs.styl :: background-color rgba(colors-ui-surface-primary-tertiary-hover, (0.25 / 0.7))
+```
+
+### D-34: An empty trace tab hides the debugger controls
+
+A session tab with no trace loaded (a blank welcome tab, not an edit workspace) hides
+the debugger's navigation buttons in the caption bar: there is nothing for them to
+step through. They keep their space, so the command prompt and the tabs do not move
+when switching between an empty tab and a trace. (2026-11-03)
+
+```guard
+src/frontend/ui/session_tabs.nim :: menu.setClass(cstring CaptionBarNoTraceClass, activeSessionIsEmpty(data))
+src/frontend/styles/components/menu_bar.styl :: &.menu-shell--no-trace #isonim-debug-controls
+```
+
 ## Focus rules
 
 Agreed by Nikolay on 2026-11-02, from

@@ -30,6 +30,13 @@ CONTROL_BORDER_WIDTH = 0.0625rem
 CONTROL_BORDER_COLOR = colors-ui-border-secondary
 CONTROL_RADIUS = 0.375rem
 
+// Control gap — ONE space between neighbouring controls: button and button,
+// field and button, in a row or stacked (Nikolay, 2026-11-03).  It is the
+// Figma design system's `space / gap/control` variable, Compact density —
+// 6px — read from the generated token so Figma stays the source of truth.
+// Not for tabs: strip tabs and sub-tabs keep their own spacing.
+CONTROL_GAP = unit(gap-control / 16, 'rem')
+
 // Panel inset — ONE distance between a panel's edges and its content: 8px on
 // the left, the right and the top, in every panel (Nikolay, 2026-09-14).
 //   * top: the panel body's own padding (`.lm_content`, golden_layout.styl; the
@@ -585,8 +592,8 @@ tooltip-look()
 
 // The value-origin badge on each State row sits beside the value-history toggle
 // (above), so it is built as the same extra-small icon button: 20px tall, the
-// shared control outline (CONTROL_BORDER_*, 6px corners), 8px from its
-// neighbour.  With text it grows sideways into a pill; with none — the backend
+// shared control outline (CONTROL_BORDER_*, 6px corners), the control gap
+// (CONTROL_GAP, 6px) from its neighbour.  With text it grows sideways into a pill; with none — the backend
 // sends an empty expression for some terminators, e.g. "recording start" — it
 // stays a 20px square instead of a pill with a hole where the text would be.
 // Sizes are `rem`, not `em`: the badge's own 12px font would otherwise shrink
@@ -609,7 +616,7 @@ tooltip-look()
   // The shared button transition (BUTTON_TRANSITION, top of this file).
   transition: BUTTON_TRANSITION
   vertical-align: middle
-  margin-left: 0.5rem
+  margin-left: CONTROL_GAP
 
   // Design system colors matching secondary image button
   background-color: colors-ui-surface-primary-default

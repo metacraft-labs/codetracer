@@ -311,7 +311,9 @@ table.dataTable tbody tr:not(.active):hover
     padding-left: PANEL_INSET
     padding-right: PANEL_INSET
     flex: 0 0 auto
-    min-height: 2.75em
+    // 32px, so the 20px Rows fields sit 6px from top and bottom.  2.75em came
+    // to 33px and centred them on a half pixel.
+    min-height: 2rem
     align-items: center
     font-family: "SpaceGrotesk"
     font-size: 0.75rem
