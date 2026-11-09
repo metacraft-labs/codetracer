@@ -1216,11 +1216,27 @@ test.describe("PLAT-35 capture: an armed breakpoint and a tracepoint on one line
     );
     await waitForEditorRelayout(ctPage);
 
-    // The breakpoint, exactly as the 'breakpoint-editor' scenario sets it.
-    const driven = await drive(layout, bothPointsBase.operations);
-    expect(driven.moves).toBe(opCount);
+    // The program is stepped exactly as the 'breakpoint-editor' scenario steps
+    // it; the breakpoint is set below, by the same gutter press, with a retry.
+    // MEASURED: `drive`'s own `setBreakpoint` press left no glyph at all in
+    // about one run in six to twenty-five of this case (the press landed before
+    // the editor had finished laying out), and a missing glyph is an
+    // environment race, not the claim under test. A press is repeated ONLY
+    // after the glyph has been seen absent, so a late glyph is never toggled
+    // off by a second press.
+    const stepOps = bothPointsBase.operations.filter(
+      (o: ScenarioOp) => o.kind !== "setBreakpoint",
+    );
+    const breakpointOp = bothPointsBase.operations.find(
+      (o: ScenarioOp) => o.kind === "setBreakpoint",
+    );
+    expect(breakpointOp, "'breakpoint-editor' declares a setBreakpoint").toBeTruthy();
+    const driven = await drive(layout, stepOps);
+    expect(driven.moves).toBe(
+      stepOps.reduce((n: number, op: ScenarioOp) => n + (op.times ?? 1), 0),
+    );
+    await waitForEditorFrameSettled(ctPage);
 
-    // The line the breakpoint landed on: the one whose glyph says so.
     const gutters = ctPage.locator(
       "div[id^='editorComponent'] .margin-view-overlays .gutter",
     );
@@ -1231,16 +1247,25 @@ test.describe("PLAT-35 capture: an armed breakpoint and a tracepoint on one line
         .sort((a, b) => a - b),
     );
     expect(lines.length, "the editor drew no gutter rows").toBeGreaterThan(0);
-    // The rows may have scrolled since the breakpoint was set, so the line is
-    // found by its mark and not recomputed from the declared offset.
-    let target = -1;
-    for (const l of lines) {
-      if ((await glyphMarksOn(ctPage, l)).includes("gutter-glyph-breakpoint")) {
-        target = l;
+    // Relative to the first drawn row, as the scenario's `line` is.
+    const target = lines[Math.min(breakpointOp?.line ?? 1, lines.length - 1)];
+    let armed = false;
+    for (let attempt = 0; attempt < 3 && !armed; attempt++) {
+      if ((await glyphMarksOn(ctPage, target)).includes("gutter-glyph-breakpoint")) {
+        armed = true;
         break;
       }
+      await pressGlyph(ctPage, target);
+      try {
+        await expect
+          .poll(() => glyphMarksOn(ctPage, target), { timeout: 8_000 })
+          .toContain("gutter-glyph-breakpoint");
+        armed = true;
+      } catch {
+        await waitForEditorFrameSettled(ctPage);
+      }
     }
-    expect(target, "no drawn line carries the breakpoint glyph").toBeGreaterThan(0);
+    expect(armed, `no breakpoint glyph on line ${target} after three presses`).toBe(true);
 
     // The tracepoint, on the same line, through the editor's own entry point.
     await ctPage.evaluate((line) => {
