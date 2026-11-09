@@ -435,7 +435,7 @@ src/frontend/viewmodel/tests/unit/plat32-history-mutation-control.sha256	src/fro
 src/frontend/viewmodel/tests/unit/plat32-history-mutation-control.sha256	src/frontend/viewmodel/editor/operations.nim	4243f588d96eef7748616586dfe85e692273aa467242a17221f3a2341b5730b4	f28dfaefe805c8a0f6958bb2c1ff272574299ed5e1de841a2dc3ad88f68a93cb
 src/frontend/viewmodel/tests/unit/plat32-history-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_editor_history_laws.nim	a44a720d343372a7e65522f595937508e75742849687f7f5ab321ec15d4044a0	3d77ced2772280a988f392e1049173dcc6b47bc0fb3ff552cbb552fc36ffe097
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	src/frontend/viewmodel/editor/operations.nim	4243f588d96eef7748616586dfe85e692273aa467242a17221f3a2341b5730b4	f28dfaefe805c8a0f6958bb2c1ff272574299ed5e1de841a2dc3ad88f68a93cb
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml	b622e9d774ee64da319c2053ebd1d4af7d5a5c7947f29b35c36a72954495465e	9791540dd9307262a44edb8557485599fd3e811afdf0d908b445515e3b533b64
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml	b622e9d774ee64da319c2053ebd1d4af7d5a5c7947f29b35c36a72954495465e	dc4ccbdafdfb537d2d4612e2f2ac472df714716e33982d769a256b781d93d816
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	justfile	35b1dbb41f6528ad8cd944b95269528f6411c51fa5c4f5771a781970ff32f89a	356bd13159cdc9d0fddef53279c424c4966cbbeb211fe306193faebbe5989813
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/test-lane-files.sh	e1d6e76c7d034416265f9af9000a8f28fa89fca5bea3802612e162913f88f249	0ce7227dbe56c10b780a395a0303d685cd02dbd40234ae1173518a6a379a0a7f
 src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	src/frontend/viewmodel/editing_core.nim	22091e34cac128635c133093fe54db4b5aaffb70f6403f77232291833912770d	523e410249726163c1fcb2f1117c70346130e56c3b84fd3bb3e5105d15a9fc86
@@ -575,3 +575,16 @@ src/frontend/tui/tests/plat70g-multiclick-mutation-control.sha256	src/frontend/v
 # is claimed and no control file was re-recorded.
 src/frontend/tui/tests/plat46-design-mutation-control.sha256	src/frontend/tui/app/tests/test_degraded_style_tables.nim	1db46cdee846f2db18d5a0f95c0c5f855e804734a0523e81a61394a6c81d5f8b	3186722e83443eecc8730685ed332adb6468cdb970e46d527c2155827e91394a
 src/frontend/tui/tests/plat65-nim-tracing-mutation-control.sha256	src/frontend/gpui/main.nim	8f708bfc0683e2fc8bf211040b56b98d3e65b8b9a0ba8db369648f90f76b401e	233feceb0477a02ad931120bb91f49621380b036255ba6e687cb18749e4c7c29
+
+# 2026-11-09, 9cc8c26ba (dim disabled loop buttons with an inset shadow)
+# changed `styles/components/button.styl`, which the plat70f pointer
+# control digests, without a line here. No re-grade is claimed and no
+# control file was re-recorded.
+src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/styles/components/button.styl	2d908c745e9faa9e82bf70a35a68a98ebb433651196470176f470419f01f4df5	86ab2aec710c6203305fc3321959c3d64b2ba9b926b537a8da6cbd984058fa7a
+
+# 2026-11-09, 571942981 (report a missing calc fixture as a counted skip in
+# plat48) changed `tests/test_plat48_top_bar.nim`, which the plat48-topbar
+# and plat64-input-routing controls digest, without a line here. No
+# re-grade is claimed and no control file was re-recorded.
+src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/frontend/tui/tests/test_plat48_top_bar.nim	d0971e4dba3dde07f5ae348ab7b3c6647ed2531b0ae9c9159c9229030541d3eb	8d176a5a5beafc3d74e57322412d846de668e9f33c223435d7f230a0e41c6aa6
+src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/tui/tests/test_plat48_top_bar.nim	d0971e4dba3dde07f5ae348ab7b3c6647ed2531b0ae9c9159c9229030541d3eb	8d176a5a5beafc3d74e57322412d846de668e9f33c223435d7f230a0e41c6aa6
