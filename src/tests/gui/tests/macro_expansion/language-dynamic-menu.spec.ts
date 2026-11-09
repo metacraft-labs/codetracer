@@ -57,38 +57,46 @@ interface MenuNodeShape {
 }
 
 /**
- * Wait until `window.data.ui.menuNode` is populated and a Nim
- * `data.trace.lang` is reflected on the page.  Trace load is async
- * (DAP handshake -> run-to-entry) and the menu is rebuilt inside the
- * same handler, so we poll for both to settle before asserting on
- * the tree shape.
+ * The loaded trace as the renderer sees it when it builds the menu,
+ * plus the menu it built.
  */
-async function readMenuNodeWhenReady(
-  page: Page,
-  expectedLang: "nim" | "non-nim",
-): Promise<MenuNodeShape> {
-  // The MenuNode kind ordinals come straight from Nim's MenuNodeKind
-  // enum (MenuFolder = 0, MenuElement = 1).  Mirroring them as
-  // numeric literals here keeps the assertion infrastructure
-  // self-contained — Playwright cannot import Nim sources.
-  //
+interface LoadedTraceMenu {
+  /** `session.trace.lang` as the ordinal of Nim's `Lang` enum. */
+  lang: number;
+  /** `session.trace.program`. */
+  program: string;
+  /**
+   * The renderer's `effectiveTraceLang` (ui_js.nim) resolves to
+   * `LangNim` for this trace — the condition under which
+   * `appendLanguageSpecificViewItems` adds the Nim items.
+   */
+  isNim: boolean;
+  menuNode: MenuNodeShape;
+}
+
+/**
+ * Wait until a trace is loaded and the menu built for it, then read
+ * both.  Trace load is async (DAP handshake -> run-to-entry), and
+ * `onTraceLoaded` (ui_js.nim) sets `data.trace` and rebuilds
+ * `data.ui.menuNode` in the same synchronous step, so once the
+ * session carries a loaded trace its menu reflects that trace and not
+ * the pre-trace menu.
+ *
+ * The wait does NOT depend on the trace's language.  It used to wait
+ * for a `trace.program` ending in `.nim`, which never happens for a
+ * recorded `.nim` source: `ct record` compiles it and records the
+ * binary, so the program has no extension (codetracer-pm issue
+ * 2026-11-09-language-dynamic-menu-nim-case-waits-for-a-program-named-dot-nim).
+ * The language is instead classified the way the renderer does, and
+ * the caller asserts on it.
+ */
+async function readMenuNodeWhenReady(page: Page): Promise<LoadedTraceMenu> {
   // `Data.trace`, `Data.ui` and friends are Nim `template`s that
   // resolve to `data.sessions[data.activeSessionIndex].<field>`,
   // so we have to walk the same path from the JS side (templates do
   // not erase to actual fields on the JS object).
-  //
-  // The menu is rebuilt every time the renderer finishes loading a
-  // trace (`onTraceLoaded` in ui_js.nim).  Wait until both
-  // `session.ui.menuNode` is populated AND `session.trace.program`
-  // names a file of the expected family — `data.trace.lang` is the
-  // canonical signal, but historical recordings classified by an
-  // earlier importer can have `lang === LangUnknown` even for Nim
-  // traces (see `effectiveTraceLang` in ui_js.nim).  Asserting on
-  // the program filename mirrors the renderer's own fallback so the
-  // test still anchors on the loaded trace, not on a stale
-  // pre-trace menu.
   await page.waitForFunction(
-    (expected: string) => {
+    () => {
       const d = (window as unknown as { data?: any }).data;
       if (!d) return false;
       const idx = typeof d.activeSessionIndex === "number"
@@ -96,25 +104,37 @@ async function readMenuNodeWhenReady(
         : 0;
       const session = Array.isArray(d.sessions) ? d.sessions[idx] : null;
       if (!session?.ui?.menuNode) return false;
-      const program = String(session.trace?.program ?? "");
-      if (program.length === 0) return false;
-      // Match the renderer's `effectiveTraceLang` heuristic by
-      // extension.  The Lang enum (`common_lang.nim`) labels `.nim`
-      // as LangNim; any other extension is treated as "not Nim"
-      // for this test (the spec only contrasts Nim vs. non-Nim).
-      const isNim = program.toLowerCase().endsWith(".nim");
-      return expected === "nim" ? isNim : !isNim;
+      return String(session.trace?.program ?? "").length > 0;
     },
-    expectedLang,
+    undefined,
     { timeout: 60_000 },
   );
 
-  return await page.evaluate((): MenuNodeShape => {
+  return await page.evaluate((): LoadedTraceMenu => {
+    // Ordinals mirrored from Nim enums as numeric literals, because
+    // Playwright cannot import Nim sources and the JS backend erases
+    // enums to their ordinals:
+    //   - `MenuNodeKind` (frontend/types.nim): MenuFolder = 0,
+    //     MenuElement = 1.
+    //   - `Lang` (common/common_lang.nim): LangUnknown = 0,
+    //     LangNim = 4.  Those ordinals are pinned against the Rust
+    //     enum by src/tests/cli/lang_enum_contract_test.nim.
+    const LANG_UNKNOWN = 0;
+    const LANG_NIM = 4;
     const d = (window as unknown as { data?: any }).data;
     const idx = typeof d.activeSessionIndex === "number"
       ? d.activeSessionIndex
       : 0;
     const session = d.sessions[idx];
+    const lang = typeof session.trace.lang === "number"
+      ? session.trace.lang
+      : -1;
+    const program = String(session.trace.program ?? "");
+    // Mirror of `effectiveTraceLang` in ui_js.nim: `trace.lang` is
+    // the canonical signal; only a `LangUnknown` trace falls back to
+    // the program's `.nim` extension.
+    const isNim = lang === LANG_NIM ||
+      (lang === LANG_UNKNOWN && program.toLowerCase().endsWith(".nim"));
     const toShape = (n: any): MenuNodeShape => ({
       name: typeof n?.name === "string" ? n.name : String(n?.name ?? ""),
       kind: typeof n?.kind === "number" ? n.kind : -1,
@@ -122,7 +142,7 @@ async function readMenuNodeWhenReady(
         ? n.elements.map(toShape)
         : [],
     });
-    return toShape(session.ui.menuNode);
+    return { lang, program, isNim, menuNode: toShape(session.ui.menuNode) };
   });
 }
 
@@ -169,8 +189,14 @@ test.describe("language-dynamic View-menu items", () => {
         const layout = new LayoutPage(ctPage);
         await layout.waitForBaseComponentsLoaded();
 
-        const menuNode = await readMenuNodeWhenReady(ctPage, "nim");
-        const viewFolder = findViewFolder(menuNode);
+        const loaded = await readMenuNodeWhenReady(ctPage);
+        expect(
+          loaded.isNim,
+          "the loaded trace must resolve to Nim the way the renderer " +
+            `resolves it (trace.lang=${loaded.lang}, ` +
+            `program=${JSON.stringify(loaded.program)})`,
+        ).toBe(true);
+        const viewFolder = findViewFolder(loaded.menuNode);
         expect(
           viewFolder,
           "View folder must exist in the menu tree",
@@ -200,8 +226,14 @@ test.describe("language-dynamic View-menu items", () => {
         const layout = new LayoutPage(ctPage);
         await layout.waitForBaseComponentsLoaded();
 
-        const menuNode = await readMenuNodeWhenReady(ctPage, "non-nim");
-        const viewFolder = findViewFolder(menuNode);
+        const loaded = await readMenuNodeWhenReady(ctPage);
+        expect(
+          loaded.isNim,
+          "the loaded trace must not resolve to Nim " +
+            `(trace.lang=${loaded.lang}, ` +
+            `program=${JSON.stringify(loaded.program)})`,
+        ).toBe(false);
+        const viewFolder = findViewFolder(loaded.menuNode);
         expect(
           viewFolder,
           "View folder must exist in the menu tree",
