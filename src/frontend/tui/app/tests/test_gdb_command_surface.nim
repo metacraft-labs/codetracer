@@ -162,7 +162,10 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 127
+  ExpectedAppModules = 129
+    ## 2026-11-09: 127 → 129, `theme/pointer_protocol.nim` (`d8e437ee5`, the
+    ## pointer's shape on every front-end) and `views/visual_replay_panes.nim`
+    ## (`919620c00`, Visual Replay on the terminal), landed without re-counting.
     ## 2026-11-05 (PLAT-61): 126 → 127, `views/shell_session_pane.nim`, the
     ## Shell pane's painter.
     ## 2026-11-04 (PLAT-62): 125 → 126, `views/constraints_pane.nim`, the
@@ -311,7 +314,10 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 384
+  ExpectedStyleLiterals = 394
+    ## 2026-11-09: 384 → 394, measured — nine in the new
+    ## `views/visual_replay_panes.nim` (`919620c00`) and one,
+    ## `BreakpointHintStyle`, in an existing file (`ffec0f79a`).
     ## 2026-11-05 (PLAT-61): 379 → 384, measured — the Shell pane's five
     ## (`views/shell_session_pane.nim`: its header and title, and the
     ## working, success and error tones of its gutter).
@@ -464,7 +470,8 @@ const
     ## reachability guard's bucket B). They were deleted to bring that ratchet
     ## back under its ceiling, and `views/search.nim` had no other literal, so
     ## it leaves the styled-file count. No painted colour changed.
-  ExpectedStyledFiles = 47
+  ExpectedStyledFiles = 48
+    ## 2026-11-09: +1, `views/visual_replay_panes.nim`.
     ## 2026-11-05 (PLAT-61): +1, `views/shell_session_pane.nim`.
     ## 2026-11-04 (PLAT-62): +1, `views/constraints_pane.nim`.
     ## 2026-11-03 (PLAT-63): +1, `views/verification_pane.nim`.

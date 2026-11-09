@@ -54,7 +54,11 @@ import codetracer_embed
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 541
+const ExpectedAssertions = 554
+  ## 541 -> 554, measured on 2026-11-09: `d8e437ee5` added the
+  ## `pointer-shapes` axis to the terminal profile, which TA-13
+  ## sweeps once per persona (+10 for the ten personas); the other three are not
+  ## individually attributed.
   ## 529 -> 541, measured: the glyph table's four Shell gutter roles
   ## (`grShellWorking`, `-Ok`, `-Error`, `-Range`), three per-role checks each.
   ## 523 -> 529, measured: the glyph table's `grDropdown` and
@@ -514,7 +518,8 @@ suite "PLAT-71 Tier 1: the terminal's capability profile":
                                                      persona.probe))
       ck report.len >= 14
       ck report[0].startsWith("Terminal")
-    ck axes == Personas.len * 18
+    # 18 -> 19 axes per persona: `pointer-shapes` (`d8e437ee5`).
+    ck axes == Personas.len * 19
 
   test "§6.3: the glyph table's columns and the views' published constants":
     ck GlyphProfile(tier: tierAscii).glyph(grTruncation) == "~"
