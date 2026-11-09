@@ -3,8 +3,8 @@
  Telemetry upload retries — and keep the
  previous behaviour behind a flag until
  every downstream consumer of the old
- interface has migrated, with a note in the
- changelog
+ interface has migrated, with a note in
+ the changelog
                      1 of 4 milestones · 25%
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ● 1 completed  ● 1 in progress  ● 2 planned

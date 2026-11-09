@@ -120,19 +120,38 @@ proc drawMenu*(c: var AhCanvas; parent: AhNode; row, col, width, height: int;
   c.area("menu:" & kind, row, col, width, height, c.tone.menu)
   c.node(parent, row, col, width, height, [("menu", kind)])
 
+const
+  MenuInset* = 1
+    ## The cells a menu keeps clear at each side (its mark sits after one).
+  MenuOriginGap* = 2
+    ## The cells a menu item keeps clear before its right-hand column, so a
+    ## cut title's "…" never touches the origin.
+
+proc trailingCells*(trailing: openArray[(string, string)]): int =
+  ## The cells an item's trailing words take, one space apart.
+  for (word, _) in trailing: result += widthOf(word) + 1
+  result = max(0, result - 1)
+
 proc drawMenuItem*(c: var AhCanvas; menu: AhNode; row, col, width: int;
                    m: MarkStyle; title, key: string; active: bool;
                    trailing: openArray[(string, string)] = [];
-                   onClick: proc() = nil): AhNode =
-  ## One line of a dropdown: a mark, the title, then quieter facts at its end.
+                   onClick: proc() = nil; trailColumn = -1): AhNode =
+  ## One line of a dropdown: a mark, the title, then quieter facts at its
+  ## end, right-aligned in a column `trailColumn` cells wide (the menu's
+  ## widest; this item's own by default) that ends one cell in from the
+  ## menu's edge, with `MenuOriginGap` cells between it and the title.
   result = c.node(menu, row, col, width, 1, [("menu-item", key)])
   if active: c.fill(row, col, width, 1, c.p.activeTab)
   discard c.mark(result, row, col + 1, m)
-  var tail = 0
-  for (word, _) in trailing: tail += widthOf(word) + 1
-  discard c.text(result, row, col + 3, max(1, width - 4 - tail), title,
-                 if active: c.p.activeTabText else: c.p.textBody)
-  var at = col + width - 1 - tail
+  let tail = trailingCells(trailing)
+  let column = max(tail, trailColumn)
+  let columnAt = col + width - MenuInset - column
+  let titleRoom = columnAt - (if column > 0: MenuOriginGap else: MenuInset) - (col + 3)
+  discard c.text(result, row, col + 3, max(1, titleRoom), title,
+                 if active: c.p.activeTabText else: c.p.textBody, fact = "title")
+  var at = columnAt + column - tail
+  if tail > 0:
+    discard c.node(result, row, at, tail, 1, [("menu-trailing", key)])
   for (word, colour) in trailing:
     discard c.put(row, at, word, colour)
     at += widthOf(word) + 1
@@ -189,11 +208,17 @@ proc drawTab(c: var AhCanvas; parent: AhNode; vm: SessionTabStripVM;
       result.underline = true
       result.underlineColor = ink)
 
-proc noticeGround*(c: AhCanvas): string =
-  ## A notice in a tab bar: tab-shaped by a quiet ground of its own (the
-  ## web draws a dashed outline there), the raised surface a step off the
-  ## bar's — never the active tab's grey, so it cannot read as the active tab.
-  tokenHexOf(dtColorsUiSurfaceBaseRaised, c.p.mode)
+proc noticeGround*(p: AhPalette): string =
+  ## A notice in a tab bar: tab-shaped by a ground of its own (the web
+  ## draws a dashed outline there), a visible step off the bar's — Dark
+  ## `surface/primary/secondary-hover` (1.36:1 on the bar), Light
+  ## `surface/base/card` (1.34:1) — and never the active tab's grey, so it
+  ## cannot read as the active tab. The steps nearer the active tab's own
+  ## (1.56:1, 2.04:1) are the active grey itself in Dark and, in Light, a
+  ## ground the notice's caption and error text read on at about 2.6:1.
+  if p.mode == dmDark: p.hover else: p.menu
+
+proc noticeGround*(c: AhCanvas): string = noticeGround(c.p)
 
 proc drawStripNotice*(c: var AhCanvas; parent: AhNode; row, col, width: int;
                       message, kind: string; retry: proc()): int =
@@ -290,10 +315,11 @@ proc drawSessionTabStrip*(c: var AhCanvas; vm: SessionTabStripVM; row, col, widt
     # The menu holds each title whole with two cells before its origin, and
     # keeps a row of its own ground above and below its items (the web's
     # dropdown padding), so it does not sit against the strip.
+    var column = 0
+    for i in overflow: column = max(column, widthOf(tabs[i].originShort))
     var widest = MenuMinCells
     for i in overflow:
-      widest = max(widest, 4 + widthOf(tabs[i].title) + 2 +
-                   (if tabs[i].originShort.len > 0: widthOf(tabs[i].originShort) + 1 else: 0))
+      widest = max(widest, 3 + widthOf(tabs[i].title) + MenuOriginGap + column + MenuInset)
     let menuW = min(widest, width - 1)
     let menuCol = col + max(0, width - 1 - menuW)
     let menu = c.drawMenu(host, lastRow + 1, menuCol, menuW,
@@ -306,7 +332,8 @@ proc drawSessionTabStrip*(c: var AhCanvas; vm: SessionTabStripVM; row, col, widt
       if tabs[i].originShort.len > 0: trailing.add (tabs[i].originShort, c.p.textCaption)
       discard c.drawMenuItem(menu, lastRow + 2 + k, menuCol, menuW,
                              c.p.markOf(tabs[i].attention), tabs[i].title, id,
-                             tabs[i].active, trailing, proc() = discard target.activate(id))
+                             tabs[i].active, trailing, proc() = discard target.activate(id),
+                             trailColumn = column)
 
 proc mountSessionTabStrip*(vm: SessionTabStripVM; cols: int) =
   ## Tell the viewmodel the strip's width, in the unit its layout counts.
@@ -380,7 +407,18 @@ type
     ## Where a list's group headers put their parts, the same for every
     ## header of the list so `n/m` stands in one column: the title's slot,
     ## then `n/m` right-aligned in its own, then the counts' slot at the end.
+    ## `flush`: the docked panel's wide layout, where every header's counts
+    ## are right-aligned to the panel's end, flush with the rows' ages.
     titleAt*, titleW*, progressW*, countsW*: int
+    flush*: bool
+
+  GroupHeaderPlace* = object
+    ## One header's parts, in absolute columns: the title's width, where
+    ## `n/m` and the counts start and how many cells the counts get (none
+    ## when fewer than two would show), and whether the header flowed
+    ## inline (`n/m` two cells after its title) rather than in the columns.
+    titleW*, progressAt*, countsAt*, countsW*: int
+    inline*: bool
 
 const
   GroupCountsShare = 40
@@ -388,16 +426,22 @@ const
     ## `max-width: 40%`).
   GroupCountsMin = 8
     ## What the title slot leaves the counts at least (`1 needs…`).
+  GroupInlineGap = 2
+    ## Between a title and the `n/m` that flows after it.
 
-proc groupColumns*(vm: SessionTabStripVM; width: int): GroupColumns =
+proc groupColumns*(vm: SessionTabStripVM; width: int; flush = false): GroupColumns =
   ## The columns of `vm`'s group headers in a list `width` cells wide: the
   ## title's slot as wide as the widest title, but leaving `n/m` its column
   ## and the counts at least `GroupCountsMin` cells; `n/m` right-aligned in
   ## a column as wide as the widest `n/m`; the counts the rest (at most 40%
   ## of the line). A title longer than its slot takes room from its own
-  ## header's counts (`groupHeaderLayout`): the counts are cut before the
+  ## header's counts (`groupHeaderPlace`): the counts are cut before the
   ## title is (`.ah-session-group-counts` shrinks a hundred times faster).
+  ## `flush` (the docked panel's wide layout): the counts' slot is the
+  ## widest counts, ending at the panel's end, and `n/m` stands just left of
+  ## it.
   result.titleAt = 5   # fold, a space, the mark, a space
+  result.flush = flush
   var widestCounts, widestProgress, widestTitle = 0
   for g in vm.groups:
     widestCounts = max(widestCounts, widthOf(countsText(g.counts)))
@@ -406,24 +450,48 @@ proc groupColumns*(vm: SessionTabStripVM; width: int): GroupColumns =
   let line = width - result.titleAt - 1
   let pw = if widestProgress > 0: widestProgress + 1 else: 0
   result.progressW = widestProgress
+  if flush:
+    result.countsW = min(widestCounts, line * GroupCountsShare div 100)
+    result.titleW = max(4, line - pw - 1 - result.countsW)
+    return
   result.titleW = max(4, min(max(widestTitle, line - pw - 1 -
                                  min(widestCounts, line * GroupCountsShare div 100)),
                              line - pw - 1 - GroupCountsMin))
   result.countsW = max(0, line - result.titleW - pw - 1)
 
-proc groupHeaderLayout*(cols: GroupColumns; width: int; title, progress,
-                        counts: string): tuple[titleW, countsW: int] =
-  ## One header's title and counts widths: the title whole when the line can
-  ## hold it beside `n/m` (taking its counts' room first), cut only when it
-  ## cannot; the counts what is left of their slot (none below two cells).
+proc groupHeaderPlace*(cols: GroupColumns; col, width: int; title, progress,
+                       counts: string): GroupHeaderPlace =
+  ## One header's layout. The columns are a preference, not a constraint:
+  ## the title whole when the line can hold it beside `n/m` (taking its
+  ## counts' room first), cut only when it cannot; the counts what is left
+  ## of their slot. A header whose counts the columns would cut, but which
+  ## would show them whole with `n/m` two cells after its title, flows
+  ## inline instead (as the web's header always does), so a short title
+  ## never costs its own counts; the other headers keep the column. On the
+  ## docked panel's wide layout (`cols.flush`) the counts end at the panel's
+  ## end, flush with the rows' ages.
+  let titleAt = col + cols.titleAt
+  let lineEnd = col + width - 1             # exclusive: one cell of inset
   let line = width - cols.titleAt - 1
   let pw = if cols.progressW > 0: cols.progressW + 1 else: 0
   let natural = widthOf(title)
+  let cw = widthOf(counts)
   result.titleW = cols.titleW
-  result.countsW = min(cols.countsW, widthOf(counts))
+  result.countsW = min(cols.countsW, cw)
   if natural > cols.titleW:
     result.titleW = min(natural, line - pw)
-    result.countsW = min(widthOf(counts), max(0, line - pw - result.titleW - 1))
+    result.countsW = min(cw, max(0, line - pw - result.titleW - 1))
+  let progressEnd = max(titleAt + result.titleW + 1 + cols.progressW,
+                        lineEnd - (if cols.countsW > 0: cols.countsW + 1 else: 0))
+  result.progressAt = progressEnd - widthOf(progress)
+  result.countsAt = if cols.flush: lineEnd - result.countsW else: progressEnd + 1
+  if not cols.flush and result.countsW < cw:
+    let progressCells = if progress.len > 0: widthOf(progress) + 1 else: 0
+    if titleAt + natural + GroupInlineGap + progressCells + cw <= lineEnd:
+      result = GroupHeaderPlace(titleW: natural, inline: true,
+                                progressAt: titleAt + natural + GroupInlineGap,
+                                countsAt: titleAt + natural + GroupInlineGap + progressCells,
+                                countsW: cw)
   if result.countsW < 2: result.countsW = 0
 
 proc drawGroupHeader(c: var AhCanvas; parent: AhNode; vm: SessionTabStripVM;
@@ -434,7 +502,8 @@ proc drawGroupHeader(c: var AhCanvas; parent: AhNode; vm: SessionTabStripVM;
   ## node carries the action role's bar at its left edge (the web fills it;
   ## a fill here would collide with the band's two grounds). The title has
   ## priority over the counts, and `n/m` stands in the list's one column
-  ## unless this header's title needs its place.
+  ## unless this header's title needs its place or its counts are whole
+  ## only inline (`groupHeaderPlace`).
   let planId = group.planId
   let focused = planId.len > 0 and planId == vm.focusedPlan.val
   c.area("group", row, col, width, 1, c.tone.group[index mod 2])
@@ -446,27 +515,23 @@ proc drawGroupHeader(c: var AhCanvas; parent: AhNode; vm: SessionTabStripVM;
   c.target(row, col, width, 1, proc() = target.toggleGroup(planId))
   discard c.put(row, col + 1, if group.collapsed: FoldedGlyph else: UnfoldedGlyph,
                 c.p.textLabel)
-  var titleAt = col + 3
   if planId.len > 0:
-    discard c.mark(n, row, titleAt, c.p.markOf(group.state))
-  titleAt = col + cols.titleAt
+    discard c.mark(n, row, col + 3, c.p.markOf(group.state))
+  let titleAt = col + cols.titleAt
   let counts = countsText(group.counts)
   let progress = group.progressText
-  let (titleW, countsW) = groupHeaderLayout(cols, width, group.title, progress, counts)
-  discard c.text(n, row, titleAt, titleW, group.title, c.p.textLabel, bold = true,
+  let place = groupHeaderPlace(cols, col, width, group.title, progress, counts)
+  if place.inline: n.tag("inline", "true")
+  discard c.text(n, row, titleAt, place.titleW, group.title, c.p.textLabel, bold = true,
                  fact = "title")
-  # `n/m` right-aligned in its column, after the title's slot (or its own
-  # title, when that took the counts' room).
-  let progressEnd = max(titleAt + titleW + 1 + cols.progressW,
-                        col + width - 1 - (if cols.countsW > 0: cols.countsW + 1 else: 0))
   if progress.len > 0:
-    discard c.text(n, row, progressEnd - widthOf(progress), widthOf(progress), progress,
+    discard c.text(n, row, place.progressAt, widthOf(progress), progress,
                    c.p.textCaption, fact = "progress")
-  if countsW > 0:
-    discard c.text(n, row, progressEnd + 1, countsW, counts, c.p.textCaption,
-                   fact = "counts")
+  if place.countsW > 0:
+    discard c.text(n, row, place.countsAt, place.countsW, counts, c.p.textCaption,
+                   fact = "counts", alignRight = cols.flush)
   else:
-    discard c.node(n, row, progressEnd + 1, 0, 1, [("counts-hidden", counts)])
+    discard c.node(n, row, place.countsAt, 0, 1, [("counts-hidden", counts)])
 
 proc drawSessionList*(c: var AhCanvas; vm: SessionTabStripVM; row, col, width, height: int) =
   ## The list at (`row`, `col`): `width` × `height` cells for a docked panel;
@@ -485,8 +550,9 @@ proc drawSessionList*(c: var AhCanvas; vm: SessionTabStripVM; row, col, width, h
   # where a terminal line does not.
   let showSummary = not collapsed and vm.state.val == asReady
   let showSource = not collapsed and vm.sourceLabel.len > 0
+  # Beside SESSIONS, two cells after it as every head's parts are.
   let besideTitle = showSummary and not sidebar and columns and
-                    10 + widthOf(vm.summaryText) <= w - 2
+                    11 + widthOf(vm.summaryText) <= w - 2
   let summaryLines = if showSummary and not besideTitle: wrapCells(vm.summaryText, w - 2).len
                      else: 0
   let sourceLines = if showSource: wrapCells(vm.sourceLabel, w - 2).len else: 0
@@ -505,7 +571,7 @@ proc drawSessionList*(c: var AhCanvas; vm: SessionTabStripVM; row, col, width, h
   var r = row + 1
   if showSummary:
     if besideTitle:
-      discard c.text(head, row, col + 10, w - 12, vm.summaryText, c.p.textCaption,
+      discard c.text(head, row, col + 11, w - 13, vm.summaryText, c.p.textCaption,
                      fact = "summary")
     else:
       r += c.para(head, r, col + 1, w - 2, vm.summaryText, c.p.textCaption, fact = "summary")
@@ -527,7 +593,7 @@ proc drawSessionList*(c: var AhCanvas; vm: SessionTabStripVM; row, col, width, h
       return
     let list = c.node(host, bodyTop, col, w, bodyH, [("rows", "list")])
     r = bodyTop
-    let groupCols = groupColumns(vm, w)
+    let groupCols = groupColumns(vm, w, flush = columns)
     for gi, group in vm.groups:
       let showHeader = vm.grouped.val and not collapsed
       if showHeader:

@@ -21,7 +21,7 @@ import nim_agents_isonim_viewmodels/agent_harbor/fleet_vm
 from ../../viewmodel/views/agent_harbor_words import
   filterLabel, filterCount, metaParts, metaPartsShort, withheldNote, headerSummary,
   AgentHarborFleetLoadingText, AgentHarborFleetEmptyText,
-  AgentHarborFleetFilteredEmptyText, AgentHarborFleetEmptyCellText
+  AgentHarborFleetFilteredEmptyText, AgentHarborFleetEmptyCellText, activityLineIsError, filterCountInk
 
 import ./ah_theme
 import ./ah_initiative_panels
@@ -91,10 +91,13 @@ proc drawFilter(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; filter: Flee
   r.appendChild(result, r.text(filterLabel(filter), CaptionPx,
                                if active: p.textBody else: p.textLabel, shrink = false))
   # `.ah-fleet-filter-count`: tabular figures.
-  r.appendChild(result, r.text($count, CaptionPx,
-                               if count == 0: p.textDisabled
-                               elif active: p.textBody else: p.textCaption, shrink = false,
-                               tabular = true))
+  let role = filterCountInk(count, active)
+  let ink = if role.body: p.textBody elif role.disabled: p.textDisabled else: p.textCaption
+  let countText = r.text($count, CaptionPx, ink, shrink = false, tabular = true)
+  # The ink as a fact: the shim keeps styles it cannot be asked for, and the
+  # CTF-P1b coverage test holds this colour to the shared rule.
+  r.tag(countText, "ink", ink)
+  r.appendChild(result, countText)
   r.addEventListener(result, "click", proc() = vm.setFilter(chosen))
 
 proc cell(r: GpuiRenderer; p: AhPalette; s: string; widthPx: int; name: string;
@@ -192,16 +195,15 @@ proc drawRow(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; row: FleetRow;
   # 16px apart, not the row's 2px further each.
   let activity = r.box(column = true, pairs = [("min-width", "0px")])
   for i in 0 ..< shown:
-    let level = if i < row.activityLevels.len: row.activityLevels[i] else: ""
     let hasChip = i == 0 and row.activity.len + row.activityMore > 1
     # `.ah-fleet-activity-row`: the line and the chip 8px apart.
     let line = r.box(pairs = [("gap", "8px"), ("items", "center"), ("min-width", "0px")])
     if hasChip: r.setStyle(line, "height", $ChipLinePx & "px")
-    let t = r.text(row.activity[i], CaptionPx,
-                   if sel: selText
-                   elif level == "error": p.textError else: p.rowDetail,
-                   pairs = [lh])
+    let ink = if sel: selText
+              elif activityLineIsError(row, i): p.textError else: p.rowDetail
+    let t = r.text(row.activity[i], CaptionPx, ink, pairs = [lh])
     r.tag(t, "activity", row.activity[i])
+    r.tag(t, "ink", ink)
     r.appendChild(line, t)
     if hasChip:
       let hidden = row.activity.len - 1 + row.activityMore

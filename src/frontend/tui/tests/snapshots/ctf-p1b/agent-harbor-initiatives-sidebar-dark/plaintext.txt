@@ -1,7 +1,7 @@
  Initiatives  ⚲ ✕
  INITIATIVES
- invented working set: 14 sessions over 4
- initiatives
+ invented working set: 14 sessions over
+ 4 initiatives
                4 initiatives · 12 sessions ·
            2 need input · 2 in no initiative
  ▾ ● Telemetry upload retries      1/4 · 25%

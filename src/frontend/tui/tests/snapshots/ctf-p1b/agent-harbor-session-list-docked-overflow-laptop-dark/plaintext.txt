@@ -1,7 +1,7 @@
  Sessions  ⚲ ✕
- SESSIONS 40 sessions · 6 need input · 8 idle · 16 running · 2 failed
+ SESSIONS  40 sessions · 6 need input · 8 idle · 16 running · 2 failed
  invented working set: 40 sessions over 5 initiatives
- ▾ ● Telemetry upload retries                                                                                                          1/4 2 need input · 2 idle · 2 running
+ ▾ ● Telemetry upload retries                                                                                                          1/4        2 need input · 2 idle · 2 running
  ● Retry telemetry uploads with exponential backoff                                    needs input CodeTracer · Claude 2.1.0 · host-a                                           now
    assistant: Should the old behaviour stay behind a flag, or go?
  ● Report dropped telemetry batches on the status page                                 needs input CLI · Codex 0.9.4 · host-b                                                    4m
@@ -16,7 +16,7 @@
    assistant: Running the tests again after the change.
  ● Cap the telemetry retry budget per hour                                             completed CodeTracer · Opencode 0.6.1 · host-d                                            1m
    assistant: Finished; the tests pass.
- ▾ ● Settings redesign                                                                                                                 3/8 2 need input · 2 idle · 2 running
+ ▾ ● Settings redesign                                                                                                                 3/8        2 need input · 2 idle · 2 running
  ● Add search to the settings page                                                     needs input CLI · Opencode 0.6.1 · host-b                                                now
    assistant: Should the old behaviour stay behind a flag, or go?
  ● Show which settings need a restart                                                  needs input WebUI · Claude 2.1.0 · host-c                                                 4m
@@ -31,7 +31,7 @@
    assistant: Running the tests again after the change.
  ● Add keyboard navigation to the settings tabs                                        completed TUI · Grok 1.2.0 · host-e                                                       1m
    assistant: Finished; the tests pass.
- ▾ ● Release 3.0                                                                                                                      5/12 2 need input · 1 idle · 2 running
+ ▾ ● Release 3.0                                                                                                                      5/12        2 need input · 1 idle · 2 running
  ● Trim the 3.0 release bundle under 40 MB                                             needs input WebUI · Grok 1.2.0 · host-c                                                  now
    assistant: Should the old behaviour stay behind a flag, or go?
  ● Tag the 3.0 release candidate                                                       needs input CodeTracer · Opencode 0.6.1 · host-d                                          4m

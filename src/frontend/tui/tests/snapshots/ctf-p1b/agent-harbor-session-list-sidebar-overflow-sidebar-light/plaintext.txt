@@ -1,8 +1,8 @@
  SESSIONS                                  «
- 40 sessions · 6 need input · 8 idle ·
- 16 running · 2 failed
- invented working set: 40 sessions over 5
- initiatives
+ 40 sessions · 6 need input ·
+ 8 idle · 16 running · 2 failed
+ invented working set: 40 sessions over
+ 5 initiatives
  ▾ ● Telemetry upload retries   1/4 2 need …
  ● Retry telemetry uploads with exponen… now
    needs input CodeTracer · Claude 2.1.0 · …

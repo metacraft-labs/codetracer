@@ -197,6 +197,19 @@ proc drawPopup(c: var AhCanvas; parent: AhNode; popup: InitiativePopup;
       break
   if bound > height: c.fill(row + height, col, width, bound - height, c.tone.frame)
 
+proc popupHeadingCells(popup: InitiativePopup): int =
+  ## The popup's first line whole: an inset, the mark and a space, the
+  ## title, two cells, the state word, an inset.
+  1 + 2 + widthOf(popup.title) + 2 + widthOf(stateWord(popup.state)) + 1
+
+proc popupCells*(popup: InitiativePopup; barCells: int): int =
+  ## The popup's width: the stylesheet's 24rem, at most 80% of the bar, but
+  ## as wide as its heading needs, up to the bar's own width: the terminal's
+  ## letters are wider than the web's, and the web shows the title and its
+  ## state word whole on one line in the 80% (a title the bar cannot hold
+  ## beside its state word is cut, as the web cuts it).
+  min(barCells, max(min(PopupCells, barCells * 4 div 5), popupHeadingCells(popup)))
+
 proc autoLabel(vm: InitiativeTabStripVM): string =
   (if vm.compact: "Auto: " else: "Auto-switch: ") & (if vm.autoSwitch.val: "on" else: "off")
 
@@ -223,9 +236,14 @@ proc drawInbox(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStripVM; row, c
   let target = vm
   let shown = inboxShown(vm)
   let n = c.node(parent, row, col, inboxCells(vm), 1, [("inbox", shown)])
+  # With nothing waiting the steps have nowhere to go: drawn in the
+  # disabled role (`.ah-inbox-empty .ah-inbox-step`), so they do not look
+  # pressable.
+  let stepInk = if vm.inboxPosition.len == 0: c.p.textDisabled else: c.p.textLabel
+  let stepState = if vm.inboxPosition.len == 0: "disabled" else: "enabled"
   var at = col
-  discard c.put(row, at, " \xE2\x86\x90 ", c.p.textLabel)
-  discard c.node(n, row, at + 1, 1, 1, [("button", "\xE2\x86\x90")])
+  discard c.put(row, at, " \xE2\x86\x90 ", stepInk)
+  discard c.node(n, row, at + 1, 1, 1, [("button", "\xE2\x86\x90"), ("step", stepState)])
   c.target(row, at, 3, 1, proc() = discard target.stepInbox(-1))
   at += 3
   if not vm.compact:
@@ -234,8 +252,8 @@ proc drawInbox(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStripVM; row, c
     discard c.text(n, row, at + max(0, (slot - pw) div 2), slot, shown, c.p.textLabel,
                    fact = "inbox-position")
     at += slot + 1
-  discard c.put(row, at, " \xE2\x86\x92 ", c.p.textLabel)
-  discard c.node(n, row, at + 1, 1, 1, [("button", "\xE2\x86\x92")])
+  discard c.put(row, at, " \xE2\x86\x92 ", stepInk)
+  discard c.node(n, row, at + 1, 1, 1, [("button", "\xE2\x86\x92"), ("step", stepState)])
   c.target(row, at, 3, 1, proc() = discard target.stepInbox(1))
   at += 4
   let auto = vm.autoSwitch.val
@@ -376,15 +394,17 @@ proc drawInitiativeTabBar*(c: var AhCanvas; vm: InitiativeTabStripVM; row, col, 
     cc += elsewhereCells(vm) + 1
   if vm.state.val in {asReady, asError}: c.drawInbox(controls, vm, controlsRow, cc)
   if ready and popupCol >= 0:
-    let popupW = min(PopupCells, width * 4 div 5)
+    let popupW = popupCells(vm.popupOf(vm.popupId.val), width)
     let left = min(popupCol, max(col, col + width - popupW))
     c.drawPopup(host, vm.popupOf(vm.popupId.val), barBelow, left, popupW)
     let target = vm
     c.leave.add proc() = target.popupId.val = ""
   if ready and overflow.len > 0 and vm.overflowOpen.val:
+    var column = 0
+    for i in overflow: column = max(column, widthOf(tabs[i].progressText))
     var widest = MenuMinCells
     for i in overflow:
-      widest = max(widest, 4 + widthOf(tabs[i].title) + 2 + widthOf(tabs[i].progressText) + 1)
+      widest = max(widest, 3 + widthOf(tabs[i].title) + MenuOriginGap + column + MenuInset)
     let menuW = min(widest, width - 1)
     let menuCol = max(col, min(chipCol, col + width - 1 - menuW))
     # A row of the menu's own ground above and below its items, as the
@@ -398,7 +418,7 @@ proc drawInitiativeTabBar*(c: var AhCanvas; vm: InitiativeTabStripVM; row, col, 
       let target = vm
       discard c.drawMenuItem(menu, barBelow + 1 + k, menuCol, menuW, m, tab.title, key, tab.active,
         (if tab.progressText.len > 0: @[(tab.progressText, c.p.textCaption)] else: @[]),
-        proc() = discard target.activate(key))
+        proc() = discard target.activate(key), trailColumn = column)
   if ready and vm.elsewhereCount > 0 and vm.elsewhereOpen.val:
     let entries = vm.elsewhere
     let menuW = if vm.stacked: width - 2 else: min(ElsewhereMenuCells, width - 2)

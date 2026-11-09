@@ -121,7 +121,10 @@ AH_ROW_DOT = 0.5rem
     background: colors-ui-surface-primary-secondary-hover
     color: colors-ui-text-primary-body
 
-  &.ah-fleet-filter-empty .ah-fleet-filter-count
+  // A 0 is quieter than a count, except on the active filter, whose count
+  // keeps the body role on its fill (the disabled role falls to about
+  // 2.2:1 there).
+  &.ah-fleet-filter-empty:not(.ah-fleet-filter-active) .ah-fleet-filter-count
     color: colors-ui-text-primary-disabled
 
 .ah-fleet-filter-count
@@ -432,9 +435,6 @@ AH_ROW_DOT = 0.5rem
 
   .ah-fleet-meta-short
     display: inline
-
-.ah-fleet-activity-error
-  color: colors-ui-text-error-primary
 
 // The commit-row timestamp column (`.vcs-commit-time-col`).
 // On the title's first line: the same line box as the title.
@@ -1975,6 +1975,15 @@ AH_MARK = 0.5rem
 .ah-fleet-activity-line,
 .ah-session-row-detail
   color: by-mode(colors-ui-text-primary-caption, colors-ui-text-primary-label)
+
+// An error-level activity line is red only on a row with no failure line
+// (the view sets the class from `agent_harbor_words.activityLineIsError`):
+// a failure line already says the fault in red, and two red lines read as
+// one fault twice. After the rule above, which it must override; a selected
+// row's own text colour (`.ah-fleet-row-selected ...`, more specific) still
+// wins over it.
+.ah-fleet-activity-error
+  color: colors-ui-text-error-primary
 
 // The overflow chip keeps the right-hand group's
 // spacing from the sessions chip.

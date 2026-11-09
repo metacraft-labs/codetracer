@@ -263,7 +263,8 @@ proc elsewhereWidth(vm: InitiativeTabStripVM): int =
            max(18, 8 + textPx($vm.elsewhereCount, CaptionPx - 1, tabular = true))
   if not vm.compact: result += 6 + textPx(vm.elsewhereLabel, CaptionPx)
 
-proc inboxStep(r: GpuiRenderer; p: AhPalette; arrow: string; onClick: proc()): GpuiElement =
+proc inboxStep(r: GpuiRenderer; p: AhPalette; arrow: string; onClick: proc();
+               disabled = false): GpuiElement =
   ## Previous or Next (`.ah-inbox-step`): a 16px arrow, 6px in, 24px high,
   ## 25px wide as the browser sets it (the arrow's advance in the
   ## interface face; GPUI may set the glyph from a fallback face).
@@ -272,8 +273,12 @@ proc inboxStep(r: GpuiRenderer; p: AhPalette; arrow: string; onClick: proc()): G
                           ("justify", "center"), ("padding-left", "6px"),
                           ("padding-right", "6px"), ("flex-shrink", "0"),
                           ("rounded", $ControlRadiusPx & "px"), ("cursor", cursorOf(hkControl))])
-  r.appendChild(result, r.text(arrow, BodyLargePx, p.textLabel, shrink = false))
+  # With nothing waiting, in the disabled role (`.ah-inbox-empty .ah-inbox-step`).
+  let ink = if disabled: p.textDisabled else: p.textLabel
+  r.appendChild(result, r.text(arrow, BodyLargePx, ink, shrink = false))
+  r.tag(result, "ink", ink)
   r.tag(result, "button", arrow)
+  r.tag(result, "step", if disabled: "disabled" else: "enabled")
   r.addEventListener(result, "click", onClick)
 
 proc drawInbox(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM): GpuiElement =
@@ -288,7 +293,8 @@ proc drawInbox(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM): GpuiEle
   let auto = vm.autoSwitch.val
   result = r.box(pairs = [("gap", "2px"), ("items", "center"), ("flex-shrink", "0")])
   r.tag(result, "inbox", if position.len == 0: "inbox empty" else: position)
-  r.appendChild(result, r.inboxStep(p, "\xE2\x86\x90", proc() = discard target.stepInbox(-1)))
+  r.appendChild(result, r.inboxStep(p, "\xE2\x86\x90", proc() = discard target.stepInbox(-1),
+                                   disabled = position.len == 0))
   if not compact:
     let slot = r.box(pairs = [("width", $InboxPositionPx & "px"), ("justify", "center"),
                               ("items", "center"), ("flex-shrink", "0")])
@@ -299,7 +305,8 @@ proc drawInbox(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM): GpuiEle
     r.tag(pos, "inbox-position", if position.len == 0: "inbox empty" else: position)
     r.appendChild(slot, pos)
     r.appendChild(result, slot)
-  r.appendChild(result, r.inboxStep(p, "\xE2\x86\x92", proc() = discard target.stepInbox(1)))
+  r.appendChild(result, r.inboxStep(p, "\xE2\x86\x92", proc() = discard target.stepInbox(1),
+                                   disabled = position.len == 0))
   let toggle = r.box(pairs = [("height", $ControlPx & "px"), ("items", "center"),
                               ("gap", "6px"), ("padding-left", "6px"),
                               ("padding-right", "6px"), ("margin-left", "4px"),

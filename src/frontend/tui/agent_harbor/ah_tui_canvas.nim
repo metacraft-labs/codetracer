@@ -246,19 +246,15 @@ type
     text*: string
     start*: int
 
-proc wrapRuns*(text: string; width: int): seq[WrappedLine] =
-  ## `text` broken into lines of at most `width` cells, at spaces, as the
-  ## web's `white-space: normal` breaks it; a word longer than a line is
-  ## cut across lines at the width (`overflow-wrap: anywhere`), so nothing
-  ## of it is lost. The spaces a break falls on are not drawn.
-  ##
-  ## A text that lists its parts with " · " (a summary, a milestone's meta)
-  ## breaks after a separator where the line holds one past its middle, so
-  ## a part (`Tests: 2 pending`) stays on one line and no line starts with
-  ## the separator.
-  let w = max(1, width)
-  var runesOf: seq[string]
-  for r in runes(text): runesOf.add $r
+proc runeCells(r: string): int = max(1, cellsOfRune(r.runeAtPos(0), awNarrow))
+
+proc isSeparatorAt(runesOf: seq[string]; k: int): bool =
+  ## Whether runes `k - 1 .. k + 1` are " · ".
+  k >= 1 and k + 1 < runesOf.len and runesOf[k - 1] == " " and
+    runesOf[k] == "\xC2\xB7" and runesOf[k + 1] == " "
+
+proc wrapGreedy(runesOf: seq[string]; w: int): seq[WrappedLine] =
+  ## The longest-first word wrap `wrapRuns` falls back on (see there).
   var i = 0
   while i < runesOf.len:
     while i < runesOf.len and runesOf[i] == " ": inc i
@@ -300,6 +296,132 @@ proc wrapRuns*(text: string; width: int): seq[WrappedLine] =
     for k in i ..< stop: line.add runesOf[k]
     result.add WrappedLine(text: line.strip(leading = false), start: i)
     i = stop
+
+proc lineOf(runesOf: seq[string]; first, stop: int): WrappedLine =
+  ## Runes `first ..< stop` as one line, its trailing spaces dropped.
+  var line = ""
+  for k in first ..< stop: line.add runesOf[k]
+  WrappedLine(text: line.strip(leading = false), start: first)
+
+proc wrapParts(runesOf: seq[string]; w: int): seq[WrappedLine] =
+  ## A text that lists its parts with " · ", broken only after a separator
+  ## (each part whole on a line, the separator ending the line it breaks),
+  ## into as few lines as a longest-first fill needs, those lines as even
+  ## as they can be: the break that minimises the longest line, then the
+  ## spread. Empty when a part (with its separator) is wider than a line:
+  ## the caller then wraps the words.
+  var starts = @[0]        # the rune each part starts at
+  for k in 1 ..< runesOf.len - 1:
+    if isSeparatorAt(runesOf, k): starts.add k + 2
+  let n = starts.len
+  if n < 2: return
+  # Each part's cells as it ends a line (" ·" kept, the trailing space not)
+  # and as it is followed on the same line (" · " in full).
+  var alone, joined = newSeq[int](n)
+  for p in 0 ..< n:
+    let stop = if p + 1 < n: starts[p + 1] - 3 else: runesOf.len
+    var cells = 0
+    for k in starts[p] ..< stop: cells += runeCells(runesOf[k])
+    alone[p] = cells + (if p + 1 < n: 2 else: 0)
+    joined[p] = cells + (if p + 1 < n: 3 else: 0)
+    if alone[p] > w: return
+  proc span(a, b: int): int =
+    ## Cells of parts `a ..< b` on one line.
+    for p in a ..< b - 1: result += joined[p]
+    result += alone[b - 1]
+  # The fewest lines: a longest-first fill.
+  var lines = 0
+  var a = 0
+  while a < n:
+    var b = a + 1
+    while b < n and span(a, b + 1) <= w: inc b
+    inc lines
+    a = b
+  # The evenest break into that many lines (a handful of parts: exhaustive
+  # search over the break positions by dynamic programming).
+  const Inf = high(int) div 4
+  type Cost = tuple[longest, spread: int]
+  var best = newSeq[seq[Cost]](n + 1)
+  var cut = newSeq[seq[int]](n + 1)
+  for i in 0 .. n:
+    best[i] = newSeq[Cost](lines + 1)
+    cut[i] = newSeq[int](lines + 1)
+    for l in 0 .. lines: best[i][l] = (Inf, Inf)
+  best[0][0] = (0, 0)
+  for l in 1 .. lines:
+    for b in 1 .. n:
+      for a in 0 ..< b:
+        if best[a][l - 1].longest >= Inf: continue
+        let s = span(a, b)
+        if s > w: continue
+        let slack = w - s
+        let c: Cost = (max(best[a][l - 1].longest, s), best[a][l - 1].spread + slack * slack)
+        if c < best[b][l]:
+          best[b][l] = c
+          cut[b][l] = a
+  if best[n][lines].longest >= Inf: return
+  var bounds: seq[int]
+  var b = n
+  for l in countdown(lines, 1):
+    bounds.add b
+    b = cut[b][l]
+  var first = 0
+  for i in countdown(bounds.high, 0):
+    let stop = bounds[i]
+    let last = if stop < n: starts[stop] - 1 else: runesOf.len   # keep " ·"
+    result.add lineOf(runesOf, starts[first], last)
+    first = stop
+
+proc keepLastWordCompany(lines: var seq[WrappedLine]; runesOf: seq[string]; w: int) =
+  ## Prose does not end on a lone word: when the last line is one word and
+  ## the line above has more than one, that line's last word moves down,
+  ## where the two fit on a line.
+  if lines.len < 2: return
+  let last = lines[^1]
+  if ' ' in last.text: return
+  let prev = lines[^2]
+  let cut = prev.text.rfind(' ')
+  if cut <= 0: return
+  # The previous line must have broken at a space (not inside a long word).
+  if last.start == 0 or runesOf[last.start - 1] != " ": return
+  let moved = prev.text[cut + 1 .. ^1]
+  let joinedText = moved & " " & last.text
+  if widthOf(joinedText) > w: return
+  let kept = prev.text[0 ..< cut].strip(leading = false)
+  var movedRunes = 0
+  for _ in runes(moved): inc movedRunes
+  lines[^2] = WrappedLine(text: kept, start: prev.start)
+  lines[^1] = WrappedLine(text: joinedText, start: last.start - 1 - movedRunes)
+
+proc wrapRuns*(text: string; width: int): seq[WrappedLine] =
+  ## `text` broken into lines of at most `width` cells, at spaces, as the
+  ## web's `white-space: normal` breaks it; a word longer than a line is
+  ## cut across lines at the width (`overflow-wrap: anywhere`), so nothing
+  ## of it is lost. The spaces a break falls on are not drawn.
+  ##
+  ## A text that lists its parts with " · " (a summary, a milestone's meta)
+  ## breaks only after a separator, so a part (`Tests: 1 failing, 2
+  ## pending`) is never split, and its lines are made even
+  ## (`wrapParts`); only a part wider than a line falls back on breaking
+  ## at words. Prose never ends on a lone word (`keepLastWordCompany`).
+  let w = max(1, width)
+  var runesOf: seq[string]
+  for r in runes(text): runesOf.add $r
+  var lead = 0
+  while lead < runesOf.len and runesOf[lead] == " ": inc lead
+  if lead == runesOf.len: return
+  var cells = 0
+  for k in lead ..< runesOf.len: cells += runeCells(runesOf[k])
+  if cells <= w: return @[lineOf(runesOf, lead, runesOf.len)]
+  var hasSeparator = false
+  for k in 1 ..< max(1, runesOf.len - 1):
+    if isSeparatorAt(runesOf, k): hasSeparator = true
+  if hasSeparator:
+    result = wrapParts(runesOf, w)
+    if result.len > 0: return
+    return wrapGreedy(runesOf, w)
+  result = wrapGreedy(runesOf, w)
+  keepLastWordCompany(result, runesOf, w)
 
 proc wrapCells*(text: string; width: int): seq[string] =
   ## `wrapRuns`' lines as text.

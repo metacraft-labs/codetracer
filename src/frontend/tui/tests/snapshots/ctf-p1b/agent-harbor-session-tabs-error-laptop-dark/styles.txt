@@ -1,6 +1,6 @@
 # TermAssert styles v1 56x180
-0 #f3f3f3/#161616
-1 #fca5a5/#161616
+0 #f3f3f3/#333333
+1 #fca5a5/#333333
 2 #f3f3f3/#1b1b1b
 3 #c8c8c8/#3c3c3c
 4 #b0b0b0/#3c3c3c

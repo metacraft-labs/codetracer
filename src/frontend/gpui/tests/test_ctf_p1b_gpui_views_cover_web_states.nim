@@ -48,9 +48,12 @@ import ../../stories/codetracer_stories
 import ../../../../tools/stories/emit_storybook_stories
 import ../agent_harbor/ah_stories
 import ../agent_harbor/ah_session_views
+import ../agent_harbor/ah_fleet_panel
+import nim_agents/agent_harbor/fleet_records
 import nim_agents_isonim_viewmodels/agent_harbor/[fleet_vm, session_tabs_vm,
-  initiative_tabs_vm, initiatives_vm, initiative_progress_vm]
-from ../../viewmodel/views/agent_harbor_words import tabLabelOf, filterCount
+  initiative_tabs_vm, initiatives_vm, initiative_progress_vm, data_source, fixture_source]
+from ../../viewmodel/views/agent_harbor_words import tabLabelOf, filterCount,
+  activityLineIsError
 
 const
   AgentHarborSectionTitle = "CodeTracer/Agent Harbor"
@@ -315,6 +318,31 @@ proc checkProgress(view: GpuiElement; vm: InitiativeProgressVM): seq[string] =
   result.expect("executive summary", view.values("executive-summary"),
                 @[if summary.len > 0: summary else: "The plan states no executive summary."])
 
+proc fleetInkProblems(view: GpuiElement; vm: FleetSnapshotVM; p: AhPalette): seq[string] =
+  ## The inks the shared rules decide (the views tag each as `ink`, the
+  ## colour they hand the text): an activity line red only on a row with no
+  ## failure line (`activityLineIsError`), else the caption role, the
+  ## selection's text on the selected row; the active filter's count in the
+  ## body role even at 0, another 0 in the disabled role.
+  for row in vm.rows:
+    for e in view.all("row"):
+      if e.attr("row") != row.id: continue
+      for i, a in e.all("activity"):
+        let wanted = if row.selected: p.selectedText
+                     elif activityLineIsError(row, i): p.textError else: p.rowDetail
+        if a.attr("ink") != wanted:
+          result.add "activity line " & $i & " of " & row.shortId &
+                     (if row.failureText.len > 0: " (under a failure line)" else: "") &
+                     " is drawn in " & a.attr("ink") & ", not " & wanted
+  for e in view.all("filter"):
+    let n = parseInt(e.attr("filter-count"))
+    let wanted = if e.attr("active") == "true": p.textBody
+                 elif n == 0: p.textDisabled else: p.textCaption
+    let count = e.first("ink")
+    if count.isNil or count.attr("ink") != wanted:
+      result.add "the count of filter " & e.attr("filter") & " is drawn in " &
+                 (if count.isNil: "nothing" else: count.attr("ink")) & ", not " & wanted
+
 proc checkFleet(view: GpuiElement; vm: FleetSnapshotVM): seq[string] =
   result.expect("state", view.attr("state"), stateName(vm.state.val))
   commonState(view, vm.state.val, vm.error.val, result)
@@ -347,6 +375,22 @@ proc checkFleet(view: GpuiElement; vm: FleetSnapshotVM): seq[string] =
         let shown = if row.expanded: row.activity.len else: min(1, row.activity.len)
         result.expect("activity of " & row.shortId, e.values("activity"), row.activity[0 ..< shown])
         result.expect("title of " & row.shortId, e.first("title").attr("title"), row.title)
+
+proc inkProblems(m: AhStoryMount; mode: DesignMode): seq[string] =
+  ## The colours the shared rules decide, by surface: the fleet's
+  ## (`fleetInkProblems`), and the inbox's Previous / Next in the disabled
+  ## role while nothing waits.
+  let p = ahPalette(mode)
+  case m.surface
+  of "agent-harbor-fleet":
+    if m.fleet.state.val == asReady: result = fleetInkProblems(m.view, m.fleet, p)
+  of "agent-harbor-initiative-tabs":
+    let wanted = if m.initiativeTabs.inboxPosition.len == 0: p.textDisabled else: p.textLabel
+    for e in m.view.all("step"):
+      if e.attr("ink") != wanted:
+        result.add "the inbox step " & e.attr("button") & " (" & e.attr("step") &
+                   ") is drawn in " & e.attr("ink") & ", not " & wanted
+  else: discard
 
 proc checkStory(m: AhStoryMount): seq[string] =
   ## The drawn tree against the viewmodel the story built; empty when they
@@ -384,7 +428,7 @@ proc renderStory(story: CodeTracerStory; w, h: int; mode: DesignMode;
     let m = r.mountAgentHarborStoryGpui(story.surface, story.fixture, w, h, mode,
                                         frameTitle)
     result.mount = m
-    result.problems = checkStory(m) & drawnTextProblems(m.root)
+    result.problems = checkStory(m) & drawnTextProblems(m.root) & inkProblems(m, mode)
     if not r.verifyRenderPlan(m.root):
       result.problems.add "the shadow tree builds no valid render plan"
     if frameTitle.len > 0 and m.root.first("frame-title").attr("frame-title") != frameTitle:
@@ -504,6 +548,74 @@ suite "CTF-P1b: the comparison can fail":
       m.dispose()
     ck ahPalette(dmDark).panel != ahPalette(dmLight).panel
 
+proc fixtureSnapshot(): FleetSnapshot =
+  var got: ref FleetSnapshot
+  newFixtureDataSource().loadFleet proc(answer: DataResult[FleetSnapshot]) =
+    doAssert answer.ok, answer.error
+    got = new FleetSnapshot
+    got[] = answer.value
+  doAssert not got.isNil, "the fixture source answers synchronously"
+  got[]
+
+suite "CTF-P1b: the fleet's and the inbox's inks follow the shared rules":
+  test "an error-level activity line: red without a failure line, caption under one":
+    # The story data holds error-level activity only under failure lines, so
+    # the other case is made from it: one failed session of the embedded
+    # synthetic fleet given the running status, served through the
+    # production `SnapshotDataSource` seam.
+    var snapshot = fixtureSnapshot()
+    var id = ""
+    for s in snapshot.sessions.mitems:
+      if id.len == 0 and s.status == fsFailed:
+        for a in s.recent:
+          if a.level == "error": id = s.id
+        if id.len > 0:
+          s.status = fsRunning
+          s.rawStatus = "running"
+    ck id.len > 0
+    for mode in Modes:
+      gpui_reset_tree()
+      let p = ahPalette(mode)
+      let vm = newFleetSnapshotVM(newSnapshotDataSource(snapshot))
+      vm.load()
+      let host = r.createElement("div")
+      r.drawFleetPanel(host, vm, p, 1440)
+      ck fleetInkProblems(host, vm, p).len == 0
+      var red, quiet: GpuiElement
+      for row in vm.rows:
+        for e in host.all("row"):
+          if e.attr("row") != row.id: continue
+          for i, a in e.all("activity"):
+            if row.activityLevels[i] != "error": continue
+            if row.failureText.len == 0 and red.isNil: red = a
+            elif row.failureText.len > 0 and quiet.isNil: quiet = a
+      ck not red.isNil and not quiet.isNil
+      ck red.attr("ink") == p.textError
+      ck quiet.attr("ink") == p.rowDetail
+      # Negative control: the two inks swapped are both reported.
+      r.tag(red, "ink", p.rowDetail)
+      r.tag(quiet, "ink", p.textError)
+      let problems = fleetInkProblems(host, vm, p).join(" ")
+      ck problems.contains("of " & id[0 ..< 8] & " is drawn in " & p.rowDetail)
+      ck problems.contains("(under a failure line) is drawn in " & p.textError)
+      vm.dispose()
+
+  test "a pressable arrow with nothing waiting, and the active 0 quiet, are reported":
+    for (surface, fixture) in [("agent-harbor-initiative-tabs", "empty"),
+                               ("agent-harbor-fleet", "empty")]:
+      gpui_reset_tree()
+      let m = r.mountAgentHarborStoryGpui(surface, fixture, 1440, 900, dmLight)
+      ck inkProblems(m, dmLight).len == 0
+      let p = ahPalette(dmLight)
+      if surface == "agent-harbor-fleet":
+        for f in m.view.all("filter"):
+          if f.attr("active") == "true": r.tag(f.first("ink"), "ink", p.textDisabled)
+        ck inkProblems(m, dmLight).join(" ").contains("the count of filter")
+      else:
+        r.tag(m.view.first("step"), "ink", p.textLabel)
+        ck inkProblems(m, dmLight).join(" ").contains("the inbox step")
+      m.dispose()
+
 suite "CTF-P1b: the GPUI views share the viewmodels, not the web views":
   test "no GPUI Agent Harbor view imports a web view or the web renderer":
     # The words both front-ends say live in `viewmodel/views/agent_harbor_words`,
@@ -526,4 +638,4 @@ suite "CTF-P1b: the GPUI views share the viewmodels, not the web views":
 
 suite "CTF-P1b: assertion count":
   test "every assertion ran":
-    check countedAssertions == 28
+    check countedAssertions == 45

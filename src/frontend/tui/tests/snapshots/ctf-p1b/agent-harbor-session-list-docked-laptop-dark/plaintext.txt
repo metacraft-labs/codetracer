@@ -1,7 +1,7 @@
  Sessions  ⚲ ✕
- SESSIONS 14 sessions · 2 need input · 2 idle · 7 running · 1 failed
+ SESSIONS  14 sessions · 2 need input · 2 idle · 7 running · 1 failed
  invented working set: 14 sessions over 4 initiatives
- ▾ ● Telemetry upload retries                                                                                                                1/4 1 needs input · 2 running
+ ▾ ● Telemetry upload retries                                                                                                                1/4          1 needs input · 2 running
  ● Retry telemetry uploads with exponential backoff                                    needs input CodeTracer · Claude 2.1.0 · host-a                                           now
    assistant: Should the old behaviour stay behind a flag, or go?
  ● Persist the telemetry queue across restarts                                         running TUI · Claude 2.1.0 · host-e                                                       4m
@@ -17,19 +17,19 @@
    assistant: Done for now; ready for the next instruction.
  ● Fix the flaky clock-skew test on the new runners                                    running Telegram · Opencode 0.6.1 · host-f                                                4m
    assistant: Running the tests again after the change.
- ▾ ● Route cache on the new storage layer                                                                                                    2/6 1 idle · 1 running · 1 failed
+ ▾ ● Route cache on the new storage layer                                                                                                    2/6      1 idle · 1 running · 1 failed
  ○ Migrate cached routes without a cold start                                          idle Telegram · Codex 0.9.4 · host-f                                                      5m
    assistant: Done for now; ready for the next instruction.
  ● Port the route cache to the new storage layer                                       running CLI · Codex 0.9.4 · host-b                                                        1m
    assistant: Running the tests again after the change.
  ● Benchmark route cache reads on the new layer                                        failed CodeTracer · Codex 0.9.4 · host-d                                                  2m
    [exit] status=1
- ▾ ● Settings redesign                                                                                                                       3/8 2 running
+ ▾ ● Settings redesign                                                                                                                       3/8                          2 running
  ● Split the settings page into tabs                                                   running WebUI · Grok 1.2.0 · host-c                                                       2m
    assistant: Running the tests again after the change.
  ● Add search to the settings page                                                     running TUI · Grok 1.2.0 · host-e                                                         3m
    assistant: Running the tests again after the change.
- ▾   No initiative                                                                                                                               1 running · 1 queued
+ ▾   No initiative                                                                                                                                             1 running · 1 queued
  ● Replace the hand-rolled JSON writer                                                 running CLI · Codex 0.9.4 · host-b                                                        6m
    assistant: Running the tests again after the change.
  ● Profile the importer on the large fixture                                           queued CodeTracer · Grok 1.2.0 · host-a                                                   6m

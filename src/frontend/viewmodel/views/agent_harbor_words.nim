@@ -107,6 +107,28 @@ proc filterLabel*(filter: FleetFilter): string =
   of ffFailed: "Failed"
   of ffEnded: "Ended"
 
+proc activityLineIsError*(row: FleetRow; line: int): bool =
+  ## Whether a fleet row's activity line `line` is drawn in the error
+  ## colour: it is one the viewmodel marks error-level, AND the row has no
+  ## failure line. A failure line already says the fault in red; the
+  ## activity under it stays in the caption role, so one fault is not shown
+  ## twice in red: a failed row shows a red failure line, or else an
+  ## error-coloured activity line. One rule for the three front-ends: the
+  ## web sets `ah-fleet-activity-error` from it, GPUI and the terminal pick
+  ## the ink from it. A selected row draws every line in the selection's
+  ## text colour, whatever this says.
+  line >= 0 and line < row.activityLevels.len and row.activityLevels[line] == "error" and
+    row.failureText.len == 0
+
+proc filterCountInk*(count: int; active: bool): tuple[disabled, body: bool] =
+  ## Which role a fleet filter's count takes: the active filter's count is
+  ## in the body role even at 0 (on the active fill the disabled role falls
+  ## to about 2.2:1); another filter's 0 is in the disabled role, quieter
+  ## than a count; any other count in the caption role (neither flag set).
+  if active: (false, true)
+  elif count == 0: (true, false)
+  else: (false, false)
+
 proc filterCount*(counts: FleetCounts; filter: FleetFilter): int =
   case filter
   of ffAll: counts.listed

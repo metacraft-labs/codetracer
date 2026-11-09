@@ -111,6 +111,29 @@ export const plays = {
   "agent-harbor-fleet-failed": fleetCheck(async (el) => {
     await waitFor(el, ".ah-fleet-row");
     for (const row of fleetRows(el)) expect(row.classList.contains("ah-fleet-cat-failed")).toBe(true);
+    // One fault is red once: under a red failure line the activity lines are
+    // in the caption role, never the error colour, and none carries the
+    // error class (`agent_harbor_words.activityLineIsError`).
+    const withFailure = [...fleetRows(el)].filter(
+      (r) => !r.classList.contains("ah-fleet-row-selected") && r.querySelector(".ah-fleet-row-failure"));
+    expect(withFailure.length).toBeGreaterThan(0);
+    const red = getComputedStyle(withFailure[0].querySelector(".ah-fleet-row-failure")).color;
+    for (const row of withFailure) {
+      for (const line of row.querySelectorAll(".ah-fleet-activity-line")) {
+        expect(line.classList.contains("ah-fleet-activity-error")).toBe(false);
+        expect(getComputedStyle(line).color).not.toBe(red);
+      }
+    }
+    // The class the view sets on an error-level line of a row WITHOUT a
+    // failure line (no such row is in the story data) does draw it red: the
+    // rule is not overridden by the activity line's own colour rule.
+    const probe = withFailure[0].querySelector(".ah-fleet-activity-line");
+    probe.classList.add("ah-fleet-activity-error");
+    try {
+      expect(getComputedStyle(probe).color).toBe(red);
+    } finally {
+      probe.classList.remove("ah-fleet-activity-error");
+    }
   }),
   "agent-harbor-fleet-selected": fleetCheck(async (el) => {
     await waitFor(el, ".ah-fleet-row-selected");
@@ -127,6 +150,14 @@ export const plays = {
   "agent-harbor-fleet-empty": fleetCheck(async (el) => {
     expect(el.querySelector(".ah-fleet-overlay")?.textContent).toContain("No sessions");
     expect(fleetRows(el).length).toBe(0);
+    // The active filter's 0 keeps the body role on its fill; another
+    // filter's 0 is quieter (the disabled role).
+    const active = el.querySelector(".ah-fleet-filter-active");
+    const activeCount = active.querySelector(".ah-fleet-filter-count");
+    expect(activeCount.textContent).toBe("0");
+    expect(getComputedStyle(activeCount).color).toBe(getComputedStyle(active).color);
+    const idle = el.querySelector(".ah-fleet-filter-empty:not(.ah-fleet-filter-active) .ah-fleet-filter-count");
+    expect(getComputedStyle(idle).color).not.toBe(getComputedStyle(activeCount).color);
   }),
 
   "agent-harbor-fleet-filtered-empty": fleetCheck(async (el) => {

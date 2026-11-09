@@ -231,12 +231,12 @@ proc renderRow[R](r: R; vm: FleetSnapshotVM;
   let allLines = row.activity.join("\n")
   for i in 0 ..< shown:
     let line = row.activity[i]
-    let level = if i < row.activityLevels.len: row.activityLevels[i] else: ""
     var lineHost: typeof(r.createElement("div"))
     let lineNode = ui(r):
       tdiv(ref = lineHost, class = "ah-fleet-activity-row"):
+        # Red only where the row has no failure line (`activityLineIsError`).
         tdiv(class = "ah-fleet-activity-line" &
-                     (if level == "error": " ah-fleet-activity-error" else: ""),
+                     (if activityLineIsError(row, i): " ah-fleet-activity-error" else: ""),
              title = allLines):
           text line
     # The unfold control rides on the first line, so a folded row stays one

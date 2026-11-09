@@ -18,7 +18,8 @@ import nim_agents_isonim_viewmodels/agent_harbor/fleet_vm
 from ../../viewmodel/views/agent_harbor_words import
   filterLabel, filterCount, metaParts, metaPartsShort, withheldNote, headerSummary,
   AgentHarborFleetLoadingText, AgentHarborFleetEmptyText,
-  AgentHarborFleetFilteredEmptyText, AgentHarborFleetEmptyCellText
+  AgentHarborFleetFilteredEmptyText, AgentHarborFleetEmptyCellText, activityLineIsError,
+  filterCountInk
 
 import ./ah_tui_canvas
 import ./ah_tui_initiative_panels
@@ -124,17 +125,15 @@ proc drawRow(c: var AhCanvas; parent: AhNode; vm: FleetSnapshotVM; row: FleetRow
                    fact = "failure")
     inc r
   for i in 0 ..< shown:
-    let level = if i < row.activityLevels.len: row.activityLevels[i] else: ""
     let hasChip = i == 0 and row.activity.len + row.activityMore > 1
     var label = ""
     if hasChip:
       let hidden = row.activity.len - 1 + row.activityMore
       label = " " & (if row.expanded: "less" else: "+" & $hidden) & " "
     # An activity line the viewmodel marks as an error is red only where no
-    # failure line above already says it in red: the failure line carries
-    # the error, the activity under it is the quiet caption the web draws
-    # (two red lines read as one fault twice).
-    let errorInk = level == "error" and row.failureText.len == 0
+    # failure line above already says it in red (`activityLineIsError`, the
+    # rule the three front-ends share).
+    let errorInk = activityLineIsError(row, i)
     let tw = c.text(n, r, mc, mainW - (if hasChip: widthOf(label) + 1 else: 0),
                     row.activity[i],
                     if sel: selText elif errorInk: c.p.textError else: c.p.rowDetail,
@@ -210,9 +209,11 @@ proc drawFleetPanel*(c: var AhCanvas; vm: FleetSnapshotVM; row, col, width, heig
       if active: c.fill(fr, at, w, 1, c.tone.chosen)
       let lw = c.put(fr, at + 1, filterLabel(filter),
                      if active: c.p.textBody else: c.p.textLabel)
+      let ink = filterCountInk(n, active)
       discard c.put(fr, at + 1 + lw + 1, $n,
-                    if n == 0: c.p.textDisabled elif active: c.p.textBody else: c.p.textCaption)
-      discard chip
+                    if ink.body: c.p.textBody elif ink.disabled: c.p.textDisabled
+                    else: c.p.textCaption)
+      discard c.node(chip, fr, at + 1 + lw + 1, widthOf($n), 1, [("count-of", $filter)])
       c.target(fr, at, w, 1, proc() = vm.setFilter(chosen))
       at += w + 1
     r += lines

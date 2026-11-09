@@ -5,8 +5,8 @@
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ● 1 completed  ● 1 in progress  ● 1 planned
  Route cache on the new storage layer: one
- milestone done, one in progress, one
- planned.
+ milestone done, one in progress,
+ one planned.
  CURRENT RC-M2: The main change
  IN PROGRESS (1)
  ● RC-M2   The main change
