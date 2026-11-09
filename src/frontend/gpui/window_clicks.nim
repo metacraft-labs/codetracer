@@ -185,19 +185,34 @@ proc wireOne(r: GpuiRenderer; el: GpuiElement; c: GPaneClick;
   for name in ["mousedown", "contextmenu", "auxdown"]:
     r.addEventListener(el, name, handler)
 
-proc wireWindowClicks*(r: GpuiRenderer; root: GpuiElement;
+proc wireWindowClicks*(r: GpuiRenderer; nodes: var seq[SnapshotNode];
                        dedupe: ptr PressDedupe;
                        onClick: proc(c: GPaneClick)): int {.discardable.} =
   ## Walk the window's tree and give every row this module recognises (see
   ## the header) its listeners, once. Answers how many rows were wired by
   ## this walk.
+  ##
+  ## The tree is `nodes`, read ONCE (`snapshotTree`) and shared with
+  ## `window_pointer.stampPointerShapes`: both walks run after every redraw,
+  ## over every element of the window, and a shim call per attribute name
+  ## per element made them the larger part of a live divider drag's cost a
+  ## motion. An element's parent and grandparent are read from the snapshot
+  ## too; only the rows wired here take a handle, and each is recorded in
+  ## `nodes` (its `WiredAttribute`) as it is on the element, for the stamp.
   var wiredNow = 0
-  proc walk(el: GpuiElement; context: string) =
-    if el.isNil:
-      return
-    var ctx = context
-    let id = getAttribute(el, ViewIdAttribute)
-    let kind = getAttribute(el, ViewKindAttribute)
+  var contexts = newSeq[string](nodes.len)
+  template up(at: int): int =
+    ## The parent of node `at`, -1 above the root (or for -1).
+    (let k = at; if k < 0: -1 else: nodes[k].parent)
+  template attrAt(at: int; name: string): string =
+    ## Node `at`'s `name`, "" for -1 — what `getAttribute` says of a nil node.
+    (let k = at; if k < 0: "" else: nodes[k].attr(name))
+  for i in 0 ..< nodes.len:
+    template n: untyped = nodes[i]
+    # A row's pane is named by its nearest enclosing pane root.
+    var ctx = if n.parent >= 0: contexts[n.parent] else: ""
+    let id = n.attr(ViewIdAttribute)
+    let kind = n.attr(ViewKindAttribute)
     if id == "eventLog": ctx = "eventLog"
     elif id == "state.root": ctx = "state"
     elif id == "fileTree": ctx = "fileTree"
@@ -205,7 +220,8 @@ proc wireWindowClicks*(r: GpuiRenderer; root: GpuiElement;
     elif id == "scratchpad": ctx = "scratchpad"
     elif id == "vcs.workingTree.files": ctx = "vcsFiles"
     elif id == "vcs.commits.list": ctx = "vcsCommits"
-    let wired = getAttribute(el, WiredAttribute).len > 0
+    contexts[i] = ctx
+    let wired = n.attr(WiredAttribute).len > 0
     if not wired:
       var c = GPaneClick(part: gcpNone)
       if kind == "Tree" and ctx == "fileTree" and id.startsWith("fileTree"):
@@ -213,32 +229,31 @@ proc wireWindowClicks*(r: GpuiRenderer; root: GpuiElement;
       elif kind == "Tree" and ctx == "state" and id != "state.root" and
            id.len > 0:
         c = GPaneClick(part: gcpVariable, key: id)
-      elif ctx == "eventLog" and getAttribute(el, "data-row-index").len > 0:
+      elif ctx == "eventLog" and n.attr("data-row-index").len > 0:
         try:
           c = GPaneClick(part: gcpEventRow,
-                         index: parseInt(getAttribute(el, "data-row-index")))
+                         index: parseInt(n.attr("data-row-index")))
         except ValueError: discard
-      elif ctx == "eventLog" and getAttribute(el, "data-column-index").len > 0 and
-           getAttribute(r.parentNode(el), "data-row-index").len == 0:
+      elif ctx == "eventLog" and n.attr("data-column-index").len > 0 and
+           attrAt(n.parent, "data-row-index").len == 0:
         # A header cell (a cell of the row with no row index): its column.
         try:
           c = GPaneClick(part: gcpEventHeader,
-                         index: parseInt(getAttribute(el, "data-column-index")))
+                         index: parseInt(n.attr("data-column-index")))
         except ValueError: discard
       elif ctx == "scratchpad" and
-           getAttribute(el, "data-column-index") == "0" and
-           getAttribute(r.parentNode(el), "data-row-index").len > 0:
+           n.attr("data-column-index") == "0" and
+           attrAt(n.parent, "data-row-index").len > 0:
         # The FIRST cell of a row is its close button.
         try:
           c = GPaneClick(part: gcpScratchClose,
-                         index: parseInt(getAttribute(r.parentNode(el),
-                                                      "data-row-index")))
+                         index: parseInt(attrAt(n.parent, "data-row-index")))
         except ValueError: discard
       elif ctx in ["pointList", "vcsFiles", "vcsCommits"] and
-           getAttribute(el, "data-option-index").len > 0:
-        let option = getAttribute(el, "data-option-id")
+           n.attr("data-option-index").len > 0:
+        let option = n.attr("data-option-id")
         try:
-          let i = parseInt(getAttribute(el, "data-option-index"))
+          let i = parseInt(n.attr("data-option-index"))
           c = case ctx
               of "pointList": GPaneClick(part: gcpPoint, index: i)
               of "vcsFiles": GPaneClick(part: gcpVcsFile, key: option)
@@ -247,64 +262,59 @@ proc wireWindowClicks*(r: GpuiRenderer; root: GpuiElement;
                   GPaneClick(part: gcpVcsFile, key: option)
                 else: GPaneClick(part: gcpVcsCommit, index: i, key: option)
         except ValueError: discard
-      elif getAttribute(el, CallArgAttribute).len > 0:
-        let row = r.parentNode(el)
-        if not row.isNil and getAttribute(row, CallRowAttribute).len > 0:
+      elif n.attr(CallArgAttribute).len > 0:
+        let row = n.parent
+        if row >= 0 and attrAt(row, CallRowAttribute).len > 0:
           try:
             c = GPaneClick(part: gcpCallArg,
-                           index: parseBiggestInt(getAttribute(row,
-                                                               CallRowAttribute)),
-                           line: parseInt(getAttribute(el, CallArgAttribute)))
+                           index: parseBiggestInt(attrAt(row, CallRowAttribute)),
+                           line: parseInt(n.attr(CallArgAttribute)))
           except ValueError: discard
-      elif getAttribute(el, TextRoleAttribute) == $trValueText:
-        let column = r.parentNode(el)
-        let row = if column.isNil: nil else: r.parentNode(column)
-        let line = if row.isNil: "" else: getAttribute(row, EditorRowAttribute)
+      elif n.attr(TextRoleAttribute) == $trValueText:
+        let line = attrAt(up(n.parent), EditorRowAttribute)
         if line.len > 0:
           try: c = GPaneClick(part: gcpValue, line: parseInt(line))
           except ValueError: discard
-      elif getAttribute(el, FooterPositionAttribute).len > 0:
+      elif n.attr(FooterPositionAttribute).len > 0:
         c = GPaneClick(part: gcpPosition,
-                       key: getAttribute(el, FooterPositionAttribute))
-      elif getAttribute(el, CallRowAttribute).len > 0:
+                       key: n.attr(FooterPositionAttribute))
+      elif n.attr(CallRowAttribute).len > 0:
         try:
           c = GPaneClick(part: gcpCallRow,
-                         index: parseBiggestInt(getAttribute(el,
-                                                             CallRowAttribute)))
+                         index: parseBiggestInt(n.attr(CallRowAttribute)))
         except ValueError: discard
-      elif getAttribute(el, StateControlAttribute).len > 0:
+      elif n.attr(StateControlAttribute).len > 0:
         c = GPaneClick(part: gcpStateControl,
-                       key: getAttribute(el, StateControlAttribute))
-      elif getAttribute(el, StateHistoryEntryAttribute).len > 0:
+                       key: n.attr(StateControlAttribute))
+      elif n.attr(StateHistoryEntryAttribute).len > 0:
         c = GPaneClick(part: gcpHistoryEntry,
-                       key: getAttribute(el, StateHistoryEntryAttribute))
-      elif getAttribute(el, StateOriginHopAttribute).len > 0:
+                       key: n.attr(StateHistoryEntryAttribute))
+      elif n.attr(StateOriginHopAttribute).len > 0:
         c = GPaneClick(part: gcpOriginHop,
-                       key: getAttribute(el, StateOriginHopAttribute) & "#" &
-                            getAttribute(el, StateOriginPathAttribute))
-      elif getAttribute(el, StateAddWatchAttribute).len > 0:
+                       key: n.attr(StateOriginHopAttribute) & "#" &
+                            n.attr(StateOriginPathAttribute))
+      elif n.attr(StateAddWatchAttribute).len > 0:
         c = GPaneClick(part: gcpAddWatch, key: "watch")
-      elif getAttribute(el, CallSearchAttribute).len > 0:
+      elif n.attr(CallSearchAttribute).len > 0:
         c = GPaneClick(part: gcpCallSearch, key: "calls")
-      elif getAttribute(el, TabPaneAttribute).len > 0:
-        c = GPaneClick(part: gcpTab, key: getAttribute(el, TabPaneAttribute))
-      elif getAttribute(el, TextRoleAttribute) == $trGutterLineNumber or
-           getAttribute(el, EditorCodeColumnAttribute).len > 0:
-        let row = r.parentNode(el)
-        let line = if row.isNil: "" else: getAttribute(row, EditorRowAttribute)
+      elif n.attr(TabPaneAttribute).len > 0:
+        c = GPaneClick(part: gcpTab, key: n.attr(TabPaneAttribute))
+      elif n.attr(TextRoleAttribute) == $trGutterLineNumber or
+           n.attr(EditorCodeColumnAttribute).len > 0:
+        let line = attrAt(n.parent, EditorRowAttribute)
         if line.len > 0:
           try:
             c = GPaneClick(
-              part: (if getAttribute(el, EditorCodeColumnAttribute).len > 0:
+              part: (if n.attr(EditorCodeColumnAttribute).len > 0:
                        gcpCode else: gcpGutter),
               line: parseInt(line))
           except ValueError: discard
       if c.part != gcpNone:
-        wireOne(r, el, c, dedupe, onClick)
-        inc wiredNow
-    for i in 0 ..< childCount(el):
-      walk(nthChild(el, i), ctx)
-  walk(root, "")
+        let el = elementOf(n.id)
+        if not el.isNil:
+          wireOne(r, el, c, dedupe, onClick)
+          n.attributes.add (WiredAttribute, $c.part)
+          inc wiredNow
   wiredNow
 
 proc findClickTarget*(r: GpuiRenderer; root: GpuiElement; part: GClickPart;

@@ -13018,12 +13018,15 @@ proc wireClicks(r: GpuiRenderer) =
   ## Give every row the window draws its click listeners (`window_clicks`).
   # The whole window: the panes (`gContainer`) and the footer, whose
   # location is a click target too (K37).
-  if not gRoot.isNil:
-    discard wireWindowClicks(r, gRoot, addr gPressDedupe, onPaneClick)
-    stampPointerShapes(r, gRoot)
-  elif not gContainer.isNil:
-    discard wireWindowClicks(r, gContainer, addr gPressDedupe, onPaneClick)
-    stampPointerShapes(r, gContainer)
+  let root = if not gRoot.isNil: gRoot else: gContainer
+  if root.isNil:
+    return
+  # The tree is read once for both walks (`snapshotTree`): they run after
+  # every redraw, a divider's live drag redraws on every motion, and reading
+  # it element by element cost that drag about 50 ms a motion.
+  var nodes = snapshotTree(root)
+  discard wireWindowClicks(r, nodes, addr gPressDedupe, onPaneClick)
+  stampPointerShapes(r, nodes)
 
 proc handlePopoverPress(r: GpuiRenderer; kind: GpuiEventKind;
                         x, y: int): bool =

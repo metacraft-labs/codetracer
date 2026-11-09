@@ -32,7 +32,7 @@
 
 import replay_prerequisite
 import ../../tui/tests/fixtures/fixture_provider
-import std/[json, os, osproc, streams, strtabs, strutils, tempfiles,
+import std/[json, os, osproc, posix, streams, strtabs, strutils, tempfiles,
             times, unittest]
 import ./gpui_child_env
 from ../../tui/host/native_host import nativeCtBinary
@@ -238,39 +238,68 @@ suite "PLAT-51 part B GPUI: live reflow while a divider is dragged":
   test "the cost of one live motion, measured":
     # THE WINDOW'S OWN WORK PER MOTION — the arrangement re-laid-out and its
     # element tree rebuilt — as the difference between a run that moves the
-    # divider forty times and one that presses and releases it, over the
+    # divider `Motions` times and one that presses and releases it, over the
     # same start-up. A proxy for the frame (the off-screen shim paints
     # nothing), reported with the host's load.
+    #
+    # Two hundred motions, not forty: two whole processes' runs differ by
+    # a second or so of their own, and over forty motions that was ±10 ms a
+    # motion — as large as the work once it was cheap (forty read -1 ms).
+    const Motions = 200
     var g0: JsonNode
     discard windowPlan("wait:1", g0)
     let (dx, dy) = centre(g0["dividers"][0]["rect"])
     var moves = ""
-    for i in 1 .. 40:
+    for i in 1 .. Motions:
       moves.add ",move:" & $(dx + (i mod 20) * 4) & ":" & $dy
-    proc timed(ops: string): float =
+    proc childCpu(): float =
+      ## The processor time (user + system) of every child this process has
+      ## reaped so far, in seconds.
+      var ru: Rusage
+      doAssert getrusage(RUSAGE_CHILDREN, addr ru) == 0
+      float(ru.ru_utime.tv_sec) + float(ru.ru_utime.tv_usec) / 1e6 +
+        float(ru.ru_stime.tv_sec) + float(ru.ru_stime.tv_usec) / 1e6
+    proc timed(ops: string): tuple[wall, cpu: float] =
       let t0 = epochTime()
+      let c0 = childCpu()
       discard windowPlan(ops)
-      epochTime() - t0
+      (epochTime() - t0, childCpu() - c0)
     # Best of FIVE, interleaved: each figure is a whole process's run, and a
     # shared host's load swings between runs (best of three once read 22 ms
     # a motion at load 29 where the next two runs read 12.7 and 4.4).
-    var base, moved = high(float)
+    var base, moved = (wall: high(float), cpu: high(float))
     for _ in 0 ..< 5:
-      base = min(base, timed("press:" & $dx & ":" & $dy & ",release:" & $dx &
-                             ":" & $dy))
-      moved = min(moved, timed("press:" & $dx & ":" & $dy & moves &
-                               ",release:" & $dx & ":" & $dy))
-    let perMotionMs = (moved - base) * 1000.0 / 40.0
+      let b = timed("press:" & $dx & ":" & $dy & ",release:" & $dx & ":" & $dy)
+      let m = timed("press:" & $dx & ":" & $dy & moves & ",release:" & $dx &
+                    ":" & $dy)
+      base = (min(base.wall, b.wall), min(base.cpu, b.cpu))
+      moved = (min(moved.wall, m.wall), min(moved.cpu, m.cpu))
+    let perMotionMs = (moved.wall - base.wall) * 1000.0 / float(Motions)
+    let perMotionCpuMs = (moved.cpu - base.cpu) * 1000.0 / float(Motions)
     let load = try: readFile("/proc/loadavg").splitWhitespace()[0]
                except IOError: "?"
     echo "PLAT-51 GPUI live drag: ", formatFloat(perMotionMs, ffDecimal, 2),
-         " ms per motion (best of 5; load ", load, ")"
-    checkpoint("per motion " & $perMotionMs & " ms")
+         " ms per motion, ", formatFloat(perMotionCpuMs, ffDecimal, 2),
+         " ms of processor time (best of 5; load ", load, ")"
+    checkpoint("per motion " & $perMotionMs & " ms, " & $perMotionCpuMs &
+               " ms of processor time")
     # The 16 ms budget on a host that is not oversubscribed; on one that is,
     # scaled by the share of a processor this process gets (load / cores).
     let share = max(1.0, (try: parseFloat(load) except ValueError: 0.0) /
                          float(countProcessors()))
-    ck perMotionMs < 16.0 * share
+    # AND THE WORK ITSELF, UNSCALED: the processor time a motion costs the
+    # window does not grow with the host's load the way its wall time does,
+    # so that half holds the budget on every host. It read ~50 ms a motion
+    # while the wall time, against a budget scaled by a load of 72, passed:
+    # every redraw re-read some seventy attributes of every element of the
+    # window, one shim call each (`window_pointer.stampPointerShapes`). The
+    # wall time alone also undercounts the work: the motions overlap the
+    # run's own waiting, so it read 14 ms where the work was 55.
+    # `base.cpu > 0` is that half's own control: the window's processor time
+    # is counted only once it is reaped as THIS process's child, so a window
+    # that ran as anything else (a detached grandchild, say) would read zero
+    # for both runs and pass the bound without having been measured.
+    ck perMotionMs < 16.0 * share and base.cpu > 0.0 and perMotionCpuMs < 16.0
 
 suite "PLAT-51 part B GPUI: GoldenLayout's drop zones in the window":
 

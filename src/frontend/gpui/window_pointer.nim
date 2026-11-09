@@ -78,34 +78,41 @@ func kindOfPart(part: string): HitKind =
   of $gcpCallSearch: hkTextInput
   else: hkNone
 
-proc hitTargetOf*(el: GpuiElement): HitTarget =
-  ## The element's kind and state, read off what the renderers stamped.
-  let part = getAttribute(el, WiredAttribute)
+func hitTargetOf*(n: SnapshotNode): HitTarget =
+  ## The element's kind and state, read off what the renderers stamped — its
+  ## attributes, as `snapshotTree` read them.
+  if n.attributes.len == 0:
+    return HitTarget(kind: hkNone)
+  let part = n.attr(WiredAttribute)
   var kind = if part.len > 0: kindOfPart(part) else: hkNone
   if kind == hkNone or kind == hkRow:
     for (attribute, attributeKind) in AttributeKinds:
-      if getAttribute(el, attribute).len > 0:
+      if n.attr(attribute).len > 0:
         kind = attributeKind
         break
   result = HitTarget(kind: kind)
   if kind == hkCell:
     result.truncated = true
   for (attribute, value) in DisabledMarks:
-    if getAttribute(el, attribute) == value:
+    if n.attr(attribute) == value:
       result.disabled = true
 
-proc stampPointerShapes*(r: GpuiRenderer; root: GpuiElement) =
+proc stampPointerShapes*(r: GpuiRenderer; nodes: openArray[SnapshotNode]) =
   ## Every interactive element's `cursor`, from `pointerShapeOf` (§4). An
   ## element the walk reads as nothing keeps no style: it inherits the arrow.
-  proc walk(el: GpuiElement) =
-    if el.isNil:
-      return
-    let target = hitTargetOf(el)
+  ##
+  ## `nodes` is the window's tree as `snapshotTree` read it, after
+  ## `window_clicks.wireWindowClicks` recorded the rows it wired: this runs
+  ## after every redraw, over every element of the window, and asking the
+  ## shim for each of the names above one call at a time cost about 40 ms a
+  ## redraw. Only the elements styled here take a handle.
+  for n in nodes:
+    let target = hitTargetOf(n)
     if target.kind != hkNone:
+      let el = elementOf(n.id)
+      if el.isNil:
+        continue
       let kindName = $target.kind
-      if getAttribute(el, PointerStampAttribute) != kindName:
+      if n.attr(PointerStampAttribute) != kindName:
         r.setAttribute(el, PointerStampAttribute, kindName)
       r.setStyle(el, "cursor", pointerShapeOf(target).cssName)
-    for i in 0 ..< childCount(el):
-      walk(nthChild(el, i))
-  walk(root)
