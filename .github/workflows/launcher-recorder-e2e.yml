@@ -710,10 +710,11 @@ jobs:
             # flake.lock roll moved it off 3b6196ef).
             # Re-aligned to flake.lock on 2026-11-01 after the flake.lock rolls
             # up to 5044c35b9 (io-mon's new pin still carries
-            # src/io_mon/depfile.nim).
+            # src/io_mon/depfile.nim). Re-aligned again 2026-11-09 after the
+            # flake.lock re-pins ffbaf94f3 and 1471ea29b.
             # runquota is locked as a `follows` of reprobuild's `runquota-src`;
             # the pin below is that node's rev.
-            io-mon=ac06360d15be70aca46202d0ce04c5b17cba5ac1
+            io-mon=c9e4dbd413389c0f27e209dba5a6157ef2437be6
             nim-shm-queue=84fd76b174d4868e703ba3d599668ee340e0b6ea
             nim-shm-gset=953bd231a022243fcee96092234d7cf80f7042b0
             nim-stackable-hooks=d715806424e8373708494913e59a48237978cc2a
@@ -723,7 +724,7 @@ jobs:
             # recorder repos' lock records these edges also resolve did not
             # carry it. They do now; going bare is a separate change.
             isonim=b7ff71e7c17593beccbee772cba87519e746e030
-            isonim-tui=ff295f7be6d7efc095ef4d249b1df0577d969c89
+            isonim-tui=2e45dfbca5f522afabf873976922a34b5301d440
             runquota=9818dc0c90be8ba7993424a7bbfbb6e009ffa965
             # Required by scripts/require-siblings.sh (`ct` links its reference
             # library). SHA, not bare: this workflow is also called from recorder
