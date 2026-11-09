@@ -418,13 +418,22 @@ button
 // These two paint their icon as a background image, which `color` cannot reach
 // and `opacity` cannot dim without fading the fill too (D-20).  A half-strength
 // layer of the button's own fill over the image dims only the icon.
-LOOP_ICON_DIM = linear-gradient(rgba(colors-ui-surface-primary-default, 0.5), rgba(colors-ui-surface-primary-default, 0.5))
+//
+// The layer is an inset box-shadow, not a `linear-gradient`: a gradient is
+// drawn by a dithering shader, and over this button's rounded corners the
+// software rasteriser's dither flipped between two states a few seconds apart
+// (11 pixels, one grey level), which made the PLAT-35 tier-1 canary of the
+// Electron capture drift one run in five.  A shadow is a flat rounded-rect
+// fill, so the frame no longer changes after it has settled.  The spread is
+// larger than the button, so it covers the whole padding box; the buttons have
+// no border (`ct-button-no-border`).
+LOOP_ICON_DIM = inset 0 0 0 2em rgba(colors-ui-surface-primary-default, 0.5)
 
 #backward-loop:disabled
-  background-image: LOOP_ICON_DIM, ct-images-omni-backward
+  box-shadow: LOOP_ICON_DIM
 
 #forward-loop:disabled
-  background-image: LOOP_ICON_DIM, ct-images-omni-forward
+  box-shadow: LOOP_ICON_DIM
 
 // The trace editor's run and options buttons draw the design system's ui-icons
 // (icons-lg) as the Build panel's buttons do (`.build-ctrl-btn`,
