@@ -465,7 +465,12 @@ def run_cargo(suite, test_filter):
             place = re.sub(r"^thread '([^']*)' \(\d+\) ", r"thread '\1' ", ln.strip())
             detail = [x.strip() for x in lines[i + 1:i + 4]
                       if x.strip().startswith(("left:", "right:", "assertion", "hops"))]
-            return "RED", [" ".join([place] + detail)]
+            # A fixture's temporary directory (`tempfile`'s `.tmpXXXXXX`,
+            # under whatever $TMPDIR the shell has) differs on every run, so
+            # it is replaced: a recorded cause must be one a re-run can match.
+            cause = re.sub(r'/[^\s"]*?/\.tmp[A-Za-z0-9]{6}/', "<tmp>/",
+                           " ".join([place] + detail))
+            return "RED", [cause]
     return "RED", []
 
 
@@ -618,6 +623,11 @@ def main():
         finally:
             for rel in files:
                 shutil.move(backups[rel], path_of(rel))
+                # The backup carries the pre-arm mtime (`copy2`), which is
+                # older than the build cargo made from the mutant, so cargo's
+                # fingerprint would keep that mutant's test binary for the
+                # next run. A fresh mtime makes the restored bytes rebuild.
+                os.utime(path_of(rel))
                 if sha(rel) != digests[rel]:
                     print(f"ABORT: restore of {rel} failed after {arm_id}.")
                     return 1
