@@ -13423,11 +13423,13 @@ proc writeFrameReport(path: string; loadStart, loadEnd: string;
 
 proc centreOf(r: PxRect): (int, int) = (r.x + r.w div 2, r.y + r.h div 2)
 
-proc runWindowOp(r: GpuiRenderer; op: string): string =
+proc runWindowOp(r: GpuiRenderer; op: string; release = true): string =
   ## One `--window-ops` event, through the window's own handlers
   ## (`windowPointer`, `windowKey`). A named target is aimed from the
   ## geometry the window drew — the same aim a user's pointer takes. Answers
-  ## "" or why the event could not be aimed.
+  ## "" or why the event could not be aimed. `release = false` leaves a
+  ## `click:` on the editor's text HELD, the button still down, for an op
+  ## (`select:`) that goes on to move and release the pointer itself.
   let parts = op.split(':')
   proc at(i: int): int = parseInt(parts[i])
   proc pressAt(x, y: int) =
@@ -14624,9 +14626,12 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
         discard fireEvent(node, name, ev)
         node = r.parentNode(node)
       gPressDedupe.clear()
-      # A click: its release too, which a real press has by now.
-      gEditorPointer.releaseEditor()
-      gTextDrag = false
+      # A click: its release too, which a real press has by now — unless the
+      # caller drags from here (`release = false`): the press stays held, so
+      # the pointer's move grows the selection and its release ends it.
+      if release:
+        gEditorPointer.releaseEditor()
+        gTextDrag = false
       if at.x >= 0 and kind == gekPointerDown:
         pressAt(at.x, at.y)
       return ""
@@ -14648,14 +14653,25 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       # PLAT-68: `select:<line>@<column>:<line>@<column>` — a left press on
       # the editor's text at the first cell, the pointer moved, with the
       # button held, to the second, and released there: a DRAG, through the
-      # row's press and the window's own pointer handler.
+      # row's press and the window's own pointer handler. The press is HELD
+      # (`release = false`): a `click:` releases at once, and a drag that
+      # starts released selects nothing.
+      #
+      # Both ends are aimed at the LEFT half of their cell (`click:`'s `l`),
+      # so each is the caret boundary BEFORE the named column and the
+      # selection is the columns from the first up to, not including, the
+      # second. A press reads the NEAREST boundary (`editorHitAt`, Monaco's
+      # rule), so the cell's middle — where `editorXOfColumn` aims — lies on
+      # the tie between the boundaries either side and rounds whichever way
+      # the pixel arithmetic happens to fall.
       if parts.len != 3 or '@' notin parts[1] or '@' notin parts[2]:
         return "select takes <line>@<column>:<line>@<column>"
-      let pressed = runWindowOp(r, "click:code:" & parts[1])
+      let pressed = runWindowOp(r, "click:code:" & parts[1] & "l",
+                                release = false)
       if pressed.len > 0:
         return pressed
       let to = parts[2].split('@')
-      let x = editorXOfColumn(parseInt(to[1]))
+      let x = editorXOfColumn(parseInt(to[1])) - int(EditorColumnPx / 4)
       let y = editorYOfLine(parseInt(to[0]))
       if y <= 0:
         return "line " & to[0] & " is not drawn in the editor"
