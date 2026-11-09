@@ -127,6 +127,7 @@ import ../styles/generated/design_tokens
 import codetracer_embed
 
 import ./app/shell
+import ../../common/content_file_cache
 import ./app/leaves
 from ../../common/view_vocabulary/layout_questions import trPaneTitle
 import ./app/pane_names
@@ -4848,8 +4849,6 @@ var
     ## that has not moved (after a redraw); a keyboard move of the menu's
     ## highlight must not be taken back by it, so a hover counts only when
     ## the pointer really moved — the desktop menu's rule too.
-  gIconDir = ""
-    ## Where the desktop's marks are written as SVG documents for `img`.
   gChrome: WindowChrome
     ## PLAT-69: THE WINDOW'S FRAME — whether the top bar is the title bar
     ## (client-side decorations), which window buttons it holds and where,
@@ -4996,14 +4995,8 @@ const
     ## `ct-button-image-md-secondary` colour, #b4b4b4 (measured 2026-10-17).
 
 proc topBarSvgPath(name, svg: string): string =
-  ## An icon of the bar, written once as an SVG file beside the marks.
-  if gIconDir.len == 0:
-    gIconDir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
-    createDir(gIconDir)
-  let path = gIconDir / ("bar-" & name & ".svg")
-  if not fileExists(path):
-    writeFile(path, svg)
-  path
+  ## An icon of the bar, as an SVG file in the per-user content cache.
+  contentFile(IconArea, "bar-" & name & ".svg", svg)
 
 proc toolSvgPath(tool: GToolButton; enabled: bool): string =
   ## A tool button's icon: the desktop's own mark for history and reset
@@ -5036,18 +5029,12 @@ proc markSvgPath(controlIndex: int; enabled: bool): string =
   ## The desktop's mark for a control, written once as an SVG document in
   ## the ink its state is drawn in — `svgMarkup`'s `currentColor` resolved,
   ## as the button's CSS `color` resolves it on the desktop.
-  if gIconDir.len == 0:
-    gIconDir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
-    createDir(gIconDir)
   let c = TransportControls[controlIndex]
-  let path = gIconDir / (c.id & (if enabled: "-on" else: "-off") & ".svg")
-  if not fileExists(path):
-    let ink = if enabled: ControlInk else: chromeOf(crTabInactiveForeground)
-    var svg = svgMarkup(markFor(c.id)).replace("currentColor", ink)
-    svg = svg.replace("<svg ", "<svg width=\"" & $(2 * ControlIconPx) &
-                      "\" height=\"" & $(2 * ControlIconPx) & "\" ")
-    writeFile(path, svg)
-  path
+  let ink = if enabled: ControlInk else: chromeOf(crTabInactiveForeground)
+  var svg = svgMarkup(markFor(c.id)).replace("currentColor", ink)
+  svg = svg.replace("<svg ", "<svg width=\"" & $(2 * ControlIconPx) &
+                    "\" height=\"" & $(2 * ControlIconPx) & "\" ")
+  contentFile(IconArea, c.id & (if enabled: "-on" else: "-off") & ".svg", svg)
 
 const
   WindowButtonIcons: array[GWindowButton, tuple[svg: string; w, h: int]] = [
@@ -5068,27 +5055,16 @@ const
 
 proc windowButtonSvgPath(button: GWindowButton; restore: bool): string =
   ## A window button's icon, written once as an SVG file for `img` beside
-  ## the debugger's marks (and removed with them, `removeMarkFiles`).
-  if gIconDir.len == 0:
-    gIconDir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
-    createDir(gIconDir)
+  ## the debugger's marks, in the per-user content cache.
   let name = if restore: "restore" else: $button
-  let path = gIconDir / ("window-" & name & ".svg")
-  if not fileExists(path):
-    writeFile(path, if restore: WindowRestoreIcon.svg
-                    else: WindowButtonIcons[button].svg)
-  path
+  contentFile(IconArea, "window-" & name & ".svg",
+              if restore: WindowRestoreIcon.svg
+              else: WindowButtonIcons[button].svg)
 
 proc tabIconSvgPath(svg: string): string =
-  ## A tab icon, written once as an SVG file beside the debugger's marks.
-  if gIconDir.len == 0:
-    gIconDir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
-    createDir(gIconDir)
-  let path = gIconDir / (if svg == TabPinIcon: "tab-pin.svg"
-                         else: "tab-close.svg")
-  if not fileExists(path):
-    writeFile(path, svg)
-  path
+  ## A tab icon, as an SVG file in the per-user content cache.
+  contentFile(IconArea, if svg == TabPinIcon: "tab-pin.svg" else: "tab-close.svg",
+              svg)
 
 proc controlsEnabled(): seq[bool] =
   if gSession.isNil or gSession.session.debugControlsVM.isNil:
@@ -13444,15 +13420,6 @@ proc writeFrameReport(path: string; loadStart, loadEnd: string;
 
 proc centreOf(r: PxRect): (int, int) = (r.x + r.w div 2, r.y + r.h div 2)
 
-proc removeMarkFiles() =
-  ## The debugger controls' SVG files (`markSvgPath`) live in a directory of
-  ## this process's own; it goes when the window does, so a run leaves
-  ## nothing behind in the temporary directory.
-  if gIconDir.len > 0:
-    try: removeDir(gIconDir)
-    except OSError: discard
-    gIconDir = ""
-
 proc runWindowOp(r: GpuiRenderer; op: string): string =
   ## One `--window-ops` event, through the window's own handlers
   ## (`windowPointer`, `windowKey`). A named target is aimed from the
@@ -14891,9 +14858,9 @@ proc reportWindowPlan(cmd: GpuiCommand; outcome: LeafRenderOutcome;
   if not r.verifyRenderPlan(root):
     stderr.writeLine("codetracer-gpui: the window's render plan did not verify")
     return 1
-  # The marks' SVG files STAY: the plan names them (`img src`) and they are
-  # what a reader of the plan checks the drawn marks against. The reader
-  # removes them (`test_plat48_gpui_plan.nim` does).
+  # The marks' SVG files are in the per-user content cache: the plan names
+  # them (`img src`) and a reader of the plan checks the drawn marks against
+  # them; nothing is left in the temporary directory.
   echo r.renderPlanJson(root)
   0
 
@@ -14934,15 +14901,6 @@ proc capturePixels(cmd: GpuiCommand): int =
         stderr.writeLine("codetracer-gpui: --window-ops: " & failure)
         return 1
   let shot = renderRootToPixels(root, cmd.width, cmd.height)
-  # The marks' SVG files GO, as they do when the window closes
-  # (`launchWindow`), and UNLIKE `--report-window-plan`, which leaves them
-  # because the plan it prints names them and a reader checks them. This path
-  # prints no plan: the renderer has already rasterised them into `shot`, so
-  # after this line nothing can read them and leaving them would leak a
-  # temporary directory per capture. Added 2026-10-02 when PLAT-48's top bar
-  # arrived ahead of this change — the capture path had no mark files to
-  # remove before `drawTopBar` existed.
-  removeMarkFiles()
   let failed = writeCapture(cmd.pixelsOut, shot, cmd.pixelsView,
                             cmd.pixelsScenario)
   if failed.len > 0:
@@ -15055,7 +15013,6 @@ proc launchWindow(cmd: GpuiCommand; title: string;
   gpui_launch(title.cstring, float(cmd.width), float(cmd.height),
               paintWindowChrome)
   let elapsedMs = int((epochTime() - startedAt) * 1000)
-  removeMarkFiles()
   if cmd.frameReport.len > 0:
     if not writeFrameReport(cmd.frameReport, loadStart, loadAverage(),
                             elapsedMs, cmd.quitAfterMs):

@@ -98,8 +98,9 @@ let calc = requireFixture(fixtureSpec("calc"))
 
 var drawnFiles: Table[string, string]
   ## Every file a reported plan's `img src` names, read as soon as the plan
-  ## is: `--report-window-plan` leaves the marks' SVG files for its reader,
-  ## and this reader removes them.
+  ## is: the marks' SVG files are in the spawned binary's per-user content
+  ## cache (`CODETRACER_HOME`, under the case's directory), which goes with
+  ## the case, so they are read before it is removed.
 
 var lastPlanTrace = ""
   ## M76: the gesture trace (`CODETRACER_GPUI_GESTURE_TRACE=1`) of the last
@@ -137,23 +138,19 @@ proc windowPlan(ops: string; pre: seq[string] = @[]; trace = false): JsonNode =
   let err = if fileExists(errFile): readFile(errFile) else: ""
   lastPlanTrace = err
   removeFile(errFile)
-  removeDir(state)
   if rc != 0:
+    removeDir(state)
     checkpoint("codetracer-gpui exited " & $rc & ": " & err)
     raise newException(IOError, "the window plan run failed (" & ops & ")")
   result = parseJson(output)
-  var dirs: seq[string] = @[]
   proc keep(n: JsonNode) =
     if n{"tag"}.getStr == "img":
       let src = n{"attributes"}{"src"}.getStr
       if src.len > 0 and fileExists(src):
         drawnFiles[src] = readFile(src)
-        if src.parentDir notin dirs: dirs.add src.parentDir
     for c in n{"children"}.getElems: keep(c)
   keep(result)
-  for d in dirs:
-    try: removeDir(d)
-    except OSError: discard
+  removeDir(state)
 
 proc attr(n: JsonNode; name: string): string =
   if n{"attributes"}.kind == JObject: n["attributes"]{name}.getStr else: ""
