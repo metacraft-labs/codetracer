@@ -100,6 +100,7 @@ ROUTER = "src/frontend/viewmodel/keymap/keymap_router.nim"
 STACK = "src/frontend/viewmodel/keymap/layer_stack.nim"
 IMPORTERS = "src/frontend/viewmodel/keymap/keymap_importers.nim"
 CORE = "src/frontend/viewmodel/editing_core.nim"
+EDITOR_POINTER = "src/frontend/viewmodel/input/editor_pointer.nim"
 ROLES = "src/frontend/tui/app/theme/roles.nim"
 CHROME = "src/frontend/gpui/chrome.nim"
 TUI_MAIN = "src/frontend/tui/main.nim"
@@ -150,7 +151,7 @@ PTYC = "src/frontend/tui/tests/real_terminal/test_plat68c_pty.nim"
 GPUIC = "src/frontend/gpui/tests/test_plat68c_gpui_plan.nim"
 
 SUBJECTS = [NAMES, KEYMAP, SELECTION, WHEN, CUA, CUA_SPEC, RESTORE,
-            ROUTER, STACK, IMPORTERS, CORE, ROLES, CHROME, TUI_MAIN, DRIVER,
+            ROUTER, STACK, IMPORTERS, CORE, EDITOR_POINTER, ROLES, CHROME, TUI_MAIN, DRIVER,
             MOTIONS, GPUI_MAIN, MONACO, DISPATCH, RUNTIME, ALT_TAP,
             PRODUCT_MENU, TOP_BAR, OPERATIONS, NAVIGATION, EMACS, CAPS, USER_KEYMAP, GPUI_KEYS, DOM_KEYS, MENU_ACCEL, INDEX_MENU, DIALOG]
 SUITES = [DECODING, BASES, ORACLE, PTY, EXTRACTOR, "tools/cua-keymap-extractor.py",
@@ -207,8 +208,8 @@ ARMS = [
      "behaviour-preserving: the DECLARED SURVIVOR"),
 
     # ---- Phase B: the router, the layer stack, the front ends ------------
-    ("B1", [(ROUTER, "  for source in [lsUser, lsBase]:",
-             "  for source in [lsBase, lsUser]:")],
+    ("B1", [(ROUTER, "  result = @[]\n  for source in [lsUser, lsBase]:",
+             "  result = @[]\n  for source in [lsBase, lsUser]:")],
      [(LAYERS, None)],
      "KL-11: the base answers before the user's rows"),
     ("B2", [(STACK, "  if s.layers.len > 0 and s.layers[^1].token == token:",
@@ -245,8 +246,10 @@ ARMS = [
              "    BaseRow(chords: \"Shift+Down\", operation: \"editor.extend-line-down\", whenText: Writable),")],
      [(GPUIK, "*::Shift+Down selects*")],
      "selection refused in the read-only editor"),
-    ("B9", [(CORE, "  d.state.selection = singleSelection(d.state.selection.mainRange.anchor,",
-             "  d.state.selection = singleSelection(d.offsetAt(line, column),")],
+    # Both front-ends drag through `dragEditor` (Editor-Pane.md MC.4); the
+    # selection only moves with the extend there.
+    ("B9", [(EDITOR_POINTER, "  else:\n    d.runPointerOp(\"extend-by-unit-to\", args, nowMs)",
+             "  else:\n    discard")],
      [(PTYB, "*::a pointer drag*"), (GPUIK, "*::a pointer drag*")],
      "a pointer drag moves the caret and selects nothing"),
     ("B10", [(TUI_MAIN, "    epilogue.add osc52Copy(rt.app.clipboard)",
@@ -474,8 +477,8 @@ ARMS = [
              "  if false:")],
      [(PTYC, "*::Vim's g ends at 1000 ms*")],
      "a timed-out prefix stays on the status line until the next key"),
-    ("C6", [(RUNTIME, "  of \"help.keyboard-shortcuts\":\n    rt.showShortcutReference(outcome)",
-             "  of \"help.keyboard-shortcuts\":\n    discard")],
+    ("C6", [(RUNTIME, "  session.bindOp(\"help.keyboard-shortcuts\", act(rt.showShortcutReference(outcome)))",
+             "  session.bindOp(\"help.keyboard-shortcuts\", act((block: discard outcome)))")],
      [(PTYC, "*::a user row with no `when` takes Enter*")],
      "the terminal's Ctrl+K Ctrl+S shows no reference"),
     ("C7", [(ROUTER, "  for l in activeLayers(router.stack, path):\n    result.add (l.table, true)",
@@ -496,10 +499,11 @@ ARMS = [
 ]
 DECLARED_SURVIVORS = {"N1", "C1", "C2"}
 IN_BINARY = {NAMES, KEYMAP, SELECTION, WHEN, CUA, RESTORE, ROUTER, STACK,
-             CORE, ROLES, TUI_MAIN, DRIVER, MOTIONS, RUNTIME, PRODUCT_MENU,
+             CORE, EDITOR_POINTER, ROLES, TUI_MAIN, DRIVER, MOTIONS, RUNTIME, PRODUCT_MENU,
              TOP_BAR, OPERATIONS, CAPS}
   # Subjects compiled into `codetracer-tui`.
-IN_GPUI = {NAMES, KEYMAP, SELECTION, WHEN, CUA, ROUTER, STACK, CORE, CHROME,
+IN_GPUI = {NAMES, KEYMAP, SELECTION, WHEN, CUA, ROUTER, STACK, CORE,
+           EDITOR_POINTER, CHROME,
            GPUI_MAIN, ALT_TAP, PRODUCT_MENU, OPERATIONS, GPUI_KEYS}
   # Subjects compiled into `codetracer-gpui`.
 GPUI_SUITES = {GPUIK, DIFF13, GPUIC}
