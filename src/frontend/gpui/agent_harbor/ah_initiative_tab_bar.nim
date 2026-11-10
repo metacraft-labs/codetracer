@@ -280,11 +280,15 @@ proc inboxStep(r: GpuiRenderer; p: AhPalette; arrow: string; onClick: proc();
   ## Previous or Next (`.ah-inbox-step`): a 16px arrow, 6px in, 24px high,
   ## 25px wide as the browser sets it (the arrow's advance in the
   ## interface face; GPUI may set the glyph from a fallback face).
+  # A disabled step is not pressable, so it takes no pointer cursor: the
+  # browser's pointer stamp gives `.ah-inbox-empty .ah-inbox-step` no hit
+  # kind, the default arrow.
+  let cursor = cursorOf(if disabled: hkNone else: hkControl)
   result = r.box(pairs = [("height", $ControlPx & "px"), ("items", "center"),
                           ("width", $InboxStepPx & "px"),
                           ("justify", "center"), ("padding-left", "6px"),
                           ("padding-right", "6px"), ("flex-shrink", "0"),
-                          ("rounded", $ControlRadiusPx & "px"), ("cursor", cursorOf(hkControl))])
+                          ("rounded", $ControlRadiusPx & "px"), ("cursor", cursor)])
   # With nothing waiting the step has nowhere to go: the disabled role at
   # full opacity, as the browser draws it; the label role otherwise.
   let ink = inboxStepInk(p, disabled)
@@ -292,6 +296,7 @@ proc inboxStep(r: GpuiRenderer; p: AhPalette; arrow: string; onClick: proc();
   r.tag(result, "ink", ink)
   r.tag(result, "button", arrow)
   r.tag(result, "step", if disabled: "disabled" else: "enabled")
+  r.tag(result, "cursor", cursor)
   r.addEventListener(result, "click", onClick)
 
 proc drawInbox(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM): GpuiElement =

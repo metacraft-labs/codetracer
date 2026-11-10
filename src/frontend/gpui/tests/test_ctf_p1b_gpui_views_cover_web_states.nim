@@ -397,6 +397,14 @@ proc inkProblems(m: AhStoryMount; mode: DesignMode): seq[string] =
       if e.attr("ink") != wanted:
         result.add "the inbox step " & e.attr("button") & " (" & e.attr("step") &
                    ") is drawn in " & e.attr("ink") & ", not " & wanted
+      # The pointer over it: the hand only where it can be pressed, the
+      # default arrow where it cannot (the browser's pointer stamp gives a
+      # step in an empty inbox no hit kind). Spelled as the CSS names, not
+      # through `cursorOf`, so the check does not share the view's rule.
+      let cursor = if empty: "default" else: "pointer"
+      if e.attr("cursor") != cursor:
+        result.add "the inbox step " & e.attr("button") & " (" & e.attr("step") &
+                   ") shows the " & e.attr("cursor") & " cursor, not " & cursor
     # Auto-switch on: its dot in the action border role in both modes
     # (`.ah-inbox-auto-on::before`: `colors-ui-border-action`).
     for e in m.view.all("auto-switch"):
@@ -644,6 +652,18 @@ suite "CTF-P1b: the fleet's and the inbox's inks follow the shared rules":
       ck inkProblems(m, mode).join(" ").contains("the inbox step")
       m.dispose()
 
+  test "a disabled arrow under the pressable cursor is reported":
+    for mode in [dmDark, dmLight]:
+      gpui_reset_tree()
+      let m = r.mountAgentHarborStoryGpui("agent-harbor-initiative-tabs", "empty",
+                                          1440, 900, mode)
+      ck inkProblems(m, mode).len == 0
+      let step = m.view.first("step")
+      ck step.attr("step") == "disabled"
+      r.tag(step, "cursor", "pointer")
+      ck inkProblems(m, mode).join(" ").contains("shows the pointer cursor")
+      m.dispose()
+
   test "the auto-switch dot in the action surface's colour is reported":
     # Light only: in Dark the action surface and the action border are one
     # colour (#6366f1), which is why the defect showed only in Light.
@@ -681,4 +701,4 @@ suite "CTF-P1b: the GPUI views share the viewmodels, not the web views":
 
 suite "CTF-P1b: assertion count":
   test "every assertion ran":
-    check countedAssertions == 54
+    check countedAssertions == 60
