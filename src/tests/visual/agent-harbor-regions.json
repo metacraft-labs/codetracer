@@ -53,7 +53,10 @@
     "the ones whose size the views compute themselves (the single-line tabs'",
     "Flexbox shrink, the inbox position's minimum, the strip notice's budget,",
     "the error reason's line pitch, the list head's rows, the docked summary's",
-    "offset), so a pixel-level answer is the one that can fail."
+    "offset; the initiative bar's tabs, `+N` and \"+\", the `bar-*` regions,",
+    "whose places follow from the inactive tabs' widths; and a tab bar's",
+    "`caption`, whose height follows from its lines), so a pixel-level answer",
+    "is the one that can fail."
   ],
   "schemaVersion": 1,
   "regions": [
@@ -344,6 +347,74 @@
       "px": [
         "x",
         "w"
+      ]
+    },
+    {
+      "name": "bar-tab-first",
+      "web": ".ah-initiative-tab-bar .session-tab.ah-tab:not(.ah-tab-notice):not(.active)",
+      "gpui": {
+        "data-ah-bar-tab": "",
+        "data-ah-active": "false"
+      },
+      "pick": "first",
+      "px": [
+        "x",
+        "w"
+      ]
+    },
+    {
+      "name": "bar-tab-last",
+      "web": ".ah-initiative-tab-bar .session-tab.ah-tab:not(.ah-tab-notice):not(.active)",
+      "gpui": {
+        "data-ah-bar-tab": "",
+        "data-ah-active": "false"
+      },
+      "pick": "last-whole",
+      "px": [
+        "x",
+        "w"
+      ]
+    },
+    {
+      "name": "bar-active-tab",
+      "web": ".ah-initiative-tab-bar .session-tab.ah-tab:not(.ah-tab-notice).active",
+      "gpui": {
+        "data-ah-bar-tab": "",
+        "data-ah-active": "true"
+      },
+      "px": [
+        "x",
+        "w"
+      ]
+    },
+    {
+      "name": "bar-overflow",
+      "web": ".ah-initiative-tab-bar .session-tab-overflow",
+      "gpui": {
+        "data-ah-bar-overflow": ""
+      },
+      "px": [
+        "x"
+      ]
+    },
+    {
+      "name": "bar-add",
+      "web": ".ah-initiative-tab-bar .session-tab-add",
+      "gpui": {
+        "data-ah-bar-add": ""
+      },
+      "px": [
+        "x"
+      ]
+    },
+    {
+      "name": "caption",
+      "web": ".ah-tab-caption",
+      "gpui": {
+        "data-ah-caption": ""
+      },
+      "px": [
+        "h"
       ]
     }
   ]

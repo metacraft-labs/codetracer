@@ -289,6 +289,12 @@ type
     exactPx*: float
       ## Its exact (fractional) width, when every part of it is known
       ## exactly; 0 when only the rounded `widthPx` is.
+    dropPx*: int
+      ## How far below the line's top it sits when it shares its line with
+      ## the items before it, its line growing by as much: a row laid out
+      ## with `align-items: baseline`, where a smaller text's baseline-aligned
+      ## box ends lower than a larger one's (the fleet's 12px meta beside its
+      ## 14px title). 0 for an item that does not move.
 
 proc flowLines*(r: GpuiRenderer; items: openArray[FlowItem]; availPx, gapPx,
                 lineHeightPx, rowGapPx: int): GpuiElement =
@@ -326,6 +332,12 @@ proc flowLines*(r: GpuiRenderer; items: openArray[FlowItem]; availPx, gapPx,
       grows = false
       exactUsed = 0.0
       allExact = true
+    if item.dropPx > 0 and count > 0:
+      # Baseline-aligned beside what is already on the line: the line's
+      # items keep to its top, this one `dropPx` lower, the line that much
+      # taller.
+      r.styles(line, [("height", $(lineHeightPx + item.dropPx) & "px"), ("items", "start")])
+      r.setStyle(item.el, "margin-top", $item.dropPx & "px")
     if item.alignEnd and not grows:
       r.appendChild(line, r.box(pairs = [("flex-grow", "1")]))
     if item.grow:

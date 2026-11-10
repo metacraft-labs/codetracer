@@ -17,6 +17,8 @@
 ## state suffixes are the web switcher's (`agent_harbor_words.stateSuffix`).
 
 
+import std/[math, strutils]
+
 import ../../../common/pointer_shape
 import isonim/core/[signals, computation]
 import nim_agents_isonim_viewmodels/agent_harbor/initiative_tabs_vm
@@ -46,44 +48,74 @@ const
   ControlsGapPx = 4           ## `.ah-bar-controls` gap: 0.25rem
   ElsewhereMarginPx = 4       ## `.ah-elsewhere` margin-right: 0.25rem
 
-proc recordingButtonWidth(rb: RecordingButton): int =
-  ## Its number in tabular figures (`.ah-rec-button`), 4px in on each side.
-  max(18, 8 + textPx($rb.number & stateSuffix(rb.state), CaptionPx, tabular = true))
+const EllipsisUnits = 672.0
+  ## Space Grotesk Regular's advance for "…" (U+2026), in units of its
+  ## 1000-unit em (`hmtx`, read from SpaceGrotesk-Regular.otf with fontTools
+  ## on 2026-11-10). `design_font_metrics` holds printable ASCII and budgets
+  ## any other rune as an M (864); a loading button's `2 …` is set from the
+  ## face's own glyph. (The failed button's "✕" is not in the face: the
+  ## browser sets a fallback glyph 10.07px wide at 12px, and the M's 10.37px
+  ## stands for it.)
 
-proc recordingsWidth(buttons: RecordingButtons): int =
-  if buttons.buttons.len == 0: return 0
-  result = TabInnerGapPx
-  for rb in buttons.buttons: result += recordingButtonWidth(rb) + RecordingButtonGapPx
-  if buttons.hidden > 0: result += textPx("+" & $buttons.hidden, CaptionPx) + 4
+proc recordingButtonWidth(rb: RecordingButton): float =
+  ## Its number in tabular figures and its state suffix (`.ah-rec-button`),
+  ## 4px in on each side inside its 1px outline (the box is border-box
+  ## sized, as the web's is), at least 18px.
+  let label = $rb.number & stateSuffix(rb.state)
+  var words = textWidth(label, CaptionPx, tabular = true)
+  if Ellipsis in label:
+    words += float(CaptionPx) * EllipsisUnits / 1000.0 - textWidth("M", CaptionPx)
+  max(18.0, 8.0 + 2.0 + words)
 
-proc initiativeTabContent(vm: InitiativeTabStripVM; tab: StripTab): int =
-  ## Its content's width, unclamped: what a browser takes as its flex base
-  ## size, and so what it shrinks in proportion to.
-  result = 2 * TabPadPx + MarkPx + TabInnerGapPx + textPx(tab.title, TabTitlePx)
+proc recordingsWidth(buttons: RecordingButtons): float =
+  ## The switcher beside `n/m`: the tab's 6px gap, the buttons 2px apart
+  ## (`.ah-rec-switch`: a gap BETWEEN items, so one fewer than the buttons
+  ## unless `+N` follows them), and `+N`.
+  if buttons.buttons.len == 0: return 0.0
+  result = float(TabInnerGapPx)
+  for rb in buttons.buttons: result += recordingButtonWidth(rb)
+  result += float(RecordingButtonGapPx * (buttons.buttons.len - 1))
+  # `.ah-rec-more`: 4px in on each side, no outline, 2px after the last button.
+  if buttons.hidden > 0:
+    result += float(RecordingButtonGapPx) + textWidth("+" & $buttons.hidden, CaptionPx) + 8.0
+
+proc initiativeTabContent(vm: InitiativeTabStripVM; tab: StripTab): float =
+  ## Its content's width, unclamped and unrounded: what a browser takes as
+  ## its flex base size (its max-content), and so what it shrinks in
+  ## proportion to. Its words are measured KERNED (`textWidth`), as the
+  ## browser and GPUI set them: the unkerned, rounded `textPx` made every
+  ## tab one to three pixels wider than the web's, and a bar of four tabs
+  ## put "+" 5px right of the web's.
+  result = float(2 * TabPadPx + MarkPx + TabInnerGapPx) + textWidth(tab.title, TabTitlePx)
   if tab.kind == stkInitiative:
-    result += TabInnerGapPx + textPx(tab.progressText, CaptionPx, tabular = true)
+    result += float(TabInnerGapPx) + textWidth(tab.progressText, CaptionPx, tabular = true)
     if tab.active: result += recordingsWidth(vm.recordingButtonsOf(tab.id))
   elif tab.session.originShort.len > 0:
-    result += TabInnerGapPx + textPx(tab.session.originShort, CaptionPx)
+    result += float(TabInnerGapPx) + textWidth(tab.session.originShort, CaptionPx)
 
-proc initiativeTabWidth*(vm: InitiativeTabStripVM; tab: StripTab; barPx = 0): int =
+proc pxOf(v: float): string =
+  ## A length in CSS pixels, to a hundredth.
+  formatFloat(v, ffDecimal, 2) & "px"
+
+proc initiativeTabWidth*(vm: InitiativeTabStripVM; tab: StripTab; barPx = 0): float =
   ## Its content, from 8rem to 16rem (the active one to 24rem).
   let w = initiativeTabContent(vm, tab)
   # A stacked bar's active tab leaves its line room for the chip and "+"
   # (`max-width: calc(100% - 88px)`).
   let activeMax = if vm.stacked and barPx > 0: min(InitiativeTabMaxPx, barPx - 88)
                   else: InitiativeTabMaxPx
-  clamp(w, TabMinPx, if tab.active: max(TabMinPx, activeMax) else: InactiveTabMaxPx)
+  clamp(w, float(TabMinPx),
+        float(if tab.active: max(TabMinPx, activeMax) else: InactiveTabMaxPx))
 
-proc initiativeTabMinWidth(vm: InitiativeTabStripVM; tab: StripTab): int =
+proc initiativeTabMinWidth(vm: InitiativeTabStripVM; tab: StripTab): float =
   ## The narrowest a tab shrinks to when the bar is full: its name at its
   ## `min-width: 4.5rem` beside everything else it holds, and never under
   ## `min-width: 8rem`.
-  result = 2 * TabPadPx + MarkPx + TabInnerGapPx + 72
+  result = float(2 * TabPadPx + MarkPx + TabInnerGapPx + 72)
   if tab.kind == stkInitiative:
-    result += TabInnerGapPx + textPx(tab.progressText, CaptionPx, tabular = true)
+    result += float(TabInnerGapPx) + textWidth(tab.progressText, CaptionPx, tabular = true)
     if tab.active: result += recordingsWidth(vm.recordingButtonsOf(tab.id))
-  result = max(result, TabMinPx)
+  result = max(result, float(TabMinPx))
 
 proc drawRecordingButton(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
                          initiativeId: string; rb: RecordingButton): GpuiElement =
@@ -127,7 +159,7 @@ proc drawRecordingButton(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM
                      proc() = discard target.selectRecording(initiativeId, id))
 
 proc drawBarTab(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
-                tab: StripTab; widthPx, minPx, basisPx: int): GpuiElement =
+                tab: StripTab; widthPx, minPx, basisPx: float): GpuiElement =
   let key = if tab.kind == stkInitiative: initiativeKey(tab.id) else: sessionKey(tab.id)
   let id = tab.id
   # `flex: 0 1 auto` over the tab's natural width, down to `min-width:
@@ -135,8 +167,8 @@ proc drawBarTab(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
   # proportion to their widths, CSS Flexbox §9.7), as the web bar does; the
   # name keeps 4.5rem of itself (its own `min-width`).
   # The flex basis is the content's whole width, the cap its `max-width`.
-  result = r.box(pairs = [("flex-basis", $basisPx & "px"), ("max-width", $widthPx & "px"),
-                          ("min-width", $minPx & "px"),
+  result = r.box(pairs = [("flex-basis", pxOf(basisPx)), ("max-width", pxOf(widthPx)),
+                          ("min-width", pxOf(minPx)),
                           ("height", $StripTabPx & "px"), ("items", "center"),
                           ("gap", $TabInnerGapPx & "px"),
                           ("padding-left", $TabPadPx & "px"),
@@ -145,6 +177,9 @@ proc drawBarTab(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
                           ("overflow", "hidden"), ("cursor", cursorOf(hkControl))])
   if tab.active: r.setStyle(result, "background", p.activeTab)
   r.tag(result, "tab", key)
+  # The bar's own tabs, told from the session strip's (`session-tab`) by the
+  # layout regions (`bar-*` in `agent-harbor-regions.json`).
+  r.tag(result, "bar-tab", key)
   r.tag(result, "active", $tab.active)
   r.tag(result, "tooltip", tab.tooltip)
   let target = vm
@@ -183,10 +218,12 @@ proc drawBarTab(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
           # The recordings that did not fit: a count in a recording
           # button's outline (`.ah-rec-more`: the label role, outlined
           # `by-mode(border-primary, text-primary-caption)` so it shows on
-          # the active tab's fill in Light too).
+          # the active tab's fill in Light too). The web draws that outline
+          # as an inset shadow, inside its 4px padding; a GPUI border takes
+          # room, so the padding is 3px and the box is the web's width.
           let moreBorder = if p.mode == dmDark: p.borderPrimary else: p.textCaption
           let more = r.box(pairs = [("height", "18px"), ("items", "center"),
-                                    ("padding-left", "4px"), ("padding-right", "4px"),
+                                    ("padding-left", "3px"), ("padding-right", "3px"),
                                     ("rounded", "4px"), ("border-width", "1px"),
                                     ("border-color", moreBorder), ("flex-shrink", "0")])
           r.appendChild(more, r.text("+" & $buttons.hidden, CaptionPx, p.textLabel,
@@ -459,6 +496,9 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
                   ("width", $widthPx & "px"), ("display", "flex"),
                   ("flex-direction", "column"), ("padding-top", $StripTopPx & "px")])
   r.tag(host, "surface", "agent-harbor-initiative-tabs")
+  # The caption bar the bar stands for (the web's `.ah-tab-caption`): its
+  # height is a layout region checked in pixels.
+  r.tag(host, "caption", "initiative-tabs")
   let ready = vm.state.val == asReady
   r.tag(host, "state", if ready and vm.tabs.len == 0: "empty" else: stateName(vm.state.val))
   r.tag(host, "compact", $vm.compact)
@@ -498,7 +538,7 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
     overflow = layout.overflow
     # The tabs shrink toward their narrowest to leave the controls their room
     # (`flex: 0 1 auto`), as the viewmodel's capacity rule assumes.
-    var widths, mins: seq[int]
+    var widths, mins: seq[float]
     for i in layout.visible:
       widths.add initiativeTabWidth(vm, tabs[i], widthPx - 8)
       mins.add initiativeTabMinWidth(vm, tabs[i])
@@ -514,11 +554,16 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
       if vm.elsewhereCount > 0: controlsPx += ControlsGapPx + elsewhereWidth(vm)
     # Where each tab will end up (the popup and the overflow menu hang from
     # them): the same proportional shrink the layout applies.
-    let fitted = fitWidths(widths, widthPx - 8 - controlsPx, TabMinPx, BarGapPx,
-                           mins = mins)
+    # (In whole pixels: a menu's or the popup's place, not a tab's width.)
+    var whole, wholeMins: seq[int]
+    for w in widths: whole.add int(round(w))
+    for w in mins: wholeMins.add int(round(w))
+    let fitted = fitWidths(whole, widthPx - 8 - controlsPx, TabMinPx, BarGapPx,
+                           mins = wholeMins)
     for k, i in layout.visible:
       if tabs[i].kind == stkInitiative and vm.popupId.val == tabs[i].id: popupLeft = x
-      r.appendChild(line, r.drawBarTab(p, vm, tabs[i], widths[k], min(TabMinPx, widths[k]),
+      r.appendChild(line, r.drawBarTab(p, vm, tabs[i], widths[k],
+                                       min(float(TabMinPx), widths[k]),
                                        initiativeTabContent(vm, tabs[i])))
       x += fitted[k] + BarGapPx
     if overflow.len > 0:
@@ -532,6 +577,7 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
       let chip = r.drawOverflowChip(p, overflow.len, waits, proc() =
         target.overflowOpen.val = not target.overflowOpen.val, open = vm.overflowOpen.val)
       r.setStyle(chip, "margin-right", $(BarChipGapPx - BarGapPx) & "px")
+      r.tag(chip, "bar-overflow", $overflow.len)
       r.appendChild(line, chip)
       x += 28 + BarChipGapPx
     if vm.elsewhereCount > 0:
@@ -546,15 +592,24 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
                            ("items", "center"), ("justify", "center"),
                            ("background", p.tertiary), ("flex-shrink", "0")])
   r.tag(add, "add", "+")
+  r.tag(add, "bar-add", "+")
   r.appendChild(add, r.plusIcon(p))
   r.appendChild(line, add)
   if vm.state.val in {asReady, asError}: r.appendChild(controls, r.drawInbox(p, vm))
   if vm.stacked:
     r.appendChild(host, line)
     # Stacked, the controls take the second line's width (`.ah-bar-stacked
-    # .ah-bar-controls`), their parts from its start.
-    let second = r.box(pairs = [("height", $StripLinePx & "px"), ("items", "center"),
-                                ("padding-right", "8px")])
+    # .ah-bar-controls`), their parts from its start. While loading the
+    # group holds nothing (no inbox, nothing started elsewhere), and the
+    # web's empty `.ah-bar-controls` is 0px high after the bar's 4px row
+    # gap: the line is that gap alone, not 30px of empty bar.
+    let empty = vm.state.val in {asIdle, asLoading}
+    let second = r.box(pairs = [("height", $(if empty: BarGapPx else: StripLinePx) & "px"),
+                                ("items", "center"), ("padding-right", "8px")])
+    # And the caption keeps 6px under the bar (`.ah-tab-caption`'s
+    # `padding-bottom: 0.375rem`); a 30px line already holds its tab or
+    # its controls 2px clear of its foot, so 4px more.
+    r.setStyle(host, "padding-bottom", $(6 - (StripLinePx - StripTabPx) div 2) & "px")
     r.setStyle(controls, "flex-grow", "1")
     r.appendChild(second, controls)
     r.appendChild(host, second)

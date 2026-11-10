@@ -6,7 +6,7 @@
  ● Retry telemetry uploads with exponential backoff now
    needs input CodeTracer · Claude 2.1.0 · host-a
    assistant: Should the old behaviour stay behind a f…
- ● Report dropped telemetry batches on the status p… 4m
+ ● Report dropped telemetry batches on the status…   4m
    needs input CLI · Codex 0.9.4 · host-b
    assistant: Should the old behaviour stay behind a f…
  ○ Test telemetry retries against a flaky collector  2m

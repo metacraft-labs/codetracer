@@ -532,6 +532,16 @@ AH_MARK = 0.5rem
 .ah-tab-strip-host
   display: contents
 
+// Stories only (`Initiative Tabs: Popup Over A Panel`): the panel that lies
+// under the caption bar in the shell. `#menu` is fixed at the window's top
+// and paints its own ground, so the panel fills the window behind it and
+// shows below it, where the bar's popup and menus drop.
+.ah-story-panel-under
+  position: fixed
+  inset: 0
+  z-index: 0
+  background: colors-ui-surface-base-panel
+
 // A tab holds a mark and an origin besides its title, so it may grow past
 // the plain strip's 10em before its title is cut.
 .ah-tab-strip

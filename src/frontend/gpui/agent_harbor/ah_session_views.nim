@@ -337,6 +337,9 @@ proc drawSessionTabStrip*(r: GpuiRenderer; host: GpuiElement;
                   ("width", $widthPx & "px"), ("display", "flex"),
                   ("flex-direction", "column"), ("padding-top", $StripTopPx & "px")])
   r.tag(host, "surface", "agent-harbor-session-tabs")
+  # The caption bar the strip stands for (the web's `.ah-tab-caption`): its
+  # height is a layout region checked in pixels.
+  r.tag(host, "caption", "session-tabs")
   r.tag(host, "mode", $vm.mode.val)
   r.tag(host, "state", stateName(vm.state.val))
   let tabs = vm.tabs
@@ -407,6 +410,11 @@ proc drawSessionTabStrip*(r: GpuiRenderer; host: GpuiElement;
   r.appendChild(line, r.drawAddButton(p))
   for l in lines: r.appendChild(host, l)
   r.tag(host, "lines", $lines.len)
+  if vm.mode.val == tsmMultiLine:
+    # Wrapped, the caption grows with its lines and keeps 6px under the last
+    # tab (`#menu.ah-tab-caption-multiline`, `padding-bottom: 0.375rem`):
+    # the last line's 30px hold the tab 2px down, so 4px more.
+    r.setStyle(host, "padding-bottom", $(6 - (StripLinePx - StripTabPx) div 2) & "px")
   if overflow.len > 0 and vm.overflowOpen.val:
     # As wide as its widest item, from 13.75em to the window less 0.75rem,
     # its right edge 4px in from the bar's (which ends 8px short of the

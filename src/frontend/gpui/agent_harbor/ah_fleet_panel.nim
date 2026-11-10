@@ -35,6 +35,12 @@ const
   LinePx = 16                ## a row's lines: `type-ui-lineheight-body-sm` / `-caption-md`
   ChipLinePx = 18            ## the activity line: the `+N` chip's 16px line and its 1px border
   TitleMetaGapPx = 12        ## a wide row's title and meta on one line: `column-gap: 0.75rem`
+  MetaBaselineDropPx = 1
+    ## A wide row's title and meta on one line are baseline-aligned
+    ## (`.ah-fleet-row-main`, `align-items: baseline`): the 12px meta's
+    ## 16px box sits 1px below the 14px title's, and that line is 17px (the
+    ## browser's layout, measured 2026-11-10 on `fleet-failed`: title at
+    ## y 489, meta at 490, the next line at 508).
   WideAgeColumnPx = 64       ## 4rem: the "Active" column
   GridGapPx = 8
 
@@ -180,7 +186,8 @@ proc drawRow(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; row: FleetRow;
     let metaPx = textPx(row.statusLabel, CaptionPx) + 6 + textPx(metaWords, CaptionPx)
     r.appendChild(main, r.flowLines([
       FlowItem(el: title, widthPx: textPx(row.title, BodyPx)),
-      FlowItem(el: meta, widthPx: metaPx)], grid.session, TitleMetaGapPx, LinePx, 2))
+      FlowItem(el: meta, widthPx: metaPx, dropPx: MetaBaselineDropPx)], grid.session,
+      TitleMetaGapPx, LinePx, 2))
   else:
     r.appendChild(main, title)
     r.appendChild(main, meta)

@@ -380,12 +380,13 @@ proc drawMilestone(c: var AhCanvas; parent: AhNode; m: MilestoneLine; index, row
   discard c.mark(n, row, col + 1, c.p.markOf(m.statusClass))
   discard c.text(n, row, col + 3, idW, m.id, c.p.textLabel)
   let titleW = if wide: width - 3 - idW - 1 - metaW - 2 else: width - 3 - idW - 2
-  discard c.text(n, row, col + 3 + idW + 1, max(1, titleW), m.title, c.p.textBody,
-                 fact = "title")
   let mr = if wide: row else: row + 1
   var mc = if wide: col + width - 1 - metaW else: col + 3
   if wide:
     mc = max(mc, col + width - 1 - widthOf(metaText) - tagW)
+  # Wide, the meta column follows the title: a cut title keeps its gap.
+  discard c.text(n, row, col + 3 + idW + 1, max(1, titleW), m.title, c.p.textBody,
+                 fact = "title", before = if wide: mc else: -1)
   if m.current:
     mc += c.put(mr, mc, "CURRENT", c.p.textLabel, bold = true) + 1
   let room = col + width - 1 - mc

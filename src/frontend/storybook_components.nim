@@ -1831,7 +1831,14 @@ proc mountAgentHarborSessionTabs(container: isonim_dom.Element;
 
 proc mountAgentHarborInitiativeTabs(container: isonim_dom.Element;
                                     fixture: string): DisposeProc =
-  ## The tab bar with initiatives as tabs, in the caption bar.
+  ## The tab bar with initiatives as tabs, in the caption bar; with a panel
+  ## under the bar where the story asks for one (`hasPanelUnderCaption`):
+  ## the caption is fixed at the window's top, so the panel fills the
+  ## window behind it (`.ah-story-panel-under`) and shows below it.
+  if hasPanelUnderCaption("agent-harbor-initiative-tabs", fixture):
+    let panel = isonim_dom.createElement(isonim_dom.document, cstring"div")
+    isonim_dom.setAttribute(panel, cstring"class", cstring"ah-story-panel-under")
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
   let caption = isonim_dom.createElement(isonim_dom.document, cstring"div")
   isonim_dom.setAttribute(caption, cstring"id", cstring"menu")
   isonim_dom.setAttribute(caption, cstring"class", cstring"ah-tab-caption")

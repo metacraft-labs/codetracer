@@ -1,4 +1,4 @@
- ● Port the route ca… CLI ✕   ● +13   +
+ ● Port the route c…  CLI ✕   ● +13   +
                                              
  ● Replace the hand-rolled JSON writer  CLI
  ● Cap the telemetry retry budget per…   CT

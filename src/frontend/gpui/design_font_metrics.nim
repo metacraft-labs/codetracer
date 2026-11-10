@@ -36,7 +36,10 @@
 ## line breaks EXACTLY as the browser's does needs it: "1 completed" in
 ## tabular figures is 73.60 px at 12 px unkerned and 73.14 px set, and three
 ## such legend items fit a 262 px line set and overflow it unkerned. The
-## views' flex bases still measure unkerned (`kerned = false`), as they did.
+## initiative bar's tabs take their flex bases kerned too (2026-11-10): a
+## browser's flex base is the tab's max-content, its words as set, and four
+## tabs measured unkerned and rounded put the bar's "+" 5 px right of the
+## web's. The other views' flex bases still measure unkerned.
 ##
 ## Pure: no renderer, no font file at run time.
 

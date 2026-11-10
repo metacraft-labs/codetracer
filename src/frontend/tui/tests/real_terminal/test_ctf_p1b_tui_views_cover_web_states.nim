@@ -39,7 +39,10 @@
 ##      text never leaves a space or a dangling separator before its "…",
 ##      and a tree header's counts are cut only between their parts
 ##      (`cutEdgeProblems`); a title keeps two cells before the status word
-##      right-aligned on its line (`statusGapProblems`).
+##      right-aligned on its line (`statusGapProblems`), and a text cut
+##      before whatever follows it on its line (an age, a fleet column, the
+##      elsewhere menu's initiative and state, a tab's origin or `n/m`)
+##      keeps two cells before it too (`cutGapProblems`).
 ##   2. THE CELL STYLES AGAINST THE VIEWMODEL. The ground and ink of the
 ##      parts whose state the viewmodel decides — the active tab and row, the
 ##      selected initiative and fleet row, the current milestone, the active
@@ -94,7 +97,7 @@ from ../../../viewmodel/views/agent_harbor_words import tabLabelOf, filterCount,
   countsText, activityLineIsError
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling.
-const ExpectedAssertions = 89
+const ExpectedAssertions = 107
 
 const
   Stem = "app_agent_harbor_story"
@@ -323,6 +326,36 @@ proc cutEdgeProblems(m: AhTuiMount): seq[string] =
           if acc == kept: whole = true
         if not whole:
           result.add "the counts '" & n.attr(fact) & "' are cut inside a part: '" & drawn & "'"
+
+const CutGapFacts = @DrawnTextFacts & @["initiative-title", "col"]
+  ## The texts that may be cut before a next column: every one-row text
+  ## fact, the elsewhere menu's initiative, and a fleet grid cell.
+
+proc cutGapProblems(m: AhTuiMount): seq[string] =
+  ## A text cut to its cells keeps `StatusWordGap` cells before the next
+  ## thing on its line: past its "…", the cells up to the next drawn glyph
+  ## on the same ground must be at least that many blanks. A change of
+  ## ground ends the search (a chip, the next area, a menu laid over the
+  ## row are set apart by their ground), and so does the screen's edge.
+  let g = m.canvas.grid
+  for fact in CutGapFacts:
+    for n in m.canvas.root.all(fact):
+      if n.row >= m.rows or n.width == 0 or n.height > 1: continue
+      let drawn = g.cellsText(n.row, n.col, n.width).strip(leading = false)
+      if not drawn.endsWith(Ellipsis): continue
+      let stop = n.col + widthOf(drawn)
+      let ground = g.styleAt(n.row, stop - 1).bg
+      var blanks = 0
+      var at = stop
+      while at < m.cols and g.styleAt(n.row, at).bg == ground and
+            g.runeAt(n.row, at) == " ":
+        inc blanks
+        inc at
+      if at >= m.cols or g.styleAt(n.row, at).bg != ground: continue
+      if blanks < StatusWordGap:
+        let label = if fact == "col": n.attr("col") & " column" else: fact
+        result.add "the " & label & " '" & drawn & "' is cut " & $blanks &
+                   " cell(s) before '" & g.cellsText(n.row, at, min(8, m.cols - at)).strip & "'"
 
 proc statusGapProblems(m: AhTuiMount): seq[string] =
   ## A title, whole or cut, keeps `StatusWordGap` cells before the status
@@ -772,6 +805,9 @@ proc styleProblems(m: AhTuiMount; look: LookOf): seq[string] =
                            markInk(p.markOf(tab.attention)))
   of "agent-harbor-initiative-tabs":
     let vm = m.initiativeTabs
+    # What the bar's popup covers: the window, or the panel under the
+    # caption bar where the story draws one.
+    let covered = if hasPanelUnderCaption(m.surface, m.fixture): t.body else: t.frame
     for e in view.all("tab"):
       let active = e.attr("tab") == vm.activeTab.val
       if active:
@@ -785,8 +821,21 @@ proc styleProblems(m: AhTuiMount; look: LookOf): seq[string] =
         result.expectGround(look, e, rows, "the active recording",
                             if m.mode == dmDark: p.action else: p.borderAction)
     for e in view.all("popup"):
+      # The popup's ground is the card where the card is at least
+      # `PopupGroundMinContrast` off what it covers; elsewhere a surface
+      # role that is (`surface/primary/secondary-hover` or
+      # `-tertiary-hover`): no outline tells the popup from what it covers.
       let drawn = AhNode(row: e.row, col: e.col, width: e.width, height: 1)
-      result.expectGround(look, drawn, rows, "the popup", t.menu)
+      if contrastRatio(t.menu, covered) >= PopupGroundMinContrast:
+        result.expectGround(look, drawn, rows, "the popup", t.menu)
+      elif e.row < rows:
+        let got = look(e.row, e.col).bg
+        let roles = [p.hover, tokenHexOf(dtColorsUiSurfacePrimaryTertiaryHover, m.mode)]
+        if got notin roles or contrastRatio(got, covered) < PopupGroundMinContrast:
+          result.add "the popup is on " & got & ", " &
+                     formatFloat(contrastRatio(got, covered), ffDecimal, 2) &
+                     ":1 off what it covers (" & covered & "), not a surface role at least " &
+                     formatFloat(PopupGroundMinContrast, ffDecimal, 2) & ":1 off it"
     # Auto-switch on: its dot in the action border role in both modes
     # (`.ah-inbox-auto-on::before`), the mark two cells before the label.
     for e in view.all("auto-switch"):
@@ -920,6 +969,7 @@ proc renderOnTerminal(story: CodeTracerStory; sizeName: string; cols, rows: int;
   result = checkStory(m) & drawnTextProblems(m) & cutTextProblems(m) &
            separatorWrapProblems(m) & sessionHeaderProblems(m) & popupHeadingProblems(m) &
            menuGapProblems(m) & cutEdgeProblems(m) & statusGapProblems(m) &
+           cutGapProblems(m) &
            styleProblems(m, m.gridLook())
   var sess = spawnStory(id, cols, rows, mode)
   defer: sess.close()
@@ -1269,6 +1319,43 @@ suite "CTF-P1b: the round-3 checks can fail":
     ck spoiled
     ck statusGapProblems(m).join(" ").contains("cell(s) before its status word")
     m.dispose()
+
+  test "a cut text one cell before its next column is reported":
+    # The final visual review's T1: a cut title one cell from its age, the
+    # next fleet column, the elsewhere menu's initiative. Each spoiled by
+    # drawing a glyph one cell past the "…", on the same ground.
+    for (family, story, cols) in [("agent-harbor-fleet", "snapshot", 180),
+                                  ("agent-harbor-fleet", "snapshot", 45),
+                                  ("agent-harbor-session-list", "sidebar", 45),
+                                  ("agent-harbor-initiative-tabs", "elsewhere", 180)]:
+      let m = mountStory(storyOf(family, story), cols, 56, dmDark)
+      ck cutGapProblems(m).len == 0
+      var spoiled = false
+      for fact in CutGapFacts:
+        for n in m.view.all(fact):
+          let drawn = m.canvas.grid.cellsText(n.row, n.col, n.width).strip(leading = false)
+          if spoiled or n.row >= m.rows or n.height > 1 or not drawn.endsWith(Ellipsis): continue
+          let stop = n.col + widthOf(drawn)
+          if stop + 1 >= m.cols: continue
+          m.canvas.grid.paint(n.row, stop + 1, "x", m.canvas.grid.styleAt(n.row, stop - 1))
+          spoiled = true
+      ck spoiled
+      ck cutGapProblems(m).join(" ").contains("is cut 1 cell(s) before 'x")
+      m.dispose()
+
+  test "a popup on the card over a panel, where the card is too near it, is reported":
+    # The final visual review's caveat: the card is 1.12:1 off Light's panel
+    # (1.03:1 in Dark). Over the window it stays on the card in Light.
+    for mode in Modes:
+      let m = mountStory(storyOf("agent-harbor-initiative-tabs", PopupOverPanelFixture), 180, 56, mode)
+      ck styleProblems(m, m.gridLook()).len == 0
+      let e = m.view.first("popup")
+      ck not e.isNil
+      m.canvas.grid.restyle(e.row, e.col, e.width, proc(s: CellStyle): CellStyle =
+        result = s
+        result.bg = tone(ahPalette(mode)).menu)
+      ck styleProblems(m, m.gridLook()).join(" ").contains("off what it covers")
+      m.dispose()
 
   test "Retry on the panel's secondary surface is reported":
     let m = mountStory(storyOf("agent-harbor-fleet", "error"), 180, 56, dmDark)

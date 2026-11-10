@@ -6,11 +6,11 @@
    failed orbit-ws-6 · cf5812b4
    build failed: 3 tests did not pass
    build failed: 3 tests did not pass  +1
- ● Reject route plans whose waypoints leave the mission corrid… Gemini 1.8.2                   build-01                       Telemetry upload retries           3h 10m          8h
+ ● Reject route plans whose waypoints leave the mission corri…  Gemini 1.8.2                   build-01                       Telemetry upload retries           3h 10m          8h
    failed orbit-labs/flight-planner · fix/propagator-step-coun…
    build failed: 3 tests did not pass
    build failed: 3 tests did not pass  +1
- ● Rename the legacy config keys and keep the old names as ali… Claude 4.2.0                   build-03                       —                                  2h 54m         10h
+ ● Rename the legacy config keys and keep the old names as al…  Claude 4.2.0                   build-03                       —                                  2h 54m         10h
    failed orbit-ws-3 · e68df722
    build failed: 3 tests did not pass
    build failed: 3 tests did not pass  +1

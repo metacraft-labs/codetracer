@@ -2,13 +2,13 @@
  AGENT HARBOR SESSIONS  synthetic fleet, 2026-01-15 10:00 UTC                                                               5 of 48 sessions · prompts of 12 withheld by the server
   All 48   Needs input 5   Running 9   Queued 3   Failed 9   Ended 22
    Session                                                      Agent                          Host                           Initiative                       Duration      Active
- ● Add a retry budget to the telemetry uploader and cover it w… Claude 4.2.0 ×2                build-01                       Telemetry upload retries              41m         26m
+ ● Add a retry budget to the telemetry uploader and cover it…   Claude 4.2.0 ×2                build-01                       Telemetry upload retries              41m         26m
    needs input orbit-labs/orbit-sim · fix/propagator-step-coun…
    Asked a single-choice question  +2
  ● Fix the off-by-one in the orbit propagator's step counter    Codex 0.91.3                   build-02                       Route cache on the new storag…     1h 21m          1h
    needs input orbit-labs/telemetry-ui · feat/telemetry-retry-…
    Asked a single-choice question  +2
- ● Port the flight planner's route cache to the new storage la… Gemini 1.8.2                   build-03                       —                                  1h 51m          1h
+ ● Port the flight planner's route cache to the new storage l…  Gemini 1.8.2                   build-03                       —                                  1h 51m          1h
    needs input orbit-ws-3 · 2d227ee6
    Asked a single-choice question  +2
  ● migration-guide-1                                            Opencode 0.12.7                gpu-01                         Telemetry upload retries           2h 37m          2h

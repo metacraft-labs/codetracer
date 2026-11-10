@@ -7,19 +7,19 @@
  ● Add a retry budget to the telemetry…  26m
    needs input Claude 4.2.0 ×2 · orbit-…
    Asked a single-choice question  +2
- ● Fix the off-by-one in the orbit propa… 1h
+ ● Fix the off-by-one in the orbit prop…  1h
    needs input Codex 0.91.3 · orbit-labs…
    Asked a single-choice question  +2
- ● Port the flight planner's route cache… 1h
+ ● Port the flight planner's route cach…  1h
    needs input Gemini 1.8.2 · orbit-ws-3…
    Asked a single-choice question  +2
  ● migration-guide-1                      2h
    needs input Opencode 0.12.7 · meadow/…
    Asked a single-choice question  +2
- ● Write the migration guide for the 3.0… 2h
+ ● Write the migration guide for the 3.…  2h
    needs input Claude 4.2.0 · orbit-labs…
    Asked a single-choice question  +2
- ● Make the dashboard's latency chart re… 3h
+ ● Make the dashboard's latency chart r…  3h
    running Codex 0.91.3 · orbit-ws-6 · w…
    Running the test suite  +1
  ● Investigate why the nightly fuzz job…  4h
@@ -28,29 +28,29 @@
  ● retry-budget-2                         4h
    running Opencode 0.12.7 · meadow/pape…
    Reading docs/configuration.md ×2  +1
- ● Split the monolithic scheduler module… 5h
+ ● Split the monolithic scheduler modul…  5h
    running Claude 4.2.0 · orbit-ws-3 · b…
    Reading docs/configuration.md  +1
- ● Replace the hand-rolled JSON writer w… 6h
+ ● Replace the hand-rolled JSON writer…   6h
    running Codex 0.91.3 · orbit-labs/tel…
    Committed 2 files  +2
- ● Profile the paperboat renderer and re… 6h
+ ● Profile the paperboat renderer and r…  6h
    running Gemini 1.8.2 · orbit-labs/fli…
    Committed 2 files  +1
  ● latency-chart-2                        7h
    running Opencode 0.12.7 ×2 · orbit-ws…
    Running the test suite  +1
- ● Document every public function of the… 7h
+ ● Document every public function of th…  7h
    running Claude 4.2.0 · orbit-labs/orb…
    Committed 2 files  +2
- ● Add keyboard navigation to the missio… 8h
+ ● Add keyboard navigation to the missi…  8h
    running Codex 0.91.3 · orbit-labs/tel…
    Reading docs/configuration.md  +2
- ● Teach the importer to accept gzip-com… 9h
+ ● Teach the importer to accept gzip-co…  9h
    queued Gemini 1.8.2 · build-03 · 587e…
  ● propagator-3                          10h
    queued Opencode 0.12.7 · meadow/pape…
- ● Cache the ephemeris tables between p… 10h
+ ● Cache the ephemeris tables between…   10h
    queued Claude 4.2.0 · orbit-labs/orb…
  ● Show the upload queue's depth on the…  8h
    failed Codex 0.91.3 · orbit-ws-6 · wi…

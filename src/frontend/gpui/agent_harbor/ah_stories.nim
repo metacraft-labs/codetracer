@@ -128,6 +128,15 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
     r.setStyle(host, "flex-grow", "1")
     r.setStyle(host, "min-height", "0px")
     r.appendChild(body, host)
+  elif hasPanelUnderCaption(surface, fixture):
+    # The caption bar over a panel, as in the shell: the window below the
+    # bar on the panel's ground, where the bar's popup drops (the web story
+    # fills the window behind its fixed caption with `.ah-story-panel-under`).
+    m.root = r.box(column = true, pairs = [("width", $widthPx & "px"),
+                                           ("height", $heightPx & "px"),
+                                           ("background", p.panel)])
+    host = r.createElement("div")
+    r.appendChild(m.root, host)
   else:
     host = r.createElement("div")
     m.root = host

@@ -64,15 +64,16 @@ proc agentText(row: FleetRow): string =
   if row.agentCount > 1: row.agentLabel & " \xC3\x97" & $row.agentCount else: row.agentLabel
 
 proc cell(c: var AhCanvas; parent: AhNode; row, col, width: int; s, name: string;
-          right = false; colour = "") =
-  ## One grid cell; an empty one says "—" in the disabled role.
+          right = false; colour = ""; before = -1) =
+  ## One grid cell; an empty one says "—" in the disabled role. `before`:
+  ## where the next cell's text starts (`text`'s `before`).
   let empty = s.len == 0
   let shown = if empty: AgentHarborFleetEmptyCellText else: s
   let n = c.node(parent, row, col, width, 1, [("col", name)])
   if empty: n.tag("empty", "true")
   discard c.text(n, row, col, width, shown,
                  if empty: c.p.textDisabled elif colour.len > 0: colour else: c.p.textLabel,
-                 alignRight = right)
+                 alignRight = right, before = before)
 
 proc drawRow(c: var AhCanvas; parent: AhNode; vm: FleetSnapshotVM; row: FleetRow;
              index, top, col, width: int; columns, anyInitiative: bool;
@@ -100,9 +101,12 @@ proc drawRow(c: var AhCanvas; parent: AhNode; vm: FleetSnapshotVM; row: FleetRow
   c.target(top, col, width, height, proc() = vm.select(id))
   discard c.mark(n, top, col + 1, c.p.markOf(row.category))
   let mc = col + 3
+  # What follows the main column on the first line: the agent's column when
+  # wide, the age at sidebar width. A text cut before it keeps its gap.
+  let nextAt = mc + mainW + 1
   discard c.text(n, top, mc, if oneLine: widthOf(row.title) else: mainW, row.title,
                  if sel: selText elif row.titleIsPlaceholder: c.p.textCaption else: c.p.textBody,
-                 fact = "title")
+                 fact = "title", before = nextAt)
   var r = top + 1
   var metaRow = top + 1
   var metaCol = mc
@@ -117,7 +121,8 @@ proc drawRow(c: var AhCanvas; parent: AhNode; vm: FleetSnapshotVM; row: FleetRow
   let room = mainW - (metaCol - mc) - sw - 1
   if room > 0:
     discard c.text(n, metaRow, metaCol + sw + 1, room, metaWords,
-                   if sel: selText else: c.p.textCaption, fact = "meta")
+                   if sel: selText else: c.p.textCaption, fact = "meta",
+                   before = if metaRow == top: nextAt else: -1)
   else:
     discard c.node(n, metaRow, metaCol + sw, 0, 1, [("meta-hidden", metaWords)])
   if row.failureText.len > 0:
@@ -153,12 +158,19 @@ proc drawRow(c: var AhCanvas; parent: AhNode; vm: FleetSnapshotVM; row: FleetRow
   if columns:
     let colour = if sel: selText else: ""
     var at = mc + grid.session + 1
-    c.cell(n, top, at, grid.share, row.agentText, "agent", colour = colour)
+    # The duration is right-aligned in its column: where its text starts.
+    let durationAt = mc + grid.session + 1 + (grid.share + 1) * (if anyInitiative: 3 else: 2) +
+                     DurationCells - widthOf(if row.durationLabel.len > 0: row.durationLabel
+                                             else: AgentHarborFleetEmptyCellText)
+    c.cell(n, top, at, grid.share, row.agentText, "agent", colour = colour,
+           before = at + grid.share + 1)
     at += grid.share + 1
-    c.cell(n, top, at, grid.share, row.host, "host", colour = colour)
+    c.cell(n, top, at, grid.share, row.host, "host", colour = colour,
+           before = if anyInitiative: at + grid.share + 1 else: durationAt)
     at += grid.share + 1
     if anyInitiative:
-      c.cell(n, top, at, grid.share, row.initiative, "initiative", colour = colour)
+      c.cell(n, top, at, grid.share, row.initiative, "initiative", colour = colour,
+             before = durationAt)
       at += grid.share + 1
     c.cell(n, top, at, DurationCells, row.durationLabel, "duration", right = true,
            colour = colour)

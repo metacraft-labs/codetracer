@@ -54,7 +54,7 @@
 ## that size. A width the stylesheet states in pixels is drawn as
 ## `cellsOf(px)` cells.
 
-import std/strutils
+import std/[math, strutils]
 from std/unicode import runes, Rune, `$`, runeAtPos
 
 import ../app/views/styled_row
@@ -79,6 +79,9 @@ const
     ## The cells a title (whole or cut) keeps before a right-aligned status
     ## or state word on its line, as an overflow menu's item keeps before its
     ## origin: the web's gap there is visible, one cell read as one phrase.
+    ## A text cut before any other next column on its line (an age, a
+    ## fleet or menu column, a tab's origin or `n/m`) keeps as many: see
+    ## `text`'s `before`.
 
 type
   AhNode* = ref object
@@ -179,6 +182,39 @@ proc tone*(p: AhPalette): AhTone =
          chip: (if dark: p.activeTab else: p.tertiary),
          chipOnAction: tokenHexOf(dtColorsUiSurfaceActionPrimaryHover, p.mode),
          chosen: p.activeTab)
+
+proc luminanceOf*(hex: string): float =
+  ## WCAG 2 relative luminance of `#rrggbb`
+  ## (https://www.w3.org/TR/WCAG21/#dfn-relative-luminance).
+  var channels: array[3, float]
+  for k, i in [1, 3, 5]:
+    let c = float(hexByte(hex, i)) / 255.0
+    channels[k] = if c <= 0.04045: c / 12.92 else: pow((c + 0.055) / 1.055, 2.4)
+  0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+proc contrastOf*(a, b: string): float =
+  ## WCAG 2 contrast ratio of two opaque colours
+  ## (https://www.w3.org/TR/WCAG21/#dfn-contrast-ratio).
+  let (la, lb) = (luminanceOf(a), luminanceOf(b))
+  (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+const PopupGroundMinContrast* = 1.3
+  ## How far off what it covers the popup's ground is, at least: the step
+  ## a tab bar's notice and a control's own ground keep, since no outline
+  ## tells the popup from what lies under it.
+
+proc popupGround*(p: AhPalette; covered: string): string =
+  ## The initiative popup's ground over `covered` (the window under the
+  ## caption bar, or a panel): the card, the web's dropdown surface, where
+  ## it is at least `PopupGroundMinContrast` off `covered`, else the next
+  ## surface role that is -- `surface/primary/secondary-hover`, then
+  ## `-tertiary-hover`. Light's card is 1.34:1 off the window but 1.12:1
+  ## off its panel; Dark's 1.14:1 and 1.03:1.
+  let candidates = [p.menu, p.hover,
+                    tokenHexOf(dtColorsUiSurfacePrimaryTertiaryHover, p.mode)]
+  for candidate in candidates:
+    if contrastOf(candidate, covered) >= PopupGroundMinContrast: return candidate
+  candidates[^1]
 
 proc stripeOn*(t: AhTone; p: AhPalette; ground: string; besides = ""): string =
   ## The ground of every other item of a list drawn on `ground`: the band,
@@ -480,12 +516,23 @@ proc put*(c: var AhCanvas; row, col: int; s, fg: string; bold = false;
   w
 
 proc text*(c: var AhCanvas; parent: AhNode; row, col, cells: int; s, fg: string;
-           bold = false; fact = ""; bg = ""; alignRight = false; byParts = false): int =
+           bold = false; fact = ""; bg = ""; alignRight = false; byParts = false;
+           before = -1): int =
   ## One line of text, elided to `cells` (the width the layout gives it);
   ## `byParts`: cut only between its " · " parts (`elideParts`).
+  ## `before`, when given, is the column the next thing on the line starts
+  ## at (an age, the next column of a grid or a menu, a tab's origin): a
+  ## text too long for its cells is then cut to end `StatusWordGap` cells
+  ## before it, so its "…" never sits one cell from the next word, where
+  ## the two read as one phrase (`Fix the propa… 1h`). A text that fits is
+  ## drawn whole in its cells as before: the layouts give a whole text the
+  ## web's own gap.
   ## `fact`, when given, tags a node with the full text over the cells it
   ## draws. Returns the cells drawn.
-  let shown = if byParts: elideParts(s, cells) else: elide(s, cells)
+  let room = if before >= 0 and widthOf(s) > cells:
+               max(1, min(cells, before - StatusWordGap - col))
+             else: cells
+  let shown = if byParts: elideParts(s, room) else: elide(s, room)
   let w = widthOf(shown)
   let at = if alignRight: col + max(0, cells - w) else: col
   discard c.put(row, at, shown, fg, bold, bg)

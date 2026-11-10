@@ -1,4 +1,4 @@
- ● Telemetry upload r… 1/4   ● Route cache on the… 2/6   ● Settings rede… 3/8   ● CI runner migra… 4/10   +1   +     8  agent harbor sessions   ←  1 of 3    →   ● Auto-switch: on
+ ● Telemetry upload…   1/4   ● Route cache on th…  2/6   ● Settings red…  3/8   ● CI runner migr…  4/10   +1   +     8  agent harbor sessions   ←  1 of 3    →   ● Auto-switch: on
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

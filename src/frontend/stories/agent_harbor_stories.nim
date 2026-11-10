@@ -270,8 +270,20 @@ import nim_agents_isonim_viewmodels/agent_harbor/initiative_tabs_vm
 
 export initiative_tabs_vm
 
-const initiativeTabsFixtures* = ["tabs", "popup", "elsewhere", "next", "auto-switch",
-  "recordings-many", "overflow-40", "long-names", "real", "empty", "loading", "error"]
+const PopupOverPanelFixture* = "popup-over-panel"
+  ## The initiative bar's `popup` state with a panel under the caption bar,
+  ## as in the shell, so the popup opens over a panel's ground rather than
+  ## the window's.
+
+const initiativeTabsFixtures* = ["tabs", "popup", PopupOverPanelFixture, "elsewhere", "next",
+  "auto-switch", "recordings-many", "overflow-40", "long-names", "real", "empty", "loading",
+  "error"]
+
+func hasPanelUnderCaption*(surface, fixture: string): bool =
+  ## Whether a story draws a panel under the caption bar (its whole window
+  ## below the bar on the panel's ground): each front-end's story host draws
+  ## it, the web's, GPUI's and the terminal's.
+  surface == "agent-harbor-initiative-tabs" and fixture == PopupOverPanelFixture
 
 proc inventedRecordings(count: int): seq[RecordingEntry] =
   ## More replays than any capture holds, one still loading, one that
@@ -288,7 +300,8 @@ proc inventedRecordings(count: int): seq[RecordingEntry] =
 
 proc createInitiativeTabsStoryVM*(fixture: string): InitiativeTabStripVM =
   ## The tab bar with one tab per initiative: `tabs` (the first active, with
-  ## its loaded recordings), `popup` (its progress popup shown), `elsewhere`
+  ## its loaded recordings), `popup` (its progress popup shown; with a panel
+  ## under the bar, `popup-over-panel`), `elsewhere`
   ## (the sessions started elsewhere, listed), `next` (Next taken: the first
   ## waiting session in view), `auto-switch` (auto-switch on and the
   ## instruction delivered: the view moved on), `recordings-many`, and the
@@ -314,7 +327,7 @@ proc createInitiativeTabsStoryVM*(fixture: string): InitiativeTabStripVM =
     recordings.delete(1)
     result.setRecordings(first, recordings, recordings[0].id)
   case fixture
-  of "popup": result.popupId.val = first
+  of "popup", PopupOverPanelFixture: result.popupId.val = first
   of "elsewhere": result.elsewhereOpen.val = true
   of "next": discard result.stepInbox(1)
   of "auto-switch":

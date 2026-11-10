@@ -2,13 +2,13 @@
  AGENT HARBOR SESSIONS  synthetic fleet, 2026-01-15 10:00 UTC                                                                    48 sessions · prompts of 12 withheld by the server
   All 48   Needs input 5   Running 9   Queued 3   Failed 9   Ended 22
    Session                                                      Agent                          Host                           Initiative                       Duration      Active
- ● Add a retry budget to the telemetry uploader and cover it w… Claude 4.2.0 ×2                build-01                       Telemetry upload retries              41m         26m
+ ● Add a retry budget to the telemetry uploader and cover it…   Claude 4.2.0 ×2                build-01                       Telemetry upload retries              41m         26m
    needs input orbit-labs/orbit-sim · fix/propagator-step-coun…
    Asked a single-choice question  +2
  ● Fix the off-by-one in the orbit propagator's step counter    Codex 0.91.3                   build-02                       Route cache on the new storag…     1h 21m          1h
    needs input orbit-labs/telemetry-ui · feat/telemetry-retry-…
    Asked a single-choice question  +2
- ● Port the flight planner's route cache to the new storage la… Gemini 1.8.2                   build-03                       —                                  1h 51m          1h
+ ● Port the flight planner's route cache to the new storage l…  Gemini 1.8.2                   build-03                       —                                  1h 51m          1h
    needs input orbit-ws-3 · 2d227ee6
    Asked a single-choice question  +2
  ● migration-guide-1                                            Opencode 0.12.7                gpu-01                         Telemetry upload retries           2h 37m          2h
@@ -17,7 +17,7 @@
  ● Write the migration guide for the 3.0 configuration format   Claude 4.2.0                   mac-01                         —                                  3h 08m          2h
    needs input orbit-labs/orbit-sim · fix/latency-chart-light-…
    Asked a single-choice question  +2
- ● Make the dashboard's latency chart readable in the light th… Codex 0.91.3                   win-01                         —                                  3h 49m          3h
+ ● Make the dashboard's latency chart readable in the light t…  Codex 0.91.3                   win-01                         —                                  3h 49m          3h
    running orbit-ws-6 · 250a2df8
    Running the test suite  +1
  ● Investigate why the nightly fuzz job times out on the parser Gemini 1.8.2                   build-01                       Telemetry upload retries           4h 24m          4h
@@ -26,13 +26,13 @@
  ● retry-budget-2                                               Opencode 0.12.7                build-02                       Route cache on the new storag…     5h 03m          4h
    running meadow/paperboat · feat/telemetry-retry-budget · or…
    Reading docs/configuration.md ×2  +1
- ● Split the monolithic scheduler module into three cohesive p… Claude 4.2.0                   build-03                       —                                  5h 41m          5h
+ ● Split the monolithic scheduler module into three cohesive…   Claude 4.2.0                   build-03                       —                                  5h 41m          5h
    running orbit-ws-3 · ca48029a
    Reading docs/configuration.md  +1
- ● Replace the hand-rolled JSON writer with the shared seriali… Codex 0.91.3                   gpu-01                         —                                  6h 15m          6h
+ ● Replace the hand-rolled JSON writer with the shared serial…  Codex 0.91.3                   gpu-01                         —                                  6h 15m          6h
    running orbit-labs/telemetry-ui · docs/config-3-migration…
    Committed 2 files  +2
- ● Profile the paperboat renderer and remove the per-frame all… Gemini 1.8.2                   mac-01                         Route cache on the new storag…     6h 55m          6h
+ ● Profile the paperboat renderer and remove the per-frame al…  Gemini 1.8.2                   mac-01                         Route cache on the new storag…     6h 55m          6h
    running orbit-labs/flight-planner · fix/latency-chart-light…
    Committed 2 files  +1
  ● latency-chart-2  running orbit-ws-6 · efc7e734               Opencode 0.12.7 ×2             win-01                         —                                  7h 29m          7h
@@ -43,7 +43,7 @@
  ● Add keyboard navigation to the mission timeline              Codex 0.91.3                   build-02                       Route cache on the new storag…     8h 47m          8h
    running orbit-labs/telemetry-ui · feat/telemetry-retry-budg…
    Reading docs/configuration.md  +2
- ● Teach the importer to accept gzip-compressed telemetry arch… Gemini 1.8.2                   build-03                       —                                  9h 16m          9h
+ ● Teach the importer to accept gzip-compressed telemetry arc…  Gemini 1.8.2                   build-03                       —                                  9h 16m          9h
    queued 587ecf79
  ● propagator-3                                                 Opencode 0.12.7                gpu-01                         Telemetry upload retries          10h 01m         10h
    queued meadow/paperboat · docs/config-3-migration · orbit-w…
@@ -53,4 +53,4 @@
    failed orbit-ws-6 · cf5812b4
    build failed: 3 tests did not pass
    build failed: 3 tests did not pass  +1
- ● Reject route plans whose waypoints leave the mission corrid… Gemini 1.8.2                   build-01                       Telemetry upload retries           3h 10m          8h
+ ● Reject route plans whose waypoints leave the mission corri…  Gemini 1.8.2                   build-01                       Telemetry upload retries           3h 10m          8h

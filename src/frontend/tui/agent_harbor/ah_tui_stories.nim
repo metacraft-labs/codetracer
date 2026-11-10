@@ -107,6 +107,10 @@ proc draw*(m: AhTuiMount) =
   c.area("window", 0, 0, m.cols, m.rows, c.tone.frame)
   var top = 0
   if m.frameTitle.len > 0: top = c.drawFrame(m.frameTitle)
+  if hasPanelUnderCaption(m.surface, m.fixture):
+    # The caption bar over a panel, as in the shell: the window under the
+    # bar is the panel's (the bar paints its own rows), where its popup drops.
+    c.area("panel", top, 0, m.cols, m.rows - top, c.tone.body)
   let h = m.rows - top
   case m.surface
   of "agent-harbor-fleet": c.drawFleetPanel(m.fleet, top, 0, m.cols, h)

@@ -4,23 +4,23 @@
  invented working set: 14 sessions over
  4 initiatives
  ▾ ● Telemetry upload retries   1/4
- ● Retry telemetry uploads with exponen… now
+ ● Retry telemetry uploads with expone…  now
    needs input CodeTracer · Claude 2.1.0…
    assistant: Should the old behaviour stay…
- ● Persist the telemetry queue across re… 4m
+ ● Persist the telemetry queue across r…  4m
    running TUI · Claude 2.1.0 · host-e
    assistant: Running the tests again after…
- ● Cap the telemetry retry budget per ho… 5m
+ ● Cap the telemetry retry budget per h…  5m
    running CodeTracer · Claude 2.1.0 · host…
    assistant: Running the tests again after…
- ● Add jitter to the telemetry retry del… 1m
+ ● Add jitter to the telemetry retry de…  1m
    completed WebUI · Claude 2.1.0 · host-c
    assistant: Finished; the tests pass.
  ▾ ● CI runner migration       4/10
- ● Cache the dependency graph between C… now
+ ● Cache the dependency graph between…   now
    needs input CLI · Opencode 0.6.1 · host-b
    assistant: Should the old behaviour stay…
- ○ Migrate the CI matrix to the new runn… 3m
+ ○ Migrate the CI matrix to the new run…  3m
    idle CodeTracer · Opencode 0.6.1 · host-d
    assistant: Done for now; ready for the n…
  ● Fix the flaky clock-skew test on the…  4m
@@ -30,10 +30,10 @@
  ○ Migrate cached routes without a cold…  5m
    idle Telegram · Codex 0.9.4 · host-f
    assistant: Done for now; ready for the n…
- ● Port the route cache to the new stora… 1m
+ ● Port the route cache to the new stor…  1m
    running CLI · Codex 0.9.4 · host-b
    assistant: Running the tests again after…
- ● Benchmark route cache reads on the ne… 2m
+ ● Benchmark route cache reads on the n…  2m
    failed CodeTracer · Codex 0.9.4 · host-d
    [exit] status=1
  ▾ ● Settings redesign  3/8 2 running
@@ -47,7 +47,7 @@
  ● Replace the hand-rolled JSON writer    6m
    running CLI · Codex 0.9.4 · host-b
    assistant: Running the tests again after…
- ● Profile the importer on the large fix… 6m
+ ● Profile the importer on the large fi…  6m
    queued CodeTracer · Grok 1.2.0 · host-a
    assistant: Queued until an agent slot fr…
                                              

@@ -1,43 +1,43 @@
- ● Tag the 3.0 releas… CT ✕
- ● Retire the ol… Web
- ○ Reset a setti… CLI
+ ● Tag the 3.0 relea…  CT ✕
+ ● Retire the o…  Web
+ ○ Reset a sett…  CLI
  ● Fix the route…  CT
- ● Document the t… Tg
- ● Add a dark th… TUI
- ● Show test dura… CT
- ● Show which se… Web
- ● Add route cac… CLI
- ○ Test telemetry… CT
- ● Bump the minim… Tg
- ○ Stream the CI… TUI
- ● Audit the sess… CT
- ● Remove the ol… Web
- ● Report droppe… CLI
+ ● Document the…   Tg
+ ● Add a dark t…  TUI
+ ● Show test dur…  CT
+ ● Show which s…  Web
+ ● Add route ca…  CLI
+ ○ Test telemetr…  CT
+ ● Bump the mini…  Tg
+ ○ Stream the C…  TUI
+ ● Audit the ses…  CT
+ ● Remove the o…  Web
+ ● Report dropp…  CLI
  ● Draft the 3.0…  CT
- ● Move the macOS… Tg
+ ● Move the macO…  Tg
  ● Add keyboard…  TUI
- ○ Expire stale r… CT
- ● Teach the par… Web
- ○ Rename the un… CLI
+ ○ Expire stale…   CT
+ ● Teach the pa…  Web
+ ○ Rename the u…  CLI
  ● Fix the flaky…  CT
- ● Keep unsaved s… Tg
- ● Benchmark rou… TUI
- ● Cap the teleme… CT
+ ● Keep unsaved…   Tg
+ ● Benchmark ro…  TUI
+ ● Cap the telem…  CT
  ● Trim the 3.0…  Web
- ● Replace the h… CLI
- ○ Move the accou… CT
- ● Migrate cached… Tg
- ● Add jitter to… TUI
- ● Remove the dep… CT
- ● Cache the dep… Web
- ● Add search to… CLI
- ● Profile the im… CT
- ○ Persist the te… Tg
- ● Write the upg… TUI
- ○ Migrate the CI… CT
- ● Split the set… Web
- ● Port the rout… CLI
- ● Retry telemetr… CT   +
+ ● Replace the…   CLI
+ ○ Move the acco…  CT
+ ● Migrate cache…  Tg
+ ● Add jitter t…  TUI
+ ● Remove the de…  CT
+ ● Cache the de…  Web
+ ● Add search t…  CLI
+ ● Profile the i…  CT
+ ○ Persist the t…  Tg
+ ● Write the up…  TUI
+ ○ Migrate the C…  CT
+ ● Split the se…  Web
+ ● Port the rou…  CLI
+ ● Retry telemet…  CT   +
                                              
                                              
                                              

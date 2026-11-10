@@ -188,6 +188,13 @@ func agentHarborSection(): CodeTracerStorySection =
       story("InitiativeTabsPopup", "Initiative Tabs: Progress Popup", "view", "agent-harbor-initiative-tabs", "popup",
             "agent-harbor-initiative-tabs-popup",
             "The first initiative's progress popup, as on hover"),
+      # The same popup over a panel's ground rather than the window's: a
+      # panel lies under the caption bar, as in the shell, where the popup
+      # drops over whichever panel is below the bar.
+      story("InitiativeTabsPopupOverPanel", "Initiative Tabs: Popup Over A Panel", "view",
+            "agent-harbor-initiative-tabs", "popup-over-panel",
+            "agent-harbor-initiative-tabs-popup",
+            "The progress popup opening over the panel under the caption bar"),
       story("InitiativeTabsElsewhere", "Initiative Tabs: Sessions Started Elsewhere", "view", "agent-harbor-initiative-tabs", "elsewhere",
             "agent-harbor-initiative-tabs-elsewhere",
             "The [N agent harbor sessions] menu open"),

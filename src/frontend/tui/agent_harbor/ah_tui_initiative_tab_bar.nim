@@ -119,6 +119,7 @@ proc drawBarTab(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStripVM;
     c.target(row, col, width, 1, proc() = discard target.activate(key))
   # From the right: the recording buttons, `n/m`, then the title takes the rest.
   var right = col + width - 1
+  var nextAt = -1   # where `n/m` or the origin starts: a cut title keeps its gap
   if tab.kind == stkInitiative:
     var buttons: RecordingButtons
     if tab.active: buttons = vm.recordingButtonsOf(id)
@@ -140,12 +141,15 @@ proc drawBarTab(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStripVM;
         discard c.node(switcher, row, at, widthOf(more), 1,
                        [("recordings-hidden", $buttons.hidden)])
     right = progressCol - 1
+    nextAt = progressCol
   elif tab.session.originShort.len > 0:
     let ow = widthOf(tab.session.originShort)
     discard c.put(row, right - ow, tab.session.originShort, c.p.textCaption)
+    nextAt = right - ow
     right -= ow + 1
   discard c.text(n, row, col + 3, max(1, right - (col + 3)), tab.title,
-                 if tab.active: c.p.activeTabText else: c.p.textCaption, fact = "label")
+                 if tab.active: c.p.activeTabText else: c.p.textCaption, fact = "label",
+                 before = nextAt)
 
 proc drawPopup(c: var AhCanvas; parent: AhNode; popup: InitiativePopup;
                row, col, width: int) =
@@ -157,7 +161,11 @@ proc drawPopup(c: var AhCanvas; parent: AhNode; popup: InitiativePopup;
   let legendRows = 3   # an upper bound for the labelled legend, trimmed below
   var height = 1 + 1 + 1 + legendRows + (if popup.currentMilestone.len > 0: 1 else: 0) +
                summary.len + 1 + popup.sessions.len + 1
-  c.area("popup", row, col, width, min(height, c.rows - row), c.tone.menu)
+  # What the popup covers (the window, or a panel below the bar): its ground
+  # steps at least 1.3:1 off it (`popupGround`), and the rows the bound
+  # over-counts are given back to it.
+  let covered = c.bgAt(row, col)
+  c.area("popup", row, col, width, min(height, c.rows - row), popupGround(c.p, covered))
   let n = c.node(parent, row, col, width, height, [("popup", popup.id)])
   var r = row + 1
   discard c.mark(n, r, col + 1, c.p.markOf(popup.state))
@@ -192,12 +200,12 @@ proc drawPopup(c: var AhCanvas; parent: AhNode; popup: InitiativePopup;
   height = r - row + 1
   n.height = height
   # Trim the area to what was drawn: the rows the bound over-counted go back
-  # to the window.
+  # to what the popup covers.
   for a in countdown(c.areas.high, 0):
     if c.areas[a].name == "popup":
       c.areas[a].height = min(height, c.rows - row)
       break
-  if bound > height: c.fill(row + height, col, width, bound - height, c.tone.frame)
+  if bound > height: c.fill(row + height, col, width, bound - height, covered)
 
 proc popupHeadingCells(popup: InitiativePopup): int =
   ## The popup's first line whole: an inset, the mark and a space, the
@@ -309,12 +317,19 @@ proc drawElsewhereItem(c: var AhCanvas; menu: AhNode; entry: ElsewhereSession;
   discard c.mark(n, row, col + 1, c.p.markOf(entry.item.attention))
   let ow = ElsewhereOriginCells
   if not stacked:
+    # Each column cut before the next keeps `StatusWordGap` cells before it
+    # (`text`'s `before`): the title and the initiative are near the same
+    # ink, so one cell between them read as one phrase.
     let titleW = max(4, width - 3 - ElsewhereInitiativeCells - ElsewhereStatusCells - ow - 4)
-    discard c.text(n, row, col + 3, titleW, entry.item.title, c.p.textBody)
     var at = col + 3 + titleW + 1
-    discard c.text(n, row, at, ElsewhereInitiativeCells, initiative, initiativeFg)
+    discard c.text(n, row, col + 3, titleW, entry.item.title, c.p.textBody,
+                   fact = "title", before = at)
+    discard c.text(n, row, at, ElsewhereInitiativeCells, initiative, initiativeFg,
+                   fact = "initiative-title", before = at + ElsewhereInitiativeCells + 1)
     at += ElsewhereInitiativeCells + 1
-    discard c.text(n, row, at, ElsewhereStatusCells, entry.item.statusLabel, c.p.textCaption)
+    discard c.text(n, row, at, ElsewhereStatusCells, entry.item.statusLabel, c.p.textCaption,
+                   fact = "status",
+                   before = at + ElsewhereStatusCells + 1 + ow - widthOf(entry.item.originShort))
     at += ElsewhereStatusCells + 1
     discard c.text(n, row, at, ow, entry.item.originShort, c.p.textCaption, alignRight = true)
   else:

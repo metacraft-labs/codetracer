@@ -1,0 +1,56 @@
+ ● Telemetry uploa…  1/4  1  +3    ● +4   +
+ 9    ←  →   Auto: off
+                                             
+ ● Telemetry upload retries  needs input
+ 1 of 4 milestones · 25%
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ● 1 completed  ● 1 in progress
+ ● 2 planned
+ CURRENT TR-M1: Data model
+ Telemetry upload retries: 1 of 4
+ milestones done; the current one is
+ Data model.
+                                             
+ ● Cap the telemetry retry bud…  running
+ ● Add jitter to the telemet…  completed
+ ● Persist the telemetry queue…  running
+ ● Retry telemetry uploads…  needs input
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             

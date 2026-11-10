@@ -180,23 +180,27 @@ proc drawTab(c: var AhCanvas; parent: AhNode; vm: SessionTabStripVM;
   c.target(row, col, width, 1, proc() = discard vm.activate(id))
   discard c.mark(n, row, col + 1, c.p.markOf(tab.attention))
   var right = col + width - 1
+  var nextAt = -1   # where the origin or the close starts: a cut label keeps its gap
   # On the active tab the origin and the close take the active row's quiet
   # role: on Light's tan the caption role reads at about 2:1 (the web's
   # `.ah-session-row-active` makes the same move for the same reason).
   let quietOnActive = if c.p.mode == dmDark: c.p.activeTabOrigin else: c.p.activeRowQuiet
   if closable and tab.active:
     right -= 2
+    nextAt = right + 1
     discard c.put(row, right + 1, "\xE2\x9C\x95", quietOnActive)
     discard c.node(n, row, right + 1, 1, 1, [("close", id)])
     c.target(row, right + 1, 1, 1, proc() = discard vm.close(id))
   if tab.originShort.len > 0:
     right -= widthOf(tab.originShort) + 1
+    nextAt = right + 1
     discard c.text(n, row, right + 1, widthOf(tab.originShort), tab.originShort,
                    if tab.active: quietOnActive else: c.p.textCaption,
                    fact = "origin")
   let label = tabLabelOf(tab)
   discard c.text(n, row, col + 3, max(1, right - (col + 3)), label,
-                 if tab.active: c.p.activeTabText else: c.p.textCaption, fact = "label")
+                 if tab.active: c.p.activeTabText else: c.p.textCaption, fact = "label",
+                 before = nextAt)
   if vm.isInFocus(tab):
     # The focused initiative's tabs: an underline in the action role under
     # the tab (SGR 58 gives it its own colour, the web's 2px action line),
@@ -371,15 +375,18 @@ proc drawListRow(c: var AhCanvas; parent: AhNode; vm: SessionTabStripVM;
   discard c.mark(n, row, col + 1, c.p.markOf(tab.attention))
   let quiet = if tab.active: c.p.activeRowQuiet else: c.p.textCaption
   let ageW = widthOf(tab.ageLabel)
+  # Where the age's text starts: a title or meta cut before it keeps its gap.
+  let ageAt = col + width - 1 - ageW
   if columns:
     let column = max(4, (width - 3 - AgeCells - 3) div 2)
-    discard c.text(n, row, col + 3, column, tab.title,
-                   if tab.active: c.p.activeTabText else: c.p.textBody, fact = "title")
     let metaCol = col + 3 + column + 1
+    discard c.text(n, row, col + 3, column, tab.title,
+                   if tab.active: c.p.activeTabText else: c.p.textBody, fact = "title",
+                   before = metaCol)
     let sw = c.text(n, row, metaCol, column, tab.statusLabel,
                     c.p.statusWordColour(tab.attention), fact = "status")
     discard c.text(n, row, metaCol + sw + 1, max(1, column - sw - 1), metaOf(tab), quiet,
-                   fact = "meta")
+                   fact = "meta", before = ageAt)
     discard c.text(n, row, col + width - 1 - AgeCells, AgeCells, tab.ageLabel,
                    c.p.textBodySubtle, fact = "age", alignRight = true)
     if detail.len > 0:
@@ -388,7 +395,8 @@ proc drawListRow(c: var AhCanvas; parent: AhNode; vm: SessionTabStripVM;
                      fact = "detail")
     return height
   discard c.text(n, row, col + 3, max(1, width - 3 - ageW - 2), tab.title,
-                 if tab.active: c.p.activeTabText else: c.p.textBody, fact = "title")
+                 if tab.active: c.p.activeTabText else: c.p.textBody, fact = "title",
+                 before = ageAt)
   discard c.text(n, row, col + width - 1 - ageW, ageW, tab.ageLabel, c.p.textBodySubtle,
                  fact = "age")
   let sw = c.text(n, row + 1, col + 3, max(1, width - 4), tab.statusLabel,

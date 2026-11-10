@@ -9,10 +9,10 @@
  ○ Migrate cached routes without a cold…  5m
    idle Telegram · Codex 0.9.4 · host-f
    assistant: Done for now; ready for the n…
- ● Port the route cache to the new stora… 1m
+ ● Port the route cache to the new stor…  1m
    running CLI · Codex 0.9.4 · host-b
    assistant: Running the tests again after…
- ● Benchmark route cache reads on the ne… 2m
+ ● Benchmark route cache reads on the n…  2m
    failed CodeTracer · Codex 0.9.4 · host-d
    [exit] status=1
  ▾ ● Settings redesign  3/8 2 running
@@ -26,7 +26,7 @@
  ● Replace the hand-rolled JSON writer    6m
    running CLI · Codex 0.9.4 · host-b
    assistant: Running the tests again after…
- ● Profile the importer on the large fix… 6m
+ ● Profile the importer on the large fi…  6m
    queued CodeTracer · Grok 1.2.0 · host-a
    assistant: Queued until an agent slot fr…
                                              
