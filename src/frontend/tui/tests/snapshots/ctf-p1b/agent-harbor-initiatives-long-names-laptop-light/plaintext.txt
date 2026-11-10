@@ -1,24 +1,24 @@
  Initiatives  ⚲ ✕
  INITIATIVES  invented working set with long names                                                                                       5 initiatives · 4 sessions · 1 needs input
- ▾ ● Telemetry upload retries — and keep the previous behavio…  1/4 · 25%    ● Retry telemetry uploads with exponential backoff — and keep the previous behaviour behi… needs input
+ ▾ ● Telemetry upload retries — and keep the previous behavio…  1/4 · 25%    ● Retry telemetry uploads with exponential backoff — and keep the previous behaviour beh…  needs input
      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀            ● 1  ● 1  ● 2
-     CURRENT TR-M1: A milestone whose title runs on well past any width …
+     CURRENT TR-M1: A milestone whose title runs on well past any width…
      orbit-labs/telemetry-retry · manager tr-manager
- ▾ ● CI runner migration — and keep the previous behaviour b…  4/10 · 40%    ○ Migrate the CI matrix to the new runners — and keep the previous behaviour behind a flag until… idle
+ ▾ ● CI runner migration — and keep the previous behaviour b…  4/10 · 40%    ○ Migrate the CI matrix to the new runners — and keep the previous behaviour behind a flag unti…  idle
      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  ● 4  ● 1  ● 1  ● 1  ● 3
-     CURRENT CM-M4: A milestone whose title runs on well past any width …
+     CURRENT CM-M4: A milestone whose title runs on well past any width…
      orbit-labs/ci-runner-migration
- ▾ ● Route cache on the new storage layer — and keep the prev…  2/6 · 33%    ● Port the route cache to the new storage layer — and keep the previous behaviour behind a fl… running
+ ▾ ● Route cache on the new storage layer — and keep the prev…  2/6 · 33%    ● Port the route cache to the new storage layer — and keep the previous behaviour behind a f…  running
      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀       ● 2  ● 1  ● 1  ● 2
-     CURRENT RC-M2: A milestone whose title runs on well past any width …
+     CURRENT RC-M2: A milestone whose title runs on well past any width…
      orbit-labs/route-cache
- ▾ ● Settings redesign — and keep the previous behaviour behi…  3/8 · 38%    ● Split the settings page into tabs — and keep the previous behaviour behind a flag until eve… running
+ ▾ ● Settings redesign — and keep the previous behaviour behi…  3/8 · 38%    ● Split the settings page into tabs — and keep the previous behaviour behind a flag until ev…  running
      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀       ● 3  ● 1  ● 1  ● 3
-     CURRENT SR-M3: A milestone whose title runs on well past any width …
+     CURRENT SR-M3: A milestone whose title runs on well past any width…
      orbit-labs/settings-redesign · manager sr-manager
- ▾ ○ Release 3.0 — and keep the previous behaviour behind a …  5/12 · 42%    No session is working on it
+ ▾ ○ Release 3.0 — and keep the previous behaviour behind a…   5/12 · 42%    No session is working on it
      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀       ● 5  ● 1  ● 1  ● 5
-     CURRENT R3-M5: A milestone whose title runs on well past any width …
+     CURRENT R3-M5: A milestone whose title runs on well past any width…
      orbit-labs/release-3 · manager r3-manager
                                                                                                                                                                                     
                                                                                                                                                                                     

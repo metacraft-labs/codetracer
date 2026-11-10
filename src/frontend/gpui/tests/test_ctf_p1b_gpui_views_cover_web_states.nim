@@ -385,11 +385,23 @@ proc inkProblems(m: AhStoryMount; mode: DesignMode): seq[string] =
   of "agent-harbor-fleet":
     if m.fleet.state.val == asReady: result = fleetInkProblems(m.view, m.fleet, p)
   of "agent-harbor-initiative-tabs":
-    let wanted = if m.initiativeTabs.inboxPosition.len == 0: p.textDisabled else: p.textLabel
+    # Previous / Next: the label role, at half opacity while nothing waits
+    # (what the browser computes: `InboxStepDisabledAlpha`).
+    let opacity = if m.initiativeTabs.inboxPosition.len == 0: "0.5" else: "1"
     for e in m.view.all("step"):
-      if e.attr("ink") != wanted:
+      if e.attr("ink") != p.textLabel or e.attr("ink-opacity") != opacity:
         result.add "the inbox step " & e.attr("button") & " (" & e.attr("step") &
-                   ") is drawn in " & e.attr("ink") & ", not " & wanted
+                   ") is drawn in " & e.attr("ink") & " at opacity " & e.attr("ink-opacity") &
+                   ", not " & p.textLabel & " at " & opacity
+    # Auto-switch on: its dot in the action border role in both modes
+    # (`.ah-inbox-auto-on::before`: `colors-ui-border-action`).
+    for e in m.view.all("auto-switch"):
+      if e.attr("auto-switch") != "true": continue
+      let dot = e.first("mark")
+      if dot.isNil or dot.attr("mark") != p.borderAction:
+        result.add "the auto-switch dot is " &
+                   (if dot.isNil: "not drawn" else: "drawn in " & dot.attr("mark")) &
+                   ", not in the action border colour " & p.borderAction
   else: discard
 
 proc checkStory(m: AhStoryMount): seq[string] =
@@ -612,8 +624,23 @@ suite "CTF-P1b: the fleet's and the inbox's inks follow the shared rules":
           if f.attr("active") == "true": r.tag(f.first("ink"), "ink", p.textDisabled)
         ck inkProblems(m, dmLight).join(" ").contains("the count of filter")
       else:
-        r.tag(m.view.first("step"), "ink", p.textLabel)
+        r.tag(m.view.first("step"), "ink-opacity", "1")
         ck inkProblems(m, dmLight).join(" ").contains("the inbox step")
+      m.dispose()
+
+  test "the auto-switch dot in the action surface's colour is reported":
+    # Light only: in Dark the action surface and the action border are one
+    # colour (#6366f1), which is why the defect showed only in Light.
+    for mode in [dmLight]:
+      gpui_reset_tree()
+      let m = r.mountAgentHarborStoryGpui("agent-harbor-initiative-tabs", "auto-switch",
+                                          1440, 900, mode)
+      ck inkProblems(m, mode).len == 0
+      let toggle = m.view.first("auto-switch")
+      ck toggle.attr("auto-switch") == "true"
+      r.tag(toggle.first("mark"), "mark", ahPalette(mode).action)
+      ck inkProblems(m, mode).join(" ").contains("the auto-switch dot is drawn in " &
+                                                 ahPalette(mode).action)
       m.dispose()
 
 suite "CTF-P1b: the GPUI views share the viewmodels, not the web views":
@@ -638,4 +665,4 @@ suite "CTF-P1b: the GPUI views share the viewmodels, not the web views":
 
 suite "CTF-P1b: assertion count":
   test "every assertion ran":
-    check countedAssertions == 45
+    check countedAssertions == 48

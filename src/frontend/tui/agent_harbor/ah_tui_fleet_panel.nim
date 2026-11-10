@@ -140,10 +140,12 @@ proc drawRow(c: var AhCanvas; parent: AhNode; vm: FleetSnapshotVM; row: FleetRow
                     fact = "activity")
     if hasChip:
       let at = mc + tw + 1
-      # On the selected row the chip keeps the row's ground and is told by
-      # its words' colour; elsewhere it has the chip's ground.
+      # A chip on its own ground on every row: on the selected row the
+      # action surface's hover step (`tone.chipOnAction`, where the web
+      # outlines it in the selection's text colour), so it still reads as a
+      # control on the selection; elsewhere the chip's ground.
       discard c.put(r, at, label, if sel: selText else: c.p.textLabel,
-                    bg = if sel: "" else: c.tone.chip)
+                    bg = if sel: c.tone.chipOnAction else: c.tone.chip)
       discard c.node(n, r, at + 1, widthOf(label) - 2, 1,
                      [("activity-more", label.strip), ("outlined", $sel)])
       c.target(r, at, widthOf(label), 1, proc() = vm.toggleExpanded(id))

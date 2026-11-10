@@ -166,8 +166,10 @@ proc drawPopup(c: var AhCanvas; parent: AhNode; popup: InitiativePopup;
                     else: c.p.textLabel
   let word = stateWord(popup.state)
   let ww = widthOf(word)
-  discard c.text(n, r, col + 3, max(1, inner - 2 - ww - 1), popup.title, c.p.textBody,
-                 bold = true, fact = "title")
+  # Two cells before the state word (`StatusWordGap`; `popupHeadingCells`
+  # counts them).
+  discard c.text(n, r, col + 3, max(1, inner - 2 - ww - StatusWordGap), popup.title,
+                 c.p.textBody, bold = true, fact = "title")
   discard c.text(n, r, col + width - 1 - ww, ww, word, stateColour, fact = "state")
   inc r
   discard c.text(n, r, col + 1, inner, popup.headline, c.p.textCaption, fact = "headline")
@@ -236,10 +238,12 @@ proc drawInbox(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStripVM; row, c
   let target = vm
   let shown = inboxShown(vm)
   let n = c.node(parent, row, col, inboxCells(vm), 1, [("inbox", shown)])
-  # With nothing waiting the steps have nowhere to go: drawn in the
-  # disabled role (`.ah-inbox-empty .ah-inbox-step`), so they do not look
-  # pressable.
-  let stepInk = if vm.inboxPosition.len == 0: c.p.textDisabled else: c.p.textLabel
+  # With nothing waiting the steps have nowhere to go: drawn as the browser
+  # draws them, the label at half opacity (`InboxStepDisabledAlpha`), here
+  # blended over the bar, so they do not look pressable.
+  let stepInk = if vm.inboxPosition.len == 0:
+                  blendOver(c.p.textLabel & InboxStepDisabledAlpha, c.bgAt(row, col))
+                else: c.p.textLabel
   let stepState = if vm.inboxPosition.len == 0: "disabled" else: "enabled"
   var at = col
   discard c.put(row, at, " \xE2\x86\x90 ", stepInk)
@@ -259,7 +263,10 @@ proc drawInbox(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStripVM; row, c
   let auto = vm.autoSwitch.val
   let start = at
   if auto:
-    discard c.mark(n, row, at + 1, MarkStyle(colour: c.p.action))
+    # The "on" dot is in the action BORDER role in both modes
+    # (`.ah-inbox-auto-on::before`: `colors-ui-border-action`); the action
+    # surface is Light's pale selection fill, on which the dot vanishes.
+    discard c.mark(n, row, at + 1, MarkStyle(colour: c.p.borderAction))
     at += 2
   let label = autoLabel(vm)
   discard c.put(row, at + 1, label, if auto: c.p.textBody else: c.p.textLabel)
@@ -313,12 +320,12 @@ proc drawElsewhereItem(c: var AhCanvas; menu: AhNode; entry: ElsewhereSession;
     at += ElsewhereStatusCells + 1
     discard c.text(n, row, at, ow, entry.item.originShort, c.p.textCaption, alignRight = true)
   else:
-    discard c.text(n, row, col + 3, max(1, width - 4 - third - 1), entry.item.title,
-                   c.p.textBody)
+    discard c.text(n, row, col + 3, max(1, width - 4 - third - StatusWordGap),
+                   entry.item.title, c.p.textBody)
     discard c.text(n, row, col + width - 1 - third, third, entry.item.originShort,
                    c.p.textCaption, alignRight = true)
-    discard c.text(n, row + 1, col + 3, max(1, width - 4 - third - 1), initiative,
-                   initiativeFg)
+    discard c.text(n, row + 1, col + 3, max(1, width - 4 - third - StatusWordGap),
+                   initiative, initiativeFg)
     discard c.text(n, row + 1, col + width - 1 - third, third, entry.item.statusLabel,
                    c.p.textCaption, alignRight = true)
   height

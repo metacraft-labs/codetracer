@@ -49,7 +49,13 @@
 ##     position alone, two different rows that each sit near the bottom of
 ##     their window could still be within the tolerance of each other;
 ##   * a `fill` region's background is more than `FillTolerance` per channel
-##     from the colour the browser composites behind it.
+##     from the colour the browser composites behind it;
+##   * an edge a region declares in `px` (the single-line tabs, the strip
+##     notice, the inbox position, a panel error's reason, the session
+##     list's head and summary) is more than `PxTolerance` pixels from the
+##     web's. The pane-rectangle comparison above still applies to them;
+##     this one only adds the pixel-sized answer it cannot give (two
+##     hundredths of the laptop viewport are 29px).
 ##
 ## The verdicts, each region's rectangle on both sides and its deltas are
 ## written to `build/ctf-p1b/parity/report.json` and `report.md` (the
@@ -62,7 +68,8 @@
 ## fail by name, while the untouched copy and one shifted by exactly the
 ## tolerance pass — so a judge that cannot fail, or one whose tolerance
 ## silently became zero, is caught. The same for a row picked at another
-## index, and for a fill one and two units off (one passes, two fails).
+## index, for a fill one and two units off (one passes, two fails), and for
+## a `px` edge off by `PxTolerance` (passes) and one pixel more (fails).
 ##
 ## No mocks: both sides are real captures of real renderers, over the
 ## committed synthetic fixture set both builds embed.
@@ -95,12 +102,21 @@ const
   MinimumStories = 59
     ## The section's stories at CTF-P2a's landing; a floor, so a declaration
     ## that lost its stories cannot pass by expecting nothing.
+  PxTolerance = 2.0
+    ## Per edge, in pixels, for the edges a region declares in `px`, ON TOP
+    ## of the pane-rectangle comparison (which stays as it is): the browser
+    ## lays out in fractions of a pixel and the GPUI views in whole ones, and
+    ## the two set a text's width a pixel apart (kerning and rounding). Two
+    ## hundredths of the laptop viewport are 29px, wider than any one tab,
+    ## line pitch or inset these regions exist to hold.
 
 let repoRoot = currentSourcePath().parentDir.parentDir.parentDir.parentDir.parentDir
 let gpuiDir = getEnv("CTF_P1B_GPUI_OUT", repoRoot / "build" / "ctf-p1b" / "gpui")
 let webRecordPath = getEnv("CTF_P1B_WEB_RECORD",
                            repoRoot / "src" / "tests" / "visual" / "agent-harbor-web-regions.json")
 let reportDir = getEnv("CTF_P1B_REPORT_DIR", repoRoot / "build" / "ctf-p1b" / "parity")
+let regionsDeclPath = getEnv("CTF_P1B_REGIONS",
+                             repoRoot / "src" / "tests" / "visual" / "agent-harbor-regions.json")
 
 type
   Rect = object
@@ -123,6 +139,7 @@ type
     vNoWeb = "no-web-capture"
     vLayout = "layout"
     vFill = "fill"
+    vPixels = "pixels"
 
   RegionDelta = object
     name: string
@@ -132,6 +149,7 @@ type
     within: bool
     sameRow: bool               ## a row region: both sides picked the same row
     webFill, gpuiFill: string   ## a `fill` region's background, `#rrggbb`
+    pxEdges: seq[string]        ## the edges compared in pixels (`px`)
 
   CaptureJudgement = object
     id: string
@@ -247,6 +265,42 @@ proc compareFills(webNode: JsonNode; gpui: RegionSet; frame: Frame;
       judgement.problems.add "region " & name & " is filled " & got & " at (" & $x &
         ", " & $y & "), the web's " & want & " (tolerance " & $FillTolerance & ")"
 
+proc pxEdgesOf(path: string): Table[string, seq[string]] =
+  ## Each declared region's `px` edges (`x`, `y`, `w`, `h`), from the one
+  ## declaration both capture paths read.
+  let doc = parseJson(readFile(path))
+  for region in doc["regions"]:
+    var edges: seq[string]
+    for e in region{"px"}.getElems:
+      doAssert e.getStr in ["x", "y", "w", "h"], path & ": region " &
+        region["name"].getStr & ": unknown px edge " & e.getStr
+      edges.add e.getStr
+    if edges.len > 0: result[region["name"].getStr] = edges
+
+let pxEdges = pxEdgesOf(regionsDeclPath)
+
+proc edgeOf(r: Rect; edge: string): float =
+  case edge
+  of "x": r.x
+  of "y": r.y
+  of "w": r.w
+  else: r.h
+
+proc comparePixels(judgement: var CaptureJudgement) =
+  ## The `px` edges of every region both sides drew, to within
+  ## `PxTolerance`.
+  for d in judgement.regions.mitems:
+    if d.onlyOn.len > 0 or d.name notin pxEdges: continue
+    d.pxEdges = pxEdges[d.name]
+    for edge in d.pxEdges:
+      let a = d.webPx.edgeOf(edge)
+      let b = d.gpuiPx.edgeOf(edge)
+      if abs(a - b) > PxTolerance:
+        if judgement.verdict == vPass: judgement.verdict = vPixels
+        judgement.problems.add "region " & d.name & ": " & edge & " is " &
+          formatFloat(b, ffDecimal, 1) & "px in GPUI, " & formatFloat(a, ffDecimal, 1) &
+          "px on the web (tolerance " & $int(PxTolerance) & "px)"
+
 proc compareRegions(web, gpui: RegionSet; vw, vh: int;
                     judgement: var CaptureJudgement) =
   ## PLAT-35's comparator over the two answers; every region's deltas are
@@ -354,6 +408,7 @@ proc judgeCapture(id: string; dir: string; webCapture: JsonNode;
     result.problems.add "the web record has no capture " & id
     return
   compareRegions(regionsOf(webCapture["regions"]), gpui, vw, vh, result)
+  comparePixels(result)
   compareFills(webCapture["regions"], gpui, frame, result)
 
 # ---------------------------------------------------------------------------
@@ -396,6 +451,8 @@ proc toJson(d: RegionDelta): JsonNode =
                         "px": [d.gpuiPx.x, d.gpuiPx.y, d.gpuiPx.w, d.gpuiPx.h]}
   if d.webFill.len > 0:
     result["fill"] = %*{"web": d.webFill, "gpui": d.gpuiFill}
+  if d.pxEdges.len > 0:
+    result["pxEdges"] = %d.pxEdges
   if d.webPx.index >= 0 or d.gpuiPx.index >= 0:
     result["index"] = %*{"web": d.webPx.index, "gpui": d.gpuiPx.index}
   if d.onlyOn.len == 0:
@@ -407,7 +464,9 @@ proc writeReport(judgements: seq[CaptureJudgement]) =
   var captures = newJArray()
   var md = "# CTF-P1b: GPUI captures against the web layout\n\n" &
            "Tolerance: " & $PaneRectangleTolerancePp &
-           " hundredths of the viewport per edge (PLAT-35 `PaneRectangleTolerancePp`).\n\n" &
+           " hundredths of the viewport per edge (PLAT-35 `PaneRectangleTolerancePp`), " &
+           "and " & $int(PxTolerance) &
+           "px on the edges a region declares in `px`.\n\n" &
            "| capture | verdict | regions outside the tolerance |\n|---|---|---|\n"
   var passed = 0
   for j in judgements:
@@ -419,7 +478,7 @@ proc writeReport(judgements: seq[CaptureJudgement]) =
     md.add "| " & j.id & " | " & $j.verdict & " | " &
            j.problems.join("; ").replace("|", "\\|") & " |\n"
   writeFile(reportDir / "report.json", pretty(%*{
-    "tolerancePp": PaneRectangleTolerancePp,
+    "tolerancePp": PaneRectangleTolerancePp, "tolerancePx": PxTolerance,
     # Repository-relative, so a copied report names no machine's paths.
     "gpuiDir": relativePath(gpuiDir, repoRoot),
     "webRecord": relativePath(webRecordPath, repoRoot), "passed": passed, "total": judgements.len,
@@ -572,6 +631,29 @@ suite "CTF-P1b: the layout judge fails what it must (negative controls)":
     let j = judgeCapture(source.id, dir, twoOff, source.width, source.height)
     check j.verdict == vFill
     check j.problems.len > 0 and "region active-tab is filled" in j.problems[0]
+
+  test "a px edge one pixel past the tolerance fails, one at it passes":
+    # A region the declaration compares in pixels, its GPUI width set from
+    # the web's: off by exactly `PxTolerance` it passes (the pane rectangle
+    # moves by under a hundredth), one pixel more fails by name.
+    proc widened(by: float): CaptureJudgement =
+      let dir = plant()
+      let path = dir / (source.id & ".regions.json")
+      var doc = parseJson(readFile(path))
+      check doc{"regions"}{"inbox-position"} != nil
+      check "inbox-position" in pxEdges and "w" in pxEdges["inbox-position"]
+      if doc{"regions"}{"inbox-position"}.isNil: return CaptureJudgement(verdict: vMissing)
+      let webW = web{source.id}{"regions"}{"inbox-position"}{"w"}.getFloat
+      doc["regions"]["inbox-position"]["w"] = %(webW + by)
+      writeFile(path, $doc)
+      judgeCapture(source.id, dir, web{source.id}, source.width, source.height)
+    check widened(PxTolerance).verdict == vPass
+    let beyond = widened(PxTolerance + 1)
+    check beyond.verdict == vPixels
+    var named = false
+    for problem in beyond.problems:
+      if "region inbox-position: w is" in problem: named = true
+    check named
 
   test "a row region that is another row on the GPUI side fails":
     # The popup's last session line, reported one row further down: the

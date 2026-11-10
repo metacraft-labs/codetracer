@@ -42,6 +42,7 @@ const
   BarChipGapPx = 8            ## the bar's `+N` chip: 6px margin, "+" 2px more
   InboxStepPx = 25
   InboxPositionPx = 72        ## `.ah-inbox-position` min-width: 4.5rem
+  InboxPositionPadPx = 4      ## and its `padding: 0 0.25rem`, inside that minimum
   ControlsGapPx = 4           ## `.ah-bar-controls` gap: 0.25rem
   ElsewhereMarginPx = 4       ## `.ah-elsewhere` margin-right: 0.25rem
 
@@ -247,14 +248,25 @@ proc drawPopup(r: GpuiRenderer; p: AhPalette; popup: InitiativePopup; widthPx: i
 proc autoLabel(vm: InitiativeTabStripVM): string =
   (if vm.compact: "Auto: " else: "Auto-switch: ") & (if vm.autoSwitch.val: "on" else: "off")
 
+proc inboxPositionText(vm: InitiativeTabStripVM): string =
+  if vm.inboxPosition.len == 0: "inbox empty" else: vm.inboxPosition
+
+proc inboxSlotWidth(vm: InitiativeTabStripVM): int =
+  ## The position's slot as the browser sizes `.ah-inbox-position` (a
+  ## border box): at least 4.5rem, padding included, and wider when its
+  ## words and their 0.25rem padding on either side need more (measured:
+  ## 72px for `4 waiting`, 81px for `inbox empty`).
+  max(InboxPositionPx,
+      textPx(inboxPositionText(vm), CaptionPx, tabular = true) + 2 * InboxPositionPadPx)
+
 proc inboxWidth(vm: InitiativeTabStripVM): int =
   ## How wide `drawInbox` draws (no margins: `.ah-bar-controls .ah-inbox`
-  ## zeroes them): the two steps, the position at its fixed 4.5rem, the
+  ## zeroes them): the two steps, the position's slot (`inboxSlotWidth`), the
   ## toggle 4px further off (6px in, no border, and when on the action mark
   ## 6px before its words), all 2px apart.
   result = 2 * InboxStepPx + 2 * 2 + 4 + 12 + textPx(autoLabel(vm), CaptionPx)
   if vm.autoSwitch.val: result += MarkPx + 6
-  if not vm.compact: result += 2 + InboxPositionPx
+  if not vm.compact: result += 2 + inboxSlotWidth(vm)
 
 proc elsewhereWidth(vm: InitiativeTabStripVM): int =
   ## How wide `drawElsewhere` draws, its 4px right margin included: 6px in,
@@ -273,10 +285,14 @@ proc inboxStep(r: GpuiRenderer; p: AhPalette; arrow: string; onClick: proc();
                           ("justify", "center"), ("padding-left", "6px"),
                           ("padding-right", "6px"), ("flex-shrink", "0"),
                           ("rounded", $ControlRadiusPx & "px"), ("cursor", cursorOf(hkControl))])
-  # With nothing waiting, in the disabled role (`.ah-inbox-empty .ah-inbox-step`).
-  let ink = if disabled: p.textDisabled else: p.textLabel
-  r.appendChild(result, r.text(arrow, BodyLargePx, ink, shrink = false))
+  # With nothing waiting, the label role at half opacity, as the browser
+  # computes it (`InboxStepDisabledAlpha`).
+  let ink = p.textLabel
+  let words = r.text(arrow, BodyLargePx, ink, shrink = false)
+  if disabled: r.setStyle(words, "opacity", "0.5")
+  r.appendChild(result, words)
   r.tag(result, "ink", ink)
+  r.tag(result, "ink-opacity", if disabled: "0.5" else: "1")
   r.tag(result, "button", arrow)
   r.tag(result, "step", if disabled: "disabled" else: "enabled")
   r.addEventListener(result, "click", onClick)
@@ -284,7 +300,7 @@ proc inboxStep(r: GpuiRenderer; p: AhPalette; arrow: string; onClick: proc();
 proc drawInbox(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM): GpuiElement =
   ## Previous / Next over the waiting sessions, and auto-switch; compact, no
   ## position and `Auto: on|off`. `.ah-inbox`: its parts 2px apart, no
-  ## margins inside the bar's controls; the position a fixed 4.5rem,
+  ## margins inside the bar's controls; the position at least 4.5rem,
   ## centred, so the steps do not move as it changes; the toggle without an
   ## outline, with the action mark while on.
   let target = vm
@@ -296,8 +312,14 @@ proc drawInbox(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM): GpuiEle
   r.appendChild(result, r.inboxStep(p, "\xE2\x86\x90", proc() = discard target.stepInbox(-1),
                                    disabled = position.len == 0))
   if not compact:
-    let slot = r.box(pairs = [("width", $InboxPositionPx & "px"), ("justify", "center"),
-                              ("items", "center"), ("flex-shrink", "0")])
+    # A minimum, not a width: the slot grows with its words and their
+    # padding past the 4.5rem (`inboxSlotWidth`).
+    let slot = r.box(pairs = [("min-width", $InboxPositionPx & "px"),
+                              ("padding-left", $InboxPositionPadPx & "px"),
+                              ("padding-right", $InboxPositionPadPx & "px"),
+                              ("justify", "center"), ("items", "center"),
+                              ("flex-shrink", "0")])
+    r.tag(slot, "inbox-slot", "true")
     # `.ah-inbox-position` in the label role (the stylesheet's later rule),
     # in tabular figures.
     let pos = r.text(if position.len == 0: "inbox empty" else: position, CaptionPx,
@@ -315,7 +337,10 @@ proc drawInbox(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM): GpuiEle
   # No outline in the bar, on or off (`.ah-initiative-tab-bar .ah-inbox-auto`:
   # `border-width: 0`, and while on `box-shadow: none`): "on" is told by the
   # action mark and the body colour.
-  if auto: r.appendChild(toggle, r.mark(MarkStyle(colour: p.action)))
+  # The "on" dot is in the action BORDER role in both modes
+  # (`.ah-inbox-auto-on::before`: `colors-ui-border-action`); the action
+  # surface is Light's pale selection fill, on which the dot vanishes.
+  if auto: r.appendChild(toggle, r.mark(MarkStyle(colour: p.borderAction)))
   r.appendChild(toggle, r.text(autoLabel(vm), CaptionPx,
                                if auto: p.textBody else: p.textLabel, shrink = false))
   r.tag(toggle, "button", autoLabel(vm))

@@ -42,7 +42,18 @@
     "and the counts beside (or, labelled, under) it. A bar can be the wrong",
     "width while the row around it keeps its box: the web gives the legend",
     "`min-width: 9rem` so the bars of all rows end together, and a view that",
-    "did not drew its bar about 70px wider."
+    "did not drew its bar about 70px wider.",
+    "",
+    "A region with `px` (a list of its edges among `x`, `y`, `w`, `h`) is also",
+    "compared on those edges IN PIXELS, to within `PxTolerance` (2px) of the",
+    "web's, on top of the pane-rectangle comparison, which it does not replace.",
+    "Two hundredths of a 1440px viewport are 29px: a tab 9px narrower than the",
+    "web's, an error reason on 19px lines instead of 16px, a head 8px short or a",
+    "notice running into the strip's 8px inset all pass it. These regions are",
+    "the ones whose size the views compute themselves (the single-line tabs'",
+    "Flexbox shrink, the inbox position's minimum, the strip notice's budget,",
+    "the error reason's line pitch, the list head's rows, the docked summary's",
+    "offset), so a pixel-level answer is the one that can fail."
   ],
   "schemaVersion": 1,
   "regions": [
@@ -255,6 +266,85 @@
         "data-ah-menu-item": ""
       },
       "pick": "last-whole"
+    },
+    {
+      "name": "inactive-tab-first",
+      "web": ".ah-tab-strip:not(.ah-initiative-tab-bar) .session-tab.ah-tab:not(.active)",
+      "gpui": {
+        "data-ah-session-tab": "",
+        "data-ah-active": "false"
+      },
+      "pick": "first",
+      "px": [
+        "x",
+        "w"
+      ]
+    },
+    {
+      "name": "inactive-tab-last",
+      "web": ".ah-tab-strip:not(.ah-initiative-tab-bar) .session-tab.ah-tab:not(.active)",
+      "gpui": {
+        "data-ah-session-tab": "",
+        "data-ah-active": "false"
+      },
+      "pick": "last-whole",
+      "px": [
+        "x",
+        "w"
+      ]
+    },
+    {
+      "name": "strip-notice",
+      "web": ".ah-tab-strip .session-tab.ah-tab-notice",
+      "gpui": {
+        "data-ah-strip-notice": ""
+      },
+      "px": [
+        "x",
+        "w"
+      ]
+    },
+    {
+      "name": "error-reason",
+      "web": ".ah-fleet-error-message",
+      "gpui": {
+        "data-ah-error-reason": ""
+      },
+      "px": [
+        "y",
+        "h"
+      ]
+    },
+    {
+      "name": "list-head",
+      "web": ".ah-session-list-head",
+      "gpui": {
+        "data-ah-head": "sessions"
+      },
+      "px": [
+        "h"
+      ]
+    },
+    {
+      "name": "list-summary",
+      "web": ".ah-session-list-summary",
+      "gpui": {
+        "data-ah-list-summary": ""
+      },
+      "px": [
+        "x"
+      ]
+    },
+    {
+      "name": "inbox-position",
+      "web": ".ah-inbox-position",
+      "gpui": {
+        "data-ah-inbox-slot": ""
+      },
+      "px": [
+        "x",
+        "w"
+      ]
     }
   ]
 }

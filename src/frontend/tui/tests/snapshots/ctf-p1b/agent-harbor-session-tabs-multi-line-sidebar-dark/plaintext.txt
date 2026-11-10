@@ -1,6 +1,6 @@
  ● Replace the hand-… CLI ✕
  ● Cap the teleme… CT
- ● Fix the flaky … Tg
+ ● Fix the flaky…  Tg
  ● Add search to… TUI
  ● Benchmark rout… CT
  ● Add jitter to… Web

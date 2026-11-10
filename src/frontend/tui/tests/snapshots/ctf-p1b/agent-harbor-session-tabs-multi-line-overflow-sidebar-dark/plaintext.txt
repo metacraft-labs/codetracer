@@ -1,7 +1,7 @@
  ● Tag the 3.0 releas… CT ✕
  ● Retire the ol… Web
  ○ Reset a setti… CLI
- ● Fix the route … CT
+ ● Fix the route…  CT
  ● Document the t… Tg
  ● Add a dark th… TUI
  ● Show test dura… CT
@@ -13,17 +13,17 @@
  ● Audit the sess… CT
  ● Remove the ol… Web
  ● Report droppe… CLI
- ● Draft the 3.0 … CT
+ ● Draft the 3.0…  CT
  ● Move the macOS… Tg
- ● Add keyboard … TUI
+ ● Add keyboard…  TUI
  ○ Expire stale r… CT
  ● Teach the par… Web
  ○ Rename the un… CLI
- ● Fix the flaky … CT
+ ● Fix the flaky…  CT
  ● Keep unsaved s… Tg
  ● Benchmark rou… TUI
  ● Cap the teleme… CT
- ● Trim the 3.0 … Web
+ ● Trim the 3.0…  Web
  ● Replace the h… CLI
  ○ Move the accou… CT
  ● Migrate cached… Tg

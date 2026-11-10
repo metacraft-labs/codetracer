@@ -2,7 +2,7 @@
  14 sessions · 2 need input ·
  2 idle · 7 running · 1 failed
  invented working set: 14 sessions over 4 initiatives
- ▾ ● Telemetry upload retries              1/4 1 needs…
+ ▾ ● Telemetry upload retries              1/4
  ● Retry telemetry uploads with exponential backoff now
    needs input CodeTracer · Claude 2.1.0 · host-a
    assistant: Should the old behaviour stay behind a f…
@@ -15,7 +15,7 @@
  ● Add jitter to the telemetry retry delays          1m
    completed WebUI · Claude 2.1.0 · host-c
    assistant: Finished; the tests pass.
- ▾ ● CI runner migration                  4/10 1 needs…
+ ▾ ● CI runner migration                  4/10
  ● Cache the dependency graph between CI runs       now
    needs input CLI · Opencode 0.6.1 · host-b
    assistant: Should the old behaviour stay behind a f…
@@ -25,7 +25,7 @@
  ● Fix the flaky clock-skew test on the new runners  4m
    running Telegram · Opencode 0.6.1 · host-f
    assistant: Running the tests again after the change.
- ▾ ● Route cache on the new storage layer  2/6 1 idle …
+ ▾ ● Route cache on the new storage layer  2/6 1 idle…
  ○ Migrate cached routes without a cold start        5m
    idle Telegram · Codex 0.9.4 · host-f
    assistant: Done for now; ready for the next instruc…

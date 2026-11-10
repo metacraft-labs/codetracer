@@ -38,6 +38,7 @@ export renderer, design_tokens, agent_harbor_palette
 
 const
   CaptionPx* = 12          ## type-ui-size-caption-md / label-md
+  CaptionLinePx* = 16      ## type-ui-lineheight-caption-md
   BodyPx* = 14             ## type-ui-size-body-md
   BodyLargePx* = 16        ## type-ui-size-body-lg
   MarkPx* = 8              ## AH_MARK, 0.5rem
@@ -47,6 +48,11 @@ const
   StripLinePx* = 30        ## one line of the caption bar's tab strip
   StripTabPx* = 26         ## a session tab's height (1.625em)
   Middot* = " \xC2\xB7 "
+  LabelTracking* = "0.03125em"
+    ## The uppercase labels' `letter-spacing` (`.ah-fleet-title`,
+    ## `.ah-session-list-title`, `.ah-initiative-label`,
+    ## `.ah-progress-group-header`, `.ah-milestone-current-tag`): 0.375px
+    ## after every character at the caption size (`tracked`).
   Ellipsis* = "\xE2\x80\xA6"
 
 # ---------------------------------------------------------------------------
@@ -100,6 +106,12 @@ proc text*(r: GpuiRenderer; s: string; sizePx: int; colour: string;
     r.setStyle(result, "flex-shrink", "0")
   r.styles(result, pairs)
   r.appendChild(result, r.createTextNode(s))
+
+proc tracked*(r: GpuiRenderer; el: GpuiElement): GpuiElement =
+  ## `el`, an uppercase label, spaced as the stylesheet spaces those
+  ## (`LabelTracking`; isonim-gpui sets the glyphs itself). Returns `el`.
+  r.setStyle(el, "letter-spacing", LabelTracking)
+  el
 
 proc mark*(r: GpuiRenderer; m: MarkStyle; sizePx = MarkPx): GpuiElement =
   ## The status mark every sessions view shares: a dot, or a hollow ring.
@@ -248,6 +260,7 @@ proc stripNotice*(r: GpuiRenderer; p: AhPalette; message, kind: string;
                           ("border-width", "1px"), ("border-style", "dashed"),
                           ("border-color", if error: p.textError else: p.borderPrimary)])
   r.tag(result, "notice", kind)
+  r.tag(result, "strip-notice", kind)
   let words = r.text(message, sizePx, if error: p.textError else: p.textCaption)
   if error: r.tag(words, "error", message)
   r.appendChild(result, words)
@@ -355,9 +368,13 @@ proc errorBlock*(r: GpuiRenderer; p: AhPalette; title, message: string;
                                          ("items", "center"), ("justify", "center")])
   r.tag(result, "notice", "error")
   r.appendChild(result, r.text(title, BodyPx, p.textError, shrink = false))
+  # On the caption's 16px lines (`.ah-fleet-error-message`: `line-height:
+  # type-ui-lineheight-caption-md`), not the face's own, which wraps at 19px.
   let why = r.text(message, CaptionPx, p.textCaption, shrink = false,
-                   pairs = [("white-space", "normal"), ("text-align", "center")])
+                   pairs = [("white-space", "normal"), ("text-align", "center"),
+                            ("line-height", $CaptionLinePx & "px")])
   r.tag(why, "error", message)
+  r.tag(why, "error-reason", "true")
   r.appendChild(result, why)
   # `.ah-fleet-retry`: 24px, the secondary surface, outlined.
   let button = r.button(p, "Retry", retry)

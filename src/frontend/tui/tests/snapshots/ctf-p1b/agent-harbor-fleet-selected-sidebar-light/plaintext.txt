@@ -4,7 +4,7 @@
  prompts of 12 withheld by the server
   All 48   Needs input 5   Running 9
   Queued 3   Failed 9   Ended 22
- ● Add a retry budget to the telemetry … 26m
+ ● Add a retry budget to the telemetry…  26m
    needs input Claude 4.2.0 ×2 · orbit-…
    Asked a single-choice question  +2
  ● Fix the off-by-one in the orbit propa… 1h
@@ -22,7 +22,7 @@
  ● Make the dashboard's latency chart re… 3h
    running Codex 0.91.3 · orbit-ws-6 · w…
    Running the test suite  +1
- ● Investigate why the nightly fuzz job … 4h
+ ● Investigate why the nightly fuzz job…  4h
    running Gemini 1.8.2 · orbit-labs/fli…
    Pushed fix/propagator-step-count  +2
  ● retry-budget-2                         4h
@@ -52,5 +52,5 @@
    queued Opencode 0.12.7 · meadow/pape…
  ● Cache the ephemeris tables between p… 10h
    queued Claude 4.2.0 · orbit-labs/orb…
- ● Show the upload queue's depth on the … 8h
+ ● Show the upload queue's depth on the…  8h
    failed Codex 0.91.3 · orbit-ws-6 · wi…

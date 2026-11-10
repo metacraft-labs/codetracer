@@ -1,4 +1,4 @@
- ● Tag the 3.0 releas… CT ✕   ● Retire the ol… Web   ○ Reset a setti… CLI   ● Fix the route … CT   ● Document the t… Tg   ● Add a dark the… TUI   ● Show test durat… CT   ● +33   +
+ ● Tag the 3.0 releas… CT ✕   ● Retire the ol… Web   ○ Reset a setti… CLI   ● Fix the route…  CT   ● Document the t… Tg   ● Add a dark the… TUI   ● Show test durat… CT   ● +33   +
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

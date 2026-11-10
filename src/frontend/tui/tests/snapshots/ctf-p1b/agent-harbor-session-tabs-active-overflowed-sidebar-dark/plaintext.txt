@@ -5,9 +5,9 @@
  ● Fix the flaky clock-skew test on t…   Tg
  ● Add search to the settings page      TUI
  ● Benchmark route cache reads on the…   CT
- ● Add jitter to the telemetry retry …  Web
+ ● Add jitter to the telemetry retry…   Web
  ● Cache the dependency graph between…  CLI
- ● Profile the importer on the large …   CT
+ ● Profile the importer on the large…    CT
  ○ Migrate cached routes without a co…   Tg
  ● Persist the telemetry queue across…  TUI
  ○ Migrate the CI matrix to the new r…   CT

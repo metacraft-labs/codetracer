@@ -8,10 +8,10 @@
  Telemetry upload retries: 1 of 4 milestones
  done; the current one is Data model.
                                                                                                                                                                                     
- ● Cap the telemetry retry budget per … running
- ● Add jitter to the telemetry retry… completed
- ● Persist the telemetry queue across … running
- ● Retry telemetry uploads with ex… needs input
+ ● Cap the telemetry retry budget per…  running
+ ● Add jitter to the telemetry retr…  completed
+ ● Persist the telemetry queue across…  running
+ ● Retry telemetry uploads with e…  needs input
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

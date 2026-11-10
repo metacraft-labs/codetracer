@@ -11,10 +11,10 @@
  milestones done; the current one is
  Data model.
                                              
- ● Cap the telemetry retry budg… running
- ● Add jitter to the telemetr… completed
- ● Persist the telemetry queue … running
- ● Retry telemetry uploads … needs input
+ ● Cap the telemetry retry bud…  running
+ ● Add jitter to the telemet…  completed
+ ● Persist the telemetry queue…  running
+ ● Retry telemetry uploads…  needs input
                                              
                                              
                                              

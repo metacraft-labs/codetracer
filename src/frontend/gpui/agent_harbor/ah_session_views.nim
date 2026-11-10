@@ -18,6 +18,8 @@
 ## measured widths.
 
 
+import std/math
+
 import ../../../common/pointer_shape
 import isonim/core/[signals, computation]
 import nim_agents_isonim_viewmodels/agent_harbor/session_tabs_vm
@@ -61,84 +63,122 @@ const
 # The strip
 # ---------------------------------------------------------------------------
 
+proc tabContentWidth*(tab: SessionItem; closable: bool): int =
+  ## A single-line tab's content width (its max-content: padding, mark,
+  ## title, origin and, active, the close control), unclamped: the FLEX
+  ## BASE SIZE of a `flex: 0 1 auto` tab (CSS Flexbox §9.2 step 3,
+  ## https://www.w3.org/TR/css-flexbox-1/#algo-main-item), which the shrink
+  ## starts from, not the width its min/max clamp it to.
+  result = 2 * TabPadPx + MarkPx + TabInnerGapPx + textPx(tabLabelOf(tab), TabTitlePx)
+  if tab.originShort.len > 0: result += TabInnerGapPx + textPx(tab.originShort, TabOriginPx)
+  if closable and tab.active: result += TabInnerGapPx + TabClosePx
+
 proc tabWidth*(tab: SessionItem; closable: bool; wrapped = false): int =
-  ## A tab's width as the web strip sizes it: the active tab exactly 14rem
-  ## (it holds the close control); on several lines every other tab 11rem;
-  ## on one line every other tab its content, between 10rem and 12rem.
+  ## A tab's width as the web strip sizes it when nothing shrinks: the
+  ## active tab exactly 14rem (it holds the close control); on several
+  ## lines every other tab 11rem; on one line every other tab its content,
+  ## between 10rem and 12rem (its hypothetical main size).
   if tab.active: return ActiveTabPx
   if wrapped: return WrapTabPx
-  var w = 2 * TabPadPx + MarkPx + TabInnerGapPx + textPx(tabLabelOf(tab), TabTitlePx)
-  if tab.originShort.len > 0: w += TabInnerGapPx + textPx(tab.originShort, TabOriginPx)
-  if closable and tab.active: w += TabInnerGapPx + TabClosePx
-  clamp(w, TabMinWidthPx, TabMaxPx)
+  clamp(tabContentWidth(tab, closable), TabMinWidthPx, TabMaxPx)
 
 proc fitWidths*(widths: seq[int]; budget, minPx, gap: int;
-                fixed: seq[bool] = @[]; mins: seq[int] = @[]): seq[int] =
-  ## The widths a row of `flex: 0 1 auto` tabs takes when their natural
-  ## `widths` overflow `budget` (CSS Flexbox §9.7, "Resolving Flexible
-  ## Lengths", https://www.w3.org/TR/css-flexbox-1/#resolve-flexible-lengths):
-  ## every tab gives up room IN PROPORTION TO ITS WIDTH, none below `minPx`
-  ## (a tab that reaches it is frozen there and the rest share what remains);
-  ## a `fixed` tab never shrinks (the session strip's active tab, `flex: 0 0
-  ## 14rem`). `mins`, when given, is each tab's own minimum (its
-  ## min-content), in place of `minPx`. A row that cannot fit at the minimum
-  ## keeps it.
+                fixed: seq[bool] = @[]; mins: seq[int] = @[];
+                maxes: seq[int] = @[]): seq[int] =
+  ## The widths a row of `flex: 0 1 auto` tabs takes in `budget` pixels, as
+  ## CSS Flexbox §9.7 resolves them ("Resolving Flexible Lengths",
+  ## https://www.w3.org/TR/css-flexbox-1/#resolve-flexible-lengths).
+  ## `widths` are the FLEX BASE SIZES (each tab's content width, unclamped);
+  ## each tab is held between its minimum (`mins[i]` when given, its
+  ## min-content, never above its base; else `minPx`) and its maximum
+  ## (`maxes[i]`; none when not given). A `fixed` tab never flexes (the
+  ## session strip's active tab, `flex: 0 0 14rem`).
   ##
-  ## The widths are whole pixels and a browser's are not, so the deficit is
-  ## handed out whole: each tab gives up the floor of its exact share, and
-  ## the pixels left over go one each to the tabs with the largest
-  ## remainders, so the row ends exactly at `budget`, as the browser's does.
-  ## (Rounding every share UP left the row a pixel short per shrunk tab:
-  ## seven pixels of free strip on a full single-line strip.)
-  result = widths
-  var floor = newSeq[int](widths.len)
-  var frozen = newSeq[bool](widths.len)
-  for i in 0 ..< widths.len:
-    floor[i] = if i < mins.len: min(mins[i], widths[i]) else: minPx
-    frozen[i] = (i < fixed.len and fixed[i]) or widths[i] <= floor[i]
-  while true:
-    var total = gap * max(0, widths.len - 1)
-    var basis = 0
-    for i, w in result:
-      total += w
-      if not frozen[i]: basis += widths[i]
-    let deficit = total - budget
-    if deficit <= 0 or basis == 0: break
-    # A tab whose exact share takes it to its minimum is frozen there, and
-    # the rest share what remains (the next round).
-    var clamped = false
-    for i in 0 ..< result.len:
-      if frozen[i]: continue
-      if result[i] * basis - deficit * widths[i] <= floor[i] * basis:
-        result[i] = floor[i]
-        frozen[i] = true
-        clamped = true
-    if clamped: continue
-    var shares = newSeq[int](result.len)
-    var given = 0
-    for i in 0 ..< result.len:
-      if frozen[i]: continue
-      shares[i] = deficit * widths[i] div basis
-      given += shares[i]
-    while given < deficit:
-      # The largest remainder not yet given its extra pixel; on a tie, the
-      # first.
-      var best = -1
-      var bestRem = -1
-      for i in 0 ..< result.len:
-        if frozen[i] or shares[i] > deficit * widths[i] div basis: continue
-        # Never below the tab's minimum for the sake of a pixel.
-        if result[i] - shares[i] - 1 < floor[i]: continue
-        let rem = deficit * widths[i] mod basis
-        if rem > bestRem:
-          best = i
-          bestRem = rem
-      if best < 0: break
-      inc shares[best]
-      inc given
-    for i in 0 ..< result.len:
-      if not frozen[i]: result[i] -= shares[i]
-    break
+  ## 1. Each tab's hypothetical size is its base clamped to its min / max;
+  ##    a row whose hypothetical sizes fit is laid out at them.
+  ## 2. Otherwise it shrinks. A fixed tab, and one whose base is below its
+  ##    hypothetical size (raised to its minimum), is frozen at its
+  ##    hypothetical size. The rest share the deficit IN PROPORTION TO
+  ##    THEIR BASE SIZES (the scaled flex shrink factor, shrink 1 × base),
+  ##    measured from the bases, not from the clamped sizes: so a long
+  ##    title (base above the maximum) still gives up the most.
+  ## 3. Each round, a tab whose share takes it past its minimum or maximum
+  ##    is clamped; when the clamps add up to a net growth the tabs clamped
+  ##    to their minimum are frozen, a net shrink freezes those clamped to
+  ##    their maximum, none freezes all; the rest share what is left
+  ##    again.
+  ##
+  ## The widths are whole pixels and a browser's are not, so the result is
+  ## rounded so the row keeps the browser's total: each tab the floor of
+  ## its exact width, and the pixels that leaves go one each to the tabs
+  ## with the largest remainders (on a tie, the first), never past a tab's
+  ## maximum.
+  let n = widths.len
+  var lo, hi = newSeq[float](n)
+  var hyp = newSeq[float](n)
+  var frozen = newSeq[bool](n)
+  for i in 0 ..< n:
+    lo[i] = float(if i < mins.len: min(mins[i], widths[i]) else: minPx)
+    hi[i] = if i < maxes.len: float(maxes[i]) else: Inf
+    hyp[i] = if i < fixed.len and fixed[i]: float(widths[i])
+             else: clamp(float(widths[i]), lo[i], max(lo[i], hi[i]))
+  let gaps = float(gap * max(0, n - 1))
+  var total = gaps
+  for v in hyp: total += v
+  var target = hyp
+  if total > float(budget):
+    for i in 0 ..< n:
+      frozen[i] = (i < fixed.len and fixed[i]) or float(widths[i]) < hyp[i]
+    while true:
+      var anyOpen = false
+      var used = gaps
+      var basis = 0.0
+      for i in 0 ..< n:
+        if frozen[i]: used += target[i]
+        else:
+          anyOpen = true
+          used += float(widths[i])
+          basis += float(widths[i])
+      if not anyOpen or basis <= 0: break
+      let free = float(budget) - used
+      var violation = 0.0
+      var clampedTo = newSeq[float](n)   # >0 grew to a min, <0 cut to a max
+      for i in 0 ..< n:
+        if frozen[i]: continue
+        let t = if free < 0: float(widths[i]) + free * float(widths[i]) / basis
+                else: float(widths[i])
+        let c = clamp(t, lo[i], max(lo[i], hi[i]))
+        target[i] = c
+        clampedTo[i] = c - t
+        violation += c - t
+      for i in 0 ..< n:
+        if frozen[i]: continue
+        if violation > 1e-9:
+          if clampedTo[i] > 1e-9: frozen[i] = true
+        elif violation < -1e-9:
+          if clampedTo[i] < -1e-9: frozen[i] = true
+        else: frozen[i] = true
+  # Whole pixels, keeping the exact total.
+  result = newSeq[int](n)
+  var exactSum = 0.0
+  var given = 0
+  for i in 0 ..< n:
+    result[i] = int(floor(target[i] + 1e-9))
+    exactSum += target[i]
+    given += result[i]
+  var left = int(round(exactSum)) - given
+  while left > 0:
+    var best = -1
+    var bestRem = -1.0
+    for i in 0 ..< n:
+      let rem = target[i] - float(result[i])
+      if float(result[i] + 1) > max(lo[i], hi[i]) + 1e-9: continue
+      if rem > bestRem + 1e-9:
+        best = i
+        bestRem = rem
+    if best < 0 or bestRem <= 1e-9: break
+    inc result[best]
+    dec left
 
 proc drawTab(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
              tab: SessionItem; closable: bool; widthPx = -1): GpuiElement =
@@ -152,6 +192,7 @@ proc drawTab(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
                           ("flex-shrink", "0"), ("cursor", cursorOf(hkControl))])
   if tab.active: r.setStyle(result, "background", p.activeTab)
   r.tag(result, "tab", id)
+  r.tag(result, "session-tab", id)
   r.tag(result, "attention", $tab.attention)
   r.tag(result, "active", $tab.active)
   r.tag(result, "tooltip", tab.tooltip)
@@ -184,10 +225,13 @@ proc drawTab(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
   r.addEventListener(result, "click", proc() = discard vm.activate(id))
 
 proc drawStatusTab(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
-                   message, kind: string; retry: bool): GpuiElement =
+                   message, kind: string; retry: bool; widthPx: int): GpuiElement =
   ## A tab-shaped notice in place of the tabs: loading, empty, or an error
-  ## with its Retry.
+  ## with its Retry. At most what the line leaves beside "+" INSIDE the
+  ## strip's 8px right inset (the tabs' budget, `widthPx - 8`), so "+"
+  ## keeps the inset as it does beside tabs.
   result = r.stripNotice(p, message, kind, TabTitlePx)
+  r.setStyle(result, "max-width", $max(0, widthPx - 8 - AddButtonPx - StripGapPx) & "px")
   if retry:
     let target = vm
     r.appendChild(result, r.stripRetry(p, proc() = target.load()))
@@ -306,13 +350,15 @@ proc drawSessionTabStrip*(r: GpuiRenderer; host: GpuiElement;
   var overflow: seq[int]
   case vm.state.val
   of asIdle, asLoading:
-    r.appendChild(line, r.drawStatusTab(p, vm, AgentHarborTabsLoadingText, "loading", false))
+    r.appendChild(line, r.drawStatusTab(p, vm, AgentHarborTabsLoadingText, "loading", false,
+                                        widthPx))
   of asError:
     r.appendChild(line, r.drawStatusTab(p, vm, AgentHarborTabsErrorText & ": " &
-                                        vm.error.val, "error", true))
+                                        vm.error.val, "error", true, widthPx))
   of asReady:
     if tabs.len == 0:
-      r.appendChild(line, r.drawStatusTab(p, vm, AgentHarborTabsEmptyText, "empty", false))
+      r.appendChild(line, r.drawStatusTab(p, vm, AgentHarborTabsEmptyText, "empty", false,
+                                          widthPx))
     else:
       let closable = tabs.len > 1
       if vm.mode.val == tsmMultiLine:
@@ -327,10 +373,14 @@ proc drawSessionTabStrip*(r: GpuiRenderer; host: GpuiElement;
       else:
         let layout = vm.singleLine
         overflow = layout.overflow
-        var widths: seq[int]
+        # Each tab's flex base size is its content width, unclamped, and
+        # its maximum 12rem (`fitWidths`, §9.7): a long title shrinks from
+        # its whole width, so short titles are not narrowed to make room.
+        var widths, maxes: seq[int]
         var fixed: seq[bool]
         for i in layout.visible:
-          widths.add tabWidth(tabs[i], closable)
+          widths.add(if tabs[i].active: ActiveTabPx else: tabContentWidth(tabs[i], closable))
+          maxes.add(if tabs[i].active: ActiveTabPx else: TabMaxPx)
           fixed.add tabs[i].active
         # "+" and, when tabs overflow, the `+N` chip as `drawOverflowChip`
         # draws it, 12px clear of "+".
@@ -341,7 +391,7 @@ proc drawSessionTabStrip*(r: GpuiRenderer; host: GpuiElement;
                        (if overflow.len > 0: overflowChipWidth(overflow.len, waits > 0) + ChipGapPx
                         else: 0)
         let fitted = fitWidths(widths, widthPx - 8 - controls, TabMinWidthPx, StripGapPx,
-                               fixed)
+                               fixed, maxes = maxes)
         for k, i in layout.visible:
           r.appendChild(line, r.drawTab(p, vm, tabs[i], closable, fitted[k]))
   if overflow.len > 0:
@@ -563,8 +613,8 @@ proc drawSessionList*(r: GpuiRenderer; host: GpuiElement; vm: SessionTabStripVM;
   let titleLine = r.box(pairs = [("items", "center"), ("height", $ControlPx & "px"),
                                  ("justify", if collapsed: "center" else: "space-between")])
   if not collapsed:
-    r.appendChild(titleLine, r.text("SESSIONS", CaptionPx, p.textBody, bold = true,
-                                    shrink = false))
+    r.appendChild(titleLine, r.tracked(r.text("SESSIONS", CaptionPx, p.textBody,
+                                              bold = true, shrink = false)))
   if sidebar:
     let target = vm
     let toggle = r.box(pairs = [("width", $ControlPx & "px"), ("height", $ControlPx & "px"),
@@ -581,13 +631,24 @@ proc drawSessionList*(r: GpuiRenderer; host: GpuiElement; vm: SessionTabStripVM;
     let summary = r.text(vm.summaryText, CaptionPx, p.textCaption,
                          pairs = [("line-height", "24px")])
     r.tag(summary, "summary", vm.summaryText)
+    r.tag(summary, "list-summary", "true")
     if sidebar or not columns:
       r.appendChild(head, summary)
     else:
       # Docked across a wide window, the head is one line: the label, then
-      # the summary beside it.
+      # the summary beside it, 16px off (the head's 8px gap and the
+      # summary's own `margin-left: 0.5rem`).
       r.styles(titleLine, [("justify", "start"), ("gap", "8px")])
+      r.setStyle(summary, "margin-left", "8px")
       r.appendChild(titleLine, summary)
+  elif not collapsed and (sidebar or not columns):
+    # Loading or failed: the web still lays out the (empty) summary on its
+    # own line under the title (`.ah-session-list-summary`, `flex: 1 1
+    # 100%`), so the head keeps its 8px row gap and is as tall as when
+    # ready, minus the words. An empty line of no height keeps that gap.
+    let summary = r.box(pairs = [("height", "0px")])
+    r.tag(summary, "summary-empty", "true")
+    r.appendChild(head, summary)
   r.appendChild(host, head)
   if not collapsed and vm.sourceLabel.len > 0:
     let source = r.box(pairs = [("padding-top", "4px"), ("padding-bottom", "4px"),

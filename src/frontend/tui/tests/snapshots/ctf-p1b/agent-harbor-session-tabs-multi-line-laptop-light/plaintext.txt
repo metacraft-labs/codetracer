@@ -1,4 +1,4 @@
- ● Replace the hand-… CLI ✕   ● Cap the teleme… CT   ● Fix the flaky … Tg   ● Add search to… TUI   ● Benchmark rout… CT   ● Add jitter to… Web   ● Cache the dep… CLI
+ ● Replace the hand-… CLI ✕   ● Cap the teleme… CT   ● Fix the flaky…  Tg   ● Add search to… TUI   ● Benchmark rout… CT   ● Add jitter to… Web   ● Cache the dep… CLI
  ● Profile the im… CT   ○ Migrate cached… Tg   ● Persist the t… TUI   ○ Migrate the CI… CT   ● Split the set… Web   ● Port the rout… CLI   ● Retry telemetr… CT   +
                                                                                                                                                                                     
                                                                                                                                                                                     

@@ -75,6 +75,10 @@ const
   FoldedGlyph* = "\xE2\x96\xB8"  ## ▸ (what expands)
   UnfoldedGlyph* = "\xE2\x96\xBE" ## ▾
   BarGlyph* = "\xE2\x96\x8E"     ## ▎ an inset bar down a row's left edge
+  StatusWordGap* = 2
+    ## The cells a title (whole or cut) keeps before a right-aligned status
+    ## or state word on its line, as an overflow menu's item keeps before its
+    ## origin: the web's gap there is visible, one cell read as one phrase.
 
 type
   AhNode* = ref object
@@ -124,6 +128,10 @@ type
     filters*: string ## the fleet's filter strip, between two head bands
     menu*: string    ## a dropdown, a popup: surface/base/card
     chip*: string    ## a control's own ground (+, +N, a badge, Retry)
+    chipOnAction*: string
+      ## A control's ground on the action surface (the `+N` chip of the
+      ## selected fleet row): surface/action/primary-hover, a step off the
+      ## selection in both modes, where the web draws the chip's outline.
     chosen*: string  ## the active filter chip
 
 # ---------------------------------------------------------------------------
@@ -169,6 +177,7 @@ proc tone*(p: AhPalette): AhTone =
          # Dark's tertiary is its stripe's ground: a chip on a stripe takes
          # the next grey up.
          chip: (if dark: p.activeTab else: p.tertiary),
+         chipOnAction: tokenHexOf(dtColorsUiSurfaceActionPrimaryHover, p.mode),
          chosen: p.activeTab)
 
 proc stripeOn*(t: AhTone; p: AhPalette; ground: string; besides = ""): string =
@@ -230,13 +239,40 @@ proc tag*(n: AhNode; name, value: string) =
 
 proc widthOf*(s: string): int = cellWidthOf(s)
 
+proc trimCut(s: string): string =
+  ## The kept start of a cut text without what would dangle before "…":
+  ## trailing spaces, and a separator (" · ", " — ") the cut left last.
+  result = s.strip(leading = false)
+  for sep in ["\xC2\xB7", "\xE2\x80\x94"]:
+    if result.endsWith(" " & sep):
+      result = result[0 ..< result.len - sep.len].strip(leading = false)
+
 proc elide*(s: string; cells: int): string =
   ## `s` in at most `cells` columns: whole when it fits, else cut and ended
-  ## with "…" (the stylesheet's `text-overflow: ellipsis`).
+  ## with "…" (the stylesheet's `text-overflow: ellipsis`). The cut never
+  ## leaves a space (or a dangling " · " / " — ") before the "…": a cell
+  ## would be spent on nothing and the "…" would stand apart like a word.
   if cells <= 0: return ""
   if widthOf(s) <= cells: return s
   if cells == 1: return Ellipsis
-  cellSlice(s, 0, cells - 1) & Ellipsis
+  let kept = trimCut(cellSlice(s, 0, cells - 1))
+  if kept.len == 0: Ellipsis else: kept & Ellipsis
+
+proc elideParts*(s: string; cells: int): string =
+  ## A text that lists its parts with " · " (a tree header's counts:
+  ## `2 need input · 1 running`) in at most `cells` columns, cut only
+  ## between parts: as many whole parts as fit, ended with "…"; "" when not
+  ## even the first part fits with its "…" (a part cut inside, `2 need…`,
+  ## says less than none). A text with no separator is cut by `elide`.
+  if widthOf(s) <= cells: return s
+  let parts = s.split(Middot)
+  if parts.len < 2: return elide(s, cells)
+  var kept = ""
+  for part in parts:
+    let next = if kept.len == 0: part else: kept & Middot & part
+    if widthOf(next) + 1 > cells: break
+    kept = next
+  if kept.len > 0: kept & Ellipsis else: ""
 
 type
   WrappedLine* = object
@@ -444,11 +480,12 @@ proc put*(c: var AhCanvas; row, col: int; s, fg: string; bold = false;
   w
 
 proc text*(c: var AhCanvas; parent: AhNode; row, col, cells: int; s, fg: string;
-           bold = false; fact = ""; bg = ""; alignRight = false): int =
-  ## One line of text, elided to `cells` (the width the layout gives it).
+           bold = false; fact = ""; bg = ""; alignRight = false; byParts = false): int =
+  ## One line of text, elided to `cells` (the width the layout gives it);
+  ## `byParts`: cut only between its " · " parts (`elideParts`).
   ## `fact`, when given, tags a node with the full text over the cells it
   ## draws. Returns the cells drawn.
-  let shown = elide(s, cells)
+  let shown = if byParts: elideParts(s, cells) else: elide(s, cells)
   let w = widthOf(shown)
   let at = if alignRight: col + max(0, cells - w) else: col
   discard c.put(row, at, shown, fg, bold, bg)
@@ -595,12 +632,13 @@ proc errorBlock*(c: var AhCanvas; parent: AhNode; row, col, width, height: int;
     discard c.node(n, first, left, max(0, right - left), lines.len, [(fact, value)])
   c.centred(titleLines, r, c.p.textError, "error-title", title)
   c.centred(whyLines, r, c.p.textCaption, "error", message)
+  # Retry on the controls' own ground (`tone.chip`, the tab bar's Retry's):
+  # the web outlines the button, and the secondary surface it fills it with
+  # is the panel's own in Light and 1.17:1 off it in Dark, so it read as
+  # text.
   let label = " Retry "
   let rc = col + max(0, (width - widthOf(label)) div 2)
-  discard c.put(r, rc, label, c.p.textLabel, bg = c.p.secondary)
-  if c.p.secondary == c.bgAt(r, max(0, rc - 1)):
-    # Retry's ground is the body's in some mode: then the chip's own.
-    discard c.put(r, rc, label, c.p.textLabel, bg = c.p.tertiary)
+  discard c.put(r, rc, label, c.p.textLabel, bg = c.tone.chip)
   discard c.node(n, r, rc + 1, widthOf(label) - 2, 1, [("button", "Retry")])
   c.target(r, rc, widthOf(label), 1, retry)
 

@@ -3,10 +3,10 @@
  2 idle · 7 running · 1 failed
  invented working set: 14 sessions over
  4 initiatives
- ▸ ● Telemetry upload retries   1/4 1 needs…
- ▸ ● CI runner migration       4/10 1 needs…
+ ▸ ● Telemetry upload retries   1/4
+ ▸ ● CI runner migration       4/10
  ▾ ● Route cache on the new storage la…  2/6
- ○ Migrate cached routes without a cold … 5m
+ ○ Migrate cached routes without a cold…  5m
    idle Telegram · Codex 0.9.4 · host-f
    assistant: Done for now; ready for the n…
  ● Port the route cache to the new stora… 1m

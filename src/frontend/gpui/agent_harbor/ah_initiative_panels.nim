@@ -69,7 +69,7 @@ proc drawSectionHeader*(r: GpuiRenderer; p: AhPalette; title, source,
                                          ("flex-shrink", "0")])
   r.rule(result, p.borderSecondary)
   let upper = title.toUpperAscii
-  let t = r.text(upper, CaptionPx, p.textBody, bold = true, shrink = false)
+  let t = r.tracked(r.text(upper, CaptionPx, p.textBody, bold = true, shrink = false))
   let s = r.text(source, CaptionPx, p.textCaption)
   r.tag(s, "source", source)
   let sm = r.text(summary, CaptionPx, p.textCaption)
@@ -167,9 +167,9 @@ proc drawCurrent*(r: GpuiRenderer; p: AhPalette; text: string; colour = ""): Gpu
   let lh = ("line-height", $LinePx & "px")
   result = r.box(pairs = [("gap", "8px"), ("items", "center"), ("height", $LinePx & "px")])
   r.tag(result, "current", text)
-  r.appendChild(result, r.text("CURRENT", CaptionPx,
-                               if colour.len > 0: colour else: p.textLabel,
-                               bold = true, shrink = false, pairs = [lh]))
+  r.appendChild(result, r.tracked(r.text("CURRENT", CaptionPx,
+                                         if colour.len > 0: colour else: p.textLabel,
+                                         bold = true, shrink = false, pairs = [lh])))
   r.appendChild(result, r.text(text, CaptionPx,
                                if colour.len > 0: colour else: p.textBody, pairs = [lh]))
 
@@ -409,8 +409,8 @@ proc drawMilestone(r: GpuiRenderer; p: AhPalette; m: MilestoneLine;
   # caption size, 6px before the counts.
   let meta = r.box(pairs = [("gap", "6px"), ("items", "center"), ("height", $LinePx & "px")])
   if m.current:
-    r.appendChild(meta, r.text("CURRENT", CaptionPx, p.textLabel, bold = true,
-                               shrink = false, pairs = [lh]))
+    r.appendChild(meta, r.tracked(r.text("CURRENT", CaptionPx, p.textLabel, bold = true,
+                                         shrink = false, pairs = [lh])))
   let metaRun = r.box(pairs = [("items", "center")])
   r.tag(metaRun, "meta", parts.before & parts.failing & parts.after)
   r.appendChild(metaRun, r.text(parts.before, CaptionPx, p.textCaption, shrink = false,
@@ -488,8 +488,8 @@ proc drawProgressPanel*(r: GpuiRenderer; host: GpuiElement; vm: InitiativeProgre
                                   ("padding-left", $InsetPx & "px"), ("flex-shrink", "0")])
       r.rule(header, p.borderSecondary)
       r.tag(header, "group", group.name)
-      r.appendChild(header, r.text(group.name.toUpperAscii, CaptionPx, p.textLabel,
-                                   bold = true, shrink = false))
+      r.appendChild(header, r.tracked(r.text(group.name.toUpperAscii, CaptionPx,
+                                             p.textLabel, bold = true, shrink = false)))
       r.appendChild(header, r.text("(" & $group.count & ")", CaptionPx, p.textCaption,
                                    shrink = false))
       r.appendChild(list, header)

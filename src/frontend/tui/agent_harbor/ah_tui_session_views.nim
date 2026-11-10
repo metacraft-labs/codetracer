@@ -425,7 +425,9 @@ const
     ## The counts take at most 40% of a header (`.ah-session-group-counts`:
     ## `max-width: 40%`).
   GroupCountsMin = 8
-    ## What the title slot leaves the counts at least (`1 needs…`).
+    ## What the title slot leaves the counts at least (`2 failed`, `1 idle…`:
+    ## the counts are cut only between their parts, so a slot that holds no
+    ## whole first part shows none).
   GroupInlineGap = 2
     ## Between a title and the `n/m` that flows after it.
 
@@ -527,9 +529,11 @@ proc drawGroupHeader(c: var AhCanvas; parent: AhNode; vm: SessionTabStripVM;
   if progress.len > 0:
     discard c.text(n, row, place.progressAt, widthOf(progress), progress,
                    c.p.textCaption, fact = "progress")
-  if place.countsW > 0:
+  # The counts are cut only between their parts (`2 need input…`, never
+  # `2 need…`); where not even the first part fits they are left out.
+  if place.countsW > 0 and elideParts(counts, place.countsW).len > 0:
     discard c.text(n, row, place.countsAt, place.countsW, counts, c.p.textCaption,
-                   fact = "counts", alignRight = cols.flush)
+                   fact = "counts", alignRight = cols.flush, byParts = true)
   else:
     discard c.node(n, row, place.countsAt, 0, 1, [("counts-hidden", counts)])
 

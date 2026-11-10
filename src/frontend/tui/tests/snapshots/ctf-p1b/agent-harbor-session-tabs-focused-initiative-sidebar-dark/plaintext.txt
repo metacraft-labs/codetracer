@@ -1,6 +1,6 @@
  ● Replace the h… CLI
- ● Cap the telemetry … CT ✕
- ● Fix the flaky … Tg
+ ● Cap the telemetry…  CT ✕
+ ● Fix the flaky…  Tg
  ● Add search to… TUI
  ● Benchmark rout… CT
  ● Add jitter to… Web

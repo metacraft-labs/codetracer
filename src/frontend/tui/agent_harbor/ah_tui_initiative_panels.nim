@@ -225,8 +225,10 @@ proc drawSessionLine*(c: var AhCanvas; parent: AhNode; item: SessionItem;
                                               ("tooltip", item.tooltip)])
   discard c.mark(n, row, col, c.p.markOf(item.attention))
   let sw = widthOf(item.statusLabel)
-  discard c.text(n, row, col + 2, max(1, width - 2 - sw - 1), item.title, c.p.textBody,
-                 fact = "title")
+  # Two cells before the right-aligned status word, as a menu item keeps
+  # before its origin (`StatusWordGap`).
+  discard c.text(n, row, col + 2, max(1, width - 2 - sw - StatusWordGap), item.title,
+                 c.p.textBody, fact = "title")
   discard c.text(n, row, col + width - sw, sw, item.statusLabel,
                  c.p.sessionStatusColour(item.attention), fact = "status")
 

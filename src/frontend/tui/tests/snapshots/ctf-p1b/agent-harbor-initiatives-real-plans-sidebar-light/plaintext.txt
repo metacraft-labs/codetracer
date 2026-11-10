@@ -8,7 +8,7 @@
      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀       ● 1  ● 1  ● 1
      CURRENT RC-M2: The main change
      orbit-labs/flight-planner
-      ● Add a retry budget to t… needs input
+      ● Add a retry budget to…   needs input
  ▾ ○ Telemetry upload retries      1/3 · 33%
      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀       ● 1  ● 1  ● 1
      CURRENT TR-M2: The main change

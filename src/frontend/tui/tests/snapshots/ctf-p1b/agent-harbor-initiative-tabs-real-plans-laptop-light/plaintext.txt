@@ -1,4 +1,4 @@
- ○ Telemetry upload retries 1/3   ● Route cache on the new … 1/3   +                                                  2  agent harbor sessions   ← 1 waiting  →   Auto-switch: off
+ ○ Telemetry upload retries 1/3   ● Route cache on the new…  1/3   +                                                  2  agent harbor sessions   ← 1 waiting  →   Auto-switch: off
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

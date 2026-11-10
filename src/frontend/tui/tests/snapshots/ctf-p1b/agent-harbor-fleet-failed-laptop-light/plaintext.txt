@@ -15,7 +15,7 @@
    build failed: 3 tests did not pass
    build failed: 3 tests did not pass  +1
  ● Give the latency chart a percentile selector                 Codex 0.91.3                   gpu-01                         Telemetry upload retries           2h 33m         11h
-   failed orbit-labs/telemetry-ui · docs/config-3-migration · …
+   failed orbit-labs/telemetry-ui · docs/config-3-migration…
    [exit] status=1
    [exit] status=1  +1
  ● feat/telemetry-retry-budget                                  Opencode 0.12.7                build-02                       —                                     47m         11h
@@ -34,7 +34,7 @@
    Committed 2 files
    Anti-halting resumed a stalled turn (idle turn)  +1
  ● Move the scheduler's clock behind an injectable interface    Claude 4.2.0                   build-01                       —                                     25m         14h
-   cancelled orbit-labs/orbit-sim · fix/propagator-step-count …
+   cancelled orbit-labs/orbit-sim · fix/propagator-step-count…
    Committed 2 files
    Committed 2 files  +1
                                                                                                                                                                                     

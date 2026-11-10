@@ -35,15 +35,23 @@
 ##      panel's wide layout they end flush with the ages
 ##      (`sessionHeaderProblems`); the popup's heading shows a title whole
 ##      wherever the bar can hold it (`popupHeadingProblems`); an overflow
-##      menu keeps two cells before its origin (`menuGapProblems`).
+##      menu keeps two cells before its origin (`menuGapProblems`). A cut
+##      text never leaves a space or a dangling separator before its "…",
+##      and a tree header's counts are cut only between their parts
+##      (`cutEdgeProblems`); a title keeps two cells before the status word
+##      right-aligned on its line (`statusGapProblems`).
 ##   2. THE CELL STYLES AGAINST THE VIEWMODEL. The ground and ink of the
 ##      parts whose state the viewmodel decides — the active tab and row, the
 ##      selected initiative and fleet row, the current milestone, the active
 ##      filter and recording, each status mark's colour, an error's colour,
 ##      the section head's band, the focused initiative's underline in the
 ##      action colour (its own colour, SGR 58), a tab bar's notice ground at
-##      least `NoticeGroundMinContrast` off the bar's, the inbox's steps in
-##      the disabled role while nothing waits, the fleet's activity lines
+##      least `NoticeGroundMinContrast` off the bar's, the inbox's steps at
+##      the label's half opacity while nothing waits (as the browser draws
+##      them), the auto-switch dot in the action border colour, a panel's
+##      Retry on the controls' ground and the selected fleet row's `+N` chip
+##      on a ground of its own (each at least `ControlGroundMinContrast` off
+##      what it lies on), the fleet's activity lines
 ##      (red only on a row with no failure line) and filter counts — are
 ##      derived here from the
 ##      viewmodel and the design-system palette
@@ -86,7 +94,7 @@ from ../../../viewmodel/views/agent_harbor_words import tabLabelOf, filterCount,
   countsText, activityLineIsError
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling.
-const ExpectedAssertions = 69
+const ExpectedAssertions = 86
 
 const
   Stem = "app_agent_harbor_story"
@@ -291,6 +299,45 @@ proc menuGapProblems(m: AhTuiMount): seq[string] =
                    " cell(s) before its origin"
       if menu.col + menu.width - (trail.col + trail.width) < 1:
         result.add "the menu item '" & t.attr("title") & "' puts its origin against the menu's edge"
+
+proc cutEdgeProblems(m: AhTuiMount): seq[string] =
+  ## A text cut to its cells never leaves a space, or a separator (" · ",
+  ## " — ") the cut made last, before its "…": the cell is spent on nothing
+  ## and the "…" stands apart like a word. A tree header's counts are cut
+  ## only between their parts (`2 need input…`, never `2 need…`).
+  for fact in DrawnTextFacts:
+    for n in m.canvas.root.all(fact):
+      if n.row >= m.rows or n.width == 0 or n.height > 1: continue
+      let drawn = m.drawnText(n)
+      if not drawn.endsWith(Ellipsis): continue
+      let kept = drawn[0 ..< drawn.len - Ellipsis.len]
+      if kept.len == 0: continue
+      if kept.endsWith(" ") or kept.endsWith(" \xC2\xB7") or kept.endsWith(" \xE2\x80\x94"):
+        result.add "the " & fact & " '" & n.attr(fact) & "' is cut to '" & drawn &
+                   "', a space or a separator before its \"…\""
+      if fact == "counts":
+        var whole = false
+        var acc = ""
+        for part in n.attr(fact).split(Middot):
+          acc = if acc.len == 0: part else: acc & Middot & part
+          if acc == kept: whole = true
+        if not whole:
+          result.add "the counts '" & n.attr(fact) & "' are cut inside a part: '" & drawn & "'"
+
+proc statusGapProblems(m: AhTuiMount): seq[string] =
+  ## A title, whole or cut, keeps `StatusWordGap` cells before the status
+  ## word right-aligned on its line: an initiative's session lines (the
+  ## Initiatives panel's and the popup's) and the popup's heading.
+  proc gap(m: AhTuiMount; owner: AhNode; word: string; into: var seq[string]) =
+    let t = owner.first("title")
+    let w = owner.first(word)
+    if t.isNil or w.isNil or t.row >= m.rows or t.row != w.row or w.width == 0: return
+    let titleEnd = t.col + widthOf(m.canvas.grid.cellsText(t.row, t.col, t.width).strip(leading = false))
+    if w.col - titleEnd < StatusWordGap:
+      into.add "the title '" & t.attr("title") & "' leaves " & $(w.col - titleEnd) &
+               " cell(s) before its " & word & " word '" & w.attr(word) & "'"
+  for s in m.canvas.root.all("session"): m.gap(s, "status", result)
+  for p in m.canvas.root.all("popup"): m.gap(p, "state", result)
 
 proc expect(problems: var seq[string]; what: string; drawn, wanted: auto) =
   if drawn != wanted:
@@ -596,6 +643,11 @@ const NoticeGroundMinContrast = 1.3
   ## (WCAG 2 contrast ratio, https://www.w3.org/TR/WCAG21/#dfn-contrast-ratio):
   ## below it the notice reads as loose text, not as a tab.
 
+const ControlGroundMinContrast = 1.3
+  ## The least contrast ratio between a control's own ground (a panel's
+  ## Retry, the selected fleet row's `+N` chip) and the ground it lies on:
+  ## below it the control reads as text (the web outlines both).
+
 proc relativeLuminance(hex: string): float =
   ## WCAG 2 relative luminance (https://www.w3.org/TR/WCAG21/#dfn-relative-luminance).
   var channel: array[3, float]
@@ -655,6 +707,21 @@ proc styleProblems(m: AhTuiMount; look: LookOf): seq[string] =
     else:
       result.expectInk(look, n.first("error-title"), rows, "the error's title", p.textError)
       result.expectInk(look, n.first("error"), rows, "the error's reason", p.textCaption)
+  # A panel's Retry is a control on its own ground, a visible step off the
+  # panel's (`ControlGroundMinContrast`), as the web's outlined button is.
+  for n in view.all("notice"):
+    if n.attr("notice") != "error" or n.height <= 1: continue
+    let b = n.first("button")
+    if b.isNil or b.row >= rows: continue
+    let ground = look(b.row, b.col).bg
+    let panel = look(b.row, b.col - 2).bg
+    if ground != t.chip:
+      result.add "Retry is on " & ground & ", not the controls' ground " & t.chip
+    elif ground == "" or panel == "" or contrastRatio(ground, panel) < ControlGroundMinContrast:
+      result.add "Retry is on " & ground & ", " &
+                 formatFloat(contrastRatio(ground, panel), ffDecimal, 2) &
+                 ":1 against the panel's " & panel & ", under " &
+                 formatFloat(ControlGroundMinContrast, ffDecimal, 2) & ":1"
   # A tab bar's notice is tab-shaped: its ground a visible step off the
   # bar's (`NoticeGroundMinContrast`).
   for n in view.all("notice"):
@@ -720,11 +787,25 @@ proc styleProblems(m: AhTuiMount; look: LookOf): seq[string] =
     for e in view.all("popup"):
       let drawn = AhNode(row: e.row, col: e.col, width: e.width, height: 1)
       result.expectGround(look, drawn, rows, "the popup", t.menu)
-    # Previous / Next in the disabled role while nothing waits.
+    # Auto-switch on: its dot in the action border role in both modes
+    # (`.ah-inbox-auto-on::before`), the mark two cells before the label.
+    for e in view.all("auto-switch"):
+      if e.attr("auto-switch") != "true" or e.row >= rows: continue
+      var dot: AhNode
+      for mk in view.all("mark"):
+        if mk.row == e.row and mk.col == e.col - 2: dot = mk
+      if dot.isNil:
+        result.add "auto-switch is on and draws no dot"
+      else:
+        result.expectInk(look, dot, rows, "the auto-switch dot", p.borderAction)
+    # Previous / Next while nothing waits: the label at half opacity over
+    # the bar, as the browser draws them (`InboxStepDisabledAlpha`).
     for e in view.all("step"):
       result.expectInk(look, e, rows, "the inbox step " & e.attr("button") &
                        " (" & e.attr("step") & ")",
-                       if vm.inboxPosition.len == 0: p.textDisabled else: p.textLabel)
+                       if vm.inboxPosition.len == 0:
+                         blendOver(p.textLabel & InboxStepDisabledAlpha, t.frame)
+                       else: p.textLabel)
   of "agent-harbor-initiatives":
     let vm = m.initiatives
     for i, row in vm.rows:
@@ -762,6 +843,21 @@ proc styleProblems(m: AhTuiMount; look: LookOf): seq[string] =
         let probe = AhNode(row: e.row, col: e.col, width: 1, height: 1)
         result.expectGround(look, probe, rows, "fleet row " & row.shortId,
           if row.selected: p.action elif i mod 2 == 1: t.band else: t.body)
+        # The `+N` / `less` chip on its own ground; on the selected row a
+        # visible step off the selection (`ControlGroundMinContrast`).
+        let more = e.first("activity-more")
+        if not more.isNil and more.row < rows:
+          let wanted = if row.selected: t.chipOnAction else: t.chip
+          result.expectGround(look, more, rows, "the chip " & more.attr("activity-more") &
+                              " of " & row.shortId, wanted)
+          if row.selected:
+            let chipBg = look(more.row, more.col).bg
+            let rowBg = look(e.row, e.col).bg
+            if chipBg.len == 0 or rowBg.len == 0 or
+               contrastRatio(chipBg, rowBg) < ControlGroundMinContrast:
+              result.add "the chip of the selected row " & row.shortId & " is on " & chipBg &
+                         " against the row's " & rowBg & ", under " &
+                         formatFloat(ControlGroundMinContrast, ffDecimal, 2) & ":1"
     result.add fleetInkProblems(view, look, rows, p, vm)
   else: discard
 
@@ -824,7 +920,8 @@ proc renderOnTerminal(story: CodeTracerStory; sizeName: string; cols, rows: int;
   defer: m.dispose()
   result = checkStory(m) & drawnTextProblems(m) & cutTextProblems(m) &
            separatorWrapProblems(m) & sessionHeaderProblems(m) & popupHeadingProblems(m) &
-           menuGapProblems(m) & styleProblems(m, m.gridLook())
+           menuGapProblems(m) & cutEdgeProblems(m) & statusGapProblems(m) &
+           styleProblems(m, m.gridLook())
   var sess = spawnStory(id, cols, rows, mode)
   defer: sess.close()
   result.add screenProblems(sess, m)
@@ -1122,6 +1219,83 @@ suite "CTF-P1b: the round-2 layout checks can fail":
          problems.contains("is drawn in " & p.rowDetail & ", not " & p.textError)
       ck problems.contains("(under a failure line) at")
       vm.dispose()
+
+suite "CTF-P1b: the round-3 checks can fail":
+  # Positive controls for the checks added after the third visual review:
+  # each drawing is spoiled the way the check guards against and must be
+  # reported.
+
+  test "a space before a cut text's \"…\", and counts cut inside a part, are reported":
+    let m = mountStory(storyOf("agent-harbor-session-list", "sidebar"), 45, 56, dmDark)
+    ck cutEdgeProblems(m).len == 0
+    var t: AhNode
+    for n in m.view.all("title"):
+      if t.isNil and n.width >= 4 and n.row < m.rows: t = n
+    ck not t.isNil
+    let st = m.canvas.grid.styleAt(t.row, t.col)
+    m.canvas.grid.paint(t.row, t.col + t.width - 2, " " & Ellipsis, st)
+    ck cutEdgeProblems(m).join(" ").contains("a space or a separator before")
+    m.dispose()
+    let m2 = mountStory(storyOf("agent-harbor-session-list", "sidebar"), 45, 56, dmDark)
+    var counts: AhNode
+    for n in m2.view.all("counts"):
+      if counts.isNil and Middot in n.attr("counts") and n.width >= 3: counts = n
+    ck not counts.isNil
+    m2.canvas.grid.paint(counts.row, counts.col, "2" & Ellipsis,
+                         m2.canvas.grid.styleAt(counts.row, counts.col))
+    counts.width = 2
+    ck cutEdgeProblems(m2).join(" ").contains("cut inside a part")
+    m2.dispose()
+
+  test "a title against its status word is reported":
+    let m = mountStory(storyOf("agent-harbor-initiative-tabs", "popup"), 180, 56, dmDark)
+    ck statusGapProblems(m).len == 0
+    var spoiled = false
+    for sline in m.view.all("session"):
+      let t = sline.first("title")
+      let w = sline.first("status")
+      if not spoiled and not t.isNil and not w.isNil:
+        let titleEnd = t.col + widthOf(m.canvas.grid.cellsText(t.row, t.col, t.width).strip(leading = false))
+        w.col = titleEnd + 1
+        spoiled = true
+    ck spoiled
+    ck statusGapProblems(m).join(" ").contains("cell(s) before its status word")
+    m.dispose()
+
+  test "Retry on the panel's secondary surface is reported":
+    let m = mountStory(storyOf("agent-harbor-fleet", "error"), 180, 56, dmDark)
+    ck styleProblems(m, m.gridLook()).len == 0
+    let b = m.view.first("notice").first("button")
+    ck not b.isNil
+    m.canvas.grid.restyle(b.row, b.col - 1, b.width + 2, proc(s: CellStyle): CellStyle =
+      result = s
+      result.bg = ahPalette(dmDark).secondary)
+    ck styleProblems(m, m.gridLook()).join(" ").contains("Retry is on")
+    m.dispose()
+
+  test "the selected row's chip on the selection's own ground is reported":
+    let m = mountStory(storyOf("agent-harbor-fleet", "selected"), 180, 56, dmLight)
+    ck styleProblems(m, m.gridLook()).len == 0
+    var spoiled = false
+    for e in m.view.all("row"):
+      let more = e.first("activity-more")
+      if not spoiled and e.attr("selected") == "true" and not more.isNil:
+        m.canvas.grid.restyle(more.row, more.col - 1, more.width + 2, proc(s: CellStyle): CellStyle =
+          result = s
+          result.bg = ahPalette(dmLight).action)
+        spoiled = true
+    ck spoiled
+    ck styleProblems(m, m.gridLook()).join(" ").contains("of the selected row")
+    m.dispose()
+
+  test "the auto-switch dot in the action surface's colour is reported":
+    let m = mountStory(storyOf("agent-harbor-initiative-tabs", "auto-switch"), 180, 56, dmLight)
+    ck styleProblems(m, m.gridLook()).len == 0
+    let e = m.view.first("auto-switch")
+    ck e.attr("auto-switch") == "true"
+    m.repaint(AhNode(row: e.row, col: e.col - 2, width: 1, height: 1), ahPalette(dmLight).action)
+    ck styleProblems(m, m.gridLook()).join(" ").contains("the auto-switch dot")
+    m.dispose()
 
 suite "CTF-P1b: the story host answers the pointer on a real terminal":
   # The initiative popup opens on hover (DEC 1003 motion,
