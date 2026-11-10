@@ -5173,9 +5173,14 @@ proc drawFooter(r: GpuiRenderer) =
   let f = absBox(r, gGeom.footer, chromeOf(crWindowBackground))
   r.setAttribute(f, "data-ct-footer", "status-bar")
   gTopEls.add f
-  proc text(r: GpuiRenderer; parent: GpuiElement; s: string) =
+  proc text(r: GpuiRenderer; parent: GpuiElement; s: string;
+            spacing = "") =
     let t = r.createElement("div")
     r.setStyle(t, "font-size", "14px")
+    # `letter-spacing` is not inherited by an element child (isonim-gpui sets
+    # it on the element that holds the text node), so it goes on `t`.
+    if spacing.len > 0:
+      r.setStyle(t, "letter-spacing", spacing)
     r.setStyle(t, "white-space", "nowrap")
     r.setStyle(t, "flex-shrink", "0")
     r.appendChild(t, r.createTextNode(s))
@@ -5246,10 +5251,10 @@ proc drawFooter(r: GpuiRenderer) =
       r.setAttribute(b, "data-ct-dock-slot", sl.pane)
       r.setAttribute(b, "data-ct-tab-active", $shown)
       r.setStyle(b, "padding-left", $SlotPadPx & "px")
-      r.setStyle(b, "letter-spacing", LabelLetterSpacingCss)
       r.setStyle(b, "rounded", $TabRadiusPx & "px")
       r.setStyle(b, "color", if shown: chromeOf(crTabActiveForeground) else: ink)
-      text(r, b, sl.label)
+      # Measured with `LabelLetterSpacing` (`slotExtentPx`), so drawn with it.
+      text(r, b, sl.label, LabelLetterSpacingCss)
       r.appendChild(strip, b)
     gTopEls.add strip
   # PLAT-54: the status line's note — after the file info and the bottom

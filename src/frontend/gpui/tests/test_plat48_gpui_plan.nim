@@ -176,6 +176,16 @@ proc textOf(n: JsonNode): string =
   if n{"kind"}.getStr == "TextNode": return n{"text"}.getStr
   for c in n{"children"}.getElems: result.add textOf(c)
 
+proc textHolder(n: JsonNode): JsonNode =
+  ## The element that DIRECTLY holds the first text node under `n`: the one
+  ## whose `letter-spacing` the shim draws the glyphs with (it is not
+  ## inherited by an element child).
+  for c in n{"children"}.getElems:
+    if c{"kind"}.getStr == "TextNode": return n
+  for c in n{"children"}.getElems:
+    let h = textHolder(c)
+    if not h.isNil: return h
+
 proc px(n: JsonNode; style: string): int =
   let v = n{"styles"}{style}.getStr
   if v.endsWith("px"): parseInt(v[0 ..< v.len - 2]) else: -1
@@ -309,7 +319,7 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
       # (`slotExtentPx` uses `LabelLetterSpacing`): the issue 2026-11-10-gpui-
       # shell-measures-panel-tab-labels-with-letter-spacing-but-draws-them-
       # without.
-      ck s{"styles"}{"letter_spacing"}.getStr == LabelLetterSpacingCss
+      ck s.textHolder{"styles"}{"letter_spacing"}.getStr == LabelLetterSpacingCss
     var want: seq[string] = @[]
     for d in sharedDefaultDocked(): want.add d.title
     ck labels == want
@@ -477,7 +487,7 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
       for s in top.nodesWith("data-ct-dock-slot"):
         slots.add s.attr("data-ct-dock-slot")
         # The top strip's label is measured with `LabelLetterSpacing` too.
-        ck s{"styles"}{"letter_spacing"}.getStr == LabelLetterSpacingCss
+        ck s.textHolder{"styles"}{"letter_spacing"}.getStr == LabelLetterSpacingCss
     ck slots == @[$paneState]
     # No pane box holds State any more: no tab of the tree is State's.
     ck plan.tabPanes().len > 0
