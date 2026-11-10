@@ -417,17 +417,25 @@ answerable separately.
 
 `src/frontend/tui/tests/apps/` holds child apps, not tests. They are named
 `app_*.nim` so neither lane's discovery collects them; the Tier-2 suites
-compile them on demand through `dual_snap.compileChildApp`, which is
-timestamp-guarded against the app source, `test_app_runtime.nim` **and every
-`.nim` under `app/`** (`dual_snap.newestSourceTime`).
+compile them on demand through `dual_snap.compileChildApp`, which reuses a
+child only while nothing it was built from has changed. "What it was built
+from" is the compiler's own answer: the child compile prints every module it
+reads, and `<bin>.stamp` records their directories, the files those modules
+embed with `staticRead` from elsewhere, the directory trees of modules that
+`{.compile.}` native sources, the compiler, the compile line, and which checkout of each sibling library
+(`isonim-tui`, `isonim`, …) it resolved. An edit in any of them, in this
+repository or a sibling, rebuilds the child once (`dual_snap.newestSourceTime`).
 
-That last clause was added by CTUI-5 after it bit: a mutation arm edited
+The stamp started as the app source and `test_app_runtime.nim`, and grew one
+false red at a time. CTUI-5 added `app/` after it bit: a mutation arm edited
 `app/views/gutter.nim`, rebuilt, ran the Tier-2 suite and restored the file —
 and the next lane run reused the MUTATED binary, because neither the app source
 nor the runtime had changed. The suite reported a defect that no longer
 existed. The dangerous direction is the other one: a cross-tier comparison
 between a fresh Tier-1 model and a stale Tier-2 binary is a comparison of two
-different programs.
+different programs. A hand-written list of trees never caught up with the
+imports — a renderer change in `isonim-tui` was later graded by a child built
+before it — so the list was replaced by what the compiler reports.
 
 **CTUI-7 met the same trap through a different door, and it is worth knowing
 before you run a mutation arm.** The stamp compares MTIMES. Restoring a mutated
@@ -444,10 +452,11 @@ find src/frontend/tui/app -name '*.nim' -exec touch {} +
 rm -rf test-logs/tui-dual-snap/bin
 ```
 
-The guard is right; a timestamp-preserving restore is what defeats it. Sibling libraries (`isonim-tui`, `TermAssert`) are
-deliberately **not** in the stamp — a child app draws `app/`, and rebuilding on
-every sibling edit would cost the lane a link per case for a dependency that
-moves far less often.
+The guard is right; a timestamp-preserving restore is what defeats it. Sibling
+libraries a child links (`isonim-tui`, `isonim`, `nim-termctl`, …) are in the
+stamp like the repository's own modules: a stale renderer is the same two
+different programs as a stale `app/`, and a child is rebuilt once per edit, not
+once per case.
 
 ### Where the artifacts are
 

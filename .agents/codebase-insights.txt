@@ -4080,13 +4080,17 @@ PLAT-3 — THE ABSTRACT VIEW VOCABULARY (2026-09-07)
     `const CellStyle` literals under `app/`, so a new module that paints must
     move `ExpectedStyleLiterals` too — which is why `binding.nim`'s decorations
     carry a GLYPH per kind and no style at all.
-  * `testing/dual_snap.newestSourceTime` STAMPS `app/` **AND `host/`**.  A
-    Tier-2 child binary is rebuilt when anything under either moves, and `host/`
-    is in the stamp because `tests/apps/app_layout_persist.nim` calls
-    `host/layout_store`.  Leave it in: without it a mutation arm against a
-    `host/` module is graded by a child built BEFORE the mutation, which is a
-    comparison of two different programs and fails — or passes — for a reason
-    that has nothing to do with the subject.
+  * `testing/dual_snap`'s CHILD STAMP IS WHAT THE COMPILER REPORTS, not a
+    list of trees.  The child compile runs with the `Processing` hint, and
+    `<bin>.stamp` records every directory a module came from (sibling
+    libraries included), the files those modules `staticRead` from elsewhere,
+    the trees they `{.compile.}`, the compiler and the resolved library
+    checkouts.  Do not go back to a hand-written list: it missed `host/`, then
+    `isonim-tui`, then most of `viewmodel/` and `common/`, and each miss graded
+    a mutation or a renderer change with a child built BEFORE it.  A new
+    compile-time read through a COMPUTED path marks the child `volatile`
+    (always rebuilt) unless `KnownComputedReads` names its module and the
+    stamp covers what it reads.
   * `layout_interaction.nodeAtPath` HANDS OUT A LIVE `ref` INTO THE COMMITTED
     TREE.  Use `nodeInfoAtPath`, which returns a `NodeInfo` value with no
     reference field; `binding.nim` names `nodeAtPath` nowhere and its test
@@ -8388,22 +8392,10 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - The execution arrow's lane is the shared gutter map's `gbPointer` band (`plat42_code_column.pointerLane`, from `editor_gutter_lanes` at `chrome.CodeFontPx`). The breakpoint disc is in `gbGlyph`, LEFT of it, so "ink left of the number" reads a breakpoint as a second pointer.
 - `codeColumnLeft` must step over 1 px indent guides and the 2 px caret crossing the execution band (`MaxCrossingPx`); a guide reads as a band of another grey.
 - `plat42_window_record` OCRs every row and chip: 10 to 40 minutes on the shared host. `ci/test/plat42-surfaces-window.sh` reads `CODETRACER_PLAT42_BIN`, `_TRACE` and `_FLOW_TRACE`.
-||||||| parent of bda4c92e789 (feat(viewmodel): trace Nim's compile-time code from the editor)
-||||||| parent of b058150866e (feat(desktop): run the project's Verno action from the Verification pane)
-||||||| parent of 6454c5a4603 (wip)
-||||||| parent of d592263ff05 (wip)
 - Desktop Verification runs: the renderer (`ui/verification.nim`) reads the project's task files with node `fs`, picks the first Verno action (`vernoActions`), and sends its argv (`project_actions.launchArgv`, shared with `host/project_action_runner.launchSpec`) to the main process (`index/verification_runner`, `CODETRACER::verification-start`/`-cancel`; answers `-running`, `-output`, `-exit`, `-failed-to-start`, handled in `ui_js.nim`). The report (`<cwd>/target/verno-report.json`) is read by the renderer only on `-exit`. The pane's Run/Stop reach the host through `isonim_verification_view.verificationRunRequest`/`verificationStopRequest`; a browser tab (no `inElectron`) offers no Run.
 - The PLAT-63 replay `verno` (`tui/tests/fixtures/plat63_verno_projects.nim`) waits 60 s when a `hold` file sits beside it, so a suite can watch a run live and Stop it; the fixture's `when isMainModule` writes a package for the desktop Playwright spec (`tests/verification-pane/desktop_verno_run.spec.ts`).
 - A `KeymapRouter` caches its resolution tries per router (`editing_keymap.trieFor`). A fresh router's first key builds them (306-342 us of CPU at load 66-98); a warm dispatch is 34-38 us mean, 86-100 us worst. `tui/tests/test_modal_dispatch_gate` gates both, separately, at 2 ms.
 - `ci/test/shell-gate-coverage.sh` scans the disk (`find`), not git: a stale untracked script left in an rsync mirror (e.g. the removed `ci/test/readonly-leftovers-sweep-test.sh`) shows up as an unrecorded dark gate.
-||||||| parent of b058150866e (feat(desktop): run the project's Verno action from the Verification pane)
-||||||| parent of 6454c5a4603 (wip)
-||||||| parent of d592263ff05 (wip)
-- Desktop Verification runs: the renderer (`ui/verification.nim`) reads the project's task files with node `fs`, picks the first Verno action (`vernoActions`), and sends its argv (`project_actions.launchArgv`, shared with `host/project_action_runner.launchSpec`) to the main process (`index/verification_runner`, `CODETRACER::verification-start`/`-cancel`; answers `-running`, `-output`, `-exit`, `-failed-to-start`, handled in `ui_js.nim`). The report (`<cwd>/target/verno-report.json`) is read by the renderer only on `-exit`. The pane's Run/Stop reach the host through `isonim_verification_view.verificationRunRequest`/`verificationStopRequest`; a browser tab (no `inElectron`) offers no Run.
-- The PLAT-63 replay `verno` (`tui/tests/fixtures/plat63_verno_projects.nim`) waits 60 s when a `hold` file sits beside it, so a suite can watch a run live and Stop it; the fixture's `when isMainModule` writes a package for the desktop Playwright spec (`tests/verification-pane/desktop_verno_run.spec.ts`).
-- A `KeymapRouter` caches its resolution tries per router (`editing_keymap.trieFor`). A fresh router's first key builds them (306-342 us of CPU at load 66-98); a warm dispatch is 34-38 us mean, 86-100 us worst. `tui/tests/test_modal_dispatch_gate` gates both, separately, at 2 ms.
-- `ci/test/shell-gate-coverage.sh` scans the disk (`find`), not git: a stale untracked script left in an rsync mirror (e.g. the removed `ci/test/readonly-leftovers-sweep-test.sh`) shows up as an unrecorded dark gate.
-||||||| parent of 5a128028978 (feat(viewmodel): trace Nim's compile-time code from the editor)
 
 ## Nim's compile-time tracing (`viewmodels/nim_tracing_vm`, `host/native_nim_tracer`)
 - The terminal and GPUI ask codetracer-nim's nimsuggest directly (`--v3 --stdin`, one session per trace); the desktop goes through nim-langserver. The trace queries live in `executeNoHooksV3`: without `--v3` nimsuggest reads `tracestatic` and prints nothing at all.

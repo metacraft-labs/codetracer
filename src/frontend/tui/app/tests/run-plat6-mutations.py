@@ -153,14 +153,16 @@ SHELL = "src/frontend/tui/app/views/shell.nim"
 #
 # `dual_snap.nim` is the one that made this necessary and it is not a
 # hypothetical. It decides whether a Tier-2 arm is graded against a FRESHLY
-# BUILT child: `newestSourceTime` stamps the app source, `test_app_runtime.nim`,
-# `app/` and `host/`, and `compileChildApp` rebuilds only when the binary is
-# older than that stamp. PLAT-6's verification reverted the stamp to its
-# `app/`-only form and re-ran M38B — a real defect in `host/layout_store.nim`,
-# graded at Tier 2 — and it **SURVIVED**, because the child was never rebuilt
-# and a stale binary graded as a passing one. That is a false GREEN produced by
-# an edit to a file the per-arm SHA-256 check did not cover, so the file that
-# decides whether a grade is real is now covered by it.
+# BUILT child: `newestSourceTime` stamps every directory the child's last
+# compile read (the app source, `test_app_runtime.nim`, `app/`, `host/` and the
+# rest of its imports), and `compileChildApp` rebuilds when anything in that
+# stamp changed after the compile that built the binary started. PLAT-6's
+# verification reverted the stamp to its `app/`-only form and re-ran M38B — a
+# real defect in `host/layout_store.nim`, graded at Tier 2 — and it
+# **SURVIVED**, because the child was never rebuilt and a stale binary graded as
+# a passing one. That is a false GREEN produced by an edit to a file the per-arm
+# SHA-256 check did not cover, so the file that decides whether a grade is real
+# is now covered by it.
 #
 # The same argument reaches three more files, and they are here for it rather
 # than for tidiness — each is compiled INTO the child binary a Tier-2 arm is

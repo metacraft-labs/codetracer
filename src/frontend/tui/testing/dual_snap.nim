@@ -741,8 +741,13 @@ proc childCompileCommand*(stem: string): string =
   ##
   ## `--path:../TermAssertClient/src` and nothing else from the Tier-2 sibling
   ## set: the child talks to the harness, it does not host one.
+  ##
+  ## The `Processing` hint with full paths makes the compiler name every
+  ## module it reads; `compileChildApp` records their directories as the
+  ## child's rebuild stamp (see `processedFiles`).
   let root = repoRoot()
   var cmd = "nim c --styleCheck:usages --styleCheck:error --mm:orc -d:release"
+  cmd.add " --hint:Processing:on --processing:filenames --listFullPaths"
   cmd.add " --path:" & (root / "src" / "frontend" / "viewmodel").quoteShell
   cmd.add " -d:isonimTuiGrammarArchive=" &
           (root / "build" / "grammars" / "libcodetracer_tui_grammars.a")
@@ -761,15 +766,23 @@ const ChildLibraries* = [
   ("isonim", "isonim.nim", "ISONIM_SRC"),
   ("isonim-tui", "isonim_tui.nim", "ISONIM_TUI_SRC"),
   ("nim-termctl", "nim_termctl.nim", "NIM_TERMCTL_SRC"),
+  ("nim-everywhere", "nim_everywhere.nim", ""),
+  ("nim-agents", "nim_agents.nim", ""),
   ("nim-agents-isonim-viewmodels", "nim_agents_isonim_viewmodels.nim", "")]
-  ## The sibling libraries a child app links through `config.nims` and that
-  ## are edited in this workspace: IsoNim's core, the terminal renderer, the
-  ## terminal-control layer under it, and the Agent Harbor viewmodels the
-  ## story host mounts. Each is in the rebuild stamp for the reason
-  ## `newestSourceTime` gives for `app/`; an empty override means
-  ## `config.nims` offers none. The fifth sibling the child links,
-  ## `TermAssertClient`, is not resolved here because there is nothing to
-  ## resolve: `childCompileCommand` names its checkout itself.
+  ## The sibling libraries a child app links through `config.nims`: IsoNim's
+  ## core, the terminal renderer, the terminal-control layer under it, the
+  ## platform seams IsoNim's core imports, and the Agent Harbor records and
+  ## viewmodels the story host mounts. An empty override means `config.nims`
+  ## offers none. The last sibling the child links, `TermAssertClient`, is
+  ## not resolved here because there is nothing to resolve:
+  ## `childCompileCommand` names its checkout itself.
+  ##
+  ## WHICH FILES of these a child read is the compiler's answer, not this
+  ## list's (`processedFiles`). The list answers the question the
+  ## compiler cannot be asked before compiling: which checkout of each the
+  ## compile WOULD read now, so a change of checkout is seen
+  ## (`childBuildInputs`). A sibling missing here still has its files
+  ## stamped; only a switch of its checkout would go unseen.
 
 proc resolvedLibrarySource*(sibling, entry, envVar: string): string =
   ## The `src/` directory the child compile resolves `entry` from, or `""`
@@ -818,8 +831,201 @@ proc childLibrarySourceRoots*(): seq[string] =
       result.add absolutePath(dir)
   result.add repoRoot().parentDir / "TermAssertClient" / "src"
 
-proc newestSourceTime*(stem: string): float =
-  ## The newest modification time among everything a child app is built from.
+type
+  ProcessedFile* = object
+    ## One file the compiler reported reading (see `processedFiles`).
+    path*: string
+    config*: bool
+      ## Read while evaluating a configuration script (`config.nims`), not
+      ## as a module of the program.
+
+proc processedFiles*(compilerOutput: string): seq[ProcessedFile] =
+  ## Every file the compiler reported reading, in first-seen order, from the
+  ## output of `childCompileCommand`. Each line the `Processing` hint prints
+  ## ends in `: <absolute path> [Processing]` (the format is
+  ## `modulegraphs.nim`'s `"$#$# $#: $#: $#"`), and lines printed while a
+  ## configuration script is evaluated carry `(nims)`.
+  ## A file read both by a configuration script and by the program counts as
+  ## the program's.
+  const tail = " [Processing]"
+  for line in compilerOutput.splitLines():
+    let line = line.strip(leading = false)
+    if not line.endsWith(tail):
+      continue
+    let head = line[0 ..< line.len - tail.len]
+    let at = head.rfind(": ")
+    if at < 0:
+      continue
+    let path = head[at + 2 .. ^1]
+    if not path.isAbsolute:
+      continue
+    let config = head.startsWith("Hint: (nims)")
+    var known = false
+    for file in result.mitems:
+      if file.path == path:
+        file.config = file.config and config
+        known = true
+    if not known:
+      result.add ProcessedFile(path: path, config: config)
+
+const
+  KnownComputedReads* = [
+    "nim_agents_isonim_viewmodels" / "agent_harbor" / "fixture_source.nim"]
+    ## Modules whose compile-time reads name a computed path, and which this
+    ## module stamps by hand: `fixture_source` embeds one of the fixture sets
+    ## `agentHarborFixtureDirs` lists, chosen by whether the private manifest
+    ## exists (`childBuildInputs` records that).
+
+proc codeOutsideLiterals(line: string): tuple[code: string;
+                                              literals: seq[(int, string)]] =
+  ## `line` with every string literal blanked out and any trailing `#`
+  ## comment dropped, plus each literal's text and where it began. Only plain
+  ## `"…"` literals are read; a raw, triple-quoted or character literal is left
+  ## in the code, which can only make the scan below call more reads computed.
+  var i = 0
+  while i < line.len:
+    let c = line[i]
+    if c == '#':
+      break
+    if c == '"' and not line.continuesWith("\"\"\"", i) and
+       (i == 0 or line[i - 1] notin IdentChars):
+      var j = i + 1
+      var text = ""
+      while j < line.len and line[j] != '"':
+        if line[j] == '\\' and j + 1 < line.len:
+          text.add line[j .. j + 1]
+          j += 2
+        else:
+          text.add line[j]
+          inc j
+      result.literals.add (i, text)
+      result.code.add '"'
+      result.code.add ' '.repeat(j - i - 1)
+      if j < line.len:
+        result.code.add '"'
+      i = j + 1
+    else:
+      result.code.add c
+      inc i
+
+proc compileTimeReads*(module: string): tuple[files, trees: seq[string];
+                                              computed: bool] =
+  ## What `module` reads at compile time besides the modules it imports,
+  ## which the `Processing` hint does not report: every `staticRead` /
+  ## `slurp` of a literal path, resolved against the module's directory as
+  ## the compiler resolves it; the module's whole directory tree, and any
+  ## literal path the pragma names, when it `{.compile.}`s or `{.link.}`s
+  ## native code (isonim's Yoga sources sit below `yoga_bindings.nim`); and
+  ## whether it reads anything this cannot name.
+  ##
+  ## THE SCAN ERRS TOWARD `computed`, which costs a rebuild, and never toward
+  ## silence, which costs a stale child. Every mention of a reading call in
+  ## code — outside string literals and comments — counts as computed unless
+  ## it is exactly `staticRead("<path>")` or `slurp("<path>")`: command
+  ## syntax, method-call syntax, a concatenated path and every `gorge` /
+  ## `staticExec` command included. A call in a branch the compile never
+  ## takes still counts.
+  const calls = ["staticRead", "slurp", "gorge", "gorgeEx", "staticExec"]
+  let dir = module.parentDir
+  proc resolve(target: string): string =
+    (if target.isAbsolute: target else: dir / target).normalizedPath
+  for line in readFile(module).splitLines():
+    let (code, literals) = codeOutsideLiterals(line)
+    # `codeOutsideLiterals` reads only plain literals and `#` comments. On a
+    # line it may have misread — a character literal, a raw string, a block
+    # comment — any mention of a reading call in the RAW line is computed.
+    if '\'' in line or "#[" in line or "r\"" in line or "R\"" in line:
+      for call in calls:
+        var at = line.find(call)
+        while at >= 0:
+          let after = at + call.len
+          if (at == 0 or line[at - 1] notin IdentChars) and
+             (after >= line.len or line[after] notin IdentChars):
+            result.computed = true
+          at = line.find(call, after)
+    let compact = code.replace(" ", "")
+    if "{." in compact and
+       (compact.contains("compile:") or compact.contains("compile(") or
+        compact.contains("link:") or compact.contains("link(")):
+      if dir notin result.trees:
+        result.trees.add dir
+      for (_, text) in literals:
+        let file = resolve(text)
+        if fileExists(file) and file notin result.files:
+          result.files.add file
+    for call in calls:
+      var at = code.find(call)
+      while at >= 0:
+        let after = at + call.len
+        let isWord = (at == 0 or code[at - 1] notin IdentChars) and
+                     (after >= code.len or code[after] notin IdentChars)
+        if isWord:
+          var literal = false
+          if call in ["staticRead", "slurp"] and
+             code.continuesWith("(\"", after):
+            for (start, text) in literals:
+              if start == after + 1:
+                let close = start + text.len + 1
+                if close + 1 < code.len and code[close] == '"' and
+                   code[close + 1 .. ^1].strip().startsWith(")"):
+                  let file = resolve(text)
+                  if file notin result.files:
+                    result.files.add file
+                  literal = true
+          if not literal:
+            result.computed = true
+        at = code.find(call, after)
+
+proc childStampPath*(stem: string): string =
+  ## The record, beside the binary, of what it was built from (see
+  ## `compileChildApp`).
+  appBinaryPath(stem) & ".stamp"
+
+proc agentHarborFixtureDirs(): seq[string] =
+  ## The fixture sets `nim_agents_isonim_viewmodels/agent_harbor/
+  ## fixture_source` may embed with `staticRead` — its synthetic set, the
+  ## private one beside the workspace, or the directory
+  ## `AGENT_HARBOR_FIXTURES` names. The compiler does not report a
+  ## `staticRead`, and these are not beside the module that reads them.
+  let viewmodels = resolvedLibrarySource("nim-agents-isonim-viewmodels",
+                                         "nim_agents_isonim_viewmodels.nim", "")
+  if viewmodels.len > 0:
+    let checkout = viewmodels.parentDir
+    result.add checkout / "fixtures" / "agent-harbor"
+    result.add checkout.parentDir / "codetracer-pm" / "design" /
+               "agent-harbor-front-end" / "fixtures"
+  let fromEnv = getEnv("AGENT_HARBOR_FIXTURES")
+  if fromEnv.len > 0 and fromEnv != "synthetic" and
+     fromEnv.absolutePath.normalizedPath notin result:
+    result.add fromEnv
+
+proc childBuildInputs(stem: string): seq[string] =
+  ## Everything besides file contents that decides which program the compile
+  ## produces: the compile line, the compiler it runs, the checkout each
+  ## sibling library resolves from (see `ChildLibraries`), and the Agent
+  ## Harbor fixture choice — `fixture_source` embeds the private set when its
+  ## manifest exists, so that existence is an input too.
+  result.add "command " & childCompileCommand(stem)
+  let nim = findExe("nim")
+  result.add "compiler " & (if nim.len > 0: nim.expandFilename else: "")
+  for root in childLibrarySourceRoots():
+    result.add "root " & root
+  result.add "fixtures " & getEnv("AGENT_HARBOR_FIXTURES")
+  for dir in agentHarborFixtureDirs():
+    result.add "fixture-manifest " & dir & " " &
+               $fileExists(dir / "manifest.json")
+
+proc mtimeOf(path: string): float =
+  getFileInfo(path, followSymlink = true).lastWriteTime.toUnixFloat()
+
+proc newestSourceTime*(sources, trees, files: openArray[string]): float =
+  ## The newest modification time among everything a child app is built from:
+  ## every file in `sources` (the directories of the modules the last compile
+  ## read) and the directories themselves, so a file added or deleted there
+  ## counts; every file under `trees`; every one of `files`; the
+  ## configuration and link inputs the compiler does not report; and the
+  ## Agent Harbor fixture sets. A source, tree or file that has gone away
+  ## counts as changed.
   ##
   ## THE APP SOURCE AND THE RUNTIME ARE NOT ENOUGH, and that was measured
   ## rather than reasoned about. CTUI-5's `app_source_pane` is a thin wrapper
@@ -834,97 +1040,102 @@ proc newestSourceTime*(stem: string): float =
   ## binary is a comparison of two different programs, and it fails — or
   ## passes — for a reason that has nothing to do with the renderer.
   ##
-  ## So the whole of `app/` is in the stamp. `app/` is what a child app draws.
-  ## **THE SIBLING LIBRARIES THE CHILD LINKS ARE IN IT TOO**, and an earlier
-  ## version of this comment recorded leaving them out as a deliberate residue
-  ## ("a rebuild on every `isonim-tui` edit would cost the lane a link per
-  ## case"). That cost was misjudged — a stale binary is rebuilt ONCE after an
-  ## edit, not once per case — and the residue bit: CTF-P1b's SGR 58 underline
-  ## colour landed in `isonim-tui`'s `text/ansi`, the story host built before
-  ## it was reused, and the Tier-2 terminal ran the old renderer against a
-  ## Tier-1 model built with the new one. See `childLibrarySourceRoots` for
-  ## which trees, and `compileChildApp` for why the stamp also records WHICH
-  ## checkout of each it read.
-  ##
-  ## **`host/` IS IN THE STAMP TOO, AS OF PLAT-6's PERSISTENCE**, and it is in
-  ## for the reason above rather than for tidiness: `apps/app_layout_persist
-  ## .nim` calls `host/layout_store.restoreLayoutForSession` and
-  ## `persistLayoutForSession` — the two calls `main.nim` makes — so a mutation
-  ## arm against that module would otherwise be graded by a Tier-2 binary built
-  ## before it, which is exactly the false red this paragraph describes. It is a
-  ## small directory and it changes rarely, so the rebuild cost is nearer to
-  ## `test_app_runtime.nim`'s than to `isonim-tui`'s.
+  ## **THE SET IS THE COMPILER'S, NOT A HAND-WRITTEN LIST.** This stamp was a
+  ## list of trees, grown one false red at a time: `app/`, then `host/`
+  ## (PLAT-6), `common/terminal_graphics/` (PLAT-14), `styles/generated/`
+  ## (PLAT-46), the Agent Harbor trees (CTF-P1b). It never caught up. It left
+  ## out the sibling libraries — CTF-P1b's SGR 58 underline colour landed in
+  ## `isonim-tui`'s `text/ansi`, the story host built before it was reused,
+  ## and the Tier-2 terminal ran the old renderer against a Tier-1 model built
+  ## with the new one — and it left out most of `viewmodel/`, `headless_app/`
+  ## and `common/`, which every child imports. Reading the modules from the
+  ## compile itself cannot fall behind an import.
   result = 0.0
-  let src = appSourcePath(stem)
-  if fileExists(src):
-    result = getFileInfo(src).lastWriteTime.toUnixFloat()
-  let tui = repoRoot() / "src" / "frontend" / "tui"
-  let runtime = tui / "testing" / "test_app_runtime.nim"
-  if fileExists(runtime):
-    result = max(result, getFileInfo(runtime).lastWriteTime.toUnixFloat())
-  ## **`src/common/terminal_graphics/` IS IN THE STAMP TOO, AS OF PLAT-14**,
-  ## and for the paragraph above rather than for completeness:
-  ## `apps/app_image_probe.nim` calls `renderCells` and `emitProtocolImage`
-  ## directly, so a mutation arm against the tier renderer or the emitter would
-  ## otherwise be graded by a Tier-2 binary built before it — the exact false
-  ## red CTUI-5 measured, with a different subject. It is a six-file directory
-  ## that changes rarely, so the rebuild cost is nearer to
-  ## `test_app_runtime.nim`'s than to `isonim-tui`'s.
-  ## **`src/frontend/styles/generated/` IS IN THE STAMP AS OF PLAT-46**: every
-  ## colour a child paints is resolved from `design_tokens.nim` there, so a
-  ## token change (a `just sync-design-tokens`, or PLAT-46's derivation
-  ## mutation arms) must rebuild the children like a change under `app/`.
-  ## **`tui/agent_harbor/`, `stories/`, `viewmodel/views/` AND THE AGENT
-  ## HARBOR VIEWMODELS ARE IN THE STAMP AS OF CTF-P1b**, for the same reason:
-  ## `apps/app_agent_harbor_story.nim` draws the Agent Harbor views over the
-  ## story constructors, the shared words and palette, and the viewmodels of
-  ## the sibling `nim-agents-isonim-viewmodels`, and a negative control
-  ## against any of them must not be graded by a binary built before it. (The
-  ## viewmodels are read through `childLibrarySourceRoots`, with the other
-  ## sibling libraries.)
-  for dir in @[tui / "app", tui / "host", tui / "agent_harbor",
-               repoRoot() / "src" / "common" / "terminal_graphics",
-               repoRoot() / "src" / "frontend" / "styles" / "generated",
-               repoRoot() / "src" / "frontend" / "stories",
-               repoRoot() / "src" / "frontend" / "viewmodel" / "views"] &
-              childLibrarySourceRoots():
+  var paths = @[repoRoot() / "config.nims",
+                repoRoot() / "reprobuild.paths",
+                repoRoot() / "repro.paths",
+                repoRoot() / "src" / "frontend" / "tui" / "tests" / "config.nims",
+                repoRoot() / "build" / "grammars" / "libcodetracer_tui_grammars.a",
+                repoRoot() / "build" / "grammars" / "tui-link-flags.txt"]
+  for dir in sources:
     if not dirExists(dir):
-      continue
-    for path in walkDirRec(dir):
-      if path.endsWith(".nim"):
-        result = max(result, getFileInfo(path).lastWriteTime.toUnixFloat())
-
-proc childStampRootsPath*(stem: string): string =
-  ## The record, beside the binary, of which library checkouts it was built
-  ## from (see `compileChildApp`).
-  appBinaryPath(stem) & ".roots"
-
-proc childStampRoots(): string =
-  childLibrarySourceRoots().join("\n") & "\n"
+      return Inf
+    paths.add dir
+    for kind, path in walkDir(dir):
+      if kind in {pcFile, pcLinkToFile}:
+        paths.add path
+  for dir in trees:
+    if not dirExists(dir):
+      return Inf
+    for path in walkDirRec(dir, yieldFilter = {pcFile, pcLinkToFile, pcDir}):
+      paths.add path
+  for file in files:
+    if not fileExists(file):
+      return Inf
+    paths.add file
+  for dir in agentHarborFixtureDirs():
+    if dirExists(dir):
+      paths.add dir
+      for path in walkDirRec(dir, yieldFilter = {pcFile, pcLinkToFile, pcDir}):
+        paths.add path
+  for path in paths:
+    if fileExists(path) or dirExists(path):
+      result = max(result, mtimeOf(path))
 
 proc childAppIsCurrent*(stem: string): bool =
-  ## Whether `bin/<stem>` may be reused: it exists, it is newer than every
-  ## file in `newestSourceTime`'s set, and it was built from the library
-  ## checkouts the compile would resolve now.
+  ## Whether `bin/<stem>` may be reused: it exists, its stamp records the
+  ## build inputs the compile would use now and names nothing it cannot
+  ## check, and nothing it names changed after the compile that built it
+  ## STARTED — an edit made while the compiler ran may have been read, or
+  ## may not.
   let bin = appBinaryPath(stem)
-  if not fileExists(bin):
+  let stamp = childStampPath(stem)
+  if not fileExists(bin) or not fileExists(stamp):
     return false
-  let roots = childStampRootsPath(stem)
-  if not fileExists(roots) or readFile(roots) != childStampRoots():
+  var inputs, sources, trees, files: seq[string]
+  var started = -1.0
+  for line in readFile(stamp).splitLines():
+    let space = line.find(' ')
+    if space < 0:
+      continue
+    let (key, value) = (line[0 ..< space], line[space + 1 .. ^1])
+    case key
+    of "source": sources.add value
+    of "tree": trees.add value
+    of "file": files.add value
+    of "started":
+      try: started = parseFloat(value)
+      except ValueError: return false
+    of "volatile": return false
+    of "binary":
+      # The binary this stamp describes, so one replaced under a valid stamp
+      # (two compiles of one stem racing) is not trusted.
+      let info = getFileInfo(bin)
+      if value != $info.lastWriteTime.toUnixFloat() & " " & $info.size:
+        return false
+    else: inputs.add line
+  if inputs != childBuildInputs(stem) or sources.len == 0 or started < 0:
     return false
-  getFileInfo(bin).lastWriteTime.toUnixFloat() > newestSourceTime(stem)
+  newestSourceTime(sources, trees, files) < started
 
 proc compileChildApp*(stem: string) =
   ## Compile `tests/apps/<stem>.nim` unless `childAppIsCurrent` says the
   ## binary may be reused. Never skips on failure: a child that will not
   ## compile is the defect, and it is reported with the compiler's own output.
   ##
+  ## After each successful link, `<bin>.stamp` records the build inputs
+  ## (`childBuildInputs`), when the compile started, the directory of every
+  ## module the compiler read (`processedFiles`), and what those modules read
+  ## at compile time besides (`compileTimeReads`). A module that reads
+  ## something the scan cannot name marks the child `volatile`: it is rebuilt
+  ## every time rather than trusted. A binary with no stamp — like every
+  ## binary built before the stamp existed — or with different inputs is
+  ## rebuilt.
+  ##
   ## MODIFICATION TIMES ALONE CANNOT SEE A CHANGE OF CHECKOUT. Pointing
   ## `ISONIM_TUI_SRC` at a pinned or older tree changes what the child links
-  ## while every file in the stamp gets OLDER, so the stale binary would win.
-  ## The resolved library roots are therefore written to `<bin>.roots` after
-  ## each successful link, and a binary whose record differs — or that has
-  ## none, like every binary built before the record existed — is rebuilt.
+  ## while every file in the stamp gets OLDER, so the stale binary would win;
+  ## the recorded library roots are what see it.
   let src = appSourcePath(stem)
   if not fileExists(src):
     raise newException(DualSnapError, "child app source missing: " & src)
@@ -932,15 +1143,56 @@ proc compileChildApp*(stem: string) =
   createDir(bin.parentDir)
   if childAppIsCurrent(stem): return
   # Removed BEFORE the compile so a failed one cannot leave an old binary
-  # beside a record that still matches it.
-  removeFile(childStampRootsPath(stem))
-  let roots = childStampRoots()
+  # beside a stamp that still matches it.
+  removeFile(childStampPath(stem))
+  var stamp = childBuildInputs(stem)
+  # Taken before the compiler reads anything, and compared with `<`, so an
+  # edit during the compile is never mistaken for one it saw.
+  stamp.add "started " & $getTime().toUnixFloat()
   let (output, code) = execCmdEx(childCompileCommand(stem))
   if code != 0:
     raise newException(DualSnapError,
       "child app '" & stem & "' failed to compile (exit " & $code & "):\n" &
       childCompileCommand(stem) & "\n" & output)
-  writeFile(childStampRootsPath(stem), roots)
+  let processed = processedFiles(output)
+  if processed.len == 0:
+    raise newException(DualSnapError,
+      "child app '" & stem & "' compiled, but the compiler named no module " &
+      "it read, so there is nothing to stamp it with:\n" & output)
+  # The compiler's own library is not scanned: it changes only with the
+  # compiler, which `childBuildInputs` records, and it declares the very calls
+  # the scan looks for. Its directory is the one `system.nim` came from.
+  var compilerLib = ""
+  for file in processed:
+    if file.path.extractFilename == "system.nim":
+      compilerLib = file.path.parentDir & DirSep
+      break
+  var sources, trees, files, volatile: seq[string]
+  for file in processed:
+    let dir = file.path.parentDir
+    if dir notin sources:
+      sources.add dir
+    if file.config or not file.path.endsWith(".nim") or
+       not fileExists(file.path) or
+       (compilerLib.len > 0 and file.path.startsWith(compilerLib)):
+      continue
+    let reads = compileTimeReads(file.path)
+    for tree in reads.trees:
+      if tree notin trees: trees.add tree
+    for read in reads.files:
+      if read notin files: files.add read
+    var known = false
+    for module in KnownComputedReads:
+      known = known or file.path.endsWith(DirSep & module)
+    if reads.computed and not known:
+      volatile.add file.path
+  for dir in sources: stamp.add "source " & dir
+  for dir in trees: stamp.add "tree " & dir
+  for file in files: stamp.add "file " & file
+  for module in volatile: stamp.add "volatile " & module
+  let info = getFileInfo(bin)
+  stamp.add "binary " & $info.lastWriteTime.toUnixFloat() & " " & $info.size
+  writeFile(childStampPath(stem), stamp.join("\n") & "\n")
 
 # ---------------------------------------------------------------------------
 # Barriers
