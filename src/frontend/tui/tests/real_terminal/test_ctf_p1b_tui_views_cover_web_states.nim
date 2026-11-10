@@ -94,7 +94,7 @@ from ../../../viewmodel/views/agent_harbor_words import tabLabelOf, filterCount,
   countsText, activityLineIsError
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling.
-const ExpectedAssertions = 86
+const ExpectedAssertions = 89
 
 const
   Stem = "app_agent_harbor_story"
@@ -798,13 +798,12 @@ proc styleProblems(m: AhTuiMount; look: LookOf): seq[string] =
         result.add "auto-switch is on and draws no dot"
       else:
         result.expectInk(look, dot, rows, "the auto-switch dot", p.borderAction)
-    # Previous / Next while nothing waits: the label at half opacity over
-    # the bar, as the browser draws them (`InboxStepDisabledAlpha`).
+    # Previous / Next: in the disabled role while nothing waits, as the
+    # browser draws them; in the label role while something does.
     for e in view.all("step"):
       result.expectInk(look, e, rows, "the inbox step " & e.attr("button") &
                        " (" & e.attr("step") & ")",
-                       if vm.inboxPosition.len == 0:
-                         blendOver(p.textLabel & InboxStepDisabledAlpha, t.frame)
+                       if vm.inboxPosition.len == 0: p.textDisabled
                        else: p.textLabel)
   of "agent-harbor-initiatives":
     let vm = m.initiatives
@@ -1162,6 +1161,15 @@ suite "CTF-P1b: the round-2 layout checks can fail":
     let step = m.view.first("step")
     ck step.attr("step") == "disabled"
     m.repaint(step, ahPalette(dmLight).textLabel)
+    ck styleProblems(m, m.gridLook()).join(" ").contains("the inbox step")
+    m.dispose()
+
+  test "an arrow drawn disabled while a session waits is reported":
+    let m = mountStory(storyOf("agent-harbor-initiative-tabs", "next"), 180, 56, dmLight)
+    ck styleProblems(m, m.gridLook()).len == 0
+    let step = m.view.first("step")
+    ck step.attr("step") == "enabled"
+    m.repaint(step, ahPalette(dmLight).textDisabled)
     ck styleProblems(m, m.gridLook()).join(" ").contains("the inbox step")
     m.dispose()
 

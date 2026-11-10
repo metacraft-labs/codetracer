@@ -385,14 +385,18 @@ proc inkProblems(m: AhStoryMount; mode: DesignMode): seq[string] =
   of "agent-harbor-fleet":
     if m.fleet.state.val == asReady: result = fleetInkProblems(m.view, m.fleet, p)
   of "agent-harbor-initiative-tabs":
-    # Previous / Next: the label role, at half opacity while nothing waits
-    # (what the browser computes: `InboxStepDisabledAlpha`).
-    let opacity = if m.initiativeTabs.inboxPosition.len == 0: "0.5" else: "1"
+    # Previous / Next: the disabled role while nothing waits, the label role
+    # while something does (what the browser computes). Each step is drawn
+    # at full opacity: the colour alone says whether it can be pressed.
+    let empty = m.initiativeTabs.inboxPosition.len == 0
+    let wanted = if empty: p.textDisabled else: p.textLabel
     for e in m.view.all("step"):
-      if e.attr("ink") != p.textLabel or e.attr("ink-opacity") != opacity:
+      if e.attr("step") != (if empty: "disabled" else: "enabled"):
+        result.add "the inbox step " & e.attr("button") & " is marked " & e.attr("step") &
+                   " while the inbox is " & (if empty: "empty" else: "not empty")
+      if e.attr("ink") != wanted:
         result.add "the inbox step " & e.attr("button") & " (" & e.attr("step") &
-                   ") is drawn in " & e.attr("ink") & " at opacity " & e.attr("ink-opacity") &
-                   ", not " & p.textLabel & " at " & opacity
+                   ") is drawn in " & e.attr("ink") & ", not " & wanted
     # Auto-switch on: its dot in the action border role in both modes
     # (`.ah-inbox-auto-on::before`: `colors-ui-border-action`).
     for e in m.view.all("auto-switch"):
@@ -624,8 +628,20 @@ suite "CTF-P1b: the fleet's and the inbox's inks follow the shared rules":
           if f.attr("active") == "true": r.tag(f.first("ink"), "ink", p.textDisabled)
         ck inkProblems(m, dmLight).join(" ").contains("the count of filter")
       else:
-        r.tag(m.view.first("step"), "ink-opacity", "1")
+        r.tag(m.view.first("step"), "ink", p.textLabel)
         ck inkProblems(m, dmLight).join(" ").contains("the inbox step")
+      m.dispose()
+
+  test "an arrow drawn disabled while a session waits is reported":
+    for mode in [dmDark, dmLight]:
+      gpui_reset_tree()
+      let m = r.mountAgentHarborStoryGpui("agent-harbor-initiative-tabs", "next",
+                                          1440, 900, mode)
+      ck inkProblems(m, mode).len == 0
+      let step = m.view.first("step")
+      ck step.attr("step") == "enabled"
+      r.tag(step, "ink", ahPalette(mode).textDisabled)
+      ck inkProblems(m, mode).join(" ").contains("the inbox step")
       m.dispose()
 
   test "the auto-switch dot in the action surface's colour is reported":
@@ -665,4 +681,4 @@ suite "CTF-P1b: the GPUI views share the viewmodels, not the web views":
 
 suite "CTF-P1b: assertion count":
   test "every assertion ran":
-    check countedAssertions == 48
+    check countedAssertions == 54

@@ -86,17 +86,6 @@ type
     colour*: string
     ring*: bool
 
-const
-  InboxStepDisabledAlpha* = "80"
-    ## Previous / Next with nothing waiting: the label role at half opacity,
-    ## as the browser computes it (`.ah-initiative-tab-bar .ah-inbox-step`
-    ## sets the label colour and `.ah-inbox-empty .ah-inbox-step` `opacity:
-    ## 0.5`; that file's earlier `.ah-inbox-empty .ah-inbox-step` colour,
-    ## the disabled role, is overridden by the later rule and never
-    ## applies). 0x80 of 255 is 0.502: a renderer with opacity draws the
-    ## label at 0.5, one without blends `textLabel & InboxStepDisabledAlpha`
-    ## over the bar.
-
 proc ahPalette*(mode: DesignMode): AhPalette =
   template t(token: DesignToken): string = DesignTokenHex[token][mode]
   AhPalette(
@@ -150,6 +139,13 @@ proc ahPalette*(mode: DesignMode): AhPalette =
     # 0.28 of 255 is 71.4: alpha 0x47.
     selectedTint: (if mode == dmDark: t(dtColorsUiSurfaceActionPrimary) & "47"
                    else: t(dtColorsUiSurfacePrimarySecondaryHover)))
+
+proc inboxStepInk*(p: AhPalette; disabled: bool): string =
+  ## The inbox's Previous / Next (`.ah-inbox-step`): the label role while
+  ## a session waits, the disabled role at full opacity while nothing does
+  ## (`.ah-initiative-tab-bar .ah-inbox-empty .ah-inbox-step`). The steps
+  ## wrap, so an empty inbox is the only state they are disabled in.
+  if disabled: p.textDisabled else: p.textLabel
 
 # ---------------------------------------------------------------------------
 # Status colours: `agent_harbor.styl`'s `.ah-att-*`, `.ah-ist-*`, `.ah-ms-*`

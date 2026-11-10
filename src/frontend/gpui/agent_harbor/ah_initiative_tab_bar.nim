@@ -285,14 +285,11 @@ proc inboxStep(r: GpuiRenderer; p: AhPalette; arrow: string; onClick: proc();
                           ("justify", "center"), ("padding-left", "6px"),
                           ("padding-right", "6px"), ("flex-shrink", "0"),
                           ("rounded", $ControlRadiusPx & "px"), ("cursor", cursorOf(hkControl))])
-  # With nothing waiting, the label role at half opacity, as the browser
-  # computes it (`InboxStepDisabledAlpha`).
-  let ink = p.textLabel
-  let words = r.text(arrow, BodyLargePx, ink, shrink = false)
-  if disabled: r.setStyle(words, "opacity", "0.5")
-  r.appendChild(result, words)
+  # With nothing waiting the step has nowhere to go: the disabled role at
+  # full opacity, as the browser draws it; the label role otherwise.
+  let ink = inboxStepInk(p, disabled)
+  r.appendChild(result, r.text(arrow, BodyLargePx, ink, shrink = false))
   r.tag(result, "ink", ink)
-  r.tag(result, "ink-opacity", if disabled: "0.5" else: "1")
   r.tag(result, "button", arrow)
   r.tag(result, "step", if disabled: "disabled" else: "enabled")
   r.addEventListener(result, "click", onClick)

@@ -239,11 +239,9 @@ proc drawInbox(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStripVM; row, c
   let shown = inboxShown(vm)
   let n = c.node(parent, row, col, inboxCells(vm), 1, [("inbox", shown)])
   # With nothing waiting the steps have nowhere to go: drawn as the browser
-  # draws them, the label at half opacity (`InboxStepDisabledAlpha`), here
-  # blended over the bar, so they do not look pressable.
-  let stepInk = if vm.inboxPosition.len == 0:
-                  blendOver(c.p.textLabel & InboxStepDisabledAlpha, c.bgAt(row, col))
-                else: c.p.textLabel
+  # draws them, in the disabled role, so they do not look pressable; in the
+  # label role otherwise.
+  let stepInk = inboxStepInk(c.p, vm.inboxPosition.len == 0)
   let stepState = if vm.inboxPosition.len == 0: "disabled" else: "enabled"
   var at = col
   discard c.put(row, at, " \xE2\x86\x90 ", stepInk)

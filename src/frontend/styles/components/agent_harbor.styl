@@ -1868,9 +1868,6 @@ AH_MARK = 0.5rem
 .ah-inbox-position
   color: colors-ui-text-primary-label
 
-.ah-inbox-empty .ah-inbox-step
-  opacity: 0.5
-
 // The chip and its menu: the menu drops from the chip.
 .ah-elsewhere-anchor
   position: relative
@@ -2296,6 +2293,19 @@ AH_MARK = 0.5rem
   &:hover
     background-color: colors-ui-surface-primary-secondary-hover !important
     color: colors-ui-text-primary-body
+
+// Previous / Next with nothing waiting have nowhere to go (the steps wrap, so
+// an empty inbox is the only state in which they are disabled): drawn in the
+// disabled role at full opacity, as CodeTracer's own disabled buttons are
+// (`button:disabled`, button.styl), and they do not light up under the
+// pointer. One class more than the ghost rule above, which would otherwise
+// paint them in the label role, as it did while this read `opacity: 0.5`.
+.ah-initiative-tab-bar .ah-inbox-empty .ah-inbox-step
+  color: colors-ui-text-primary-disabled
+
+  &:hover
+    background-color: transparent !important
+    color: colors-ui-text-primary-disabled
 
 .ah-tab-strip.overflow-open .ah-tab-overflow-count,
 .ah-elsewhere.ah-elsewhere-open

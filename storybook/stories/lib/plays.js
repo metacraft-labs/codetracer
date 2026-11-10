@@ -81,6 +81,54 @@ const initiativesCheck = (assert) => hostCheck(".agent-harbor-initiatives", asse
 const progressCheck = (assert) => hostCheck(".agent-harbor-progress", assert);
 const initiativeTabsCheck = (assert) => hostCheck(".ah-initiative-tab-bar", assert);
 
+// The inbox's Previous / Next: the colour each arrow computes to, and the
+// colours of the two roles it may take in the theme in view. The disabled
+// role is read from a disabled `<button>` (CodeTracer's own `button:disabled`
+// rule), the label role from a `.ah-inbox-position` inside the bar (the
+// bar's rule draws the position in it). Transitions are held off while
+// reading, so a value is the settled one, not a frame of a colour fade.
+function settledColor(node) {
+  const before = node.style.transition;
+  node.style.transition = "none";
+  try {
+    return getComputedStyle(node).color;
+  } finally {
+    node.style.transition = before;
+  }
+}
+
+function inboxRoleColors(el) {
+  const group = el.querySelector(".ah-initiative-tab-bar .ah-inbox");
+  const label = document.createElement("span");
+  label.className = "ah-inbox-position";
+  const disabled = document.createElement("button");
+  disabled.disabled = true;
+  group.appendChild(label);
+  el.appendChild(disabled);
+  try {
+    return { label: settledColor(label), disabled: settledColor(disabled) };
+  } finally {
+    label.remove();
+    disabled.remove();
+  }
+}
+
+// Each arrow in the disabled role at full opacity while nothing waits (an
+// empty inbox is the only state the wrapping steps are disabled in), in the
+// label role otherwise; the two roles differ, so the arrows read differently.
+function expectInboxStepInk(el) {
+  const group = el.querySelector(".ah-initiative-tab-bar .ah-inbox");
+  const steps = group.querySelectorAll(".ah-inbox-step");
+  expect(steps.length).toBe(2);
+  const roles = inboxRoleColors(el);
+  expect(roles.disabled).not.toBe(roles.label);
+  const wanted = group.classList.contains("ah-inbox-empty") ? roles.disabled : roles.label;
+  for (const step of steps) {
+    expect(settledColor(step)).toBe(wanted);
+    expect(getComputedStyle(step).opacity).toBe("1");
+  }
+}
+
 // --- Terminal output ------------------------------------------------------
 
 function terminalCheck(assert) {
@@ -263,6 +311,18 @@ export const plays = {
     const steps = el.querySelectorAll(".ah-inbox-step");
     const position = el.querySelector(".ah-inbox-position")?.textContent ?? steps[steps.length - 1]?.getAttribute("title");
     expect(position).toMatch(/of \d+|waiting|empty/);
+    // Something waits here: the arrows are pressable, in the label role.
+    expect(el.querySelector(".ah-inbox").classList.contains("ah-inbox-empty")).toBe(false);
+    expectInboxStepInk(el);
+    // The same arrows with nothing waiting take the disabled role: the
+    // empty inbox's rule is not overridden by the bar's own colour rule.
+    const group = el.querySelector(".ah-inbox");
+    group.classList.add("ah-inbox-empty");
+    try {
+      expectInboxStepInk(el);
+    } finally {
+      group.classList.remove("ah-inbox-empty");
+    }
   }),
   "agent-harbor-initiative-tabs-recordings": initiativeTabsCheck(async (el) => {
     await waitFor(el, ".ah-rec-button");
@@ -281,6 +341,9 @@ export const plays = {
   }),
   "agent-harbor-initiative-tabs-empty": initiativeTabsCheck(async (el) => {
     expect(el.querySelector(".ah-tab-empty")?.textContent).toContain("No initiative");
+    // Nothing waits: the arrows are drawn disabled, not pressable.
+    await waitFor(el, ".ah-inbox.ah-inbox-empty");
+    expectInboxStepInk(el);
   }),
   "agent-harbor-initiative-tabs-loading": initiativeTabsCheck(async (el) => {
     expect(el.querySelector(".ah-tab-loading")?.textContent).toContain("Loading");
