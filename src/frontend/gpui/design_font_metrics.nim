@@ -260,6 +260,10 @@ const
     t
   LabelLetterSpacing* = -0.14
     ## The desktop's tab and strip labels (`.lm_tab` `letter-spacing`).
+  LabelLetterSpacingCss* = $LabelLetterSpacing & "px"
+    ## The same spacing as the `letter-spacing` style a label is DRAWN with:
+    ## a label's box is sized with `LabelLetterSpacing`, so its glyphs must be
+    ## set with exactly that (isonim-gpui's `SpacedText` draws it).
 
 func groteskTextWidth*(s: string; sizePx: float; letterSpacing = 0.0;
                        tabular = false; kerned = false): float =

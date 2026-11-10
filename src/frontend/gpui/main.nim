@@ -1987,6 +1987,8 @@ proc drawStrip(r: GpuiRenderer; st: GeomStrip;
       r.setStyle(slot, "flex-direction", "row")
       r.setStyle(slot, "padding-left", $TabPadPx & "px")
       r.setStyle(slot, "white-space", "nowrap")
+      # Measured with `LabelLetterSpacing` (`slotExtentPx`), so drawn with it.
+      r.setStyle(slot, "letter-spacing", LabelLetterSpacingCss)
       r.appendChild(slot, r.createTextNode(sl.label))
     else:
       r.setStyle(slot, "flex-direction", "column")
@@ -5244,6 +5246,7 @@ proc drawFooter(r: GpuiRenderer) =
       r.setAttribute(b, "data-ct-dock-slot", sl.pane)
       r.setAttribute(b, "data-ct-tab-active", $shown)
       r.setStyle(b, "padding-left", $SlotPadPx & "px")
+      r.setStyle(b, "letter-spacing", LabelLetterSpacingCss)
       r.setStyle(b, "rounded", $TabRadiusPx & "px")
       r.setStyle(b, "color", if shown: chromeOf(crTabActiveForeground) else: ink)
       text(r, b, sl.label)

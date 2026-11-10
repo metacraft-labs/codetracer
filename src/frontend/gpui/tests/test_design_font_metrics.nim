@@ -30,6 +30,9 @@ suite "design_font_metrics: one budget per character":
     # the module's table was checked against.
     check groteskTextPx("BUILD", 14.0, LabelLetterSpacing) == 38
 
+  test "the drawn letter-spacing is the measured one":
+    check LabelLetterSpacingCss == "-0.14px"
+
   test "letter spacing is added once per character":
     let plain = groteskTextWidth("a\xC2\xB7b", 14.0)          # "a·b"
     let spaced = groteskTextWidth("a\xC2\xB7b", 14.0, -0.5)

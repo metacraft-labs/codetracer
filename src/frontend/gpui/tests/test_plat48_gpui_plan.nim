@@ -35,6 +35,7 @@ import codetracer_embed
 import headless_app/layout_model
 import gpui/chrome
 import gpui/window_geometry
+import gpui/design_font_metrics
 import gpui/window_top_bar
 import gpui/app/dock_projection
 import views/debug_control_marks
@@ -46,7 +47,12 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 243
+  ExpectedAssertions = 248
+    ## 247 -> 248: the top strip's label too. Measured.
+    ## 243 -> 247 (2026-11-10, issue gpui-shell-measures-panel-tab-labels-with-
+    ## letter-spacing-but-draws-them-without): each of the footer strip's four
+    ## labels is asserted to be drawn with the spacing it is measured with.
+    ## Measured.
     ## 222 -> 243 (M76, codetracer#843): the Debug menu's Stop and point
     ## items drawn enabled (+15), and Shift+F5 ending the session (+6).
     ## Measured.
@@ -299,6 +305,11 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     for s in strips[0].nodesWith("data-ct-dock-slot"):
       labels.add s.textOf
       ck s.attr("data-ct-tab-active") == "false"
+      # A label is drawn with the spacing its box is measured with
+      # (`slotExtentPx` uses `LabelLetterSpacing`): the issue 2026-11-10-gpui-
+      # shell-measures-panel-tab-labels-with-letter-spacing-but-draws-them-
+      # without.
+      ck s{"styles"}{"letter_spacing"}.getStr == LabelLetterSpacingCss
     var want: seq[string] = @[]
     for d in sharedDefaultDocked(): want.add d.title
     ck labels == want
@@ -465,6 +476,8 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     if not top.isNil:
       for s in top.nodesWith("data-ct-dock-slot"):
         slots.add s.attr("data-ct-dock-slot")
+        # The top strip's label is measured with `LabelLetterSpacing` too.
+        ck s{"styles"}{"letter_spacing"}.getStr == LabelLetterSpacingCss
     ck slots == @[$paneState]
     # No pane box holds State any more: no tab of the tree is State's.
     ck plan.tabPanes().len > 0
