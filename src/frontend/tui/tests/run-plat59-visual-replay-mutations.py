@@ -91,16 +91,45 @@ SUBJECTS = [PANES, PLAYER, FRAME, HISTORY, CLIENT, PRODUCER, OPEN, CHANNEL, TUI_
             GPUI_MAIN, VOCAB, FACTORY]
 SUITES = [VMU, TBL, PTY, PLAN, SPEC, REFUSAL]
 
-TBL_ADD = "*::the panes are added as the desktop adds them, additively"
 TBL_REFUSED = "*::a recording the engine refuses opens with its graphics, and says why"
-TBL_FRAMES = "*::the frame at three positions is the program's, and the desktop's"
-TBL_SCRUB = "*::the scrubber holds, follows the pointer and settles on the release"
-TBL_DRAW = "*::the nested draw-call scrubber shows a frame's draw calls"
-TBL_PICK = "*::the picker's magnifier picks a source pixel and its history loads"
-TBL_NAV = "*::a history row navigates: the Video Player shows its draw call"
-TBL_TIER0 = "*::at tier 0 the frame is transmitted over the cells the pane reserves"
-TBL_VOCAB = "*::the vocabulary's Video Player view says the shared words"
-TBL_KEYS = "*::the desktop's keys, scoped to the Video Player"
+# The terminal suite's other cases are ONE scenario over one session, in this
+# order: a case starts from the state the cases before it left (the Video
+# Player's tab shown and focused by FRAMES, the pixel PICK commits, ...). A
+# filter naming one such case alone runs it from a fresh session, where it
+# cannot pass: NAV finds no history rows to press (`hs.listTop >= 0` fails,
+# then `entries[n - 1]` raises), and SCRUB, DRAW, PICK and TIER0 find the
+# Video Player's tab not shown. Measured at 51f358391: those five RED alone,
+# the whole binary GREEN. So a scenario case is graded together with the
+# cases that precede it (`std/unittest` takes several name filters and runs
+# the matching tests in suite order).
+TBL_SCENARIO = [
+    "*::the panes are added as the desktop adds them, additively",
+    "*::the frame at three positions is the program's, and the desktop's",
+    "*::the scrubber holds, follows the pointer and settles on the release",
+    "*::the nested draw-call scrubber shows a frame's draw calls",
+    "*::the picker's magnifier picks a source pixel and its history loads",
+    "*::a history row navigates: the Video Player shows its draw call",
+    "*::shader debug shows the fragment and the shader's source",
+    "*::at tier 0 the frame is transmitted over the cells the pane reserves",
+    "*::the vocabulary's Video Player view says the shared words",
+    "*::the desktop's keys, scoped to the Video Player",
+]
+
+
+def through(case):
+    """The scenario's filters from its first case through `case`."""
+    return tuple(TBL_SCENARIO[:TBL_SCENARIO.index(case) + 1])
+
+
+TBL_ADD = through(TBL_SCENARIO[0])
+TBL_FRAMES = through(TBL_SCENARIO[1])
+TBL_SCRUB = through(TBL_SCENARIO[2])
+TBL_DRAW = through(TBL_SCENARIO[3])
+TBL_PICK = through(TBL_SCENARIO[4])
+TBL_NAV = through(TBL_SCENARIO[5])
+TBL_TIER0 = through(TBL_SCENARIO[7])
+TBL_VOCAB = through(TBL_SCENARIO[8])
+TBL_KEYS = through(TBL_SCENARIO[9])
 PLAN_FRAMES = "*::the frame at three positions: the program's pixels, the desktop's"
 PLAN_DRAW = "*::the nested draw-call scrubber shows a frame's draw calls"
 PLAN_PICK = "*::the picker's loupe, a pick, the pixel's history and its navigation"
@@ -149,7 +178,7 @@ ARMS = [
               '  if total > 0: "Frame " & $at & " / " & $total')],
      [(TBL, TBL_FRAMES), (PTY, None)],
      "the frame label counts frames instead of naming the last one"),
-    ("V12", [(PLAYER, "  discard vm.scrubRevision.val\n", "")],
+    ("V12", [(PLAYER, "  discard vm.scrubRevision.val", "")],
      [(VMU, None)],
      "the desktop's frame label freezes on the frame a drag pressed"),
     ("C1", [(CLIENT, "        else: postJson(pixelHistoryUrl(baseUrl, x, y, frame),\n"
@@ -219,7 +248,10 @@ ARMS = [
      "a held scrubber does not follow the pointer"),
     ("T8", [(RUNTIME, '  key in ["Space", "k", "K", "j", "J", "l", "L", "Left", "Right",',
              '  key in ["k", "K", "j", "J", "l", "L", "Left", "Right",')],
-     [(PTY, None)],
+     # The scrubber case's Space pauses on a session that is playing; the
+     # pty suite's Space is skipped when playback already ended by itself, so
+     # alone it let this arm survive (measured at 258f46856).
+     [(TBL, TBL_SCRUB), (PTY, None)],
      "Space is not the Video Player's"),
     ("T9", [(RUNTIME, "  if on:", "  if false:")],
      [(TBL, TBL_ADD), (PTY, None)],
@@ -247,7 +279,7 @@ ARMS = [
     ("G4", [(GPUI_MAIN, "    if hit.kind == gvHistoryRow:", "    if false:")],
      [(PLAN, PLAN_PICK)],
      "a GPUI press on a history row does nothing"),
-    ("G6", [(GPUI_MAIN, "  if pane in gPanesArmed:\n    return\n", "")],
+    ("G6", [(GPUI_MAIN, "  if pane in gPanesArmed:\n    return", "")],
      [(PLAN, PLAN_KEYS)],
      "every key in the window runs twice: a press of Right steps two frames"),
     ("G5", [(GPUI_MAIN, '      of "end": action = some(VpaJumpEnd)',
@@ -275,10 +307,12 @@ IN_BINARY = {PANES, PLAYER, FRAME, HISTORY, CLIENT, PRODUCER, TUI_PANE,
              TUI_PANES, BINDING, RUNTIME, HOST, FRAME_IMAGE, VOCAB}
 IN_GPUI = {PANES, PLAYER, FRAME, HISTORY, CLIENT, PRODUCER, GPUI_LEAF,
            GPUI_MAIN, VOCAB}
-IN_DESKTOP = set()
-  # The desktop's spec is run by `$PLAT59_DESKTOP_TEST` (the capture recipe),
-  # which compiles the renderer from the checkout as it stands: an arm's
-  # defect needs no separate build.
+IN_DESKTOP = {FACTORY}
+  # The desktop's spec runs the desktop `just build-once` built — neither
+  # `$PLAT59_DESKTOP_TEST` (the capture recipe) nor `npx playwright test`
+  # compiles the renderer — so an arm in the desktop's client is graded
+  # after a `build-once` of the mutated tree. Without it D1 graded the
+  # unmutated desktop and survived (measured at 258f46856).
 PTY_SUITES = {PTY}
 GPUI_SUITES = {PLAN}
 DESKTOP_SUITES = {SPEC}
@@ -385,9 +419,25 @@ def build_desktop():
     return build_with("PLAT59_BUILD_DESKTOP", "build-once")
 
 
+def without_local_paths(line):
+    """The line with this checkout's root and the visual-replay fixture's
+    directory written as `<repo>` and `<fixture>`. A GPUI run that fails
+    names its command line, fixture path included, so a cause recorded
+    verbatim held one checkout's absolute path: it matched only in the
+    checkout it was derived in, and put a home directory into the tree
+    (G5, 2026-11-11)."""
+    fixture = os.environ.get("CODETRACER_VISUAL_REPLAY_FIXTURE", "")
+    if fixture:
+        line = line.replace(str(Path(fixture).resolve()), "<fixture>")
+        line = line.replace(fixture, "<fixture>")
+    return line.replace(str(REPO), "<repo>")
+
+
 def portable_cause(line):
     """A pty suite's wait names its condition and then snapshots the screen;
-    the recorded cause keeps the condition and drops the snapshot."""
+    the recorded cause keeps the condition and drops the snapshot, and
+    names no local path (`without_local_paths`)."""
+    line = without_local_paths(line)
     head, sep, _rest = line.partition("; screen:")
     if sep:
         return head
@@ -405,16 +455,23 @@ def run_spec(suite):
         ["npx", "playwright", "test", suite.split("src/tests/gui/", 1)[1],
          "--reporter=line"]
     cwd = REPO if cmd else REPO / "src/tests/gui"
+    # The spec writes what it read to `$PLAT59_ANSWERS_OUT`, by default the
+    # committed reference the native suites assert against: a graded run (a
+    # mutated desktop among them) writes a scratch copy instead.
+    NIMCACHE.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ)
+    env.setdefault("PLAT59_ANSWERS_OUT",
+                   str(NIMCACHE / "plat59-visual-replay.electron.json"))
     try:
         p = subprocess.run(argv, cwd=cwd, capture_output=True, text=True,
-                           timeout=TIMEOUT)
+                           timeout=TIMEOUT, env=env)
     except subprocess.TimeoutExpired:
         return "HUNG", []
     out = (p.stdout or "") + (p.stderr or "")
     if p.returncode == 0:
         return ("GREEN", []) if " passed" in out else ("RAN-NOTHING", [])
     plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
-    first = [ln.strip() for ln in plain.splitlines()
+    first = [without_local_paths(ln.strip()) for ln in plain.splitlines()
              if ln.strip().startswith("Error:")][:1]
     return "RED", first
 
@@ -440,6 +497,16 @@ def run_rust(suite):
     return "RED", first
 
 
+def case_filters(test_filter):
+    """An arm's filter as `std/unittest` arguments: none, one test name, or
+    a scenario's names (`through`)."""
+    if not test_filter:
+        return ()
+    if isinstance(test_filter, str):
+        return (test_filter,)
+    return tuple(test_filter)
+
+
 def run_suite(suite, test_filter):
     if suite in RUST_SUITES:
         return run_rust(suite)
@@ -452,8 +519,7 @@ def run_suite(suite, test_filter):
            "--warnings:off",
            f"--nimcache:{NIMCACHE}/{stem}",
            f"-o:{NIMCACHE}/{stem}.out"] + suite_flags(suite) + [suite]
-    if test_filter:
-        cmd.append(test_filter)
+    cmd.extend(case_filters(test_filter))
     try:
         p = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True,
                            timeout=TIMEOUT, env=env)
@@ -464,15 +530,44 @@ def run_suite(suite, test_filter):
         return "HUNG", []
     failures = [portable_cause(ln.strip().split("Check failed: ", 1)[1])
                 for ln in out.splitlines() if "Check failed: " in ln]
+    # `nim c -r` says this only when the compiled suite RAN and exited
+    # non-zero; a compile error never reaches it. Without the distinction a
+    # suite that dies outside any test (an unhandled exception from the
+    # scenario's own `open()`, a nil read) was graded DID-NOT-COMPILE —
+    # measured at 258f46856: R1's refused open and G2's missing loupe.
+    ran_binary = "Error: execution of an external program failed" in out
     if p.returncode == 0:
+        # §37's floor: every case a filter names must have run (a name that
+        # matches nothing exits 0); an unfiltered run, at least one.
         ran = out.count("[OK]")
-        return ("GREEN", failures) if ran > 0 else ("RAN-NOTHING", [])
-    if not failures and "Error:" in out and "[FAILED]" not in out:
+        floor = max(1, len(case_filters(test_filter)))
+        return ("GREEN", failures) if ran >= floor else ("RAN-NOTHING", [])
+    if not failures and not ran_binary and "Error:" in out and \
+            "[FAILED]" not in out:
         return "DID-NOT-COMPILE", failures
     if not failures:
         failures = [portable_cause(ln.strip()) for ln in out.splitlines()
                     if "[FAILED]" in ln or "Unhandled exception" in ln][:1]
+    if not failures:
+        failures = [died_outside_a_test(out)]
     return "RED", failures
+
+
+def died_outside_a_test(out):
+    """The cause of a suite that died outside any test: the unhandled
+    exception's type (its message carries pids and paths, and may span
+    lines; Nim ends it with `[Type]`), or the signal's line."""
+    lines = out.splitlines()
+    for i, ln in enumerate(lines):
+        if ln.startswith("Error: unhandled exception: "):
+            for tail in lines[i:]:
+                m = re.search(r" \[(\w+)\]$", tail.rstrip())
+                if m:
+                    return f"Error: unhandled exception: … [{m.group(1)}]"
+            return "Error: unhandled exception"
+        if ln.startswith("SIG"):
+            return ln.strip()
+    return "the suite exited non-zero outside any test"
 
 
 def grade(suites):
@@ -532,9 +627,10 @@ def main():
     if needs_desktop and not build_desktop():
         print("ABORT: the unmutated desktop does not build.")
         return 1
-    graded = sorted({(s, flt or "") for arm in selected for s, flt in arm[2]})
+    graded = sorted({(s, case_filters(flt)) for arm in selected
+                     for s, flt in arm[2]})
     for s, flt in graded:
-        v, f = run_suite(s, flt or None)
+        v, f = run_suite(s, flt)
         if v != "GREEN":
             print(f"ABORT: the baseline of {s} is {v}: {f[:1]}")
             return 1

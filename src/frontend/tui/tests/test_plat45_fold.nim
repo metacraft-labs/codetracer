@@ -232,7 +232,7 @@ suite "PLAT-45: the terminal's fold at every size":
     # Checked on the shipped order AND on a shuffled one, so the rule is the
     # code's and not an accident of how the shared order is written.
     let cap = terminalCapability()
-    proc checkOrder(s: SharedLayout) =
+    proc checkOrder(s: SharedLayout; cap: PaneCapability) =
       let t = terminalFolds(s, cap)
       ck t.folds.len == s.folds.len
       var sawDrawable = false
@@ -248,7 +248,7 @@ suite "PLAT-45: the terminal's fold at every size":
         if draws: sawDrawable = true
         else: ck not sawDrawable
     let shipped = sharedDefaultLayout()
-    checkOrder(shipped)
+    checkOrder(shipped, cap)
     # PLAT-47: the shipped default (the desktop's Debug layout) has no
     # report-only REGION left — VCS and Tests are tabs of the FILES panel, Agent
     # Activity of the call trace's, Terminal Output of the event log's — so the
@@ -262,17 +262,45 @@ suite "PLAT-45: the terminal's fold at every size":
       FoldStep(region: paneCalltrace, into: paneState),
       FoldStep(region: paneEventLog, into: paneState),
       FoldStep(region: paneState, into: paneEditor)])
-    checkOrder(bundled)
+    checkOrder(bundled, cap)
     var shuffled = bundled
     shuffled.folds = @[bundled.folds[2], bundled.folds[3], bundled.folds[0],
                        bundled.folds[4], bundled.folds[1], bundled.folds[5]]
-    checkOrder(shuffled)
+    checkOrder(shuffled, cap)
     # No region is report-only any more: Test Results is drawn since PLAT-53
     # and Constraints since PLAT-62, so every step keeps its declared place
     # and the shuffle's own first two lead.
     let t = terminalFolds(shuffled, cap)
     ck t.folds[0].region == paneFileTree
     ck t.folds[1].region == paneCalltrace
+    # So with the terminal's own capability the rule no longer has a region to
+    # act on: every check above would pass with `terminalFolds` taking the
+    # shared order as it is (mutation arm E2 survived from PLAT-62 on). The
+    # rule is about a CAPABILITY (`terminalFolds` takes one), so it is
+    # exercised on a declared one: the terminal's, with Test Results and
+    # Constraints declared report leaves again — the capability PLAT-45 shipped
+    # with, and the shape of any pane the terminal does not draw yet. Derived
+    # from `terminalCapability()` rather than spelled, so a pane the terminal
+    # starts drawing later cannot empty this fixture the way PLAT-53 and
+    # PLAT-62 emptied the one above.
+    var reportCap = cap
+    reportCap.drawable.excl {paneTestResults, paneConstraints}
+    reportCap.reasons[paneTestResults] = "declared a report leaf for this case"
+    reportCap.reasons[paneConstraints] = "declared a report leaf for this case"
+    # Non-vacuity: under this capability the bundled tree really has a region
+    # of report leaves next to regions that draw data.
+    ck regionOf(bundled.tree, paneTestResults) !=
+       regionOf(bundled.tree, paneConstraints)
+    ck reportLeaves(bundled.tree, reportCap).len >= 2
+    checkOrder(bundled, reportCap)
+    checkOrder(shuffled, reportCap)
+    # The shuffle puts Files and the call trace first; the terminal still
+    # gives up the two report-only regions before them, in the shared order
+    # among themselves (Constraints into Test Results, then that stack).
+    let r = terminalFolds(shuffled, reportCap)
+    ck r.folds[0].region == paneConstraints
+    ck r.folds[1].region == paneTestResults
+    ck r.folds[2].region == paneFileTree
     # And at every size the shipped default keeps TESTS where the desktop
     # keeps it — a tab of the FILES panel — whatever the terminal folds.
     for w in countup(80, 300, 20):

@@ -187,8 +187,8 @@ ARMS = [
      [(PTY, PTY_CUA)],
      "§3.3: the terminal's field does not search as it is typed into"),
     # ---- GPUI ---------------------------------------------------------------------
-    ("G1", [(GPUI_MAIN, "    runFindOperation(r, res.operation, nowMs)\n    return",
-             "    openOmnibar(r, CommandPrefix & \"grep \")\n    return")],
+    ("G1", [(GPUI_MAIN, "                act(runFindOperation(r, c.name, c.nowMs)))",
+             "                act(openOmnibar(r, CommandPrefix & \"grep \")))")],
      [(PLAN, None)],
      "GPUI's find is the omnibar's `:grep` again"),
     ("G2", [(GPUI_LEAVES, "    r.setAttribute(band, FindMatchAttribute,",

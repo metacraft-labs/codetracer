@@ -42,7 +42,7 @@ import gpui/visual_replay_leaf
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 43
+const ExpectedAssertions = 46
 
 var countedAssertions = 0
 
@@ -101,10 +101,15 @@ proc windowPlan(ops: string): JsonNode =
   windowPlan(ops, t)
 
 proc attr(n: JsonNode; name: string): string =
-  if n{"attributes"}.kind == JObject: n["attributes"]{name}.getStr else: ""
+  ## `name`'s value, or "" — also on a node the plan does not have (`first`'s
+  ## empty object, whose `{"attributes"}` is nil): an element the window did
+  ## not draw is a failed check, not a nil read that kills the suite.
+  let a = n{"attributes"}
+  if not a.isNil and a.kind == JObject: a{name}.getStr else: ""
 
 proc has(n: JsonNode; name: string): bool =
-  n{"attributes"}.kind == JObject and n["attributes"].hasKey(name)
+  let a = n{"attributes"}
+  not a.isNil and a.kind == JObject and a.hasKey(name)
 
 proc nodesWith(plan: JsonNode; attribute: string): seq[JsonNode] =
   proc walk(n: JsonNode; acc: var seq[JsonNode]) =
@@ -126,6 +131,12 @@ proc imageQuads(plan: JsonNode): seq[string] =
   ## quarters, top left, top right, bottom left, bottom right
   ## (`visual_replay_leaf.quadSamples`).
   plan.first(VisualImageQuadsAttribute).attr(VisualImageQuadsAttribute).split(',')
+
+proc imageHeld(plan: JsonNode): string =
+  ## The extent of the pixels the frame's `img` HOLDS — set by the renderer
+  ## when the element is given them (`setImageRgba`), absent when it is not;
+  ## `imageQuads` reads the picture the leaf was asked to draw, not this.
+  plan.first(VisualImageAttribute).attr("data-gpui-image")
 
 proc programQuads(frame: int): seq[string] =
   @[hexOf(quadColour(frame, 2)), hexOf(quadColour(frame, 3)),
@@ -174,20 +185,25 @@ suite "PLAT-59: the Visual Replay panes in the GPUI window":
       ck "visual replay: player at" in trace
 
     test "the frame at three positions: the program's pixels, the desktop's":
+      let size = $GlSceneSize & "x" & $GlSceneSize
       # Frame 0.
-      ck windowPlan(Show).imageQuads == programQuads(0)
+      let firstPlan = windowPlan(Show)
+      ck firstPlan.imageQuads == programQuads(0)
+      ck firstPlan.imageHeld == size
       # The scrubber's middle: a press, a drag, a release.
       let midOps = Show & ",visual:scrub:frame:3:" & $Mid & ",visual:wait"
       let plan = windowPlan(midOps)
       ck plan.first(VideoPlayerAttribute).attr(VideoPlayerAttribute) ==
         $Mid & "/" & $GlSceneFrames
       ck plan.imageQuads == programQuads(Mid)
+      ck plan.imageHeld == size
       # The last, by End.
       let endOps = Show & ",visual:key:video:End,visual:wait"
       let last = windowPlan(endOps)
       ck last.first(VideoPlayerAttribute).attr(
         VideoPlayerAttribute) == $(GlSceneFrames - 1) & "/" & $GlSceneFrames
       ck last.imageQuads == programQuads(GlSceneFrames - 1)
+      ck last.imageHeld == size
       # The desktop's Video Player showed the same frames, in these colours.
       let desk = answers["frames"]
       ck desk[0]["frame"].getInt == 0

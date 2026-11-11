@@ -262,9 +262,11 @@ ARMS = [
         "  TermCell(ch: 0, attr: s.table.idOf(TermAttrs(fg: s.pen.fg, bg: s.pen.bg)))\n",
         "  TermCell(ch: 0, attr: s.table.idOf(TermAttrs()))\n",
         U_ERASE, "an erased cell drops the pen's colours"),
+    # M8 RE-AIMED 2026-11-09: `348342aaa` keeps the scrolled-off line first
+    # (`keepScrolledOff`), so the scroll is the next line; same defect.
     Arm("M8", MODEL,
-        "  if s.row == s.bottom:\n    s.scrollUp(s.top, s.bottom, 1)\n",
-        "  if s.row == s.bottom:\n    s.scrollUp(0, s.bottom, 1)\n",
+        "    s.keepScrolledOff(1)\n    s.scrollUp(s.top, s.bottom, 1)\n",
+        "    s.keepScrolledOff(1)\n    s.scrollUp(0, s.bottom, 1)\n",
         U_REGION, "a line feed at the region's bottom scrolls the rows above it"),
     Arm("M9", MODEL,
         "      s.eraseRect(0, 0, s.rows - 1, s.cols)\n      s.sawClear = true\n",
@@ -316,9 +318,11 @@ ARMS = [
         "  if offered: tvScreen else: tvLines\n",
         "  tvLines\n",
         N_OPENS, "a full-screen program opens on its lines"),
+    # V4 RE-AIMED 2026-11-09: `e91f95ce8` names the key by `fieldKeyOf`
+    # (`fkRight`) instead of the DOM key string; same defect.
     Arm("V4", DVIEW,
-        "  of \"ArrowRight\":\n    discard vm.stepWrite(1)\n",
-        "  of \"ArrowRight\":\n    discard vm.stepWrite(0)\n",
+        "  of fkRight:\n    discard vm.stepWrite(1)\n",
+        "  of fkRight:\n    discard vm.stepWrite(0)\n",
         N_ARROW, "ArrowRight steps nowhere"),
     Arm("V5", TVM,
         "  var ev = vm.eventOf(eventIndex)\n",

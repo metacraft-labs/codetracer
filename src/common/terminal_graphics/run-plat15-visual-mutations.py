@@ -35,8 +35,10 @@ COORDINATE and a DEGRADATION, and the two have different failure modes:
     `DrawableTiers` contains `itProtocol` and `cell_render.renderCells` refuses
     it, so a pane that asked "is this drawable?" before painting was told yes
     for a Kitty terminal and the `CellRenderError` left `shellScreen`'s whole
-    paint. V24 collapses the two sets back together and restores that exception
-    verbatim; V23 keeps the guard and loses only the REASON, so the tier-0
+    paint. V24 collapses the two sets back together and restores that wrong
+    answer (`fdgNone` for a Kitty overlay; since PLAT-59's tier-0 branch in
+    `paintFrameViewer` it paints a blank picture rather than raising); V23
+    keeps the guard and loses only the REASON, so the tier-0
     report and the octant report each have evidence the other cannot satisfy
     (§32a).
 
@@ -632,17 +634,23 @@ MUTATIONS: list = [
         "  CellRenderableTiers* = DrawableTiers - {itProtocol}",
         "  CellRenderableTiers* = DrawableTiers",
         P_TIER0, NIM_PANE,
-        "Unhandled exception: image tier 'protocol' is a graphics-protocol "
-        "emission, not a cell rendering",
-        why="THE PREDICATE ITSELF, AND IT RESTORES THE ORIGINAL DEFECT EXACTLY. "
-            "`DrawableTiers` means 'this tier produces bytes for a terminal' "
-            "and CONTAINS `itProtocol`; `CellRenderableTiers` means 'this tier "
-            "produces CELLS' and does not. Collapse the two and `resolveGap` "
-            "answers `fdgNone` for a Kitty terminal again, `renderCells` "
-            "refuses tier 0 from inside `paintFrameViewer`, and the "
-            "`CellRenderError` leaves the WHOLE shell paint rather than one "
-            "pane — which is what PLAT-15's landing pass measured through "
-            "`shellScreen` and is why the two sets are two sets.",
+        'model.gap was none',
+        why="THE PREDICATE ITSELF. `DrawableTiers` means 'this tier produces "
+            "bytes for a terminal' and CONTAINS `itProtocol`; "
+            "`CellRenderableTiers` means 'this tier produces CELLS' and does "
+            "not. Collapse the two and `resolveGap` answers `fdgNone` for an "
+            "unmagnified Kitty OVERLAY again — a pane nothing transmits a "
+            "tier-0 frame for (`transmitsProtocol` is false). PLAT-15's "
+            "landing pass measured that answer as a `CellRenderError` leaving "
+            "the WHOLE `shellScreen` paint; since PLAT-59 (919620c00) "
+            "`paintFrameViewer` has a tier-0 branch that reserves the picture "
+            "as blank cells for the host to transmit over, so the same wrong "
+            "answer now paints an empty picture with no reason and no remedy "
+            "(`pictureRows` 11, `degradedRows` 0), and the encoded shape falls "
+            "through to `fdgNoDecoder` — the wrong reason. The needle is the "
+            "first check that reads the wrong answer itself: the gap is "
+            "`none`, where V23's mutant (same check) reads `tier-not-drawable`, "
+            "so the two arms stay distinguishable (§32a).",
         control_name="the renderable set, written as the members it has",
         control_find="  CellRenderableTiers* = DrawableTiers - {itProtocol}",
         control_replace="  CellRenderableTiers* = {itHalfBlock, itQuadrant, itSextant,\n"

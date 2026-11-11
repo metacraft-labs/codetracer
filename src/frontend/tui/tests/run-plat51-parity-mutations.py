@@ -468,8 +468,12 @@ ARMS = [
     Arm("T8", RUNTIME,
         # RE-AIMED 2026-10-21 (M76): the caret line is `editorCaretLine`, shared
         # with the program menu's "Add a Tracepoint"; same arm, its one call.
-        "    rt.openTracepointEditorAt(rt.app.source.path, rt.editorCaretLine())\n",
-        "    discard rt.editorCaretLine()\n",
+        # RE-AIMED again 2026-11-09: `e91f95ce8` binds it as the named
+        # operation `editor.toggle-tracepoint`; same arm, its one call.
+        '  session.bindOp("editor.toggle-tracepoint",\n'
+        "             act(rt.openTracepointEditorAt(rt.app.source.path, rt.editorCaretLine())))\n",
+        '  session.bindOp("editor.toggle-tracepoint", act do:\n'
+        "    discard rt.editorCaretLine())\n",
         P_CARET, "Alt+t and Ctrl+Enter do not open the tracepoint editor"),
     Arm("T14", TDRIVER,
         "      if (b >= ' ' and b <= '~') or b == '\\x7f' or b < ' ':\n        let alt = Esc & $b\n",
@@ -550,9 +554,13 @@ ARMS = [
         "  if path in open:\n    open.excl path\n  else:\n    try:\n      discard gSession.loadValueHistory(path, gpuiRowBudget())\n",
         "  if true:\n    open.excl path\n  else:\n    try:\n      discard gSession.loadValueHistory(path, gpuiRowBudget())\n",
         G_HISTORY, "GPUI's history control never opens the history"),
+    # G6 RE-AIMED 2026-11-09: ffec0f79a moved the caret placement into the
+    # shared pointer model (`editor_pointer.pressEditor`); GPUI's own part is
+    # the hit it hands that model. The defect points the press at the caret
+    # that is already there, so a click in the code places no caret.
     Arm("G6", GMAIN,
-        "      placeCaret(r, path, c.line, column)\n",
-        "      discard column\n",
+        "  result.offset = d.offsetAtView(line - 1, result.displayColumn)\n",
+        "  result.offset = d.offsetAtView(d.caretLine - 1, d.caretViewColumn)\n",
         G_CARET, "a click in GPUI's code places no caret"),
     Arm("G7", GMAIN,
         "  gCtxMenu.openAt(menu, y, x)\n",
@@ -1023,6 +1031,36 @@ def engine_target_dir() -> Path:
     return Path(os.environ["REPLAY_SERVER_BIN"]).resolve().parents[1]
 
 
+def engine_binary() -> Path:
+    """The replay-server `build_engine` writes: cargo's `dev` profile output
+    in `engine_target_dir()`."""
+    return engine_target_dir() / "debug" / (
+        "replay-server" + (".exe" if os.name == "nt" else ""))
+
+
+def engine_binary_problem() -> str:
+    """Why an engine arm could not be graded with this `REPLAY_SERVER_BIN`,
+    or "" when it can.
+
+    The suites run the replay-server `REPLAY_SERVER_BIN` names
+    (`src/common/replay_server_path`'s first candidate) and `build_engine`
+    writes `<target>/debug/replay-server`. When those are two files, the
+    mutated engine is built and never run: graded at 69206138e with
+    `REPLAY_SERVER_BIN=src/build-debug/bin/replay-server`, E1 SURVIVED
+    because every suite ran the unmutated `bin/` copy, while the same
+    mutant run through `src/build-debug/debug/replay-server` failed the
+    killer case (`knownTotal` 62, not 70). The suites' own provenance check
+    does not catch it: it is opt-in (`CODETRACER_REQUIRE_REPLAY_REVISION`),
+    and it compares a binary with the checkout's sources, which are the
+    mutant's while the arm runs."""
+    named = Path(os.environ["REPLAY_SERVER_BIN"]).resolve()
+    built = engine_binary().resolve()
+    if named != built:
+        return (f"REPLAY_SERVER_BIN is {named}, but an engine arm rebuilds "
+                f"{built}; export REPLAY_SERVER_BIN={built}")
+    return ""
+
+
 def run_cargo_engine(path: str, filt: str, case: str | None) -> RunResult:
     """The engine's own unit tests (`cargo test --lib <module>`), in
     `ENGINE_DIR`, into the replay-server's target directory."""
@@ -1387,6 +1425,12 @@ def main() -> int:
     install_restore_on_signal()
 
     wanted = [a for a in ARMS if not only or a.id in only]
+    # An engine arm is graded only if the suites run the engine it rebuilds.
+    if any(path in ENGINE_SUBJECTS for a in wanted for path, _f, _r in a.edits()):
+        problem = engine_binary_problem()
+        if problem:
+            print(f"REFUSING TO RUN: {problem}")
+            return 1
     print("\n== control ==")
     if any(CASE_SUITE[a.killer] in BINARY_SUITES for a in wanted) and \
        not build_tui():

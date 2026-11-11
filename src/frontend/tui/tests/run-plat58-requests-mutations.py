@@ -178,7 +178,9 @@ ARMS = [
              "      return RequestsTarget(kind: rqStatus, position: -1)")],
      [(TBL, None)],
      "N.4: a press on the Method picker opens the Status options"),
-    ("T5", [(RUNTIME, "        rt.openContextMenu(r.menu, event.row, event.col, outcome)",
+    ("T5", [(RUNTIME, "position: t.position), outcome)\n      if r.menu.entries.len > 0:\n"
+                      "        rt.openContextMenu(r.menu, event.row, event.col, outcome)",
+             "position: t.position), outcome)\n      if r.menu.entries.len > 0:\n"
              "        discard r.menu")],
      [(TBL, None)],
      "N.5: a right press on a row opens no menu"),
@@ -186,8 +188,8 @@ ARMS = [
              "          position: t.position, nowMs: 0), outcome)")],
      [(TBL, None)],
      "N.4: every press is judged at time 0 (a late press goes to the handler)"),
-    ("T7", [(RUNTIME, "       rt.runRequestsKeyOperation(res.operation, outcome):",
-             "       false:")],
+    ("T7", [(RUNTIME, "                  ask(rt.runRequestsKeyOperation(c.name, outcome)))",
+             "                  ask(false))")],
      [(TBL, None)],
      "N.4: the keys do not move the selection; Enter is not the handler"),
     ("T8", [(RUNTIME, "  if at >= 0 and b.layout.docked[at].open:",
@@ -214,7 +216,7 @@ ARMS = [
               "      let requestsChanged = false")],
      [(PTY, None)],
      "N.2: the shipped terminal never polls (no reveal, no tail)"),
-    ("T14", [(PROFILE, "     paneRequests},", "     },"),
+    ("T14", [(PROFILE, "     paneRequests,", "     "),
              (SHELL, "  elif region.pane == paneRequests and model.requests.loaded:",
               "  elif false:")],
      [(PTY, None)],
@@ -416,6 +418,10 @@ def run_rust(suite):
     first = [ln.strip() for ln in out.splitlines()
              if "panicked at" in ln or ln.strip().startswith("ct/seek")][:1]
     first = [re.sub(r":\d+:\d+:", "", f) for f in first]
+    # Rust's panic line names the OS thread id (`thread 'name' (1234)
+    # panicked`), which differs on every run; drop it as plat70f's does.
+    first = [re.sub(r"^thread '([^']*)' \(\d+\) ", r"thread '\1' ", f)
+             for f in first]
     return "RED", first
 
 

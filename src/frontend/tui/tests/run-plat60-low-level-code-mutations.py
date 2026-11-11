@@ -181,11 +181,12 @@ ARMS = [
     ("R2", [(RUNTIME, "  rt.lowLevelCursor = at", "  return")],
      [(TBL, TBL_XREF)],
      "the editor's caret is never told to the listing"),
-    ("R3", [(RUNTIME, "    rt.openLowLevelCode(outcome)", "    discard")],
+    ("R3", [(RUNTIME, '  session.bindOp("view.low-level-code", act(rt.openLowLevelCode(outcome)))',
+             '  session.bindOp("view.low-level-code", inert)')],
      [(TBL, TBL_OPEN), (PTY, None)],
      "Alt+1 opens nothing"),
-    ("R4", [(RUNTIME, "       rt.runLowLevelKeyOperation(res.operation, outcome):",
-             "       false:")],
+    ("R4", [(RUNTIME, "                  ask(rt.runLowLevelKeyOperation(c.name, outcome)))",
+             "                  ask(false))")],
      [(TBL, TBL_XREF)],
      "the list keys do not move the listing's cursor"),
     ("R5", [(RUNTIME, "    model.source.crossRefLine = ll.crossRefLine", "    discard")],
@@ -204,7 +205,8 @@ ARMS = [
               '    BaseRow(chords: "Alt+1", operation: "view.low-level-code", whenText: "frontEnd == desktop", table: G),')],
      [(TBL, TBL_OPEN), (PTY, None)],
      "Alt+1 is the desktop's alone again"),
-    ("KM2", [(SCOPES, '                    "lowLevelCode"]', "                    ]")],
+    ("KM2", [(SCOPES, '                    "lowLevelCode", "verification", "pixelHistory"]',
+              '                    "verification", "pixelHistory"]')],
      [(TBL, TBL_XREF)],
      "the focused listing is not a list pane: the list keys are not its"),
     # ---- the GPUI leaf, window and editor ----------------------------------
@@ -256,10 +258,14 @@ DECLARED_SURVIVORS = {"Z1"}
 IN_BINARY = {VM, VIEW, STORE, TUI_PANE, SOURCE_PANE, RUNTIME, HOST, KEYMAP,
              SCOPES, VOCAB, HEADLESS}
 IN_GPUI = {VM, STORE, GPUI_LEAF, GPUI_MAIN, KEYMAP, SCOPES, VOCAB, HEADLESS}
-IN_DESKTOP = set()
-  # The desktop's spec is run by `$PLAT60_DESKTOP_TEST` (the capture recipe),
-  # which compiles the renderer from the checkout as it stands: an arm's
-  # defect needs no separate build.
+IN_DESKTOP = {DESKTOP_EDITOR}
+  # Subjects compiled into the desktop's bundle that a SPEC arm mutates. With
+  # `$PLAT60_DESKTOP_TEST` unset the spec runs the BUILT variant
+  # (`src/build-debug`), so an arm's defect reaches it only through
+  # `build_desktop()`; without this, D2 was graded against the unmutated
+  # renderer and "survived" (measured 2026-11-10 at 51f358391). The capture
+  # recipe (`scripts/plat60-capture-electron.sh`) compiles its own prefix and
+  # needs no build, but the build does it no harm.
 PTY_SUITES = {PTY}
 GPUI_SUITES = {PLAN}
 DESKTOP_SUITES = {SPEC}
@@ -386,9 +392,14 @@ def run_spec(suite):
         ["npx", "playwright", "test", suite.split("src/tests/gui/", 1)[1],
          "--reporter=line"]
     cwd = REPO if cmd else REPO / "src/tests/gui"
+    # The spec writes what it read before it checks it; over a planted defect
+    # that must never be the committed answers file.
+    env = dict(os.environ)
+    env.setdefault("PLAT60_ANSWERS_OUT",
+                   str(NIMCACHE / "plat60-low-level-code.electron.json"))
     try:
         p = subprocess.run(argv, cwd=cwd, capture_output=True, text=True,
-                           timeout=TIMEOUT)
+                           timeout=TIMEOUT, env=env)
     except subprocess.TimeoutExpired:
         return "HUNG", []
     out = (p.stdout or "") + (p.stderr or "")

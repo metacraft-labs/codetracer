@@ -405,9 +405,13 @@ ARMS = [
         "        if dr.item >= 0 and lv.items[dr.item].index == entered:\n          row = 1\n",
         R_TERMMENU,
         "the terminal's submenu starts at the top, not level with its folder"),
+    # MN3 RE-AIMED 2026-11-09: `e91f95ce8` routes Right to the named
+    # operation `menu.enter-folder`; the defect is unchanged.
     Arm("MN3", RUNTIME,
-        '  of "Right": discard vm.enterFolder()\n',
-        '  of "Right": vm.moveHighlight(1)\n',
+        '  programMenu.bindOp("menu.enter-folder", act do:\n'
+        '    discard rt.app.menu.enterFolder())\n',
+        '  programMenu.bindOp("menu.enter-folder", act do:\n'
+        '    rt.app.menu.moveHighlight(1))\n',
         P_MENU,
         "Right on a folder moves the highlight instead of opening the submenu"),
     Arm("GM1", WINTOP,
@@ -415,9 +419,13 @@ ARMS = [
         "          y = r.rect.y - 4\n      x = px\n",
         R_GPUIMENU,
         "GPUI's submenu popover opens over its parent"),
+    # GM2 RE-AIMED 2026-11-09: `e91f95ce8` routes GPUI's Right to the named
+    # operation `menu.enter-folder`; the defect is unchanged.
     Arm("GM2", GPUIMAIN,
-        '    of "right": discard gMenu.enterFolder()\n',
-        '    of "right": gMenu.moveHighlight(1)\n',
+        '  programMenu.bindOp("menu.enter-folder", act do:\n'
+        '    discard gMenu.enterFolder()\n',
+        '  programMenu.bindOp("menu.enter-folder", act do:\n'
+        '    gMenu.moveHighlight(1)\n',
         G_MENU,
         "GPUI's Right key moves the highlight instead of opening the submenu"),
 
@@ -713,9 +721,11 @@ ARMS = [
         "  let toggleCol = origin + call.depth * CallRowIndentCells + 1\n",
         S2_HIT,
         "a press on the toggle is read one cell to the left of it"),
+    # CT8 RE-AIMED 2026-11-09: `e91f95ce8` runs a row press as the named
+    # operation `calltrace.go-to-call`; the defect is unchanged.
     Arm("CT8", RUNTIME,
-        "      of cthRow:\n        outcome.jumpsToCall = true\n",
-        "      of cthRow:\n        outcome.jumpsToCall = false\n",
+        '  onTarget("calltrace.go-to-call"):\n    outcome.jumpsToCall = true\n',
+        '  onTarget("calltrace.go-to-call"):\n    outcome.jumpsToCall = false\n',
         P2_JUMP,
         "a click on a call-trace row goes nowhere"),
     # CT9 RE-AIMED 2026-10-23: `ad7805dbd` moved the terminal's toggle into
@@ -732,9 +742,11 @@ ARMS = [
         "GPUI draws the arguments in the body text, not their colour"),
     # CT11 RE-AIMED 2026-10-23: `ad7805dbd`: GPUI's row press goes to the
     # call through the shared driver (`session_driver.jumpToCall`).
+    # CT11 RE-AIMED again 2026-11-09: `e91f95ce8` runs GPUI's row press as
+    # the named operation `calltrace.go-to-call`.
     Arm("CT11", GPUIMAIN,
-        "  let why = gSession.jumpToCall(row.index)\n",
-        "  let why = \"\"\n",
+        "    let why = gSession.jumpToCall(c.target.index)\n",
+        "    let why = \"\"\n",
         G2_JUMP,
         "a press on a GPUI call-trace row goes nowhere"),
     Arm("CT12", NATIVEHOST,

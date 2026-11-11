@@ -205,8 +205,8 @@ ARMS = [
              '        let r = rt.actOnConstraints(ConstraintsAct(kind: cakSelect,')],
      [(TBL, None)],
      "K68: a right press on a row opens no menu"),
-    ("T5", [(RUNTIME, '       rt.runConstraintsKeyOperation(res.operation, outcome):',
-             '       false:')],
+    ("T5", [(RUNTIME, '                     ask(rt.runConstraintsKeyOperation(c.name, outcome)))',
+             '                     ask(false))')],
      [(TBL, None)],
      "the focused pane's keys do not move the selection; Enter opens nothing"),
     ("T6", [(RUNTIME, '    if words.len == 1 and words[0] == "constraints":',
@@ -482,6 +482,10 @@ def run_rust(suite):
     first = [ln.strip() for ln in out.splitlines()
              if "panicked at" in ln or ln.strip().startswith("ct/seek")][:1]
     first = [re.sub(r":\d+:\d+:", "", f) for f in first]
+    # Rust's panic line names the OS thread id (`thread 'name' (1234)
+    # panicked`), which differs on every run; drop it as plat70f's does.
+    first = [re.sub(r"^thread '([^']*)' \(\d+\) ", r"thread '\1' ", f)
+             for f in first]
     return "RED", first
 
 

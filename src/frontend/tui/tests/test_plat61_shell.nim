@@ -12,9 +12,11 @@
 ## Python program and records it with `ct record`, whose report line reaches
 ## the pane through the session's report file. Asserted:
 ##
-##   1. THE SHELL: `:shell` shows the pane, focused; the shell starts at the
-##      pane's text area (`stty size` answers it), prints its prompt, and
-##      typed keys reach it — `Enter` runs the line;
+##   1. THE SHELL: `:shell` shows the pane, focused; the shell is
+##      `CODETRACER_SHELL_COMMAND` (§7.2) — the host's resolution and the
+##      running process's argv; it starts at the pane's text area (`stty
+##      size` answers it), prints its prompt, and typed keys reach it —
+##      `Enter` runs the line;
 ##   2. THE RECORDED BUILD: the build's output in the pane, the recording's
 ##      action marked on the lines `ct record` wrote — `●` on the first, `│`
 ##      on the rest, in the success role — and its words;
@@ -31,7 +33,8 @@
 ##      pane; a key brings the view back to the tail;
 ##   7. THE SIZE FOLLOWS THE PANE: a resized terminal resizes the shell;
 ##   8. THE ORDER: the session hands out a writer's output before the event
-##      it reported after printing it (`/bin/sh -c`, no pane).
+##      it reported after printing it (`/bin/sh -c`, no pane) — checked
+##      FIRST, before the pane opens; see the suite's opening comment.
 ##
 ## THE ONE STAND-IN, and why it is not a mock: `TuiApp.recordingOpener` is the
 ## front-end's "open this recording in a new session tab", which `main.nim`
@@ -41,7 +44,7 @@
 ## the tab itself opening is `real_terminal/test_plat61_shell_pty.nim`'s, over
 ## the shipped binary.
 
-import std/[base64, json, os, strutils, times, unittest]
+import std/[base64, json, os, osproc, strutils, times, unittest]
 
 import isonim/testing/mock_dom
 import codetracer_embed
@@ -55,11 +58,14 @@ import ../app/layout/profile
 import ../app/views/shell_session_pane
 import ../host/tui_session
 import ../../../common/shell_session
+import ../../viewmodel/host/native_shell_host
 import ./fixtures/fixture_provider
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
-# as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 51
+# as the suite's RUNTIME assertion count. Measured: 53 on a green run at
+# 2ea21ab5c plus the two §7.2 checks that the pane's shell is
+# `CODETRACER_SHELL_COMMAND` (51 before them).
+const ExpectedAssertions = 53
 
 var countedAssertions = 0
 
@@ -166,8 +172,8 @@ putEnv("CODETRACER_HOME", scratch / "ct-home")
 # The shell's prompt, fixed by an rc file (as the GPUI and real-terminal
 # suites fix it).
 writeFile(scratch / "shellrc", "PS1='$ '\n")
-putEnv("CODETRACER_SHELL_COMMAND",
-       "bash --noprofile --rcfile " & scratch / "shellrc" & " -i")
+let shellCommand = "bash --noprofile --rcfile " & scratch / "shellrc" & " -i"
+putEnv("CODETRACER_SHELL_COMMAND", shellCommand)
 putEnv("PATH", ctDir() & PathSep & getEnv("PATH"))
 let build = writeBuild(scratch / "project")
 
@@ -187,11 +193,63 @@ proc open(width = Cols; height = Rows): (TuiRuntime, TuiSession) =
   s.refresh(rt)
   (rt, s)
 
+proc shellArgv(pid: int): seq[string] =
+  ## The running shell's argv, as the OS reports it: `/proc/<pid>/cmdline`
+  ## (NUL-separated) where there is a `/proc`, else `ps -o args=` (macOS).
+  ## Empty when the process is gone or not readable.
+  let cmdline = "/proc/" & $pid & "/cmdline"
+  if fileExists(cmdline):
+    try:
+      for word in readFile(cmdline).split('\0'):
+        if word.len > 0: result.add word
+    except IOError:
+      discard
+  else:
+    let (output, code) = execCmdEx("ps -o args= -p " & $pid)
+    if code == 0:
+      result = output.strip.splitWhitespace()
+
 proc focusedPane(rt: TuiRuntime): PaneKind =
   let (_, p) = rt.focus.focusedPane()
   p
 
 suite "PLAT-61 the Shell pane on the terminal":
+  # FIRST, before the pane's shell exists. This case is the one place the
+  # order of a poll's output and events is measured at a fixed moment (one
+  # poll, made once both are written), so a session that reorders them
+  # (`run-plat61-shell-mutations.py` S1) fails here on every run. The pane
+  # cases that follow see the same defect only when one poll happens to
+  # carry both the build's last line and `ct record`'s report, which is
+  # timing; run after them, the FIRST failure (the one the harness reads)
+  # was theirs or this case's depending on that (measured 2026-11-10 at
+  # 71d92eb52: S1 died at R1's `lastLine == "done"` check).
+  test "an event follows the output its writer printed before it":
+    # The session itself (`common/shell_session.poll`), no pane: a writer
+    # prints a line and THEN appends its report line; one poll, made once
+    # both are written, hands the output out before the event (§7.2).
+    var opts = ShellSessionOptions(shell: "/bin/sh", cols: 40, rows: 10)
+    opts.args = @["-c", "printf 'printed-before\\n'; " &
+      "printf '{\"kind\":\"record\"}\\n' >> \"$CODETRACER_SHELL_REPORT_FILE\"; " &
+      "sleep 5"]
+    let session = startShellSession(opts)
+    let deadline = epochTime() + 10.0
+    while epochTime() < deadline and
+        (not fileExists(session.reportPath) or getFileSize(session.reportPath) == 0):
+      sleep(10)
+    sleep(100)  # the line discipline has the printed bytes well before this
+    let messages = session.poll(0)
+    var outputAt, eventAt = -1
+    for i, m in messages:
+      if m.hasKey("output") and outputAt < 0 and
+          "printed-before" in decode(m["output"].getStr):
+        outputAt = i
+      if m.hasKey("event") and eventAt < 0:
+        eventAt = i
+    session.close()
+    ck outputAt >= 0
+    ck eventAt >= 0
+    ck outputAt < eventAt
+
   let (rt, s) = open()
 
   test "`:shell` shows the pane, focused, its shell at the pane's size":
@@ -204,6 +262,25 @@ suite "PLAT-61 the Shell pane on the terminal":
     let area = rt.shellPaneArea()
     ck area.width > 0
     let (cols, rows) = shellPaneSize(area)
+    # §7.2: THE PANE'S SHELL IS `CODETRACER_SHELL_COMMAND`, split on
+    # whitespace. Asserted before anything waits on the shell's prompt, so a
+    # host that ignores the variable fails HERE, by name, on every machine —
+    # not later, at whichever wait the machine's own `$SHELL -i` happens to
+    # miss (its prompt is the host's, not the rc file's `$ `).
+    # The host's resolution — what it hands the session (`native_shell_host`):
+    let words = shellCommand.splitWhitespace()
+    let resolved = shellOptionsFromEnv(cols, rows)
+    ck resolved.shell == words[0] and resolved.args == words[1 .. ^1]
+    # …and the process the pane actually runs: its argv, once it has exec'd
+    # (until then the forked child still reports this test's own argv).
+    let pid = s.shell.session.pid
+    let self = getAppFilename().extractFilename
+    s.pumpUntil(rt, proc(): bool =
+      let argv = shellArgv(pid)
+      argv.len > 0 and argv[0].extractFilename != self, "the shell's exec")
+    let argv = shellArgv(pid)
+    ck argv.len == words.len and argv[0].extractFilename == words[0] and
+       argv[1 .. ^1] == words[1 .. ^1]
     s.pumpUntil(rt, proc(): bool = s.shows("$"), "the prompt")
     ck s.vm.state.val == sssRunning
     ck s.vm.screen.cols == cols and s.vm.screen.rows == rows
@@ -362,33 +439,6 @@ suite "PLAT-61 the Shell pane on the terminal":
     s.pumpUntil(rt, proc(): bool = s.shows($rows & " " & $cols),
                 "stty size after the resize")
     ck s.shows($rows & " " & $cols)
-
-  test "an event follows the output its writer printed before it":
-    # The session itself (`common/shell_session.poll`), no pane: a writer
-    # prints a line and THEN appends its report line; one poll, made once
-    # both are written, hands the output out before the event (§7.2).
-    var opts = ShellSessionOptions(shell: "/bin/sh", cols: 40, rows: 10)
-    opts.args = @["-c", "printf 'printed-before\\n'; " &
-      "printf '{\"kind\":\"record\"}\\n' >> \"$CODETRACER_SHELL_REPORT_FILE\"; " &
-      "sleep 5"]
-    let session = startShellSession(opts)
-    let deadline = epochTime() + 10.0
-    while epochTime() < deadline and
-        (not fileExists(session.reportPath) or getFileSize(session.reportPath) == 0):
-      sleep(10)
-    sleep(100)  # the line discipline has the printed bytes well before this
-    let messages = session.poll(0)
-    var outputAt, eventAt = -1
-    for i, m in messages:
-      if m.hasKey("output") and outputAt < 0 and
-          "printed-before" in decode(m["output"].getStr):
-        outputAt = i
-      if m.hasKey("event") and eventAt < 0:
-        eventAt = i
-    session.close()
-    ck outputAt >= 0
-    ck eventAt >= 0
-    ck outputAt < eventAt
 
   test "every assertion ran":
     s.close()

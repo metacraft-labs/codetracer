@@ -434,9 +434,11 @@ ARMS = [
         "      discard\n",
         T_REBIND,
         "the terminal's menu shows no chord for any item"),
+    # TM2 RE-AIMED 2026-11-09: `e91f95ce8` routes Down to the named
+    # operation `menu.focus-next`; the defect is unchanged — it moves up.
     Arm("TM2", RUNTIME,
-        '  of "Down": vm.moveHighlight(1)\n',
-        '  of "Down": vm.moveHighlight(-1)\n',
+        '  programMenu.bindOp("menu.focus-next", act(rt.app.menu.moveHighlight(1)))\n',
+        '  programMenu.bindOp("menu.focus-next", act(rt.app.menu.moveHighlight(-1)))\n',
         T_F12,
         "Down walks the menu's first level upwards"),
     # --- acting on the recording -------------------------------------------------------
@@ -445,9 +447,15 @@ ARMS = [
         "    rt.runPromptLine(\":goto 0\", outcome)\n",
         P_TICK,
         "the omnibar's tick result goes to the start, not the tick asked for"),
+    # TC1 RE-AIMED 2026-11-09: `e91f95ce8` runs a toolbar control's named
+    # operation instead of its key action; the defect is unchanged — an
+    # enabled control's press runs nothing.
     Arm("TC1", RUNTIME,
-        "    else:\n      rt.performAction(ka, outcome)\n  of thOmnibar:",
-        "    else:\n      discard ka\n  of thOmnibar:",
+        "      rt.runOperation(EditingResolution(kind: erOperation, operation: name,\n"
+        "                                        argument: arg), 0, outcome)\n"
+        "  of thOmnibar:",
+        "      discard (name, arg)\n"
+        "  of thOmnibar:",
         P_CLICK,
         "a click on an enabled control does nothing"),
     # TF1 RE-AIMED 2026-10-27: PLAT-71 (`4ea31ecc4`) also holds a hover-only
@@ -550,9 +558,11 @@ ARMS = [
         "the `CSI u` spelling of Ctrl+Tab is not a key: the terminals that "
         "report Ctrl+Tab that way cannot step the tabs"),
     # --- GPUI's drawing, read from the window's own render plan ------------------
+    # GW1 RE-AIMED 2026-11-09: e478a8c14 moved the mark into `markSvgPath`
+    # (one indent level less); same statement, same defect.
     Arm("GW1", GPUIMAIN,
-        "    var svg = svgMarkup(markFor(c.id)).replace(\"currentColor\", ink)\n",
-        "    var svg = svgMarkup(markFor(TransportControls[0].id)).replace(\"currentColor\", ink)\n",
+        "  var svg = svgMarkup(markFor(c.id)).replace(\"currentColor\", ink)\n",
+        "  var svg = svgMarkup(markFor(TransportControls[0].id)).replace(\"currentColor\", ink)\n",
         W_BAND,
         "every debugger control in the window draws the first control's mark"),
     Arm("GW2", GPUIMAIN,

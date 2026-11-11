@@ -27,7 +27,9 @@
 ##     focused, the list keys move the selection and Enter opens; an unsaved
 ##     edit to a source marks the counts `(stale)` and `:w` re-measures them;
 ##   * `:constraints` IN DEBUG MODE, where the default places no Constraints
-##     pane: it is opened (and kept by the arrangement) and measured;
+##     pane: it is opened (and kept by the arrangement) and measured — from
+##     the omnibox, and from vim's command line, where no palette entry can
+##     stand in for the verb;
 ##   * THE VOCABULARY'S VIEW of the same ViewModel (`constraintsPaneView`): a
 ##     `Table` of the same cells, and the pane no longer an accepted
 ##     exception.
@@ -57,7 +59,7 @@ from ../../view_vocabulary/pane_views import constraintsPaneView,
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 83
+const ExpectedAssertions = 87
 
 var countedAssertions = 0
 
@@ -468,6 +470,30 @@ suite "PLAT-62: the terminal's Constraints pane over a real measurement":
     ck s.rt.paneAreaOf(paneConstraints).width == 0
     var outcome: RuntimeOutcome
     s.rt.runMenuAction("aConstraints", outcome)
+    ck s.rt.paneAreaOf(paneConstraints).width > 0
+    s.settle()
+    ck s.rt.app.constraints.rows.len == Plat62RowTotal
+    s.src.close()
+    removeDir(project)
+
+  test "Debug mode, vim: `:constraints` on the command line opens it":
+    # The omnibox case above cannot tell the verb from the menu: under the
+    # default keymap the omnibox IS the command line, and a line whose verb
+    # is no command takes the palette's chosen entry instead — which, now
+    # that Debug mode's View menu lists Constraints too, opens the pane by
+    # itself. Vim's `:` opens the command line proper, where nothing but the
+    # `:constraints` verb can open it.
+    let project = writeCrate()
+    var s = open(project, pmDebug)
+    s.rt.selectBase(bkVim, ksFlag)
+    s.rt.refreshMenuForKeymap()
+    let b = s.rt.app.layoutBinding
+    ck not b.layout.tree.contains(paneConstraints)
+    discard s.rt.handleToken(":", 0)
+    for ch in "constraints":
+      discard s.rt.handleToken($ch, 0)
+    discard s.rt.handleToken("\r", 0)
+    ck b.layout.tree.contains(paneConstraints)
     ck s.rt.paneAreaOf(paneConstraints).width > 0
     s.settle()
     ck s.rt.app.constraints.rows.len == Plat62RowTotal

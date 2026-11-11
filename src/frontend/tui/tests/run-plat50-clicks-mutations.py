@@ -297,7 +297,8 @@ K_VALUE = ("a click on a value expands it; a right click offers history and "
            "origin")
 K_WHERE = ("after a click moves the debugger the status line says where it "
            "landed")
-K_COLUMN = "Alt+click anchors a breakpoint at the column; the replay honours it"
+# RENAMED 2026-11-09 with the test (`ffec0f79a`: Shift+F9 replaced Alt+click).
+K_COLUMN = "Shift+F9 at the caret anchors a breakpoint at the column; the replay honours it"
 K_CALLJUMP = "Ctrl+Alt+click on a call goes into it; the menu's call jumps too"
 K_COPY = "Copy puts the line on the clipboard (OSC 52)"
 K_TRACEPOINT = "Add tracepoint: the prompt, then the sweep's hits on that line"
@@ -349,8 +350,9 @@ I_POINTER = ("a pointer event decodes its window position, and a wheel its "
              "delta")
 G_SCRATCH = "an argument pinned to the scratchpad; its close button removes it"
 G_ORDER = "an event-log header orders the log; again reverses it"
-G_COLUMN = ("Alt+click anchors a column breakpoint; Ctrl+Alt+click goes into "
-            "a call")
+# RENAMED 2026-11-09 with the test (`ffec0f79a`).
+G_COLUMN = ("Shift+F9 anchors a column breakpoint at the caret; Ctrl+Alt+click "
+            "goes into a call")
 G_FLOW = "an inline value's menu; Ctrl+click pins it"
 G_SWEEP = "the Variables list, a point, the footer's location, a dock label"
 G_VCS = "the VCS pane: a file's diff, a commit's files"
@@ -447,33 +449,42 @@ ARMS = [
         "  let i = screen.top + (row - screen.area.row - 1)\n",
         "  let i = screen.top + (row - screen.area.row - 2)\n",
         K_FILES, "a Files click lands on the row above"),
+    # RT4 RE-AIMED 2026-11-09: `ffec0f79a` decides the gutter press in the
+    # shared pointer model (`pfToggleBreakpoint`); Debug mode's request is dropped.
     Arm("RT4", RUNTIME,
-        "    if event.button == mbLeft:\n      outcome.requestClick(PaneClickRequest(kind: pcToggleBreakpoint,\n                                            path: src.path, line: line))",
-        "    if event.button == mbOther:\n      outcome.requestClick(PaneClickRequest(kind: pcToggleBreakpoint,\n                                            path: src.path, line: line))",
+        "    else:\n      outcome.requestClick(PaneClickRequest(kind: pcToggleBreakpoint,\n                                            path: path, line: line))\n",
+        "    else:\n      discard (path, line)\n",
         K_GUTTER, "a gutter click sets no breakpoint"),
+    # RT5 RE-AIMED 2026-11-09: `ffec0f79a` moved the code; same defect.
     Arm("RT5", RUNTIME,
-        "          enabled: mark == gmBreakpointDisabled))",
-        "          enabled: mark == gmBreakpoint))",
+        "        kind: pcSetBreakpointEnabled, path: path, line: line,\n        enabled: mark == gmBreakpointDisabled))\n",
+        "        kind: pcSetBreakpointEnabled, path: path, line: line,\n        enabled: mark == gmBreakpoint))\n",
         K_GUTTER, "the gutter right-click enables an enabled breakpoint"),
+    # RT6 RE-AIMED 2026-11-09: `ffec0f79a`: Ctrl+click and a middle click are
+    # both `pfLineJump`; the Ctrl one is refused, the middle one still goes.
     Arm("RT6", RUNTIME,
-        "    elif event.ctrl:\n      outcome.requestClick(PaneClickRequest(kind: pcLineJump, path: src.path,",
-        "    elif false:\n      outcome.requestClick(PaneClickRequest(kind: pcLineJump, path: src.path,",
+        "  of pfLineJump:\n    if editing:\n      return false\n",
+        "  of pfLineJump:\n    if editing or event.ctrl:\n      return false\n",
         K_CTRL, "Ctrl+click on a line goes nowhere"),
     Arm("RT7", RUNTIME,
         "    of gmBreakpoint: lbEnabled\n",
         "    of gmBreakpoint: lbNone\n",
         K_BPMENU, "a breakpoint's line gets the plain line's menu"),
+    # RT8 RE-AIMED 2026-11-09: `e91f95ce8` moved the code; same defect.
     Arm("RT8", RUNTIME,
-        "rt.openContextMenu(callTraceContextMenu(hit.index, call.toggle != crtLeaf,",
-        "rt.openContextMenu(callTraceContextMenu(hit.index, call.toggle == crtLeaf,",
+        "                                                     call.toggle != crtLeaf,\n",
+        "                                                     call.toggle == crtLeaf,\n",
         K_CALL, "a leaf call's menu offers expanding, a parent's does not"),
+    # RT9 RE-AIMED 2026-11-09: `e91f95ce8` runs the right press as the named
+    # operation `event-log.show-content`; it now jumps instead of showing.
     Arm("RT9", RUNTIME,
-        "  if event.button == mbRight:\n    rt.showContent(\"event #\"",
-        "  if false:\n    rt.showContent(\"event #\"",
+        '  onTarget("event-log.show-content"):\n    rt.showContent("event #"',
+        '  onTarget("event-log.show-content"):\n    outcome.requestClick(PaneClickRequest(kind: pcEventJump, index: c.target.index,\n                                          tick: c.target.tick, path: c.target.path,\n                                          line: c.target.line, text: c.target.text))\n    if false: rt.showContent("event #"',
         K_EVENT, "a right-click on an event jumps instead of showing it"),
+    # RT11 RE-AIMED 2026-11-09: `e91f95ce8` moved the code; same defect.
     Arm("RT11", RUNTIME,
-        "      discard rt.app.variables.toggleNode(path)\n",
-        "      discard path\n",
+        '  onTarget("variables.toggle-expand"):\n    discard rt.app.variables.toggleNode(c.target.path)\n',
+        '  onTarget("variables.toggle-expand"):\n    discard c.target.path\n',
         K_VALUE, "a value click expands nothing"),
     Arm("RT12", RUNTIME,
         "    rt.app.points.selected = i\n",
@@ -499,13 +510,17 @@ ARMS = [
         "        if index >= 0 and event.button == mbLeft:\n",
         "        if index >= 0 and event.button == mbRight:\n",
         K_TAB, "a menu entry is chosen only by the right button"),
+    # RT18 RE-AIMED 2026-11-09: `e91f95ce8` binds Esc (and Enter, q) to
+    # `content-view.close` in `overlay_rows`; the close keeps the overlay open,
+    # so this defect is wider than Esc alone.
     Arm("RT18", RUNTIME,
-        '    of "Escape", "Esc", "Enter", "q":\n      rt.app.content = ContentOverlay()\n',
-        '    of "Enter", "q":\n      rt.app.content = ContentOverlay()\n',
+        '  contentView.bindOp("content-view.close", act do:\n    rt.app.content = ContentOverlay())\n',
+        '  contentView.bindOp("content-view.close", act do:\n    discard)\n',
         S_ESC, "Esc leaves the event's content open"),
+    # RT19 RE-AIMED 2026-11-09: `e91f95ce8` moved the code; same defect.
     Arm("RT19", RUNTIME,
-        '    of "context-menu.focus-next": rt.app.contextMenu.move(1)\n',
-        '    of "context-menu.focus-next": rt.app.contextMenu.move(-1)\n',
+        '  menu.bindOp("context-menu.focus-next", act(rt.app.contextMenu.move(1)))\n',
+        '  menu.bindOp("context-menu.focus-next", act(rt.app.contextMenu.move(-1)))\n',
         S_TABMENU, "Down in a context menu moves up"),
     Arm("RT20", RUNTIME,
         "  if acted.status == lasNoGesture and not inGesture and\n     rt.routePaneClick(geometry, event, outcome):\n",
@@ -624,17 +639,20 @@ ARMS = [
         "    if rr.contains(x, y):\n      return (true, i)\n",
         "    if rr.contains(x, y):\n      return (true, min(i + 1, s.menu.entries.len - 1))\n",
         G_TEXTMENU, "GPUI's menu hit is one entry low"),
+    # GM1 RE-AIMED 2026-11-09: `e91f95ce8` moved the code; same defect.
     Arm("GM1", GPUIMAIN,
-        "    if c.button == gbRight:\n      showContent(r, \"event #\"",
-        "    if false:\n      showContent(r, \"event #\"",
+        '    showContent(r, "event #" & $row.eventIndex & " at tick " & $row.rrTicks,\n                row.value)\n',
+        "    discard row\n",
         G_EVENT, "GPUI's event right-click shows nothing"),
     Arm("GM2", GPUIMAIN,
         "                                              mark == emBreakpointDisabled)\n",
         "                                              mark == emBreakpoint)\n",
         G_GUTTER, "GPUI's gutter right-click enables an enabled breakpoint"),
+    # GM3 RE-AIMED 2026-11-09: `ffec0f79a`: Ctrl+click and a middle click are
+    # both `pfLineJump`; the Ctrl one goes nowhere, the middle one still goes.
     Arm("GM3", GPUIMAIN,
-        "    elif c.button == gbMiddle or (c.button == gbLeft and c.ctrl):\n",
-        "    elif c.button == gbMiddle:\n",
+        '    of pfLineJump:\n      try:\n        gSession.sourceLineJump(path, c.line, "smart")\n',
+        '    of pfLineJump:\n      if c.ctrl: return\n      try:\n        gSession.sourceLineJump(path, c.line, "smart")\n',
         G_CTRL, "GPUI's Ctrl+click goes nowhere"),
     Arm("GM4", GPUIMAIN,
         '         of caRunToCursor: "forward"\n',
@@ -652,9 +670,10 @@ ARMS = [
         "  of caClosePane:\n    applyGestureCommand(r, cmdRemovePane(target.pane))\n",
         "  of caClosePane:\n    discard target\n",
         G_TAB, "GPUI's tab menu Close closes nothing"),
+    # GM8 RE-AIMED 2026-11-09: `e91f95ce8` moved the code; same defect.
     Arm("GM8", GPUIMAIN,
-        "      session.stateVM.toggleExpand(c.key)\n",
-        "      discard c.key\n",
+        "    gSession.session.stateVM.toggleExpand(c.target.path)\n",
+        "    discard c.target.path\n",
         G_VALUE, "GPUI's value press expands nothing"),
     # RE-AIMED 2026-10-24 (K19): a file press, and the menu's Edit, open
     # through `openTreeFile`.
@@ -664,9 +683,10 @@ ARMS = [
         G_FILES, "GPUI's file press opens nothing"),
     # K19, 2026-10-24: a Files node opens the Files pane's menu (Filesystem-
     # Pane.md § "Context menu"), from the shared Files model.
+    # GF1 RE-AIMED 2026-11-09: `e91f95ce8` moved the code; same defect.
     Arm("GF1", GPUIMAIN,
-        "    if c.button == gbRight:\n      openContextMenuAt(r, vm.fileTreeContextMenuOf(e.path), c.x, c.y)\n      return\n",
-        "    if c.button == gbRight:\n      return\n",
+        "                      menu = vm.fileTreeContextMenuOf(e.path), x = c.x, y = c.y)\n",
+        "                      menu = ContextMenuModel(), x = c.x, y = c.y)\n",
         G_FILES, "GPUI's Files node opens no menu again"),
     Arm("GF2", GPUIMAIN,
         "      else:\n        openTreeFile(r, target.path)\n      return\n",
@@ -727,11 +747,12 @@ ARMS = [
         "  attachEditFiles(leafSet, tab.folder)   # K19: the folder's Files tree\n",
         "  discard tab.folder\n",
         E_TAB, "a folder tab's Files leaf gets no model"),
+    # GE11 RE-AIMED 2026-11-09: `f9b44c8e7` grew the Edit window's exemption
+    # (Verification, Constraints); the Files entries leave it, so an Edit
+    # window refuses them.
     Arm("GE11", GPUIMAIN,
-        "     action notin {caFileCreate, caFileRename, caFileDelete, caFileEdit,\n"
-        "                   caAgentAttachUpload, caAgentAttachFilesFolders,\n"
-        "                   caAgentAttachEditorSelection, caAgentAttachRecording}:\n",
-        "     true:\n",
+        "     action notin {caFileCreate, caFileRename, caFileDelete, caFileEdit,\n                   caAgentAttachUpload,",
+        "     action notin {\n                   caAgentAttachUpload,",
         E_CREATE, "an Edit window runs no Files entry (no session)"),
     Arm("GE12", GPUIMAIN,
         "  if gCtxMenu.open and key.toLowerAscii in [\"escape\", \"esc\"]:\n",
@@ -841,13 +862,19 @@ ARMS = [
         "  discard vm\n",
         K_SCRATCH, "nothing reaches the scratchpad"),
     # --- 1. the sweep's other rows: the terminal ------------------------------
+    # RT21 RE-AIMED 2026-11-09: `ffec0f79a` removed Alt+click's column
+    # breakpoint; Shift+F9 at the caret sets it (`toggleInlineAt`). Same defect:
+    # the column breakpoint is anchored at column 1.
     Arm("RT21", RUNTIME,
-        "        column: max(1, min(target.column, width))))\n",
-        "        column: 1))\n",
+        "                                          column: max(1, column),\n",
+        "                                          column: 1,\n",
         K_COLUMN, "Alt+click anchors at the line's first column"),
+    # RT22 RE-AIMED 2026-11-09: `ffec0f79a`: Ctrl+Alt+click is `pfCallJump`
+    # in the shared pointer model (Alt+click now adds a cursor); refused here,
+    # it goes into no call. The menu's call jumps are untouched.
     Arm("RT22", RUNTIME,
-        "    if event.ctrl and event.alt:\n      # K15",
-        "    if false:\n      # K15",
+        "  of pfCallJump:\n    if editing:\n      return false\n",
+        "  of pfCallJump:\n    if editing or (event.ctrl and event.alt):\n      return false\n",
         K_CALLJUMP, "Ctrl+Alt+click is read as Alt+click"),
     Arm("RT23", RUNTIME,
         '    rt.copyToClipboard(target.text & "\\n", "line " & $target.line)\n',
@@ -861,9 +888,10 @@ ARMS = [
         "    if hit.row < 0 or not hit.close:\n",
         "    if hit.row < 0 or hit.close:\n",
         K_SCRATCH, "the close button does nothing, the value's text removes it"),
+    # RT26 RE-AIMED 2026-11-09: `e91f95ce8` moved the code; same defect.
     Arm("RT26", RUNTIME,
-        "    if onHeader and event.button == mbLeft:\n",
-        "    if false:\n",
+        "    if onHeader:\n      return rt.runPointer(event, paneEventLog, ekHeader,\n",
+        "    if false:\n      return rt.runPointer(event, paneEventLog, ekHeader,\n",
         K_ORDER, "a header click is ignored"),
     Arm("RT27", RUNTIME,
         "  if event.row == rt.height - 1 and event.button == mbLeft:\n",
@@ -921,9 +949,11 @@ ARMS = [
         "    result.entries.add entry(d.label, action,\n"
         "                             hint = \"\",\n",
         K_FILEMENU, "a disabled Files entry's reason is not drawn"),
+    # TS7 RE-AIMED 2026-11-09: `ffec0f79a`: the column breakpoint is
+    # `pcToggleInlineBreakpoint` (Shift+F9); the host drops its column.
     Arm("TS7", TUISESSION,
-        "    if session.setColumnBreakpoint(c.path, c.line, c.column):\n",
-        "    if session.setColumnBreakpoint(c.path, c.line, 1):\n",
+        "    if session.toggleInlineBreakpoint(c.path, c.line, c.column, c.lastColumn):\n",
+        "    if session.toggleInlineBreakpoint(c.path, c.line, 1, c.lastColumn):\n",
         K_COLUMN, "the terminal's column breakpoint drops the column"),
     Arm("TS8", TUISESSION,
         "    rt.app.eventLog.reorder(c.order)\n",
@@ -964,16 +994,21 @@ ARMS = [
         "  result = ScratchpadHit(row: i, close: col == area.col + 1)\n",
         K_SCRATCH, "the close button's hit a cell off"),
     # --- 1. the sweep's other rows: GPUI --------------------------------------
+    # GM14 RE-AIMED 2026-11-09: `ffec0f79a`: GPUI's column breakpoint is
+    # Shift+F9's `toggleInlineAt`; it anchors at column 1.
     Arm("GM14", GPUIMAIN,
-        "      if gSession.setColumnBreakpoint(path, c.line, col):\n",
-        "      if gSession.setColumnBreakpoint(path, c.line, 1):\n",
+        "  if gSession.toggleInlineBreakpoint(path, line, column, last):\n",
+        "  if gSession.toggleInlineBreakpoint(path, line, 1, last):\n",
         G_COLUMN, "GPUI's Alt+click anchors at the first column"),
+    # GM15 RE-AIMED 2026-11-09: `ffec0f79a`: Ctrl+Alt+click is `pfCallJump`
+    # (Alt+click no longer sets a breakpoint); GPUI's goes into no call.
     Arm("GM15", GPUIMAIN,
-        "    elif c.button == gbLeft and c.ctrl and c.alt:\n",
-        "    elif false:\n",
+        "    of pfCallJump:\n      let (token, err) = callTokenAt(lineTextOf(path, c.line), column,\n",
+        "    of pfCallJump:\n      if c.ctrl and c.alt: return\n      let (token, err) = callTokenAt(lineTextOf(path, c.line), column,\n",
         G_COLUMN, "GPUI's Ctrl+Alt+click read as Alt+click"),
+    # GM16 RE-AIMED 2026-11-09: `e91f95ce8` moved the code; same defect.
     Arm("GM16", GPUIMAIN,
-        "    orderEventLog(r, session.eventLogVM.order.clickedHeader(shown[c.index]))\n",
+        "    orderEventLog(r, vm.order.clickedHeader(shown[c.target.index]))\n",
         "    orderEventLog(r, RecordedEventOrder)\n",
         G_ORDER, "GPUI's header click keeps the recorded order"),
     Arm("GM17", GPUIMAIN,
@@ -992,9 +1027,10 @@ ARMS = [
         "          openContextMenuAt(r, dockLabelContextMenu(k, strip.edge), x, y)\n",
         "          openContextMenuAt(r, tabContextMenu(k, false), x, y)\n",
         G_SWEEP, "GPUI's dock label opens the tab's menu"),
+    # GM21 RE-AIMED 2026-11-09: `f9b44c8e7` moved the code; same defect.
     Arm("GM21", GPUIMAIN,
-        "    applyGestureCommand(r, cmdAddPane(pane,\n",
-        "    applyGestureCommand(r, cmdActivateTab(pane))\n    discard (cmdAddPane(pane,\n",
+        "    applyGestureCommand(r, cmdAddPane(pane, after = anchor))\n",
+        "    applyGestureCommand(r, cmdActivateTab(pane))\n    discard (cmdAddPane(pane, after = anchor))\n",
         G_SWEEP, "GPUI's View menu cannot open a pane the arrangement lacks"),
     Arm("GM22", GPUIMAIN,
         "    gPanes[leaf.paneId] = node\n    markPaneScope(r, node, leaf.paneId)\n"
@@ -1188,9 +1224,11 @@ ARMS = [
         "  if false:\n    for d in gGeom.dividers:\n",
         G_DIVIDERS, "GPUI never draws the subtle lines"),
     # --- the desktop's own defect ------------------------------------------
+    # DE1 RE-AIMED 2026-11-09: `ffec0f79a` replaced the DOM gutter with
+    # Monaco's glyph margin; its right click enables or disables nothing.
     Arm("DE1", DESKEDITOR,
-        "    element = element.parentNode\n    dataset = element.dataset\n  if not dataset.line.isNil:\n",
-        "    element = element.parentNode\n  if not dataset.line.isNil:\n",
+        "        self.toggleGlyphEnabled(self.name, cast[int](ev.target.position.lineNumber))\n",
+        "        discard ev.target.position.lineNumber\n",
         D_DESKTOP, "the desktop's gutter right-click reads the marker's dataset"),
     Arm("DE2", DESKEDITOR,
         "    elif e.target.position.isNil or e.target.element.isNil:\n",
@@ -1198,9 +1236,12 @@ ARMS = [
         D_DESKTOP, "the desktop's press with no text position throws again"),
     # RE-AIMED 2026-10-22: `5c52d631f` made the class test one helper that
     # also matches the empty slot. Killed by the Electron gate at `e353dcb7b`.
+    # DE3 RE-AIMED 2026-11-09: `ffec0f79a`: the marker's right click is
+    # recognised by Monaco's target type, not a class; tested against the
+    # wrong type it falls through to the menu and toggles nothing.
     Arm("DE3", DESKEDITOR,
-        '    if cstrutils.startsWith(element, cstring"gutter-breakpoint") or\n',
-        '    if element == cstring"gutter-breakpoint" or\n',
+        '    if cast[int](ev.target.toJs["type"]) == MouseTargetGutterGlyphMargin:\n',
+        '    if cast[int](ev.target.toJs["type"]) == MouseTargetGutterLineDecorations:\n',
         D_DESKTOP, "the desktop's marker right-click matched by a class it lacks"),
 ]
 
@@ -1393,6 +1434,32 @@ def engine_target_dir() -> Path:
     """The cargo target directory `REPLAY_SERVER_BIN` was built into
     (`<target>/<profile>/replay-server`)."""
     return Path(os.environ["REPLAY_SERVER_BIN"]).resolve().parents[1]
+
+
+def engine_binary() -> Path:
+    """The replay-server `build_engine` writes: cargo's `dev` profile output
+    in `engine_target_dir()`."""
+    return engine_target_dir() / "debug" / (
+        "replay-server" + (".exe" if os.name == "nt" else ""))
+
+
+def engine_binary_problem() -> str:
+    """Why an engine arm could not be graded with this `REPLAY_SERVER_BIN`,
+    or "" when it can.
+
+    The suites run the replay-server `REPLAY_SERVER_BIN` names and
+    `build_engine` writes `engine_binary()`. When those are two files the
+    mutated engine is built and never run, and the arm reads as a gap in the
+    suites: graded at 71d92eb52 with `REPLAY_SERVER_BIN=src/build-debug/bin/
+    replay-server` (tup's copy), EN4 SURVIVED, "no case noticed", while its
+    engine was rebuilt into `src/build-debug/debug/`. plat51's harness
+    refuses the same mismatch (its `engine_binary_problem`)."""
+    named = Path(os.environ["REPLAY_SERVER_BIN"]).resolve()
+    built = engine_binary().resolve()
+    if named != built:
+        return (f"REPLAY_SERVER_BIN is {named}, but an engine arm rebuilds "
+                f"{built}; export REPLAY_SERVER_BIN={built}")
+    return ""
 
 
 def run_cargo_engine(path: str, filt: str, case: str | None) -> RunResult:
@@ -1759,6 +1826,12 @@ def main() -> int:
     install_restore_on_signal()
 
     wanted = [a for a in ARMS if not only or a.id in only]
+    # An engine arm is graded only if the suites run the engine it rebuilds.
+    if any(path in ENGINE_SUBJECTS for a in wanted for path, _f, _r in a.edits()):
+        problem = engine_binary_problem()
+        if problem:
+            print(f"REFUSING TO RUN: {problem}")
+            return 1
     print("\n== control ==")
     if any(CASE_SUITE[a.killer] in BINARY_SUITES for a in wanted) and \
        not build_tui():

@@ -41,6 +41,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -257,7 +258,7 @@ ARMS = [
              "    if vm.state.val == sssIdle:\n      vm.startShell(cols + 7, rows)")],
      [(TBL, None)],
      "§7.2: the terminal's shell does not start at the pane's size"),
-    ("T8", [(PROFILE, "     paneShell},", "     },")],
+    ("T8", [(PROFILE, "     paneShell,", "     ")],
      [(TBL, None), (PTY, None)],
      "the terminal draws the Shell pane as a report leaf again"),
     ("T9", [(TUI_MAIN, "  app.shellAct = proc(act: ShellAct): ShellActResult =\n    session.shellAct(rt, act)",
@@ -422,6 +423,33 @@ def controls_match():
     return ok
 
 
+def run_group(argv, **kw):
+    """`subprocess.run(argv, timeout=TIMEOUT, **kw)` in a session of its own,
+    whose whole process group is killed when the run ends. A suite outlives
+    its own runner otherwise: on a timeout `subprocess.run` kills only the
+    process it started (`nim c -r`, `bash`), and the compiled suite and the
+    `codetracer-gpui` it drives stay behind, hung, for as long as the host is
+    up (three of them, 11-15 hours old, measured 2026-11-10). Raises
+    `subprocess.TimeoutExpired` as `subprocess.run` does."""
+    proc = subprocess.Popen(argv, start_new_session=True, **kw)
+    try:
+        out, err = proc.communicate(timeout=TIMEOUT)
+    except BaseException:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.communicate()
+        raise
+    # A suite that exits leaves nothing running either: anything it left
+    # in its group would hold the next arm's pty, port or window.
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    return subprocess.CompletedProcess(argv, proc.returncode, out, err)
+
+
 def build_with(env_var, recipe):
     cmd = os.environ.get(env_var)
     argv = ["bash", "-c", cmd] if cmd else ["just", recipe]
@@ -460,8 +488,8 @@ def run_rust(suite):
         ["cargo", "test", "--test", Path(suite).stem]
     cwd = REPO if cmd else REPO / "src/db-backend"
     try:
-        p = subprocess.run(argv, cwd=cwd, capture_output=True, text=True,
-                           timeout=TIMEOUT)
+        p = run_group(argv, cwd=cwd, stdout=subprocess.PIPE,
+                      stderr=subprocess.PIPE, text=True)
     except subprocess.TimeoutExpired:
         return "HUNG", []
     out = (p.stdout or "") + (p.stderr or "")
@@ -472,6 +500,10 @@ def run_rust(suite):
     first = [ln.strip() for ln in out.splitlines()
              if "panicked at" in ln or ln.strip().startswith("ct/seek")][:1]
     first = [re.sub(r":\d+:\d+:", "", f) for f in first]
+    # Rust's panic line names the OS thread id (`thread 'name' (1234)
+    # panicked`), which differs on every run; drop it as plat70f's does.
+    first = [re.sub(r"^thread '([^']*)' \(\d+\) ", r"thread '\1' ", f)
+             for f in first]
     return "RED", first
 
 
@@ -484,8 +516,8 @@ def run_spec(suite):
         ["bash", CAPTURE]
     saved = path_of(ANSWERS).read_bytes()
     try:
-        p = subprocess.run(argv, cwd=REPO, capture_output=True, text=True,
-                           timeout=TIMEOUT)
+        p = run_group(argv, cwd=REPO, stdout=subprocess.PIPE,
+                      stderr=subprocess.PIPE, text=True)
     except subprocess.TimeoutExpired:
         return "HUNG", []
     finally:
@@ -540,9 +572,8 @@ def run_suite(suite, test_filter):
     if test_filter:
         cmd.append(test_filter)
     try:
-        p = subprocess.run(cmd, cwd=REPO, stdout=subprocess.PIPE,
-                           stderr=subprocess.STDOUT, text=True,
-                           timeout=TIMEOUT, env=env)
+        p = run_group(cmd, cwd=REPO, stdout=subprocess.PIPE,
+                      stderr=subprocess.STDOUT, text=True, env=env)
     except subprocess.TimeoutExpired:
         return "HUNG", []
     out = (p.stdout or "") + (p.stderr or "")
