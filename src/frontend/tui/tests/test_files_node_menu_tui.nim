@@ -248,6 +248,13 @@ suite "K19 in the terminal: Edit mode acts on the disk":
   test "Delete asks first: Escape keeps the file, Enter moves it to the trash":
     let root = project()
     let data = createTempDir("ct-files-menu-tui-data-", "")
+    # ct-home-sweep: not codetracer state. XDG_DATA_HOME is redirected only to
+    # aim the freedesktop.org trash (`$XDG_DATA_HOME/Trash`, which
+    # `native_file_tree.homeTrashDir` resolves) at this suite's directory, in
+    # this process. The trash is the desktop's, shared with every file
+    # manager, and CODETRACER_HOME does not move it by design; CodeTracer's own
+    # state is already in the scratch CODETRACER_HOME every test program gets
+    # (test_support/state_isolation.nim).
     let saved = getEnv("XDG_DATA_HOME")
     putEnv("XDG_DATA_HOME", data)
     let rt = editRuntime(root)

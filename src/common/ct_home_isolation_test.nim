@@ -400,7 +400,14 @@ suite "CODETRACER_HOME — the sweeps":
       ("src/ct_test/certificate_store_roots.nim",
        "the cross-tool test-certificates store (test-certificates-spec " &
        "Transport.md §2.1); its override is TEST_CERTIFICATES_DIR, and " &
-       "CODETRACER_HOME deliberately does not move a store other producers share")]
+       "CODETRACER_HOME deliberately does not move a store other producers share"),
+      ("src/frontend/viewmodel/host/native_file_tree.nim",
+       "the Files pane's Delete moves an entry into the desktop's trash, which " &
+       "the freedesktop.org Trash specification places at $XDG_DATA_HOME/Trash " &
+       "(~/.local/share/Trash; ~/.Trash on macOS): the user's own trash, " &
+       "shared with every file manager, not CodeTracer state, so " &
+       "CODETRACER_HOME deliberately does not move it " &
+       "(https://specifications.freedesktop.org/trash-spec/latest/)")]
     var scanned, resolving = 0
     for path in walkDirRec(repoRoot / "src"):
       let rel = path.relativePath(repoRoot).replace('\\', '/')
