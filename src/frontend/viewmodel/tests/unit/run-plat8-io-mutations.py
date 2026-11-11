@@ -776,21 +776,33 @@ MUTATIONS: list[Mutation] = [
     ),
     Mutation(
         "P27", IO,
-        "    var spins = 0\n"
-        "    while spins < 20000:",
-        "    var spins = 0\n"
-        "    while false:",
+        "    while true:\n"
+        "      var code = -1\n"
+        "      try:\n"
+        "        code = p.proc0.peekExitCode()\n"
+        "      except CatchableError, Defect:",
+        "    p.reaped = true\n"
+        "    if p.reaped: return\n"
+        "    while true:\n"
+        "      var code = -1\n"
+        "      try:\n"
+        "        code = p.proc0.peekExitCode()\n"
+        "      except CatchableError, Defect:",
         I_TEARDOWN, NIM_IO,
         "the killed child is never REAPED, so it becomes a zombie — a process "
-        "the OS still lists. A liveness probe that asked only `kill(pid, 0)` "
-        "would call that dead; `/proc/<pid>` does not, which is why the suite "
-        "asks both.",
-        control_name="the spin bound is hoisted into a named constant",
-        control_find="    var spins = 0\n"
-                     "    while spins < 20000:",
-        control_replace="    let spinLimit = 20000\n"
-                        "    var spins = 0\n"
-                        "    while spins < spinLimit:",
+        "the OS still lists — and the closer says nothing about it. A liveness "
+        "probe that asked only `kill(pid, 0)` would call that dead; "
+        "`/proc/<pid>` does not, which is why the suite asks both. Re-aimed "
+        "2026-11-10, when the reap loop's iteration bound became a wall-clock "
+        "deadline: the old needle quoted `while spins < 20000`, the bound that "
+        "gave up on a loaded host and left exactly this zombie on unmutated "
+        "code.",
+        control_name="the reap deadline's window is hoisted into a named binding",
+        control_find="    let deadline = getMonoTime() + "
+                     "initDuration(milliseconds = KillReapDeadlineMs)",
+        control_replace="    let reapWindow = "
+                        "initDuration(milliseconds = KillReapDeadlineMs)\n"
+                        "    let deadline = getMonoTime() + reapWindow",
     ),
     Mutation(
         "P28", HOST,
