@@ -45,7 +45,7 @@
  */
 
 import { test, expect, readyOnEntryTest as readyOnEntry } from "../../lib/fixtures";
-import { LayoutPage } from "../../page-objects/layout_page";
+import { LayoutPage } from "../../page-objects/layout-page";
 
 test.use({ sourcePath: "noir_space_ship/", launchMode: "trace" });
 test.setTimeout(300_000);
@@ -109,21 +109,44 @@ async function readDimming(page: any): Promise<Reading> {
   });
 }
 
-/** Toggle a breakpoint by clicking the CodeTracer gutter for `line`. */
-async function toggleBreakpoint(page: any, line: number): Promise<void> {
-  const coords = await page.evaluate((lineNumber: number) => {
-    const gutter = document.querySelector(
-      `.monaco-editor .margin-view-overlays .gutter[data-line='${lineNumber}']`,
-    );
-    if (!gutter) return null;
-    const r = gutter.getBoundingClientRect();
-    if (r.height === 0) return null;
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-  }, line);
-  if (!coords) {
-    throw new Error(`gutter row for line ${line} is not laid out`);
-  }
-  await page.mouse.click(coords.x, coords.y);
+/**
+ * Set a line breakpoint on `line` of `path` — the session's breakpoint set,
+ * through the debugger service's `addColumnBreakpoint` with column 0 (a
+ * whole-line breakpoint, `sdk/breakpoints.plannedAnchored`) — and wait until
+ * the session holds it, so a breakpoint that was not set fails here, named,
+ * instead of letting Continue run to the end of the recording.
+ *
+ * This used to click the centre of the CodeTracer `.gutter[data-line]` cell
+ * of whatever editor was first in the DOM. Two things were wrong with that:
+ * the cell is the line-number column now (the breakpoint column is Monaco's
+ * glyph margin, Editor-Pane.md MC.5), and the first editor is `main.nr`,
+ * where line 34 is blank — `calculate_damage` is in `shield.nr`, which no
+ * editor shows at the entry stop. Opening `shield.nr` from the Files pane
+ * does not give an editor to press in either: it opens under its relative
+ * path, `src/shield.nr`, and stays behind `main.nr` (codetracer-pm issue
+ * `2026-11-12-files-pane-opens-a-recorded-source-under-its-relative-path`).
+ */
+async function setBreakpoint(page: any, path: string, line: number): Promise<void> {
+  await page.evaluate(
+    ({ p, l }: { p: string; l: number }) => {
+      const debuggerService = (window as any).data.services.debugger;
+      debuggerService.addColumnBreakpoint.call(debuggerService, p, l, 0);
+    },
+    { p: path, l: line },
+  );
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          ({ p, l }: { p: string; l: number }) =>
+            ((window as any).ctBreakpointRows?.() ?? []).some(
+              (r: any) => r.path === p && r.line === l && r.column === 0,
+            ),
+          { p: path, l: line },
+        ),
+      { message: `no breakpoint was set on ${path}:${line}`, timeout: 15_000 },
+    )
+    .toBe(true);
 }
 
 test("a line that already ran is not dimmed just for being above the cursor", async ({
@@ -133,12 +156,22 @@ test("a line that already ran is not dimmed just for being above the cursor", as
   await ctPage.waitForSelector(".view-line", { timeout: 90_000 });
 
   // Jump into `calculate_damage` and stop below its opening statements —
-  // the exact situation the report describes.
-  await toggleBreakpoint(ctPage, STOP_LINE);
-  await new LayoutPage(ctPage).continueButton().click({ timeout: 30_000 });
+  // the exact situation the report describes. The function is in
+  // `shield.nr`, beside the entry file `main.nr`; the recording names both
+  // by their absolute paths.
+  const layout = new LayoutPage(ctPage);
+  const entryPath: string = await ctPage.evaluate(
+    () => String((globalThis as any).data.services.debugger.location.path),
+  );
+  expect(entryPath, "the entry stop is in main.nr").toMatch(/\/main\.nr$/);
+  const shieldPath = entryPath.replace(/main\.nr$/, "shield.nr");
+  await setBreakpoint(ctPage, shieldPath, STOP_LINE);
+  await layout.continueButton().click({ timeout: 30_000 });
   await ctPage.waitForFunction(
-    (line: number) =>
-      (globalThis as any).data?.services?.debugger?.location?.line === line,
+    (line: number) => {
+      const location = (globalThis as any).data?.services?.debugger?.location;
+      return location?.line === line && String(location?.path ?? "").endsWith("shield.nr");
+    },
     STOP_LINE,
     { timeout: 120_000 },
   );
