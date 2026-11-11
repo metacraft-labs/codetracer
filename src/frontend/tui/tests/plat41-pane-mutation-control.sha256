@@ -2,11 +2,11 @@
 # subjects AND the suites the arms are graded by (§16c).
 # Refreshed with --record-control-hashes, gated by the needle
 # scan (§39a).
-5abf1ef7cea6de82aad911e2cb43109c7ffa59028ec3bcae5b5c561ef3aec0f0  src/frontend/view_vocabulary/pane_views.nim
-85316d3b5f35368740f69de6abfa95fbf5f8d7011ea9b997614ba0fa0a1643da  src/frontend/viewmodel/viewmodels/flow_vm.nim
+81eff64b1711b9a013b85a03cd3c7014747b8d9014fd3ddc3084ba7383350bea  src/frontend/view_vocabulary/pane_views.nim
+ef5fed44b5a30b4f38234745c3ad8a9c9fb22cb377701a542128e6992dcb0058  src/frontend/viewmodel/viewmodels/flow_vm.nim
 885ccf90002e1520775ed9be1e588cd225f319baba1971dab8672bd1b11824ba  src/frontend/viewmodel/store/replay_data_store.nim
-5ec633e4be8a57f3483381e3030681a5b3e84b8a4b9604eea0de4b6a54d2a444  src/frontend/tui/host/native_host.nim
-b48d267df4c0f66db2f83d72dfe3ac6220f92f16895fa0635cb97daf4bc8b701  src/frontend/headless_app/headless_app.nim
+43a617a67ff08d2dd5b8ffa45869f3eb3930905f653876f387161e982783cbe7  src/frontend/tui/host/native_host.nim
+f5c8a3409d46e9b0cadba203a0ca73c5e8c71a8f2b0dd35fa5fa18673d569c36  src/frontend/headless_app/headless_app.nim
 30e4b962b05974e99c7d5c12934efbbcc57be5063c80d00cadc462b09090de02  src/common/trace_source_paths.nim
 499e05ae64bb26d33d4cce1f3c6fc8b07567c6edadcd8d45640e48cf331d37d2  src/frontend/tui/tests/test_plat41_parity.nim
-bba448bddc96c4ad7bf4061e0ebd2a7a51cf70d717bb0446704078233aa9d92a  src/frontend/tui/tests/test_plat41_pane_coverage.nim
+b376837d1cc6fc3ccc2971475c8e2ce6d07ce201f261be22342b7bfb7b4eec27  src/frontend/tui/tests/test_plat41_pane_coverage.nim

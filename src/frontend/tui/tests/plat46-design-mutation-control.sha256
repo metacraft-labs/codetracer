@@ -2,16 +2,16 @@
 # the subjects AND the suites the arms are graded by (§16c).
 # Refreshed with --record-control-hashes, gated by the needle
 # scan (§39a).
-0cc75f59e87a451f7b9b52805558f223049c0336b92bcb3ab8fa555f6c648e13  src/frontend/tui/app/theme/roles.nim
-99dc7daa706d2ad09620b55f963a24ec7ba16e7bf067caf3fa9a1e8c5a2776fa  src/frontend/tui/app/theme/palette.nim
-2291b4503f2e93ecef12ea56687ced251e630e804137f24415ce5e3773fdcc30  src/frontend/tui/app/theme/capabilities.nim
+44373bc763be9d896445891509ac39004d39d783c098a269874e096b730198db  src/frontend/tui/app/theme/roles.nim
+f3d393fc820cf09de46805d0639661ae72c75cb26725e3e867441031852d7a60  src/frontend/tui/app/theme/palette.nim
+40c50a6a381d64a02ff7b1894488fdf9c20f2919acdcf6c645d48cbcce0f0e27  src/frontend/tui/app/theme/capabilities.nim
 ab670c238d9e98d67b821087fb17d9bfe4ccc48ea6a0eb112e12c9b7e258f0d6  src/frontend/tui/app/theme/colour_math.nim
-f1f5b7c029a51bdccf8516f7cdd4cbbc0ee7f5464599ce9e10cc0adefd3bc077  src/frontend/tui/app/views/shell.nim
-1eeb5f8f80c1800e2a756a9d2118466a46d1dd940faa895aba10aeec04e156b2  src/frontend/tui/app/views/gutter.nim
-6ea69a99a68d77adf02fec57c2f4ce888c8c1abbe2b6e2187c3dbf0308cc04ff  src/frontend/tui/app/views/source_pane.nim
-76a64a4870bfc74dff18897744a7991ba1be91090a002cd8b12af3d91d87707b  src/frontend/tui/host/terminal_probe.nim
+09454097889294a4861a5eca9cccd9be16d9ba5244ab683a49daf7a8b33bd686  src/frontend/tui/app/views/shell.nim
+1401d5b4cf40ba3ad68794ff1fe38ca34887bf337dac87d553a0eb86f3867e1c  src/frontend/tui/app/views/gutter.nim
+b44a594fb002463a4b616bde99f8a4791de4ca5a36b18e487755473df8d4ae11  src/frontend/tui/app/views/source_pane.nim
+9fce287d64b7aec99d425bd446199a4e2897c7b2c06189beb1ffd33246b77a2b  src/frontend/tui/host/terminal_probe.nim
 92b76397e164fec56e5091a5e2d4ab7a314035095ced745b52d29713be5a8fbf  scripts/tokens-to-styl.sh
-1db46cdee846f2db18d5a0f95c0c5f855e804734a0523e81a61394a6c81d5f8b  src/frontend/tui/app/tests/test_degraded_style_tables.nim
+3186722e83443eecc8730685ed332adb6468cdb970e46d527c2155827e91394a  src/frontend/tui/app/tests/test_degraded_style_tables.nim
 a32bdc420f98e7f7562c878d0bf758bab5cf1cd8ac4df25baf04b18e467eb578  src/frontend/tui/app/tests/test_capability_resolution.nim
 825901238fc6539a7b2b1001c28b1689d6fa9c0c3be4ac0de91682919b5da5ac  src/frontend/tui/tests/test_plat46_terminal_probe.nim
 ad6bdf01f5417fdece3624a40c429d1794106785b010b803289adcb10fcc9045  src/frontend/tui/tests/real_terminal/test_plat46_design_tokens.nim

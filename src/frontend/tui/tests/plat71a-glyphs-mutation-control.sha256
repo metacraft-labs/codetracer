@@ -4,8 +4,8 @@
 # needle scan.
 15e734b9ee8043749c6f3cb17d36fd4d984ed69b32113b9f74c7e83a1843ae6b  src/frontend/tui/app/views/glyph_table.nim
 c75cccb6eb5b15bdfe8dc3cc661c24f3333209a4b6e0bcf87211d5b925013b6e  src/frontend/tui/app/views/scrollbar_styles.nim
-b0a2f4917ca4ec515bf811d4fd130fe480bdfb1cdcc62d57ebdacc070a95758d  src/frontend/tui/app/views/styled_row.nim
-ae9db095dded7eeb7a1a88229b49d4249f3a67cc90fefc521eede102dbdad0cf  src/frontend/tui/app/theme/degradation.nim
+7139873731627681ca18ae41de91e1e209026b61e07e5bac8d17c23f4b68b512  src/frontend/tui/app/views/styled_row.nim
+9dce6ddf2027ab26ba85d8841af05c76c56351bc05ca5639f79c0cd16f81e061  src/frontend/tui/app/theme/degradation.nim
 1401d5b4cf40ba3ad68794ff1fe38ca34887bf337dac87d553a0eb86f3867e1c  src/frontend/tui/app/views/gutter.nim
 0cf18057109aaa42ed5c6824f6f19a86f74cc16109997cfbc656672d4ee66a9d  src/frontend/tui/app/views/call_trace.nim
 52edab8c1f994db57a0a4a49f070d3601beb860a69e730542d592ef25fd63341  src/frontend/tui/app/views/top_bar.nim
