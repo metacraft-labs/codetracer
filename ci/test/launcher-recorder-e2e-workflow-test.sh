@@ -1421,9 +1421,136 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 9b''. The owning action prepares the selected SDK/project environments.
-# Its real SDK/HTTP tests qualify activation and expiry; these assertions hold
-# this consumer's shell, project list and ordering, without copying SDK pins.
+# 9b''. REPRO'S OWN TOOL-PROVISIONING NIXPKGS IS FETCHED FIRST, AT THE PIN.
+#
+# `repro exec` realizes catalog tools from `github:NixOS/nixpkgs/<rev>?narHash=`
+# with <rev> = reprobuild's CanonicalNixpkgsRev, and no dev shell evaluation
+# reaches that ref: launcher run 40412127662's beam arm got `401 Bad
+# credentials` on it ~2 h after the mint. 242b1d028 left this fetch to the
+# shared preparation (9b''' below), which makes it only after realizing the
+# `ci` shell, and ruby-recorder run 42982584550 got the same 401 there, 2 h 6
+# min after the mint. The prefetch step reads the pin out of codetracer's
+# `reprobuild` flake input and fetches it, and nothing more. Pinned here,
+# EXECUTED with a stub nix against a planted flake.lock and pin file whose
+# revision is NOT the real one, so a step that restated the revision fails:
+#   a. it fetches exactly the planted ref, through the locked reprobuild input;
+#   b. it does so BEFORE the first dev-shell evaluation;
+#   c. a pin file that no longer reads is an error, and nothing is evaluated;
+#   d. a flake with no direct `reprobuild` input is skipped, not an error;
+#   e. a nixpkgs fetch that fails stops the step, naming the ref.
+# ---------------------------------------------------------------------------
+echo
+echo "repro's tool-provisioning nixpkgs is fetched first, at the revision reprobuild pins"
+
+RP="$TMP/repro-nixpkgs"
+mkdir -p "$RP/bin" "$RP/ws/codetracer" "$RP/ws/codetracer-trace-format-nim" \
+	"$RP/ws/codetracer-ruby-recorder" "$RP/rbsrc/libs/repro_dsl_stdlib/src/repro_dsl_stdlib"
+: >"$RP/ws/codetracer/flake.nix"
+readonly RP_RB_REV="1111111111111111111111111111111111111111"
+readonly RP_NP_REV="2222222222222222222222222222222222222222"
+printf '%s\n' \
+	'{"nodes": {"root": {"inputs": {"reprobuild": "reprobuild"}},' \
+	'  "reprobuild": {"locked": {"type": "github", "owner": "metacraft-labs",' \
+	"    \"repo\": \"reprobuild\", \"rev\": \"$RP_RB_REV\", \"narHash\": \"sha256-rb+rb/rb=\"}}}," \
+	' "root": "root", "version": 7}' >"$RP/with-reprobuild.lock"
+cp "$RP/with-reprobuild.lock" "$RP/ws/codetracer/flake.lock"
+readonly RP_PIN="$RP/rbsrc/libs/repro_dsl_stdlib/src/repro_dsl_stdlib/nixpkgs_pin.nim"
+printf '%s\n' \
+	'const' \
+	"  CanonicalNixpkgsRev* = \"$RP_NP_REV\"" \
+	'    ## The nixpkgs commit every nixpkgs# catalog entry resolves against.' \
+	'' \
+	'  CanonicalNixpkgsNarHash* = "sha256-np+np/np="' \
+	'    ## The NAR hash of the tree at CanonicalNixpkgsRev.' >"$RP/pin.good"
+cp "$RP/pin.good" "$RP_PIN"
+cat >"$RP/bin/nix" <<'STUB'
+#!/usr/bin/env bash
+printf '%s|%s\n' "$(pwd -P)" "$*" >>"$NIX_LOG"
+case "$*" in
+	*"--expr builtins.currentSystem"*) printf 'x86_64-linux'; exit 0 ;;
+	"flake prefetch --json "*) printf '{"storePath": "%s", "hash": "sha256-x"}\n' "$RB_SRC"; exit 0 ;;
+	"flake prefetch "*)
+		if [ -n "${NIX_FAIL_PREFETCH:-}" ]; then
+			echo "error: unable to download 'https://api.github.com/repos/NixOS/nixpkgs/tarball/0': HTTP error 401" >&2
+			exit 1
+		fi
+		exit 0 ;;
+esac
+printf '/nix/store/00000000000000000000000000000000-stub.drv'
+STUB
+chmod +x "$RP/bin/nix"
+RP_STEP="$RP/step.sh"
+extract_step_script "$PREFETCH_STEP" "$REUSABLE" >"$RP_STEP"
+
+# run_rp_step [FAIL] -> "<exit>|<combined output>"
+run_rp_step() {
+	local out rc
+	: >"$RP/nix.log"
+	out="$(PATH="$RP/bin:$PATH" NIX_LOG="$RP/nix.log" RB_SRC="$RP/rbsrc" \
+		NIX_FAIL_PREFETCH="${1:-}" CT_DIR="$RP/ws/codetracer" \
+		RECORDER_REPO=codetracer-ruby-recorder bash "$RP_STEP" 2>&1)"
+	rc=$?
+	printf '%s|%s' "$rc" "$out"
+}
+
+readonly RP_RB_REF="github:metacraft-labs/reprobuild/$RP_RB_REV?narHash=sha256-rb%2Brb%2Frb%3D"
+readonly RP_NP_REF="github:NixOS/nixpkgs/$RP_NP_REV?narHash=sha256-np%2Bnp%2Fnp%3D"
+rp_out="$(run_rp_step)"
+# A github ref names no checkout, so the directory these two run in is not
+# part of the contract; only the argv is compared.
+rp_argv="$(cut -d'|' -f2- "$RP/nix.log")"
+if [ "${rp_out%%|*}" = 0 ] &&
+	grep -qxF "flake prefetch --json $RP_RB_REF" <<<"$rp_argv" &&
+	grep -qxF "flake prefetch $RP_NP_REF" <<<"$rp_argv"; then
+	ok "the prefetch fetches the nixpkgs ref read from codetracer's locked reprobuild input"
+else
+	fail "the prefetch fetches the nixpkgs ref read from codetracer's locked reprobuild input" \
+		"exit ${rp_out%%|*}; want '$RP_RB_REF' then '$RP_NP_REF'" "nix calls: $(tr '\n' ';' <"$RP/nix.log")" \
+		"output: ${rp_out#*|}"
+fi
+rp_np_line="$(grep -nF "flake prefetch $RP_NP_REF" "$RP/nix.log" | head -n1 | cut -d: -f1)"
+rp_eval_line="$(grep -nF "eval --raw --no-write-lock-file" "$RP/nix.log" | head -n1 | cut -d: -f1)"
+if [ -n "$rp_np_line" ] && [ -n "$rp_eval_line" ] && [ "$rp_np_line" -lt "$rp_eval_line" ]; then
+	ok "the provisioning nixpkgs is fetched before the first dev-shell evaluation"
+else
+	fail "the provisioning nixpkgs is fetched before the first dev-shell evaluation" \
+		"nixpkgs fetch at call ${rp_np_line:-none}, first eval at call ${rp_eval_line:-none}"
+fi
+
+printf 'const\n  SomethingElse* = "x"\n' >"$RP_PIN"
+rp_out="$(run_rp_step)"
+if [ "${rp_out%%|*}" != 0 ] && grep -q "::error::could not read CanonicalNixpkgsRev" <<<"$rp_out" &&
+	! grep -q "eval --raw" "$RP/nix.log"; then
+	ok "a pin file that no longer reads is an error naming it, before anything is evaluated"
+else
+	fail "a pin file that no longer reads is an error naming it, before anything is evaluated" "got: ${rp_out}"
+fi
+cp "$RP/pin.good" "$RP_PIN"
+
+printf '{"nodes": {"root": {"inputs": {}}}, "root": "root", "version": 7}\n' >"$RP/ws/codetracer/flake.lock"
+rp_out="$(run_rp_step)"
+if [ "${rp_out%%|*}" = 0 ] && grep -q "no direct reprobuild input" <<<"$rp_out" &&
+	! grep -q "flake prefetch" "$RP/nix.log"; then
+	ok "a codetracer flake with no direct reprobuild input is skipped, not an error"
+else
+	fail "a codetracer flake with no direct reprobuild input is skipped, not an error" "got: ${rp_out}"
+fi
+cp "$RP/with-reprobuild.lock" "$RP/ws/codetracer/flake.lock"
+
+rp_out="$(run_rp_step fail)"
+if [ "${rp_out%%|*}" != 0 ] && grep -qF "::error::could not fetch $RP_NP_REF" <<<"$rp_out" &&
+	grep -q "HTTP error 401" <<<"$rp_out"; then
+	ok "a failed provisioning-nixpkgs fetch stops the step, naming the ref"
+else
+	fail "a failed provisioning-nixpkgs fetch stops the step, naming the ref" "got: ${rp_out}"
+fi
+
+# ---------------------------------------------------------------------------
+# 9b'''. The owning action prepares the selected SDK/project environments.
+# Its real SDK/HTTP tests qualify activation; these assertions hold this
+# consumer's shell, project list and ordering. The preparation copies no SDK
+# pin: the one place that reads one is the token-window fetch (9b'' above),
+# which selects and realizes nothing.
 echo
 echo "selected Repro environments use shared preparation before the core build"
 prepare_block="$(step_block 'Prepare selected Repro toolchains before long running gates' "$REUSABLE")"
@@ -1451,11 +1578,18 @@ else
 fi
 prepare_line="$(grep -nF -- '- name: Prepare selected Repro toolchains before long running gates' "$REUSABLE" | cut -d: -f1)"
 core_line="$(grep -nF -- '- name: Build the codetracer-desktop core' "$REUSABLE" | cut -d: -f1)"
+# Every line of the workflow outside the prefetch step that names the SDK's
+# nixpkgs pin (comments included: a step that explains it is about to use it).
+pin_outside_prefetch="$(strip_cr "$REUSABLE" | awk -v want="      - name: $PREFETCH_STEP" '
+	$0 == want { p=1; next }
+	p && /^      - name: / { p=0 }
+	!p' | grep -nE 'CanonicalNixpkgs|nixpkgs_pin[.]nim')"
 if [ -n "$prepare_line" ] && [ -n "$core_line" ] && [ "$prepare_line" -lt "$core_line" ] &&
-	! grep -qE 'CanonicalNixpkgs|nixpkgs_pin[.]nim' "$REUSABLE"; then
-	ok "shared tool preparation precedes the core build without parsing SDK pins"
+	[ -z "$pin_outside_prefetch" ]; then
+	ok "shared tool preparation precedes the core build; only the token-window fetch reads the SDK's nixpkgs pin"
 else
-	fail "shared tool preparation precedes the core build without parsing SDK pins" "prepare=$prepare_line core=$core_line"
+	fail "shared tool preparation precedes the core build; only the token-window fetch reads the SDK's nixpkgs pin" \
+		"prepare=$prepare_line core=$core_line" "pin named outside the prefetch: ${pin_outside_prefetch:-(none)}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -2203,7 +2337,7 @@ fi
 # reporting success on fewer checks than it claims.
 # ---------------------------------------------------------------------------
 echo
-readonly EXPECTED_ASSERTIONS=43
+readonly EXPECTED_ASSERTIONS=48
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))
