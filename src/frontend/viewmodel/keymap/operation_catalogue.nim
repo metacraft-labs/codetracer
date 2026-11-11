@@ -87,6 +87,15 @@ const
   LayoutGestureTable* = "layout-gesture"
     ## Pushed while a layout gesture (a drag, a held divider, a revealed dock) is
     ## live: its `Escape` beats every base's, as the terminal's always did.
+  VideoPlayerTable* = PaneTablePrefix & "videoPlayer"
+    ## The Video Player's own keys while it has the focus.
+  VideoPickerTable* = "video-picker"
+    ## Pushed while the Video Player's pixel picker is on, owned by the pane:
+    ## its `Escape` cancels the picker and is nobody else's then.
+  VideoMagnifierTable* = "video-magnifier"
+    ## Pushed while the terminal's magnifier is open over the frame (the
+    ## picker's keyboard stage): the arrows move the picked pixel, `Enter`
+    ## picks it.
   PointerTable* = "pointer"
     ## The rows whose key is a pointer gesture (`pointer_rows`). Never on a
     ## scope path: only `keymap_router.routePointer` consults it.
@@ -497,6 +506,10 @@ const
        "Keep the Listing in Step with the Source"),
     op("verification.run", PaneTablePrefix & "verification",
        "Run the Project's Verifier"),
+    op("verification.stop", PaneTablePrefix & "verification",
+       "Stop the Verifier"),
+    op("requests.select", PaneTablePrefix & "requests", "Select this request",
+       oaTarget),
     op("variables.toggle-expand", PaneTablePrefix & "state",
        "Expand or collapse this value", oaTarget),
     op("variables.value-history", PaneTablePrefix & "state",
@@ -568,17 +581,30 @@ const
     op("frame-viewer.next-frame", GlobalTable, "Next frame", oaTarget),
     op("frame-viewer.previous-frame", GlobalTable, "Previous frame", oaTarget),
     op("frame-viewer.go-to-frame", GlobalTable, "Go to this frame", oaTarget),
-    op("video-player.toggle-play", GlobalTable, "Video: Play / Pause"),
-    op("video-player.rewind", GlobalTable, "Video: Rewind"),
-    op("video-player.fast-forward", GlobalTable, "Video: Fast Forward"),
-    op("video-player.step-frame-back", GlobalTable, "Video: Previous Frame"),
-    op("video-player.step-frame-forward", GlobalTable, "Video: Next Frame"),
-    op("video-player.step-draw-back", GlobalTable, "Video: Previous Draw"),
-    op("video-player.step-draw-forward", GlobalTable, "Video: Next Draw"),
-    op("video-player.jump-start", GlobalTable, "Video: Jump to Start"),
-    op("video-player.jump-end", GlobalTable, "Video: Jump to End"),
-    op("video-player.toggle-picker", GlobalTable, "Video: Toggle Picker"),
-    op("video-player.cancel-picker", GlobalTable, "Video: Cancel Picker"),
+    # The Video Player's own keys (Visual-Replay.md § Keyboard Shortcuts): its
+    # pane's table while it has the focus, the picker's and the magnifier's
+    # layers while they are open (`overlay_rows`).
+    op("video-player.toggle-play", VideoPlayerTable, "Video: Play / Pause"),
+    op("video-player.rewind", VideoPlayerTable, "Video: Rewind"),
+    op("video-player.fast-forward", VideoPlayerTable, "Video: Fast Forward"),
+    op("video-player.step-frame-back", VideoPlayerTable, "Video: Previous Frame"),
+    op("video-player.step-frame-forward", VideoPlayerTable, "Video: Next Frame"),
+    op("video-player.step-draw-back", VideoPlayerTable, "Video: Previous Draw"),
+    op("video-player.step-draw-forward", VideoPlayerTable, "Video: Next Draw"),
+    op("video-player.jump-start", VideoPlayerTable, "Video: Jump to Start"),
+    op("video-player.jump-end", VideoPlayerTable, "Video: Jump to End"),
+    op("video-player.toggle-picker", VideoPlayerTable, "Video: Toggle Picker"),
+    op("video-player.cancel-picker", VideoPickerTable, "Video: Cancel Picker"),
+    op("video-player.move-magnifier-left", VideoMagnifierTable,
+       "Video: Move the Picked Pixel Left", oaNumber),
+    op("video-player.move-magnifier-right", VideoMagnifierTable,
+       "Video: Move the Picked Pixel Right", oaNumber),
+    op("video-player.move-magnifier-up", VideoMagnifierTable,
+       "Video: Move the Picked Pixel Up", oaNumber),
+    op("video-player.move-magnifier-down", VideoMagnifierTable,
+       "Video: Move the Picked Pixel Down", oaNumber),
+    op("video-player.commit-pick", VideoMagnifierTable,
+       "Video: Pick This Pixel"),
 
     # --- The terminal's modal machine, under the Vim and Kakoune bases ----
     # (§5.5 / CodeTracer-TUI.md §4.1: its mode is state; these are the

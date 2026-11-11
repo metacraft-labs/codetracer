@@ -679,8 +679,8 @@ when defined(js):
   ## M2 historical note: a raw window-level Escape keydown handler used to
   ## live here (``installEscapeHandler``).  M4 retired it in favour of the
   ## standard ClientAction pipeline — ``ClientAction.videoPlayerCancelPicker``
-  ## is one of the pane's own keys (``videoPlayerKey``) in
-  ## ``ui/key_router.nim`` and routed onto ``VideoPlayerVM.cancelPicker`` via
+  ## is the picker layer's `Escape` (``keymap/overlay_rows``), routed by
+  ## ``ui/key_router.nim`` onto ``VideoPlayerVM.cancelPicker`` via
   ## ``dispatchVideoPlayerAction``.  The new wiring respects focus scoping
   ## (only fires when the Video Player is focused or hovered) and falls
   ## through to ``aEscape`` when picker mode is inactive, so it can coexist
@@ -809,9 +809,9 @@ when defined(js):
           vm.tickPlayback(nowMs))
 
     ## Escape → cancelPicker flows through the standard ClientAction
-    ## pipeline (M4).  No raw keydown listener is installed here — the
-    ## pane's own keys in ``ui/key_router.nim`` (``videoPlayerKey``) query
-    ## ``videoPlayerHasFocus()`` and ``vm.pickerState`` before delegating.
+    ## pipeline (M4).  No raw keydown listener is installed here — it is a
+    ## row of the picker's layer (``keymap/overlay_rows``), which
+    ## ``ui/key_router.nim`` pushes while ``vm.pickerState`` is active.
 
 proc renderVideoPlayerPanel*[R, N](r: R; vm: VideoPlayerVM): N =
   ## The Video Player panel, under any renderer (Shared-DOM-Front-Ends D3);

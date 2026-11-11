@@ -49,6 +49,7 @@ import headless_app/layout_model
 import codetracer_embed
 
 import ../app/runtime
+import ../../viewmodel/keymap/[keymap_router, user_keymap]
 import ../app/tui_app
 import ../app/theme/capabilities
 import ../app/theme/image_capability
@@ -66,7 +67,7 @@ import ./fixtures/visual_fixture
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 113
+const ExpectedAssertions = 119
 
 var countedAssertions = 0
 
@@ -461,6 +462,39 @@ suite "PLAT-59: the Visual Replay panes on the terminal":
       rt.app.layoutBinding.focus = paneEventLog
       ck rt.focus.focusPaneKind(paneEventLog)
       ck not rt.videoPlayerOwnsToken(" ")
+
+    test "the player's keys and its buttons' presses follow a user's rows":
+      # Input-Routing §4.3 / §5.1: the keys are keymap rows and a transport
+      # button runs the operation it carries, so a user's `keybindings.json`
+      # rebinds both — a key in the pane's scope, a press on its buttons.
+      rt.showVisualPane(paneVideoPlayer)
+      rt.app.layoutBinding.focus = paneVideoPlayer
+      discard rt.focus.focusPaneKind(paneVideoPlayer)
+      rt.router.applyUserKeymap(parseUserKeymap("""[
+        { "key": "j", "command": "video-player.jump-end",
+          "when": "paneKind == videoPlayer" },
+        { "key": "click", "command": "video-player.jump-start",
+          "when": "paneKind == videoPlayer && elementKind == button" }
+      ]"""))
+      defer: rt.router.applyUserKeymap(parseUserKeymap("[]"))
+      s.send(rt, "\x1b[H")                 # Home: the first frame
+      s.settle(rt)
+      ck panes.frame.currentFrame.val == 0
+      s.send(rt, "j")                      # rebound: the last frame
+      s.settle(rt)
+      ck panes.frame.currentFrame.val == GlSceneFrames - 1
+      ck panes.player.playState.val == Paused
+      # A press on Play now runs the user's row: the first frame, not playing.
+      let (_, screen) = rt.videoPlayerScreen()
+      var playCol = -1
+      for b in screen.transportButtons:
+        if b.action == VpaTogglePlay: playCol = b.col
+      ck playCol >= 0
+      s.send(rt, sgr(0, screen.transportRow, playCol))
+      s.send(rt, sgr(0, screen.transportRow, playCol, release = true))
+      s.settle(rt)
+      ck panes.frame.currentFrame.val == 0
+      ck panes.player.playState.val == Paused
 
     s.close()
 

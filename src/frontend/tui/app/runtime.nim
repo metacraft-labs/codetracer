@@ -2272,6 +2272,11 @@ proc pointerCellX(event: MouseEvent; fallback = -1.0): float =
   ## reports pixels (SGR-pixel, DECSET 1016), else `fallback`.
   if event.pixel: event.px / mouseMetrics().cellW else: fallback
 
+proc pressElement(rt: TuiRuntime; event: MouseEvent; pane: PaneKind;
+                  kind: ElementKind; operation: string; target: ContextTarget;
+                  outcome: var RuntimeOutcome): bool
+  ## A press on an element, through the router: defined beside `runPointer`.
+
 proc routeTerminalOutputClick(rt: TuiRuntime; area: CellArea;
                               event: MouseEvent;
                               outcome: var RuntimeOutcome): bool =
@@ -2299,7 +2304,9 @@ proc routeTerminalOutputClick(rt: TuiRuntime; area: CellArea;
     outcome.requestClick(PaneClickRequest(kind: pcTerminalView,
                                           text: $tvScreen))
   of thFragment:
-    return rt.terminalWriteJump(hit.eventIndex, outcome)
+    return rt.pressElement(event, paneTerminalOutput, ekRow, "",
+                           ContextTarget(pane: paneTerminalOutput,
+                                         index: int64(hit.eventIndex)), outcome)
   of thScreenTrack:
     rt.app.terminalDrag = tdScreen
     rt.app.terminalOutput.scrubSent = -1
@@ -3446,73 +3453,54 @@ proc cancelPicker(rt: TuiRuntime; outcome: var RuntimeOutcome) =
   rt.closeMagnifier()
   discard rt.actOnVisual(VisualAct(kind: vaPickerState, on: false), outcome)
 
-proc videoPlayerOwnsToken*(rt: TuiRuntime; token: string): bool =
-  ## The Video Player's keys while it has the focus (Visual-Replay.md §
-  ## Keyboard Shortcuts: "scoped to the Video Player component when it has
-  ## focus"): Space / K play-pause, J rewind, L fast forward, Left / Right a
-  ## frame, Shift+Left / Shift+Right a draw call, Home / End, P the picker —
-  ## and, while the magnifier is open, the arrows move its pixel, Enter
-  ## picks, Esc cancels.
-  let (had, focused) = rt.focus.focusedPane()
-  if not had or focused != paneVideoPlayer or not rt.app.frameViewer.pane:
-    return false
-  let key = rt.keyOf(token)
-  if rt.app.frameViewer.magnified:
-    return key in ["Left", "Right", "Up", "Down", "Shift+Left", "Shift+Right",
-                   "Shift+Up", "Shift+Down", "Enter", "Escape", "Esc", "p",
-                   "P"]
-  key in ["Space", "k", "K", "j", "J", "l", "L", "Left", "Right",
-          "Shift+Left", "Shift+Right", "Home", "End", "p", "P"] or
-    (key in ["Escape", "Esc"] and rt.app.frameViewer.transport.picker)
-
 proc playerAction(rt: TuiRuntime; action: VideoPlayerAction;
                   outcome: var RuntimeOutcome) =
   discard rt.actOnVisual(VisualAct(kind: vaPlayer, action: action), outcome)
 
-proc routeTokenToVideoPlayer(rt: TuiRuntime; token: string;
-                             outcome: var RuntimeOutcome) =
-  let key = rt.keyOf(token)
+proc openPickerByKeyboard(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  ## `video-player.toggle-picker` with the picker off: §5's first stage at the
+  ## frame's centre — the magnifier — or, with no frame drawn, the player's
+  ## own picker state.
+  let (area, screen) = rt.videoPlayerScreen()
+  if screen.pictureTop >= 0:
+    discard rt.openMagnifierAtCell(area.col + screen.pictureCols div 2,
+      screen.pictureTop + screen.pictureRows div 2, outcome)
+  else:
+    rt.playerAction(VpaTogglePicker, outcome)
+
+proc togglePicker(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  if rt.app.frameViewer.magnified or rt.app.frameViewer.transport.picker:
+    rt.cancelPicker(outcome)
+  else:
+    rt.openPickerByKeyboard(outcome)
+
+proc moveMagnifier(rt: TuiRuntime; dx, dy: int; outcome: var RuntimeOutcome) =
+  rt.app.frameViewer = rt.app.frameViewer.moveCursorBy(dx, dy)
+  rt.note(describeMagnifier(rt.app.frameViewer.magnifier))
   outcome.repaint = true
-  if rt.app.frameViewer.magnified:
-    let step = if key.startsWith("Shift+"): 8 else: 1
-    case key
-    of "Left", "Shift+Left":
-      rt.app.frameViewer = rt.app.frameViewer.moveCursorBy(-step, 0)
-    of "Right", "Shift+Right":
-      rt.app.frameViewer = rt.app.frameViewer.moveCursorBy(step, 0)
-    of "Up", "Shift+Up":
-      rt.app.frameViewer = rt.app.frameViewer.moveCursorBy(0, -step)
-    of "Down", "Shift+Down":
-      rt.app.frameViewer = rt.app.frameViewer.moveCursorBy(0, step)
-    of "Enter":
-      rt.commitMagnifier(outcome)
-      return
-    of "Escape", "Esc", "p", "P":
-      rt.cancelPicker(outcome)
-      return
-    else: discard
-    rt.note(describeMagnifier(rt.app.frameViewer.magnifier))
-    return
-  case key
-  of "Space", "k", "K": rt.playerAction(VpaTogglePlay, outcome)
-  of "j", "J": rt.playerAction(VpaRewind, outcome)
-  of "l", "L": rt.playerAction(VpaFastForward, outcome)
-  of "Left": rt.playerAction(VpaStepFrameBack, outcome)
-  of "Right": rt.playerAction(VpaStepFrameForward, outcome)
-  of "Shift+Left": rt.playerAction(VpaStepDrawBack, outcome)
-  of "Shift+Right": rt.playerAction(VpaStepDrawForward, outcome)
-  of "Home": rt.playerAction(VpaJumpStart, outcome)
-  of "End": rt.playerAction(VpaJumpEnd, outcome)
-  of "p", "P":
-    # The picker on: §5's first stage at the frame's centre, by keyboard.
-    let (area, screen) = rt.videoPlayerScreen()
-    if screen.pictureTop >= 0:
-      discard rt.openMagnifierAtCell(area.col + screen.pictureCols div 2,
-        screen.pictureTop + screen.pictureRows div 2, outcome)
-    else:
-      rt.playerAction(VpaTogglePicker, outcome)
-  of "Escape", "Esc": rt.cancelPicker(outcome)
-  else: discard
+
+proc videoPlayerFocused(rt: TuiRuntime): bool =
+  let (had, focused) = rt.focus.focusedPane()
+  had and focused == paneVideoPlayer and rt.app.frameViewer.pane
+
+proc syncVideoPlayerLayers(rt: TuiRuntime) =
+  ## The picker's layer while it is on, the magnifier's over it while that is
+  ## open — owned by the pane, so their keys hold only while it has the focus.
+  var wanted: seq[tuple[table, label: string]] = @[]
+  if rt.app.frameViewer.pane and
+     (rt.app.frameViewer.transport.picker or rt.app.frameViewer.magnified):
+    wanted.add (VideoPickerTable, "PICKER")
+  if rt.app.frameViewer.pane and rt.app.frameViewer.magnified:
+    wanted.add (VideoMagnifierTable, "PICKER")
+  rt.router.syncOwnedLayers($paneVideoPlayer, wanted)
+
+proc videoPlayerOwnsToken*(rt: TuiRuntime; token: string): bool =
+  ## Whether `token` reaches one of the Video Player's operations from where
+  ## the focus is now (its rows in `overlay_rows`): a question for the suites,
+  ## answered by the router itself.
+  rt.syncVideoPlayerLayers()
+  let res = rt.probeKey(rt.keyOf(token))
+  res.kind == erOperation and res.operation.startsWith("video-player.")
 
 proc routeVideoPlayerDrag*(rt: TuiRuntime; event: MouseEvent;
                            outcome: var RuntimeOutcome): bool =
@@ -3557,13 +3545,10 @@ proc pressVideoPlayer(rt: TuiRuntime; event: MouseEvent;
   if event.row == screen.transportRow:
     for b in screen.transportButtons:
       if event.col >= b.col and event.col < b.col + b.width:
-        if b.action == VpaTogglePicker:
-          if m.magnified or m.transport.picker:
-            rt.cancelPicker(outcome)
-          else:
-            rt.routeTokenToVideoPlayer("p", outcome)
-        else:
-          rt.playerAction(b.action, outcome)
+        # K69: the button runs the operation it carries.
+        discard rt.pressElement(event, paneVideoPlayer, ekButton,
+                                VideoPlayerOperations[b.action],
+                                ContextTarget(pane: paneVideoPlayer), outcome)
         return true
     return true
   if event.row == screen.scrubberRow and screen.scrubberRow >= 0:
@@ -3583,18 +3568,30 @@ proc pressVideoPlayer(rt: TuiRuntime; event: MouseEvent;
   if screen.pictureTop >= 0 and event.row >= screen.pictureTop and
      event.row < screen.pictureTop + screen.pictureRows and
      event.col >= area.col and event.col < area.col + screen.pictureCols:
-    if m.magnified:
-      # The second stage by pointer: the pixel under the press, committed.
-      let (cc, cr) = m.magnifier.cursorCell()
-      let dx = (event.col - area.col - cc) div max(1, m.magnifier.zoomCols)
-      let dy = (event.row - screen.pictureTop - cr) div
-               max(1, m.magnifier.zoomRows)
-      rt.app.frameViewer = m.moveCursorBy(dx, dy)
-      rt.commitMagnifier(outcome)
-    else:
-      discard rt.openMagnifierAtCell(event.col, event.row, outcome)
+    # K72: the frame is a value; its press is the pointer keymap's
+    # (`video-player.select-pixel`), on the cell pressed.
+    discard rt.pressElement(event, paneVideoPlayer, ekValue, "",
+                            ContextTarget(pane: paneVideoPlayer,
+                                          column: event.col, line: event.row),
+                            outcome)
     return true
   false
+
+proc selectPixelAtCell(rt: TuiRuntime; col, row: int;
+                       outcome: var RuntimeOutcome) =
+  ## `video-player.select-pixel` on the terminal: §5's first stage (the
+  ## magnifier over the cell pressed), or with the magnifier open its second
+  ## stage — the pixel under the press, committed.
+  let (area, screen) = rt.videoPlayerScreen()
+  let m = rt.app.frameViewer
+  if m.magnified:
+    let (cc, cr) = m.magnifier.cursorCell()
+    let dx = (col - area.col - cc) div max(1, m.magnifier.zoomCols)
+    let dy = (row - screen.pictureTop - cr) div max(1, m.magnifier.zoomRows)
+    rt.app.frameViewer = m.moveCursorBy(dx, dy)
+    rt.commitMagnifier(outcome)
+  else:
+    discard rt.openMagnifierAtCell(col, row, outcome)
 
 proc pressPixelHistory(rt: TuiRuntime; event: MouseEvent;
                        outcome: var RuntimeOutcome): bool =
@@ -3607,8 +3604,10 @@ proc pressPixelHistory(rt: TuiRuntime; event: MouseEvent;
   let t = screen.historyTargetAt(rt.app.pixelHistory, event.row)
   if t.kind != vtHistoryRow:
     return true
-  discard rt.actOnVisual(VisualAct(kind: vaHistoryActivate, index: t.index),
-                         outcome)
+  # K73: a row's press is the pointer keymap's (`pixel-history.activate`).
+  discard rt.pressElement(event, panePixelHistory, ekRow, "",
+                          ContextTarget(pane: panePixelHistory,
+                                        index: int64(t.index)), outcome)
   true
 
 proc pressShaderDebug(rt: TuiRuntime; event: MouseEvent;
@@ -3620,8 +3619,11 @@ proc pressShaderDebug(rt: TuiRuntime; event: MouseEvent;
   let (_, screen) = rt.shaderDebugScreen()
   let t = screen.shaderTargetAt(event.row, event.col)
   if t.kind == vtShaderButton:
-    discard rt.actOnVisual(VisualAct(kind: vaShaderStep, button: t.button),
-                           outcome)
+    # K74: the button runs the operation it carries, on its own step.
+    discard rt.pressElement(event, paneShaderDebug, ekButton,
+                            "shader-debug.step",
+                            ContextTarget(pane: paneShaderDebug,
+                                          text: $t.button), outcome)
   true
 
 proc revealHistory(rt: TuiRuntime; row: int) =
@@ -4366,6 +4368,31 @@ proc runPointer(rt: TuiRuntime; event: MouseEvent; pane: PaneKind;
   of oiDisabled: rt.note(answer.reason)
   of oiAbsent:
     rt.note("`" & res.operation & "` (" & operationLabelOf(res.operation) &
+            ") is not available in the terminal")
+  answer.kind != oiAbsent
+
+proc pressElement(rt: TuiRuntime; event: MouseEvent; pane: PaneKind;
+                  kind: ElementKind; operation: string; target: ContextTarget;
+                  outcome: var RuntimeOutcome): bool =
+  ## **A PRESS ON AN ELEMENT THAT DECLARES ITS OPERATION** (Input-Routing §5.1):
+  ## the hit test found the element and what it is; a pointer row for the
+  ## gesture (a user's `keybindings.json`, the base's) decides first, and a
+  ## plain primary press runs the element's own `operation` by name through the
+  ## operation tables — a transport button's step, a Shader Debug button's.
+  if rt.runPointer(event, pane, kind, target, outcome):
+    return true
+  if operation.len == 0 or event.button != mbLeft:
+    return false
+  if rt.operations.isNil:
+    rt.buildOperationTables()
+  outcome.repaint = true
+  let answer = rt.operations.invoke(
+    TerminalCall(name: operation, target: target, pointer: true), outcome)
+  case answer.kind
+  of oiRan: discard
+  of oiDisabled: rt.note(answer.reason)
+  of oiAbsent:
+    rt.note("`" & operation & "` (" & operationLabelOf(operation) &
             ") is not available in the terminal")
   answer.kind != oiAbsent
 
@@ -5145,8 +5172,11 @@ proc routeEditorClick(rt: TuiRuntime; under: CellArea; event: MouseEvent;
                          event.row, event.col, outcome)
     of mbLeft:
       if event.ctrl:
-        outcome.requestClick(PaneClickRequest(kind: pcScratchpadAdd,
-                                              values: @[(v.name, v.value)]))
+        # Ctrl+click on a value is a pointer row (`scratchpad.add-value`).
+        discard rt.pressElement(event, paneEditor, ekValue, "",
+                                ContextTarget(pane: paneEditor,
+                                              expression: v.name, text: v.value),
+                                outcome)
       else:
         # The note GPUI's window gives for the same click (`gpui/main.nim`'s
         # inline-value press) — the line's value as the flow recorded it.
@@ -5245,13 +5275,11 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
             rt.revealBuildPane()
             outcome.repaint = true
             return true
-    let colon = rt.app.location.rfind(':')
-    if colon <= 0:
+    if rt.app.location.rfind(':') <= 0:
       return false
-    let path = rt.app.location[0 ..< colon]
-    rt.copyToClipboard(path, "the path " & path)
-    outcome.repaint = true
-    return true
+    # K37: the location is a button carrying its operation.
+    return rt.pressElement(event, paneEditor, ekButton, "status.copy-path",
+                           ContextTarget(), outcome)
   let (onPane, region, under) = geometry.paneAt(event.row, event.col)
   if not onPane:
     return false
@@ -5375,13 +5403,15 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
         if event.button == mbLeft:
           case screen.controlAt(rt.app.variables, event.row, event.col)
           of vcHistory:
-            outcome.requestClick(PaneClickRequest(kind: pcValueHistory,
-                                                  path: prow.node.path))
-            return true
+            return rt.pressElement(event, paneState, ekButton,
+                                   "variables.value-history",
+                                   ContextTarget(pane: paneState,
+                                                 path: prow.node.path), outcome)
           of vcOrigin:
-            outcome.requestClick(PaneClickRequest(kind: pcValueOrigin,
-                                                  path: prow.node.path))
-            return true
+            return rt.pressElement(event, paneState, ekButton,
+                                   "variables.value-origin",
+                                   ContextTarget(pane: paneState,
+                                                 path: prow.node.path), outcome)
           of vcRemoveWatch:
             outcome.requestClick(PaneClickRequest(
               kind: pcWatch, path: prow.node.name, behaviour: "remove"))
@@ -5416,9 +5446,9 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
     let i = event.row - under.row - 1
     if i < 0 or i >= rt.app.points.rows.len:
       return false
-    rt.app.points.selected = i
-    outcome.repaint = true
-    return true
+    return rt.pressElement(event, panePointList, ekRow, "",
+                           ContextTarget(pane: panePointList, index: int64(i)),
+                           outcome)
   of paneScratchpad:
     # K33: the close button removes the value.
     if event.button != mbLeft or not rt.app.scratchpad.loaded:
@@ -5426,9 +5456,9 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
     let hit = rt.app.scratchpad.scratchpadHitAt(under, event.row, event.col)
     if hit.row < 0 or not hit.close:
       return false
-    outcome.requestClick(PaneClickRequest(kind: pcScratchpadRemove,
-                                          index: hit.row))
-    return true
+    return rt.pressElement(event, paneScratchpad, ekButton, "scratchpad.remove",
+                           ContextTarget(pane: paneScratchpad,
+                                         index: int64(hit.row)), outcome)
   of paneAgentActivity:
     # PLAT-54: a row runs its action (a turn, a run, a test, a tool group
     # opened or closed), a `[button]` its button's (a recording opened, in
@@ -5481,9 +5511,10 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
     let t = rt.app.search.searchTargetAt(screen, area, event.row, event.col)
     case t.kind
     of stMatch:
-      outcome.requestClick(PaneClickRequest(kind: pcSearchResult,
-                                            index: t.index, path: t.path))
-      return true
+      return rt.pressElement(event, paneSearch, ekRow, "",
+                             ContextTarget(pane: paneSearch,
+                                           index: int64(t.index), path: t.path),
+                             outcome)
     of stOption:
       outcome.requestClick(PaneClickRequest(kind: pcSearchOption,
                                             text: t.option))
@@ -5570,12 +5601,12 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
       return true
     case t.kind
     of ltInstruction:
-      discard rt.actOnLowLevel(LowLevelAct(kind: llaPress, index: t.index),
-                               outcome)
-      return true
+      return rt.pressElement(event, paneLowLevelCode, ekRow, "",
+                             ContextTarget(pane: paneLowLevelCode,
+                                           index: int64(t.index)), outcome)
     of ltSync:
-      discard rt.actOnLowLevel(LowLevelAct(kind: llaToggleSync), outcome)
-      return true
+      return rt.pressElement(event, paneLowLevelCode, ekToggle, "",
+                             ContextTarget(pane: paneLowLevelCode), outcome)
     of ltSource, ltHeader, ltTrack:
       return true
     of ltNone:
@@ -5603,15 +5634,18 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
     case t.kind
     of vtLine:
       if t.key.len > 0:
-        discard rt.actOnVerification(VerificationAct(kind: vrPress,
-                                                     key: t.key), outcome)
+        discard rt.pressElement(event, paneVerification, ekRow, "",
+                                ContextTarget(pane: paneVerification,
+                                              token: t.key), outcome)
       return true
     of vtRun:
-      discard rt.actOnVerification(VerificationAct(kind: vrRun), outcome)
-      return true
+      return rt.pressElement(event, paneVerification, ekButton,
+                             "verification.run",
+                             ContextTarget(pane: paneVerification), outcome)
     of vtStop:
-      discard rt.actOnVerification(VerificationAct(kind: vrStop), outcome)
-      return true
+      return rt.pressElement(event, paneVerification, ekButton,
+                             "verification.stop",
+                             ContextTarget(pane: paneVerification), outcome)
     of vtHeader, vtTrack:
       return true
     of vtNone:
@@ -5691,16 +5725,20 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
     case t.kind
     of rqRow:
       if t.held:
-        discard rt.actOnRequests(RequestsAct(kind: rakPress,
-          position: t.position, nowMs: rt.scrollbars.clockMs), outcome)
-        rt.keepRequestSelected(outcome)
+        # K58: a row's press is the pointer keymap's; the ViewModel counts a
+        # second press as the double press that goes to the handler.
+        discard rt.pressElement(event, paneRequests, ekRow, "",
+                                ContextTarget(pane: paneRequests,
+                                              index: int64(t.position)),
+                                outcome)
       return true
     of rqMethod, rqStatus:
-      let r = rt.actOnRequests(RequestsAct(kind: rakPickerMenu,
-        text: (if t.kind == rqStatus: "status" else: "method")), outcome)
-      if r.menu.entries.len > 0:
-        rt.openContextMenu(r.menu, event.row + 1, event.col, outcome)
-      return true
+      # K60: the picker is a button carrying its filter's operation.
+      return rt.pressElement(event, paneRequests, ekButton,
+                             (if t.kind == rqStatus: "requests.filter-status"
+                              else: "requests.filter-method"),
+                             ContextTarget(pane: paneRequests, line: event.row + 1,
+                                           column: event.col), outcome)
     of rqField:
       rt.openRequestsField(outcome)
       return true
@@ -5729,8 +5767,9 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
         if r.menu.entries.len > 0:
           rt.openContextMenu(r.menu, event.row, event.col, outcome)
       else:
-        discard rt.actOnConstraints(ConstraintsAct(kind: cakOpen,
-                                                   index: t.index), outcome)
+        discard rt.pressElement(event, paneConstraints, ekRow, "",
+                                ContextTarget(pane: paneConstraints,
+                                              index: int64(t.index)), outcome)
       return true
     of cgTrack, cgText:
       return true
@@ -5751,13 +5790,14 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
     of vrNone:
       return false
     of vrFile, vrCommitFile:
-      outcome.requestClick(PaneClickRequest(kind: pcVcsDiff, path: t.path,
-                                            text: t.status,
-                                            behaviour: t.hash))
+      return rt.pressElement(event, paneVcs, ekRow, "",
+                             ContextTarget(pane: paneVcs, path: t.path,
+                                           text: t.status, token: t.hash),
+                             outcome)
     of vrCommit:
-      outcome.requestClick(PaneClickRequest(kind: pcVcsCommit,
-                                            index: t.index))
-    return true
+      return rt.pressElement(event, paneVcs, ekToggle, "",
+                             ContextTarget(pane: paneVcs, index: int64(t.index)),
+                             outcome)
   of paneTerminalOutput:
     # PLAT-52 (K32): a fragment goes to the write that produced it; the
     # toggle and the two scrubbers.
@@ -8102,6 +8142,7 @@ proc syncOverlayLayers(rt: TuiRuntime) =
   rt.want(LayoutGestureTable, "window", "", gesture)
   rt.want(ContentViewTable, "window", "", rt.app.content.open)
   rt.want(TerminalInfoTable, "window", "", rt.terminalInfo.open)
+  rt.syncVideoPlayerLayers()
 
 proc pendingPrefixDueMs*(rt: TuiRuntime): int64 =
   ## When the pending chord prefix times out under this base (Vim and
@@ -8861,7 +8902,7 @@ proc buildOperationTables(rt: TuiRuntime) =
       let chosen = action
       if ContextActionOperations[chosen].len > 0:
         chosenEntries.bindOp(ContextActionOperations[chosen], act do:
-          if not c.pointer:
+          if not c.menu:
             return false
           rt.runContextAction(chosen, c.target, outcome))
   hub.add chosenEntries
@@ -8977,7 +9018,7 @@ proc buildOperationTables(rt: TuiRuntime) =
     if chosen.chosen and ContextActionOperations[chosen.action].len > 0:
       discard rt.operations.invoke(
         TerminalCall(name: ContextActionOperations[chosen.action],
-                     target: chosen.target, pointer: true), outcome))
+                     target: chosen.target, pointer: true, menu: true), outcome))
   menu.bindOp("context-menu.close", act(rt.app.contextMenu.close()))
   for o in Catalogue:
     if o.name.startsWith("context-menu.") and not menu.holds(o.name):
@@ -9055,6 +9096,17 @@ proc buildOperationTables(rt: TuiRuntime) =
                  "list.activate"], ask do:
     let (_, focused) = rt.focus.focusedPane()
     rt.runVisualKeyOperation(focused, c.name, outcome))
+  visual.bindOp("pixel-history.activate", act do:
+    if not c.pointer:
+      return false
+    discard rt.actOnVisual(VisualAct(kind: vaHistoryActivate,
+                                     index: int(c.target.index)), outcome))
+  visual.bindOp("shader-debug.step", act do:
+    var button: ShaderButton
+    try: button = parseEnum[ShaderButton](c.target.text)
+    except ValueError: return false
+    discard rt.actOnVisual(VisualAct(kind: vaShaderStep, button: button),
+                           outcome))
 
   let constraints = newOperationTable[ContextTarget, RuntimeOutcome]("pane:constraints",
     proc(): bool = focusedOn(paneConstraints) and rt.app.constraints.loaded)
@@ -9062,6 +9114,44 @@ proc buildOperationTables(rt: TuiRuntime) =
                      ask(rt.runConstraintsKeyOperation(c.name, outcome)))
   hub.add constraints
   hub.add visual
+
+  # PLAT-59: the Video Player's own keys while it is focused (its rows and its
+  # picker's and magnifier's layers are `overlay_rows`').
+  let player = newOperationTable[ContextTarget, RuntimeOutcome]("pane:videoPlayer",
+    proc(): bool = rt.videoPlayerFocused)
+  for action in VpaTogglePlay .. VpaJumpEnd:
+    closureScope:
+      let playerAct = action
+      player.bindOp(VideoPlayerOperations[playerAct],
+                    act(rt.playerAction(playerAct, outcome)))
+  player.bindOp("video-player.toggle-picker", act(rt.togglePicker(outcome)))
+  player.bindOp("video-player.cancel-picker", ask do:
+    if not (rt.app.frameViewer.magnified or rt.app.frameViewer.transport.picker):
+      return false
+    rt.cancelPicker(outcome)
+    true)
+  for (name, dx, dy) in [("video-player.move-magnifier-left", -1, 0),
+                         ("video-player.move-magnifier-right", 1, 0),
+                         ("video-player.move-magnifier-up", 0, -1),
+                         ("video-player.move-magnifier-down", 0, 1)]:
+    closureScope:
+      let (mx, my) = (dx, dy)
+      player.bindOp(name, ask do:
+        if not rt.app.frameViewer.magnified:
+          return false
+        let step = try: max(1, parseInt(c.argument)) except ValueError: 1
+        rt.moveMagnifier(mx * step, my * step, outcome)
+        true)
+  player.bindOp("video-player.select-pixel", act do:
+    if not c.pointer:
+      return false
+    rt.selectPixelAtCell(c.target.column, c.target.line, outcome))
+  player.bindOp("video-player.commit-pick", ask do:
+    if not rt.app.frameViewer.magnified:
+      return false
+    rt.commitMagnifier(outcome)
+    true)
+  hub.add player
 
   # PLAT-52: the Terminal Output pane's own keys while it is focused.
   let terminalOutput = newOperationTable[ContextTarget, RuntimeOutcome]("pane:terminalOutput",
@@ -9114,7 +9204,7 @@ proc buildOperationTables(rt: TuiRuntime) =
     ## An operation that acts on an element: the row a press hit-tested, or a
     ## hosted pane's row. From a key there is no element here: it says so.
     elements.bindOp(name, act do:
-      if not c.pointer:
+      if not c.pointer or c.menu:
         return false
       body)
   onTarget("calltrace.go-to-call"):
@@ -9155,6 +9245,60 @@ proc buildOperationTables(rt: TuiRuntime) =
     outcome.requestClick(PaneClickRequest(kind: pcToggleFolder, path: c.target.path))
   onTarget("file-tree.activate"):
     rt.activateFilesRow(c.target.index.int, outcome)
+  # What the other panes' elements run (`pointer_rows`, and the operation a
+  # button carries), the procedures their presses always ran.
+  onTarget("scratchpad.add-value"):
+    outcome.requestClick(PaneClickRequest(kind: pcScratchpadAdd,
+                                          values: @[(c.target.expression,
+                                                     c.target.text)]))
+  onTarget("point-list.select"):
+    rt.app.points.selected = int(c.target.index)
+  onTarget("scratchpad.remove"):
+    outcome.requestClick(PaneClickRequest(kind: pcScratchpadRemove,
+                                          index: int(c.target.index)))
+  onTarget("vcs.open-file-diff"):
+    outcome.requestClick(PaneClickRequest(kind: pcVcsDiff, path: c.target.path,
+                                          text: c.target.text,
+                                          behaviour: c.target.token))
+  onTarget("vcs.toggle-commit"):
+    outcome.requestClick(PaneClickRequest(kind: pcVcsCommit,
+                                          index: int(c.target.index)))
+  onTarget("search.open-result"):
+    outcome.requestClick(PaneClickRequest(kind: pcSearchResult,
+                                          index: int(c.target.index),
+                                          path: c.target.path))
+  onTarget("terminal-output.jump-to-write"):
+    discard rt.terminalWriteJump(int(c.target.index), outcome)
+  onTarget("requests.select"):
+    discard rt.actOnRequests(RequestsAct(kind: rakPress,
+      position: int(c.target.index), nowMs: rt.scrollbars.clockMs), outcome)
+    rt.keepRequestSelected(outcome)
+  onTarget("requests.go-to-handler"):
+    discard rt.actOnRequests(RequestsAct(kind: rakGoToHandler), outcome)
+  for (name, which) in [("requests.filter-method", "method"),
+                        ("requests.filter-status", "status")]:
+    closureScope:
+      let picker = which
+      onTarget(name):
+        let r = rt.actOnRequests(RequestsAct(kind: rakPickerMenu, text: picker),
+                                 outcome)
+        if r.menu.entries.len > 0:
+          rt.openContextMenu(r.menu, c.target.line, c.target.column, outcome)
+  onTarget("low-level.go-to-source-line"):
+    discard rt.actOnLowLevel(LowLevelAct(kind: llaPress,
+                                         index: int(c.target.index)), outcome)
+  onTarget("low-level.toggle-sync"):
+    discard rt.actOnLowLevel(LowLevelAct(kind: llaToggleSync), outcome)
+  onTarget("verification.go-to-source"):
+    discard rt.actOnVerification(VerificationAct(kind: vrPress,
+                                                 key: c.target.token), outcome)
+  onTarget("verification.run"):
+    discard rt.actOnVerification(VerificationAct(kind: vrRun), outcome)
+  onTarget("verification.stop"):
+    discard rt.actOnVerification(VerificationAct(kind: vrStop), outcome)
+  onTarget("constraints.go-to-source"):
+    discard rt.actOnConstraints(ConstraintsAct(kind: cakOpen,
+                                               index: int(c.target.index)), outcome)
   hub.add elements
 
   # --- The session ----------------------------------------------------------
@@ -9230,6 +9374,14 @@ proc buildOperationTables(rt: TuiRuntime) =
                  act do:
                    discard rt.runViewOperation(c.name, outcome))
   session.bindOp("help.keyboard-shortcuts", act(rt.showShortcutReference(outcome)))
+  # K37: the status line's location, copied (its press carries this name).
+  session.bindOp("status.copy-path", act do:
+    let colon = rt.app.location.rfind(':')
+    if colon <= 0:
+      rt.note("there is no current file to copy the path of")
+    else:
+      let path = rt.app.location[0 ..< colon]
+      rt.copyToClipboard(path, "the path " & path))
   session.bindOp("help.check-key-delivery", act do:
     rt.keyCheck = startCheck()
     rt.note("keys check: press keys to see how they arrive; Esc ends the check"))
@@ -9578,12 +9730,6 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
     return
   if rt.app.menu.isOpen:
     rt.handleMenuKey(token, nowMs, result)
-    return
-
-  # PLAT-59: THE VIDEO PLAYER'S OWN KEYS while it is focused — the
-  # desktop's, scoped to the pane (Visual-Replay.md § Keyboard Shortcuts).
-  if rt.videoPlayerOwnsToken(token):
-    rt.routeTokenToVideoPlayer(token, result)
     return
 
   # PLAT-68: `:keys check` — every key is reported, none is run, until Esc.

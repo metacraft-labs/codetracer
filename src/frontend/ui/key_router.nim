@@ -260,6 +260,14 @@ proc desktopScopePath*(): ScopePath =
   # was the focus, and a list pane's `Enter` / arrows / letters were run here
   # and the key stopped (`scope_path.withNativeTextField`).
   result = withNativeTextField(result, focusedFieldFactsOf(active))
+  # Visual-Replay.md § Keyboard Shortcuts: the Video Player's keys hold while
+  # it has the focus OR the pointer is over its frame (`videoPlayerHasFocus`,
+  # the pane's tracker) — its pane is then where the keys go, unless a text
+  # field has them.
+  if videoPlayerHasFocus() and result.focused.kind != ekInput and
+     (result.innermostPane < 0 or
+      result[result.innermostPane].paneKind != "videoPlayer"):
+    result = @[window, pane("videoPlayer")]
 
 proc desktopFacts(): SessionFacts =
   ## The ViewModels' facts, from this renderer's state.
@@ -389,39 +397,14 @@ proc sendValueOrigin(expression: cstring) =
   }
   data.dapApi.sendCtRequest(CtOriginChain, args)
 
-# The Video Player pane's OWN keys while it has the focus (Visual-Replay.md
-# §Keyboard Shortcuts) — a pane's keys, like the terminal's Terminal Output
-# pane's, asked before the router; a key it does not take goes on to it.
-const VideoPlayerKeys = {
-  "Space": ClientAction.videoPlayerTogglePlay,
-  "k": ClientAction.videoPlayerTogglePlay,
-  "j": ClientAction.videoPlayerRewind,
-  "l": ClientAction.videoPlayerFastForward,
-  "Left": ClientAction.videoPlayerStepFrameBack,
-  "Right": ClientAction.videoPlayerStepFrameForward,
-  "Shift+Left": ClientAction.videoPlayerStepDrawBack,
-  "Shift+Right": ClientAction.videoPlayerStepDrawForward,
-  "Home": ClientAction.videoPlayerJumpStart,
-  "End": ClientAction.videoPlayerJumpEnd,
-  "p": ClientAction.videoPlayerTogglePicker}.toTable
-
-proc videoPlayerKey(name: string): bool =
-  ## Whether the focused Video Player took `name`. `Esc` is its only while
-  ## the pixel picker is active.
-  if not videoPlayerHasFocus():
-    return false
-  if name == "Esc":
-    let vm = currentVideoPlayerVM()
-    if vm.isNil or vm.pickerState.val != PickerActive:
-      return false
-    data.actions[ClientAction.videoPlayerCancelPicker](nil)
-    return true
-  if not VideoPlayerKeys.hasKey(name):
-    return false
-  let handler = data.actions[VideoPlayerKeys[name]]
-  if not handler.isNil:
-    handler(nil)
-  true
+proc syncVideoPickerLayer() =
+  ## The Video Player's picker layer (`overlay_rows`: its `Escape`) is pushed,
+  ## owned by the pane, exactly while the picker is on.
+  let vm = currentVideoPlayerVM()
+  var wanted: seq[tuple[table, label: string]] = @[]
+  if not vm.isNil and vm.pickerState.val == PickerActive:
+    wanted.add (VideoPickerTable, "PICKER")
+  deskRouter.syncOwnedLayers("videoPlayer", wanted)
 
 proc traceOperation(op: string) =
   ## Every operation the router resolved, in order, on
@@ -772,6 +755,7 @@ proc routeKey(name: string; ev: JsObject) =
   syncPaletteLayer()
   syncContextMenuLayer()
   syncMenuLayer()
+  syncVideoPickerLayer()
   let path = desktopScopePath()
   let facts = desktopFacts()
   # An open program menu owns its keys, as on the terminal and GPUI; the
@@ -854,9 +838,6 @@ proc onKeyDown(ev: JsObject) =
   deskAltTap.interrupted()
   let name = canonicalKeyOfEvent(ev)
   if name.len == 0:
-    return
-  if videoPlayerKey(name):
-    stop(ev)
     return
   # `Enter` on a focused button is that button's: the browser clicks a native
   # one, and `isonim_activation` a `role="button"`.  Routed, it ran the pane's

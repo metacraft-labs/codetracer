@@ -48,6 +48,54 @@ const
             whenText: "paneKind == fileTree && elementKind == row",
             table: PointerTable),
 
+    # --- The other panes' rows (K31 - K35, K53, K58, K61, K63, K64, K67) ----
+    BaseRow(chords: "Click", operation: "point-list.select",
+            whenText: "paneKind == pointList && elementKind == row",
+            table: PointerTable),
+    BaseRow(chords: "Click", operation: "terminal-output.jump-to-write",
+            whenText: "paneKind == terminalOutput && elementKind == row",
+            table: PointerTable),
+    BaseRow(chords: "Click", operation: "vcs.open-file-diff",
+            whenText: "paneKind == vcs && elementKind == row",
+            table: PointerTable),
+    BaseRow(chords: "Click", operation: "vcs.toggle-commit",
+            whenText: "paneKind == vcs && elementKind == toggle",
+            table: PointerTable),
+    BaseRow(chords: "Click", operation: "search.open-result",
+            whenText: "paneKind == search && elementKind == row",
+            table: PointerTable),
+    BaseRow(chords: "Click", operation: "requests.select",
+            whenText: "paneKind == requests && elementKind == row",
+            table: PointerTable),
+    BaseRow(chords: "Click", operation: "low-level.go-to-source-line",
+            whenText: "paneKind == lowLevelCode && elementKind == row",
+            table: PointerTable),
+    BaseRow(chords: "Click", operation: "low-level.toggle-sync",
+            whenText: "paneKind == lowLevelCode && elementKind == toggle",
+            table: PointerTable),
+    BaseRow(chords: "Click", operation: "verification.go-to-source",
+            whenText: "paneKind == verification && elementKind == row",
+            table: PointerTable),
+    BaseRow(chords: "Click", operation: "constraints.go-to-source",
+            whenText: "paneKind == constraints && elementKind == row",
+            table: PointerTable),
+
+    # --- An inline value in the editor (K36): Ctrl+click pins it ---------------
+    BaseRow(chords: "Ctrl+Click", operation: "scratchpad.add-value",
+            whenText: "paneKind == editor && elementKind == value",
+            table: PointerTable),
+
+    # --- The Visual Replay panes (K72, K73): a press on the Video Player's
+    # frame picks the pixel under it, on a Pixel History row goes to its draw
+    # call. (A transport or Shader Debug button runs the operation it
+    # carries; the scrubbers are gestures.)
+    BaseRow(chords: "Click", operation: "video-player.select-pixel",
+            whenText: "paneKind == videoPlayer && elementKind == value",
+            table: PointerTable),
+    BaseRow(chords: "Click", operation: "pixel-history.activate",
+            whenText: "paneKind == pixelHistory && elementKind == row",
+            table: PointerTable),
+
     # --- Every element with a menu (K7, K19, K22, K28, K59, K62, K65, K68) ---
     BaseRow(chords: "RightClick", operation: "context-menu.open",
             whenText: "elementKind != none && paneKind != eventLog",

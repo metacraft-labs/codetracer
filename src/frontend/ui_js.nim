@@ -6371,10 +6371,10 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     agentic_session_launcher.startAgenticWorktreeSessionFromCommandPalette(),
   videoPlayerTogglePlay: # --- M4 Visual Replay / Video Player handlers ----------------------------
   # Each handler delegates to ``dispatchVideoPlayerAction`` on the live
-  # VideoPlayerVM instance.  Focus scoping is enforced by the pane's own keys
-  # in ``ui/key_router.nim`` (``videoPlayerKey``, asked before the router)
-  # — they check ``videoPlayerHasFocus()`` before calling these
-  # handlers, so the handlers themselves do not re-check focus.  This keeps
+  # VideoPlayerVM instance.  Focus scoping is the keymap's: the player's rows
+  # (``keymap/overlay_rows``) are its pane's, and ``ui/key_router.nim`` puts
+  # that pane on the scope path while ``videoPlayerHasFocus()`` — so the
+  # handlers themselves do not re-check focus.  This keeps
   # the handlers usable from menus, the command palette, and the Playwright
   # test hook (``__CODETRACER_TEST__.videoPlayerAction``) without requiring a
   # focused panel.  When the VM is not constructed (no visual recording

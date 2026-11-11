@@ -395,6 +395,22 @@ proc unmountOwner*(router: var KeymapRouter; owner: string): seq[PushedLayer] =
   router.stack = next
   popped
 
+proc syncOwnedLayers*(router: var KeymapRouter; owner: string;
+                      wanted: openArray[tuple[table, label: string]]) =
+  ## The layers `owner` pushes are exactly `wanted`, oldest first: a pane's
+  ## modes (the Video Player's picker and, over it, the terminal's magnifier)
+  ## follow its state here rather than being pushed and popped at each place
+  ## that opens or closes one. Unchanged when they already are; otherwise the
+  ## owner's layers are replaced, whatever else was pushed since.
+  var have: seq[tuple[table, label: string]] = @[]
+  for l in router.stack.layers:
+    if l.owner == owner: have.add (l.table, l.label)
+  if have == @wanted:
+    return
+  discard router.unmountOwner(owner)
+  for w in wanted:
+    discard router.pushLayer(w.table, owner, w.label)
+
 # ---------------------------------------------------------------------------
 # What the user is shown
 # ---------------------------------------------------------------------------

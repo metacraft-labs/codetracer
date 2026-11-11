@@ -146,3 +146,88 @@ suite "§4.1: the overlays' rows":
     check OverlayRows.len > 0
     check PointerRows.len > 0
     for row in PointerRows: check row.table == PointerTable
+
+suite "the Video Player's own rows (Visual-Replay.md § Keyboard Shortcuts)":
+  # The pane's keys, its picker's `Escape` and the terminal's magnifier, each a
+  # row every base carries; a key resolved with the pane focused, and with the
+  # pane's layers pushed as each front-end pushes them while they are open.
+  let player = @[element(ekWindow, "window"), pane("videoPlayer")]
+
+  proc keyOp(r: var KeymapRouter; path: ScopePath; key: string): string =
+    let res = r.route(facts(), path, nmNormal, key, 0)
+    if res.kind != erOperation: ""
+    elif res.argument.len > 0: res.operation & "(" & res.argument & ")"
+    else: res.operation
+
+  test "every base sends the player's keys to its operations":
+    for base in BaseKeymap:
+      var r = initKeymapRouter(base, Desktop)
+      check r.keyOp(player, "Space") == "video-player.toggle-play"
+      check r.keyOp(player, "k") == "video-player.toggle-play"
+      check r.keyOp(player, "j") == "video-player.rewind"
+      check r.keyOp(player, "l") == "video-player.fast-forward"
+      check r.keyOp(player, "Left") == "video-player.step-frame-back"
+      check r.keyOp(player, "Right") == "video-player.step-frame-forward"
+      check r.keyOp(player, "Shift+Left") == "video-player.step-draw-back"
+      check r.keyOp(player, "Shift+Right") == "video-player.step-draw-forward"
+      check r.keyOp(player, "Home") == "video-player.jump-start"
+      check r.keyOp(player, "End") == "video-player.jump-end"
+      check r.keyOp(player, "p") == "video-player.toggle-picker"
+
+  test "Escape is the picker's only while its layer is pushed":
+    var r = initKeymapRouter(bkCua, Desktop)
+    check r.keyOp(player, "Esc") != "video-player.cancel-picker"
+    r.syncOwnedLayers("videoPlayer", [(VideoPickerTable, "PICKER")])
+    check r.keyOp(player, "Esc") == "video-player.cancel-picker"
+    # Elsewhere the picker's layer is not on the path.
+    check r.keyOp(@[element(ekWindow, "window"), pane("eventLog")], "Esc") !=
+      "video-player.cancel-picker"
+    r.syncOwnedLayers("videoPlayer", [])
+    check r.keyOp(player, "Esc") != "video-player.cancel-picker"
+
+  test "the magnifier's layer takes the arrows, Enter and p over the pane's":
+    var r = initKeymapRouter(bkCua, Terminal)
+    r.syncOwnedLayers("videoPlayer", [(VideoPickerTable, "PICKER"),
+                                      (VideoMagnifierTable, "PICKER")])
+    check r.keyOp(player, "Left") == "video-player.move-magnifier-left(1)"
+    check r.keyOp(player, "Right") == "video-player.move-magnifier-right(1)"
+    check r.keyOp(player, "Up") == "video-player.move-magnifier-up(1)"
+    check r.keyOp(player, "Down") == "video-player.move-magnifier-down(1)"
+    check r.keyOp(player, "Shift+Left") == "video-player.move-magnifier-left(8)"
+    check r.keyOp(player, "Shift+Up") == "video-player.move-magnifier-up(8)"
+    check r.keyOp(player, "Enter") == "video-player.commit-pick"
+    check r.keyOp(player, "Esc") == "video-player.cancel-picker"
+    check r.keyOp(player, "p") == "video-player.cancel-picker"
+    # Closing the magnifier leaves the picker's layer as it was.
+    r.syncOwnedLayers("videoPlayer", [(VideoPickerTable, "PICKER")])
+    check r.keyOp(player, "Left") == "video-player.step-frame-back"
+
+  test "a user's row rebinds a player key":
+    var r = initKeymapRouter(bkCua, Desktop, user = parseUserKeymap("""[
+      { "key": "j", "command": "video-player.jump-start",
+        "when": "paneKind == videoPlayer" }
+    ]"""))
+    check r.keyOp(player, "j") == "video-player.jump-start"
+
+  test "the Visual Replay panes' presses are the pointer keymap's":
+    for base in BaseKeymap:
+      let r = initKeymapRouter(base, Desktop)
+      check opOf(r, "videoPlayer", ekValue, "Click") == "video-player.select-pixel"
+      check opOf(r, "pixelHistory", ekRow, "Click") == "pixel-history.activate"
+      check opOf(r, "videoPlayer", ekButton, "Click") == ""
+
+  test "every pane's row press is the pointer keymap's":
+    for base in BaseKeymap:
+      let r = initKeymapRouter(base, Desktop)
+      check opOf(r, "pointList", ekRow, "Click") == "point-list.select"
+      check opOf(r, "terminalOutput", ekRow, "Click") == "terminal-output.jump-to-write"
+      check opOf(r, "vcs", ekRow, "Click") == "vcs.open-file-diff"
+      check opOf(r, "vcs", ekToggle, "Click") == "vcs.toggle-commit"
+      check opOf(r, "search", ekRow, "Click") == "search.open-result"
+      check opOf(r, "requests", ekRow, "Click") == "requests.select"
+      check opOf(r, "lowLevelCode", ekRow, "Click") == "low-level.go-to-source-line"
+      check opOf(r, "lowLevelCode", ekToggle, "Click") == "low-level.toggle-sync"
+      check opOf(r, "verification", ekRow, "Click") == "verification.go-to-source"
+      check opOf(r, "constraints", ekRow, "Click") == "constraints.go-to-source"
+      check opOf(r, "editor", ekValue, "Ctrl+Click") == "scratchpad.add-value"
+      check opOf(r, "editor", ekValue, "Click") == ""

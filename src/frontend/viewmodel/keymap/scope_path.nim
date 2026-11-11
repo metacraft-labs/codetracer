@@ -92,7 +92,8 @@ const
   ListPaneKinds = ["calltrace", "state", "eventLog", "search", "pointList",
                     "fileTree", "buildOutput", "problems", "testResults",
                     "requests", "agentActivity", "vcs", "constraints",
-                    "lowLevelCode", "verification", "pixelHistory"]
+                    "lowLevelCode", "verification", "pixelHistory",
+                    "shaderDebug"]
     ## The list-like panes (CUA-Keymap.md §3.6): a focused one is
     ## `listFocus` and takes the shared `list` table.
 

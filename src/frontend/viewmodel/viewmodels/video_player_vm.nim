@@ -83,6 +83,24 @@ type
     VpaTogglePicker,
     VpaCancelPicker
 
+const
+  VideoPlayerOperations*: array[VideoPlayerAction, string] = [
+    VpaTogglePlay: "video-player.toggle-play",
+    VpaRewind: "video-player.rewind",
+    VpaFastForward: "video-player.fast-forward",
+    VpaStepFrameBack: "video-player.step-frame-back",
+    VpaStepFrameForward: "video-player.step-frame-forward",
+    VpaStepDrawBack: "video-player.step-draw-back",
+    VpaStepDrawForward: "video-player.step-draw-forward",
+    VpaJumpStart: "video-player.jump-start",
+    VpaJumpEnd: "video-player.jump-end",
+    VpaTogglePicker: "video-player.toggle-picker",
+    VpaCancelPicker: "video-player.cancel-picker"]
+    ## Each action as the operation that names it (Input-Routing §3): what a
+    ## key's row and a transport button's press both run, through each
+    ## front-end's operation tables.
+
+type
   ScrubAxis* = enum
     ## The pane's two scrubbers (CodeTracer-TUI-Graphics.md §4): the frame
     ## scrubber over the recording's frames, and the nested draw-call

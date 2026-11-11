@@ -1,6 +1,6 @@
 ## overlay_rows.nim — the keys of the overlays every base shares: the program
 ## menu, a shown text (an event's content), the terminal's information dialog,
-## and the Terminal Output pane's own keys.
+## and the Terminal Output pane's and the Video Player's own keys.
 ##
 ## Owns: those rows as data (Input-Routing §4.3: no binding is installed by
 ## code; each of these was a `case` over key names in each front-end's view).
@@ -60,4 +60,36 @@ const
     BaseRow(chords: "v", operation: "terminal-output.toggle-view",
             whenText: "paneKind == terminalOutput && !textInputFocus",
             table: PaneTablePrefix & "terminalOutput"),
+
+    # --- The Video Player (Visual-Replay.md § Keyboard Shortcuts): its keys
+    # while it has the focus, the same under every base, as the desktop's
+    # player always had them.
+    BaseRow(chords: "Space", operation: "video-player.toggle-play", table: VideoPlayerTable),
+    BaseRow(chords: "k", operation: "video-player.toggle-play", table: VideoPlayerTable),
+    BaseRow(chords: "j", operation: "video-player.rewind", table: VideoPlayerTable),
+    BaseRow(chords: "l", operation: "video-player.fast-forward", table: VideoPlayerTable),
+    BaseRow(chords: "Left", operation: "video-player.step-frame-back", table: VideoPlayerTable),
+    BaseRow(chords: "Right", operation: "video-player.step-frame-forward", table: VideoPlayerTable),
+    BaseRow(chords: "Shift+Left", operation: "video-player.step-draw-back", table: VideoPlayerTable),
+    BaseRow(chords: "Shift+Right", operation: "video-player.step-draw-forward", table: VideoPlayerTable),
+    BaseRow(chords: "Home", operation: "video-player.jump-start", table: VideoPlayerTable),
+    BaseRow(chords: "End", operation: "video-player.jump-end", table: VideoPlayerTable),
+    BaseRow(chords: "p", operation: "video-player.toggle-picker", table: VideoPlayerTable),
+    # While the pixel picker is on, `Escape` cancels it (a layer the pane
+    # pushes, so `Escape` is the pane's only then).
+    BaseRow(chords: "Escape", operation: "video-player.cancel-picker", table: VideoPickerTable),
+    # While the terminal's magnifier is open over the frame — the picker's
+    # keyboard stage — the arrows move the picked pixel (with Shift, by eight),
+    # `Enter` picks it, and `Escape` or `p` cancels.
+    BaseRow(chords: "Left", operation: "video-player.move-magnifier-left(1)", table: VideoMagnifierTable),
+    BaseRow(chords: "Right", operation: "video-player.move-magnifier-right(1)", table: VideoMagnifierTable),
+    BaseRow(chords: "Up", operation: "video-player.move-magnifier-up(1)", table: VideoMagnifierTable),
+    BaseRow(chords: "Down", operation: "video-player.move-magnifier-down(1)", table: VideoMagnifierTable),
+    BaseRow(chords: "Shift+Left", operation: "video-player.move-magnifier-left(8)", table: VideoMagnifierTable),
+    BaseRow(chords: "Shift+Right", operation: "video-player.move-magnifier-right(8)", table: VideoMagnifierTable),
+    BaseRow(chords: "Shift+Up", operation: "video-player.move-magnifier-up(8)", table: VideoMagnifierTable),
+    BaseRow(chords: "Shift+Down", operation: "video-player.move-magnifier-down(8)", table: VideoMagnifierTable),
+    BaseRow(chords: "Enter", operation: "video-player.commit-pick", table: VideoMagnifierTable),
+    BaseRow(chords: "Escape", operation: "video-player.cancel-picker", table: VideoMagnifierTable),
+    BaseRow(chords: "p", operation: "video-player.cancel-picker", table: VideoMagnifierTable),
   ]

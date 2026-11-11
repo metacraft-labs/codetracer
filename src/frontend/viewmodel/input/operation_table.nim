@@ -56,6 +56,9 @@ type
       ## default value for a key.
     pointer*: bool
       ## Reached by a pointer gesture, so `target` is meaningful.
+    menu*: bool
+      ## Chosen from the element's context menu (`pointer` is set too): the
+      ## entry's own procedure, not the element's press, performs it.
 
   OperationAction*[T, C] = proc(call: OperationCall[T]; ctx: var C): bool {.closure.}
     ## Performs the operation. `false`: not this table's after all; the walk

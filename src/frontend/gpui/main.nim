@@ -2955,6 +2955,10 @@ var gPressGesture = "Click"
 proc runElementGesture(r: GpuiRenderer; gesture: string; pane: PaneKind;
                        kind: ElementKind; target: ContextTarget;
                        menu = ContextMenuModel(); x = 0; y = 0): bool {.discardable.}
+proc pressElement(r: GpuiRenderer; pane: PaneKind; kind: ElementKind;
+                  operation: string; target: ContextTarget;
+                  gesture = "Click"; x = 0; y = 0): bool
+  ## PLAT-64: forward-declared; defined beside `runElementGesture`.
 
 proc clickCalltrace(r: GpuiRenderer; x, y: int): bool =
   ## PLAT-49 part B: a press on the call trace's body. On a row: go to that
@@ -3166,7 +3170,9 @@ proc pressTerminalOutput(r: GpuiRenderer; x, y: int): bool =
     traceGesture("terminal view " & $vm.view.val)
     drawTerminalPane(r)
   of ghWrite:
-    return terminalJump(r, hit.write)
+    return pressElement(r, paneTerminalOutput, ekRow, "",
+                        ContextTarget(pane: paneTerminalOutput,
+                                      index: int64(hit.write)))
   of ghLineTrack:
     scrubTerminalLines(r, y, click = true)
   of ghLineThumb:
@@ -4739,10 +4745,6 @@ proc windowKey(key: string; mods: seq[string]) =
   # PLAT-61: the focused, running Shell pane takes every key for its shell
   # (CodeTracer-Shell.md §7.5) — except after its prefix.
   if shellKey(r, key, mods):
-    return
-  # PLAT-59: the Video Player's own keys while it has the focus (the
-  # desktop's, scoped to the pane).
-  if visualKey(r, key, mods):
     return
   routeWindowKey(r, key, mods)
 
@@ -9091,14 +9093,12 @@ proc pressLowLevel(r: GpuiRenderer; x, y: int; right = false): bool =
     return true
   case hit.kind
   of glInstruction:
-    vm.selectInstruction(hit.index)
-    traceGesture("low-level: press instruction " & $hit.index)
-    lowLevelGoTo(r, vm.jumpTargetOf(hit.index))
+    discard pressElement(r, paneLowLevelCode, ekRow, "",
+                         ContextTarget(pane: paneLowLevelCode,
+                                       index: int64(hit.index)))
   of glSync:
-    vm.setSyncEnabled(not vm.syncSettings.val.enabled)
-    traceGesture("low-level: " & syncToggleLabel(vm.syncSettings.val.enabled))
-    drawLowLevelPane(r)
-    redrawReplayEditor(r)
+    discard pressElement(r, paneLowLevelCode, ekToggle, "",
+                         ContextTarget(pane: paneLowLevelCode))
   of glTrack, glThumb:
     gLowLevel.dragging = hit.kind == glThumb
     if gLowLevel.dragging:
@@ -9212,6 +9212,10 @@ proc runGpuiVerification(r: GpuiRenderer) =
   drawVerificationPane(r)
   armRecordTick()
 
+var gVerificationOpened = false
+  ## Whether the last press on a Verification line opened a file (the pane
+  ## then leaves the focus to the editor).
+
 proc pressVerification(r: GpuiRenderer; x, y: int; right = false): bool =
   ## A press on the Verification pane: a finding goes to its source (or says
   ## why not), an offer opens its counterexample, a step moves it (and to
@@ -9235,14 +9239,16 @@ proc pressVerification(r: GpuiRenderer; x, y: int; right = false): bool =
   case hit.kind
   of gvLine:
     if hit.key.len > 0:
-      traceGesture("verification: press " & hit.key)
-      opened = verificationGoTo(r, vm.activateLine(session, hit.key))
-      verificationShown(r)
+      gVerificationOpened = false
+      discard pressElement(r, paneVerification, ekRow, "",
+                           ContextTarget(pane: paneVerification, token: hit.key))
+      opened = gVerificationOpened
   of gvRun:
-    runGpuiVerification(r)
+    discard pressElement(r, paneVerification, ekButton, "verification.run",
+                         ContextTarget(pane: paneVerification))
   of gvStop:
-    verificationSay(gVerification.stopVerification())
-    drawVerificationPane(r)
+    discard pressElement(r, paneVerification, ekButton, "verification.stop",
+                         ContextTarget(pane: paneVerification))
   of gvTrack, gvThumb:
     let lay = verificationLayout(vm, session, body)
     gVerificationPane.dragging = hit.kind == gvThumb
@@ -9497,12 +9503,11 @@ proc pressVisual(r: GpuiRenderer; x, y: int): bool =
     let hit = videoHitAt(panes, video, x, y)
     case hit.kind
     of gvButton:
-      if hit.action == VpaTogglePicker:
-        panes.player.togglePicker()
-        gVisual.loupe = none(tuple[x, y: int])
-      else:
-        discard panes.player.dispatchVideoPlayerAction(hit.action)
-      traceGesture("visual: " & $hit.action)
+      # K69: the button runs the operation it carries.
+      discard pressElement(r, paneVideoPlayer, ekButton,
+                           VideoPlayerOperations[hit.action],
+                           ContextTarget(pane: paneVideoPlayer))
+      return true
     of gvFrameTrack, gvDrawTrack:
       gVisual.scrubbing = true
       gVisual.scrubAxis = if hit.kind == gvFrameTrack: scrubFrame
@@ -9511,13 +9516,12 @@ proc pressVisual(r: GpuiRenderer; x, y: int): bool =
       traceGesture("visual: scrub " & $gVisual.scrubAxis & " " &
                    $hit.position)
     of gvImage:
-      if panes.player.pickerState.val == PickerActive:
-        commitPick(r, hit.x, hit.y)
-        return true
-      # Visual-Replay.md § Selection Result's fallback: a click outside the
-      # picker still selects the pixel under it.
-      panes.frame.selectPixel(hit.x, hit.y)
-      traceGesture("visual: selected " & $hit.x & "," & $hit.y)
+      # K72: the frame is a value; its press is the pointer keymap's
+      # (`video-player.select-pixel`), on the source pixel under it.
+      discard pressElement(r, paneVideoPlayer, ekValue, "",
+                           ContextTarget(pane: paneVideoPlayer, column: hit.x,
+                                         line: hit.y))
+      return true
     else: discard
     visualAfterAct(r)
     return true
@@ -9527,19 +9531,11 @@ proc pressVisual(r: GpuiRenderer; x, y: int): bool =
       focusWindowPane(r, $panePixelHistory)
     let hit = historyHitAt(panes, gVisual, history, x, y)
     if hit.kind == gvHistoryRow:
-      discard panes.activateHistoryEntry(hit.index)
-      traceGesture("visual: history row " & $hit.index)
-      # A navigation moved the recording: every pane follows the move.
-      var moved = false
-      for e in gSession.backend.eventQueue:
-        if e{"event"}.getStr("") == "stopped":
-          moved = true
-      if moved:
-        try:
-          gSession.settleAfterSeek()
-          afterMove(r)
-        except CatchableError as e:
-          traceGesture("visual: the move failed: " & e.msg)
+      # K73: a row's press is the pointer keymap's (`pixel-history.activate`).
+      discard pressElement(r, panePixelHistory, ekRow, "",
+                           ContextTarget(pane: panePixelHistory,
+                                         index: int64(hit.index)))
+      return true
     visualAfterAct(r)
     return true
   let shader = visualBodyOf(paneShaderDebug)
@@ -9548,12 +9544,11 @@ proc pressVisual(r: GpuiRenderer; x, y: int): bool =
       focusWindowPane(r, $paneShaderDebug)
     let hit = shaderHitAt(panes, shader, x, y)
     if hit.kind == gvShaderButton:
-      case hit.button
-      of "First": panes.shader.stepFirst()
-      of "Back": panes.shader.stepBackward()
-      of "Step": panes.shader.stepForward()
-      of "Last": panes.shader.stepLast()
-      else: discard
+      # K74: the button runs the operation it carries, on its own step.
+      discard pressElement(r, paneShaderDebug, ekButton, "shader-debug.step",
+                           ContextTarget(pane: paneShaderDebug,
+                                         text: hit.button))
+      return true
     visualAfterAct(r)
     return true
   false
@@ -9595,55 +9590,90 @@ proc releaseVisual(r: GpuiRenderer; x, y: int): bool =
   visualAfterAct(r)
   true
 
-proc visualKey(r: GpuiRenderer; key: string; mods: seq[string]): bool =
-  ## The Video Player's keys while it has the focus (Visual-Replay.md §
-  ## Keyboard Shortcuts): Space / K play-pause, J rewind, L fast forward,
-  ## Left / Right a frame, Shift+Left / Shift+Right a draw call, Home / End,
-  ## P the picker, Esc cancels it. The Pixel History's and Shader Debug's
-  ## arrows move the selection and the step.
+proc runPlayerAction(r: GpuiRenderer; action: VideoPlayerAction): bool =
+  ## The Video Player's operations (its rows are `overlay_rows`'), onto its
+  ## ViewModel. `false` when the player declined (Esc with the picker off).
+  let panes = visualVM()
+  if panes.isNil or gFocusPane != $paneVideoPlayer:
+    return false
+  if not panes.player.dispatchVideoPlayerAction(action):
+    return false
+  if action in {VpaTogglePicker, VpaCancelPicker}:
+    gVisual.loupe = none(tuple[x, y: int])
+  traceGesture("visual: key " & $action)
+  visualAfterAct(r)
+  true
+
+proc selectPixelAt(r: GpuiRenderer; x, y: int): bool =
+  ## `video-player.select-pixel` on the frame's source pixel `x`, `y`: the
+  ## picker's commit while it is on; otherwise Visual-Replay.md § Selection
+  ## Result's fallback, a press outside the picker still selects the pixel.
   let panes = visualVM()
   if panes.isNil:
     return false
-  let k = key.toLowerAscii
-  let shift = mods == @["shift"]
-  if gFocusPane == $paneVideoPlayer:
-    var action = none(VideoPlayerAction)
-    if mods.len == 0:
-      case k
-      of " ", "space", "k": action = some(VpaTogglePlay)
-      of "j": action = some(VpaRewind)
-      of "l": action = some(VpaFastForward)
-      of "left", "arrowleft": action = some(VpaStepFrameBack)
-      of "right", "arrowright": action = some(VpaStepFrameForward)
-      of "home": action = some(VpaJumpStart)
-      of "end": action = some(VpaJumpEnd)
-      of "p": action = some(VpaTogglePicker)
-      of "escape": action = some(VpaCancelPicker)
-      else: discard
-    elif shift:
-      case k
-      of "left", "arrowleft": action = some(VpaStepDrawBack)
-      of "right", "arrowright": action = some(VpaStepDrawForward)
-      else: discard
-    if action.isNone:
-      return false
-    if not panes.player.dispatchVideoPlayerAction(action.get):
-      return false   # Esc with the picker off: someone else's
-    if action.get in {VpaTogglePicker, VpaCancelPicker}:
-      gVisual.loupe = none(tuple[x, y: int])
-    traceGesture("visual: key " & $action.get)
-    visualAfterAct(r)
+  if panes.player.pickerState.val == PickerActive:
+    commitPick(r, x, y)
     return true
-  if gFocusPane == $panePixelHistory and mods.len == 0:
+  panes.frame.selectPixel(x, y)
+  traceGesture("visual: selected " & $x & "," & $y)
+  visualAfterAct(r)
+  true
+
+proc activateHistoryRow(r: GpuiRenderer; index: int): bool =
+  ## `pixel-history.activate`: the row's draw call, and every pane follows the
+  ## move it made.
+  let panes = visualVM()
+  if panes.isNil:
+    return false
+  discard panes.activateHistoryEntry(index)
+  traceGesture("visual: history row " & $index)
+  var moved = false
+  for e in gSession.backend.eventQueue:
+    if e{"event"}.getStr("") == "stopped":
+      moved = true
+  if moved:
+    try:
+      gSession.settleAfterSeek()
+      afterMove(r)
+    except CatchableError as e:
+      traceGesture("visual: the move failed: " & e.msg)
+  visualAfterAct(r)
+  true
+
+proc stepShader(r: GpuiRenderer; button: string): bool =
+  ## `shader-debug.step` with the button that carries it.
+  let panes = visualVM()
+  if panes.isNil:
+    return false
+  case button
+  of "First": panes.shader.stepFirst()
+  of "Back": panes.shader.stepBackward()
+  of "Step": panes.shader.stepForward()
+  of "Last": panes.shader.stepLast()
+  else: return false
+  visualAfterAct(r)
+  true
+
+proc runVisualListOperation(r: GpuiRenderer; operation: string): bool =
+  ## The Pixel History's rows (a row's cursor; `list.activate` navigates) and
+  ## the Shader Debug pane's step (next / previous, first / last), as the
+  ## terminal's `runVisualKeyOperation`. Answers whether `operation` was the
+  ## focused pane's.
+  let panes = visualVM()
+  if panes.isNil:
+    return false
+  if gFocusPane == $panePixelHistory:
     let n = panes.history.entries.val.len
     if n == 0:
       return false
     let at = if panes.history.selectedEntry.val.isSome:
                panes.history.selectedEntry.val.get else: -1
-    case k
-    of "down", "arrowdown": panes.selectHistoryEntry(min(n - 1, at + 1))
-    of "up", "arrowup": panes.selectHistoryEntry(max(0, at - 1))
-    of "enter":
+    case operation
+    of "list.focus-next": panes.selectHistoryEntry(min(n - 1, at + 1))
+    of "list.focus-previous": panes.selectHistoryEntry(max(0, at - 1))
+    of "list.focus-first": panes.selectHistoryEntry(0)
+    of "list.focus-last": panes.selectHistoryEntry(n - 1)
+    of "list.activate":
       if at < 0: return false
       discard panes.activateHistoryEntry(at)
     else: return false
@@ -9652,16 +9682,46 @@ proc visualKey(r: GpuiRenderer; key: string; mods: seq[string]): bool =
          panes.history.selectedEntry.val.get else: 0))
     visualAfterAct(r)
     return true
-  if gFocusPane == $paneShaderDebug and mods.len == 0:
-    case k
-    of "down", "arrowdown": panes.shader.stepForward()
-    of "up", "arrowup": panes.shader.stepBackward()
-    of "home": panes.shader.stepFirst()
-    of "end": panes.shader.stepLast()
+  if gFocusPane == $paneShaderDebug:
+    case operation
+    of "list.focus-next": panes.shader.stepForward()
+    of "list.focus-previous": panes.shader.stepBackward()
+    of "list.focus-first": panes.shader.stepFirst()
+    of "list.focus-last": panes.shader.stepLast()
     else: return false
     visualAfterAct(r)
     return true
   false
+
+proc visualKey(r: GpuiRenderer; key: string; mods: seq[string]): bool =
+  ## `--window-ops`' `visual:key`: the keystroke through the window's router,
+  ## as a delivered key is; whether it reached one of the Visual Replay
+  ## panes' operations (their rows: `overlay_rows`, the list table).
+  syncOverlayLayers()
+  let name = canonicalKeyOfGpui(key, mods)
+  if name.len == 0:
+    return false
+  var probe = gRouter
+  let res = probe.route(windowSessionFacts(), windowScopePath(), nmNormal, name,
+                        int64(epochTime() * 1000))
+  if res.kind != erOperation:
+    return false
+  let visualPane = gFocusPane in [$paneVideoPlayer, $panePixelHistory,
+                                  $paneShaderDebug]
+  if not (res.operation.startsWith("video-player.") or
+          (visualPane and res.operation.startsWith("list."))):
+    return false
+  routeWindowKey(r, key, mods)
+  true
+
+proc syncVideoPlayerLayers() =
+  ## The picker's layer while it is on, owned by the pane, so its `Escape`
+  ## holds only while the Video Player has the focus.
+  let panes = visualVM()
+  var wanted: seq[tuple[table, label: string]] = @[]
+  if not panes.isNil and panes.player.pickerState.val == PickerActive:
+    wanted.add (VideoPickerTable, "PICKER")
+  gRouter.syncOwnedLayers($paneVideoPlayer, wanted)
 
 proc pollCertificateIndicator(r: GpuiRenderer) =
   ## Only whole current answers cross the worker's channel. drawTopBar
@@ -9739,15 +9799,21 @@ proc pressRequests(r: GpuiRenderer; x, y: int; right = false): bool =
   of grqNone, grqOther: discard
   of grqRow:
     if hit.index >= 0:
-      let host = gSession.pressRequest(hit.index, nowMs)
-      traceGesture("requests: press #" & $hit.position & " -> " &
-                   $vm.selectedIndex.val)
-      requestsSay(r, host)
+      # K58: the row's press is the pointer keymap's; the session counts a
+      # second press as the double press that goes to the handler.
+      discard pressElement(r, paneRequests, ekRow, "",
+                           ContextTarget(pane: paneRequests,
+                                         index: int64(hit.index),
+                                         line: hit.position))
   of grqMethod, grqStatus:
+    # K60: the picker is a button carrying its filter's operation.
     let lay = requestsLayout(vm, body)
     let at = if hit.kind == grqStatus: lay.statusPicker else: lay.methodPicker
-    openContextMenuAt(r, vm.requestPickerMenuOf(hit.kind == grqStatus),
-                      at.x, at.y + at.h)
+    discard pressElement(r, paneRequests, ekButton,
+                         (if hit.kind == grqStatus: "requests.filter-status"
+                          else: "requests.filter-method"),
+                         ContextTarget(pane: paneRequests, column: at.x,
+                                       line: at.y + at.h))
   of grqField:
     openRequestsField(r)
   of grqHandler:
@@ -9914,8 +9980,9 @@ proc pressConstraints(r: GpuiRenderer; x, y: int; right = false): bool =
   case hit.kind
   of gcNone, gcText: discard
   of gcRow:
-    traceGesture("constraints: press row " & $hit.index)
-    activateConstraintRow(r, hit.index)
+    discard pressElement(r, paneConstraints, ekRow, "",
+                         ContextTarget(pane: paneConstraints,
+                                       index: int64(hit.index)))
   of gcTrack, gcThumb:
     gConstraintsPane.dragging = hit.kind == gcThumb
     if gConstraintsPane.dragging:
@@ -11290,7 +11357,9 @@ proc pressSearch(r: GpuiRenderer; x, y: int): bool =
   of gsNone, gsFile: discard
   of gsQuery: openFindInFiles(r)
   of gsOption: toggleSearchOption(r, hit.option)
-  of gsMatch: discard openSearchResult(r, hit.index)
+  of gsMatch:
+    discard pressElement(r, paneSearch, ekRow, "",
+                         ContextTarget(pane: paneSearch, index: int64(hit.index)))
   of gsTrack, gsThumb:
     gSearch.dragging = hit.kind == gsThumb
     if gSearch.dragging:
@@ -11731,6 +11800,7 @@ proc syncOverlayLayers() =
   want(ContextMenuTable, "MENU", gCtxMenu.open)
   want(MenuTable, "", menuOpen)
   want(ContentViewTable, "", gContent.open)
+  syncVideoPlayerLayers()
 
 proc refreshMenuShortcuts() =
   ## The menu's chords are THE ROUTER'S (KL-8): each item's operation
@@ -12100,7 +12170,7 @@ proc buildWindowOperationTables(r: GpuiRenderer) =
       let chosen = action
       if ContextActionOperations[chosen].len > 0:
         chosenEntries.bindOp(ContextActionOperations[chosen], act do:
-          if not c.pointer:
+          if not c.menu:
             return false
           runContextAction(r, chosen, c.target))
   hub.add chosenEntries
@@ -12242,6 +12312,28 @@ proc buildWindowOperationTables(r: GpuiRenderer) =
     stepTerminalWrite(r, (if c.name == "view.scroll-left": -1 else: 1)))
   hub.add terminalOutput
 
+  # PLAT-59: the Video Player's own keys while it has the focus, and the Pixel
+  # History's and Shader Debug's rows (`overlay_rows`, the list table).
+  let player = newOperationTable[ContextTarget, WindowDispatch]("pane:videoPlayer",
+    proc(): bool = gFocusPane == $paneVideoPlayer and not visualVM().isNil)
+  for action in VideoPlayerAction:
+    closureScope:
+      let playerAct = action
+      player.bindOp(VideoPlayerOperations[playerAct],
+                    ask(runPlayerAction(r, playerAct)))
+  player.bindOp("video-player.select-pixel", ask do:
+    c.pointer and selectPixelAt(r, c.target.column, c.target.line))
+  hub.add player
+  let visualLists = newOperationTable[ContextTarget, WindowDispatch]("pane:visual",
+    proc(): bool = gFocusPane in [$panePixelHistory, $paneShaderDebug])
+  visualLists.onEach(["list.focus-next", "list.focus-previous", "list.focus-first",
+                      "list.focus-last", "list.activate"],
+                     ask(runVisualListOperation(r, c.name)))
+  visualLists.bindOp("pixel-history.activate", ask do:
+    c.pointer and activateHistoryRow(r, int(c.target.index)))
+  visualLists.bindOp("shader-debug.step", ask(stepShader(r, c.target.text)))
+  hub.add visualLists
+
   # --- The context menu -----------------------------------------------------
   let menu = newOperationTable[ContextTarget, WindowDispatch]("context-menu",
     proc(): bool = gCtxMenu.open)
@@ -12264,7 +12356,7 @@ proc buildWindowOperationTables(r: GpuiRenderer) =
       var inner = WindowDispatch()
       discard gOperations.invoke(
         WindowCall(name: ContextActionOperations[chosen.action],
-                   target: chosen.target, pointer: true), inner))
+                   target: chosen.target, pointer: true, menu: true), inner))
   menu.bindOp("context-menu.close", act do:
     gCtxMenu.close()
     drawTopBar(r))
@@ -12316,7 +12408,7 @@ proc buildWindowOperationTables(r: GpuiRenderer) =
     ## An operation that acts on an element: the row a press hit-tested. From a
     ## key there is no element here, and it says so.
     elements.bindOp(name, act do:
-      if not c.pointer:
+      if not c.pointer or c.menu:
         return false
       body)
   onTarget("calltrace.go-to-call"):
@@ -12378,10 +12470,89 @@ proc buildWindowOperationTables(r: GpuiRenderer) =
       discard openEditFile(e.path)
     else:
       openTreeFile(r, e.path)
+  # What the other panes' elements run (`pointer_rows`, and the operation a
+  # button carries), the procedures their presses always ran.
+  onTarget("point-list.select"):
+    let vm = gSession.session.pointListVM
+    if vm.isNil:
+      return false
+    vm.selectPoint(some(int(c.target.index)))
+    traceGesture("point selected #" & $c.target.index)
+    redrawPaneOf(r, panePointList)
+  onTarget("scratchpad.remove"):
+    let vm = gSession.session.scratchpadVM
+    if vm.isNil:
+      return false
+    vm.removeValue(int(c.target.index))
+    traceGesture("scratchpad " & $vm.entries.val.len & " value(s)")
+    redrawPaneOf(r, paneScratchpad)
+  onTarget("scratchpad.add-value"):
+    gSession.addToScratchpad(c.target.expression, c.target.text)
+    traceGesture("scratchpad " &
+                 $gSession.session.scratchpadVM.entries.val.len & " value(s)")
+    redrawPaneOf(r, paneScratchpad)
+  onTarget("vcs.open-file-diff"):
+    openVcsDiff(r, c.target.text)
+  onTarget("vcs.toggle-commit"):
+    toggleVcsCommit(r, int(c.target.index))
+  onTarget("variables.value-history"):
+    showValueHistory(r, c.target.path)
+  onTarget("variables.value-origin"):
+    showValueOrigin(r, c.target.path)
+  onTarget("variables.hide-other-process-watches"):
+    # Variable-State-Pane.md § Decisions, 2026-10-24.
+    if not gSession.isNil and not gSession.session.stateVM.isNil:
+      gSession.session.stateVM.setHideOtherProcessWatches(c.target.text == "on")
+      redrawPaneOf(r, paneState)
+  onTarget("search.open-result"):
+    discard openSearchResult(r, int(c.target.index))
+  onTarget("terminal-output.jump-to-write"):
+    return terminalJump(r, int(c.target.index))
+  onTarget("requests.select"):
+    let host = gSession.pressRequest(int(c.target.index), nowMonoMs())
+    traceGesture("requests: press #" & $c.target.line & " -> " &
+                 $requestsVM().selectedIndex.val)
+    requestsSay(r, host)
+  for (name, status) in [("requests.filter-method", false),
+                         ("requests.filter-status", true)]:
+    closureScope:
+      let isStatus = status
+      onTarget(name):
+        openContextMenuAt(r, requestsVM().requestPickerMenuOf(isStatus),
+                          c.target.column, c.target.line)
+  onTarget("low-level.go-to-source-line"):
+    let vm = lowLevelVM()
+    vm.selectInstruction(int(c.target.index))
+    traceGesture("low-level: press instruction " & $c.target.index)
+    lowLevelGoTo(r, vm.jumpTargetOf(int(c.target.index)))
+  onTarget("low-level.toggle-sync"):
+    let vm = lowLevelVM()
+    vm.setSyncEnabled(not vm.syncSettings.val.enabled)
+    traceGesture("low-level: " & syncToggleLabel(vm.syncSettings.val.enabled))
+    drawLowLevelPane(r)
+    redrawReplayEditor(r)
+  onTarget("verification.go-to-source"):
+    traceGesture("verification: press " & c.target.token)
+    gVerificationOpened = verificationGoTo(r,
+      gVerification.vm.activateLine(gVerification.session, c.target.token))
+    verificationShown(r)
+  onTarget("verification.run"):
+    runGpuiVerification(r)
+  onTarget("verification.stop"):
+    verificationSay(gVerification.stopVerification())
+    drawVerificationPane(r)
+  onTarget("constraints.go-to-source"):
+    traceGesture("constraints: press row " & $c.target.index)
+    activateConstraintRow(r, int(c.target.index))
   hub.add elements
 
   # --- The window -----------------------------------------------------------
   let window = newOperationTable[ContextTarget, WindowDispatch]("window")
+  # K37: the footer's location, copied (its press carries this name).
+  window.bindOp("status.copy-path", act do:
+    if gSession.isNil:
+      return false
+    copyToClipboard(gSession.getCurrentFile(), "the path"))
   window.onEach(["editor.jump-to-value-origin", "debugger.reverse-origin"], act do:
     walkValueOrigin(r, reverse = c.name == "debugger.reverse-origin"))
   window.bindOp(ShowValueOriginOperation, act do:
@@ -12555,6 +12726,32 @@ proc runElementGesture(r: GpuiRenderer; gesture: string; pane: PaneKind;
   of oiDisabled: traceGesture(answer.reason)
   of oiAbsent:
     traceGesture("`" & res.operation & "` (" & operationLabelOf(res.operation) &
+                 ") is not available in this window")
+  answer.kind != oiAbsent
+
+proc pressElement(r: GpuiRenderer; pane: PaneKind; kind: ElementKind;
+                  operation: string; target: ContextTarget;
+                  gesture = "Click"; x = 0; y = 0): bool =
+  ## **A PRESS ON AN ELEMENT THAT DECLARES ITS OPERATION** (Input-Routing §5.1):
+  ## the hit test found the element and what it is; a pointer row for the
+  ## press decides first (a user's `keybindings.json`, the base's), and
+  ## otherwise the element's own `operation` runs by name through the
+  ## operation tables — a transport button's step, a Shader Debug button's.
+  if runElementGesture(r, gesture, pane, kind, target, x = x, y = y):
+    return true
+  if operation.len == 0 or gesture.endsWith("RightClick") or
+     gesture.endsWith("MiddleClick"):
+    return false
+  if gOperations.isNil:
+    buildWindowOperationTables(r)
+  var ctx = WindowDispatch()
+  let answer = gOperations.invoke(
+    WindowCall(name: operation, target: target, pointer: true), ctx)
+  case answer.kind
+  of oiRan: discard
+  of oiDisabled: traceGesture(answer.reason)
+  of oiAbsent:
+    traceGesture("`" & operation & "` (" & operationLabelOf(operation) &
                  ") is not available in this window")
   answer.kind != oiAbsent
 
@@ -12886,10 +13083,11 @@ proc onPaneClick(c: GPaneClick) =
                                                 v.value, lineValuesOf(row)),
                         c.x, c.y)
     elif c.button == gbLeft and c.ctrl:
-      gSession.addToScratchpad(v.name, v.value)
-      traceGesture("scratchpad " &
-                   $session.scratchpadVM.entries.val.len & " value(s)")
-      redrawPaneOf(r, paneScratchpad)
+      # K36: Ctrl+click on a value is a pointer row (`scratchpad.add-value`).
+      discard pressElement(r, paneEditor, ekValue, "",
+                           ContextTarget(pane: paneEditor, expression: v.name,
+                                         text: v.value),
+                           gestureOfClick(c), c.x, c.y)
     elif c.button == gbLeft:
       traceGesture(v.name & " = " & v.value & " is the value at this step")
   of gcpCallRow:
@@ -12933,15 +13131,22 @@ proc onPaneClick(c: GPaneClick) =
       return
     let kind = c.key[0 ..< sep]
     let arg = c.key[sep + 1 .. ^1]
+    # K40 / K41 / K29: each control is a button carrying its operation.
     case kind
-    of "history": showValueHistory(r, arg)
-    of "origin": showValueOrigin(r, arg)
+    of "history":
+      discard pressElement(r, paneState, ekButton, "variables.value-history",
+                           ContextTarget(pane: paneState, path: arg),
+                           gestureOfClick(c), c.x, c.y)
+    of "origin":
+      discard pressElement(r, paneState, ekButton, "variables.value-origin",
+                           ContextTarget(pane: paneState, path: arg),
+                           gestureOfClick(c), c.x, c.y)
     of "unwatch": discard runWatchCommand(r, ":unwatch " & arg)
     of "hide-other-process-watches":
-      # Variable-State-Pane.md § Decisions, 2026-10-24.
-      if not gSession.isNil and not gSession.session.stateVM.isNil:
-        gSession.session.stateVM.setHideOtherProcessWatches(arg == "on")
-        redrawPaneOf(r, paneState)
+      discard pressElement(r, paneState, ekButton,
+                           "variables.hide-other-process-watches",
+                           ContextTarget(pane: paneState, text: arg),
+                           gestureOfClick(c), c.x, c.y)
     else: discard
   of gcpOriginHop:
     # A hop is a navigation row: a click does what `Enter` on it does
@@ -12998,28 +13203,34 @@ proc onPaneClick(c: GPaneClick) =
     # K31: the desktop's click selects the point.
     if c.button != gbLeft or session.pointListVM.isNil:
       return
-    session.pointListVM.selectPoint(some(int(c.index)))
-    traceGesture("point selected #" & $c.index)
-    redrawPaneOf(r, panePointList)
+    discard pressElement(r, panePointList, ekRow, "",
+                         ContextTarget(pane: panePointList, index: c.index),
+                         gestureOfClick(c), c.x, c.y)
   of gcpScratchClose:
     # K33: a pinned value's close button.
     if c.button != gbLeft or session.scratchpadVM.isNil:
       return
-    session.scratchpadVM.removeValue(int(c.index))
-    traceGesture("scratchpad " &
-                 $session.scratchpadVM.entries.val.len & " value(s)")
-    redrawPaneOf(r, paneScratchpad)
+    discard pressElement(r, paneScratchpad, ekButton, "scratchpad.remove",
+                         ContextTarget(pane: paneScratchpad, index: c.index),
+                         gestureOfClick(c), c.x, c.y)
   of gcpPosition:
     # K37: the footer's location — the current file's path copied, as the
     # desktop's copy control copies it (measured: the path, no line).
     if c.button == gbLeft:
-      copyToClipboard(gSession.getCurrentFile(), "the path")
+      discard pressElement(r, paneEditor, ekButton, "status.copy-path",
+                           ContextTarget(), gestureOfClick(c), c.x, c.y)
   of gcpVcsFile:
     if c.button == gbLeft:
-      openVcsDiff(r, c.key)
+      discard pressElement(r, paneVcs, ekRow, "",
+                           ContextTarget(pane: paneVcs, text: c.key),
+                           gestureOfClick(c), c.x, c.y)
   of gcpVcsCommit:
     if c.button == gbLeft and c.key.startsWith("commit-"):
-      try: toggleVcsCommit(r, parseInt(c.key["commit-".len .. ^1]))
+      try:
+        discard pressElement(r, paneVcs, ekToggle, "",
+                             ContextTarget(pane: paneVcs,
+                               index: int64(parseInt(c.key["commit-".len .. ^1]))),
+                             gestureOfClick(c), c.x, c.y)
       except ValueError: discard
 
 proc wireClicks(r: GpuiRenderer) =
@@ -13594,7 +13805,7 @@ proc runWindowOp(r: GpuiRenderer; op: string; release = true): string =
                    of "history": panePixelHistory
                    of "shader": paneShaderDebug
                    else: paneVideoPlayer
-        gFocusPane = $pane
+        focusWindowPane(r, $pane)
         let mods = if parts.len > 4: parts[4].split('+') else: @[]
         if not visualKey(r, parts[3], mods):
           return "the " & $pane & " pane does not take '" & parts[3] & "'"
