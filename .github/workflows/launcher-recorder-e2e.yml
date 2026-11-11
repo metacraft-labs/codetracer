@@ -641,10 +641,27 @@ jobs:
         # native ccbe5866 and js 634bce37 records: neither names it; it only
         # appears in records whose publisher's workspace happened to carry the
         # isonim project), so a bare entry would fail this step and it takes
-        # the same flake.lock SHA shape.  isonim-gpui / nim-termctl / nim-pty
-        # are on the same `--path` list but nothing a tup rule builds imports
-        # them (only the terminal and GPUI front-ends do); they stay
-        # unprovisioned and require-siblings.sh keeps them advisory.
+        # the same flake.lock SHA shape.  isonim-gpui / nim-termctl are on the
+        # same `--path` list but nothing a tup rule builds imports them (only
+        # the terminal and GPUI front-ends do); they stay unprovisioned and
+        # require-siblings.sh keeps them advisory.
+        #
+        # NIM-PTY.  It used to sit in that unprovisioned list too, and stopped
+        # belonging there with 4e856d570: from that commit on `ct` itself
+        # compiles src/common/shell_session.nim (for `ct shell-session`), which
+        # imports `nim_pty` (482bb270d later made require-siblings.sh list it
+        # as REQUIRED; revisions between the two still call it advisory, and
+        # their build fails all the same).  Without it every arm of this gate
+        # died in `Build the codetracer-desktop core` with
+        #
+        #   src/common/shell_session.nim(40, 8) Error: cannot open file: nim_pty
+        #
+        # (codetracer-beam-recorder PR #16 at bdfa491, job 128550018745).
+        # This file is resolved at `@dev` by every caller, but the codetracer
+        # it builds is the revision the caller's lock pins, so it provisions
+        # nim-pty even while the branch it is read from has a `ct` that does
+        # not import it yet.  ci/test/launcher-recorder-e2e-workflow-test.sh
+        # fails if this block drops it.
         #
         # THE PROPER FIX IS STILL IN ANOTHER REPOSITORY, and this is a bridge to
         # it, not a replacement for it: declare `isonim`, `isonim-tui` and
@@ -718,6 +735,11 @@ jobs:
             # repos, whose repro.lock need not pin it. It is a flake input, so the
             # SHA is the one flake.lock pins.
             test-certificates-tools=9864082065c8acb1db315e65a6a4157a3ab77117
+            # `ct shell-session` imports `nim_pty` from 4e856d570 on; see
+            # "NIM-PTY" above. SHA, not bare, for the same reason as
+            # test-certificates-tools: recorder repos' locks need not pin it.
+            # It is a flake input, so the SHA is flake.lock's.
+            nim-pty=2845abd58dd2073475177301590c8b51aa5c9094
 
       - name: Check the workspace has the shape the driver expects
         # Cheap, and it turns the one class of failure a local rehearsal cannot

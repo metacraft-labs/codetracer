@@ -1540,6 +1540,7 @@ nim-acp
 nim-agent-harbor
 nim-agents
 nim-everywhere
+nim-pty
 nim-shm-gset
 nim-shm-queue
 nim-stackable-hooks
