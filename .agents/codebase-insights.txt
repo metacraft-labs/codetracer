@@ -8412,3 +8412,15 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - The compiler's tracer records source PATHS, not text: a recording opens with "No source for …" unless the sources are copied to `<folder>/files/<absolute path>` (`bundleSources`), which is where replay-server's files root reads them.
 - The session strip of the terminal scrolls (`‹ … ›`) once its tabs overflow, and draws no tab at all with one session; GPUI's plan has no `data-ct-session-tab` node with one session.
 - Opening a recording from Edit mode leaves the window in Edit mode unless the opener switches it; `advanceNimTrace` enters Debug mode after a trace opens.
+
+## Desktop value origin, breakpoints and Playwright waits (2026-11-12)
+- The row menu's "Show value origin", the badge and `Ctrl+Shift+O` in the Variables pane expand the chain IN PLACE (`OriginChainVM.loadRowChain`); only `onShowOrigin` (the in-row chain's "Show in side panel", the command palette, the editor's Show Value Origin) opens the side panel and pushes a breadcrumb.
+- Playwright `hasNot:` tests DESCENDANTS: `li` filtered `hasNot: .x` keeps an `li.x`. Select the hop rows by their own class (`li.ct-origin-hop`).
+- `VariableStatePane.variableValueText` is the whole row's text (name, type, button labels); `variableValue` is the value cell. A Ruby top-level local is listed as `nil` before its assignment, so "listed" is not "assigned".
+- `@axe-core/playwright` needs `.setLegacyMode(true)` under Electron: the default mode opens a blank page, and Electron refuses `Target.createTarget`.
+- `#stable-status` exists only while an operation is in flight; wait for a move with `lib/operation-settled.ts` (`moveAndSettle`), not for `ready-status`.
+- `sdk/breakpoints.requestBreakpoints` applies only the latest request's answer per file (`ReplayDataStore.breakpointRequests`); an older answer arriving late used to delete a breakpoint placed after it.
+- Nim procs exposed to JS as methods (`installM5ColumnAwareServiceMethods`) get no default arguments from a JS caller: an omitted cstring arrives `undefined` and `$` on it throws in `cstrToNimstr`.
+- A line breakpoint fires once per VISIT to its line (db.rs `breakpoint_slot_fires_at`, consecutive same-line steps of a frame are one visit). The JS recorder writes a loop body's iterations as consecutive steps on the body line, so a breakpoint or tracepoint there fires once, not per iteration.
+- The default `ct record` backend for C/C++/Rust is MCR; `ct-mcr debugserver` refuses a recording of more than one thread. Specs that need rr set `test.use({ recordBackend: "rr" })`.
+- A MutationObserver records `setAttribute` of an unchanged value as a mutation; the pointer stamp and the table fit pass write only changed values. IsoNim's attribute/text effects still rewrite unchanged values on every row reuse.
