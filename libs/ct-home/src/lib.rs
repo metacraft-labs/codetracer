@@ -135,11 +135,17 @@ pub fn config_dir() -> Option<PathBuf> {
 /// idempotent and cheap. Not for production code: it writes the process
 /// environment, which is only sound while no other thread reads it.
 ///
-/// A directory it CREATES is removed when the process exits (an `atexit`
-/// handler, so it runs after the test harness's `main` returns or calls
-/// `std::process::exit`, whatever the tests' verdict), unless
-/// `CT_KEEP_SCRATCH_HOME=1` asks to keep it for debugging; it then says on
-/// stderr where it is. An inherited scratch home is the caller's and is never
+/// A directory it CREATES is removed when the process exits (a C `atexit`
+/// handler), unless `CT_KEEP_SCRATCH_HOME=1` asks to keep it for debugging;
+/// it then says on stderr where it is. The handler runs when the test
+/// harness's `main` returns, and on Linux and macOS also when it calls
+/// `std::process::exit` -- which libtest does when a test FAILED -- because
+/// there that is libc's `exit`. On Windows `std::process::exit` is
+/// `ExitProcess`, which runs no `atexit` handler, so a test binary that failed
+/// leaves its home behind (measured 2026-11-11, stable-x86_64-pc-windows-msvc
+/// 1.98.1); one that passed does not. A lane that exports a scratch
+/// `CODETRACER_HOME` first (`ci/lib/codetracer-home.sh`) is unaffected: its
+/// tests inherit that home, create none, and the lane removes it. An inherited scratch home is the caller's and is never
 /// removed. Until 2026-11-11 nothing removed it, so every test process left a
 /// `ct-test-home-<pid>-<ns>` in the temp directory for good -- one per test
 /// under nextest, which runs each test in a process of its own. Removal is
@@ -194,14 +200,18 @@ extern "C" fn remove_created_home() {
     let Some(dir) = CREATED_HOME.get() else {
         return;
     };
+    // Never panic here: unwinding out of an `extern "C"` exit handler aborts.
+    // So no `eprintln!`, which panics when stderr cannot be written (closed,
+    // or a broken pipe): a failed write is ignored instead.
     if env::var_os(KEEP_SCRATCH_HOME_ENV).is_some_and(|v| v == "1") {
-        eprintln!(
+        use std::io::Write as _;
+        let _ = writeln!(
+            std::io::stderr(),
             "ct-home: {KEEP_SCRATCH_HOME_ENV}=1: kept the scratch CODETRACER_HOME {}",
             dir.display()
         );
         return;
     }
-    // Never panic here: unwinding out of an `extern "C"` exit handler aborts.
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -325,6 +335,8 @@ mod tests {
     // temp directory: the child calls `isolate_for_tests`, checks the home
     // exists, prints it and exits; the parent looks after the child is gone.
     const PROBE_ENV: &str = "CT_HOME_ISOLATE_PROBE";
+    /// Makes the probe child's test FAIL after it printed its home.
+    const PROBE_FAIL_ENV: &str = "CT_HOME_ISOLATE_PROBE_FAIL";
 
     #[test]
     fn isolate_probe_child() {
@@ -342,6 +354,9 @@ mod tests {
         );
         std::fs::write(dir.join("written-by-the-test"), b"x").unwrap();
         println!("CT-HOME-PROBE {}", dir.display());
+        if env::var_os(PROBE_FAIL_ENV).is_some() {
+            panic!("the probe child fails on request, so libtest exits through std::process::exit");
+        }
     }
 
     /// Run the probe child; returns (home it printed, its stderr, exit ok).
@@ -359,6 +374,7 @@ mod tests {
         .env(PROBE_ENV, "1")
         .env_remove(CODETRACER_HOME_ENV)
         .env_remove(KEEP_SCRATCH_HOME_ENV)
+        .env_remove(PROBE_FAIL_ENV)
         .env("TMPDIR", tmp)
         .env("TMP", tmp)
         .env("TEMP", tmp);
@@ -419,6 +435,23 @@ mod tests {
             .map(|e| e.file_name())
             .collect();
         assert!(left.is_empty(), "left in the temp directory: {left:?}");
+    }
+
+    /// A test binary whose test FAILED exits through `std::process::exit`,
+    /// which is libc's `exit` here and runs the handler. Not on Windows, where
+    /// it is `ExitProcess` and the home stays (see `isolate_for_tests`).
+    #[cfg(not(windows))]
+    #[test]
+    fn a_failing_process_removes_its_scratch_home_too() {
+        let tmp_guard = probe_tmp("failing");
+        let tmp: &PathBuf = &tmp_guard;
+        let (home, err, ok) = run_probe(tmp, &[(PROBE_FAIL_ENV, "1".as_ref())]);
+        assert!(!ok, "the probe child was asked to fail and did not: {err}");
+        assert!(
+            home.starts_with(tmp),
+            "the child made no home under {tmp:?}: {home:?}"
+        );
+        assert!(!home.exists(), "{home:?} outlived its failing process");
     }
 
     #[test]
