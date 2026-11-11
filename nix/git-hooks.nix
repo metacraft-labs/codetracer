@@ -143,8 +143,13 @@ in
       if [ "$ct_hooks_dir" = "$ct_common_dir/hooks" ]; then
         ROOT_PATH="$ROOT_PATH" bash ${installationScript} --config-only || ct_hooks_status=$?
       else
-        echo "ERROR: refusing to migrate native hooks outside the common hooks directory: $ct_hooks_dir" >&2
-        ct_hooks_status=1
+        # The hooks directory is not at $ct_common_dir/hooks — this happens
+        # with the `repo` tool, which puts hooks under project-objects/ while
+        # --git-common-dir points to projects/. The old .pre-commit-config.yaml
+        # symlink still resolves correctly, so this is cosmetic, not a
+        # correctness issue. Warn but do not fail the build.
+        echo "WARNING: cannot migrate native hooks to absolute config path outside the common hooks directory: $ct_hooks_dir" >&2
+        echo "  (hooks continue to work via the .pre-commit-config.yaml symlink)" >&2
       fi
     fi
     unset ct_hooks_dir ct_common_dir ct_upgrade_config ct_hook_type ct_suffix ct_slot

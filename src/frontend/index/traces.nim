@@ -454,6 +454,19 @@ proc sourceFoldersFromTracePaths*(trace: Trace): Future[seq[cstring]] {.async.} 
     var sourceFolders: seq[cstring] = trace.sourceFolders
     if sourceFolders.len == 0:
       sourceFolders = fallbackLiveSourceFolders(trace)
+    # When all recorded source folders are subdirectories of the workdir,
+    # use the workdir as the single root so that project-level files
+    # (Nargo.toml, Cargo.toml, …) appear in the Files pane and the
+    # edit-mode toolbar can derive the project kind from them (EMT-A28).
+    if not trace.workdir.isNil and trace.workdir.len > 0 and pathExists(trace.workdir):
+      let workdir = $trace.workdir
+      var allUnderWorkdir = sourceFolders.len > 0
+      for f in sourceFolders:
+        if not ($f).startsWith(workdir):
+          allUnderWorkdir = false
+          break
+      if allUnderWorkdir:
+        return @[trace.workdir]
     return sourceFolders
 
   var input = ImportedTraceTreeInputs(
