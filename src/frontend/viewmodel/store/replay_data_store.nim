@@ -356,6 +356,12 @@ type
   ReplayDataStore* = ref object of ViewModel
     ## Central reactive store.  Created via `createReplayDataStore`.
     storeId*: int  ## Unique identity for diagnostics — assigned in createReplayDataStore.
+    breakpointRequests*: Table[string, int]
+      ## Per file, how many `setBreakpoints` requests have been sent
+      ## (`sdk/breakpoints.requestBreakpoints`). An answer is applied only
+      ## while its request is still the file's latest: answers can arrive
+      ## after a newer request was held, and an older answer applied then
+      ## would replace the newer set with the one it superseded.
     session*: Signal[SessionState]
     debugger*: Signal[DebuggerState]
     stop*: Signal[StopLocation]

@@ -17,7 +17,7 @@
 ## A DISABLED breakpoint is not sent — the engine holds only the armed ones —
 ## and stays a row of the point list until it is deleted (PLAT-50).
 
-import std/[json, options]
+import std/[json, options, tables]
 from std/os import extractFilename
 
 import isonim/core/signals
@@ -188,10 +188,19 @@ proc requestBreakpoints*(store: ReplayDataStore; path: string;
   if store.isNil:
     if not onDone.isNil: onDone(false)
     return
+  ##
+  ## ONLY THE LATEST REQUEST'S ANSWER IS APPLIED. Two changes in quick
+  ## succession — delete a line's breakpoint, then anchor a new one there —
+  ## send two requests, and the first one's answer (an empty set) can arrive
+  ## after the second set is held. Applied then, it deleted the breakpoint
+  ## just placed, and the second answer was the only thing that could bring
+  ## it back.
   store.applyVerifiedBreakpoints(path, plan, resolution = "requested")
   if store.backend.isNil:
     if not onDone.isNil: onDone(false)
     return
+  let generation = store.breakpointRequests.getOrDefault(path) + 1
+  store.breakpointRequests[path] = generation
   let theStore = store
   let thePath = path
   let thePlan = plan
@@ -199,7 +208,7 @@ proc requestBreakpoints*(store: ReplayDataStore; path: string;
     store.backend.send("setBreakpoints", setBreakpointsArgs(path, plan)),
     proc(response: JsonNode) =
       let ok = responseSucceeded(response)
-      if ok:
+      if ok and theStore.breakpointRequests.getOrDefault(thePath) == generation:
         theStore.applyVerifiedBreakpoints(thePath,
           answeredBreakpoints(thePlan, responseBody(response)))
       if not onDone.isNil: onDone(ok),

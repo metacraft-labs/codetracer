@@ -5753,7 +5753,15 @@ proc thunkM5AddColumnBreakpoint(path: cstring, line, column: int,
   ## ``data.services.debugger.addColumnBreakpoint.call(svc, path, line,
   ## column, "i > 100")``.  Empty/missing condition preserves the M1
   ## unconditional behaviour.
-  data.services.debugger.addColumnBreakpoint(path, line, column, condition)
+  ##
+  ## "Missing" has to be handled here: a JS caller that passes three
+  ## arguments leaves ``condition`` ``undefined`` — Nim's default value
+  ## applies only to Nim callers — and converting ``undefined`` to a Nim
+  ## string throws in ``cstrToNimstr``.
+  let cond =
+    if cast[JsObject](condition).isUndefined or condition.isNil: cstring""
+    else: condition
+  data.services.debugger.addColumnBreakpoint(path, line, column, cond)
 
 proc thunkM5AddColumnTracepoint(path: cstring, line, column: int,
                                 logMessage: cstring) =
@@ -5789,16 +5797,26 @@ proc thunkM5InstallSourceViewForTest(
   data.services.debugger.installSourceViewForTest(
     recordedPath, formattedViewPath, sourcemapV3Json)
 
-proc thunkM5DapSendCtRequest(kindOrdinal: int, rawValue: JsObject) =
+proc thunkM5DapSendCtRequest(kindName: cstring, rawValue: JsObject) =
   ## The M3 GUI spec drives a plain DAP ``next`` via
-  ## ``data.dapApi.sendCtRequest(DapNext, {threadId: 1})`` — the same
+  ## ``data.dapApi.sendCtRequest("DapNext", {threadId: 1})`` — the same
   ## pipeline ``DebuggerService.step`` uses for the F10 keybind path.
   ## Without an exposed method dispatch the spec fails with
   ## "Neither dapApi.sendCtRequest nor services.debugger.stepForward
-  ## is reachable".  We re-route through the underlying Nim proc with
-  ## the ordinal coerced back to ``CtEventKind`` (the wire enum is a
-  ## plain ordinal in JS).
-  data.dapApi.sendCtRequest(cast[CtEventKind](kindOrdinal), rawValue)
+  ## is reachable".  We re-route through the underlying Nim proc.
+  ##
+  ## The kind is taken BY NAME. It used to be the ``CtEventKind`` ordinal,
+  ## which the spec hard-coded: when a member was added before ``DapNext``
+  ## the spec's 22 became ``DapNextResponse``, and the request it sent
+  ## failed with nothing naming the cause. A name that is not a
+  ## ``CtEventKind`` throws, naming it.
+  let kind =
+    try:
+      parseEnum[CtEventKind]($kindName)
+    except ValueError:
+      raise newException(ValueError,
+        "dapApi.sendCtRequest: no CtEventKind named '" & $kindName & "'")
+  data.dapApi.sendCtRequest(kind, rawValue)
 
 proc installM5ColumnAwareServiceMethods() =
   ## Attach the M1/M2/M3 service procs and the M3 DAP-pipeline

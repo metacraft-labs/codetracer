@@ -231,25 +231,12 @@ async function stepOver(editor: EditorPane): Promise<void> {
       // `DapNext` is the CtEventKind whose string mapping in
       // `dap.nim` is "next" — sending it dispatches the legacy
       // line-granularity step the M3 runner intercepts on active-view
-      // toggle.
-      //
-      // The ordinal value is derived from
-      // ``src/common/ct_event.nim``'s ``CtEventKind`` enum (declared
-      // in source-order, no explicit values, so ordinals follow
-      // declaration order starting at 0).  Counting through the
-      // enum: ``CtUpdateTable=0 ... DapStepIn=18, DapStepInResponse=19,
-      // DapStepOut=20, DapStepOutResponse=21, DapNext=22``.  Earlier
-      // revisions of this test hard-coded ``24``, which is actually
-      // ``DapContinue`` — that ran the trace to the end and (with the
-      // formatted-view active) projected the final minified step
-      // ``(2, 1)`` onto formatted line ``FmtLine2 + 3 = 6``, exactly
-      // the value the failing assertion reported.  The legacy-view
-      // sibling test ``minified_view_step_over_preserves_legacy_line_granularity``
-      // green-lit the same bug only because Continue happens to land
-      // on the last user-source line, which equals ``fixture.lineTwo``.
-      // Sending DapNext (22) drives the formatted-view runner the
-      // M3 contract pins this test on.
-      dapApi.sendCtRequest(/* DapNext */ 22, { threadId: 1 });
+      // toggle. The kind is passed by NAME (`thunkM5DapSendCtRequest` in
+      // `ui_js.nim` parses it). It used to be the enum ordinal, hard-coded
+      // here; a member added to `CtEventKind` turned 22 into
+      // `DapNextResponse`, and an earlier 24 was `DapContinue`, which ran
+      // the trace to its end while the assertions still read as a step.
+      dapApi.sendCtRequest("DapNext", { threadId: 1 });
       return;
     }
     // There used to be a `services.debugger.stepForward` fallback here.  It

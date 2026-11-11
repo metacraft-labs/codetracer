@@ -102,6 +102,25 @@ suite "the store's breakpoints, through the session backend":
     check bound.len == 1 and bound[0].line == 5
     check bound.len == 1 and bound[0].resolution == "verified"
 
+  test "an answer to a superseded request does not replace the newer set":
+    # Delete a line's breakpoint, then anchor a new one on it before the
+    # engine answers the delete: the delete's answer arrives first and must
+    # not remove the breakpoint held since.
+    let mock = newMockBackendService()
+    mock.deferResponses = true
+    let store = createReplayDataStore(mock.toBackendService())
+    store.applyVerifiedBreakpoints("/src/g.nim", @[2])
+    check store.deleteBreakpoint("/src/g.nim", 2)
+    store.setAnchoredBreakpoint("/src/g.nim", 2, 3, condition = "i > 1")
+    check mock.pendingDeferredCount == 2
+    mock.settleDeferred(answer([]))          # the delete's answer
+    var rows = store.rowsOf("/src/g.nim")
+    check rows.len == 1 and rows[0].column == 3 and rows[0].condition == "i > 1"
+    mock.settleDeferred(answer([2]))         # the anchored one's answer
+    rows = store.rowsOf("/src/g.nim")
+    check rows.len == 1 and rows[0].column == 3 and
+      rows[0].condition == "i > 1" and rows[0].resolution == "verified"
+
   test "a refused request leaves the requested set standing":
     let mock = newMockBackendService()
     mock.expect("setBreakpoints", %*{"type": "response",
