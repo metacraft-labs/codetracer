@@ -134,6 +134,20 @@ pub fn config_dir() -> Option<PathBuf> {
 /// before anything resolves a path or spawns a CodeTracer binary. It is
 /// idempotent and cheap. Not for production code: it writes the process
 /// environment, which is only sound while no other thread reads it.
+///
+/// A directory it CREATES is removed when the process exits (an `atexit`
+/// handler, so it runs after the test harness's `main` returns or calls
+/// `std::process::exit`, whatever the tests' verdict), unless
+/// `CT_KEEP_SCRATCH_HOME=1` asks to keep it for debugging; it then says on
+/// stderr where it is. An inherited scratch home is the caller's and is never
+/// removed. Until 2026-11-11 nothing removed it, so every test process left a
+/// `ct-test-home-<pid>-<ns>` in the temp directory for good -- one per test
+/// under nextest, which runs each test in a process of its own. Removal is
+/// best effort: a child that outlived the process and still holds a file
+/// (Windows) leaves the directory behind, and the process's status stands.
+/// One directory per process, not one per test binary: nextest runs a
+/// binary's tests in concurrent processes, and a shared home would let them
+/// see each other's state.
 pub fn isolate_for_tests() -> PathBuf {
     use std::sync::OnceLock;
     static ISOLATED: OnceLock<PathBuf> = OnceLock::new();
@@ -153,12 +167,50 @@ pub fn isolate_for_tests() -> PathBuf {
                     .unwrap_or(0)
             ));
             std::fs::create_dir_all(&dir).expect("create a scratch CODETRACER_HOME");
+            remove_at_exit(dir.clone());
             // Edition 2021: `set_var` is safe to call; the race it can cause
             // with a concurrent reader is the caller's to avoid (see above).
             env::set_var(CODETRACER_HOME_ENV, &dir);
             dir
         })
         .clone()
+}
+
+/// `CT_KEEP_SCRATCH_HOME=1` keeps the scratch home `isolate_for_tests` made
+/// (the knob every CodeTracer test harness reads, `ci/lib/codetracer-home.sh`).
+pub const KEEP_SCRATCH_HOME_ENV: &str = "CT_KEEP_SCRATCH_HOME";
+
+/// The home `isolate_for_tests` created, for the exit handler. A static is
+/// never dropped, so it is still there when the handler runs.
+static CREATED_HOME: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+extern "C" {
+    // The C runtime's `atexit`, in every libc Rust links (glibc, musl,
+    // macOS's libSystem, the Windows UCRT): the crate stays dependency-free.
+    fn atexit(callback: extern "C" fn()) -> std::os::raw::c_int;
+}
+
+extern "C" fn remove_created_home() {
+    let Some(dir) = CREATED_HOME.get() else {
+        return;
+    };
+    if env::var_os(KEEP_SCRATCH_HOME_ENV).is_some_and(|v| v == "1") {
+        eprintln!(
+            "ct-home: {KEEP_SCRATCH_HOME_ENV}=1: kept the scratch CODETRACER_HOME {}",
+            dir.display()
+        );
+        return;
+    }
+    // Never panic here: unwinding out of an `extern "C"` exit handler aborts.
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+fn remove_at_exit(dir: PathBuf) {
+    if CREATED_HOME.set(dir).is_ok() {
+        // SAFETY: registers a plain function with no captured state; it only
+        // reads a static that is never dropped.
+        let _ = unsafe { atexit(remove_created_home) };
+    }
 }
 
 /// The marker file that makes a directory outside the temp dir acceptable as a
@@ -266,6 +318,141 @@ mod tests {
             assert!(nim.contains(&needle), "ct_home.nim lacks {needle}");
         }
         assert!(nim.contains(&format!("\"{CODETRACER_HOME_ENV}\"")));
+    }
+
+    // THE SCRATCH HOME IS REMOVED AT EXIT. Each case runs this test binary
+    // again, as a child that runs only `isolate_probe_child`, under a private
+    // temp directory: the child calls `isolate_for_tests`, checks the home
+    // exists, prints it and exits; the parent looks after the child is gone.
+    const PROBE_ENV: &str = "CT_HOME_ISOLATE_PROBE";
+
+    #[test]
+    fn isolate_probe_child() {
+        if env::var_os(PROBE_ENV).is_none() {
+            return; // only as the child of the cases below
+        }
+        let dir = isolate_for_tests();
+        assert!(
+            dir.is_dir(),
+            "the scratch home must exist while the process runs"
+        );
+        assert_eq!(
+            env::var_os(CODETRACER_HOME_ENV),
+            Some(dir.clone().into_os_string())
+        );
+        std::fs::write(dir.join("written-by-the-test"), b"x").unwrap();
+        println!("CT-HOME-PROBE {}", dir.display());
+    }
+
+    /// Run the probe child; returns (home it printed, its stderr, exit ok).
+    fn run_probe(
+        tmp: &std::path::Path,
+        extra: &[(&str, &std::ffi::OsStr)],
+    ) -> (PathBuf, String, bool) {
+        let mut cmd = std::process::Command::new(env::current_exe().unwrap());
+        cmd.args([
+            "--exact",
+            "tests::isolate_probe_child",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(PROBE_ENV, "1")
+        .env_remove(CODETRACER_HOME_ENV)
+        .env_remove(KEEP_SCRATCH_HOME_ENV)
+        .env("TMPDIR", tmp)
+        .env("TMP", tmp)
+        .env("TEMP", tmp);
+        for (k, v) in extra {
+            cmd.env(k, v);
+        }
+        let out = cmd.output().expect("run the probe child");
+        let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+        // libtest prints `test <name> ... ` before the test's own output, on
+        // the same line.
+        let home = stdout
+            .lines()
+            .find_map(|l| l.split_once("CT-HOME-PROBE ").map(|(_, p)| p.trim_end()))
+            .map(PathBuf::from)
+            .unwrap_or_default();
+        (
+            home,
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+            out.status.success(),
+        )
+    }
+
+    /// A private temp directory for one case, removed when the case ends,
+    /// passing or panicking.
+    struct ProbeTmp(PathBuf);
+    impl Drop for ProbeTmp {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    impl std::ops::Deref for ProbeTmp {
+        type Target = PathBuf;
+        fn deref(&self) -> &PathBuf {
+            &self.0
+        }
+    }
+    fn probe_tmp(name: &str) -> ProbeTmp {
+        let t = env::temp_dir().join(format!("ct-home-crate-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&t);
+        std::fs::create_dir_all(&t).unwrap();
+        ProbeTmp(t)
+    }
+
+    #[test]
+    fn a_created_scratch_home_is_removed_when_the_process_exits() {
+        let tmp_guard = probe_tmp("removed");
+        let tmp: &PathBuf = &tmp_guard;
+        let (home, err, ok) = run_probe(tmp, &[]);
+        assert!(ok, "probe child failed: {err}");
+        assert!(
+            home.starts_with(tmp),
+            "the child made no home under {tmp:?}: {home:?}"
+        );
+        assert!(!home.exists(), "{home:?} outlived its process");
+        let left: Vec<_> = std::fs::read_dir(tmp)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert!(left.is_empty(), "left in the temp directory: {left:?}");
+    }
+
+    #[test]
+    fn ct_keep_scratch_home_keeps_it_and_says_where() {
+        let tmp_guard = probe_tmp("kept");
+        let tmp: &PathBuf = &tmp_guard;
+        let (home, err, ok) = run_probe(tmp, &[(KEEP_SCRATCH_HOME_ENV, "1".as_ref())]);
+        assert!(ok, "probe child failed: {err}");
+        assert!(
+            home.join("written-by-the-test").is_file(),
+            "{home:?} was not kept"
+        );
+        assert!(
+            err.contains(&format!(
+                "kept the scratch CODETRACER_HOME {}",
+                home.display()
+            )),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn an_inherited_scratch_home_is_never_removed() {
+        let tmp_guard = probe_tmp("inherited");
+        let tmp: &PathBuf = &tmp_guard;
+        let inherited = tmp.join("lane-home");
+        std::fs::create_dir_all(&inherited).unwrap();
+        let (home, err, ok) = run_probe(tmp, &[(CODETRACER_HOME_ENV, inherited.as_os_str())]);
+        assert!(ok, "probe child failed: {err}");
+        assert_eq!(home, inherited);
+        assert!(
+            inherited.join("written-by-the-test").is_file(),
+            "the caller's home was removed"
+        );
     }
 
     #[test]
