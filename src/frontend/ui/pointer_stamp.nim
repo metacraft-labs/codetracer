@@ -357,7 +357,15 @@ proc hitTargetOf(el: JsEl): HitTarget =
                                  el.attr("data-disabled") == cstring"true")
 
 proc stamp(el: JsEl) =
-  el.setAttr("data-pointer", cstring(pointerShapeOf(el.hitTargetOf).cssName))
+  ## Writes only a CHANGED shape. Every `class` write re-stamps its element
+  ## (the observer below), and a view's reactive effects rewrite a row's
+  ## classes on every stop whether or not they changed; an unconditional
+  ## `setAttribute` then made a DOM mutation per element per repaint that
+  ## changed nothing — a third of the State pane's mutations on a
+  ## close-and-reopen (`state_pane_no_render_storm.spec.ts`).
+  let shape = cstring(pointerShapeOf(el.hitTargetOf).cssName)
+  if el.attr("data-pointer") != shape:
+    el.setAttr("data-pointer", shape)
 
 proc stampTree(root: JsEl) =
   if not root.isElement or not root.closest(SkippedSubtree).isNil:

@@ -55,7 +55,9 @@ when defined(js):
   proc attr(el: JsObject; name: cstring): cstring
     {.importjs: "(#.getAttribute(#) || '')".}
   proc setAttr(el: JsObject; name, value: cstring)
-    {.importjs: "#.setAttribute(#, #)".}
+    {.importjs: "(function(e,n,v){if(e.getAttribute(n)!==v)e.setAttribute(n,v);})(#,#,#)".}
+    ## Writes only a CHANGED mode: the pass runs on every repaint, and an
+    ## unchanged mode written again is a DOM mutation that changes nothing.
   proc setStyle(el: JsObject; key, value: cstring)
     {.importjs: "#.style.setProperty(#, #)".}
   proc removeStyle(el: JsObject; key: cstring)

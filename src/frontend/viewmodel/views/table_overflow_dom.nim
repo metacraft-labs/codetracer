@@ -102,7 +102,11 @@ when defined(js):
     ## Whether the attribute is present at all: `attr` answers "" both for a
     ## missing attribute and for one set to "".
   proc setAttr(el: JsObject; name, value: cstring)
-    {.importjs: "#.setAttribute(#, #)".}
+    {.importjs: "(function(e,n,v){if(e.getAttribute(n)!==v)e.setAttribute(n,v);})(#,#,#)".}
+    ## Writes only a CHANGED value. The fit pass runs on every repaint of a
+    ## table, and nearly every cell's verdict is the one it already carries;
+    ## an unconditional `setAttribute` made a DOM mutation of each, which a
+    ## `MutationObserver` (the pointer stamp's, a test's) has to process.
   proc removeAttr(el: JsObject; name: cstring)
     {.importjs: "#.removeAttribute(#)".}
   proc queryAll(el: JsObject; sel: cstring): seq[JsObject]
