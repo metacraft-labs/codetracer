@@ -294,6 +294,14 @@ when defined(js):
   # values.
   # ---------------------------------------------------------------------
 
+  proc breadcrumbEntryHandler(vm: OriginChainVM; index: int): proc(ev: Event) =
+    ## A press on a query breadcrumb goes back to it (§3.3,
+    ## `OriginChainVM.onSelectBreadcrumb`). A factory, so each entry's
+    ## closure holds its own index (Nim closures in a loop share the loop's
+    ## variables).
+    result = proc(_: Event) =
+      vm.onSelectBreadcrumb(index)
+
   proc breadcrumbChipHandler(vm: OriginChainVM;
                              chip: BreadcrumbChip): proc(ev: Event) =
     let recordingId = chip.recordingId
@@ -389,11 +397,17 @@ when defined(js):
                                breadcrumbChipHandler(vm, chipCopy))
         nav.appendChild(crumb)
     else:
-      for entry in vm.breadcrumbStack.val:
+      let entries = vm.breadcrumbStack.val
+      for index, entry in entries:
         let crumb = document.createElement(cstring"button")
         crumb.setAttribute(cstring"class",
                            cstring"breadcrumb-chip ct-origin-breadcrumb-entry")
         crumb.innerText = cstring(entry.variableName & "@" & $entry.stepId)
+        if index == entries.len - 1:
+          # The query the panel shows: announced as the current step.
+          crumb.setAttribute(cstring"aria-current", cstring"step")
+        crumb.addEventListener(cstring"click",
+                               breadcrumbEntryHandler(vm, index))
         nav.appendChild(crumb)
     section.appendChild(nav)
 

@@ -47,43 +47,43 @@ test("e2e_origin_python_breadcrumb_navigation", async ({ ctPage }) => {
     await ctPage.waitForTimeout(500);
   }
 
-  // Open the origin chain for `local`.
-  await origin.rightClickRow("local");
-  await origin.clickShowValueOriginMenuItem();
-  await expect(origin.sidePanel()).toBeVisible({ timeout: 15_000 });
+  // Open the origin chain for `local`: right-click → "Show value origin"
+  // expands it under the row (Value-Origin-Tracking.md §3.1, §3.2.1). The
+  // chain crosses the call: `local = p`, the parameter bind, `value = 7`.
+  await origin.showValueOriginInPlace("local");
+  await expect(origin.expandedChainHops("local").first()).toHaveText("local = p", { timeout: 15_000 });
+  await expect(origin.inlineChainTerminator("local")).toHaveText("7");
 
-  // One breadcrumb after the initial query.
+  // The breadcrumbs live in the side panel: "Show in side panel" (§3.2.2).
+  await origin.openInSidePanel("local");
+  await expect(origin.breadcrumbChips()).toHaveCount(1, { timeout: 15_000 });
   const initialCrumbs = await origin.breadcrumbChips().count();
-  expect(initialCrumbs, "initial query pushes one breadcrumb").toBeGreaterThanOrEqual(1);
 
-  // ---- Drill into an operand to push another breadcrumb -----------------
-  // The Computational terminator's operand rows are clickable and emit a
-  // recursive ct/originChain via OriginChainVM.onShowOrigin (spec §3.3).
-  // For the parameter_pass chain the terminator is Literal so we instead
-  // use the side panel's first hop button (clicking it routes through
-  // OriginChainVM.onSeekToHop but also re-issues onShowOrigin on the
-  // resolved target — both pin a breadcrumb).
+  // ---- A second query pushes another breadcrumb --------------------------
+  // Seek to the chain's first hop (`local = p`) from the side panel, then
+  // ask for the origin of the parameter `p` there, through its row's
+  // in-place chain and "Show in side panel": every side-panel query pushes
+  // one breadcrumb (§3.3).
   await origin.clickSidePanelHop(0);
-  await ctPage.waitForTimeout(750);
-  await origin.rightClickRow("local");
-  await origin.clickShowValueOriginMenuItem();
-  await ctPage.waitForTimeout(500);
-
-  const deeperCrumbs = await origin.breadcrumbChips().count();
-  expect(deeperCrumbs, "navigating into another origin pushes a breadcrumb")
-    .toBeGreaterThan(initialCrumbs);
+  await expect.poll(() => statePane.variableValue("p"), {
+    message: "the hop's step is inside `receive`, where `p` is 7",
+    timeout: 15_000,
+  }).toBe("7");
+  await origin.showValueOriginInPlace("p");
+  await origin.openInSidePanel("p");
+  await expect.poll(() => origin.breadcrumbChips().count(), {
+    message: "navigating into another origin pushes a breadcrumb",
+    timeout: 15_000,
+  }).toBe(initialCrumbs + 1);
+  const deeperCrumbs = initialCrumbs + 1;
 
   // ---- Press Back (Esc + re-open via the previous breadcrumb chip) -----
   // The breadcrumb chips are <button> elements per
   // `ui/isonim_origin_chain.nim::renderPanelDom`; clicking the second-to-
   // last chip pops the LIFO stack via OriginChainVM.onPopBreadcrumb.
-  const breadcrumbCount = await origin.breadcrumbChips().count();
-  await origin.breadcrumbChips().nth(breadcrumbCount - 2).click();
-  await ctPage.waitForTimeout(500);
-
-  const finalCrumbs = await origin.breadcrumbChips().count();
-  expect(
-    finalCrumbs,
-    "clicking a previous breadcrumb chip pops the LIFO stack down to that depth",
-  ).toBeLessThan(deeperCrumbs);
+  await origin.breadcrumbChips().nth(deeperCrumbs - 2).click();
+  await expect.poll(() => origin.breadcrumbChips().count(), {
+    message: "clicking a previous breadcrumb chip pops the LIFO stack down to that depth",
+    timeout: 15_000,
+  }).toBe(deeperCrumbs - 1);
 });

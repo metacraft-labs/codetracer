@@ -1387,6 +1387,40 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
       check w.origin.breadcrumbStack.val.len == 0
       dispose()
 
+  test "the expanded chain's \"Show in side panel\" opens the side panel on the row's chain":
+    # §3.2.2: the affordance at the bottom of the expanded chain is the side
+    # panel's door from the State pane. It is hidden until the row holds a
+    # chain, and a press opens the panel with that variable's chain and one
+    # breadcrumb, through the production bridge.
+    createRoot proc(dispose: proc()) =
+      let w = makeWiredOrigin()
+      w.showEagerRow("c")
+      w.mock.expect("ct/originChain", twoHopChainPayload("c"))
+      let panel = renderStatePanel[MockRenderer, MockNode](MockRenderer(), w.state)
+      let row = findRowNamed(panel, "c")
+      check row != nil
+      let open = findByClass(row, "ct-origin-show-in-side-panel")
+      check open != nil
+      check open != nil and open.styles.getOrDefault("display", "") == "none"
+      findBadgeForRow(panel, "c").fireEvent("click")
+      drain()
+      check open != nil and open.styles.getOrDefault("display", "") == "inline-block"
+      check not w.origin.sidePanelOpen.val
+
+      w.mock.clearReceivedCommands()
+      w.mock.expect("ct/originChain", twoHopChainPayload("c"))
+      open.fireEvent("click")
+      drain()
+      let sent = originChainRequests(w.mock)
+      check sent.len == 1 and sent[0]["variableName"].getStr == "c"
+      check w.origin.sidePanelOpen.val
+      check w.origin.activeChain.val.isSome and
+        w.origin.activeChain.val.get.queryVariable == "c" and
+        w.origin.activeChain.val.get.hops.len == 2
+      check w.origin.breadcrumbStack.val.len == 1 and
+        w.origin.breadcrumbStack.val[0].variableName == "c"
+      dispose()
+
   test "collapsing, and re-expanding a row whose chain is held, send nothing":
     createRoot proc(dispose: proc()) =
       let w = makeWiredOrigin()
@@ -1578,6 +1612,55 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
       check w.origin.breadcrumbStack.val.len == 1 and
         w.origin.breadcrumbStack.val[0].variableName == "c"
       check not w.origin.loading.val
+      dispose()
+
+  test "a breadcrumb goes back to the chain its query was answered with":
+    # §3.3: the breadcrumbs list the queries the user navigated through,
+    # "allowing easy back-up". Going back pops the later queries and shows
+    # the earlier chain again WITHOUT asking: asked again after a move, a
+    # current-stop query would answer about a different moment.
+    createRoot proc(dispose: proc()) =
+      let w = makeWiredOrigin()
+      w.mock.expect("ct/originChain", twoHopChainPayload("c"))
+      w.state.onShowOrigin("c", Location(file: "fixture.py", line: 3))
+      drain()
+      w.mock.expect("ct/originChain", twoHopChainPayload("d"))
+      w.state.onShowOrigin("d", Location(file: "fixture.py", line: 3))
+      drain()
+      check w.origin.breadcrumbStack.val.len == 2
+      check w.origin.activeChain.val.get.queryVariable == "d"
+
+      w.mock.clearReceivedCommands()
+      w.origin.onSelectBreadcrumb(0)
+      drain()
+      check originChainRequests(w.mock).len == 0
+      check w.origin.breadcrumbStack.val.len == 1 and
+        w.origin.breadcrumbStack.val[0].variableName == "c"
+      check w.origin.activeChain.val.isSome and
+        w.origin.activeChain.val.get.queryVariable == "c"
+      check w.origin.sidePanelOpen.val
+      check not w.origin.loading.val
+      # The breadcrumb shown, or one out of range, changes nothing.
+      w.origin.onSelectBreadcrumb(0)
+      w.origin.onSelectBreadcrumb(5)
+      drain()
+      check w.origin.breadcrumbStack.val.len == 1
+      check originChainRequests(w.mock).len == 0
+      dispose()
+
+  test "a breadcrumb whose answer never arrived is asked again":
+    createRoot proc(dispose: proc()) =
+      let w = makeWiredOrigin()
+      w.origin.onPushBreadcrumb(BreadcrumbEntry(variableName: "c", stepId: 7))
+      w.origin.onPushBreadcrumb(BreadcrumbEntry(variableName: "d", stepId: -1))
+      w.mock.expect("ct/originChain", twoHopChainPayload("c"))
+      w.origin.onSelectBreadcrumb(0)
+      drain()
+      let sent = originChainRequests(w.mock)
+      check sent.len == 1 and sent[0]["variableName"].getStr == "c"
+      check w.origin.breadcrumbStack.val.len == 1
+      check w.origin.activeChain.val.isSome and
+        w.origin.activeChain.val.get.queryVariable == "c"
       dispose()
 
   test "Pin to scratchpad, through the production bridge, reaches ScratchpadVM.chainEntries":

@@ -46,12 +46,14 @@ test("e2e_origin_python_computational_expand_operands", async ({ ctPage }) => {
     await ctPage.waitForTimeout(500);
   }
 
-  // ---- Show origin via the right-click menu -----------------------------
-  await origin.rightClickRow("result");
-  await origin.clickShowValueOriginMenuItem();
-  await expect(origin.sidePanel()).toBeVisible({ timeout: 15_000 });
+  // ---- Show origin via the right-click menu: the chain under the row ----
+  await origin.showValueOriginInPlace("result");
+  // Single Computational hop + its terminator per ANSWERS.md.
+  await expect(origin.expandedChainHops("result")).toHaveText(["result = a + b"], { timeout: 15_000 });
+  await expect(origin.inlineChainTerminator("result")).toHaveText("a + b");
 
-  // Single hop + terminator per ANSWERS.md.
+  // ---- Operands live in the side panel: "Show in side panel" -----------
+  await origin.openInSidePanel("result");
   await expect(origin.sidePanelHops()).toHaveCount(1, { timeout: 15_000 });
 
   // ---- Expand operands on the Computational hop -------------------------
@@ -80,9 +82,10 @@ test("e2e_origin_python_pin_to_scratchpad", async ({ ctPage }) => {
     await ctPage.waitForTimeout(500);
   }
 
-  await origin.rightClickRow("result");
-  await origin.clickShowValueOriginMenuItem();
-  await expect(origin.sidePanel()).toBeVisible({ timeout: 15_000 });
+  await origin.showValueOriginInPlace("result");
+  await expect(origin.expandedChainHops("result")).toHaveText(["result = a + b"], { timeout: 15_000 });
+  await origin.openInSidePanel("result");
+  await expect(origin.sidePanelHops()).toHaveCount(1, { timeout: 15_000 });
 
   await origin.pinChain();
 
@@ -94,7 +97,14 @@ test("e2e_origin_python_pin_to_scratchpad", async ({ ctPage }) => {
   // (`isonim_scratchpad_view.ScratchpadChainRowClass`). This selector read
   // `.scratchpad-chain-entry`, a class nothing renders, so the case could not
   // have passed once it ran.
-  const scratchpadChain = ctPage.locator(".scratchpad-chain-view");
+  //
+  // The card is drawn in the Scratchpad pane, which is a background tab of
+  // the default layout: bring it forward before asking for visibility.
+  const scratchpad = (await layout.scratchpadTabs(true))[0];
+  expect(scratchpad, "the layout has a Scratchpad pane").toBeDefined();
+  await scratchpad.clickTab();
+  const scratchpadChain = scratchpad.root.locator(".scratchpad-chain-view");
   await expect(scratchpadChain.first()).toBeVisible({ timeout: 15_000 });
   await expect(scratchpadChain).toHaveCount(1);
+  await expect(scratchpadChain.first(), "the pinned card is `result`'s chain").toContainText("result");
 });

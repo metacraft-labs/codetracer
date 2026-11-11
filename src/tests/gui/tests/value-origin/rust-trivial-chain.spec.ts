@@ -25,6 +25,10 @@ import {
 
 const fixtureSource = originFixturePath("rust", "simple_trivial_chain");
 
+/** ANSWERS.md, as the in-row chain draws it: `lhs = rhs` per hop, newest
+ *  first; the terminator is the literal. */
+const EXPECTED_HOPS = ["c = b", "b = a", "a = 10"];
+
 test.use({ sourcePath: fixtureSource, launchMode: "trace" });
 test.setTimeout(240_000);
 
@@ -43,25 +47,24 @@ test("e2e_origin_rust_in_codetracer_gui", async ({ ctPage }) => {
   await ctPage.waitForTimeout(750);
   const statePane = (await layout.programStateTabs(true))[0];
   expect(statePane, "State Pane must be present").toBeDefined();
-  let cVisible = (await statePane.variableValueText("c")) !== "";
+  // Until `c` holds its value, not merely until it is listed: a local can be
+  // listed before its assignment runs (uninitialised in Rust), and its
+  // origin there is not the chain.
+  let cVisible = (await statePane.variableValue("c")) === "10";
   for (let i = 0; i < 20 && !cVisible; i++) {
     await layout.nextButton().click();
     await ctPage.waitForTimeout(500);
-    cVisible = (await statePane.variableValueText("c")) !== "";
+    cVisible = (await statePane.variableValue("c")) === "10";
   }
   expect(cVisible, "stepping to the println! line must surface local `c`").toBe(true);
 
-  // Right-click `c` → "Show value origin"
-  await origin.rightClickRow("c");
-  await origin.clickShowValueOriginMenuItem();
-
-  // The side panel mounts on the document body when the M11 algorithm
-  // returns its chain.
-  await expect(origin.sidePanel()).toBeVisible({ timeout: 30_000 });
+  // Right-click `c` → "Show value origin": the chain expands under the row
+  // (Value-Origin-Tracking.md §3.1, §3.2.1) once the M11 algorithm answers.
+  await origin.showValueOriginInPlace("c");
 
   // ANSWERS.md asserts three TrivialCopy hops + Literal(10) terminator
   // for `c -> b -> a -> 10`.
-  await expect(origin.sidePanelHops()).toHaveCount(3, { timeout: 30_000 });
-  await expect(origin.sidePanelTerminator()).toBeVisible();
-  await expect(origin.sidePanelTerminator()).toContainText("10");
+  await expect(origin.expandedChainHops("c")).toHaveText(EXPECTED_HOPS, { timeout: 30_000 });
+  await expect(origin.inlineChainTerminator("c")).toBeVisible();
+  await expect(origin.inlineChainTerminator("c")).toHaveText("10");
 });

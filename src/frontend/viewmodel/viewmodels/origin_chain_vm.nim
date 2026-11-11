@@ -83,6 +83,12 @@ type
       ## Per-session navigation history. Each `onShowOrigin` push adds
       ## an entry; the side-panel renders them as clickable
       ## breadcrumbs (spec §3.3).
+    breadcrumbChains: seq[Option[OriginChain]]
+      ## The chain each breadcrumb's query was answered with, by position in
+      ## `breadcrumbStack`, so going back to a breadcrumb shows what the user
+      ## saw there (`onSelectBreadcrumb`). An entry is `none` until its answer
+      ## arrives; a stack set from elsewhere (a collab mirror) has no chains,
+      ## and its breadcrumbs are asked again instead.
     preferences*: Signal[OriginPreferences]
       ## User-mutable badge / chain preferences (spec §3.7).
     placeholderFillQueue*: Signal[seq[string]]
@@ -337,6 +343,14 @@ proc rejectChainAnswer*(vm: OriginChainVM; transportId: string): bool =
   vm.onCancelLoad()
   true
 
+proc rememberBreadcrumbChain(vm: OriginChainVM; chain: OriginChain) =
+  ## The side panel's chain just arrived: it answers the latest breadcrumb.
+  let depth = vm.breadcrumbStack.val.len
+  if depth == 0:
+    return
+  vm.breadcrumbChains.setLen(depth)
+  vm.breadcrumbChains[depth - 1] = some(chain)
+
 proc applyChainAnswer*(vm: OriginChainVM; chain: OriginChain;
                        transportId: string): bool =
   ## Apply a chain that arrived on the transport, named by the request it
@@ -352,6 +366,7 @@ proc applyChainAnswer*(vm: OriginChainVM; chain: OriginChain;
   vm.activeChain.val = some(chain)
   vm.loading.val = false
   vm.latestTransportRequest = ""
+  vm.rememberBreadcrumbChain(chain)
   true
 
 proc applyChainResponse*(vm: OriginChainVM; chain: OriginChain;
@@ -364,6 +379,7 @@ proc applyChainResponse*(vm: OriginChainVM; chain: OriginChain;
     return
   vm.activeChain.val = some(chain)
   vm.loading.val = false
+  vm.rememberBreadcrumbChain(chain)
 
 proc onCancelLoad*(vm: OriginChainVM) =
   ## Drop the spinner flag and bump the request counter so any future
@@ -455,11 +471,40 @@ proc onPopBreadcrumb*(vm: OriginChainVM): Option[BreadcrumbEntry] =
   let last = stack[^1]
   stack.setLen(stack.len - 1)
   vm.breadcrumbStack.val = stack
+  if vm.breadcrumbChains.len > stack.len:
+    vm.breadcrumbChains.setLen(stack.len)
   some(last)
 
 proc onClearBreadcrumbs*(vm: OriginChainVM) =
   ## Clear the entire breadcrumb stack (called on session switch).
   vm.breadcrumbStack.val = @[]
+  vm.breadcrumbChains.setLen(0)
+
+proc onSelectBreadcrumb*(vm: OriginChainVM; index: int) =
+  ## A press on the breadcrumb at `index` (spec §3.3: the breadcrumbs list
+  ## the queries "the user navigated through, allowing easy back-up"): the
+  ## queries after it are popped, and the side panel shows its chain again.
+  ##
+  ## The chain shown is the one that breadcrumb was answered with, not a new
+  ## query: a breadcrumb asked at the current stop (`stepId` -1) asked again
+  ## after a move would answer about a different moment. A breadcrumb whose
+  ## answer never arrived is asked again. Any request still in flight is
+  ## cancelled, so its late answer cannot replace the chain gone back to.
+  let stack = vm.breadcrumbStack.val
+  if index < 0 or index >= stack.len:
+    return
+  var kept = stack
+  kept.setLen(index + 1)
+  vm.breadcrumbStack.val = kept
+  if vm.breadcrumbChains.len > index + 1:
+    vm.breadcrumbChains.setLen(index + 1)
+  vm.onCancelLoad()
+  vm.sidePanelOpen.val = true
+  if index < vm.breadcrumbChains.len and vm.breadcrumbChains[index].isSome:
+    vm.activeChain.val = vm.breadcrumbChains[index]
+  else:
+    vm.sendChainQuery(stack[index].variableName, stack[index].stepId,
+                      forSidePanel = true)
 
 proc toggleExpanded*(vm: OriginChainVM; row: VariableId) =
   ## Toggle the inline expansion state for `row`. The State Pane

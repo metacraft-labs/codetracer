@@ -21,7 +21,14 @@ import {
 
 const fixtureSource = originFixturePath("c", "cross_thread_copy");
 
-test.use({ sourcePath: fixtureSource, launchMode: "trace" });
+// Recorded with rr, as the skip gate above it assumes (`cRrSpecSkipReason`
+// checks the rr toolchain): the cross-thread hop is the M11 rr algorithm's
+// (it switches the replay to the writing thread). The default backend is
+// MCR, and MCR cannot replay this program yet: `ct-mcr debugserver` refuses
+// a recording of more than one thread ("a multi-threaded recording needs
+// multi-threaded emulator replay (XMR-B1) first"), so no stop was ever
+// reported and the entry readiness wait timed out.
+test.use({ sourcePath: fixtureSource, launchMode: "trace", recordBackend: "rr" });
 test.setTimeout(240_000);
 
 test.beforeAll(() => {
@@ -34,32 +41,42 @@ test("e2e_origin_c_cross_thread_copy_in_codetracer_gui", async ({ ctPage }) => {
   const layout = new LayoutPage(ctPage);
   const origin = new OriginChainPanePageObject(ctPage);
 
-  // Step to the printf line.
+  // Step to the printf line: until `local` holds the 99 the writer thread
+  // stored (listed is not enough — it is listed, as 0, before the load).
   await layout.runToEntryButton().click();
   await ctPage.waitForTimeout(750);
   const statePane = (await layout.programStateTabs(true))[0];
   expect(statePane, "State Pane must be present").toBeDefined();
-  let localVisible = (await statePane.variableValueText("local")) !== "";
-  for (let i = 0; i < 30 && !localVisible; i++) {
+  let localLoaded = (await statePane.variableValue("local")) === "99";
+  for (let i = 0; i < 30 && !localLoaded; i++) {
     await layout.nextButton().click();
     await ctPage.waitForTimeout(500);
-    localVisible = (await statePane.variableValueText("local")) !== "";
+    localLoaded = (await statePane.variableValue("local")) === "99";
   }
-  expect(localVisible, "stepping must surface local `local`").toBe(true);
+  expect(localLoaded, "stepping must reach the load of `local` (99)").toBe(true);
 
-  // Right-click `local` → "Show value origin".
-  await origin.rightClickRow("local");
-  await origin.clickShowValueOriginMenuItem();
-  await expect(origin.sidePanel()).toBeVisible({ timeout: 30_000 });
+  // Right-click `local` → "Show value origin": the chain expands under the
+  // row (Value-Origin-Tracking.md §3.1, §3.2.1). The cross-thread hop
+  // carries its classification icon (§3.2.2), and the terminator is the
+  // writer's literal.
+  await origin.showValueOriginInPlace("local");
+  await expect(
+    origin.expandedChainHops("local").locator(".ct-origin-icon-cross-thread"),
+    "the chain has a cross-thread hop",
+  ).toHaveCount(1, { timeout: 30_000 });
+  await expect(origin.inlineChainTerminator("local")).toContainText("99");
 
-  // The cross-thread hop must be rendered with the icon. Locate it via
-  // the test-id the renderer exposes (the M2 chain renderer assigns
-  // `data-testid="origin-hop-cross-thread"` to CrossThreadCopy hops).
-  const crossThreadHop = origin.sidePanel().locator(
-    '[data-testid="origin-hop-cross-thread"], [data-origin-kind="CrossThreadCopy"]',
-  );
-  await expect(crossThreadHop.first()).toBeVisible({ timeout: 30_000 });
-
-  // Confidence badge "0.6" must be visible on the cross-thread hop.
-  await expect(crossThreadHop.first()).toContainText("0.6");
+  // In the side panel the hop says what it is in its accessible name
+  // (§13.0, `hopAriaLabel`), and shows its confidence (spec §6.3
+  // "Cross-thread guard": 0.6) as text, as §13.0 requires of a
+  // low-confidence hop. The side panel draws no confidence yet: that half
+  // stays red until it does (codetracer-pm issue
+  // `2026-11-12-desktop-origin-side-panel-shows-no-hop-confidence`). It used
+  // to look for `data-testid="origin-hop-cross-thread"`, which nothing
+  // renders.
+  await origin.openInSidePanel("local");
+  const crossThreadHop = origin.sidePanel()
+    .locator('section > ol > li.ct-origin-hop[aria-label*="cross-thread copy"]');
+  await expect(crossThreadHop).toHaveCount(1, { timeout: 30_000 });
+  await expect(crossThreadHop).toContainText("0.6");
 });

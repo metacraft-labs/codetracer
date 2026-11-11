@@ -118,6 +118,24 @@ export class VariableStatePane {
     return ((await row.textContent()) ?? "").trim();
   }
 
+  /**
+   * The text of the named row's VALUE cell (`span.value-expanded-text`),
+   * or "" when the row is absent. `variableValueText` returns the whole
+   * row's text (name, type, button labels), which is enough to tell
+   * whether a row is listed but not what it holds.
+   */
+  async variableValue(name: string, timeoutMs = 1_000): Promise<string> {
+    const row = this.variableRow(name);
+    try {
+      await row.waitFor({ state: "attached", timeout: timeoutMs });
+    } catch {
+      return "";
+    }
+    const cell = row.locator(".value-expanded-text").first();
+    if ((await cell.count()) === 0) return "";
+    return ((await cell.textContent()) ?? "").trim();
+  }
+
   async programStateVariables(forceReload = false): Promise<ValueComponentView[]> {
     if (forceReload || this.variables.length === 0) {
       const locators = await this.root.locator(".value-expanded").all();

@@ -536,6 +536,21 @@ proc chainForRow(vm: StateVM; item: VariableViewState): Option[OriginChain] =
     return none(OriginChain)
   vm.originChainLookup(item.name)
 
+proc showInSidePanelDisplay(vm: StateVM; item: VariableViewState): string =
+  if chainForRow(vm, item).isSome: "inline-block" else: "none"
+
+proc onShowInSidePanel(vm: StateVM; item: proc(): VariableViewState): proc() =
+  ## The expanded chain's "Show in side panel" (§3.2.2): the side panel's
+  ## query for the row's variable at the current stop, through the same
+  ## bridge the command palette and `origin(expr)` watches use
+  ## (`origin_chain_bridges`: `OriginChainVM.onShowOrigin` opens the panel,
+  ## pushes the breadcrumb and asks for the chain). Reads `item()` when
+  ## clicked, so a reused row opens the variable it shows.
+  result = proc() =
+    let row = item()
+    if not vm.onShowOriginProc.isNil and not vm.store.isNil:
+      vm.onShowOriginProc(row.name, vm.store.debugger.val.location)
+
 proc hopLineText(hop: OriginHop): string =
   ## Single-line preview the in-row block emits per hop — matches the
   ## semantics the side-panel renders for the same data shape.
@@ -741,8 +756,10 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
   ##             span.ct-origin-badge-icon
   ##             span.ct-origin-badge-text
   ##       div.ct-origin-inline-chain[display: block when expanded]  ← sibling of atom/compound-parent
-  ##         div.ct-origin-inline-chain-hop (one per hop) — text "lhs = rhs"
-  ##         div.ct-origin-inline-chain-terminator
+  ##         div.ct-origin-inline-chain-lines
+  ##           div.ct-origin-inline-chain-hop (one per hop) — text "lhs = rhs"
+  ##           div.ct-origin-inline-chain-terminator
+  ##         button.ct-origin-show-in-side-panel[display: once the chain is held]
   ##       div.ct-history-inline-container[display: block when expanded]  ← sibling of atom/compound-parent
   ##         div.ct-history-inline-row (one per history entry)
   ##           div.history-location : "{rrTicks}"
@@ -836,9 +853,18 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
       # layout out of line, matching the history container placement.
       # Populated after the ui() block via renderOriginChainLines (indexEach).
       tdiv(class = "ct-origin-inline-chain ct-mt-2",
-           display = (if rowExpanded(vm, item()): "block" else: "none"),
-           ref = chainContainer):
-        discard
+           display = (if rowExpanded(vm, item()): "block" else: "none")):
+        tdiv(class = "ct-origin-inline-chain-lines", ref = chainContainer):
+          discard
+        # Spec §3.2.2: "A 'Show in side panel' affordance at the bottom of
+        # the expanded chain opens the same chain in the dedicated side
+        # panel" — the side panel's one door from the State pane since the
+        # row menu's "Show value origin" expands in place (§3.1). Shown
+        # once the row has a chain to show.
+        button(class = "ct-origin-show-in-side-panel ct-button-text-xs-tertiary",
+               display = showInSidePanelDisplay(vm, item()),
+               onclick = onShowInSidePanel(vm, item)):
+          text "Show in side panel"
       # History container is a sibling of atomOrCompoundClass — placed
       # outside it so that expanding history does not push the name/value
       # layout out of line. Populated after the ui() block via

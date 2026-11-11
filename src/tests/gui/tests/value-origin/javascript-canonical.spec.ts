@@ -20,6 +20,10 @@ import {
 
 const fixtureSource = originFixturePath("javascript", "simple_trivial_chain");
 
+/** ANSWERS.md, as the in-row chain draws it: `lhs = rhs` per hop, newest
+ *  first; the terminator is the literal. */
+const EXPECTED_HOPS = ["c = b", "b = a", "a = 10"];
+
 test.use({ sourcePath: fixtureSource, launchMode: "trace" });
 test.setTimeout(180_000);
 
@@ -37,17 +41,21 @@ test("e2e_origin_javascript_canonical_chain", async ({ ctPage }) => {
   await ctPage.waitForTimeout(750);
   const statePane = (await layout.programStateTabs(true))[0];
   for (let i = 0; i < 12; i++) {
-    if ((await statePane.variableValueText("c")) !== "") {
+    // Until `c` holds its value, not merely until it is listed: a local can
+    // be listed before its assignment runs, and its origin there is not the
+    // chain.
+    if ((await statePane.variableValue("c")) === "10") {
       break;
     }
     await layout.nextButton().click();
     await ctPage.waitForTimeout(500);
   }
+  expect(await statePane.variableValue("c"), "stepping must reach `c`'s assignment").toBe("10");
 
-  await origin.rightClickRow("c");
-  await origin.clickShowValueOriginMenuItem();
-  await expect(origin.sidePanel()).toBeVisible({ timeout: 15_000 });
-
-  await expect(origin.sidePanelHops()).toHaveCount(3, { timeout: 15_000 });
-  await expect(origin.sidePanelTerminator()).toContainText("10");
+  // Right-click → "Show value origin" expands the chain under the row
+  // (Value-Origin-Tracking.md §3.1, §3.2.1). Three hops + Literal(10), per
+  // the fixture's ANSWERS.md.
+  await origin.showValueOriginInPlace("c");
+  await expect(origin.expandedChainHops("c")).toHaveText(EXPECTED_HOPS, { timeout: 15_000 });
+  await expect(origin.inlineChainTerminator("c")).toHaveText("10");
 });
