@@ -19,8 +19,9 @@ touched.
 
 The builds run `$PLAT64_BUILD_TUI` / `$PLAT64_BUILD_GPUI` /
 `$PLAT64_BUILD_DESKTOP` when set, else `just build-tui` / `just build-gpui` /
-`just build-once`. The desktop arms are graded by the Electron spec, run by
-`$PLAT64_DESKTOP_TEST` when set, else `npx playwright test` in `src/tests/gui`.
+`just build-once`. The desktop arms are graded by the Electron specs, run by
+`$PLAT64_DESKTOP_TEST` when set (with the spec in `$PLAT64_DESKTOP_SPEC`,
+relative to `src/tests/gui`), else `npx playwright test` in `src/tests/gui`.
 
 No mocks: the suites graded here run the shipped tables and router over real
 values, the shipped terminal binary on a real pty against a real recording and
@@ -79,10 +80,12 @@ PLAN = "src/frontend/gpui/tests/test_plat64_gpui_plan.nim"
 SPEC = "src/tests/gui/tests/keymaps/plat64-input-routing.spec.ts"
 GATETEST = "ci/test/input-routing-gate-test.sh"
 TOPBAR = "src/frontend/tui/tests/test_plat48_top_bar.nim"
+VPSPEC = "src/tests/gui/tests/frame-viewer/video-player-keymap-rows.spec.ts"
 
 SUBJECTS = [TABLE, ROUTER, KEYNAMES, POINTER, OVERLAY, CLIENT, CLICKS, RUNTIME,
             MOUSE, GMAIN, GKEYS, FIELD, KEYROUTER, GATE]
-SUITES = [MAP, TABLES, CENSUS, UNIT, LAYERS, PTY, PLAN, SPEC, GATETEST, TOPBAR]
+SUITES = [MAP, TABLES, CENSUS, UNIT, LAYERS, PTY, PLAN, SPEC, GATETEST, TOPBAR,
+          VPSPEC]
 
 # (id, [(subject, find, replace), ...], [(suite, filter), ...], what it breaks)
 ARMS = [
@@ -188,6 +191,33 @@ ARMS = [
     ("R2", [(RUNTIME, '  rt.want(MenuTable, "window", "", rt.app.menu.isOpen)', "")],
      [(TOPBAR, None)],
      "the terminal never pushes the menu's layer"),
+    # ---- the Video Player's rows and presses ----------------------------------
+    ("V1", [(OVERLAY, '    BaseRow(chords: "j", operation: "video-player.rewind", table: VideoPlayerTable),',
+             '    BaseRow(chords: "j", operation: "video-player.fast-forward", table: VideoPlayerTable),')],
+     [(UNIT, None)],
+     "a Video Player row is bound to the wrong operation"),
+    ("V2", [(OVERLAY, '    BaseRow(chords: "Enter", operation: "video-player.commit-pick", table: VideoMagnifierTable),',
+             '    BaseRow(chords: "Enter", operation: "video-player.cancel-picker", table: VideoMagnifierTable),')],
+     [(UNIT, None)],
+     "Enter in the magnifier cancels the pick instead of making it"),
+    ("V3", [(RUNTIME, "        discard rt.pressElement(event, paneVideoPlayer, ekButton,\n"
+                      "                                VideoPlayerOperations[b.action],\n"
+                      "                                ContextTarget(pane: paneVideoPlayer), outcome)",
+             "        rt.playerAction(b.action, outcome)")],
+     [(TABLES, None)],
+     "a transport button's press bypasses the router: a user's row cannot take it"),
+    ("V4", [(RUNTIME, '  rt.want(TerminalInfoTable, "window", "", rt.terminalInfo.open)\n  rt.syncVideoPlayerLayers()',
+             '  rt.want(TerminalInfoTable, "window", "", rt.terminalInfo.open)')],
+     [(TABLES, None)],
+     "the terminal never pushes the picker's layers: the magnifier's keys step frames"),
+    ("P6", [(POINTER, '    BaseRow(chords: "Click", operation: "point-list.select",',
+             '    BaseRow(chords: "Click", operation: "vcs.toggle-commit",')],
+     [(UNIT, None)],
+     "§5.1: a Points row declares another pane's operation"),
+    ("V5", [(KEYROUTER, "  syncVideoPickerLayer()\n  let path = desktopScopePath()",
+             "  let path = desktopScopePath()")],
+     [(VPSPEC, None)],
+     "the desktop never pushes the picker's layer: Escape does not cancel it"),
     # ---- the desktop -----------------------------------------------------------
     ("W1", [(KEYROUTER, '  if res.kind == erOperation and res.layer.startsWith("user:"):\n    if runDesktopOperation(res) == nkHandled:',
              '  if false:\n    if runDesktopOperation(res) == nkHandled:')],
@@ -222,7 +252,7 @@ IN_DESKTOP = {ROUTER, KEYNAMES, POINTER, OVERLAY, CLIENT, FIELD, KEYROUTER}
   # Subjects compiled into the desktop's bundle.
 PTY_SUITES = {PTY}
 GPUI_SUITES = {PLAN}
-DESKTOP_SUITES = {SPEC}
+DESKTOP_SUITES = {SPEC, VPSPEC}
 SHELL_SUITES = {GATETEST}
 
 
@@ -343,9 +373,13 @@ def run_spec(suite):
         ["npx", "playwright", "test", suite.split("src/tests/gui/", 1)[1],
          "--reporter=line"]
     cwd = REPO if cmd else REPO / "src/tests/gui"
+    # The spec a `$PLAT64_DESKTOP_TEST` command is to run, relative to
+    # src/tests/gui (there is more than one desktop suite).
+    env = dict(os.environ,
+               PLAT64_DESKTOP_SPEC=suite.split("src/tests/gui/", 1)[1])
     try:
         p = subprocess.run(argv, cwd=cwd, capture_output=True, text=True,
-                           timeout=TIMEOUT)
+                           timeout=TIMEOUT, env=env)
     except subprocess.TimeoutExpired:
         return "HUNG", []
     out = (p.stdout or "") + (p.stderr or "")
